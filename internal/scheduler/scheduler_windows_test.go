@@ -28,11 +28,21 @@ func TestBuildCreateXML_Logon(t *testing.T) {
 	if !strings.Contains(xml, "<Arguments>daemon --server serena</Arguments>") {
 		t.Errorf("Arguments not properly joined: %s", xml)
 	}
-	if !strings.Contains(xml, "<RestartInterval>PT60S</RestartInterval>") {
-		t.Errorf("Restart policy not set: %s", xml)
+	// Task Scheduler requires a nested <RestartOnFailure> container with
+	// <Interval> and <Count> inside — flat <RestartInterval>/<RestartCount>
+	// siblings are rejected at schtasks /Create /XML time.
+	if !strings.Contains(xml, "<RestartOnFailure>") {
+		t.Errorf("expected <RestartOnFailure> container: %s", xml)
 	}
-	if !strings.Contains(xml, "<RestartCount>3</RestartCount>") {
-		t.Errorf("Restart count not set: %s", xml)
+	if !strings.Contains(xml, "<Interval>PT1M</Interval>") {
+		t.Errorf("expected <Interval>PT1M</Interval> inside RestartOnFailure: %s", xml)
+	}
+	if !strings.Contains(xml, "<Count>3</Count>") {
+		t.Errorf("expected <Count>3</Count> inside RestartOnFailure: %s", xml)
+	}
+	// Also assert that the old flat form is NOT present (regression guard).
+	if strings.Contains(xml, "<RestartInterval>") || strings.Contains(xml, "<RestartCount>") {
+		t.Errorf("flat RestartInterval/RestartCount must not appear: %s", xml)
 	}
 }
 

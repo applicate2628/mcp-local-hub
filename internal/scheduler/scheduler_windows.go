@@ -89,10 +89,17 @@ func buildCreateXML(spec TaskSpec, userName string) string {
 	buf.WriteString("  </Principals>\n")
 
 	// Settings — restart policy + sane defaults
+	//
+	// Per Task Scheduler XML schema, the retry policy is a single <RestartOnFailure>
+	// container holding <Interval> + <Count> — NOT flat <RestartInterval>/<RestartCount>
+	// siblings. Task Scheduler rejects the flat form with
+	//     ERROR: The task XML contains an unexpected node. (N,M):RestartInterval:
 	buf.WriteString("  <Settings>\n")
 	if spec.RestartOnFailure {
-		buf.WriteString("    <RestartInterval>PT60S</RestartInterval>\n")
-		buf.WriteString("    <RestartCount>3</RestartCount>\n")
+		buf.WriteString("    <RestartOnFailure>\n")
+		buf.WriteString("      <Interval>PT1M</Interval>\n")
+		buf.WriteString("      <Count>3</Count>\n")
+		buf.WriteString("    </RestartOnFailure>\n")
 	}
 	buf.WriteString("    <AllowHardTerminate>true</AllowHardTerminate>\n")
 	buf.WriteString("    <StartWhenAvailable>false</StartWhenAvailable>\n")
