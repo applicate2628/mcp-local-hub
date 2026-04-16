@@ -35,9 +35,7 @@ func newStatusCmd() *cobra.Command {
 func newRestartCmd() *cobra.Command {
 	return &cobra.Command{Use: "restart", Short: "Restart daemon(s)", RunE: stub("restart")}
 }
-func newRollbackCmd() *cobra.Command {
-	return &cobra.Command{Use: "rollback", Short: "Restore pre-install client configs", RunE: stub("rollback")}
-}
+func newRollbackCmd() *cobra.Command { return newRollbackCmdReal() }
 func newDaemonCmd() *cobra.Command {
 	return &cobra.Command{Use: "daemon", Short: "Run a daemon (invoked by scheduler)", RunE: stub("daemon")}
 }
