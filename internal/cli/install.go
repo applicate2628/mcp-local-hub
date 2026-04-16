@@ -36,6 +36,7 @@ type ClientUpdatePlan struct {
 
 func newInstallCmdReal() *cobra.Command {
 	var server string
+	var daemonFilter string
 	var dryRun bool
 	c := &cobra.Command{
 		Use:   "install",
@@ -57,7 +58,7 @@ func newInstallCmdReal() *cobra.Command {
 			if err := Preflight(m); err != nil {
 				return err
 			}
-			plan, err := BuildPlan(m)
+			plan, err := BuildPlan(m, daemonFilter)
 			if err != nil {
 				return err
 			}
@@ -68,12 +69,22 @@ func newInstallCmdReal() *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&server, "server", "", "server name (matches servers/<name>/manifest.yaml)")
+	c.Flags().StringVar(&daemonFilter, "daemon", "", "install only this daemon (+ its client bindings); omit to install all")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print planned actions without making changes")
 	return c
 }
 
 // BuildPlan translates a manifest into concrete intended actions.
-func BuildPlan(m *config.ServerManifest) (*Plan, error) {
+// If daemonFilter is non-empty, only that daemon and its referencing client
+// bindings are included; weekly refresh is skipped because a partial install
+// does not imply a full-server restart. An unknown daemonFilter is an error
+// surfaced before any side effects.
+func BuildPlan(m *config.ServerManifest, daemonFilter string) (*Plan, error) {
+	if daemonFilter != "" {
+		if _, ok := findDaemon(m, daemonFilter); !ok {
+			return nil, fmt.Errorf("no daemon %q in manifest %s", daemonFilter, m.Name)
+		}
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, err
@@ -81,6 +92,9 @@ func BuildPlan(m *config.ServerManifest) (*Plan, error) {
 	p := &Plan{Server: m.Name}
 	// Scheduler tasks — one per daemon (global) or lazy (workspace-scoped).
 	for _, d := range m.Daemons {
+		if daemonFilter != "" && d.Name != daemonFilter {
+			continue
+		}
 		p.SchedulerTasks = append(p.SchedulerTasks, ScheduledTaskPlan{
 			Name:    "mcp-local-hub-" + m.Name + "-" + d.Name,
 			Command: exe,
@@ -88,7 +102,8 @@ func BuildPlan(m *config.ServerManifest) (*Plan, error) {
 			Trigger: "At logon",
 		})
 	}
-	if m.WeeklyRefresh {
+	// Weekly refresh restarts the whole server, so it only makes sense for full installs.
+	if m.WeeklyRefresh && daemonFilter == "" {
 		p.SchedulerTasks = append(p.SchedulerTasks, ScheduledTaskPlan{
 			Name:    "mcp-local-hub-" + m.Name + "-weekly-refresh",
 			Command: exe,
@@ -96,8 +111,11 @@ func BuildPlan(m *config.ServerManifest) (*Plan, error) {
 			Trigger: "Weekly Sun 03:00",
 		})
 	}
-	// Client updates — one per binding.
+	// Client updates — one per binding; with a filter, only bindings pointing at the chosen daemon.
 	for _, b := range m.ClientBindings {
+		if daemonFilter != "" && b.Daemon != daemonFilter {
+			continue
+		}
 		daemon, ok := findDaemon(m, b.Daemon)
 		if !ok {
 			return nil, fmt.Errorf("binding references unknown daemon %q", b.Daemon)
