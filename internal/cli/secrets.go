@@ -26,6 +26,7 @@ func newSecretsCmdReal() *cobra.Command {
 	root.AddCommand(newSecretsListCmd())
 	root.AddCommand(newSecretsDeleteCmd())
 	root.AddCommand(newSecretsEditCmd())
+	root.AddCommand(newSecretsMigrateCmd())
 	return root
 }
 
@@ -215,6 +216,78 @@ func newSecretsEditCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func newSecretsMigrateCmd() *cobra.Command {
+	var fromClient string
+	c := &cobra.Command{
+		Use:   "migrate",
+		Short: "Import hardcoded secrets from a client config",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path, err := clientConfigPath(fromClient)
+			if err != nil {
+				return err
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return fmt.Errorf("read %s: %w", path, err)
+			}
+			candidates := secrets.ScanConfigText(string(data))
+			if len(candidates) == 0 {
+				cmd.Println("No candidates found.")
+				return nil
+			}
+			v, err := secrets.OpenVault(defaultKeyPath(), defaultVaultPath())
+			if err != nil {
+				return err
+			}
+			in := bufio.NewReader(os.Stdin)
+			imported := 0
+			for _, cand := range candidates {
+				cmd.Printf("Found %s = %s (from %s)\n", cand.Key, maskValue(cand.Value), path)
+				cmd.Print("Import? [y/N]: ")
+				line, _ := in.ReadString('\n')
+				line = strings.TrimSpace(strings.ToLower(line))
+				if line == "y" || line == "yes" {
+					if err := v.Set(cand.Key, cand.Value); err != nil {
+						return err
+					}
+					imported++
+				}
+			}
+			cmd.Printf("✓ Imported %d secrets. Original file NOT modified — run `mcp install` to apply.\n", imported)
+			return nil
+		},
+	}
+	c.Flags().StringVar(&fromClient, "from-client", "", "client name: claude-code | codex-cli | gemini-cli | antigravity")
+	_ = c.MarkFlagRequired("from-client")
+	return c
+}
+
+func clientConfigPath(name string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	switch name {
+	case "claude-code":
+		return filepath.Join(home, ".claude", "settings.json"), nil
+	case "codex-cli":
+		return filepath.Join(home, ".codex", "config.toml"), nil
+	case "gemini-cli":
+		return filepath.Join(home, ".gemini", "settings.json"), nil
+	case "antigravity":
+		return filepath.Join(home, ".gemini", "antigravity", "mcp_config.json"), nil
+	default:
+		return "", fmt.Errorf("unknown client %q (expected claude-code | codex-cli | gemini-cli | antigravity)", name)
+	}
+}
+
+func maskValue(v string) string {
+	if len(v) <= 4 {
+		return "***"
+	}
+	return v[:2] + strings.Repeat("*", len(v)-4) + v[len(v)-2:]
 }
 
 func readAllStdin() ([]byte, error) {
