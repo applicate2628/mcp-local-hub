@@ -7,6 +7,7 @@ import (
 
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/scheduler"
 
 	"github.com/spf13/cobra"
 )
@@ -60,7 +61,7 @@ func newInstallCmdReal() *cobra.Command {
 			if dryRun {
 				return printPlan(cmd, plan)
 			}
-			return fmt.Errorf("real install not yet implemented — use --dry-run (Task 20 wires this)")
+			return executeInstall(cmd, m, plan)
 		},
 	}
 	c.Flags().StringVar(&server, "server", "", "server name (matches servers/<name>/manifest.yaml)")
@@ -139,4 +140,86 @@ func printPlan(cmd *cobra.Command, p *Plan) error {
 	cmd.Println("\nNo changes made.")
 	_ = clients.Client(nil) // keep import live for later tasks
 	return nil
+}
+
+func executeInstall(cmd *cobra.Command, m *config.ServerManifest, p *Plan) error {
+	sch, err := scheduler.New()
+	if err != nil {
+		return fmt.Errorf("scheduler: %w", err)
+	}
+	repoDir, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	// 1. Create scheduler tasks.
+	for _, t := range p.SchedulerTasks {
+		spec := scheduler.TaskSpec{
+			Name:             t.Name,
+			Description:      "mcp-local-hub: " + m.Name,
+			Command:          t.Command,
+			Args:             t.Args,
+			WorkingDir:       repoDir,
+			RestartOnFailure: true,
+		}
+		if t.Trigger == "At logon" {
+			spec.LogonTrigger = true
+		} else if t.Trigger == "Weekly Sun 03:00" {
+			spec.WeeklyTrigger = &scheduler.WeeklyTrigger{DayOfWeek: 0, HourLocal: 3, MinuteLocal: 0}
+		}
+		// Delete any previous instance so Create is idempotent.
+		_ = sch.Delete(spec.Name)
+		if err := sch.Create(spec); err != nil {
+			return fmt.Errorf("create task %s: %w", spec.Name, err)
+		}
+		cmd.Printf("✓ Scheduler task created: %s\n", spec.Name)
+	}
+	// 2. Backup + update client configs.
+	allClients := mustAllClients()
+	for _, u := range p.ClientUpdates {
+		client := allClients[u.Client]
+		if client == nil {
+			return fmt.Errorf("unknown client %q in binding", u.Client)
+		}
+		if !client.Exists() {
+			cmd.Printf("⚠ Client %s not installed on this machine — skipping\n", u.Client)
+			continue
+		}
+		bak, err := client.Backup()
+		if err != nil {
+			return fmt.Errorf("backup %s: %w", u.Client, err)
+		}
+		cmd.Printf("  backup: %s\n", bak)
+		if err := client.AddEntry(clients.MCPEntry{Name: m.Name, URL: u.URL}); err != nil {
+			return fmt.Errorf("add entry to %s: %w", u.Client, err)
+		}
+		cmd.Printf("✓ %s → %s\n", u.Client, u.URL)
+	}
+	// 3. Start daemons immediately (without waiting for next logon).
+	for _, t := range p.SchedulerTasks {
+		// Skip weekly refresh — it's triggered on schedule, not on install.
+		if t.Trigger != "At logon" {
+			continue
+		}
+		if err := sch.Run(t.Name); err != nil {
+			cmd.Printf("⚠ failed to start %s immediately: %v (will start at next logon)\n", t.Name, err)
+		} else {
+			cmd.Printf("✓ Started: %s\n", t.Name)
+		}
+	}
+	cmd.Println("\nInstall complete.")
+	return nil
+}
+
+func mustAllClients() map[string]clients.Client {
+	result := map[string]clients.Client{}
+	for _, factory := range []func() (clients.Client, error){
+		clients.NewClaudeCode, clients.NewCodexCLI, clients.NewGeminiCLI, clients.NewAntigravity,
+	} {
+		c, err := factory()
+		if err != nil {
+			continue
+		}
+		result[c.Name()] = c
+	}
+	return result
 }
