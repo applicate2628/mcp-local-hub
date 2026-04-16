@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -24,6 +25,7 @@ func newSecretsCmdReal() *cobra.Command {
 	root.AddCommand(newSecretsGetCmd())
 	root.AddCommand(newSecretsListCmd())
 	root.AddCommand(newSecretsDeleteCmd())
+	root.AddCommand(newSecretsEditCmd())
 	return root
 }
 
@@ -153,6 +155,63 @@ func newSecretsDeleteCmd() *cobra.Command {
 				return err
 			}
 			cmd.Printf("✓ Deleted %s\n", args[0])
+			return nil
+		},
+	}
+}
+
+func newSecretsEditCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "edit",
+		Short: "Open decrypted vault in $EDITOR and re-encrypt on save",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			v, err := secrets.OpenVault(defaultKeyPath(), defaultVaultPath())
+			if err != nil {
+				return err
+			}
+			yamlBytes, err := v.ExportYAML()
+			if err != nil {
+				return err
+			}
+			tmp, err := os.CreateTemp("", "mcp-secrets-*.yaml")
+			if err != nil {
+				return err
+			}
+			tmpPath := tmp.Name()
+			defer func() {
+				// Best-effort secure wipe: overwrite with zeros, then delete.
+				zeros := make([]byte, 4096)
+				if f, err := os.OpenFile(tmpPath, os.O_WRONLY, 0600); err == nil {
+					_, _ = f.Write(zeros)
+					f.Close()
+				}
+				_ = os.Remove(tmpPath)
+			}()
+			if _, err := tmp.Write(yamlBytes); err != nil {
+				tmp.Close()
+				return err
+			}
+			tmp.Close()
+
+			editor := os.Getenv("EDITOR")
+			if editor == "" {
+				editor = "notepad" // Windows fallback
+			}
+			c := exec.Command(editor, tmpPath)
+			c.Stdin = os.Stdin
+			c.Stdout = os.Stdout
+			c.Stderr = os.Stderr
+			if err := c.Run(); err != nil {
+				return fmt.Errorf("editor: %w", err)
+			}
+			updated, err := os.ReadFile(tmpPath)
+			if err != nil {
+				return err
+			}
+			if err := v.ImportYAML(updated); err != nil {
+				return err
+			}
+			cmd.Println("✓ Re-encrypted secrets.age")
 			return nil
 		},
 	}

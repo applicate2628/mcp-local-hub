@@ -9,6 +9,7 @@ import (
 	"sort"
 
 	"filippo.io/age"
+	"gopkg.in/yaml.v3"
 )
 
 // Vault is an age-encrypted key/value store persisted in a single file.
@@ -157,4 +158,23 @@ func (v *Vault) load() error {
 		return fmt.Errorf("unmarshal vault: %w", err)
 	}
 	return nil
+}
+
+// ExportYAML returns the current vault contents as YAML bytes (for editor workflow).
+func (v *Vault) ExportYAML() ([]byte, error) {
+	return yaml.Marshal(v.data)
+}
+
+// ImportYAML replaces the entire vault with the contents of raw (YAML key/value map).
+// The backing file is re-encrypted with the current identity.
+func (v *Vault) ImportYAML(raw []byte) error {
+	var m map[string]string
+	if err := yaml.Unmarshal(raw, &m); err != nil {
+		return fmt.Errorf("import yaml: %w", err)
+	}
+	if m == nil {
+		m = map[string]string{}
+	}
+	v.data = m
+	return v.save()
 }
