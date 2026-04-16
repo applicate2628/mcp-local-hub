@@ -1,7 +1,15 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+
+	"mcp-local-hub/internal/cli"
+)
 
 func main() {
-	fmt.Println("mcp-local-hub: CLI entry point — Task 1 stub")
+	if err := cli.NewRootCmd().Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
 }
