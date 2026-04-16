@@ -32,9 +32,7 @@ func newUninstallCmd() *cobra.Command { return newUninstallCmdReal() }
 func newStatusCmd() *cobra.Command  { return newStatusCmdReal() }
 func newRestartCmd() *cobra.Command { return newRestartCmdReal() }
 func newRollbackCmd() *cobra.Command { return newRollbackCmdReal() }
-func newDaemonCmd() *cobra.Command {
-	return &cobra.Command{Use: "daemon", Short: "Run a daemon (invoked by scheduler)", RunE: stub("daemon")}
-}
+func newDaemonCmd() *cobra.Command { return newDaemonCmdReal() }
 func newSecretsCmd() *cobra.Command {
 	return newSecretsCmdReal()
 }
