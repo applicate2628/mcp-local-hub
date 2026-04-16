@@ -48,7 +48,7 @@ func newDaemonCmd() *cobra.Command {
 	return &cobra.Command{Use: "daemon", Short: "Run a daemon (invoked by scheduler)", RunE: stub("daemon")}
 }
 func newSecretsCmd() *cobra.Command {
-	return &cobra.Command{Use: "secrets", Short: "Manage encrypted secrets", RunE: stub("secrets")}
+	return newSecretsCmdReal()
 }
 
 func stub(name string) func(*cobra.Command, []string) error {
