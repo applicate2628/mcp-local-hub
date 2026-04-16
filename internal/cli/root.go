@@ -28,9 +28,7 @@ func NewRootCmd() *cobra.Command {
 func newInstallCmd() *cobra.Command {
 	return newInstallCmdReal()
 }
-func newUninstallCmd() *cobra.Command {
-	return &cobra.Command{Use: "uninstall", Short: "Uninstall server(s)", RunE: stub("uninstall")}
-}
+func newUninstallCmd() *cobra.Command { return newUninstallCmdReal() }
 func newStatusCmd() *cobra.Command {
 	return &cobra.Command{Use: "status", Short: "Show daemon status", RunE: stub("status")}
 }
