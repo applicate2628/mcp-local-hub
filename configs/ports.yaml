@@ -1,0 +1,9 @@
+# Central port registry for mcp-local-hub.
+# Edited by `mcp install` and read at every daemon start for conflict detection.
+# Ranges (per spec §3.5):
+#   9121-9139 — global daemons
+#   9140-9199 — reserved for future global daemons
+#   9200-9299 — workspace-scoped daemons
+
+global: []
+workspace_scoped: []
