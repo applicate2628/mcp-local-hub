@@ -9,13 +9,16 @@ import (
 	"time"
 )
 
-// NewClaudeCode returns a Client bound to the current user's ~/.claude/settings.json.
+// NewClaudeCode returns a Client bound to the current user's ~/.claude.json.
+// Note: this is the single-file Claude Code user config at $HOME/.claude.json —
+// NOT the .claude/ directory's settings.json, which stores UI preferences and
+// is not read for MCP server entries.
 func NewClaudeCode() (Client, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
 	}
-	return &claudeCode{path: filepath.Join(home, ".claude", "settings.json")}, nil
+	return &claudeCode{path: filepath.Join(home, ".claude.json")}, nil
 }
 
 type claudeCode struct {
@@ -108,7 +111,14 @@ func (c *claudeCode) AddEntry(entry MCPEntry) error {
 	if servers == nil {
 		servers = map[string]any{}
 	}
-	serverEntry := map[string]any{"url": entry.URL}
+	// Claude Code's per-transport schema requires an explicit `type` field.
+	// For HTTP-transport servers the correct value is "http"; stdio servers use
+	// "stdio" and include command/args/env instead. This adapter only produces
+	// URL-backed entries, so type is hardcoded here.
+	serverEntry := map[string]any{
+		"type": "http",
+		"url":  entry.URL,
+	}
 	if len(entry.Headers) > 0 {
 		serverEntry["headers"] = entry.Headers
 	}

@@ -271,7 +271,7 @@ func clientConfigPath(name string) (string, error) {
 	}
 	switch name {
 	case "claude-code":
-		return filepath.Join(home, ".claude", "settings.json"), nil
+		return filepath.Join(home, ".claude.json"), nil
 	case "codex-cli":
 		return filepath.Join(home, ".codex", "config.toml"), nil
 	case "gemini-cli":

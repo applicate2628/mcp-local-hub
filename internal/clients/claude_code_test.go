@@ -41,6 +41,9 @@ func TestClaudeCode_AddEntry_CreatesField(t *testing.T) {
 	if serena["url"] != "http://localhost:9121/mcp" {
 		t.Errorf("url = %v, want http://localhost:9121/mcp", serena["url"])
 	}
+	if serena["type"] != "http" {
+		t.Errorf("type = %v, want http (required by Claude Code schema for HTTP transport)", serena["type"])
+	}
 	// Original field preserved
 	if parsed["other"] != "field" {
 		t.Error("original field dropped")

@@ -73,7 +73,7 @@ Ship a local platform — **MCP Local Hub** — that:
                 │ creates                              │ reads/writes (with .bak)
                 ▼                                      ▼
 ┌─ OS Scheduler ──────────────┐      ┌─ MCP client configs ────────────┐
-│ Windows Task Scheduler      │      │ ~/.claude/settings.json         │
+│ Windows Task Scheduler      │      │ ~/.claude.json                  │
 │ systemd --user units        │      │ ~/.codex/config.toml            │
 │ launchd agents              │      │ ~/.gemini/settings.json         │
 └─────────────────────────────┘      │ ~/.gemini/antigravity/mcp_*.json│
@@ -113,7 +113,7 @@ One process per (server, instance). The instance distinction matters when one se
 | Restart policy | 60 s × 3 attempts on failure |
 | Refresh | Weekly task restarts all global daemons at Sun 03:00 (covers sessions that never log out) |
 | Port | Static, from manifest |
-| Binding | Referenced from global client configs (`~/.claude/settings.json`, `~/.codex/config.toml`, etc.) |
+| Binding | Referenced from global client configs (`~/.claude.json`, `~/.codex/config.toml`, etc.) |
 
 Examples: Serena (3 contexts × 1 instance each), memory (1), sequential-thinking (1), fetch (1), wolfram (1), paper-search-mcp (1).
 
@@ -171,7 +171,7 @@ Client modules registered today:
 
 | Client | Config path | Format | URL field |
 |---|---|---|---|
-| Claude Code | `~/.claude/settings.json` | JSON | `url` (verified, supports Streamable HTTP) |
+| Claude Code | `~/.claude.json` | JSON | `url` + `type: "http"` (verified against code.claude.com/docs/en/mcp + empirical `~/.claude.json`) |
 | Codex CLI | `~/.codex/config.toml` | TOML | `url` (verified, Codex 0.121+) |
 | Gemini CLI | `~/.gemini/settings.json` | JSON | `httpUrl` (TBD, verified at Phase 0) |
 | Antigravity | `~/.gemini/antigravity/mcp_config.json` | JSON | `httpUrl` (TBD, same as Gemini) |
@@ -442,7 +442,7 @@ user> mcp install --server serena
   ├─ check ports.yaml for conflicts
   ├─ register scheduler tasks for each daemon (3 for Serena)
   ├─ update client configs (backup → write url entry)
-  │    ├─ ~/.claude/settings.json       ← Claude Code binding
+  │    ├─ ~/.claude.json                 ← Claude Code binding
   │    ├─ ~/.codex/config.toml           ← Codex binding
   │    ├─ ~/.gemini/antigravity/mcp_config.json  ← Antigravity
   │    └─ ~/.gemini/settings.json       ← Gemini (shares Antigravity port)
