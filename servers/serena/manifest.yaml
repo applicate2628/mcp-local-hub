@@ -1,0 +1,40 @@
+name: serena
+kind: global
+transport: native-http
+command: uvx
+base_args:
+  - --refresh
+  - --from
+  - git+https://github.com/oraios/serena
+  - serena
+  - start-mcp-server
+  - --transport
+  - streamable-http
+env: {}
+daemons:
+  - name: claude
+    context: claude-code
+    port: 9121
+    extra_args: [--context, claude-code]
+  - name: codex
+    context: codex
+    port: 9122
+    extra_args: [--context, codex]
+  - name: antigravity
+    context: antigravity
+    port: 9123
+    extra_args: [--context, antigravity]
+client_bindings:
+  - client: claude-code
+    daemon: claude
+    url_path: /mcp
+  - client: codex-cli
+    daemon: codex
+    url_path: /mcp
+  - client: antigravity
+    daemon: antigravity
+    url_path: /mcp
+  - client: gemini-cli
+    daemon: antigravity
+    url_path: /mcp
+weekly_refresh: true
