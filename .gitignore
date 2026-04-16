@@ -1,0 +1,20 @@
+# Identity (NEVER commit)
+.age-key
+
+# Local config (gitignored per §3.8 of spec)
+config.local.yaml
+
+# Build outputs
+/mcp
+/mcp.exe
+/bin/
+
+# Go
+*.test
+*.prof
+coverage.out
+
+# Editor
+.vscode/
+.idea/
+*.swp
