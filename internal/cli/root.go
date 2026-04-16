@@ -26,11 +26,7 @@ func NewRootCmd() *cobra.Command {
 // Stub constructors — each returns a cobra.Command that prints "not implemented yet".
 // Later tasks replace each RunE with real logic.
 func newInstallCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "install",
-		Short: "Install an MCP server as shared daemon(s)",
-		RunE:  stub("install"),
-	}
+	return newInstallCmdReal()
 }
 func newUninstallCmd() *cobra.Command {
 	return &cobra.Command{Use: "uninstall", Short: "Uninstall server(s)", RunE: stub("uninstall")}
