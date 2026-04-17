@@ -223,25 +223,53 @@ Get-Process | Where-Object { $_.Path -like '*uvx*' } | Stop-Process -Force
 
 ## Secrets
 
-For servers that need API keys (wolfram, context7, any OAuth-bearer server):
+For servers that need API keys (wolfram, paper-search-mcp, any OAuth-bearer server):
 
 ```bash
-./mcp.exe secrets init                         # creates .age-key + secrets.age
-./mcp.exe secrets set WOLFRAM_APP_ID --value AB123...
-./mcp.exe secrets list                         # shows keys, not values
-./mcp.exe secrets get WOLFRAM_APP_ID           # copies to clipboard by default
-./mcp.exe secrets get WOLFRAM_APP_ID --show    # prints to stdout
-./mcp.exe secrets edit                         # open decrypted vault in $EDITOR
-./mcp.exe secrets migrate --from-client codex-cli   # scan existing config for API keys, interactively import
+./bin/mcp.exe secrets init                         # generate .age-key + empty secrets.age
+./bin/mcp.exe secrets set WOLFRAM_APP_ID --value AB123...
+./bin/mcp.exe secrets list                         # shows keys, not values
+./bin/mcp.exe secrets get WOLFRAM_APP_ID           # copies to clipboard by default
+./bin/mcp.exe secrets get WOLFRAM_APP_ID --show    # prints to stdout
+./bin/mcp.exe secrets edit                         # open decrypted vault in $EDITOR
+./bin/mcp.exe secrets migrate --from-client codex-cli   # scan existing config for API keys, interactively import
 ```
 
-Manifest env references use prefixes:
+### Where the secret files live
+
+Both files live in the per-user data directory, **independent of where the repo or mcp.exe is installed**:
+
+| OS | Path |
+|---|---|
+| Windows | `%LOCALAPPDATA%\mcp-local-hub\` — typically `C:\Users\<you>\AppData\Local\mcp-local-hub\` |
+| Linux | `$XDG_DATA_HOME/mcp-local-hub/` — default `~/.local/share/mcp-local-hub/` |
+| macOS | `~/Library/Application Support/mcp-local-hub/` |
+
+Two files are stored there:
+
+- `.age-key` — private identity file, ~75 bytes. **Never commit, never email in plaintext.** Treat like an SSH private key.
+- `secrets.age` — encrypted vault containing your actual secret values. Opaque ciphertext without `.age-key`.
+
+### Transferring to another machine
+
+1. Install `mcp-local-hub` on the new machine (clone + `./build.sh`)
+2. Copy both files from the old machine's data dir to the new machine's data dir (path from the table above):
+   - Through a password manager (Bitwarden secure notes, 1Password, etc.)
+   - Through an encrypted USB stick
+   - Through `scp` / `rsync` / `rclone` with a trusted transport
+   - Through a **private** GitHub repository (public repos with `.age-key` is a critical leak)
+3. Run `./bin/mcp.exe secrets list` on the new machine — should print your keys without error. If it errors with "failed to decrypt", the `.age-key` or `secrets.age` didn't copy correctly.
+
+### Manifest env references use prefixes
+
 - `secret:KEY` — look up in encrypted vault
 - `file:KEY` — look up in `config.local.yaml` (gitignored)
 - `$VAR` — read OS environment variable
 - anything else — literal value
 
-The age identity file (`.age-key`) is **gitignored** and generated per machine. Keep a backup somewhere safe — losing it means the encrypted vault is unreadable.
+### Backup
+
+Losing `.age-key` means the vault is unreadable — there is no recovery path. Keep at least one copy outside the primary machine (password manager is ideal).
 
 ## Troubleshooting
 
