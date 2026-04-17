@@ -11,8 +11,10 @@ import (
 const attachParentProcess = ^uint32(0) // (DWORD)-1
 
 var (
-	kernel32          = syscall.NewLazyDLL("kernel32.dll")
-	procAttachConsole = kernel32.NewProc("AttachConsole")
+	kernel32               = syscall.NewLazyDLL("kernel32.dll")
+	procAttachConsole      = kernel32.NewProc("AttachConsole")
+	procSetConsoleOutputCP = kernel32.NewProc("SetConsoleOutputCP")
+	procSetConsoleCP       = kernel32.NewProc("SetConsoleCP")
 )
 
 // attachParentConsoleIfAvailable tries to attach this Windows-subsystem
@@ -30,13 +32,20 @@ var (
 // i.e. when the GUI subsystem zeroed it out and AttachConsole just
 // allocated a fresh console for us.
 func attachParentConsoleIfAvailable() {
-	ret, _, _ := procAttachConsole.Call(uintptr(attachParentProcess))
-	if ret == 0 {
-		return
+	if ret, _, _ := procAttachConsole.Call(uintptr(attachParentProcess)); ret != 0 {
+		reopenIfInvalid("CONIN$", os.O_RDONLY, &os.Stdin)
+		reopenIfInvalid("CONOUT$", os.O_WRONLY, &os.Stdout)
+		reopenIfInvalid("CONOUT$", os.O_WRONLY, &os.Stderr)
 	}
-	reopenIfInvalid("CONIN$", os.O_RDONLY, &os.Stdin)
-	reopenIfInvalid("CONOUT$", os.O_WRONLY, &os.Stdout)
-	reopenIfInvalid("CONOUT$", os.O_WRONLY, &os.Stderr)
+	// Go source is UTF-8; the default Windows console output code page is
+	// OEM (866 on ru_RU locales, 1251 for GUI). When UTF-8 bytes hit a
+	// non-UTF-8 console, multi-byte glyphs like ✓/✗/— render as gibberish
+	// and some decoded bytes land in C0/C1 control-char range, repositioning
+	// the cursor and causing line overlap. Switching the attached console to
+	// CP_UTF8 is a no-op when no console is present and effective otherwise.
+	const cpUTF8 uintptr = 65001
+	_, _, _ = procSetConsoleOutputCP.Call(cpUTF8)
+	_, _, _ = procSetConsoleCP.Call(cpUTF8)
 }
 
 // reopenIfInvalid rewires *target to the named console device only when

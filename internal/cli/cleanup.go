@@ -50,8 +50,22 @@ Default is dry-run (reports only). Pass --confirm to actually kill.`,
 				len(orphans), float64(totalRAM)/(1024*1024))
 			if dryRun {
 				fmt.Fprintln(cmd.OutOrStdout(), "(dry-run — no processes killed. Re-run with --confirm to kill.)")
-			} else {
-				fmt.Fprintln(cmd.OutOrStdout(), "(killed via taskkill /F)")
+				return nil
+			}
+			killed, skipped := 0, 0
+			for _, o := range orphans {
+				if o.KillErr != "" {
+					skipped++
+				} else {
+					killed++
+				}
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "killed: %d · skipped: %d · total: %d\n",
+				killed, skipped, len(orphans))
+			for _, o := range orphans {
+				if o.KillErr != "" {
+					fmt.Fprintf(cmd.OutOrStderr(), "  ✗ PID %d: %s\n", o.PID, o.KillErr)
+				}
 			}
 			return nil
 		},

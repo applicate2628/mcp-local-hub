@@ -11,6 +11,8 @@ import (
 )
 
 // OrphanProcess describes one orphan MCP subprocess discovered by CleanupOrphans.
+// KillErr is populated only when DryRun=false and taskkill failed for this PID
+// (access denied, process already gone, etc.); empty on success or dry-run.
 type OrphanProcess struct {
 	PID      int
 	ParentID int
@@ -18,6 +20,7 @@ type OrphanProcess struct {
 	RAMBytes uint64
 	Cmdline  string
 	AgeSec   int64
+	KillErr  string
 }
 
 // CleanupOpts controls CleanupOrphans.
@@ -90,10 +93,19 @@ func (a *API) CleanupOrphans(opts CleanupOpts) ([]OrphanProcess, error) {
 		filtered = append(filtered, o)
 	}
 
-	// Kill if not dry-run.
+	// Kill if not dry-run. Preserve taskkill's stderr on each failure so the
+	// caller can distinguish "access denied" from "PID already gone" in the
+	// per-orphan report instead of silently swallowing the error.
 	if !opts.DryRun {
-		for _, o := range filtered {
-			_ = exec.Command("taskkill", "/PID", strconv.Itoa(o.PID), "/F").Run()
+		for i := range filtered {
+			out, err := exec.Command("taskkill", "/PID", strconv.Itoa(filtered[i].PID), "/F").CombinedOutput()
+			if err != nil {
+				msg := strings.TrimSpace(string(out))
+				if msg == "" {
+					msg = err.Error()
+				}
+				filtered[i].KillErr = msg
+			}
 		}
 	}
 
