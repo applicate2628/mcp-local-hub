@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"mcp-local-hub/internal/clients"
@@ -473,5 +474,67 @@ func clientConfigPath(name string) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown client %q (expected claude-code | codex-cli | gemini-cli | antigravity)", name)
 	}
+}
+
+// Stop stops a running daemon without removing its scheduler task or client
+// entries. Equivalent to `schtasks /End /TN <name>` for each task matching
+// the server (+ daemon filter if set).
+func (a *API) Stop(server, daemonFilter string) error {
+	sch, err := scheduler.New()
+	if err != nil {
+		return err
+	}
+	tasks, err := sch.List("mcp-local-hub-" + server + "-")
+	if err != nil {
+		return err
+	}
+	for _, t := range tasks {
+		if daemonFilter != "" {
+			wantSuffix := "-" + daemonFilter
+			if !strings.HasSuffix(strings.TrimPrefix(t.Name, "\\"), wantSuffix) {
+				continue
+			}
+		}
+		if err := sch.Stop(t.Name); err != nil {
+			return fmt.Errorf("stop %s: %w", t.Name, err)
+		}
+	}
+	return nil
+}
+
+// RestartResult is one row in a RestartAll report.
+type RestartResult struct {
+	TaskName string
+	Err      string
+}
+
+// RestartAll stops+starts every scheduler task under our prefix. Returns a
+// per-task result list with any errors.
+func (a *API) RestartAll() ([]RestartResult, error) {
+	sch, err := scheduler.New()
+	if err != nil {
+		return nil, err
+	}
+	tasks, err := sch.List("mcp-local-hub-")
+	if err != nil {
+		return nil, err
+	}
+	var results []RestartResult
+	for _, t := range tasks {
+		// Skip weekly-refresh — scheduled, not restarted.
+		if strings.Contains(t.Name, "weekly-refresh") {
+			continue
+		}
+		if err := sch.Stop(t.Name); err != nil && !strings.Contains(err.Error(), "no running instance") {
+			results = append(results, RestartResult{TaskName: t.Name, Err: err.Error()})
+			continue
+		}
+		if err := sch.Run(t.Name); err != nil {
+			results = append(results, RestartResult{TaskName: t.Name, Err: err.Error()})
+			continue
+		}
+		results = append(results, RestartResult{TaskName: t.Name})
+	}
+	return results, nil
 }
 

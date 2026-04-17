@@ -19,6 +19,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newScanCmd())
 	root.AddCommand(newMigrateCmd())
 	root.AddCommand(newRestartCmd())
+	root.AddCommand(newStopCmd())
 	root.AddCommand(newRollbackCmd())
 	root.AddCommand(newDaemonCmd())
 	root.AddCommand(newRelayCmd())
@@ -51,6 +52,9 @@ func newLogsCmd() *cobra.Command {
 }
 func newCleanupCmd() *cobra.Command {
 	return newCleanupCmdReal()
+}
+func newStopCmd() *cobra.Command {
+	return newStopCmdReal()
 }
 
 func stub(name string) func(*cobra.Command, []string) error {

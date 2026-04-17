@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"fmt"
+
+	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/scheduler"
 
 	"github.com/spf13/cobra"
@@ -11,8 +14,27 @@ func newRestartCmdReal() *cobra.Command {
 	var all bool
 	c := &cobra.Command{
 		Use:   "restart",
-		Short: "Restart daemon(s)",
+		Short: "Restart daemon(s): stop + re-run scheduler tasks",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if all {
+				if server != "" {
+					return fmt.Errorf("--all is mutually exclusive with --server")
+				}
+				a := api.NewAPI()
+				results, err := a.RestartAll()
+				if err != nil {
+					return err
+				}
+				for _, r := range results {
+					if r.Err != "" {
+						fmt.Fprintf(cmd.OutOrStderr(), "✗ %s: %s\n", r.TaskName, r.Err)
+					} else {
+						fmt.Fprintf(cmd.OutOrStdout(), "✓ Restarted %s\n", r.TaskName)
+					}
+				}
+				return nil
+			}
+			// existing --server path
 			sch, err := scheduler.New()
 			if err != nil {
 				return err
