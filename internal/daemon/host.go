@@ -3,12 +3,16 @@ package daemon
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -37,6 +41,13 @@ type StdioHost struct {
 	wg      sync.WaitGroup // tracks reader goroutines so Stop() can drain them
 	started bool
 	stopped bool
+
+	// HTTP-side multiplexing: each incoming JSON-RPC request id is rewritten
+	// to a monotonic internal id; readStdoutLoop dispatches the response back
+	// to the waiting handler via the matching channel in `pending`.
+	nextInternalID atomic.Int64
+	pendingMu      sync.Mutex
+	pending        map[int64]chan json.RawMessage
 }
 
 func NewStdioHost(cfg HostConfig) (*StdioHost, error) {
@@ -46,6 +57,7 @@ func NewStdioHost(cfg HostConfig) (*StdioHost, error) {
 	return &StdioHost{
 		cfg:        cfg,
 		testStdout: make(chan []byte, 16),
+		pending:    make(map[int64]chan json.RawMessage),
 	}, nil
 }
 
@@ -148,17 +160,117 @@ func (h *StdioHost) writeStdin(line []byte) error {
 	return err
 }
 
-// readStdoutLoop is the subprocess stdout reader. For now it just forwards
-// each raw line to testStdout. Task 3 wires it to the ID-routing map.
+// readStdoutLoop is the subprocess stdout reader. It peeks at each line's
+// JSON-RPC id and dispatches it to the corresponding waiting HTTP handler
+// via the `pending` map. Lines without a matching pending entry (e.g.
+// notifications, server-initiated messages, or unrouted ids) fall through
+// to testStdout so unit tests can still observe raw subprocess output.
 func (h *StdioHost) readStdoutLoop() {
 	defer h.wg.Done()
 	for h.stdoutScan.Scan() {
 		line := append([]byte(nil), h.stdoutScan.Bytes()...)
+		// Try to parse id and route to pending request.
+		var peek struct {
+			ID json.RawMessage `json:"id"`
+		}
+		if err := json.Unmarshal(line, &peek); err == nil && len(peek.ID) > 0 {
+			var id int64
+			if err := json.Unmarshal(peek.ID, &id); err == nil {
+				h.pendingMu.Lock()
+				ch, ok := h.pending[id]
+				h.pendingMu.Unlock()
+				if ok {
+					select {
+					case ch <- line:
+					default:
+					}
+					continue
+				}
+			}
+		}
+		// Unrouted line (notification or unknown id) — send to testStdout as fallback.
 		select {
 		case h.testStdout <- line:
 		default:
-			// Drop if nobody is reading (prevents goroutine leak in tests).
 		}
+	}
+}
+
+// HTTPHandler returns the http.Handler that POSTs JSON-RPC to the subprocess.
+// For now only POST /mcp is implemented; GET (SSE) and DELETE come in Task 4.
+func (h *StdioHost) HTTPHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			h.handlePOST(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	return mux
+}
+
+func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	var msg map[string]json.RawMessage
+	if err := json.Unmarshal(body, &msg); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Notifications have no id; we forward-and-forget.
+	origIDRaw, hasID := msg["id"]
+	if !hasID {
+		if err := h.writeStdin(body); err != nil {
+			http.Error(w, "write stdin: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
+
+	// Rewrite id to an internal counter to avoid collisions across HTTP clients.
+	internalID := h.nextInternalID.Add(1)
+	msg["id"] = json.RawMessage(strconv.FormatInt(internalID, 10))
+	rewritten, _ := json.Marshal(msg)
+
+	respCh := make(chan json.RawMessage, 1)
+	h.pendingMu.Lock()
+	h.pending[internalID] = respCh
+	h.pendingMu.Unlock()
+	defer func() {
+		h.pendingMu.Lock()
+		delete(h.pending, internalID)
+		h.pendingMu.Unlock()
+	}()
+
+	if err := h.writeStdin(rewritten); err != nil {
+		http.Error(w, "write stdin: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	select {
+	case respBody := <-respCh:
+		// Restore the original id before returning to the HTTP client.
+		var respMsg map[string]json.RawMessage
+		if err := json.Unmarshal(respBody, &respMsg); err != nil {
+			http.Error(w, "subprocess returned invalid JSON", http.StatusBadGateway)
+			return
+		}
+		respMsg["id"] = origIDRaw
+		out, _ := json.Marshal(respMsg)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(out)
+	case <-r.Context().Done():
+		http.Error(w, "client canceled", http.StatusRequestTimeout)
+	case <-time.After(30 * time.Second):
+		http.Error(w, "subprocess response timeout", http.StatusGatewayTimeout)
 	}
 }
 

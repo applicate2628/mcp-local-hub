@@ -4,6 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -105,4 +111,64 @@ sys.stdout.flush()
 	if result.Custom != "hello-phase-2" {
 		t.Errorf("CUSTOM_VAR: got %q, want %q", result.Custom, "hello-phase-2")
 	}
+}
+
+// TestHostHTTPIDMultiplexing verifies that two concurrent HTTP clients each
+// receive the response matching their original request id, even when the
+// host rewrites ids internally to route them to one shared subprocess.
+//
+// The echo subprocess returns the request unchanged — so we can assert that
+// the id we sent is the id we got back, per-client.
+func TestHostHTTPIDMultiplexing(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	h, err := NewStdioHost(HostConfig{
+		Command: echoSubprocCommand(),
+		Args:    echoSubprocArgs(),
+	})
+	if err != nil {
+		t.Fatalf("NewStdioHost: %v", err)
+	}
+	if err := h.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer h.Stop()
+
+	ts := httptest.NewServer(h.HTTPHandler())
+	defer ts.Close()
+
+	// Two clients send requests with id=100 and id=200 concurrently.
+	// Each must receive back its own id, not the other client's.
+	sendAndAssert := func(t *testing.T, id int) {
+		body := fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"ping"}`, id)
+		req, _ := http.NewRequest("POST", ts.URL+"/mcp", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Errorf("POST id=%d: %v", id, err)
+			return
+		}
+		defer resp.Body.Close()
+		got, _ := io.ReadAll(resp.Body)
+		var msg map[string]any
+		if err := json.Unmarshal(got, &msg); err != nil {
+			t.Errorf("id=%d: bad JSON response: %v (body=%s)", id, err, got)
+			return
+		}
+		if gotID, ok := msg["id"].(float64); !ok || int(gotID) != id {
+			t.Errorf("id=%d: response id mismatch: got %v", id, msg["id"])
+		}
+	}
+
+	var wg sync.WaitGroup
+	for _, id := range []int{100, 200, 300} {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			sendAndAssert(t, id)
+		}(id)
+	}
+	wg.Wait()
 }
