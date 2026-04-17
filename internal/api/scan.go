@@ -21,11 +21,24 @@ type ScanOpts struct {
 	ManifestDir           string
 }
 
-// perSessionServers are MCP servers whose state is session-bound and cannot
-// be meaningfully shared across clients. Hardcoded because the list is small,
-// well-known, and rarely changes; if it grows, move to a config file.
+// perSessionServers are MCP servers whose state genuinely cannot be shared
+// across clients. Note: many servers that look like they'd be per-session
+// (gdb, lldb) actually have built-in session-management (SessionManager with
+// sessions[session_id] dict), so they CAN be hub-shared — one daemon serves
+// N concurrent debug sessions tracked by session_id.
+//
+// Before adding a server here, grep its source for "session_id" / "sessions["
+// patterns. If present, it's session-multiplexed and belongs in a manifest,
+// not here.
+//
+// lldb: the common lldb-bridge tool is a TCP-stdio bridge to a SINGLE LLDB
+// protocol-server connection — each client connection owns its bridge and
+// its LLDB. Different architecture from GDB-MCP's session manager. Stays
+// per-session until/unless a session-multiplexed lldb MCP server exists.
+//
+// playwright: each session typically spawns its own browser context which
+// is heavy; leaving as per-session until we confirm multiplexing behavior.
 var perSessionServers = map[string]bool{
-	"gdb":        true,
 	"lldb":       true,
 	"playwright": true,
 }

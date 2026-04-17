@@ -10,7 +10,7 @@ import (
 // TestScanClassifiesEntries verifies the three key classifications:
 // via-hub (HTTP entry pointing at our daemon), can-migrate (stdio entry
 // matching one of our manifest names), unknown (stdio entry with no
-// manifest), per-session (well-known per-session server like gdb).
+// manifest), per-session (well-known per-session server like playwright).
 func TestScanClassifiesEntries(t *testing.T) {
 	tmp := t.TempDir()
 
@@ -20,7 +20,7 @@ func TestScanClassifiesEntries(t *testing.T) {
 			"memory":     map[string]any{"type": "http", "url": "http://localhost:9123/mcp"},
 			"filesystem": map[string]any{"command": "npx", "args": []string{"-y", "@x/filesystem"}},
 			"my-thing":   map[string]any{"command": "python", "args": []string{"my.py"}},
-			"gdb":        map[string]any{"command": "uv", "args": []string{"run", "server.py"}},
+			"playwright": map[string]any{"command": "npx", "args": []string{"-y", "@playwright/mcp"}},
 		},
 	}
 	claudePath := filepath.Join(tmp, ".claude.json")
@@ -62,8 +62,8 @@ func TestScanClassifiesEntries(t *testing.T) {
 	if got := byName["my-thing"].Status; got != "unknown" {
 		t.Errorf("my-thing.Status: got %q, want unknown", got)
 	}
-	if got := byName["gdb"].Status; got != "per-session" {
-		t.Errorf("gdb.Status: got %q, want per-session", got)
+	if got := byName["playwright"].Status; got != "per-session" {
+		t.Errorf("playwright.Status: got %q, want per-session", got)
 	}
 }
 
