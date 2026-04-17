@@ -171,6 +171,33 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 	return executeInstallTo(w, m, plan)
 }
 
+// Status returns the current scheduler view of all mcp-local-hub tasks,
+// enriched with Server/Daemon/Port parsed from manifest, plus PID/RAM/Uptime
+// for Running tasks when the OS introspection layer is available (Windows,
+// populated by internal/api/processes.go at init). NextRun is not parsed here
+// — scheduler.TaskStatus surfaces the human-readable string form; callers
+// that want it can re-query the scheduler directly.
+func (a *API) Status() ([]DaemonStatus, error) {
+	sch, err := scheduler.New()
+	if err != nil {
+		return nil, err
+	}
+	tasks, err := sch.List("mcp-local-hub-")
+	if err != nil {
+		return nil, err
+	}
+	result := make([]DaemonStatus, 0, len(tasks))
+	for _, t := range tasks {
+		result = append(result, DaemonStatus{
+			TaskName:   t.Name,
+			State:      t.State,
+			LastResult: int32(t.LastResult),
+		})
+	}
+	enrichStatus(result, defaultManifestDir())
+	return result, nil
+}
+
 // Uninstall removes all scheduler tasks and client entries for a server.
 // It never prints; the returned UninstallReport carries the outcome for
 // CLI/GUI rendering.
