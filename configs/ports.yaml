@@ -5,7 +5,4 @@ global:
   - server: serena
     daemon: codex
     port: 9122
-  - server: serena
-    daemon: antigravity
-    port: 9123
 workspace_scoped: []

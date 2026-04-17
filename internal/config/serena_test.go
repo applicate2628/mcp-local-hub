@@ -18,11 +18,29 @@ func TestSerenaManifestParses(t *testing.T) {
 	if m.Name != "serena" {
 		t.Errorf("Name = %q", m.Name)
 	}
-	if len(m.Daemons) != 3 {
-		t.Errorf("len(Daemons) = %d, want 3", len(m.Daemons))
+	// Shared-daemon layout: claude (claude-code context, shared by Claude Code,
+	// Gemini CLI, and Antigravity) + codex (separate because Codex requires
+	// its own Serena context). Antigravity's own daemon was removed.
+	if len(m.Daemons) != 2 {
+		t.Errorf("len(Daemons) = %d, want 2 (claude + codex)", len(m.Daemons))
 	}
 	if len(m.ClientBindings) != 4 {
 		t.Errorf("len(ClientBindings) = %d, want 4", len(m.ClientBindings))
+	}
+	// Verify the three non-Codex clients all bind to the shared "claude" daemon.
+	sharedClaude := map[string]bool{"claude-code": false, "antigravity": false, "gemini-cli": false}
+	for _, b := range m.ClientBindings {
+		if _, ok := sharedClaude[b.Client]; ok {
+			if b.Daemon != "claude" {
+				t.Errorf("binding %s.daemon = %q, want claude (shared daemon)", b.Client, b.Daemon)
+			}
+			sharedClaude[b.Client] = true
+		}
+	}
+	for client, seen := range sharedClaude {
+		if !seen {
+			t.Errorf("binding for client %q not found", client)
+		}
 	}
 }
 

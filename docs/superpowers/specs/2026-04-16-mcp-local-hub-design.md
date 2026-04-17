@@ -81,9 +81,11 @@ Ship a local platform — **MCP Local Hub** — that:
                 │ launches           └─────────────────────────────────┘
                 ▼                                      │
 ┌─ Daemons (per server manifest) ──────────┐          │
-│ global: serena-claude (9121)             │          │
-│ global: serena-codex  (9122)             │ serves   │
-│ global: serena-antigrav (9123)           │◀─────────┘
+│ global: serena-claude (9121)  shared     │          │
+│         ├─ Claude Code                   │          │
+│         ├─ Gemini CLI                    │ serves   │
+│         └─ Antigravity                   │◀─────────┘
+│ global: serena-codex  (9122)             │          │
 │ global: memory (9140)                    │ MCP requests
 │ workspace: pyright@d:/dev/Orch (9214)    │
 │ workspace: rust@d:/dev/foo    (9215)     │
@@ -104,7 +106,7 @@ Chosen after comparing PowerShell / Python / Go / Rust / TypeScript (details bel
 
 #### 3.3.1 Global daemons
 
-One process per (server, instance). The instance distinction matters when one server has per-client-context variants — e.g., Serena accepts one `--context` flag per process, so three Serena daemons run with `claude-code`, `codex`, `antigravity` contexts.
+One process per (server, context). The context distinction matters when one server has per-client-context variants — e.g., Serena accepts one `--context` flag per process. For the Phase 1 Serena deployment we run **two** daemons: `claude-code` context (port 9121, shared by Claude Code, Gemini CLI, and Antigravity — all three accept this context's tool preset) and `codex` context (port 9122, required by Codex CLI's own preset). The three non-Codex clients share a single Serena process and thus share the gopls LSP cache.
 
 | Property | Value |
 |---|---|
@@ -149,7 +151,7 @@ Current servers via bridge: `memory`, `sequential-thinking`, `mcp-server-fetch`,
 
 | Range | Purpose | Phase 1-3 usage |
 |---|---|---|
-| 9121-9139 | Global daemons, assigned per server manifest (19 ports) | Serena 9121-9123 |
+| 9121-9139 | Global daemons, assigned per server manifest (19 ports) | Serena 9121-9122 |
 | 9140-9199 | Global daemons for later servers (60 ports) | memory 9140 (Phase 2) |
 | 9200-9299 | Workspace-scoped daemons (100 slots) | mcp-language-server instances (Phase 3) |
 
@@ -208,10 +210,6 @@ daemons:
     context: codex
     port: 9122
     extra_args: [--context, codex]
-  - name: antigravity
-    context: antigravity
-    port: 9123
-    extra_args: [--context, antigravity]
 client_bindings:
   - client: claude-code
     daemon: claude
@@ -220,10 +218,10 @@ client_bindings:
     daemon: codex
     url_path: /mcp
   - client: antigravity
-    daemon: antigravity
+    daemon: claude           # shared: antigravity accepts claude-code context
     url_path: /mcp
   - client: gemini-cli
-    daemon: antigravity
+    daemon: claude           # shared: same as antigravity
     url_path: /mcp
 weekly_refresh: true
 ```
@@ -564,7 +562,7 @@ Access denied, task-service down, manifest ref stale. Each scheduler adapter sur
 **Exit criteria:** unit tests green, dry-run install produces correct artifacts, empty repo ships.
 
 ### Phase 1 — Serena (global daemon, native-http)
-**Scope:** Serena manifest (3 daemons × 1 context each), install path through all 4 clients, verify native-http transport end-to-end.
+**Scope:** Serena manifest (2 daemons — shared `claude-code` context for Claude Code + Gemini CLI + Antigravity, separate `codex` context for Codex CLI), install path through all 4 clients, verify native-http transport end-to-end.
 
 **Validates:** global-daemon pattern, multi-daemon-per-server, native-http path, all 4 client adapters.
 
