@@ -48,6 +48,19 @@ type StdioHost struct {
 	nextInternalID atomic.Int64
 	pendingMu      sync.Mutex
 	pending        map[int64]chan json.RawMessage
+
+	// Initialize-cache: stdio MCP servers expect `initialize` once per process
+	// lifetime, but the host fans out one subprocess to N HTTP clients. The
+	// first client's initialize result is cached and replayed (with each
+	// caller's id substituted) for subsequent initialize requests.
+	initMu     sync.Mutex
+	initCached json.RawMessage // cached initialize response body (with `id` rewritten at send time)
+
+	// SSE subscribers: GET /mcp opens a server-sent-events stream that
+	// receives subprocess-originated notifications (JSON-RPC messages with
+	// no `id`). Each subscriber holds one buffered channel.
+	sseMu      sync.Mutex
+	sseClients []chan []byte
 }
 
 func NewStdioHost(cfg HostConfig) (*StdioHost, error) {
@@ -188,7 +201,16 @@ func (h *StdioHost) readStdoutLoop() {
 				}
 			}
 		}
-		// Unrouted line (notification or unknown id) — send to testStdout as fallback.
+		// Unrouted line = notification → broadcast to SSE subscribers.
+		h.sseMu.Lock()
+		for _, c := range h.sseClients {
+			select {
+			case c <- line:
+			default:
+			}
+		}
+		h.sseMu.Unlock()
+		// Also keep the testStdout path for tests that watch unrouted lines.
 		select {
 		case h.testStdout <- line:
 		default:
@@ -196,14 +218,22 @@ func (h *StdioHost) readStdoutLoop() {
 	}
 }
 
-// HTTPHandler returns the http.Handler that POSTs JSON-RPC to the subprocess.
-// For now only POST /mcp is implemented; GET (SSE) and DELETE come in Task 4.
+// HTTPHandler returns the http.Handler for /mcp implementing the
+// Streamable HTTP MCP transport: POST for JSON-RPC requests, GET for SSE
+// subscription, DELETE for client-side session termination.
 func (h *StdioHost) HTTPHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost:
 			h.handlePOST(w, r)
+		case http.MethodDelete:
+			// Session termination: subprocess stays alive (shared across clients),
+			// but we acknowledge the client's request. Nothing to clean up on our side
+			// since pending requests are per-request scoped.
+			w.WriteHeader(http.StatusNoContent)
+		case http.MethodGet:
+			h.handleSSE(w, r)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -223,8 +253,32 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Notifications have no id; we forward-and-forget.
 	origIDRaw, hasID := msg["id"]
+
+	// Initialize-cache short-circuit. Stdio MCP servers expect `initialize`
+	// once per process lifetime; on a cache hit we replay the prior response
+	// with the caller's id substituted, without touching the subprocess.
+	if methodRaw, ok := msg["method"]; ok && hasID {
+		var method string
+		_ = json.Unmarshal(methodRaw, &method)
+		if method == "initialize" {
+			h.initMu.Lock()
+			cached := h.initCached
+			h.initMu.Unlock()
+			if cached != nil {
+				var respMsg map[string]json.RawMessage
+				_ = json.Unmarshal(cached, &respMsg)
+				respMsg["id"] = origIDRaw
+				out, _ := json.Marshal(respMsg)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write(out)
+				return
+			}
+		}
+	}
+
+	// Notifications have no id; we forward-and-forget.
 	if !hasID {
 		if err := h.writeStdin(body); err != nil {
 			http.Error(w, "write stdin: "+err.Error(), http.StatusInternalServerError)
@@ -256,6 +310,20 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 
 	select {
 	case respBody := <-respCh:
+		// Cache initialize responses so subsequent clients can short-circuit.
+		// Guarded by initMu so the first responder wins; concurrent first-callers
+		// still get a correct answer (they each forwarded once before the cache existed).
+		if methodRaw, ok := msg["method"]; ok {
+			var method string
+			_ = json.Unmarshal(methodRaw, &method)
+			if method == "initialize" {
+				h.initMu.Lock()
+				if h.initCached == nil {
+					h.initCached = append(json.RawMessage(nil), respBody...)
+				}
+				h.initMu.Unlock()
+			}
+		}
 		// Restore the original id before returning to the HTTP client.
 		var respMsg map[string]json.RawMessage
 		if err := json.Unmarshal(respBody, &respMsg); err != nil {
@@ -271,6 +339,46 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "client canceled", http.StatusRequestTimeout)
 	case <-time.After(30 * time.Second):
 		http.Error(w, "subprocess response timeout", http.StatusGatewayTimeout)
+	}
+}
+
+// handleSSE registers a new SSE subscriber and keeps the connection open
+// until the client disconnects. Notifications from the subprocess are
+// broadcast to all active SSE subscribers.
+func (h *StdioHost) handleSSE(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	flusher.Flush()
+
+	ch := make(chan []byte, 32)
+	h.sseMu.Lock()
+	h.sseClients = append(h.sseClients, ch)
+	h.sseMu.Unlock()
+	defer func() {
+		h.sseMu.Lock()
+		for i, c := range h.sseClients {
+			if c == ch {
+				h.sseClients = append(h.sseClients[:i], h.sseClients[i+1:]...)
+				break
+			}
+		}
+		h.sseMu.Unlock()
+	}()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case line := <-ch:
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", line)
+			flusher.Flush()
+		}
 	}
 }
 

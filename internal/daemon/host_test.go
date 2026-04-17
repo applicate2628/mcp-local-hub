@@ -172,3 +172,90 @@ func TestHostHTTPIDMultiplexing(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// TestHostInitializeCached verifies that after the first client sends
+// `initialize`, subsequent `initialize` requests return the cached response
+// without being forwarded to the subprocess. This is the contract
+// for sharing one subprocess across N MCP clients.
+func TestHostInitializeCached(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Scripted subprocess: responds to the first `initialize` with a
+	// fixed result, then the test asserts the second request never reaches it
+	// by checking the stdin counter from inside the script.
+	h, err := NewStdioHost(HostConfig{
+		Command: "python",
+		Args: []string{"-u", "-c", `
+import sys, json
+seen = 0
+for line in sys.stdin:
+    msg = json.loads(line)
+    seen += 1
+    if msg.get("method") == "initialize":
+        resp = {"jsonrpc":"2.0","id":msg["id"],"result":{"protocolVersion":"2025-03-26","capabilities":{},"seen":seen}}
+        sys.stdout.write(json.dumps(resp) + "\n")
+        sys.stdout.flush()
+`},
+	})
+	if err != nil {
+		t.Fatalf("NewStdioHost: %v", err)
+	}
+	if err := h.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer h.Stop()
+
+	ts := httptest.NewServer(h.HTTPHandler())
+	defer ts.Close()
+
+	initBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}`
+
+	doInit := func() map[string]any {
+		resp, err := http.Post(ts.URL+"/mcp", "application/json", strings.NewReader(initBody))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		var msg map[string]any
+		_ = json.Unmarshal(body, &msg)
+		return msg
+	}
+
+	r1 := doInit()
+	r2 := doInit()
+
+	// Both should have the same `result.seen` value (1), because the second
+	// request was served from the cache, not forwarded to the subprocess.
+	result1, _ := r1["result"].(map[string]any)
+	result2, _ := r2["result"].(map[string]any)
+	if result1["seen"] != 1.0 || result2["seen"] != 1.0 {
+		t.Errorf("initialize cache not used: r1.seen=%v r2.seen=%v (both should be 1)", result1["seen"], result2["seen"])
+	}
+}
+
+// TestHostDELETETerminates verifies DELETE /mcp is accepted.
+func TestHostDELETETerminates(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	h, err := NewStdioHost(HostConfig{Command: echoSubprocCommand(), Args: echoSubprocArgs()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer h.Stop()
+	ts := httptest.NewServer(h.HTTPHandler())
+	defer ts.Close()
+
+	req, _ := http.NewRequest("DELETE", ts.URL+"/mcp", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		t.Errorf("DELETE: got %d, want 200 or 204", resp.StatusCode)
+	}
+}
