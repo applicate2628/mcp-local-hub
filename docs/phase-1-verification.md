@@ -16,14 +16,12 @@ Closes Task 27 of `docs/superpowers/plans/2026-04-16-mcp-local-hub-phase-0-1.md`
 
 ## Final Architecture
 
-Two Serena daemons, three clients managed by mcp-local-hub:
+Two Serena daemons, four clients managed by mcp-local-hub:
 
 | Daemon | Port | Serena context | Clients sharing it |
 |---|---|---|---|
-| `claude` | 9121 | `claude-code` | Claude Code, Gemini CLI |
-| `codex` | 9122 | `codex` | Codex CLI |
-
-Antigravity is **intentionally excluded** from managed bindings — see §Antigravity below.
+| `claude` | 9121 | `claude-code` | Claude Code (HTTP), Gemini CLI (HTTP), Antigravity (stdio relay) |
+| `codex` | 9122 | `codex` | Codex CLI (HTTP) |
 
 Weekly refresh task: `mcp-local-hub-serena-weekly-refresh` — runs `mcp restart --server serena` every Sunday 03:00 local time, so both daemons pull the latest Serena via `uvx --refresh`.
 
@@ -70,21 +68,27 @@ Flash 2.5 via `gemini -p "list all MCP tools" -m gemini-2.5-flash --yolo` enumer
 
 Full tool-call round-trip through `gemini -p` was not forced through in this session; the tool-discovery evidence is sufficient validation of the transport layer. The first-run issue seen earlier (Cascade-of-user-prompts interpretation where `"serena"` was parsed as a shell binary name) was understood — unrelated to the transport.
 
-### Antigravity — excluded from managed bindings 🔵
+### Antigravity Cascade (via stdio relay) ✓
 
-Empirical findings:
+**Background:** Antigravity's Cascade agent silently drops any `mcpServers` entry pointing at a loopback HTTP URL (confirmed by testing `{url,type,timeout}`, `{serverUrl,disabled}`, and hybrid schemas — all dropped). Remote HTTPS works (e.g. `context7`), localhost does not.
 
-- Antigravity's Cascade agent, via its `RefreshMcpServers` RPC, **silently drops** any `mcpServers` entry at loopback HTTP URL. Confirmed by testing three shapes in `~/.gemini/antigravity/mcp_config.json`:
-  - `{url, type: "http", timeout, disabled}` (Gemini-CLI schema) — dropped
-  - `{serverUrl, disabled}` (Antigravity canonical schema, mimicking the working `context7` entry) — also dropped
-- `context7` works because it's a **remote HTTPS** endpoint (`https://mcp.context7.com/mcp`). Cascade's HTTP transport may be whitelist-restricted or scheme-checked for non-loopback addresses.
-- User confirmed that their pre-existing stdio entry (`command: uvx`, `args: [-p, 3.13, --from, git+https://github.com/oraios/serena, ...]`) works — visible in `mcp_config.json.preinstall` backup.
+**Solution:** `mcp-local-hub` writes a **stdio relay** entry to `~/.gemini/antigravity/mcp_config.json`:
 
-Decision: **mcp-local-hub does not manage `~/.gemini/antigravity/mcp_config.json`**. Users keep their upstream stdio entry; Antigravity spawns its own Serena per session (no shared-daemon benefit for this client).
+```json
+"serena": {
+  "command": "D:\\dev\\mcp-local-hub\\mcp.exe",
+  "args": ["relay", "--server", "serena", "--daemon", "claude"],
+  "disabled": false
+}
+```
 
-The `internal/clients/antigravity.go` adapter stays in the codebase with its `serverUrl`-based schema — see commit `d3a9358`. It may become useful if (a) Antigravity releases loopback-HTTP support, or (b) users run a shared remote Serena over HTTPS.
+Cascade spawns `mcp.exe relay` as a stdio subprocess. The relay (`internal/daemon/relay.go`) translates JSON-RPC between stdin/stdout and the shared HTTP daemon on port 9121.
 
-Separately observed but unrelated to mcp-local-hub: Antigravity's `RefreshMcpServers` enters a permanent "loading already in progress" state after `mcp-language-server`-based entries (clangd, fortran, javascript, python, rust, typescript, ...) return exit 1 on shutdown. This is a third-party upstream bug (`mcp-language-server`'s graceful-shutdown handling on Windows) that affects *all* MCP refresh cycles in Antigravity, independent of our changes.
+**Verification:** after install + Antigravity restart, Cascade spawned 3 relay processes (one per workspace context). All established TCP connections to daemon:9121. User confirmed Serena tools visible and functional in Cascade — `find_symbol`, `get_symbols_overview`, dashboard accessible.
+
+**Race condition fix:** initial relay implementation used CAS-based goroutine coordination in `stdinPump`, which didn't guarantee message ordering — `notifications/initialized` could win the CAS race and send a non-initialize message as the first POST, causing the server to return 400 "Missing session ID". Fixed by serializing messages synchronously while `sessionID == ""`, then switching to parallel dispatch after session establishment (commit `83ca841`).
+
+**Unrelated upstream bug observed:** Antigravity's `RefreshMcpServers` enters a permanent "loading already in progress" state after `mcp-language-server`-based entries (clangd, fortran, etc.) return exit 1 on shutdown. This is a third-party bug in `mcp-language-server`'s Windows graceful-shutdown handling, unrelated to mcp-local-hub.
 
 ## Post-plan fixes applied
 
@@ -104,9 +108,20 @@ Nine commits beyond the original 27 tasks, all empirically driven — each one c
 
 Pattern across most fixes: **unit test asserted our assumed output shape and passed** because production code produced that shape. Only live integration surfaced the mismatch. Compound guard for each fix now: test explicitly forbids the old buggy shape from returning.
 
+### Post-Phase 1 relay commits
+
+| Commit | Description |
+|---|---|
+| `7d2e79e` | Windows version resource + `mcp version` subcommand (PE metadata to reduce AV false positives) |
+| `04cd269` | HTTP→stdio relay core (`internal/daemon/relay.go`) with 6 unit tests |
+| `f3c71ed` | `mcp relay` CLI subcommand (`--server/--daemon` and `--url` modes) with 3 tests |
+| `c8c7e5e` | Antigravity adapter writes stdio-relay entry; `MCPEntry` extended with relay fields |
+| `201d22e` | Antigravity binding re-added to serena manifest (relay transport) |
+| `83ca841` | Race condition fix: serialize messages in relay until session established |
+
 ## Deferred (next phases)
 
-- **Phase 2** — memory daemon + real stdio-bridge integration via `supergateway` (currently code-only in `internal/daemon/bridge.go`, not yet exercised end-to-end). Validates the whole stdio-bridge lane.
+- **Phase 2** — memory daemon + additional stdio-relay consumers (e.g. Serena through Antigravity for other projects).
 - **Phase 3** — workspace-scoped daemons + `mcp register/unregister` for mcp-language-server. Incidentally addresses the Antigravity `mcp-language-server` shutdown bug observed in this session.
 - **Phase 4+** — additional global daemons (sequential-thinking, wolfram, paper-search-mcp).
 - **Linux/macOS scheduler** — real implementations replacing the current compile-only stubs.
@@ -114,4 +129,4 @@ Pattern across most fixes: **unit test asserted our assumed output shape and pas
 
 ## Status
 
-**Phase 0 + Phase 1 CLOSED.** 37 commits on `master`. `go test ./...` all-green across `config`, `clients`, `scheduler`, `secrets`, `cli`, `daemon`. Live end-to-end verified on three of four clients (Codex + Claude + Gemini). Fourth client (Antigravity) excluded by architectural decision after empirical testing.
+**Phase 0 + Phase 1 + post-Phase 1 relay CLOSED.** All four clients live end-to-end verified: Codex CLI, Claude Code (Haiku), Gemini CLI (Flash 2.5), Antigravity Cascade (stdio relay). `go test ./...` all-green across `config`, `clients`, `scheduler`, `secrets`, `cli`, `daemon`.

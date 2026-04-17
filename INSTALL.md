@@ -19,7 +19,7 @@ cd d:\dev\mcp-local-hub
 go build -o mcp.exe ./cmd/mcp
 ```
 
-On success: `mcp.exe` appears in the repo root (~7.9 MB).
+On success: `mcp.exe` appears in the repo root (~12 MB, includes Windows version resource metadata).
 
 Optional: add the repo directory to `PATH` so you can run `mcp` from anywhere. Until then every command is `./mcp.exe ...`.
 
@@ -31,7 +31,7 @@ The Phase 1 manifest ships with Serena configured. To install it:
 # Preview what would happen (no side effects)
 ./mcp.exe install --server serena --dry-run
 
-# Apply: creates 3 Task Scheduler tasks, writes 3 client configs, starts both daemons
+# Apply: creates 3 Task Scheduler tasks, writes 4 client configs, starts both daemons
 ./mcp.exe install --server serena
 ```
 
@@ -47,6 +47,8 @@ Expected output:
 ✓ codex-cli → http://localhost:9122/mcp
   backup: C:\Users\<you>\.gemini\settings.json.bak-mcp-local-hub-<timestamp>
 ✓ gemini-cli → http://localhost:9121/mcp
+  backup: C:\Users\<you>\.gemini\antigravity\mcp_config.json.bak-mcp-local-hub-<timestamp>
+✓ antigravity → relay (mcp.exe relay --server serena --daemon claude)
 ✓ Started: mcp-local-hub-serena-claude
 ✓ Started: mcp-local-hub-serena-codex
 
@@ -118,18 +120,28 @@ Namespace for Serena tools inside a Gemini prompt is `mcp_serena_*` (single unde
 gemini -p "use mcp_serena_find_symbol with name_path=main" -m gemini-2.5-flash --yolo
 ```
 
-### Antigravity — NOT managed
+### Antigravity (Cascade)
 
-`mcp-local-hub` does **not** write to `~/.gemini/antigravity/mcp_config.json`. As of April 2026, Antigravity's Cascade agent silently drops any MCP entry pointing at a loopback HTTP URL, regardless of schema. Keep your existing stdio entry (e.g. `uvx --from git+https://github.com/oraios/serena ...`) or configure Antigravity separately.
+Antigravity's Cascade agent silently drops any `mcp_config.json` entry pointing at a loopback HTTP URL. `mcp-local-hub` works around this by writing a **stdio relay** entry instead:
 
-If a future Antigravity version adds loopback-HTTP support, re-enable by adding an `antigravity` client binding in `servers/serena/manifest.yaml`:
-```yaml
-client_bindings:
-  - client: antigravity
-    daemon: claude
-    url_path: /mcp
+```json
+"serena": {
+  "command": "D:\\dev\\mcp-local-hub\\mcp.exe",
+  "args": ["relay", "--server", "serena", "--daemon", "claude"],
+  "disabled": false
+}
 ```
-Then `mcp install --server serena` will start managing it. The adapter code (`internal/clients/antigravity.go`) already writes the canonical `{serverUrl, disabled}` schema.
+
+Cascade spawns `mcp.exe relay` as a normal stdio subprocess. The relay translates JSON-RPC between stdin/stdout and the shared HTTP daemon on port 9121. No extra Serena process per Antigravity session — it shares the same daemon as Claude Code and Gemini CLI.
+
+**After install, restart Antigravity** for Cascade to pick up the new entry:
+```powershell
+Get-Process -Name Antigravity | Stop-Process -Force
+Start-Sleep 3
+Start-Process "$env:LOCALAPPDATA\Programs\Antigravity\Antigravity.exe"
+```
+
+The relay binary path is absolute (points at `mcp.exe` in the repo root). If you move the binary, re-run `mcp install --server serena` to update the path.
 
 ## Uninstall & rollback
 

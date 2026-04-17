@@ -23,14 +23,14 @@ Every modern coding assistant (Claude Code, Codex CLI, Gemini CLI, Antigravity, 
    │ + one shared gopls   │          │ + one shared gopls   │
    └────────┬─────────────┘          └────────┬─────────────┘
             │                                 │
-   ┌────────┼─────────┐                       │
-   ▼        ▼         ▼                       ▼
-  Claude  Gemini   Antigravity*             Codex CLI
-  Code    CLI      (stdio, unmanaged)
-
-  * Antigravity's Cascade agent currently rejects loopback-HTTP MCP
-    entries; keeps its upstream stdio spawn separately (see INSTALL.md).
+   ┌────────┼─────────┬──────────┐            │
+   ▼        ▼         ▼          ▼            ▼
+  Claude  Gemini   Antigravity  (future     Codex CLI
+  Code    CLI      (stdio       stdio
+  (HTTP)  (HTTP)    relay)      clients)
 ```
+
+Antigravity's Cascade agent rejects loopback-HTTP MCP entries, so `mcp-local-hub` bridges it via a **stdio relay subprocess**: `mcp.exe relay` translates between stdio JSON-RPC and the shared HTTP daemon. Cascade sees a normal stdio command; the daemon stays shared.
 
 ## Quick start
 
@@ -38,7 +38,7 @@ Every modern coding assistant (Claude Code, Codex CLI, Gemini CLI, Antigravity, 
 # Build
 go build -o mcp.exe ./cmd/mcp
 
-# Install all bindings (2 daemons + 3 client configs)
+# Install all bindings (2 daemons + 4 client configs)
 ./mcp.exe install --server serena
 
 # Verify
@@ -55,9 +55,9 @@ Detailed setup, per-client behaviour, and troubleshooting in [INSTALL.md](INSTAL
 | Claude Code CLI | 2.1.112 | `~/.claude.json` | HTTP (`type: "http"`) |
 | Codex CLI | 0.121.0 | `~/.codex/config.toml` | HTTP (streamable_http) |
 | Gemini CLI | 0.38.1 | `~/.gemini/settings.json` | HTTP (`type: "http"`) |
-| Antigravity IDE | v0.x | — | not managed (see below) |
+| Antigravity IDE | v0.x | `~/.gemini/antigravity/mcp_config.json` | stdio relay → HTTP |
 
-**Antigravity caveat:** as of April 2026, Antigravity's Cascade agent silently drops `mcp_config.json` entries pointing at loopback HTTP URLs (tested: Gemini-CLI `{url,type,timeout}` schema, Antigravity-native `{serverUrl,disabled}` schema, and hybrid combinations). Remote HTTPS works (e.g. `context7`), localhost does not. `mcp-local-hub` therefore leaves `~/.gemini/antigravity/mcp_config.json` untouched — users keep their existing stdio entry. If Antigravity gains loopback-HTTP support, re-enable by adding an `antigravity` binding to `servers/serena/manifest.yaml`; the adapter code (`internal/clients/antigravity.go`) still uses the canonical `serverUrl` schema.
+**Antigravity note:** Cascade rejects loopback-HTTP MCP entries, so `mcp-local-hub` writes a **stdio relay** entry instead — `mcp.exe relay --server serena --daemon claude`. Cascade spawns the relay as a normal stdio subprocess; the relay forwards JSON-RPC to the shared HTTP daemon on port 9121. No extra Serena process per Antigravity session.
 
 ## Key commands
 
@@ -71,14 +71,18 @@ Detailed setup, per-client behaviour, and troubleshooting in [INSTALL.md](INSTAL
 | `mcp status` | Show state of all `mcp-local-hub-*` Task Scheduler tasks |
 | `mcp restart --server <name> \| --all` | Stop + re-run scheduler tasks |
 | `mcp daemon --server <n> --daemon <d>` | Invoked by the scheduler; exec the real server with tee'd logs |
+| `mcp relay --server <n> --daemon <d>` | stdio↔HTTP bridge for clients that reject loopback HTTP (e.g. Antigravity) |
+| `mcp relay --url <url>` | Direct relay to an arbitrary Streamable HTTP endpoint |
 | `mcp secrets {init,set,get,list,delete,edit,migrate}` | Manage age-encrypted vault for API keys etc. |
+| `mcp version` | Print build version, commit, and date |
 
 ## Current status
 
-**Phase 1 complete** (2026-04-17). 38 commits on `master`, `go test ./...` all-green, three of four clients live end-to-end verified (Codex, Claude Haiku, Gemini Flash 2.5). See [docs/phase-1-verification.md](docs/phase-1-verification.md) for the full verification matrix including the nine post-plan fixes applied during live testing.
+**Phase 1 + post-Phase 1 relay complete** (2026-04-17). All four clients live end-to-end verified: Codex CLI, Claude Code (Haiku), Gemini CLI (Flash 2.5), and Antigravity Cascade (via stdio relay). See [docs/phase-1-verification.md](docs/phase-1-verification.md) for the full verification matrix.
 
 **Roadmap (not yet implemented):**
-- Phase 2: memory server + stdio-bridge via [supergateway](https://github.com/supercorp-ai/supergateway)
+
+- Phase 2: memory server + additional stdio-relay consumers (e.g. Serena through Antigravity)
 - Phase 3: workspace-scoped daemons + `mcp register`/`unregister` for per-project mcp-language-server instances
 - Phase 4+: additional global daemons (sequential-thinking, wolfram, paper-search-mcp)
 - Linux/macOS scheduler backends (currently Windows-first, Linux/macOS compile-only stubs)
