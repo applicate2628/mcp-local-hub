@@ -35,14 +35,55 @@ func enrichStatus(rows []DaemonStatus, manifestDir string) {
 		// spawned daemon keeps running. Gating on State=="Running" here made
 		// PID/RAM/UPTIME columns blank for every live daemon. Always probe by
 		// port and let the lookup itself decide whether a daemon is alive.
+		alive := false
 		if lookupProcess != nil && rows[i].Port != 0 {
 			if pid, ram, uptime, ok := lookupProcess(rows[i].Port); ok {
 				rows[i].PID = pid
 				rows[i].RAMBytes = ram
 				rows[i].UptimeSec = uptime
+				alive = true
 			}
 		}
+		rows[i].State = deriveState(rows[i].State, alive, rows[i].NextRun)
 	}
+}
+
+// deriveState maps (raw scheduler task state, daemon port-listening?, NextRun text)
+// to a user-meaningful status. Windows Task Scheduler's "Ready" covers both
+// "waiting for next trigger" and "logon-triggered daemon whose process died
+// hours ago" — the raw state alone cannot tell those apart. By folding in
+// port liveness and trigger presence we get four actionable labels:
+//   Running   — port bound; daemon alive (raw state irrelevant)
+//   Starting  — scheduler currently executing the task's launch action,
+//               port not yet bound
+//   Scheduled — task idle, no live daemon, but trigger will fire later
+//               (weekly-refresh-style tasks)
+//   Stopped   — task idle with no future trigger and no daemon (logon-only
+//               daemon that has exited; user needs to `mcphub restart`)
+// Anything unexpected (Disabled, Queued, etc.) falls through unchanged.
+func deriveState(raw string, alive bool, nextRun string) string {
+	if alive {
+		return "Running"
+	}
+	switch raw {
+	case "Running":
+		return "Starting"
+	case "Ready":
+		if hasFutureTrigger(nextRun) {
+			return "Scheduled"
+		}
+		return "Stopped"
+	}
+	return raw
+}
+
+// hasFutureTrigger returns true when schtasks reports a concrete next-run
+// timestamp. Empty string or the literal "N/A" both mean "no upcoming
+// trigger" (e.g. logon-triggered daemon tasks that only fire at user
+// logon — schtasks emits "N/A" for NextRun in that case).
+func hasFutureTrigger(nextRun string) bool {
+	s := strings.TrimSpace(nextRun)
+	return s != "" && !strings.EqualFold(s, "N/A")
 }
 
 // parseTaskName splits `\mcp-local-hub-<server>-<daemon>` into (server, daemon).
