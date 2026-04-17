@@ -24,6 +24,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newRelayCmd())
 	root.AddCommand(newSecretsCmd())
 	root.AddCommand(newVersionCmd())
+	root.AddCommand(newLogsCmd())
 	return root
 }
 
@@ -43,6 +44,9 @@ func newRelayCmd() *cobra.Command   { return newRelayCmdReal() }
 func newVersionCmd() *cobra.Command { return newVersionCmdReal() }
 func newSecretsCmd() *cobra.Command {
 	return newSecretsCmdReal()
+}
+func newLogsCmd() *cobra.Command {
+	return newLogsCmdReal()
 }
 
 func stub(name string) func(*cobra.Command, []string) error {
