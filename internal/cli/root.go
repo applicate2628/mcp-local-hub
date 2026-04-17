@@ -25,6 +25,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newSecretsCmd())
 	root.AddCommand(newVersionCmd())
 	root.AddCommand(newLogsCmd())
+	root.AddCommand(newCleanupCmd())
 	return root
 }
 
@@ -47,6 +48,9 @@ func newSecretsCmd() *cobra.Command {
 }
 func newLogsCmd() *cobra.Command {
 	return newLogsCmdReal()
+}
+func newCleanupCmd() *cobra.Command {
+	return newCleanupCmdReal()
 }
 
 func stub(name string) func(*cobra.Command, []string) error {
