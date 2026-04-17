@@ -14,9 +14,42 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Repo-relative paths — resolved at every call so the binary is portable.
-func defaultKeyPath() string   { return filepath.Join(".", ".age-key") }
-func defaultVaultPath() string { return filepath.Join(".", "secrets.age") }
+// defaultKeyPath resolves .age-key relative to the binary's location.
+// Supports both layouts: exe+key in the same dir (legacy) and exe in bin/
+// with key one level up (standard Go layout). Falls back to CWD-relative
+// "./.age-key" so dev invocations from the repo root also work.
+func defaultKeyPath() string {
+	return resolveSecretPath(".age-key")
+}
+
+// defaultVaultPath resolves secrets.age using the same lookup order as
+// defaultKeyPath. Both files live together, so they're always found in the
+// same directory.
+func defaultVaultPath() string {
+	return resolveSecretPath("secrets.age")
+}
+
+// resolveSecretPath returns the first existing path among (in order):
+//   1. <exe_dir>/<name>      (legacy: binary + secrets at same level)
+//   2. <exe_dir>/../<name>   (standard: binary in bin/, secrets one level up)
+//   3. ./<name>              (CWD fallback for dev invocations)
+// If none exist, returns the CWD-relative form; callers that need to create
+// the file (secrets init) will then write to CWD.
+func resolveSecretPath(name string) string {
+	exe, err := os.Executable()
+	if err == nil {
+		exeDir := filepath.Dir(exe)
+		sibling := filepath.Join(exeDir, name)
+		if _, err := os.Stat(sibling); err == nil {
+			return sibling
+		}
+		parent := filepath.Join(exeDir, "..", name)
+		if _, err := os.Stat(parent); err == nil {
+			return parent
+		}
+	}
+	return filepath.Join(".", name)
+}
 
 func newSecretsCmdReal() *cobra.Command {
 	root := &cobra.Command{Use: "secrets", Short: "Manage encrypted secrets"}
