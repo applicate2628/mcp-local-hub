@@ -102,11 +102,25 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 	return out, nil
 }
 
+// genericInterpreters are command names that match far too many unrelated
+// processes (every npx-invoked tool, every python script, etc.) to be useful
+// as identifying patterns. We skip them when building patterns and rely on
+// server-specific tokens (package names, script paths) for identification.
+var genericInterpreters = map[string]bool{
+	"npx": true, "npx.cmd": true,
+	"node": true, "node.exe": true,
+	"python": true, "python.exe": true, "python3": true,
+	"uv": true, "uvx": true, "uv.exe": true, "uvx.exe": true,
+	"cmd": true, "cmd.exe": true,
+	"sh": true, "bash": true,
+}
+
 // patternsForServer returns the substring patterns used to identify running
-// processes of this server. For manifested servers, it uses command + any
-// reasonably long non-flag arg (typically a recognizable script or package
-// name). For non-manifested (unknown/per-session) servers, it falls back to
-// the server name only — callers should treat counts for unknown servers
+// processes of this server. Generic interpreters (npx, node, python, uvx)
+// are skipped because they match thousands of unrelated processes; only
+// server-specific tokens (package names, script paths) reliably identify
+// a server's own processes. For non-manifested (unknown/per-session) servers,
+// falls back to the server name — callers treat counts for unknown servers
 // as an upper bound.
 func patternsForServer(serverName, manifestDir string) []string {
 	f, err := os.Open(filepath.Join(manifestDir, serverName, "manifest.yaml"))
@@ -119,7 +133,7 @@ func patternsForServer(serverName, manifestDir string) []string {
 		return []string{serverName}
 	}
 	var out []string
-	if m.Command != "" {
+	if m.Command != "" && !genericInterpreters[m.Command] {
 		out = append(out, m.Command)
 	}
 	for _, arg := range m.BaseArgs {
