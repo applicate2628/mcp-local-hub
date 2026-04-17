@@ -1,7 +1,11 @@
 package api
 
 import (
+	"bytes"
+	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -178,5 +182,50 @@ func TestPreflight_UnknownCommand(t *testing.T) {
 	}
 	if err := Preflight(m, "x"); err == nil {
 		t.Error("expected error for missing command")
+	}
+}
+
+// TestInstallAllInstallsEverything spawns a tempdir with two fake manifests
+// and asserts Install is invoked for each (dry-run mode so no scheduler/
+// client writes). Verifies InstallAllFrom returns one result per manifest.
+func TestInstallAllInstallsEverything(t *testing.T) {
+	tmp := t.TempDir()
+	makeFakeManifest(t, filepath.Join(tmp, "foo"), "foo", 9130)
+	makeFakeManifest(t, filepath.Join(tmp, "bar"), "bar", 9131)
+
+	a := NewAPI()
+	var buf bytes.Buffer
+	results := a.InstallAllFrom(InstallAllOpts{
+		ManifestDir: tmp,
+		DryRun:      true,
+		Writer:      &buf,
+	})
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	for _, r := range results {
+		if r.Err != nil {
+			t.Errorf("server %s: unexpected error %v", r.Server, r.Err)
+		}
+	}
+}
+
+func makeFakeManifest(t *testing.T, dir, name string, port int) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	body := fmt.Sprintf(`name: %s
+kind: global
+transport: stdio-bridge
+command: echo
+daemons:
+  - name: default
+    port: %d
+client_bindings: []
+weekly_refresh: false
+`, name, port)
+	if err := os.WriteFile(filepath.Join(dir, "manifest.yaml"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
 	}
 }

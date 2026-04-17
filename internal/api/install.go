@@ -45,6 +45,19 @@ type InstallOpts struct {
 	Writer       io.Writer // progress output destination; nil = os.Stderr
 }
 
+// InstallAllOpts controls a bulk install.
+type InstallAllOpts struct {
+	ManifestDir string
+	DryRun      bool
+	Writer      io.Writer
+}
+
+// InstallResult is one row in an InstallAll report.
+type InstallResult struct {
+	Server string
+	Err    error
+}
+
 // UninstallReport summarizes what Uninstall actually did. Callers (CLI/GUI)
 // render this however they like; the API itself does not print.
 type UninstallReport struct {
@@ -88,6 +101,73 @@ func (a *API) Install(opts InstallOpts) error {
 		return printPlanTo(w, plan)
 	}
 	// 5. Execute.
+	return executeInstallTo(w, m, plan)
+}
+
+// InstallAll is the production entry point for bulk install using
+// defaultManifestDir().
+func (a *API) InstallAll(dryRun bool, w io.Writer) []InstallResult {
+	return a.InstallAllFrom(InstallAllOpts{
+		ManifestDir: defaultManifestDir(),
+		DryRun:      dryRun,
+		Writer:      w,
+	})
+}
+
+// InstallAllFrom installs every manifest under ManifestDir. It continues past
+// individual failures and returns the per-server result list so callers can
+// display a summary.
+func (a *API) InstallAllFrom(opts InstallAllOpts) []InstallResult {
+	var results []InstallResult
+	entries, err := os.ReadDir(opts.ManifestDir)
+	if err != nil {
+		return []InstallResult{{Err: err}}
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(opts.ManifestDir, e.Name(), "manifest.yaml")); err != nil {
+			continue
+		}
+		err := a.installFromManifestDir(InstallOpts{
+			Server: e.Name(),
+			DryRun: opts.DryRun,
+			Writer: opts.Writer,
+		}, opts.ManifestDir)
+		results = append(results, InstallResult{Server: e.Name(), Err: err})
+	}
+	return results
+}
+
+// installFromManifestDir is Install-like but with an explicit manifestDir
+// override. Used by InstallAllFrom so tests can point at a tempdir without
+// mutating global executable-path state. Preflight is intentionally omitted
+// here — bulk installs may run against manifests whose sibling daemons are
+// already occupying their ports from a prior install, which would otherwise
+// abort the entire batch.
+func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error {
+	w := opts.Writer
+	if w == nil {
+		w = os.Stderr
+	}
+	manifestPath := filepath.Join(manifestDir, opts.Server, "manifest.yaml")
+	f, err := os.Open(manifestPath)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", manifestPath, err)
+	}
+	defer f.Close()
+	m, err := config.ParseManifest(f)
+	if err != nil {
+		return err
+	}
+	plan, err := BuildPlan(m, opts.DaemonFilter)
+	if err != nil {
+		return err
+	}
+	if opts.DryRun {
+		return printPlanTo(w, plan)
+	}
 	return executeInstallTo(w, m, plan)
 }
 
