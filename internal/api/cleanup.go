@@ -2,9 +2,9 @@ package api
 
 import (
 	"bufio"
-	"fmt"
 	"io"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -32,6 +32,12 @@ type CleanupOpts struct {
 // pattern but whose parent is NOT our `mcp.exe daemon` wrapper. Reports them
 // (dry-run) or kills them (non-dry-run).
 func (a *API) CleanupOrphans(opts CleanupOpts) ([]OrphanProcess, error) {
+	if runtime.GOOS != "windows" {
+		// Process introspection below uses Windows-specific tooling.
+		// Return an empty result on other platforms so the CLI stays usable
+		// (`mcp cleanup` just prints "No orphan processes found.").
+		return nil, nil
+	}
 	if opts.MinAgeSec == 0 {
 		opts.MinAgeSec = 60
 	}
@@ -49,12 +55,12 @@ func (a *API) CleanupOrphans(opts CleanupOpts) ([]OrphanProcess, error) {
 		}
 	}
 
-	// One wmic call, then filter.
-	out, err := exec.Command("wmic", "process", "get",
-		"CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize",
-		"/format:csv").Output()
+	// Snapshot processes. wmic was the historical tool but Windows 11 24H2+
+	// ships without it; PowerShell's Get-CimInstance works on every modern
+	// Windows and produces equivalent data.
+	out, err := runProcessSnapshot()
 	if err != nil {
-		return nil, fmt.Errorf("wmic: %w", err)
+		return nil, err
 	}
 
 	// Flat list of patterns — any match counts this PID as a candidate orphan.

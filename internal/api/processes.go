@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -14,15 +15,57 @@ import (
 // command-line substring patterns. Typical usage: feed it the server name
 // and the primary command/arg tokens from its manifest.
 //
-// Windows-only for Phase 3A.2. On Linux/macOS it returns (0, nil) until a
-// cross-platform implementation lands later.
+// Windows-only for Phase 3A.2. On Linux/macOS it returns (0, nil) — the
+// caller gets zero results without error, which keeps scan/cleanup flows
+// usable without crashing.
 func (a *API) CountProcesses(patterns []string) (int, error) {
-	cmd := exec.Command("wmic", "process", "get", "CommandLine,ProcessId,WorkingSetSize", "/format:csv")
-	out, err := cmd.Output()
-	if err != nil {
-		return 0, fmt.Errorf("wmic: %w", err)
+	if runtime.GOOS != "windows" {
+		return 0, nil
 	}
-	return parseWmicCount(strings.NewReader(string(out)), patterns)
+	out, err := runProcessSnapshot()
+	if err != nil {
+		return 0, err
+	}
+	return parseWmicCount(strings.NewReader(out), patterns)
+}
+
+// runProcessSnapshot returns a CSV-formatted process list compatible with
+// the shape wmic historically produced. Tries wmic first (legacy Windows),
+// falls back to PowerShell Get-CimInstance (Windows 11 24H2+ removed wmic).
+//
+// Output format:
+//   Node,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize
+//   HOST,"cmdline text",20260417180000.000000+000,555,1001,40000000
+//   ...
+//
+// CommandLine is quoted with "" escaping (wmic-compatible). CreationDate is
+// formatted as CIM_DATETIME so parseWmicDate works unchanged. Returned as a
+// single string for convenience; callers wrap in strings.NewReader.
+func runProcessSnapshot() (string, error) {
+	// Legacy path: wmic (present on Windows 10 and older Windows 11).
+	wmicOut, wmicErr := exec.Command("wmic", "process", "get",
+		"CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize",
+		"/format:csv").Output()
+	if wmicErr == nil {
+		return string(wmicOut), nil
+	}
+
+	// PowerShell fallback: works on every Windows with PowerShell installed,
+	// which is every supported Windows version (5.1 built-in, 7 via MSI).
+	// Emit rows in wmic CSV shape so the parsers don't need a second path.
+	// Uses [string]::Format instead of backtick-escaping to keep the Go
+	// raw-string literal clean (PowerShell's backtick would close the literal).
+	const psScript = `Get-CimInstance Win32_Process | ForEach-Object {
+		$cmdline = if ($_.CommandLine) { ($_.CommandLine -replace '"', '""') } else { '' }
+		$created = $_.CreationDate.ToString('yyyyMMddHHmmss') + '.000000+000'
+		[string]::Format('HOST,"{0}",{1},{2},{3},{4}', $cmdline, $created, $_.ParentProcessId, $_.ProcessId, $_.WorkingSetSize)
+	}`
+	psOut, psErr := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript).Output()
+	if psErr != nil {
+		return "", fmt.Errorf("both wmic and PowerShell process snapshot failed: wmic=%v; powershell=%v", wmicErr, psErr)
+	}
+	header := "Node,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize\n"
+	return header + string(psOut), nil
 }
 
 // parseWmicCount scans the CSV `wmic process get` output and returns the
@@ -55,6 +98,9 @@ type ProcessInfo struct {
 // CommandLine contains at least one of the given substring patterns.
 // Windows-only (wmic); returns nil on other platforms.
 func (a *API) ListMatchingProcesses(patterns []string) ([]ProcessInfo, error) {
+	if runtime.GOOS != "windows" {
+		return nil, nil
+	}
 	cmd := exec.Command("wmic", "process", "get", "CommandLine,ProcessId,WorkingSetSize", "/format:csv")
 	out, err := cmd.Output()
 	if err != nil {
@@ -114,7 +160,14 @@ func splitCSVLine(line string) []string {
 // init populates status_enrich.go's lookupProcess function pointer with a
 // real Windows implementation that combines netstat (to find the PID owning
 // the port) and wmic (to fetch RAM + start time for that PID).
+//
+// On Linux/macOS the function pointer stays nil; callers in status_enrich.go
+// already check for nil before invoking it, so PID/RAM/Uptime columns just
+// stay blank on non-Windows hosts.
 func init() {
+	if runtime.GOOS != "windows" {
+		return
+	}
 	lookupProcess = func(port int) (int, uint64, int64, bool) {
 		if port <= 0 {
 			return 0, 0, 0, false
