@@ -114,7 +114,7 @@ func buildCreateXML(spec TaskSpec, userName string) string {
 	buf.WriteString("    <IdleSettings>\n      <StopOnIdleEnd>false</StopOnIdleEnd>\n      <RestartOnIdle>false</RestartOnIdle>\n    </IdleSettings>\n")
 	buf.WriteString("    <AllowStartOnDemand>true</AllowStartOnDemand>\n")
 	buf.WriteString("    <Enabled>true</Enabled>\n")
-	buf.WriteString("    <Hidden>false</Hidden>\n")
+	buf.WriteString("    <Hidden>true</Hidden>\n")
 	buf.WriteString("    <RunOnlyIfIdle>false</RunOnlyIfIdle>\n")
 	buf.WriteString("    <WakeToRun>false</WakeToRun>\n")
 	buf.WriteString("    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>\n") // no timeout
