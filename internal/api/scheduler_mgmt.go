@@ -3,6 +3,8 @@ package api
 import (
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/scheduler"
@@ -82,6 +84,71 @@ func (a *API) SchedulerUpgrade() ([]SchedulerUpgradeResult, error) {
 		results = append(results, SchedulerUpgradeResult{TaskName: t.Name, NewCmd: exe})
 	}
 	return results, nil
+}
+
+// WeeklyRefreshSet creates or replaces the hub-wide weekly-refresh
+// scheduler task. schedule format is "<DAY> <HH:MM>" where DAY is a
+// 3-letter abbreviation (SUN|MON|...|SAT, case-insensitive).
+func (a *API) WeeklyRefreshSet(schedule string) error {
+	day, hr, min, err := parseWeeklyRefreshSchedule(schedule)
+	if err != nil {
+		return err
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	sch, err := scheduler.New()
+	if err != nil {
+		return err
+	}
+	const taskName = "mcp-local-hub-weekly-refresh"
+	_ = sch.Delete(taskName) // idempotent
+	return sch.Create(scheduler.TaskSpec{
+		Name:             taskName,
+		Description:      "mcp-local-hub: weekly refresh (restart --all)",
+		Command:          exe,
+		Args:             []string{"restart", "--all"},
+		WeeklyTrigger:    &scheduler.WeeklyTrigger{DayOfWeek: day, HourLocal: hr, MinuteLocal: min},
+		RestartOnFailure: false,
+	})
+}
+
+// WeeklyRefreshDisable removes the hub-wide weekly-refresh task.
+// Per-manifest weekly_refresh: true entries are not affected.
+func (a *API) WeeklyRefreshDisable() error {
+	sch, err := scheduler.New()
+	if err != nil {
+		return err
+	}
+	return sch.Delete("mcp-local-hub-weekly-refresh")
+}
+
+// parseWeeklyRefreshSchedule parses "<DAY> <HH:MM>" into numeric parts.
+// DAY: SUN=0, MON=1, TUE=2, WED=3, THU=4, FRI=5, SAT=6 (matches Go's Weekday).
+func parseWeeklyRefreshSchedule(s string) (day, hour, min int, err error) {
+	parts := strings.SplitN(strings.TrimSpace(s), " ", 2)
+	if len(parts) != 2 {
+		return 0, 0, 0, fmt.Errorf("expected '<DAY> <HH:MM>', got %q", s)
+	}
+	dayMap := map[string]int{"SUN": 0, "MON": 1, "TUE": 2, "WED": 3, "THU": 4, "FRI": 5, "SAT": 6}
+	day, ok := dayMap[strings.ToUpper(parts[0])]
+	if !ok {
+		return 0, 0, 0, fmt.Errorf("unknown day %q (use SUN..SAT)", parts[0])
+	}
+	hm := strings.SplitN(parts[1], ":", 2)
+	if len(hm) != 2 {
+		return 0, 0, 0, fmt.Errorf("expected HH:MM, got %q", parts[1])
+	}
+	hour, err = strconv.Atoi(hm[0])
+	if err != nil || hour < 0 || hour > 23 {
+		return 0, 0, 0, fmt.Errorf("invalid hour %q", hm[0])
+	}
+	min, err = strconv.Atoi(hm[1])
+	if err != nil || min < 0 || min > 59 {
+		return 0, 0, 0, fmt.Errorf("invalid minute %q", hm[1])
+	}
+	return day, hour, min, nil
 }
 
 // _ keeps config import alive for future use in this file.

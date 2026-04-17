@@ -16,3 +16,32 @@ func TestSchedulerUpgradeNoopWhenEmpty(t *testing.T) {
 	}
 	_ = results
 }
+
+func TestParseWeeklyRefreshSchedule(t *testing.T) {
+	tests := []struct {
+		input   string
+		wantDay int
+		wantHr  int
+		wantMin int
+		wantErr bool
+	}{
+		{"SUN 03:00", 0, 3, 0, false},
+		{"MON 14:30", 1, 14, 30, false},
+		{"FRI 23:59", 5, 23, 59, false},
+		{"SAT 00:01", 6, 0, 1, false},
+		{"XXX 12:00", 0, 0, 0, true},
+		{"SUN 25:00", 0, 0, 0, true},
+		{"SUN", 0, 0, 0, true},
+	}
+	for _, tc := range tests {
+		day, hr, min, err := parseWeeklyRefreshSchedule(tc.input)
+		gotErr := err != nil
+		if gotErr != tc.wantErr {
+			t.Errorf("%q: err=%v, wantErr=%v", tc.input, err, tc.wantErr)
+			continue
+		}
+		if !tc.wantErr && (day != tc.wantDay || hr != tc.wantHr || min != tc.wantMin) {
+			t.Errorf("%q: got (%d,%d,%d), want (%d,%d,%d)", tc.input, day, hr, min, tc.wantDay, tc.wantHr, tc.wantMin)
+		}
+	}
+}
