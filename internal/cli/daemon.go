@@ -72,10 +72,21 @@ func newDaemonCmdReal() *cobra.Command {
 			logPath := filepath.Join(logBaseDir(), server+"-"+daemonName+".log")
 			childArgs := append([]string{}, m.BaseArgs...)
 			childArgs = append(childArgs, spec.ExtraArgs...)
+			// Resolve `command: mcphub` to the running binary's absolute path.
+			// Manifests that wrap a hub-internal subcommand (e.g. lldb-bridge)
+			// need the exact same exe that carries that subcommand; Go's exec
+			// would otherwise use PATH and can find an older install of
+			// mcphub whose subcommand set is out of date.
+			cmdPath := m.Command
+			if m.Command == "mcphub" {
+				if self, err := os.Executable(); err == nil {
+					cmdPath = self
+				}
+			}
 			if m.Transport == config.TransportNativeHTTP {
 				childArgs = append(childArgs, "--port", fmt.Sprintf("%d", spec.Port))
 				ls := daemon.LaunchSpec{
-					Command: m.Command,
+					Command: cmdPath,
 					Args:    childArgs,
 					Env:     env,
 					LogPath: logPath,
@@ -91,7 +102,7 @@ func newDaemonCmdReal() *cobra.Command {
 				// Replaces the previous npx supergateway wrapper (bridge.go),
 				// removing the node/npm dependency from the runtime.
 				h, err := daemon.NewStdioHost(daemon.HostConfig{
-					Command: m.Command,
+					Command: cmdPath,
 					Args:    childArgs,
 					Env:     env,
 				})

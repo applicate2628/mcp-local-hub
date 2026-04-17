@@ -1,0 +1,36 @@
+name: lldb
+kind: global
+transport: stdio-bridge
+command: mcphub
+base_args:
+  - lldb-bridge
+  - localhost:47000
+env: {}
+
+# LLDB's built-in MCP server speaks MCP over a raw TCP socket, not stdio
+# (`lldb -> protocol-server start MCP listen://host:port`). The
+# `mcphub lldb-bridge` subcommand translates stdio↔TCP and also auto-
+# spawns lldb.exe if nothing is listening on :47000 yet. Auto-spawned
+# LLDB is terminated cleanly when the daemon exits.
+#
+# Previously this server was per-session (python bridge.py spawned as
+# a child of Claude Code directly). That worked for one Claude session
+# but failed the moment a second session tried to open lldb — LLDB's
+# protocol-server accepts multiple TCP connects at the kernel level
+# but only services one client at a time, so a second bridge.py would
+# time out. Hosting it through mcphub fixes that: the hub serializes
+# all HTTP requests onto a single bridge→LLDB TCP connection, so any
+# number of Claude sessions can share the same LLDB.
+daemons:
+  - name: default
+    port: 9130
+
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+  - client: codex-cli
+    daemon: default
+    url_path: /mcp
+
+weekly_refresh: false

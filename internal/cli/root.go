@@ -34,6 +34,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newManifestCmd())
 	root.AddCommand(newSchedulerCmd())
 	root.AddCommand(newSettingsCmd())
+	root.AddCommand(newLldbBridgeCmd())
 	return root
 }
 
@@ -67,6 +68,7 @@ func newBackupsCmd() *cobra.Command { return newBackupsCmdReal() }
 func newManifestCmd() *cobra.Command { return newManifestCmdReal() }
 func newSchedulerCmd() *cobra.Command { return newSchedulerCmdReal() }
 func newSettingsCmd() *cobra.Command  { return newSettingsCmdReal() }
+func newLldbBridgeCmd() *cobra.Command { return newLldbBridgeCmdReal() }
 
 func stub(name string) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
