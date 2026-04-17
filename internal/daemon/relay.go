@@ -41,14 +41,6 @@ type HTTPToStdioRelay struct {
 	// Stored as atomic.Value for lock-free reads from both goroutines.
 	sessionID atomic.Value // string; "" until minted
 
-	// Session-establishment coordination: the very first POST must
-	// complete (or fail) before subsequent POSTs dispatch — otherwise
-	// they race and hit the server without MCP-Session-Id. See §Session
-	// lifecycle in the Post-Phase 1 plan.
-	firstDispatched atomic.Bool      // true after one goroutine claims initializer slot
-	sessionOnceSig  sync.Once        // signals sessionReady exactly once
-	sessionReady    chan struct{}    // closed after first POST response processed
-
 	// stdoutMu serializes writes from both stdin-pump and sse-listener
 	// goroutines so interleaved JSON lines never corrupt the wire.
 	stdoutMu sync.Mutex
@@ -112,8 +104,6 @@ func (r *HTTPToStdioRelay) Run(ctx context.Context) error {
 			Timeout: time.Duration(defaultHTTPTimeoutSec) * time.Second,
 		}
 	}
-	r.sessionReady = make(chan struct{})
-
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -144,8 +134,15 @@ func (r *HTTPToStdioRelay) Run(ctx context.Context) error {
 }
 
 // stdinPump reads JSON-RPC lines from stdin and POSTs each to /mcp.
-// Each POST runs in its own goroutine tracked by wg so Run can wait
-// for them to finish before shutting the SSE listener down.
+//
+// Messages sent before the session is established (before the server
+// responds to `initialize` with a `MCP-Session-Id` header) are
+// processed SYNCHRONOUSLY — one at a time, in stdin order. This
+// prevents the race where a goroutine carrying `notifications/initialized`
+// wins the CAS slot and arrives at the server before `initialize`.
+//
+// After the session is established, messages are dispatched in parallel
+// goroutines tracked by wg so Run can wait for them to drain.
 func (r *HTTPToStdioRelay) stdinPump(ctx context.Context, wg *sync.WaitGroup) error {
 	reader := bufio.NewReaderSize(r.Stdin, maxStdinLineBytes)
 
@@ -163,6 +160,16 @@ func (r *HTTPToStdioRelay) stdinPump(ctx context.Context, wg *sync.WaitGroup) er
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
+
+		// Synchronous path until session established — guarantees
+		// message ordering (initialize first) and session-id capture
+		// before any parallel dispatch.
+		if r.getSessionID() == "" {
+			r.handlePOST(ctx, line)
+			continue
+		}
+
+		// Session known — safe to parallelize.
 		wg.Add(1)
 		go func(body []byte) {
 			defer wg.Done()
@@ -176,31 +183,8 @@ func (r *HTTPToStdioRelay) stdinPump(ctx context.Context, wg *sync.WaitGroup) er
 // (has id), synthesizes a JSON-RPC error response so the client does
 // not hang awaiting a reply.
 //
-// Session-establishment rule: until MCP-Session-Id is minted by the
-// server, exactly one POST goroutine proceeds (the initializer). All
-// other POST goroutines block on r.sessionReady. Once the first
-// response is processed (success or failure), sessionReady is closed
-// and all waiting goroutines resume. This avoids races where multiple
-// POSTs arrive at the server simultaneously without a session header.
 func (r *HTTPToStdioRelay) handlePOST(ctx context.Context, body []byte) {
 	meta, metaErr := decodeJSONRPCMeta(body)
-
-	if r.getSessionID() == "" {
-		// Try to become the initializer; if another goroutine already
-		// claimed the slot, wait for it.
-		if !r.firstDispatched.CompareAndSwap(false, true) {
-			select {
-			case <-r.sessionReady:
-				// Proceed — session may be set, or initializer failed.
-			case <-ctx.Done():
-				return
-			}
-		} else {
-			// We are the initializer; signal others once our response
-			// is processed, regardless of success.
-			defer r.signalSessionReady()
-		}
-	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", r.URL, bytes.NewReader(body))
 	if err != nil {
@@ -472,13 +456,6 @@ func (r *HTTPToStdioRelay) setSessionID(sid string) {
 	}
 }
 
-// signalSessionReady closes r.sessionReady exactly once. Called from
-// the deferred path of the first POST goroutine (the "initializer")
-// so queued POSTs unblock regardless of whether initialization
-// succeeded or failed.
-func (r *HTTPToStdioRelay) signalSessionReady() {
-	r.sessionOnceSig.Do(func() { close(r.sessionReady) })
-}
 
 // readJSONRPCLine reads up to the next newline from r and returns the
 // raw bytes (without the terminator). Errors include io.EOF (clean
