@@ -1,0 +1,27 @@
+name: time
+kind: global
+transport: stdio-bridge
+command: npx
+base_args:
+  - "-y"
+  - "@mcpcentral/mcp-time"
+
+daemons:
+  - name: default
+    port: 9128
+
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+  - client: codex-cli
+    daemon: default
+    url_path: /mcp
+  - client: gemini-cli
+    daemon: default
+    url_path: /mcp
+  - client: antigravity
+    daemon: default
+    url_path: /mcp
+
+weekly_refresh: false
