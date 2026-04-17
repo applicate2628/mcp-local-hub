@@ -16,7 +16,7 @@ func newCleanupCmdReal() *cobra.Command {
 		Use:   "cleanup",
 		Short: "Find and kill orphan MCP server processes (dry-run by default)",
 		Long: `Finds MCP-server processes whose command line matches a manifest's command
-but whose parent is NOT our 'mcp.exe daemon' wrapper. These are typically
+but whose parent is NOT our 'mcphub.exe daemon' wrapper. These are typically
 leftover from dead client sessions (IDE restarts, CTRL-C not propagating
 to children, etc.).
 

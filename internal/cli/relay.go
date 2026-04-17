@@ -45,7 +45,7 @@ installed manifest, or --url to point at any HTTP endpoint directly.`,
 			return r.Run(cmd.Context())
 		},
 	}
-	c.Flags().StringVar(&server, "server", "", "server name (looks up servers/<name>/manifest.yaml next to mcp.exe)")
+	c.Flags().StringVar(&server, "server", "", "server name (looks up servers/<name>/manifest.yaml next to mcphub.exe)")
 	c.Flags().StringVar(&daemonName, "daemon", "", "daemon name within the server manifest")
 	c.Flags().StringVar(&url, "url", "", "direct HTTP URL (mutually exclusive with --server/--daemon)")
 	c.Flags().StringVar(&projectPath, "project", "", "optional workspace path (Phase 3 reserved; pass-through only)")

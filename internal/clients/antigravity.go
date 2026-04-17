@@ -25,7 +25,7 @@ import (
 // Entry shape written:
 //
 //	"<server-name>": {
-//	  "command": "<abs-path>/mcp.exe",
+//	  "command": "<abs-path>/mcphub.exe",
 //	  "args": ["relay", "--server", "<s>", "--daemon", "<d>"],
 //	  "disabled": false
 //	}
@@ -59,7 +59,7 @@ func (a *antigravityClient) AddEntry(entry MCPEntry) error {
 		return fmt.Errorf("antigravity adapter requires MCPEntry.RelayServer and RelayDaemon (Cascade only accepts stdio entries for localhost MCP; relay spawner is used to bridge to the shared HTTP daemon)")
 	}
 	if entry.RelayExePath == "" {
-		return fmt.Errorf("antigravity adapter requires MCPEntry.RelayExePath (absolute path to mcp.exe for the 'command' field)")
+		return fmt.Errorf("antigravity adapter requires MCPEntry.RelayExePath (absolute path to mcphub.exe for the 'command' field)")
 	}
 	m, err := a.readJSON()
 	if err != nil {

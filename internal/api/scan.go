@@ -102,6 +102,15 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 	return out, nil
 }
 
+// isOurRelayBinary returns true when the given path points at our CLI
+// binary — either the current name (mcphub.exe) or the legacy name
+// (mcp.exe) that early installations may still have in client configs.
+// Matches by basename, case-insensitive.
+func isOurRelayBinary(cmd string) bool {
+	base := strings.ToLower(filepath.Base(cmd))
+	return base == "mcphub.exe" || base == "mcp.exe" || base == "mcphub" || base == "mcp"
+}
+
 // genericInterpreters are command names that match far too many unrelated
 // processes (every npx-invoked tool, every python script, etc.) to be useful
 // as identifying patterns. We skip them when building patterns and rely on
@@ -278,10 +287,12 @@ func shapeAntigravityEntry(raw map[string]any) ClientEntry {
 	if url, ok := raw["serverUrl"].(string); ok {
 		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
 	}
-	// Detect our own relay shape: command=*mcp.exe args[0]=="relay".
+	// Detect our own relay shape: command is mcphub.exe (or legacy mcp.exe)
+	// with args[0]=="relay". Accepting both names because early installs
+	// used "mcp.exe" before the rename.
 	if cmd, ok := raw["command"].(string); ok {
 		if args, ok := raw["args"].([]any); ok && len(args) > 0 {
-			if first, _ := args[0].(string); first == "relay" && strings.HasSuffix(strings.ToLower(cmd), "mcp.exe") {
+			if first, _ := args[0].(string); first == "relay" && isOurRelayBinary(cmd) {
 				return ClientEntry{Transport: "relay", Endpoint: cmd, Raw: raw}
 			}
 		}

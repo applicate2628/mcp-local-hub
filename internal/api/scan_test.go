@@ -83,9 +83,9 @@ url = "http://localhost:9123/mcp"
 	geminiPath := filepath.Join(tmp, "settings.json")
 	_ = os.WriteFile(geminiPath, []byte(`{"mcpServers":{"memory":{"url":"http://localhost:9123/mcp","type":"http"}}}`), 0600)
 
-	// Antigravity — relay (stdio with command=mcp.exe args=[relay, --server, memory])
+	// Antigravity — relay (stdio with command=mcphub.exe args=[relay, --server, memory])
 	agPath := filepath.Join(tmp, "mcp_config.json")
-	_ = os.WriteFile(agPath, []byte(`{"mcpServers":{"memory":{"command":"D:/dev/mcp.exe","args":["relay","--server","memory","--daemon","default"],"disabled":false}}}`), 0600)
+	_ = os.WriteFile(agPath, []byte(`{"mcpServers":{"memory":{"command":"D:/dev/mcphub.exe","args":["relay","--server","memory","--daemon","default"],"disabled":false}}}`), 0600)
 
 	a := NewAPI()
 	result, err := a.ScanFrom(ScanOpts{

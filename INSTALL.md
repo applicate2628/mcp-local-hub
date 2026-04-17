@@ -9,19 +9,19 @@
    powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
    ```
    Then verify: `uvx --version`.
-4. **Windows 11** recommended. Windows 10 should work but is untested. Linux/macOS currently fail at `mcp install` — stubs only.
+4. **Windows 11** recommended. Windows 10 should work but is untested. Linux/macOS currently fail at `mcphub install` — stubs only.
 5. **An MCP client or two** (Claude Code, Codex CLI, Gemini CLI, Cursor, Continue…) already installed on the machine.
 
 ## Build
 
 ```bash
 cd d:\dev\mcp-local-hub
-go build -o mcp.exe ./cmd/mcp
+go build -o mcphub.exe ./cmd/mcphub
 ```
 
-On success: `mcp.exe` appears in the repo root (~12 MB, includes Windows version resource metadata).
+On success: `mcphub.exe` appears in the repo root (~12 MB, includes Windows version resource metadata).
 
-Optional: add the repo directory to `PATH` so you can run `mcp` from anywhere. Until then every command is `./mcp.exe ...`.
+Optional: add the repo directory to `PATH` so you can run `mcp` from anywhere. Until then every command is `./mcphub.exe ...`.
 
 ## First install
 
@@ -29,10 +29,10 @@ Seven servers ship with manifests: `serena`, `memory`, `sequential-thinking`, `w
 
 ```bash
 # Preview what would happen (no side effects)
-./mcp.exe install --server serena --dry-run
+./mcphub.exe install --server serena --dry-run
 
 # Apply: creates 3 Task Scheduler tasks, writes 4 client configs, starts both daemons
-./mcp.exe install --server serena
+./mcphub.exe install --server serena
 ```
 
 Expected output:
@@ -48,7 +48,7 @@ Expected output:
   backup: C:\Users\<you>\.gemini\settings.json.bak-mcp-local-hub-<timestamp>
 ✓ gemini-cli → http://localhost:9121/mcp
   backup: C:\Users\<you>\.gemini\antigravity\mcp_config.json.bak-mcp-local-hub-<timestamp>
-✓ antigravity → relay (mcp.exe relay --server serena --daemon claude)
+✓ antigravity → relay (mcphub.exe relay --server serena --daemon claude)
 ✓ Started: mcp-local-hub-serena-claude
 ✓ Started: mcp-local-hub-serena-codex
 
@@ -60,7 +60,7 @@ First `✓ Started` triggers `uvx` to download Serena (~30 seconds on a fresh ma
 Verify:
 
 ```bash
-./mcp.exe status        # 3 tasks; -claude and -codex Running, -weekly-refresh Ready
+./mcphub.exe status        # 3 tasks; -claude and -codex Running, -weekly-refresh Ready
 claude mcp get serena   # Status: ✓ Connected, Type: http, URL: http://localhost:9121/mcp
 codex mcp get serena    # enabled: true, transport: streamable_http
 ```
@@ -68,7 +68,7 @@ codex mcp get serena    # enabled: true, transport: streamable_http
 ### Partial install (one daemon only)
 
 ```bash
-./mcp.exe install --server serena --daemon codex
+./mcphub.exe install --server serena --daemon codex
 ```
 
 Creates only the `codex` daemon (port 9122), applies only the `codex-cli` client binding, skips weekly refresh. Useful when trying it out on a single client first.
@@ -126,13 +126,13 @@ Antigravity's Cascade agent silently drops any `mcp_config.json` entry pointing 
 
 ```json
 "serena": {
-  "command": "D:\\dev\\mcp-local-hub\\mcp.exe",
+  "command": "D:\\dev\\mcp-local-hub\\mcphub.exe",
   "args": ["relay", "--server", "serena", "--daemon", "claude"],
   "disabled": false
 }
 ```
 
-Cascade spawns `mcp.exe relay` as a normal stdio subprocess. The relay translates JSON-RPC between stdin/stdout and the shared HTTP daemon on port 9121. No extra Serena process per Antigravity session — it shares the same daemon as Claude Code and Gemini CLI.
+Cascade spawns `mcphub.exe relay` as a normal stdio subprocess. The relay translates JSON-RPC between stdin/stdout and the shared HTTP daemon on port 9121. No extra Serena process per Antigravity session — it shares the same daemon as Claude Code and Gemini CLI.
 
 **After install, restart Antigravity** for Cascade to pick up the new entry:
 ```powershell
@@ -141,7 +141,7 @@ Start-Sleep 3
 Start-Process "$env:LOCALAPPDATA\Programs\Antigravity\Antigravity.exe"
 ```
 
-The relay binary path is absolute (points at `mcp.exe` in the repo root). If you move the binary, re-run `mcp install --server serena` to update the path.
+The relay binary path is absolute (points at `mcphub.exe` in the repo root). If you move the binary, re-run `mcphub install --server serena` to update the path.
 
 ## Per-server notes (beyond serena)
 
@@ -168,7 +168,7 @@ Requires the Wolfram LLM MCP server installed separately at that path.
 `WOLFRAM_LLM_APP_ID` is stored in the encrypted vault:
 
 ```bash
-mcp secrets set wolfram_app_id --value <your-app-id>
+mcphub secrets set wolfram_app_id --value <your-app-id>
 ```
 
 ### godbolt (port 9126)
@@ -183,7 +183,7 @@ Runs `uvx --from paper-search-mcp python -m paper_search_mcp.server`.
 Requires `uvx`. `PAPER_SEARCH_MCP_UNPAYWALL_EMAIL` is stored in the vault:
 
 ```bash
-mcp secrets set unpaywall_email --value <your-email>
+mcphub secrets set unpaywall_email --value <your-email>
 ```
 
 First install may take ~30s as `uvx` downloads `paper-search-mcp`.
@@ -206,10 +206,10 @@ claude mcp add --transport http context7 https://mcp.context7.com/mcp
 
 ```bash
 # Remove scheduler tasks and client entries
-./mcp.exe uninstall --server serena
+./mcphub.exe uninstall --server serena
 
 # Restore client configs from the latest backup (pre-install state)
-./mcp.exe rollback
+./mcphub.exe rollback
 ```
 
 Backups are named `<config>.bak-mcp-local-hub-YYYYMMDD-HHMMSS` and live next to each client config. Uninstall does NOT delete them — keep as long as you want or clean up manually.
@@ -226,18 +226,18 @@ Get-Process | Where-Object { $_.Path -like '*uvx*' } | Stop-Process -Force
 For servers that need API keys (wolfram, paper-search-mcp, any OAuth-bearer server):
 
 ```bash
-./bin/mcp.exe secrets init                         # generate .age-key + empty secrets.age
-./bin/mcp.exe secrets set WOLFRAM_APP_ID --value AB123...
-./bin/mcp.exe secrets list                         # shows keys, not values
-./bin/mcp.exe secrets get WOLFRAM_APP_ID           # copies to clipboard by default
-./bin/mcp.exe secrets get WOLFRAM_APP_ID --show    # prints to stdout
-./bin/mcp.exe secrets edit                         # open decrypted vault in $EDITOR
-./bin/mcp.exe secrets migrate --from-client codex-cli   # scan existing config for API keys, interactively import
+./bin/mcphub.exe secrets init                         # generate .age-key + empty secrets.age
+./bin/mcphub.exe secrets set WOLFRAM_APP_ID --value AB123...
+./bin/mcphub.exe secrets list                         # shows keys, not values
+./bin/mcphub.exe secrets get WOLFRAM_APP_ID           # copies to clipboard by default
+./bin/mcphub.exe secrets get WOLFRAM_APP_ID --show    # prints to stdout
+./bin/mcphub.exe secrets edit                         # open decrypted vault in $EDITOR
+./bin/mcphub.exe secrets migrate --from-client codex-cli   # scan existing config for API keys, interactively import
 ```
 
 ### Where the secret files live
 
-Both files live in the per-user data directory, **independent of where the repo or mcp.exe is installed**:
+Both files live in the per-user data directory, **independent of where the repo or mcphub.exe is installed**:
 
 | OS | Path |
 |---|---|
@@ -258,7 +258,7 @@ Two files are stored there:
    - Through an encrypted USB stick
    - Through `scp` / `rsync` / `rclone` with a trusted transport
    - Through a **private** GitHub repository (public repos with `.age-key` is a critical leak)
-3. Run `./bin/mcp.exe secrets list` on the new machine — should print your keys without error. If it errors with "failed to decrypt", the `.age-key` or `secrets.age` didn't copy correctly.
+3. Run `./bin/mcphub.exe secrets list` on the new machine — should print your keys without error. If it errors with "failed to decrypt", the `.age-key` or `secrets.age` didn't copy correctly.
 
 ### Manifest env references use prefixes
 
@@ -312,4 +312,4 @@ Scheduler view: `%SystemRoot%\System32\Tasks\mcp-local-hub-*` are the XML task d
 
 - Read [docs/phase-1-verification.md](docs/phase-1-verification.md) for the full live-test matrix and the nine post-plan fixes applied during real testing.
 - Read [docs/superpowers/specs/2026-04-16-mcp-local-hub-design.md](docs/superpowers/specs/2026-04-16-mcp-local-hub-design.md) for the architectural rationale (global vs workspace-scoped daemons, port pool allocation, transport choice, secrets handling).
-- If you want to add a new MCP server beyond Serena, copy `servers/serena/manifest.yaml` to `servers/<your-server>/manifest.yaml`, adjust fields, then `mcp install --server <your-server>`. Port must be in 9121–9139 (global range) or 9200–9299 (workspace-scoped) and registered in `configs/ports.yaml`.
+- If you want to add a new MCP server beyond Serena, copy `servers/serena/manifest.yaml` to `servers/<your-server>/manifest.yaml`, adjust fields, then `mcphub install --server <your-server>`. Port must be in 9121–9139 (global range) or 9200–9299 (workspace-scoped) and registered in `configs/ports.yaml`.

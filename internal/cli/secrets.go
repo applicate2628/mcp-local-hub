@@ -28,7 +28,7 @@ func defaultVaultPath() string {
 
 // userDataDir returns the OS-standard per-user data directory for this app,
 // creating it if it doesn't exist. This is the canonical home for .age-key
-// and secrets.age — independent of where mcp.exe or the repo live.
+// and secrets.age — independent of where mcphub.exe or the repo live.
 //
 //   Windows: %LOCALAPPDATA%\mcp-local-hub
 //   Linux:   $XDG_DATA_HOME/mcp-local-hub  (default ~/.local/share/mcp-local-hub)

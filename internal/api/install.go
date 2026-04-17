@@ -406,7 +406,7 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan) error {
 	// 2. Backup + update client configs.
 	// Populate relay-related fields so adapters for stdio-only clients
 	// (e.g. Antigravity) can produce their `command`+`args` entry shape
-	// invoking `mcp.exe relay`. HTTP-native adapters ignore these fields.
+	// invoking `mcphub.exe relay`. HTTP-native adapters ignore these fields.
 	exePath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve executable path: %w", err)

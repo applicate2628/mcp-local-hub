@@ -12,9 +12,9 @@
         "CompanyName":      "Dmitry Denisenko (@applicate2628)",
         "FileDescription":  "Local shared-daemon manager for MCP servers",
         "FileVersion":      "0.1.0.0",
-        "InternalName":     "mcp",
+        "InternalName":     "mcphub",
         "LegalCopyright":   "Copyright 2026 Dmitry Denisenko (@applicate2628). Licensed under Apache-2.0. https://github.com/applicate2628/mcp-local-hub",
-        "OriginalFilename": "mcp.exe",
+        "OriginalFilename": "mcphub.exe",
         "ProductName":      "mcp-local-hub",
         "ProductVersion":   "0.1.0.0",
         "Comments":         "Homepage: https://github.com/applicate2628/mcp-local-hub | Issues: https://github.com/applicate2628/mcp-local-hub/issues | License: Apache-2.0"

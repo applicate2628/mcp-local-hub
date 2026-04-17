@@ -11,7 +11,7 @@ func TestBuildCreateXML_Logon(t *testing.T) {
 	spec := TaskSpec{
 		Name:             "mcp-local-hub-test-logon",
 		Description:      "test logon task",
-		Command:          `C:\path\mcp.exe`,
+		Command:          `C:\path\mcphub.exe`,
 		Args:             []string{"daemon", "--server", "serena"},
 		WorkingDir:       `C:\repo`,
 		LogonTrigger:     true,
@@ -22,7 +22,7 @@ func TestBuildCreateXML_Logon(t *testing.T) {
 	if !strings.Contains(xml, "<LogonTrigger>") {
 		t.Error("expected <LogonTrigger> in XML")
 	}
-	if !strings.Contains(xml, `<Command>C:\path\mcp.exe</Command>`) {
+	if !strings.Contains(xml, `<Command>C:\path\mcphub.exe</Command>`) {
 		t.Errorf("Command path not found in XML: %s", xml)
 	}
 	if !strings.Contains(xml, "<Arguments>daemon --server serena</Arguments>") {
@@ -50,7 +50,7 @@ func TestBuildCreateXML_Weekly(t *testing.T) {
 	spec := TaskSpec{
 		Name:        "mcp-local-hub-refresh",
 		Description: "weekly",
-		Command:     `C:\path\mcp.exe`,
+		Command:     `C:\path\mcphub.exe`,
 		Args:        []string{"restart", "--all"},
 		WeeklyTrigger: &WeeklyTrigger{
 			DayOfWeek:   0, // Sunday

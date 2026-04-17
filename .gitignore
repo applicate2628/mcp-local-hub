@@ -29,7 +29,12 @@ coverage.out
 # Serena LSP runtime (cache, memories, per-project overrides regenerated at activate_project)
 .serena/
 
-# Note: cmd/mcp/resource.syso is committed (Windows version resource,
-# generated from versioninfo.json via `go generate ./cmd/mcp`). Keeping
+# Note: cmd/mcphub/resource.syso is committed (Windows version resource,
+# generated from versioninfo.json via `go generate ./cmd/mcphub`). Keeping
 # it in the repo so `go build` works without first running goversioninfo.
 # Regenerate when versioninfo.json changes, then commit both.
+
+# Tool artifacts from Claude Code / superpowers skills
+/.claude/
+/.scratch/
+/.superpowers/

@@ -23,7 +23,7 @@ Two Serena daemons, four clients managed by mcp-local-hub:
 | `claude` | 9121 | `claude-code` | Claude Code (HTTP), Gemini CLI (HTTP), Antigravity (stdio relay) |
 | `codex` | 9122 | `codex` | Codex CLI (HTTP) |
 
-Weekly refresh task: `mcp-local-hub-serena-weekly-refresh` — runs `mcp restart --server serena` every Sunday 03:00 local time, so both daemons pull the latest Serena via `uvx --refresh`.
+Weekly refresh task: `mcp-local-hub-serena-weekly-refresh` — runs `mcphub restart --server serena` every Sunday 03:00 local time, so both daemons pull the latest Serena via `uvx --refresh`.
 
 ## Live-verified end-to-end flows
 
@@ -76,13 +76,13 @@ Full tool-call round-trip through `gemini -p` was not forced through in this ses
 
 ```json
 "serena": {
-  "command": "D:\\dev\\mcp-local-hub\\mcp.exe",
+  "command": "D:\\dev\\mcp-local-hub\\mcphub.exe",
   "args": ["relay", "--server", "serena", "--daemon", "claude"],
   "disabled": false
 }
 ```
 
-Cascade spawns `mcp.exe relay` as a stdio subprocess. The relay (`internal/daemon/relay.go`) translates JSON-RPC between stdin/stdout and the shared HTTP daemon on port 9121.
+Cascade spawns `mcphub.exe relay` as a stdio subprocess. The relay (`internal/daemon/relay.go`) translates JSON-RPC between stdin/stdout and the shared HTTP daemon on port 9121.
 
 **Verification:** after install + Antigravity restart, Cascade spawned 3 relay processes (one per workspace context). All established TCP connections to daemon:9121. User confirmed Serena tools visible and functional in Cascade — `find_symbol`, `get_symbols_overview`, dashboard accessible.
 
@@ -112,9 +112,9 @@ Pattern across most fixes: **unit test asserted our assumed output shape and pas
 
 | Commit | Description |
 |---|---|
-| `7d2e79e` | Windows version resource + `mcp version` subcommand (PE metadata to reduce AV false positives) |
+| `7d2e79e` | Windows version resource + `mcphub version` subcommand (PE metadata to reduce AV false positives) |
 | `04cd269` | HTTP→stdio relay core (`internal/daemon/relay.go`) with 6 unit tests |
-| `f3c71ed` | `mcp relay` CLI subcommand (`--server/--daemon` and `--url` modes) with 3 tests |
+| `f3c71ed` | `mcphub relay` CLI subcommand (`--server/--daemon` and `--url` modes) with 3 tests |
 | `c8c7e5e` | Antigravity adapter writes stdio-relay entry; `MCPEntry` extended with relay fields |
 | `201d22e` | Antigravity binding re-added to serena manifest (relay transport) |
 | `83ca841` | Race condition fix: serialize messages in relay until session established |

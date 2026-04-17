@@ -21,8 +21,8 @@ var (
 // calls work. When there is no parent console (Scheduler, Explorer
 // double-click, detached spawn), this returns quietly.
 //
-// Inherited handles from a shell redirect (e.g. `mcp.exe > out.txt`) or a
-// pipe (e.g. `mcp.exe | tee`) must be preserved: Windows passes those to
+// Inherited handles from a shell redirect (e.g. `mcphub.exe > out.txt`) or a
+// pipe (e.g. `mcphub.exe | tee`) must be preserved: Windows passes those to
 // the child even under the GUI subsystem, and rewiring os.Stdout to
 // CONOUT$ on top of a valid inherited handle would send output to the
 // attached (hidden) console instead of the redirected target. We only

@@ -4,11 +4,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewRootCmd builds the top-level `mcp` command with all subcommand stubs attached.
+// NewRootCmd builds the top-level `mcphub` command with all subcommand stubs attached.
 // Subcommand implementations are filled in by later tasks; this task only wires the tree.
+//
+// Named "mcphub" (rather than "mcp") to avoid the name collision with the
+// Python mcp SDK which installs a binary of the same name via pip.
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:           "mcp",
+		Use:           "mcphub",
 		Short:         "Local shared-daemon manager for MCP servers",
 		SilenceUsage:  true,
 		SilenceErrors: true,

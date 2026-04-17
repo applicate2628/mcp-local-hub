@@ -150,9 +150,13 @@ func parseOrphans(r io.Reader, patterns []string) []OrphanProcess {
 		if !matched {
 			continue
 		}
-		// Is parent an mcp.exe daemon process?
+		// Is parent one of our own daemons? Accept both the current name
+		// (mcphub.exe) and the legacy name (mcp.exe) — early installations
+		// may still have task entries referencing the old binary.
 		if parent, ok := byPID[r.ppid]; ok {
-			if strings.Contains(parent.cmdline, "mcp.exe") && strings.Contains(parent.cmdline, "daemon") {
+			pcmd := parent.cmdline
+			if strings.Contains(pcmd, "daemon") &&
+				(strings.Contains(pcmd, "mcphub.exe") || strings.Contains(pcmd, "mcp.exe")) {
 				continue // NOT orphan — child of our daemon
 			}
 		}

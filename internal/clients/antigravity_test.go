@@ -23,7 +23,7 @@ func newAntigravityForTest(t *testing.T, initial string) *antigravityClient {
 }
 
 // TestAntigravity_AddEntry_WritesStdioRelayShape verifies that Antigravity
-// entries are written as stdio invocations of the local mcp.exe relay
+// entries are written as stdio invocations of the local mcphub.exe relay
 // subcommand (Cascade silently drops loopback-HTTP entries regardless of
 // schema — stdio relay is the only working path as of v0.x).
 func TestAntigravity_AddEntry_WritesStdioRelayShape(t *testing.T) {
@@ -33,7 +33,7 @@ func TestAntigravity_AddEntry_WritesStdioRelayShape(t *testing.T) {
 		URL:          "http://localhost:9121/mcp", // ignored by adapter; relay args take over
 		RelayServer:  "serena",
 		RelayDaemon:  "claude",
-		RelayExePath: `D:\dev\mcp-local-hub\mcp.exe`,
+		RelayExePath: `D:\dev\mcp-local-hub\mcphub.exe`,
 	})
 	if err != nil {
 		t.Fatalf("AddEntry: %v", err)
@@ -48,8 +48,8 @@ func TestAntigravity_AddEntry_WritesStdioRelayShape(t *testing.T) {
 	if !ok {
 		t.Fatalf("serena entry missing: %v", servers)
 	}
-	if cmd, _ := serena["command"].(string); cmd != `D:\dev\mcp-local-hub\mcp.exe` {
-		t.Errorf("command = %q, want absolute mcp.exe path", cmd)
+	if cmd, _ := serena["command"].(string); cmd != `D:\dev\mcp-local-hub\mcphub.exe` {
+		t.Errorf("command = %q, want absolute mcphub.exe path", cmd)
 	}
 	argsAny, ok := serena["args"].([]any)
 	if !ok || len(argsAny) != 5 {
@@ -109,7 +109,7 @@ func TestAntigravity_GetEntry_ReconstructsRelayArgs(t *testing.T) {
 	a := newAntigravityForTest(t, `{
   "mcpServers": {
     "serena": {
-      "command": "D:\\dev\\mcp-local-hub\\mcp.exe",
+      "command": "D:\\dev\\mcp-local-hub\\mcphub.exe",
       "args": ["relay", "--server", "serena", "--daemon", "claude"],
       "disabled": false
     }

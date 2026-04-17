@@ -42,7 +42,7 @@ Eliminates the node.js runtime dependency for stdio-bridge daemons.
 | da89097 | sequential-thinking daemon (port 9124) |
 | 815860a | wolfram daemon (port 9125, APP_ID from vault) |
 | d875481 | godbolt daemon (port 9126) |
-| a3e6e8a | paper-search-mcp daemon (port 9127) |
+| a3e6e8a | paper-search-mcphub daemon (port 9127) |
 | ba265f8 | time daemon (port 9128) |
 
 ## Live verification
@@ -61,7 +61,7 @@ Task 13 verified end-to-end. All 8 daemon ports respond to MCP `initialize` with
 
 ## RAM footprint
 
-8 mcp.exe daemon processes total ~71 MB (aggregate). Each inner stdio subprocess (node, python, uvx child) is ~40-70 MB depending on runtime. Before Phase 2: ~60-80 stdio subprocesses across 4 clients totaling ~2 GB. After Phase 2: 7 inner subprocesses + 8 daemons = ~600 MB when measured including inner MCP servers. Net savings: ~1.4 GB from consolidation alone, plus elimination of data-race risk in memory's JSONL store.
+8 mcphub.exe daemon processes total ~71 MB (aggregate). Each inner stdio subprocess (node, python, uvx child) is ~40-70 MB depending on runtime. Before Phase 2: ~60-80 stdio subprocesses across 4 clients totaling ~2 GB. After Phase 2: 7 inner subprocesses + 8 daemons = ~600 MB when measured including inner MCP servers. Net savings: ~1.4 GB from consolidation alone, plus elimination of data-race risk in memory's JSONL store.
 
 ## Known follow-ups (not blocking)
 

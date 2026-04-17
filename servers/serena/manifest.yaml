@@ -31,7 +31,7 @@ daemons:
 ## Antigravity's Cascade agent (Antigravity IDE v0.x as of 2026-04-17)
 # silently drops loopback-HTTP MCP entries regardless of schema. Its HTTP
 # support works only for remote HTTPS endpoints. Workaround: write a stdio
-# entry to ~/.gemini/antigravity/mcp_config.json that spawns `mcp.exe relay`
+# entry to ~/.gemini/antigravity/mcp_config.json that spawns `mcphub.exe relay`
 # as its child process. The relay connects to the shared HTTP daemon on 9121
 # and forwards JSON-RPC between Antigravity's stdin/stdout and the daemon.
 # This restores shared-daemon benefits for multi-window Antigravity users
