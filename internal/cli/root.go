@@ -21,6 +21,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newDaemonCmd())
 	root.AddCommand(newRelayCmd())
 	root.AddCommand(newSecretsCmd())
+	root.AddCommand(newVersionCmd())
 	return root
 }
 
@@ -33,8 +34,9 @@ func newUninstallCmd() *cobra.Command { return newUninstallCmdReal() }
 func newStatusCmd() *cobra.Command  { return newStatusCmdReal() }
 func newRestartCmd() *cobra.Command { return newRestartCmdReal() }
 func newRollbackCmd() *cobra.Command { return newRollbackCmdReal() }
-func newDaemonCmd() *cobra.Command { return newDaemonCmdReal() }
-func newRelayCmd() *cobra.Command  { return newRelayCmdReal() }
+func newDaemonCmd() *cobra.Command  { return newDaemonCmdReal() }
+func newRelayCmd() *cobra.Command   { return newRelayCmdReal() }
+func newVersionCmd() *cobra.Command { return newVersionCmdReal() }
 func newSecretsCmd() *cobra.Command {
 	return newSecretsCmdReal()
 }
