@@ -1,5 +1,11 @@
-# Identity (NEVER commit)
+# Identity (NEVER commit) — age private key that decrypts secrets.age.
 .age-key
+
+# Encrypted vault — user policy: keep OUT of git, transfer manually.
+# Even though secrets.age is ciphertext (safe with .age-key absent),
+# user preference is no secrets in repo at all. Transfer both files
+# between machines via password manager / encrypted USB / scp.
+secrets.age
 
 # Local config (gitignored per §3.8 of spec)
 config.local.yaml
