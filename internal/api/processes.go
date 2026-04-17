@@ -168,11 +168,14 @@ func init() {
 }
 
 // parseWmicDate parses wmic's CIM_DATETIME format: YYYYMMDDHHMMSS.mmmmmm+ZZZ.
+// The timestamp is in local time (the +ZZZ offset is discarded); using
+// time.Local gives correct time.Since() results. Parsing as UTC would
+// produce negative uptime on non-UTC hosts.
 func parseWmicDate(s string) time.Time {
 	if len(s) < 14 {
 		return time.Time{}
 	}
-	t, err := time.Parse("20060102150405", s[:14])
+	t, err := time.ParseInLocation("20060102150405", s[:14], time.Local)
 	if err != nil {
 		return time.Time{}
 	}
