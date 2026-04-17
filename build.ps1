@@ -22,21 +22,28 @@ try { $commit = (git rev-parse --short HEAD 2>$null) } catch { $commit = "unknow
 if ([string]::IsNullOrWhiteSpace($commit)) { $commit = "unknown" }
 $buildDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 
+$outDir = "bin"
+$outFile = Join-Path $outDir "mcp.exe"
+
+if (-not (Test-Path $outDir)) {
+    New-Item -ItemType Directory -Path $outDir | Out-Null
+}
+
 Write-Host "==> Generating Windows version resource (cmd/mcp/resource.syso)"
 go generate ./cmd/mcp
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $ldflags = "-X main.version=$version -X main.commit=$commit -X main.buildDate=$buildDate -H windowsgui"
 
-Write-Host "==> Building mcp.exe (version=$version commit=$commit)"
-go build -trimpath -ldflags $ldflags -o mcp.exe ./cmd/mcp
+Write-Host "==> Building $outFile (version=$version commit=$commit)"
+go build -trimpath -ldflags $ldflags -o $outFile ./cmd/mcp
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-if (Test-Path mcp.exe) {
+if (Test-Path $outFile) {
     Write-Host "==> Metadata embedded:"
-    (Get-Item mcp.exe).VersionInfo | Format-List FileVersion,ProductName,FileDescription,CompanyName,LegalCopyright,Comments
-    Write-Host "==> Done. Run './mcp.exe version' to print build info."
+    (Get-Item $outFile).VersionInfo | Format-List FileVersion,ProductName,FileDescription,CompanyName,LegalCopyright,Comments
+    Write-Host "==> Done. Run './$outFile version' to print build info."
 } else {
-    Write-Error "mcp.exe missing after build \u2014 check Defender exclusions (see INSTALL.md)."
+    Write-Error "$outFile missing after build — check Defender exclusions (see INSTALL.md)."
     exit 1
 }

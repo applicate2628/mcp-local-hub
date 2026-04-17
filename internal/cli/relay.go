@@ -72,7 +72,14 @@ func resolveRelayURL(server, daemonName, explicitURL string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve executable path: %w", err)
 	}
-	manifestPath := filepath.Join(filepath.Dir(exe), "servers", server, "manifest.yaml")
+	exeDir := filepath.Dir(exe)
+	manifestPath := filepath.Join(exeDir, "servers", server, "manifest.yaml")
+	if _, statErr := os.Stat(manifestPath); statErr != nil {
+		alt := filepath.Join(exeDir, "..", "servers", server, "manifest.yaml")
+		if _, statErr2 := os.Stat(alt); statErr2 == nil {
+			manifestPath = alt
+		}
+	}
 	f, err := os.Open(manifestPath)
 	if err != nil {
 		return "", fmt.Errorf("open manifest %s: %w", manifestPath, err)

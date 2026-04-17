@@ -27,12 +27,21 @@ func newDaemonCmdReal() *cobra.Command {
 			}
 			// Resolve the manifest relative to the binary, not CWD —
 			// scheduler tasks may launch us with an inherited cwd that
-			// is not the repo root. Mirrors relay.go's discovery path.
+			// is not the repo root. Supports two layouts:
+			//   - exe and servers/ at same level (legacy)
+			//   - exe in bin/ and servers/ one level up (standard Go layout)
 			exe, err := os.Executable()
 			if err != nil {
 				return fmt.Errorf("resolve executable: %w", err)
 			}
-			manifestPath := filepath.Join(filepath.Dir(exe), "servers", server, "manifest.yaml")
+			exeDir := filepath.Dir(exe)
+			manifestPath := filepath.Join(exeDir, "servers", server, "manifest.yaml")
+			if _, statErr := os.Stat(manifestPath); statErr != nil {
+				alt := filepath.Join(exeDir, "..", "servers", server, "manifest.yaml")
+				if _, statErr2 := os.Stat(alt); statErr2 == nil {
+					manifestPath = alt
+				}
+			}
 			f, err := os.Open(manifestPath)
 			if err != nil {
 				return fmt.Errorf("open manifest %s: %w", manifestPath, err)

@@ -98,11 +98,22 @@ func shortClient(c string) string {
 	return c
 }
 
-// scanManifestDir returns path to `servers/` next to the running binary.
+// scanManifestDir returns path to `servers/` resolved against the running
+// binary's location. Supports both legacy layout (exe + servers/ at same
+// level) and standard Go layout (exe in bin/, servers/ at project root).
 func scanManifestDir() string {
 	exe, err := os.Executable()
 	if err != nil {
 		return "servers"
 	}
-	return filepath.Join(filepath.Dir(exe), "servers")
+	exeDir := filepath.Dir(exe)
+	sibling := filepath.Join(exeDir, "servers")
+	if st, err := os.Stat(sibling); err == nil && st.IsDir() {
+		return sibling
+	}
+	parent := filepath.Join(exeDir, "..", "servers")
+	if st, err := os.Stat(parent); err == nil && st.IsDir() {
+		return parent
+	}
+	return "servers"
 }

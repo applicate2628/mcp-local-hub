@@ -352,13 +352,30 @@ func (a *API) Scan() (*ScanResult, error) {
 	})
 }
 
-// defaultManifestDir returns the path to `servers/` next to the running binary.
+// defaultManifestDir returns the path to `servers/` resolved against the
+// running binary's location. Two layouts supported:
+//   - binary and servers/ in the same directory (legacy / standalone install)
+//   - binary in bin/ and servers/ in bin/../ (standard Go project layout)
+// Falls back to CWD-relative "servers" if neither exists, so tests that
+// don't set an explicit ManifestDir still work when run from the repo root.
 func defaultManifestDir() string {
 	exe, err := os.Executable()
 	if err != nil {
 		return "servers"
 	}
-	return filepath.Join(filepath.Dir(exe), "servers")
+	exeDir := filepath.Dir(exe)
+	// Legacy: exe and servers/ at same level.
+	sibling := filepath.Join(exeDir, "servers")
+	if st, err := os.Stat(sibling); err == nil && st.IsDir() {
+		return sibling
+	}
+	// Standard: exe in bin/, servers/ one level up.
+	parent := filepath.Join(exeDir, "..", "servers")
+	if st, err := os.Stat(parent); err == nil && st.IsDir() {
+		return parent
+	}
+	// Last resort: relative to CWD.
+	return "servers"
 }
 
 // ExtractManifestFromClient reads a stdio entry from the specified client
