@@ -30,7 +30,12 @@ func enrichStatus(rows []DaemonStatus, manifestDir string) {
 			// Fallback: single-daemon manifests whose task name doesn't encode "default".
 			rows[i].Port = p
 		}
-		if rows[i].State == "Running" && lookupProcess != nil && rows[i].Port != 0 {
+		// Windows Task Scheduler flips the task back to "Ready" the moment its
+		// action (launch the daemon process) completes — even though the
+		// spawned daemon keeps running. Gating on State=="Running" here made
+		// PID/RAM/UPTIME columns blank for every live daemon. Always probe by
+		// port and let the lookup itself decide whether a daemon is alive.
+		if lookupProcess != nil && rows[i].Port != 0 {
 			if pid, ram, uptime, ok := lookupProcess(rows[i].Port); ok {
 				rows[i].PID = pid
 				rows[i].RAMBytes = ram
