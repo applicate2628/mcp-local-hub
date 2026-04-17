@@ -66,3 +66,53 @@ func TestScanClassifiesEntries(t *testing.T) {
 		t.Errorf("gdb.Status: got %q, want per-session", got)
 	}
 }
+
+// TestScanCoversAllFourClients seeds a Codex TOML, Gemini JSON, and
+// Antigravity JSON with "memory" entries of different transports and checks
+// each is represented in the ClientPresence map with the correct transport tag.
+func TestScanCoversAllFourClients(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Codex (TOML)
+	codexPath := filepath.Join(tmp, "config.toml")
+	_ = os.WriteFile(codexPath, []byte(`[mcp_servers.memory]
+url = "http://localhost:9123/mcp"
+`), 0600)
+
+	// Gemini (JSON w/ mcpServers { url + type: http })
+	geminiPath := filepath.Join(tmp, "settings.json")
+	_ = os.WriteFile(geminiPath, []byte(`{"mcpServers":{"memory":{"url":"http://localhost:9123/mcp","type":"http"}}}`), 0600)
+
+	// Antigravity — relay (stdio with command=mcp.exe args=[relay, --server, memory])
+	agPath := filepath.Join(tmp, "mcp_config.json")
+	_ = os.WriteFile(agPath, []byte(`{"mcpServers":{"memory":{"command":"D:/dev/mcp.exe","args":["relay","--server","memory","--daemon","default"],"disabled":false}}}`), 0600)
+
+	a := NewAPI()
+	result, err := a.ScanFrom(ScanOpts{
+		CodexConfigPath:       codexPath,
+		GeminiConfigPath:      geminiPath,
+		AntigravityConfigPath: agPath,
+		ManifestDir:           t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	var memEntry *ScanEntry
+	for i := range result.Entries {
+		if result.Entries[i].Name == "memory" {
+			memEntry = &result.Entries[i]
+		}
+	}
+	if memEntry == nil {
+		t.Fatal("no memory entry found")
+	}
+	if got := memEntry.ClientPresence["codex-cli"].Transport; got != "http" {
+		t.Errorf("codex-cli.Transport: got %q, want http", got)
+	}
+	if got := memEntry.ClientPresence["gemini-cli"].Transport; got != "http" {
+		t.Errorf("gemini-cli.Transport: got %q, want http", got)
+	}
+	if got := memEntry.ClientPresence["antigravity"].Transport; got != "relay" {
+		t.Errorf("antigravity.Transport: got %q, want relay", got)
+	}
+}
