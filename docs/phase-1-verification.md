@@ -82,7 +82,7 @@ Empirical findings:
 
 Decision: **mcp-local-hub does not manage `~/.gemini/antigravity/mcp_config.json`**. Users keep their upstream stdio entry; Antigravity spawns its own Serena per session (no shared-daemon benefit for this client).
 
-The `internal/clients/antigravity.go` adapter stays in the codebase with its `serverUrl`-based schema — see commit `572ad8c`. It may become useful if (a) Antigravity releases loopback-HTTP support, or (b) users run a shared remote Serena over HTTPS.
+The `internal/clients/antigravity.go` adapter stays in the codebase with its `serverUrl`-based schema — see commit `d3a9358`. It may become useful if (a) Antigravity releases loopback-HTTP support, or (b) users run a shared remote Serena over HTTPS.
 
 Separately observed but unrelated to mcp-local-hub: Antigravity's `RefreshMcpServers` enters a permanent "loading already in progress" state after `mcp-language-server`-based entries (clangd, fortran, javascript, python, rust, typescript, ...) return exit 1 on shutdown. This is a third-party upstream bug (`mcp-language-server`'s graceful-shutdown handling on Windows) that affects *all* MCP refresh cycles in Antigravity, independent of our changes.
 
@@ -92,15 +92,15 @@ Nine commits beyond the original 27 tasks, all empirically driven — each one c
 
 | Commit | Fix |
 |---|---|
-| `4560ae9` | Claude Code reads `~/.claude.json` (not `~/.claude/settings.json`), entries need `"type": "http"` |
-| `d64d2ee` | `--daemon` flag for selective installation (filter both scheduler tasks and client bindings) |
-| `738fda3` | Task Scheduler XML: nest restart policy inside `<RestartOnFailure>` container |
-| `8354b47` | Preflight respects `--daemon` filter — a partial install must not probe sibling daemons' ports |
-| `3ec2132` | Gemini CLI 0.38+ HTTP schema is `{url, type: "http", timeout}`, not legacy `{httpUrl, disabled}` |
-| `3c17fa6` | Shared-daemon redesign: 2 daemons instead of 3 (−33% Serena processes, shared gopls cache) |
-| `c6dd695` | Task Scheduler XML: weekly recurrence inside `<CalendarTrigger>/<ScheduleByWeek>`, not bare `<WeeklyTrigger>` |
-| `572ad8c` | Antigravity HTTP schema uses `serverUrl` field (not `url`) — verified empirically against `context7` entry |
-| `36551bb` | Antigravity excluded from client bindings — Cascade rejects loopback HTTP regardless of schema |
+| `cdc55c3` | Claude Code reads `~/.claude.json` (not `~/.claude/settings.json`), entries need `"type": "http"` |
+| `2438830` | `--daemon` flag for selective installation (filter both scheduler tasks and client bindings) |
+| `434139e` | Task Scheduler XML: nest restart policy inside `<RestartOnFailure>` container |
+| `106e29b` | Preflight respects `--daemon` filter — a partial install must not probe sibling daemons' ports |
+| `987e4b7` | Gemini CLI 0.38+ HTTP schema is `{url, type: "http", timeout}`, not legacy `{httpUrl, disabled}` |
+| `153cfb8` | Shared-daemon redesign: 2 daemons instead of 3 (−33% Serena processes, shared gopls cache) |
+| `2d147b3` | Task Scheduler XML: weekly recurrence inside `<CalendarTrigger>/<ScheduleByWeek>`, not bare `<WeeklyTrigger>` |
+| `d3a9358` | Antigravity HTTP schema uses `serverUrl` field (not `url`) — verified empirically against `context7` entry |
+| `96c9aa3` | Antigravity excluded from client bindings — Cascade rejects loopback HTTP regardless of schema |
 
 Pattern across most fixes: **unit test asserted our assumed output shape and passed** because production code produced that shape. Only live integration surfaced the mismatch. Compound guard for each fix now: test explicitly forbids the old buggy shape from returning.
 
