@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"time"
 )
 
 // NewClaudeCode returns a Client bound to the current user's ~/.claude.json.
@@ -34,25 +33,11 @@ func (c *claudeCode) Exists() bool {
 }
 
 func (c *claudeCode) Backup() (string, error) {
-	if !c.Exists() {
-		return "", &ErrClientNotInstalled{Client: c.Name()}
-	}
-	ts := time.Now().Format("20060102-150405")
-	bak := c.path + ".bak-mcp-local-hub-" + ts
-	in, err := os.Open(c.path)
-	if err != nil {
-		return "", err
-	}
-	defer in.Close()
-	out, err := os.OpenFile(bak, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return "", err
-	}
-	defer out.Close()
-	if _, err := io.Copy(out, in); err != nil {
-		return "", err
-	}
-	return bak, nil
+	return writeBackup(c.path, c.Name(), 0)
+}
+
+func (c *claudeCode) BackupKeep(keepN int) (string, error) {
+	return writeBackup(c.path, c.Name(), keepN)
 }
 
 func (c *claudeCode) Restore(backupPath string) error {

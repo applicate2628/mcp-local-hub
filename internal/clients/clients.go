@@ -1,5 +1,14 @@
 package clients
 
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+)
+
 // MCPEntry describes one MCP server entry in a client's config.
 // The hub uses this to add/update/remove entries idempotently.
 //
@@ -39,7 +48,23 @@ type Client interface {
 
 	// Backup copies the current config to a sibling file ending in ".bak-mcp-local-hub-<timestamp>"
 	// and returns the path. Overwrites any previous backup with the same timestamp-second.
+	//
+	// As a side effect, the first ever Backup call also writes a one-shot pristine
+	// sentinel "<path>.bak-mcp-local-hub-original" that captures the config as it
+	// existed before mcp-local-hub touched it. The sentinel is never overwritten
+	// on subsequent calls — it stays pointing at the user's pre-hub state so a
+	// full uninstall can always reach a clean slate regardless of how many
+	// install/migrate cycles have happened in between.
+	//
+	// Backup does NOT prune older timestamped backups. Use BackupKeep for that.
 	Backup() (string, error)
+
+	// BackupKeep behaves like Backup (sentinel + timestamped copy) but, after
+	// writing the new timestamped backup, prunes older timestamped backups so
+	// that at most keepN of them remain on disk. The pristine `-original`
+	// sentinel is never pruned. If keepN <= 0, no pruning happens (same
+	// behavior as Backup).
+	BackupKeep(keepN int) (string, error)
 
 	// Restore copies the named backup over the live config, overwriting current content.
 	Restore(backupPath string) error
@@ -80,4 +105,107 @@ func AllClients() map[string]Client {
 		result[c.Name()] = c
 	}
 	return result
+}
+
+// backupSuffixPrefix is the shared filename fragment that identifies every
+// backup file produced by mcp-local-hub. Both the pristine sentinel and the
+// rolling timestamped copies start with this prefix.
+const backupSuffixPrefix = ".bak-mcp-local-hub-"
+
+// originalSentinelSuffix names the one-shot pristine backup written the very
+// first time an adapter backs up a config file. It captures the user's
+// pre-hub state so a full uninstall can always reach a clean slate.
+const originalSentinelSuffix = backupSuffixPrefix + "original"
+
+// writeBackup is the shared Backup implementation for every adapter. It
+// reads livePath, writes (exactly once) the pristine `-original` sentinel
+// if it does not already exist, writes a fresh timestamped backup, and
+// optionally prunes older timestamped backups so only keepN remain.
+//
+// If livePath does not exist, returns ErrClientNotInstalled{Client: clientName}
+// to preserve the error contract every adapter already had.
+//
+// If keepN <= 0, pruning is skipped (matching the pre-rotation Backup()
+// contract used by install.go / migrate.go).
+func writeBackup(livePath, clientName string, keepN int) (string, error) {
+	data, err := os.ReadFile(livePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", &ErrClientNotInstalled{Client: clientName}
+		}
+		return "", err
+	}
+
+	// One-shot pristine sentinel: written only when missing, never overwritten.
+	// This is what makes a full uninstall reversible even after many rolling
+	// backups have aged out.
+	sentinel := livePath + originalSentinelSuffix
+	if _, err := os.Stat(sentinel); os.IsNotExist(err) {
+		if err := os.WriteFile(sentinel, data, 0600); err != nil {
+			return "", fmt.Errorf("write sentinel: %w", err)
+		}
+	}
+
+	// Timestamped rolling backup. Windows filesystems give second-resolution
+	// mtime only, so two calls in the same second land on the same filename
+	// and the second call overwrites the first — harmless, since the content
+	// is the current live config either way.
+	bakPath := livePath + backupSuffixPrefix + time.Now().Format("20060102-150405")
+	if err := os.WriteFile(bakPath, data, 0600); err != nil {
+		return "", err
+	}
+
+	if keepN > 0 {
+		pruneOldTimestamped(livePath, keepN)
+	}
+	return bakPath, nil
+}
+
+// pruneOldTimestamped keeps only the keepN most recent timestamped backups
+// of livePath. The pristine `-original` sentinel is always preserved.
+// Errors during listing or removal are intentionally swallowed — pruning is
+// best-effort; a failed unlink must not break a successful Backup call.
+func pruneOldTimestamped(livePath string, keepN int) {
+	dir := filepath.Dir(livePath)
+	base := filepath.Base(livePath)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	prefix := base + backupSuffixPrefix
+	type bak struct {
+		path    string
+		modTime time.Time
+	}
+	var timestamped []bak
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		if name == base+originalSentinelSuffix {
+			continue // sentinel, never touch
+		}
+		fi, err := e.Info()
+		if err != nil {
+			continue
+		}
+		timestamped = append(timestamped, bak{
+			path:    filepath.Join(dir, name),
+			modTime: fi.ModTime(),
+		})
+	}
+	if len(timestamped) <= keepN {
+		return
+	}
+	// Newest first, then drop everything past index keepN-1.
+	sort.Slice(timestamped, func(i, j int) bool {
+		return timestamped[i].modTime.After(timestamped[j].modTime)
+	})
+	for _, b := range timestamped[keepN:] {
+		_ = os.Remove(b.path)
+	}
 }

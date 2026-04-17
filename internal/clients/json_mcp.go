@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"time"
 )
 
 // jsonMCPClient is a reusable struct that handles JSON-format MCP configs
@@ -27,23 +26,11 @@ func (j *jsonMCPClient) Exists() bool {
 }
 
 func (j *jsonMCPClient) Backup() (string, error) {
-	if !j.Exists() {
-		return "", &ErrClientNotInstalled{Client: j.clientName}
-	}
-	ts := time.Now().Format("20060102-150405")
-	bak := j.path + ".bak-mcp-local-hub-" + ts
-	in, err := os.Open(j.path)
-	if err != nil {
-		return "", err
-	}
-	defer in.Close()
-	out, err := os.OpenFile(bak, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return "", err
-	}
-	defer out.Close()
-	_, err = io.Copy(out, in)
-	return bak, err
+	return writeBackup(j.path, j.clientName, 0)
+}
+
+func (j *jsonMCPClient) BackupKeep(keepN int) (string, error) {
+	return writeBackup(j.path, j.clientName, keepN)
 }
 
 func (j *jsonMCPClient) Restore(backupPath string) error {

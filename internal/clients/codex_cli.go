@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -32,23 +31,11 @@ func (c *codexCLI) Exists() bool {
 }
 
 func (c *codexCLI) Backup() (string, error) {
-	if !c.Exists() {
-		return "", &ErrClientNotInstalled{Client: c.Name()}
-	}
-	ts := time.Now().Format("20060102-150405")
-	bak := c.path + ".bak-mcp-local-hub-" + ts
-	in, err := os.Open(c.path)
-	if err != nil {
-		return "", err
-	}
-	defer in.Close()
-	out, err := os.OpenFile(bak, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return "", err
-	}
-	defer out.Close()
-	_, err = io.Copy(out, in)
-	return bak, err
+	return writeBackup(c.path, c.Name(), 0)
+}
+
+func (c *codexCLI) BackupKeep(keepN int) (string, error) {
+	return writeBackup(c.path, c.Name(), keepN)
 }
 
 func (c *codexCLI) Restore(backupPath string) error {
