@@ -26,7 +26,7 @@ Write-Host "==> Generating Windows version resource (cmd/mcp/resource.syso)"
 go generate ./cmd/mcp
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-$ldflags = "-X main.version=$version -X main.commit=$commit -X main.buildDate=$buildDate"
+$ldflags = "-X main.version=$version -X main.commit=$commit -X main.buildDate=$buildDate -H windowsgui"
 
 Write-Host "==> Building mcp.exe (version=$version commit=$commit)"
 go build -trimpath -ldflags $ldflags -o mcp.exe ./cmd/mcp

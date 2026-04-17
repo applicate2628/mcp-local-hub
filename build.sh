@@ -13,7 +13,7 @@ go generate ./cmd/mcp
 LDFLAGS="-X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildDate=${BUILD_DATE}"
 
 echo "==> Building mcp.exe (version=${VERSION} commit=${COMMIT})"
-go build -trimpath -ldflags "${LDFLAGS}" -o mcp.exe ./cmd/mcp
+go build -trimpath -ldflags "${LDFLAGS} -H windowsgui" -o mcp.exe ./cmd/mcp
 
 if [ ! -f mcp.exe ]; then
   echo "ERROR: mcp.exe missing after build — check Defender exclusions (see INSTALL.md)." >&2
