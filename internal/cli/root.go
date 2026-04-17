@@ -33,6 +33,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newBackupsCmd())
 	root.AddCommand(newManifestCmd())
 	root.AddCommand(newSchedulerCmd())
+	root.AddCommand(newSettingsCmd())
 	return root
 }
 
@@ -65,6 +66,7 @@ func newStopCmd() *cobra.Command {
 func newBackupsCmd() *cobra.Command { return newBackupsCmdReal() }
 func newManifestCmd() *cobra.Command { return newManifestCmdReal() }
 func newSchedulerCmd() *cobra.Command { return newSchedulerCmdReal() }
+func newSettingsCmd() *cobra.Command  { return newSettingsCmdReal() }
 
 func stub(name string) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
