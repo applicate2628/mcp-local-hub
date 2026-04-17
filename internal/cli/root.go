@@ -17,6 +17,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newUninstallCmd())
 	root.AddCommand(newStatusCmd())
 	root.AddCommand(newScanCmd())
+	root.AddCommand(newMigrateCmd())
 	root.AddCommand(newRestartCmd())
 	root.AddCommand(newRollbackCmd())
 	root.AddCommand(newDaemonCmd())
@@ -34,6 +35,7 @@ func newInstallCmd() *cobra.Command {
 func newUninstallCmd() *cobra.Command { return newUninstallCmdReal() }
 func newStatusCmd() *cobra.Command  { return newStatusCmdReal() }
 func newScanCmd() *cobra.Command    { return newScanCmdReal() }
+func newMigrateCmd() *cobra.Command { return newMigrateCmdReal() }
 func newRestartCmd() *cobra.Command { return newRestartCmdReal() }
 func newRollbackCmd() *cobra.Command { return newRollbackCmdReal() }
 func newDaemonCmd() *cobra.Command  { return newDaemonCmdReal() }
