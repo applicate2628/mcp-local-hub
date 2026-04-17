@@ -28,10 +28,11 @@ type ScheduledTaskPlan struct {
 }
 
 type ClientUpdatePlan struct {
-	Client string
-	Path   string
-	Action string // "add" | "replace"
-	URL    string
+	Client     string
+	Path       string
+	Action     string // "add" | "replace"
+	URL        string
+	DaemonName string // manifest daemon this binding points at (for relay-aware adapters)
 }
 
 func newInstallCmdReal() *cobra.Command {
@@ -130,10 +131,11 @@ func BuildPlan(m *config.ServerManifest, daemonFilter string) (*Plan, error) {
 		}
 		url := fmt.Sprintf("http://localhost:%d%s", daemon.Port, urlPath)
 		p.ClientUpdates = append(p.ClientUpdates, ClientUpdatePlan{
-			Client: b.Client,
-			Path:   path,
-			Action: "add/replace",
-			URL:    url,
+			Client:     b.Client,
+			Path:       path,
+			Action:     "add/replace",
+			URL:        url,
+			DaemonName: b.Daemon,
 		})
 	}
 	return p, nil
@@ -195,6 +197,13 @@ func executeInstall(cmd *cobra.Command, m *config.ServerManifest, p *Plan) error
 		cmd.Printf("✓ Scheduler task created: %s\n", spec.Name)
 	}
 	// 2. Backup + update client configs.
+	// Populate relay-related fields so adapters for stdio-only clients
+	// (e.g. Antigravity) can produce their `command`+`args` entry shape
+	// invoking `mcp.exe relay`. HTTP-native adapters ignore these fields.
+	exePath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve executable path: %w", err)
+	}
 	allClients := mustAllClients()
 	for _, u := range p.ClientUpdates {
 		client := allClients[u.Client]
@@ -210,7 +219,14 @@ func executeInstall(cmd *cobra.Command, m *config.ServerManifest, p *Plan) error
 			return fmt.Errorf("backup %s: %w", u.Client, err)
 		}
 		cmd.Printf("  backup: %s\n", bak)
-		if err := client.AddEntry(clients.MCPEntry{Name: m.Name, URL: u.URL}); err != nil {
+		entry := clients.MCPEntry{
+			Name:         m.Name,
+			URL:          u.URL,
+			RelayServer:  m.Name,
+			RelayDaemon:  u.DaemonName,
+			RelayExePath: exePath,
+		}
+		if err := client.AddEntry(entry); err != nil {
 			return fmt.Errorf("add entry to %s: %w", u.Client, err)
 		}
 		cmd.Printf("✓ %s → %s\n", u.Client, u.URL)

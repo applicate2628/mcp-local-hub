@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -17,17 +18,24 @@ func newAntigravityForTest(t *testing.T, initial string) *antigravityClient {
 	return &antigravityClient{jsonMCPClient: &jsonMCPClient{
 		path:       path,
 		clientName: "antigravity",
-		urlField:   "serverUrl",
+		urlField:   "command",
 	}}
 }
 
-// TestAntigravity_AddEntry_WritesServerUrlSchema verifies the HTTP entry
-// uses Antigravity's specific schema: serverUrl + disabled (+ optional
-// headers). No `url`, no `type:"http"`, no `timeout` — those are
-// Gemini-CLI shapes that the Antigravity Cascade agent silently drops.
-func TestAntigravity_AddEntry_WritesServerUrlSchema(t *testing.T) {
+// TestAntigravity_AddEntry_WritesStdioRelayShape verifies that Antigravity
+// entries are written as stdio invocations of the local mcp.exe relay
+// subcommand (Cascade silently drops loopback-HTTP entries regardless of
+// schema — stdio relay is the only working path as of v0.x).
+func TestAntigravity_AddEntry_WritesStdioRelayShape(t *testing.T) {
 	a := newAntigravityForTest(t, `{"mcpServers":{"keep":{"command":"x"}}}`)
-	if err := a.AddEntry(MCPEntry{Name: "serena", URL: "http://localhost:9121/mcp"}); err != nil {
+	err := a.AddEntry(MCPEntry{
+		Name:         "serena",
+		URL:          "http://localhost:9121/mcp", // ignored by adapter; relay args take over
+		RelayServer:  "serena",
+		RelayDaemon:  "claude",
+		RelayExePath: `D:\dev\mcp-local-hub\mcp.exe`,
+	})
+	if err != nil {
 		t.Fatalf("AddEntry: %v", err)
 	}
 	raw, _ := os.ReadFile(a.path)
@@ -40,25 +48,73 @@ func TestAntigravity_AddEntry_WritesServerUrlSchema(t *testing.T) {
 	if !ok {
 		t.Fatalf("serena entry missing: %v", servers)
 	}
-	if serena["serverUrl"] != "http://localhost:9121/mcp" {
-		t.Errorf("serverUrl = %v, want http://localhost:9121/mcp", serena["serverUrl"])
+	if cmd, _ := serena["command"].(string); cmd != `D:\dev\mcp-local-hub\mcp.exe` {
+		t.Errorf("command = %q, want absolute mcp.exe path", cmd)
 	}
-	if d, _ := serena["disabled"].(bool); d != false {
-		t.Errorf("disabled = %v, want false", serena["disabled"])
+	argsAny, ok := serena["args"].([]any)
+	if !ok || len(argsAny) != 5 {
+		t.Fatalf("args must be 5-element array [relay, --server, <s>, --daemon, <d>], got %v", serena["args"])
 	}
-	// Regression guards: none of the Gemini-CLI-style fields may appear.
-	for _, bad := range []string{"url", "type", "timeout", "httpUrl"} {
-		if _, has := serena[bad]; has {
-			t.Errorf("unexpected Gemini-style field %q in Antigravity entry: %v", bad, serena)
+	want := []string{"relay", "--server", "serena", "--daemon", "claude"}
+	for i, v := range want {
+		got, _ := argsAny[i].(string)
+		if got != v {
+			t.Errorf("args[%d] = %q, want %q", i, got, v)
 		}
 	}
-	if _, hasKeep := servers["keep"]; !hasKeep {
+	if d, _ := serena["disabled"].(bool); d != false {
+		t.Errorf("disabled = %v, want false", d)
+	}
+	// Must NOT write any HTTP shape fields — Cascade drops those.
+	for _, bad := range []string{"url", "serverUrl", "httpUrl", "type", "timeout"} {
+		if _, has := serena[bad]; has {
+			t.Errorf("unexpected HTTP-shape field %q present in stdio-relay entry: %v", bad, serena)
+		}
+	}
+	// Unrelated entry preserved.
+	if _, ok := servers["keep"]; !ok {
 		t.Error("unrelated 'keep' entry dropped")
 	}
 }
 
-func TestAntigravity_GetEntry_ReadsServerUrlField(t *testing.T) {
-	a := newAntigravityForTest(t, `{"mcpServers":{"serena":{"serverUrl":"http://localhost:9121/mcp","disabled":false}}}`)
+// TestAntigravity_AddEntry_RejectsMissingRelayFields ensures the adapter
+// fails loudly when install.go forgets to populate the relay identifiers.
+// A silent fallback to URL would produce entries Cascade ignores.
+func TestAntigravity_AddEntry_RejectsMissingRelayFields(t *testing.T) {
+	a := newAntigravityForTest(t, `{"mcpServers":{}}`)
+	cases := []struct {
+		name string
+		e    MCPEntry
+	}{
+		{"no relay server", MCPEntry{Name: "x", URL: "http://x", RelayDaemon: "d", RelayExePath: "path"}},
+		{"no relay daemon", MCPEntry{Name: "x", URL: "http://x", RelayServer: "s", RelayExePath: "path"}},
+		{"no exe path", MCPEntry{Name: "x", URL: "http://x", RelayServer: "s", RelayDaemon: "d"}},
+	}
+	for _, c := range cases {
+		err := a.AddEntry(c.e)
+		if err == nil {
+			t.Errorf("case %q: expected error, got nil", c.name)
+			continue
+		}
+		if !strings.Contains(err.Error(), "antigravity adapter requires") {
+			t.Errorf("case %q: error should reference required fields: %v", c.name, err)
+		}
+	}
+}
+
+// TestAntigravity_GetEntry_ReconstructsRelayArgs reads back an entry
+// the adapter itself wrote and exposes RelayServer/RelayDaemon/RelayExePath
+// for diagnostics (e.g. verifying install idempotency).
+func TestAntigravity_GetEntry_ReconstructsRelayArgs(t *testing.T) {
+	a := newAntigravityForTest(t, `{
+  "mcpServers": {
+    "serena": {
+      "command": "D:\\dev\\mcp-local-hub\\mcp.exe",
+      "args": ["relay", "--server", "serena", "--daemon", "claude"],
+      "disabled": false
+    }
+  }
+}`)
 	e, err := a.GetEntry("serena")
 	if err != nil {
 		t.Fatalf("GetEntry: %v", err)
@@ -66,13 +122,21 @@ func TestAntigravity_GetEntry_ReadsServerUrlField(t *testing.T) {
 	if e == nil {
 		t.Fatal("GetEntry returned nil")
 	}
-	if e.URL != "http://localhost:9121/mcp" {
-		t.Errorf("URL = %q", e.URL)
+	if e.RelayServer != "serena" {
+		t.Errorf("RelayServer = %q", e.RelayServer)
+	}
+	if e.RelayDaemon != "claude" {
+		t.Errorf("RelayDaemon = %q", e.RelayDaemon)
+	}
+	if e.RelayExePath == "" {
+		t.Error("RelayExePath should be populated from 'command' field")
 	}
 }
 
+// TestAntigravity_RemoveEntry_Inherited confirms the inherited RemoveEntry
+// still works even with the new stdio-relay entry shape.
 func TestAntigravity_RemoveEntry_Inherited(t *testing.T) {
-	a := newAntigravityForTest(t, `{"mcpServers":{"serena":{"serverUrl":"x"},"other":{"serverUrl":"y"}}}`)
+	a := newAntigravityForTest(t, `{"mcpServers":{"serena":{"command":"x","args":["relay"]},"other":{"command":"y"}}}`)
 	if err := a.RemoveEntry("serena"); err != nil {
 		t.Fatalf("RemoveEntry: %v", err)
 	}

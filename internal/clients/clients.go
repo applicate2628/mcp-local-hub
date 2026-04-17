@@ -2,11 +2,24 @@ package clients
 
 // MCPEntry describes one MCP server entry in a client's config.
 // The hub uses this to add/update/remove entries idempotently.
+//
+// Most adapters consume the URL directly (clients that speak HTTP MCP
+// natively). Adapters for stdio-only clients — currently only Antigravity —
+// consume the RelayServer/RelayDaemon/RelayExePath triple instead and
+// write a 'command'+'args' entry invoking `mcp.exe relay`. Install.go
+// populates all fields so individual adapters ignore what they don't need.
 type MCPEntry struct {
 	Name    string            // server name, e.g., "serena"
 	URL     string            // full URL, e.g., "http://localhost:9121/mcp"
 	Headers map[string]string // optional HTTP headers
 	Env     map[string]string // only used by stdio entries (for rollback); URL entries leave this nil
+
+	// Relay-based stdio adapters (Antigravity): these three fields identify
+	// the manifest lookup the stdio client should perform when it spawns
+	// mcp.exe relay as its child process.
+	RelayServer  string // server name in manifest, e.g., "serena"
+	RelayDaemon  string // daemon name within that manifest, e.g., "claude"
+	RelayExePath string // absolute path to mcp.exe (from os.Executable() at install time)
 }
 
 // Client is the OS-/format-abstracted interface for a single MCP client config file.
