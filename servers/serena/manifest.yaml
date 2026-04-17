@@ -28,18 +28,25 @@ daemons:
     port: 9122
     extra_args: [--context, codex]
 
-# Antigravity is intentionally excluded from client_bindings: empirically
-# (Antigravity IDE v0.x, as of 2026-04-17) its Cascade agent does not accept
-# loopback-HTTP MCP servers. Its HTTP support in mcp_config.json works only
-# for remote HTTPS endpoints (e.g. context7 @ mcp.context7.com). Users who
-# want Serena in Antigravity should keep the upstream stdio entry (uvx-spawned)
-# in ~/.gemini/antigravity/mcp_config.json — mcp-local-hub does not manage it.
+## Antigravity's Cascade agent (Antigravity IDE v0.x as of 2026-04-17)
+# silently drops loopback-HTTP MCP entries regardless of schema. Its HTTP
+# support works only for remote HTTPS endpoints. Workaround: write a stdio
+# entry to ~/.gemini/antigravity/mcp_config.json that spawns `mcp.exe relay`
+# as its child process. The relay connects to the shared HTTP daemon on 9121
+# and forwards JSON-RPC between Antigravity's stdin/stdout and the daemon.
+# This restores shared-daemon benefits for multi-window Antigravity users
+# without requiring Cascade to add loopback-HTTP support.
+#
+# See internal/clients/antigravity.go + internal/daemon/relay.go.
 client_bindings:
   - client: claude-code
     daemon: claude
     url_path: /mcp
   - client: codex-cli
     daemon: codex
+    url_path: /mcp
+  - client: antigravity
+    daemon: claude
     url_path: /mcp
   - client: gemini-cli
     daemon: claude
