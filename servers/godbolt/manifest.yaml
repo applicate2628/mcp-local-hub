@@ -1,0 +1,26 @@
+name: godbolt
+kind: global
+transport: stdio-bridge
+command: C:/Users/dima_/.local/mcp-servers/godbolt-mcp/venv/Scripts/python.exe
+base_args:
+  - "C:/Users/dima_/.local/mcp-servers/godbolt-mcp/godbolt_mcp.py"
+
+daemons:
+  - name: default
+    port: 9126
+
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+  - client: codex-cli
+    daemon: default
+    url_path: /mcp
+  - client: gemini-cli
+    daemon: default
+    url_path: /mcp
+  - client: antigravity
+    daemon: default
+    url_path: /mcp
+
+weekly_refresh: false
