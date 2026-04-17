@@ -287,3 +287,123 @@ func defaultManifestDir() string {
 	}
 	return filepath.Join(filepath.Dir(exe), "servers")
 }
+
+// ExtractManifestFromClient reads a stdio entry from the specified client
+// config and renders a draft manifest.yaml suitable for the GUI "Create
+// manifest" flow. The draft always includes bindings for all four clients;
+// users edit as desired before saving.
+func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts) (string, error) {
+	var raw map[string]any
+
+	switch client {
+	case "claude-code":
+		if opts.ClaudeConfigPath == "" {
+			return "", fmt.Errorf("ClaudeConfigPath empty")
+		}
+		data, err := os.ReadFile(opts.ClaudeConfigPath)
+		if err != nil {
+			return "", err
+		}
+		var cfg struct {
+			MCPServers map[string]map[string]any `json:"mcpServers"`
+		}
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return "", err
+		}
+		raw = cfg.MCPServers[serverName]
+	default:
+		return "", fmt.Errorf("extract not yet supported for client %q (extend here when needed)", client)
+	}
+	if raw == nil {
+		return "", fmt.Errorf("server %q not found in client %q config", serverName, client)
+	}
+
+	cmd, _ := raw["command"].(string)
+	var args []string
+	if arr, ok := raw["args"].([]any); ok {
+		for _, v := range arr {
+			if s, ok := v.(string); ok {
+				args = append(args, s)
+			}
+		}
+	}
+	envMap := map[string]string{}
+	if envAny, ok := raw["env"].(map[string]any); ok {
+		for k, v := range envAny {
+			if s, ok := v.(string); ok {
+				envMap[k] = s
+			}
+		}
+	}
+
+	// Pick next free port in 9121-9139 range not already used by other manifests.
+	port, err := pickNextFreePort(opts.ManifestDir)
+	if err != nil {
+		return "", err
+	}
+
+	return renderDraftManifestYAML(serverName, cmd, args, envMap, port), nil
+}
+
+func pickNextFreePort(manifestDir string) (int, error) {
+	used := map[int]bool{}
+	entries, _ := os.ReadDir(manifestDir)
+	for _, e := range entries {
+		data, err := os.ReadFile(filepath.Join(manifestDir, e.Name(), "manifest.yaml"))
+		if err != nil {
+			continue
+		}
+		// Minimal YAML scrape — we do not want to pull go-yaml just for this.
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			const p = "port:"
+			if strings.HasPrefix(line, p) {
+				var n int
+				fmt.Sscanf(line, "port: %d", &n)
+				if n > 0 {
+					used[n] = true
+				}
+			}
+		}
+	}
+	for p := 9121; p <= 9139; p++ {
+		if !used[p] {
+			return p, nil
+		}
+	}
+	return 0, fmt.Errorf("no free port in 9121-9139 range")
+}
+
+func renderDraftManifestYAML(name, cmd string, args []string, env map[string]string, port int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "name: %s\n", name)
+	fmt.Fprintln(&b, "kind: global")
+	fmt.Fprintln(&b, "transport: stdio-bridge")
+	fmt.Fprintf(&b, "command: %s\n", cmd)
+	if len(args) > 0 {
+		fmt.Fprintln(&b, "base_args:")
+		for _, a := range args {
+			fmt.Fprintf(&b, "  - %q\n", a)
+		}
+	}
+	if len(env) > 0 {
+		fmt.Fprintln(&b, "env:")
+		for k, v := range env {
+			fmt.Fprintf(&b, "  %s: %q\n", k, v)
+		}
+	}
+	fmt.Fprintln(&b, "")
+	fmt.Fprintln(&b, "daemons:")
+	fmt.Fprintln(&b, "  - name: default")
+	fmt.Fprintf(&b, "    port: %d\n", port)
+	fmt.Fprintln(&b, "")
+	fmt.Fprintln(&b, "client_bindings:")
+	for _, c := range []string{"claude-code", "codex-cli", "gemini-cli", "antigravity"} {
+		fmt.Fprintf(&b, "  - client: %s\n", c)
+		fmt.Fprintln(&b, "    daemon: default")
+		fmt.Fprintln(&b, "    url_path: /mcp")
+	}
+	fmt.Fprintln(&b, "")
+	fmt.Fprintln(&b, "weekly_refresh: false")
+	return b.String()
+}
