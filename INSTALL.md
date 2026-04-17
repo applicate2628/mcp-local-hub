@@ -25,7 +25,7 @@ Optional: add the repo directory to `PATH` so you can run `mcp` from anywhere. U
 
 ## First install
 
-The Phase 1 manifest ships with Serena configured. To install it:
+Seven servers ship with manifests: `serena`, `memory`, `sequential-thinking`, `wolfram`, `godbolt`, `paper-search-mcp`, `time`. Each is installed independently. Start with Serena (Phase 1 flagship):
 
 ```bash
 # Preview what would happen (no side effects)
@@ -142,6 +142,65 @@ Start-Process "$env:LOCALAPPDATA\Programs\Antigravity\Antigravity.exe"
 ```
 
 The relay binary path is absolute (points at `mcp.exe` in the repo root). If you move the binary, re-run `mcp install --server serena` to update the path.
+
+## Per-server notes (beyond serena)
+
+Phase 2 added 6 global daemons. Each has its own manifest in `servers/<name>/manifest.yaml`.
+
+### memory (port 9123)
+
+Runs `npx -y @modelcontextprotocol/server-memory`. Stores data in
+`MEMORY_FILE_PATH` (default set to `c:/Users/dima_/OneDrive/Documents/env/Agents/memory.jsonl`
+in the manifest — update for your system before install). This is the
+critical daemon — previously each client spawned its own memory server,
+causing concurrent writes to the same JSONL file (data race). The
+shared daemon serializes all writes through one subprocess.
+
+### sequential-thinking (port 9124)
+
+Runs `npx -y @modelcontextprotocol/server-sequential-thinking`. Stateless
+reasoning helper. No env needed.
+
+### wolfram (port 9125)
+
+Runs `node C:/Users/dima_/.local/mcp-servers/wolframalpha-llm-mcp/build/index.js`.
+Requires the Wolfram LLM MCP server installed separately at that path.
+`WOLFRAM_LLM_APP_ID` is stored in the encrypted vault:
+
+```bash
+mcp secrets set wolfram_app_id --value <your-app-id>
+```
+
+### godbolt (port 9126)
+
+Runs `python C:/Users/dima_/.local/mcp-servers/godbolt-mcp/godbolt_mcp.py`
+from the godbolt venv. Requires the godbolt-mcp project installed at that
+path. Stateless (API proxy to godbolt.org).
+
+### paper-search-mcp (port 9127)
+
+Runs `uvx --from paper-search-mcp python -m paper_search_mcp.server`.
+Requires `uvx`. `PAPER_SEARCH_MCP_UNPAYWALL_EMAIL` is stored in the vault:
+
+```bash
+mcp secrets set unpaywall_email --value <your-email>
+```
+
+First install may take ~30s as `uvx` downloads `paper-search-mcp`.
+
+### time (port 9128)
+
+Runs `npx -y @mcpcentral/mcp-time`. Trivial, stateless.
+
+### context7 (no daemon)
+
+Available at `https://mcp.context7.com/mcp` as a remote HTTPS endpoint.
+Codex CLI, Gemini CLI, and Antigravity typically have it pre-configured.
+For Claude Code, add it manually:
+
+```bash
+claude mcp add --transport http context7 https://mcp.context7.com/mcp
+```
 
 ## Uninstall & rollback
 

@@ -130,3 +130,13 @@ Pattern across most fixes: **unit test asserted our assumed output shape and pas
 ## Status
 
 **Phase 0 + Phase 1 + post-Phase 1 relay CLOSED.** All four clients live end-to-end verified: Codex CLI, Claude Code (Haiku), Gemini CLI (Flash 2.5), Antigravity Cascade (stdio relay). `go test ./...` all-green across `config`, `clients`, `scheduler`, `secrets`, `cli`, `daemon`.
+
+---
+
+## Phase 2 (follow-on) — 2026-04-17
+
+Phase 2 closed by `docs/phase-2-verification.md`. Summary:
+
+- 6 new global daemons (memory, sequential-thinking, wolfram, godbolt, paper-search-mcp, time) on ports 9123–9128
+- Native Go stdio-host (`internal/daemon/host.go`) replaces `supergateway`
+- context7 added to Claude Code as direct HTTPS (no daemon)

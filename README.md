@@ -11,24 +11,28 @@ Every modern coding assistant (Claude Code, Codex CLI, Gemini CLI, Antigravity, 
 `mcp-local-hub` runs each MCP server **once per OS user**, exposes it as a local HTTP endpoint via [Streamable HTTP transport](https://modelcontextprotocol.io/docs/concepts/transports), and writes the correct client-config entry into each managed MCP client. Clients see a shared daemon instead of their own child process.
 
 ```
-   ┌───────────────────────────────────────────────────────────────┐
-   │              OS-level Task Scheduler (Windows schtasks)        │
-   │              starts on logon, restarts on failure              │
-   └──────┬─────────────────────────────────┬──────────────────────┘
-          │                                 │
-          ▼                                 ▼
-   ┌──────────────────────┐          ┌──────────────────────┐
-   │ Serena daemon 9121   │          │ Serena daemon 9122   │
-   │ context=claude-code  │          │ context=codex        │
-   │ + one shared gopls   │          │ + one shared gopls   │
-   └────────┬─────────────┘          └────────┬─────────────┘
-            │                                 │
-   ┌────────┼─────────┬──────────┐            │
-   ▼        ▼         ▼          ▼            ▼
-  Claude  Gemini   Antigravity  (future     Codex CLI
-  Code    CLI      (stdio       stdio
-  (HTTP)  (HTTP)    relay)      clients)
+   ┌─────────────────────────────────────────────────────────────────────┐
+   │             OS-level Task Scheduler (Windows schtasks)              │
+   │             starts on logon, restarts on failure                    │
+   └──┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬─────────────────┘
+      │      │      │      │      │      │      │      │
+      ▼      ▼      ▼      ▼      ▼      ▼      ▼      ▼
+   ┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐
+   │seren││seren││memor││seq- ││wolf-││god- ││paper││time │
+   │claud││codex││y    ││think││ram  ││bolt ││-srch││     │
+   │9121 ││9122 ││9123 ││9124 ││9125 ││9126 ││9127 ││9128 │
+   └──┬──┘└──┬──┘└──┬──┘└──┬──┘└──┬──┘└──┬──┘└──┬──┘└──┬──┘
+      │      │      │      │      │      │      │      │
+      │      │      └──────┴──────┴──────┴──────┴──────┴── (shared by all 4 clients)
+      │      │
+   ┌──┼──────┼──────────┬──────────┐
+   ▼  ▼      ▼          ▼          ▼
+  Claude   Gemini    Antigravity  Codex CLI
+  Code     CLI       (stdio       (HTTP)
+  (HTTP)   (HTTP)     relay)
 ```
+
+The 6 non-serena daemons run as **stdio-bridge** via a native Go stdio-host (`internal/daemon/host.go`): one subprocess per daemon, multiplexed across concurrent HTTP clients via JSON-RPC `id` rewriting and a cached `initialize` response.
 
 Antigravity's Cascade agent rejects loopback-HTTP MCP entries, so `mcp-local-hub` bridges it via a **stdio relay subprocess**: `mcp.exe relay` translates between stdio JSON-RPC and the shared HTTP daemon. Cascade sees a normal stdio command; the daemon stays shared.
 
@@ -78,14 +82,18 @@ Detailed setup, per-client behaviour, and troubleshooting in [INSTALL.md](INSTAL
 
 ## Current status
 
-**Phase 1 + post-Phase 1 relay complete** (2026-04-17). All four clients live end-to-end verified: Codex CLI, Claude Code (Haiku), Gemini CLI (Flash 2.5), and Antigravity Cascade (via stdio relay). See [docs/phase-1-verification.md](docs/phase-1-verification.md) for the full verification matrix.
+**Phase 2 complete** (2026-04-17). 8 MCP daemons consolidated:
+
+- serena (×2 contexts: claude-code, codex)
+- memory, sequential-thinking, wolfram, godbolt, paper-search-mcp, time
+
+Plus context7 as direct HTTPS entry (no daemon needed). Native Go stdio-host (`internal/daemon/host.go`) replaces `supergateway` npm dep for stdio→HTTP bridging. All 4 clients (Claude Code, Codex CLI, Gemini CLI, Antigravity) share these daemons. See [docs/phase-2-verification.md](docs/phase-2-verification.md).
 
 **Roadmap (not yet implemented):**
 
-- Phase 2: memory server + additional stdio-relay consumers (e.g. Serena through Antigravity)
 - Phase 3: workspace-scoped daemons + `mcp register`/`unregister` for per-project mcp-language-server instances
-- Phase 4+: additional global daemons (sequential-thinking, wolfram, paper-search-mcp)
-- Linux/macOS scheduler backends (currently Windows-first, Linux/macOS compile-only stubs)
+- Post-Phase-2: minimal GUI installer (scans client configs, checkboxes for hub routing)
+- Phase 4+: Linux/macOS scheduler backends
 
 ## Platform support
 
