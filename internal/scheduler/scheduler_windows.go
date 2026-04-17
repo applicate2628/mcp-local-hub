@@ -68,14 +68,18 @@ func buildCreateXML(spec TaskSpec, userName string) string {
 	if spec.WeeklyTrigger != nil {
 		wt := spec.WeeklyTrigger
 		day := dayNames[wt.DayOfWeek]
-		buf.WriteString("    <WeeklyTrigger>\n")
+		// Weekly recurrence lives inside <CalendarTrigger>, not as a standalone
+		// <WeeklyTrigger> child of <Triggers>. Task Scheduler rejects the flat
+		// form with:
+		//     ERROR: The task XML contains an unexpected node. (N,M):WeeklyTrigger:
+		buf.WriteString("    <CalendarTrigger>\n")
 		buf.WriteString(fmt.Sprintf("      <StartBoundary>2026-01-04T%02d:%02d:00</StartBoundary>\n", wt.HourLocal, wt.MinuteLocal))
 		buf.WriteString("      <Enabled>true</Enabled>\n")
 		buf.WriteString("      <ScheduleByWeek>\n")
 		buf.WriteString(fmt.Sprintf("        <DaysOfWeek><%s /></DaysOfWeek>\n", day))
 		buf.WriteString("        <WeeksInterval>1</WeeksInterval>\n")
 		buf.WriteString("      </ScheduleByWeek>\n")
-		buf.WriteString("    </WeeklyTrigger>\n")
+		buf.WriteString("    </CalendarTrigger>\n")
 	}
 	buf.WriteString("  </Triggers>\n")
 

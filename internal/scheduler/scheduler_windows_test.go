@@ -59,13 +59,22 @@ func TestBuildCreateXML_Weekly(t *testing.T) {
 		},
 	}
 	xml := buildCreateXML(spec, "dima_")
-	if !strings.Contains(xml, "<WeeklyTrigger>") {
-		t.Error("expected <WeeklyTrigger>")
+	// Weekly recurrence must be inside <CalendarTrigger>, not a top-level
+	// <WeeklyTrigger> (Task Scheduler schema rule, rejected at schtasks /Create).
+	if !strings.Contains(xml, "<CalendarTrigger>") {
+		t.Errorf("expected <CalendarTrigger> container: %s", xml)
+	}
+	if !strings.Contains(xml, "<ScheduleByWeek>") {
+		t.Errorf("expected <ScheduleByWeek>: %s", xml)
 	}
 	if !strings.Contains(xml, "<DaysOfWeek><Sunday /></DaysOfWeek>") {
 		t.Errorf("Sunday not set: %s", xml)
 	}
 	if !strings.Contains(xml, "T03:00:00") {
 		t.Errorf("03:00 time not set: %s", xml)
+	}
+	// Regression guard: bare <WeeklyTrigger> (as direct child of <Triggers>) is invalid.
+	if strings.Contains(xml, "<WeeklyTrigger>") {
+		t.Errorf("bare <WeeklyTrigger> must not appear (use <CalendarTrigger>): %s", xml)
 	}
 }
