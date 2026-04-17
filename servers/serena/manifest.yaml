@@ -13,11 +13,11 @@ base_args:
 env: {}
 
 # Two daemons, two Serena contexts:
-#   - claude (9121, context=claude-code) is shared by Claude Code, Gemini CLI, and Antigravity.
-#     All three accept the claude-code context's tool preset. Sharing reduces Serena instance
-#     count from 3 → 1 and lets the gopls LSP cache serve three client sessions simultaneously.
-#   - codex (9122, context=codex) is separate because Codex CLI requires Codex-specific tool
-#     presets; two contexts in one daemon is not supported by Serena.
+#   - claude (9121, context=claude-code) is shared by Claude Code and Gemini CLI.
+#     Both accept the claude-code context's tool preset. Sharing reduces Serena
+#     instance count and lets the gopls LSP cache serve both client sessions.
+#   - codex (9122, context=codex) is separate because Codex CLI requires its
+#     own Serena context's tool preset.
 daemons:
   - name: claude
     context: claude-code
@@ -28,15 +28,18 @@ daemons:
     port: 9122
     extra_args: [--context, codex]
 
+# Antigravity is intentionally excluded from client_bindings: empirically
+# (Antigravity IDE v0.x, as of 2026-04-17) its Cascade agent does not accept
+# loopback-HTTP MCP servers. Its HTTP support in mcp_config.json works only
+# for remote HTTPS endpoints (e.g. context7 @ mcp.context7.com). Users who
+# want Serena in Antigravity should keep the upstream stdio entry (uvx-spawned)
+# in ~/.gemini/antigravity/mcp_config.json — mcp-local-hub does not manage it.
 client_bindings:
   - client: claude-code
     daemon: claude
     url_path: /mcp
   - client: codex-cli
     daemon: codex
-    url_path: /mcp
-  - client: antigravity
-    daemon: claude
     url_path: /mcp
   - client: gemini-cli
     daemon: claude
