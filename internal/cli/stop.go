@@ -10,12 +10,31 @@ import (
 
 func newStopCmdReal() *cobra.Command {
 	var server, daemonFilter string
+	var all bool
 	c := &cobra.Command{
 		Use:   "stop",
-		Short: "Stop a daemon without uninstalling (tasks and configs remain)",
+		Short: "Stop daemon(s) without uninstalling (tasks and configs remain)",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if all {
+				if server != "" {
+					return fmt.Errorf("--all is mutually exclusive with --server")
+				}
+				a := api.NewAPI()
+				results, err := a.StopAll()
+				if err != nil {
+					return err
+				}
+				for _, r := range results {
+					if r.Err != "" {
+						fmt.Fprintf(cmd.OutOrStderr(), "✗ %s: %s\n", r.TaskName, r.Err)
+					} else {
+						fmt.Fprintf(cmd.OutOrStdout(), "✓ Stopped %s\n", r.TaskName)
+					}
+				}
+				return nil
+			}
 			if server == "" {
-				return fmt.Errorf("--server is required")
+				return fmt.Errorf("--server or --all is required")
 			}
 			a := api.NewAPI()
 			if err := a.Stop(server, daemonFilter); err != nil {
@@ -25,7 +44,8 @@ func newStopCmdReal() *cobra.Command {
 			return nil
 		},
 	}
-	c.Flags().StringVar(&server, "server", "", "server name (required)")
+	c.Flags().StringVar(&server, "server", "", "server name")
 	c.Flags().StringVar(&daemonFilter, "daemon", "", "daemon name within the server manifest")
+	c.Flags().BoolVar(&all, "all", false, "stop every running daemon")
 	return c
 }

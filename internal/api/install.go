@@ -538,3 +538,30 @@ func (a *API) RestartAll() ([]RestartResult, error) {
 	return results, nil
 }
 
+// StopAll stops every running scheduler task under our prefix. Leaves tasks
+// in place (scheduler will relaunch them at next LogonTrigger unless also
+// uninstalled). Returns per-task results so the CLI can report failures.
+func (a *API) StopAll() ([]RestartResult, error) {
+	sch, err := scheduler.New()
+	if err != nil {
+		return nil, err
+	}
+	tasks, err := sch.List("mcp-local-hub-")
+	if err != nil {
+		return nil, err
+	}
+	var results []RestartResult
+	for _, t := range tasks {
+		// Skip weekly-refresh — schedule-only task; Stop has no effect anyway.
+		if strings.Contains(t.Name, "weekly-refresh") {
+			continue
+		}
+		if err := sch.Stop(t.Name); err != nil && !strings.Contains(err.Error(), "no running instance") {
+			results = append(results, RestartResult{TaskName: t.Name, Err: err.Error()})
+			continue
+		}
+		results = append(results, RestartResult{TaskName: t.Name})
+	}
+	return results, nil
+}
+
