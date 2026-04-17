@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -512,6 +513,15 @@ type RestartResult struct {
 
 // RestartAll stops+starts every scheduler task under our prefix. Returns a
 // per-task result list with any errors.
+//
+// Why we don't rely on scheduler.Stop alone: the task's action (spawning
+// the daemon) finishes in milliseconds; the scheduler immediately flips
+// the task back to "Ready". `schtasks /End` therefore finds no running
+// task instance and silently succeeds, while the daemon process keeps
+// running. A subsequent `schtasks /Run` tries to spawn a second daemon,
+// hits the bound port, and dies — so the user ends up with the original
+// stale daemon they wanted to replace. We have to kill the daemon
+// process by port first.
 func (a *API) RestartAll() ([]RestartResult, error) {
 	sch, err := scheduler.New()
 	if err != nil {
@@ -521,16 +531,23 @@ func (a *API) RestartAll() ([]RestartResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	ports := manifestPortMap(defaultManifestDir())
 	var results []RestartResult
 	for _, t := range tasks {
 		// Skip weekly-refresh — scheduled, not restarted.
 		if strings.Contains(t.Name, "weekly-refresh") {
 			continue
 		}
-		if err := sch.Stop(t.Name); err != nil && !strings.Contains(err.Error(), "no running instance") {
-			results = append(results, RestartResult{TaskName: t.Name, Err: err.Error()})
+		srv, dmn := parseTaskName(t.Name)
+		port := ports[srv][dmn]
+		if port == 0 {
+			port = ports[srv]["default"]
+		}
+		if err := killDaemonByPort(port, 5*time.Second); err != nil {
+			results = append(results, RestartResult{TaskName: t.Name, Err: "kill daemon: " + err.Error()})
 			continue
 		}
+		_ = sch.Stop(t.Name) // no-op for completed actions; preserve for the edge case of a mid-launch task
 		if err := sch.Run(t.Name); err != nil {
 			results = append(results, RestartResult{TaskName: t.Name, Err: err.Error()})
 			continue
@@ -542,7 +559,9 @@ func (a *API) RestartAll() ([]RestartResult, error) {
 
 // StopAll stops every running scheduler task under our prefix. Leaves tasks
 // in place (scheduler will relaunch them at next LogonTrigger unless also
-// uninstalled). Returns per-task results so the CLI can report failures.
+// uninstalled). Kills the daemon process by port (see RestartAll comment
+// on why scheduler.Stop alone isn't enough). Returns per-task results so
+// the CLI can report failures.
 func (a *API) StopAll() ([]RestartResult, error) {
 	sch, err := scheduler.New()
 	if err != nil {
@@ -552,18 +571,54 @@ func (a *API) StopAll() ([]RestartResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	ports := manifestPortMap(defaultManifestDir())
 	var results []RestartResult
 	for _, t := range tasks {
 		// Skip weekly-refresh — schedule-only task; Stop has no effect anyway.
 		if strings.Contains(t.Name, "weekly-refresh") {
 			continue
 		}
-		if err := sch.Stop(t.Name); err != nil && !strings.Contains(err.Error(), "no running instance") {
-			results = append(results, RestartResult{TaskName: t.Name, Err: err.Error()})
+		srv, dmn := parseTaskName(t.Name)
+		port := ports[srv][dmn]
+		if port == 0 {
+			port = ports[srv]["default"]
+		}
+		if err := killDaemonByPort(port, 5*time.Second); err != nil {
+			results = append(results, RestartResult{TaskName: t.Name, Err: "kill daemon: " + err.Error()})
 			continue
 		}
+		_ = sch.Stop(t.Name)
 		results = append(results, RestartResult{TaskName: t.Name})
 	}
 	return results, nil
+}
+
+// killDaemonByPort finds the process listening on 127.0.0.1:port, kills
+// its whole tree with taskkill /F /T, and polls until the port is free.
+// Returns nil when nothing is listening (nothing to kill).
+//
+// /T is critical: our hub.exe spawns npx/uvx which spawn node/python.
+// Killing only hub.exe leaves the grandchildren running and occupying
+// the child-stdin side of the pipe.
+func killDaemonByPort(port int, timeout time.Duration) error {
+	if lookupProcess == nil || port == 0 {
+		return nil
+	}
+	pid, _, _, ok := lookupProcess(port)
+	if !ok {
+		return nil
+	}
+	out, err := exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/F", "/T").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("taskkill %d: %w: %s", pid, err, strings.TrimSpace(string(out)))
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, _, _, stillUp := lookupProcess(port); !stillUp {
+			return nil
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return fmt.Errorf("port %d still bound after %s", port, timeout)
 }
 
