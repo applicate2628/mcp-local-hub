@@ -19,8 +19,8 @@ type DaemonStatus struct {
 	TaskName   string    `json:"task_name"`
 	State      string    `json:"state"`      // "Running" | "Ready" | "Failed" | "Stopped"
 	Port       int       `json:"port"`
-	LastResult int32     `json:"last_result"`
-	NextRun    time.Time `json:"next_run"`
+	LastResult int32  `json:"last_result"`
+	NextRun    string `json:"next_run"` // backend-specific text (e.g. "Sunday, April 19, 2026 3:00:00 AM" on Windows; "N/A" when no trigger)
 	PID        int       `json:"pid,omitempty"`
 	RAMBytes   uint64    `json:"ram_bytes,omitempty"`
 	UptimeSec  int64     `json:"uptime_sec,omitempty"`

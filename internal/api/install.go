@@ -175,9 +175,10 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 // Status returns the current scheduler view of all mcp-local-hub tasks,
 // enriched with Server/Daemon/Port parsed from manifest, plus PID/RAM/Uptime
 // for Running tasks when the OS introspection layer is available (Windows,
-// populated by internal/api/processes.go at init). NextRun is not parsed here
-// — scheduler.TaskStatus surfaces the human-readable string form; callers
-// that want it can re-query the scheduler directly.
+// populated by internal/api/processes.go at init). NextRun is surfaced as a
+// raw backend-specific string (the locale-formatted time schtasks emits on
+// Windows, empty elsewhere); callers that need a parsed time.Time should
+// re-query the scheduler directly.
 func (a *API) Status() ([]DaemonStatus, error) {
 	sch, err := scheduler.New()
 	if err != nil {
@@ -193,6 +194,7 @@ func (a *API) Status() ([]DaemonStatus, error) {
 			TaskName:   t.Name,
 			State:      t.State,
 			LastResult: int32(t.LastResult),
+			NextRun:    t.NextRun,
 		})
 	}
 	enrichStatus(result, defaultManifestDir())

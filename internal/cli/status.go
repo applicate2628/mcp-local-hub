@@ -25,9 +25,8 @@ func newStatusCmdReal() *cobra.Command {
 				enc.SetIndent("", "  ")
 				return enc.Encode(rows)
 			}
-			// Header row
-			fmt.Fprintf(cmd.OutOrStdout(), "%-45s %-10s %-6s %-8s %-8s %-10s\n",
-				"NAME", "STATE", "PORT", "PID", "RAM(MB)", "UPTIME")
+			fmt.Fprintf(cmd.OutOrStdout(), "%-45s %-10s %-6s %-8s %-8s %-10s %s\n",
+				"NAME", "STATE", "PORT", "PID", "RAM(MB)", "UPTIME", "NEXT RUN")
 			for _, r := range rows {
 				ram := ""
 				if r.RAMBytes > 0 {
@@ -45,8 +44,8 @@ func newStatusCmdReal() *cobra.Command {
 				if r.PID > 0 {
 					pid = fmt.Sprintf("%d", r.PID)
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "%-45s %-10s %-6s %-8s %-8s %-10s\n",
-					r.TaskName, r.State, port, pid, ram, uptime)
+				fmt.Fprintf(cmd.OutOrStdout(), "%-45s %-10s %-6s %-8s %-8s %-10s %s\n",
+					r.TaskName, r.State, port, pid, ram, uptime, r.NextRun)
 			}
 			return nil
 		},
