@@ -5,4 +5,22 @@ global:
   - server: serena
     daemon: codex
     port: 9122
+  - server: memory
+    daemon: default
+    port: 9123
+  - server: sequential-thinking
+    daemon: default
+    port: 9124
+  - server: wolfram
+    daemon: default
+    port: 9125
+  - server: godbolt
+    daemon: default
+    port: 9126
+  - server: paper-search-mcp
+    daemon: default
+    port: 9127
+  - server: time
+    daemon: default
+    port: 9128
 workspace_scoped: []
