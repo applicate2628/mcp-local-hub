@@ -320,15 +320,88 @@ Commit after each file-group task set, NOT one mega-commit.
 
 ---
 
-## Protocol notes (filled during Task 1)
+## Protocol notes (from Task 1 research, 2026-04-17)
 
-_To be appended during Task 1 research phase. Will contain:_
+Sources: MCP spec 2025-11-25 (`basic/transports`) via context7, plus empirical observation of Claude Code extension ↔ Serena live handshake (`serena-claude.log` + `~/AppData/Roaming/Antigravity/logs/.../Claude VSCode.log`).
 
-- Session-ID header lifecycle (mint on first initialize? server echoes? etc.)
-- SSE framing details (`data:` prefix, `\n\n` termination, event types)
-- Graceful shutdown sequence (client DELETE? server TIMEOUT? both?)
-- Bidirectional concurrency requirements
-- Edge cases: slow HTTP responses, malformed SSE, simultaneous writes to stdout
+### Stdio side (Antigravity ↔ relay, via stdin/stdout)
+
+- **Framing:** line-delimited JSON-RPC 2.0 messages. Each message is one line, terminated by `\n`. Messages **MUST NOT** contain embedded newlines. `{"jsonrpc":"2.0","id":1,"method":"...","params":{...}}` followed by `\n`.
+- **Stderr:** relay writes any diagnostic/logging here; stdio client (Antigravity) may ignore or capture.
+- **Hard rule:** relay's stdout must contain **only** valid MCP messages. No banner text, no "Starting relay..." lines.
+- **Message types:** requests (has `id`), notifications (no `id`), responses (has `id`, has `result` or `error`). All flow through the same line protocol; client→server direction is primarily requests+notifications, server→client is responses+notifications (and rarely server-initiated requests).
+
+### HTTP side (relay ↔ Serena daemon, Streamable HTTP transport)
+
+**Endpoint:** single URL (e.g. `http://localhost:9121/mcp`) supports POST and GET.
+
+**Client → Server (POST /mcp):**
+- Headers: `Content-Type: application/json`, `Accept: application/json, text/event-stream` (both required, server may choose either response type), `MCP-Session-Id: <id>` (after session established).
+- Body: single JSON-RPC message.
+- **Response depends on body type:**
+  - If body was a **notification or a client→server response** → server returns `202 Accepted` with **no body**. No further work.
+  - If body was a **request** (has `id`) → server returns:
+    - (a) `200 OK` with `Content-Type: application/json` and a single JSON-RPC response in body, OR
+    - (b) `200 OK` with `Content-Type: text/event-stream` and an SSE stream containing potentially multiple messages (server-initiated notifications/requests before the final response, then the response matching the request's `id`, then optionally more messages or stream close).
+  - Server chooses (a) or (b) per-request. Relay must handle both. Real Serena empirically uses **both** — simple tool calls get (a), long-running operations (e.g. `find_symbol` during gopls cold indexing) may get (b).
+- **Error responses:** `400` with optional JSON-RPC error body (missing/invalid session, malformed message, etc.). `404` specifically means "session unknown" — client must re-initialize.
+
+**Server → Client (GET /mcp, SSE):**
+- Client opens long-lived `GET /mcp` with `Accept: text/event-stream` and session header.
+- Server streams events as they arrive; each event is `data: <json>\n\n` (optionally prefixed `id: <event-id>\n` and `event: <type>\n`).
+- Event payload = one JSON-RPC message (request/notification from server; NOT a response unless this stream is a resumption).
+- Server **MAY** close connection at any time; relay reconnects using `Last-Event-ID` header for resumption (nice-to-have, not required for v1).
+
+### Session lifecycle
+
+- **Header name:** `MCP-Session-Id` (exact casing per spec; HTTP headers are case-insensitive but we preserve spec casing in our code for clarity).
+- **Mint:** server includes `MCP-Session-Id: <uuid-or-similar>` in the **response headers** of the very first POST (which carries `InitializeRequest` and has no session header on the request side). Session ID is opaque to client — relay captures and echoes.
+- **Reuse:** relay injects `MCP-Session-Id: <captured>` into every subsequent POST and into the parallel GET. If server ever returns 404 on a request, session expired — relay must issue fresh initialize and re-establish.
+- **Termination:** when stdin EOF arrives (Antigravity killed relay), relay issues `DELETE /mcp` with the session header, then closes HTTP client. Server may also independently drop session; relay handles 404 gracefully.
+
+### Edge cases for implementation
+
+1. **Simultaneous writes to stdout** — POST response goroutine and GET SSE goroutine both produce stdio lines. Guard with `sync.Mutex` around stdout write path, or route everything through a single serializing goroutine via channel.
+2. **Response-before-request** on SSE stream — event IDs may arrive out of order relative to POST responses. Relay must pass each message to stdout as-is; client (Antigravity) correlates by `id` field.
+3. **HTTP 5xx / network error on POST** — relay synthesizes a JSON-RPC error response with the original request's `id` and writes to stdout. Otherwise Antigravity hangs awaiting response.
+4. **Malformed stdin JSON** — log to stderr, skip. Antigravity is the trusted source, this would be a bug in it, not a runtime security concern.
+5. **SSE reconnect** — on connection drop during streaming, relay retries GET `/mcp` with `Last-Event-ID` header. For v1, simple "retry once after 1s" is sufficient — don't add exponential backoff complexity.
+6. **Concurrent POSTs** — MCP allows multiple outstanding requests from client. Relay must not serialize them; each POST gets its own goroutine and returns its response to stdout independently.
+
+### Implementation sketch
+
+```go
+// HTTPToStdioRelay structure (internal/daemon/relay.go)
+type HTTPToStdioRelay struct {
+    URL           string
+    Stdin         io.Reader
+    Stdout        io.Writer
+    Stderr        io.Writer
+    HTTPClient    *http.Client  // default: 60s total timeout, loopback-only
+    sessionID     atomic.Value  // string, mint on first response header
+    stdoutMu      sync.Mutex    // serialize writes
+}
+
+// Goroutine 1: stdin → POST → stdout
+func (r *HTTPToStdioRelay) stdinPump(ctx context.Context) error { ... }
+
+// Goroutine 2: GET /mcp (SSE) → stdout
+func (r *HTTPToStdioRelay) sseListener(ctx context.Context) error { ... }
+
+// Entry point: parallel start both, wait for either stdin EOF or ctx cancel
+func (r *HTTPToStdioRelay) Run(ctx context.Context) error {
+    errCh := make(chan error, 2)
+    go func() { errCh <- r.stdinPump(ctx) }()
+    go func() { errCh <- r.sseListener(ctx) }()
+    // First error wins, other goroutine canceled via ctx
+    ...
+    // On shutdown: DELETE /mcp with session id
+    r.terminateSession()
+    return firstErr
+}
+```
+
+Estimated Task 2 LOC: ~250 Go + ~150 test. Total relay.go ≈ 300 LOC, well within "single-file-fits-in-head" territory.
 
 ---
 
