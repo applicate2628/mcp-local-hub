@@ -1,0 +1,28 @@
+name: wolfram
+kind: global
+transport: stdio-bridge
+command: node
+base_args:
+  - "C:/Users/dima_/.local/mcp-servers/wolframalpha-llm-mcp/build/index.js"
+env:
+  WOLFRAM_LLM_APP_ID: "secret:wolfram_app_id"
+
+daemons:
+  - name: default
+    port: 9125
+
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+  - client: codex-cli
+    daemon: default
+    url_path: /mcp
+  - client: gemini-cli
+    daemon: default
+    url_path: /mcp
+  - client: antigravity
+    daemon: default
+    url_path: /mcp
+
+weekly_refresh: false
