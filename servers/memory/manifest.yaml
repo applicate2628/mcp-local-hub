@@ -1,0 +1,29 @@
+name: memory
+kind: global
+transport: stdio-bridge
+command: npx
+base_args:
+  - "-y"
+  - "@modelcontextprotocol/server-memory"
+env:
+  MEMORY_FILE_PATH: "c:/Users/dima_/OneDrive/Documents/env/Agents/memory.jsonl"
+
+daemons:
+  - name: default
+    port: 9123
+
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+  - client: codex-cli
+    daemon: default
+    url_path: /mcp
+  - client: gemini-cli
+    daemon: default
+    url_path: /mcp
+  - client: antigravity
+    daemon: default
+    url_path: /mcp
+
+weekly_refresh: false
