@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 
+	"mcp-local-hub/internal/clients"
+
 	"github.com/spf13/cobra"
 )
 
@@ -15,7 +17,7 @@ func newRollbackCmdReal() *cobra.Command {
 		Use:   "rollback",
 		Short: "Restore the latest mcp-local-hub backup for each client",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			allClients := mustAllClients()
+			allClients := clients.AllClients()
 			restored := 0
 			for name, c := range allClients {
 				if !c.Exists() {

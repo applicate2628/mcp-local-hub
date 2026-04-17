@@ -62,3 +62,22 @@ type ErrClientNotInstalled struct{ Client string }
 func (e *ErrClientNotInstalled) Error() string {
 	return "client not installed: " + e.Client
 }
+
+// AllClients returns the map of {client-name -> Client} for every supported
+// adapter. Factories that return an error (e.g. UserHomeDir failure) are
+// silently skipped, so callers that iterate the map see only adapters that
+// could be constructed on the current host. This is the shared accessor
+// used by both internal/api and internal/cli.
+func AllClients() map[string]Client {
+	result := map[string]Client{}
+	for _, factory := range []func() (Client, error){
+		NewClaudeCode, NewCodexCLI, NewGeminiCLI, NewAntigravity,
+	} {
+		c, err := factory()
+		if err != nil {
+			continue
+		}
+		result[c.Name()] = c
+	}
+	return result
+}

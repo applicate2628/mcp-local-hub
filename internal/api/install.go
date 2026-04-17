@@ -204,7 +204,7 @@ func (a *API) Uninstall(server string) (*UninstallReport, error) {
 		}
 	}
 	// Remove client entries.
-	allClients := mustAllClients()
+	allClients := clients.AllClients()
 	for _, b := range m.ClientBindings {
 		client := allClients[b.Client]
 		if client == nil || !client.Exists() {
@@ -383,7 +383,7 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan) error {
 	if err != nil {
 		return fmt.Errorf("resolve executable path: %w", err)
 	}
-	allClients := mustAllClients()
+	allClients := clients.AllClients()
 	for _, u := range p.ClientUpdates {
 		client := allClients[u.Client]
 		if client == nil {
@@ -448,19 +448,3 @@ func clientConfigPath(name string) (string, error) {
 	}
 }
 
-// mustAllClients builds the map of {client-name -> Client}. Private helper
-// owned by the api package; a parallel copy lives in cli for commands that
-// do not yet call through api (rollback).
-func mustAllClients() map[string]clients.Client {
-	result := map[string]clients.Client{}
-	for _, factory := range []func() (clients.Client, error){
-		clients.NewClaudeCode, clients.NewCodexCLI, clients.NewGeminiCLI, clients.NewAntigravity,
-	} {
-		c, err := factory()
-		if err != nil {
-			continue
-		}
-		result[c.Name()] = c
-	}
-	return result
-}

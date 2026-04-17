@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"mcp-local-hub/internal/api"
-	"mcp-local-hub/internal/clients"
 
 	"github.com/spf13/cobra"
 )
@@ -55,20 +54,3 @@ func newInstallCmdReal() *cobra.Command {
 	return c
 }
 
-// mustAllClients builds the map of {client-name -> Client}. Used by cli
-// commands that have not yet migrated to the api package (rollback,
-// uninstall wrapper pre-refactor). Kept in cli so those commands compile;
-// api owns its own private copy.
-func mustAllClients() map[string]clients.Client {
-	result := map[string]clients.Client{}
-	for _, factory := range []func() (clients.Client, error){
-		clients.NewClaudeCode, clients.NewCodexCLI, clients.NewGeminiCLI, clients.NewAntigravity,
-	} {
-		c, err := factory()
-		if err != nil {
-			continue
-		}
-		result[c.Name()] = c
-	}
-	return result
-}
