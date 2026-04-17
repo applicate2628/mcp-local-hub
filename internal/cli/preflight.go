@@ -11,13 +11,22 @@ import (
 
 // Preflight verifies install preconditions. Returns first error found.
 // Called by install before any side effects.
-func Preflight(m *config.ServerManifest) error {
+//
+// daemonFilter must match the same filter used by BuildPlan — only daemons
+// that the install will actually (re)create have their ports checked. Without
+// this alignment, a partial install would fail preflight whenever sibling
+// daemons (already running from a prior install) occupy their assigned ports,
+// even though those ports are not being touched by the current invocation.
+func Preflight(m *config.ServerManifest, daemonFilter string) error {
 	// 1. Command available.
 	if _, err := exec.LookPath(m.Command); err != nil {
 		return fmt.Errorf("command %q not found on PATH: %w", m.Command, err)
 	}
-	// 2. Ports free (for global daemons).
+	// 2. Ports free — only for daemons in the filtered scope.
 	for _, d := range m.Daemons {
+		if daemonFilter != "" && d.Name != daemonFilter {
+			continue
+		}
 		if portInUse(d.Port) {
 			return fmt.Errorf("port %d already in use (needed for daemon %s/%s)", d.Port, m.Name, d.Name)
 		}

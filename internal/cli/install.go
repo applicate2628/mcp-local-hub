@@ -55,7 +55,7 @@ func newInstallCmdReal() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := Preflight(m); err != nil {
+			if err := Preflight(m, daemonFilter); err != nil {
 				return err
 			}
 			plan, err := BuildPlan(m, daemonFilter)
