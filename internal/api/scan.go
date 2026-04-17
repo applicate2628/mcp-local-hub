@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"mcp-local-hub/internal/config"
+
 	toml "github.com/pelletier/go-toml/v2"
 )
 
@@ -19,6 +21,7 @@ type ScanOpts struct {
 	GeminiConfigPath      string
 	AntigravityConfigPath string
 	ManifestDir           string
+	WithProcessCount      bool // populate ScanEntry.ProcessCount via wmic
 }
 
 // perSessionServers are MCP servers whose state genuinely cannot be shared
@@ -84,7 +87,50 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 	for _, e := range entries {
 		out.Entries = append(out.Entries, *e)
 	}
+	if opts.WithProcessCount {
+		for i := range out.Entries {
+			patterns := patternsForServer(out.Entries[i].Name, opts.ManifestDir)
+			if len(patterns) == 0 {
+				continue
+			}
+			count, err := a.CountProcesses(patterns)
+			if err == nil {
+				out.Entries[i].ProcessCount = count
+			}
+		}
+	}
 	return out, nil
+}
+
+// patternsForServer returns the substring patterns used to identify running
+// processes of this server. For manifested servers, it uses command + any
+// reasonably long non-flag arg (typically a recognizable script or package
+// name). For non-manifested (unknown/per-session) servers, it falls back to
+// the server name only — callers should treat counts for unknown servers
+// as an upper bound.
+func patternsForServer(serverName, manifestDir string) []string {
+	f, err := os.Open(filepath.Join(manifestDir, serverName, "manifest.yaml"))
+	if err != nil {
+		return []string{serverName}
+	}
+	defer f.Close()
+	m, err := config.ParseManifest(f)
+	if err != nil {
+		return []string{serverName}
+	}
+	var out []string
+	if m.Command != "" {
+		out = append(out, m.Command)
+	}
+	for _, arg := range m.BaseArgs {
+		if len(arg) > 3 && !strings.HasPrefix(arg, "-") {
+			out = append(out, arg)
+		}
+	}
+	if len(out) == 0 {
+		out = append(out, serverName)
+	}
+	return out
 }
 
 func scanClaude(entries map[string]*ScanEntry, path string) error {

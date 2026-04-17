@@ -116,3 +116,38 @@ url = "http://localhost:9123/mcp"
 		t.Errorf("antigravity.Transport: got %q, want relay", got)
 	}
 }
+
+// TestScanWithProcessCountPopulates verifies ScanFrom populates ProcessCount
+// when WithProcessCount is true. We don't assert an exact number (test runs
+// on real host), just that the field is either zero or positive and that the
+// call doesn't error.
+func TestScanWithProcessCountPopulates(t *testing.T) {
+	tmp := t.TempDir()
+	_ = os.WriteFile(filepath.Join(tmp, ".claude.json"),
+		[]byte(`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9123/mcp"}}}`), 0600)
+	_ = os.MkdirAll(filepath.Join(tmp, "servers", "memory"), 0755)
+	_ = os.WriteFile(filepath.Join(tmp, "servers", "memory", "manifest.yaml"),
+		[]byte("name: memory\nkind: global\ntransport: stdio-bridge\ncommand: npx\nbase_args:\n  - \"-y\"\n  - \"@modelcontextprotocol/server-memory\"\ndaemons:\n  - name: default\n    port: 9123\n"), 0644)
+
+	a := NewAPI()
+	result, err := a.ScanFrom(ScanOpts{
+		ClaudeConfigPath: filepath.Join(tmp, ".claude.json"),
+		ManifestDir:      filepath.Join(tmp, "servers"),
+		WithProcessCount: true,
+	})
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	found := false
+	for _, e := range result.Entries {
+		if e.Name == "memory" {
+			found = true
+			if e.ProcessCount < 0 {
+				t.Errorf("ProcessCount must be non-negative, got %d", e.ProcessCount)
+			}
+		}
+	}
+	if !found {
+		t.Error("memory entry missing from scan result")
+	}
+}

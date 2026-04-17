@@ -33,6 +33,7 @@ type ScanEntry struct {
 	ClientPresence map[string]ClientEntry `json:"client_presence"`
 	ManifestExists bool                   `json:"manifest_exists"`
 	CanMigrate     bool                   `json:"can_migrate"`
+	ProcessCount   int                    `json:"process_count,omitempty"`
 }
 
 // ClientEntry captures the shape of how one MCP server is configured inside
