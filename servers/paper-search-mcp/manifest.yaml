@@ -1,0 +1,32 @@
+name: paper-search-mcp
+kind: global
+transport: stdio-bridge
+command: uvx
+base_args:
+  - "--from"
+  - "paper-search-mcp"
+  - "python"
+  - "-m"
+  - "paper_search_mcp.server"
+env:
+  PAPER_SEARCH_MCP_UNPAYWALL_EMAIL: "secret:unpaywall_email"
+
+daemons:
+  - name: default
+    port: 9127
+
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+  - client: codex-cli
+    daemon: default
+    url_path: /mcp
+  - client: gemini-cli
+    daemon: default
+    url_path: /mcp
+  - client: antigravity
+    daemon: default
+    url_path: /mcp
+
+weekly_refresh: false
