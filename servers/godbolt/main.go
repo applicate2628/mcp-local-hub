@@ -271,10 +271,25 @@ func (gs *GodboltServer) getVersion(ctx context.Context, req *mcp.ReadResourceRe
 // e.g., from "resource://compilers/cpp" with template "resource://compilers/{language_id}"
 // returns "cpp"
 func extractPathParam(uri, paramName string) string {
-	// Simple extraction: split by '/' and get the last segment
+	// Parse resource://path/to/param1/param2
+	// and extract by position based on paramName
 	parts := strings.Split(uri, "/")
-	if len(parts) > 0 {
-		return parts[len(parts)-1]
+
+	// Map parameter name to position for known templates
+	var paramPosition int
+	switch {
+	case paramName == "language_id":
+		paramPosition = 2 // resource://compilers/cpp → parts[2] = "cpp"
+	case paramName == "instruction_set":
+		paramPosition = 2 // resource://asm/x86/mov → parts[2] = "x86"
+	case paramName == "opcode":
+		paramPosition = 3 // resource://asm/x86/mov → parts[3] = "mov"
+	default:
+		return ""
+	}
+
+	if paramPosition < len(parts) {
+		return parts[paramPosition]
 	}
 	return ""
 }
