@@ -61,6 +61,8 @@ type StdioHost struct {
 	// no `id`). Each subscriber holds one buffered channel.
 	sseMu      sync.Mutex
 	sseClients []chan []byte
+
+	done chan struct{} // closed by Stop() to unblock pending handlers
 }
 
 func NewStdioHost(cfg HostConfig) (*StdioHost, error) {
@@ -71,6 +73,7 @@ func NewStdioHost(cfg HostConfig) (*StdioHost, error) {
 		cfg:        cfg,
 		testStdout: make(chan []byte, 16),
 		pending:    make(map[int64]chan json.RawMessage),
+		done:       make(chan struct{}),
 	}, nil
 }
 
@@ -146,6 +149,7 @@ func (h *StdioHost) Stop() error {
 		return nil
 	}
 	h.stopped = true
+	close(h.done) // unblock any pending HTTP handlers waiting on the subprocess
 	_ = h.stdin.Close()
 	if h.cmd != nil && h.cmd.Process != nil {
 		_ = h.cmd.Process.Kill()
@@ -335,6 +339,8 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(out)
+	case <-h.done:
+		http.Error(w, "host shutting down", http.StatusServiceUnavailable)
 	case <-r.Context().Done():
 		http.Error(w, "client canceled", http.StatusRequestTimeout)
 	case <-time.After(30 * time.Second):
@@ -374,6 +380,8 @@ func (h *StdioHost) handleSSE(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-r.Context().Done():
+			return
+		case <-h.done:
 			return
 		case line := <-ch:
 			_, _ = fmt.Fprintf(w, "data: %s\n\n", line)

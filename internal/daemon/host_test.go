@@ -235,6 +235,113 @@ for line in sys.stdin:
 	}
 }
 
+// TestHostStopUnblocksPendingHandlers verifies that calling Stop() while
+// a handler is waiting for a subprocess response unblocks the handler
+// immediately with 503 instead of waiting the full 30s timeout.
+func TestHostStopUnblocksPendingHandlers(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Silent subprocess: reads stdin but never writes stdout.
+	h, err := NewStdioHost(HostConfig{
+		Command: "python",
+		Args:    []string{"-u", "-c", "import sys\nfor _ in sys.stdin: pass"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := httptest.NewServer(h.HTTPHandler())
+	defer ts.Close()
+
+	// Start a request that will hang waiting for subprocess response.
+	done := make(chan int, 1)
+	go func() {
+		resp, err := http.Post(ts.URL+"/mcp", "application/json",
+			strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"test"}`))
+		if err != nil {
+			done <- -1
+			return
+		}
+		resp.Body.Close()
+		done <- resp.StatusCode
+	}()
+
+	// Give the handler a moment to enter the select.
+	time.Sleep(200 * time.Millisecond)
+
+	// Stop should unblock the handler quickly.
+	stopAt := time.Now()
+	_ = h.Stop()
+	unblocked := time.Since(stopAt)
+	if unblocked > 2*time.Second {
+		t.Errorf("Stop did not unblock handler quickly: took %v", unblocked)
+	}
+
+	select {
+	case status := <-done:
+		if status != http.StatusServiceUnavailable {
+			t.Errorf("handler got status %d, want 503", status)
+		}
+	case <-time.After(3 * time.Second):
+		t.Error("handler did not return within 3s after Stop")
+	}
+}
+
+// TestHostStopUnblocksSSE verifies that calling Stop() while an SSE client
+// is subscribed unblocks the handler quickly instead of hanging forever.
+func TestHostStopUnblocksSSE(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	h, err := NewStdioHost(HostConfig{Command: echoSubprocCommand(), Args: echoSubprocArgs()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := httptest.NewServer(h.HTTPHandler())
+	defer ts.Close()
+
+	// Open an SSE subscription in background; it will block reading.
+	sseDone := make(chan struct{})
+	go func() {
+		defer close(sseDone)
+		req, _ := http.NewRequest("GET", ts.URL+"/mcp", nil)
+		req.Header.Set("Accept", "text/event-stream")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return
+		}
+		defer resp.Body.Close()
+		// Drain body until connection closes.
+		io.Copy(io.Discard, resp.Body)
+	}()
+
+	// Let the SSE handler enter the stream loop.
+	time.Sleep(200 * time.Millisecond)
+
+	// Stop should unblock the SSE handler quickly.
+	stopAt := time.Now()
+	_ = h.Stop()
+	unblocked := time.Since(stopAt)
+	if unblocked > 2*time.Second {
+		t.Errorf("Stop did not unblock SSE handler quickly: took %v", unblocked)
+	}
+
+	select {
+	case <-sseDone:
+		// Handler exited — good.
+	case <-time.After(3 * time.Second):
+		t.Error("SSE handler did not return within 3s after Stop")
+	}
+}
+
 // TestHostDELETETerminates verifies DELETE /mcp is accepted.
 func TestHostDELETETerminates(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

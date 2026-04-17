@@ -1,9 +1,13 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/daemon"
@@ -21,10 +25,17 @@ func newDaemonCmdReal() *cobra.Command {
 			if server == "" || daemonName == "" {
 				return fmt.Errorf("--server and --daemon are required")
 			}
-			manifestPath := filepath.Join("servers", server, "manifest.yaml")
+			// Resolve the manifest relative to the binary, not CWD —
+			// scheduler tasks may launch us with an inherited cwd that
+			// is not the repo root. Mirrors relay.go's discovery path.
+			exe, err := os.Executable()
+			if err != nil {
+				return fmt.Errorf("resolve executable: %w", err)
+			}
+			manifestPath := filepath.Join(filepath.Dir(exe), "servers", server, "manifest.yaml")
 			f, err := os.Open(manifestPath)
 			if err != nil {
-				return err
+				return fmt.Errorf("open manifest %s: %w", manifestPath, err)
 			}
 			defer f.Close()
 			m, err := config.ParseManifest(f)
@@ -66,12 +77,48 @@ func newDaemonCmdReal() *cobra.Command {
 				}
 				os.Exit(code)
 			} else if m.Transport == config.TransportStdioBridge {
-				ls := daemon.BuildBridgeSpec(m.Command, childArgs, spec.Port, env, logPath)
-				code, err := daemon.Launch(ls)
+				// Native Go stdio-host: spawns the inner stdio MCP server as
+				// a subprocess and exposes it on HTTP via the in-process host.
+				// Replaces the previous npx supergateway wrapper (bridge.go),
+				// removing the node/npm dependency from the runtime.
+				h, err := daemon.NewStdioHost(daemon.HostConfig{
+					Command: m.Command,
+					Args:    childArgs,
+					Env:     env,
+				})
 				if err != nil {
-					return err
+					return fmt.Errorf("NewStdioHost: %w", err)
 				}
-				os.Exit(code)
+				ctx := cmd.Context()
+				if err := h.Start(ctx); err != nil {
+					return fmt.Errorf("host.Start: %w", err)
+				}
+				srv := &http.Server{
+					Addr:              fmt.Sprintf("127.0.0.1:%d", spec.Port),
+					Handler:           h.HTTPHandler(),
+					ReadHeaderTimeout: 10 * time.Second,
+					// WriteTimeout intentionally 0 (unlimited): SSE streams are long-lived;
+					// writes are bounded per-line via the handler's own select/context,
+					// not by the server socket.
+				}
+				errCh := make(chan error, 1)
+				go func() { errCh <- srv.ListenAndServe() }()
+				select {
+				case err := <-errCh:
+					_ = h.Stop()
+					if errors.Is(err, http.ErrServerClosed) {
+						return nil
+					}
+					return fmt.Errorf("http server: %w", err)
+				case <-ctx.Done():
+					// Stop() first so handleSSE and handlePOST goroutines observe h.done
+					// and return; then Shutdown can complete without waiting on long-lived SSE.
+					_ = h.Stop()
+					shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					_ = srv.Shutdown(shutdownCtx)
+					return nil
+				}
 			} else {
 				return fmt.Errorf("unsupported transport %q", m.Transport)
 			}

@@ -1,3 +1,9 @@
+// Package daemon — bridge.go is DEPRECATED as of Phase 2.
+//
+// Original role: wrapped a stdio MCP server in `npx supergateway` to expose it
+// over HTTP. Replaced by internal/daemon/host.go, a native Go stdio-host that
+// handles the HTTP→stdio proxy without requiring node/npm. bridge.go is kept
+// for reference only; no production code path invokes it.
 package daemon
 
 import (
