@@ -10,11 +10,24 @@ secrets.age
 # Local config (gitignored per §3.8 of spec)
 config.local.yaml
 
-# Build outputs
+# Build outputs — drops from `go build ./cmd/<name>` at repo root
 /mcp
 /mcp.exe
 /mcp.exe~
+/mcphub
+/mcphub.exe
+/mcphub.exe~
+/godbolt
+/godbolt.exe
+/godbolt.exe~
+/lldb-bridge
+/lldb-bridge.exe
+/lldb-bridge.exe~
 /bin/
+
+# Editor saved-copy backups
+*.saved.bak
+~*.bak
 
 # Go
 *.test
