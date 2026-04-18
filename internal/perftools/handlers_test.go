@@ -2,6 +2,8 @@ package perftools
 
 import (
 	"encoding/json"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -58,4 +60,76 @@ func TestToolsResource_ReturnsJSONCatalog(t *testing.T) {
 			t.Errorf("catalog missing key %q in JSON: %s", key, rc.Text)
 		}
 	}
+}
+
+func TestClangTidy_ParsesRealOutput(t *testing.T) {
+	cat := DetectTools()
+	if !cat.ClangTidy.Installed {
+		t.Skip("clang-tidy not on PATH; integration test skipped")
+	}
+
+	// Tiny C++ source with a clearly-flagged performance issue —
+	// pass-by-value of a non-trivial type.
+	dir := t.TempDir()
+	srcPath := dir + "/t.cpp"
+	if err := os.WriteFile(srcPath, []byte(
+		"#include <string>\nvoid f(std::string s){(void)s;}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Minimal compile_commands.json pointing at the temp file.
+	ccPath := dir + "/compile_commands.json"
+	cc := `[{"directory":"` + filepathFwd(dir) + `","file":"` + filepathFwd(srcPath) +
+		`","command":"clang++ -std=c++17 -c ` + filepathFwd(srcPath) + `"}]`
+	if err := os.WriteFile(ccPath, []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tb := &PerfToolbox{tools: cat}
+	args, _ := json.Marshal(map[string]interface{}{
+		"files":        []string{srcPath},
+		"project_root": dir,
+		"checks":       "performance-unnecessary-value-param",
+	})
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: args}}
+
+	result, err := tb.clangTidyTool(t.Context(), req)
+	if err != nil {
+		t.Fatalf("clangTidyTool: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("tool returned IsError=true: %+v", contentText(result))
+	}
+
+	body := contentText(result)
+	// Expect JSON with at least one diagnostic referencing our check.
+	if !strings.Contains(body, "performance-unnecessary-value-param") {
+		t.Errorf("expected performance-unnecessary-value-param diagnostic in output:\n%s", body)
+	}
+	// Must be valid JSON.
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
+		t.Fatalf("tool output is not valid JSON: %v\n%s", err, body)
+	}
+	if _, ok := parsed["diagnostics"]; !ok {
+		t.Errorf("output JSON missing diagnostics key: %s", body)
+	}
+}
+
+// contentText extracts the Text field from the first TextContent in a
+// CallToolResult. Used by every handler test in this file.
+func contentText(r *mcp.CallToolResult) string {
+	if len(r.Content) == 0 {
+		return ""
+	}
+	if tc, ok := r.Content[0].(*mcp.TextContent); ok {
+		return tc.Text
+	}
+	return ""
+}
+
+// filepathFwd returns a filesystem path with forward slashes so it can
+// be safely embedded inside a JSON string literal without escape hell.
+func filepathFwd(p string) string {
+	return strings.ReplaceAll(p, `\`, `/`)
 }

@@ -48,7 +48,38 @@ func registerResources(tb *PerfToolbox) {
 // in their respective files; this function is the single registration
 // point so Tasks 2-5 each add one AddTool call here.
 func registerTools(tb *PerfToolbox) {
-	// Tasks 2-5 will AddTool here.
+	tb.server.AddTool(&mcp.Tool{
+		Name: "clang_tidy",
+		Description: "Run clang-tidy against source files using the project's compile_commands.json. " +
+			"Returns structured JSON with diagnostics[] (file, line, column, severity, check, message), " +
+			"plus raw_stderr and exit_code. Requires compile_commands.json in project_root — generate via CMake " +
+			"(-DCMAKE_EXPORT_COMPILE_COMMANDS=ON) or bear/compiledb for Make-based builds. " +
+			"Common checks preset: performance-*,bugprone-*,readability-*.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"files": map[string]interface{}{
+					"type":        "array",
+					"items":       map[string]interface{}{"type": "string"},
+					"description": "List of source file paths to analyze (absolute or relative to project_root).",
+				},
+				"project_root": map[string]interface{}{
+					"type":        "string",
+					"description": "Directory containing compile_commands.json. clang-tidy resolves flags per-file from this DB.",
+				},
+				"checks": map[string]interface{}{
+					"type":        "string",
+					"description": "Optional. Comma-separated check pattern (e.g. 'performance-*,bugprone-*'). Omit to use .clang-tidy config or default checks.",
+				},
+				"extra_args": map[string]interface{}{
+					"type":        "array",
+					"items":       map[string]interface{}{"type": "string"},
+					"description": "Optional. Additional raw arguments passed verbatim before file list (e.g. ['--header-filter=.*', '--quiet']).",
+				},
+			},
+			"required": []string{"files", "project_root"},
+		},
+	}, tb.clangTidyTool)
 }
 
 // getToolsResource serves resource://tools — marshals the catalog to
