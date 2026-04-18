@@ -65,13 +65,27 @@ func (a *API) BackupsListIn(dir, liveName string) ([]BackupInfo, error) {
 // BackupsClean prunes timestamped backups for all 4 clients, keeping only
 // keepN most recent per client. Sentinels never touched.
 func (a *API) BackupsClean(keepN int) ([]string, error) {
+	return a.backupsCleanAll(keepN, false)
+}
+
+// BackupsCleanPreview returns the list of backup files that would be removed
+// by BackupsClean(keepN) without actually deleting them. Used by the CLI's
+// `backups clean --dry-run` flag so users can audit the prune list before
+// committing to the deletion.
+func (a *API) BackupsCleanPreview(keepN int) ([]string, error) {
+	return a.backupsCleanAll(keepN, true)
+}
+
+// backupsCleanAll is the shared implementation of BackupsClean and
+// BackupsCleanPreview. dryRun=true returns candidate paths without deleting.
+func (a *API) backupsCleanAll(keepN int, dryRun bool) ([]string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
 	}
 	var removed []string
 	for _, c := range clientFiles(home) {
-		r, err := a.BackupsCleanIn(filepath.Dir(c), filepath.Base(c), keepN)
+		r, err := a.backupsCleanInImpl(filepath.Dir(c), filepath.Base(c), keepN, dryRun)
 		if err != nil {
 			continue
 		}
@@ -82,6 +96,11 @@ func (a *API) BackupsClean(keepN int) ([]string, error) {
 
 // BackupsCleanIn is the tempdir-capable form of BackupsClean.
 func (a *API) BackupsCleanIn(dir, liveName string, keepN int) ([]string, error) {
+	return a.backupsCleanInImpl(dir, liveName, keepN, false)
+}
+
+// backupsCleanInImpl is the shared core for BackupsCleanIn and the dry-run path.
+func (a *API) backupsCleanInImpl(dir, liveName string, keepN int, dryRun bool) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -115,6 +134,13 @@ func (a *API) BackupsCleanIn(dir, liveName string, keepN int) ([]string, error) 
 	sort.Slice(ts, func(i, j int) bool { return ts[i].modTime.After(ts[j].modTime) })
 	var removed []string
 	for _, b := range ts[keepN:] {
+		if dryRun {
+			// Dry-run: return the would-be-deleted path without touching
+			// the filesystem. Caller lists these so the user can audit
+			// the prune set before re-running without --dry-run.
+			removed = append(removed, b.path)
+			continue
+		}
 		if err := os.Remove(b.path); err == nil {
 			removed = append(removed, b.path)
 		}

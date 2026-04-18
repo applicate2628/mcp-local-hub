@@ -54,27 +54,45 @@ func newBackupsListCmd() *cobra.Command {
 
 func newBackupsCleanCmd() *cobra.Command {
 	var keep int
+	var dryRun bool
 	c := &cobra.Command{
 		Use:   "clean",
 		Short: "Remove old timestamped backups, keeping only the N most recent per client",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a := api.NewAPI()
-			removed, err := a.BackupsClean(keep)
+			var (
+				candidates []string
+				err        error
+			)
+			if dryRun {
+				candidates, err = a.BackupsCleanPreview(keep)
+			} else {
+				candidates, err = a.BackupsClean(keep)
+			}
 			if err != nil {
 				return err
 			}
-			if len(removed) == 0 {
+			if len(candidates) == 0 {
 				fmt.Fprintln(cmd.OutOrStdout(), "Nothing to clean.")
 				return nil
 			}
-			for _, p := range removed {
-				fmt.Fprintf(cmd.OutOrStdout(), "\u2713 Removed %s\n", p)
+			verb := "Removed"
+			if dryRun {
+				verb = "Would remove"
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "\n%d file(s) removed.\n", len(removed))
+			for _, p := range candidates {
+				fmt.Fprintf(cmd.OutOrStdout(), "\u2713 %s %s\n", verb, p)
+			}
+			if dryRun {
+				fmt.Fprintf(cmd.OutOrStdout(), "\n%d file(s) would be removed. Re-run without --dry-run to delete.\n", len(candidates))
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "\n%d file(s) removed.\n", len(candidates))
+			}
 			return nil
 		},
 	}
 	c.Flags().IntVar(&keep, "keep", 5, "number of most recent timestamped backups to retain per client")
+	c.Flags().BoolVar(&dryRun, "dry-run", false, "list candidates without deleting")
 	return c
 }
 
