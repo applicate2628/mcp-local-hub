@@ -1,27 +1,18 @@
-package cli
-
-import (
-	"fmt"
-	"io"
-	"net"
-	"os"
-	"os/exec"
-	"os/signal"
-	"runtime"
-	"strconv"
-	"strings"
-	"syscall"
-	"time"
-
-	"github.com/spf13/cobra"
-)
-
-// newLldbBridgeCmdReal wires `mcphub lldb-bridge <host:port> [--lldb-path PATH]`.
-// This is the Go rewrite of the Python reference script at
-// C:\Users\dima_\.local\mcp-servers\lldb-bridge\bridge.py. Why this lives in
-// mcphub and not a standalone binary: we ship one exe for the whole stack,
-// so reusing it as the stdio MCP command removes an extra install step and
-// keeps upgrade semantics uniform with the other hub daemons.
+// Package lldb implements the stdio↔TCP bridge for LLDB's built-in MCP
+// server. It is consumed as a library from two entry points:
+//   - cmd/lldb-bridge, a standalone binary for users who don't want the hub
+//   - internal/lldb.NewCommand, embedded as an mcphub subcommand
+//
+// Both entry points share the same bridge loop, LLDB spawn logic, and
+// platform-specific applyNoWindow helpers via runLldbBridge, so there is
+// no behavior drift between shapes.
+//
+// This file is the Go rewrite of the Python reference script at
+// C:\Users\dima_\.local\mcp-servers\lldb-bridge\bridge.py. Why this lives
+// in mcphub (and as its own standalone binary) rather than as a Python
+// script: we ship one exe for the whole stack, so reusing it as the stdio
+// MCP command removes an extra install step and keeps upgrade semantics
+// uniform with the other hub daemons.
 //
 // LLDB's built-in MCP server (`protocol-server start MCP listen://host:port`)
 // speaks MCP over a raw TCP socket, not stdio — this bridge adapts that to
@@ -37,25 +28,21 @@ import (
 //  3. Forward stdin→socket and socket→stdout concurrently; either side
 //     closing triggers a full shutdown.
 //  4. If we spawned LLDB, terminate it on exit.
-func newLldbBridgeCmdReal() *cobra.Command {
-	var lldbPath string
-	c := &cobra.Command{
-		Use:    "lldb-bridge <host:port>",
-		Short:  "Stdio↔TCP bridge for LLDB's built-in MCP server (with auto-spawn)",
-		Hidden: true, // internal transport helper, not a user-facing verb
-		Args:   cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			host, port, err := parseHostPort(args[0])
-			if err != nil {
-				return err
-			}
-			return runLldbBridge(host, port, lldbPath)
-		},
-	}
-	c.Flags().StringVar(&lldbPath, "lldb-path", defaultLldbPath(),
-		"path to lldb executable (used only if the port is not already listening)")
-	return c
-}
+package lldb
+
+import (
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"os/exec"
+	"os/signal"
+	"runtime"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+)
 
 // Tunables kept explicit so future operators can justify changes without
 // digging through the bridge logic.

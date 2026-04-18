@@ -2,6 +2,9 @@ package cli
 
 import (
 	"github.com/spf13/cobra"
+
+	"mcp-local-hub/internal/godbolt"
+	"mcp-local-hub/internal/lldb"
 )
 
 // NewRootCmd builds the top-level `mcphub` command with all subcommand stubs attached.
@@ -34,7 +37,8 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newManifestCmd())
 	root.AddCommand(newSchedulerCmd())
 	root.AddCommand(newSettingsCmd())
-	root.AddCommand(newLldbBridgeCmd())
+	root.AddCommand(lldb.NewCommand())
+	root.AddCommand(godbolt.NewCommand())
 	return root
 }
 
@@ -68,7 +72,6 @@ func newBackupsCmd() *cobra.Command { return newBackupsCmdReal() }
 func newManifestCmd() *cobra.Command { return newManifestCmdReal() }
 func newSchedulerCmd() *cobra.Command { return newSchedulerCmdReal() }
 func newSettingsCmd() *cobra.Command  { return newSettingsCmdReal() }
-func newLldbBridgeCmd() *cobra.Command { return newLldbBridgeCmdReal() }
 
 func stub(name string) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
