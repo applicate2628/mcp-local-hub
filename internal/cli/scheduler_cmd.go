@@ -12,6 +12,20 @@ func newSchedulerCmdReal() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "scheduler",
 		Short: "Scheduler-level operations (upgrade tasks, manage weekly refresh)",
+		Long: `Manage Windows Task Scheduler task metadata directly, without
+reinstalling servers.
+
+Subcommands:
+  scheduler upgrade                  # rewrite every task's <Command> to
+                                     # the current canonical mcphub path.
+                                     # Fixes tasks left by an old install
+                                     # after 'mcphub setup' moved the binary.
+  scheduler weekly-refresh set <DAY>  # install a hub-wide weekly task that
+                  <HH:MM>              # runs 'mcphub restart --all' on the
+                                       # given schedule (3-letter day, 24h time)
+  scheduler weekly-refresh disable    # remove the hub-wide weekly task
+
+See also: install, setup, restart.`,
 	}
 	root.AddCommand(newSchedulerUpgradeCmd())
 	root.AddCommand(newSchedulerWeeklyRefreshCmd())

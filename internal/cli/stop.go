@@ -14,6 +14,22 @@ func newStopCmdReal() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "stop",
 		Short: "Stop daemon(s) without uninstalling (tasks and configs remain)",
+		Long: `Kill the live daemon process (by port) and /End its scheduler task.
+Scheduler task XML, client-config entries, and backups are untouched —
+you can 'restart' the same daemon back up later, or 'uninstall' to
+remove the task entirely.
+
+Examples:
+  mcphub stop --server serena                # all serena daemons
+  mcphub stop --server serena --daemon codex # one daemon
+  mcphub stop --all                          # every mcp-local-hub-* task
+
+When to use:
+  - Before 'mcphub setup' if the canonical binary is in use
+  - Before a rebuild, to release the exe file lock on Windows
+  - Temporarily disabling a server without uninstalling
+
+See also: restart, uninstall, status.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if all {
 				if server != "" {

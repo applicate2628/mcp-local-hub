@@ -84,7 +84,41 @@ func resolveSecretPath(name string) string {
 }
 
 func newSecretsCmdReal() *cobra.Command {
-	root := &cobra.Command{Use: "secrets", Short: "Manage encrypted secrets"}
+	root := &cobra.Command{
+		Use:   "secrets",
+		Short: "Manage encrypted secrets",
+		Long: `Manage the age-encrypted key/value vault used by manifests to inject
+environment variables at daemon startup (e.g. 'env: WOLFRAM_APP_ID:
+secret:wolfram_app_id' in wolfram's manifest).
+
+Storage locations (per-user, OS-canonical — independent of repo/binary):
+  Windows:  %LOCALAPPDATA%\mcp-local-hub\{.age-key,secrets.age}
+  Linux:    $XDG_DATA_HOME/mcp-local-hub/...
+  macOS:    ~/Library/Application Support/mcp-local-hub/...
+
+.age-key is your private identity (like an SSH private key). Lose it,
+lose access. Copy via password manager / encrypted USB / trusted scp
+when moving to a new machine.
+
+Subcommands:
+  secrets init                      # generate .age-key + empty secrets.age
+  secrets set <key> --value <val>   # add or update a secret
+  secrets get <key>                 # print value (clipboard by default)
+  secrets get <key> --show          # print to stdout
+  secrets list                      # list keys (not values)
+  secrets delete <key>              # remove a key
+  secrets edit                      # open decrypted vault in $EDITOR
+  secrets migrate --from-client X   # scan client configs for API keys,
+                                    # interactively import into vault
+
+Manifest env-reference prefixes:
+  secret:KEY   — look up in encrypted vault (this)
+  file:KEY     — look up in config.local.yaml (gitignored)
+  $VAR         — read OS environment variable
+  anything-else — literal value
+
+See also: install (fails preflight if a secret: reference is missing).`,
+	}
 	root.AddCommand(newSecretsInitCmd())
 	root.AddCommand(newSecretsSetCmd())
 	root.AddCommand(newSecretsGetCmd())

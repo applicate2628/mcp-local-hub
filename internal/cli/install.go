@@ -25,6 +25,30 @@ func newInstallCmdReal() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "install",
 		Short: "Install an MCP server as shared daemon(s)",
+		Long: `Install an MCP server from a manifest under servers/<name>/manifest.yaml.
+
+What install does:
+  1. Verifies mcphub is on PATH (prompts to 'setup' if not, in a terminal)
+  2. Creates Windows Task Scheduler tasks — one per daemon, plus an
+     optional weekly-refresh task if the manifest declares one
+  3. Starts the scheduler tasks immediately (won't wait for next logon)
+  4. Writes a timestamped backup for each client config it touches
+  5. Patches each client's config per the manifest's client_bindings list:
+     HTTP entries for Claude/Codex/Gemini, stdio-relay entries for Antigravity
+
+Examples:
+  mcphub install --server serena               # install all daemons in the manifest
+  mcphub install --server serena --daemon codex # install only one daemon
+  mcphub install --server serena --dry-run     # preview actions, change nothing
+  mcphub install --all                         # install every shipped manifest
+
+Prerequisites:
+  - First-time users: run 'mcphub setup' once to canonicalize the binary
+    at ~/.local/bin and register it on user PATH
+  - Secrets (wolfram, paper-search-mcp): 'mcphub secrets set <key>' first
+  - Windows: Task Scheduler backend only. Linux/macOS ship compile-only stubs.
+
+See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// If mcphub is not on PATH, try to bootstrap before we hit
 			// the API's preflight check. Three-tier fallback:

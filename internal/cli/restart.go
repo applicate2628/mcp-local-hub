@@ -15,6 +15,24 @@ func newRestartCmdReal() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "restart",
 		Short: "Restart daemon(s): stop + re-run scheduler tasks",
+		Long: `Kill the live daemon process (by port) and re-run its scheduler task(s).
+Equivalent to 'mcphub stop' + 'schtasks /Run' in one step, with the
+kill-before-rerun ordering that a naive 'schtasks /End + /Run' misses
+(scheduler /End only ends the task action, not the spawned daemon; the
+port stays bound, next /Run silently fails).
+
+Examples:
+  mcphub restart --server serena    # restart all daemons for one server
+  mcphub restart --all              # restart every mcp-local-hub-* task
+                                    # (skips -weekly-refresh tasks)
+
+When to use:
+  - After rebuilding the mcphub binary — pick up the new embedded code
+  - After editing a manifest (daemons read manifests at startup, not live)
+  - After updating a secret that a daemon consumes via env
+  - When 'status' shows a task Stopped and you need it back up
+
+See also: stop, status, scheduler upgrade, setup.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if all {
 				if server != "" {

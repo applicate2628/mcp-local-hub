@@ -34,14 +34,21 @@ func Run(ctx context.Context) error {
 	return nil
 }
 
-// registerResources mounts the discovery resource.
+// registerResources mounts the discovery resource and the workflow guide.
 func registerResources(tb *PerfToolbox) {
 	tb.server.AddResource(&mcp.Resource{
 		URI:         "resource://tools",
 		Name:        "tools",
-		Description: "Catalog of detected perf-analysis tools with versions (clang-tidy, hyperfine, llvm-objdump, include-what-you-use).",
+		Description: "Catalog of detected perf-analysis tools with versions (clang-tidy, hyperfine, llvm-objdump, include-what-you-use). Check this first before calling any tool — not all four may be installed on every host.",
 		MIMEType:    "application/json",
 	}, tb.getToolsResource)
+
+	tb.server.AddResource(&mcp.Resource{
+		URI:         "resource://workflow",
+		Name:        "workflow",
+		Description: "Workflow guide: when to use which tool, canonical perf-review patterns (clang_tidy → godbolt verify → hyperfine measure → llvm_objdump confirm), anti-patterns, and cross-server handoffs to godbolt. Read this first when orienting to the perftools MCP surface.",
+		MIMEType:    "text/markdown",
+	}, tb.getWorkflow)
 }
 
 // registerTools mounts tool handlers. Handlers themselves are defined

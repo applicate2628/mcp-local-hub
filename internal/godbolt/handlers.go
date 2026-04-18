@@ -58,6 +58,13 @@ func registerResources(gs *GodboltServer) {
 		Name:        "version",
 		Description: "Get the version information of the Compiler Explorer instance.",
 	}, gs.getVersion)
+
+	gs.server.AddResource(&mcp.Resource{
+		URI:         "resource://workflow",
+		Name:        "workflow",
+		Description: "Workflow guide: when to use which tool, canonical perf-review patterns, anti-patterns, and cross-server handoffs to perftools. Read this first when orienting to the godbolt MCP surface.",
+		MIMEType:    "text/markdown",
+	}, gs.getWorkflow)
 }
 
 // registerTools attaches the three write-capable tools (compile_code,

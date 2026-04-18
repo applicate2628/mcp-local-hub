@@ -13,6 +13,23 @@ func newBackupsCmdReal() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "backups",
 		Short: "List, clean, or show client config backups",
+		Long: `Manage '.bak-mcp-local-hub-*' sibling files that install/migrate/rollback
+write next to each managed client config. Every install operation writes
+a timestamped backup BEFORE mutating a config — rollback uses the most
+recent, 'rollback --original' uses the pristine '-original' sentinel
+(written exactly once on the first-ever backup per client).
+
+Subcommands:
+  backups list           # table of all backups across all 4 clients
+  backups clean          # prune old timestamped backups (keep N most recent)
+  backups clean --dry-run # preview the prune set without deleting
+  backups show <path>    # print a backup file's contents
+
+The pristine sentinel ('.bak-mcp-local-hub-original') is ALWAYS preserved
+by clean — only timestamped backups get pruned. That sentinel is your
+nuclear undo for 'rollback --original'.
+
+See also: rollback, install, uninstall.`,
 	}
 	root.AddCommand(newBackupsListCmd())
 	root.AddCommand(newBackupsCleanCmd())

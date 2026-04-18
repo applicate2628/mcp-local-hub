@@ -23,6 +23,24 @@ func newDaemonCmdReal() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "daemon",
 		Short: "Run a daemon (invoked by scheduler, not by humans)",
+		Long: `Run a single mcp-local-hub daemon. This is the actual server process
+that Task Scheduler launches per the scheduler task XML's <Exec>/<Command>
+and <Arguments> fields. Not intended for interactive use.
+
+Flow:
+  1. Reads the server's manifest from the binary's //go:embed servers/
+  2. Sets up env per manifest (including secret:KEY dereferencing)
+  3. For native-http servers: launches the upstream binary directly
+  4. For stdio-bridge servers: spawns child + multiplexes HTTP clients
+     onto it via the in-process Go stdio-host
+  5. Tees child stdout+stderr to %LOCALAPPDATA%\mcp-local-hub\logs\<s>-<d>.log
+  6. Exits non-zero on unexpected child-process death — Task Scheduler's
+     RestartOnFailure (3 retries × 1 min) auto-recovers
+
+The scheduler task's XML is created by 'mcphub install'; you should never
+need to call this manually.
+
+See also: install, logs, restart, status.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if server == "" || daemonName == "" {
 				return fmt.Errorf("--server and --daemon are required")

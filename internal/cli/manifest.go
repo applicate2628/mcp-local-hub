@@ -15,6 +15,24 @@ func newManifestCmdReal() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "manifest",
 		Short: "Manage server manifests under servers/*/manifest.yaml",
+		Long: `Inspect and author server manifests. Manifests are the source-of-truth
+for each server — daemon name(s), port(s), command + args, env
+references, client bindings, and weekly-refresh policy.
+
+Manifests are embedded into the mcphub binary via //go:embed at build
+time (servers/embed.go). This lets the canonical ~/.local/bin/mcphub.exe
+resolve manifests without needing a sibling servers/ directory on disk —
+at the cost of requiring a rebuild to pick up manifest edits.
+
+Subcommands:
+  manifest list             # names of all embedded manifests
+  manifest show <name>      # print a manifest's YAML content
+  manifest create <name>    # scaffold a new manifest interactively
+  manifest edit <name>      # open in $EDITOR (source file, not embed)
+
+After editing / creating a manifest, rebuild + 'mcphub install --server <n>'.
+
+See also: install, scan (flags un-manifested clients as "unknown").`,
 	}
 	root.AddCommand(newManifestListCmd())
 	root.AddCommand(newManifestShowCmd())

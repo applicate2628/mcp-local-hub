@@ -178,15 +178,37 @@ func newSetupCmdReal() *cobra.Command {
 	return &cobra.Command{
 		Use:   "setup",
 		Short: "Install mcphub to ~/.local/bin and register on user PATH",
-		Long: `Install the currently-running mcphub binary to the canonical user-local
-location (~/.local/bin) and make sure that directory is on the user PATH.
+		Long: `Canonicalize the mcphub binary at ~/.local/bin/mcphub.exe (Windows) or
+~/.local/bin/mcphub (Linux/macOS) and ensure that directory is on user PATH.
 
-This lets scheduler tasks and Antigravity relay entries reference mcphub
-by short name rather than an absolute path, so you can move or rebuild
-the binary without breaking previously-registered integrations.
+What setup does:
+  1. Copies the currently-running mcphub binary to ~/.local/bin/
+     (idempotent — skips copy if already at target)
+  2. Windows: ensures %USERPROFILE%\.local\bin is in HKCU\Environment\Path,
+     broadcasts WM_SETTINGCHANGE so new shells pick it up
+  3. Linux/macOS: prints the 'export PATH=...' line to paste into shell rc
+     (does NOT modify rc files automatically)
 
-Idempotent: a second run produces no changes if the target is already
-up to date.`,
+Why this exists:
+  Scheduler tasks reference ~/.local/bin/mcphub.exe by absolute path
+  (Task Scheduler's CreateProcess doesn't honor PATH reliably, so a
+  bare 'mcphub.exe' Command fails with ERROR_FILE_NOT_FOUND). The
+  canonical path depends only on $HOME, not on dev checkout location,
+  so moving or rebuilding the binary only requires 're-running setup'
+  — scheduler tasks keep working without any rewrite.
+
+Examples:
+  mcphub setup    # after 'go build', before first 'install'
+  mcphub setup    # after pulling + rebuilding — replaces the canonical copy
+
+Caveats:
+  - The shell that ran 'setup' won't see the updated PATH — close and
+    reopen it. WM_SETTINGCHANGE only reaches NEW shells.
+  - If ~/.local/bin/mcphub.exe is currently running (as a hub daemon),
+    the copy step fails with 'target is in use' — run 'mcphub stop --all'
+    first, or kill the daemon processes manually.
+
+See also: install, scheduler upgrade.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return Bootstrap(cmd.OutOrStdout())
 		},

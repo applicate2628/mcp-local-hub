@@ -18,6 +18,32 @@ func newRollbackCmdReal() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "rollback",
 		Short: "Restore the latest mcp-local-hub backup for each client",
+		Long: `Restore client config files (claude-code / codex-cli / gemini-cli /
+antigravity) from their most recent '.bak-mcp-local-hub-<timestamp>'
+sibling. Useful for 'I just installed and it broke something, revert
+everything' workflows.
+
+Two modes:
+  Default:    restore the LATEST timestamped backup (pre-last-install state)
+  --original: restore the PRISTINE '-original' sentinel (pre-any-install-ever
+              state — the config as it was the very first time mcphub
+              touched it). The sentinel is written exactly once per client,
+              on the first-ever backup, and never overwritten.
+
+Examples:
+  mcphub rollback              # undo the most recent install/uninstall
+  mcphub rollback --original   # nuclear option: go back to day 0
+
+What rollback does NOT do:
+  - Delete backup files (they remain on disk — inspect with 'backups list')
+  - Stop running daemons (use 'stop --all' separately if needed)
+  - Remove scheduler tasks (use 'uninstall' for that)
+
+After rollback, 'claude mcp list' / equivalent should show the pre-install
+state. Most MCP clients cache the config at startup, so restart the client
+session to see the restored config.
+
+See also: backups list, backups show, uninstall.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if original {
 				a := api.NewAPI()

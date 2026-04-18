@@ -16,6 +16,27 @@ func newUninstallCmdReal() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "uninstall",
 		Short: "Remove an installed MCP server (scheduler + client bindings)",
+		Long: `Reverse of 'install': deletes the scheduler tasks and removes the
+server's entry from every managed client config (claude-code, codex-cli,
+gemini-cli, antigravity).
+
+What uninstall does:
+  1. Reads the manifest to know which tasks + which clients to touch
+  2. Deletes each 'mcp-local-hub-<server>-*' Task Scheduler task
+  3. Removes the server's entry from each client config
+  4. Does NOT delete .bak-mcp-local-hub-* backup files — they remain on disk
+  5. Does NOT delete live daemon processes — Task Scheduler's task delete
+     only removes task metadata; existing processes keep running until they
+     exit naturally. Use 'mcphub stop --server <n>' first to kill them.
+
+Examples:
+  mcphub uninstall --server wolfram
+
+Recovery:
+  'mcphub rollback' restores the latest client config backup
+  'mcphub rollback --original' restores the pristine pre-hub-ever sentinel
+
+See also: install, stop, rollback, backups list.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if server == "" {
 				return fmt.Errorf("--server is required")

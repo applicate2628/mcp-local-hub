@@ -16,6 +16,28 @@ func newScanCmdReal() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "scan",
 		Short: "Scan client configs: which MCP servers are hub-routed, can-migrate, unknown, or per-session",
+		Long: `Walk every managed client config (claude-code, codex-cli, gemini-cli,
+antigravity) and classify each MCP server entry into one of five buckets:
+
+  via-hub        — already routed through mcp-local-hub (HTTP or relay)
+  can-migrate    — has a manifest but still stdio in this client;
+                   'mcphub migrate' can switch it
+  unknown        — stdio entry with no matching manifest under servers/
+  per-session    — intentionally NOT hub-shareable (playwright, etc.)
+  not-installed  — manifest exists but no client references it yet
+
+Per-entry column encodes which clients reference the server:
+  cc=<transport>  Claude Code
+  cx=<transport>  Codex CLI
+  gm=<transport>  Gemini CLI
+  ag=<transport>  Antigravity (relay = hub-managed stdio relay)
+
+Examples:
+  mcphub scan                 # pretty table
+  mcphub scan --json          # machine-readable
+  mcphub scan --with-procs    # include process count per server (wmic)
+
+See also: migrate, manifest list, install.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a := api.NewAPI()
 			home, err := os.UserHomeDir()

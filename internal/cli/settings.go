@@ -12,6 +12,20 @@ func newSettingsCmdReal() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "settings",
 		Short: "Read/write GUI preferences (theme, shell, default-home, etc.)",
+		Long: `Manage persistent key/value preferences under
+%LOCALAPPDATA%\mcp-local-hub\settings.yaml (or equivalent XDG path).
+
+Currently forward-compatibility scaffolding for Phase 3B (GUI layer) —
+keys like 'theme', 'shell', 'default-home' will be consumed by the
+GUI when that lands. CLI exposes the read/write surface so settings
+are accessible before the GUI exists.
+
+Subcommands:
+  settings list      # all current settings as key=value pairs
+  settings get <k>   # print one value
+  settings set <k> <v>  # write one value
+
+No keys are required — defaults apply when settings.yaml is missing.`,
 	}
 	root.AddCommand(newSettingsListCmd())
 	root.AddCommand(newSettingsGetCmd())

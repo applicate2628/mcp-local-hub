@@ -15,12 +15,32 @@ func newCleanupCmdReal() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "cleanup",
 		Short: "Find and kill orphan MCP server processes (dry-run by default)",
-		Long: `Finds MCP-server processes whose command line matches a manifest's command
-but whose parent is NOT our 'mcphub.exe daemon' wrapper. These are typically
-leftover from dead client sessions (IDE restarts, CTRL-C not propagating
-to children, etc.).
+		Long: `Find MCP-server processes that match a manifest pattern, are old enough
+(>60s by default), and have NO live mcphub daemon in their parent chain.
+These are typically leftover from dead client sessions (IDE restarts,
+Ctrl-C not propagating to children, stale uvx/npx after daemon crash).
 
-Default is dry-run (reports only). Pass --confirm to actually kill.`,
+Default is dry-run (reports only). Pass --confirm to actually kill.
+
+Safety guards (to avoid false-positives like killing Dropbox):
+  - Our own binaries (mcphub/godbolt/lldb-bridge/perftools) are always excluded
+  - Processes whose ancestor chain contains 'mcphub.exe daemon' are excluded
+    (walks up to 16 levels, catches uv/npx/python sub-processes)
+  - Generic interpreter substrings (python, node, npx) are NOT used as match
+    patterns — they'd false-match Dropbox/VS Code/MSYS2 shell processes
+  - Min-age filter skips processes younger than 60s (they may be legitimate
+    in-flight installs)
+
+Examples:
+  mcphub cleanup --dry-run              # safe preview (default)
+  mcphub cleanup --confirm              # actually kill
+  mcphub cleanup --server serena        # limit to one server's patterns
+  mcphub cleanup --min-age-sec 300      # stricter: ignore <5min processes
+
+Pair with 'stop --all' for a nuclear reset:
+  mcphub stop --all && mcphub cleanup --confirm
+
+See also: stop, restart, status.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if confirm {
 				dryRun = false

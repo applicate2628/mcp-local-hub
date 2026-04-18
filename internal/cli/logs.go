@@ -15,7 +15,28 @@ func newLogsCmdReal() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "logs <server>",
 		Short: "Print (and optionally follow) daemon logs",
-		Args:  cobra.ExactArgs(1),
+		Long: `Print the last N lines of a daemon's stdout/stderr log file.
+Logs live at %LOCALAPPDATA%\mcp-local-hub\logs\<server>-<daemon>.log
+on Windows (equivalent XDG state dir on Linux/macOS).
+
+An absent log file is NOT an error — stdio-only daemons that produce
+no stderr (perftools, time, sequential-thinking, embedded Go servers
+with no diagnostics) never create a log file. In that case logs
+prints a human-readable '(no output yet)' placeholder instead of the
+OS 'file not found' error.
+
+Examples:
+  mcphub logs serena                    # last 100 lines, default daemon
+  mcphub logs serena --daemon codex     # pick one of multiple daemons
+  mcphub logs serena --tail 500         # more history
+  mcphub logs serena --tail 0           # full log
+
+Log rotation: daemon.Launch tees to these files with 10MB rotation,
+5 rotations kept. Old logs appear as <name>.log.1 / .log.2 / etc.
+'logs' only tails the current .log — inspect rotated copies manually.
+
+See also: status, restart.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a := api.NewAPI()
 			if follow {

@@ -14,6 +14,28 @@ func newStatusCmdReal() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "status",
 		Short: "Show state of all mcp-local-hub scheduler tasks",
+		Long: `Print a table of every 'mcp-local-hub-*' Task Scheduler task with state,
+port, PID, RAM, uptime, and next-run time (for scheduled tasks).
+
+State column:
+  Running    — port is bound, daemon process alive
+  Starting   — scheduler is mid-launch; port not yet bound
+  Scheduled  — task idle, no live daemon, but a future trigger will fire
+               (e.g. -weekly-refresh tasks)
+  Stopped    — task idle, no future trigger, no daemon. Run 'restart' to revive.
+  Disabled   — scheduler marked task as disabled (rare)
+
+Examples:
+  mcphub status         # pretty table
+  mcphub status --json  # machine-readable
+
+Troubleshooting:
+  - All tasks showing Stopped? The mcphub binary may have moved.
+    'mcphub setup' + 'mcphub scheduler upgrade' fixes that in one pass.
+  - Some tasks Stopped, others Running? Restart the Stopped ones:
+    'mcphub restart --server <name>'.
+
+See also: restart, stop, logs, scheduler upgrade.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a := api.NewAPI()
 			rows, err := a.Status()
