@@ -34,15 +34,17 @@ type ScanOpts struct {
 // patterns. If present, it's session-multiplexed and belongs in a manifest,
 // not here.
 //
-// lldb: the common lldb-bridge tool is a TCP-stdio bridge to a SINGLE LLDB
-// protocol-server connection — each client connection owns its bridge and
-// its LLDB. Different architecture from GDB-MCP's session manager. Stays
-// per-session until/unless a session-multiplexed lldb MCP server exists.
+// Historical note on lldb: the original Python bridge.py was genuinely
+// per-session (each client spawned its own bridge process and its own
+// LLDB). The current `mcphub lldb-bridge` Go subcommand, combined with
+// the hub's stdio-bridge HTTP transport, serializes requests from every
+// connected MCP client onto a single bridge → LLDB TCP socket. So lldb
+// IS hub-shared and lives in servers/lldb/manifest.yaml — not in this
+// map.
 //
 // playwright: each session typically spawns its own browser context which
 // is heavy; leaving as per-session until we confirm multiplexing behavior.
 var perSessionServers = map[string]bool{
-	"lldb":       true,
 	"playwright": true,
 }
 
@@ -146,9 +148,22 @@ func patternsForServer(serverName, manifestDir string) []string {
 		out = append(out, m.Command)
 	}
 	for _, arg := range m.BaseArgs {
-		if len(arg) > 3 && !strings.HasPrefix(arg, "-") {
-			out = append(out, arg)
+		if len(arg) <= 3 || strings.HasPrefix(arg, "-") {
+			continue
 		}
+		// Apply the same generic-interpreter filter to BaseArgs so manifests
+		// that embed an interpreter in their args (e.g. gdb's "python",
+		// "server.py") don't contribute substrings that match unrelated
+		// processes system-wide. Dropbox ships a bundled Python, VS Code
+		// ships node, MSYS2 fills every shell with "python"/"node" tokens —
+		// matching any of those as an orphan pattern is a false-positive
+		// bomb. Keep only paths / package-name tokens that are unique to
+		// the server.
+		base := strings.ToLower(filepath.Base(arg))
+		if genericInterpreters[base] {
+			continue
+		}
+		out = append(out, arg)
 	}
 	if len(out) == 0 {
 		out = append(out, serverName)

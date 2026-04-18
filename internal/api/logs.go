@@ -22,6 +22,16 @@ func (a *API) LogsGetFrom(opts LogsOpts) (string, error) {
 	path := filepath.Join(opts.LogDir, fmt.Sprintf("%s-%s.log", opts.Server, opts.Daemon))
 	data, err := os.ReadFile(path)
 	if err != nil {
+		// An absent log file is the common case for healthy stdio-only
+		// servers that never write to stderr (the only stream tee'd to
+		// the log) — perftools, time, sequential-thinking, embedded Go
+		// servers with no diagnostics to emit. Return a human-readable
+		// placeholder instead of an OS error so `mcphub logs perftools`
+		// doesn't look like the daemon is broken when it's fine.
+		if os.IsNotExist(err) {
+			return fmt.Sprintf("(no log output yet — %s-%s daemon hasn't written to stderr, which is normal for healthy stdio-only servers)\n",
+				opts.Server, opts.Daemon), nil
+		}
 		return "", err
 	}
 	if opts.Tail <= 0 {

@@ -4,11 +4,46 @@ import (
 	"bufio"
 	"io"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// isOurOwnProcess returns true when the cmdline's executable token is one
+// of our own binaries: mcphub.exe (running as daemon or any subcommand),
+// the standalone godbolt / lldb-bridge / perftools exes, or the legacy
+// mcp.exe name from early installations. Basename match, case-insensitive.
+// Used by the orphan detector to skip processes that are running by
+// design — their parent is typically the Task Scheduler service, so the
+// parent-is-our-daemon heuristic alone cannot protect them.
+func isOurOwnProcess(cmdline string) bool {
+	if cmdline == "" {
+		return false
+	}
+	// Extract the first token (the exe path). Handles both quoted and
+	// unquoted cmdlines: `"C:\path with spaces\mcphub.exe" daemon ...`
+	// and `C:\path\mcphub.exe daemon ...`.
+	first := cmdline
+	if cmdline[0] == '"' {
+		if end := strings.IndexByte(cmdline[1:], '"'); end > 0 {
+			first = cmdline[1 : 1+end]
+		}
+	} else if sp := strings.IndexByte(cmdline, ' '); sp > 0 {
+		first = cmdline[:sp]
+	}
+	base := strings.ToLower(filepath.Base(first))
+	switch base {
+	case "mcphub.exe", "mcphub",
+		"mcp.exe", "mcp",
+		"godbolt.exe", "godbolt",
+		"lldb-bridge.exe", "lldb-bridge",
+		"perftools.exe", "perftools":
+		return true
+	}
+	return false
+}
 
 // OrphanProcess describes one orphan MCP subprocess discovered by CleanupOrphans.
 // KillErr is populated only when DryRun=false and taskkill failed for this PID
@@ -152,6 +187,17 @@ func parseOrphans(r io.Reader, patterns []string) []OrphanProcess {
 
 	var out []OrphanProcess
 	for _, r := range rows {
+		// Never flag our own binaries — mcphub.exe (running as daemon or
+		// as any subcommand), the standalone godbolt/lldb-bridge/perftools
+		// exes, or the legacy mcp.exe name. These are running by design;
+		// their parent is the Task Scheduler service, so the parent-is-our-
+		// daemon check below won't save them. Without this explicit
+		// allowlist the cleanup would flag e.g. `mcphub.exe daemon --server
+		// gdb` as an orphan gdb-server just because "gdb" appears in its
+		// cmdline.
+		if isOurOwnProcess(r.cmdline) {
+			continue
+		}
 		matched := false
 		for _, p := range patterns {
 			if strings.Contains(r.cmdline, p) {
@@ -162,15 +208,32 @@ func parseOrphans(r io.Reader, patterns []string) []OrphanProcess {
 		if !matched {
 			continue
 		}
-		// Is parent one of our own daemons? Accept both the current name
-		// (mcphub.exe) and the legacy name (mcp.exe) — early installations
-		// may still have task entries referencing the old binary.
-		if parent, ok := byPID[r.ppid]; ok {
+		// Is any ANCESTOR one of our own daemons? Walk the parent chain
+		// up to a bounded depth (16 levels is well beyond anything real).
+		// Single-level check misses uvx/npx/node sub-processes that wrap
+		// the actual server — e.g. mcphub.exe daemon → uv → python →
+		// server.py forms a 4-deep chain where python's direct parent is
+		// uv, not our daemon. Walking the chain means every descendant
+		// of a live `mcphub.exe daemon` is correctly excluded.
+		ourDescendant := false
+		for cur, depth := r.ppid, 0; depth < 16; depth++ {
+			parent, ok := byPID[cur]
+			if !ok {
+				break
+			}
 			pcmd := parent.cmdline
 			if strings.Contains(pcmd, "daemon") &&
 				(strings.Contains(pcmd, "mcphub.exe") || strings.Contains(pcmd, "mcp.exe")) {
-				continue // NOT orphan — child of our daemon
+				ourDescendant = true
+				break
 			}
+			if parent.ppid == 0 || parent.ppid == cur {
+				break // reached the root or a self-loop
+			}
+			cur = parent.ppid
+		}
+		if ourDescendant {
+			continue // NOT orphan — descendant of our daemon
 		}
 		age := int64(0)
 		if !r.created.IsZero() {
