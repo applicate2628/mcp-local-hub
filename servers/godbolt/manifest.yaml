@@ -1,9 +1,24 @@
 name: godbolt
 kind: global
 transport: stdio-bridge
-command: C:/Users/dima_/.local/mcp-servers/godbolt-mcp/venv/Scripts/python.exe
+command: mcphub
 base_args:
-  - "C:/Users/dima_/.local/mcp-servers/godbolt-mcp/godbolt_mcp.py"
+  - godbolt
+
+env: {}
+
+# Godbolt Compiler Explorer MCP server: exposes 6 resources (languages,
+# compilers, libraries, formats, asm instruction docs, version) and 3 tools
+# (compile_code, compile_cmake, format_code). All endpoints proxy to the
+# godbolt.org API. Single daemon shared across all MCP clients via HTTP
+# multiplexing through the stdio-bridge transport.
+#
+# Previously this server was a Python FastMCP process launched per-session
+# through a virtualenv (command: python.exe + godbolt_mcp.py). That worked
+# but required a separate venv per machine, spawned a fresh Python process
+# per client, and pulled a fresh httpx connection per request. The Go
+# rewrite lives inside the mcphub binary — no venv, one hub-managed daemon,
+# shared HTTP client pool.
 
 daemons:
   - name: default
