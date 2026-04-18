@@ -62,7 +62,8 @@ type StdioHost struct {
 	sseMu      sync.Mutex
 	sseClients []chan []byte
 
-	done chan struct{} // closed by Stop() to unblock pending handlers
+	done        chan struct{} // closed by Stop() to unblock pending handlers
+	childExited chan struct{} // closed by the watcher goroutine when cmd.Wait() returns
 }
 
 func NewStdioHost(cfg HostConfig) (*StdioHost, error) {
@@ -70,10 +71,11 @@ func NewStdioHost(cfg HostConfig) (*StdioHost, error) {
 		return nil, errors.New("HostConfig.Command is required")
 	}
 	return &StdioHost{
-		cfg:        cfg,
-		testStdout: make(chan []byte, 16),
-		pending:    make(map[int64]chan json.RawMessage),
-		done:       make(chan struct{}),
+		cfg:         cfg,
+		testStdout:  make(chan []byte, 16),
+		pending:     make(map[int64]chan json.RawMessage),
+		done:        make(chan struct{}),
+		childExited: make(chan struct{}),
 	}, nil
 }
 
@@ -138,10 +140,34 @@ func (h *StdioHost) Start(ctx context.Context) error {
 	h.wg.Add(1)
 	go h.readStdoutLoop()
 
+	// Watcher goroutine: owns cmd.Wait() exclusively so no other call site
+	// double-waits. When the child exits for any reason (normal exit, crash,
+	// signal, Stop-initiated Kill), we close h.childExited so:
+	//   - in-flight HTTP handlers can return 502 instead of blocking 30s
+	//   - Stop() can observe the termination without calling Wait() itself
+	//   - the outer daemon loop (internal/cli/daemon.go) can observe
+	//     unexpected death and exit non-zero so the scheduler restarts us
+	go func() {
+		_ = cmd.Wait()
+		close(h.childExited)
+	}()
+
 	return nil
 }
 
+// ChildExited returns a channel that is closed when the subprocess exits
+// for any reason. Callers may select on it to react to unexpected death
+// (the outer daemon loop) or to confirm clean shutdown (Stop()).
+func (h *StdioHost) ChildExited() <-chan struct{} {
+	return h.childExited
+}
+
 // Stop terminates the subprocess and closes all pipes.
+//
+// Stop does NOT call cmd.Process.Wait(); that call is owned exclusively by
+// the watcher goroutine spawned in Start() so there is no double-Wait race.
+// Instead, Stop signals Kill() (if the child is still alive) and then blocks
+// on h.childExited to confirm the watcher saw the exit and closed the pipes.
 func (h *StdioHost) Stop() error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -152,8 +178,20 @@ func (h *StdioHost) Stop() error {
 	close(h.done) // unblock any pending HTTP handlers waiting on the subprocess
 	_ = h.stdin.Close()
 	if h.cmd != nil && h.cmd.Process != nil {
+		// Kill() is a no-op if the process has already exited (the watcher
+		// goroutine may have already closed h.childExited by the time we
+		// get here — that is fine, the channel receive below returns
+		// immediately in that case).
 		_ = h.cmd.Process.Kill()
-		_, _ = h.cmd.Process.Wait()
+	}
+	// Wait for the watcher goroutine to observe cmd.Wait() returning. This
+	// is bounded: either the child was already dead (immediate) or Kill()
+	// just terminated it (milliseconds). We still cap the wait so a truly
+	// wedged process (e.g. unkillable kernel state on Windows) cannot hang
+	// Stop forever — the outer daemon will exit the host process anyway.
+	select {
+	case <-h.childExited:
+	case <-time.After(5 * time.Second):
 	}
 	h.wg.Wait()
 	return nil
@@ -341,6 +379,12 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(out)
 	case <-h.done:
 		http.Error(w, "host shutting down", http.StatusServiceUnavailable)
+	case <-h.childExited:
+		// Child died while we were waiting for its reply. Return 502 so the
+		// client sees a distinct, immediate failure instead of blocking the
+		// full 30s timeout. The outer daemon loop observes the same signal
+		// and exits non-zero so the scheduler can restart the whole task.
+		http.Error(w, "subprocess died unexpectedly", http.StatusBadGateway)
 	case <-r.Context().Done():
 		http.Error(w, "client canceled", http.StatusRequestTimeout)
 	case <-time.After(30 * time.Second):
@@ -382,6 +426,10 @@ func (h *StdioHost) handleSSE(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-h.done:
+			return
+		case <-h.childExited:
+			// Child died — nothing more will be emitted on this stream.
+			// Return cleanly so the HTTP server can close the connection.
 			return
 		case line := <-ch:
 			_, _ = fmt.Fprintf(w, "data: %s\n\n", line)

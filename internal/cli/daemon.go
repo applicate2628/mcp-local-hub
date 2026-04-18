@@ -138,6 +138,21 @@ func newDaemonCmdReal() *cobra.Command {
 					defer cancel()
 					_ = srv.Shutdown(shutdownCtx)
 					return nil
+				case <-h.ChildExited():
+					// Stdio child died unexpectedly (npx/uvx servers like memory,
+					// sequential-thinking, time are known to exit silently after
+					// serving N requests). Surface this to the scheduler by
+					// returning a non-nil error from RunE so mcphub exits
+					// non-zero; Windows Task Scheduler's RestartOnFailure policy
+					// (3 retries, 1 minute apart — configured in install.go and
+					// scheduler_windows.go) will re-launch the task, which
+					// respawns the child. Scheduler owns the retry budget; we
+					// do not add in-process respawn logic here.
+					_ = h.Stop()
+					shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					_ = srv.Shutdown(shutdownCtx)
+					return fmt.Errorf("stdio child exited unexpectedly")
 				}
 			} else {
 				return fmt.Errorf("unsupported transport %q", m.Transport)

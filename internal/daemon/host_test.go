@@ -342,6 +342,162 @@ func TestHostStopUnblocksSSE(t *testing.T) {
 	}
 }
 
+// TestStdioHost_ChildExitsUnexpectedly_UnblocksPendingRequest verifies that
+// when the subprocess dies while an HTTP client is waiting for a reply, the
+// handler returns quickly with 502 (not after the 30s subprocess-response
+// timeout) and ChildExited() is closed so the outer daemon can react.
+//
+// This is the signal the scheduler needs: npx/uvx stdio children like
+// memory, sequential-thinking, and time silently exit after serving N
+// requests; before this change the mcphub daemon looked healthy to
+// `mcphub status` while every MCP call timed out.
+func TestStdioHost_ChildExitsUnexpectedly_UnblocksPendingRequest(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Subprocess reads one line from stdin and then exits without replying.
+	// This simulates the real failure mode: request forwarded to child,
+	// child dies before sending the JSON-RPC response.
+	h, err := NewStdioHost(HostConfig{
+		Command: "python",
+		Args:    []string{"-u", "-c", "import sys\nsys.stdin.readline()\nsys.exit(0)"},
+	})
+	if err != nil {
+		t.Fatalf("NewStdioHost: %v", err)
+	}
+	if err := h.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer h.Stop()
+
+	ts := httptest.NewServer(h.HTTPHandler())
+	defer ts.Close()
+
+	// Fire the request; it will write a line to the child (which then exits)
+	// and block waiting for a reply that never comes. The handler must
+	// observe childExited and return 502, not wait 30s for the timeout.
+	start := time.Now()
+	resp, err := http.Post(ts.URL+"/mcp", "application/json",
+		strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"test"}`))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	elapsed := time.Since(start)
+
+	if elapsed > 5*time.Second {
+		t.Errorf("handler did not unblock quickly on child death: took %v (expected < 5s)", elapsed)
+	}
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("status: got %d, want 502 Bad Gateway", resp.StatusCode)
+	}
+
+	// ChildExited() must be observably closed at this point.
+	select {
+	case <-h.ChildExited():
+		// Good.
+	case <-time.After(2 * time.Second):
+		t.Error("ChildExited() was not closed after subprocess exit")
+	}
+}
+
+// TestStdioHost_Stop_DoesNotRaceWithChildExit verifies that calling Stop()
+// while the child is still alive does not panic on double-close of
+// childExited and that the channel fires exactly once. This exercises the
+// path where Stop's Kill() triggers the watcher goroutine's cmd.Wait() to
+// return — both must cooperate cleanly.
+func TestStdioHost_Stop_DoesNotRaceWithChildExit(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Long-running subprocess: sleeps reading stdin until killed.
+	h, err := NewStdioHost(HostConfig{
+		Command: "python",
+		Args:    []string{"-u", "-c", "import sys\nfor _ in sys.stdin: pass"},
+	})
+	if err != nil {
+		t.Fatalf("NewStdioHost: %v", err)
+	}
+	if err := h.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Sanity: channel is not closed yet.
+	select {
+	case <-h.ChildExited():
+		t.Fatal("ChildExited() closed before the child actually exited")
+	default:
+	}
+
+	// Stop() kills the child and waits for the watcher to close childExited.
+	// If the watcher and Stop both tried to close the channel this would
+	// panic; the test asserts that does not happen.
+	if err := h.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	// After Stop, ChildExited() must be closed.
+	select {
+	case <-h.ChildExited():
+		// Good.
+	default:
+		t.Error("ChildExited() was not closed after Stop()")
+	}
+
+	// A second Stop() must also be safe (idempotent) and must not panic.
+	if err := h.Stop(); err != nil {
+		t.Errorf("second Stop: %v", err)
+	}
+}
+
+// TestStdioHost_SSE_ChildExitUnblocksStream verifies that an active SSE
+// subscriber is released when the subprocess dies, rather than being held
+// open until the client disconnects. This mirrors the POST handler's
+// child-exit path for the streaming side.
+func TestStdioHost_SSE_ChildExitUnblocksStream(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	h, err := NewStdioHost(HostConfig{
+		Command: "python",
+		Args:    []string{"-u", "-c", "import sys, time\ntime.sleep(0.5)\nsys.exit(0)"},
+	})
+	if err != nil {
+		t.Fatalf("NewStdioHost: %v", err)
+	}
+	if err := h.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer h.Stop()
+
+	ts := httptest.NewServer(h.HTTPHandler())
+	defer ts.Close()
+
+	sseDone := make(chan struct{})
+	go func() {
+		defer close(sseDone)
+		req, _ := http.NewRequest("GET", ts.URL+"/mcp", nil)
+		req.Header.Set("Accept", "text/event-stream")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return
+		}
+		defer resp.Body.Close()
+		io.Copy(io.Discard, resp.Body)
+	}()
+
+	// Wait for the SSE handler to enter the stream loop, then for the child
+	// to self-exit after its 0.5s sleep. The handler should observe
+	// childExited and return cleanly; the HTTP server then closes the
+	// response body, which unblocks the goroutine's io.Copy.
+	select {
+	case <-sseDone:
+		// Good — stream released when child exited.
+	case <-time.After(5 * time.Second):
+		t.Error("SSE handler did not return after child exit within 5s")
+	}
+}
+
 // TestHostDELETETerminates verifies DELETE /mcp is accepted.
 func TestHostDELETETerminates(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
