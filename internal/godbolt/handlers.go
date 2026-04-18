@@ -227,15 +227,9 @@ func registerTools(gs *GodboltServer) {
 
 // getLanguages handles GET /api/languages
 func (gs *GodboltServer) getLanguages(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
-	resp, err := gs.httpClient.Get(gs.baseURL + "/languages")
+	body, err := gs.fetchResource(gs.baseURL + "/languages")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get languages: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read languages response: %w", err)
 	}
 
 	var languages interface{}
@@ -262,15 +256,9 @@ func (gs *GodboltServer) getCompilers(ctx context.Context, req *mcp.ReadResource
 		return nil, fmt.Errorf("missing language_id parameter")
 	}
 
-	resp, err := gs.httpClient.Get(fmt.Sprintf("%s/compilers/%s", gs.baseURL, languageID))
+	body, err := gs.fetchResource(fmt.Sprintf("%s/compilers/%s", gs.baseURL, languageID))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get compilers: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read compilers response: %w", err)
 	}
 
 	var compilers interface{}
@@ -297,15 +285,9 @@ func (gs *GodboltServer) getLibraries(ctx context.Context, req *mcp.ReadResource
 		return nil, fmt.Errorf("missing language_id parameter")
 	}
 
-	resp, err := gs.httpClient.Get(fmt.Sprintf("%s/libraries/%s", gs.baseURL, languageID))
+	body, err := gs.fetchResource(fmt.Sprintf("%s/libraries/%s", gs.baseURL, languageID))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get libraries: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read libraries response: %w", err)
 	}
 
 	var libraries interface{}
@@ -327,15 +309,9 @@ func (gs *GodboltServer) getLibraries(ctx context.Context, req *mcp.ReadResource
 
 // getFormatters handles GET /api/formats
 func (gs *GodboltServer) getFormatters(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
-	resp, err := gs.httpClient.Get(gs.baseURL + "/formats")
+	body, err := gs.fetchResource(gs.baseURL + "/formats")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get formatters: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read formatters response: %w", err)
 	}
 
 	var formatters interface{}
@@ -363,15 +339,9 @@ func (gs *GodboltServer) getInstructionInfo(ctx context.Context, req *mcp.ReadRe
 		return nil, fmt.Errorf("missing instruction_set or opcode parameter")
 	}
 
-	resp, err := gs.httpClient.Get(fmt.Sprintf("%s/asm/%s/%s", gs.baseURL, instructionSet, opcode))
+	body, err := gs.fetchResource(fmt.Sprintf("%s/asm/%s/%s", gs.baseURL, instructionSet, opcode))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get instruction info: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read instruction info response: %w", err)
 	}
 
 	return &mcp.ReadResourceResult{
@@ -387,15 +357,9 @@ func (gs *GodboltServer) getInstructionInfo(ctx context.Context, req *mcp.ReadRe
 
 // getVersion handles GET /api/version
 func (gs *GodboltServer) getVersion(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
-	resp, err := gs.httpClient.Get(gs.baseURL + "/version")
+	body, err := gs.fetchResource(gs.baseURL + "/version")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get version: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read version response: %w", err)
 	}
 
 	return &mcp.ReadResourceResult{
@@ -420,15 +384,9 @@ func (gs *GodboltServer) getPopularArguments(ctx context.Context, req *mcp.ReadR
 		return nil, fmt.Errorf("missing compiler_id parameter")
 	}
 
-	resp, err := gs.httpClient.Get(fmt.Sprintf("%s/popularArguments/%s", gs.baseURL, compilerID))
+	body, err := gs.fetchResource(fmt.Sprintf("%s/popularArguments/%s", gs.baseURL, compilerID))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get popular arguments: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read popular-arguments response: %w", err)
 	}
 
 	return &mcp.ReadResourceResult{
@@ -809,6 +767,37 @@ func (gs *GodboltServer) invokeCompile(ctx context.Context, url string, payload 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
+	}
+	return body, nil
+}
+
+// fetchResource is the shared HTTP-GET path used by every resource
+// handler (getLanguages / getCompilers / getLibraries / getFormatters /
+// getInstructionInfo / getVersion / getPopularArguments). It wraps the
+// Get+ReadAll boilerplate AND adds a status-code check so non-2xx
+// responses — the typical "unknown compiler id", "language not found",
+// stale opcode — surface as an error instead of being silently returned
+// to the MCP client as a stray HTML 404 page or JSON error body that
+// downstream code would treat as the real resource.
+func (gs *GodboltServer) fetchResource(url string) ([]byte, error) {
+	resp, err := gs.httpClient.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("call godbolt: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		// Preserve the first 200 bytes of the body so callers can see
+		// what godbolt actually said (often useful for debugging a bad
+		// compiler_id or instruction_set).
+		snippet := string(body)
+		if len(snippet) > 200 {
+			snippet = snippet[:200] + "…"
+		}
+		return nil, fmt.Errorf("godbolt %s returned HTTP %d: %s", url, resp.StatusCode, snippet)
 	}
 	return body, nil
 }
