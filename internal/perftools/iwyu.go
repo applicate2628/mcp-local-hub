@@ -1,11 +1,9 @@
 package perftools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -20,8 +18,30 @@ type IWYUReport struct {
 	FullList []string `json:"full_list"`
 }
 
+// iwyuStatus encodes the three-way outcome distinction that IWYU's
+// raw output makes implicit. Callers can branch on this instead of
+// inspecting raw_output to tell "IWYU had nothing to suggest" apart
+// from "IWYU couldn't parse the file" — the earlier API conflated
+// both into an empty reports[].
+//
+//	"ok"            IWYU ran, produced at least one parseable block
+//	"no-suggestions" IWYU ran, exited 0, produced no blocks (rare but
+//	                 happens when the file is already include-clean)
+//	"env-failure"   IWYU couldn't find stdlib headers or a compile
+//	                 target — its output starts with "fatal error"
+//	                 and no blocks were produced. Usually means the
+//	                 caller's extra_args don't match their toolchain.
+type iwyuStatus string
+
+const (
+	iwyuStatusOK            iwyuStatus = "ok"
+	iwyuStatusNoSuggestions iwyuStatus = "no-suggestions"
+	iwyuStatusEnvFailure    iwyuStatus = "env-failure"
+)
+
 // iwyuResult is the top-level JSON shape returned to the client.
 type iwyuResult struct {
+	Status    iwyuStatus   `json:"status"`
 	Reports   []IWYUReport `json:"reports"`
 	RawOutput string       `json:"raw_output,omitempty"`
 	ExitCode  int          `json:"exit_code"`
@@ -51,27 +71,14 @@ func (tb *PerfToolbox) iwyuTool(ctx context.Context, req *mcp.CallToolRequest) (
 	cmdArgs := append([]string{}, args.ExtraArgs...)
 	cmdArgs = append(cmdArgs, args.File)
 
-	cmd := exec.CommandContext(ctx, tb.tools.IWYU.Path, cmdArgs...)
-	if args.ProjectRoot != "" {
-		cmd.Dir = args.ProjectRoot
-	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	runErr := cmd.Run()
-
-	exitCode := 0
-	if ee, ok := runErr.(*exec.ExitError); ok {
-		// IWYU's exit code convention: non-zero means "suggestions made"
-		// — it is NOT an error condition. Keep the code but don't fail.
-		exitCode = ee.ExitCode()
-	} else if runErr != nil {
-		return errResult(fmt.Sprintf("include-what-you-use failed: %v\nstderr:\n%s", runErr, stderr.String())), nil
+	cap, err := runCapture(ctx, tb.tools.IWYU.Path, args.ProjectRoot, cmdArgs)
+	if err != nil {
+		return errResult(fmt.Sprintf("include-what-you-use failed: %v", err)), nil
 	}
 
 	// IWYU writes its suggestions to stderr in practice (historical quirk);
 	// parse both streams to be robust across versions.
-	combined := stderr.String() + "\n" + stdout.String()
+	combined := string(cap.Stderr) + "\n" + string(cap.Stdout)
 	reports := parseIWYUOutput(combined)
 	// Always emit reports[] as an array (never null) so callers can
 	// rely on the JSON shape and len() unconditionally.
@@ -80,14 +87,35 @@ func (tb *PerfToolbox) iwyuTool(ctx context.Context, req *mcp.CallToolRequest) (
 	}
 
 	result := iwyuResult{
+		Status:    classifyIWYUStatus(reports, combined, cap.ExitCode),
 		Reports:   reports,
 		RawOutput: combined,
-		ExitCode:  exitCode,
+		ExitCode:  cap.ExitCode,
 	}
 	body, _ := json.MarshalIndent(result, "", "  ")
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: string(body)}},
 	}, nil
+}
+
+// classifyIWYUStatus decides the three-way status based on the parsed
+// reports and raw output. Precedence: env-failure (raw output has the
+// signature fatal-error marker) > ok (at least one report) >
+// no-suggestions (IWYU ran fine, had nothing to say).
+func classifyIWYUStatus(reports []IWYUReport, rawOutput string, exitCode int) iwyuStatus {
+	if len(reports) == 0 {
+		// Heuristic: IWYU's env-failure paths always include a "fatal
+		// error:" marker in the output before it bails. The typical
+		// cases are "fatal error: 'mm_malloc.h' file not found" when
+		// the bundled clang headers don't match the host stdlib, and
+		// "fatal error: 'X' file not found" for user-code includes.
+		if strings.Contains(rawOutput, "fatal error:") {
+			return iwyuStatusEnvFailure
+		}
+		return iwyuStatusNoSuggestions
+	}
+	_ = exitCode // reserved for future signal if IWYU starts using it
+	return iwyuStatusOK
 }
 
 // parseIWYUOutput walks IWYU's text output and extracts per-file

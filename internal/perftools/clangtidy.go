@@ -1,11 +1,9 @@
 package perftools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -73,28 +71,20 @@ func (tb *PerfToolbox) clangTidyTool(ctx context.Context, req *mcp.CallToolReque
 	cmdArgs = append(cmdArgs, args.ExtraArgs...)
 	cmdArgs = append(cmdArgs, args.Files...)
 
-	cmd := exec.CommandContext(ctx, tb.tools.ClangTidy.Path, cmdArgs...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	runErr := cmd.Run()
-
-	exitCode := 0
-	if ee, ok := runErr.(*exec.ExitError); ok {
-		exitCode = ee.ExitCode()
-	} else if runErr != nil {
-		return errResult(fmt.Sprintf("failed to run clang-tidy: %v", runErr)), nil
+	cap, err := runCapture(ctx, tb.tools.ClangTidy.Path, "", cmdArgs)
+	if err != nil {
+		return errResult(fmt.Sprintf("failed to run clang-tidy: %v", err)), nil
 	}
 
 	// clang-tidy writes diagnostics to stdout AND stderr depending on the
 	// version; parse both so we catch everything.
-	combined := stdout.String() + "\n" + stderr.String()
+	combined := string(cap.Stdout) + "\n" + string(cap.Stderr)
 	diags := parseClangTidyOutput(combined)
 
 	result := clangTidyResult{
 		Diagnostics: diags,
-		RawStderr:   stderr.String(),
-		ExitCode:    exitCode,
+		RawStderr:   string(cap.Stderr),
+		ExitCode:    cap.ExitCode,
 	}
 	body, _ := json.MarshalIndent(result, "", "  ")
 	return &mcp.CallToolResult{

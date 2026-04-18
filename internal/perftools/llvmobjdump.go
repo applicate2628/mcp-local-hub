@@ -1,11 +1,9 @@
 package perftools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -56,15 +54,14 @@ func (tb *PerfToolbox) llvmObjdumpTool(ctx context.Context, req *mcp.CallToolReq
 	cmdArgs = append(cmdArgs, args.ExtraArgs...)
 	cmdArgs = append(cmdArgs, args.Binary)
 
-	cmd := exec.CommandContext(ctx, tb.tools.LLVMObjdump.Path, cmdArgs...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return errResult(fmt.Sprintf("llvm-objdump failed: %v\nstderr:\n%s", err, stderr.String())), nil
+	cap, err := runCapture(ctx, tb.tools.LLVMObjdump.Path, "", cmdArgs)
+	if err != nil {
+		return errResult(fmt.Sprintf("llvm-objdump failed: %v", err)), nil
 	}
-
+	if cap.ExitCode != 0 {
+		return errResult(fmt.Sprintf("llvm-objdump exited %d\nstderr:\n%s", cap.ExitCode, string(cap.Stderr))), nil
+	}
 	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: stdout.String()}},
+		Content: []mcp.Content{&mcp.TextContent{Text: string(cap.Stdout)}},
 	}, nil
 }
