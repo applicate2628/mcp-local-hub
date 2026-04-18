@@ -15,7 +15,7 @@
 ## Build
 
 ```bash
-cd d:\dev\mcp-local-hub
+cd <repo-root>
 go build -o mcphub.exe ./cmd/mcphub
 ```
 
@@ -126,11 +126,13 @@ Antigravity's Cascade agent silently drops any `mcp_config.json` entry pointing 
 
 ```json
 "serena": {
-  "command": "D:\\dev\\mcp-local-hub\\mcphub.exe",
+  "command": "<absolute-path-to>\\mcphub.exe",
   "args": ["relay", "--server", "serena", "--daemon", "claude"],
   "disabled": false
 }
 ```
+
+`<absolute-path-to>` is filled in by `mcphub install` using `os.Executable()` — whatever absolute path points at the `mcphub.exe` that ran the install. If you move the binary afterwards, re-run `mcphub install --server serena` so the entry is rewritten with the new path.
 
 Cascade spawns `mcphub.exe relay` as a normal stdio subprocess. The relay translates JSON-RPC between stdin/stdout and the shared HTTP daemon on port 9121. No extra Serena process per Antigravity session — it shares the same daemon as Claude Code and Gemini CLI.
 
