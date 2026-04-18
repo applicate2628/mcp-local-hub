@@ -117,6 +117,46 @@ func registerTools(tb *PerfToolbox) {
 			"required": []string{"commands"},
 		},
 	}, tb.hyperfineTool)
+
+	tb.server.AddTool(&mcp.Tool{
+		Name: "llvm_objdump",
+		Description: "Disassemble the user's REAL built binary (post-LTO, post-PGO, post-linker-inlining) via " +
+			"llvm-objdump. Unlike godbolt's sandbox compile, this is the authoritative answer to 'what " +
+			"instructions are actually in my .exe?'. Returns raw disassembly text. Use the function " +
+			"parameter to limit output to a specific symbol (heavily recommended — full .text disassembly " +
+			"of a real binary is typically megabytes).",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"binary": map[string]interface{}{
+					"type":        "string",
+					"description": "Path to the binary file (executable, object, shared lib, or archive).",
+				},
+				"function": map[string]interface{}{
+					"type":        "string",
+					"description": "Optional. Limit disassembly to this symbol name (demangled). Highly recommended for large binaries.",
+				},
+				"section": map[string]interface{}{
+					"type":        "string",
+					"description": "Optional. Limit disassembly to a named section (e.g. '.text', '.text.startup').",
+				},
+				"with_source": map[string]interface{}{
+					"type":        "boolean",
+					"description": "Optional. Interleave source lines with asm (requires binary built with -g). Default false.",
+				},
+				"intel": map[string]interface{}{
+					"type":        "boolean",
+					"description": "Optional. Use Intel asm syntax instead of AT&T. Default false (AT&T).",
+				},
+				"extra_args": map[string]interface{}{
+					"type":        "array",
+					"items":       map[string]interface{}{"type": "string"},
+					"description": "Optional. Additional raw llvm-objdump args (e.g. ['--no-show-raw-insn']).",
+				},
+			},
+			"required": []string{"binary"},
+		},
+	}, tb.llvmObjdumpTool)
 }
 
 // getToolsResource serves resource://tools — marshals the catalog to

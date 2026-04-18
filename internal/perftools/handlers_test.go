@@ -184,3 +184,38 @@ func TestHyperfine_ComparesTwoCommands(t *testing.T) {
 		}
 	}
 }
+
+func TestLLVMObjdump_DisassemblesBinary(t *testing.T) {
+	cat := DetectTools()
+	if !cat.LLVMObjdump.Installed {
+		t.Skip("llvm-objdump not on PATH; integration test skipped")
+	}
+
+	// Pick any PE/ELF binary that's guaranteed to exist on this host —
+	// the test binary itself is the most reliable choice.
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+
+	tb := &PerfToolbox{tools: cat}
+	args, _ := json.Marshal(map[string]interface{}{
+		"binary":  exe,
+		"section": ".text",
+	})
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: args}}
+
+	result, err := tb.llvmObjdumpTool(t.Context(), req)
+	if err != nil {
+		t.Fatalf("llvmObjdumpTool: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("tool returned IsError=true: %s", contentText(result))
+	}
+
+	body := contentText(result)
+	// At minimum the disassembly should contain a section marker.
+	if !strings.Contains(body, "Disassembly") && !strings.Contains(body, "section") {
+		t.Errorf("expected disassembly header in output:\n%s", body[:min(len(body), 500)])
+	}
+}
