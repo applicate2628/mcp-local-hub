@@ -25,7 +25,7 @@ Optional: add the repo directory to `PATH` so you can run `mcp` from anywhere. U
 
 ## First install
 
-Seven servers ship with manifests: `serena`, `memory`, `sequential-thinking`, `wolfram`, `godbolt`, `paper-search-mcp`, `time`. Each is installed independently. Start with Serena (Phase 1 flagship):
+Nine servers ship with manifests: `serena`, `memory`, `sequential-thinking`, `wolfram`, `godbolt`, `paper-search-mcp`, `time`, `gdb`, `lldb`. Each is installed independently. Start with Serena (Phase 1 flagship):
 
 ```bash
 # Preview what would happen (no side effects)
@@ -173,9 +173,17 @@ mcphub secrets set wolfram_app_id --value <your-app-id>
 
 ### godbolt (port 9126)
 
-Runs `python C:/Users/dima_/.local/mcp-servers/godbolt-mcp/godbolt_mcp.py`
-from the godbolt venv. Requires the godbolt-mcp project installed at that
-path. Stateless (API proxy to godbolt.org).
+Embedded in `mcphub.exe` — no external dependency. Manifest runs
+`mcphub godbolt` as the daemon command. Exposes 6 MCP resources
+(`resource://languages`, `resource://compilers/{language_id}`,
+`resource://libraries/{language_id}`, `resource://formats`,
+`resource://asm/{instruction_set}/{opcode}`, `resource://version`) and
+3 tools (`compile_code`, `compile_cmake`, `format_code`), all proxied
+to the public Godbolt Compiler Explorer API at godbolt.org. Stateless.
+
+Previously shipped as a separate Python FastMCP server in a venv; the
+Go rewrite lives in `internal/godbolt/` and can also be built as a
+standalone binary — see the *Standalone binaries* section below.
 
 ### paper-search-mcp (port 9127)
 
@@ -191,6 +199,62 @@ First install may take ~30s as `uvx` downloads `paper-search-mcp`.
 ### time (port 9128)
 
 Runs `npx -y @mcpcentral/mcp-time`. Trivial, stateless.
+
+### gdb (port 9129)
+
+Runs `uv run --directory C:/Users/dima_/.local/mcp-servers/GDB-MCP python server.py`.
+Multi-debugger MCP server (gdb + lldb submodules) with built-in session
+management — one daemon serves N concurrent debug sessions identified
+by `session_id`. Requires the GDB-MCP project installed at that path and
+`uv` on PATH.
+
+### lldb (port 9130)
+
+Embedded in `mcphub.exe`. LLDB has its own MCP server implementation
+but it speaks MCP over a raw TCP socket (`protocol-server start MCP
+listen://host:port`), not stdio. The manifest runs `mcphub lldb-bridge
+localhost:47000` which:
+
+1. Connects to an LLDB instance already listening on :47000, or
+2. Spawns `lldb.exe` (path: `--lldb-path`, defaults to
+   `C:\msys64\ucrt64\bin\lldb.exe` on Windows) and waits for it to bind
+   :47000, then
+3. Forwards stdio↔TCP in both directions until either side closes.
+
+When the stdio-bridge transport in mcphub HTTP-multiplexes this daemon,
+multiple Claude / Codex sessions share one LLDB instance — LLDB's
+protocol-server itself can only service one TCP client at a time, so
+per-session bridges would race. Auto-spawned LLDB is terminated cleanly
+on daemon exit. The bridge lives in `internal/lldb/` and can also be
+built as a standalone binary — see *Standalone binaries* below.
+
+### Standalone binaries (optional)
+
+Two of the bundled servers — `godbolt` and `lldb-bridge` — live inside
+`mcphub.exe` but can also be built as independent binaries for users
+who want them without the full hub:
+
+```bash
+go build -o godbolt.exe ./cmd/godbolt
+go build -o lldb-bridge.exe ./cmd/lldb-bridge
+```
+
+Each is a thin entry point (`cmd/<name>/main.go`) that imports the same
+library package the hub uses (`internal/godbolt`, `internal/lldb`), so
+there is zero code duplication between the embedded and standalone
+shapes. Behavior is identical to `mcphub godbolt` / `mcphub lldb-bridge`
+— the binaries just skip the hub's scheduler/multiplexer.
+
+When to use standalone binaries:
+
+- You want a compiler-explorer stdio MCP server in another tool that
+  doesn't need mcphub.
+- You want to run the LLDB bridge from a custom script or a non-Windows
+  host where the hub's Task-Scheduler integration is not available.
+
+Manifests can target either shape — switch `command: mcphub` to
+`command: godbolt` (resp. `command: lldb-bridge`) if the standalone
+binary is on `PATH`.
 
 ### context7 (no daemon)
 
