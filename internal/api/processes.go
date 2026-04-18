@@ -180,7 +180,7 @@ func init() {
 		}
 		var pid int
 		portMarker := fmt.Sprintf("127.0.0.1:%d", port)
-		for _, line := range strings.Split(string(out), "\n") {
+		for line := range strings.SplitSeq(string(out), "\n") {
 			if !strings.Contains(line, portMarker) || !strings.Contains(line, "LISTENING") {
 				continue
 			}

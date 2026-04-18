@@ -78,7 +78,7 @@ func probe(bin string, versionExtract func(string) string) *ToolInfo {
 // line. Most tools emit "<bin> x.y.z\n<more noise>" — we keep the first
 // non-empty line.
 func firstLine(s string) string {
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" {
 			return line

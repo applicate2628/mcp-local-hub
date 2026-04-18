@@ -97,7 +97,7 @@ func (tb *PerfToolbox) clangTidyTool(ctx context.Context, req *mcp.CallToolReque
 // summaries, source-code snippets, carets — are ignored silently.
 func parseClangTidyOutput(s string) []Diagnostic {
 	var out []Diagnostic
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		line = strings.TrimSpace(line)
 		m := diagLineRE.FindStringSubmatch(line)
 		if m == nil {

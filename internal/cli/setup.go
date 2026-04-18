@@ -131,7 +131,7 @@ func targetDirOnPath() bool {
 // (e.g. `C:\Users\x/.local/bin`).
 func dirOnPath(dir, pathEnv string) bool {
 	sep := string(os.PathListSeparator)
-	for _, entry := range strings.Split(pathEnv, sep) {
+	for entry := range strings.SplitSeq(pathEnv, sep) {
 		if entry == "" {
 			continue
 		}

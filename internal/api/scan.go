@@ -471,7 +471,7 @@ func pickNextFreePort(manifestDir string) (int, error) {
 			continue
 		}
 		// Minimal YAML scrape — we do not want to pull go-yaml just for this.
-		for _, line := range strings.Split(string(data), "\n") {
+		for line := range strings.SplitSeq(string(data), "\n") {
 			line = strings.TrimSpace(line)
 			const p = "port:"
 			if strings.HasPrefix(line, p) {

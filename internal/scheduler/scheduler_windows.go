@@ -256,7 +256,7 @@ func (w *windowsScheduler) List(prefix string) ([]TaskStatus, error) {
 // parseTaskQueryOutput extracts key fields from schtasks /Query /V /FO LIST output.
 func parseTaskQueryOutput(out string, nameHint string) TaskStatus {
 	status := TaskStatus{Name: nameHint, LastResult: -1}
-	for _, line := range strings.Split(out, "\r\n") {
+	for line := range strings.SplitSeq(out, "\r\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "TaskName:") {
 			status.Name = strings.TrimSpace(strings.TrimPrefix(line, "TaskName:"))

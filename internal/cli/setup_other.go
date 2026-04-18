@@ -26,7 +26,7 @@ func ensureOnPath(w io.Writer, dir string) error {
 // Exact match per entry after trimming whitespace; non-Windows filesystems
 // are case-sensitive so no case folding.
 func pathEnvContains(pathValue, dir string) bool {
-	for _, entry := range strings.Split(pathValue, ":") {
+	for entry := range strings.SplitSeq(pathValue, ":") {
 		if strings.TrimSpace(entry) == dir {
 			return true
 		}

@@ -134,7 +134,7 @@ func classifyIWYUStatus(reports []IWYUReport, rawOutput string, exitCode int) iw
 // Section order is stable; `---` delimits a file block.
 func parseIWYUOutput(s string) []IWYUReport {
 	var reports []IWYUReport
-	for _, block := range strings.Split(s, "---") {
+	for block := range strings.SplitSeq(s, "---") {
 		block = strings.TrimSpace(block)
 		if block == "" {
 			continue
@@ -152,7 +152,7 @@ func parseIWYUBlock(block string) IWYUReport {
 	var r IWYUReport
 	section := "" // "add" | "remove" | "full"
 
-	for _, line := range strings.Split(block, "\n") {
+	for line := range strings.SplitSeq(block, "\n") {
 		line = strings.TrimRight(line, "\r")
 		trim := strings.TrimSpace(line)
 

@@ -90,7 +90,7 @@ func pathContainsDir(pathValue, dir string) bool {
 		return false
 	}
 	target := normalizeWinPath(dir)
-	for _, entry := range strings.Split(pathValue, ";") {
+	for entry := range strings.SplitSeq(pathValue, ";") {
 		if strings.EqualFold(normalizeWinPath(entry), target) {
 			return true
 		}
