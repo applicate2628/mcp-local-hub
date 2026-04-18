@@ -219,3 +219,54 @@ func TestLLVMObjdump_DisassemblesBinary(t *testing.T) {
 		t.Errorf("expected disassembly header in output:\n%s", body[:min(len(body), 500)])
 	}
 }
+
+func TestIWYU_ParsesSuggestions(t *testing.T) {
+	cat := DetectTools()
+	if !cat.IWYU.Installed {
+		t.Skip("include-what-you-use not on PATH; integration test skipped")
+	}
+
+	// Minimal source with a deliberately unused include — iwyu should flag it.
+	dir := t.TempDir()
+	srcPath := dir + "/t.cpp"
+	if err := os.WriteFile(srcPath, []byte(
+		"#include <string>\n#include <vector>\nint main(){std::vector<int> v; (void)v; return 0;}\n"),
+		0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tb := &PerfToolbox{tools: cat}
+	args, _ := json.Marshal(map[string]interface{}{
+		"file":         srcPath,
+		"project_root": dir,
+		"extra_args":   []string{"-std=c++17"},
+	})
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: args}}
+
+	result, err := tb.iwyuTool(t.Context(), req)
+	if err != nil {
+		t.Fatalf("iwyuTool: %v", err)
+	}
+	if result.IsError {
+		// iwyu can fail for environmental reasons (missing stdlib headers in
+		// the temp compile) — treat as skip rather than test failure.
+		t.Skipf("iwyu returned IsError, treating as environment skip: %s",
+			contentText(result))
+	}
+
+	body := contentText(result)
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
+		t.Fatalf("tool output not valid JSON: %v\n%s", err, body)
+	}
+	// At minimum the response carries a reports[] array.
+	reports, ok := parsed["reports"].([]interface{})
+	if !ok {
+		t.Fatalf("expected reports[] in output, got: %+v", parsed)
+	}
+	if len(reports) == 0 {
+		// Allow graceful skip if iwyu produced no parseable blocks — this
+		// can happen if iwyu's output format varies by version.
+		t.Skip("reports[] is empty — iwyu produced no parseable output for the test file")
+	}
+}

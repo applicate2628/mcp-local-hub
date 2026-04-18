@@ -157,6 +157,33 @@ func registerTools(tb *PerfToolbox) {
 			"required": []string{"binary"},
 		},
 	}, tb.llvmObjdumpTool)
+
+	tb.server.AddTool(&mcp.Tool{
+		Name: "iwyu",
+		Description: "Run include-what-you-use on a source file. Returns structured JSON with reports[] — one entry " +
+			"per file in the output — each carrying add[], remove[], and full_list[] include suggestions. Plus " +
+			"raw_output for unparsed inspection. Unlike clang-tidy's include cleaner, IWYU does whole-transitive " +
+			"analysis: 'header X forward-declares Y; you use Y; so you should include Y's definition directly'.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"file": map[string]interface{}{
+					"type":        "string",
+					"description": "Source file path to analyze.",
+				},
+				"project_root": map[string]interface{}{
+					"type":        "string",
+					"description": "Optional. Working directory for iwyu; relative #include paths resolve from here.",
+				},
+				"extra_args": map[string]interface{}{
+					"type":        "array",
+					"items":       map[string]interface{}{"type": "string"},
+					"description": "Optional. Additional raw iwyu args (e.g. ['-std=c++17', '-Iinclude']).",
+				},
+			},
+			"required": []string{"file"},
+		},
+	}, tb.iwyuTool)
 }
 
 // getToolsResource serves resource://tools — marshals the catalog to
