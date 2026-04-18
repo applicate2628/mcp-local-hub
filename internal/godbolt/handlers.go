@@ -67,7 +67,7 @@ func registerTools(gs *GodboltServer) {
 	// Tool 1: compile_code
 	gs.server.AddTool(&mcp.Tool{
 		Name:        "compile_code",
-		Description: "Compile source code with a specified compiler. Returns assembly output and compilation messages.",
+		Description: "Compile source code via godbolt.org. Returns structured JSON with asm[], stdout[], stderr[], optional execResult (if filters.execute=true), optional optOutput[] (if filters.optOutput=true), and optional tools[] output (if tools[] is non-empty — e.g. llvm-mca throughput tables, pahole struct layout). Use filters to control asm syntax and enable execute/optOutput. Use execute_parameters for stdin/args of the executed binary. Use tools for llvm-mca / pahole / other godbolt-hosted analyzers that operate on the compile result.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -105,6 +105,30 @@ func registerTools(gs *GodboltServer) {
 						},
 					},
 				},
+				"filters": map[string]interface{}{
+					"type":                 "object",
+					"description":          "godbolt.org filters object (optional). Supported keys: execute (run binary and return stdout/stderr/exit), optOutput (include LLVM optimization remarks in response), intel (Intel asm syntax vs AT&T), labels, directives, commentOnly, demangle, libraryCode, trim, binary, binaryObject. Values are booleans.",
+					"additionalProperties": true,
+				},
+				"execute_parameters": map[string]interface{}{
+					"type":        "object",
+					"description": "Parameters passed to the binary when filters.execute=true. Optional keys: stdin (string piped to the process), args (array of argv strings).",
+					"properties": map[string]interface{}{
+						"stdin": map[string]interface{}{"type": "string"},
+						"args":  map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
+					},
+				},
+				"tools": map[string]interface{}{
+					"type":        "array",
+					"description": "Run godbolt-hosted tools against the compile result. Most useful for perf work: [{\"id\":\"llvm-mcatrunk\",\"args\":\"-mcpu=skylake -timeline\"}] for cycle-accurate throughput/port-pressure analysis of the generated asm, [{\"id\":\"pahole\",\"args\":\"\"}] for struct layout / padding / cacheline audit. Not the place for clang-tidy / cppcheck / iwyu — those should wrap local binaries against your real compile_commands.json in a separate MCP. List available tools for a compiler via godbolt's /api/compilers/{language} entries (each has a tools[] field).",
+					"items": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"id":   map[string]interface{}{"type": "string"},
+							"args": map[string]interface{}{"type": "string"},
+						},
+					},
+				},
 			},
 			"required": []string{"compiler_id", "source"},
 		},
@@ -113,7 +137,7 @@ func registerTools(gs *GodboltServer) {
 	// Tool 2: compile_cmake
 	gs.server.AddTool(&mcp.Tool{
 		Name:        "compile_cmake",
-		Description: "Compile a CMake project with a specified compiler. Returns build output and compilation messages.",
+		Description: "Compile a CMake project via godbolt.org. Returns structured JSON with asm[], stdout[], stderr[], optional execResult (if filters.execute=true), optional optOutput[] (if filters.optOutput=true), and optional tools[] output (if tools[] is non-empty — e.g. llvm-mca throughput tables, pahole struct layout). Use filters to control asm syntax and enable execute/optOutput. Use execute_parameters for stdin/args of the executed binary. Use tools for llvm-mca / pahole / other godbolt-hosted analyzers that operate on the compile result.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -148,6 +172,30 @@ func registerTools(gs *GodboltServer) {
 						"properties": map[string]interface{}{
 							"id":      map[string]interface{}{"type": "string"},
 							"version": map[string]interface{}{"type": "string"},
+						},
+					},
+				},
+				"filters": map[string]interface{}{
+					"type":                 "object",
+					"description":          "godbolt.org filters object (optional). Supported keys: execute (run binary and return stdout/stderr/exit), optOutput (include LLVM optimization remarks in response), intel (Intel asm syntax vs AT&T), labels, directives, commentOnly, demangle, libraryCode, trim, binary, binaryObject. Values are booleans.",
+					"additionalProperties": true,
+				},
+				"execute_parameters": map[string]interface{}{
+					"type":        "object",
+					"description": "Parameters passed to the binary when filters.execute=true. Optional keys: stdin (string piped to the process), args (array of argv strings).",
+					"properties": map[string]interface{}{
+						"stdin": map[string]interface{}{"type": "string"},
+						"args":  map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
+					},
+				},
+				"tools": map[string]interface{}{
+					"type":        "array",
+					"description": "Run godbolt-hosted tools against the compile result. Most useful for perf work: [{\"id\":\"llvm-mcatrunk\",\"args\":\"-mcpu=skylake -timeline\"}] for cycle-accurate throughput/port-pressure analysis of the generated asm, [{\"id\":\"pahole\",\"args\":\"\"}] for struct layout / padding / cacheline audit. Not the place for clang-tidy / cppcheck / iwyu — those should wrap local binaries against your real compile_commands.json in a separate MCP. List available tools for a compiler via godbolt's /api/compilers/{language} entries (each has a tools[] field).",
+					"items": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"id":   map[string]interface{}{"type": "string"},
+							"args": map[string]interface{}{"type": "string"},
 						},
 					},
 				},
