@@ -127,3 +127,47 @@ func TestCompileTool_PassesFiltersExecuteParametersAndTools(t *testing.T) {
 		t.Errorf("tools[0].id = %v, want llvm-mcatrunk", firstTool["id"])
 	}
 }
+
+func TestCompileCMakeTool_MirrorsCompileToolSurface(t *testing.T) {
+	var gotAccept string
+	var gotPayload map[string]interface{}
+	srv := fakeGodbolt(t, &gotAccept, &gotPayload)
+	defer srv.Close()
+
+	gs := &GodboltServer{httpClient: srv.Client(), baseURL: srv.URL + "/api"}
+
+	rawArgs, _ := json.Marshal(map[string]interface{}{
+		"compiler_id":    "gcc-13.2",
+		"source":         "cmake_minimum_required(VERSION 3.20)\nproject(x)\n",
+		"user_arguments": "-O3",
+		"filters":        map[string]interface{}{"execute": true},
+		"execute_parameters": map[string]interface{}{
+			"stdin": "hello\n",
+		},
+		"tools": []map[string]interface{}{
+			{"id": "pahole", "args": ""},
+		},
+	})
+
+	_, err := gs.compileCMakeTool(t.Context(), (&mockCallToolRequest{Arguments: rawArgs}).toReal())
+	if err != nil {
+		t.Fatalf("compileCMakeTool: %v", err)
+	}
+
+	if gotAccept != "application/json" {
+		t.Errorf("Accept header = %q, want application/json", gotAccept)
+	}
+	opts := gotPayload["options"].(map[string]interface{})
+	filters := opts["filters"].(map[string]interface{})
+	if filters["execute"] != true {
+		t.Errorf("filters.execute not forwarded: %+v", filters)
+	}
+	execParams := opts["executeParameters"].(map[string]interface{})
+	if execParams["stdin"] != "hello\n" {
+		t.Errorf("executeParameters.stdin not forwarded: %+v", execParams)
+	}
+	tools, ok := gotPayload["tools"].([]interface{})
+	if !ok || len(tools) != 1 {
+		t.Fatalf("tools not forwarded or wrong count: %+v", gotPayload["tools"])
+	}
+}
