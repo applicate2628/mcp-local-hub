@@ -167,6 +167,69 @@ func TestGetPopularArguments(t *testing.T) {
 	}
 }
 
+func TestGetCompilers_ExtractsLanguageID(t *testing.T) {
+	var gotURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURL = r.URL.String()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"id":"gcc-13.2","name":"GCC 13.2"}]`))
+	}))
+	defer srv.Close()
+	gs := &GodboltServer{httpClient: srv.Client(), baseURL: srv.URL + "/api"}
+
+	req := &mcp.ReadResourceRequest{Params: &mcp.ReadResourceParams{}}
+	req.Params.URI = "resource://compilers/cpp"
+	_, err := gs.getCompilers(t.Context(), req)
+	if err != nil {
+		t.Fatalf("getCompilers: %v", err)
+	}
+	if gotURL != "/api/compilers/cpp" {
+		t.Errorf("godbolt URL = %q, want /api/compilers/cpp", gotURL)
+	}
+}
+
+func TestGetLibraries_ExtractsLanguageID(t *testing.T) {
+	var gotURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURL = r.URL.String()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+	gs := &GodboltServer{httpClient: srv.Client(), baseURL: srv.URL + "/api"}
+
+	req := &mcp.ReadResourceRequest{Params: &mcp.ReadResourceParams{}}
+	req.Params.URI = "resource://libraries/rust"
+	_, err := gs.getLibraries(t.Context(), req)
+	if err != nil {
+		t.Fatalf("getLibraries: %v", err)
+	}
+	if gotURL != "/api/libraries/rust" {
+		t.Errorf("godbolt URL = %q, want /api/libraries/rust", gotURL)
+	}
+}
+
+func TestGetInstructionInfo_ExtractsBothParams(t *testing.T) {
+	var gotURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURL = r.URL.String()
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("MOV instruction docs"))
+	}))
+	defer srv.Close()
+	gs := &GodboltServer{httpClient: srv.Client(), baseURL: srv.URL + "/api"}
+
+	req := &mcp.ReadResourceRequest{Params: &mcp.ReadResourceParams{}}
+	req.Params.URI = "resource://asm/x86/mov"
+	_, err := gs.getInstructionInfo(t.Context(), req)
+	if err != nil {
+		t.Fatalf("getInstructionInfo: %v", err)
+	}
+	if gotURL != "/api/asm/x86/mov" {
+		t.Errorf("godbolt URL = %q, want /api/asm/x86/mov (both instruction_set and opcode must extract correctly)", gotURL)
+	}
+}
+
 func TestCompileCMakeTool_MirrorsCompileToolSurface(t *testing.T) {
 	var gotAccept string
 	var gotPayload map[string]interface{}

@@ -402,25 +402,21 @@ func extractPathParam(uri, paramName string) string {
 	// and extract by position based on paramName
 	parts := strings.Split(uri, "/")
 
-	// Map parameter name to position for known templates
+	// Map parameter name to position for known templates.
+	// strings.Split("resource://compilers/cpp", "/") yields
+	// ["resource:", "", "compilers", "cpp"] — the empty string after
+	// "resource:" comes from the "//" separator. All positions below
+	// account for that empty parts[1].
 	var paramPosition int
 	switch {
 	case paramName == "language_id":
-		paramPosition = 2 // resource://compilers/cpp → parts[2] = "cpp"
+		paramPosition = 3 // resource://compilers/cpp → parts=["resource:","","compilers","cpp"]
 	case paramName == "instruction_set":
-		paramPosition = 2 // resource://asm/x86/mov → parts[2] = "x86"
+		paramPosition = 3 // resource://asm/x86/mov → parts=["resource:","","asm","x86","mov"]
 	case paramName == "opcode":
-		paramPosition = 3 // resource://asm/x86/mov → parts[3] = "mov"
+		paramPosition = 4 // resource://asm/x86/mov → "mov" at index 4
 	case paramName == "compiler_id":
-		// strings.Split("resource://popularArguments/gcc-13.2", "/") yields
-		// ["resource:", "", "popularArguments", "gcc-13.2"] — so the
-		// compiler id sits at parts[3], not parts[2]. (The pre-existing
-		// instruction_set/opcode comments above are inherited and inaccurate
-		// for the same reason; their handlers happen to lack a unit test that
-		// exercises real path values, so the off-by-one stayed latent.
-		// Fixing those is out of scope for this task; filed as adjacent
-		// finding.)
-		paramPosition = 3
+		paramPosition = 3 // resource://popularArguments/gcc-13.2 → parts=["resource:","","popularArguments","gcc-13.2"]
 	default:
 		return ""
 	}
