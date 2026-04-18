@@ -17,7 +17,7 @@
 
 $ErrorActionPreference = "Stop"
 
-$version = "0.1.0"
+$version = "0.3.0"
 try { $commit = (git rev-parse --short HEAD 2>$null) } catch { $commit = "unknown" }
 if ([string]::IsNullOrWhiteSpace($commit)) { $commit = "unknown" }
 $buildDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
