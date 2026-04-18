@@ -2,7 +2,6 @@ package api
 
 import (
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 
@@ -27,10 +26,6 @@ type SchedulerUpgradeResult struct {
 // Preserves scheduler task names and trigger configurations; only the
 // <Command> and <WorkingDirectory> fields are updated.
 func (a *API) SchedulerUpgrade() ([]SchedulerUpgradeResult, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return nil, err
-	}
 	sch, err := scheduler.New()
 	if err != nil {
 		return nil, err
@@ -68,7 +63,7 @@ func (a *API) SchedulerUpgrade() ([]SchedulerUpgradeResult, error) {
 		spec := scheduler.TaskSpec{
 			Name:             t.Name,
 			Description:      "mcp-local-hub: " + m.Name,
-			Command:          exe,
+			Command:          mcphubShortName,
 			Args:             args,
 			RestartOnFailure: dmn != "weekly-refresh",
 		}
@@ -81,7 +76,7 @@ func (a *API) SchedulerUpgrade() ([]SchedulerUpgradeResult, error) {
 			results = append(results, SchedulerUpgradeResult{TaskName: t.Name, Err: fmt.Sprintf("create: %v", err)})
 			continue
 		}
-		results = append(results, SchedulerUpgradeResult{TaskName: t.Name, NewCmd: exe})
+		results = append(results, SchedulerUpgradeResult{TaskName: t.Name, NewCmd: mcphubShortName})
 	}
 	return results, nil
 }
@@ -94,10 +89,6 @@ func (a *API) WeeklyRefreshSet(schedule string) error {
 	if err != nil {
 		return err
 	}
-	exe, err := os.Executable()
-	if err != nil {
-		return err
-	}
 	sch, err := scheduler.New()
 	if err != nil {
 		return err
@@ -107,7 +98,7 @@ func (a *API) WeeklyRefreshSet(schedule string) error {
 	return sch.Create(scheduler.TaskSpec{
 		Name:             taskName,
 		Description:      "mcp-local-hub: weekly refresh (restart --all)",
-		Command:          exe,
+		Command:          mcphubShortName,
 		Args:             []string{"restart", "--all"},
 		WeeklyTrigger:    &scheduler.WeeklyTrigger{DayOfWeek: day, HourLocal: hr, MinuteLocal: min},
 		RestartOnFailure: false,

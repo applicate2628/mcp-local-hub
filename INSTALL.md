@@ -21,7 +21,25 @@ go build -o mcphub.exe ./cmd/mcphub
 
 On success: `mcphub.exe` appears in the repo root (~12 MB, includes Windows version resource metadata).
 
-Optional: add the repo directory to `PATH` so you can run `mcp` from anywhere. Until then every command is `./mcphub.exe ...`.
+## Setup (PATH registration)
+
+Scheduler tasks and Antigravity relay entries reference `mcphub.exe` by bare name and rely on PATH resolution at run time, so the binary can live anywhere as long as it's on PATH. `mcphub setup` canonicalizes that location:
+
+```bash
+./mcphub.exe setup
+```
+
+What it does:
+
+- Copies the running binary to `%USERPROFILE%\.local\bin\mcphub.exe` (on Linux/macOS: `~/.local/bin/mcphub`).
+- On Windows: appends that directory to `HKCU\Environment\Path` if it isn't already there, then broadcasts `WM_SETTINGCHANGE` so new shells pick up the change. **The shell that ran `setup` won't see the updated PATH — close and reopen it.**
+- On Linux/macOS: prints the one-line `export PATH=...` snippet to paste into your shell rc. Does not touch rc files.
+
+Idempotent — running it again when the binary is already at the target and the dir is already on PATH is a no-op (no registry write, no duplicate entries).
+
+If you skip this step, `mcphub install` will detect that `mcphub.exe` isn't on PATH and either prompt to bootstrap (interactive shells) or fail with a pointer back to `mcphub setup` (CI, pipes).
+
+Moving the binary later: run `setup` again from the new location. Existing scheduler tasks keep working without rewriting — they resolve `mcphub.exe` through PATH.
 
 ## First install
 
