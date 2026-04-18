@@ -9,10 +9,11 @@ import (
 // Resolver turns manifest env values (which may contain prefixes like `secret:`,
 // `file:`, or `$VAR`) into plaintext for use in a child process environment.
 // Resolution order per spec §3.8:
-//   secret:<key> → vault.Get
-//   file:<key>   → local config map
-//   $VAR         → os.Getenv (fails if unset)
-//   <literal>    → returned as-is
+//
+//	secret:<key> → vault.Get
+//	file:<key>   → local config map
+//	$VAR         → os.Getenv (fails if unset)
+//	<literal>    → returned as-is
 type Resolver struct {
 	vault *Vault
 	local map[string]string

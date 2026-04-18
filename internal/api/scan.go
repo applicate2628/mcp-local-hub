@@ -382,6 +382,7 @@ func (a *API) Scan() (*ScanResult, error) {
 // running binary's location. Two layouts supported:
 //   - binary and servers/ in the same directory (legacy / standalone install)
 //   - binary in bin/ and servers/ in bin/../ (standard Go project layout)
+//
 // Falls back to CWD-relative "servers" if neither exists, so tests that
 // don't set an explicit ManifestDir still work when run from the repo root.
 func defaultManifestDir() string {

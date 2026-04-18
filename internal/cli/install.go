@@ -101,4 +101,3 @@ func maybeBootstrapInteractively(w io.Writer, in *os.File) error {
 	}
 	return fmt.Errorf("%s not found on PATH — run `mcphub setup` once to install to ~/.local/bin and register in PATH", mcphubShortName)
 }
-

@@ -52,14 +52,14 @@ func newInstallCmd() *cobra.Command {
 }
 func newSetupCmd() *cobra.Command     { return newSetupCmdReal() }
 func newUninstallCmd() *cobra.Command { return newUninstallCmdReal() }
-func newStatusCmd() *cobra.Command  { return newStatusCmdReal() }
-func newScanCmd() *cobra.Command    { return newScanCmdReal() }
-func newMigrateCmd() *cobra.Command { return newMigrateCmdReal() }
-func newRestartCmd() *cobra.Command { return newRestartCmdReal() }
-func newRollbackCmd() *cobra.Command { return newRollbackCmdReal() }
-func newDaemonCmd() *cobra.Command  { return newDaemonCmdReal() }
-func newRelayCmd() *cobra.Command   { return newRelayCmdReal() }
-func newVersionCmd() *cobra.Command { return newVersionCmdReal() }
+func newStatusCmd() *cobra.Command    { return newStatusCmdReal() }
+func newScanCmd() *cobra.Command      { return newScanCmdReal() }
+func newMigrateCmd() *cobra.Command   { return newMigrateCmdReal() }
+func newRestartCmd() *cobra.Command   { return newRestartCmdReal() }
+func newRollbackCmd() *cobra.Command  { return newRollbackCmdReal() }
+func newDaemonCmd() *cobra.Command    { return newDaemonCmdReal() }
+func newRelayCmd() *cobra.Command     { return newRelayCmdReal() }
+func newVersionCmd() *cobra.Command   { return newVersionCmdReal() }
 func newSecretsCmd() *cobra.Command {
 	return newSecretsCmdReal()
 }
@@ -72,8 +72,8 @@ func newCleanupCmd() *cobra.Command {
 func newStopCmd() *cobra.Command {
 	return newStopCmdReal()
 }
-func newBackupsCmd() *cobra.Command { return newBackupsCmdReal() }
-func newManifestCmd() *cobra.Command { return newManifestCmdReal() }
+func newBackupsCmd() *cobra.Command   { return newBackupsCmdReal() }
+func newManifestCmd() *cobra.Command  { return newManifestCmdReal() }
 func newSchedulerCmd() *cobra.Command { return newSchedulerCmdReal() }
 func newSettingsCmd() *cobra.Command  { return newSettingsCmdReal() }
 

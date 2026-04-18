@@ -182,7 +182,6 @@ func (r *HTTPToStdioRelay) stdinPump(ctx context.Context, wg *sync.WaitGroup) er
 // server's response(s) back to stdout. On HTTP failure with a request
 // (has id), synthesizes a JSON-RPC error response so the client does
 // not hang awaiting a reply.
-//
 func (r *HTTPToStdioRelay) handlePOST(ctx context.Context, body []byte) {
 	meta, metaErr := decodeJSONRPCMeta(body)
 
@@ -455,7 +454,6 @@ func (r *HTTPToStdioRelay) setSessionID(sid string) {
 		r.sessionID.Store(sid)
 	}
 }
-
 
 // readJSONRPCLine reads up to the next newline from r and returns the
 // raw bytes (without the terminator). Errors include io.EOF (clean

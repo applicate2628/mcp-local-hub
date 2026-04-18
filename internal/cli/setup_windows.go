@@ -17,10 +17,10 @@ import (
 // Windows SendMessageTimeout constants. Kept local so we don't pull in the
 // whole golang.org/x/sys/windows package just for two numbers.
 const (
-	hwndBroadcast     uintptr = 0xFFFF
-	wmSettingChange   uintptr = 0x001A
-	smtoAbortIfHung   uintptr = 0x0002
-	broadcastTimeout  uintptr = 1000 // ms
+	hwndBroadcast    uintptr = 0xFFFF
+	wmSettingChange  uintptr = 0x001A
+	smtoAbortIfHung  uintptr = 0x0002
+	broadcastTimeout uintptr = 1000 // ms
 )
 
 // ensureOnPath makes sure dir is on HKCU\Environment\Path and broadcasts
@@ -186,4 +186,3 @@ func isZeroSyscallError(err error) bool {
 	}
 	return false
 }
-

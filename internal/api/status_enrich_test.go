@@ -65,11 +65,11 @@ func TestParseTaskName(t *testing.T) {
 // boundary — exercise deriveState directly.
 func TestDeriveState(t *testing.T) {
 	cases := []struct {
-		name     string
-		raw      string
-		alive    bool
-		nextRun  string
-		wantOut  string
+		name    string
+		raw     string
+		alive   bool
+		nextRun string
+		wantOut string
 	}{
 		{"alive overrides any raw state", "Ready", true, "N/A", "Running"},
 		{"alive even when raw=Running (task still firing)", "Running", true, "", "Running"},

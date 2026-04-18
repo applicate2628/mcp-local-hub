@@ -55,25 +55,25 @@ func registerTools(tb *PerfToolbox) {
 			"plus raw_stderr and exit_code. Requires compile_commands.json in project_root — generate via CMake " +
 			"(-DCMAKE_EXPORT_COMPILE_COMMANDS=ON) or bear/compiledb for Make-based builds. " +
 			"Common checks preset: performance-*,bugprone-*,readability-*.",
-		InputSchema: map[string]interface{}{
+		InputSchema: map[string]any{
 			"type": "object",
-			"properties": map[string]interface{}{
-				"files": map[string]interface{}{
+			"properties": map[string]any{
+				"files": map[string]any{
 					"type":        "array",
-					"items":       map[string]interface{}{"type": "string"},
+					"items":       map[string]any{"type": "string"},
 					"description": "List of source file paths to analyze (absolute or relative to project_root).",
 				},
-				"project_root": map[string]interface{}{
+				"project_root": map[string]any{
 					"type":        "string",
 					"description": "Directory containing compile_commands.json. clang-tidy resolves flags per-file from this DB.",
 				},
-				"checks": map[string]interface{}{
+				"checks": map[string]any{
 					"type":        "string",
 					"description": "Optional. Comma-separated check pattern (e.g. 'performance-*,bugprone-*'). Omit to use .clang-tidy config or default checks.",
 				},
-				"extra_args": map[string]interface{}{
+				"extra_args": map[string]any{
 					"type":        "array",
-					"items":       map[string]interface{}{"type": "string"},
+					"items":       map[string]any{"type": "string"},
 					"description": "Optional. Additional raw arguments passed verbatim before file list (e.g. ['--header-filter=.*', '--quiet']).",
 				},
 			},
@@ -88,29 +88,29 @@ func registerTools(tb *PerfToolbox) {
 			"system, and raw times[] in seconds. For N>=2 commands hyperfine also computes pairwise ratios " +
 			"in its own output. Use warmup to stabilize caches (recommended 1-3) and min_runs/max_runs to " +
 			"control the statistical budget.",
-		InputSchema: map[string]interface{}{
+		InputSchema: map[string]any{
 			"type": "object",
-			"properties": map[string]interface{}{
-				"commands": map[string]interface{}{
+			"properties": map[string]any{
+				"commands": map[string]any{
 					"type":        "array",
-					"items":       map[string]interface{}{"type": "string"},
+					"items":       map[string]any{"type": "string"},
 					"description": "Shell commands to benchmark. Pass 2+ to enable comparative ratios.",
 				},
-				"warmup": map[string]interface{}{
+				"warmup": map[string]any{
 					"type":        "integer",
 					"description": "Number of warmup runs per command before measurement. Optional (default 0).",
 				},
-				"min_runs": map[string]interface{}{
+				"min_runs": map[string]any{
 					"type":        "integer",
 					"description": "Minimum runs per command. Optional (default hyperfine default = 10).",
 				},
-				"max_runs": map[string]interface{}{
+				"max_runs": map[string]any{
 					"type":        "integer",
 					"description": "Maximum runs per command. Optional.",
 				},
-				"extra_args": map[string]interface{}{
+				"extra_args": map[string]any{
 					"type":        "array",
-					"items":       map[string]interface{}{"type": "string"},
+					"items":       map[string]any{"type": "string"},
 					"description": "Optional. Additional raw hyperfine arguments (e.g. ['--prepare', 'sync']).",
 				},
 			},
@@ -125,32 +125,32 @@ func registerTools(tb *PerfToolbox) {
 			"instructions are actually in my .exe?'. Returns raw disassembly text. Use the function " +
 			"parameter to limit output to a specific symbol (heavily recommended — full .text disassembly " +
 			"of a real binary is typically megabytes).",
-		InputSchema: map[string]interface{}{
+		InputSchema: map[string]any{
 			"type": "object",
-			"properties": map[string]interface{}{
-				"binary": map[string]interface{}{
+			"properties": map[string]any{
+				"binary": map[string]any{
 					"type":        "string",
 					"description": "Path to the binary file (executable, object, shared lib, or archive).",
 				},
-				"function": map[string]interface{}{
+				"function": map[string]any{
 					"type":        "string",
 					"description": "Optional. Limit disassembly to this symbol name (demangled). Highly recommended for large binaries.",
 				},
-				"section": map[string]interface{}{
+				"section": map[string]any{
 					"type":        "string",
 					"description": "Optional. Limit disassembly to a named section (e.g. '.text', '.text.startup').",
 				},
-				"with_source": map[string]interface{}{
+				"with_source": map[string]any{
 					"type":        "boolean",
 					"description": "Optional. Interleave source lines with asm (requires binary built with -g). Default false.",
 				},
-				"intel": map[string]interface{}{
+				"intel": map[string]any{
 					"type":        "boolean",
 					"description": "Optional. Use Intel asm syntax instead of AT&T. Default false (AT&T).",
 				},
-				"extra_args": map[string]interface{}{
+				"extra_args": map[string]any{
 					"type":        "array",
-					"items":       map[string]interface{}{"type": "string"},
+					"items":       map[string]any{"type": "string"},
 					"description": "Optional. Additional raw llvm-objdump args (e.g. ['--no-show-raw-insn']).",
 				},
 			},
@@ -164,20 +164,20 @@ func registerTools(tb *PerfToolbox) {
 			"per file in the output — each carrying add[], remove[], and full_list[] include suggestions. Plus " +
 			"raw_output for unparsed inspection. Unlike clang-tidy's include cleaner, IWYU does whole-transitive " +
 			"analysis: 'header X forward-declares Y; you use Y; so you should include Y's definition directly'.",
-		InputSchema: map[string]interface{}{
+		InputSchema: map[string]any{
 			"type": "object",
-			"properties": map[string]interface{}{
-				"file": map[string]interface{}{
+			"properties": map[string]any{
+				"file": map[string]any{
 					"type":        "string",
 					"description": "Source file path to analyze.",
 				},
-				"project_root": map[string]interface{}{
+				"project_root": map[string]any{
 					"type":        "string",
 					"description": "Optional. Working directory for iwyu; relative #include paths resolve from here.",
 				},
-				"extra_args": map[string]interface{}{
+				"extra_args": map[string]any{
 					"type":        "array",
-					"items":       map[string]interface{}{"type": "string"},
+					"items":       map[string]any{"type": "string"},
 					"description": "Optional. Additional raw iwyu args (e.g. ['-std=c++17', '-Iinclude']).",
 				},
 			},

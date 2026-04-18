@@ -71,7 +71,7 @@ type ClientUpdatePlan struct {
 // InstallOpts controls an install invocation.
 type InstallOpts struct {
 	Server       string
-	DaemonFilter string    // empty = all daemons in the manifest
+	DaemonFilter string // empty = all daemons in the manifest
 	DryRun       bool
 	Writer       io.Writer // progress output destination; nil = os.Stderr
 }
@@ -666,4 +666,3 @@ func killDaemonByPort(port int, timeout time.Duration) error {
 	}
 	return fmt.Errorf("port %d still bound after %s", port, timeout)
 }
-

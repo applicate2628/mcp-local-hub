@@ -9,8 +9,8 @@ import (
 
 // Kind enumerates daemon types. Only these two values are valid in manifest.kind.
 const (
-	KindGlobal           = "global"
-	KindWorkspaceScoped  = "workspace-scoped"
+	KindGlobal          = "global"
+	KindWorkspaceScoped = "workspace-scoped"
 )
 
 // Transport enumerates how the server speaks MCP. Only these are valid.
@@ -21,19 +21,19 @@ const (
 
 // ServerManifest is the parsed form of a `servers/<name>/manifest.yaml` file.
 type ServerManifest struct {
-	Name            string          `yaml:"name"`
-	Kind            string          `yaml:"kind"`
-	Transport       string          `yaml:"transport"`
-	Command         string          `yaml:"command"`
-	BaseArgs        []string        `yaml:"base_args"`
-	BaseArgsTemplate []string       `yaml:"base_args_template"`
-	Env             map[string]string `yaml:"env"`
-	Daemons         []DaemonSpec    `yaml:"daemons"`
-	Languages       []LanguageSpec  `yaml:"languages"`
-	PortPool        *PortPool       `yaml:"port_pool"`
-	IdleTimeoutMin  int             `yaml:"idle_timeout_min"`
-	ClientBindings  []ClientBinding `yaml:"client_bindings"`
-	WeeklyRefresh   bool            `yaml:"weekly_refresh"`
+	Name             string            `yaml:"name"`
+	Kind             string            `yaml:"kind"`
+	Transport        string            `yaml:"transport"`
+	Command          string            `yaml:"command"`
+	BaseArgs         []string          `yaml:"base_args"`
+	BaseArgsTemplate []string          `yaml:"base_args_template"`
+	Env              map[string]string `yaml:"env"`
+	Daemons          []DaemonSpec      `yaml:"daemons"`
+	Languages        []LanguageSpec    `yaml:"languages"`
+	PortPool         *PortPool         `yaml:"port_pool"`
+	IdleTimeoutMin   int               `yaml:"idle_timeout_min"`
+	ClientBindings   []ClientBinding   `yaml:"client_bindings"`
+	WeeklyRefresh    bool              `yaml:"weekly_refresh"`
 }
 
 type DaemonSpec struct {

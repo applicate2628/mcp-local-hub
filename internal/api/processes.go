@@ -34,9 +34,10 @@ func (a *API) CountProcesses(patterns []string) (int, error) {
 // falls back to PowerShell Get-CimInstance (Windows 11 24H2+ removed wmic).
 //
 // Output format:
-//   Node,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize
-//   HOST,"cmdline text",20260417180000.000000+000,555,1001,40000000
-//   ...
+//
+//	Node,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize
+//	HOST,"cmdline text",20260417180000.000000+000,555,1001,40000000
+//	...
 //
 // CommandLine is quoted with "" escaping (wmic-compatible). CreationDate is
 // formatted as CIM_DATETIME so parseWmicDate works unchanged. Returned as a

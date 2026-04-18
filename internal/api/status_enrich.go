@@ -53,13 +53,15 @@ func enrichStatus(rows []DaemonStatus, manifestDir string) {
 // "waiting for next trigger" and "logon-triggered daemon whose process died
 // hours ago" — the raw state alone cannot tell those apart. By folding in
 // port liveness and trigger presence we get four actionable labels:
-//   Running   — port bound; daemon alive (raw state irrelevant)
-//   Starting  — scheduler currently executing the task's launch action,
-//               port not yet bound
-//   Scheduled — task idle, no live daemon, but trigger will fire later
-//               (weekly-refresh-style tasks)
-//   Stopped   — task idle with no future trigger and no daemon (logon-only
-//               daemon that has exited; user needs to `mcphub restart`)
+//
+//	Running   — port bound; daemon alive (raw state irrelevant)
+//	Starting  — scheduler currently executing the task's launch action,
+//	            port not yet bound
+//	Scheduled — task idle, no live daemon, but trigger will fire later
+//	            (weekly-refresh-style tasks)
+//	Stopped   — task idle with no future trigger and no daemon (logon-only
+//	            daemon that has exited; user needs to `mcphub restart`)
+//
 // Anything unexpected (Disabled, Queued, etc.) falls through unchanged.
 func deriveState(raw string, alive bool, nextRun string) string {
 	if alive {

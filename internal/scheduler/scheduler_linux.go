@@ -12,10 +12,10 @@ func newPlatformScheduler() (Scheduler, error) {
 	return nil, fmt.Errorf("linux scheduler not yet implemented (Phase 0-1 is Windows-first)")
 }
 
-func (linuxScheduler) Create(TaskSpec) error          { return fmt.Errorf("not implemented") }
-func (linuxScheduler) Delete(string) error            { return fmt.Errorf("not implemented") }
-func (linuxScheduler) Run(string) error               { return fmt.Errorf("not implemented") }
-func (linuxScheduler) Stop(string) error              { return fmt.Errorf("not implemented") }
+func (linuxScheduler) Create(TaskSpec) error { return fmt.Errorf("not implemented") }
+func (linuxScheduler) Delete(string) error   { return fmt.Errorf("not implemented") }
+func (linuxScheduler) Run(string) error      { return fmt.Errorf("not implemented") }
+func (linuxScheduler) Stop(string) error     { return fmt.Errorf("not implemented") }
 func (linuxScheduler) Status(string) (TaskStatus, error) {
 	return TaskStatus{}, fmt.Errorf("not implemented")
 }

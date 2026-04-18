@@ -31,10 +31,10 @@ func TestFindLatestBackupSkipsSentinel(t *testing.T) {
 		return p
 	}
 
-	_ = write("original")                     // pristine sentinel
-	_ = write("20260101-000000")              // first timestamped
-	newest := write("20260418-030645")        // most recent — expected result
-	_ = write("20260215-120000")              // middle
+	_ = write("original")              // pristine sentinel
+	_ = write("20260101-000000")       // first timestamped
+	newest := write("20260418-030645") // most recent — expected result
+	_ = write("20260215-120000")       // middle
 
 	got, err := findLatestBackup(live)
 	if err != nil {

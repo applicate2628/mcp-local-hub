@@ -35,9 +35,9 @@ type TaskSpec struct {
 }
 
 type WeeklyTrigger struct {
-	DayOfWeek    int // 0=Sunday .. 6=Saturday
-	HourLocal    int
-	MinuteLocal  int
+	DayOfWeek   int // 0=Sunday .. 6=Saturday
+	HourLocal   int
+	MinuteLocal int
 }
 
 // TaskStatus summarizes what the OS scheduler currently thinks of a task.

@@ -68,64 +68,64 @@ func registerTools(gs *GodboltServer) {
 	gs.server.AddTool(&mcp.Tool{
 		Name:        "compile_code",
 		Description: "Compile source code via godbolt.org. Returns structured JSON with asm[], stdout[], stderr[], optional execResult (if filters.execute=true), optional optOutput[] (if filters.optOutput=true), and optional tools[] output (if tools[] is non-empty — e.g. llvm-mca throughput tables, pahole struct layout). Use filters to control asm syntax and enable execute/optOutput. Use execute_parameters for stdin/args of the executed binary. Use tools for llvm-mca / pahole / other godbolt-hosted analyzers that operate on the compile result.",
-		InputSchema: map[string]interface{}{
+		InputSchema: map[string]any{
 			"type": "object",
-			"properties": map[string]interface{}{
-				"compiler_id": map[string]interface{}{
+			"properties": map[string]any{
+				"compiler_id": map[string]any{
 					"type":        "string",
 					"description": "The compiler ID (e.g., 'gcc11')",
 				},
-				"source": map[string]interface{}{
+				"source": map[string]any{
 					"type":        "string",
 					"description": "The source code to compile",
 				},
-				"user_arguments": map[string]interface{}{
+				"user_arguments": map[string]any{
 					"type":        "string",
 					"description": "Optional compiler flags and options",
 				},
-				"files": map[string]interface{}{
+				"files": map[string]any{
 					"type":        "array",
 					"description": "Optional additional source files",
-					"items": map[string]interface{}{
+					"items": map[string]any{
 						"type": "object",
-						"properties": map[string]interface{}{
-							"filename": map[string]interface{}{"type": "string"},
-							"contents": map[string]interface{}{"type": "string"},
+						"properties": map[string]any{
+							"filename": map[string]any{"type": "string"},
+							"contents": map[string]any{"type": "string"},
 						},
 					},
 				},
-				"libraries": map[string]interface{}{
+				"libraries": map[string]any{
 					"type":        "array",
 					"description": "Optional libraries to link",
-					"items": map[string]interface{}{
+					"items": map[string]any{
 						"type": "object",
-						"properties": map[string]interface{}{
-							"id":      map[string]interface{}{"type": "string"},
-							"version": map[string]interface{}{"type": "string"},
+						"properties": map[string]any{
+							"id":      map[string]any{"type": "string"},
+							"version": map[string]any{"type": "string"},
 						},
 					},
 				},
-				"filters": map[string]interface{}{
+				"filters": map[string]any{
 					"type":                 "object",
 					"description":          "godbolt.org filters object (optional). Supported keys: execute (run binary and return stdout/stderr/exit), optOutput (include LLVM optimization remarks in response), intel (Intel asm syntax vs AT&T), labels, directives, commentOnly, demangle, libraryCode, trim, binary, binaryObject. Values are booleans.",
 					"additionalProperties": true,
 				},
-				"execute_parameters": map[string]interface{}{
+				"execute_parameters": map[string]any{
 					"type":        "object",
 					"description": "Parameters passed to the binary when filters.execute=true. Optional keys: stdin (string piped to the process), args (array of argv strings).",
-					"properties": map[string]interface{}{
-						"stdin": map[string]interface{}{"type": "string"},
-						"args":  map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
+					"properties": map[string]any{
+						"stdin": map[string]any{"type": "string"},
+						"args":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 					},
 				},
-				"tools": map[string]interface{}{
+				"tools": map[string]any{
 					"type":        "array",
 					"description": "Run godbolt-hosted tools against the compile result. Most useful for perf work: [{\"id\":\"llvm-mcatrunk\",\"args\":\"-mcpu=skylake -timeline\"}] for cycle-accurate throughput/port-pressure analysis of the generated asm, [{\"id\":\"pahole\",\"args\":\"\"}] for struct layout / padding / cacheline audit. Not the place for clang-tidy / cppcheck / iwyu — those should wrap local binaries against your real compile_commands.json in a separate MCP. List available tools for a compiler via godbolt's /api/compilers/{language} entries (each has a tools[] field).",
-					"items": map[string]interface{}{
+					"items": map[string]any{
 						"type": "object",
-						"properties": map[string]interface{}{
-							"id":   map[string]interface{}{"type": "string"},
-							"args": map[string]interface{}{"type": "string"},
+						"properties": map[string]any{
+							"id":   map[string]any{"type": "string"},
+							"args": map[string]any{"type": "string"},
 						},
 					},
 				},
@@ -138,64 +138,64 @@ func registerTools(gs *GodboltServer) {
 	gs.server.AddTool(&mcp.Tool{
 		Name:        "compile_cmake",
 		Description: "Compile a CMake project via godbolt.org. Returns structured JSON with asm[], stdout[], stderr[], optional execResult (if filters.execute=true), optional optOutput[] (if filters.optOutput=true), and optional tools[] output (if tools[] is non-empty — e.g. llvm-mca throughput tables, pahole struct layout). Use filters to control asm syntax and enable execute/optOutput. Use execute_parameters for stdin/args of the executed binary. Use tools for llvm-mca / pahole / other godbolt-hosted analyzers that operate on the compile result.",
-		InputSchema: map[string]interface{}{
+		InputSchema: map[string]any{
 			"type": "object",
-			"properties": map[string]interface{}{
-				"compiler_id": map[string]interface{}{
+			"properties": map[string]any{
+				"compiler_id": map[string]any{
 					"type":        "string",
 					"description": "The compiler ID (e.g., 'gcc11')",
 				},
-				"source": map[string]interface{}{
+				"source": map[string]any{
 					"type":        "string",
 					"description": "The CMakeLists.txt content or main source file",
 				},
-				"user_arguments": map[string]interface{}{
+				"user_arguments": map[string]any{
 					"type":        "string",
 					"description": "Optional CMake or compiler flags",
 				},
-				"files": map[string]interface{}{
+				"files": map[string]any{
 					"type":        "array",
 					"description": "Optional additional source files",
-					"items": map[string]interface{}{
+					"items": map[string]any{
 						"type": "object",
-						"properties": map[string]interface{}{
-							"filename": map[string]interface{}{"type": "string"},
-							"contents": map[string]interface{}{"type": "string"},
+						"properties": map[string]any{
+							"filename": map[string]any{"type": "string"},
+							"contents": map[string]any{"type": "string"},
 						},
 					},
 				},
-				"libraries": map[string]interface{}{
+				"libraries": map[string]any{
 					"type":        "array",
 					"description": "Optional libraries to link",
-					"items": map[string]interface{}{
+					"items": map[string]any{
 						"type": "object",
-						"properties": map[string]interface{}{
-							"id":      map[string]interface{}{"type": "string"},
-							"version": map[string]interface{}{"type": "string"},
+						"properties": map[string]any{
+							"id":      map[string]any{"type": "string"},
+							"version": map[string]any{"type": "string"},
 						},
 					},
 				},
-				"filters": map[string]interface{}{
+				"filters": map[string]any{
 					"type":                 "object",
 					"description":          "godbolt.org filters object (optional). Supported keys: execute (run binary and return stdout/stderr/exit), optOutput (include LLVM optimization remarks in response), intel (Intel asm syntax vs AT&T), labels, directives, commentOnly, demangle, libraryCode, trim, binary, binaryObject. Values are booleans.",
 					"additionalProperties": true,
 				},
-				"execute_parameters": map[string]interface{}{
+				"execute_parameters": map[string]any{
 					"type":        "object",
 					"description": "Parameters passed to the binary when filters.execute=true. Optional keys: stdin (string piped to the process), args (array of argv strings).",
-					"properties": map[string]interface{}{
-						"stdin": map[string]interface{}{"type": "string"},
-						"args":  map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
+					"properties": map[string]any{
+						"stdin": map[string]any{"type": "string"},
+						"args":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 					},
 				},
-				"tools": map[string]interface{}{
+				"tools": map[string]any{
 					"type":        "array",
 					"description": "Run godbolt-hosted tools against the compile result. Most useful for perf work: [{\"id\":\"llvm-mcatrunk\",\"args\":\"-mcpu=skylake -timeline\"}] for cycle-accurate throughput/port-pressure analysis of the generated asm, [{\"id\":\"pahole\",\"args\":\"\"}] for struct layout / padding / cacheline audit. Not the place for clang-tidy / cppcheck / iwyu — those should wrap local binaries against your real compile_commands.json in a separate MCP. List available tools for a compiler via godbolt's /api/compilers/{language} entries (each has a tools[] field).",
-					"items": map[string]interface{}{
+					"items": map[string]any{
 						"type": "object",
-						"properties": map[string]interface{}{
-							"id":   map[string]interface{}{"type": "string"},
-							"args": map[string]interface{}{"type": "string"},
+						"properties": map[string]any{
+							"id":   map[string]any{"type": "string"},
+							"args": map[string]any{"type": "string"},
 						},
 					},
 				},
@@ -208,14 +208,14 @@ func registerTools(gs *GodboltServer) {
 	gs.server.AddTool(&mcp.Tool{
 		Name:        "format_code",
 		Description: "Format source code using a specified code formatter.",
-		InputSchema: map[string]interface{}{
+		InputSchema: map[string]any{
 			"type": "object",
-			"properties": map[string]interface{}{
-				"formatter": map[string]interface{}{
+			"properties": map[string]any{
+				"formatter": map[string]any{
 					"type":        "string",
 					"description": "The formatter ID (e.g., 'clangformat', 'rustfmt')",
 				},
-				"source": map[string]interface{}{
+				"source": map[string]any{
 					"type":        "string",
 					"description": "The source code to format",
 				},
@@ -232,7 +232,7 @@ func (gs *GodboltServer) getLanguages(ctx context.Context, req *mcp.ReadResource
 		return nil, fmt.Errorf("failed to get languages: %w", err)
 	}
 
-	var languages interface{}
+	var languages any
 	if err := json.Unmarshal(body, &languages); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal languages: %w", err)
 	}
@@ -261,7 +261,7 @@ func (gs *GodboltServer) getCompilers(ctx context.Context, req *mcp.ReadResource
 		return nil, fmt.Errorf("failed to get compilers: %w", err)
 	}
 
-	var compilers interface{}
+	var compilers any
 	if err := json.Unmarshal(body, &compilers); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal compilers: %w", err)
 	}
@@ -290,7 +290,7 @@ func (gs *GodboltServer) getLibraries(ctx context.Context, req *mcp.ReadResource
 		return nil, fmt.Errorf("failed to get libraries: %w", err)
 	}
 
-	var libraries interface{}
+	var libraries any
 	if err := json.Unmarshal(body, &libraries); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal libraries: %w", err)
 	}
@@ -314,7 +314,7 @@ func (gs *GodboltServer) getFormatters(ctx context.Context, req *mcp.ReadResourc
 		return nil, fmt.Errorf("failed to get formatters: %w", err)
 	}
 
-	var formatters interface{}
+	var formatters any
 	if err := json.Unmarshal(body, &formatters); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal formatters: %w", err)
 	}
@@ -437,14 +437,14 @@ func extractPathParam(uri, paramName string) string {
 // POST /api/compiler/{compiler_id}/compile
 func (gs *GodboltServer) compileTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var args struct {
-		CompilerID        string                   `json:"compiler_id"`
-		Source            string                   `json:"source"`
-		UserArguments     string                   `json:"user_arguments"`
-		Files             []interface{}            `json:"files"`
-		Libraries         []interface{}            `json:"libraries"`
-		Filters           map[string]interface{}   `json:"filters"`
-		ExecuteParameters map[string]interface{}   `json:"execute_parameters"`
-		Tools             []map[string]interface{} `json:"tools"`
+		CompilerID        string           `json:"compiler_id"`
+		Source            string           `json:"source"`
+		UserArguments     string           `json:"user_arguments"`
+		Files             []any            `json:"files"`
+		Libraries         []any            `json:"libraries"`
+		Filters           map[string]any   `json:"filters"`
+		ExecuteParameters map[string]any   `json:"execute_parameters"`
+		Tools             []map[string]any `json:"tools"`
 	}
 
 	if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
@@ -470,7 +470,7 @@ func (gs *GodboltServer) compileTool(ctx context.Context, req *mcp.CallToolReque
 	}
 
 	// Build request payload
-	options := map[string]interface{}{
+	options := map[string]any{
 		"userArguments": args.UserArguments,
 		"libraries":     args.Libraries,
 	}
@@ -480,7 +480,7 @@ func (gs *GodboltServer) compileTool(ctx context.Context, req *mcp.CallToolReque
 	if len(args.ExecuteParameters) > 0 {
 		options["executeParameters"] = args.ExecuteParameters
 	}
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"source":  args.Source,
 		"options": options,
 	}
@@ -533,14 +533,14 @@ func (gs *GodboltServer) compileTool(ctx context.Context, req *mcp.CallToolReque
 // POST /api/compiler/{compiler_id}/cmake
 func (gs *GodboltServer) compileCMakeTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var args struct {
-		CompilerID        string                   `json:"compiler_id"`
-		Source            string                   `json:"source"`
-		UserArguments     string                   `json:"user_arguments"`
-		Files             []interface{}            `json:"files"`
-		Libraries         []interface{}            `json:"libraries"`
-		Filters           map[string]interface{}   `json:"filters"`
-		ExecuteParameters map[string]interface{}   `json:"execute_parameters"`
-		Tools             []map[string]interface{} `json:"tools"`
+		CompilerID        string           `json:"compiler_id"`
+		Source            string           `json:"source"`
+		UserArguments     string           `json:"user_arguments"`
+		Files             []any            `json:"files"`
+		Libraries         []any            `json:"libraries"`
+		Filters           map[string]any   `json:"filters"`
+		ExecuteParameters map[string]any   `json:"execute_parameters"`
+		Tools             []map[string]any `json:"tools"`
 	}
 
 	if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
@@ -566,7 +566,7 @@ func (gs *GodboltServer) compileCMakeTool(ctx context.Context, req *mcp.CallTool
 	}
 
 	// Build request payload
-	options := map[string]interface{}{
+	options := map[string]any{
 		"userArguments": args.UserArguments,
 		"libraries":     args.Libraries,
 	}
@@ -576,7 +576,7 @@ func (gs *GodboltServer) compileCMakeTool(ctx context.Context, req *mcp.CallTool
 	if len(args.ExecuteParameters) > 0 {
 		options["executeParameters"] = args.ExecuteParameters
 	}
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"source":  args.Source,
 		"options": options,
 	}
@@ -654,7 +654,7 @@ func (gs *GodboltServer) formatTool(ctx context.Context, req *mcp.CallToolReques
 	}
 
 	// Build request payload
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"source": args.Source,
 	}
 
@@ -700,7 +700,7 @@ func (gs *GodboltServer) formatTool(ctx context.Context, req *mcp.CallToolReques
 	}
 
 	// Parse JSON response and extract "answer" field
-	var response map[string]interface{}
+	var response map[string]any
 	if err := json.Unmarshal(body, &response); err != nil {
 		return &mcp.CallToolResult{
 			IsError: true,

@@ -51,7 +51,7 @@ func TestToolsResource_ReturnsJSONCatalog(t *testing.T) {
 		t.Fatalf("Contents[0] has no text: %+v", rc)
 	}
 
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := json.Unmarshal([]byte(rc.Text), &parsed); err != nil {
 		t.Fatalf("resource text is not valid JSON: %v\n%s", err, rc.Text)
 	}
@@ -86,7 +86,7 @@ func TestClangTidy_ParsesRealOutput(t *testing.T) {
 	}
 
 	tb := &PerfToolbox{tools: cat}
-	args, _ := json.Marshal(map[string]interface{}{
+	args, _ := json.Marshal(map[string]any{
 		"files":        []string{srcPath},
 		"project_root": dir,
 		"checks":       "performance-unnecessary-value-param",
@@ -107,7 +107,7 @@ func TestClangTidy_ParsesRealOutput(t *testing.T) {
 		t.Errorf("expected performance-unnecessary-value-param diagnostic in output:\n%s", body)
 	}
 	// Must be valid JSON.
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
 		t.Fatalf("tool output is not valid JSON: %v\n%s", err, body)
 	}
@@ -142,7 +142,7 @@ func TestHyperfine_ComparesTwoCommands(t *testing.T) {
 
 	tb := &PerfToolbox{tools: cat}
 	// Two trivially different commands — timing gap is tiny but measurable.
-	args, _ := json.Marshal(map[string]interface{}{
+	args, _ := json.Marshal(map[string]any{
 		"commands": []string{
 			"cmd /c exit 0",                    // near-instant
 			"cmd /c ping -n 1 127.0.0.1 > nul", // ~1ms
@@ -162,17 +162,17 @@ func TestHyperfine_ComparesTwoCommands(t *testing.T) {
 	}
 
 	body := contentText(result)
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
 		t.Fatalf("tool output not valid JSON: %v\n%s", err, body)
 	}
-	results, ok := parsed["results"].([]interface{})
+	results, ok := parsed["results"].([]any)
 	if !ok || len(results) != 2 {
 		t.Fatalf("expected results[] of length 2, got %+v", parsed["results"])
 	}
 	// Each result must at minimum carry mean + command.
 	for i, r := range results {
-		m, ok := r.(map[string]interface{})
+		m, ok := r.(map[string]any)
 		if !ok {
 			t.Fatalf("results[%d] is not an object: %T", i, r)
 		}
@@ -199,7 +199,7 @@ func TestLLVMObjdump_DisassemblesBinary(t *testing.T) {
 	}
 
 	tb := &PerfToolbox{tools: cat}
-	args, _ := json.Marshal(map[string]interface{}{
+	args, _ := json.Marshal(map[string]any{
 		"binary":  exe,
 		"section": ".text",
 	})
@@ -236,7 +236,7 @@ func TestIWYU_ParsesSuggestions(t *testing.T) {
 	}
 
 	tb := &PerfToolbox{tools: cat}
-	args, _ := json.Marshal(map[string]interface{}{
+	args, _ := json.Marshal(map[string]any{
 		"file":         srcPath,
 		"project_root": dir,
 		"extra_args":   []string{"-std=c++17"},
@@ -255,12 +255,12 @@ func TestIWYU_ParsesSuggestions(t *testing.T) {
 	}
 
 	body := contentText(result)
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
 		t.Fatalf("tool output not valid JSON: %v\n%s", err, body)
 	}
 	// At minimum the response carries a reports[] array.
-	reports, ok := parsed["reports"].([]interface{})
+	reports, ok := parsed["reports"].([]any)
 	if !ok {
 		t.Fatalf("expected reports[] in output, got: %+v", parsed)
 	}

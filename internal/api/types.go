@@ -14,16 +14,16 @@ type State struct {
 
 // DaemonStatus enriches the scheduler-task view with process stats.
 type DaemonStatus struct {
-	Server     string    `json:"server"`
-	Daemon     string    `json:"daemon"`
-	TaskName   string    `json:"task_name"`
-	State      string    `json:"state"`      // "Running" | "Ready" | "Failed" | "Stopped"
-	Port       int       `json:"port"`
+	Server     string `json:"server"`
+	Daemon     string `json:"daemon"`
+	TaskName   string `json:"task_name"`
+	State      string `json:"state"` // "Running" | "Ready" | "Failed" | "Stopped"
+	Port       int    `json:"port"`
 	LastResult int32  `json:"last_result"`
 	NextRun    string `json:"next_run"` // backend-specific text (e.g. "Sunday, April 19, 2026 3:00:00 AM" on Windows; "N/A" when no trigger)
-	PID        int       `json:"pid,omitempty"`
-	RAMBytes   uint64    `json:"ram_bytes,omitempty"`
-	UptimeSec  int64     `json:"uptime_sec,omitempty"`
+	PID        int    `json:"pid,omitempty"`
+	RAMBytes   uint64 `json:"ram_bytes,omitempty"`
+	UptimeSec  int64  `json:"uptime_sec,omitempty"`
 }
 
 // ScanEntry is one row in the unified "across all clients" view.
@@ -39,9 +39,9 @@ type ScanEntry struct {
 // ClientEntry captures the shape of how one MCP server is configured inside
 // one client config.
 type ClientEntry struct {
-	Transport string            `json:"transport"` // "http" | "stdio" | "relay" | "absent"
-	Endpoint  string            `json:"endpoint"`  // URL for http, command for stdio, etc.
-	Raw       map[string]any    `json:"raw"`       // the original JSON/TOML fragment
+	Transport string         `json:"transport"` // "http" | "stdio" | "relay" | "absent"
+	Endpoint  string         `json:"endpoint"`  // URL for http, command for stdio, etc.
+	Raw       map[string]any `json:"raw"`       // the original JSON/TOML fragment
 }
 
 // ScanResult bundles a full scan with timestamp for caching / SSE.
