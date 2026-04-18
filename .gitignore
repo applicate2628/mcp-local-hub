@@ -23,7 +23,24 @@ config.local.yaml
 /lldb-bridge
 /lldb-bridge.exe
 /lldb-bridge.exe~
+/perftools
+/perftools.exe
+/perftools.exe~
 /bin/
+
+# Build outputs from in-directory `go build` inside cmd/* — not the
+# canonical path (root is), but some workflows still land them here.
+/cmd/mcphub/mcphub.exe
+/cmd/mcphub/mcphub.exe~
+/cmd/godbolt/godbolt.exe
+/cmd/godbolt/godbolt.exe~
+/cmd/lldb-bridge/lldb-bridge.exe
+/cmd/lldb-bridge/lldb-bridge.exe~
+/cmd/perftools/perftools.exe
+/cmd/perftools/perftools.exe~
+
+# Session reports / transcripts from subagent tooling
+/.reports/
 
 # Editor saved-copy backups
 *.saved.bak
