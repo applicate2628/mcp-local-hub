@@ -32,5 +32,11 @@ client_bindings:
   - client: codex-cli
     daemon: default
     url_path: /mcp
+  - client: gemini-cli
+    daemon: default
+    url_path: /mcp
+  - client: antigravity
+    daemon: default
+    url_path: /mcp
 
 weekly_refresh: false
