@@ -43,7 +43,7 @@ Moving or rebuilding the binary later: run `setup` again from the new location. 
 
 ## First install
 
-Nine servers ship with manifests: `serena`, `memory`, `sequential-thinking`, `wolfram`, `godbolt`, `paper-search-mcp`, `time`, `gdb`, `lldb`. Each is installed independently. Start with Serena (Phase 1 flagship):
+Ten servers ship with manifests: `serena`, `memory`, `sequential-thinking`, `wolfram`, `godbolt`, `paper-search-mcp`, `time`, `gdb`, `lldb`, `perftools`. Each is installed independently. Start with Serena (Phase 1 flagship):
 
 ```bash
 # Preview what would happen (no side effects)
@@ -307,21 +307,74 @@ per-session bridges would race. Auto-spawned LLDB is terminated cleanly
 on daemon exit. The bridge lives in `internal/lldb/` and can also be
 built as a standalone binary — see *Standalone binaries* below.
 
+### perftools (port 9131)
+
+Embedded in `mcphub.exe` — no external dependency beyond what MSYS2/ucrt64 already provides. Manifest runs `mcphub perftools` as the daemon command. Wraps four local analysis tools that complement the godbolt server by operating on the user's **real** build output (post-LTO/PGO/linker-inlining) instead of godbolt's single-file sandbox compile.
+
+**Tools:**
+
+- `clang_tidy` — run clang-tidy with a checks filter against files in a project with a `compile_commands.json`. Returns structured JSON `{diagnostics[{file, line, column, severity, check, message}], raw_stderr, exit_code}`. Catches the dozens of `performance-*` and `bugprone-*` checks that need real build context (transitive includes, preprocessor state, platform macros).
+- `hyperfine` — benchmark one or more shell commands with statistical rigor (warmup, outlier detection, min/max runs). Returns hyperfine's `--export-json` verbatim: `{results[{command, mean, stddev, median, min, max, user, system, times[]}]}`. For 2+ commands hyperfine also computes pairwise ratios. Use this to answer "is variant A actually faster than B?" with sub-percent precision.
+- `llvm_objdump` — disassemble a function/section of the user's REAL binary (post-LTO/PGO/linker-inlining). Supports Intel/AT&T syntax, source interleave, symbol filtering. Unique vs godbolt: godbolt is compile-only/sandbox/single-file — `llvm_objdump` shows what's in the `.exe` after your whole build pipeline.
+- `iwyu` — run include-what-you-use on a source file. Returns per-file `{add[], remove[], full_list[]}` include suggestions plus raw output. Shaves compile time by trimming unused transitive includes.
+
+**Resource:**
+
+- `resource://tools` — JSON catalog of which of the four tools are installed on this machine and their versions. Probed once at startup via `exec.LookPath` + `<bin> --version`. Lets MCP clients skip tools that would fail rather than guessing.
+
+**Prerequisites (tools on PATH):**
+
+On the MSYS2/ucrt64 stack, install via `pacman`:
+
+```powershell
+pacman -S mingw-w64-ucrt-x86_64-clang-tools-extra    # clang-tidy
+pacman -S mingw-w64-ucrt-x86_64-hyperfine            # hyperfine
+pacman -S mingw-w64-ucrt-x86_64-llvm                 # llvm-objdump
+pacman -S mingw-w64-ucrt-x86_64-include-what-you-use # include-what-you-use
+```
+
+Then make sure `C:\msys64\ucrt64\bin` is on PATH for the mcphub scheduler task. `mcphub perftools` checks at startup and advertises missing tools via `resource://tools` — the server starts regardless; per-tool calls surface a clean "X not installed" error.
+
+**The complete perf loop in one chat:**
+
+```text
+clang_tidy(files=["src/hot.cpp"], project_root="/path/to/repo",
+           checks="performance-*")
+  → finds: performance-unnecessary-value-param on foo's std::string arg
+
+<edit to pass by const-ref>
+
+compile_code(compiler_id="gcc-13.2", source=..., filters={optOutput: true})
+  → godbolt check: vectorized, no spurious copies
+
+<rebuild via user's cmake>
+
+hyperfine(commands=["./build-old/mybin", "./build-new/mybin"],
+          warmup=3, min_runs=10)
+  → new is 1.28× faster (±0.4%)
+
+llvm_objdump(binary="./build-new/mybin", function="hot_loop")
+  → confirm LTO-linked final output still retains the vectorization
+```
+
+The Go implementation lives in `internal/perftools/` and can also be built as a standalone binary — see *Standalone binaries* below.
+
 ### Standalone binaries (optional)
 
-Two of the bundled servers — `godbolt` and `lldb-bridge` — live inside
+Three of the bundled servers — `godbolt`, `lldb-bridge`, and `perftools` — live inside
 `mcphub.exe` but can also be built as independent binaries for users
 who want them without the full hub:
 
 ```bash
 go build -o godbolt.exe ./cmd/godbolt
 go build -o lldb-bridge.exe ./cmd/lldb-bridge
+go build -o perftools.exe ./cmd/perftools
 ```
 
 Each is a thin entry point (`cmd/<name>/main.go`) that imports the same
-library package the hub uses (`internal/godbolt`, `internal/lldb`), so
+library package the hub uses (`internal/godbolt`, `internal/lldb`, `internal/perftools`), so
 there is zero code duplication between the embedded and standalone
-shapes. Behavior is identical to `mcphub godbolt` / `mcphub lldb-bridge`
+shapes. Behavior is identical to `mcphub godbolt` / `mcphub lldb-bridge` / `mcphub perftools`
 — the binaries just skip the hub's scheduler/multiplexer.
 
 When to use standalone binaries:
@@ -330,9 +383,10 @@ When to use standalone binaries:
   doesn't need mcphub.
 - You want to run the LLDB bridge from a custom script or a non-Windows
   host where the hub's Task-Scheduler integration is not available.
+- You want the perf-analysis toolbox (clang-tidy / hyperfine / llvm-objdump / iwyu) inline in a tool that doesn't need mcphub, provided the underlying binaries are on PATH.
 
 Manifests can target either shape — switch `command: mcphub` to
-`command: godbolt` (resp. `command: lldb-bridge`) if the standalone
+`command: godbolt` / `command: lldb-bridge` / `command: perftools` if the standalone
 binary is on `PATH`.
 
 ### context7 (no daemon)
