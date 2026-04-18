@@ -193,17 +193,76 @@ mcphub secrets set wolfram_app_id --value <your-app-id>
 
 ### godbolt (port 9126)
 
-Embedded in `mcphub.exe` — no external dependency. Manifest runs
-`mcphub godbolt` as the daemon command. Exposes 6 MCP resources
-(`resource://languages`, `resource://compilers/{language_id}`,
-`resource://libraries/{language_id}`, `resource://formats`,
-`resource://asm/{instruction_set}/{opcode}`, `resource://version`) and
-3 tools (`compile_code`, `compile_cmake`, `format_code`), all proxied
-to the public Godbolt Compiler Explorer API at godbolt.org. Stateless.
+Embedded in `mcphub.exe` — no external dependency. Manifest runs `mcphub godbolt` as the daemon command. Proxies the Godbolt Compiler Explorer API at godbolt.org.
 
-Previously shipped as a separate Python FastMCP server in a venv; the
-Go rewrite lives in `internal/godbolt/` and can also be built as a
-standalone binary — see the *Standalone binaries* section below.
+**Tools:**
+- `compile_code` — compile a single-file source via the chosen compiler. Returns JSON with separate `asm[]`, `stdout[]`, `stderr[]`, optional `execResult` (when `filters.execute=true`), and optional `optOutput[]` (when `filters.optOutput=true` — structured LLVM optimization remarks).
+- `compile_cmake` — same as compile_code but for CMake projects.
+- `format_code` — run source through a godbolt-hosted formatter (clang-format, rustfmt, gofmt, etc.).
+
+**Tool options (for compile_code / compile_cmake):**
+- `user_arguments` — compiler flags as a single string (e.g. `"-O3 -march=x86-64-v3"`).
+- `files` — additional source files (array of `{filename, contents}`).
+- `libraries` — godbolt-hosted libraries to link (array of `{id, version}`, list via `resource://libraries/{language_id}`).
+- `filters` — godbolt filter flags (object). Most useful: `execute: true` (run binary), `optOutput: true` (LLVM opt remarks), `intel: true` (Intel asm syntax).
+- `execute_parameters` — stdin + args for execute mode (object: `{stdin: string, args: [string]}`).
+- `tools` — godbolt-hosted tools that operate on the compile result (array of `{id, args}`). Killer use cases: `llvm-mcatrunk` for cycle-accurate throughput/port-pressure analysis, `pahole` for struct layout / cacheline packing. Not for clang-tidy/cppcheck/iwyu — those belong in a separate MCP wrapped around local binaries.
+
+**Resources:**
+- `resource://languages` — supported languages.
+- `resource://compilers/{language_id}` — compilers for a language.
+- `resource://libraries/{language_id}` — available libraries with versions.
+- `resource://formats` — available formatters.
+- `resource://asm/{instruction_set}/{opcode}` — documentation for a single asm instruction.
+- `resource://popularArguments/{compiler_id}` — popular flag combinations for a compiler (discoverability for unfamiliar toolchains).
+- `resource://version` — godbolt.org instance version.
+
+**Performance-review workflow examples:**
+
+*1. Optimization remarks — did the loop vectorize?*
+
+```
+compile_code(
+  compiler_id="gcc-13.2",
+  source="<hot loop>",
+  user_arguments="-O3 -march=x86-64-v3 -Rpass-missed=vector",
+  filters={"optOutput": true, "intel": true}
+)
+```
+
+Response contains `optOutput[]` with structured remarks like `{Name: "loop-vectorize", Function: "hot_loop", Args: [{String: "loop not vectorized: unsafe dependency"}]}` — no more guessing why SIMD didn't kick in.
+
+*2. Execute with stdin to verify correctness*
+
+Add `filters={"execute": true}` and `execute_parameters={"stdin": "input..."}` to run the compiled binary with a specific input in the same call; the response gains an `execResult` object with `stdout[]`, `stderr[]`, and exit `code`.
+
+*3. Cycle-accurate throughput analysis with llvm-mca*
+
+```
+compile_code(
+  compiler_id="clang-17",
+  source="<hot loop>",
+  user_arguments="-O3 -march=skylake",
+  tools=[{"id": "llvm-mcatrunk", "args": "-mcpu=skylake -timeline"}]
+)
+```
+
+Response gains a `tools[]` field with per-tool output — llvm-mca reports IPC, uOps/cycle, Block RThroughput, and resource-pressure tables per port. Move from "it vectorized" to "the bottleneck is port 5 at 2.5 uOps/cycle".
+
+*4. Struct layout audit with pahole*
+
+```
+compile_code(
+  compiler_id="gcc-13.2",
+  source="struct Foo { ... };",
+  user_arguments="-g -O2",
+  tools=[{"id": "pahole", "args": ""}]
+)
+```
+
+pahole output shows padding holes, cacheline boundaries, member ordering — the bread and butter of data-oriented perf work.
+
+The Go rewrite lives in `internal/godbolt/` and can also be built as a standalone binary — see *Standalone binaries* below.
 
 ### paper-search-mcp (port 9127)
 
