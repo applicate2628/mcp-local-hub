@@ -5,6 +5,7 @@ import (
 
 	"mcp-local-hub/internal/godbolt"
 	"mcp-local-hub/internal/lldb"
+	"mcp-local-hub/internal/perftools"
 )
 
 // NewRootCmd builds the top-level `mcphub` command with all subcommand stubs attached.
@@ -40,6 +41,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newSettingsCmd())
 	root.AddCommand(lldb.NewCommand())
 	root.AddCommand(godbolt.NewCommand())
+	root.AddCommand(perftools.NewCommand())
 	return root
 }
 
