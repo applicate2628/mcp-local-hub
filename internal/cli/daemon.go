@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/daemon"
 	"mcp-local-hub/internal/secrets"
+	"mcp-local-hub/servers"
 
 	"github.com/spf13/cobra"
 )
@@ -25,29 +27,18 @@ func newDaemonCmdReal() *cobra.Command {
 			if server == "" || daemonName == "" {
 				return fmt.Errorf("--server and --daemon are required")
 			}
-			// Resolve the manifest relative to the binary, not CWD —
-			// scheduler tasks may launch us with an inherited cwd that
-			// is not the repo root. Supports two layouts:
-			//   - exe and servers/ at same level (legacy)
-			//   - exe in bin/ and servers/ one level up (standard Go layout)
-			exe, err := os.Executable()
+			// Load the manifest from the embed.FS baked into the binary.
+			// This works regardless of where mcphub.exe is installed
+			// (canonical ~/.local/bin, dev checkout, anywhere on PATH)
+			// — manifests travel with the binary so scheduler tasks
+			// don't need to find a servers/ directory on disk.
+			f, err := servers.Manifests.Open(server + "/manifest.yaml")
 			if err != nil {
-				return fmt.Errorf("resolve executable: %w", err)
-			}
-			exeDir := filepath.Dir(exe)
-			manifestPath := filepath.Join(exeDir, "servers", server, "manifest.yaml")
-			if _, statErr := os.Stat(manifestPath); statErr != nil {
-				alt := filepath.Join(exeDir, "..", "servers", server, "manifest.yaml")
-				if _, statErr2 := os.Stat(alt); statErr2 == nil {
-					manifestPath = alt
-				}
-			}
-			f, err := os.Open(manifestPath)
-			if err != nil {
-				return fmt.Errorf("open manifest %s: %w", manifestPath, err)
+				return fmt.Errorf("open embedded manifest %s: %w", server, err)
 			}
 			defer f.Close()
-			m, err := config.ParseManifest(f)
+			var mReader io.Reader = f
+			m, err := config.ParseManifest(mReader)
 			if err != nil {
 				return err
 			}

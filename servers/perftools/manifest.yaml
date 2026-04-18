@@ -1,0 +1,40 @@
+name: perftools
+kind: global
+transport: stdio-bridge
+command: mcphub
+base_args:
+  - perftools
+
+env: {}
+
+# Perf-Toolbox MCP: wraps four local MSYS2/ucrt64 perf-analysis tools
+# (clang-tidy, hyperfine, llvm-objdump, include-what-you-use) as MCP
+# tools, plus a resource://tools discovery endpoint. Complements the
+# godbolt server — godbolt shows what a single-file sandbox compile
+# produces; perftools shows what the user's REAL local build output
+# contains (post-LTO, post-PGO, post-linker-inlining) and measures it
+# with statistical rigor via hyperfine.
+#
+# All four tools are optional at runtime — the server starts fine when
+# some are missing and advertises the shortfall via resource://tools.
+# Missing tools fail cleanly per-call with "X not installed: <reason>".
+
+daemons:
+  - name: default
+    port: 9131
+
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+  - client: codex-cli
+    daemon: default
+    url_path: /mcp
+  - client: gemini-cli
+    daemon: default
+    url_path: /mcp
+  - client: antigravity
+    daemon: default
+    url_path: /mcp
+
+weekly_refresh: false
