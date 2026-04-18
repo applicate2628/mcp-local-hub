@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -171,7 +172,7 @@ func registerTools(gs *GodboltServer) {
 
 // getLanguages handles GET /api/languages
 func (gs *GodboltServer) getLanguages(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
-	resp, err := gs.httpClient.Get(godboltBaseURL + "/languages")
+	resp, err := gs.httpClient.Get(gs.baseURL + "/languages")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get languages: %w", err)
 	}
@@ -206,7 +207,7 @@ func (gs *GodboltServer) getCompilers(ctx context.Context, req *mcp.ReadResource
 		return nil, fmt.Errorf("missing language_id parameter")
 	}
 
-	resp, err := gs.httpClient.Get(fmt.Sprintf("%s/compilers/%s", godboltBaseURL, languageID))
+	resp, err := gs.httpClient.Get(fmt.Sprintf("%s/compilers/%s", gs.baseURL, languageID))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get compilers: %w", err)
 	}
@@ -241,7 +242,7 @@ func (gs *GodboltServer) getLibraries(ctx context.Context, req *mcp.ReadResource
 		return nil, fmt.Errorf("missing language_id parameter")
 	}
 
-	resp, err := gs.httpClient.Get(fmt.Sprintf("%s/libraries/%s", godboltBaseURL, languageID))
+	resp, err := gs.httpClient.Get(fmt.Sprintf("%s/libraries/%s", gs.baseURL, languageID))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get libraries: %w", err)
 	}
@@ -271,7 +272,7 @@ func (gs *GodboltServer) getLibraries(ctx context.Context, req *mcp.ReadResource
 
 // getFormatters handles GET /api/formats
 func (gs *GodboltServer) getFormatters(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
-	resp, err := gs.httpClient.Get(godboltBaseURL + "/formats")
+	resp, err := gs.httpClient.Get(gs.baseURL + "/formats")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get formatters: %w", err)
 	}
@@ -307,7 +308,7 @@ func (gs *GodboltServer) getInstructionInfo(ctx context.Context, req *mcp.ReadRe
 		return nil, fmt.Errorf("missing instruction_set or opcode parameter")
 	}
 
-	resp, err := gs.httpClient.Get(fmt.Sprintf("%s/asm/%s/%s", godboltBaseURL, instructionSet, opcode))
+	resp, err := gs.httpClient.Get(fmt.Sprintf("%s/asm/%s/%s", gs.baseURL, instructionSet, opcode))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get instruction info: %w", err)
 	}
@@ -331,7 +332,7 @@ func (gs *GodboltServer) getInstructionInfo(ctx context.Context, req *mcp.ReadRe
 
 // getVersion handles GET /api/version
 func (gs *GodboltServer) getVersion(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
-	resp, err := gs.httpClient.Get(godboltBaseURL + "/version")
+	resp, err := gs.httpClient.Get(gs.baseURL + "/version")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get version: %w", err)
 	}
@@ -439,29 +440,14 @@ func (gs *GodboltServer) compileTool(ctx context.Context, req *mcp.CallToolReque
 		}, nil
 	}
 
-	// Make POST request to Godbolt
-	url := fmt.Sprintf("%s/compiler/%s/compile", godboltBaseURL, args.CompilerID)
-	resp, err := gs.httpClient.Post(url, "application/json", bytes.NewReader(payloadJSON))
+	url := fmt.Sprintf("%s/compiler/%s/compile", gs.baseURL, args.CompilerID)
+	body, err := gs.invokeCompile(ctx, url, payloadJSON)
 	if err != nil {
 		return &mcp.CallToolResult{
 			IsError: true,
 			Content: []mcp.Content{
 				&mcp.TextContent{
 					Text: fmt.Sprintf("failed to call compiler: %v", err),
-				},
-			},
-		}, nil
-	}
-	defer resp.Body.Close()
-
-	// Read response
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return &mcp.CallToolResult{
-			IsError: true,
-			Content: []mcp.Content{
-				&mcp.TextContent{
-					Text: fmt.Sprintf("failed to read compiler response: %v", err),
 				},
 			},
 		}, nil
@@ -536,7 +522,7 @@ func (gs *GodboltServer) compileCMakeTool(ctx context.Context, req *mcp.CallTool
 	}
 
 	// Make POST request to Godbolt
-	url := fmt.Sprintf("%s/compiler/%s/cmake", godboltBaseURL, args.CompilerID)
+	url := fmt.Sprintf("%s/compiler/%s/cmake", gs.baseURL, args.CompilerID)
 	resp, err := gs.httpClient.Post(url, "application/json", bytes.NewReader(payloadJSON))
 	if err != nil {
 		return &mcp.CallToolResult{
@@ -622,7 +608,7 @@ func (gs *GodboltServer) formatTool(ctx context.Context, req *mcp.CallToolReques
 	}
 
 	// Make POST request to Godbolt
-	url := fmt.Sprintf("%s/format/%s", godboltBaseURL, args.Formatter)
+	url := fmt.Sprintf("%s/format/%s", gs.baseURL, args.Formatter)
 	resp, err := gs.httpClient.Post(url, "application/json", bytes.NewReader(payloadJSON))
 	if err != nil {
 		return &mcp.CallToolResult{
@@ -695,4 +681,28 @@ func (gs *GodboltServer) formatTool(ctx context.Context, req *mcp.CallToolReques
 			},
 		},
 	}, nil
+}
+
+// invokeCompile is the shared HTTP dispatch used by compileTool (and,
+// after Task 3, compileCMakeTool). It sends the POST with Accept:
+// application/json so godbolt returns the full structured response
+// (code / asm / stdout / stderr / execResult / optOutput) instead of
+// a text-only asm dump.
+func (gs *GodboltServer) invokeCompile(ctx context.Context, url string, payload []byte) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	resp, err := gs.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("call godbolt: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	return body, nil
 }

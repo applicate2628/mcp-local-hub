@@ -26,6 +26,7 @@ const godboltBaseURL = "https://godbolt.org/api"
 type GodboltServer struct {
 	httpClient *http.Client
 	server     *mcp.Server
+	baseURL    string // defaults to godboltBaseURL; overridable for tests
 }
 
 // Run wires up a fresh GodboltServer, registers all resources and tools,
@@ -35,6 +36,7 @@ type GodboltServer struct {
 func Run(ctx context.Context) error {
 	gs := &GodboltServer{
 		httpClient: &http.Client{},
+		baseURL:    godboltBaseURL,
 	}
 
 	gs.server = mcp.NewServer(&mcp.Implementation{
