@@ -21,9 +21,9 @@ go build -o mcphub.exe ./cmd/mcphub
 
 On success: `mcphub.exe` appears in the repo root (~12 MB, includes Windows version resource metadata).
 
-## Setup (PATH registration)
+## Setup (canonical install)
 
-Scheduler tasks and Antigravity relay entries reference `mcphub.exe` by bare name and rely on PATH resolution at run time, so the binary can live anywhere as long as it's on PATH. `mcphub setup` canonicalizes that location:
+Scheduler tasks reference `~/.local/bin/mcphub.exe` by absolute path (Windows Task Scheduler's CreateProcess call doesn't honor PATH — confirmed empirically), and Antigravity relay entries reference the short name (Node's child_process spawner does honor PATH). Both point at the same canonical install. `mcphub setup` puts the binary there and registers PATH:
 
 ```bash
 ./mcphub.exe setup
@@ -39,7 +39,7 @@ Idempotent — running it again when the binary is already at the target and the
 
 If you skip this step, `mcphub install` will detect that `mcphub.exe` isn't on PATH and either prompt to bootstrap (interactive shells) or fail with a pointer back to `mcphub setup` (CI, pipes).
 
-Moving the binary later: run `setup` again from the new location. Existing scheduler tasks keep working without rewriting — they resolve `mcphub.exe` through PATH.
+Moving or rebuilding the binary later: run `setup` again from the new location. It copies the new binary over `~/.local/bin/mcphub.exe`, so existing scheduler tasks — which point at that absolute path — keep working without any rewrite. If you need to migrate tasks that still reference an old absolute path (e.g. dev checkout tasks created before setup), run `mcphub scheduler upgrade` once.
 
 ## First install
 
