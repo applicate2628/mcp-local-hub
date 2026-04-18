@@ -1,4 +1,4 @@
-package main
+package godbolt
 
 import (
 	"bytes"
@@ -6,42 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
-	"net/http"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const godboltBaseURL = "https://godbolt.org/api"
-
-type GodboltServer struct {
-	httpClient *http.Client
-	server     *mcp.Server
-}
-
-func main() {
-	gs := &GodboltServer{
-		httpClient: &http.Client{},
-	}
-
-	gs.server = mcp.NewServer(&mcp.Implementation{
-		Name:    "godbolt-compiler-explorer",
-		Version: "1.0.0",
-	}, nil)
-
-	// Register resources
-	registerResources(gs)
-
-	// Register tools
-	registerTools(gs)
-
-	// Run server over stdio
-	if err := gs.server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
-		log.Fatalf("failed to run server: %v", err)
-	}
-}
-
+// registerResources attaches the six read-only resources (five HTTP GET
+// endpoints plus one static version resource) to the MCP server. Called
+// once from Run during startup.
 func registerResources(gs *GodboltServer) {
 	gs.server.AddResource(&mcp.Resource{
 		URI:         "resource://languages",
@@ -80,6 +52,9 @@ func registerResources(gs *GodboltServer) {
 	}, gs.getVersion)
 }
 
+// registerTools attaches the three write-capable tools (compile_code,
+// compile_cmake, format_code) to the MCP server. Called once from Run
+// during startup.
 func registerTools(gs *GodboltServer) {
 	// Tool 1: compile_code
 	gs.server.AddTool(&mcp.Tool{
