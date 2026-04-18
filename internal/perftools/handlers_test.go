@@ -133,3 +133,54 @@ func contentText(r *mcp.CallToolResult) string {
 func filepathFwd(p string) string {
 	return strings.ReplaceAll(p, `\`, `/`)
 }
+
+func TestHyperfine_ComparesTwoCommands(t *testing.T) {
+	cat := DetectTools()
+	if !cat.Hyperfine.Installed {
+		t.Skip("hyperfine not on PATH; integration test skipped")
+	}
+
+	tb := &PerfToolbox{tools: cat}
+	// Two trivially different commands — timing gap is tiny but measurable.
+	args, _ := json.Marshal(map[string]interface{}{
+		"commands": []string{
+			"cmd /c exit 0",                    // near-instant
+			"cmd /c ping -n 1 127.0.0.1 > nul", // ~1ms
+		},
+		"warmup":   1,
+		"min_runs": 3,
+		"max_runs": 5,
+	})
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: args}}
+
+	result, err := tb.hyperfineTool(t.Context(), req)
+	if err != nil {
+		t.Fatalf("hyperfineTool: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("tool returned IsError=true: %s", contentText(result))
+	}
+
+	body := contentText(result)
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
+		t.Fatalf("tool output not valid JSON: %v\n%s", err, body)
+	}
+	results, ok := parsed["results"].([]interface{})
+	if !ok || len(results) != 2 {
+		t.Fatalf("expected results[] of length 2, got %+v", parsed["results"])
+	}
+	// Each result must at minimum carry mean + command.
+	for i, r := range results {
+		m, ok := r.(map[string]interface{})
+		if !ok {
+			t.Fatalf("results[%d] is not an object: %T", i, r)
+		}
+		if _, ok := m["mean"]; !ok {
+			t.Errorf("results[%d] missing mean: %+v", i, m)
+		}
+		if _, ok := m["command"]; !ok {
+			t.Errorf("results[%d] missing command: %+v", i, m)
+		}
+	}
+}

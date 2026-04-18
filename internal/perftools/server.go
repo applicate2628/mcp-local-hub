@@ -80,6 +80,43 @@ func registerTools(tb *PerfToolbox) {
 			"required": []string{"files", "project_root"},
 		},
 	}, tb.clangTidyTool)
+
+	tb.server.AddTool(&mcp.Tool{
+		Name: "hyperfine",
+		Description: "Run a statistical benchmark against one or more shell commands via hyperfine. " +
+			"Returns JSON with results[] (one per command) containing mean, stddev, median, min, max, user, " +
+			"system, and raw times[] in seconds. For N>=2 commands hyperfine also computes pairwise ratios " +
+			"in its own output. Use warmup to stabilize caches (recommended 1-3) and min_runs/max_runs to " +
+			"control the statistical budget.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"commands": map[string]interface{}{
+					"type":        "array",
+					"items":       map[string]interface{}{"type": "string"},
+					"description": "Shell commands to benchmark. Pass 2+ to enable comparative ratios.",
+				},
+				"warmup": map[string]interface{}{
+					"type":        "integer",
+					"description": "Number of warmup runs per command before measurement. Optional (default 0).",
+				},
+				"min_runs": map[string]interface{}{
+					"type":        "integer",
+					"description": "Minimum runs per command. Optional (default hyperfine default = 10).",
+				},
+				"max_runs": map[string]interface{}{
+					"type":        "integer",
+					"description": "Maximum runs per command. Optional.",
+				},
+				"extra_args": map[string]interface{}{
+					"type":        "array",
+					"items":       map[string]interface{}{"type": "string"},
+					"description": "Optional. Additional raw hyperfine arguments (e.g. ['--prepare', 'sync']).",
+				},
+			},
+			"required": []string{"commands"},
+		},
+	}, tb.hyperfineTool)
 }
 
 // getToolsResource serves resource://tools — marshals the catalog to
