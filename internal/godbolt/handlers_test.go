@@ -128,6 +128,45 @@ func TestCompileTool_PassesFiltersExecuteParametersAndTools(t *testing.T) {
 	}
 }
 
+func TestGetPopularArguments(t *testing.T) {
+	var gotURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURL = r.URL.String()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"-O3":{"description":"optimize","timesused":100}}`))
+	}))
+	defer srv.Close()
+
+	gs := &GodboltServer{httpClient: srv.Client(), baseURL: srv.URL + "/api"}
+
+	req := &mcp.ReadResourceRequest{Params: &mcp.ReadResourceParams{}}
+	req.Params.URI = "resource://popularArguments/gcc-13.2"
+
+	result, err := gs.getPopularArguments(t.Context(), req)
+	if err != nil {
+		t.Fatalf("getPopularArguments: %v", err)
+	}
+	if gotURL != "/api/popularArguments/gcc-13.2" {
+		t.Errorf("godbolt URL = %q, want /api/popularArguments/gcc-13.2", gotURL)
+	}
+	if len(result.Contents) == 0 {
+		t.Fatal("empty Contents")
+	}
+	rc := result.Contents[0]
+	if rc == nil {
+		t.Fatal("Contents[0] is nil")
+	}
+	if !strings.Contains(rc.Text, `"-O3"`) {
+		t.Errorf("response text missing -O3 entry: %s", rc.Text)
+	}
+	if rc.MIMEType != "application/json" {
+		t.Errorf("MIME = %q, want application/json", rc.MIMEType)
+	}
+	if rc.URI != "resource://popularArguments/gcc-13.2" {
+		t.Errorf("URI = %q, want resource://popularArguments/gcc-13.2", rc.URI)
+	}
+}
+
 func TestCompileCMakeTool_MirrorsCompileToolSurface(t *testing.T) {
 	var gotAccept string
 	var gotPayload map[string]interface{}

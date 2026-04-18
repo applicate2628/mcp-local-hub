@@ -46,6 +46,13 @@ func registerResources(gs *GodboltServer) {
 		Description: "Get documentation for a specific assembly instruction.",
 	}, gs.getInstructionInfo)
 
+	gs.server.AddResourceTemplate(&mcp.ResourceTemplate{
+		URITemplate: "resource://popularArguments/{compiler_id}",
+		Name:        "popularArguments",
+		Description: "Popular flag combinations for a specific compiler (discoverability for unfamiliar toolchains).",
+		MIMEType:    "application/json",
+	}, gs.getPopularArguments)
+
 	gs.server.AddResource(&mcp.Resource{
 		URI:         "resource://version",
 		Name:        "version",
@@ -354,6 +361,39 @@ func (gs *GodboltServer) getVersion(ctx context.Context, req *mcp.ReadResourceRe
 	}, nil
 }
 
+// getPopularArguments handles resource://popularArguments/{compiler_id}
+// — godbolt's curated list of popular flag combinations per compiler.
+// Useful for discoverability on unfamiliar toolchains (nvcc, icpx,
+// embedded cross-compilers) where the common -O3/-march=native defaults
+// don't apply.
+func (gs *GodboltServer) getPopularArguments(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	compilerID := extractPathParam(req.Params.URI, "compiler_id")
+	if compilerID == "" {
+		return nil, fmt.Errorf("missing compiler_id parameter")
+	}
+
+	resp, err := gs.httpClient.Get(fmt.Sprintf("%s/popularArguments/%s", gs.baseURL, compilerID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get popular arguments: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read popular-arguments response: %w", err)
+	}
+
+	return &mcp.ReadResourceResult{
+		Contents: []*mcp.ResourceContents{
+			{
+				URI:      req.Params.URI,
+				MIMEType: "application/json",
+				Text:     string(body),
+			},
+		},
+	}, nil
+}
+
 // extractPathParam extracts a parameter value from a resource URI template
 // e.g., from "resource://compilers/cpp" with template "resource://compilers/{language_id}"
 // returns "cpp"
@@ -371,6 +411,16 @@ func extractPathParam(uri, paramName string) string {
 		paramPosition = 2 // resource://asm/x86/mov → parts[2] = "x86"
 	case paramName == "opcode":
 		paramPosition = 3 // resource://asm/x86/mov → parts[3] = "mov"
+	case paramName == "compiler_id":
+		// strings.Split("resource://popularArguments/gcc-13.2", "/") yields
+		// ["resource:", "", "popularArguments", "gcc-13.2"] — so the
+		// compiler id sits at parts[3], not parts[2]. (The pre-existing
+		// instruction_set/opcode comments above are inherited and inaccurate
+		// for the same reason; their handlers happen to lack a unit test that
+		// exercises real path values, so the off-by-one stayed latent.
+		// Fixing those is out of scope for this task; filed as adjacent
+		// finding.)
+		paramPosition = 3
 	default:
 		return ""
 	}
