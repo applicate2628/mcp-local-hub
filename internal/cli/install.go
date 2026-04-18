@@ -1,11 +1,17 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"strings"
 
 	"mcp-local-hub/internal/api"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 // newInstallCmdReal is the concrete cobra.Command wired by root.go's stub
@@ -20,6 +26,16 @@ func newInstallCmdReal() *cobra.Command {
 		Use:   "install",
 		Short: "Install an MCP server as shared daemon(s)",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// If mcphub is not on PATH, offer to bootstrap before we hit
+			// the API's preflight check. Only prompt when stdin is a
+			// terminal; in non-interactive contexts (CI, pipes) we must
+			// not surprise-modify the user's PATH — preflight will emit
+			// the guidance error instead.
+			if _, err := exec.LookPath(mcphubShortName); err != nil {
+				if err := maybeBootstrapInteractively(cmd.OutOrStdout(), os.Stdin); err != nil {
+					return err
+				}
+			}
 			if all {
 				if server != "" || daemonFilter != "" {
 					return fmt.Errorf("--all is mutually exclusive with --server/--daemon")
@@ -52,5 +68,27 @@ func newInstallCmdReal() *cobra.Command {
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print planned actions without making changes")
 	c.Flags().BoolVar(&all, "all", false, "install every manifest under servers/")
 	return c
+}
+
+// maybeBootstrapInteractively asks the user whether to bootstrap mcphub to
+// ~/.local/bin when it is not yet on PATH. Returns nil if the user says yes
+// (and bootstrap succeeds) or no-ops with a guidance error when the user
+// declines. In non-terminal contexts it returns nil immediately; the API
+// preflight check will then surface the "not on PATH" error with the same
+// guidance, so automation never has its PATH mutated out from under it.
+func maybeBootstrapInteractively(w io.Writer, in *os.File) error {
+	if !term.IsTerminal(int(in.Fd())) {
+		return nil
+	}
+	fmt.Fprintf(w, "%s not found on PATH. Bootstrap to ~/.local/bin? [Y/n] ", mcphubShortName)
+	line, err := bufio.NewReader(in).ReadString('\n')
+	if err != nil && err != io.EOF {
+		return fmt.Errorf("read prompt response: %w", err)
+	}
+	answer := strings.TrimSpace(line)
+	if answer == "" || strings.EqualFold(answer, "y") || strings.EqualFold(answer, "yes") {
+		return Bootstrap(w)
+	}
+	return fmt.Errorf("%s not found on PATH — run `mcphub setup` once to install to ~/.local/bin and register in PATH", mcphubShortName)
 }
 

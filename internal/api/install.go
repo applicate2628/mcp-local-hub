@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +16,19 @@ import (
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/scheduler"
 )
+
+// mcphubShortName is the bare executable name used in scheduler task Command
+// fields and Antigravity relay entries. PATH resolution picks the correct
+// binary from whatever directory the user has on PATH (canonical location
+// is ~/.local/bin after `mcphub setup`). Using a short name means the user
+// can move or rebuild mcphub without invalidating previously-registered
+// scheduler tasks and relay configs.
+var mcphubShortName = func() string {
+	if runtime.GOOS == "windows" {
+		return "mcphub.exe"
+	}
+	return "mcphub"
+}()
 
 // Plan describes the side effects that `mcp install --server X` would produce.
 // Returned by BuildPlan and rendered by `install --dry-run`.
@@ -261,10 +275,9 @@ func BuildPlan(m *config.ServerManifest, daemonFilter string) (*Plan, error) {
 			return nil, fmt.Errorf("no daemon %q in manifest %s", daemonFilter, m.Name)
 		}
 	}
-	exe, err := os.Executable()
-	if err != nil {
-		return nil, err
-	}
+	// We intentionally don't use os.Executable() for the Command field —
+	// scheduler tasks reference mcphub by bare name and rely on PATH so the
+	// binary can live anywhere the user chooses (see Preflight below).
 	p := &Plan{Server: m.Name}
 	// Scheduler tasks — one per daemon (global) or lazy (workspace-scoped).
 	for _, d := range m.Daemons {
@@ -273,7 +286,7 @@ func BuildPlan(m *config.ServerManifest, daemonFilter string) (*Plan, error) {
 		}
 		p.SchedulerTasks = append(p.SchedulerTasks, ScheduledTaskPlan{
 			Name:    "mcp-local-hub-" + m.Name + "-" + d.Name,
-			Command: exe,
+			Command: mcphubShortName,
 			Args:    []string{"daemon", "--server", m.Name, "--daemon", d.Name},
 			Trigger: "At logon",
 		})
@@ -282,7 +295,7 @@ func BuildPlan(m *config.ServerManifest, daemonFilter string) (*Plan, error) {
 	if m.WeeklyRefresh && daemonFilter == "" {
 		p.SchedulerTasks = append(p.SchedulerTasks, ScheduledTaskPlan{
 			Name:    "mcp-local-hub-" + m.Name + "-weekly-refresh",
-			Command: exe,
+			Command: mcphubShortName,
 			Args:    []string{"restart", "--server", m.Name},
 			Trigger: "Weekly Sun 03:00",
 		})
@@ -338,7 +351,13 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 	if _, err := exec.LookPath(m.Command); err != nil {
 		return fmt.Errorf("command %q not found on PATH: %w", m.Command, err)
 	}
-	// 2. Ports free — only for daemons in the filtered scope.
+	// 2. mcphub itself must be resolvable by short name — scheduler tasks
+	// and Antigravity relay entries reference mcphub without a path and
+	// rely on PATH resolution so the binary can live anywhere.
+	if _, err := exec.LookPath(mcphubShortName); err != nil {
+		return fmt.Errorf("%s not found on PATH — run `mcphub setup` once to install to ~/.local/bin and register in PATH: %w", mcphubShortName, err)
+	}
+	// 3. Ports free — only for daemons in the filtered scope.
 	for _, d := range m.Daemons {
 		if daemonFilter != "" && d.Name != daemonFilter {
 			continue
@@ -410,10 +429,9 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan) error {
 	// Populate relay-related fields so adapters for stdio-only clients
 	// (e.g. Antigravity) can produce their `command`+`args` entry shape
 	// invoking `mcphub.exe relay`. HTTP-native adapters ignore these fields.
-	exePath, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("resolve executable path: %w", err)
-	}
+	// We reference mcphub by short name and let the client's PATH resolve it;
+	// this lets the user move or rebuild mcphub without rewriting every
+	// client config.
 	allClients := clients.AllClients()
 	for _, u := range p.ClientUpdates {
 		client := allClients[u.Client]
@@ -434,7 +452,7 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan) error {
 			URL:          u.URL,
 			RelayServer:  m.Name,
 			RelayDaemon:  u.DaemonName,
-			RelayExePath: exePath,
+			RelayExePath: mcphubShortName,
 		}
 		if err := client.AddEntry(entry); err != nil {
 			return fmt.Errorf("add entry to %s: %w", u.Client, err)
