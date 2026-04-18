@@ -26,14 +26,24 @@ func newInstallCmdReal() *cobra.Command {
 		Use:   "install",
 		Short: "Install an MCP server as shared daemon(s)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// If mcphub is not on PATH, offer to bootstrap before we hit
-			// the API's preflight check. Only prompt when stdin is a
-			// terminal; in non-interactive contexts (CI, pipes) we must
-			// not surprise-modify the user's PATH — preflight will emit
-			// the guidance error instead.
+			// If mcphub is not on PATH, try to bootstrap before we hit
+			// the API's preflight check. Three-tier fallback:
+			//   1. ~/.local/bin already on PATH — silently copy there
+			//      (no registry write, no prompt, non-interactive safe).
+			//   2. Interactive terminal — prompt "bootstrap? [Y/n]".
+			//   3. Non-interactive without canonical dir on PATH —
+			//      return the guidance error (preflight would produce
+			//      the same message).
 			if _, err := exec.LookPath(mcphubShortName); err != nil {
-				if err := maybeBootstrapInteractively(cmd.OutOrStdout(), os.Stdin); err != nil {
-					return err
+				switch {
+				case targetDirOnPath():
+					if err := Bootstrap(cmd.OutOrStdout()); err != nil {
+						return err
+					}
+				default:
+					if err := maybeBootstrapInteractively(cmd.OutOrStdout(), os.Stdin); err != nil {
+						return err
+					}
 				}
 			}
 			if all {

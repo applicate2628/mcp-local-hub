@@ -30,6 +30,36 @@ func TestEnrichStatusFillsPortFromManifest(t *testing.T) {
 	}
 }
 
+// TestParseTaskName locks in the task-name convention from install.go
+// (and the scheduler_mgmt rewriter that consumes it). Tricky cases:
+//   - weekly-refresh is a two-word daemon name, not two separate segments
+//   - hyphenated server names work as long as the daemon is a single word
+//     (default behaviour — LastIndex split is unambiguous when no daemon
+//     contains '-')
+func TestParseTaskName(t *testing.T) {
+	cases := []struct {
+		in         string
+		wantSrv    string
+		wantDaemon string
+	}{
+		{`\mcp-local-hub-serena-weekly-refresh`, "serena", "weekly-refresh"},
+		{`\mcp-local-hub-memory-default`, "memory", "default"},
+		{`\mcp-local-hub-serena-claude`, "serena", "claude"},
+		{`\mcp-local-hub-paper-search-mcp-default`, "paper-search-mcp", "default"},
+		{`\mcp-local-hub-paper-search-mcp-weekly-refresh`, "paper-search-mcp", "weekly-refresh"},
+		{`mcp-local-hub-memory-default`, "memory", "default"}, // no leading backslash
+		{`\mcp-local-hub-bareword`, "bareword", ""},
+		{`\some-other-task`, "", ""}, // foreign prefix → empty
+	}
+	for _, tc := range cases {
+		gotSrv, gotDaemon := parseTaskName(tc.in)
+		if gotSrv != tc.wantSrv || gotDaemon != tc.wantDaemon {
+			t.Errorf("parseTaskName(%q) = (%q, %q), want (%q, %q)",
+				tc.in, gotSrv, gotDaemon, tc.wantSrv, tc.wantDaemon)
+		}
+	}
+}
+
 // TestDeriveState documents the four derived-state labels. lookupProcess
 // is nil in unit tests so `alive` is always false at the enrichStatus
 // boundary — exercise deriveState directly.

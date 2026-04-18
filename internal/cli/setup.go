@@ -111,6 +111,37 @@ func copyExe(src, dst string) error {
 	return nil
 }
 
+// targetDirOnPath reports whether the canonical install directory
+// (~/.local/bin) is already in the current process's PATH env var. When
+// it is, `mcphub install` can silently copy the binary there without
+// prompting the user or touching the PATH registry — a pre-existing PATH
+// entry means future invocations and Task Scheduler launches will find
+// the newly-copied binary automatically.
+func targetDirOnPath() bool {
+	targetDir, err := setupTargetDir()
+	if err != nil {
+		return false
+	}
+	return dirOnPath(targetDir, os.Getenv("PATH"))
+}
+
+// dirOnPath splits a PATH-style string on the OS list separator and reports
+// whether any entry references the same directory as dir. Uses samePath so
+// comparisons are case-insensitive on Windows and tolerate mixed separators
+// (e.g. `C:\Users\x/.local/bin`).
+func dirOnPath(dir, pathEnv string) bool {
+	sep := string(os.PathListSeparator)
+	for _, entry := range strings.Split(pathEnv, sep) {
+		if entry == "" {
+			continue
+		}
+		if samePath(entry, dir) {
+			return true
+		}
+	}
+	return false
+}
+
 // Bootstrap installs the currently-running mcphub to ~/.local/bin and ensures
 // that directory is on the user's PATH. Idempotent: a second call makes no
 // changes if the target already matches the current exe and PATH is set up.
