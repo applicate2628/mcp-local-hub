@@ -385,11 +385,14 @@ func extractPathParam(uri, paramName string) string {
 // POST /api/compiler/{compiler_id}/compile
 func (gs *GodboltServer) compileTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var args struct {
-		CompilerID    string        `json:"compiler_id"`
-		Source        string        `json:"source"`
-		UserArguments string        `json:"user_arguments"`
-		Files         []interface{} `json:"files"`
-		Libraries     []interface{} `json:"libraries"`
+		CompilerID        string                   `json:"compiler_id"`
+		Source            string                   `json:"source"`
+		UserArguments     string                   `json:"user_arguments"`
+		Files             []interface{}            `json:"files"`
+		Libraries         []interface{}            `json:"libraries"`
+		Filters           map[string]interface{}   `json:"filters"`
+		ExecuteParameters map[string]interface{}   `json:"execute_parameters"`
+		Tools             []map[string]interface{} `json:"tools"`
 	}
 
 	if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
@@ -415,16 +418,28 @@ func (gs *GodboltServer) compileTool(ctx context.Context, req *mcp.CallToolReque
 	}
 
 	// Build request payload
-	payload := map[string]interface{}{
-		"source": args.Source,
-		"options": map[string]interface{}{
-			"userArguments": args.UserArguments,
-			"libraries":     args.Libraries,
-		},
+	options := map[string]interface{}{
+		"userArguments": args.UserArguments,
+		"libraries":     args.Libraries,
 	}
-
+	if len(args.Filters) > 0 {
+		options["filters"] = args.Filters
+	}
+	if len(args.ExecuteParameters) > 0 {
+		options["executeParameters"] = args.ExecuteParameters
+	}
+	payload := map[string]interface{}{
+		"source":  args.Source,
+		"options": options,
+	}
 	if len(args.Files) > 0 {
 		payload["files"] = args.Files
+	}
+	if len(args.Tools) > 0 {
+		// tools is a top-level payload field in godbolt's API, NOT nested
+		// inside options. Cross-checked against godbolt.org's
+		// /api/compiler/{id}/compile examples.
+		payload["tools"] = args.Tools
 	}
 
 	// Marshal payload to JSON
