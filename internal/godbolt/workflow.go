@@ -182,3 +182,15 @@ func (gs *GodboltServer) getWorkflow(ctx context.Context, req *mcp.ReadResourceR
 		},
 	}, nil
 }
+
+// workflowTool is the tool-transport twin of getWorkflow. MCP clients
+// that surface resources to the user/agent natively can read
+// resource://workflow directly; clients that only wire tools (e.g.
+// Claude Code CLI's agent view) need the same content behind a tool
+// call. Same markdown body, just returned in a CallToolResult instead
+// of a ReadResourceResult.
+func (gs *GodboltServer) workflowTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: workflowMarkdown}},
+	}, nil
+}

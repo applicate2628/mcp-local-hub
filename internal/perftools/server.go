@@ -191,6 +191,18 @@ func registerTools(tb *PerfToolbox) {
 			"required": []string{"file"},
 		},
 	}, tb.iwyuTool)
+
+	// Workflow tool mirrors resource://workflow — exposed as a tool so
+	// MCP clients that don't surface resources (e.g. Claude Code CLI's
+	// agent view) can still fetch the ecosystem-context document.
+	tb.server.AddTool(&mcp.Tool{
+		Name:        "workflow",
+		Description: "Returns the perftools MCP ecosystem-context document in markdown: when to use which tool (clang_tidy vs hyperfine vs llvm_objdump vs iwyu), canonical perf-review chain, tool-parameter patterns, anti-patterns, and cross-server handoffs to godbolt. Call this FIRST when orienting to the perftools MCP — tool descriptions alone cover 'what', this covers 'when and how to combine'.",
+		InputSchema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		},
+	}, tb.workflowTool)
 }
 
 // getToolsResource serves resource://tools — marshals the catalog to

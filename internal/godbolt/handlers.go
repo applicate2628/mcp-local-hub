@@ -230,6 +230,19 @@ func registerTools(gs *GodboltServer) {
 			"required": []string{"formatter", "source"},
 		},
 	}, gs.formatTool)
+
+	// Workflow tool mirrors resource://workflow — exposed as a tool so
+	// MCP clients that don't surface resources (e.g. Claude Code CLI's
+	// agent view) can still fetch the ecosystem-context document. Same
+	// content, different transport.
+	gs.server.AddTool(&mcp.Tool{
+		Name:        "workflow",
+		Description: "Returns the godbolt MCP ecosystem-context document in markdown: when to use which tool, canonical perf-review workflows, tool-parameter patterns, anti-patterns, and cross-server handoffs to perftools. Call this FIRST when orienting to the godbolt MCP — tool descriptions alone cover 'what', this covers 'when and how to combine'.",
+		InputSchema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		},
+	}, gs.workflowTool)
 }
 
 // getLanguages handles GET /api/languages
@@ -774,6 +787,18 @@ func (gs *GodboltServer) invokeCompile(ctx context.Context, url string, payload 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
+	}
+	// Same HTTP-status guard as fetchResource. Without this, a bad
+	// compiler_id returned a literal "Not Found" text to the caller
+	// that was indistinguishable from a valid 200 with odd content.
+	// Preserve first 200 bytes of body so the agent can see what
+	// godbolt actually said (e.g. "unknown compiler foo").
+	if resp.StatusCode >= 400 {
+		snippet := string(body)
+		if len(snippet) > 200 {
+			snippet = snippet[:200] + "…"
+		}
+		return nil, fmt.Errorf("godbolt %s returned HTTP %d: %s", url, resp.StatusCode, snippet)
 	}
 	return body, nil
 }
