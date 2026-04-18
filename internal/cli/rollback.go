@@ -64,19 +64,32 @@ func newRollbackCmdReal() *cobra.Command {
 	return c
 }
 
-// findLatestBackup locates the newest `<configPath>.bak-mcp-local-hub-*` sibling.
+// findLatestBackup locates the newest timestamped
+// `<configPath>.bak-mcp-local-hub-YYYYMMDD-HHMMSS` sibling. The pristine
+// sentinel `<configPath>.bak-mcp-local-hub-original` written on the very
+// first backup shares the same prefix but must NOT be returned here —
+// `--original` / RollbackOriginal is the only caller that should see it.
+// Without the exclusion the lexicographic sort would rank "original"
+// (letters, ASCII ≥97) after every digit-prefixed timestamp and
+// findLatestBackup would silently hand back the pristine sentinel.
 func findLatestBackup(configPath string) (string, error) {
 	dir := filepath.Dir(configPath)
 	base := filepath.Base(configPath) + ".bak-mcp-local-hub-"
+	const sentinel = "original"
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return "", err
 	}
 	var backups []string
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), base) {
-			backups = append(backups, filepath.Join(dir, e.Name()))
+		name := e.Name()
+		if !strings.HasPrefix(name, base) {
+			continue
 		}
+		if name[len(base):] == sentinel {
+			continue
+		}
+		backups = append(backups, filepath.Join(dir, name))
 	}
 	if len(backups) == 0 {
 		return "", nil
