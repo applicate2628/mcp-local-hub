@@ -26,4 +26,10 @@ global:
   - server: gdb
     daemon: default
     port: 9129
+  - server: lldb
+    daemon: default
+    port: 9130
+  - server: perftools
+    daemon: default
+    port: 9131
 workspace_scoped: []

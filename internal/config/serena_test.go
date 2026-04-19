@@ -56,3 +56,67 @@ func TestPortsRegistryValid(t *testing.T) {
 		t.Fatalf("ParsePortRegistry: %v", err)
 	}
 }
+
+// TestPortsRegistryCoversAllShippedManifests guards that every (server,
+// daemon, port) tuple declared in a shipped manifest.yaml has a matching
+// entry in configs/ports.yaml. Without this the registry drifts: lldb
+// and perftools manifests existed for weeks before ports.yaml caught up,
+// so the registry was technically valid (no parse error) but not actually
+// the source of truth it was supposed to be.
+func TestPortsRegistryCoversAllShippedManifests(t *testing.T) {
+	regFile, err := os.Open("../../configs/ports.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer regFile.Close()
+	reg, err := ParsePortRegistry(regFile)
+	if err != nil {
+		t.Fatalf("ParsePortRegistry: %v", err)
+	}
+
+	// Index registry: (server, daemon) → port.
+	regIndex := map[string]int{}
+	for _, g := range reg.Global {
+		regIndex[g.Server+"/"+g.Daemon] = g.Port
+	}
+
+	// Walk shipped manifests on disk (the test runs from internal/config so
+	// the source tree is reachable via ../../servers/).
+	serversDir := "../../servers"
+	entries, err := os.ReadDir(serversDir)
+	if err != nil {
+		t.Fatalf("ReadDir %s: %v", serversDir, err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		mPath := serversDir + "/" + e.Name() + "/manifest.yaml"
+		mFile, err := os.Open(mPath)
+		if err != nil {
+			continue // not a server dir
+		}
+		m, parseErr := ParseManifest(mFile)
+		mFile.Close()
+		if parseErr != nil {
+			t.Errorf("ParseManifest %s: %v", mPath, parseErr)
+			continue
+		}
+		// kind=workspace_scoped uses pool, not registry entry — skip.
+		// (Currently no workspace_scoped manifests; this is forward-looking.)
+		if m.Kind != KindGlobal {
+			continue
+		}
+		for _, d := range m.Daemons {
+			key := m.Name + "/" + d.Name
+			port, ok := regIndex[key]
+			if !ok {
+				t.Errorf("ports.yaml missing entry for %s (manifest declares port %d)", key, d.Port)
+				continue
+			}
+			if port != d.Port {
+				t.Errorf("ports.yaml has %s=%d but manifest declares port %d", key, port, d.Port)
+			}
+		}
+	}
+}
