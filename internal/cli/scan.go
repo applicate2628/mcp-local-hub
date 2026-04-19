@@ -120,22 +120,12 @@ func shortClient(c string) string {
 	return c
 }
 
-// scanManifestDir returns path to `servers/` resolved against the running
-// binary's location. Supports both legacy layout (exe + servers/ at same
-// level) and standard Go layout (exe in bin/, servers/ at project root).
-func scanManifestDir() string {
-	exe, err := os.Executable()
-	if err != nil {
-		return "servers"
-	}
-	exeDir := filepath.Dir(exe)
-	sibling := filepath.Join(exeDir, "servers")
-	if st, err := os.Stat(sibling); err == nil && st.IsDir() {
-		return sibling
-	}
-	parent := filepath.Join(exeDir, "..", "servers")
-	if st, err := os.Stat(parent); err == nil && st.IsDir() {
-		return parent
-	}
-	return "servers"
-}
+// scanManifestDir returns "" to tell the api layer to use the
+// production embed-first resolution path (servers.Manifests embed FS
+// union on-disk defaultManifestDir). Retained as a named seam rather
+// than inlining "" at every call site, so if we ever need per-install
+// overrides they plug in here.
+//
+// Tests that want hermetic fixtures pass an explicit ManifestDir
+// (typically t.TempDir()); those callers never go through this helper.
+func scanManifestDir() string { return "" }

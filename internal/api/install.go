@@ -269,7 +269,10 @@ func (a *API) Status() ([]DaemonStatus, error) {
 			NextRun:    t.NextRun,
 		})
 	}
-	enrichStatus(result, defaultManifestDir())
+	// Empty dir → enrichStatus uses the embed-first resolution path so
+	// `mcphub status` from %TEMP% sees the same server set that the
+	// daemon sees.
+	enrichStatus(result, "")
 	return result, nil
 }
 
@@ -277,13 +280,11 @@ func (a *API) Status() ([]DaemonStatus, error) {
 // It never prints; the returned UninstallReport carries the outcome for
 // CLI/GUI rendering.
 func (a *API) Uninstall(server string) (*UninstallReport, error) {
-	manifestPath := filepath.Join(defaultManifestDir(), server, "manifest.yaml")
-	f, err := os.Open(manifestPath)
+	data, err := loadManifestYAMLEmbedFirst(server)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("load manifest %s: %w", server, err)
 	}
-	defer f.Close()
-	m, err := config.ParseManifest(f)
+	m, err := config.ParseManifest(bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
@@ -631,7 +632,7 @@ func (a *API) RestartAll() ([]RestartResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	ports := manifestPortMap(defaultManifestDir())
+	ports := manifestPortMap("")
 	var results []RestartResult
 	for _, t := range tasks {
 		// Skip weekly-refresh — scheduled, not restarted.
@@ -671,7 +672,7 @@ func (a *API) StopAll() ([]RestartResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	ports := manifestPortMap(defaultManifestDir())
+	ports := manifestPortMap("")
 	var results []RestartResult
 	for _, t := range tasks {
 		// Skip weekly-refresh — schedule-only task; Stop has no effect anyway.

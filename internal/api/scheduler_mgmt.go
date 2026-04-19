@@ -39,14 +39,14 @@ func (a *API) SchedulerUpgrade() ([]SchedulerUpgradeResult, error) {
 		return nil, err
 	}
 	var results []SchedulerUpgradeResult
-	manifestDir := defaultManifestDir()
 	for _, t := range tasks {
 		srv, dmn := parseTaskName(t.Name)
 		if srv == "" {
 			results = append(results, SchedulerUpgradeResult{TaskName: t.Name, Err: "unparseable task name"})
 			continue
 		}
-		m, err := loadManifestForServer(manifestDir, srv)
+		// Empty dir → loadManifestForServer uses embed-first resolution.
+		m, err := loadManifestForServer("", srv)
 		if err != nil {
 			results = append(results, SchedulerUpgradeResult{TaskName: t.Name, Err: fmt.Sprintf("manifest %s: %v", srv, err)})
 			continue

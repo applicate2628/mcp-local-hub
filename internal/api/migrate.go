@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -157,9 +158,18 @@ func (a *API) MigrateFrom(opts MigrateOpts) (*MigrateReport, error) {
 	return report, nil
 }
 
-// loadManifestForServer opens and parses servers/<name>/manifest.yaml under
-// the given directory. Extracted so MigrateFrom's main loop stays readable.
+// loadManifestForServer opens and parses servers/<name>/manifest.yaml.
+// Empty dir triggers the production embed-first path (servers.Manifests
+// embed FS with disk fallback). A non-empty dir reads only from that
+// directory — used by tests that inject hermetic manifest fixtures.
 func loadManifestForServer(dir, name string) (*config.ServerManifest, error) {
+	if dir == "" {
+		data, err := loadManifestYAMLEmbedFirst(name)
+		if err != nil {
+			return nil, err
+		}
+		return config.ParseManifest(bytes.NewReader(data))
+	}
 	f, err := os.Open(filepath.Join(dir, name, "manifest.yaml"))
 	if err != nil {
 		return nil, err

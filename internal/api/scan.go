@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -134,12 +135,21 @@ var genericInterpreters = map[string]bool{
 // falls back to the server name — callers treat counts for unknown servers
 // as an upper bound.
 func patternsForServer(serverName, manifestDir string) []string {
-	f, err := os.Open(filepath.Join(manifestDir, serverName, "manifest.yaml"))
+	var (
+		data []byte
+		err  error
+	)
+	if manifestDir == "" {
+		// Production path: embed first, disk fallback.
+		data, err = loadManifestYAMLEmbedFirst(serverName)
+	} else {
+		// Test-pathway: explicit dir only.
+		data, err = os.ReadFile(filepath.Join(manifestDir, serverName, "manifest.yaml"))
+	}
 	if err != nil {
 		return []string{serverName}
 	}
-	defer f.Close()
-	m, err := config.ParseManifest(f)
+	m, err := config.ParseManifest(bytes.NewReader(data))
 	if err != nil {
 		return []string{serverName}
 	}
@@ -316,8 +326,22 @@ func shapeAntigravityEntry(raw map[string]any) ClientEntry {
 	return ClientEntry{Transport: "absent", Raw: raw}
 }
 
+// readManifestNames returns the set of available server names.
+// Empty dir selects the production path (embedded manifests union
+// on-disk defaultManifestDir). A non-empty dir restricts to that
+// directory only — used by tests to inject a hermetic manifest set.
 func readManifestNames(dir string) (map[string]bool, error) {
 	names := map[string]bool{}
+	if dir == "" {
+		list, err := listManifestNamesEmbedFirst()
+		if err != nil {
+			return nil, err
+		}
+		for _, n := range list {
+			names[n] = true
+		}
+		return names, nil
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -374,7 +398,11 @@ func (a *API) Scan() (*ScanResult, error) {
 		CodexConfigPath:       filepath.Join(home, ".codex", "config.toml"),
 		GeminiConfigPath:      filepath.Join(home, ".gemini", "settings.json"),
 		AntigravityConfigPath: filepath.Join(home, ".gemini", "antigravity", "mcp_config.json"),
-		ManifestDir:           defaultManifestDir(),
+		// Empty ManifestDir → ScanFrom uses the embed-first resolution
+		// path. The on-disk defaultManifestDir stays available as a
+		// secondary source for dev-checkout scenarios where a freshly-
+		// added manifest hasn't been compiled into the binary yet.
+		ManifestDir: "",
 	})
 }
 

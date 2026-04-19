@@ -29,6 +29,24 @@ func TestResolveRelayURL_MutuallyExclusive(t *testing.T) {
 	}
 }
 
+// TestResolveRelayURL_ResolvesFromEmbeddedManifest verifies that
+// --server/--daemon reads the manifest from the binary's embedded FS.
+// This is the regression guard for the original report: the relay
+// failed with "open R:\Temp\servers\serena\manifest.yaml: no such
+// file or directory" when the binary was invoked from %TEMP%, because
+// the old implementation looked for manifests on disk relative to the
+// executable path.
+func TestResolveRelayURL_ResolvesFromEmbeddedManifest(t *testing.T) {
+	// serena ships in the embed FS with daemon "claude" → port 9121.
+	u, err := resolveRelayURL("serena", "claude", "")
+	if err != nil {
+		t.Fatalf("resolveRelayURL(serena, claude): %v", err)
+	}
+	if !strings.Contains(u, ":9121/mcp") {
+		t.Errorf("url = %q, want ...:9121/mcp (serena.claude port)", u)
+	}
+}
+
 // TestResolveRelayURL_MissingFlags rejects invocations with neither
 // --url nor --server/--daemon set.
 func TestResolveRelayURL_MissingFlags(t *testing.T) {

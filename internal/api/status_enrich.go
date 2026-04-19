@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -116,10 +117,31 @@ func parseTaskName(task string) (string, string) {
 	return rest[:idx], rest[idx+1:]
 }
 
-// manifestPortMap reads all servers/*/manifest.yaml and returns a map
-// server → daemon → port. Missing dir = empty map (not an error).
+// manifestPortMap walks every available manifest and returns a map
+// server → daemon → port. Empty manifestDir uses the production
+// embed-first resolution path; a non-empty dir reads that directory
+// only (test hermetic use).
 func manifestPortMap(manifestDir string) map[string]map[string]int {
 	out := map[string]map[string]int{}
+	if manifestDir == "" {
+		names, _ := listManifestNamesEmbedFirst()
+		for _, name := range names {
+			data, err := loadManifestYAMLEmbedFirst(name)
+			if err != nil {
+				continue
+			}
+			m, err := config.ParseManifest(bytes.NewReader(data))
+			if err != nil {
+				continue
+			}
+			inner := map[string]int{}
+			for _, d := range m.Daemons {
+				inner[d.Name] = d.Port
+			}
+			out[m.Name] = inner
+		}
+		return out
+	}
 	entries, err := os.ReadDir(manifestDir)
 	if err != nil {
 		return out
