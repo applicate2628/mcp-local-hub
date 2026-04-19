@@ -76,10 +76,3 @@ func newBackupsCmd() *cobra.Command   { return newBackupsCmdReal() }
 func newManifestCmd() *cobra.Command  { return newManifestCmdReal() }
 func newSchedulerCmd() *cobra.Command { return newSchedulerCmdReal() }
 func newSettingsCmd() *cobra.Command  { return newSettingsCmdReal() }
-
-func stub(name string) func(*cobra.Command, []string) error {
-	return func(cmd *cobra.Command, args []string) error {
-		cmd.Printf("mcp %s: not implemented yet\n", name)
-		return nil
-	}
-}

@@ -30,9 +30,9 @@ func defaultVaultPath() string {
 // creating it if it doesn't exist. This is the canonical home for .age-key
 // and secrets.age — independent of where mcphub.exe or the repo live.
 //
-//   Windows: %LOCALAPPDATA%\mcp-local-hub
-//   Linux:   $XDG_DATA_HOME/mcp-local-hub  (default ~/.local/share/mcp-local-hub)
-//   macOS:   ~/Library/Application Support/mcp-local-hub
+//	Windows: %LOCALAPPDATA%\mcp-local-hub
+//	Linux:   $XDG_DATA_HOME/mcp-local-hub  (default ~/.local/share/mcp-local-hub)
+//	macOS:   ~/Library/Application Support/mcp-local-hub
 func userDataDir() string {
 	if v := os.Getenv("LOCALAPPDATA"); v != "" { // Windows
 		return filepath.Join(v, "mcp-local-hub")
@@ -53,10 +53,10 @@ func userDataDir() string {
 }
 
 // resolveSecretPath returns the first existing path among (in order):
-//   1. %LOCALAPPDATA%\mcp-local-hub\<name>  (canonical, OS-standard user data)
-//   2. <exe_dir>/<name>                     (legacy: single-dir install)
-//   3. <exe_dir>/../<name>                  (bin/ layout: secrets one level up)
-//   4. ./<name>                             (CWD fallback for dev invocations)
+//  1. %LOCALAPPDATA%\mcp-local-hub\<name>  (canonical, OS-standard user data)
+//  2. <exe_dir>/<name>                     (legacy: single-dir install)
+//  3. <exe_dir>/../<name>                  (bin/ layout: secrets one level up)
+//  4. ./<name>                             (CWD fallback for dev invocations)
 //
 // If none exist, returns the canonical path under userDataDir() — so that
 // `mcp secrets init` creates fresh files in the OS-standard location rather

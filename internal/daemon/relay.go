@@ -360,8 +360,10 @@ func (r *HTTPToStdioRelay) readSSEStream(ctx context.Context, body io.Reader, st
 			dataBuf.WriteString(val)
 		case strings.HasPrefix(line, "id:"):
 			lastID = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
-		case strings.HasPrefix(line, "event:"), strings.HasPrefix(line, "retry:"), strings.HasPrefix(line, ":"):
-			// event type / retry hint / comment — ignore; relay is transport-level.
+		default:
+			// Other SSE field lines (event:, retry:, comment lines starting
+			// with ':', or unrecognized fields) are ignored — the relay is
+			// transport-level and forwards only the data: payload.
 		}
 	}
 	flush()

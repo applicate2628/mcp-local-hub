@@ -5,7 +5,8 @@ import (
 )
 
 // State is the snapshot of what the API knows about the running system.
-// Accessed only under API.stateMu.
+// Currently treated as read-only after NewAPI; mutation paths add their
+// own synchronization where they exist.
 type State struct {
 	Daemons  map[string]DaemonStatus // key: "<server>.<daemon>"
 	LastScan *ScanResult

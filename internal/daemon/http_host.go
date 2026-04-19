@@ -471,4 +471,3 @@ func copyHeadersForUpstream(dst, src http.Header) {
 		}
 	}
 }
-

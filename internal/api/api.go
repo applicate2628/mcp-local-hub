@@ -9,16 +9,12 @@
 // frontend can expose it.
 package api
 
-import "sync"
-
 // API is the orchestration handle held by cli and gui. A single instance is
 // created per process via NewAPI. Methods are safe for concurrent use unless
 // noted otherwise.
 type API struct {
-	stateMu sync.RWMutex
-	state   *State
-
-	bus *EventBus
+	state *State
+	bus   *EventBus
 }
 
 // NewAPI constructs a fresh API with an initialized state and event bus.

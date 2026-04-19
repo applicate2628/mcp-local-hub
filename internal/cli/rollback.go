@@ -123,10 +123,3 @@ func findLatestBackup(configPath string) (string, error) {
 	sort.Strings(backups) // lexicographic == chronological due to timestamp format
 	return backups[len(backups)-1], nil
 }
-
-func _unused_error_wrap(err error) error {
-	if err == nil {
-		return nil
-	}
-	return fmt.Errorf("rollback: %w", err)
-}

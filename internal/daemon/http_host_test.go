@@ -20,7 +20,6 @@ import (
 type mockUpstream struct {
 	t            *testing.T
 	server       *httptest.Server
-	mu           struct{}
 	responseMode string // "json" or "sse"
 	lastBody     []byte
 }
