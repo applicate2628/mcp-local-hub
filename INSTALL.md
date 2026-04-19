@@ -4,11 +4,25 @@
 
 1. **Go 1.26+** — `go version` must succeed. Required by `go.mod` (uses 1.24+ stdlib APIs such as `strings.SplitSeq`). Tested on 1.26.2 windows/amd64.
 2. **Git for Windows** (includes Git Bash; the CLI expects Unix-style shell for some setup commands).
-3. **uvx** — Python package runner, needed by Serena. Install via [uv](https://github.com/astral-sh/uv):
+3. **uvx** — Python package runner, needed by Serena. Install via [uv](https://github.com/astral-sh/uv). Do NOT pipe the upstream installer directly into a shell — download it first, inspect it, then run:
    ```powershell
-   powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+   # 1. Fetch the installer to a file you can audit
+   irm https://astral.sh/uv/install.ps1 -OutFile "$env:TEMP\uv-install.ps1"
+
+   # 2. Review the contents — confirm what it does before executing
+   notepad "$env:TEMP\uv-install.ps1"
+
+   # 3. Run it only after you're satisfied
+   powershell -ExecutionPolicy Bypass -File "$env:TEMP\uv-install.ps1"
+
+   # 4. Verify
+   uvx --version
    ```
-   Then verify: `uvx --version`.
+   Alternatively install via `winget`:
+   ```powershell
+   winget install --id=astral-sh.uv -e
+   ```
+   The previous version of this document recommended `irm ... | iex` — that pattern executes remote code with no audit step and is the classic "pipe-to-shell" anti-pattern. Keep the download-inspect-run flow for any third-party installer.
 4. **Windows 11** recommended. Windows 10 should work but is untested. Linux/macOS currently fail at `mcphub install` — stubs only.
 5. **An MCP client or two** (Claude Code, Codex CLI, Gemini CLI, Cursor, Continue…) already installed on the machine.
 
