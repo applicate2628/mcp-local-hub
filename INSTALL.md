@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-1. **Go 1.22+** — `go version` must succeed. Tested on 1.26.2 windows/amd64.
+1. **Go 1.26+** — `go version` must succeed. Required by `go.mod` (uses 1.24+ stdlib APIs such as `strings.SplitSeq`). Tested on 1.26.2 windows/amd64.
 2. **Git for Windows** (includes Git Bash; the CLI expects Unix-style shell for some setup commands).
 3. **uvx** — Python package runner, needed by Serena. Install via [uv](https://github.com/astral-sh/uv):
    ```powershell

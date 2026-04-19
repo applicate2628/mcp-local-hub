@@ -8,7 +8,7 @@
 #     visible via `./mcphub.exe version`.
 #   * Reproducible output via -trimpath.
 #
-# Prerequisites: Go 1.22+, git. Goversioninfo downloads on the fly via
+# Prerequisites: Go 1.26+, git. Goversioninfo downloads on the fly via
 # `go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest`.
 #
 # Note on antivirus: unsigned Go binaries can trip Windows Defender's ML
