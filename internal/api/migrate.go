@@ -140,8 +140,14 @@ func (a *API) MigrateFrom(opts MigrateOpts) (*MigrateReport, error) {
 				RelayDaemon: binding.Daemon,
 			}
 			if binding.Client == "antigravity" {
-				if exe, err := os.Executable(); err == nil {
-					entry.RelayExePath = exe
+				// Anchor at the canonical installed path, not at the
+				// running executable. Otherwise a migrate invoked from a
+				// dev checkout or %TEMP% build would persist a
+				// throwaway absolute path into Antigravity's config —
+				// the next time that path disappears (cleanup, rebuild)
+				// Antigravity's MCP entry is silently broken.
+				if canonical, err := canonicalMcphubPath(); err == nil {
+					entry.RelayExePath = canonical
 				}
 			}
 			if err := adapter.AddEntry(entry); err != nil {

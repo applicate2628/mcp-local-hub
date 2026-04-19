@@ -551,10 +551,18 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan) error {
 	if err != nil {
 		return fmt.Errorf("scheduler: %w", err)
 	}
-	repoDir, err := os.Getwd()
+	// WorkingDirectory for the scheduler task: anchor at ~/.local/bin/
+	// (same directory as the canonical mcphub binary). Using os.Getwd()
+	// baked the dev-checkout cwd into the task XML — later invocations
+	// from any other cwd broke because scheduler-spawned processes
+	// inherited a stale cwd that no longer existed (e.g. R:\Temp\build
+	// from a throwaway install run). ~/.local/bin is guaranteed to
+	// exist (canonicalMcphubPath just confirmed it) and doesn't rot.
+	canonical, err := canonicalMcphubPath()
 	if err != nil {
 		return err
 	}
+	workDir := filepath.Dir(canonical)
 
 	// Rollback stack: accumulate compensating operations as side effects
 	// are applied. On mid-sequence failure, pop and run them in reverse
@@ -575,7 +583,7 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan) error {
 			Description:      "mcp-local-hub: " + m.Name,
 			Command:          t.Command,
 			Args:             t.Args,
-			WorkingDir:       repoDir,
+			WorkingDir:       workDir,
 			RestartOnFailure: true,
 		}
 		if t.Trigger == "At logon" {
