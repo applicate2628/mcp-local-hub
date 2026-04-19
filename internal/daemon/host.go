@@ -22,6 +22,12 @@ type HostConfig struct {
 	Args       []string          // subprocess args
 	Env        map[string]string // appended to os.Environ() for the subprocess
 	WorkingDir string            // subprocess cwd; empty means inherit
+	// LogPath, when set, receives subprocess stderr tee'd into a rotated
+	// log file (same convention as daemon.Launch — 10 MB, 5 rotations).
+	// Stdout is the JSON-RPC protocol channel and is never written to
+	// the log; only diagnostic stderr is captured. When empty, stderr
+	// goes to os.Stderr only (the daemon process's own stderr).
+	LogPath string
 }
 
 // StdioHost hosts a long-lived stdio subprocess and (in later tasks) exposes
@@ -48,6 +54,10 @@ type StdioHost struct {
 	nextInternalID atomic.Int64
 	pendingMu      sync.Mutex
 	pending        map[int64]chan json.RawMessage
+
+	// logFile is the optional rotated log file for child stderr.
+	// nil when HostConfig.LogPath is empty.
+	logFile io.Closer
 
 	// bridge owns the shared initialize cache, capability probe, and
 	// SyntheticTool-driven request/response transforms. Initialize-cache
@@ -117,14 +127,18 @@ func (h *StdioHost) Start(ctx context.Context) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start subprocess: %w", err)
 	}
-	// Forward stderr line-by-line to os.Stderr for diagnostic visibility.
+	// Forward stderr to os.Stderr AND (if LogPath set) to a rotated
+	// log file. Mirrors daemon.Launch / HTTPHost behavior so
+	// `mcphub logs <server>` shows actual subprocess output instead of
+	// "(no output yet)" for stdio-bridge daemons.
+	stderrSink := h.openStderrSink()
 	h.wg.Add(1)
 	go func() {
 		defer h.wg.Done()
 		s := bufio.NewScanner(stderr)
 		s.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for s.Scan() {
-			fmt.Fprintf(os.Stderr, "[subproc stderr] %s\n", s.Bytes())
+			fmt.Fprintf(stderrSink, "[subproc stderr] %s\n", s.Bytes())
 		}
 	}()
 
@@ -195,7 +209,35 @@ func (h *StdioHost) Stop() error {
 	case <-time.After(5 * time.Second):
 	}
 	h.wg.Wait()
+	if h.logFile != nil {
+		_ = h.logFile.Close()
+	}
 	return nil
+}
+
+// openStderrSink returns a writer for child stderr. When LogPath is set
+// the writer tees to both the rotated log file (so `mcphub logs` works
+// for stdio-bridge daemons) and os.Stderr (so the operator's terminal
+// keeps showing live diagnostics). When LogPath is empty, falls back to
+// os.Stderr only — matches the pre-LogPath behavior.
+func (h *StdioHost) openStderrSink() io.Writer {
+	if h.cfg.LogPath == "" {
+		return os.Stderr
+	}
+	if err := os.MkdirAll(filepath_Dir(h.cfg.LogPath), 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "warn: mkdir log dir: %v\n", err)
+		return os.Stderr
+	}
+	if err := RotateIfLarge(h.cfg.LogPath, 10*1024*1024, 5); err != nil {
+		fmt.Fprintf(os.Stderr, "warn: rotate log: %v\n", err)
+	}
+	f, err := os.OpenFile(h.cfg.LogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warn: open log %q: %v\n", h.cfg.LogPath, err)
+		return os.Stderr
+	}
+	h.logFile = f
+	return io.MultiWriter(f, os.Stderr)
 }
 
 // writeStdin sends a line (terminated with '\n') to the subprocess stdin.

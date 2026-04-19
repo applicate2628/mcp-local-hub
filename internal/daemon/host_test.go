@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -115,6 +117,48 @@ sys.stdout.flush()
 
 // TestHostHTTPIDMultiplexing verifies that two concurrent HTTP clients each
 // receive the response matching their original request id, even when the
+// TestStdioHost_TeesStderrToLogFile verifies that with HostConfig.LogPath
+// set, the child's stderr is tee'd into the rotated log file (in addition
+// to os.Stderr). Closes the gap that made `mcphub logs <stdio-server>`
+// report "(no output yet)" for stdio-bridge daemons.
+func TestStdioHost_TeesStderrToLogFile(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	logPath := filepath.Join(t.TempDir(), "stdio-host.log")
+
+	h, err := NewStdioHost(HostConfig{
+		Command: "python",
+		Args: []string{"-u", "-c", `
+import sys, time
+sys.stderr.write("PROBE_STDERR_MARKER\n")
+sys.stderr.flush()
+time.sleep(0.5)
+`},
+		LogPath: logPath,
+	})
+	if err != nil {
+		t.Fatalf("NewStdioHost: %v", err)
+	}
+	if err := h.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	select {
+	case <-h.ChildExited():
+	case <-time.After(3 * time.Second):
+		t.Fatal("child did not exit within 3s")
+	}
+	_ = h.Stop()
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log %q: %v", logPath, err)
+	}
+	if !strings.Contains(string(data), "PROBE_STDERR_MARKER") {
+		t.Errorf("log missing stderr marker; got %q", data)
+	}
+}
+
 // host rewrites ids internally to route them to one shared subprocess.
 //
 // The echo subprocess returns the request unchanged — so we can assert that

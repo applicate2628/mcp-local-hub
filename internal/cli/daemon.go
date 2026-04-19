@@ -156,6 +156,7 @@ See also: install, logs, restart, status.`,
 					Command: cmdPath,
 					Args:    childArgs,
 					Env:     env,
+					LogPath: logPath,
 				})
 				if err != nil {
 					return fmt.Errorf("NewStdioHost: %w", err)
