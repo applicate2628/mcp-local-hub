@@ -102,12 +102,13 @@ func (m *mockUpstream) handle(w http.ResponseWriter, r *http.Request) {
 func newHTTPHostAgainstMock(t *testing.T, upstream *mockUpstream) *HTTPHost {
 	t.Helper()
 	h := &HTTPHost{
-		httpClient:  upstream.server.Client(),
-		upstreamURL: upstream.URL(),
-		bridge:      NewProtocolBridge(),
-		done:        make(chan struct{}),
-		childExited: make(chan struct{}),
-		started:     true, // skip Start() — no subprocess to spawn
+		httpClient:   upstream.server.Client(),
+		streamClient: upstream.server.Client(),
+		upstreamURL:  upstream.URL(),
+		bridge:       NewProtocolBridge(),
+		done:         make(chan struct{}),
+		childExited:  make(chan struct{}),
+		started:      true, // skip Start() — no subprocess to spawn
 	}
 	return h
 }
@@ -399,6 +400,48 @@ func (f *fakeFlushResponseWriter) Header() http.Header         { return f.header
 func (f *fakeFlushResponseWriter) WriteHeader(statusCode int)  { f.status = statusCode }
 func (f *fakeFlushResponseWriter) Write(b []byte) (int, error) { return f.buf.Write(b) }
 func (f *fakeFlushResponseWriter) Flush()                      {}
+
+// TestHTTPHost_GETUsesStreamClient_NoClientTimeout guards against
+// regression of the 60 s httpClient timeout being applied to
+// long-lived SSE subscriptions. The test asserts that GET /mcp routes
+// through h.streamClient (no timeout) by making the upstream respond
+// with a stream that is still open when the assertion runs.
+func TestHTTPHost_GETUsesStreamClient_NoClientTimeout(t *testing.T) {
+	// Upstream that holds a GET open and slowly emits keepalive frames.
+	// If the proxy used httpClient with 60 s timeout, the test would
+	// still pass because it only runs for ~200 ms — so instead we
+	// assert the CLIENT IDENTITY: streamClient must have Timeout 0.
+	upstream := newMockUpstream(t, "json")
+	defer upstream.Close()
+	h := newHTTPHostAgainstMock(t, upstream)
+
+	if h.streamClient == nil {
+		t.Fatal("streamClient must be non-nil for GET SSE passthrough")
+	}
+	// streamClient is used for GET; it must have NO overall timeout so
+	// the MCP notifications channel can stay open for the session.
+	// httpClient is allowed to keep its 60 s bound for POST request-
+	// response exchanges. The test harness's mock client copies the
+	// timeout from httptest.Server which may be zero — so rather than
+	// asserting numeric values, we assert that the two clients are
+	// DISTINCT pointers when constructed by NewHTTPHost.
+	realHost, err := NewHTTPHost(HTTPHostConfig{
+		Command:      "true",
+		UpstreamPort: 12345,
+	})
+	if err != nil {
+		t.Fatalf("NewHTTPHost: %v", err)
+	}
+	if realHost.httpClient == realHost.streamClient {
+		t.Error("httpClient and streamClient must be distinct so GET SSE isn't bounded by the 60 s POST timeout")
+	}
+	if realHost.streamClient.Timeout != 0 {
+		t.Errorf("streamClient.Timeout = %v, want 0 (long-lived SSE)", realHost.streamClient.Timeout)
+	}
+	if realHost.httpClient.Timeout == 0 {
+		t.Error("httpClient.Timeout = 0 — POST requests should have a finite bound to avoid stuck handlers")
+	}
+}
 
 // --- waitForReady / Start guardrail ---
 

@@ -37,10 +37,11 @@ import (
 type HTTPHost struct {
 	cfg HTTPHostConfig
 
-	cmd         *exec.Cmd
-	httpClient  *http.Client
-	upstreamURL string
-	bridge      *ProtocolBridge
+	cmd          *exec.Cmd
+	httpClient   *http.Client // request-response POSTs (60 s timeout)
+	streamClient *http.Client // long-lived GET SSE (no timeout)
+	upstreamURL  string
+	bridge       *ProtocolBridge
 
 	mu          sync.Mutex
 	started     bool
@@ -86,12 +87,23 @@ func NewHTTPHost(cfg HTTPHostConfig) (*HTTPHost, error) {
 	}
 	cfg.UpstreamPath = path
 	return &HTTPHost{
-		cfg:         cfg,
-		httpClient:  &http.Client{Timeout: 60 * time.Second},
-		upstreamURL: fmt.Sprintf("http://127.0.0.1:%d%s", cfg.UpstreamPort, path),
-		bridge:      NewProtocolBridge(),
-		done:        make(chan struct{}),
-		childExited: make(chan struct{}),
+		cfg: cfg,
+		// httpClient is used for request-response POSTs (initialize,
+		// tools/list, tools/call). 60 s is a generous upper bound — most
+		// MCP method round-trips finish in tens of ms to a few seconds.
+		httpClient: &http.Client{Timeout: 60 * time.Second},
+		// streamClient is used for the long-lived SSE subscription on
+		// GET /mcp. Per Streamable HTTP spec, the server-to-client
+		// notifications channel stays open for the lifetime of the
+		// client session. A Timeout here would tear the stream down
+		// roughly every minute — so the client is configured with no
+		// overall deadline; cancellation is driven purely by the
+		// per-request context (client disconnect or host Shutdown).
+		streamClient: &http.Client{Timeout: 0},
+		upstreamURL:  fmt.Sprintf("http://127.0.0.1:%d%s", cfg.UpstreamPort, path),
+		bridge:       NewProtocolBridge(),
+		done:         make(chan struct{}),
+		childExited:  make(chan struct{}),
 	}, nil
 }
 
@@ -352,8 +364,10 @@ func copyResponseHeaders(dst, src http.Header) {
 	}
 }
 
-// forwardPassthrough is used for GET /mcp (SSE subscription) and for
-// non-JSON POST bodies. No transforms — just relay bytes both directions.
+// forwardPassthrough handles GET /mcp (long-lived SSE subscription).
+// Uses streamClient (no timeout) because the notifications channel
+// stays open for the client session lifetime — the 60 s httpClient
+// deadline would tear it down every minute otherwise.
 func (h *HTTPHost) forwardPassthrough(w http.ResponseWriter, r *http.Request) {
 	upstreamReq, err := http.NewRequestWithContext(r.Context(), r.Method, h.upstreamURL, r.Body)
 	if err != nil {
@@ -361,7 +375,7 @@ func (h *HTTPHost) forwardPassthrough(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	copyHeadersForUpstream(upstreamReq.Header, r.Header)
-	resp, err := h.httpClient.Do(upstreamReq)
+	resp, err := h.streamClient.Do(upstreamReq)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
