@@ -173,6 +173,72 @@ func TestPreflight_RespectsDaemonFilter(t *testing.T) {
 	}
 }
 
+// TestPreflight_ChecksInternalPortForNativeHTTP verifies that a native-http
+// manifest fails preflight when the internal port (external + offset) is
+// already bound, even if the external port itself is free. Without this
+// check, install would persist scheduler/client config and then crash at
+// runtime when HTTPHost tries to spawn its upstream.
+func TestPreflight_ChecksInternalPortForNativeHTTP(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	occupiedInternal := ln.Addr().(*net.TCPAddr).Port
+	// Pick an external port such that internal = external + offset hits
+	// the occupied port. Working backward: external = occupied - offset.
+	// We still need the external port itself to be free — allocate it
+	// transiently and close before calling Preflight to confirm it's free.
+	external := occupiedInternal - config.NativeHTTPInternalPortOffset
+	if external < 1024 {
+		t.Skipf("could not construct test ports from occupied=%d offset=%d", occupiedInternal, config.NativeHTTPInternalPortOffset)
+	}
+
+	m := &config.ServerManifest{
+		Name:      "testsrv",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportNativeHTTP,
+		Command:   "go",
+		Daemons:   []config.DaemonSpec{{Name: "default", Port: external}},
+	}
+
+	err = Preflight(m, "")
+	if err == nil {
+		t.Fatal("expected preflight error when internal port is bound")
+	}
+	if !strings.Contains(err.Error(), "internal port") {
+		t.Errorf("error should mention 'internal port': %v", err)
+	}
+}
+
+// TestPreflight_StdioBridgeIgnoresInternalPort asserts that the internal-port
+// check is scoped to native-http. stdio-bridge transports have no second
+// port and must not be rejected for something outside their scope.
+func TestPreflight_StdioBridgeIgnoresInternalPort(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	occupied := ln.Addr().(*net.TCPAddr).Port
+	external := occupied - config.NativeHTTPInternalPortOffset
+	if external < 1024 {
+		t.Skipf("could not construct test ports")
+	}
+
+	m := &config.ServerManifest{
+		Name:      "testsrv",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportStdioBridge,
+		Command:   "go",
+		Daemons:   []config.DaemonSpec{{Name: "default", Port: external}},
+	}
+
+	if err := Preflight(m, ""); err != nil {
+		t.Errorf("stdio-bridge preflight should pass (internal-port check is native-http only): %v", err)
+	}
+}
+
 // TestPreflight_UnknownCommand ensures the command check runs regardless of filter.
 func TestPreflight_UnknownCommand(t *testing.T) {
 	m := &config.ServerManifest{

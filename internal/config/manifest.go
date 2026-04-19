@@ -19,6 +19,13 @@ const (
 	TransportStdioBridge = "stdio-bridge"
 )
 
+// NativeHTTPInternalPortOffset is the fixed delta between a native-http
+// daemon's external (client-facing) port and the internal port its
+// upstream subprocess binds. Lives here so the two independent readers
+// — api.Preflight (port-free check at install) and cli/daemon.go
+// (subprocess --port flag at runtime) — share a single source of truth.
+const NativeHTTPInternalPortOffset = 10000
+
 // ServerManifest is the parsed form of a `servers/<name>/manifest.yaml` file.
 type ServerManifest struct {
 	Name             string            `yaml:"name"`

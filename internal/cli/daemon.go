@@ -94,14 +94,14 @@ See also: install, logs, restart, status.`,
 			}
 			if m.Transport == config.TransportNativeHTTP {
 				// Native-http path: upstream subprocess listens on an INTERNAL
-				// port (spec.Port + 10000). mcphub's HTTPHost listens on the
-				// external spec.Port and reverse-proxies to upstream while
-				// applying the ProtocolBridge transforms (inject synthetic
-				// __read_resource__/__list_prompts__/__get_prompt__, rewrite
-				// their calls to the matching native MCP methods). Internal
-				// ports are chosen by a fixed +10000 offset so the mapping is
-				// predictable and stable across restarts.
-				internalPort := spec.Port + 10000
+				// port (spec.Port + api.NativeHTTPInternalPortOffset). mcphub's
+				// HTTPHost listens on the external spec.Port and reverse-proxies
+				// to upstream while applying the ProtocolBridge transforms
+				// (inject synthetic __read_resource__/__list_prompts__/
+				// __get_prompt__, rewrite their calls to the matching native
+				// MCP methods). Internal ports are chosen by a fixed offset so
+				// the mapping is predictable and stable across restarts.
+				internalPort := spec.Port + config.NativeHTTPInternalPortOffset
 				childArgs = append(childArgs, "--port", fmt.Sprintf("%d", internalPort))
 				h, err := daemon.NewHTTPHost(daemon.HTTPHostConfig{
 					Command:      cmdPath,

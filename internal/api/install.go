@@ -427,12 +427,25 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 		return fmt.Errorf("%s not on PATH — run `mcphub setup` once to add ~/.local/bin to PATH: %w", mcphubShortName, err)
 	}
 	// 3. Ports free — only for daemons in the filtered scope.
+	//
+	// For native-http transports the daemon binds TWO ports: the external
+	// client-facing spec.Port, and the internal spec.Port+10000 where the
+	// upstream subprocess listens (see cli/daemon.go native-http branch).
+	// Both must be free at install time; otherwise the install writes
+	// scheduler and client-config entries that immediately fail to start.
 	for _, d := range m.Daemons {
 		if daemonFilter != "" && d.Name != daemonFilter {
 			continue
 		}
 		if portInUse(d.Port) {
 			return fmt.Errorf("port %d already in use (needed for daemon %s/%s)", d.Port, m.Name, d.Name)
+		}
+		if m.Transport == config.TransportNativeHTTP {
+			internal := d.Port + config.NativeHTTPInternalPortOffset
+			if portInUse(internal) {
+				return fmt.Errorf("internal port %d already in use (needed for native-http upstream of %s/%s; external=%d, internal=external+%d)",
+					internal, m.Name, d.Name, d.Port, config.NativeHTTPInternalPortOffset)
+			}
 		}
 	}
 	return nil
