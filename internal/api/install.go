@@ -16,6 +16,7 @@ import (
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/scheduler"
+	"mcp-local-hub/internal/secrets"
 )
 
 // mcphubShortName is the bare executable name. Used for Antigravity relay
@@ -447,6 +448,45 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 				return fmt.Errorf("internal port %d already in use (needed for native-http upstream of %s/%s; external=%d, internal=external+%d)",
 					internal, m.Name, d.Name, d.Port, config.NativeHTTPInternalPortOffset)
 			}
+		}
+	}
+	// 4. Secret references resolve. Any `secret:<key>` in manifest.Env
+	// must already exist in the vault — otherwise the daemon would
+	// spawn, fail to start on the missing env var, and the user would
+	// chase a cryptic subprocess error. Failing here surfaces the real
+	// cause (missing secret) before any side effect is applied.
+	if err := checkSecretRefs(m.Env); err != nil {
+		return err
+	}
+	return nil
+}
+
+// checkSecretRefs resolves every manifest env value and fails fast on
+// the first missing secret. Only probes secret: refs — file:/literal/
+// $VAR values are left to the resolver at daemon launch (they have
+// different failure modes we don't want to pre-empt here).
+func checkSecretRefs(env map[string]string) error {
+	vault, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
+	if err != nil {
+		// No vault yet — only fail if at least one secret: ref is
+		// declared. Manifests with no secret refs should install
+		// cleanly on a fresh machine without any secrets setup.
+		for k, v := range env {
+			if strings.HasPrefix(v, "secret:") {
+				return fmt.Errorf("env[%s]=%q requires a secrets vault; run `mcphub secrets set %s` first (vault open failed: %v)",
+					k, v, strings.TrimPrefix(v, "secret:"), err)
+			}
+		}
+		return nil
+	}
+	resolver := secrets.NewResolver(vault, nil)
+	for k, v := range env {
+		if !strings.HasPrefix(v, "secret:") {
+			continue
+		}
+		if _, err := resolver.Resolve(v); err != nil {
+			return fmt.Errorf("env[%s]=%q: %w (run `mcphub secrets set %s` to provide it)",
+				k, v, err, strings.TrimPrefix(v, "secret:"))
 		}
 	}
 	return nil

@@ -239,6 +239,69 @@ func TestPreflight_StdioBridgeIgnoresInternalPort(t *testing.T) {
 	}
 }
 
+// TestPreflight_MissingSecretFailsFast verifies that a manifest whose
+// env declares a `secret:<key>` that is absent from the vault fails
+// preflight — surfacing the missing secret BEFORE any side effect (task
+// creation, client-config backup+rewrite, daemon spawn) is applied.
+// The alternative path (deferred resolution at daemon launch) yielded
+// a cryptic subprocess error several steps removed from the real cause.
+func TestPreflight_MissingSecretFailsFast(t *testing.T) {
+	// Point the secrets resolver at a non-existent vault location so
+	// any secret: ref triggers the "vault unavailable" branch. Keeps
+	// the test hermetic: we aren't exercising decryption, just the
+	// gate that blocks install when a ref cannot resolve.
+	t.Setenv("LOCALAPPDATA", t.TempDir())  // Windows path
+	t.Setenv("XDG_DATA_HOME", t.TempDir()) // Linux path
+
+	m := &config.ServerManifest{
+		Name:      "secretless-server",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportStdioBridge,
+		Command:   "go",
+		Env:       map[string]string{"API_KEY": "secret:nonexistent_key"},
+		Daemons:   []config.DaemonSpec{{Name: "default", Port: 0}},
+	}
+
+	err := Preflight(m, "")
+	if err == nil {
+		t.Fatal("expected preflight to fail for missing secret ref")
+	}
+	if !strings.Contains(err.Error(), "nonexistent_key") {
+		t.Errorf("error should name the missing key: %v", err)
+	}
+}
+
+// TestPreflight_NoSecretsNeeded confirms manifests without any secret:
+// references preflight cleanly even when no vault exists (fresh
+// machine, user has not run `mcphub secrets init`).
+func TestPreflight_NoSecretsNeeded(t *testing.T) {
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close() // must be free for preflight
+
+	m := &config.ServerManifest{
+		Name:      "plain-server",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportStdioBridge,
+		Command:   "go",
+		Env:       map[string]string{"PORT": "literal", "OTHER": "$MY_ENV_VAR_UNSET"},
+		Daemons:   []config.DaemonSpec{{Name: "default", Port: port}},
+	}
+
+	// Preflight should succeed despite the $VAR ref because it is only
+	// the secret: refs that are gated here (the $VAR check happens at
+	// daemon launch where the contract is different).
+	if err := Preflight(m, ""); err != nil {
+		t.Errorf("preflight unexpectedly failed with no secret refs: %v", err)
+	}
+}
+
 // TestPreflight_UnknownCommand ensures the command check runs regardless of filter.
 func TestPreflight_UnknownCommand(t *testing.T) {
 	m := &config.ServerManifest{
