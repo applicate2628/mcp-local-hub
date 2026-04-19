@@ -33,6 +33,28 @@ func TestDetectTools_ReportsInstalledWithVersion(t *testing.T) {
 	}
 }
 
+func TestListToolsTool_MirrorsResourceCatalog(t *testing.T) {
+	tb := &PerfToolbox{tools: DetectTools()}
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{}`)}}
+	result, err := tb.listToolsTool(t.Context(), req)
+	if err != nil {
+		t.Fatalf("listToolsTool: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected IsError")
+	}
+	if len(result.Content) == 0 {
+		t.Fatal("empty Content")
+	}
+	text := result.Content[0].(*mcp.TextContent).Text
+	// Same JSON catalog shape as resource://tools — must mention all four tool names.
+	for _, name := range []string{"clang-tidy", "hyperfine", "llvm-objdump", "include-what-you-use"} {
+		if !strings.Contains(text, name) {
+			t.Errorf("list_tools output missing entry for %q: %s", name, text)
+		}
+	}
+}
+
 func TestToolsResource_ReturnsJSONCatalog(t *testing.T) {
 	srv := &PerfToolbox{tools: DetectTools()}
 

@@ -243,6 +243,9 @@ func registerTools(gs *GodboltServer) {
 			"properties": map[string]any{},
 		},
 	}, gs.workflowTool)
+
+	// Tool twins for the list-style resources. See resource_tools.go.
+	registerResourceTools(gs)
 }
 
 // getLanguages handles GET /api/languages

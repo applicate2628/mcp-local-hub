@@ -231,6 +231,94 @@ func TestGetInstructionInfo_ExtractsBothParams(t *testing.T) {
 	}
 }
 
+func TestListCompilersTool_DelegatesToResource(t *testing.T) {
+	var gotURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURL = r.URL.String()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"id":"gcc-13.2","name":"GCC 13.2"}]`))
+	}))
+	defer srv.Close()
+	gs := &GodboltServer{httpClient: srv.Client(), baseURL: srv.URL + "/api"}
+
+	rawArgs, _ := json.Marshal(map[string]any{"language_id": "c++"})
+	result, err := gs.listCompilersTool(t.Context(), (&mockCallToolRequest{Arguments: rawArgs}).toReal())
+	if err != nil {
+		t.Fatalf("listCompilersTool: %v", err)
+	}
+	if gotURL != "/api/compilers/c++" {
+		t.Errorf("godbolt URL = %q, want /api/compilers/c++", gotURL)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected IsError result")
+	}
+	if len(result.Content) == 0 {
+		t.Fatal("empty Content")
+	}
+	text, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("Content[0] is not TextContent: %T", result.Content[0])
+	}
+	if !strings.Contains(text.Text, `"gcc-13.2"`) {
+		t.Errorf("response missing compiler id: %s", text.Text)
+	}
+}
+
+func TestListCompilersTool_MissingLanguageIDReturnsError(t *testing.T) {
+	gs := &GodboltServer{httpClient: http.DefaultClient, baseURL: "http://unused"}
+	rawArgs, _ := json.Marshal(map[string]any{})
+	result, err := gs.listCompilersTool(t.Context(), (&mockCallToolRequest{Arguments: rawArgs}).toReal())
+	if err != nil {
+		t.Fatalf("listCompilersTool: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected IsError=true for missing language_id")
+	}
+}
+
+func TestGetVersionTool_DelegatesToResource(t *testing.T) {
+	var gotURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURL = r.URL.String()
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("Compiler Explorer v42"))
+	}))
+	defer srv.Close()
+	gs := &GodboltServer{httpClient: srv.Client(), baseURL: srv.URL + "/api"}
+
+	result, err := gs.getVersionTool(t.Context(), (&mockCallToolRequest{Arguments: json.RawMessage(`{}`)}).toReal())
+	if err != nil {
+		t.Fatalf("getVersionTool: %v", err)
+	}
+	if gotURL != "/api/version" {
+		t.Errorf("godbolt URL = %q, want /api/version", gotURL)
+	}
+	text := result.Content[0].(*mcp.TextContent).Text
+	if !strings.Contains(text, "Compiler Explorer v42") {
+		t.Errorf("response missing version string: %s", text)
+	}
+}
+
+func TestLookupInstructionTool_RequiresBothParams(t *testing.T) {
+	gs := &GodboltServer{httpClient: http.DefaultClient, baseURL: "http://unused"}
+
+	cases := []map[string]any{
+		{"instruction_set": "x86"},
+		{"opcode": "mov"},
+		{},
+	}
+	for i, c := range cases {
+		rawArgs, _ := json.Marshal(c)
+		result, err := gs.lookupInstructionTool(t.Context(), (&mockCallToolRequest{Arguments: rawArgs}).toReal())
+		if err != nil {
+			t.Fatalf("case %d: %v", i, err)
+		}
+		if !result.IsError {
+			t.Errorf("case %d: expected IsError for args %+v", i, c)
+		}
+	}
+}
+
 func TestCompileCMakeTool_MirrorsCompileToolSurface(t *testing.T) {
 	var gotAccept string
 	var gotPayload map[string]any

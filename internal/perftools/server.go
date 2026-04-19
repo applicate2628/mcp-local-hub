@@ -203,6 +203,41 @@ func registerTools(tb *PerfToolbox) {
 			"properties": map[string]any{},
 		},
 	}, tb.workflowTool)
+
+	// list_tools mirrors resource://tools — the availability catalog
+	// (clang-tidy, hyperfine, llvm-objdump, iwyu with installed/version/
+	// path). Call this FIRST before any perf-analysis tool to see which
+	// binaries this host actually has.
+	tb.server.AddTool(&mcp.Tool{
+		Name:        "list_tools",
+		Description: "Return the catalog of detected perf-analysis binaries (clang-tidy, hyperfine, llvm-objdump, include-what-you-use). Each entry carries installed (bool), version (string when installed), and path (or error). Same content as resource://tools. Call this FIRST — not every host has all four installed.",
+		InputSchema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		},
+	}, tb.listToolsTool)
+}
+
+// listToolsTool is the tool-transport twin of getToolsResource. Same
+// JSON body, returned as a TextContent CallToolResult instead of a
+// ResourceContents ReadResourceResult.
+func (tb *PerfToolbox) listToolsTool(ctx context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	resReq := &mcp.ReadResourceRequest{Params: &mcp.ReadResourceParams{URI: "resource://tools"}}
+	result, err := tb.getToolsResource(ctx, resReq)
+	if err != nil {
+		return &mcp.CallToolResult{
+			IsError: true,
+			Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}},
+		}, nil
+	}
+	content := make([]mcp.Content, 0, len(result.Contents))
+	for _, c := range result.Contents {
+		if c == nil {
+			continue
+		}
+		content = append(content, &mcp.TextContent{Text: c.Text})
+	}
+	return &mcp.CallToolResult{Content: content}, nil
 }
 
 // getToolsResource serves resource://tools — marshals the catalog to
