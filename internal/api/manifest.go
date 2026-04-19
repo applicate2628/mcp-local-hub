@@ -10,10 +10,17 @@ import (
 	"mcp-local-hub/internal/config"
 )
 
-// ManifestList returns the sorted list of server names that have a manifest
-// at <defaultManifestDir>/<name>/manifest.yaml.
+// ManifestList returns the sorted list of server names that have a
+// manifest, unioning the embed FS (shipped with the binary, source of
+// truth in production) with the on-disk defaultManifestDir (used by
+// dev flows where a new manifest hasn't been compiled in yet).
+//
+// Before this changed, ManifestList ONLY looked at disk — so a canonical
+// ~/.local/bin/mcphub.exe invoked from %TEMP% reported 0 servers even
+// though 10 were baked into the binary. That was split-brain with the
+// daemon (which always reads from embed).
 func (a *API) ManifestList() ([]string, error) {
-	return a.ManifestListIn(defaultManifestDir())
+	return listManifestNamesEmbedFirst()
 }
 
 // ManifestListIn is the tempdir-capable form of ManifestList.
@@ -38,9 +45,15 @@ func (a *API) ManifestListIn(dir string) ([]string, error) {
 	return names, nil
 }
 
-// ManifestGet returns the raw YAML of the named server's manifest.
+// ManifestGet returns the raw YAML of the named server's manifest,
+// reading from the embed FS first (production) with disk fallback for
+// dev flow. See listManifestNamesEmbedFirst for the rationale.
 func (a *API) ManifestGet(name string) (string, error) {
-	return a.ManifestGetIn(defaultManifestDir(), name)
+	data, err := loadManifestYAMLEmbedFirst(name)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 // ManifestGetIn is the tempdir-capable form of ManifestGet.

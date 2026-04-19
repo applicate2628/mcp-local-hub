@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net"
@@ -107,14 +108,16 @@ func (a *API) Install(opts InstallOpts) error {
 	if w == nil {
 		w = os.Stderr
 	}
-	// 1. Load manifest.
-	manifestPath := filepath.Join(defaultManifestDir(), opts.Server, "manifest.yaml")
-	f, err := os.Open(manifestPath)
+	// 1. Load manifest (embed FS first, disk fallback for dev flow).
+	//    The canonical installed binary resolves manifests from its
+	//    embedded FS so an install launched from any cwd finds the same
+	//    10 servers the daemon sees — previously install opened disk
+	//    and failed or saw a stale subset.
+	data, err := loadManifestYAMLEmbedFirst(opts.Server)
 	if err != nil {
-		return fmt.Errorf("open %s: %w", manifestPath, err)
+		return fmt.Errorf("load manifest %s: %w", opts.Server, err)
 	}
-	defer f.Close()
-	m, err := config.ParseManifest(f)
+	m, err := config.ParseManifest(bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
@@ -135,19 +138,30 @@ func (a *API) Install(opts InstallOpts) error {
 	return executeInstallTo(w, m, plan)
 }
 
-// InstallAll is the production entry point for bulk install using
-// defaultManifestDir().
+// InstallAll is the production entry point for bulk install. Reads
+// the authoritative server list from the embed FS (with disk union
+// for dev flow) so the canonical installed binary behaves identically
+// regardless of cwd or whether a dev source tree sits nearby.
 func (a *API) InstallAll(dryRun bool, w io.Writer) []InstallResult {
-	return a.InstallAllFrom(InstallAllOpts{
-		ManifestDir: defaultManifestDir(),
-		DryRun:      dryRun,
-		Writer:      w,
-	})
+	names, err := listManifestNamesEmbedFirst()
+	if err != nil {
+		return []InstallResult{{Err: err}}
+	}
+	var results []InstallResult
+	for _, name := range names {
+		err := a.installUsingEmbedFirst(InstallOpts{
+			Server: name,
+			DryRun: dryRun,
+			Writer: w,
+		})
+		results = append(results, InstallResult{Server: name, Err: err})
+	}
+	return results
 }
 
-// InstallAllFrom installs every manifest under ManifestDir. It continues past
-// individual failures and returns the per-server result list so callers can
-// display a summary.
+// InstallAllFrom installs every manifest under the explicit opts.ManifestDir.
+// Retained for test hermetic-filesystem use and legacy callers that pass
+// a tempdir; production uses InstallAll which consults the embed FS.
 func (a *API) InstallAllFrom(opts InstallAllOpts) []InstallResult {
 	var results []InstallResult
 	entries, err := os.ReadDir(opts.ManifestDir)
@@ -169,6 +183,34 @@ func (a *API) InstallAllFrom(opts InstallAllOpts) []InstallResult {
 		results = append(results, InstallResult{Server: e.Name(), Err: err})
 	}
 	return results
+}
+
+// installUsingEmbedFirst is the install entry that loads the manifest
+// via loadManifestYAMLEmbedFirst. Preflight is intentionally omitted
+// here — bulk installs may run against manifests whose sibling daemons
+// are already occupying their ports from a prior install, which would
+// otherwise abort the entire batch.
+func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
+	w := opts.Writer
+	if w == nil {
+		w = os.Stderr
+	}
+	data, err := loadManifestYAMLEmbedFirst(opts.Server)
+	if err != nil {
+		return fmt.Errorf("load manifest %s: %w", opts.Server, err)
+	}
+	m, err := config.ParseManifest(bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	plan, err := BuildPlan(m, opts.DaemonFilter)
+	if err != nil {
+		return err
+	}
+	if opts.DryRun {
+		return printPlanTo(w, plan)
+	}
+	return executeInstallTo(w, m, plan)
 }
 
 // installFromManifestDir is Install-like but with an explicit manifestDir
