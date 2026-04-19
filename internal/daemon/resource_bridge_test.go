@@ -11,11 +11,14 @@ import (
 	"time"
 )
 
-// --- Pure-function unit tests ---
+// --- Pure-function unit tests (ProtocolBridge + registry) ---
 
-func TestInjectReadResourceTool_AppendsSyntheticEntry(t *testing.T) {
+func TestProtocolBridge_InjectTools_AppendsSyntheticEntry(t *testing.T) {
+	b := NewProtocolBridge()
+	b.CacheInitialize(json.RawMessage(`{"result":{"capabilities":{"resources":{}}}}`))
+
 	in := json.RawMessage(`{"jsonrpc":"2.0","id":7,"result":{"tools":[{"name":"compile_code"}]}}`)
-	out := injectReadResourceTool(in)
+	out := b.InjectTools(in)
 
 	var parsed struct {
 		Result struct {
@@ -38,9 +41,12 @@ func TestInjectReadResourceTool_AppendsSyntheticEntry(t *testing.T) {
 	}
 }
 
-func TestInjectReadResourceTool_HandlesEmptyTools(t *testing.T) {
+func TestProtocolBridge_InjectTools_EmptyTools(t *testing.T) {
+	b := NewProtocolBridge()
+	b.CacheInitialize(json.RawMessage(`{"result":{"capabilities":{"resources":{}}}}`))
+
 	in := json.RawMessage(`{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}`)
-	out := injectReadResourceTool(in)
+	out := b.InjectTools(in)
 
 	var parsed struct {
 		Result struct {
@@ -55,80 +61,113 @@ func TestInjectReadResourceTool_HandlesEmptyTools(t *testing.T) {
 	}
 }
 
-func TestInjectReadResourceTool_MalformedBodyReturnsUnchanged(t *testing.T) {
+func TestProtocolBridge_InjectTools_NoCapability_NoInjection(t *testing.T) {
+	// No initialize cached → no capabilities known → no injection.
+	b := NewProtocolBridge()
+	in := json.RawMessage(`{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"only_tool"}]}}`)
+	out := b.InjectTools(in)
+	if string(out) != string(in) {
+		t.Errorf("expected passthrough when capability unknown, got: %s", out)
+	}
+}
+
+func TestProtocolBridge_InjectTools_MalformedBodyReturnsUnchanged(t *testing.T) {
+	b := NewProtocolBridge()
+	b.CacheInitialize(json.RawMessage(`{"result":{"capabilities":{"resources":{}}}}`))
 	in := json.RawMessage(`not json`)
-	out := injectReadResourceTool(in)
+	out := b.InjectTools(in)
 	if string(out) != string(in) {
 		t.Errorf("expected passthrough on parse failure, got %q", out)
 	}
 }
 
-func TestMaybeRewriteReadResourceCall_TransformsMethodAndParams(t *testing.T) {
+func TestProtocolBridge_TransformRequest_RewritesReadResource(t *testing.T) {
+	b := NewProtocolBridge()
+	b.CacheInitialize(json.RawMessage(`{"result":{"capabilities":{"resources":{}}}}`))
+
 	raw := json.RawMessage(`{"jsonrpc":"2.0","id":42,"method":"tools/call","params":{"name":"__read_resource__","arguments":{"uri":"resource://workflow"}}}`)
 	var msg map[string]json.RawMessage
 	_ = json.Unmarshal(raw, &msg)
 
-	rw := maybeRewriteReadResourceCall(msg)
-	if !rw.applied {
-		t.Fatal("expected applied=true")
+	action := b.TransformRequest(msg)
+	if action.Active == nil {
+		t.Fatal("expected Active non-nil for __read_resource__ call")
 	}
-	if rw.parseError != nil {
-		t.Fatalf("unexpected parseError: %v", rw.parseError)
+	if action.SynthError != nil {
+		t.Fatalf("unexpected SynthError: %v", action.SynthError)
 	}
-	if rw.uri != "resource://workflow" {
-		t.Errorf("uri = %q, want resource://workflow", rw.uri)
+	if action.Active.Name != "__read_resource__" {
+		t.Errorf("Active.Name = %q", action.Active.Name)
 	}
 
-	var out map[string]json.RawMessage
-	if err := json.Unmarshal(rw.payload, &out); err != nil {
-		t.Fatalf("payload not valid JSON: %v", err)
-	}
+	// msg should be rewritten in place: method → resources/read, params → {uri}.
 	var gotMethod string
-	_ = json.Unmarshal(out["method"], &gotMethod)
+	_ = json.Unmarshal(msg["method"], &gotMethod)
 	if gotMethod != "resources/read" {
 		t.Errorf("method = %q, want resources/read", gotMethod)
 	}
 	var params struct {
 		URI string `json:"uri"`
 	}
-	_ = json.Unmarshal(out["params"], &params)
+	_ = json.Unmarshal(msg["params"], &params)
 	if params.URI != "resource://workflow" {
-		t.Errorf("params.uri = %q, want resource://workflow", params.URI)
+		t.Errorf("params.uri = %q", params.URI)
 	}
-	// id must survive the rewrite.
-	if string(out["id"]) != "42" {
-		t.Errorf("id not preserved: got %q", out["id"])
+	if string(msg["id"]) != "42" {
+		t.Errorf("id not preserved: %q", msg["id"])
 	}
 }
 
-func TestMaybeRewriteReadResourceCall_IgnoresOtherTools(t *testing.T) {
+func TestProtocolBridge_TransformRequest_IgnoresOtherTools(t *testing.T) {
+	b := NewProtocolBridge()
+	b.CacheInitialize(json.RawMessage(`{"result":{"capabilities":{"resources":{}}}}`))
+
 	raw := json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"compile_code","arguments":{"source":"int main(){}"}}}`)
 	var msg map[string]json.RawMessage
 	_ = json.Unmarshal(raw, &msg)
 
-	rw := maybeRewriteReadResourceCall(msg)
-	if rw.applied {
-		t.Errorf("expected applied=false for non-__read_resource__ call, got %+v", rw)
+	action := b.TransformRequest(msg)
+	if action.Active != nil || action.SynthError != nil {
+		t.Errorf("expected empty BridgeAction for non-synthetic tool, got %+v", action)
 	}
 }
 
-func TestMaybeRewriteReadResourceCall_MissingURIReturnsParseError(t *testing.T) {
+func TestProtocolBridge_TransformRequest_MissingURIReturnsError(t *testing.T) {
+	b := NewProtocolBridge()
+	b.CacheInitialize(json.RawMessage(`{"result":{"capabilities":{"resources":{}}}}`))
+
 	raw := json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"__read_resource__","arguments":{}}}`)
 	var msg map[string]json.RawMessage
 	_ = json.Unmarshal(raw, &msg)
 
-	rw := maybeRewriteReadResourceCall(msg)
-	if !rw.applied {
-		t.Fatal("expected applied=true so handler can return a tool-call error")
+	action := b.TransformRequest(msg)
+	if action.Active == nil {
+		t.Fatal("Active should be set so caller can write error response")
 	}
-	if rw.parseError == nil {
-		t.Fatal("expected non-nil parseError for missing uri")
+	if action.SynthError == nil {
+		t.Fatal("SynthError should be non-nil for missing uri")
 	}
 }
 
-func TestReshapeReadResourceResponse_ConvertsContentsToContent(t *testing.T) {
+func TestProtocolBridge_TransformRequest_CapabilityGate(t *testing.T) {
+	b := NewProtocolBridge()
+	// Cache an initialize that does NOT declare resources.
+	b.CacheInitialize(json.RawMessage(`{"result":{"capabilities":{"tools":{}}}}`))
+
+	raw := json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"__read_resource__","arguments":{"uri":"resource://x"}}}`)
+	var msg map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &msg)
+
+	action := b.TransformRequest(msg)
+	if action.SynthError == nil {
+		t.Fatal("expected capability-gate error when server lacks resources capability")
+	}
+}
+
+func TestReadResourceTool_MapResult_ConvertsContentsToContent(t *testing.T) {
+	synth := readResourceSyntheticTool()
 	in := json.RawMessage(`{"jsonrpc":"2.0","id":3,"result":{"contents":[{"uri":"resource://workflow","mimeType":"text/markdown","text":"hello"},{"uri":"resource://workflow","mimeType":"text/markdown","text":"world"}]}}`)
-	out := reshapeReadResourceResponse(in)
+	out := synth.MapResult(in)
 
 	var parsed struct {
 		Result struct {
@@ -152,32 +191,44 @@ func TestReshapeReadResourceResponse_ConvertsContentsToContent(t *testing.T) {
 	}
 }
 
-func TestReshapeReadResourceResponse_MalformedReturnsUnchanged(t *testing.T) {
+func TestReadResourceTool_MapResult_MalformedReturnsUnchanged(t *testing.T) {
+	synth := readResourceSyntheticTool()
 	in := json.RawMessage(`not json`)
-	out := reshapeReadResourceResponse(in)
+	out := synth.MapResult(in)
 	if string(out) != string(in) {
 		t.Errorf("expected passthrough on parse failure")
 	}
 }
 
-func TestHasResourcesCapability_ReadsCachedInitialize(t *testing.T) {
-	h := &StdioHost{}
-
-	// No cached initialize yet → false.
-	if h.hasResourcesCapability() {
-		t.Error("expected false before initialize is cached")
+func TestHasCapability_ReadsCachedInitialize(t *testing.T) {
+	// Empty cache → false.
+	if hasCapability(nil, "resources") {
+		t.Error("expected false for empty cache")
 	}
-
-	// Cache an initialize response without resources → false.
-	h.initCached = json.RawMessage(`{"result":{"capabilities":{"tools":{}}}}`)
-	if h.hasResourcesCapability() {
+	// Missing capability → false.
+	if hasCapability(json.RawMessage(`{"result":{"capabilities":{"tools":{}}}}`), "resources") {
 		t.Error("expected false when capabilities.resources is absent")
 	}
+	// Present capability → true.
+	if !hasCapability(json.RawMessage(`{"result":{"capabilities":{"resources":{}}}}`), "resources") {
+		t.Error("expected true for empty-object capability declaration")
+	}
+	// Empty capability name → false (defensive).
+	if hasCapability(json.RawMessage(`{"result":{"capabilities":{"resources":{}}}}`), "") {
+		t.Error("expected false for empty capability name")
+	}
+}
 
-	// Cache an initialize response WITH resources → true.
-	h.initCached = json.RawMessage(`{"result":{"capabilities":{"resources":{}}}}`)
-	if !h.hasResourcesCapability() {
-		t.Error("expected true when capabilities.resources is present (even if empty object)")
+func TestSyntheticTools_NamesAreUnique(t *testing.T) {
+	// Defensive: if two registry entries claim the same Name, findSyntheticTool
+	// becomes ambiguous. This test catches accidental duplicates at the
+	// earliest possible point.
+	seen := map[string]bool{}
+	for _, s := range syntheticTools() {
+		if seen[s.Name] {
+			t.Errorf("duplicate synthetic tool Name: %q", s.Name)
+		}
+		seen[s.Name] = true
 	}
 }
 

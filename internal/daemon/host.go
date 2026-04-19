@@ -49,12 +49,12 @@ type StdioHost struct {
 	pendingMu      sync.Mutex
 	pending        map[int64]chan json.RawMessage
 
-	// Initialize-cache: stdio MCP servers expect `initialize` once per process
-	// lifetime, but the host fans out one subprocess to N HTTP clients. The
-	// first client's initialize result is cached and replayed (with each
-	// caller's id substituted) for subsequent initialize requests.
-	initMu     sync.Mutex
-	initCached json.RawMessage // cached initialize response body (with `id` rewritten at send time)
+	// bridge owns the shared initialize cache, capability probe, and
+	// SyntheticTool-driven request/response transforms. Initialize-cache
+	// was previously a pair of fields (initMu, initCached) on StdioHost;
+	// moving them into ProtocolBridge lets HTTPHost reuse the same
+	// machinery without duplication.
+	bridge *ProtocolBridge
 
 	// SSE subscribers: GET /mcp opens a server-sent-events stream that
 	// receives subprocess-originated notifications (JSON-RPC messages with
@@ -74,6 +74,7 @@ func NewStdioHost(cfg HostConfig) (*StdioHost, error) {
 		cfg:         cfg,
 		testStdout:  make(chan []byte, 16),
 		pending:     make(map[int64]chan json.RawMessage),
+		bridge:      NewProtocolBridge(),
 		done:        make(chan struct{}),
 		childExited: make(chan struct{}),
 	}, nil
@@ -308,10 +309,7 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 	// once per process lifetime; on a cache hit we replay the prior response
 	// with the caller's id substituted, without touching the subprocess.
 	if hasID && origMethod == "initialize" {
-		h.initMu.Lock()
-		cached := h.initCached
-		h.initMu.Unlock()
-		if cached != nil {
+		if cached := h.bridge.InitCached(); cached != nil {
 			var respMsg map[string]json.RawMessage
 			_ = json.Unmarshal(cached, &respMsg)
 			respMsg["id"] = origIDRaw
@@ -323,28 +321,17 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Resource-bridge: rewrite __read_resource__ tool calls to resources/read
-	// when the subprocess advertised resources capability during initialize.
-	// readResourceCall stays true so the response path can reshape the body.
-	var readResourceCall bool
-	if hasID && origMethod == "tools/call" {
-		rw := maybeRewriteReadResourceCall(msg)
-		if rw.applied {
-			if !h.hasResourcesCapability() {
-				writeToolCallError(w, origIDRaw, "__read_resource__ is unavailable: subprocess does not expose resources capability")
-				return
-			}
-			if rw.parseError != nil {
-				writeToolCallError(w, origIDRaw, rw.parseError.Error())
-				return
-			}
-			// Unmarshal the rewritten payload back into msg so the downstream
-			// id-rewrite and forwarding path operate on resources/read.
-			if err := json.Unmarshal(rw.payload, &msg); err != nil {
-				writeToolCallError(w, origIDRaw, "internal rewrite failure: "+err.Error())
-				return
-			}
-			readResourceCall = true
+	// Capability bridge: rewrite tools/call targeting a synthetic tool
+	// (__read_resource__ today, __get_prompt__/__list_prompts__ once
+	// Phase 2 lands) into the underlying MCP method. action.Active
+	// stays non-nil through the response path so TransformResponse can
+	// reshape the body.
+	var action BridgeAction
+	if hasID {
+		action = h.bridge.TransformRequest(msg)
+		if action.SynthError != nil {
+			writeToolCallError(w, origIDRaw, action.SynthError.Error())
+			return
 		}
 	}
 
@@ -381,23 +368,18 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 	select {
 	case respBody := <-respCh:
 		// Cache initialize responses so subsequent clients can short-circuit.
-		// Guarded by initMu so the first responder wins; concurrent first-callers
-		// still get a correct answer (they each forwarded once before the cache existed).
+		// First responder wins; concurrent first-callers still get a correct
+		// answer (they each forwarded once before the cache existed).
 		if origMethod == "initialize" {
-			h.initMu.Lock()
-			if h.initCached == nil {
-				h.initCached = append(json.RawMessage(nil), respBody...)
-			}
-			h.initMu.Unlock()
+			h.bridge.CacheInitialize(respBody)
 		}
-		// Resource-bridge response transforms. Reshape takes precedence —
-		// if we rewrote to resources/read, the body shape is already
-		// different and the injection branch does not apply.
-		if readResourceCall {
-			respBody = reshapeReadResourceResponse(respBody)
-		} else if origMethod == "tools/list" && h.hasResourcesCapability() {
-			respBody = injectReadResourceTool(respBody)
-		}
+		// Bridge response transforms. Inside TransformResponse:
+		//   - if action.Active != nil (synthetic tool call), respBody is
+		//     reshaped via Active.MapResult (e.g. resources/read → tools/call)
+		//   - else if origMethod == "tools/list", synthetic tools whose
+		//     capability is declared get injected into result.tools[]
+		//   - otherwise passthrough
+		respBody = h.bridge.TransformResponse(origMethod, action.Active, respBody)
 		// Restore the original id before returning to the HTTP client.
 		var respMsg map[string]json.RawMessage
 		if err := json.Unmarshal(respBody, &respMsg); err != nil {
