@@ -57,6 +57,8 @@ type SyntheticTool struct {
 func syntheticTools() []SyntheticTool {
 	return []SyntheticTool{
 		readResourceSyntheticTool(),
+		listPromptsSyntheticTool(),
+		getPromptSyntheticTool(),
 	}
 }
 
