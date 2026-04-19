@@ -93,18 +93,60 @@ See also: install, logs, restart, status.`,
 				}
 			}
 			if m.Transport == config.TransportNativeHTTP {
-				childArgs = append(childArgs, "--port", fmt.Sprintf("%d", spec.Port))
-				ls := daemon.LaunchSpec{
-					Command: cmdPath,
-					Args:    childArgs,
-					Env:     env,
-					LogPath: logPath,
-				}
-				code, err := daemon.Launch(ls)
+				// Native-http path: upstream subprocess listens on an INTERNAL
+				// port (spec.Port + 10000). mcphub's HTTPHost listens on the
+				// external spec.Port and reverse-proxies to upstream while
+				// applying the ProtocolBridge transforms (inject synthetic
+				// __read_resource__/__list_prompts__/__get_prompt__, rewrite
+				// their calls to the matching native MCP methods). Internal
+				// ports are chosen by a fixed +10000 offset so the mapping is
+				// predictable and stable across restarts.
+				internalPort := spec.Port + 10000
+				childArgs = append(childArgs, "--port", fmt.Sprintf("%d", internalPort))
+				h, err := daemon.NewHTTPHost(daemon.HTTPHostConfig{
+					Command:      cmdPath,
+					Args:         childArgs,
+					Env:          env,
+					UpstreamPort: internalPort,
+					LogPath:      logPath,
+				})
 				if err != nil {
-					return err
+					return fmt.Errorf("NewHTTPHost: %w", err)
 				}
-				os.Exit(code)
+				ctx := cmd.Context()
+				if err := h.Start(ctx); err != nil {
+					return fmt.Errorf("httphost.Start: %w", err)
+				}
+				srv := &http.Server{
+					Addr:              fmt.Sprintf("127.0.0.1:%d", spec.Port),
+					Handler:           h.HTTPHandler(),
+					ReadHeaderTimeout: 10 * time.Second,
+					// WriteTimeout 0: SSE streams are long-lived; handler owns cancellation.
+				}
+				errCh := make(chan error, 1)
+				go func() { errCh <- srv.ListenAndServe() }()
+				select {
+				case err := <-errCh:
+					_ = h.Stop()
+					if errors.Is(err, http.ErrServerClosed) {
+						return nil
+					}
+					return fmt.Errorf("http server: %w", err)
+				case <-ctx.Done():
+					_ = h.Stop()
+					shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					_ = srv.Shutdown(shutdownCtx)
+					return nil
+				case <-h.ChildExited():
+					// Upstream server died. Same recovery policy as stdio-bridge:
+					// return non-zero → Task Scheduler's RestartOnFailure respawns.
+					_ = h.Stop()
+					shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					_ = srv.Shutdown(shutdownCtx)
+					return fmt.Errorf("native-http upstream exited unexpectedly")
+				}
 			} else if m.Transport == config.TransportStdioBridge {
 				// Native Go stdio-host: spawns the inner stdio MCP server as
 				// a subprocess and exposes it on HTTP via the in-process host.
@@ -166,7 +208,6 @@ See also: install, logs, restart, status.`,
 			} else {
 				return fmt.Errorf("unsupported transport %q", m.Transport)
 			}
-			return nil
 		},
 	}
 	c.Flags().StringVar(&server, "server", "", "server name")

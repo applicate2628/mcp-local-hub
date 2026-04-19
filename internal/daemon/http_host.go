@@ -48,6 +48,7 @@ type HTTPHost struct {
 	wg          sync.WaitGroup
 	done        chan struct{}
 	childExited chan struct{}
+	logCloser   io.Closer // non-nil when LogPath was opened; closed by Stop
 }
 
 // HTTPHostConfig describes one native-http-host instance.
@@ -61,6 +62,11 @@ type HTTPHostConfig struct {
 	// HealthTimeout bounds how long Start() waits for the upstream
 	// server to begin accepting connections. Default 30 s.
 	HealthTimeout time.Duration
+	// LogPath, when set, receives subprocess stdout+stderr tee'd into
+	// a rotated log file (same convention as daemon.Launch). When empty,
+	// subprocess output goes only to os.Stderr (the daemon process's own
+	// stderr, typically captured by the scheduler task).
+	LogPath string
 }
 
 // NewHTTPHost validates config and returns a host ready to Start.
@@ -108,11 +114,17 @@ func (h *HTTPHost) Start(ctx context.Context) error {
 		}
 		cmd.Env = env
 	}
-	// Upstream logs to its own stdout/stderr — forward both to our stderr
-	// so operators can see startup issues without polluting any protocol
-	// channel (there is no protocol channel on stdout for native-http).
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
+	// Upstream logs to its own stdout+stderr. There is no protocol
+	// channel on stdout for native-http servers (JSON-RPC is carried by
+	// the HTTP endpoint), so both streams are diagnostic-only.
+	//
+	// When LogPath is set, tee both into the rotated log file AND
+	// os.Stderr — matches daemon.Launch's logging contract for the
+	// pre-HTTPHost native-http path so we don't regress observability.
+	stdoutWriter, stderrWriter, logCloser := h.openLogWriters()
+	cmd.Stdout = stdoutWriter
+	cmd.Stderr = stderrWriter
+	h.logCloser = logCloser
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start upstream subprocess: %w", err)
@@ -181,7 +193,35 @@ func (h *HTTPHost) Stop() error {
 	case <-time.After(5 * time.Second):
 	}
 	h.wg.Wait()
+	if h.logCloser != nil {
+		_ = h.logCloser.Close()
+	}
 	return nil
+}
+
+// openLogWriters returns the stdout and stderr writers to attach to
+// the subprocess, plus an io.Closer for the log file (or nil). When
+// LogPath is unset both writers are os.Stderr. When set, both are a
+// MultiWriter that tees the log file + os.Stderr, using daemon.Launch's
+// rotation convention (10 MB, 5 rotations).
+func (h *HTTPHost) openLogWriters() (stdout, stderr io.Writer, closer io.Closer) {
+	if h.cfg.LogPath == "" {
+		return os.Stderr, os.Stderr, nil
+	}
+	if err := os.MkdirAll(filepath_Dir(h.cfg.LogPath), 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "warn: mkdir log dir: %v\n", err)
+		return os.Stderr, os.Stderr, nil
+	}
+	if err := RotateIfLarge(h.cfg.LogPath, 10*1024*1024, 5); err != nil {
+		fmt.Fprintf(os.Stderr, "warn: rotate log: %v\n", err)
+	}
+	logFile, err := os.OpenFile(h.cfg.LogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warn: open log %q: %v\n", h.cfg.LogPath, err)
+		return os.Stderr, os.Stderr, nil
+	}
+	multi := io.MultiWriter(logFile, os.Stderr)
+	return multi, multi, logFile
 }
 
 // HTTPHandler returns the http.Handler for /mcp.
