@@ -111,10 +111,11 @@ func TestCompileTool_PassesFiltersExecuteParametersAndTools(t *testing.T) {
 		t.Errorf("stdin not forwarded: %+v", execParams)
 	}
 
-	// tools lives at the TOP of the payload, not inside options.
-	tools, ok := gotPayload["tools"].([]any)
+	// tools lives INSIDE options per the official Compiler Explorer
+	// API docs — putting it at top level gets silently dropped.
+	tools, ok := opts["tools"].([]any)
 	if !ok {
-		t.Fatalf("tools not forwarded at top level: payload=%+v", gotPayload)
+		t.Fatalf("tools not forwarded inside options: options=%+v", opts)
 	}
 	if len(tools) != 2 {
 		t.Fatalf("expected 2 tools, got %d: %+v", len(tools), tools)
@@ -268,8 +269,8 @@ func TestCompileCMakeTool_MirrorsCompileToolSurface(t *testing.T) {
 	if execParams["stdin"] != "hello\n" {
 		t.Errorf("executeParameters.stdin not forwarded: %+v", execParams)
 	}
-	tools, ok := gotPayload["tools"].([]any)
+	tools, ok := opts["tools"].([]any)
 	if !ok || len(tools) != 1 {
-		t.Fatalf("tools not forwarded or wrong count: %+v", gotPayload["tools"])
+		t.Fatalf("tools not forwarded inside options or wrong count: %+v", opts["tools"])
 	}
 }

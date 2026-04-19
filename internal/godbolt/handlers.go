@@ -500,18 +500,20 @@ func (gs *GodboltServer) compileTool(ctx context.Context, req *mcp.CallToolReque
 	if len(args.ExecuteParameters) > 0 {
 		options["executeParameters"] = args.ExecuteParameters
 	}
+	if len(args.Tools) > 0 {
+		// tools goes INSIDE options per the official Compiler Explorer API
+		// docs (compiler-explorer/docs/API.md). An earlier version of this
+		// code put it at top-level and was silently ignored — godbolt
+		// dropped unknown top-level fields without error, so tools[] came
+		// back empty in the response even with valid tool ids.
+		options["tools"] = args.Tools
+	}
 	payload := map[string]any{
 		"source":  args.Source,
 		"options": options,
 	}
 	if len(args.Files) > 0 {
 		payload["files"] = args.Files
-	}
-	if len(args.Tools) > 0 {
-		// tools is a top-level payload field in godbolt's API, NOT nested
-		// inside options. Cross-checked against godbolt.org's
-		// /api/compiler/{id}/compile examples.
-		payload["tools"] = args.Tools
 	}
 
 	// Marshal payload to JSON
@@ -596,15 +598,17 @@ func (gs *GodboltServer) compileCMakeTool(ctx context.Context, req *mcp.CallTool
 	if len(args.ExecuteParameters) > 0 {
 		options["executeParameters"] = args.ExecuteParameters
 	}
+	if len(args.Tools) > 0 {
+		// tools goes INSIDE options per the official Compiler Explorer API
+		// docs (compiler-explorer/docs/API.md). Match compile_code placement.
+		options["tools"] = args.Tools
+	}
 	payload := map[string]any{
 		"source":  args.Source,
 		"options": options,
 	}
 	if len(args.Files) > 0 {
 		payload["files"] = args.Files
-	}
-	if len(args.Tools) > 0 {
-		payload["tools"] = args.Tools
 	}
 
 	// Marshal payload to JSON
