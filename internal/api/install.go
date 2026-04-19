@@ -187,10 +187,12 @@ func (a *API) InstallAllFrom(opts InstallAllOpts) []InstallResult {
 }
 
 // installUsingEmbedFirst is the install entry that loads the manifest
-// via loadManifestYAMLEmbedFirst. Preflight is intentionally omitted
-// here — bulk installs may run against manifests whose sibling daemons
-// are already occupying their ports from a prior install, which would
-// otherwise abort the entire batch.
+// via loadManifestYAMLEmbedFirst. Full Preflight is intentionally
+// downgraded for the bulk-install case (ports belonging to a server
+// already installed on this machine would otherwise abort the batch),
+// but the subset of checks that are always relevant — command
+// availability, canonical mcphub, and secret references — still runs
+// so a broken manifest fails fast instead of leaving partial state.
 func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 	w := opts.Writer
 	if w == nil {
@@ -204,6 +206,9 @@ func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 	if err != nil {
 		return err
 	}
+	if err := preflightBulkSubset(m); err != nil {
+		return err
+	}
 	plan, err := BuildPlan(m, opts.DaemonFilter)
 	if err != nil {
 		return err
@@ -214,12 +219,33 @@ func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 	return executeInstallTo(w, m, plan)
 }
 
+// preflightBulkSubset is the subset of Preflight that is always safe
+// to run in --all / bulk install mode: command + canonical mcphub
+// + secret references. Port-in-use checks are skipped because they
+// would reject every server already running on the host.
+func preflightBulkSubset(m *config.ServerManifest) error {
+	if _, err := exec.LookPath(m.Command); err != nil {
+		return fmt.Errorf("command %q not found on PATH: %w", m.Command, err)
+	}
+	canonicalPath, err := canonicalMcphubPath()
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(canonicalPath); err != nil {
+		return fmt.Errorf("%s not present — run `mcphub setup` once: %w", canonicalPath, err)
+	}
+	if _, err := exec.LookPath(mcphubShortName); err != nil {
+		return fmt.Errorf("%s not on PATH — run `mcphub setup`: %w", mcphubShortName, err)
+	}
+	return checkSecretRefs(m.Env)
+}
+
 // installFromManifestDir is Install-like but with an explicit manifestDir
 // override. Used by InstallAllFrom so tests can point at a tempdir without
-// mutating global executable-path state. Preflight is intentionally omitted
-// here — bulk installs may run against manifests whose sibling daemons are
-// already occupying their ports from a prior install, which would otherwise
-// abort the entire batch.
+// mutating global executable-path state. Runs the same preflight subset
+// as installUsingEmbedFirst (command + canonical mcphub + secrets) —
+// port checks are skipped because bulk installs legitimately coexist
+// with already-running sibling daemons.
 func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error {
 	w := opts.Writer
 	if w == nil {
@@ -233,6 +259,9 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 	defer f.Close()
 	m, err := config.ParseManifest(f)
 	if err != nil {
+		return err
+	}
+	if err := preflightBulkSubset(m); err != nil {
 		return err
 	}
 	plan, err := BuildPlan(m, opts.DaemonFilter)
