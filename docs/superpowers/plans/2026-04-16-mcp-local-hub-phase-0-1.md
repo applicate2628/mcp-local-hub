@@ -3488,7 +3488,7 @@ import (
 
 func TestScanCodexConfig_FindsApiKey(t *testing.T) {
 	toml := `[mcp_servers.wolfram.env]
-WOLFRAM_LLM_APP_ID = "ABCDEF123456"
+WOLFRAM_LLM_APP_ID = "EXAMPLE_APP_ID_123"
 `
 	candidates := ScanConfigText(toml)
 	if len(candidates) != 1 {
@@ -3497,8 +3497,8 @@ WOLFRAM_LLM_APP_ID = "ABCDEF123456"
 	if candidates[0].Key != "WOLFRAM_LLM_APP_ID" {
 		t.Errorf("Key = %q, want WOLFRAM_LLM_APP_ID", candidates[0].Key)
 	}
-	if candidates[0].Value != "ABCDEF123456" {
-		t.Errorf("Value = %q, want ABCDEF123456", candidates[0].Value)
+	if candidates[0].Value != "EXAMPLE_APP_ID_123" {
+		t.Errorf("Value = %q, want EXAMPLE_APP_ID_123", candidates[0].Value)
 	}
 }
 
@@ -3534,7 +3534,7 @@ import (
 // approve each import into the vault.
 type Candidate struct {
 	Key   string // e.g., "WOLFRAM_LLM_APP_ID"
-	Value string // e.g., "ABCDEF123456"
+	Value string // e.g., "EXAMPLE_APP_ID_123"
 }
 
 // secretLineRe matches lines that look like `KEY = "VALUE"` (TOML) or `"KEY": "VALUE"` (JSON).

@@ -10,7 +10,7 @@ import (
 // approve each import into the vault.
 type Candidate struct {
 	Key   string // e.g., "WOLFRAM_LLM_APP_ID"
-	Value string // e.g., "ABCDEF123456"
+	Value string // e.g., "EXAMPLE_APP_ID_123"
 }
 
 // secretLineRe matches lines that look like `KEY = "VALUE"` (TOML) or `"KEY": "VALUE"` (JSON).

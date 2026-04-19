@@ -43,7 +43,7 @@
 **Env/secret resolution:**
 
 - memory needs `MEMORY_FILE_PATH=c:/Users/dima_/OneDrive/Documents/env/Agents/memory.jsonl` — literal path, not a secret
-- wolfram needs `WOLFRAM_LLM_APP_ID=ABCDEF123456` — move to secret vault (`wolfram_app_id`)
+- wolfram needs `WOLFRAM_LLM_APP_ID=EXAMPLE_APP_ID_123` — move to secret vault (`wolfram_app_id`)
 - paper-search-mcp needs `PAPER_SEARCH_MCP_UNPAYWALL_EMAIL=user@example.com` — move to vault (`unpaywall_email`)
 - Others have no env
 
@@ -1302,7 +1302,7 @@ git commit -m "feat(servers): add sequential-thinking global daemon (port 9124)"
 - [ ] **Step 1: Move wolfram APP ID to the encrypted vault**
 
 ```bash
-cd d:/dev/mcp-local-hub && ./mcp.exe secrets set wolfram_app_id --value ABCDEF123456
+cd d:/dev/mcp-local-hub && ./mcp.exe secrets set wolfram_app_id --value EXAMPLE_APP_ID_123
 ./mcp.exe secrets list
 ```
 
