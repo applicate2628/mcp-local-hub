@@ -4,13 +4,12 @@ import (
 	"fmt"
 
 	"mcp-local-hub/internal/api"
-	"mcp-local-hub/internal/scheduler"
 
 	"github.com/spf13/cobra"
 )
 
 func newRestartCmdReal() *cobra.Command {
-	var server string
+	var server, daemonFilter string
 	var all bool
 	c := &cobra.Command{
 		Use:   "restart",
@@ -22,9 +21,10 @@ kill-before-rerun ordering that a naive 'schtasks /End + /Run' misses
 port stays bound, next /Run silently fails).
 
 Examples:
-  mcphub restart --server serena    # restart all daemons for one server
-  mcphub restart --all              # restart every mcp-local-hub-* task
-                                    # (skips -weekly-refresh tasks)
+  mcphub restart --server serena                # restart all daemons for one server
+  mcphub restart --server serena --daemon codex # just one daemon
+  mcphub restart --all                          # restart every mcp-local-hub-* task
+                                                # (skips -weekly-refresh tasks)
 
 When to use:
   - After rebuilding the mcphub binary — pick up the new embedded code
@@ -34,60 +34,41 @@ When to use:
 
 See also: stop, status, scheduler upgrade, setup.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if all {
-				if server != "" {
-					return fmt.Errorf("--all is mutually exclusive with --server")
-				}
-				a := api.NewAPI()
-				results, err := a.RestartAll()
-				if err != nil {
-					return err
-				}
-				for _, r := range results {
-					if r.Err != "" {
-						fmt.Fprintf(cmd.OutOrStderr(), "✗ %s: %s\n", r.TaskName, r.Err)
-					} else {
-						fmt.Fprintf(cmd.OutOrStdout(), "✓ Restarted %s\n", r.TaskName)
-					}
-				}
-				return nil
-			}
-			// existing --server path
-			sch, err := scheduler.New()
-			if err != nil {
-				return err
-			}
-			prefix := "mcp-local-hub-"
-			if server != "" {
-				prefix = "mcp-local-hub-" + server
-			}
-			if !all && server == "" {
+			a := api.NewAPI()
+			var (
+				results []api.RestartResult
+				err     error
+			)
+			switch {
+			case all && server != "":
+				return fmt.Errorf("--all is mutually exclusive with --server")
+			case all:
+				results, err = a.RestartAll()
+			case server != "":
+				results, err = a.Restart(server, daemonFilter)
+			default:
 				return cmd.Help()
 			}
-			tasks, err := sch.List(prefix)
 			if err != nil {
 				return err
 			}
-			for _, t := range tasks {
-				// Skip weekly-refresh tasks when scope is --all (they trigger themselves).
-				if all && (containsSuffix(t.Name, "-weekly-refresh")) {
-					continue
+			anyFail := false
+			for _, r := range results {
+				if r.Err != "" {
+					anyFail = true
+					fmt.Fprintf(cmd.OutOrStderr(), "✗ %s: %s\n", r.TaskName, r.Err)
+				} else {
+					fmt.Fprintf(cmd.OutOrStdout(), "✓ Restarted %s\n", r.TaskName)
 				}
-				_ = sch.Stop(t.Name)
-				if err := sch.Run(t.Name); err != nil {
-					cmd.Printf("⚠ run %s: %v\n", t.Name, err)
-					continue
-				}
-				cmd.Printf("✓ Restarted %s\n", t.Name)
+			}
+			if anyFail {
+				return fmt.Errorf("one or more daemons failed to restart")
 			}
 			return nil
 		},
 	}
 	c.Flags().StringVar(&server, "server", "", "restart only daemons for this server")
+	c.Flags().StringVar(&daemonFilter, "daemon", "", "daemon name within the server manifest")
 	c.Flags().BoolVar(&all, "all", false, "restart all mcp-local-hub daemons")
 	return c
-}
-
-func containsSuffix(s, suffix string) bool {
-	return len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix
 }

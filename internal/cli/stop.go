@@ -53,10 +53,22 @@ See also: restart, uninstall, status.`,
 				return fmt.Errorf("--server or --all is required")
 			}
 			a := api.NewAPI()
-			if err := a.Stop(server, daemonFilter); err != nil {
+			results, err := a.Stop(server, daemonFilter)
+			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "✓ Stopped %s\n", server)
+			anyFail := false
+			for _, r := range results {
+				if r.Err != "" {
+					anyFail = true
+					fmt.Fprintf(cmd.OutOrStderr(), "✗ %s: %s\n", r.TaskName, r.Err)
+				} else {
+					fmt.Fprintf(cmd.OutOrStdout(), "✓ Stopped %s\n", r.TaskName)
+				}
+			}
+			if anyFail {
+				return fmt.Errorf("one or more daemons failed to stop")
+			}
 			return nil
 		},
 	}

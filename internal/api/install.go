@@ -581,17 +581,23 @@ func clientConfigPath(name string) (string, error) {
 }
 
 // Stop stops a running daemon without removing its scheduler task or client
-// entries. Equivalent to `schtasks /End /TN <name>` for each task matching
-// the server (+ daemon filter if set).
-func (a *API) Stop(server, daemonFilter string) error {
+// entries. For each matching task it kills the daemon process by port
+// FIRST (schtasks /End only terminates the task's launch action; the
+// spawned daemon process keeps the port bound until killed) and then
+// calls sch.Stop to clean up the scheduler state. Returns a per-task
+// result set so callers can surface partial failures without bailing
+// after the first row.
+func (a *API) Stop(server, daemonFilter string) ([]RestartResult, error) {
 	sch, err := scheduler.New()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	tasks, err := sch.List("mcp-local-hub-" + server + "-")
 	if err != nil {
-		return err
+		return nil, err
 	}
+	ports := manifestPortMap("")
+	var results []RestartResult
 	for _, t := range tasks {
 		if daemonFilter != "" {
 			wantSuffix := "-" + daemonFilter
@@ -599,11 +605,69 @@ func (a *API) Stop(server, daemonFilter string) error {
 				continue
 			}
 		}
-		if err := sch.Stop(t.Name); err != nil {
-			return fmt.Errorf("stop %s: %w", t.Name, err)
+		if strings.Contains(t.Name, "weekly-refresh") {
+			continue // schedule-only task, nothing to kill
 		}
+		srv, dmn := parseTaskName(t.Name)
+		port := ports[srv][dmn]
+		if port == 0 {
+			port = ports[srv]["default"]
+		}
+		if port != 0 {
+			if err := killDaemonByPort(port, 5*time.Second); err != nil {
+				results = append(results, RestartResult{TaskName: t.Name, Err: "kill daemon: " + err.Error()})
+				continue
+			}
+		}
+		_ = sch.Stop(t.Name)
+		results = append(results, RestartResult{TaskName: t.Name})
 	}
-	return nil
+	return results, nil
+}
+
+// Restart kills the live daemons for one server (+ optional daemon
+// filter) by port and re-runs their scheduler tasks. The --server
+// counterpart of RestartAll: same semantics, narrower scope.
+func (a *API) Restart(server, daemonFilter string) ([]RestartResult, error) {
+	sch, err := scheduler.New()
+	if err != nil {
+		return nil, err
+	}
+	tasks, err := sch.List("mcp-local-hub-" + server + "-")
+	if err != nil {
+		return nil, err
+	}
+	ports := manifestPortMap("")
+	var results []RestartResult
+	for _, t := range tasks {
+		if daemonFilter != "" {
+			wantSuffix := "-" + daemonFilter
+			if !strings.HasSuffix(strings.TrimPrefix(t.Name, "\\"), wantSuffix) {
+				continue
+			}
+		}
+		if strings.Contains(t.Name, "weekly-refresh") {
+			continue
+		}
+		srv, dmn := parseTaskName(t.Name)
+		port := ports[srv][dmn]
+		if port == 0 {
+			port = ports[srv]["default"]
+		}
+		if port != 0 {
+			if err := killDaemonByPort(port, 5*time.Second); err != nil {
+				results = append(results, RestartResult{TaskName: t.Name, Err: "kill daemon: " + err.Error()})
+				continue
+			}
+		}
+		_ = sch.Stop(t.Name)
+		if err := sch.Run(t.Name); err != nil {
+			results = append(results, RestartResult{TaskName: t.Name, Err: err.Error()})
+			continue
+		}
+		results = append(results, RestartResult{TaskName: t.Name})
+	}
+	return results, nil
 }
 
 // RestartResult is one row in a RestartAll report.
