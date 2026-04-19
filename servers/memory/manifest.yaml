@@ -5,8 +5,11 @@ command: npx
 base_args:
   - "-y"
   - "@modelcontextprotocol/server-memory"
+# MEMORY_FILE_PATH defaults to a per-user location under the home dir.
+# Override at install time by exporting the env var (or by editing this
+# manifest before install) if you keep memory data elsewhere.
 env:
-  MEMORY_FILE_PATH: "c:/Users/dima_/OneDrive/Documents/env/Agents/memory.jsonl"
+  MEMORY_FILE_PATH: "${HOME}/.local/share/mcp-memory/memory.jsonl"
 
 daemons:
   - name: default

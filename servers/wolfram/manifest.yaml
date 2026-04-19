@@ -1,9 +1,12 @@
 name: wolfram
 kind: global
 transport: stdio-bridge
+# wolframalpha-llm-mcp is a third-party Node-based server. Clone it into
+# ${HOME}/.local/mcp-servers/wolframalpha-llm-mcp and build with
+# `npm install && npm run build` before installing this manifest.
 command: node
 base_args:
-  - "C:/Users/dima_/.local/mcp-servers/wolframalpha-llm-mcp/build/index.js"
+  - "${HOME}/.local/mcp-servers/wolframalpha-llm-mcp/build/index.js"
 env:
   WOLFRAM_LLM_APP_ID: "secret:wolfram_app_id"
 
