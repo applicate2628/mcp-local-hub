@@ -4,11 +4,43 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
 	"mcp-local-hub/internal/config"
 )
+
+// validManifestName bounds acceptable server names to lower-case
+// letters, digits, dot, underscore, hyphen. Any other character would
+// either (a) change how defaultManifestDir's filepath.Join resolves —
+// ".." escapes the parent, absolute paths ignore the root, leading
+// slashes change the meaning — or (b) collide with OS-specific path
+// semantics (colon-drive on Windows, control chars). Restricting the
+// charset means we never need to revalidate the joined path, which
+// eliminates the class of bugs where name parsing and path resolution
+// disagree.
+var validManifestName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+
+// checkManifestName rejects names that could escape the manifest
+// directory via path traversal, contain absolute-path semantics, or
+// land on reserved Windows filenames. Returns a descriptive error so
+// the CLI/API surface the reason rather than a generic "bad name".
+func checkManifestName(name string) error {
+	if name == "" {
+		return fmt.Errorf("manifest name: must be non-empty")
+	}
+	if !validManifestName.MatchString(name) {
+		return fmt.Errorf("manifest name %q: must match [a-z0-9][a-z0-9._-]* (lowercase ASCII, digits, '.', '_', '-', and must not start with '.' or '-')", name)
+	}
+	// Reject any name that resolves to '.' or '..' after clean. The
+	// regex already blocks '..' literally, but Clean catches chained
+	// forms like '.../..' that a future looser regex might miss.
+	if clean := filepath.Clean(name); clean != name || clean == "." || clean == ".." {
+		return fmt.Errorf("manifest name %q: resolves to non-canonical path %q", name, clean)
+	}
+	return nil
+}
 
 // ManifestList returns the sorted list of server names that have a
 // manifest, unioning the embed FS (shipped with the binary, source of
@@ -49,6 +81,9 @@ func (a *API) ManifestListIn(dir string) ([]string, error) {
 // reading from the embed FS first (production) with disk fallback for
 // dev flow. See listManifestNamesEmbedFirst for the rationale.
 func (a *API) ManifestGet(name string) (string, error) {
+	if err := checkManifestName(name); err != nil {
+		return "", err
+	}
 	data, err := loadManifestYAMLEmbedFirst(name)
 	if err != nil {
 		return "", err
@@ -75,6 +110,9 @@ func (a *API) ManifestCreate(name, yaml string) error {
 
 // ManifestCreateIn is the tempdir-capable form of ManifestCreate.
 func (a *API) ManifestCreateIn(dir, name, yaml string) error {
+	if err := checkManifestName(name); err != nil {
+		return err
+	}
 	target := filepath.Join(dir, name, "manifest.yaml")
 	if _, err := os.Stat(target); err == nil {
 		return fmt.Errorf("manifest %q already exists at %s; use edit instead", name, target)
@@ -96,6 +134,9 @@ func (a *API) ManifestEdit(name, yaml string) error {
 
 // ManifestEditIn is the tempdir-capable form of ManifestEdit.
 func (a *API) ManifestEditIn(dir, name, yaml string) error {
+	if err := checkManifestName(name); err != nil {
+		return err
+	}
 	target := filepath.Join(dir, name, "manifest.yaml")
 	if _, err := os.Stat(target); err != nil {
 		return fmt.Errorf("manifest %q does not exist; use create instead", name)
@@ -139,8 +180,21 @@ func (a *API) ManifestDelete(name string) error {
 }
 
 // ManifestDeleteIn is the tempdir-capable form of ManifestDelete.
+//
+// The regex-guarded name lets us use filepath.Join safely: validManifestName
+// cannot contain separators, so the resulting target is always a direct
+// child of dir. We still compare Dir(target) to Clean(dir) as a defense in
+// depth in case some future edit relaxes the guard or introduces a new
+// separator quirk.
 func (a *API) ManifestDeleteIn(dir, name string) error {
+	if err := checkManifestName(name); err != nil {
+		return err
+	}
 	target := filepath.Join(dir, name)
+	cleanDir := filepath.Clean(dir)
+	if parent := filepath.Dir(target); parent != cleanDir {
+		return fmt.Errorf("manifest delete: resolved path %q escapes manifest dir %q", target, cleanDir)
+	}
 	if _, err := os.Stat(target); err != nil {
 		return fmt.Errorf("manifest %q does not exist", name)
 	}

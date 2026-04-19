@@ -67,3 +67,45 @@ func TestManifestDeleteRemovesDir(t *testing.T) {
 		t.Error("manifest dir not removed")
 	}
 }
+
+// TestManifestCRUD_RejectsPathTraversalNames guards the regression
+// where an attacker-controlled (or typo'd) name like "..",
+// "../escaped", or an absolute path could escape the manifest root —
+// for ManifestDeleteIn that would have meant os.RemoveAll on an
+// arbitrary directory. The name validator rejects anything outside
+// [a-z0-9][a-z0-9._-]*.
+func TestManifestCRUD_RejectsPathTraversalNames(t *testing.T) {
+	a := NewAPI()
+	tmp := t.TempDir()
+
+	cases := []string{
+		"..",
+		"../escaped",
+		"../../etc",
+		"/abs/path",
+		`\abs\path`,
+		"name/with/slash",
+		"name\\with\\bs",
+		"CapitalLetters",
+		".leading-dot",
+		"-leading-dash",
+		"",
+		" space",
+		"name with spaces",
+	}
+
+	for _, bad := range cases {
+		if err := a.ManifestDeleteIn(tmp, bad); err == nil {
+			t.Errorf("ManifestDeleteIn(_, %q): expected rejection, got nil", bad)
+		}
+		if err := a.ManifestCreateIn(tmp, bad, "name: x\nkind: global\ntransport: stdio-bridge\ncommand: x\ndaemons: [{name: default, port: 9999}]\n"); err == nil {
+			t.Errorf("ManifestCreateIn(_, %q): expected rejection, got nil", bad)
+		}
+		if err := a.ManifestEditIn(tmp, bad, "name: x\nkind: global\ntransport: stdio-bridge\ncommand: x\n"); err == nil {
+			t.Errorf("ManifestEditIn(_, %q): expected rejection, got nil", bad)
+		}
+		if _, err := a.ManifestGet(bad); err == nil {
+			t.Errorf("ManifestGet(%q): expected rejection, got nil", bad)
+		}
+	}
+}
