@@ -76,12 +76,17 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				}
 				a := api.NewAPI()
 				results := a.InstallAll(dryRun, cmd.OutOrStdout())
+				failed := 0
 				for _, r := range results {
 					if r.Err != nil {
+						failed++
 						fmt.Fprintf(cmd.OutOrStderr(), "\u2717 %s: %v\n", r.Server, r.Err)
 					} else {
 						fmt.Fprintf(cmd.OutOrStdout(), "\u2713 %s\n", r.Server)
 					}
+				}
+				if failed > 0 {
+					return fmt.Errorf("%d of %d install(s) failed", failed, len(results))
 				}
 				return nil
 			}

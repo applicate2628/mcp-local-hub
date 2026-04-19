@@ -63,7 +63,16 @@ See also: scan, install, rollback.`,
 			if jsonOut {
 				enc := json.NewEncoder(cmd.OutOrStdout())
 				enc.SetIndent("", "  ")
-				return enc.Encode(report)
+				if err := enc.Encode(report); err != nil {
+					return err
+				}
+				if len(report.Failed) > 0 {
+					// JSON consumers parse Failed[] directly, but exit code
+					// must still signal failure so CI scripts don't treat
+					// partial-success output as success.
+					return fmt.Errorf("%d migration row(s) failed", len(report.Failed))
+				}
+				return nil
 			}
 			for _, app := range report.Applied {
 				fmt.Fprintf(cmd.OutOrStdout(), "✓ %s/%s → %s\n", app.Server, app.Client, app.URL)
@@ -73,6 +82,9 @@ See also: scan, install, rollback.`,
 			}
 			if dryRun {
 				fmt.Fprintln(cmd.OutOrStdout(), "\n(dry-run — no files modified)")
+			}
+			if len(report.Failed) > 0 {
+				return fmt.Errorf("%d migration row(s) failed", len(report.Failed))
 			}
 			return nil
 		},
