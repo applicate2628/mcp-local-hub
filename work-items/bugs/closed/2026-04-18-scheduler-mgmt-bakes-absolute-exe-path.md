@@ -5,7 +5,7 @@ found-by: backend-engineer
 found-in-phase: PATH-based resolution implementation (adjacent finding)
 affected-surface: internal/api/scheduler_mgmt.go:71, internal/api/scheduler_mgmt.go:110
 context: adjacent-finding
-status: open
+status: closed
 ---
 
 ## Summary

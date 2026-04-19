@@ -5,7 +5,7 @@ found-by: backend-engineer
 found-in-phase: godbolt perf-expansion Task 4 (resource://popularArguments)
 affected-surface: internal/godbolt/handlers.go:extractPathParam (~line 388 after Task 4 changes)
 context: adjacent-finding
-status: open
+status: closed
 ---
 
 ## Summary

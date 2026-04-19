@@ -30,10 +30,14 @@
 
 ```bash
 cd <repo-root>
-go build -o mcphub.exe ./cmd/mcphub
+bash build.sh   # Git Bash / WSL / Linux / macOS
+# or, on Windows native:
+pwsh ./build.ps1
 ```
 
-On success: `mcphub.exe` appears in the repo root (~12 MB, includes Windows version resource metadata).
+Both scripts embed the current git commit, the build date, and a Windows version resource into the binary (see `mcphub.exe version`). A plain `go build -o mcphub.exe ./cmd/mcphub` also works for dev iteration but leaves version metadata as `dev/unknown`.
+
+On success: `bin/mcphub.exe` appears (~15 MB, includes Windows version resource metadata).
 
 ## Setup (canonical install)
 
@@ -175,7 +179,13 @@ Start-Sleep 3
 Start-Process "$env:LOCALAPPDATA\Programs\Antigravity\Antigravity.exe"
 ```
 
-The relay binary path is absolute (points at `mcphub.exe` in the repo root). If you move the binary, re-run `mcphub install --server serena` to update the path.
+The relay binary path is the canonical `~/.local/bin/mcphub.exe` that `mcphub setup` installs. Moving, rebuilding, or upgrading the binary only requires re-running `mcphub setup` — scheduler tasks and Antigravity client entries keep pointing at the same deterministic path.
+
+## Manifest resolution model
+
+Shipped manifests live under `servers/<name>/manifest.yaml` in the source tree and are embedded into `mcphub.exe` at build time via `//go:embed`. The canonical installed binary at `~/.local/bin/mcphub.exe` resolves manifests from its embedded FS first; CLI commands (`manifest list`, `install`, `scan`, `migrate`, `status`, `relay`) all see the same 10 shipped servers regardless of the invocation's cwd. Dev flow: a newly-added `servers/<name>/manifest.yaml` that has not yet been compiled into the binary is still picked up from disk via a secondary lookup under `defaultManifestDir()` — useful for editing a manifest and immediately testing with `./bin/mcphub.exe manifest get <name>` without a full build cycle.
+
+Write operations (`manifest create` / `edit` / `delete`) still write to disk only — the embedded FS is immutable at runtime.
 
 ## Per-server notes (beyond serena)
 
@@ -183,12 +193,13 @@ Phase 2 added 6 global daemons. Each has its own manifest in `servers/<name>/man
 
 ### memory (port 9123)
 
-Runs `npx -y @modelcontextprotocol/server-memory`. Stores data in
-`MEMORY_FILE_PATH` (default set to `c:/Users/dima_/OneDrive/Documents/env/Agents/memory.jsonl`
-in the manifest — update for your system before install). This is the
-critical daemon — previously each client spawned its own memory server,
-causing concurrent writes to the same JSONL file (data race). The
-shared daemon serializes all writes through one subprocess.
+Runs `npx -y @modelcontextprotocol/server-memory`. Stores data at
+`${HOME}/.local/share/mcp-memory/memory.jsonl` by default. Override the
+`MEMORY_FILE_PATH` env var in the manifest (or export it in the shell
+that launches `mcphub install`) to relocate. This is the critical
+daemon — previously each client spawned its own memory server, causing
+concurrent writes to the same JSONL file (data race). The shared
+daemon serializes all writes through one subprocess.
 
 ### sequential-thinking (port 9124)
 
@@ -197,8 +208,15 @@ reasoning helper. No env needed.
 
 ### wolfram (port 9125)
 
-Runs `node C:/Users/dima_/.local/mcp-servers/wolframalpha-llm-mcp/build/index.js`.
-Requires the Wolfram LLM MCP server installed separately at that path.
+Runs `node ${HOME}/.local/mcp-servers/wolframalpha-llm-mcp/build/index.js`.
+Clone the Wolfram LLM MCP server into that location and build it:
+```bash
+mkdir -p ~/.local/mcp-servers
+git clone https://github.com/SecretiveShell/MCP-wolfram-alpha.git \
+    ~/.local/mcp-servers/wolframalpha-llm-mcp
+cd ~/.local/mcp-servers/wolframalpha-llm-mcp
+npm install && npm run build
+```
 `WOLFRAM_LLM_APP_ID` is stored in the encrypted vault:
 
 ```bash
@@ -295,11 +313,15 @@ Runs `npx -y @mcpcentral/mcp-time`. Trivial, stateless.
 
 ### gdb (port 9129)
 
-Runs `uv run --directory C:/Users/dima_/.local/mcp-servers/GDB-MCP python server.py`.
+Runs `uv run --directory ${HOME}/.local/mcp-servers/GDB-MCP python server.py`.
 Multi-debugger MCP server (gdb + lldb submodules) with built-in session
 management — one daemon serves N concurrent debug sessions identified
-by `session_id`. Requires the GDB-MCP project installed at that path and
-`uv` on PATH.
+by `session_id`. Clone the project at that path:
+```bash
+git clone https://github.com/pansila/GDB-MCP.git \
+    ~/.local/mcp-servers/GDB-MCP
+```
+Requires `uv` on PATH.
 
 ### lldb (port 9130)
 

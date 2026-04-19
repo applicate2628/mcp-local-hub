@@ -5,7 +5,7 @@ found-by: qa-engineer
 found-in-phase: Phase 3A.3 / Task 5 — scheduler upgrade review
 affected-surface: internal/api/status_enrich.go:45 (consumed by internal/api/scheduler_mgmt.go:43 and internal/api/status_enrich.go:24)
 context: docs/superpowers/plans/2026-04-17-phase-3a3-management-cli.md (Task 5, lines 1290-1476)
-status: open
+status: closed
 ---
 
 ## Reproduction
