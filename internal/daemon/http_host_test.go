@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -223,30 +224,83 @@ func TestHTTPHost_SSE_InjectsAndReshapes(t *testing.T) {
 	}
 }
 
-func TestHTTPHost_InitializeCached_ShortCircuits(t *testing.T) {
+// TestHTTPHost_InitializeForwardsAndPreservesSessionID verifies that
+// EVERY initialize reaches upstream (no cache-based short-circuit) and
+// that upstream's Mcp-Session-Id header is copied to the client's
+// response. Caching + replaying initialize in HTTPHost would strip the
+// session-id, breaking every subsequent POST/GET from the client.
+//
+// This is the regression guard for a real bug caught in empirical
+// testing (Phase 5): the old implementation short-circuited and
+// returned "Bad Request: Missing session ID" on the second client call.
+func TestHTTPHost_InitializeForwardsAndPreservesSessionID(t *testing.T) {
 	upstream := newMockUpstream(t, "json")
 	defer upstream.Close()
 	h := newHTTPHostAgainstMock(t, upstream)
 	ts := httptest.NewServer(h.HTTPHandler())
 	defer ts.Close()
 
-	body1 := post(t, ts.URL, "application/json",
-		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}`)
-	firstUpstream := upstream.LastBody()
-
-	// Second initialize with different id — must be cached (upstream.lastBody unchanged).
-	body2 := post(t, ts.URL, "application/json",
-		`{"jsonrpc":"2.0","id":99,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}`)
-	if string(upstream.LastBody()) != string(firstUpstream) {
-		t.Error("second initialize reached upstream — cache did not short-circuit")
+	// Client uses net/http directly so we can inspect response headers.
+	doInit := func(id int) (body []byte, sessionID string) {
+		body = post(t, ts.URL, "application/json",
+			`{"jsonrpc":"2.0","id":`+strconv.Itoa(id)+`,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}`)
+		// Re-issue to capture headers (post() discards them).
+		req, _ := http.NewRequest("POST", ts.URL+"/mcp", strings.NewReader(
+			`{"jsonrpc":"2.0","id":`+strconv.Itoa(id+100)+`,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("POST: %v", err)
+		}
+		defer resp.Body.Close()
+		return body, resp.Header.Get("Mcp-Session-Id")
 	}
 
-	// Both bodies have different id values substituted correctly.
+	body1, sid1 := doInit(1)
+	upstream1 := append([]byte(nil), upstream.LastBody()...)
+	body2, sid2 := doInit(2)
+	upstream2 := upstream.LastBody()
+
+	// Every initialize must reach upstream (both upstream bodies must be set).
+	if len(upstream1) == 0 || len(upstream2) == 0 {
+		t.Fatalf("upstream did not see both initializes: u1=%q u2=%q", upstream1, upstream2)
+	}
+	// mock writes the same Mcp-Session-Id ("mock-session") for every
+	// response. What we're guarding is that the proxy COPIED that header
+	// to the client — not that each session is distinct.
+	if sid1 != "mock-session" || sid2 != "mock-session" {
+		t.Errorf("Mcp-Session-Id not propagated: sid1=%q sid2=%q", sid1, sid2)
+	}
+	// And the response bodies must have the client-sent ids (1 and 2).
 	var r1, r2 map[string]any
 	_ = json.Unmarshal(body1, &r1)
 	_ = json.Unmarshal(body2, &r2)
-	if r1["id"].(float64) != 1 || r2["id"].(float64) != 99 {
-		t.Errorf("id substitution wrong: r1.id=%v r2.id=%v", r1["id"], r2["id"])
+	if r1["id"].(float64) != 1 || r2["id"].(float64) != 2 {
+		t.Errorf("id not preserved on forwarded initialize: r1.id=%v r2.id=%v", r1["id"], r2["id"])
+	}
+}
+
+// TestHTTPHost_InitializeCapabilitiesCachedForInjection verifies that
+// even though initialize itself is NOT short-circuited, the response
+// capabilities ARE cached — so the next tools/list correctly decides
+// whether to inject synthetic tools.
+func TestHTTPHost_InitializeCapabilitiesCachedForInjection(t *testing.T) {
+	upstream := newMockUpstream(t, "json")
+	defer upstream.Close()
+	h := newHTTPHostAgainstMock(t, upstream)
+	ts := httptest.NewServer(h.HTTPHandler())
+	defer ts.Close()
+
+	// initialize: upstream advertises resources capability.
+	post(t, ts.URL, "application/json",
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}`)
+
+	// tools/list: should inject __read_resource__ because the bridge
+	// cached capabilities.resources from initialize.
+	body := post(t, ts.URL, "application/json", `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
+	if !strings.Contains(string(body), "__read_resource__") {
+		t.Errorf("capability cache not populated — tools/list did not get __read_resource__: %s", body)
 	}
 }
 

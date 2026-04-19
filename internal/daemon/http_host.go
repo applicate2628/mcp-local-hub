@@ -263,18 +263,19 @@ func (h *HTTPHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(m, &origMethod)
 	}
 
-	// Initialize-cache short-circuit. Responds in the client's preferred
-	// content-type (application/json or text/event-stream).
-	if hasID && origMethod == "initialize" {
-		if cached := h.bridge.InitCached(); cached != nil {
-			var respMsg map[string]json.RawMessage
-			_ = json.Unmarshal(cached, &respMsg)
-			respMsg["id"] = origIDRaw
-			out, _ := json.Marshal(respMsg)
-			writeInAcceptedFormat(w, r, out)
-			return
-		}
-	}
+	// NOTE on initialize caching: unlike StdioHost (whose subprocess
+	// expects exactly one initialize per process lifetime), the native-http
+	// upstream creates a separate session per initialize and returns a
+	// distinct Mcp-Session-Id header. Replaying a cached body would (1)
+	// strip upstream's session-id header from the response, breaking every
+	// subsequent POST/GET the client issues, and (2) hide per-client state
+	// that the upstream server expects to manage itself. Therefore HTTPHost
+	// does NOT short-circuit initialize — every initialize is forwarded to
+	// upstream so the upstream creates and returns a fresh session. The
+	// bridge still CacheInitialize()s the first successful response so the
+	// capability probe (hasCapability) has a stable answer for tools/list
+	// injection, but the cached body is used for capability inspection
+	// only, never replayed as a response.
 
 	// Synthetic-tool request rewrite (shared with StdioHost).
 	var action BridgeAction
@@ -457,25 +458,3 @@ func copyHeadersForUpstream(dst, src http.Header) {
 	}
 }
 
-// writeInAcceptedFormat writes a JSON-RPC response body either as raw
-// JSON or wrapped in a single SSE message frame, based on the client's
-// Accept header. Used for initialize-cache short-circuits where we
-// must produce the response without consulting upstream.
-func writeInAcceptedFormat(w http.ResponseWriter, r *http.Request, body []byte) {
-	accept := r.Header.Get("Accept")
-	// Prefer text/event-stream only when the client accepts SSE but
-	// does NOT also accept plain JSON — that's the MCP-spec convention
-	// for "I can only parse SSE frames".
-	if strings.Contains(accept, "text/event-stream") && !strings.Contains(accept, "application/json") {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprintf(w, "event: message\ndata: %s\n\n", body)
-		if flusher, ok := w.(http.Flusher); ok {
-			flusher.Flush()
-		}
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(body)
-}
