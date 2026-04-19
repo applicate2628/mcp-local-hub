@@ -411,6 +411,12 @@ claude mcp add --transport http context7 https://mcp.context7.com/mcp
 
 Backups are named `<config>.bak-mcp-local-hub-YYYYMMDD-HHMMSS` and live next to each client config. Uninstall does NOT delete them — keep as long as you want or clean up manually.
 
+### Install-time atomicity
+
+`install --server X` applies its side effects in order: create scheduler tasks → backup each client config → add the MCP entry → kick off the scheduler task. If any step after the first fails, the installer compensates in reverse: scheduler tasks it just created are deleted, and MCP entries it just added are removed (backups are preserved untouched so you can restore them manually via `rollback` if you need to undo an earlier install of a DIFFERENT server).
+
+This is best-effort atomicity: two concurrent `install` invocations can still step on each other, and a crash between compensating ops leaves partial state. For a deterministic recovery from such a state, run `uninstall --server X` then `install --server X` again.
+
 `uninstall` does not kill already-running Serena Python processes (Task Scheduler deletes the task metadata, not live children). If a daemon is still bound to 9121/9122 after uninstall:
 ```powershell
 Stop-Process -Name python -Force -ErrorAction SilentlyContinue

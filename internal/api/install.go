@@ -486,6 +486,19 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan) error {
 	if err != nil {
 		return err
 	}
+
+	// Rollback stack: accumulate compensating operations as side effects
+	// are applied. On mid-sequence failure, pop and run them in reverse
+	// so a failed install does not leave the system in a half-configured
+	// state (scheduler tasks for a server whose client entries were never
+	// written, or vice-versa).
+	var rollback []func()
+	runRollback := func() {
+		for i := len(rollback) - 1; i >= 0; i-- {
+			rollback[i]()
+		}
+	}
+
 	// 1. Create scheduler tasks.
 	for _, t := range p.SchedulerTasks {
 		spec := scheduler.TaskSpec{
@@ -504,8 +517,14 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan) error {
 		// Delete any previous instance so Create is idempotent.
 		_ = sch.Delete(spec.Name)
 		if err := sch.Create(spec); err != nil {
+			runRollback()
 			return fmt.Errorf("create task %s: %w", spec.Name, err)
 		}
+		taskName := spec.Name
+		rollback = append(rollback, func() {
+			_ = sch.Delete(taskName)
+			fmt.Fprintf(w, "  rollback: deleted scheduler task %s\n", taskName)
+		})
 		fmt.Fprintf(w, "\u2713 Scheduler task created: %s\n", spec.Name)
 	}
 	// 2. Backup + update client configs.
@@ -519,6 +538,7 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan) error {
 	for _, u := range p.ClientUpdates {
 		client := allClients[u.Client]
 		if client == nil {
+			runRollback()
 			return fmt.Errorf("unknown client %q in binding", u.Client)
 		}
 		if !client.Exists() {
@@ -527,6 +547,7 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan) error {
 		}
 		bak, err := client.Backup()
 		if err != nil {
+			runRollback()
 			return fmt.Errorf("backup %s: %w", u.Client, err)
 		}
 		fmt.Fprintf(w, "  backup: %s\n", bak)
@@ -538,8 +559,19 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan) error {
 			RelayExePath: mcphubShortName,
 		}
 		if err := client.AddEntry(entry); err != nil {
+			runRollback()
 			return fmt.Errorf("add entry to %s: %w", u.Client, err)
 		}
+		// Compensating op: remove the entry we just added. We don't
+		// restore the backup file wholesale because a concurrent install
+		// of a different server would lose its added entry; RemoveEntry
+		// is surgical and matches our Plan's scope (this server's name).
+		clientRef := client
+		entryName := m.Name
+		rollback = append(rollback, func() {
+			_ = clientRef.RemoveEntry(entryName)
+			fmt.Fprintf(w, "  rollback: removed %s entry from %s\n", entryName, u.Client)
+		})
 		fmt.Fprintf(w, "\u2713 %s \u2192 %s\n", u.Client, u.URL)
 	}
 	// 3. Start daemons immediately (without waiting for next logon).
