@@ -819,7 +819,17 @@ func (gs *GodboltServer) invokeCompile(ctx context.Context, url string, payload 
 // to the MCP client as a stray HTML 404 page or JSON error body that
 // downstream code would treat as the real resource.
 func (gs *GodboltServer) fetchResource(url string) ([]byte, error) {
-	resp, err := gs.httpClient.Get(url)
+	// Accept: application/json is required for /api/languages, /api/compilers,
+	// /api/libraries, /api/formats, /api/popularArguments — without it godbolt
+	// returns a plain-text table that json.Unmarshal later rejects with "invalid
+	// character 'I' looking for beginning of value". The /api/asm and /api/version
+	// endpoints always return text/plain regardless; they don't care about Accept.
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := gs.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("call godbolt: %w", err)
 	}
