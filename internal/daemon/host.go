@@ -297,26 +297,54 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 
 	origIDRaw, hasID := msg["id"]
 
+	// Snapshot the original method once. Used by the initialize cache,
+	// the __read_resource__ rewrite, and the post-response injection hook.
+	var origMethod string
+	if m, ok := msg["method"]; ok {
+		_ = json.Unmarshal(m, &origMethod)
+	}
+
 	// Initialize-cache short-circuit. Stdio MCP servers expect `initialize`
 	// once per process lifetime; on a cache hit we replay the prior response
 	// with the caller's id substituted, without touching the subprocess.
-	if methodRaw, ok := msg["method"]; ok && hasID {
-		var method string
-		_ = json.Unmarshal(methodRaw, &method)
-		if method == "initialize" {
-			h.initMu.Lock()
-			cached := h.initCached
-			h.initMu.Unlock()
-			if cached != nil {
-				var respMsg map[string]json.RawMessage
-				_ = json.Unmarshal(cached, &respMsg)
-				respMsg["id"] = origIDRaw
-				out, _ := json.Marshal(respMsg)
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write(out)
+	if hasID && origMethod == "initialize" {
+		h.initMu.Lock()
+		cached := h.initCached
+		h.initMu.Unlock()
+		if cached != nil {
+			var respMsg map[string]json.RawMessage
+			_ = json.Unmarshal(cached, &respMsg)
+			respMsg["id"] = origIDRaw
+			out, _ := json.Marshal(respMsg)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(out)
+			return
+		}
+	}
+
+	// Resource-bridge: rewrite __read_resource__ tool calls to resources/read
+	// when the subprocess advertised resources capability during initialize.
+	// readResourceCall stays true so the response path can reshape the body.
+	var readResourceCall bool
+	if hasID && origMethod == "tools/call" {
+		rw := maybeRewriteReadResourceCall(msg)
+		if rw.applied {
+			if !h.hasResourcesCapability() {
+				writeToolCallError(w, origIDRaw, "__read_resource__ is unavailable: subprocess does not expose resources capability")
 				return
 			}
+			if rw.parseError != nil {
+				writeToolCallError(w, origIDRaw, rw.parseError.Error())
+				return
+			}
+			// Unmarshal the rewritten payload back into msg so the downstream
+			// id-rewrite and forwarding path operate on resources/read.
+			if err := json.Unmarshal(rw.payload, &msg); err != nil {
+				writeToolCallError(w, origIDRaw, "internal rewrite failure: "+err.Error())
+				return
+			}
+			readResourceCall = true
 		}
 	}
 
@@ -355,16 +383,20 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 		// Cache initialize responses so subsequent clients can short-circuit.
 		// Guarded by initMu so the first responder wins; concurrent first-callers
 		// still get a correct answer (they each forwarded once before the cache existed).
-		if methodRaw, ok := msg["method"]; ok {
-			var method string
-			_ = json.Unmarshal(methodRaw, &method)
-			if method == "initialize" {
-				h.initMu.Lock()
-				if h.initCached == nil {
-					h.initCached = append(json.RawMessage(nil), respBody...)
-				}
-				h.initMu.Unlock()
+		if origMethod == "initialize" {
+			h.initMu.Lock()
+			if h.initCached == nil {
+				h.initCached = append(json.RawMessage(nil), respBody...)
 			}
+			h.initMu.Unlock()
+		}
+		// Resource-bridge response transforms. Reshape takes precedence —
+		// if we rewrote to resources/read, the body shape is already
+		// different and the injection branch does not apply.
+		if readResourceCall {
+			respBody = reshapeReadResourceResponse(respBody)
+		} else if origMethod == "tools/list" && h.hasResourcesCapability() {
+			respBody = injectReadResourceTool(respBody)
 		}
 		// Restore the original id before returning to the HTTP client.
 		var respMsg map[string]json.RawMessage
