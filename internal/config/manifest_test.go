@@ -160,3 +160,113 @@ command: echo
 		t.Fatal("expected error for invalid kind, got nil")
 	}
 }
+
+func TestParseManifest_WorkspaceScopedSchema(t *testing.T) {
+	yaml := `
+name: mcp-language-server
+kind: workspace-scoped
+transport: stdio-bridge
+command: mcp-language-server
+port_pool:
+  start: 9200
+  end: 9299
+languages:
+  - name: python
+    backend: mcp-language-server
+    transport: stdio
+    lsp_command: pyright-langserver
+    extra_flags: ["--stdio"]
+  - name: go
+    backend: gopls-mcp
+    transport: stdio
+    lsp_command: gopls
+    extra_flags: ["mcp"]
+weekly_refresh: false
+`
+	m, err := ParseManifest(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v", err)
+	}
+	if m.Kind != KindWorkspaceScoped {
+		t.Errorf("Kind = %q, want workspace-scoped", m.Kind)
+	}
+	if m.PortPool == nil || m.PortPool.Start != 9200 || m.PortPool.End != 9299 {
+		t.Errorf("PortPool = %+v, want {9200,9299}", m.PortPool)
+	}
+	if len(m.Languages) != 2 {
+		t.Fatalf("len(Languages) = %d, want 2", len(m.Languages))
+	}
+	if m.Languages[0].Backend != "mcp-language-server" {
+		t.Errorf("Languages[0].Backend = %q", m.Languages[0].Backend)
+	}
+	if m.Languages[1].Backend != "gopls-mcp" {
+		t.Errorf("Languages[1].Backend = %q", m.Languages[1].Backend)
+	}
+	if m.Languages[0].Transport != "stdio" {
+		t.Errorf("Languages[0].Transport = %q, want stdio", m.Languages[0].Transport)
+	}
+}
+
+func TestParseManifest_LanguageTransportDefault(t *testing.T) {
+	// transport omitted -> defaults to "stdio"
+	yaml := `
+name: mcp-language-server
+kind: workspace-scoped
+transport: stdio-bridge
+command: mcp-language-server
+port_pool: {start: 9200, end: 9299}
+languages:
+  - name: python
+    backend: mcp-language-server
+    lsp_command: pyright-langserver
+`
+	m, err := ParseManifest(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v", err)
+	}
+	if m.Languages[0].Transport != "stdio" {
+		t.Errorf("Transport default = %q, want stdio", m.Languages[0].Transport)
+	}
+}
+
+func TestParseManifest_LanguageTransportEnum(t *testing.T) {
+	yaml := `
+name: mcp-language-server
+kind: workspace-scoped
+transport: stdio-bridge
+command: mcp-language-server
+port_pool: {start: 9200, end: 9299}
+languages:
+  - name: python
+    backend: mcp-language-server
+    transport: something-unknown
+    lsp_command: pyright-langserver
+`
+	_, err := ParseManifest(strings.NewReader(yaml))
+	if err == nil {
+		t.Fatal("expected error for unknown transport value")
+	}
+	if !strings.Contains(err.Error(), "transport") {
+		t.Errorf("error should mention transport: %v", err)
+	}
+}
+
+func TestParseManifest_WorkspaceScopedRejectsMissingPortPool(t *testing.T) {
+	yaml := `
+name: mcp-language-server
+kind: workspace-scoped
+transport: stdio-bridge
+command: mcp-language-server
+languages:
+  - name: python
+    backend: mcp-language-server
+    lsp_command: pyright-langserver
+`
+	_, err := ParseManifest(strings.NewReader(yaml))
+	if err == nil {
+		t.Fatal("expected error for workspace-scoped manifest without port_pool")
+	}
+	if !strings.Contains(err.Error(), "port_pool") {
+		t.Errorf("error should mention port_pool: %v", err)
+	}
+}

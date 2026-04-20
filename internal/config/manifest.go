@@ -28,6 +28,15 @@ const (
 // (subprocess --port flag at runtime) — share a single source of truth.
 const NativeHTTPInternalPortOffset = 10000
 
+// Valid LanguageSpec.Transport values. Kept in manifest alongside language so
+// the launcher can dispatch on per-language transport without re-probing the
+// upstream binary.
+const (
+	LanguageTransportStdio      = "stdio"       // v1 default: subprocess stdin/stdout wrapped by daemon.NewStdioHost
+	LanguageTransportHTTPListen = "http_listen" // reserved (gopls -listen variant)
+	LanguageTransportNativeHTTP = "native_http" // reserved
+)
+
 // ServerManifest is the parsed form of a `servers/<name>/manifest.yaml` file.
 type ServerManifest struct {
 	Name             string            `yaml:"name"`
@@ -54,6 +63,8 @@ type DaemonSpec struct {
 
 type LanguageSpec struct {
 	Name       string   `yaml:"name"`
+	Backend    string   `yaml:"backend"`   // "mcp-language-server" or "gopls-mcp"
+	Transport  string   `yaml:"transport"` // "stdio" (default) | "http_listen" | "native_http"
 	LspCommand string   `yaml:"lsp_command"`
 	ExtraFlags []string `yaml:"extra_flags"`
 }
@@ -151,6 +162,36 @@ func (m *ServerManifest) Validate() error {
 	}
 	if m.Command == "" {
 		return fmt.Errorf("manifest %s: command is required", m.Name)
+	}
+	if m.Kind == KindWorkspaceScoped {
+		if m.PortPool == nil {
+			return fmt.Errorf("manifest %s: port_pool is required for kind=workspace-scoped", m.Name)
+		}
+		if m.PortPool.Start <= 0 || m.PortPool.End < m.PortPool.Start {
+			return fmt.Errorf("manifest %s: port_pool must have start>0 and end>=start (got {%d,%d})", m.Name, m.PortPool.Start, m.PortPool.End)
+		}
+		if len(m.Languages) == 0 {
+			return fmt.Errorf("manifest %s: languages[] must be non-empty for kind=workspace-scoped", m.Name)
+		}
+		for i := range m.Languages {
+			l := &m.Languages[i]
+			if l.Name == "" {
+				return fmt.Errorf("manifest %s: languages[%d].name is required", m.Name, i)
+			}
+			if l.Backend != "mcp-language-server" && l.Backend != "gopls-mcp" {
+				return fmt.Errorf("manifest %s: languages[%d].backend must be \"mcp-language-server\" or \"gopls-mcp\" (got %q)", m.Name, i, l.Backend)
+			}
+			if l.Transport == "" {
+				l.Transport = LanguageTransportStdio
+			}
+			if l.Transport != LanguageTransportStdio && l.Transport != LanguageTransportHTTPListen && l.Transport != LanguageTransportNativeHTTP {
+				return fmt.Errorf("manifest %s: languages[%d].transport must be %q | %q | %q (got %q)", m.Name, i,
+					LanguageTransportStdio, LanguageTransportHTTPListen, LanguageTransportNativeHTTP, l.Transport)
+			}
+			if l.LspCommand == "" {
+				return fmt.Errorf("manifest %s: languages[%d].lsp_command is required", m.Name, i)
+			}
+		}
 	}
 	return nil
 }
