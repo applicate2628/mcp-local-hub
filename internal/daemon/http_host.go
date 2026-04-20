@@ -151,7 +151,11 @@ func (h *HTTPHost) Start(ctx context.Context) error {
 	}()
 
 	if err := h.waitForReady(ctx); err != nil {
-		_ = cmd.Process.Kill()
+		// Tree-kill: wrappers like uvx/npx spawn the actual server as
+		// a child and a plain cmd.Process.Kill leaves that child
+		// holding the port. killProcessTree uses taskkill /F /T on
+		// Windows so the whole subtree is gone.
+		_ = killProcessTree(cmd.Process.Pid)
 		return fmt.Errorf("upstream not ready: %w", err)
 	}
 	return nil
@@ -198,7 +202,7 @@ func (h *HTTPHost) Stop() error {
 	h.stopped = true
 	close(h.done)
 	if h.cmd != nil && h.cmd.Process != nil {
-		_ = h.cmd.Process.Kill()
+		_ = killProcessTree(h.cmd.Process.Pid)
 	}
 	select {
 	case <-h.childExited:
