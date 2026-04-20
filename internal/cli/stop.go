@@ -40,12 +40,17 @@ See also: restart, uninstall, status.`,
 				if err != nil {
 					return err
 				}
+				anyFail := false
 				for _, r := range results {
 					if r.Err != "" {
+						anyFail = true
 						fmt.Fprintf(cmd.OutOrStderr(), "✗ %s: %s\n", r.TaskName, r.Err)
 					} else {
 						fmt.Fprintf(cmd.OutOrStdout(), "✓ Stopped %s\n", r.TaskName)
 					}
+				}
+				if anyFail {
+					return fmt.Errorf("one or more daemons failed to stop")
 				}
 				return nil
 			}

@@ -204,6 +204,46 @@ func (w *windowsScheduler) Delete(name string) error {
 	return nil
 }
 
+// ExportXML dumps the full Task Scheduler XML for a task via
+// `schtasks /Query /XML`. Returns a "not found" error (captured as
+// ErrTaskNotFound so callers can distinguish a missing task from other
+// failures) when the task does not exist.
+func (w *windowsScheduler) ExportXML(name string) ([]byte, error) {
+	cmd := exec.Command("schtasks", "/Query", "/TN", name, "/XML")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "cannot find") || strings.Contains(string(out), "does not exist") {
+			return nil, ErrTaskNotFound
+		}
+		return nil, fmt.Errorf("schtasks /Query: %w: %s", err, string(out))
+	}
+	return out, nil
+}
+
+// ImportXML re-creates a task from raw Task Scheduler XML via
+// `schtasks /Create /XML`. Used by install's rollback path to restore
+// a task that was deleted in preparation for a re-install that then
+// failed mid-sequence. Idempotent: if the task already exists, /F
+// overwrites it.
+func (w *windowsScheduler) ImportXML(name string, xml []byte) error {
+	tmp, err := os.CreateTemp("", "mcp-task-restore-*.xml")
+	if err != nil {
+		return fmt.Errorf("create temp: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(xml); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write xml: %w", err)
+	}
+	tmp.Close()
+	cmd := exec.Command("schtasks", "/Create", "/TN", name, "/XML", tmp.Name(), "/F")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("schtasks /Create /XML: %w: %s", err, string(out))
+	}
+	return nil
+}
+
 func (w *windowsScheduler) Run(name string) error {
 	cmd := exec.Command("schtasks", "/Run", "/TN", name)
 	out, err := cmd.CombinedOutput()

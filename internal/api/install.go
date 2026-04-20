@@ -591,15 +591,31 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan) error {
 		} else if t.Trigger == "Weekly Sun 03:00" {
 			spec.WeeklyTrigger = &scheduler.WeeklyTrigger{DayOfWeek: 0, HourLocal: 3, MinuteLocal: 0}
 		}
-		// Delete any previous instance so Create is idempotent.
+		// Snapshot any existing task before replacing it so rollback can
+		// put it back. Prior to this, Delete-before-Create made install
+		// idempotent but a mid-sequence failure left the user with
+		// NOTHING — the old task was gone and the new one never got
+		// created. ExportXML gives us the full Task Scheduler XML of
+		// whatever was there; rollback feeds it to ImportXML to restore.
+		var priorXML []byte
+		if xml, err := sch.ExportXML(spec.Name); err == nil {
+			priorXML = xml
+		}
 		_ = sch.Delete(spec.Name)
 		if err := sch.Create(spec); err != nil {
 			runRollback()
 			return fmt.Errorf("create task %s: %w", spec.Name, err)
 		}
 		taskName := spec.Name
+		savedXML := priorXML // capture for closure
 		rollback = append(rollback, func() {
 			_ = sch.Delete(taskName)
+			if len(savedXML) > 0 {
+				if err := sch.ImportXML(taskName, savedXML); err == nil {
+					fmt.Fprintf(w, "  rollback: restored prior scheduler task %s\n", taskName)
+					return
+				}
+			}
 			fmt.Fprintf(w, "  rollback: deleted scheduler task %s\n", taskName)
 		})
 		fmt.Fprintf(w, "\u2713 Scheduler task created: %s\n", spec.Name)

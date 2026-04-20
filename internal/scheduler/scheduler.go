@@ -1,5 +1,7 @@
 package scheduler
 
+import "errors"
+
 // TaskSpec describes a scheduled task the hub wants the OS to manage.
 // Scheduler backends translate this into Windows Task Scheduler, systemd user units,
 // or launchd agents.
@@ -48,6 +50,12 @@ type TaskStatus struct {
 	NextRun    string // human-readable, backend-specific
 }
 
+// ErrTaskNotFound is returned by ExportXML and other lookup APIs when
+// the named task does not exist. Separate sentinel so callers can
+// distinguish absent-but-expected tasks from schtasks communication
+// failures.
+var ErrTaskNotFound = errors.New("scheduler: task not found")
+
 // Scheduler is the OS-abstracted interface for managing mcp-local-hub daemon tasks.
 // Implementations live in scheduler_<os>.go files selected by build tags.
 type Scheduler interface {
@@ -69,6 +77,18 @@ type Scheduler interface {
 
 	// List returns all tasks whose Name starts with prefix (e.g., "mcp-local-hub-").
 	List(prefix string) ([]TaskStatus, error)
+
+	// ExportXML returns the raw Task Scheduler XML for a task by name.
+	// Used by install's rollback path to snapshot an existing task before
+	// replacing it, so a failed mid-sequence install can restore the
+	// prior task instead of leaving nothing. Platforms without native
+	// equivalents (Linux, macOS) return an error; callers guard on that
+	// and treat the case as "no prior spec to preserve".
+	ExportXML(name string) ([]byte, error)
+
+	// ImportXML re-creates a task from raw Task Scheduler XML. Counterpart
+	// of ExportXML; used for rollback restoration.
+	ImportXML(name string, xml []byte) error
 }
 
 // New returns the platform-appropriate Scheduler implementation for the current OS.

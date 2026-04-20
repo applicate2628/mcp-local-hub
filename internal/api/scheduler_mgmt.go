@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -60,15 +61,27 @@ func (a *API) SchedulerUpgrade() ([]SchedulerUpgradeResult, error) {
 		}
 		_ = m // referenced for future expansion (env, triggers)
 
+		// Snapshot the existing XML so a failed create can restore the
+		// prior task instead of leaving the user with nothing.
+		var priorXML []byte
+		if xml, err := sch.ExportXML(t.Name); err == nil {
+			priorXML = xml
+		}
 		if err := sch.Delete(t.Name); err != nil {
 			results = append(results, SchedulerUpgradeResult{TaskName: t.Name, Err: fmt.Sprintf("delete: %v", err)})
 			continue
 		}
+		// Anchor WorkingDir at the canonical install dir. The install
+		// flow (executeInstallTo) does the same — scheduler upgrade
+		// rewrites Command + Args + WorkingDir together so tasks built
+		// by a throwaway 'mcphub install' in %TEMP' don't keep pointing
+		// at a deleted cwd after the upgrade.
 		spec := scheduler.TaskSpec{
 			Name:             t.Name,
 			Description:      "mcp-local-hub: " + m.Name,
 			Command:          canonicalPath,
 			Args:             args,
+			WorkingDir:       filepath.Dir(canonicalPath),
 			RestartOnFailure: dmn != "weekly-refresh",
 		}
 		if dmn == "weekly-refresh" {
@@ -77,6 +90,10 @@ func (a *API) SchedulerUpgrade() ([]SchedulerUpgradeResult, error) {
 			spec.LogonTrigger = true
 		}
 		if err := sch.Create(spec); err != nil {
+			// Restore prior task on failure; don't leave user with nothing.
+			if len(priorXML) > 0 {
+				_ = sch.ImportXML(t.Name, priorXML)
+			}
 			results = append(results, SchedulerUpgradeResult{TaskName: t.Name, Err: fmt.Sprintf("create: %v", err)})
 			continue
 		}

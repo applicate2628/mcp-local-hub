@@ -42,12 +42,17 @@ func newSchedulerUpgradeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			anyFail := false
 			for _, r := range results {
 				if r.Err != "" {
+					anyFail = true
 					fmt.Fprintf(cmd.OutOrStderr(), "✗ %s: %s\n", r.TaskName, r.Err)
 				} else {
 					fmt.Fprintf(cmd.OutOrStdout(), "✓ Upgraded %s → %s\n", r.TaskName, r.NewCmd)
 				}
+			}
+			if anyFail {
+				return fmt.Errorf("one or more scheduler tasks failed to upgrade")
 			}
 			return nil
 		},
