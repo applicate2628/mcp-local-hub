@@ -219,6 +219,127 @@ func init() {
 		}
 		return pid, ram, uptime, true
 	}
+
+	// Batch variant: one netstat + one wmic for N ports.
+	lookupProcessBatch = func(ports []int) map[int]struct {
+		PID       int
+		RAMBytes  uint64
+		UptimeSec int64
+	} {
+		result := make(map[int]struct {
+			PID       int
+			RAMBytes  uint64
+			UptimeSec int64
+		}, len(ports))
+		if len(ports) == 0 {
+			return result
+		}
+
+		// Step 1: one netstat -ano → build port→pid map.
+		out, err := exec.Command("netstat", "-ano").Output()
+		if err != nil {
+			return result
+		}
+		wantPort := make(map[int]bool, len(ports))
+		for _, p := range ports {
+			wantPort[p] = true
+		}
+		portToPID := make(map[int]int, len(ports))
+		pidSet := make(map[int]bool, len(ports))
+		for line := range strings.SplitSeq(string(out), "\n") {
+			if !strings.Contains(line, "LISTENING") {
+				continue
+			}
+			fields := strings.Fields(line)
+			if len(fields) < 2 {
+				continue
+			}
+			// Local-addr field format: "127.0.0.1:<port>" or "[::]:<port>".
+			addr := fields[1]
+			idx := strings.LastIndex(addr, ":")
+			if idx < 0 {
+				continue
+			}
+			port, err := strconv.Atoi(addr[idx+1:])
+			if err != nil || !wantPort[port] {
+				continue
+			}
+			pid, _ := strconv.Atoi(fields[len(fields)-1])
+			if pid == 0 {
+				continue
+			}
+			if _, already := portToPID[port]; !already {
+				portToPID[port] = pid
+				pidSet[pid] = true
+			}
+		}
+		if len(pidSet) == 0 {
+			return result
+		}
+
+		// Step 2: one wmic call filtered to exactly the PIDs we care
+		// about. `WHERE (ProcessId=A or ProcessId=B …)` — avoids the
+		// per-pid loop the old code did.
+		var wmicWhere strings.Builder
+		first := true
+		for pid := range pidSet {
+			if !first {
+				wmicWhere.WriteString(" or ")
+			}
+			first = false
+			fmt.Fprintf(&wmicWhere, "ProcessId=%d", pid)
+		}
+		out2, err := exec.Command("wmic", "process", "where",
+			wmicWhere.String(),
+			"get", "ProcessId,WorkingSetSize,CreationDate", "/format:csv").Output()
+		if err != nil {
+			// Fall back to PIDs without RAM/uptime — still useful.
+			for port, pid := range portToPID {
+				result[port] = struct {
+					PID       int
+					RAMBytes  uint64
+					UptimeSec int64
+				}{PID: pid}
+			}
+			return result
+		}
+		type procInfo struct {
+			ram     uint64
+			created time.Time
+		}
+		pidInfo := make(map[int]procInfo, len(pidSet))
+		for _, line := range strings.Split(string(out2), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "Node,") {
+				continue
+			}
+			fields := splitCSVLine(line)
+			// Node,CreationDate,ProcessId,WorkingSetSize
+			if len(fields) < 4 {
+				continue
+			}
+			pid, _ := strconv.Atoi(strings.TrimSpace(fields[2]))
+			if pid == 0 {
+				continue
+			}
+			ram, _ := strconv.ParseUint(strings.TrimSpace(fields[3]), 10, 64)
+			created := parseWmicDate(strings.TrimSpace(fields[1]))
+			pidInfo[pid] = procInfo{ram: ram, created: created}
+		}
+		for port, pid := range portToPID {
+			info := pidInfo[pid]
+			var uptime int64
+			if !info.created.IsZero() {
+				uptime = int64(time.Since(info.created).Seconds())
+			}
+			result[port] = struct {
+				PID       int
+				RAMBytes  uint64
+				UptimeSec int64
+			}{PID: pid, RAMBytes: info.ram, UptimeSec: uptime}
+		}
+		return result
+	}
 }
 
 // parseWmicDate parses wmic's CIM_DATETIME format: YYYYMMDDHHMMSS.mmmmmm+ZZZ.
