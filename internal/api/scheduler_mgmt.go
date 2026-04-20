@@ -42,6 +42,15 @@ func (a *API) SchedulerUpgrade() ([]SchedulerUpgradeResult, error) {
 	var results []SchedulerUpgradeResult
 	for _, t := range tasks {
 		srv, dmn := parseTaskName(t.Name)
+		// Hub-wide weekly-refresh ("mcp-local-hub-weekly-refresh") parses
+		// as ("", "weekly-refresh") — no per-server manifest to re-read,
+		// no Command rewrite needed (it already points at canonical mcphub
+		// and runs `restart --all`). Leave it untouched; the scheduler
+		// upgrade flow is specifically about per-server daemon tasks
+		// getting their Command rewired after the binary moves.
+		if srv == "" && dmn == "weekly-refresh" {
+			continue
+		}
 		if srv == "" {
 			results = append(results, SchedulerUpgradeResult{TaskName: t.Name, Err: "unparseable task name"})
 			continue

@@ -143,13 +143,22 @@ func parseTaskName(task string) (string, string) {
 		return "", ""
 	}
 	rest := name[len(prefix):]
-	// Weekly-refresh daemons are registered with the two-word daemon name
-	// "weekly-refresh" (internal/api/install.go — "mcp-local-hub-<server>-
-	// weekly-refresh"). A plain LastIndex('-') split would cut between
-	// "weekly" and "refresh" and mis-attribute "serena-weekly"/"refresh"
-	// instead of the intended "serena"/"weekly-refresh". Check the suffix
-	// first so the hyphen-bearing daemon is restored before falling back
-	// to the single-segment split used by every other daemon.
+	// Hub-wide weekly-refresh (created by scheduler_mgmt.WeeklyRefreshSet)
+	// is just "mcp-local-hub-weekly-refresh" — no per-server prefix. The
+	// generic -weekly-refresh branch below would treat the whole string
+	// as <server=weekly-refresh, daemon=""> which is wrong. Short-circuit
+	// on exact match.
+	if rest == "weekly-refresh" {
+		return "", "weekly-refresh"
+	}
+	// Per-server weekly-refresh daemons are registered with the
+	// two-word daemon name "weekly-refresh" (install.go —
+	// "mcp-local-hub-<server>-weekly-refresh"). A plain LastIndex('-')
+	// split would cut between "weekly" and "refresh" and mis-attribute
+	// "serena-weekly"/"refresh" instead of the intended
+	// "serena"/"weekly-refresh". Check the suffix first so the
+	// hyphen-bearing daemon is restored before falling back to the
+	// single-segment split used by every other daemon.
 	const weeklySuffix = "-weekly-refresh"
 	if strings.HasSuffix(rest, weeklySuffix) {
 		return rest[:len(rest)-len(weeklySuffix)], "weekly-refresh"

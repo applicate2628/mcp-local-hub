@@ -50,6 +50,13 @@ func TestParseTaskName(t *testing.T) {
 		{`mcp-local-hub-memory-default`, "memory", "default"}, // no leading backslash
 		{`\mcp-local-hub-bareword`, "bareword", ""},
 		{`\some-other-task`, "", ""}, // foreign prefix → empty
+		// Hub-wide weekly-refresh task (from WeeklyRefreshSet) has no
+		// per-server prefix. Must parse to (server="", daemon="weekly-refresh").
+		// Without the exact-match short-circuit, the -weekly-refresh suffix
+		// rule would attribute it to server="weekly-refresh", daemon=""
+		// which is wrong — it's a hub-wide job, not a per-server daemon.
+		{`\mcp-local-hub-weekly-refresh`, "", "weekly-refresh"},
+		{`mcp-local-hub-weekly-refresh`, "", "weekly-refresh"},
 	}
 	for _, tc := range cases {
 		gotSrv, gotDaemon := parseTaskName(tc.in)

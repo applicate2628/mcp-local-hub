@@ -638,6 +638,14 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan) error {
 			fmt.Fprintf(w, "\u26a0 Client %s not installed on this machine \u2014 skipping\n", u.Client)
 			continue
 		}
+		// Snapshot the prior entry BEFORE backing up the file or adding
+		// the new one. This is the piece that makes rollback atomic on
+		// reinstall/replace: if the install fails downstream and the
+		// entry already existed with a different URL or relay config,
+		// we AddEntry(prior) to restore — instead of RemoveEntry, which
+		// would leave the client with no entry at all.
+		priorEntry, _ := client.GetEntry(m.Name)
+
 		bak, err := client.Backup()
 		if err != nil {
 			runRollback()
@@ -655,13 +663,22 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan) error {
 			runRollback()
 			return fmt.Errorf("add entry to %s: %w", u.Client, err)
 		}
-		// Compensating op: remove the entry we just added. We don't
-		// restore the backup file wholesale because a concurrent install
-		// of a different server would lose its added entry; RemoveEntry
-		// is surgical and matches our Plan's scope (this server's name).
+		// Compensating op: restore the PRIOR entry (if any) or remove
+		// the entry we just added (if this was a first-time install).
+		// Wholesale-restoring the backup file is still avoided — a
+		// concurrent install of a different server would lose its entry
+		// if we did that. Entry-level capture+restore keeps the rollback
+		// surgical while preserving the full prior state of THIS server.
 		clientRef := client
 		entryName := m.Name
+		savedPrior := priorEntry
 		rollback = append(rollback, func() {
+			if savedPrior != nil {
+				if err := clientRef.AddEntry(*savedPrior); err == nil {
+					fmt.Fprintf(w, "  rollback: restored prior %s entry in %s\n", entryName, u.Client)
+					return
+				}
+			}
 			_ = clientRef.RemoveEntry(entryName)
 			fmt.Fprintf(w, "  rollback: removed %s entry from %s\n", entryName, u.Client)
 		})

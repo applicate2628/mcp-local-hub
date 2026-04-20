@@ -151,11 +151,14 @@ func (h *HTTPHost) Start(ctx context.Context) error {
 	}()
 
 	if err := h.waitForReady(ctx); err != nil {
-		// Tree-kill: wrappers like uvx/npx spawn the actual server as
-		// a child and a plain cmd.Process.Kill leaves that child
-		// holding the port. killProcessTree uses taskkill /F /T on
-		// Windows so the whole subtree is gone.
-		_ = killProcessTree(cmd.Process.Pid)
+		// Full lifecycle cleanup: tree-kill the child, mark stopped,
+		// wait for the watcher to observe exit, close the log file,
+		// drain the waitgroup. Previously this path only killed the
+		// process tree — leaving h.done open, the watcher goroutine
+		// orphaned, and the logCloser unflushed. stopLocked is shared
+		// with Stop() so the readiness-fail and normal-shutdown
+		// branches end in the same state.
+		_ = h.stopLocked()
 		return fmt.Errorf("upstream not ready: %w", err)
 	}
 	return nil
@@ -196,6 +199,19 @@ func (h *HTTPHost) ChildExited() <-chan struct{} { return h.childExited }
 func (h *HTTPHost) Stop() error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	return h.stopLocked()
+}
+
+// stopLocked is the shared teardown path used by Stop() and by Start()'s
+// readiness-fail branch. Assumes the caller already holds h.mu. Runs
+// the full lifecycle cleanup (close done, tree-kill child, wait for
+// childExited + wg, close log) so every callsite ends in the same
+// resource-free state. Previously the readiness-fail branch only
+// tree-killed and left h.done open, h.logFile unclosed, and the
+// childExited watcher dangling — any subsequent Stop() silently
+// returned nil because h.started was already true but setup was
+// incomplete.
+func (h *HTTPHost) stopLocked() error {
 	if !h.started || h.stopped {
 		return nil
 	}
