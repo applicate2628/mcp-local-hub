@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -83,11 +84,22 @@ func ParseManifest(r io.Reader) (*ServerManifest, error) {
 	if err := dec.Decode(&m); err != nil {
 		return nil, fmt.Errorf("yaml decode: %w", err)
 	}
+	var missing []string
 	for i, a := range m.BaseArgs {
-		m.BaseArgs[i] = expandEnvCrossPlatform(a)
+		expanded, miss := expandEnvCrossPlatform(a)
+		m.BaseArgs[i] = expanded
+		missing = append(missing, miss...)
 	}
 	for k, v := range m.Env {
-		m.Env[k] = expandEnvCrossPlatform(v)
+		expanded, miss := expandEnvCrossPlatform(v)
+		m.Env[k] = expanded
+		for _, name := range miss {
+			missing = append(missing, k+":"+name)
+		}
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("manifest references unresolved environment variable(s): %s (set them before invoking mcphub, or remove the ${...} reference from the manifest)",
+			strings.Join(missing, ", "))
 	}
 	if err := m.Validate(); err != nil {
 		return nil, err
@@ -96,22 +108,34 @@ func ParseManifest(r io.Reader) (*ServerManifest, error) {
 }
 
 // expandEnvCrossPlatform expands $VAR and ${VAR} tokens against the host
-// environment, with one cross-platform niceness: when ${HOME} is referenced
-// on Windows (where HOME is typically unset), fall back to USERPROFILE so
-// the same manifest works under both bash and cmd.exe / PowerShell.
-func expandEnvCrossPlatform(s string) string {
-	return os.Expand(s, func(name string) string {
+// environment. Returns the expanded string plus a list of variable
+// names that were referenced but not set — callers can decide whether
+// to treat empty expansion as an error or accept the empty value.
+//
+// Cross-platform niceness: ${HOME} on Windows (where HOME is typically
+// unset) falls back to USERPROFILE, and vice-versa, so the same
+// manifest works under bash, cmd.exe, and PowerShell without dual
+// templating. Both unset → the name is reported as missing.
+func expandEnvCrossPlatform(s string) (string, []string) {
+	var missing []string
+	expanded := os.Expand(s, func(name string) string {
 		if v := os.Getenv(name); v != "" {
 			return v
 		}
 		if name == "HOME" {
-			return os.Getenv("USERPROFILE")
+			if v := os.Getenv("USERPROFILE"); v != "" {
+				return v
+			}
 		}
 		if name == "USERPROFILE" {
-			return os.Getenv("HOME")
+			if v := os.Getenv("HOME"); v != "" {
+				return v
+			}
 		}
+		missing = append(missing, name)
 		return ""
 	})
+	return expanded, missing
 }
 
 // Validate checks required fields and enum values. Called automatically by ParseManifest.

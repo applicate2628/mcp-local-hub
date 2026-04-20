@@ -217,17 +217,45 @@ func newSecretsEditCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			tmp, err := os.CreateTemp("", "mcp-secrets-*.yaml")
+			// Temp file lives INSIDE the user-private UserDataDir
+			// (%LOCALAPPDATA%\mcp-local-hub on Windows, $XDG_DATA_HOME
+			// or ~/.local/share/mcp-local-hub on Unix). The old
+			// implementation used os.CreateTemp("", ...) which picks
+			// the system-global temp — /tmp on Unix (world-readable
+			// in some distros) or %TEMP% on Windows (typically
+			// user-private but shared across apps). Moving the file
+			// into the app's own data dir keeps it on the same ACL
+			// boundary as secrets.age itself.
+			editDir := secrets.UserDataDir()
+			if err := os.MkdirAll(editDir, 0o700); err != nil {
+				return fmt.Errorf("create edit dir: %w", err)
+			}
+			tmp, err := os.CreateTemp(editDir, "mcp-secrets-*.yaml")
 			if err != nil {
 				return err
 			}
 			tmpPath := tmp.Name()
 			defer func() {
-				// Best-effort secure wipe: overwrite with zeros, then delete.
-				zeros := make([]byte, 4096)
-				if f, err := os.OpenFile(tmpPath, os.O_WRONLY, 0600); err == nil {
-					_, _ = f.Write(zeros)
-					f.Close()
+				// Secure wipe sized to the actual file length (the previous
+				// implementation overwrote only the first 4 KB; a larger
+				// edited vault would leak every byte past that). Grows as
+				// needed, single syscall, then delete.
+				if st, err := os.Stat(tmpPath); err == nil {
+					if f, err := os.OpenFile(tmpPath, os.O_WRONLY, 0o600); err == nil {
+						n := st.Size()
+						const chunk = 64 * 1024
+						buf := make([]byte, chunk)
+						for remaining := n; remaining > 0; {
+							w := int64(chunk)
+							if remaining < w {
+								w = remaining
+							}
+							_, _ = f.Write(buf[:w])
+							remaining -= w
+						}
+						_ = f.Sync()
+						f.Close()
+					}
 				}
 				_ = os.Remove(tmpPath)
 			}()

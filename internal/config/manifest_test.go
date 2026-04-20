@@ -42,6 +42,38 @@ daemons:
 	}
 }
 
+// TestParseManifest_MissingEnvIsErrorNotSilentEmpty is the regression
+// guard for the finding 'manifest env expansion returns empty string
+// up to resolver validation'. Previously expandEnvCrossPlatform
+// silently substituted "" when a ${VAR} reference had no value; that
+// collapsed e.g. 'MEMORY_FILE_PATH: ${HOME}/.local/share/mcp-memory/x'
+// into '/.local/share/mcp-memory/x' on a bare Windows shell where
+// neither HOME nor USERPROFILE was set — and the daemon wrote its
+// memory.jsonl to the root of the system drive. Now the reference
+// must resolve; otherwise ParseManifest rejects the manifest with an
+// actionable error listing every missing variable.
+func TestParseManifest_MissingEnvIsErrorNotSilentEmpty(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("TOTALLY_UNSET_VAR", "")
+
+	yaml := `
+name: t
+kind: global
+transport: stdio-bridge
+command: bash
+base_args: ["${TOTALLY_UNSET_VAR}/script.sh"]
+daemons: [{name: default, port: 9999}]
+`
+	_, err := ParseManifest(strings.NewReader(yaml))
+	if err == nil {
+		t.Fatal("expected ParseManifest to reject manifest with unresolved ${VAR}")
+	}
+	if !strings.Contains(err.Error(), "TOTALLY_UNSET_VAR") {
+		t.Errorf("error should name the missing variable: %v", err)
+	}
+}
+
 func TestParseManifest_HOMEFallsBackToUserProfile(t *testing.T) {
 	// Cross-platform niceness: ${HOME} on Windows where HOME is unset
 	// should still resolve via USERPROFILE so the same manifest works
