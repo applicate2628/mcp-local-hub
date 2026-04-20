@@ -29,6 +29,43 @@ func (a *API) CountProcesses(patterns []string) (int, error) {
 	return parseWmicCount(strings.NewReader(out), patterns)
 }
 
+// processSnapshot is a pre-fetched wmic/PowerShell output buffer used
+// by scan --processes to amortize the ~500 ms-per-invocation cost of
+// snapshotting the process table across all entries. Empty string is
+// the zero value — CountProcessesFromSnapshot treats it as "no
+// processes match" (same behavior as CountProcesses on non-Windows).
+type processSnapshot struct {
+	raw string
+}
+
+// takeProcessSnapshot captures the current process list ONCE so
+// multiple entries can be scored against it without re-invoking wmic
+// per call. Returns an empty snapshot on non-Windows or on snapshot
+// failure — callers then see zero counts instead of an error, matching
+// the contract of CountProcesses.
+func takeProcessSnapshot() processSnapshot {
+	if runtime.GOOS != "windows" {
+		return processSnapshot{}
+	}
+	out, err := runProcessSnapshot()
+	if err != nil {
+		return processSnapshot{}
+	}
+	return processSnapshot{raw: out}
+}
+
+// CountProcessesFromSnapshot is the batch variant of CountProcesses —
+// reuses a single process-snapshot across many pattern sets. Intended
+// for scan --processes which probes 20+ entries; doing one wmic per
+// entry was measured at ~13 s vs ~1 s with this variant.
+func (a *API) CountProcessesFromSnapshot(snap processSnapshot, patterns []string) int {
+	if snap.raw == "" {
+		return 0
+	}
+	n, _ := parseWmicCount(strings.NewReader(snap.raw), patterns)
+	return n
+}
+
 // runProcessSnapshot returns a CSV-formatted process list compatible with
 // the shape wmic historically produced. Tries wmic first (legacy Windows),
 // falls back to PowerShell Get-CimInstance (Windows 11 24H2+ removed wmic).
