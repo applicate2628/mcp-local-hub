@@ -20,7 +20,6 @@ import (
 
 func defaultKeyPath() string   { return secrets.DefaultKeyPath() }
 func defaultVaultPath() string { return secrets.DefaultVaultPath() }
-func userDataDir() string      { return secrets.UserDataDir() }
 
 func newSecretsCmdReal() *cobra.Command {
 	root := &cobra.Command{

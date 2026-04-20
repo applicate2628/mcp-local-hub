@@ -344,10 +344,14 @@ func makeFakeManifest(t *testing.T, dir, name string, port int) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
+	// 'go' is guaranteed to be on PATH in every Go test environment.
+	// Previously the fixture used 'echo', which works under Unix shells
+	// but not on Windows where echo is a cmd.exe builtin, not a PE file
+	// — exec.LookPath fails and preflightBulkSubset rejects the manifest.
 	body := fmt.Sprintf(`name: %s
 kind: global
 transport: stdio-bridge
-command: echo
+command: go
 daemons:
   - name: default
     port: %d
