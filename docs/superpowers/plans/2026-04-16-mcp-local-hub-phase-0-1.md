@@ -1388,7 +1388,7 @@ func TestBuildCreateXML_Logon(t *testing.T) {
 		LogonTrigger:     true,
 		RestartOnFailure: true,
 	}
-	xml := buildCreateXML(spec, "dima_")
+	xml := buildCreateXML(spec, "USERNAME")
 
 	if !strings.Contains(xml, "<LogonTrigger>") {
 		t.Error("expected <LogonTrigger> in XML")
@@ -1419,7 +1419,7 @@ func TestBuildCreateXML_Weekly(t *testing.T) {
 			MinuteLocal: 0,
 		},
 	}
-	xml := buildCreateXML(spec, "dima_")
+	xml := buildCreateXML(spec, "USERNAME")
 	if !strings.Contains(xml, "<WeeklyTrigger>") {
 		t.Error("expected <WeeklyTrigger>")
 	}
@@ -1459,7 +1459,7 @@ import (
 // We build a Task Scheduler XML document per spec, pipe it to `schtasks /Create /XML`,
 // and parse the output of `/Query` for Status/List.
 type windowsScheduler struct {
-	username string // e.g., "dima_"
+	username string // e.g., "USERNAME"
 }
 
 func newPlatformScheduler() (Scheduler, error) {

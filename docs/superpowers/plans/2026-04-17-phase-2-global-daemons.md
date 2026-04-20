@@ -20,7 +20,7 @@
 
 - Phase 1 + post-Phase 1 complete: shared serena daemon on 9121/9122 working, relay.go tested, all 4 clients connect successfully
 - `uvx` (Python), `node`, `npx` available on PATH (needed to launch the underlying stdio servers)
-- Existing server binaries installed: wolfram at `C:/Users/dima_/.local/mcp-servers/wolframalpha-llm-mcp/build/index.js`, godbolt at `C:/Users/dima_/.local/mcp-servers/godbolt-mcp/...`
+- Existing server binaries installed: wolfram at `C:/Users/USERNAME/.local/mcp-servers/wolframalpha-llm-mcp/build/index.js`, godbolt at `C:/Users/USERNAME/.local/mcp-servers/godbolt-mcp/...`
 - User on Windows 11 (Linux/macOS scheduler stubs not in scope)
 
 ---
@@ -42,7 +42,7 @@
 
 **Env/secret resolution:**
 
-- memory needs `MEMORY_FILE_PATH=c:/Users/dima_/OneDrive/Documents/env/Agents/memory.jsonl` — literal path, not a secret
+- memory needs `MEMORY_FILE_PATH=c:/Users/USERNAME/OneDrive/Documents/env/Agents/memory.jsonl` — literal path, not a secret
 - wolfram needs `WOLFRAM_LLM_APP_ID=EXAMPLE_APP_ID_123` — move to secret vault (`wolfram_app_id`)
 - paper-search-mcp needs `PAPER_SEARCH_MCP_UNPAYWALL_EMAIL=user@example.com` — move to vault (`unpaywall_email`)
 - Others have no env
@@ -1153,7 +1153,7 @@ base_args:
   - "-y"
   - "@modelcontextprotocol/server-memory"
 env:
-  MEMORY_FILE_PATH: "c:/Users/dima_/OneDrive/Documents/env/Agents/memory.jsonl"
+  MEMORY_FILE_PATH: "c:/Users/USERNAME/OneDrive/Documents/env/Agents/memory.jsonl"
 
 daemons:
   - name: default
@@ -1316,7 +1316,7 @@ kind: global
 transport: stdio-bridge
 command: node
 base_args:
-  - "C:/Users/dima_/.local/mcp-servers/wolframalpha-llm-mcp/build/index.js"
+  - "C:/Users/USERNAME/.local/mcp-servers/wolframalpha-llm-mcp/build/index.js"
 env:
   WOLFRAM_LLM_APP_ID: "secret:wolfram_app_id"
 
@@ -1376,9 +1376,9 @@ Godbolt ships as a Python script in its own venv. The base command is the venv's
 name: godbolt
 kind: global
 transport: stdio-bridge
-command: C:/Users/dima_/.local/mcp-servers/godbolt-mcp/venv/Scripts/python.exe
+command: C:/Users/USERNAME/.local/mcp-servers/godbolt-mcp/venv/Scripts/python.exe
 base_args:
-  - "C:/Users/dima_/.local/mcp-servers/godbolt-mcp/godbolt_mcp.py"
+  - "C:/Users/USERNAME/.local/mcp-servers/godbolt-mcp/godbolt_mcp.py"
 
 daemons:
   - name: default

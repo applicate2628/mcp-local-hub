@@ -41,8 +41,13 @@ Antigravity's Cascade agent rejects loopback-HTTP MCP entries, so `mcp-local-hub
 ## Quick start
 
 ```bash
-# 1. Build
-go build -o mcphub.exe ./cmd/mcphub
+# 1. Build (embeds git commit + build date into the binary)
+bash build.sh        # Git Bash / WSL / Linux / macOS
+# or on Windows native:
+pwsh ./build.ps1
+
+# Plain `go build -o mcphub.exe ./cmd/mcphub` also works for dev
+# iteration but leaves version metadata as dev/unknown.
 
 # 2. Install to ~/.local/bin and register on user PATH (idempotent)
 ./mcphub.exe setup

@@ -186,8 +186,8 @@ Empty by design — settings are written by GUI (Phase 3B). Command exists as a 
 ### `mcphub setup`
 
 ```
-✓ mcphub already at C:\Users\dima_\.local\bin\mcphub.exe (no copy needed)
-✓ C:\Users\dima_\.local\bin already on user PATH
+✓ mcphub already at C:\Users\USERNAME\.local\bin\mcphub.exe (no copy needed)
+✓ C:\Users\USERNAME\.local\bin already on user PATH
 ```
 
 Idempotent. First-run: copies binary to canonical location + writes HKCU PATH entry + broadcasts WM_SETTINGCHANGE. Subsequent runs: no-op.
@@ -196,13 +196,13 @@ Idempotent. First-run: copies binary to canonical location + writes HKCU PATH en
 
 ```
 ✓ Scheduler task created: mcp-local-hub-perftools-default
-  backup: C:\Users\dima_\.claude.json.bak-mcp-local-hub-20260418-232719
+  backup: C:\Users\USERNAME\.claude.json.bak-mcp-local-hub-20260418-232719
 ✓ claude-code → http://localhost:9131/mcp
-  backup: C:\Users\dima_\.codex\config.toml.bak-mcp-local-hub-20260418-232719
+  backup: C:\Users\USERNAME\.codex\config.toml.bak-mcp-local-hub-20260418-232719
 ✓ codex-cli → http://localhost:9131/mcp
-  backup: C:\Users\dima_\.gemini\settings.json.bak-mcp-local-hub-20260418-232719
+  backup: C:\Users\USERNAME\.gemini\settings.json.bak-mcp-local-hub-20260418-232719
 ✓ gemini-cli → http://localhost:9131/mcp
-  backup: C:\Users\dima_\.gemini\antigravity\mcp_config.json.bak-mcp-local-hub-20260418-232719
+  backup: C:\Users\USERNAME\.gemini\antigravity\mcp_config.json.bak-mcp-local-hub-20260418-232719
 ✓ antigravity → http://localhost:9131/mcp
 ✓ Started: mcp-local-hub-perftools-default
 
@@ -236,18 +236,18 @@ Confirms:
 ### `mcphub scheduler upgrade`
 
 ```
-✓ Upgraded \mcp-local-hub-gdb-default → C:\Users\dima_\.local\bin\mcphub.exe
-✓ Upgraded \mcp-local-hub-godbolt-default → C:\Users\dima_\.local\bin\mcphub.exe
-✓ Upgraded \mcp-local-hub-lldb-default → C:\Users\dima_\.local\bin\mcphub.exe
-✓ Upgraded \mcp-local-hub-memory-default → C:\Users\dima_\.local\bin\mcphub.exe
-✓ Upgraded \mcp-local-hub-paper-search-mcp-default → C:\Users\dima_\.local\bin\mcphub.exe
-✓ Upgraded \mcp-local-hub-perftools-default → C:\Users\dima_\.local\bin\mcphub.exe
-✓ Upgraded \mcp-local-hub-sequential-thinking-default → C:\Users\dima_\.local\bin\mcphub.exe
-✓ Upgraded \mcp-local-hub-serena-claude → C:\Users\dima_\.local\bin\mcphub.exe
-✓ Upgraded \mcp-local-hub-serena-codex → C:\Users\dima_\.local\bin\mcphub.exe
-✓ Upgraded \mcp-local-hub-serena-weekly-refresh → C:\Users\dima_\.local\bin\mcphub.exe
-✓ Upgraded \mcp-local-hub-time-default → C:\Users\dima_\.local\bin\mcphub.exe
-✓ Upgraded \mcp-local-hub-wolfram-default → C:\Users\dima_\.local\bin\mcphub.exe
+✓ Upgraded \mcp-local-hub-gdb-default → C:\Users\USERNAME\.local\bin\mcphub.exe
+✓ Upgraded \mcp-local-hub-godbolt-default → C:\Users\USERNAME\.local\bin\mcphub.exe
+✓ Upgraded \mcp-local-hub-lldb-default → C:\Users\USERNAME\.local\bin\mcphub.exe
+✓ Upgraded \mcp-local-hub-memory-default → C:\Users\USERNAME\.local\bin\mcphub.exe
+✓ Upgraded \mcp-local-hub-paper-search-mcp-default → C:\Users\USERNAME\.local\bin\mcphub.exe
+✓ Upgraded \mcp-local-hub-perftools-default → C:\Users\USERNAME\.local\bin\mcphub.exe
+✓ Upgraded \mcp-local-hub-sequential-thinking-default → C:\Users\USERNAME\.local\bin\mcphub.exe
+✓ Upgraded \mcp-local-hub-serena-claude → C:\Users\USERNAME\.local\bin\mcphub.exe
+✓ Upgraded \mcp-local-hub-serena-codex → C:\Users\USERNAME\.local\bin\mcphub.exe
+✓ Upgraded \mcp-local-hub-serena-weekly-refresh → C:\Users\USERNAME\.local\bin\mcphub.exe
+✓ Upgraded \mcp-local-hub-time-default → C:\Users\USERNAME\.local\bin\mcphub.exe
+✓ Upgraded \mcp-local-hub-wolfram-default → C:\Users\USERNAME\.local\bin\mcphub.exe
 ```
 
 Rewrites every scheduler task's `<Command>` to the current canonical `~/.local/bin/mcphub.exe`. 11 tasks upgraded (10 daemon + 1 weekly-refresh). Confirms the `parseTaskName` weekly-refresh fix (`c067e2e`) — earlier versions mis-split `serena-weekly-refresh` into server=serena-weekly / daemon=refresh and silently skipped it.
