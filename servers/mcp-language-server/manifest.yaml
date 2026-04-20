@@ -1,0 +1,72 @@
+name: mcp-language-server
+kind: workspace-scoped
+transport: stdio-bridge
+
+# Default command/transport apply to 8 of 9 languages (the mcp-language-server
+# backend). The `go` language overrides these via backend=gopls-mcp — see
+# internal/daemon/backend_lifecycle.go for dispatch.
+command: mcp-language-server
+
+port_pool:
+  start: 9200
+  end: 9299
+
+# Phase 3 lazy mode: register() creates scheduler tasks for lazy proxies.
+# Heavy backends spawn only on first tools/call. weekly_refresh restarts the
+# PROXY; re-materialization of the backend happens on the next tools/call.
+weekly_refresh: false
+
+# 9 supported languages. All v1 entries use transport: stdio. The lazy proxy
+# dispatches on backend+transport at materialization time; changing to
+# http_listen or native_http is a future follow-up.
+languages:
+  - name: clangd
+    backend: mcp-language-server
+    transport: stdio
+    lsp_command: clangd
+
+  - name: fortran
+    backend: mcp-language-server
+    transport: stdio
+    lsp_command: fortls
+
+  - name: go
+    backend: gopls-mcp
+    transport: stdio
+    lsp_command: gopls
+    extra_flags: [mcp]
+
+  - name: javascript
+    backend: mcp-language-server
+    transport: stdio
+    lsp_command: typescript-language-server
+    extra_flags: ["--stdio"]
+
+  - name: python
+    backend: mcp-language-server
+    transport: stdio
+    lsp_command: pyright-langserver
+    extra_flags: ["--stdio"]
+
+  - name: rust
+    backend: mcp-language-server
+    transport: stdio
+    lsp_command: rust-analyzer
+
+  - name: typescript
+    backend: mcp-language-server
+    transport: stdio
+    lsp_command: typescript-language-server
+    extra_flags: ["--stdio"]
+
+  - name: vscode-css
+    backend: mcp-language-server
+    transport: stdio
+    lsp_command: vscode-css-language-server
+    extra_flags: ["--stdio"]
+
+  - name: vscode-html
+    backend: mcp-language-server
+    transport: stdio
+    lsp_command: vscode-html-language-server
+    extra_flags: ["--stdio"]
