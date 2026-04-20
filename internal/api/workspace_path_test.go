@@ -25,14 +25,7 @@ func TestWorkspaceKey_Deterministic(t *testing.T) {
 
 func TestCanonicalWorkspacePath_RelativeResolvedToAbsolute(t *testing.T) {
 	dir := t.TempDir()
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chdir(cwd)
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
+	t.Chdir(dir)
 	got, err := CanonicalWorkspacePath(".")
 	if err != nil {
 		t.Fatalf("CanonicalWorkspacePath: %v", err)

@@ -4,7 +4,7 @@ transport: stdio-bridge
 
 # Default command/transport apply to 8 of 9 languages (the mcp-language-server
 # backend). The `go` language overrides these via backend=gopls-mcp — see
-# internal/daemon/backend_lifecycle.go for dispatch.
+# internal/daemon/backend_lifecycle.go (introduced in M2 Task 7) for dispatch.
 command: mcp-language-server
 
 port_pool:

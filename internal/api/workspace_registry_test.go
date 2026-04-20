@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,10 +59,11 @@ func TestRegistry_RoundtripWithEntries(t *testing.T) {
 	}
 }
 
-// TestRegistry_AtomicWriteCrashLeavesOldFileIntact simulates a crash between
-// write-temp and rename by deleting the temp file before Save completes.
-// We model the crash by directly exercising the atomic primitive.
-func TestRegistry_AtomicWriteCrashLeavesOldFileIntact(t *testing.T) {
+// TestRegistry_SaveBacksUpPreMutationFile verifies that Save() preserves the
+// prior file contents as a rolling .bak before overwriting. This is the
+// recovery mechanism; it does not simulate a crash — it simply asserts the
+// backup-before-write primitive that makes crash recovery possible.
+func TestRegistry_SaveBacksUpPreMutationFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "workspaces.yaml")
 	if err := os.WriteFile(path, []byte("version: 1\nworkspaces:\n  - workspace_key: oldentry\n    language: python\n    port: 9200\n"), 0600); err != nil {
@@ -86,7 +88,7 @@ func TestRegistry_AtomicWriteCrashLeavesOldFileIntact(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read bak: %v", err)
 	}
-	if !registryTestContains(bak, []byte("oldentry")) {
+	if !bytes.Contains(bak, []byte("oldentry")) {
 		t.Errorf("bak missing old entry; got %s", bak)
 	}
 }
@@ -186,18 +188,3 @@ func TestRegistry_LastErrorTruncation(t *testing.T) {
 	}
 }
 
-func registryTestContains(haystack, needle []byte) bool {
-	for i := 0; i+len(needle) <= len(haystack); i++ {
-		match := true
-		for j := 0; j < len(needle); j++ {
-			if haystack[i+j] != needle[j] {
-				match = false
-				break
-			}
-		}
-		if match {
-			return true
-		}
-	}
-	return false
-}
