@@ -137,7 +137,7 @@ func TestEnrichStatusFillsPortFromManifest(t *testing.T) {
 - [ ] **Step 3: Verify failure**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/api/ -run TestEnrichStatusFillsPort -v
+cd <repo> && go test ./internal/api/ -run TestEnrichStatusFillsPort -v
 ```
 
 Expected: FAIL with `enrichStatus undefined`.
@@ -253,7 +253,7 @@ Two tiny silencing lines at the bottom let the file compile with `fmt` and `time
 - [ ] **Step 5: Run the test**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/api/ -run TestEnrichStatusFills -v
+cd <repo> && go test ./internal/api/ -run TestEnrichStatusFills -v
 ```
 
 Expected: PASS.
@@ -261,7 +261,7 @@ Expected: PASS.
 - [ ] **Step 6: Run full test suite to ensure no regressions**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./... 
+cd <repo> && go test ./... 
 ```
 
 Expected: all green.
@@ -328,7 +328,7 @@ HOST,"some-other-process",9999,1000000
 - [ ] **Step 2: Verify failure**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/api/ -run TestCountProcesses -v
+cd <repo> && go test ./internal/api/ -run TestCountProcesses -v
 ```
 
 Expected: FAIL (`parseWmicCount` undefined).
@@ -564,7 +564,7 @@ if rows[i].State == "Running" && lookupProcess != nil {
 - [ ] **Step 5: Run the tests**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/api/ -v
+cd <repo> && go test ./internal/api/ -v
 ```
 
 Expected: all tests PASS (3 new `CountProcesses`/`parseWmicCount` tests plus existing ones).
@@ -703,7 +703,7 @@ func newStatusCmd() *cobra.Command {
 - [ ] **Step 5: Run tests + smoke**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./... && ./build.sh && ./mcp.exe status
+cd <repo> && go test ./... && ./build.sh && ./mcp.exe status
 ```
 
 Expected: all tests pass; status output now shows Port/PID/RAM/Uptime columns for running daemons; empty columns for Ready/Failed rows.
@@ -981,7 +981,7 @@ Open `internal/cli/root.go`. Find the command registration block (likely `rootCm
 - [ ] **Step 6: Rebuild and smoke**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./... && ./build.sh
+cd <repo> && go test ./... && ./build.sh
 ./mcp.exe scan
 ./mcp.exe scan --processes
 ./mcp.exe scan --json | head -c 500
@@ -1082,7 +1082,7 @@ Add `newMigrateCmd()` to the `rootCmd.AddCommand(...)` list.
 - [ ] **Step 3: Smoke test**
 
 ```bash
-cd d:/dev/mcp-local-hub && ./build.sh
+cd <repo> && ./build.sh
 ./mcp.exe migrate memory --dry-run
 ```
 
@@ -1150,7 +1150,7 @@ func TestLogsGetTailsFromFile(t *testing.T) {
 - [ ] **Step 2: Verify failure**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/api/ -run TestLogsGet -v
+cd <repo> && go test ./internal/api/ -run TestLogsGet -v
 ```
 
 Expected: FAIL.
@@ -1270,7 +1270,7 @@ func newLogsCmd() *cobra.Command {
 Add `newLogsCmd()` to `rootCmd.AddCommand(...)` in root.go.
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./... && ./build.sh
+cd <repo> && go test ./... && ./build.sh
 ./mcp.exe logs memory --tail 5
 ```
 
@@ -1310,7 +1310,7 @@ import (
 func TestParseOrphanDetectionIgnoresOurDaemons(t *testing.T) {
 	wmicCsv := `Node,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize
 HOST,"uv run --directory .../GDB-MCP python server.py",20260417180000.000000+180,555,1001,40000000
-HOST,"D:\dev\mcp-local-hub\mcp.exe daemon --server gdb --daemon default",20260417180000.000000+180,999,555,15000000
+HOST,"<repo>\mcp.exe daemon --server gdb --daemon default",20260417180000.000000+180,999,555,15000000
 HOST,"uv run --directory .../GDB-MCP python server.py",20260417170000.000000+180,1,2002,42000000
 `
 	orphans := parseOrphans(strings.NewReader(wmicCsv), []string{"GDB-MCP"})
@@ -1328,7 +1328,7 @@ HOST,"uv run --directory .../GDB-MCP python server.py",20260417170000.000000+180
 - [ ] **Step 2: Verify failure**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/api/ -run TestParseOrphan -v
+cd <repo> && go test ./internal/api/ -run TestParseOrphan -v
 ```
 
 Expected: FAIL.
@@ -1512,7 +1512,7 @@ func parseOrphans(r io.Reader, patterns []string) []OrphanProcess {
 - [ ] **Step 4: Run the test**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/api/ -run TestParseOrphan -v
+cd <repo> && go test ./internal/api/ -run TestParseOrphan -v
 ```
 
 Expected: PASS.
@@ -1638,7 +1638,7 @@ Add `newCleanupCmd()` to `rootCmd.AddCommand(...)` in root.go.
 - [ ] **Step 3: Smoke test**
 
 ```bash
-cd d:/dev/mcp-local-hub && ./build.sh
+cd <repo> && ./build.sh
 ./mcp.exe cleanup
 ```
 
@@ -1810,7 +1810,7 @@ Add `newStopCmd()` to `rootCmd.AddCommand(...)` in root.go.
 - [ ] **Step 5: Smoke test**
 
 ```bash
-cd d:/dev/mcp-local-hub && ./build.sh
+cd <repo> && ./build.sh
 ./mcp.exe stop --server memory
 ./mcp.exe status | grep memory
 # Expected: memory Ready (stopped)

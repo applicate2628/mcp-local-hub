@@ -268,7 +268,7 @@ Commits: `e700e0a` (godbolt refactor), `a1e4d6a` (lldb refactor), `ae120ed` (per
 
 ### PATH-based install + `mcphub setup`
 
-Scheduler tasks previously baked the absolute path of whatever `mcphub.exe` ran the install (typically `D:\dev\mcp-local-hub\mcphub.exe`) into the task XML. Moving the binary invalidated every task silently.
+Scheduler tasks previously baked the absolute path of whatever `mcphub.exe` ran the install (typically a dev checkout path like `<repo>\mcphub.exe`) into the task XML. Moving the binary invalidated every task silently.
 
 New model:
 

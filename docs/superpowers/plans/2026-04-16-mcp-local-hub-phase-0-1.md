@@ -96,7 +96,7 @@ mcp-local-hub/
 
 - [ ] **Step 1: cd into the pre-seeded repo directory and initialize git**
 
-The repo directory `d:\dev\mcp-local-hub\` already exists with `docs/superpowers/{specs,plans}/` populated (this spec and plan). Do not `mkdir` — just enter and initialize git.
+The repo directory `<repo>\` already exists with `docs/superpowers/{specs,plans}/` populated (this spec and plan). Do not `mkdir` — just enter and initialize git.
 
 ```bash
 cd /d/dev/mcp-local-hub
@@ -4699,7 +4699,7 @@ git commit -m "docs: Phase 1 verification notes"
 
 ---
 
-**Plan complete and saved to `d:\dev\mcp-local-hub\docs\superpowers\plans\2026-04-16-mcp-local-hub-phase-0-1.md`. Two execution options:**
+**Plan complete and saved to `<repo>\docs\superpowers\plans\2026-04-16-mcp-local-hub-phase-0-1.md`. Two execution options:**
 
 **1. Subagent-Driven (recommended)** — dispatch a fresh subagent per task, review between tasks, fast iteration.
 

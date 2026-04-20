@@ -194,7 +194,7 @@ Note on `mcp.ResourceContents` pointer shape: the godbolt tests discovered that 
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run from `D:\dev\mcp-local-hub`:
+Run from `<repo>`:
 
 ```bash
 go test ./internal/perftools/... -v
@@ -1566,7 +1566,7 @@ Port 9131 is the next free slot after the existing allocations (9121-9130).
 - [ ] **Step 2: Install and verify the server**
 
 ```bash
-cd d:/dev/mcp-local-hub
+cd <repo>
 go build -o mcphub.exe ./cmd/mcphub
 ./mcphub.exe install --server perftools
 sleep 3

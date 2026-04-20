@@ -258,7 +258,7 @@ Change the build line to append ` -H windowsgui` to `$ldflags` before the `go bu
 - [ ] **Step 6: Rebuild and smoke-test**
 
 ```bash
-cd d:/dev/mcp-local-hub && ./build.sh && ./mcp.exe version
+cd <repo> && ./build.sh && ./mcp.exe version
 ```
 
 Expected: version prints to terminal (AttachConsole worked against Git Bash). File size ~12 MB unchanged materially.
@@ -436,7 +436,7 @@ func newEventBus() *EventBus { return &EventBus{} }
 - [ ] **Step 5: Run test**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/api/ -v
+cd <repo> && go test ./internal/api/ -v
 ```
 
 Expected: `TestNewAPIReturnsWorkingInstance` PASS.
@@ -533,7 +533,7 @@ func TestScanClassifiesEntries(t *testing.T) {
 - [ ] **Step 2: Verify the test fails**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/api/ -run TestScanClassifiesEntries -v
+cd <repo> && go test ./internal/api/ -run TestScanClassifiesEntries -v
 ```
 
 Expected: FAIL with `a.ScanFrom undefined` / `ScanOpts undefined`.
@@ -688,7 +688,7 @@ func classify(e *ScanEntry, name string, manifestNames map[string]bool) string {
 - [ ] **Step 4: Run the test**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/api/ -run TestScanClassifiesEntries -v
+cd <repo> && go test ./internal/api/ -run TestScanClassifiesEntries -v
 ```
 
 Expected: PASS.
@@ -768,7 +768,7 @@ url = "http://localhost:9123/mcp"
 - [ ] **Step 2: Verify failure**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/api/ -run TestScanCoversAllFourClients -v
+cd <repo> && go test ./internal/api/ -run TestScanCoversAllFourClients -v
 ```
 
 Expected: FAIL — `codex-cli` key never populated.
@@ -967,7 +967,7 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 - [ ] **Step 5: Run the tests**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/api/ -v
+cd <repo> && go test ./internal/api/ -v
 ```
 
 Expected: both TestScanClassifiesEntries and TestScanCoversAllFourClients PASS.
@@ -1076,7 +1076,7 @@ func TestExtractManifestFromClientPreservesCommandAndEnv(t *testing.T) {
 - [ ] **Step 2: Verify failure**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/api/ -run TestExtractManifestFromClient -v
+cd <repo> && go test ./internal/api/ -run TestExtractManifestFromClient -v
 ```
 
 Expected: FAIL.
@@ -1210,7 +1210,7 @@ func renderDraftManifestYAML(name, cmd string, args []string, env map[string]str
 - [ ] **Step 4: Run the test**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/api/ -v
+cd <repo> && go test ./internal/api/ -v
 ```
 
 Expected: all tests PASS.
@@ -1310,7 +1310,7 @@ func newInstallCmd() *cobra.Command {
 - [ ] **Step 4: Run full test suite**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./... -v
+cd <repo> && go test ./... -v
 ```
 
 Expected: all green. Existing install_test.go may need tweaks to point at `api.Install()` instead of the CLI helper — apply minimal adjustments until the test suite is clean.
@@ -1455,7 +1455,7 @@ if all {
 - [ ] **Step 5: Run tests**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./... -v
+cd <repo> && go test ./... -v
 ```
 
 Expected: all PASS including new test.
@@ -1568,7 +1568,7 @@ weekly_refresh: false
 - [ ] **Step 2: Verify failure**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/api/ -run TestMigrateReplacesStdioWithHTTPForOneClient -v
+cd <repo> && go test ./internal/api/ -run TestMigrateReplacesStdioWithHTTPForOneClient -v
 ```
 
 Expected: FAIL.
@@ -1704,7 +1704,7 @@ func findDaemonPort(m *config.ServerManifest, daemonName string) (int, bool) {
 - [ ] **Step 4: Run the test**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/api/ -v
+cd <repo> && go test ./internal/api/ -v
 ```
 
 Expected: PASS.

@@ -185,7 +185,7 @@ Note: if `jsonMCP` is unexported and test lives in a separate file, either move 
 - [ ] **Step 3: Verify failure**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/clients/ -run "TestBackupSentinel|TestBackupKeeps" -v
+cd <repo> && go test ./internal/clients/ -run "TestBackupSentinel|TestBackupKeeps" -v
 ```
 
 Expected: FAIL — `BackupKeep` undefined OR sentinel not written.
@@ -288,7 +288,7 @@ Apply the same to all 4 adapters (claude_code, codex_cli, gemini_cli, antigravit
 - [ ] **Step 5: Run tests**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/clients/ -v
+cd <repo> && go test ./internal/clients/ -v
 ```
 
 Expected: all tests PASS including new sentinel + keep-N tests.
@@ -296,7 +296,7 @@ Expected: all tests PASS including new sentinel + keep-N tests.
 - [ ] **Step 6: Run full suite (existing install/migrate callers still work)**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./... 
+cd <repo> && go test ./... 
 ```
 
 Expected: all green.
@@ -401,7 +401,7 @@ func TestBackupsCleanKeepsN(t *testing.T) {
 - [ ] **Step 2: Verify failure**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/api/ -run TestBackups -v
+cd <repo> && go test ./internal/api/ -run TestBackups -v
 ```
 
 Expected: FAIL.
@@ -611,7 +611,7 @@ var _ = fmt.Errorf
 - [ ] **Step 4: Run api tests**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/api/ -v
+cd <repo> && go test ./internal/api/ -v
 ```
 
 Expected: PASS.
@@ -757,7 +757,7 @@ root.AddCommand(newBackupsCmd())
 - [ ] **Step 8: Test + build**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./... && go build ./...
+cd <repo> && go test ./... && go build ./...
 ```
 
 Expected: all green, silent build.
@@ -857,7 +857,7 @@ func TestManifestDeleteRemovesDir(t *testing.T) {
 - [ ] **Step 2: Verify failure**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/api/ -run TestManifest -v
+cd <repo> && go test ./internal/api/ -run TestManifest -v
 ```
 
 Expected: FAIL — methods undefined.
@@ -1005,7 +1005,7 @@ func (a *API) ManifestDeleteIn(dir, name string) error {
 - [ ] **Step 4: Run tests**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/api/ -run TestManifest -v
+cd <repo> && go test ./internal/api/ -run TestManifest -v
 ```
 
 Expected: PASS.
@@ -1266,7 +1266,7 @@ root.AddCommand(newManifestCmd())
 - [ ] **Step 3: Build + test**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./... && go build ./...
+cd <repo> && go test ./... && go build ./...
 ```
 
 - [ ] **Step 4: Smoke test**
@@ -1470,7 +1470,7 @@ root.AddCommand(newSchedulerCmd())
 - [ ] **Step 5: Test + build + commit**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./... && go build ./...
+cd <repo> && go test ./... && go build ./...
 git add internal/api/scheduler_mgmt.go internal/api/scheduler_mgmt_test.go internal/cli/scheduler_cmd.go internal/cli/root.go
 git commit -m "feat(scheduler): mcphub scheduler upgrade — regenerate tasks with current exe path"
 ```
@@ -1640,7 +1640,7 @@ Pass --set "SUN 03:00" to enable, --disable to remove.`,
 - [ ] **Step 4: Test + commit**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./... && go build ./...
+cd <repo> && go test ./... && go build ./...
 # Smoke test
 ./bin/mcphub.exe scheduler weekly-refresh --set "SUN 03:00"
 ./bin/mcphub.exe status | grep weekly-refresh
@@ -1897,7 +1897,7 @@ root.AddCommand(newSettingsCmd())
 - [ ] **Step 5: Test + smoke + commit**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./... && go build ./...
+cd <repo> && go test ./... && go build ./...
 ./bin/mcphub.exe settings set theme dark
 ./bin/mcphub.exe settings list
 ./bin/mcphub.exe settings get theme

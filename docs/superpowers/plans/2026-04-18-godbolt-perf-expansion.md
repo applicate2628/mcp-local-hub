@@ -177,7 +177,7 @@ This test references a new helper `invokeCompile` and a new field `baseURL` on `
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run from `D:\dev\mcp-local-hub`:
+Run from `<repo>`:
 
 ```bash
 go test ./internal/godbolt/... -run TestCompileTool_SendsAcceptJSON -v

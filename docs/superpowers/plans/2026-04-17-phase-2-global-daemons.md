@@ -243,7 +243,7 @@ func echoSubprocArgs() []string {
 - [ ] **Step 2: Run test to verify it fails (no implementation yet)**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/daemon/ -run TestHostSubprocessLifecycle -v
+cd <repo> && go test ./internal/daemon/ -run TestHostSubprocessLifecycle -v
 ```
 
 Expected: FAIL with `undefined: NewStdioHost`
@@ -419,7 +419,7 @@ func (h *StdioHost) readStdoutTest(timeout time.Duration) ([]byte, error) {
 - [ ] **Step 4: Run test to verify it passes**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/daemon/ -run TestHostSubprocessLifecycle -v
+cd <repo> && go test ./internal/daemon/ -run TestHostSubprocessLifecycle -v
 ```
 
 Expected: PASS
@@ -511,7 +511,7 @@ Also add imports: `"fmt"`, `"io"`, `"net/http"`, `"net/http/httptest"`, `"string
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/daemon/ -run TestHostHTTPIDMultiplexing -v
+cd <repo> && go test ./internal/daemon/ -run TestHostHTTPIDMultiplexing -v
 ```
 
 Expected: FAIL with `h.HTTPHandler undefined`
@@ -646,7 +646,7 @@ func (h *StdioHost) readStdoutLoop() {
 - [ ] **Step 4: Run test to verify it passes**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/daemon/ -run TestHostHTTPIDMultiplexing -v
+cd <repo> && go test ./internal/daemon/ -run TestHostHTTPIDMultiplexing -v
 ```
 
 Expected: PASS
@@ -763,7 +763,7 @@ func TestHostDELETETerminates(t *testing.T) {
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/daemon/ -run "TestHostInitializeCached|TestHostDELETETerminates" -v
+cd <repo> && go test ./internal/daemon/ -run "TestHostInitializeCached|TestHostDELETETerminates" -v
 ```
 
 Expected: both FAIL
@@ -1014,7 +1014,7 @@ Add `sseMu sync.Mutex` and `sseClients []chan []byte` fields to `StdioHost`. Ext
 - [ ] **Step 4: Run tests to verify they pass**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./internal/daemon/ -v
+cd <repo> && go test ./internal/daemon/ -v
 ```
 
 Expected: all tests PASS (4 so far: lifecycle, multiplexing, initialize-cache, DELETE)
@@ -1122,7 +1122,7 @@ At the top of `internal/daemon/bridge.go`, replace the file's leading comment (b
 - [ ] **Step 4: Run all tests to verify nothing regressed**
 
 ```bash
-cd d:/dev/mcp-local-hub && go test ./... -v
+cd <repo> && go test ./... -v
 ```
 
 Expected: all PASS, including new host tests, existing relay tests, and daemon-cli tests.
@@ -1179,7 +1179,7 @@ weekly_refresh: false
 - [ ] **Step 2: Rebuild mcp.exe**
 
 ```bash
-cd d:/dev/mcp-local-hub && ./build.sh
+cd <repo> && ./build.sh
 ```
 
 Expected: successful build, `mcp.exe` created.
@@ -1187,7 +1187,7 @@ Expected: successful build, `mcp.exe` created.
 - [ ] **Step 3: Dry-run install to inspect plan**
 
 ```bash
-cd d:/dev/mcp-local-hub && ./mcp.exe install --server memory --dry-run
+cd <repo> && ./mcp.exe install --server memory --dry-run
 ```
 
 Expected output includes 1 scheduler task `mcp-local-hub-memory-default` + 4 client updates.
@@ -1201,7 +1201,7 @@ taskkill //F //IM node.exe 2>/dev/null | grep -c "server-memory" || true
 - [ ] **Step 5: Apply install**
 
 ```bash
-cd d:/dev/mcp-local-hub && ./mcp.exe install --server memory
+cd <repo> && ./mcp.exe install --server memory
 ```
 
 Expected: all 4 client bindings written, daemon on 9123 started.
@@ -1275,7 +1275,7 @@ weekly_refresh: false
 - [ ] **Step 2: Install and verify**
 
 ```bash
-cd d:/dev/mcp-local-hub && ./mcp.exe install --server sequential-thinking
+cd <repo> && ./mcp.exe install --server sequential-thinking
 curl -s -X POST http://127.0.0.1:9124/mcp \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
@@ -1302,7 +1302,7 @@ git commit -m "feat(servers): add sequential-thinking global daemon (port 9124)"
 - [ ] **Step 1: Move wolfram APP ID to the encrypted vault**
 
 ```bash
-cd d:/dev/mcp-local-hub && ./mcp.exe secrets set wolfram_app_id --value EXAMPLE_APP_ID_123
+cd <repo> && ./mcp.exe secrets set wolfram_app_id --value EXAMPLE_APP_ID_123
 ./mcp.exe secrets list
 ```
 
@@ -1344,7 +1344,7 @@ weekly_refresh: false
 - [ ] **Step 3: Install and verify**
 
 ```bash
-cd d:/dev/mcp-local-hub && ./mcp.exe install --server wolfram
+cd <repo> && ./mcp.exe install --server wolfram
 curl -s -X POST http://127.0.0.1:9125/mcp \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
@@ -1404,7 +1404,7 @@ weekly_refresh: false
 - [ ] **Step 2: Install and verify**
 
 ```bash
-cd d:/dev/mcp-local-hub && ./mcp.exe install --server godbolt
+cd <repo> && ./mcp.exe install --server godbolt
 curl -s -X POST http://127.0.0.1:9126/mcp \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
@@ -1431,7 +1431,7 @@ git commit -m "feat(servers): add godbolt global daemon (port 9126)"
 - [ ] **Step 1: Move unpaywall email to the vault**
 
 ```bash
-cd d:/dev/mcp-local-hub && ./mcp.exe secrets set unpaywall_email --value user@example.com
+cd <repo> && ./mcp.exe secrets set unpaywall_email --value user@example.com
 ```
 
 - [ ] **Step 2: Create `servers/paper-search-mcp/manifest.yaml`**
@@ -1474,7 +1474,7 @@ weekly_refresh: false
 - [ ] **Step 3: Install and verify**
 
 ```bash
-cd d:/dev/mcp-local-hub && ./mcp.exe install --server paper-search-mcp
+cd <repo> && ./mcp.exe install --server paper-search-mcp
 curl -s -X POST http://127.0.0.1:9127/mcp \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
@@ -1533,7 +1533,7 @@ weekly_refresh: false
 - [ ] **Step 2: Install and verify**
 
 ```bash
-cd d:/dev/mcp-local-hub && ./mcp.exe install --server time
+cd <repo> && ./mcp.exe install --server time
 curl -s -X POST http://127.0.0.1:9128/mcp \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
