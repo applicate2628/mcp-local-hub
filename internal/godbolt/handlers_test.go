@@ -25,6 +25,40 @@ func fakeGodbolt(t *testing.T, gotAccept *string, gotPayload *map[string]any) *h
 	}))
 }
 
+// TestGodboltDisabled_BlocksOutboundRequests is the security guard
+// regression test: with MCPHUB_GODBOLT_DISABLE set, the server must
+// refuse to send source code off-host. Verifies both the compile
+// (POST) path and the resource (GET) path return ErrGodboltDisabled
+// without ever reaching the test httptest.Server.
+func TestGodboltDisabled_BlocksOutboundRequests(t *testing.T) {
+	t.Setenv("MCPHUB_GODBOLT_DISABLE", "1")
+
+	var reached bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	gs := &GodboltServer{httpClient: srv.Client(), baseURL: srv.URL + "/api"}
+
+	// POST path (invokeCompile)
+	_, err := gs.invokeCompile(t.Context(), srv.URL+"/api/compiler/x/compile", []byte(`{}`))
+	if err == nil {
+		t.Fatal("invokeCompile: expected error when MCPHUB_GODBOLT_DISABLE set")
+	}
+
+	// GET path (fetchResource)
+	_, err = gs.fetchResource(srv.URL + "/api/languages")
+	if err == nil {
+		t.Fatal("fetchResource: expected error when MCPHUB_GODBOLT_DISABLE set")
+	}
+
+	if reached {
+		t.Error("test server was reached despite MCPHUB_GODBOLT_DISABLE — kill switch failed")
+	}
+}
+
 func TestCompileTool_SendsAcceptJSON(t *testing.T) {
 	var gotAccept string
 	var gotPayload map[string]any

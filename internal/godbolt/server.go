@@ -9,11 +9,27 @@ package godbolt
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// ErrGodboltDisabled is returned from every HTTP-touching handler when
+// MCPHUB_GODBOLT_DISABLE is set. The MCP tool descriptions advertise
+// the env var so agent clients know how to hard-block the server from
+// sending source code off-host — useful when the current workspace
+// holds confidential or export-controlled material.
+var ErrGodboltDisabled = errors.New("godbolt server disabled by MCPHUB_GODBOLT_DISABLE env var (unset it to re-enable outbound requests to godbolt.org)")
+
+// godboltDisabled reports whether outbound requests should be refused.
+// Re-evaluated each call rather than cached so toggling the var for
+// a single test / session doesn't require restart.
+func godboltDisabled() bool {
+	return os.Getenv("MCPHUB_GODBOLT_DISABLE") != ""
+}
 
 // godboltBaseURL is the Compiler Explorer REST API root. Kept unexported
 // because it is an internal transport detail, not part of the package

@@ -74,7 +74,7 @@ func registerTools(gs *GodboltServer) {
 	// Tool 1: compile_code
 	gs.server.AddTool(&mcp.Tool{
 		Name:        "compile_code",
-		Description: "Compile source code via godbolt.org. Returns structured JSON with asm[], stdout[], stderr[], optional execResult (if filters.execute=true), optional optOutput[] (if filters.optOutput=true), and optional tools[] output (if tools[] is non-empty — e.g. llvm-mca throughput tables, pahole struct layout). Use filters to control asm syntax and enable execute/optOutput. Use execute_parameters for stdin/args of the executed binary. Use tools for llvm-mca / pahole / other godbolt-hosted analyzers that operate on the compile result.",
+		Description: "⚠ SENDS SOURCE to https://godbolt.org (third-party public service). DO NOT use for confidential or proprietary code — the source, file contents, and execute-parameters all leave your machine. Set the env var MCPHUB_GODBOLT_DISABLE=1 before launch to hard-block every tool in this server. Compile source code via godbolt.org. Returns structured JSON with asm[], stdout[], stderr[], optional execResult (if filters.execute=true), optional optOutput[] (if filters.optOutput=true), and optional tools[] output (if tools[] is non-empty — e.g. llvm-mca throughput tables, pahole struct layout). Use filters to control asm syntax and enable execute/optOutput. Use execute_parameters for stdin/args of the executed binary. Use tools for llvm-mca / pahole / other godbolt-hosted analyzers that operate on the compile result.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -144,7 +144,7 @@ func registerTools(gs *GodboltServer) {
 	// Tool 2: compile_cmake
 	gs.server.AddTool(&mcp.Tool{
 		Name:        "compile_cmake",
-		Description: "Compile a CMake project via godbolt.org. Returns structured JSON with asm[], stdout[], stderr[], optional execResult (if filters.execute=true), optional optOutput[] (if filters.optOutput=true), and optional tools[] output (if tools[] is non-empty — e.g. llvm-mca throughput tables, pahole struct layout). Use filters to control asm syntax and enable execute/optOutput. Use execute_parameters for stdin/args of the executed binary. Use tools for llvm-mca / pahole / other godbolt-hosted analyzers that operate on the compile result.",
+		Description: "⚠ SENDS SOURCE AND ALL FILES to https://godbolt.org (third-party public service). DO NOT use for confidential or proprietary code. Set MCPHUB_GODBOLT_DISABLE=1 before launch to hard-block every tool in this server. Compile a CMake project via godbolt.org. Returns structured JSON with asm[], stdout[], stderr[], optional execResult (if filters.execute=true), optional optOutput[] (if filters.optOutput=true), and optional tools[] output (if tools[] is non-empty — e.g. llvm-mca throughput tables, pahole struct layout). Use filters to control asm syntax and enable execute/optOutput. Use execute_parameters for stdin/args of the executed binary. Use tools for llvm-mca / pahole / other godbolt-hosted analyzers that operate on the compile result.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -214,7 +214,7 @@ func registerTools(gs *GodboltServer) {
 	// Tool 3: format_code
 	gs.server.AddTool(&mcp.Tool{
 		Name:        "format_code",
-		Description: "Format source code using a specified code formatter.",
+		Description: "⚠ SENDS SOURCE to https://godbolt.org (third-party public service). Set MCPHUB_GODBOLT_DISABLE=1 before launch to hard-block every tool in this server. Format source code using a specified code formatter.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -780,6 +780,9 @@ func (gs *GodboltServer) formatTool(ctx context.Context, req *mcp.CallToolReques
 // (code / asm / stdout / stderr / execResult / optOutput) instead of
 // a text-only asm dump.
 func (gs *GodboltServer) invokeCompile(ctx context.Context, url string, payload []byte) ([]byte, error) {
+	if godboltDisabled() {
+		return nil, ErrGodboltDisabled
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
@@ -819,6 +822,9 @@ func (gs *GodboltServer) invokeCompile(ctx context.Context, url string, payload 
 // to the MCP client as a stray HTML 404 page or JSON error body that
 // downstream code would treat as the real resource.
 func (gs *GodboltServer) fetchResource(url string) ([]byte, error) {
+	if godboltDisabled() {
+		return nil, ErrGodboltDisabled
+	}
 	// Accept: application/json is required for /api/languages, /api/compilers,
 	// /api/libraries, /api/formats, /api/popularArguments — without it godbolt
 	// returns a plain-text table that json.Unmarshal later rejects with "invalid
