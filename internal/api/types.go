@@ -25,6 +25,23 @@ type DaemonStatus struct {
 	PID        int    `json:"pid,omitempty"`
 	RAMBytes   uint64 `json:"ram_bytes,omitempty"`
 	UptimeSec  int64  `json:"uptime_sec,omitempty"`
+
+	// MCP-level health probe (populated only by Status with probeHealth=true).
+	// Running daemon / bound port does NOT imply the MCP protocol is alive —
+	// the subprocess may be in a broken state, or (in gdb/lldb's case) the
+	// MCP server may respond but its backend binary is missing. A successful
+	// tools/list round-trip is the first layer of "operational health".
+	Health *HealthProbe `json:"health,omitempty"`
+}
+
+// HealthProbe records the outcome of an MCP protocol smoke test against
+// a daemon's HTTP endpoint. OK=true + ToolCount>0 = minimally operational.
+// Err is populated (with OK=false) on transport error, non-2xx response,
+// or a parseable JSON-RPC error in the tools/list response.
+type HealthProbe struct {
+	OK        bool   `json:"ok"`
+	ToolCount int    `json:"tool_count,omitempty"`
+	Err       string `json:"err,omitempty"`
 }
 
 // ScanEntry is one row in the unified "across all clients" view.

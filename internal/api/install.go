@@ -2,15 +2,19 @@ package api
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"mcp-local-hub/internal/clients"
@@ -282,6 +286,21 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 // Windows, empty elsewhere); callers that need a parsed time.Time should
 // re-query the scheduler directly.
 func (a *API) Status() ([]DaemonStatus, error) {
+	return a.StatusWithHealth(false)
+}
+
+// StatusWithHealth is Status + an optional MCP protocol smoke test
+// per Running daemon. When probeHealth is true, the function POSTs
+// initialize + tools/list to each daemon's /mcp endpoint and fills
+// DaemonStatus.Health. This is the "operational health" the audit
+// flagged as missing: codex mcp list saying a server is connected
+// and scheduler saying the task is running is not the same as the
+// MCP server being able to list its tools.
+//
+// Disabled by default because the probe adds 1-3 s of per-daemon
+// HTTP round-trips — acceptable for an interactive command but
+// wasteful for repeated polling.
+func (a *API) StatusWithHealth(probeHealth bool) ([]DaemonStatus, error) {
 	sch, err := scheduler.New()
 	if err != nil {
 		return nil, err
@@ -303,7 +322,90 @@ func (a *API) Status() ([]DaemonStatus, error) {
 	// `mcphub status` from %TEMP% sees the same server set that the
 	// daemon sees.
 	enrichStatus(result, "")
+	if probeHealth {
+		probeDaemonHealth(result)
+	}
 	return result, nil
+}
+
+// probeDaemonHealth fills DaemonStatus.Health for every Running row
+// with a Port. The protocol: POST initialize (stream OR json Accept),
+// capture Mcp-Session-Id, POST tools/list, count tools in the
+// response. Any transport or JSON-RPC error is captured as Err with
+// OK=false. Runs concurrently across rows to keep total time bounded.
+func probeDaemonHealth(rows []DaemonStatus) {
+	var wg sync.WaitGroup
+	for i := range rows {
+		if rows[i].State != "Running" || rows[i].Port == 0 {
+			continue
+		}
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			rows[idx].Health = singleHealthProbe(rows[idx].Port)
+		}(i)
+	}
+	wg.Wait()
+}
+
+// singleHealthProbe does the initialize → tools/list sequence against
+// 127.0.0.1:<port>/mcp with a 3 s total deadline. Returns a
+// populated HealthProbe either way — the CLI decides whether OK or
+// Err is the user-visible signal.
+func singleHealthProbe(port int) *HealthProbe {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	url := fmt.Sprintf("http://127.0.0.1:%d/mcp", port)
+	client := &http.Client{Timeout: 3 * time.Second}
+
+	initBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"mcphub-health","version":"1"}}}`
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(initBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	resp, err := client.Do(req)
+	if err != nil {
+		return &HealthProbe{Err: "initialize: " + err.Error()}
+	}
+	sessionID := resp.Header.Get("Mcp-Session-Id")
+	_ = resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return &HealthProbe{Err: fmt.Sprintf("initialize: HTTP %d", resp.StatusCode)}
+	}
+
+	listBody := `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`
+	req2, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(listBody))
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("Accept", "application/json, text/event-stream")
+	if sessionID != "" {
+		req2.Header.Set("Mcp-Session-Id", sessionID)
+	}
+	resp2, err := client.Do(req2)
+	if err != nil {
+		return &HealthProbe{Err: "tools/list: " + err.Error()}
+	}
+	defer resp2.Body.Close()
+	raw, _ := io.ReadAll(resp2.Body)
+	payload := raw
+	// SSE-wrapped response: pull JSON out of the first data: line.
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(line, "data: ") {
+			payload = []byte(strings.TrimPrefix(line, "data: "))
+			break
+		}
+	}
+	var parsed struct {
+		Error  json.RawMessage `json:"error"`
+		Result struct {
+			Tools []json.RawMessage `json:"tools"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(payload, &parsed); err != nil {
+		return &HealthProbe{Err: "tools/list: parse: " + err.Error()}
+	}
+	if len(parsed.Error) > 0 {
+		return &HealthProbe{Err: "tools/list: " + string(parsed.Error)}
+	}
+	return &HealthProbe{OK: true, ToolCount: len(parsed.Result.Tools)}
 }
 
 // Uninstall removes all scheduler tasks and client entries for a server.

@@ -11,6 +11,7 @@ import (
 
 func newStatusCmdReal() *cobra.Command {
 	var jsonOut bool
+	var probeHealth bool
 	c := &cobra.Command{
 		Use:   "status",
 		Short: "Show state of all mcp-local-hub scheduler tasks",
@@ -25,9 +26,19 @@ State column:
   Stopped    — task idle, no future trigger, no daemon. Run 'restart' to revive.
   Disabled   — scheduler marked task as disabled (rare)
 
+--health adds an MCP protocol smoke test per Running daemon. The
+column shows either the tool count returned by tools/list ("OK N")
+or the error the MCP server returned ("ERR ..."). Running + port
+bound is NOT the same as 'MCP protocol responds' — a daemon can
+be alive while its upstream backend (e.g. gdb/lldb binaries) is
+missing, or while the subprocess is wedged. --health adds ~1-3 s
+of round-trip time per daemon; use it for diagnostic passes, not
+routine polling.
+
 Examples:
-  mcphub status         # pretty table
-  mcphub status --json  # machine-readable
+  mcphub status             # pretty table
+  mcphub status --json      # machine-readable
+  mcphub status --health    # + MCP-level probe
 
 Troubleshooting:
   - All tasks showing Stopped? The mcphub binary may have moved.
@@ -38,7 +49,7 @@ Troubleshooting:
 See also: restart, stop, logs, scheduler upgrade.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a := api.NewAPI()
-			rows, err := a.Status()
+			rows, err := a.StatusWithHealth(probeHealth)
 			if err != nil {
 				return err
 			}
@@ -47,8 +58,13 @@ See also: restart, stop, logs, scheduler upgrade.`,
 				enc.SetIndent("", "  ")
 				return enc.Encode(rows)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%-45s %-10s %-6s %-8s %-8s %-10s %s\n",
-				"NAME", "STATE", "PORT", "PID", "RAM(MB)", "UPTIME", "NEXT RUN")
+			headerFmt := "%-45s %-10s %-6s %-8s %-8s %-10s %s\n"
+			headerArgs := []any{"NAME", "STATE", "PORT", "PID", "RAM(MB)", "UPTIME", "NEXT RUN"}
+			if probeHealth {
+				headerFmt = "%-45s %-10s %-6s %-8s %-8s %-10s %-20s %s\n"
+				headerArgs = []any{"NAME", "STATE", "PORT", "PID", "RAM(MB)", "UPTIME", "HEALTH", "NEXT RUN"}
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), headerFmt, headerArgs...)
 			for _, r := range rows {
 				ram := ""
 				if r.RAMBytes > 0 {
@@ -66,12 +82,34 @@ See also: restart, stop, logs, scheduler upgrade.`,
 				if r.PID > 0 {
 					pid = fmt.Sprintf("%d", r.PID)
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "%-45s %-10s %-6s %-8s %-8s %-10s %s\n",
-					r.TaskName, r.State, port, pid, ram, uptime, r.NextRun)
+				if probeHealth {
+					health := ""
+					switch {
+					case r.Health == nil:
+						health = "—"
+					case r.Health.OK:
+						health = fmt.Sprintf("OK (%d)", r.Health.ToolCount)
+					default:
+						health = "ERR: " + firstN(r.Health.Err, 40)
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), headerFmt,
+						r.TaskName, r.State, port, pid, ram, uptime, health, r.NextRun)
+				} else {
+					fmt.Fprintf(cmd.OutOrStdout(), headerFmt,
+						r.TaskName, r.State, port, pid, ram, uptime, r.NextRun)
+				}
 			}
 			return nil
 		},
 	}
 	c.Flags().BoolVar(&jsonOut, "json", false, "machine-readable JSON output")
+	c.Flags().BoolVar(&probeHealth, "health", false, "MCP-level smoke test: initialize + tools/list per Running daemon")
 	return c
+}
+
+func firstN(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
