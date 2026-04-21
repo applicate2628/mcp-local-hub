@@ -20,6 +20,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -57,6 +58,21 @@ func (a *API) EnsureWeeklyRefreshTask() error {
 	if err != nil {
 		return err
 	}
+	// Snapshot any prior task before the destructive Delete so a Create
+	// failure can restore the previously working schedule. Register
+	// treats EnsureWeeklyRefreshTask errors as non-fatal warnings — a
+	// transient scheduler glitch must not silently disable weekly
+	// refresh for every registered workspace until the next successful
+	// register hits this path again.
+	var priorXML []byte
+	if xml, err := sch.ExportXML(WeeklyRefreshTaskName); err == nil {
+		priorXML = xml
+	} else if !errors.Is(err, scheduler.ErrTaskNotFound) {
+		// ExportXML failed for a reason other than "not found" — abort
+		// before the destructive Delete. Transient export errors should
+		// not nuke the existing schedule.
+		return fmt.Errorf("export prior %s: %w", WeeklyRefreshTaskName, err)
+	}
 	// Idempotent replace: Delete returns nil if the task is absent.
 	_ = sch.Delete(WeeklyRefreshTaskName)
 	spec := scheduler.TaskSpec{
@@ -70,6 +86,14 @@ func (a *API) EnsureWeeklyRefreshTask() error {
 		},
 	}
 	if err := sch.Create(spec); err != nil {
+		// Create failed — restore the prior task if we had one so the
+		// previously working schedule survives the transient glitch.
+		if len(priorXML) > 0 {
+			if rerr := sch.ImportXML(WeeklyRefreshTaskName, priorXML); rerr != nil {
+				return fmt.Errorf("create %s failed: %w; additionally restore-prior failed: %v",
+					WeeklyRefreshTaskName, err, rerr)
+			}
+		}
 		return fmt.Errorf("create %s: %w", WeeklyRefreshTaskName, err)
 	}
 	return nil

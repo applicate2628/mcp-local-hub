@@ -193,6 +193,37 @@ func (r *recordingScheduler) ImportXML(name string, xml []byte) error {
 	return r.inner.ImportXML(name, xml)
 }
 
+// TestEnsureWeeklyRefreshTask_PreservesPriorOnCreateFailure guards the
+// "transient Create glitch silently disables weekly refresh" regression.
+// Old behavior: Delete → Create. A Create failure left the previous
+// task gone, and Register treats EnsureWeeklyRefreshTask errors as
+// non-fatal warnings. Every registered workspace silently loses
+// weekly-refresh scheduling until someone re-registers successfully.
+// New behavior: snapshot priorXML before Delete; on Create failure,
+// ImportXML to restore the prior schedule.
+func TestEnsureWeeklyRefreshTask_PreservesPriorOnCreateFailure(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+
+	a := NewAPI()
+	// First call succeeds — establishes the prior task + XML in the fake.
+	if err := a.EnsureWeeklyRefreshTask(); err != nil {
+		t.Fatalf("seed Ensure: %v", err)
+	}
+	// Force the NEXT Create to fail (transient scheduler glitch).
+	h.fakeSch.failCreateForName = WeeklyRefreshTaskName
+
+	err := a.EnsureWeeklyRefreshTask()
+	if err == nil {
+		t.Fatal("expected Ensure to error on Create failure")
+	}
+	// The prior task's XML must have been restored via ImportXML.
+	xml, xerr := h.fakeSch.ExportXML(WeeklyRefreshTaskName)
+	if xerr != nil || len(xml) == 0 {
+		t.Errorf("prior task not restored after Create failure: xerr=%v xml-len=%d", xerr, len(xml))
+	}
+}
+
 // TestEnsureWeeklyRefreshTask_Idempotent verifies EnsureWeeklyRefreshTask can
 // be called repeatedly without error and produces exactly one shared task.
 func TestEnsureWeeklyRefreshTask_Idempotent(t *testing.T) {
