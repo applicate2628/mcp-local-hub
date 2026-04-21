@@ -293,20 +293,13 @@ func (a *API) registerOneLanguage(
 		return WorkspaceEntry{}, fmt.Errorf("create task %s: %w", taskName, err)
 	}
 	fmt.Fprintf(w, "\u2713 Scheduler task created: %s\n", taskName)
-	// Start the proxy immediately. Logon-triggered tasks only fire at the
-	// next logon, so without this call `mcphub register` would advertise a
-	// dead port until the user reboots. Mirrors the Phase 2 install path
-	// which invokes sch.Run right after Create. On Run failure we fall
-	// back to the rollback stack, which will Delete the task (restoring
-	// the prior XML, if any) and the registry row.
-	if err := sch.Run(taskName); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("run task %s: %w", taskName, err)
-	}
-	fmt.Fprintf(w, "\u2713 Scheduler task started: %s\n", taskName)
-	// 2. Write client entries.
-	bindings := m.ClientBindings
-	if len(bindings) == 0 {
-		bindings = defaultClientBindings
+	// Pre-compute client entry names so the registry entry can be fully
+	// composed BEFORE we start the proxy. The daemon launched by sch.Run
+	// loads workspaces.yaml on startup and exits if its (workspaceKey,
+	// language) is absent — persisting-before-Run closes that race.
+	bindingsPre := m.ClientBindings
+	if len(bindingsPre) == 0 {
+		bindingsPre = defaultClientBindings
 	}
 	entryNameByClient := map[string]string{}
 	if had {
@@ -314,16 +307,54 @@ func (a *API) registerOneLanguage(
 			entryNameByClient[k] = v
 		}
 	}
-	for _, b := range bindings {
+	for _, b := range bindingsPre {
 		client, ok := allClients[b.Client]
 		if !ok || !client.Exists() {
 			continue
 		}
-		entryName, already := entryNameByClient[b.Client]
-		if !already {
-			entryName = ResolveEntryName(reg, m.Name, lang, wsKey)
-			entryNameByClient[b.Client] = entryName
+		if _, already := entryNameByClient[b.Client]; !already {
+			entryNameByClient[b.Client] = ResolveEntryName(reg, m.Name, lang, wsKey)
 		}
+	}
+	composedEntry := WorkspaceEntry{
+		WorkspaceKey:  wsKey,
+		WorkspacePath: canonical,
+		Language:      lang,
+		Backend:       spec.Backend,
+		Port:          port,
+		TaskName:      taskName,
+		ClientEntries: entryNameByClient,
+		WeeklyRefresh: opts.WeeklyRefresh,
+		Lifecycle:     LifecycleConfigured,
+	}
+	reg.Put(composedEntry)
+	if err := reg.Save(); err != nil {
+		return WorkspaceEntry{}, fmt.Errorf("persist registry: %w", err)
+	}
+	capturedRegKey := wsKey
+	capturedRegLang := lang
+	*rollback = append(*rollback, func() {
+		reg.Remove(capturedRegKey, capturedRegLang)
+		_ = reg.Save()
+		fmt.Fprintf(w, "  rollback: removed registry entry %s/%s\n", capturedRegKey, capturedRegLang)
+	})
+
+	// Start the proxy. Registry is already persisted, so daemon startup
+	// finds the entry. Logon-triggered tasks only fire at the next logon,
+	// so this sch.Run prevents the port from advertising dead until reboot.
+	if err := sch.Run(taskName); err != nil {
+		return WorkspaceEntry{}, fmt.Errorf("run task %s: %w", taskName, err)
+	}
+	fmt.Fprintf(w, "\u2713 Scheduler task started: %s\n", taskName)
+	// 2. Write client entries. Names + entry were pre-composed above;
+	// this loop just pushes entries into each client's config and
+	// registers per-client rollbacks.
+	for _, b := range bindingsPre {
+		client, ok := allClients[b.Client]
+		if !ok || !client.Exists() {
+			continue
+		}
+		entryName := entryNameByClient[b.Client]
 		priorEntry, _ := client.GetEntry(entryName)
 		urlPath := b.URLPath
 		if urlPath == "" {
@@ -351,18 +382,7 @@ func (a *API) registerOneLanguage(
 		})
 		fmt.Fprintf(w, "\u2713 %s \u2192 %s (entry %s)\n", b.Client, entry.URL, entryName)
 	}
-	// 3. Compose registry entry.
-	return WorkspaceEntry{
-		WorkspaceKey:  wsKey,
-		WorkspacePath: canonical,
-		Language:      lang,
-		Backend:       spec.Backend,
-		Port:          port,
-		TaskName:      taskName,
-		ClientEntries: entryNameByClient,
-		WeeklyRefresh: opts.WeeklyRefresh,
-		Lifecycle:     LifecycleConfigured, // lazy-mode: proxy scheduled, backend NOT spawned
-	}, nil
+	return composedEntry, nil
 }
 
 // Unregister removes scheduler tasks, client-config entries, and registry
@@ -387,7 +407,13 @@ func (a *API) Unregister(workspacePath string, languages []string) (*UnregisterR
 }
 
 func (a *API) unregisterWithManifest(m *config.ServerManifest, workspacePath string, languages []string, w io.Writer) (*UnregisterReport, error) {
-	canonical, err := CanonicalWorkspacePath(workspacePath)
+	// Use the existence-tolerant variant: the operator may be cleaning up
+	// a registration whose workspace directory has since been deleted,
+	// moved, or is on an unavailable drive. Without this weakening, an
+	// orphaned scheduler task / client entry / registry row survives
+	// forever because the user cannot run `mcphub unregister` against a
+	// missing path. Registration paths still use the strict form.
+	canonical, err := CanonicalWorkspacePathForCleanup(workspacePath)
 	if err != nil {
 		return nil, err
 	}

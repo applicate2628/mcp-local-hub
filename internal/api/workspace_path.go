@@ -43,6 +43,25 @@ func CanonicalWorkspacePath(p string) (string, error) {
 	return abs, nil
 }
 
+// CanonicalWorkspacePathForCleanup performs the same abs+clean+drive-lowercase
+// normalization as CanonicalWorkspacePath but does NOT require the directory
+// to exist. Use for unregister and other cleanup paths where the workspace
+// may have been deleted, moved, or be on an unavailable drive — the user
+// still needs a way to remove orphaned scheduler tasks / registry rows /
+// client entries. Registration paths MUST use CanonicalWorkspacePath so the
+// existence + non-symlink invariants hold for daemons that will actually
+// open files inside the workspace.
+func CanonicalWorkspacePathForCleanup(p string) (string, error) {
+	abs, err := filepath.Abs(filepath.Clean(p))
+	if err != nil {
+		return "", fmt.Errorf("workspace path: %w", err)
+	}
+	if runtime.GOOS == "windows" && len(abs) >= 2 && abs[1] == ':' {
+		abs = strings.ToLower(string(abs[0])) + abs[1:]
+	}
+	return abs, nil
+}
+
 // WorkspaceKey returns a short deterministic hex identifier for a canonical
 // workspace path. 8 hex chars = 32 bits of entropy. Used in scheduler task
 // names and client entry suffixes — the raw path (with backslashes, colons,

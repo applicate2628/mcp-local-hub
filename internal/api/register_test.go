@@ -270,6 +270,47 @@ func TestRegister_RollbackOnClientFailure(t *testing.T) {
 	}
 }
 
+// TestRegister_RegistryPersistedBeforeRun guards the race between
+// sch.Run and reg.Save: the daemon process spawned by Run loads
+// workspaces.yaml immediately and exits if (workspaceKey, language)
+// is absent. Registry must be on disk BEFORE sch.Run fires, otherwise
+// the first launch races against persistence and the proxy may fail
+// startup until scheduler retry / next logon.
+func TestRegister_RegistryPersistedBeforeRun(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	origKill := killByPortFn
+	defer func() { killByPortFn = origKill }()
+	killByPortFn = func(port int, _ time.Duration) error { return nil }
+	// Instrument fakeScheduler.Run to snapshot the registry file contents
+	// AT THE MOMENT Run is called. If persist-before-Run holds, the file
+	// must contain this language's entry by then.
+	ws := t.TempDir()
+	m := nineLanguageManifest()
+	var snapshot []WorkspaceEntry
+	h.fakeSch.runHook = func(name string) {
+		reg := NewRegistry(h.regPath)
+		_ = reg.Load()
+		snapshot = append([]WorkspaceEntry(nil), reg.Workspaces...)
+	}
+	defer func() { h.fakeSch.runHook = nil }()
+	if _, err := mustNewAPI(t).registerWithManifest(m, ws, []string{"python"}, RegisterOpts{Writer: &bytes.Buffer{}}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	// At the moment sch.Run fired, the registry must already contain the
+	// python entry on disk.
+	var sawPython bool
+	for _, e := range snapshot {
+		if e.Language == "python" {
+			sawPython = true
+			break
+		}
+	}
+	if !sawPython {
+		t.Errorf("registry did not contain python entry when sch.Run fired (snapshot=%+v)", snapshot)
+	}
+}
+
 // TestRegister_PriorTaskRestoredIfCreateFails guards the narrow
 // "Create fails on re-register" window: the rollback closure must
 // already be registered BEFORE sch.Delete runs, so a subsequent
@@ -827,9 +868,10 @@ type fakeScheduler struct {
 	failCreateForName string // if non-empty, Create with Name==this value returns an induced error
 	createCount       int
 	createdSpecs      []scheduler.TaskSpec
-	failRunForTask    string   // if non-empty, Run(name) returns an induced error for this task name
-	runCount          int      // total Run invocations
-	runNames          []string // ordered list of task names passed to Run
+	failRunForTask    string            // if non-empty, Run(name) returns an induced error for this task name
+	runCount          int               // total Run invocations
+	runHook           func(name string) // optional hook called at the top of Run before the induced-failure check
+	runNames          []string          // ordered list of task names passed to Run
 }
 
 func (f *fakeScheduler) Create(spec scheduler.TaskSpec) error {
@@ -855,6 +897,9 @@ func (f *fakeScheduler) Create(spec scheduler.TaskSpec) error {
 }
 func (f *fakeScheduler) Delete(name string) error { delete(f.tasks, name); return nil }
 func (f *fakeScheduler) Run(name string) error {
+	if f.runHook != nil {
+		f.runHook(name)
+	}
 	f.runCount++
 	f.runNames = append(f.runNames, name)
 	if f.failRunForTask != "" && f.failRunForTask == name {
