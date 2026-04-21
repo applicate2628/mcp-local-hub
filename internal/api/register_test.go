@@ -348,6 +348,48 @@ func TestRegister_ReRegisterKillsOldProxyBeforeReplace(t *testing.T) {
 	}
 }
 
+// TestRegister_ReRegisterPreservesPriorWeeklyRefresh guards the narrow
+// case where a user previously registered with --no-weekly-refresh
+// (WeeklyRefresh=false) and later ran a plain `mcphub register` (which
+// defaults opts.WeeklyRefresh to true). Before the fix, the silent
+// default would re-enable weekly refresh despite the user's original
+// choice. Re-register must preserve the prior WeeklyRefresh value on
+// the idempotent path.
+func TestRegister_ReRegisterPreservesPriorWeeklyRefresh(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	origKill := killByPortFn
+	defer func() { killByPortFn = origKill }()
+	killByPortFn = func(port int, _ time.Duration) error { return nil }
+	ws := t.TempDir()
+	m := nineLanguageManifest()
+	a := mustNewAPI(t)
+	// First register with WeeklyRefresh=false (mimics --no-weekly-refresh).
+	if _, err := a.registerWithManifest(m, ws, []string{"python"}, RegisterOpts{
+		Writer:        &bytes.Buffer{},
+		WeeklyRefresh: false,
+	}); err != nil {
+		t.Fatalf("first register: %v", err)
+	}
+	// Plain re-register with default opts.WeeklyRefresh=true — must
+	// NOT silently re-enable the user's disabled setting.
+	if _, err := a.registerWithManifest(m, ws, []string{"python"}, RegisterOpts{
+		Writer:        &bytes.Buffer{},
+		WeeklyRefresh: true, // CLI default
+	}); err != nil {
+		t.Fatalf("re-register: %v", err)
+	}
+	reg := NewRegistry(h.regPath)
+	_ = reg.Load()
+	e, ok := reg.Get(WorkspaceKey(mustCanonical(t, ws)), "python")
+	if !ok {
+		t.Fatal("entry missing after re-register")
+	}
+	if e.WeeklyRefresh {
+		t.Errorf("re-register silently flipped WeeklyRefresh back to true (regression); want prior value (false)")
+	}
+}
+
 // TestRegister_AbortsBeforeDeleteOnExportXMLError guards the narrow
 // case where ExportXML fails for a reason OTHER than ErrTaskNotFound
 // (permission denied, scheduler service unavailable, XML corruption).

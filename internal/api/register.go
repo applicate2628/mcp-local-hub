@@ -334,6 +334,17 @@ func (a *API) registerOneLanguage(
 			entryNameByClient[b.Client] = ResolveEntryName(reg, m.Name, lang, wsKey)
 		}
 	}
+	// On re-register (idempotent path, had == true), preserve the prior
+	// weekly_refresh value. Otherwise a user who previously registered
+	// with --no-weekly-refresh would have it silently re-enabled by any
+	// later `mcphub register` invocation, since opts.WeeklyRefresh
+	// defaults to true in the CLI flow. A caller that wants to CHANGE
+	// the setting on re-register must use a dedicated path (e.g., a
+	// future `mcphub workspaces set weekly-refresh=...`).
+	weeklyRefresh := opts.WeeklyRefresh
+	if had {
+		weeklyRefresh = prior.WeeklyRefresh
+	}
 	composedEntry := WorkspaceEntry{
 		WorkspaceKey:  wsKey,
 		WorkspacePath: canonical,
@@ -342,7 +353,7 @@ func (a *API) registerOneLanguage(
 		Port:          port,
 		TaskName:      taskName,
 		ClientEntries: entryNameByClient,
-		WeeklyRefresh: opts.WeeklyRefresh,
+		WeeklyRefresh: weeklyRefresh,
 		Lifecycle:     LifecycleConfigured,
 	}
 	reg.Put(composedEntry)

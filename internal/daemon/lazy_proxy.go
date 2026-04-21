@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -234,6 +235,16 @@ func (p *LazyProxy) handleToolsCall(w http.ResponseWriter, r *http.Request, req 
 	}
 	resp, err := ep.SendRequest(r.Context(), req)
 	if err != nil {
+		// Differentiate client-cancel from backend failure. SendRequest
+		// is driven by r.Context(); a client disconnect or timeout
+		// returns context.Canceled / context.DeadlineExceeded even
+		// when the backend is healthy. Tearing down on client cancel
+		// would force avoidable rematerialization for every other
+		// caller of the same proxy.
+		if isClientCancelErr(r.Context(), err) {
+			writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
+			return
+		}
 		// Backend died mid-stream or stdio channel failed. Evict the cached
 		// endpoint, clear the inflight gate (so the next call re-materializes),
 		// and mark the registry as Failed so `status` surfaces the incident.
@@ -263,6 +274,11 @@ func (p *LazyProxy) handleForward(w http.ResponseWriter, r *http.Request, req *J
 	}
 	resp, err := ep.SendRequest(r.Context(), req)
 	if err != nil {
+		// Client-cancel is not a backend failure — see handleToolsCall.
+		if isClientCancelErr(r.Context(), err) {
+			writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
+			return
+		}
 		p.onSendFailure(err)
 		writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
 		return
@@ -273,6 +289,23 @@ func (p *LazyProxy) handleForward(w http.ResponseWriter, r *http.Request, req *J
 		return
 	}
 	writeJSON(w, out)
+}
+
+// isClientCancelErr reports whether err is the consequence of the client's
+// request context being canceled or timing out, rather than a backend
+// failure. Treats any error with the request context already canceled as
+// client-cancel — SendRequest commonly wraps context.Canceled inside a
+// "write stdin:" or "send rpc:" wrapper, and errors.Is would miss the
+// unwrapped case. If the context is still Live we fall back to
+// errors.Is(err, context.Canceled|DeadlineExceeded) for belt-and-braces.
+func isClientCancelErr(ctx context.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	if ctx.Err() != nil {
+		return true
+	}
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 // handleSSE answers GET /mcp. v1 minimal behavior: before materialization,

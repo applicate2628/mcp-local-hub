@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -466,6 +467,45 @@ func TestLazyProxy_ThrottledRetryReturnsCachedError(t *testing.T) {
 	}
 	if got := f.materializeCount.Load(); got != 1 {
 		t.Errorf("materializeCount = %d after throttled retry, want 1", got)
+	}
+}
+
+// TestLazyProxy_ClientCancelDoesNotTearDownBackend guards the narrow
+// case where a client disconnects mid-request: SendRequest returns
+// context.Canceled (driven by r.Context()), but the backend subprocess
+// is still alive and healthy. The proxy must NOT call onSendFailure
+// in that case — tearing down the backend over a client-side issue
+// forces every other caller into an avoidable rematerialization and
+// briefly marks lifecycle as Failed in the registry.
+func TestLazyProxy_ClientCancelDoesNotTearDownBackend(t *testing.T) {
+	// Fake returns context.Canceled (as if the downstream SendRequest
+	// observed the client-side cancel propagating through its ctx).
+	f := &fakeLifecycle{
+		kind:           "mcp-language-server",
+		sendRequestErr: context.Canceled,
+	}
+	p, regPath := newTestProxy(t, "mcp-language-server", f)
+	h := p.Handler()
+
+	// Use a pre-canceled context so the proxy sees ctx.Err() != nil on
+	// the failed SendRequest — matches the isClientCancelErr branch.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call"}`)
+	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/mcp", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	// The backend must NOT be stopped — client-cancel is not a crash.
+	if got := f.stopCount.Load(); got != 0 {
+		t.Errorf("client-cancel triggered backend Stop: count=%d (regression)", got)
+	}
+	// And the registry Lifecycle must still be Active (or whatever
+	// materialization set), NOT Failed.
+	e := readEntry(t, regPath)
+	if e.Lifecycle == api.LifecycleFailed {
+		t.Errorf("client-cancel flipped lifecycle to Failed (regression): %+v", e)
 	}
 }
 
