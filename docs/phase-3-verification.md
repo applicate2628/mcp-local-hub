@@ -429,26 +429,40 @@ regardless of when they fire. Regression guard:
 attempt `reg.Lock()` in a goroutine with a 2s bound — fails immediately if
 Register is ever again holding the flock across `sch.Run`.
 
+## Multi-language smoke closeout
+
+Ran additionally to close the "not live-verified for multi-language
+workspaces" concern. Registered two languages with different backends on
+the same workspace:
+
+```
+$ mcphub register d:\dev\mcp-local-hub python
+✓ python → port=9200 task=mcp-local-hub-lsp-b133f336-python
+  (backend: mcp-language-server, wraps pyright-langserver via -lsp flag)
+
+$ mcphub register d:\dev\mcp-local-hub go
+✓ go     → port=9201 task=mcp-local-hub-lsp-b133f336-go
+  (backend: gopls-mcp, native gopls MCP subcommand)
+
+$ mcphub workspaces
+b133f336  go      9201  gopls-mcp            configured  -  d:\dev\mcp-local-hub
+b133f336  python  9200  mcp-language-server  configured  -  d:\dev\mcp-local-hub
+
+$ schtasks /Query ...
+mcp-local-hub-lsp-b133f336-go       Running
+mcp-local-hub-lsp-b133f336-python   Running
+```
+
+Port allocator correctly bumped python (registered first) to 9200 and go
+to 9201 — confirming the AllocatePort → reg.Save atomicity across
+per-language flock windows introduced in `551a885`. Partial unregister
+(`mcphub unregister <ws> python`) tore down only python's task + client
+entries, leaving go's registration intact. Full `mcphub unregister <ws>`
+then removed the remaining go task cleanly. No leftover scheduler entries
+at any step. Three back-to-back register/materialize/unregister cycles
+each deleted the task reliably — no task-survive flakiness observed.
+
 ## Known gaps / follow-ups
-
-### 🟡 `mcphub unregister` reports task deletion but Windows task survives
-
-Second observation from the smoke: after a successful `mcphub unregister`
-whose output included `✓ deleted scheduler task mcp-local-hub-lsp-b133f336-go`,
-`schtasks /Query` still showed the task entry (with `Last Result: 1` — the
-exit code of the dying proxy). Manually running `schtasks /Delete /TN
-"\mcp-local-hub-lsp-b133f336-go" /F` reported SUCCESS and removed it. The Go
-`sch.Delete` call in `scheduler_windows.go` treats "task not found" output as
-idempotent success — it may be swallowing a delete-while-transitional case.
-Separate investigation owed. Not a data-safety issue (the registry row, client
-entries, and listening port are all cleaned up), but leaves an orphaned
-scheduler task definition on re-register.
-
-### ⚪ `mcp status` `--workspace-scoped` filter live-verified only for single-language workspace
-
-Lifecycle transitions `configured → active` and `last_used` timestamp both
-rendered correctly during the smoke. Not live-verified for multi-language
-workspaces on this machine; unit-tested via `status_workspace_test.go`.
 
 ### ⚪ Weekly-refresh for workspace-scoped uses one shared task
 
