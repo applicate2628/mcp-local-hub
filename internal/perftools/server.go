@@ -263,9 +263,12 @@ func (tb *PerfToolbox) listToolsTool(ctx context.Context, _ *mcp.CallToolRequest
 }
 
 // getToolsResource serves resource://tools — marshals the catalog to
-// JSON and returns it as a single TextResourceContents.
+// JSON and returns it as a single TextResourceContents. Honors the
+// hyperfine opt-in gate: when unset, hyperfine is stripped from the
+// advertised catalog so the "check tools first, then call" contract
+// stays "callable if advertised" — not "maybe callable".
 func (tb *PerfToolbox) getToolsResource(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
-	body, err := json.MarshalIndent(tb.tools.AsMap(), "", "  ")
+	body, err := json.MarshalIndent(tb.availableToolsMap(), "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("marshal tool catalog: %w", err)
 	}
@@ -274,4 +277,16 @@ func (tb *PerfToolbox) getToolsResource(ctx context.Context, req *mcp.ReadResour
 			{URI: req.Params.URI, MIMEType: "application/json", Text: string(body)},
 		},
 	}, nil
+}
+
+// availableToolsMap returns tb.tools.AsMap() with tools filtered out when
+// the corresponding registration gate is closed. Today that only affects
+// hyperfine, but centralizing the filter keeps discovery consistent with
+// the actual AddTool branches in registerTools.
+func (tb *PerfToolbox) availableToolsMap() map[string]*ToolInfo {
+	m := tb.tools.AsMap()
+	if !hyperfineEnabled() {
+		delete(m, "hyperfine")
+	}
+	return m
 }

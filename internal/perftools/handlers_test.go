@@ -34,6 +34,8 @@ func TestDetectTools_ReportsInstalledWithVersion(t *testing.T) {
 }
 
 func TestListToolsTool_MirrorsResourceCatalog(t *testing.T) {
+	// Gate open: all four tools must appear in the advertised catalog.
+	t.Setenv(hyperfineOptInEnv, "1")
 	tb := &PerfToolbox{tools: DetectTools()}
 	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{}`)}}
 	result, err := tb.listToolsTool(t.Context(), req)
@@ -55,7 +57,34 @@ func TestListToolsTool_MirrorsResourceCatalog(t *testing.T) {
 	}
 }
 
+// TestListToolsTool_HidesHyperfineWhenGateClosed guards the discovery
+// contract: when the hyperfine gate is CLOSED, list_tools must NOT
+// advertise hyperfine, so a client following "check tools first, then
+// call" never attempts a tools/call that would 404. Otherwise the
+// contract regresses from "callable if advertised" to "maybe callable".
+func TestListToolsTool_HidesHyperfineWhenGateClosed(t *testing.T) {
+	t.Setenv(hyperfineOptInEnv, "")
+	tb := &PerfToolbox{tools: DetectTools()}
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{}`)}}
+	result, err := tb.listToolsTool(t.Context(), req)
+	if err != nil {
+		t.Fatalf("listToolsTool: %v", err)
+	}
+	text := result.Content[0].(*mcp.TextContent).Text
+	if strings.Contains(text, "hyperfine") {
+		t.Errorf("hyperfine advertised despite closed gate; list_tools output: %s", text)
+	}
+	// The other three remain visible.
+	for _, name := range []string{"clang-tidy", "llvm-objdump", "include-what-you-use"} {
+		if !strings.Contains(text, name) {
+			t.Errorf("non-gated tool %q missing from list_tools: %s", name, text)
+		}
+	}
+}
+
 func TestToolsResource_ReturnsJSONCatalog(t *testing.T) {
+	// Gate open: all four tools must appear in the JSON body.
+	t.Setenv(hyperfineOptInEnv, "1")
 	srv := &PerfToolbox{tools: DetectTools()}
 
 	req := &mcp.ReadResourceRequest{Params: &mcp.ReadResourceParams{}}
@@ -80,6 +109,33 @@ func TestToolsResource_ReturnsJSONCatalog(t *testing.T) {
 	for _, key := range []string{"clang-tidy", "hyperfine", "llvm-objdump", "include-what-you-use"} {
 		if _, ok := parsed[key]; !ok {
 			t.Errorf("catalog missing key %q in JSON: %s", key, rc.Text)
+		}
+	}
+}
+
+// TestToolsResource_HidesHyperfineWhenGateClosed — resource-transport
+// twin of the list_tools test. Discovery must stay consistent across
+// both transports.
+func TestToolsResource_HidesHyperfineWhenGateClosed(t *testing.T) {
+	t.Setenv(hyperfineOptInEnv, "")
+	srv := &PerfToolbox{tools: DetectTools()}
+	req := &mcp.ReadResourceRequest{Params: &mcp.ReadResourceParams{}}
+	req.Params.URI = "resource://tools"
+	result, err := srv.getToolsResource(t.Context(), req)
+	if err != nil {
+		t.Fatalf("getToolsResource: %v", err)
+	}
+	rc := result.Contents[0]
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(rc.Text), &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if _, has := parsed["hyperfine"]; has {
+		t.Errorf("hyperfine key advertised despite closed gate: %s", rc.Text)
+	}
+	for _, key := range []string{"clang-tidy", "llvm-objdump", "include-what-you-use"} {
+		if _, ok := parsed[key]; !ok {
+			t.Errorf("non-gated tool %q missing from JSON: %s", key, rc.Text)
 		}
 	}
 }
