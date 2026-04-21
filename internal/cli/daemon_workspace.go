@@ -197,6 +197,7 @@ func buildWorkspaceBackendLifecycle(spec config.LanguageSpec, canonicalWorkspace
 			Workspace:      canonicalWorkspace,
 			Language:       language,
 			LogPath:        logPath,
+			LSPCommand:     spec.LspCommand, // enables pre-flight for LSP-missing → LifecycleMissing
 		})
 	default:
 		return nil

@@ -258,7 +258,18 @@ func (a *API) registerOneLanguage(
 	}
 	capturedTaskName := taskName
 	capturedPriorXML := priorXML
+	capturedPort := port
 	*rollback = append(*rollback, func() {
+		// Kill the running proxy BEFORE deleting the task. On Windows,
+		// sch.Delete removes the task definition but does NOT terminate
+		// the already-started process. If sch.Run above succeeded and
+		// a later step (client-config write, registry save) failed, the
+		// rollback stack runs — without this kill, an orphan proxy would
+		// keep the allocated port bound and break immediate re-register
+		// attempts. killByPortFn is a no-op if nothing is listening.
+		if capturedPort > 0 {
+			_ = killByPortFn(capturedPort, 5*time.Second)
+		}
 		_ = sch.Delete(capturedTaskName)
 		if len(capturedPriorXML) > 0 {
 			_ = sch.ImportXML(capturedTaskName, capturedPriorXML)

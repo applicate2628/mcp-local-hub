@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os/exec"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -83,6 +84,35 @@ func TestBackendLifecycle_MissingBinarySurfaces(t *testing.T) {
 	}
 	if !IsMissingBinaryErr(err) {
 		t.Errorf("error should classify as missing-binary: %v", err)
+	}
+}
+
+// TestBackendLifecycle_MissingWrappedLSPClassifiedAsMissing guards the
+// "wrapper installed, language server missing" case: mcp-language-server
+// exists on PATH but the configured -lsp binary does not. Without the
+// pre-flight LookPath check, the wrapper starts successfully and fails
+// during MCP handshake, which wrapInitErr wraps as a generic init failure
+// → LifecycleFailed. The contract expects LifecycleMissing for any missing
+// binary in the chain, so the proxy can render the correct status cell
+// and the operator sees "install pyright" not "debug init failure".
+func TestBackendLifecycle_MissingWrappedLSPClassifiedAsMissing(t *testing.T) {
+	wrapper, wrapperArgs := fakeLSPCommand(t) // a binary that actually exists
+	b := NewMcpLanguageServerStdio(McpLanguageServerStdioConfig{
+		WrapperCommand: wrapper,
+		WrapperArgs:    wrapperArgs,
+		Workspace:      t.TempDir(),
+		Language:       "python",
+		LSPCommand:     "this-lsp-binary-does-not-exist-xyz-9999",
+	})
+	_, err := b.Materialize(context.Background())
+	if err == nil {
+		t.Fatal("expected error when wrapped LSP binary is missing")
+	}
+	if !IsMissingBinaryErr(err) {
+		t.Errorf("missing LSP binary must classify as missing (not failed); got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "this-lsp-binary-does-not-exist") {
+		t.Errorf("error must name the missing LSP binary for operator clarity: %v", err)
 	}
 }
 

@@ -270,6 +270,43 @@ func TestRegister_RollbackOnClientFailure(t *testing.T) {
 	}
 }
 
+// TestRegister_RollbackKillsProxyForStartedLanguage guards the Windows
+// orphan-proxy leak: Register's rollback used to only call sch.Delete,
+// which on Windows removes the task definition but leaves the already-
+// started child process (launched by sch.Run) running and bound to the
+// allocated port. A later re-register would find the port occupied.
+// Rollback now kills the running proxy by port before deleting the task.
+func TestRegister_RollbackKillsProxyForStartedLanguage(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	// Capture every port killByPortFn is asked to terminate.
+	origKill := killByPortFn
+	defer func() { killByPortFn = origKill }()
+	var killed []int
+	killByPortFn = func(port int, _ time.Duration) error {
+		killed = append(killed, port)
+		return nil
+	}
+	// Force a client-write failure AFTER scheduler Create + Run succeed on
+	// language 1, so rollback path runs with a live (from the test's
+	// perspective: "should-be-running") proxy.
+	h.fakeClients.failAddEntryCalls = 1
+	ws := t.TempDir()
+	m := nineLanguageManifest()
+	_, err := mustNewAPI(t).registerWithManifest(m, ws, []string{"python"}, RegisterOpts{Writer: &bytes.Buffer{}})
+	if err == nil {
+		t.Fatal("expected forced client-failure to error")
+	}
+	if len(killed) == 0 {
+		t.Fatal("rollback did not invoke killByPortFn — Windows would leak the started proxy process")
+	}
+	for _, p := range killed {
+		if p < 9200 || p > 9299 {
+			t.Errorf("killed port %d outside workspace pool 9200-9299", p)
+		}
+	}
+}
+
 // TestRegister_StartsProxyImmediately verifies the post-Create sch.Run call
 // that prevents logon-triggered tasks from sitting dead until the user's
 // next logon. The original Register created the scheduler task but never

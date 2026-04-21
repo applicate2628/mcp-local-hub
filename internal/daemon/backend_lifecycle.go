@@ -229,6 +229,14 @@ type McpLanguageServerStdioConfig struct {
 	Workspace      string
 	Language       string
 	LogPath        string
+	// LSPCommand is the wrapped LSP binary name (the value passed via
+	// `-lsp <cmd>` in WrapperArgs). Used for a pre-spawn LookPath check
+	// so a missing language server (e.g., pyright-langserver not on
+	// PATH while mcp-language-server itself is installed) is classified
+	// as LifecycleMissing instead of LifecycleFailed. Empty disables
+	// the LSP-side preflight — callers that cannot determine the LSP
+	// binary up-front should leave this empty.
+	LSPCommand string
 	// HandshakeTimeout bounds the post-spawn MCP initialize+initialized
 	// handshake. Defaults to 10 seconds when zero. Exceeding it causes
 	// Materialize to tear the subprocess down and return a wrapped error.
@@ -260,6 +268,16 @@ func (b *mcpLanguageServerStdio) Materialize(ctx context.Context) (MCPEndpoint, 
 	}
 	if _, err := exec.LookPath(b.cfg.WrapperCommand); err != nil {
 		return nil, fmt.Errorf("%w: %s", errMissingBinary, b.cfg.WrapperCommand)
+	}
+	// Wrapper is present but the wrapped LSP binary may not be. Without
+	// this pre-flight, a missing `-lsp <cmd>` binary surfaces as a generic
+	// init/handshake failure (LifecycleFailed), breaking the documented
+	// "wrapper installed, language server missing" → LifecycleMissing
+	// contract. Empty LSPCommand disables the check (caller didn't supply).
+	if b.cfg.LSPCommand != "" {
+		if _, err := exec.LookPath(b.cfg.LSPCommand); err != nil {
+			return nil, fmt.Errorf("%w: %s (wrapped by %s)", errMissingBinary, b.cfg.LSPCommand, b.cfg.WrapperCommand)
+		}
 	}
 	h, err := NewStdioHost(HostConfig{
 		Command:    b.cfg.WrapperCommand,
