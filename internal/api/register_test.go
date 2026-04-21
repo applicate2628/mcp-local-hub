@@ -315,6 +315,42 @@ func TestRegister_RollbackRestoresPriorRegistryEntryOnReRegister(t *testing.T) {
 	}
 }
 
+// TestRegister_AbortsBeforeDeleteOnExportXMLError guards the narrow
+// case where ExportXML fails for a reason OTHER than ErrTaskNotFound
+// (permission denied, scheduler service unavailable, XML corruption).
+// Ignoring the error and proceeding would Delete the existing task
+// without a priorXML snapshot, so rollback could not restore it on a
+// later failure — a transient export error would turn into a
+// persistent outage. Register must abort BEFORE any destructive side
+// effect when the export's error is not the benign "not found".
+func TestRegister_AbortsBeforeDeleteOnExportXMLError(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	// Pre-seed an existing task + XML so the "not found" branch is not
+	// how we get here — the export must fail on the NEXT register.
+	h.fakeSch.xml["mcp-local-hub-lsp-placeholder"] = []byte("<Task/>")
+	h.fakeSch.failExportXMLErr = fmt.Errorf("RPC_E_DISCONNECTED: scheduler service unreachable")
+	deleteCountBefore := 0
+	for range h.fakeSch.tasks {
+		deleteCountBefore++
+	}
+	ws := t.TempDir()
+	m := nineLanguageManifest()
+	_, err := mustNewAPI(t).registerWithManifest(m, ws, []string{"python"}, RegisterOpts{Writer: &bytes.Buffer{}})
+	if err == nil {
+		t.Fatal("expected register to abort on non-not-found ExportXML error")
+	}
+	if !strings.Contains(err.Error(), "export") {
+		t.Errorf("error should mention export failure: %v", err)
+	}
+	// No scheduler Delete should have fired for the language task on the
+	// aborted register (we allow Creates for the shared weekly-refresh
+	// task only, which happens before this code path).
+	if h.fakeSch.createCount > 1 { // weekly-refresh task is 1 Create
+		t.Errorf("expected no per-language Create on abort, got %d total Creates", h.fakeSch.createCount)
+	}
+}
+
 // TestRegister_RegistryPersistedBeforeRun guards the race between
 // sch.Run and reg.Save: the daemon process spawned by Run loads
 // workspaces.yaml immediately and exits if (workspaceKey, language)
@@ -944,6 +980,7 @@ type fakeScheduler struct {
 	failCreateForName string // if non-empty, Create with Name==this value returns an induced error
 	createCount       int
 	createdSpecs      []scheduler.TaskSpec
+	failExportXMLErr  error             // if non-nil, ExportXML returns this error (instead of ErrTaskNotFound)
 	failRunForTask    string            // if non-empty, Run(name) returns an induced error for this task name
 	runCount          int               // total Run invocations
 	runHook           func(name string) // optional hook called at the top of Run before the induced-failure check
@@ -984,6 +1021,9 @@ func (f *fakeScheduler) Run(name string) error {
 	return nil
 }
 func (f *fakeScheduler) ExportXML(name string) ([]byte, error) {
+	if f.failExportXMLErr != nil {
+		return nil, f.failExportXMLErr
+	}
 	if b, ok := f.xml[name]; ok {
 		return b, nil
 	}

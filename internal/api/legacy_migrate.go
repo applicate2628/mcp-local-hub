@@ -162,8 +162,23 @@ func (a *API) MigrateLegacy(entries []LegacyLSEntry, opts LegacyMigrateOpts) (*L
 		regPath, _ := registryPathForRegister()
 		reg := NewRegistry(regPath)
 		_ = reg.Load()
+		// Constrain the in-place check to THIS workspace — otherwise a
+		// name used by a different workspace (e.g., a collision-suffixed
+		// "mcp-language-server-python-abcd" on workspace A, combined with
+		// a plain "mcp-language-server-python" legacy row on workspace B)
+		// would falsely match and skip the RemoveEntry, leaving the old
+		// legacy config in place. CanonicalWorkspacePath here mirrors
+		// what Register did internally; on symlinked/junction paths the
+		// EvalSymlinks resolution is the same, so the keys match.
+		currentWSKey := ""
+		if canonical, err := CanonicalWorkspacePath(ws); err == nil {
+			currentWSKey = WorkspaceKey(canonical)
+		}
 		entryJustWrittenByRegister := func(client, entryName string) bool {
 			for _, regEntry := range reg.Workspaces {
+				if regEntry.WorkspaceKey != currentWSKey {
+					continue
+				}
 				if name, ok := regEntry.ClientEntries[client]; ok && name == entryName {
 					return true
 				}

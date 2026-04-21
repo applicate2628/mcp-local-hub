@@ -227,6 +227,47 @@ func TestMigrateLegacy_PreservesInPlaceReplacedEntry(t *testing.T) {
 	}
 }
 
+// TestMigrateLegacy_InPlaceCheckScopedToCurrentWorkspace guards the
+// global-vs-local-scope fix for entryJustWrittenByRegister. If another
+// workspace happened to have an entry with the same (client, name) as
+// the legacy row being migrated, a global check would falsely treat
+// that as an in-place replacement and skip RemoveEntry — leaving the
+// current workspace's legacy entry dangling. The check must be scoped
+// to the workspace being migrated.
+func TestMigrateLegacy_InPlaceCheckScopedToCurrentWorkspace(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	// Workspace A already registered python with the CANONICAL name.
+	wsA := t.TempDir()
+	a := NewAPI()
+	if _, err := a.registerWithManifest(nineLanguageManifest(), wsA, []string{"python"}, RegisterOpts{Writer: &bytes.Buffer{}}); err != nil {
+		t.Fatalf("prep register wsA: %v", err)
+	}
+	// Workspace B has a LEGACY entry with the same canonical name.
+	// Register for wsB will assign a suffixed name (collision), so the
+	// legacy entry is NOT the name Register wrote for wsB. A global
+	// check would still see "mcp-language-server-python" in wsA's
+	// entries and wrongly skip the delete. Scoped check must detect
+	// wsA is not the current workspace and proceed with RemoveEntry.
+	wsB := t.TempDir()
+	h.fakeClients.entries["codex-cli"]["mcp-language-server-python"] = "wsB-legacy-url"
+	entries := []LegacyLSEntry{
+		{Client: "codex-cli", EntryName: "mcp-language-server-python", Workspace: wsB, Language: "python", LspCommand: "pyright-langserver"},
+	}
+	report, err := a.MigrateLegacy(entries, LegacyMigrateOpts{Yes: true, Writer: &bytes.Buffer{}})
+	if err != nil {
+		t.Fatalf("MigrateLegacy: %v", err)
+	}
+	if len(report.Applied) != 1 {
+		t.Fatalf("expected Applied=1, got %+v", report)
+	}
+	// The legacy entry (with the canonical-but-belongs-to-wsA-too name)
+	// must be GONE because wsB's Register used a suffixed name.
+	if _, still := h.fakeClients.entries["codex-cli"]["mcp-language-server-python"]; still {
+		t.Error("legacy entry survived because in-place check falsely matched another workspace (regression)")
+	}
+}
+
 // TestMigrateLegacy_KeepsLegacyOnRegisterFailure proves the inverse: if
 // Register fails, the legacy rows stay intact so the user can re-run.
 // We induce a failure by making the first client AddEntry call fail,

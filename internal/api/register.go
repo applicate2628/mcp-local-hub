@@ -19,6 +19,7 @@ package api
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -242,6 +243,14 @@ func (a *API) registerOneLanguage(
 	var priorXML []byte
 	if xml, err := sch.ExportXML(taskName); err == nil {
 		priorXML = xml
+	} else if !errors.Is(err, scheduler.ErrTaskNotFound) {
+		// Only "task not found" is safe to ignore — any other export error
+		// (permission, scheduler service down, XML corruption) means we do
+		// NOT have a reliable priorXML snapshot. Proceeding would Delete
+		// the existing task and leave rollback unable to restore it on a
+		// later failure, turning a recoverable re-register error into a
+		// persistent outage.
+		return WorkspaceEntry{}, fmt.Errorf("export prior task %s: %w", taskName, err)
 	}
 	// Register the scheduler rollback BEFORE the destructive Delete+Create
 	// so a Create failure on a re-register path does not orphan the old
