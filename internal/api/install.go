@@ -553,8 +553,15 @@ func probeDaemonHealth(rows []DaemonStatus) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			h := singleHealthProbe(rows[idx].Port)
-			if h != nil && rows[idx].Language != "" {
+			h := singleHealthProbeFn(rows[idx].Port)
+			// Mark lazy-proxy probes by task-name structure, not by
+			// registry-populated Language. Language can be empty when
+			// registry enrichment fails (missing/corrupt file) even
+			// though the task is clearly a lazy proxy. Without the
+			// Source tag the CLI would show "OK (N)" as if a real
+			// backend validated, when only the synthetic tools/list
+			// responded — misleading during incidents.
+			if h != nil && IsLazyProxyTaskName(rows[idx].TaskName) {
 				h.Source = "proxy-synthetic"
 			}
 			rows[idx].Health = h
@@ -567,6 +574,11 @@ func probeDaemonHealth(rows []DaemonStatus) {
 // 127.0.0.1:<port>/mcp with a 3 s total deadline. Returns a
 // populated HealthProbe either way — the CLI decides whether OK or
 // Err is the user-visible signal.
+// singleHealthProbeFn is the test seam for singleHealthProbe. Production
+// callers go through it; tests swap the var so the HTTP round-trip path
+// is not exercised and the probe result is deterministic.
+var singleHealthProbeFn = singleHealthProbe
+
 func singleHealthProbe(port int) *HealthProbe {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()

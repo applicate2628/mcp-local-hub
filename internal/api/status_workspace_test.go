@@ -5,6 +5,32 @@ import (
 	"time"
 )
 
+// TestProbeDaemonHealth_TagsLazyProxyBySourceEvenWithoutLanguage guards
+// the Source-tagging contract: lazy-proxy rows must be marked
+// "proxy-synthetic" based on task-name structure, not registry-populated
+// Language. Language can be empty when registry enrichment fails
+// (missing/corrupt file), but TaskName still identifies the proxy.
+// Without this fix the CLI falls through to global formatting "OK (N)"
+// as if a real backend validated, misleading operators in incidents.
+func TestProbeDaemonHealth_TagsLazyProxyBySourceEvenWithoutLanguage(t *testing.T) {
+	origProbe := singleHealthProbeFn
+	defer func() { singleHealthProbeFn = origProbe }()
+	singleHealthProbeFn = func(port int) *HealthProbe {
+		return &HealthProbe{OK: true, ToolCount: 6}
+	}
+	// Lazy-proxy task with EMPTY Language (simulates registry-miss).
+	rows := []DaemonStatus{
+		{TaskName: "mcp-local-hub-lsp-deadbeef-python", State: "Running", Port: 9217},
+	}
+	probeDaemonHealth(rows)
+	if rows[0].Health == nil {
+		t.Fatal("Health not populated")
+	}
+	if rows[0].Health.Source != "proxy-synthetic" {
+		t.Errorf("Source = %q, want proxy-synthetic (should be tagged by task-name structure, not Language)", rows[0].Health.Source)
+	}
+}
+
 // TestEnrichStatusWithRegistry_OrphanWorkspaceTaskPreservesRawState guards
 // the "missing registry entry" edge case for a workspace-scoped scheduler
 // task. Without this guard, deriveState saw Port=0 → alive=false → the

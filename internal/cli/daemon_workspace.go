@@ -103,6 +103,17 @@ construct the backend lifecycle. Human invocation is not supported.`,
 				return fmt.Errorf("not registered: workspace %s language %s (key %s)",
 					canonical, languageFlag, wsKey)
 			}
+			// Scheduler task args and the registry are two sources of truth
+			// that can drift (stale task XML, manual edits, partial recovery).
+			// If --port mismatches entry.Port, coming up anyway would bind a
+			// port clients and status-metadata don't expect, producing a
+			// silently-broken registration that still looks healthy in
+			// `mcphub workspaces`. Refuse to start — the operator must
+			// explicitly re-register to reconcile.
+			if entry.Port != portFlag {
+				return fmt.Errorf("port mismatch: --port=%d but registry entry for (%s, %s) has port %d; run `mcphub register` to reconcile",
+					portFlag, wsKey, languageFlag, entry.Port)
+			}
 			// Re-assert Configured lifecycle on startup using the already-
 			// loaded Registry (no new flock acquisition — we hold it).
 			// Bind does the same thing via PutLifecycle would deadlock
