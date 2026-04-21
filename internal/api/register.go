@@ -157,21 +157,22 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 	if err := a.EnsureWeeklyRefreshTask(); err != nil {
 		fmt.Fprintf(w, "warning: ensure shared weekly-refresh task: %v\n", err)
 	}
-	// 3. Acquire the registry lock.
+	// 3. Per-language register with rollback stack.
+	//
+	// Registry flock lifetime is scoped to `registerOneLanguage`'s Phase 1
+	// (port alloc + task create + registry write) and is explicitly
+	// released BEFORE `sch.Run` triggers the proxy subprocess. Holding it
+	// across sch.Run + readiness probe deadlocks the proxy: the proxy's
+	// own `reg.Lock()` in `daemon_workspace.go` would block until the
+	// readiness probe times out, then register's rollback would delete
+	// the registry entry, and the unblocked proxy would exit with
+	// "not registered". Rollback closures that touch the registry each
+	// re-acquire the lock themselves.
 	regPath, err := registryPathForRegister()
 	if err != nil {
 		return nil, err
 	}
 	reg := NewRegistry(regPath)
-	unlock, err := reg.Lock()
-	if err != nil {
-		return nil, err
-	}
-	defer unlock()
-	if err := reg.Load(); err != nil {
-		return nil, err
-	}
-	// 4. Per-language register with rollback stack.
 	sch, err := schedulerNewForRegister()
 	if err != nil {
 		return nil, err
@@ -191,11 +192,6 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 			return report, fmt.Errorf("register language %s: %w", lang, err)
 		}
 		report.Entries = append(report.Entries, entry)
-		reg.Put(entry)
-	}
-	if err := reg.Save(); err != nil {
-		runRollback()
-		return report, fmt.Errorf("persist registry: %w", err)
 	}
 	return report, nil
 }
@@ -221,6 +217,26 @@ func (a *API) registerOneLanguage(
 			spec = l
 			break
 		}
+	}
+	// Phase 1: registry write window — acquire flock, load current state,
+	// do all port/task/registry work, release flock BEFORE sch.Run so the
+	// spawned proxy subprocess can acquire it. The rollback closures that
+	// touch registry each re-acquire the flock themselves so rollback is
+	// safe whether it runs during Phase 1 (flock still held) or Phase 2/3
+	// (flock released).
+	unlock, err := reg.Lock()
+	if err != nil {
+		return WorkspaceEntry{}, fmt.Errorf("acquire registry lock: %w", err)
+	}
+	releaseUnlock := func() {
+		if unlock != nil {
+			unlock()
+			unlock = nil
+		}
+	}
+	defer releaseUnlock()
+	if err := reg.Load(); err != nil {
+		return WorkspaceEntry{}, fmt.Errorf("load registry: %w", err)
 	}
 	// Reuse existing entry port (idempotent re-register) or allocate new.
 	prior, had := reg.Get(wsKey, lang)
@@ -392,6 +408,22 @@ func (a *API) registerOneLanguage(
 	capturedHad := had
 	capturedPrior := prior
 	*rollback = append(*rollback, func() {
+		// Rollback may fire at any phase — before or after Phase 1 releases
+		// the flock — so re-acquire it here. If acquisition fails (extreme
+		// cases: registry path unreachable, concurrent holder deadlocked),
+		// log and continue so sibling rollback closures still run.
+		unlock, err := reg.Lock()
+		if err != nil {
+			fmt.Fprintf(w, "  rollback: could not lock registry for %s/%s: %v\n",
+				capturedRegKey, capturedRegLang, err)
+			return
+		}
+		defer unlock()
+		if err := reg.Load(); err != nil {
+			fmt.Fprintf(w, "  rollback: could not reload registry for %s/%s: %v\n",
+				capturedRegKey, capturedRegLang, err)
+			return
+		}
 		if capturedHad {
 			// Re-register rollback: restore the prior (workspace, language)
 			// entry. Simply removing would leave the scheduler task
@@ -408,6 +440,17 @@ func (a *API) registerOneLanguage(
 		_ = reg.Save()
 		fmt.Fprintf(w, "  rollback: removed registry entry %s/%s\n", capturedRegKey, capturedRegLang)
 	})
+
+	// Phase 1 complete: the registry row is persisted to disk. Release the
+	// flock BEFORE sch.Run so the proxy subprocess launched by the scheduler
+	// task can acquire it. Holding the flock through sch.Run + readiness
+	// probe deadlocks the proxy: daemon_workspace.go's reg.Lock() blocks on
+	// us, its port never binds, our readiness probe times out, and we then
+	// roll back the registry row the already-blocked proxy was waiting to
+	// read. Net result: "error: not registered" from the proxy and a
+	// consistent 10s register failure. Regression-guarded by
+	// TestRegisterOneLanguage_ReleasesFlockBeforeSchRun.
+	releaseUnlock()
 
 	// Start the proxy. Registry is already persisted, so daemon startup
 	// finds the entry. Logon-triggered tasks only fire at the next logon,

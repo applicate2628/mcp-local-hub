@@ -361,6 +361,63 @@ func TestRegister_ReadinessFailureRollsBack(t *testing.T) {
 	}
 }
 
+// TestRegister_ReleasesFlockBeforeSchRun is the regression guard for the
+// deadlock discovered during real-LSP smoke on 2026-04-22:
+//
+//   - Register acquired the registry flock at its top.
+//   - Inside the same flock, it called sch.Run to start the scheduler-
+//     backed workspace proxy, then polled readiness on the bound port for
+//     up to 10s.
+//   - The spawned workspace-proxy subprocess (see daemon_workspace.go)
+//     tries to acquire the SAME flock on startup — it blocked waiting for
+//     Register's flock for the entire readiness window.
+//   - Register's readiness probe timed out (port never bound because the
+//     proxy was stuck in Lock), rollback removed the registry entry, and
+//     then finally released the flock. The proxy woke up, saw an empty
+//     registry, and exited "not registered".
+//
+// Net result: every `mcphub register` against a real scheduler failed
+// with a ~10s timeout. The E2E test missed this because it stubs
+// sch.Run as a no-op — no second process ever competes for the flock.
+//
+// This test hooks into fakeScheduler.Run to TRY to acquire the flock from
+// a goroutine with a bounded timeout. If Register is still holding the
+// flock at sch.Run time, the goroutine blocks; the hook surfaces a clear
+// error which propagates out as a Register failure.
+func TestRegister_ReleasesFlockBeforeSchRun(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+
+	h.fakeSch.runHook = func(name string) {
+		reg := NewRegistry(h.regPath)
+		done := make(chan error, 1)
+		go func() {
+			unlock, err := reg.Lock()
+			if err != nil {
+				done <- err
+				return
+			}
+			unlock()
+			done <- nil
+		}()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("sch.Run hook: failed to acquire registry flock: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Errorf("sch.Run hook: timed out acquiring registry flock — Register is still holding it during sch.Run (regression)")
+		}
+	}
+
+	ws := t.TempDir()
+	m := nineLanguageManifest()
+	_, err := mustNewAPI(t).registerWithManifest(m, ws, []string{"python"}, RegisterOpts{Writer: &bytes.Buffer{}})
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+}
+
 // TestRegister_SharedWeeklyTaskNotCreatedWhenCanonicalMissing guards
 // against the leak where EnsureWeeklyRefreshTask used to run BEFORE
 // the canonical-mcphub preflight. A user who ran register without
