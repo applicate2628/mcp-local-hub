@@ -130,6 +130,15 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 				lang, m.Name, sortedLanguageNames(m))
 		}
 	}
+	// 2.5 Ensure the shared weekly-refresh task exists. Idempotent (Delete
+	// + Create under the hood) so it is safe to invoke on every Register.
+	// Failure here is non-fatal — per-workspace registration must not be
+	// blocked by a shared-task problem; surface a warning and carry on.
+	// Placed AFTER argument validation so an invalid-language call
+	// produces no scheduler side effects at all.
+	if err := a.EnsureWeeklyRefreshTask(); err != nil {
+		fmt.Fprintf(w, "warning: ensure shared weekly-refresh task: %v\n", err)
+	}
 	// 3. Acquire the registry lock.
 	regPath, err := registryPathForRegister()
 	if err != nil {

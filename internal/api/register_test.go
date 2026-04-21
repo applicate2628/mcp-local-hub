@@ -132,11 +132,19 @@ func TestRegister_DefaultAllLanguages(t *testing.T) {
 	}
 	// Scheduler task args must include the lazy-proxy invariant:
 	// `daemon workspace-proxy --port <p> --workspace <ws> --language <lang>`.
-	if len(h.fakeSch.createdSpecs) != 9 {
-		t.Fatalf("scheduler Create called %d times, want 9", len(h.fakeSch.createdSpecs))
+	// Register also creates the shared weekly-refresh task (idempotent);
+	// filter it out before counting per-language tasks.
+	var langSpecs []scheduler.TaskSpec
+	for _, s := range h.fakeSch.createdSpecs {
+		if s.Name != WeeklyRefreshTaskName {
+			langSpecs = append(langSpecs, s)
+		}
+	}
+	if len(langSpecs) != 9 {
+		t.Fatalf("per-language scheduler Create called %d times, want 9", len(langSpecs))
 	}
 	sawWorkspaceProxy := false
-	for _, s := range h.fakeSch.createdSpecs {
+	for _, s := range langSpecs {
 		if len(s.Args) >= 2 && s.Args[0] == "daemon" && s.Args[1] == "workspace-proxy" {
 			sawWorkspaceProxy = true
 			// Confirm every flag uses double-dash form (pflag requirement).
@@ -330,6 +338,64 @@ func TestRegister_NoWeeklyRefreshOpt(t *testing.T) {
 	}
 }
 
+// TestRegister_EnsuresSharedWeeklyRefreshTask verifies Register calls
+// EnsureWeeklyRefreshTask so the single shared scheduler task gets created
+// without requiring a separate CLI invocation. The test uses the fake
+// scheduler to assert Create(mcp-local-hub-workspace-weekly-refresh, ...)
+// was invoked at least once during a Register call. Register must succeed
+// (the shared task's creation is a side-effect; failures there warn but do
+// not abort).
+func TestRegister_EnsuresSharedWeeklyRefreshTask(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	ws := t.TempDir()
+	m := nineLanguageManifest()
+	if _, err := mustNewAPI(t).registerWithManifest(m, ws, []string{"python"}, RegisterOpts{Writer: &bytes.Buffer{}}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	// The fake scheduler records every Create call; one of them must be
+	// the shared weekly-refresh task.
+	sawShared := false
+	for _, s := range h.fakeSch.createdSpecs {
+		if s.Name == WeeklyRefreshTaskName {
+			sawShared = true
+			if len(s.Args) == 0 || s.Args[0] != "workspace-weekly-refresh" {
+				t.Errorf("shared task args = %v; want [workspace-weekly-refresh]", s.Args)
+			}
+			break
+		}
+	}
+	if !sawShared {
+		t.Errorf("Register did not create %s; saw %d specs", WeeklyRefreshTaskName, len(h.fakeSch.createdSpecs))
+	}
+}
+
+// TestRegister_SurvivesSharedWeeklyRefreshFailure confirms the Register
+// path does not abort when EnsureWeeklyRefreshTask fails — the shared task
+// is a best-effort side effect; per-workspace registration must proceed
+// even if the shared scheduler write rejects.
+func TestRegister_SurvivesSharedWeeklyRefreshFailure(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	// Induce a failure on the VERY FIRST Create call — the shared
+	// weekly-refresh task is created before the per-language loop starts,
+	// so the first Create in Register is the shared one.
+	h.fakeSch.failCreateForName = WeeklyRefreshTaskName
+	ws := t.TempDir()
+	m := nineLanguageManifest()
+	buf := &bytes.Buffer{}
+	rpt, err := mustNewAPI(t).registerWithManifest(m, ws, []string{"python"}, RegisterOpts{Writer: buf})
+	if err != nil {
+		t.Fatalf("Register should survive shared-task failure; got %v", err)
+	}
+	if len(rpt.Entries) != 1 {
+		t.Errorf("expected 1 entry, got %d", len(rpt.Entries))
+	}
+	if !strings.Contains(buf.String(), "warning: ensure shared weekly-refresh task") {
+		t.Errorf("expected warning in writer output; got:\n%s", buf.String())
+	}
+}
+
 func TestRegister_EntryNameCollision(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
@@ -500,15 +566,19 @@ func TestInstall_AcceptsGlobalManifestStill(t *testing.T) {
 // --- Test doubles -------------------------------------------------------
 
 type fakeScheduler struct {
-	tasks            map[string]bool
-	xml              map[string][]byte
-	failCreateAfterN int // Create calls after the Nth succeed; the (N+1)th fails
-	createCount      int
-	createdSpecs     []scheduler.TaskSpec
-	failRunForTask   string // if non-empty, Run(name) returns an induced error for this task name
+	tasks             map[string]bool
+	xml               map[string][]byte
+	failCreateAfterN  int    // Create calls after the Nth succeed; the (N+1)th fails
+	failCreateForName string // if non-empty, Create with Name==this value returns an induced error
+	createCount       int
+	createdSpecs      []scheduler.TaskSpec
+	failRunForTask    string // if non-empty, Run(name) returns an induced error for this task name
 }
 
 func (f *fakeScheduler) Create(spec scheduler.TaskSpec) error {
+	if f.failCreateForName != "" && spec.Name == f.failCreateForName {
+		return fmt.Errorf("fake scheduler: induced failure for task %s", spec.Name)
+	}
 	if f.failCreateAfterN > 0 && f.createCount >= f.failCreateAfterN {
 		return fmt.Errorf("fake scheduler: induced failure after %d Create calls", f.failCreateAfterN)
 	}
