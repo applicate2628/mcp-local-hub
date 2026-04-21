@@ -4,9 +4,25 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// hyperfineOptInEnv gates tool registration for the `hyperfine` benchmark.
+// It executes client-supplied shell commands — functional exactly as intended,
+// but that same surface is a remote-code-execution vector for any MCP client
+// that can reach the perftools server. Admin opts in with "1" to enable it;
+// any other value (including absent) leaves the tool unregistered so the
+// server refuses the tools/call with method-not-found.
+const hyperfineOptInEnv = "MCP_LOCAL_HUB_ENABLE_UNSAFE_HYPERFINE"
+
+// hyperfineEnabled reports whether the admin opted into exposing the
+// hyperfine tool. Extracted from the registerTools branch so it is
+// easy to unit-test without wiring a real MCP server.
+func hyperfineEnabled() bool {
+	return os.Getenv(hyperfineOptInEnv) == "1"
+}
 
 // PerfToolbox is the MCP server instance. tools is populated once at
 // startup by DetectTools() so request dispatch is a cheap pointer read.
@@ -88,42 +104,48 @@ func registerTools(tb *PerfToolbox) {
 		},
 	}, tb.clangTidyTool)
 
-	tb.server.AddTool(&mcp.Tool{
-		Name: "hyperfine",
-		Description: "Run a statistical benchmark against one or more shell commands via hyperfine. " +
-			"Returns JSON with results[] (one per command) containing mean, stddev, median, min, max, user, " +
-			"system, and raw times[] in seconds. For N>=2 commands hyperfine also computes pairwise ratios " +
-			"in its own output. Use warmup to stabilize caches (recommended 1-3) and min_runs/max_runs to " +
-			"control the statistical budget.",
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"commands": map[string]any{
-					"type":        "array",
-					"items":       map[string]any{"type": "string"},
-					"description": "Shell commands to benchmark. Pass 2+ to enable comparative ratios.",
+	// hyperfine registers client-supplied shell commands for execution,
+	// so it is gated behind an explicit opt-in env var. Missing or not
+	// "1" → tool unregistered, and tools/call returns method-not-found
+	// from the MCP SDK layer as if the tool never existed.
+	if hyperfineEnabled() {
+		tb.server.AddTool(&mcp.Tool{
+			Name: "hyperfine",
+			Description: "Run a statistical benchmark against one or more shell commands via hyperfine. " +
+				"Returns JSON with results[] (one per command) containing mean, stddev, median, min, max, user, " +
+				"system, and raw times[] in seconds. For N>=2 commands hyperfine also computes pairwise ratios " +
+				"in its own output. Use warmup to stabilize caches (recommended 1-3) and min_runs/max_runs to " +
+				"control the statistical budget.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"commands": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "string"},
+						"description": "Shell commands to benchmark. Pass 2+ to enable comparative ratios.",
+					},
+					"warmup": map[string]any{
+						"type":        "integer",
+						"description": "Number of warmup runs per command before measurement. Optional (default 0).",
+					},
+					"min_runs": map[string]any{
+						"type":        "integer",
+						"description": "Minimum runs per command. Optional (default hyperfine default = 10).",
+					},
+					"max_runs": map[string]any{
+						"type":        "integer",
+						"description": "Maximum runs per command. Optional.",
+					},
+					"extra_args": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "string"},
+						"description": "Optional. Additional raw hyperfine arguments (e.g. ['--prepare', 'sync']).",
+					},
 				},
-				"warmup": map[string]any{
-					"type":        "integer",
-					"description": "Number of warmup runs per command before measurement. Optional (default 0).",
-				},
-				"min_runs": map[string]any{
-					"type":        "integer",
-					"description": "Minimum runs per command. Optional (default hyperfine default = 10).",
-				},
-				"max_runs": map[string]any{
-					"type":        "integer",
-					"description": "Maximum runs per command. Optional.",
-				},
-				"extra_args": map[string]any{
-					"type":        "array",
-					"items":       map[string]any{"type": "string"},
-					"description": "Optional. Additional raw hyperfine arguments (e.g. ['--prepare', 'sync']).",
-				},
+				"required": []string{"commands"},
 			},
-			"required": []string{"commands"},
-		},
-	}, tb.hyperfineTool)
+		}, tb.hyperfineTool)
+	}
 
 	tb.server.AddTool(&mcp.Tool{
 		Name: "llvm_objdump",

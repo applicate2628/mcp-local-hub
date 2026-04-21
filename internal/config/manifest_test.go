@@ -104,7 +104,7 @@ name: serena
 kind: global
 transport: native-http
 command: uvx
-base_args: [--refresh, --from, git+https://github.com/oraios/serena, serena, start-mcp-server]
+base_args: [--from, git+https://github.com/oraios/serena@f0a3a279b7c48d28b9e7e4aea1ed9caed846906b, serena, start-mcp-server]
 daemons:
   - name: claude
     context: claude-code
@@ -114,7 +114,7 @@ client_bindings:
   - client: claude-code
     daemon: claude
     url_path: /mcp
-weekly_refresh: true
+weekly_refresh: false
 `
 	m, err := ParseManifest(strings.NewReader(yaml))
 	if err != nil {
@@ -132,8 +132,8 @@ weekly_refresh: true
 	if m.Daemons[0].Port != 9121 {
 		t.Errorf("Daemons[0].Port = %d, want 9121", m.Daemons[0].Port)
 	}
-	if !m.WeeklyRefresh {
-		t.Error("WeeklyRefresh = false, want true")
+	if m.WeeklyRefresh {
+		t.Error("WeeklyRefresh = true, want false")
 	}
 }
 

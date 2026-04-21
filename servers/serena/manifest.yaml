@@ -3,9 +3,8 @@ kind: global
 transport: native-http
 command: uvx
 base_args:
-  - --refresh
   - --from
-  - git+https://github.com/oraios/serena
+  - git+https://github.com/oraios/serena@f0a3a279b7c48d28b9e7e4aea1ed9caed846906b
   - serena
   - start-mcp-server
   - --transport
@@ -52,4 +51,4 @@ client_bindings:
     daemon: claude
     url_path: /mcp
 
-weekly_refresh: true
+weekly_refresh: false
