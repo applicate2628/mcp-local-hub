@@ -98,9 +98,20 @@ construct the backend lifecycle. Human invocation is not supported.`,
 			if err := reg.Load(); err != nil {
 				return fmt.Errorf("load registry: %w", err)
 			}
-			if _, ok := reg.Get(wsKey, languageFlag); !ok {
+			entry, ok := reg.Get(wsKey, languageFlag)
+			if !ok {
 				return fmt.Errorf("not registered: workspace %s language %s (key %s)",
 					canonical, languageFlag, wsKey)
+			}
+			// Re-assert Configured lifecycle on startup using the already-
+			// loaded Registry (no new flock acquisition — we hold it).
+			// Bind does the same thing via PutLifecycle would deadlock
+			// the outer flock on Windows' non-reentrant LockFileEx.
+			entry.Lifecycle = api.LifecycleConfigured
+			entry.LastError = ""
+			reg.Put(entry)
+			if err := reg.Save(); err != nil {
+				return fmt.Errorf("persist configured state: %w", err)
 			}
 
 			// Load the manifest from the embedded FS and locate the language spec.

@@ -107,17 +107,19 @@ func (p *LazyProxy) Handler() http.Handler {
 	return mux
 }
 
-// Bind writes the initial LifecycleConfigured state and binds the TCP
-// listener on 127.0.0.1:<port>. It returns once the port is bound but
-// before accepting any requests. Call Serve afterward to run the request
-// loop. Splitting bind from serve lets the CLI caller hold the registry
-// flock across the "check registry + bind port" critical section so an
-// `mcphub unregister` cannot remove the row between the check and the
-// bind — which would otherwise let unregister's kill-by-port miss the
-// not-yet-listening proxy, leaving an orphan after serve begins.
+// Bind binds the TCP listener on 127.0.0.1:<port>. It returns once the
+// port is bound but before accepting any requests. Call Serve afterward
+// to run the request loop.
+//
+// IMPORTANT: Bind is lock-free with respect to the registry file lock so
+// a caller already holding reg.Lock() (to make the "check registry +
+// bind port" check atomic vs concurrent unregister) does not deadlock
+// on Windows LockFileEx when Bind tries to re-acquire the same flock.
+// Writing the initial LifecycleConfigured state is the caller's
+// responsibility — see ListenAndServe for the convenient all-in-one
+// path, or WriteConfiguredState for the explicit pre-Bind write that
+// uses the caller's already-loaded Registry instance.
 func (p *LazyProxy) Bind() error {
-	_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycle(
-		p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleConfigured, "")
 	addr := fmt.Sprintf("127.0.0.1:%d", p.cfg.Port)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -142,9 +144,14 @@ func (p *LazyProxy) Serve() error {
 	return p.server.Serve(p.listener)
 }
 
-// ListenAndServe binds and serves in one call. Retained for callers that
-// don't need the lock-aware Bind/Serve split (e.g. tests using httptest).
+// ListenAndServe writes the initial Configured state, binds, and serves
+// in one call. Retained for callers that don't need the lock-aware
+// Bind/Serve split (tests using httptest, production callers without
+// registry-flock concerns). Production CLI uses the split form so the
+// flock wraps check-plus-bind atomically.
 func (p *LazyProxy) ListenAndServe() error {
+	_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycle(
+		p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleConfigured, "")
 	if err := p.Bind(); err != nil {
 		return err
 	}
