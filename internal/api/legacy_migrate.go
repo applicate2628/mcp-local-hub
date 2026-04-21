@@ -151,8 +151,35 @@ func (a *API) MigrateLegacy(entries []LegacyLSEntry, opts LegacyMigrateOpts) (*L
 			}
 			continue
 		}
-		// Register succeeded; now delete each legacy entry from its owning client.
+		// Register succeeded; now delete each legacy entry from its owning
+		// client — but NOT when Register replaced the legacy entry in place.
+		// If the legacy row used the canonical managed name
+		// (e.g. "mcp-language-server-python"), Register.AddEntry already
+		// overwrote that same key with the new workspace-proxy URL, and
+		// a RemoveEntry here would delete the freshly-migrated config.
+		// Load the registry once so we can ask: "did Register just write
+		// this (client, entry_name)?"
+		regPath, _ := registryPathForRegister()
+		reg := NewRegistry(regPath)
+		_ = reg.Load()
+		entryJustWrittenByRegister := func(client, entryName string) bool {
+			for _, regEntry := range reg.Workspaces {
+				if name, ok := regEntry.ClientEntries[client]; ok && name == entryName {
+					return true
+				}
+			}
+			return false
+		}
 		for _, e := range rows {
+			if entryJustWrittenByRegister(e.Client, e.EntryName) {
+				// Legacy row was replaced in-place with the new
+				// workspace-proxy URL — migration already succeeded for
+				// this row without a separate RemoveEntry.
+				fmt.Fprintf(w, "  legacy entry %q in %s already replaced by Register (in-place)\n",
+					e.EntryName, e.Client)
+				report.Applied = append(report.Applied, e)
+				continue
+			}
 			client, ok := allClients[e.Client]
 			if !ok || !client.Exists() {
 				// Client adapter unavailable — record the delete failure

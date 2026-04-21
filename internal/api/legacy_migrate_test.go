@@ -186,6 +186,47 @@ func TestMigrateLegacy_RemovesLegacyAfterSuccess(t *testing.T) {
 	}
 }
 
+// TestMigrateLegacy_PreservesInPlaceReplacedEntry guards the narrow case
+// where a legacy row already used the CANONICAL managed name (e.g.
+// "mcp-language-server-python") — the exact name Register's ResolveEntryName
+// would return for the new registration. In that case Register.AddEntry
+// overwrites the legacy key in place with the new workspace-proxy URL,
+// and a subsequent RemoveEntry call would wipe the freshly-migrated
+// entry. Migration should detect the in-place replacement and skip
+// RemoveEntry. The workspace ends up registered AND the client config
+// has the correct new URL — which is the success criterion.
+func TestMigrateLegacy_PreservesInPlaceReplacedEntry(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	ws := t.TempDir()
+	// Pre-seed the legacy entry under the EXACT canonical name Register
+	// will produce for this language. Register.AddEntry will overwrite
+	// this value with the new URL; RemoveEntry MUST NOT follow.
+	h.fakeClients.entries["codex-cli"]["mcp-language-server-python"] = "legacy-url"
+	entries := []LegacyLSEntry{
+		{Client: "codex-cli", EntryName: "mcp-language-server-python", Workspace: ws, Language: "python", LspCommand: "pyright-langserver"},
+	}
+	a := NewAPI()
+	report, err := a.MigrateLegacy(entries, LegacyMigrateOpts{Yes: true, Writer: &bytes.Buffer{}})
+	if err != nil {
+		t.Fatalf("MigrateLegacy: %v", err)
+	}
+	if len(report.Applied) != 1 {
+		t.Fatalf("expected Applied=1, got %+v", report)
+	}
+	got, stillThere := h.fakeClients.entries["codex-cli"]["mcp-language-server-python"]
+	if !stillThere {
+		t.Fatal("freshly-migrated entry was deleted by post-register cleanup (regression)")
+	}
+	if got == "legacy-url" {
+		t.Errorf("entry still holds legacy URL: Register.AddEntry did not overwrite")
+	}
+	// The URL should now be a workspace-proxy loopback URL.
+	if !strings.HasPrefix(got, "http://localhost:") {
+		t.Errorf("expected workspace-proxy URL, got %q", got)
+	}
+}
+
 // TestMigrateLegacy_KeepsLegacyOnRegisterFailure proves the inverse: if
 // Register fails, the legacy rows stay intact so the user can re-run.
 // We induce a failure by making the first client AddEntry call fail,
