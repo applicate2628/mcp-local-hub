@@ -273,7 +273,13 @@ func (a *API) registerOneLanguage(
 		_ = sch.Delete(capturedTaskName)
 		if len(capturedPriorXML) > 0 {
 			_ = sch.ImportXML(capturedTaskName, capturedPriorXML)
-			fmt.Fprintf(w, "  rollback: restored scheduler task %s\n", capturedTaskName)
+			// Restart the prior proxy. Without this, re-register rollback
+			// would restore the old task definition but leave no process
+			// running (we just killed the live proxy above), turning a
+			// recoverable re-register error into a hard outage for the
+			// language until next logon/manual restart.
+			_ = sch.Run(capturedTaskName)
+			fmt.Fprintf(w, "  rollback: restored + restarted scheduler task %s\n", capturedTaskName)
 		} else {
 			fmt.Fprintf(w, "  rollback: deleted scheduler task %s\n", capturedTaskName)
 		}

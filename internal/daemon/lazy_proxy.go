@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -202,6 +203,17 @@ func (p *LazyProxy) handleMCP(w http.ResponseWriter, r *http.Request) {
 	case "tools/call":
 		p.handleToolsCall(w, r, &req)
 	default:
+		// JSON-RPC 2.0 forbids responses to notifications (requests with
+		// no id, method prefix "notifications/"). Forwarding one through
+		// handleForward would block waiting for a response the backend
+		// is spec-bound not to send. Accept with 202 + empty body instead.
+		// The two well-known notifications are matched explicitly above;
+		// this guard catches future/custom notifications like
+		// notifications/progress, notifications/roots/list_changed, etc.
+		if strings.HasPrefix(req.Method, "notifications/") {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
 		// Resources, prompts, and any other non-initialize/list method
 		// requires a materialized backend. Treat it like tools/call for
 		// materialization semantics but do NOT debounce-write the

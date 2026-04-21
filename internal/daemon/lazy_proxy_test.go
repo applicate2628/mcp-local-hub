@@ -223,6 +223,32 @@ func TestLazyProxy_PingEchoesClientID(t *testing.T) {
 	}
 }
 
+// TestLazyProxy_UnknownNotificationReturns202NoForward guards the
+// dispatch default-branch fix: ANY `notifications/*` method (known or
+// unknown) must resolve as 202 Accepted without forwarding to the
+// backend, because JSON-RPC 2.0 forbids responses to notifications and
+// handleForward would block waiting for one that the backend is spec-
+// bound not to emit. Regression scenario: client sends
+// notifications/progress or a custom notification — proxy must not
+// materialize or forward.
+func TestLazyProxy_UnknownNotificationReturns202NoForward(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server"}
+	p, _ := newTestProxy(t, "mcp-language-server", f)
+
+	for _, method := range []string{"notifications/progress", "notifications/roots/list_changed", "notifications/custom/app-specific"} {
+		rr := postRPC(t, p.Handler(), method, 0) // notifications have no id
+		if rr.Code != http.StatusAccepted {
+			t.Errorf("%s: code = %d, want 202 Accepted (notifications must not forward)", method, rr.Code)
+		}
+		if got := rr.Body.Len(); got != 0 {
+			t.Errorf("%s: body length = %d, want 0", method, got)
+		}
+	}
+	if f.materializeCount.Load() != 0 {
+		t.Errorf("unknown notifications triggered materialize: count=%d", f.materializeCount.Load())
+	}
+}
+
 // TestLazyProxy_NotificationsReturn202NoBody verifies that true JSON-RPC
 // notifications (no id expected per spec) receive 202 Accepted with an
 // empty body — not a synthetic JSON envelope with null id, which could

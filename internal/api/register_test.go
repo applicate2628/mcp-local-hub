@@ -270,6 +270,43 @@ func TestRegister_RollbackOnClientFailure(t *testing.T) {
 	}
 }
 
+// TestRegister_RollbackRestartsPriorProxyOnReRegister guards the
+// "re-register rollback leaves workspace offline" regression: when a
+// language was already registered (priorXML captured) and a later step
+// in the same Register call fails, the rollback must restore the prior
+// scheduler task AND restart it — otherwise the task definition is
+// back but no proxy process runs, breaking the workspace until next
+// logon. Without the sch.Run after ImportXML, a recoverable re-register
+// error turns into a hard outage.
+func TestRegister_RollbackRestartsPriorProxyOnReRegister(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	origKill := killByPortFn
+	defer func() { killByPortFn = origKill }()
+	killByPortFn = func(port int, _ time.Duration) error { return nil }
+	ws := t.TempDir()
+	m := nineLanguageManifest()
+	a := mustNewAPI(t)
+	// First register succeeds — establishes the "prior" state.
+	if _, err := a.registerWithManifest(m, ws, []string{"python"}, RegisterOpts{Writer: &bytes.Buffer{}}); err != nil {
+		t.Fatalf("first register: %v", err)
+	}
+	runsBefore := h.fakeSch.runCount
+	// Second register with same language must hit priorXML path; force
+	// later-step failure via client fake so the rollback closure runs.
+	// Target the NEXT AddEntry call (counter is cumulative across registers).
+	h.fakeClients.failAddEntryCalls = h.fakeClients.addEntryCount + 1
+	_, err := a.registerWithManifest(m, ws, []string{"python"}, RegisterOpts{Writer: &bytes.Buffer{}})
+	if err == nil {
+		t.Fatal("expected re-register with forced client failure to error")
+	}
+	// The rollback must have restored + restarted the prior task:
+	// exactly one additional Run call beyond the initial register's Run.
+	if got := h.fakeSch.runCount - runsBefore; got < 1 {
+		t.Errorf("rollback did not restart prior proxy (sch.Run deltas=%d, want >=1)", got)
+	}
+}
+
 // TestRegister_RollbackKillsProxyForStartedLanguage guards the Windows
 // orphan-proxy leak: Register's rollback used to only call sch.Delete,
 // which on Windows removes the task definition but leaves the already-
@@ -770,6 +807,15 @@ func (f *fakeScheduler) Create(spec scheduler.TaskSpec) error {
 	f.createCount++
 	f.tasks[spec.Name] = true
 	f.createdSpecs = append(f.createdSpecs, spec)
+	// Mirror real scheduler behavior: a created task has an exportable
+	// XML snapshot. Stored XML is opaque to the test; rollback/re-register
+	// paths depend on ExportXML returning non-empty for an existing task.
+	if f.xml == nil {
+		f.xml = map[string][]byte{}
+	}
+	if _, exists := f.xml[spec.Name]; !exists {
+		f.xml[spec.Name] = []byte("<Task name=\"" + spec.Name + "\"/>")
+	}
 	return nil
 }
 func (f *fakeScheduler) Delete(name string) error { delete(f.tasks, name); return nil }
