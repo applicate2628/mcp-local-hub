@@ -1063,27 +1063,25 @@ func (a *API) Stop(server, daemonFilter string) ([]RestartResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	tasks, err := sch.List("mcp-local-hub-" + server + "-")
+	tasks, err := listTasksForServer(sch, server)
 	if err != nil {
 		return nil, err
 	}
 	ports := manifestPortMap("")
+	wsByTask := workspaceTasksByName()
 	var results []RestartResult
 	for _, t := range tasks {
+		normalized := strings.TrimPrefix(t.Name, "\\")
 		if daemonFilter != "" {
 			wantSuffix := "-" + daemonFilter
-			if !strings.HasSuffix(strings.TrimPrefix(t.Name, "\\"), wantSuffix) {
+			if !strings.HasSuffix(normalized, wantSuffix) {
 				continue
 			}
 		}
 		if strings.Contains(t.Name, "weekly-refresh") {
 			continue // schedule-only task, nothing to kill
 		}
-		srv, dmn := parseTaskName(t.Name)
-		port := ports[srv][dmn]
-		if port == 0 {
-			port = ports[srv]["default"]
-		}
+		port := portForTask(normalized, ports, wsByTask)
 		if port != 0 {
 			if err := killDaemonByPort(port, 5*time.Second); err != nil {
 				results = append(results, RestartResult{TaskName: t.Name, Err: "kill daemon: " + err.Error()})
@@ -1104,27 +1102,25 @@ func (a *API) Restart(server, daemonFilter string) ([]RestartResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	tasks, err := sch.List("mcp-local-hub-" + server + "-")
+	tasks, err := listTasksForServer(sch, server)
 	if err != nil {
 		return nil, err
 	}
 	ports := manifestPortMap("")
+	wsByTask := workspaceTasksByName()
 	var results []RestartResult
 	for _, t := range tasks {
+		normalized := strings.TrimPrefix(t.Name, "\\")
 		if daemonFilter != "" {
 			wantSuffix := "-" + daemonFilter
-			if !strings.HasSuffix(strings.TrimPrefix(t.Name, "\\"), wantSuffix) {
+			if !strings.HasSuffix(normalized, wantSuffix) {
 				continue
 			}
 		}
 		if strings.Contains(t.Name, "weekly-refresh") {
 			continue
 		}
-		srv, dmn := parseTaskName(t.Name)
-		port := ports[srv][dmn]
-		if port == 0 {
-			port = ports[srv]["default"]
-		}
+		port := portForTask(normalized, ports, wsByTask)
 		if port != 0 {
 			if err := killDaemonByPort(port, 5*time.Second); err != nil {
 				results = append(results, RestartResult{TaskName: t.Name, Err: "kill daemon: " + err.Error()})
@@ -1139,6 +1135,84 @@ func (a *API) Restart(server, daemonFilter string) ([]RestartResult, error) {
 		results = append(results, RestartResult{TaskName: t.Name})
 	}
 	return results, nil
+}
+
+// listTasksForServer returns every scheduler task whose name maps to
+// the given server. For global servers that means the classic
+// "mcp-local-hub-<server>-" prefix. For workspace-scoped servers (the
+// manifest's Kind == workspace-scoped) the per-(workspace, language)
+// proxy tasks use "mcp-local-hub-lsp-<key>-<lang>" with NO server slug
+// in the name — this helper also queries that prefix so `mcphub stop
+// --server mcp-language-server` and `mcphub restart --server
+// mcp-language-server` actually target those daemons. Without the
+// extended match, workspace-scoped proxies survive every server-scoped
+// maintenance command.
+func listTasksForServer(sch scheduler.Scheduler, server string) ([]scheduler.TaskStatus, error) {
+	primary, err := sch.List("mcp-local-hub-" + server + "-")
+	if err != nil {
+		return nil, err
+	}
+	if !serverIsWorkspaceScoped(server) {
+		return primary, nil
+	}
+	lsp, err := sch.List("mcp-local-hub-lsp-")
+	if err != nil {
+		// Don't fail the entire Stop/Restart if the secondary list
+		// errors — log would be nice but we're in API layer; return
+		// the primary result set so at least global tasks are handled.
+		return primary, nil
+	}
+	return append(primary, lsp...), nil
+}
+
+// serverIsWorkspaceScoped returns true iff the given server name refers
+// to a manifest with Kind == workspace-scoped. Misses (unknown manifest,
+// load error) return false — classic behavior.
+func serverIsWorkspaceScoped(server string) bool {
+	data, err := loadManifestYAMLEmbedFirst(server)
+	if err != nil {
+		return false
+	}
+	m, err := config.ParseManifest(bytes.NewReader(data))
+	if err != nil {
+		return false
+	}
+	return m.Kind == config.KindWorkspaceScoped
+}
+
+// workspaceTasksByName returns a (taskName → WorkspaceEntry) map from
+// the current registry. Used by Stop/Restart to find the right port for
+// workspace-scoped lazy-proxy tasks (their ports live in the registry,
+// not the manifest). Nil on registry load failure — callers treat it as
+// empty and fall back to manifest ports.
+func workspaceTasksByName() map[string]WorkspaceEntry {
+	regPath, err := DefaultRegistryPath()
+	if err != nil {
+		return nil
+	}
+	reg := NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		return nil
+	}
+	out := make(map[string]WorkspaceEntry, len(reg.Workspaces))
+	for _, e := range reg.Workspaces {
+		out[strings.TrimPrefix(e.TaskName, "\\")] = e
+	}
+	return out
+}
+
+// portForTask resolves the port for a scheduler task name, trying the
+// workspace-scoped registry first (for lazy-proxy tasks) and then
+// falling back to the manifest port map (for global daemons).
+func portForTask(taskName string, ports map[string]map[string]int, wsByTask map[string]WorkspaceEntry) int {
+	if e, ok := wsByTask[taskName]; ok && e.Port != 0 {
+		return e.Port
+	}
+	srv, dmn := parseTaskName(taskName)
+	if p, ok := ports[srv][dmn]; ok {
+		return p
+	}
+	return ports[srv]["default"]
 }
 
 // RestartResult is one row in a RestartAll report.

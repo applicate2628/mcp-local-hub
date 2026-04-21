@@ -5,6 +5,35 @@ import (
 	"time"
 )
 
+// TestPortForTask_WorkspaceScopedBeatsManifest guards the port-lookup
+// priority for Stop/Restart: workspace-scoped tasks (lazy-proxy names)
+// must resolve their port from the registry, NOT the manifest map.
+// The manifest has no entry for lsp-<key>-<lang> tasks, so a naive
+// `ports[srv][dmn]` lookup would return 0 and kill-by-port would
+// no-op, leaving the orphan daemon running.
+func TestPortForTask_WorkspaceScopedBeatsManifest(t *testing.T) {
+	wsByTask := map[string]WorkspaceEntry{
+		"mcp-local-hub-lsp-deadbeef-python": {Port: 9217, Language: "python", Backend: "mcp-language-server"},
+	}
+	ports := map[string]map[string]int{} // empty manifest map — workspace-scoped must still resolve
+	got := portForTask("mcp-local-hub-lsp-deadbeef-python", ports, wsByTask)
+	if got != 9217 {
+		t.Errorf("workspace-scoped port = %d, want 9217", got)
+	}
+}
+
+// TestPortForTask_GlobalFallback confirms global daemons still resolve
+// from the manifest map when not in the workspace-scoped registry.
+func TestPortForTask_GlobalFallback(t *testing.T) {
+	ports := map[string]map[string]int{
+		"serena": {"claude": 9121, "default": 9121},
+	}
+	got := portForTask("mcp-local-hub-serena-claude", ports, nil)
+	if got != 9121 {
+		t.Errorf("global port = %d, want 9121", got)
+	}
+}
+
 // TestProbeDaemonHealth_TagsLazyProxyBySourceEvenWithoutLanguage guards
 // the Source-tagging contract: lazy-proxy rows must be marked
 // "proxy-synthetic" based on task-name structure, not registry-populated
