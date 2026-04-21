@@ -53,10 +53,13 @@ func NewInflightGate(minRetryGap time.Duration) *InflightGate {
 // return the cached error without invoking fn. A successful Do clears the
 // failure state for key.
 //
-// fn receives ctx verbatim; cancellation of a singleflight winner's ctx
-// cancels the shared invocation. Losers wait for the winner's completion
-// regardless of their own ctx — this matches singleflight's documented
-// semantics and keeps the "exactly one fn per key" invariant intact.
+// fn receives a DETACHED context that preserves the winner's values
+// (deadline, tracing, etc. via context.WithoutCancel-equivalent) but
+// whose cancellation is independent of the caller's request context.
+// Without this, a short-lived or disconnected winner request (e.g. a
+// canceled HTTP request from one client) would abort the shared
+// materialization AND cache the canceled-error for the retry-gap
+// window — making healthy concurrent callers fail for no reason.
 func (g *InflightGate) Do(ctx context.Context, key string, fn func(context.Context) (any, error)) (any, error) {
 	// Fast-path throttle check.
 	g.mu.Lock()
@@ -68,8 +71,13 @@ func (g *InflightGate) Do(ctx context.Context, key string, fn func(context.Conte
 	}
 	g.mu.Unlock()
 
+	// Detach the materialization context from the winner's request
+	// cancellation so a hung client cannot abort a materialization
+	// that other concurrent callers still need.
+	materializeCtx := context.WithoutCancel(ctx)
+
 	v, err, _ := g.sf.Do(key, func() (any, error) {
-		res, err := fn(ctx)
+		res, err := fn(materializeCtx)
 		g.mu.Lock()
 		defer g.mu.Unlock()
 		if err != nil {

@@ -143,6 +143,60 @@ func TestInflight_ForgetClearsThrottle(t *testing.T) {
 	}
 }
 
+// TestInflight_WinnerCancellationDoesNotAbortLosers guards the context-
+// isolation fix: the singleflight winner's request context must NOT
+// propagate into fn(ctx). Otherwise a short-lived or disconnected
+// winner would abort the shared materialization AND cache the cancel
+// error for the retry-gap window, causing healthy concurrent callers
+// to see the canceled error as if their own requests had failed.
+func TestInflight_WinnerCancellationDoesNotAbortLosers(t *testing.T) {
+	g := NewInflightGate(10 * time.Millisecond)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var observedCancel atomic.Bool
+
+	fn := func(ctx context.Context) (any, error) {
+		close(started)
+		<-release
+		// Observe whether the detached context was canceled. It must NOT
+		// be: the gate must detach from the winner's request context.
+		if ctx.Err() != nil {
+			observedCancel.Store(true)
+		}
+		return "ok", nil
+	}
+
+	winnerCtx, cancel := context.WithCancel(context.Background())
+	winnerErr := make(chan error, 1)
+	go func() {
+		_, err := g.Do(winnerCtx, "k", fn)
+		winnerErr <- err
+	}()
+	<-started
+	cancel() // winner disconnects mid-materialize
+	close(release)
+
+	// Winner's Do returns without error because fn completed successfully.
+	if err := <-winnerErr; err != nil {
+		t.Errorf("winner should see success despite its own cancel: %v", err)
+	}
+	if observedCancel.Load() {
+		t.Error("fn observed canceled context — materialization aborted by winner's cancel (regression)")
+	}
+	// Critical: the retry throttle must NOT hold a cached canceled-error.
+	// A fresh Do on the same key should run fn again (fresh state).
+	var reran atomic.Int32
+	if _, err := g.Do(context.Background(), "k", func(ctx context.Context) (any, error) {
+		reran.Add(1)
+		return "ok2", nil
+	}); err != nil {
+		t.Errorf("subsequent Do must not be blocked by stale canceled-error: %v", err)
+	}
+	if reran.Load() != 1 {
+		t.Errorf("fresh call did not run fn (ran=%d); gate still throttling", reran.Load())
+	}
+}
+
 func TestInflight_IndependentKeysDoNotInterfere(t *testing.T) {
 	g := NewInflightGate(100 * time.Millisecond)
 	boom := errors.New("boom")

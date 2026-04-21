@@ -288,6 +288,15 @@ func (a *API) registerOneLanguage(
 	// Destructive replace: prior task (if any) is Deleted and the new task
 	// Created. A Create failure triggers runRollback which fires the
 	// closure above to restore priorXML (or no-op if there was no prior).
+	//
+	// Kill the currently-running proxy FIRST when replacing. Windows Task
+	// Scheduler's Delete does NOT terminate the running child — without
+	// this kill, the old proxy keeps `port` bound and sch.Run below fails
+	// to bind. Only meaningful when we're actually replacing (priorXML
+	// non-empty); on a first-time registration the port is unbound.
+	if len(priorXML) > 0 && port > 0 {
+		_ = killByPortFn(port, 5*time.Second)
+	}
 	_ = sch.Delete(taskName)
 	taskSpec := scheduler.TaskSpec{
 		Name:             taskName,

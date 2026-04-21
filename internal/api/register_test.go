@@ -315,6 +315,39 @@ func TestRegister_RollbackRestoresPriorRegistryEntryOnReRegister(t *testing.T) {
 	}
 }
 
+// TestRegister_ReRegisterKillsOldProxyBeforeReplace guards the Windows
+// scheduler-vs-process gap: Task Scheduler's Delete removes the task
+// definition but does NOT terminate the running child. On re-register
+// (priorXML present), the old proxy keeps the allocated port bound;
+// sch.Run for the replacement task would then fail to bind. Register
+// must kill-by-port BEFORE the Delete+Create+Run sequence.
+func TestRegister_ReRegisterKillsOldProxyBeforeReplace(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	origKill := killByPortFn
+	defer func() { killByPortFn = origKill }()
+	var killedPorts []int
+	killByPortFn = func(port int, _ time.Duration) error {
+		killedPorts = append(killedPorts, port)
+		return nil
+	}
+	ws := t.TempDir()
+	m := nineLanguageManifest()
+	a := mustNewAPI(t)
+	// First register → priorXML will exist for the second call.
+	if _, err := a.registerWithManifest(m, ws, []string{"python"}, RegisterOpts{Writer: &bytes.Buffer{}}); err != nil {
+		t.Fatalf("first register: %v", err)
+	}
+	killsBefore := len(killedPorts)
+	// Second register must kill-by-port BEFORE replacing the task.
+	if _, err := a.registerWithManifest(m, ws, []string{"python"}, RegisterOpts{Writer: &bytes.Buffer{}}); err != nil {
+		t.Fatalf("second register: %v", err)
+	}
+	if got := len(killedPorts) - killsBefore; got < 1 {
+		t.Errorf("re-register did not call killByPortFn (delta=%d); old proxy would have kept port bound", got)
+	}
+}
+
 // TestRegister_AbortsBeforeDeleteOnExportXMLError guards the narrow
 // case where ExportXML fails for a reason OTHER than ErrTaskNotFound
 // (permission denied, scheduler service unavailable, XML corruption).
