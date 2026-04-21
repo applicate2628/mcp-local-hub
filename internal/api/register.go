@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
@@ -402,12 +403,26 @@ func (a *API) unregisterWithManifest(m *config.ServerManifest, workspacePath str
 				fmt.Sprintf("language %s not registered for workspace %s", lang, canonical))
 			continue
 		}
-		// 1. Remove scheduler task. Task Scheduler's Delete is the
+		// 1. Kill any live proxy bound to this language's port BEFORE we
+		// Delete the scheduler task. sch.Delete removes the task record
+		// but does NOT terminate the running child — without this kill,
+		// the proxy keeps the port bound until the next reboot, which
+		// breaks immediate re-register and leaves the registry/scheduler
+		// disagreeing with what's actually on the network. Errors are
+		// downgraded to warnings because a successful kill-on-absent
+		// (nothing listening) is expected for cold workspaces and MUST
+		// not fail the teardown path.
+		if killByPortFn != nil && entry.Port != 0 {
+			if err := killByPortFn(entry.Port, 5*time.Second); err != nil {
+				report.Warnings = append(report.Warnings,
+					fmt.Sprintf("kill proxy on port %d (task %s): %v",
+						entry.Port, entry.TaskName, err))
+			}
+		}
+		// 2. Remove scheduler task. Task Scheduler's Delete is the
 		// supported way to stop a logon-triggered task from respawning.
-		// The in-process lazy proxy that the task launched will exit when
-		// the scheduler kills it on next host reboot; in-flight HTTP
-		// clients keep their connections until the proxy's port is no
-		// longer being bound, which is acceptable for a teardown path.
+		// The kill-by-port above already terminated any live proxy; this
+		// Delete prevents it from being re-launched at next logon.
 		if err := sch.Delete(entry.TaskName); err != nil {
 			report.Warnings = append(report.Warnings,
 				fmt.Sprintf("delete task %s: %v", entry.TaskName, err))

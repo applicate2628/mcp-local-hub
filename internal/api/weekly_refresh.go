@@ -22,6 +22,7 @@ package api
 import (
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"mcp-local-hub/internal/scheduler"
 )
@@ -78,12 +79,12 @@ func (a *API) EnsureWeeklyRefreshTask() error {
 // language) scheduler task whose WeeklyRefresh flag is true. Best-effort:
 // per-entry failures are recorded in Warnings without aborting the run.
 //
-// Restarting a lazy proxy is intentionally minimal: Run on the existing
-// task name triggers an immediate one-shot execution. The proxy's own
-// startup stamps Lifecycle=Configured and the next tools/call lazily
-// re-materializes the backend. No kill-by-port dance here — unlike Phase 2
-// restart paths — because the scheduler's RestartOnFailure policy plus the
-// proxy's idempotent startup keep state consistent.
+// Refresh is kill-then-run: the live proxy (if any) is terminated by port
+// so the replacement one launched by sch.Run binds cleanly. Task
+// Scheduler's Run semantics on an already-running task are unreliable
+// (MultipleInstancesPolicy=IgnoreNew makes it a no-op) and the Phase 2
+// install/restart paths established killDaemonByPort as the correct
+// pattern. kill-on-absent is expected and produces no warning.
 func (a *API) WeeklyRefreshAll() (*WeeklyRefreshReport, error) {
 	regPath, err := registryPathForRegister()
 	if err != nil {
@@ -101,6 +102,17 @@ func (a *API) WeeklyRefreshAll() (*WeeklyRefreshReport, error) {
 	for _, e := range reg.Workspaces {
 		if !e.WeeklyRefresh {
 			continue
+		}
+		// Kill the stale proxy first. Failure to kill is non-fatal —
+		// the subsequent Run may still succeed if the old process is
+		// already gone or was never running. Errors go to Warnings so
+		// operators see them in the report.
+		if killByPortFn != nil && e.Port != 0 {
+			if err := killByPortFn(e.Port, 5*time.Second); err != nil {
+				report.Warnings = append(report.Warnings,
+					fmt.Sprintf("kill proxy on port %d (task %s): %v",
+						e.Port, e.TaskName, err))
+			}
 		}
 		if err := sch.Run(e.TaskName); err != nil {
 			report.Warnings = append(report.Warnings,

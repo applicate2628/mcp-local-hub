@@ -1185,6 +1185,12 @@ func (a *API) StopAll() ([]RestartResult, error) {
 	return results, nil
 }
 
+// killByPortFn is a test seam for killDaemonByPort. Production callers go
+// through this indirection so the Unregister and WeeklyRefreshAll code
+// paths can be unit-tested without spawning real processes bound to ports.
+// Tests assign a fake in their setup and restore the default in defer.
+var killByPortFn = killDaemonByPort
+
 // killDaemonByPort finds the process listening on 127.0.0.1:port, kills
 // its whole tree with taskkill /F /T, and polls until the port is free.
 // Returns nil when nothing is listening (nothing to kill).

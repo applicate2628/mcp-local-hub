@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
@@ -600,6 +601,80 @@ func TestUnregister_UnknownWorkspaceErrors(t *testing.T) {
 	m := nineLanguageManifest()
 	if _, err := mustNewAPI(t).unregisterWithManifest(m, ws, nil, &bytes.Buffer{}); err == nil {
 		t.Fatal("expected error for unregistered workspace")
+	}
+}
+
+// TestUnregister_KillsStaleProxyByPort verifies that Unregister terminates
+// the running proxy for every language it removes BEFORE calling sch.Delete.
+// Without this kill, the proxy keeps its port bound until the next reboot
+// (sch.Delete drops the task record but does not stop the running child).
+func TestUnregister_KillsStaleProxyByPort(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	// Fake killByPortFn — records the ports it was asked to kill.
+	origKill := killByPortFn
+	defer func() { killByPortFn = origKill }()
+	var killed []int
+	killByPortFn = func(port int, timeout time.Duration) error {
+		killed = append(killed, port)
+		return nil
+	}
+	ws := t.TempDir()
+	m := nineLanguageManifest()
+	a := mustNewAPI(t)
+	if _, err := a.registerWithManifest(m, ws, []string{"python", "typescript"}, RegisterOpts{Writer: &bytes.Buffer{}}); err != nil {
+		t.Fatal(err)
+	}
+	// Read allocated ports from the registry so we can assert kill order.
+	reg := NewRegistry(h.regPath)
+	_ = reg.Load()
+	wantPorts := map[int]bool{}
+	for _, e := range reg.Workspaces {
+		wantPorts[e.Port] = true
+	}
+	if _, err := a.unregisterWithManifest(m, ws, nil, &bytes.Buffer{}); err != nil {
+		t.Fatalf("Unregister: %v", err)
+	}
+	if len(killed) != len(wantPorts) {
+		t.Fatalf("killed %d ports, want %d: got=%v want=%v",
+			len(killed), len(wantPorts), killed, wantPorts)
+	}
+	for _, p := range killed {
+		if !wantPorts[p] {
+			t.Errorf("killed unexpected port %d; wanted one of %v", p, wantPorts)
+		}
+	}
+}
+
+// TestUnregister_KillProxyFailureIsWarning verifies that a kill-by-port
+// failure does NOT abort the teardown; the error is recorded in Warnings
+// and Unregister proceeds to remove the task + registry row.
+func TestUnregister_KillProxyFailureIsWarning(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	origKill := killByPortFn
+	defer func() { killByPortFn = origKill }()
+	killByPortFn = func(port int, timeout time.Duration) error {
+		return fmt.Errorf("induced kill failure for port %d", port)
+	}
+	ws := t.TempDir()
+	m := nineLanguageManifest()
+	a := mustNewAPI(t)
+	if _, err := a.registerWithManifest(m, ws, []string{"python"}, RegisterOpts{Writer: &bytes.Buffer{}}); err != nil {
+		t.Fatal(err)
+	}
+	rpt, err := a.unregisterWithManifest(m, ws, nil, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("Unregister must not fail on kill-by-port error: %v", err)
+	}
+	if len(rpt.Warnings) == 0 {
+		t.Error("expected at least one warning for kill-by-port failure")
+	}
+	// Registry row still removed despite the kill failure.
+	reg := NewRegistry(h.regPath)
+	_ = reg.Load()
+	if len(reg.Workspaces) != 0 {
+		t.Errorf("registry rows remain after Unregister: %+v", reg.Workspaces)
 	}
 }
 
