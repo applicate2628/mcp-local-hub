@@ -73,8 +73,18 @@ func (g *InflightGate) Do(ctx context.Context, key string, fn func(context.Conte
 
 	// Detach the materialization context from the winner's request
 	// cancellation so a hung client cannot abort a materialization
-	// that other concurrent callers still need.
+	// that other concurrent callers still need. BUT preserve the
+	// winner's deadline so materialization still honors the per-
+	// request timeout — WithoutCancel drops both cancellation AND
+	// deadline, which would let backend startup drift up to the
+	// backend's default handshake timeout (≥10s) even when the
+	// caller asked for a much shorter bound.
 	materializeCtx := context.WithoutCancel(ctx)
+	if dl, ok := ctx.Deadline(); ok {
+		var cancel context.CancelFunc
+		materializeCtx, cancel = context.WithDeadline(materializeCtx, dl)
+		defer cancel()
+	}
 
 	v, err, _ := g.sf.Do(key, func() (any, error) {
 		res, err := fn(materializeCtx)

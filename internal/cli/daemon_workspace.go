@@ -192,11 +192,21 @@ construct the backend lifecycle. Human invocation is not supported.`,
 				}
 				return nil
 			case err := <-errCh:
-				// ListenAndServe returned — either a bind error or a Stop
-				// happened. http.ErrServerClosed is the clean-shutdown signal.
+				// Serve returned — either a bind error or a Stop happened.
+				// http.ErrServerClosed is the clean-shutdown signal.
 				if errors.Is(err, http.ErrServerClosed) {
 					return nil
 				}
+				// Unexpected Serve error. Tear down the materialized
+				// backend (if any) before returning so scheduler restart
+				// doesn't leak orphaned LSP subprocesses holding the
+				// workspace-proxy port / stdin pipes. Stop is idempotent
+				// and bounded by the 5s shutdown context; the error
+				// returned to Task Scheduler still reflects the original
+				// Serve failure.
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				_ = proxy.Stop(shutdownCtx)
+				cancel()
 				return fmt.Errorf("lazy proxy: %w", err)
 			case <-cmd.Context().Done():
 				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

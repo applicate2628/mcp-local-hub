@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -194,6 +195,40 @@ func TestInflight_WinnerCancellationDoesNotAbortLosers(t *testing.T) {
 	}
 	if reran.Load() != 1 {
 		t.Errorf("fresh call did not run fn (ran=%d); gate still throttling", reran.Load())
+	}
+}
+
+// TestInflight_DeadlinePropagatedToFn guards the "deadline survives
+// detach" fix: WithoutCancel drops BOTH cancellation and deadline by
+// design, but materialization must still honor the winner's timeout
+// so backend startup can't drift past it and keep singleflight busy.
+// The gate re-applies ctx.Deadline() via WithDeadline after detaching
+// cancellation.
+func TestInflight_DeadlinePropagatedToFn(t *testing.T) {
+	g := NewInflightGate(10 * time.Millisecond)
+	// 50ms deadline on the caller's context.
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	var fnDeadlineOK atomic.Bool
+	_, err := g.Do(ctx, "k", func(fctx context.Context) (any, error) {
+		dl, ok := fctx.Deadline()
+		if !ok {
+			return nil, errors.New("fn context has no deadline — winner deadline was dropped")
+		}
+		// Deadline should fire within ~50ms of now (not 10s+ as the
+		// backend default would be). Allow generous slack for CI.
+		if remaining := time.Until(dl); remaining > 200*time.Millisecond {
+			return nil, fmt.Errorf("deadline too far out: %v (expected ~50ms)", remaining)
+		}
+		fnDeadlineOK.Store(true)
+		return "ok", nil
+	})
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if !fnDeadlineOK.Load() {
+		t.Error("fn did not observe the caller's deadline on the detached context")
 	}
 }
 
