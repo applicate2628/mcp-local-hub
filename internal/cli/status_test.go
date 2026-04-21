@@ -38,12 +38,12 @@ func TestStatusCLI_ForceMaterializeFlagExists(t *testing.T) {
 // populated survive the filter.
 func TestFilterWorkspaceScoped(t *testing.T) {
 	rows := []api.DaemonStatus{
-		{TaskName: "mcp-local-hub-serena-claude"},                                    // global, filtered out
-		{TaskName: "mcp-local-hub-lsp-abcd1234-python", Language: "python"},          // workspace-scoped, kept
-		{TaskName: "mcp-local-hub-gdb-default"},                                      // global, filtered out
-		{TaskName: "mcp-local-hub-lsp-deadbeef-go", Lifecycle: api.LifecycleActive},  // workspace-scoped via lifecycle
-		{TaskName: "\\mcp-local-hub-lsp-cafef00d-rust"},                              // Windows leading-backslash, empty fields
-		{TaskName: "mcp-local-hub-workspace-weekly-refresh"},                         // hub maintenance task, filtered out
+		{TaskName: "mcp-local-hub-serena-claude"},                                   // global, filtered out
+		{TaskName: "mcp-local-hub-lsp-abcd1234-python", Language: "python"},         // workspace-scoped, kept
+		{TaskName: "mcp-local-hub-gdb-default"},                                     // global, filtered out
+		{TaskName: "mcp-local-hub-lsp-deadbeef-go", Lifecycle: api.LifecycleActive}, // workspace-scoped via lifecycle
+		{TaskName: "\\mcp-local-hub-lsp-cafef00d-rust"},                             // Windows leading-backslash, empty fields
+		{TaskName: "mcp-local-hub-workspace-weekly-refresh"},                        // hub maintenance task, filtered out
 	}
 	got := filterWorkspaceScoped(rows)
 	if len(got) != 3 {
