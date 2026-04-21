@@ -269,6 +269,77 @@ func TestRegister_RollbackOnClientFailure(t *testing.T) {
 	}
 }
 
+// TestRegister_StartsProxyImmediately verifies the post-Create sch.Run call
+// that prevents logon-triggered tasks from sitting dead until the user's
+// next logon. The original Register created the scheduler task but never
+// started it, so the advertised port was unbound until reboot. This test
+// guards that regression.
+func TestRegister_StartsProxyImmediately(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	ws := t.TempDir()
+	m := nineLanguageManifest()
+	wantLangs := []string{"python", "typescript", "rust"}
+	_, err := mustNewAPI(t).registerWithManifest(m, ws, wantLangs, RegisterOpts{Writer: &bytes.Buffer{}})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	// Exactly one Run per registered language (weekly-refresh task is
+	// Created but not Run — that fires on the weekly trigger).
+	gotRuns := 0
+	for _, n := range h.fakeSch.runNames {
+		for _, lang := range wantLangs {
+			if strings.HasSuffix(n, "-"+lang) {
+				gotRuns++
+				break
+			}
+		}
+	}
+	if gotRuns != len(wantLangs) {
+		t.Errorf("per-language Run calls = %d, want %d; runNames=%v",
+			gotRuns, len(wantLangs), h.fakeSch.runNames)
+	}
+}
+
+// TestRegister_RollsBackIfRunFails verifies that when sch.Run fails for
+// language N, earlier languages in the same Register batch are rolled back
+// (registry rows removed, client entries reverted). Covers the new failure
+// mode introduced by the Run-after-Create wiring.
+func TestRegister_RollsBackIfRunFails(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	ws := t.TempDir()
+	m := nineLanguageManifest()
+	// Compute the expected task name for the second language (typescript)
+	// and induce Run failure on that task. Language 1 (python) should
+	// succeed; language 2 fails on Run, triggering rollback of both.
+	wsKey := WorkspaceKey(mustCanonical(t, ws))
+	h.fakeSch.failRunForTask = fmt.Sprintf("mcp-local-hub-lsp-%s-%s", wsKey, "typescript")
+	_, err := mustNewAPI(t).registerWithManifest(m, ws, []string{"python", "typescript"}, RegisterOpts{Writer: &bytes.Buffer{}})
+	if err == nil {
+		t.Fatal("expected Register to fail on induced Run error")
+	}
+	reg := NewRegistry(h.regPath)
+	_ = reg.Load()
+	if len(reg.Workspaces) != 0 {
+		t.Errorf("registry not rolled back after Run failure: %+v", reg.Workspaces)
+	}
+	if n := countEntries(h.fakeClients); n != 0 {
+		t.Errorf("client entries not rolled back after Run failure: %d remain", n)
+	}
+}
+
+// mustCanonical mirrors the register path's workspace canonicalization so
+// per-test wsKey values stay consistent with production behavior.
+func mustCanonical(t *testing.T, ws string) string {
+	t.Helper()
+	c, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
 func TestRegister_RollbackOnPortExhaustion(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
@@ -572,7 +643,9 @@ type fakeScheduler struct {
 	failCreateForName string // if non-empty, Create with Name==this value returns an induced error
 	createCount       int
 	createdSpecs      []scheduler.TaskSpec
-	failRunForTask    string // if non-empty, Run(name) returns an induced error for this task name
+	failRunForTask    string   // if non-empty, Run(name) returns an induced error for this task name
+	runCount          int      // total Run invocations
+	runNames          []string // ordered list of task names passed to Run
 }
 
 func (f *fakeScheduler) Create(spec scheduler.TaskSpec) error {
@@ -589,6 +662,8 @@ func (f *fakeScheduler) Create(spec scheduler.TaskSpec) error {
 }
 func (f *fakeScheduler) Delete(name string) error { delete(f.tasks, name); return nil }
 func (f *fakeScheduler) Run(name string) error {
+	f.runCount++
+	f.runNames = append(f.runNames, name)
 	if f.failRunForTask != "" && f.failRunForTask == name {
 		return fmt.Errorf("fake scheduler: induced Run failure for %s", name)
 	}

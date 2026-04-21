@@ -267,6 +267,16 @@ func (a *API) registerOneLanguage(
 		}
 	})
 	fmt.Fprintf(w, "\u2713 Scheduler task created: %s\n", taskName)
+	// Start the proxy immediately. Logon-triggered tasks only fire at the
+	// next logon, so without this call `mcphub register` would advertise a
+	// dead port until the user reboots. Mirrors the Phase 2 install path
+	// which invokes sch.Run right after Create. On Run failure we fall
+	// back to the rollback stack, which will Delete the task (restoring
+	// the prior XML, if any) and the registry row.
+	if err := sch.Run(taskName); err != nil {
+		return WorkspaceEntry{}, fmt.Errorf("run task %s: %w", taskName, err)
+	}
+	fmt.Fprintf(w, "\u2713 Scheduler task started: %s\n", taskName)
 	// 2. Write client entries.
 	bindings := m.ClientBindings
 	if len(bindings) == 0 {
