@@ -61,28 +61,68 @@ func CanonicalWorkspacePathForCleanup(p string) (string, error) {
 		return "", fmt.Errorf("workspace path: %w", err)
 	}
 	// Try to resolve symlinks so Register/Unregister agree on the key.
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		abs = resolved
-	} else if info, lerr := os.Lstat(abs); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
-		// EvalSymlinks failed (target moved / deleted / unavailable drive),
-		// but the symlink file itself still exists. Read its target directly
-		// so the key matches what Register produced when the target was live.
-		// Without this, unregistering via a symlink whose target is gone
-		// would hash a different key and fail to find the orphaned entries.
-		if target, rerr := os.Readlink(abs); rerr == nil {
-			if !filepath.IsAbs(target) {
-				target = filepath.Join(filepath.Dir(abs), target)
-			}
-			abs = filepath.Clean(target)
-		}
-	}
-	// Final fallback: if both EvalSymlinks and Readlink failed (symlink
-	// AND its parent are gone), keep the unresolved abs. The operator
-	// can still fall back to the non-symlinked canonical path manually.
+	abs = resolveSymlinksBestEffort(abs)
 	if runtime.GOOS == "windows" && len(abs) >= 2 && abs[1] == ':' {
 		abs = strings.ToLower(string(abs[0])) + abs[1:]
 	}
 	return abs, nil
+}
+
+// resolveSymlinksBestEffort returns the symlink-resolved canonical form of
+// abs, or the closest approximation available when components of the path
+// are gone. It handles three cases in order:
+//  1. EvalSymlinks(abs) succeeds — use the fully-resolved path.
+//  2. The abs path itself is a surviving symlink but its target is gone —
+//     Readlink(abs) and resolve relative targets against the symlink's dir.
+//  3. A PARENT component is a surviving symlink whose target is gone —
+//     walk up from the full path finding the nearest ancestor that exists,
+//     Readlink if it is a symlink, then rejoin the surviving suffix.
+//
+// Case 3 is the subtle one Codex round-19 identified: if registration used
+// "/alias/project" where /alias is the symlink and /alias's target later
+// disappears, both EvalSymlinks AND Lstat(abs) fail (parent is a broken
+// symlink so stat traverses through it and errors). Without the walk,
+// cleanup would hash the un-resolved alias path and miss the original
+// registration's canonical key.
+//
+// When no ancestor can be resolved, returns abs unchanged — best the
+// operator can get; they may need to re-register via the original alias
+// to reconcile state.
+func resolveSymlinksBestEffort(abs string) string {
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved
+	}
+	// Walk upward from abs looking for the nearest surviving component.
+	suffix := ""
+	cur := abs
+	for {
+		if info, err := os.Lstat(cur); err == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				if target, rerr := os.Readlink(cur); rerr == nil {
+					if !filepath.IsAbs(target) {
+						target = filepath.Join(filepath.Dir(cur), target)
+					}
+					rewritten := filepath.Clean(filepath.Join(target, suffix))
+					// Re-try EvalSymlinks on the rewritten path in case the
+					// rewrite exposed a fully-live chain.
+					if full, ferr := filepath.EvalSymlinks(rewritten); ferr == nil {
+						return full
+					}
+					return rewritten
+				}
+			}
+			// Nearest surviving ancestor is a regular dir; deeper components
+			// are truly gone. Fall through to returning abs unchanged.
+			return abs
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			// Reached filesystem root without finding anything.
+			return abs
+		}
+		suffix = filepath.Join(filepath.Base(cur), suffix)
+		cur = parent
+	}
 }
 
 // WorkspaceKey returns a short deterministic hex identifier for a canonical

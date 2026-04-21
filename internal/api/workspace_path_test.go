@@ -63,6 +63,52 @@ func TestCanonicalWorkspacePath_WindowsDriveLetterLowercased(t *testing.T) {
 	}
 }
 
+// TestCanonicalWorkspacePathForCleanup_ResolvesBrokenParentSymlink guards
+// the round-19 Codex case: registration used a path like /alias/project
+// where /alias is the symlink. Later /alias's target is deleted. Now
+// EvalSymlinks on the full path fails, Lstat on the full path also
+// fails (parent traversal broken), and Readlink on the full path fails
+// (it's not itself a symlink). The cleanup canonicalizer must walk up
+// from the full path to find the surviving /alias symlink and resolve
+// manually so the key matches Register's. Otherwise orphan registry
+// entries are unreachable.
+// Skipped on Windows (symlink creation requires admin).
+func TestCanonicalWorkspacePathForCleanup_ResolvesBrokenParentSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation on Windows requires developer mode / admin")
+	}
+	// real target dir (will be deleted later)
+	realParent := filepath.Join(t.TempDir(), "real")
+	projectInReal := filepath.Join(realParent, "project")
+	if err := os.MkdirAll(projectInReal, 0755); err != nil {
+		t.Fatalf("mkdir real/project: %v", err)
+	}
+	// alias symlink to realParent
+	aliasBase := t.TempDir()
+	alias := filepath.Join(aliasBase, "alias")
+	if err := os.Symlink(realParent, alias); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	aliasProject := filepath.Join(alias, "project")
+	// Key at register-time (target alive).
+	registerKey, err := CanonicalWorkspacePath(aliasProject)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath(aliasProject): %v", err)
+	}
+	// Simulate target deletion AFTER registration.
+	if err := os.RemoveAll(realParent); err != nil {
+		t.Fatalf("remove real: %v", err)
+	}
+	// Cleanup must still produce the same canonical.
+	cleanupKey, err := CanonicalWorkspacePathForCleanup(aliasProject)
+	if err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	if cleanupKey != registerKey {
+		t.Errorf("cleanup key diverged when parent symlink target gone:\n  register = %q\n  cleanup  = %q", registerKey, cleanupKey)
+	}
+}
+
 // TestCanonicalWorkspacePathForCleanup_ReadsSymlinkWhenTargetGone guards
 // the cleanup-stability fix: after a user registers through a symlinked
 // workspace and later deletes the target, unregister via the original
