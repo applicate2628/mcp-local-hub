@@ -41,6 +41,26 @@ func (a *API) SchedulerUpgrade() ([]SchedulerUpgradeResult, error) {
 	}
 	var results []SchedulerUpgradeResult
 	for _, t := range tasks {
+		normalized := strings.TrimPrefix(t.Name, "\\")
+		// Workspace-scoped shared weekly-refresh task:
+		// "mcp-local-hub-workspace-weekly-refresh". parseTaskName would
+		// see server="workspace" and try to load a nonexistent manifest.
+		// Skip — the task's Command already points at canonical mcphub
+		// running the hidden `workspace-weekly-refresh` subcommand,
+		// same as the global weekly-refresh case below.
+		if normalized == WeeklyRefreshTaskName {
+			continue
+		}
+		// Workspace-scoped lazy-proxy tasks: "mcp-local-hub-lsp-<key>-<lang>".
+		// parseTaskName reports server="lsp" which also lacks a manifest.
+		// Skip — these tasks are rebuilt via `mcphub register` when needed,
+		// not via scheduler upgrade. The upgrade flow is for per-server
+		// daemon tasks whose Command needs rewiring after the binary moves;
+		// workspace-proxy tasks' Command is the same mcphub binary and
+		// already correct.
+		if IsLazyProxyTaskName(normalized) {
+			continue
+		}
 		srv, dmn := parseTaskName(t.Name)
 		// Hub-wide weekly-refresh ("mcp-local-hub-weekly-refresh") parses
 		// as ("", "weekly-refresh") — no per-server manifest to re-read,

@@ -1,6 +1,55 @@
 package api
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+// TestSchedulerUpgrade_WorkspaceTaskSkipPredicates guards the skip logic
+// introduced for Phase 3 workspace-scoped tasks. SchedulerUpgrade is
+// designed to rebuild per-server daemon tasks (Command path rewrite
+// after a binary move); the shared workspace weekly-refresh task and
+// the per-(workspace, language) lazy proxies must be left alone — they
+// do not resolve to any manifest's server slug and re-registration is
+// the correct path to rebuild them. Without these skips, upgrade
+// would report "manifest workspace: not found" and "manifest lsp: not
+// found" and potentially delete tasks that have no replacement path.
+func TestSchedulerUpgrade_WorkspaceTaskSkipPredicates(t *testing.T) {
+	cases := []struct {
+		name   string
+		task   string
+		expect string // "skip-ws-weekly" | "skip-ws-lazy" | "upgrade" | "skip-global-weekly"
+	}{
+		{"global-weekly-refresh", "mcp-local-hub-weekly-refresh", "skip-global-weekly"},
+		{"workspace-weekly-refresh", "mcp-local-hub-workspace-weekly-refresh", "skip-ws-weekly"},
+		{"lazy-proxy", "mcp-local-hub-lsp-abcd1234-python", "skip-ws-lazy"},
+		{"global-daemon", "mcp-local-hub-serena-claude", "upgrade"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			normalized := strings.TrimPrefix(tc.task, "\\")
+			var got string
+			switch {
+			case normalized == WeeklyRefreshTaskName:
+				got = "skip-ws-weekly"
+			case IsLazyProxyTaskName(normalized):
+				got = "skip-ws-lazy"
+			default:
+				srv, dmn := parseTaskName(tc.task)
+				if srv == "" && dmn == "weekly-refresh" {
+					got = "skip-global-weekly"
+				} else if srv == "" {
+					got = "unparseable"
+				} else {
+					got = "upgrade"
+				}
+			}
+			if got != tc.expect {
+				t.Errorf("task %q: got %q, want %q", tc.task, got, tc.expect)
+			}
+		})
+	}
+}
 
 // TestSchedulerUpgradeNoopWhenEmpty verifies that running SchedulerUpgrade
 // on a system with no mcp-local-hub tasks returns an empty result list

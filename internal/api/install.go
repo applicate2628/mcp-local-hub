@@ -1242,17 +1242,14 @@ func (a *API) RestartAll() ([]RestartResult, error) {
 		return nil, err
 	}
 	ports := manifestPortMap("")
+	wsByTask := workspaceTasksByName()
 	var results []RestartResult
 	for _, t := range tasks {
 		// Skip weekly-refresh — scheduled, not restarted.
 		if strings.Contains(t.Name, "weekly-refresh") {
 			continue
 		}
-		srv, dmn := parseTaskName(t.Name)
-		port := ports[srv][dmn]
-		if port == 0 {
-			port = ports[srv]["default"]
-		}
+		port := portForTask(strings.TrimPrefix(t.Name, "\\"), ports, wsByTask)
 		if err := killDaemonByPort(port, 5*time.Second); err != nil {
 			results = append(results, RestartResult{TaskName: t.Name, Err: "kill daemon: " + err.Error()})
 			continue
@@ -1282,17 +1279,14 @@ func (a *API) StopAll() ([]RestartResult, error) {
 		return nil, err
 	}
 	ports := manifestPortMap("")
+	wsByTask := workspaceTasksByName()
 	var results []RestartResult
 	for _, t := range tasks {
 		// Skip weekly-refresh — schedule-only task; Stop has no effect anyway.
 		if strings.Contains(t.Name, "weekly-refresh") {
 			continue
 		}
-		srv, dmn := parseTaskName(t.Name)
-		port := ports[srv][dmn]
-		if port == 0 {
-			port = ports[srv]["default"]
-		}
+		port := portForTask(strings.TrimPrefix(t.Name, "\\"), ports, wsByTask)
 		if err := killDaemonByPort(port, 5*time.Second); err != nil {
 			results = append(results, RestartResult{TaskName: t.Name, Err: "kill daemon: " + err.Error()})
 			continue
