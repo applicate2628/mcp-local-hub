@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -359,13 +360,23 @@ func (a *API) StatusWithHealth(probeHealth bool) ([]DaemonStatus, error) {
 // ForceMaterialize is also true, workspace-scoped rows receive an
 // additional no-op tools/call that triggers real backend materialization
 // (the proxy writes LifecycleActive/Missing/Failed to the registry, which
-// the enrichment then reloads onto the row). ForceMaterialize without
-// ProbeHealth is a no-op — the flag only affects the workspace-scoped
-// probe path.
+// the enrichment then reloads onto the row).
+//
+// ForceMaterialize requires ProbeHealth. StatusWithOpts returns
+// ErrForceMaterializeRequiresHealth when that invariant is violated —
+// both the CLI help and the `--force-materialize` flag description promise
+// this dependency. Allowing the flag in isolation would either be a
+// silent no-op (confusing) or trigger materialization without the
+// operator asking for the accompanying probe.
 type StatusOpts struct {
 	ProbeHealth      bool
 	ForceMaterialize bool
 }
+
+// ErrForceMaterializeRequiresHealth enforces the documented `--health`
+// prerequisite for `--force-materialize`. Callers should surface this
+// verbatim to the end user.
+var ErrForceMaterializeRequiresHealth = errors.New("--force-materialize requires --health")
 
 // StatusWithOpts is Status + optional MCP-level probes. When
 // opts.ProbeHealth is true, the function POSTs initialize + tools/list to
@@ -379,6 +390,9 @@ type StatusOpts struct {
 // round-trips — acceptable for an interactive command but wasteful for
 // repeated polling.
 func (a *API) StatusWithOpts(opts StatusOpts) ([]DaemonStatus, error) {
+	if opts.ForceMaterialize && !opts.ProbeHealth {
+		return nil, ErrForceMaterializeRequiresHealth
+	}
 	sch, err := scheduler.New()
 	if err != nil {
 		return nil, err
@@ -516,6 +530,14 @@ func sendForceMaterializeTools(port int, backend string) {
 // capture Mcp-Session-Id, POST tools/list, count tools in the
 // response. Any transport or JSON-RPC error is captured as Err with
 // OK=false. Runs concurrently across rows to keep total time bounded.
+//
+// Workspace-scoped lazy proxies answer both initialize and tools/list
+// synthetically from the embedded tool catalog without spawning the
+// heavy backend. The probe therefore verifies the proxy is alive but
+// says nothing about the underlying LSP binary. We tag those rows with
+// Source="proxy-synthetic" so the CLI layer can distinguish them from
+// a global-daemon row where a successful probe implies the upstream
+// MCP server is also alive.
 func probeDaemonHealth(rows []DaemonStatus) {
 	var wg sync.WaitGroup
 	for i := range rows {
@@ -525,7 +547,11 @@ func probeDaemonHealth(rows []DaemonStatus) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			rows[idx].Health = singleHealthProbe(rows[idx].Port)
+			h := singleHealthProbe(rows[idx].Port)
+			if h != nil && rows[idx].Language != "" {
+				h.Source = "proxy-synthetic"
+			}
+			rows[idx].Health = h
 		}(i)
 	}
 	wg.Wait()

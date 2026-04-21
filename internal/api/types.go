@@ -51,10 +51,21 @@ type DaemonStatus struct {
 // a daemon's HTTP endpoint. OK=true + ToolCount>0 = minimally operational.
 // Err is populated (with OK=false) on transport error, non-2xx response,
 // or a parseable JSON-RPC error in the tools/list response.
+//
+// Source distinguishes what the probe actually reached. Global daemons
+// proxy requests straight to their upstream so "proxy" and "backend" are
+// the same process; Source stays empty ("") there. Workspace-scoped
+// lazy proxies answer initialize+tools/list synthetically from the
+// embedded catalog without spawning the heavy backend — those rows
+// carry Source=="proxy-synthetic". When --force-materialize also ran,
+// the row's Lifecycle field (LifecycleActive | LifecycleMissing |
+// LifecycleFailed) tells the caller the backend side; the CLI layer
+// composes that into a combined human-readable cell.
 type HealthProbe struct {
 	OK        bool   `json:"ok"`
 	ToolCount int    `json:"tool_count,omitempty"`
 	Err       string `json:"err,omitempty"`
+	Source    string `json:"source,omitempty"` // "proxy-synthetic" for workspace-scoped rows; "" otherwise
 }
 
 // ScanEntry is one row in the unified "across all clients" view.

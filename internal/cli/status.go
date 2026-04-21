@@ -183,15 +183,43 @@ func printWorkspaceScopedTable(cmd *cobra.Command, rows []api.DaemonStatus, prob
 	return nil
 }
 
-// renderHealthCell formats a DaemonStatus.Health probe outcome.
+// renderHealthCell formats a DaemonStatus.Health probe outcome. For
+// workspace-scoped rows (Source=="proxy-synthetic") the cell annotates
+// whether the probe only confirmed the synthetic handshake or also
+// observed a materialized backend, so operators don't mistake a live
+// lazy proxy for a healthy LSP binary.
+//
+// Decoding table for workspace-scoped rows:
+//
+//	Health.OK + Lifecycle==active              → "OK (materialized)"
+//	Health.OK + Lifecycle==missing             → "OK (synth); backend missing"
+//	Health.OK + Lifecycle==failed              → "OK (synth); backend ERR: ..."
+//	Health.OK + Lifecycle∈{configured,starting,""} → "OK (synth)"
+//	Health.OK==false                           → "ERR: <probe error>"
+//
+// Global-daemon rows (Source=="") render the original OK (<count>)
+// format so upstream output stays unchanged.
 func renderHealthCell(r api.DaemonStatus) string {
-	switch {
-	case r.Health == nil:
+	if r.Health == nil {
 		return "—"
-	case r.Health.OK:
-		return fmt.Sprintf("OK (%d)", r.Health.ToolCount)
-	default:
+	}
+	if !r.Health.OK {
 		return "ERR: " + firstN(r.Health.Err, 40)
+	}
+	if r.Health.Source != "proxy-synthetic" {
+		return fmt.Sprintf("OK (%d)", r.Health.ToolCount)
+	}
+	// Workspace-scoped: compose with Lifecycle to distinguish proxy-only
+	// vs backend-materialized success paths.
+	switch r.Lifecycle {
+	case "active":
+		return "OK (materialized)"
+	case "missing":
+		return "OK (synth); backend missing"
+	case "failed":
+		return "OK (synth); backend ERR: " + firstN(r.LastError, 30)
+	default:
+		return "OK (synth)"
 	}
 }
 

@@ -117,3 +117,94 @@ func TestRelativeStatusLastUsed_ZeroReturnsDash(t *testing.T) {
 		t.Errorf("zero time: got %q, want %q", got, "-")
 	}
 }
+
+// TestStatusCLI_ForceMaterializeRequiresHealth verifies the contract the CLI
+// help promises: `--force-materialize` without `--health` errors out with a
+// message that names both flags, so operators see the fix immediately.
+func TestStatusCLI_ForceMaterializeRequiresHealth(t *testing.T) {
+	// Invoke the validation directly via the API layer; this mirrors what
+	// the CLI RunE does (api.StatusWithOpts propagates the error verbatim).
+	a := api.NewAPI()
+	_, err := a.StatusWithOpts(api.StatusOpts{ForceMaterialize: true, ProbeHealth: false})
+	if err == nil {
+		t.Fatal("StatusWithOpts must reject --force-materialize without --health")
+	}
+	if !strings.Contains(err.Error(), "--force-materialize") || !strings.Contains(err.Error(), "--health") {
+		t.Errorf("error must name both flags; got: %v", err)
+	}
+}
+
+// TestRenderHealthCell_DistinguishesProxyFromBackend asserts the cell
+// rendering for workspace-scoped rows differentiates a synthetic-only
+// probe from one that observed a materialized backend. Prevents an
+// operator from mistaking `OK` on a lazy proxy for `the LSP binary is
+// installed and responsive`.
+func TestRenderHealthCell_DistinguishesProxyFromBackend(t *testing.T) {
+	cases := []struct {
+		name     string
+		row      api.DaemonStatus
+		wantCell string
+	}{
+		{
+			name: "proxy_synth_no_materialize",
+			row: api.DaemonStatus{
+				Language:  "python",
+				Lifecycle: api.LifecycleConfigured,
+				Health:    &api.HealthProbe{OK: true, ToolCount: 7, Source: "proxy-synthetic"},
+			},
+			wantCell: "OK (synth)",
+		},
+		{
+			name: "proxy_synth_backend_active",
+			row: api.DaemonStatus{
+				Language:  "python",
+				Lifecycle: api.LifecycleActive,
+				Health:    &api.HealthProbe{OK: true, ToolCount: 7, Source: "proxy-synthetic"},
+			},
+			wantCell: "OK (materialized)",
+		},
+		{
+			name: "proxy_synth_backend_missing",
+			row: api.DaemonStatus{
+				Language:  "go",
+				Lifecycle: api.LifecycleMissing,
+				LastError: "exec: \"gopls\": not found",
+				Health:    &api.HealthProbe{OK: true, ToolCount: 7, Source: "proxy-synthetic"},
+			},
+			wantCell: "OK (synth); backend missing",
+		},
+		{
+			name: "proxy_synth_backend_failed",
+			row: api.DaemonStatus{
+				Language:  "go",
+				Lifecycle: api.LifecycleFailed,
+				LastError: "spawn failed",
+				Health:    &api.HealthProbe{OK: true, ToolCount: 7, Source: "proxy-synthetic"},
+			},
+			wantCell: "OK (synth); backend ERR: spawn failed",
+		},
+		{
+			name: "global_daemon_unchanged",
+			row: api.DaemonStatus{
+				Health: &api.HealthProbe{OK: true, ToolCount: 5}, // Source=""
+			},
+			wantCell: "OK (5)",
+		},
+		{
+			name: "probe_error",
+			row: api.DaemonStatus{
+				Language: "python",
+				Health:   &api.HealthProbe{OK: false, Err: "connection refused", Source: "proxy-synthetic"},
+			},
+			wantCell: "ERR: connection refused",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := renderHealthCell(tc.row)
+			if got != tc.wantCell {
+				t.Errorf("got %q, want %q", got, tc.wantCell)
+			}
+		})
+	}
+}
