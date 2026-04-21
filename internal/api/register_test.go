@@ -315,6 +315,38 @@ func TestRegister_RollbackRestoresPriorRegistryEntryOnReRegister(t *testing.T) {
 	}
 }
 
+// TestRegister_AbortsWhenCanonicalMcphubMissing guards against the
+// silent-broken-registration hazard where the scheduler task's Command
+// points at a non-existent mcphub binary. A fresh user who ran
+// `mcphub register` before `mcphub setup` (or on a machine where the
+// canonical install was never copied) would see "register succeeded"
+// but the proxy never comes up — Windows schtasks /run does not
+// validate the action actually executed.
+func TestRegister_AbortsWhenCanonicalMcphubMissing(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	// Point canonicalMcphubPath at a guaranteed-nonexistent location.
+	orig := testCanonicalMcphubPathOverride
+	defer func() { testCanonicalMcphubPathOverride = orig }()
+	testCanonicalMcphubPathOverride = filepath.Join(t.TempDir(), "no-such-mcphub.exe")
+
+	ws := t.TempDir()
+	m := nineLanguageManifest()
+	_, err := mustNewAPI(t).registerWithManifest(m, ws, []string{"python"}, RegisterOpts{Writer: &bytes.Buffer{}})
+	if err == nil {
+		t.Fatal("expected register to fail when canonical mcphub is missing")
+	}
+	if !strings.Contains(err.Error(), "mcphub setup") {
+		t.Errorf("error should mention `mcphub setup` remediation: %v", err)
+	}
+	// No scheduler tasks should have been created for the language.
+	for _, s := range h.fakeSch.createdSpecs {
+		if s.Name != WeeklyRefreshTaskName {
+			t.Errorf("per-language task created despite missing mcphub: %+v", s)
+		}
+	}
+}
+
 // TestRegister_ReRegisterKillsOldProxyBeforeReplace guards the Windows
 // scheduler-vs-process gap: Task Scheduler's Delete removes the task
 // definition but does NOT terminate the running child. On re-register

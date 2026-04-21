@@ -44,7 +44,16 @@ var mcphubShortName = func() string {
 // $HOME / %USERPROFILE%), not dev-location-specific: moving or rebuilding
 // the binary and re-running `mcphub setup` keeps scheduler tasks valid
 // without any rewrite.
+// testCanonicalMcphubPathOverride is the test seam for canonicalMcphubPath.
+// Production leaves it empty; unit tests that need a deterministic (or
+// deliberately missing) binary path set it in their setup and restore
+// in defer.
+var testCanonicalMcphubPathOverride string
+
 func canonicalMcphubPath() (string, error) {
+	if testCanonicalMcphubPathOverride != "" {
+		return testCanonicalMcphubPathOverride, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolve user home: %w", err)
@@ -1157,10 +1166,13 @@ func listTasksForServer(sch scheduler.Scheduler, server string) ([]scheduler.Tas
 	}
 	lsp, err := sch.List("mcp-local-hub-lsp-")
 	if err != nil {
-		// Don't fail the entire Stop/Restart if the secondary list
-		// errors — log would be nice but we're in API layer; return
-		// the primary result set so at least global tasks are handled.
-		return primary, nil
+		// Surface the error. Swallowing would let Stop/Restart
+		// report "success" while silently skipping every workspace
+		// proxy — a scheduler/service glitch would then leave stale
+		// daemons running with no signal to the operator. Wrap so
+		// the caller can distinguish primary vs secondary list
+		// failure when debugging.
+		return nil, fmt.Errorf("list workspace-scoped lazy-proxy tasks: %w", err)
 	}
 	return append(primary, lsp...), nil
 }

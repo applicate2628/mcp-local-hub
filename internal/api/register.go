@@ -234,6 +234,17 @@ func (a *API) registerOneLanguage(
 	if err != nil {
 		return WorkspaceEntry{}, err
 	}
+	// Verify the canonical mcphub binary actually exists before creating a
+	// scheduler task pointing at it. Without this preflight, a fresh user
+	// who skipped `mcphub setup` could get a successful-looking register
+	// that persists registry/client state for a non-existent binary path;
+	// Windows schtasks /run only starts the task and never verifies the
+	// action actually executed, so the registration appears to succeed
+	// while no proxy ever comes up. Install does the same preflight in
+	// installUsingEmbedFirst (see install.go:298-300).
+	if _, err := os.Stat(canonicalExe); err != nil {
+		return WorkspaceEntry{}, fmt.Errorf("%s not present — run `mcphub setup` once: %w", canonicalExe, err)
+	}
 	args := []string{
 		"daemon", "workspace-proxy",
 		"--port", fmt.Sprintf("%d", port),
