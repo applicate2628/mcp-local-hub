@@ -5,6 +5,34 @@ import (
 	"time"
 )
 
+// TestEnrichStatusWithRegistry_OrphanWorkspaceTaskPreservesRawState guards
+// the "missing registry entry" edge case for a workspace-scoped scheduler
+// task. Without this guard, deriveState saw Port=0 → alive=false → the
+// raw "Running" would flip to "Starting", misreporting a healthy orphan
+// proxy as still starting. Keep the raw scheduler state when no matching
+// registry row exists so the operator sees the truth and can investigate.
+func TestEnrichStatusWithRegistry_OrphanWorkspaceTaskPreservesRawState(t *testing.T) {
+	dir := t.TempDir()
+	regPath := dir + "/ws.yaml"
+	// Registry is EMPTY — the task exists in scheduler but has no matching
+	// registry entry (corruption / stale scheduler task).
+	rows := []DaemonStatus{
+		{
+			TaskName: "mcp-local-hub-lsp-deadbeef-python",
+			State:    "Running",
+			NextRun:  "",
+		},
+	}
+	enrichStatusWithRegistry(rows, "", regPath)
+	if rows[0].State != "Running" {
+		t.Errorf("orphan workspace-scoped task: State = %q, want %q (raw scheduler state must be preserved when registry has no entry)",
+			rows[0].State, "Running")
+	}
+	if rows[0].Port != 0 {
+		t.Errorf("expected Port=0 (no registry entry to resolve from); got %d", rows[0].Port)
+	}
+}
+
 // TestEnrichStatusWithRegistry_WorkspaceScoped seeds a registry entry for a
 // lazy-proxy task name and asserts enrichStatusWithRegistry populates every
 // workspace-scoped field (Workspace, Language, Backend, Lifecycle,

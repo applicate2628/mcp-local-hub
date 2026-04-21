@@ -131,6 +131,15 @@ func enrichStatusWithRegistry(rows []DaemonStatus, manifestDir, registryPath str
 
 	// Second pass: fill PID/RAM/Uptime + derive state.
 	for i := range rows {
+		// Workspace-scoped row whose registry entry couldn't be resolved
+		// has Port=0. deriveState would then see alive=false and transform
+		// the raw scheduler "Running" into "Starting" — falsely reporting
+		// a healthy proxy as starting whenever the registry is missing or
+		// unreadable OR the task is orphaned. Keep the raw scheduler state
+		// in that case so the operator still sees the truth.
+		if rows[i].Port == 0 && IsLazyProxyTaskName(rows[i].TaskName) {
+			continue
+		}
 		alive := false
 		if batch != nil && rows[i].Port != 0 {
 			if info, ok := batch[rows[i].Port]; ok {
