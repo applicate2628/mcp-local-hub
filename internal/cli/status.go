@@ -97,13 +97,14 @@ See also: restart, stop, logs, scheduler upgrade.`,
 }
 
 // filterWorkspaceScoped returns only rows whose TaskName matches the
-// lazy-proxy `mcp-local-hub-lsp-<key>-<lang>` pattern. Tested indirectly
-// via the CLI test harness; the test relies on the DaemonStatus.Lifecycle
-// field being non-empty for workspace-scoped rows after enrichment.
+// lazy-proxy `mcp-local-hub-lsp-<key>-<lang>` pattern. The predicate is
+// structural (task-name) rather than field-based: Lifecycle and Language
+// are registry-derived and may be empty if registry load or enrichment
+// failed, which must not silently drop a real workspace-scoped row.
 func filterWorkspaceScoped(rows []api.DaemonStatus) []api.DaemonStatus {
 	out := rows[:0]
 	for _, r := range rows {
-		if r.Language != "" || r.Lifecycle != "" {
+		if api.IsLazyProxyTaskName(r.TaskName) {
 			out = append(out, r)
 		}
 	}

@@ -204,6 +204,17 @@ func hasFutureTrigger(nextRun string) bool {
 // WorkspaceKey is always 8 hex characters (api.WorkspaceKey); rejecting
 // other lengths keeps a future `lsp-*` global-server name from matching
 // this pattern accidentally.
+// IsLazyProxyTaskName returns true iff the given scheduler task name
+// matches the `mcp-local-hub-lsp-<workspaceKey>-<language>` pattern.
+// Use this for filtering status rows by structure rather than by
+// registry-derived fields (Lifecycle, Language), which can be empty
+// when registry loading or enrichment fails — in that scenario a
+// field-based filter silently drops genuine workspace-scoped rows.
+func IsLazyProxyTaskName(task string) bool {
+	_, _, ok := parseLazyProxyTaskName(task)
+	return ok
+}
+
 func parseLazyProxyTaskName(task string) (workspaceKey, language string, ok bool) {
 	name := strings.TrimPrefix(task, "\\")
 	const prefix = "mcp-local-hub-lsp-"

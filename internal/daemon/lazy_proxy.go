@@ -185,11 +185,20 @@ func (p *LazyProxy) handleMCP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, resp)
-	case "notifications/initialized", "notifications/cancelled", "ping":
-		// Synthetic ack — no backend contact. Notifications have no id per
-		// JSON-RPC 2.0; send a minimal empty-result envelope for the rare
-		// client that expects a reply.
-		writeJSON(w, []byte(`{"jsonrpc":"2.0","id":null,"result":{}}`))
+	case "notifications/initialized", "notifications/cancelled":
+		// True JSON-RPC 2.0 notifications: no response expected. Answer
+		// with 202 Accepted and empty body — emitting a response with
+		// null id confuses strict clients that match id-based envelopes.
+		w.WriteHeader(http.StatusAccepted)
+	case "ping":
+		// ping is a REQUEST per MCP spec: client sends id, expects the
+		// same id echoed in the reply. A hard-coded null breaks request
+		// correlation in clients' heartbeat/probe logic.
+		id := req.ID
+		if len(id) == 0 {
+			id = json.RawMessage("null")
+		}
+		writeJSON(w, fmt.Appendf(nil, `{"jsonrpc":"2.0","id":%s,"result":{}}`, string(id)))
 	case "tools/call":
 		p.handleToolsCall(w, r, &req)
 	default:

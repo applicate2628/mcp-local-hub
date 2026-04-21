@@ -196,6 +196,55 @@ func TestLazyProxy_InitializeSyntheticNoMaterialize(t *testing.T) {
 	}
 }
 
+// TestLazyProxy_PingEchoesClientID guards the JSON-RPC request/response
+// correlation contract: when a client sends `ping` with a real id, the
+// proxy must echo that same id in its reply. A hard-coded null (or any
+// other value) breaks heartbeat/probe logic that matches id-to-response
+// via strict equality.
+func TestLazyProxy_PingEchoesClientID(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server"}
+	p, _ := newTestProxy(t, "mcp-language-server", f)
+
+	rr := postRPC(t, p.Handler(), "ping", 4242)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("ping code = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	got := parseRPC(t, rr.Body.Bytes())
+	// JSON numbers decode as float64 via encoding/json into an interface{}.
+	id, ok := got["id"].(float64)
+	if !ok {
+		t.Fatalf("ping reply id type %T want float64 (echoed request id): %v", got["id"], got)
+	}
+	if int(id) != 4242 {
+		t.Errorf("ping id = %v, want 4242 (client id must be echoed)", id)
+	}
+	if f.materializeCount.Load() != 0 {
+		t.Errorf("ping triggered materialize: count=%d", f.materializeCount.Load())
+	}
+}
+
+// TestLazyProxy_NotificationsReturn202NoBody verifies that true JSON-RPC
+// notifications (no id expected per spec) receive 202 Accepted with an
+// empty body — not a synthetic JSON envelope with null id, which could
+// confuse strict JSON-RPC clients.
+func TestLazyProxy_NotificationsReturn202NoBody(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server"}
+	p, _ := newTestProxy(t, "mcp-language-server", f)
+
+	for _, method := range []string{"notifications/initialized", "notifications/cancelled"} {
+		rr := postRPC(t, p.Handler(), method, 99)
+		if rr.Code != http.StatusAccepted {
+			t.Errorf("%s: code = %d, want 202 Accepted", method, rr.Code)
+		}
+		if got := rr.Body.Len(); got != 0 {
+			t.Errorf("%s: body length = %d, want 0 (notifications have no response)", method, got)
+		}
+	}
+	if f.materializeCount.Load() != 0 {
+		t.Errorf("notifications triggered materialize: count=%d", f.materializeCount.Load())
+	}
+}
+
 func TestLazyProxy_ToolsListSyntheticNoMaterialize(t *testing.T) {
 	f := &fakeLifecycle{kind: "mcp-language-server"}
 	p, _ := newTestProxy(t, "mcp-language-server", f)

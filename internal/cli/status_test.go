@@ -38,20 +38,29 @@ func TestStatusCLI_ForceMaterializeFlagExists(t *testing.T) {
 // populated survive the filter.
 func TestFilterWorkspaceScoped(t *testing.T) {
 	rows := []api.DaemonStatus{
-		{TaskName: "mcp-local-hub-serena-claude"},                                   // global, filtered out
-		{TaskName: "mcp-local-hub-lsp-abcd1234-python", Language: "python"},         // workspace-scoped, kept
-		{TaskName: "mcp-local-hub-gdb-default"},                                     // global, filtered out
-		{TaskName: "mcp-local-hub-lsp-deadbeef-go", Lifecycle: api.LifecycleActive}, // workspace-scoped via lifecycle
+		{TaskName: "mcp-local-hub-serena-claude"},                                    // global, filtered out
+		{TaskName: "mcp-local-hub-lsp-abcd1234-python", Language: "python"},          // workspace-scoped, kept
+		{TaskName: "mcp-local-hub-gdb-default"},                                      // global, filtered out
+		{TaskName: "mcp-local-hub-lsp-deadbeef-go", Lifecycle: api.LifecycleActive},  // workspace-scoped via lifecycle
+		{TaskName: "\\mcp-local-hub-lsp-cafef00d-rust"},                              // Windows leading-backslash, empty fields
+		{TaskName: "mcp-local-hub-workspace-weekly-refresh"},                         // hub maintenance task, filtered out
 	}
 	got := filterWorkspaceScoped(rows)
-	if len(got) != 2 {
-		t.Fatalf("filter kept %d rows, want 2: %+v", len(got), got)
+	if len(got) != 3 {
+		t.Fatalf("filter kept %d rows, want 3: %+v", len(got), got)
 	}
-	if got[0].Language != "python" {
-		t.Errorf("row 0: Language = %q, want python", got[0].Language)
+	// Regression guard: row with empty Lifecycle AND empty Language must still
+	// be kept because TaskName matches the lazy-proxy pattern. Registry load
+	// failures can leave those fields empty; the previous field-based filter
+	// silently dropped genuine workspace-scoped rows in that scenario.
+	var sawEmpty bool
+	for _, r := range got {
+		if r.Lifecycle == "" && r.Language == "" && r.TaskName == "\\mcp-local-hub-lsp-cafef00d-rust" {
+			sawEmpty = true
+		}
 	}
-	if got[1].Lifecycle != api.LifecycleActive {
-		t.Errorf("row 1: Lifecycle = %q, want active", got[1].Lifecycle)
+	if !sawEmpty {
+		t.Error("filter dropped a workspace-scoped row with empty Lifecycle+Language (registry-miss scenario)")
 	}
 }
 
