@@ -509,6 +509,23 @@ func TestLazyProxy_ClientCancelDoesNotTearDownBackend(t *testing.T) {
 	}
 }
 
+// TestLazyProxy_ServeBeforeBindErrors guards the Bind/Serve split contract:
+// callers that use the lock-aware two-step flow (acquire registry lock →
+// Bind → release lock → Serve) must see a clear error if they try to Serve
+// without a prior Bind. Prevents silent misuse where a caller forgets
+// to Bind and a subsequent Serve no-ops or panics.
+func TestLazyProxy_ServeBeforeBindErrors(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server"}
+	p, _ := newTestProxy(t, "mcp-language-server", f)
+	err := p.Serve()
+	if err == nil {
+		t.Fatal("Serve without prior Bind must error")
+	}
+	if !strings.Contains(err.Error(), "not bound") && !strings.Contains(err.Error(), "Bind()") {
+		t.Errorf("error should mention the missing Bind: %v", err)
+	}
+}
+
 func TestLazyProxy_BackendCrashReMaterializes(t *testing.T) {
 	// First tools/call materializes successfully but SendRequest errors out
 	// mid-stream. Second call must see the evicted cache and re-materialize

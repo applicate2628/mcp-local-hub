@@ -79,6 +79,22 @@ construct the backend lifecycle. Human invocation is not supported.`,
 				}
 			}
 			reg := api.NewRegistry(regPath)
+			// Acquire the registry flock BEFORE the existence check and hold
+			// it through Bind so `mcphub unregister` can't race us out of
+			// the registry between check and listener.Bind. Once Bind returns
+			// the port is actually listening, so a post-unlock unregister's
+			// kill-by-port will find and terminate the proxy.
+			unlock, err := reg.Lock()
+			if err != nil {
+				return fmt.Errorf("registry lock: %w", err)
+			}
+			releaseUnlock := func() {
+				if unlock != nil {
+					unlock()
+					unlock = nil
+				}
+			}
+			defer releaseUnlock()
 			if err := reg.Load(); err != nil {
 				return fmt.Errorf("load registry: %w", err)
 			}
@@ -132,8 +148,18 @@ construct the backend lifecycle. Human invocation is not supported.`,
 			signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 			defer signal.Stop(sigCh)
 
+			// Bind under the still-held registry lock so unregister cannot
+			// remove our row between the Get check above and the port being
+			// actually listening. Once the listener is bound, it is safe to
+			// release the lock — a subsequent unregister's kill-by-port will
+			// find the listening socket and terminate us.
+			if err := proxy.Bind(); err != nil {
+				return fmt.Errorf("bind proxy: %w", err)
+			}
+			releaseUnlock()
+
 			errCh := make(chan error, 1)
-			go func() { errCh <- proxy.ListenAndServe() }()
+			go func() { errCh <- proxy.Serve() }()
 
 			select {
 			case <-sigCh:

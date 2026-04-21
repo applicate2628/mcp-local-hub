@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -65,9 +66,10 @@ type LazyProxyConfig struct {
 //   - LastToolsCallAt registry writes are coalesced to the debounce interval
 //     to keep the YAML file churn-free under sustained traffic.
 type LazyProxy struct {
-	cfg    LazyProxyConfig
-	gate   *InflightGate
-	server *http.Server
+	cfg      LazyProxyConfig
+	gate     *InflightGate
+	server   *http.Server
+	listener net.Listener // populated by Bind; consumed by Serve
 
 	mu       sync.Mutex
 	endpoint MCPEndpoint
@@ -105,22 +107,48 @@ func (p *LazyProxy) Handler() http.Handler {
 	return mux
 }
 
-// ListenAndServe writes the initial LifecycleConfigured state, binds
-// 127.0.0.1:<port>, and serves until Stop is called. Returns
-// http.ErrServerClosed after a clean Stop.
-func (p *LazyProxy) ListenAndServe() error {
-	// Initial registry state: proxy up, backend not spawned.
-	// Writing Configured is a no-op if the entry is already at that state,
-	// and it re-asserts the invariant if the registry was hand-edited.
+// Bind writes the initial LifecycleConfigured state and binds the TCP
+// listener on 127.0.0.1:<port>. It returns once the port is bound but
+// before accepting any requests. Call Serve afterward to run the request
+// loop. Splitting bind from serve lets the CLI caller hold the registry
+// flock across the "check registry + bind port" critical section so an
+// `mcphub unregister` cannot remove the row between the check and the
+// bind — which would otherwise let unregister's kill-by-port miss the
+// not-yet-listening proxy, leaving an orphan after serve begins.
+func (p *LazyProxy) Bind() error {
 	_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycle(
 		p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleConfigured, "")
+	addr := fmt.Sprintf("127.0.0.1:%d", p.cfg.Port)
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("bind %s: %w", addr, err)
+	}
+	p.listener = ln
 	p.server = &http.Server{
-		Addr:              fmt.Sprintf("127.0.0.1:%d", p.cfg.Port),
+		Addr:              addr,
 		Handler:           p.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		// WriteTimeout 0: handlers own cancellation via r.Context().
 	}
-	return p.server.ListenAndServe()
+	return nil
+}
+
+// Serve runs the request loop on the listener populated by Bind. Returns
+// http.ErrServerClosed after a clean Stop.
+func (p *LazyProxy) Serve() error {
+	if p.listener == nil || p.server == nil {
+		return errors.New("proxy not bound — call Bind() first")
+	}
+	return p.server.Serve(p.listener)
+}
+
+// ListenAndServe binds and serves in one call. Retained for callers that
+// don't need the lock-aware Bind/Serve split (e.g. tests using httptest).
+func (p *LazyProxy) ListenAndServe() error {
+	if err := p.Bind(); err != nil {
+		return err
+	}
+	return p.Serve()
 }
 
 // Stop closes the materialized endpoint (if any), invokes Lifecycle.Stop to
