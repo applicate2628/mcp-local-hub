@@ -213,6 +213,9 @@ See also: install, logs, restart, status.`,
 	}
 	c.Flags().StringVar(&server, "server", "", "server name")
 	c.Flags().StringVar(&daemonName, "daemon", "", "daemon name within the server manifest")
+	// Phase 3 workspace-scoped: lazy proxy subcommand the scheduler task
+	// launches per (workspace, language). Hidden — users don't run it.
+	c.AddCommand(newDaemonWorkspaceProxyCmd())
 	return c
 }
 
