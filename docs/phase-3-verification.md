@@ -367,20 +367,88 @@ New test files added this phase include:
 - `internal/config/manifest_test.go` — 5 new tests for workspace-scoped shape
   (`Kind`, `PortPool`, `Languages[]`, transport default, transport enum)
 
+## Real-LSP smoke closeout — 2026-04-22
+
+The Known-gap "real-LSP smoke not run on this host" is now closed. Ran the full
+lifecycle against live `gopls mcp` on the mcp-local-hub repo itself:
+
+```
+$ mcphub register d:\dev\mcp-local-hub go
+✓ Scheduler task created: mcp-local-hub-lsp-b133f336-go
+✓ Scheduler task started: mcp-local-hub-lsp-b133f336-go
+✓ codex-cli     → http://localhost:9200/mcp (entry mcp-language-server-go)
+✓ claude-code   → http://localhost:9200/mcp
+✓ gemini-cli    → http://localhost:9200/mcp
+
+$ mcphub workspaces
+b133f336  go  9200  gopls-mcp  configured  -  d:\dev\mcp-local-hub
+
+$ curl -sX POST http://127.0.0.1:9200/mcp ... tools/call go_workspace
+{"result":{"content":[{"type":"text","text":"The `D:\\dev\\mcp-local-hub`
+  directory uses Go modules, with the following main modules:
+  \tD:\\dev\\mcp-local-hub\\go.mod (module mcp-local-hub)\n\n"}]}}
+
+$ mcphub workspaces
+b133f336  go  9200  gopls-mcp  active  0s ago  d:\dev\mcp-local-hub
+```
+
+Lifecycle transition `configured → active` fires exactly on first `tools/call`,
+`gopls.exe` children spawn from the proxy process, response is real gopls
+output (workspace scan), and `mcphub unregister` tears the whole chain down
+cleanly.
+
+### Register flock deadlock found + fixed (551a885)
+
+The first real-LSP smoke run failed with a consistent ~10s timeout: `proxy
+readiness on port 9200: dial tcp 127.0.0.1:9200: connectex: No connection
+could be made because the target machine actively refused it.`
+
+Root cause: `Register` acquired the registry flock at its entry and held it
+across `sch.Run` + the 10s readiness probe. The spawned `mcphub daemon
+workspace-proxy` subprocess opens the registry with its own `reg.Lock()` on
+startup ([internal/cli/daemon_workspace.go:87](internal/cli/daemon_workspace.go#L87))
+to make "check registry row + bind port" atomic against concurrent
+`unregister`. That `Lock()` blocked on Register's flock the whole 10s window,
+the proxy never bound, Register's rollback removed the registry row before
+releasing the flock, the unblocked proxy loaded an empty registry and exited
+with `error: not registered`.
+
+Every Phase 3 register against a real scheduler failed. The 26 Codex review
+rounds + 27th manual review missed it because
+[internal/e2e/lazy_register_test.go](internal/e2e/lazy_register_test.go) uses
+`InstallTestHooks` to override `testSchedulerFactory` with a fake whose
+`sch.Run` is a no-op — no second process ever competes for the flock in the
+test path.
+
+Fix in `551a885`: per-language flock lifecycle. `registerOneLanguage` now
+owns a Phase 1 flock window (Lock → Load → port alloc → task create →
+`reg.Put`/`Save`) and explicitly releases the flock **before** `sch.Run`.
+Registry-touching rollback closures re-acquire the flock so they remain safe
+regardless of when they fire. Regression guard:
+`TestRegister_ReleasesFlockBeforeSchRun` hooks `fakeScheduler.runHook` to
+attempt `reg.Lock()` in a goroutine with a 2s bound — fails immediately if
+Register is ever again holding the flock across `sch.Run`.
+
 ## Known gaps / follow-ups
 
-### ⚪ End-to-end smoke against real LSP binaries not run on this machine
+### 🟡 `mcphub unregister` reports task deletion but Windows task survives
 
-E2E test `lazy_register_test.go` uses a stubbed backend; real-world first-call
-materialization against `pyright-langserver`, `gopls mcp`, `clangd`, etc.
-hasn't been exercised on this host. Not a functional risk per se (backend
-handshake is tested in `internal/daemon/lazy_proxy_test.go`) but a real-LSP
-smoke run would close the loop for the `LifecycleMissing` detection path.
+Second observation from the smoke: after a successful `mcphub unregister`
+whose output included `✓ deleted scheduler task mcp-local-hub-lsp-b133f336-go`,
+`schtasks /Query` still showed the task entry (with `Last Result: 1` — the
+exit code of the dying proxy). Manually running `schtasks /Delete /TN
+"\mcp-local-hub-lsp-b133f336-go" /F` reported SUCCESS and removed it. The Go
+`sch.Delete` call in `scheduler_windows.go` treats "task not found" output as
+idempotent success — it may be swallowing a delete-while-transitional case.
+Separate investigation owed. Not a data-safety issue (the registry row, client
+entries, and listening port are all cleaned up), but leaves an orphaned
+scheduler task definition on re-register.
 
-### ⚪ `mcp status` `--workspace-scoped` filter is commit `3cde473`-era
+### ⚪ `mcp status` `--workspace-scoped` filter live-verified only for single-language workspace
 
-Shipped in Task 15 but not live-verified on this machine because no workspace
-is registered. Unit-tested via `status_workspace_test.go`.
+Lifecycle transitions `configured → active` and `last_used` timestamp both
+rendered correctly during the smoke. Not live-verified for multi-language
+workspaces on this machine; unit-tested via `status_workspace_test.go`.
 
 ### ⚪ Weekly-refresh for workspace-scoped uses one shared task
 
@@ -412,6 +480,8 @@ this workspace-scoped work. Still deferred — picks up next.
 ## Merge trail (master)
 
 ```
+551a885 fix(api): release registry flock before sch.Run in register
+b17650e docs(phase-3): add phase-3-verification notes
 c81810e chore(docs): normalize INSTALL.md CRLF→LF + clarify resource://tools wording
 c122150 fix(api,docs): address REVISE — prune obsolete tasks + docs reflect hyperfine gate
 410dd49 fix(perftools): discovery hides hyperfine when gate is closed
@@ -425,3 +495,5 @@ e3adacc fix(security): gate hyperfine tool + pin serena source + drop auto-refre
 ```
 
 All on master. All tests green. PR #1 + PR #4 closed-merged via fast-forward.
+Real-LSP smoke + 551a885 lift Phase 3 from "code merged" to
+"end-to-end functional on a real machine".
