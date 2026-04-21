@@ -505,6 +505,7 @@ type fakeScheduler struct {
 	failCreateAfterN int // Create calls after the Nth succeed; the (N+1)th fails
 	createCount      int
 	createdSpecs     []scheduler.TaskSpec
+	failRunForTask   string // if non-empty, Run(name) returns an induced error for this task name
 }
 
 func (f *fakeScheduler) Create(spec scheduler.TaskSpec) error {
@@ -517,7 +518,12 @@ func (f *fakeScheduler) Create(spec scheduler.TaskSpec) error {
 	return nil
 }
 func (f *fakeScheduler) Delete(name string) error { delete(f.tasks, name); return nil }
-func (f *fakeScheduler) Run(name string) error    { return nil }
+func (f *fakeScheduler) Run(name string) error {
+	if f.failRunForTask != "" && f.failRunForTask == name {
+		return fmt.Errorf("fake scheduler: induced Run failure for %s", name)
+	}
+	return nil
+}
 func (f *fakeScheduler) ExportXML(name string) ([]byte, error) {
 	if b, ok := f.xml[name]; ok {
 		return b, nil
