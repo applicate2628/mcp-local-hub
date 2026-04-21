@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
-	"time"
 )
 
 // JSONRPCRequest is the minimal request envelope the lazy proxy forwards.
@@ -306,14 +305,14 @@ func (e *stdioHostEndpoint) Close() error {
 // proxy can distinguish startup failures from missing-binary failures. Any
 // error here becomes LifecycleFailed (not Missing) since the binary WAS found
 // but the handshake or process-start failed afterward.
+//
+// Uses %w so errors.Is / errors.As keep working across the wrap; the lazy
+// proxy's IsMissingBinaryErr classification relies on the unwrap chain, and
+// truncation is better handled at the log or registry-write site (MaxLastErrorBytes
+// already caps registry LastError to 200 bytes).
 func wrapInitErr(err error) error {
 	if err == nil {
 		return nil
 	}
-	msg := err.Error()
-	if len(msg) > 300 {
-		msg = msg[:300] + "..."
-	}
-	_ = time.Second // reserved for future timeout annotation
-	return fmt.Errorf("backend init: %s", msg)
+	return fmt.Errorf("backend init: %w", err)
 }

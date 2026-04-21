@@ -34,15 +34,13 @@ func TestInflight_ConcurrentCallsShareOne(t *testing.T) {
 		return "ep", nil
 	}
 	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 10 {
+		wg.Go(func() {
 			_, err := g.Do(context.Background(), "k1", fn)
 			if err != nil {
 				t.Error(err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if calls.Load() != 1 {

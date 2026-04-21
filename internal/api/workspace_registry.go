@@ -225,32 +225,20 @@ func (r *Registry) ListByWorkspace(workspaceKey string) []WorkspaceEntry {
 
 // PutLifecycle loads the registry under lock, updates the lifecycle state +
 // LastError for (workspaceKey, language), and saves. LastError is truncated
-// to MaxLastErrorBytes. If Lifecycle transitions to Active, the caller
-// should also set LastMaterializedAt via PutLifecycleWithTimestamps.
+// to MaxLastErrorBytes. For transitions that need to stamp a timestamp
+// (e.g., -> Active), use PutLifecycleWithTimestamps instead.
+//
+// Implementation note: delegates to PutLifecycleWithTimestamps with zero
+// timestamps; the zero-time guards inside skip the timestamp assignments,
+// preserving the "state + error only" contract.
 func (r *Registry) PutLifecycle(workspaceKey, language, state, lastError string) error {
-	unlock, err := r.Lock()
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	if err := r.Load(); err != nil {
-		return err
-	}
-	e, ok := r.Get(workspaceKey, language)
-	if !ok {
-		e = WorkspaceEntry{WorkspaceKey: workspaceKey, Language: language}
-	}
-	e.Lifecycle = state
-	if len(lastError) > MaxLastErrorBytes {
-		lastError = lastError[:MaxLastErrorBytes]
-	}
-	e.LastError = lastError
-	r.Put(e)
-	return r.Save()
+	return r.PutLifecycleWithTimestamps(workspaceKey, language, state, lastError, time.Time{}, time.Time{})
 }
 
 // PutLifecycleWithTimestamps is the richer variant used by the proxy at
 // materialization edges: state transition + timestamps in one atomic save.
+// Zero-valued materializedAt / toolsCallAt leave the existing stored values
+// unchanged; non-zero values are coerced to UTC before write.
 func (r *Registry) PutLifecycleWithTimestamps(workspaceKey, language, state, lastError string, materializedAt, toolsCallAt time.Time) error {
 	unlock, err := r.Lock()
 	if err != nil {
