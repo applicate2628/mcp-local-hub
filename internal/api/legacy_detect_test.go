@@ -167,6 +167,31 @@ func TestDetectLegacyLSP_IgnoresEnabledEntries(t *testing.T) {
 	}
 }
 
+// TestDetectLegacyLSP_IgnoresCodexEntriesWithoutExplicitEnabledFalse
+// guards the Codex-convention fix: in Codex TOML, a missing `enabled`
+// key means the entry is enabled (our own writer omits the flag on
+// active entries). Migration must NOT sweep up entries with an absent
+// enabled key — they are still in active use and deleting them would
+// break the user's running config.
+func TestDetectLegacyLSP_IgnoresCodexEntriesWithoutExplicitEnabledFalse(t *testing.T) {
+	const fixtureNoEnabled = `[mcp_servers.pyright]
+command = "mcp-language-server"
+args = ["-workspace", "/home/u/ws", "-lsp", "pyright-langserver", "--", "--stdio"]
+`
+	dir := withHomeDir(t)
+	_ = os.MkdirAll(filepath.Join(dir, ".codex"), 0755)
+	if err := os.WriteFile(filepath.Join(dir, ".codex", "config.toml"), []byte(fixtureNoEnabled), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := DetectLegacyLanguageServerEntries()
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("entry without explicit enabled=false must be treated as active, got %d legacy rows: %+v", len(got), got)
+	}
+}
+
 // TestDetectLegacyLSP_ExtractsWorkspaceAndLanguage confirms parsing of
 // --workspace and --lsp flags across both Codex and Claude fixtures. This
 // is the round-trip test that keeps parseWorkspaceAndLsp honest.

@@ -72,8 +72,10 @@ func DetectLegacyLanguageServerEntries() ([]LegacyLSEntry, error) {
 
 // extractLegacyFromCodexTOML parses a Codex config.toml body and returns
 // every [mcp_servers.*] block whose command is "mcp-language-server" and
-// whose enabled flag is NOT true (absent or false both qualify as disabled
-// — Codex's convention is `enabled = false` for parked servers).
+// whose `enabled` key is EXPLICITLY set to false. Codex treats a missing
+// enabled key as enabled (our own writer omits the flag on active entries),
+// so absence must not qualify as "legacy / disabled" — migration would
+// otherwise sweep up and delete actively-used configs.
 func extractLegacyFromCodexTOML(raw []byte) ([]LegacyLSEntry, error) {
 	var m map[string]any
 	if err := toml.Unmarshal(raw, &m); err != nil {
@@ -89,9 +91,11 @@ func extractLegacyFromCodexTOML(raw []byte) ([]LegacyLSEntry, error) {
 		if cmd, _ := entry["command"].(string); cmd != "mcp-language-server" {
 			continue
 		}
-		// Disabled gate: only collect when `enabled` is explicitly false or
-		// absent. An entry with `enabled = true` is still in active use.
-		if enabled, ok := entry["enabled"].(bool); ok && enabled {
+		// Disabled gate: only collect when `enabled` is EXPLICITLY false.
+		// Missing key = enabled (Codex default), so skip — migration must
+		// not touch active entries.
+		enabled, ok := entry["enabled"].(bool)
+		if !ok || enabled {
 			continue
 		}
 		args, _ := entry["args"].([]any)
