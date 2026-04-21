@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // JSONRPCRequest is the minimal request envelope the lazy proxy forwards.
@@ -125,6 +126,99 @@ func (h *StdioHost) SendRPC(ctx context.Context, body []byte) ([]byte, error) {
 	}
 }
 
+// SendNotification writes a JSON-RPC notification (no id, no response
+// expected) to the subprocess stdin. Used by the lazy proxy's Materialize
+// path to deliver `notifications/initialized` after the `initialize` round
+// trip completes. Best-effort: returns the stdin write error if the pipe
+// is already dead, otherwise nil. Does NOT wait for an acknowledgement
+// because notifications have no reply per JSON-RPC 2.0.
+func (h *StdioHost) SendNotification(ctx context.Context, method string, params json.RawMessage) error {
+	notif := map[string]any{
+		"jsonrpc": "2.0",
+		"method":  method,
+	}
+	if len(params) > 0 {
+		notif["params"] = params
+	}
+	body, err := json.Marshal(notif)
+	if err != nil {
+		return fmt.Errorf("marshal notification: %w", err)
+	}
+	// Honor cancellation for parity with SendRPC; cheap pre-check.
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-h.done:
+		return errors.New("backend host stopped")
+	case <-h.childExited:
+		return errors.New("backend subprocess exited")
+	default:
+	}
+	if err := h.writeStdin(body); err != nil {
+		return fmt.Errorf("write stdin: %w", err)
+	}
+	return nil
+}
+
+// mcpBootstrapClientInfo is the clientInfo the lazy proxy declares when it
+// handshakes with a materialized backend. Shared across both backend flavors.
+var mcpBootstrapClientInfo = map[string]any{
+	"name":    "mcp-local-hub-lazy-proxy",
+	"version": "1.0.0",
+}
+
+// performMCPHandshake drives the standard MCP `initialize` + `notifications/initialized`
+// sequence against a freshly-started StdioHost. The backend's MCP session is
+// not usable until this completes — many backends reject tools/call before
+// initialize and hang indefinitely (observed with `gopls mcp` and
+// `mcp-language-server`).
+//
+// Protocol version "2025-03-26" mirrors the value the synthetic handshake
+// answers with (see api.SyntheticInitializeResponse); backends that negotiate
+// down will return their own version in the response, which we currently
+// discard — v1 scope is "get the session live," not "propagate negotiated
+// version to the proxy layer."
+//
+// Returns a wrapped error on timeout, write failure, or a JSON-RPC error
+// payload from the backend. Callers MUST tear down the host on any error
+// because the session is partially established and further use is undefined.
+func performMCPHandshake(ctx context.Context, h *StdioHost) error {
+	initReq := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "initialize",
+		"params": map[string]any{
+			"protocolVersion": "2025-03-26",
+			"clientInfo":      mcpBootstrapClientInfo,
+			"capabilities":    map[string]any{},
+		},
+	}
+	body, err := json.Marshal(initReq)
+	if err != nil {
+		return fmt.Errorf("marshal initialize: %w", err)
+	}
+	raw, err := h.SendRPC(ctx, body)
+	if err != nil {
+		return fmt.Errorf("initialize: %w", err)
+	}
+	// Surface server-side initialize errors verbatim so the lazy proxy's
+	// LifecycleFailed LastError carries the real cause.
+	var respEnvelope struct {
+		Error *JSONRPCError `json:"error,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &respEnvelope); err != nil {
+		return fmt.Errorf("parse initialize response: %w", err)
+	}
+	if respEnvelope.Error != nil {
+		return fmt.Errorf("initialize rejected: code=%d msg=%s",
+			respEnvelope.Error.Code, respEnvelope.Error.Message)
+	}
+	if err := h.SendNotification(ctx, "notifications/initialized", nil); err != nil {
+		return fmt.Errorf("notifications/initialized: %w", err)
+	}
+	return nil
+}
+
 // --- mcp-language-server stdio impl ------------------------------------------
 
 // McpLanguageServerStdioConfig configures a stdio-hosted
@@ -135,6 +229,10 @@ type McpLanguageServerStdioConfig struct {
 	Workspace      string
 	Language       string
 	LogPath        string
+	// HandshakeTimeout bounds the post-spawn MCP initialize+initialized
+	// handshake. Defaults to 10 seconds when zero. Exceeding it causes
+	// Materialize to tear the subprocess down and return a wrapped error.
+	HandshakeTimeout time.Duration
 }
 
 type mcpLanguageServerStdio struct {
@@ -175,6 +273,19 @@ func (b *mcpLanguageServerStdio) Materialize(ctx context.Context) (MCPEndpoint, 
 	if err := h.Start(ctx); err != nil {
 		return nil, wrapInitErr(err)
 	}
+	// Bootstrap the backend's MCP session BEFORE publishing the endpoint.
+	// Backends refuse tools/call before initialize; leaving the session
+	// uninitialized causes client-facing tools/call to hang until timeout.
+	hsTimeout := b.cfg.HandshakeTimeout
+	if hsTimeout == 0 {
+		hsTimeout = 10 * time.Second
+	}
+	hsCtx, cancel := context.WithTimeout(ctx, hsTimeout)
+	defer cancel()
+	if err := performMCPHandshake(hsCtx, h); err != nil {
+		_ = h.Stop()
+		return nil, wrapInitErr(err)
+	}
 	b.host = h
 	return newStdioHostEndpoint(h), nil
 }
@@ -198,6 +309,9 @@ type GoplsMCPStdioConfig struct {
 	ExtraArgs      []string // defaults to ["mcp"]
 	Workspace      string
 	LogPath        string
+	// HandshakeTimeout bounds the post-spawn MCP initialize+initialized
+	// handshake. Defaults to 10 seconds when zero.
+	HandshakeTimeout time.Duration
 }
 
 type goplsMCPStdio struct {
@@ -238,6 +352,18 @@ func (b *goplsMCPStdio) Materialize(ctx context.Context) (MCPEndpoint, error) {
 		return nil, err
 	}
 	if err := h.Start(ctx); err != nil {
+		return nil, wrapInitErr(err)
+	}
+	// Bootstrap the backend's MCP session BEFORE publishing the endpoint.
+	// See mcpLanguageServerStdio.Materialize for rationale.
+	hsTimeout := b.cfg.HandshakeTimeout
+	if hsTimeout == 0 {
+		hsTimeout = 10 * time.Second
+	}
+	hsCtx, cancel := context.WithTimeout(ctx, hsTimeout)
+	defer cancel()
+	if err := performMCPHandshake(hsCtx, h); err != nil {
+		_ = h.Stop()
 		return nil, wrapInitErr(err)
 	}
 	b.host = h

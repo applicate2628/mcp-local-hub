@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"os/exec"
 	"runtime"
 	"testing"
 	"time"
@@ -10,23 +11,40 @@ import (
 
 // fakeLSPCommand returns a portable shell command that behaves enough like a
 // stdio MCP server to validate the lifecycle primitive without requiring a
-// real LSP binary on CI. It writes one canned initialize reply to stdout,
-// then blocks on stdin so Stop()'s tree-kill path is exercised.
+// real LSP binary on CI. It reads the incoming `initialize` request, extracts
+// its id, replies with a matching initialize response, then quietly swallows
+// the `notifications/initialized` that follows and blocks on further stdin so
+// Stop()'s tree-kill path is exercised.
+//
+// Matching the incoming id is important because StdioHost rewrites every
+// JSON-RPC id to a monotonic internal counter — the reply must echo that
+// internal id back so SendRPC's pending-map lookup succeeds.
 func fakeLSPCommand(t *testing.T) (cmd string, args []string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		// Windows: python is consistently on PATH for the project's test
 		// suite (TestHostSubprocessLifecycle relies on it).
 		return "python", []string{"-u", "-c",
-			`import sys
-sys.stdout.write('{"jsonrpc":"2.0","id":1,"result":{"capabilities":{}}}\n')
+			`import sys, json
+# Echo back whatever id the host wrote for the initialize request.
+line = sys.stdin.readline()
+try:
+    req = json.loads(line)
+    rid = req.get("id", 1)
+except Exception:
+    rid = 1
+sys.stdout.write(json.dumps({"jsonrpc":"2.0","id":rid,"result":{"capabilities":{}}}) + "\n")
 sys.stdout.flush()
+# Drain notifications/initialized and any later traffic.
 for _ in sys.stdin:
     pass
 `}
 	}
 	return "sh", []string{"-c",
-		`printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"capabilities":{}}}'; cat`}
+		`read -r line
+rid=$(printf '%s' "$line" | python -c 'import sys,json; d=json.loads(sys.stdin.read()); print(d.get("id",1))')
+printf '{"jsonrpc":"2.0","id":%s,"result":{"capabilities":{}}}\n' "$rid"
+cat`}
 }
 
 func TestBackendLifecycle_StdioMaterializeStops(t *testing.T) {
@@ -123,6 +141,112 @@ func TestBackendLifecycle_EndpointCloseIsIdempotent(t *testing.T) {
 	_, err = ep.SendRequest(context.Background(), &JSONRPCRequest{Method: "ping", ID: json.RawMessage(`1`)})
 	if err == nil {
 		t.Error("SendRequest after Close must error")
+	}
+}
+
+// TestBackendLifecycle_MaterializeCompletesMCPHandshake_McpLanguageServer
+// drives the real mcp-language-server.exe wrapper through Materialize and
+// asserts the post-spawn MCP handshake completes within a reasonable bound.
+// Skips when the binary is not on PATH — keeps CI green on machines without
+// the dev toolchain. A real tools/call afterward would require the wrapper's
+// LSP child (gopls) also be installed; we stop at handshake to keep the
+// assertion surface focused on the regression this guards.
+func TestBackendLifecycle_MaterializeCompletesMCPHandshake_McpLanguageServer(t *testing.T) {
+	bin := "mcp-language-server"
+	if _, err := exec.LookPath(bin); err != nil {
+		t.Skipf("%s not on PATH; skipping live probe", bin)
+	}
+	if _, err := exec.LookPath("gopls"); err != nil {
+		t.Skipf("gopls (required by mcp-language-server wrapper) not on PATH; skipping live probe")
+	}
+	ws := t.TempDir()
+	b := NewMcpLanguageServerStdio(McpLanguageServerStdioConfig{
+		WrapperCommand:   bin,
+		WrapperArgs:      []string{"-workspace", ws, "-lsp", "gopls"},
+		Workspace:        ws,
+		HandshakeTimeout: 15 * time.Second,
+	})
+	defer b.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	start := time.Now()
+	ep, err := b.Materialize(ctx)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("Materialize against real %s failed after %s: %v", bin, elapsed, err)
+	}
+	if ep == nil {
+		t.Fatal("endpoint nil")
+	}
+	t.Logf("%s Materialize+handshake completed in %s", bin, elapsed)
+}
+
+// TestBackendLifecycle_MaterializeCompletesMCPHandshake_GoplsMCP is the
+// equivalent live probe for `gopls mcp`.
+func TestBackendLifecycle_MaterializeCompletesMCPHandshake_GoplsMCP(t *testing.T) {
+	bin := "gopls"
+	if _, err := exec.LookPath(bin); err != nil {
+		t.Skipf("%s not on PATH; skipping live probe", bin)
+	}
+	ws := t.TempDir()
+	b := NewGoplsMCPStdio(GoplsMCPStdioConfig{
+		WrapperCommand:   bin,
+		Workspace:        ws,
+		HandshakeTimeout: 15 * time.Second,
+	})
+	defer b.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	start := time.Now()
+	ep, err := b.Materialize(ctx)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("Materialize against real gopls mcp failed after %s: %v", elapsed, err)
+	}
+	if ep == nil {
+		t.Fatal("endpoint nil")
+	}
+	t.Logf("gopls mcp Materialize+handshake completed in %s", elapsed)
+}
+
+// TestBackendLifecycle_HandshakeTimeoutTearsDownSubprocess verifies the
+// handshake timeout path: a backend that never answers initialize must cause
+// Materialize to tear the subprocess down and return a wrapped error (not
+// hang forever).
+func TestBackendLifecycle_HandshakeTimeoutTearsDownSubprocess(t *testing.T) {
+	var cmd string
+	var args []string
+	if runtime.GOOS == "windows" {
+		cmd = "python"
+		args = []string{"-u", "-c", `import sys
+# Silent backend: never replies, just drains stdin.
+for _ in sys.stdin:
+    pass
+`}
+	} else {
+		cmd = "sh"
+		args = []string{"-c", "cat >/dev/null"}
+	}
+	b := NewMcpLanguageServerStdio(McpLanguageServerStdioConfig{
+		WrapperCommand:   cmd,
+		WrapperArgs:      args,
+		Workspace:        t.TempDir(),
+		HandshakeTimeout: 500 * time.Millisecond,
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, err := b.Materialize(ctx)
+	if err == nil {
+		t.Fatal("Materialize must error when handshake times out")
+	}
+	if IsMissingBinaryErr(err) {
+		t.Errorf("timeout error must NOT classify as missing-binary: %v", err)
+	}
+	// Second Materialize after teardown should spawn fresh and again time
+	// out — verifies the host was cleaned up rather than left dangling.
+	_, err2 := b.Materialize(ctx)
+	if err2 == nil {
+		t.Error("second Materialize after tear-down must also error")
 	}
 }
 
