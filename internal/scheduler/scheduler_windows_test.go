@@ -78,3 +78,81 @@ func TestBuildCreateXML_Weekly(t *testing.T) {
 		t.Errorf("bare <WeeklyTrigger> must not appear (use <CalendarTrigger>): %s", xml)
 	}
 }
+
+// TestBuildCreateXML_QuotesArgsWithSpaces guards the workspace-scoped
+// register path that passes canonical absolute paths (e.g.
+// `C:\Users\Test User\workspace`) as a TaskSpec argument. Without the
+// syscall.EscapeArg pass in joinTaskArgs, Task Scheduler's XML
+// `<Arguments>` element received the raw path and Windows' child-launcher
+// split it into multiple argv tokens.
+func TestBuildCreateXML_QuotesArgsWithSpaces(t *testing.T) {
+	spec := TaskSpec{
+		Name:    "mcp-local-hub-quote-test",
+		Command: `C:\path\mcphub.exe`,
+		Args: []string{
+			"daemon", "workspace-proxy",
+			"--port", "9200",
+			"--workspace", `C:\Users\Test User\workspace`,
+			"--language", "go",
+		},
+	}
+	xml := buildCreateXML(spec, "dima_")
+	// The workspace path MUST be wrapped in quotes; unquoted would split
+	// into "C:\Users\Test" + "User\workspace" at argv time. xmlEscape will
+	// then re-encode the surrounding quote as &#34; inside the XML.
+	wantFragment := `&#34;C:\Users\Test User\workspace&#34;`
+	if !strings.Contains(xml, wantFragment) {
+		t.Errorf("expected workspace path to be quoted (%q) in XML, got:\n%s", wantFragment, xml)
+	}
+	// Simple args (no spaces) must still appear unquoted so operator-read
+	// Task Scheduler panels stay readable.
+	if !strings.Contains(xml, "daemon workspace-proxy --port 9200") {
+		t.Errorf("simple args must not be gratuitously quoted; xml=%s", xml)
+	}
+}
+
+// TestBuildCreateXML_HandlesInternalQuotes verifies the escaping applied
+// to an argument that already contains a double quote. syscall.EscapeArg
+// escapes the internal quote as \"; outer quotes are only added when the
+// arg also contains whitespace. For an internal quote alone the expected
+// rendering is `a\"b` which XML-escapes to `a\&#34;b`.
+func TestBuildCreateXML_HandlesInternalQuotes(t *testing.T) {
+	spec := TaskSpec{
+		Name:    "mcp-local-hub-quote-internal-test",
+		Command: `C:\path\mcphub.exe`,
+		Args:    []string{"--label", `a"b`},
+	}
+	xml := buildCreateXML(spec, "dima_")
+	if !strings.Contains(xml, `a\&#34;b`) {
+		t.Errorf("expected escaped internal quote `a\\&#34;b` in XML, got:\n%s", xml)
+	}
+	// A quote-with-space arg must get the outer wrapping quotes too.
+	spec2 := TaskSpec{
+		Name:    "mcp-local-hub-quote-internal-space-test",
+		Command: `C:\path\mcphub.exe`,
+		Args:    []string{"--label", `has "quoted" space`},
+	}
+	xml2 := buildCreateXML(spec2, "dima_")
+	if !strings.Contains(xml2, `&#34;has \&#34;quoted\&#34; space&#34;`) {
+		t.Errorf("expected both outer and internal quotes escaped, got:\n%s", xml2)
+	}
+}
+
+// TestBuildCreateXML_HandlesTrailingBackslash verifies
+// CommandLineToArgvW's rule for runs of backslashes preceding a closing
+// quote: every trailing backslash must be doubled. A naive
+// quoting implementation would emit `"C:\path\"` which Windows parses as
+// `C:\path"`. syscall.EscapeArg doubles the backslashes correctly.
+func TestBuildCreateXML_HandlesTrailingBackslash(t *testing.T) {
+	spec := TaskSpec{
+		Name:    "mcp-local-hub-quote-trailbs-test",
+		Command: `C:\path\mcphub.exe`,
+		Args:    []string{"--workspace", `C:\Users\Test User\ws\`},
+	}
+	xml := buildCreateXML(spec, "dima_")
+	// With a trailing backslash the arg should end in `\\"` inside the
+	// command line, i.e. `&#34;...ws\\&#34;` in the XML-escaped form.
+	if !strings.Contains(xml, `ws\\&#34;`) {
+		t.Errorf("trailing backslash must be doubled before closing quote, got:\n%s", xml)
+	}
+}

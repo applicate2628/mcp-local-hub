@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/user"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -125,7 +126,7 @@ func buildCreateXML(spec TaskSpec, userName string) string {
 	buf.WriteString("  <Actions Context=\"Author\">\n    <Exec>\n")
 	buf.WriteString(fmt.Sprintf("      <Command>%s</Command>\n", xmlEscape(spec.Command)))
 	if len(spec.Args) > 0 {
-		buf.WriteString(fmt.Sprintf("      <Arguments>%s</Arguments>\n", xmlEscape(strings.Join(spec.Args, " "))))
+		buf.WriteString(fmt.Sprintf("      <Arguments>%s</Arguments>\n", xmlEscape(joinTaskArgs(spec.Args))))
 	}
 	if spec.WorkingDir != "" {
 		buf.WriteString(fmt.Sprintf("      <WorkingDirectory>%s</WorkingDirectory>\n", xmlEscape(spec.WorkingDir)))
@@ -134,6 +135,30 @@ func buildCreateXML(spec TaskSpec, userName string) string {
 	buf.WriteString("</Task>\n")
 
 	return buf.String()
+}
+
+// joinTaskArgs concatenates args into a Windows-compatible command line.
+// Each arg is escaped via syscall.EscapeArg (stdlib — implements the same
+// CommandLineToArgvW-compatible rules Go's own os/exec uses on Windows),
+// then joined with single spaces. Without this, arguments containing
+// spaces or embedded quotes were fed unescaped into the Task Scheduler
+// XML `<Arguments>` element and split into multiple argv tokens at child
+// launch — breaking any workspace path like
+// `C:\Users\Test User\workspace`.
+//
+// syscall.EscapeArg is a no-op for args that contain none of the shell
+// metacharacters it guards against (space, tab, `"`, `\`), so previously
+// simple flag values like `--port` / `9200` / `--language` / `go` render
+// identically to the pre-fix output.
+func joinTaskArgs(args []string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	escaped := make([]string, len(args))
+	for i, a := range args {
+		escaped[i] = syscall.EscapeArg(a)
+	}
+	return strings.Join(escaped, " ")
 }
 
 func xmlEscape(s string) string {
