@@ -291,7 +291,11 @@ func TestLazyProxy_ToolsCallMaterializesOnce(t *testing.T) {
 }
 
 func TestLazyProxy_ConcurrentFirstCall(t *testing.T) {
-	f := &fakeLifecycle{kind: "mcp-language-server", materializeDelay: 30 * time.Millisecond}
+	// 200ms delay (not 30ms) gives enough headroom for all 10 goroutines to
+	// enter gate.Do before the first materialize completes, even under
+	// parallel-test-suite load. Shorter delays produce observed flakes
+	// where goroutines serialize through the gate, each starting a new flight.
+	f := &fakeLifecycle{kind: "mcp-language-server", materializeDelay: 200 * time.Millisecond}
 	p, _ := newTestProxy(t, "mcp-language-server", f)
 	h := p.Handler()
 	var wg sync.WaitGroup
