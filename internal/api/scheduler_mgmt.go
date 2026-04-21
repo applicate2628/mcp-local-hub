@@ -39,26 +39,33 @@ func (a *API) SchedulerUpgrade() ([]SchedulerUpgradeResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Load the registry once for workspace-scoped task upgrades.
+	wsByTask := workspaceTasksByName()
 	var results []SchedulerUpgradeResult
 	for _, t := range tasks {
 		normalized := strings.TrimPrefix(t.Name, "\\")
 		// Workspace-scoped shared weekly-refresh task:
 		// "mcp-local-hub-workspace-weekly-refresh". parseTaskName would
-		// see server="workspace" and try to load a nonexistent manifest.
-		// Skip — the task's Command already points at canonical mcphub
-		// running the hidden `workspace-weekly-refresh` subcommand,
-		// same as the global weekly-refresh case below.
+		// see server="workspace" and try to load a nonexistent manifest,
+		// but the task's Command DOES need rewriting to the new canonical
+		// mcphub path when the binary moves — otherwise weekly refreshes
+		// silently stop working after the upgrade.
 		if normalized == WeeklyRefreshTaskName {
+			if r := upgradeWorkspaceWeeklyRefreshTask(sch, t.Name, canonicalPath); r != nil {
+				results = append(results, *r)
+			}
 			continue
 		}
 		// Workspace-scoped lazy-proxy tasks: "mcp-local-hub-lsp-<key>-<lang>".
 		// parseTaskName reports server="lsp" which also lacks a manifest.
-		// Skip — these tasks are rebuilt via `mcphub register` when needed,
-		// not via scheduler upgrade. The upgrade flow is for per-server
-		// daemon tasks whose Command needs rewiring after the binary moves;
-		// workspace-proxy tasks' Command is the same mcphub binary and
-		// already correct.
+		// Cannot reuse the per-server manifest path, but the Command still
+		// needs rewriting so the new logon spawns the relocated mcphub.
+		// Args are reconstructed from the registry entry (port, workspace,
+		// language) which is already the source of truth for these tasks.
 		if IsLazyProxyTaskName(normalized) {
+			if r := upgradeLazyProxyTask(sch, t.Name, normalized, canonicalPath, wsByTask); r != nil {
+				results = append(results, *r)
+			}
 			continue
 		}
 		srv, dmn := parseTaskName(t.Name)
@@ -129,6 +136,75 @@ func (a *API) SchedulerUpgrade() ([]SchedulerUpgradeResult, error) {
 		results = append(results, SchedulerUpgradeResult{TaskName: t.Name, NewCmd: canonicalPath})
 	}
 	return results, nil
+}
+
+// upgradeWorkspaceWeeklyRefreshTask rewrites the shared workspace
+// weekly-refresh task's Command to canonicalPath. Called from
+// SchedulerUpgrade for the `mcp-local-hub-workspace-weekly-refresh`
+// task — that task has no corresponding manifest so the main upgrade
+// loop can't use loadManifestForServer, but the Command path still
+// needs refreshing after a binary move. Snapshot + restore on failure
+// mirrors the rest of the upgrade loop.
+func upgradeWorkspaceWeeklyRefreshTask(sch scheduler.Scheduler, taskName, canonicalPath string) *SchedulerUpgradeResult {
+	priorXML, _ := sch.ExportXML(taskName)
+	if err := sch.Delete(taskName); err != nil {
+		return &SchedulerUpgradeResult{TaskName: taskName, Err: fmt.Sprintf("delete: %v", err)}
+	}
+	spec := scheduler.TaskSpec{
+		Name:             taskName,
+		Description:      "mcp-local-hub: weekly refresh of workspace-scoped lazy proxies",
+		Command:          canonicalPath,
+		Args:             []string{"workspace-weekly-refresh"},
+		WorkingDir:       filepath.Dir(canonicalPath),
+		WeeklyTrigger:    &scheduler.WeeklyTrigger{DayOfWeek: 0, HourLocal: 3, MinuteLocal: 0},
+		RestartOnFailure: false,
+	}
+	if err := sch.Create(spec); err != nil {
+		if len(priorXML) > 0 {
+			_ = sch.ImportXML(taskName, priorXML)
+		}
+		return &SchedulerUpgradeResult{TaskName: taskName, Err: fmt.Sprintf("create: %v", err)}
+	}
+	return &SchedulerUpgradeResult{TaskName: taskName, NewCmd: canonicalPath}
+}
+
+// upgradeLazyProxyTask rewrites a `mcp-local-hub-lsp-<key>-<lang>`
+// scheduler task's Command + Args to the new canonicalPath. Args
+// (port, workspace path, language) come from the registry entry
+// which is the source of truth for these tasks. Missing registry
+// entry surfaces as an error — upgrading a task with no registry
+// row would produce a broken config, better to let the operator
+// re-register.
+func upgradeLazyProxyTask(sch scheduler.Scheduler, taskName, normalizedName, canonicalPath string, wsByTask map[string]WorkspaceEntry) *SchedulerUpgradeResult {
+	entry, ok := wsByTask[normalizedName]
+	if !ok {
+		return &SchedulerUpgradeResult{TaskName: taskName, Err: "no registry entry for workspace-proxy task; run mcphub register to rebuild"}
+	}
+	priorXML, _ := sch.ExportXML(taskName)
+	if err := sch.Delete(taskName); err != nil {
+		return &SchedulerUpgradeResult{TaskName: taskName, Err: fmt.Sprintf("delete: %v", err)}
+	}
+	spec := scheduler.TaskSpec{
+		Name:        taskName,
+		Description: fmt.Sprintf("mcp-local-hub: workspace %s lang %s", entry.WorkspacePath, entry.Language),
+		Command:     canonicalPath,
+		Args: []string{
+			"daemon", "workspace-proxy",
+			"--port", fmt.Sprintf("%d", entry.Port),
+			"--workspace", entry.WorkspacePath,
+			"--language", entry.Language,
+		},
+		WorkingDir:       filepath.Dir(canonicalPath),
+		RestartOnFailure: true,
+		LogonTrigger:     true,
+	}
+	if err := sch.Create(spec); err != nil {
+		if len(priorXML) > 0 {
+			_ = sch.ImportXML(taskName, priorXML)
+		}
+		return &SchedulerUpgradeResult{TaskName: taskName, Err: fmt.Sprintf("create: %v", err)}
+	}
+	return &SchedulerUpgradeResult{TaskName: taskName, NewCmd: canonicalPath}
 }
 
 // WeeklyRefreshSet creates or replaces the hub-wide weekly-refresh

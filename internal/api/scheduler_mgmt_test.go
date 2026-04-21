@@ -5,24 +5,29 @@ import (
 	"testing"
 )
 
-// TestSchedulerUpgrade_WorkspaceTaskSkipPredicates guards the skip logic
-// introduced for Phase 3 workspace-scoped tasks. SchedulerUpgrade is
-// designed to rebuild per-server daemon tasks (Command path rewrite
-// after a binary move); the shared workspace weekly-refresh task and
-// the per-(workspace, language) lazy proxies must be left alone — they
-// do not resolve to any manifest's server slug and re-registration is
-// the correct path to rebuild them. Without these skips, upgrade
-// would report "manifest workspace: not found" and "manifest lsp: not
-// found" and potentially delete tasks that have no replacement path.
-func TestSchedulerUpgrade_WorkspaceTaskSkipPredicates(t *testing.T) {
+// TestSchedulerUpgrade_TaskRoutingPredicates guards the routing logic
+// in SchedulerUpgrade. Each task name goes to exactly one branch:
+//   - "upgrade-ws-weekly"  → upgradeWorkspaceWeeklyRefreshTask helper
+//     (rewrites Command to canonical mcphub, keeps weekly trigger)
+//   - "upgrade-ws-lazy"    → upgradeLazyProxyTask helper
+//     (rewrites Command + Args from the registry entry)
+//   - "skip-global-weekly" → old hub-wide `restart --all` task,
+//     Command already correct, left untouched
+//   - "upgrade"            → classic per-server daemon flow,
+//     loadManifestForServer + rebuild args from manifest
+//
+// Predicate regression: if IsLazyProxyTaskName or WeeklyRefreshTaskName
+// matching drift, this test catches it because the routing silently
+// changes.
+func TestSchedulerUpgrade_TaskRoutingPredicates(t *testing.T) {
 	cases := []struct {
 		name   string
 		task   string
-		expect string // "skip-ws-weekly" | "skip-ws-lazy" | "upgrade" | "skip-global-weekly"
+		expect string
 	}{
 		{"global-weekly-refresh", "mcp-local-hub-weekly-refresh", "skip-global-weekly"},
-		{"workspace-weekly-refresh", "mcp-local-hub-workspace-weekly-refresh", "skip-ws-weekly"},
-		{"lazy-proxy", "mcp-local-hub-lsp-abcd1234-python", "skip-ws-lazy"},
+		{"workspace-weekly-refresh", "mcp-local-hub-workspace-weekly-refresh", "upgrade-ws-weekly"},
+		{"lazy-proxy", "mcp-local-hub-lsp-abcd1234-python", "upgrade-ws-lazy"},
 		{"global-daemon", "mcp-local-hub-serena-claude", "upgrade"},
 	}
 	for _, tc := range cases {
@@ -31,9 +36,9 @@ func TestSchedulerUpgrade_WorkspaceTaskSkipPredicates(t *testing.T) {
 			var got string
 			switch {
 			case normalized == WeeklyRefreshTaskName:
-				got = "skip-ws-weekly"
+				got = "upgrade-ws-weekly"
 			case IsLazyProxyTaskName(normalized):
-				got = "skip-ws-lazy"
+				got = "upgrade-ws-lazy"
 			default:
 				srv, dmn := parseTaskName(tc.task)
 				if srv == "" && dmn == "weekly-refresh" {
