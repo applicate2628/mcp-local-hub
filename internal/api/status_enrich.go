@@ -36,12 +36,72 @@ var lookupProcessBatch func(ports []int) map[int]struct {
 // Server, Daemon (parsed from TaskName), and — when the task is Running —
 // PID/RAMBytes/UptimeSec from a live wmic query. manifestDir points at the
 // repo's servers/ directory; passed explicitly so tests can use t.TempDir().
+//
+// Workspace-scoped rows (TaskName matches `mcp-local-hub-lsp-<key>-<lang>`)
+// get their Port and the 5-state lifecycle fields from the workspace
+// registry when registryPath is non-empty; pass "" in tests that do not
+// need the workspace-scoped overlay.
 func enrichStatus(rows []DaemonStatus, manifestDir string) {
+	enrichStatusWithRegistry(rows, manifestDir, "")
+}
+
+// enrichStatusWithRegistry is the richer variant used by StatusWithHealth.
+// registryPath, when non-empty, points at the workspace registry YAML; rows
+// whose TaskName matches the lazy-proxy pattern are enriched with
+// Workspace, Language, Backend, Lifecycle, and the LastMaterializedAt /
+// LastToolsCallAt / LastError fields. Empty registryPath (or a missing
+// file) skips the overlay silently so existing global-daemon callers see
+// stable output.
+func enrichStatusWithRegistry(rows []DaemonStatus, manifestDir, registryPath string) {
 	ports := manifestPortMap(manifestDir)
+
+	// Workspace-scoped overlay: preload the registry once so we don't reload
+	// per-row. Keys are normalized by trimming the scheduler's leading '\'
+	// so rows emitted as `\mcp-...` still match registry entries stored as
+	// `mcp-...`.
+	var wsEntries map[string]WorkspaceEntry
+	if registryPath != "" {
+		reg := NewRegistry(registryPath)
+		if err := reg.Load(); err == nil {
+			wsEntries = make(map[string]WorkspaceEntry, len(reg.Workspaces))
+			for _, e := range reg.Workspaces {
+				wsEntries[strings.TrimPrefix(e.TaskName, "\\")] = e
+			}
+		}
+	}
 
 	// First pass: populate Server/Daemon/Port.
 	var wantedPorts []int
 	for i := range rows {
+		// Workspace-scoped row? Populate lifecycle overlay from registry and
+		// short-circuit the manifest-port lookup (workspace-scoped ports live
+		// in the registry, not the manifest). The manifest-port lookup would
+		// miss anyway since "lsp-<key>" is not a real server slug.
+		if wsKey, lang, ok := parseLazyProxyTaskName(rows[i].TaskName); ok {
+			rows[i].Server = "mcp-language-server"
+			rows[i].Daemon = "lsp-" + wsKey + "-" + lang
+			if wsEntries != nil {
+				// Task Scheduler emits names with a leading '\'; the registry
+				// stores them without. Normalize both when looking up.
+				normalized := strings.TrimPrefix(rows[i].TaskName, "\\")
+				if e, had := wsEntries[normalized]; had {
+					rows[i].Workspace = e.WorkspacePath
+					rows[i].Language = e.Language
+					rows[i].Backend = e.Backend
+					rows[i].Lifecycle = e.Lifecycle
+					rows[i].LastMaterializedAt = e.LastMaterializedAt
+					rows[i].LastToolsCallAt = e.LastToolsCallAt
+					rows[i].LastError = e.LastError
+					if e.Port != 0 {
+						rows[i].Port = e.Port
+					}
+				}
+			}
+			if rows[i].Port != 0 {
+				wantedPorts = append(wantedPorts, rows[i].Port)
+			}
+			continue
+		}
 		srv, dmn := parseTaskName(rows[i].TaskName)
 		rows[i].Server = srv
 		rows[i].Daemon = dmn
@@ -132,6 +192,41 @@ func deriveState(raw string, alive bool, nextRun string) string {
 func hasFutureTrigger(nextRun string) bool {
 	s := strings.TrimSpace(nextRun)
 	return s != "" && !strings.EqualFold(s, "N/A")
+}
+
+// parseLazyProxyTaskName recognizes the workspace-scoped lazy-proxy
+// TaskName convention `mcp-local-hub-lsp-<workspaceKey>-<language>` (with
+// optional leading backslash) and returns (workspaceKey, language, true).
+// Any other shape returns ("", "", false) — including the hub-wide
+// weekly-refresh task (`mcp-local-hub-workspace-weekly-refresh`) and the
+// global per-server/per-daemon tasks parsed by parseTaskName.
+//
+// WorkspaceKey is always 8 hex characters (api.WorkspaceKey); rejecting
+// other lengths keeps a future `lsp-*` global-server name from matching
+// this pattern accidentally.
+func parseLazyProxyTaskName(task string) (workspaceKey, language string, ok bool) {
+	name := strings.TrimPrefix(task, "\\")
+	const prefix = "mcp-local-hub-lsp-"
+	if !strings.HasPrefix(name, prefix) {
+		return "", "", false
+	}
+	rest := name[len(prefix):]
+	// workspaceKey is exactly 8 hex chars; the language follows the '-'.
+	if len(rest) < 8+1 || rest[8] != '-' {
+		return "", "", false
+	}
+	key := rest[:8]
+	for i := 0; i < 8; i++ {
+		c := key[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return "", "", false
+		}
+	}
+	lang := rest[9:]
+	if lang == "" {
+		return "", "", false
+	}
+	return key, lang, true
 }
 
 // parseTaskName splits `\mcp-local-hub-<server>-<daemon>` into (server, daemon).

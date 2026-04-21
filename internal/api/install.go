@@ -345,21 +345,40 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 // Windows, empty elsewhere); callers that need a parsed time.Time should
 // re-query the scheduler directly.
 func (a *API) Status() ([]DaemonStatus, error) {
-	return a.StatusWithHealth(false)
+	return a.StatusWithOpts(StatusOpts{})
 }
 
-// StatusWithHealth is Status + an optional MCP protocol smoke test
-// per Running daemon. When probeHealth is true, the function POSTs
-// initialize + tools/list to each daemon's /mcp endpoint and fills
-// DaemonStatus.Health. This is the "operational health" the audit
-// flagged as missing: codex mcp list saying a server is connected
-// and scheduler saying the task is running is not the same as the
-// MCP server being able to list its tools.
-//
-// Disabled by default because the probe adds 1-3 s of per-daemon
-// HTTP round-trips — acceptable for an interactive command but
-// wasteful for repeated polling.
+// StatusWithHealth is the pre-M5 shim kept for backwards compatibility. New
+// callers should prefer StatusWithOpts.
 func (a *API) StatusWithHealth(probeHealth bool) ([]DaemonStatus, error) {
+	return a.StatusWithOpts(StatusOpts{ProbeHealth: probeHealth})
+}
+
+// StatusOpts bundles the flags governing Status enrichment. ProbeHealth
+// toggles the synthetic initialize + tools/list round-trip. When
+// ForceMaterialize is also true, workspace-scoped rows receive an
+// additional no-op tools/call that triggers real backend materialization
+// (the proxy writes LifecycleActive/Missing/Failed to the registry, which
+// the enrichment then reloads onto the row). ForceMaterialize without
+// ProbeHealth is a no-op — the flag only affects the workspace-scoped
+// probe path.
+type StatusOpts struct {
+	ProbeHealth      bool
+	ForceMaterialize bool
+}
+
+// StatusWithOpts is Status + optional MCP-level probes. When
+// opts.ProbeHealth is true, the function POSTs initialize + tools/list to
+// each Running daemon's /mcp endpoint and fills DaemonStatus.Health. When
+// opts.ForceMaterialize is also true, workspace-scoped rows get an
+// additional no-op tools/call that drives the lazy proxy through
+// materialization and records the resulting 5-state lifecycle in the
+// registry (which this function then reloads onto the row).
+//
+// Disabled by default because the probe adds 1-3 s of per-daemon HTTP
+// round-trips — acceptable for an interactive command but wasteful for
+// repeated polling.
+func (a *API) StatusWithOpts(opts StatusOpts) ([]DaemonStatus, error) {
 	sch, err := scheduler.New()
 	if err != nil {
 		return nil, err
@@ -379,12 +398,117 @@ func (a *API) StatusWithHealth(probeHealth bool) ([]DaemonStatus, error) {
 	}
 	// Empty dir → enrichStatus uses the embed-first resolution path so
 	// `mcphub status` from %TEMP% sees the same server set that the
-	// daemon sees.
-	enrichStatus(result, "")
-	if probeHealth {
+	// daemon sees. Registry path is best-effort; if DefaultRegistryPath
+	// errors (no $HOME, etc.), workspace-scoped rows get the task-name
+	// parse only — their Lifecycle column shows "-" rather than a value.
+	regPath, regErr := DefaultRegistryPath()
+	if regErr != nil {
+		regPath = ""
+	}
+	enrichStatusWithRegistry(result, "", regPath)
+	if opts.ProbeHealth {
 		probeDaemonHealth(result)
 	}
+	if opts.ForceMaterialize {
+		forceMaterializeWorkspaceScoped(result, regPath)
+	}
 	return result, nil
+}
+
+// forceMaterializeProbe is the hook StatusWithOpts uses when
+// opts.ForceMaterialize is true. Production path is sendForceMaterializeTools
+// which actually POSTs a no-op tools/call over HTTP; tests replace this
+// variable so they can assert "Materialize was triggered" without spinning
+// up a real HTTP server.
+//
+// The result string is captured into the registry as LastError when
+// non-empty; a nil error + empty string means the probe returned a valid
+// JSON-RPC response (either success or JSON-RPC error — classification
+// happens inside the hook).
+var forceMaterializeProbe = sendForceMaterializeTools
+
+// forceMaterializeWorkspaceScoped walks rows and for every workspace-scoped
+// entry (non-empty Language), sends a real no-op tools/call via the
+// forceMaterializeProbe hook. The proxy will drive the backend through
+// materialization and record the 5-state lifecycle in the registry.
+// After every row is probed, the registry is reloaded and the rows'
+// Lifecycle + LastError + timestamp fields are refreshed.
+func forceMaterializeWorkspaceScoped(rows []DaemonStatus, regPath string) {
+	var wg sync.WaitGroup
+	for i := range rows {
+		if rows[i].Language == "" || rows[i].Port == 0 {
+			continue
+		}
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			forceMaterializeProbe(rows[idx].Port, rows[idx].Backend)
+		}(i)
+	}
+	wg.Wait()
+	// Reload the registry once so every workspace-scoped row sees the
+	// proxy's post-probe lifecycle + timestamp writes.
+	if regPath == "" {
+		return
+	}
+	reg := NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		return
+	}
+	byTask := make(map[string]WorkspaceEntry, len(reg.Workspaces))
+	for _, e := range reg.Workspaces {
+		byTask[e.TaskName] = e
+	}
+	for i := range rows {
+		if rows[i].Language == "" {
+			continue
+		}
+		if e, ok := byTask[rows[i].TaskName]; ok {
+			rows[i].Lifecycle = e.Lifecycle
+			rows[i].LastMaterializedAt = e.LastMaterializedAt
+			rows[i].LastToolsCallAt = e.LastToolsCallAt
+			rows[i].LastError = e.LastError
+		}
+	}
+}
+
+// sendForceMaterializeTools POSTs a safe no-op tools/call to
+// http://127.0.0.1:<port>/mcp so the lazy proxy triggers its own backend
+// materialization. Tool choice per backend:
+//
+//	mcp-language-server → "hover" (safe, read-only; diagnostics alternative
+//	  requires a loaded file that may not exist in the workspace yet)
+//	gopls-mcp           → "go_workspace" (no-arg diagnostic equivalent)
+//	other               → "tools/call" with a benign empty name; the proxy
+//	  materializes before validating the tool name, so any valid
+//	  JSON-RPC shape is enough to drive materialization
+//
+// The function does not interpret the response body. The proxy records
+// LifecycleActive on success, LifecycleMissing/LifecycleFailed on failure,
+// and the caller reloads the registry to observe whichever was written.
+func sendForceMaterializeTools(port int, backend string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	toolName := "hover"
+	switch backend {
+	case "gopls-mcp":
+		toolName = "go_workspace"
+	}
+	body := fmt.Sprintf(
+		`{"jsonrpc":"2.0","id":101,"method":"tools/call","params":{"name":%q,"arguments":{}}}`,
+		toolName)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
+		fmt.Sprintf("http://127.0.0.1:%d/mcp", port),
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
 }
 
 // probeDaemonHealth fills DaemonStatus.Health for every Running row

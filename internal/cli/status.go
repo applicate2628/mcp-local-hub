@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"mcp-local-hub/internal/api"
 
@@ -12,6 +13,8 @@ import (
 func newStatusCmdReal() *cobra.Command {
 	var jsonOut bool
 	var probeHealth bool
+	var workspaceScoped bool
+	var forceMaterialize bool
 	c := &cobra.Command{
 		Use:   "status",
 		Short: "Show state of all mcp-local-hub scheduler tasks",
@@ -35,10 +38,24 @@ missing, or while the subprocess is wedged. --health adds ~1-3 s
 of round-trip time per daemon; use it for diagnostic passes, not
 routine polling.
 
+--workspace-scoped filters to the lazy-proxy daemons created by
+'mcphub register' and prints extra columns: LIFECYCLE (one of
+configured/starting/active/missing/failed) and LAST_USED (relative
+time since last tools/call). LAST_ERROR (truncated) shows the most
+recent materialization failure on missing/failed rows.
+
+--force-materialize (requires --health) sends a real tools/call to
+each workspace-scoped proxy to probe the heavy backend. Without this
+flag --health preserves the lazy contract (synthetic handshake only;
+backend stays cold). Use when you specifically want to verify that
+LSP binaries are installed and the proxy can materialize them.
+
 Examples:
-  mcphub status             # pretty table
-  mcphub status --json      # machine-readable
-  mcphub status --health    # + MCP-level probe
+  mcphub status                                 # pretty table
+  mcphub status --json                          # machine-readable
+  mcphub status --health                        # + MCP-level probe (synthetic)
+  mcphub status --workspace-scoped              # lazy-proxy rows only
+  mcphub status --health --force-materialize    # probe LSP backends
 
 Troubleshooting:
   - All tasks showing Stopped? The mcphub binary may have moved.
@@ -49,62 +66,153 @@ Troubleshooting:
 See also: restart, stop, logs, scheduler upgrade.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a := api.NewAPI()
-			rows, err := a.StatusWithHealth(probeHealth)
+			rows, err := a.StatusWithOpts(api.StatusOpts{
+				ProbeHealth:      probeHealth,
+				ForceMaterialize: forceMaterialize,
+			})
 			if err != nil {
 				return err
+			}
+			if workspaceScoped {
+				rows = filterWorkspaceScoped(rows)
 			}
 			if jsonOut {
 				enc := json.NewEncoder(cmd.OutOrStdout())
 				enc.SetIndent("", "  ")
 				return enc.Encode(rows)
 			}
-			headerFmt := "%-45s %-10s %-6s %-8s %-8s %-10s %s\n"
-			headerArgs := []any{"NAME", "STATE", "PORT", "PID", "RAM(MB)", "UPTIME", "NEXT RUN"}
-			if probeHealth {
-				headerFmt = "%-45s %-10s %-6s %-8s %-8s %-10s %-20s %s\n"
-				headerArgs = []any{"NAME", "STATE", "PORT", "PID", "RAM(MB)", "UPTIME", "HEALTH", "NEXT RUN"}
+			if workspaceScoped {
+				return printWorkspaceScopedTable(cmd, rows, probeHealth)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), headerFmt, headerArgs...)
-			for _, r := range rows {
-				ram := ""
-				if r.RAMBytes > 0 {
-					ram = fmt.Sprintf("%d", r.RAMBytes/(1024*1024))
-				}
-				uptime := ""
-				if r.UptimeSec > 0 {
-					uptime = fmt.Sprintf("%dh%dm", r.UptimeSec/3600, (r.UptimeSec%3600)/60)
-				}
-				port := ""
-				if r.Port > 0 {
-					port = fmt.Sprintf("%d", r.Port)
-				}
-				pid := ""
-				if r.PID > 0 {
-					pid = fmt.Sprintf("%d", r.PID)
-				}
-				if probeHealth {
-					health := ""
-					switch {
-					case r.Health == nil:
-						health = "—"
-					case r.Health.OK:
-						health = fmt.Sprintf("OK (%d)", r.Health.ToolCount)
-					default:
-						health = "ERR: " + firstN(r.Health.Err, 40)
-					}
-					fmt.Fprintf(cmd.OutOrStdout(), headerFmt,
-						r.TaskName, r.State, port, pid, ram, uptime, health, r.NextRun)
-				} else {
-					fmt.Fprintf(cmd.OutOrStdout(), headerFmt,
-						r.TaskName, r.State, port, pid, ram, uptime, r.NextRun)
-				}
-			}
-			return nil
+			return printDefaultStatusTable(cmd, rows, probeHealth)
 		},
 	}
 	c.Flags().BoolVar(&jsonOut, "json", false, "machine-readable JSON output")
 	c.Flags().BoolVar(&probeHealth, "health", false, "MCP-level smoke test: initialize + tools/list per Running daemon")
+	c.Flags().BoolVar(&workspaceScoped, "workspace-scoped", false,
+		"show only workspace-scoped lazy-proxy daemons with LIFECYCLE / LAST_USED / LAST_ERROR columns")
+	c.Flags().BoolVar(&forceMaterialize, "force-materialize", false,
+		"for workspace-scoped daemons with --health: send a real tools/call to probe the heavy backend (triggers materialization). Default --health stays at proxy-alive only.")
 	return c
+}
+
+// filterWorkspaceScoped returns only rows whose TaskName matches the
+// lazy-proxy `mcp-local-hub-lsp-<key>-<lang>` pattern. Tested indirectly
+// via the CLI test harness; the test relies on the DaemonStatus.Lifecycle
+// field being non-empty for workspace-scoped rows after enrichment.
+func filterWorkspaceScoped(rows []api.DaemonStatus) []api.DaemonStatus {
+	out := rows[:0]
+	for _, r := range rows {
+		if r.Language != "" || r.Lifecycle != "" {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// printDefaultStatusTable renders the original (pre-M5) status layout.
+// Kept intact so global-daemon operators see stable output.
+func printDefaultStatusTable(cmd *cobra.Command, rows []api.DaemonStatus, probeHealth bool) error {
+	headerFmt := "%-45s %-10s %-6s %-8s %-8s %-10s %s\n"
+	headerArgs := []any{"NAME", "STATE", "PORT", "PID", "RAM(MB)", "UPTIME", "NEXT RUN"}
+	if probeHealth {
+		headerFmt = "%-45s %-10s %-6s %-8s %-8s %-10s %-20s %s\n"
+		headerArgs = []any{"NAME", "STATE", "PORT", "PID", "RAM(MB)", "UPTIME", "HEALTH", "NEXT RUN"}
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), headerFmt, headerArgs...)
+	for _, r := range rows {
+		ram := ""
+		if r.RAMBytes > 0 {
+			ram = fmt.Sprintf("%d", r.RAMBytes/(1024*1024))
+		}
+		uptime := ""
+		if r.UptimeSec > 0 {
+			uptime = fmt.Sprintf("%dh%dm", r.UptimeSec/3600, (r.UptimeSec%3600)/60)
+		}
+		port := ""
+		if r.Port > 0 {
+			port = fmt.Sprintf("%d", r.Port)
+		}
+		pid := ""
+		if r.PID > 0 {
+			pid = fmt.Sprintf("%d", r.PID)
+		}
+		if probeHealth {
+			health := renderHealthCell(r)
+			fmt.Fprintf(cmd.OutOrStdout(), headerFmt,
+				r.TaskName, r.State, port, pid, ram, uptime, health, r.NextRun)
+		} else {
+			fmt.Fprintf(cmd.OutOrStdout(), headerFmt,
+				r.TaskName, r.State, port, pid, ram, uptime, r.NextRun)
+		}
+	}
+	return nil
+}
+
+// printWorkspaceScopedTable renders the --workspace-scoped layout. Columns:
+// NAME, STATE, PORT, LIFECYCLE, LAST_USED, LAST_ERROR (+ HEALTH when
+// --health is set).
+func printWorkspaceScopedTable(cmd *cobra.Command, rows []api.DaemonStatus, probeHealth bool) error {
+	headerFmt := "%-45s %-10s %-6s %-11s %-10s %s\n"
+	headerArgs := []any{"NAME", "STATE", "PORT", "LIFECYCLE", "LAST_USED", "LAST_ERROR"}
+	if probeHealth {
+		headerFmt = "%-45s %-10s %-6s %-11s %-10s %-20s %s\n"
+		headerArgs = []any{"NAME", "STATE", "PORT", "LIFECYCLE", "LAST_USED", "HEALTH", "LAST_ERROR"}
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), headerFmt, headerArgs...)
+	for _, r := range rows {
+		port := ""
+		if r.Port > 0 {
+			port = fmt.Sprintf("%d", r.Port)
+		}
+		lifecycle := r.Lifecycle
+		if lifecycle == "" {
+			lifecycle = "-"
+		}
+		lastUsed := relativeStatusLastUsed(r.LastToolsCallAt)
+		lastErr := firstN(r.LastError, 40)
+		if probeHealth {
+			health := renderHealthCell(r)
+			fmt.Fprintf(cmd.OutOrStdout(), headerFmt,
+				r.TaskName, r.State, port, lifecycle, lastUsed, health, lastErr)
+		} else {
+			fmt.Fprintf(cmd.OutOrStdout(), headerFmt,
+				r.TaskName, r.State, port, lifecycle, lastUsed, lastErr)
+		}
+	}
+	return nil
+}
+
+// renderHealthCell formats a DaemonStatus.Health probe outcome.
+func renderHealthCell(r api.DaemonStatus) string {
+	switch {
+	case r.Health == nil:
+		return "—"
+	case r.Health.OK:
+		return fmt.Sprintf("OK (%d)", r.Health.ToolCount)
+	default:
+		return "ERR: " + firstN(r.Health.Err, 40)
+	}
+}
+
+// relativeStatusLastUsed is the status-table variant of LAST_USED
+// formatting. Zero time → "-"; elapsed rendered coarsely.
+func relativeStatusLastUsed(t time.Time) string {
+	if t.IsZero() {
+		return "-"
+	}
+	elapsed := time.Since(t)
+	switch {
+	case elapsed < time.Minute:
+		return fmt.Sprintf("%ds ago", int(elapsed.Seconds()))
+	case elapsed < time.Hour:
+		return fmt.Sprintf("%dm ago", int(elapsed.Minutes()))
+	case elapsed < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(elapsed.Hours()))
+	case elapsed < 30*24*time.Hour:
+		return fmt.Sprintf("%dd ago", int(elapsed.Hours()/24))
+	}
+	return t.UTC().Format("2006-01-02")
 }
 
 func firstN(s string, n int) string {

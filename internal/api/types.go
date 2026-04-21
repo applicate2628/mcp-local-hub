@@ -32,6 +32,19 @@ type DaemonStatus struct {
 	// MCP server may respond but its backend binary is missing. A successful
 	// tools/list round-trip is the first layer of "operational health".
 	Health *HealthProbe `json:"health,omitempty"`
+
+	// Workspace-scoped daemon fields (all empty for global daemons). Populated
+	// from the workspace registry when TaskName matches the lazy-proxy pattern
+	// `mcp-local-hub-lsp-<workspaceKey>-<language>`. Lifecycle is one of
+	// LifecycleConfigured / LifecycleStarting / LifecycleActive /
+	// LifecycleMissing / LifecycleFailed.
+	Workspace          string    `json:"workspace,omitempty"`
+	Language           string    `json:"language,omitempty"`
+	Backend            string    `json:"backend,omitempty"`
+	Lifecycle          string    `json:"lifecycle,omitempty"`
+	LastMaterializedAt time.Time `json:"last_materialized_at,omitempty"`
+	LastToolsCallAt    time.Time `json:"last_tools_call_at,omitempty"`
+	LastError          string    `json:"last_error,omitempty"`
 }
 
 // HealthProbe records the outcome of an MCP protocol smoke test against
