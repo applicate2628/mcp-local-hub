@@ -105,6 +105,23 @@ type UninstallReport struct {
 	ClientWarns     []string
 }
 
+// refuseWorkspaceScopedInstall returns a clear error when someone tries to
+// `mcphub install --server mcp-language-server`. Workspace-scoped manifests
+// require `mcphub register <workspace> [language...]` — there is no implicit
+// install semantic for them because the (workspace, language) tuples that a
+// workspace-scoped server needs cannot be inferred from the manifest alone.
+// Callers may pass a writer for a human-friendly surface; the returned error
+// is the machine-readable signal.
+func refuseWorkspaceScopedInstall(m *config.ServerManifest, w io.Writer) error {
+	if m.Kind != config.KindWorkspaceScoped {
+		return nil
+	}
+	if w != nil {
+		fmt.Fprintf(w, "Server %q is workspace-scoped; use `mcphub register <workspace> [language...]` instead of `mcphub install`.\n", m.Name)
+	}
+	return fmt.Errorf("server %q is workspace-scoped; use `mcphub register <workspace> [language...]`", m.Name)
+}
+
 // Install performs the full install flow for one server: reads manifest,
 // runs preflight, builds plan, creates scheduler tasks, writes client configs,
 // starts daemons.
@@ -124,6 +141,11 @@ func (a *API) Install(opts InstallOpts) error {
 	}
 	m, err := config.ParseManifest(bytes.NewReader(data))
 	if err != nil {
+		return err
+	}
+	// 1a. Reject workspace-scoped manifests at the Install entrypoint.
+	// These require the explicit per-workspace `mcphub register` flow.
+	if err := refuseWorkspaceScopedInstall(m, w); err != nil {
 		return err
 	}
 	// 2. Preflight.
@@ -147,13 +169,28 @@ func (a *API) Install(opts InstallOpts) error {
 // the authoritative server list from the embed FS (with disk union
 // for dev flow) so the canonical installed binary behaves identically
 // regardless of cwd or whether a dev source tree sits nearby.
+//
+// Workspace-scoped manifests are skipped silently — not a failure, just
+// not this command's job. Such servers require the explicit per-workspace
+// `mcphub register` flow; a notice is emitted to w so the user knows why
+// those names were omitted.
 func (a *API) InstallAll(dryRun bool, w io.Writer) []InstallResult {
 	names, err := listManifestNamesEmbedFirst()
 	if err != nil {
 		return []InstallResult{{Err: err}}
 	}
 	var results []InstallResult
+	var skipped []string
 	for _, name := range names {
+		// Probe the manifest kind cheaply. A parse error here is not
+		// fatal — the normal install path will surface the same error
+		// with its usual wrapping — so we fall through on failure.
+		if data, derr := loadManifestYAMLEmbedFirst(name); derr == nil {
+			if mf, perr := config.ParseManifest(bytes.NewReader(data)); perr == nil && mf.Kind == config.KindWorkspaceScoped {
+				skipped = append(skipped, name)
+				continue
+			}
+		}
 		err := a.installUsingEmbedFirst(InstallOpts{
 			Server: name,
 			DryRun: dryRun,
@@ -161,24 +198,42 @@ func (a *API) InstallAll(dryRun bool, w io.Writer) []InstallResult {
 		})
 		results = append(results, InstallResult{Server: name, Err: err})
 	}
+	if len(skipped) > 0 && w != nil {
+		fmt.Fprintf(w, "Skipped %d workspace-scoped manifest(s); use `mcphub register` instead: %v\n",
+			len(skipped), skipped)
+	}
 	return results
 }
 
 // InstallAllFrom installs every manifest under the explicit opts.ManifestDir.
 // Retained for test hermetic-filesystem use and legacy callers that pass
 // a tempdir; production uses InstallAll which consults the embed FS.
+//
+// Workspace-scoped manifests in the directory are skipped silently (same
+// contract as InstallAll).
 func (a *API) InstallAllFrom(opts InstallAllOpts) []InstallResult {
 	var results []InstallResult
 	entries, err := os.ReadDir(opts.ManifestDir)
 	if err != nil {
 		return []InstallResult{{Err: err}}
 	}
+	var skipped []string
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(opts.ManifestDir, e.Name(), "manifest.yaml")); err != nil {
+		manifestPath := filepath.Join(opts.ManifestDir, e.Name(), "manifest.yaml")
+		if _, err := os.Stat(manifestPath); err != nil {
 			continue
+		}
+		// Skip workspace-scoped manifests — same contract as InstallAll.
+		if f, oerr := os.Open(manifestPath); oerr == nil {
+			mf, perr := config.ParseManifest(f)
+			_ = f.Close()
+			if perr == nil && mf.Kind == config.KindWorkspaceScoped {
+				skipped = append(skipped, e.Name())
+				continue
+			}
 		}
 		err := a.installFromManifestDir(InstallOpts{
 			Server: e.Name(),
@@ -186,6 +241,10 @@ func (a *API) InstallAllFrom(opts InstallAllOpts) []InstallResult {
 			Writer: opts.Writer,
 		}, opts.ManifestDir)
 		results = append(results, InstallResult{Server: e.Name(), Err: err})
+	}
+	if len(skipped) > 0 && opts.Writer != nil {
+		fmt.Fprintf(opts.Writer, "Skipped %d workspace-scoped manifest(s); use `mcphub register` instead: %v\n",
+			len(skipped), skipped)
 	}
 	return results
 }
