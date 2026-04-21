@@ -173,8 +173,43 @@ func TestRegistry_LifecycleFieldsRoundtrip(t *testing.T) {
 	}
 }
 
+// TestRegistry_PutLifecycleNoOpOnMissingEntry guards against ghost-row
+// resurrection: after Unregister removes a (workspace_key, language) row,
+// a still-running proxy process MAY emit a late lifecycle write.
+// PutLifecycle must silently no-op in that case rather than construct a
+// bare entry with no port/task/bindings — that would leave a partial
+// ghost record in workspaces.yaml and `mcphub workspaces` output,
+// breaking the Unregister contract.
+func TestRegistry_PutLifecycleNoOpOnMissingEntry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workspaces.yaml")
+	reg := NewRegistry(path)
+	// Seed nothing: the (workspace_key, language) is unregistered.
+	if err := reg.PutLifecycle("deadbeef", "python", LifecycleFailed, "late write"); err != nil {
+		t.Fatalf("PutLifecycle: %v", err)
+	}
+	// Reload a fresh registry to assert nothing was persisted.
+	reg2 := NewRegistry(path)
+	if err := reg2.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if _, ok := reg2.Get("deadbeef", "python"); ok {
+		t.Error("PutLifecycle resurrected a ghost entry for unregistered (key, lang)")
+	}
+	if len(reg2.Workspaces) != 0 {
+		t.Errorf("registry has %d entries, want 0 (ghost-row leak)", len(reg2.Workspaces))
+	}
+}
+
 func TestRegistry_LastErrorTruncation(t *testing.T) {
-	reg := NewRegistry(t.TempDir() + "/r.yaml")
+	path := t.TempDir() + "/r.yaml"
+	reg := NewRegistry(path)
+	// Seed the entry first — PutLifecycle no-ops when the entry is absent
+	// (ghost-resurrection guard); truncation is verified on a Put update,
+	// mirroring the proxy's real flow: Register seeds, proxy updates.
+	reg.Put(WorkspaceEntry{WorkspaceKey: "abcd1234", Language: "python", Backend: "mcp-language-server"})
+	if err := reg.Save(); err != nil {
+		t.Fatalf("seed Save: %v", err)
+	}
 	big := strings.Repeat("x", 500)
 	if err := reg.PutLifecycle("abcd1234", "python", LifecycleFailed, big); err != nil {
 		t.Fatalf("PutLifecycle: %v", err)

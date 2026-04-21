@@ -250,7 +250,12 @@ func (r *Registry) PutLifecycleWithTimestamps(workspaceKey, language, state, las
 	}
 	e, ok := r.Get(workspaceKey, language)
 	if !ok {
-		e = WorkspaceEntry{WorkspaceKey: workspaceKey, Language: language}
+		// Silent no-op: Unregister removed the row while the proxy
+		// process was still running and now emits a late lifecycle
+		// write. Resurrecting a bare entry (no port/task/bindings)
+		// would leave a ghost record in workspaces.yaml and status
+		// output — breaks the Unregister contract.
+		return nil
 	}
 	e.Lifecycle = state
 	if len(lastError) > MaxLastErrorBytes {

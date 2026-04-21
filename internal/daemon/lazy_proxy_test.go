@@ -94,6 +94,23 @@ func newTestProxy(t *testing.T, kind string, f *fakeLifecycle) (*LazyProxy, stri
 func newTestProxyWithCfg(t *testing.T, kind string, f *fakeLifecycle, retryGap, toolsDebounce time.Duration) (*LazyProxy, string) {
 	t.Helper()
 	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	// Seed the (workspace_key, language) entry — mirrors production flow
+	// where api.Register creates the entry before the proxy process runs.
+	// PutLifecycle silently no-ops if the entry is missing (to prevent
+	// ghost-row resurrection after unregister), so tests that assert
+	// proxy lifecycle writes must seed first.
+	seed := api.NewRegistry(regPath)
+	seed.Put(api.WorkspaceEntry{
+		WorkspaceKey:  "abcd1234",
+		WorkspacePath: "D:/test/ws",
+		Language:      "python",
+		Backend:       kind,
+		TaskName:      "mcp-local-hub-lsp-abcd1234-python",
+		Lifecycle:     "", // proxy's ListenAndServe will stamp Configured
+	})
+	if err := seed.Save(); err != nil {
+		t.Fatalf("seed registry: %v", err)
+	}
 	p := NewLazyProxy(LazyProxyConfig{
 		WorkspaceKey:        "abcd1234",
 		WorkspacePath:       "D:/test/ws",
@@ -476,6 +493,18 @@ func TestLazyProxy_ConfiguredStateOnStartup(t *testing.T) {
 		t.Fatalf("pickFreePort: %v", err)
 	}
 	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	// Seed entry with empty Lifecycle; the test asserts the proxy writes
+	// LifecycleConfigured on startup, upgrading the stored state.
+	seed := api.NewRegistry(regPath)
+	seed.Put(api.WorkspaceEntry{
+		WorkspaceKey: "abcd1234", WorkspacePath: "D:/test/ws",
+		Language: "python", Backend: "mcp-language-server",
+		TaskName:  "mcp-local-hub-lsp-abcd1234-python",
+		Lifecycle: "",
+	})
+	if err := seed.Save(); err != nil {
+		t.Fatalf("seed registry: %v", err)
+	}
 	p := NewLazyProxy(LazyProxyConfig{
 		WorkspaceKey:        "abcd1234",
 		WorkspacePath:       "D:/test/ws",

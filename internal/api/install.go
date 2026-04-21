@@ -469,15 +469,21 @@ func forceMaterializeWorkspaceScoped(rows []DaemonStatus, regPath string) {
 	if err := reg.Load(); err != nil {
 		return
 	}
+	// Normalize leading "\" on both sides: Windows Task Scheduler's List
+	// returns tasks with a leading "\" (e.g. "\mcp-local-hub-lsp-abc-python"),
+	// whereas the registry stores the bare "mcp-local-hub-lsp-abc-python" form.
+	// Without this the post-probe refresh silently misses every workspace-scoped
+	// row on Windows even though the proxy has already written the new state.
+	normalizeTaskName := func(s string) string { return strings.TrimPrefix(s, "\\") }
 	byTask := make(map[string]WorkspaceEntry, len(reg.Workspaces))
 	for _, e := range reg.Workspaces {
-		byTask[e.TaskName] = e
+		byTask[normalizeTaskName(e.TaskName)] = e
 	}
 	for i := range rows {
 		if rows[i].Language == "" {
 			continue
 		}
-		if e, ok := byTask[rows[i].TaskName]; ok {
+		if e, ok := byTask[normalizeTaskName(rows[i].TaskName)]; ok {
 			rows[i].Lifecycle = e.Lifecycle
 			rows[i].LastMaterializedAt = e.LastMaterializedAt
 			rows[i].LastToolsCallAt = e.LastToolsCallAt

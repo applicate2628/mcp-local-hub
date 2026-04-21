@@ -117,6 +117,56 @@ func TestForceMaterialize_ReloadsLifecycleFromRegistry(t *testing.T) {
 	}
 }
 
+// TestForceMaterialize_NormalizesLeadingBackslashTaskName guards against
+// the Windows scheduler-vs-registry naming mismatch: Scheduler.List returns
+// task names prefixed with "\" (e.g. "\mcp-local-hub-lsp-abc-python"),
+// while the registry stores the bare form. Without normalization the
+// post-probe reload misses every workspace-scoped row on Windows even
+// though the proxy has already written the new lifecycle state.
+func TestForceMaterialize_NormalizesLeadingBackslashTaskName(t *testing.T) {
+	dir := t.TempDir()
+	regPath := dir + "/ws.yaml"
+	reg := NewRegistry(regPath)
+	reg.Put(WorkspaceEntry{
+		WorkspaceKey: "abcd1234",
+		Language:     "python",
+		Backend:      "mcp-language-server",
+		Port:         9218,
+		TaskName:     "mcp-local-hub-lsp-abcd1234-python", // registry: no leading "\"
+		Lifecycle:    LifecycleConfigured,
+	})
+	if err := reg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := &fakeForceMaterializeProbe{
+		onCall: func(port int, backend string) {
+			r := NewRegistry(regPath)
+			_ = r.PutLifecycle("abcd1234", "python", LifecycleActive, "")
+		},
+	}
+	orig := forceMaterializeProbe
+	forceMaterializeProbe = fake.send
+	defer func() { forceMaterializeProbe = orig }()
+
+	// Simulate Scheduler.List output: task names prefixed with "\".
+	rows := []DaemonStatus{
+		{
+			TaskName:  "\\mcp-local-hub-lsp-abcd1234-python",
+			Port:      9218,
+			Language:  "python",
+			Backend:   "mcp-language-server",
+			Lifecycle: LifecycleConfigured,
+		},
+	}
+	forceMaterializeWorkspaceScoped(rows, regPath)
+
+	if rows[0].Lifecycle != LifecycleActive {
+		t.Errorf("Lifecycle after reload = %q, want %q (backslash mismatch skipped refresh?)",
+			rows[0].Lifecycle, LifecycleActive)
+	}
+}
+
 // TestForceMaterialize_MissingRegistryIsSilentNoop checks that the reload
 // step is resilient to a missing or unreadable registry file.
 func TestForceMaterialize_MissingRegistryIsSilentNoop(t *testing.T) {
