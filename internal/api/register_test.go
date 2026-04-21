@@ -36,9 +36,15 @@ func newRegisterHarness(t *testing.T) *registerHarness {
 	origSchedulerNew := testSchedulerFactory
 	origClientFactory := testClientFactory
 	origRegistryPath := testRegistryPathOverride
+	origReadiness := proxyReadinessFn
 
 	sch := &fakeScheduler{tasks: map[string]bool{}, xml: map[string][]byte{}}
 	testSchedulerFactory = func() (testScheduler, error) { return sch, nil }
+	// Fake scheduler's Run is a no-op — no real proxy ever binds, so
+	// the production HTTP-based readiness probe would time out. Tests
+	// opt into "readiness always succeeds"; specific tests that want
+	// to exercise the readiness-failure path override this again.
+	proxyReadinessFn = func(port int, timeout time.Duration) error { return nil }
 
 	fc := &fakeClientsMap{entries: map[string]map[string]string{}, exists: map[string]bool{}}
 	// Pre-populate the three HTTP clients so Exists() returns true in tests.
@@ -63,6 +69,7 @@ func newRegisterHarness(t *testing.T) *registerHarness {
 			testSchedulerFactory = origSchedulerNew
 			testClientFactory = origClientFactory
 			testRegistryPathOverride = origRegistryPath
+			proxyReadinessFn = origReadiness
 		},
 	}
 }
@@ -315,6 +322,72 @@ func TestRegister_RollbackRestoresPriorRegistryEntryOnReRegister(t *testing.T) {
 	}
 }
 
+// TestRegister_ReadinessFailureRollsBack guards the post-Run
+// readiness probe. Windows schtasks /Run only triggers the task
+// action; it never validates the action actually succeeded. Without
+// the probe, a bad-XML / bound-port / startup-crash scenario would
+// produce a successful-looking register whose client configs point
+// at a dead port. The probe returns an error here, so register MUST
+// unwind all side effects (registry entry, scheduler task, client
+// entries) via the rollback stack.
+func TestRegister_ReadinessFailureRollsBack(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	origKill := killByPortFn
+	defer func() { killByPortFn = origKill }()
+	killByPortFn = func(port int, _ time.Duration) error { return nil }
+	// Override readiness to ALWAYS fail. Harness defaults to always-OK.
+	proxyReadinessFn = func(port int, timeout time.Duration) error {
+		return fmt.Errorf("induced readiness failure on :%d", port)
+	}
+	ws := t.TempDir()
+	m := nineLanguageManifest()
+	_, err := mustNewAPI(t).registerWithManifest(m, ws, []string{"python"}, RegisterOpts{Writer: &bytes.Buffer{}})
+	if err == nil {
+		t.Fatal("expected register to fail when readiness probe errors")
+	}
+	if !strings.Contains(err.Error(), "proxy readiness") {
+		t.Errorf("error should mention readiness failure: %v", err)
+	}
+	// Registry must be empty (no leak).
+	reg := NewRegistry(h.regPath)
+	_ = reg.Load()
+	if len(reg.Workspaces) != 0 {
+		t.Errorf("registry not rolled back after readiness fail: %+v", reg.Workspaces)
+	}
+	// No per-language client entries should remain.
+	if n := countEntries(h.fakeClients); n != 0 {
+		t.Errorf("client entries leaked: %d remain", n)
+	}
+}
+
+// TestRegister_SharedWeeklyTaskNotCreatedWhenCanonicalMissing guards
+// against the leak where EnsureWeeklyRefreshTask used to run BEFORE
+// the canonical-mcphub preflight. A user who ran register without
+// `mcphub setup` would fail registration but leave the shared
+// weekly-refresh task pointing at the missing binary.
+func TestRegister_SharedWeeklyTaskNotCreatedWhenCanonicalMissing(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	orig := testCanonicalMcphubPathOverride
+	defer func() { testCanonicalMcphubPathOverride = orig }()
+	testCanonicalMcphubPathOverride = filepath.Join(t.TempDir(), "no-such-mcphub.exe")
+
+	ws := t.TempDir()
+	m := nineLanguageManifest()
+	_, err := mustNewAPI(t).registerWithManifest(m, ws, []string{"python"}, RegisterOpts{Writer: &bytes.Buffer{}})
+	if err == nil {
+		t.Fatal("expected register to fail when canonical mcphub is missing")
+	}
+	// The shared weekly-refresh task must NOT have been created (preflight
+	// fails first → no scheduler side effects at all).
+	for _, s := range h.fakeSch.createdSpecs {
+		if s.Name == WeeklyRefreshTaskName {
+			t.Errorf("shared weekly-refresh task leaked despite missing mcphub: %+v", s)
+		}
+	}
+}
+
 // TestRegister_AbortsWhenCanonicalMcphubMissing guards against the
 // silent-broken-registration hazard where the scheduler task's Command
 // points at a non-existent mcphub binary. A fresh user who ran
@@ -339,11 +412,18 @@ func TestRegister_AbortsWhenCanonicalMcphubMissing(t *testing.T) {
 	if !strings.Contains(err.Error(), "mcphub setup") {
 		t.Errorf("error should mention `mcphub setup` remediation: %v", err)
 	}
-	// No scheduler tasks should have been created for the language.
-	for _, s := range h.fakeSch.createdSpecs {
-		if s.Name != WeeklyRefreshTaskName {
-			t.Errorf("per-language task created despite missing mcphub: %+v", s)
+	// No scheduler tasks at all — not per-language, not the shared weekly
+	// refresh. Prior to the preflight-reorder fix, EnsureWeeklyRefreshTask
+	// ran BEFORE the canonical-mcphub check, so the shared task leaked
+	// (pointing at a missing binary) even though register errored out.
+	// The fail-fast contract requires ZERO scheduler side effects when
+	// setup hasn't been run.
+	if len(h.fakeSch.createdSpecs) != 0 {
+		var names []string
+		for _, s := range h.fakeSch.createdSpecs {
+			names = append(names, s.Name)
 		}
+		t.Errorf("any scheduler task created despite missing mcphub: %v", names)
 	}
 }
 

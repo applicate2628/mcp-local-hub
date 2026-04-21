@@ -457,6 +457,14 @@ var forceMaterializeProbe = sendForceMaterializeTools
 // After every row is probed, the registry is reloaded and the rows'
 // Lifecycle + LastError + timestamp fields are refreshed.
 func forceMaterializeWorkspaceScoped(rows []DaemonStatus, regPath string) {
+	// Collect tool-call errors per row so we can surface them after
+	// the registry reload. LifecycleActive only promises "MCP handshake
+	// completed" — the backend may still return JSON-RPC errors at the
+	// tool-call layer (e.g., workspace-load failures in gopls or missing
+	// file context for pyright). Without this capture, --force-materialize
+	// showed "active" while the tool actually errored, misleading
+	// operators during incidents.
+	toolErr := make([]string, len(rows))
 	var wg sync.WaitGroup
 	for i := range rows {
 		if rows[i].Language == "" || rows[i].Port == 0 {
@@ -465,10 +473,20 @@ func forceMaterializeWorkspaceScoped(rows []DaemonStatus, regPath string) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			forceMaterializeProbe(rows[idx].Port, rows[idx].Backend)
+			toolErr[idx] = forceMaterializeProbe(rows[idx].Port, rows[idx].Backend)
 		}(i)
 	}
 	wg.Wait()
+	// Always propagate tool-level errors to rows first — this must
+	// happen even when the registry reload path below is skipped
+	// (empty regPath / unreadable registry). Without this, callers
+	// observing rows[i].LastError would see the stale registry value
+	// (or empty) instead of the actual --force-materialize outcome.
+	for i := range rows {
+		if toolErr[i] != "" {
+			rows[i].LastError = toolErr[i]
+		}
+	}
 	// Reload the registry once so every workspace-scoped row sees the
 	// proxy's post-probe lifecycle + timestamp writes.
 	if regPath == "" {
@@ -496,7 +514,11 @@ func forceMaterializeWorkspaceScoped(rows []DaemonStatus, regPath string) {
 			rows[i].Lifecycle = e.Lifecycle
 			rows[i].LastMaterializedAt = e.LastMaterializedAt
 			rows[i].LastToolsCallAt = e.LastToolsCallAt
-			rows[i].LastError = e.LastError
+			// Preserve the probe's tool-error if one was captured
+			// above; otherwise take the registry's value.
+			if toolErr[i] == "" {
+				rows[i].LastError = e.LastError
+			}
 		}
 	}
 }
@@ -512,10 +534,19 @@ func forceMaterializeWorkspaceScoped(rows []DaemonStatus, regPath string) {
 //	  materializes before validating the tool name, so any valid
 //	  JSON-RPC shape is enough to drive materialization
 //
-// The function does not interpret the response body. The proxy records
-// LifecycleActive on success, LifecycleMissing/LifecycleFailed on failure,
-// and the caller reloads the registry to observe whichever was written.
-func sendForceMaterializeTools(port int, backend string) {
+// Returns a non-empty backend-error string when the JSON-RPC response
+// carries an "error" field. The proxy's own registry write marks
+// LifecycleActive on MCP handshake success — which can diverge from
+// the tool-call outcome when the backend speaks MCP but cannot serve
+// tool calls (workspace-load errors in gopls, missing file in pyright,
+// etc.). The caller surfaces the returned string as LastError so the
+// CLI cell reads "OK (synth); backend ERR: <tool response err>"
+// instead of hiding a tool-call failure behind LifecycleActive.
+//
+// Empty return on transport error (unreachable): we already return
+// without touching the registry, and the subsequent registry reload
+// will show whatever lifecycle the proxy last wrote.
+func sendForceMaterializeTools(port int, backend string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	toolName := "hover"
@@ -534,10 +565,45 @@ func sendForceMaterializeTools(port int, backend string) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return
+		return ""
 	}
-	_, _ = io.Copy(io.Discard, resp.Body)
-	_ = resp.Body.Close()
+	defer resp.Body.Close()
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if err != nil {
+		return ""
+	}
+	// Streamable HTTP can deliver the response as JSON directly or as a
+	// single SSE event. Extract the data: line when SSE; otherwise parse
+	// the whole body.
+	jsonBytes := payload
+	if strings.HasPrefix(strings.TrimLeft(string(payload), " \t\r\n"), "event:") ||
+		strings.HasPrefix(strings.TrimLeft(string(payload), " \t\r\n"), "data:") {
+		for _, line := range strings.Split(string(payload), "\n") {
+			line = strings.TrimSpace(line)
+			if after, ok := strings.CutPrefix(line, "data:"); ok {
+				jsonBytes = []byte(strings.TrimSpace(after))
+				break
+			}
+		}
+	}
+	var env struct {
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(jsonBytes, &env); err != nil {
+		return ""
+	}
+	if env.Error != nil && env.Error.Message != "" {
+		// Truncate to match LastError capping.
+		msg := env.Error.Message
+		if len(msg) > MaxLastErrorBytes {
+			msg = msg[:MaxLastErrorBytes] + "…"
+		}
+		return fmt.Sprintf("backend %s: %s", toolName, msg)
+	}
+	return ""
 }
 
 // probeDaemonHealth fills DaemonStatus.Health for every Running row

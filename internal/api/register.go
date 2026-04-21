@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -132,12 +133,27 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 				lang, m.Name, sortedLanguageNames(m))
 		}
 	}
+	// 2.4 Preflight the canonical mcphub binary BEFORE any scheduler
+	// side effect. Register's per-language loop does the same check
+	// inside registerOneLanguage, but EnsureWeeklyRefreshTask (below)
+	// would fire first and could leak a shared "mcp-local-hub-workspace-
+	// weekly-refresh" task pointing at a missing binary if setup wasn't
+	// run yet. Fail fast instead — the user sees the same "run mcphub
+	// setup once" message install uses, no orphan shared state created.
+	canonicalExeForPreflight, err := canonicalMcphubPath()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := os.Stat(canonicalExeForPreflight); err != nil {
+		return nil, fmt.Errorf("%s not present — run `mcphub setup` once: %w", canonicalExeForPreflight, err)
+	}
 	// 2.5 Ensure the shared weekly-refresh task exists. Idempotent (Delete
 	// + Create under the hood) so it is safe to invoke on every Register.
 	// Failure here is non-fatal — per-workspace registration must not be
 	// blocked by a shared-task problem; surface a warning and carry on.
-	// Placed AFTER argument validation so an invalid-language call
-	// produces no scheduler side effects at all.
+	// Placed AFTER argument validation AND the canonical-mcphub preflight
+	// so neither invalid-language calls nor setup-skipped installs
+	// produce scheduler side effects at all.
 	if err := a.EnsureWeeklyRefreshTask(); err != nil {
 		fmt.Fprintf(w, "warning: ensure shared weekly-refresh task: %v\n", err)
 	}
@@ -399,6 +415,18 @@ func (a *API) registerOneLanguage(
 	if err := sch.Run(taskName); err != nil {
 		return WorkspaceEntry{}, fmt.Errorf("run task %s: %w", taskName, err)
 	}
+	// Verify readiness. Windows schtasks /Run only triggers the task
+	// action; it does not report whether the action actually succeeded.
+	// Without this probe, a bad binary path, port contention, startup
+	// crash, or task-XML drift would produce a successful-looking
+	// register whose client configs point at a dead port. The probe
+	// polls 127.0.0.1:<port>/mcp with synthetic initialize until it
+	// succeeds OR the bounded timeout elapses. Rollback stack fires
+	// on timeout so registry / scheduler / client entries do not leak
+	// for a proxy that never came up.
+	if err := proxyReadinessFn(port, 10*time.Second); err != nil {
+		return WorkspaceEntry{}, fmt.Errorf("proxy readiness on port %d: %w", port, err)
+	}
 	fmt.Fprintf(w, "\u2713 Scheduler task started: %s\n", taskName)
 	// 2. Write client entries. Names + entry were pre-composed above;
 	// this loop just pushes entries into each client's config and
@@ -615,6 +643,51 @@ func sortedLanguageNames(m *config.ServerManifest) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// proxyReadinessFn is the test seam for verifyProxyReady. Production
+// callers go through this hook. Tests override it to return nil
+// immediately (skip the real HTTP probe against the fake scheduler
+// whose Run doesn't actually spawn a proxy) or to inject failures.
+var proxyReadinessFn = verifyProxyReady
+
+// verifyProxyReady polls 127.0.0.1:<port>/mcp with a minimal MCP
+// initialize request until the proxy answers OR the bounded timeout
+// elapses. Returns nil on first successful 200 response, error
+// otherwise. 200ms polling interval balances quick-success latency
+// against thrashing the port during slower startups. Called right
+// after sch.Run so register can error-and-rollback instead of
+// reporting a successful registration whose proxy never came up.
+func verifyProxyReady(port int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	url := fmt.Sprintf("http://127.0.0.1:%d/mcp", port)
+	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"mcphub-register-readiness","version":"1.0.0"},"capabilities":{}}}`)
+	client := &http.Client{Timeout: 2 * time.Second}
+	var lastErr error
+	for time.Now().Before(deadline) {
+		req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+		if err != nil {
+			return fmt.Errorf("build readiness request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = err
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			return nil
+		}
+		lastErr = fmt.Errorf("readiness probe status %d", resp.StatusCode)
+		time.Sleep(200 * time.Millisecond)
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("timeout after %s", timeout)
+	}
+	return lastErr
 }
 
 // --- Test seams ---------------------------------------------------------

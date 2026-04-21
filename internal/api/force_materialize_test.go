@@ -14,12 +14,45 @@ type fakeForceMaterializeProbe struct {
 	// onCall, when non-nil, is invoked before each probe. Tests can use it
 	// to simulate the proxy writing LifecycleActive to the registry.
 	onCall func(port int, backend string)
+	// returnErr, when non-empty, is the backend-tool-error string the fake
+	// returns. Lets tests exercise the path where tool-call succeeded
+	// in transport but backend surfaced a JSON-RPC error.
+	returnErr string
 }
 
-func (f *fakeForceMaterializeProbe) send(port int, backend string) {
+func (f *fakeForceMaterializeProbe) send(port int, backend string) string {
 	f.calls.Add(1)
 	if f.onCall != nil {
 		f.onCall(port, backend)
+	}
+	return f.returnErr
+}
+
+// TestForceMaterialize_SurfacesBackendToolError guards the corrected
+// --force-materialize contract: the probe now parses the JSON-RPC
+// response and, when the backend returns an error (e.g. gopls
+// "workspace load failed"), surfaces that message via DaemonStatus.
+// LastError. Previously the function discarded the response entirely,
+// so LifecycleActive hid tool-call failures from operators even
+// though --force-materialize was the explicit "check backend tool
+// readiness" command.
+func TestForceMaterialize_SurfacesBackendToolError(t *testing.T) {
+	fake := &fakeForceMaterializeProbe{
+		returnErr: "backend hover: workspace_load_failed: no go.mod",
+	}
+	orig := forceMaterializeProbe
+	forceMaterializeProbe = fake.send
+	defer func() { forceMaterializeProbe = orig }()
+
+	rows := []DaemonStatus{
+		{TaskName: "mcp-local-hub-lsp-abcd1234-python", Port: 9217, Language: "python", Backend: "mcp-language-server"},
+	}
+	forceMaterializeWorkspaceScoped(rows, "")
+	if rows[0].LastError != "backend hover: workspace_load_failed: no go.mod" {
+		t.Errorf("LastError = %q; want the tool-error string from probe", rows[0].LastError)
+	}
+	if fake.calls.Load() != 1 {
+		t.Errorf("probe calls = %d; want 1", fake.calls.Load())
 	}
 }
 

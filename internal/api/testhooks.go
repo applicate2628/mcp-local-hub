@@ -9,6 +9,8 @@
 package api
 
 import (
+	"time"
+
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/scheduler"
 )
@@ -47,6 +49,15 @@ func InstallTestHooks(newScheduler func() (TestSchedulerIface, error),
 	origSch := testSchedulerFactory
 	origClients := testClientFactory
 	origRegPath := testRegistryPathOverride
+	origReadiness := proxyReadinessFn
+
+	// Cross-package tests run against a fake scheduler whose Run is a
+	// no-op; the production readiness probe would then time out waiting
+	// for a port that never binds. Fake it to succeed immediately so
+	// Register's post-Run check does not block E2E tests. The E2E test
+	// reaches the proxy via its own httptest server, not via the CLI
+	// listening on the register-advertised port.
+	proxyReadinessFn = func(port int, timeout time.Duration) error { return nil }
 
 	testSchedulerFactory = func() (testScheduler, error) {
 		s, err := newScheduler()
@@ -68,6 +79,7 @@ func InstallTestHooks(newScheduler func() (TestSchedulerIface, error),
 		testSchedulerFactory = origSch
 		testClientFactory = origClients
 		testRegistryPathOverride = origRegPath
+		proxyReadinessFn = origReadiness
 	}
 }
 
