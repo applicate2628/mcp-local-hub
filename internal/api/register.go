@@ -333,7 +333,21 @@ func (a *API) registerOneLanguage(
 	}
 	capturedRegKey := wsKey
 	capturedRegLang := lang
+	capturedHad := had
+	capturedPrior := prior
 	*rollback = append(*rollback, func() {
+		if capturedHad {
+			// Re-register rollback: restore the prior (workspace, language)
+			// entry. Simply removing would leave the scheduler task
+			// (possibly restored from priorXML and restarted) pointing at
+			// a missing registry row, which workspace-proxy treats as
+			// "not registered" and exits — turning a recoverable
+			// re-register failure into a persistent outage.
+			reg.Put(capturedPrior)
+			_ = reg.Save()
+			fmt.Fprintf(w, "  rollback: restored prior registry entry %s/%s\n", capturedRegKey, capturedRegLang)
+			return
+		}
 		reg.Remove(capturedRegKey, capturedRegLang)
 		_ = reg.Save()
 		fmt.Fprintf(w, "  rollback: removed registry entry %s/%s\n", capturedRegKey, capturedRegLang)

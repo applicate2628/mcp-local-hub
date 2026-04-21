@@ -437,6 +437,12 @@ func (e *stdioHostEndpoint) SendRequest(ctx context.Context, req *JSONRPCRequest
 	if err := json.Unmarshal(raw, &resp); err != nil {
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
+	// Restore the client's original id. SendRPC multiplexes concurrent
+	// callers through an internal counter, so `raw` comes back stamped
+	// with that internal id. Clients match replies to requests by id;
+	// returning the internal id would break correlation for any client
+	// using string ids or non-sequential ids, causing apparent timeouts.
+	resp.ID = req.ID
 	return &resp, nil
 }
 

@@ -133,6 +133,82 @@ func TestBackendLifecycle_GoplsMissingBinarySurfaces(t *testing.T) {
 	}
 }
 
+// echoLSPCommand is a multi-request variant of fakeLSPCommand: it loops
+// over stdin, reads each JSON-RPC request, and echoes back a response
+// with the same id and an empty result. Lets tests exercise SendRequest
+// on forwarded calls after the initial handshake.
+func echoLSPCommand(t *testing.T) (cmd string, args []string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return "python", []string{"-u", "-c",
+			`import sys, json
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        req = json.loads(line)
+    except Exception:
+        continue
+    rid = req.get("id")
+    # Notifications have no id; do not reply.
+    if rid is None:
+        continue
+    sys.stdout.write(json.dumps({"jsonrpc":"2.0","id":rid,"result":{}}) + "\n")
+    sys.stdout.flush()
+`}
+	}
+	return "sh", []string{"-c", `while read -r line; do
+  rid=$(printf '%s' "$line" | python -c 'import sys,json; d=json.loads(sys.stdin.read()); v=d.get("id"); print("" if v is None else json.dumps(v))')
+  if [ -n "$rid" ]; then
+    printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$rid"
+  fi
+done`}
+}
+
+// TestBackendLifecycle_SendRequestPreservesClientID guards the JSON-RPC
+// correlation contract for FORWARDED calls (not just ping): SendRPC
+// multiplexes concurrent callers through an internal counter, so the
+// raw backend response returns stamped with that internal id. The
+// endpoint must restore the client's original id before handing the
+// response back up the stack. Clients that use string ids, negative
+// ids, or non-sequential concurrent ids would otherwise see apparent
+// timeouts because their id-based reply matcher misses the response.
+func TestBackendLifecycle_SendRequestPreservesClientID(t *testing.T) {
+	cmd, args := echoLSPCommand(t)
+	b := NewMcpLanguageServerStdio(McpLanguageServerStdioConfig{
+		WrapperCommand:   cmd,
+		WrapperArgs:      args,
+		Workspace:        t.TempDir(),
+		Language:         "python",
+		HandshakeTimeout: 3 * time.Second,
+	})
+	defer func() { _ = b.Stop() }()
+	ep, err := b.Materialize(context.Background())
+	if err != nil {
+		t.Fatalf("Materialize: %v", err)
+	}
+	// Use a distinctive client id that cannot collide with the internal
+	// integer counter SendRPC picks — a JSON string id + a negative int.
+	cases := []json.RawMessage{
+		json.RawMessage(`"client-string-id-xyz"`),
+		json.RawMessage(`-42`),
+	}
+	for _, clientID := range cases {
+		req := &JSONRPCRequest{Jsonrpc: "2.0", ID: clientID, Method: "tools/list"}
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		resp, err := ep.SendRequest(ctx, req)
+		cancel()
+		if err != nil {
+			t.Fatalf("SendRequest %s: %v", clientID, err)
+		}
+		if string(resp.ID) != string(clientID) {
+			t.Errorf("response id = %s, want %s (SendRPC rewrote id for multiplex; endpoint must restore)",
+				string(resp.ID), string(clientID))
+		}
+	}
+}
+
 func TestBackendLifecycle_SendRequestAfterStopErrors(t *testing.T) {
 	cmd, args := fakeLSPCommand(t)
 	b := NewMcpLanguageServerStdio(McpLanguageServerStdioConfig{

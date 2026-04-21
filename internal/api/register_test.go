@@ -270,6 +270,51 @@ func TestRegister_RollbackOnClientFailure(t *testing.T) {
 	}
 }
 
+// TestRegister_RollbackRestoresPriorRegistryEntryOnReRegister guards
+// the narrow "re-register rollback removes prior row" regression: when
+// `had == true`, the registry rollback must RESTORE the prior entry,
+// not delete it. Deleting turns a recoverable re-register failure into
+// a persistent outage — the scheduler task gets restored from priorXML
+// + restarted, but workspace-proxy exits immediately because its
+// (workspaceKey, language) registry row is gone.
+func TestRegister_RollbackRestoresPriorRegistryEntryOnReRegister(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	origKill := killByPortFn
+	defer func() { killByPortFn = origKill }()
+	killByPortFn = func(port int, _ time.Duration) error { return nil }
+	ws := t.TempDir()
+	m := nineLanguageManifest()
+	a := mustNewAPI(t)
+	if _, err := a.registerWithManifest(m, ws, []string{"python"}, RegisterOpts{Writer: &bytes.Buffer{}}); err != nil {
+		t.Fatalf("first register: %v", err)
+	}
+	// Capture the entry as it was after first register.
+	reg := NewRegistry(h.regPath)
+	_ = reg.Load()
+	before, ok := reg.Get(WorkspaceKey(mustCanonical(t, ws)), "python")
+	if !ok {
+		t.Fatal("first register did not persist python entry")
+	}
+	// Force a client-write failure on the second register. Rollback must
+	// restore the prior entry, not delete it.
+	h.fakeClients.failAddEntryCalls = h.fakeClients.addEntryCount + 1
+	_, err := a.registerWithManifest(m, ws, []string{"python"}, RegisterOpts{Writer: &bytes.Buffer{}})
+	if err == nil {
+		t.Fatal("expected re-register with forced client failure to error")
+	}
+	// After rollback, the prior entry must still be present on disk.
+	reg2 := NewRegistry(h.regPath)
+	_ = reg2.Load()
+	after, ok := reg2.Get(before.WorkspaceKey, "python")
+	if !ok {
+		t.Fatal("rollback deleted prior entry instead of restoring it (workspace-proxy would exit with 'not registered')")
+	}
+	if after.Port != before.Port {
+		t.Errorf("rollback did not preserve prior port: before=%d after=%d", before.Port, after.Port)
+	}
+}
+
 // TestRegister_RegistryPersistedBeforeRun guards the race between
 // sch.Run and reg.Save: the daemon process spawned by Run loads
 // workspaces.yaml immediately and exits if (workspaceKey, language)
