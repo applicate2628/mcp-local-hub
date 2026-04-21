@@ -381,7 +381,7 @@ func TestLazyProxy_BackendCrashReMaterializes(t *testing.T) {
 		kind:           "mcp-language-server",
 		sendRequestErr: errors.New("backend subprocess exited"),
 	}
-	p, _ := newTestProxyWithCfg(t, "mcp-language-server", f, 10*time.Millisecond, 100*time.Millisecond)
+	p, regPath := newTestProxyWithCfg(t, "mcp-language-server", f, 10*time.Millisecond, 100*time.Millisecond)
 	h := p.Handler()
 	rr := postRPC(t, h, "tools/call", 1)
 	if rr.Code != http.StatusOK {
@@ -390,6 +390,18 @@ func TestLazyProxy_BackendCrashReMaterializes(t *testing.T) {
 	got := parseRPC(t, rr.Body.Bytes())
 	if got["error"] == nil {
 		t.Fatalf("expected error envelope on send failure: %+v", got)
+	}
+	// Post-crash, pre-remat assertions. These guard the onSendFailure
+	// ordering contract (Lifecycle.Stop MUST run before gate.Forget so
+	// concurrent callers don't reuse the dead host). If Stop is skipped
+	// or reordered, stopCount stays at zero and the host-tear-down race
+	// silently regresses.
+	if sc := f.stopCount.Load(); sc < 1 {
+		t.Errorf("expected Lifecycle.Stop to be called after crash, stopCount=%d", sc)
+	}
+	crashEntry := readEntry(t, regPath)
+	if crashEntry.Lifecycle != api.LifecycleFailed {
+		t.Errorf("expected LifecycleFailed between crash and remat, got %q", crashEntry.Lifecycle)
 	}
 	// Flip fake so next SendRequest succeeds.
 	f.sendRequestErr = nil

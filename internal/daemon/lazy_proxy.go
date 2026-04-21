@@ -323,9 +323,20 @@ func (p *LazyProxy) ensureMaterialized(ctx context.Context) (MCPEndpoint, error)
 }
 
 // onSendFailure handles mid-stream backend death: evict the cached endpoint,
-// clear gate state so the next call re-materializes, stamp Failed in the
-// registry. Preserves the underlying error chain (errors.Is works upstream)
-// because PutLifecycle records err.Error() verbatim after truncation.
+// tear down the dead subprocess, clear gate state so the next call
+// re-materializes, stamp Failed in the registry. Preserves the underlying
+// error chain (errors.Is works upstream) because PutLifecycle records
+// err.Error() verbatim after truncation.
+//
+// Ordering is load-bearing: Lifecycle.Stop() MUST precede gate.Forget().
+// Stop invalidates the lifecycle impl's cached host (b.host = nil inside
+// mcpLanguageServerStdio / goplsMCPStdio), so the next Materialize spawns
+// fresh. If we Forget first, a concurrent ensureMaterialized caller can
+// enter the cleared gate, call Materialize on the not-yet-stopped
+// lifecycle, observe b.host != nil, and receive an endpoint wrapping the
+// dying host — producing an extra dead-endpoint round-trip before
+// self-correction. "Disable-then-publish": kill the shared resource, THEN
+// signal that new callers may enter.
 func (p *LazyProxy) onSendFailure(err error) {
 	p.mu.Lock()
 	if p.endpoint != nil {
@@ -333,10 +344,12 @@ func (p *LazyProxy) onSendFailure(err error) {
 		p.endpoint = nil
 	}
 	p.mu.Unlock()
-	p.gate.Forget(p.inflightKey())
-	// Tell the lifecycle impl to tear its subprocess down too — safe even if
-	// the child already exited on its own.
+	// Tell the lifecycle impl to tear its subprocess down first — safe even
+	// if the child already exited on its own. This invalidates the impl's
+	// cached host so any concurrent Materialize that slips in after the
+	// next Forget() will re-spawn rather than reuse the dead host.
 	_ = p.cfg.Lifecycle.Stop()
+	p.gate.Forget(p.inflightKey())
 	_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycle(
 		p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleFailed, err.Error())
 }
