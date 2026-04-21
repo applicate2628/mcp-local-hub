@@ -721,6 +721,37 @@ func TestResolveEntryName_CollisionAppendsHash(t *testing.T) {
 	}
 }
 
+// TestResolveEntryName_ShortSuffixCollisionExtendsToFullKey guards the
+// narrow case where two OTHER workspaces both collide on base AND
+// share the first 4 hex chars of their workspace keys. With only
+// 4-char suffixes, two workspaces like "ourk1111" and "ourk2222"
+// would both map to "mcp-language-server-python-ourk", overwriting
+// each other's client config entry. When the short form is taken,
+// ResolveEntryName must fall back to the full 8-char key.
+func TestResolveEntryName_ShortSuffixCollisionExtendsToFullKey(t *testing.T) {
+	reg := NewRegistry(t.TempDir() + "/reg.yaml")
+	// Workspace A already holds the BASE name.
+	reg.Put(WorkspaceEntry{
+		WorkspaceKey:  "ffffffff",
+		Language:      "python",
+		ClientEntries: map[string]string{"codex-cli": "mcp-language-server-python"},
+	})
+	// Workspace B shares the first 4 hex with our key AND already holds
+	// the short-suffixed collision name — mimics the bug scenario where
+	// a prior collision taking "ourk" prefix already parked the name.
+	reg.Put(WorkspaceEntry{
+		WorkspaceKey:  "ourk1111",
+		Language:      "python",
+		ClientEntries: map[string]string{"codex-cli": "mcp-language-server-python-ourk"},
+	})
+	// Now our key "ourk2222" collides on base with A and on suffix with B.
+	got := ResolveEntryName(reg, "mcp-language-server", "python", "ourk2222")
+	want := "mcp-language-server-python-ourk2222"
+	if got != want {
+		t.Errorf("short-suffix collision must extend to full key; got %q want %q", got, want)
+	}
+}
+
 func TestResolveEntryName_SameWorkspaceReturnsBase(t *testing.T) {
 	reg := NewRegistry(t.TempDir() + "/reg.yaml")
 	reg.Put(WorkspaceEntry{

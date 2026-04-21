@@ -531,15 +531,41 @@ func ResolveEntryName(reg *Registry, serverName, language, workspaceKey string) 
 	for _, e := range reg.Workspaces {
 		for _, name := range e.ClientEntries {
 			if name == base && e.WorkspaceKey != workspaceKey {
-				suffix := workspaceKey
-				if len(suffix) > 4 {
-					suffix = suffix[:4]
+				short := workspaceKey
+				if len(short) > 4 {
+					short = short[:4]
 				}
-				return base + "-" + suffix
+				candidate := base + "-" + short
+				// Two workspaces sharing the first 4 hex chars of their
+				// keys AND colliding on the same language would otherwise
+				// get the same candidate name, causing one register to
+				// overwrite the other's client entry. Fall back to the
+				// full 8-char key when the short form is also taken.
+				if entryNameTakenByOtherWorkspace(reg, candidate, workspaceKey) {
+					return base + "-" + workspaceKey
+				}
+				return candidate
 			}
 		}
 	}
 	return base
+}
+
+// entryNameTakenByOtherWorkspace returns true iff some registry entry
+// (other than our own workspaceKey) already uses the given client entry
+// name. Used by ResolveEntryName to escape short-suffix collisions.
+func entryNameTakenByOtherWorkspace(reg *Registry, candidate, workspaceKey string) bool {
+	for _, e := range reg.Workspaces {
+		if e.WorkspaceKey == workspaceKey {
+			continue
+		}
+		for _, name := range e.ClientEntries {
+			if name == candidate {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func sortedLanguageNames(m *config.ServerManifest) []string {

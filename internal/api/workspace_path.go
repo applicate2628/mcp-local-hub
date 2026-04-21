@@ -10,51 +10,61 @@ import (
 	"strings"
 )
 
-// CanonicalWorkspacePath resolves p to an absolute, cleaned path usable as
-// the deterministic input to WorkspaceKey.
+// CanonicalWorkspacePath resolves p to an absolute, symlink-resolved,
+// cleaned path usable as the deterministic input to WorkspaceKey.
 //
 // Rules:
-//   - filepath.Abs(filepath.Clean(p)) — same normalization as internal/cli/setup.go
-//   - on Windows, the drive-letter is lowercased (rest preserved) so "C:/foo"
-//     and "c:/foo" produce the same workspace key — Windows paths are
-//     case-insensitive on NTFS by default
-//   - the path must exist (os.Lstat succeeds)
-//   - the path must NOT be a symlink / reparse point — reject with a clear error;
-//     the user should pass the resolved path instead. This avoids the permissions
-//     surface of opening arbitrary directories via GetFinalPathNameByHandle.
+//   - filepath.Abs(filepath.Clean(p)) for initial normalization
+//   - filepath.EvalSymlinks on the full path so symlinks in ANY component
+//     (not just the final one) resolve to their targets. Critical for
+//     de-duplication: aliased parents like "/tmp/foo → /var/tmp/foo"
+//     must not produce two different WorkspaceKey values for the same
+//     underlying directory, which would spawn duplicate scheduler and
+//     client state and make unregister/migration inconsistent across
+//     aliases.
+//   - the final resolved path must exist and be a directory
+//   - on Windows, the drive-letter is lowercased (rest preserved) so
+//     "C:/foo" and "c:/foo" produce the same workspace key.
 func CanonicalWorkspacePath(p string) (string, error) {
 	abs, err := filepath.Abs(filepath.Clean(p))
 	if err != nil {
 		return "", fmt.Errorf("workspace path: %w", err)
 	}
-	fi, err := os.Lstat(abs)
+	resolved, err := filepath.EvalSymlinks(abs)
 	if err != nil {
 		return "", fmt.Errorf("workspace %s: %w", abs, err)
 	}
+	fi, err := os.Stat(resolved)
+	if err != nil {
+		return "", fmt.Errorf("workspace %s: %w", resolved, err)
+	}
 	if !fi.IsDir() {
-		return "", fmt.Errorf("workspace %s: not a directory", abs)
+		return "", fmt.Errorf("workspace %s: not a directory", resolved)
 	}
-	if fi.Mode()&os.ModeSymlink != 0 {
-		return "", fmt.Errorf("workspace %s: path is a symlink / reparse point; pass the resolved path instead", abs)
+	if runtime.GOOS == "windows" && len(resolved) >= 2 && resolved[1] == ':' {
+		resolved = strings.ToLower(string(resolved[0])) + resolved[1:]
 	}
-	if runtime.GOOS == "windows" && len(abs) >= 2 && abs[1] == ':' {
-		abs = strings.ToLower(string(abs[0])) + abs[1:]
-	}
-	return abs, nil
+	return resolved, nil
 }
 
-// CanonicalWorkspacePathForCleanup performs the same abs+clean+drive-lowercase
-// normalization as CanonicalWorkspacePath but does NOT require the directory
-// to exist. Use for unregister and other cleanup paths where the workspace
-// may have been deleted, moved, or be on an unavailable drive — the user
-// still needs a way to remove orphaned scheduler tasks / registry rows /
-// client entries. Registration paths MUST use CanonicalWorkspacePath so the
-// existence + non-symlink invariants hold for daemons that will actually
-// open files inside the workspace.
+// CanonicalWorkspacePathForCleanup returns a canonical path for
+// unregister / cleanup: same normalization as CanonicalWorkspacePath
+// (abs + clean + EvalSymlinks + drive-letter lowercase) but does NOT
+// require the directory to exist. If the path still resolves, we use
+// the resolved form so the workspace_key matches what Register
+// persisted. If the path is gone (deleted, moved, unavailable drive),
+// we fall back to abs+clean+drive-lowercase so the operator can still
+// remove orphan scheduler tasks / client entries / registry rows.
 func CanonicalWorkspacePathForCleanup(p string) (string, error) {
 	abs, err := filepath.Abs(filepath.Clean(p))
 	if err != nil {
 		return "", fmt.Errorf("workspace path: %w", err)
+	}
+	// Try to resolve symlinks so Register/Unregister agree on the key.
+	// Failure here (path missing, permission denied) is not fatal — fall
+	// back to the unresolved abs form.
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
 	}
 	if runtime.GOOS == "windows" && len(abs) >= 2 && abs[1] == ':' {
 		abs = strings.ToLower(string(abs[0])) + abs[1:]

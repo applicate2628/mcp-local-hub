@@ -63,22 +63,37 @@ func TestCanonicalWorkspacePath_WindowsDriveLetterLowercased(t *testing.T) {
 	}
 }
 
-// TestCanonicalWorkspacePath_RejectsSymlink ensures the "reject symlinks" policy.
-// Skipped on Windows when symlink creation requires admin; portable on Linux.
-func TestCanonicalWorkspacePath_RejectsSymlink(t *testing.T) {
+// TestCanonicalWorkspacePath_ResolvesSymlinkToTarget ensures symlinks at
+// any level — final OR intermediate — resolve to the real underlying
+// directory so the same workspace is never registered twice under
+// different aliases. The previous policy rejected final-path symlinks
+// outright, but that left intermediate-parent symlinks silently
+// un-resolved and producing different WorkspaceKey values for the same
+// directory.
+// Skipped on Windows where symlink creation requires developer mode.
+func TestCanonicalWorkspacePath_ResolvesSymlinkToTarget(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation on Windows requires developer mode / admin")
 	}
-	real := t.TempDir()
+	realDir := t.TempDir()
 	link := filepath.Join(t.TempDir(), "link")
-	if err := os.Symlink(real, link); err != nil {
+	if err := os.Symlink(realDir, link); err != nil {
 		t.Fatalf("symlink: %v", err)
 	}
-	_, err := CanonicalWorkspacePath(link)
-	if err == nil {
-		t.Fatal("expected error for symlink")
+	resolvedFromLink, err := CanonicalWorkspacePath(link)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath(link): %v", err)
 	}
-	if !strings.Contains(err.Error(), "symlink") && !strings.Contains(err.Error(), "reparse") {
-		t.Errorf("error should mention symlink/reparse: %v", err)
+	resolvedFromReal, err := CanonicalWorkspacePath(realDir)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath(real): %v", err)
+	}
+	if resolvedFromLink != resolvedFromReal {
+		t.Errorf("symlink + real path must produce same canonical; got link=%q real=%q",
+			resolvedFromLink, resolvedFromReal)
+	}
+	if WorkspaceKey(resolvedFromLink) != WorkspaceKey(resolvedFromReal) {
+		t.Errorf("WorkspaceKey must match for aliased paths; got link=%q real=%q",
+			WorkspaceKey(resolvedFromLink), WorkspaceKey(resolvedFromReal))
 	}
 }
