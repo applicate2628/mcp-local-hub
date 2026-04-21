@@ -63,6 +63,53 @@ func TestCanonicalWorkspacePath_WindowsDriveLetterLowercased(t *testing.T) {
 	}
 }
 
+// TestCanonicalWorkspacePathForCleanup_ResolvesSymlinkViaRegularAncestor
+// guards the subtle case where the user registered via a symlinked
+// parent AND later deleted only the leaf. Example: register
+// /alias/dir/project where /alias → /real. Canonical at register time
+// is /real/dir/project. Then user deletes `project`. EvalSymlinks on
+// the full path fails (project gone). Walking up, Lstat(/alias/dir)
+// succeeds — but reports a REGULAR directory (the Lstat follows /alias
+// transparently because /alias/dir is reached THROUGH it, and the
+// mode-check sees the regular target, not the symlink). The old code
+// returned /alias/dir/project at that point, producing a different
+// WorkspaceKey than Register stored. Without this fix, unregister
+// cannot find orphaned entries for a valid common deletion pattern.
+// Skipped on Windows (symlink creation requires admin).
+func TestCanonicalWorkspacePathForCleanup_ResolvesSymlinkViaRegularAncestor(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation on Windows requires developer mode / admin")
+	}
+	realParent := filepath.Join(t.TempDir(), "real")
+	realDir := filepath.Join(realParent, "dir")
+	leaf := filepath.Join(realDir, "project")
+	if err := os.MkdirAll(leaf, 0755); err != nil {
+		t.Fatalf("mkdir real/dir/project: %v", err)
+	}
+	aliasBase := t.TempDir()
+	alias := filepath.Join(aliasBase, "alias") // alias → realParent
+	if err := os.Symlink(realParent, alias); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	aliasLeaf := filepath.Join(alias, "dir", "project")
+	// Snapshot key at register time.
+	registerKey, err := CanonicalWorkspacePath(aliasLeaf)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	// Delete ONLY the leaf; /alias/dir stays alive (via symlink chain).
+	if err := os.RemoveAll(leaf); err != nil {
+		t.Fatalf("remove leaf: %v", err)
+	}
+	cleanupKey, err := CanonicalWorkspacePathForCleanup(aliasLeaf)
+	if err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	if cleanupKey != registerKey {
+		t.Errorf("cleanup key diverged (/alias/.../project vs /real/.../project):\n  register = %q\n  cleanup  = %q", registerKey, cleanupKey)
+	}
+}
+
 // TestCanonicalWorkspacePathForCleanup_ResolvesBrokenParentSymlink guards
 // the round-19 Codex case: registration used a path like /alias/project
 // where /alias is the symlink. Later /alias's target is deleted. Now

@@ -111,8 +111,22 @@ func resolveSymlinksBestEffort(abs string) string {
 					return rewritten
 				}
 			}
-			// Nearest surviving ancestor is a regular dir; deeper components
-			// are truly gone. Fall through to returning abs unchanged.
+			// Surviving ancestor is a regular directory — but the path
+			// from root to THIS directory may still contain symlinks we
+			// need to collapse (e.g. "/alias/dir" where /alias → /real:
+			// Lstat sees /alias/dir as a regular dir, yet EvalSymlinks
+			// resolves it to /real/dir). Run EvalSymlinks on the ancestor
+			// itself, then rejoin the deleted-suffix we climbed past so
+			// the cleanup key matches Register's canonical.
+			if resolved, ferr := filepath.EvalSymlinks(cur); ferr == nil {
+				if suffix != "" {
+					return filepath.Clean(filepath.Join(resolved, suffix))
+				}
+				return resolved
+			}
+			// EvalSymlinks failed on the ancestor too — return abs
+			// unchanged; operator may need to retry after re-creating
+			// the missing target.
 			return abs
 		}
 		parent := filepath.Dir(cur)
