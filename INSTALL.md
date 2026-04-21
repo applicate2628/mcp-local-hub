@@ -355,7 +355,7 @@ Embedded in `mcphub.exe` — no external dependency beyond what MSYS2/ucrt64 alr
 
 **Resource:**
 
-- `resource://tools` — JSON catalog of which of the four tools are installed on this machine and their versions. Probed once at startup via `exec.LookPath` + `<bin> --version`. Lets MCP clients skip tools that would fail rather than guessing.
+- `resource://tools` — JSON catalog of the tools **advertised by this daemon**: the three always-on analyzers (`clang-tidy`, `llvm-objdump`, `include-what-you-use`) when their binary is present, plus `hyperfine` only when the opt-in gate is open (see below). Each entry carries the detected version probed once at startup via `exec.LookPath` + `<bin> --version`. Lets MCP clients skip tools that would fail rather than guessing.
 
 **Prerequisites (tools on PATH):**
 
