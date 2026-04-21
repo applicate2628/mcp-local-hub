@@ -11,11 +11,13 @@ import (
 // individual tool descriptions (which already cover "what").
 const workflowMarkdown = `# Perf-Toolbox MCP Server — Workflow Guide
 
-This server wraps four **local** performance-analysis binaries from the
-user's MSYS2/ucrt64 (or equivalent) installation: ` + "`clang-tidy`" + `,
-` + "`hyperfine`" + `, ` + "`llvm-objdump`" + `, and ` + "`include-what-you-use`" + `. It's the
-"real local build" side of the perf-review loop. The companion ` + "`godbolt`" + `
-MCP server handles the "single-file compile on godbolt.org sandbox" side.
+This server wraps **local** performance-analysis binaries from the user's
+MSYS2/ucrt64 (or equivalent) installation: ` + "`clang-tidy`" + `, ` + "`llvm-objdump`" + `,
+and ` + "`include-what-you-use`" + ` are always registered when installed, plus
+` + "`hyperfine`" + ` which is **opt-in only** (see "Hyperfine opt-in" below).
+It's the "real local build" side of the perf-review loop. The companion
+` + "`godbolt`" + ` MCP server handles the "single-file compile on godbolt.org sandbox"
+side.
 
 ## Before using any tool — check availability
 
@@ -36,12 +38,38 @@ If a tool is ` + "`installed: false`" + `, the handler will return a clean
 "not installed" error — no need to preemptively guard. But checking up-front
 means you can propose "install iwyu via pacman" instead of calling a failing tool.
 
-## Tool selection (4 tools)
+` + "`hyperfine`" + ` is also subject to an admin opt-in gate and may be **absent from
+the catalog entirely** even when the binary is installed on disk — see
+"Hyperfine opt-in" below.
+
+## Hyperfine opt-in
+
+` + "`hyperfine`" + ` runs shell commands supplied by the MCP client. That's the tool
+contract (statistical benchmarking of arbitrary programs), but the same surface
+is a remote-code-execution path for any client able to reach the daemon, so it
+is disabled by default.
+
+To enable: set ` + "`MCP_LOCAL_HUB_ENABLE_UNSAFE_HYPERFINE=1`" + ` on the process that
+runs ` + "`mcphub perftools`" + ` (the scheduler-owned daemon, typically
+` + "`mcp-local-hub-perftools-default`" + `). Any other value — including ` + "`\"true\"`" + `,
+` + "`\"yes\"`" + `, ` + "`\"0\"`" + `, or trailing whitespace — keeps the gate closed.
+
+**When the gate is closed** (default), both discovery surfaces hide the tool:
+
+- ` + "`resource://tools`" + ` lists only the three always-on tools
+- ` + "`list_tools`" + ` (tool-transport twin) omits ` + "`hyperfine`" + ` as well
+- ` + "`tools/call hyperfine`" + ` returns method-not-found from the SDK
+
+So the "check availability, then call" contract stays consistent: advertised ⇒
+callable. See INSTALL.md "Opting into hyperfine" for the Windows/scheduler
+recipe.
+
+## Tool selection (3 always-on + 1 opt-in)
 
 | Tool | Use when |
 |------|----------|
 | ` + "`clang_tidy`" + ` | Audit real project source for perf / correctness antipatterns. Needs ` + "`compile_commands.json`" + `. |
-| ` + "`hyperfine`" + ` | "Is variant A faster than variant B?" Statistical bench of any shell commands. Sub-percent precision. |
+| ` + "`hyperfine`" + ` *(opt-in)* | "Is variant A faster than variant B?" Statistical bench of any shell commands. Sub-percent precision. Requires ` + "`MCP_LOCAL_HUB_ENABLE_UNSAFE_HYPERFINE=1`" + ` on the daemon. |
 | ` + "`llvm_objdump`" + ` | Disassemble user's **real** built binary (post-LTO/PGO/linker-inlining). The authoritative answer to "what's actually in my .exe". |
 | ` + "`iwyu`" + ` | Include hygiene: trim unused ` + "`#include`" + `s, add missing ones. Reduces compile time. |
 

@@ -76,7 +76,7 @@ Detailed setup, per-client behaviour, and troubleshooting in [INSTALL.md](INSTAL
 | **time** | 9128 | stdio-bridge (npx) | Trivial stateless |
 | **gdb** | 9129 | stdio-bridge (uv run) | Multi-debugger with session management |
 | **lldb** | 9130 | **embedded Go bridge** | Auto-spawns `lldb.exe`, HTTP-multiplexes concurrent clients onto single TCP connection |
-| **perftools** | 9131 | **embedded Go** | clang-tidy + hyperfine + llvm-objdump + include-what-you-use over real projects |
+| **perftools** | 9131 | **embedded Go** | clang-tidy + llvm-objdump + include-what-you-use over real projects; `hyperfine` is **opt-in only** (RCE surface — set `MCP_LOCAL_HUB_ENABLE_UNSAFE_HYPERFINE=1`, see INSTALL) |
 
 Plus **context7** as a direct HTTPS entry (no daemon, no scheduler task).
 
@@ -93,7 +93,8 @@ perftools.clang_tidy(files=["src/hot.cpp"], checks="performance-*")
 # sanity-check asm on godbolt with optimization remarks
 godbolt.compile_code(source=..., filters={optOutput: true, intel: true})
 
-# statistical bench: is the new variant actually faster?
+# statistical bench (requires opt-in: MCP_LOCAL_HUB_ENABLE_UNSAFE_HYPERFINE=1 on
+# the perftools daemon — see INSTALL.md "Opting into hyperfine")
 perftools.hyperfine(commands=["./old_bin", "./new_bin"], warmup=3)
 
 # verify the LTO-linked final binary keeps the vectorization

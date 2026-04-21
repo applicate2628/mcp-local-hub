@@ -67,7 +67,7 @@ Ten servers ship with manifests: `serena`, `memory`, `sequential-thinking`, `wol
 # Preview what would happen (no side effects)
 ./mcphub.exe install --server serena --dry-run
 
-# Apply: creates 3 Task Scheduler tasks, writes 4 client configs, starts both daemons
+# Apply: creates 2 Task Scheduler tasks (claude + codex daemons), writes 4 client configs, starts both daemons
 ./mcphub.exe install --server serena
 ```
 
@@ -76,7 +76,6 @@ Expected output:
 ```
 ✓ Scheduler task created: mcp-local-hub-serena-claude
 ✓ Scheduler task created: mcp-local-hub-serena-codex
-✓ Scheduler task created: mcp-local-hub-serena-weekly-refresh
   backup: C:\Users\<you>\.claude.json.bak-mcp-local-hub-<timestamp>
 ✓ claude-code → http://localhost:9121/mcp
   backup: C:\Users\<you>\.codex\config.toml.bak-mcp-local-hub-<timestamp>
@@ -96,7 +95,7 @@ First `✓ Started` triggers `uvx` to download Serena (~30 seconds on a fresh ma
 Verify:
 
 ```bash
-./mcphub.exe status        # 3 tasks; -claude and -codex Running, -weekly-refresh Ready
+./mcphub.exe status        # 2 tasks; -claude and -codex Running (auto-refresh disabled since v0.x; reinstall prunes any stale `-weekly-refresh` task left from earlier versions)
 claude mcp get serena   # Status: ✓ Connected, Type: http, URL: http://localhost:9121/mcp
 codex mcp get serena    # enabled: true, transport: streamable_http
 ```
@@ -345,12 +344,12 @@ built as a standalone binary — see *Standalone binaries* below.
 
 ### perftools (port 9131)
 
-Embedded in `mcphub.exe` — no external dependency beyond what MSYS2/ucrt64 already provides. Manifest runs `mcphub perftools` as the daemon command. Wraps four local analysis tools that complement the godbolt server by operating on the user's **real** build output (post-LTO/PGO/linker-inlining) instead of godbolt's single-file sandbox compile.
+Embedded in `mcphub.exe` — no external dependency beyond what MSYS2/ucrt64 already provides. Manifest runs `mcphub perftools` as the daemon command. Wraps three always-on local analysis tools plus an opt-in benchmarker (`hyperfine`, see below). All operate on the user's **real** build output (post-LTO/PGO/linker-inlining) instead of godbolt's single-file sandbox compile.
 
 **Tools:**
 
 - `clang_tidy` — run clang-tidy with a checks filter against files in a project with a `compile_commands.json`. Returns structured JSON `{diagnostics[{file, line, column, severity, check, message}], raw_stderr, exit_code}`. Catches the dozens of `performance-*` and `bugprone-*` checks that need real build context (transitive includes, preprocessor state, platform macros).
-- `hyperfine` — benchmark one or more shell commands with statistical rigor (warmup, outlier detection, min/max runs). Returns hyperfine's `--export-json` verbatim: `{results[{command, mean, stddev, median, min, max, user, system, times[]}]}`. For 2+ commands hyperfine also computes pairwise ratios. Use this to answer "is variant A actually faster than B?" with sub-percent precision.
+- `hyperfine` — **disabled by default** (opt-in; see "Opting into hyperfine" below). When enabled, benchmarks one or more shell commands with statistical rigor (warmup, outlier detection, min/max runs). Returns hyperfine's `--export-json` verbatim: `{results[{command, mean, stddev, median, min, max, user, system, times[]}]}`. For 2+ commands hyperfine also computes pairwise ratios. Use this to answer "is variant A actually faster than B?" with sub-percent precision.
 - `llvm_objdump` — disassemble a function/section of the user's REAL binary (post-LTO/PGO/linker-inlining). Supports Intel/AT&T syntax, source interleave, symbol filtering. Unique vs godbolt: godbolt is compile-only/sandbox/single-file — `llvm_objdump` shows what's in the `.exe` after your whole build pipeline.
 - `iwyu` — run include-what-you-use on a source file. Returns per-file `{add[], remove[], full_list[]}` include suggestions plus raw output. Shaves compile time by trimming unused transitive includes.
 
@@ -370,6 +369,41 @@ pacman -S mingw-w64-ucrt-x86_64-include-what-you-use # include-what-you-use
 ```
 
 Then make sure `C:\msys64\ucrt64\bin` is on PATH for the mcphub scheduler task. `mcphub perftools` checks at startup and advertises missing tools via `resource://tools` — the server starts regardless; per-tool calls surface a clean "X not installed" error.
+
+**Opting into hyperfine (default: disabled):**
+
+`hyperfine` executes arbitrary shell commands supplied by the MCP client — that's exactly its benchmark contract, but the same surface is a remote-code-execution path for any client that can reach the perftools daemon. To keep reinstall and first-setup safe by default, `hyperfine` is **unregistered** unless you opt in explicitly.
+
+To enable it, set the environment variable
+
+```
+MCP_LOCAL_HUB_ENABLE_UNSAFE_HYPERFINE=1
+```
+
+on the **process that runs `mcphub perftools`**, i.e. the user account that owns the scheduler task `mcp-local-hub-perftools-default`. On Windows the simplest route is a persistent user-level env var:
+
+```powershell
+# PowerShell (sets HKCU so the scheduler-launched process inherits it at next logon):
+[Environment]::SetEnvironmentVariable("MCP_LOCAL_HUB_ENABLE_UNSAFE_HYPERFINE", "1", "User")
+
+# Or via cmd/setx equivalent:
+setx MCP_LOCAL_HUB_ENABLE_UNSAFE_HYPERFINE 1
+```
+
+Log out and back in (or restart the scheduler task) so the daemon picks it up.
+
+Any value other than the literal string `"1"` (including absent, `"true"`, `"yes"`, `"0"`, or trailing whitespace) keeps the gate closed. When closed:
+
+- the tool is **not registered** — `tools/call hyperfine` returns method-not-found from the SDK layer as if the tool never existed
+- `resource://tools` and `list_tools` both **hide** `hyperfine` — the "check availability, then call" contract stays consistent ("advertised ⇒ callable")
+
+To confirm the gate state:
+
+```
+resource://tools
+→ clang-tidy / llvm-objdump / include-what-you-use present; hyperfine absent  (gate closed)
+→ all four listed                                                             (gate open)
+```
 
 **The complete perf loop in one chat:**
 

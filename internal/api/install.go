@@ -67,6 +67,12 @@ type Plan struct {
 	Server         string
 	SchedulerTasks []ScheduledTaskPlan
 	ClientUpdates  []ClientUpdatePlan
+	// FullInstall is true when BuildPlan was called with an empty daemonFilter
+	// — i.e. the plan covers the whole manifest. Only a full install can
+	// safely reconcile (prune) obsolete sibling scheduler tasks from prior
+	// installs; a partial install targets one daemon and must leave others
+	// alone.
+	FullInstall bool
 }
 
 type ScheduledTaskPlan struct {
@@ -773,7 +779,7 @@ func BuildPlan(m *config.ServerManifest, daemonFilter string) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &Plan{Server: m.Name}
+	p := &Plan{Server: m.Name, FullInstall: daemonFilter == ""}
 	// Scheduler tasks — one per daemon (global) or lazy (workspace-scoped).
 	for _, d := range m.Daemons {
 		if daemonFilter != "" && d.Name != daemonFilter {
@@ -1024,6 +1030,26 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan) error {
 		})
 		fmt.Fprintf(w, "\u2713 Scheduler task created: %s\n", spec.Name)
 	}
+	// 1b. Reconcile scheduler tasks: prune obsolete tasks left from prior
+	// installs that this plan no longer covers (e.g. a `-weekly-refresh`
+	// task from a manifest whose `weekly_refresh` flipped to false). Only
+	// safe for full installs; partial installs target one daemon and must
+	// not touch sibling tasks for daemons outside the filter.
+	if p.FullInstall {
+		planned := make(map[string]struct{}, len(p.SchedulerTasks))
+		for _, t := range p.SchedulerTasks {
+			planned[t.Name] = struct{}{}
+		}
+		pruneRollbacks, perr := pruneObsoleteServerTasks(sch, m.Name, planned, w)
+		if perr != nil {
+			// Listing failed — fall through with a warning. Reconciliation
+			// is a nice-to-have; a reinstall that can't enumerate prior
+			// tasks is still strictly better than aborting the install.
+			fmt.Fprintf(w, "\u26a0 Task reconciliation skipped: %v\n", perr)
+		} else {
+			rollback = append(rollback, pruneRollbacks...)
+		}
+	}
 	// 2. Backup + update client configs.
 	// Populate relay-related fields so adapters for stdio-only clients
 	// (e.g. Antigravity) can produce their `command`+`args` entry shape
@@ -1102,6 +1128,78 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan) error {
 	}
 	fmt.Fprintln(w, "\nInstall complete.")
 	return nil
+}
+
+// schedulerLister is the narrow scheduler subset pruneObsoleteServerTasks
+// needs. scheduler.Scheduler satisfies it via its full method set; keeping
+// the interface narrow lets tests supply a minimal fake without implementing
+// Create / Run / Status / Stop.
+type schedulerLister interface {
+	List(prefix string) ([]scheduler.TaskStatus, error)
+	Delete(name string) error
+	ExportXML(name string) ([]byte, error)
+	ImportXML(name string, xml []byte) error
+}
+
+// pruneObsoleteServerTasks deletes scheduler tasks whose Name starts with
+// "mcp-local-hub-<server>-" and are absent from `planned`. Returns one
+// rollback closure per successfully-pruned task that restores the task from
+// its pre-delete XML snapshot. Callers must append these to their own
+// rollback stack so a later install-sequence failure undoes the pruning
+// together with the rest of the install.
+//
+// Only safe to call for full installs. Partial installs (one daemon) would
+// see sibling-daemon tasks as "not in plan" and incorrectly prune them.
+//
+// Failures that are safe to continue past (per-task ExportXML errors,
+// per-task Delete errors) are logged as warnings and skipped; only an
+// initial List error is returned as fatal because we cannot reason about
+// what to prune without an enumeration.
+func pruneObsoleteServerTasks(sch schedulerLister, server string, planned map[string]struct{}, w io.Writer) ([]func(), error) {
+	prefix := "mcp-local-hub-" + server + "-"
+	existing, err := sch.List(prefix)
+	if err != nil {
+		return nil, fmt.Errorf("list tasks for %s: %w", server, err)
+	}
+	var rollbacks []func()
+	for _, task := range existing {
+		// Windows Task Scheduler prefixes names with a leading backslash
+		// (the task-folder separator). Strip it before prefix/equality
+		// checks so "\mcp-local-hub-X-foo" matches "mcp-local-hub-X-foo".
+		name := strings.TrimPrefix(task.Name, "\\")
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		if _, keep := planned[name]; keep {
+			continue
+		}
+		// Snapshot XML for rollback. Best-effort: if the backend can't
+		// export (platform limitation, ACL, etc.), we still delete but
+		// rollback can only log that it cannot recreate.
+		var priorXML []byte
+		if xml, xerr := sch.ExportXML(name); xerr == nil {
+			priorXML = xml
+		}
+		if derr := sch.Delete(name); derr != nil {
+			fmt.Fprintf(w, "\u26a0 Failed to prune obsolete scheduler task %s: %v\n", name, derr)
+			continue
+		}
+		fmt.Fprintf(w, "\u2713 Scheduler task removed (obsolete): %s\n", name)
+		taskName := name
+		savedXML := priorXML
+		rollbacks = append(rollbacks, func() {
+			if len(savedXML) == 0 {
+				fmt.Fprintf(w, "  rollback: cannot recreate pruned task %s (no XML snapshot)\n", taskName)
+				return
+			}
+			if ierr := sch.ImportXML(taskName, savedXML); ierr != nil {
+				fmt.Fprintf(w, "  rollback: restore pruned task %s failed: %v\n", taskName, ierr)
+				return
+			}
+			fmt.Fprintf(w, "  rollback: restored obsolete scheduler task %s\n", taskName)
+		})
+	}
+	return rollbacks, nil
 }
 
 // clientConfigPath returns the absolute path to the named client's config.
