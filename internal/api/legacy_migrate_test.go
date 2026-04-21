@@ -227,6 +227,43 @@ func TestMigrateLegacy_PreservesInPlaceReplacedEntry(t *testing.T) {
 	}
 }
 
+// TestMigrateLegacy_ClosedStdinDeclinesConfirmation guards against a
+// silent auto-approval bug: the interactive prompt used to ignore
+// ReadString errors and treat empty input as "yes" (default-Y). With
+// closed stdin (CI without --yes, redirected input, broken pipe),
+// that meant migrate-legacy would register workspaces and delete
+// legacy entries without any user confirmation, contradicting the
+// documented "interactive-by-default unless --yes" contract.
+func TestMigrateLegacy_ClosedStdinDeclinesConfirmation(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	ws := t.TempDir()
+	h.fakeClients.entries["codex-cli"]["legacy"] = "legacy-url"
+	entries := []LegacyLSEntry{
+		{Client: "codex-cli", EntryName: "legacy", Workspace: ws, Language: "python", LspCommand: "pyright-langserver"},
+	}
+	a := NewAPI()
+	// Yes=false (interactive) + empty reader (immediate EOF) simulates
+	// closed stdin. Migration MUST skip, not auto-approve.
+	report, err := a.MigrateLegacy(entries, LegacyMigrateOpts{
+		Yes:    false,
+		In:     strings.NewReader(""),
+		Writer: &bytes.Buffer{},
+	})
+	if err != nil {
+		t.Fatalf("MigrateLegacy: %v", err)
+	}
+	if len(report.Applied) != 0 {
+		t.Errorf("expected Applied=0 on closed stdin, got %+v", report.Applied)
+	}
+	if len(report.Skipped) != 1 {
+		t.Errorf("expected Skipped=1 on closed stdin, got %+v", report.Skipped)
+	}
+	if _, ok := h.fakeClients.entries["codex-cli"]["legacy"]; !ok {
+		t.Error("legacy entry removed despite closed stdin (silent auto-approve)")
+	}
+}
+
 // TestMigrateLegacy_InPlaceCheckScopedToCurrentWorkspace guards the
 // global-vs-local-scope fix for entryJustWrittenByRegister. If another
 // workspace happened to have an entry with the same (client, name) as

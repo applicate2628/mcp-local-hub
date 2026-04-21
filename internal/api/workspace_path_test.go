@@ -63,6 +63,48 @@ func TestCanonicalWorkspacePath_WindowsDriveLetterLowercased(t *testing.T) {
 	}
 }
 
+// TestCanonicalWorkspacePathForCleanup_ReadsSymlinkWhenTargetGone guards
+// the cleanup-stability fix: after a user registers through a symlinked
+// workspace and later deletes the target, unregister via the original
+// symlink path must still produce the same WorkspaceKey Register used.
+// EvalSymlinks fails when the target is gone, but Readlink on the
+// surviving symlink recovers the original target path so the hash
+// matches. Without this, orphaned scheduler/client/registry state
+// becomes unreachable via the user's original invocation.
+// Skipped on Windows (symlink creation requires admin).
+func TestCanonicalWorkspacePathForCleanup_ReadsSymlinkWhenTargetGone(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation on Windows requires developer mode / admin")
+	}
+	// Set up: a real dir, a symlink to it, snapshot its canonical key.
+	realDir := filepath.Join(t.TempDir(), "real")
+	if err := os.Mkdir(realDir, 0755); err != nil {
+		t.Fatalf("mkdir real: %v", err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(realDir, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	// Key computed via the strict Register-time function.
+	registerKey, err := CanonicalWorkspacePath(link)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath(link): %v", err)
+	}
+	// Simulate target deletion AFTER registration.
+	if err := os.RemoveAll(realDir); err != nil {
+		t.Fatalf("remove real: %v", err)
+	}
+	// Cleanup path MUST still produce the same canonical form.
+	cleanupKey, err := CanonicalWorkspacePathForCleanup(link)
+	if err != nil {
+		t.Fatalf("Cleanup(link) after target gone: %v", err)
+	}
+	if cleanupKey != registerKey {
+		t.Errorf("cleanup key diverged from register key after target gone:\n  register = %q\n  cleanup  = %q\n(orphaned scheduler/registry entries would be unreachable)",
+			registerKey, cleanupKey)
+	}
+}
+
 // TestCanonicalWorkspacePath_ResolvesSymlinkToTarget ensures symlinks at
 // any level — final OR intermediate — resolve to the real underlying
 // directory so the same workspace is never registered twice under

@@ -16,6 +16,7 @@ package api
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -134,7 +135,23 @@ func (a *API) MigrateLegacy(entries []LegacyLSEntry, opts LegacyMigrateOpts) (*L
 		if !opts.Yes {
 			fmt.Fprintf(w, "Migrate workspace %s (register all manifest languages, remove %d legacy entries)? [Y/n] ",
 				ws, len(rows))
-			line, _ := reader.ReadString('\n')
+			line, readErr := reader.ReadString('\n')
+			// Stdin closed before a response arrived (io.EOF) means there is
+			// no interactive user — e.g., CI without --yes, redirected input,
+			// or a broken pipe. Treat as declined rather than silently
+			// approving a destructive register+delete. An Enter-without-typing
+			// with a real terminal still hits the default-Y branch below
+			// because readErr is nil and line == "\n" → trimmed empty.
+			if readErr != nil && errors.Is(readErr, io.EOF) {
+				fmt.Fprintf(w, "  stdin closed without confirmation; skipping %s\n", ws)
+				report.Skipped = append(report.Skipped, rows...)
+				continue
+			}
+			if readErr != nil {
+				fmt.Fprintf(w, "  read confirmation for %s: %v — skipping\n", ws, readErr)
+				report.Skipped = append(report.Skipped, rows...)
+				continue
+			}
 			ans := strings.TrimSpace(line)
 			if ans != "" && !strings.EqualFold(ans, "y") && !strings.EqualFold(ans, "yes") {
 				report.Skipped = append(report.Skipped, rows...)

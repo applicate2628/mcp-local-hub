@@ -61,11 +61,24 @@ func CanonicalWorkspacePathForCleanup(p string) (string, error) {
 		return "", fmt.Errorf("workspace path: %w", err)
 	}
 	// Try to resolve symlinks so Register/Unregister agree on the key.
-	// Failure here (path missing, permission denied) is not fatal — fall
-	// back to the unresolved abs form.
 	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
 		abs = resolved
+	} else if info, lerr := os.Lstat(abs); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
+		// EvalSymlinks failed (target moved / deleted / unavailable drive),
+		// but the symlink file itself still exists. Read its target directly
+		// so the key matches what Register produced when the target was live.
+		// Without this, unregistering via a symlink whose target is gone
+		// would hash a different key and fail to find the orphaned entries.
+		if target, rerr := os.Readlink(abs); rerr == nil {
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(filepath.Dir(abs), target)
+			}
+			abs = filepath.Clean(target)
+		}
 	}
+	// Final fallback: if both EvalSymlinks and Readlink failed (symlink
+	// AND its parent are gone), keep the unresolved abs. The operator
+	// can still fall back to the non-symlinked canonical path manually.
 	if runtime.GOOS == "windows" && len(abs) >= 2 && abs[1] == ':' {
 		abs = strings.ToLower(string(abs[0])) + abs[1:]
 	}
