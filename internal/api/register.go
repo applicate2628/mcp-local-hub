@@ -243,19 +243,11 @@ func (a *API) registerOneLanguage(
 	if xml, err := sch.ExportXML(taskName); err == nil {
 		priorXML = xml
 	}
-	_ = sch.Delete(taskName)
-	taskSpec := scheduler.TaskSpec{
-		Name:             taskName,
-		Description:      fmt.Sprintf("mcp-local-hub: workspace %s lang %s", canonical, lang),
-		Command:          canonicalExe,
-		Args:             args,
-		WorkingDir:       filepath.Dir(canonicalExe),
-		RestartOnFailure: true,
-		LogonTrigger:     true,
-	}
-	if err := sch.Create(taskSpec); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("create task %s: %w", taskName, err)
-	}
+	// Register the scheduler rollback BEFORE the destructive Delete+Create
+	// so a Create failure on a re-register path does not orphan the old
+	// task. Previously the rollback was appended after Create: a transient
+	// Create error left the prior task deleted with no restoration, turning
+	// a recoverable registration error into a hard workspace outage.
 	capturedTaskName := taskName
 	capturedPriorXML := priorXML
 	capturedPort := port
@@ -284,6 +276,22 @@ func (a *API) registerOneLanguage(
 			fmt.Fprintf(w, "  rollback: deleted scheduler task %s\n", capturedTaskName)
 		}
 	})
+	// Destructive replace: prior task (if any) is Deleted and the new task
+	// Created. A Create failure triggers runRollback which fires the
+	// closure above to restore priorXML (or no-op if there was no prior).
+	_ = sch.Delete(taskName)
+	taskSpec := scheduler.TaskSpec{
+		Name:             taskName,
+		Description:      fmt.Sprintf("mcp-local-hub: workspace %s lang %s", canonical, lang),
+		Command:          canonicalExe,
+		Args:             args,
+		WorkingDir:       filepath.Dir(canonicalExe),
+		RestartOnFailure: true,
+		LogonTrigger:     true,
+	}
+	if err := sch.Create(taskSpec); err != nil {
+		return WorkspaceEntry{}, fmt.Errorf("create task %s: %w", taskName, err)
+	}
 	fmt.Fprintf(w, "\u2713 Scheduler task created: %s\n", taskName)
 	// Start the proxy immediately. Logon-triggered tasks only fire at the
 	// next logon, so without this call `mcphub register` would advertise a

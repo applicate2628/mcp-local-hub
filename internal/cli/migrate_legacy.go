@@ -48,10 +48,19 @@ See also: register, workspaces.`,
 				return err
 			}
 			a := api.NewAPI()
+			// With --json, stdout must be machine-parseable: one JSON object
+			// at the end and nothing else. MigrateLegacy (and its nested
+			// Register calls) emit progress + prompt text through the
+			// writer, which would contaminate stdout. Route that traffic
+			// to stderr in JSON mode so stdout stays clean.
+			progressWriter := cmd.OutOrStdout()
+			if jsonOut {
+				progressWriter = cmd.ErrOrStderr()
+			}
 			report, err := a.MigrateLegacy(entries, api.LegacyMigrateOpts{
 				DryRun: dryRun,
 				Yes:    yes,
-				Writer: cmd.OutOrStdout(),
+				Writer: progressWriter,
 				In:     cmd.InOrStdin(),
 			})
 			if err != nil {

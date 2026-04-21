@@ -270,6 +270,41 @@ func TestRegister_RollbackOnClientFailure(t *testing.T) {
 	}
 }
 
+// TestRegister_PriorTaskRestoredIfCreateFails guards the narrow
+// "Create fails on re-register" window: the rollback closure must
+// already be registered BEFORE sch.Delete runs, so a subsequent
+// sch.Create failure triggers restoration of the prior task XML
+// (and sch.Run to restart the prior proxy). Before this fix, the
+// rollback closure was appended AFTER Create — meaning a Create
+// failure returned early with the prior task already Delete'd and
+// NO rollback entry to restore it.
+func TestRegister_PriorTaskRestoredIfCreateFails(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	origKill := killByPortFn
+	defer func() { killByPortFn = origKill }()
+	killByPortFn = func(port int, _ time.Duration) error { return nil }
+	ws := t.TempDir()
+	m := nineLanguageManifest()
+	a := mustNewAPI(t)
+	// First register succeeds → prior task + XML exists.
+	if _, err := a.registerWithManifest(m, ws, []string{"python"}, RegisterOpts{Writer: &bytes.Buffer{}}); err != nil {
+		t.Fatalf("first register: %v", err)
+	}
+	// Force the NEXT Create call (second register's replace step) to fail.
+	h.fakeSch.failCreateAfterN = h.fakeSch.createCount
+	runsBefore := h.fakeSch.runCount
+	_, err := a.registerWithManifest(m, ws, []string{"python"}, RegisterOpts{Writer: &bytes.Buffer{}})
+	if err == nil {
+		t.Fatal("expected Create failure on re-register to error")
+	}
+	// Rollback must have restored + restarted the prior task even though
+	// Create failed BEFORE any Run on the new task.
+	if got := h.fakeSch.runCount - runsBefore; got < 1 {
+		t.Errorf("rollback did not restart prior proxy after Create failure (runs delta=%d, want >=1)", got)
+	}
+}
+
 // TestRegister_RollbackRestartsPriorProxyOnReRegister guards the
 // "re-register rollback leaves workspace offline" regression: when a
 // language was already registered (priorXML captured) and a later step
