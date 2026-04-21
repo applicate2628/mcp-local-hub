@@ -179,7 +179,7 @@ type recordingScheduler struct {
 }
 
 func (r *recordingScheduler) Create(spec scheduler.TaskSpec) error { return r.inner.Create(spec) }
-func (r *recordingScheduler) Delete(name string) error            { return r.inner.Delete(name) }
+func (r *recordingScheduler) Delete(name string) error             { return r.inner.Delete(name) }
 func (r *recordingScheduler) Run(name string) error {
 	if r.onRun != nil {
 		r.onRun(name)

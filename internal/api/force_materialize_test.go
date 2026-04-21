@@ -56,7 +56,7 @@ func TestForceMaterialize_TriggersProbe(t *testing.T) {
 
 	rows := []DaemonStatus{
 		{TaskName: "mcp-local-hub-lsp-abcd1234-python", Port: 9217, Language: "python", Backend: "mcp-language-server"},
-		{TaskName: "mcp-local-hub-serena-claude", Port: 9121},           // global: skipped
+		{TaskName: "mcp-local-hub-serena-claude", Port: 9121}, // global: skipped
 		{TaskName: "mcp-local-hub-lsp-deadbeef-go", Port: 9218, Language: "go", Backend: "gopls-mcp"},
 		{TaskName: "mcp-local-hub-lsp-cafebabe-rust", Language: "rust"}, // no port: skipped
 	}

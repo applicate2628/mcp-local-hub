@@ -187,4 +187,3 @@ func TestRegistry_LastErrorTruncation(t *testing.T) {
 		t.Errorf("LastError length = %d, want <= %d", len(e.LastError), MaxLastErrorBytes)
 	}
 }
-

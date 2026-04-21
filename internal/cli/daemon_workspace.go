@@ -38,15 +38,15 @@ import (
 //  8. ListenAndServe; on shutdown, Stop the proxy within 5s.
 func newDaemonWorkspaceProxyCmd() *cobra.Command {
 	var (
-		portFlag       int
-		workspaceFlag  string
-		languageFlag   string
-		serverFlag     string
+		portFlag         int
+		workspaceFlag    string
+		languageFlag     string
+		serverFlag       string
 		registryOverride string
 	)
 	c := &cobra.Command{
-		Use:    "workspace-proxy",
-		Short:  "Launch the lazy proxy for one (workspace, language) tuple",
+		Use:   "workspace-proxy",
+		Short: "Launch the lazy proxy for one (workspace, language) tuple",
 		Long: `Internal subcommand invoked by the scheduler task created by
 'mcphub register'. Answers initialize/tools/list synthetically from the
 embedded catalog and materializes the heavy backend on the first tools/call.

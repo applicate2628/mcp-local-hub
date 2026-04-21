@@ -554,15 +554,19 @@ func registryPathForRegister() (string, error) {
 
 type realSchedulerAdapter struct{ s scheduler.Scheduler }
 
-func (a realSchedulerAdapter) Create(spec scheduler.TaskSpec) error     { return a.s.Create(spec) }
-func (a realSchedulerAdapter) Delete(name string) error                 { return a.s.Delete(name) }
-func (a realSchedulerAdapter) Run(name string) error                    { return a.s.Run(name) }
-func (a realSchedulerAdapter) ExportXML(name string) ([]byte, error)    { return a.s.ExportXML(name) }
-func (a realSchedulerAdapter) ImportXML(name string, xml []byte) error  { return a.s.ImportXML(name, xml) }
+func (a realSchedulerAdapter) Create(spec scheduler.TaskSpec) error  { return a.s.Create(spec) }
+func (a realSchedulerAdapter) Delete(name string) error              { return a.s.Delete(name) }
+func (a realSchedulerAdapter) Run(name string) error                 { return a.s.Run(name) }
+func (a realSchedulerAdapter) ExportXML(name string) ([]byte, error) { return a.s.ExportXML(name) }
+func (a realSchedulerAdapter) ImportXML(name string, xml []byte) error {
+	return a.s.ImportXML(name, xml)
+}
 
 type realClientAdapter struct{ c clients.Client }
 
-func (a realClientAdapter) Exists() bool                                    { return a.c.Exists() }
-func (a realClientAdapter) AddEntry(e clients.MCPEntry) error               { return a.c.AddEntry(e) }
-func (a realClientAdapter) RemoveEntry(name string) error                   { return a.c.RemoveEntry(name) }
-func (a realClientAdapter) GetEntry(name string) (*clients.MCPEntry, error) { return a.c.GetEntry(name) }
+func (a realClientAdapter) Exists() bool                      { return a.c.Exists() }
+func (a realClientAdapter) AddEntry(e clients.MCPEntry) error { return a.c.AddEntry(e) }
+func (a realClientAdapter) RemoveEntry(name string) error     { return a.c.RemoveEntry(name) }
+func (a realClientAdapter) GetEntry(name string) (*clients.MCPEntry, error) {
+	return a.c.GetEntry(name)
+}

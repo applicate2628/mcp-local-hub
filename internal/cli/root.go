@@ -77,10 +77,10 @@ func newCleanupCmd() *cobra.Command {
 func newStopCmd() *cobra.Command {
 	return newStopCmdReal()
 }
-func newBackupsCmd() *cobra.Command    { return newBackupsCmdReal() }
-func newManifestCmd() *cobra.Command   { return newManifestCmdReal() }
-func newSchedulerCmd() *cobra.Command  { return newSchedulerCmdReal() }
-func newSettingsCmd() *cobra.Command   { return newSettingsCmdReal() }
+func newBackupsCmd() *cobra.Command       { return newBackupsCmdReal() }
+func newManifestCmd() *cobra.Command      { return newManifestCmdReal() }
+func newSchedulerCmd() *cobra.Command     { return newSchedulerCmdReal() }
+func newSettingsCmd() *cobra.Command      { return newSettingsCmdReal() }
 func newRegisterCmd() *cobra.Command      { return newRegisterCmdReal() }
 func newUnregisterCmd() *cobra.Command    { return newUnregisterCmdReal() }
 func newWorkspacesCmd() *cobra.Command    { return newWorkspacesCmdReal() }
