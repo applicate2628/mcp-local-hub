@@ -1,0 +1,178 @@
+// Package api — legacy mcp-language-server migration (M4 Task 14).
+//
+// Lazy-mode adaptation from the eager plan: Register in lazy mode
+// configures ALL manifest languages per call, so migration dedupes the
+// detected LegacyLSEntry slice by workspace and emits ONE Register(ws,
+// nil, opts) per unique workspace instead of one per (workspace,
+// language) pair. That produces fewer, simpler scheduler tasks (exactly
+// one proxy per (workspace, language) rather than N overlapping task
+// sets).
+//
+// Ordering contract: a legacy entry is deleted from its original client
+// config ONLY after the covering Register for its workspace succeeds. A
+// failed register keeps the legacy rows intact so the user can re-run
+// the migration.
+package api
+
+import (
+	"bufio"
+	"fmt"
+	"io"
+	"os"
+	"sort"
+	"strings"
+)
+
+// LegacyMigrateOpts controls MigrateLegacy behavior.
+type LegacyMigrateOpts struct {
+	DryRun bool
+	Yes    bool      // skip per-workspace prompts (non-interactive)
+	In     io.Reader // defaults to os.Stdin for prompts; overridden in tests
+	Writer io.Writer // progress output; nil = os.Stderr
+}
+
+// LegacyMigrateReport lists the (per-entry) outcome of a migration run.
+// Planned is the full input slice; Applied / Skipped / Failed together
+// cover every input entry in non-dry-run mode. In dry-run mode Applied is
+// always empty.
+type LegacyMigrateReport struct {
+	Planned []LegacyLSEntry     `json:"planned"`
+	Applied []LegacyLSEntry     `json:"applied"`
+	Skipped []LegacyLSEntry     `json:"skipped"`
+	Failed  []FailedLegacyEntry `json:"failed,omitempty"`
+}
+
+// FailedLegacyEntry carries the error string so the report serializes
+// cleanly to JSON without exposing Go error values.
+type FailedLegacyEntry struct {
+	Entry LegacyLSEntry `json:"entry"`
+	Err   string        `json:"err"`
+}
+
+// MigrateLegacy converts the supplied LegacyLSEntry slice into managed
+// workspace registrations. Behavior:
+//
+//   - DryRun prints the plan (one Register per unique workspace + the
+//     legacy entries that would be removed) and returns without side
+//     effects.
+//   - Interactive mode (default) prompts per unique workspace before the
+//     Register call. Answering "n" skips every legacy entry belonging to
+//     that workspace — an all-or-nothing choice that matches the lazy
+//     register contract (one call = all languages).
+//   - --yes mode skips all prompts and converts every known-language
+//     workspace unattended.
+//
+// Entries whose Language is empty (unknown LSP binary) are Skipped with
+// a diagnostic. Their workspace is still eligible for Register via its
+// OTHER entries, but the unknown-binary row itself is not removed — the
+// user needs to rename it manually.
+func (a *API) MigrateLegacy(entries []LegacyLSEntry, opts LegacyMigrateOpts) (*LegacyMigrateReport, error) {
+	w := opts.Writer
+	if w == nil {
+		w = os.Stderr
+	}
+	in := opts.In
+	if in == nil {
+		in = os.Stdin
+	}
+	reader := bufio.NewReader(in)
+	report := &LegacyMigrateReport{Planned: append([]LegacyLSEntry(nil), entries...)}
+
+	// Partition: unknown-language rows get Skipped immediately; the rest
+	// are grouped by workspace. A workspace with ZERO known-language rows
+	// is effectively skipped (no Register call, no client-side deletes).
+	var eligible []LegacyLSEntry
+	for _, e := range entries {
+		if e.Language == "" {
+			report.Skipped = append(report.Skipped, e)
+			fmt.Fprintf(w, "skip: %s entry %q — unknown LSP binary %q (manual migration required)\n",
+				e.Client, e.EntryName, e.LspCommand)
+			continue
+		}
+		if e.Workspace == "" {
+			// No workspace arg at all — legacy entry is malformed. Record
+			// as Failed so the caller sees it.
+			report.Failed = append(report.Failed, FailedLegacyEntry{
+				Entry: e,
+				Err:   "legacy entry missing --workspace arg",
+			})
+			continue
+		}
+		eligible = append(eligible, e)
+	}
+
+	// Group eligible entries by workspace (first-seen preserving insertion
+	// order of entries for deterministic prompt order across runs — sorted
+	// after collection).
+	byWorkspace := map[string][]LegacyLSEntry{}
+	var workspaceOrder []string
+	for _, e := range eligible {
+		if _, seen := byWorkspace[e.Workspace]; !seen {
+			workspaceOrder = append(workspaceOrder, e.Workspace)
+		}
+		byWorkspace[e.Workspace] = append(byWorkspace[e.Workspace], e)
+	}
+	sort.Strings(workspaceOrder)
+
+	if opts.DryRun {
+		for _, ws := range workspaceOrder {
+			rows := byWorkspace[ws]
+			fmt.Fprintf(w, "plan: register %s (all manifest languages) and remove %d legacy entries\n",
+				ws, len(rows))
+			for _, e := range rows {
+				fmt.Fprintf(w, "  - %s entry %q (lang %s)\n", e.Client, e.EntryName, e.Language)
+			}
+		}
+		return report, nil
+	}
+
+	// Real run: one Register per unique workspace, then delete every
+	// legacy entry belonging to that workspace on success.
+	allClients := clientsAllForRegister()
+	for _, ws := range workspaceOrder {
+		rows := byWorkspace[ws]
+		if !opts.Yes {
+			fmt.Fprintf(w, "Migrate workspace %s (register all manifest languages, remove %d legacy entries)? [Y/n] ",
+				ws, len(rows))
+			line, _ := reader.ReadString('\n')
+			ans := strings.TrimSpace(line)
+			if ans != "" && !strings.EqualFold(ans, "y") && !strings.EqualFold(ans, "yes") {
+				report.Skipped = append(report.Skipped, rows...)
+				continue
+			}
+		}
+		if _, err := a.Register(ws, nil, RegisterOpts{Writer: w, WeeklyRefresh: true}); err != nil {
+			// Register failed — keep every legacy row intact, record per-row failure.
+			for _, e := range rows {
+				report.Failed = append(report.Failed, FailedLegacyEntry{
+					Entry: e,
+					Err:   "register: " + err.Error(),
+				})
+			}
+			continue
+		}
+		// Register succeeded; now delete each legacy entry from its owning client.
+		for _, e := range rows {
+			client, ok := allClients[e.Client]
+			if !ok || !client.Exists() {
+				// Client adapter unavailable — record the delete failure
+				// but keep the successful Register accounted for. The
+				// legacy row stays in the config; user can re-run migrate.
+				report.Failed = append(report.Failed, FailedLegacyEntry{
+					Entry: e,
+					Err:   fmt.Sprintf("client %s unavailable for RemoveEntry", e.Client),
+				})
+				continue
+			}
+			if err := client.RemoveEntry(e.EntryName); err != nil {
+				report.Failed = append(report.Failed, FailedLegacyEntry{
+					Entry: e,
+					Err:   "remove legacy entry: " + err.Error(),
+				})
+				continue
+			}
+			report.Applied = append(report.Applied, e)
+		}
+	}
+	return report, nil
+}

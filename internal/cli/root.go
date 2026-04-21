@@ -42,6 +42,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newRegisterCmd())
 	root.AddCommand(newUnregisterCmd())
 	root.AddCommand(newWorkspacesCmd())
+	root.AddCommand(newMigrateLegacyCmd())
 	root.AddCommand(lldb.NewCommand())
 	root.AddCommand(godbolt.NewCommand())
 	root.AddCommand(perftools.NewCommand())
@@ -79,6 +80,7 @@ func newBackupsCmd() *cobra.Command    { return newBackupsCmdReal() }
 func newManifestCmd() *cobra.Command   { return newManifestCmdReal() }
 func newSchedulerCmd() *cobra.Command  { return newSchedulerCmdReal() }
 func newSettingsCmd() *cobra.Command   { return newSettingsCmdReal() }
-func newRegisterCmd() *cobra.Command   { return newRegisterCmdReal() }
-func newUnregisterCmd() *cobra.Command { return newUnregisterCmdReal() }
-func newWorkspacesCmd() *cobra.Command { return newWorkspacesCmdReal() }
+func newRegisterCmd() *cobra.Command      { return newRegisterCmdReal() }
+func newUnregisterCmd() *cobra.Command    { return newUnregisterCmdReal() }
+func newWorkspacesCmd() *cobra.Command    { return newWorkspacesCmdReal() }
+func newMigrateLegacyCmd() *cobra.Command { return newMigrateLegacyCmdReal() }
