@@ -69,3 +69,23 @@ func TestBackupsCleanKeepsN(t *testing.T) {
 		t.Error("sentinel removed")
 	}
 }
+
+func TestBackupsCleanInRejectsNegativeKeepN(t *testing.T) {
+	tmp := t.TempDir()
+	live := filepath.Join(tmp, ".claude.json")
+	_ = os.WriteFile(live, []byte("{}"), 0600)
+
+	a := NewAPI()
+	_, err := a.BackupsCleanIn(tmp, ".claude.json", -1)
+	if err == nil {
+		t.Fatal("expected error for negative keepN, got nil")
+	}
+}
+
+func TestBackupsCleanPreviewRejectsNegativeKeepN(t *testing.T) {
+	a := NewAPI()
+	_, err := a.BackupsCleanPreview(-1)
+	if err == nil {
+		t.Fatal("expected error for negative keepN, got nil")
+	}
+}
