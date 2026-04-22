@@ -54,6 +54,24 @@ type DaemonStatus struct {
 	LastMaterializedAt time.Time `json:"last_materialized_at,omitempty"`
 	LastToolsCallAt    time.Time `json:"last_tools_call_at,omitempty"`
 	LastError          string    `json:"last_error,omitempty"`
+
+	// IsMaintenance marks scheduler-maintenance rows (weekly-refresh tasks
+	// in all three naming variants: hub-wide global, hub-wide workspace,
+	// and legacy per-server). Populated by enrichStatusWithRegistry from
+	// the canonical parseTaskName output (daemon == "weekly-refresh").
+	//
+	// The GUI uses this flag to filter maintenance rows out of surfaces
+	// that only make sense for daemon rows:
+	//   - Logs picker (internal/gui/assets/logs.js): empty `server` would
+	//     produce a GET /api/logs/?... → 404.
+	//   - Dashboard (internal/gui/assets/dashboard.js): empty `server`
+	//     would render a blank-name card whose Restart button hits
+	//     /api/servers//restart with an invalid target.
+	// Using a server-side structural flag instead of duplicating the
+	// task-name match in JS keeps the canonical Go parser as the single
+	// source of truth; future maintenance tasks only need to update the
+	// Go predicate.
+	IsMaintenance bool `json:"is_maintenance,omitempty"`
 }
 
 // HealthProbe records the outcome of an MCP protocol smoke test against

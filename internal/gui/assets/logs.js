@@ -49,6 +49,19 @@ window.mcphub.screens.logs = function(root) {
     return Boolean(row && row.is_workspace_scoped);
   }
 
+  // Scheduler-maintenance rows (weekly-refresh tasks) surface via
+  // /api/status alongside daemon rows but have no server name — or
+  // "workspace" for the hub-wide workspace variant — and no matching
+  // <server>-<daemon>.log file to read. Adding them to the picker lets
+  // a user pick a row whose load() then fires GET /api/logs/?... with
+  // an empty server → 404. Same rationale as is_workspace_scoped: use
+  // the server-side structural flag populated by the canonical Go
+  // parser (see DaemonStatus.IsMaintenance in internal/api/types.go)
+  // instead of duplicating task-name string matching in JS.
+  function isMaintenance(row) {
+    return Boolean(row && row.is_maintenance);
+  }
+
   // Backend returns the {error, code} JSON envelope (via writeAPIError) on
   // failures — not an array. The previous `(rows || []).filter(...)` would
   // treat the truthy error object as iterable and throw at .filter, leaving
@@ -66,7 +79,7 @@ window.mcphub.screens.logs = function(root) {
       followEl.disabled = true;
       return;
     }
-    const eligible = data.filter(r => !isWorkspaceScoped(r));
+    const eligible = data.filter(r => !isWorkspaceScoped(r) && !isMaintenance(r));
     eligible.forEach(r => {
       const opt = document.createElement("option");
       const label = r.daemon && r.daemon !== "default" ? `${r.server} (${r.daemon})` : r.server;

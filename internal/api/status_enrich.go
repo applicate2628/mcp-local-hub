@@ -111,6 +111,19 @@ func enrichStatusWithRegistry(rows []DaemonStatus, manifestDir, registryPath str
 		srv, dmn := parseTaskName(rows[i].TaskName)
 		rows[i].Server = srv
 		rows[i].Daemon = dmn
+		// Mark scheduler-maintenance rows so GUI consumers can filter them
+		// out of daemon-only surfaces (Logs picker, Dashboard cards). All
+		// three weekly-refresh naming conventions parse to
+		// daemon == "weekly-refresh":
+		//   - "mcp-local-hub-weekly-refresh"           → ("", "weekly-refresh")
+		//   - "mcp-local-hub-workspace-weekly-refresh" → ("workspace", "weekly-refresh")
+		//   - "mcp-local-hub-<server>-weekly-refresh"  → (<server>, "weekly-refresh")
+		// Use the parse output as the single source of truth; the JS side
+		// reads the is_maintenance flag instead of re-implementing the
+		// match.
+		if dmn == "weekly-refresh" {
+			rows[i].IsMaintenance = true
+		}
 		if p, ok := ports[srv][dmn]; ok {
 			rows[i].Port = p
 		} else if p, ok := ports[srv]["default"]; ok {

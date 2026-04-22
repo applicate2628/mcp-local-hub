@@ -68,7 +68,14 @@ window.mcphub.screens.dashboard = function(root) {
       cardsEl.innerHTML = `<p class="error">Failed to load status: ${escapeHtml(data?.error ?? r.statusText ?? "unknown")}</p>`;
       return;
     }
-    data.forEach(row => state[keyFor(row)] = row);
+    // Scheduler-maintenance rows (weekly-refresh tasks) have no server
+    // name (or "workspace" for the hub-wide workspace variant) and no
+    // meaningful "Restart" action. Rendering them as dashboard cards
+    // would produce a blank-name card whose Restart button hits
+    // /api/servers//restart → invalid target. Filter them out via the
+    // server-side structural flag (DaemonStatus.IsMaintenance) rather
+    // than duplicating the task-name match in JS.
+    data.filter(row => !row.is_maintenance).forEach(row => state[keyFor(row)] = row);
     render();
   }).catch(err => {
     cardsEl.innerHTML = `<p class="error">Failed to load status: ${escapeHtml(err.message)}</p>`;
@@ -77,6 +84,13 @@ window.mcphub.screens.dashboard = function(root) {
   const es = new EventSource("/api/events");
   es.addEventListener("daemon-state", e => {
     const body = JSON.parse(e.data);
+    // Same filter as the bootstrap above: ignore SSE deltas for
+    // maintenance rows so weekly-refresh transitions (which fire
+    // every status-poll cycle the task's state changes) do not
+    // re-inject a blank-name card after the initial filter dropped
+    // it. The poller in internal/gui/poller.go forwards the
+    // is_maintenance flag on every daemon-state event.
+    if (body.is_maintenance) return;
     const k = keyFor(body);
     if (body.state === "Gone") delete state[k];
     else state[k] = Object.assign(state[k] ?? {server: body.server, daemon: body.daemon}, body);

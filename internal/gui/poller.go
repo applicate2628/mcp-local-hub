@@ -94,11 +94,12 @@ func (p *StatusPoller) poll(ctx context.Context) {
 		p.events.Publish(Event{
 			Type: "daemon-state",
 			Body: map[string]any{
-				"server": r.Server,
-				"daemon": r.Daemon,
-				"state":  r.State,
-				"pid":    r.PID,
-				"port":   r.Port,
+				"server":         r.Server,
+				"daemon":         r.Daemon,
+				"state":          r.State,
+				"pid":            r.PID,
+				"port":           r.Port,
+				"is_maintenance": r.IsMaintenance,
 			},
 		})
 	}

@@ -236,6 +236,45 @@ func TestEnrichStatusWithRegistry_NoRegistryFileIsSilentNoop(t *testing.T) {
 	}
 }
 
+// TestEnrichStatusWithRegistry_MaintenanceFlag covers the structural
+// IsMaintenance flag populated for weekly-refresh scheduler tasks. The
+// GUI (Logs picker, Dashboard) uses this flag to filter maintenance
+// rows out of daemon-only surfaces — without it, selecting the hub-wide
+// weekly-refresh row in the Logs picker issues GET /api/logs/?... with
+// an empty server and 404s, and the Dashboard renders a blank-name
+// card whose Restart button hits /api/servers//restart.
+//
+// Covers all three weekly-refresh naming conventions (hub-wide global,
+// hub-wide workspace, legacy per-server) and confirms a normal daemon
+// row stays IsMaintenance=false.
+func TestEnrichStatusWithRegistry_MaintenanceFlag(t *testing.T) {
+	dir := t.TempDir()
+	regPath := dir + "/ws.yaml"
+	rows := []DaemonStatus{
+		{TaskName: `\mcp-local-hub-workspace-weekly-refresh`}, // hub-wide workspace (WeeklyRefreshTaskName)
+		{TaskName: `\mcp-local-hub-weekly-refresh`},           // hub-wide global (WeeklyRefreshSet)
+		{TaskName: `\mcp-local-hub-serena-weekly-refresh`},    // legacy per-server
+		{TaskName: `\mcp-local-hub-serena-claude`},            // normal daemon row
+	}
+	enrichStatusWithRegistry(rows, "", regPath)
+
+	for i, want := range []bool{true, true, true, false} {
+		if rows[i].IsMaintenance != want {
+			t.Errorf("rows[%d] TaskName=%q IsMaintenance = %v, want %v",
+				i, rows[i].TaskName, rows[i].IsMaintenance, want)
+		}
+	}
+	// Also confirm the task-name parse produced the expected daemon label
+	// — if parseTaskName ever regresses, IsMaintenance would silently stop
+	// firing for the hub-wide workspace task.
+	if rows[0].Daemon != "weekly-refresh" {
+		t.Errorf("hub-wide workspace task: Daemon = %q, want weekly-refresh", rows[0].Daemon)
+	}
+	if rows[3].Daemon != "claude" {
+		t.Errorf("normal daemon row: Daemon = %q, want claude", rows[3].Daemon)
+	}
+}
+
 // TestParseLazyProxyTaskName exercises the pattern classifier.
 func TestParseLazyProxyTaskName(t *testing.T) {
 	cases := []struct {
