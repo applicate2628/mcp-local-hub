@@ -4,7 +4,7 @@ import { useEventSource } from "../hooks/useEventSource";
 import type { DaemonStatus } from "../types";
 
 interface PickerEntry {
-  value: string; // JSON-encoded {server, daemon}
+  value: string;  // JSON-encoded {server, daemon}
   label: string;
   server: string;
   daemon: string;
@@ -17,7 +17,22 @@ export function LogsScreen() {
   const [follow, setFollow] = useState<boolean>(false);
   const [body, setBody] = useState<string>("");
   const [notice, setNotice] = useState<string>("");
+  const [reloadToken, setReloadToken] = useState<number>(0);
   const preRef = useRef<HTMLPreElement | null>(null);
+
+  // Snapshot-versus-SSE race coordination (reviewer finding 3 on PR-internal
+  // review — the first commit lost live log lines when the user changed
+  // `selected` while Follow was on). Refs avoid closure staleness: flipping
+  // a useState would re-render and only the NEXT onLine closure would see
+  // the new value, dropping events in the gap.
+  //
+  // Protocol:
+  //   - When the snapshot effect starts, mark NOT ready and clear the buffer.
+  //   - SSE onLine during that window: push to bufferRef, do not setBody.
+  //   - When the snapshot resolves, prefix any buffered lines to the text
+  //     before setBody; then mark ready so subsequent onLines setBody live.
+  const snapshotReadyRef = useRef<boolean>(true);
+  const bufferRef = useRef<string[]>([]);
 
   // Initial status load + picker population. Filters:
   //  - is_workspace_scoped: lazy-proxy daemons write to
@@ -61,22 +76,27 @@ export function LogsScreen() {
     };
   }, []);
 
-  // Fetch snapshot whenever (selected, tail, reloadToken) changes.
-  // Follow=true triggers the SSE subscription below AFTER the snapshot so
-  // the user sees the static tail first then the live appends.
-  const [reloadToken, setReloadToken] = useState<number>(0);
+  // Fetch snapshot whenever (selected, tail, reloadToken) changes. `follow`
+  // is intentionally excluded so toggling Follow opens/closes the stream
+  // without refetching the snapshot.
   useEffect(() => {
     if (!selected) return;
     let cancelled = false;
+    snapshotReadyRef.current = false;
+    bufferRef.current = [];
+    setBody("Loading…");
     (async () => {
       const { server, daemon } = JSON.parse(selected) as { server: string; daemon: string };
-      setBody("Loading…");
-      const qs =
-        `tail=${encodeURIComponent(String(tail))}` +
-        (daemon ? `&daemon=${encodeURIComponent(daemon)}` : "");
+      const qs = `tail=${encodeURIComponent(String(tail))}` + (daemon ? `&daemon=${encodeURIComponent(daemon)}` : "");
       const resp = await fetch(`/api/logs/${encodeURIComponent(server)}?${qs}`);
       const text = await resp.text();
-      if (!cancelled) setBody(text);
+      if (cancelled) return;
+      // Flush any SSE lines that arrived during the fetch window.
+      const buffered = bufferRef.current;
+      bufferRef.current = [];
+      const flushed = buffered.length > 0 ? text + buffered.join("\n") + "\n" : text;
+      setBody(flushed);
+      snapshotReadyRef.current = true;
     })();
     return () => {
       cancelled = true;
@@ -91,18 +111,24 @@ export function LogsScreen() {
   }, [follow, selected]);
 
   const onLine = useCallback((ev: MessageEvent) => {
-    setBody((prev) => {
-      const next = prev + ev.data + "\n";
-      // Schedule an auto-scroll after Preact commits.
-      queueMicrotask(() => {
-        const pre = preRef.current;
-        if (pre) pre.scrollTop = pre.scrollHeight;
-      });
-      return next;
-    });
+    if (!snapshotReadyRef.current) {
+      // Snapshot still loading — buffer so the lines survive setBody(text).
+      bufferRef.current.push(ev.data);
+      return;
+    }
+    setBody((prev) => prev + ev.data + "\n");
   }, []);
 
   useEventSource(streamUrl, { "log-line": onLine });
+
+  // Auto-scroll to bottom after Preact commits each body update. A
+  // queueMicrotask scheduled inside the setBody updater would read the
+  // DOM BEFORE the new text node was committed — scrollHeight would be
+  // one line stale and auto-scroll would drift behind under fast streams.
+  useEffect(() => {
+    const pre = preRef.current;
+    if (pre) pre.scrollTop = pre.scrollHeight;
+  }, [body]);
 
   const controlsDisabled = entries !== null && entries.length === 0;
 
@@ -132,8 +158,8 @@ export function LogsScreen() {
               const n = Number((ev.currentTarget as HTMLInputElement).value);
               if (Number.isFinite(n) && n >= 1) setTail(n);
             }}
-          />{" "}
-          lines
+          />
+          {" "}lines
         </label>
         <label>
           <input
@@ -141,8 +167,8 @@ export function LogsScreen() {
             checked={follow}
             disabled={controlsDisabled}
             onChange={(ev) => setFollow((ev.currentTarget as HTMLInputElement).checked)}
-          />{" "}
-          Follow
+          />
+          {" "}Follow
         </label>
         <button disabled={controlsDisabled} onClick={() => setReloadToken((x) => x + 1)}>
           Refresh
