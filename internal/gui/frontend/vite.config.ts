@@ -20,7 +20,11 @@ export default defineConfig({
       output: {
         entryFileNames: "app.js",
         chunkFileNames: "[name].js",
-        assetFileNames: "[name].[ext]",
+        // CSS extracted from the entry chunk is named after the chunk ("index")
+        // by default. Force it back to "style" so the Go route /assets/style.css
+        // and the embed path stay stable across rebuilds.
+        assetFileNames: (info) =>
+          info.name?.endsWith(".css") ? "style.css" : "[name].[ext]",
       },
     },
   },

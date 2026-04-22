@@ -1,31 +1,13 @@
 <!doctype html>
 <html lang="en" data-theme="auto">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>mcp-local-hub</title>
-  <link rel="stylesheet" href="/assets/style.css">
-</head>
-<body>
-  <aside class="sidebar">
-    <div class="brand">mcp-local-hub</div>
-    <nav>
-      <a href="#/servers"   data-screen="servers">Servers</a>
-      <a href="#/dashboard" data-screen="dashboard">Dashboard</a>
-      <a href="#/logs"      data-screen="logs">Logs</a>
-    </nav>
-  </aside>
-  <main id="screen-root"><!-- filled by app.js --></main>
-  <!-- Script order matters: app.js MUST come first because it sets up
-       window.mcphub = { screens: {}, _cleanups: [] } and defines
-       registerCleanup. Each screen module then attaches to
-       window.mcphub.screens.* synchronously. Using static <script> tags
-       (not dynamically injected ones) guarantees in-order synchronous
-       execution before DOMContentLoaded fires, so the first render() does
-       not see an empty screens registry. -->
-  <script src="/assets/app.js"></script>
-  <script src="/assets/servers.js"></script>
-  <script src="/assets/dashboard.js"></script>
-  <script src="/assets/logs.js"></script>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>mcp-local-hub</title>
+    <script type="module" crossorigin src="/assets/app.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/style.css">
+  </head>
+  <body>
+    <div id="app"></div>
+  </body>
 </html>
