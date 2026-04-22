@@ -16,6 +16,16 @@
     </nav>
   </aside>
   <main id="screen-root"><!-- filled by app.js --></main>
+  <!-- Script order matters: app.js MUST come first because it sets up
+       window.mcphub = { screens: {}, _cleanups: [] } and defines
+       registerCleanup. Each screen module then attaches to
+       window.mcphub.screens.* synchronously. Using static <script> tags
+       (not dynamically injected ones) guarantees in-order synchronous
+       execution before DOMContentLoaded fires, so the first render() does
+       not see an empty screens registry. -->
   <script src="/assets/app.js"></script>
+  <script src="/assets/servers.js"></script>
+  <script src="/assets/dashboard.js"></script>
+  <script src="/assets/logs.js"></script>
 </body>
 </html>

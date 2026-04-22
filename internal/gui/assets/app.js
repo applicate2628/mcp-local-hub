@@ -18,13 +18,12 @@ window.mcphub.registerCleanup = function(fn) {
   window.mcphub._cleanups.push(fn);
 };
 
-// Load per-screen modules. Each module sets window.mcphub.screens[name].
-const screenModules = ["/assets/servers.js", "/assets/dashboard.js", "/assets/logs.js"];
-screenModules.forEach(src => {
-  const sc = document.createElement("script");
-  sc.src = src;
-  document.head.appendChild(sc);
-});
+// Screen modules (servers.js, dashboard.js, logs.js) are loaded via static
+// <script> tags in index.html AFTER this file. Dynamic injection is avoided
+// intentionally: dynamically appended script elements load asynchronously,
+// so DOMContentLoaded could fire before window.mcphub.screens.* was populated
+// and the first render() would show "Unknown screen: servers" on cold load.
+// Static tags execute in document order before DOMContentLoaded fires.
 
 function render() {
   // Drain cleanups from the previous screen before we render the next one.

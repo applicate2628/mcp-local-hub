@@ -38,34 +38,42 @@ window.mcphub.screens.servers = async function(root) {
   }
 
   async function applyChanges() {
-    // Derive request payload from per-cell dirty state:
-    //   servers = unique server names with at least one dirty cell
-    //   clients = unique client names across all dirty cells
-    // The backend will process the cartesian intersection internally via
-    // MigrateOpts.ClientsInclude. This is safe because the GUI only sends a
-    // client name when at least one of its cells is dirty, so every listed
-    // client has a justified rewrite in the current apply.
-    const servers = [...dirty.keys()];
-    const clientSet = new Set();
-    for (const cs of dirty.values()) for (const c of cs) clientSet.add(c);
-    const clients = [...clientSet];
+    // Migrate is called PER-SERVER-GROUP, not once with a unioned client list.
+    // MigrateOpts.ClientsInclude is a global filter applied to every Server in
+    // the request, so a single call with {servers:[A,B], clients:[claude,gemini]}
+    // would rewrite all four cells (A×claude, A×gemini, B×claude, B×gemini)
+    // even if the user only dirtied (A,claude) and (B,gemini). Looping keeps
+    // each server's client list scoped to exactly its own dirty cells.
+    const changes = [];
+    for (const [server, clients] of dirty.entries()) {
+      if (clients.size === 0) continue;
+      changes.push({server, clients: [...clients]});
+    }
     applyBtn.disabled = true;
-    applyStatus.textContent = `Migrating ${servers.join(", ")}…`;
-    try {
-      const resp = await fetch("/api/migrate", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({servers, clients}),
-      });
-      if (!resp.ok) {
-        const body = await resp.json().catch(() => ({error: "unknown"}));
-        throw new Error(body.error);
+    applyStatus.textContent = `Migrating ${changes.length} server(s)…`;
+    const failed = [];
+    for (const change of changes) {
+      try {
+        const resp = await fetch("/api/migrate", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({servers: [change.server], clients: change.clients}),
+        });
+        if (!resp.ok) {
+          const body = await resp.json().catch(() => ({error: resp.status}));
+          failed.push(`${change.server}: ${body.error}`);
+        }
+      } catch (e) {
+        failed.push(`${change.server}: ${e.message}`);
       }
+    }
+    if (failed.length === 0) {
       applyStatus.textContent = "Migrated. Refreshing…";
       dirty.clear();
       render(); // reload the matrix
-    } catch (err) {
-      applyStatus.innerHTML = `<span class="error">Failed: ${err.message}</span>`;
+    } else {
+      applyStatus.innerHTML = `<span class="error">Failed: ${failed.join("; ")}</span>`;
+      applyBtn.disabled = false;
     }
   }
   applyBtn.addEventListener("click", applyChanges);
