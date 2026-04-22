@@ -63,8 +63,16 @@ func (l *SingleInstanceLock) Release() {
 	if l == nil || l.fl == nil {
 		return
 	}
-	_ = os.Remove(l.pidport)
+	// Order matters: unlock the flock FIRST so a racing second instance
+	// can acquire ownership immediately. Removing the pidport before
+	// unlock leaves a window where the second instance sees
+	// ErrSingleInstanceBusy but ReadPidport fails (file gone), causing
+	// false-negative "running but unreachable" failures during normal
+	// shutdown. The reverse window (flock free, stale pidport file) is
+	// safe because acquireSingleInstanceAt always overwrites pidport
+	// via os.WriteFile after TryLock succeeds.
 	_ = l.fl.Unlock()
+	_ = os.Remove(l.pidport)
 	l.fl = nil
 }
 

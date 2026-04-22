@@ -59,11 +59,27 @@ window.mcphub.screens.logs = function(root) {
       body.textContent = skipped > 0
         ? `No global-server logs available (${skipped} workspace-proxy entries hidden — Phase 3B-II will surface their lsp-<key>-<lang>.log files).`
         : "No daemons running.";
+      // Disable controls when there are no eligible rows. Otherwise the
+      // refresh/tail/follow event listeners can still invoke load(),
+      // where JSON.parse(sel.value) throws on an empty "" value and
+      // leaves the screen stuck in "Loading…". (The early return in
+      // load() also guards this path; disabling the controls makes the
+      // "nothing to pick" state visible to the user.)
+      document.getElementById("logs-refresh").disabled = true;
+      followEl.disabled = true;
+      sel.disabled = true;
     }
   });
 
   async function load() {
     if (es) { es.close(); es = null; }
+    if (!sel.value) {
+      // No eligible daemons (fresh install, or only workspace-proxy rows
+      // hidden by the dropdown filter). The hint message is already in
+      // body.textContent from the populate-dropdown branch above, so do
+      // not overwrite it with "Loading…" and do not JSON.parse("").
+      return;
+    }
     body.textContent = "Loading…";
     const {server, daemon} = JSON.parse(sel.value);
     const tail = tailEl.value;
