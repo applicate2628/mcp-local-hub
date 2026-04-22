@@ -194,6 +194,37 @@ func TestClangTidy_ParsesRealOutput(t *testing.T) {
 	}
 }
 
+func TestValidateClangTidyInputs_DisallowedExtraArgs(t *testing.T) {
+	tests := []string{
+		"-load",
+		"--load=plugin.so",
+		"-fix",
+		"--fix-errors",
+		"--export-fixes=/tmp/fixes.yaml",
+	}
+
+	for _, arg := range tests {
+		err := validateClangTidyInputs(".", []string{"main.cpp"}, []string{arg})
+		if err == nil {
+			t.Fatalf("expected error for disallowed arg %q", arg)
+		}
+	}
+}
+
+func TestValidateClangTidyInputs_RejectsDashPrefixedFiles(t *testing.T) {
+	err := validateClangTidyInputs(".", []string{"--export-fixes=/tmp/pwned.yaml"}, nil)
+	if err == nil {
+		t.Fatal("expected error for dash-prefixed file path")
+	}
+}
+
+func TestValidateClangTidyInputs_AllowsSafeArgs(t *testing.T) {
+	err := validateClangTidyInputs(".", []string{"main.cpp"}, []string{"--quiet", "-header-filter=.*"})
+	if err != nil {
+		t.Fatalf("expected safe args to pass validation, got error: %v", err)
+	}
+}
+
 // contentText extracts the Text field from the first TextContent in a
 // CallToolResult. Used by every handler test in this file.
 func contentText(r *mcp.CallToolResult) string {
