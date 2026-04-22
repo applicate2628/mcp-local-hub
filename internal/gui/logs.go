@@ -35,7 +35,7 @@ func registerLogsRoutes(s *Server) {
 		}
 		streaming := len(parts) == 2 && parts[1] == "stream"
 		if streaming {
-			streamLogs(s, server, w, r)
+			streamLogs(s, server, r.URL.Query().Get("daemon"), w, r)
 			return
 		}
 		if r.Method != http.MethodGet {
@@ -43,11 +43,16 @@ func registerLogsRoutes(s *Server) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		// daemon is optional — an empty string lets the logsProvider
+		// adapter fall back to "default" for single-daemon servers.
+		// Multi-daemon servers (serena: claude + codex) require the
+		// explicit daemon name the UI picker selected.
+		daemon := r.URL.Query().Get("daemon")
 		tail, _ := strconv.Atoi(r.URL.Query().Get("tail"))
 		if tail <= 0 {
 			tail = 500
 		}
-		body, err := s.logs.Logs(server, tail)
+		body, err := s.logs.Logs(server, daemon, tail)
 		if err != nil {
 			writeAPIError(w, err, http.StatusInternalServerError, "LOGS_FAILED")
 			return
@@ -63,9 +68,14 @@ func registerLogsRoutes(s *Server) {
 // after a Split on "\n" are skipped so a trailing newline does not
 // produce a blank SSE event.
 //
+// daemon is threaded through to every logsProvider call (both the
+// initial prime and the per-tick fetch) so multi-daemon servers like
+// serena can follow the correct daemon's log file. An empty daemon is
+// forwarded as-is and the logsProvider adapter falls back to "default".
+//
 // The handler exits when the client disconnects (r.Context cancellation)
 // or when the provider returns an error (sent as an "error" SSE event).
-func streamLogs(s *Server, server string, w http.ResponseWriter, r *http.Request) {
+func streamLogs(s *Server, server, daemon string, w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
@@ -89,7 +99,7 @@ func streamLogs(s *Server, server string, w http.ResponseWriter, r *http.Request
 	// "log-line" events — duplicating what /api/logs/:server already
 	// rendered when the UI first opened the Logs screen.
 	var lastLen int
-	if body, err := s.logs.Logs(server, 0); err == nil {
+	if body, err := s.logs.Logs(server, daemon, 0); err == nil {
 		lastLen = len(body)
 	}
 
@@ -98,7 +108,7 @@ func streamLogs(s *Server, server string, w http.ResponseWriter, r *http.Request
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			body, err := s.logs.Logs(server, 0)
+			body, err := s.logs.Logs(server, daemon, 0)
 			if err != nil {
 				fmt.Fprintf(w, "event: error\ndata: %s\n\n", err.Error())
 				flusher.Flush()

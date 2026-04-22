@@ -16,10 +16,17 @@ window.mcphub.screens.logs = function(root) {
   const body = document.getElementById("logs-body");
   let es = null;
 
+  // /api/status returns one row per (server, daemon) pair. Multi-daemon
+  // servers (serena: claude + codex) appear as multiple rows with the
+  // same `server` and different `daemon` names and no "default" daemon,
+  // so we key the picker by (server, daemon) and render "server (daemon)"
+  // whenever the daemon is not the single-daemon "default".
   fetch("/api/status").then(r => r.json()).then(rows => {
     (rows || []).forEach(r => {
       const opt = document.createElement("option");
-      opt.value = r.server; opt.textContent = r.server;
+      const label = r.daemon && r.daemon !== "default" ? `${r.server} (${r.daemon})` : r.server;
+      opt.value = JSON.stringify({server: r.server, daemon: r.daemon || ""});
+      opt.textContent = label;
       sel.appendChild(opt);
     });
     if ((rows || []).length) load();
@@ -28,14 +35,16 @@ window.mcphub.screens.logs = function(root) {
   async function load() {
     if (es) { es.close(); es = null; }
     body.textContent = "Loading…";
-    const server = sel.value;
+    const {server, daemon} = JSON.parse(sel.value);
     const tail = tailEl.value;
-    const resp = await fetch(`/api/logs/${encodeURIComponent(server)}?tail=${encodeURIComponent(tail)}`);
+    const qs = `tail=${encodeURIComponent(tail)}` + (daemon ? `&daemon=${encodeURIComponent(daemon)}` : "");
+    const resp = await fetch(`/api/logs/${encodeURIComponent(server)}?${qs}`);
     body.textContent = await resp.text();
-    if (followEl.checked) startFollow(server);
+    if (followEl.checked) startFollow(server, daemon);
   }
-  function startFollow(server) {
-    es = new EventSource(`/api/logs/${encodeURIComponent(server)}/stream`);
+  function startFollow(server, daemon) {
+    const qs = daemon ? `?daemon=${encodeURIComponent(daemon)}` : "";
+    es = new EventSource(`/api/logs/${encodeURIComponent(server)}/stream${qs}`);
     es.addEventListener("log-line", e => {
       body.textContent += e.data + "\n";
       body.scrollTop = body.scrollHeight;

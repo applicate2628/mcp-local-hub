@@ -96,8 +96,14 @@ window.mcphub.screens.servers = async function(root) {
       for (const server of servers) {
         const row = document.createElement("tr");
         const st = statusByServer[server.name] || {};
+        // server.name originates from client-config map keys (see /api/scan),
+        // which are already constrained — but defense in depth escapes any
+        // HTML metacharacters before interpolating into innerHTML. The GUI
+        // binds 127.0.0.1 only (spec §2.2), so cross-origin XSS is not the
+        // live threat model; this prevents a malicious config key from
+        // injecting markup into the matrix regardless.
         row.innerHTML = `
-          <td>${server.name}</td>
+          <td>${escapeHtml(server.name)}</td>
           ${clients.map(c => renderCell(server, c)).join("")}
           <td>${st.port ?? "—"}</td>
           <td>${st.state ?? "—"}</td>`;
@@ -112,6 +118,14 @@ window.mcphub.screens.servers = async function(root) {
   }
   render();
 };
+
+// escapeHtml replaces HTML-significant characters with their entity forms
+// so user-controlled strings can be safely interpolated into innerHTML or
+// attribute values. Used on server.name and the data-server attribute on
+// matrix checkboxes — both flow from /api/scan's client-config map keys.
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+}
 
 // collectServers adapts api.ScanResult into a flat list of
 // {name, routing:{client: "via-hub"|"direct"|"not-installed"|...}}.
@@ -153,5 +167,8 @@ function renderCell(server, client) {
   const routing = server.routing[client];
   const checked = routing === "via-hub" ? "checked" : "";
   const disabled = routing === "unsupported" || routing === "not-installed" ? "disabled" : "";
-  return `<td><input type="checkbox" data-server="${server.name}" data-client="${client}" ${checked} ${disabled}></td>`;
+  // data-server carries server.name into an attribute value — escape it
+  // for the same reason the name cell is escaped. `client` is bounded by
+  // the hardcoded clients array above and does not need escaping.
+  return `<td><input type="checkbox" data-server="${escapeHtml(server.name)}" data-client="${client}" ${checked} ${disabled}></td>`;
 }

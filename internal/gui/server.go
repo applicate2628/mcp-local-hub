@@ -112,23 +112,27 @@ func (realRestarter) Restart(server string) error {
 
 // logsProvider is the narrow interface the /api/logs/:server handler needs.
 // The handler converts the stored log text to either a plain GET body or an
-// SSE tail-follow stream. The daemon name is not exposed at this seam —
-// realLogs pins it to "default", matching the single-daemon-per-server
-// manifest shape the GUI scans in Phase 3B. Multi-daemon selection is a
-// Phase 3B-II concern and would surface a new field on logsProvider.
+// SSE tail-follow stream. The daemon parameter threads a specific daemon
+// name through to api.LogsGet; an empty string resolves to "default" in
+// realLogs below, preserving single-daemon-per-server behavior while
+// letting multi-daemon servers (serena ships claude + codex with no
+// "default") pick the correct log file.
 type logsProvider interface {
-	Logs(server string, tail int) (string, error)
+	Logs(server, daemon string, tail int) (string, error)
 }
 
 type realLogs struct{}
 
-// Logs delegates to api.LogsGet with daemon "default". This mirrors the
-// single-daemon assumption the rest of Phase 3B makes (scan + status +
-// migrate all address the default daemon) and keeps the GUI seam narrow.
-// If a server is later packaged with multiple daemons, the GUI would need
-// to surface a daemon picker and logsProvider would gain a second arg.
-func (realLogs) Logs(server string, tail int) (string, error) {
-	return api.NewAPI().LogsGet(server, "default", tail)
+// Logs delegates to api.LogsGet. An empty daemon falls back to "default",
+// which matches the single-daemon-per-server manifest shape used by most
+// Phase 3B servers. Multi-daemon servers (e.g. serena, which exposes
+// claude + codex daemons and no "default") can pass the explicit daemon
+// name the GUI picker selected — see /api/status rows for daemon values.
+func (realLogs) Logs(server, daemon string, tail int) (string, error) {
+	if daemon == "" {
+		daemon = "default"
+	}
+	return api.NewAPI().LogsGet(server, daemon, tail)
 }
 
 // RealStatusProvider is the production-default statusProvider. Tests inject
