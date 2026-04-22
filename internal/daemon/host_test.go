@@ -217,6 +217,31 @@ func TestHostHTTPIDMultiplexing(t *testing.T) {
 	wg.Wait()
 }
 
+func TestHostHTTPRejectsOversizedPOSTBody(t *testing.T) {
+	h, err := NewStdioHost(HostConfig{
+		Command: echoSubprocCommand(),
+		Args:    echoSubprocArgs(),
+	})
+	if err != nil {
+		t.Fatalf("NewStdioHost: %v", err)
+	}
+
+	ts := httptest.NewServer(h.HTTPHandler())
+	defer ts.Close()
+
+	tooLarge := strings.Repeat("a", int(maxMCPPostBodyBytes)+1)
+	resp, err := http.Post(ts.URL+"/mcp", "application/json", strings.NewReader(tooLarge))
+	if err != nil {
+		t.Fatalf("POST oversized body: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d, want=%d, body=%q", resp.StatusCode, http.StatusRequestEntityTooLarge, string(body))
+	}
+}
+
 // TestHostInitializeCached verifies that after the first client sends
 // `initialize`, subsequent `initialize` requests return the cached response
 // without being forwarded to the subprocess. This is the contract

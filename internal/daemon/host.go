@@ -76,6 +76,8 @@ type StdioHost struct {
 	childExited chan struct{} // closed by the watcher goroutine when cmd.Wait() returns
 }
 
+const maxMCPPostBodyBytes int64 = 1 << 20 // 1 MiB
+
 func NewStdioHost(cfg HostConfig) (*StdioHost, error) {
 	if cfg.Command == "" {
 		return nil, errors.New("HostConfig.Command is required")
@@ -330,8 +332,15 @@ func (h *StdioHost) HTTPHandler() http.Handler {
 }
 
 func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxMCPPostBodyBytes)
+	defer r.Body.Close()
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
 		return
 	}

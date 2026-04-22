@@ -169,6 +169,7 @@ See also: install, logs, restart, status.`,
 					Addr:              fmt.Sprintf("127.0.0.1:%d", spec.Port),
 					Handler:           h.HTTPHandler(),
 					ReadHeaderTimeout: 10 * time.Second,
+					ReadTimeout:       30 * time.Second,
 					// WriteTimeout intentionally 0 (unlimited): SSE streams are long-lived;
 					// writes are bounded per-line via the handler's own select/context,
 					// not by the server socket.
