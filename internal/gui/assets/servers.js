@@ -175,7 +175,7 @@ window.mcphub.screens.servers = async function(root) {
 // one running daemon's port stays visible even when another daemon is down.
 function aggregateStatus(rows) {
   const grouped = {};
-  for (const r of rows || []) {
+  for (const r of (rows || []).filter(x => !x.is_maintenance)) {
     if (!grouped[r.server]) grouped[r.server] = [];
     grouped[r.server].push(r);
   }
