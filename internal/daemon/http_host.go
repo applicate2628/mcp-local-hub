@@ -52,7 +52,9 @@ type HTTPHost struct {
 	logCloser   io.Closer // non-nil when LogPath was opened; closed by Stop
 }
 
-const httpHostMaxRequestBodyBytes int64 = 4 << 20 // 4 MiB
+var errBodyTooLarge = errors.New("body too large")
+
+const maxHTTPHostBodyBytes int64 = 4 << 20 // 4 MiB
 
 // HTTPHostConfig describes one native-http-host instance.
 type HTTPHostConfig struct {
@@ -220,14 +222,7 @@ func (h *HTTPHost) stopLocked() error {
 	h.stopped = true
 	close(h.done)
 	if h.cmd != nil && h.cmd.Process != nil {
-		// Avoid PID-reuse hazards: if the child has already exited and
-		// Wait() has returned, do not issue a new PID-based tree kill.
-		select {
-		case <-h.childExited:
-			// already exited; nothing to kill
-		default:
-			_ = killProcessTree(h.cmd.Process.Pid)
-		}
+		_ = killProcessTree(h.cmd.Process.Pid)
 	}
 	select {
 	case <-h.childExited:
@@ -285,10 +280,9 @@ func (h *HTTPHost) HTTPHandler() http.Handler {
 }
 
 func (h *HTTPHost) handlePOST(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, httpHostMaxRequestBodyBytes))
+	body, err := readAllWithLimit(r.Body, maxHTTPHostBodyBytes)
 	if err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
+		if errors.Is(err, errBodyTooLarge) {
 			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
 			return
 		}
@@ -368,13 +362,32 @@ func (h *HTTPHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Plain JSON response.
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := readAllWithLimit(resp.Body, maxHTTPHostBodyBytes)
+	if err != nil {
+		if errors.Is(err, errBodyTooLarge) {
+			http.Error(w, "upstream response too large", http.StatusBadGateway)
+			return
+		}
+		http.Error(w, "read upstream response: "+err.Error(), http.StatusBadGateway)
+		return
+	}
 	if origMethod == "initialize" {
 		h.bridge.CacheInitialize(respBody)
 	}
 	respBody = h.bridge.TransformResponse(origMethod, action.Active, respBody)
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(respBody)
+}
+
+func readAllWithLimit(r io.Reader, maxBytes int64) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > maxBytes {
+		return nil, errBodyTooLarge
+	}
+	return body, nil
 }
 
 // copyResponseHeaders propagates selected upstream response headers to

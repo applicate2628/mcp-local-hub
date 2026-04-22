@@ -332,6 +332,62 @@ func TestHTTPHost_InitializeCapabilitiesCachedForInjection(t *testing.T) {
 	}
 }
 
+func TestHTTPHost_POSTBodyTooLargeRejected(t *testing.T) {
+	upstream := newMockUpstream(t, "json")
+	defer upstream.Close()
+	h := newHTTPHostAgainstMock(t, upstream)
+	ts := httptest.NewServer(h.HTTPHandler())
+	defer ts.Close()
+
+	req, _ := http.NewRequest("POST", ts.URL+"/mcp", strings.NewReader(strings.Repeat("x", int(maxHTTPHostBodyBytes)+1)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusRequestEntityTooLarge)
+	}
+}
+
+func TestHTTPHost_UpstreamJSONBodyTooLargeRejected(t *testing.T) {
+	largeUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(strings.Repeat("y", int(maxHTTPHostBodyBytes)+1)))
+	}))
+	defer largeUpstream.Close()
+
+	h := &HTTPHost{
+		httpClient:   largeUpstream.Client(),
+		streamClient: largeUpstream.Client(),
+		upstreamURL:  largeUpstream.URL,
+		bridge:       NewProtocolBridge(),
+		done:         make(chan struct{}),
+		childExited:  make(chan struct{}),
+		started:      true,
+	}
+	ts := httptest.NewServer(h.HTTPHandler())
+	defer ts.Close()
+
+	req, _ := http.NewRequest("POST", ts.URL+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadGateway)
+	}
+}
+
 // --- SSE parser edge cases ---
 
 func TestStreamSSE_PassesThroughNonJSONDataLines(t *testing.T) {
