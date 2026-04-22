@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -70,6 +71,35 @@ func (realMigrator) Migrate(servers []string) error {
 	return err
 }
 
+// restarter is the narrow interface the /api/servers/:name/restart handler
+// needs. realRestarter is the production adapter; tests inject their own.
+type restarter interface {
+	Restart(server string) error
+}
+
+type realRestarter struct{}
+
+// Restart delegates to api.Restart(server, daemonFilter). The GUI handler
+// targets "restart all daemons for one server," so daemonFilter is "".
+// Per-task failures are aggregated into a single error to match the CLI's
+// "one or more daemons failed to restart" semantics (see internal/cli/restart.go).
+func (realRestarter) Restart(server string) error {
+	results, err := api.NewAPI().Restart(server, "")
+	if err != nil {
+		return err
+	}
+	var failed []string
+	for _, r := range results {
+		if r.Err != "" {
+			failed = append(failed, r.TaskName+": "+r.Err)
+		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("restart failed: %s", strings.Join(failed, "; "))
+	}
+	return nil
+}
+
 // RealStatusProvider is the production-default statusProvider. Tests inject
 // their own; callers outside the package construct this one.
 type RealStatusProvider = realStatusProvider
@@ -85,6 +115,7 @@ type Server struct {
 	scanner          scanner
 	status           statusProvider
 	migrator         migrator
+	restart          restarter
 	events           *Broadcaster
 }
 
@@ -98,12 +129,14 @@ func NewServer(cfg Config) *Server {
 	s.scanner = realScanner{}
 	s.status = realStatusProvider{}
 	s.migrator = realMigrator{}
+	s.restart = realRestarter{}
 	s.events = NewBroadcaster()
 	registerPingRoutes(s)
 	registerAssetRoutes(s)
 	registerScanRoutes(s)
 	registerStatusRoutes(s)
 	registerMigrateRoutes(s)
+	registerServerRoutes(s)
 	registerEventsRoutes(s)
 	return s
 }
