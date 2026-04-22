@@ -31,3 +31,13 @@ main { padding: 24px; overflow: auto; }
 .servers-matrix thead th { background: var(--sidebar-bg); font-weight: 500; }
 .servers-matrix input[type="checkbox"] { margin: 0; }
 .error { color: var(--danger); }
+
+/* --- Dashboard cards --- */
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-top: 16px; }
+.card { border: 1px solid var(--border); border-radius: 8px; padding: 16px; background: var(--bg); }
+.card-title { font-weight: 600; margin-bottom: 12px; }
+.card-kv { display: flex; justify-content: space-between; padding: 4px 0; font-size: 14px; }
+.card.ok .state { color: var(--success); }
+.card.down .state { color: var(--danger); }
+.card-actions { margin-top: 12px; }
+.card-actions button { width: 100%; padding: 6px; border: 1px solid var(--border); background: var(--sidebar-bg); color: var(--text); border-radius: 4px; cursor: pointer; }
