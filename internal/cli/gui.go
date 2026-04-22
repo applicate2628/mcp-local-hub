@@ -126,6 +126,9 @@ activates the first window and exits 0.`,
 	c.Flags().BoolVar(&noBrowser, "no-browser", false, "do not auto-launch a browser window")
 	c.Flags().BoolVar(&noTray, "no-tray", false, "do not show the system-tray icon")
 	c.Flags().BoolVar(&force, "force", false, "take over a stuck single-instance mutex if pidport probe fails")
+	// --force is a Phase 3B-II placeholder: today it only prints a warning and still falls into
+	// the standard handshake path. Hide it from --help so users don't expect the takeover behavior.
+	_ = c.Flags().MarkHidden("force")
 	return c
 }
 

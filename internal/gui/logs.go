@@ -75,6 +75,11 @@ func streamLogs(s *Server, server string, w http.ResponseWriter, r *http.Request
 	w.Header().Set("Cache-Control", "no-cache")
 	flusher.Flush()
 
+	// No explicit SSE keepalive is sent: the server binds 127.0.0.1 only
+	// (spec §2.2 non-goal: remote access) and browsers hold idle localhost
+	// SSE connections indefinitely. If Phase 3B-II ever exposes this
+	// stream through a reverse proxy, add a `event: ping\ndata: \n\n`
+	// heartbeat every 20–30s to defeat proxy idle timeouts.
 	ctx := r.Context()
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()

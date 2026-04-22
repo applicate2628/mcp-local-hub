@@ -113,8 +113,9 @@ internal/gui/assets/
 
 This document.
 
-Total on branch vs `origin/master`: **23 commits** (22 plan commits + 1
-Task-1 post-review polish landed separately).
+Total on branch vs `origin/master`: **25 commits** (1 plan commit + 21 task
+commits + 1 Task-1 post-review polish + this verification doc + 1 final-review
+cleanup that addressed the observations from the holistic pre-merge review).
 
 ## Tests
 
@@ -256,7 +257,7 @@ d309642 feat(gui): scaffold HTTP server with ping + lifecycle test
 f66e11e docs(phase-3b): add GUI MVP implementation plan (22 tasks, TDD)
 ```
 
-All 23 commits on `phase-3b-gui-mvp`. All tests green under `-race`.
+All 25 commits on `phase-3b-gui-mvp`. All tests green under `-race`.
 Release build with `-H windowsgui` clean. Ready for merge; live-browser
 smoke of the four §2.1 MVP criteria is the one remaining manual step the
 user should run against a Windows desktop before calling Phase 3B-I
