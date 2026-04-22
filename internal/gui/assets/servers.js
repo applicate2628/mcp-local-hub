@@ -91,7 +91,7 @@ window.mcphub.screens.servers = async function(root) {
       const clients = ["claude-code", "codex-cli", "gemini-cli", "antigravity"];
       table.innerHTML = `<thead><tr><th>Server</th>${clients.map(c => `<th>${c}</th>`).join("")}<th>Port</th><th>State</th></tr></thead>`;
       const tbody = document.createElement("tbody");
-      const statusByServer = Object.fromEntries((status || []).map(s => [s.server, s]));
+      const statusByServer = aggregateStatus(status);
       const servers = collectServers(scan);
       for (const server of servers) {
         const row = document.createElement("tr");
@@ -118,6 +118,44 @@ window.mcphub.screens.servers = async function(root) {
   }
   render();
 };
+
+// aggregateStatus collapses /api/status's per-(server, daemon) rows into one
+// row per server for the matrix display. Multi-daemon servers (serena ships
+// claude + codex) otherwise had the second iterated daemon overwrite the
+// first in an Object.fromEntries([server, s]) derivation, masking the case
+// where one daemon was down while the other was Running.
+//
+// The aggregate state is:
+//   - "Running"  iff every daemon for this server reports Running
+//   - "All <X>"  (reuses first state) when every daemon is non-Running
+//   - "Partial"  when states are mixed
+// The representative port is the lowest non-zero port for stability and so
+// one running daemon's port stays visible even when another daemon is down.
+function aggregateStatus(rows) {
+  const grouped = {};
+  for (const r of rows || []) {
+    if (!grouped[r.server]) grouped[r.server] = [];
+    grouped[r.server].push(r);
+  }
+  const out = {};
+  for (const [server, daemons] of Object.entries(grouped)) {
+    const states = daemons.map(d => d.state);
+    const allRunning = states.every(s => s === "Running");
+    const allStopped = states.every(s => s !== "Running");
+    let aggregate;
+    if (allRunning) aggregate = "Running";
+    else if (allStopped) aggregate = states[0] ?? "Stopped";
+    else aggregate = "Partial";
+    const ports = daemons.map(d => d.port).filter(p => p > 0).sort((a, b) => a - b);
+    out[server] = {
+      server,
+      state: aggregate,
+      port: ports[0] ?? null,
+      daemonCount: daemons.length,
+    };
+  }
+  return out;
+}
 
 // escapeHtml replaces HTML-significant characters with their entity forms
 // so user-controlled strings can be safely interpolated into innerHTML or

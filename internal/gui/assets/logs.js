@@ -21,15 +21,45 @@ window.mcphub.screens.logs = function(root) {
   // same `server` and different `daemon` names and no "default" daemon,
   // so we key the picker by (server, daemon) and render "server (daemon)"
   // whenever the daemon is not the single-daemon "default".
+  //
+  // Workspace-scoped lazy-proxy daemons (registered via `mcphub register
+  // <workspace> <lang>`) write logs to lsp-<workspaceKey>-<language>.log
+  // per internal/cli/daemon_workspace.go, not to the <server>-<daemon>.log
+  // path that api.LogsGet reads. Selecting such a row from this dropdown
+  // would hit api.LogsGet and show "no log output yet" even when the
+  // workspace log file exists. Until Phase 3B-II adds proper workspace
+  // log surfacing, filter them out of the picker using the same structural
+  // predicate as internal/cli/status.go `filterWorkspaceScoped`: task_name
+  // prefix `mcp-local-hub-lsp-`. Structural (task_name) rather than
+  // field-based (workspace/lifecycle) because those fields are registry-
+  // derived and may be empty if enrichment failed, which must not let a
+  // workspace-proxy row sneak back into the picker.
+  const LAZY_PROXY_PREFIX = "mcp-local-hub-lsp-";
+  function isWorkspaceScoped(row) {
+    const tn = row && row.task_name ? String(row.task_name) : "";
+    // Windows scheduler occasionally emits a leading backslash on task names.
+    const stripped = tn.startsWith("\\") ? tn.slice(1) : tn;
+    return stripped.startsWith(LAZY_PROXY_PREFIX);
+  }
+
   fetch("/api/status").then(r => r.json()).then(rows => {
-    (rows || []).forEach(r => {
+    const all = rows || [];
+    const eligible = all.filter(r => !isWorkspaceScoped(r));
+    eligible.forEach(r => {
       const opt = document.createElement("option");
       const label = r.daemon && r.daemon !== "default" ? `${r.server} (${r.daemon})` : r.server;
       opt.value = JSON.stringify({server: r.server, daemon: r.daemon || ""});
       opt.textContent = label;
       sel.appendChild(opt);
     });
-    if ((rows || []).length) load();
+    if (eligible.length) {
+      load();
+    } else {
+      const skipped = all.length - eligible.length;
+      body.textContent = skipped > 0
+        ? `No global-server logs available (${skipped} workspace-proxy entries hidden — Phase 3B-II will surface their lsp-<key>-<lang>.log files).`
+        : "No daemons running.";
+    }
   });
 
   async function load() {
