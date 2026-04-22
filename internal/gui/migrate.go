@@ -23,7 +23,7 @@ type migrateRequest struct {
 }
 
 func registerMigrateRoutes(s *Server) {
-	s.mux.HandleFunc("/api/migrate", func(w http.ResponseWriter, r *http.Request) {
+	s.mux.HandleFunc("/api/migrate", s.requireSameOrigin(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", "POST")
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -39,5 +39,5 @@ func registerMigrateRoutes(s *Server) {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
-	})
+	}))
 }

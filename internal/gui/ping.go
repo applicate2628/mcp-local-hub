@@ -20,7 +20,7 @@ func registerPingRoutes(s *Server) {
 			"version": s.cfg.Version,
 		})
 	})
-	s.mux.HandleFunc("/api/activate-window", func(w http.ResponseWriter, r *http.Request) {
+	s.mux.HandleFunc("/api/activate-window", s.requireSameOrigin(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", "POST")
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -30,5 +30,5 @@ func registerPingRoutes(s *Server) {
 			s.onActivateWindow()
 		}
 		w.WriteHeader(http.StatusNoContent)
-	})
+	}))
 }

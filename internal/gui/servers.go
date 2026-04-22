@@ -10,7 +10,7 @@ import (
 // URL pattern: /api/servers/<name>/<action>. Today the only supported action
 // is "restart"; other actions 404 so future additions stay additive.
 func registerServerRoutes(s *Server) {
-	s.mux.HandleFunc("/api/servers/", func(w http.ResponseWriter, r *http.Request) {
+	s.mux.HandleFunc("/api/servers/", s.requireSameOrigin(func(w http.ResponseWriter, r *http.Request) {
 		rest := strings.TrimPrefix(r.URL.Path, "/api/servers/")
 		parts := strings.Split(rest, "/")
 		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
@@ -33,5 +33,5 @@ func registerServerRoutes(s *Server) {
 		default:
 			http.NotFound(w, r)
 		}
-	})
+	}))
 }
