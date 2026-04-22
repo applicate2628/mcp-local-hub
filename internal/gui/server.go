@@ -9,6 +9,8 @@ import (
 	"os"
 	"sync/atomic"
 	"time"
+
+	"mcp-local-hub/internal/api"
 )
 
 // Config drives Server construction. Zero values are sensible defaults.
@@ -25,6 +27,18 @@ type Config struct {
 	PID int
 }
 
+// scanner is the narrow interface that the /api/scan handler needs.
+// realScanner is the production adapter; tests inject their own.
+type scanner interface {
+	Scan() (*api.ScanResult, error)
+}
+
+type realScanner struct{}
+
+func (realScanner) Scan() (*api.ScanResult, error) {
+	return api.NewAPI().Scan()
+}
+
 // Server is the GUI HTTP server. It owns a net/http.Server bound to
 // 127.0.0.1, a ready-to-register mux, and a best-effort shutdown path.
 type Server struct {
@@ -33,6 +47,7 @@ type Server struct {
 	srv              *http.Server
 	port             atomic.Int32 // set after Listen, read by Port()
 	onActivateWindow func()
+	scanner          scanner
 }
 
 // NewServer constructs the Server. It registers the ping handler
@@ -42,8 +57,10 @@ func NewServer(cfg Config) *Server {
 		cfg.PID = os.Getpid()
 	}
 	s := &Server{cfg: cfg, mux: http.NewServeMux()}
+	s.scanner = realScanner{}
 	registerPingRoutes(s)
 	registerAssetRoutes(s)
+	registerScanRoutes(s)
 	return s
 }
 
