@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"sync/atomic"
 	"time"
 )
@@ -15,24 +16,41 @@ type Config struct {
 	// Port to bind on 127.0.0.1. Zero lets the OS pick one from the
 	// ephemeral range; the chosen port is reported via Server.Port().
 	Port int
+	// Version is surfaced by /api/ping so the GUI's About screen and the
+	// second-instance probe can confirm identity across releases.
+	Version string
+	// PID is surfaced by /api/ping so the second-instance probe can
+	// verify the pidport file's PID matches the live process. Zero
+	// means "use os.Getpid()" (the normal production path).
+	PID int
 }
 
 // Server is the GUI HTTP server. It owns a net/http.Server bound to
 // 127.0.0.1, a ready-to-register mux, and a best-effort shutdown path.
 type Server struct {
-	cfg  Config
-	mux  *http.ServeMux
-	srv  *http.Server
-	port atomic.Int32 // set after Listen, read by Port()
+	cfg              Config
+	mux              *http.ServeMux
+	srv              *http.Server
+	port             atomic.Int32 // set after Listen, read by Port()
+	onActivateWindow func()
 }
 
 // NewServer constructs the Server. It registers the ping handler
 // immediately so even a minimal Server answers /api/ping.
 func NewServer(cfg Config) *Server {
+	if cfg.PID == 0 {
+		cfg.PID = os.Getpid()
+	}
 	s := &Server{cfg: cfg, mux: http.NewServeMux()}
-	s.mux.HandleFunc("/api/ping", s.handlePing)
+	registerPingRoutes(s)
 	return s
 }
+
+// OnActivateWindow registers the callback invoked when POST
+// /api/activate-window is received. A second `mcphub gui` invocation
+// posts here after handshaking with the incumbent; the callback is the
+// hook that the tray + main window use to come to front.
+func (s *Server) OnActivateWindow(fn func()) { s.onActivateWindow = fn }
 
 // Port returns the actual TCP port the server is bound to. Zero until
 // Start has signaled ready.
@@ -71,10 +89,4 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 		}
 		return err
 	}
-}
-
-// handlePing is the skeleton that Task 3 fills out with version info.
-func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write([]byte(`{"ok":true}`))
 }
