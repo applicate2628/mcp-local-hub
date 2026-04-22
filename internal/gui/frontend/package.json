@@ -1,0 +1,21 @@
+{
+  "name": "mcp-local-hub-frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "preact": "^10.22.0"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.9.0",
+    "typescript": "^5.5.0",
+    "vite": "^5.4.0",
+    "vitest": "^2.1.0"
+  }
+}
