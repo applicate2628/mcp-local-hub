@@ -105,6 +105,30 @@ func TestLogs_RejectsPathTraversalDaemon(t *testing.T) {
 	}
 }
 
+// TestLogs_StreamRejectsNonGET verifies the method gate at the top of
+// streamLogs. Spec §4.6 defines only GET /api/logs/:server/stream, and
+// the outer route dispatches to streamLogs solely on the trailing path
+// segment — so without an explicit method check a POST / PUT / DELETE
+// to /api/logs/:server/stream would open a long-lived SSE response on
+// an unintended verb. The handler must return 405 with Allow: GET for
+// any non-GET method before any SSE headers are written.
+func TestLogs_StreamRejectsNonGET(t *testing.T) {
+	fl := &fakeLogs{body: "x"}
+	s := NewServer(Config{})
+	s.logs = fl
+	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete} {
+		req := httptest.NewRequest(method, "/api/logs/serena/stream", nil)
+		rec := httptest.NewRecorder()
+		s.mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusMethodNotAllowed {
+			t.Errorf("%s /api/logs/serena/stream → status %d, want 405", method, rec.Code)
+		}
+		if got := rec.Header().Get("Allow"); got != "GET" {
+			t.Errorf("%s /api/logs/serena/stream → Allow=%q, want GET", method, got)
+		}
+	}
+}
+
 // TestLogs_RejectsPathTraversalServer guards the server path segment
 // of /api/logs/:server against path-segment injection. A value like
 // "foo/bar" lands as parts=["foo","bar"] inside the handler; without

@@ -16,6 +16,19 @@ type LogsOpts struct {
 	Tail   int    // 0 = all lines
 }
 
+// LogPlaceholderPrefix is the fixed leading substring of the human-readable
+// body returned by LogsGet/LogsGetFrom when the log file for (server,daemon)
+// does not exist yet. The full body continues with the server and daemon
+// names and closing explanatory text, so callers that need to distinguish
+// "placeholder" from real log content should use strings.HasPrefix against
+// this constant rather than full-string equality.
+//
+// The GUI SSE tail-follow (internal/gui/logs.go) depends on this: if it
+// primed its cursor from the placeholder's length, the first bytes of the
+// real log file — once the daemon finally writes to stderr — would look
+// already-emitted and be silently skipped.
+const LogPlaceholderPrefix = "(no log output yet"
+
 // LogsGetFrom reads the log file for (server, daemon) and returns the last
 // Tail lines. Exposed (rather than LogsGet) so tests can pass a custom dir.
 func (a *API) LogsGetFrom(opts LogsOpts) (string, error) {
@@ -29,8 +42,8 @@ func (a *API) LogsGetFrom(opts LogsOpts) (string, error) {
 		// placeholder instead of an OS error so `mcphub logs perftools`
 		// doesn't look like the daemon is broken when it's fine.
 		if os.IsNotExist(err) {
-			return fmt.Sprintf("(no log output yet — %s-%s daemon hasn't written to stderr, which is normal for healthy stdio-only servers)\n",
-				opts.Server, opts.Daemon), nil
+			return fmt.Sprintf("%s — %s-%s daemon hasn't written to stderr, which is normal for healthy stdio-only servers)\n",
+				LogPlaceholderPrefix, opts.Server, opts.Daemon), nil
 		}
 		return "", err
 	}

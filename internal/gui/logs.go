@@ -20,6 +20,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"mcp-local-hub/internal/api"
 )
 
 // validNameRe is the safe charset for server + daemon names that flow
@@ -116,6 +118,17 @@ func registerLogsRoutes(s *Server) {
 // The handler exits when the client disconnects (r.Context cancellation)
 // or when the provider returns an error (sent as an "error" SSE event).
 func streamLogs(s *Server, server, daemon string, w http.ResponseWriter, r *http.Request) {
+	// Spec §4.6 defines only GET /api/logs/:server/stream. Enforce that
+	// here rather than after the flusher type-assert: the outer route
+	// dispatches to streamLogs based solely on the trailing path segment,
+	// so without this gate POST /api/logs/foo/stream (or any non-GET
+	// method) would open a long-lived SSE response. Reject with 405 +
+	// Allow: GET before any SSE headers are written.
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
@@ -138,8 +151,16 @@ func streamLogs(s *Server, server, daemon string, w http.ResponseWriter, r *http
 	// this the first tick emits the ENTIRE current log as live
 	// "log-line" events — duplicating what /api/logs/:server already
 	// rendered when the UI first opened the Logs screen.
+	//
+	// Skip the prime when the body is api.LogsGet's "no log file yet"
+	// placeholder (file does not exist and the API returns nil error +
+	// human-readable text). Seeding the cursor from the placeholder's
+	// length would silently discard the first len(placeholder) bytes of
+	// the real log once the daemon finally writes to stderr — the user
+	// would permanently miss the start of that first session. See
+	// api.LogPlaceholderPrefix for the shared sentinel.
 	var lastLen int
-	if body, err := s.logs.Logs(server, daemon, 0); err == nil {
+	if body, err := s.logs.Logs(server, daemon, 0); err == nil && !isLogPlaceholder(body) {
 		lastLen = len(body)
 	}
 
@@ -176,4 +197,17 @@ func streamLogs(s *Server, server, daemon string, w http.ResponseWriter, r *http
 			}
 		}
 	}
+}
+
+// isLogPlaceholder reports whether body is the "no log file yet"
+// placeholder returned by api.LogsGet when the log file for a
+// (server, daemon) pair does not exist yet. That body is human-readable
+// text, not log content, so streamLogs must NOT seed its lastLen cursor
+// from its length — doing so would silently skip the first
+// len(placeholder) bytes of the real log once the daemon eventually
+// writes to stderr. Matches by prefix because the full placeholder
+// interpolates server/daemon names; the prefix is the stable sentinel
+// exported as api.LogPlaceholderPrefix.
+func isLogPlaceholder(body string) bool {
+	return strings.HasPrefix(body, api.LogPlaceholderPrefix)
 }
