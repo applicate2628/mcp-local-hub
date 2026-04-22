@@ -54,9 +54,14 @@ func (realStatusProvider) Status() ([]api.DaemonStatus, error) {
 // migrator is the narrow interface the /api/migrate handler needs.
 // The handler treats the operation as a bulk "apply changes" — any failed
 // (server, client) row inside the MigrateReport is surfaced as an error.
+// clients narrows the set of client bindings that get rewritten (empty means
+// "every binding configured for these servers"); it maps directly onto
+// api.MigrateOpts.ClientsInclude. The GUI matrix is per-cell (server × client),
+// so the handler must be able to address a single cell without touching the
+// server's other client bindings — hence clients rides alongside servers.
 // realMigrator is the production adapter; tests inject their own.
 type migrator interface {
-	Migrate(servers []string) error
+	Migrate(servers, clients []string) error
 }
 
 type realMigrator struct{}
@@ -66,8 +71,13 @@ type realMigrator struct{}
 // the production embed-first path — this mirrors the CLI's scanManifestDir()
 // returning "". The ScanOpts client-path fields are documented as unused by
 // the migrate flow (see internal/api/migrate.go), so we do not populate them.
-func (realMigrator) Migrate(servers []string) error {
-	_, err := api.NewAPI().MigrateFrom(api.MigrateOpts{Servers: servers})
+// clients is forwarded into MigrateOpts.ClientsInclude; an empty slice
+// preserves the original "all clients bound in the manifest" behavior.
+func (realMigrator) Migrate(servers, clients []string) error {
+	_, err := api.NewAPI().MigrateFrom(api.MigrateOpts{
+		Servers:        servers,
+		ClientsInclude: clients,
+	})
 	return err
 }
 

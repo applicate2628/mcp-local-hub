@@ -7,8 +7,19 @@ import (
 	"net/http"
 )
 
+// migrateRequest is the /api/migrate POST body.
+//
+// Servers is the list of server names to migrate. Clients is optional: when
+// non-empty it narrows the rewrite to the listed client adapters, matching
+// api.MigrateOpts.ClientsInclude semantics. An empty/omitted Clients preserves
+// the original "rewrite every client binding configured for these servers"
+// behavior — useful for CLI-style "migrate whole server" workflows.
+//
+// The GUI sends both fields so flipping one (server, client) checkbox does
+// not silently rewrite the other client rows on the same server.
 type migrateRequest struct {
 	Servers []string `json:"servers"`
+	Clients []string `json:"clients,omitempty"`
 }
 
 func registerMigrateRoutes(s *Server) {
@@ -23,7 +34,7 @@ func registerMigrateRoutes(s *Server) {
 			writeAPIError(w, fmt.Errorf("invalid JSON: %w", err), http.StatusBadRequest, "BAD_REQUEST")
 			return
 		}
-		if err := s.migrator.Migrate(req.Servers); err != nil {
+		if err := s.migrator.Migrate(req.Servers, req.Clients); err != nil {
 			writeAPIError(w, err, http.StatusInternalServerError, "MIGRATE_FAILED")
 			return
 		}

@@ -46,12 +46,10 @@ window.mcphub.screens.logs = function(root) {
   followEl.addEventListener("change", load);
   document.getElementById("logs-refresh").addEventListener("click", load);
 
-  // Cleanup on screen swap
-  const observer = new MutationObserver(() => {
-    if (!document.body.contains(root)) {
-      if (es) es.close();
-      observer.disconnect();
-    }
-  });
-  observer.observe(document.body, {childList: true, subtree: true});
+  // Close the active EventSource (if any) on screen swap. See dashboard.js
+  // for the full rationale: #screen-root is reused across swaps so a
+  // MutationObserver on removal never fires. The cleanup closure captures
+  // `es` by reference, so it always sees the latest connection — whether
+  // the user toggled Follow multiple times or never enabled it at all.
+  window.mcphub.registerCleanup(() => { if (es) es.close(); });
 };

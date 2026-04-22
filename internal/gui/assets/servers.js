@@ -10,32 +10,59 @@ window.mcphub.screens.servers = async function(root) {
   const content = document.getElementById("servers-content");
   const applyBtn = document.getElementById("apply-migrate");
   const applyStatus = document.getElementById("apply-status");
-  const toMigrate = new Set();
+  // Per-cell dirty tracking: server name -> Set<client name>. A (server, client)
+  // pair is dirty iff the user's checked state differs from defaultChecked.
+  // Tracking per-cell (instead of per-server) is load-bearing: /api/migrate's
+  // ClientsInclude narrows the rewrite to the listed clients, so sending ONLY
+  // the affected (server, client) pairs prevents one flipped checkbox from
+  // silently rewriting every other client binding on that server.
+  const dirty = new Map();
 
   function onCheckboxChange(e) {
     const server = e.target.dataset.server;
+    const client = e.target.dataset.client;
     const initial = e.target.defaultChecked;
-    if (e.target.checked !== initial) toMigrate.add(server);
-    else toMigrate.delete(server);
-    applyBtn.disabled = toMigrate.size === 0;
+    if (e.target.checked !== initial) {
+      let clients = dirty.get(server);
+      if (!clients) { clients = new Set(); dirty.set(server, clients); }
+      clients.add(client);
+    } else {
+      const clients = dirty.get(server);
+      if (clients) {
+        clients.delete(client);
+        if (clients.size === 0) dirty.delete(server);
+      }
+    }
+    // Apply stays enabled as long as ANY cell (across any server) is dirty.
+    applyBtn.disabled = dirty.size === 0;
   }
 
   async function applyChanges() {
-    const servers = [...toMigrate];
+    // Derive request payload from per-cell dirty state:
+    //   servers = unique server names with at least one dirty cell
+    //   clients = unique client names across all dirty cells
+    // The backend will process the cartesian intersection internally via
+    // MigrateOpts.ClientsInclude. This is safe because the GUI only sends a
+    // client name when at least one of its cells is dirty, so every listed
+    // client has a justified rewrite in the current apply.
+    const servers = [...dirty.keys()];
+    const clientSet = new Set();
+    for (const cs of dirty.values()) for (const c of cs) clientSet.add(c);
+    const clients = [...clientSet];
     applyBtn.disabled = true;
     applyStatus.textContent = `Migrating ${servers.join(", ")}…`;
     try {
       const resp = await fetch("/api/migrate", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({servers}),
+        body: JSON.stringify({servers, clients}),
       });
       if (!resp.ok) {
         const body = await resp.json().catch(() => ({error: "unknown"}));
         throw new Error(body.error);
       }
       applyStatus.textContent = "Migrated. Refreshing…";
-      toMigrate.clear();
+      dirty.clear();
       render(); // reload the matrix
     } catch (err) {
       applyStatus.innerHTML = `<span class="error">Failed: ${err.message}</span>`;

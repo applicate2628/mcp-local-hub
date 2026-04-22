@@ -52,12 +52,11 @@ window.mcphub.screens.dashboard = function(root) {
     render();
   });
 
-  // Cleanup: when screen swaps (root is replaced), close the EventSource.
-  const observer = new MutationObserver(() => {
-    if (!document.body.contains(root)) {
-      es.close();
-      observer.disconnect();
-    }
-  });
-  observer.observe(document.body, {childList: true, subtree: true});
+  // Close the EventSource when the router swaps screens. #screen-root is
+  // reused across swaps (innerHTML is cleared but the element stays in the
+  // DOM), so a MutationObserver on body removal would never fire — every
+  // visit to Dashboard would leak another live EventSource. The router's
+  // cleanup registry in app.js runs pending callbacks before rendering the
+  // next screen, which is the load-bearing lifecycle hook here.
+  window.mcphub.registerCleanup(() => es.close());
 };
