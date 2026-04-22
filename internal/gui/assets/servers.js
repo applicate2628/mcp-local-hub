@@ -61,10 +61,15 @@ window.mcphub.screens.servers = async function(root) {
         });
         if (!resp.ok) {
           const body = await resp.json().catch(() => ({error: resp.status}));
-          failed.push(`${change.server}: ${body.error}`);
+          // Both server name (from scanned config map keys) and the API
+          // error string are untrusted; escape each before building the
+          // message that gets interpolated into innerHTML below. Joining
+          // pre-escaped strings with "; " is safe because "; " contains
+          // no HTML metacharacters.
+          failed.push(`${escapeHtml(change.server)}: ${escapeHtml(body.error ?? String(resp.status))}`);
         }
       } catch (e) {
-        failed.push(`${change.server}: ${e.message}`);
+        failed.push(`${escapeHtml(change.server)}: ${escapeHtml(e.message ?? "unknown")}`);
       }
     }
     if (failed.length === 0) {

@@ -18,7 +18,8 @@ var ErrSingleInstanceBusy = errors.New("another mcphub gui is already running")
 
 // SingleInstanceLock represents the acquired single-instance ownership.
 // Release must be called on shutdown (or by an errdefer immediately after
-// acquisition) to free the lock file and remove the pidport record.
+// acquisition) to free the flock. The pidport file is intentionally NOT
+// removed on Release — see Release() for the rationale.
 type SingleInstanceLock struct {
 	pidport string
 	fl      *flock.Flock
@@ -58,34 +59,28 @@ func acquireSingleInstanceAt(pidportPath string, port int) (*SingleInstanceLock,
 	return &SingleInstanceLock{pidport: pidportPath, fl: fl}, nil
 }
 
-// Release removes the pidport record and releases the lock. Idempotent.
+// Release releases ONLY the flock — it does NOT remove the pidport file.
+// Idempotent.
+//
+// Removing the pidport on Release is unsafe: a racing successor that
+// acquires the flock (between our Unlock and Remove) and writes its own
+// pidport would have its file deleted. Round 7 (unlock-first) and round
+// 8 (ownership PID check before Remove) both left a TOCTOU window
+// between the read and the remove. The flock is the source of truth for
+// ownership; the pidport file is metadata that the next acquirer
+// overwrites atomically via os.WriteFile in acquireSingleInstanceAt.
+//
+// Stale-file harmless because:
+//   - No flock holder + listener gone → TryActivateIncumbent probes the
+//     port → connection-refused → "incumbent unreachable" error surfaces
+//     correctly to the caller.
+//   - Next acquirer overwrites the file before any second-instance
+//     handshake can read it.
 func (l *SingleInstanceLock) Release() {
 	if l == nil || l.fl == nil {
 		return
 	}
-	// Order matters: unlock the flock FIRST so a racing second instance
-	// can acquire ownership immediately. Removing the pidport before
-	// unlock leaves a window where the second instance sees
-	// ErrSingleInstanceBusy but ReadPidport fails (file gone), causing
-	// false-negative "running but unreachable" failures during normal
-	// shutdown.
-	//
-	// The unlock-first order introduces a SEPARATE race: between our
-	// Unlock and our Remove, a racing successor can acquire the flock
-	// and write ITS pidport; a blind os.Remove would then delete the
-	// successor's metadata file and cause the same false-negative for
-	// the next probing client. We close that race by checking
-	// ownership: read the pidport, and only remove it if the recorded
-	// PID is still ours. A tiny TOCTOU window remains between the read
-	// and the remove, but a successor's subsequent os.WriteFile
-	// overwrites the file in place so the window collapses quickly in
-	// practice. A read error (file already gone, or a successor wrote
-	// a malformed transient state) is treated as "not ours" — safer to
-	// leak a stale file than to clobber a successor.
 	_ = l.fl.Unlock()
-	if pid, _, err := ReadPidport(l.pidport); err == nil && pid == os.Getpid() {
-		_ = os.Remove(l.pidport)
-	}
 	l.fl = nil
 }
 
