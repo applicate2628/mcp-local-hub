@@ -39,6 +39,17 @@ func (realScanner) Scan() (*api.ScanResult, error) {
 	return api.NewAPI().Scan()
 }
 
+// statusProvider is the narrow interface the /api/status handler needs.
+type statusProvider interface {
+	Status() ([]api.DaemonStatus, error)
+}
+
+type realStatusProvider struct{}
+
+func (realStatusProvider) Status() ([]api.DaemonStatus, error) {
+	return api.NewAPI().Status()
+}
+
 // Server is the GUI HTTP server. It owns a net/http.Server bound to
 // 127.0.0.1, a ready-to-register mux, and a best-effort shutdown path.
 type Server struct {
@@ -48,6 +59,7 @@ type Server struct {
 	port             atomic.Int32 // set after Listen, read by Port()
 	onActivateWindow func()
 	scanner          scanner
+	status           statusProvider
 }
 
 // NewServer constructs the Server. It registers the ping handler
@@ -58,9 +70,11 @@ func NewServer(cfg Config) *Server {
 	}
 	s := &Server{cfg: cfg, mux: http.NewServeMux()}
 	s.scanner = realScanner{}
+	s.status = realStatusProvider{}
 	registerPingRoutes(s)
 	registerAssetRoutes(s)
 	registerScanRoutes(s)
+	registerStatusRoutes(s)
 	return s
 }
 
