@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -815,6 +816,9 @@ func BuildPlan(m *config.ServerManifest, daemonFilter string) (*Plan, error) {
 		if urlPath == "" {
 			urlPath = "/mcp"
 		}
+		if err := validateClientURLPath(urlPath); err != nil {
+			return nil, fmt.Errorf("invalid url_path for client %q: %w", b.Client, err)
+		}
 		url := fmt.Sprintf("http://localhost:%d%s", daemon.Port, urlPath)
 		p.ClientUpdates = append(p.ClientUpdates, ClientUpdatePlan{
 			Client:     b.Client,
@@ -825,6 +829,23 @@ func BuildPlan(m *config.ServerManifest, daemonFilter string) (*Plan, error) {
 		})
 	}
 	return p, nil
+}
+
+func validateClientURLPath(urlPath string) error {
+	if !strings.HasPrefix(urlPath, "/") {
+		return fmt.Errorf("must start with '/'")
+	}
+	if strings.HasPrefix(urlPath, "//") {
+		return fmt.Errorf("must not start with '//'")
+	}
+	u, err := url.Parse(urlPath)
+	if err != nil {
+		return fmt.Errorf("parse url_path: %w", err)
+	}
+	if u.Scheme != "" || u.Host != "" || u.User != nil {
+		return fmt.Errorf("must be a path-only URL")
+	}
+	return nil
 }
 
 func findDaemon(m *config.ServerManifest, name string) (config.DaemonSpec, bool) {

@@ -124,6 +124,19 @@ func TestBuildPlan_UnknownDaemonFilter_Errors(t *testing.T) {
 	}
 }
 
+func TestBuildPlan_InvalidClientURLPath_Errors(t *testing.T) {
+	m := serenaLikeManifest()
+	m.ClientBindings[0].URLPath = "@evil.com/mcp"
+
+	_, err := BuildPlan(m, "")
+	if err == nil {
+		t.Fatal("expected error for invalid url_path, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid url_path") {
+		t.Fatalf("error = %v, want mention of invalid url_path", err)
+	}
+}
+
 // TestPreflight_RespectsDaemonFilter ensures --daemon filter keeps Preflight
 // from checking ports of unrelated daemons that may legitimately be occupied
 // by a previous partial install.
