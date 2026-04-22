@@ -3,6 +3,7 @@
 package scheduler
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -177,5 +178,36 @@ func TestSameWindowsUser(t *testing.T) {
 				t.Fatalf("sameWindowsUser(%q, %q)=%v, want %v", tc.owner, tc.current, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestResolveSchtasksPath(t *testing.T) {
+	t.Setenv("SystemRoot", `C:\Windows`)
+	t.Setenv("WINDIR", "")
+	got, err := resolveSchtasksPath()
+	if err != nil {
+		t.Fatalf("resolveSchtasksPath() error = %v", err)
+	}
+	want := filepath.Join(`C:\Windows`, "System32", "schtasks.exe")
+	if got != want {
+		t.Fatalf("resolveSchtasksPath() = %q, want %q", got, want)
+	}
+}
+
+func TestResolveSchtasksPathFallbackAndMissing(t *testing.T) {
+	t.Setenv("SystemRoot", "")
+	t.Setenv("WINDIR", `D:\Win`)
+	got, err := resolveSchtasksPath()
+	if err != nil {
+		t.Fatalf("resolveSchtasksPath() fallback error = %v", err)
+	}
+	want := filepath.Join(`D:\Win`, "System32", "schtasks.exe")
+	if got != want {
+		t.Fatalf("resolveSchtasksPath() fallback = %q, want %q", got, want)
+	}
+
+	t.Setenv("WINDIR", "")
+	if _, err := resolveSchtasksPath(); err == nil {
+		t.Fatal("resolveSchtasksPath() expected error when SystemRoot/WINDIR unset")
 	}
 }
