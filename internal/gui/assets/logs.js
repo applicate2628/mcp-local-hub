@@ -28,23 +28,46 @@ window.mcphub.screens.logs = function(root) {
   // path that api.LogsGet reads. Selecting such a row from this dropdown
   // would hit api.LogsGet and show "no log output yet" even when the
   // workspace log file exists. Until Phase 3B-II adds proper workspace
-  // log surfacing, filter them out of the picker using the same structural
-  // predicate as internal/cli/status.go `filterWorkspaceScoped`: task_name
-  // prefix `mcp-local-hub-lsp-`. Structural (task_name) rather than
-  // field-based (workspace/lifecycle) because those fields are registry-
-  // derived and may be empty if enrichment failed, which must not let a
-  // workspace-proxy row sneak back into the picker.
-  const LAZY_PROXY_PREFIX = "mcp-local-hub-lsp-";
+  // log surfacing, filter them out of the picker using a structural
+  // task_name match (rather than field-based on workspace/lifecycle,
+  // which are registry-derived and may be empty if enrichment failed,
+  // and must not let a workspace-proxy row sneak back into the picker).
+  //
+  // Mirror api.IsLazyProxyTaskName (internal/api/status_enrich.go):
+  // lazy-proxy task names are strictly
+  // `mcp-local-hub-lsp-<workspaceKey>-<language>`, where workspaceKey
+  // is exactly 8 lowercase hex chars (api.WorkspaceKey) and language is
+  // a non-empty suffix. A loose startsWith("mcp-local-hub-lsp-") check
+  // would false-positive on a hypothetical global server named `lsp-*`
+  // (e.g., `lsp-tools` → task `mcp-local-hub-lsp-tools-default`),
+  // silently hiding its row from the picker. Match the canonical
+  // structure directly.
+  const LAZY_PROXY_RE = /^mcp-local-hub-lsp-[0-9a-f]{8}-[^/]+$/;
   function isWorkspaceScoped(row) {
     const tn = row && row.task_name ? String(row.task_name) : "";
     // Windows scheduler occasionally emits a leading backslash on task names.
     const stripped = tn.startsWith("\\") ? tn.slice(1) : tn;
-    return stripped.startsWith(LAZY_PROXY_PREFIX);
+    return LAZY_PROXY_RE.test(stripped);
   }
 
-  fetch("/api/status").then(r => r.json()).then(rows => {
-    const all = rows || [];
-    const eligible = all.filter(r => !isWorkspaceScoped(r));
+  // Backend returns the {error, code} JSON envelope (via writeAPIError) on
+  // failures — not an array. The previous `(rows || []).filter(...)` would
+  // treat the truthy error object as iterable and throw at .filter, leaving
+  // Logs blank with the controls still enabled; a later Refresh click would
+  // then try to JSON.parse("") in load() and throw again. Require resp.ok
+  // AND an actual array before iterating; on failure surface the envelope
+  // message and disable every downstream control so no later click or
+  // change event can re-enter load() with an empty sel.value.
+  fetch("/api/status").then(async r => {
+    const data = await r.json().catch(() => null);
+    if (!r.ok || !Array.isArray(data)) {
+      body.textContent = "Failed to load status: " + (data?.error ?? r.statusText ?? "unknown");
+      sel.disabled = true;
+      document.getElementById("logs-refresh").disabled = true;
+      followEl.disabled = true;
+      return;
+    }
+    const eligible = data.filter(r => !isWorkspaceScoped(r));
     eligible.forEach(r => {
       const opt = document.createElement("option");
       const label = r.daemon && r.daemon !== "default" ? `${r.server} (${r.daemon})` : r.server;
@@ -55,7 +78,7 @@ window.mcphub.screens.logs = function(root) {
     if (eligible.length) {
       load();
     } else {
-      const skipped = all.length - eligible.length;
+      const skipped = data.length - eligible.length;
       body.textContent = skipped > 0
         ? `No global-server logs available (${skipped} workspace-proxy entries hidden — Phase 3B-II will surface their lsp-<key>-<lang>.log files).`
         : "No daemons running.";
@@ -69,6 +92,11 @@ window.mcphub.screens.logs = function(root) {
       followEl.disabled = true;
       sel.disabled = true;
     }
+  }).catch(err => {
+    body.textContent = "Failed to load status: " + err.message;
+    sel.disabled = true;
+    document.getElementById("logs-refresh").disabled = true;
+    followEl.disabled = true;
   });
 
   async function load() {

@@ -54,9 +54,24 @@ window.mcphub.screens.dashboard = function(root) {
   }
 
   // Initial load via /api/status, then live updates via SSE.
-  fetch("/api/status").then(r => r.json()).then(rows => {
-    (rows || []).forEach(r => state[keyFor(r)] = r);
+  //
+  // Backend returns the {error, code} JSON envelope (via writeAPIError)
+  // on failures — not an array. The previous `(rows || []).forEach(...)`
+  // guard treated the truthy error object as iterable and threw at
+  // .forEach, leaving the dashboard blank with the live SSE stream
+  // never getting wired up. Explicitly require resp.ok AND an actual
+  // array, and surface the error envelope's message through the
+  // existing .error CSS class.
+  fetch("/api/status").then(async r => {
+    const data = await r.json().catch(() => null);
+    if (!r.ok || !Array.isArray(data)) {
+      cardsEl.innerHTML = `<p class="error">Failed to load status: ${escapeHtml(data?.error ?? r.statusText ?? "unknown")}</p>`;
+      return;
+    }
+    data.forEach(row => state[keyFor(row)] = row);
     render();
+  }).catch(err => {
+    cardsEl.innerHTML = `<p class="error">Failed to load status: ${escapeHtml(err.message)}</p>`;
   });
 
   const es = new EventSource("/api/events");
