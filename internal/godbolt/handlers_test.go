@@ -59,6 +59,41 @@ func TestGodboltDisabled_BlocksOutboundRequests(t *testing.T) {
 	}
 }
 
+func TestGodboltDisabled_BlocksFormatToolOutboundRequests(t *testing.T) {
+	t.Setenv("MCPHUB_GODBOLT_DISABLE", "1")
+
+	var reached bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	gs := &GodboltServer{httpClient: srv.Client(), baseURL: srv.URL + "/api"}
+	rawArgs, _ := json.Marshal(map[string]any{
+		"formatter": "clangformat",
+		"source":    "int main(){}",
+	})
+
+	result, err := gs.formatTool(t.Context(), (&mockCallToolRequest{Arguments: rawArgs}).toReal())
+	if err != nil {
+		t.Fatalf("formatTool returned unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("formatTool: expected IsError=true when MCPHUB_GODBOLT_DISABLE set")
+	}
+	text, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("Content[0] is not TextContent: %T", result.Content[0])
+	}
+	if !strings.Contains(text.Text, ErrGodboltDisabled.Error()) {
+		t.Fatalf("formatTool error = %q, want to contain %q", text.Text, ErrGodboltDisabled.Error())
+	}
+	if reached {
+		t.Fatal("formatTool reached remote server despite MCPHUB_GODBOLT_DISABLE")
+	}
+}
+
 func TestCompileTool_SendsAcceptJSON(t *testing.T) {
 	var gotAccept string
 	var gotPayload map[string]any

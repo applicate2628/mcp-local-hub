@@ -653,6 +653,17 @@ func (gs *GodboltServer) compileCMakeTool(ctx context.Context, req *mcp.CallTool
 // POST /api/format/{formatter}
 // Extracts the "answer" field from the JSON response
 func (gs *GodboltServer) formatTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if godboltDisabled() {
+		return &mcp.CallToolResult{
+			IsError: true,
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: ErrGodboltDisabled.Error(),
+				},
+			},
+		}, nil
+	}
+
 	var args struct {
 		Formatter string `json:"formatter"`
 		Source    string `json:"source"`
