@@ -64,7 +64,10 @@ activates the first window and exits 0.`,
 					fmt.Fprintln(cmd.OutOrStderr(), "warning: --force not implemented yet; falling back to handshake")
 				}
 				if err := gui.TryActivateIncumbent(pidportPath, 2*time.Second); err != nil {
-					return fmt.Errorf("another mcphub gui is running but unreachable (%v) — use --force to take over", err)
+					return fmt.Errorf(
+						"another mcphub gui is running but unreachable (%v); "+
+							"if the incumbent process is gone, remove %s.lock and retry",
+						err, pidportPath)
 				}
 				fmt.Fprintln(cmd.OutOrStdout(), "activated existing mcphub gui")
 				return nil

@@ -167,9 +167,10 @@ window.mcphub.screens.servers = async function(root) {
 // where one daemon was down while the other was Running.
 //
 // The aggregate state is:
-//   - "Running"  iff every daemon for this server reports Running
-//   - "All <X>"  (reuses first state) when every daemon is non-Running
-//   - "Partial"  when states are mixed
+//   - the shared state when every daemon reports the exact same state
+//   - "Partial" otherwise — including mixed non-Running states like
+//     Failed + Stopped. Surfacing a single state in that case would hide
+//     that the daemons are in different failure modes.
 // The representative port is the lowest non-zero port for stability and so
 // one running daemon's port stays visible even when another daemon is down.
 function aggregateStatus(rows) {
@@ -181,12 +182,13 @@ function aggregateStatus(rows) {
   const out = {};
   for (const [server, daemons] of Object.entries(grouped)) {
     const states = daemons.map(d => d.state);
-    const allRunning = states.every(s => s === "Running");
-    const allStopped = states.every(s => s !== "Running");
+    const unique = [...new Set(states)];
     let aggregate;
-    if (allRunning) aggregate = "Running";
-    else if (allStopped) aggregate = states[0] ?? "Stopped";
-    else aggregate = "Partial";
+    if (unique.length === 1) {
+      aggregate = unique[0];
+    } else {
+      aggregate = "Partial";
+    }
     const ports = daemons.map(d => d.port).filter(p => p > 0).sort((a, b) => a - b);
     out[server] = {
       server,
