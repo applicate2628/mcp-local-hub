@@ -205,6 +205,24 @@ func streamLogs(s *Server, server, daemon string, w http.ResponseWriter, r *http
 				flusher.Flush()
 				return
 			}
+			if isLogPlaceholder(body) {
+				// The daemon hasn't written anything yet (or the log
+				// file was removed and api.LogsGet is again returning
+				// the "no log file yet" placeholder). Do NOT emit it as
+				// a log-line event and do NOT advance lastLen. Emitting
+				// would push human-readable placeholder text into the
+				// UI's line stream; advancing would seed the cursor
+				// from the placeholder's length (~30 chars), and then
+				// on the next tick the real log — typically shorter
+				// than the placeholder — would hit the
+				// `len(body) < lastLen` rotation branch, which resets
+				// the cursor to the new size and `continue`s, silently
+				// skipping the first bytes of the daemon's first
+				// session. See api.LogPlaceholderPrefix for the shared
+				// sentinel and the prime block above for the matching
+				// guard on the initial fetch.
+				continue
+			}
 			if len(body) < lastLen {
 				// Log rotated or truncated — the file is smaller than
 				// our cursor. Reset to the current size instead of

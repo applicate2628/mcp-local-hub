@@ -1,11 +1,16 @@
 package gui
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"mcp-local-hub/internal/api"
 )
 
 type fakeLogs struct {
@@ -19,6 +24,34 @@ func (f *fakeLogs) Logs(server, daemon string, tail int) (string, error) {
 	f.gotServer = server
 	f.gotDaemon = daemon
 	return f.body, f.err
+}
+
+// scriptedLogs returns a different body per call so a test can simulate
+// the realistic sequence streamLogs observes when Follow is enabled
+// before the daemon has written anything: prime returns the "no log
+// yet" placeholder, the first few ticks keep returning the placeholder
+// (the file still doesn't exist), and a later tick finally returns the
+// real log once the daemon has written to stderr. Calls past the end of
+// seq keep returning the last entry so the streaming loop does not
+// observe an artificial truncation.
+type scriptedLogs struct {
+	mu        sync.Mutex
+	seq       []string
+	idx       int
+	gotServer string
+	gotDaemon string
+}
+
+func (f *scriptedLogs) Logs(server, daemon string, tail int) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.gotServer, f.gotDaemon = server, daemon
+	if f.idx < len(f.seq) {
+		out := f.seq[f.idx]
+		f.idx++
+		return out, nil
+	}
+	return f.seq[len(f.seq)-1], nil
 }
 
 func TestLogs_GetReturnsText(t *testing.T) {
@@ -221,5 +254,86 @@ func TestLogs_RejectsPathTraversalServer(t *testing.T) {
 		if fl.gotServer != "" {
 			t.Errorf("path=%q: provider called with server=%q (want provider NOT called)", c.path, fl.gotServer)
 		}
+	}
+}
+
+// TestStreamLogs_DoesNotEmitOrAdvanceCursorOnPlaceholder pins the R14
+// fix to streamLogs's per-tick loop. R12 added the isLogPlaceholder
+// check for the INITIAL prime of lastLen only; without an equivalent
+// check inside the ticker.C branch, enabling Follow before the daemon
+// writes anything produced this sequence:
+//
+//  1. prime skipped (body is placeholder)  -> lastLen = 0
+//  2. tick 1: body is still placeholder; len(body) > lastLen=0 so the
+//     emission branch ran, pushing "(no log output yet ...)" into the
+//     SSE stream as a log-line event and seeding lastLen ~= 30.
+//  3. tick 2: daemon has now written a short first line (typically
+//     shorter than the placeholder); len(body) < lastLen hits the
+//     rotation branch, which resets the cursor to the new size and
+//     `continue`s -- the first real bytes of that session are never
+//     emitted.
+//
+// The fix detects the placeholder inside the tick loop and `continue`s
+// without advancing lastLen. This test confirms:
+//   - the placeholder text never appears as a log-line payload in the
+//     SSE output (it is not streamable content);
+//   - once the real log appears, its bytes ARE emitted in full (the
+//     rotation branch does not eat them).
+func TestStreamLogs_DoesNotEmitOrAdvanceCursorOnPlaceholder(t *testing.T) {
+	// A well-formed placeholder body matches api.LogPlaceholderPrefix
+	// exactly; the rest of the string interpolates the (server, daemon)
+	// pair and is irrelevant to isLogPlaceholder.
+	placeholder := api.LogPlaceholderPrefix + " for test/default)"
+	realLog := "first-line\nsecond-line\n"
+	fl := &scriptedLogs{seq: []string{
+		placeholder, // prime
+		placeholder, // tick 1
+		placeholder, // tick 2
+		realLog,     // tick 3: daemon finally wrote; stays at this body afterwards
+	}}
+	s := NewServer(Config{})
+	s.logs = fl
+
+	// sseRecorder is defined in events_test.go (same package) and is a
+	// goroutine-safe http.ResponseWriter+Flusher. httptest.NewRecorder
+	// cannot be used directly: streamLogs type-asserts the writer to
+	// http.Flusher and it is not safe for concurrent access between the
+	// handler and the test goroutine under -race.
+	rec := newSSERecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/logs/test/stream", nil)
+	// Bound the SSE handler; 2s is comfortably above three 500ms ticks
+	// plus the prime. The test cancels as soon as it observes the real
+	// log bytes so a passing run completes quickly.
+	ctx, cancel := context.WithTimeout(req.Context(), 2500*time.Millisecond)
+	defer cancel()
+	req = req.WithContext(ctx)
+	done := make(chan struct{})
+	go func() {
+		s.mux.ServeHTTP(rec, req)
+		close(done)
+	}()
+
+	deadline := time.Now().Add(2200 * time.Millisecond)
+	sawReal := false
+	for time.Now().Before(deadline) {
+		body := rec.body()
+		if strings.Contains(body, "first-line") && strings.Contains(body, "second-line") {
+			sawReal = true
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	cancel()
+	<-done
+
+	final := rec.body()
+	if !sawReal {
+		t.Fatalf("never saw real log lines; body: %q", final)
+	}
+	// The placeholder text must NEVER appear in the emitted stream.
+	// Before R14 the tick loop emitted it as a log-line event; after
+	// R14 the placeholder is dropped and the cursor is not advanced.
+	if strings.Contains(final, api.LogPlaceholderPrefix) {
+		t.Errorf("placeholder text leaked into SSE stream: %q", final)
 	}
 }
