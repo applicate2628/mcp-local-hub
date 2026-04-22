@@ -311,7 +311,9 @@ func (w *windowsScheduler) List(prefix string) ([]TaskStatus, error) {
 	var results []TaskStatus
 	for _, r := range records {
 		status := parseTaskQueryOutput(r, "")
-		if status.Name != "" && strings.HasPrefix(strings.TrimPrefix(status.Name, "\\"), prefix) {
+		if status.Name != "" &&
+			strings.HasPrefix(strings.TrimPrefix(status.Name, "\\"), prefix) &&
+			sameWindowsUser(status.Owner, w.username) {
 			results = append(results, status)
 		}
 	}
@@ -331,7 +333,27 @@ func parseTaskQueryOutput(out string, nameHint string) TaskStatus {
 			fmt.Sscanf(strings.TrimPrefix(line, "Last Result:"), " %d", &status.LastResult)
 		} else if strings.HasPrefix(line, "Next Run Time:") {
 			status.NextRun = strings.TrimSpace(strings.TrimPrefix(line, "Next Run Time:"))
+		} else if strings.HasPrefix(line, "Run As User:") {
+			status.Owner = strings.TrimSpace(strings.TrimPrefix(line, "Run As User:"))
 		}
 	}
 	return status
+}
+
+// sameWindowsUser compares a Task Scheduler "Run As User" value against the
+// current user's short username (no DOMAIN\ prefix), case-insensitively.
+func sameWindowsUser(owner, currentShortName string) bool {
+	owner = strings.TrimSpace(owner)
+	if owner == "" || currentShortName == "" {
+		return false
+	}
+	owner = strings.ToLower(owner)
+	currentShortName = strings.ToLower(currentShortName)
+	if owner == currentShortName {
+		return true
+	}
+	if i := strings.LastIndex(owner, `\`); i >= 0 {
+		return owner[i+1:] == currentShortName
+	}
+	return false
 }

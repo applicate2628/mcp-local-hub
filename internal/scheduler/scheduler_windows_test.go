@@ -156,3 +156,26 @@ func TestBuildCreateXML_HandlesTrailingBackslash(t *testing.T) {
 		t.Errorf("trailing backslash must be doubled before closing quote, got:\n%s", xml)
 	}
 }
+
+func TestSameWindowsUser(t *testing.T) {
+	tests := []struct {
+		name    string
+		owner   string
+		current string
+		want    bool
+	}{
+		{name: "exact", owner: "alice", current: "alice", want: true},
+		{name: "domain prefixed", owner: `MACHINE\alice`, current: "alice", want: true},
+		{name: "case-insensitive", owner: `domain\ALICE`, current: "alice", want: true},
+		{name: "different user", owner: "bob", current: "alice", want: false},
+		{name: "empty owner", owner: "", current: "alice", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := sameWindowsUser(tc.owner, tc.current)
+			if got != tc.want {
+				t.Fatalf("sameWindowsUser(%q, %q)=%v, want %v", tc.owner, tc.current, got, tc.want)
+			}
+		})
+	}
+}

@@ -48,6 +48,7 @@ type TaskStatus struct {
 	State      string // "Ready", "Running", "Disabled", "Unknown"
 	LastResult int    // exit code of last run, or -1 if never run
 	NextRun    string // human-readable, backend-specific
+	Owner      string // backend-specific task owner/account, if available
 }
 
 // ErrTaskNotFound is returned by ExportXML and other lookup APIs when
