@@ -172,12 +172,16 @@ func copyFile(src, dst string, perm os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	defer out.Close()
-
 	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
 		return err
 	}
-
+	// Close explicitly so flush/commit errors (disk full, NFS fsync failure)
+	// surface here instead of being swallowed by a deferred Close — otherwise
+	// writeBackup reports success on a truncated backup file.
+	if err := out.Close(); err != nil {
+		return err
+	}
 	return nil
 }
 
