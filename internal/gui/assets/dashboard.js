@@ -1,21 +1,32 @@
 // internal/gui/assets/dashboard.js
+//
+// The dashboard keys its in-memory state map by the composite
+// "<server>/<daemon>" tuple, matching the poller convention. A
+// multi-daemon server like serena (claude + codex) would otherwise
+// collide on server alone — state[r.server] would only retain the
+// last-seen daemon row, rendering exactly one card instead of two.
+function keyFor(r) {
+  return r.server + "/" + (r.daemon || "default");
+}
+
 window.mcphub.screens.dashboard = function(root) {
   root.innerHTML = `<h1>Dashboard</h1><div id="cards" class="cards"></div>`;
   const cardsEl = document.getElementById("cards");
-  const state = {}; // server name -> DaemonStatus
+  const state = {}; // composite "<server>/<daemon>" key -> DaemonStatus
 
   function render() {
     cardsEl.innerHTML = "";
-    Object.values(state).sort((a, b) => a.server.localeCompare(b.server)).forEach(d => {
+    Object.values(state).sort((a, b) => keyFor(a).localeCompare(keyFor(b))).forEach(d => {
       const card = document.createElement("div");
       card.className = "card " + (d.state === "Running" ? "ok" : "down");
+      const title = d.daemon && d.daemon !== "default" ? `${d.server} (${d.daemon})` : d.server;
       card.innerHTML = `
-        <div class="card-title">${d.server}</div>
+        <div class="card-title">${escapeHtml(title)}</div>
         <div class="card-kv"><span>Port</span><span>${d.port ?? "—"}</span></div>
         <div class="card-kv"><span>PID</span><span>${d.pid ?? "—"}</span></div>
-        <div class="card-kv"><span>State</span><span class="state">${d.state}</span></div>
+        <div class="card-kv"><span>State</span><span class="state">${escapeHtml(d.state ?? "")}</span></div>
         <div class="card-actions">
-          <button data-server="${d.server}" class="restart-btn">Restart</button>
+          <button data-server="${escapeHtml(d.server)}" class="restart-btn">Restart</button>
         </div>`;
       cardsEl.appendChild(card);
     });
@@ -38,17 +49,22 @@ window.mcphub.screens.dashboard = function(root) {
     }));
   }
 
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  }
+
   // Initial load via /api/status, then live updates via SSE.
   fetch("/api/status").then(r => r.json()).then(rows => {
-    (rows || []).forEach(r => state[r.server] = r);
+    (rows || []).forEach(r => state[keyFor(r)] = r);
     render();
   });
 
   const es = new EventSource("/api/events");
   es.addEventListener("daemon-state", e => {
     const body = JSON.parse(e.data);
-    if (body.state === "Gone") delete state[body.server];
-    else state[body.server] = Object.assign(state[body.server] ?? {server: body.server}, body);
+    const k = keyFor(body);
+    if (body.state === "Gone") delete state[k];
+    else state[k] = Object.assign(state[k] ?? {server: body.server, daemon: body.daemon}, body);
     render();
   });
 

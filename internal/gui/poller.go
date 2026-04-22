@@ -2,9 +2,9 @@
 //
 // StatusPoller samples statusProvider.Status() on a fixed interval and
 // publishes a "daemon-state" event onto the Broadcaster on every
-// observed change in (Server, State, PID, Port). Fetch errors are
-// surfaced as "poller-error" events and the loop continues on the next
-// tick. Servers that disappear between samples emit a terminal
+// observed change in (Server, Daemon, State, PID, Port). Fetch errors
+// are surfaced as "poller-error" events and the loop continues on the
+// next tick. Daemons that disappear between samples emit a terminal
 // daemon-state event with state="Gone".
 //
 // Spec: §3.6 (real-time event bus).
@@ -19,13 +19,20 @@ import (
 )
 
 // StatusPoller samples api.Status() on a fixed interval and publishes
-// a daemon-state event on every observed change in (Server, State, PID,
-// Port). The event body matches spec §3.6.
+// a daemon-state event on every observed change in (Server, Daemon,
+// State, PID, Port). The event body matches spec §3.6.
+//
+// The cache is keyed by the composite "<server>/<daemon>" tuple because
+// api.Status() returns one row per daemon: a multi-daemon server like
+// serena (claude + codex) would otherwise collide on Server alone,
+// overwriting the first daemon's row each cycle and emitting spurious
+// deltas on the next cycle. An empty Daemon falls back to "default" so
+// single-daemon servers stay correct.
 type StatusPoller struct {
 	status   statusProvider
 	events   *Broadcaster
 	interval time.Duration
-	last     map[string]api.DaemonStatus
+	last     map[string]api.DaemonStatus // key: "<server>/<daemon>"
 }
 
 // NewStatusPoller constructs a StatusPoller. It does not start any
@@ -37,6 +44,18 @@ func NewStatusPoller(status statusProvider, events *Broadcaster, interval time.D
 		interval: interval,
 		last:     map[string]api.DaemonStatus{},
 	}
+}
+
+// keyFor produces the composite cache / delta key for one DaemonStatus
+// row. An empty Daemon field (single-daemon manifests) falls back to
+// "default" to match the convention used by the logs adapter and the
+// dashboard UI.
+func keyFor(r api.DaemonStatus) string {
+	d := r.Daemon
+	if d == "" {
+		d = "default"
+	}
+	return r.Server + "/" + d
 }
 
 // Run blocks until ctx is canceled. Polls every interval and publishes
@@ -65,29 +84,36 @@ func (p *StatusPoller) poll(ctx context.Context) {
 	}
 	seen := map[string]struct{}{}
 	for _, r := range rows {
-		seen[r.Server] = struct{}{}
-		prev, ok := p.last[r.Server]
+		k := keyFor(r)
+		seen[k] = struct{}{}
+		prev, ok := p.last[k]
 		if ok && prev.State == r.State && prev.PID == r.PID && prev.Port == r.Port {
 			continue
 		}
-		p.last[r.Server] = r
+		p.last[k] = r
 		p.events.Publish(Event{
 			Type: "daemon-state",
 			Body: map[string]any{
 				"server": r.Server,
+				"daemon": r.Daemon,
 				"state":  r.State,
 				"pid":    r.PID,
 				"port":   r.Port,
 			},
 		})
 	}
-	// Removed rows: server in last but not in this fetch.
-	for name := range p.last {
-		if _, still := seen[name]; !still {
-			delete(p.last, name)
+	// Removed rows: key in last but not in this fetch.
+	for k := range p.last {
+		if _, still := seen[k]; !still {
+			gone := p.last[k]
+			delete(p.last, k)
 			p.events.Publish(Event{
 				Type: "daemon-state",
-				Body: map[string]any{"server": name, "state": "Gone"},
+				Body: map[string]any{
+					"server": gone.Server,
+					"daemon": gone.Daemon,
+					"state":  "Gone",
+				},
 			})
 		}
 	}
