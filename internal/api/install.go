@@ -699,15 +699,19 @@ func singleHealthProbe(port int) *HealthProbe {
 // Uninstall removes all scheduler tasks and client entries for a server.
 // It never prints; the returned UninstallReport carries the outcome for
 // CLI/GUI rendering.
+// retiredServerNames is the allowlist of server names whose manifests
+// have been removed in prior upgrades but may still have stale scheduler
+// tasks and client entries on user machines. Only these names trigger
+// the manifest-less uninstall fallback; any other unknown name fails
+// fast so a typo cannot delete unrelated tasks by prefix overlap.
+var retiredServerNames = map[string]bool{
+	"gdb": true, // removed in the gdb shared-manifest retirement (PR #13)
+}
+
 func (a *API) Uninstall(server string) (*UninstallReport, error) {
 	data, err := loadManifestYAMLEmbedFirst(server)
 	if err != nil {
-		if os.IsNotExist(err) {
-			// Legacy-install cleanup path: the manifest was removed in an
-			// upgrade (e.g. the gdb shared-manifest retirement) but scheduler
-			// tasks and client entries from the previous install may still
-			// exist. Fall back to blind cleanup by task-prefix match and
-			// entry removal across all known clients.
+		if os.IsNotExist(err) && retiredServerNames[server] {
 			return a.uninstallWithoutManifest(server)
 		}
 		return nil, fmt.Errorf("load manifest %s: %w", server, err)
@@ -751,17 +755,24 @@ func (a *API) Uninstall(server string) (*UninstallReport, error) {
 }
 
 // uninstallWithoutManifest cleans up stale scheduler tasks and client
-// entries for a server whose manifest is no longer shipped. Called by
-// Uninstall when loadManifestYAMLEmbedFirst returns ENOENT. Best-effort:
-// task deletion by prefix + RemoveEntry across every known client. An
-// entry that does not exist is not an error.
+// entries for a retired server whose manifest is no longer shipped.
+// Only called by Uninstall for names in retiredServerNames — a typo or
+// unknown server name must never reach here, because the task-prefix
+// match would delete any task whose name starts with
+// "mcp-local-hub-<server>-" (e.g. uninstalling "se" would otherwise
+// sweep up "mcp-local-hub-serena-*"). Best-effort: task deletion by
+// prefix + RemoveEntry across every known client. An entry that does
+// not exist is not an error.
 func (a *API) uninstallWithoutManifest(server string) (*UninstallReport, error) {
 	sch, err := scheduler.New()
 	if err != nil {
 		return nil, err
 	}
 	report := &UninstallReport{Server: server}
-	prefix := "mcp-local-hub-" + server
+	// Trailing dash matches the main Uninstall path's narrowing from
+	// PR #31 so "mcp-local-hub-gdb-default" matches but "mcp-local-hub-
+	// gdbtool-*" does not.
+	prefix := "mcp-local-hub-" + server + "-"
 	tasks, err := sch.List(prefix)
 	if err != nil {
 		return nil, err
