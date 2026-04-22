@@ -60,6 +60,7 @@ type Server struct {
 	onActivateWindow func()
 	scanner          scanner
 	status           statusProvider
+	events           *Broadcaster
 }
 
 // NewServer constructs the Server. It registers the ping handler
@@ -71,12 +72,18 @@ func NewServer(cfg Config) *Server {
 	s := &Server{cfg: cfg, mux: http.NewServeMux()}
 	s.scanner = realScanner{}
 	s.status = realStatusProvider{}
+	s.events = NewBroadcaster()
 	registerPingRoutes(s)
 	registerAssetRoutes(s)
 	registerScanRoutes(s)
 	registerStatusRoutes(s)
+	registerEventsRoutes(s)
 	return s
 }
+
+// Broadcaster exposes the SSE event bus. Tests publish into it directly;
+// production callers (poller goroutine in Task 12+) use it the same way.
+func (s *Server) Broadcaster() *Broadcaster { return s.events }
 
 // OnActivateWindow registers the callback invoked when POST
 // /api/activate-window is received. A second `mcphub gui` invocation
