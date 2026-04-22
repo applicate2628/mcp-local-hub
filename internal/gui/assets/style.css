@@ -24,3 +24,10 @@ nav a { color: var(--text); text-decoration: none; padding: 8px 12px; border-rad
 nav a:hover { background: var(--border); }
 nav a.active { background: var(--border); font-weight: 500; }
 main { padding: 24px; overflow: auto; }
+
+/* --- Servers matrix --- */
+.servers-matrix { border-collapse: collapse; width: 100%; max-width: 960px; }
+.servers-matrix th, .servers-matrix td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
+.servers-matrix thead th { background: var(--sidebar-bg); font-weight: 500; }
+.servers-matrix input[type="checkbox"] { margin: 0; }
+.error { color: var(--danger); }
