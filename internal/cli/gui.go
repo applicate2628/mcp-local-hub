@@ -99,7 +99,12 @@ activates the first window and exits 0.`,
 				return ctx.Err()
 			}
 
-			_ = noBrowser
+			if !noBrowser {
+				url := fmt.Sprintf("http://127.0.0.1:%d/", s.Port())
+				if err := gui.LaunchBrowser(url); err != nil {
+					fmt.Fprintf(cmd.OutOrStderr(), "warning: could not auto-launch browser: %v\n", err)
+				}
+			}
 			_ = noTray
 			return <-errCh
 		},
