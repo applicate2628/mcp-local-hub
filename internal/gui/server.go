@@ -50,6 +50,10 @@ func (realStatusProvider) Status() ([]api.DaemonStatus, error) {
 	return api.NewAPI().Status()
 }
 
+// RealStatusProvider is the production-default statusProvider. Tests inject
+// their own; callers outside the package construct this one.
+type RealStatusProvider = realStatusProvider
+
 // Server is the GUI HTTP server. It owns a net/http.Server bound to
 // 127.0.0.1, a ready-to-register mux, and a best-effort shutdown path.
 type Server struct {

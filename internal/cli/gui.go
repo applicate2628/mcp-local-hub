@@ -85,6 +85,11 @@ activates the first window and exits 0.`,
 			ready := make(chan struct{})
 			errCh := make(chan error, 1)
 			go func() { errCh <- s.Start(ctx, ready) }()
+
+			// Poll daemon status every 5s and push daemon-state events onto /api/events.
+			poller := gui.NewStatusPoller(gui.RealStatusProvider{}, s.Broadcaster(), 5*time.Second)
+			go poller.Run(ctx)
+
 			select {
 			case <-ready:
 				fmt.Fprintf(cmd.OutOrStdout(), "GUI listening on http://127.0.0.1:%d\n", s.Port())
