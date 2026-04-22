@@ -61,7 +61,9 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = s.srv.Shutdown(shutdownCtx)
+		if err := s.srv.Shutdown(shutdownCtx); err != nil {
+			return fmt.Errorf("graceful shutdown: %w", err)
+		}
 		return nil
 	case err := <-errCh:
 		if errors.Is(err, http.ErrServerClosed) {
@@ -74,5 +76,5 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 // handlePing is the skeleton that Task 3 fills out with version info.
 func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"ok":true}`))
+	_, _ = w.Write([]byte(`{"ok":true}`))
 }
