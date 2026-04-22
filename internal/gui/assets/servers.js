@@ -220,6 +220,34 @@ function collectServers(scan) {
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// isHubLoopback reports whether an http endpoint URL targets the local hub.
+// MUST parse the URL and compare hostname — a substring test like
+// endpoint.includes("127.0.0.1") misclassifies URLs that merely contain the
+// loopback string as a DNS label or path/query component, e.g.
+// https://127.0.0.1.evil.com/foo or https://example.com/?host=127.0.0.1.
+// Such a misclassification would pre-check the Servers matrix cell and could
+// let Apply rewrite the binding based on the wrong routing assumption.
+// Unparseable endpoints (stdio:, relative paths, empty strings) fall to
+// not-loopback — defense in depth, matches the spec's "scan classifies as
+// can-migrate" treatment for unknown shapes.
+// Sanity:
+//   isHubLoopback("http://127.0.0.1:9123/mcp")      // true
+//   isHubLoopback("http://localhost:9123/mcp")      // true
+//   isHubLoopback("http://[::1]:9123/mcp")          // true
+//   isHubLoopback("https://127.0.0.1.evil.com/foo") // false
+//   isHubLoopback("https://example.com/?h=127.0.0.1")// false
+//   isHubLoopback("stdio:///memory")                // false
+//   isHubLoopback("")                               // false
+function isHubLoopback(endpoint) {
+  if (!endpoint) return false;
+  try {
+    const u = new URL(endpoint);
+    return u.hostname === "127.0.0.1" || u.hostname === "localhost" || u.hostname === "[::1]";
+  } catch {
+    return false;
+  }
+}
+
 // perClientRouting maps ClientPresence into the per-cell routing tag that
 // renderCell expects. Keeps the plan's contract: "via-hub" → checked,
 // "not-installed" → disabled, everything else → unchecked+enabled.
@@ -230,7 +258,7 @@ function perClientRouting(clientPresence) {
     const endpoint = (entry && entry.endpoint) || "";
     if (!transport || transport === "absent") {
       routing[client] = "not-installed";
-    } else if (transport === "http" && (endpoint.includes("localhost") || endpoint.includes("127.0.0.1"))) {
+    } else if (transport === "http" && isHubLoopback(endpoint)) {
       routing[client] = "via-hub";
     } else if (transport === "relay") {
       routing[client] = "via-hub";
