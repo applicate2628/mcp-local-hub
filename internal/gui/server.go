@@ -43,6 +43,7 @@ func NewServer(cfg Config) *Server {
 	}
 	s := &Server{cfg: cfg, mux: http.NewServeMux()}
 	registerPingRoutes(s)
+	registerAssetRoutes(s)
 	return s
 }
 
