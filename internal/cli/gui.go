@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/gui"
+	"mcp-local-hub/internal/tray"
 
 	"github.com/spf13/cobra"
 )
@@ -105,7 +106,19 @@ activates the first window and exits 0.`,
 					fmt.Fprintf(cmd.OutOrStderr(), "warning: could not auto-launch browser: %v\n", err)
 				}
 			}
-			_ = noTray
+			if !noTray {
+				go func() {
+					_ = tray.Run(ctx, tray.Config{
+						ActivateWindow: func() {
+							// In-process handshake: hit our own activate handler to
+							// trigger whatever OnActivateWindow callback is registered
+							// (Phase 3B-II: focus browser window).
+							_ = gui.TryActivateIncumbent(pidportPath, 500*time.Millisecond)
+						},
+						Quit: stop, // signal.NotifyContext's cancel function
+					})
+				}()
+			}
 			return <-errCh
 		},
 	}
