@@ -38,6 +38,15 @@ type DaemonStatus struct {
 	// `mcp-local-hub-lsp-<workspaceKey>-<language>`. Lifecycle is one of
 	// LifecycleConfigured / LifecycleStarting / LifecycleActive /
 	// LifecycleMissing / LifecycleFailed.
+	//
+	// IsWorkspaceScoped mirrors IsLazyProxyTaskName(TaskName) and is the
+	// authoritative structural flag for consumers that only need to know
+	// "is this a workspace-scoped lazy-proxy row?" without parsing TaskName
+	// or depending on registry-derived fields (Workspace/Language/Lifecycle),
+	// which can be empty when registry loading or enrichment fails. The GUI
+	// Logs picker uses this flag to filter workspace-scoped rows out of the
+	// global-daemon log dropdown; see internal/gui/assets/logs.js.
+	IsWorkspaceScoped  bool      `json:"is_workspace_scoped,omitempty"`
 	Workspace          string    `json:"workspace,omitempty"`
 	Language           string    `json:"language,omitempty"`
 	Backend            string    `json:"backend,omitempty"`

@@ -78,6 +78,12 @@ func enrichStatusWithRegistry(rows []DaemonStatus, manifestDir, registryPath str
 		// in the registry, not the manifest). The manifest-port lookup would
 		// miss anyway since "lsp-<key>" is not a real server slug.
 		if wsKey, lang, ok := parseLazyProxyTaskName(rows[i].TaskName); ok {
+			// Mark the row with the structural workspace-scoped flag BEFORE
+			// the registry overlay so consumers (notably the GUI Logs
+			// picker) get a truthful signal even when registry loading or
+			// enrichment fails and Workspace/Language/Lifecycle end up
+			// empty. See DaemonStatus.IsWorkspaceScoped in types.go.
+			rows[i].IsWorkspaceScoped = true
 			rows[i].Server = "mcp-language-server"
 			rows[i].Daemon = "lsp-" + wsKey + "-" + lang
 			if wsEntries != nil {

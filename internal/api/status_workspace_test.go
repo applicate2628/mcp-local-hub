@@ -139,6 +139,9 @@ func TestEnrichStatusWithRegistry_WorkspaceScoped(t *testing.T) {
 	if r.Port != 9217 {
 		t.Errorf("Port = %d, want 9217", r.Port)
 	}
+	if !r.IsWorkspaceScoped {
+		t.Errorf("IsWorkspaceScoped = false, want true for lazy-proxy task name")
+	}
 }
 
 // TestEnrichStatusWithRegistry_FailedEntryCarriesLastError asserts a
@@ -201,6 +204,9 @@ func TestEnrichStatusWithRegistry_GlobalRowUntouched(t *testing.T) {
 	if rows[0].Server != "serena" || rows[0].Daemon != "claude" {
 		t.Errorf("global row parse broke: Server=%q Daemon=%q", rows[0].Server, rows[0].Daemon)
 	}
+	if rows[0].IsWorkspaceScoped {
+		t.Errorf("IsWorkspaceScoped = true on global row; must stay false")
+	}
 }
 
 // TestEnrichStatusWithRegistry_NoRegistryFileIsSilentNoop asserts a missing
@@ -219,6 +225,14 @@ func TestEnrichStatusWithRegistry_NoRegistryFileIsSilentNoop(t *testing.T) {
 	// Server / Daemon still get parsed.
 	if rows[0].Server != "mcp-language-server" {
 		t.Errorf("Server = %q, want mcp-language-server", rows[0].Server)
+	}
+	// IsWorkspaceScoped is the structural flag; it must survive the
+	// registry-missing scenario (it is set BEFORE the overlay). This is
+	// the exact failure mode the GUI Logs picker depends on — without
+	// this guarantee, workspace-proxy rows would leak into the global
+	// log dropdown whenever registry loading fails.
+	if !rows[0].IsWorkspaceScoped {
+		t.Errorf("IsWorkspaceScoped = false when registry is missing; must still be true (derived from TaskName structure, not registry)")
 	}
 }
 

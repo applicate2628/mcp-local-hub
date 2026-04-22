@@ -28,26 +28,25 @@ window.mcphub.screens.logs = function(root) {
   // path that api.LogsGet reads. Selecting such a row from this dropdown
   // would hit api.LogsGet and show "no log output yet" even when the
   // workspace log file exists. Until Phase 3B-II adds proper workspace
-  // log surfacing, filter them out of the picker using a structural
-  // task_name match (rather than field-based on workspace/lifecycle,
-  // which are registry-derived and may be empty if enrichment failed,
-  // and must not let a workspace-proxy row sneak back into the picker).
+  // log surfacing, filter them out of the picker.
   //
-  // Mirror api.IsLazyProxyTaskName (internal/api/status_enrich.go):
-  // lazy-proxy task names are strictly
-  // `mcp-local-hub-lsp-<workspaceKey>-<language>`, where workspaceKey
-  // is exactly 8 lowercase hex chars (api.WorkspaceKey) and language is
-  // a non-empty suffix. A loose startsWith("mcp-local-hub-lsp-") check
-  // would false-positive on a hypothetical global server named `lsp-*`
-  // (e.g., `lsp-tools` → task `mcp-local-hub-lsp-tools-default`),
-  // silently hiding its row from the picker. Match the canonical
-  // structure directly.
-  const LAZY_PROXY_RE = /^mcp-local-hub-lsp-[0-9a-f]{8}-[^/]+$/;
+  // Source of truth: `is_workspace_scoped` on api.DaemonStatus (see
+  // internal/api/types.go), populated by enrichStatusWithRegistry from
+  // api.IsLazyProxyTaskName(TaskName). Using this server-side flag
+  // instead of re-parsing task_name in JS avoids two failure modes:
+  //   1. Regex drift — a JS-local regex like
+  //      /^mcp-local-hub-lsp-[0-9a-f]{8}-[^/]+$/ would diverge from the
+  //      canonical Go predicate the first time either side tightens
+  //      (e.g., a future global slug `lsp-<8hex>-foo` whose task name
+  //      `mcp-local-hub-lsp-<8hex>-foo-default` would satisfy the loose
+  //      regex and falsely hide the global daemon from the picker).
+  //   2. Registry-emptiness — field-based checks on workspace/language/
+  //      lifecycle would let a workspace-proxy row sneak back into the
+  //      picker whenever registry loading fails and those fields are
+  //      empty. The structural flag is derived from TaskName, not the
+  //      registry, so it stays correct in that scenario.
   function isWorkspaceScoped(row) {
-    const tn = row && row.task_name ? String(row.task_name) : "";
-    // Windows scheduler occasionally emits a leading backslash on task names.
-    const stripped = tn.startsWith("\\") ? tn.slice(1) : tn;
-    return LAZY_PROXY_RE.test(stripped);
+    return Boolean(row && row.is_workspace_scoped);
   }
 
   // Backend returns the {error, code} JSON envelope (via writeAPIError) on
