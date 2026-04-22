@@ -18,11 +18,10 @@ import (
 // We spawn it via `npx -y supergateway --stdio "<inner cmd>" --port <N>`.
 //
 // innerCmd + innerArgs form the stdio server's own command line. supergateway
-// expects this as a single shell-quoted string in the --stdio argument.
+// expects this as a single shell command string in the --stdio argument.
 // Env is applied to the inner command's process (supergateway forwards it).
 func BuildBridgeSpec(innerCmd string, innerArgs []string, port int, env map[string]string, logPath string) LaunchSpec {
-	// Shell-quote the inner command line for supergateway.
-	// Simple strategy: wrap each token in double quotes if it contains whitespace.
+	// Quote each token for POSIX shells so metacharacters are treated as data.
 	quoted := make([]string, 0, len(innerArgs)+1)
 	quoted = append(quoted, shellQuote(innerCmd))
 	for _, a := range innerArgs {
@@ -39,22 +38,11 @@ func BuildBridgeSpec(innerCmd string, innerArgs []string, port int, env map[stri
 	}
 }
 
-// shellQuote conservatively wraps a token in double quotes when it contains
-// whitespace or shell metacharacters. Backslashes on Windows paths are preserved.
+// shellQuote returns a shell-safe POSIX token representation.
+// It uses single-quote wrapping and escapes internal single quotes.
 func shellQuote(s string) string {
 	if s == "" {
-		return `""`
+		return "''"
 	}
-	needs := false
-	for _, r := range s {
-		if r == ' ' || r == '\t' || r == '"' || r == '\'' || r == '&' || r == '|' {
-			needs = true
-			break
-		}
-	}
-	if !needs {
-		return s
-	}
-	// Escape internal double quotes by doubling them (cmd.exe-compatible).
-	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
