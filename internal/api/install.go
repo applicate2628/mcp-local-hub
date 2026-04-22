@@ -631,6 +631,8 @@ func probeDaemonHealth(rows []DaemonStatus) {
 // is not exercised and the probe result is deterministic.
 var singleHealthProbeFn = singleHealthProbe
 
+const maxHealthProbeResponseBytes = 1 << 20 // 1 MiB
+
 func singleHealthProbe(port int) *HealthProbe {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -663,7 +665,13 @@ func singleHealthProbe(port int) *HealthProbe {
 		return &HealthProbe{Err: "tools/list: " + err.Error()}
 	}
 	defer resp2.Body.Close()
-	raw, _ := io.ReadAll(resp2.Body)
+	raw, err := io.ReadAll(io.LimitReader(resp2.Body, maxHealthProbeResponseBytes+1))
+	if err != nil {
+		return &HealthProbe{Err: "tools/list: read: " + err.Error()}
+	}
+	if len(raw) > maxHealthProbeResponseBytes {
+		return &HealthProbe{Err: fmt.Sprintf("tools/list: response too large (> %d bytes)", maxHealthProbeResponseBytes)}
+	}
 	payload := raw
 	// SSE-wrapped response: pull JSON out of the first data: line.
 	for _, line := range strings.Split(string(raw), "\n") {

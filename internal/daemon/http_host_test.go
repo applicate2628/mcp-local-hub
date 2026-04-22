@@ -231,7 +231,7 @@ func TestHTTPHost_POSTBodyTooLarge(t *testing.T) {
 	ts := httptest.NewServer(h.HTTPHandler())
 	defer ts.Close()
 
-	tooLarge := strings.Repeat("a", int(httpHostMaxRequestBodyBytes)+1)
+	tooLarge := strings.Repeat("a", int(maxHTTPHostBodyBytes)+1)
 	req, err := http.NewRequest(http.MethodPost, ts.URL+"/mcp", strings.NewReader(tooLarge))
 	if err != nil {
 		t.Fatalf("new request: %v", err)
