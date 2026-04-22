@@ -1,19 +1,8 @@
 import type { JSX } from "preact";
 import { useRouter } from "./hooks/useRouter";
 import { DashboardScreen } from "./screens/Dashboard";
+import { LogsScreen } from "./screens/Logs";
 import { ServersScreen } from "./screens/Servers";
-
-// Screen components get wired up in later tasks. For now render a "Coming
-// soon" placeholder per route so the shell, sidebar, and hashchange
-// handling are verifiable before any real screen lands.
-function ComingSoon({ name }: { name: string }) {
-  return (
-    <div>
-      <h1>{name}</h1>
-      <p>Port in progress — see docs/superpowers/plans/2026-04-23-phase-3b-ii-d0-gui-vite-migration.md</p>
-    </div>
-  );
-}
 
 // JSX.Element is imported from preact (see import above). jsx:"preserve"
 // + jsxImportSource:"preact" makes the preact/jsx-runtime inject the
@@ -24,7 +13,7 @@ function ComingSoon({ name }: { name: string }) {
 const SCREENS: Record<string, () => JSX.Element> = {
   servers: () => <ServersScreen />,
   dashboard: () => <DashboardScreen />,
-  logs: () => <ComingSoon name="Logs" />,
+  logs: () => <LogsScreen />,
 };
 
 export function App() {
