@@ -1,5 +1,6 @@
 import type { JSX } from "preact";
 import { useRouter } from "./hooks/useRouter";
+import { DashboardScreen } from "./screens/Dashboard";
 import { ServersScreen } from "./screens/Servers";
 
 // Screen components get wired up in later tasks. For now render a "Coming
@@ -22,7 +23,7 @@ function ComingSoon({ name }: { name: string }) {
 // signature, which is what App renders below.
 const SCREENS: Record<string, () => JSX.Element> = {
   servers: () => <ServersScreen />,
-  dashboard: () => <ComingSoon name="Dashboard" />,
+  dashboard: () => <DashboardScreen />,
   logs: () => <ComingSoon name="Logs" />,
 };
 
