@@ -1,5 +1,6 @@
 import type { JSX } from "preact";
 import { useRouter } from "./hooks/useRouter";
+import { ServersScreen } from "./screens/Servers";
 
 // Screen components get wired up in later tasks. For now render a "Coming
 // soon" placeholder per route so the shell, sidebar, and hashchange
@@ -13,12 +14,14 @@ function ComingSoon({ name }: { name: string }) {
   );
 }
 
-// JSX.Element is available as a global under tsconfig.json's
-// jsxImportSource: "preact" (TS >=4.1). A map of route -> thunk gives
-// each entry a component-of-no-props signature, which is what App
-// renders below.
+// JSX.Element is imported from preact (see import above). jsx:"preserve"
+// + jsxImportSource:"preact" makes the preact/jsx-runtime inject the
+// factory calls, but does NOT populate a global JSX namespace — so the
+// type reference below requires the explicit import.
+// A map of route -> thunk gives each entry a component-of-no-props
+// signature, which is what App renders below.
 const SCREENS: Record<string, () => JSX.Element> = {
-  servers: () => <ComingSoon name="Servers" />,
+  servers: () => <ServersScreen />,
   dashboard: () => <ComingSoon name="Dashboard" />,
   logs: () => <ComingSoon name="Logs" />,
 };
