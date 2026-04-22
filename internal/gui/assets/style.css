@@ -41,3 +41,7 @@ main { padding: 24px; overflow: auto; }
 .card.down .state { color: var(--danger); }
 .card-actions { margin-top: 12px; }
 .card-actions button { width: 100%; padding: 6px; border: 1px solid var(--border); background: var(--sidebar-bg); color: var(--text); border-radius: 4px; cursor: pointer; }
+
+/* --- Logs screen --- */
+#logs-controls { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
+#logs-body { background: var(--sidebar-bg); border: 1px solid var(--border); padding: 12px; overflow: auto; max-height: 70vh; font-family: monospace; font-size: 12px; white-space: pre-wrap; }

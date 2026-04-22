@@ -1,4 +1,57 @@
 // internal/gui/assets/logs.js
 window.mcphub.screens.logs = function(root) {
-  root.innerHTML = "<h1>Logs</h1><p>Coming in Task 19.</p>";
+  root.innerHTML = `
+    <h1>Logs</h1>
+    <div id="logs-controls">
+      <select id="logs-server"></select>
+      <label><input type="number" id="logs-tail" value="500" min="1" max="10000"> lines</label>
+      <label><input type="checkbox" id="logs-follow"> Follow</label>
+      <button id="logs-refresh">Refresh</button>
+    </div>
+    <pre id="logs-body"></pre>`;
+
+  const sel = document.getElementById("logs-server");
+  const tailEl = document.getElementById("logs-tail");
+  const followEl = document.getElementById("logs-follow");
+  const body = document.getElementById("logs-body");
+  let es = null;
+
+  fetch("/api/status").then(r => r.json()).then(rows => {
+    (rows || []).forEach(r => {
+      const opt = document.createElement("option");
+      opt.value = r.server; opt.textContent = r.server;
+      sel.appendChild(opt);
+    });
+    if ((rows || []).length) load();
+  });
+
+  async function load() {
+    if (es) { es.close(); es = null; }
+    body.textContent = "Loading…";
+    const server = sel.value;
+    const tail = tailEl.value;
+    const resp = await fetch(`/api/logs/${encodeURIComponent(server)}?tail=${encodeURIComponent(tail)}`);
+    body.textContent = await resp.text();
+    if (followEl.checked) startFollow(server);
+  }
+  function startFollow(server) {
+    es = new EventSource(`/api/logs/${encodeURIComponent(server)}/stream`);
+    es.addEventListener("log-line", e => {
+      body.textContent += e.data + "\n";
+      body.scrollTop = body.scrollHeight;
+    });
+  }
+  sel.addEventListener("change", load);
+  tailEl.addEventListener("change", load);
+  followEl.addEventListener("change", load);
+  document.getElementById("logs-refresh").addEventListener("click", load);
+
+  // Cleanup on screen swap
+  const observer = new MutationObserver(() => {
+    if (!document.body.contains(root)) {
+      if (es) es.close();
+      observer.disconnect();
+    }
+  });
+  observer.observe(document.body, {childList: true, subtree: true});
 };

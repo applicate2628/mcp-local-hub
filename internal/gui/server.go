@@ -100,6 +100,27 @@ func (realRestarter) Restart(server string) error {
 	return nil
 }
 
+// logsProvider is the narrow interface the /api/logs/:server handler needs.
+// The handler converts the stored log text to either a plain GET body or an
+// SSE tail-follow stream. The daemon name is not exposed at this seam —
+// realLogs pins it to "default", matching the single-daemon-per-server
+// manifest shape the GUI scans in Phase 3B. Multi-daemon selection is a
+// Phase 3B-II concern and would surface a new field on logsProvider.
+type logsProvider interface {
+	Logs(server string, tail int) (string, error)
+}
+
+type realLogs struct{}
+
+// Logs delegates to api.LogsGet with daemon "default". This mirrors the
+// single-daemon assumption the rest of Phase 3B makes (scan + status +
+// migrate all address the default daemon) and keeps the GUI seam narrow.
+// If a server is later packaged with multiple daemons, the GUI would need
+// to surface a daemon picker and logsProvider would gain a second arg.
+func (realLogs) Logs(server string, tail int) (string, error) {
+	return api.NewAPI().LogsGet(server, "default", tail)
+}
+
 // RealStatusProvider is the production-default statusProvider. Tests inject
 // their own; callers outside the package construct this one.
 type RealStatusProvider = realStatusProvider
@@ -116,6 +137,7 @@ type Server struct {
 	status           statusProvider
 	migrator         migrator
 	restart          restarter
+	logs             logsProvider
 	events           *Broadcaster
 }
 
@@ -130,6 +152,7 @@ func NewServer(cfg Config) *Server {
 	s.status = realStatusProvider{}
 	s.migrator = realMigrator{}
 	s.restart = realRestarter{}
+	s.logs = realLogs{}
 	s.events = NewBroadcaster()
 	registerPingRoutes(s)
 	registerAssetRoutes(s)
@@ -138,6 +161,7 @@ func NewServer(cfg Config) *Server {
 	registerMigrateRoutes(s)
 	registerServerRoutes(s)
 	registerEventsRoutes(s)
+	registerLogsRoutes(s)
 	return s
 }
 
