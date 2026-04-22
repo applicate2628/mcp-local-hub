@@ -59,9 +59,9 @@ export function DashboardScreen() {
   useEventSource("/api/events", { "daemon-state": onDelta });
 
   async function restart(server: string) {
-    // Visual feedback is handled inside the button component below — here
-    // we only need to surface errors as needed; on success the SSE stream
-    // delivers the State: Running update.
+    // Re-throws on failure so the Card's button state machine can
+    // transition to "error" and flash "Failed". Visual feedback lives
+    // in the Card component; here we only log for operator diagnostics.
     try {
       const resp = await fetch(`/api/servers/${encodeURIComponent(server)}/restart`, { method: "POST" });
       if (!resp.ok) {
@@ -70,6 +70,7 @@ export function DashboardScreen() {
       }
     } catch (e) {
       console.error(`restart ${server}: ${(e as Error).message}`);
+      throw e;
     }
   }
 
