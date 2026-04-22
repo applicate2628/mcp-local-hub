@@ -83,13 +83,49 @@ window.mcphub.screens.servers = async function(root) {
   }
   applyBtn.addEventListener("click", applyChanges);
 
+  // Mirror the R10 guard pattern used on dashboard.js + logs.js. Backend
+  // returns the {error, code} JSON envelope via writeAPIError on failure
+  // — not the ScanResult / []DaemonStatus the UI expects. Without this
+  // check, collectServers(envelope) would iterate Object.entries(undefined)
+  // = [], rendering "no servers" silently; aggregateStatus(envelope) would
+  // throw at (rows || []).forEach when the envelope object is truthy.
+  // Require resp.ok AND the expected top-level JSON shape before trusting
+  // either payload, and surface the envelope's `error` text.
+  async function fetchOrThrow(path, expect) {
+    const resp = await fetch(path);
+    const data = await resp.json().catch(() => null);
+    if (!resp.ok) {
+      throw new Error(`${path}: ${data?.error ?? resp.statusText ?? "unknown"}`);
+    }
+    if (expect === "array" && !Array.isArray(data)) {
+      throw new Error(`${path}: expected array, got ${typeof data}`);
+    }
+    if (expect === "object" && (data === null || typeof data !== "object" || Array.isArray(data))) {
+      throw new Error(`${path}: expected object, got ${Array.isArray(data) ? "array" : typeof data}`);
+    }
+    return data;
+  }
+
   async function render() {
     content.textContent = "Loading…";
+    let scan, status;
     try {
-      const [scan, status] = await Promise.all([
-        fetch("/api/scan").then(r => r.json()),
-        fetch("/api/status").then(r => r.json()),
+      [scan, status] = await Promise.all([
+        fetchOrThrow("/api/scan", "object"),  // api.ScanResult: {at, entries:[...]}
+        fetchOrThrow("/api/status", "array"), // []api.DaemonStatus
       ]);
+    } catch (err) {
+      content.innerHTML = `<p class="error">Failed to load: ${escapeHtml(err.message)}</p>`;
+      return;
+    }
+    // ScanResult.entries is the array we actually iterate. A present-but-
+    // non-array value would make collectServers silently return [] and
+    // render the matrix empty; catch that explicitly.
+    if (scan.entries != null && !Array.isArray(scan.entries)) {
+      content.innerHTML = `<p class="error">Failed to load: /api/scan returned malformed entries</p>`;
+      return;
+    }
+    try {
       content.innerHTML = "";
       const table = document.createElement("table");
       table.className = "servers-matrix";
@@ -118,7 +154,7 @@ window.mcphub.screens.servers = async function(root) {
       content.appendChild(table);
       content.querySelectorAll("input[type=checkbox]").forEach(cb => cb.addEventListener("change", onCheckboxChange));
     } catch (err) {
-      content.innerHTML = `<p class="error">Failed to load: ${err.message}</p>`;
+      content.innerHTML = `<p class="error">Failed to load: ${escapeHtml(err.message)}</p>`;
     }
   }
   render();

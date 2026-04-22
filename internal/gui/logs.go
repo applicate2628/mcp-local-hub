@@ -16,10 +16,29 @@ package gui
 import (
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// validNameRe is the safe charset for server + daemon names that flow
+// into the log-file path composed by api.LogsGet, which reads
+// "<logDir>/<server>-<daemon>.log". Without this gate a query like
+// ?daemon=../etc/passwd would escape logDir via the composed filename.
+// Only alphanumerics, "-", and "_" are allowed — rejecting path
+// separators (/, \), ".." traversal, whitespace, NUL, and every other
+// filesystem-significant character. This mirrors the task-name
+// character class used elsewhere in the hub (e.g. workspace keys are
+// lowercase hex and languages are simple identifiers).
+var validNameRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// validName returns true iff s is a non-empty string of safe name
+// characters. Callers use it to gate untrusted path-segment and
+// query-param input before composing a log-file path.
+func validName(s string) bool {
+	return s != "" && validNameRe.MatchString(s)
+}
 
 // registerLogsRoutes wires the /api/logs/ prefix. The suffix after the
 // server name decides the mode — absent = snapshot, "stream" = SSE.
@@ -29,13 +48,39 @@ func registerLogsRoutes(s *Server) {
 		rest := strings.TrimPrefix(r.URL.Path, "/api/logs/")
 		parts := strings.SplitN(rest, "/", 2)
 		server := parts[0]
-		if server == "" {
+		// validName gates the server path segment before it reaches
+		// api.LogsGet. A percent-encoded value like "..%2Fetc"
+		// decodes to URL.Path="../etc" and would slip past the
+		// ServeMux redirect path (which only canonicalizes literal
+		// ".."). Reject anything outside [A-Za-z0-9_-]+ with 404 so
+		// the handler never composes a log-file path from untrusted
+		// input. See validNameRe above.
+		if !validName(server) {
+			http.NotFound(w, r)
+			return
+		}
+		// A trailing path segment other than "stream" (e.g.
+		// /api/logs/foo/bar) is not a valid route. Silently falling
+		// through to the snapshot branch with server="foo" would
+		// misattribute the request; return 404 instead.
+		if len(parts) == 2 && parts[1] != "" && parts[1] != "stream" {
 			http.NotFound(w, r)
 			return
 		}
 		streaming := len(parts) == 2 && parts[1] == "stream"
+		// daemon is optional — an empty string lets the logsProvider
+		// adapter fall back to "default" for single-daemon servers.
+		// Multi-daemon servers (serena: claude + codex) require the
+		// explicit daemon name the UI picker selected. When non-empty,
+		// it must pass validName for the same log-path-composition
+		// reason the server segment does.
+		daemon := r.URL.Query().Get("daemon")
+		if daemon != "" && !validName(daemon) {
+			writeAPIError(w, fmt.Errorf("invalid daemon name"), http.StatusBadRequest, "BAD_REQUEST")
+			return
+		}
 		if streaming {
-			streamLogs(s, server, r.URL.Query().Get("daemon"), w, r)
+			streamLogs(s, server, daemon, w, r)
 			return
 		}
 		if r.Method != http.MethodGet {
@@ -43,11 +88,6 @@ func registerLogsRoutes(s *Server) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		// daemon is optional — an empty string lets the logsProvider
-		// adapter fall back to "default" for single-daemon servers.
-		// Multi-daemon servers (serena: claude + codex) require the
-		// explicit daemon name the UI picker selected.
-		daemon := r.URL.Query().Get("daemon")
 		tail, _ := strconv.Atoi(r.URL.Query().Get("tail"))
 		if tail <= 0 {
 			tail = 500
