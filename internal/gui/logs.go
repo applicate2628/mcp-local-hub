@@ -28,18 +28,48 @@ import (
 // into the log-file path composed by api.LogsGet, which reads
 // "<logDir>/<server>-<daemon>.log". Without this gate a query like
 // ?daemon=../etc/passwd would escape logDir via the composed filename.
-// Only alphanumerics, "-", and "_" are allowed — rejecting path
-// separators (/, \), ".." traversal, whitespace, NUL, and every other
-// filesystem-significant character. This mirrors the task-name
-// character class used elsewhere in the hub (e.g. workspace keys are
-// lowercase hex and languages are simple identifiers).
-var validNameRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+//
+// The charset mirrors api.validManifestName (^[a-z0-9][a-z0-9._-]*$),
+// which is the canonical server-name validator: alphanumerics plus
+// ".", "_", "-". If this GUI regex were tighter than the manifest
+// validator, servers with legal dotted names (e.g. paper-search-mcp.io,
+// foo.bar) would be valid everywhere except /api/logs/:server, which
+// would 404 them. We intentionally allow uppercase here as a superset
+// because path separators and traversal sequences are what matter for
+// log-file safety; the underlying manifest layer still enforces its
+// own lowercase rule when the name is actually used to load a
+// manifest. The explicit ".." check in validName keeps path-traversal
+// blocked even though dots are otherwise legal.
+var validNameRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 // validName returns true iff s is a non-empty string of safe name
 // characters. Callers use it to gate untrusted path-segment and
 // query-param input before composing a log-file path.
+//
+// Two secondary rules backstop the charset once "." is allowed:
+//
+//   - reject s == "." or s == "..": single- and double-dot standalone
+//     segments have filesystem meaning (current / parent directory).
+//     The mux canonicalizes literal ".." in the URL path before the
+//     handler runs, but the daemon query parameter does not go through
+//     that canonicalization, so the gate has to fire here.
+//   - reject any s containing "..": sequences like "foo..bar" or
+//     "..hidden" would satisfy the charset once "." is legal. The
+//     charset already excludes "/" and "\\", so combined with this
+//     rule no "." form can escape the log directory.
+//
+// Dotted identifiers like paper-search-mcp.io still pass both checks.
 func validName(s string) bool {
-	return s != "" && validNameRe.MatchString(s)
+	if s == "" || !validNameRe.MatchString(s) {
+		return false
+	}
+	if s == "." || s == ".." {
+		return false
+	}
+	if strings.Contains(s, "..") {
+		return false
+	}
+	return true
 }
 
 // registerLogsRoutes wires the /api/logs/ prefix. The suffix after the

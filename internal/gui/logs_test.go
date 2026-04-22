@@ -129,6 +129,54 @@ func TestLogs_StreamRejectsNonGET(t *testing.T) {
 	}
 }
 
+// TestLogs_AcceptsDottedServerName confirms that a server name with
+// "." characters — legal under api.validManifestName (^[a-z0-9][a-z0-9._-]*$)
+// — is also accepted by the GUI /api/logs/:server route. Before this
+// regression guard the GUI validNameRe was ^[A-Za-z0-9_-]+$ (no dots),
+// so servers like paper-search-mcp.io or foo.bar were valid everywhere
+// except the logs endpoint, which 404'd them. The test fixes the
+// validators' charset contract at the request boundary.
+func TestLogs_AcceptsDottedServerName(t *testing.T) {
+	fl := &fakeLogs{body: "x"}
+	s := NewServer(Config{})
+	s.logs = fl
+	req := httptest.NewRequest(http.MethodGet, "/api/logs/paper-search-mcp.io", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("dotted server name should be accepted; got status %d", rec.Code)
+	}
+}
+
+// TestLogs_RejectsDoubleDotSequence guards the "." character that the
+// regex now permits. The charset alone would accept path-traversal
+// sequences like "foo..bar" or "..hidden" once dots are legal, so
+// validName has an explicit strings.Contains(s, "..") rejection. This
+// test pins that secondary check — removing it would silently re-open
+// a traversal surface because api.LogsGet composes
+// "<logDir>/<server>-<daemon>.log" and a leaked ".." in either
+// segment escapes the log directory.
+//
+// The bare ".." is intentionally omitted from this suite: net/http
+// ServeMux canonicalizes literal ".." in URL.Path into a 301/307
+// redirect before the handler runs, so the bare form never reaches
+// validName as a raw server segment. That behavior is exercised by
+// TestLogs_RejectsPathTraversalServer using encoded variants
+// (..%2Fetc, %2E%2E%2Fetc) which do reach the handler.
+func TestLogs_RejectsDoubleDotSequence(t *testing.T) {
+	fl := &fakeLogs{body: "x"}
+	s := NewServer(Config{})
+	s.logs = fl
+	for _, bad := range []string{"foo..bar", "..hidden", "trail..", "a..b..c"} {
+		req := httptest.NewRequest(http.MethodGet, "/api/logs/"+bad, nil)
+		rec := httptest.NewRecorder()
+		s.mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("server=%q (contains ..) → status %d, want 404", bad, rec.Code)
+		}
+	}
+}
+
 // TestLogs_RejectsPathTraversalServer guards the server path segment
 // of /api/logs/:server against path-segment injection. A value like
 // "foo/bar" lands as parts=["foo","bar"] inside the handler; without
