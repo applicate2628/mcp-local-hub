@@ -1,6 +1,7 @@
 package godbolt
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -113,6 +114,24 @@ func TestCompileTool_SendsAcceptJSON(t *testing.T) {
 	}
 }
 
+func TestInvokeCompile_RejectsOversizedResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(bytes.Repeat([]byte("a"), int(maxGodboltResponseBytes+1)))
+	}))
+	defer srv.Close()
+
+	gs := &GodboltServer{httpClient: srv.Client(), baseURL: srv.URL + "/api"}
+	_, err := gs.invokeCompile(t.Context(), srv.URL+"/api/compiler/gcc/compile", []byte(`{"source":"int main(){}"}`))
+	if err == nil {
+		t.Fatal("invokeCompile: expected size limit error")
+	}
+	if !strings.Contains(err.Error(), "response body exceeds") {
+		t.Fatalf("invokeCompile: unexpected error %v", err)
+	}
+}
+
 // mockCallToolRequest wraps raw JSON bytes as a CallToolRequest so tests
 // can invoke compileTool/compileCMakeTool without constructing the full
 // MCP request plumbing.
@@ -195,6 +214,36 @@ func TestCompileTool_PassesFiltersExecuteParametersAndTools(t *testing.T) {
 	}
 	if firstTool["id"] != "llvm-mcatrunk" {
 		t.Errorf("tools[0].id = %v, want llvm-mcatrunk", firstTool["id"])
+	}
+}
+
+func TestFormatTool_RejectsOversizedResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(bytes.Repeat([]byte("a"), int(maxGodboltResponseBytes+1)))
+	}))
+	defer srv.Close()
+
+	gs := &GodboltServer{httpClient: srv.Client(), baseURL: srv.URL + "/api"}
+	rawArgs, _ := json.Marshal(map[string]any{
+		"formatter": "clangformat",
+		"source":    "int main(){}",
+	})
+
+	res, err := gs.formatTool(t.Context(), (&mockCallToolRequest{Arguments: rawArgs}).toReal())
+	if err != nil {
+		t.Fatalf("formatTool returned error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("formatTool: expected tool-level error")
+	}
+	text, ok := res.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("formatTool: expected TextContent, got %T", res.Content[0])
+	}
+	if !strings.Contains(text.Text, "response body exceeds") {
+		t.Fatalf("formatTool: expected size limit error, got %q", text.Text)
 	}
 }
 

@@ -12,6 +12,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+const maxGodboltResponseBytes int64 = 10 * 1024 * 1024
+
 // registerResources attaches the six read-only resources (five HTTP GET
 // endpoints plus one static version resource) to the MCP server. Called
 // once from Run during startup.
@@ -724,8 +726,8 @@ func (gs *GodboltServer) formatTool(ctx context.Context, req *mcp.CallToolReques
 	}
 	defer resp.Body.Close()
 
-	// Read response
-	body, err := io.ReadAll(resp.Body)
+	// Read response with size cap to avoid unbounded memory growth.
+	body, err := readResponseBody(resp.Body)
 	if err != nil {
 		return &mcp.CallToolResult{
 			IsError: true,
@@ -805,7 +807,7 @@ func (gs *GodboltServer) invokeCompile(ctx context.Context, url string, payload 
 		return nil, fmt.Errorf("call godbolt: %w", err)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	body, err := readResponseBody(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}
@@ -864,6 +866,18 @@ func (gs *GodboltServer) fetchResource(url string) ([]byte, error) {
 			snippet = snippet[:200] + "…"
 		}
 		return nil, fmt.Errorf("godbolt %s returned HTTP %d: %s", url, resp.StatusCode, snippet)
+	}
+	return body, nil
+}
+
+func readResponseBody(r io.Reader) ([]byte, error) {
+	lr := &io.LimitedReader{R: r, N: maxGodboltResponseBytes + 1}
+	body, err := io.ReadAll(lr)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > maxGodboltResponseBytes {
+		return nil, fmt.Errorf("response body exceeds %d bytes", maxGodboltResponseBytes)
 	}
 	return body, nil
 }
