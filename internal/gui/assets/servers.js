@@ -273,9 +273,35 @@ function perClientRouting(clientPresence) {
 function renderCell(server, client) {
   const routing = server.routing[client];
   const checked = routing === "via-hub" ? "checked" : "";
-  const disabled = routing === "unsupported" || routing === "not-installed" ? "disabled" : "";
+  // Disable when:
+  //  - "unsupported" or "not-installed": cell is meaningless
+  //  - "via-hub": MVP has no reverse-migrate API (api.MigrateFrom is one-way
+  //    stdio -> hub HTTP). Allowing the uncheck would let the user dirty the
+  //    cell, click Apply, and receive 204 while nothing actually changed —
+  //    the re-run of MigrateFrom is a no-op on an already-migrated binding,
+  //    so after refresh the cell is still via-hub. Disabling the checkbox
+  //    prevents that silent-no-op UX. Reverse-migrate (hub HTTP -> stdio
+  //    rewrite) is tracked for Phase 3B-II; until then users who need to
+  //    undo a migration run `mcphub rollback --client <name>` on the CLI,
+  //    which uses the backup-restore path.
+  const isVisuallyDisabled =
+    routing === "unsupported" || routing === "not-installed" || routing === "via-hub";
+  const disabled = isVisuallyDisabled ? "disabled" : "";
+  // Tooltip text flows into an attribute value via innerHTML, so both the
+  // client label and any server-derived string must be escaped. The strings
+  // below contain no user-controlled data beyond `client`, but escapeHtml
+  // keeps the contract uniform with the other attributes in this row.
+  let title = "";
+  if (routing === "via-hub") {
+    title = ` title="Already routed through the hub. To disable, run \`mcphub rollback --client ${escapeHtml(client)}\` (Phase 3B-II will add a UI for this)."`;
+  } else if (routing === "not-installed") {
+    title = ` title="${escapeHtml(client)} is not installed on this machine."`;
+  } else if (routing === "unsupported") {
+    title = ` title="${escapeHtml(client)} cannot route this server through the hub (e.g., per-session servers)."`;
+  }
   // data-server carries server.name into an attribute value — escape it
   // for the same reason the name cell is escaped. `client` is bounded by
-  // the hardcoded clients array above and does not need escaping.
-  return `<td><input type="checkbox" data-server="${escapeHtml(server.name)}" data-client="${client}" ${checked} ${disabled}></td>`;
+  // the hardcoded clients array above but is escaped here as defense in
+  // depth now that it also flows into the title attribute.
+  return `<td><input type="checkbox" data-server="${escapeHtml(server.name)}" data-client="${escapeHtml(client)}" ${checked} ${disabled}${title}></td>`;
 }
