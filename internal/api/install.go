@@ -702,6 +702,14 @@ func singleHealthProbe(port int) *HealthProbe {
 func (a *API) Uninstall(server string) (*UninstallReport, error) {
 	data, err := loadManifestYAMLEmbedFirst(server)
 	if err != nil {
+		if os.IsNotExist(err) {
+			// Legacy-install cleanup path: the manifest was removed in an
+			// upgrade (e.g. the gdb shared-manifest retirement) but scheduler
+			// tasks and client entries from the previous install may still
+			// exist. Fall back to blind cleanup by task-prefix match and
+			// entry removal across all known clients.
+			return a.uninstallWithoutManifest(server)
+		}
 		return nil, fmt.Errorf("load manifest %s: %w", server, err)
 	}
 	m, err := config.ParseManifest(bytes.NewReader(data))
@@ -738,6 +746,53 @@ func (a *API) Uninstall(server string) (*UninstallReport, error) {
 			continue
 		}
 		report.ClientsUpdated = append(report.ClientsUpdated, b.Client)
+	}
+	return report, nil
+}
+
+// uninstallWithoutManifest cleans up stale scheduler tasks and client
+// entries for a server whose manifest is no longer shipped. Called by
+// Uninstall when loadManifestYAMLEmbedFirst returns ENOENT. Best-effort:
+// task deletion by prefix + RemoveEntry across every known client. An
+// entry that does not exist is not an error.
+func (a *API) uninstallWithoutManifest(server string) (*UninstallReport, error) {
+	sch, err := scheduler.New()
+	if err != nil {
+		return nil, err
+	}
+	report := &UninstallReport{Server: server}
+	prefix := "mcp-local-hub-" + server
+	tasks, err := sch.List(prefix)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range tasks {
+		if err := sch.Delete(t.Name); err != nil {
+			report.TaskDeleteWarns = append(report.TaskDeleteWarns, fmt.Sprintf("delete %s: %v", t.Name, err))
+		} else {
+			report.TasksDeleted = append(report.TasksDeleted, t.Name)
+		}
+	}
+	for name, client := range clients.AllClients() {
+		if client == nil || !client.Exists() {
+			continue
+		}
+		// Only touch clients that actually had an entry; RemoveEntry would
+		// otherwise rewrite every client config file (generating a backup)
+		// just to delete a nonexistent key.
+		entry, err := client.GetEntry(server)
+		if err != nil {
+			report.ClientWarns = append(report.ClientWarns, fmt.Sprintf("lookup %s in %s: %v", server, name, err))
+			continue
+		}
+		if entry == nil {
+			continue
+		}
+		if err := client.RemoveEntry(server); err != nil {
+			report.ClientWarns = append(report.ClientWarns, fmt.Sprintf("remove %s from %s: %v", server, name, err))
+			continue
+		}
+		report.ClientsUpdated = append(report.ClientsUpdated, name)
 	}
 	return report, nil
 }
