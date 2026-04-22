@@ -94,3 +94,9 @@ func ReadPidport(path string) (pid, port int, err error) {
 func formatPidport(pid, port int) string {
 	return fmt.Sprintf("%d %d\n", pid, port)
 }
+
+// AcquireSingleInstanceAt is the exported form of acquireSingleInstanceAt
+// so callers outside the gui package (cli) can share the same path.
+func AcquireSingleInstanceAt(pidportPath string, port int) (*SingleInstanceLock, error) {
+	return acquireSingleInstanceAt(pidportPath, port)
+}
