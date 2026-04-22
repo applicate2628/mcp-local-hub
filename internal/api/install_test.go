@@ -35,6 +35,23 @@ func serenaLikeManifest() *config.ServerManifest {
 	}
 }
 
+func preparePreflightBinaryChecks(t *testing.T) {
+	t.Helper()
+	origCanonical := testCanonicalMcphubPathOverride
+	origShort := mcphubShortName
+	t.Cleanup(func() {
+		testCanonicalMcphubPathOverride = origCanonical
+		mcphubShortName = origShort
+	})
+	binDir := t.TempDir()
+	canonical := filepath.Join(binDir, "mcphub-test")
+	if err := os.WriteFile(canonical, []byte(""), 0755); err != nil {
+		t.Fatalf("write fake canonical mcphub: %v", err)
+	}
+	testCanonicalMcphubPathOverride = canonical
+	mcphubShortName = "go"
+}
+
 func TestBuildPlan_NoFilter_FullInstall(t *testing.T) {
 	m := serenaLikeManifest()
 	p, err := BuildPlan(m, "")
@@ -146,6 +163,7 @@ func TestBuildPlan_InvalidClientURLPath_Errors(t *testing.T) {
 // With no filter, the first daemon is checked first and the error references
 // "first".
 func TestPreflight_RespectsDaemonFilter(t *testing.T) {
+	preparePreflightBinaryChecks(t)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -192,6 +210,7 @@ func TestPreflight_RespectsDaemonFilter(t *testing.T) {
 // check, install would persist scheduler/client config and then crash at
 // runtime when HTTPHost tries to spawn its upstream.
 func TestPreflight_ChecksInternalPortForNativeHTTP(t *testing.T) {
+	preparePreflightBinaryChecks(t)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -228,6 +247,7 @@ func TestPreflight_ChecksInternalPortForNativeHTTP(t *testing.T) {
 // check is scoped to native-http. stdio-bridge transports have no second
 // port and must not be rejected for something outside their scope.
 func TestPreflight_StdioBridgeIgnoresInternalPort(t *testing.T) {
+	preparePreflightBinaryChecks(t)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -259,6 +279,7 @@ func TestPreflight_StdioBridgeIgnoresInternalPort(t *testing.T) {
 // The alternative path (deferred resolution at daemon launch) yielded
 // a cryptic subprocess error several steps removed from the real cause.
 func TestPreflight_MissingSecretFailsFast(t *testing.T) {
+	preparePreflightBinaryChecks(t)
 	// Point the secrets resolver at a non-existent vault location so
 	// any secret: ref triggers the "vault unavailable" branch. Keeps
 	// the test hermetic: we aren't exercising decryption, just the
@@ -288,6 +309,7 @@ func TestPreflight_MissingSecretFailsFast(t *testing.T) {
 // references preflight cleanly even when no vault exists (fresh
 // machine, user has not run `mcphub secrets init`).
 func TestPreflight_NoSecretsNeeded(t *testing.T) {
+	preparePreflightBinaryChecks(t)
 	t.Setenv("LOCALAPPDATA", t.TempDir())
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 
@@ -334,6 +356,7 @@ func TestInstallAllInstallsEverything(t *testing.T) {
 	tmp := t.TempDir()
 	makeFakeManifest(t, filepath.Join(tmp, "foo"), "foo", 9130)
 	makeFakeManifest(t, filepath.Join(tmp, "bar"), "bar", 9131)
+	preparePreflightBinaryChecks(t)
 
 	a := NewAPI()
 	var buf bytes.Buffer
@@ -352,6 +375,43 @@ func TestInstallAllInstallsEverything(t *testing.T) {
 	}
 }
 
+func TestInstallAllFrom_PortConflictFailsThatServer(t *testing.T) {
+	tmp := t.TempDir()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	occupied := ln.Addr().(*net.TCPAddr).Port
+	makeFakeManifest(t, filepath.Join(tmp, "busy"), "busy", occupied)
+	makeFakeManifest(t, filepath.Join(tmp, "free"), "free", occupied+1)
+	preparePreflightBinaryChecks(t)
+
+	a := NewAPI()
+	results := a.InstallAllFrom(InstallAllOpts{
+		ManifestDir: tmp,
+		DryRun:      true,
+		Writer:      &bytes.Buffer{},
+	})
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+
+	byServer := map[string]error{}
+	for _, r := range results {
+		byServer[r.Server] = r.Err
+	}
+	if byServer["busy"] == nil {
+		t.Fatalf("expected busy server to fail preflight for occupied port")
+	}
+	if !strings.Contains(byServer["busy"].Error(), "already in use") {
+		t.Fatalf("busy error should mention occupied port, got: %v", byServer["busy"])
+	}
+	if byServer["free"] != nil {
+		t.Fatalf("expected free server to pass, got: %v", byServer["free"])
+	}
+}
+
 func makeFakeManifest(t *testing.T, dir, name string, port int) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -360,7 +420,7 @@ func makeFakeManifest(t *testing.T, dir, name string, port int) {
 	// 'go' is guaranteed to be on PATH in every Go test environment.
 	// Previously the fixture used 'echo', which works under Unix shells
 	// but not on Windows where echo is a cmd.exe builtin, not a PE file
-	// — exec.LookPath fails and preflightBulkSubset rejects the manifest.
+	// — exec.LookPath fails and install preflight rejects the manifest.
 	body := fmt.Sprintf(`name: %s
 kind: global
 transport: stdio-bridge

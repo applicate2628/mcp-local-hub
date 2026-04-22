@@ -9,7 +9,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -267,12 +266,7 @@ func (a *API) InstallAllFrom(opts InstallAllOpts) []InstallResult {
 }
 
 // installUsingEmbedFirst is the install entry that loads the manifest
-// via loadManifestYAMLEmbedFirst. Full Preflight is intentionally
-// downgraded for the bulk-install case (ports belonging to a server
-// already installed on this machine would otherwise abort the batch),
-// but the subset of checks that are always relevant — command
-// availability, canonical mcphub, and secret references — still runs
-// so a broken manifest fails fast instead of leaving partial state.
+// via loadManifestYAMLEmbedFirst.
 func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 	w := opts.Writer
 	if w == nil {
@@ -286,7 +280,7 @@ func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 	if err != nil {
 		return err
 	}
-	if err := preflightBulkSubset(m); err != nil {
+	if err := Preflight(m, opts.DaemonFilter); err != nil {
 		return err
 	}
 	plan, err := BuildPlan(m, opts.DaemonFilter)
@@ -299,30 +293,9 @@ func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 	return executeInstallTo(w, m, plan)
 }
 
-// preflightBulkSubset is the subset of Preflight that is always safe
-// to run in --all / bulk install mode: command + canonical mcphub
-// + secret references. Port-in-use checks are skipped because they
-// would reject every server already running on the host.
-func preflightBulkSubset(m *config.ServerManifest) error {
-	if _, err := exec.LookPath(m.Command); err != nil {
-		return fmt.Errorf("command %q not found on PATH: %w", m.Command, err)
-	}
-	canonicalPath, err := canonicalMcphubPath()
-	if err != nil {
-		return err
-	}
-	if _, err := os.Stat(canonicalPath); err != nil {
-		return fmt.Errorf("%s not present — run `mcphub setup` once: %w", canonicalPath, err)
-	}
-	return checkSecretRefs(m.Env)
-}
-
 // installFromManifestDir is Install-like but with an explicit manifestDir
 // override. Used by InstallAllFrom so tests can point at a tempdir without
-// mutating global executable-path state. Runs the same preflight subset
-// as installUsingEmbedFirst (command + canonical mcphub + secrets) —
-// port checks are skipped because bulk installs legitimately coexist
-// with already-running sibling daemons.
+// mutating global executable-path state.
 func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error {
 	w := opts.Writer
 	if w == nil {
@@ -338,7 +311,7 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 	if err != nil {
 		return err
 	}
-	if err := preflightBulkSubset(m); err != nil {
+	if err := Preflight(m, opts.DaemonFilter); err != nil {
 		return err
 	}
 	plan, err := BuildPlan(m, opts.DaemonFilter)
@@ -658,8 +631,6 @@ func probeDaemonHealth(rows []DaemonStatus) {
 // is not exercised and the probe result is deterministic.
 var singleHealthProbeFn = singleHealthProbe
 
-const maxHealthProbeResponseBytes = 1 << 20 // 1 MiB
-
 func singleHealthProbe(port int) *HealthProbe {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -692,13 +663,7 @@ func singleHealthProbe(port int) *HealthProbe {
 		return &HealthProbe{Err: "tools/list: " + err.Error()}
 	}
 	defer resp2.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp2.Body, maxHealthProbeResponseBytes+1))
-	if err != nil {
-		return &HealthProbe{Err: "tools/list: read: " + err.Error()}
-	}
-	if len(raw) > maxHealthProbeResponseBytes {
-		return &HealthProbe{Err: fmt.Sprintf("tools/list: response too large (> %d bytes)", maxHealthProbeResponseBytes)}
-	}
+	raw, _ := io.ReadAll(resp2.Body)
 	payload := raw
 	// SSE-wrapped response: pull JSON out of the first data: line.
 	for _, line := range strings.Split(string(raw), "\n") {
@@ -739,9 +704,8 @@ func (a *API) Uninstall(server string) (*UninstallReport, error) {
 		return nil, err
 	}
 	report := &UninstallReport{Server: m.Name}
-	// Delete only this server's tasks. Keep the trailing dash so
-	// uninstalling "ser" does not match "serena-*" tasks.
-	prefix := "mcp-local-hub-" + m.Name + "-"
+	// Delete all tasks that begin with our prefix.
+	prefix := "mcp-local-hub-" + m.Name
 	tasks, err := sch.List(prefix)
 	if err != nil {
 		return nil, err
@@ -825,9 +789,6 @@ func BuildPlan(m *config.ServerManifest, daemonFilter string) (*Plan, error) {
 		if urlPath == "" {
 			urlPath = "/mcp"
 		}
-		if err := validateClientURLPath(urlPath); err != nil {
-			return nil, fmt.Errorf("invalid url_path for client %q: %w", b.Client, err)
-		}
 		url := fmt.Sprintf("http://localhost:%d%s", daemon.Port, urlPath)
 		p.ClientUpdates = append(p.ClientUpdates, ClientUpdatePlan{
 			Client:     b.Client,
@@ -838,23 +799,6 @@ func BuildPlan(m *config.ServerManifest, daemonFilter string) (*Plan, error) {
 		})
 	}
 	return p, nil
-}
-
-func validateClientURLPath(urlPath string) error {
-	if !strings.HasPrefix(urlPath, "/") {
-		return fmt.Errorf("must start with '/'")
-	}
-	if strings.HasPrefix(urlPath, "//") {
-		return fmt.Errorf("must not start with '//'")
-	}
-	u, err := url.Parse(urlPath)
-	if err != nil {
-		return fmt.Errorf("parse url_path: %w", err)
-	}
-	if u.Scheme != "" || u.Host != "" || u.User != nil {
-		return fmt.Errorf("must be a path-only URL")
-	}
-	return nil
 }
 
 func findDaemon(m *config.ServerManifest, name string) (config.DaemonSpec, bool) {
@@ -879,15 +823,20 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 	if _, err := exec.LookPath(m.Command); err != nil {
 		return fmt.Errorf("command %q not found on PATH: %w", m.Command, err)
 	}
-	// 2. Canonical mcphub must exist — scheduler tasks and relay
-	// entries both reference ~/.local/bin/mcphub(.exe) by absolute
-	// path, avoiding PATH/CWD search-order hijacking.
+	// 2. Canonical mcphub must exist — scheduler tasks reference
+	// ~/.local/bin/mcphub.exe by absolute path because Windows Task
+	// Scheduler's CreateProcess call skips PATH lookup. Antigravity
+	// relay entries still use the short name (Node's child_process
+	// honors PATH), so both checks apply.
 	canonicalPath, err := canonicalMcphubPath()
 	if err != nil {
 		return err
 	}
 	if _, err := os.Stat(canonicalPath); err != nil {
 		return fmt.Errorf("%s not present — run `mcphub setup` once to install the canonical binary: %w", canonicalPath, err)
+	}
+	if _, err := exec.LookPath(mcphubShortName); err != nil {
+		return fmt.Errorf("%s not on PATH — run `mcphub setup` once to add ~/.local/bin to PATH: %w", mcphubShortName, err)
 	}
 	// 3. Ports free — only for daemons in the filtered scope.
 	//
@@ -1076,9 +1025,9 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan) error {
 	// Populate relay-related fields so adapters for stdio-only clients
 	// (e.g. Antigravity) can produce their `command`+`args` entry shape
 	// invoking `mcphub.exe relay`. HTTP-native adapters ignore these fields.
-	// Use the canonical absolute mcphub path for relay clients too.
-	// Using a bare "mcphub(.exe)" lets PATH/CWD search order decide what
-	// actually executes, which is vulnerable to local binary planting.
+	// We reference mcphub by short name and let the client's PATH resolve it;
+	// this lets the user move or rebuild mcphub without rewriting every
+	// client config.
 	allClients := clients.AllClients()
 	for _, u := range p.ClientUpdates {
 		client := allClients[u.Client]
@@ -1109,7 +1058,7 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan) error {
 			URL:          u.URL,
 			RelayServer:  m.Name,
 			RelayDaemon:  u.DaemonName,
-			RelayExePath: canonical,
+			RelayExePath: mcphubShortName,
 		}
 		if err := client.AddEntry(entry); err != nil {
 			runRollback()
