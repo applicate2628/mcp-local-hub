@@ -273,7 +273,15 @@ function perClientRouting(clientPresence) {
 }
 
 function renderCell(server, client) {
-  const routing = server.routing[client];
+  // Treat undefined routing as "not-installed" — perClientRouting only
+  // populates keys present in /api/scan's client_presence map, so if a
+  // client column has no entry for this server the cell must render as
+  // a disabled checkbox, not an enabled one. An enabled checkbox would
+  // let the user dirty the cell and click Apply; MigrateFrom on an
+  // absent client silently no-ops via adapter.Exists()==false and
+  // returns 204, which the UI then reports as success. Defaulting here
+  // routes through the existing disable-states logic below.
+  const routing = server.routing[client] ?? "not-installed";
   const checked = routing === "via-hub" ? "checked" : "";
   // Disable when:
   //  - "unsupported" or "not-installed": cell is meaningless

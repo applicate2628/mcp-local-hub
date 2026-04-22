@@ -342,3 +342,77 @@ func TestStreamLogs_DoesNotEmitOrAdvanceCursorOnPlaceholder(t *testing.T) {
 		t.Errorf("placeholder text leaked into SSE stream: %q", final)
 	}
 }
+
+// TestStreamLogs_PreservesPartialLineAcrossTicks pins the R22 fix to
+// streamLogs's per-tick split. Daemons commonly write one logical line
+// in multiple writes — for example "Loading..." on one write and
+// " done\n" on the next. Before R22 the per-tick split on "\n" emitted
+// the unterminated "Loading..." fragment as its own log-line event,
+// then the continuation " done" as a second event. The UI saw two
+// corrupted events instead of the intended single "Loading... done"
+// line.
+//
+// The fix carries any unterminated trailing fragment from one tick's
+// suffix into the next tick's prepend via pendingLine. This test
+// scripts the exact sequence:
+//
+//  1. prime: empty file (lastLen seeded at 0; pendingLine empty).
+//  2. tick 1: "Loading..." — no newline, must NOT be emitted; held as
+//     pendingLine for the next tick.
+//  3. tick 2: "Loading... done\n" — len grew, suffix=" done\n" is
+//     prepended with pendingLine → "Loading... done\n", split yields
+//     one complete line emitted as a single log-line event.
+//
+// The test fails if the SSE stream contains an event whose data line
+// is exactly "Loading..." (the premature partial), and passes once the
+// merged "Loading... done" appears.
+func TestStreamLogs_PreservesPartialLineAcrossTicks(t *testing.T) {
+	fl := &scriptedLogs{seq: []string{
+		"",                  // prime: empty file
+		"Loading...",        // tick 1: partial line, no "\n"
+		"Loading... done\n", // tick 2: completion
+	}}
+	s := NewServer(Config{})
+	s.logs = fl
+
+	rec := newSSERecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/logs/test/stream", nil)
+	ctx, cancel := context.WithTimeout(req.Context(), 2*time.Second)
+	defer cancel()
+	req = req.WithContext(ctx)
+	done := make(chan struct{})
+	go func() {
+		s.mux.ServeHTTP(rec, req)
+		close(done)
+	}()
+
+	// Wait for the merged "Loading... done" event. 1800ms is comfortably
+	// above the two 500ms ticks plus the prime; the test cancels as
+	// soon as the merge is observed so a passing run exits early.
+	deadline := time.Now().Add(1800 * time.Millisecond)
+	sawMerged := false
+	for time.Now().Before(deadline) {
+		body := rec.body()
+		if strings.Contains(body, "Loading... done") {
+			// Confirm the partial "Loading..." was NOT emitted on its
+			// own. The SSE framing is "data: <payload>\n\n", so the
+			// exact byte sequence "data: Loading...\n\n" is only
+			// produced when the unterminated fragment was flushed
+			// prematurely. The merged line emits as
+			// "data: Loading... done\n\n" — a different substring.
+			if strings.Contains(body, "data: Loading...\n\n") {
+				cancel()
+				<-done
+				t.Fatalf("partial line emitted prematurely; body: %q", body)
+			}
+			sawMerged = true
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	if !sawMerged {
+		t.Fatalf("never saw merged line; body: %q", rec.body())
+	}
+}

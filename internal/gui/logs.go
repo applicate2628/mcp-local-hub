@@ -190,8 +190,24 @@ func streamLogs(s *Server, server, daemon string, w http.ResponseWriter, r *http
 	// would permanently miss the start of that first session. See
 	// api.LogPlaceholderFor for the shared exact-match sentinel.
 	var lastLen int
+	// pendingLine holds any unterminated trailing fragment (no "\n") that
+	// arrived on the previous tick's suffix. A daemon often writes one
+	// logical line in multiple writes — e.g. "Loading..." then " done\n"
+	// — so without carrying the fragment across ticks the first write's
+	// suffix splits into a log-line event for "Loading..." and the next
+	// tick emits another event for " done". The UI then sees corrupted
+	// line boundaries. Holding the unterminated fragment until its
+	// newline arrives merges the writes back into one event.
+	var pendingLine string
 	if body, err := s.logs.Logs(server, daemon, 0); err == nil && !isLogPlaceholder(body, server, daemon) {
 		lastLen = len(body)
+		// We deliberately do NOT seed pendingLine from the prime. The
+		// prime is the initial-state snapshot already rendered by
+		// /api/logs/:server when the UI opened the Logs screen; it is
+		// not re-emitted as SSE log-line events. Carrying a fragment
+		// from it into the first tick would risk prepending prime
+		// bytes to a live suffix. The rotation branch below applies
+		// the same rule for the same reason.
 	}
 
 	for {
@@ -228,14 +244,45 @@ func streamLogs(s *Server, server, daemon string, w http.ResponseWriter, r *http
 				// our cursor. Reset to the current size instead of
 				// replaying the new file from the start; continuing to
 				// gate on `len(body) > lastLen` would freeze emission
-				// until the new file grew past the old length.
+				// until the new file grew past the old length. Also
+				// drop any pendingLine: it belonged to the previous
+				// file's trailing fragment, which has no relationship
+				// to the rotated file's contents. Carrying it forward
+				// would prepend dead text onto the first real line of
+				// the new file.
 				lastLen = len(body)
+				pendingLine = ""
 				continue
 			}
 			if len(body) > lastLen {
-				suffix := body[lastLen:]
-				for _, line := range strings.Split(suffix, "\n") {
+				// Prepend any unterminated fragment held from the
+				// previous tick, then clear it — if this tick's suffix
+				// also ends mid-line, the new fragment is reassigned
+				// to pendingLine below.
+				suffix := pendingLine + body[lastLen:]
+				pendingLine = ""
+
+				lines := strings.Split(suffix, "\n")
+				// strings.Split("a\nb\n", "\n") -> ["a", "b", ""].
+				// strings.Split("a\nb",   "\n") -> ["a", "b"].
+				// A non-empty last element means the suffix ended
+				// without a newline — that fragment is unterminated
+				// and must be held until the next tick supplies its
+				// continuation. An empty last element means the
+				// suffix ended cleanly on a newline; drop the empty
+				// tail so it isn't emitted as a blank line event.
+				if n := len(lines); n > 0 && lines[n-1] != "" {
+					pendingLine = lines[n-1]
+					lines = lines[:n-1]
+				} else if n > 0 && lines[n-1] == "" {
+					lines = lines[:n-1]
+				}
+				for _, line := range lines {
 					if line == "" {
+						// Interior blank lines inside the suffix
+						// (e.g. two consecutive newlines) are not
+						// emitted as blank SSE events; keep the
+						// pre-R22 behavior of skipping them.
 						continue
 					}
 					fmt.Fprintf(w, "event: log-line\ndata: %s\n\n", line)
