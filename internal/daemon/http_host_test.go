@@ -224,6 +224,34 @@ func TestHTTPHost_SSE_InjectsAndReshapes(t *testing.T) {
 	}
 }
 
+func TestHTTPHost_POSTBodyTooLarge(t *testing.T) {
+	upstream := newMockUpstream(t, "json")
+	defer upstream.Close()
+	h := newHTTPHostAgainstMock(t, upstream)
+	ts := httptest.NewServer(h.HTTPHandler())
+	defer ts.Close()
+
+	tooLarge := strings.Repeat("a", int(httpHostMaxRequestBodyBytes)+1)
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/mcp", strings.NewReader(tooLarge))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusRequestEntityTooLarge)
+	}
+	if len(upstream.LastBody()) != 0 {
+		t.Fatalf("expected request to be rejected before proxying upstream")
+	}
+}
+
 // TestHTTPHost_InitializeForwardsAndPreservesSessionID verifies that
 // EVERY initialize reaches upstream (no cache-based short-circuit) and
 // that upstream's Mcp-Session-Id header is copied to the client's

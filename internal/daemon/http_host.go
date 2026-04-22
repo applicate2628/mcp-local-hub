@@ -52,6 +52,8 @@ type HTTPHost struct {
 	logCloser   io.Closer // non-nil when LogPath was opened; closed by Stop
 }
 
+const httpHostMaxRequestBodyBytes int64 = 4 << 20 // 4 MiB
+
 // HTTPHostConfig describes one native-http-host instance.
 type HTTPHostConfig struct {
 	Command      string            // subprocess executable (e.g. "uvx")
@@ -276,8 +278,13 @@ func (h *HTTPHost) HTTPHandler() http.Handler {
 }
 
 func (h *HTTPHost) handlePOST(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, httpHostMaxRequestBodyBytes))
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
