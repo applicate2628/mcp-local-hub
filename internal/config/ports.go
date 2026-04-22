@@ -66,5 +66,15 @@ func (r *PortRegistry) Validate() error {
 			}
 		}
 	}
+	for i := 0; i < len(r.WorkspaceScoped); i++ {
+		a := r.WorkspaceScoped[i]
+		for j := i + 1; j < len(r.WorkspaceScoped); j++ {
+			b := r.WorkspaceScoped[j]
+			if a.PoolStart <= b.PoolEnd && b.PoolStart <= a.PoolEnd {
+				return fmt.Errorf("workspace pool %d-%d (%s) overlaps with %d-%d (%s)",
+					a.PoolStart, a.PoolEnd, a.Server, b.PoolStart, b.PoolEnd, b.Server)
+			}
+		}
+	}
 	return nil
 }
