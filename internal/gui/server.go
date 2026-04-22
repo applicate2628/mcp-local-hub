@@ -50,6 +50,26 @@ func (realStatusProvider) Status() ([]api.DaemonStatus, error) {
 	return api.NewAPI().Status()
 }
 
+// migrator is the narrow interface the /api/migrate handler needs.
+// The handler treats the operation as a bulk "apply changes" — any failed
+// (server, client) row inside the MigrateReport is surfaced as an error.
+// realMigrator is the production adapter; tests inject their own.
+type migrator interface {
+	Migrate(servers []string) error
+}
+
+type realMigrator struct{}
+
+// Migrate delegates to api.MigrateFrom. ScanOpts is left zero so
+// ManifestDir defaults to "", which api.loadManifestForServer documents as
+// the production embed-first path — this mirrors the CLI's scanManifestDir()
+// returning "". The ScanOpts client-path fields are documented as unused by
+// the migrate flow (see internal/api/migrate.go), so we do not populate them.
+func (realMigrator) Migrate(servers []string) error {
+	_, err := api.NewAPI().MigrateFrom(api.MigrateOpts{Servers: servers})
+	return err
+}
+
 // RealStatusProvider is the production-default statusProvider. Tests inject
 // their own; callers outside the package construct this one.
 type RealStatusProvider = realStatusProvider
@@ -64,6 +84,7 @@ type Server struct {
 	onActivateWindow func()
 	scanner          scanner
 	status           statusProvider
+	migrator         migrator
 	events           *Broadcaster
 }
 
@@ -76,11 +97,13 @@ func NewServer(cfg Config) *Server {
 	s := &Server{cfg: cfg, mux: http.NewServeMux()}
 	s.scanner = realScanner{}
 	s.status = realStatusProvider{}
+	s.migrator = realMigrator{}
 	s.events = NewBroadcaster()
 	registerPingRoutes(s)
 	registerAssetRoutes(s)
 	registerScanRoutes(s)
 	registerStatusRoutes(s)
+	registerMigrateRoutes(s)
 	registerEventsRoutes(s)
 	return s
 }
