@@ -313,9 +313,6 @@ func preflightBulkSubset(m *config.ServerManifest) error {
 	if _, err := os.Stat(canonicalPath); err != nil {
 		return fmt.Errorf("%s not present — run `mcphub setup` once: %w", canonicalPath, err)
 	}
-	if _, err := exec.LookPath(mcphubShortName); err != nil {
-		return fmt.Errorf("%s not on PATH — run `mcphub setup`: %w", mcphubShortName, err)
-	}
 	return checkSecretRefs(m.Env)
 }
 
@@ -852,20 +849,15 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 	if _, err := exec.LookPath(m.Command); err != nil {
 		return fmt.Errorf("command %q not found on PATH: %w", m.Command, err)
 	}
-	// 2. Canonical mcphub must exist — scheduler tasks reference
-	// ~/.local/bin/mcphub.exe by absolute path because Windows Task
-	// Scheduler's CreateProcess call skips PATH lookup. Antigravity
-	// relay entries still use the short name (Node's child_process
-	// honors PATH), so both checks apply.
+	// 2. Canonical mcphub must exist — scheduler tasks and relay
+	// entries both reference ~/.local/bin/mcphub(.exe) by absolute
+	// path, avoiding PATH/CWD search-order hijacking.
 	canonicalPath, err := canonicalMcphubPath()
 	if err != nil {
 		return err
 	}
 	if _, err := os.Stat(canonicalPath); err != nil {
 		return fmt.Errorf("%s not present — run `mcphub setup` once to install the canonical binary: %w", canonicalPath, err)
-	}
-	if _, err := exec.LookPath(mcphubShortName); err != nil {
-		return fmt.Errorf("%s not on PATH — run `mcphub setup` once to add ~/.local/bin to PATH: %w", mcphubShortName, err)
 	}
 	// 3. Ports free — only for daemons in the filtered scope.
 	//
@@ -1054,9 +1046,9 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan) error {
 	// Populate relay-related fields so adapters for stdio-only clients
 	// (e.g. Antigravity) can produce their `command`+`args` entry shape
 	// invoking `mcphub.exe relay`. HTTP-native adapters ignore these fields.
-	// We reference mcphub by short name and let the client's PATH resolve it;
-	// this lets the user move or rebuild mcphub without rewriting every
-	// client config.
+	// Use the canonical absolute mcphub path for relay clients too.
+	// Using a bare "mcphub(.exe)" lets PATH/CWD search order decide what
+	// actually executes, which is vulnerable to local binary planting.
 	allClients := clients.AllClients()
 	for _, u := range p.ClientUpdates {
 		client := allClients[u.Client]
@@ -1087,7 +1079,7 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan) error {
 			URL:          u.URL,
 			RelayServer:  m.Name,
 			RelayDaemon:  u.DaemonName,
-			RelayExePath: mcphubShortName,
+			RelayExePath: canonical,
 		}
 		if err := client.AddEntry(entry); err != nil {
 			runRollback()
