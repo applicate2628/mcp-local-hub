@@ -68,11 +68,14 @@ type StdioHost struct {
 	bridge *ProtocolBridge
 
 	// SSE subscribers: GET /mcp opens a server-sent-events stream that
-	// is tied to the current MCP session. We intentionally do not broadcast
-	// unrouted subprocess notifications here because they cannot be safely
-	// attributed to a specific HTTP client/session.
-	sseActive atomic.Int32
-	sessionID string
+	// receives subprocess-originated notifications (JSON-RPC messages with
+	// no `id` or unrouted ids). Each subscriber holds one buffered channel.
+	// Subscriptions are session-scoped via validSession; sseActive caps the
+	// number of concurrent streams so a client cannot exhaust goroutines.
+	sseMu      sync.Mutex
+	sseClients []chan []byte
+	sseActive  atomic.Int32
+	sessionID  string
 
 	done        chan struct{} // closed by Stop() to unblock pending handlers
 	childExited chan struct{} // closed by the watcher goroutine when cmd.Wait() returns
@@ -304,7 +307,19 @@ func (h *StdioHost) readStdoutLoop() {
 				}
 			}
 		}
-		// Keep unrouted lines visible for tests that watch subprocess output.
+		// Unrouted line = notification or untracked id → fan out to SSE
+		// subscribers so Streamable HTTP clients receive server-initiated
+		// traffic. Non-blocking send: a slow subscriber cannot stall the
+		// reader loop for other clients.
+		h.sseMu.Lock()
+		for _, c := range h.sseClients {
+			select {
+			case c <- line:
+			default:
+			}
+		}
+		h.sseMu.Unlock()
+		// Also keep the testStdout path for tests that watch raw output.
 		select {
 		case h.testStdout <- line:
 		default:
@@ -497,6 +512,21 @@ func (h *StdioHost) handleSSE(w http.ResponseWriter, r *http.Request) {
 	_, _ = fmt.Fprint(w, ": keepalive\n\n")
 	flusher.Flush()
 
+	ch := make(chan []byte, 32)
+	h.sseMu.Lock()
+	h.sseClients = append(h.sseClients, ch)
+	h.sseMu.Unlock()
+	defer func() {
+		h.sseMu.Lock()
+		for i, c := range h.sseClients {
+			if c == ch {
+				h.sseClients = append(h.sseClients[:i], h.sseClients[i+1:]...)
+				break
+			}
+		}
+		h.sseMu.Unlock()
+	}()
+
 	for {
 		select {
 		case <-r.Context().Done():
@@ -507,6 +537,9 @@ func (h *StdioHost) handleSSE(w http.ResponseWriter, r *http.Request) {
 			// Child died — nothing more will be emitted on this stream.
 			// Return cleanly so the HTTP server can close the connection.
 			return
+		case line := <-ch:
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", line)
+			flusher.Flush()
 		}
 	}
 }
