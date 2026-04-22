@@ -81,3 +81,49 @@ func TestRelease_UnlocksBeforeRemovingPidport(t *testing.T) {
 	}
 	lock2.Release()
 }
+
+// TestRelease_DoesNotClobberSuccessorPidport pins the round-8 fix for
+// the successor-clobber race introduced in round 7. The round-7 change
+// moved flock.Unlock() before os.Remove(pidport) to close the
+// shutdown-race window where a second instance could see ErrBusy but
+// fail to ReadPidport. That fix opened a new window: between Unlock
+// and Remove, a racing successor can acquire the flock and rewrite
+// pidport with its own PID; a blind Remove would then delete the
+// successor's metadata file. The round-8 fix checks the recorded PID
+// before removing. This test simulates the successor-write by
+// overwriting pidport with a different PID after lock acquisition,
+// then calling Release() and asserting the file survives unchanged.
+func TestRelease_DoesNotClobberSuccessorPidport(t *testing.T) {
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+
+	// Simulate the lock + write phase (our process becomes incumbent).
+	lock1, err := acquireSingleInstanceAt(pidport, 9100)
+	if err != nil {
+		t.Fatalf("lock1: %v", err)
+	}
+
+	// Simulate the post-Unlock window: a racing successor acquires the
+	// flock (we can't take it inside the test because lock1 still
+	// holds it — Release's Unlock runs first in production, which is
+	// what lets the successor in) and writes ITS pidport. Using a
+	// fake PID that cannot equal os.Getpid() keeps the assertion
+	// deterministic across platforms and test runners.
+	successorPID := os.Getpid() + 1
+	successorPidport := []byte(formatPidport(successorPID, 9101))
+	if err := os.WriteFile(pidport, successorPidport, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Release must NOT remove the successor's pidport because the
+	// recorded PID no longer names our process.
+	lock1.Release()
+
+	got, err := os.ReadFile(pidport)
+	if err != nil {
+		t.Fatalf("pidport should still exist (successor wrote it): %v", err)
+	}
+	if string(got) != string(successorPidport) {
+		t.Errorf("pidport contents = %q, want successor's %q", got, successorPidport)
+	}
+}

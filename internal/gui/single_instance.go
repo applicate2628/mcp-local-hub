@@ -68,11 +68,24 @@ func (l *SingleInstanceLock) Release() {
 	// unlock leaves a window where the second instance sees
 	// ErrSingleInstanceBusy but ReadPidport fails (file gone), causing
 	// false-negative "running but unreachable" failures during normal
-	// shutdown. The reverse window (flock free, stale pidport file) is
-	// safe because acquireSingleInstanceAt always overwrites pidport
-	// via os.WriteFile after TryLock succeeds.
+	// shutdown.
+	//
+	// The unlock-first order introduces a SEPARATE race: between our
+	// Unlock and our Remove, a racing successor can acquire the flock
+	// and write ITS pidport; a blind os.Remove would then delete the
+	// successor's metadata file and cause the same false-negative for
+	// the next probing client. We close that race by checking
+	// ownership: read the pidport, and only remove it if the recorded
+	// PID is still ours. A tiny TOCTOU window remains between the read
+	// and the remove, but a successor's subsequent os.WriteFile
+	// overwrites the file in place so the window collapses quickly in
+	// practice. A read error (file already gone, or a successor wrote
+	// a malformed transient state) is treated as "not ours" — safer to
+	// leak a stale file than to clobber a successor.
 	_ = l.fl.Unlock()
-	_ = os.Remove(l.pidport)
+	if pid, _, err := ReadPidport(l.pidport); err == nil && pid == os.Getpid() {
+		_ = os.Remove(l.pidport)
+	}
 	l.fl = nil
 }
 

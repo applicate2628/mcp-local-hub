@@ -73,12 +73,29 @@ type realMigrator struct{}
 // the migrate flow (see internal/api/migrate.go), so we do not populate them.
 // clients is forwarded into MigrateOpts.ClientsInclude; an empty slice
 // preserves the original "all clients bound in the manifest" behavior.
+//
+// Per-row failures are aggregated into a single error that mirrors the CLI's
+// behavior in internal/cli/migrate.go: api.MigrateFrom returns nil error when
+// only per-row writes fail (the outer run is considered complete), recording
+// each failure in MigrateReport.Failed. Dropping that slice would let
+// /api/migrate return 204 after partial failures, so the GUI would clear its
+// pending changes even though some client config rewrites were not applied.
 func (realMigrator) Migrate(servers, clients []string) error {
-	_, err := api.NewAPI().MigrateFrom(api.MigrateOpts{
+	report, err := api.NewAPI().MigrateFrom(api.MigrateOpts{
 		Servers:        servers,
 		ClientsInclude: clients,
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	if report != nil && len(report.Failed) > 0 {
+		msgs := make([]string, 0, len(report.Failed))
+		for _, f := range report.Failed {
+			msgs = append(msgs, f.Server+"/"+f.Client+": "+f.Err)
+		}
+		return fmt.Errorf("%d migration row(s) failed: %s", len(report.Failed), strings.Join(msgs, "; "))
+	}
+	return nil
 }
 
 // restarter is the narrow interface the /api/servers/:name/restart handler
