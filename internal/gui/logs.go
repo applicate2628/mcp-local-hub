@@ -83,7 +83,16 @@ func streamLogs(s *Server, server string, w http.ResponseWriter, r *http.Request
 	ctx := r.Context()
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
+
+	// Prime lastLen with the current log size before the loop. Without
+	// this the first tick emits the ENTIRE current log as live
+	// "log-line" events — duplicating what /api/logs/:server already
+	// rendered when the UI first opened the Logs screen.
 	var lastLen int
+	if body, err := s.logs.Logs(server, 0); err == nil {
+		lastLen = len(body)
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -94,6 +103,15 @@ func streamLogs(s *Server, server string, w http.ResponseWriter, r *http.Request
 				fmt.Fprintf(w, "event: error\ndata: %s\n\n", err.Error())
 				flusher.Flush()
 				return
+			}
+			if len(body) < lastLen {
+				// Log rotated or truncated — the file is smaller than
+				// our cursor. Reset to the current size instead of
+				// replaying the new file from the start; continuing to
+				// gate on `len(body) > lastLen` would freeze emission
+				// until the new file grew past the old length.
+				lastLen = len(body)
+				continue
 			}
 			if len(body) > lastLen {
 				suffix := body[lastLen:]

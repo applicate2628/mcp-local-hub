@@ -4,7 +4,6 @@ package cli
 import (
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -47,20 +46,16 @@ activates the first window and exits 0.`,
 				pidportPath = filepath.Join(d, "gui.pidport")
 			}
 
-			// Pre-bind a listener to resolve the actual port (port=0 → OS picks
-			// one). We immediately Close it and let gui.Server rebind; the race
-			// window is single-digit microseconds on loopback and acceptable
-			// for a local-only GUI server.
-			listener, err := listenForPort(port)
-			if err != nil {
-				return err
-			}
-			boundPort := listener.Addr().(*net.TCPAddr).Port
-			_ = listener.Close()
-
-			// Phase A: acquire single-instance lock, falling back to
-			// handshake-and-exit if another instance is live.
-			lock, err := gui.AcquireSingleInstanceAt(pidportPath, boundPort)
+			// Phase A: acquire the single-instance lock BEFORE binding any
+			// port. If we bind first and the requested --port is already in
+			// use (e.g. because the incumbent GUI owns it), ListenTCP fails
+			// with "address already in use" and we never reach the
+			// handshake path that would activate the incumbent. The
+			// pidport file initially records the requested port (which may
+			// be 0 = auto); once the server actually binds, we rewrite it
+			// with the resolved port so second-instance handshake probes
+			// reach the right place.
+			lock, err := gui.AcquireSingleInstanceAt(pidportPath, port)
 			if err != nil {
 				if !errors.Is(err, gui.ErrSingleInstanceBusy) {
 					return err
@@ -76,8 +71,10 @@ activates the first window and exits 0.`,
 			}
 			defer lock.Release()
 
-			// Phase B: start the HTTP server.
-			s := gui.NewServer(gui.Config{Port: boundPort, Version: versionString()})
+			// Phase B: start the HTTP server. Server.Start binds 127.0.0.1
+			// on the configured port (0 = OS-assigned) and signals ready
+			// once the listener is live.
+			s := gui.NewServer(gui.Config{Port: port, Version: versionString()})
 			s.OnActivateWindow(func() {
 				// Phase 3B-II will wire tray/browser here. MVP: just log.
 				fmt.Fprintln(cmd.OutOrStdout(), "activate-window received")
@@ -93,7 +90,18 @@ activates the first window and exits 0.`,
 
 			select {
 			case <-ready:
-				fmt.Fprintf(cmd.OutOrStdout(), "GUI listening on http://127.0.0.1:%d\n", s.Port())
+				// Now we know the actual bound port. If the user passed
+				// --port 0, rewrite the pidport file so the
+				// second-instance handshake hits the right place. The
+				// flock on *.lock still gates ownership; the pidport file
+				// is ownership metadata the lock holder freely updates.
+				actualPort := s.Port()
+				if actualPort != port {
+					if err := gui.RewritePidportPort(pidportPath, actualPort); err != nil {
+						fmt.Fprintf(cmd.OutOrStderr(), "warning: pidport rewrite: %v\n", err)
+					}
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "GUI listening on http://127.0.0.1:%d\n", actualPort)
 			case err := <-errCh:
 				return err
 			case <-ctx.Done():
@@ -130,15 +138,6 @@ activates the first window and exits 0.`,
 	// the standard handshake path. Hide it from --help so users don't expect the takeover behavior.
 	_ = c.Flags().MarkHidden("force")
 	return c
-}
-
-// listenForPort picks an OS-assigned free port when port==0, or binds
-// the requested port. Returns the bound listener so the caller can
-// forward the port number to Server without a TOCTOU window wider than
-// an immediate Close+reopen.
-func listenForPort(port int) (*net.TCPListener, error) {
-	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port}
-	return net.ListenTCP("tcp", addr)
 }
 
 // versionString returns the linker-baked version. Ephemeral placeholder

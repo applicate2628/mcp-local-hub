@@ -100,3 +100,14 @@ func formatPidport(pid, port int) string {
 func AcquireSingleInstanceAt(pidportPath string, port int) (*SingleInstanceLock, error) {
 	return acquireSingleInstanceAt(pidportPath, port)
 }
+
+// RewritePidportPort overwrites the pidport file with the current PID and
+// the supplied port. Used by the CLI after Server.Start resolves an
+// OS-assigned port (--port 0): the lock was acquired before bind with
+// the originally requested port, but second-instance handshake probes
+// need the actual bound port. The caller must hold the single-instance
+// lock — the flock on *.lock gates ownership, the pidport file is
+// ownership metadata the lock holder freely updates.
+func RewritePidportPort(pidportPath string, port int) error {
+	return os.WriteFile(pidportPath, []byte(formatPidport(os.Getpid(), port)), 0o600)
+}
