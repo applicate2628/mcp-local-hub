@@ -3,10 +3,13 @@ package perftools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+const llvmObjdumpMaxStdoutBytes = 8 * 1024 * 1024
 
 // llvmObjdumpTool disassembles a binary using llvm-objdump. Unlike
 // godbolt's sandbox compile, this operates on the USER'S ACTUAL
@@ -54,8 +57,11 @@ func (tb *PerfToolbox) llvmObjdumpTool(ctx context.Context, req *mcp.CallToolReq
 	cmdArgs = append(cmdArgs, args.ExtraArgs...)
 	cmdArgs = append(cmdArgs, args.Binary)
 
-	cap, err := runCapture(ctx, tb.tools.LLVMObjdump.Path, "", cmdArgs)
+	cap, err := runCaptureLimited(ctx, tb.tools.LLVMObjdump.Path, "", cmdArgs, llvmObjdumpMaxStdoutBytes, 512*1024)
 	if err != nil {
+		if errors.Is(err, errOutputLimitExceeded) {
+			return errResult(fmt.Sprintf("llvm-objdump output exceeded %d bytes; narrow the request with function/section filters", llvmObjdumpMaxStdoutBytes)), nil
+		}
 		return errResult(fmt.Sprintf("llvm-objdump failed: %v", err)), nil
 	}
 	if cap.ExitCode != 0 {
