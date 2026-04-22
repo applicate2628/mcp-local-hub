@@ -2,6 +2,7 @@ package clients
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -128,8 +129,7 @@ const originalSentinelSuffix = backupSuffixPrefix + "original"
 // If keepN <= 0, pruning is skipped (matching the pre-rotation Backup()
 // contract used by install.go / migrate.go).
 func writeBackup(livePath, clientName string, keepN int) (string, error) {
-	data, err := os.ReadFile(livePath)
-	if err != nil {
+	if _, err := os.Stat(livePath); err != nil {
 		if os.IsNotExist(err) {
 			return "", &ErrClientNotInstalled{Client: clientName}
 		}
@@ -141,7 +141,7 @@ func writeBackup(livePath, clientName string, keepN int) (string, error) {
 	// backups have aged out.
 	sentinel := livePath + originalSentinelSuffix
 	if _, err := os.Stat(sentinel); os.IsNotExist(err) {
-		if err := os.WriteFile(sentinel, data, 0600); err != nil {
+		if err := copyFile(livePath, sentinel, 0600); err != nil {
 			return "", fmt.Errorf("write sentinel: %w", err)
 		}
 	}
@@ -151,7 +151,7 @@ func writeBackup(livePath, clientName string, keepN int) (string, error) {
 	// and the second call overwrites the first — harmless, since the content
 	// is the current live config either way.
 	bakPath := livePath + backupSuffixPrefix + time.Now().Format("20060102-150405")
-	if err := os.WriteFile(bakPath, data, 0600); err != nil {
+	if err := copyFile(livePath, bakPath, 0600); err != nil {
 		return "", err
 	}
 
@@ -159,6 +159,30 @@ func writeBackup(livePath, clientName string, keepN int) (string, error) {
 		pruneOldTimestamped(livePath, keepN)
 	}
 	return bakPath, nil
+}
+
+func copyFile(src, dst string, perm os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	// Close explicitly so flush/commit errors (disk full, NFS fsync failure)
+	// surface here instead of being swallowed by a deferred Close — otherwise
+	// writeBackup reports success on a truncated backup file.
+	if err := out.Close(); err != nil {
+		return err
+	}
+	return nil
 }
 
 // pruneOldTimestamped keeps only the keepN most recent timestamped backups

@@ -1,9 +1,11 @@
 package daemon
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -277,5 +279,28 @@ func TestRelay_GracefulShutdownSendsDELETE(t *testing.T) {
 
 	if fake.deleteCount.Load() == 0 {
 		t.Error("expected DELETE /mcp on shutdown, got 0")
+	}
+}
+
+func TestReadJSONRPCLine_TooLong(t *testing.T) {
+	input := append(bytes.Repeat([]byte("a"), maxStdinLineBytes+1), '\n')
+	br := bufio.NewReaderSize(bytes.NewReader(input), maxStdinLineBytes)
+
+	_, err := readJSONRPCLine(br)
+	if !errors.Is(err, errStdinLineTooLong) {
+		t.Fatalf("expected errStdinLineTooLong, got %v", err)
+	}
+}
+
+func TestReadJSONRPCLine_MaxLengthAccepted(t *testing.T) {
+	input := append(bytes.Repeat([]byte("a"), maxStdinLineBytes-1), '\n')
+	br := bufio.NewReaderSize(bytes.NewReader(input), maxStdinLineBytes)
+
+	line, err := readJSONRPCLine(br)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(line) != maxStdinLineBytes-1 {
+		t.Fatalf("line length = %d, want %d", len(line), maxStdinLineBytes-1)
 	}
 }

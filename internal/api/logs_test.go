@@ -32,3 +32,14 @@ func TestLogsGetTailsFromFile(t *testing.T) {
 		t.Errorf("expected 5 tailed lines, got %d", len(lines))
 	}
 }
+
+func TestDefaultLogDirUsesXDGStateHome(t *testing.T) {
+	t.Setenv("LOCALAPPDATA", "")
+	t.Setenv("XDG_STATE_HOME", "/tmp/custom-state")
+
+	got := defaultLogDir()
+	want := filepath.Join("/tmp/custom-state", "mcp-local-hub", "logs")
+	if got != want {
+		t.Fatalf("defaultLogDir() = %q, want %q", got, want)
+	}
+}

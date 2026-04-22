@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -79,6 +80,9 @@ func (a *API) BackupsCleanPreview(keepN int) ([]string, error) {
 // backupsCleanAll is the shared implementation of BackupsClean and
 // BackupsCleanPreview. dryRun=true returns candidate paths without deleting.
 func (a *API) backupsCleanAll(keepN int, dryRun bool) ([]string, error) {
+	if keepN < 0 {
+		return nil, fmt.Errorf("keepN must be >= 0")
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
@@ -96,6 +100,9 @@ func (a *API) backupsCleanAll(keepN int, dryRun bool) ([]string, error) {
 
 // BackupsCleanIn is the tempdir-capable form of BackupsClean.
 func (a *API) BackupsCleanIn(dir, liveName string, keepN int) ([]string, error) {
+	if keepN < 0 {
+		return nil, fmt.Errorf("keepN must be >= 0")
+	}
 	return a.backupsCleanInImpl(dir, liveName, keepN, false)
 }
 

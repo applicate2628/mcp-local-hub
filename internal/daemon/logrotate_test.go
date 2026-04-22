@@ -69,3 +69,26 @@ func TestRotateIfLarge_PrunesOldestWhenOverCount(t *testing.T) {
 		t.Errorf("expected 5 rotated files after prune, got %d", rotated)
 	}
 }
+
+func TestRotateIfLarge_NegativeKeepCountDoesNotPanic(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "test.log")
+	big := make([]byte, 11*1024*1024)
+	if err := os.WriteFile(logPath, big, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RotateIfLarge(logPath, 10*1024*1024, -1); err != nil {
+		t.Fatalf("RotateIfLarge: %v", err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "test.log.") {
+			t.Fatalf("expected no rotated files when keepCount is negative, found %s", e.Name())
+		}
+	}
+}

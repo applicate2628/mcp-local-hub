@@ -16,6 +16,26 @@ import (
 	"time"
 )
 
+func acquireSessionID(t *testing.T, baseURL string) string {
+	t.Helper()
+	req, _ := http.NewRequest("POST", baseURL+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","method":"ping"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("acquire session id: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("acquire session id: status=%d body=%s", resp.StatusCode, body)
+	}
+	sid := resp.Header.Get("Mcp-Session-Id")
+	if sid == "" {
+		t.Fatal("acquire session id: empty Mcp-Session-Id header")
+	}
+	return sid
+}
+
 // TestHostSubprocessLifecycle verifies the stdio-host can spawn a subprocess,
 // forward a write to its stdin, and capture the matching line from stdout.
 // Uses a tiny echo-subprocess (writes each stdin line unchanged to stdout).
@@ -217,6 +237,31 @@ func TestHostHTTPIDMultiplexing(t *testing.T) {
 	wg.Wait()
 }
 
+func TestHostHTTPRejectsOversizedPOSTBody(t *testing.T) {
+	h, err := NewStdioHost(HostConfig{
+		Command: echoSubprocCommand(),
+		Args:    echoSubprocArgs(),
+	})
+	if err != nil {
+		t.Fatalf("NewStdioHost: %v", err)
+	}
+
+	ts := httptest.NewServer(h.HTTPHandler())
+	defer ts.Close()
+
+	tooLarge := strings.Repeat("a", int(maxMCPPostBodyBytes)+1)
+	resp, err := http.Post(ts.URL+"/mcp", "application/json", strings.NewReader(tooLarge))
+	if err != nil {
+		t.Fatalf("POST oversized body: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d, want=%d, body=%q", resp.StatusCode, http.StatusRequestEntityTooLarge, string(body))
+	}
+}
+
 // TestHostInitializeCached verifies that after the first client sends
 // `initialize`, subsequent `initialize` requests return the cached response
 // without being forwarded to the subprocess. This is the contract
@@ -358,6 +403,7 @@ func TestHostStopUnblocksSSE(t *testing.T) {
 		defer close(sseDone)
 		req, _ := http.NewRequest("GET", ts.URL+"/mcp", nil)
 		req.Header.Set("Accept", "text/event-stream")
+		req.Header.Set("Mcp-Session-Id", acquireSessionID(t, ts.URL))
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return
@@ -522,6 +568,7 @@ func TestStdioHost_SSE_ChildExitUnblocksStream(t *testing.T) {
 		defer close(sseDone)
 		req, _ := http.NewRequest("GET", ts.URL+"/mcp", nil)
 		req.Header.Set("Accept", "text/event-stream")
+		req.Header.Set("Mcp-Session-Id", acquireSessionID(t, ts.URL))
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return
@@ -558,11 +605,38 @@ func TestHostDELETETerminates(t *testing.T) {
 	defer ts.Close()
 
 	req, _ := http.NewRequest("DELETE", ts.URL+"/mcp", nil)
+	req.Header.Set("Mcp-Session-Id", acquireSessionID(t, ts.URL))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		t.Errorf("DELETE: got %d, want 200 or 204", resp.StatusCode)
+	}
+}
+
+func TestHostSSERequiresSessionID(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	h, err := NewStdioHost(HostConfig{Command: echoSubprocCommand(), Args: echoSubprocArgs()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer h.Stop()
+	ts := httptest.NewServer(h.HTTPHandler())
+	defer ts.Close()
+
+	req, _ := http.NewRequest("GET", ts.URL+"/mcp", nil)
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("GET /mcp without session id: got %d want %d", resp.StatusCode, http.StatusUnauthorized)
 	}
 }

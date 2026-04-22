@@ -195,6 +195,27 @@ func splitCSVLine(line string) []string {
 	return out
 }
 
+// netstatLinePIDForLoopbackPort extracts the PID from a single `netstat -ano`
+// line only when the line represents a LISTENING socket on exactly
+// 127.0.0.1:<port>. Returns (pid, true) on a strict match.
+func netstatLinePIDForLoopbackPort(line string, port int) (int, bool) {
+	if !strings.Contains(line, "LISTENING") || port <= 0 {
+		return 0, false
+	}
+	fields := strings.Fields(line)
+	if len(fields) < 2 {
+		return 0, false
+	}
+	if fields[1] != fmt.Sprintf("127.0.0.1:%d", port) {
+		return 0, false
+	}
+	pid, err := strconv.Atoi(fields[len(fields)-1])
+	if err != nil || pid == 0 {
+		return 0, false
+	}
+	return pid, true
+}
+
 // init populates status_enrich.go's lookupProcess function pointer with a
 // real Windows implementation that combines netstat (to find the PID owning
 // the port) and wmic (to fetch RAM + start time for that PID).
@@ -216,14 +237,9 @@ func init() {
 			return 0, 0, 0, false
 		}
 		var pid int
-		portMarker := fmt.Sprintf("127.0.0.1:%d", port)
 		for line := range strings.SplitSeq(string(out), "\n") {
-			if !strings.Contains(line, portMarker) || !strings.Contains(line, "LISTENING") {
-				continue
-			}
-			fields := strings.Fields(line)
-			if len(fields) > 0 {
-				pid, _ = strconv.Atoi(fields[len(fields)-1])
+			if parsedPID, ok := netstatLinePIDForLoopbackPort(line, port); ok {
+				pid = parsedPID
 				break
 			}
 		}

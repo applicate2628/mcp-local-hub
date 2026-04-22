@@ -93,6 +93,9 @@ func defaultLogDir() string {
 	if v := os.Getenv("LOCALAPPDATA"); v != "" {
 		return filepath.Join(v, "mcp-local-hub", "logs")
 	}
+	if v := os.Getenv("XDG_STATE_HOME"); v != "" {
+		return filepath.Join(v, "mcp-local-hub", "logs")
+	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".local", "state", "mcp-local-hub", "logs")
 }

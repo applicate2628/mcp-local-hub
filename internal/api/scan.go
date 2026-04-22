@@ -25,27 +25,12 @@ type ScanOpts struct {
 	WithProcessCount      bool // populate ScanEntry.ProcessCount via wmic
 }
 
-// perSessionServers are MCP servers whose state genuinely cannot be shared
-// across clients. Note: many servers that look like they'd be per-session
-// (gdb, lldb) actually have built-in session-management (SessionManager with
-// sessions[session_id] dict), so they CAN be hub-shared — one daemon serves
-// N concurrent debug sessions tracked by session_id.
-//
-// Before adding a server here, grep its source for "session_id" / "sessions["
-// patterns. If present, it's session-multiplexed and belongs in a manifest,
-// not here.
-//
-// Historical note on lldb: the original Python bridge.py was genuinely
-// per-session (each client spawned its own bridge process and its own
-// LLDB). The current `mcphub lldb-bridge` Go subcommand, combined with
-// the hub's stdio-bridge HTTP transport, serializes requests from every
-// connected MCP client onto a single bridge → LLDB TCP socket. So lldb
-// IS hub-shared and lives in servers/lldb/manifest.yaml — not in this
-// map.
-//
-// playwright: each session typically spawns its own browser context which
-// is heavy; leaving as per-session until we confirm multiplexing behavior.
+// perSessionServers are MCP servers whose sessions must remain isolated
+// per local client/process. Even when an upstream tool supports a session_id
+// parameter, we conservatively keep debuggers per-session unless the hub
+// enforces caller authentication and session ownership.
 var perSessionServers = map[string]bool{
+	"gdb":        true,
 	"playwright": true,
 }
 

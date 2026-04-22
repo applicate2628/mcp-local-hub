@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -266,12 +267,7 @@ func (a *API) InstallAllFrom(opts InstallAllOpts) []InstallResult {
 }
 
 // installUsingEmbedFirst is the install entry that loads the manifest
-// via loadManifestYAMLEmbedFirst. Full Preflight is intentionally
-// downgraded for the bulk-install case (ports belonging to a server
-// already installed on this machine would otherwise abort the batch),
-// but the subset of checks that are always relevant — command
-// availability, canonical mcphub, and secret references — still runs
-// so a broken manifest fails fast instead of leaving partial state.
+// via loadManifestYAMLEmbedFirst.
 func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 	w := opts.Writer
 	if w == nil {
@@ -285,7 +281,7 @@ func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 	if err != nil {
 		return err
 	}
-	if err := preflightBulkSubset(m); err != nil {
+	if err := Preflight(m, opts.DaemonFilter); err != nil {
 		return err
 	}
 	plan, err := BuildPlan(m, opts.DaemonFilter)
@@ -298,33 +294,9 @@ func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 	return executeInstallTo(w, m, plan)
 }
 
-// preflightBulkSubset is the subset of Preflight that is always safe
-// to run in --all / bulk install mode: command + canonical mcphub
-// + secret references. Port-in-use checks are skipped because they
-// would reject every server already running on the host.
-func preflightBulkSubset(m *config.ServerManifest) error {
-	if _, err := exec.LookPath(m.Command); err != nil {
-		return fmt.Errorf("command %q not found on PATH: %w", m.Command, err)
-	}
-	canonicalPath, err := canonicalMcphubPath()
-	if err != nil {
-		return err
-	}
-	if _, err := os.Stat(canonicalPath); err != nil {
-		return fmt.Errorf("%s not present — run `mcphub setup` once: %w", canonicalPath, err)
-	}
-	if _, err := exec.LookPath(mcphubShortName); err != nil {
-		return fmt.Errorf("%s not on PATH — run `mcphub setup`: %w", mcphubShortName, err)
-	}
-	return checkSecretRefs(m.Env)
-}
-
 // installFromManifestDir is Install-like but with an explicit manifestDir
 // override. Used by InstallAllFrom so tests can point at a tempdir without
-// mutating global executable-path state. Runs the same preflight subset
-// as installUsingEmbedFirst (command + canonical mcphub + secrets) —
-// port checks are skipped because bulk installs legitimately coexist
-// with already-running sibling daemons.
+// mutating global executable-path state.
 func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error {
 	w := opts.Writer
 	if w == nil {
@@ -340,7 +312,7 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 	if err != nil {
 		return err
 	}
-	if err := preflightBulkSubset(m); err != nil {
+	if err := Preflight(m, opts.DaemonFilter); err != nil {
 		return err
 	}
 	plan, err := BuildPlan(m, opts.DaemonFilter)
@@ -660,6 +632,8 @@ func probeDaemonHealth(rows []DaemonStatus) {
 // is not exercised and the probe result is deterministic.
 var singleHealthProbeFn = singleHealthProbe
 
+const maxHealthProbeResponseBytes = 1 << 20 // 1 MiB
+
 func singleHealthProbe(port int) *HealthProbe {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -692,7 +666,13 @@ func singleHealthProbe(port int) *HealthProbe {
 		return &HealthProbe{Err: "tools/list: " + err.Error()}
 	}
 	defer resp2.Body.Close()
-	raw, _ := io.ReadAll(resp2.Body)
+	raw, err := io.ReadAll(io.LimitReader(resp2.Body, maxHealthProbeResponseBytes+1))
+	if err != nil {
+		return &HealthProbe{Err: "tools/list: read: " + err.Error()}
+	}
+	if len(raw) > maxHealthProbeResponseBytes {
+		return &HealthProbe{Err: fmt.Sprintf("tools/list: response too large (> %d bytes)", maxHealthProbeResponseBytes)}
+	}
 	payload := raw
 	// SSE-wrapped response: pull JSON out of the first data: line.
 	for _, line := range strings.Split(string(raw), "\n") {
@@ -719,9 +699,21 @@ func singleHealthProbe(port int) *HealthProbe {
 // Uninstall removes all scheduler tasks and client entries for a server.
 // It never prints; the returned UninstallReport carries the outcome for
 // CLI/GUI rendering.
+// retiredServerNames is the allowlist of server names whose manifests
+// have been removed in prior upgrades but may still have stale scheduler
+// tasks and client entries on user machines. Only these names trigger
+// the manifest-less uninstall fallback; any other unknown name fails
+// fast so a typo cannot delete unrelated tasks by prefix overlap.
+var retiredServerNames = map[string]bool{
+	"gdb": true, // removed in the gdb shared-manifest retirement (PR #13)
+}
+
 func (a *API) Uninstall(server string) (*UninstallReport, error) {
 	data, err := loadManifestYAMLEmbedFirst(server)
 	if err != nil {
+		if os.IsNotExist(err) && retiredServerNames[server] {
+			return a.uninstallWithoutManifest(server)
+		}
 		return nil, fmt.Errorf("load manifest %s: %w", server, err)
 	}
 	m, err := config.ParseManifest(bytes.NewReader(data))
@@ -758,6 +750,60 @@ func (a *API) Uninstall(server string) (*UninstallReport, error) {
 			continue
 		}
 		report.ClientsUpdated = append(report.ClientsUpdated, b.Client)
+	}
+	return report, nil
+}
+
+// uninstallWithoutManifest cleans up stale scheduler tasks and client
+// entries for a retired server whose manifest is no longer shipped.
+// Only called by Uninstall for names in retiredServerNames — a typo or
+// unknown server name must never reach here, because the task-prefix
+// match would delete any task whose name starts with
+// "mcp-local-hub-<server>-" (e.g. uninstalling "se" would otherwise
+// sweep up "mcp-local-hub-serena-*"). Best-effort: task deletion by
+// prefix + RemoveEntry across every known client. An entry that does
+// not exist is not an error.
+func (a *API) uninstallWithoutManifest(server string) (*UninstallReport, error) {
+	sch, err := scheduler.New()
+	if err != nil {
+		return nil, err
+	}
+	report := &UninstallReport{Server: server}
+	// Trailing dash matches the main Uninstall path's narrowing from
+	// PR #31 so "mcp-local-hub-gdb-default" matches but "mcp-local-hub-
+	// gdbtool-*" does not.
+	prefix := "mcp-local-hub-" + server + "-"
+	tasks, err := sch.List(prefix)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range tasks {
+		if err := sch.Delete(t.Name); err != nil {
+			report.TaskDeleteWarns = append(report.TaskDeleteWarns, fmt.Sprintf("delete %s: %v", t.Name, err))
+		} else {
+			report.TasksDeleted = append(report.TasksDeleted, t.Name)
+		}
+	}
+	for name, client := range clients.AllClients() {
+		if client == nil || !client.Exists() {
+			continue
+		}
+		// Only touch clients that actually had an entry; RemoveEntry would
+		// otherwise rewrite every client config file (generating a backup)
+		// just to delete a nonexistent key.
+		entry, err := client.GetEntry(server)
+		if err != nil {
+			report.ClientWarns = append(report.ClientWarns, fmt.Sprintf("lookup %s in %s: %v", server, name, err))
+			continue
+		}
+		if entry == nil {
+			continue
+		}
+		if err := client.RemoveEntry(server); err != nil {
+			report.ClientWarns = append(report.ClientWarns, fmt.Sprintf("remove %s from %s: %v", server, name, err))
+			continue
+		}
+		report.ClientsUpdated = append(report.ClientsUpdated, name)
 	}
 	return report, nil
 }
@@ -818,6 +864,9 @@ func BuildPlan(m *config.ServerManifest, daemonFilter string) (*Plan, error) {
 		if urlPath == "" {
 			urlPath = "/mcp"
 		}
+		if err := validateClientURLPath(urlPath); err != nil {
+			return nil, fmt.Errorf("invalid url_path for client %q: %w", b.Client, err)
+		}
 		url := fmt.Sprintf("http://localhost:%d%s", daemon.Port, urlPath)
 		p.ClientUpdates = append(p.ClientUpdates, ClientUpdatePlan{
 			Client:     b.Client,
@@ -828,6 +877,23 @@ func BuildPlan(m *config.ServerManifest, daemonFilter string) (*Plan, error) {
 		})
 	}
 	return p, nil
+}
+
+func validateClientURLPath(urlPath string) error {
+	if !strings.HasPrefix(urlPath, "/") {
+		return fmt.Errorf("must start with '/'")
+	}
+	if strings.HasPrefix(urlPath, "//") {
+		return fmt.Errorf("must not start with '//'")
+	}
+	u, err := url.Parse(urlPath)
+	if err != nil {
+		return fmt.Errorf("parse url_path: %w", err)
+	}
+	if u.Scheme != "" || u.Host != "" || u.User != nil {
+		return fmt.Errorf("must be a path-only URL")
+	}
+	return nil
 }
 
 func findDaemon(m *config.ServerManifest, name string) (config.DaemonSpec, bool) {

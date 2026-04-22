@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -63,6 +64,9 @@ func (tb *PerfToolbox) clangTidyTool(ctx context.Context, req *mcp.CallToolReque
 	if args.ProjectRoot == "" {
 		return errResult("missing required parameter: project_root (directory containing compile_commands.json)"), nil
 	}
+	if err := validateClangTidyInputs(args.ProjectRoot, args.Files, args.ExtraArgs); err != nil {
+		return errResult(err.Error()), nil
+	}
 
 	cmdArgs := []string{"-p", args.ProjectRoot}
 	if args.Checks != "" {
@@ -90,6 +94,44 @@ func (tb *PerfToolbox) clangTidyTool(ctx context.Context, req *mcp.CallToolReque
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: string(body)}},
 	}, nil
+}
+
+func validateClangTidyInputs(projectRoot string, files, extraArgs []string) error {
+	if strings.HasPrefix(projectRoot, "-") {
+		return fmt.Errorf("invalid project_root: must not start with '-'")
+	}
+	if filepath.IsAbs(projectRoot) && filepath.Clean(projectRoot) == "/" {
+		return fmt.Errorf("invalid project_root: '/' is not allowed")
+	}
+	for _, f := range files {
+		if strings.HasPrefix(f, "-") {
+			return fmt.Errorf("invalid file path %q: must not start with '-'.", f)
+		}
+	}
+	for _, a := range extraArgs {
+		if isDisallowedClangTidyArg(a) {
+			return fmt.Errorf("disallowed clang-tidy argument: %s", a)
+		}
+	}
+	return nil
+}
+
+func isDisallowedClangTidyArg(arg string) bool {
+	trimmed := strings.TrimSpace(arg)
+	if trimmed == "" {
+		return false
+	}
+	disallowed := []string{
+		"-load", "--load",
+		"-fix", "--fix", "--fix-errors",
+		"-export-fixes", "--export-fixes",
+	}
+	for _, flag := range disallowed {
+		if trimmed == flag || strings.HasPrefix(trimmed, flag+"=") {
+			return true
+		}
+	}
+	return false
 }
 
 // parseClangTidyOutput scans clang-tidy's output for the file:line:col

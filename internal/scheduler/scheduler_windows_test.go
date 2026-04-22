@@ -3,6 +3,7 @@
 package scheduler
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -154,5 +155,59 @@ func TestBuildCreateXML_HandlesTrailingBackslash(t *testing.T) {
 	// command line, i.e. `&#34;...ws\\&#34;` in the XML-escaped form.
 	if !strings.Contains(xml, `ws\\&#34;`) {
 		t.Errorf("trailing backslash must be doubled before closing quote, got:\n%s", xml)
+	}
+}
+
+func TestSameWindowsUser(t *testing.T) {
+	tests := []struct {
+		name    string
+		owner   string
+		current string
+		want    bool
+	}{
+		{name: "exact", owner: "alice", current: "alice", want: true},
+		{name: "domain prefixed", owner: `MACHINE\alice`, current: "alice", want: true},
+		{name: "case-insensitive", owner: `domain\ALICE`, current: "alice", want: true},
+		{name: "different user", owner: "bob", current: "alice", want: false},
+		{name: "empty owner", owner: "", current: "alice", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := sameWindowsUser(tc.owner, tc.current)
+			if got != tc.want {
+				t.Fatalf("sameWindowsUser(%q, %q)=%v, want %v", tc.owner, tc.current, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestResolveSchtasksPath(t *testing.T) {
+	t.Setenv("SystemRoot", `C:\Windows`)
+	t.Setenv("WINDIR", "")
+	got, err := resolveSchtasksPath()
+	if err != nil {
+		t.Fatalf("resolveSchtasksPath() error = %v", err)
+	}
+	want := filepath.Join(`C:\Windows`, "System32", "schtasks.exe")
+	if got != want {
+		t.Fatalf("resolveSchtasksPath() = %q, want %q", got, want)
+	}
+}
+
+func TestResolveSchtasksPathFallbackAndMissing(t *testing.T) {
+	t.Setenv("SystemRoot", "")
+	t.Setenv("WINDIR", `D:\Win`)
+	got, err := resolveSchtasksPath()
+	if err != nil {
+		t.Fatalf("resolveSchtasksPath() fallback error = %v", err)
+	}
+	want := filepath.Join(`D:\Win`, "System32", "schtasks.exe")
+	if got != want {
+		t.Fatalf("resolveSchtasksPath() fallback = %q, want %q", got, want)
+	}
+
+	t.Setenv("WINDIR", "")
+	if _, err := resolveSchtasksPath(); err == nil {
+		t.Fatal("resolveSchtasksPath() expected error when SystemRoot/WINDIR unset")
 	}
 }

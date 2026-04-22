@@ -3,6 +3,7 @@ package daemon
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -68,17 +69,27 @@ type StdioHost struct {
 
 	// SSE subscribers: GET /mcp opens a server-sent-events stream that
 	// receives subprocess-originated notifications (JSON-RPC messages with
-	// no `id`). Each subscriber holds one buffered channel.
+	// no `id` or unrouted ids). Each subscriber holds one buffered channel.
+	// Subscriptions are session-scoped via validSession; sseActive caps the
+	// number of concurrent streams so a client cannot exhaust goroutines.
 	sseMu      sync.Mutex
 	sseClients []chan []byte
+	sseActive  atomic.Int32
+	sessionID  string
 
 	done        chan struct{} // closed by Stop() to unblock pending handlers
 	childExited chan struct{} // closed by the watcher goroutine when cmd.Wait() returns
 }
 
+const maxMCPPostBodyBytes int64 = 1 << 20 // 1 MiB
+
 func NewStdioHost(cfg HostConfig) (*StdioHost, error) {
 	if cfg.Command == "" {
 		return nil, errors.New("HostConfig.Command is required")
+	}
+	sid, err := randomSessionID()
+	if err != nil {
+		return nil, fmt.Errorf("generate session id: %w", err)
 	}
 	return &StdioHost{
 		cfg:         cfg,
@@ -87,6 +98,7 @@ func NewStdioHost(cfg HostConfig) (*StdioHost, error) {
 		bridge:      NewProtocolBridge(),
 		done:        make(chan struct{}),
 		childExited: make(chan struct{}),
+		sessionID:   sid,
 	}, nil
 }
 
@@ -193,14 +205,20 @@ func (h *StdioHost) Stop() error {
 	close(h.done) // unblock any pending HTTP handlers waiting on the subprocess
 	_ = h.stdin.Close()
 	if h.cmd != nil && h.cmd.Process != nil {
-		// Tree-kill so wrappers (npx, uvx, uv, node launchers) and
-		// their real child servers all go down together. Plain
-		// Process.Kill only kills the wrapper; its child would keep
-		// its stdin/stdout pipes open past the Wait-watcher close
-		// and the port bound past Stop's return. taskkill /F /T on
-		// Windows walks the tree; on Unix we fall back to pkill -P
-		// (see treekill.go). No-op if the process has already exited.
-		_ = killProcessTree(h.cmd.Process.Pid)
+		// Only tree-kill if the watcher has not already observed process
+		// exit. This avoids PID-reuse hazards from issuing a fresh
+		// PID-based taskkill/pkill after the original process is gone.
+		select {
+		case <-h.childExited:
+			// already exited; no kill needed
+		default:
+			// Tree-kill so wrappers (npx, uvx, uv, node launchers) and
+			// their real child servers all go down together. Plain
+			// Process.Kill only kills the wrapper; its child would keep
+			// its stdin/stdout pipes open past the Wait-watcher close
+			// and the port bound past Stop's return.
+			_ = killProcessTree(h.cmd.Process.Pid)
+		}
 	}
 	// Wait for the watcher goroutine to observe cmd.Wait() returning. This
 	// is bounded: either the child was already dead (immediate) or Kill()
@@ -289,7 +307,10 @@ func (h *StdioHost) readStdoutLoop() {
 				}
 			}
 		}
-		// Unrouted line = notification → broadcast to SSE subscribers.
+		// Unrouted line = notification or untracked id → fan out to SSE
+		// subscribers so Streamable HTTP clients receive server-initiated
+		// traffic. Non-blocking send: a slow subscriber cannot stall the
+		// reader loop for other clients.
 		h.sseMu.Lock()
 		for _, c := range h.sseClients {
 			select {
@@ -298,7 +319,7 @@ func (h *StdioHost) readStdoutLoop() {
 			}
 		}
 		h.sseMu.Unlock()
-		// Also keep the testStdout path for tests that watch unrouted lines.
+		// Also keep the testStdout path for tests that watch raw output.
 		select {
 		case h.testStdout <- line:
 		default:
@@ -316,6 +337,10 @@ func (h *StdioHost) HTTPHandler() http.Handler {
 		case http.MethodPost:
 			h.handlePOST(w, r)
 		case http.MethodDelete:
+			if !h.validSession(r) {
+				http.Error(w, "missing or invalid session id", http.StatusUnauthorized)
+				return
+			}
 			// Session termination: subprocess stays alive (shared across clients),
 			// but we acknowledge the client's request. Nothing to clean up on our side
 			// since pending requests are per-request scoped.
@@ -330,8 +355,16 @@ func (h *StdioHost) HTTPHandler() http.Handler {
 }
 
 func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxMCPPostBodyBytes)
+	defer r.Body.Close()
+	w.Header().Set("Mcp-Session-Id", h.sessionID)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -451,10 +484,22 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleSSE registers a new SSE subscriber and keeps the connection open
-// until the client disconnects. Notifications from the subprocess are
-// broadcast to all active SSE subscribers.
+const maxSSESubscribers = 32
+
+// handleSSE keeps a scoped SSE stream open for the active session until the
+// client disconnects, host stops, or the child exits.
 func (h *StdioHost) handleSSE(w http.ResponseWriter, r *http.Request) {
+	if !h.validSession(r) {
+		http.Error(w, "missing or invalid session id", http.StatusUnauthorized)
+		return
+	}
+	if h.sseActive.Add(1) > maxSSESubscribers {
+		h.sseActive.Add(-1)
+		http.Error(w, "too many SSE subscribers", http.StatusTooManyRequests)
+		return
+	}
+	defer h.sseActive.Add(-1)
+
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
@@ -463,6 +508,8 @@ func (h *StdioHost) handleSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Mcp-Session-Id", h.sessionID)
+	_, _ = fmt.Fprint(w, ": keepalive\n\n")
 	flusher.Flush()
 
 	ch := make(chan []byte, 32)
@@ -495,6 +542,18 @@ func (h *StdioHost) handleSSE(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+func (h *StdioHost) validSession(r *http.Request) bool {
+	return r.Header.Get("Mcp-Session-Id") == h.sessionID
+}
+
+func randomSessionID() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", b[:]), nil
 }
 
 // readStdoutTest exposes the raw stdout stream for unit tests only.

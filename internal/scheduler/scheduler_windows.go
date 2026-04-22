@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -18,7 +19,8 @@ import (
 // We build a Task Scheduler XML document per spec, pipe it to `schtasks /Create /XML`,
 // and parse the output of `/Query` for Status/List.
 type windowsScheduler struct {
-	username string // e.g., "dima_"
+	username     string // e.g., "dima_"
+	schtasksPath string
 }
 
 func newPlatformScheduler() (Scheduler, error) {
@@ -26,12 +28,27 @@ func newPlatformScheduler() (Scheduler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("user.Current: %w", err)
 	}
+	schtasksPath, err := resolveSchtasksPath()
+	if err != nil {
+		return nil, err
+	}
 	// u.Username is typically "MACHINE\\user" on Windows — strip the domain.
 	name := u.Username
 	if i := strings.LastIndex(name, "\\"); i >= 0 {
 		name = name[i+1:]
 	}
-	return &windowsScheduler{username: name}, nil
+	return &windowsScheduler{username: name, schtasksPath: schtasksPath}, nil
+}
+
+func resolveSchtasksPath() (string, error) {
+	systemRoot := os.Getenv("SystemRoot")
+	if systemRoot == "" {
+		systemRoot = os.Getenv("WINDIR")
+	}
+	if systemRoot == "" {
+		return "", fmt.Errorf("resolve schtasks path: SystemRoot/WINDIR is empty")
+	}
+	return filepath.Join(systemRoot, "System32", "schtasks.exe"), nil
 }
 
 // dayNames maps Go weekday ints to Task Scheduler XML element names.
@@ -183,7 +200,7 @@ func (w *windowsScheduler) Create(spec TaskSpec) error {
 	}
 	tmp.Close()
 
-	cmd := exec.Command("schtasks", "/Create", "/TN", spec.Name, "/XML", tmp.Name(), "/F")
+	cmd := exec.Command(w.schtasksPath, "/Create", "/TN", spec.Name, "/XML", tmp.Name(), "/F")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("schtasks /Create: %w: %s", err, string(out))
@@ -216,7 +233,7 @@ func utf8ToUTF16WithBOM(s string) []byte {
 }
 
 func (w *windowsScheduler) Delete(name string) error {
-	cmd := exec.Command("schtasks", "/Delete", "/TN", name, "/F")
+	cmd := exec.Command(w.schtasksPath, "/Delete", "/TN", name, "/F")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		// If the task does not exist, schtasks returns exit 1 with "ERROR: The system cannot find the file specified."
@@ -234,7 +251,7 @@ func (w *windowsScheduler) Delete(name string) error {
 // ErrTaskNotFound so callers can distinguish a missing task from other
 // failures) when the task does not exist.
 func (w *windowsScheduler) ExportXML(name string) ([]byte, error) {
-	cmd := exec.Command("schtasks", "/Query", "/TN", name, "/XML")
+	cmd := exec.Command(w.schtasksPath, "/Query", "/TN", name, "/XML")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if strings.Contains(string(out), "cannot find") || strings.Contains(string(out), "does not exist") {
@@ -261,7 +278,7 @@ func (w *windowsScheduler) ImportXML(name string, xml []byte) error {
 		return fmt.Errorf("write xml: %w", err)
 	}
 	tmp.Close()
-	cmd := exec.Command("schtasks", "/Create", "/TN", name, "/XML", tmp.Name(), "/F")
+	cmd := exec.Command(w.schtasksPath, "/Create", "/TN", name, "/XML", tmp.Name(), "/F")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("schtasks /Create /XML: %w: %s", err, string(out))
@@ -270,7 +287,7 @@ func (w *windowsScheduler) ImportXML(name string, xml []byte) error {
 }
 
 func (w *windowsScheduler) Run(name string) error {
-	cmd := exec.Command("schtasks", "/Run", "/TN", name)
+	cmd := exec.Command(w.schtasksPath, "/Run", "/TN", name)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("schtasks /Run: %w: %s", err, string(out))
@@ -279,7 +296,7 @@ func (w *windowsScheduler) Run(name string) error {
 }
 
 func (w *windowsScheduler) Stop(name string) error {
-	cmd := exec.Command("schtasks", "/End", "/TN", name)
+	cmd := exec.Command(w.schtasksPath, "/End", "/TN", name)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		// "ERROR: There is no running instance of the task." → nil
@@ -292,7 +309,7 @@ func (w *windowsScheduler) Stop(name string) error {
 }
 
 func (w *windowsScheduler) Status(name string) (TaskStatus, error) {
-	cmd := exec.Command("schtasks", "/Query", "/TN", name, "/V", "/FO", "LIST")
+	cmd := exec.Command(w.schtasksPath, "/Query", "/TN", name, "/V", "/FO", "LIST")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return TaskStatus{}, fmt.Errorf("schtasks /Query: %w: %s", err, string(out))
@@ -301,7 +318,7 @@ func (w *windowsScheduler) Status(name string) (TaskStatus, error) {
 }
 
 func (w *windowsScheduler) List(prefix string) ([]TaskStatus, error) {
-	cmd := exec.Command("schtasks", "/Query", "/V", "/FO", "LIST")
+	cmd := exec.Command(w.schtasksPath, "/Query", "/V", "/FO", "LIST")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("schtasks /Query: %w: %s", err, string(out))
@@ -311,7 +328,9 @@ func (w *windowsScheduler) List(prefix string) ([]TaskStatus, error) {
 	var results []TaskStatus
 	for _, r := range records {
 		status := parseTaskQueryOutput(r, "")
-		if status.Name != "" && strings.HasPrefix(strings.TrimPrefix(status.Name, "\\"), prefix) {
+		if status.Name != "" &&
+			strings.HasPrefix(strings.TrimPrefix(status.Name, "\\"), prefix) &&
+			sameWindowsUser(status.Owner, w.username) {
 			results = append(results, status)
 		}
 	}
@@ -331,7 +350,27 @@ func parseTaskQueryOutput(out string, nameHint string) TaskStatus {
 			fmt.Sscanf(strings.TrimPrefix(line, "Last Result:"), " %d", &status.LastResult)
 		} else if strings.HasPrefix(line, "Next Run Time:") {
 			status.NextRun = strings.TrimSpace(strings.TrimPrefix(line, "Next Run Time:"))
+		} else if strings.HasPrefix(line, "Run As User:") {
+			status.Owner = strings.TrimSpace(strings.TrimPrefix(line, "Run As User:"))
 		}
 	}
 	return status
+}
+
+// sameWindowsUser compares a Task Scheduler "Run As User" value against the
+// current user's short username (no DOMAIN\ prefix), case-insensitively.
+func sameWindowsUser(owner, currentShortName string) bool {
+	owner = strings.TrimSpace(owner)
+	if owner == "" || currentShortName == "" {
+		return false
+	}
+	owner = strings.ToLower(owner)
+	currentShortName = strings.ToLower(currentShortName)
+	if owner == currentShortName {
+		return true
+	}
+	if i := strings.LastIndex(owner, `\`); i >= 0 {
+		return owner[i+1:] == currentShortName
+	}
+	return false
 }

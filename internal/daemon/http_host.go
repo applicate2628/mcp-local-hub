@@ -52,6 +52,10 @@ type HTTPHost struct {
 	logCloser   io.Closer // non-nil when LogPath was opened; closed by Stop
 }
 
+var errBodyTooLarge = errors.New("body too large")
+
+const maxHTTPHostBodyBytes int64 = 4 << 20 // 4 MiB
+
 // HTTPHostConfig describes one native-http-host instance.
 type HTTPHostConfig struct {
 	Command      string            // subprocess executable (e.g. "uvx")
@@ -276,8 +280,12 @@ func (h *HTTPHost) HTTPHandler() http.Handler {
 }
 
 func (h *HTTPHost) handlePOST(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
+	body, err := readAllWithLimit(r.Body, maxHTTPHostBodyBytes)
 	if err != nil {
+		if errors.Is(err, errBodyTooLarge) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -354,13 +362,32 @@ func (h *HTTPHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Plain JSON response.
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := readAllWithLimit(resp.Body, maxHTTPHostBodyBytes)
+	if err != nil {
+		if errors.Is(err, errBodyTooLarge) {
+			http.Error(w, "upstream response too large", http.StatusBadGateway)
+			return
+		}
+		http.Error(w, "read upstream response: "+err.Error(), http.StatusBadGateway)
+		return
+	}
 	if origMethod == "initialize" {
 		h.bridge.CacheInitialize(respBody)
 	}
 	respBody = h.bridge.TransformResponse(origMethod, action.Active, respBody)
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(respBody)
+}
+
+func readAllWithLimit(r io.Reader, maxBytes int64) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > maxBytes {
+		return nil, errBodyTooLarge
+	}
+	return body, nil
 }
 
 // copyResponseHeaders propagates selected upstream response headers to

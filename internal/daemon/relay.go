@@ -71,6 +71,8 @@ const (
 	maxStdinLineBytes = 1 << 20 // 1 MiB
 )
 
+var errStdinLineTooLong = errors.New("stdin line exceeds maxStdinLineBytes")
+
 // Run starts the relay. It returns when stdin reaches EOF (client detached)
 // or ctx is canceled, whichever comes first, after issuing a best-effort
 // DELETE /mcp to the server for graceful session termination.
@@ -461,11 +463,21 @@ func (r *HTTPToStdioRelay) setSessionID(sid string) {
 // raw bytes (without the terminator). Errors include io.EOF (clean
 // detach) and any bufio.Reader error.
 func readJSONRPCLine(br *bufio.Reader) ([]byte, error) {
-	line, err := br.ReadBytes('\n')
-	if len(line) == 0 && err != nil {
-		return nil, err
+	var line []byte
+	for {
+		chunk, err := br.ReadSlice('\n')
+		if len(line)+len(chunk) > maxStdinLineBytes {
+			return nil, errStdinLineTooLong
+		}
+		line = append(line, chunk...)
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		if len(line) == 0 && err != nil {
+			return nil, err
+		}
+		return bytes.TrimRight(line, "\r\n"), err
 	}
-	return bytes.TrimRight(line, "\r\n"), err
 }
 
 // decodeJSONRPCMeta extracts the jsonrpc/id/method triple without

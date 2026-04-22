@@ -72,3 +72,19 @@ workspace_scoped:
 		t.Fatal("expected overlap error between global port 9250 and workspace pool 9200-9299")
 	}
 }
+
+func TestPortRegistry_DetectWorkspacePoolOverlap(t *testing.T) {
+	yaml := `
+workspace_scoped:
+  - server: a
+    pool_start: 9200
+    pool_end: 9250
+  - server: b
+    pool_start: 9240
+    pool_end: 9299
+`
+	_, err := ParsePortRegistry(strings.NewReader(yaml))
+	if err == nil {
+		t.Fatal("expected overlap error between workspace pools 9200-9250 and 9240-9299")
+	}
+}

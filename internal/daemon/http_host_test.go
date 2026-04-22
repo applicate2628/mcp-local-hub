@@ -224,6 +224,34 @@ func TestHTTPHost_SSE_InjectsAndReshapes(t *testing.T) {
 	}
 }
 
+func TestHTTPHost_POSTBodyTooLarge(t *testing.T) {
+	upstream := newMockUpstream(t, "json")
+	defer upstream.Close()
+	h := newHTTPHostAgainstMock(t, upstream)
+	ts := httptest.NewServer(h.HTTPHandler())
+	defer ts.Close()
+
+	tooLarge := strings.Repeat("a", int(maxHTTPHostBodyBytes)+1)
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/mcp", strings.NewReader(tooLarge))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusRequestEntityTooLarge)
+	}
+	if len(upstream.LastBody()) != 0 {
+		t.Fatalf("expected request to be rejected before proxying upstream")
+	}
+}
+
 // TestHTTPHost_InitializeForwardsAndPreservesSessionID verifies that
 // EVERY initialize reaches upstream (no cache-based short-circuit) and
 // that upstream's Mcp-Session-Id header is copied to the client's
@@ -301,6 +329,62 @@ func TestHTTPHost_InitializeCapabilitiesCachedForInjection(t *testing.T) {
 	body := post(t, ts.URL, "application/json", `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
 	if !strings.Contains(string(body), "__read_resource__") {
 		t.Errorf("capability cache not populated — tools/list did not get __read_resource__: %s", body)
+	}
+}
+
+func TestHTTPHost_POSTBodyTooLargeRejected(t *testing.T) {
+	upstream := newMockUpstream(t, "json")
+	defer upstream.Close()
+	h := newHTTPHostAgainstMock(t, upstream)
+	ts := httptest.NewServer(h.HTTPHandler())
+	defer ts.Close()
+
+	req, _ := http.NewRequest("POST", ts.URL+"/mcp", strings.NewReader(strings.Repeat("x", int(maxHTTPHostBodyBytes)+1)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusRequestEntityTooLarge)
+	}
+}
+
+func TestHTTPHost_UpstreamJSONBodyTooLargeRejected(t *testing.T) {
+	largeUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(strings.Repeat("y", int(maxHTTPHostBodyBytes)+1)))
+	}))
+	defer largeUpstream.Close()
+
+	h := &HTTPHost{
+		httpClient:   largeUpstream.Client(),
+		streamClient: largeUpstream.Client(),
+		upstreamURL:  largeUpstream.URL,
+		bridge:       NewProtocolBridge(),
+		done:         make(chan struct{}),
+		childExited:  make(chan struct{}),
+		started:      true,
+	}
+	ts := httptest.NewServer(h.HTTPHandler())
+	defer ts.Close()
+
+	req, _ := http.NewRequest("POST", ts.URL+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadGateway)
 	}
 }
 

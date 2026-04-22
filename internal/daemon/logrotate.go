@@ -34,6 +34,9 @@ func RotateIfLarge(logPath string, maxSize int64, keepCount int) error {
 // pruneOldRotations deletes rotated siblings beyond keepCount, keeping the newest.
 // Rotation files are identified by the prefix `filepath.Base(logPath)+"."`.
 func pruneOldRotations(logPath string, keepCount int) error {
+	if keepCount < 0 {
+		keepCount = 0
+	}
 	dir := filepath.Dir(logPath)
 	base := filepath.Base(logPath) + "."
 	entries, err := os.ReadDir(dir)

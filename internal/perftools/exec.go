@@ -3,7 +3,9 @@ package perftools
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"math"
 	"os/exec"
 )
 
@@ -20,6 +22,34 @@ type captureResult struct {
 	ExitCode int
 }
 
+var errOutputLimitExceeded = errors.New("subprocess output exceeded configured limit")
+
+type cappedBuffer struct {
+	buf      bytes.Buffer
+	limit    int
+	exceeded bool
+}
+
+func (c *cappedBuffer) Write(p []byte) (int, error) {
+	if c.limit >= 0 && c.buf.Len()+len(p) > c.limit {
+		remaining := c.limit - c.buf.Len()
+		if remaining > 0 {
+			_, _ = c.buf.Write(p[:remaining])
+		}
+		c.exceeded = true
+		return len(p), errOutputLimitExceeded
+	}
+	return c.buf.Write(p)
+}
+
+func (c *cappedBuffer) Bytes() []byte {
+	return c.buf.Bytes()
+}
+
+func (c *cappedBuffer) String() string {
+	return c.buf.String()
+}
+
 // runCapture spawns cmd under ctx, captures stdout and stderr into
 // separate buffers, and reports the exit code. Non-zero exit with an
 // *exec.ExitError is NOT a failure (some tools use exit codes to
@@ -27,22 +57,37 @@ type captureResult struct {
 // problems (binary not executable, context cancelled, pipe setup
 // failure). workingDir is optional — pass "" to inherit parent's cwd.
 func runCapture(ctx context.Context, binPath, workingDir string, args []string) (*captureResult, error) {
+	return runCaptureLimited(ctx, binPath, workingDir, args, math.MaxInt, math.MaxInt)
+}
+
+// runCaptureLimited is runCapture with explicit stdout/stderr limits in bytes.
+func runCaptureLimited(ctx context.Context, binPath, workingDir string, args []string, stdoutLimit, stderrLimit int) (*captureResult, error) {
 	cmd := exec.CommandContext(ctx, binPath, args...)
 	if workingDir != "" {
 		cmd.Dir = workingDir
 	}
-	var stdout, stderr bytes.Buffer
+	stdout := cappedBuffer{limit: stdoutLimit}
+	stderr := cappedBuffer{limit: stderrLimit}
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
 	res := &captureResult{Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}
+	// When the cap is hit we close our reader side; the child may then exit with a
+	// broken-pipe / SIGPIPE code that surfaces as *exec.ExitError. Surface the cap
+	// condition first so callers can report it, not the misleading exit code.
+	if stdout.exceeded || stderr.exceeded {
+		return nil, errOutputLimitExceeded
+	}
 	if err == nil {
 		return res, nil
 	}
 	if ee, ok := err.(*exec.ExitError); ok {
 		res.ExitCode = ee.ExitCode()
 		return res, nil
+	}
+	if errors.Is(err, errOutputLimitExceeded) {
+		return nil, errOutputLimitExceeded
 	}
 	return nil, fmt.Errorf("run %s: %w (stderr: %s)", binPath, err, stderr.String())
 }

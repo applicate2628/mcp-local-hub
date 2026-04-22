@@ -93,6 +93,37 @@ func TestSingleHealthProbe_Unreachable(t *testing.T) {
 	}
 }
 
+// TestSingleHealthProbe_OversizedResponse verifies tools/list responses
+// larger than the safety cap are rejected without full buffering.
+func TestSingleHealthProbe_OversizedResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf := make([]byte, 4096)
+		n, _ := r.Body.Read(buf)
+		body := string(buf[:n])
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Mcp-Session-Id", "test-session")
+		if strings.Contains(body, `"initialize"`) {
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"capabilities":{}}}`))
+			return
+		}
+		tooLarge := strings.Repeat("x", maxHealthProbeResponseBytes+1)
+		_, _ = w.Write([]byte(tooLarge))
+	}))
+	defer srv.Close()
+	port := parsePort(t, srv.URL)
+
+	h := singleHealthProbe(port)
+	if h == nil {
+		t.Fatal("nil probe")
+	}
+	if h.OK {
+		t.Fatalf("expected OK=false for oversized response, got %+v", h)
+	}
+	if !strings.Contains(h.Err, "response too large") {
+		t.Fatalf("expected oversized-response error, got %q", h.Err)
+	}
+}
+
 // parsePort is a small helper: extract the port part from an
 // httptest.Server URL ("http://127.0.0.1:PORT").
 func parsePort(t *testing.T, url string) int {

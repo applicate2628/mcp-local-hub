@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -371,10 +372,10 @@ func readAllStdin() ([]byte, error) {
 			out = append(out, buf[:n]...)
 		}
 		if err != nil {
-			if errors.Is(err, os.ErrInvalid) || err.Error() == "EOF" {
+			if errors.Is(err, os.ErrInvalid) || errors.Is(err, io.EOF) {
 				break
 			}
-			return out, nil
+			return out, err
 		}
 	}
 	return out, nil
