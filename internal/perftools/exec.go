@@ -25,8 +25,9 @@ type captureResult struct {
 var errOutputLimitExceeded = errors.New("subprocess output exceeded configured limit")
 
 type cappedBuffer struct {
-	buf   bytes.Buffer
-	limit int
+	buf      bytes.Buffer
+	limit    int
+	exceeded bool
 }
 
 func (c *cappedBuffer) Write(p []byte) (int, error) {
@@ -35,6 +36,7 @@ func (c *cappedBuffer) Write(p []byte) (int, error) {
 		if remaining > 0 {
 			_, _ = c.buf.Write(p[:remaining])
 		}
+		c.exceeded = true
 		return len(p), errOutputLimitExceeded
 	}
 	return c.buf.Write(p)
@@ -71,6 +73,12 @@ func runCaptureLimited(ctx context.Context, binPath, workingDir string, args []s
 
 	err := cmd.Run()
 	res := &captureResult{Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}
+	// When the cap is hit we close our reader side; the child may then exit with a
+	// broken-pipe / SIGPIPE code that surfaces as *exec.ExitError. Surface the cap
+	// condition first so callers can report it, not the misleading exit code.
+	if stdout.exceeded || stderr.exceeded {
+		return nil, errOutputLimitExceeded
+	}
 	if err == nil {
 		return res, nil
 	}

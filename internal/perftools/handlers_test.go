@@ -3,6 +3,8 @@ package perftools
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -299,18 +301,32 @@ func TestLLVMObjdump_DisassemblesBinary(t *testing.T) {
 	if !cat.LLVMObjdump.Installed {
 		t.Skip("llvm-objdump not on PATH; integration test skipped")
 	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not on PATH; integration test skipped")
+	}
 
-	// Pick any PE/ELF binary that's guaranteed to exist on this host —
-	// the test binary itself is the most reliable choice.
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatalf("os.Executable: %v", err)
+	// Build a small dedicated binary with symbols intact. The `go test`
+	// harness links its own test binary with `-s -w`, which strips the
+	// classic symbol table and would cause llvm-objdump to emit
+	// "missing symbol" when we pass --disassemble-symbols.
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "main.go")
+	if err := os.WriteFile(src, []byte("package main\nfunc main() { println(\"ok\") }\n"), 0o644); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
+	exe := filepath.Join(tmp, "hello.exe")
+	build := exec.Command("go", "build", "-o", exe, src)
+	build.Env = append(os.Environ(), "GOFLAGS=")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v: %s", err, out)
 	}
 
 	tb := &PerfToolbox{tools: cat}
+	// Narrow to the main symbol so the disassembly stays well under the
+	// handler's 8 MiB output cap.
 	args, _ := json.Marshal(map[string]any{
-		"binary":  exe,
-		"section": ".text",
+		"binary":   exe,
+		"function": "main.main",
 	})
 	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: args}}
 
