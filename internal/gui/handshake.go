@@ -49,8 +49,34 @@ func TryActivateIncumbent(pidportPath string, totalTimeout time.Duration) error 
 			OK  bool `json:"ok"`
 			PID int  `json:"pid"`
 		}
-		_ = json.NewDecoder(resp.Body).Decode(&body)
+		decErr := json.NewDecoder(resp.Body).Decode(&body)
 		resp.Body.Close()
+		if decErr != nil {
+			// Non-JSON or malformed response. This does not
+			// definitively mean "the incumbent said not-ok": the
+			// pidport's port briefly points at the configured port
+			// (often the default 17842) before Server.Start binds
+			// and RewritePidportPort overwrites it with the actual
+			// OS-assigned port. During that race window a probe can
+			// land on an unrelated transient listener (another dev
+			// server, a browser extension, a stale socket) that
+			// returns HTML, an empty body, or any other non-JSON
+			// content on 200. Bailing with "not-ok" after the first
+			// such reply would kill the handshake even though the
+			// real mcphub gui incumbent is about to become reachable.
+			// Treat it as transient and keep retrying until
+			// totalTimeout; a truly unreachable incumbent falls out
+			// of the loop naturally and returns the aggregated
+			// "incumbent unreachable" error.
+			//
+			// Contrast with the body.OK==false branch below: that
+			// case is a STRUCTURED JSON reply from something
+			// fluent in the mcphub ping schema explicitly saying
+			// it is unhealthy — terminal, no retry helps.
+			lastErr = fmt.Errorf("decode ping: %w", decErr)
+			time.Sleep(250 * time.Millisecond)
+			continue
+		}
 		if !body.OK {
 			return fmt.Errorf("incumbent ping replied not-ok")
 		}

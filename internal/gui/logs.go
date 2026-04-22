@@ -188,9 +188,9 @@ func streamLogs(s *Server, server, daemon string, w http.ResponseWriter, r *http
 	// length would silently discard the first len(placeholder) bytes of
 	// the real log once the daemon finally writes to stderr — the user
 	// would permanently miss the start of that first session. See
-	// api.LogPlaceholderPrefix for the shared sentinel.
+	// api.LogPlaceholderFor for the shared exact-match sentinel.
 	var lastLen int
-	if body, err := s.logs.Logs(server, daemon, 0); err == nil && !isLogPlaceholder(body) {
+	if body, err := s.logs.Logs(server, daemon, 0); err == nil && !isLogPlaceholder(body, server, daemon) {
 		lastLen = len(body)
 	}
 
@@ -205,22 +205,22 @@ func streamLogs(s *Server, server, daemon string, w http.ResponseWriter, r *http
 				flusher.Flush()
 				return
 			}
-			if isLogPlaceholder(body) {
+			if isLogPlaceholder(body, server, daemon) {
 				// The daemon hasn't written anything yet (or the log
 				// file was removed and api.LogsGet is again returning
 				// the "no log file yet" placeholder). Do NOT emit it as
 				// a log-line event and do NOT advance lastLen. Emitting
 				// would push human-readable placeholder text into the
 				// UI's line stream; advancing would seed the cursor
-				// from the placeholder's length (~30 chars), and then
+				// from the placeholder's length (~100+ chars), and then
 				// on the next tick the real log — typically shorter
 				// than the placeholder — would hit the
 				// `len(body) < lastLen` rotation branch, which resets
 				// the cursor to the new size and `continue`s, silently
 				// skipping the first bytes of the daemon's first
-				// session. See api.LogPlaceholderPrefix for the shared
-				// sentinel and the prime block above for the matching
-				// guard on the initial fetch.
+				// session. See api.LogPlaceholderFor for the shared
+				// exact-match sentinel and the prime block above for
+				// the matching guard on the initial fetch.
 				continue
 			}
 			if len(body) < lastLen {
@@ -247,15 +247,28 @@ func streamLogs(s *Server, server, daemon string, w http.ResponseWriter, r *http
 	}
 }
 
-// isLogPlaceholder reports whether body is the "no log file yet"
-// placeholder returned by api.LogsGet when the log file for a
-// (server, daemon) pair does not exist yet. That body is human-readable
-// text, not log content, so streamLogs must NOT seed its lastLen cursor
-// from its length — doing so would silently skip the first
-// len(placeholder) bytes of the real log once the daemon eventually
-// writes to stderr. Matches by prefix because the full placeholder
-// interpolates server/daemon names; the prefix is the stable sentinel
-// exported as api.LogPlaceholderPrefix.
-func isLogPlaceholder(body string) bool {
-	return strings.HasPrefix(body, api.LogPlaceholderPrefix)
+// isLogPlaceholder reports whether body is the exact "no log file yet"
+// placeholder api.LogsGet returns for (server, daemon) when the log file
+// does not exist. That body is human-readable text, not log content, so
+// streamLogs must NOT seed its lastLen cursor from its length — doing so
+// would silently skip the first len(placeholder) bytes of the real log
+// once the daemon eventually writes to stderr.
+//
+// Matches by exact full-string equality against api.LogPlaceholderFor,
+// not by prefix against api.LogPlaceholderPrefix. A prefix check would
+// misclassify any real log line whose leading text happens to start with
+// "(no log output yet" — Follow would then permanently drop that line
+// from the SSE stream. api.LogPlaceholderFor is the single source of
+// truth for the exact bytes LogsGet emits for a given (server, daemon);
+// this helper is the consumer side of that contract.
+//
+// An empty daemon is normalized to "default" here to match realLogs.Logs,
+// which makes the same substitution before calling api.LogsGet — so the
+// placeholder produced by the API layer always uses "default" in that
+// branch, and this side must compare against the same value.
+func isLogPlaceholder(body, server, daemon string) bool {
+	if daemon == "" {
+		daemon = "default"
+	}
+	return body == api.LogPlaceholderFor(server, daemon)
 }

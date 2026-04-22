@@ -280,10 +280,15 @@ func TestLogs_RejectsPathTraversalServer(t *testing.T) {
 //   - once the real log appears, its bytes ARE emitted in full (the
 //     rotation branch does not eat them).
 func TestStreamLogs_DoesNotEmitOrAdvanceCursorOnPlaceholder(t *testing.T) {
-	// A well-formed placeholder body matches api.LogPlaceholderPrefix
-	// exactly; the rest of the string interpolates the (server, daemon)
-	// pair and is irrelevant to isLogPlaceholder.
-	placeholder := api.LogPlaceholderPrefix + " for test/default)"
+	// Exact placeholder body for (server=test, daemon=default).
+	// isLogPlaceholder now matches by full-string equality via
+	// api.LogPlaceholderFor (not by prefix), so the scripted body must
+	// reproduce the exact bytes LogsGet would emit for this pair.
+	// URL path "/api/logs/test/stream" resolves to server=test and
+	// daemon="" at the handler boundary; realLogs.Logs (and
+	// isLogPlaceholder) normalize empty daemon to "default" before
+	// composing the comparison string — we mirror that here.
+	placeholder := api.LogPlaceholderFor("test", "default")
 	realLog := "first-line\nsecond-line\n"
 	fl := &scriptedLogs{seq: []string{
 		placeholder, // prime

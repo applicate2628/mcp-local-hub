@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -98,6 +99,65 @@ func TestHandshake_ReReadsPidportDuringStartupWindow(t *testing.T) {
 	case <-activated:
 	case <-time.After(1 * time.Second):
 		t.Fatal("incumbent never received activate (re-read pidport probably missing)")
+	}
+}
+
+// TestHandshake_RetriesOnNonJSONPing pins the R21 P2 fix: a non-JSON
+// /api/ping response (e.g. an HTML body from a transient non-mcphub
+// listener squatting on the pidport's port during the startup race)
+// must NOT be treated as a terminal "not-ok" reply. Before the fix,
+// decErr was ignored and body.OK defaulted to false, so the very first
+// undecodable response killed the handshake even though a later retry
+// could have reached the real mcphub gui incumbent.
+//
+// This test stages a server that returns garbage HTML for the first two
+// ping attempts and valid mcphub JSON on the third, then asserts the
+// handshake eventually lands the /api/activate-window call and that
+// at least three /api/ping attempts were observed. If the decode-error
+// path ever re-regresses to an immediate return, TryActivateIncumbent
+// would surface an "incumbent ping replied not-ok" error on the first
+// tick and this test would fail fast.
+func TestHandshake_RetriesOnNonJSONPing(t *testing.T) {
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+
+	var attempts int32
+	activated := make(chan struct{}, 1)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/ping", func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&attempts, 1)
+		if n < 3 {
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte("<html>not mcphub</html>"))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"pid":111,"version":"t"}`))
+	})
+	mux.HandleFunc("/api/activate-window", func(w http.ResponseWriter, r *http.Request) {
+		activated <- struct{}{}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+	port := parseTestServerPort(t, ts.URL)
+	if err := os.WriteFile(pidport, []byte(formatPidport(111, port)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3s total budget covers the 250ms retry spacing × ≥3 attempts with
+	// comfortable margin on slow CI. A passing run completes as soon as
+	// the third ping returns valid JSON and activate-window fires.
+	if err := TryActivateIncumbent(pidport, 3*time.Second); err != nil {
+		t.Fatalf("TryActivateIncumbent: %v", err)
+	}
+	select {
+	case <-activated:
+	case <-time.After(1 * time.Second):
+		t.Fatal("incumbent never received activate")
+	}
+	if got := atomic.LoadInt32(&attempts); got < 3 {
+		t.Errorf("expected at least 3 ping attempts (2 non-JSON + 1 JSON); got %d", got)
 	}
 }
 
