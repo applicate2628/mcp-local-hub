@@ -38,11 +38,12 @@ Tracking document for Phase 3B-II — the "everything I cut from Phase 3B-I MVP"
 | C3 | Tray icon state variants | MVP ships a single icon (`SetTooltip` only). Add 4-state icon switching (`healthy` / `degraded` / `down` / `migrating`) driven by SSE `daemon-state` events. | Spec §6 |
 | C4 | Toast notifications | Windows toast on `daemon-failed` / `auto-restart-triggered` / `manual-action-done`. Events already in `/api/events` stream, UI does not render them. | Spec §6 |
 
-### D. Testing infrastructure
+### D. Testing & frontend infrastructure
 
 | # | Item | Description |
 |---|---|---|
-| **D1** | **Playwright E2E suite** | Automate the "live browser smoke" gap that PR #5 left deferred. Covers: Servers matrix render + toggle, Dashboard live SSE updates, Logs picker + tail follow, Migration grouping (post-A1), AddServer form (post-A2). Runs against `go run ./cmd/mcphub gui --no-browser --no-tray --port 0` spawned by test fixture. Node.js + `@playwright/test` + headless Chromium. ~300-500 lines of test code. CI job separate from `go test`. **Recommended as the FIRST task of Phase 3B-II** — amortizes toolchain investment across all subsequent screens, provides regression safety before Migration/AddServer/Secrets/Settings land. |
+| **D0** | **Frontend toolchain migration → Vite + TS + React** | Phase 3B-I shipped vanilla JS (~700 LOC across `app.js`/`servers.js`/`dashboard.js`/`logs.js`). The five Phase 3B-II screens — especially A2 (AddServer form with accordion + live YAML preview + save-time validation) — grow this to ~2000+ LOC of hand-rolled `innerHTML` templating, which does not scale. Migrate the existing 3 screens to a Vite + TypeScript + React (or Preact for smaller bundle) stack BEFORE adding new screens. Build output stays `go:embed`-consumable (static HTML/JS/CSS under `internal/gui/assets/`), Go side untouched. No runtime change for end users; dev-time adds Node.js + npm. **Must come before D1 and before any A-series screen** — otherwise we rewrite twice. |
+| **D1** | **Playwright E2E suite** | Automate the "live browser smoke" gap that PR #5 left deferred. Covers: Servers matrix render + toggle, Dashboard live SSE updates, Logs picker + tail follow, Migration grouping (post-A1), AddServer form (post-A2). Runs against `go run ./cmd/mcphub gui --no-browser --no-tray --port 0` spawned by test fixture. Node.js + `@playwright/test` + headless Chromium. ~300-500 lines of test code. CI job separate from `go test`. Follows D0 so the toolchain is already in place. |
 | D2 | Live manual smoke | Remaining gaps Playwright does NOT cover: tray icon rendering, AttachConsole + windowsgui subsystem matrix (cmd/PowerShell/Git Bash/Scheduler/Explorer × status/install/gui), single-instance recovery through OS reboot, real daemon kill via Task Manager. Requires Windows desktop. |
 | D3 | Multi-language workspace smoke (Phase 3 follow-up) | `mcphub register D:\dev\proj cpp python rust` — concurrent materialization of three real LSP backends (clangd, pyright-langserver, rust-analyzer). Currently unit-tested with fakes; no live multi-language verification. Belongs with D2 on the same Windows desktop session. |
 
@@ -57,19 +58,20 @@ Tracking document for Phase 3B-II — the "everything I cut from Phase 3B-I MVP"
 
 ## Suggested sequencing
 
-1. **D1** — Playwright E2E suite (foundational for everything downstream; unlocks regression-safe iteration on A1–A5)
-2. **B1** — Reverse-migrate API (unblocks proper uncheck semantics in Servers matrix; small backend change)
-3. **B2** — ExtractManifestFromClient API (unblocks A1 "Create manifest" action)
-4. **A1** — Migration screen (primary deferred UX; depends on B2)
-5. **A2** — Add/Edit manifest form (largest UI surface; depends on B2 for prefill)
-6. **A3** — Secrets screen
-7. **A4** — Settings screen
-8. **A5** — About screen
-9. **C3 + C4** — Tray icon state variants + toast notifications (polish after SSE event handling is mature)
-10. **C1 + C2** — `--force` take-over + browser focus (CLI/UX polish, Windows-specific wiring)
-11. **Release hardening** — D2 + D3 manual smoke matrix, write `docs/phase-3b-ii-verification.md`
+1. **D0** — Frontend toolchain migration → Vite + TS + React (must come first; a later migration forces rewriting every new screen)
+2. **D1** — Playwright E2E suite (foundational for everything downstream; unlocks regression-safe iteration on A1–A5)
+3. **B1** — Reverse-migrate API (unblocks proper uncheck semantics in Servers matrix; small backend change)
+4. **B2** — ExtractManifestFromClient API (unblocks A1 "Create manifest" action)
+5. **A1** — Migration screen (primary deferred UX; depends on B2)
+6. **A2** — Add/Edit manifest form (largest UI surface; depends on B2 for prefill)
+7. **A3** — Secrets screen
+8. **A4** — Settings screen
+9. **A5** — About screen
+10. **C3 + C4** — Tray icon state variants + toast notifications (polish after SSE event handling is mature)
+11. **C1 + C2** — `--force` take-over + browser focus (CLI/UX polish, Windows-specific wiring)
+12. **Release hardening** — D2 + D3 manual smoke matrix, write `docs/phase-3b-ii-verification.md`
 
-**Estimated scope:** ~30-40 implementation tasks, similar shape to Phase 3B-I MVP (22 tasks). Playwright adds ~5-8 test-authoring tasks on top of UI tasks; budget accordingly.
+**Estimated scope:** ~35-45 implementation tasks. D0 adds ~9-10 migration tasks; Playwright adds ~5-8 test-authoring tasks on top of UI tasks; budget accordingly.
 
 **Not included here** (out of scope for 3B-II entirely):
 - Cross-platform tray (Linux/macOS) — explicit non-goal per spec §2.2
