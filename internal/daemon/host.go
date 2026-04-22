@@ -195,14 +195,20 @@ func (h *StdioHost) Stop() error {
 	close(h.done) // unblock any pending HTTP handlers waiting on the subprocess
 	_ = h.stdin.Close()
 	if h.cmd != nil && h.cmd.Process != nil {
-		// Tree-kill so wrappers (npx, uvx, uv, node launchers) and
-		// their real child servers all go down together. Plain
-		// Process.Kill only kills the wrapper; its child would keep
-		// its stdin/stdout pipes open past the Wait-watcher close
-		// and the port bound past Stop's return. taskkill /F /T on
-		// Windows walks the tree; on Unix we fall back to pkill -P
-		// (see treekill.go). No-op if the process has already exited.
-		_ = killProcessTree(h.cmd.Process.Pid)
+		// Only tree-kill if the watcher has not already observed process
+		// exit. This avoids PID-reuse hazards from issuing a fresh
+		// PID-based taskkill/pkill after the original process is gone.
+		select {
+		case <-h.childExited:
+			// already exited; no kill needed
+		default:
+			// Tree-kill so wrappers (npx, uvx, uv, node launchers) and
+			// their real child servers all go down together. Plain
+			// Process.Kill only kills the wrapper; its child would keep
+			// its stdin/stdout pipes open past the Wait-watcher close
+			// and the port bound past Stop's return.
+			_ = killProcessTree(h.cmd.Process.Pid)
+		}
 	}
 	// Wait for the watcher goroutine to observe cmd.Wait() returning. This
 	// is bounded: either the child was already dead (immediate) or Kill()
