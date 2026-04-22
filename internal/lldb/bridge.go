@@ -215,8 +215,16 @@ func bridge(sock net.Conn, stdin io.Reader, stdout io.Writer, sigCh <-chan os.Si
 		return nil
 	case sig := <-sigCh:
 		_ = sock.Close()
-		<-stdinDone
-		<-stdoutDone
+		// Do not block on stdinDone here: if stdin is open but idle, the
+		// stdin→socket goroutine can remain blocked on Read forever.
+		select {
+		case <-stdinDone:
+		default:
+		}
+		select {
+		case <-stdoutDone:
+		default:
+		}
 		return fmt.Errorf("interrupted by %s", sig)
 	}
 }
