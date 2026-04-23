@@ -1,7 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { fetchOrThrow } from "../api";
 import { groupMigrationEntries, type MigrationGroups } from "../lib/migration-grouping";
-import type { ScanResult } from "../types";
+import type { ScanEntry, ScanResult } from "../types";
 
 // DismissedResponse mirrors the /api/dismissed handler shape from
 // internal/gui/dismiss.go. Declared inline here rather than in
@@ -23,14 +23,14 @@ export function MigrationScreen() {
   const [scan, setScan] = useState<ScanResult | null>(null);
   const [dismissedUnknown, setDismissedUnknown] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionBusy, setActionBusy] = useState<string | null>(null); // server name being demigrated
   const [scanReloadToken, setScanReloadToken] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        // Parallel fetch — both endpoints are idempotent and
-        // independent; round-trips run concurrently.
         const [s, d] = await Promise.all([
           fetchOrThrow<ScanResult>("/api/scan", "object"),
           fetchOrThrow<DismissedResponse>("/api/dismissed", "object"),
@@ -46,6 +46,27 @@ export function MigrationScreen() {
     })();
     return () => { cancelled = true; };
   }, [scanReloadToken]);
+
+  async function runDemigrate(serverName: string) {
+    setActionBusy(serverName);
+    setActionError(null);
+    try {
+      const resp = await fetch("/api/demigrate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ servers: [serverName] }),
+      });
+      if (!resp.ok && resp.status !== 204) {
+        const body = await resp.json().catch(() => ({ error: resp.statusText }));
+        throw new Error(body?.error ?? `HTTP ${resp.status}`);
+      }
+      setScanReloadToken((n) => n + 1);
+    } catch (err) {
+      setActionError(`Demigrate ${serverName}: ${(err as Error).message}`);
+    } finally {
+      setActionBusy(null);
+    }
+  }
 
   const groups: MigrationGroups = scan
     ? groupMigrationEntries(scan, dismissedUnknown)
@@ -77,6 +98,7 @@ export function MigrationScreen() {
   return (
     <section class="screen migration">
       <h1>Migration</h1>
+      {actionError && <p class="error action-error">{actionError}</p>}
       {totalRows === 0 ? (
         <p class="empty-state">
           No MCP servers found across any client config. Install or configure
@@ -85,11 +107,10 @@ export function MigrationScreen() {
         </p>
       ) : (
         <>
-          <GroupSection
-            title="Via hub"
-            tone="via-hub"
+          <ViaHubGroup
             entries={groups.viaHub}
-            emptyLabel="No hub-routed entries yet."
+            actionBusy={actionBusy}
+            onDemigrate={runDemigrate}
           />
           <GroupSection
             title="Can migrate"
@@ -118,6 +139,42 @@ export function MigrationScreen() {
       >
         Rescan
       </button>
+    </section>
+  );
+}
+
+function ViaHubGroup(props: {
+  entries: ScanEntry[];
+  actionBusy: string | null;
+  onDemigrate: (server: string) => void;
+}) {
+  if (props.entries.length === 0) {
+    return (
+      <section class="group group-via-hub" data-group="via-hub">
+        <h2>Via hub</h2>
+        <p class="empty">No hub-routed entries yet.</p>
+      </section>
+    );
+  }
+  return (
+    <section class="group group-via-hub" data-group="via-hub">
+      <h2>Via hub</h2>
+      <ul class="group-rows">
+        {props.entries.map((e) => (
+          <li key={e.name} data-server={e.name}>
+            <span class="server-name">{e.name}</span>
+            <button
+              type="button"
+              class="demigrate"
+              data-action="demigrate"
+              disabled={props.actionBusy != null}
+              onClick={() => props.onDemigrate(e.name)}
+            >
+              {props.actionBusy === e.name ? "Demigrating…" : "Demigrate"}
+            </button>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
