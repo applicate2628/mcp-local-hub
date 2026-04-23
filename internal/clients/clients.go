@@ -122,21 +122,26 @@ func (e *ErrClientNotInstalled) Error() string {
 // the `-original` sentinel.
 var ErrBackupEntryAlreadyMigrated = errors.New("clients: backup copy of entry is already in hub-managed shape")
 
-// IsMcphubBinary reports whether cmd's basename matches the mcphub
-// executable name. Case-insensitive to cover Windows (mcphub.exe) and
-// POSIX (mcphub). Used by both internal/api/scan.go's Antigravity
-// relay-reject branch and the per-adapter RestoreEntryFromBackup
-// hub-relay detection to avoid false positives against user stdio
-// entries whose first argument happens to be the literal string
-// "relay". Exported so internal/api/scan.go (package api) can call it
-// via clients.IsMcphubBinary; within package clients it is called as
-// the unqualified IsMcphubBinary.
+// IsMcphubBinary reports whether cmd's basename matches our CLI
+// binary name. Accepts the current names (mcphub / mcphub.exe) AND
+// the legacy names (mcp / mcp.exe) that early installations may
+// still have persisted into Antigravity client configs — matches
+// the existing isOurRelayBinary classifier at internal/api/scan.go:99
+// and the cleanup allowlist at internal/api/cleanup.go:38. Without
+// the legacy names, Task 6's Antigravity relay-reject would silently
+// accept legacy mcp.exe relay entries as "user stdio" and happily
+// draft a manifest pointing at the legacy binary — a regression
+// relative to pre-Phase-3B-II behavior. Case-insensitive basename
+// match. Exported so internal/api/scan.go (package api) can call it
+// via clients.IsMcphubBinary; within package clients it is called
+// as the unqualified IsMcphubBinary.
 func IsMcphubBinary(cmd string) bool {
 	if cmd == "" {
 		return false
 	}
 	base := strings.ToLower(filepath.Base(cmd))
-	return base == "mcphub" || base == "mcphub.exe"
+	return base == "mcphub" || base == "mcphub.exe" ||
+		base == "mcp" || base == "mcp.exe"
 }
 
 // AllClients returns the map of {client-name -> Client} for every supported
