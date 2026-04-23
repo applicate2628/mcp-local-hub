@@ -306,9 +306,9 @@ client_bindings:
 	if len(report.Failed) != 1 {
 		t.Fatalf("expected 1 failure, got %d: %+v", len(report.Failed), report.Failed)
 	}
-	if !strings.Contains(strings.ToLower(report.Failed[0].Err), "already") &&
-		!strings.Contains(strings.ToLower(report.Failed[0].Err), "newest-first") {
-		t.Errorf("failure message should mention already-migrated/newest-first: got %q", report.Failed[0].Err)
+	lowerErr := strings.ToLower(report.Failed[0].Err)
+	if !strings.Contains(lowerErr, "already") || !strings.Contains(lowerErr, "sentinel") {
+		t.Errorf("failure message should mention the already-migrated state and point at the -original sentinel: got %q", report.Failed[0].Err)
 	}
 }
 

@@ -520,6 +520,17 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 	}
 
 	cmd, _ := raw["command"].(string)
+	// Reject HTTP-only / hub-managed entries early. Extract is for stdio
+	// servers; an entry that has no `command` cannot produce a valid
+	// manifest (renderDraftManifestYAML would emit an empty `command:`
+	// line and ServerManifest.Validate would then fail with a less
+	// actionable error). The most common case is a user trying to
+	// extract from a server they already migrated — the entry is now
+	// hub-HTTP (Claude/Codex/Gemini) or hub-relay with empty-command
+	// downgrades — so we guide them toward demigrate instead.
+	if cmd == "" {
+		return "", fmt.Errorf("server %q in client %q has no `command` field — it is an HTTP-only or hub-managed entry, not user-configured stdio (run `mcphub demigrate %s` to restore the pre-migrate shape first if this server was migrated)", serverName, client, serverName)
+	}
 	var args []string
 	if arr, ok := raw["args"].([]any); ok {
 		for _, v := range arr {

@@ -194,6 +194,74 @@ func TestExtractManifestFromClient_Antigravity_AcceptsGenuineStdio(t *testing.T)
 	}
 }
 
+func TestExtractManifestFromClient_RejectsHubHTTPOnly_Claude(t *testing.T) {
+	// A migrated entry has `url` but no `command`. renderDraftManifestYAML
+	// would emit an empty `command:` line and the resulting manifest
+	// would fail Validate(). Reject early with an actionable message
+	// pointing the operator at demigrate as the likely remedy.
+	tmp := t.TempDir()
+	claudePath := filepath.Join(tmp, ".claude.json")
+	if err := os.WriteFile(claudePath, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`),
+		0600); err != nil {
+		t.Fatal(err)
+	}
+	a := NewAPI()
+	_, err := a.ExtractManifestFromClient("claude-code", "memory", ScanOpts{
+		ClaudeConfigPath: claudePath,
+		ManifestDir:      t.TempDir(),
+	})
+	if err == nil {
+		t.Fatal("expected rejection for HTTP-only entry, got nil")
+	}
+	if !strings.Contains(err.Error(), "no `command`") || !strings.Contains(err.Error(), "demigrate") {
+		t.Errorf("expected error to mention missing command + demigrate remedy, got %v", err)
+	}
+}
+
+func TestExtractManifestFromClient_RejectsHubHTTPOnly_Gemini(t *testing.T) {
+	tmp := t.TempDir()
+	geminiPath := filepath.Join(tmp, "settings.json")
+	if err := os.WriteFile(geminiPath, []byte(
+		`{"mcpServers":{"memory":{"url":"http://localhost:9200/mcp","type":"http"}}}`),
+		0600); err != nil {
+		t.Fatal(err)
+	}
+	a := NewAPI()
+	_, err := a.ExtractManifestFromClient("gemini-cli", "memory", ScanOpts{
+		GeminiConfigPath: geminiPath,
+		ManifestDir:      t.TempDir(),
+	})
+	if err == nil {
+		t.Fatal("expected rejection for HTTP-only entry, got nil")
+	}
+	if !strings.Contains(err.Error(), "no `command`") {
+		t.Errorf("expected error to mention missing command, got %v", err)
+	}
+}
+
+func TestExtractManifestFromClient_RejectsHubHTTPOnly_Codex(t *testing.T) {
+	tmp := t.TempDir()
+	codexPath := filepath.Join(tmp, "config.toml")
+	body := `[mcp_servers.memory]
+url = "http://localhost:9200/mcp"
+`
+	if err := os.WriteFile(codexPath, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	a := NewAPI()
+	_, err := a.ExtractManifestFromClient("codex-cli", "memory", ScanOpts{
+		CodexConfigPath: codexPath,
+		ManifestDir:     t.TempDir(),
+	})
+	if err == nil {
+		t.Fatal("expected rejection for HTTP-only entry, got nil")
+	}
+	if !strings.Contains(err.Error(), "no `command`") {
+		t.Errorf("expected error to mention missing command, got %v", err)
+	}
+}
+
 func TestExtractManifestFromClient_Antigravity_AcceptsRelayFirstArgWithNonMcphubCmd(t *testing.T) {
 	// Regression guard: a user could have a genuine stdio server whose
 	// first argument happens to be the literal string "relay" (e.g. a

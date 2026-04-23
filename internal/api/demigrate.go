@@ -39,15 +39,19 @@ type RestoredMigration struct {
 // exactly the rows Migrate would produce. Entries in other clients with
 // the same server name are NOT touched.
 //
-// Multi-server ordering constraint: when multiple servers were migrated
-// from the same client, the latest backup captures state BETWEEN those
-// migrations. It holds earlier-migrated servers in hub-HTTP form and
-// later-migrated servers in stdio form. Demigrating must proceed
-// newest-first (or target only the last-migrated server) — older
-// servers hit ErrBackupEntryAlreadyMigrated and surface as Failed rows
-// with a message directing the operator to restore from the
-// `-original` sentinel manually. This is intentional: silently
-// re-writing hub-HTTP data is strictly worse than a clear failure.
+// Multi-server constraint: when multiple servers were migrated from the
+// same client, each migration takes its own timestamped backup capturing
+// state at that moment. The latest backup therefore holds earlier-
+// migrated servers ALREADY in hub-HTTP/relay form and only the most-
+// recently-migrated server in stdio form. Demigrate can auto-restore
+// ONLY that last-migrated server from the latest backup. Earlier-
+// migrated servers hit ErrBackupEntryAlreadyMigrated and surface as
+// Failed rows; the operator must restore those from the `-original`
+// sentinel manually. Ordering of demigrate calls does not help — the
+// latest backup's content is frozen and does not change when earlier
+// entries are rewritten in the live file. This is intentional:
+// silently re-writing hub-HTTP data is strictly worse than a clear
+// failure directing the operator to the sentinel.
 //
 // Errors per-(server, client) are captured in the report; the function
 // returns nil unless a setup-level problem applies to every row.
@@ -107,7 +111,7 @@ func (a *API) Demigrate(opts DemigrateOpts) (*DemigrateReport, error) {
 				errMsg := err.Error()
 				if errors.Is(err, clients.ErrBackupEntryAlreadyMigrated) {
 					errMsg = fmt.Sprintf(
-						"latest backup holds %q already in hub-managed form — demigrate newest-first, or restore manually from the -original sentinel (%s)",
+						"latest backup holds %q already in hub-managed form — Demigrate can only auto-restore the most-recently-migrated server per client. Restore manually from the -original sentinel (%s).",
 						server, backupPath)
 				}
 				report.Failed = append(report.Failed, FailedMigration{
