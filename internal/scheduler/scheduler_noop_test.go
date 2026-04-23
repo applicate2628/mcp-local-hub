@@ -44,21 +44,31 @@ func TestNoopScheduler_StatusReturnsNotFound(t *testing.T) {
 	}
 }
 
-func TestNoopScheduler_CreateRunDeleteAreNoOps(t *testing.T) {
+// TestNoopScheduler_MutationsAreRejected locks in the "hard-fail on
+// mutation" contract added after Codex GitHub R1 flagged the original
+// silent-success behavior. If MCPHUB_E2E_SCHEDULER=none leaks into a
+// production shell, install/restart flows that call scheduler.New()
+// must error out loudly instead of reporting phantom success.
+func TestNoopScheduler_MutationsAreRejected(t *testing.T) {
 	var s Scheduler = &noopScheduler{}
-	if err := s.Create(TaskSpec{Name: "x"}); err != nil {
-		t.Errorf("Create: %v", err)
+	mutations := []struct {
+		name string
+		call func() error
+	}{
+		{"Create", func() error { return s.Create(TaskSpec{Name: "x"}) }},
+		{"Delete", func() error { return s.Delete("x") }},
+		{"Run", func() error { return s.Run("x") }},
+		{"Stop", func() error { return s.Stop("x") }},
+		{"ImportXML", func() error { return s.ImportXML("x", []byte("<Task/>")) }},
 	}
-	if err := s.Run("x"); err != nil {
-		t.Errorf("Run: %v", err)
-	}
-	if err := s.Stop("x"); err != nil {
-		t.Errorf("Stop: %v", err)
-	}
-	if err := s.Delete("x"); err != nil {
-		t.Errorf("Delete: %v", err)
-	}
-	if err := s.ImportXML("x", []byte("<Task/>")); err != nil {
-		t.Errorf("ImportXML: %v", err)
+	for _, m := range mutations {
+		err := m.call()
+		if err == nil {
+			t.Errorf("%s: expected error, got nil (silent success is the regression Codex flagged)", m.name)
+			continue
+		}
+		if !errors.Is(err, errNoopSchedulerMutation) {
+			t.Errorf("%s: expected errNoopSchedulerMutation, got %v", m.name, err)
+		}
 	}
 }
