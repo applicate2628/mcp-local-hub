@@ -357,7 +357,16 @@ func classify(e *ScanEntry, name string, manifestNames map[string]bool) string {
 	hasHub := false
 	hasStdio := false
 	for _, c := range e.ClientPresence {
-		if c.Transport == "http" && strings.Contains(c.Endpoint, "localhost") {
+		if c.Transport == "http" && clients.IsHubHTTPURL(c.Endpoint) {
+			hasHub = true
+		}
+		if c.Transport == "relay" {
+			// Antigravity's hub-routed shape: the hub rewrites Antigravity
+			// bindings into a relay command (mcphub binary + args[0]=="relay").
+			// scan.go:310 flags this as Transport: "relay". Without this branch
+			// hub-routed Antigravity servers fall to "not-installed" and the
+			// Migration screen drops them, hiding a real demigrate candidate.
+			// (PR #4 Codex R1.)
 			hasHub = true
 		}
 		if c.Transport == "stdio" {

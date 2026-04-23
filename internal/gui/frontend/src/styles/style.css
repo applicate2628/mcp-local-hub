@@ -45,3 +45,23 @@ main { padding: 24px; overflow: auto; }
 /* --- Logs screen --- */
 #logs-controls { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
 #logs-body { background: var(--sidebar-bg); border: 1px solid var(--border); padding: 12px; overflow: auto; max-height: 70vh; font-family: monospace; font-size: 12px; white-space: pre-wrap; }
+
+/* Migration screen group tones (spec §5.2) */
+.screen.migration .group { margin: 1.25rem 0; padding: 0.75rem 1rem;
+    border-left: 4px solid var(--border, #d0d7de); border-radius: 4px; }
+.screen.migration .group > h2 { margin: 0 0 0.5rem; font-size: 1.05rem; }
+.screen.migration .group > .empty { color: var(--text-muted, #656d76);
+    font-style: italic; }
+.screen.migration .group-via-hub     { border-left-color: var(--success, #1a7f37); }
+.screen.migration .group-can-migrate { border-left-color: var(--warning, #bf8700); }
+.screen.migration .group-unknown     { border-left-color: var(--accent, #8250df); }
+.screen.migration .group-per-session { border-left-color: var(--text-muted, #656d76); }
+.screen.migration .group-rows { list-style: none; padding: 0; margin: 0; }
+.screen.migration .group-rows li {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.25rem 0; border-bottom: 1px solid var(--border-subtle, #e4e7eb);
+}
+.screen.migration .group-rows li:last-child { border-bottom: none; }
+.screen.migration .server-name { flex: 1 1 auto; font-family: var(--font-mono); }
+.screen.migration .action-error { color: var(--danger, #cf222e); }
+.screen.migration button[disabled] { opacity: 0.5; cursor: not-allowed; }

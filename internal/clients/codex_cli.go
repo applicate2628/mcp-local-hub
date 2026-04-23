@@ -176,7 +176,7 @@ func (c *codexCLI) RestoreEntryFromBackup(backupPath, name string) error {
 			// User-configured remote HTTP entries (non-loopback url)
 			// pass through.
 			if rawMap, ok := backupEntry.(map[string]any); ok {
-				if urlStr, _ := rawMap["url"].(string); isHubHTTPURL(urlStr) {
+				if urlStr, _ := rawMap["url"].(string); IsHubHTTPURL(urlStr) {
 					if _, hasCmd := rawMap["command"]; !hasCmd {
 						return ErrBackupEntryAlreadyMigrated
 					}

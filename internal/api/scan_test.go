@@ -151,3 +151,86 @@ func TestScanWithProcessCountPopulates(t *testing.T) {
 		t.Error("memory entry missing from scan result")
 	}
 }
+
+// TestClassify exercises the server-status classifier against the five
+// possible outcomes (per-session, via-hub, can-migrate, unknown,
+// not-installed) and verifies the PR #4 Codex R1 fix: relay transport
+// AND 127.0.0.1 endpoints are both recognised as hub-routed.
+func TestClassify(t *testing.T) {
+	manifests := map[string]bool{"serena": true}
+	cases := []struct {
+		name       string
+		entry      *ScanEntry
+		serverName string
+		want       string
+	}{
+		{
+			name:       "per-session takes precedence",
+			entry:      &ScanEntry{ClientPresence: map[string]ClientEntry{"x": {Transport: "http", Endpoint: "http://localhost:9100/mcp"}}},
+			serverName: firstPerSessionServer(t),
+			want:       "per-session",
+		},
+		{
+			name:       "http + localhost -> via-hub",
+			entry:      &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://localhost:9200/mcp"}}},
+			serverName: "memory",
+			want:       "via-hub",
+		},
+		{
+			name:       "http + 127.0.0.1 -> via-hub (Codex R1)",
+			entry:      &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://127.0.0.1:9200/mcp"}}},
+			serverName: "memory",
+			want:       "via-hub",
+		},
+		{
+			name:       "relay transport -> via-hub (Codex R1)",
+			entry:      &ScanEntry{ClientPresence: map[string]ClientEntry{"antigravity": {Transport: "relay", Endpoint: "mcphub.exe"}}},
+			serverName: "memory",
+			want:       "via-hub",
+		},
+		{
+			name:       "stdio + manifest -> can-migrate",
+			entry:      &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "stdio", Endpoint: "npx"}}},
+			serverName: "serena",
+			want:       "can-migrate",
+		},
+		{
+			name:       "stdio without manifest -> unknown",
+			entry:      &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "stdio", Endpoint: "npx"}}},
+			serverName: "random-server",
+			want:       "unknown",
+		},
+		{
+			name:       "no known transport -> not-installed",
+			entry:      &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "absent"}}},
+			serverName: "memory",
+			want:       "not-installed",
+		},
+		{
+			name:       "mixed relay + stdio with manifest -> can-migrate (hasStdio wins over hub)",
+			entry:      &ScanEntry{ClientPresence: map[string]ClientEntry{"antigravity": {Transport: "relay", Endpoint: "mcphub.exe"}, "claude-code": {Transport: "stdio", Endpoint: "npx"}}},
+			serverName: "serena",
+			want:       "can-migrate",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := classify(tc.entry, tc.serverName, manifests)
+			if got != tc.want {
+				t.Fatalf("classify(%q) = %q, want %q", tc.serverName, got, tc.want)
+			}
+		})
+	}
+}
+
+// firstPerSessionServer returns a deterministic name known to live in
+// perSessionServers, so TestClassify does not hardcode a value that
+// could later rotate as that list is edited.
+func firstPerSessionServer(t *testing.T) string {
+	t.Helper()
+	for name := range perSessionServers {
+		return name
+	}
+	t.Fatalf("perSessionServers is empty; TestClassify expected at least one entry")
+	return ""
+}

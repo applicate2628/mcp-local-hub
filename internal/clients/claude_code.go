@@ -187,7 +187,7 @@ func (c *claudeCode) RestoreEntryFromBackup(backupPath, name string) error {
 			// servers (url pointing at a non-loopback host) pass
 			// through to the normal restore path.
 			if rawMap, ok := backupEntry.(map[string]any); ok {
-				if urlStr, _ := rawMap["url"].(string); isHubHTTPURL(urlStr) {
+				if urlStr, _ := rawMap["url"].(string); IsHubHTTPURL(urlStr) {
 					if _, hasCmd := rawMap["command"]; !hasCmd {
 						return ErrBackupEntryAlreadyMigrated
 					}

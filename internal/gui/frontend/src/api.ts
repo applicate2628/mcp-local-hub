@@ -34,3 +34,25 @@ export async function fetchOrThrow<T>(
   }
   return data as T;
 }
+
+// postDismiss sends the Migration screen's Unknown-group Dismiss action
+// to the hub. Backend persistence lives in Task 2; GET /api/dismissed
+// in Task 3. This
+// is a thin wrapper so the screen code does not repeat fetch plumbing.
+// Throws on non-204 responses with a descriptive message including the
+// backend-provided error field when present.
+export async function postDismiss(server: string): Promise<void> {
+  const resp = await fetch("/api/dismiss", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ server }),
+  });
+  if (resp.status === 204) return;
+  let body: { error?: string } | null = null;
+  try {
+    body = (await resp.json()) as { error?: string };
+  } catch {
+    // Non-JSON error body; fall through.
+  }
+  throw new Error(`/api/dismiss: ${body?.error ?? resp.statusText}`);
+}

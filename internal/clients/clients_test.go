@@ -259,6 +259,31 @@ func TestLatestBackup_ReturnsNotOkWhenAbsent(t *testing.T) {
 	}
 }
 
+func TestIsHubHTTPURL(t *testing.T) {
+	cases := []struct {
+		name string
+		url  string
+		want bool
+	}{
+		{"localhost loopback hub", "http://localhost:9200/mcp", true},
+		{"127.0.0.1 loopback hub", "http://127.0.0.1:9200/mcp", true},
+		{"IPv6 [::1] loopback hub (PR #4 Codex R3)", "http://[::1]:9200/mcp", true},
+		{"remote https", "https://api.example.com/mcp", false},
+		{"remote http", "http://api.example.com/mcp", false},
+		{"subdomain spoof with 127.0.0.1", "http://127.0.0.1.evil.com/mcp", false},
+		{"empty", "", false},
+		{"stdio scheme", "stdio:///memory", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := IsHubHTTPURL(tc.url)
+			if got != tc.want {
+				t.Errorf("IsHubHTTPURL(%q) = %v, want %v", tc.url, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestLatestBackup_IgnoresDirectoriesWithBackupPrefix(t *testing.T) {
 	// Defensive: if something odd (a checkout side-channel, an archiver)
 	// leaves a DIRECTORY whose name starts with the backup prefix,
