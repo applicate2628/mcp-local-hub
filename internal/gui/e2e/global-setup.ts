@@ -36,17 +36,23 @@ export default async function globalSetup() {
     maxBuffer: 10 * 1024 * 1024,
     shell: true, // npm resolves to npm.cmd on Windows via shell lookup
   });
-  const { stdout: diffOut } = await execFileP(
+  // git status --porcelain catches both modified-tracked files AND
+  // untracked files (e.g. a newly split chunk or an imported font that
+  // Vite emits for the first time). `git diff --name-only` misses the
+  // untracked case — the E2E would pass while a clean-checkout go build
+  // would be missing the new embed file.
+  const { stdout: statusOut } = await execFileP(
     "git",
-    ["diff", "--name-only", "--", "internal/gui/assets/"],
+    ["status", "--porcelain", "--", "internal/gui/assets/"],
     { cwd: repoRoot, maxBuffer: 1024 * 1024 },
   );
-  if (diffOut.trim().length > 0) {
+  if (statusOut.trim().length > 0) {
     throw new Error(
       "[global-setup] internal/gui/assets/ changed after npm run build — " +
-        "committed bundle was stale. Run `go generate ./internal/gui/...` " +
-        "and commit the updated assets. Modified files:\n" +
-        diffOut,
+        "committed bundle was stale or a new asset was emitted. Run " +
+        "`go generate ./internal/gui/...` and commit the updated assets. " +
+        "Changed/new files:\n" +
+        statusOut,
     );
   }
 
