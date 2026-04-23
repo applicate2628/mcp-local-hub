@@ -2,6 +2,7 @@ package clients
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -145,5 +146,75 @@ func TestAntigravity_RemoveEntry_Inherited(t *testing.T) {
 	}
 	if e, _ := a.GetEntry("other"); e == nil {
 		t.Error("other entry should still be present")
+	}
+}
+
+func TestAntigravity_RestoreEntryFromBackup_RestoresOrRemovesPerBackup(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mcp_config.json")
+	// Live has a relay-stdio entry written by mcphub migrate.
+	if err := os.WriteFile(path, []byte(
+		`{"mcpServers":{"serena":{"command":"C:/mcphub.exe","args":["relay","--server","serena","--daemon","claude"],"disabled":false}}}`),
+		0600); err != nil {
+		t.Fatal(err)
+	}
+	// Backup predates the install — no serena entry.
+	backup := path + ".bak-mcp-local-hub-20260101-000000"
+	if err := os.WriteFile(backup, []byte(`{"mcpServers":{}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	a := &antigravityClient{jsonMCPClient: &jsonMCPClient{path: path, clientName: "antigravity", urlField: "command"}}
+	if err := a.RestoreEntryFromBackup(backup, "serena"); err != nil {
+		t.Fatalf("RestoreEntryFromBackup: %v", err)
+	}
+	live, _ := os.ReadFile(path)
+	var m map[string]any
+	if err := json.Unmarshal(live, &m); err != nil {
+		t.Fatal(err)
+	}
+	servers := m["mcpServers"].(map[string]any)
+	if _, present := servers["serena"]; present {
+		t.Error("serena should have been removed")
+	}
+}
+
+func TestAntigravity_LatestBackupPath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mcp_config.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	backup := path + ".bak-mcp-local-hub-20260101-000000"
+	if err := os.WriteFile(backup, []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	a := &antigravityClient{jsonMCPClient: &jsonMCPClient{path: path, clientName: "antigravity", urlField: "command"}}
+	got, ok, err := a.LatestBackupPath()
+	if err != nil || !ok || got != backup {
+		t.Errorf("LatestBackupPath = %q ok=%v err=%v", got, ok, err)
+	}
+}
+
+func TestAntigravity_RestoreEntryFromBackup_RefusesHubRelayBackupEntry(t *testing.T) {
+	// Antigravity's hub-managed form is a RELAY entry: command points
+	// at the mcphub binary and args[0] == "relay". Refuse restoring
+	// from a backup that already contains a relay-shaped entry.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mcp_config.json")
+	if err := os.WriteFile(path, []byte(
+		`{"mcpServers":{"serena":{"command":"C:/mcphub.exe","args":["relay","--server","serena","--daemon","claude"]}}}`),
+		0600); err != nil {
+		t.Fatal(err)
+	}
+	backup := path + ".bak-mcp-local-hub-20260101-000000"
+	if err := os.WriteFile(backup, []byte(
+		`{"mcpServers":{"serena":{"command":"C:/mcphub.exe","args":["relay","--server","serena","--daemon","claude"]}}}`),
+		0600); err != nil {
+		t.Fatal(err)
+	}
+	a := &antigravityClient{jsonMCPClient: &jsonMCPClient{path: path, clientName: "antigravity", urlField: "command"}}
+	err := a.RestoreEntryFromBackup(backup, "serena")
+	if !errors.Is(err, ErrBackupEntryAlreadyMigrated) {
+		t.Fatalf("expected ErrBackupEntryAlreadyMigrated, got %v", err)
 	}
 }
