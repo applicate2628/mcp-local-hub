@@ -159,9 +159,13 @@ export const test = base.extend<{ hub: HubHandle }>({
       const handle: HubHandle = { url: `http://127.0.0.1:${port}`, port, home };
 
       // Wait for /api/ping to 200 before handing control to the test.
-      // Poll up to 5s; if the loop exhausts without success, THROW
-      // (cleanup runs via finally).
-      const deadline = Date.now() + 5_000;
+      // Poll up to 10s; if the loop exhausts without success, THROW
+      // (cleanup runs via finally). 10s covers Windows TCP bind latency
+      // right after a cold global-setup build — the banner fires as soon
+      // as the listen socket is announced but the OS takes another beat
+      // to actually accept connections when the machine is still
+      // finishing go/npm compile I/O. 5s was too tight under that load.
+      const deadline = Date.now() + 10_000;
       let pingOk = false;
       while (Date.now() < deadline && !closed) {
         try {
@@ -177,7 +181,7 @@ export const test = base.extend<{ hub: HubHandle }>({
       }
       if (!pingOk) {
         throw new Error(
-          `hub fixture: /api/ping did not respond within 5s at ${handle.url}`,
+          `hub fixture: /api/ping did not respond within 10s at ${handle.url}`,
         );
       }
 
