@@ -103,6 +103,16 @@ export function LogsScreen() {
     };
   }, [selected, tail, reloadToken]);
 
+  // When Follow activates, refetch the snapshot so any log lines written
+  // between the initial snapshot and the SSE connect are not silently
+  // skipped (the SSE stream starts from the file's current size). Only
+  // triggers on the off→on edge; toggling off does not refetch.
+  useEffect(() => {
+    if (follow) {
+      setReloadToken((x) => x + 1);
+    }
+  }, [follow]);
+
   const streamUrl = useMemo(() => {
     if (!follow || !selected) return null;
     const { server, daemon } = JSON.parse(selected) as { server: string; daemon: string };

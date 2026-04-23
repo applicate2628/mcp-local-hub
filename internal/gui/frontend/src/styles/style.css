@@ -16,7 +16,7 @@
 }
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-body { display: grid; grid-template-columns: 220px 1fr; }
+#app { display: grid; grid-template-columns: 220px 1fr; height: 100%; }
 .sidebar { background: var(--sidebar-bg); border-right: 1px solid var(--border); padding: 16px; }
 .brand { font-weight: 600; margin-bottom: 24px; }
 nav { display: flex; flex-direction: column; gap: 4px; }
