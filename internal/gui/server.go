@@ -136,6 +136,27 @@ func (realDemigrater) Demigrate(servers, clients []string) error {
 	return nil
 }
 
+// dismisser is the narrow interface both /api/dismiss (POST) and
+// /api/dismissed (GET) need. One interface for both directions keeps
+// the injection shape small; the POST handler uses DismissUnknown,
+// the GET handler uses ListDismissedUnknown.
+// realDismisser forwards to api.DismissUnknown / api.ListDismissedUnknown
+// (persistent JSON file).
+type dismisser interface {
+	DismissUnknown(name string) error
+	ListDismissedUnknown() (map[string]struct{}, error)
+}
+
+type realDismisser struct{}
+
+func (realDismisser) DismissUnknown(name string) error {
+	return api.DismissUnknown(name)
+}
+
+func (realDismisser) ListDismissedUnknown() (map[string]struct{}, error) {
+	return api.ListDismissedUnknown()
+}
+
 // restarter is the narrow interface the /api/servers/:name/restart handler
 // needs. realRestarter is the production adapter; tests inject their own.
 type restarter interface {
@@ -206,6 +227,7 @@ type Server struct {
 	status           statusProvider
 	migrator         migrator
 	demigrater       demigrater
+	dismisser        dismisser
 	restart          restarter
 	logs             logsProvider
 	events           *Broadcaster
@@ -222,6 +244,7 @@ func NewServer(cfg Config) *Server {
 	s.status = realStatusProvider{}
 	s.migrator = realMigrator{}
 	s.demigrater = realDemigrater{}
+	s.dismisser = realDismisser{}
 	s.restart = realRestarter{}
 	s.logs = realLogs{}
 	s.events = NewBroadcaster()
@@ -231,6 +254,7 @@ func NewServer(cfg Config) *Server {
 	registerStatusRoutes(s)
 	registerMigrateRoutes(s)
 	registerDemigrateRoutes(s)
+	registerDismissRoutes(s)
 	registerServerRoutes(s)
 	registerEventsRoutes(s)
 	registerLogsRoutes(s)
