@@ -210,6 +210,10 @@ func (c *codexCLI) BackupContainsEntry(backupPath, name string) (bool, error) {
 	if servers == nil {
 		return false, nil
 	}
-	_, present := servers[name]
-	return present, nil
+	// Require the entry to be a table (map). A scalar value would
+	// be malformed in TOML at this path; treat as absent so
+	// sentinel fallback refuses rather than silently writes
+	// corrupted data via RestoreEntryFromBackup.
+	entry, ok := servers[name].(map[string]any)
+	return ok && entry != nil, nil
 }

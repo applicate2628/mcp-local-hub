@@ -221,6 +221,10 @@ func (j *jsonMCPClient) BackupContainsEntry(backupPath, name string) (bool, erro
 	if servers == nil {
 		return false, nil
 	}
-	_, present := servers[name]
-	return present, nil
+	// Require the entry to be an object — a scalar value at this
+	// key would be malformed and, if fed to RestoreEntryFromBackup,
+	// would corrupt the live config. Treat non-object values as
+	// absent so the sentinel fallback refuses with a clear error.
+	entry, ok := servers[name].(map[string]any)
+	return ok && entry != nil, nil
 }

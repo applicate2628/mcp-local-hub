@@ -221,6 +221,11 @@ func (c *claudeCode) BackupContainsEntry(backupPath, name string) (bool, error) 
 	if servers == nil {
 		return false, nil
 	}
-	_, present := servers[name]
-	return present, nil
+	// Require the entry to be an object. A scalar (string, number,
+	// bool) or null passes the "key present" check but would
+	// corrupt the live config if fed back through
+	// RestoreEntryFromBackup — treat as absent so sentinel fallback
+	// refuses rather than silently writes malformed data.
+	entry, ok := servers[name].(map[string]any)
+	return ok && entry != nil, nil
 }

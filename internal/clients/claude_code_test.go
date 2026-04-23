@@ -251,6 +251,33 @@ func TestClaudeCode_RestoreEntryFromBackup_AcceptsRemoteHTTPBackup(t *testing.T)
 	}
 }
 
+func TestClaudeCode_BackupContainsEntry_RejectsNonObjectValues(t *testing.T) {
+	// Malformed backup where mcpServers[name] is a scalar (string, null,
+	// etc.) — BackupContainsEntry must report absent so Demigrate's
+	// sentinel fallback refuses rather than calling RestoreEntryFromBackup
+	// which would then write the scalar into the live config.
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".claude.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	badBackup := path + ".bak-mcp-local-hub-20260101-000000"
+	if err := os.WriteFile(badBackup, []byte(
+		`{"mcpServers":{"memory":"bad","other":null}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c := &claudeCode{path: path}
+	for _, name := range []string{"memory", "other"} {
+		has, err := c.BackupContainsEntry(badBackup, name)
+		if err != nil {
+			t.Errorf("%s: unexpected err: %v", name, err)
+		}
+		if has {
+			t.Errorf("%s: expected BackupContainsEntry=false for non-object value; would corrupt live if fed to RestoreEntryFromBackup", name)
+		}
+	}
+}
+
 func TestClaudeCode_RestoreEntryFromBackup_RefusesHubHTTPBackupEntry(t *testing.T) {
 	// Backup was taken AFTER an earlier migrate already rewrote this
 	// entry to hub-HTTP form (typical when two servers are migrated
