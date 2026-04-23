@@ -100,6 +100,16 @@ type Client interface {
 	// already in the backup's shape. Other entries in the live config
 	// are untouched.
 	RestoreEntryFromBackup(backupPath, name string) error
+
+	// BackupContainsEntry reports whether the backup file at backupPath
+	// has a parsed server entry named `name`. Used by Demigrate's
+	// sentinel-fallback path to distinguish "entry absent from sentinel"
+	// (the server was added AFTER the sentinel was written, so
+	// RestoreEntryFromBackup would silently delete it — destructive)
+	// from "entry present in sentinel" (safe to restore). Returns
+	// (false, nil) on present-but-malformed and on absent; returns
+	// (_, err) only for I/O or parse errors.
+	BackupContainsEntry(backupPath, name string) (bool, error)
 }
 
 // ErrClientNotInstalled signals the client's config file does not exist on this machine.

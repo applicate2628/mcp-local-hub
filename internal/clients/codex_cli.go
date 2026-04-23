@@ -191,3 +191,25 @@ func (c *codexCLI) RestoreEntryFromBackup(backupPath, name string) error {
 	liveMap["mcp_servers"] = liveServers
 	return c.writeTOML(liveMap)
 }
+
+// BackupContainsEntry reports whether the backup file at backupPath
+// has an [mcp_servers.<name>] table.
+func (c *codexCLI) BackupContainsEntry(backupPath, name string) (bool, error) {
+	data, err := os.ReadFile(backupPath)
+	if err != nil {
+		return false, fmt.Errorf("read backup %s: %w", backupPath, err)
+	}
+	if len(data) == 0 {
+		return false, nil
+	}
+	var m map[string]any
+	if err := toml.Unmarshal(data, &m); err != nil {
+		return false, fmt.Errorf("parse backup %s: %w", backupPath, err)
+	}
+	servers, _ := m["mcp_servers"].(map[string]any)
+	if servers == nil {
+		return false, nil
+	}
+	_, present := servers[name]
+	return present, nil
+}

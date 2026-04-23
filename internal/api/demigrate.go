@@ -45,12 +45,17 @@ type RestoredMigration struct {
 // entries in hub-managed form. For those, Demigrate falls back
 // automatically to the pristine `-original` sentinel (the one-shot
 // pre-hub snapshot Client.Backup() writes on first call; never
-// overwritten). If both the latest backup AND the sentinel refuse
-// (e.g. the sentinel was tampered with, or never written), Demigrate
-// surfaces a Failed row naming both paths so the operator can restore
-// manually. Silent rewriting of hub-managed data is strictly worse
-// than a clear failure, so the defensive check in each adapter's
-// RestoreEntryFromBackup does not compromise.
+// overwritten) — but only if the sentinel actually contains the
+// named entry (verified via Client.BackupContainsEntry). If the
+// sentinel lacks the entry, the server must have been added AFTER
+// the sentinel was written, so auto-rollback from the sentinel would
+// silently DELETE the user-configured entry — Demigrate refuses and
+// reports a Failed row directing the operator to inspect older
+// timestamped backups manually. If both the latest backup AND the
+// sentinel refuse for any other reason (sentinel tampered with or
+// unreadable), Demigrate surfaces a Failed row naming both paths.
+// Silent rewriting of hub-managed data and silent deletion of user
+// entries are both strictly worse than a clear failure.
 //
 // Errors per-(server, client) are captured in the report; the function
 // returns nil unless a setup-level problem applies to every row.
@@ -114,14 +119,34 @@ func (a *API) Demigrate(opts DemigrateOpts) (*DemigrateReport, error) {
 				// -original sentinel, which by definition captures pre-hub
 				// state and therefore cannot hold a hub-managed shape for
 				// any entry that existed before mcphub touched the file.
+				//
+				// BUT: RestoreEntryFromBackup silently deletes the live
+				// entry when the backup lacks it — correct when migrate
+				// added the server from scratch, WRONG when the operator
+				// added the server AFTER the sentinel was written and
+				// then migrated it (twice, in the bot-R1-P1 reproducer).
+				// Pre-check sentinel containment to avoid the destructive
+				// silent-delete path.
 				sentinelPath := adapter.ConfigPath() + ".bak-mcp-local-hub-original"
-				if sentErr := adapter.RestoreEntryFromBackup(sentinelPath, server); sentErr == nil {
-					restoredFrom = sentinelPath
-					err = nil
-				} else {
+				hasInSentinel, sentCheckErr := adapter.BackupContainsEntry(sentinelPath, server)
+				switch {
+				case sentCheckErr != nil:
 					err = fmt.Errorf(
-						"latest backup %s holds %q already in hub-managed form, and -original sentinel fallback at %s also failed: %w",
-						backupPath, server, sentinelPath, sentErr)
+						"latest backup %s holds %q already in hub-managed form, and -original sentinel at %s is unreadable: %w",
+						backupPath, server, sentinelPath, sentCheckErr)
+				case !hasInSentinel:
+					err = fmt.Errorf(
+						"latest backup %s holds %q already in hub-managed form, and -original sentinel at %s does not contain %q (server was added after the sentinel was written; auto-rollback would silently delete it — inspect older timestamped backups manually)",
+						backupPath, server, sentinelPath, server)
+				default:
+					if sentErr := adapter.RestoreEntryFromBackup(sentinelPath, server); sentErr == nil {
+						restoredFrom = sentinelPath
+						err = nil
+					} else {
+						err = fmt.Errorf(
+							"latest backup %s holds %q already in hub-managed form, and -original sentinel fallback at %s failed: %w",
+							backupPath, server, sentinelPath, sentErr)
+					}
 				}
 			}
 			if err != nil {

@@ -202,3 +202,25 @@ func (c *claudeCode) RestoreEntryFromBackup(backupPath, name string) error {
 	liveMap["mcpServers"] = liveServers
 	return c.writeJSON(liveMap)
 }
+
+// BackupContainsEntry reports whether the backup file at backupPath
+// has an mcpServers[name] entry.
+func (c *claudeCode) BackupContainsEntry(backupPath, name string) (bool, error) {
+	data, err := os.ReadFile(backupPath)
+	if err != nil {
+		return false, fmt.Errorf("read backup %s: %w", backupPath, err)
+	}
+	if len(data) == 0 {
+		return false, nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return false, fmt.Errorf("parse backup %s: %w", backupPath, err)
+	}
+	servers, _ := m["mcpServers"].(map[string]any)
+	if servers == nil {
+		return false, nil
+	}
+	_, present := servers[name]
+	return present, nil
+}

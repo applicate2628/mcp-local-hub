@@ -384,8 +384,78 @@ client_bindings:
 		t.Fatalf("expected 1 failure, got %d: %+v", len(report.Failed), report.Failed)
 	}
 	lowerErr := strings.ToLower(report.Failed[0].Err)
-	if !strings.Contains(lowerErr, "sentinel") || !strings.Contains(lowerErr, "also failed") {
-		t.Errorf("failure message should mention sentinel fallback also failed: got %q", report.Failed[0].Err)
+	if !strings.Contains(lowerErr, "sentinel") || !strings.Contains(lowerErr, "fallback") || !strings.Contains(lowerErr, "failed") {
+		t.Errorf("failure message should mention sentinel fallback failed: got %q", report.Failed[0].Err)
+	}
+}
+
+func TestDemigrate_FailsWhenServerAddedAfterSentinelThenMigratedTwice(t *testing.T) {
+	// Bot R2 P1 reproducer: operator installed mcphub (sentinel captured
+	// as pristine pre-hub state), then LATER added serverX manually, then
+	// migrated serverX twice. Latest backup holds X in hub-managed form.
+	// Sentinel lacks X entirely (it was added after sentinel was written).
+	// Naïve sentinel fallback would silently DELETE X from live and
+	// count it as a successful rollback — destructive. Demigrate must
+	// detect this via BackupContainsEntry pre-check and surface a clear
+	// Failed row.
+	tmp := t.TempDir()
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("HOME", tmp)
+	claudePath := filepath.Join(tmp, ".claude.json")
+	_ = os.WriteFile(claudePath, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0600)
+	// Latest backup = after first migrate (memory already hub-managed).
+	latest := claudePath + ".bak-mcp-local-hub-20260301-120000"
+	_ = os.WriteFile(latest, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0600)
+	// Sentinel = pristine pre-hub, BEFORE memory was manually added.
+	// memory is ABSENT from sentinel.
+	sentinel := claudePath + ".bak-mcp-local-hub-original"
+	_ = os.WriteFile(sentinel, []byte(`{"mcpServers":{}}`), 0600)
+
+	manifestDir := t.TempDir()
+	memDir := filepath.Join(manifestDir, "memory")
+	_ = os.MkdirAll(memDir, 0700)
+	_ = os.WriteFile(filepath.Join(memDir, "manifest.yaml"), []byte(
+		`name: memory
+kind: global
+transport: stdio-bridge
+command: npx
+daemons:
+  - name: default
+    port: 9200
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+`), 0600)
+
+	a := NewAPI()
+	report, err := a.Demigrate(DemigrateOpts{
+		Servers:  []string{"memory"},
+		ScanOpts: ScanOpts{ManifestDir: manifestDir},
+		Writer:   io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("Demigrate: %v", err)
+	}
+	if len(report.Restored) != 0 {
+		t.Fatalf("expected 0 restored (sentinel lacks entry, silent-delete must be refused), got %+v", report.Restored)
+	}
+	if len(report.Failed) != 1 {
+		t.Fatalf("expected 1 failure, got %d: %+v", len(report.Failed), report.Failed)
+	}
+	lowerErr := strings.ToLower(report.Failed[0].Err)
+	if !strings.Contains(lowerErr, "sentinel") || !strings.Contains(lowerErr, "does not contain") {
+		t.Errorf("failure message should indicate sentinel does not contain the entry: got %q", report.Failed[0].Err)
+	}
+	// Live config must not have been touched — memory still present.
+	live, _ := os.ReadFile(claudePath)
+	var liveMap map[string]any
+	_ = json.Unmarshal(live, &liveMap)
+	servers := liveMap["mcpServers"].(map[string]any)
+	if _, present := servers["memory"]; !present {
+		t.Error("live config lost memory entry — auto-rollback path must not silently delete user-added servers")
 	}
 }
 
