@@ -208,6 +208,13 @@ function CellView(props: {
   const routing: Routing = server.routing[client] ?? "not-installed";
   const initialChecked = routing === "via-hub";
   const [checked, setChecked] = useState(initialChecked);
+  // Keep local `checked` in sync with the authoritative initialChecked
+  // when routing actually changes (a scan reload moving a cell from
+  // direct→via-hub, an external config change, etc.). Deps `[initialChecked]`
+  // means unrelated parent re-renders do not stomp an in-progress user edit.
+  useEffect(() => {
+    setChecked(initialChecked);
+  }, [initialChecked]);
   // Disable when:
   //  - "unsupported" or "not-installed": cell is meaningless
   //  - "via-hub": MVP has no reverse-migrate API yet (Phase 3B-II B1).

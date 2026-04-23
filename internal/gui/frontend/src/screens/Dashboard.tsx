@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "preact/hooks";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { fetchOrThrow } from "../api";
 import { useEventSource } from "../hooks/useEventSource";
 import type { DaemonStatus } from "../types";
@@ -100,6 +100,15 @@ export function DashboardScreen() {
 function Card(props: { daemon: DaemonStatus; onRestart: (server: string) => Promise<void> }) {
   const { daemon: d, onRestart } = props;
   const [btnState, setBtnState] = useState<"idle" | "working" | "done" | "error">("idle");
+  // Track the pending "snap back to idle" timer so (a) a second click can
+  // cancel the stale timer before replacing it — otherwise the old timer
+  // fires mid-way through the new restart and resets btnState to idle
+  // while the new POST is still in flight — and (b) unmount cleans up.
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+  }, []);
+
   const cls = d.state === "Running" ? "card ok" : "card down";
   const title = d.daemon && d.daemon !== "default" ? `${d.server} (${d.daemon})` : d.server;
   const btnText = {
@@ -110,6 +119,10 @@ function Card(props: { daemon: DaemonStatus; onRestart: (server: string) => Prom
   }[btnState];
 
   async function click() {
+    // The disabled prop already blocks clicks when btnState !== "idle",
+    // but guard here too in case a race delivers a click event before
+    // the disabled attribute has been applied by the renderer.
+    if (btnState !== "idle") return;
     setBtnState("working");
     try {
       await onRestart(d.server);
@@ -117,7 +130,11 @@ function Card(props: { daemon: DaemonStatus; onRestart: (server: string) => Prom
     } catch {
       setBtnState("error");
     }
-    setTimeout(() => setBtnState("idle"), 1500);
+    if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+    resetTimerRef.current = setTimeout(() => {
+      setBtnState("idle");
+      resetTimerRef.current = null;
+    }, 1500);
   }
 
   return (
@@ -136,7 +153,7 @@ function Card(props: { daemon: DaemonStatus; onRestart: (server: string) => Prom
         <span class="state">{d.state}</span>
       </div>
       <div class="card-actions">
-        <button onClick={click} disabled={btnState === "working"}>
+        <button onClick={click} disabled={btnState !== "idle"}>
           {btnText}
         </button>
       </div>
