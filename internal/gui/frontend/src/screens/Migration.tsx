@@ -34,9 +34,24 @@ export function MigrationScreen() {
     let cancelled = false;
     (async () => {
       try {
+        // /api/scan is authoritative — its failure means we cannot render
+        // the screen. /api/dismissed is auxiliary — a transient
+        // permission/read error on gui-dismissed.json should degrade to
+        // "no dismissals known" rather than blanking the entire screen
+        // (which would also block Demigrate / Migrate selected for
+        // unaffected groups). (PR #4 Codex R2.)
+        const dismissedFallback: DismissedResponse = { unknown: [] };
         const [s, d] = await Promise.all([
           fetchOrThrow<ScanResult>("/api/scan", "object"),
-          fetchOrThrow<DismissedResponse>("/api/dismissed", "object"),
+          fetchOrThrow<DismissedResponse>("/api/dismissed", "object").catch(
+            (err: unknown) => {
+              console.warn(
+                "Migration: /api/dismissed failed, rendering without dismissal filter:",
+                err,
+              );
+              return dismissedFallback;
+            },
+          ),
         ]);
         if (!cancelled) {
           setScan(s);
