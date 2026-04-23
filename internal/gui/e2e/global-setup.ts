@@ -24,9 +24,11 @@ export default async function globalSetup() {
   mkdirSync(binDir, { recursive: true });
   const binPath = resolve(binDir, process.platform === "win32" ? "mcphub.exe" : "mcphub");
 
-  // 1) Rebuild Preact bundle → internal/gui/assets/. Otherwise tests
-  //    could pass against stale assets after a frontend source change
-  //    that was never rebuilt locally.
+  // 1) Rebuild Preact bundle → internal/gui/assets/. Then verify
+  //    git didn't see any diff after the rebuild — if it did, the
+  //    committed bundle was stale vs source and a fresh `go build`
+  //    on CI would ship different code than what E2E just exercised.
+  //    Fail loudly rather than silently masking the problem.
   console.log("[global-setup] npm run build (frontend)…");
   await execFileP("npm", ["run", "build"], {
     cwd: frontendDir,
@@ -34,6 +36,19 @@ export default async function globalSetup() {
     maxBuffer: 10 * 1024 * 1024,
     shell: true, // npm resolves to npm.cmd on Windows via shell lookup
   });
+  const { stdout: diffOut } = await execFileP(
+    "git",
+    ["diff", "--name-only", "--", "internal/gui/assets/"],
+    { cwd: repoRoot, maxBuffer: 1024 * 1024 },
+  );
+  if (diffOut.trim().length > 0) {
+    throw new Error(
+      "[global-setup] internal/gui/assets/ changed after npm run build — " +
+        "committed bundle was stale. Run `go generate ./internal/gui/...` " +
+        "and commit the updated assets. Modified files:\n" +
+        diffOut,
+    );
+  }
 
   // 2) Compile mcphub binary so the fixture can spawn it fast.
   console.log("[global-setup] go build ./cmd/mcphub…");
