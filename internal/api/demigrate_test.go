@@ -389,6 +389,71 @@ client_bindings:
 	}
 }
 
+func TestDemigrate_FailsWhenOnlySentinelExistsAndLacksEntry(t *testing.T) {
+	// Bot R4 P1 reproducer: all timestamped backups have been pruned
+	// (e.g. via `backups clean --keep 0`) so LatestBackupPath returns
+	// the pristine sentinel directly. If the server was added AFTER
+	// the sentinel was written, the main restore path must apply the
+	// same containment safety check as the fallback path — else
+	// RestoreEntryFromBackup would silently delete the live entry.
+	tmp := t.TempDir()
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("HOME", tmp)
+	claudePath := filepath.Join(tmp, ".claude.json")
+	_ = os.WriteFile(claudePath, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0600)
+	// Only the sentinel exists — timestamped backups pruned. Sentinel
+	// is pristine pre-hub, so it does NOT contain memory (which was
+	// added later).
+	sentinel := claudePath + ".bak-mcp-local-hub-original"
+	_ = os.WriteFile(sentinel, []byte(`{"mcpServers":{}}`), 0600)
+
+	manifestDir := t.TempDir()
+	memDir := filepath.Join(manifestDir, "memory")
+	_ = os.MkdirAll(memDir, 0700)
+	_ = os.WriteFile(filepath.Join(memDir, "manifest.yaml"), []byte(
+		`name: memory
+kind: global
+transport: stdio-bridge
+command: npx
+daemons:
+  - name: default
+    port: 9200
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+`), 0600)
+
+	a := NewAPI()
+	report, err := a.Demigrate(DemigrateOpts{
+		Servers:  []string{"memory"},
+		ScanOpts: ScanOpts{ManifestDir: manifestDir},
+		Writer:   io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("Demigrate: %v", err)
+	}
+	if len(report.Restored) != 0 {
+		t.Fatalf("expected 0 restored (sentinel lacks entry; silent-delete must be refused), got %+v", report.Restored)
+	}
+	if len(report.Failed) != 1 {
+		t.Fatalf("expected 1 failure, got %d: %+v", len(report.Failed), report.Failed)
+	}
+	lowerErr := strings.ToLower(report.Failed[0].Err)
+	if !strings.Contains(lowerErr, "sentinel") || !strings.Contains(lowerErr, "does not contain") {
+		t.Errorf("failure message should indicate sentinel does not contain the entry: got %q", report.Failed[0].Err)
+	}
+	// Live config untouched.
+	live, _ := os.ReadFile(claudePath)
+	var liveMap map[string]any
+	_ = json.Unmarshal(live, &liveMap)
+	servers := liveMap["mcpServers"].(map[string]any)
+	if _, present := servers["memory"]; !present {
+		t.Error("live config lost memory entry — sentinel-only path must not silently delete")
+	}
+}
+
 func TestDemigrate_FailsWhenServerAddedAfterSentinelThenMigratedTwice(t *testing.T) {
 	// Bot R2 P1 reproducer: operator installed mcphub (sentinel captured
 	// as pristine pre-hub state), then LATER added serverX manually, then

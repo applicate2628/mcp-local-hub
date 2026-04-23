@@ -111,42 +111,51 @@ func (a *API) Demigrate(opts DemigrateOpts) (*DemigrateReport, error) {
 				})
 				continue
 			}
-			restoredFrom := backupPath
-			err = adapter.RestoreEntryFromBackup(backupPath, server)
-			if errors.Is(err, clients.ErrBackupEntryAlreadyMigrated) {
-				// Latest backup already holds this entry in hub-managed form
-				// (multi-server or repeat-migrate case). Try the pristine
-				// -original sentinel, which by definition captures pre-hub
-				// state and therefore cannot hold a hub-managed shape for
-				// any entry that existed before mcphub touched the file.
-				//
-				// BUT: RestoreEntryFromBackup silently deletes the live
-				// entry when the backup lacks it — correct when migrate
-				// added the server from scratch, WRONG when the operator
-				// added the server AFTER the sentinel was written and
-				// then migrated it (twice, in the bot-R1-P1 reproducer).
-				// Pre-check sentinel containment to avoid the destructive
-				// silent-delete path.
-				sentinelPath := adapter.ConfigPath() + ".bak-mcp-local-hub-original"
-				hasInSentinel, sentCheckErr := adapter.BackupContainsEntry(sentinelPath, server)
-				switch {
-				case sentCheckErr != nil:
-					err = fmt.Errorf(
-						"latest backup %s holds %q already in hub-managed form, and -original sentinel at %s is unreadable: %w",
-						backupPath, server, sentinelPath, sentCheckErr)
-				case !hasInSentinel:
-					err = fmt.Errorf(
-						"latest backup %s holds %q already in hub-managed form, and -original sentinel at %s does not contain %q (server was added after the sentinel was written; auto-rollback would silently delete it — inspect older timestamped backups manually)",
-						backupPath, server, sentinelPath, server)
-				default:
-					if sentErr := adapter.RestoreEntryFromBackup(sentinelPath, server); sentErr == nil {
-						restoredFrom = sentinelPath
-						err = nil
-					} else {
-						err = fmt.Errorf(
-							"latest backup %s holds %q already in hub-managed form, and -original sentinel fallback at %s failed: %w",
-							backupPath, server, sentinelPath, sentErr)
+			sentinelPath := adapter.ConfigPath() + ".bak-mcp-local-hub-original"
+			// safeRestore wraps adapter.RestoreEntryFromBackup with a
+			// containment pre-check when the backup path is the
+			// -original sentinel. Rationale: RestoreEntryFromBackup
+			// silently deletes the live entry when the backup lacks
+			// it. That's correct semantics when the backup is a
+			// TIMESTAMPED snapshot taken right before migrate (migrate
+			// added the server from scratch, so demigrate removes it).
+			// But when the backup is the pristine sentinel AND the
+			// sentinel lacks the entry, the server must have been
+			// added AFTER mcphub first touched the config — silently
+			// deleting it is destructive, not a rollback. Refuse in
+			// that case with a clear message. The main flow can reach
+			// this scenario whenever `LatestBackupPath` returns the
+			// sentinel directly (e.g. timestamped backups were
+			// pruned); the ErrBackupEntryAlreadyMigrated fallback
+			// reaches it explicitly.
+			safeRestore := func(path string) error {
+				if path == sentinelPath {
+					has, err := adapter.BackupContainsEntry(path, server)
+					if err != nil {
+						return fmt.Errorf("sentinel %s unreadable: %w", path, err)
 					}
+					if !has {
+						return fmt.Errorf(
+							"-original sentinel at %s does not contain %q (server added after sentinel was written; auto-rollback would silently delete it — inspect older timestamped backups manually)",
+							path, server)
+					}
+				}
+				return adapter.RestoreEntryFromBackup(path, server)
+			}
+			restoredFrom := backupPath
+			err = safeRestore(backupPath)
+			if errors.Is(err, clients.ErrBackupEntryAlreadyMigrated) {
+				// Latest timestamped backup already holds this entry in
+				// hub-managed form (multi-server or repeat-migrate case).
+				// Fall back to the pristine sentinel — safeRestore's
+				// pre-check applies.
+				if sentErr := safeRestore(sentinelPath); sentErr == nil {
+					restoredFrom = sentinelPath
+					err = nil
+				} else {
+					err = fmt.Errorf(
+						"latest backup %s holds %q already in hub-managed form, and -original sentinel fallback failed: %w",
+						backupPath, server, sentErr)
 				}
 			}
 			if err != nil {
