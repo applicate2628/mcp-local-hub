@@ -35,11 +35,15 @@ func registerDismissRoutes(s *Server) {
 			writeAPIError(w, fmt.Errorf("invalid JSON: %w", err), http.StatusBadRequest, "BAD_REQUEST")
 			return
 		}
-		if strings.TrimSpace(req.Server) == "" {
+		// Normalize before both the empty-check and the persist call so
+		// " server " doesn't pass validation and then store a key that
+		// won't match scan entries during filtering. (PR #4 Codex R3.)
+		name := strings.TrimSpace(req.Server)
+		if name == "" {
 			writeAPIError(w, fmt.Errorf("server must not be empty"), http.StatusBadRequest, "BAD_REQUEST")
 			return
 		}
-		if err := s.dismisser.DismissUnknown(req.Server); err != nil {
+		if err := s.dismisser.DismissUnknown(name); err != nil {
 			writeAPIError(w, err, http.StatusInternalServerError, "DISMISS_FAILED")
 			return
 		}

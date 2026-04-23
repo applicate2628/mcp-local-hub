@@ -136,8 +136,9 @@ func (e *ErrClientNotInstalled) Error() string {
 var ErrBackupEntryAlreadyMigrated = errors.New("clients: backup copy of entry is already in hub-managed shape")
 
 // IsHubHTTPURL reports whether urlStr looks like a mcp-local-hub
-// managed loopback URL (`http://localhost:<port>/...` or
-// `http://127.0.0.1:<port>/...`). Used by the per-adapter defensive
+// managed loopback URL (`http://localhost:<port>/...`,
+// `http://127.0.0.1:<port>/...`, or `http://[::1]:<port>/...`).
+// Used by the per-adapter defensive
 // check in RestoreEntryFromBackup to distinguish hub-managed entries
 // from legitimate user-configured remote HTTP MCP servers (e.g. a
 // context7-style `https://api.example.com/mcp`). A naïve "has url,
@@ -148,7 +149,8 @@ var ErrBackupEntryAlreadyMigrated = errors.New("clients: backup copy of entry is
 // HTTP), never data corruption.
 func IsHubHTTPURL(urlStr string) bool {
 	return strings.HasPrefix(urlStr, "http://localhost:") ||
-		strings.HasPrefix(urlStr, "http://127.0.0.1:")
+		strings.HasPrefix(urlStr, "http://127.0.0.1:") ||
+		strings.HasPrefix(urlStr, "http://[::1]:")
 }
 
 // IsMcphubBinary reports whether cmd's basename matches our CLI

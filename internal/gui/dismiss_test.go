@@ -93,6 +93,29 @@ func TestDismissHandler_SurfacesBackendError(t *testing.T) {
 	}
 }
 
+func TestDismissHandler_TrimsServerNameBeforePersist(t *testing.T) {
+	// PR #4 Codex R3: the handler used to validate trim(req.Server) but
+	// persist the untrimmed req.Server. A request like "  serenity  "
+	// passed the empty-check yet stored a whitespace-padded key that
+	// never matched a scan entry during filtering. Assert the key is
+	// stored trimmed.
+	fake := &fakeDismisser{}
+	s := NewServer(Config{Port: 0})
+	s.dismisser = fake
+	body := bytes.NewReader([]byte(`{"server":"  serenity  "}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/dismiss", body)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.mux.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("want 204, got %d: %s", w.Code, w.Body.String())
+	}
+	if len(fake.got) != 1 || fake.got[0] != "serenity" {
+		t.Errorf("got=%v, want [serenity]", fake.got)
+	}
+}
+
 func TestDismissHandler_RejectsCrossOrigin(t *testing.T) {
 	s := NewServer(Config{Port: 0})
 	s.dismisser = &fakeDismisser{}
