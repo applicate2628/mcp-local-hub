@@ -187,3 +187,95 @@ func TestBackupKeepZero_DoesNotPrune(t *testing.T) {
 		t.Errorf("Backup() (keepN=0) must not prune; want 3 timestamped, got %d", timestamped)
 	}
 }
+
+func TestLatestBackup_PrefersMostRecentTimestamped(t *testing.T) {
+	dir := t.TempDir()
+	live := filepath.Join(dir, "foo.json")
+	if err := os.WriteFile(live, []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Three timestamped backups. Current backup name format is
+	// `<livePath>.bak-mcp-local-hub-<YYYYMMDD-HHMMSS>` (see
+	// clients.go:writeBackup timestamp layout). Lexicographic order
+	// matches chronological order because the digits are fixed-width.
+	for _, ts := range []string{"20260101-120000", "20260201-120000", "20260115-120000"} {
+		p := filepath.Join(dir, "foo.json.bak-mcp-local-hub-"+ts)
+		if err := os.WriteFile(p, []byte(`{"ts":"`+ts+`"}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Pristine sentinel — must be returned only when no timestamped
+	// backup exists.
+	if err := os.WriteFile(filepath.Join(dir, "foo.json.bak-mcp-local-hub-original"),
+		[]byte(`{"pristine":true}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	path, ok, err := latestBackup(live, "test-client")
+	if err != nil {
+		t.Fatalf("latestBackup: %v", err)
+	}
+	if !ok {
+		t.Fatalf("latestBackup: expected backup to exist")
+	}
+	if !strings.HasSuffix(path, "foo.json.bak-mcp-local-hub-20260201-120000") {
+		t.Errorf("expected most recent timestamped backup, got %s", path)
+	}
+}
+
+func TestLatestBackup_FallsBackToOriginalSentinel(t *testing.T) {
+	dir := t.TempDir()
+	live := filepath.Join(dir, "foo.json")
+	if err := os.WriteFile(live, []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	origPath := filepath.Join(dir, "foo.json.bak-mcp-local-hub-original")
+	if err := os.WriteFile(origPath, []byte(`{"pristine":true}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	path, ok, err := latestBackup(live, "test-client")
+	if err != nil {
+		t.Fatalf("latestBackup: %v", err)
+	}
+	if !ok {
+		t.Fatalf("latestBackup: expected original sentinel to be picked up")
+	}
+	if path != origPath {
+		t.Errorf("expected %s, got %s", origPath, path)
+	}
+}
+
+func TestLatestBackup_ReturnsNotOkWhenAbsent(t *testing.T) {
+	dir := t.TempDir()
+	live := filepath.Join(dir, "foo.json")
+	if err := os.WriteFile(live, []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, ok, err := latestBackup(live, "test-client")
+	if err != nil {
+		t.Fatalf("latestBackup: %v", err)
+	}
+	if ok {
+		t.Fatal("expected ok=false when no backup files present")
+	}
+}
+
+func TestLatestBackup_IgnoresDirectoriesWithBackupPrefix(t *testing.T) {
+	// Defensive: if something odd (a checkout side-channel, an archiver)
+	// leaves a DIRECTORY whose name starts with the backup prefix,
+	// latestBackup must not return that directory as the "backup path".
+	dir := t.TempDir()
+	live := filepath.Join(dir, "foo.json")
+	if err := os.WriteFile(live, []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "foo.json.bak-mcp-local-hub-20260101-000000"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	_, ok, err := latestBackup(live, "test-client")
+	if err != nil {
+		t.Fatalf("latestBackup: %v", err)
+	}
+	if ok {
+		t.Fatal("expected ok=false — directory must not count as a backup")
+	}
+}

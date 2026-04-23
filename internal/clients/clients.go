@@ -1,6 +1,7 @@
 package clients
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -80,6 +81,25 @@ type Client interface {
 
 	// GetEntry returns the current value of the named entry, or nil if missing.
 	GetEntry(name string) (*MCPEntry, error)
+
+	// LatestBackupPath returns the absolute path to the most recent
+	// mcp-local-hub backup of this client's config. Timestamped
+	// backups (.bak-mcp-local-hub-<YYYYMMDD-HHMMSS>) take precedence
+	// over the pristine -original sentinel. Returns (path, true, nil)
+	// when a backup exists, ("", false, nil) when none do, (_, _, err)
+	// on a filesystem error.
+	LatestBackupPath() (string, bool, error)
+
+	// RestoreEntryFromBackup reads the backup file at backupPath,
+	// extracts the entry named `name`, and writes that raw pre-migrate
+	// shape to the live config — overwriting any current entry with
+	// the same name. If the backup does NOT contain the entry (i.e.
+	// migrate added it from scratch and there was no prior entry),
+	// removes the current entry. Returns an error if the backup file
+	// cannot be opened or parsed. Idempotent if the live config is
+	// already in the backup's shape. Other entries in the live config
+	// are untouched.
+	RestoreEntryFromBackup(backupPath, name string) error
 }
 
 // ErrClientNotInstalled signals the client's config file does not exist on this machine.
@@ -87,6 +107,36 @@ type ErrClientNotInstalled struct{ Client string }
 
 func (e *ErrClientNotInstalled) Error() string {
 	return "client not installed: " + e.Client
+}
+
+// ErrBackupEntryAlreadyMigrated is returned by RestoreEntryFromBackup
+// when the backup file's copy of the named entry is already in
+// hub-HTTP form (for JSON/TOML clients) or hub-relay form (for
+// Antigravity). This happens when a backup was taken AFTER an earlier
+// migrate of the same client had already rewritten the entry —
+// typically the "newest" backup when multiple servers are migrated
+// sequentially from the same client. Restoring from such a backup
+// would silently re-write the hub-managed form, defeating demigrate.
+// Callers (Demigrate) must surface this as a Failed row and instruct
+// the operator to demigrate newest-first or restore manually from
+// the `-original` sentinel.
+var ErrBackupEntryAlreadyMigrated = errors.New("clients: backup copy of entry is already in hub-managed shape")
+
+// IsMcphubBinary reports whether cmd's basename matches the mcphub
+// executable name. Case-insensitive to cover Windows (mcphub.exe) and
+// POSIX (mcphub). Used by both internal/api/scan.go's Antigravity
+// relay-reject branch and the per-adapter RestoreEntryFromBackup
+// hub-relay detection to avoid false positives against user stdio
+// entries whose first argument happens to be the literal string
+// "relay". Exported so internal/api/scan.go (package api) can call it
+// via clients.IsMcphubBinary; within package clients it is called as
+// the unqualified IsMcphubBinary.
+func IsMcphubBinary(cmd string) bool {
+	if cmd == "" {
+		return false
+	}
+	base := strings.ToLower(filepath.Base(cmd))
+	return base == "mcphub" || base == "mcphub.exe"
 }
 
 // AllClients returns the map of {client-name -> Client} for every supported
@@ -232,4 +282,50 @@ func pruneOldTimestamped(livePath string, keepN int) {
 	for _, b := range timestamped[keepN:] {
 		_ = os.Remove(b.path)
 	}
+}
+
+// latestBackup returns the most recent mcp-local-hub backup path for
+// livePath. Timestamped copies (livePath + ".bak-mcp-local-hub-<ts>")
+// take precedence over the pristine "-original" sentinel; within
+// timestamped copies the lexicographically-largest name wins (timestamps
+// use the 20060102-150405 layout, which sorts correctly as a string).
+// Directories with matching names are ignored. Returns ("", false, nil)
+// when no backup files are present and (_, _, err) on filesystem error.
+// The second parameter (clientName) is currently unused but reserved for
+// future per-client log/diagnostic context.
+func latestBackup(livePath, _ string) (string, bool, error) {
+	dir := filepath.Dir(livePath)
+	prefix := filepath.Base(livePath) + ".bak-mcp-local-hub-"
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	var timestamped []string
+	var original string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		suffix := strings.TrimPrefix(name, prefix)
+		if suffix == "original" {
+			original = filepath.Join(dir, name)
+			continue
+		}
+		timestamped = append(timestamped, filepath.Join(dir, name))
+	}
+	if len(timestamped) > 0 {
+		sort.Strings(timestamped)
+		return timestamped[len(timestamped)-1], true, nil
+	}
+	if original != "" {
+		return original, true, nil
+	}
+	return "", false, nil
 }
