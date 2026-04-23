@@ -1,6 +1,10 @@
 package scheduler
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+	"os"
+)
 
 // TaskSpec describes a scheduled task the hub wants the OS to manage.
 // Scheduler backends translate this into Windows Task Scheduler, systemd user units,
@@ -92,8 +96,26 @@ type Scheduler interface {
 	ImportXML(name string, xml []byte) error
 }
 
+// e2eSchedulerEnv, when set to "none", swaps scheduler.New()'s return
+// value for a noop scheduler that records no tasks and reports empty
+// results. Used exclusively by the Playwright E2E fixture so tests
+// run against a deterministic empty state regardless of whatever
+// mcp-local-hub-* tasks the host Task Scheduler happens to have
+// installed. The prefix is a convention so accidental production
+// use is obvious both in code review and in the startup log.
+const e2eSchedulerEnv = "MCPHUB_E2E_SCHEDULER"
+
 // New returns the platform-appropriate Scheduler implementation for the current OS.
-// Defined per-OS in scheduler_<os>.go.
+// Defined per-OS in scheduler_<os>.go. If MCPHUB_E2E_SCHEDULER=none is set,
+// returns the noop scheduler instead — test-only; never set in production.
 func New() (Scheduler, error) {
+	if os.Getenv(e2eSchedulerEnv) == "none" {
+		// Log to stderr so accidental production activation is visible
+		// in daemon/hub logs the next time an operator investigates.
+		fmt.Fprintf(os.Stderr,
+			"warning: %s=none — scheduler returns empty/noop responses. This flag is for E2E tests only; never set it in production.\n",
+			e2eSchedulerEnv)
+		return &noopScheduler{}, nil
+	}
 	return newPlatformScheduler()
 }
