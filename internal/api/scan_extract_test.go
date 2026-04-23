@@ -195,10 +195,10 @@ func TestExtractManifestFromClient_Antigravity_AcceptsGenuineStdio(t *testing.T)
 }
 
 func TestExtractManifestFromClient_Antigravity_AcceptsRelayFirstArgWithNonMcphubCmd(t *testing.T) {
-	// Codex R2 finding #2: a user could have a genuine stdio server whose
+	// Regression guard: a user could have a genuine stdio server whose
 	// first argument happens to be the literal string "relay" (e.g. a
 	// custom relay tool at /usr/local/bin/mymcp). The hub-relay reject
-	// must check BOTH command (is mcphub binary) AND args[0] == "relay"
+	// must check BOTH command (is the mcphub binary) AND args[0]=="relay"
 	// — not args[0] alone.
 	tmp := t.TempDir()
 	agPath := filepath.Join(tmp, "mcp_config.json")

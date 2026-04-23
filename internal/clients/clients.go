@@ -128,10 +128,12 @@ var ErrBackupEntryAlreadyMigrated = errors.New("clients: backup copy of entry is
 // still have persisted into Antigravity client configs — matches
 // the existing isOurRelayBinary classifier at internal/api/scan.go:99
 // and the cleanup allowlist at internal/api/cleanup.go:38. Without
-// the legacy names, Task 6's Antigravity relay-reject would silently
+// the legacy names, the Antigravity relay-reject in
+// ExtractManifestFromClient (internal/api/scan.go) would silently
 // accept legacy mcp.exe relay entries as "user stdio" and happily
-// draft a manifest pointing at the legacy binary — a regression
-// relative to pre-Phase-3B-II behavior. Case-insensitive basename
+// draft a manifest pointing at the legacy binary. The adapter
+// RestoreEntryFromBackup hub-relay detection uses the same helper,
+// so one widening covers both call sites. Case-insensitive basename
 // match. Exported so internal/api/scan.go (package api) can call it
 // via clients.IsMcphubBinary; within package clients it is called
 // as the unqualified IsMcphubBinary.
