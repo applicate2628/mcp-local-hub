@@ -132,3 +132,60 @@ func (c *codexCLI) GetEntry(name string) (*MCPEntry, error) {
 	url, _ := raw["url"].(string)
 	return &MCPEntry{Name: name, URL: url}, nil
 }
+
+// LatestBackupPath delegates to the shared helper.
+func (c *codexCLI) LatestBackupPath() (string, bool, error) {
+	return latestBackup(c.path, c.Name())
+}
+
+// RestoreEntryFromBackup reads the TOML backup, extracts the
+// [mcp_servers.<name>] table (if present), and writes it over the live
+// config's corresponding entry. Other [mcp_servers.*] tables are left
+// untouched.
+//
+// Defensively refuses if the backup's copy of the named entry is
+// already in hub-HTTP form (has a `url` key and no `command` key) —
+// see ErrBackupEntryAlreadyMigrated.
+func (c *codexCLI) RestoreEntryFromBackup(backupPath, name string) error {
+	backupData, err := os.ReadFile(backupPath)
+	if err != nil {
+		return fmt.Errorf("read backup %s: %w", backupPath, err)
+	}
+	var backupMap map[string]any
+	if len(backupData) > 0 {
+		if err := toml.Unmarshal(backupData, &backupMap); err != nil {
+			return fmt.Errorf("parse backup %s: %w", backupPath, err)
+		}
+	}
+	if backupMap == nil {
+		backupMap = map[string]any{}
+	}
+	backupServers, _ := backupMap["mcp_servers"].(map[string]any)
+	liveMap, err := c.readTOML()
+	if err != nil {
+		return err
+	}
+	liveServers, _ := liveMap["mcp_servers"].(map[string]any)
+	if liveServers == nil {
+		liveServers = map[string]any{}
+	}
+	if backupServers != nil {
+		if backupEntry, present := backupServers[name]; present {
+			// Defensive: refuse hub-HTTP-shaped backup entries for
+			// Codex CLI (has `url`, no `command`).
+			if rawMap, ok := backupEntry.(map[string]any); ok {
+				if _, hasURL := rawMap["url"]; hasURL {
+					if _, hasCmd := rawMap["command"]; !hasCmd {
+						return ErrBackupEntryAlreadyMigrated
+					}
+				}
+			}
+			liveServers[name] = backupEntry
+			liveMap["mcp_servers"] = liveServers
+			return c.writeTOML(liveMap)
+		}
+	}
+	delete(liveServers, name)
+	liveMap["mcp_servers"] = liveServers
+	return c.writeTOML(liveMap)
+}
