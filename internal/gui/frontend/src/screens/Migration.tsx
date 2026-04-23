@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import { fetchOrThrow, postDismiss } from "../api";
+import { useEventSource } from "../hooks/useEventSource";
 import { groupMigrationEntries, type MigrationGroups } from "../lib/migration-grouping";
 import type { ScanEntry, ScanResult } from "../types";
 
@@ -52,6 +53,17 @@ export function MigrationScreen() {
     })();
     return () => { cancelled = true; };
   }, [scanReloadToken]);
+
+  // SSE refresh: any out-of-band change (another GUI tab migrated, CLI
+  // ran on this machine, user hand-edited .claude.json) should refresh
+  // the view. Migrate/Demigrate/Dismiss local actions already bump
+  // scanReloadToken on success; SSE covers the rest. Event names here
+  // are whatever the hub broadcaster (internal/gui/events.go) actually
+  // emits — keep the subscription narrow so unknown events do not cause
+  // pointless rescans.
+  useEventSource("/api/events", {
+    "daemon-state": () => setScanReloadToken((n) => n + 1),
+  });
 
   async function runDemigrate(serverName: string) {
     setActionBusy(serverName);
