@@ -98,6 +98,44 @@ func (realMigrator) Migrate(servers, clients []string) error {
 	return nil
 }
 
+// demigrater is the narrow interface the /api/demigrate handler needs.
+// Semantics mirror migrator: per-row failures inside the DemigrateReport
+// are aggregated into a single error so partial failures cannot silently
+// 204 and mislead the GUI into thinking the rollback succeeded.
+// realDemigrater is the production adapter; tests inject their own.
+type demigrater interface {
+	Demigrate(servers, clients []string) error
+}
+
+type realDemigrater struct{}
+
+// Demigrate delegates to api.Demigrate. ScanOpts left zero (embed-first
+// manifest path, like realMigrator). clients is forwarded into
+// DemigrateOpts.ClientsInclude; empty slice preserves the "all bindings
+// configured in the manifest" shape.
+//
+// Per-row failures are aggregated into a single error for the same
+// reason realMigrator aggregates: api.Demigrate returns nil error when
+// only per-row writes fail, and dropping that slice would let the GUI
+// clear its pending state after partial success.
+func (realDemigrater) Demigrate(servers, clients []string) error {
+	report, err := api.NewAPI().Demigrate(api.DemigrateOpts{
+		Servers:        servers,
+		ClientsInclude: clients,
+	})
+	if err != nil {
+		return err
+	}
+	if report != nil && len(report.Failed) > 0 {
+		msgs := make([]string, 0, len(report.Failed))
+		for _, f := range report.Failed {
+			msgs = append(msgs, f.Server+"/"+f.Client+": "+f.Err)
+		}
+		return fmt.Errorf("%d demigrate row(s) failed: %s", len(report.Failed), strings.Join(msgs, "; "))
+	}
+	return nil
+}
+
 // restarter is the narrow interface the /api/servers/:name/restart handler
 // needs. realRestarter is the production adapter; tests inject their own.
 type restarter interface {
@@ -167,6 +205,7 @@ type Server struct {
 	scanner          scanner
 	status           statusProvider
 	migrator         migrator
+	demigrater       demigrater
 	restart          restarter
 	logs             logsProvider
 	events           *Broadcaster
@@ -182,6 +221,7 @@ func NewServer(cfg Config) *Server {
 	s.scanner = realScanner{}
 	s.status = realStatusProvider{}
 	s.migrator = realMigrator{}
+	s.demigrater = realDemigrater{}
 	s.restart = realRestarter{}
 	s.logs = realLogs{}
 	s.events = NewBroadcaster()
@@ -190,6 +230,7 @@ func NewServer(cfg Config) *Server {
 	registerScanRoutes(s)
 	registerStatusRoutes(s)
 	registerMigrateRoutes(s)
+	registerDemigrateRoutes(s)
 	registerServerRoutes(s)
 	registerEventsRoutes(s)
 	registerLogsRoutes(s)
