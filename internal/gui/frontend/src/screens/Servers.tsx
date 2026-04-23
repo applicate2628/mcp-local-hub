@@ -107,6 +107,14 @@ export function ServersScreen() {
     }
     if (failed.length === 0) {
       setApplyMsg("Migrated. Refreshing…");
+      // Clear dirty BEFORE the reload effect completes so the Apply
+      // button stays disabled through the refresh window. Without this,
+      // setApplying(false) below re-enables Apply while the reload is
+      // still fetching /api/scan + /api/status — the user could click
+      // Apply again and resubmit the same /api/migrate POSTs. The
+      // reload effect's own setDirty(new Map()) at completion is then
+      // idempotent. (Codex CLI R2.)
+      setDirty(new Map());
       setReloadToken((x) => x + 1);
     } else {
       setApplyMsg(`Failed: ${failed.join("; ")}`);
