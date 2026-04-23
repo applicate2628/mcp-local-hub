@@ -1,0 +1,47 @@
+:root {
+  --bg: #ffffff;
+  --text: #1f2328;
+  --border: #d0d7de;
+  --success: #1a7f37;
+  --danger: #cf222e;
+  --sidebar-bg: #f6f8fa;
+}
+[data-theme="dark"] {
+  --bg: #0d1117;
+  --text: #c9d1d9;
+  --border: #30363d;
+  --success: #3fb950;
+  --danger: #f85149;
+  --sidebar-bg: #161b22;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+#app { display: grid; grid-template-columns: 220px 1fr; height: 100%; }
+.sidebar { background: var(--sidebar-bg); border-right: 1px solid var(--border); padding: 16px; }
+.brand { font-weight: 600; margin-bottom: 24px; }
+nav { display: flex; flex-direction: column; gap: 4px; }
+nav a { color: var(--text); text-decoration: none; padding: 8px 12px; border-radius: 6px; }
+nav a:hover { background: var(--border); }
+nav a.active { background: var(--border); font-weight: 500; }
+main { padding: 24px; overflow: auto; }
+
+/* --- Servers matrix --- */
+.servers-matrix { border-collapse: collapse; width: 100%; max-width: 960px; }
+.servers-matrix th, .servers-matrix td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
+.servers-matrix thead th { background: var(--sidebar-bg); font-weight: 500; }
+.servers-matrix input[type="checkbox"] { margin: 0; }
+.error { color: var(--danger); }
+
+/* --- Dashboard cards --- */
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-top: 16px; }
+.card { border: 1px solid var(--border); border-radius: 8px; padding: 16px; background: var(--bg); }
+.card-title { font-weight: 600; margin-bottom: 12px; }
+.card-kv { display: flex; justify-content: space-between; padding: 4px 0; font-size: 14px; }
+.card.ok .state { color: var(--success); }
+.card.down .state { color: var(--danger); }
+.card-actions { margin-top: 12px; }
+.card-actions button { width: 100%; padding: 6px; border: 1px solid var(--border); background: var(--sidebar-bg); color: var(--text); border-radius: 4px; cursor: pointer; }
+
+/* --- Logs screen --- */
+#logs-controls { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
+#logs-body { background: var(--sidebar-bg); border: 1px solid var(--border); padding: 12px; overflow: auto; max-height: 70vh; font-family: monospace; font-size: 12px; white-space: pre-wrap; }
