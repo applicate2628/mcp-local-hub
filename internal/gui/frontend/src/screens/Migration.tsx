@@ -1,5 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
-import { fetchOrThrow } from "../api";
+import { fetchOrThrow, postDismiss } from "../api";
 import { groupMigrationEntries, type MigrationGroups } from "../lib/migration-grouping";
 import type { ScanEntry, ScanResult } from "../types";
 
@@ -26,6 +26,8 @@ export function MigrationScreen() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState<string | null>(null); // server name being demigrated
   const [scanReloadToken, setScanReloadToken] = useState(0);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [migrateBusy, setMigrateBusy] = useState<boolean>(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -39,6 +41,10 @@ export function MigrationScreen() {
           setScan(s);
           setDismissedUnknown(new Set(d.unknown ?? []));
           setError(null);
+          const canMigrateNames = (s.entries ?? [])
+            .filter((e) => e.status === "can-migrate")
+            .map((e) => e.name);
+          setSelected(new Set(canMigrateNames));
         }
       } catch (err) {
         if (!cancelled) setError((err as Error).message);
@@ -65,6 +71,47 @@ export function MigrationScreen() {
       setActionError(`Demigrate ${serverName}: ${(err as Error).message}`);
     } finally {
       setActionBusy(null);
+    }
+  }
+
+  async function runMigrateSelected() {
+    if (selected.size === 0) return;
+    setMigrateBusy(true);
+    setActionError(null);
+    try {
+      const resp = await fetch("/api/migrate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ servers: [...selected] }),
+      });
+      if (!resp.ok && resp.status !== 204) {
+        const body = await resp.json().catch(() => ({ error: resp.statusText }));
+        throw new Error(body?.error ?? `HTTP ${resp.status}`);
+      }
+      setScanReloadToken((n) => n + 1);
+    } catch (err) {
+      setActionError(`Migrate selected: ${(err as Error).message}`);
+    } finally {
+      setMigrateBusy(false);
+    }
+  }
+
+  function toggleSelected(name: string, next: boolean) {
+    setSelected((prev) => {
+      const s = new Set(prev);
+      if (next) s.add(name);
+      else s.delete(name);
+      return s;
+    });
+  }
+
+  async function runDismiss(entry: ScanEntry) {
+    setActionError(null);
+    try {
+      await postDismiss(entry.name);
+      setScanReloadToken((n) => n + 1);
+    } catch (err) {
+      setActionError(`Dismiss ${entry.name}: ${(err as Error).message}`);
     }
   }
 
@@ -112,17 +159,16 @@ export function MigrationScreen() {
             actionBusy={actionBusy}
             onDemigrate={runDemigrate}
           />
-          <GroupSection
-            title="Can migrate"
-            tone="can-migrate"
+          <CanMigrateGroup
             entries={groups.canMigrate}
-            emptyLabel="No stdio entries with matching manifests."
+            selected={selected}
+            onToggle={toggleSelected}
+            onMigrateSelected={runMigrateSelected}
+            migrateBusy={migrateBusy}
           />
-          <GroupSection
-            title="Unknown"
-            tone="unknown"
+          <UnknownGroup
             entries={groups.unknown}
-            emptyLabel="No unknown stdio entries."
+            onDismiss={runDismiss}
           />
           <GroupSection
             title="Per-session"
@@ -171,6 +217,98 @@ function ViaHubGroup(props: {
               onClick={() => props.onDemigrate(e.name)}
             >
               {props.actionBusy === e.name ? "Demigrating…" : "Demigrate"}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function CanMigrateGroup(props: {
+  entries: ScanEntry[];
+  selected: Set<string>;
+  onToggle: (name: string, next: boolean) => void;
+  onMigrateSelected: () => void;
+  migrateBusy: boolean;
+}) {
+  if (props.entries.length === 0) {
+    return (
+      <section class="group group-can-migrate" data-group="can-migrate">
+        <h2>Can migrate</h2>
+        <p class="empty">No stdio entries with matching manifests.</p>
+      </section>
+    );
+  }
+  const selectedInGroup = props.entries.filter((e) => props.selected.has(e.name)).length;
+  return (
+    <section class="group group-can-migrate" data-group="can-migrate">
+      <h2>Can migrate</h2>
+      <ul class="group-rows">
+        {props.entries.map((e) => (
+          <li key={e.name} data-server={e.name}>
+            <label>
+              <input
+                type="checkbox"
+                data-action="select"
+                checked={props.selected.has(e.name)}
+                onChange={(ev) =>
+                  props.onToggle(e.name, (ev.currentTarget as HTMLInputElement).checked)
+                }
+              />
+              <span class="server-name">{e.name}</span>
+            </label>
+          </li>
+        ))}
+      </ul>
+      <button
+        type="button"
+        class="migrate-selected"
+        data-action="migrate-selected"
+        disabled={selectedInGroup === 0 || props.migrateBusy}
+        onClick={props.onMigrateSelected}
+      >
+        {props.migrateBusy ? "Migrating…" : `Migrate selected (${selectedInGroup})`}
+      </button>
+    </section>
+  );
+}
+
+function UnknownGroup(props: {
+  entries: ScanEntry[];
+  onDismiss: (entry: ScanEntry) => void;
+}) {
+  if (props.entries.length === 0) {
+    return (
+      <section class="group group-unknown" data-group="unknown">
+        <h2>Unknown</h2>
+        <p class="empty">No unknown stdio entries.</p>
+      </section>
+    );
+  }
+  return (
+    <section class="group group-unknown" data-group="unknown">
+      <h2>Unknown</h2>
+      <ul class="group-rows">
+        {props.entries.map((e) => (
+          <li key={e.name} data-server={e.name}>
+            <span class="server-name">{e.name}</span>
+            <button
+              type="button"
+              class="create-manifest"
+              data-action="create-manifest"
+              disabled
+              title="Available after A2 (Add/Edit manifest) ships"
+            >
+              Create manifest
+            </button>
+            <button
+              type="button"
+              class="dismiss"
+              data-action="dismiss"
+              onClick={() => props.onDismiss(e)}
+            >
+              Dismiss
             </button>
           </li>
         ))}
