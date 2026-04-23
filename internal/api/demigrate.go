@@ -110,9 +110,10 @@ func (a *API) Demigrate(opts DemigrateOpts) (*DemigrateReport, error) {
 			if err := adapter.RestoreEntryFromBackup(backupPath, server); err != nil {
 				errMsg := err.Error()
 				if errors.Is(err, clients.ErrBackupEntryAlreadyMigrated) {
+					sentinelPath := adapter.ConfigPath() + ".bak-mcp-local-hub-original"
 					errMsg = fmt.Sprintf(
-						"latest backup holds %q already in hub-managed form — Demigrate can only auto-restore the most-recently-migrated server per client. Restore manually from the -original sentinel (%s).",
-						server, backupPath)
+						"latest backup %s holds %q already in hub-managed form — Demigrate can only auto-restore the most-recently-migrated server per client. Restore manually from the -original sentinel at %s.",
+						backupPath, server, sentinelPath)
 				}
 				report.Failed = append(report.Failed, FailedMigration{
 					Server: server, Client: binding.Client, Err: errMsg,

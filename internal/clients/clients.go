@@ -113,13 +113,16 @@ func (e *ErrClientNotInstalled) Error() string {
 // when the backup file's copy of the named entry is already in
 // hub-HTTP form (for JSON/TOML clients) or hub-relay form (for
 // Antigravity). This happens when a backup was taken AFTER an earlier
-// migrate of the same client had already rewritten the entry —
-// typically the "newest" backup when multiple servers are migrated
-// sequentially from the same client. Restoring from such a backup
-// would silently re-write the hub-managed form, defeating demigrate.
-// Callers (Demigrate) must surface this as a Failed row and instruct
-// the operator to demigrate newest-first or restore manually from
-// the `-original` sentinel.
+// migrate of the same client had already rewritten the entry — the
+// common case being a second migrate of a different server which
+// snapshots the live file while the first server is already in hub
+// form. Restoring from such a backup would silently re-write the
+// hub-managed form, defeating demigrate. Callers (Demigrate) must
+// surface this as a Failed row and instruct the operator to restore
+// manually from the `-original` sentinel (the one-shot pre-hub
+// snapshot; never overwritten). Demigrate itself can only auto-
+// restore the most-recently-migrated server per client; earlier
+// servers in the same client require the sentinel.
 var ErrBackupEntryAlreadyMigrated = errors.New("clients: backup copy of entry is already in hub-managed shape")
 
 // IsMcphubBinary reports whether cmd's basename matches our CLI
