@@ -170,12 +170,7 @@ export function MigrationScreen() {
             entries={groups.unknown}
             onDismiss={runDismiss}
           />
-          <GroupSection
-            title="Per-session"
-            tone="per-session"
-            entries={groups.perSession}
-            emptyLabel="No per-session entries."
-          />
+          <PerSessionGroup entries={groups.perSession} />
         </>
       )}
       <button
@@ -317,32 +312,30 @@ function UnknownGroup(props: {
   );
 }
 
-// GroupSection is a minimal per-group row-list renderer shared by the
-// scaffolding. Task 6 replaces the Via-hub call with ViaHubGroup
-// (Demigrate per row); Task 7 replaces Can-migrate / Unknown with
-// CanMigrateGroup (pre-checked + Migrate-selected) and UnknownGroup
-// (disabled Create-manifest + Dismiss); Task 8 replaces Per-session
-// with PerSessionGroup and removes this generic renderer.
-function GroupSection(props: {
-  title: string;
-  tone: "via-hub" | "can-migrate" | "unknown" | "per-session";
-  entries: Array<{ name: string }>;
-  emptyLabel: string;
-}) {
+function PerSessionGroup(props: { entries: ScanEntry[] }) {
+  if (props.entries.length === 0) {
+    return (
+      <section class="group group-per-session" data-group="per-session">
+        <h2>Per-session</h2>
+        <p class="empty">No per-session entries.</p>
+      </section>
+    );
+  }
   return (
-    <section class={`group group-${props.tone}`} data-group={props.tone}>
-      <h2>{props.title}</h2>
-      {props.entries.length === 0 ? (
-        <p class="empty">{props.emptyLabel}</p>
-      ) : (
-        <ul class="group-rows">
-          {props.entries.map((e) => (
-            <li key={e.name} data-server={e.name}>
-              <span class="server-name">{e.name}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+    <section class="group group-per-session" data-group="per-session">
+      <h2>Per-session</h2>
+      <p class="info">
+        These entries are shareable per-session only (e.g. running IDE
+        integrations). They cannot be migrated into the hub and do not
+        support Demigrate.
+      </p>
+      <ul class="group-rows">
+        {props.entries.map((e) => (
+          <li key={e.name} data-server={e.name}>
+            <span class="server-name">{e.name}</span>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
