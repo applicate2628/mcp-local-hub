@@ -46,6 +46,13 @@ export function DashboardScreen() {
     const body = JSON.parse(ev.data) as DaemonStatus & { state: string };
     if (body.is_maintenance) return;
     const k = keyFor(body);
+    // A valid delta means the backend is reachable — clear any stale
+    // bootstrap error so the early-return at render time falls through
+    // and cards render from live state. Without this the Dashboard
+    // stays locked on "Failed to load status" forever after a transient
+    // startup 500, even though /api/events is streaming fine.
+    // (GitHub Codex PR #1 R1.)
+    setError(null);
     setState((prev) => {
       if (body.state === "Gone") {
         const next = { ...prev };
