@@ -114,12 +114,13 @@ jobs:
 
 ### What's covered
 
-- Shell: sidebar, three nav links, hash routing, active-link highlight.
+- Shell: sidebar, four nav links, hash routing, active-link highlight.
 - Servers: matrix columns (Server + 4 clients + Port + State), empty-body state on clean tmpHome, Apply disabled with no dirty cells.
+- Migration: h1, empty-state copy, group sections hidden on empty home, hashchange swap from Servers, full POST /api/dismiss → on-disk JSON → GET /api/dismissed round-trip, /api/scan-unfiltered regression guard (seed + dismiss + re-scan).
 - Dashboard: empty-cards state on fresh home, `/api/events` SSE connection opens on mount.
 - Logs: picker + controls render, notice text on no-daemons state, controls disabled when no eligible entries.
 
-11 smoke tests total (3 shell + 3 servers + 2 dashboard + 3 logs), ~8s
+17 smoke tests total (3 shell + 3 servers + 6 migration + 2 dashboard + 3 logs), ~10s
 wall-time on a warm machine.
 
 ### What's NOT covered (future)
