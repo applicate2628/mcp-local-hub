@@ -2,6 +2,7 @@ package clients
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -101,5 +102,87 @@ func TestGeminiCLI_RemoveEntry_Inherited(t *testing.T) {
 	}
 	if e, _ := g.GetEntry("other"); e == nil {
 		t.Error("other entry should still be present")
+	}
+}
+
+func TestGeminiCLI_RestoreEntryFromBackup_RestoresStdio(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	// Live is post-migrate hub-HTTP.
+	if err := os.WriteFile(path, []byte(
+		`{"mcpServers":{"memory":{"url":"http://localhost:9001/mcp","type":"http","timeout":10000}}}`),
+		0600); err != nil {
+		t.Fatal(err)
+	}
+	backup := path + ".bak-mcp-local-hub-20260101-000000"
+	if err := os.WriteFile(backup, []byte(
+		`{"mcpServers":{"memory":{"command":"npx","args":["-y","mem"]}}}`),
+		0600); err != nil {
+		t.Fatal(err)
+	}
+	g := &geminiCLI{jsonMCPClient: &jsonMCPClient{path: path, clientName: "gemini-cli", urlField: "url"}}
+	if err := g.RestoreEntryFromBackup(backup, "memory"); err != nil {
+		t.Fatalf("RestoreEntryFromBackup: %v", err)
+	}
+	live, _ := os.ReadFile(path)
+	var m map[string]any
+	if err := json.Unmarshal(live, &m); err != nil {
+		t.Fatal(err)
+	}
+	entry := m["mcpServers"].(map[string]any)["memory"].(map[string]any)
+	if entry["command"] != "npx" {
+		t.Errorf("command=%v, want npx", entry["command"])
+	}
+	if _, hasURL := entry["url"]; hasURL {
+		t.Errorf("hub-http url should be gone, got %v", entry)
+	}
+}
+
+func TestGeminiCLI_RestoreEntryFromBackup_RemovesOnAbsent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	if err := os.WriteFile(path, []byte(
+		`{"mcpServers":{"newserver":{"url":"x","type":"http"}}}`),
+		0600); err != nil {
+		t.Fatal(err)
+	}
+	backup := path + ".bak-mcp-local-hub-20260101-000000"
+	if err := os.WriteFile(backup, []byte(`{"mcpServers":{}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	g := &geminiCLI{jsonMCPClient: &jsonMCPClient{path: path, clientName: "gemini-cli", urlField: "url"}}
+	if err := g.RestoreEntryFromBackup(backup, "newserver"); err != nil {
+		t.Fatalf("RestoreEntryFromBackup: %v", err)
+	}
+	live, _ := os.ReadFile(path)
+	var m map[string]any
+	if err := json.Unmarshal(live, &m); err != nil {
+		t.Fatal(err)
+	}
+	servers := m["mcpServers"].(map[string]any)
+	if _, present := servers["newserver"]; present {
+		t.Error("newserver should have been removed")
+	}
+}
+
+func TestGeminiCLI_RestoreEntryFromBackup_RefusesHubHTTPBackupEntry(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	if err := os.WriteFile(path, []byte(
+		`{"mcpServers":{"memory":{"url":"http://localhost:9200/mcp","type":"http"}}}`),
+		0600); err != nil {
+		t.Fatal(err)
+	}
+	// Backup has memory ALREADY in hub-HTTP form.
+	backup := path + ".bak-mcp-local-hub-20260101-000000"
+	if err := os.WriteFile(backup, []byte(
+		`{"mcpServers":{"memory":{"url":"http://localhost:9200/mcp","type":"http"}}}`),
+		0600); err != nil {
+		t.Fatal(err)
+	}
+	g := &geminiCLI{jsonMCPClient: &jsonMCPClient{path: path, clientName: "gemini-cli", urlField: "url"}}
+	err := g.RestoreEntryFromBackup(backup, "memory")
+	if !errors.Is(err, ErrBackupEntryAlreadyMigrated) {
+		t.Fatalf("expected ErrBackupEntryAlreadyMigrated, got %v", err)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
 
 	toml "github.com/pelletier/go-toml/v2"
@@ -95,10 +96,12 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 // isOurRelayBinary returns true when the given path points at our CLI
 // binary — either the current name (mcphub.exe) or the legacy name
 // (mcp.exe) that early installations may still have in client configs.
-// Matches by basename, case-insensitive.
+// Delegates to clients.IsMcphubBinary so the 4-name allowlist lives in
+// exactly one place; this wrapper is kept only because the classifier
+// below reads better when paired with a local name. If a future client
+// ever persists a different binary name, update only IsMcphubBinary.
 func isOurRelayBinary(cmd string) bool {
-	base := strings.ToLower(filepath.Base(cmd))
-	return base == "mcphub.exe" || base == "mcp.exe" || base == "mcphub" || base == "mcp"
+	return clients.IsMcphubBinary(cmd)
 }
 
 // genericInterpreters are command names that match far too many unrelated
@@ -443,6 +446,74 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 			return "", err
 		}
 		raw = cfg.MCPServers[serverName]
+
+	case "codex-cli":
+		if opts.CodexConfigPath == "" {
+			return "", fmt.Errorf("CodexConfigPath empty")
+		}
+		data, err := os.ReadFile(opts.CodexConfigPath)
+		if err != nil {
+			return "", err
+		}
+		var root map[string]any
+		if err := toml.Unmarshal(data, &root); err != nil {
+			return "", err
+		}
+		servers, _ := root["mcp_servers"].(map[string]any)
+		if servers != nil {
+			raw, _ = servers[serverName].(map[string]any)
+		}
+
+	case "gemini-cli":
+		if opts.GeminiConfigPath == "" {
+			return "", fmt.Errorf("GeminiConfigPath empty")
+		}
+		data, err := os.ReadFile(opts.GeminiConfigPath)
+		if err != nil {
+			return "", err
+		}
+		var cfg struct {
+			MCPServers map[string]map[string]any `json:"mcpServers"`
+		}
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return "", err
+		}
+		raw = cfg.MCPServers[serverName]
+
+	case "antigravity":
+		if opts.AntigravityConfigPath == "" {
+			return "", fmt.Errorf("AntigravityConfigPath empty")
+		}
+		data, err := os.ReadFile(opts.AntigravityConfigPath)
+		if err != nil {
+			return "", err
+		}
+		var cfg struct {
+			MCPServers map[string]map[string]any `json:"mcpServers"`
+		}
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return "", err
+		}
+		raw = cfg.MCPServers[serverName]
+		// Antigravity entries written by mcphub migrate use command=mcphub,
+		// args[0]="relay". Extracting a manifest from THAT would loop:
+		// manifest → install → relay entry → manifest → ... Reject narrowly:
+		// command must be the mcphub binary AND args[0] must equal "relay".
+		// A user's genuine stdio server whose first arg happens to be "relay"
+		// but whose command is not mcphub passes through unchanged. Uses the
+		// shared clients.IsMcphubBinary helper (also used by RestoreEntryFromBackup
+		// for hub-relay detection in adapter defensive checks).
+		if raw != nil {
+			cmd, _ := raw["command"].(string)
+			if clients.IsMcphubBinary(cmd) {
+				if args, ok := raw["args"].([]any); ok && len(args) > 0 {
+					if first, ok := args[0].(string); ok && first == "relay" {
+						return "", fmt.Errorf("entry %q is a mcphub-managed relay stdio (command is mcphub binary + args[0]==\"relay\") — not user-configured stdio, cannot extract a manifest from it", serverName)
+					}
+				}
+			}
+		}
+
 	default:
 		return "", fmt.Errorf("extract not yet supported for client %q (extend here when needed)", client)
 	}
@@ -451,6 +522,17 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 	}
 
 	cmd, _ := raw["command"].(string)
+	// Reject HTTP-only / hub-managed entries early. Extract is for stdio
+	// servers; an entry that has no `command` cannot produce a valid
+	// manifest (renderDraftManifestYAML would emit an empty `command:`
+	// line and ServerManifest.Validate would then fail with a less
+	// actionable error). The most common case is a user trying to
+	// extract from a server they already migrated — the entry is now
+	// hub-HTTP (Claude/Codex/Gemini) or hub-relay with empty-command
+	// downgrades — so we guide them toward demigrate instead.
+	if cmd == "" {
+		return "", fmt.Errorf("server %q in client %q has no `command` field — it is an HTTP-only or hub-managed entry, not user-configured stdio (run `mcphub demigrate %s` to restore the pre-migrate shape first if this server was migrated)", serverName, client, serverName)
+	}
 	var args []string
 	if arr, ok := raw["args"].([]any); ok {
 		for _, v := range arr {

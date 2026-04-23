@@ -142,3 +142,90 @@ func (c *claudeCode) GetEntry(name string) (*MCPEntry, error) {
 	url, _ := raw["url"].(string)
 	return &MCPEntry{Name: name, URL: url}, nil
 }
+
+// LatestBackupPath delegates to the shared helper.
+func (c *claudeCode) LatestBackupPath() (string, bool, error) {
+	return latestBackup(c.path, c.Name())
+}
+
+// RestoreEntryFromBackup reads the raw per-name entry from the backup
+// at backupPath and writes it (or removes the current live entry, if
+// the backup had none) into the live config. Other entries in the
+// live config are untouched.
+//
+// Defensively refuses if the backup's copy of the named entry is
+// already in hub-HTTP form (has a `url` field but no `command`). That
+// situation arises when the backup was taken AFTER an earlier migrate
+// of the same client already rewrote this entry — restoring would
+// silently re-apply hub-HTTP data. See ErrBackupEntryAlreadyMigrated.
+func (c *claudeCode) RestoreEntryFromBackup(backupPath, name string) error {
+	backupData, err := os.ReadFile(backupPath)
+	if err != nil {
+		return fmt.Errorf("read backup %s: %w", backupPath, err)
+	}
+	var backupMap map[string]any
+	if len(backupData) == 0 {
+		backupMap = map[string]any{}
+	} else if err := json.Unmarshal(backupData, &backupMap); err != nil {
+		return fmt.Errorf("parse backup %s: %w", backupPath, err)
+	}
+	backupServers, _ := backupMap["mcpServers"].(map[string]any)
+	liveMap, err := c.readJSON()
+	if err != nil {
+		return err
+	}
+	liveServers, _ := liveMap["mcpServers"].(map[string]any)
+	if liveServers == nil {
+		liveServers = map[string]any{}
+	}
+	if backupServers != nil {
+		if backupEntry, present := backupServers[name]; present {
+			// Defensive: refuse hub-HTTP-shaped backup entries. The
+			// canonical hub-HTTP shape in .claude.json has a loopback
+			// `url` field (http://localhost:<port>/... or 127.0.0.1)
+			// and no `command` field. User-configured remote HTTP MCP
+			// servers (url pointing at a non-loopback host) pass
+			// through to the normal restore path.
+			if rawMap, ok := backupEntry.(map[string]any); ok {
+				if urlStr, _ := rawMap["url"].(string); isHubHTTPURL(urlStr) {
+					if _, hasCmd := rawMap["command"]; !hasCmd {
+						return ErrBackupEntryAlreadyMigrated
+					}
+				}
+			}
+			liveServers[name] = backupEntry
+			liveMap["mcpServers"] = liveServers
+			return c.writeJSON(liveMap)
+		}
+	}
+	delete(liveServers, name)
+	liveMap["mcpServers"] = liveServers
+	return c.writeJSON(liveMap)
+}
+
+// BackupContainsEntry reports whether the backup file at backupPath
+// has an mcpServers[name] entry.
+func (c *claudeCode) BackupContainsEntry(backupPath, name string) (bool, error) {
+	data, err := os.ReadFile(backupPath)
+	if err != nil {
+		return false, fmt.Errorf("read backup %s: %w", backupPath, err)
+	}
+	if len(data) == 0 {
+		return false, nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return false, fmt.Errorf("parse backup %s: %w", backupPath, err)
+	}
+	servers, _ := m["mcpServers"].(map[string]any)
+	if servers == nil {
+		return false, nil
+	}
+	// Require the entry to be an object. A scalar (string, number,
+	// bool) or null passes the "key present" check but would
+	// corrupt the live config if fed back through
+	// RestoreEntryFromBackup — treat as absent so sentinel fallback
+	// refuses rather than silently writes malformed data.
+	entry, ok := servers[name].(map[string]any)
+	return ok && entry != nil, nil
+}

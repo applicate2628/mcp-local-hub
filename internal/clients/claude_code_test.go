@@ -2,6 +2,7 @@ package clients
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -94,5 +95,211 @@ func TestClaudeCode_BackupRestore(t *testing.T) {
 	got, _ := os.ReadFile(path)
 	if string(got) != original {
 		t.Errorf("after restore = %q, want %q", got, original)
+	}
+}
+
+func TestClaudeCode_LatestBackupPath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".claude.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	backup := path + ".bak-mcp-local-hub-20260101-000000"
+	if err := os.WriteFile(backup, []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c := &claudeCode{path: path}
+	got, ok, err := c.LatestBackupPath()
+	if err != nil || !ok || got != backup {
+		t.Errorf("LatestBackupPath = %q ok=%v err=%v", got, ok, err)
+	}
+}
+
+func TestClaudeCode_RestoreEntryFromBackup_RestoresStdioShape(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".claude.json")
+	// Live config is in post-migrate hub-HTTP state.
+	if err := os.WriteFile(path, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9123/mcp"}}}`),
+		0600); err != nil {
+		t.Fatal(err)
+	}
+	// Backup has pre-migrate stdio.
+	backup := path + ".bak-mcp-local-hub-20260101-000000"
+	if err := os.WriteFile(backup, []byte(
+		`{"mcpServers":{"memory":{"type":"stdio","command":"npx","args":["-y","mem"]}}}`),
+		0600); err != nil {
+		t.Fatal(err)
+	}
+	c := &claudeCode{path: path}
+	if err := c.RestoreEntryFromBackup(backup, "memory"); err != nil {
+		t.Fatalf("RestoreEntryFromBackup: %v", err)
+	}
+	live, _ := os.ReadFile(path)
+	var m map[string]any
+	if err := json.Unmarshal(live, &m); err != nil {
+		t.Fatal(err)
+	}
+	entry := m["mcpServers"].(map[string]any)["memory"].(map[string]any)
+	if entry["type"] != "stdio" {
+		t.Errorf("type=%v, want stdio", entry["type"])
+	}
+	if entry["command"] != "npx" {
+		t.Errorf("command=%v, want npx", entry["command"])
+	}
+}
+
+func TestClaudeCode_RestoreEntryFromBackup_RemovesEntryIfBackupLacksIt(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".claude.json")
+	// Live has two entries; only `memory` exists in backup.
+	if err := os.WriteFile(path, []byte(
+		`{"mcpServers":{"newserver":{"type":"http","url":"x"},"memory":{"type":"http","url":"y"}}}`),
+		0600); err != nil {
+		t.Fatal(err)
+	}
+	backup := path + ".bak-mcp-local-hub-20260101-000000"
+	if err := os.WriteFile(backup, []byte(
+		`{"mcpServers":{"memory":{"type":"stdio","command":"npx","args":["-y","mem"]}}}`),
+		0600); err != nil {
+		t.Fatal(err)
+	}
+	c := &claudeCode{path: path}
+	if err := c.RestoreEntryFromBackup(backup, "newserver"); err != nil {
+		t.Fatalf("RestoreEntryFromBackup: %v", err)
+	}
+	live, _ := os.ReadFile(path)
+	var m map[string]any
+	if err := json.Unmarshal(live, &m); err != nil {
+		t.Fatal(err)
+	}
+	servers := m["mcpServers"].(map[string]any)
+	if _, present := servers["newserver"]; present {
+		t.Error("newserver should have been removed — backup predates it")
+	}
+	// memory must survive because the call targeted only `newserver`.
+	if _, present := servers["memory"]; !present {
+		t.Error("memory was touched but should be untouched — call targeted newserver")
+	}
+}
+
+func TestClaudeCode_RestoreEntryFromBackup_PreservesUnrelatedEntries(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".claude.json")
+	// Live has `memory` (migrated) + `other` (user added since migrate).
+	if err := os.WriteFile(path, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"y"},"other":{"type":"stdio","command":"echo"}}}`),
+		0600); err != nil {
+		t.Fatal(err)
+	}
+	backup := path + ".bak-mcp-local-hub-20260101-000000"
+	// Backup predates `other`, has stdio `memory`.
+	if err := os.WriteFile(backup, []byte(
+		`{"mcpServers":{"memory":{"type":"stdio","command":"npx","args":["-y","mem"]}}}`),
+		0600); err != nil {
+		t.Fatal(err)
+	}
+	c := &claudeCode{path: path}
+	if err := c.RestoreEntryFromBackup(backup, "memory"); err != nil {
+		t.Fatalf("RestoreEntryFromBackup: %v", err)
+	}
+	live, _ := os.ReadFile(path)
+	var m map[string]any
+	if err := json.Unmarshal(live, &m); err != nil {
+		t.Fatal(err)
+	}
+	servers := m["mcpServers"].(map[string]any)
+	// memory is rolled back to stdio.
+	memEntry := servers["memory"].(map[string]any)
+	if memEntry["type"] != "stdio" {
+		t.Errorf("memory.type=%v, want stdio", memEntry["type"])
+	}
+	// `other` entry (added after migrate, not in backup) is preserved.
+	if _, present := servers["other"]; !present {
+		t.Error("unrelated 'other' entry lost — per-entry rollback must preserve it")
+	}
+}
+
+func TestClaudeCode_RestoreEntryFromBackup_AcceptsRemoteHTTPBackup(t *testing.T) {
+	// User has a legit remote HTTP MCP server (non-loopback URL). The
+	// defensive "already migrated" check must ONLY fire on loopback
+	// urls (hub-managed shape); remote urls pass through to the
+	// normal restore path.
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".claude.json")
+	if err := os.WriteFile(path, []byte(`{"mcpServers":{}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	backup := path + ".bak-mcp-local-hub-20260101-000000"
+	if err := os.WriteFile(backup, []byte(
+		`{"mcpServers":{"remote":{"type":"http","url":"https://api.example.com/mcp"}}}`),
+		0600); err != nil {
+		t.Fatal(err)
+	}
+	c := &claudeCode{path: path}
+	if err := c.RestoreEntryFromBackup(backup, "remote"); err != nil {
+		t.Fatalf("RestoreEntryFromBackup: %v (remote HTTP url must not be rejected as hub-managed)", err)
+	}
+	live, _ := os.ReadFile(path)
+	var m map[string]any
+	if err := json.Unmarshal(live, &m); err != nil {
+		t.Fatal(err)
+	}
+	entry := m["mcpServers"].(map[string]any)["remote"].(map[string]any)
+	if entry["url"] != "https://api.example.com/mcp" {
+		t.Errorf("url=%v, want https://api.example.com/mcp", entry["url"])
+	}
+}
+
+func TestClaudeCode_BackupContainsEntry_RejectsNonObjectValues(t *testing.T) {
+	// Malformed backup where mcpServers[name] is a scalar (string, null,
+	// etc.) — BackupContainsEntry must report absent so Demigrate's
+	// sentinel fallback refuses rather than calling RestoreEntryFromBackup
+	// which would then write the scalar into the live config.
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".claude.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	badBackup := path + ".bak-mcp-local-hub-20260101-000000"
+	if err := os.WriteFile(badBackup, []byte(
+		`{"mcpServers":{"memory":"bad","other":null}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c := &claudeCode{path: path}
+	for _, name := range []string{"memory", "other"} {
+		has, err := c.BackupContainsEntry(badBackup, name)
+		if err != nil {
+			t.Errorf("%s: unexpected err: %v", name, err)
+		}
+		if has {
+			t.Errorf("%s: expected BackupContainsEntry=false for non-object value; would corrupt live if fed to RestoreEntryFromBackup", name)
+		}
+	}
+}
+
+func TestClaudeCode_RestoreEntryFromBackup_RefusesHubHTTPBackupEntry(t *testing.T) {
+	// Backup was taken AFTER an earlier migrate already rewrote this
+	// entry to hub-HTTP form (typical when two servers are migrated
+	// sequentially from the same client). Restoring from this backup
+	// would silently re-write the hub-HTTP entry. Defensive refuse.
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".claude.json")
+	if err := os.WriteFile(path, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`),
+		0600); err != nil {
+		t.Fatal(err)
+	}
+	// Backup has memory ALREADY migrated — this is the bug we must catch.
+	backup := path + ".bak-mcp-local-hub-20260101-000000"
+	if err := os.WriteFile(backup, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`),
+		0600); err != nil {
+		t.Fatal(err)
+	}
+	c := &claudeCode{path: path}
+	err := c.RestoreEntryFromBackup(backup, "memory")
+	if !errors.Is(err, ErrBackupEntryAlreadyMigrated) {
+		t.Fatalf("expected ErrBackupEntryAlreadyMigrated, got %v", err)
 	}
 }

@@ -128,3 +128,103 @@ func (j *jsonMCPClient) GetEntry(name string) (*MCPEntry, error) {
 	url, _ := raw[j.urlField].(string)
 	return &MCPEntry{Name: name, URL: url}, nil
 }
+
+// LatestBackupPath delegates to the shared helper.
+func (j *jsonMCPClient) LatestBackupPath() (string, bool, error) {
+	return latestBackup(j.path, j.clientName)
+}
+
+// RestoreEntryFromBackup reads the JSON backup, extracts mcpServers[name]
+// (if present), and writes it (or removes the current live entry) to
+// the live config. Other entries in mcpServers are untouched.
+// Inherited by geminiCLI and antigravityClient via struct embedding.
+//
+// Defensively refuses if the backup's copy of the named entry is
+// already in hub-managed shape. Shape detection is adapter-specific:
+//   - For Gemini CLI (urlField = "url"): entry has `url` and no `command`.
+//   - For Antigravity (urlField = "command"): entry's `command` is the
+//     mcphub binary AND args[0] == "relay".
+//
+// Both paths return ErrBackupEntryAlreadyMigrated so Demigrate can
+// surface a clear operator-facing failure row.
+func (j *jsonMCPClient) RestoreEntryFromBackup(backupPath, name string) error {
+	backupData, err := os.ReadFile(backupPath)
+	if err != nil {
+		return fmt.Errorf("read backup %s: %w", backupPath, err)
+	}
+	var backupMap map[string]any
+	if len(backupData) == 0 {
+		backupMap = map[string]any{}
+	} else if err := json.Unmarshal(backupData, &backupMap); err != nil {
+		return fmt.Errorf("parse backup %s: %w", backupPath, err)
+	}
+	backupServers, _ := backupMap["mcpServers"].(map[string]any)
+	liveMap, err := j.readJSON()
+	if err != nil {
+		return err
+	}
+	liveServers, _ := liveMap["mcpServers"].(map[string]any)
+	if liveServers == nil {
+		liveServers = map[string]any{}
+	}
+	if backupServers != nil {
+		if backupEntry, present := backupServers[name]; present {
+			if rawMap, ok := backupEntry.(map[string]any); ok {
+				if j.urlField == "url" {
+					// Gemini CLI hub-HTTP shape: loopback `url`
+					// (http://localhost:<port>/) present, `command`
+					// absent. User-configured remote HTTP entries
+					// pass through.
+					if urlStr, _ := rawMap["url"].(string); isHubHTTPURL(urlStr) {
+						if _, hasCmd := rawMap["command"]; !hasCmd {
+							return ErrBackupEntryAlreadyMigrated
+						}
+					}
+				} else {
+					// Antigravity hub-relay shape: command is mcphub,
+					// args[0] == "relay".
+					if cmd, _ := rawMap["command"].(string); IsMcphubBinary(cmd) {
+						if args, ok := rawMap["args"].([]any); ok && len(args) > 0 {
+							if first, _ := args[0].(string); first == "relay" {
+								return ErrBackupEntryAlreadyMigrated
+							}
+						}
+					}
+				}
+			}
+			liveServers[name] = backupEntry
+			liveMap["mcpServers"] = liveServers
+			return j.writeJSON(liveMap)
+		}
+	}
+	delete(liveServers, name)
+	liveMap["mcpServers"] = liveServers
+	return j.writeJSON(liveMap)
+}
+
+// BackupContainsEntry reports whether the backup file at backupPath
+// has an mcpServers[name] entry. Inherited by both geminiCLI and
+// antigravityClient via struct embedding.
+func (j *jsonMCPClient) BackupContainsEntry(backupPath, name string) (bool, error) {
+	data, err := os.ReadFile(backupPath)
+	if err != nil {
+		return false, fmt.Errorf("read backup %s: %w", backupPath, err)
+	}
+	if len(data) == 0 {
+		return false, nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return false, fmt.Errorf("parse backup %s: %w", backupPath, err)
+	}
+	servers, _ := m["mcpServers"].(map[string]any)
+	if servers == nil {
+		return false, nil
+	}
+	// Require the entry to be an object — a scalar value at this
+	// key would be malformed and, if fed to RestoreEntryFromBackup,
+	// would corrupt the live config. Treat non-object values as
+	// absent so the sentinel fallback refuses with a clear error.
+	entry, ok := servers[name].(map[string]any)
+	return ok && entry != nil, nil
+}
