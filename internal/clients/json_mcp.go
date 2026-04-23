@@ -175,7 +175,7 @@ func (j *jsonMCPClient) RestoreEntryFromBackup(backupPath, name string) error {
 					// (http://localhost:<port>/) present, `command`
 					// absent. User-configured remote HTTP entries
 					// pass through.
-					if urlStr, _ := rawMap["url"].(string); isHubHTTPURL(urlStr) {
+					if urlStr, _ := rawMap["url"].(string); IsHubHTTPURL(urlStr) {
 						if _, hasCmd := rawMap["command"]; !hasCmd {
 							return ErrBackupEntryAlreadyMigrated
 						}
