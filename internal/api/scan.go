@@ -96,10 +96,12 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 // isOurRelayBinary returns true when the given path points at our CLI
 // binary — either the current name (mcphub.exe) or the legacy name
 // (mcp.exe) that early installations may still have in client configs.
-// Matches by basename, case-insensitive.
+// Delegates to clients.IsMcphubBinary so the 4-name allowlist lives in
+// exactly one place; this wrapper is kept only because the classifier
+// below reads better when paired with a local name. If a future client
+// ever persists a different binary name, update only IsMcphubBinary.
 func isOurRelayBinary(cmd string) bool {
-	base := strings.ToLower(filepath.Base(cmd))
-	return base == "mcphub.exe" || base == "mcp.exe" || base == "mcphub" || base == "mcp"
+	return clients.IsMcphubBinary(cmd)
 }
 
 // genericInterpreters are command names that match far too many unrelated
