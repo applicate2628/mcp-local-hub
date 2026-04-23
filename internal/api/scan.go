@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
 
 	toml "github.com/pelletier/go-toml/v2"
@@ -443,6 +444,74 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 			return "", err
 		}
 		raw = cfg.MCPServers[serverName]
+
+	case "codex-cli":
+		if opts.CodexConfigPath == "" {
+			return "", fmt.Errorf("CodexConfigPath empty")
+		}
+		data, err := os.ReadFile(opts.CodexConfigPath)
+		if err != nil {
+			return "", err
+		}
+		var root map[string]any
+		if err := toml.Unmarshal(data, &root); err != nil {
+			return "", err
+		}
+		servers, _ := root["mcp_servers"].(map[string]any)
+		if servers != nil {
+			raw, _ = servers[serverName].(map[string]any)
+		}
+
+	case "gemini-cli":
+		if opts.GeminiConfigPath == "" {
+			return "", fmt.Errorf("GeminiConfigPath empty")
+		}
+		data, err := os.ReadFile(opts.GeminiConfigPath)
+		if err != nil {
+			return "", err
+		}
+		var cfg struct {
+			MCPServers map[string]map[string]any `json:"mcpServers"`
+		}
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return "", err
+		}
+		raw = cfg.MCPServers[serverName]
+
+	case "antigravity":
+		if opts.AntigravityConfigPath == "" {
+			return "", fmt.Errorf("AntigravityConfigPath empty")
+		}
+		data, err := os.ReadFile(opts.AntigravityConfigPath)
+		if err != nil {
+			return "", err
+		}
+		var cfg struct {
+			MCPServers map[string]map[string]any `json:"mcpServers"`
+		}
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return "", err
+		}
+		raw = cfg.MCPServers[serverName]
+		// Antigravity entries written by mcphub migrate use command=mcphub,
+		// args[0]="relay". Extracting a manifest from THAT would loop:
+		// manifest → install → relay entry → manifest → ... Reject narrowly:
+		// command must be the mcphub binary AND args[0] must equal "relay".
+		// A user's genuine stdio server whose first arg happens to be "relay"
+		// but whose command is not mcphub passes through unchanged. Uses the
+		// shared clients.IsMcphubBinary helper (also used by RestoreEntryFromBackup
+		// for hub-relay detection in adapter defensive checks).
+		if raw != nil {
+			cmd, _ := raw["command"].(string)
+			if clients.IsMcphubBinary(cmd) {
+				if args, ok := raw["args"].([]any); ok && len(args) > 0 {
+					if first, ok := args[0].(string); ok && first == "relay" {
+						return "", fmt.Errorf("entry %q is a mcphub-managed relay stdio (command is mcphub binary + args[0]==\"relay\") — not user-configured stdio, cannot extract a manifest from it", serverName)
+					}
+				}
+			}
+		}
+
 	default:
 		return "", fmt.Errorf("extract not yet supported for client %q (extend here when needed)", client)
 	}
