@@ -171,8 +171,11 @@ func (j *jsonMCPClient) RestoreEntryFromBackup(backupPath, name string) error {
 		if backupEntry, present := backupServers[name]; present {
 			if rawMap, ok := backupEntry.(map[string]any); ok {
 				if j.urlField == "url" {
-					// Gemini CLI hub-HTTP shape: `url` present, `command` absent.
-					if _, hasURL := rawMap["url"]; hasURL {
+					// Gemini CLI hub-HTTP shape: loopback `url`
+					// (http://localhost:<port>/) present, `command`
+					// absent. User-configured remote HTTP entries
+					// pass through.
+					if urlStr, _ := rawMap["url"].(string); isHubHTTPURL(urlStr) {
 						if _, hasCmd := rawMap["command"]; !hasCmd {
 							return ErrBackupEntryAlreadyMigrated
 						}

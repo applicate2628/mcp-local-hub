@@ -172,9 +172,11 @@ func (c *codexCLI) RestoreEntryFromBackup(backupPath, name string) error {
 	if backupServers != nil {
 		if backupEntry, present := backupServers[name]; present {
 			// Defensive: refuse hub-HTTP-shaped backup entries for
-			// Codex CLI (has `url`, no `command`).
+			// Codex CLI (loopback `url` present, `command` absent).
+			// User-configured remote HTTP entries (non-loopback url)
+			// pass through.
 			if rawMap, ok := backupEntry.(map[string]any); ok {
-				if _, hasURL := rawMap["url"]; hasURL {
+				if urlStr, _ := rawMap["url"].(string); isHubHTTPURL(urlStr) {
 					if _, hasCmd := rawMap["command"]; !hasCmd {
 						return ErrBackupEntryAlreadyMigrated
 					}

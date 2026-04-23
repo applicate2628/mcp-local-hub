@@ -39,19 +39,18 @@ type RestoredMigration struct {
 // exactly the rows Migrate would produce. Entries in other clients with
 // the same server name are NOT touched.
 //
-// Multi-server constraint: when multiple servers were migrated from the
-// same client, each migration takes its own timestamped backup capturing
-// state at that moment. The latest backup therefore holds earlier-
-// migrated servers ALREADY in hub-HTTP/relay form and only the most-
-// recently-migrated server in stdio form. Demigrate can auto-restore
-// ONLY that last-migrated server from the latest backup. Earlier-
-// migrated servers hit ErrBackupEntryAlreadyMigrated and surface as
-// Failed rows; the operator must restore those from the `-original`
-// sentinel manually. Ordering of demigrate calls does not help — the
-// latest backup's content is frozen and does not change when earlier
-// entries are rewritten in the live file. This is intentional:
-// silently re-writing hub-HTTP data is strictly worse than a clear
-// failure directing the operator to the sentinel.
+// Multi-server / repeat-migrate behavior: when multiple servers are
+// migrated from the same client — or the same server is migrated more
+// than once — the latest timestamped backup may already hold earlier
+// entries in hub-managed form. For those, Demigrate falls back
+// automatically to the pristine `-original` sentinel (the one-shot
+// pre-hub snapshot Client.Backup() writes on first call; never
+// overwritten). If both the latest backup AND the sentinel refuse
+// (e.g. the sentinel was tampered with, or never written), Demigrate
+// surfaces a Failed row naming both paths so the operator can restore
+// manually. Silent rewriting of hub-managed data is strictly worse
+// than a clear failure, so the defensive check in each adapter's
+// RestoreEntryFromBackup does not compromise.
 //
 // Errors per-(server, client) are captured in the report; the function
 // returns nil unless a setup-level problem applies to every row.
@@ -107,23 +106,34 @@ func (a *API) Demigrate(opts DemigrateOpts) (*DemigrateReport, error) {
 				})
 				continue
 			}
-			if err := adapter.RestoreEntryFromBackup(backupPath, server); err != nil {
-				errMsg := err.Error()
-				if errors.Is(err, clients.ErrBackupEntryAlreadyMigrated) {
-					sentinelPath := adapter.ConfigPath() + ".bak-mcp-local-hub-original"
-					errMsg = fmt.Sprintf(
-						"latest backup %s holds %q already in hub-managed form — Demigrate can only auto-restore the most-recently-migrated server per client. Restore manually from the -original sentinel at %s.",
-						backupPath, server, sentinelPath)
+			restoredFrom := backupPath
+			err = adapter.RestoreEntryFromBackup(backupPath, server)
+			if errors.Is(err, clients.ErrBackupEntryAlreadyMigrated) {
+				// Latest backup already holds this entry in hub-managed form
+				// (multi-server or repeat-migrate case). Try the pristine
+				// -original sentinel, which by definition captures pre-hub
+				// state and therefore cannot hold a hub-managed shape for
+				// any entry that existed before mcphub touched the file.
+				sentinelPath := adapter.ConfigPath() + ".bak-mcp-local-hub-original"
+				if sentErr := adapter.RestoreEntryFromBackup(sentinelPath, server); sentErr == nil {
+					restoredFrom = sentinelPath
+					err = nil
+				} else {
+					err = fmt.Errorf(
+						"latest backup %s holds %q already in hub-managed form, and -original sentinel fallback at %s also failed: %w",
+						backupPath, server, sentinelPath, sentErr)
 				}
+			}
+			if err != nil {
 				report.Failed = append(report.Failed, FailedMigration{
-					Server: server, Client: binding.Client, Err: errMsg,
+					Server: server, Client: binding.Client, Err: err.Error(),
 				})
 				continue
 			}
 			report.Restored = append(report.Restored, RestoredMigration{
 				Server: server, Client: binding.Client,
 			})
-			fmt.Fprintf(opts.Writer, "restored %s for %s from %s\n", server, binding.Client, backupPath)
+			fmt.Fprintf(opts.Writer, "restored %s for %s from %s\n", server, binding.Client, restoredFrom)
 		}
 	}
 	return report, nil

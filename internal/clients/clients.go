@@ -125,6 +125,22 @@ func (e *ErrClientNotInstalled) Error() string {
 // servers in the same client require the sentinel.
 var ErrBackupEntryAlreadyMigrated = errors.New("clients: backup copy of entry is already in hub-managed shape")
 
+// isHubHTTPURL reports whether urlStr looks like a mcp-local-hub
+// managed loopback URL (`http://localhost:<port>/...` or
+// `http://127.0.0.1:<port>/...`). Used by the per-adapter defensive
+// check in RestoreEntryFromBackup to distinguish hub-managed entries
+// from legitimate user-configured remote HTTP MCP servers (e.g. a
+// context7-style `https://api.example.com/mcp`). A naïve "has url,
+// no command" check would false-reject those. Loopback-only is a
+// narrow-enough heuristic: user-run local MCP HTTP servers are rare
+// and even then their backup-original shape was HTTP anyway, so
+// refusing to restore them is at worst a no-op (same HTTP → same
+// HTTP), never data corruption.
+func isHubHTTPURL(urlStr string) bool {
+	return strings.HasPrefix(urlStr, "http://localhost:") ||
+		strings.HasPrefix(urlStr, "http://127.0.0.1:")
+}
+
 // IsMcphubBinary reports whether cmd's basename matches our CLI
 // binary name. Accepts the current names (mcphub / mcphub.exe) AND
 // the legacy names (mcp / mcp.exe) that early installations may

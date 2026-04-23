@@ -104,7 +104,7 @@ func TestDemigrate_OnlyIteratesManifestBindings(t *testing.T) {
 
 	claudePath := filepath.Join(tmp, ".claude.json")
 	if err := os.WriteFile(claudePath, []byte(
-		`{"mcpServers":{"memory":{"type":"http","url":"http://x/mcp"}}}`), 0600); err != nil {
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	geminiDir := filepath.Join(tmp, ".gemini")
@@ -112,7 +112,7 @@ func TestDemigrate_OnlyIteratesManifestBindings(t *testing.T) {
 		t.Fatal(err)
 	}
 	geminiPath := filepath.Join(geminiDir, "settings.json")
-	geminiBefore := `{"mcpServers":{"memory":{"url":"http://x/mcp","type":"http","timeout":10000}}}`
+	geminiBefore := `{"mcpServers":{"memory":{"url":"http://localhost:9200/mcp","type":"http","timeout":10000}}}`
 	if err := os.WriteFile(geminiPath, []byte(geminiBefore), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestDemigrate_ClientsIncludeFilter(t *testing.T) {
 	t.Setenv("HOME", tmp)
 	claudePath := filepath.Join(tmp, ".claude.json")
 	_ = os.WriteFile(claudePath, []byte(
-		`{"mcpServers":{"memory":{"type":"http","url":"http://x/mcp"}}}`), 0600)
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0600)
 	_ = os.WriteFile(claudePath+".bak-mcp-local-hub-20260101-000000", []byte(
 		`{"mcpServers":{"memory":{"type":"stdio","command":"npx"}}}`), 0600)
 
@@ -212,13 +212,13 @@ func TestDemigrate_MultiServerNewestFirstSucceeds(t *testing.T) {
 	t.Setenv("HOME", tmp)
 	claudePath := filepath.Join(tmp, ".claude.json")
 	if err := os.WriteFile(claudePath, []byte(
-		`{"mcpServers":{"memory":{"type":"http","url":"http://x/mcp"},"fs":{"type":"http","url":"http://y/mcp"}}}`),
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"},"fs":{"type":"http","url":"http://localhost:9201/mcp"}}}`),
 		0600); err != nil {
 		t.Fatal(err)
 	}
 	latest := claudePath + ".bak-mcp-local-hub-20260201-120000"
 	if err := os.WriteFile(latest, []byte(
-		`{"mcpServers":{"memory":{"type":"http","url":"http://x/mcp"},"fs":{"type":"stdio","command":"npx","args":["-y","fs"]}}}`),
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"},"fs":{"type":"stdio","command":"npx","args":["-y","fs"]}}}`),
 		0600); err != nil {
 		t.Fatal(err)
 	}
@@ -257,19 +257,31 @@ client_bindings:
 	}
 }
 
-func TestDemigrate_MultiServerRejectsOlderMigrationClearly(t *testing.T) {
+func TestDemigrate_MultiServerFallsBackToSentinel(t *testing.T) {
+	// Earlier-migrated server's latest backup already holds the entry
+	// in hub-managed form. Demigrate must fall back to the -original
+	// sentinel (which captures true pre-hub state) rather than report
+	// a clear but unhelpful failure.
 	tmp := t.TempDir()
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("HOME", tmp)
 	claudePath := filepath.Join(tmp, ".claude.json")
 	if err := os.WriteFile(claudePath, []byte(
-		`{"mcpServers":{"memory":{"type":"http","url":"http://x/mcp"},"fs":{"type":"http","url":"http://y/mcp"}}}`),
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"},"fs":{"type":"http","url":"http://localhost:9201/mcp"}}}`),
 		0600); err != nil {
 		t.Fatal(err)
 	}
+	// Latest backup: pre-fs-migrate, so memory is already in hub-managed
+	// form here. Sentinel: pre-hub, so memory is stdio.
 	latest := claudePath + ".bak-mcp-local-hub-20260201-120000"
 	if err := os.WriteFile(latest, []byte(
-		`{"mcpServers":{"memory":{"type":"http","url":"http://x/mcp"},"fs":{"type":"stdio","command":"npx"}}}`),
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"},"fs":{"type":"stdio","command":"npx"}}}`),
+		0600); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := claudePath + ".bak-mcp-local-hub-original"
+	if err := os.WriteFile(sentinel, []byte(
+		`{"mcpServers":{"memory":{"type":"stdio","command":"npx","args":["-y","mem"]}}}`),
 		0600); err != nil {
 		t.Fatal(err)
 	}
@@ -300,15 +312,134 @@ client_bindings:
 	if err != nil {
 		t.Fatalf("Demigrate: %v", err)
 	}
+	if len(report.Failed) > 0 {
+		t.Fatalf("unexpected failures: %+v", report.Failed)
+	}
+	if len(report.Restored) != 1 {
+		t.Fatalf("expected 1 restored via sentinel fallback, got %+v", report.Restored)
+	}
+	// Live memory is back to stdio.
+	live, _ := os.ReadFile(claudePath)
+	var parsed map[string]any
+	if err := json.Unmarshal(live, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	memEntry := parsed["mcpServers"].(map[string]any)["memory"].(map[string]any)
+	if memEntry["command"] != "npx" {
+		t.Errorf("live memory.command=%v, want npx; full live: %s", memEntry["command"], string(live))
+	}
+	if memEntry["type"] != "stdio" {
+		t.Errorf("live memory.type=%v, want stdio", memEntry["type"])
+	}
+}
+
+func TestDemigrate_FailsWhenBothLatestAndSentinelRefuse(t *testing.T) {
+	// Pathological: both latest backup AND sentinel hold the entry in
+	// hub-managed form (e.g. user-edited sentinel or some unusual
+	// install history). Demigrate must fail with a clear message
+	// naming both paths.
+	tmp := t.TempDir()
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("HOME", tmp)
+	claudePath := filepath.Join(tmp, ".claude.json")
+	_ = os.WriteFile(claudePath, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0600)
+	latest := claudePath + ".bak-mcp-local-hub-20260101-000000"
+	_ = os.WriteFile(latest, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0600)
+	sentinel := claudePath + ".bak-mcp-local-hub-original"
+	_ = os.WriteFile(sentinel, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0600)
+
+	manifestDir := t.TempDir()
+	memDir := filepath.Join(manifestDir, "memory")
+	_ = os.MkdirAll(memDir, 0700)
+	_ = os.WriteFile(filepath.Join(memDir, "manifest.yaml"), []byte(
+		`name: memory
+kind: global
+transport: stdio-bridge
+command: npx
+daemons:
+  - name: default
+    port: 9200
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+`), 0600)
+
+	a := NewAPI()
+	report, err := a.Demigrate(DemigrateOpts{
+		Servers:  []string{"memory"},
+		ScanOpts: ScanOpts{ManifestDir: manifestDir},
+		Writer:   io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("Demigrate: %v", err)
+	}
 	if len(report.Restored) != 0 {
-		t.Fatalf("expected 0 restored (backup holds already-migrated entry), got %+v", report.Restored)
+		t.Fatalf("expected 0 restored (both backups hold hub-managed entry), got %+v", report.Restored)
 	}
 	if len(report.Failed) != 1 {
 		t.Fatalf("expected 1 failure, got %d: %+v", len(report.Failed), report.Failed)
 	}
 	lowerErr := strings.ToLower(report.Failed[0].Err)
-	if !strings.Contains(lowerErr, "already") || !strings.Contains(lowerErr, "sentinel") {
-		t.Errorf("failure message should mention the already-migrated state and point at the -original sentinel: got %q", report.Failed[0].Err)
+	if !strings.Contains(lowerErr, "sentinel") || !strings.Contains(lowerErr, "also failed") {
+		t.Errorf("failure message should mention sentinel fallback also failed: got %q", report.Failed[0].Err)
+	}
+}
+
+func TestDemigrate_SingleServerMigratedTwiceRestoresViaSentinel(t *testing.T) {
+	// Bot R1 P1 scenario: migrate serverA, then migrate serverA again.
+	// The second migrate's backup captures post-first-migrate state,
+	// so the entry is already hub-managed in the latest backup.
+	// Demigrate must fall back to the sentinel.
+	tmp := t.TempDir()
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("HOME", tmp)
+	claudePath := filepath.Join(tmp, ".claude.json")
+	_ = os.WriteFile(claudePath, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0600)
+	// Latest backup = post-first-migrate (memory already http).
+	latest := claudePath + ".bak-mcp-local-hub-20260301-120000"
+	_ = os.WriteFile(latest, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0600)
+	// Sentinel = pristine pre-hub (memory is stdio).
+	sentinel := claudePath + ".bak-mcp-local-hub-original"
+	_ = os.WriteFile(sentinel, []byte(
+		`{"mcpServers":{"memory":{"type":"stdio","command":"npx","args":["-y","mem"]}}}`), 0600)
+
+	manifestDir := t.TempDir()
+	memDir := filepath.Join(manifestDir, "memory")
+	_ = os.MkdirAll(memDir, 0700)
+	_ = os.WriteFile(filepath.Join(memDir, "manifest.yaml"), []byte(
+		`name: memory
+kind: global
+transport: stdio-bridge
+command: npx
+daemons:
+  - name: default
+    port: 9200
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+`), 0600)
+
+	a := NewAPI()
+	report, err := a.Demigrate(DemigrateOpts{
+		Servers:  []string{"memory"},
+		ScanOpts: ScanOpts{ManifestDir: manifestDir},
+		Writer:   io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("Demigrate: %v", err)
+	}
+	if len(report.Failed) > 0 {
+		t.Fatalf("unexpected failures: %+v", report.Failed)
+	}
+	if len(report.Restored) != 1 {
+		t.Fatalf("expected 1 restored via sentinel fallback, got %+v", report.Restored)
 	}
 }
 
@@ -318,7 +449,7 @@ func TestDemigrate_NoBackupReportsFailure(t *testing.T) {
 	t.Setenv("HOME", tmp)
 	claudePath := filepath.Join(tmp, ".claude.json")
 	_ = os.WriteFile(claudePath, []byte(
-		`{"mcpServers":{"memory":{"type":"http","url":"http://x/mcp"}}}`), 0600)
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0600)
 
 	manifestDir := t.TempDir()
 	memDir := filepath.Join(manifestDir, "memory")

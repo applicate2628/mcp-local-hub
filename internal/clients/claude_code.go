@@ -181,10 +181,13 @@ func (c *claudeCode) RestoreEntryFromBackup(backupPath, name string) error {
 	if backupServers != nil {
 		if backupEntry, present := backupServers[name]; present {
 			// Defensive: refuse hub-HTTP-shaped backup entries. The
-			// canonical hub-HTTP shape in .claude.json has a `url`
-			// field and no `command` field.
+			// canonical hub-HTTP shape in .claude.json has a loopback
+			// `url` field (http://localhost:<port>/... or 127.0.0.1)
+			// and no `command` field. User-configured remote HTTP MCP
+			// servers (url pointing at a non-loopback host) pass
+			// through to the normal restore path.
 			if rawMap, ok := backupEntry.(map[string]any); ok {
-				if _, hasURL := rawMap["url"]; hasURL {
+				if urlStr, _ := rawMap["url"].(string); isHubHTTPURL(urlStr) {
 					if _, hasCmd := rawMap["command"]; !hasCmd {
 						return ErrBackupEntryAlreadyMigrated
 					}

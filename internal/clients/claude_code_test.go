@@ -220,6 +220,37 @@ func TestClaudeCode_RestoreEntryFromBackup_PreservesUnrelatedEntries(t *testing.
 	}
 }
 
+func TestClaudeCode_RestoreEntryFromBackup_AcceptsRemoteHTTPBackup(t *testing.T) {
+	// User has a legit remote HTTP MCP server (non-loopback URL). The
+	// defensive "already migrated" check must ONLY fire on loopback
+	// urls (hub-managed shape); remote urls pass through to the
+	// normal restore path.
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".claude.json")
+	if err := os.WriteFile(path, []byte(`{"mcpServers":{}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	backup := path + ".bak-mcp-local-hub-20260101-000000"
+	if err := os.WriteFile(backup, []byte(
+		`{"mcpServers":{"remote":{"type":"http","url":"https://api.example.com/mcp"}}}`),
+		0600); err != nil {
+		t.Fatal(err)
+	}
+	c := &claudeCode{path: path}
+	if err := c.RestoreEntryFromBackup(backup, "remote"); err != nil {
+		t.Fatalf("RestoreEntryFromBackup: %v (remote HTTP url must not be rejected as hub-managed)", err)
+	}
+	live, _ := os.ReadFile(path)
+	var m map[string]any
+	if err := json.Unmarshal(live, &m); err != nil {
+		t.Fatal(err)
+	}
+	entry := m["mcpServers"].(map[string]any)["remote"].(map[string]any)
+	if entry["url"] != "https://api.example.com/mcp" {
+		t.Errorf("url=%v, want https://api.example.com/mcp", entry["url"])
+	}
+}
+
 func TestClaudeCode_RestoreEntryFromBackup_RefusesHubHTTPBackupEntry(t *testing.T) {
 	// Backup was taken AFTER an earlier migrate already rewrote this
 	// entry to hub-HTTP form (typical when two servers are migrated
