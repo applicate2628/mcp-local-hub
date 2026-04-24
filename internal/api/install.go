@@ -921,17 +921,14 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 	// 2. Canonical mcphub must exist — scheduler tasks reference
 	// ~/.local/bin/mcphub.exe by absolute path because Windows Task
 	// Scheduler's CreateProcess call skips PATH lookup. Antigravity
-	// relay entries still use the short name (Node's child_process
-	// honors PATH), so both checks apply.
+	// relay entries also use this canonical absolute path to avoid
+	// PATH/CWD resolution and binary planting.
 	canonicalPath, err := canonicalMcphubPath()
 	if err != nil {
 		return err
 	}
 	if _, err := os.Stat(canonicalPath); err != nil {
 		return fmt.Errorf("%s not present — run `mcphub setup` once to install the canonical binary: %w", canonicalPath, err)
-	}
-	if _, err := exec.LookPath(mcphubShortName); err != nil {
-		return fmt.Errorf("%s not on PATH — run `mcphub setup` once to add ~/.local/bin to PATH: %w", mcphubShortName, err)
 	}
 	// 3. Ports free — only for daemons in the filtered scope.
 	//
@@ -1120,9 +1117,8 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan) error {
 	// Populate relay-related fields so adapters for stdio-only clients
 	// (e.g. Antigravity) can produce their `command`+`args` entry shape
 	// invoking `mcphub.exe relay`. HTTP-native adapters ignore these fields.
-	// We reference mcphub by short name and let the client's PATH resolve it;
-	// this lets the user move or rebuild mcphub without rewriting every
-	// client config.
+	// Use an absolute canonical path to avoid PATH/CWD lookup when clients
+	// spawn the relay command.
 	allClients := clients.AllClients()
 	for _, u := range p.ClientUpdates {
 		client := allClients[u.Client]
@@ -1153,7 +1149,7 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan) error {
 			URL:          u.URL,
 			RelayServer:  m.Name,
 			RelayDaemon:  u.DaemonName,
-			RelayExePath: mcphubShortName,
+			RelayExePath: canonical,
 		}
 		if err := client.AddEntry(entry); err != nil {
 			runRollback()

@@ -61,6 +61,9 @@ func (a *antigravityClient) AddEntry(entry MCPEntry) error {
 	if entry.RelayExePath == "" {
 		return fmt.Errorf("antigravity adapter requires MCPEntry.RelayExePath (absolute path to mcphub.exe for the 'command' field)")
 	}
+	if !filepath.IsAbs(entry.RelayExePath) {
+		return fmt.Errorf("antigravity adapter requires MCPEntry.RelayExePath to be absolute (got %q)", entry.RelayExePath)
+	}
 	m, err := a.readJSON()
 	if err != nil {
 		return err
