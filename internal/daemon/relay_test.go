@@ -304,3 +304,50 @@ func TestReadJSONRPCLine_MaxLengthAccepted(t *testing.T) {
 		t.Fatalf("line length = %d, want %d", len(line), maxStdinLineBytes-1)
 	}
 }
+
+func TestRelay_StdinPumpCapsConcurrentPOSTs(t *testing.T) {
+	fake := newFakeServer(t)
+	blockPOST := make(chan struct{})
+	fake.onPOST = func(body []byte, sid string) (int, string, []byte) {
+		<-blockPOST
+		return 202, "", nil
+	}
+	srv := httptest.NewServer(fake.handler())
+	defer srv.Close()
+
+	var stdin bytes.Buffer
+	for i := 0; i < maxConcurrentPOSTs*3; i++ {
+		fmt.Fprintf(&stdin, `{"jsonrpc":"2.0","method":"notifications/ping","params":{"n":%d}}`+"\n", i)
+	}
+
+	r := &HTTPToStdioRelay{
+		URL:        srv.URL,
+		Stdin:      &stdin,
+		Stdout:     io.Discard,
+		Stderr:     io.Discard,
+		HTTPClient: &http.Client{Timeout: 2 * time.Second},
+	}
+	r.setSessionID("already-initialized")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var wg sync.WaitGroup
+	done := make(chan error, 1)
+	go func() {
+		done <- r.stdinPump(ctx, &wg)
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+	inFlight := int(fake.postCount.Load())
+	if inFlight > maxConcurrentPOSTs {
+		t.Fatalf("concurrent POSTs exceeded cap: got %d, cap %d", inFlight, maxConcurrentPOSTs)
+	}
+
+	close(blockPOST)
+	err := <-done
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("stdinPump returned %v, want io.EOF", err)
+	}
+	wg.Wait()
+}

@@ -69,6 +69,11 @@ const (
 	// KB-sized; 1 MiB is a generous ceiling that catches runaway inputs
 	// without rejecting any real MCP payload.
 	maxStdinLineBytes = 1 << 20 // 1 MiB
+
+	// Upper bound on concurrent POST workers spawned from stdinPump after
+	// session establishment. Provides backpressure against untrusted or
+	// buggy stdio clients that can otherwise enqueue unbounded work.
+	maxConcurrentPOSTs = 64
 )
 
 var errStdinLineTooLong = errors.New("stdin line exceeds maxStdinLineBytes")
@@ -147,6 +152,7 @@ func (r *HTTPToStdioRelay) Run(ctx context.Context) error {
 // goroutines tracked by wg so Run can wait for them to drain.
 func (r *HTTPToStdioRelay) stdinPump(ctx context.Context, wg *sync.WaitGroup) error {
 	reader := bufio.NewReaderSize(r.Stdin, maxStdinLineBytes)
+	postSem := make(chan struct{}, maxConcurrentPOSTs)
 
 	for {
 		if ctx.Err() != nil {
@@ -172,9 +178,16 @@ func (r *HTTPToStdioRelay) stdinPump(ctx context.Context, wg *sync.WaitGroup) er
 		}
 
 		// Session known — safe to parallelize.
+		select {
+		case postSem <- struct{}{}:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+
 		wg.Add(1)
 		go func(body []byte) {
 			defer wg.Done()
+			defer func() { <-postSem }()
 			r.handlePOST(ctx, body)
 		}(line)
 	}
