@@ -142,4 +142,21 @@ test.describe("Add server screen", () => {
     await expect(page.locator("h1")).toHaveText("Add server"); // stayed
     expect(dialogSeen).toBe(true);
   });
+
+  test("hash with query params still resolves to Add server screen (PR #5 Codex R2)", async ({
+    page,
+    hub,
+  }) => {
+    // Regression guard: useRouter must strip ?query from the hash
+    // before matching against SCREENS. If it doesn't, "add-server?..."
+    // becomes an unknown-screen fallback and the A1→A2a handoff
+    // breaks silently. This mirrors the URL A1 Migration's Create
+    // manifest button emits.
+    await page.goto(`${hub.url}/#/add-server?server=ghost&from-client=claude-code`);
+    await expect(page.locator("h1")).toHaveText("Add server");
+    // Prefill will 500 because the client config doesn't exist on a fresh home;
+    // the banner surfaces that as "Could not prefill..." which is the
+    // expected graceful-degrade path from Task 14.
+    await expect(page.locator('[data-testid="banner"].error')).toContainText("Could not prefill");
+  });
 });
