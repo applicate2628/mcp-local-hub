@@ -68,67 +68,48 @@ func TestManifestDeleteRemovesDir(t *testing.T) {
 	}
 }
 
-// TestManifestGetIn_ReturnsContentHash verifies that ManifestGetInWithHash
-// returns the same YAML as ManifestGetIn and a hash consistent with
-// ManifestHashContent applied to those bytes.
 func TestManifestGetIn_ReturnsContentHash(t *testing.T) {
-	tmp := t.TempDir()
-	yaml := "name: hashsrv\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9210\n"
-	if err := os.MkdirAll(filepath.Join(tmp, "hashsrv"), 0755); err != nil {
-		t.Fatal(err)
+	dir := t.TempDir()
+	a := &API{}
+	name := "memory"
+	// Must satisfy api.ManifestValidate (which ManifestCreateIn gates on):
+	// requires kind, transport, command, and at least one daemon.
+	yaml := "name: memory\nkind: global\ntransport: stdio-bridge\ncommand: npx\ndaemons:\n  - name: default\n    port: 9210\n"
+	if err := a.ManifestCreateIn(dir, name, yaml); err != nil {
+		t.Fatalf("create: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(tmp, "hashsrv", "manifest.yaml"), []byte(yaml), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	a := NewAPI()
-	gotYAML, gotHash, err := a.ManifestGetInWithHash(tmp, "hashsrv")
+	got, hash, err := a.ManifestGetInWithHash(dir, name)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("get: %v", err)
 	}
-	if gotYAML != yaml {
-		t.Errorf("YAML mismatch:\ngot  %q\nwant %q", gotYAML, yaml)
+	if got != yaml {
+		t.Errorf("yaml = %q, want %q", got, yaml)
 	}
-	wantHash := ManifestHashContent([]byte(yaml))
-	if gotHash != wantHash {
-		t.Errorf("hash mismatch: got %q, want %q", gotHash, wantHash)
+	want := ManifestHashContent([]byte(yaml))
+	if hash != want {
+		t.Errorf("hash = %q, want %q", hash, want)
 	}
 }
 
-// TestManifestGetIn_HashChangesOnExternalWrite is the load-bearing case
-// for A2b D3 stale-file detection: if a second actor writes the manifest
-// between the GUI's Load and Save calls, the hash must change so
-// ManifestEdit can detect the conflict.
 func TestManifestGetIn_HashChangesOnExternalWrite(t *testing.T) {
-	tmp := t.TempDir()
-	yaml1 := "name: stalesrv\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9211\n"
-	if err := os.MkdirAll(filepath.Join(tmp, "stalesrv"), 0755); err != nil {
-		t.Fatal(err)
+	dir := t.TempDir()
+	a := &API{}
+	name := "demo"
+	initial := "name: demo\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9211\n"
+	if err := a.ManifestCreateIn(dir, name, initial); err != nil {
+		t.Fatalf("create: %v", err)
 	}
-	manifestPath := filepath.Join(tmp, "stalesrv", "manifest.yaml")
-	if err := os.WriteFile(manifestPath, []byte(yaml1), 0644); err != nil {
-		t.Fatal(err)
+	_, h1, _ := a.ManifestGetInWithHash(dir, name)
+	// External write — different bytes (port change) to simulate another
+	// editor touching the file between Load and Save.
+	path := filepath.Join(dir, name, "manifest.yaml")
+	mutated := "name: demo\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9212\n"
+	if err := os.WriteFile(path, []byte(mutated), 0600); err != nil {
+		t.Fatalf("external write: %v", err)
 	}
-
-	a := NewAPI()
-	_, h1, err := a.ManifestGetInWithHash(tmp, "stalesrv")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Simulate an external write between Load and Save.
-	yaml2 := "name: stalesrv\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9212\n"
-	if err := os.WriteFile(manifestPath, []byte(yaml2), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	_, h2, err := a.ManifestGetInWithHash(tmp, "stalesrv")
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	_, h2, _ := a.ManifestGetInWithHash(dir, name)
 	if h1 == h2 {
-		t.Error("hash must differ after external write, but h1 == h2")
+		t.Errorf("hash unchanged after external write: %q", h1)
 	}
 }
 
