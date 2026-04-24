@@ -8,7 +8,7 @@ import { MigrationScreen } from "./screens/Migration";
 import { ServersScreen } from "./screens/Servers";
 
 export function App() {
-  const screen = useRouter("servers");
+  const { screen } = useRouter("servers");
   const [addServerDirty, setAddServerDirty] = useState(false);
 
   // guardClick is wired onto every sidebar <a>. If the Add server screen

@@ -1,8 +1,16 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { BLANK_FORM, parseYAMLToForm, toYAML } from "../lib/manifest-yaml";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
-import { getExtractManifest, postManifestCreate, postManifestValidate } from "../api";
-import type { ManifestFormState } from "../types";
+import {
+  getExtractManifest,
+  getManifest,
+  postManifestCreate,
+  postManifestEdit,
+  postManifestValidate,
+  ManifestHashMismatchError,
+} from "../api";
+import { generateUUID } from "../lib/uuid";
+import type { BindingFormEntry, DaemonFormEntry, ManifestFormState } from "../types";
 
 // MANIFEST_NAME_REGEX mirrors internal/api/manifest.go:23 validManifestName.
 // Live client-side regex check provides instant feedback; the backend still
@@ -45,7 +53,11 @@ function parseAddServerQuery(): { server: string; fromClient: string } {
   };
 }
 
-export function AddServerScreen(props: { onDirtyChange?: (dirty: boolean) => void } = {}) {
+export function AddServerScreen(props: {
+  mode?: "create" | "edit";
+  onDirtyChange?: (dirty: boolean) => void;
+} = {}) {
+  const mode = props.mode ?? "create";
   const [formState, setFormState] = useState<ManifestFormState>(BLANK_FORM);
   // initialSnapshot is the post-normalization baseline the dirty check
   // compares against. Updated on mount (after any prefill path) and on
@@ -137,42 +149,35 @@ export function AddServerScreen(props: { onDirtyChange?: (dirty: boolean) => voi
   function addDaemon() {
     setFormState((prev) => ({
       ...prev,
-      daemons: [...prev.daemons, { name: "", port: 0 }],
+      daemons: [...prev.daemons, { _id: generateUUID(), name: "", port: 0 }],
     }));
   }
 
-  // updateDaemon handles both the name-rename cascade and port updates.
-  // When the name field is edited, every client_binding that referenced
-  // the old name is updated to the new name in the same atomic state
-  // update — the form never exposes an intermediate "orphan binding"
-  // state. Users who hand-edit a binding's daemon field to a non-existent
-  // daemon get caught by the post-save ManifestValidate (Q6 gotcha).
+  // updateDaemon handles port updates. Bindings reference daemons by _id
+  // (identity-stable UUID), so rename no longer needs cascade — the binding
+  // automatically resolves to the updated name at toYAML time.
   function updateDaemon(index: number, field: "name" | "port", value: string) {
     setFormState((prev) => {
       const target = prev.daemons[index];
       if (!target) return prev;
-      const nextDaemon = field === "name"
+      const nextDaemon: DaemonFormEntry = field === "name"
         ? { ...target, name: value }
         : { ...target, port: parsePort(value) };
       const nextDaemons = prev.daemons.slice();
       nextDaemons[index] = nextDaemon;
-      const nextBindings = field === "name" && target.name !== value
-        ? prev.client_bindings.map((b) =>
-            b.daemon === target.name ? { ...b, daemon: value } : b,
-          )
-        : prev.client_bindings;
-      return { ...prev, daemons: nextDaemons, client_bindings: nextBindings };
+      // No cascade needed — bindings key by _id, which is identity-stable.
+      return { ...prev, daemons: nextDaemons };
     });
   }
 
   // deleteDaemon cascades to bindings: if any bindings reference this
-  // daemon, the user is prompted; on confirm both the daemon row and
+  // daemon by _id, the user is prompted; on confirm both the daemon row and
   // every binding that pointed at it are removed in one state update.
   function deleteDaemon(index: number) {
     setFormState((prev) => {
       const target = prev.daemons[index];
       if (!target) return prev;
-      const orphans = prev.client_bindings.filter((b) => b.daemon === target.name);
+      const orphans = prev.client_bindings.filter((b) => b.daemonId === target._id);
       if (orphans.length > 0) {
         // eslint-disable-next-line no-alert
         const ok = window.confirm(
@@ -183,7 +188,7 @@ export function AddServerScreen(props: { onDirtyChange?: (dirty: boolean) => voi
       return {
         ...prev,
         daemons: prev.daemons.filter((_, i) => i !== index),
-        client_bindings: prev.client_bindings.filter((b) => b.daemon !== target.name),
+        client_bindings: prev.client_bindings.filter((b) => b.daemonId !== target._id),
       };
     });
   }
@@ -193,17 +198,18 @@ export function AddServerScreen(props: { onDirtyChange?: (dirty: boolean) => voi
     return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : 0;
   }
 
-  function addBinding(daemonName: string) {
+  // addBinding creates a new binding referencing the daemon by its stable _id.
+  function addBinding(daemonId: string) {
     setFormState((prev) => ({
       ...prev,
       client_bindings: [
         ...prev.client_bindings,
-        { client: KNOWN_CLIENTS[0], daemon: daemonName, url_path: "/mcp" },
+        { client: KNOWN_CLIENTS[0], daemonId, url_path: "/mcp" },
       ],
     }));
   }
 
-  function updateBinding(index: number, field: "client" | "daemon" | "url_path", value: string) {
+  function updateBinding(index: number, field: "client" | "daemonId" | "url_path", value: string) {
     setFormState((prev) => {
       const next = prev.client_bindings.slice();
       const target = next[index];
@@ -376,6 +382,13 @@ export function AddServerScreen(props: { onDirtyChange?: (dirty: boolean) => voi
     }
   }
 
+  // Suppress unused-import warnings for edit-mode symbols imported for
+  // Tasks 12-13. These are intentionally imported now so that Task 11
+  // restores typecheck-clean state across the whole frontend.
+  void getManifest;
+  void postManifestEdit;
+  void ManifestHashMismatchError;
+
   return (
     <section class="screen add-server">
       <h1>Add server</h1>
@@ -450,6 +463,8 @@ export function AddServerScreen(props: { onDirtyChange?: (dirty: boolean) => voi
                 value={formState.name}
                 placeholder="memory"
                 onInput={(e) => updateField("name", (e.currentTarget as HTMLInputElement).value)}
+                disabled={mode === "edit"}
+                title={mode === "edit" ? "Kind and name are immutable after first install. Delete and recreate the server to change them." : undefined}
               />
               {nameError && <span class="inline-error">{nameError}</span>}
             </div>
@@ -459,6 +474,8 @@ export function AddServerScreen(props: { onDirtyChange?: (dirty: boolean) => voi
                 id="field-kind"
                 value={formState.kind}
                 onChange={(e) => updateField("kind", (e.currentTarget as HTMLSelectElement).value as ManifestFormState["kind"])}
+                disabled={mode === "edit"}
+                title={mode === "edit" ? "Kind and name are immutable after first install. Delete and recreate the server to change them." : undefined}
               >
                 {KIND_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -542,7 +559,7 @@ export function AddServerScreen(props: { onDirtyChange?: (dirty: boolean) => voi
           <AccordionSection title="Daemons">
             <div class="repeatable-rows" data-testid="daemon-rows">
               {formState.daemons.map((d, i) => (
-                <div class="form-row daemon-row" key={i} data-daemon-row={i}>
+                <div class="form-row daemon-row" key={d._id} data-daemon-row={i}>
                   <input
                     type="text"
                     placeholder="name (e.g. default)"
@@ -611,10 +628,10 @@ function AccordionSection(props: { title: string; open?: boolean; children: prea
 //     its own collapsible inner subsection. Zero-daemon case shows a
 //     helpful empty-state instructing the user to add a daemon first.
 function ClientBindingsSection(props: {
-  daemons: Array<{ name: string; port: number }>;
-  bindings: Array<{ client: string; daemon: string; url_path: string }>;
-  onAdd: (daemonName: string) => void;
-  onUpdate: (index: number, field: "client" | "daemon" | "url_path", value: string) => void;
+  daemons: DaemonFormEntry[];
+  bindings: BindingFormEntry[];
+  onAdd: (daemonId: string) => void;
+  onUpdate: (index: number, field: "client" | "daemonId" | "url_path", value: string) => void;
   onDelete: (index: number) => void;
 }) {
   const { daemons, bindings, onAdd, onUpdate, onDelete } = props;
@@ -627,7 +644,7 @@ function ClientBindingsSection(props: {
     );
   }
   if (daemons.length === 1) {
-    const only = daemons[0].name;
+    const only = daemons[0]._id;
     return (
       <BindingsList
         bindings={bindings}
@@ -642,16 +659,16 @@ function ClientBindingsSection(props: {
       {daemons.map((d) => {
         const indices: number[] = [];
         const group = bindings.filter((b, idx) => {
-          if (b.daemon === d.name) { indices.push(idx); return true; }
+          if (b.daemonId === d._id) { indices.push(idx); return true; }
           return false;
         });
         return (
-          <section class="bindings-daemon-group" key={d.name} data-daemon-group={d.name}>
+          <section class="bindings-daemon-group" key={d._id} data-daemon-group={d.name}>
             <h3>daemon: {d.name} (port {d.port})</h3>
             <BindingsList
               bindings={group}
               indices={indices}
-              onAdd={() => onAdd(d.name)}
+              onAdd={() => onAdd(d._id)}
               onUpdate={onUpdate}
               onDelete={onDelete}
             />
@@ -668,10 +685,10 @@ function ClientBindingsSection(props: {
 // onDelete calls operate on the correct slot. Single-daemon path supplies
 // the whole bindings array without an indices map.
 function BindingsList(props: {
-  bindings: Array<{ client: string; daemon: string; url_path: string }>;
+  bindings: BindingFormEntry[];
   indices?: number[];
   onAdd: () => void;
-  onUpdate: (index: number, field: "client" | "daemon" | "url_path", value: string) => void;
+  onUpdate: (index: number, field: "client" | "daemonId" | "url_path", value: string) => void;
   onDelete: (index: number) => void;
 }) {
   const { bindings, indices, onAdd, onUpdate, onDelete } = props;
