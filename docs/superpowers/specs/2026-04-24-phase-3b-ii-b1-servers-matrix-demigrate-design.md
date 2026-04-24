@@ -134,7 +134,7 @@ Three small items adjacent to B1's code surface are bundled into the same branch
 
 - `api.go` package/type comment rewrite (prep commit 1) — same file as the `api.NewAPI()` followup closure; one edit, two doc gaps covered.
 - Three `/api/manifest/edit` handler tests (`a2b-combined-pr-followups.md` item #3) — literally the neighboring handler file of `/api/demigrate`, one commit of Go tests with zero production-code changes.
-- `CLAUDE.md` E2E coverage catch-up (43 → 47 stale from A2b Task 19 → 51 after B1) — ships alongside B1 to avoid a separate docs PR.
+- `CLAUDE.md` E2E coverage catch-up (43 → 47 stale from A2b Task 19 → 52 after B1's +5 E2E scenarios per §6.3) — ships alongside B1 to avoid a separate docs PR.
 
 Each item is explicitly named in §7; none extend B1's ACCEPTANCE path (the matrix uncheck-to-demigrate wiring is the single feature that must land for "B1 done"). Dropping any ancillary item mid-flight is safe.
 
@@ -190,11 +190,13 @@ with:
 
 The new copy is active (describes the enabled action), references the checkbox semantic directly, and no longer points users at the CLI workaround.
 
-### D6 — No optimistic UI; reload-on-success only (REVISED per Codex R3 P2)
+### D6 — No optimistic UI; reload-on-success only; PRUNE successful changes on partial failure (REVISED per Codex R3 P2 + R7 P1)
 
-Today's pattern (unchanged for B1): after Apply dispatches, reload only when `failed.length === 0`. On success, clear dirty AND bump `reloadToken` to trigger a fresh `/api/scan` + `/api/status` fetch; the checkbox state reconciles from the authoritative backend scan. On partial/total failure, leave dirty populated and leave cell checkboxes in their user-flipped local state so the user can retry Apply or un-flip a cell manually.
+After Apply dispatches, reload only when `failed.length === 0`. On success, clear dirty AND bump `reloadToken` to trigger a fresh `/api/scan` + `/api/status` fetch; checkbox state reconciles from the authoritative backend scan. **On partial failure:** prune successful changes from the dirty map — retain ONLY entries whose POST failed — and leave cell checkboxes in their user-flipped local state for the failed cells so the user can retry Apply or un-flip manually.
 
-An earlier revision of this memo said "reload after success OR partial failure"; that was a misread. Verified current `Servers.tsx:108-122` only reloads on the empty-failed branch. Keeping the current behavior avoids a hidden behavior change and preserves the "failed cells stay dirty and retryable" UX that A2a established. E2E scenario §6.3 #3 is written to match the current reload-on-success-only contract.
+Retry-safety rationale: a naive "keep entire dirty map on any failure" retry strategy (what the code does today for the migrate-only path) reintroduces R5/R6's polluted-backup bug on the second attempt. Example: `demigrate(B, claude-code)` succeeds in phase 1, `migrate(A, claude-code)` writes a fresh backup in phase 2, `migrate(C, codex-cli)` fails. User clicks Apply. Without pruning, the already-successful `demigrate(B, claude-code)` replays and reads the NOW-polluted post-migrate backup — falls back to the sentinel, which may lack the entry, demigrate refuses, UX breaks even though the first attempt actually worked. With pruning: only `migrate(C, codex-cli)` retries; `demigrate(B)` and `migrate(A)` are gone from dirty. Apply button disabled after the successful ones are pruned and the user un-flips the stuck cell, OR re-enabled by subsequent changes. **[R7 P1 on this memo caught this retry-amplification.]**
+
+Current `Servers.tsx:108-122` unconditionally keeps dirty on any failure. The plan's matrix-wiring task (§7 step 5) therefore introduces a NEW behavior (success-pruning on partial failure) in addition to the direction-branching and ordering/gating. E2E scenario 5 covers both the per-client gate AND the success-pruning path explicitly.
 
 ### D7 — Apply-button disabled predicate
 
@@ -297,8 +299,8 @@ The plan should derive from this memo with the following commit breakdown:
 3. **Go tests:** add the 3 `/api/manifest/edit` coverage tests (`EmptyName_400`, `MalformedJSON_400`, `RejectsNonPOST_405`). Single commit; no production-code changes.
 4. **Servers matrix dirty-shape refactor:** change `dirty` to `Map<string, Map<string, Direction>>`, update `toggleCell` to persist direction, update `applyChanges` to iterate the richer structure and batch per (server, direction) pair (see §4 D4). This is the load-bearing change. Single commit.
 5. **Servers matrix wiring:** enable `via-hub` checkbox (remove from disabled list, update tooltip copy per §4 D5), branch `applyChanges` endpoint per direction to call `/api/migrate` vs `/api/demigrate` using the shape from commit 4. Includes regenerated assets (`go generate ./internal/gui/...`). Single commit.
-6. **E2E:** add 4 scenarios in `servers.spec.ts`; grep + update any `mcphub rollback` tooltip assertion elsewhere. Single commit.
-7. **Docs:** update `CLAUDE.md` coverage section to reflect current suite (43 in committed docs → 47 at HEAD → 51 after B1) per §6.3 note. Single commit.
+6. **E2E:** add 5 scenarios in `servers.spec.ts` (per §6.3: load-demigrate happy path, mixed-Apply demigrate-first ordering, demigrate-failure preserves dirty + no reload, tooltip-copy assertion, per-client-gate retry-safety); grep + update any `mcphub rollback` tooltip assertion elsewhere. Single commit.
+7. **Docs:** update `CLAUDE.md` coverage section to reflect current suite (43 in committed docs → 47 at HEAD → 52 after B1) per §6.3 note. Single commit.
 
 Estimated scope: **~7 commits, ~200–300 LOC total** (mostly TS/TSX and TS test code; minimal Go — 3 short handler tests). Revised up from 5 commits to account for the dirty-shape refactor now being a distinct load-bearing commit separate from the enable-checkbox wiring.
 
@@ -309,4 +311,4 @@ Estimated scope: **~7 commits, ~200–300 LOC total** (mostly TS/TSX and TS test
 - [x] Ambiguity check — demigrate body shape is explicit (`{servers: [one], clients: [one]}` per-cell batch vs `{servers: [name]}` no-clients for the Migration-screen bulk case).
 - [x] Scope check — single-milestone-sized, 7 commits, one branch.
 - [x] Decision lock — D1 (variant A) confirmed with user + Codex advisory; D4 (dirty-shape refactor) spelled out after Codex R1 P1 caught the missing direction; D10 (no manifest cascade) explicit.
-- [x] Codex-review gate — R1 (P1 dirty shape, P2 backup lock myth, P2 api.go contradiction, P3 E2E count) → rev 2; R2 (P2 D4/D7 prune invariant, P2 backup race failure-mode rewrite, P3 CLI parity claim, P3 scope-drift framing) → rev 3; R3 (P2 D6 reload-on-success-only, P3 D3 batch-label shape, P3 R3 empty-clients verified) → rev 4; R4 (P1 typo `direction-clients` → `clients`, P2 NewAPI-not-literally-zero-cost phrasing, P3 `mcphub stop --server` correct CLI shape) → rev 5; R5 (P1 mixed-Apply order: demigrate-first-not-migrate-first, P2 remaining "zero-cost" phrasing in §1/§3.1, P3 `mcphub rollback --client` never existed — removed equivalence claim from §2.3) → rev 6; R6 (P1 retry-safety: per-client gate on migrate phase after demigrate-phase failure to prevent polluted-backup bug across retries, P3 §2.4 heading still said "VERIFIED ZERO-COST" → "verified no background resources") → rev 7 (this commit).
+- [x] Codex-review gate — R1 (P1 dirty shape, P2 backup lock myth, P2 api.go contradiction, P3 E2E count) → rev 2; R2 (P2 D4/D7 prune invariant, P2 backup race failure-mode rewrite, P3 CLI parity claim, P3 scope-drift framing) → rev 3; R3 (P2 D6 reload-on-success-only, P3 D3 batch-label shape, P3 R3 empty-clients verified) → rev 4; R4 (P1 typo `direction-clients` → `clients`, P2 NewAPI-not-literally-zero-cost phrasing, P3 `mcphub stop --server` correct CLI shape) → rev 5; R5 (P1 mixed-Apply order: demigrate-first-not-migrate-first, P2 remaining "zero-cost" phrasing in §1/§3.1, P3 `mcphub rollback --client` never existed — removed equivalence claim from §2.3) → rev 6; R6 (P1 retry-safety: per-client gate on migrate phase after demigrate-phase failure to prevent polluted-backup bug across retries, P3 §2.4 heading still said "VERIFIED ZERO-COST" → "verified no background resources") → rev 7; R7 (P1 retry-amplification across already-successful changes: D6 now prunes successful entries from dirty on partial failure so a retry doesn't replay post-polluted-backup demigrates; P3 §3.3/§7 count-drift 4→5 scenarios / 51→52) → rev 8 (this commit).
