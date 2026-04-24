@@ -19,6 +19,7 @@ const TRANSPORT_OPTIONS = [
   { value: "stdio-bridge", label: "stdio-bridge (daemon multiplexes stdio child)" },
   { value: "native-http", label: "native-http (upstream speaks HTTP directly)" },
 ] as const;
+const KNOWN_CLIENTS = ["claude-code", "codex-cli", "gemini-cli", "antigravity"] as const;
 
 export function AddServerScreen() {
   const [formState, setFormState] = useState<ManifestFormState>(BLANK_FORM);
@@ -128,6 +129,33 @@ export function AddServerScreen() {
   function parsePort(raw: string): number {
     const n = Number(raw);
     return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : 0;
+  }
+
+  function addBinding(daemonName: string) {
+    setFormState((prev) => ({
+      ...prev,
+      client_bindings: [
+        ...prev.client_bindings,
+        { client: KNOWN_CLIENTS[0], daemon: daemonName, url_path: "/mcp" },
+      ],
+    }));
+  }
+
+  function updateBinding(index: number, field: "client" | "daemon" | "url_path", value: string) {
+    setFormState((prev) => {
+      const next = prev.client_bindings.slice();
+      const target = next[index];
+      if (!target) return prev;
+      next[index] = { ...target, [field]: value };
+      return { ...prev, client_bindings: next };
+    });
+  }
+
+  function deleteBinding(index: number) {
+    setFormState((prev) => ({
+      ...prev,
+      client_bindings: prev.client_bindings.filter((_, i) => i !== index),
+    }));
   }
 
   return (
@@ -260,7 +288,13 @@ export function AddServerScreen() {
             </div>
           </AccordionSection>
           <AccordionSection title="Client bindings">
-            <p class="placeholder">adaptive 1-vs-multi daemon (Task 10)</p>
+            <ClientBindingsSection
+              daemons={formState.daemons}
+              bindings={formState.client_bindings}
+              onAdd={addBinding}
+              onUpdate={updateBinding}
+              onDelete={deleteBinding}
+            />
           </AccordionSection>
         </div>
         <aside class="add-server-preview">
@@ -289,5 +323,107 @@ function AccordionSection(props: { title: string; open?: boolean; children: prea
       </button>
       {expanded && <div class="accordion-body">{props.children}</div>}
     </section>
+  );
+}
+
+// ClientBindingsSection adaptively renders the bindings list:
+//   - When there's exactly one daemon: flat [client][url_path][x] rows,
+//     no inner accordion chrome. New bindings are added under that daemon.
+//   - When there are 0 or 2+ daemons: grouped by daemon, each group is
+//     its own collapsible inner subsection. Zero-daemon case shows a
+//     helpful empty-state instructing the user to add a daemon first.
+function ClientBindingsSection(props: {
+  daemons: Array<{ name: string; port: number }>;
+  bindings: Array<{ client: string; daemon: string; url_path: string }>;
+  onAdd: (daemonName: string) => void;
+  onUpdate: (index: number, field: "client" | "daemon" | "url_path", value: string) => void;
+  onDelete: (index: number) => void;
+}) {
+  const { daemons, bindings, onAdd, onUpdate, onDelete } = props;
+  if (daemons.length === 0) {
+    return (
+      <p class="placeholder">
+        Add at least one daemon (in the section above) before creating
+        client bindings — each binding must reference a daemon by name.
+      </p>
+    );
+  }
+  if (daemons.length === 1) {
+    const only = daemons[0].name;
+    return (
+      <BindingsList
+        bindings={bindings}
+        onAdd={() => onAdd(only)}
+        onUpdate={onUpdate}
+        onDelete={onDelete}
+      />
+    );
+  }
+  return (
+    <div data-testid="bindings-adaptive-multi">
+      {daemons.map((d) => {
+        const indices: number[] = [];
+        const group = bindings.filter((b, idx) => {
+          if (b.daemon === d.name) { indices.push(idx); return true; }
+          return false;
+        });
+        return (
+          <section class="bindings-daemon-group" key={d.name} data-daemon-group={d.name}>
+            <h3>daemon: {d.name} (port {d.port})</h3>
+            <BindingsList
+              bindings={group}
+              indices={indices}
+              onAdd={() => onAdd(d.name)}
+              onUpdate={onUpdate}
+              onDelete={onDelete}
+            />
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+// BindingsList renders a flat list of bindings. When the `indices` prop
+// is supplied (multi-daemon path), it maps each displayed row to its
+// absolute index in the parent client_bindings array, so the onUpdate /
+// onDelete calls operate on the correct slot. Single-daemon path supplies
+// the whole bindings array without an indices map.
+function BindingsList(props: {
+  bindings: Array<{ client: string; daemon: string; url_path: string }>;
+  indices?: number[];
+  onAdd: () => void;
+  onUpdate: (index: number, field: "client" | "daemon" | "url_path", value: string) => void;
+  onDelete: (index: number) => void;
+}) {
+  const { bindings, indices, onAdd, onUpdate, onDelete } = props;
+  return (
+    <div class="repeatable-rows bindings-list" data-testid="bindings-list">
+      {bindings.map((b, displayIdx) => {
+        const absIdx = indices ? indices[displayIdx] : displayIdx;
+        return (
+          <div class="form-row binding-row" key={absIdx} data-binding-row={absIdx}>
+            <select
+              value={b.client}
+              data-field="binding-client"
+              onChange={(e) => onUpdate(absIdx, "client", (e.currentTarget as HTMLSelectElement).value)}
+            >
+              {KNOWN_CLIENTS.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+            <input
+              type="text"
+              value={b.url_path}
+              placeholder="/mcp"
+              data-field="binding-url-path"
+              onInput={(e) => onUpdate(absIdx, "url_path", (e.currentTarget as HTMLInputElement).value)}
+            />
+            <button type="button" onClick={() => onDelete(absIdx)} data-action="delete-binding">×</button>
+          </div>
+        );
+      })}
+      <button type="button" onClick={onAdd} data-action="add-binding">+ Add binding</button>
+    </div>
   );
 }
