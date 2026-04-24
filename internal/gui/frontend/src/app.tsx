@@ -10,14 +10,6 @@ import { ServersScreen } from "./screens/Servers";
 export function App() {
   const screen = useRouter("servers");
   const [addServerDirty, setAddServerDirty] = useState(false);
-  const SCREENS: Record<string, () => JSX.Element> = {
-    servers: () => <ServersScreen />,
-    migration: () => <MigrationScreen />,
-    "add-server": () => <AddServerScreen onDirtyChange={setAddServerDirty} />,
-    dashboard: () => <DashboardScreen />,
-    logs: () => <LogsScreen />,
-  };
-  const Render = SCREENS[screen];
 
   // guardClick is wired onto every sidebar <a>. If the Add server screen
   // is dirty AND the click leaves it for another screen, we prompt.
@@ -44,6 +36,35 @@ export function App() {
     };
   }
 
+  // renderScreen maps the current hash to the matching screen. We render
+  // each <Screen /> inline (not via a lookup table of thunks) so that
+  // Preact sees a stable component type across re-renders. Early attempts
+  // used Record<string, () => JSX.Element> + <Render />, which gave Render
+  // a fresh function identity on every parent re-render and forced Preact
+  // to unmount/remount the screen — destroying AddServer's form state on
+  // every keystroke because its dirty-effect round-trips through parent
+  // state.
+  let body: JSX.Element;
+  switch (screen) {
+    case "servers":
+      body = <ServersScreen />;
+      break;
+    case "migration":
+      body = <MigrationScreen />;
+      break;
+    case "add-server":
+      body = <AddServerScreen onDirtyChange={setAddServerDirty} />;
+      break;
+    case "dashboard":
+      body = <DashboardScreen />;
+      break;
+    case "logs":
+      body = <LogsScreen />;
+      break;
+    default:
+      body = <p>Unknown screen: {screen}</p>;
+  }
+
   return (
     <>
       <aside class="sidebar">
@@ -57,7 +78,7 @@ export function App() {
         </nav>
       </aside>
       <main id="screen-root">
-        {Render ? <Render /> : <p>Unknown screen: {screen}</p>}
+        {body}
       </main>
     </>
   );
