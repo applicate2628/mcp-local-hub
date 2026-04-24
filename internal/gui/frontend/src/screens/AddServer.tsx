@@ -284,7 +284,17 @@ export function AddServerScreen(props: {
   }
 
   const [warnings, setWarnings] = useState<string[] | null>(null);
-  const [banner, setBanner] = useState<{ kind: "error" | "success"; text: string; retry?: () => Promise<void> } | null>(null);
+
+  type Banner = {
+    kind: "error" | "success";
+    text: string;
+    retry?: () => Promise<void>;
+    reinstall?: boolean;
+    staleReload?: boolean;
+    staleForceSave?: boolean;
+  };
+
+  const [banner, setBanner] = useState<Banner | null>(null);
   const [busy, setBusy] = useState<"" | "validate" | "save" | "install">("");
   // submissionVersion: bumped every time a Save/Save&Install click starts
   // its own inline serialize-validate-submit pipeline. If a second click
@@ -329,33 +339,134 @@ export function AddServerScreen(props: {
         setBanner({ kind: "error", text: "Name is required." });
         return;
       }
-      const payload = toYAML(formState); // FRESH snapshot, not debounced preview
-      const validateOut = await postManifestValidate(payload);
+      const payload = toYAML(formState);
+      const warnings = await postManifestValidate(payload);
       if (version !== submissionCounter.current) return;
-      if (validateOut.length > 0) {
-        setWarnings(validateOut);
-        setBanner({ kind: "error", text: `Cannot save: ${validateOut.length} validation warning${validateOut.length === 1 ? "" : "s"}.` });
+      if (warnings.length > 0) {
+        setWarnings(warnings);
+        setBanner({
+          kind: "error",
+          text: `Cannot save: ${warnings.length} validation warning${warnings.length === 1 ? "" : "s"}.`,
+        });
         return;
       }
-      await postManifestCreate(name, payload);
-      if (version !== submissionCounter.current) return;
-      // Commit the save as the new baseline. Paste does NOT do this; only
-      // actual persist does. (Q8.)
-      setInitialSnapshot(formState);
+      if (mode === "edit") {
+        try {
+          const { hash: newHash } = await postManifestEdit(name, payload, formState.loadedHash);
+          if (version !== submissionCounter.current) return;
+          // Atomic snapshot update: build one post-save object carrying the
+          // fresh hash AND the user's just-persisted form state; set both
+          // formState and initialSnapshot from the same reference so dirty
+          // is false (P1-2 fix: no separate getManifest refresh, no ordering race).
+          const postSave: ManifestFormState = { ...formState, loadedHash: newHash };
+          setFormState(postSave);
+          setInitialSnapshot(postSave);
+        } catch (err) {
+          if (version !== submissionCounter.current) return;
+          if (err instanceof ManifestHashMismatchError) {
+            setBanner({
+              kind: "error",
+              text: "Manifest changed on disk since you opened it. Reload will discard your edits and show the new version. Force Save will overwrite with your version.",
+              staleReload: true,
+              staleForceSave: true,
+            });
+            return;
+          }
+          throw err;
+        }
+      } else {
+        await postManifestCreate(name, payload);
+        if (version !== submissionCounter.current) return;
+        setInitialSnapshot(formState);
+      }
+      setWarnings(null);
       if (!opts.install) {
-        setWarnings(null);
-        setBanner({ kind: "success", text: `Saved servers/${name}/manifest.yaml.` });
+        setBanner({
+          kind: "success",
+          text: mode === "edit"
+            ? `Saved. Daemon still running old config.`
+            : `Saved servers/${name}/manifest.yaml.`,
+          reinstall: mode === "edit",
+        });
         return;
       }
-      // Save & Install: run install; on failure, keep manifest on disk, offer retry.
       await runInstallNow(name, version);
     } catch (err) {
       if (version !== submissionCounter.current) return;
       setBanner({ kind: "error", text: (err as Error).message });
     } finally {
-      if (version === submissionCounter.current) {
-        setBusy("");
+      if (version === submissionCounter.current) setBusy("");
+    }
+  }
+
+  async function runReload() {
+    if (!editName) return;
+    setBusy("save");
+    setBanner(null);
+    try {
+      const { yaml, hash } = await getManifest(editName);
+      const parsed = parseYAMLToForm(yaml);
+      parsed.loadedHash = hash;
+      setFormState(parsed);
+      setInitialSnapshot(parsed);
+      setBanner({ kind: "success", text: "Reloaded fresh manifest from disk." });
+    } catch (err) {
+      setBanner({ kind: "error", text: (err as Error).message });
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function runForceSave() {
+    const version = ++submissionCounter.current;
+    setBusy("save");
+    setBanner(null);
+    try {
+      const name = formState.name.trim();
+      // 1. Re-read disk to get fresh hash + fresh _preservedRaw.
+      const fresh = await getManifest(name);
+      if (version !== submissionCounter.current) return;
+      const freshParsed = parseYAMLToForm(fresh.yaml);
+      // 2. Merge: user's known-field edits win; fresh disk _preservedRaw wins.
+      const merged: ManifestFormState = {
+        ...formState,
+        _preservedRaw: freshParsed._preservedRaw,
+      };
+      // 3. Serialize FINAL payload AFTER merge.
+      const payload = toYAML(merged);
+      // 4. Validate the FINAL payload (P1-4 fix: validate the exact bytes
+      // that will be written, not pre-merge).
+      const warnings = await postManifestValidate(payload);
+      if (version !== submissionCounter.current) return;
+      if (warnings.length > 0) {
+        setWarnings(warnings);
+        setBanner({
+          kind: "error",
+          text: `Cannot Force Save: ${warnings.length} validation warning${warnings.length === 1 ? "" : "s"} in merged payload.`,
+        });
+        return;
       }
+      // 5. Write with fresh hash as expectedHash; consume returned new hash.
+      const { hash: newHash } = await postManifestEdit(name, payload, fresh.hash);
+      if (version !== submissionCounter.current) return;
+      // 6. Atomic baseline update.
+      const postSave: ManifestFormState = { ...merged, loadedHash: newHash };
+      setFormState(postSave);
+      setInitialSnapshot(postSave);
+      const preservedKeys = Object.keys(freshParsed._preservedRaw);
+      setBanner({
+        kind: "success",
+        text:
+          preservedKeys.length > 0
+            ? `Force-saved. Preserved external fields: ${preservedKeys.join(", ")}.`
+            : `Force-saved.`,
+        reinstall: true,
+      });
+    } catch (err) {
+      if (version !== submissionCounter.current) return;
+      setBanner({ kind: "error", text: `Force Save failed: ${(err as Error).message}` });
+    } finally {
+      if (version === submissionCounter.current) setBusy("");
     }
   }
 
@@ -439,12 +550,6 @@ export function AddServerScreen(props: {
     }
   }
 
-  // Suppress unused-import warnings for Task 13 symbols (postManifestEdit,
-  // ManifestHashMismatchError). getManifest is now consumed by the mount
-  // effect above; these two are still latent until Task 13.
-  void postManifestEdit;
-  void ManifestHashMismatchError;
-
   return (
     <section class="screen add-server">
       <h1>Add server</h1>
@@ -516,9 +621,22 @@ export function AddServerScreen(props: {
         <div class={`banner ${banner.kind}`} data-testid="banner">
           <p>{banner.text}</p>
           {banner.retry && (
-            <button type="button" onClick={() => banner.retry?.()} data-action="retry-install">
-              Retry Install
+            <button type="button" onClick={() => banner.retry?.()} data-action="retry-install">Retry Install</button>
+          )}
+          {banner.reinstall && (
+            <button
+              type="button"
+              onClick={() => runInstallNow(formState.name.trim(), ++submissionCounter.current)}
+              data-action="reinstall"
+            >
+              Reinstall
             </button>
+          )}
+          {banner.staleReload && (
+            <button type="button" onClick={() => runReload()} data-action="reload">Reload</button>
+          )}
+          {banner.staleForceSave && (
+            <button type="button" onClick={() => runForceSave()} data-action="force-save">Force Save</button>
           )}
         </div>
       )}
