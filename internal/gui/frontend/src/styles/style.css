@@ -65,3 +65,117 @@ main { padding: 24px; overflow: auto; }
 .screen.migration .server-name { flex: 1 1 auto; font-family: var(--font-mono); }
 .screen.migration .action-error { color: var(--danger, #cf222e); }
 .screen.migration button[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+/* Add server — accordion + two-column grid */
+.screen.add-server .add-server-grid {
+  display: grid;
+  grid-template-columns: minmax(420px, 1fr) minmax(320px, 420px);
+  gap: 24px;
+  margin-top: 8px;
+}
+.screen.add-server .add-server-preview pre {
+  background: var(--sidebar-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  max-height: 70vh;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+.screen.add-server .accordion {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+.screen.add-server .accordion-header {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--sidebar-bg);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+}
+.screen.add-server .accordion-header .chevron {
+  width: 1em;
+  text-align: center;
+}
+.screen.add-server .accordion-body {
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+}
+.screen.add-server .accordion .placeholder {
+  color: var(--text-muted, #656d76);
+  font-style: italic;
+  margin: 0;
+}
+.screen.add-server .form-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 6px 0;
+}
+.screen.add-server .form-row label {
+  min-width: 120px;
+  font-size: 14px;
+}
+.screen.add-server .form-row input[type="text"],
+.screen.add-server .form-row input[type="number"],
+.screen.add-server .form-row select {
+  flex: 1 1 auto;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+.screen.add-server .inline-error {
+  color: var(--danger);
+  font-size: 12px;
+  margin-left: 8px;
+}
+.screen.add-server .toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 16px 0;
+}
+.screen.add-server .toolbar button {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  background: var(--sidebar-bg);
+  color: var(--text);
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+}
+.screen.add-server .toolbar button.primary {
+  background: var(--success);
+  color: var(--bg);
+  border-color: var(--success);
+}
+.screen.add-server .toolbar button[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.screen.add-server .banner {
+  padding: 10px 12px;
+  border-left: 4px solid var(--border);
+  border-radius: 4px;
+  background: var(--sidebar-bg);
+  margin: 8px 0;
+  font-size: 14px;
+}
+.screen.add-server .banner.error {
+  border-left-color: var(--danger);
+}
+.screen.add-server .banner.success {
+  border-left-color: var(--success);
+}

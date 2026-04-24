@@ -56,3 +56,66 @@ export async function postDismiss(server: string): Promise<void> {
   }
   throw new Error(`/api/dismiss: ${body?.error ?? resp.statusText}`);
 }
+
+// postManifestCreate writes a new manifest via the A2a GUI pipeline. On
+// success the backend returns 204; any non-2xx is surfaced as a thrown
+// Error carrying the backend's {error} envelope text when present. Callers
+// handle the "already exists" case by inspecting the error message — the
+// backend currently returns "manifest \"<name>\" already exists at ..."
+// verbatim, which is user-friendly enough to show in a banner.
+export async function postManifestCreate(name: string, yaml: string): Promise<void> {
+  const resp = await fetch("/api/manifest/create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, yaml }),
+  });
+  if (resp.status === 204) return;
+  let body: { error?: string } | null = null;
+  try {
+    body = (await resp.json()) as { error?: string };
+  } catch {
+    // Non-JSON error body; fall through.
+  }
+  throw new Error(`/api/manifest/create: ${body?.error ?? resp.statusText}`);
+}
+
+// postManifestValidate returns the list of structural warnings produced by
+// api.ManifestValidate. Empty array == valid. Throws on transport/HTTP error
+// (not on validation warnings — those are normal return values).
+export async function postManifestValidate(yaml: string): Promise<string[]> {
+  const resp = await fetch("/api/manifest/validate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ yaml }),
+  });
+  if (!resp.ok) {
+    let body: { error?: string } | null = null;
+    try {
+      body = (await resp.json()) as { error?: string };
+    } catch {
+      // Non-JSON error body; fall through.
+    }
+    throw new Error(`/api/manifest/validate: ${body?.error ?? resp.statusText}`);
+  }
+  const payload = (await resp.json()) as { warnings?: string[] };
+  return payload.warnings ?? [];
+}
+
+// getExtractManifest fetches the prefill YAML that populates AddServer's
+// form when the user arrives via the A1 Migration Create-manifest button.
+// Returns the raw YAML string. Throws on non-2xx with the backend error.
+export async function getExtractManifest(client: string, server: string): Promise<string> {
+  const url = `/api/extract-manifest?client=${encodeURIComponent(client)}&server=${encodeURIComponent(server)}`;
+  const resp = await fetch(url);
+  if (!resp.ok) {
+    let body: { error?: string } | null = null;
+    try {
+      body = (await resp.json()) as { error?: string };
+    } catch {
+      // Non-JSON error body; fall through.
+    }
+    throw new Error(`/api/extract-manifest: ${body?.error ?? resp.statusText}`);
+  }
+  const payload = (await resp.json()) as { yaml?: string };
+  return payload.yaml ?? "";
+}

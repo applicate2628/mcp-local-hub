@@ -319,8 +319,13 @@ function UnknownGroup(props: {
               type="button"
               class="create-manifest"
               data-action="create-manifest"
-              disabled
-              title="Available after A2 (Add/Edit manifest) ships"
+              onClick={() => {
+                const client = firstClientFor(e);
+                const url = client
+                  ? `#/add-server?server=${encodeURIComponent(e.name)}&from-client=${encodeURIComponent(client)}`
+                  : `#/add-server?server=${encodeURIComponent(e.name)}`;
+                window.location.hash = url;
+              }}
             >
               Create manifest
             </button>
@@ -365,4 +370,17 @@ function PerSessionGroup(props: { entries: ScanEntry[] }) {
       </ul>
     </section>
   );
+}
+
+// firstClientFor picks a sensible client name to extract from for a given
+// Unknown scan entry. The stdio entry may live in any one client's config
+// (typically the user had the server set up in Claude Code first). We pick
+// the first client that has a stdio transport for the entry; fallback:
+// empty string, which still navigates (fresh-create with just the name).
+function firstClientFor(entry: { client_presence?: Record<string, { transport?: string }> }): string {
+  const presence = entry.client_presence ?? {};
+  for (const [client, info] of Object.entries(presence)) {
+    if (info?.transport === "stdio") return client;
+  }
+  return "";
 }
