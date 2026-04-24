@@ -262,7 +262,9 @@ func TestManifestGetIn_ReturnsContentHash(t *testing.T) {
 	dir := t.TempDir()
 	a := &API{}
 	name := "memory"
-	yaml := "name: memory\nkind: global\ntransport: stdio-bridge\ncommand: npx\n"
+	// Must satisfy api.ManifestValidate (which ManifestCreateIn gates on):
+	// requires kind, transport, command, and at least one daemon.
+	yaml := "name: memory\nkind: global\ntransport: stdio-bridge\ncommand: npx\ndaemons:\n  - name: default\n    port: 9210\n"
 	if err := a.ManifestCreateIn(dir, name, yaml); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -283,13 +285,16 @@ func TestManifestGetIn_HashChangesOnExternalWrite(t *testing.T) {
 	dir := t.TempDir()
 	a := &API{}
 	name := "demo"
-	if err := a.ManifestCreateIn(dir, name, "name: demo\n"); err != nil {
+	initial := "name: demo\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9211\n"
+	if err := a.ManifestCreateIn(dir, name, initial); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	_, h1, _ := a.ManifestGetInWithHash(dir, name)
-	// External write.
+	// External write — different bytes (port change) to simulate another
+	// editor touching the file between Load and Save.
 	path := filepath.Join(dir, name, "manifest.yaml")
-	if err := os.WriteFile(path, []byte("name: demo\nkind: global\n"), 0600); err != nil {
+	mutated := "name: demo\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9212\n"
+	if err := os.WriteFile(path, []byte(mutated), 0600); err != nil {
 		t.Fatalf("external write: %v", err)
 	}
 	_, h2, _ := a.ManifestGetInWithHash(dir, name)
