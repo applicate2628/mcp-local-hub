@@ -101,9 +101,9 @@ Find and replace:
 ## 2. `api.NewAPI()` called per-request in `realManifest*` adapters
 ```
 
-…with the new heading + verified body below (preserving the section ordering; if FIXED items live in a different group in this file, move section #2 into that group):
+…with the new heading + verified body below (preserving the section ordering; if FIXED items live in a different group in this file, move section #2 into that group). Note: the block uses a **4-backtick outer fence** because the body nests a 3-backtick Go code block — a 3-backtick outer fence would break rendering and prevent clean copy-paste.
 
-```markdown
+````markdown
 ## 2. ~~`api.NewAPI()` called per-request in `realManifest*` adapters~~ — FIXED (verified, B1)
 
 **Originally flagged:** Task 4 code-quality review (confidence 85), concern that `newEventBus()` might spawn a goroutine making per-request `api.NewAPI()` a leak.
@@ -120,7 +120,7 @@ func newEventBus() *EventBus { return &EventBus{} }
 **Doc fix bundled alongside B1** (`internal/api/api.go` comments revised to match — the old "A single instance is created per process" claim and the "CLI ≡ UI parity by construction" claim both contradicted current state; updated to describe per-request GUI adapter construction and softened the CLI-parity language).
 
 **Shared-`*api.API` refactor deferred** until `EventBus` is actually populated (the source comment in `events.go` says "Populated in Task 22"). When that work lands, the same task restates the per-process-instance contract and threads a shared handle through all adapters.
-```
+````
 
 ### Step 3 — Read the current state of `internal/api/api.go`
 
@@ -646,27 +646,28 @@ type OutcomeMap = Map<string, Map<string, Outcome>>;
     setApplying(true);
     setApplyMsg(`Applying…`);
 
-    // Phase 1: demigrate batches. Group dirty entries by (server, direction)
-    // and send all demigrate POSTs FIRST. §4 D4 order invariant: demigrate
-    // must run before migrate because api.MigrateFrom writes a fresh backup
-    // — a demigrate after migrate on the same client would read the polluted
-    // post-migrate backup and fall back to the sentinel.
-    type Batch = { server: string; clients: string[] };
-    const demigrateBatches: Batch[] = [];
-    const migrateBatches: Batch[] = [];
+    // Per-cell POST granularity (memo §4 D2). Each (server, client, direction)
+    // cell fires its OWN /api/migrate or /api/demigrate POST with a single-
+    // element clients array. Batching multiple clients into one POST would
+    // be collapsed by the handlers into a single 500 on any row failure,
+    // corrupting per-cell outcome tracking — a batch containing one failed
+    // row and one succeeded row would mark BOTH failed, leaving the actually-
+    // successful row dirty and replaying it on retry (which reads the now-
+    // polluted backup and hits the R5 sentinel bug). Per-cell POSTs keep
+    // outcome 1:1 with cell state. [Codex plan-R4 P1 on this plan.]
+    type Cell = { server: string; client: string };
+    const demigrateCells: Cell[] = [];
+    const migrateCells: Cell[] = [];
     for (const [server, clientMap] of dirty.entries()) {
-      const demigrateClients: string[] = [];
-      const migrateClients: string[] = [];
       for (const [client, direction] of clientMap.entries()) {
-        if (direction === "demigrate") demigrateClients.push(client);
-        else migrateClients.push(client);
+        if (direction === "demigrate") demigrateCells.push({ server, client });
+        else migrateCells.push({ server, client });
       }
-      if (demigrateClients.length > 0) demigrateBatches.push({ server, clients: demigrateClients });
-      if (migrateClients.length > 0) migrateBatches.push({ server, clients: migrateClients });
     }
 
     // Per-entry outcomes — seed every entry as "gated" (will upgrade to
-    // "succeeded" or "failed" once its POST fires).
+    // "succeeded" or "failed" once its POST fires; gated only remains for
+    // cells skipped by the phase-2 per-client gate).
     const outcomes: OutcomeMap = new Map();
     for (const [server, clientMap] of dirty.entries()) {
       const row: Map<string, Outcome> = new Map();
@@ -675,63 +676,59 @@ type OutcomeMap = Map<string, Map<string, Outcome>>;
     }
 
     const failed: string[] = [];
-    // Clients whose phase-1 demigrate failed. Phase 2 strips these from
-    // every migrate batch (per-client gate, §4 D4). If a migrate batch's
-    // filtered clients list becomes empty, skip the POST entirely.
+    // Clients whose phase-1 demigrate failed. Phase 2 skips every migrate
+    // cell targeting such a client (per-client gate, §4 D4). Gated cells
+    // stay "gated" in outcomes and retain in dirty for retry.
     const failedDemigrateClients = new Set<string>();
 
-    // PHASE 1 — demigrate.
-    for (const batch of demigrateBatches) {
+    // PHASE 1 — demigrate (one POST per cell).
+    for (const cell of demigrateCells) {
       try {
         const resp = await fetch("/api/demigrate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ servers: [batch.server], clients: batch.clients }),
+          body: JSON.stringify({ servers: [cell.server], clients: [cell.client] }),
         });
         if (resp.ok || resp.status === 204) {
-          for (const c of batch.clients) outcomes.get(batch.server)!.set(c, "succeeded");
+          outcomes.get(cell.server)!.set(cell.client, "succeeded");
         } else {
           const body = (await resp.json().catch(() => ({}))) as { error?: string };
-          failed.push(`${batch.server}/demigrate/[${batch.clients.join(",")}]: ${body.error ?? resp.status}`);
-          for (const c of batch.clients) {
-            outcomes.get(batch.server)!.set(c, "failed");
-            failedDemigrateClients.add(c);
-          }
+          failed.push(`${cell.server}/demigrate/${cell.client}: ${body.error ?? resp.status}`);
+          outcomes.get(cell.server)!.set(cell.client, "failed");
+          failedDemigrateClients.add(cell.client);
         }
       } catch (e) {
-        failed.push(`${batch.server}/demigrate/[${batch.clients.join(",")}]: ${(e as Error).message ?? "unknown"}`);
-        for (const c of batch.clients) {
-          outcomes.get(batch.server)!.set(c, "failed");
-          failedDemigrateClients.add(c);
-        }
+        failed.push(`${cell.server}/demigrate/${cell.client}: ${(e as Error).message ?? "unknown"}`);
+        outcomes.get(cell.server)!.set(cell.client, "failed");
+        failedDemigrateClients.add(cell.client);
       }
     }
 
-    // PHASE 2 — migrate, with per-client gate.
-    for (const batch of migrateBatches) {
-      const allowedClients = batch.clients.filter((c) => !failedDemigrateClients.has(c));
-      if (allowedClients.length === 0) {
-        // Every client in this batch was gated (its demigrate on the same
-        // client failed in phase 1). Skip the POST entirely; entries stay
-        // "gated" so they retain in dirty for retry.
+    // PHASE 2 — migrate (one POST per cell, with per-client gate).
+    for (const cell of migrateCells) {
+      if (failedDemigrateClients.has(cell.client)) {
+        // Gated: a phase-1 demigrate on this client failed. Do NOT fire
+        // the migrate — it would write a polluted post-migrate backup
+        // that the user's retry of the failed demigrate would then
+        // misread. Outcome stays "gated"; entry retains in dirty.
         continue;
       }
       try {
         const resp = await fetch("/api/migrate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ servers: [batch.server], clients: allowedClients }),
+          body: JSON.stringify({ servers: [cell.server], clients: [cell.client] }),
         });
         if (resp.ok || resp.status === 204) {
-          for (const c of allowedClients) outcomes.get(batch.server)!.set(c, "succeeded");
+          outcomes.get(cell.server)!.set(cell.client, "succeeded");
         } else {
           const body = (await resp.json().catch(() => ({}))) as { error?: string };
-          failed.push(`${batch.server}/migrate/[${allowedClients.join(",")}]: ${body.error ?? resp.status}`);
-          for (const c of allowedClients) outcomes.get(batch.server)!.set(c, "failed");
+          failed.push(`${cell.server}/migrate/${cell.client}: ${body.error ?? resp.status}`);
+          outcomes.get(cell.server)!.set(cell.client, "failed");
         }
       } catch (e) {
-        failed.push(`${batch.server}/migrate/[${allowedClients.join(",")}]: ${(e as Error).message ?? "unknown"}`);
-        for (const c of allowedClients) outcomes.get(batch.server)!.set(c, "failed");
+        failed.push(`${cell.server}/migrate/${cell.client}: ${(e as Error).message ?? "unknown"}`);
+        outcomes.get(cell.server)!.set(cell.client, "failed");
       }
     }
 
@@ -866,7 +863,10 @@ Wiring per B1 design memo §4 decisions:
   Checkbox initialChecked baseline honest so future toggles fire the
   correct direction.
 - Error surface (D3): failed.push entries are '{server}/{direction}/
-  [{client-list}]: {error}' — aligns with the batch shape.
+  {client}: {error}' — per-cell, 1:1 with cell state (plan-R4 P1:
+  switched from batched-client POSTs to per-cell POSTs because the
+  handler collapses partial failures into a single 500 and that would
+  mark truly-succeeded rows as failed, defeating success-pruning).
 
 No backend change (api.Demigrate, /api/demigrate handler, and the
 Migration-screen per-row Demigrate button were already merged as
@@ -1172,10 +1172,12 @@ Expected: a `test.describe("Servers"...)` with 3 existing scenarios. Note whethe
     await page.locator('#servers-toolbar button', { hasText: "Apply" }).click();
 
     // Wait for Apply to fully settle: "Failed:" banner appears AND Apply
-    // button is re-enabled (setApplying(false) has run). Only THEN read
-    // log.length — otherwise a buggy extra gated-migrate POST arriving
-    // mid-settle could slip past a `>= 2` wait. §4 D4/D6 guarantees the
-    // first Apply posts exactly one demigrate + one filtered migrate.
+    // button is re-enabled (setApplying(false) has run). Then assert exact
+    // POST count + per-cell shape. Phase 1 per-cell: ONE /api/demigrate
+    // for (A, claude-code). Phase 2 per-cell with gate: migrate for
+    // (B, claude-code) SKIPPED (gated — failedDemigrateClients has
+    // claude-code), migrate for (B, codex-cli) FIRES as its own POST.
+    // Total: 2 POSTs, each with a single-element clients array.
     await expect(page.locator('#servers-toolbar .error')).toContainText("Failed:");
     await expect(page.locator('#servers-toolbar button', { hasText: "Apply" })).toBeEnabled();
     expect(log).toHaveLength(2);
