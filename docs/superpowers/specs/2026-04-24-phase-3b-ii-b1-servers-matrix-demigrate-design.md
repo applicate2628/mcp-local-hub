@@ -151,9 +151,15 @@ Codex advisory concurs (2026-04-24 consultation): variant A has the best user-va
 
 Per-change narrow: `POST /api/demigrate` with `{servers: [change.server], clients: [change.client]}`. This matches `DemigrateOpts.ClientsInclude` semantics — rolls back only the (server, client) pair the user unchecked, not every client bound to that server. Users can demigrate every binding from the Migration screen's per-row button (which sends `{servers: [name]}` with empty `clients`).
 
-### D3 — Error surface
+### D3 — Error surface (REVISED per Codex R3 P3 — aligned with D4 batching)
 
-Reuse the existing `failed: string[]` pattern in `applyChanges`. On a failed POST, push `${change.server}/${change.client}: ${body.error ?? resp.status}` and continue with remaining changes. Render `Failed: <joined>` in the toolbar's `apply-msg` span. No inline per-row error (would require row-state plumbing; not a B1 requirement).
+Reuse the existing `failed: string[]` pattern in `applyChanges`. Each POST represents a `(server, direction)` batch carrying one or more clients, so the failure label must reflect the batch shape:
+
+```ts
+failed.push(`${server}/${direction}/[${clients.join(",")}]: ${body.error ?? resp.status}`);
+```
+
+Render `Failed: <joined>` in the toolbar's `apply-msg` span. No inline per-row error (would require row-state plumbing; not a B1 requirement).
 
 ### D4 — Dirty-map tracking (REVISED per Codex R1 P1)
 
@@ -182,9 +188,11 @@ with:
 
 The new copy is active (describes the enabled action), references the checkbox semantic directly, and no longer points users at the CLI workaround.
 
-### D6 — No optimistic UI
+### D6 — No optimistic UI; reload-on-success only (REVISED per Codex R3 P2)
 
-Keep the existing pattern: after Apply dispatches all changes (success or partial), bump `reloadToken` to trigger a fresh `/api/scan` + `/api/status` fetch. The new checkbox state for via-hub cells will reconcile from the authoritative backend scan — consistent with how migrate-direction changes already reconcile.
+Today's pattern (unchanged for B1): after Apply dispatches, reload only when `failed.length === 0`. On success, clear dirty AND bump `reloadToken` to trigger a fresh `/api/scan` + `/api/status` fetch; the checkbox state reconciles from the authoritative backend scan. On partial/total failure, leave dirty populated and leave cell checkboxes in their user-flipped local state so the user can retry Apply or un-flip a cell manually.
+
+An earlier revision of this memo said "reload after success OR partial failure"; that was a misread. Verified current `Servers.tsx:108-122` only reloads on the empty-failed branch. Keeping the current behavior avoids a hidden behavior change and preserves the "failed cells stay dirty and retryable" UX that A2a established. E2E scenario §6.3 #3 is written to match the current reload-on-success-only contract.
 
 ### D7 — Apply-button disabled predicate
 
@@ -229,9 +237,19 @@ Imagine a user checks a `direct` cell (queues migrate) and unchecks a different 
 
 The user unchecks a cell that is "via-hub" at page load but a background external-config change between load and Apply moved it to "direct". The POST `/api/demigrate` fires for a server whose latest-backup no longer contains a hub-routed entry → `Demigrate` auto-falls-back to the `-original` sentinel, or if the sentinel lacks the entry, refuses with a Failed row that surfaces in `apply-msg`. Existing behavior; no new defense needed.
 
-### R3 — Empty `clients` slice semantics
+### R3 — Empty `clients` slice semantics (VERIFIED per Codex R3 P3)
 
-`DemigrateOpts.ClientsInclude == nil` means "every client in the manifest's `client_bindings`", while `ClientsInclude == []string{}` (empty non-nil) means "no filter applied"... need to verify the existing handler normalizes this. Task 1 of the plan should grep `demigrate.go` for the zero-length behavior and fix the frontend to always send a non-empty `clients` slice for the per-cell case to match the narrow-rollback intent. (Migration per-row button already sends `servers: [name]` with no `clients` field, which serializes as `null` and means "every binding" — that is the intended broad rollback for that UI.)
+Verified against [internal/api/demigrate.go:72](../../../internal/api/demigrate.go#L72):
+
+```go
+if len(opts.ClientsInclude) == 0 {
+    return true
+}
+```
+
+`len(nil slice) == 0` in Go, so **both** `ClientsInclude == nil` and `ClientsInclude == []string{}` behave identically: "no filter applied — every client bound in the manifest is rolled back". The Migration per-row button's current body `{servers: [name]}` (no `clients` field → missing JSON key → nil Go slice) therefore produces the intended broad-rollback semantics.
+
+For B1's per-cell rollback we must send a **non-empty `clients` array** — `{servers: [change.server], direction-clients: [...toRollBackOnly]}` — so the narrow filter actually narrows. An empty client array would widen the rollback to every binding on the manifest, undoing the cell-level intent. Plan's Task 5 (matrix wiring) must include a typed check that the demigrate POST body never has `clients: []` for per-cell calls.
 
 ### R4 — Tooltip copy change breaks an existing E2E assertion
 
@@ -255,7 +273,7 @@ No new `internal/api/demigrate_test.go` or `internal/gui/demigrate_test.go` test
 
 1. **"uncheck via-hub + Apply posts /api/demigrate"** — seed a manifest + scan-result fixture where cell `(demo, claude-code)` is `via-hub`; load Servers matrix; intercept `/api/demigrate` on the page; uncheck the cell; click Apply; assert the intercepted POST body is `{servers: ["demo"], clients: ["claude-code"]}` and the row refreshes to show `direct` (or the cell reflects whatever the post-reload scan returns).
 2. **"mixed Apply dispatches both endpoints"** — seed two rows: `(a, claude-code)` at `direct`, `(b, claude-code)` at `via-hub`. User checks the first and unchecks the second. Apply dispatches `/api/migrate` then `/api/demigrate` in dirty-map order. Assert both requests posted with their respective narrowed bodies.
-3. **"demigrate failure surfaces in apply-msg"** — stub `/api/demigrate` to 500 with a generic body. Uncheck a via-hub cell, Apply. Assert the toolbar `apply-msg` contains `Failed:` and the row stays at `via-hub` after the reload (backend truth wins). Checkbox resets to its pre-change state via the existing reloadToken refresh.
+3. **"demigrate failure surfaces in apply-msg and keeps dirty state"** — stub `/api/demigrate` to 500 with a generic body. Uncheck a via-hub cell, Apply. Assert the toolbar `apply-msg` contains `Failed:` with the `server/demigrate/[client]` shape from §4 D3. Per §4 D6 (reload-on-success-only): reloadToken is NOT bumped on failure, so the checkbox stays in its locally-flipped (unchecked) state and dirty map retains the entry — user can click Apply again to retry or toggle the cell to revert. No routing-column change expected because the scan did not re-run.
 4. **"tooltip copy reflects uncheck-to-demigrate semantic"** — assert the `title` attribute on a `via-hub` cell contains "Uncheck and Apply to roll this binding back" (or the exact substring we land on). Remove/update any prior assertion that expected the `mcphub rollback --client` phrase.
 
 Target: `internal/gui/e2e/tests/servers.spec.ts` grows from 3 → 7 scenarios (4 new). Total E2E suite at current HEAD is **47** (3 shell + 3 servers + 6 migration + 13 add-server + 17 edit-server + 2 dashboard + 3 logs — verified by counting `test(` per spec file). Target after B1: **51**.
@@ -287,4 +305,4 @@ Estimated scope: **~7 commits, ~200–300 LOC total** (mostly TS/TSX and TS test
 - [x] Ambiguity check — demigrate body shape is explicit (`{servers: [one], clients: [one]}` per-cell batch vs `{servers: [name]}` no-clients for the Migration-screen bulk case).
 - [x] Scope check — single-milestone-sized, 7 commits, one branch.
 - [x] Decision lock — D1 (variant A) confirmed with user + Codex advisory; D4 (dirty-shape refactor) spelled out after Codex R1 P1 caught the missing direction; D10 (no manifest cascade) explicit.
-- [x] Codex-review gate — R1 REVISE findings (P1 dirty shape, P2 backup lock myth, P2 api.go contradiction, P3 E2E count) all addressed in revision 2; R2 findings (P2 D4/D7 prune invariant, P2 backup race failure-mode rewrite, P3 CLI parity claim, P3 scope-drift framing) all addressed in revision 3.
+- [x] Codex-review gate — R1 REVISE (P1 dirty shape, P2 backup lock myth, P2 api.go contradiction, P3 E2E count) → revision 2; R2 (P2 D4/D7 prune invariant, P2 backup race failure-mode rewrite, P3 CLI parity claim, P3 scope-drift framing) → revision 3; R3 (P2 D6 reload-on-success-only, P3 D3 batch-label shape, P3 R3 empty-clients semantics verified) → revision 4 (this commit).
