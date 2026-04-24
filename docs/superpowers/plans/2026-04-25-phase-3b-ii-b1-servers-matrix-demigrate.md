@@ -551,13 +551,13 @@ Expected: 107 tests pass (same count as HEAD).
 
 ### Step 6 — Regenerate embedded assets
 
-- [ ] **From repo root:**
+- [ ] **From `internal/gui/frontend/` (where the previous typecheck+Vitest steps ran), hop back to repo root and regenerate:**
 
 ```bash
 cd ../../.. && go generate ./internal/gui/...
 ```
 
-Expected: vite build output showing `internal/gui/assets/app.js` regenerated.
+Expected: vite build output showing `internal/gui/assets/app.js` regenerated. (If you lost your working dir — just `cd <repo-root> && go generate ./internal/gui/...` from anywhere.)
 
 ### Step 7 — Verify existing A2a servers E2E still passes
 
@@ -1171,31 +1171,33 @@ Expected: a `test.describe("Servers"...)` with 3 existing scenarios. Note whethe
     // FIRST Apply.
     await page.locator('#servers-toolbar button', { hasText: "Apply" }).click();
 
-    // Expect: one demigrate POST (A, claude-code) — fails. One migrate POST
-    // for B — clients list contains codex-cli only (claude-code stripped by
-    // the per-client gate because demigrate(A, claude-code) failed).
-    await expect.poll(() => log.length).toBeGreaterThanOrEqual(2);
+    // Wait for Apply to fully settle: "Failed:" banner appears AND Apply
+    // button is re-enabled (setApplying(false) has run). Only THEN read
+    // log.length — otherwise a buggy extra gated-migrate POST arriving
+    // mid-settle could slip past a `>= 2` wait. §4 D4/D6 guarantees the
+    // first Apply posts exactly one demigrate + one filtered migrate.
+    await expect(page.locator('#servers-toolbar .error')).toContainText("Failed:");
+    await expect(page.locator('#servers-toolbar button', { hasText: "Apply" })).toBeEnabled();
+    expect(log).toHaveLength(2);
     expect(log[0].url).toBe("demigrate");
     expect(JSON.parse(log[0].body!)).toEqual({ servers: ["A"], clients: ["claude-code"] });
     expect(log[1].url).toBe("migrate");
     expect(JSON.parse(log[1].body!)).toEqual({ servers: ["B"], clients: ["codex-cli"] });
 
-    // Apply button stays enabled: dirty retains the failed demigrate + the
-    // gated migrate(B, claude-code). Only migrate(B, codex-cli) was pruned.
-    await expect(page.locator('#servers-toolbar .error')).toContainText("Failed:");
-    await expect(page.locator('#servers-toolbar button', { hasText: "Apply" })).toBeEnabled();
-
     // Un-stub demigrate so the retry succeeds.
     demigrateShouldFail = false;
     log.length = 0;
 
-    // SECOND Apply (no re-toggling; dirty still has the retained entries).
+    // SECOND Apply (no re-toggling; dirty still has the retained entries —
+    // the failed demigrate(A) and the gated migrate(B, claude-code)).
     await page.locator('#servers-toolbar button', { hasText: "Apply" }).click();
 
-    // Expect: exactly 2 POSTs — one demigrate (A, claude-code) that now
-    // succeeds, then one migrate (B, claude-code) that fires because the
-    // blocking demigrate succeeded. (B, codex-cli) does NOT re-fire.
-    await expect.poll(() => log.length).toBe(2);
+    // Same pattern: wait for settle, then assert exact count. Expected:
+    // one demigrate(A, claude-code) now succeeds, one migrate(B, claude-code)
+    // fires because the blocking demigrate succeeded. (B, codex-cli) does
+    // NOT re-fire — pruned on first Apply as truly-successful.
+    await expect(page.locator('#servers-toolbar button', { hasText: "Apply" })).toBeEnabled();
+    expect(log).toHaveLength(2);
     expect(log[0].url).toBe("demigrate");
     expect(log[1].url).toBe("migrate");
     expect(JSON.parse(log[1].body!)).toEqual({ servers: ["B"], clients: ["claude-code"] });
@@ -1207,10 +1209,10 @@ Expected: a `test.describe("Servers"...)` with 3 existing scenarios. Note whethe
 - [ ] **Search the whole E2E tree for any test that asserted the old `mcphub rollback --client` tooltip text** so we don't leave a scenario expecting the deleted copy:
 
 ```bash
-grep -rn "mcphub rollback --client" internal/gui/e2e/tests/
+grep -rn "mcphub rollback --client" internal/gui/e2e/tests/ | grep -v "not.toContain"
 ```
 
-Expected: zero matches (scenario 4's negative assertion notwithstanding — that one asserts the absence). If any prior test still expects the old text, delete or update that assertion.
+Expected: **zero matches** after excluding scenario 4's deliberate negative assertion (which itself contains the literal inside `expect(title).not.toContain("mcphub rollback --client")`). If any match surfaces from the grep, delete or update that assertion. (The `grep -v "not.toContain"` filter is intentional — scenario 4 asserts the literal is ABSENT from the live tooltip, so its line legitimately contains the literal.)
 
 ### Step 8 — Run the 5 new scenarios in isolation
 
