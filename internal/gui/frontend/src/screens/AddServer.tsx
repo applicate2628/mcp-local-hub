@@ -268,6 +268,26 @@ export function AddServerScreen(props: {
     return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : 0;
   }
 
+  function toggleBinding(daemonId: string, client: string, checked: boolean) {
+    setFormState((prev) => {
+      if (checked) {
+        return {
+          ...prev,
+          client_bindings: [
+            ...prev.client_bindings,
+            { client, daemonId, url_path: "/mcp" },
+          ],
+        };
+      }
+      return {
+        ...prev,
+        client_bindings: prev.client_bindings.filter(
+          (b) => !(b.client === client && b.daemonId === daemonId),
+        ),
+      };
+    });
+  }
+
   // addBinding creates a new binding referencing the daemon by its stable _id.
   function addBinding(daemonId: string) {
     setFormState((prev) => ({
@@ -805,6 +825,7 @@ export function AddServerScreen(props: {
               onAdd={addBinding}
               onUpdate={updateBinding}
               onDelete={deleteBinding}
+              onToggle={toggleBinding}
               readOnly={readOnly}
             />
           </AccordionSection>
@@ -906,9 +927,10 @@ function ClientBindingsSection(props: {
   onAdd: (daemonId: string) => void;
   onUpdate: (index: number, field: "client" | "daemonId" | "url_path", value: string) => void;
   onDelete: (index: number) => void;
+  onToggle: (daemonId: string, client: string, checked: boolean) => void;
   readOnly?: boolean;
 }) {
-  const { daemons, bindings, onAdd, onUpdate, onDelete, readOnly } = props;
+  const { daemons, bindings, onAdd, onUpdate, onDelete, onToggle, readOnly } = props;
   if (daemons.length === 0) {
     return (
       <p class="placeholder">
@@ -928,6 +950,9 @@ function ClientBindingsSection(props: {
         readOnly={readOnly}
       />
     );
+  }
+  if (daemons.length >= 4) {
+    return <BindingsMatrix daemons={daemons} bindings={bindings} onToggle={onToggle} onUpdate={onUpdate} />;
   }
   return (
     <div data-testid="bindings-adaptive-multi">
@@ -1209,6 +1234,69 @@ function LanguagesSubsection(props: {
         </button>
       </div>
     </div>
+  );
+}
+
+// BindingsMatrix renders a client × daemon matrix for servers with 4+ daemons.
+// Rows = KNOWN_CLIENTS, columns = daemons. Each cell holds a checkbox; when
+// checked, an inline url_path text input appears in the cell. Toggling a
+// checkbox adds or removes the corresponding BindingFormEntry via onToggle.
+function BindingsMatrix(props: {
+  daemons: DaemonFormEntry[];
+  bindings: BindingFormEntry[];
+  onToggle: (daemonId: string, client: string, checked: boolean) => void;
+  onUpdate: (index: number, field: "client" | "daemonId" | "url_path", value: string) => void;
+}) {
+  const { daemons, bindings, onToggle, onUpdate } = props;
+  return (
+    <table class="bindings-matrix" data-testid="bindings-matrix">
+      <thead>
+        <tr>
+          <th>Client</th>
+          {daemons.map((d) => (
+            <th key={d._id}>{d.name || "(unnamed)"}<br /><small>:{d.port}</small></th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {KNOWN_CLIENTS.map((c) => (
+          <tr key={c}>
+            <td>{c}</td>
+            {daemons.map((d) => {
+              const absIdx = bindings.findIndex(
+                (b) => b.client === c && b.daemonId === d._id,
+              );
+              const bound = absIdx !== -1;
+              const urlPath = bound ? bindings[absIdx].url_path : "";
+              return (
+                <td key={d._id}>
+                  <input
+                    type="checkbox"
+                    checked={bound}
+                    data-action="binding-toggle"
+                    data-daemon={d._id}
+                    data-client={c}
+                    onChange={(e) =>
+                      onToggle(d._id, c, (e.currentTarget as HTMLInputElement).checked)
+                    }
+                  />
+                  {bound && (
+                    <input
+                      type="text"
+                      value={urlPath}
+                      placeholder="/mcp"
+                      onInput={(e) =>
+                        onUpdate(absIdx, "url_path", (e.currentTarget as HTMLInputElement).value)
+                      }
+                    />
+                  )}
+                </td>
+              );
+            })}
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 

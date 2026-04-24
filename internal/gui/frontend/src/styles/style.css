@@ -205,3 +205,25 @@ main { padding: 24px; overflow: auto; }
   gap: 8px;
   margin-top: 8px;
 }
+
+/* A2b multi-daemon matrix */
+.screen.add-server .bindings-matrix {
+  border-collapse: collapse;
+  width: 100%;
+  max-width: 960px;
+  margin-top: 8px;
+}
+.screen.add-server .bindings-matrix th,
+.screen.add-server .bindings-matrix td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+}
+.screen.add-server .bindings-matrix thead th {
+  background: var(--sidebar-bg);
+  font-weight: 500;
+}
+.screen.add-server .bindings-matrix td input[type="text"] {
+  width: 100%;
+  margin-top: 4px;
+}
