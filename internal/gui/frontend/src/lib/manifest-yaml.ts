@@ -40,6 +40,13 @@ const LANGUAGE_KNOWN = new Set([
 // uses "daemonId" — this set describes the input side of the parse boundary.
 const BINDING_KNOWN = new Set(["client", "daemon", "url_path"]);
 
+// PORT_POOL_KNOWN mirrors parseYAMLToForm's accepted port_pool keys. A
+// manifest carrying extra keys (e.g. a future port-pool allocation policy
+// field) must trip hasNestedUnknown so the edit flow enters read-only mode
+// — parseYAMLToForm drops the extras and toYAML does not round-trip them,
+// which would be silent data loss. Codex R2 (#16 P2).
+const PORT_POOL_KNOWN = new Set(["start", "end"]);
+
 // BLANK_FORM is the canonical empty ManifestFormState. Used by:
 //   - AddServer.tsx fresh-create entry path (no URL params)
 //   - parseYAMLToForm as the starting state that missing fields fall back to
@@ -267,6 +274,17 @@ export function hasNestedUnknown(yaml: string): boolean {
           if (!BINDING_KNOWN.has(k)) return true;
         }
       }
+    }
+  }
+
+  // Codex R2 (#16 P2): port_pool is an object (not an array), so the
+  // array-loop above won't catch it. parseYAMLToForm keeps only start/end
+  // and toYAML won't re-emit extras; flag any unknown key here so edit
+  // mode defers to read-only and the extras aren't silently lost.
+  const portPool = r.port_pool;
+  if (portPool && typeof portPool === "object" && !Array.isArray(portPool)) {
+    for (const k of Object.keys(portPool as Record<string, unknown>)) {
+      if (!PORT_POOL_KNOWN.has(k)) return true;
     }
   }
 

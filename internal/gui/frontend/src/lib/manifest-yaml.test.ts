@@ -425,6 +425,34 @@ future_top_level_field: ok
 `;
     expect(hasNestedUnknown(yaml)).toBe(false);
   });
+
+  // Codex R2 (#16 P2): port_pool is an object, so the array-walker won't
+  // catch it. Extras would be silently dropped by parseYAMLToForm and never
+  // re-emitted by toYAML. Must trigger read-only mode instead.
+  it("returns true when port_pool has an unknown field", () => {
+    const yaml = `name: demo
+kind: workspace-scoped
+transport: stdio-bridge
+command: ws
+port_pool:
+  start: 9200
+  end: 9220
+  allocation_policy: random
+`;
+    expect(hasNestedUnknown(yaml)).toBe(true);
+  });
+
+  it("returns false when port_pool has only start and end", () => {
+    const yaml = `name: demo
+kind: workspace-scoped
+transport: stdio-bridge
+command: ws
+port_pool:
+  start: 9200
+  end: 9220
+`;
+    expect(hasNestedUnknown(yaml)).toBe(false);
+  });
 });
 
 describe("toYAML A2b extensions", () => {

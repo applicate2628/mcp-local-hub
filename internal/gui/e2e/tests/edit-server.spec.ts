@@ -654,4 +654,49 @@ daemons:
     await expect(page.locator("#field-name")).toHaveValue(name);
     await expect(page.locator('[data-action="paste-yaml"]')).toBeDisabled();
   });
+
+  // Codex R2 (#16 P2 finding 4): edit-mode Save must not be gated on
+  // nameError. The Name field is immutable in edit mode (disabled attr)
+  // and the write path uses editName from the URL — so a legacy manifest
+  // whose YAML `name:` field doesn't match MANIFEST_NAME_REGEX (e.g. from
+  // a historical manual/direct-disk edit) must not permanently block the
+  // user from saving other changes. name-regex validation remains in
+  // force for CREATE mode.
+  test("edit mode does not gate Save on nameError (legacy YAML name allowed)", async ({
+    page,
+    hub,
+  }) => {
+    // The directory name still passes checkManifestName (lowercase +
+    // hyphens). The YAML `name:` field, however, has uppercase and an
+    // underscore — fails MANIFEST_NAME_REGEX in the frontend form. This
+    // represents a manifest that was edited on disk outside the GUI.
+    const dirName = "e2e-legacy-name";
+    const yamlNameField = "Legacy_Server_UPPER";
+    seedManifest(
+      dirName,
+      `name: ${yamlNameField}
+kind: global
+transport: stdio-bridge
+command: echo
+daemons:
+  - name: d
+    port: 9520
+`,
+    );
+    await page.goto(
+      `${hub.url}/#/edit-server?name=${encodeURIComponent(dirName)}`,
+    );
+    // Form loaded the YAML's non-conforming name field.
+    await expect(page.locator("#field-name")).toHaveValue(yamlNameField);
+    // The inline name-regex error IS visible (the field value doesn't
+    // match MANIFEST_NAME_REGEX)...
+    await expect(page.locator(".inline-error")).toBeVisible();
+    // ...but Save + Save&Install stay ENABLED in edit mode since the write
+    // uses editName from the URL (dirName, conforming), and the field is
+    // immutable so the user can't "fix" it even if they wanted to.
+    await expect(page.locator('[data-action="save"]')).toBeEnabled();
+    await expect(
+      page.locator('[data-action="save-and-install"]'),
+    ).toBeEnabled();
+  });
 });

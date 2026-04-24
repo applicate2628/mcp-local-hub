@@ -656,7 +656,7 @@ export function AddServerScreen(props: {
         <button
           type="button"
           onClick={() => runSave({ install: false })}
-          disabled={readOnly || busy !== "" || !!nameError}
+          disabled={readOnly || busy !== "" || (mode !== "edit" && !!nameError)}
           data-action="save"
         >
           {busy === "save" ? "Saving…" : "Save"}
@@ -665,7 +665,7 @@ export function AddServerScreen(props: {
           type="button"
           class="primary"
           onClick={() => runSave({ install: true })}
-          disabled={readOnly || busy !== "" || !!nameError}
+          disabled={readOnly || busy !== "" || (mode !== "edit" && !!nameError)}
           data-action="save-and-install"
         >
           {busy === "install" ? "Installing…" : "Save & Install"}
