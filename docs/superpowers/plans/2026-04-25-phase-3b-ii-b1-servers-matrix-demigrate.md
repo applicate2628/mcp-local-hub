@@ -606,6 +606,18 @@ success-pruning + always-reload."
 
 This is the user-visible B1 change. Rewrites `applyChanges` to the §4 D4+D6 semantics (2-phase demigrate-before-migrate with per-client gate, 3-outcome tracking, success-pruning, always-reload). Enables the `via-hub` checkbox and updates tooltip copy.
 
+### Step 0 — Remove the dirty-wipe from the reload effect (Codex plan-R1 P1 fix)
+
+The existing reload effect at `Servers.tsx:47` calls `setDirty(new Map())` at the end of every successful `/api/scan` + `/api/status` fetch. That was correct for A2a migrate-only behavior (Apply's own success path already cleared dirty; the reload's redundant clear was idempotent). But Task 5's Apply ALWAYS bumps `reloadToken` — including on partial failure, where `applyChanges` has just carefully pruned successful entries and RETAINED failed + gated entries. If the reload effect then wipes everything, retained entries disappear before the user can retry, breaking §4 D6 R7/R10 and failing scenario 3 / scenario 5.
+
+- [ ] **Edit `internal/gui/frontend/src/screens/Servers.tsx:47`** — inside the reload `useEffect`'s success branch, delete the line:
+
+```ts
+        setDirty(new Map());
+```
+
+After deletion, the reload effect no longer touches `dirty` on its own. Dirty mutation becomes owned by exactly two call sites: (1) `toggleCell` adds/removes on user toggle, (2) `applyChanges` prunes succeeded-outcome entries at the end of each Apply. On full success, all entries prune to empty; on partial failure, failed + gated entries are retained for retry.
+
 ### Step 1 — Add the `OutcomeMap` type above `ServersScreen`
 
 - [ ] **Edit `internal/gui/frontend/src/screens/Servers.tsx`** — immediately after the `DirtyMap` type declaration (around line 15), add:
@@ -874,6 +886,18 @@ not mitigated in B1."
 
 Five scenarios per B1 design memo §6.3. Order below matches the memo's numbering.
 
+**Routing-classifier contract (see `internal/gui/frontend/src/lib/routing.ts:29-40` for canonical source):**
+
+| `transport` in `client_presence` | `endpoint` | Classifies as |
+|---|---|---|
+| `"absent"` or missing | (any) | `not-installed` (checkbox disabled) |
+| `"http"` | loopback URL (`127.0.0.1` / `localhost` / `[::1]`) | `via-hub` (checkbox checked + interactive after B1) |
+| `"relay"` | (any) | `via-hub` |
+| `"http"` | non-loopback URL | `direct` (checkbox unchecked + interactive) |
+| `"stdio"` or anything else | (any) | `direct` |
+
+**The E2E stubs below use `transport: "stdio"` for direct cells** because it's the canonical direct shape (stdio = client runs the MCP server as a subprocess, no HTTP involved). Do NOT use `transport: "http"` with a loopback endpoint for a "direct" fixture — that classifies as `via-hub` and the scenario will queue the wrong direction. [Codex plan-R1 P1 caught this in an earlier draft of this plan.]
+
 ### Step 1 — Read existing `servers.spec.ts` to learn fixture patterns
 
 - [ ] **Open the file and note the imports, `seedScanFixture` helper if present, and the `hub` fixture shape:**
@@ -889,11 +913,18 @@ Expected: a `test.describe("Servers"...)` with 3 existing scenarios. Note whethe
 - [ ] **Append to `servers.spec.ts`** (before the final closing `});` of the `test.describe` block, if wrapped, OR at the end of the file if scenarios are top-level):
 
 ```ts
-  // B1 scenario 1: load path. Uncheck a via-hub cell, Apply, assert POST
-  // /api/demigrate fires with {servers, clients} narrowed to that cell.
-  test("uncheck via-hub + Apply posts /api/demigrate narrowed to that cell", async ({ page, hub }) => {
-    // Stub /api/scan so one cell is via-hub.
-    const scanBody = {
+  // B1 scenario 1: load path. Uncheck a via-hub cell, Apply, assert
+  // /api/demigrate fires with {servers, clients} narrowed to that cell,
+  // AND the cell reflects "direct" after the post-Apply reload (per
+  // §6.3 scenario 1 in the design memo — the post-reload state
+  // assertion is what proves success-pruning + always-reload actually
+  // compose to the expected UI outcome).
+  test("uncheck via-hub + Apply posts /api/demigrate narrowed to that cell + post-reload reflects direct", async ({ page, hub }) => {
+    // Stateful /api/scan: returns via-hub on first call (initial mount),
+    // returns direct ("stdio") after the demigrate flips the backend.
+    // A non-hub transport is what routing.ts:29-40 classifies as "direct".
+    let demigrateCompleted = false;
+    const viaHubBody = {
       entries: [
         {
           name: "demo",
@@ -904,13 +935,28 @@ Expected: a `test.describe("Servers"...)` with 3 existing scenarios. Note whethe
         },
       ],
     };
-    await page.route("**/api/scan", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(scanBody) }));
+    const directBody = {
+      entries: [
+        {
+          name: "demo",
+          client_presence: {
+            "claude-code": { transport: "stdio", endpoint: "" },
+            "codex-cli":   { transport: "absent", endpoint: "" },
+          },
+        },
+      ],
+    };
+    await page.route("**/api/scan", async (r) => {
+      const body = demigrateCompleted ? directBody : viaHubBody;
+      await r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+    });
     await page.route("**/api/status", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) }));
 
-    // Intercept /api/demigrate to capture the body.
+    // Intercept /api/demigrate to capture the body + flip the scan state.
     let demigrateBody: string | null = null;
     await page.route("**/api/demigrate", async (r) => {
       demigrateBody = r.request().postData();
+      demigrateCompleted = true;
       await r.fulfill({ status: 204, body: "" });
     });
 
@@ -918,13 +964,22 @@ Expected: a `test.describe("Servers"...)` with 3 existing scenarios. Note whethe
     await page.waitForSelector('table.servers-matrix');
 
     // Uncheck the via-hub cell.
-    const cell = page.locator('tr[data-testid], table.servers-matrix tr').filter({ hasText: "demo" }).locator('input[type="checkbox"]').first();
-    await cell.uncheck();
+    const claudeCell = page.locator('table.servers-matrix tr').filter({ hasText: "demo" }).locator('input[type="checkbox"]').nth(0);
+    await expect(claudeCell).toBeChecked(); // sanity: starts as via-hub
+    await claudeCell.uncheck();
     await page.locator('#servers-toolbar button', { hasText: "Apply" }).click();
 
-    // Wait for network to settle.
+    // Assert the POST body shape.
     await expect.poll(() => demigrateBody).not.toBeNull();
     expect(JSON.parse(demigrateBody!)).toEqual({ servers: ["demo"], clients: ["claude-code"] });
+
+    // Assert the post-reload state: the claude-code cell now reflects direct
+    // (unchecked, enabled). The Checkbox useEffect syncs local `checked` to
+    // the new initialChecked when routing changed.
+    await expect(claudeCell).not.toBeChecked();
+    await expect(claudeCell).toBeEnabled();
+    // Apply button is disabled again (dirty.size === 0 after success-prune).
+    await expect(page.locator('#servers-toolbar button', { hasText: "Apply" })).toBeDisabled();
   });
 ```
 
@@ -942,7 +997,7 @@ Expected: a `test.describe("Servers"...)` with 3 existing scenarios. Note whethe
         {
           name: "a",
           client_presence: {
-            "claude-code": { transport: "http", endpoint: "http://127.0.0.1:9200" }, // direct → queued migrate
+            "claude-code": { transport: "stdio", endpoint: "" }, // direct stdio → queued migrate
           },
         },
         {
@@ -992,17 +1047,17 @@ Expected: a `test.describe("Servers"...)` with 3 existing scenarios. Note whethe
         },
       ],
     };
-    await page.route("**/api/scan", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(scanBody) }));
-    await page.route("**/api/status", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) }));
 
+    // Single /api/scan route that both fulfills AND increments the counter.
+    // Installing a second page.route for the same URL would make only one of
+    // them respond (Playwright route precedence is stack-based and
+    // implementation-defined); keep it one route.
     let scanCallCount = 0;
-    // Increment scanCallCount on each /api/scan — first call is the initial
-    // mount, second proves the post-Apply reload ran even though demigrate
-    // failed.
     await page.route("**/api/scan", async (r) => {
       scanCallCount++;
       await r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(scanBody) });
     });
+    await page.route("**/api/status", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) }));
     await page.route("**/api/demigrate", (r) => r.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "disk full" }) }));
 
     await page.goto(`${hub.url}/#/servers`);
@@ -1076,8 +1131,8 @@ Expected: a `test.describe("Servers"...)` with 3 existing scenarios. Note whethe
         {
           name: "B",
           client_presence: {
-            "claude-code": { transport: "http", endpoint: "http://127.0.0.1:9201" }, // direct → queued migrate (GATED)
-            "codex-cli":   { transport: "http", endpoint: "http://127.0.0.1:9202" }, // direct → queued migrate (SUCCESS)
+            "claude-code": { transport: "stdio", endpoint: "" }, // direct stdio → queued migrate (GATED)
+            "codex-cli":   { transport: "stdio", endpoint: "" }, // direct stdio → queued migrate (SUCCESS)
           },
         },
       ],
