@@ -7,7 +7,7 @@ import (
 )
 
 func registerScanRoutes(s *Server) {
-	s.mux.HandleFunc("/api/scan", func(w http.ResponseWriter, r *http.Request) {
+	s.mux.HandleFunc("/api/scan", s.requireSameOrigin(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", "GET")
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -20,7 +20,7 @@ func registerScanRoutes(s *Server) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(result)
-	})
+	}))
 }
 
 // writeAPIError is the canonical error-envelope shape from spec §4.3.

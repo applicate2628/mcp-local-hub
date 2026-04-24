@@ -38,3 +38,28 @@ func TestScan_ReturnsJSONWrappingAPIResult(t *testing.T) {
 		t.Errorf("response decoded to nil map")
 	}
 }
+
+func TestScan_BlocksCrossOrigin(t *testing.T) {
+	s := NewServer(Config{})
+	s.scanner = fakeScanner{result: &api.ScanResult{}}
+	req := httptest.NewRequest(http.MethodGet, "/api/scan", nil)
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
+func TestScan_AllowsSameOrigin(t *testing.T) {
+	s := NewServer(Config{})
+	s.port.Store(7777)
+	s.scanner = fakeScanner{result: &api.ScanResult{}}
+	req := httptest.NewRequest(http.MethodGet, "/api/scan", nil)
+	req.Header.Set("Origin", "http://127.0.0.1:7777")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
