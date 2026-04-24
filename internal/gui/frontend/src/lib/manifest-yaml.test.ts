@@ -112,6 +112,20 @@ describe("toYAML", () => {
     // And does not contain a corruption pattern like `has "quotes"` inside a double-quoted wrapper.
     expect(yaml).not.toMatch(/"has "quotes" inside"/);
   });
+
+  it("wraps Windows-path values (backslashes) in single quotes to avoid YAML escapes (PR #5 Codex R1)", () => {
+    const state: ManifestFormState = {
+      ...base,
+      name: "demo",
+      command: "npx",
+      env: [{ key: "PATH", value: "C:\\Users\\dima_\\.local\\bin" }],
+    };
+    const yaml = toYAML(state);
+    // Single-quoted branch keeps the backslashes literal.
+    expect(yaml).toContain(`PATH: 'C:\\Users\\dima_\\.local\\bin'`);
+    // Must NOT double-quote — that would let YAML interpret \U as a hex escape.
+    expect(yaml).not.toMatch(/PATH: "C:\\\\Users/);
+  });
 });
 
 describe("BLANK_FORM constant", () => {

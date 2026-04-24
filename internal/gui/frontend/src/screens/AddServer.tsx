@@ -280,6 +280,7 @@ export function AddServerScreen(props: { onDirtyChange?: (dirty: boolean) => voi
       // actual persist does. (Q8.)
       setInitialSnapshot(formState);
       if (!opts.install) {
+        setWarnings(null);
         setBanner({ kind: "success", text: `Saved servers/${name}/manifest.yaml.` });
         return;
       }
@@ -312,6 +313,7 @@ export function AddServerScreen(props: { onDirtyChange?: (dirty: boolean) => voi
         });
         return;
       }
+      setWarnings(null);
       setBanner({ kind: "success", text: `Installed ${name}. Daemons will start at next logon (or run "mcphub restart --server ${name}" now).` });
     } catch (err) {
       if (version !== submissionCounter.current) return;

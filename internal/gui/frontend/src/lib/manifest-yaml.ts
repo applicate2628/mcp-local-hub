@@ -61,12 +61,16 @@ export function toYAML(state: ManifestFormState): string {
   return lines.join("\n") + "\n";
 }
 
-// quote picks the right YAML string wrapper. If the value contains a
-// double-quote, use single quotes (YAML escapes `'` as `''` inside single
-// quotes). Otherwise use double quotes — they handle backslash-n etc.
-// consistently. Empty strings render as `""`.
+// quote picks the right YAML string wrapper:
+//   - values containing a double-quote OR a backslash → single-quote
+//     branch (YAML single-quoted strings treat backslashes literally,
+//     which matches what a user typing "C:\\Users\\..." intends — no
+//     \U hex-digit parse failure, no \n becoming a newline).
+//   - otherwise → double-quote branch (handles most cases cleanly).
+//   - empty strings render as `""`.
+// Single-quote escape: `'` becomes `''` inside a single-quoted string.
 function quote(s: string): string {
-  if (s.includes(`"`)) {
+  if (s.includes(`"`) || s.includes("\\")) {
     return `'${s.replace(/'/g, `''`)}'`;
   }
   return `"${s}"`;
