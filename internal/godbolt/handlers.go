@@ -829,7 +829,7 @@ func (gs *GodboltServer) invokeCompile(ctx context.Context, url string, payload 
 // fetchResource is the shared HTTP-GET path used by every resource
 // handler (getLanguages / getCompilers / getLibraries / getFormatters /
 // getInstructionInfo / getVersion / getPopularArguments). It wraps the
-// Get+ReadAll boilerplate AND adds a status-code check so non-2xx
+// Get+readResponseBody boilerplate AND adds a status-code check so non-2xx
 // responses — the typical "unknown compiler id", "language not found",
 // stale opcode — surface as an error instead of being silently returned
 // to the MCP client as a stray HTML 404 page or JSON error body that
@@ -853,7 +853,7 @@ func (gs *GodboltServer) fetchResource(url string) ([]byte, error) {
 		return nil, fmt.Errorf("call godbolt: %w", err)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	body, err := readResponseBody(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}

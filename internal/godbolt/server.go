@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -36,6 +37,8 @@ func godboltDisabled() bool {
 // contract.
 const godboltBaseURL = "https://godbolt.org/api"
 
+const godboltHTTPTimeout = 30 * time.Second
+
 // GodboltServer holds the HTTP client used to call the Compiler Explorer
 // REST API and the MCP server instance that dispatches resource reads
 // and tool calls to the methods on this struct.
@@ -51,7 +54,7 @@ type GodboltServer struct {
 // points; keep runtime behavior here, not in cmd/godbolt or NewCommand.
 func Run(ctx context.Context) error {
 	gs := &GodboltServer{
-		httpClient: &http.Client{},
+		httpClient: &http.Client{Timeout: godboltHTTPTimeout},
 		baseURL:    godboltBaseURL,
 	}
 
