@@ -5,15 +5,22 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// serversDir is the on-disk manifest directory that the E2E binary resolves
-// via defaultManifestDir(). The binary lives at e2e/bin/mcphub.exe; it probes
-// for a `servers/` sibling (not found), then falls back to bin/../servers/ =
-// e2e/servers/. global-setup.ts wipes this directory before every run, so
-// tests that seed here start clean on each invocation.
-const serversDir = resolve(__dirname, "..", "servers");
+// serversDir matches what defaultManifestDir() (internal/api/scan.go) returns
+// in the E2E environment. The binary lives at e2e/bin/mcphub.exe and probes:
+//   1. exeDir/servers         = e2e/bin/servers/   (sibling, first match wins)
+//   2. exeDir/../servers      = e2e/servers/       (parent)
+//   3. fallback (PR #11)      = e2e/bin/servers/   (after CWD fallback removed)
+//
+// After the first add-server test calls /api/manifest/create, the binary
+// creates e2e/bin/servers/ via the fallback path. Every subsequent request
+// then resolves to e2e/bin/servers/ (sibling check succeeds). Seeds must
+// therefore target bin/servers/ to be visible to the binary — otherwise
+// seedManifest writes to e2e/servers/ but the binary reads from bin/servers/
+// and the form loads empty. global-setup.ts wipes BOTH dirs at run start.
+const serversDir = resolve(__dirname, "..", "bin", "servers");
 
-// seedManifest writes <name>/manifest.yaml into e2e/servers/ so the GUI
-// binary can serve it via /api/manifest/get?name=<name>. Uses unique
+// seedManifest writes <name>/manifest.yaml into e2e/bin/servers/ so the
+// GUI binary can serve it via /api/manifest/get?name=<name>. Uses unique
 // name prefixes to avoid collisions when workers > 1 (CI).
 function seedManifest(name: string, yaml: string): void {
   const dir = join(serversDir, name);
