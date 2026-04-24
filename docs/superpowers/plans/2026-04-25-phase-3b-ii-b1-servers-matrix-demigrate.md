@@ -946,7 +946,14 @@ Expected: a `test.describe("Servers"...)` with 3 existing scenarios. Note whethe
         },
       ],
     };
+    // Count /api/scan calls to prove the post-Apply reload actually ran
+    // (§4 D6: always-reload). Without this counter, scenario 1's
+    // post-reload assertions could pass without any reload happening at
+    // all — the local checkbox state + Apply-disabled + via-hub-enabled
+    // would all hold after success-prune alone.
+    let scanCallCount = 0;
     await page.route("**/api/scan", async (r) => {
+      scanCallCount++;
       const body = demigrateCompleted ? directBody : viaHubBody;
       await r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
     });
@@ -962,10 +969,14 @@ Expected: a `test.describe("Servers"...)` with 3 existing scenarios. Note whethe
 
     await page.goto(`${hub.url}/#/servers`);
     await page.waitForSelector('table.servers-matrix');
+    const initialScanCount = scanCallCount; // snapshot after mount reload
 
     // Uncheck the via-hub cell.
     const claudeCell = page.locator('table.servers-matrix tr').filter({ hasText: "demo" }).locator('input[type="checkbox"]').nth(0);
     await expect(claudeCell).toBeChecked(); // sanity: starts as via-hub
+    // Title must match the new B1 tooltip copy, not the obsolete
+    // "mcphub rollback --client" text.
+    await expect(claudeCell).toHaveAttribute("title", /Uncheck and Apply/);
     await claudeCell.uncheck();
     await page.locator('#servers-toolbar button', { hasText: "Apply" }).click();
 
@@ -973,9 +984,17 @@ Expected: a `test.describe("Servers"...)` with 3 existing scenarios. Note whethe
     await expect.poll(() => demigrateBody).not.toBeNull();
     expect(JSON.parse(demigrateBody!)).toEqual({ servers: ["demo"], clients: ["claude-code"] });
 
-    // Assert the post-reload state: the claude-code cell now reflects direct
-    // (unchecked, enabled). The Checkbox useEffect syncs local `checked` to
-    // the new initialChecked when routing changed.
+    // The post-Apply /api/scan reload MUST have run — §4 D6 always-reload.
+    // Without this counter check, the assertions below could all pass even
+    // if no reload fired.
+    await expect.poll(() => scanCallCount).toBeGreaterThan(initialScanCount);
+
+    // Post-reload state: the claude-code cell now reflects direct (title
+    // changes to the "unsupported/not-installed/direct" branch rather than
+    // the via-hub branch). Asserting title disappears (or changes) proves
+    // the reload updated the scan state — a pure local-flip without reload
+    // would still show the via-hub title attribute.
+    await expect(claudeCell).not.toHaveAttribute("title", /Uncheck and Apply/);
     await expect(claudeCell).not.toBeChecked();
     await expect(claudeCell).toBeEnabled();
     // Apply button is disabled again (dirty.size === 0 after success-prune).
@@ -1068,7 +1087,7 @@ Expected: a `test.describe("Servers"...)` with 3 existing scenarios. Note whethe
     await page.locator('#servers-toolbar button', { hasText: "Apply" }).click();
 
     await expect(page.locator('#servers-toolbar .error')).toContainText("Failed:");
-    await expect(page.locator('#servers-toolbar .error')).toContainText("demigrate/[claude-code]");
+    await expect(page.locator('#servers-toolbar .error')).toContainText("demo/demigrate/claude-code");
     await expect(page.locator('#servers-toolbar .error')).toContainText("disk full");
 
     // Reload MUST have run (scan called again since Apply click).
