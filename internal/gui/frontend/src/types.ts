@@ -46,3 +46,34 @@ export interface ServerAggregate {
   port: number | null;
   daemonCount: number;
 }
+
+// ManifestFormState is the authoritative in-memory shape for the AddServer
+// screen. The form writes to it; toYAML(state) serializes it for the backend.
+// Using array-of-objects for env and client_bindings (rather than maps) keeps
+// add/delete operations and render ordering deterministic.
+export interface ManifestFormState {
+  name: string;
+  kind: "global" | "workspace-scoped";
+  transport: "stdio-bridge" | "native-http";
+  command: string;
+  base_args: string[];
+  env: Array<{ key: string; value: string }>;
+  daemons: Array<{ name: string; port: number }>;
+  client_bindings: Array<{ client: string; daemon: string; url_path: string }>;
+  weekly_refresh: boolean;
+}
+
+export interface ValidationWarning {
+  message: string;
+}
+
+// ManifestValidateResponse mirrors the /api/manifest/validate handler shape.
+export interface ManifestValidateResponse {
+  warnings: string[];
+}
+
+// ExtractManifestResponse is a placeholder until the extract endpoint lands
+// in a later task. Shape: { yaml: string }.
+export interface ExtractManifestResponse {
+  yaml: string;
+}

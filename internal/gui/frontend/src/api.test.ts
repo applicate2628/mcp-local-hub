@@ -53,3 +53,78 @@ describe("fetchOrThrow", () => {
     await expect(fetchOrThrow("/p", "object")).rejects.toThrow(/expected object/);
   });
 });
+
+import { postManifestCreate, postManifestValidate } from "./api";
+
+describe("postManifestCreate", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("resolves on 204", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 204,
+      statusText: "No Content",
+    }) as unknown as Response);
+    await expect(postManifestCreate("demo", "name: demo")).resolves.toBeUndefined();
+  });
+
+  it("throws with backend error field on non-2xx", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 500,
+      statusText: "Internal Server Error",
+      json: async () => ({ error: "manifest already exists" }),
+    }) as unknown as Response);
+    await expect(postManifestCreate("demo", "name: demo")).rejects.toThrow(/manifest already exists/);
+  });
+
+  it("serializes name + yaml into JSON body", async () => {
+    const seen: { body?: string } = {};
+    globalThis.fetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      seen.body = init?.body as string;
+      return { ok: true, status: 204, statusText: "No Content" } as unknown as Response;
+    });
+    await postManifestCreate("demo", "name: demo\nkind: global\n");
+    expect(JSON.parse(seen.body!)).toEqual({ name: "demo", yaml: "name: demo\nkind: global\n" });
+  });
+});
+
+describe("postManifestValidate", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns warnings array on 200", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({ warnings: ["no daemons declared"] }),
+    }) as unknown as Response);
+    const out = await postManifestValidate("name: x");
+    expect(out).toEqual(["no daemons declared"]);
+  });
+
+  it("returns empty array when backend emits warnings:[]", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({ warnings: [] }),
+    }) as unknown as Response);
+    const out = await postManifestValidate("name: demo\nkind: global\n");
+    expect(out).toEqual([]);
+  });
+
+  it("throws on non-2xx with backend error text", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 400,
+      statusText: "Bad Request",
+      json: async () => ({ error: "invalid JSON" }),
+    }) as unknown as Response);
+    await expect(postManifestValidate("not-yaml-at-all")).rejects.toThrow(/invalid JSON/);
+  });
+});
