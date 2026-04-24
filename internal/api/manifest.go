@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -101,6 +102,31 @@ func (a *API) ManifestGetIn(dir, name string) (string, error) {
 	return string(data), nil
 }
 
+// ManifestGetInWithHash reads the manifest YAML and returns both the
+// text and its SHA-256 content hash. Used by the GUI edit flow so
+// ManifestEdit can detect external writes that occurred between Load
+// and Save (A2b D3 stale-file detection).
+func (a *API) ManifestGetInWithHash(dir, name string) (string, string, error) {
+	path := filepath.Join(dir, name, "manifest.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", "", err
+	}
+	return string(data), ManifestHashContent(data), nil
+}
+
+// ManifestGetWithHash is the default-dir convenience wrapper, used by
+// GUI handlers which always read from defaultManifestDir().
+func (a *API) ManifestGetWithHash(name string) (string, string, error) {
+	if err := checkManifestName(name); err != nil {
+		return "", "", err
+	}
+	// Read from disk (not embed) because edit flow only makes sense
+	// for user-created / on-disk manifests — you cannot edit embedded
+	// shipped manifests in-place.
+	return a.ManifestGetInWithHash(defaultManifestDir(), name)
+}
+
 // ManifestCreate writes a new manifest under the default servers dir.
 // Rejects if the server name already has a manifest — use ManifestEdit
 // to change existing ones.
@@ -170,6 +196,78 @@ func (a *API) ManifestValidate(yaml string) []string {
 		}
 	}
 	return warnings
+}
+
+// ErrManifestHashMismatch is returned by ManifestEditInWithHash when
+// the on-disk manifest's current content hash does not match the
+// client-supplied expectedHash. The GUI maps this to the stale-file
+// banner (A2b D3). Passing an empty expectedHash skips the check —
+// used by Force Save which re-reads at save-time.
+var ErrManifestHashMismatch = errors.New("manifest hash mismatch: file changed on disk since it was loaded")
+
+// ManifestEditInWithHash replaces an existing manifest atomically via
+// tmp-file-plus-rename. If the on-disk content hash diverged from
+// expectedHash (non-empty), returns ErrManifestHashMismatch without
+// writing. Empty expectedHash skips the check (Force Save path which
+// re-reads at save-time). Returns the new post-write content hash so
+// callers can update their loadedHash cache in one pass — avoids an
+// extra GET round-trip AND the stale-hash-after-force-save race.
+func (a *API) ManifestEditInWithHash(dir, name, yaml, expectedHash string) (newHash string, err error) {
+	if err := checkManifestName(name); err != nil {
+		return "", err
+	}
+	target := filepath.Join(dir, name, "manifest.yaml")
+	current, err := os.ReadFile(target)
+	if err != nil {
+		return "", fmt.Errorf("manifest %q does not exist; use create instead", name)
+	}
+	if expectedHash != "" {
+		if got := ManifestHashContent(current); got != expectedHash {
+			return "", ErrManifestHashMismatch
+		}
+	}
+	if warnings := a.ManifestValidate(yaml); len(warnings) > 0 {
+		return "", fmt.Errorf("manifest has validation errors: %s", strings.Join(warnings, "; "))
+	}
+	// Atomic write: unique tmp in the same directory, defer cleanup,
+	// os.Rename on success. Test-only hook manifestEditFailWriteHook
+	// lets tests inject a write/rename failure without relying on
+	// read-only-dir tricks (brittle on Windows).
+	tmp, err := os.CreateTemp(filepath.Dir(target), "manifest-*.tmp")
+	if err != nil {
+		return "", fmt.Errorf("create tmp: %w", err)
+	}
+	tmpPath := tmp.Name()
+	// Always attempt to remove tmp; harmless if rename already moved it.
+	defer func() { _ = os.Remove(tmpPath) }()
+	if _, err := tmp.Write([]byte(yaml)); err != nil {
+		_ = tmp.Close()
+		return "", fmt.Errorf("write tmp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return "", fmt.Errorf("close tmp: %w", err)
+	}
+	if manifestEditFailWriteHook != nil && manifestEditFailWriteHook() {
+		return "", fmt.Errorf("injected write failure")
+	}
+	if err := os.Rename(tmpPath, target); err != nil {
+		return "", fmt.Errorf("atomic rename: %w", err)
+	}
+	return ManifestHashContent([]byte(yaml)), nil
+}
+
+// manifestEditFailWriteHook is a package-internal test hook that forces
+// a simulated write-failure to verify atomic-write crash-safety. Tests
+// set it via ManifestSetFailWriteHook, run the operation, then reset.
+var manifestEditFailWriteHook func() bool
+
+// ManifestSetFailWriteHook is test-only; callers in production code MUST
+// NOT set this. Exported only so internal/gui tests can reuse the hook.
+func ManifestSetFailWriteHook(h func() bool) { manifestEditFailWriteHook = h }
+
+// ManifestEditWithHash is the default-dir convenience wrapper.
+func (a *API) ManifestEditWithHash(name, yaml, expectedHash string) (string, error) {
+	return a.ManifestEditInWithHash(defaultManifestDir(), name, yaml, expectedHash)
 }
 
 // ManifestDelete removes the named server's manifest directory. Does NOT

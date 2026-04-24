@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -22,6 +22,21 @@ export default async function globalSetup() {
   const frontendDir = resolve(__dirname, "..", "frontend");
   const binDir = resolve(__dirname, "bin");
   mkdirSync(binDir, { recursive: true });
+
+  // Wipe the servers/ directories that the mcphub binary populates when tests
+  // call POST /api/manifest/create. The binary's defaultManifestDir() probes:
+  //   1. exeDir/servers     = e2e/bin/servers/  (sibling, checked first)
+  //   2. exeDir/../servers  = e2e/servers/      (parent)
+  //   3. fallback           = e2e/bin/servers/  (after PR #11 removed CWD fallback)
+  //
+  // Whichever exists first is chosen. If bin/servers/ has stale content from a
+  // previous run, the binary writes there; but edit-server.spec.ts seeds manifests
+  // into e2e/servers/, causing a dir-mismatch where reads and writes target
+  // different roots. Wiping BOTH keeps the resolution deterministic: after the
+  // wipe, bin/servers doesn't exist → sibling check fails → parent is selected
+  // as soon as any seed (or create) populates e2e/servers/.
+  rmSync(resolve(__dirname, "servers"), { recursive: true, force: true });
+  rmSync(resolve(__dirname, "bin", "servers"), { recursive: true, force: true });
   const binPath = resolve(binDir, process.platform === "win32" ? "mcphub.exe" : "mcphub");
 
   // 1) Rebuild Preact bundle → internal/gui/assets/. Then verify

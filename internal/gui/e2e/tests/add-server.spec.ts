@@ -18,8 +18,8 @@ test.describe("Add server screen", () => {
     await page.locator(".accordion-header", { hasText: "Command" }).click();
     await page.locator("#field-command").fill("npx");
     // Wait for the 150ms debounce to settle.
-    await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("name: demo");
-    await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("command: npx");
+    await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("name: 'demo'");
+    await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("command: 'npx'");
   });
 
   test("inline name-regex error shows when name contains uppercase", async ({ page, hub }) => {
@@ -54,9 +54,9 @@ test.describe("Add server screen", () => {
     // independent, so opening Client bindings did NOT close Daemons.
     // Rename default -> main directly in the still-visible Daemons field.
     await page.locator('[data-field="daemon-name"]').fill("main");
-    await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("- name: main");
-    await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("daemon: main");
-    await expect(page.locator('[data-testid="yaml-preview"]')).not.toContainText("daemon: default");
+    await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("- name: 'main'");
+    await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("daemon: 'main'");
+    await expect(page.locator('[data-testid="yaml-preview"]')).not.toContainText("daemon: 'default'");
   });
 
   test("deleting a daemon with bindings prompts and cascade-deletes", async ({ page, hub }) => {
@@ -121,8 +121,8 @@ test.describe("Add server screen", () => {
     const yaml = `name: pasted\nkind: global\ntransport: stdio-bridge\ncommand: npx\ndaemons:\n  - name: default\n    port: 9100\n`;
     page.once("dialog", (d) => d.accept(yaml));
     await page.locator('[data-action="paste-yaml"]').click();
-    await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("name: pasted");
-    await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("command: npx");
+    await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("name: 'pasted'");
+    await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("command: 'npx'");
     // The dirty indicator is set by the parent App; we verify via the
     // sidebar-intercept test below.
   });
@@ -158,5 +158,75 @@ test.describe("Add server screen", () => {
     // the banner surfaces that as "Could not prefill..." which is the
     // expected graceful-degrade path from Task 14.
     await expect(page.locator('[data-testid="banner"].error')).toContainText("Could not prefill");
+  });
+
+  // -----------------------------------------------------------------------
+  // P2-3-A. Advanced kind-toggle: workspace-scoped reveals languages and
+  //         port_pool; switching back to global hides them.
+  // -----------------------------------------------------------------------
+  test("Advanced kind-toggle: workspace-scoped reveals languages/port_pool; global hides them (P2-3)", async ({
+    page,
+    hub,
+  }) => {
+    await page.goto(`${hub.url}/#/add-server`);
+    await expect(page.locator("h1")).toHaveText("Add server");
+    // Open Advanced accordion.
+    await page.locator(".accordion-header", { hasText: "Advanced" }).click();
+    // Default kind is global — workspace-only fields must be hidden.
+    await expect(
+      page.locator('[data-field="port-pool-start"]'),
+    ).not.toBeVisible();
+    await expect(
+      page.locator('[data-testid="languages-subsection"]'),
+    ).not.toBeVisible();
+    // Switch kind to workspace-scoped via the Basics select (Basics is open by default).
+    await page.locator("#field-kind").selectOption("workspace-scoped");
+    // Advanced section is already open — workspace-only fields must appear.
+    await expect(page.locator('[data-field="port-pool-start"]')).toBeVisible();
+    await expect(
+      page.locator('[data-testid="languages-subsection"]'),
+    ).toBeVisible();
+    // Switch back to global — workspace-only fields must hide again.
+    await page.locator("#field-kind").selectOption("global");
+    await expect(
+      page.locator('[data-field="port-pool-start"]'),
+    ).not.toBeVisible();
+    await expect(
+      page.locator('[data-testid="languages-subsection"]'),
+    ).not.toBeVisible();
+  });
+
+  // -----------------------------------------------------------------------
+  // P2-3-B. Advanced always-visible fields (idle_timeout, base_args_template,
+  //         daemon.extra_args) survive kind toggles and remain accessible.
+  // -----------------------------------------------------------------------
+  test("Advanced always-visible fields survive kind toggles (idle_timeout, base_args_template, daemon.extra_args) (P2-3)", async ({
+    page,
+    hub,
+  }) => {
+    await page.goto(`${hub.url}/#/add-server`);
+    // Open Advanced accordion.
+    await page.locator(".accordion-header", { hasText: "Advanced" }).click();
+    // Idle timeout field is always visible (not kind-gated).
+    await expect(page.locator("#field-idle-timeout")).toBeVisible();
+    // Base args template section is always visible.
+    await expect(
+      page.locator('[data-testid="base-args-template"]'),
+    ).toBeVisible();
+    // Add a daemon to make per-daemon extras appear.
+    await page.locator(".accordion-header", { hasText: "Daemons" }).click();
+    await page.locator('[data-action="add-daemon"]').click();
+    await page.locator('[data-field="daemon-name"]').fill("default");
+    await page.locator('[data-field="daemon-port"]').fill("9100");
+    // Toggle kind global -> workspace-scoped -> global.
+    await page.locator("#field-kind").selectOption("workspace-scoped");
+    await page.locator("#field-kind").selectOption("global");
+    // Idle timeout and base-args-template remain visible after kind toggle.
+    await expect(page.locator("#field-idle-timeout")).toBeVisible();
+    await expect(
+      page.locator('[data-testid="base-args-template"]'),
+    ).toBeVisible();
+    // Per-daemon extras subsection is always visible when daemons exist.
+    await expect(page.locator('[data-testid="daemon-extras"]')).toBeVisible();
   });
 });

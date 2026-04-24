@@ -2,9 +2,13 @@ package gui
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
+
+	"mcp-local-hub/internal/api"
 )
 
 // manifestCreator / manifestValidator are the pin-point subsets of api.API
@@ -19,6 +23,14 @@ type manifestValidator interface {
 	ManifestValidate(yaml string) []string
 }
 
+type manifestGetter interface {
+	ManifestGetWithHash(name string) (yaml string, hash string, err error)
+}
+
+type manifestEditor interface {
+	ManifestEditWithHash(name, yaml, expectedHash string) (newHash string, err error)
+}
+
 type manifestCreateRequest struct {
 	Name string `json:"name"`
 	YAML string `json:"yaml"`
@@ -30,6 +42,21 @@ type manifestValidateRequest struct {
 
 type manifestValidateResponse struct {
 	Warnings []string `json:"warnings"`
+}
+
+type manifestGetResponse struct {
+	YAML string `json:"yaml"`
+	Hash string `json:"hash"`
+}
+
+type manifestEditRequest struct {
+	Name         string `json:"name"`
+	YAML         string `json:"yaml"`
+	ExpectedHash string `json:"expected_hash"`
+}
+
+type manifestEditResponse struct {
+	Hash string `json:"hash"`
 }
 
 // registerManifestRoutes wires POST /api/manifest/create and
@@ -57,7 +84,11 @@ func registerManifestRoutes(s *Server) {
 			return
 		}
 		if err := s.manifestCreator.ManifestCreate(name, req.YAML); err != nil {
-			writeAPIError(w, err, http.StatusInternalServerError, "MANIFEST_CREATE_FAILED")
+			// Codex R1 (#16 P2): err may be an *os.PathError that includes an
+			// absolute filesystem path. Log the real error server-side; send
+			// a stable sanitized message to the client.
+			log.Printf("/api/manifest/create name=%q: %v", name, err)
+			writeAPIError(w, errors.New("internal error creating manifest"), http.StatusInternalServerError, "MANIFEST_CREATE_FAILED")
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -79,5 +110,60 @@ func registerManifestRoutes(s *Server) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(manifestValidateResponse{Warnings: warnings})
+	}))
+	s.mux.HandleFunc("/api/manifest/get", s.requireSameOrigin(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		name := strings.TrimSpace(r.URL.Query().Get("name"))
+		if name == "" {
+			writeAPIError(w, fmt.Errorf("name must not be empty"), http.StatusBadRequest, "BAD_REQUEST")
+			return
+		}
+		yaml, hash, err := s.manifestGetter.ManifestGetWithHash(name)
+		if err != nil {
+			// Codex R1 (#16 P2): err is often *os.PathError on missing or
+			// unreadable manifests and leaks the absolute manifest dir.
+			log.Printf("/api/manifest/get name=%q: %v", name, err)
+			writeAPIError(w, errors.New("internal error reading manifest"), http.StatusInternalServerError, "MANIFEST_GET_FAILED")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(manifestGetResponse{YAML: yaml, Hash: hash})
+	}))
+	s.mux.HandleFunc("/api/manifest/edit", s.requireSameOrigin(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", "POST")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req manifestEditRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeAPIError(w, fmt.Errorf("invalid JSON: %w", err), http.StatusBadRequest, "BAD_REQUEST")
+			return
+		}
+		name := strings.TrimSpace(req.Name)
+		if name == "" {
+			writeAPIError(w, fmt.Errorf("name must not be empty"), http.StatusBadRequest, "BAD_REQUEST")
+			return
+		}
+		newHash, err := s.manifestEditor.ManifestEditWithHash(name, req.YAML, req.ExpectedHash)
+		if err != nil {
+			// Hash-mismatch is a legitimate client-facing signal with a
+			// generic message; pass it through. Other errors can wrap
+			// *os.PathError (atomic-rename failure, stat failure during
+			// hash-gate read) and must be sanitized before responding.
+			if errors.Is(err, api.ErrManifestHashMismatch) {
+				writeAPIError(w, err, http.StatusConflict, "MANIFEST_HASH_MISMATCH")
+				return
+			}
+			log.Printf("/api/manifest/edit name=%q: %v", name, err)
+			writeAPIError(w, errors.New("internal error writing manifest"), http.StatusInternalServerError, "MANIFEST_EDIT_FAILED")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(manifestEditResponse{Hash: newHash})
 	}))
 }

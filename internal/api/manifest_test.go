@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,6 +66,155 @@ func TestManifestDeleteRemovesDir(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(tmp, "doomed")); !os.IsNotExist(err) {
 		t.Error("manifest dir not removed")
+	}
+}
+
+func TestManifestGetIn_ReturnsContentHash(t *testing.T) {
+	dir := t.TempDir()
+	a := &API{}
+	name := "memory"
+	// Must satisfy api.ManifestValidate (which ManifestCreateIn gates on):
+	// requires kind, transport, command, and at least one daemon.
+	yaml := "name: memory\nkind: global\ntransport: stdio-bridge\ncommand: npx\ndaemons:\n  - name: default\n    port: 9210\n"
+	if err := a.ManifestCreateIn(dir, name, yaml); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got, hash, err := a.ManifestGetInWithHash(dir, name)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got != yaml {
+		t.Errorf("yaml = %q, want %q", got, yaml)
+	}
+	want := ManifestHashContent([]byte(yaml))
+	if hash != want {
+		t.Errorf("hash = %q, want %q", hash, want)
+	}
+}
+
+func TestManifestGetIn_HashChangesOnExternalWrite(t *testing.T) {
+	dir := t.TempDir()
+	a := &API{}
+	name := "demo"
+	initial := "name: demo\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9211\n"
+	if err := a.ManifestCreateIn(dir, name, initial); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	_, h1, _ := a.ManifestGetInWithHash(dir, name)
+	// External write — different bytes (port change) to simulate another
+	// editor touching the file between Load and Save.
+	path := filepath.Join(dir, name, "manifest.yaml")
+	mutated := "name: demo\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9212\n"
+	if err := os.WriteFile(path, []byte(mutated), 0600); err != nil {
+		t.Fatalf("external write: %v", err)
+	}
+	_, h2, _ := a.ManifestGetInWithHash(dir, name)
+	if h1 == h2 {
+		t.Errorf("hash unchanged after external write: %q", h1)
+	}
+}
+
+// Test YAML invariant: all strings passed to ManifestCreateIn AND to
+// ManifestEditInWithHash (with non-empty expectedHash matching, or empty
+// expectedHash — any path that reaches ManifestValidate) must pass
+// api.ManifestValidate, which requires name + kind + transport + command
+// + at least one daemon. See Task 2 for the same validator gate.
+func TestManifestEditIn_RejectsHashMismatch(t *testing.T) {
+	dir := t.TempDir()
+	a := &API{}
+	name := "demo"
+	if err := a.ManifestCreateIn(dir, name, "name: demo\nkind: global\ntransport: stdio-bridge\ncommand: npx\ndaemons:\n  - name: default\n    port: 9220\n"); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	_, hash, _ := a.ManifestGetInWithHash(dir, name)
+	path := filepath.Join(dir, name, "manifest.yaml")
+	// External write bypasses validate (direct os.WriteFile); needs to
+	// differ from the original bytes so the hash check trips.
+	if err := os.WriteFile(path, []byte("name: demo\nkind: workspace-scoped\ntransport: stdio-bridge\ncommand: npx\ndaemons:\n  - name: default\n    port: 9220\n"), 0600); err != nil {
+		t.Fatalf("external write: %v", err)
+	}
+	// Edit yaml never reaches ManifestValidate because the hash-check
+	// short-circuits first; still kept well-formed for clarity.
+	_, err := a.ManifestEditInWithHash(dir, name, "name: demo\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9220\n", hash)
+	if err == nil {
+		t.Fatalf("expected hash-mismatch error, got nil")
+	}
+	if !errors.Is(err, ErrManifestHashMismatch) {
+		t.Errorf("err = %v, want ErrManifestHashMismatch", err)
+	}
+}
+
+func TestManifestEditIn_AcceptsMatchingHash_ReturnsNewHash(t *testing.T) {
+	dir := t.TempDir()
+	a := &API{}
+	name := "demo"
+	orig := "name: demo\nkind: global\ntransport: stdio-bridge\ncommand: npx\ndaemons:\n  - name: default\n    port: 9221\n"
+	if err := a.ManifestCreateIn(dir, name, orig); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	_, hash, _ := a.ManifestGetInWithHash(dir, name)
+	// Edit path reaches ManifestValidate — yaml must be well-formed.
+	updated := "name: demo\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9221\n"
+	newHash, err := a.ManifestEditInWithHash(dir, name, updated, hash)
+	if err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+	wantHash := ManifestHashContent([]byte(updated))
+	if newHash != wantHash {
+		t.Errorf("returned hash = %q, want %q", newHash, wantHash)
+	}
+	got, diskHash, _ := a.ManifestGetInWithHash(dir, name)
+	if got != updated {
+		t.Errorf("yaml = %q, want %q", got, updated)
+	}
+	if diskHash != newHash {
+		t.Errorf("disk hash = %q does not match returned newHash %q", diskHash, newHash)
+	}
+}
+
+func TestManifestEditIn_EmptyExpectedHash_SkipsCheck(t *testing.T) {
+	dir := t.TempDir()
+	a := &API{}
+	name := "demo"
+	orig := "name: demo\nkind: global\ntransport: stdio-bridge\ncommand: npx\ndaemons:\n  - name: default\n    port: 9222\n"
+	if err := a.ManifestCreateIn(dir, name, orig); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// Empty expectedHash skips the check but still runs ManifestValidate
+	// on the new yaml — must remain well-formed.
+	updated := "name: demo\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9222\n"
+	if _, err := a.ManifestEditInWithHash(dir, name, updated, ""); err != nil {
+		t.Fatalf("empty-hash edit should succeed: %v", err)
+	}
+}
+
+func TestManifestEditIn_AtomicWrite_TargetUnchangedOnFailure(t *testing.T) {
+	dir := t.TempDir()
+	a := &API{}
+	name := "demo"
+	orig := "name: demo\nkind: global\ntransport: stdio-bridge\ncommand: npx\ndaemons:\n  - name: default\n    port: 9223\n"
+	if err := a.ManifestCreateIn(dir, name, orig); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// Inject write failure between tmp-close and rename.
+	ManifestSetFailWriteHook(func() bool { return true })
+	defer ManifestSetFailWriteHook(nil)
+	updated := "name: demo\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9223\n"
+	_, err := a.ManifestEditInWithHash(dir, name, updated, "")
+	if err == nil {
+		t.Fatalf("expected injected failure, got nil")
+	}
+	// Target content must be UNCHANGED.
+	got, _, _ := a.ManifestGetInWithHash(dir, name)
+	if got != orig {
+		t.Errorf("target yaml changed on failure: %q, want %q", got, orig)
+	}
+	// No stale tmp file left.
+	files, _ := os.ReadDir(filepath.Join(dir, name))
+	for _, f := range files {
+		if strings.HasSuffix(f.Name(), ".tmp") {
+			t.Errorf("stale tmp file left: %q", f.Name())
+		}
 	}
 }
 

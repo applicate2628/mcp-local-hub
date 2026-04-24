@@ -175,6 +175,20 @@ func (realManifestValidator) ManifestValidate(yaml string) []string {
 	return api.NewAPI().ManifestValidate(yaml)
 }
 
+// realManifestGetter is the production adapter for /api/manifest/get.
+type realManifestGetter struct{}
+
+func (realManifestGetter) ManifestGetWithHash(name string) (string, string, error) {
+	return api.NewAPI().ManifestGetWithHash(name)
+}
+
+// realManifestEditor is the production adapter for /api/manifest/edit.
+type realManifestEditor struct{}
+
+func (realManifestEditor) ManifestEditWithHash(name, yaml, expectedHash string) (string, error) {
+	return api.NewAPI().ManifestEditWithHash(name, yaml, expectedHash)
+}
+
 // restarter is the narrow interface the /api/servers/:name/restart handler
 // needs. realRestarter is the production adapter; tests inject their own.
 type restarter interface {
@@ -248,6 +262,8 @@ type Server struct {
 	dismisser        dismisser
 	manifestCreator   manifestCreator
 	manifestValidator manifestValidator
+	manifestGetter    manifestGetter
+	manifestEditor    manifestEditor
 	installer        installer
 	restart          restarter
 	logs             logsProvider
@@ -269,6 +285,8 @@ func NewServer(cfg Config) *Server {
 	s.dismisser = realDismisser{}
 	s.manifestCreator = realManifestCreator{}
 	s.manifestValidator = realManifestValidator{}
+	s.manifestGetter = realManifestGetter{}
+	s.manifestEditor = realManifestEditor{}
 	s.installer = realInstaller{}
 	s.restart = realRestarter{}
 	s.logs = realLogs{}

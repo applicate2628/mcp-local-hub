@@ -13,6 +13,7 @@ import (
 	"mcp-local-hub/internal/config"
 
 	toml "github.com/pelletier/go-toml/v2"
+	"gopkg.in/yaml.v3"
 )
 
 // ScanOpts provides per-client config paths so tests can point at temp dirs.
@@ -410,12 +411,15 @@ func (a *API) Scan() (*ScanResult, error) {
 //   - binary and servers/ in the same directory (legacy / standalone install)
 //   - binary in bin/ and servers/ in bin/../ (standard Go project layout)
 //
-// Falls back to CWD-relative "servers" if neither exists, so tests that
-// don't set an explicit ManifestDir still work when run from the repo root.
+// If neither exists, returns the sibling path (exeDir/servers) without
+// consulting the current working directory. This avoids untrusted CWD-based
+// manifest resolution while preserving a deterministic on-disk location.
 func defaultManifestDir() string {
 	exe, err := os.Executable()
 	if err != nil {
-		return "servers"
+		// Fail closed to a deterministic, clearly invalid absolute-ish path
+		// rather than a CWD-relative location.
+		return filepath.Join(string(os.PathSeparator), "nonexistent", "mcphub", "servers")
 	}
 	exeDir := filepath.Dir(exe)
 	// Legacy: exe and servers/ at same level.
@@ -428,8 +432,8 @@ func defaultManifestDir() string {
 	if st, err := os.Stat(parent); err == nil && st.IsDir() {
 		return parent
 	}
-	// Last resort: relative to CWD.
-	return "servers"
+	// Last resort: deterministic path near the executable (not CWD).
+	return sibling
 }
 
 // ExtractManifestFromClient reads a stdio entry from the specified client
@@ -598,35 +602,38 @@ func pickNextFreePort(manifestDir string) (int, error) {
 }
 
 func renderDraftManifestYAML(name, cmd string, args []string, env map[string]string, port int) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "name: %s\n", name)
-	fmt.Fprintln(&b, "kind: global")
-	fmt.Fprintln(&b, "transport: stdio-bridge")
-	fmt.Fprintf(&b, "command: %s\n", cmd)
-	if len(args) > 0 {
-		fmt.Fprintln(&b, "base_args:")
-		for _, a := range args {
-			fmt.Fprintf(&b, "  - %q\n", a)
-		}
+	doc := struct {
+		Name           string            `yaml:"name"`
+		Kind           string            `yaml:"kind"`
+		Transport      string            `yaml:"transport"`
+		Command        string            `yaml:"command"`
+		BaseArgs       []string          `yaml:"base_args,omitempty"`
+		Env            map[string]string `yaml:"env,omitempty"`
+		Daemons        []map[string]any  `yaml:"daemons"`
+		ClientBindings []map[string]any  `yaml:"client_bindings"`
+		WeeklyRefresh  bool              `yaml:"weekly_refresh"`
+	}{
+		Name:      name,
+		Kind:      "global",
+		Transport: "stdio-bridge",
+		Command:   cmd,
+		BaseArgs:  args,
+		Env:       env,
+		Daemons: []map[string]any{
+			{"name": "default", "port": port},
+		},
+		ClientBindings: []map[string]any{
+			{"client": "claude-code", "daemon": "default", "url_path": "/mcp"},
+			{"client": "codex-cli", "daemon": "default", "url_path": "/mcp"},
+			{"client": "gemini-cli", "daemon": "default", "url_path": "/mcp"},
+			{"client": "antigravity", "daemon": "default", "url_path": "/mcp"},
+		},
+		WeeklyRefresh: false,
 	}
-	if len(env) > 0 {
-		fmt.Fprintln(&b, "env:")
-		for k, v := range env {
-			fmt.Fprintf(&b, "  %s: %q\n", k, v)
-		}
+	out, err := yaml.Marshal(doc)
+	if err != nil {
+		// yaml.Marshal on this static structure should not fail; fallback keeps behavior.
+		return ""
 	}
-	fmt.Fprintln(&b, "")
-	fmt.Fprintln(&b, "daemons:")
-	fmt.Fprintln(&b, "  - name: default")
-	fmt.Fprintf(&b, "    port: %d\n", port)
-	fmt.Fprintln(&b, "")
-	fmt.Fprintln(&b, "client_bindings:")
-	for _, c := range []string{"claude-code", "codex-cli", "gemini-cli", "antigravity"} {
-		fmt.Fprintf(&b, "  - client: %s\n", c)
-		fmt.Fprintln(&b, "    daemon: default")
-		fmt.Fprintln(&b, "    url_path: /mcp")
-	}
-	fmt.Fprintln(&b, "")
-	fmt.Fprintln(&b, "weekly_refresh: false")
-	return b.String()
+	return string(out)
 }

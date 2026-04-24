@@ -29,12 +29,13 @@ func newAntigravityForTest(t *testing.T, initial string) *antigravityClient {
 // schema — stdio relay is the only working path as of v0.x).
 func TestAntigravity_AddEntry_WritesStdioRelayShape(t *testing.T) {
 	a := newAntigravityForTest(t, `{"mcpServers":{"keep":{"command":"x"}}}`)
+	exePath := filepath.Join(t.TempDir(), "mcphub.exe")
 	err := a.AddEntry(MCPEntry{
 		Name:         "serena",
 		URL:          "http://localhost:9121/mcp", // ignored by adapter; relay args take over
 		RelayServer:  "serena",
 		RelayDaemon:  "claude",
-		RelayExePath: `D:\dev\mcp-local-hub\mcphub.exe`,
+		RelayExePath: exePath,
 	})
 	if err != nil {
 		t.Fatalf("AddEntry: %v", err)
@@ -49,7 +50,7 @@ func TestAntigravity_AddEntry_WritesStdioRelayShape(t *testing.T) {
 	if !ok {
 		t.Fatalf("serena entry missing: %v", servers)
 	}
-	if cmd, _ := serena["command"].(string); cmd != `D:\dev\mcp-local-hub\mcphub.exe` {
+	if cmd, _ := serena["command"].(string); cmd != exePath {
 		t.Errorf("command = %q, want absolute mcphub.exe path", cmd)
 	}
 	argsAny, ok := serena["args"].([]any)
@@ -90,6 +91,7 @@ func TestAntigravity_AddEntry_RejectsMissingRelayFields(t *testing.T) {
 		{"no relay server", MCPEntry{Name: "x", URL: "http://x", RelayDaemon: "d", RelayExePath: "path"}},
 		{"no relay daemon", MCPEntry{Name: "x", URL: "http://x", RelayServer: "s", RelayExePath: "path"}},
 		{"no exe path", MCPEntry{Name: "x", URL: "http://x", RelayServer: "s", RelayDaemon: "d"}},
+		{"relative exe path", MCPEntry{Name: "x", URL: "http://x", RelayServer: "s", RelayDaemon: "d", RelayExePath: "mcphub"}},
 	}
 	for _, c := range cases {
 		err := a.AddEntry(c.e)

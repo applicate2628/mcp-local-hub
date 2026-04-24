@@ -3,6 +3,7 @@ package perftools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -40,6 +41,11 @@ type clangTidyResult struct {
 	ExitCode    int          `json:"exit_code"`
 }
 
+const (
+	clangTidyMaxStdoutBytes = 8 * 1024 * 1024
+	clangTidyMaxStderrBytes = 2 * 1024 * 1024
+)
+
 // clangTidyTool runs clang-tidy against a list of files, using the
 // project's compile_commands.json for flag resolution. Returns a
 // structured JSON diagnostics list so callers can filter by check,
@@ -75,8 +81,11 @@ func (tb *PerfToolbox) clangTidyTool(ctx context.Context, req *mcp.CallToolReque
 	cmdArgs = append(cmdArgs, args.ExtraArgs...)
 	cmdArgs = append(cmdArgs, args.Files...)
 
-	cap, err := runCapture(ctx, tb.tools.ClangTidy.Path, "", cmdArgs)
+	cap, err := runCaptureLimited(ctx, tb.tools.ClangTidy.Path, "", cmdArgs, clangTidyMaxStdoutBytes, clangTidyMaxStderrBytes)
 	if err != nil {
+		if errors.Is(err, errOutputLimitExceeded) {
+			return errResult(fmt.Sprintf("clang-tidy output exceeded limits (stdout=%d bytes, stderr=%d bytes); narrow files/checks or reduce verbosity", clangTidyMaxStdoutBytes, clangTidyMaxStderrBytes)), nil
+		}
 		return errResult(fmt.Sprintf("failed to run clang-tidy: %v", err)), nil
 	}
 
