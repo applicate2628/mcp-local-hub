@@ -100,3 +100,22 @@ export async function postManifestValidate(yaml: string): Promise<string[]> {
   const payload = (await resp.json()) as { warnings?: string[] };
   return payload.warnings ?? [];
 }
+
+// getExtractManifest fetches the prefill YAML that populates AddServer's
+// form when the user arrives via the A1 Migration Create-manifest button.
+// Returns the raw YAML string. Throws on non-2xx with the backend error.
+export async function getExtractManifest(client: string, server: string): Promise<string> {
+  const url = `/api/extract-manifest?client=${encodeURIComponent(client)}&server=${encodeURIComponent(server)}`;
+  const resp = await fetch(url);
+  if (!resp.ok) {
+    let body: { error?: string } | null = null;
+    try {
+      body = (await resp.json()) as { error?: string };
+    } catch {
+      // Non-JSON error body; fall through.
+    }
+    throw new Error(`/api/extract-manifest: ${body?.error ?? resp.statusText}`);
+  }
+  const payload = (await resp.json()) as { yaml?: string };
+  return payload.yaml ?? "";
+}

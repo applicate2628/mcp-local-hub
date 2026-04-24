@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { BLANK_FORM, parseYAMLToForm, toYAML } from "../lib/manifest-yaml";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
-import { postManifestCreate, postManifestValidate } from "../api";
+import { getExtractManifest, postManifestCreate, postManifestValidate } from "../api";
 import type { ManifestFormState } from "../types";
 
 // MANIFEST_NAME_REGEX mirrors internal/api/manifest.go:23 validManifestName.
@@ -31,6 +31,20 @@ function deepEqualForm(a: ManifestFormState, b: ManifestFormState): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+// parseAddServerQuery extracts ?server=...&from-client=... from the current
+// hash. A1's Create-manifest button navigates to
+// #/add-server?server=<name>&from-client=<client> — we pick those up on
+// mount and run the prefill fetch.
+function parseAddServerQuery(): { server: string; fromClient: string } {
+  const hash = window.location.hash;
+  const q = hash.split("?")[1] ?? "";
+  const params = new URLSearchParams(q);
+  return {
+    server: params.get("server") ?? "",
+    fromClient: params.get("from-client") ?? "",
+  };
+}
+
 export function AddServerScreen(props: { onDirtyChange?: (dirty: boolean) => void } = {}) {
   const [formState, setFormState] = useState<ManifestFormState>(BLANK_FORM);
   // initialSnapshot is the post-normalization baseline the dirty check
@@ -46,6 +60,33 @@ export function AddServerScreen(props: { onDirtyChange?: (dirty: boolean) => voi
   useEffect(() => {
     props.onDirtyChange?.(isDirty);
   }, [isDirty]);
+
+  // Prefill path (Q8 baseline gotcha): fetch extract-manifest when the
+  // user arrives from A1, parse → set form state → take the snapshot
+  // AFTER normalization so dirty is false on first render.
+  useEffect(() => {
+    const { server, fromClient } = parseAddServerQuery();
+    if (!server || !fromClient) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const yaml = await getExtractManifest(fromClient, server);
+        if (cancelled) return;
+        const parsed = parseYAMLToForm(yaml);
+        setFormState(parsed);
+        setInitialSnapshot(parsed);
+      } catch (err) {
+        if (cancelled) return;
+        setBanner({
+          kind: "error",
+          text: `Could not prefill from ${fromClient}/${server}: ${(err as Error).message}. Continuing with empty form.`,
+        });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const nameError = formState.name.length > 0 && !MANIFEST_NAME_REGEX.test(formState.name)
     ? "Must match [a-z0-9][a-z0-9._-]* (lowercase, digits, '.', '_', '-')"

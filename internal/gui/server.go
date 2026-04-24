@@ -251,6 +251,7 @@ type Server struct {
 	installer        installer
 	restart          restarter
 	logs             logsProvider
+	extractor        extractor
 	events           *Broadcaster
 }
 
@@ -271,6 +272,7 @@ func NewServer(cfg Config) *Server {
 	s.installer = realInstaller{}
 	s.restart = realRestarter{}
 	s.logs = realLogs{}
+	s.extractor = realExtractor{}
 	s.events = NewBroadcaster()
 	registerPingRoutes(s)
 	registerAssetRoutes(s)
@@ -284,6 +286,7 @@ func NewServer(cfg Config) *Server {
 	registerServerRoutes(s)
 	registerEventsRoutes(s)
 	registerLogsRoutes(s)
+	registerExtractManifestRoutes(s)
 	return s
 }
 
