@@ -47,10 +47,41 @@ export interface ServerAggregate {
   daemonCount: number;
 }
 
-// ManifestFormState is the authoritative in-memory shape for the AddServer
-// screen. The form writes to it; toYAML(state) serializes it for the backend.
-// Using array-of-objects for env and client_bindings (rather than maps) keeps
-// add/delete operations and render ordering deterministic.
+// DaemonFormEntry — A2b extension: adds form-state-only UUID for identity-
+// stable rename + delete. The UUID is NEVER serialized to YAML; it's
+// replaced by daemon.name at toYAML time and re-generated on each Load.
+export interface DaemonFormEntry {
+  _id: string;
+  name: string;
+  port: number;
+  // A2b Advanced, workspace-scoped only:
+  context?: string;
+  extra_args?: string[];
+}
+
+// BindingFormEntry — A2b extension: references daemon by _id internally
+// for rename safety. At toYAML time the _id is resolved to the daemon's
+// current name.
+export interface BindingFormEntry {
+  client: string;
+  daemonId: string;
+  url_path: string;
+}
+
+// LanguageFormEntry — A2b Advanced (workspace-scoped only).
+export interface LanguageFormEntry {
+  _id: string;
+  name: string;
+  backend: string;
+  transport?: "stdio" | "http_listen" | "native_http";
+  lsp_command?: string;
+  extra_flags?: string[];
+}
+
+// ManifestFormState — A2b shape. loadedHash + _preservedRaw support
+// stale-file detection + round-trip preservation. Advanced fields are
+// optional: kind-gated sub-fields (languages, port_pool, daemon.context)
+// are only serialized when kind === "workspace-scoped".
 export interface ManifestFormState {
   name: string;
   kind: "global" | "workspace-scoped";
@@ -58,9 +89,17 @@ export interface ManifestFormState {
   command: string;
   base_args: string[];
   env: Array<{ key: string; value: string }>;
-  daemons: Array<{ name: string; port: number }>;
-  client_bindings: Array<{ client: string; daemon: string; url_path: string }>;
+  daemons: DaemonFormEntry[];
+  client_bindings: BindingFormEntry[];
   weekly_refresh: boolean;
+  // A2b Advanced:
+  idle_timeout_min?: number;
+  base_args_template?: string[];
+  languages?: LanguageFormEntry[];
+  port_pool?: { start: number; end: number };
+  // A2b state-only:
+  loadedHash: string;
+  _preservedRaw: Record<string, unknown>;
 }
 
 export interface ValidationWarning {
@@ -76,4 +115,10 @@ export interface ManifestValidateResponse {
 // in a later task. Shape: { yaml: string }.
 export interface ExtractManifestResponse {
   yaml: string;
+}
+
+// GetManifestResponse mirrors the new /api/manifest/get response.
+export interface GetManifestResponse {
+  yaml: string;
+  hash: string;
 }

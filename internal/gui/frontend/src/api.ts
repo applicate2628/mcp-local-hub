@@ -119,3 +119,76 @@ export async function getExtractManifest(client: string, server: string): Promis
   const payload = (await resp.json()) as { yaml?: string };
   return payload.yaml ?? "";
 }
+
+// ManifestHashMismatchError marks the stale-file-detection branch so
+// the AddServer edit flow can show the [Reload]/[Force Save] banner
+// instead of a generic error toast.
+export class ManifestHashMismatchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ManifestHashMismatchError";
+  }
+}
+
+// getManifest reads the named manifest from disk and returns the YAML
+// together with the SHA-256 content hash. The hash is stored in form
+// state at Load and passed back to postManifestEdit as expected_hash.
+export async function getManifest(name: string): Promise<{ yaml: string; hash: string }> {
+  const resp = await fetch(`/api/manifest/get?name=${encodeURIComponent(name)}`);
+  if (!resp.ok) {
+    let body: { error?: string } | null = null;
+    try {
+      body = (await resp.json()) as { error?: string };
+    } catch {
+      // Non-JSON error body; fall through.
+    }
+    throw new Error(`/api/manifest/get: ${body?.error ?? resp.statusText}`);
+  }
+  const payload = (await resp.json()) as { yaml?: string; hash?: string };
+  return { yaml: payload.yaml ?? "", hash: payload.hash ?? "" };
+}
+
+// postManifestEdit overwrites an existing manifest. expectedHash is the
+// hash returned by getManifest at Load time; the backend rejects the
+// write with 409 if the on-disk hash has since changed (external edit).
+// Pass expectedHash === "" to skip the concurrency check (Force Save
+// re-read path).
+//
+// Appendix P1-3 override: returns the new hash from the 200 response so
+// runSave can refresh loadedHash atomically without a separate GET
+// round-trip. Rejects 200 responses missing a non-empty hash (R3 safety:
+// an empty hash would silently downgrade the next save's
+// optimistic-concurrency check).
+export async function postManifestEdit(
+  name: string,
+  yaml: string,
+  expectedHash: string,
+): Promise<{ hash: string }> {
+  const resp = await fetch("/api/manifest/edit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, yaml, expected_hash: expectedHash }),
+  });
+  if (resp.ok) {
+    const payload = (await resp.json()) as { hash?: string };
+    // R3 correction: reject malformed success (empty/missing hash).
+    // An empty returned hash would become loadedHash, and the next
+    // edit call would send expected_hash="" — which the backend treats
+    // as "skip optimistic concurrency". That silently drops stale
+    // detection. Reject 200 without a non-empty hash.
+    if (!payload.hash) {
+      throw new Error("/api/manifest/edit: success response missing hash field");
+    }
+    return { hash: payload.hash };
+  }
+  let body: { error?: string; code?: string } | null = null;
+  try {
+    body = (await resp.json()) as { error?: string; code?: string };
+  } catch {
+    // Non-JSON error body; fall through.
+  }
+  if (resp.status === 409 && body?.code === "MANIFEST_HASH_MISMATCH") {
+    throw new ManifestHashMismatchError(body.error ?? "hash mismatch");
+  }
+  throw new Error(`/api/manifest/edit: ${body?.error ?? resp.statusText}`);
+}
