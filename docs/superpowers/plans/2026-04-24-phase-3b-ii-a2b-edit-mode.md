@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 >
+> **⚠️ READ THE APPENDIX FIRST.** The Codex R2 plan-review identified 7 findings that were addressed via refined implementations. The **Appendix at the very bottom of this document OVERRIDES the task bodies** where they conflict — specifically for Tasks 3, 4, 8, 9, 12, 13, 18, plus P2-3 create-mode Advanced E2E coverage. Subagent implementers MUST apply appendix-refined code, not original task-body code, for the noted tasks.
+>
 > **NEW workflow gate:** after BOTH memo and plan are committed, request a **Codex full-plan review** BEFORE dispatching any implementer. Rationale: A2a's 3 in-flight fixes (paste stale closure, remount regression, spec accordion bugs) each cost one review cycle that a plan-level review would have caught at plan time.
 
 **Goal:** Ship production-grade edit-mode hardening + Advanced section for the Add Server screen (`#/edit-server?name=<name>`), extending `AddServerScreen` via a `mode: "create" | "edit"` prop. Includes content-hash stale-file detection, Force Save last-writer-wins with `_preservedRaw` round-trip, beforeunload + hashchange nav guard, Advanced fields (kind-gated), multi-daemon matrix view, read-only mode for nested-unknown manifests, and identity locking (name + kind) in edit mode.
@@ -3645,3 +3647,800 @@ Task 1 (hash helper) → Task 2 (ManifestGetWithHash) → Task 3 (ManifestEditWi
 **Type consistency:** `ManifestFormState` shape consistent Tasks 5, 7, 11, 12, 13, 16, 17. `DaemonFormEntry._id` introduced in Task 5 and used consistently through 11, 13, 16, 17. `ManifestHashMismatchError` named in Task 8 and used in Task 13. Data-testid strings (`load-error-banner`, `readonly-banner`, `bindings-matrix`, `port-pool`, `languages-subsection`) defined in the tasks that add them and referenced in Task 18 tests.
 
 No gaps found.
+
+---
+
+# Appendix: Codex R2 plan-review refinements (OVERRIDES task bodies)
+
+Codex R1 full-plan review flagged 7 findings. Codex R2 reviewed the lead's proposed fixes and identified needed revisions. The resolved fixes below **override the original task bodies** for Tasks 3, 4, 8, 9, 12, 13, 18, plus added create-mode Advanced E2E coverage. Subagent implementers MUST apply the code in this appendix, not the original task-body code, for the noted sections.
+
+## Summary table
+
+| Finding | Severity | Area | Resolution |
+|---|---|---|---|
+| P1-1 | must-fix | Task 3 atomic write | `os.CreateTemp` + atomic rename + defer cleanup + injected failure hook |
+| P1-2 | dropped | Task 13 hash refresh | Superseded by P1-3 (backend returns new hash; no extra `getManifest` call needed) |
+| P1-3 | must-fix | Tasks 3, 4, 8, 13 | `ManifestEditWithHash` returns new hash; `/api/manifest/edit` responds 200 + `{hash}`; `postManifestEdit(): Promise<{hash}>`; runSave/runForceSave consume it atomically |
+| P1-4 | must-fix | Task 13 Force Save | Validate the FINAL payload AFTER re-read + merge + serialize, not before |
+| P2-1 | should-fix | Task 18 E2E | Drop `page.close()` + beforeunload test (unreliable); add hashchange cancel/accept + Paste→Save race |
+| P2-2 | should-fix | Tasks 9, 12 | `useRouter` returns `{screen, query}`; AddServer derives `editName` from route state; load effect deps on stable strings; guard-driven state update (not direct hashchange listener) |
+| P2-3 | should-fix | Task 18 (and add-server.spec.ts) | Add create-mode Advanced kind-toggle + always-visible field E2E coverage |
+
+## P1-1 refined — Task 3 atomic write
+
+**Replaces Task 3 Step 3 impl + Step 1 tests.**
+
+### Refined `ManifestEditInWithHash` impl
+
+```go
+// ManifestEditInWithHash replaces an existing manifest atomically via
+// tmp-file-plus-rename. If the on-disk content hash diverged from
+// expectedHash (non-empty), returns ErrManifestHashMismatch without
+// writing. Empty expectedHash skips the check (Force Save path which
+// re-reads at save-time). Returns the new post-write content hash so
+// callers can update their loadedHash cache in one pass — avoids an
+// extra GET round-trip AND the stale-hash-after-force-save race.
+func (a *API) ManifestEditInWithHash(dir, name, yaml, expectedHash string) (newHash string, err error) {
+	if err := checkManifestName(name); err != nil {
+		return "", err
+	}
+	target := filepath.Join(dir, name, "manifest.yaml")
+	current, err := os.ReadFile(target)
+	if err != nil {
+		return "", fmt.Errorf("manifest %q does not exist; use create instead", name)
+	}
+	if expectedHash != "" {
+		if got := ManifestHashContent(current); got != expectedHash {
+			return "", ErrManifestHashMismatch
+		}
+	}
+	if warnings := a.ManifestValidate(yaml); len(warnings) > 0 {
+		return "", fmt.Errorf("manifest has validation errors: %s", strings.Join(warnings, "; "))
+	}
+	// Atomic write: unique tmp in the same directory, defer cleanup,
+	// os.Rename on success. Test-only hook manifestEditFailWriteHook
+	// lets tests inject a write/rename failure without relying on
+	// read-only-dir tricks (brittle on Windows).
+	tmp, err := os.CreateTemp(filepath.Dir(target), "manifest-*.tmp")
+	if err != nil {
+		return "", fmt.Errorf("create tmp: %w", err)
+	}
+	tmpPath := tmp.Name()
+	// Always attempt to remove tmp; harmless if rename already moved it.
+	defer func() { _ = os.Remove(tmpPath) }()
+	if _, err := tmp.Write([]byte(yaml)); err != nil {
+		_ = tmp.Close()
+		return "", fmt.Errorf("write tmp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return "", fmt.Errorf("close tmp: %w", err)
+	}
+	if manifestEditFailWriteHook != nil && manifestEditFailWriteHook() {
+		return "", fmt.Errorf("injected write failure")
+	}
+	if err := os.Rename(tmpPath, target); err != nil {
+		return "", fmt.Errorf("atomic rename: %w", err)
+	}
+	return ManifestHashContent([]byte(yaml)), nil
+}
+
+// manifestEditFailWriteHook is a package-internal test hook that forces
+// a simulated write-failure to verify atomic-write crash-safety. Tests
+// set it via ManifestSetFailWriteHook, run the operation, then reset.
+var manifestEditFailWriteHook func() bool
+
+// ManifestSetFailWriteHook is test-only; callers in production code MUST
+// NOT set this. Exported only so internal/gui tests can reuse the hook.
+func ManifestSetFailWriteHook(h func() bool) { manifestEditFailWriteHook = h }
+
+// ManifestEditWithHash is the default-dir convenience wrapper.
+func (a *API) ManifestEditWithHash(name, yaml, expectedHash string) (string, error) {
+	return a.ManifestEditInWithHash(defaultManifestDir(), name, yaml, expectedHash)
+}
+```
+
+### Refined Task 3 tests (adjust for `(string, error)` return + atomic test)
+
+All existing test bodies change:
+
+```go
+func TestManifestEditIn_RejectsHashMismatch(t *testing.T) {
+	dir := t.TempDir()
+	a := &API{}
+	name := "demo"
+	if err := a.ManifestCreateIn(dir, name, "name: demo\nkind: global\ntransport: stdio-bridge\ncommand: npx\n"); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	_, hash, _ := a.ManifestGetInWithHash(dir, name)
+	path := filepath.Join(dir, name, "manifest.yaml")
+	if err := os.WriteFile(path, []byte("name: demo\nkind: workspace-scoped\ntransport: stdio-bridge\ncommand: npx\n"), 0600); err != nil {
+		t.Fatalf("external write: %v", err)
+	}
+	_, err := a.ManifestEditInWithHash(dir, name, "name: demo\nkind: global\ntransport: stdio-bridge\ncommand: echo\n", hash)
+	if err == nil {
+		t.Fatalf("expected hash-mismatch error, got nil")
+	}
+	if !errors.Is(err, ErrManifestHashMismatch) {
+		t.Errorf("err = %v, want ErrManifestHashMismatch", err)
+	}
+}
+
+func TestManifestEditIn_AcceptsMatchingHash_ReturnsNewHash(t *testing.T) {
+	dir := t.TempDir()
+	a := &API{}
+	name := "demo"
+	orig := "name: demo\nkind: global\ntransport: stdio-bridge\ncommand: npx\n"
+	if err := a.ManifestCreateIn(dir, name, orig); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	_, hash, _ := a.ManifestGetInWithHash(dir, name)
+	updated := "name: demo\nkind: global\ntransport: stdio-bridge\ncommand: echo\n"
+	newHash, err := a.ManifestEditInWithHash(dir, name, updated, hash)
+	if err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+	wantHash := ManifestHashContent([]byte(updated))
+	if newHash != wantHash {
+		t.Errorf("returned hash = %q, want %q", newHash, wantHash)
+	}
+	got, diskHash, _ := a.ManifestGetInWithHash(dir, name)
+	if got != updated {
+		t.Errorf("yaml = %q, want %q", got, updated)
+	}
+	if diskHash != newHash {
+		t.Errorf("disk hash = %q does not match returned newHash %q", diskHash, newHash)
+	}
+}
+
+func TestManifestEditIn_EmptyExpectedHash_SkipsCheck(t *testing.T) {
+	dir := t.TempDir()
+	a := &API{}
+	name := "demo"
+	if err := a.ManifestCreateIn(dir, name, "name: demo\n"); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := a.ManifestEditInWithHash(dir, name, "name: demo\nkind: global\n", ""); err != nil {
+		t.Fatalf("empty-hash edit should succeed: %v", err)
+	}
+}
+
+func TestManifestEditIn_AtomicWrite_TargetUnchangedOnFailure(t *testing.T) {
+	dir := t.TempDir()
+	a := &API{}
+	name := "demo"
+	orig := "name: demo\n"
+	if err := a.ManifestCreateIn(dir, name, orig); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// Inject write failure between tmp-close and rename.
+	ManifestSetFailWriteHook(func() bool { return true })
+	defer ManifestSetFailWriteHook(nil)
+	_, err := a.ManifestEditInWithHash(dir, name, "name: demo\nkind: global\n", "")
+	if err == nil {
+		t.Fatalf("expected injected failure, got nil")
+	}
+	// Target content must be UNCHANGED.
+	got, _, _ := a.ManifestGetInWithHash(dir, name)
+	if got != orig {
+		t.Errorf("target yaml changed on failure: %q, want %q", got, orig)
+	}
+	// No stale tmp file left.
+	files, _ := os.ReadDir(filepath.Join(dir, name))
+	for _, f := range files {
+		if strings.HasSuffix(f.Name(), ".tmp") {
+			t.Errorf("stale tmp file left: %q", f.Name())
+		}
+	}
+}
+```
+
+## P1-3 refined — hash return cascade (Tasks 4, 8, 13)
+
+### Task 4 — GUI handler response: 200 + `{hash}` instead of 204
+
+Replace the handler body for `/api/manifest/edit` in Task 4 Step 1:
+
+```go
+s.mux.HandleFunc("/api/manifest/edit", s.requireSameOrigin(func(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req manifestEditRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeAPIError(w, fmt.Errorf("invalid JSON: %w", err), http.StatusBadRequest, "BAD_REQUEST")
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		writeAPIError(w, fmt.Errorf("name must not be empty"), http.StatusBadRequest, "BAD_REQUEST")
+		return
+	}
+	newHash, err := s.manifestEditor.ManifestEditWithHash(name, req.YAML, req.ExpectedHash)
+	if err != nil {
+		code := "MANIFEST_EDIT_FAILED"
+		status := http.StatusInternalServerError
+		if errors.Is(err, api.ErrManifestHashMismatch) {
+			code = "MANIFEST_HASH_MISMATCH"
+			status = http.StatusConflict
+		}
+		writeAPIError(w, err, status, code)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(manifestEditResponse{Hash: newHash})
+}))
+```
+
+Add the response type near the other types in Task 4:
+
+```go
+type manifestEditResponse struct {
+	Hash string `json:"hash"`
+}
+```
+
+Update the `manifestEditor` interface signature:
+
+```go
+type manifestEditor interface {
+	ManifestEditWithHash(name, yaml, expectedHash string) (newHash string, err error)
+}
+```
+
+`realManifestEditor` and `fakeManifestEditor` both return `(string, error)`. Update test expectations: success case asserts `rec.Code == http.StatusOK` (not 204) and the body contains `"hash":"<returned>"`. Hash-mismatch case still asserts 409.
+
+### Task 8 — `postManifestEdit` returns `Promise<{hash: string}>`
+
+Replace the test block for `postManifestEdit` success case:
+
+```ts
+  it("returns new hash on 200", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({ hash: "new-hash-abc" }),
+    }) as unknown as Response);
+    const out = await postManifestEdit("demo", "name: demo\n", "old-hash");
+    expect(out).toEqual({ hash: "new-hash-abc" });
+  });
+```
+
+Replace the impl in `api.ts`:
+
+```ts
+export async function postManifestEdit(
+  name: string,
+  yaml: string,
+  expectedHash: string,
+): Promise<{ hash: string }> {
+  const resp = await fetch("/api/manifest/edit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, yaml, expected_hash: expectedHash }),
+  });
+  if (resp.ok) {
+    const payload = (await resp.json()) as { hash?: string };
+    return { hash: payload.hash ?? "" };
+  }
+  let body: { error?: string; code?: string } | null = null;
+  try {
+    body = (await resp.json()) as { error?: string; code?: string };
+  } catch {
+    // Non-JSON error body; fall through.
+  }
+  if (resp.status === 409 && body?.code === "MANIFEST_HASH_MISMATCH") {
+    throw new ManifestHashMismatchError(body.error ?? "hash mismatch");
+  }
+  throw new Error(`/api/manifest/edit: ${body?.error ?? resp.statusText}`);
+}
+```
+
+### Task 13 — runSave + runForceSave consume returned hash atomically
+
+Replace the entire `runSave` success branch AND `runForceSave` body in Task 13:
+
+```tsx
+  async function runSave(opts: { install: boolean }) {
+    const version = ++submissionCounter.current;
+    setBusy(opts.install ? "install" : "save");
+    setBanner(null);
+    try {
+      const name = formState.name.trim();
+      if (!name) {
+        setBanner({ kind: "error", text: "Name is required." });
+        return;
+      }
+      const payload = toYAML(formState);
+      const warnings = await postManifestValidate(payload);
+      if (version !== submissionCounter.current) return;
+      if (warnings.length > 0) {
+        setWarnings(warnings);
+        setBanner({
+          kind: "error",
+          text: `Cannot save: ${warnings.length} validation warning${warnings.length === 1 ? "" : "s"}.`,
+        });
+        return;
+      }
+      if (mode === "edit") {
+        try {
+          const { hash: newHash } = await postManifestEdit(name, payload, formState.loadedHash);
+          if (version !== submissionCounter.current) return;
+          // Atomic snapshot update: build one post-save object carrying the
+          // fresh hash AND the user's just-persisted form state; set both
+          // formState and initialSnapshot from the same reference so dirty
+          // is false (P1-2 fix: no separate getManifest refresh, no ordering race).
+          const postSave: ManifestFormState = { ...formState, loadedHash: newHash };
+          setFormState(postSave);
+          setInitialSnapshot(postSave);
+        } catch (err) {
+          if (version !== submissionCounter.current) return;
+          if (err instanceof ManifestHashMismatchError) {
+            setBanner({
+              kind: "error",
+              text: "Manifest changed on disk since you opened it. Reload will discard your edits and show the new version. Force Save will overwrite with your version.",
+              staleReload: true,
+              staleForceSave: true,
+            });
+            return;
+          }
+          throw err;
+        }
+      } else {
+        await postManifestCreate(name, payload);
+        if (version !== submissionCounter.current) return;
+        setInitialSnapshot(formState);
+      }
+      setWarnings(null);
+      if (!opts.install) {
+        setBanner({
+          kind: "success",
+          text: mode === "edit"
+            ? `Saved. Daemon still running old config.`
+            : `Saved servers/${name}/manifest.yaml.`,
+          reinstall: mode === "edit",
+        });
+        return;
+      }
+      await runInstallNow(name, version);
+    } catch (err) {
+      if (version !== submissionCounter.current) return;
+      setBanner({ kind: "error", text: (err as Error).message });
+    } finally {
+      if (version === submissionCounter.current) setBusy("");
+    }
+  }
+
+  async function runForceSave() {
+    const version = ++submissionCounter.current;
+    setBusy("save");
+    setBanner(null);
+    try {
+      const name = formState.name.trim();
+      // 1. Re-read disk to get fresh hash + fresh _preservedRaw.
+      const fresh = await getManifest(name);
+      if (version !== submissionCounter.current) return;
+      const freshParsed = parseYAMLToForm(fresh.yaml);
+      // 2. Merge: user's known-field edits win; fresh disk _preservedRaw wins.
+      const merged: ManifestFormState = {
+        ...formState,
+        _preservedRaw: freshParsed._preservedRaw,
+      };
+      // 3. Serialize FINAL payload AFTER merge.
+      const payload = toYAML(merged);
+      // 4. Validate the FINAL payload (P1-4 fix: validate the exact bytes
+      // that will be written, not pre-merge).
+      const warnings = await postManifestValidate(payload);
+      if (version !== submissionCounter.current) return;
+      if (warnings.length > 0) {
+        setWarnings(warnings);
+        setBanner({
+          kind: "error",
+          text: `Cannot Force Save: ${warnings.length} validation warning${warnings.length === 1 ? "" : "s"} in merged payload.`,
+        });
+        return;
+      }
+      // 5. Write with fresh hash as expectedHash; consume returned new hash.
+      const { hash: newHash } = await postManifestEdit(name, payload, fresh.hash);
+      if (version !== submissionCounter.current) return;
+      // 6. Atomic baseline update.
+      const postSave: ManifestFormState = { ...merged, loadedHash: newHash };
+      setFormState(postSave);
+      setInitialSnapshot(postSave);
+      const preservedKeys = Object.keys(freshParsed._preservedRaw);
+      setBanner({
+        kind: "success",
+        text:
+          preservedKeys.length > 0
+            ? `Force-saved. Preserved external fields: ${preservedKeys.join(", ")}.`
+            : `Force-saved.`,
+        reinstall: true,
+      });
+    } catch (err) {
+      if (version !== submissionCounter.current) return;
+      setBanner({ kind: "error", text: `Force Save failed: ${(err as Error).message}` });
+    } finally {
+      if (version === submissionCounter.current) setBusy("");
+    }
+  }
+```
+
+## P2-2 refined — useRouter `{screen, query}` + guard-driven state (Tasks 9, 12)
+
+### Task 9 — `useRouter` exposes `{screen, query}` and updates state ONLY on accepted navigation
+
+Replace `useRouter.ts`:
+
+```ts
+import { useEffect, useRef, useState } from "preact/hooks";
+
+export interface RouterState {
+  screen: string;
+  query: string;  // the raw query-string after "?", empty if none
+}
+
+function parse(defaultScreen: string): RouterState {
+  const hash = window.location.hash || `#/${defaultScreen}`;
+  const afterPrefix = hash.replace(/^#\//, "");
+  const [screenRaw, queryRaw = ""] = afterPrefix.split("?", 2);
+  return {
+    screen: screenRaw || defaultScreen,
+    query: queryRaw,
+  };
+}
+
+// useRouter is a minimal hash router. Returns {screen, query} as stable
+// strings. The guard receives the TARGET RouterState BEFORE it is
+// committed to internal state. Returning false reverts the hash via
+// history.replaceState with a suppression flag; internal state NEVER
+// moves to the declined target. This is critical for AddServer's
+// identity-change flow: a dirty-cancelled ?name=a → ?name=b navigation
+// must not update editName, or the load effect would fire and fetch b
+// against the user's intent.
+export function useRouter(
+  defaultScreen: string,
+  guard?: (target: RouterState) => boolean,
+): RouterState {
+  const [state, setState] = useState<RouterState>(() => parse(defaultScreen));
+  const suppressRef = useRef(false);
+
+  useEffect(() => {
+    const onHash = (e: HashChangeEvent) => {
+      if (suppressRef.current) {
+        suppressRef.current = false;
+        return;
+      }
+      const target = parse(defaultScreen);
+      if (guard && !guard(target)) {
+        suppressRef.current = true;
+        window.history.replaceState(null, "", e.oldURL);
+        return;
+      }
+      setState(target);
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guard, defaultScreen]);
+
+  return state;
+}
+```
+
+### Task 9 — tests add same-screen-different-query case
+
+Append to `useRouter.test.ts`:
+
+```ts
+describe("useRouter same-key-different-query (A2b P2-2)", () => {
+  beforeEach(() => {
+    window.location.hash = "";
+  });
+
+  it("calls guard when query changes even if screen key stays the same", () => {
+    window.location.hash = "#/edit-server?name=a";
+    const guard = vi.fn(() => true);
+    renderHook(() => useRouter("servers", guard));
+    guard.mockClear();
+    act(() => {
+      window.history.pushState(null, "", "#/edit-server?name=b");
+      window.dispatchEvent(new HashChangeEvent("hashchange", {
+        oldURL: "http://localhost/#/edit-server?name=a",
+        newURL: "http://localhost/#/edit-server?name=b",
+      }));
+    });
+    expect(guard).toHaveBeenCalledWith({ screen: "edit-server", query: "name=b" });
+  });
+
+  it("query state does NOT change when guard returns false on same-key nav", () => {
+    window.location.hash = "#/edit-server?name=a";
+    const guard = vi.fn(() => false);
+    const { result } = renderHook(() => useRouter("servers", guard));
+    expect(result.current.query).toBe("name=a");
+    act(() => {
+      window.history.pushState(null, "", "#/edit-server?name=b");
+      window.dispatchEvent(new HashChangeEvent("hashchange", {
+        oldURL: "http://localhost/#/edit-server?name=a",
+        newURL: "http://localhost/#/edit-server?name=b",
+      }));
+    });
+    // Declined — state stays on a.
+    expect(result.current.query).toBe("name=a");
+  });
+});
+```
+
+### Task 9 — existing A2a tests must keep passing
+
+Prior tests call `useRouter("servers")` and assert the returned value is a string (screen key). Update those assertions to `.screen` access, e.g.:
+
+```ts
+// BEFORE: expect(result.current).toBe("servers")
+// AFTER:  expect(result.current.screen).toBe("servers")
+```
+
+Apply to every existing useRouter test assertion.
+
+### Task 12 — AddServer derives `editName` from route state; load effect uses stable deps
+
+Replace the Task 12 mount effect with:
+
+```tsx
+  // props.route is passed from App.tsx (the consumer of useRouter).
+  // We accept it rather than calling useRouter ourselves because the
+  // guard lives in App and needs to reference addServerDirty.
+  const editName = useMemo(() => {
+    if (props.mode !== "edit") return "";
+    const params = new URLSearchParams(props.route?.query ?? "");
+    return params.get("name") ?? "";
+  }, [props.mode, props.route?.query]);
+
+  useEffect(() => {
+    if (props.mode !== "edit") return;
+    if (!editName) {
+      setLoadError("No manifest name specified");
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { yaml, hash } = await getManifest(editName);
+        if (cancelled) return;
+        const nested = hasNestedUnknown(yaml);
+        const parsed = parseYAMLToForm(yaml);
+        parsed.loadedHash = hash;
+        setFormState(parsed);
+        setInitialSnapshot(parsed);
+        if (nested) {
+          setReadOnlyReason(
+            "This manifest contains fields the GUI cannot handle. Editing via GUI would drop them.",
+          );
+        }
+      } catch (err) {
+        if (cancelled) return;
+        setLoadError((err as Error).message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [props.mode, editName]);
+```
+
+Add `useMemo` to the `preact/hooks` import line.
+
+Update the `AddServerScreen` props signature:
+
+```tsx
+export function AddServerScreen(props: {
+  mode?: "create" | "edit";
+  route?: RouterState;  // passed from App.tsx, used for edit-mode identity
+  onDirtyChange?: (dirty: boolean) => void;
+} = {}) {
+```
+
+`RouterState` imported from `../hooks/useRouter`.
+
+### Task 14 — App.tsx threads route into AddServerScreen and guard uses full RouterState
+
+Update Task 14's App.tsx body:
+
+```tsx
+export function App() {
+  const [addServerDirty, setAddServerDirty] = useState(false);
+
+  const guard = (target: RouterState): boolean => {
+    if (!addServerDirty) return true;
+    // Same screen AND same query → no navigation, no prompt.
+    if (target.screen === route.screen && target.query === route.query) return true;
+    // eslint-disable-next-line no-alert
+    const ok = window.confirm("Discard unsaved changes?");
+    if (ok) setAddServerDirty(false);
+    return ok;
+  };
+
+  const route = useRouter("servers", guard);
+  useUnsavedChangesGuard(addServerDirty);
+
+  function guardClick(targetScreen: string): (e: MouseEvent) => void {
+    return (e) => {
+      if (!addServerDirty) return;
+      if (route.screen !== "add-server" && route.screen !== "edit-server") return;
+      if (targetScreen === route.screen) return;
+      // eslint-disable-next-line no-alert
+      const ok = window.confirm("Discard unsaved changes?");
+      if (!ok) {
+        e.preventDefault();
+      } else {
+        setAddServerDirty(false);
+      }
+    };
+  }
+
+  let body: JSX.Element;
+  switch (route.screen) {
+    case "servers":
+      body = <ServersScreen />;
+      break;
+    case "migration":
+      body = <MigrationScreen />;
+      break;
+    case "add-server":
+      body = <AddServerScreen mode="create" route={route} onDirtyChange={setAddServerDirty} />;
+      break;
+    case "edit-server":
+      body = <AddServerScreen mode="edit" route={route} onDirtyChange={setAddServerDirty} />;
+      break;
+    case "dashboard":
+      body = <DashboardScreen />;
+      break;
+    case "logs":
+      body = <LogsScreen />;
+      break;
+    default:
+      body = <p>Unknown screen: {route.screen}</p>;
+  }
+
+  return (
+    <>
+      <aside class="sidebar">
+        <div class="brand">mcp-local-hub</div>
+        <nav>
+          <a href="#/servers" class={route.screen === "servers" ? "active" : ""} onClick={guardClick("servers")}>Servers</a>
+          <a href="#/migration" class={route.screen === "migration" ? "active" : ""} onClick={guardClick("migration")}>Migration</a>
+          <a href="#/add-server" class={route.screen === "add-server" ? "active" : ""} onClick={guardClick("add-server")}>Add server</a>
+          <a href="#/dashboard" class={route.screen === "dashboard" ? "active" : ""} onClick={guardClick("dashboard")}>Dashboard</a>
+          <a href="#/logs" class={route.screen === "logs" ? "active" : ""} onClick={guardClick("logs")}>Logs</a>
+        </nav>
+      </aside>
+      <main id="screen-root">
+        {body}
+      </main>
+    </>
+  );
+}
+```
+
+Import `RouterState` from `./hooks/useRouter`.
+
+## P2-1 refined — Task 18 E2E (drop page.close, add hashchange cancel/accept + Paste→Save race)
+
+Remove from Task 18 any `page.close()` + beforeunload dialog test. Add these three scenarios to `edit-server.spec.ts`:
+
+```ts
+  test("hashchange cancel: dirty edit + hash nav away with dialog.dismiss -> stays", async ({ page, hub }) => {
+    seedManifest(hub.home, "e2e-hc-cancel", `name: e2e-hc-cancel
+kind: global
+transport: stdio-bridge
+command: a
+`);
+    await page.goto(`${hub.url}/#/edit-server?name=e2e-hc-cancel`);
+    await page.locator(".accordion-header", { hasText: "Command" }).click();
+    await page.locator("#field-command").fill("b");
+    page.once("dialog", (d) => d.dismiss());
+    await page.evaluate(() => { window.location.hash = "#/servers"; });
+    // Give the hashchange handler time to process + revert.
+    await page.waitForTimeout(100);
+    await expect(page.locator("h1")).toHaveText("Add server");
+    await expect(page.locator("#field-command")).toHaveValue("b");
+  });
+
+  test("hashchange accept: dirty edit + hash nav away with dialog.accept -> navigates + clears dirty", async ({ page, hub }) => {
+    seedManifest(hub.home, "e2e-hc-accept", `name: e2e-hc-accept
+kind: global
+transport: stdio-bridge
+command: a
+`);
+    await page.goto(`${hub.url}/#/edit-server?name=e2e-hc-accept`);
+    await page.locator(".accordion-header", { hasText: "Command" }).click();
+    await page.locator("#field-command").fill("b");
+    page.once("dialog", (d) => d.accept());
+    await page.evaluate(() => { window.location.hash = "#/servers"; });
+    await expect(page.locator("h1")).toHaveText("Servers");
+  });
+
+  test("Paste YAML -> Save race: Save payload contains pasted content, not pre-paste (version-counter invariant)", async ({ page, hub }) => {
+    // Create-mode test: fill name, paste YAML that overwrites, then Save
+    // immediately. The submission-version counter must ensure the POST
+    // body reflects the POSTED form state (post-paste), not a mid-stream
+    // stale snapshot. We intercept the network request and inspect body.
+    await page.goto(`${hub.url}/#/add-server`);
+    await page.locator("#field-name").fill("precursor");
+    const posted: { body?: string } = {};
+    await page.route("**/api/manifest/create", async (r) => {
+      posted.body = r.request().postData() ?? "";
+      await r.fulfill({ status: 204, body: "" });
+    });
+    const yaml = `name: pasted-wins\nkind: global\ntransport: stdio-bridge\ncommand: echoed\n`;
+    page.once("dialog", (d) => d.accept(yaml));
+    await page.locator('[data-action="paste-yaml"]').click();
+    await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("name: pasted-wins");
+    await page.locator('[data-action="save"]').click();
+    await expect.poll(() => posted.body ?? "").toContain(`"name":"pasted-wins"`);
+    expect(posted.body).not.toContain(`"name":"precursor"`);
+  });
+```
+
+Note on the beforeunload coverage gap: browser-close behavior is declared **best-effort**, not E2E-tested. Rationale: `page.close()` + native `beforeunload` dialog handling is unreliable across Playwright browsers / versions. A manual smoke test (close tab with dirty form, verify dialog) lives in D2 matrix.
+
+## P2-3 refined — create-mode Advanced kind-toggle E2E (add-server.spec.ts)
+
+Append to `internal/gui/e2e/tests/add-server.spec.ts`:
+
+```ts
+  test("Advanced kind-toggle: workspace-scoped reveals languages/port_pool/daemon.context; global hides them", async ({ page, hub }) => {
+    await page.goto(`${hub.url}/#/add-server`);
+    // Expand Advanced. Initially kind=global: workspace-only fields absent.
+    await page.locator(".accordion-header", { hasText: "Advanced" }).click();
+    await expect(page.locator('[data-testid="port-pool"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="languages-subsection"]')).toHaveCount(0);
+    // Switch kind to workspace-scoped.
+    await page.locator(".accordion-header", { hasText: "Basics" }).click();
+    await page.locator("#field-kind").selectOption("workspace-scoped");
+    await page.locator(".accordion-header", { hasText: "Advanced" }).click();
+    await expect(page.locator('[data-testid="port-pool"]')).toBeVisible();
+    await expect(page.locator('[data-testid="languages-subsection"]')).toBeVisible();
+    // Switch back to global: workspace-only fields vanish.
+    await page.locator(".accordion-header", { hasText: "Basics" }).click();
+    await page.locator("#field-kind").selectOption("global");
+    await page.locator(".accordion-header", { hasText: "Advanced" }).click();
+    await expect(page.locator('[data-testid="port-pool"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="languages-subsection"]')).toHaveCount(0);
+  });
+
+  test("Advanced always-visible fields survive kind toggles (idle_timeout, base_args_template, daemon.extra_args)", async ({ page, hub }) => {
+    await page.goto(`${hub.url}/#/add-server`);
+    await page.locator(".accordion-header", { hasText: "Advanced" }).click();
+    await expect(page.locator("#field-idle-timeout")).toBeVisible();
+    await expect(page.locator('[data-testid="base-args-template"]')).toBeVisible();
+    // Flip kind both ways; always-visible fields remain.
+    await page.locator(".accordion-header", { hasText: "Basics" }).click();
+    await page.locator("#field-kind").selectOption("workspace-scoped");
+    await page.locator(".accordion-header", { hasText: "Advanced" }).click();
+    await expect(page.locator("#field-idle-timeout")).toBeVisible();
+    await expect(page.locator('[data-testid="base-args-template"]')).toBeVisible();
+    await page.locator(".accordion-header", { hasText: "Basics" }).click();
+    await page.locator("#field-kind").selectOption("global");
+    await page.locator(".accordion-header", { hasText: "Advanced" }).click();
+    await expect(page.locator("#field-idle-timeout")).toBeVisible();
+    await expect(page.locator('[data-testid="base-args-template"]')).toBeVisible();
+  });
+```
+
+## Test count updates
+
+Task 18 (edit-server.spec.ts) goes from 10 → 12 tests (added hashchange cancel + accept; Paste-Save race already present or explicit). add-server.spec.ts goes from 10 → 12 tests (added two create-mode Advanced kind-toggle tests).
+
+Task 19 CLAUDE.md coverage block totals: **41 smoke tests** (3 shell + 3 servers + 6 migration + 12 add-server + 12 edit-server + 2 dashboard + 3 logs).
+
+## Summary: what subagent implementers must do
+
+For Tasks 3, 4, 8, 9, 12, 13, 14, 18, plus the P2-3 add-server.spec.ts additions:
+
+1. **Read the original task body** for context (files, commit message, general approach).
+2. **Apply the refined code from this Appendix** in place of any conflicting original task-body code.
+3. **Commit messages** stay as originally specified in the task bodies — they already describe the feature, and the appendix refinement is an implementation detail, not a scope change.
+4. When self-reviewing before DONE, verify the refined constraints: atomic write with no stale tmp leftovers (Task 3); hash returned from edit endpoint (Task 4); `postManifestEdit` returns `{hash}` (Task 8); `useRouter` returns `{screen, query}` and guard-driven state updates (Task 9); `editName` derived state + stable deps (Task 12); runSave atomic baseline update from returned hash + runForceSave validates after merge (Task 13); `route` threaded through App → AddServer (Task 14); hashchange cancel/accept + Paste-Save race tests present in edit-server.spec.ts, create-mode Advanced kind-toggle tests present in add-server.spec.ts (Task 18).
+
