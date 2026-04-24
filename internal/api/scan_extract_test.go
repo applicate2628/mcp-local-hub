@@ -297,3 +297,34 @@ func TestExtractManifestFromClient_Antigravity_AcceptsRelayFirstArgWithNonMcphub
 		t.Errorf("BaseArgs = %v, want [relay, --target, remote]", m.BaseArgs)
 	}
 }
+
+func TestRenderDraftManifestYAML_EscapesUntrustedFields(t *testing.T) {
+	yaml := renderDraftManifestYAML(
+		"good\ntransport: pwned",
+		"cmd\nweekly_refresh: true",
+		[]string{"ok"},
+		map[string]string{"A\nkind: hacked": "v"},
+		9121,
+	)
+
+	if strings.Count(yaml, "\ntransport:") != 1 {
+		t.Fatalf("unexpected transport key injection in output:\n%s", yaml)
+	}
+	if strings.Count(yaml, "\nweekly_refresh:") != 1 {
+		t.Fatalf("unexpected weekly_refresh key injection in output:\n%s", yaml)
+	}
+
+	m, err := config.ParseManifest(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v\n%s", err, yaml)
+	}
+	if m.Name != "good\ntransport: pwned" {
+		t.Fatalf("name changed: got %q", m.Name)
+	}
+	if m.Command != "cmd\nweekly_refresh: true" {
+		t.Fatalf("command changed: got %q", m.Command)
+	}
+	if m.Env["A\nkind: hacked"] != "v" {
+		t.Fatalf("env key/value changed: %#v", m.Env)
+	}
+}
