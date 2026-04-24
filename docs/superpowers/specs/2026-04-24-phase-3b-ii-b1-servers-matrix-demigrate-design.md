@@ -58,7 +58,7 @@ type EventBus struct{}
 func newEventBus() *EventBus { return &EventBus{} }
 ```
 
-`EventBus` is an empty struct. `newEventBus()` allocates nothing beyond the struct itself — no goroutine, no channel, no background worker. `api.NewAPI()` is a pure struct allocation. Per-request construction is cheap and safe; the "goroutine leak" concern is a false positive in the current state.
+`EventBus` is an empty struct. `newEventBus()` allocates nothing beyond the struct itself — **no goroutine, no channel, no background worker**. `api.NewAPI()` still allocates its own `&State{Daemons: make(map[string]DaemonStatus)}` (tiny map + struct header), so it is not *literally* zero-cost — but it spawns no background resources that would leak across requests. Per-request construction is cheap and safe; the "goroutine leak" concern is a false positive in the current state. [R4 P2 on this memo corrected an earlier overclaim of "pure struct allocation".]
 
 **But the canonical contract is inconsistent on two fronts.** [internal/api/api.go:1–26](../../../internal/api/api.go#L1-L26):
 
@@ -120,7 +120,7 @@ These mirror existing `/api/manifest/get` and `/api/manifest/create` handler cov
 
 ### 3.2 Out of scope (not this memo)
 
-- **Auto-stop hub daemons when last client unbinds.** Demigrate restores client configs; it does not touch `internal/scheduler` or the running hub daemons. After the last via-hub checkbox uncheck for a server, the hub daemon keeps running with no clients. User can stop it via `mcphub stop <server>` (CLI). Auto-stop would involve scheduler-level state reasoning and per-binding reference counting that belongs to a separate effort. Confirmed out-of-scope with user 2026-04-24.
+- **Auto-stop hub daemons when last client unbinds.** Demigrate restores client configs; it does not touch `internal/scheduler` or the running hub daemons. After the last via-hub checkbox uncheck for a server, the hub daemon keeps running with no clients. User can stop it via `mcphub stop --server <name>` (CLI — verified against [internal/cli/stop.go:23](../../../internal/cli/stop.go#L23)). Auto-stop would involve scheduler-level state reasoning and per-binding reference counting that belongs to a separate effort. Confirmed out-of-scope with user 2026-04-24.
 - **Backup cleanup.** Demigrate reads client backups but does not delete them. Stale backups are left as-is (by design, for manual recovery).
 - **Shared `*api.API` refactor.** Speculative coupling; deferred to when `EventBus` is actually populated.
 - **Batch/transactional `/api/apply` endpoint.** Deferred; may surface later if a real "batch with atomicity" requirement appears.
@@ -249,7 +249,7 @@ if len(opts.ClientsInclude) == 0 {
 
 `len(nil slice) == 0` in Go, so **both** `ClientsInclude == nil` and `ClientsInclude == []string{}` behave identically: "no filter applied — every client bound in the manifest is rolled back". The Migration per-row button's current body `{servers: [name]}` (no `clients` field → missing JSON key → nil Go slice) therefore produces the intended broad-rollback semantics.
 
-For B1's per-cell rollback we must send a **non-empty `clients` array** — `{servers: [change.server], direction-clients: [...toRollBackOnly]}` — so the narrow filter actually narrows. An empty client array would widen the rollback to every binding on the manifest, undoing the cell-level intent. Plan's Task 5 (matrix wiring) must include a typed check that the demigrate POST body never has `clients: []` for per-cell calls.
+For B1's per-cell rollback we must send a **non-empty `clients` array** in the POST body — `{servers: [change.server], clients: [...toRollBackOnly]}` — so the narrow filter actually narrows. An empty `clients` array (or omitting the key) would widen the rollback to every binding on the manifest, undoing the cell-level intent. Plan's matrix-wiring task must include a typed check that the demigrate POST body has a non-empty `clients` array for per-cell calls. [R3 draft text originally used a placeholder `direction-clients` field name — that was a typo and is corrected here: the handler's decoder looks at `clients`.]
 
 ### R4 — Tooltip copy change breaks an existing E2E assertion
 
@@ -305,4 +305,4 @@ Estimated scope: **~7 commits, ~200–300 LOC total** (mostly TS/TSX and TS test
 - [x] Ambiguity check — demigrate body shape is explicit (`{servers: [one], clients: [one]}` per-cell batch vs `{servers: [name]}` no-clients for the Migration-screen bulk case).
 - [x] Scope check — single-milestone-sized, 7 commits, one branch.
 - [x] Decision lock — D1 (variant A) confirmed with user + Codex advisory; D4 (dirty-shape refactor) spelled out after Codex R1 P1 caught the missing direction; D10 (no manifest cascade) explicit.
-- [x] Codex-review gate — R1 REVISE (P1 dirty shape, P2 backup lock myth, P2 api.go contradiction, P3 E2E count) → revision 2; R2 (P2 D4/D7 prune invariant, P2 backup race failure-mode rewrite, P3 CLI parity claim, P3 scope-drift framing) → revision 3; R3 (P2 D6 reload-on-success-only, P3 D3 batch-label shape, P3 R3 empty-clients semantics verified) → revision 4 (this commit).
+- [x] Codex-review gate — R1 (P1 dirty shape, P2 backup lock myth, P2 api.go contradiction, P3 E2E count) → rev 2; R2 (P2 D4/D7 prune invariant, P2 backup race failure-mode rewrite, P3 CLI parity claim, P3 scope-drift framing) → rev 3; R3 (P2 D6 reload-on-success-only, P3 D3 batch-label shape, P3 R3 empty-clients verified) → rev 4; R4 (P1 typo `direction-clients` → `clients`, P2 NewAPI-not-literally-zero-cost phrasing, P3 `mcphub stop --server` correct CLI shape) → rev 5 (this commit).
