@@ -16,7 +16,7 @@ This memo covers:
 - Enabling the `via-hub` checkbox in the Servers matrix.
 - Extending `applyChanges` in `Servers.tsx` to pick `/api/migrate` vs `/api/demigrate` per-change based on direction.
 - Reusing the existing per-change sequential orchestration and error surface (no new endpoint, no parallel-apply, no new partial-success UI).
-- Closing follow-up item #2 from `a2b-combined-pr-followups.md` as doc-only (`api.NewAPI()` is zero-cost; `EventBus` is an empty struct, `newEventBus()` spawns nothing).
+- Closing follow-up item #2 from `a2b-combined-pr-followups.md` as doc-only (`api.NewAPI()` is cheap and spawns no background resources — `EventBus` is an empty struct, `newEventBus()` has no goroutine / channel / worker; the only allocations are the `&State{Daemons: map}` and struct headers themselves).
 - Filling three test-coverage gaps on `/api/manifest/edit` flagged in the same memo (item #3).
 
 ## 2. Context recon
@@ -43,7 +43,7 @@ This memo covers:
 const disabled = routing === "unsupported" || routing === "not-installed" || routing === "via-hub";
 ```
 
-The tooltip at line 234 also still points users at `mcphub rollback --client <name>` as the workaround — that CLI path is the user-space equivalent of what we are about to wire into the UI, and the tooltip is now misleading.
+The tooltip at line 234 also still points users at `mcphub rollback --client <name>` as the workaround. **That CLI invocation does not exist:** `mcphub rollback` ([internal/cli/rollback.go:19](../../../internal/cli/rollback.go#L19)) takes only `--original` (restore whole-client pristine sentinel) — no `--client` flag and no per-binding granularity. The tooltip has always been wrong, not just stale, and B1 replaces it with action-oriented GUI guidance (see §4 D5) rather than trying to point at any CLI command. **[R5 P3 on this memo corrected an earlier claim that the old tooltip was a "user-space equivalent" of the Matrix Apply we are wiring.]**
 
 `applyChanges` (same file, lines ~85–123) iterates the `dirty` map and `POST /api/migrate` for every dirty server-group. It collects failures into a `failed: string[]` array and renders `Failed: ...` in `apply-msg` on the toolbar. The `reloadToken` bump at the end triggers a `/api/scan` + `/api/status` refetch.
 
@@ -106,7 +106,7 @@ Future-proofing (if `EventBus` gets populated later — the source comment says 
 
 **B1-prep — `api.NewAPI()` followup closure (docs only, 2 files):**
 
-1. Update `work-items/bugs/a2b-combined-pr-followups.md` item #2: move to FIXED/verified section with a pointer to `internal/api/events.go` proving zero-cost construction.
+1. Update `work-items/bugs/a2b-combined-pr-followups.md` item #2: move to FIXED/verified section with a pointer to `internal/api/events.go` proving no background-resource construction (empty `EventBus` struct, no goroutine/channel/worker).
 2. Update `internal/api/api.go` package/type comment to accurately describe the current per-request construction pattern (the existing comment "A single instance is created per process" contradicts GUI adapter behavior and will keep confusing future readers and code-review tools). No behavior change; pure comment edit.
 3. No production-code change in the Go adapters themselves.
 
@@ -171,7 +171,8 @@ const [dirty, setDirty] = useState<Map<string, Map<string, Direction>>>(new Map(
 ```
 
 - `toggleCell(server, client, nextChecked, initialChecked)` computes direction from `initialChecked`: if it was `true` (cell was `via-hub` at load) the user is rolling it back → `"demigrate"`; if it was `false` (cell was `direct`) the user is migrating → `"migrate"`. When `nextChecked === initialChecked` (toggle back to the initial state) the entry is removed.
-- `applyChanges` iterates the inner map per-server and groups changes by direction. Each distinct (direction, server) batch fires one POST with `{servers: [server], clients: [...matchingClients]}`. Servers with both a migrate-batch and a demigrate-batch (e.g., user checks clients A,B and unchecks client C on the same row) produce two sequential POSTs for that server — first the migrate for A,B, then the demigrate for C, or vice-versa (order: migrate-first for predictability — newly-bound hub daemons before any rollback affects related state).
+- `applyChanges` iterates the inner map per-server and groups changes by direction. Each distinct (direction, server) batch fires one POST with `{servers: [server], clients: [...matchingClients]}`. Servers with both a migrate-batch and a demigrate-batch (e.g., user checks clients A,B and unchecks client C on the same row) produce two sequential POSTs.
+- **Order invariant: demigrate-before-migrate across the entire Apply.** Rationale: `api.MigrateFrom` writes a fresh `.bak-mcp-local-hub-<timestamp>` backup BEFORE mutating the client config. If migrate runs first on a client that also has a queued demigrate for the SAME client, the demigrate's subsequent `latestBackup` read sees the just-written post-migrate backup — the entry it wants to roll back is now in hub-managed form in that backup. `api.Demigrate` then falls back to the pristine `-original` sentinel; if the sentinel lacks that entry (server was added after the sentinel was frozen), demigrate refuses and the matrix shows a Failed row for a change the user expected to succeed. Running all demigrate POSTs before any migrate POSTs keeps each demigrate's backup read pointed at the pre-session snapshot. **[R5 P1 on this memo caught the original "migrate-first" ordering; it was wrong.]**
 - `toggleCell` prune invariant: when a toggle returns a cell to its initial state, delete the `client` entry from the inner map AND, if the inner map becomes empty, delete the `server` entry from the outer map. With the invariant enforced at every update, `applying || dirty.size === 0` remains correct without a deep-empty scan. (An earlier draft suggested "skip pruning" as a shortcut — that would leave the outer map non-empty after a toggle-back and re-enable Apply for no-op state. Rejected per Codex R2 on this memo.)
 
 This is a real schema change, not a derivation trick. It is the only B1 change that touches non-trivial component state.
@@ -272,7 +273,7 @@ No new `internal/api/demigrate_test.go` or `internal/gui/demigrate_test.go` test
 ### 6.3 Playwright E2E (new scenarios in `internal/gui/e2e/tests/servers.spec.ts`)
 
 1. **"uncheck via-hub + Apply posts /api/demigrate"** — seed a manifest + scan-result fixture where cell `(demo, claude-code)` is `via-hub`; load Servers matrix; intercept `/api/demigrate` on the page; uncheck the cell; click Apply; assert the intercepted POST body is `{servers: ["demo"], clients: ["claude-code"]}` and the row refreshes to show `direct` (or the cell reflects whatever the post-reload scan returns).
-2. **"mixed Apply dispatches both endpoints"** — seed two rows: `(a, claude-code)` at `direct`, `(b, claude-code)` at `via-hub`. User checks the first and unchecks the second. Apply dispatches `/api/migrate` then `/api/demigrate` in dirty-map order. Assert both requests posted with their respective narrowed bodies.
+2. **"mixed Apply dispatches both endpoints, demigrate first"** — seed two rows: `(a, claude-code)` at `direct`, `(b, claude-code)` at `via-hub`. User checks the first (queues migrate on server `a`) and unchecks the second (queues demigrate on server `b`). Apply must dispatch `/api/demigrate` for `b` BEFORE `/api/migrate` for `a` per §4 D4's order invariant (demigrate-first across the whole Apply so each demigrate's backup read is not polluted by a just-written post-migrate backup on the same client). Assert request ordering via intercepted timestamps or a per-request counter.
 3. **"demigrate failure surfaces in apply-msg and keeps dirty state"** — stub `/api/demigrate` to 500 with a generic body. Uncheck a via-hub cell, Apply. Assert the toolbar `apply-msg` contains `Failed:` with the `server/demigrate/[client]` shape from §4 D3. Per §4 D6 (reload-on-success-only): reloadToken is NOT bumped on failure, so the checkbox stays in its locally-flipped (unchecked) state and dirty map retains the entry — user can click Apply again to retry or toggle the cell to revert. No routing-column change expected because the scan did not re-run.
 4. **"tooltip copy reflects uncheck-to-demigrate semantic"** — assert the `title` attribute on a `via-hub` cell contains "Uncheck and Apply to roll this binding back" (or the exact substring we land on). Remove/update any prior assertion that expected the `mcphub rollback --client` phrase.
 
@@ -305,4 +306,4 @@ Estimated scope: **~7 commits, ~200–300 LOC total** (mostly TS/TSX and TS test
 - [x] Ambiguity check — demigrate body shape is explicit (`{servers: [one], clients: [one]}` per-cell batch vs `{servers: [name]}` no-clients for the Migration-screen bulk case).
 - [x] Scope check — single-milestone-sized, 7 commits, one branch.
 - [x] Decision lock — D1 (variant A) confirmed with user + Codex advisory; D4 (dirty-shape refactor) spelled out after Codex R1 P1 caught the missing direction; D10 (no manifest cascade) explicit.
-- [x] Codex-review gate — R1 (P1 dirty shape, P2 backup lock myth, P2 api.go contradiction, P3 E2E count) → rev 2; R2 (P2 D4/D7 prune invariant, P2 backup race failure-mode rewrite, P3 CLI parity claim, P3 scope-drift framing) → rev 3; R3 (P2 D6 reload-on-success-only, P3 D3 batch-label shape, P3 R3 empty-clients verified) → rev 4; R4 (P1 typo `direction-clients` → `clients`, P2 NewAPI-not-literally-zero-cost phrasing, P3 `mcphub stop --server` correct CLI shape) → rev 5 (this commit).
+- [x] Codex-review gate — R1 (P1 dirty shape, P2 backup lock myth, P2 api.go contradiction, P3 E2E count) → rev 2; R2 (P2 D4/D7 prune invariant, P2 backup race failure-mode rewrite, P3 CLI parity claim, P3 scope-drift framing) → rev 3; R3 (P2 D6 reload-on-success-only, P3 D3 batch-label shape, P3 R3 empty-clients verified) → rev 4; R4 (P1 typo `direction-clients` → `clients`, P2 NewAPI-not-literally-zero-cost phrasing, P3 `mcphub stop --server` correct CLI shape) → rev 5; R5 (P1 mixed-Apply order: demigrate-first-not-migrate-first, P2 remaining "zero-cost" phrasing in §1/§3.1, P3 `mcphub rollback --client` never existed — removed equivalence claim from §2.3) → rev 6 (this commit).
