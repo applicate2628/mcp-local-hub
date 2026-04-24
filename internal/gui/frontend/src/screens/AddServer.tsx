@@ -367,12 +367,24 @@ export function AddServerScreen(props: {
     setBusy(opts.install ? "install" : "save");
     setBanner(null);
     try {
-      const name = formState.name.trim();
+      // Codex R1 correction: in edit mode, anchor identity + concurrency guard
+      // to IMMUTABLE sources. formState.name and formState.loadedHash are
+      // mutable — handlePasteYAML overwrites them — so using them would let
+      // a mid-session Paste YAML retarget the Save to a different manifest
+      // with expected_hash="" (no stale protection). editName comes from the
+      // URL and is fixed per edit session; initialSnapshot.loadedHash is set
+      // on Load/Save and is NOT touched by Paste.
+      const name = mode === "edit" ? editName : formState.name.trim();
       if (!name) {
         setBanner({ kind: "error", text: "Name is required." });
         return;
       }
-      const payload = toYAML(formState);
+      // In edit mode, toYAML must serialize against the original identity.
+      // If a Paste slipped through (it shouldn't — Paste is disabled in
+      // edit mode — but defense in depth), force the target name back into
+      // the payload so the written YAML matches the target path.
+      const payloadState = mode === "edit" ? { ...formState, name } : formState;
+      const payload = toYAML(payloadState);
       const warnings = await postManifestValidate(payload);
       if (version !== submissionCounter.current) return;
       if (warnings.length > 0) {
@@ -385,13 +397,14 @@ export function AddServerScreen(props: {
       }
       if (mode === "edit") {
         try {
-          const { hash: newHash } = await postManifestEdit(name, payload, formState.loadedHash);
+          const expectedHash = initialSnapshot.loadedHash;
+          const { hash: newHash } = await postManifestEdit(name, payload, expectedHash);
           if (version !== submissionCounter.current) return;
           // Atomic snapshot update: build one post-save object carrying the
           // fresh hash AND the user's just-persisted form state; set both
           // formState and initialSnapshot from the same reference so dirty
           // is false (P1-2 fix: no separate getManifest refresh, no ordering race).
-          const postSave: ManifestFormState = { ...formState, loadedHash: newHash };
+          const postSave: ManifestFormState = { ...payloadState, loadedHash: newHash };
           setFormState(postSave);
           setInitialSnapshot(postSave);
         } catch (err) {
@@ -438,10 +451,27 @@ export function AddServerScreen(props: {
     setBanner(null);
     try {
       const { yaml, hash } = await getManifest(editName);
+      // Codex R1 correction: re-run hasNestedUnknown on the reloaded YAML.
+      // The external write that caused the stale-hash mismatch may have
+      // introduced unsupported nested fields (e.g. a new daemons[].extra_*
+      // key). Without this check, Reload bypasses the read-only guard that
+      // the initial mount effect enforces, and a subsequent Save would drop
+      // the unsupported fields silently.
+      const nested = hasNestedUnknown(yaml);
       const parsed = parseYAMLToForm(yaml);
       parsed.loadedHash = hash;
       setFormState(parsed);
       setInitialSnapshot(parsed);
+      if (nested) {
+        setReadOnlyReason(
+          "This manifest contains fields the GUI cannot handle. Editing via GUI would drop them.",
+        );
+      } else {
+        // Clear any stale read-only reason from a prior load so the form
+        // becomes editable again when the external write removed the
+        // problematic nested-unknown field.
+        setReadOnlyReason(null);
+      }
       setBanner({ kind: "success", text: "Reloaded fresh manifest from disk." });
     } catch (err) {
       setBanner({ kind: "error", text: (err as Error).message });
@@ -455,14 +485,21 @@ export function AddServerScreen(props: {
     setBusy("save");
     setBanner(null);
     try {
-      const name = formState.name.trim();
+      // Codex R1 correction: Force Save is only reachable in edit mode;
+      // anchor to editName (URL-derived, immutable) rather than
+      // formState.name which a Paste YAML could have retargeted.
+      const name = editName;
+      if (!name) return;
       // 1. Re-read disk to get fresh hash + fresh _preservedRaw.
       const fresh = await getManifest(name);
       if (version !== submissionCounter.current) return;
       const freshParsed = parseYAMLToForm(fresh.yaml);
       // 2. Merge: user's known-field edits win; fresh disk _preservedRaw wins.
+      // Force the target name back into the merged payload so serialization
+      // matches the target path even if a Paste slipped through.
       const merged: ManifestFormState = {
         ...formState,
+        name,
         _preservedRaw: freshParsed._preservedRaw,
       };
       // 3. Serialize FINAL payload AFTER merge.
@@ -636,8 +673,9 @@ export function AddServerScreen(props: {
         <button
           type="button"
           onClick={handlePasteYAML}
-          disabled={readOnly || busy !== ""}
+          disabled={readOnly || mode === "edit" || busy !== ""}
           data-action="paste-yaml"
+          title={mode === "edit" ? "Paste YAML is disabled in edit mode to prevent replacing the target manifest's identity mid-session. To replace a manifest wholesale, delete it from Servers and create a new one." : undefined}
         >
           Paste YAML
         </button>

@@ -583,4 +583,75 @@ test.describe("Edit server screen", () => {
       page.locator('[data-testid="yaml-preview"]'),
     ).toContainText("e2e-paste-race");
   });
+
+  // Codex R1 (#16 P1 finding 1): Reload must re-run hasNestedUnknown so an
+  // external write that introduces unknown nested fields between Load and
+  // Save puts the reloaded form into read-only mode.
+  test("Reload after external nested-unknown change enters read-only mode", async ({
+    page,
+    hub,
+  }) => {
+    const name = "e2e-reload-nested";
+    // Start clean: no nested-unknown.
+    seedManifest(
+      name,
+      `name: ${name}
+kind: global
+transport: stdio-bridge
+command: old
+daemons:
+  - name: d1
+    port: 9500
+`,
+    );
+    await page.goto(`${hub.url}/#/edit-server?name=${name}`);
+    await expect(page.locator("#field-name")).toHaveValue(name);
+    // Dirty the form so Save will be attempted against a known-hash.
+    await page.locator(".accordion-header", { hasText: "Command" }).click();
+    await page.locator("#field-command").fill("new");
+    // Simulate an external edit that ALSO adds a nested-unknown field.
+    seedManifest(
+      name,
+      `name: ${name}
+kind: global
+transport: stdio-bridge
+command: external-wrote-this
+daemons:
+  - name: d1
+    port: 9500
+    future_nested_field: something
+`,
+    );
+    // Save → hash mismatch banner with [Reload] + [Force Save].
+    await page.locator('[data-action="save"]').click();
+    await expect(page.locator('[data-action="reload"]')).toBeVisible();
+    await page.locator('[data-action="reload"]').click();
+    // After Reload, the manifest is nested-unknown → read-only banner appears.
+    await expect(page.locator('[data-testid="readonly-banner"]')).toBeVisible();
+    // Save + Save & Install are disabled in read-only mode.
+    await expect(page.locator('[data-action="save"]')).toBeDisabled();
+  });
+
+  // Codex R1 (#16 P1 finding 2): Paste YAML is disabled in edit mode so a
+  // mid-session paste cannot retarget the Save to a different manifest with
+  // expected_hash="". Disabled at the button level (defense in depth) plus
+  // the runSave/runForceSave anchors (editName + initialSnapshot.loadedHash)
+  // would ignore a mutated formState if Paste somehow fired anyway.
+  test("Paste YAML button is disabled in edit mode", async ({ page, hub }) => {
+    const name = "e2e-paste-disabled-in-edit";
+    seedManifest(
+      name,
+      `name: ${name}
+kind: global
+transport: stdio-bridge
+command: echo
+daemons:
+  - name: d
+    port: 9510
+`,
+    );
+    await page.goto(`${hub.url}/#/edit-server?name=${name}`);
+    await expect(page.locator("#field-name")).toHaveValue(name);
+    await expect(page.locator('[data-action="paste-yaml"]')).toBeDisabled();
+  });
 });

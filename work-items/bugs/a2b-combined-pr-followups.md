@@ -18,25 +18,26 @@ patterns, not A2b-introduced regressions. But the user asked for
 production-grade work, so the combined PR should decide what to do with them
 once the separate security fixes are in view.
 
-## 1. `writeAPIError` forwards raw `err.Error()` to the client on 500s
+## 1. ~~`writeAPIError` forwards raw `err.Error()` to the client on 500s~~ **FIXED in PR #16 (Codex R1)**
 
-**Reviewer:** Task 4 code-quality (confidence 87)
-**Surface added:** `/api/manifest/get` and `/api/manifest/edit` 500 paths
-**Sibling existing:** `/api/manifest/create` 500 path already has this
-(internal/gui/scan.go writeAPIError behavior)
+**Reviewer:** Task 4 code-quality (confidence 87) + Codex R1 #16 (P2)
+**Surface:** `/api/manifest/get`, `/api/manifest/edit`, `/api/manifest/create` 500 paths
+**Fixed in:** Combined PR #16 commit addressing Codex R1 findings
 
-Backend errors on disk-bound calls can be `*os.PathError` — the error string
-includes an absolute filesystem path. When forwarded through the JSON response,
-this leaks the on-disk layout to the browser. For the edit flow, the absolute
-path of the user's manifests/ directory becomes visible to any same-origin
-caller that can trigger a 500 (e.g., by POSTing a name pointing at a non-
-existent manifest or by exhausting FDs).
+All three 500 paths now `log.Printf` the raw error server-side with name+op
+context and return a sanitized `"internal error ..."` message to the client.
+The 409 `MANIFEST_HASH_MISMATCH` path still passes through since its message
+is generic.
 
-Suggested remediation (to be considered against the user's security fixes):
-- Sentinel "internal error" message to the client; log the real error
-  server-side with context (`name`, operation, pid).
-- Applies to both new handlers and the pre-existing create handler (fix in
-  one place if we choose to address).
+Regression tests in `internal/gui/manifest_test.go`:
+- `TestManifestGetHandler_500DoesNotLeakErrorDetails`
+- `TestManifestEditHandler_500DoesNotLeakErrorDetails`
+- `TestManifestEditHandler_HashMismatch_PassesThrough`
+- `TestManifestCreateHandler_500DoesNotLeakErrorDetails`
+
+All inject `*os.PathError`-style errors and assert the response body contains
+neither the absolute path nor the raw error text, and does contain the
+sanitized message.
 
 ## 2. `api.NewAPI()` called per-request in `realManifest*` adapters
 
@@ -92,6 +93,50 @@ Left as-is per plan-fidelity priority.
 Review at combined-PR prep time: decide which of 1, 2, 3 to fold into the
 combined PR vs defer, and which are genuinely covered by the user's separate
 security work.
+
+---
+
+## FIXED: Codex R1 P1 findings (fixed in PR #16)
+
+**Found during:** `@codex review` on PR #16 (combined A2b + 9 security PRs)
+**Fixed in:** Same PR, commit addressing R1
+
+### Finding 1 (P1) — `runReload` bypassed nested-unknown guard
+
+The Reload path after a hash-mismatch banner fetched fresh YAML, parsed it,
+and restored form state — but never called `hasNestedUnknown` again. If the
+external write that caused the mismatch also introduced unsupported nested
+fields, Reload left the form editable and a subsequent Save would silently
+drop those fields.
+
+Fix: `runReload` now mirrors the mount effect — calls `hasNestedUnknown`
+on the fetched YAML, sets `readOnlyReason` when true, explicitly clears it
+when false (so removing a problematic field via external edit + Reload
+unlocks the form).
+
+E2E regression: `Reload after external nested-unknown change enters read-only mode`
+in `edit-server.spec.ts`.
+
+### Finding 2 (P1) — Save in edit mode anchored to mutable identity/hash
+
+`runSave` used `formState.name` and `formState.loadedHash`. Both are mutable:
+`handlePasteYAML` overwrites formState including the name, and resets
+`loadedHash` to `""`. So a mid-session Paste YAML in edit mode could make
+the Save target a different manifest name with `expected_hash=""` — no
+stale-write protection, wrong file overwritten.
+
+Two-layer fix:
+1. `runSave` and `runForceSave` in edit mode anchor to `editName` (URL-derived,
+   immutable per session) for identity and `initialSnapshot.loadedHash`
+   (set on Load/Save, never touched by Paste) as `expectedHash`. The merged
+   payload is forced back to the target `name` before serialization so even
+   if Paste slipped through, the written YAML matches the path.
+2. `[Paste YAML]` button is disabled when `mode === "edit"` with an
+   explanatory title. Users who need to replace a manifest wholesale should
+   delete + recreate via Add Server.
+
+E2E regression: `Paste YAML button is disabled in edit mode` in
+`edit-server.spec.ts`.
 
 ---
 

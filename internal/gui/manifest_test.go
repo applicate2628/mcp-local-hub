@@ -91,14 +91,23 @@ func TestManifestCreateHandler_ForwardsNameAndYAML(t *testing.T) {
 }
 
 func TestManifestCreateHandler_SurfacesCreateError(t *testing.T) {
+	// After Codex R1 P2 sanitization, the 500 body contains a stable
+	// "internal error ..." message and the MANIFEST_CREATE_FAILED code,
+	// NOT the raw backend error text. The real error is logged server-side.
+	// TestManifestCreateHandler_500DoesNotLeakErrorDetails covers the leak-
+	// prevention invariant specifically.
 	create := &fakeManifestCreator{err: errors.New("manifest \"demo\" already exists at ...")}
 	s := newManifestTestServer(create, &fakeManifestValidator{})
 	rec := postJSON(t, s, "/api/manifest/create", `{"name":"demo","yaml":"name: demo"}`)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "already exists") {
-		t.Errorf("body=%q missing backend error text", rec.Body.String())
+	body := rec.Body.String()
+	if !strings.Contains(body, "MANIFEST_CREATE_FAILED") {
+		t.Errorf("body=%q missing error code", body)
+	}
+	if !strings.Contains(body, "internal error") {
+		t.Errorf("body=%q missing sanitized message", body)
 	}
 }
 
@@ -297,5 +306,84 @@ func TestManifestEditHandler_OtherError_Returns500(t *testing.T) {
 		`{"name":"demo","yaml":"name: demo","expected_hash":""}`)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d", rec.Code)
+	}
+}
+
+// Codex R1 (#16 P2): 500 responses must not echo raw err.Error() because
+// backend errors on disk-bound calls wrap *os.PathError and leak absolute
+// filesystem paths. Verify the three handlers all sanitize before responding.
+
+func TestManifestGetHandler_500DoesNotLeakErrorDetails(t *testing.T) {
+	leaky := errors.New("open /home/alice/.secret/manifests/demo/manifest.yaml: permission denied")
+	getter := &fakeManifestGetter{err: leaky}
+	s := newManifestTestServerFull(&fakeManifestCreator{}, &fakeManifestValidator{},
+		getter, &fakeManifestEditor{})
+	req := httptest.NewRequest(http.MethodGet, "/api/manifest/get?name=demo", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "/home/alice") || strings.Contains(body, "permission denied") {
+		t.Errorf("response body leaks filesystem path or raw error: %q", body)
+	}
+	if !strings.Contains(body, "internal error") {
+		t.Errorf("response body missing generic message: %q", body)
+	}
+}
+
+func TestManifestEditHandler_500DoesNotLeakErrorDetails(t *testing.T) {
+	leaky := errors.New("atomic rename: rename /var/lib/mcphub/servers/demo/manifest.yaml.tmp: no space left on device")
+	editor := &fakeManifestEditor{err: leaky}
+	s := newManifestTestServerFull(&fakeManifestCreator{}, &fakeManifestValidator{},
+		&fakeManifestGetter{}, editor)
+	rec := postJSON(t, s, "/api/manifest/edit",
+		`{"name":"demo","yaml":"name: demo","expected_hash":""}`)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "/var/lib") || strings.Contains(body, "no space left") {
+		t.Errorf("response body leaks filesystem path or raw error: %q", body)
+	}
+	if !strings.Contains(body, "internal error") {
+		t.Errorf("response body missing generic message: %q", body)
+	}
+}
+
+func TestManifestEditHandler_HashMismatch_PassesThrough(t *testing.T) {
+	// Hash-mismatch is a legitimate client-facing signal with a generic
+	// message; the sanitization must NOT apply to it.
+	editor := &fakeManifestEditor{err: api.ErrManifestHashMismatch}
+	s := newManifestTestServerFull(&fakeManifestCreator{}, &fakeManifestValidator{},
+		&fakeManifestGetter{}, editor)
+	rec := postJSON(t, s, "/api/manifest/edit",
+		`{"name":"demo","yaml":"name: demo","expected_hash":"stale"}`)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "MANIFEST_HASH_MISMATCH") {
+		t.Errorf("hash-mismatch code missing from body: %q", rec.Body.String())
+	}
+}
+
+func TestManifestCreateHandler_500DoesNotLeakErrorDetails(t *testing.T) {
+	leaky := errors.New("mkdir /etc/secret/servers/demo: permission denied")
+	creator := &fakeManifestCreator{err: leaky}
+	s := newManifestTestServerFull(creator, &fakeManifestValidator{},
+		&fakeManifestGetter{}, &fakeManifestEditor{})
+	rec := postJSON(t, s, "/api/manifest/create",
+		`{"name":"demo","yaml":"name: demo"}`)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "/etc/secret") || strings.Contains(body, "permission denied") {
+		t.Errorf("response body leaks filesystem path or raw error: %q", body)
+	}
+	if !strings.Contains(body, "internal error") {
+		t.Errorf("response body missing generic message: %q", body)
 	}
 }
