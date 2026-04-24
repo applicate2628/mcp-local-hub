@@ -324,6 +324,77 @@ for line in sys.stdin:
 	}
 }
 
+// TestHostInitializeCacheSkipsErrors verifies initialize errors are not cached.
+// A failed initialize must not poison future clients: once a valid initialize
+// is sent, it should be forwarded and cached as the shared success response.
+func TestHostInitializeCacheSkipsErrors(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	h, err := NewStdioHost(HostConfig{
+		Command: "python",
+		Args: []string{"-u", "-c", `
+import sys, json
+seen = 0
+for line in sys.stdin:
+    msg = json.loads(line)
+    if msg.get("method") != "initialize":
+        continue
+    seen += 1
+    params = msg.get("params", {})
+    if params.get("protocolVersion") != "2025-03-26":
+        resp = {"jsonrpc":"2.0","id":msg["id"],"error":{"code":-32602,"message":"unsupported protocolVersion"}}
+    else:
+        resp = {"jsonrpc":"2.0","id":msg["id"],"result":{"protocolVersion":"2025-03-26","capabilities":{},"seen":seen}}
+    sys.stdout.write(json.dumps(resp) + "\n")
+    sys.stdout.flush()
+`},
+	})
+	if err != nil {
+		t.Fatalf("NewStdioHost: %v", err)
+	}
+	if err := h.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer h.Stop()
+
+	ts := httptest.NewServer(h.HTTPHandler())
+	defer ts.Close()
+
+	post := func(body string) map[string]any {
+		resp, err := http.Post(ts.URL+"/mcp", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		raw, _ := io.ReadAll(resp.Body)
+		var msg map[string]any
+		_ = json.Unmarshal(raw, &msg)
+		return msg
+	}
+
+	// First initialize fails and must NOT be cached.
+	bad := post(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"bad","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}`)
+	if _, ok := bad["error"]; !ok {
+		t.Fatalf("first initialize should fail, got: %#v", bad)
+	}
+
+	// Second initialize is valid and should be forwarded (seen=2), proving
+	// the prior error was not replayed from cache.
+	good1 := post(`{"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}`)
+	result1, _ := good1["result"].(map[string]any)
+	if result1["seen"] != 2.0 {
+		t.Fatalf("valid initialize was not forwarded after prior error: seen=%v body=%#v", result1["seen"], good1)
+	}
+
+	// Third valid initialize should now hit cache and keep seen=2.
+	good2 := post(`{"jsonrpc":"2.0","id":3,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}`)
+	result2, _ := good2["result"].(map[string]any)
+	if result2["seen"] != 2.0 {
+		t.Fatalf("valid initialize cache not used after success: seen=%v body=%#v", result2["seen"], good2)
+	}
+}
+
 // TestHostStopUnblocksPendingHandlers verifies that calling Stop() while
 // a handler is waiting for a subprocess response unblocks the handler
 // immediately with 503 instead of waiting the full 30s timeout.

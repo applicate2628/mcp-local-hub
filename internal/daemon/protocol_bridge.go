@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -30,6 +31,18 @@ func NewProtocolBridge() *ProtocolBridge {
 // see a stable capability set. Caller should hand in the raw body only
 // after confirming it parses as JSON.
 func (b *ProtocolBridge) CacheInitialize(body json.RawMessage) {
+	var resp struct {
+		Error json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return
+	}
+	if len(resp.Error) > 0 && !bytes.Equal(bytes.TrimSpace(resp.Error), []byte("null")) {
+		// Do not cache initialize failures. Caching an error would let a
+		// single bad/hostile caller poison all future initialize requests.
+		return
+	}
+
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.initCached == nil {
