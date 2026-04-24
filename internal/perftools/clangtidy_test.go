@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -11,6 +12,13 @@ import (
 )
 
 func TestClangTidyTool_RejectsOversizedOutput(t *testing.T) {
+	// Fake clang-tidy is a bash script; Windows cannot execute a file without
+	// a recognized PATHEXT extension through os/exec. The output-limit path
+	// is already exercised by internal/perftools TestRunCaptureLimited; this
+	// is just a handler-wiring test. Skip on Windows.
+	if runtime.GOOS == "windows" {
+		t.Skip("bash-script fake clang-tidy not executable on Windows")
+	}
 	dir := t.TempDir()
 	fake := filepath.Join(dir, "clang-tidy")
 	script := "#!/usr/bin/env bash\nhead -c $((9 * 1024 * 1024)) </dev/zero | tr '\\000' 'A'\n"
