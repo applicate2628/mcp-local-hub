@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "preact/hooks";
-import { BLANK_FORM, parseYAMLToForm, toYAML } from "../lib/manifest-yaml";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { BLANK_FORM, hasNestedUnknown, parseYAMLToForm, toYAML } from "../lib/manifest-yaml";
+import type { RouterState } from "../hooks/useRouter";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import {
   getExtractManifest,
@@ -55,6 +56,7 @@ function parseAddServerQuery(): { server: string; fromClient: string } {
 
 export function AddServerScreen(props: {
   mode?: "create" | "edit";
+  route?: RouterState;
   onDirtyChange?: (dirty: boolean) => void;
 } = {}) {
   const mode = props.mode ?? "create";
@@ -68,6 +70,9 @@ export function AddServerScreen(props: {
   const yamlPreview = toYAML(debouncedState);
 
   const isDirty = !deepEqualForm(formState, initialSnapshot);
+
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [readOnlyReason, setReadOnlyReason] = useState<string | null>(null);
 
   useEffect(() => {
     props.onDirtyChange?.(isDirty);
@@ -99,6 +104,58 @@ export function AddServerScreen(props: {
       cancelled = true;
     };
   }, []);
+
+  // editName is derived from route.query so that a dirty-declined name=a →
+  // name=b navigation does not fire a stale load (the memo dep stays stable).
+  const editName = useMemo(() => {
+    if (props.mode !== "edit") return "";
+    const params = new URLSearchParams(props.route?.query ?? "");
+    return params.get("name") ?? "";
+  }, [props.mode, props.route?.query]);
+
+  // Mount effect for edit mode: reset per-manifest state BEFORE the new load
+  // (R3 invariant) then fetch, apply hash, and detect nested-unknown fields.
+  useEffect(() => {
+    if (props.mode !== "edit") return;
+    // R3 correction: reset prior per-manifest state BEFORE the new load.
+    // Without this, navigating a→b in edit mode inherits a's loadError
+    // or readOnlyReason (e.g., a had nested unknowns, b is clean, b
+    // would render in read-only mode). Also blank the form while
+    // fetching so we don't flash a's data in b's UI.
+    setLoadError(null);
+    setReadOnlyReason(null);
+    setFormState(BLANK_FORM);
+    setInitialSnapshot(BLANK_FORM);
+    if (!editName) {
+      setLoadError("No manifest name specified");
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { yaml, hash } = await getManifest(editName);
+        if (cancelled) return;
+        const nested = hasNestedUnknown(yaml);
+        const parsed = parseYAMLToForm(yaml);
+        parsed.loadedHash = hash;
+        setFormState(parsed);
+        setInitialSnapshot(parsed);
+        if (nested) {
+          setReadOnlyReason(
+            "This manifest contains fields the GUI cannot handle. Editing via GUI would drop them.",
+          );
+        }
+      } catch (err) {
+        if (cancelled) return;
+        setLoadError((err as Error).message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [props.mode, editName]);
+
+  const readOnly = readOnlyReason !== null;
 
   const nameError = formState.name.length > 0 && !MANIFEST_NAME_REGEX.test(formState.name)
     ? "Must match [a-z0-9][a-z0-9._-]* (lowercase, digits, '.', '_', '-')"
@@ -382,21 +439,41 @@ export function AddServerScreen(props: {
     }
   }
 
-  // Suppress unused-import warnings for edit-mode symbols imported for
-  // Tasks 12-13. These are intentionally imported now so that Task 11
-  // restores typecheck-clean state across the whole frontend.
-  void getManifest;
+  // Suppress unused-import warnings for Task 13 symbols (postManifestEdit,
+  // ManifestHashMismatchError). getManifest is now consumed by the mount
+  // effect above; these two are still latent until Task 13.
   void postManifestEdit;
   void ManifestHashMismatchError;
 
   return (
     <section class="screen add-server">
       <h1>Add server</h1>
+      {loadError && (
+        <div class="banner error" data-testid="load-error-banner">
+          <p>Failed to load <code>{editName || "(unnamed)"}</code>: {loadError}</p>
+          <div class="banner-actions">
+            <button type="button" onClick={() => { setLoadError(null); window.location.reload(); }}>Retry</button>
+            <button type="button" onClick={() => { window.location.hash = "#/servers"; }}>Back to Servers</button>
+          </div>
+        </div>
+      )}
+      {readOnlyReason && (
+        <div class="banner warning" data-testid="readonly-banner">
+          <p>{readOnlyReason}</p>
+          <p>
+            Edit via CLI (<code>mcphub manifest edit {editName}</code>) or
+            delete + recreate via Add Server.
+          </p>
+          <div class="banner-actions">
+            <button type="button" onClick={() => { window.location.hash = "#/servers"; }}>Back to Servers</button>
+          </div>
+        </div>
+      )}
       <div class="toolbar" data-testid="add-server-toolbar">
         <button
           type="button"
           onClick={runValidate}
-          disabled={busy !== ""}
+          disabled={readOnly || busy !== ""}
           data-action="validate"
         >
           {busy === "validate" ? "Validating…" : "Validate"}
@@ -404,7 +481,7 @@ export function AddServerScreen(props: {
         <button
           type="button"
           onClick={() => runSave({ install: false })}
-          disabled={busy !== "" || !!nameError}
+          disabled={readOnly || busy !== "" || !!nameError}
           data-action="save"
         >
           {busy === "save" ? "Saving…" : "Save"}
@@ -413,7 +490,7 @@ export function AddServerScreen(props: {
           type="button"
           class="primary"
           onClick={() => runSave({ install: true })}
-          disabled={busy !== "" || !!nameError}
+          disabled={readOnly || busy !== "" || !!nameError}
           data-action="save-and-install"
         >
           {busy === "install" ? "Installing…" : "Save & Install"}
@@ -421,7 +498,7 @@ export function AddServerScreen(props: {
         <button
           type="button"
           onClick={handlePasteYAML}
-          disabled={busy !== ""}
+          disabled={readOnly || busy !== ""}
           data-action="paste-yaml"
         >
           Paste YAML
@@ -463,7 +540,7 @@ export function AddServerScreen(props: {
                 value={formState.name}
                 placeholder="memory"
                 onInput={(e) => updateField("name", (e.currentTarget as HTMLInputElement).value)}
-                disabled={mode === "edit"}
+                disabled={readOnly || mode === "edit"}
                 title={mode === "edit" ? "Kind and name are immutable after first install. Delete and recreate the server to change them." : undefined}
               />
               {nameError && <span class="inline-error">{nameError}</span>}
@@ -474,7 +551,7 @@ export function AddServerScreen(props: {
                 id="field-kind"
                 value={formState.kind}
                 onChange={(e) => updateField("kind", (e.currentTarget as HTMLSelectElement).value as ManifestFormState["kind"])}
-                disabled={mode === "edit"}
+                disabled={readOnly || mode === "edit"}
                 title={mode === "edit" ? "Kind and name are immutable after first install. Delete and recreate the server to change them." : undefined}
               >
                 {KIND_OPTIONS.map((opt) => (
@@ -491,6 +568,7 @@ export function AddServerScreen(props: {
                 id="field-transport"
                 value={formState.transport}
                 onChange={(e) => updateField("transport", (e.currentTarget as HTMLSelectElement).value as ManifestFormState["transport"])}
+                disabled={readOnly}
               >
                 {TRANSPORT_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -505,6 +583,7 @@ export function AddServerScreen(props: {
                 value={formState.command}
                 placeholder="npx"
                 onInput={(e) => updateField("command", (e.currentTarget as HTMLInputElement).value)}
+                disabled={readOnly}
               />
             </div>
             <div class="form-row">
@@ -516,11 +595,12 @@ export function AddServerScreen(props: {
                       type="text"
                       value={arg}
                       onInput={(e) => updateBaseArg(i, (e.currentTarget as HTMLInputElement).value)}
+                      disabled={readOnly}
                     />
-                    <button type="button" onClick={() => deleteBaseArg(i)} data-action="delete-base-arg">×</button>
+                    <button type="button" onClick={() => deleteBaseArg(i)} disabled={readOnly} data-action="delete-base-arg">×</button>
                   </div>
                 ))}
-                <button type="button" onClick={addBaseArg} data-action="add-base-arg">+ Add arg</button>
+                <button type="button" onClick={addBaseArg} disabled={readOnly} data-action="add-base-arg">+ Add arg</button>
               </div>
             </div>
             <div class="form-row">
@@ -530,6 +610,7 @@ export function AddServerScreen(props: {
                 type="checkbox"
                 checked={formState.weekly_refresh}
                 onChange={(e) => updateField("weekly_refresh", (e.currentTarget as HTMLInputElement).checked)}
+                disabled={readOnly}
               />
             </div>
           </AccordionSection>
@@ -543,17 +624,19 @@ export function AddServerScreen(props: {
                     placeholder="KEY"
                     value={row.key}
                     onInput={(e) => updateEnv(i, "key", (e.currentTarget as HTMLInputElement).value)}
+                    disabled={readOnly}
                   />
                   <input
                     type="text"
                     placeholder="value (literal or ${HOME}/...)"
                     value={row.value}
                     onInput={(e) => updateEnv(i, "value", (e.currentTarget as HTMLInputElement).value)}
+                    disabled={readOnly}
                   />
-                  <button type="button" onClick={() => deleteEnv(i)} data-action="delete-env">×</button>
+                  <button type="button" onClick={() => deleteEnv(i)} disabled={readOnly} data-action="delete-env">×</button>
                 </div>
               ))}
-              <button type="button" onClick={addEnv} data-action="add-env">+ Add environment variable</button>
+              <button type="button" onClick={addEnv} disabled={readOnly} data-action="add-env">+ Add environment variable</button>
             </div>
           </AccordionSection>
           <AccordionSection title="Daemons">
@@ -565,6 +648,7 @@ export function AddServerScreen(props: {
                     placeholder="name (e.g. default)"
                     value={d.name}
                     onInput={(e) => updateDaemon(i, "name", (e.currentTarget as HTMLInputElement).value)}
+                    disabled={readOnly}
                     data-field="daemon-name"
                   />
                   <input
@@ -574,12 +658,13 @@ export function AddServerScreen(props: {
                     placeholder="9100"
                     value={d.port}
                     onInput={(e) => updateDaemon(i, "port", (e.currentTarget as HTMLInputElement).value)}
+                    disabled={readOnly}
                     data-field="daemon-port"
                   />
-                  <button type="button" onClick={() => deleteDaemon(i)} data-action="delete-daemon">×</button>
+                  <button type="button" onClick={() => deleteDaemon(i)} disabled={readOnly} data-action="delete-daemon">×</button>
                 </div>
               ))}
-              <button type="button" onClick={addDaemon} data-action="add-daemon">+ Add daemon</button>
+              <button type="button" onClick={addDaemon} disabled={readOnly} data-action="add-daemon">+ Add daemon</button>
             </div>
           </AccordionSection>
           <AccordionSection title="Client bindings">
@@ -589,6 +674,7 @@ export function AddServerScreen(props: {
               onAdd={addBinding}
               onUpdate={updateBinding}
               onDelete={deleteBinding}
+              readOnly={readOnly}
             />
           </AccordionSection>
         </div>
@@ -633,8 +719,9 @@ function ClientBindingsSection(props: {
   onAdd: (daemonId: string) => void;
   onUpdate: (index: number, field: "client" | "daemonId" | "url_path", value: string) => void;
   onDelete: (index: number) => void;
+  readOnly?: boolean;
 }) {
-  const { daemons, bindings, onAdd, onUpdate, onDelete } = props;
+  const { daemons, bindings, onAdd, onUpdate, onDelete, readOnly } = props;
   if (daemons.length === 0) {
     return (
       <p class="placeholder">
@@ -651,6 +738,7 @@ function ClientBindingsSection(props: {
         onAdd={() => onAdd(only)}
         onUpdate={onUpdate}
         onDelete={onDelete}
+        readOnly={readOnly}
       />
     );
   }
@@ -671,6 +759,7 @@ function ClientBindingsSection(props: {
               onAdd={() => onAdd(d._id)}
               onUpdate={onUpdate}
               onDelete={onDelete}
+              readOnly={readOnly}
             />
           </section>
         );
@@ -690,8 +779,9 @@ function BindingsList(props: {
   onAdd: () => void;
   onUpdate: (index: number, field: "client" | "daemonId" | "url_path", value: string) => void;
   onDelete: (index: number) => void;
+  readOnly?: boolean;
 }) {
-  const { bindings, indices, onAdd, onUpdate, onDelete } = props;
+  const { bindings, indices, onAdd, onUpdate, onDelete, readOnly } = props;
   return (
     <div class="repeatable-rows bindings-list" data-testid="bindings-list">
       {bindings.map((b, displayIdx) => {
@@ -702,6 +792,7 @@ function BindingsList(props: {
               value={b.client}
               data-field="binding-client"
               onChange={(e) => onUpdate(absIdx, "client", (e.currentTarget as HTMLSelectElement).value)}
+              disabled={readOnly}
             >
               {KNOWN_CLIENTS.map((c) => (
                 <option key={c} value={c}>{c}</option>
@@ -713,12 +804,13 @@ function BindingsList(props: {
               placeholder="/mcp"
               data-field="binding-url-path"
               onInput={(e) => onUpdate(absIdx, "url_path", (e.currentTarget as HTMLInputElement).value)}
+              disabled={readOnly}
             />
-            <button type="button" onClick={() => onDelete(absIdx)} data-action="delete-binding">×</button>
+            <button type="button" onClick={() => onDelete(absIdx)} disabled={readOnly} data-action="delete-binding">×</button>
           </div>
         );
       })}
-      <button type="button" onClick={onAdd} data-action="add-binding">+ Add binding</button>
+      <button type="button" onClick={onAdd} disabled={readOnly} data-action="add-binding">+ Add binding</button>
     </div>
   );
 }
