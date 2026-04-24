@@ -410,12 +410,15 @@ func (a *API) Scan() (*ScanResult, error) {
 //   - binary and servers/ in the same directory (legacy / standalone install)
 //   - binary in bin/ and servers/ in bin/../ (standard Go project layout)
 //
-// Falls back to CWD-relative "servers" if neither exists, so tests that
-// don't set an explicit ManifestDir still work when run from the repo root.
+// If neither exists, returns the sibling path (exeDir/servers) without
+// consulting the current working directory. This avoids untrusted CWD-based
+// manifest resolution while preserving a deterministic on-disk location.
 func defaultManifestDir() string {
 	exe, err := os.Executable()
 	if err != nil {
-		return "servers"
+		// Fail closed to a deterministic, clearly invalid absolute-ish path
+		// rather than a CWD-relative location.
+		return filepath.Join(string(os.PathSeparator), "nonexistent", "mcphub", "servers")
 	}
 	exeDir := filepath.Dir(exe)
 	// Legacy: exe and servers/ at same level.
@@ -428,8 +431,8 @@ func defaultManifestDir() string {
 	if st, err := os.Stat(parent); err == nil && st.IsDir() {
 		return parent
 	}
-	// Last resort: relative to CWD.
-	return "servers"
+	// Last resort: deterministic path near the executable (not CWD).
+	return sibling
 }
 
 // ExtractManifestFromClient reads a stdio entry from the specified client
