@@ -68,6 +68,70 @@ func TestManifestDeleteRemovesDir(t *testing.T) {
 	}
 }
 
+// TestManifestGetIn_ReturnsContentHash verifies that ManifestGetInWithHash
+// returns the same YAML as ManifestGetIn and a hash consistent with
+// ManifestHashContent applied to those bytes.
+func TestManifestGetIn_ReturnsContentHash(t *testing.T) {
+	tmp := t.TempDir()
+	yaml := "name: hashsrv\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9210\n"
+	if err := os.MkdirAll(filepath.Join(tmp, "hashsrv"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "hashsrv", "manifest.yaml"), []byte(yaml), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := NewAPI()
+	gotYAML, gotHash, err := a.ManifestGetInWithHash(tmp, "hashsrv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotYAML != yaml {
+		t.Errorf("YAML mismatch:\ngot  %q\nwant %q", gotYAML, yaml)
+	}
+	wantHash := ManifestHashContent([]byte(yaml))
+	if gotHash != wantHash {
+		t.Errorf("hash mismatch: got %q, want %q", gotHash, wantHash)
+	}
+}
+
+// TestManifestGetIn_HashChangesOnExternalWrite is the load-bearing case
+// for A2b D3 stale-file detection: if a second actor writes the manifest
+// between the GUI's Load and Save calls, the hash must change so
+// ManifestEdit can detect the conflict.
+func TestManifestGetIn_HashChangesOnExternalWrite(t *testing.T) {
+	tmp := t.TempDir()
+	yaml1 := "name: stalesrv\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9211\n"
+	if err := os.MkdirAll(filepath.Join(tmp, "stalesrv"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(tmp, "stalesrv", "manifest.yaml")
+	if err := os.WriteFile(manifestPath, []byte(yaml1), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := NewAPI()
+	_, h1, err := a.ManifestGetInWithHash(tmp, "stalesrv")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate an external write between Load and Save.
+	yaml2 := "name: stalesrv\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9212\n"
+	if err := os.WriteFile(manifestPath, []byte(yaml2), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, h2, err := a.ManifestGetInWithHash(tmp, "stalesrv")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if h1 == h2 {
+		t.Error("hash must differ after external write, but h1 == h2")
+	}
+}
+
 // TestManifestCRUD_RejectsPathTraversalNames guards the regression
 // where an attacker-controlled (or typo'd) name like "..",
 // "../escaped", or an absolute path could escape the manifest root —

@@ -101,6 +101,31 @@ func (a *API) ManifestGetIn(dir, name string) (string, error) {
 	return string(data), nil
 }
 
+// ManifestGetInWithHash reads the manifest YAML and returns both the
+// text and its SHA-256 content hash. Used by the GUI edit flow so
+// ManifestEdit can detect external writes that occurred between Load
+// and Save (A2b D3 stale-file detection).
+func (a *API) ManifestGetInWithHash(dir, name string) (string, string, error) {
+	path := filepath.Join(dir, name, "manifest.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", "", err
+	}
+	return string(data), ManifestHashContent(data), nil
+}
+
+// ManifestGetWithHash is the default-dir convenience wrapper, used by
+// GUI handlers which always read from defaultManifestDir().
+func (a *API) ManifestGetWithHash(name string) (string, string, error) {
+	if err := checkManifestName(name); err != nil {
+		return "", "", err
+	}
+	// Read from disk (not embed) because edit flow only makes sense
+	// for user-created / on-disk manifests — you cannot edit embedded
+	// shipped manifests in-place.
+	return a.ManifestGetInWithHash(defaultManifestDir(), name)
+}
+
 // ManifestCreate writes a new manifest under the default servers dir.
 // Rejects if the server name already has a manifest — use ManifestEdit
 // to change existing ones.
