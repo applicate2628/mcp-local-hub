@@ -262,17 +262,40 @@ export function AddServerScreen() {
   async function handlePasteYAML() {
     const pasted = window.prompt("Paste YAML manifest:", "");
     if (pasted == null || pasted.trim() === "") return;
+    let parsed: ManifestFormState;
     try {
-      const parsed = parseYAMLToForm(pasted);
-      setFormState(parsed);
-      // Per Q8 decision: paste does NOT reset the dirty baseline. Only
-      // successful Save does. We DO auto-run structural validate since
-      // paste is a mode switch and users expect "this parsed / this
-      // mapped" feedback (Codex xhigh memo).
-      setBanner(null);
-      await runValidate();
+      parsed = parseYAMLToForm(pasted);
     } catch (err) {
       setBanner({ kind: "error", text: `Paste failed: ${(err as Error).message}` });
+      return;
+    }
+    setFormState(parsed);
+    // Per Q8 decision: paste does NOT reset the dirty baseline. Only
+    // successful Save does. We DO auto-run structural validate since
+    // paste is a mode switch and users expect "this parsed / this
+    // mapped" feedback (Codex xhigh memo).
+    //
+    // Inline the validate against `parsed` — NOT via runValidate(),
+    // whose closure would see the pre-paste formState (Task 12 review
+    // must-fix).
+    const version = ++validateCounter.current;
+    setBusy("validate");
+    setBanner(null);
+    try {
+      const payload = toYAML(parsed);
+      const out = await postManifestValidate(payload);
+      if (version !== validateCounter.current) return;
+      setWarnings(out);
+      if (out.length === 0) {
+        setBanner({ kind: "success", text: "Pasted YAML passed validation." });
+      } else {
+        setBanner({ kind: "error", text: `Pasted YAML has ${out.length} validation warning${out.length === 1 ? "" : "s"}.` });
+      }
+    } catch (err) {
+      if (version !== validateCounter.current) return;
+      setBanner({ kind: "error", text: `/api/manifest/validate: ${(err as Error).message}` });
+    } finally {
+      setBusy("");
     }
   }
 
