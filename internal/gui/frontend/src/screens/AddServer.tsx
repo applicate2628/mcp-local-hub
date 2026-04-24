@@ -71,6 +71,65 @@ export function AddServerScreen() {
     }));
   }
 
+  function addDaemon() {
+    setFormState((prev) => ({
+      ...prev,
+      daemons: [...prev.daemons, { name: "", port: 0 }],
+    }));
+  }
+
+  // updateDaemon handles both the name-rename cascade and port updates.
+  // When the name field is edited, every client_binding that referenced
+  // the old name is updated to the new name in the same atomic state
+  // update — the form never exposes an intermediate "orphan binding"
+  // state. Users who hand-edit a binding's daemon field to a non-existent
+  // daemon get caught by the post-save ManifestValidate (Q6 gotcha).
+  function updateDaemon(index: number, field: "name" | "port", value: string) {
+    setFormState((prev) => {
+      const target = prev.daemons[index];
+      if (!target) return prev;
+      const nextDaemon = field === "name"
+        ? { ...target, name: value }
+        : { ...target, port: parsePort(value) };
+      const nextDaemons = prev.daemons.slice();
+      nextDaemons[index] = nextDaemon;
+      const nextBindings = field === "name" && target.name !== value
+        ? prev.client_bindings.map((b) =>
+            b.daemon === target.name ? { ...b, daemon: value } : b,
+          )
+        : prev.client_bindings;
+      return { ...prev, daemons: nextDaemons, client_bindings: nextBindings };
+    });
+  }
+
+  // deleteDaemon cascades to bindings: if any bindings reference this
+  // daemon, the user is prompted; on confirm both the daemon row and
+  // every binding that pointed at it are removed in one state update.
+  function deleteDaemon(index: number) {
+    setFormState((prev) => {
+      const target = prev.daemons[index];
+      if (!target) return prev;
+      const orphans = prev.client_bindings.filter((b) => b.daemon === target.name);
+      if (orphans.length > 0) {
+        // eslint-disable-next-line no-alert
+        const ok = window.confirm(
+          `Delete daemon "${target.name}" and its ${orphans.length} client binding${orphans.length === 1 ? "" : "s"}?`,
+        );
+        if (!ok) return prev;
+      }
+      return {
+        ...prev,
+        daemons: prev.daemons.filter((_, i) => i !== index),
+        client_bindings: prev.client_bindings.filter((b) => b.daemon !== target.name),
+      };
+    });
+  }
+
+  function parsePort(raw: string): number {
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : 0;
+  }
+
   return (
     <section class="screen add-server">
       <h1>Add server</h1>
@@ -175,7 +234,30 @@ export function AddServerScreen() {
             </div>
           </AccordionSection>
           <AccordionSection title="Daemons">
-            <p class="placeholder">name + port rows with cascade rename/delete (Task 9)</p>
+            <div class="repeatable-rows" data-testid="daemon-rows">
+              {formState.daemons.map((d, i) => (
+                <div class="form-row daemon-row" key={i} data-daemon-row={i}>
+                  <input
+                    type="text"
+                    placeholder="name (e.g. default)"
+                    value={d.name}
+                    onInput={(e) => updateDaemon(i, "name", (e.currentTarget as HTMLInputElement).value)}
+                    data-field="daemon-name"
+                  />
+                  <input
+                    type="number"
+                    min={0}
+                    max={65535}
+                    placeholder="9100"
+                    value={d.port}
+                    onInput={(e) => updateDaemon(i, "port", (e.currentTarget as HTMLInputElement).value)}
+                    data-field="daemon-port"
+                  />
+                  <button type="button" onClick={() => deleteDaemon(i)} data-action="delete-daemon">×</button>
+                </div>
+              ))}
+              <button type="button" onClick={addDaemon} data-action="add-daemon">+ Add daemon</button>
+            </div>
           </AccordionSection>
           <AccordionSection title="Client bindings">
             <p class="placeholder">adaptive 1-vs-multi daemon (Task 10)</p>
