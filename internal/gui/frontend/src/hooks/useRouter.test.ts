@@ -94,3 +94,79 @@ describe("useRouter same-key-different-query (A2b P2-2)", () => {
     expect(result.current.query).toBe("name=a");
   });
 });
+
+describe("useRouter guard stability (R2b-Q3)", () => {
+  beforeEach(() => {
+    cleanup();
+    window.location.hash = "";
+  });
+
+  it("uses the latest guard on hashchange even when caller passes a fresh inline arrow each render", async () => {
+    // Simulate a caller that re-renders with a new arrow each time:
+    // first render installs a "allow all" guard, then we re-render with
+    // a "block all" guard and verify the NEW guard is consulted.
+    const guard1 = vi.fn(() => true);
+    const guard2 = vi.fn(() => false);
+
+    const { result, rerender } = renderHook(
+      ({ g }: { g: () => boolean }) => useRouter("servers", g),
+      { initialProps: { g: guard1 } },
+    );
+
+    // First nav accepted by guard1.
+    act(() => {
+      window.history.pushState(null, "", "#/migration");
+      window.dispatchEvent(new HashChangeEvent("hashchange", {
+        oldURL: "http://localhost/",
+        newURL: "http://localhost/#/migration",
+      }));
+    });
+    expect(guard1).toHaveBeenCalled();
+    expect(result.current.screen).toBe("migration");
+
+    // Re-render with guard2. If the hook subscribed per-render, we'd
+    // see a re-subscription; with the ref-based design the listener is
+    // the same instance and reads the latest guardRef.current.
+    rerender({ g: guard2 });
+
+    // Second nav is declined by guard2.
+    act(() => {
+      window.history.pushState(null, "", "#/servers");
+      window.dispatchEvent(new HashChangeEvent("hashchange", {
+        oldURL: "http://localhost/#/migration",
+        newURL: "http://localhost/#/servers",
+      }));
+    });
+    expect(guard2).toHaveBeenCalled();
+    // Declined → internal state stays on migration.
+    expect(result.current.screen).toBe("migration");
+  });
+});
+
+describe("useRouter empty oldURL safety (R2b-Q4)", () => {
+  beforeEach(() => {
+    cleanup();
+    window.location.hash = "#/servers";
+  });
+
+  it("does not throw when the declined hashchange has empty oldURL", () => {
+    const guard = vi.fn(() => false);
+    const { result } = renderHook(() => useRouter("servers", guard));
+    // Trigger a hashchange whose oldURL is an empty string (happy-dom
+    // sends "" on the first nav from a blank page). Before the Q4 fix
+    // this threw TypeError inside the listener and swallowed silently,
+    // leaving the URL in the declined state.
+    expect(() => {
+      act(() => {
+        window.history.pushState(null, "", "#/add-server");
+        window.dispatchEvent(new HashChangeEvent("hashchange", {
+          oldURL: "",
+          newURL: "http://localhost/#/add-server",
+        }));
+      });
+    }).not.toThrow();
+    // Guard was consulted; state did not advance.
+    expect(guard).toHaveBeenCalled();
+    expect(result.current.screen).toBe("servers");
+  });
+});
