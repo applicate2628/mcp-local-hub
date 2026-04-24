@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toYAML } from "./manifest-yaml";
+import { toYAML, parseYAMLToForm, BLANK_FORM } from "./manifest-yaml";
 import type { ManifestFormState } from "../types";
 
 const base: ManifestFormState = {
@@ -111,5 +111,116 @@ describe("toYAML", () => {
     expect(yaml).toContain(`has`);
     // And does not contain a corruption pattern like `has "quotes"` inside a double-quoted wrapper.
     expect(yaml).not.toMatch(/"has "quotes" inside"/);
+  });
+});
+
+describe("BLANK_FORM constant", () => {
+  it("has all fields with sensible defaults", () => {
+    expect(BLANK_FORM.name).toBe("");
+    expect(BLANK_FORM.kind).toBe("global");
+    expect(BLANK_FORM.transport).toBe("stdio-bridge");
+    expect(BLANK_FORM.command).toBe("");
+    expect(BLANK_FORM.base_args).toEqual([]);
+    expect(BLANK_FORM.env).toEqual([]);
+    expect(BLANK_FORM.daemons).toEqual([]);
+    expect(BLANK_FORM.client_bindings).toEqual([]);
+    expect(BLANK_FORM.weekly_refresh).toBe(false);
+  });
+});
+
+describe("parseYAMLToForm", () => {
+  it("parses a complete manifest (memory example) round-trip-cleanly", () => {
+    const yaml = `name: memory
+kind: global
+transport: stdio-bridge
+command: npx
+base_args:
+  - "-y"
+  - "@modelcontextprotocol/server-memory"
+env:
+  MEMORY_FILE_PATH: "\${HOME}/.local/share/mcp-memory/memory.jsonl"
+daemons:
+  - name: default
+    port: 9123
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+  - client: codex-cli
+    daemon: default
+    url_path: /mcp
+`;
+    const form = parseYAMLToForm(yaml);
+    expect(form.name).toBe("memory");
+    expect(form.kind).toBe("global");
+    expect(form.transport).toBe("stdio-bridge");
+    expect(form.command).toBe("npx");
+    expect(form.base_args).toEqual(["-y", "@modelcontextprotocol/server-memory"]);
+    expect(form.env).toEqual([
+      { key: "MEMORY_FILE_PATH", value: "${HOME}/.local/share/mcp-memory/memory.jsonl" },
+    ]);
+    expect(form.daemons).toEqual([{ name: "default", port: 9123 }]);
+    expect(form.client_bindings).toHaveLength(2);
+    expect(form.client_bindings[0]).toEqual({ client: "claude-code", daemon: "default", url_path: "/mcp" });
+  });
+
+  it("treats missing kind as 'global' (default)", () => {
+    const form = parseYAMLToForm(`name: demo\ntransport: stdio-bridge\ncommand: npx\n`);
+    expect(form.kind).toBe("global");
+  });
+
+  it("treats missing transport as 'stdio-bridge' (default)", () => {
+    const form = parseYAMLToForm(`name: demo\nkind: global\ncommand: npx\n`);
+    expect(form.transport).toBe("stdio-bridge");
+  });
+
+  it("coerces missing arrays to []", () => {
+    const form = parseYAMLToForm(`name: demo\nkind: global\ntransport: stdio-bridge\ncommand: npx\n`);
+    expect(form.base_args).toEqual([]);
+    expect(form.daemons).toEqual([]);
+    expect(form.client_bindings).toEqual([]);
+  });
+
+  it("coerces missing env map to empty array", () => {
+    const form = parseYAMLToForm(`name: demo\ncommand: npx\n`);
+    expect(form.env).toEqual([]);
+  });
+
+  it("coerces missing weekly_refresh to false", () => {
+    const form = parseYAMLToForm(`name: demo\ncommand: npx\n`);
+    expect(form.weekly_refresh).toBe(false);
+  });
+
+  it("normalizes env map into array-of-{key,value} pairs", () => {
+    const form = parseYAMLToForm(`name: demo\ncommand: npx\nenv:\n  A: "1"\n  B: "two"\n`);
+    expect(form.env).toEqual([
+      { key: "A", value: "1" },
+      { key: "B", value: "two" },
+    ]);
+  });
+
+  it("throws on malformed YAML", () => {
+    expect(() => parseYAMLToForm(`name: demo\n  this: is: nested: wrong`)).toThrow();
+  });
+
+  it("round-trips via toYAML without losing required fields", () => {
+    const input: ManifestFormState = {
+      ...base,
+      name: "memory",
+      command: "npx",
+      base_args: ["-y", "@pkg/srv"],
+      env: [{ key: "K", value: "v" }],
+      daemons: [{ name: "default", port: 9100 }],
+      client_bindings: [{ client: "claude-code", daemon: "default", url_path: "/mcp" }],
+    };
+    const yaml = toYAML(input);
+    const parsed = parseYAMLToForm(yaml);
+    expect(parsed).toEqual(input);
+  });
+
+  it("BLANK_FORM round-trips to minimal YAML and back to BLANK_FORM shape", () => {
+    const yaml = toYAML(BLANK_FORM);
+    const parsed = parseYAMLToForm(yaml);
+    expect(parsed).toEqual(BLANK_FORM);
   });
 });
