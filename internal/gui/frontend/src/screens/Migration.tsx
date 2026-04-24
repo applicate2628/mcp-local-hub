@@ -231,6 +231,10 @@ function ViaHubGroup(props: {
         {props.entries.map((e) => (
           <li key={e.name} data-server={e.name}>
             <span class="server-name">{e.name}</span>
+            <a
+              href={`#/edit-server?name=${encodeURIComponent(e.name)}`}
+              data-action="edit-manifest"
+            >Edit manifest</a>
             <button
               type="button"
               class="demigrate"

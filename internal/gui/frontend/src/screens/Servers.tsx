@@ -187,7 +187,14 @@ function ServerRowView(props: {
   const { server, status, onToggle } = props;
   return (
     <tr>
-      <td>{server.name}</td>
+      <td>
+        <a
+          href={`#/edit-server?name=${encodeURIComponent(server.name)}`}
+          data-action="edit-server"
+        >
+          {server.name}
+        </a>
+      </td>
       {CLIENTS.map((client) => (
         <CellView key={client} server={server} client={client} onToggle={onToggle} />
       ))}
