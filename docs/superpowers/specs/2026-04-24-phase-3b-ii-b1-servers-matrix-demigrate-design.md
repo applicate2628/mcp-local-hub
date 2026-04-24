@@ -45,9 +45,11 @@ const disabled = routing === "unsupported" || routing === "not-installed" || rou
 
 The tooltip at line 234 also still points users at `mcphub rollback --client <name>` as the workaround — that CLI path is the user-space equivalent of what we are about to wire into the UI, and the tooltip is now misleading.
 
-`applyChanges` (same file, lines ~85–123) iterates the `dirty` map and `POST /api/migrate` for every dirty change. It collects failures into a `failed: string[]` array and renders `Failed: ...` in `apply-msg` on the toolbar. The `reloadToken` bump at the end triggers a `/api/scan` + `/api/status` refetch. **This is the exact shape we extend for demigrate — we just branch the endpoint per change direction.**
+`applyChanges` (same file, lines ~85–123) iterates the `dirty` map and `POST /api/migrate` for every dirty server-group. It collects failures into a `failed: string[]` array and renders `Failed: ...` in `apply-msg` on the toolbar. The `reloadToken` bump at the end triggers a `/api/scan` + `/api/status` refetch.
 
-### 2.4 `api.NewAPI()` lifecycle — VERIFIED ZERO-COST
+**Critical:** today's `dirty` state is `Map<string, Set<string>>` (server → set of clients). Per-cell **direction is not preserved** — the map only records "this cell is dirty", not "flipping from direct to via-hub or vice versa". `toggleCell` uses the `initialChecked` value at the call site to decide whether to add/remove the entry, but does NOT persist direction into the map. `applyChanges` therefore can't know per change whether to POST `migrate` or `demigrate`. This memo's design has to fix the dirty shape before it can branch the endpoint per change. [Codex R1 P1 on this memo, §A-below.]
+
+### 2.4 `api.NewAPI()` lifecycle — VERIFIED ZERO-COST, but `api.go` comment contradicts current use
 
 `a2b-combined-pr-followups.md` item #2 flagged `api.NewAPI()` being constructed per-request inside every real adapter (`realManifestCreator`, `realManifestGetter`, `realManifestEditor`, `realManifestValidator`, `realDemigrater`) as a potential goroutine leak if `newEventBus()` spawned a background worker. Inspection of [internal/api/events.go](../../../internal/api/events.go):
 
@@ -56,9 +58,19 @@ type EventBus struct{}
 func newEventBus() *EventBus { return &EventBus{} }
 ```
 
-`EventBus` is an empty struct. `newEventBus()` allocates nothing beyond the struct itself — no goroutine, no channel, no background worker. `api.NewAPI()` is a pure struct allocation. Per-request construction is cheap and safe. The followup item is a **false positive** in the current state; it should be closed as doc-only (verified).
+`EventBus` is an empty struct. `newEventBus()` allocates nothing beyond the struct itself — no goroutine, no channel, no background worker. `api.NewAPI()` is a pure struct allocation. Per-request construction is cheap and safe; the "goroutine leak" concern is a false positive in the current state.
 
-Future-proofing (if `EventBus` gets populated later — the source comment says "Populated in Task 22"): when that work lands, the same task should introduce the shared-`*api.API` refactor as part of its own scope. Threading a shared instance **now** would be speculative coupling against a non-goroutine-spawning struct.
+**But the canonical contract is inconsistent.** [internal/api/api.go:12](../../../internal/api/api.go#L12) says:
+
+```go
+// API is the orchestration handle held by cli and gui. A single instance is
+// created per process via NewAPI. Methods are safe for concurrent use unless
+// noted otherwise.
+```
+
+"A single instance is created per process" is violated by the GUI adapters, which call `api.NewAPI()` on every request. This is harmless today because `EventBus` is empty, but future readers (and future Codex passes) will keep flagging this as a bug unless the comment and the code agree. Closing followup #2 as doc-only therefore requires TWO doc updates, not one: (1) the followup memo entry marked verified, AND (2) `api.go`'s package comment revised to accurately describe the current per-request construction pattern.
+
+Future-proofing (if `EventBus` gets populated later — the source comment says "Populated in Task 22"): when that work lands, the same task introduces the shared-`*api.API` refactor AND re-restates the per-process-instance contract. Threading a shared instance **now** would be speculative coupling against a non-goroutine-spawning struct — but the comment must still be honest about what the code does today. [Codex R1 P2 on this memo.]
 
 ## 3. Scope
 
@@ -74,10 +86,11 @@ Future-proofing (if `EventBus` gets populated later — the source comment says 
 4. Keep the existing sequential per-change loop, error-accumulation into `failed[]`, toolbar `apply-msg` surface, and `reloadToken` bump. No new batch endpoint, no Promise.all concurrency, no partial-success UI.
 5. E2E regression scenarios (see §6).
 
-**B1-prep — `api.NewAPI()` followup closure (doc-only):**
+**B1-prep — `api.NewAPI()` followup closure (docs only, 2 files):**
 
 1. Update `work-items/bugs/a2b-combined-pr-followups.md` item #2: move to FIXED/verified section with a pointer to `internal/api/events.go` proving zero-cost construction.
-2. No code change.
+2. Update `internal/api/api.go` package/type comment to accurately describe the current per-request construction pattern (the existing comment "A single instance is created per process" contradicts GUI adapter behavior and will keep confusing future readers and code-review tools). No behavior change; pure comment edit.
+3. No production-code change in the Go adapters themselves.
 
 **Coverage debt clean-up (a2b-combined-pr-followups.md item #3):**
 
@@ -112,9 +125,20 @@ Per-change narrow: `POST /api/demigrate` with `{servers: [change.server], client
 
 Reuse the existing `failed: string[]` pattern in `applyChanges`. On a failed POST, push `${change.server}/${change.client}: ${body.error ?? resp.status}` and continue with remaining changes. Render `Failed: <joined>` in the toolbar's `apply-msg` span. No inline per-row error (would require row-state plumbing; not a B1 requirement).
 
-### D4 — Dirty-map tracking
+### D4 — Dirty-map tracking (REVISED per Codex R1 P1)
 
-Existing dirty map already records `(server, client) → {next, initial}` and the `applyChanges` closure has access to `initialChecked` for each change. No schema change needed; direction derives from existing fields.
+Today's dirty state is `Map<string, Set<string>>` (server → set of dirty clients). Direction is NOT preserved. The B1 design requires direction per-cell so `applyChanges` can branch the endpoint correctly. Chosen shape:
+
+```ts
+type Direction = "migrate" | "demigrate";
+const [dirty, setDirty] = useState<Map<string, Map<string, Direction>>>(new Map());
+```
+
+- `toggleCell(server, client, nextChecked, initialChecked)` computes direction from `initialChecked`: if it was `true` (cell was `via-hub` at load) the user is rolling it back → `"demigrate"`; if it was `false` (cell was `direct`) the user is migrating → `"migrate"`. When `nextChecked === initialChecked` (toggle back to the initial state) the entry is removed.
+- `applyChanges` iterates the inner map per-server and groups changes by direction. Each distinct (direction, server) batch fires one POST with `{servers: [server], clients: [...matchingClients]}`. Servers with both a migrate-batch and a demigrate-batch (e.g., user checks clients A,B and unchecks client C on the same row) produce two sequential POSTs for that server — first the migrate for A,B, then the demigrate for C, or vice-versa (order: migrate-first for predictability — newly-bound hub daemons before any rollback affects related state).
+- `applyDisabled` uses `dirty.size === 0` today; revised check: `dirty.size === 0 || [...dirty.values()].every(m => m.size === 0)`. (Simpler: skip pruning empty inner maps in toggleCell, keep one `size` check.)
+
+This is a real schema change, not a derivation trick. It is the only B1 change that touches non-trivial component state.
 
 ### D5 — Tooltip copy for `via-hub` cells
 
@@ -150,9 +174,22 @@ The existing post-Apply reload already picks up both directions because `/api/sc
 
 ## 5. Risks
 
-### R1 — R17's original concern still valid for direct→via-hub→direct flapping
+### R1 — Cross-apply backup-file contention on the same client
 
-Imagine a user checks a `direct` cell (queues migrate), then in the same Apply session unchecks a different `via-hub` cell (queues demigrate). Both POSTs fire sequentially. If they happen to touch the same backup file for the same client (e.g., user is migrating server-A while demigrating server-B on claude-code), the migrate's backup rotation and the demigrate's backup read could race at the filesystem level. Mitigation: `api.Migrate` and `api.Demigrate` both serialize through the client's backup-lock (existing `internal/clients` pattern); filesystem-level ordering is preserved because the POSTs run sequentially from the client side and the backend is the same single-writer process. No new mitigation needed.
+Imagine a user checks a `direct` cell (queues migrate) and unchecks a different `via-hub` cell on the same client (queues demigrate) — e.g., migrating server-A while demigrating server-B on claude-code. Both POSTs target the same claude-code config file and its backup rotation.
+
+**Verified:** `internal/clients/clients.go` `writeBackup` / `latestBackup` / restore paths use plain `os` I/O with no `sync.Mutex`, no `flock`, no process-level lock. I checked for lock primitives in the package and none exist. [Codex R1 P2 on this memo corrected an earlier false claim in this memo that such a lock existed.]
+
+**Actual mitigation for B1:**
+
+- Within a single GUI tab's Apply invocation, the frontend's sequential per-change loop already serializes POSTs to the backend. Two requests never overlap on the same client.
+- The single-instance mutex at process start (`mcphub gui`'s `<pidport>.lock`) forbids a second GUI process from running concurrently — so there is no two-GUI-process race.
+- Multiple TABS of the same GUI process CAN issue interleaved `POST /api/migrate` and `POST /api/demigrate` against the same Go process. Each handler is a separate goroutine; the HTTP mux does not serialize them. This is a **residual race** that existed pre-B1 for two tabs both clicking the Migration-screen's Demigrate button at once. B1 widens the exposure slightly (matrix Apply on one tab + Migration-screen Demigrate on another) but introduces no NEW primitive; the risk was already latent.
+- CLI-plus-GUI interleaving is similarly possible (e.g., `mcphub migrate ...` while the user clicks Apply on the GUI matrix) and has the same risk class.
+
+**Residual risk accepted for B1.** A proper fix is client-level backup serialization (`sync.Mutex` keyed by client name, or per-client file-lock) and belongs with a follow-up plan item, NOT this memo. The failure mode is user-visible (a truncated or interleaved backup file surfaces an error on read — demigrate then fails loudly rather than silently corrupting data, since `latestBackup` validates JSON before returning), so the trade-off is "rare failure visible to user" vs "new locking primitive this cycle."
+
+**Decision:** ship B1 without new locks. Add a `work-items/bugs/b1-backup-file-race.md` entry alongside the B1 implementation plan so the concern is durable and re-visitable.
 
 ### R2 — Demigrate on a server not in via-hub
 
@@ -187,7 +224,9 @@ No new `internal/api/demigrate_test.go` or `internal/gui/demigrate_test.go` test
 3. **"demigrate failure surfaces in apply-msg"** — stub `/api/demigrate` to 500 with a generic body. Uncheck a via-hub cell, Apply. Assert the toolbar `apply-msg` contains `Failed:` and the row stays at `via-hub` after the reload (backend truth wins). Checkbox resets to its pre-change state via the existing reloadToken refresh.
 4. **"tooltip copy reflects uncheck-to-demigrate semantic"** — assert the `title` attribute on a `via-hub` cell contains "Uncheck and Apply to roll this binding back" (or the exact substring we land on). Remove/update any prior assertion that expected the `mcphub rollback --client` phrase.
 
-Target: `internal/gui/e2e/tests/servers.spec.ts` grows from 3 → 7 scenarios (4 new). Total E2E suite 47 → 51.
+Target: `internal/gui/e2e/tests/servers.spec.ts` grows from 3 → 7 scenarios (4 new). Total E2E suite at current HEAD is **47** (3 shell + 3 servers + 6 migration + 13 add-server + 17 edit-server + 2 dashboard + 3 logs — verified by counting `test(` per spec file). Target after B1: **51**.
+
+**CLAUDE.md accounting is stale.** The committed CLAUDE.md coverage section still says "43 smoke tests total" — written at Task 19 of A2b before the R1 (+3 E2E) and R2 (+1 E2E) Codex-fix commits brought the count to 47. The B1 docs commit must therefore update CLAUDE.md in two steps' worth of delta: catch up to 47 (capture the R1/R2 additions) AND add B1's +4 to land on 51. Plan task for the docs update: one commit that rewrites the coverage section to reflect the current suite, with the 51 final total. [Codex R1 P3 on this memo.]
 
 ### 6.4 Cross-suite regression
 
@@ -197,18 +236,21 @@ No existing `servers.spec.ts`, `add-server.spec.ts`, `edit-server.spec.ts`, `mig
 
 The plan should derive from this memo with the following commit breakdown:
 
-1. **doc-only:** close a2b-combined-pr-followups item #2 as verified (prep). Single commit updating the memo.
-2. **Go tests:** add the 3 `/api/manifest/edit` coverage tests. Single commit; no production-code changes.
-3. **Servers matrix wiring:** enable `via-hub` checkbox, extend `applyChanges` with direction-branching, update tooltip copy. Single commit including regenerated assets (`go generate ./internal/gui/...`).
-4. **E2E:** add 4 scenarios in `servers.spec.ts`; update any `mcphub rollback` tooltip assertion elsewhere. Single commit.
-5. **Docs:** update `CLAUDE.md` E2E coverage line (47 → 51). Single commit.
+1. **doc-only prep:** close `a2b-combined-pr-followups.md` item #2 as verified AND update `internal/api/api.go` package/type comment to honestly describe current per-request adapter construction (both must move together — see §2.4). Single commit.
+2. **File work-items bug entry:** create `work-items/bugs/b1-backup-file-race.md` so the R1 residual race is durable (see §5 R1). Single commit, doc-only.
+3. **Go tests:** add the 3 `/api/manifest/edit` coverage tests (`EmptyName_400`, `MalformedJSON_400`, `RejectsNonPOST_405`). Single commit; no production-code changes.
+4. **Servers matrix dirty-shape refactor:** change `dirty` to `Map<string, Map<string, Direction>>`, update `toggleCell` to persist direction, update `applyChanges` to iterate the richer structure and batch per (server, direction) pair (see §4 D4). This is the load-bearing change. Single commit.
+5. **Servers matrix wiring:** enable `via-hub` checkbox (remove from disabled list, update tooltip copy per §4 D5), branch `applyChanges` endpoint per direction to call `/api/migrate` vs `/api/demigrate` using the shape from commit 4. Includes regenerated assets (`go generate ./internal/gui/...`). Single commit.
+6. **E2E:** add 4 scenarios in `servers.spec.ts`; grep + update any `mcphub rollback` tooltip assertion elsewhere. Single commit.
+7. **Docs:** update `CLAUDE.md` coverage section to reflect current suite (43 in committed docs → 47 at HEAD → 51 after B1) per §6.3 note. Single commit.
 
-Estimated scope: **~5 commits, ~150–250 LOC total** (mostly TS/TSX and TS test code; minimal Go — 3 short handler tests).
+Estimated scope: **~7 commits, ~200–300 LOC total** (mostly TS/TSX and TS test code; minimal Go — 3 short handler tests). Revised up from 5 commits to account for the dirty-shape refactor now being a distinct load-bearing commit separate from the enable-checkbox wiring.
 
 ## 8. Self-review checklist
 
-- [ ] Placeholder scan — none found.
-- [ ] Internal consistency — §3 scope matches §4 decisions matches §7 handoff.
-- [ ] Ambiguity check — demigrate body shape is explicit (`{servers: [one], clients: [one]}` per-cell vs `{servers: [name]}` no-clients for the Migration-screen bulk case).
-- [ ] Scope check — single-milestone-sized, 5 commits, one branch.
-- [ ] Decision lock — D1 (variant A) confirmed with user + Codex advisory; D10 (no manifest cascade) explicit.
+- [x] Placeholder scan — none.
+- [x] Internal consistency — §3 scope matches §4 decisions matches §7 handoff after Codex R1 revision.
+- [x] Ambiguity check — demigrate body shape is explicit (`{servers: [one], clients: [one]}` per-cell batch vs `{servers: [name]}` no-clients for the Migration-screen bulk case).
+- [x] Scope check — single-milestone-sized, 7 commits, one branch.
+- [x] Decision lock — D1 (variant A) confirmed with user + Codex advisory; D4 (dirty-shape refactor) spelled out after Codex R1 P1 caught the missing direction; D10 (no manifest cascade) explicit.
+- [x] Codex-review gate — R1 REVISE findings (P1 dirty shape, P2 backup lock myth, P2 api.go contradiction, P3 E2E count) all addressed in this revision.
