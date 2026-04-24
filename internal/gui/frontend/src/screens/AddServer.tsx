@@ -952,7 +952,7 @@ function ClientBindingsSection(props: {
     );
   }
   if (daemons.length >= 4) {
-    return <BindingsMatrix daemons={daemons} bindings={bindings} onToggle={onToggle} onUpdate={onUpdate} />;
+    return <BindingsMatrix daemons={daemons} bindings={bindings} onToggle={onToggle} onUpdate={onUpdate} readOnly={readOnly} />;
   }
   return (
     <div data-testid="bindings-adaptive-multi">
@@ -1246,6 +1246,7 @@ function BindingsMatrix(props: {
   bindings: BindingFormEntry[];
   onToggle: (daemonId: string, client: string, checked: boolean) => void;
   onUpdate: (index: number, field: "client" | "daemonId" | "url_path", value: string) => void;
+  readOnly?: boolean;
 }) {
   const { daemons, bindings, onToggle, onUpdate } = props;
   return (
@@ -1276,6 +1277,7 @@ function BindingsMatrix(props: {
                     data-action="binding-toggle"
                     data-daemon={d._id}
                     data-client={c}
+                    disabled={props.readOnly}
                     onChange={(e) =>
                       onToggle(d._id, c, (e.currentTarget as HTMLInputElement).checked)
                     }
@@ -1285,6 +1287,7 @@ function BindingsMatrix(props: {
                       type="text"
                       value={urlPath}
                       placeholder="/mcp"
+                      disabled={props.readOnly}
                       onInput={(e) =>
                         onUpdate(absIdx, "url_path", (e.currentTarget as HTMLInputElement).value)
                       }

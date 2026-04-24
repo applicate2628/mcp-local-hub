@@ -92,3 +92,26 @@ Left as-is per plan-fidelity priority.
 Review at combined-PR prep time: decide which of 1, 2, 3 to fold into the
 combined PR vs defer, and which are genuinely covered by the user's separate
 security work.
+
+---
+
+## FIXED: BindingsMatrix readOnly (fixed pre-PR, same branch)
+
+**Found during:** Final whole-branch review of `feat/phase-3b-ii-a2b-edit-mode`
+**Fixed in:** Same branch, commit after `cc1ad6b`
+
+`BindingsMatrix` (the 4+-daemon path inside `ClientBindingsSection`) did not
+receive or propagate the `readOnly` flag. A manifest with 4+ daemons AND any
+nested-unknown field would show a read-only banner and a disabled Save button,
+but the matrix checkboxes and url_path inputs remained interactive. Users could
+dirty the form without being able to save — violating the D13 invariant.
+
+Fix: added `readOnly?: boolean` to `BindingsMatrix` props; applied
+`disabled={props.readOnly}` to every `<input type="checkbox">` and
+`<input type="text">` in each matrix cell; threaded `readOnly={readOnly}` into
+the `BindingsMatrix` call site in `ClientBindingsSection`.
+
+E2E regression added in `edit-server.spec.ts` (test 14): seeds a 4-daemon
+manifest with `extra_config` nested-unknown, navigates to edit mode, expands
+Client bindings, asserts every matrix checkbox and the first url_path input
+are disabled. E2E count 43 → 44.

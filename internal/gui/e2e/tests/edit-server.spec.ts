@@ -479,6 +479,60 @@ test.describe("Edit server screen", () => {
   });
 
   // -----------------------------------------------------------------------
+  // 14. Read-only + 4+-daemon matrix: matrix checkboxes and url_path inputs
+  //     are disabled (D13 invariant — final-review finding).
+  // -----------------------------------------------------------------------
+  test("read-only + 4+-daemon matrix: matrix checkboxes and url_path inputs are disabled", async ({
+    page,
+    hub,
+  }) => {
+    // Seed a manifest with 4 daemons AND a nested-unknown field (extra_config
+    // on daemon 'a') — the trigger for read-only mode. The matrix view
+    // renders when daemons.length >= 4; read-only mode requires ALL inputs
+    // disabled.
+    seedManifest(
+      "e2e-matrix-ro",
+      [
+        "name: e2e-matrix-ro",
+        "kind: global",
+        "transport: stdio-bridge",
+        "command: echo",
+        "daemons:",
+        "  - name: a",
+        "    port: 9300",
+        "    extra_config:",
+        "      custom: 1",
+        "  - name: b",
+        "    port: 9301",
+        "  - name: c",
+        "    port: 9302",
+        "  - name: d",
+        "    port: 9303",
+        "client_bindings:",
+        "  - client: claude-code",
+        "    daemon: a",
+        "    url_path: /mcp",
+      ].join("\n") + "\n",
+    );
+    await page.goto(`${hub.url}/#/edit-server?name=e2e-matrix-ro`);
+    // Confirm we're in read-only mode.
+    await expect(page.locator('[data-testid="readonly-banner"]')).toBeVisible();
+    // Expand Client bindings accordion.
+    await page.locator(".accordion-header", { hasText: "Client bindings" }).click();
+    await expect(page.locator('[data-testid="bindings-matrix"]')).toBeVisible();
+    // Every matrix checkbox must be disabled.
+    const checkboxes = page.locator('.bindings-matrix input[type="checkbox"]');
+    const count = await checkboxes.count();
+    expect(count).toBeGreaterThan(0);
+    for (let i = 0; i < count; i++) {
+      await expect(checkboxes.nth(i)).toBeDisabled();
+    }
+    // The existing claude-code/a binding's url_path input must be disabled too.
+    const urlInput = page.locator('.bindings-matrix input[type="text"]').first();
+    await expect(urlInput).toBeDisabled();
+  });
+
+  // -----------------------------------------------------------------------
   // P2-1-C. Paste YAML → Save race: version-counter invariant holds.
   //   Clicking Paste and immediately clicking Save while validate is
   //   still in-flight must not let the pre-paste Save version win.
