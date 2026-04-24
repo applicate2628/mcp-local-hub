@@ -159,4 +159,74 @@ test.describe("Add server screen", () => {
     // expected graceful-degrade path from Task 14.
     await expect(page.locator('[data-testid="banner"].error')).toContainText("Could not prefill");
   });
+
+  // -----------------------------------------------------------------------
+  // P2-3-A. Advanced kind-toggle: workspace-scoped reveals languages and
+  //         port_pool; switching back to global hides them.
+  // -----------------------------------------------------------------------
+  test("Advanced kind-toggle: workspace-scoped reveals languages/port_pool; global hides them (P2-3)", async ({
+    page,
+    hub,
+  }) => {
+    await page.goto(`${hub.url}/#/add-server`);
+    await expect(page.locator("h1")).toHaveText("Add server");
+    // Open Advanced accordion.
+    await page.locator(".accordion-header", { hasText: "Advanced" }).click();
+    // Default kind is global — workspace-only fields must be hidden.
+    await expect(
+      page.locator('[data-field="port-pool-start"]'),
+    ).not.toBeVisible();
+    await expect(
+      page.locator('[data-testid="languages-subsection"]'),
+    ).not.toBeVisible();
+    // Switch kind to workspace-scoped via the Basics select (Basics is open by default).
+    await page.locator("#field-kind").selectOption("workspace-scoped");
+    // Advanced section is already open — workspace-only fields must appear.
+    await expect(page.locator('[data-field="port-pool-start"]')).toBeVisible();
+    await expect(
+      page.locator('[data-testid="languages-subsection"]'),
+    ).toBeVisible();
+    // Switch back to global — workspace-only fields must hide again.
+    await page.locator("#field-kind").selectOption("global");
+    await expect(
+      page.locator('[data-field="port-pool-start"]'),
+    ).not.toBeVisible();
+    await expect(
+      page.locator('[data-testid="languages-subsection"]'),
+    ).not.toBeVisible();
+  });
+
+  // -----------------------------------------------------------------------
+  // P2-3-B. Advanced always-visible fields (idle_timeout, base_args_template,
+  //         daemon.extra_args) survive kind toggles and remain accessible.
+  // -----------------------------------------------------------------------
+  test("Advanced always-visible fields survive kind toggles (idle_timeout, base_args_template, daemon.extra_args) (P2-3)", async ({
+    page,
+    hub,
+  }) => {
+    await page.goto(`${hub.url}/#/add-server`);
+    // Open Advanced accordion.
+    await page.locator(".accordion-header", { hasText: "Advanced" }).click();
+    // Idle timeout field is always visible (not kind-gated).
+    await expect(page.locator("#field-idle-timeout")).toBeVisible();
+    // Base args template section is always visible.
+    await expect(
+      page.locator('[data-testid="base-args-template"]'),
+    ).toBeVisible();
+    // Add a daemon to make per-daemon extras appear.
+    await page.locator(".accordion-header", { hasText: "Daemons" }).click();
+    await page.locator('[data-action="add-daemon"]').click();
+    await page.locator('[data-field="daemon-name"]').fill("default");
+    await page.locator('[data-field="daemon-port"]').fill("9100");
+    // Toggle kind global -> workspace-scoped -> global.
+    await page.locator("#field-kind").selectOption("workspace-scoped");
+    await page.locator("#field-kind").selectOption("global");
+    // Idle timeout and base-args-template remain visible after kind toggle.
+    await expect(page.locator("#field-idle-timeout")).toBeVisible();
+    await expect(
+      page.locator('[data-testid="base-args-template"]'),
+    ).toBeVisible();
+    // Per-daemon extras subsection is always visible when daemons exist.
+    await expect(page.locator('[data-testid="daemon-extras"]')).toBeVisible();
+  });
 });
