@@ -1,5 +1,5 @@
 import { useRef, useState } from "preact/hooks";
-import { BLANK_FORM, toYAML } from "../lib/manifest-yaml";
+import { BLANK_FORM, parseYAMLToForm, toYAML } from "../lib/manifest-yaml";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { postManifestCreate, postManifestValidate } from "../api";
 import type { ManifestFormState } from "../types";
@@ -259,6 +259,34 @@ export function AddServerScreen() {
     }
   }
 
+  async function handlePasteYAML() {
+    const pasted = window.prompt("Paste YAML manifest:", "");
+    if (pasted == null || pasted.trim() === "") return;
+    try {
+      const parsed = parseYAMLToForm(pasted);
+      setFormState(parsed);
+      // Per Q8 decision: paste does NOT reset the dirty baseline. Only
+      // successful Save does. We DO auto-run structural validate since
+      // paste is a mode switch and users expect "this parsed / this
+      // mapped" feedback (Codex xhigh memo).
+      setBanner(null);
+      await runValidate();
+    } catch (err) {
+      setBanner({ kind: "error", text: `Paste failed: ${(err as Error).message}` });
+    }
+  }
+
+  async function handleCopyYAML() {
+    const yaml = toYAML(formState); // fresh, not debounced
+    try {
+      await navigator.clipboard.writeText(yaml);
+      setBanner({ kind: "success", text: "YAML copied to clipboard." });
+    } catch {
+      // Fallback for environments without clipboard API (older E2E setup etc.)
+      setBanner({ kind: "error", text: "Clipboard API unavailable — copy manually from the preview pane." });
+    }
+  }
+
   return (
     <section class="screen add-server">
       <h1>Add server</h1>
@@ -287,6 +315,22 @@ export function AddServerScreen() {
           data-action="save-and-install"
         >
           {busy === "install" ? "Installing…" : "Save & Install"}
+        </button>
+        <button
+          type="button"
+          onClick={handlePasteYAML}
+          disabled={busy !== ""}
+          data-action="paste-yaml"
+        >
+          Paste YAML
+        </button>
+        <button
+          type="button"
+          onClick={handleCopyYAML}
+          disabled={busy !== ""}
+          data-action="copy-yaml"
+        >
+          Copy YAML
         </button>
       </div>
       {banner && (
