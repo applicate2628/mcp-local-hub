@@ -1192,11 +1192,19 @@ Expected: a `test.describe("Servers"...)` with 3 existing scenarios. Note whethe
     // the failed demigrate(A) and the gated migrate(B, claude-code)).
     await page.locator('#servers-toolbar button', { hasText: "Apply" }).click();
 
-    // Same pattern: wait for settle, then assert exact count. Expected:
-    // one demigrate(A, claude-code) now succeeds, one migrate(B, claude-code)
-    // fires because the blocking demigrate succeeded. (B, codex-cli) does
-    // NOT re-fire — pruned on first Apply as truly-successful.
-    await expect(page.locator('#servers-toolbar button', { hasText: "Apply" })).toBeEnabled();
+    // Wait for the success banner text (indicates setApplying(false) ran
+    // AND success-pruning emptied dirty). Then assert Apply button is
+    // DISABLED — because both retained entries ran successfully on this
+    // retry and were pruned, dirty.size is now 0. (Asserting "enabled"
+    // here would either race or time out on a correct implementation —
+    // Codex plan-R3 P1.)
+    await expect(page.locator('#servers-toolbar span')).toContainText("Applied.");
+    await expect(page.locator('#servers-toolbar button', { hasText: "Apply" })).toBeDisabled();
+
+    // Exact-count assertion: one demigrate(A, claude-code) that now succeeds,
+    // one migrate(B, claude-code) that fires because the blocking demigrate
+    // succeeded. (B, codex-cli) does NOT re-fire — pruned on first Apply
+    // as truly-successful.
     expect(log).toHaveLength(2);
     expect(log[0].url).toBe("demigrate");
     expect(log[1].url).toBe("migrate");
