@@ -52,6 +52,25 @@ export function AddServerScreen() {
     }));
   }
 
+  function addEnv() {
+    setFormState((prev) => ({ ...prev, env: [...prev.env, { key: "", value: "" }] }));
+  }
+
+  function updateEnv(index: number, field: "key" | "value", value: string) {
+    setFormState((prev) => {
+      const next = prev.env.slice();
+      next[index] = { ...next[index], [field]: value };
+      return { ...prev, env: next };
+    });
+  }
+
+  function deleteEnv(index: number) {
+    setFormState((prev) => ({
+      ...prev,
+      env: prev.env.filter((_, i) => i !== index),
+    }));
+  }
+
   return (
     <section class="screen add-server">
       <h1>Add server</h1>
@@ -134,7 +153,26 @@ export function AddServerScreen() {
           </AccordionSection>
 
           <AccordionSection title="Environment">
-            <p class="placeholder">env key-value rows (Task 8)</p>
+            <div class="repeatable-rows" data-testid="env-rows">
+              {formState.env.map((row, i) => (
+                <div class="form-row env-row" key={i} data-env-row={i}>
+                  <input
+                    type="text"
+                    placeholder="KEY"
+                    value={row.key}
+                    onInput={(e) => updateEnv(i, "key", (e.currentTarget as HTMLInputElement).value)}
+                  />
+                  <input
+                    type="text"
+                    placeholder="value (literal or ${HOME}/...)"
+                    value={row.value}
+                    onInput={(e) => updateEnv(i, "value", (e.currentTarget as HTMLInputElement).value)}
+                  />
+                  <button type="button" onClick={() => deleteEnv(i)} data-action="delete-env">×</button>
+                </div>
+              ))}
+              <button type="button" onClick={addEnv} data-action="add-env">+ Add environment variable</button>
+            </div>
           </AccordionSection>
           <AccordionSection title="Daemons">
             <p class="placeholder">name + port rows with cascade rename/delete (Task 9)</p>
