@@ -33,6 +33,11 @@ const LANGUAGE_KNOWN = new Set([
   "lsp_command",
   "extra_flags",
 ]);
+// BINDING_KNOWN lists raw YAML wire-format keys (what hasNestedUnknown sees
+// when it parses on-disk YAML), NOT form-state keys. parseYAMLToForm reads
+// b.daemon (YAML) and converts it to daemonId (form state) at load time;
+// toYAML does the inverse. Keep "daemon" here even though BindingFormEntry
+// uses "daemonId" — this set describes the input side of the parse boundary.
 const BINDING_KNOWN = new Set(["client", "daemon", "url_path"]);
 
 // BLANK_FORM is the canonical empty ManifestFormState. Used by:

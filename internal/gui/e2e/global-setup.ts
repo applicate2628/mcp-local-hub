@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -22,6 +22,16 @@ export default async function globalSetup() {
   const frontendDir = resolve(__dirname, "..", "frontend");
   const binDir = resolve(__dirname, "bin");
   mkdirSync(binDir, { recursive: true });
+
+  // Wipe the servers/ directory that the mcphub binary populates when tests
+  // call POST /api/manifest/create. The binary resolves its manifest root
+  // relative to its own executable (bin/../servers/), NOT relative to the
+  // per-test HOME/USERPROFILE that the hub fixture redirects. Without this
+  // cleanup, tests "Save writes manifest" and "Save & Install" fail on every
+  // re-run because the named manifest directories still exist from the prior
+  // run and the backend rejects the duplicate-name create request.
+  const serversDir = resolve(__dirname, "servers");
+  rmSync(serversDir, { recursive: true, force: true });
   const binPath = resolve(binDir, process.platform === "win32" ? "mcphub.exe" : "mcphub");
 
   // 1) Rebuild Preact bundle → internal/gui/assets/. Then verify
