@@ -1,4 +1,4 @@
-import { useRef, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { BLANK_FORM, parseYAMLToForm, toYAML } from "../lib/manifest-yaml";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { postManifestCreate, postManifestValidate } from "../api";
@@ -22,10 +22,30 @@ const TRANSPORT_OPTIONS = [
 ] as const;
 const KNOWN_CLIENTS = ["claude-code", "codex-cli", "gemini-cli", "antigravity"] as const;
 
-export function AddServerScreen() {
+// deepEqualForm compares two ManifestFormState instances structurally. Used
+// by the Q8 dirty check. JSON.stringify is defensible for this shape: all
+// fields are serializable primitives, arrays, and plain objects with no
+// Date/Map/Set/functions. If a future field breaks that assumption, switch
+// to a proper deep-equal import and update the test.
+function deepEqualForm(a: ManifestFormState, b: ManifestFormState): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+export function AddServerScreen(props: { onDirtyChange?: (dirty: boolean) => void } = {}) {
   const [formState, setFormState] = useState<ManifestFormState>(BLANK_FORM);
+  // initialSnapshot is the post-normalization baseline the dirty check
+  // compares against. Updated on mount (after any prefill path) and on
+  // successful Save. Critically NOT updated on Paste YAML import (Q8
+  // anti-silent-data-loss: paste must not move the baseline).
+  const [initialSnapshot, setInitialSnapshot] = useState<ManifestFormState>(BLANK_FORM);
   const debouncedState = useDebouncedValue(formState, 150);
   const yamlPreview = toYAML(debouncedState);
+
+  const isDirty = !deepEqualForm(formState, initialSnapshot);
+
+  useEffect(() => {
+    props.onDirtyChange?.(isDirty);
+  }, [isDirty]);
 
   const nameError = formState.name.length > 0 && !MANIFEST_NAME_REGEX.test(formState.name)
     ? "Must match [a-z0-9][a-z0-9._-]* (lowercase, digits, '.', '_', '-')"
@@ -215,6 +235,9 @@ export function AddServerScreen() {
       }
       await postManifestCreate(name, payload);
       if (version !== submissionCounter.current) return;
+      // Commit the save as the new baseline. Paste does NOT do this; only
+      // actual persist does. (Q8.)
+      setInitialSnapshot(formState);
       if (!opts.install) {
         setBanner({ kind: "success", text: `Saved servers/${name}/manifest.yaml.` });
         return;
