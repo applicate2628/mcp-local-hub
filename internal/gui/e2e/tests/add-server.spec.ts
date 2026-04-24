@@ -50,8 +50,9 @@ test.describe("Add server screen", () => {
     await page.locator('[data-field="daemon-port"]').fill("9100");
     await page.locator(".accordion-header", { hasText: "Client bindings" }).click();
     await page.locator('[data-action="add-binding"]').click();
-    // Now rename default -> main
-    await page.locator(".accordion-header", { hasText: "Daemons" }).click();
+    // Daemons is still expanded — the per-section accordion state is
+    // independent, so opening Client bindings did NOT close Daemons.
+    // Rename default -> main directly in the still-visible Daemons field.
     await page.locator('[data-field="daemon-name"]').fill("main");
     await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("- name: main");
     await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("daemon: main");
@@ -68,7 +69,7 @@ test.describe("Add server screen", () => {
     await page.locator('[data-action="add-binding"]').click();
     // Wire up the confirm dialog to accept.
     page.once("dialog", (d) => d.accept());
-    await page.locator(".accordion-header", { hasText: "Daemons" }).click();
+    // Daemons is still expanded. Click delete directly — no re-click needed.
     await page.locator('[data-action="delete-daemon"]').click();
     await expect(page.locator('[data-testid="yaml-preview"]')).not.toContainText("daemons:");
     await expect(page.locator('[data-testid="yaml-preview"]')).not.toContainText("client_bindings:");
@@ -77,6 +78,8 @@ test.describe("Add server screen", () => {
   test("Save writes manifest to disk (servers/<name>/manifest.yaml exists)", async ({ page, hub }) => {
     await page.goto(`${hub.url}/#/add-server`);
     await page.locator("#field-name").fill("e2e-save-only");
+    // Basics is open by default; expand Command before filling its field.
+    await page.locator(".accordion-header", { hasText: "Command" }).click();
     await page.locator("#field-command").fill("echo");
     await page.locator(".accordion-header", { hasText: "Daemons" }).click();
     await page.locator('[data-action="add-daemon"]').click();
@@ -84,10 +87,6 @@ test.describe("Add server screen", () => {
     await page.locator('[data-field="daemon-port"]').fill("9991");
     await page.locator('[data-action="save"]').click();
     await expect(page.locator('[data-testid="banner"].success')).toContainText("Saved");
-    // Note: hub fixture uses the binary's embed FS for servers/, so we
-    // verify the success banner only — the filesystem write lands in
-    // the binary's runtime servers dir which for this build equals the
-    // repo's servers/ tree. Assert via the banner.
   });
 
   test("Save & Install on a name with port conflict keeps manifest + shows Retry Install", async ({
@@ -102,6 +101,8 @@ test.describe("Add server screen", () => {
     try {
       await page.goto(`${hub.url}/#/add-server`);
       await page.locator("#field-name").fill("e2e-port-conflict");
+      // Expand Command accordion before filling its field.
+      await page.locator(".accordion-header", { hasText: "Command" }).click();
       await page.locator("#field-command").fill("echo");
       await page.locator(".accordion-header", { hasText: "Daemons" }).click();
       await page.locator('[data-action="add-daemon"]').click();
