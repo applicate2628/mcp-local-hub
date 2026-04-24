@@ -157,6 +157,24 @@ func (realDismisser) ListDismissedUnknown() (map[string]struct{}, error) {
 	return api.ListDismissedUnknown()
 }
 
+// realManifestCreator is the production adapter for /api/manifest/create.
+// Matches the realDemigrater / realDismisser idiom: empty value receiver,
+// lazy api.NewAPI() per call so tests can swap the interface without
+// needing to stub a constructor.
+type realManifestCreator struct{}
+
+func (realManifestCreator) ManifestCreate(name, yaml string) error {
+	return api.NewAPI().ManifestCreate(name, yaml)
+}
+
+// realManifestValidator is the production adapter for /api/manifest/validate.
+// Same shape as realManifestCreator above.
+type realManifestValidator struct{}
+
+func (realManifestValidator) ManifestValidate(yaml string) []string {
+	return api.NewAPI().ManifestValidate(yaml)
+}
+
 // restarter is the narrow interface the /api/servers/:name/restart handler
 // needs. realRestarter is the production adapter; tests inject their own.
 type restarter interface {
@@ -228,6 +246,8 @@ type Server struct {
 	migrator         migrator
 	demigrater       demigrater
 	dismisser        dismisser
+	manifestCreator   manifestCreator
+	manifestValidator manifestValidator
 	restart          restarter
 	logs             logsProvider
 	events           *Broadcaster
@@ -245,6 +265,8 @@ func NewServer(cfg Config) *Server {
 	s.migrator = realMigrator{}
 	s.demigrater = realDemigrater{}
 	s.dismisser = realDismisser{}
+	s.manifestCreator = realManifestCreator{}
+	s.manifestValidator = realManifestValidator{}
 	s.restart = realRestarter{}
 	s.logs = realLogs{}
 	s.events = NewBroadcaster()
@@ -255,6 +277,7 @@ func NewServer(cfg Config) *Server {
 	registerMigrateRoutes(s)
 	registerDemigrateRoutes(s)
 	registerDismissRoutes(s)
+	registerManifestRoutes(s)
 	registerServerRoutes(s)
 	registerEventsRoutes(s)
 	registerLogsRoutes(s)
