@@ -248,6 +248,7 @@ type Server struct {
 	dismisser        dismisser
 	manifestCreator   manifestCreator
 	manifestValidator manifestValidator
+	installer        installer
 	restart          restarter
 	logs             logsProvider
 	events           *Broadcaster
@@ -267,6 +268,7 @@ func NewServer(cfg Config) *Server {
 	s.dismisser = realDismisser{}
 	s.manifestCreator = realManifestCreator{}
 	s.manifestValidator = realManifestValidator{}
+	s.installer = realInstaller{}
 	s.restart = realRestarter{}
 	s.logs = realLogs{}
 	s.events = NewBroadcaster()
@@ -278,6 +280,7 @@ func NewServer(cfg Config) *Server {
 	registerDemigrateRoutes(s)
 	registerDismissRoutes(s)
 	registerManifestRoutes(s)
+	registerInstallRoutes(s)
 	registerServerRoutes(s)
 	registerEventsRoutes(s)
 	registerLogsRoutes(s)

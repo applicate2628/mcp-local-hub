@@ -1,6 +1,7 @@
-import { useState } from "preact/hooks";
+import { useRef, useState } from "preact/hooks";
 import { BLANK_FORM, toYAML } from "../lib/manifest-yaml";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
+import { postManifestCreate, postManifestValidate } from "../api";
 import type { ManifestFormState } from "../types";
 
 // MANIFEST_NAME_REGEX mirrors internal/api/manifest.go:23 validManifestName.
@@ -158,9 +159,153 @@ export function AddServerScreen() {
     }));
   }
 
+  const [warnings, setWarnings] = useState<string[] | null>(null);
+  const [banner, setBanner] = useState<{ kind: "error" | "success"; text: string; retry?: () => Promise<void> } | null>(null);
+  const [busy, setBusy] = useState<"" | "validate" | "save" | "install">("");
+  // submissionVersion: bumped every time a Save/Save&Install click starts
+  // its own inline serialize-validate-submit pipeline. If a second click
+  // happens while the first is still in flight, the older pipeline sees
+  // submissionCounter.current != its own captured value and bails before
+  // writing to state. (Q3 Codex-identified gotcha.)
+  const submissionCounter = useRef(0);
+  // validateVersion: same pattern for the async Validate button path. A
+  // newer Validate click invalidates an older in-flight validate's result
+  // so stale warnings don't paint over fresh state. (Q5.)
+  const validateCounter = useRef(0);
+
+  async function runValidate() {
+    const version = ++validateCounter.current;
+    setBusy("validate");
+    setBanner(null);
+    try {
+      const payload = toYAML(formState); // FRESH, not debounced
+      const out = await postManifestValidate(payload);
+      if (version !== validateCounter.current) return; // preempted
+      setWarnings(out);
+      if (out.length === 0) {
+        setBanner({ kind: "success", text: "Validation passed — no warnings." });
+      } else {
+        setBanner({ kind: "error", text: `${out.length} validation warning${out.length === 1 ? "" : "s"}.` });
+      }
+    } catch (err) {
+      if (version !== validateCounter.current) return;
+      setBanner({ kind: "error", text: `/api/manifest/validate: ${(err as Error).message}` });
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function runSave(opts: { install: boolean }) {
+    const version = ++submissionCounter.current;
+    setBusy(opts.install ? "install" : "save");
+    setBanner(null);
+    try {
+      const name = formState.name.trim();
+      if (!name) {
+        setBanner({ kind: "error", text: "Name is required." });
+        return;
+      }
+      const payload = toYAML(formState); // FRESH snapshot, not debounced preview
+      const validateOut = await postManifestValidate(payload);
+      if (version !== submissionCounter.current) return;
+      if (validateOut.length > 0) {
+        setWarnings(validateOut);
+        setBanner({ kind: "error", text: `Cannot save: ${validateOut.length} validation warning${validateOut.length === 1 ? "" : "s"}.` });
+        return;
+      }
+      await postManifestCreate(name, payload);
+      if (version !== submissionCounter.current) return;
+      if (!opts.install) {
+        setBanner({ kind: "success", text: `Saved servers/${name}/manifest.yaml.` });
+        return;
+      }
+      // Save & Install: run install; on failure, keep manifest on disk, offer retry.
+      await runInstallNow(name, version);
+    } catch (err) {
+      if (version !== submissionCounter.current) return;
+      setBanner({ kind: "error", text: (err as Error).message });
+    } finally {
+      if (version === submissionCounter.current) {
+        setBusy("");
+      }
+    }
+  }
+
+  async function runInstallNow(name: string, version: number) {
+    try {
+      const resp = await fetch(`/api/install?name=${encodeURIComponent(name)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (version !== submissionCounter.current) return;
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        const err = (body as { error?: string }).error ?? resp.statusText;
+        setBanner({
+          kind: "error",
+          text: `Saved servers/${name}/manifest.yaml, but install failed: ${err}`,
+          retry: () => runInstallNow(name, ++submissionCounter.current),
+        });
+        return;
+      }
+      setBanner({ kind: "success", text: `Installed ${name}. Daemons will start at next logon (or run "mcphub restart --server ${name}" now).` });
+    } catch (err) {
+      if (version !== submissionCounter.current) return;
+      setBanner({
+        kind: "error",
+        text: `Saved servers/${name}/manifest.yaml, but install threw: ${(err as Error).message}`,
+        retry: () => runInstallNow(name, ++submissionCounter.current),
+      });
+    }
+  }
+
   return (
     <section class="screen add-server">
       <h1>Add server</h1>
+      <div class="toolbar" data-testid="add-server-toolbar">
+        <button
+          type="button"
+          onClick={runValidate}
+          disabled={busy !== ""}
+          data-action="validate"
+        >
+          {busy === "validate" ? "Validating…" : "Validate"}
+        </button>
+        <button
+          type="button"
+          onClick={() => runSave({ install: false })}
+          disabled={busy !== "" || !!nameError}
+          data-action="save"
+        >
+          {busy === "save" ? "Saving…" : "Save"}
+        </button>
+        <button
+          type="button"
+          class="primary"
+          onClick={() => runSave({ install: true })}
+          disabled={busy !== "" || !!nameError}
+          data-action="save-and-install"
+        >
+          {busy === "install" ? "Installing…" : "Save & Install"}
+        </button>
+      </div>
+      {banner && (
+        <div class={`banner ${banner.kind}`} data-testid="banner">
+          <p>{banner.text}</p>
+          {banner.retry && (
+            <button type="button" onClick={() => banner.retry?.()} data-action="retry-install">
+              Retry Install
+            </button>
+          )}
+        </div>
+      )}
+      {warnings && warnings.length > 0 && (
+        <ul class="validation-warnings" data-testid="validation-warnings">
+          {warnings.map((w, i) => (
+            <li key={i}>{w}</li>
+          ))}
+        </ul>
+      )}
       <div class="add-server-grid">
         <div class="add-server-form">
           <AccordionSection title="Basics" open={true}>
