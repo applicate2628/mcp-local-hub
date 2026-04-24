@@ -54,19 +54,23 @@ export const BLANK_FORM: ManifestFormState = {
   _preservedRaw: {},
 };
 
-// quote picks the right YAML string wrapper:
-//   - values containing a double-quote OR a backslash → single-quote
-//     branch (YAML single-quoted strings treat backslashes literally,
-//     which matches what a user typing "C:\\Users\\..." intends — no
-//     \U hex-digit parse failure, no \n becoming a newline).
-//   - otherwise → double-quote branch (handles most cases cleanly).
-//   - empty strings render as `""`.
-// Single-quote escape: `'` becomes `''` inside a single-quoted string.
+// quote serializes a user-supplied string as a YAML-safe scalar. We always
+// quote user input because bare scalars have surprising semantics: `yes`,
+// `true`, `null`, `1234`, values with leading whitespace, or names starting
+// with `{` / `[` / `*` / `&` / `!` / `#` are all parsed as non-strings or
+// YAML structure markers. Single-quoted form is the safer default because
+// it interprets backslashes literally; we only fall back to double-quoted
+// for values containing `'` or `\n` (neither of which single-quoted YAML
+// can express without block-scalar ceremony), and in that case we use
+// JSON.stringify which emits valid YAML double-quoted strings with proper
+// newline escaping. Reviewer #R2b-Q1.
 function quote(s: string): string {
-  if (s.includes(`"`) || s.includes("\\")) {
-    return `'${s.replace(/'/g, `''`)}'`;
+  if (s.includes("'") || s.includes("\n")) {
+    // JSON.stringify handles both cases with correct escape sequences;
+    // YAML flow-style double-quoted scalars are a strict superset of JSON.
+    return JSON.stringify(s);
   }
-  return `"${s}"`;
+  return `'${s}'`;
 }
 
 function asString(v: unknown, fallback: string): string {
@@ -219,7 +223,11 @@ export function hasNestedUnknown(yaml: string): boolean {
   try {
     raw = yamlParse(yaml);
   } catch {
-    return false; // parse error handled elsewhere; not a "nested unknown".
+    // Safe default: if the YAML is syntactically corrupt, treat the file as
+    // opaque and force read-only mode. The alternative (return false) would
+    // open edit mode on unparseable input, letting the user overwrite a
+    // file they cannot structurally see. Reviewer #R2b-Q2.
+    return true;
   }
   if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return false;
   const r = raw as Record<string, unknown>;
@@ -274,10 +282,16 @@ export function hasNestedUnknown(yaml: string): boolean {
 //   daemon.context are only emitted when kind === "workspace-scoped".
 export function toYAML(state: ManifestFormState): string {
   const lines: string[] = [];
-  lines.push(`name: ${state.name}`);
+  // All user-supplied scalars go through quote() so names like "yes",
+  // "true", "null", "1234", or values with leading whitespace round-trip
+  // safely instead of being re-parsed as booleans / numbers / structure
+  // markers. The two enum-style fields (kind, transport) + numeric fields
+  // (port, idle_timeout_min, port_pool.{start,end}) are bare because their
+  // domains are controlled (asKind/asTransport/asNumber on the inverse).
+  lines.push(`name: ${quote(state.name)}`);
   lines.push(`kind: ${state.kind}`);
   lines.push(`transport: ${state.transport}`);
-  lines.push(`command: ${state.command}`);
+  lines.push(`command: ${quote(state.command)}`);
   if (state.base_args.length > 0) {
     lines.push(`base_args: [${state.base_args.map(quote).join(", ")}]`);
   }
@@ -293,7 +307,7 @@ export function toYAML(state: ManifestFormState): string {
   if (state.daemons.length > 0) {
     lines.push("daemons:");
     for (const d of state.daemons) {
-      lines.push(`  - name: ${d.name}`);
+      lines.push(`  - name: ${quote(d.name)}`);
       lines.push(`    port: ${d.port}`);
       if (state.kind === "workspace-scoped") {
         if (typeof d.context === "string" && d.context.length > 0) {
@@ -312,9 +326,9 @@ export function toYAML(state: ManifestFormState): string {
   if (liveBindings.length > 0) {
     lines.push("client_bindings:");
     for (const b of liveBindings) {
-      lines.push(`  - client: ${b.client}`);
-      lines.push(`    daemon: ${idToName.get(b.daemonId)}`);
-      lines.push(`    url_path: ${b.url_path}`);
+      lines.push(`  - client: ${quote(b.client)}`);
+      lines.push(`    daemon: ${quote(idToName.get(b.daemonId)!)}`);
+      lines.push(`    url_path: ${quote(b.url_path)}`);
     }
   }
   if (state.weekly_refresh) {
@@ -325,8 +339,8 @@ export function toYAML(state: ManifestFormState): string {
     if (state.languages && state.languages.length > 0) {
       lines.push("languages:");
       for (const l of state.languages) {
-        lines.push(`  - name: ${l.name}`);
-        lines.push(`    backend: ${l.backend}`);
+        lines.push(`  - name: ${quote(l.name)}`);
+        lines.push(`    backend: ${quote(l.backend)}`);
         if (l.transport) lines.push(`    transport: ${l.transport}`);
         if (l.lsp_command) lines.push(`    lsp_command: ${quote(l.lsp_command)}`);
         if (l.extra_flags && l.extra_flags.length > 0) {

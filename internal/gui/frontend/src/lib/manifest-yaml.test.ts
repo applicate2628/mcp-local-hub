@@ -22,10 +22,10 @@ describe("toYAML", () => {
   it("serializes a minimal state with only name + kind + transport + command", () => {
     const state: ManifestFormState = { ...base, name: "demo", command: "npx" };
     const yaml = toYAML(state);
-    expect(yaml).toContain("name: demo");
+    expect(yaml).toContain("name: 'demo'");
     expect(yaml).toContain("kind: global");
     expect(yaml).toContain("transport: stdio-bridge");
-    expect(yaml).toContain("command: npx");
+    expect(yaml).toContain("command: 'npx'");
   });
 
   it("renders base_args as a flow-style YAML array with quotes around each element", () => {
@@ -36,7 +36,7 @@ describe("toYAML", () => {
       base_args: ["-y", "@example/server-mem"],
     };
     const yaml = toYAML(state);
-    expect(yaml).toContain(`base_args: ["-y", "@example/server-mem"]`);
+    expect(yaml).toContain(`base_args: ['-y', '@example/server-mem']`);
   });
 
   it("renders env as a nested map with quoted values", () => {
@@ -51,8 +51,8 @@ describe("toYAML", () => {
     };
     const yaml = toYAML(state);
     expect(yaml).toContain("env:");
-    expect(yaml).toContain(`  PATH: "/usr/bin"`);
-    expect(yaml).toContain(`  MEMORY_FILE_PATH: "\${HOME}/.local/share/mcp-memory/memory.jsonl"`);
+    expect(yaml).toContain(`  PATH: '/usr/bin'`);
+    expect(yaml).toContain(`  MEMORY_FILE_PATH: '\${HOME}/.local/share/mcp-memory/memory.jsonl'`);
   });
 
   it("omits env section entirely when the env array is empty", () => {
@@ -73,8 +73,8 @@ describe("toYAML", () => {
     };
     const yaml = toYAML(state);
     expect(yaml).toContain("daemons:");
-    expect(yaml).toMatch(/- name: default\s+port: 9123/);
-    expect(yaml).toMatch(/- name: workspace-py\s+port: 9124/);
+    expect(yaml).toMatch(/- name: 'default'\s+port: 9123/);
+    expect(yaml).toMatch(/- name: 'workspace-py'\s+port: 9124/);
   });
 
   it("renders client_bindings as a list-of-maps with client + daemon + url_path", () => {
@@ -90,8 +90,8 @@ describe("toYAML", () => {
     };
     const yaml = toYAML(state);
     expect(yaml).toContain("client_bindings:");
-    expect(yaml).toMatch(/- client: claude-code\s+daemon: default\s+url_path: \/mcp/);
-    expect(yaml).toMatch(/- client: codex-cli\s+daemon: default\s+url_path: \/mcp/);
+    expect(yaml).toMatch(/- client: 'claude-code'\s+daemon: 'default'\s+url_path: '\/mcp'/);
+    expect(yaml).toMatch(/- client: 'codex-cli'\s+daemon: 'default'\s+url_path: '\/mcp'/);
   });
 
   it("renders weekly_refresh only when true", () => {
@@ -437,7 +437,7 @@ describe("toYAML A2b extensions", () => {
       client_bindings: [{ client: "claude-code", daemonId: "uuid-1", url_path: "/mcp" }],
     };
     const yaml = toYAML(form);
-    expect(yaml).toMatch(/- client: claude-code\s+daemon: only\s+url_path: \/mcp/);
+    expect(yaml).toMatch(/- client: 'claude-code'\s+daemon: 'only'\s+url_path: '\/mcp'/);
   });
 
   it("drops client_bindings whose daemonId no longer exists (safety net)", () => {
@@ -452,8 +452,8 @@ describe("toYAML A2b extensions", () => {
       ],
     };
     const yaml = toYAML(form);
-    expect(yaml).toContain("client: claude-code");
-    expect(yaml).not.toContain("client: codex-cli");
+    expect(yaml).toContain("client: 'claude-code'");
+    expect(yaml).not.toContain("client: 'codex-cli'");
   });
 
   it("merges _preservedRaw top-level keys into the output", () => {
@@ -491,5 +491,78 @@ describe("toYAML A2b extensions", () => {
     const y2 = toYAML(workspace);
     expect(y2).toContain("languages:");
     expect(y2).toContain("port_pool:");
+  });
+});
+
+describe("toYAML quality hardening (R2b-Q1 scalar quoting)", () => {
+  it("round-trips a daemon named like a YAML reserved word", () => {
+    const form = parseYAMLToForm(`name: demo
+command: npx
+daemons:
+  - name: 'yes'
+    port: 9400
+  - name: 'true'
+    port: 9401
+  - name: '1234'
+    port: 9402
+`);
+    // Note: yaml parser unwraps the quotes; daemons[0].name === "yes" as a string
+    expect(form.daemons[0].name).toBe("yes");
+    expect(form.daemons[1].name).toBe("true");
+    expect(form.daemons[2].name).toBe("1234");
+
+    const yaml = toYAML(form);
+    // Re-parse and assert the values survive as strings.
+    const round = parseYAMLToForm(yaml);
+    expect(round.daemons[0].name).toBe("yes");
+    expect(round.daemons[1].name).toBe("true");
+    expect(round.daemons[2].name).toBe("1234");
+  });
+
+  it("round-trips names containing spaces", () => {
+    const form: ManifestFormState = {
+      ...BLANK_FORM,
+      name: "my server",
+      command: "echo hi",
+      daemons: [{ _id: "u1", name: "worker one", port: 9410 }],
+      client_bindings: [
+        { client: "claude-code", daemonId: "u1", url_path: "/path one" },
+      ],
+    };
+    const yaml = toYAML(form);
+    const round = parseYAMLToForm(yaml);
+    expect(round.name).toBe("my server");
+    expect(round.command).toBe("echo hi");
+    expect(round.daemons[0].name).toBe("worker one");
+    expect(round.client_bindings[0].url_path).toBe("/path one");
+  });
+
+  it("emits double-quoted form for values containing a single quote", () => {
+    const form: ManifestFormState = {
+      ...BLANK_FORM,
+      name: "demo",
+      command: "it's fine",
+    };
+    const yaml = toYAML(form);
+    // JSON.stringify: {"key": "it's fine"} — backslash is not introduced for '
+    // JSON encodes "it's fine" as "it's fine" (only " and \ need escaping in JSON).
+    expect(yaml).toContain(`command: "it's fine"`);
+  });
+
+  it("emits double-quoted form with \\n escape for values containing a newline", () => {
+    const form: ManifestFormState = {
+      ...BLANK_FORM,
+      name: "demo",
+      command: "line1\nline2",
+    };
+    const yaml = toYAML(form);
+    expect(yaml).toContain(`command: "line1\\nline2"`);
+  });
+});
+
+describe("hasNestedUnknown quality hardening (R2b-Q2 parse-fail default)", () => {
+  it("returns true on syntactically invalid YAML (safe: forces read-only)", () => {
+    const broken = "name: demo\n  : : nonsense\n[[";
+    expect(hasNestedUnknown(broken)).toBe(true);
   });
 });
