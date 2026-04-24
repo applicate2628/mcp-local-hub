@@ -18,8 +18,8 @@ test.describe("Add server screen", () => {
     await page.locator(".accordion-header", { hasText: "Command" }).click();
     await page.locator("#field-command").fill("npx");
     // Wait for the 150ms debounce to settle.
-    await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("name: demo");
-    await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("command: npx");
+    await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("name: 'demo'");
+    await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("command: 'npx'");
   });
 
   test("inline name-regex error shows when name contains uppercase", async ({ page, hub }) => {
@@ -54,9 +54,9 @@ test.describe("Add server screen", () => {
     // independent, so opening Client bindings did NOT close Daemons.
     // Rename default -> main directly in the still-visible Daemons field.
     await page.locator('[data-field="daemon-name"]').fill("main");
-    await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("- name: main");
-    await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("daemon: main");
-    await expect(page.locator('[data-testid="yaml-preview"]')).not.toContainText("daemon: default");
+    await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("- name: 'main'");
+    await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("daemon: 'main'");
+    await expect(page.locator('[data-testid="yaml-preview"]')).not.toContainText("daemon: 'default'");
   });
 
   test("deleting a daemon with bindings prompts and cascade-deletes", async ({ page, hub }) => {
@@ -121,8 +121,8 @@ test.describe("Add server screen", () => {
     const yaml = `name: pasted\nkind: global\ntransport: stdio-bridge\ncommand: npx\ndaemons:\n  - name: default\n    port: 9100\n`;
     page.once("dialog", (d) => d.accept(yaml));
     await page.locator('[data-action="paste-yaml"]').click();
-    await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("name: pasted");
-    await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("command: npx");
+    await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("name: 'pasted'");
+    await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("command: 'npx'");
     // The dirty indicator is set by the parent App; we verify via the
     // sidebar-intercept test below.
   });
