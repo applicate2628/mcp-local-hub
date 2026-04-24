@@ -11,7 +11,7 @@ import {
   ManifestHashMismatchError,
 } from "../api";
 import { generateUUID } from "../lib/uuid";
-import type { BindingFormEntry, DaemonFormEntry, ManifestFormState } from "../types";
+import type { BindingFormEntry, DaemonFormEntry, LanguageFormEntry, ManifestFormState } from "../types";
 
 // MANIFEST_NAME_REGEX mirrors internal/api/manifest.go:23 validManifestName.
 // Live client-side regex check provides instant feedback; the backend still
@@ -248,6 +248,19 @@ export function AddServerScreen(props: {
         client_bindings: prev.client_bindings.filter((b) => b.daemonId !== target._id),
       };
     });
+  }
+
+  function updateDaemonExtras(
+    id: string,
+    field: "context" | "extra_args",
+    value: string | string[] | undefined,
+  ) {
+    setFormState((prev) => ({
+      ...prev,
+      daemons: prev.daemons.map((d) =>
+        d._id === id ? { ...d, [field]: value } : d,
+      ),
+    }));
   }
 
   function parsePort(raw: string): number {
@@ -795,6 +808,62 @@ export function AddServerScreen(props: {
               readOnly={readOnly}
             />
           </AccordionSection>
+          <AccordionSection title="Advanced">
+            <div class="form-row">
+              <label for="field-idle-timeout">Idle timeout (min)</label>
+              <input
+                id="field-idle-timeout"
+                type="number"
+                min={0}
+                value={formState.idle_timeout_min ?? ""}
+                placeholder="(unset)"
+                disabled={readOnly}
+                onInput={(e) => {
+                  const v = (e.currentTarget as HTMLInputElement).value;
+                  updateField("idle_timeout_min", v === "" ? undefined : Number(v));
+                }}
+              />
+            </div>
+            <div class="form-row">
+              <label>Base args template</label>
+              <RepeatableStringRows
+                label="arg"
+                value={formState.base_args_template ?? []}
+                onChange={(next) =>
+                  updateField("base_args_template", next.length > 0 ? next : undefined)
+                }
+                disabled={readOnly}
+                dataTestId="base-args-template"
+              />
+            </div>
+            {formState.kind === "workspace-scoped" && (
+              <>
+                <PortPoolField
+                  value={formState.port_pool}
+                  onChange={(pp) => updateField("port_pool", pp)}
+                  disabled={readOnly}
+                />
+                <LanguagesSubsection
+                  languages={formState.languages ?? []}
+                  onChange={(next) =>
+                    updateField("languages", next.length > 0 ? next : undefined)
+                  }
+                  disabled={readOnly}
+                />
+              </>
+            )}
+            {formState.daemons.length > 0 && (
+              <div class="form-row" data-testid="daemon-extras">
+                <label>Per-daemon extras</label>
+                <DaemonExtrasSubsection
+                  daemons={formState.daemons}
+                  kind={formState.kind}
+                  onUpdate={(id, field, value) => updateDaemonExtras(id, field, value)}
+                  disabled={readOnly}
+                />
+              </div>
+            )}
+          </AccordionSection>
         </div>
         <aside class="add-server-preview">
           <h2>YAML preview</h2>
@@ -929,6 +998,262 @@ function BindingsList(props: {
         );
       })}
       <button type="button" onClick={onAdd} disabled={readOnly} data-action="add-binding">+ Add binding</button>
+    </div>
+  );
+}
+
+// RepeatableStringRows renders an add/delete list of plain string inputs.
+// Used for base_args_template and LanguageFormEntry.extra_flags.
+function RepeatableStringRows(props: {
+  label: string;
+  value: string[];
+  onChange: (next: string[]) => void;
+  disabled?: boolean;
+  dataTestId?: string;
+}) {
+  const { label, value, onChange, disabled, dataTestId } = props;
+  return (
+    <div class="repeatable-rows" data-testid={dataTestId}>
+      {value.map((v, i) => (
+        <div class="form-row" key={i}>
+          <input
+            type="text"
+            placeholder={label}
+            value={v}
+            onInput={(e) => {
+              const next = value.slice();
+              next[i] = (e.currentTarget as HTMLInputElement).value;
+              onChange(next);
+            }}
+            disabled={disabled}
+          />
+          <button
+            type="button"
+            onClick={() => onChange(value.filter((_, j) => j !== i))}
+            disabled={disabled}
+            data-action={`delete-${dataTestId ?? label}-row`}
+          >
+            ×
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={() => onChange([...value, ""])}
+        disabled={disabled}
+        data-action={`add-${dataTestId ?? label}-row`}
+      >
+        + Add {label}
+      </button>
+    </div>
+  );
+}
+
+// PortPoolField renders the port_pool { start, end } pair.
+// Only visible when kind === "workspace-scoped".
+function PortPoolField(props: {
+  value: { start: number; end: number } | undefined;
+  onChange: (pp: { start: number; end: number } | undefined) => void;
+  disabled?: boolean;
+}) {
+  const { value, onChange, disabled } = props;
+  const start = value?.start ?? 0;
+  const end = value?.end ?? 0;
+  function parseN(raw: string): number {
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : 0;
+  }
+  return (
+    <div class="form-row">
+      <label>Port pool</label>
+      <input
+        type="number"
+        min={0}
+        max={65535}
+        placeholder="start"
+        value={value ? start : ""}
+        disabled={disabled}
+        onInput={(e) => {
+          const v = (e.currentTarget as HTMLInputElement).value;
+          if (v === "" && end === 0) { onChange(undefined); return; }
+          onChange({ start: parseN(v), end });
+        }}
+        data-field="port-pool-start"
+      />
+      <span>–</span>
+      <input
+        type="number"
+        min={0}
+        max={65535}
+        placeholder="end"
+        value={value ? end : ""}
+        disabled={disabled}
+        onInput={(e) => {
+          const v = (e.currentTarget as HTMLInputElement).value;
+          if (v === "" && start === 0) { onChange(undefined); return; }
+          onChange({ start, end: parseN(v) });
+        }}
+        data-field="port-pool-end"
+      />
+    </div>
+  );
+}
+
+// LanguagesSubsection renders a list of LanguageFormEntry rows.
+// Each entry has a stable _id assigned at creation time via generateUUID().
+// Only visible when kind === "workspace-scoped".
+function LanguagesSubsection(props: {
+  languages: LanguageFormEntry[];
+  onChange: (next: LanguageFormEntry[]) => void;
+  disabled?: boolean;
+}) {
+  const { languages, onChange, disabled } = props;
+  function addLanguage() {
+    onChange([
+      ...languages,
+      { _id: generateUUID(), name: "", backend: "", transport: undefined, lsp_command: "", extra_flags: [] },
+    ]);
+  }
+  function updateLanguage<K extends keyof LanguageFormEntry>(idx: number, field: K, value: LanguageFormEntry[K]) {
+    const next = languages.slice();
+    next[idx] = { ...next[idx], [field]: value };
+    onChange(next);
+  }
+  function deleteLanguage(idx: number) {
+    onChange(languages.filter((_, i) => i !== idx));
+  }
+  return (
+    <div class="form-row" data-testid="languages-subsection">
+      <label>Languages</label>
+      <div style={{ flex: 1 }}>
+        {languages.map((lang, idx) => (
+          <fieldset class="language-entry" key={lang._id}>
+            <legend>Language {idx + 1}</legend>
+            <div class="form-row">
+              <label>Name</label>
+              <input
+                type="text"
+                placeholder="typescript"
+                value={lang.name}
+                onInput={(e) => updateLanguage(idx, "name", (e.currentTarget as HTMLInputElement).value)}
+                disabled={disabled}
+                data-field="language-name"
+              />
+              <button
+                type="button"
+                onClick={() => deleteLanguage(idx)}
+                disabled={disabled}
+                data-action="delete-language"
+              >
+                ×
+              </button>
+            </div>
+            <div class="form-row">
+              <label>Backend</label>
+              <input
+                type="text"
+                placeholder="ts-morph"
+                value={lang.backend}
+                onInput={(e) => updateLanguage(idx, "backend", (e.currentTarget as HTMLInputElement).value)}
+                disabled={disabled}
+                data-field="language-backend"
+              />
+            </div>
+            <div class="form-row">
+              <label>Transport</label>
+              <select
+                value={lang.transport ?? ""}
+                onChange={(e) => {
+                  const v = (e.currentTarget as HTMLSelectElement).value;
+                  updateLanguage(idx, "transport", v === "" ? undefined : v as LanguageFormEntry["transport"]);
+                }}
+                disabled={disabled}
+                data-field="language-transport"
+              >
+                <option value="">(unset)</option>
+                <option value="stdio">stdio</option>
+                <option value="http_listen">http_listen</option>
+                <option value="native_http">native_http</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label>LSP command</label>
+              <input
+                type="text"
+                placeholder="typescript-language-server --stdio"
+                value={lang.lsp_command ?? ""}
+                onInput={(e) => updateLanguage(idx, "lsp_command", (e.currentTarget as HTMLInputElement).value)}
+                disabled={disabled}
+                data-field="language-lsp-command"
+              />
+            </div>
+            <div class="form-row">
+              <label>Extra flags</label>
+              <RepeatableStringRows
+                label="flag"
+                value={lang.extra_flags ?? []}
+                onChange={(next) => updateLanguage(idx, "extra_flags", next.length > 0 ? next : [])}
+                disabled={disabled}
+                dataTestId={`language-${idx}-extra-flags`}
+              />
+            </div>
+          </fieldset>
+        ))}
+        <button
+          type="button"
+          onClick={addLanguage}
+          disabled={disabled}
+          data-action="add-language"
+        >
+          + Add language
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// DaemonExtrasSubsection renders per-daemon context + extra_args fields.
+// context is only rendered when kind === "workspace-scoped".
+function DaemonExtrasSubsection(props: {
+  daemons: DaemonFormEntry[];
+  kind: ManifestFormState["kind"];
+  onUpdate: (id: string, field: "context" | "extra_args", value: string | string[] | undefined) => void;
+  disabled?: boolean;
+}) {
+  const { daemons, kind, onUpdate, disabled } = props;
+  return (
+    <div style={{ flex: 1 }}>
+      {daemons.map((d) => (
+        <fieldset class="daemon-extras-entry" key={d._id}>
+          <legend>{d.name || "(unnamed daemon)"}</legend>
+          {kind === "workspace-scoped" && (
+            <div class="form-row">
+              <label>Context</label>
+              <input
+                type="text"
+                placeholder="(unset)"
+                value={d.context ?? ""}
+                onInput={(e) => {
+                  const v = (e.currentTarget as HTMLInputElement).value;
+                  onUpdate(d._id, "context", v === "" ? undefined : v);
+                }}
+                disabled={disabled}
+                data-field="daemon-context"
+              />
+            </div>
+          )}
+          <div class="form-row">
+            <label>Extra args</label>
+            <RepeatableStringRows
+              label="arg"
+              value={d.extra_args ?? []}
+              onChange={(next) => onUpdate(d._id, "extra_args", next.length > 0 ? next : undefined)}
+              disabled={disabled}
+              dataTestId={`daemon-${d._id}-extra-args`}
+            />
+          </div>
+        </fieldset>
+      ))}
     </div>
   );
 }
