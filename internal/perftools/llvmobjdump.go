@@ -9,7 +9,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const llvmObjdumpMaxStdoutBytes = 8 * 1024 * 1024
+// Keep output below the daemon stdio scanner's 1 MiB token limit.
+// Reserve headroom for JSON-RPC envelope + JSON escaping overhead.
+const llvmObjdumpMaxStdoutBytes = 512 * 1024
 
 // llvmObjdumpTool disassembles a binary using llvm-objdump. Unlike
 // godbolt's sandbox compile, this operates on the USER'S ACTUAL

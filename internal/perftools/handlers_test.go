@@ -323,7 +323,7 @@ func TestLLVMObjdump_DisassemblesBinary(t *testing.T) {
 
 	tb := &PerfToolbox{tools: cat}
 	// Narrow to the main symbol so the disassembly stays well under the
-	// handler's 8 MiB output cap.
+	// handler's bounded output cap.
 	args, _ := json.Marshal(map[string]any{
 		"binary":   exe,
 		"function": "main.main",
