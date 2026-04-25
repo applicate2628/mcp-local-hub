@@ -717,6 +717,12 @@ type SecretsInitFailed struct {
 
 func (e *SecretsInitFailed) Error() string { return e.Cause.Error() }
 
+// initVaultFn is the function the wrapper calls to perform the
+// underlying init. Tests override this to inject failures and verify
+// cleanup behavior (memo R7). Codex plan-R3 P1: declared with the
+// exported type so Step 1.C.5's SecretsInit body compiles.
+var initVaultFn = secrets.InitVault
+
 // SecretsInit implements the D2 four-case classifier (memo §5.1):
 //   case 1 → 200 ok, no-op
 //   case 2a → 200 ok, fresh init
@@ -850,41 +856,15 @@ func TestSecretsInit_FreshInitCreatesFiles(t *testing.T) {
 Run: `go test ./internal/api/ -run TestSecretsInit_FreshInitCreatesFiles -count=1 -v`
 Expected: PASS.
 
-- [ ] **Step 1.C.6b: Add R7 partial-init test seam to `secrets.go` AND export the failure type**
+- [ ] **Step 1.C.6b: Confirm R7 seam already in place**
 
-**Codex plan-R1 P1 + plan-R2 P1:** the wrapper needs a deterministic way to inject an InitVault failure mid-write, AND `SecretsInitFailed` must be EXPORTED from the start (was deferred to Task 3 in the original draft, which broke compile order — Task 1 tests reference the exported name). Promote both up-front:
+**Codex plan-R3 P1 — fix history:** the original draft tried to keep `secretsInitFailed` unexported in Task 1 and promote in Task 3, which broke Task 1 compile. R3 promoted both `SecretsInitFailed` and `initVaultFn` into the very first `secrets.go` skeleton (Step 1.C.4 above). This step now just verifies the seam is present:
 
-In `internal/api/secrets.go`, replace the unexported `secretsInitFailed` block (added in Step 1.C.4) with:
+- `SecretsInitFailed` is exported (Step 1.C.4 code block).
+- `initVaultFn` is declared as `var initVaultFn = secrets.InitVault` next to it.
+- `SecretsInit` already calls `initVaultFn(keyPath, vaultPath)`.
 
-```go
-// SecretsInitFailed is the typed error SecretsInit returns when
-// InitVault failed mid-way and the wrapper attempted cleanup. The
-// handler inspects CleanupStatus to map to 200 (cleanup ok, retryable)
-// vs 500 (cleanup failed; orphan_path requires manual removal). Memo
-// §5.1 + R7. Promoted to exported up front (plan-R2 P1) so Task 1
-// tests compile.
-type SecretsInitFailed struct {
-	CleanupStatus string // "ok" | "failed"
-	OrphanPath    string // populated only on cleanup-failed
-	Cause         error
-}
-
-func (e *SecretsInitFailed) Error() string { return e.Cause.Error() }
-
-// initVaultFn is the function the wrapper calls to perform the
-// underlying init. Tests override this to inject failures and verify
-// cleanup behavior (memo R7).
-var initVaultFn = secrets.InitVault
-```
-
-Update every `&secretsInitFailed{...}` reference in `SecretsInit` to `&SecretsInitFailed{...}`. Then in the same function body, replace the InitVault call:
-
-```go
-// Old: if err := secrets.InitVault(keyPath, vaultPath); err != nil {
-if err := initVaultFn(keyPath, vaultPath); err != nil {
-```
-
-Note: this means Task 3's "secretsInitFailed → SecretsInitFailed promotion" is no-op (already exported); the handler in Task 3 just consumes the exported type directly.
+If you skipped Step 1.C.4 ahead and inserted the unexported variant, fix it now: rename `secretsInitFailed` → `SecretsInitFailed`, lowercase fields → uppercase (`cleanupStatus` → `CleanupStatus`, `orphanPath` → `OrphanPath`, `cause` → `Cause`), and add the `initVaultFn` declaration. Otherwise this step is a no-op.
 
 - [ ] **Step 1.C.6c: Add three R7 partial-init tests**
 
@@ -2033,54 +2013,17 @@ func registerSecretsRoutes(s *Server) {
 
 Use a single `/api/secrets/` (trailing slash) prefix handler that branches on path components, plus dedicated `/api/secrets/init` and `/api/secrets` (no trailing slash). Note Go's `http.ServeMux` treats `/api/secrets` and `/api/secrets/` as distinct: the trailing-slash one matches all sub-paths.
 
-- [ ] **Step 3.A.3: Implement `secretsInitHandler`**
+- [ ] **Step 3.A.3: Implement `secretsInitHandler` (uses exported `SecretsInitFailed` from Task 1)**
 
-Append:
+Append the helper and the final handler — single block, no stale prose:
 
 ```go
-func (s *Server) secretsInitHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", "POST")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	res, err := s.secrets.Init()
-	if err == nil {
-		writeJSON(w, http.StatusOK, res)
-		return
-	}
-	// Classify the error per memo D2.
-	var blocked *api.SecretsInitBlocked
-	if errors.As(err, &blocked) {
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"error": err.Error(),
-			"code":  "SECRETS_INIT_BLOCKED",
-		})
-		return
-	}
-	// Test-friendly handler: api.SecretsInit's secretsInitFailed is
-	// unexported. We detect partial-init by inspecting Error() prefix
-	// and CleanupStatus presence in the result; for clean separation
-	// the next plan iteration could promote the type. For now, a
-	// bare error means generic SECRETS_INIT_FAILED.
-	writeJSON(w, http.StatusInternalServerError, map[string]any{
-		"error": err.Error(),
-		"code":  "SECRETS_INIT_FAILED",
-	})
-}
-
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
 }
-```
 
-**Note on `SecretsInitFailed` location**: the type was already promoted to exported in Step 1.C.6b (plan-R2 P1 — original deferral broke Task 1 compile). The handler just consumes the exported type directly. No further `internal/api/secrets.go` edits needed in Task 3.
-
-Now finalize `secretsInitHandler`:
-
-```go
 func (s *Server) secretsInitHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
@@ -4217,9 +4160,14 @@ export function RotateResultBanner(props: {
 
 - [ ] **Step 7.A.2: Wire into `Secrets.tsx`**
 
-Add to imports:
+Add to imports (and update the existing `preact/hooks` import to include `useCallback` and `useEffect` — Codex plan-R3 P1):
 
 ```tsx
+// Replace the existing line:
+//   import { useState } from "preact/hooks";
+// with:
+import { useCallback, useEffect, useState } from "preact/hooks";
+
 import { PersistentRotateCTA, RotateResultBanner, RotateSecretModal } from "../components/RotateSecretModal";
 import { restartSecret } from "../lib/secrets-api";
 import type { SecretsRotateResult } from "../lib/secrets-api";
@@ -4239,6 +4187,7 @@ function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<voi
   const [bannerName, setBannerName] = useState<string | null>(null);
   const [rotateResult, setRotateResult] = useState<SecretsRotateResult | null>(null);
   const [rotateMode, setRotateMode] = useState<"no-restart" | "with-restart" | null>(null);
+  const [deleteName, setDeleteName] = useState<string | null>(null);
   // Codex plan-R2 P1: track running-daemon counts via /api/status so the
   // CTA logic can suppress when 0 are running (memo D4 + Codex memo-R1 P3).
   // Fetch on mount and after each rotation so the count reflects the
@@ -4269,13 +4218,17 @@ function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<voi
   const refCountFor = (name: string) =>
     props.env.secrets.find((s) => s.name === name)?.used_by.length ?? 0;
 
-  // Codex plan-R2 P1: count of *running* daemons of servers that
-  // reference this key. Used for CTA suppression (0 = toast, no CTA).
+  // Codex plan-R2 P1 + plan-R3 P2: count of *running* daemons of distinct
+  // servers that reference this key. Dedupe on server so a manifest with
+  // multiple env vars referencing the same secret does not multi-count
+  // running daemons.
   const runningCountFor = (name: string): number => {
     const refs = props.env.secrets.find((s) => s.name === name)?.used_by ?? [];
+    const distinctServers = new Set<string>();
+    for (const r of refs) distinctServers.add(r.server);
     let total = 0;
-    for (const r of refs) {
-      total += runningByServer[r.server] ?? 0;
+    for (const server of distinctServers) {
+      total += runningByServer[server] ?? 0;
     }
     return total;
   };
@@ -4344,16 +4297,23 @@ function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<voi
 }
 ```
 
-Update `SecretRowComponent` Rotate button to call a passed-in callback:
+Update `SecretRowComponent` Rotate button to call a passed-in callback. **Codex plan-R3 P1**: keep `onDelete` OPTIONAL in this task because Task 8 wires it; making it required here breaks Task 7 typecheck before Task 8 lands.
 
 ```tsx
-function SecretRowComponent(props: { row: SecretRow; onAddPrefill: (name: string) => void; onRotate: (name: string) => void; onDelete: (name: string) => void }) {
-  // ...
+function SecretRowComponent(props: {
+  row: SecretRow;
+  onAddPrefill: (name: string) => void;
+  onRotate: (name: string) => void;
+  onDelete?: (name: string) => void;        // optional in Task 7; Task 8 wires it
+}) {
+  const isPresent = props.row.state === "present";
+  // ... existing render ...
   // <button type="button" disabled={!isPresent} onClick={() => props.onRotate(props.row.name)}>Rotate</button>
+  // <button type="button" disabled={!isPresent || !props.onDelete} onClick={() => props.onDelete?.(props.row.name)}>Delete</button>
 }
 ```
 
-And pass `onRotate={(n) => setRotateName(n)}` from `InitKeyedView`.
+And pass `onRotate={(n) => setRotateName(n)}` from `InitKeyedView`. The `onDelete` callback is left out in this task; Task 8 adds `onDelete={(n) => setDeleteName(n)}`.
 
 - [ ] **Step 7.A.3: Typecheck**
 
