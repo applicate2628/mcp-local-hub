@@ -23,6 +23,18 @@ const CLIENTS = ["claude-code", "codex-cli", "gemini-cli", "antigravity"] as con
 type Direction = "migrate" | "demigrate";
 type DirtyMap = Map<string, Map<string, Direction>>;
 
+// Per-entry outcome from one applyChanges run. Drives the success-prune /
+// retain-failed-or-gated semantic in B1 memo §4 D6:
+//   - "succeeded"  : POST fired, got 2xx → prune from dirty
+//   - "failed"     : POST fired, got non-2xx → retain (user retries)
+//   - "gated"      : POST never fired because phase-1 demigrate on the
+//                    same client failed; the §4 D4 per-client gate
+//                    removed this client from the phase-2 migrate batch.
+//                    Retain (user retries; entry will fire once the
+//                    blocking demigrate succeeds).
+type Outcome = "succeeded" | "failed" | "gated";
+type OutcomeMap = Map<string, Map<string, Outcome>>;
+
 export function ServersScreen() {
   const [servers, setServers] = useState<ServerRow[] | null>(null);
   const [statusByServer, setStatusByServer] = useState<Record<string, { state: string; port: number | null }>>({});
@@ -53,7 +65,6 @@ export function ServersScreen() {
         }
         setStatusByServer(flat);
         setError(null);
-        setDirty(new Map());
       } catch (err) {
         if (!cancelled) setError((err as Error).message);
       }
@@ -91,50 +102,125 @@ export function ServersScreen() {
   }
 
   async function applyChanges() {
-    // Migrate is called PER-SERVER-GROUP, not once with a unioned client
-    // list. MigrateOpts.ClientsInclude is a global filter applied to every
-    // Server in the request, so a single call with {servers:[A,B],
-    // clients:[claude,gemini]} would rewrite all four cells (A×claude,
-    // A×gemini, B×claude, B×gemini) even if the user only dirtied
-    // (A,claude) and (B,gemini). Looping keeps each server's client list
-    // scoped to exactly its own dirty cells.
-    // Minimal shim: ignore direction for now (Task 5 introduces per-direction
-    // branching). Collects every dirty cell into the existing migrate-only
-    // POST loop. Task 4 is purely a state-shape refactor; behavior is
-    // unchanged in this commit.
-    const changes = Array.from(dirty.entries())
-      .filter(([, clients]) => clients.size > 0)
-      .map(([server, clients]) => ({ server, clients: Array.from(clients.keys()) }));
-    if (changes.length === 0) return;
+    if (dirty.size === 0) return;
     setApplying(true);
-    setApplyMsg(`Migrating ${changes.length} server(s)…`);
+    setApplyMsg(`Applying…`);
+
+    // Per-cell POST granularity (memo §4 D2). Each (server, client, direction)
+    // cell fires its OWN /api/migrate or /api/demigrate POST with a single-
+    // element clients array. Batching multiple clients into one POST would
+    // be collapsed by the handlers into a single 500 on any row failure,
+    // corrupting per-cell outcome tracking — a batch containing one failed
+    // row and one succeeded row would mark BOTH failed, leaving the actually-
+    // successful row dirty and replaying it on retry (which reads the now-
+    // polluted backup and hits the R5 sentinel bug). Per-cell POSTs keep
+    // outcome 1:1 with cell state. [Codex plan-R4 P1 on this plan.]
+    type Cell = { server: string; client: string };
+    const demigrateCells: Cell[] = [];
+    const migrateCells: Cell[] = [];
+    for (const [server, clientMap] of dirty.entries()) {
+      for (const [client, direction] of clientMap.entries()) {
+        if (direction === "demigrate") demigrateCells.push({ server, client });
+        else migrateCells.push({ server, client });
+      }
+    }
+
+    // Per-entry outcomes — seed every entry as "gated" (will upgrade to
+    // "succeeded" or "failed" once its POST fires; gated only remains for
+    // cells skipped by the phase-2 per-client gate).
+    const outcomes: OutcomeMap = new Map();
+    for (const [server, clientMap] of dirty.entries()) {
+      const row: Map<string, Outcome> = new Map();
+      for (const [client] of clientMap.entries()) row.set(client, "gated");
+      outcomes.set(server, row);
+    }
+
     const failed: string[] = [];
-    for (const change of changes) {
+    // Clients whose phase-1 demigrate failed. Phase 2 skips every migrate
+    // cell targeting such a client (per-client gate, §4 D4). Gated cells
+    // stay "gated" in outcomes and retain in dirty for retry.
+    const failedDemigrateClients = new Set<string>();
+
+    // PHASE 1 — demigrate (one POST per cell).
+    for (const cell of demigrateCells) {
+      try {
+        const resp = await fetch("/api/demigrate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ servers: [cell.server], clients: [cell.client] }),
+        });
+        if (resp.ok || resp.status === 204) {
+          outcomes.get(cell.server)!.set(cell.client, "succeeded");
+        } else {
+          const body = (await resp.json().catch(() => ({}))) as { error?: string };
+          failed.push(`${cell.server}/demigrate/${cell.client}: ${body.error ?? resp.status}`);
+          outcomes.get(cell.server)!.set(cell.client, "failed");
+          failedDemigrateClients.add(cell.client);
+        }
+      } catch (e) {
+        failed.push(`${cell.server}/demigrate/${cell.client}: ${(e as Error).message ?? "unknown"}`);
+        outcomes.get(cell.server)!.set(cell.client, "failed");
+        failedDemigrateClients.add(cell.client);
+      }
+    }
+
+    // PHASE 2 — migrate (one POST per cell, with per-client gate).
+    for (const cell of migrateCells) {
+      if (failedDemigrateClients.has(cell.client)) {
+        // Gated: a phase-1 demigrate on this client failed. Do NOT fire
+        // the migrate — it would write a polluted post-migrate backup
+        // that the user's retry of the failed demigrate would then
+        // misread. Outcome stays "gated"; entry retains in dirty.
+        continue;
+      }
       try {
         const resp = await fetch("/api/migrate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ servers: [change.server], clients: change.clients }),
+          body: JSON.stringify({ servers: [cell.server], clients: [cell.client] }),
         });
-        if (!resp.ok) {
+        if (resp.ok || resp.status === 204) {
+          outcomes.get(cell.server)!.set(cell.client, "succeeded");
+        } else {
           const body = (await resp.json().catch(() => ({}))) as { error?: string };
-          failed.push(`${change.server}: ${body.error ?? resp.status}`);
+          failed.push(`${cell.server}/migrate/${cell.client}: ${body.error ?? resp.status}`);
+          outcomes.get(cell.server)!.set(cell.client, "failed");
         }
       } catch (e) {
-        failed.push(`${change.server}: ${(e as Error).message ?? "unknown"}`);
+        failed.push(`${cell.server}/migrate/${cell.client}: ${(e as Error).message ?? "unknown"}`);
+        outcomes.get(cell.server)!.set(cell.client, "failed");
       }
     }
+
+    // Prune "succeeded" outcomes from dirty; retain "failed" and "gated".
+    // §4 D6 rationale: successful entries would silently replay on retry
+    // and re-read the now-polluted latest backup (R5/R6/R7). Gated entries
+    // represent unfulfilled user intent that must retry (R10).
+    setDirty((prev) => {
+      const next = new Map(prev);
+      for (const [server, outcomeRow] of outcomes.entries()) {
+        const clientMap = next.get(server);
+        if (!clientMap) continue;
+        for (const [client, outcome] of outcomeRow.entries()) {
+          if (outcome === "succeeded") clientMap.delete(client);
+        }
+        if (clientMap.size === 0) next.delete(server);
+      }
+      return next;
+    });
+
+    // Always reload, regardless of failure count. §4 D6 rationale: the
+    // Checkbox useEffect syncs local `checked` from `initialChecked`
+    // derived from server.routing; without a reload, successful demigrate
+    // cells stay with stale "via-hub" initialChecked and the next toggle
+    // fires the wrong direction. Reloading unconditionally keeps every
+    // cell's baseline honest. Failed cells retain their local-flipped
+    // state via a no-op useEffect sync (their initialChecked is unchanged
+    // because backend rejected the POST).
+    setReloadToken((x) => x + 1);
+
     if (failed.length === 0) {
-      setApplyMsg("Migrated. Refreshing…");
-      // Clear dirty BEFORE the reload effect completes so the Apply
-      // button stays disabled through the refresh window. Without this,
-      // setApplying(false) below re-enables Apply while the reload is
-      // still fetching /api/scan + /api/status — the user could click
-      // Apply again and resubmit the same /api/migrate POSTs. The
-      // reload effect's own setDirty(new Map()) at completion is then
-      // idempotent. (Codex CLI R2.)
-      setDirty(new Map());
-      setReloadToken((x) => x + 1);
+      setApplyMsg("Applied. Refreshing…");
     } else {
       setApplyMsg(`Failed: ${failed.join("; ")}`);
     }
@@ -241,16 +327,15 @@ function CellView(props: {
   useEffect(() => {
     setChecked(initialChecked);
   }, [initialChecked]);
-  // Disable when:
-  //  - "unsupported" or "not-installed": cell is meaningless
-  //  - "via-hub": MVP has no reverse-migrate API yet (Phase 3B-II B1).
-  //    Allowing uncheck would let the user dirty, Apply, and receive a
-  //    silent no-op because MigrateFrom is idempotent on already-migrated
-  //    bindings.
-  const disabled = routing === "unsupported" || routing === "not-installed" || routing === "via-hub";
+  // Disable when cell is meaningless:
+  //  - "unsupported"   : this client cannot route this server via the hub
+  //  - "not-installed" : this client is not installed on this machine
+  // "via-hub" is now INTERACTIVE (B1): uncheck + Apply posts
+  // /api/demigrate for this (server, client) pair. See B1 memo §4 D5.
+  const disabled = routing === "unsupported" || routing === "not-installed";
   let title: string | undefined;
   if (routing === "via-hub") {
-    title = `Already routed through the hub. To disable, run \`mcphub rollback --client ${client}\` (Phase 3B-II will add a UI for this).`;
+    title = `Currently routed through the hub. Uncheck and Apply to roll this binding back to the original ${client} config.`;
   } else if (routing === "not-installed") {
     title = `${client} is not installed on this machine.`;
   } else if (routing === "unsupported") {
