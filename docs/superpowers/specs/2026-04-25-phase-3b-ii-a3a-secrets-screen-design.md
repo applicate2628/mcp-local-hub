@@ -8,7 +8,7 @@
 
 ## 1. Summary
 
-A3-a delivers the GUI Secrets registry screen at `#/secrets`. It lists vault keys with their "Used by" counts, exposes Add / Rotate / Delete operations, and surfaces vault-state errors honestly. The backend gains 5 HTTP endpoints under `/api/secrets/*` and 5 `api.go` wrappers that thread through the existing `internal/secrets` package — closing a long-standing CLI ≡ GUI parity gap (CLI has been calling `secrets.OpenVault` directly since Phase 2; the GUI now does the same through proper API wrappers). "Used by" counts are computed by a tolerant manifest scan that aggregates env values starting with the `secret:` prefix.
+A3-a delivers the GUI Secrets registry screen at `#/secrets`. It lists vault keys with their "Used by" counts, exposes Add / Rotate / Delete operations, and surfaces vault-state errors honestly. The backend gains 6 HTTP endpoints under `/api/secrets/*` (init, GET, POST, PUT, POST restart, DELETE) and 6 `api.go` wrappers that thread through the existing `internal/secrets` package — closing a long-standing CLI ≡ GUI parity gap (CLI has been calling `secrets.OpenVault` directly since Phase 2; the GUI now does the same through proper API wrappers). "Used by" counts are computed by a tolerant manifest scan that aggregates env values starting with the `secret:` prefix.
 
 A3-b — the `env.secret:KEY` picker inside `AddServer.tsx` / `EditServer.tsx` forms — is **explicitly deferred** to a follow-up phase. A3-a builds the registry surface; A3-b adds consumer UX. This split was the Q1 decision and is locked.
 
@@ -83,7 +83,7 @@ A3-a's `api.ScanManifestEnv` (new helper, §3.1 backend item #1) inherits this e
 
 `internal/cli/secrets.go` exposes 7 cobra subcommands: `init`, `set`, `get`, `list`, `delete`, `edit`, `migrate`. Every command calls `secrets.OpenVault(defaultKeyPath(), defaultVaultPath())` **directly** ([secrets.go:84](../../../internal/cli/secrets.go#L84), [121](../../../internal/cli/secrets.go#L121), [144](../../../internal/cli/secrets.go#L144), [172](../../../internal/cli/secrets.go#L172), [195](../../../internal/cli/secrets.go#L195), [213](../../../internal/cli/secrets.go#L213), [312](../../../internal/cli/secrets.go#L312)) — bypassing `api.NewAPI()`. This is the same CLI-≡-GUI parity gap acknowledged in the B1 memo §2.4 and the softened comment in `internal/api/api.go`.
 
-A3-a does **not** retrofit the CLI to go through `api.go` — that's a separate cleanup. But the new GUI wrappers (`api.SecretsInit` / `api.SecretsListWithUsage` / `api.SecretsSet` / `api.SecretsRotate` / `api.SecretsDelete`) establish the canonical pattern future CLI work should adopt. A3-a's CLI surface is unchanged.
+A3-a does **not** retrofit the CLI to go through `api.go` — that's a separate cleanup. But the new GUI wrappers (`api.SecretsInit` / `api.SecretsListWithUsage` / `api.SecretsSet` / `api.SecretsRotate` / `api.SecretsRestart` / `api.SecretsDelete`) establish the canonical pattern future CLI work should adopt. A3-a's CLI surface is unchanged.
 
 ### 2.4 GUI surface — empty
 
@@ -140,8 +140,8 @@ A3-a's Rotate flow (Q4 D4 below: "Save and restart" with per-daemon result list)
 **Backend (Go):**
 
 1. `internal/api/secrets_scan.go` (new — **Codex memo-R2 P1 fix:** placing in `internal/api` avoids the import cycle that would arise if a `secrets` package helper imported `api` for `manifest_source.go` access; `internal/api` already imports `internal/secrets`, not the other way). Defines `ScanManifestEnv() (map[string][]UsageRef, []ManifestError, error)` reusing `listManifestNamesEmbedFirst()` + `loadManifestYAMLEmbedFirst()` from `manifest_source.go` directly. `UsageRef{Server, EnvVar}` and `ManifestError{Name, Path, Error}` are defined in `internal/api/secrets.go` alongside the wrappers. Per-manifest YAML parse errors are collected separately and surfaced in `manifest_errors`. **Memo-R1 P1: must NOT scan `<UserDataDir>/servers/*.yaml`; that path doesn't exist on installed binaries — see §2.5.**
-2. `internal/api/secrets.go` (new): 5 wrappers — `SecretsInit`, `SecretsListWithUsage`, `SecretsSet`, `SecretsRotate`, `SecretsDelete` — plus `UsageRef`, `ManifestError`, `SecretsEnvelope`, `SecretRow`, `SecretsInitResult`, `SecretsRotateResult` types. Wrappers call `secrets.OpenVault` / `secrets.InitVault` directly and call `ScanManifestEnv` (defined in the sibling `secrets_scan.go`).
-3. `internal/gui/secrets.go` (new): HTTP handlers for the 5 endpoints. **Same-origin guard via existing `requireSameOrigin` middleware ([csrf.go:27](../../../internal/gui/csrf.go#L27)) on every endpoint including GET** — Codex memo-R2 P2 corrected an earlier wrong assumption: `/api/scan` DOES enforce same-origin in this codebase. The middleware emits `CROSS_ORIGIN` (not a secrets-specific code) on rejection. Error code catalog (§5.7).
+2. `internal/api/secrets.go` (new): 6 wrappers — `SecretsInit`, `SecretsListWithUsage`, `SecretsSet`, `SecretsRotate`, `SecretsRestart`, `SecretsDelete` — plus `UsageRef`, `ManifestError`, `SecretsEnvelope`, `SecretRow`, `SecretsInitResult`, `SecretsRotateResult`, `SecretsDeleteError` types. Wrappers call `secrets.OpenVault` / `secrets.InitVault` directly and call `ScanManifestEnv` (defined in the sibling `secrets_scan.go`).
+3. `internal/gui/secrets.go` (new): HTTP handlers for the 6 endpoints. **Same-origin guard via existing `requireSameOrigin` middleware ([csrf.go:27](../../../internal/gui/csrf.go#L27)) on every endpoint including GET** — Codex memo-R2 P2 corrected an earlier wrong assumption: `/api/scan` DOES enforce same-origin in this codebase. The middleware emits `CROSS_ORIGIN` (not a secrets-specific code) on rejection. Error code catalog (§5.7).
 4. `internal/gui/server.go`: register the new routes; add `s.secrets` adapter field analogous to `s.demigrater`.
 5. **D9 refactor:** `realRestarter.Restart` returns `([]api.RestartResult, error)` instead of aggregated `error`; handler exposes the per-task shape using the existing `api.RestartResult{TaskName, Err}` type (D9 details below — no new types invented).
 6. Go unit tests for handlers and scan logic.
@@ -152,7 +152,7 @@ A3-a's Rotate flow (Q4 D4 below: "Save and restart" with per-daemon result list)
 2. `internal/gui/frontend/src/components/AddSecretModal.tsx` (new).
 3. `internal/gui/frontend/src/components/RotateSecretModal.tsx` (new): 3-button modal with `[Cancel | Save without restart | Save and restart]`.
 4. `internal/gui/frontend/src/components/DeleteSecretModal.tsx` (new): differential typed-confirm.
-5. `internal/gui/frontend/src/lib/secrets-api.ts` (new): typed fetch wrappers for the 5 endpoints.
+5. `internal/gui/frontend/src/lib/secrets-api.ts` (new): typed fetch wrappers for the 6 endpoints (init, GET list, POST add, PUT rotate, POST restart, DELETE).
 6. `internal/gui/frontend/src/app.tsx`: add 6th nav link (`#/secrets`) and the `case "secrets"` route entry to the existing screen-switch (Codex memo-R1 P2: there is no `components/Sidebar.tsx`; nav lives in `app.tsx`).
 7. `internal/gui/frontend/src/app.tsx`: extend the route switch to recognize `secrets` as a route key (no separate `routing.ts` registry exists — Codex memo-R4 P2; routing is the `useRouter` hook in `hooks/useRouter.ts` plus the screen switch in `app.tsx`).
 8. `internal/gui/frontend/src/lib/use-secrets-snapshot.ts` (new): hook that fetches `/api/secrets`, polls on focus, exposes `{state, data, error, refresh}`.
@@ -541,7 +541,7 @@ This endpoint is what the post-Rotate CTAs ("Restart now", "Retry failed restart
 
 ### 5.4 `PUT /api/secrets/:key`
 
-**Path:** `:key` is the secret name (URL-escaped if needed; only `[A-Z0-9_]` realistically used).
+**Path:** `:key` is the secret name (URL-escaped if needed; characters allowed by `^[A-Za-z][A-Za-z0-9_]*$` per §5.3 — both upper-case env-style names and lowercase identifiers like `wolfram_app_id` are valid).
 
 **Request body:** `{"value":"new-value","restart":true|false}`
 
@@ -553,7 +553,7 @@ This endpoint is what the post-Rotate CTAs ("Restart now", "Retry failed restart
 - Existence check: `vault.Get(key)` failing with not-found → 404 + `SECRETS_KEY_NOT_FOUND`.
 - `vault.Set(key, value)` — overwrite. On failure: 500 + `SECRETS_SET_FAILED`. **Vault commits BEFORE any restart attempt** (D4 best-effort). Once `vault.Set` succeeds, the response body always carries `vault_updated:true` regardless of subsequent restart outcomes.
 - If `restart === true`:
-  1. Call `restartServersForKey(key)` (helper from §D9), which iterates affected running daemons and calls `api.Restart(server, "")` per server.
+  1. Call `restartServersForKey(key)` (helper from §D9), which iterates affected running daemons and calls `api.Restart(server, daemonName)` PER-DAEMON (Codex memo-R8 P1 + R9 P1: empty filter would restart ALL tasks for a server including stopped ones — see [install.go:1349](../../../internal/api/install.go#L1349)).
   2. Returns `[]api.RestartResult` from §D9 (uses existing `{TaskName, Err}` shape; empty `Err` = success).
   3. **If orchestration itself fails** (scheduler unavailable, status query crashes): 500 + `RESTART_FAILED` with body `{vault_updated:true, error, code}`. **NOT for per-task failures** — those use 207 below.
   4. **If list is empty OR all `Err` empty:** 200 OK with body `{vault_updated:true, restart_results:[…]}`.
@@ -861,8 +861,8 @@ Tests verify both branches and both orphan shapes (`TestSecretsInit_PartialFailu
 ### 7.2 Frontend unit tests
 
 `internal/gui/frontend/src/lib/secrets-api.test.ts`:
-- Each typed wrapper (`secretsInit`, `getSecrets`, `addSecret`, `rotateSecret`, `deleteSecret`) tested against fetch-mocked responses. Asserts request shape (method, headers, body) and response parsing (envelope unmarshaling, error code extraction).
-- Vitest: ~12 test cases.
+- Each typed wrapper (`secretsInit`, `getSecrets`, `addSecret`, `rotateSecret`, `restartSecret`, `deleteSecret`) tested against fetch-mocked responses. Asserts request shape (method, headers, body) and response parsing (envelope unmarshaling, error code extraction). The `restartSecret` wrapper covers `POST /api/secrets/:key/restart` (§5.4a) used by Rotate's "Restart now" / "Retry failed restarts" CTAs. The `deleteSecret` wrapper covers the D5 escalation: first call without `confirm`, then on 409 a second call with `?confirm=true`.
+- Vitest: ~14 test cases.
 
 `internal/gui/frontend/src/lib/use-secrets-snapshot.test.ts` — render the hook in isolation, assert state transitions on fetch / refetch / focus events.
 
@@ -884,7 +884,7 @@ New file: `internal/gui/e2e/tests/secrets.spec.ts`. Uses the same fixture infras
 
 6. **"Rotate Save without restart — 0 running suppresses CTA"** (D4 + Codex memo-R1 P3) — vault with `K1`, no daemons running. Click row's Rotate. Modal shows counter (`1 daemon references this key; 0 currently running`). Type new value. Click "Save without restart". Assert `PUT /api/secrets/K1` fires with `{value, restart:false}`. Modal closes. Brief toast appears: "Vault updated. No running daemons need restart." Persistent CTA is NOT shown. After 4 seconds toast auto-dismisses.
 
-7. **"Rotate Save without restart — N running shows persistent CTA"** — vault with `K1`, two daemons referencing it, both running. Click Rotate, type new value, "Save without restart". Assert persistent CTA appears: "Vault updated. 2 running daemons still using the previous value. [Restart now] [Dismiss]". Click Dismiss → CTA disappears. (The "Restart now" semantics — re-PUT or separate restart-batch endpoint — is a plan-time refinement; this test asserts the Dismiss path only. The Restart-now path is exercised by test 8 below.)
+7. **"Rotate Save without restart — N running shows persistent CTA + Restart-now path"** — vault with `K1`, two daemons referencing it, both running. Click Rotate, type new value, "Save without restart". Assert persistent CTA appears: "Vault updated. 2 running daemons still using the previous value. [Restart now] [Dismiss]". Click "Restart now" → assert `POST /api/secrets/K1/restart` (per §5.4a — the explicit endpoint, no body, no vault rewrite). Stub returns 200 with `restart_results:[…all empty error…]`. CTA disappears, brief success toast. Then re-rotate same key (different test segment), click "Save without restart" again → click Dismiss → CTA disappears without firing the endpoint.
 
 8. **"Rotate Save and restart with partial failure"** — vault with `K1`, two manifests referencing it, both with one running daemon each. Stub `PUT /api/secrets/K1` to return 207 with `{vault_updated:true, restart_results:[{task_name:"mcp-local-hub-server-a-default", error:""}, {task_name:"mcp-local-hub-server-b-default", error:"timeout"}]}` (using existing `api.RestartResult{TaskName, Err}` JSON tags `task_name`/`error` per D9). Trigger Rotate → Save and restart. Assert response banner: "Vault updated. 1/2 daemons restarted. 1 still need restart." Failed task listed. "Retry failed restarts" button visible.
 
@@ -914,11 +914,11 @@ And the count line: `66 smoke tests total (3 shell + 8 servers + 6 migration + 1
 
 The plan should derive from this memo with the following commit breakdown. Each commit is independently buildable and testable; the order respects type dependencies.
 
-1. **Backend scaffold (api.go wrappers + scan helper).** Creates `internal/api/secrets.go` (wrappers + types) and `internal/api/secrets_scan.go` (scan helper). **Both in `internal/api`, NOT `internal/secrets`** — Codex memo-R3 P1: keeping the scan in `internal/api` avoids the import cycle that would arise if a `secrets` package helper imported `api` for `manifest_source.go` access; `internal/api` already imports `internal/secrets`, not the other way. Pure additions, no behavior change to existing surfaces. Audits `api.RestartResult` JSON tags (D9 prerequisite) — adds `json:"task_name"` / `json:"error,omitempty"` if missing. Adds Go unit tests for both files. **Acceptance:** `go test ./internal/api/...` green; new wrappers usable by would-be CLI / handlers; existing CLI behavior unchanged.
+1. **Backend scaffold (api.go wrappers + scan helper).** Creates `internal/api/secrets.go` (6 wrappers — Init/ListWithUsage/Set/Rotate/Restart/Delete + types) and `internal/api/secrets_scan.go` (scan helper). **Both in `internal/api`, NOT `internal/secrets`** — Codex memo-R3 P1: keeping the scan in `internal/api` avoids the import cycle that would arise if a `secrets` package helper imported `api` for `manifest_source.go` access; `internal/api` already imports `internal/secrets`, not the other way. Pure additions, no behavior change to existing surfaces. Audits `api.RestartResult` JSON tags (D9 prerequisite) — adds `json:"task_name"` / `json:"error"` (NOT omitempty — Codex memo-R9 P1: empty-string is the success discriminator) if missing. Adds Go unit tests for both files. **Acceptance:** `go test ./internal/api/...` green; new wrappers usable by would-be CLI / handlers; existing CLI behavior unchanged.
 
 2. **D9 restart-result granularity refactor.** `internal/gui/server.go`: refactor `restarter` interface to return `([]api.RestartResult, error)` using the existing `api.RestartResult{TaskName, Err}` type from `internal/api/install.go:1456`. Update `realRestarter` implementation. Update existing `/api/servers/:name/restart` handler at `internal/gui/servers.go:22-32` to return 200 (all empty `Err`), 207 Multi-Status (any non-empty `Err`, including all-failed), or 500 + `RESTART_FAILED` (orchestration crash before per-task results). Update existing tests for the new shape. **Acceptance:** `go test ./internal/gui/...` green; CLI `mcphub restart` unaffected (verify with E2E or smoke).
 
-3. **HTTP handlers + routing.** `internal/gui/secrets.go` (new): registers all 5 endpoints, wires same-origin guard. `internal/gui/server.go`: register routes and add `s.secrets` adapter field. Includes Go handler tests for every endpoint × every error code (§7.1). **Acceptance:** all 5 endpoints respond per §5; error codes per §5.7.
+3. **HTTP handlers + routing.** `internal/gui/secrets.go` (new): registers all 6 endpoints (`/init`, `GET /api/secrets`, `POST /api/secrets`, `PUT /api/secrets/:key`, `POST /api/secrets/:key/restart` per §5.4a, `DELETE /api/secrets/:key`), wires same-origin guard. `internal/gui/server.go`: register routes and add `s.secrets` adapter field. Includes Go handler tests for every endpoint × every error code (§7.1). **Acceptance:** all 6 endpoints respond per §5; error codes per §5.7.
 
 4. **Frontend scaffold (no UI yet).** `internal/gui/frontend/src/lib/secrets-api.ts` (new) + Vitest unit tests. `internal/gui/frontend/src/lib/use-secrets-snapshot.ts` (new) + Vitest unit tests. No UI changes. **Acceptance:** `cd internal/gui/frontend && npm test` (Vitest) green for the new files. (Codex memo-R8 P3: there is no root `package.json`; all frontend `npm` commands run inside `internal/gui/frontend/`.)
 
@@ -936,7 +936,7 @@ The plan should derive from this memo with the following commit breakdown. Each 
 
 **Note on commit ordering (Codex memo-R1 P3):** the work-items entry for the LWW limitation (`work-items/bugs/a3a-vault-concurrent-edit-lww.md`) is folded into commit 1 (the "backend scaffold" commit), NOT a final commit. This way the durable record lands BEFORE the behavior ships, not as a trailing note after the limitation is already in production. Commit 1's full scope:
 
-- `internal/api/secrets.go` (new) with the 5 wrappers + types
+- `internal/api/secrets.go` (new) with the 6 wrappers (`SecretsInit`, `SecretsListWithUsage`, `SecretsSet`, `SecretsRotate`, `SecretsRestart`, `SecretsDelete`) + types
 - `internal/api/secrets_scan.go` (new) with `ScanManifestEnv` + tests (located in `internal/api`, NOT `internal/secrets`, to avoid import cycle — see commit 1 acceptance)
 - `work-items/bugs/a3a-vault-concurrent-edit-lww.md` (new) describing R1
 - Go unit tests for all of the above
