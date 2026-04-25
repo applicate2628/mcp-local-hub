@@ -49,10 +49,10 @@ type SecretsRotateResult struct {
 // path is blocked by refs or scan errors (memo §5.5). The handler
 // serializes UsedBy / ManifestErrors into the 409 body.
 type SecretsDeleteError struct {
-	Code           string
-	Message        string
-	UsedBy         []UsageRef
-	ManifestErrors []ManifestError
+	Code           string          `json:"code"`
+	Message        string          `json:"message"`
+	UsedBy         []UsageRef      `json:"used_by,omitempty"`
+	ManifestErrors []ManifestError `json:"manifest_errors,omitempty"`
 }
 
 func (e *SecretsDeleteError) Error() string { return e.Message }
@@ -434,7 +434,10 @@ func (a *API) SecretsDelete(name string, confirm bool) error {
 	if !confirm {
 		usage, manifestErrs, scanErr := ScanManifestEnv()
 		if scanErr != nil {
-			return fmt.Errorf("scan manifests: %w", scanErr)
+			// Surface scan failure as an OpError so the handler can map it to
+			// a meaningful code instead of falling into the generic delete-
+			// failed catch-all (Codex Task-3 quality review).
+			return &SecretsOpError{Code: "SECRETS_LIST_FAILED", Msg: scanErr.Error()}
 		}
 		// Precedence per §5.5: scan-incomplete BEFORE refs.
 		if len(manifestErrs) > 0 {

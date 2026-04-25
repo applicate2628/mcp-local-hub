@@ -130,6 +130,8 @@ func opErrorStatus(code string) int {
 		return http.StatusConflict
 	case "SECRETS_KEY_NOT_FOUND":
 		return http.StatusNotFound
+	case "SECRETS_LIST_FAILED":
+		return http.StatusInternalServerError
 	default:
 		return http.StatusInternalServerError
 	}
@@ -293,5 +295,10 @@ func writeSecretsDeleteError(w http.ResponseWriter, err error) {
 		writeSecretsOpError(w, err)
 		return
 	}
+	// Defensive fallback: SecretsDelete in the api layer should always
+	// return either *SecretsDeleteError, *SecretsOpError, or nil. This
+	// branch only fires if a future caller introduces an untyped error
+	// path that bypasses the catalog. Stable label so a stray unknown
+	// failure surfaces as something operators can grep for.
 	writeAPIError(w, err, http.StatusInternalServerError, "SECRETS_DELETE_FAILED")
 }
