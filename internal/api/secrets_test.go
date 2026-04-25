@@ -478,13 +478,11 @@ func TestSecretsInit_ConcurrentCallsSerializeCleanly(t *testing.T) {
 	}
 	results := make(chan result, N)
 	var wg sync.WaitGroup
-	for i := 0; i < N; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range N {
+		wg.Go(func() {
 			r, e := a.SecretsInit()
 			results <- result{r, e}
-		}()
+		})
 	}
 	wg.Wait()
 	close(results)
@@ -513,5 +511,41 @@ func TestSecretsInit_ConcurrentCallsSerializeCleanly(t *testing.T) {
 	}
 	if len(v.List()) != 0 {
 		t.Errorf("expected empty vault after init, got keys: %v", v.List())
+	}
+}
+
+func TestSecretsSet_ConcurrentCallsAreSerialized(t *testing.T) {
+	_, _ = secretsTestEnv(t)
+	a := NewAPI()
+	if _, err := a.SecretsInit(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Spawn N concurrent SecretsSet calls with distinct names.
+	// All should succeed; the resulting vault must be openable and
+	// contain all N keys (no FS-level corruption from interleaved saves).
+	const N = 16
+	errs := make(chan error, N)
+	var wg sync.WaitGroup
+	for i := range N {
+		i := i
+		wg.Go(func() {
+			errs <- a.SecretsSet(fmt.Sprintf("KEY_%d", i), fmt.Sprintf("value_%d", i))
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for e := range errs {
+		if e != nil {
+			t.Errorf("SecretsSet failed: %v", e)
+		}
+	}
+
+	v, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
+	if err != nil {
+		t.Fatalf("vault unreadable after concurrent Set: %v", err)
+	}
+	if got := len(v.List()); got != N {
+		t.Errorf("vault has %d keys, want %d (concurrent Sets lost updates)", got, N)
 	}
 }

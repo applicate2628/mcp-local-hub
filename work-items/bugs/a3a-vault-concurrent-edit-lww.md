@@ -33,3 +33,27 @@ comparable to a small feature in itself; out of A3-a scope.
 - E2E test for two-tab conflict.
 
 **Out of A3-a scope.**
+
+---
+
+## Resolved: process-local concurrency (PR #18 mutex extension)
+
+`vaultMutex` in `internal/api/secrets.go` now serializes all vault-mutating
+API wrappers — `SecretsInit`, `SecretsSet`, `SecretsDelete`, `SecretsRotate`
+(vault-write phase only; lock released before the restart loop), and
+`SecretsListWithUsage` (read-during-write queues briefly; RWMutex deferred
+for V1 where contention is not measurable).
+
+`SecretsRestart` does not write the vault and was intentionally left without
+the mutex.
+
+**What this fixes:** two concurrent GUI calls can no longer interleave
+`age.Encrypt → buf → os.WriteFile` and produce a file that is not a valid age
+ciphertext. FS-level corruption (entire vault unreadable) is now prevented
+in-process.
+
+**What remains open:** cross-process concurrency (CLI + GUI running
+simultaneously, or two GUI processes) is still last-write-wins because
+`vaultMutex` is process-local. An OS-level advisory file lock
+(`github.com/gofrs/flock`, already in `go.mod`) is the correct fix and
+remains future work.

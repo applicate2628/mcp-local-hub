@@ -81,12 +81,16 @@ func (e *SecretsInitFailed) Unwrap() error { return e.Cause }
 // exported type so Step 1.C.5's SecretsInit body compiles.
 var initVaultFn = secrets.InitVault
 
-// initMutex serializes SecretsInit so concurrent POST /api/secrets/init
-// requests cannot interleave secrets.InitVault's Stat→GenerateIdentity→
-// WriteFile→save sequence and produce a key/vault mismatch (Codex
-// PR #18 P1 round 2). InitVault is a rare bootstrap op; serializing
-// has no real cost.
-var initMutex sync.Mutex
+// vaultMutex serializes all vault mutations (init / Set / Rotate /
+// Restart / Delete) so concurrent calls cannot interleave the
+// underlying OpenVault → mutate → save sequence and corrupt the
+// vault file (Codex PR #18 P1 round 2 + consult).
+//
+// Note: this is a process-local lock. Cross-process races (CLI +
+// GUI simultaneously) are still possible — that's the documented
+// LWW limitation in work-items/bugs/a3a-vault-concurrent-edit-lww.md
+// and an OS-level advisory file lock is a separate effort.
+var vaultMutex sync.Mutex
 
 // SecretsInit implements the D2 four-case classifier (memo §5.1):
 //
@@ -96,8 +100,8 @@ var initMutex sync.Mutex
 //	case 2c → returns SecretsInitFailed{CleanupStatus:"failed"}, handler maps to 500
 //	cases 3/4 → returns 409-style typed errors via wrapper return value
 func (a *API) SecretsInit() (SecretsInitResult, error) {
-	initMutex.Lock()
-	defer initMutex.Unlock()
+	vaultMutex.Lock()
+	defer vaultMutex.Unlock()
 
 	keyPath := secrets.DefaultKeyPath()
 	vaultPath := secrets.DefaultVaultPath()
@@ -221,6 +225,8 @@ func (a *API) SecretsSet(name, value string) error {
 	if value == "" {
 		return &SecretsOpError{Code: "SECRETS_EMPTY_VALUE", Msg: "value must not be empty"}
 	}
+	vaultMutex.Lock()
+	defer vaultMutex.Unlock()
 	v, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
 	if err != nil {
 		return &SecretsOpError{Code: "SECRETS_VAULT_NOT_INITIALIZED", Msg: err.Error()}
@@ -257,6 +263,8 @@ func (a *API) SecretsListWithUsage() (SecretsEnvelope, error) {
 	keyPath := secrets.DefaultKeyPath()
 	vaultPath := secrets.DefaultVaultPath()
 
+	vaultMutex.Lock()
+	defer vaultMutex.Unlock()
 	state, keys := classifyVault(keyPath, vaultPath)
 
 	rows := buildSecretRows(state, keys, usage)
@@ -357,16 +365,26 @@ func (a *API) SecretsRotate(name, value string, restart bool) (SecretsRotateResu
 	if value == "" {
 		return SecretsRotateResult{}, &SecretsOpError{Code: "SECRETS_EMPTY_VALUE", Msg: "value must not be empty"}
 	}
+
+	// Vault write phase — serialized. Lock released BEFORE the restart
+	// phase so a long restart loop does not block concurrent vault ops.
+	vaultMutex.Lock()
 	v, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
 	if err != nil {
+		vaultMutex.Unlock()
 		return SecretsRotateResult{}, &SecretsOpError{Code: "SECRETS_VAULT_NOT_INITIALIZED", Msg: err.Error()}
 	}
 	if _, getErr := v.Get(name); getErr != nil {
+		vaultMutex.Unlock()
 		return SecretsRotateResult{}, &SecretsOpError{Code: "SECRETS_KEY_NOT_FOUND", Msg: getErr.Error()}
 	}
 	if err := v.Set(name, value); err != nil {
+		vaultMutex.Unlock()
 		return SecretsRotateResult{}, &SecretsOpError{Code: "SECRETS_SET_FAILED", Msg: err.Error()}
 	}
+	vaultMutex.Unlock()
+	// Vault is committed. Restart phase is external orchestration that
+	// does not touch the vault, so vaultMutex is not held here.
 
 	res := SecretsRotateResult{VaultUpdated: true, RestartResults: []RestartResult{}}
 	if !restart {
@@ -460,6 +478,8 @@ func (a *API) restartServersForKey(key string) ([]RestartResult, error) {
 // returns nil on successful delete. With confirm=true, bypasses both
 // guards.
 func (a *API) SecretsDelete(name string, confirm bool) error {
+	vaultMutex.Lock()
+	defer vaultMutex.Unlock()
 	v, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
 	if err != nil {
 		return &SecretsOpError{Code: "SECRETS_VAULT_NOT_INITIALIZED", Msg: err.Error()}
