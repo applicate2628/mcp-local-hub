@@ -189,33 +189,31 @@ func (realManifestEditor) ManifestEditWithHash(name, yaml, expectedHash string) 
 	return api.NewAPI().ManifestEditWithHash(name, yaml, expectedHash)
 }
 
-// restarter is the narrow interface the /api/servers/:name/restart handler
-// needs. realRestarter is the production adapter; tests inject their own.
+// restarter is the narrow interface the /api/servers/:name/restart
+// handler needs. Per memo D9 (Codex R8 P1), it now returns the
+// per-task RestartResult slice (existing api.RestartResult{TaskName, Err}
+// shape) plus an orchestration-level error. Handler maps:
+//
+//	results all empty Err  → 200 {restart_results:[…]}
+//	results any non-empty  → 207 {restart_results:[…]}
+//	err != nil             → 500 + RESTART_FAILED, body has partial
+//	                         results (memo §D9).
 type restarter interface {
-	Restart(server string) error
+	Restart(server string) ([]api.RestartResult, error)
 }
 
 type realRestarter struct{}
 
 // Restart delegates to api.Restart(server, daemonFilter). The GUI handler
 // targets "restart all daemons for one server," so daemonFilter is "".
-// Per-task failures are aggregated into a single error to match the CLI's
-// "one or more daemons failed to restart" semantics (see internal/cli/restart.go).
-func (realRestarter) Restart(server string) error {
+// Per-task results are returned as-is; the handler inspects each Err field
+// to decide 200 vs 207 (all empty vs any non-empty).
+func (realRestarter) Restart(server string) ([]api.RestartResult, error) {
 	results, err := api.NewAPI().Restart(server, "")
-	if err != nil {
-		return err
+	if results == nil {
+		results = []api.RestartResult{}
 	}
-	var failed []string
-	for _, r := range results {
-		if r.Err != "" {
-			failed = append(failed, r.TaskName+": "+r.Err)
-		}
-	}
-	if len(failed) > 0 {
-		return fmt.Errorf("restart failed: %s", strings.Join(failed, "; "))
-	}
-	return nil
+	return results, err
 }
 
 // logsProvider is the narrow interface the /api/logs/:server handler needs.
