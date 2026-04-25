@@ -64,12 +64,13 @@ Tracking document for Phase 3B-II — the "everything I cut from Phase 3B-I MVP"
 4. **B2** — ExtractManifestFromClient API (unblocks A1 "Create manifest" action)
 5. **A1** — Migration screen (primary deferred UX; depends on B2)
 6. **A2** — Add/Edit manifest form (largest UI surface; depends on B2 for prefill)
-7. **A3** — Secrets screen
-8. **A4** — Settings screen
-9. **A5** — About screen
-10. **C3 + C4** — Tray icon state variants + toast notifications (polish after SSE event handling is mature)
-11. **C1 + C2** — `--force` take-over + browser focus (CLI/UX polish, Windows-specific wiring)
-12. **Release hardening** — D2 + D3 manual smoke matrix, write `docs/phase-3b-ii-verification.md`
+7. **A3-a** — Secrets registry screen ✅ — see [docs/superpowers/plans/2026-04-25-phase-3b-ii-a3a-secrets-screen.md](2026-04-25-phase-3b-ii-a3a-secrets-screen.md). Memo: [docs/superpowers/specs/2026-04-25-phase-3b-ii-a3a-secrets-screen-design.md](../specs/2026-04-25-phase-3b-ii-a3a-secrets-screen-design.md). PR pending user review.
+8. **A3-b** — env.secret picker in AddServer/EditServer forms (deferred from A3 split — to be tackled after A3-a dogfooding).
+9. **A4** — Settings screen
+10. **A5** — About screen
+11. **C3 + C4** — Tray icon state variants + toast notifications (polish after SSE event handling is mature)
+12. **C1 + C2** — `--force` take-over + browser focus (CLI/UX polish, Windows-specific wiring)
+13. **Release hardening** — D2 + D3 manual smoke matrix, write `docs/phase-3b-ii-verification.md`
 
 **Estimated scope:** ~35-45 implementation tasks. D0 adds ~9-10 migration tasks; Playwright adds ~5-8 test-authoring tasks on top of UI tasks; budget accordingly.
 

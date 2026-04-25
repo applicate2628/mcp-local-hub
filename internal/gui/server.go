@@ -189,33 +189,57 @@ func (realManifestEditor) ManifestEditWithHash(name, yaml, expectedHash string) 
 	return api.NewAPI().ManifestEditWithHash(name, yaml, expectedHash)
 }
 
-// restarter is the narrow interface the /api/servers/:name/restart handler
-// needs. realRestarter is the production adapter; tests inject their own.
+// restarter is the narrow interface the /api/servers/:name/restart
+// handler needs. Per memo D9 (Codex R8 P1), it now returns the
+// per-task RestartResult slice (existing api.RestartResult{TaskName, Err}
+// shape) plus an orchestration-level error. Handler maps:
+//
+//	results all empty Err  → 200 {restart_results:[…]}
+//	results any non-empty  → 207 {restart_results:[…]}
+//	err != nil             → 500 + RESTART_FAILED, body has partial
+//	                         results (memo §D9).
 type restarter interface {
-	Restart(server string) error
+	Restart(server string) ([]api.RestartResult, error)
 }
 
 type realRestarter struct{}
 
 // Restart delegates to api.Restart(server, daemonFilter). The GUI handler
 // targets "restart all daemons for one server," so daemonFilter is "".
-// Per-task failures are aggregated into a single error to match the CLI's
-// "one or more daemons failed to restart" semantics (see internal/cli/restart.go).
-func (realRestarter) Restart(server string) error {
+// Per-task results are returned as-is; the handler inspects each Err field
+// to decide 200 vs 207 (all empty vs any non-empty).
+func (realRestarter) Restart(server string) ([]api.RestartResult, error) {
 	results, err := api.NewAPI().Restart(server, "")
-	if err != nil {
-		return err
+	if results == nil {
+		results = []api.RestartResult{}
 	}
-	var failed []string
-	for _, r := range results {
-		if r.Err != "" {
-			failed = append(failed, r.TaskName+": "+r.Err)
-		}
-	}
-	if len(failed) > 0 {
-		return fmt.Errorf("restart failed: %s", strings.Join(failed, "; "))
-	}
-	return nil
+	return results, err
+}
+
+// secretsAPI is the narrow interface the /api/secrets/* handlers need.
+// Wraps api.API methods so tests can inject a fake. Per memo §5.6.
+type secretsAPI interface {
+	Init() (api.SecretsInitResult, error)
+	List() (api.SecretsEnvelope, error)
+	Set(name, value string) error
+	Rotate(name, value string, restart bool) (api.SecretsRotateResult, error)
+	Restart(name string) ([]api.RestartResult, error)
+	Delete(name string, confirm bool) error
+}
+
+type realSecretsAPI struct{}
+
+func (realSecretsAPI) Init() (api.SecretsInitResult, error) { return api.NewAPI().SecretsInit() }
+func (realSecretsAPI) List() (api.SecretsEnvelope, error)   { return api.NewAPI().SecretsListWithUsage() }
+func (realSecretsAPI) Set(name, value string) error         { return api.NewAPI().SecretsSet(name, value) }
+func (realSecretsAPI) Rotate(name, value string, restart bool) (api.SecretsRotateResult, error) {
+	return api.NewAPI().SecretsRotate(name, value, restart)
+}
+func (realSecretsAPI) Restart(name string) ([]api.RestartResult, error) {
+	return api.NewAPI().SecretsRestart(name)
+}
+func (realSecretsAPI) Delete(name string, confirm bool) error {
+	return api.NewAPI().SecretsDelete(name, confirm)
 }
 
 // logsProvider is the narrow interface the /api/logs/:server handler needs.
@@ -269,6 +293,7 @@ type Server struct {
 	logs             logsProvider
 	extractor        extractor
 	events           *Broadcaster
+	secrets          secretsAPI
 }
 
 // NewServer constructs the Server. It registers the ping handler
@@ -292,6 +317,7 @@ func NewServer(cfg Config) *Server {
 	s.logs = realLogs{}
 	s.extractor = realExtractor{}
 	s.events = NewBroadcaster()
+	s.secrets = realSecretsAPI{}
 	registerPingRoutes(s)
 	registerAssetRoutes(s)
 	registerScanRoutes(s)
@@ -305,6 +331,7 @@ func NewServer(cfg Config) *Server {
 	registerEventsRoutes(s)
 	registerLogsRoutes(s)
 	registerExtractManifestRoutes(s)
+	registerSecretsRoutes(s)
 	return s
 }
 
