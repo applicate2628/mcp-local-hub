@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 
 	"mcp-local-hub/internal/secrets"
@@ -455,5 +456,62 @@ func TestSecretsDelete_WithConfirmBypassesRefs(t *testing.T) {
 	}
 	if err := a.SecretsDelete("K1", true); err != nil {
 		t.Fatalf("SecretsDelete confirm=true: %v", err)
+	}
+}
+
+func TestSecretsInit_ConcurrentCallsSerializeCleanly(t *testing.T) {
+	_, _ = secretsTestEnv(t)
+	a := NewAPI()
+
+	// Spawn N concurrent SecretsInit calls. With the package mutex in
+	// place, calls are serialized: exactly one performs the actual
+	// InitVault write; all subsequent callers acquire the lock after the
+	// vault is committed and hit the Case-1 idempotent OpenVault path,
+	// returning vault_state="ok". No call should return an error (errors
+	// indicate corrupt state or orphan detection, not normal idempotent
+	// return). The critical post-condition is that the resulting vault is
+	// openable — proving no key/vault mismatch occurred.
+	const N = 8
+	type result struct {
+		res SecretsInitResult
+		err error
+	}
+	results := make(chan result, N)
+	var wg sync.WaitGroup
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r, e := a.SecretsInit()
+			results <- result{r, e}
+		}()
+	}
+	wg.Wait()
+	close(results)
+
+	okCount := 0
+	for r := range results {
+		if r.err != nil {
+			t.Errorf("unexpected error from concurrent SecretsInit: %v", r.err)
+			continue
+		}
+		if r.res.VaultState == "ok" {
+			okCount++
+		} else {
+			t.Errorf("unexpected vault_state %q (want ok)", r.res.VaultState)
+		}
+	}
+	if okCount != N {
+		t.Errorf("expected all %d callers to return vault_state=ok (serialized idempotent path), got %d", N, okCount)
+	}
+
+	// Verify the vault is actually openable with the written key.
+	// This is the critical invariant: no key/vault mismatch from interleaved writes.
+	v, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
+	if err != nil {
+		t.Fatalf("vault not openable after concurrent init: %v", err)
+	}
+	if len(v.List()) != 0 {
+		t.Errorf("expected empty vault after init, got keys: %v", v.List())
 	}
 }

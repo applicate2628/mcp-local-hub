@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 
 	"mcp-local-hub/internal/secrets"
 )
@@ -80,6 +81,13 @@ func (e *SecretsInitFailed) Unwrap() error { return e.Cause }
 // exported type so Step 1.C.5's SecretsInit body compiles.
 var initVaultFn = secrets.InitVault
 
+// initMutex serializes SecretsInit so concurrent POST /api/secrets/init
+// requests cannot interleave secrets.InitVault's Stat→GenerateIdentity→
+// WriteFile→save sequence and produce a key/vault mismatch (Codex
+// PR #18 P1 round 2). InitVault is a rare bootstrap op; serializing
+// has no real cost.
+var initMutex sync.Mutex
+
 // SecretsInit implements the D2 four-case classifier (memo §5.1):
 //
 //	case 1 → 200 ok, no-op
@@ -88,6 +96,9 @@ var initVaultFn = secrets.InitVault
 //	case 2c → returns SecretsInitFailed{CleanupStatus:"failed"}, handler maps to 500
 //	cases 3/4 → returns 409-style typed errors via wrapper return value
 func (a *API) SecretsInit() (SecretsInitResult, error) {
+	initMutex.Lock()
+	defer initMutex.Unlock()
+
 	keyPath := secrets.DefaultKeyPath()
 	vaultPath := secrets.DefaultVaultPath()
 
