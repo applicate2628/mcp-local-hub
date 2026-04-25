@@ -382,7 +382,7 @@ function SecretRowComponent(props: {
         >
           Delete
         </button>
-        {props.row.state === "referenced_missing" && (
+        {props.row.state === "referenced_missing" && !isReserved && (
           <span class="hint">
             {"↳ "}
             <button
