@@ -69,6 +69,11 @@ type SecretsInitFailed struct {
 
 func (e *SecretsInitFailed) Error() string { return e.Cause.Error() }
 
+// Unwrap participates in errors.Is/errors.As chains so callers can
+// inspect the underlying InitVault failure (disk full, permission, etc.)
+// without parsing Error() strings.
+func (e *SecretsInitFailed) Unwrap() error { return e.Cause }
+
 // initVaultFn is the function the wrapper calls to perform the
 // underlying init. Tests override this to inject failures and verify
 // cleanup behavior (memo R7). Codex plan-R3 P1: declared with the
@@ -88,6 +93,7 @@ func (a *API) SecretsInit() (SecretsInitResult, error) {
 
 	// Case 1: vault already opens cleanly → idempotent no-op.
 	if v, err := secrets.OpenVault(keyPath, vaultPath); err == nil {
+		// secrets.Vault holds no OS resources beyond its in-memory map; no Close needed.
 		_ = v
 		return SecretsInitResult{VaultState: "ok"}, nil
 	}
@@ -174,32 +180,33 @@ var secretNameRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
 // errors the handler maps to 400/409.
 func (a *API) SecretsSet(name, value string) error {
 	if !secretNameRE.MatchString(name) {
-		return &SecretsSetError{Code: "SECRETS_INVALID_NAME", Msg: fmt.Sprintf("name %q does not match %s", name, secretNameRE.String())}
+		return &SecretsOpError{Code: "SECRETS_INVALID_NAME", Msg: fmt.Sprintf("name %q does not match %s", name, secretNameRE.String())}
 	}
 	if value == "" {
-		return &SecretsSetError{Code: "SECRETS_EMPTY_VALUE", Msg: "value must not be empty"}
+		return &SecretsOpError{Code: "SECRETS_EMPTY_VALUE", Msg: "value must not be empty"}
 	}
 	v, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
 	if err != nil {
-		return &SecretsSetError{Code: "SECRETS_VAULT_NOT_INITIALIZED", Msg: err.Error()}
+		return &SecretsOpError{Code: "SECRETS_VAULT_NOT_INITIALIZED", Msg: err.Error()}
 	}
 	if _, getErr := v.Get(name); getErr == nil {
-		return &SecretsSetError{Code: "SECRETS_KEY_EXISTS", Msg: fmt.Sprintf("secret %q already exists; use Rotate to update", name)}
+		return &SecretsOpError{Code: "SECRETS_KEY_EXISTS", Msg: fmt.Sprintf("secret %q already exists; use Rotate to update", name)}
 	}
 	if err := v.Set(name, value); err != nil {
-		return &SecretsSetError{Code: "SECRETS_SET_FAILED", Msg: err.Error()}
+		return &SecretsOpError{Code: "SECRETS_SET_FAILED", Msg: err.Error()}
 	}
 	return nil
 }
 
-// SecretsSetError is the typed error from SecretsSet. The handler maps
-// Code → HTTP status (memo §5.7).
-type SecretsSetError struct {
+// SecretsOpError is the typed error returned by every coded Secrets API
+// wrapper (Set, Rotate, Restart, Delete) — Code maps to HTTP status per
+// memo §5.7.
+type SecretsOpError struct {
 	Code string
 	Msg  string
 }
 
-func (e *SecretsSetError) Error() string { return e.Msg }
+func (e *SecretsOpError) Error() string { return e.Msg }
 
 // SecretsListWithUsage builds the registry envelope (memo §5.2).
 func (a *API) SecretsListWithUsage() (SecretsEnvelope, error) {
@@ -309,20 +316,20 @@ func nonNilUsage(in []UsageRef) []UsageRef {
 // while still surfacing vault_updated:true.
 func (a *API) SecretsRotate(name, value string, restart bool) (SecretsRotateResult, error) {
 	if !secretNameRE.MatchString(name) {
-		return SecretsRotateResult{}, &SecretsSetError{Code: "SECRETS_INVALID_NAME", Msg: fmt.Sprintf("name %q does not match %s", name, secretNameRE.String())}
+		return SecretsRotateResult{}, &SecretsOpError{Code: "SECRETS_INVALID_NAME", Msg: fmt.Sprintf("name %q does not match %s", name, secretNameRE.String())}
 	}
 	if value == "" {
-		return SecretsRotateResult{}, &SecretsSetError{Code: "SECRETS_EMPTY_VALUE", Msg: "value must not be empty"}
+		return SecretsRotateResult{}, &SecretsOpError{Code: "SECRETS_EMPTY_VALUE", Msg: "value must not be empty"}
 	}
 	v, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
 	if err != nil {
-		return SecretsRotateResult{}, &SecretsSetError{Code: "SECRETS_VAULT_NOT_INITIALIZED", Msg: err.Error()}
+		return SecretsRotateResult{}, &SecretsOpError{Code: "SECRETS_VAULT_NOT_INITIALIZED", Msg: err.Error()}
 	}
 	if _, getErr := v.Get(name); getErr != nil {
-		return SecretsRotateResult{}, &SecretsSetError{Code: "SECRETS_KEY_NOT_FOUND", Msg: getErr.Error()}
+		return SecretsRotateResult{}, &SecretsOpError{Code: "SECRETS_KEY_NOT_FOUND", Msg: getErr.Error()}
 	}
 	if err := v.Set(name, value); err != nil {
-		return SecretsRotateResult{}, &SecretsSetError{Code: "SECRETS_SET_FAILED", Msg: err.Error()}
+		return SecretsRotateResult{}, &SecretsOpError{Code: "SECRETS_SET_FAILED", Msg: err.Error()}
 	}
 
 	res := SecretsRotateResult{VaultUpdated: true, RestartResults: []RestartResult{}}
@@ -339,10 +346,10 @@ func (a *API) SecretsRotate(name, value string, restart bool) (SecretsRotateResu
 func (a *API) SecretsRestart(name string) ([]RestartResult, error) {
 	v, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
 	if err != nil {
-		return nil, &SecretsSetError{Code: "SECRETS_VAULT_NOT_INITIALIZED", Msg: err.Error()}
+		return nil, &SecretsOpError{Code: "SECRETS_VAULT_NOT_INITIALIZED", Msg: err.Error()}
 	}
 	if _, getErr := v.Get(name); getErr != nil {
-		return nil, &SecretsSetError{Code: "SECRETS_KEY_NOT_FOUND", Msg: getErr.Error()}
+		return nil, &SecretsOpError{Code: "SECRETS_KEY_NOT_FOUND", Msg: getErr.Error()}
 	}
 	return a.restartServersForKey(name)
 }
@@ -419,10 +426,10 @@ func (a *API) restartServersForKey(key string) ([]RestartResult, error) {
 func (a *API) SecretsDelete(name string, confirm bool) error {
 	v, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
 	if err != nil {
-		return &SecretsSetError{Code: "SECRETS_VAULT_NOT_INITIALIZED", Msg: err.Error()}
+		return &SecretsOpError{Code: "SECRETS_VAULT_NOT_INITIALIZED", Msg: err.Error()}
 	}
 	if _, getErr := v.Get(name); getErr != nil {
-		return &SecretsSetError{Code: "SECRETS_KEY_NOT_FOUND", Msg: getErr.Error()}
+		return &SecretsOpError{Code: "SECRETS_KEY_NOT_FOUND", Msg: getErr.Error()}
 	}
 	if !confirm {
 		usage, manifestErrs, scanErr := ScanManifestEnv()
@@ -446,7 +453,7 @@ func (a *API) SecretsDelete(name string, confirm bool) error {
 		}
 	}
 	if err := v.Delete(name); err != nil {
-		return &SecretsSetError{Code: "SECRETS_DELETE_FAILED", Msg: err.Error()}
+		return &SecretsOpError{Code: "SECRETS_DELETE_FAILED", Msg: err.Error()}
 	}
 	return nil
 }
