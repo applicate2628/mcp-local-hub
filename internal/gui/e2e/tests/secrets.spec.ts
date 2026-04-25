@@ -6,14 +6,12 @@
 // - Most scenarios stub GET /api/secrets via page.route() because the
 //   E2E binary uses embed-FS manifests (wolfram_app_id + unpaywall_email)
 //   that would pollute the secrets list in tests expecting a clean state.
-//   Only scenarios 1 and 14 rely on the real backend end-to-end.
 // - The hub fixture sets LOCALAPPDATA=hub.home on Windows, so vault files
 //   land at <hub.home>/mcp-local-hub/.age-key and secrets.age.
 // - Scenarios requiring "daemon running" counts stub /api/status because
 //   MCPHUB_E2E_SCHEDULER=none forces /api/status to return [] always.
 
 import { test, expect } from "../fixtures/hub";
-import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -40,20 +38,6 @@ function secrEnvelope(
   });
 }
 
-/** binServersDir: where the test binary resolves on-disk manifests (disk fallback). */
-const binServersDir = resolve(__dirname, "..", "bin", "servers");
-
-/** seedManifestForScan: write a manifest into bin/servers/ for disk-fallback scan.
- *  NOTE: only works when MCPHUB_MANIFEST_DIR_OVERRIDE is not set AND the binary
- *  has already created e2e/bin/servers/ via a prior create call. Used here only
- *  for scenarios 3/4 to show the on-disk seeding pattern — those scenarios also
- *  stub GET /api/secrets directly to guarantee deterministic state. */
-function seedManifestForScan(name: string, yaml: string): void {
-  const dir = join(binServersDir, name);
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "manifest.yaml"), yaml, "utf-8");
-}
-
 // ---------------------------------------------------------------------------
 // Test suite
 // ---------------------------------------------------------------------------
@@ -64,10 +48,37 @@ test.describe("Secrets registry", () => {
   // -------------------------------------------------------------------------
   test("Empty-state init flow", async ({ page, hub }) => {
     // Fresh tmpHome → vault files don't exist → vault_state == "missing".
-    // Stub /api/status so the screen doesn't error on the Servers call.
+    // Stub /api/status so InitKeyedView's refreshRunning() doesn't 500.
     await page.route("**/api/status", (r) =>
       r.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
     );
+    // Stub GET /api/secrets: first response = missing vault; after init = ok empty.
+    let inited = false;
+    await page.route("**/api/secrets", async (r) => {
+      if (r.request().method() !== "GET") { await r.continue(); return; }
+      if (!inited) {
+        await r.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: secrEnvelope("missing"),
+        });
+      } else {
+        await r.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: secrEnvelope("ok", [], []),
+        });
+      }
+    });
+    // Stub POST /api/secrets/init → 200.
+    await page.route("**/api/secrets/init", async (r) => {
+      inited = true;
+      await r.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ vault_state: "ok" }),
+      });
+    });
 
     await page.goto(`${hub.url}/#/secrets`);
 
@@ -93,16 +104,26 @@ test.describe("Secrets registry", () => {
   // 2. Add first secret
   // -------------------------------------------------------------------------
   test("Add first secret", async ({ page, hub }) => {
-    // Stub GET /api/secrets → empty initialized vault (no leaked embed refs).
-    let secretCount = 0;
+    // Stub GET /api/secrets:
+    //   phase 0 → missing (show init button)
+    //   phase 1 → ok empty (after init, show "No secrets yet" + Add)
+    //   phase 2 → ok with OPENAI_API_KEY (after save)
+    let phase = 0;
     await page.route("**/api/secrets", async (r) => {
       if (r.request().method() === "POST") {
-        // Let real POST through so the vault actually writes.
-        await r.continue();
+        // Let POST through to real backend (vault must be real to accept Set).
+        // Actually we stub 201 here too since vault isn't really init'd.
+        phase = 2;
+        await r.fulfill({ status: 201, body: "" });
         return;
       }
-      // GET: return vault with 1 secret after POST, empty before.
-      if (secretCount === 0) {
+      if (phase === 0) {
+        await r.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: secrEnvelope("missing"),
+        });
+      } else if (phase === 1) {
         await r.fulfill({
           status: 200,
           contentType: "application/json",
@@ -121,20 +142,23 @@ test.describe("Secrets registry", () => {
     await page.route("**/api/status", (r) =>
       r.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
     );
-    await page.route("**/api/secrets/init", (r) =>
-      r.fulfill({
+    // Stub POST /api/secrets/init → 200 (advance to phase 1).
+    await page.route("**/api/secrets/init", async (r) => {
+      phase = 1;
+      await r.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({ vault_state: "ok" }),
-      }),
-    );
+      });
+    });
 
-    // Initialize vault first (to get to AddSecret state).
     await page.goto(`${hub.url}/#/secrets`);
+
+    // Phase 0: init button visible.
     const initButton = page.getByRole("button", { name: "Initialize secrets vault" });
     await expect(initButton).toBeVisible();
     await initButton.click();
-    // After init the stub returns empty-ok, so we see "No secrets yet".
+    // Phase 1: "No secrets yet" with Add secret button.
     await expect(page.getByText("No secrets yet")).toBeVisible();
 
     // Open the Add secret modal.
@@ -146,7 +170,7 @@ test.describe("Secrets registry", () => {
     await modal.locator('input[placeholder="OPENAI_API_KEY"]').fill("OPENAI_API_KEY");
     await modal.locator('input[type="password"]').fill("sk-test-value-123");
 
-    // Intercept the real POST /api/secrets (after clearing the GET stub interference).
+    // Watch for the POST /api/secrets request.
     const postResponse = page.waitForResponse(
       (r) =>
         r.url().includes("/api/secrets") &&
@@ -154,33 +178,14 @@ test.describe("Secrets registry", () => {
         r.request().method() === "POST",
     );
 
-    // Stub /api/secrets POST (name conflict with the GET route above — the GET stub
-    // above already lets POST continue; here we stub directly for 201).
-    await page.route("**/api/secrets", async (r) => {
-      if (r.request().method() === "POST") {
-        secretCount++;
-        await r.fulfill({ status: 201, body: "" });
-        return;
-      }
-      // GET after save: 1 row.
-      await r.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: secrEnvelope("ok", [
-          { name: "OPENAI_API_KEY", state: "present", used_by: [] },
-        ]),
-      });
-    });
-
     await modal.getByRole("button", { name: "Save" }).click();
 
     const saved = await postResponse;
-    // 201 means the vault wrote successfully.
+    // 201 from our stub.
     expect(saved.status()).toBe(201);
 
-    // After save the modal closes and a row appears.
+    // After save the modal closes and a row appears (phase 2 GET response).
     await expect(modal).not.toBeVisible();
-    // The table row appears with the key name.
     await expect(page.locator("table").getByText("OPENAI_API_KEY")).toBeVisible();
   });
 
@@ -216,7 +221,7 @@ test.describe("Secrets registry", () => {
     const row = page.locator("table tbody tr").filter({ hasText: "K1" });
     await expect(row).toBeVisible();
 
-    // The "Used by" column cell contains "2".
+    // The "Used by" column cell (index 1) contains "2".
     const usedByCell = row.locator("td").nth(1);
     await expect(usedByCell).toHaveText("2");
 
@@ -230,7 +235,7 @@ test.describe("Secrets registry", () => {
   // 4. Ghost ref displays for manifest-only key
   // -------------------------------------------------------------------------
   test("Ghost ref displays for manifest-only key", async ({ page, hub }) => {
-    // Vault is ok but WOLFRAM_APP_ID is referenced_missing (in manifests but not vault).
+    // Vault is ok but WOLFRAM_APP_ID is referenced_missing.
     await page.route("**/api/secrets", async (r) => {
       if (r.request().method() !== "GET") { await r.continue(); return; }
       await r.fulfill({
@@ -261,7 +266,7 @@ test.describe("Secrets registry", () => {
   });
 
   // -------------------------------------------------------------------------
-  // 5. Decrypt-failed vault → referenced_unverified
+  // 5. Decrypt-failed vault → referenced_unverified rows
   // -------------------------------------------------------------------------
   test("Decrypt-failed vault → referenced_unverified rows", async ({ page, hub }) => {
     // Vault state is decrypt_failed; manifest refs are referenced_unverified.
@@ -287,10 +292,10 @@ test.describe("Secrets registry", () => {
 
     // The BrokenView banner is visible (vault unavailable).
     await expect(page.getByText("Vault unavailable")).toBeVisible();
-    // Rows rendered as referenced_unverified — shown in the broken-view table.
-    await expect(page.getByText("MY_KEY")).toBeVisible();
-    // The BrokenView body mentions vault_state text.
+    // vault_state text appears in the banner.
     await expect(page.getByText("decrypt_failed")).toBeVisible();
+    // MY_KEY row is shown (referenced_unverified shown in broken-view table).
+    await expect(page.getByText("MY_KEY")).toBeVisible();
   });
 
   // -------------------------------------------------------------------------
@@ -300,7 +305,7 @@ test.describe("Secrets registry", () => {
     page,
     hub,
   }) => {
-    // Stub GET /api/secrets: vault ok, K1 present (used_by: 1 server).
+    // Stub GET /api/secrets: vault ok, K1 present.
     await page.route("**/api/secrets", async (r) => {
       if (r.request().method() !== "GET") { await r.continue(); return; }
       await r.fulfill({
@@ -311,12 +316,12 @@ test.describe("Secrets registry", () => {
         ]),
       });
     });
-    // /api/status returns [] → 0 running daemons.
+    // /api/status → [] (0 running daemons).
     await page.route("**/api/status", (r) =>
       r.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
     );
-    // Stub PUT /api/secrets/K1 → 200 (no restart, empty results).
-    await page.route("**/api/secrets/K1", async (r) => {
+    // PUT /api/secrets/K1 → 200 (no restart, empty results).
+    await page.route(/\/api\/secrets\/K1$/, async (r) => {
       if (r.request().method() === "PUT") {
         await r.fulfill({
           status: 200,
@@ -329,20 +334,29 @@ test.describe("Secrets registry", () => {
     });
 
     await page.goto(`${hub.url}/#/secrets`);
-    await expect(page.locator("table tbody tr")).toHaveCount(1);
+    const row = page.locator("table tbody tr").filter({ hasText: "K1" });
+    await expect(row).toBeVisible();
 
     // Click Rotate on the K1 row.
-    await page.locator("table tbody tr").filter({ hasText: "K1" }).getByRole("button", { name: "Rotate" }).click();
+    await row.getByRole("button", { name: "Rotate" }).click();
     const rotateModal = page.locator('[data-testid="rotate-secret-modal"]');
     await expect(rotateModal).toBeVisible();
 
     // Fill new value and click "Save without restart".
     await rotateModal.locator('input[type="password"]').fill("new-value-xyz");
+
+    // Wait for the PUT response.
+    const putResponse = page.waitForResponse(
+      (r) => r.url().includes("/api/secrets/K1") && r.request().method() === "PUT",
+    );
     await rotateModal.getByRole("button", { name: "Save without restart" }).click();
+    await putResponse;
     // Modal closes.
     await expect(rotateModal).not.toBeVisible();
 
     // With 0 running daemons, the persistent CTA must NOT appear.
+    // Give 1s for any async state updates to settle.
+    await page.waitForTimeout(500);
     await expect(page.locator('[data-testid="rotate-cta"]')).toHaveCount(0);
   });
 
@@ -370,7 +384,7 @@ test.describe("Secrets registry", () => {
         ]),
       });
     });
-    // /api/status: 2 running daemons for the servers that reference K1.
+    // /api/status: 2 running daemons — alpha and beta.
     await page.route("**/api/status", (r) =>
       r.fulfill({
         status: 200,
@@ -381,8 +395,8 @@ test.describe("Secrets registry", () => {
         ]),
       }),
     );
-    // PUT /api/secrets/K1 → 200.
-    await page.route("**/api/secrets/K1", async (r) => {
+    // PUT /api/secrets/K1 → 200 (save without restart).
+    await page.route(/\/api\/secrets\/K1$/, async (r) => {
       if (r.request().method() === "PUT") {
         await r.fulfill({
           status: 200,
@@ -395,31 +409,52 @@ test.describe("Secrets registry", () => {
     });
     // POST /api/secrets/K1/restart → 200 (all succeeded).
     let restartCalled = false;
-    await page.route("**/api/secrets/K1/restart", async (r) => {
-      restartCalled = true;
-      await r.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          restart_results: [
-            { task_name: "alpha/default", error: "" },
-            { task_name: "beta/default", error: "" },
-          ],
-        }),
-      });
+    await page.route(/\/api\/secrets\/K1\/restart$/, async (r) => {
+      if (r.request().method() === "POST") {
+        restartCalled = true;
+        await r.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            restart_results: [
+              { task_name: "alpha/default", error: "" },
+              { task_name: "beta/default", error: "" },
+            ],
+          }),
+        });
+        return;
+      }
+      await r.continue();
     });
 
     await page.goto(`${hub.url}/#/secrets`);
-    await expect(page.locator("table tbody tr")).toHaveCount(1);
+    const row = page.locator("table tbody tr").filter({ hasText: "K1" });
+    await expect(row).toBeVisible();
+
+    // Wait for the initial /api/status fetch (runningByServer) to complete.
+    await page.waitForResponse(
+      (r) => r.url().includes("/api/status") && r.request().method() === "GET",
+    );
 
     // Click Rotate on K1.
-    await page.locator("table tbody tr").filter({ hasText: "K1" }).getByRole("button", { name: "Rotate" }).click();
+    await row.getByRole("button", { name: "Rotate" }).click();
     const rotateModal = page.locator('[data-testid="rotate-secret-modal"]');
     await expect(rotateModal).toBeVisible();
 
     await rotateModal.locator('input[type="password"]').fill("new-value-abc");
+
+    // Wait for the PUT response before asserting CTA.
+    const putResponse = page.waitForResponse(
+      (r) => r.url().includes("/api/secrets/K1") && r.request().method() === "PUT",
+    );
     await rotateModal.getByRole("button", { name: "Save without restart" }).click();
+    await putResponse;
     await expect(rotateModal).not.toBeVisible();
+
+    // Wait for the post-rotate /api/status refresh to settle.
+    await page.waitForResponse(
+      (r) => r.url().includes("/api/status") && r.request().method() === "GET",
+    );
 
     // With 2 running daemons → persistent CTA is visible.
     const cta = page.locator('[data-testid="rotate-cta"]');
@@ -469,7 +504,7 @@ test.describe("Secrets registry", () => {
       }),
     );
     // PUT returns 207 with mixed restart_results: 1 success, 1 failure.
-    await page.route("**/api/secrets/K1", async (r) => {
+    await page.route(/\/api\/secrets\/K1$/, async (r) => {
       if (r.request().method() === "PUT") {
         await r.fulfill({
           status: 207,
@@ -488,20 +523,28 @@ test.describe("Secrets registry", () => {
     });
 
     await page.goto(`${hub.url}/#/secrets`);
-    await expect(page.locator("table tbody tr")).toHaveCount(1);
+    const row = page.locator("table tbody tr").filter({ hasText: "K1" });
+    await expect(row).toBeVisible();
 
     // Click Rotate on K1.
-    await page.locator("table tbody tr").filter({ hasText: "K1" }).getByRole("button", { name: "Rotate" }).click();
+    await row.getByRole("button", { name: "Rotate" }).click();
     const rotateModal = page.locator('[data-testid="rotate-secret-modal"]');
     await expect(rotateModal).toBeVisible();
 
     await rotateModal.locator('input[type="password"]').fill("rotated-value");
+
+    // Watch for the PUT response.
+    const putResponse = page.waitForResponse(
+      (r) => r.url().includes("/api/secrets/K1") && r.request().method() === "PUT",
+    );
     await rotateModal.getByRole("button", { name: "Save and restart" }).click();
+    await putResponse;
     await expect(rotateModal).not.toBeVisible();
 
-    // Partial-failure banner appears: "1/2 daemons restarted" (1 ok, 1 failed out of 2 total).
+    // Partial-failure banner appears.
     const partialBanner = page.locator('[data-testid="rotate-banner-partial"]');
     await expect(partialBanner).toBeVisible();
+    // 1 ok out of 2 total: "1/2".
     await expect(partialBanner).toContainText("1/2");
 
     // "Retry failed restarts" button is visible.
@@ -515,12 +558,11 @@ test.describe("Secrets registry", () => {
     page,
     hub,
   }) => {
-    // Stub GET /api/secrets: K2 present, no refs.
-    let getCount = 0;
+    // Stub GET /api/secrets: K2 present, no refs (first call); then empty (after delete).
+    let deleted = false;
     await page.route("**/api/secrets", async (r) => {
       if (r.request().method() !== "GET") { await r.continue(); return; }
-      if (getCount === 0) {
-        getCount++;
+      if (!deleted) {
         await r.fulfill({
           status: 200,
           contentType: "application/json",
@@ -529,7 +571,6 @@ test.describe("Secrets registry", () => {
           ]),
         });
       } else {
-        // After delete: empty.
         await r.fulfill({
           status: 200,
           contentType: "application/json",
@@ -541,15 +582,16 @@ test.describe("Secrets registry", () => {
       r.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
     );
 
-    // Track DELETE /api/secrets/K2 calls (no confirm flag expected).
+    // Track DELETE /api/secrets/K2 calls.
     let deleteCount = 0;
     let deletedWithConfirm = false;
-    await page.route("**/api/secrets/K2", async (r) => {
+    await page.route(/\/api\/secrets\/K2(\?.*)?$/, async (r) => {
       if (r.request().method() === "DELETE") {
         deleteCount++;
         if (r.request().url().includes("confirm=true")) {
           deletedWithConfirm = true;
         }
+        deleted = true;
         await r.fulfill({ status: 204, body: "" });
         return;
       }
@@ -559,11 +601,14 @@ test.describe("Secrets registry", () => {
     await page.goto(`${hub.url}/#/secrets`);
     await expect(page.locator("table tbody tr")).toHaveCount(1);
 
-    // Click Delete on K2.
+    // Click Delete on K2 — fires first (no-confirm) DELETE which gets 204.
+    const deleteResponse = page.waitForResponse(
+      (r) => r.url().includes("/api/secrets/K2") && r.request().method() === "DELETE",
+    );
     await page.locator("table tbody tr").filter({ hasText: "K2" }).getByRole("button", { name: "Delete" }).click();
+    await deleteResponse;
 
-    // The modal fires the first (no-confirm) DELETE immediately.
-    // Since it gets 204, it calls onDeleted → refresh → row disappears.
+    // The modal fires the DELETE immediately; 204 → onDeleted → refresh → row disappears.
     await expect(page.locator("table tbody tr").filter({ hasText: "K2" })).toHaveCount(0);
 
     // Exactly one DELETE request, no confirm flag.
@@ -578,12 +623,11 @@ test.describe("Secrets registry", () => {
     page,
     hub,
   }) => {
-    // Stub GET /api/secrets: K1 with 1 ref.
-    let getCount = 0;
+    // Stub GET /api/secrets: K1 with 1 ref (first call); empty after confirmed delete.
+    let confirmed = false;
     await page.route("**/api/secrets", async (r) => {
       if (r.request().method() !== "GET") { await r.continue(); return; }
-      if (getCount === 0) {
-        getCount++;
+      if (!confirmed) {
         await r.fulfill({
           status: 200,
           contentType: "application/json",
@@ -608,7 +652,7 @@ test.describe("Secrets registry", () => {
     );
 
     const deleteRequests: string[] = [];
-    await page.route("**/api/secrets/K1", async (r) => {
+    await page.route(/\/api\/secrets\/K1(\?.*)?$/, async (r) => {
       if (r.request().method() === "DELETE") {
         const url = r.request().url();
         deleteRequests.push(url);
@@ -625,6 +669,7 @@ test.describe("Secrets registry", () => {
           });
         } else {
           // Second DELETE (?confirm=true): succeed.
+          confirmed = true;
           await r.fulfill({ status: 204, body: "" });
         }
         return;
@@ -635,11 +680,17 @@ test.describe("Secrets registry", () => {
     await page.goto(`${hub.url}/#/secrets`);
     await expect(page.locator("table tbody tr")).toHaveCount(1);
 
-    // Click Delete on K1.
+    // Click Delete on K1. First request fires automatically (no-confirm).
+    const firstDeleteResponse = page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/secrets/K1") &&
+        !r.url().includes("confirm") &&
+        r.request().method() === "DELETE",
+    );
     await page.locator("table tbody tr").filter({ hasText: "K1" }).getByRole("button", { name: "Delete" }).click();
+    await firstDeleteResponse;
 
-    // Modal opens — first request was sent automatically (no-confirm),
-    // backend returned 409, so escalation UI shows.
+    // Modal opens — first request returned 409, escalation UI shows.
     const modal = page.locator('[data-testid="delete-secret-modal"]');
     await expect(modal).toBeVisible();
     // The "confirm-refs" stage shows the ref list.
@@ -653,7 +704,16 @@ test.describe("Secrets registry", () => {
     // Type DELETE to unlock.
     await modal.locator('[data-testid="delete-confirm-input"]').fill("DELETE");
     await expect(confirmBtn).toBeEnabled();
+
+    // Second request fires with ?confirm=true.
+    const secondDeleteResponse = page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/secrets/K1") &&
+        r.url().includes("confirm=true") &&
+        r.request().method() === "DELETE",
+    );
     await confirmBtn.click();
+    await secondDeleteResponse;
 
     // Row disappears after confirmed delete.
     await expect(modal).not.toBeVisible();
@@ -672,11 +732,10 @@ test.describe("Secrets registry", () => {
     page,
     hub,
   }) => {
-    let getCount = 0;
+    let confirmed = false;
     await page.route("**/api/secrets", async (r) => {
       if (r.request().method() !== "GET") { await r.continue(); return; }
-      if (getCount === 0) {
-        getCount++;
+      if (!confirmed) {
         await r.fulfill({
           status: 200,
           contentType: "application/json",
@@ -697,12 +756,12 @@ test.describe("Secrets registry", () => {
     );
 
     const deleteRequests: string[] = [];
-    await page.route("**/api/secrets/K1", async (r) => {
+    await page.route(/\/api\/secrets\/K1(\?.*)?$/, async (r) => {
       if (r.request().method() === "DELETE") {
         const url = r.request().url();
         deleteRequests.push(url);
         if (!url.includes("confirm=true")) {
-          // First DELETE (no-confirm): scan incomplete — 409 SECRETS_USAGE_SCAN_INCOMPLETE.
+          // First DELETE (no-confirm): scan incomplete → 409.
           await r.fulfill({
             status: 409,
             contentType: "application/json",
@@ -714,6 +773,7 @@ test.describe("Secrets registry", () => {
           });
         } else {
           // Second DELETE (?confirm=true): succeed.
+          confirmed = true;
           await r.fulfill({ status: 204, body: "" });
         }
         return;
@@ -724,11 +784,19 @@ test.describe("Secrets registry", () => {
     await page.goto(`${hub.url}/#/secrets`);
     await expect(page.locator("table tbody tr")).toHaveCount(1);
 
+    // Click Delete on K1.
+    const firstDeleteResponse = page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/secrets/K1") &&
+        !r.url().includes("confirm") &&
+        r.request().method() === "DELETE",
+    );
     await page.locator("table tbody tr").filter({ hasText: "K1" }).getByRole("button", { name: "Delete" }).click();
+    await firstDeleteResponse;
 
     const modal = page.locator('[data-testid="delete-secret-modal"]');
     await expect(modal).toBeVisible();
-    // scan-incomplete stage: corrupt manifest error listed.
+    // Scan-incomplete stage: corrupt manifest error listed.
     await expect(modal.getByText("corrupt-server/manifest.yaml")).toBeVisible();
     await expect(modal.getByText("YAML parse error")).toBeVisible();
 
@@ -738,7 +806,15 @@ test.describe("Secrets registry", () => {
 
     await modal.locator('[data-testid="delete-confirm-input"]').fill("DELETE");
     await expect(confirmBtn).toBeEnabled();
+
+    const secondDeleteResponse = page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/secrets/K1") &&
+        r.url().includes("confirm=true") &&
+        r.request().method() === "DELETE",
+    );
     await confirmBtn.click();
+    await secondDeleteResponse;
 
     // Row removed after confirmed delete.
     await expect(modal).not.toBeVisible();
@@ -757,16 +833,10 @@ test.describe("Secrets registry", () => {
     page,
     hub,
   }) => {
-    // This scenario verifies the backend API contract directly via
-    // page.request (no UI), then checks the response shape.
-    // We first init the vault, set a key, seed a manifest with a ref,
-    // then call DELETE directly.
-    //
-    // Practical approach: use page.route to stub the backend responses
-    // and verify the API client code paths via fetch from the page context.
-    // This proves the frontend APIError parsing and the 409 contract shape.
-
-    await page.route("**/api/secrets/REFED_KEY", async (r) => {
+    // This scenario verifies the API contract shape directly via fetch()
+    // from the browser context (no UI interaction), using page.route() to
+    // stub the backend. Proves the frontend APIError parsing code paths.
+    await page.route(/\/api\/secrets\/REFED_KEY(\?.*)?$/, async (r) => {
       if (r.request().method() === "DELETE") {
         if (!r.request().url().includes("confirm=true")) {
           await r.fulfill({
@@ -786,6 +856,7 @@ test.describe("Secrets registry", () => {
       await r.continue();
     });
 
+    // Navigate to any page so fetch() works in the browser context.
     await page.goto(`${hub.url}/#/secrets`);
 
     // Call DELETE via fetch from the page context (simulating the frontend API client).
@@ -811,23 +882,17 @@ test.describe("Secrets registry", () => {
     hub,
     context,
   }) => {
+    // Stub GET /api/secrets → missing (simplest state that still shows the banner).
     await page.route("**/api/secrets", async (r) => {
       if (r.request().method() !== "GET") { await r.continue(); return; }
       await r.fulfill({
         status: 200,
         contentType: "application/json",
-        body: secrEnvelope("ok", []),
+        body: secrEnvelope("missing"),
       });
     });
     await page.route("**/api/status", (r) =>
       r.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
-    );
-    await page.route("**/api/secrets/init", (r) =>
-      r.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ vault_state: "ok" }),
-      }),
     );
 
     // Grant clipboard permissions before navigating.
@@ -835,13 +900,6 @@ test.describe("Secrets registry", () => {
 
     await page.goto(`${hub.url}/#/secrets`);
 
-    // Initialize to get past the "not initialized" state.
-    const initButton = page.getByRole("button", { name: "Initialize secrets vault" });
-    if (await initButton.isVisible()) {
-      await initButton.click();
-    }
-
-    // Wait for the screen body to appear (either empty-state or table).
     // The EditVaultBanner is always visible regardless of vault state.
     const banner = page.locator('[data-testid="edit-vault-banner"]');
     await expect(banner).toBeVisible();
@@ -870,14 +928,22 @@ test.describe("Secrets registry", () => {
       await r.fulfill({
         status: 200,
         contentType: "application/json",
-        body: secrEnvelope("missing", []),
+        body: secrEnvelope("missing"),
       });
     });
     await page.route("**/api/status", (r) =>
       r.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
     );
+    // Stub scan (used by Servers screen when we start there).
+    await page.route("**/api/scan", (r) =>
+      r.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ entries: [] }),
+      }),
+    );
 
-    // Start on a different screen.
+    // Start on the Dashboard screen.
     await page.goto(`${hub.url}/#/dashboard`);
     await expect(page.locator("h1")).toHaveText("Dashboard");
 
