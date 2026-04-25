@@ -11,8 +11,10 @@ interface Props {
   // For the counter copy: total reference count and how many are running.
   // Computed by parent from snapshot + status; if not available, both
   // can be undefined and the modal omits the counts.
+  // Codex PR #18 P2: null means status is known-unavailable (distinct from
+  // undefined = not provided), but both are treated the same in the copy.
   refCount: number;
-  runningCount?: number;
+  runningCount?: number | null;
   onClose: () => void;
   onSaved: (result: SecretsRotateResult, mode: "no-restart" | "with-restart") => void;
 }
@@ -49,8 +51,10 @@ export function RotateSecretModal(props: Props) {
     }
   };
 
-  const counterCopy = props.runningCount === undefined
-    ? `${props.refCount} daemon(s) reference this key.`
+  // Codex PR #18 P2: null means status-unavailable; undefined means not
+  // provided. Both produce the same fallback copy (no running count shown).
+  const counterCopy = props.runningCount == null
+    ? `${props.refCount} daemon(s) reference this key. Running-daemon count is unavailable.`
     : `${props.refCount} daemon(s) reference this key; ${props.runningCount} currently running.`;
 
   return (

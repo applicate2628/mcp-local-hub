@@ -161,12 +161,26 @@ function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<voi
   // CTA logic can suppress when 0 are running (memo D4 + Codex memo-R1 P3).
   // Fetch on mount and after each rotation so the count reflects the
   // current world.
-  const [runningByServer, setRunningByServer] = useState<Record<string, number>>({});
+  //
+  // Codex PR #18 P2: use a discriminated union so "status endpoint failed"
+  // is distinct from "no daemons running". The previous approach kept an
+  // empty Record{} on failure, causing runningCountFor() to return 0 and
+  // triggering the "No running daemons need restart" success banner even
+  // when daemons were actually running with the old secret value.
+  type RunningState =
+    | { kind: "loading" }
+    | { kind: "error" }
+    | { kind: "ok"; counts: Record<string, number> };
+
+  const [running, setRunning] = useState<RunningState>({ kind: "loading" });
 
   const refreshRunning = useCallback(async () => {
     try {
       const resp = await fetch("/api/status");
-      if (!resp.ok) return;
+      if (!resp.ok) {
+        setRunning({ kind: "error" });
+        return;
+      }
       const rows = (await resp.json()) as Array<{ server: string; daemon: string; state: string }>;
       const counts: Record<string, number> = {};
       for (const r of rows) {
@@ -174,9 +188,9 @@ function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<voi
           counts[r.server] = (counts[r.server] ?? 0) + 1;
         }
       }
-      setRunningByServer(counts);
+      setRunning({ kind: "ok", counts });
     } catch {
-      // Best-effort: leave existing map. CTA falls back to refCount-only mode.
+      setRunning({ kind: "error" });
     }
   }, []);
   useEffect(() => { void refreshRunning(); }, [refreshRunning]);
@@ -191,13 +205,16 @@ function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<voi
   // servers that reference this key. Dedupe on server so a manifest with
   // multiple env vars referencing the same secret does not multi-count
   // running daemons.
-  const runningCountFor = (name: string): number => {
+  // Codex PR #18 P2: returns null when status is unknown (loading or error)
+  // so callers can distinguish "zero running" from "status unavailable".
+  const runningCountFor = (name: string): number | null => {
+    if (running.kind !== "ok") return null;
     const refs = props.env.secrets.find((s) => s.name === name)?.used_by ?? [];
     const distinctServers = new Set<string>();
     for (const r of refs) distinctServers.add(r.server);
     let total = 0;
     for (const server of distinctServers) {
-      total += runningByServer[server] ?? 0;
+      total += running.counts[server] ?? 0;
     }
     return total;
   };
@@ -245,32 +262,52 @@ function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<voi
         />
       )}
 
-      {rotateMode === "no-restart" && bannerName && (
-        <PersistentRotateCTA
-          secretName={bannerName}
-          affectedRunning={runningCountFor(bannerName)}
-          onRestart={async () => {
-            // Codex plan-R1 P1: surface partial failures from restart-now
-            // instead of dismissing unconditionally. The banner stays visible
-            // when the user retries; only success or explicit Dismiss clears it.
-            const res = await restartSecret(bannerName);
-            const failed = res.restart_results.filter((r) => r.error !== "");
-            if (failed.length > 0) {
-              throw new Error(`${failed.length} of ${res.restart_results.length} daemon(s) still failed: ` +
-                failed.map((f) => `${f.task_name}: ${f.error}`).join("; "));
-            }
-          }}
-          onDismiss={dismissBanner}
-        />
-      )}
-      {/* Codex P3: memo D4 — when 0 running daemons the CTA suppresses to null;
-          surface a success confirmation so the rotate is not silent. */}
-      {rotateMode === "no-restart" && bannerName && runningCountFor(bannerName) === 0 && (
-        <div class="banner banner-success" data-testid="rotate-cta-zero-running" role="status">
-          <p>Vault updated for <code>{bannerName}</code>. No running daemons need restart.</p>
-          <button type="button" onClick={dismissBanner}>Dismiss</button>
-        </div>
-      )}
+      {/* Codex PR #18 P2: three-way branch on running status:
+            null  → status unknown (loading or endpoint failed) → banner-warn
+            0     → confirmed no running daemons → banner-success
+            ≥1    → running daemons still using old value → PersistentRotateCTA */}
+      {rotateMode === "no-restart" && bannerName && (() => {
+        const count = runningCountFor(bannerName);
+        if (count === null) {
+          // Daemon status unknown (status endpoint failed). Do not suppress;
+          // tell the user to restart manually since we cannot confirm whether
+          // daemons are running with the old secret value (Codex PR #18 P2).
+          return (
+            <div class="banner banner-warn" data-testid="rotate-cta-status-unknown" role="status">
+              <p>Vault updated for <code>{bannerName}</code>. Daemon status is unavailable; restart any running daemons that use this secret from the Servers screen.</p>
+              <button type="button" onClick={dismissBanner}>Dismiss</button>
+            </div>
+          );
+        }
+        if (count === 0) {
+          // Codex P3: memo D4 — confirmed 0 running daemons; suppress CTA
+          // and surface a success confirmation so the rotate is not silent.
+          return (
+            <div class="banner banner-success" data-testid="rotate-cta-zero-running" role="status">
+              <p>Vault updated for <code>{bannerName}</code>. No running daemons need restart.</p>
+              <button type="button" onClick={dismissBanner}>Dismiss</button>
+            </div>
+          );
+        }
+        return (
+          <PersistentRotateCTA
+            secretName={bannerName}
+            affectedRunning={count}
+            onRestart={async () => {
+              // Codex plan-R1 P1: surface partial failures from restart-now
+              // instead of dismissing unconditionally. The banner stays visible
+              // when the user retries; only success or explicit Dismiss clears it.
+              const res = await restartSecret(bannerName);
+              const failed = res.restart_results.filter((r) => r.error !== "");
+              if (failed.length > 0) {
+                throw new Error(`${failed.length} of ${res.restart_results.length} daemon(s) still failed: ` +
+                  failed.map((f) => `${f.task_name}: ${f.error}`).join("; "));
+              }
+            }}
+            onDismiss={dismissBanner}
+          />
+        );
+      })()}
 
       {rotateMode === "with-restart" && bannerName && (
         <RotateResultBanner
