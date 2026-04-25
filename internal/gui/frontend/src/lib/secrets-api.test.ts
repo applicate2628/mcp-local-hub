@@ -136,4 +136,22 @@ describe("deleteSecret", () => {
     await deleteSecret("K1", { confirm: true });
     expect(mockFetch).toHaveBeenCalledWith("/api/secrets/K1?confirm=true", expect.objectContaining({ method: "DELETE" }));
   });
+
+  it("throws with manifest_errors on 409 SECRETS_USAGE_SCAN_INCOMPLETE", async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        error: "scan incomplete",
+        code: "SECRETS_USAGE_SCAN_INCOMPLETE",
+        manifest_errors: [{ path: "broken/manifest.yaml", error: "yaml: line 1" }],
+      }),
+    });
+    await expect(deleteSecret("K1")).rejects.toMatchObject({
+      code: "SECRETS_USAGE_SCAN_INCOMPLETE",
+      body: expect.objectContaining({
+        manifest_errors: [{ path: "broken/manifest.yaml", error: "yaml: line 1" }],
+      }),
+    });
+  });
 });

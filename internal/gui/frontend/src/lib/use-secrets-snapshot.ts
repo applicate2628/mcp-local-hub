@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "preact/hooks";
+import { useEffect, useState, useCallback, useRef } from "preact/hooks";
 import { getSecrets, type SecretsEnvelope, type APIError } from "./secrets-api";
 
 export type SnapshotState =
@@ -8,13 +8,21 @@ export type SnapshotState =
 
 export function useSecretsSnapshot(): SnapshotState & { refresh: () => Promise<void> } {
   const [state, setState] = useState<SnapshotState>({ status: "loading", data: null, error: null });
+  // Codex Task-4 quality review F3: monotonically incrementing
+  // generation. Each refresh captures its own generation; if the
+  // generation advances before the await resolves, the result is
+  // stale and we drop the setState call.
+  const generation = useRef(0);
 
   const refresh = useCallback(async () => {
+    const myGen = ++generation.current;
     setState({ status: "loading", data: null, error: null });
     try {
       const data = await getSecrets();
+      if (myGen !== generation.current) return; // a newer refresh started
       setState({ status: "ok", data, error: null });
     } catch (e) {
+      if (myGen !== generation.current) return;
       setState({ status: "error", data: null, error: e as Error });
     }
   }, []);
