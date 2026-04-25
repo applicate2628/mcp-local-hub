@@ -1,5 +1,5 @@
 // internal/gui/frontend/src/screens/Secrets.tsx
-import { useState } from "preact/hooks";
+import { useState, useEffect, useRef } from "preact/hooks";
 import { useSecretsSnapshot } from "../lib/use-secrets-snapshot";
 import { secretsInit } from "../lib/secrets-api";
 import type { SecretsEnvelope, SecretRow, UsageRef } from "../lib/secrets-api";
@@ -22,7 +22,7 @@ export function SecretsScreen() {
       <section class="secrets-screen">
         <h1>Secrets</h1>
         <p class="error">Failed to load: {snap.error.message}</p>
-        <button onClick={() => snap.refresh()}>Retry</button>
+        <button type="button" onClick={() => void snap.refresh()}>Retry</button>
       </section>
     );
   }
@@ -43,6 +43,12 @@ export function SecretsScreen() {
 
 function EditVaultBanner() {
   const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Codex Task-5 quality review D4-A: clear pending timer on unmount
+  // so setCopied(false) does not run on an unmounted component.
+  useEffect(() => () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+  }, []);
   return (
     <div class="banner banner-info" data-testid="edit-vault-banner">
       <span>Need bulk operations? Run the CLI command in a terminal: </span>
@@ -53,7 +59,11 @@ function EditVaultBanner() {
           try {
             await navigator.clipboard.writeText(MCPHUB_EDIT_CMD);
             setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
+            if (timerRef.current) clearTimeout(timerRef.current);
+            timerRef.current = setTimeout(() => {
+              setCopied(false);
+              timerRef.current = null;
+            }, 1500);
           } catch {
             // ignore — older browsers may reject without permission
           }
@@ -144,7 +154,18 @@ function SecretRowComponent(props: { row: SecretRow }) {
       <td>
         <button type="button" disabled={!isPresent} onClick={() => console.log(`Rotate ${props.row.name} — Task 7`)}>Rotate</button>
         <button type="button" disabled={!isPresent} onClick={() => console.log(`Delete ${props.row.name} — Task 8`)}>Delete</button>
-        {props.row.state === "referenced_missing" && <span class="hint">↳ <a href="#" onClick={() => console.log(`AddSecret prefilled with ${props.row.name} — Task 6`)}>Add this secret</a></span>}
+        {props.row.state === "referenced_missing" && (
+          <span class="hint">
+            {"↳ "}
+            <button
+              type="button"
+              class="linklike"
+              onClick={() => console.log(`AddSecret prefilled with ${props.row.name} — Task 6`)}
+            >
+              Add this secret
+            </button>
+          </span>
+        )}
       </td>
     </tr>
   );
