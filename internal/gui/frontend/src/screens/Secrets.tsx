@@ -189,9 +189,14 @@ function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<voi
         setRunning({ kind: "error" });
         return;
       }
-      const rows = (await resp.json()) as Array<{ server: string; daemon: string; state: string }>;
+      const rows = (await resp.json()) as Array<{ server: string; daemon: string; state: string; is_maintenance?: boolean }>;
       const counts: Record<string, number> = {};
       for (const r of rows) {
+        // Codex PR #18 P2: skip weekly-refresh / maintenance rows so a
+        // running maintenance task can't inflate runningCountFor and
+        // falsely tell the user real daemons need restart. Same filter
+        // as Dashboard.tsx and lib/status.ts.
+        if (r.is_maintenance) continue;
         if (r.state === "Running") {
           counts[r.server] = (counts[r.server] ?? 0) + 1;
         }
