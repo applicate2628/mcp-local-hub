@@ -387,3 +387,46 @@ func TestManifestCreateHandler_500DoesNotLeakErrorDetails(t *testing.T) {
 		t.Errorf("response body missing generic message: %q", body)
 	}
 }
+
+// Codex R7 (a2b-combined-pr-followups item #3): three coverage gaps on
+// /api/manifest/edit that parallel the already-covered get/create handlers.
+
+func TestManifestEditHandler_EmptyName_400(t *testing.T) {
+	s := newManifestTestServerFull(&fakeManifestCreator{}, &fakeManifestValidator{},
+		&fakeManifestGetter{}, &fakeManifestEditor{})
+	rec := postJSON(t, s, "/api/manifest/edit",
+		`{"name":"","yaml":"name: demo","expected_hash":""}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "BAD_REQUEST") {
+		t.Errorf("body=%q missing BAD_REQUEST code", rec.Body.String())
+	}
+}
+
+func TestManifestEditHandler_MalformedJSON_400(t *testing.T) {
+	s := newManifestTestServerFull(&fakeManifestCreator{}, &fakeManifestValidator{},
+		&fakeManifestGetter{}, &fakeManifestEditor{})
+	rec := postJSON(t, s, "/api/manifest/edit", `{not-json`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "BAD_REQUEST") {
+		t.Errorf("body=%q missing BAD_REQUEST code", rec.Body.String())
+	}
+}
+
+func TestManifestEditHandler_RejectsNonPOST_405(t *testing.T) {
+	s := newManifestTestServerFull(&fakeManifestCreator{}, &fakeManifestValidator{},
+		&fakeManifestGetter{}, &fakeManifestEditor{})
+	req := httptest.NewRequest(http.MethodGet, "/api/manifest/edit", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", rec.Code)
+	}
+	if got := rec.Header().Get("Allow"); got != "POST" {
+		t.Errorf("Allow header = %q, want POST", got)
+	}
+}
