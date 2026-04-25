@@ -227,3 +227,196 @@ main { padding: 24px; overflow: auto; }
   width: 100%;
   margin-top: 4px;
 }
+
+/* === Secrets screen styling (Phase 3B-II A3-a) === */
+
+.secrets-screen {
+  padding: 1rem;
+}
+
+.secrets-screen h1 {
+  margin-top: 0;
+}
+
+.secrets-table {
+  margin-top: 1rem;
+}
+
+.secrets-table table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.secrets-table th,
+.secrets-table td {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.empty-state {
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--sidebar-bg);
+}
+
+/* === Standalone banner styles (for Secrets, Rotate CTA, Result banner) === */
+/* Existing .banner rules are scoped to .screen.add-server and are not reusable here. */
+
+.banner {
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+  border-left: 4px solid var(--border);
+  background: var(--sidebar-bg);
+  font-size: 14px;
+}
+
+.banner-info {
+  background: #eef5ff;
+  border-left-color: #4a90e2;
+}
+
+.banner-success {
+  background: #eef9ee;
+  border-left-color: var(--success);
+}
+
+.banner-warn {
+  background: #fff8e6;
+  border-left-color: var(--warning, #bf8700);
+}
+
+.banner-error {
+  background: #fbeeee;
+  border-left-color: var(--danger);
+}
+
+[data-theme="dark"] .banner-info {
+  background: #0d1f38;
+  border-left-color: #4a90e2;
+}
+
+[data-theme="dark"] .banner-success {
+  background: #0d1f0d;
+  border-left-color: var(--success);
+}
+
+[data-theme="dark"] .banner-warn {
+  background: #1f1a00;
+  border-left-color: var(--warning, #bf8700);
+}
+
+[data-theme="dark"] .banner-error {
+  background: #1f0d0d;
+  border-left-color: var(--danger);
+}
+
+/* === Inline link-styled button === */
+
+.linklike {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: #0066cc;
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+
+.linklike:hover {
+  color: #004999;
+}
+
+.linklike:disabled {
+  color: var(--text-muted, #656d76);
+  cursor: not-allowed;
+  text-decoration: none;
+}
+
+[data-theme="dark"] .linklike {
+  color: #58a6ff;
+}
+
+[data-theme="dark"] .linklike:hover {
+  color: #79c0ff;
+}
+
+.hint {
+  margin-left: 0.25rem;
+  color: var(--text-muted, #656d76);
+  font-size: 0.875rem;
+}
+
+/* === Modal dialog chrome (<dialog> + <menu>) === */
+
+dialog {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  padding: 1.5rem;
+  max-width: 480px;
+  width: 100%;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+}
+
+dialog::backdrop {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+dialog h2 {
+  margin-top: 0;
+  font-size: 1.125rem;
+}
+
+dialog label {
+  display: block;
+  margin: 0.75rem 0 0.25rem;
+  font-size: 14px;
+}
+
+dialog label input {
+  display: block;
+  width: 100%;
+  margin-top: 0.25rem;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+menu {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 0;
+  margin: 1rem 0 0;
+}
+
+menu button {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  background: var(--sidebar-bg);
+  color: var(--text);
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+}
+
+menu button[type="submit"],
+menu button.primary {
+  background: var(--success);
+  color: var(--bg);
+  border-color: var(--success);
+}
+
+menu button[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
