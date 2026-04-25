@@ -5,6 +5,7 @@ import { secretsInit, restartSecret } from "../lib/secrets-api";
 import type { SecretsEnvelope, SecretRow, SecretsRotateResult, UsageRef } from "../lib/secrets-api";
 import { AddSecretModal } from "../components/AddSecretModal";
 import { PersistentRotateCTA, RotateResultBanner, RotateSecretModal } from "../components/RotateSecretModal";
+import { DeleteSecretModal } from "../components/DeleteSecretModal";
 
 const MCPHUB_EDIT_CMD = "mcphub secrets edit";
 
@@ -141,7 +142,7 @@ function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<voi
   const [bannerName, setBannerName] = useState<string | null>(null);
   const [rotateResult, setRotateResult] = useState<SecretsRotateResult | null>(null);
   const [rotateMode, setRotateMode] = useState<"no-restart" | "with-restart" | null>(null);
-  const [_deleteName, _setDeleteName] = useState<string | null>(null); // placeholder for Task 8
+  const [deleteName, setDeleteName] = useState<string | null>(null);
   // Codex plan-R2 P1: track running-daemon counts via /api/status so the
   // CTA logic can suppress when 0 are running (memo D4 + Codex memo-R1 P3).
   // Fetch on mount and after each rotation so the count reflects the
@@ -206,6 +207,7 @@ function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<voi
               row={s}
               onAddPrefill={(n) => { setPrefill(n); setAddOpen(true); }}
               onRotate={(n) => setRotateName(n)}
+              onDelete={(n) => setDeleteName(n)}
             />
           ))}
         </tbody>
@@ -263,6 +265,12 @@ function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<voi
           onDismiss={dismissBanner}
         />
       )}
+
+      <DeleteSecretModal
+        name={deleteName}
+        onClose={() => setDeleteName(null)}
+        onDeleted={() => { setDeleteName(null); void props.refresh(); }}
+      />
     </div>
   );
 }
@@ -271,7 +279,7 @@ function SecretRowComponent(props: {
   row: SecretRow;
   onAddPrefill: (name: string) => void;
   onRotate: (name: string) => void;
-  onDelete?: (name: string) => void;        // optional in Task 7; Task 8 wires it
+  onDelete: (name: string) => void;
 }) {
   const isPresent = props.row.state === "present";
   const usedByCount = props.row.used_by.length;
@@ -282,7 +290,7 @@ function SecretRowComponent(props: {
       <td>{props.row.state}</td>
       <td>
         <button type="button" disabled={!isPresent} onClick={() => props.onRotate(props.row.name)}>Rotate</button>
-        <button type="button" disabled={!isPresent || !props.onDelete} onClick={() => props.onDelete?.(props.row.name)}>Delete</button>
+        <button type="button" disabled={!isPresent} onClick={() => props.onDelete(props.row.name)}>Delete</button>
         {props.row.state === "referenced_missing" && (
           <span class="hint">
             {"↳ "}
