@@ -134,7 +134,9 @@ Create `internal/api/secrets_scan_test.go` with:
 package api
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -142,10 +144,10 @@ import (
 func writeManifest(t *testing.T, dir, name, body string) {
 	t.Helper()
 	subdir := filepath.Join(dir, name)
-	if err := mkdirAll(subdir, 0o700); err != nil {
+	if err := os.MkdirAll(subdir, 0o700); err != nil {
 		t.Fatalf("mkdir %s: %v", subdir, err)
 	}
-	if err := writeFile(filepath.Join(subdir, "manifest.yaml"), []byte(body), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(subdir, "manifest.yaml"), []byte(body), 0o600); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
 }
@@ -195,8 +197,6 @@ env:
 }
 ```
 
-You will need to add helper functions `mkdirAll` and `writeFile` (or use `os.MkdirAll` / `os.WriteFile` directly) — choose one and stick with it. The plan assumes you use `os.MkdirAll` / `os.WriteFile` directly: replace the helper calls accordingly.
-
 **Note**: The `MCPHUB_MANIFEST_DIR_OVERRIDE` env var does not exist yet. The next step adds it to `manifest_source.go`. For now, the test will fail to compile because `ScanManifestEnv` doesn't exist — that's expected.
 
 - [ ] **Step 1.B.2: Run test to verify it fails**
@@ -204,61 +204,90 @@ You will need to add helper functions `mkdirAll` and `writeFile` (or use `os.Mkd
 Run: `go test ./internal/api/ -run TestScanManifestEnv_AggregatesSecretRefs -count=1`
 Expected: FAIL with `undefined: ScanManifestEnv` (or similar).
 
-- [ ] **Step 1.B.3: Add manifest-dir override hook to `manifest_source.go`**
+- [ ] **Step 1.B.3: Add manifest-dir override hook to `manifest_source.go` that ALSO bypasses embed**
 
-Modify `internal/api/manifest_source.go`. At the top of the file, after the existing imports, add (do not duplicate `os`/`filepath` if already imported):
+**Codex plan-R1 P1:** the previous draft only redirected the disk fallback, but `listManifestNamesEmbedFirst()` unions embed names with disk names — and shipped manifests (`servers/wolfram/manifest.yaml`, `servers/paper-search-mcp/manifest.yaml`) embed `secret:` refs. Without bypassing the embed under the override, scan tests that expect zero refs (`TestScanManifestEnv_IgnoresNonSecretPrefixes`) would fail because the embedded refs leak in.
+
+Modify `internal/api/manifest_source.go`. Add the override helper at top:
 
 ```go
 // manifestDirForTests is a test-only override consulted by
-// ScanManifestEnv (and the disk fallback in loadManifestYAMLEmbedFirst,
-// listManifestNamesEmbedFirst) when set via the
-// MCPHUB_MANIFEST_DIR_OVERRIDE environment variable. Production paths
-// resolve through defaultManifestDir(); tests use this hook to point
-// at a tempdir without disturbing the embed FS.
+// ScanManifestEnv and the embed-aware helpers when set via
+// MCPHUB_MANIFEST_DIR_OVERRIDE. When the override is non-empty the
+// embed FS is bypassed entirely; tests get the test directory's
+// manifests with no leakage from the binary's shipped set
+// (which include `secret:` refs from wolfram, paper-search-mcp).
 func manifestDirForTests() string {
 	return os.Getenv("MCPHUB_MANIFEST_DIR_OVERRIDE")
 }
 ```
 
-Update `loadManifestYAMLEmbedFirst` and `listManifestNamesEmbedFirst` so the disk fallback prefers `manifestDirForTests()` when non-empty. In `loadManifestYAMLEmbedFirst`, replace:
+Update `loadManifestYAMLEmbedFirst` so the override fully bypasses embed:
 
 ```go
+func loadManifestYAMLEmbedFirst(name string) ([]byte, error) {
+	if dir := manifestDirForTests(); dir != "" {
+		// Test-only override: skip the embed FS entirely.
+		return os.ReadFile(filepath.Join(dir, name, "manifest.yaml"))
+	}
+	if data, err := fs.ReadFile(servers.Manifests, name+"/manifest.yaml"); err == nil {
+		return data, nil
+	}
 	path := filepath.Join(defaultManifestDir(), name, "manifest.yaml")
 	return os.ReadFile(path)
+}
 ```
 
-with:
+Update `listManifestNamesEmbedFirst` similarly:
 
 ```go
-	dir := manifestDirForTests()
-	if dir == "" {
-		dir = defaultManifestDir()
+func listManifestNamesEmbedFirst() ([]string, error) {
+	if dir := manifestDirForTests(); dir != "" {
+		// Test-only override: skip the embed FS entirely so tests get
+		// only the manifests they explicitly seed.
+		entries, err := os.ReadDir(dir)
+		if err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
+		var names []string
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(dir, e.Name(), "manifest.yaml")); err == nil {
+				names = append(names, e.Name())
+			}
+		}
+		sort.Strings(names)
+		return names, nil
 	}
-	path := filepath.Join(dir, name, "manifest.yaml")
-	return os.ReadFile(path)
-```
-
-In `listManifestNamesEmbedFirst`, replace:
-
-```go
+	// Production path: union embed + disk.
+	seen := map[string]bool{}
+	for _, n := range embeddedManifestNames() {
+		seen[n] = true
+	}
 	entries, err := os.ReadDir(defaultManifestDir())
-```
-
-with:
-
-```go
-	dir := manifestDirForTests()
-	if dir == "" {
-		dir = defaultManifestDir()
+	if err != nil && !os.IsNotExist(err) {
+		// Disk read failure is non-fatal — return what we have from embed.
 	}
-	entries, err := os.ReadDir(dir)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(defaultManifestDir(), e.Name(), "manifest.yaml")); err == nil {
+			seen[e.Name()] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for name := range seen {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out, nil
+}
 ```
 
-Also update the `if _, err := os.Stat(filepath.Join(defaultManifestDir(), e.Name(), "manifest.yaml")); err == nil {` line to use `dir`:
-
-```go
-		if _, err := os.Stat(filepath.Join(dir, e.Name(), "manifest.yaml")); err == nil {
-```
+Add `"sort"` to the imports if it isn't there already.
 
 - [ ] **Step 1.B.4: Implement `ScanManifestEnv` minimally**
 
@@ -504,12 +533,51 @@ func TestScanManifestEnv_MissingNameProducesError(t *testing.T) {
 }
 ```
 
-You also need to add `"strings"` to the test file imports if not already imported.
+- [ ] **Step 1.B.10b: Add Name-populated assertion to malformed-env test (Codex plan-R1 P2)**
+
+Update `TestScanManifestEnv_MalformedEnvProducesManifestError` (Step 1.B.6) to additionally assert `errs[0].Name == "broken-env"` — the memo §7.1 contract requires `Name` be populated when extractable. Modify the assertions:
+
+```go
+if errs[0].Name != "broken-env" {
+    t.Errorf("manifest_errors[0].Name = %q, want broken-env (memo §7.1 + plan-R1 P2)", errs[0].Name)
+}
+```
+
+This requires updating `ScanManifestEnv` impl to populate `Name` when the top-level YAML parsed enough to extract it but the env was malformed. Refine the impl:
+
+```go
+// In secrets_scan.go, in the env-failure branch, attempt a name-only
+// re-parse so the ManifestError carries the server name when known.
+//
+// Replace:
+//   if err := yaml.Unmarshal(raw, &proj); err != nil {
+//       errs = append(errs, ManifestError{Path: name + "/manifest.yaml", Error: err.Error()})
+//       continue
+//   }
+// with a two-stage parse: first try the narrow projection, then if it
+// fails, re-parse with a name-only projection to see if at least the
+// name is recoverable.
+{
+    var proj scanProjection
+    err := yaml.Unmarshal(raw, &proj)
+    if err != nil {
+        // Try a name-only fallback so the ManifestError can carry a Name when known.
+        var nameOnly struct{ Name string `yaml:"name"` }
+        if nameErr := yaml.Unmarshal(raw, &nameOnly); nameErr == nil && nameOnly.Name != "" {
+            errs = append(errs, ManifestError{Name: nameOnly.Name, Path: name + "/manifest.yaml", Error: err.Error()})
+        } else {
+            errs = append(errs, ManifestError{Path: name + "/manifest.yaml", Error: err.Error()})
+        }
+        continue
+    }
+    // … rest unchanged …
+}
+```
 
 - [ ] **Step 1.B.11: Run all scan tests**
 
 Run: `go test ./internal/api/ -run TestScanManifestEnv -count=1 -v`
-Expected: 5 tests PASS.
+Expected: 5 tests PASS. Note: because the override now fully bypasses the embed FS (Codex plan-R1 P1), `TestScanManifestEnv_IgnoresNonSecretPrefixes` correctly sees only the test-seeded manifest with no `secret:` refs and reports empty usage.
 
 ### 1.C — `secrets.go` types and wrappers (TDD)
 
@@ -681,7 +749,7 @@ func (a *API) SecretsInit() (SecretsInitResult, error) {
 		return SecretsInitResult{}, fmt.Errorf("create vault dir: %w", err)
 	}
 
-	if err := secrets.InitVault(keyPath, vaultPath); err != nil {
+	if err := initVaultFn(keyPath, vaultPath); err != nil {
 		// Partial init: clean up whatever InitVault may have created.
 		// Order: vault first (because the key file alone is benign;
 		// an orphan vault is the harder-to-explain artifact).
@@ -780,6 +848,138 @@ func TestSecretsInit_FreshInitCreatesFiles(t *testing.T) {
 
 Run: `go test ./internal/api/ -run TestSecretsInit_FreshInitCreatesFiles -count=1 -v`
 Expected: PASS.
+
+- [ ] **Step 1.C.6b: Add R7 partial-init test seam to `secrets.go`**
+
+**Codex plan-R1 P1:** the wrapper needs a deterministic way to inject an InitVault failure mid-write so the cleanup branch can be tested. Add a package-level function variable that defaults to the real InitVault but tests can override:
+
+```go
+// In internal/api/secrets.go, near the top of the SecretsInit area:
+
+// initVaultFn is the function the wrapper calls to perform the
+// underlying init. Tests override this to inject failures and verify
+// cleanup behavior (memo R7).
+var initVaultFn = secrets.InitVault
+```
+
+Then in `SecretsInit`, replace `secrets.InitVault(keyPath, vaultPath)` with `initVaultFn(keyPath, vaultPath)`.
+
+- [ ] **Step 1.C.6c: Add three R7 partial-init tests**
+
+```go
+func TestSecretsInit_PartialFailureCleansBothArtifacts(t *testing.T) {
+	keyPath, vaultPath := secretsTestEnv(t)
+	a := NewAPI()
+
+	// Inject: simulate "key written, vault write failed" — write the key
+	// ourselves, write a partial vault, then return error.
+	initVaultFn = func(kp, vp string) error {
+		if err := os.MkdirAll(filepath.Dir(kp), 0o700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(kp, []byte("AGE-SECRET-KEY-FAKE\n"), 0o600); err != nil {
+			return err
+		}
+		if err := os.WriteFile(vp, []byte("partial"), 0o600); err != nil {
+			return err
+		}
+		return fmt.Errorf("simulated mid-init failure")
+	}
+	defer func() { initVaultFn = secrets.InitVault }()
+
+	_, err := a.SecretsInit()
+	var initFailed *SecretsInitFailed
+	if !errors.As(err, &initFailed) {
+		t.Fatalf("err = %T %v, want *SecretsInitFailed", err, err)
+	}
+	if initFailed.CleanupStatus != "ok" {
+		t.Errorf("cleanup_status = %q, want ok", initFailed.CleanupStatus)
+	}
+	if fileExists(keyPath) {
+		t.Errorf("orphan key file %s still exists after cleanup", keyPath)
+	}
+	if fileExists(vaultPath) {
+		t.Errorf("orphan vault file %s still exists after cleanup", vaultPath)
+	}
+}
+
+func TestSecretsInit_PartialFailureKeyOnly(t *testing.T) {
+	keyPath, vaultPath := secretsTestEnv(t)
+	a := NewAPI()
+
+	// Simulate "key written, vault never created".
+	initVaultFn = func(kp, vp string) error {
+		if err := os.MkdirAll(filepath.Dir(kp), 0o700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(kp, []byte("AGE-SECRET-KEY-FAKE\n"), 0o600); err != nil {
+			return err
+		}
+		return fmt.Errorf("simulated key-only failure")
+	}
+	defer func() { initVaultFn = secrets.InitVault }()
+
+	_, err := a.SecretsInit()
+	var initFailed *SecretsInitFailed
+	if !errors.As(err, &initFailed) {
+		t.Fatalf("err = %T %v, want *SecretsInitFailed", err, err)
+	}
+	if initFailed.CleanupStatus != "ok" {
+		t.Errorf("cleanup_status = %q, want ok (vault never existed, key removed)", initFailed.CleanupStatus)
+	}
+	if fileExists(keyPath) {
+		t.Errorf("orphan key file %s still exists after cleanup", keyPath)
+	}
+	_ = vaultPath
+}
+
+func TestSecretsInit_PartialFailureCleanupAlsoFails(t *testing.T) {
+	keyPath, _ := secretsTestEnv(t)
+	a := NewAPI()
+
+	// Simulate "key written" then make the parent directory read-only
+	// so os.Remove fails. After the test we restore perms so t.TempDir
+	// cleanup works.
+	parent := filepath.Dir(keyPath)
+	initVaultFn = func(kp, vp string) error {
+		if err := os.MkdirAll(parent, 0o700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(kp, []byte("AGE-SECRET-KEY-FAKE\n"), 0o600); err != nil {
+			return err
+		}
+		// Lock the parent so os.Remove(kp) inside the wrapper fails.
+		if err := os.Chmod(parent, 0o500); err != nil {
+			return err
+		}
+		return fmt.Errorf("simulated mid-init failure with locked parent")
+	}
+	defer func() {
+		initVaultFn = secrets.InitVault
+		_ = os.Chmod(parent, 0o700) // restore so t.TempDir cleanup works
+	}()
+
+	_, err := a.SecretsInit()
+	var initFailed *SecretsInitFailed
+	if !errors.As(err, &initFailed) {
+		t.Fatalf("err = %T %v, want *SecretsInitFailed", err, err)
+	}
+	if initFailed.CleanupStatus != "failed" {
+		// On Windows, chmod 0o500 may not actually deny os.Remove for
+		// the owner. Skip this check on platforms that don't enforce
+		// the read-only-dir-blocks-remove invariant.
+		if runtime.GOOS == "windows" {
+			t.Skip("skipping cleanup-failed assertion on Windows: chmod 0o500 doesn't block owner Remove")
+		}
+		t.Errorf("cleanup_status = %q, want failed", initFailed.CleanupStatus)
+	}
+	if initFailed.OrphanPath == "" && runtime.GOOS != "windows" {
+		t.Errorf("orphan_path empty, want non-empty when cleanup failed")
+	}
+}
+```
+
+Add `"runtime"` and `"fmt"` to the test file imports if missing.
 
 - [ ] **Step 1.C.7: Add orphan-key test (case 4)**
 
@@ -928,8 +1128,12 @@ func (a *API) SecretsListWithUsage() (SecretsEnvelope, error) {
 
 // classifyVault maps OpenVault outcomes to the four-state vault model
 // (memo §5.2). Returns (state, keys); keys is non-nil only when state == "ok".
+//
+// Codex plan-R1 P3: capture the first OpenVault error and re-use it
+// instead of calling OpenVault twice (the second call is redundant).
 func classifyVault(keyPath, vaultPath string) (string, []string) {
-	if v, err := secrets.OpenVault(keyPath, vaultPath); err == nil {
+	v, err := secrets.OpenVault(keyPath, vaultPath)
+	if err == nil {
 		return "ok", v.List()
 	}
 	keyExists := fileExists(keyPath)
@@ -939,23 +1143,15 @@ func classifyVault(keyPath, vaultPath string) (string, []string) {
 	}
 	// Files exist but OpenVault failed: distinguish corrupt (key parse
 	// error or post-decrypt JSON garbage) from decrypt_failed (key fine,
-	// age decrypt rejected the cipher). We re-open via the same path
-	// and inspect the error string. This is brittle but acceptable for
-	// the GET path; init blocks them all the same way.
-	v, err := secrets.OpenVault(keyPath, vaultPath)
-	_ = v
-	if err == nil {
-		return "ok", nil // re-classified mid-call; treat as ok
-	}
+	// age decrypt rejected the cipher) by inspecting the captured error
+	// string. Brittle but acceptable for the GET path.
 	msg := err.Error()
 	switch {
 	case containsAny(msg, "parse identity", "no identity", "not X25519"):
 		return "corrupt", nil
-	case containsAny(msg, "age decrypt", "unmarshal vault"):
-		// age decrypt vs unmarshal: distinguish wrong-key from corrupted-json.
-		if containsAny(msg, "unmarshal vault") {
-			return "corrupt", nil
-		}
+	case containsAny(msg, "unmarshal vault"):
+		return "corrupt", nil
+	case containsAny(msg, "age decrypt"):
 		return "decrypt_failed", nil
 	default:
 		return "corrupt", nil
@@ -1161,7 +1357,7 @@ func (a *API) restartServersForKey(key string) ([]RestartResult, error) {
 		if runningByServer[st.Server] == nil {
 			runningByServer[st.Server] = map[string]bool{}
 		}
-		runningByServer[st.Server][st.Daemon] = (st.State == "running")
+		runningByServer[st.Server][st.Daemon] = (st.State == "Running") // Codex plan-R1 P1: capital R per types.go:21
 	}
 
 	// Determine the affected (server, daemon) set. Each manifest may
@@ -2648,13 +2844,214 @@ func TestSecrets_RejectsCrossOrigin(t *testing.T) {
 }
 ```
 
+- [ ] **Step 3.B.11b: Add full handler-error-matrix coverage (Codex plan-R1 P1)**
+
+Memo §7.1 enumerates per-endpoint × error-code coverage. Add the missing cases:
+
+```go
+// GET /api/secrets — vault state branches.
+func TestSecretsList_VaultMissingState(t *testing.T) {
+	fake := &fakeSecretsAPI{
+		listResult: api.SecretsEnvelope{
+			VaultState: "missing", Secrets: []api.SecretRow{}, ManifestErrors: []api.ManifestError{},
+		},
+	}
+	s := newServerWithSecretsFake(t, fake)
+	req := httptest.NewRequest(http.MethodGet, "/api/secrets", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d", rec.Code)
+	}
+	var body api.SecretsEnvelope
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if body.VaultState != "missing" {
+		t.Errorf("vault_state=%q", body.VaultState)
+	}
+}
+
+func TestSecretsList_500ListFailed(t *testing.T) {
+	fake := &fakeSecretsAPI{listErr: fmt.Errorf("scan blew up")}
+	s := newServerWithSecretsFake(t, fake)
+	req := httptest.NewRequest(http.MethodGet, "/api/secrets", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d", rec.Code)
+	}
+	var body map[string]string
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if body["code"] != "SECRETS_LIST_FAILED" {
+		t.Errorf("code=%q", body["code"])
+	}
+}
+
+// POST /api/secrets — full SecretsSetError matrix.
+func TestSecretsAdd_400EmptyValue(t *testing.T) {
+	fake := &fakeSecretsAPI{setErr: &api.SecretsSetError{Code: "SECRETS_EMPTY_VALUE", Msg: "empty"}}
+	s := newServerWithSecretsFake(t, fake)
+	req := httptest.NewRequest(http.MethodPost, "/api/secrets", bytes.NewReader([]byte(`{"name":"K","value":""}`)))
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d", rec.Code)
+	}
+}
+
+func TestSecretsAdd_409VaultNotInitialized(t *testing.T) {
+	fake := &fakeSecretsAPI{setErr: &api.SecretsSetError{Code: "SECRETS_VAULT_NOT_INITIALIZED", Msg: "no vault"}}
+	s := newServerWithSecretsFake(t, fake)
+	req := httptest.NewRequest(http.MethodPost, "/api/secrets", bytes.NewReader([]byte(`{"name":"K","value":"v"}`)))
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status=%d", rec.Code)
+	}
+}
+
+func TestSecretsAdd_500SetFailed(t *testing.T) {
+	fake := &fakeSecretsAPI{setErr: &api.SecretsSetError{Code: "SECRETS_SET_FAILED", Msg: "disk"}}
+	s := newServerWithSecretsFake(t, fake)
+	req := httptest.NewRequest(http.MethodPost, "/api/secrets", bytes.NewReader([]byte(`{"name":"K","value":"v"}`)))
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d", rec.Code)
+	}
+}
+
+// PUT /api/secrets/:key — error matrix.
+func TestSecretsRotate_404KeyNotFound(t *testing.T) {
+	fake := &fakeSecretsAPI{rotateErr: &api.SecretsSetError{Code: "SECRETS_KEY_NOT_FOUND", Msg: "missing"}}
+	s := newServerWithSecretsFake(t, fake)
+	req := httptest.NewRequest(http.MethodPut, "/api/secrets/K1", bytes.NewReader([]byte(`{"value":"v","restart":false}`)))
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status=%d", rec.Code)
+	}
+}
+
+func TestSecretsRotate_409VaultNotInitialized(t *testing.T) {
+	fake := &fakeSecretsAPI{rotateErr: &api.SecretsSetError{Code: "SECRETS_VAULT_NOT_INITIALIZED", Msg: "no vault"}}
+	s := newServerWithSecretsFake(t, fake)
+	req := httptest.NewRequest(http.MethodPut, "/api/secrets/K1", bytes.NewReader([]byte(`{"value":"v","restart":false}`)))
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status=%d", rec.Code)
+	}
+}
+
+func TestSecretsRotate_500SetFailed(t *testing.T) {
+	fake := &fakeSecretsAPI{rotateErr: &api.SecretsSetError{Code: "SECRETS_SET_FAILED", Msg: "disk"}}
+	s := newServerWithSecretsFake(t, fake)
+	req := httptest.NewRequest(http.MethodPut, "/api/secrets/K1", bytes.NewReader([]byte(`{"value":"v","restart":false}`)))
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d", rec.Code)
+	}
+}
+
+func TestSecretsRotate_400EmptyValue(t *testing.T) {
+	fake := &fakeSecretsAPI{rotateErr: &api.SecretsSetError{Code: "SECRETS_EMPTY_VALUE", Msg: "empty"}}
+	s := newServerWithSecretsFake(t, fake)
+	req := httptest.NewRequest(http.MethodPut, "/api/secrets/K1", bytes.NewReader([]byte(`{"value":"","restart":false}`)))
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d", rec.Code)
+	}
+}
+
+// POST /api/secrets/:key/restart — error matrix.
+func TestSecretsRestart_404KeyNotFound(t *testing.T) {
+	fake := &fakeSecretsAPI{restartErr: &api.SecretsSetError{Code: "SECRETS_KEY_NOT_FOUND", Msg: "missing"}}
+	s := newServerWithSecretsFake(t, fake)
+	req := httptest.NewRequest(http.MethodPost, "/api/secrets/K1/restart", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status=%d", rec.Code)
+	}
+}
+
+func TestSecretsRestart_409VaultNotInitialized(t *testing.T) {
+	fake := &fakeSecretsAPI{restartErr: &api.SecretsSetError{Code: "SECRETS_VAULT_NOT_INITIALIZED", Msg: "no vault"}}
+	s := newServerWithSecretsFake(t, fake)
+	req := httptest.NewRequest(http.MethodPost, "/api/secrets/K1/restart", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status=%d", rec.Code)
+	}
+}
+
+func TestSecretsRestart_500OrchestrationFailure(t *testing.T) {
+	fake := &fakeSecretsAPI{
+		restartResults: []api.RestartResult{{TaskName: "a", Err: ""}},
+		restartErr:     fmt.Errorf("scheduler unavailable"),
+	}
+	s := newServerWithSecretsFake(t, fake)
+	req := httptest.NewRequest(http.MethodPost, "/api/secrets/K1/restart", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d", rec.Code)
+	}
+	var body map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if body["code"] != "RESTART_FAILED" {
+		t.Errorf("code=%v", body["code"])
+	}
+	if results, _ := body["restart_results"].([]any); len(results) != 1 {
+		t.Errorf("partial results dropped")
+	}
+}
+
+// DELETE /api/secrets/:key — error matrix.
+func TestSecretsDelete_404KeyNotFound(t *testing.T) {
+	fake := &fakeSecretsAPI{deleteErr: &api.SecretsSetError{Code: "SECRETS_KEY_NOT_FOUND", Msg: "missing"}}
+	s := newServerWithSecretsFake(t, fake)
+	req := httptest.NewRequest(http.MethodDelete, "/api/secrets/K1", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status=%d", rec.Code)
+	}
+}
+
+func TestSecretsDelete_409VaultNotInitialized(t *testing.T) {
+	fake := &fakeSecretsAPI{deleteErr: &api.SecretsSetError{Code: "SECRETS_VAULT_NOT_INITIALIZED", Msg: "no vault"}}
+	s := newServerWithSecretsFake(t, fake)
+	req := httptest.NewRequest(http.MethodDelete, "/api/secrets/K1", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status=%d", rec.Code)
+	}
+}
+
+func TestSecretsDelete_500DeleteFailed(t *testing.T) {
+	fake := &fakeSecretsAPI{deleteErr: &api.SecretsSetError{Code: "SECRETS_DELETE_FAILED", Msg: "disk"}}
+	s := newServerWithSecretsFake(t, fake)
+	req := httptest.NewRequest(http.MethodDelete, "/api/secrets/K1?confirm=true", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d", rec.Code)
+	}
+}
+```
+
 - [ ] **Step 3.B.12: Run all handler tests**
 
 ```bash
 go test ./internal/gui/ -run TestSecrets -count=1 -v
 ```
 
-Expected: ~16 tests PASS.
+Expected: ~30 tests PASS (16 base + 14 matrix additions per Codex plan-R1 P1).
 
 ### 3.C — Commit
 
@@ -2994,6 +3391,13 @@ Expected: ~14 tests PASS.
 
 ### 4.B — `use-secrets-snapshot.ts` hook
 
+- [ ] **Step 4.B.1a: Write failing tests FIRST (TDD — Codex plan-R1 P2)**
+
+Create `internal/gui/frontend/src/lib/use-secrets-snapshot.test.ts` BEFORE the impl. The test content is in Step 4.B.2 below; create the file now and run `npm test` to verify the failing import.
+
+Run: `cd internal/gui/frontend && npm test -- use-secrets-snapshot`
+Expected: FAIL with `Cannot find module ./use-secrets-snapshot` or similar.
+
 - [ ] **Step 4.B.1: Implement the hook**
 
 Create `internal/gui/frontend/src/lib/use-secrets-snapshot.ts`:
@@ -3022,6 +3426,15 @@ export function useSecretsSnapshot(): SnapshotState & { refresh: () => Promise<v
 
   useEffect(() => {
     refresh();
+  }, [refresh]);
+
+  // Codex plan-R1 P2: refetch on window focus so a vault edit from a
+  // separate tab/CLI surfaces in the registry view without a manual
+  // reload. This matches memo §3.1 frontend item #8 ("polls on focus").
+  useEffect(() => {
+    const onFocus = () => { void refresh(); };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, [refresh]);
 
   return { ...state, refresh };
@@ -3614,8 +4027,10 @@ link on referenced_missing rows opens the modal with name prefilled."
 ```tsx
 // internal/gui/frontend/src/components/RotateSecretModal.tsx
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { SecretsRotateResult, RestartResult } from "../lib/secrets-api";
+import type { SecretsRotateResult } from "../lib/secrets-api";
 import { rotateSecret } from "../lib/secrets-api";
+// (Codex plan-R1 P2: removed unused RestartResult import — the banner
+// only references types via SecretsRotateResult.restart_results.)
 
 interface Props {
   open: boolean;
@@ -3787,12 +4202,17 @@ In `InitKeyedView`, lift rotate state:
 function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<void> }) {
   const [addOpen, setAddOpen] = useState(false);
   const [prefill, setPrefill] = useState<string | undefined>(undefined);
+  // Codex plan-R1 P1: rotateName must NOT be cleared when the modal closes,
+  // because the persistent CTA / result banner still need to know which
+  // secret was rotated to call POST /api/secrets/<name>/restart. The
+  // banner owns its own dismissal, which clears bannerName.
   const [rotateName, setRotateName] = useState<string | null>(null);
+  const [bannerName, setBannerName] = useState<string | null>(null);
   const [rotateResult, setRotateResult] = useState<SecretsRotateResult | null>(null);
   const [rotateMode, setRotateMode] = useState<"no-restart" | "with-restart" | null>(null);
 
   const closeRotate = () => setRotateName(null);
-  const dismissBanner = () => { setRotateResult(null); setRotateMode(null); };
+  const dismissBanner = () => { setBannerName(null); setRotateResult(null); setRotateMode(null); };
 
   const refCountFor = (name: string) =>
     props.env.secrets.find((s) => s.name === name)?.used_by.length ?? 0;
@@ -3809,6 +4229,7 @@ function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<voi
           // runningCount undefined for now; populated in a follow-up if status data is wired in
           onClose={closeRotate}
           onSaved={(result, mode) => {
+            setBannerName(rotateName);   // capture name BEFORE rotateName is cleared by closeRotate
             setRotateResult(result);
             setRotateMode(mode);
             void props.refresh();
@@ -3816,25 +4237,38 @@ function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<voi
         />
       )}
 
-      {rotateMode === "no-restart" && rotateResult && (
+      {rotateMode === "no-restart" && bannerName && (
         <PersistentRotateCTA
           visible={true}
-          secretName={rotateName ?? ""}
-          // approximate: the count of currently-affected refs from the latest snapshot.
-          affectedRunning={refCountFor(rotateName ?? "")}
+          secretName={bannerName}
+          affectedRunning={refCountFor(bannerName)}
           onRestart={async () => {
-            await restartSecret(rotateName ?? "");
+            // Codex plan-R1 P1: surface partial failures from restart-now
+            // instead of dismissing unconditionally. The banner stays visible
+            // when the user retries; only success or explicit Dismiss clears it.
+            const res = await restartSecret(bannerName);
+            const failed = res.restart_results.filter((r) => r.error !== "");
+            if (failed.length > 0) {
+              throw new Error(`${failed.length} of ${res.restart_results.length} daemon(s) still failed: ` +
+                failed.map((f) => `${f.task_name}: ${f.error}`).join("; "));
+            }
           }}
           onDismiss={dismissBanner}
         />
       )}
 
-      {rotateMode === "with-restart" && (
+      {rotateMode === "with-restart" && bannerName && (
         <RotateResultBanner
           visible={true}
           result={rotateResult}
           onRetry={async () => {
-            await restartSecret(rotateName ?? "");
+            // Codex plan-R1 P1: retry must update the banner with fresh
+            // results (so remaining failures stay listed) instead of
+            // dismissing. We swap rotateResult so the banner re-renders.
+            const res = await restartSecret(bannerName);
+            // Synthesize a SecretsRotateResult-shaped result so the banner
+            // renders the same partial-failure UI on retry.
+            setRotateResult({ vault_updated: true, restart_results: res.restart_results });
           }}
           onDismiss={dismissBanner}
         />
@@ -3953,6 +4387,14 @@ export function DeleteSecretModal(props: Props) {
           setStage({ kind: "confirm-scan-incomplete", manifestErrors: body.manifest_errors ?? [] });
           break;
         default:
+          // Codex plan-R1 P2: 404 SECRETS_KEY_NOT_FOUND on the first call
+          // means another tab/CLI just deleted this key. Treat as success
+          // (the user wanted it gone) and refresh.
+          if (err.status === 404) {
+            props.onDeleted();
+            props.onClose();
+            return;
+          }
           setStage({ kind: "error", message: err.message });
       }
     }
@@ -4118,33 +4560,31 @@ Expected: green.
 
 - [ ] **Step 9.B.1: Create `internal/gui/e2e/tests/secrets.spec.ts` skeleton**
 
+**Codex plan-R1 P2:** the existing E2E suite uses a Playwright `test.extend` fixture from `../fixtures/hub` that injects a per-test `hub: HubHandle` (see [internal/gui/e2e/fixtures/hub.ts:29](../../../internal/gui/e2e/fixtures/hub.ts#L29) and any existing `*.spec.ts`). Match that shape:
+
 ```ts
-import { test, expect } from "@playwright/test";
-import { startHubBin } from "./_hub-fixture";
+import { test, expect } from "../fixtures/hub";
 
 test.describe("Secrets registry", () => {
-  test("Empty-state init flow", async ({ page }) => {
-    const hub = await startHubBin();
-    try {
-      await page.goto(`${hub.url}/#/secrets`);
-      await expect(page.getByText("Secrets vault is not initialized")).toBeVisible();
-      const initButton = page.getByRole("button", { name: "Initialize secrets vault" });
-      await expect(initButton).toBeVisible();
+  test("Empty-state init flow", async ({ page, hub }) => {
+    await page.goto(`${hub.url}/#/secrets`);
+    await expect(page.getByText("Secrets vault is not initialized")).toBeVisible();
+    const initButton = page.getByRole("button", { name: "Initialize secrets vault" });
+    await expect(initButton).toBeVisible();
 
-      const responsePromise = page.waitForResponse((r) => r.url().endsWith("/api/secrets/init") && r.request().method() === "POST");
-      await initButton.click();
-      const resp = await responsePromise;
-      expect(resp.status()).toBe(200);
+    const responsePromise = page.waitForResponse(
+      (r) => r.url().endsWith("/api/secrets/init") && r.request().method() === "POST",
+    );
+    await initButton.click();
+    const resp = await responsePromise;
+    expect(resp.status()).toBe(200);
 
-      await expect(page.getByText("No secrets yet")).toBeVisible();
-    } finally {
-      await hub.stop();
-    }
+    await expect(page.getByText("No secrets yet")).toBeVisible();
   });
 });
 ```
 
-The `_hub-fixture.ts` is the existing helper used by other E2E suites (servers.spec.ts, migration.spec.ts). Look at `internal/gui/e2e/tests/servers.spec.ts` for the exact import shape and replicate.
+The fixture is auto-applied per-test via `test.extend`; teardown (kill hub, clean tmpHome) runs in the fixture's `finally` block. Tests do NOT call any explicit `hub.stop()` — the fixture handles it.
 
 - [ ] **Step 9.B.2-9.B.14: Add the remaining 13 scenarios**
 
@@ -4235,10 +4675,25 @@ Find the `7. **A3** — Secrets screen` line and change the prefix to `7. **A3-a
 
 ### 10.C — Manual smoke
 
-- [ ] **Step 10.C.1: Run a real `mcphub gui` and exercise full flow**
+- [ ] **Step 10.C.1: Run a real `mcphub gui` against an isolated home and exercise full flow**
+
+**Codex plan-R1 P3:** point `LOCALAPPDATA` / `XDG_DATA_HOME` / `HOME` at a temporary directory so the smoke does not touch your real secrets vault.
+
+On Windows PowerShell:
+
+```powershell
+$tmp = Join-Path $env:TEMP "mcphub-smoke-$(Get-Date -UFormat %s)"
+New-Item -ItemType Directory -Path $tmp | Out-Null
+$env:LOCALAPPDATA = $tmp
+go run ./cmd/mcphub gui --no-browser --no-tray --port 9125
+# Open http://127.0.0.1:9125/#/secrets in a browser
+```
+
+On Linux/macOS:
 
 ```bash
-go run ./cmd/mcphub gui --no-browser --no-tray --port 9125
+tmp=$(mktemp -d)
+LOCALAPPDATA="$tmp" XDG_DATA_HOME="$tmp" HOME="$tmp" go run ./cmd/mcphub gui --no-browser --no-tray --port 9125
 # Open http://127.0.0.1:9125/#/secrets in a browser
 ```
 
