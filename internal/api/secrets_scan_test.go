@@ -166,7 +166,7 @@ env:
 
 	// Run multiple times and confirm the order is stable.
 	var first []UsageRef
-	for run := 0; run < 5; run++ {
+	for run := range 5 {
 		usage, _, err := ScanManifestEnv()
 		if err != nil {
 			t.Fatalf("scan run %d: %v", run, err)
