@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { useSecretsSnapshot } from "../lib/use-secrets-snapshot";
 import { secretsInit, restartSecret } from "../lib/secrets-api";
-import type { SecretsEnvelope, SecretRow, SecretsRotateResult, UsageRef } from "../lib/secrets-api";
+import type { SecretsEnvelope, SecretRow, SecretsRotateResult, UsageRef, APIError } from "../lib/secrets-api";
 import { AddSecretModal } from "../components/AddSecretModal";
 import { PersistentRotateCTA, RotateResultBanner, RotateSecretModal } from "../components/RotateSecretModal";
 import { DeleteSecretModal } from "../components/DeleteSecretModal";
@@ -96,10 +96,24 @@ function NotInitView(props: { refresh: () => Promise<void> }) {
           setWorking(true);
           setErr(null);
           try {
-            await secretsInit();
+            const result = await secretsInit();
+            // Codex P3: case 2b returns 200 with code+error populated;
+            // surface that as a retry hint instead of silently refreshing.
+            if (result.code === "SECRETS_INIT_FAILED" && result.cleanup_status === "ok") {
+              setErr(`${result.error ?? "init failed"} — please try again.`);
+              return; // do not refresh; vault is still missing
+            }
             await props.refresh();
           } catch (e) {
-            setErr((e as Error).message);
+            // Codex P3: case 2c — 500 with cleanup_status=failed; mention the
+            // orphan_path so user knows manual cleanup is needed.
+            const err = e as APIError;
+            const body = (err.body ?? {}) as { orphan_path?: string };
+            if (err.code === "SECRETS_INIT_FAILED" && body.orphan_path) {
+              setErr(`${err.message} — manual cleanup required for ${body.orphan_path}.`);
+            } else {
+              setErr((e as Error).message);
+            }
           } finally {
             setWorking(false);
           }
@@ -248,6 +262,14 @@ function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<voi
           }}
           onDismiss={dismissBanner}
         />
+      )}
+      {/* Codex P3: memo D4 — when 0 running daemons the CTA suppresses to null;
+          surface a success confirmation so the rotate is not silent. */}
+      {rotateMode === "no-restart" && bannerName && runningCountFor(bannerName) === 0 && (
+        <div class="banner banner-success" data-testid="rotate-cta-zero-running" role="status">
+          <p>Vault updated for <code>{bannerName}</code>. No running daemons need restart.</p>
+          <button type="button" onClick={dismissBanner}>Dismiss</button>
+        </div>
       )}
 
       {rotateMode === "with-restart" && bannerName && (

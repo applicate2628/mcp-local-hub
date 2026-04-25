@@ -460,4 +460,3 @@ func (a *API) SecretsDelete(name string, confirm bool) error {
 	}
 	return nil
 }
-
