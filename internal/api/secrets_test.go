@@ -528,7 +528,6 @@ func TestSecretsSet_ConcurrentCallsAreSerialized(t *testing.T) {
 	errs := make(chan error, N)
 	var wg sync.WaitGroup
 	for i := range N {
-		i := i
 		wg.Go(func() {
 			errs <- a.SecretsSet(fmt.Sprintf("KEY_%d", i), fmt.Sprintf("value_%d", i))
 		})
