@@ -6,13 +6,22 @@ import type { DaemonStatus, ScanResult, ServerRow, Routing } from "../types";
 
 const CLIENTS = ["claude-code", "codex-cli", "gemini-cli", "antigravity"] as const;
 
-// Per-cell dirty tracking: server name -> Set<client name>. A (server,
-// client) pair is dirty iff the user's checked state differs from initial.
-// Tracking per-cell (not per-server) is load-bearing: /api/migrate's
-// ClientsInclude narrows the rewrite to the listed clients, so sending
-// ONLY the affected pairs prevents one flipped checkbox from silently
-// rewriting every other client binding on that server.
-type DirtyMap = Map<string, Set<string>>;
+// Per-cell dirty tracking with direction preserved. Outer key: server name.
+// Inner map: client → Direction.
+//
+// Direction is captured at toggle time because the cell's initialChecked
+// (scan state, authoritative) is the only honest source of truth for
+// "which endpoint should Apply call for this cell" — by the time
+// applyChanges runs, routing may have reloaded. Storing Direction in the
+// dirty map keeps endpoint selection stable across reloads.
+//
+// Prune invariant (see B1 memo §4 D4): on toggle-back (user re-flips a
+// dirty cell to its initial state), delete the client entry AND delete
+// the server entry if the inner map becomes empty. With the invariant
+// enforced at every update, `dirty.size === 0` remains a correct
+// "nothing pending" predicate without a deep-empty scan.
+type Direction = "migrate" | "demigrate";
+type DirtyMap = Map<string, Map<string, Direction>>;
 
 export function ServersScreen() {
   const [servers, setServers] = useState<ServerRow[] | null>(null);
@@ -58,13 +67,19 @@ export function ServersScreen() {
     setDirty((prev) => {
       const next = new Map(prev);
       if (nextChecked !== initialChecked) {
+        // Dirty: capture direction from initialChecked (authoritative scan
+        // state). A cell that started `via-hub` (initialChecked=true) and
+        // is now unchecked flips to "demigrate"; a direct cell (false) that
+        // just got checked flips to "migrate".
+        const direction: Direction = initialChecked ? "demigrate" : "migrate";
         let clients = next.get(server);
         if (!clients) {
-          clients = new Set();
+          clients = new Map();
           next.set(server, clients);
         }
-        clients.add(client);
+        clients.set(client, direction);
       } else {
+        // Toggle-back: enforce the prune invariant (see DirtyMap doc).
         const clients = next.get(server);
         if (clients) {
           clients.delete(client);
@@ -83,9 +98,13 @@ export function ServersScreen() {
     // A×gemini, B×claude, B×gemini) even if the user only dirtied
     // (A,claude) and (B,gemini). Looping keeps each server's client list
     // scoped to exactly its own dirty cells.
+    // Minimal shim: ignore direction for now (Task 5 introduces per-direction
+    // branching). Collects every dirty cell into the existing migrate-only
+    // POST loop. Task 4 is purely a state-shape refactor; behavior is
+    // unchanged in this commit.
     const changes = Array.from(dirty.entries())
       .filter(([, clients]) => clients.size > 0)
-      .map(([server, clients]) => ({ server, clients: Array.from(clients) }));
+      .map(([server, clients]) => ({ server, clients: Array.from(clients.keys()) }));
     if (changes.length === 0) return;
     setApplying(true);
     setApplyMsg(`Migrating ${changes.length} server(s)…`);
