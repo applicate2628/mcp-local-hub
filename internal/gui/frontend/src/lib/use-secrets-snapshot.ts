@@ -16,7 +16,15 @@ export function useSecretsSnapshot(): SnapshotState & { refresh: () => Promise<v
 
   const refresh = useCallback(async () => {
     const myGen = ++generation.current;
-    setState({ status: "loading", data: null, error: null });
+    // Stale-while-revalidate: only show "loading" on initial fetch.
+    // Background refreshes keep the previous data visible so dependent
+    // local state (e.g., InitKeyedView's CTA/banner) is not unmounted.
+    setState((prev) => {
+      if (prev.status === "ok") {
+        return prev; // keep last-known data; no loading flash
+      }
+      return { status: "loading", data: null, error: null };
+    });
     try {
       const data = await getSecrets();
       if (myGen !== generation.current) return; // a newer refresh started

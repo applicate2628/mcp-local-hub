@@ -5,7 +5,7 @@ found-by: qa-engineer
 found-in-phase: Phase 3B-II A3-a Task 9
 affected-surface: internal/gui/frontend/src/screens/Secrets.tsx + lib/use-secrets-snapshot.ts
 context: feat/phase-3b-ii-a3a-secrets-screen
-status: open
+status: fixed
 ---
 
 ## Reproduction
@@ -47,3 +47,14 @@ Option 3: Change `SecretsScreen` to keep rendering `InitKeyedView` during refres
 - `internal/gui/frontend/src/screens/Secrets.tsx:33-44` — early-return on `snap.status === "loading"` destroys `InitKeyedView`
 - `internal/gui/frontend/src/lib/use-secrets-snapshot.ts:17-19` — transitions through loading on every refresh
 - `internal/gui/e2e/tests/secrets.spec.ts:375,494` — tests 7 and 8 rewritten to assert the PUT request shape instead of CTA/banner visibility (pragmatic until fixed)
+
+## Resolution
+
+Fixed via Option 1 (stale-while-revalidate in `useSecretsSnapshot`).
+
+In `refresh()`, the `setState` call now uses a functional updater: if the previous state is already `status: "ok"`, the state is kept unchanged (returning `prev`) so the snapshot stays mounted and `InitKeyedView` is not unmounted during the background refetch. The `status: "loading"` transition only fires on the initial fetch when there is no prior data.
+
+E2E tests 7 and 8 in `internal/gui/e2e/tests/secrets.spec.ts` were restored to assert the actual UI behavior:
+
+- Test 7: verifies the `[data-testid="rotate-cta"]` banner is visible after "Save without restart" with 2 running daemons, that "Restart now" triggers `POST /api/secrets/K1/restart`, and the CTA dismisses on success.
+- Test 8: verifies the `[data-testid="rotate-banner-partial"]` banner is visible after a 207 response and that the "Retry failed restarts" button is present.

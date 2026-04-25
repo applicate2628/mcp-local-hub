@@ -370,26 +370,15 @@ test.describe("Secrets registry", () => {
   });
 
   // -------------------------------------------------------------------------
-  // 7. Rotate Save without restart — N running: PUT fires, 200 returned
-  //
-  // NOTE: The persistent CTA visibility cannot be reliably tested because
-  // the post-rotate `props.refresh()` call in InitKeyedView triggers a
-  // "loading" state in useSecretsSnapshot that unmounts InitKeyedView and
-  // resets all local state (bannerName, rotateMode, runningByServer) before
-  // the CTA can render. Filed as bug:
-  //   work-items/bugs/a3a-rotate-cta-loading-flash.md
-  //
-  // This test verifies the highest-value behaviors that are correctly
-  // testable: the PUT fires with the right body, the Rotate modal accepts
-  // the "Save without restart" button click, and the PUT response 200
-  // triggers modal closure. The POST /api/secrets/K1/restart endpoint
-  // shape is verified separately via a direct fetch in the page context.
+  // 7. Rotate Save without restart — N running: CTA persists after refresh
   // -------------------------------------------------------------------------
-  test("Rotate Save without restart — PUT fires 200 + modal closes + restart endpoint accepts POST", async ({
+  test("Rotate Save without restart — CTA persists, Restart now fires POST", async ({
     page,
     hub,
   }) => {
-    // Set up all route stubs BEFORE page.goto().
+    // Set up all route stubs BEFORE page.goto() so mount-time requests are
+    // captured immediately. /api/status is stubbed with 2 running daemons so
+    // the persistent CTA renders (affectedRunning > 0).
     await page.route("**/api/secrets", async (r) => {
       if (r.request().method() !== "GET") { await r.continue(); return; }
       await r.fulfill({
@@ -407,18 +396,18 @@ test.describe("Secrets registry", () => {
         ]),
       });
     });
-    // /api/status: 2 running daemons.
+    // 2 running daemons — CTA must appear because affectedRunning > 0.
     await page.route("**/api/status", (r) =>
       r.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify([
-          { server: "alpha", daemon: "default", state: "Running" },
-          { server: "beta", daemon: "default", state: "Running" },
+          { server: "alpha", daemon: "default", state: "Running", port: 9121 },
+          { server: "beta", daemon: "default", state: "Running", port: 9122 },
         ]),
       }),
     );
-    // PUT /api/secrets/K1 → 200 (save without restart).
+    // PUT /api/secrets/K1 → 200 (save without restart path).
     await page.route("**/api/secrets/K1", async (r) => {
       if (r.request().method() === "PUT") {
         await r.fulfill({
@@ -430,7 +419,7 @@ test.describe("Secrets registry", () => {
       }
       await r.continue();
     });
-    // POST /api/secrets/K1/restart → 200 (all succeeded).
+    // POST /api/secrets/K1/restart → 200 (all daemons restarted successfully).
     await page.route("**/api/secrets/K1/restart", async (r) => {
       if (r.request().method() === "POST") {
         await r.fulfill({
@@ -452,61 +441,47 @@ test.describe("Secrets registry", () => {
     const row = page.locator("table tbody tr").filter({ hasText: "K1" });
     await expect(row).toBeVisible();
 
-    // Click Rotate on K1.
+    // Click Rotate on K1 and fill a new value.
     await row.getByRole("button", { name: "Rotate" }).click();
     const rotateModal = page.locator('[data-testid="rotate-secret-modal"]');
     await expect(rotateModal).toBeVisible();
-
     await rotateModal.locator('input[type="password"]').fill("new-value-abc");
 
-    // Capture the PUT request body.
-    let putBody: string | null = null;
+    // Click "Save without restart" and wait for the PUT response.
     const putResponse = page.waitForResponse(
       (r) => r.url().includes("/api/secrets/K1") && r.request().method() === "PUT",
     );
     await rotateModal.getByRole("button", { name: "Save without restart" }).click();
     const putResp = await putResponse;
-    putBody = putResp.request().postData();
-
-    // PUT returned 200 from our stub.
     expect(putResp.status()).toBe(200);
-    // PUT body has restart: false (no-restart path).
-    const parsedBody = JSON.parse(putBody!);
-    expect(parsedBody.restart).toBe(false);
-    expect(parsedBody.value).toBe("new-value-abc");
 
     // Modal closes after successful rotate.
     await expect(rotateModal).not.toBeVisible();
 
-    // Directly verify the POST /api/secrets/K1/restart endpoint shape
-    // via fetch (bypasses the CTA loading-flash issue).
-    const restartResult = await page.evaluate(async () => {
-      const resp = await fetch("/api/secrets/K1/restart", { method: "POST" });
-      const body = await resp.json();
-      return { status: resp.status, body };
-    });
-    expect(restartResult.status).toBe(200);
-    expect(Array.isArray(restartResult.body.restart_results)).toBe(true);
-    expect(restartResult.body.restart_results).toHaveLength(2);
-    // All results have empty error (success).
-    for (const r of restartResult.body.restart_results) {
-      expect(r.error).toBe("");
-    }
+    // The persistent CTA banner must be visible after the background refresh.
+    // With the stale-while-revalidate fix, the snapshot stays at status:"ok"
+    // during refresh so InitKeyedView is NOT unmounted and bannerName survives.
+    const cta = page.locator('[data-testid="rotate-cta"]');
+    await expect(cta).toBeVisible();
+    await expect(cta).toContainText("Vault updated");
+    await expect(cta.getByRole("button", { name: "Restart now" })).toBeVisible();
+
+    // Click "Restart now" — verify POST /api/secrets/K1/restart fires.
+    const restartResponse = page.waitForResponse(
+      (r) => r.url().includes("/api/secrets/K1/restart") && r.request().method() === "POST",
+    );
+    await cta.getByRole("button", { name: "Restart now" }).click();
+    const restartResp = await restartResponse;
+    expect(restartResp.status()).toBe(200);
+
+    // CTA dismisses after successful restart (all errors empty → onDismiss called).
+    await expect(cta).not.toBeVisible();
   });
 
   // -------------------------------------------------------------------------
-  // 8. Rotate Save and restart with partial failure (207)
-  //
-  // NOTE: The RotateResultBanner (data-testid="rotate-banner-partial") UI
-  // cannot be reliably tested because the post-rotate props.refresh() call
-  // destroys InitKeyedView during the loading-flash (same bug as test 7).
-  // Filed as: work-items/bugs/a3a-rotate-cta-loading-flash.md
-  //
-  // This test verifies: PUT fires with restart:true, backend returns 207
-  // with mixed restart_results shape, modal closes after 207. The 207
-  // status parsing path in rotateSecret() is the correct contract to test.
+  // 8. Rotate Save and restart with partial failure (207) — banner visible
   // -------------------------------------------------------------------------
-  test("Rotate Save and restart with partial failure — PUT fires, 207 returned + body shape", async ({
+  test("Rotate Save and restart with partial failure — rotate-banner-partial visible with Retry", async ({
     page,
     hub,
   }) => {
@@ -528,13 +503,14 @@ test.describe("Secrets registry", () => {
         ]),
       });
     });
+    // 2 running daemons (required so runningCountFor > 0).
     await page.route("**/api/status", (r) =>
       r.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify([
-          { server: "alpha", daemon: "default", state: "Running" },
-          { server: "beta", daemon: "default", state: "Running" },
+          { server: "alpha", daemon: "default", state: "Running", port: 9121 },
+          { server: "beta", daemon: "default", state: "Running", port: 9122 },
         ]),
       }),
     );
@@ -561,43 +537,32 @@ test.describe("Secrets registry", () => {
     const row = page.locator("table tbody tr").filter({ hasText: "K1" });
     await expect(row).toBeVisible();
 
-    // Click Rotate on K1.
+    // Click Rotate on K1 and fill a new value.
     await row.getByRole("button", { name: "Rotate" }).click();
     const rotateModal = page.locator('[data-testid="rotate-secret-modal"]');
     await expect(rotateModal).toBeVisible();
-
     await rotateModal.locator('input[type="password"]').fill("rotated-value");
 
-    // Capture the PUT request body and response.
+    // Click "Save and restart" and wait for the 207 PUT response.
     const putResponse = page.waitForResponse(
       (r) => r.url().includes("/api/secrets/K1") && r.request().method() === "PUT",
     );
     await rotateModal.getByRole("button", { name: "Save and restart" }).click();
     const putResp = await putResponse;
-
-    // PUT body has restart: true (save-and-restart path).
-    const putBody = JSON.parse(putResp.request().postData() ?? "{}");
-    expect(putBody.restart).toBe(true);
-    expect(putBody.value).toBe("rotated-value");
-
-    // Backend returned 207 (partial-failure contract).
     expect(putResp.status()).toBe(207);
 
-    // Verify the 207 body shape matches memo §D9.
-    const respBody = await putResp.json();
-    expect(respBody.vault_updated).toBe(true);
-    expect(Array.isArray(respBody.restart_results)).toBe(true);
-    expect(respBody.restart_results).toHaveLength(2);
-    // alpha succeeded.
-    expect(respBody.restart_results[0].task_name).toBe("alpha/default");
-    expect(respBody.restart_results[0].error).toBe("");
-    // beta failed.
-    expect(respBody.restart_results[1].task_name).toBe("beta/default");
-    expect(respBody.restart_results[1].error).not.toBe("");
-
-    // rotateSecret() on the frontend handles 207 the same as 200 —
-    // modal closes (no error thrown from the 207 path).
+    // Modal closes after the rotate call (207 is treated as success by rotateSecret()).
     await expect(rotateModal).not.toBeVisible();
+
+    // The partial-failure banner must be visible — stale-while-revalidate
+    // keeps InitKeyedView mounted so rotateMode/bannerName/rotateResult survive
+    // the background refresh triggered by onSaved.
+    const partialBanner = page.locator('[data-testid="rotate-banner-partial"]');
+    await expect(partialBanner).toBeVisible();
+    // Banner copy: "1/2 daemons restarted".
+    await expect(partialBanner).toContainText("1/2");
+    // Retry button is visible.
+    await expect(partialBanner.getByRole("button", { name: "Retry failed restarts" })).toBeVisible();
   });
 
   // -------------------------------------------------------------------------
