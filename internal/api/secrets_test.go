@@ -356,6 +356,85 @@ func TestSecretsDelete_RequiresConfirmWithRefs(t *testing.T) {
 	}
 }
 
+func TestSecretsInit_RaceDoesNotDeleteConcurrentVault(t *testing.T) {
+	keyPath, vaultPath := secretsTestEnv(t)
+	a := NewAPI()
+
+	// Simulate concurrent init: another request just created both files.
+	// initVaultFn returns the "already exists" error (matches what
+	// secrets.InitVault returns at vault.go:28-33).
+	initVaultFn = func(kp, vp string) error {
+		// Pretend another request wrote both files just before we got here.
+		if err := os.MkdirAll(filepath.Dir(kp), 0o700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(kp, []byte("CONCURRENT-IDENTITY"), 0o600); err != nil {
+			return err
+		}
+		if err := os.WriteFile(vp, []byte("CONCURRENT-VAULT-CIPHERTEXT"), 0o600); err != nil {
+			return err
+		}
+		return fmt.Errorf("identity file already exists: %s", kp)
+	}
+	defer func() { initVaultFn = secrets.InitVault }()
+
+	_, err := a.SecretsInit()
+	var blocked *SecretsInitBlocked
+	if !errors.As(err, &blocked) {
+		t.Fatalf("err = %T %v, want *SecretsInitBlocked (race must NOT trigger cleanup)", err, err)
+	}
+
+	// CRITICAL: the concurrent request's files MUST still exist.
+	keyBytes, kerr := os.ReadFile(keyPath)
+	if kerr != nil {
+		t.Fatalf("concurrent key file was deleted by cleanup: %v", kerr)
+	}
+	if string(keyBytes) != "CONCURRENT-IDENTITY" {
+		t.Errorf("key file contents changed: %q", keyBytes)
+	}
+	vaultBytes, verr := os.ReadFile(vaultPath)
+	if verr != nil {
+		t.Fatalf("concurrent vault file was deleted by cleanup: %v", verr)
+	}
+	if string(vaultBytes) != "CONCURRENT-VAULT-CIPHERTEXT" {
+		t.Errorf("vault file contents changed: %q", vaultBytes)
+	}
+}
+
+func TestSecretsInit_VaultAlreadyExistsRaceDoesNotDelete(t *testing.T) {
+	keyPath, vaultPath := secretsTestEnv(t)
+	a := NewAPI()
+
+	// Simulate the rarer race where only the vault file exists from a
+	// concurrent request (e.g. they're between key write and vault write).
+	initVaultFn = func(kp, vp string) error {
+		if err := os.MkdirAll(filepath.Dir(kp), 0o700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(kp, []byte("OUR-PARTIAL-KEY"), 0o600); err != nil {
+			return err
+		}
+		if err := os.WriteFile(vp, []byte("CONCURRENT-VAULT"), 0o600); err != nil {
+			return err
+		}
+		return fmt.Errorf("vault file already exists: %s", vp)
+	}
+	defer func() { initVaultFn = secrets.InitVault }()
+
+	_, err := a.SecretsInit()
+	var blocked *SecretsInitBlocked
+	if !errors.As(err, &blocked) {
+		t.Fatalf("err = %T %v, want *SecretsInitBlocked", err, err)
+	}
+	// Both files should remain.
+	if _, kerr := os.Stat(keyPath); kerr != nil {
+		t.Errorf("key file deleted: %v", kerr)
+	}
+	if _, verr := os.Stat(vaultPath); verr != nil {
+		t.Errorf("vault file deleted: %v", verr)
+	}
+}
+
 func TestSecretsDelete_WithConfirmBypassesRefs(t *testing.T) {
 	_, _ = secretsTestEnv(t)
 	manifestDir := t.TempDir()

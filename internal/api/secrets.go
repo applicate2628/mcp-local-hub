@@ -116,9 +116,19 @@ func (a *API) SecretsInit() (SecretsInitResult, error) {
 	}
 
 	if err := initVaultFn(keyPath, vaultPath); err != nil {
-		// Partial init: clean up whatever InitVault may have created.
-		// Order: vault first (because the key file alone is benign;
-		// an orphan vault is the harder-to-explain artifact).
+		// Codex PR #18 P1 race fix: if initVaultFn refused because the
+		// target files already exist, a concurrent request just created
+		// them — we did NOT, and must NOT clean them up. Route to
+		// SECRETS_INIT_BLOCKED (cases 3/4 path) instead.
+		if initVaultRefused(err) {
+			return SecretsInitResult{}, &SecretsInitBlocked{
+				KeyExists:   fileExists(keyPath),
+				VaultExists: fileExists(vaultPath),
+			}
+		}
+		// Genuine partial init we own. Clean up whatever InitVault may
+		// have created. Order: vault first (because the key file alone
+		// is benign; an orphan vault is the harder-to-explain artifact).
 		cleanupOK := true
 		var orphan string
 		if rmErr := os.Remove(vaultPath); rmErr != nil && !os.IsNotExist(rmErr) {
@@ -169,6 +179,21 @@ func (e *SecretsInitBlocked) Error() string {
 func fileExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
+}
+
+// initVaultRefused returns true if the underlying secrets.InitVault
+// refused because one of its target files already exists. The error
+// strings come from internal/secrets/vault.go:28-33. Used to
+// distinguish "concurrent request created these files" from
+// "we created them and vault.save() failed mid-write" — only the
+// latter justifies cleanup.
+func initVaultRefused(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "identity file already exists") ||
+		strings.Contains(msg, "vault file already exists")
 }
 
 // secretNameRE allows lowercase identifiers (memo §5.3 Codex memo-R8 P1:
