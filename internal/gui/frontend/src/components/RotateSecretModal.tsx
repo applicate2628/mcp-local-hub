@@ -70,7 +70,7 @@ export function RotateSecretModal(props: Props) {
       {serverErr && <p class="error">{serverErr}</p>}
       <menu>
         <button type="button" onClick={() => props.onClose()} disabled={working}>Cancel</button>
-        <button type="button" onClick={() => submit(false)} disabled={value === "" || working}>Save without restart</button>
+        <button type="button" onClick={() => submit(false)} disabled={value === "" || working}>{working ? "Saving…" : "Save without restart"}</button>
         <button type="button" onClick={() => submit(true)} disabled={value === "" || working}>{working ? "Saving…" : "Save and restart"}</button>
       </menu>
     </dialog>
@@ -78,7 +78,6 @@ export function RotateSecretModal(props: Props) {
 }
 
 export function PersistentRotateCTA(props: {
-  visible: boolean;
   secretName: string;
   affectedRunning: number;
   onRestart: () => Promise<void>;
@@ -86,7 +85,6 @@ export function PersistentRotateCTA(props: {
 }) {
   const [working, setWorking] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  if (!props.visible) return null;
   if (props.affectedRunning === 0) {
     // Toast-only path; CTA suppressed (memo D4 + Codex memo-R1 P3).
     return null;
@@ -119,14 +117,13 @@ export function PersistentRotateCTA(props: {
 }
 
 export function RotateResultBanner(props: {
-  visible: boolean;
   result: SecretsRotateResult | null;
   onRetry: () => Promise<void>;
   onDismiss: () => void;
 }) {
   const [working, setWorking] = useState(false);
   const [retryErr, setRetryErr] = useState<string | null>(null);
-  if (!props.visible || !props.result) return null;
+  if (!props.result) return null;
   const failed = props.result.restart_results.filter((r) => r.error !== "");
   if (failed.length === 0) {
     return (

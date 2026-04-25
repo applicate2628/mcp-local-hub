@@ -127,6 +127,12 @@ function InitEmptyView(props: { refresh: () => Promise<void> }) {
 function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<void> }) {
   const [addOpen, setAddOpen] = useState(false);
   const [prefill, setPrefill] = useState<string | undefined>(undefined);
+  // Codex Task-7 quality review F3 (V1 limitation): if user opens
+  // Rotate for key B before dismissing the post-A banner, bannerName
+  // is overwritten and A's pending restart prompt is silently lost.
+  // The vault rotation for A is already committed; user can manually
+  // restart A's daemons via Servers screen. Acceptable for V1.
+  //
   // Codex plan-R1 P1: rotateName must NOT be cleared when the modal closes,
   // because the persistent CTA / result banner still need to know which
   // secret was rotated to call POST /api/secrets/<name>/restart. The
@@ -225,7 +231,6 @@ function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<voi
 
       {rotateMode === "no-restart" && bannerName && (
         <PersistentRotateCTA
-          visible={true}
           secretName={bannerName}
           affectedRunning={runningCountFor(bannerName)}
           onRestart={async () => {
@@ -245,7 +250,6 @@ function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<voi
 
       {rotateMode === "with-restart" && bannerName && (
         <RotateResultBanner
-          visible={true}
           result={rotateResult}
           onRetry={async () => {
             // Codex plan-R1 P1: retry must update the banner with fresh
