@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from "preact/hooks";
 import { useSecretsSnapshot } from "../lib/use-secrets-snapshot";
 import { secretsInit } from "../lib/secrets-api";
 import type { SecretsEnvelope, SecretRow, UsageRef } from "../lib/secrets-api";
+import { AddSecretModal } from "../components/AddSecretModal";
 
 const MCPHUB_EDIT_CMD = "mcphub secrets edit";
 
@@ -33,8 +34,8 @@ export function SecretsScreen() {
       <h1>Secrets</h1>
       <EditVaultBanner />
       {state === "missing" && <NotInitView refresh={snap.refresh} />}
-      {state === "ok" && env.secrets.length === 0 && <InitEmptyView />}
-      {state === "ok" && env.secrets.length > 0 && <InitKeyedView env={env} />}
+      {state === "ok" && env.secrets.length === 0 && <InitEmptyView refresh={snap.refresh} />}
+      {state === "ok" && env.secrets.length > 0 && <InitKeyedView env={env} refresh={snap.refresh} />}
       {(state === "decrypt_failed" || state === "corrupt") && <BrokenView env={env} />}
       <ManifestErrorsBanner env={env} />
     </section>
@@ -109,23 +110,25 @@ function NotInitView(props: { refresh: () => Promise<void> }) {
   );
 }
 
-function InitEmptyView() {
+function InitEmptyView(props: { refresh: () => Promise<void> }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div class="empty-state">
-      <p>No secrets yet.</p>
-      <button type="button" onClick={() => console.log("AddSecret modal pending — Task 6")}>
-        Add secret
-      </button>
-    </div>
+    <>
+      <div class="empty-state">
+        <p>No secrets yet.</p>
+        <button type="button" onClick={() => setOpen(true)}>Add secret</button>
+      </div>
+      <AddSecretModal open={open} onClose={() => setOpen(false)} onSaved={() => props.refresh()} />
+    </>
   );
 }
 
-function InitKeyedView(props: { env: SecretsEnvelope }) {
+function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<void> }) {
+  const [addOpen, setAddOpen] = useState(false);
+  const [prefill, setPrefill] = useState<string | undefined>(undefined);
   return (
     <div class="secrets-table">
-      <button type="button" onClick={() => console.log("AddSecret modal pending — Task 6")}>
-        Add secret
-      </button>
+      <button type="button" onClick={() => { setPrefill(undefined); setAddOpen(true); }}>Add secret</button>
       <table>
         <thead>
           <tr>
@@ -136,14 +139,21 @@ function InitKeyedView(props: { env: SecretsEnvelope }) {
           </tr>
         </thead>
         <tbody>
-          {props.env.secrets.map((s) => <SecretRowComponent key={s.name} row={s} />)}
+          {props.env.secrets.map((s) => (
+            <SecretRowComponent
+              key={s.name}
+              row={s}
+              onAddPrefill={(n) => { setPrefill(n); setAddOpen(true); }}
+            />
+          ))}
         </tbody>
       </table>
+      <AddSecretModal open={addOpen} prefillName={prefill} onClose={() => setAddOpen(false)} onSaved={() => props.refresh()} />
     </div>
   );
 }
 
-function SecretRowComponent(props: { row: SecretRow }) {
+function SecretRowComponent(props: { row: SecretRow; onAddPrefill: (name: string) => void }) {
   const isPresent = props.row.state === "present";
   const usedByCount = props.row.used_by.length;
   return (
@@ -160,7 +170,7 @@ function SecretRowComponent(props: { row: SecretRow }) {
             <button
               type="button"
               class="linklike"
-              onClick={() => console.log(`AddSecret prefilled with ${props.row.name} — Task 6`)}
+              onClick={() => props.onAddPrefill(props.row.name)}
             >
               Add this secret
             </button>

@@ -1,0 +1,91 @@
+// internal/gui/frontend/src/components/AddSecretModal.tsx
+import { useEffect, useRef, useState } from "preact/hooks";
+import { addSecret } from "../lib/secrets-api";
+
+interface Props {
+  open: boolean;
+  prefillName?: string;
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+const NAME_RE = /^[A-Za-z][A-Za-z0-9_]*$/;
+
+export function AddSecretModal(props: Props) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const [name, setName] = useState(props.prefillName ?? "");
+  const [value, setValue] = useState("");
+  const [working, setWorking] = useState(false);
+  const [serverErr, setServerErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!dialogRef.current) return;
+    if (props.open && !dialogRef.current.open) {
+      dialogRef.current.showModal();
+      setName(props.prefillName ?? "");
+      setValue("");
+      setServerErr(null);
+    } else if (!props.open && dialogRef.current.open) {
+      dialogRef.current.close();
+    }
+  }, [props.open, props.prefillName]);
+
+  const nameValid = name === "" || NAME_RE.test(name);
+  const canSubmit = name !== "" && value !== "" && nameValid && !working;
+
+  return (
+    <dialog
+      ref={dialogRef}
+      onClose={() => props.onClose()}
+      data-testid="add-secret-modal"
+    >
+      <form
+        method="dialog"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (!canSubmit) return;
+          setWorking(true);
+          setServerErr(null);
+          try {
+            await addSecret(name, value);
+            props.onSaved();
+            props.onClose();
+          } catch (err) {
+            setServerErr((err as Error).message);
+          } finally {
+            setWorking(false);
+          }
+        }}
+      >
+        <h2>Add secret</h2>
+        <label>
+          Name
+          <input
+            type="text"
+            value={name}
+            onInput={(e) => setName((e.target as HTMLInputElement).value)}
+            placeholder="OPENAI_API_KEY"
+            required
+            disabled={working || Boolean(props.prefillName)}
+          />
+        </label>
+        {!nameValid && <p class="error">Name must match {NAME_RE.source}</p>}
+        <label>
+          Value
+          <input
+            type="password"
+            value={value}
+            onInput={(e) => setValue((e.target as HTMLInputElement).value)}
+            required
+            disabled={working}
+          />
+        </label>
+        {serverErr && <p class="error">{serverErr}</p>}
+        <menu>
+          <button type="button" onClick={() => props.onClose()} disabled={working}>Cancel</button>
+          <button type="submit" disabled={!canSubmit}>{working ? "Saving…" : "Save"}</button>
+        </menu>
+      </form>
+    </dialog>
+  );
+}
