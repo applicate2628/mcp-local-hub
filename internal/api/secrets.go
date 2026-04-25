@@ -398,13 +398,23 @@ func (a *API) SecretsRotate(name, value string, restart bool) (SecretsRotateResu
 // SecretsRestart runs the restart phase only — used by POST /api/secrets/:key/restart.
 // Does NOT modify the vault.
 func (a *API) SecretsRestart(name string) ([]RestartResult, error) {
+	// Vault verification phase — serialized with the rest of vault ops
+	// so a concurrent rotate/delete cannot trick us into reading a
+	// transient partial os.WriteFile output and returning
+	// SECRETS_VAULT_NOT_INITIALIZED falsely (Codex PR #18 P2). The
+	// restart orchestration runs AFTER the unlock since it doesn't
+	// touch the vault (same pattern as SecretsRotate).
+	vaultMutex.Lock()
 	v, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
 	if err != nil {
+		vaultMutex.Unlock()
 		return nil, &SecretsOpError{Code: "SECRETS_VAULT_NOT_INITIALIZED", Msg: err.Error()}
 	}
 	if _, getErr := v.Get(name); getErr != nil {
+		vaultMutex.Unlock()
 		return nil, &SecretsOpError{Code: "SECRETS_KEY_NOT_FOUND", Msg: getErr.Error()}
 	}
+	vaultMutex.Unlock()
 	return a.restartServersForKey(name)
 }
 
