@@ -129,6 +129,53 @@ export function RotateResultBanner(props: {
   const [retryErr, setRetryErr] = useState<string | null>(null);
   if (!props.result) return null;
   const failed = props.result.restart_results.filter((r) => r.error !== "");
+
+  // Codex PR #18 P1: orchestration failure (500 RESTART_FAILED with
+  // vault_updated:true). restart_results may be empty if Status()
+  // crashed before any restart was attempted. Don't show the
+  // "0 daemons restarted" success banner — surface the error and
+  // offer retry.
+  if (props.result.error || props.result.code === "RESTART_FAILED") {
+    const partialOK = props.result.restart_results.length - failed.length;
+    const partialFailed = failed.length;
+    return (
+      <div class="banner banner-error" data-testid="rotate-banner-orchestration-error">
+        <p>
+          Vault updated for the new value, but the restart sequence aborted: <code>{props.result.error ?? "RESTART_FAILED"}</code>.
+        </p>
+        {(partialOK > 0 || partialFailed > 0) && (
+          <p>{partialOK}/{props.result.restart_results.length} daemons were restarted before the abort.{" "}
+            {partialFailed > 0 && `${partialFailed} reported errors:`}
+          </p>
+        )}
+        {partialFailed > 0 && (
+          <ul>
+            {failed.map((f) => <li key={f.task_name}><code>{f.task_name}</code>: {f.error}</li>)}
+          </ul>
+        )}
+        {retryErr && <p class="error">{retryErr}</p>}
+        <button
+          type="button"
+          disabled={working}
+          onClick={async () => {
+            setWorking(true);
+            setRetryErr(null);
+            try {
+              await props.onRetry();
+            } catch (e) {
+              setRetryErr((e as Error).message);
+            } finally {
+              setWorking(false);
+            }
+          }}
+        >
+          {working ? "Retrying…" : "Retry restart"}
+        </button>
+        <button type="button" onClick={() => props.onDismiss()}>Dismiss</button>
+      </div>
+    );
+  }
+
   if (failed.length === 0) {
     return (
       <div class="banner banner-success" data-testid="rotate-banner">

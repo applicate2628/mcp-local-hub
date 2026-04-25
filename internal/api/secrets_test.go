@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 
@@ -511,6 +512,25 @@ func TestSecretsInit_ConcurrentCallsSerializeCleanly(t *testing.T) {
 	}
 	if len(v.List()) != 0 {
 		t.Errorf("expected empty vault after init, got keys: %v", v.List())
+	}
+}
+
+func TestSecretsSet_RejectsReservedName(t *testing.T) {
+	_, _ = secretsTestEnv(t)
+	a := NewAPI()
+	if _, err := a.SecretsInit(); err != nil {
+		t.Fatal(err)
+	}
+	err := a.SecretsSet("init", "value")
+	var opErr *SecretsOpError
+	if !errors.As(err, &opErr) {
+		t.Fatalf("err = %T %v, want *SecretsOpError", err, err)
+	}
+	if opErr.Code != "SECRETS_INVALID_NAME" {
+		t.Errorf("code = %q, want SECRETS_INVALID_NAME", opErr.Code)
+	}
+	if !strings.Contains(opErr.Msg, "reserved") {
+		t.Errorf("Msg = %q, want to mention 'reserved'", opErr.Msg)
 	}
 }
 

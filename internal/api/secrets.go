@@ -222,6 +222,13 @@ func (a *API) SecretsSet(name, value string) error {
 	if !secretNameRE.MatchString(name) {
 		return &SecretsOpError{Code: "SECRETS_INVALID_NAME", Msg: fmt.Sprintf("name %q does not match %s", name, secretNameRE.String())}
 	}
+	// Codex PR #18 P2: "init" collides with the /api/secrets/init route
+	// (vault initialization). A secret with this name would be reachable
+	// via POST but PUT/DELETE /api/secrets/init route to the init handler
+	// instead, leaving the secret unmanageable. Reject at creation time.
+	if name == "init" {
+		return &SecretsOpError{Code: "SECRETS_INVALID_NAME", Msg: `name "init" is reserved (collides with /api/secrets/init route); choose a different name`}
+	}
 	if value == "" {
 		return &SecretsOpError{Code: "SECRETS_EMPTY_VALUE", Msg: "value must not be empty"}
 	}
@@ -361,6 +368,13 @@ func nonNilUsage(in []UsageRef) []UsageRef {
 func (a *API) SecretsRotate(name, value string, restart bool) (SecretsRotateResult, error) {
 	if !secretNameRE.MatchString(name) {
 		return SecretsRotateResult{}, &SecretsOpError{Code: "SECRETS_INVALID_NAME", Msg: fmt.Sprintf("name %q does not match %s", name, secretNameRE.String())}
+	}
+	// Codex PR #18 P2: belt-and-suspenders guard (mirrors SecretsSet).
+	// In practice SecretsSet already rejects "init" at creation time, so
+	// the vault should never contain this key. But if data was written via
+	// a direct vault.Set bypass, this stops the rotate path too.
+	if name == "init" {
+		return SecretsRotateResult{}, &SecretsOpError{Code: "SECRETS_INVALID_NAME", Msg: `name "init" is reserved`}
 	}
 	if value == "" {
 		return SecretsRotateResult{}, &SecretsOpError{Code: "SECRETS_EMPTY_VALUE", Msg: "value must not be empty"}

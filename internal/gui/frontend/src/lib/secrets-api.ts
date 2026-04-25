@@ -33,6 +33,14 @@ export interface RestartResult {
 export interface SecretsRotateResult {
   vault_updated: boolean;
   restart_results: RestartResult[];
+  // Codex PR #18 P1: present when the backend returned 500 +
+  // RESTART_FAILED with vault_updated:true (orchestration crashed
+  // post-vault-write, e.g. Status() failed before any restart
+  // attempts so restart_results may be empty). The banner uses this
+  // to show an orchestration-error message + retry instead of a
+  // false "0 daemons restarted" success.
+  error?: string;
+  code?: string;
 }
 
 export interface APIError extends Error {

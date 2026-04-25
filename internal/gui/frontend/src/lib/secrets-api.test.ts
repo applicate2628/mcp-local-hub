@@ -96,7 +96,7 @@ describe("rotateSecret", () => {
     expect(res.restart_results[0].error).toBe("fail");
   });
 
-  it("returns body on 500 RESTART_FAILED when vault was committed", async () => {
+  it("returns body on 500 RESTART_FAILED when vault was committed (preserves code+error)", async () => {
     mockFetch.mockResolvedValue({
       ok: false,
       status: 500,
@@ -104,14 +104,17 @@ describe("rotateSecret", () => {
         vault_updated: true,
         code: "RESTART_FAILED",
         error: "scheduler unavailable",
-        restart_results: [
-          { task_name: "mcp-local-hub-server-a-default", error: "" },
-        ],
+        restart_results: [],
       }),
     });
     const res = await rotateSecret("K1", "v", true);
     expect(res.vault_updated).toBe(true);
-    expect(res.restart_results).toHaveLength(1);
+    expect(res.restart_results).toHaveLength(0);
+    // Codex PR #18 P1: code+error fields must reach the caller so the
+    // banner can show the orchestration error instead of a false
+    // "0 daemons restarted" success.
+    expect(res.code).toBe("RESTART_FAILED");
+    expect(res.error).toBe("scheduler unavailable");
   });
 
   it("throws on 500 SECRETS_SET_FAILED (vault not committed)", async () => {
