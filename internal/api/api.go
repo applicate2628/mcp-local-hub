@@ -4,20 +4,33 @@
 // here; they never reach directly into internal/clients, internal/scheduler,
 // internal/config, or internal/secrets.
 //
-// This enforces CLI ≡ UI parity structurally: if a capability is in api, it
-// is reachable from both frontends by construction; if it is not, neither
-// frontend can expose it.
+// This keeps CLI and GUI from skipping layers: capabilities live in api so
+// both frontends can reach them without bypassing validation, backup, or
+// audit logic. NOTE: not every api function has a CLI command today —
+// api.Demigrate is wired into the GUI (/api/demigrate) but has no mcphub
+// subcommand; adding one is a separate follow-up.
 package api
 
-// API is the orchestration handle held by cli and gui. A single instance is
-// created per process via NewAPI. Methods are safe for concurrent use unless
-// noted otherwise.
+// API is the orchestration handle held by cli and gui. Methods are safe for
+// concurrent use unless noted otherwise.
+//
+// Lifecycle: the CLI layer creates one API per process via NewAPI. The GUI
+// layer currently constructs a fresh API inside every real adapter (see
+// internal/gui/server.go's realManifestCreator / realManifestGetter /
+// realManifestEditor / realManifestValidator / realDemigrater). This is
+// safe today because newEventBus (internal/api/events.go) returns an empty
+// struct — no goroutine, no background resource. When EventBus is populated
+// (Task 22 per events.go's source comment), the GUI adapters should be
+// refactored to share one API handle via the Server struct.
 type API struct {
 	state *State
 	bus   *EventBus
 }
 
 // NewAPI constructs a fresh API with an initialized state and event bus.
+// Cheap: allocates the State struct + daemon map + EventBus struct header,
+// no background resources. See the API type doc for the per-process vs
+// per-request lifecycle caveat.
 func NewAPI() *API {
 	return &API{
 		state: &State{Daemons: make(map[string]DaemonStatus)},
