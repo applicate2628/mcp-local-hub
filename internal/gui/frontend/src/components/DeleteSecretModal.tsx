@@ -19,6 +19,7 @@ export function DeleteSecretModal(props: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [stage, setStage] = useState<Stage>({ kind: "closed" });
   const [typed, setTyped] = useState("");
+  const [isConfirming, setIsConfirming] = useState(false);
 
   useEffect(() => {
     if (props.name === null) {
@@ -33,6 +34,13 @@ export function DeleteSecretModal(props: Props) {
       dialogRef.current.showModal();
     }
     void firstAttempt(props.name);
+
+    // Cleanup: ensure dialog closes if unmounted while open
+    return () => {
+      if (dialogRef.current?.open) {
+        dialogRef.current.close();
+      }
+    };
   }, [props.name]);
 
   async function firstAttempt(name: string) {
@@ -66,6 +74,7 @@ export function DeleteSecretModal(props: Props) {
 
   async function confirmDelete() {
     if (props.name === null) return;
+    setIsConfirming(true);
     try {
       await deleteSecret(props.name, { confirm: true });
       props.onDeleted();
@@ -80,7 +89,9 @@ export function DeleteSecretModal(props: Props) {
         props.onClose();
         return;
       }
-      setStage({ kind: "error", message: (e as Error).message });
+      setStage({ kind: "error", message: err.message });
+    } finally {
+      setIsConfirming(false);
     }
   }
 
@@ -92,7 +103,7 @@ export function DeleteSecretModal(props: Props) {
   return (
     <dialog
       ref={dialogRef}
-      onCancel={(e) => { if (isWorking) e.preventDefault(); }}
+      onCancel={(e) => { if (isWorking || isConfirming) e.preventDefault(); }}
       onClose={() => props.onClose()}
       data-testid="delete-secret-modal"
     >
@@ -122,6 +133,7 @@ export function DeleteSecretModal(props: Props) {
             value={typed}
             onInput={(e) => setTyped((e.target as HTMLInputElement).value)}
             data-testid="delete-confirm-input"
+            aria-label="Type DELETE to confirm"
           />
           <menu>
             <button type="button" onClick={() => props.onClose()}>Cancel</button>
@@ -146,6 +158,7 @@ export function DeleteSecretModal(props: Props) {
             value={typed}
             onInput={(e) => setTyped((e.target as HTMLInputElement).value)}
             data-testid="delete-confirm-input"
+            aria-label="Type DELETE to confirm"
           />
           <menu>
             <button type="button" onClick={() => props.onClose()}>Cancel</button>
