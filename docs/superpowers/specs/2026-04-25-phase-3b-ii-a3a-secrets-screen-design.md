@@ -90,7 +90,8 @@ A3-a does **not** retrofit the CLI to go through `api.go` — that's a separate 
 - No `/api/secrets/*` endpoints. Routing in `internal/gui/server.go` does not register any.
 - No `Secrets.tsx` screen. `internal/gui/frontend/src/screens/` contains Servers / Migration / AddServer / EditServer / Dashboard / Logs.
 - No sidebar nav link. Nav lives in `internal/gui/frontend/src/app.tsx` (no `components/Sidebar.tsx` exists — Codex memo-R1 P2). Current 5 nav entries; "Secrets" is missing.
-- `internal/gui/frontend/src/hooks/useRouter.ts` is the routing hook (no separate `routing.ts` registry — Codex memo-R4 P2). The hash-route switch lives directly in `app.tsx`'s render branch on `currentRoute`.
+- A `internal/gui/frontend/src/lib/routing.ts` file DOES exist, but Codex memo-R8 P3 clarified: it is **server-routing classifier helper logic** (per-client routing classifier `via-hub` / `direct` / `not-installed`), NOT a hash-route registry. The hash-route screen-switch lives in `app.tsx`'s `currentRoute` rendering branch, populated by the `useRouter` hook in `hooks/useRouter.ts`. A3-a does NOT add a new screen-route registry; it extends `app.tsx`'s switch.
+- `internal/gui/frontend/src/hooks/useRouter.ts` is the hash-routing hook. The hash-route screen-switch lives directly in `app.tsx`'s render branch on `currentRoute`. Note: `lib/routing.ts` exists but is server-routing classifier helper logic (per-client `via-hub`/`direct`/`not-installed`), NOT a hash-route registry — see §2.4 (Codex memo-R8 P3).
 
 A3-a creates all of these.
 
@@ -197,7 +198,7 @@ The split aligns with Codex's framing: "secret registry vs consumer UX" rather t
 **Init idempotency rule** — `secrets.InitVault` refuses if EITHER `keyPath` or `vaultPath` already exists ([vault.go:28-33](../../../internal/secrets/vault.go#L28-L33)). Order of operations inside `InitVault`: write key file first ([vault.go:38-42](../../../internal/secrets/vault.go#L38-L42)), then call `v.save()` which encrypts to a buffer and writes via `os.WriteFile(vaultPath, buf.Bytes(), 0o600)` ([vault.go:118-134](../../../internal/secrets/vault.go#L118-L134)). Either step can fail (disk full, permission, IO interruption). If the second step fails, `os.WriteFile` may have created and truncated `secrets.age` to a partial state OR not created it at all — both possibilities must be cleaned up. The `SecretsInit` wrapper is responsible for cleanup-aware retry.
 
 1. **`OpenVault` succeeds** → vault is functional. No-op. Return `vault_state:"ok"`. (Idempotent path: clicking Init on an already-initialized system is harmless.)
-2. **`OpenVault` fails AND both files are missing** → safe to call `InitVault`. On success return `vault_state:"ok"`. **On `InitVault` failure** (Codex memo-R2 P1 expanded): the wrapper attempts cleanup of EVERY artifact `InitVault` may have created — first `os.Remove(vaultPath)` (in case `os.WriteFile` partially wrote it), then `os.Remove(keyPath)` (in case the key was written but vault failed). Cleanup uses `os.IsNotExist(err)` tolerance so a missing artifact is not a cleanup failure. The wrapper reports `cleanup_status: "ok" | "failed"`:
+2. **`OpenVault` fails AND both files are missing** → safe to call `InitVault`, BUT **wrapper must `os.MkdirAll(filepath.Dir(keyPath), 0700)` first** (Codex memo-R8 P1: `secrets.InitVault` itself does NOT create the parent directory; CLI does this explicitly at [internal/cli/secrets.go:78-84](../../../internal/cli/secrets.go#L78-L84). On a fresh machine `%LOCALAPPDATA%\mcp-local-hub\` does not exist; `InitVault` would fail at `os.WriteFile(keyPath)` with ENOENT). On success return `vault_state:"ok"`. **On `InitVault` failure** (Codex memo-R2 P1 expanded): the wrapper attempts cleanup of EVERY artifact `InitVault` may have created — first `os.Remove(vaultPath)` (in case `os.WriteFile` partially wrote it), then `os.Remove(keyPath)` (in case the key was written but vault failed). Cleanup uses `os.IsNotExist(err)` tolerance so a missing artifact is not a cleanup failure. The wrapper reports `cleanup_status: "ok" | "failed"`:
    - `cleanup_status: "ok"` → both removals succeeded (or the artifacts didn't exist). User can retry; HTTP 200 with `{vault_state: "missing", cleanup_status: "ok", error, code}` so the body still surfaces the original `SECRETS_INIT_FAILED` reason.
    - `cleanup_status: "failed"` → at least one removal failed. HTTP 500 + `SECRETS_INIT_FAILED` + `orphan_path` field naming the artifact that requires manual cleanup.
 3. **`OpenVault` fails AND both files exist** (decrypt failure, identity mismatch, corrupt vault) → do NOT call `InitVault` (it would refuse anyway). Return **409** + `SECRETS_INIT_BLOCKED` with a message pointing the user at `mcphub secrets edit` for recovery, or at deleting the files manually if the key is truly lost.
@@ -254,8 +255,10 @@ Behavior:
 1. **Cancel** — no vault write, no restart. Modal closes.
 2. **Save without restart** — `PUT /api/secrets/:key` with `{"value":"…","restart":false}`. Vault updated. Modal closes.
    - If at least 1 running daemon would be affected: persistent CTA appears at top of Secrets screen: "Vault updated. N running daemons still using the previous value. [Restart now] [Dismiss]". Persistent (not toast) so user can defer until convenient maintenance window.
+     - **"Restart now" semantic** (Codex memo-R8 P1 explicit contract): button calls **`POST /api/secrets/:key/restart`** — a new endpoint that runs `restartServersForKey(key)` (same helper as Rotate's restart path) and returns `{restart_results:[…]}` with the same 200/207/500 status mapping as PUT. The endpoint takes NO body — it does NOT re-write the vault, only restarts the affected running daemons. This decouples restart-now from the rotation cycle (the value is already in the vault from the prior PUT).
+     - **"Dismiss"** simply hides the CTA from this session (no API call).
    - **If 0 running daemons** (Codex memo-R1 P3): the CTA is suppressed entirely; instead a brief toast confirms "Vault updated. No running daemons need restart." Stopped daemons will pick up the new value on next start; surfacing a useless "0 running daemons" CTA would be noise.
-3. **Save and restart** — `PUT /api/secrets/:key` with `{"value":"…","restart":true}`. Backend writes vault first, then attempts restart on each affected daemon (those bound to a server whose manifest references this key AND whose status is "running"). Response includes per-daemon results array. If any restart fails, the response banner shows: "Vault updated. 3/5 daemons restarted. 2 still need restart to use the new value." with a list of failed daemons and a "Retry failed restarts" button.
+3. **Save and restart** — `PUT /api/secrets/:key` with `{"value":"…","restart":true}`. Backend writes vault first, then attempts restart on each affected daemon (those bound to a server whose manifest references this key AND whose status is "running"). Response includes per-daemon results array. If any restart fails, the response banner shows: "Vault updated. 3/5 daemons restarted. 2 still need restart to use the new value." with a list of failed daemons and a **"Retry failed restarts"** button. **Retry semantic** (Codex memo-R8 P1 explicit contract): button calls `POST /api/secrets/:key/restart` (the same endpoint as the Save-without-restart CTA). The endpoint always restarts ALL currently-running affected daemons, not just the previously-failed subset — this is by design: per-daemon retry-targeting would require state tracking across requests, but a full re-attempt is idempotent and safe (re-restarting an already-running daemon just kills+respawns it). Successful retries clear them from the failed list; remaining failures stay listed.
 
 **No rollback on restart failure.** If 2 of 5 restarts fail, the vault still has the new value. Rolling vault back to the old value would mean: the 3 successfully-restarted daemons now use a value that's no longer authoritative, the 2 failed daemons still have the old value, and the next restart of any daemon that picks the new value pulls something stale. Best-effort writes are robust because they preserve the vault as the source of truth and let the user decide when to retry restart attempts.
 
@@ -315,7 +318,7 @@ A button would imply the GUI owns the lifecycle of the editor session — it doe
 
 ### D7 — Single Secrets.tsx with state-machine guard (Alt 1)
 
-**Frontend recon update (Codex memo-R1 P2):** there is no `internal/gui/frontend/src/components/Sidebar.tsx`. Nav and the screen-switch live in `app.tsx`. A3-a does NOT introduce a new Sidebar component — instead it adds a route entry to the existing `app.tsx` switch and a nav link to whatever the current sidebar markup is in `app.tsx`. §3.1 frontend item #6 ("`components/Sidebar.tsx`: add 6th entry") is therefore corrected to: "`internal/gui/frontend/src/app.tsx`: add the `#/secrets` case to the route switch and the corresponding link element."
+**Frontend recon update (Codex memo-R1 P2 + R8 P3):** there is no `internal/gui/frontend/src/components/Sidebar.tsx` and no separate hash-route screen registry. Nav and the screen-switch live in `app.tsx`. There IS a `lib/routing.ts` file but it's server-routing classifier (per-client `via-hub`/`direct`/`not-installed`), unrelated to hash-routes. A3-a does NOT introduce a new Sidebar component — instead it adds a route entry to the existing `app.tsx` switch and a nav link to whatever the current sidebar markup is in `app.tsx`. §3.1 frontend item #6 ("`components/Sidebar.tsx`: add 6th entry") is therefore corrected to: "`internal/gui/frontend/src/app.tsx`: add the `#/secrets` case to the route switch and the corresponding link element."
 
 **Chosen:** One file, `Secrets.tsx`, with a top-level `switch (vault_state)` rendering different shapes.
 
@@ -351,7 +354,7 @@ Drawbacks (acceptable for A3-a):
 
 **Codex memo-R2 P1 caught the most important fix:** `api.RestartResult` already exists at [install.go:1456-1460](../../../internal/api/install.go#L1456-L1460) with shape `{TaskName, Err}`. `api.Restart` already returns `[]RestartResult` (verified at the same file). A3-a MUST reuse this exact type. Inventing a parallel `{server, daemon, ok, error}` shape would either break CLI callers or create two competing contracts.
 
-**Chosen:** reuse `api.RestartResult` everywhere. The wrapper `api.SecretsRotate` returns `(SecretsRotateResult, error)` where `SecretsRotateResult.RestartResults` is `[]api.RestartResult` (see §5.6 for full struct). The plan must verify and add `json:"task_name"` / `json:"error,omitempty"` to `api.RestartResult` if not already present — current struct has no JSON tags so will marshal as `TaskName` / `Err` until tags are added.
+**Chosen:** reuse `api.RestartResult` everywhere. The wrapper `api.SecretsRotate` returns `(SecretsRotateResult, error)` where `SecretsRotateResult.RestartResults` is `[]api.RestartResult` (see §5.6 for full struct). The plan must verify and add **`json:"task_name"` / `json:"error"`** (NOT `omitempty` — Codex memo-R8 P1: the empty-string `error` value IS the success discriminator the frontend parses; `omitempty` would drop it on success, breaking the wire contract). Current struct has no JSON tags so will marshal as `TaskName` / `Err` until tags are added.
 
 **Plan task 1 (backend scaffold) MUST audit `api.RestartResult`** before the new wrappers ship: confirm field names, add JSON tags if missing, verify CLI's `internal/cli/restart.go` consumers use field accessors (not JSON marshaling) so the JSON tag addition is non-breaking.
 
@@ -381,6 +384,8 @@ Existing handler at `servers.go:22-32` calls `s.restart.Restart(name)`. The hand
 
 - Handler returns `[]api.RestartResult` in a 200 JSON body when ALL `Err` fields are empty.
 - Handler returns **207 Multi-Status** with `[]api.RestartResult` when ANY task has a non-empty `Err` — including the all-failed case. 207 is reserved for per-task failures when the orchestration loop completed; orchestration failures (loop did not complete) use 500 + `RESTART_FAILED` as described above. The frontend distinguishes "all OK" vs. "any failed" by inspecting the `error` JSON field of each result, plus checking the response status code (207 = per-task failures, 500 = orchestration failure with possible partial results).
+
+**Existing consumer compat (Codex memo-R8 P1):** the existing `Dashboard.tsx` restart button at [Dashboard.tsx:73-76](../../../internal/gui/frontend/src/screens/Dashboard.tsx#L73-L76) checks `!resp.ok` to detect failure. Since `Response.ok` is true for any 2xx including 207, partial restart failures would look successful in the existing UI. **Plan task 2 (D9 refactor) MUST update Dashboard.tsx** to either (a) check `resp.status !== 200` for failure, or (b) parse the body and inspect `restart_results[].error` regardless of status. Approach (b) is preferred because it surfaces partial-failure detail to the operator. Existing `/api/servers/:name/restart` tests must also be updated for the new shape.
 - Handler returns **500 + `RESTART_FAILED`** when the orchestration itself failed (scheduler unavailable, manifest read failed, status query failed, mid-loop `api.Restart` call returned error). In this case `vault_updated:true` is always set (vault.Set ran before restart attempts), and `restart_results` carries any partial results gathered before the abort. Helper signature `restartServersForKey(key) ([]api.RestartResult, error)` returns both partial results and error so the handler can include them.
 
 The aggregate-error behavior (single-string error from CLI's `internal/cli/restart.go`) is preserved at the **CLI layer**: `restart.go` aggregates `api.Restart`'s `[]RestartResult` into a string for human-readable output. The change is GUI-adapter-side only.
@@ -389,7 +394,7 @@ For A3-a's rotate flow, the new helper `restartServersForKey(key string) ([]api.
 
 1. Reads manifests via `listManifestNamesEmbedFirst()` + `loadManifestYAMLEmbedFirst()`, finds servers whose env references this key. **Manifest read failure** here returns `(nil, err)` — orchestration failure.
 2. Reads daemon status (existing `api.Status()` or equivalent), filters to running daemons. **Status query failure** returns `(nil, err)` — orchestration failure.
-3. Calls `api.Restart(server, "")` for each affected server. Per-server `api.Restart` errors are themselves orchestration failures and abort the loop, returning `(partial-results, err)` so the handler can surface "vault written but restart sequence aborted". Per-task failures inside a successful `api.Restart` call appear as `Err`-populated entries in the returned slice; those do NOT cause the helper to return an error.
+3. Calls `api.Restart(server, daemonName)` PER-DAEMON for each (server, daemon) pair where the daemon is currently running (Codex memo-R8 P1: `api.Restart(server, "")` with empty filter restarts EVERY task for the server including stopped ones — see [install.go:1349](../../../internal/api/install.go#L1349). We want only the running daemons that actually use this secret, so we pass the specific daemon name to scope the restart to that one task). Per-server `api.Restart` errors are themselves orchestration failures and abort the loop, returning `(partial-results, err)` so the handler can surface "vault written but restart sequence aborted". Per-task failures inside a successful `api.Restart` call appear as `Err`-populated entries in the returned slice; those do NOT cause the helper to return an error.
 4. Returns the flattened slice + nil error to `api.SecretsRotate` on the happy path.
 
 `api.SecretsRotate` propagates the helper's error to the handler. The handler:
@@ -453,7 +458,13 @@ Cache + invalidation rejected as premature optimization. If profiling later show
 
 **Implementation order:**
 
-1. `OpenVault` — determines `vault_state`. If success, `keys = vault.List()`. If file missing, `keys = nil`, `vault_state = "missing"`. If decrypt fails (wrong identity), `keys = nil`, `vault_state = "decrypt_failed"`. If JSON-decode fails post-decrypt, `keys = nil`, `vault_state = "corrupt"`.
+1. `OpenVault` — determines `vault_state` per the following classification (Codex memo-R8 P2 expanded mapping; based on actual `OpenVault` failure modes at [vault.go:53-81](../../../internal/secrets/vault.go#L53-L81)):
+   - `OpenVault` succeeds → `keys = vault.List()`, `vault_state = "ok"`. Note: a zero-byte vault file deserializes to empty map ([vault.go:143-145](../../../internal/secrets/vault.go#L143-L145)) and `OpenVault` succeeds; this is treated as `ok` with an empty key list, NOT as `corrupt`.
+   - Key file missing OR vault file missing OR both missing → `vault_state = "missing"`. Wrapper distinguishes the orphan sub-states only when init is attempted (D2 cases 4 / 2c); for read purposes they all map to `missing`.
+   - Key file exists but is unreadable / unparseable / not X25519 → `vault_state = "corrupt"` (the identity itself is broken; rendering this distinct from `decrypt_failed` makes the UI copy clearer — "your key file looks invalid" vs "your key doesn't decrypt the vault").
+   - Key file ok, vault file exists but `age.Decrypt` fails (wrong identity, truncated cipher) → `vault_state = "decrypt_failed"`.
+   - Key file ok, vault decrypts but plaintext is not valid JSON → `vault_state = "corrupt"`.
+   - In all non-`ok` cases, `keys = nil`.
 2. `ScanManifestEnv` — independent of vault state. Returns `{key → []UsageRef{server, env_var}, []ManifestError}`.
 3. **Merge** — the row state depends on BOTH vault_state AND key presence:
    - `vault_state == "ok"`:
@@ -484,7 +495,7 @@ Cache + invalidation rejected as premature optimization. If profiling later show
 **Behavior:**
 - Same-origin guard: required.
 - `OpenVault`: if missing → 409 + `SECRETS_VAULT_NOT_INITIALIZED`.
-- Validate `name`: matches `^[A-Z][A-Z0-9_]*$` (env-var convention). On mismatch: 400 + `SECRETS_INVALID_NAME` with allowed regex in message.
+- Validate `name`: matches `^[A-Za-z][A-Za-z0-9_]*$` (Codex memo-R8 P1: repo already ships `secret:wolfram_app_id` and `secret:unpaywall_email` as lowercase refs in shipped manifests, so the upper-case-only regex would forbid satisfying those existing refs). On mismatch: 400 + `SECRETS_INVALID_NAME` with allowed regex in message.
 - Validate `value`: non-empty. 400 + `SECRETS_EMPTY_VALUE` if empty.
 - Duplicate check: `vault.Get(name)` returning success → 409 + `SECRETS_KEY_EXISTS`.
 - `vault.Set(name, value)` — on success 201 Created with empty body.
@@ -501,6 +512,32 @@ Cache + invalidation rejected as premature optimization. If profiling later show
 409 {"error":"…","code":"SECRETS_VAULT_NOT_INITIALIZED"}
 500 {"error":"…","code":"SECRETS_SET_FAILED"}
 ```
+
+### 5.4a `POST /api/secrets/:key/restart` (Codex memo-R8 P1: explicit contract for "Restart now" / "Retry failed restarts" CTAs)
+
+**Path:** `:key` is the secret name.
+
+**Request body:** none (empty).
+
+**Behavior:**
+
+- Same-origin guard: required.
+- `OpenVault`: if missing → 409 + `SECRETS_VAULT_NOT_INITIALIZED`.
+- Existence check: `vault.Get(key)` failing with not-found → 404 + `SECRETS_KEY_NOT_FOUND`.
+- Calls `restartServersForKey(key)` — the same helper used by PUT's restart:true branch. Does NOT modify the vault.
+- Response status mapping is identical to PUT's restart:true path (200 / 207 / 500).
+
+**Response body shape** (same as PUT minus `vault_updated`, since this endpoint does not modify the vault):
+
+```text
+200 OK            {restart_results:[{task_name:"…", error:""}, …]}
+207 Multi-Status  {restart_results:[{task_name:"…", error:"…"}, …]}
+404               {"error":"…", "code":"SECRETS_KEY_NOT_FOUND"}
+409               {"error":"…", "code":"SECRETS_VAULT_NOT_INITIALIZED"}
+500               {"error":"…", "code":"RESTART_FAILED", "restart_results":[…partial…]}
+```
+
+This endpoint is what the post-Rotate CTAs ("Restart now", "Retry failed restarts") and any future "restart all daemons using this secret" UI calls into.
 
 ### 5.4 `PUT /api/secrets/:key`
 
@@ -525,12 +562,14 @@ Cache + invalidation rejected as premature optimization. If profiling later show
 
 **Response shapes:**
 
-**Wire shape**: each `restart_results` entry is the JSON-marshalled `api.RestartResult` with the JSON tags `task_name` / `error` (D9 mandates these tags be added to the existing struct in plan task 1). Go-side field names are `TaskName` / `Err`; JSON-side field names are `task_name` / `error`. **Frontend parsing uses `task_name` and `error` JSON keys, never `TaskName` / `Err`.**
+**Wire shape**: each `restart_results` entry is the JSON-marshalled `api.RestartResult` with the JSON tags `task_name` / `error` (D9 mandates these tags be added in plan task 1; `error` is **NOT omitempty** — empty-string is the success discriminator). Go-side field names are `TaskName` / `Err`; JSON-side field names are `task_name` / `error`. **Frontend parsing uses `task_name` and `error` JSON keys, never `TaskName` / `Err`.**
 
 ```text
 200 OK            {vault_updated:true, restart_results:[{task_name:"…", error:""}, …]}    (all OK, restart:true and at least one daemon)
 200 OK            {vault_updated:true, restart_results:[]}                                  (restart:false, or 0 daemons reference key)
 207 Multi-Status  {vault_updated:true, restart_results:[{task_name:"…", error:"…"}, …]}    (any per-task error non-empty, including all-failed)
+400               {"error":"…", "code":"SECRETS_INVALID_JSON"}                              (malformed JSON body)
+400               {"error":"…", "code":"SECRETS_EMPTY_VALUE"}                               (value field empty)
 404               {"error":"…", "code":"SECRETS_KEY_NOT_FOUND"}
 409               {"error":"…", "code":"SECRETS_VAULT_NOT_INITIALIZED"}
 500               {"error":"…", "code":"SECRETS_SET_FAILED"}                                (vault.Set failed; no vault_updated key)
@@ -600,10 +639,28 @@ type SecretsRotateResult struct {
     RestartResults []RestartResult `json:"restart_results"` // existing api.RestartResult from install.go:1456 — see D9
 }
 
+// SecretsDeleteError is returned by SecretsDelete when the no-confirm path
+// is blocked by refs or scan errors. Codex memo-R8 P2: typed error so
+// the handler can serialize used_by / manifest_errors into the 409 body.
+type SecretsDeleteError struct {
+    Code           string          // "SECRETS_HAS_REFS" | "SECRETS_USAGE_SCAN_INCOMPLETE"
+    Message        string          // human message
+    UsedBy         []UsageRef      // populated when Code == "SECRETS_HAS_REFS"
+    ManifestErrors []ManifestError // populated when Code == "SECRETS_USAGE_SCAN_INCOMPLETE"
+}
+func (e *SecretsDeleteError) Error() string { return e.Message }
+
 func (a *API) SecretsInit() (SecretsInitResult, error)
 func (a *API) SecretsListWithUsage() (SecretsEnvelope, error)
 func (a *API) SecretsSet(name, value string) error
+// SecretsRotate carries partial restart_results even when err != nil
+// (Codex memo-R8 P2: orchestration failure returns both partial slice and error).
 func (a *API) SecretsRotate(name, value string, restart bool) (SecretsRotateResult, error)
+// SecretsRestart is the helper for POST /api/secrets/:key/restart (§5.4a).
+// Returns the same shape as SecretsRotate's restart sub-path minus VaultUpdated.
+func (a *API) SecretsRestart(name string) ([]RestartResult, error)
+// SecretsDelete returns a *SecretsDeleteError on the no-confirm guarded paths
+// (HAS_REFS, USAGE_SCAN_INCOMPLETE); plain error for other failures.
 func (a *API) SecretsDelete(name string, confirm bool) error
 ```
 
@@ -751,12 +808,55 @@ Tests verify both branches and both orphan shapes (`TestSecretsInit_PartialFailu
 - `TestSecretsDelete_WithConfirmDeletesEvenWithRefs` — pre-create vault + referencing manifest. Call `SecretsDelete("K1", true)`. Assert no error, vault no longer has `K1`. Manifest is unchanged.
 - `TestSecretsDelete_WithConfirmBypassesScanIncomplete` — same scan-incomplete fixture as above. Call `SecretsDelete("K1", true)`. Assert success. Vault no longer has `K1`.
 
-`internal/gui/secrets_test.go`:
-- HTTP-level coverage of every endpoint × every error code combination. **Same-origin guard rejection emits `CROSS_ORIGIN` (NOT `SECRETS_CROSS_ORIGIN`)** (Codex memo-R2 P2) — single test asserts this on one endpoint as smoke; the middleware itself has its own coverage. Method-not-allowed (GET on POST endpoints, etc.). Body shape assertions on responses, especially:
-  - `/api/secrets` GET returns `{vault_state, secrets:[…UsageRef objects…], manifest_errors}`.
-  - `/api/secrets/init` returns 200 on idempotent path, 200 on cleanup-ok partial-failure, 500 on cleanup-failed, 409 on `SECRETS_INIT_BLOCKED`.
-  - `/api/secrets/:key` PUT returns 200 on all-success, 207 on partial-OR-all-task-failure (NOT 500), 500 only on orchestration failure.
-  - `/api/secrets/:key` DELETE returns 204 on no-refs-no-confirm, 409 + `SECRETS_USAGE_SCAN_INCOMPLETE` BEFORE 409 + `SECRETS_HAS_REFS` (precedence).
+`internal/gui/secrets_test.go` — Codex memo-R8 P2 enumerated coverage by endpoint × error code:
+
+**`POST /api/secrets/init`:**
+- 200 idempotent path (vault already exists) — vault contents unchanged.
+- 200 fresh init (both files missing) — files created, retry returns same 200.
+- 200 cleanup-ok partial-failure (case 2b) — `cleanup_status:"ok"`, both artifacts removed.
+- 500 cleanup-failed (case 2c) — `cleanup_status:"failed"`, `orphan_path` populated.
+- 409 `SECRETS_INIT_BLOCKED` (cases 3 + 4) — vault unchanged.
+- 403 `CROSS_ORIGIN` — same-origin smoke test.
+
+**`GET /api/secrets`:**
+- 200 ok empty vault — `vault_state:"ok"`, `secrets:[]`, no errors.
+- 200 ok keyed — `present` rows with UsageRef objects.
+- 200 missing — `vault_state:"missing"`, manifest-only refs as `referenced_unverified`.
+- 200 decrypt_failed — `vault_state:"decrypt_failed"`, manifest-only refs as `referenced_unverified`.
+- 200 corrupt — `vault_state:"corrupt"` for unreadable identity OR malformed vault JSON.
+- 200 with `manifest_errors` populated — broken YAML in one of the manifests.
+- 500 `SECRETS_LIST_FAILED` — `OpenVault` returns unexpected runtime error (mock).
+
+**`POST /api/secrets`:**
+- 201 success.
+- 400 `SECRETS_INVALID_NAME` — name violates regex.
+- 400 `SECRETS_EMPTY_VALUE` — value empty.
+- 400 `SECRETS_INVALID_JSON` — malformed body.
+- 409 `SECRETS_KEY_EXISTS` — duplicate.
+- 409 `SECRETS_VAULT_NOT_INITIALIZED` — vault missing.
+- 500 `SECRETS_SET_FAILED` — `vault.Set` failure (mock).
+
+**`PUT /api/secrets/:key`:**
+- 200 restart:false (vault updated, no restart attempted).
+- 200 restart:true all OK.
+- 207 restart:true any failure (incl. all-failed).
+- 400 `SECRETS_INVALID_JSON`, 400 `SECRETS_EMPTY_VALUE`.
+- 404 `SECRETS_KEY_NOT_FOUND`.
+- 409 `SECRETS_VAULT_NOT_INITIALIZED`.
+- 500 `SECRETS_SET_FAILED` — vault write fails (no `vault_updated`).
+- 500 `RESTART_FAILED` — orchestration crash post-vault-write (`vault_updated:true`, partial `restart_results`).
+
+**`POST /api/secrets/:key/restart` (§5.4a):**
+- 200 all OK, 207 any failure, 404 key not found, 409 vault not initialized, 500 orchestration failure.
+
+**`DELETE /api/secrets/:key`:**
+- 204 no-refs-no-confirm path.
+- 409 `SECRETS_USAGE_SCAN_INCOMPLETE` BEFORE 409 `SECRETS_HAS_REFS` (precedence).
+- 409 `SECRETS_HAS_REFS` (no confirm) — body has `used_by:[{server, env_var}]`.
+- 204 with `?confirm=true` (bypasses both guards).
+- 404 `SECRETS_KEY_NOT_FOUND`.
+- 409 `SECRETS_VAULT_NOT_INITIALIZED`.
+- 500 `SECRETS_DELETE_FAILED` — `vault.Delete` mock failure.
 
 ### 7.2 Frontend unit tests
 
@@ -820,7 +920,7 @@ The plan should derive from this memo with the following commit breakdown. Each 
 
 3. **HTTP handlers + routing.** `internal/gui/secrets.go` (new): registers all 5 endpoints, wires same-origin guard. `internal/gui/server.go`: register routes and add `s.secrets` adapter field. Includes Go handler tests for every endpoint × every error code (§7.1). **Acceptance:** all 5 endpoints respond per §5; error codes per §5.7.
 
-4. **Frontend scaffold (no UI yet).** `internal/gui/frontend/src/lib/secrets-api.ts` (new) + Vitest unit tests. `internal/gui/frontend/src/lib/use-secrets-snapshot.ts` (new) + Vitest unit tests. No UI changes. **Acceptance:** `npm test` (Vitest) green for the new files.
+4. **Frontend scaffold (no UI yet).** `internal/gui/frontend/src/lib/secrets-api.ts` (new) + Vitest unit tests. `internal/gui/frontend/src/lib/use-secrets-snapshot.ts` (new) + Vitest unit tests. No UI changes. **Acceptance:** `cd internal/gui/frontend && npm test` (Vitest) green for the new files. (Codex memo-R8 P3: there is no root `package.json`; all frontend `npm` commands run inside `internal/gui/frontend/`.)
 
 5. **Secrets screen + nav entry.** `internal/gui/frontend/src/screens/Secrets.tsx` (new) renders the 4-state machine. `internal/gui/frontend/src/app.tsx` adds the `#/secrets` nav link AND the `case "secrets"` route entry to the existing screen-switch (no `Sidebar.tsx` exists — Codex memo-R3 P2). No modals yet — Add / Rotate / Delete buttons are placeholders that log to console. Banner from D6 included. **Acceptance:** screen renders all 4 states correctly with seed data; manual smoke confirms; `go generate ./internal/gui/...` regenerates assets.
 
@@ -828,9 +928,9 @@ The plan should derive from this memo with the following commit breakdown. Each 
 
 7. **Rotate Secret modal (3-button).** `RotateSecretModal.tsx`. Persistent CTA banner component. `PUT /api/secrets/:key` integration with both `restart:true` and `restart:false`. Per-daemon results banner for 207 responses. **Acceptance:** Rotate flow works; 207 partial-failure renders the per-daemon list with retry button.
 
-8. **Delete Secret modal (differential).** `DeleteSecretModal.tsx`. Reads `used_by` from the cached snapshot. Differential rendering (simple vs. typed-confirm). `DELETE /api/secrets/:key?confirm=true` integration. **Acceptance:** Delete flow works in both unreferenced and referenced cases; backend 409 verified by the dedicated E2E test.
+8. **Delete Secret modal (differential).** `DeleteSecretModal.tsx`. **Implements the D5 escalation flow strictly — does NOT pre-decide based on cached `used_by`** (Codex memo-R8 P1: doing so reintroduces the stale-snapshot race D5 was written to remove). Click → fire `DELETE /api/secrets/:key` (no confirm flag). On 204 → success. On 409 + `SECRETS_HAS_REFS` → open modal with FRESH refs from response body, typed-confirm → second `DELETE ?confirm=true`. On 409 + `SECRETS_USAGE_SCAN_INCOMPLETE` → similar typed-confirm modal with scan-error copy. **Acceptance:** Delete flow works in both unreferenced and referenced cases; cached snapshot is NOT consulted; backend 409 verified by the dedicated E2E test.
 
-9. **Asset regeneration + E2E suite.** `go generate ./internal/gui/...`. Add `secrets.spec.ts` with all 14 scenarios (§7.3). Update `CLAUDE.md` E2E coverage block + count. **Acceptance:** Playwright suite passes 66/66.
+9. **Asset regeneration + E2E suite.** `go generate ./internal/gui/...`. Add `secrets.spec.ts` with all 14 scenarios (§7.3). Update `CLAUDE.md` E2E coverage block + count. **Acceptance:** Playwright suite passes 66/66 — run via `cd internal/gui/e2e && npm test` (Codex memo-R8 P3: e2e tests have their own `package.json` under `internal/gui/e2e`, separate from `internal/gui/frontend`).
 
 10. **Documentation alignment + final smoke.** Verify `CLAUDE.md` count line matches actual test count post-merge. Verify backlog entry §A row A3 is marked done with link to this memo + the resulting PR. Manual smoke against a real running `mcphub gui` for the full Init → Add → Rotate (both branches) → Delete (both branches) flow. **Acceptance:** documentation freshness + manual smoke passes.
 
