@@ -2,8 +2,11 @@
 package gui
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
+
+	"mcp-local-hub/internal/api"
 )
 
 // registerServerRoutes wires POST /api/servers/:name/restart onto the mux.
@@ -25,11 +28,33 @@ func registerServerRoutes(s *Server) {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				return
 			}
-			if err := s.restart.Restart(name); err != nil {
-				writeAPIError(w, err, http.StatusInternalServerError, "RESTART_FAILED")
+			results, err := s.restart.Restart(name)
+			if results == nil {
+				results = []api.RestartResult{}
+			}
+			body := map[string]any{"restart_results": results}
+			if err != nil {
+				body["error"] = err.Error()
+				body["code"] = "RESTART_FAILED"
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				_ = json.NewEncoder(w).Encode(body)
 				return
 			}
-			w.WriteHeader(http.StatusNoContent)
+			anyFailed := false
+			for _, r := range results {
+				if r.Err != "" {
+					anyFailed = true
+					break
+				}
+			}
+			status := http.StatusOK
+			if anyFailed {
+				status = http.StatusMultiStatus // 207
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(body)
 		default:
 			http.NotFound(w, r)
 		}

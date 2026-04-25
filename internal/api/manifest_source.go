@@ -9,6 +9,16 @@ import (
 	"mcp-local-hub/servers"
 )
 
+// manifestDirForTests is a test-only override consulted by
+// ScanManifestEnv and the embed-aware helpers when set via
+// MCPHUB_MANIFEST_DIR_OVERRIDE. When the override is non-empty the
+// embed FS is bypassed entirely; tests get the test directory's
+// manifests with no leakage from the binary's shipped set
+// (which include `secret:` refs from wolfram, paper-search-mcp).
+func manifestDirForTests() string {
+	return os.Getenv("MCPHUB_MANIFEST_DIR_OVERRIDE")
+}
+
 // Manifest-source abstraction.
 //
 // Before this file existed, read-side API calls (ManifestList,
@@ -52,6 +62,10 @@ func embeddedManifestNames() []string {
 // server. Consults the embed FS first; on miss (server not in the
 // binary's shipped set), falls back to the on-disk dev-checkout path.
 func loadManifestYAMLEmbedFirst(name string) ([]byte, error) {
+	if dir := manifestDirForTests(); dir != "" {
+		// Test-only override: skip the embed FS entirely.
+		return os.ReadFile(filepath.Join(dir, name, "manifest.yaml"))
+	}
 	if data, err := fs.ReadFile(servers.Manifests, name+"/manifest.yaml"); err == nil {
 		return data, nil
 	}
@@ -64,6 +78,26 @@ func loadManifestYAMLEmbedFirst(name string) ([]byte, error) {
 // names, unioning embed and disk so a dev-added manifest still shows
 // up before a rebuild.
 func listManifestNamesEmbedFirst() ([]string, error) {
+	if dir := manifestDirForTests(); dir != "" {
+		// Test-only override: skip the embed FS entirely so tests get
+		// only the manifests they explicitly seed.
+		entries, err := os.ReadDir(dir)
+		if err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
+		var names []string
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(dir, e.Name(), "manifest.yaml")); err == nil {
+				names = append(names, e.Name())
+			}
+		}
+		sort.Strings(names)
+		return names, nil
+	}
+	// Production path: union embed + disk.
 	seen := map[string]bool{}
 	for _, n := range embeddedManifestNames() {
 		seen[n] = true

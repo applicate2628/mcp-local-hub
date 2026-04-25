@@ -6,6 +6,7 @@ import { AddServerScreen } from "./screens/AddServer";
 import { DashboardScreen } from "./screens/Dashboard";
 import { LogsScreen } from "./screens/Logs";
 import { MigrationScreen } from "./screens/Migration";
+import { SecretsScreen } from "./screens/Secrets";
 import { ServersScreen } from "./screens/Servers";
 
 export function App() {
@@ -53,6 +54,9 @@ export function App() {
     case "edit-server":
       body = <AddServerScreen mode="edit" route={route} onDirtyChange={setAddServerDirty} />;
       break;
+    case "secrets":
+      body = <SecretsScreen />;
+      break;
     case "dashboard":
       body = <DashboardScreen />;
       break;
@@ -71,6 +75,7 @@ export function App() {
           <a href="#/servers" class={route.screen === "servers" ? "active" : ""} onClick={guardClick("servers")}>Servers</a>
           <a href="#/migration" class={route.screen === "migration" ? "active" : ""} onClick={guardClick("migration")}>Migration</a>
           <a href="#/add-server" class={route.screen === "add-server" ? "active" : ""} onClick={guardClick("add-server")}>Add server</a>
+          <a href="#/secrets" class={route.screen === "secrets" ? "active" : ""} onClick={guardClick("secrets")}>Secrets</a>
           <a href="#/dashboard" class={route.screen === "dashboard" ? "active" : ""} onClick={guardClick("dashboard")}>Dashboard</a>
           <a href="#/logs" class={route.screen === "logs" ? "active" : ""} onClick={guardClick("logs")}>Logs</a>
         </nav>

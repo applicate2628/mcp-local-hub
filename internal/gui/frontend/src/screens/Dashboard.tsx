@@ -71,8 +71,25 @@ export function DashboardScreen() {
     // in the Card component; here we only log for operator diagnostics.
     try {
       const resp = await fetch(`/api/servers/${encodeURIComponent(server)}/restart`, { method: "POST" });
+      const body = (await resp.json().catch(() => ({}))) as {
+        error?: string;
+        code?: string;
+        restart_results?: Array<{ task_name: string; error: string }>;
+      };
+      // 500 → orchestration failure, throw
+      if (resp.status === 500) {
+        throw new Error(body.error ?? String(resp.status));
+      }
+      // 207 → some tasks failed; surface them as a single error with details
+      if (resp.status === 207) {
+        const failed = (body.restart_results ?? []).filter((r) => r.error !== "");
+        const summary = failed
+          .map((r) => `${r.task_name}: ${r.error}`)
+          .join("; ");
+        throw new Error(`partial restart failure: ${summary}`);
+      }
+      // 200 → all OK, even if restart_results is non-empty (all empty errors)
       if (!resp.ok) {
-        const body = (await resp.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? String(resp.status));
       }
     } catch (e) {

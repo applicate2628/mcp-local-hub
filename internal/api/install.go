@@ -1453,10 +1453,13 @@ func portForTask(taskName string, ports map[string]map[string]int, wsByTask map[
 	return ports[srv]["default"]
 }
 
-// RestartResult is one row in a RestartAll report.
+// RestartResult is one row in a RestartAll/Restart report. JSON tags
+// added in Phase 3B-II A3-a (memo D9): the GUI restart handler now
+// emits per-task results in JSON, and `error` is NOT omitempty —
+// empty-string is the success discriminator the frontend parses.
 type RestartResult struct {
-	TaskName string
-	Err      string
+	TaskName string `json:"task_name"`
+	Err      string `json:"error"`
 }
 
 // RestartAll stops+starts every scheduler task under our prefix. Returns a
