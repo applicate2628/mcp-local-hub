@@ -36,6 +36,7 @@ export function AddSecretModal(props: Props) {
   return (
     <dialog
       ref={dialogRef}
+      onCancel={(e) => { if (working) e.preventDefault(); }}
       onClose={() => props.onClose()}
       data-testid="add-secret-modal"
     >
@@ -69,7 +70,7 @@ export function AddSecretModal(props: Props) {
             disabled={working || Boolean(props.prefillName)}
           />
         </label>
-        {!nameValid && <p class="error">Name must match {NAME_RE.source}</p>}
+        {!nameValid && <p class="error">Must start with a letter and contain only letters, digits, or underscores.</p>}
         <label>
           Value
           <input
