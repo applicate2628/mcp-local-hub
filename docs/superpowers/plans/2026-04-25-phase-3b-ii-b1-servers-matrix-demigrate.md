@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 >
-> **Design memo:** `docs/superpowers/specs/2026-04-24-phase-3b-ii-b1-servers-matrix-demigrate-design.md` (commit `48a2c21`, rev 13 after 12 Codex rounds / 24 findings). Read §4 (decisions D1–D10) and §5 (risks R1–R4) before implementing; the memo is the source of truth for every semantic choice and corner case.
+> **Design memo:** `docs/superpowers/specs/2026-04-24-phase-3b-ii-b1-servers-matrix-demigrate-design.md` (commit `14fb49d`, memo rev 14 — rev 13 was 48a2c21, then plan-R6 P2 caught that memo D3/D4 still described the batched-POST design plan-R4 had abandoned and memo rev 14 aligned the memo with per-cell POSTs). Read §4 (decisions D1–D10) and §5 (risks R1–R4) before implementing; the memo is the source of truth for every semantic choice and corner case.
 
 **Goal:** Wire the existing `api.Demigrate` / `/api/demigrate` chain into the Servers matrix checkbox so users can uncheck a `via-hub` cell and click Apply to roll back that single (server, client) binding to direct-client config — plus three small adjacent doc/test cleanups bundled from the A2b follow-up list.
 
@@ -579,8 +579,10 @@ git commit -m "refactor(gui/frontend): Servers DirtyMap shape — Map<server, Ma
 
 Prep commit for B1 matrix wiring. Changes the DirtyMap shape from
 Map<string, Set<string>> to Map<string, Map<string, Direction>> so
-applyChanges in the NEXT commit can branch per (server, direction)
-batch to pick /api/migrate vs /api/demigrate.
+applyChanges in the NEXT commit can branch per-cell to pick
+/api/migrate vs /api/demigrate (one POST per (server, client,
+direction) triple — not batched per (server, direction), because
+the handlers collapse partial row failures into a single 500).
 
 Direction is captured at toggle time from initialChecked (authoritative
 scan state, before any routing reload). toggleCell enforces the prune
