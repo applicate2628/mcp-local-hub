@@ -705,16 +705,17 @@ import (
 	"mcp-local-hub/internal/secrets"
 )
 
-// secretsInitFailed is the typed error a 200/500 partial-failure path
-// uses to carry the original InitVault error reason while letting the
-// handler shape its own response body.
-type secretsInitFailed struct {
-	cleanupStatus string // "ok" | "failed"
-	orphanPath    string // populated only on cleanup-failed
-	cause         error
+// SecretsInitFailed is the typed error SecretsInit returns when
+// InitVault failed mid-way and the wrapper attempted cleanup.
+// Promoted to exported up front (plan-R2 P1) so Task 1 tests compile;
+// fields are populated per memo §5.1 case 2b/2c.
+type SecretsInitFailed struct {
+	CleanupStatus string // "ok" | "failed"
+	OrphanPath    string // populated only on cleanup-failed
+	Cause         error
 }
 
-func (e *secretsInitFailed) Error() string { return e.cause.Error() }
+func (e *SecretsInitFailed) Error() string { return e.Cause.Error() }
 
 // SecretsInit implements the D2 four-case classifier (memo §5.1):
 //   case 1 → 200 ok, no-op
@@ -766,15 +767,15 @@ func (a *API) SecretsInit() (SecretsInitResult, error) {
 			}
 		}
 		if cleanupOK {
-			return SecretsInitResult{}, &secretsInitFailed{
-				cleanupStatus: "ok",
-				cause:         err,
+			return SecretsInitResult{}, &SecretsInitFailed{
+				CleanupStatus: "ok",
+				Cause:         err,
 			}
 		}
-		return SecretsInitResult{}, &secretsInitFailed{
-			cleanupStatus: "failed",
-			orphanPath:    orphan,
-			cause:         err,
+		return SecretsInitResult{}, &SecretsInitFailed{
+			CleanupStatus: "failed",
+			OrphanPath:    orphan,
+			Cause:         err,
 		}
 	}
 	return SecretsInitResult{VaultState: "ok"}, nil
@@ -849,12 +850,26 @@ func TestSecretsInit_FreshInitCreatesFiles(t *testing.T) {
 Run: `go test ./internal/api/ -run TestSecretsInit_FreshInitCreatesFiles -count=1 -v`
 Expected: PASS.
 
-- [ ] **Step 1.C.6b: Add R7 partial-init test seam to `secrets.go`**
+- [ ] **Step 1.C.6b: Add R7 partial-init test seam to `secrets.go` AND export the failure type**
 
-**Codex plan-R1 P1:** the wrapper needs a deterministic way to inject an InitVault failure mid-write so the cleanup branch can be tested. Add a package-level function variable that defaults to the real InitVault but tests can override:
+**Codex plan-R1 P1 + plan-R2 P1:** the wrapper needs a deterministic way to inject an InitVault failure mid-write, AND `SecretsInitFailed` must be EXPORTED from the start (was deferred to Task 3 in the original draft, which broke compile order — Task 1 tests reference the exported name). Promote both up-front:
+
+In `internal/api/secrets.go`, replace the unexported `secretsInitFailed` block (added in Step 1.C.4) with:
 
 ```go
-// In internal/api/secrets.go, near the top of the SecretsInit area:
+// SecretsInitFailed is the typed error SecretsInit returns when
+// InitVault failed mid-way and the wrapper attempted cleanup. The
+// handler inspects CleanupStatus to map to 200 (cleanup ok, retryable)
+// vs 500 (cleanup failed; orphan_path requires manual removal). Memo
+// §5.1 + R7. Promoted to exported up front (plan-R2 P1) so Task 1
+// tests compile.
+type SecretsInitFailed struct {
+	CleanupStatus string // "ok" | "failed"
+	OrphanPath    string // populated only on cleanup-failed
+	Cause         error
+}
+
+func (e *SecretsInitFailed) Error() string { return e.Cause.Error() }
 
 // initVaultFn is the function the wrapper calls to perform the
 // underlying init. Tests override this to inject failures and verify
@@ -862,7 +877,14 @@ Expected: PASS.
 var initVaultFn = secrets.InitVault
 ```
 
-Then in `SecretsInit`, replace `secrets.InitVault(keyPath, vaultPath)` with `initVaultFn(keyPath, vaultPath)`.
+Update every `&secretsInitFailed{...}` reference in `SecretsInit` to `&SecretsInitFailed{...}`. Then in the same function body, replace the InitVault call:
+
+```go
+// Old: if err := secrets.InitVault(keyPath, vaultPath); err != nil {
+if err := initVaultFn(keyPath, vaultPath); err != nil {
+```
+
+Note: this means Task 3's "secretsInitFailed → SecretsInitFailed promotion" is no-op (already exported); the handler in Task 3 just consumes the exported type directly.
 
 - [ ] **Step 1.C.6c: Add three R7 partial-init tests**
 
@@ -1332,22 +1354,27 @@ func (a *API) SecretsRestart(name string) ([]RestartResult, error) {
 }
 
 // restartServersForKey iterates manifests, finds (server, daemon) pairs
-// whose env references the key AND whose daemon status is "running",
+// whose env references the key AND whose daemon status is "Running",
 // and calls api.Restart(server, daemonName) per-daemon (memo §D9).
 // Returns accumulated []RestartResult plus a non-nil error on the first
 // orchestration failure (per-task failures are non-fatal).
+//
+// Codex plan-R2 P2: returns []RestartResult{} (empty slice, not nil)
+// even on early errors so callers and the handler can serialize a
+// well-formed JSON array per the memo wire contract.
 func (a *API) restartServersForKey(key string) ([]RestartResult, error) {
+	results := []RestartResult{}
 	usage, _, err := ScanManifestEnv()
 	if err != nil {
-		return nil, fmt.Errorf("scan manifests: %w", err)
+		return results, fmt.Errorf("scan manifests: %w", err)
 	}
 	refs := usage[key]
 	if len(refs) == 0 {
-		return []RestartResult{}, nil
+		return results, nil
 	}
 	statuses, err := a.Status()
 	if err != nil {
-		return nil, fmt.Errorf("read daemon status: %w", err)
+		return results, fmt.Errorf("read daemon status: %w", err)
 	}
 	runningByServer := make(map[string]map[string]bool) // server → daemon → running?
 	for _, st := range statuses {
@@ -1361,27 +1388,32 @@ func (a *API) restartServersForKey(key string) ([]RestartResult, error) {
 	}
 
 	// Determine the affected (server, daemon) set. Each manifest may
-	// have multiple daemons; we must restart all daemons of an
-	// affected server because the server's manifest references the
-	// key once at the env level (the env is shared across all the
-	// server's daemons in the current schema). For each affected
-	// running (server, daemon) we call api.Restart(server, daemon).
-	var results []RestartResult
+	// have multiple daemons; we must restart all running daemons of
+	// each affected server because the env is shared across the
+	// server's daemons in the current schema.
+	//
+	// Codex plan-R2 P2: de-duplicate on (server, daemon) so a single
+	// secret referenced via multiple env vars in one manifest does
+	// NOT trigger duplicate restarts.
+	type sd struct{ server, daemon string }
+	seen := map[sd]bool{}
 	for _, ref := range refs {
 		daemons := runningByServer[ref.Server]
 		for daemon, running := range daemons {
 			if !running {
 				continue
 			}
+			pair := sd{ref.Server, daemon}
+			if seen[pair] {
+				continue
+			}
+			seen[pair] = true
 			subres, restartErr := a.Restart(ref.Server, daemon)
 			results = append(results, subres...)
 			if restartErr != nil {
 				return results, fmt.Errorf("restart %s/%s: %w", ref.Server, daemon, restartErr)
 			}
 		}
-	}
-	if results == nil {
-		results = []RestartResult{}
 	}
 	return results, nil
 }
@@ -2044,24 +2076,7 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 }
 ```
 
-**Note on `secretsInitFailed`**: the type defined in `internal/api/secrets.go` is unexported. To let the handler distinguish 200-cleanup-ok from 500-cleanup-failed, promote it to exported. Edit `internal/api/secrets.go`:
-
-Replace `secretsInitFailed` with:
-
-```go
-// SecretsInitFailed is the typed error returned by SecretsInit when
-// InitVault failed mid-way and the wrapper attempted cleanup. Handler
-// inspects CleanupStatus to decide 200 vs 500.
-type SecretsInitFailed struct {
-	CleanupStatus string // "ok" | "failed"
-	OrphanPath    string // populated only on cleanup-failed
-	Cause         error
-}
-
-func (e *SecretsInitFailed) Error() string { return e.Cause.Error() }
-```
-
-And update the references in `SecretsInit` accordingly (replace `&secretsInitFailed{...}` with `&SecretsInitFailed{...}`).
+**Note on `SecretsInitFailed` location**: the type was already promoted to exported in Step 1.C.6b (plan-R2 P1 — original deferral broke Task 1 compile). The handler just consumes the exported type directly. No further `internal/api/secrets.go` edits needed in Task 3.
 
 Now finalize `secretsInitHandler`:
 
@@ -2216,9 +2231,15 @@ func (s *Server) secretsKeyRoot(w http.ResponseWriter, r *http.Request, key stri
 				return
 			}
 			// Orchestration failure: vault was updated but restart aborted.
+			// Codex plan-R2 P2: normalize nil restart_results to empty
+			// array so the wire contract always carries a JSON array.
+			results := res.RestartResults
+			if results == nil {
+				results = []api.RestartResult{}
+			}
 			full := map[string]any{
 				"vault_updated":   res.VaultUpdated,
-				"restart_results": res.RestartResults,
+				"restart_results": results,
 				"error":           err.Error(),
 				"code":            "RESTART_FAILED",
 			}
@@ -3051,7 +3072,7 @@ func TestSecretsDelete_500DeleteFailed(t *testing.T) {
 go test ./internal/gui/ -run TestSecrets -count=1 -v
 ```
 
-Expected: ~30 tests PASS (16 base + 14 matrix additions per Codex plan-R1 P1).
+Expected: ~31 tests PASS (16 base + 15 matrix additions: GET 2 + POST 3 + PUT 4 + restart 3 + DELETE 3 per Codex plan-R1 P1).
 
 ### 3.C — Commit
 
@@ -4147,6 +4168,7 @@ export function RotateResultBanner(props: {
   onDismiss: () => void;
 }) {
   const [working, setWorking] = useState(false);
+  const [retryErr, setRetryErr] = useState<string | null>(null);
   if (!props.visible || !props.result) return null;
   const failed = props.result.restart_results.filter((r) => r.error !== "");
   if (failed.length === 0) {
@@ -4165,14 +4187,21 @@ export function RotateResultBanner(props: {
       <ul>
         {failed.map((f) => <li key={f.task_name}><code>{f.task_name}</code>: {f.error}</li>)}
       </ul>
+      {retryErr && <p class="error">{retryErr}</p>}
       <button
         type="button"
         disabled={working}
         onClick={async () => {
+          // Codex plan-R2 P1: do NOT dismiss after retry. The parent
+          // calls setRotateResult with the fresh restart_results so the
+          // banner re-renders with whatever still failed. If retry
+          // throws (orchestration crash), surface the error inline.
           setWorking(true);
+          setRetryErr(null);
           try {
             await props.onRetry();
-            props.onDismiss();
+          } catch (e) {
+            setRetryErr((e as Error).message);
           } finally {
             setWorking(false);
           }
@@ -4210,12 +4239,46 @@ function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<voi
   const [bannerName, setBannerName] = useState<string | null>(null);
   const [rotateResult, setRotateResult] = useState<SecretsRotateResult | null>(null);
   const [rotateMode, setRotateMode] = useState<"no-restart" | "with-restart" | null>(null);
+  // Codex plan-R2 P1: track running-daemon counts via /api/status so the
+  // CTA logic can suppress when 0 are running (memo D4 + Codex memo-R1 P3).
+  // Fetch on mount and after each rotation so the count reflects the
+  // current world.
+  const [runningByServer, setRunningByServer] = useState<Record<string, number>>({});
+
+  const refreshRunning = useCallback(async () => {
+    try {
+      const resp = await fetch("/api/status");
+      if (!resp.ok) return;
+      const rows = (await resp.json()) as Array<{ server: string; daemon: string; state: string }>;
+      const counts: Record<string, number> = {};
+      for (const r of rows) {
+        if (r.state === "Running") {
+          counts[r.server] = (counts[r.server] ?? 0) + 1;
+        }
+      }
+      setRunningByServer(counts);
+    } catch {
+      // Best-effort: leave existing map. CTA falls back to refCount-only mode.
+    }
+  }, []);
+  useEffect(() => { void refreshRunning(); }, [refreshRunning]);
 
   const closeRotate = () => setRotateName(null);
   const dismissBanner = () => { setBannerName(null); setRotateResult(null); setRotateMode(null); };
 
   const refCountFor = (name: string) =>
     props.env.secrets.find((s) => s.name === name)?.used_by.length ?? 0;
+
+  // Codex plan-R2 P1: count of *running* daemons of servers that
+  // reference this key. Used for CTA suppression (0 = toast, no CTA).
+  const runningCountFor = (name: string): number => {
+    const refs = props.env.secrets.find((s) => s.name === name)?.used_by ?? [];
+    let total = 0;
+    for (const r of refs) {
+      total += runningByServer[r.server] ?? 0;
+    }
+    return total;
+  };
 
   return (
     <div class="secrets-table">
@@ -4226,13 +4289,14 @@ function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<voi
           open={true}
           name={rotateName}
           refCount={refCountFor(rotateName)}
-          // runningCount undefined for now; populated in a follow-up if status data is wired in
+          runningCount={runningCountFor(rotateName)}
           onClose={closeRotate}
           onSaved={(result, mode) => {
             setBannerName(rotateName);   // capture name BEFORE rotateName is cleared by closeRotate
             setRotateResult(result);
             setRotateMode(mode);
             void props.refresh();
+            void refreshRunning();
           }}
         />
       )}
@@ -4241,7 +4305,7 @@ function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<voi
         <PersistentRotateCTA
           visible={true}
           secretName={bannerName}
-          affectedRunning={refCountFor(bannerName)}
+          affectedRunning={runningCountFor(bannerName)}
           onRestart={async () => {
             // Codex plan-R1 P1: surface partial failures from restart-now
             // instead of dismissing unconditionally. The banner stays visible
@@ -4407,6 +4471,15 @@ export function DeleteSecretModal(props: Props) {
       props.onDeleted();
       props.onClose();
     } catch (e) {
+      // Codex plan-R2 P1: 404 on the confirmed call also means the key
+      // was just deleted by another tab/CLI; treat as success per memo
+      // §5.5 ("404 if just-deleted by another caller").
+      const err = e as APIError;
+      if (err.status === 404) {
+        props.onDeleted();
+        props.onClose();
+        return;
+      }
       setStage({ kind: "error", message: (e as Error).message });
     }
   }
