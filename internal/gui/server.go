@@ -216,6 +216,32 @@ func (realRestarter) Restart(server string) ([]api.RestartResult, error) {
 	return results, err
 }
 
+// secretsAPI is the narrow interface the /api/secrets/* handlers need.
+// Wraps api.API methods so tests can inject a fake. Per memo §5.6.
+type secretsAPI interface {
+	Init() (api.SecretsInitResult, error)
+	List() (api.SecretsEnvelope, error)
+	Set(name, value string) error
+	Rotate(name, value string, restart bool) (api.SecretsRotateResult, error)
+	Restart(name string) ([]api.RestartResult, error)
+	Delete(name string, confirm bool) error
+}
+
+type realSecretsAPI struct{}
+
+func (realSecretsAPI) Init() (api.SecretsInitResult, error) { return api.NewAPI().SecretsInit() }
+func (realSecretsAPI) List() (api.SecretsEnvelope, error)   { return api.NewAPI().SecretsListWithUsage() }
+func (realSecretsAPI) Set(name, value string) error         { return api.NewAPI().SecretsSet(name, value) }
+func (realSecretsAPI) Rotate(name, value string, restart bool) (api.SecretsRotateResult, error) {
+	return api.NewAPI().SecretsRotate(name, value, restart)
+}
+func (realSecretsAPI) Restart(name string) ([]api.RestartResult, error) {
+	return api.NewAPI().SecretsRestart(name)
+}
+func (realSecretsAPI) Delete(name string, confirm bool) error {
+	return api.NewAPI().SecretsDelete(name, confirm)
+}
+
 // logsProvider is the narrow interface the /api/logs/:server handler needs.
 // The handler converts the stored log text to either a plain GET body or an
 // SSE tail-follow stream. The daemon parameter threads a specific daemon
@@ -267,6 +293,7 @@ type Server struct {
 	logs             logsProvider
 	extractor        extractor
 	events           *Broadcaster
+	secrets          secretsAPI
 }
 
 // NewServer constructs the Server. It registers the ping handler
@@ -290,6 +317,7 @@ func NewServer(cfg Config) *Server {
 	s.logs = realLogs{}
 	s.extractor = realExtractor{}
 	s.events = NewBroadcaster()
+	s.secrets = realSecretsAPI{}
 	registerPingRoutes(s)
 	registerAssetRoutes(s)
 	registerScanRoutes(s)
@@ -303,6 +331,7 @@ func NewServer(cfg Config) *Server {
 	registerEventsRoutes(s)
 	registerLogsRoutes(s)
 	registerExtractManifestRoutes(s)
+	registerSecretsRoutes(s)
 	return s
 }
 
