@@ -9,6 +9,14 @@ import { DeleteSecretModal } from "../components/DeleteSecretModal";
 
 const MCPHUB_EDIT_CMD = "mcphub secrets edit";
 
+// Codex PR #18 P2 round 2: route conflict — /api/secrets/init is the
+// vault-init endpoint, not a key handler. A row whose name happens to
+// be "init" (e.g. from a legacy vault or a CLI `mcphub secrets set
+// init ...`) cannot be Rotated or Deleted via the GUI because PUT /
+// DELETE on /api/secrets/init both 405. Disable those actions and
+// nudge the user toward CLI cleanup.
+const RESERVED_SECRET_NAMES = new Set(["init"]);
+
 export function SecretsScreen() {
   const snap = useSecretsSnapshot();
 
@@ -341,6 +349,11 @@ function SecretRowComponent(props: {
   onDelete: (name: string) => void;
 }) {
   const isPresent = props.row.state === "present";
+  const isReserved = RESERVED_SECRET_NAMES.has(props.row.name);
+  const actionsDisabled = !isPresent || isReserved;
+  const reservedTitle = isReserved
+    ? `"${props.row.name}" is a reserved name (route conflict with /api/secrets/init). Manage via CLI: mcphub secrets delete ${props.row.name}`
+    : undefined;
   const usedByCount = props.row.used_by.length;
   return (
     <tr data-state={props.row.state}>
@@ -348,8 +361,22 @@ function SecretRowComponent(props: {
       <td title={formatUsedBy(props.row.used_by)}>{usedByCount}</td>
       <td>{props.row.state}</td>
       <td>
-        <button type="button" disabled={!isPresent} onClick={() => props.onRotate(props.row.name)}>Rotate</button>
-        <button type="button" disabled={!isPresent} onClick={() => props.onDelete(props.row.name)}>Delete</button>
+        <button
+          type="button"
+          disabled={actionsDisabled}
+          title={reservedTitle}
+          onClick={() => props.onRotate(props.row.name)}
+        >
+          Rotate
+        </button>
+        <button
+          type="button"
+          disabled={actionsDisabled}
+          title={reservedTitle}
+          onClick={() => props.onDelete(props.row.name)}
+        >
+          Delete
+        </button>
         {props.row.state === "referenced_missing" && (
           <span class="hint">
             {"↳ "}
