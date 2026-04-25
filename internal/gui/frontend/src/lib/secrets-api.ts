@@ -89,8 +89,16 @@ export async function rotateSecret(name: string, value: string, restart: boolean
     body: JSON.stringify({ value, restart }),
   });
   const body = await parseJSONBody(resp);
-  // 200 + 207 = success-with-or-without-partial-failure; still parse the body.
+  // 200 + 207: success (with or without per-task restart failures).
   if (resp.status === 200 || resp.status === 207) return body as SecretsRotateResult;
+  // 500 RESTART_FAILED with vault_updated:true is a committed-vault +
+  // orchestration-aborted path (memo §5.4). The vault is already
+  // updated; the modal should close so the UI's banner can render the
+  // partial state with retry. Throwing here would keep the modal open
+  // and prompt the user to re-rotate, double-writing the new value.
+  if (resp.status === 500 && body.vault_updated === true && body.code === "RESTART_FAILED") {
+    return body as SecretsRotateResult;
+  }
   throw makeAPIError(resp.status, body.code, body.error ?? `rotate failed: ${resp.status}`, body);
 }
 

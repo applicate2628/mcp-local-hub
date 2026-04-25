@@ -95,6 +95,39 @@ describe("rotateSecret", () => {
     const res = await rotateSecret("K1", "v", true);
     expect(res.restart_results[0].error).toBe("fail");
   });
+
+  it("returns body on 500 RESTART_FAILED when vault was committed", async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => ({
+        vault_updated: true,
+        code: "RESTART_FAILED",
+        error: "scheduler unavailable",
+        restart_results: [
+          { task_name: "mcp-local-hub-server-a-default", error: "" },
+        ],
+      }),
+    });
+    const res = await rotateSecret("K1", "v", true);
+    expect(res.vault_updated).toBe(true);
+    expect(res.restart_results).toHaveLength(1);
+  });
+
+  it("throws on 500 SECRETS_SET_FAILED (vault not committed)", async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => ({
+        code: "SECRETS_SET_FAILED",
+        error: "disk full",
+      }),
+    });
+    await expect(rotateSecret("K1", "v", true)).rejects.toMatchObject({
+      code: "SECRETS_SET_FAILED",
+      status: 500,
+    });
+  });
 });
 
 describe("restartSecret", () => {

@@ -91,10 +91,16 @@ func ScanManifestEnv() (map[string][]UsageRef, []ManifestError, error) {
 		}
 	}
 
-	// Sort each usage[] slice by Server name for deterministic output.
+	// Sort each usage[] slice by Server then EnvVar for deterministic output.
+	// EnvVar tie-breaker is required because proj.Env is a map and Go map
+	// iteration is randomized — a single server can reference the same secret
+	// via multiple env vars, giving nondeterministic ordering without it.
 	for k := range usage {
 		sort.Slice(usage[k], func(i, j int) bool {
-			return usage[k][i].Server < usage[k][j].Server
+			if usage[k][i].Server != usage[k][j].Server {
+				return usage[k][i].Server < usage[k][j].Server
+			}
+			return usage[k][i].EnvVar < usage[k][j].EnvVar
 		})
 	}
 

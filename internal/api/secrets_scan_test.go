@@ -150,6 +150,47 @@ env:
 	}
 }
 
+func TestScanManifestEnv_DeterministicOrderWithMultipleEnvVars(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", dir)
+
+	// One manifest, one server, multiple env vars referencing the same
+	// secret. Map iteration is randomized, so without the EnvVar
+	// tie-breaker the order would be nondeterministic across calls.
+	writeManifest(t, dir, "alpha", `name: alpha
+env:
+  Z_VAR: secret:K1
+  A_VAR: secret:K1
+  M_VAR: secret:K1
+`)
+
+	// Run multiple times and confirm the order is stable.
+	var first []UsageRef
+	for run := 0; run < 5; run++ {
+		usage, _, err := ScanManifestEnv()
+		if err != nil {
+			t.Fatalf("scan run %d: %v", run, err)
+		}
+		got := usage["K1"]
+		if len(got) != 3 {
+			t.Fatalf("run %d: len = %d, want 3", run, len(got))
+		}
+		if run == 0 {
+			first = got
+			// Expected order: A_VAR, M_VAR, Z_VAR (alphabetical EnvVar within same server).
+			if got[0].EnvVar != "A_VAR" || got[1].EnvVar != "M_VAR" || got[2].EnvVar != "Z_VAR" {
+				t.Fatalf("first run order: %+v, want A_VAR/M_VAR/Z_VAR", got)
+			}
+		} else {
+			for i := range got {
+				if got[i] != first[i] {
+					t.Errorf("run %d order drift at [%d]: got %+v, first run %+v", run, i, got[i], first[i])
+				}
+			}
+		}
+	}
+}
+
 func TestScanManifestEnv_MissingNameProducesError(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", dir)
