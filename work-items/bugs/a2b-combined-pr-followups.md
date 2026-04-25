@@ -39,28 +39,22 @@ All inject `*os.PathError`-style errors and assert the response body contains
 neither the absolute path nor the raw error text, and does contain the
 sanitized message.
 
-## 2. `api.NewAPI()` called per-request in `realManifest*` adapters
+## 2. ~~`api.NewAPI()` called per-request in `realManifest*` adapters~~ — FIXED (verified, B1)
 
-**Reviewer:** Task 4 code-quality (confidence 85)
-**Surface added:** `realManifestGetter.ManifestGetWithHash`,
-`realManifestEditor.ManifestEditWithHash`
-**Sibling existing:** `realManifestCreator.ManifestCreate` (A2a)
+**Originally flagged:** Task 4 code-quality review (confidence 85), concern that `newEventBus()` might spawn a goroutine making per-request `api.NewAPI()` a leak.
 
-`api.NewAPI()` constructs a fresh `*API` including whatever EventBus wiring
-lives in the package (the reviewer could not confirm from this commit whether
-`newEventBus()` spawns a goroutine). The `api` package comment says "a single
-instance is created per process" — the intent is process-wide, not request-
-scoped.
+**Resolution:** verified against [internal/api/events.go](../../internal/api/events.go):
 
-If `newEventBus()` does spawn a long-lived goroutine that is never stopped,
-each request on any of the four adapters is a goroutine leak.
+```go
+type EventBus struct{}
+func newEventBus() *EventBus { return &EventBus{} }
+```
 
-Suggested remediation:
-- Confirm whether `newEventBus()` is a goroutine.
-- If yes, thread one shared `*api.API` onto `Server` and have all four
-  adapters close over the same instance. Single diff touches all four.
-- If no, document on `NewAPI` that per-request construction is cheap and
-  intended to be safe, and leave the adapters as they are.
+`EventBus` is an empty struct. `newEventBus()` has no goroutine, no channel, no background worker. `api.NewAPI()` still allocates `&State{Daemons: make(map[string]DaemonStatus)}` and struct headers, so it is not *literally* zero-cost — but it spawns no background resources that would leak across requests. Per-request construction is safe.
+
+**Doc fix bundled alongside B1** (`internal/api/api.go` comments revised to match — the old "A single instance is created per process" claim and the "CLI ≡ UI parity by construction" claim both contradicted current state; updated to describe per-request GUI adapter construction and softened the CLI-parity language).
+
+**Shared-`*api.API` refactor deferred** until `EventBus` is actually populated (the source comment in `events.go` says "Populated in Task 22"). When that work lands, the same task restates the per-process-instance contract and threads a shared handle through all adapters.
 
 ## 3. `/api/manifest/edit` handler test-coverage gaps
 
