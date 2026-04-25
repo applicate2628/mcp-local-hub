@@ -305,7 +305,8 @@ test.describe("Secrets registry", () => {
     page,
     hub,
   }) => {
-    // Stub GET /api/secrets: vault ok, K1 present.
+    // Set up all route stubs BEFORE page.goto() to ensure mount-time
+    // requests are intercepted immediately.
     await page.route("**/api/secrets", async (r) => {
       if (r.request().method() !== "GET") { await r.continue(); return; }
       await r.fulfill({
@@ -321,7 +322,8 @@ test.describe("Secrets registry", () => {
       r.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
     );
     // PUT /api/secrets/K1 → 200 (no restart, empty results).
-    await page.route(/\/api\/secrets\/K1$/, async (r) => {
+    // Use glob pattern with ** prefix for reliable matching.
+    await page.route("**/api/secrets/K1", async (r) => {
       if (r.request().method() === "PUT") {
         await r.fulfill({
           status: 200,
@@ -333,7 +335,13 @@ test.describe("Secrets registry", () => {
       await r.continue();
     });
 
+    // Wait for the initial status fetch to complete (confirms runningByServer=0).
+    const statusReady = page.waitForResponse(
+      (r) => r.url().includes("/api/status") && r.request().method() === "GET",
+    );
     await page.goto(`${hub.url}/#/secrets`);
+    await statusReady;
+
     const row = page.locator("table tbody tr").filter({ hasText: "K1" });
     await expect(row).toBeVisible();
 
@@ -345,18 +353,19 @@ test.describe("Secrets registry", () => {
     // Fill new value and click "Save without restart".
     await rotateModal.locator('input[type="password"]').fill("new-value-xyz");
 
-    // Wait for the PUT response.
+    // Wait for the PUT response before asserting.
     const putResponse = page.waitForResponse(
       (r) => r.url().includes("/api/secrets/K1") && r.request().method() === "PUT",
     );
     await rotateModal.getByRole("button", { name: "Save without restart" }).click();
-    await putResponse;
+    const putResp = await putResponse;
+    expect(putResp.status()).toBe(200);
+
     // Modal closes.
     await expect(rotateModal).not.toBeVisible();
 
     // With 0 running daemons, the persistent CTA must NOT appear.
-    // Give 1s for any async state updates to settle.
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(300);
     await expect(page.locator('[data-testid="rotate-cta"]')).toHaveCount(0);
   });
 
@@ -367,6 +376,7 @@ test.describe("Secrets registry", () => {
     page,
     hub,
   }) => {
+    // Set up all route stubs BEFORE page.goto().
     await page.route("**/api/secrets", async (r) => {
       if (r.request().method() !== "GET") { await r.continue(); return; }
       await r.fulfill({
@@ -396,7 +406,9 @@ test.describe("Secrets registry", () => {
       }),
     );
     // PUT /api/secrets/K1 → 200 (save without restart).
-    await page.route(/\/api\/secrets\/K1$/, async (r) => {
+    // NOTE: **/api/secrets/K1 must be registered AFTER **/api/secrets
+    // so Playwright's stack-based route priority routes K1 specifically.
+    await page.route("**/api/secrets/K1", async (r) => {
       if (r.request().method() === "PUT") {
         await r.fulfill({
           status: 200,
@@ -409,7 +421,7 @@ test.describe("Secrets registry", () => {
     });
     // POST /api/secrets/K1/restart → 200 (all succeeded).
     let restartCalled = false;
-    await page.route(/\/api\/secrets\/K1\/restart$/, async (r) => {
+    await page.route("**/api/secrets/K1/restart", async (r) => {
       if (r.request().method() === "POST") {
         restartCalled = true;
         await r.fulfill({
@@ -427,14 +439,17 @@ test.describe("Secrets registry", () => {
       await r.continue();
     });
 
-    await page.goto(`${hub.url}/#/secrets`);
-    const row = page.locator("table tbody tr").filter({ hasText: "K1" });
-    await expect(row).toBeVisible();
-
-    // Wait for the initial /api/status fetch (runningByServer) to complete.
-    await page.waitForResponse(
+    // Set up the initial /api/status response waiter before goto so we can
+    // confirm runningByServer was populated with 2 running daemons.
+    const initialStatusResponse = page.waitForResponse(
       (r) => r.url().includes("/api/status") && r.request().method() === "GET",
     );
+    await page.goto(`${hub.url}/#/secrets`);
+    // Confirm the mount-time /api/status fetch completed (runningByServer populated).
+    await initialStatusResponse;
+
+    const row = page.locator("table tbody tr").filter({ hasText: "K1" });
+    await expect(row).toBeVisible();
 
     // Click Rotate on K1.
     await row.getByRole("button", { name: "Rotate" }).click();
@@ -443,25 +458,29 @@ test.describe("Secrets registry", () => {
 
     await rotateModal.locator('input[type="password"]').fill("new-value-abc");
 
-    // Wait for the PUT response before asserting CTA.
+    // Register PUT response waiter before clicking.
     const putResponse = page.waitForResponse(
       (r) => r.url().includes("/api/secrets/K1") && r.request().method() === "PUT",
     );
     await rotateModal.getByRole("button", { name: "Save without restart" }).click();
-    await putResponse;
+    const putResp = await putResponse;
+    // Confirm the PUT was actually intercepted by our stub (not passed to real backend).
+    expect(putResp.status()).toBe(200);
     await expect(rotateModal).not.toBeVisible();
 
-    // Wait for the post-rotate /api/status refresh to settle.
-    await page.waitForResponse(
-      (r) => r.url().includes("/api/status") && r.request().method() === "GET",
-    );
-
     // With 2 running daemons → persistent CTA is visible.
+    // The CTA renders when rotateMode=="no-restart" && affectedRunning > 0.
+    // affectedRunning uses runningByServer (from initial fetch) and props.env.secrets.
     const cta = page.locator('[data-testid="rotate-cta"]');
     await expect(cta).toBeVisible();
 
+    // Register restart response waiter before clicking.
+    const restartResponse = page.waitForResponse(
+      (r) => r.url().includes("/api/secrets/K1/restart") && r.request().method() === "POST",
+    );
     // Click "Restart now" → POST /api/secrets/K1/restart fires.
     await cta.getByRole("button", { name: "Restart now" }).click();
+    await restartResponse;
 
     // After successful restart, the CTA disappears.
     await expect(cta).not.toBeVisible();
@@ -476,6 +495,7 @@ test.describe("Secrets registry", () => {
     page,
     hub,
   }) => {
+    // Set up all route stubs BEFORE page.goto().
     await page.route("**/api/secrets", async (r) => {
       if (r.request().method() !== "GET") { await r.continue(); return; }
       await r.fulfill({
@@ -503,8 +523,8 @@ test.describe("Secrets registry", () => {
         ]),
       }),
     );
-    // PUT returns 207 with mixed restart_results: 1 success, 1 failure.
-    await page.route(/\/api\/secrets\/K1$/, async (r) => {
+    // PUT /api/secrets/K1 returns 207 with mixed restart_results.
+    await page.route("**/api/secrets/K1", async (r) => {
       if (r.request().method() === "PUT") {
         await r.fulfill({
           status: 207,
@@ -533,12 +553,14 @@ test.describe("Secrets registry", () => {
 
     await rotateModal.locator('input[type="password"]').fill("rotated-value");
 
-    // Watch for the PUT response.
+    // Register PUT response waiter before clicking.
     const putResponse = page.waitForResponse(
       (r) => r.url().includes("/api/secrets/K1") && r.request().method() === "PUT",
     );
     await rotateModal.getByRole("button", { name: "Save and restart" }).click();
-    await putResponse;
+    const putResp = await putResponse;
+    // Confirm our 207 stub was used.
+    expect(putResp.status()).toBe(207);
     await expect(rotateModal).not.toBeVisible();
 
     // Partial-failure banner appears.
