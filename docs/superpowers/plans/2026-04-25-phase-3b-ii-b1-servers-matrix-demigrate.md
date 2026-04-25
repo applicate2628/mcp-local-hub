@@ -811,11 +811,13 @@ Expected: 107 passed.
 
 ### Step 6 — Regenerate embedded assets
 
-- [ ] **From repo root:**
+- [ ] **From `internal/gui/frontend/` (where the previous Vitest step ran), hop back to repo root and regenerate:**
 
 ```bash
 cd ../../.. && go generate ./internal/gui/...
 ```
+
+(If you lost your working dir — just `cd <repo-root> && go generate ./internal/gui/...` from anywhere.)
 
 ### Step 7 — Run Go test suite as sanity
 
