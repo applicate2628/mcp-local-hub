@@ -65,7 +65,7 @@ Tracking document for Phase 3B-II — the "everything I cut from Phase 3B-I MVP"
 5. **A1** — Migration screen (primary deferred UX; depends on B2)
 6. **A2** — Add/Edit manifest form (largest UI surface; depends on B2 for prefill)
 7. **A3-a** — Secrets registry screen ✅ — see [docs/superpowers/plans/2026-04-25-phase-3b-ii-a3a-secrets-screen.md](2026-04-25-phase-3b-ii-a3a-secrets-screen.md). Memo: [docs/superpowers/specs/2026-04-25-phase-3b-ii-a3a-secrets-screen-design.md](../specs/2026-04-25-phase-3b-ii-a3a-secrets-screen-design.md). PR pending user review.
-8. **A3-b** — env.secret picker in AddServer/EditServer forms (deferred from A3 split — to be tackled after A3-a dogfooding).
+8. **A3-b** — env.secret picker in AddServer/EditServer forms ✅ — see [docs/superpowers/plans/2026-04-26-phase-3b-ii-a3b-env-secret-picker.md](2026-04-26-phase-3b-ii-a3b-env-secret-picker.md). Memo: [docs/superpowers/specs/2026-04-26-phase-3b-ii-a3b-env-secret-picker-design.md](../specs/2026-04-26-phase-3b-ii-a3b-env-secret-picker-design.md).
 9. **A4** — Settings screen
 10. **A5** — About screen
 11. **C3 + C4** — Tray icon state variants + toast notifications (polish after SSE event handling is mature)
