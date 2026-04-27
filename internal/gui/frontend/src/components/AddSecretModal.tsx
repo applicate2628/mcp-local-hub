@@ -1,12 +1,13 @@
 // internal/gui/frontend/src/components/AddSecretModal.tsx
 import { useEffect, useRef, useState } from "preact/hooks";
 import { addSecret } from "../lib/secrets-api";
+import { isReservedName } from "../lib/reserved-names";
 
 interface Props {
   open: boolean;
   prefillName?: string;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: () => void | Promise<void>; // A3-b §2.2: parent may return a Promise (e.g. snapshot.refresh())
 }
 
 const NAME_RE = /^[A-Za-z][A-Za-z0-9_]*$/;
@@ -31,7 +32,8 @@ export function AddSecretModal(props: Props) {
   }, [props.open, props.prefillName]);
 
   const nameValid = name === "" || NAME_RE.test(name);
-  const canSubmit = name !== "" && value !== "" && nameValid && !working;
+  const nameReserved = name !== "" && isReservedName(name);
+  const canSubmit = name !== "" && value !== "" && nameValid && !nameReserved && !working;
 
   return (
     <dialog
@@ -71,6 +73,7 @@ export function AddSecretModal(props: Props) {
           />
         </label>
         {!nameValid && <p class="error">Must start with a letter and contain only letters, digits, or underscores.</p>}
+        {nameReserved && <p class="error">'{name}' is a reserved name (HTTP routing). Choose a different name.</p>}
         <label>
           Value
           <input

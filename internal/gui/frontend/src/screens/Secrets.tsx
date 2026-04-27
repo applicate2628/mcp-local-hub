@@ -6,16 +6,18 @@ import type { SecretsEnvelope, SecretRow, SecretsRotateResult, UsageRef, APIErro
 import { AddSecretModal } from "../components/AddSecretModal";
 import { PersistentRotateCTA, RotateResultBanner, RotateSecretModal } from "../components/RotateSecretModal";
 import { DeleteSecretModal } from "../components/DeleteSecretModal";
+import { RESERVED_SECRET_NAMES } from "../lib/reserved-names";
 
 const MCPHUB_EDIT_CMD = "mcphub secrets edit";
 
-// Codex PR #18 P2 round 2: route conflict — /api/secrets/init is the
-// vault-init endpoint, not a key handler. A row whose name happens to
-// be "init" (e.g. from a legacy vault or a CLI `mcphub secrets set
+// RESERVED_SECRET_NAMES is now imported from lib/reserved-names.ts so the
+// SecretPicker (A3-b) and AddSecretModal client-side validation share the
+// single source. Original A3-a context: route conflict — /api/secrets/init
+// is the vault-init endpoint, not a key handler. A row whose name happens
+// to be "init" (e.g. from a legacy vault or a CLI `mcphub secrets set
 // init ...`) cannot be Rotated or Deleted via the GUI because PUT /
-// DELETE on /api/secrets/init both 405. Disable those actions and
-// nudge the user toward CLI cleanup.
-const RESERVED_SECRET_NAMES = new Set(["init"]);
+// DELETE on /api/secrets/init both 405. Disable those actions and nudge
+// the user toward CLI cleanup.
 
 export function SecretsScreen() {
   const snap = useSecretsSnapshot();
