@@ -445,9 +445,14 @@ export function SecretPicker(props: SecretPickerProps) {
             const highlighted = idx === highlightIdx;
             switch (item.kind) {
               case "section-label":
-                return <li key={`sl-${idx}`} class="dropdown-section-label" aria-disabled="true">{item.text}</li>;
+                // Codex branch-review P2: section labels are decoration, not
+                // listbox-owned options. role="presentation" tells AT to skip
+                // them (per WAI-ARIA listbox owned-element rules).
+                return <li key={`sl-${idx}`} class="dropdown-section-label" role="presentation">{item.text}</li>;
               case "divider":
-                return <li key={`div-${idx}`} class="dropdown-divider" aria-disabled="true"></li>;
+                // Codex branch-review P2: dividers are visual-only; aria-hidden
+                // hides them from AT entirely (no semantic role to expose).
+                return <li key={`div-${idx}`} class="dropdown-divider" role="presentation" aria-hidden="true"></li>;
               case "loading":
                 return <li key="ld" class="dropdown-loading" role="option" aria-disabled="true" aria-selected="false">Loading vault…</li>;
               case "empty":
