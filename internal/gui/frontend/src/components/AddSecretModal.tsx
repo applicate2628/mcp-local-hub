@@ -1,15 +1,19 @@
 // internal/gui/frontend/src/components/AddSecretModal.tsx
 import { useEffect, useRef, useState } from "preact/hooks";
 import { addSecret } from "../lib/secrets-api";
+import { isReservedName, SECRET_NAME_RE } from "../lib/reserved-names";
 
 interface Props {
   open: boolean;
   prefillName?: string;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: () => void | Promise<void>; // A3-b §2.2: parent may return a Promise (e.g. snapshot.refresh())
 }
 
-const NAME_RE = /^[A-Za-z][A-Za-z0-9_]*$/;
+// Codex PR #19 P1 follow-up: NAME_RE is now imported as SECRET_NAME_RE
+// from the shared reserved-names module so SecretPicker and AddSecretModal
+// share one source of truth for what counts as a valid secret name.
+const NAME_RE = SECRET_NAME_RE;
 
 export function AddSecretModal(props: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -31,7 +35,8 @@ export function AddSecretModal(props: Props) {
   }, [props.open, props.prefillName]);
 
   const nameValid = name === "" || NAME_RE.test(name);
-  const canSubmit = name !== "" && value !== "" && nameValid && !working;
+  const nameReserved = name !== "" && isReservedName(name);
+  const canSubmit = name !== "" && value !== "" && nameValid && !nameReserved && !working;
 
   return (
     <dialog
@@ -49,8 +54,15 @@ export function AddSecretModal(props: Props) {
           setServerErr(null);
           try {
             await addSecret(name, value);
-            props.onSaved();
-            props.onClose();
+            // A3-b §2.2: await onSaved BEFORE closing so the parent's
+            // snapshot.refresh() resolves while the modal is still open.
+            // onSaved may return void (Secrets.tsx) or a Promise (AddServer).
+            await props.onSaved();
+            // Single-close-path: close via dialogRef only. The native
+            // <dialog> onClose event will fire props.onClose() exactly
+            // once. Do NOT call props.onClose() explicitly here — that
+            // would double-fire (explicit + native).
+            dialogRef.current?.close();
           } catch (err) {
             setServerErr((err as Error).message);
           } finally {
@@ -71,6 +83,7 @@ export function AddSecretModal(props: Props) {
           />
         </label>
         {!nameValid && <p class="error">Must start with a letter and contain only letters, digits, or underscores.</p>}
+        {nameReserved && <p class="error">'{name}' is a reserved name (HTTP routing). Choose a different name.</p>}
         <label>
           Value
           <input
@@ -83,9 +96,23 @@ export function AddSecretModal(props: Props) {
         </label>
         {serverErr && <p class="error">{serverErr}</p>}
         <menu>
-          <button type="button" onClick={() => props.onClose()} disabled={working}>Cancel</button>
+          <button type="button" onClick={() => dialogRef.current?.close()} disabled={working}>Cancel</button>
           <button type="submit" disabled={!canSubmit}>{working ? "Saving…" : "Save"}</button>
         </menu>
+        {/* A3-b D4: Manage all secrets escape hatch — opens #/secrets in a new tab so the
+            host form's dirty state stays untouched. Use a real <a target="_blank"> so screen
+            readers announce it as a link, but call window.open onClick to keep the SPA
+            hash routing predictable. */}
+        <a
+          href="#/secrets"
+          onClick={(e) => {
+            e.preventDefault();
+            window.open("#/secrets", "_blank");
+          }}
+          class="modal-footer-link"
+        >
+          ⤴ Manage all secrets (new tab)
+        </a>
       </form>
     </dialog>
   );
