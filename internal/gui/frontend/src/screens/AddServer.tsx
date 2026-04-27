@@ -12,6 +12,11 @@ import {
 } from "../api";
 import { generateUUID } from "../lib/uuid";
 import type { BindingFormEntry, DaemonFormEntry, LanguageFormEntry, ManifestFormState } from "../types";
+import { useSecretsSnapshot } from "../lib/use-secrets-snapshot";
+import { AddSecretModal } from "../components/AddSecretModal";
+import { SecretPicker } from "../components/SecretPicker";
+import { BrokenRefsSummary } from "../components/BrokenRefsSummary";
+import { hasSecretKey, isSecretRef } from "../lib/secret-ref";
 
 // MANIFEST_NAME_REGEX mirrors internal/api/manifest.go:23 validManifestName.
 // Live client-side regex check provides instant feedback; the backend still
@@ -70,6 +75,41 @@ export function AddServerScreen(props: {
   const yamlPreview = toYAML(debouncedState);
 
   const isDirty = !deepEqualForm(formState, initialSnapshot);
+
+  const snapshot = useSecretsSnapshot();
+  const [createModalState, setCreateModalState] = useState<{ open: boolean; prefill: string | null }>({ open: false, prefill: null });
+  // savedFiredRef tracks whether onSaved (which already does a refresh)
+  // has fired during this modal lifecycle. If it has, the on-close
+  // refresh is skipped to prevent a stale-replacing-fresh race.
+  // Memo §5.7 + Codex memo-R2 P2-A.
+  const savedFiredRef = useRef(false);
+
+  function openCreateModal(prefill: string | null) {
+    savedFiredRef.current = false;
+    setCreateModalState({ open: true, prefill });
+  }
+
+  // Compute broken-ref list for summary line.
+  const brokenRefs: string[] = (() => {
+    if (snapshot.status !== "ok") return [];
+    if (snapshot.data.vault_state !== "ok") return [];
+    const presentSet = new Set(
+      snapshot.data.secrets.filter((s) => s.state === "present").map((s) => s.name)
+    );
+    const refs = formState.env
+      .filter((row) => isSecretRef(row.value) && hasSecretKey(row.value))
+      .map((row) => row.value.slice("secret:".length))
+      .filter((k) => !presentSet.has(k));
+    return Array.from(new Set(refs));
+  })();
+  // Codex Task-7 quality: deliberately "ok" on loading/error snapshots. The
+  // BrokenRefsSummary surfaces aggregated broken-ref counts ONLY when the
+  // vault is reachable and we have authoritative data. During loading or
+  // error, brokenRefs is also forced to [] above, so BrokenRefsSummary
+  // renders null. Per-row vault unreachability is announced by each
+  // SecretPicker's own statusText (memo §5.3 / D3 — summary is for vault-
+  // reachable broken-ref aggregation, not for vault-state announcements).
+  const summaryVaultState = snapshot.status === "ok" ? snapshot.data.vault_state : "ok";
 
   const [loadError, setLoadError] = useState<string | null>(null);
   const [readOnlyReason, setReadOnlyReason] = useState<string | null>(null);
@@ -805,6 +845,7 @@ export function AddServerScreen(props: {
           </AccordionSection>
 
           <AccordionSection title="Environment">
+            <BrokenRefsSummary vaultState={summaryVaultState} brokenRefs={brokenRefs} />
             <div class="repeatable-rows" data-testid="env-rows">
               {formState.env.map((row, i) => (
                 <div class="form-row env-row" key={i} data-env-row={i}>
@@ -815,11 +856,12 @@ export function AddServerScreen(props: {
                     onInput={(e) => updateEnv(i, "key", (e.currentTarget as HTMLInputElement).value)}
                     disabled={readOnly}
                   />
-                  <input
-                    type="text"
-                    placeholder="value (literal or ${HOME}/...)"
+                  <SecretPicker
                     value={row.value}
-                    onInput={(e) => updateEnv(i, "value", (e.currentTarget as HTMLInputElement).value)}
+                    onChange={(next) => updateEnv(i, "value", next)}
+                    envKey={row.key}
+                    snapshot={snapshot}
+                    onRequestCreate={openCreateModal}
                     disabled={readOnly}
                   />
                   <button type="button" onClick={() => deleteEnv(i)} disabled={readOnly} data-action="delete-env">×</button>
@@ -929,6 +971,20 @@ export function AddServerScreen(props: {
           <pre data-testid="yaml-preview">{yamlPreview}</pre>
         </aside>
       </div>
+      <AddSecretModal
+        open={createModalState.open}
+        prefillName={createModalState.prefill ?? undefined}
+        onSaved={async () => {
+          savedFiredRef.current = true;
+          await snapshot.refresh();
+        }}
+        onClose={async () => {
+          setCreateModalState({ open: false, prefill: null });
+          // Skip refresh on the success path — onSaved already did it.
+          if (savedFiredRef.current) return;
+          await snapshot.refresh();
+        }}
+      />
     </section>
   );
 }
