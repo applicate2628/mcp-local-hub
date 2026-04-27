@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { RESERVED_SECRET_NAMES, isReservedName } from "./reserved-names";
+import { RESERVED_SECRET_NAMES, isReservedName, SECRET_NAME_RE, isValidSecretName } from "./reserved-names";
 
 describe("RESERVED_SECRET_NAMES", () => {
   it("contains 'init' (HTTP routing reservation)", () => {
@@ -27,5 +27,35 @@ describe("isReservedName", () => {
   });
   it("returns false for empty string", () => {
     expect(isReservedName("")).toBe(false);
+  });
+});
+
+describe("SECRET_NAME_RE / isValidSecretName (Codex PR-r1 P1)", () => {
+  it("accepts standard identifier names", () => {
+    expect(isValidSecretName("foo")).toBe(true);
+    expect(isValidSecretName("OPENAI_API_KEY")).toBe(true);
+    expect(isValidSecretName("a")).toBe(true);
+    expect(isValidSecretName("Foo123_bar")).toBe(true);
+  });
+  it("rejects names starting with digit", () => {
+    expect(isValidSecretName("1foo")).toBe(false);
+  });
+  it("rejects names starting with underscore", () => {
+    expect(isValidSecretName("_foo")).toBe(false);
+  });
+  it("rejects names with hyphen", () => {
+    expect(isValidSecretName("foo-bar")).toBe(false);
+    expect(isValidSecretName("api-key")).toBe(false);
+  });
+  it("rejects names with other special characters", () => {
+    expect(isValidSecretName("foo.bar")).toBe(false);
+    expect(isValidSecretName("foo bar")).toBe(false);
+    expect(isValidSecretName("foo@bar")).toBe(false);
+  });
+  it("rejects empty string", () => {
+    expect(isValidSecretName("")).toBe(false);
+  });
+  it("SECRET_NAME_RE matches the backend regex literally", () => {
+    expect(SECRET_NAME_RE.source).toBe("^[A-Za-z][A-Za-z0-9_]*$");
   });
 });

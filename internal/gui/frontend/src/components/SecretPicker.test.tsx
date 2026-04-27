@@ -526,6 +526,92 @@ describe("SecretPicker — case 11: missing reserved name → [CRE-reserved-disa
   });
 });
 
+describe("SecretPicker — Codex PR-r1 P1: contextual create gated on valid secret name", () => {
+  it("with value='secret:foo-bar' (hyphen — invalid backend NAME_RE), '+ Create' is rendered as DISABLED with valid-name tooltip", async () => {
+    const user = userEvent.setup();
+    const onRequestCreate = vi.fn();
+    render(
+      <SecretPicker
+        value="secret:foo-bar"
+        onChange={vi.fn()}
+        envKey="X"
+        snapshot={snapshotOk()}
+        onRequestCreate={onRequestCreate}
+      />
+    );
+    await user.click(screen.getByRole("button", { name: /Pick secret/i }));
+    const createEntry = document.querySelector('[data-action="create-contextual-disabled"]');
+    expect(createEntry).toBeTruthy();
+    expect(createEntry?.getAttribute("aria-disabled")).toBe("true");
+    expect(createEntry?.getAttribute("title")?.toLowerCase()).toMatch(/not a valid secret name|letters, digits/);
+    await user.click(createEntry as Element);
+    expect(onRequestCreate).not.toHaveBeenCalled();
+  });
+
+  it("with value='secret:_leading_underscore' (starts with underscore — invalid), '+ Create' is disabled", async () => {
+    const user = userEvent.setup();
+    render(
+      <SecretPicker
+        value="secret:_leading_underscore"
+        onChange={vi.fn()}
+        envKey="X"
+        snapshot={snapshotOk()}
+        onRequestCreate={vi.fn()}
+      />
+    );
+    await user.click(screen.getByRole("button", { name: /Pick secret/i }));
+    expect(document.querySelector('[data-action="create-contextual-disabled"]')).toBeTruthy();
+  });
+});
+
+describe("SecretPicker — Codex PR-r1 P2: only state='present' keys appear in Available", () => {
+  it("filters out state='referenced_missing' rows from Available secrets", async () => {
+    const user = userEvent.setup();
+    const snap: SecretsSnapshot = {
+      status: "ok",
+      data: {
+        vault_state: "ok",
+        secrets: [
+          { name: "real_key", state: "present", used_by: [] },
+          { name: "ghost_ref", state: "referenced_missing", used_by: [] },
+        ],
+        manifest_errors: [],
+      },
+      error: null,
+      fetchedAt: Date.now(),
+      refresh: vi.fn(async () => {}),
+    };
+    render(<SecretPicker value="" onChange={vi.fn()} envKey="K" snapshot={snap} onRequestCreate={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: /Pick secret/i }));
+    const listbox = screen.getByRole("listbox");
+    expect(listbox.textContent).toContain("real_key");
+    expect(listbox.textContent).not.toContain("ghost_ref");
+  });
+
+  it("filters out state='referenced_unverified' rows from Available secrets", async () => {
+    const user = userEvent.setup();
+    const snap: SecretsSnapshot = {
+      status: "ok",
+      data: {
+        vault_state: "ok",
+        secrets: [
+          { name: "real_key", state: "present", used_by: [] },
+          { name: "unverified_ref", state: "referenced_unverified", used_by: [] },
+        ],
+        manifest_errors: [],
+      },
+      error: null,
+      fetchedAt: Date.now(),
+      refresh: vi.fn(async () => {}),
+    };
+    render(<SecretPicker value="" onChange={vi.fn()} envKey="K" snapshot={snap} onRequestCreate={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: /Pick secret/i }));
+    const listbox = screen.getByRole("listbox");
+    expect(listbox.textContent).toContain("real_key");
+    expect(listbox.textContent).not.toContain("unverified_ref");
+  });
+});
+
 describe("SecretPicker — D8 dropdown-open stale-refresh", () => {
   it("calls snapshot.refresh() when dropdown opens via 🔑 click and fetchedAt is older than 30s", async () => {
     const user = userEvent.setup();

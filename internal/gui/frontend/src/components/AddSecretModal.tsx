@@ -1,7 +1,7 @@
 // internal/gui/frontend/src/components/AddSecretModal.tsx
 import { useEffect, useRef, useState } from "preact/hooks";
 import { addSecret } from "../lib/secrets-api";
-import { isReservedName } from "../lib/reserved-names";
+import { isReservedName, SECRET_NAME_RE } from "../lib/reserved-names";
 
 interface Props {
   open: boolean;
@@ -10,7 +10,10 @@ interface Props {
   onSaved: () => void | Promise<void>; // A3-b §2.2: parent may return a Promise (e.g. snapshot.refresh())
 }
 
-const NAME_RE = /^[A-Za-z][A-Za-z0-9_]*$/;
+// Codex PR #19 P1 follow-up: NAME_RE is now imported as SECRET_NAME_RE
+// from the shared reserved-names module so SecretPicker and AddSecretModal
+// share one source of truth for what counts as a valid secret name.
+const NAME_RE = SECRET_NAME_RE;
 
 export function AddSecretModal(props: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null);

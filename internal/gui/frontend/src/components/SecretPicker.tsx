@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "preact/hooks";
 import type { SecretsSnapshot } from "../lib/use-secrets-snapshot";
 import { hasSecretKey, isSecretRef } from "../lib/secret-ref";
 import { matchTier, normalizeForMatch } from "../lib/name-match";
-import { isReservedName } from "../lib/reserved-names";
+import { isReservedName, isValidSecretName } from "../lib/reserved-names";
 
 export interface SecretPickerProps {
   value: string;
@@ -142,11 +142,19 @@ export function SecretPicker(props: SecretPickerProps) {
 
   const canCreate = snapshot.status === "ok" && snapshot.data.vault_state === "ok";
   const currentSecretKey = isSecretRef(value) && hasSecretKey(value) ? value.slice(SECRET_PREFIX.length) : null;
-  const canCreateContextual = (k: string) => canCreate && !isReservedName(k);
+  // Codex PR #19 P1: also gate on isValidSecretName — backend NAME_RE
+  // would reject creation, and AddSecretModal locks the name field when
+  // prefilled, leaving Save permanently disabled (dead-end UX). Surface
+  // the disabled state in the dropdown instead.
+  const canCreateContextual = (k: string) => canCreate && !isReservedName(k) && isValidSecretName(k);
 
   function getFilteredKeys(): string[] {
     if (snapshot.status !== "ok" || snapshot.data.vault_state !== "ok") return [];
-    const allKeys = snapshot.data.secrets.map((s) => s.name);
+    // Codex PR #19 P2: filter to state="present" only. The backend may
+    // include rows with state="referenced_missing" (vault key absent but
+    // referenced from a manifest) — selecting one would write a broken
+    // secret:<key> reference that fails at install/start time.
+    const allKeys = snapshot.data.secrets.filter((s) => s.state === "present").map((s) => s.name);
     let query = "";
     if (isSecretRef(value)) {
       query = value.slice(SECRET_PREFIX.length);
@@ -235,7 +243,9 @@ export function SecretPicker(props: SecretPickerProps) {
           targetKey: currentSecretKey,
           reason: isReservedName(currentSecretKey)
             ? `Cannot create — '${currentSecretKey}' is a reserved name (HTTP routing). Choose a different name.`
-            : "Cannot create",
+            : !isValidSecretName(currentSecretKey)
+              ? `Cannot create — '${currentSecretKey}' is not a valid secret name. Names must start with a letter and contain only letters, digits, or underscores.`
+              : "Cannot create",
           selectable: false,
         });
       }
