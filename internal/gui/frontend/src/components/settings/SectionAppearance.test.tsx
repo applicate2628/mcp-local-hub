@@ -132,4 +132,39 @@ describe("SectionAppearance", () => {
     const shellField = container.querySelector("#appearance\\.shell");
     expect(shellField?.getAttribute("aria-describedby")).toBe("appearance.shell-error");
   });
+
+  it("Codex PR P1: edit during in-flight Save preserves newer edit (compare-and-swap)", async () => {
+    // User clicks Save, then edits same field BEFORE PUT returns.
+    // Newer edit must survive the merge step — old behavior would silently
+    // drop it because edits[key] is unconditionally cleared on success.
+    let resolveTheme!: () => void;
+    const themeDelay = new Promise<void>((res) => { resolveTheme = res; });
+    vi.spyOn(api, "putSetting").mockImplementation(async (key) => {
+      if (key === "appearance.theme") {
+        await themeDelay; // hold open until we resolve manually
+      }
+    });
+    const refresh = vi.fn(async () => {});
+    const onDirty = vi.fn();
+    const { container } = render(<SectionAppearance snapshot={makeSnapshot(refresh)} onDirtyChange={onDirty} />);
+    const sel = container.querySelector("#appearance\\.theme") as HTMLSelectElement;
+    // First edit: theme = "dark"
+    fireEvent.change(sel, { target: { value: "dark" } });
+    await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(true));
+    // Click Save (PUT now in-flight, blocked on themeDelay)
+    fireEvent.click(Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Save")!);
+    // Second edit DURING in-flight save: theme = "light" (newer, unsaved)
+    fireEvent.change(sel, { target: { value: "light" } });
+    // Resolve the PUT — server got "dark", client local is "light"
+    resolveTheme();
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    // Assertion: the newer "light" edit MUST still be dirty.
+    // - dropdown shows "light" (the newer local value)
+    // - Save button enabled (section is dirty)
+    // - onDirty(true) is the latest call
+    expect(sel.value).toBe("light");
+    await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(true));
+    const saveBtn = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Save")!;
+    expect(saveBtn.disabled).toBe(false);
+  });
 });

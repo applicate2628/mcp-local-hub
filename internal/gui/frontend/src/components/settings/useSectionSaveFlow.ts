@@ -67,34 +67,52 @@ export function useSectionSaveFlow(
     if (!dirty) return;
     setBusy(true);
     setBanner(null);
-    const dirtyKeys = Object.keys(edits);
+
+    // Snapshot the values being saved BEFORE async work. Codex PR review P1:
+    // form fields stay editable during in-flight PUT. If the user edits a
+    // key again after Save click but before the PUT returns, the newer edit
+    // must NOT be silently dropped from `edits`. We track what value was
+    // SENT for each successful key, and only clear it from edits if the
+    // current local value still matches.
+    const snapshotEdits: Record<string, string> = { ...edits };
+    const dirtyKeys = Object.keys(snapshotEdits);
     const failures: Record<string, string> = {};
-    const successes: string[] = [];
+    const successes: { key: string; sentValue: string }[] = [];
+
     // Sequential PUTs — deterministic ordering, avoids server-side write races.
     for (const k of dirtyKeys) {
       try {
-        await putSetting(k, edits[k]);
-        successes.push(k);
+        await putSetting(k, snapshotEdits[k]);
+        successes.push({ key: k, sentValue: snapshotEdits[k] });
       } catch (e: any) {
         const reason = e?.body?.reason ?? e?.message ?? "save failed";
         failures[k] = String(reason);
       }
     }
-    // Memo §4.4 merge rule: drop successes from edits + errors; keep failures dirty.
-    // Codex r7 P2: errors map must clear successes BEFORE merging new failures —
-    // otherwise a key that failed previously and now saved successfully would
-    // keep its stale inline error message while becoming clean.
+
+    // Codex PR P1 (compare-and-swap): drop a saved key from edits ONLY if
+    // its current local value still equals what was sent. If the user
+    // edited it again during the in-flight PUT, the newer edit stays
+    // dirty and is preserved.
     setEdits((prev) => {
       const next = { ...prev };
-      for (const k of successes) delete next[k];
+      for (const { key, sentValue } of successes) {
+        if (next[key] === sentValue) {
+          delete next[key];
+        }
+      }
       return next;
     });
+
+    // Memo §4.4 + Codex r7 P2: errors map clears successes BEFORE merging
+    // new failures (retry-success drops stale errors).
     setErrors((prev) => {
       const next = { ...prev };
-      for (const k of successes) delete next[k]; // clear stale errors on retry-success
+      for (const { key } of successes) delete next[key]; // clear stale errors on retry-success
       for (const [k, v] of Object.entries(failures)) next[k] = v;
       return next;
     });
+
     setBusy(false);
     if (Object.keys(failures).length === 0) {
       setBanner({ kind: "ok", text: "Saved." });
