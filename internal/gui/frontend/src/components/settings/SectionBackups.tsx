@@ -15,15 +15,30 @@ export function SectionBackups({ snapshot, onDirtyChange }: SectionBackupsProps)
   const persisted = Number(def.value);
 
   const [draft, setDraft] = useState<number>(persisted);
+  // Codex r9 P2: value successfully PUT to disk but not yet confirmed by a
+  // fresh snapshot (refresh failed). Reset() reverts draft to lastSent (not
+  // the stale snapshot), so the user keeps the saved value visible.
+  const [lastSent, setLastSent] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
 
-  // Re-anchor when snapshot persisted value changes (e.g. after refresh).
-  useEffect(() => { setDraft(persisted); }, [persisted]);
+  // When persisted catches up with lastSent (refresh succeeded later),
+  // drop lastSent. Avoids a stale fallback once the snapshot is fresh.
+  useEffect(() => {
+    if (lastSent !== null && persisted === lastSent) {
+      setLastSent(null);
+    }
+  }, [persisted, lastSent]);
 
-  const dirty = draft !== persisted;
+  // The effective baseline the user edits relative to: prefer lastSent
+  // (saved-on-disk-unconfirmed) over the stale persisted snapshot.
+  const baseline = lastSent ?? persisted;
+  const dirty = draft !== baseline;
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
+
+  // Re-anchor draft when baseline changes (refresh success or initial mount).
+  useEffect(() => { setDraft(baseline); }, [baseline]);
 
   async function save() {
     setBusy(true);
@@ -35,9 +50,11 @@ export function SectionBackups({ snapshot, onDirtyChange }: SectionBackupsProps)
       setBusy(false);
       return;
     }
-    // PUT succeeded — value is on disk. Refresh is best-effort.
-    // Codex r8 P2: split refresh failure from save failure so transient
-    // GET errors don't surface as if the save itself failed.
+    // PUT succeeded — record in lastSent so Reset preserves it (Codex r9 P2).
+    const sentValue = draft;
+    setLastSent(sentValue);
+    // Refresh is best-effort. Codex r8 P2: split refresh failure from save
+    // failure so transient GET errors don't surface as if the save itself failed.
     let refreshOK = true;
     try {
       await snapshot.refresh();
@@ -51,6 +68,15 @@ export function SectionBackups({ snapshot, onDirtyChange }: SectionBackupsProps)
     } else {
       setBanner("Saved on disk. Couldn't refresh the live view — click Save again when connection recovers.");
     }
+  }
+
+  // Codex r9 P2: Reset reverts draft to baseline (lastSent ?? persisted),
+  // NOT unconditionally to persisted. After a refresh-fail Save+Reset cycle
+  // the slider stays at the saved value, not the stale snapshot value.
+  function onReset() {
+    setDraft(baseline);
+    setErr(null);
+    setBanner(null);
   }
 
   return (
@@ -95,7 +121,7 @@ export function SectionBackups({ snapshot, onDirtyChange }: SectionBackupsProps)
         <button type="button" disabled={!dirty || busy} onClick={() => void save()}>
           {busy ? "Saving…" : "Save"}
         </button>
-        <button type="button" disabled={!dirty || busy} onClick={() => setDraft(persisted)}>Reset</button>
+        <button type="button" disabled={!dirty || busy} onClick={onReset}>Reset</button>
       </div>
     </section>
   );

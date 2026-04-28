@@ -133,9 +133,13 @@ describe("SectionAppearance", () => {
     expect(shellField?.getAttribute("aria-describedby")).toBe("appearance.shell-error");
   });
 
-  it("Codex r6 P2: keeps saved edits dirty when snapshot refresh fails", async () => {
-    // Successful PUT but refresh fails. Edit must remain in `edits` so
-    // effective() returns the saved value (not the stale snapshot's old).
+  it("Codex r6 P2 (updated for r9): keeps saved value visible when snapshot refresh fails", async () => {
+    // Successful PUT but refresh fails. Under r9 architecture, the value
+    // moves from edits → lastSent on PUT success, so edits is empty and
+    // the section is NO LONGER dirty. However, effective() still returns
+    // the saved value (via lastSent), so the select shows "dark" correctly.
+    // The "click Save again" recovery path is superseded: no pending edits
+    // remain and the value is preserved for display via lastSent.
     vi.spyOn(api, "putSetting").mockResolvedValue(undefined);
     const refresh = vi.fn(async () => { throw new Error("network"); });
     const onDirty = vi.fn();
@@ -148,12 +152,36 @@ describe("SectionAppearance", () => {
     fireEvent.click(Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Save")!);
     // Banner indicates partial: "Saved on disk. Couldn't refresh the live view..."
     expect(await findByText(/Saved on disk/)).toBeTruthy();
-    // The select STILL shows "dark" (the saved value, not reverted to stale snapshot).
+    // The select STILL shows "dark" (saved value, now via lastSent fallback).
     await waitFor(() => expect(sel.value).toBe("dark"));
-    // dirty stays true — Save button still enabled.
-    await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(true));
+    // r9: dirty is now FALSE — edits is empty, lastSent is not counted as dirty.
+    // The value is preserved via lastSent, not by keeping edits populated.
+    await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(false));
     const saveBtn = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Save")!;
-    expect(saveBtn.disabled).toBe(false);
+    // Save is disabled (no pending edits to save).
+    expect(saveBtn.disabled).toBe(true);
+  });
+
+  it("Codex r9 P2: Reset preserves saved values when refresh failed", async () => {
+    // Save successfully PUTs the value, but refresh throws. lastSent retains
+    // the value. User clicks Reset → edits cleared but lastSent preserved →
+    // effective() still returns the saved value. Section is clean (not dirty).
+    vi.spyOn(api, "putSetting").mockResolvedValue(undefined);
+    const refresh = vi.fn(async () => { throw new Error("network"); });
+    const onDirty = vi.fn();
+    const { container, findByText } = render(
+      <SectionAppearance snapshot={makeSnapshot(refresh)} onDirtyChange={onDirty} />,
+    );
+    const sel = container.querySelector("#appearance\\.theme") as HTMLSelectElement;
+    fireEvent.change(sel, { target: { value: "dark" } });
+    fireEvent.click(Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Save")!);
+    expect(await findByText(/Saved on disk/)).toBeTruthy();
+    // Click Reset.
+    fireEvent.click(Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Reset")!);
+    // Select STILL shows "dark" (lastSent retains it).
+    await waitFor(() => expect(sel.value).toBe("dark"));
+    // dirty is false (no pending edits).
+    await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(false));
   });
 
   it("Codex PR P1: edit during in-flight Save preserves newer edit (compare-and-swap)", async () => {

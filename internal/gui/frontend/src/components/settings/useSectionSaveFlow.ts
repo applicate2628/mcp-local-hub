@@ -3,7 +3,6 @@ import { putSetting } from "../../lib/settings-api";
 import type { SettingsSnapshot, ConfigSettingDTO } from "../../lib/settings-types";
 
 export type SaveOutcome = {
-  // Map of dirty-key → outcome: success or error message.
   failures: Record<string, string>;
   successes: string[];
 };
@@ -13,8 +12,13 @@ export function useSectionSaveFlow(
   sectionKeys: string[],
   onDirtyChange: (b: boolean) => void,
 ) {
-  // local edited values, keyed by registry key. Empty = clean.
   const [edits, setEdits] = useState<Record<string, string>>({});
+  // Codex r9 P2: keys that have been successfully PUT but whose new value
+  // has not yet been confirmed by a fresh snapshot (refresh failed). These
+  // are NOT dirty (work is done) but effective() must surface them so the
+  // UI doesn't fall back to the stale snapshot value. Reset() preserves
+  // lastSent — only edits are pending discard work.
+  const [lastSent, setLastSent] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<{ kind: "ok" | "partial"; text: string } | null>(null);
@@ -30,25 +34,45 @@ export function useSectionSaveFlow(
     return out;
   }, [snapshot, sectionKeys]);
 
+  // When persisted catches up with lastSent (refresh succeeded later),
+  // drop the now-redundant lastSent entry. Avoids stale fallback.
+  useEffect(() => {
+    setLastSent((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const k of Object.keys(prev)) {
+        if (persisted[k] === prev[k]) {
+          delete next[k];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [persisted]);
+
   const dirty = Object.keys(edits).length > 0;
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
 
   function effective(key: string): string {
-    return edits[key] ?? persisted[key] ?? "";
+    if (key in edits) return edits[key];
+    if (key in lastSent) return lastSent[key];
+    return persisted[key] ?? "";
   }
 
   function setLocal(key: string, value: string) {
     setEdits((prev) => {
       const next = { ...prev };
-      // If matches persisted, drop from edits (clean).
-      if ((persisted[key] ?? "") === value) {
+      // The "baseline" the user is editing relative to. lastSent (if any)
+      // takes precedence over persisted because lastSent represents what's
+      // really on disk after a refresh failure.
+      const baseline = lastSent[key] ?? persisted[key] ?? "";
+      if (baseline === value) {
         delete next[key];
       } else {
         next[key] = value;
       }
       return next;
     });
-    // Clear that key's error on edit.
     setErrors((prev) => {
       if (!(key in prev)) return prev;
       const next = { ...prev };
@@ -58,6 +82,9 @@ export function useSectionSaveFlow(
   }
 
   function reset() {
+    // Codex r9 P2: clear pending edits but PRESERVE lastSent. The latter
+    // represents saved-on-disk values whose refresh failed; discarding
+    // them would silently revert the UI to the stale snapshot.
     setEdits({});
     setErrors({});
     setBanner(null);
@@ -99,36 +126,40 @@ export function useSectionSaveFlow(
       return next;
     });
 
-    // Refresh snapshot. If it fails, we KEEP successful edits in the local
-    // edits map so effective() still surfaces the user's value (Codex r6 P2).
-    // Without this guard, a transient GET failure right after a successful
-    // PUT would clear edits, fall back to the stale snapshot's old value,
-    // and visually undo the save in the UI even though disk has the new value.
+    // Move successful keys from edits to lastSent (Codex r9 P2 architecture).
+    // CAS: only move if the local value still equals what was sent (so a
+    // dirty mid-PUT edit by the user is preserved as still-dirty).
+    setEdits((prev) => {
+      const next = { ...prev };
+      for (const { key, sentValue } of successes) {
+        if (next[key] === sentValue) {
+          delete next[key];
+        }
+      }
+      return next;
+    });
+    setLastSent((prev) => {
+      const next = { ...prev };
+      for (const { key, sentValue } of successes) {
+        // Only record in lastSent if the user hasn't re-edited it (CAS).
+        // We re-read from edits via the closed snapshotEdits; if the user
+        // edited it again, we conservatively don't add to lastSent — the
+        // newer edit is still in edits and effective() reads edits first.
+        if (snapshotEdits[key] === sentValue) {
+          next[key] = sentValue;
+        }
+      }
+      return next;
+    });
+
     let refreshOK = true;
     try {
       await snapshot.refresh();
     } catch {
       refreshOK = false;
     }
-
-    if (refreshOK) {
-      // Codex PR P1 (compare-and-swap): drop a saved key from edits ONLY if
-      // its current local value still equals what was sent. If the user
-      // edited it again during the in-flight PUT, the newer edit stays
-      // dirty and is preserved.
-      setEdits((prev) => {
-        const next = { ...prev };
-        for (const { key, sentValue } of successes) {
-          if (next[key] === sentValue) {
-            delete next[key];
-          }
-        }
-        return next;
-      });
-    }
-    // refresh failed: edits stay; effective() returns the saved values;
-    // dirty stays true; user can re-click Save (idempotent) when connection
-    // recovers.
+    // The persisted-catches-up effect above will clear lastSent entries
+    // whose snapshot value now matches; no manual cleanup needed here.
 
     setBusy(false);
     if (Object.keys(failures).length === 0) {
@@ -136,8 +167,6 @@ export function useSectionSaveFlow(
         setBanner({ kind: "ok", text: "Saved." });
         setTimeout(() => setBanner(null), 2000);
       } else {
-        // All PUTs succeeded but refresh failed — disk has the new values,
-        // UI still shows them, but live snapshot is stale.
         setBanner({
           kind: "partial",
           text: "Saved on disk. Couldn't refresh the live view — click Save again when connection recovers.",
