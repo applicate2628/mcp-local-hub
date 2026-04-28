@@ -79,8 +79,17 @@ activates the first window and exits 0.`,
 			// once the listener is live.
 			s := gui.NewServer(gui.Config{Port: port, Version: versionString()})
 			s.OnActivateWindow(func() {
-				// Phase 3B-II will wire tray/browser here. MVP: just log.
-				fmt.Fprintln(cmd.OutOrStdout(), "activate-window received")
+				// Phase 3B-II C2: bring the Chrome app-mode window to
+				// foreground via Win32 SetForegroundWindow. Match by
+				// page <title> ("mcp-local-hub"), which is stable
+				// across Chrome versions in app-mode (chromeless
+				// window keeps page title as window title). On
+				// non-Windows, FocusBrowserWindow returns an error
+				// (logged below); the tray "Open dashboard" action
+				// shares the same surface and the same limitation.
+				if err := gui.FocusBrowserWindow("mcp-local-hub"); err != nil {
+					fmt.Fprintf(cmd.OutOrStderr(), "activate-window: %v\n", err)
+				}
 			})
 
 			ready := make(chan struct{})

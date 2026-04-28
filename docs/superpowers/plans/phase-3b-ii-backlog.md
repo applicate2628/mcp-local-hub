@@ -34,7 +34,7 @@ Tracking document for Phase 3B-II — the "everything I cut from Phase 3B-I MVP"
 | # | Area | Description | Source |
 |---|---|---|---|
 | C1 | `--force` take-over flag | Currently hidden placeholder. Realize: detect stale single-instance mutex, confirm with user, delete `<pidport>.lock`, acquire. | PR #5 cleanup |
-| C2 | Browser focus on activate-window | Currently logs only. Wire `SetForegroundWindow` (Windows) on the Chrome app-mode window. Tray "Open dashboard" shares the limitation. | PR #5 final review |
+| C2 | Browser focus on activate-window | ✅ PR #22 — `gui.FocusBrowserWindow` enumerates visible top-level windows by title substring "mcp-local-hub", calls SW_RESTORE then SetForegroundWindow. Activate-window callback in cli/gui.go now invokes it instead of logging. Manual real-match smoke in `docs/phase-3b-ii-verification.md` D2.1. | PR #5 final review |
 | C3 | Tray icon state variants | MVP ships a single icon (`SetTooltip` only). Add 4-state icon switching (`healthy` / `degraded` / `down` / `migrating`) driven by SSE `daemon-state` events. | Spec §6 |
 | C4 | Toast notifications | Windows toast on `daemon-failed` / `auto-restart-triggered` / `manual-action-done`. Events already in `/api/events` stream, UI does not render them. | Spec §6 |
 
