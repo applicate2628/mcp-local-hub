@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // SettingType is the discriminator for SettingDef.Type. It controls
@@ -106,13 +107,18 @@ func findDef(key string) *SettingDef {
 	return nil
 }
 
-// stringHasControlChars returns true if s contains any byte < 0x20 or
-// the DEL byte 0x7F. Used by the TypeString and TypePath syntactic
+// stringHasControlChars returns true if s contains any Unicode control
+// character: C0 controls (U+0000..U+001F), DEL (U+007F), and C1 controls
+// (U+0080..U+009F). Used by the TypeString and TypePath syntactic
 // validators to reject paths/strings with embedded control characters
 // (newlines, tabs, etc.) that break CLI output and downstream consumers.
+//
+// Codex PR #20 r15 (proactive — pre-bot CLI pre-review): C1 controls were
+// missed by the previous `r < 0x20 || r == 0x7F` check. unicode.IsControl
+// covers all three ranges atomically.
 func stringHasControlChars(s string) bool {
 	for _, r := range s {
-		if r < 0x20 || r == 0x7F {
+		if unicode.IsControl(r) {
 			return true
 		}
 	}

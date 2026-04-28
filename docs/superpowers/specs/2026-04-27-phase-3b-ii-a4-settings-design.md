@@ -238,8 +238,8 @@ Per-type validation, applied in `SettingsSet` before write and again in `PUT /ap
 | `TypeEnum` | value ∈ `Enum` |
 | `TypeBool` | value ∈ `{"true", "false"}` (lowercase) |
 | `TypeInt` | parses as int; if `Min/Max` set, value ∈ [Min, Max] |
-| `TypeString` | empty allowed iff `Optional`; if `Pattern` set and value non-empty, regex matches; rejects control chars |
-| `TypePath` | empty allowed iff `Optional` (Codex r1 P1.3); if non-empty, **syntactic only**: rejects null bytes, leading/trailing whitespace; does **not** require existence (per H2' "validation can be syntactic/existence-light") |
+| `TypeString` | empty allowed iff `Optional`; if `Pattern` set and value non-empty, regex matches; rejects all Unicode control characters (C0/DEL/C1) before the pattern check |
+| `TypePath` | empty allowed iff `Optional` (Codex r1 P1.3); if non-empty, **syntactic only**: rejects null bytes, all Unicode control characters (C0/DEL/C1, Codex r14 P2 + r15 proactive), leading/trailing whitespace; does **not** require existence (per H2' "validation can be syntactic/existence-light") |
 | `TypeAction` | `set` always rejected with `cannot set action key`; HTTP PUT returns 405 |
 
 Validation errors return a structured shape: `{"error": "validation_failed", "key": "<key>", "reason": "<message>"}` (HTTP 400). The CLI maps this to `error: invalid value for <key>: <reason>` on stderr.

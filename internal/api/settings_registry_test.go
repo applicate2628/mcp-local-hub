@@ -130,11 +130,46 @@ func TestValidate_Path_RejectsControlChars(t *testing.T) {
 		name  string
 		value string
 	}{
+		// C0 + DEL (already caught by old check)
 		{"newline in middle", "/tmp/foo\nbar"},
 		{"tab in middle", "/tmp/foo\tbar"},
 		{"carriage return", "/tmp/foo\rbar"},
 		{"DEL (0x7F)", "/tmp/foo\x7Fbar"},
 		{"vertical tab", "/tmp/foo\vbar"},
+		// C1 (newly caught by unicode.IsControl — Codex PR #20 r15)
+		{"NEL (U+0085)", "/tmp/foobar"},
+		{"START OF STRING (U+0098)", "/tmp/foobar"},
+		{"APC (U+009F)", "/tmp/foobar"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validate(def, tc.value); err == nil {
+				t.Errorf("%s: expected control-char rejection, got nil", tc.name)
+			}
+		})
+	}
+}
+
+func TestValidate_String_RejectsControlChars(t *testing.T) {
+	// Codex PR #20 r15: comprehensive Unicode control-char coverage
+	// (C0, DEL, C1). String pattern check runs AFTER control-char gate,
+	// so even regex-matching values are rejected if they contain controls.
+	def := findDef("daemons.weekly_schedule")
+	if def.Type != TypeString {
+		t.Fatal("test setup: daemons.weekly_schedule must be TypeString")
+	}
+	cases := []struct {
+		name  string
+		value string
+	}{
+		// C0 + DEL (already caught by old check)
+		{"newline", "weekly\nSun 03:00"},
+		{"tab", "weekly\tSun 03:00"},
+		{"DEL", "weekly\x7FSun 03:00"},
+		// C1 (newly caught by unicode.IsControl)
+		{"NEL (U+0085)", "weeklySun 03:00"},
+		{"START OF STRING (U+0098)", "weeklySun 03:00"},
+		{"APC (U+009F)", "weeklySun 03:00"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
