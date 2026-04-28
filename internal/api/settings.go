@@ -149,6 +149,18 @@ var legacyKeyMap = map[string]string{
 	"default-home": "appearance.default_home",
 }
 
+// ResolveLegacyKey returns the canonical registry key for a legacy pre-A4
+// name (theme, shell, default-home). Returns the input unchanged if it is
+// not a known legacy key. The CLI calls this so `mcp settings get theme`
+// works identically to `mcp settings get appearance.theme`, preserving
+// compatibility with existing user scripts (Codex PR #20 r13 P2).
+func ResolveLegacyKey(name string) string {
+	if canonical, ok := legacyKeyMap[name]; ok {
+		return canonical
+	}
+	return name
+}
+
 // migrateLegacyKeys promotes pre-A4 unqualified keys to their canonical
 // equivalents in-place. If both the legacy and canonical key are present
 // the canonical value wins (legacy is dropped). Operates on the map

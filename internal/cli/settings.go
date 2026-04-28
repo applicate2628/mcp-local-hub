@@ -85,16 +85,17 @@ func newSettingsGetCmd() *cobra.Command {
 		Short: "Print the value for a setting",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			key := args[0]
-			def := lookupRegistry(key)
+			def := lookupRegistry(args[0])
 			if def == nil {
-				return fmt.Errorf("unknown setting %s", key)
+				return fmt.Errorf("unknown setting %s", args[0])
 			}
 			if def.Type == api.TypeAction {
-				return fmt.Errorf("%s is an action; use 'mcp settings invoke' (coming in A4-b)", key)
+				return fmt.Errorf("%s is an action; use 'mcp settings invoke' (coming in A4-b)", def.Key)
 			}
 			a := api.NewAPI()
-			val, err := a.SettingsGet(key)
+			// Use def.Key (canonical) so legacy aliases like "theme" correctly
+			// fetch "appearance.theme" from the persisted YAML (Codex r13 P2).
+			val, err := a.SettingsGet(def.Key)
 			if err != nil {
 				return err
 			}
@@ -113,19 +114,21 @@ func newSettingsSetCmd() *cobra.Command {
 		Short: "Write a setting value (validated against registry)",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			key, value := args[0], args[1]
-			def := lookupRegistry(key)
+			value := args[1]
+			def := lookupRegistry(args[0])
 			if def == nil {
-				return fmt.Errorf("unknown setting %s", key)
+				return fmt.Errorf("unknown setting %s", args[0])
 			}
 			if def.Type == api.TypeAction {
-				return fmt.Errorf("cannot set action key %s", key)
+				return fmt.Errorf("cannot set action key %s", def.Key)
 			}
 			a := api.NewAPI()
-			if err := a.SettingsSet(key, value); err != nil {
+			// Use def.Key (canonical) so legacy aliases like "shell" correctly
+			// write "appearance.shell" to the persisted YAML (Codex r13 P2).
+			if err := a.SettingsSet(def.Key, value); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "✓ %s=%s\n", key, value)
+			fmt.Fprintf(cmd.OutOrStdout(), "✓ %s=%s\n", def.Key, value)
 			if def.Deferred {
 				fmt.Fprintf(cmd.ErrOrStderr(), "setting accepted; this field is deferred to A4-b and has no effect yet\n")
 			}
@@ -135,9 +138,14 @@ func newSettingsSetCmd() *cobra.Command {
 }
 
 // lookupRegistry returns a pointer into api.SettingsRegistry for key, or nil.
+// Codex PR #20 r13 P2: resolves pre-A4 legacy key names (theme, shell,
+// default-home) to their canonical equivalents before lookup, so callers
+// that use def.Key for downstream API calls automatically operate on the
+// canonical name without any additional translation.
 func lookupRegistry(key string) *api.SettingDef {
+	canonical := api.ResolveLegacyKey(key)
 	for i := range api.SettingsRegistry {
-		if api.SettingsRegistry[i].Key == key {
+		if api.SettingsRegistry[i].Key == canonical {
 			return &api.SettingsRegistry[i]
 		}
 	}
