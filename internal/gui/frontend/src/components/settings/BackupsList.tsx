@@ -59,7 +59,13 @@ export function BackupsList({ keepN }: BackupsListProps): preact.JSX.Element {
     // Sort each client's backups: originals last, timestamped newest-first.
     for (const arr of m.values()) {
       arr.sort((a, b) => {
-        if (a.kind === b.kind) return b.mod_time.localeCompare(a.mod_time);
+        if (a.kind === b.kind) {
+          // Codex r8 P3: parse to epoch — RFC3339 string compare is wrong
+          // across timezone-offset differences (DST -07:00 vs -08:00).
+          const ta = Date.parse(a.mod_time);
+          const tb = Date.parse(b.mod_time);
+          return tb - ta; // newest first
+        }
         return a.kind === "original" ? 1 : -1;
       });
     }

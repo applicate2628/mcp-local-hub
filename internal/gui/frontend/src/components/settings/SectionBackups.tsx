@@ -30,13 +30,26 @@ export function SectionBackups({ snapshot, onDirtyChange }: SectionBackupsProps)
     setErr(null);
     try {
       await putSetting("backups.keep_n", String(draft));
-      setBanner("Saved.");
-      setTimeout(() => setBanner(null), 2000);
-      await snapshot.refresh();
     } catch (e: any) {
       setErr(String(e?.body?.reason ?? e?.message ?? "save failed"));
-    } finally {
       setBusy(false);
+      return;
+    }
+    // PUT succeeded — value is on disk. Refresh is best-effort.
+    // Codex r8 P2: split refresh failure from save failure so transient
+    // GET errors don't surface as if the save itself failed.
+    let refreshOK = true;
+    try {
+      await snapshot.refresh();
+    } catch {
+      refreshOK = false;
+    }
+    setBusy(false);
+    if (refreshOK) {
+      setBanner("Saved.");
+      setTimeout(() => setBanner(null), 2000);
+    } else {
+      setBanner("Saved on disk. Couldn't refresh the live view — click Save again when connection recovers.");
     }
   }
 

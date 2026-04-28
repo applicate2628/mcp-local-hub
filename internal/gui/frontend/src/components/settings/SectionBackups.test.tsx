@@ -56,6 +56,22 @@ describe("SectionBackups", () => {
     await waitFor(() => expect(refresh).toHaveBeenCalled());
   });
 
+  it("Codex r8 P2: keeps Save state coherent when PUT succeeds but refresh throws", async () => {
+    // Successful PUT but refresh fails. The save did succeed; user should
+    // see "Saved on disk" banner, NOT a save-error inline message.
+    vi.spyOn(api, "putSetting").mockResolvedValue(undefined);
+    const refresh = vi.fn(async () => { throw new Error("network"); });
+    const onDirty = vi.fn();
+    const { container, findByText } = render(<SectionBackups snapshot={snap(refresh)} onDirtyChange={onDirty} />);
+    const slider = container.querySelector("input[type=range]") as HTMLInputElement;
+    fireEvent.input(slider, { target: { value: "12" } });
+    fireEvent.click(Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Save")!);
+    // Should show "Saved on disk" banner, NOT an inline error.
+    expect(await findByText(/Saved on disk/)).toBeTruthy();
+    // No inline error.
+    expect(container.querySelector("[role=alert]")).toBeNull();
+  });
+
   it("disabled Clean now button has the locked tooltip", () => {
     const { container } = render(<SectionBackups snapshot={snap()} onDirtyChange={() => {}} />);
     const btn = container.querySelector('[data-test-id="clean-now-disabled"]') as HTMLButtonElement;
