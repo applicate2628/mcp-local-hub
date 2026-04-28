@@ -69,8 +69,14 @@ export function SettingsScreen({ route, onDirtyChange }: SettingsScreenProps): p
 
   // Apply theme + density CSS variables on every ok-snapshot (memo §10.2).
   // The section-save flow already triggers `snapshot.refresh()`, so this
-  // hook is the single point that propagates appearance changes to
-  // <html data-theme>/<html data-density>.
+  // hook propagates appearance changes to <html data-theme>/<html data-density>
+  // immediately after Save while this screen is mounted.
+  //
+  // App.tsx ALSO applies these on its own snapshot instance so the
+  // attributes survive across ALL routes (Codex PR #20 r2 P1 fix). The
+  // duplication is intentional and idempotent — the two effects complement
+  // each other: App handles cold-start + cross-route continuity, Settings
+  // handles instantaneous live-update after Save.
   useEffect(() => {
     if (snapshot.status !== "ok") return;
     const theme = snapshot.data.settings.find((s) => s.key === "appearance.theme");
