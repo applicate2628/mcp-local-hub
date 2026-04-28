@@ -301,6 +301,61 @@ func TestSettings_MigratesLegacyKeys_CanonicalWins(t *testing.T) {
 	}
 }
 
+func TestSettings_ListIn_FallsBackToDefaultOnInvalidPersistedValue(t *testing.T) {
+	// Codex PR #20 r7 P2: legacy / hand-edited gui-preferences.yaml may
+	// contain out-of-domain values that pre-A4 didn't validate. After
+	// upgrade, SettingsListIn must NOT surface them to the GUI; it must
+	// fall back to the registry default silently.
+	a := &API{}
+	path := tmpSettings(t)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	seeded := []byte("appearance.theme: blue\nappearance.shell: sidebar\ngui_server.port: not-a-number\n")
+	if err := os.WriteFile(path, seeded, 0600); err != nil {
+		t.Fatal(err)
+	}
+	all, err := a.SettingsListIn(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if all["appearance.theme"] != "system" {
+		t.Errorf("expected default 'system' (invalid 'blue' rejected), got %q", all["appearance.theme"])
+	}
+	if all["appearance.shell"] != "pwsh" {
+		t.Errorf("expected default 'pwsh' (invalid 'sidebar' rejected), got %q", all["appearance.shell"])
+	}
+	if all["gui_server.port"] != "9125" {
+		t.Errorf("expected default '9125' (invalid 'not-a-number' rejected), got %q", all["gui_server.port"])
+	}
+}
+
+func TestSettings_ListIn_AcceptsValidPersistedValue(t *testing.T) {
+	// Sanity: the validator-on-read path must NOT regress valid values.
+	a := &API{}
+	path := tmpSettings(t)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	seeded := []byte("appearance.theme: dark\nappearance.shell: bash\ngui_server.port: 9300\n")
+	if err := os.WriteFile(path, seeded, 0600); err != nil {
+		t.Fatal(err)
+	}
+	all, err := a.SettingsListIn(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if all["appearance.theme"] != "dark" {
+		t.Errorf("valid 'dark' must round-trip, got %q", all["appearance.theme"])
+	}
+	if all["appearance.shell"] != "bash" {
+		t.Errorf("valid 'bash' must round-trip, got %q", all["appearance.shell"])
+	}
+	if all["gui_server.port"] != "9300" {
+		t.Errorf("valid '9300' must round-trip, got %q", all["gui_server.port"])
+	}
+}
+
 // contains is a tiny substring helper (avoids importing strings just here).
 func contains(haystack, needle string) bool {
 	return len(haystack) >= len(needle) && (haystack == needle ||

@@ -60,8 +60,18 @@ func (a *API) SettingsListIn(path string) (map[string]string, error) {
 			continue
 		}
 		if v, ok := raw[def.Key]; ok {
-			out[def.Key] = v
-			continue
+			// Codex PR #20 r7 P2: validate persisted value before exposing
+			// it to the GUI. Pre-A4 had no validation; legacy or hand-edited
+			// YAML may contain out-of-domain values (e.g., shell: sidebar,
+			// theme: blue) that would render as broken enum controls. Fall
+			// back to the registry default silently — defaults always pass
+			// their own validators (asserted by TestRegistry_DefaultsValidate).
+			// Go 1.22+ loop-var semantics: &def is per-iteration stable.
+			if err := validate(&def, v); err == nil {
+				out[def.Key] = v
+				continue
+			}
+			// Invalid persisted value — fall through to default below.
 		}
 		out[def.Key] = def.Default
 	}
