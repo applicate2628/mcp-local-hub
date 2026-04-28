@@ -353,10 +353,19 @@ func TestPreflight_UnknownCommand(t *testing.T) {
 // TestInstallAllInstallsEverything spawns a tempdir with two fake manifests
 // and asserts Install is invoked for each (dry-run mode so no scheduler/
 // client writes). Verifies InstallAllFrom returns one result per manifest.
+//
+// Ports must be OS-allocated (`net.Listen(":0")` via pickFreeLocalPort)
+// rather than literal 9130/9131: dev workstations frequently have those
+// ports in TIME_WAIT from prior test runs (or held by an installed
+// daemon), and the install preflight rejects manifests whose port is
+// already in use. Using pickFreeLocalPort matches the sibling test
+// TestInstallAllFrom_PortConflictFailsThatServer below.
 func TestInstallAllInstallsEverything(t *testing.T) {
 	tmp := t.TempDir()
-	makeFakeManifest(t, filepath.Join(tmp, "foo"), "foo", 9130)
-	makeFakeManifest(t, filepath.Join(tmp, "bar"), "bar", 9131)
+	fooPort := pickFreeLocalPort(t)
+	barPort := pickFreeLocalPort(t)
+	makeFakeManifest(t, filepath.Join(tmp, "foo"), "foo", fooPort)
+	makeFakeManifest(t, filepath.Join(tmp, "bar"), "bar", barPort)
 	preparePreflightBinaryChecks(t)
 
 	a := NewAPI()
