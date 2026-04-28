@@ -22,13 +22,39 @@ func rowKey(r api.DaemonStatus) string {
 	return r.Server + "/" + d
 }
 
-// isFailedRow returns true when a daemon row reports a failure
-// (LastResult != 0 OR state contains "fail"). Mirrors the
-// StateError predicates in tray.Aggregate so toast onset matches
-// tray icon onset — the user sees the icon turn red and the
+// Task Scheduler informational LastResult codes — NOT real failures.
+// Documented in MS-TSCH and observed in production:
+//
+//	0x41300 (267008) — task is ready to run
+//	0x41301 (267009) — task is currently running
+//	0x41303 (267011) — task has not yet run (initial state)
+//	0x41304 (267012) — no more runs scheduled
+//	0x41306 (267014) — task is disabled
+//	0x41307 (267015) — task has not yet run for the user
+//
+// User-defined exit codes are typically small positive (1, 2, 87,
+// 1063) or HRESULT-shaped (high bit set → negative when read as
+// int32). Anything in the 0x41300-0x4130F informational range
+// must be excluded from the failure predicate or the tray spams
+// "daemon failed" toasts every poll for every never-run /
+// idle-state task on the host (regression observed in PR #22
+// initial push, fixed before merge).
+const (
+	tsInfoCodeMin = 0x41300
+	tsInfoCodeMax = 0x4130F
+)
+
+// isFailedRow returns true when a daemon row reports a real failure.
+// Mirrors the StateError predicates in tray.Aggregate so toast onset
+// matches tray icon onset — the user sees the icon turn red and the
 // toast pop at the same transition.
+//
+// LastResult contributes only when it's outside the Task Scheduler
+// informational range (see tsInfoCodeMin/Max comment). State-string
+// "fail" match is kept as a separate signal because some daemon paths
+// emit Failed without a corresponding LastResult update.
 func isFailedRow(r api.DaemonStatus) bool {
-	if r.LastResult != 0 {
+	if r.LastResult != 0 && (r.LastResult < tsInfoCodeMin || r.LastResult > tsInfoCodeMax) {
 		return true
 	}
 	return strings.Contains(strings.ToLower(r.State), "fail")

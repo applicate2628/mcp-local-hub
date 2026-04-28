@@ -47,6 +47,30 @@ func TestAggregate(t *testing.T) {
 			},
 			StateError,
 		},
+		{"Task Scheduler info code 0x41300 (ready to run) is NOT a failure",
+			[]api.DaemonStatus{
+				{Server: "memory", State: "Running", LastResult: 0x41300},
+			},
+			StateHealthy,
+		},
+		{"Task Scheduler info code 0x41301 (currently running) is NOT a failure",
+			[]api.DaemonStatus{
+				{Server: "memory", State: "Running", LastResult: 0x41301},
+			},
+			StateHealthy,
+		},
+		{"Task Scheduler info code 0x41303 (never run) is NOT a failure — DM-1 orphan case",
+			[]api.DaemonStatus{
+				{Server: "gdb", State: "Ready", LastResult: 0x41303},
+			},
+			StateDown,
+		},
+		{"HRESULT-shaped failure (high bit set, negative int32) IS a failure",
+			[]api.DaemonStatus{
+				{Server: "memory", State: "Running", LastResult: -2147467259}, // E_FAIL
+			},
+			StateError,
+		},
 		{"state containing 'fail' → Error",
 			[]api.DaemonStatus{
 				{Server: "memory", State: "FailedToLaunch"},

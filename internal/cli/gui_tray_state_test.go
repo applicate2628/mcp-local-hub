@@ -183,6 +183,47 @@ func TestAggregateTrayState_ToastFiresOnFailureOnset(t *testing.T) {
 	}
 }
 
+// TestAggregateTrayState_ToastIgnoresTaskSchedulerInfoCodes is the
+// critical regression guard for the spam-toast bug observed on PR
+// #22 initial push. Task Scheduler reports informational codes in
+// the 0x41300-0x4130F range (e.g., 0x41303 = task has not yet run,
+// the default state for orphan/never-run scheduler entries). Those
+// are NOT failures; treating them as such fired a "daemon failed"
+// toast every 5s for every never-run task on the host, which was
+// the user-visible symptom that broke the C4 wiring.
+//
+// This test feeds a daemon row with LastResult=0x41303 across
+// multiple snapshots and asserts NO toasts fire. If the predicate
+// ever regresses to plain `LastResult != 0`, this test will spike
+// 3+ toasts and fail.
+func TestAggregateTrayState_ToastIgnoresTaskSchedulerInfoCodes(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	snaps := make(chan []api.DaemonStatus, 8)
+	out := make(chan tray.TrayState, 8)
+	toaster := &fakeToaster{}
+	go aggregateTrayStateWithToast(ctx, snaps, out, toaster.show)
+
+	// Three snapshots of an orphan daemon with TS info-code "never
+	// run yet" — no toast may fire.
+	for i := 0; i < 3; i++ {
+		snaps <- []api.DaemonStatus{
+			{Server: "gdb", State: "Ready", LastResult: 0x41303},
+		}
+	}
+
+	// Wait long enough for any spurious toasts to surface (~200ms
+	// is plenty for a goroutine fire). If no toasts arrive, the
+	// suppression is working.
+	time.Sleep(300 * time.Millisecond)
+	calls := toaster.snapshot()
+	if len(calls) != 0 {
+		t.Errorf("TS info code 0x41303 must NOT fire toasts; got %d calls: %+v",
+			len(calls), calls)
+	}
+}
+
 // TestAggregateTrayState_ToastUsesLastResult asserts a row whose
 // LastResult != 0 (Task Scheduler's most-recent exit code) fires a
 // toast even if its state field is currently "Running" — the
