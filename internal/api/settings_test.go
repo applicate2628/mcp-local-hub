@@ -231,6 +231,76 @@ func TestSettings_Concurrent_ReadWriteAtomicity(t *testing.T) {
 	}
 }
 
+func TestSettings_MigratesLegacyKeys(t *testing.T) {
+	// Codex PR #20 r4 P2: pre-A4 gui-preferences.yaml files used
+	// unqualified keys (theme, shell, default-home). After upgrade the
+	// resolver expects canonical keys (appearance.theme etc.). Migration
+	// happens transparently on first read and is persisted on next write.
+	a := &API{}
+	path := tmpSettings(t)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	seeded := []byte("theme: dark\nshell: bash\ndefault-home: /home/old\n")
+	if err := os.WriteFile(path, seeded, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// SettingsListIn should expose the legacy values under canonical keys.
+	all, err := a.SettingsListIn(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if all["appearance.theme"] != "dark" {
+		t.Errorf("expected appearance.theme=dark from legacy theme key, got %q", all["appearance.theme"])
+	}
+	if all["appearance.shell"] != "bash" {
+		t.Errorf("expected appearance.shell=bash from legacy shell key, got %q", all["appearance.shell"])
+	}
+	if all["appearance.default_home"] != "/home/old" {
+		t.Errorf("expected appearance.default_home=/home/old from legacy default-home key, got %q", all["appearance.default_home"])
+	}
+	// Trigger a write of an unrelated key — should persist migration.
+	if err := a.SettingsSetIn(path, "appearance.density", "compact"); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := readRawSettingsMap(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Legacy keys must be GONE from disk after the migration write.
+	for _, legacy := range []string{"theme", "shell", "default-home"} {
+		if _, has := raw[legacy]; has {
+			t.Errorf("legacy key %q must be removed from disk after migration", legacy)
+		}
+	}
+	// Canonical keys carry the migrated values.
+	if raw["appearance.theme"] != "dark" {
+		t.Errorf("canonical appearance.theme not persisted: %q", raw["appearance.theme"])
+	}
+}
+
+func TestSettings_MigratesLegacyKeys_CanonicalWins(t *testing.T) {
+	// If both legacy AND canonical key are present, canonical wins
+	// (legacy is dropped). This is defensive — shouldn't happen in
+	// practice but the migration must be deterministic.
+	a := &API{}
+	path := tmpSettings(t)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	seeded := []byte("theme: light\nappearance.theme: dark\n")
+	if err := os.WriteFile(path, seeded, 0600); err != nil {
+		t.Fatal(err)
+	}
+	all, err := a.SettingsListIn(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if all["appearance.theme"] != "dark" {
+		t.Errorf("expected dark (canonical wins over legacy), got %q", all["appearance.theme"])
+	}
+}
+
 // contains is a tiny substring helper (avoids importing strings just here).
 func contains(haystack, needle string) bool {
 	return len(haystack) >= len(needle) && (haystack == needle ||

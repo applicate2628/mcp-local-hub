@@ -45,6 +45,20 @@ describe("useSettingsSnapshot", () => {
     expect((result.current.error as Error).message).toBe("network");
   });
 
+  it("Codex PR #20 r4 P2: preserves stale data when refresh fails after initial success", async () => {
+    // First fetch succeeds — status:"ok" with data.
+    vi.spyOn(api, "getSettings").mockResolvedValue(goodEnvelope);
+    const { result } = renderHook(() => useSettingsSnapshot());
+    await waitFor(() => expect(result.current.status).toBe("ok"));
+    expect(result.current.data).toEqual(goodEnvelope);
+    // Second fetch (manual refresh) throws — must NOT clear data.
+    vi.spyOn(api, "getSettings").mockRejectedValue(new Error("transient"));
+    await act(async () => { await result.current.refresh(); });
+    // State stays ok with the previous good data.
+    expect(result.current.status).toBe("ok");
+    expect(result.current.data).toEqual(goodEnvelope);
+  });
+
   it("retains discriminated-union shape (action entries have no value/default)", async () => {
     vi.spyOn(api, "getSettings").mockResolvedValue(goodEnvelope);
     const { result } = renderHook(() => useSettingsSnapshot());

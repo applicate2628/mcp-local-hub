@@ -124,6 +124,36 @@ func (a *API) SettingsSetIn(path, key, value string) error {
 	return os.WriteFile(path, data, 0600)
 }
 
+// legacyKeyMap maps pre-A4 unqualified keys to their canonical
+// (section-prefixed) registry equivalents. Documented historical keys
+// from the previous CLI long help: theme, shell, default-home.
+//
+// Codex PR #20 r4 P2: existing gui-preferences.yaml files with these
+// unqualified keys would otherwise be silently ignored after upgrade
+// (resolver looks only for appearance.theme etc.); first read promotes
+// them to canonical keys, and the next SettingsSetIn rewrite persists
+// the migration to disk.
+var legacyKeyMap = map[string]string{
+	"theme":        "appearance.theme",
+	"shell":        "appearance.shell",
+	"default-home": "appearance.default_home",
+}
+
+// migrateLegacyKeys promotes pre-A4 unqualified keys to their canonical
+// equivalents in-place. If both the legacy and canonical key are present
+// the canonical value wins (legacy is dropped). Operates on the map
+// returned by yaml.Unmarshal before any caller sees it.
+func migrateLegacyKeys(raw map[string]string) {
+	for legacy, canonical := range legacyKeyMap {
+		if v, hasLegacy := raw[legacy]; hasLegacy {
+			if _, hasCanonical := raw[canonical]; !hasCanonical {
+				raw[canonical] = v
+			}
+			delete(raw, legacy)
+		}
+	}
+}
+
 // readRawSettingsMap reads the file as a flat map[string]string. Unknown
 // keys (e.g., a typo or a future-deferred entry written by CLI ahead of
 // A4-b's GUI editor) are preserved verbatim. Returns an empty map if
@@ -140,5 +170,6 @@ func readRawSettingsMap(path string) (map[string]string, error) {
 	if err := yaml.Unmarshal(data, &out); err != nil {
 		return nil, err
 	}
+	migrateLegacyKeys(out)
 	return out, nil
 }

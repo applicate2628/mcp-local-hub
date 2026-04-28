@@ -20,7 +20,17 @@ export function useSettingsSnapshot(): SettingsSnapshot {
       setState({ status: "ok", data, error: null });
     } catch (e) {
       if (myGen !== generation.current) return;
-      setState({ status: "error", data: null, error: e as Error });
+      // Codex PR #20 r4 P2: preserve last-good data on refresh failure.
+      // Without this, a transient GET failure after a section save would
+      // unmount section-local state via SettingsScreen's full-page error
+      // fallback, dropping the user's retry context for partial failures.
+      // Initial-load failures (no prior ok) still surface as the error state.
+      setState((prev) => {
+        if (prev.status === "ok") {
+          return prev; // keep stale data; refresh failure is silent
+        }
+        return { status: "error", data: null, error: e as Error };
+      });
     }
   }, []);
 
