@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -118,5 +120,66 @@ func TestWriteLaunchFailure_CreatesParentDir(t *testing.T) {
 
 	if _, err := os.Stat(logPath); err != nil {
 		t.Fatalf("expected log file to exist after writeLaunchFailure: %v", err)
+	}
+}
+
+// TestDaemonCmd_RunFailure_AppendsToLog is the E2E for DM-3a: it
+// invokes the cobra `mcphub daemon` Cmd against an unknown server name
+// so the embedded manifest open fails. The defer-wrap on RunE MUST
+// capture the returned error and append a timestamped diagnostic line
+// to the per-daemon log path BEFORE the error reaches the caller.
+//
+// The unit tests above (TestWriteLaunchFailure_*) verify the helper in
+// isolation. This test closes the gap by exercising the full cobra Cmd
+// → defer-wrap → log-file path; without it nothing proves the wrap
+// actually fires when RunE returns a real error. If the defer block in
+// daemon.go is removed or its writeLaunchFailure call is dropped, this
+// test fails — that's the regression guard.
+func TestDaemonCmd_RunFailure_AppendsToLog(t *testing.T) {
+	// Redirect logBaseDir() to a tempdir on every supported OS:
+	//   - Windows: %LOCALAPPDATA% wins
+	//   - Linux/macOS: $XDG_STATE_HOME wins (LOCALAPPDATA is empty there
+	//     in normal use, but t.Setenv just makes both branches resolve
+	//     to the same tmpHome — both env vars are restored on cleanup)
+	tmpHome := t.TempDir()
+	t.Setenv("LOCALAPPDATA", tmpHome)
+	t.Setenv("XDG_STATE_HOME", tmpHome)
+
+	cmd := newDaemonCmdReal()
+	var stderr bytes.Buffer
+	cmd.SetErr(&stderr)
+	cmd.SetOut(io.Discard)
+	cmd.SetArgs([]string{"--server", "no-such-server", "--daemon", "no-such-daemon"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected daemon command to fail with unknown server, got nil")
+	}
+
+	// logBaseDir() resolves to <LOCALAPPDATA>/mcp-local-hub/logs on
+	// Windows and <XDG_STATE_HOME>/mcp-local-hub/logs on POSIX. Both
+	// env vars point at tmpHome above, so the path is the same.
+	logPath := filepath.Join(tmpHome, "mcp-local-hub", "logs", "no-such-server-no-such-daemon.log")
+	data, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		t.Fatalf("expected log file at %s, got read error: %v", logPath, readErr)
+	}
+	content := string(data)
+
+	// Defer-wrap MUST have written a timestamped failure line. These
+	// four substrings are the wrap's distinguishing features — if any
+	// is missing, the wrap is no longer firing or has been changed in
+	// a way that breaks the diagnostic format users grep for.
+	for _, want := range []string{
+		"[mcphub-launch-failure",
+		"server=no-such-server",
+		"daemon=no-such-daemon",
+		// The original manifest-open error mentions the unknown server
+		// name; this confirms the underlying error reached the log
+		// rather than being replaced with a generic message.
+		"no-such-server",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("log missing %q; got:\n%s", want, content)
+		}
 	}
 }
