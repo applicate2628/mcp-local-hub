@@ -2,12 +2,40 @@ package cli
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/tray"
 )
+
+// fakeToaster captures toast calls for assertion. Thread-safe
+// because the aggregator fires the toast in a separate goroutine.
+type fakeToaster struct {
+	mu    sync.Mutex
+	calls []toastCall
+}
+
+type toastCall struct {
+	title string
+	body  string
+}
+
+func (f *fakeToaster) show(title, body string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, toastCall{title: title, body: body})
+	return nil
+}
+
+func (f *fakeToaster) snapshot() []toastCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]toastCall, len(f.calls))
+	copy(out, f.calls)
+	return out
+}
 
 // TestAggregateTrayState_ForwardsOnChange asserts the aggregator
 // forwards a TrayState exactly once when the aggregate transitions
@@ -98,5 +126,92 @@ func TestAggregateTrayState_ExitsOnSnapshotChannelClose(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("aggregateTrayState did not return within 2s of snapshot channel close")
+	}
+}
+
+// TestAggregateTrayState_ToastFiresOnFailureOnset asserts the
+// aggregator fires exactly one toast when a daemon transitions
+// into a failed state, and no further toasts on subsequent
+// snapshots that show the daemon still failed (onset, not
+// repeated alerts). Critical UX contract: spam protection
+// without losing the first signal.
+func TestAggregateTrayState_ToastFiresOnFailureOnset(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	snaps := make(chan []api.DaemonStatus, 8)
+	out := make(chan tray.TrayState, 8)
+	toaster := &fakeToaster{}
+	go aggregateTrayStateWithToast(ctx, snaps, out, toaster.show)
+
+	// Snapshot 1: all healthy.
+	snaps <- []api.DaemonStatus{{Server: "memory", State: "Running"}}
+	// Snapshot 2: memory failed (state contains "fail").
+	snaps <- []api.DaemonStatus{{Server: "memory", State: "FailedToLaunch"}}
+	// Snapshot 3: memory still failed — should NOT fire another toast.
+	snaps <- []api.DaemonStatus{{Server: "memory", State: "FailedToLaunch"}}
+	// Snapshot 4: memory recovered.
+	snaps <- []api.DaemonStatus{{Server: "memory", State: "Running"}}
+	// Snapshot 5: memory failed again — fresh onset, should fire.
+	snaps <- []api.DaemonStatus{{Server: "memory", State: "FailedToLaunch"}}
+
+	// Wait for goroutines to drain. The toast goroutines fire async,
+	// so poll up to 2s for the expected count.
+	deadline := time.After(2 * time.Second)
+	for {
+		if len(toaster.snapshot()) >= 2 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("expected 2 toast calls within 2s, got %d", len(toaster.snapshot()))
+		default:
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	calls := toaster.snapshot()
+	if len(calls) != 2 {
+		t.Errorf("expected exactly 2 onset toasts, got %d: %+v", len(calls), calls)
+	}
+	for _, c := range calls {
+		if c.title != "mcp-local-hub: daemon failed" {
+			t.Errorf("title = %q, want %q", c.title, "mcp-local-hub: daemon failed")
+		}
+		if c.body == "" {
+			t.Errorf("body should be non-empty (server/daemon + state details)")
+		}
+	}
+}
+
+// TestAggregateTrayState_ToastUsesLastResult asserts a row whose
+// LastResult != 0 (Task Scheduler's most-recent exit code) fires a
+// toast even if its state field is currently "Running" — the
+// failure code is the canonical "something went wrong" signal and
+// must reach the user.
+func TestAggregateTrayState_ToastUsesLastResult(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	snaps := make(chan []api.DaemonStatus, 8)
+	out := make(chan tray.TrayState, 8)
+	toaster := &fakeToaster{}
+	go aggregateTrayStateWithToast(ctx, snaps, out, toaster.show)
+
+	// Snapshot 1: clean.
+	snaps <- []api.DaemonStatus{{Server: "memory", State: "Running"}}
+	// Snapshot 2: state still Running but LastResult flipped to 1.
+	snaps <- []api.DaemonStatus{{Server: "memory", State: "Running", LastResult: 1}}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		if len(toaster.snapshot()) >= 1 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("expected 1 toast within 2s, got %d", len(toaster.snapshot()))
+		default:
+			time.Sleep(20 * time.Millisecond)
+		}
 	}
 }
