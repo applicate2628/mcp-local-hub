@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"strings"
 
 	"mcp-local-hub/internal/api"
 
@@ -50,13 +49,12 @@ func newSettingsListCmd() *cobra.Command {
 					fmt.Fprintf(cmd.OutOrStdout(), "%s:\n", def.Section)
 					currentSection = def.Section
 				}
-				keyShort := strings.TrimPrefix(def.Key, def.Section+".")
 				if def.Type == api.TypeAction {
 					marker := ""
 					if def.Deferred {
 						marker = "  [deferred — coming in A4-b]"
 					}
-					fmt.Fprintf(cmd.OutOrStdout(), "  %s = <action>%s\n", keyShort, marker)
+					fmt.Fprintf(cmd.OutOrStdout(), "  %s = <action>%s\n", def.Key, marker)
 					continue
 				}
 				v, has := values[def.Key]
@@ -71,9 +69,9 @@ func newSettingsListCmd() *cobra.Command {
 					marker = "  [restart required]"
 				}
 				if v == "" {
-					fmt.Fprintf(cmd.OutOrStdout(), "  %s = <empty>  (default: %q)%s\n", keyShort, def.Default, marker)
+					fmt.Fprintf(cmd.OutOrStdout(), "  %s = <empty>  (default: %q)%s\n", def.Key, def.Default, marker)
 				} else {
-					fmt.Fprintf(cmd.OutOrStdout(), "  %s = %s  (default: %s)%s\n", keyShort, v, def.Default, marker)
+					fmt.Fprintf(cmd.OutOrStdout(), "  %s = %s  (default: %s)%s\n", def.Key, v, def.Default, marker)
 				}
 			}
 			return nil

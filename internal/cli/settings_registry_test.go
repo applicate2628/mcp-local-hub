@@ -57,6 +57,34 @@ func TestCLI_List_AnnotatesDeferred(t *testing.T) {
 	}
 }
 
+func TestCLI_List_PrintsCanonicalKeys_NotStripped(t *testing.T) {
+	// Codex PR #20 r5 P2: list output must print canonical keys
+	// (appearance.theme), not section-stripped (theme), so users can
+	// copy directly into `mcp settings get/set`.
+	withTempHome(t)
+	out, _, err := runCLI(t, "list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "appearance.theme = ") {
+		t.Errorf("expected canonical 'appearance.theme = ' in list output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "gui_server.port = ") {
+		t.Errorf("expected canonical 'gui_server.port = ' in list output, got:\n%s", out)
+	}
+	// The OLD (stripped) form must be absent. We use a tighter pattern
+	// to avoid matching the section header line "appearance:" which
+	// contains "appearance".
+	// Old format had a 2-space indent + bare local name + " = "; e.g. "  theme = ".
+	// Canonical now: "  appearance.theme = ". So a line starting with
+	// "  theme = " would indicate regression.
+	for _, badPrefix := range []string{"  theme =", "  density =", "  shell =", "  port =", "  keep_n ="} {
+		if strings.Contains(out, badPrefix) {
+			t.Errorf("unexpected stripped form %q in list output (Codex r5 P2 regression)", badPrefix)
+		}
+	}
+}
+
 func TestCLI_Get_UnknownKey_Exit1(t *testing.T) {
 	withTempHome(t)
 	_, _, err := runCLI(t, "get", "no.such.key")
