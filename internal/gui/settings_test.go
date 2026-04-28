@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -17,6 +19,7 @@ type fakeSettings struct {
 	setErr     error
 	openErr    error
 	openCalled string
+	path       string // configurable for first-run path tests; defaults to /tmp/test/gui-preferences.yaml
 }
 
 func (f *fakeSettings) List() (map[string]string, error) {
@@ -48,7 +51,12 @@ func (f *fakeSettings) Set(key, value string) error {
 	return nil
 }
 
-func (f *fakeSettings) SettingsPath() string { return "/tmp/test/gui-preferences.yaml" }
+func (f *fakeSettings) SettingsPath() string {
+	if f.path != "" {
+		return f.path
+	}
+	return "/tmp/test/gui-preferences.yaml"
+}
 
 func (f *fakeSettings) OpenPath(path string) error {
 	f.openCalled = path
@@ -292,6 +300,30 @@ func TestSettings_AllRoutes_RejectCrossOrigin(t *testing.T) {
 		if rr.Code != 403 {
 			t.Errorf("%s %s: expected 403 cross-origin, got %d", c.method, c.path, rr.Code)
 		}
+	}
+}
+
+func TestSettings_POST_OpenAppDataFolder_CreatesDirIfMissing(t *testing.T) {
+	// Codex PR #20 r3 P2: first-run path where the app-data directory
+	// doesn't exist yet must succeed (not 500). MkdirAll runs before
+	// OpenPath so explorer.exe / xdg-open never sees a non-existent path.
+	s, fake := newTestServer(t)
+	realDir := t.TempDir()
+	fake.path = filepath.Join(realDir, "subdir", "gui-preferences.yaml")
+	// Sanity: subdir must not exist yet.
+	if _, err := os.Stat(filepath.Join(realDir, "subdir")); !os.IsNotExist(err) {
+		t.Fatal("test setup: subdir should not exist yet")
+	}
+	req := httptest.NewRequest("POST", "/api/settings/advanced.open_app_data_folder", nil)
+	req.Header = sameOriginHeaders()
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+	if rr.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	// MkdirAll must have created the directory.
+	if _, err := os.Stat(filepath.Join(realDir, "subdir")); err != nil {
+		t.Errorf("expected MkdirAll to have created subdir, got %v", err)
 	}
 }
 

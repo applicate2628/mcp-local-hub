@@ -43,6 +43,13 @@ func (a *API) SettingsList() (map[string]string, error) {
 
 // SettingsListIn is the tempdir-capable form.
 func (a *API) SettingsListIn(path string) (map[string]string, error) {
+	// Codex PR #20 r3 P1: lock reads with the same mutex that serializes
+	// writes. Without this, SettingsSetIn's truncate-then-write window
+	// lets a concurrent reader observe partial YAML, causing yaml.Unmarshal
+	// to fail and returning a 500 from /api/settings. Each read is
+	// microseconds; mcphub-GUI is single-user low-throughput.
+	settingsMu.Lock()
+	defer settingsMu.Unlock()
 	raw, err := readRawSettingsMap(path)
 	if err != nil {
 		return nil, err

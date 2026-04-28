@@ -4,7 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func tmpSettings(t *testing.T) string {
@@ -177,6 +179,55 @@ func TestSettings_Concurrent_SameKey(t *testing.T) {
 	}
 	if !ok {
 		t.Errorf("final value %q not in %v (torn write?)", got, values)
+	}
+}
+
+func TestSettings_Concurrent_ReadWriteAtomicity(t *testing.T) {
+	// Codex PR #20 r3 P1: SettingsListIn must not observe partial YAML
+	// during a concurrent SettingsSetIn write. Without the read lock,
+	// os.WriteFile's truncate+write window allows yaml.Unmarshal to fail
+	// on the half-written file. With settingsMu wrapping reads, the reader
+	// either sees the old map or the new map, never partial.
+	a := &API{}
+	path := tmpSettings(t)
+	if err := a.SettingsSetIn(path, "appearance.theme", "system"); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	var listErrs int64
+	var setCount int64
+	deadline := time.Now().Add(2 * time.Second)
+	// 4 readers continuously list while 4 writers continuously toggle the theme.
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for time.Now().Before(deadline) {
+				if _, err := a.SettingsListIn(path); err != nil {
+					atomic.AddInt64(&listErrs, 1)
+				}
+			}
+		}()
+	}
+	values := []string{"light", "dark", "system"}
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			n := 0
+			for time.Now().Before(deadline) {
+				_ = a.SettingsSetIn(path, "appearance.theme", values[n%3])
+				n++
+				atomic.AddInt64(&setCount, 1)
+			}
+		}(i)
+	}
+	wg.Wait()
+	if listErrs != 0 {
+		t.Errorf("SettingsListIn observed %d unmarshal failures across %d concurrent writes", listErrs, atomic.LoadInt64(&setCount))
+	}
+	if atomic.LoadInt64(&setCount) == 0 {
+		t.Fatal("test did not exercise concurrent writes")
 	}
 }
 

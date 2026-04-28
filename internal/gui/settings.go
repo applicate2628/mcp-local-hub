@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -207,6 +208,17 @@ func (s *Server) settingsPost(w http.ResponseWriter, r *http.Request, def *api.S
 	switch def.Key {
 	case "advanced.open_app_data_folder":
 		dir := filepath.Dir(s.settings.SettingsPath())
+		// Codex PR #20 r3 P2: on first-run setups where no settings/secrets
+		// file has been written yet, the app-data directory may not exist.
+		// explorer.exe / xdg-open / open fail on non-existent paths, so
+		// ensure the directory exists before invoking the file manager.
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{
+				"error":  "mkdir_failed",
+				"reason": err.Error(),
+			})
+			return
+		}
 		if err := s.settings.OpenPath(dir); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{
 				"error":  "spawn_failed",
