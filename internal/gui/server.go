@@ -294,6 +294,7 @@ type Server struct {
 	extractor        extractor
 	events           *Broadcaster
 	secrets          secretsAPI
+	settings         settingsAPI
 }
 
 // NewServer constructs the Server. It registers the ping handler
@@ -318,6 +319,7 @@ func NewServer(cfg Config) *Server {
 	s.extractor = realExtractor{}
 	s.events = NewBroadcaster()
 	s.secrets = realSecretsAPI{}
+	s.settings = realSettingsAPI{}
 	registerPingRoutes(s)
 	registerAssetRoutes(s)
 	registerScanRoutes(s)
@@ -332,6 +334,7 @@ func NewServer(cfg Config) *Server {
 	registerLogsRoutes(s)
 	registerExtractManifestRoutes(s)
 	registerSecretsRoutes(s)
+	registerSettingsRoutes(s)
 	return s
 }
 
