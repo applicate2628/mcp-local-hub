@@ -9,6 +9,11 @@ import (
 	"mcp-local-hub/internal/config"
 )
 
+// selfPIDFn returns the current process PID. Test seam for DM-2: tests
+// can override it to control which PID counts as "self" without
+// spawning a real subprocess. Production = os.Getpid.
+var selfPIDFn = os.Getpid
+
 // lookupProcess queries netstat + wmic for the process bound to 127.0.0.1:port.
 // Populated by internal/api/processes.go's init() on Windows (Task 2); stays
 // nil elsewhere so cross-platform callers fall through the (ok==false) branch.
@@ -149,33 +154,59 @@ func enrichStatusWithRegistry(rows []DaemonStatus, manifestDir, registryPath str
 	}
 
 	// Second pass: fill PID/RAM/Uptime + derive state.
+	selfPID := selfPIDFn()
 	for i := range rows {
-		// Workspace-scoped row whose registry entry couldn't be resolved
-		// has Port=0. deriveState would then see alive=false and transform
-		// the raw scheduler "Running" into "Starting" — falsely reporting
-		// a healthy proxy as starting whenever the registry is missing or
-		// unreadable OR the task is orphaned. Keep the raw scheduler state
-		// in that case so the operator still sees the truth.
-		if rows[i].Port == 0 && IsLazyProxyTaskName(rows[i].TaskName) {
+		// DM-1 (extends the lazy-proxy escape hatch): any row with Port=0
+		// means we don't know which port to probe. Two real causes:
+		//   1) Workspace-scoped lazy-proxy whose registry entry couldn't
+		//      be resolved (corrupt / stale registry, orphan task).
+		//   2) Global daemon whose manifest isn't in this binary's embed
+		//      (dev binary running alongside an installed mcphub.exe
+		//      whose servers/ has more entries — the dev `go run`
+		//      binary's status query then finds task names it can't
+		//      resolve to ports).
+		// Without this guard, deriveState sees alive=false and transforms
+		// the raw scheduler "Running" into "Starting" forever — the
+		// operator sees a permanently "Starting" daemon that is actually
+		// healthy. The lazy-proxy reasoning generalizes: if we don't know
+		// the port we can't probe alive, so the raw scheduler state is
+		// the most honest signal we have. The IsLazyProxyTaskName check
+		// is now redundant but harmless — keep the comment-anchor for
+		// the original lazy-proxy fix while the broader Port==0 guard
+		// catches the new orphan / manifest-asymmetry cases.
+		if rows[i].Port == 0 {
 			continue
 		}
 		alive := false
 		if batch != nil && rows[i].Port != 0 {
 			if info, ok := batch[rows[i].Port]; ok {
-				rows[i].PID = info.PID
-				rows[i].RAMBytes = info.RAMBytes
-				rows[i].UptimeSec = info.UptimeSec
-				alive = true
+				// DM-2: skip self-PID. If the running mcphub process is
+				// the PID listening on rows[i].Port, that means the
+				// GUI itself bound that port (e.g., wolfram manifest
+				// declares 9125 and mcphub-GUI's --port also defaults
+				// to 9125). The daemon is NOT actually alive — counting
+				// the GUI as the daemon would falsely report Running
+				// with the GUI's PID/RAM/uptime. Treat as alive=false
+				// so deriveState produces a truthful state for the
+				// daemon row instead of a misleading false positive.
+				if info.PID != selfPID {
+					rows[i].PID = info.PID
+					rows[i].RAMBytes = info.RAMBytes
+					rows[i].UptimeSec = info.UptimeSec
+					alive = true
+				}
 			}
 		} else if lookupProcess != nil && rows[i].Port != 0 {
 			// Fallback to per-row lookup when the batch form isn't
 			// populated (shouldn't happen on Windows; covers unit-test
 			// harnesses that set lookupProcess but not the batch).
 			if pid, ram, uptime, ok := lookupProcess(rows[i].Port); ok {
-				rows[i].PID = pid
-				rows[i].RAMBytes = ram
-				rows[i].UptimeSec = uptime
-				alive = true
+				if pid != selfPID {
+					rows[i].PID = pid
+					rows[i].RAMBytes = ram
+					rows[i].UptimeSec = uptime
+					alive = true
+				}
 			}
 		}
 		rows[i].State = deriveState(rows[i].State, alive, rows[i].NextRun)

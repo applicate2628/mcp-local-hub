@@ -55,7 +55,7 @@ The scheduler task passes --workspace, --language, and --port; the proxy
 reads the registry to confirm the tuple is registered and the manifest to
 construct the backend lifecycle. Human invocation is not supported.`,
 		Hidden: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) (err error) {
 			if portFlag <= 0 {
 				return fmt.Errorf("--port is required and must be > 0")
 			}
@@ -70,6 +70,26 @@ construct the backend lifecycle. Human invocation is not supported.`,
 				return fmt.Errorf("canonical workspace path: %w", err)
 			}
 			wsKey := api.WorkspaceKey(canonical)
+			// DM-3 mirror: capture launch failure into the lazy-proxy log
+			// file. Same reasoning as newDaemonCmdReal — Task Scheduler
+			// records last_result=1 but loses mcphub's stderr, so without
+			// this wrap registry/manifest/bind errors leave no diagnostic
+			// trail. logPath here matches what the proxy itself writes:
+			// `lsp-<wsKey>-<language>.log`. Computing it requires
+			// canonicalization (above) so the wrap is installed only after
+			// wsKey is known; the workspace+language guard above runs
+			// before any operation that can fail in a way the user would
+			// need help diagnosing.
+			launchLogPath := filepath.Join(logBaseDir(),
+				fmt.Sprintf("lsp-%s-%s.log", wsKey, languageFlag))
+			defer func() {
+				if err != nil {
+					writeLaunchFailure(launchLogPath,
+						"mcp-language-server",
+						"lsp-"+wsKey+"-"+languageFlag,
+						err)
+				}
+			}()
 
 			regPath := registryOverride
 			if regPath == "" {
@@ -146,8 +166,13 @@ construct the backend lifecycle. Human invocation is not supported.`,
 				return fmt.Errorf("manifest %s lacks language %q", serverFlag, languageFlag)
 			}
 
-			logPath := filepath.Join(logBaseDir(),
-				fmt.Sprintf("lsp-%s-%s.log", wsKey, languageFlag))
+			// Reuse launchLogPath (computed above for the launch-failure
+			// defer) so the backend's child stdout/stderr and any
+			// pre-Serve mcphub-side error diagnostic land in the same
+			// file. Two log files for one daemon would split the log
+			// dropdown in the GUI and confuse "where did the failure
+			// go?" debugging.
+			logPath := launchLogPath
 			lc := buildWorkspaceBackendLifecycle(spec, canonical, languageFlag, logPath)
 			if lc == nil {
 				return fmt.Errorf("unsupported backend %q for language %q", spec.Backend, languageFlag)

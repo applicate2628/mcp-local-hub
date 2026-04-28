@@ -41,10 +41,26 @@ The scheduler task's XML is created by 'mcphub install'; you should never
 need to call this manually.
 
 See also: install, logs, restart, status.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) (err error) {
 			if server == "" || daemonName == "" {
 				return fmt.Errorf("--server and --daemon are required")
 			}
+			// DM-3: capture launch failure into the daemon log file. Without
+			// this wrap, pre-child errors (manifest open/parse, env resolve,
+			// host construction, port bind, etc.) only reach mcphub's own
+			// stderr — which Task Scheduler does NOT preserve. last_result=1
+			// with no log entry leaves the user with no way to diagnose
+			// (this happened with serena: never figured out the cause). The
+			// wrap appends a timestamped diagnostic line so the cause
+			// survives in the standard daemon log path. logPath must be
+			// computed BEFORE the manifest load so manifest-open failures
+			// also reach the log.
+			logPath := filepath.Join(logBaseDir(), server+"-"+daemonName+".log")
+			defer func() {
+				if err != nil {
+					writeLaunchFailure(logPath, server, daemonName, err)
+				}
+			}()
 			// Load the manifest from the embed.FS baked into the binary.
 			// This works regardless of where mcphub.exe is installed
 			// (canonical ~/.local/bin, dev checkout, anywhere on PATH)
@@ -78,7 +94,6 @@ See also: install, logs, restart, status.`,
 				return err
 			}
 			// Build launch spec.
-			logPath := filepath.Join(logBaseDir(), server+"-"+daemonName+".log")
 			childArgs := append([]string{}, m.BaseArgs...)
 			childArgs = append(childArgs, spec.ExtraArgs...)
 			// Resolve `command: mcphub` to the running binary's absolute path.
@@ -232,4 +247,23 @@ func logBaseDir() string {
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".local", "state", "mcp-local-hub", "logs")
+}
+
+// writeLaunchFailure appends a timestamped failure diagnostic to the
+// daemon's log file so Task Scheduler's last_result=1 isn't a black hole.
+// Failures to open or write the diagnostic are silently dropped — we
+// don't want this wrapper to compound the original launch error or to
+// fail the deferred path with a panic. The line format is grep-able:
+// `[mcphub-launch-failure <RFC3339-UTC> server=<s> daemon=<d>] <err>`.
+func writeLaunchFailure(logPath, server, daemonName string, launchErr error) {
+	if mkErr := os.MkdirAll(filepath.Dir(logPath), 0700); mkErr != nil {
+		return
+	}
+	f, openErr := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if openErr != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "\n[mcphub-launch-failure %s server=%s daemon=%s] %v\n",
+		time.Now().UTC().Format(time.RFC3339), server, daemonName, launchErr)
 }

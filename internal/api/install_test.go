@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/config"
 )
@@ -433,5 +434,98 @@ weekly_refresh: false
 `, name, port)
 	if err := os.WriteFile(filepath.Join(dir, "manifest.yaml"), []byte(body), 0644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// pickFreeLocalPort returns a 127.0.0.1 port that net.Listen succeeded
+// on (and immediately closed). The kernel is unlikely to reuse the
+// exact port within a few microseconds for a different listener, so
+// the freshly-closed port is a reasonable "free" probe target. Tests
+// that need the port held open should re-Listen before probing.
+func pickFreeLocalPort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+	_ = l.Close()
+	return port
+}
+
+// TestWaitForPortFree_FreePortReturnsImmediately asserts the DM-3
+// helper returns nil on the first probe when nothing is listening —
+// no spurious sleep delay in the common Restart path.
+func TestWaitForPortFree_FreePortReturnsImmediately(t *testing.T) {
+	port := pickFreeLocalPort(t)
+	start := time.Now()
+	if err := waitForPortFree(port, 3*time.Second); err != nil {
+		t.Fatalf("expected nil on free port, got: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Errorf("free-port path was slow: elapsed=%v (must succeed on first probe)", elapsed)
+	}
+}
+
+// TestWaitForPortFree_HeldPortTimesOut asserts that when the port
+// stays bound, waitForPortFree returns an error after roughly the
+// configured timeout. A daemon that fails to release would otherwise
+// trigger a new daemon's bind to fail too — surfacing the wait error
+// to the operator is more informative than dropping straight into
+// `schtasks /Run` and letting it record last_result=1.
+func TestWaitForPortFree_HeldPortTimesOut(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer l.Close()
+	port := l.Addr().(*net.TCPAddr).Port
+
+	start := time.Now()
+	err = waitForPortFree(port, 300*time.Millisecond)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected timeout error on held port, got nil")
+	}
+	if !strings.Contains(err.Error(), "still in use") {
+		t.Errorf("error must mention 'still in use'; got: %v", err)
+	}
+	// Lower bound: the loop must wait at least one full timeout window.
+	if elapsed < 250*time.Millisecond {
+		t.Errorf("timed out too soon: elapsed=%v, want >=250ms", elapsed)
+	}
+	// Upper bound: a generous tolerance for slow CI; primary assertion
+	// is that we don't block forever.
+	if elapsed > 3*time.Second {
+		t.Errorf("timed out too late: elapsed=%v, want <3s", elapsed)
+	}
+}
+
+// TestWaitForPortFree_PortReleasedDuringWait simulates the realistic
+// TIME_WAIT race: the helper starts probing while the port is still
+// held, the listener releases mid-wait, and the helper succeeds before
+// the timeout. This is the entire reason DM-3 added the wait — the
+// new daemon's bind would otherwise race the kernel's socket cleanup
+// and lose.
+func TestWaitForPortFree_PortReleasedDuringWait(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+
+	// Release the port asynchronously after a short hold.
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		_ = l.Close()
+	}()
+
+	start := time.Now()
+	if err := waitForPortFree(port, 3*time.Second); err != nil {
+		t.Fatalf("expected port to free during wait, got: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed < 100*time.Millisecond {
+		t.Errorf("returned suspiciously fast: elapsed=%v (port was held %v)",
+			elapsed, 150*time.Millisecond)
 	}
 }
