@@ -68,13 +68,24 @@ test("Deep-link query-string scrolls Backups into view (Codex r1 P1.1)", async (
 });
 
 test("Sticky inner-nav active state changes on scroll", async ({ page, hub }) => {
+  await page.setViewportSize({ width: 1024, height: 600 }); // force scrolling — sections can't all fit on screen
   await page.goto(hub.url + "#/settings");
-  await page.evaluate(() => {
-    document.querySelector('section[data-section="gui_server"]')?.scrollIntoView({ block: "start" });
-  });
+  // Wait for the IntersectionObserver to fire on load and mark "appearance" active.
   await page.waitForFunction(() => {
-    const a = document.querySelector('.settings-section-nav a[href="#/settings?section=gui_server"]');
+    const a = document.querySelector('.settings-section-nav a[href="#/settings?section=appearance"]');
     return a?.classList.contains("active");
+  }, null, { timeout: 5000 });
+  // Scroll the <main> scroll container (not window) to the bottom so later sections
+  // enter the IO's active band. The layout is grid with <main overflow:auto>, so
+  // scrolling the window has no effect — the overflow container is <main>.
+  await page.evaluate(() => {
+    const main = document.getElementById("screen-root");
+    if (main) main.scrollTo({ top: main.scrollHeight, behavior: "instant" });
+  });
+  // Wait for the active link to move away from "appearance".
+  await page.waitForFunction(() => {
+    const a = document.querySelector('.settings-section-nav a[href="#/settings?section=appearance"]');
+    return !a?.classList.contains("active");
   }, null, { timeout: 5000 });
 });
 
@@ -99,18 +110,27 @@ test("Save validation failure shows inline error + keeps key dirty", async ({ pa
 });
 
 test("Port pending-restart badge appears after Save (Codex r3 P2.1 + r4 P2.1)", async ({ page, hub }) => {
+  // The binary runs on --port 0 (ephemeral), so on initial load the persisted
+  // default (9125) != actual port → badge is CORRECTLY visible from the start.
+  // The semantic is "persisted vs running", not "draft vs running".
   await page.goto(hub.url + "#/settings?section=gui_server");
-  const actual = await page.evaluate(async () => {
-    const r = await fetch("/api/settings", { credentials: "same-origin" });
-    return (await r.json()).actual_port;
-  });
-  const newPort = actual + 100;
-  await page.locator("#gui_server\\.port").fill(String(newPort));
-  // Codex r4 P2.1: dirty draft does NOT flip badge yet.
-  await expect(page.locator('[data-test-id="port-restart-badge"]')).toBeHidden();
+  const badge = page.locator('[data-test-id="port-restart-badge"]');
+  // Badge is visible on load because persisted=9125 != actual=ephemeral.
+  await expect(badge).toBeVisible();
+  const badgeTextBefore = await badge.textContent();
+  // The badge should mention the persisted default (9125).
+  expect(badgeTextBefore).toContain("9125");
+  // Type a new port into the draft field.
+  await page.locator("#gui_server\\.port").fill("9200");
+  // Codex r4 P2.1: dirty draft does NOT flip badge — persisted is still 9125.
+  await expect(badge).toBeVisible();
+  expect(await badge.textContent()).toContain("9125");
+  // Save → persisted becomes 9200.
   await page.locator('section[data-section="gui_server"] button:has-text("Save")').click();
   await expect(page.locator(".save-banner.ok")).toBeVisible();
-  await expect(page.locator('[data-test-id="port-restart-badge"]')).toBeVisible();
+  // Badge now mentions 9200 (persisted=9200 != actual=ephemeral).
+  await expect(badge).toBeVisible();
+  expect(await badge.textContent()).toContain("9200");
 });
 
 test("Daemons read-only with 'Configured ... (effective in A4-b)' wording (Codex r1 P1.7)", async ({ page, hub }) => {
@@ -133,10 +153,17 @@ test("Backups preview marks would-prune rows", async ({ page, hub }) => {
   await seedBackups(hub.home, "claude-code", 7);
   await page.goto(hub.url + "#/settings?section=backups");
   // Set keep_n=3 → expect 4 rows (oldest) tagged eligible.
-  await page.locator("#backups-keep-n-slider").fill("3");
+  // Use evaluate + dispatchEvent("input") because Playwright's fill() on
+  // <input type="range"> does not reliably fire the onInput event in headless
+  // Chromium; the framework uses onInput to update draft state, so without
+  // the explicit event the preview API is never called with keep_n=3.
+  await page.locator("#backups-keep-n-slider").evaluate((el: HTMLInputElement) => {
+    el.value = "3";
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  });
   // Wait for debounced preview (250ms debounce + RTT margin).
   await page.waitForTimeout(500);
-  const eligible = page.locator('[data-test-id="eligible-badge"]');
+  const eligible = page.locator('[data-testid="eligible-badge"]');
   await expect(eligible.first()).toBeVisible();
   expect(await eligible.count()).toBeGreaterThanOrEqual(4);
 });
