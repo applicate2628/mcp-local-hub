@@ -25,8 +25,14 @@ export function BackupsList({ keepN }: BackupsListProps): preact.JSX.Element {
   }, []);
 
   // Debounced preview refetch on keepN change.
+  // Codex pre-push P2: clear `wouldRemove` synchronously when keepN changes
+  // AND on fetch failure. Without this, the previous keep_n's eligible-row
+  // markers linger across the new keep_n's debounce window OR alongside the
+  // "Preview unavailable" inline message — both surface stale "Would be
+  // eligible for cleanup" badges that contradict the current UI state.
   useEffect(() => {
     if (keepN < 0) return;
+    setWouldRemove(new Set()); // clear stale markers immediately on keepN change
     let cancelled = false;
     const id = setTimeout(async () => {
       try {
@@ -36,6 +42,7 @@ export function BackupsList({ keepN }: BackupsListProps): preact.JSX.Element {
         setPreviewFailed(false);
       } catch {
         if (cancelled) return;
+        setWouldRemove(new Set()); // clear stale markers on preview failure
         setPreviewFailed(true);
       }
     }, 250);

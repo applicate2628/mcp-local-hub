@@ -1,5 +1,5 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, waitFor } from "@testing-library/preact";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { render, waitFor, cleanup } from "@testing-library/preact";
 import { BackupsList } from "./BackupsList";
 import * as api from "../../lib/settings-api";
 import { BACKUPS_COPY } from "./backups-copy";
@@ -15,10 +15,12 @@ const fixture = [
 
 describe("BackupsList", () => {
   beforeEach(() => {
+    cleanup(); // happy-dom: prior renders linger in document.body without explicit cleanup
     vi.restoreAllMocks();
     vi.spyOn(api, "getBackups").mockResolvedValue(fixture);
     vi.spyOn(api, "getBackupsCleanPreview").mockResolvedValue([]);
   });
+  afterEach(() => cleanup());
 
   it("renders 4 client groups", async () => {
     const { findAllByText } = render(<BackupsList keepN={5} />);
@@ -56,5 +58,28 @@ describe("BackupsList", () => {
     expect(await findByTestId("preview-unavailable")).toBeTruthy();
     // Base list still rendered.
     await findAllByText(/claude-code/);
+  });
+
+  it("Codex pre-push P2: stale eligible badges cleared on keepN change AND on preview failure", async () => {
+    // First render: keepN=1 → /cc/2026-04-24.bak eligible.
+    const previewSpy = vi.spyOn(api, "getBackupsCleanPreview").mockResolvedValue(["/cc/2026-04-24.bak"]);
+    const { findByTestId, queryByTestId, rerender, container } = render(<BackupsList keepN={1} />);
+    expect(await findByTestId("eligible-badge")).toBeTruthy();
+    // keepN bump: stale markers must clear synchronously, before the new
+    // preview resolves. We capture the count BEFORE letting the timer run.
+    previewSpy.mockResolvedValue([]); // new keep_n returns no eligible paths
+    rerender(<BackupsList keepN={99} />);
+    // The synchronous clear inside the keepN-change effect should have
+    // emptied wouldRemove already; the badge must be gone.
+    await waitFor(() => expect(container.querySelectorAll('[data-testid="eligible-badge"]').length).toBe(0));
+    // Second transition: preview failure must also clear leftovers.
+    previewSpy.mockResolvedValue(["/cc/2026-04-25.bak"]);
+    rerender(<BackupsList keepN={1} />);
+    expect(await findByTestId("eligible-badge")).toBeTruthy(); // re-eligible after success
+    previewSpy.mockRejectedValue(new Error("backend down"));
+    rerender(<BackupsList keepN={2} />);
+    await findByTestId("preview-unavailable");
+    // No stale eligible badges should remain alongside "Preview unavailable".
+    expect(queryByTestId("eligible-badge")).toBeNull();
   });
 });
