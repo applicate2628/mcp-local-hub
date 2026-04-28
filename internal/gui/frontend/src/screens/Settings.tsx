@@ -3,16 +3,13 @@ import type { RouterState } from "../hooks/useRouter";
 import type { Section } from "../lib/settings-types";
 import { useSettingsSnapshot } from "../lib/use-settings-snapshot";
 import { SectionNav } from "../components/settings/SectionNav";
-// Tasks 9 + 10 will switch these imports to the real per-section files
-// (Codex r1 P2.1 build order). For now they come from the placeholder
-// shim so this screen compiles and renders deterministically.
-import {
-  SectionAppearance,
-  SectionGuiServer,
-  SectionDaemons,
-  SectionBackups,
-  SectionAdvanced,
-} from "../components/settings/SectionPlaceholder";
+// Task 9 wires the real per-section files for Appearance/GuiServer/Daemons.
+// SectionBackups + SectionAdvanced still come from the placeholder shim
+// until Task 10 lands and deletes that file entirely.
+import { SectionAppearance } from "../components/settings/SectionAppearance";
+import { SectionGuiServer } from "../components/settings/SectionGuiServer";
+import { SectionDaemons } from "../components/settings/SectionDaemons";
+import { SectionBackups, SectionAdvanced } from "../components/settings/SectionPlaceholder";
 
 export type SettingsScreenProps = {
   route: RouterState;
