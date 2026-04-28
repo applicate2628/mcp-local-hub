@@ -3,13 +3,11 @@ import type { RouterState } from "../hooks/useRouter";
 import type { Section } from "../lib/settings-types";
 import { useSettingsSnapshot } from "../lib/use-settings-snapshot";
 import { SectionNav } from "../components/settings/SectionNav";
-// Task 9 wires the real per-section files for Appearance/GuiServer/Daemons.
-// SectionBackups + SectionAdvanced still come from the placeholder shim
-// until Task 10 lands and deletes that file entirely.
 import { SectionAppearance } from "../components/settings/SectionAppearance";
 import { SectionGuiServer } from "../components/settings/SectionGuiServer";
 import { SectionDaemons } from "../components/settings/SectionDaemons";
-import { SectionBackups, SectionAdvanced } from "../components/settings/SectionPlaceholder";
+import { SectionBackups } from "../components/settings/SectionBackups";
+import { SectionAdvanced } from "../components/settings/SectionAdvanced";
 
 export type SettingsScreenProps = {
   route: RouterState;
