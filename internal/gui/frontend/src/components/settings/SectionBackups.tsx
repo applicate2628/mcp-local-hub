@@ -70,7 +70,9 @@ export function SectionBackups({ snapshot, onDirtyChange }: SectionBackupsProps)
       setBanner("Saved.");
       setTimeout(() => setBanner(null), 2000);
     } else {
-      setBanner("Saved on disk. Couldn't refresh the live view — click Save again when connection recovers.");
+      // Codex r12 P3: after refresh failure the section is clean and Save is
+      // disabled, so "click Save again" is unreachable. Suggest reload instead.
+      setBanner("Saved on disk. The live view didn't refresh — reload or revisit Settings to confirm.");
     }
   }
 

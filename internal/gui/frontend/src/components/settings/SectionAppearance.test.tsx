@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, fireEvent, waitFor } from "@testing-library/preact";
+import { render, fireEvent, waitFor, within } from "@testing-library/preact";
 import { SectionAppearance } from "./SectionAppearance";
 import * as api from "../../lib/settings-api";
 import type { SettingsSnapshot, SettingsEnvelope } from "../../lib/settings-types";
@@ -150,7 +150,7 @@ describe("SectionAppearance", () => {
     fireEvent.change(sel, { target: { value: "dark" } });
     await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(true));
     fireEvent.click(Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Save")!);
-    // Banner indicates partial: "Saved on disk. Couldn't refresh the live view..."
+    // Banner indicates partial: "Saved on disk. The live view didn't refresh..."
     expect(await findByText(/Saved on disk/)).toBeTruthy();
     // The select STILL shows "dark" (saved value, now via lastSent fallback).
     await waitFor(() => expect(sel.value).toBe("dark"));
@@ -182,6 +182,65 @@ describe("SectionAppearance", () => {
     await waitFor(() => expect(sel.value).toBe("dark"));
     // dirty is false (no pending edits).
     await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(false));
+  });
+
+  it("Codex r12 P2: failure error is NOT shown when user re-edited during in-flight PUT", async () => {
+    // User edits theme=dark, clicks Save. PUT for "dark" is held in flight.
+    // User re-edits theme=light during the PUT. PUT then rejects with an error.
+    // The failure references "dark" — a value the user has already abandoned.
+    // The inline error must NOT appear because the CAS check (live edit ≠ sent)
+    // tells us the failure is stale relative to the user's current edit.
+    let rejectTheme!: (e: Error) => void;
+    const themeDelay = new Promise<void>((_, rej) => { rejectTheme = rej; });
+    vi.spyOn(api, "putSetting").mockImplementation(async (key) => {
+      if (key === "appearance.theme") {
+        await themeDelay;
+      }
+    });
+    const refresh = vi.fn(async () => {});
+    const onDirty = vi.fn();
+    const { container } = render(
+      <SectionAppearance snapshot={makeSnapshot(refresh)} onDirtyChange={onDirty} />,
+    );
+    const scope = within(container as HTMLElement);
+    const sel = container.querySelector("#appearance\\.theme") as HTMLSelectElement;
+    // First edit: theme = "dark"
+    fireEvent.change(sel, { target: { value: "dark" } });
+    await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(true));
+    // Click Save (PUT now in-flight, blocked on themeDelay)
+    fireEvent.click(Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Save")!);
+    // Re-edit DURING in-flight PUT: theme = "light"
+    fireEvent.change(sel, { target: { value: "light" } });
+    // PUT for "dark" now fails — but the user is on "light"
+    rejectTheme(Object.assign(new Error("server error"), { body: { reason: "bad value" } }));
+    await waitFor(() => expect(onDirty).toHaveBeenCalledWith(true));
+    // No inline error: the failure was for "dark", but user holds "light".
+    // CAS check (live "light" ≠ sent "dark") must suppress the error.
+    // Use within(container) to scope the role query to THIS render only.
+    await waitFor(() => expect(scope.queryByRole("alert")).toBeNull());
+    // The user's "light" value is still present and dirty.
+    expect(sel.value).toBe("light");
+  });
+
+  it("Codex r12 P3: refresh-failure banner says reload, not 'click Save again'", async () => {
+    // PUT succeeds, refresh fails. Banner must not say "click Save again"
+    // because Save is now disabled (edits cleared by CAS on success).
+    vi.spyOn(api, "putSetting").mockResolvedValue(undefined);
+    const refresh = vi.fn(async () => { throw new Error("network"); });
+    const { container } = render(
+      <SectionAppearance snapshot={makeSnapshot(refresh)} onDirtyChange={() => {}} />,
+    );
+    const scope = within(container as HTMLElement);
+    fireEvent.change(
+      container.querySelector("#appearance\\.theme") as HTMLSelectElement,
+      { target: { value: "dark" } },
+    );
+    fireEvent.click(Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Save")!);
+    // Use within(container) so we don't pick up banners from other renders
+    // that may still be in the document from prior tests.
+    const banner = await scope.findByText(/Saved on disk/);
+    expect(banner.textContent).not.toMatch(/click Save again/);
+    expect(banner.textContent).toMatch(/reload|revisit/i);
   });
 
   it("Codex PR P1: edit during in-flight Save preserves newer edit (compare-and-swap)", async () => {

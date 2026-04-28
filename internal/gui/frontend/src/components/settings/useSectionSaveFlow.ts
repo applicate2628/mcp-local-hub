@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "preact/hooks";
+import { useState, useEffect, useMemo, useRef } from "preact/hooks";
 import { putSetting } from "../../lib/settings-api";
 import type { SettingsSnapshot, ConfigSettingDTO } from "../../lib/settings-types";
 
@@ -13,6 +13,11 @@ export function useSectionSaveFlow(
   onDirtyChange: (b: boolean) => void,
 ) {
   const [edits, setEdits] = useState<Record<string, string>>({});
+  // Ref mirror of edits — kept in sync by setLocal, reset, and save so that
+  // save() can read the live edit value synchronously during async PUT loops
+  // without requiring a nested functional-setState trick.
+  // Codex r12 P2: used for CAS gating of failure errors.
+  const editsRef = useRef<Record<string, string>>({});
   // Codex r9 P2: keys that have been successfully PUT but whose new value
   // has not yet been confirmed by a fresh snapshot (refresh failed). These
   // are NOT dirty (work is done) but effective() must surface them so the
@@ -71,6 +76,7 @@ export function useSectionSaveFlow(
       } else {
         next[key] = value;
       }
+      editsRef.current = next; // keep ref in sync
       return next;
     });
     setErrors((prev) => {
@@ -85,6 +91,7 @@ export function useSectionSaveFlow(
     // Codex r9 P2: clear pending edits but PRESERVE lastSent. The latter
     // represents saved-on-disk values whose refresh failed; discarding
     // them would silently revert the UI to the stale snapshot.
+    editsRef.current = {};
     setEdits({});
     setErrors({});
     setBanner(null);
@@ -117,18 +124,31 @@ export function useSectionSaveFlow(
       }
     }
 
+    // Read live edits from the ref — set synchronously by setLocal/reset,
+    // so it accurately reflects any mid-PUT re-edits the user made.
+    // Codex r12 P2: used for CAS gating of failure errors and lastSent writes.
+    const liveEdits = editsRef.current;
+
     // Memo §4.4 + Codex r7 P2: errors map clears successes BEFORE merging
     // new failures (retry-success drops stale errors).
+    // Codex r12 P2: only attach a failure error if the live edit still
+    // matches the sent value. If the user re-edited during the in-flight PUT,
+    // the failure referenced an OLD value they have moved on from; drop it.
     setErrors((prev) => {
       const next = { ...prev };
       for (const { key } of successes) delete next[key]; // clear stale errors on retry-success
-      for (const [k, v] of Object.entries(failures)) next[k] = v;
+      for (const [k, v] of Object.entries(failures)) {
+        // liveEdits[k] is the value visible in the field right now;
+        // snapshotEdits[k] is what was actually sent to the server.
+        // Match = user hasn't re-edited; mismatch = stale failure, drop it.
+        if (liveEdits[k] === snapshotEdits[k]) {
+          next[k] = v;
+        }
+      }
       return next;
     });
 
-    // Move successful keys from edits to lastSent (Codex r9 P2 architecture).
-    // CAS: only move if the local value still equals what was sent (so a
-    // dirty mid-PUT edit by the user is preserved as still-dirty).
+    // CAS-clear successful keys from edits (r6 P2).
     setEdits((prev) => {
       const next = { ...prev };
       for (const { key, sentValue } of successes) {
@@ -136,16 +156,18 @@ export function useSectionSaveFlow(
           delete next[key];
         }
       }
+      editsRef.current = next; // keep ref in sync with cleared successes
       return next;
     });
+
+    // Move successful keys to lastSent (Codex r9 P2 architecture).
+    // CAS: only record in lastSent if the user hasn't re-edited (live value
+    // still equals what was sent). If they re-edited, their newer value is
+    // in edits and effective() reads edits first — no lastSent needed.
     setLastSent((prev) => {
       const next = { ...prev };
       for (const { key, sentValue } of successes) {
-        // Only record in lastSent if the user hasn't re-edited it (CAS).
-        // We re-read from edits via the closed snapshotEdits; if the user
-        // edited it again, we conservatively don't add to lastSent — the
-        // newer edit is still in edits and effective() reads edits first.
-        if (snapshotEdits[key] === sentValue) {
+        if (liveEdits[key] === sentValue) {
           next[key] = sentValue;
         }
       }
@@ -167,9 +189,12 @@ export function useSectionSaveFlow(
         setBanner({ kind: "ok", text: "Saved." });
         setTimeout(() => setBanner(null), 2000);
       } else {
+        // Codex r12 P3: after a refresh failure the section is clean (edits
+        // cleared, lastSent holds the value). Save is disabled — telling the
+        // user to "click Save again" is misleading. Suggest reload instead.
         setBanner({
           kind: "partial",
-          text: "Saved on disk. Couldn't refresh the live view — click Save again when connection recovers.",
+          text: "Saved on disk. The live view didn't refresh — reload or revisit Settings to confirm.",
         });
       }
     } else {
