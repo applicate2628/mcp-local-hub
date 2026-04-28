@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, waitFor, cleanup } from "@testing-library/preact";
 import { SettingsScreen } from "./Settings";
 import * as api from "../lib/settings-api";
-import type { SettingsEnvelope } from "../lib/settings-types";
+import type { SettingsEnvelope, SettingsSnapshot } from "../lib/settings-types";
 import type { RouterState } from "../hooks/useRouter";
 
 const fakeEnv: SettingsEnvelope = {
@@ -34,13 +34,22 @@ const fakeEnv: SettingsEnvelope = {
   ],
 };
 
+// Codex PR #20 r11 P2: SettingsScreen now receives snapshot as a prop
+// (lifted to App level). Tests construct fake SettingsSnapshot objects
+// directly instead of relying on the hook's internal API call.
+function okSnap(data: SettingsEnvelope): SettingsSnapshot {
+  return { status: "ok", data, error: null, refresh: vi.fn(async () => {}) };
+}
+const loadingSnap: SettingsSnapshot = { status: "loading", data: null, error: null, refresh: vi.fn(async () => {}) };
+const errorSnap: SettingsSnapshot = { status: "error", data: null, error: new Error("boom"), refresh: vi.fn(async () => {}) };
+
 const stubRoute = (query: string): RouterState => ({ screen: "settings", query });
 
 describe("SettingsScreen", () => {
   beforeEach(() => {
     cleanup();
     vi.restoreAllMocks();
-    vi.spyOn(api, "getSettings").mockResolvedValue(fakeEnv);
+    // Section-level API calls (Backups list, etc.) are still needed.
     vi.spyOn(api, "getBackups").mockResolvedValue([]);
     vi.spyOn(api, "getBackupsCleanPreview").mockResolvedValue([]);
   });
@@ -49,7 +58,7 @@ describe("SettingsScreen", () => {
   it("renders all 5 section <h2>s on success", async () => {
     // Section h2s are sourced from <h2> elements (heading role level 2).
     // SectionNav links also carry the same labels but as <a>, not <h2>.
-    const { findByRole } = render(<SettingsScreen route={stubRoute("")} onDirtyChange={() => {}} />);
+    const { findByRole } = render(<SettingsScreen route={stubRoute("")} onDirtyChange={() => {}} snapshot={okSnap(fakeEnv)} />);
     expect(await findByRole("heading", { level: 2, name: "Appearance" })).toBeTruthy();
     expect(await findByRole("heading", { level: 2, name: "GUI server" })).toBeTruthy();
     expect(await findByRole("heading", { level: 2, name: "Daemons" })).toBeTruthy();
@@ -57,23 +66,27 @@ describe("SettingsScreen", () => {
     expect(await findByRole("heading", { level: 2, name: "Advanced" })).toBeTruthy();
   });
 
-  it("renders Loading then Settings header", async () => {
-    const { container, findByRole } = render(<SettingsScreen route={stubRoute("")} onDirtyChange={() => {}} />);
-    // Initial loading state may or may not render; final state must show Settings.
+  it("renders loading state (h1 Settings present)", async () => {
+    const { container, findByRole } = render(<SettingsScreen route={stubRoute("")} onDirtyChange={() => {}} snapshot={loadingSnap} />);
+    await findByRole("heading", { level: 1, name: "Settings" });
+    expect(container.querySelector("h1")?.textContent).toBe("Settings");
+  });
+
+  it("renders ok state — Settings header present", async () => {
+    const { container, findByRole } = render(<SettingsScreen route={stubRoute("")} onDirtyChange={() => {}} snapshot={okSnap(fakeEnv)} />);
     await findByRole("heading", { level: 1, name: "Settings" });
     expect(container.querySelector("h1")?.textContent).toBe("Settings");
   });
 
   it("calls onDirtyChange(false) initially", async () => {
     const onDirty = vi.fn();
-    render(<SettingsScreen route={stubRoute("")} onDirtyChange={onDirty} />);
+    render(<SettingsScreen route={stubRoute("")} onDirtyChange={onDirty} snapshot={okSnap(fakeEnv)} />);
     await waitFor(() => expect(onDirty).toHaveBeenCalled());
     expect(onDirty).toHaveBeenLastCalledWith(false);
   });
 
   it("error state renders Retry button", async () => {
-    vi.spyOn(api, "getSettings").mockRejectedValue(new Error("boom"));
-    const { findByText, findByRole } = render(<SettingsScreen route={stubRoute("")} onDirtyChange={() => {}} />);
+    const { findByText, findByRole } = render(<SettingsScreen route={stubRoute("")} onDirtyChange={() => {}} snapshot={errorSnap} />);
     expect(await findByText(/Could not load settings/)).toBeTruthy();
     expect(await findByRole("button", { name: "Retry" })).toBeTruthy();
   });

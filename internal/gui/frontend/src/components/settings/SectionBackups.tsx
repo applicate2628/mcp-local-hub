@@ -43,6 +43,10 @@ export function SectionBackups({ snapshot, onDirtyChange }: SectionBackupsProps)
   async function save() {
     setBusy(true);
     setErr(null);
+    // Codex PR #20 r11 P3: clear any stale success/error banner immediately
+    // so the user doesn't see a leftover "Saved." from a prior call while
+    // the new save is in-flight.
+    setBanner(null);
     try {
       await putSetting("backups.keep_n", String(draft));
     } catch (e: any) {

@@ -23,15 +23,14 @@ export function App() {
   // section's local draft state in one go. Memo §10.4.
   const [discardKey, setDiscardKey] = useState(0);
 
-  // Codex PR #20 r2 P1: apply appearance attributes at app bootstrap so
-  // saved theme + density are active on every route, not just while
-  // SettingsScreen is mounted. Without this the attributes are only set
-  // while the user has #/settings open; any other route (Servers, Dashboard,
-  // etc.) renders with default styling until Settings is visited once.
-  //
-  // SettingsScreen ALSO applies these on its own snapshot instance for
-  // instantaneous post-Save feedback — the duplication is intentional and
-  // idempotent (setAttribute with the same value is a no-op).
+  // Codex PR #20 r2 P1 / r11 P2: single source of truth for appearance
+  // attribute application. App owns the snapshot and passes it down to
+  // SettingsScreen as a prop. This ensures there is exactly one apply
+  // pipeline for data-theme / data-density — after Save, SectionAppearance
+  // calls snapshot.refresh() which triggers this App-level effect, updating
+  // the attributes. Settings.tsx no longer holds its own hook instance, so
+  // the race where App's stale fetch could overwrite post-Save values is
+  // eliminated.
   const globalSettings = useSettingsSnapshot();
   useEffect(() => {
     if (globalSettings.status !== "ok") return;
@@ -105,7 +104,9 @@ export function App() {
     case "settings":
       // `key={discardKey}` forces a full remount on confirmed discard so
       // every section's local draft state resets cleanly (Codex r2 P1).
-      body = <SettingsScreen key={discardKey} route={route} onDirtyChange={setSettingsDirty} />;
+      // Codex PR #20 r11 P2: snapshot lifted to App — pass as prop so
+      // Settings never creates a competing instance.
+      body = <SettingsScreen key={discardKey} route={route} onDirtyChange={setSettingsDirty} snapshot={globalSettings} />;
       break;
     default:
       body = <p>Unknown screen: {route.screen}</p>;

@@ -1,7 +1,6 @@
 import { useState, useEffect } from "preact/hooks";
 import type { RouterState } from "../hooks/useRouter";
-import type { Section } from "../lib/settings-types";
-import { useSettingsSnapshot } from "../lib/use-settings-snapshot";
+import type { Section, SettingsSnapshot } from "../lib/settings-types";
 import { SectionNav } from "../components/settings/SectionNav";
 import { SectionAppearance } from "../components/settings/SectionAppearance";
 import { SectionGuiServer } from "../components/settings/SectionGuiServer";
@@ -12,13 +11,16 @@ import { SectionAdvanced } from "../components/settings/SectionAdvanced";
 export type SettingsScreenProps = {
   route: RouterState;
   onDirtyChange: (b: boolean) => void;
+  // Codex PR #20 r11 P2: snapshot lifted to App level to avoid a
+  // duplicate-instance race where App's stale fetch overwrites Settings's
+  // just-saved theme/density attributes.
+  snapshot: SettingsSnapshot;
 };
 
 const SECTION_IDS: Section[] = ["appearance", "gui_server", "daemons", "backups", "advanced"];
 
-// Codex r1 P3.1 — destructure both props.
-export function SettingsScreen({ route, onDirtyChange }: SettingsScreenProps): preact.JSX.Element {
-  const snapshot = useSettingsSnapshot();
+// Codex r1 P3.1 — destructure all props.
+export function SettingsScreen({ route, onDirtyChange, snapshot }: SettingsScreenProps): preact.JSX.Element {
   const [appearanceDirty, setAppearanceDirty] = useState(false);
   const [guiServerDirty, setGuiServerDirty] = useState(false);
   const [backupsDirty, setBackupsDirty] = useState(false);
@@ -67,23 +69,11 @@ export function SettingsScreen({ route, onDirtyChange }: SettingsScreenProps): p
     }
   }, [route.query, snapshot.status]);
 
-  // Apply theme + density CSS variables on every ok-snapshot (memo §10.2).
-  // The section-save flow already triggers `snapshot.refresh()`, so this
-  // hook propagates appearance changes to <html data-theme>/<html data-density>
-  // immediately after Save while this screen is mounted.
-  //
-  // App.tsx ALSO applies these on its own snapshot instance so the
-  // attributes survive across ALL routes (Codex PR #20 r2 P1 fix). The
-  // duplication is intentional and idempotent — the two effects complement
-  // each other: App handles cold-start + cross-route continuity, Settings
-  // handles instantaneous live-update after Save.
-  useEffect(() => {
-    if (snapshot.status !== "ok") return;
-    const theme = snapshot.data.settings.find((s) => s.key === "appearance.theme");
-    const density = snapshot.data.settings.find((s) => s.key === "appearance.density");
-    if (theme && "value" in theme) document.documentElement.setAttribute("data-theme", theme.value);
-    if (density && "value" in density) document.documentElement.setAttribute("data-density", density.value);
-  }, [snapshot.status, snapshot.status === "ok" ? snapshot.data : null]);
+  // Codex PR #20 r11 P2: theme/density apply removed from here.
+  // App.tsx is the sole owner of the lifted snapshot and applies data-theme /
+  // data-density in its own useEffect. When SectionAppearance saves and calls
+  // snapshot.refresh(), App's effect re-runs on the refreshed data — there is
+  // now only one apply pipeline, so no overwrite race is possible.
 
   if (snapshot.status === "loading") {
     return (

@@ -5,6 +5,7 @@ import { render, waitFor, cleanup } from "@testing-library/preact";
 import { App } from "./app";
 import * as settingsApi from "./lib/settings-api";
 import type { SettingsEnvelope } from "./lib/settings-types";
+import { isConfig } from "./lib/settings-types";
 
 // Minimal SettingsEnvelope with non-default appearance values so the test
 // can confirm the attributes were written (not just that defaults were kept).
@@ -75,5 +76,36 @@ describe("App — global appearance attribute application (Codex PR #20 r2 P1)",
       expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
     });
     expect(document.documentElement.getAttribute("data-density")).toBe("spacious");
+  });
+});
+
+describe("App — lifted snapshot ownership (Codex PR #20 r11 P2)", () => {
+  it("applies theme/density even when fetch is slow — single pipeline, no overwrite race", async () => {
+    // App is the SOLE owner of useSettingsSnapshot. Settings.tsx no longer
+    // creates a duplicate hook instance. So even if App's fetch is slow,
+    // there is only one apply pipeline — no competing instance can overwrite
+    // the attributes with stale values after Save.
+    const goodEnvelope: SettingsEnvelope = fakeEnv;
+    const slowSnapshot = new Promise<SettingsEnvelope>((resolve) => {
+      setTimeout(() => resolve(goodEnvelope), 100);
+    });
+    vi.spyOn(settingsApi, "getSettings").mockReturnValue(slowSnapshot);
+
+    window.location.hash = "#/servers";
+    render(<App />);
+
+    // Narrow to ConfigSettingDTO to access .value — ActionSettingDTO has no .value.
+    const themeEntry = goodEnvelope.settings.find((s) => s.key === "appearance.theme")!;
+    const densityEntry = goodEnvelope.settings.find((s) => s.key === "appearance.density")!;
+    const expectedTheme = isConfig(themeEntry) ? themeEntry.value : "";
+    const expectedDensity = isConfig(densityEntry) ? densityEntry.value : "";
+
+    // Wait up to 500 ms for the (deliberately slow) fetch to resolve and for
+    // App's useEffect to write the attributes to <html>.
+    await waitFor(
+      () => expect(document.documentElement.getAttribute("data-theme")).toBe(expectedTheme),
+      { timeout: 500 },
+    );
+    expect(document.documentElement.getAttribute("data-density")).toBe(expectedDensity);
   });
 });
