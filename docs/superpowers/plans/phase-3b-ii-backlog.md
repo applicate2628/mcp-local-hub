@@ -77,7 +77,7 @@ Tracking document for Phase 3B-II — the "everything I cut from Phase 3B-I MVP"
 
 Surfaced during A4-a local smoke (2026-04-28) and confirmed via Codex consult. Independent of A4-a; deferred to a dedicated sprint.
 
-**Status:** DM-1 + DM-2 + DM-3 implemented in PR #21 (branch `feat/daemon-mgmt-hygiene`, pending merge).
+**Status:** DM-1 + DM-2 + DM-3 implemented and merged. PR #21, merge SHA `e01e9113` (squash, 2026-04-28).
 
 - **DM-1: Status `Starting` forever when manifest missing.** ✅ Fixed in `internal/api/status_enrich.go` — when `Port=0 && !IsMaintenance`, `deriveState` is bypassed so the raw scheduler state (`Running`, `Ready`, …) survives instead of being mis-rendered as `Starting`. Maintenance rows (`weekly-refresh`) keep going through `deriveState` so `Ready+future trigger → Scheduled` and `Ready+no trigger → Stopped` still work. Codex r1 P2 narrowed the original guard from "all Port=0 rows" to "non-maintenance Port=0 rows."
 - **DM-2: Self-PID false-positive `Running`.** ✅ Fixed in `internal/api/status_enrich.go` — `selfPIDFn` test seam returns `os.Getpid()` in production and a stub in tests; rows whose detected PID matches `selfPID` skip the alive/PID/RAM/Uptime population so the GUI's own listener can no longer masquerade as a daemon. Long-term: enforce disjoint port ranges for GUI vs daemon manifests (open).
