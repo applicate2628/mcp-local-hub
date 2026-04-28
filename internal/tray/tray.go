@@ -12,6 +12,13 @@ type Config struct {
 	// Quit is called when the user picks "Quit (keep daemons)". The CLI
 	// uses this to cancel the GUI context and exit cleanly.
 	Quit func()
+	// StateCh delivers TrayState transitions. The tray loop selects on
+	// it and calls SetIcon + SetTooltip when a new state arrives.
+	// nil channel disables state-driven icon swapping (the tray runs
+	// with a single static icon — useful for tests / non-Windows).
+	// The producer should NOT close StateCh during normal operation;
+	// closing is treated as ctx-cancelled in the select loop.
+	StateCh <-chan TrayState
 }
 
 // Run blocks running the tray event loop until ctx is canceled. On

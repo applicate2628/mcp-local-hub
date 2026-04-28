@@ -35,7 +35,7 @@ Tracking document for Phase 3B-II — the "everything I cut from Phase 3B-I MVP"
 |---|---|---|---|
 | C1 | `--force` take-over flag | Currently hidden placeholder. Realize: detect stale single-instance mutex, confirm with user, delete `<pidport>.lock`, acquire. | PR #5 cleanup |
 | C2 | Browser focus on activate-window | ✅ PR #22 — `gui.FocusBrowserWindow` enumerates visible top-level windows by title substring "mcp-local-hub", calls SW_RESTORE then SetForegroundWindow. Activate-window callback in cli/gui.go now invokes it instead of logging. Manual real-match smoke in `docs/phase-3b-ii-verification.md` D2.1. | PR #5 final review |
-| C3 | Tray icon state variants | MVP ships a single icon (`SetTooltip` only). Add 4-state icon switching (`healthy` / `degraded` / `down` / `migrating`) driven by SSE `daemon-state` events. | Spec §6 |
+| C3 | Tray icon state variants | ✅ PR #22 — `internal/tray/state.go::Aggregate` maps DaemonStatus rows to one of 4 spec-§6 variants (`healthy / partial / down / error`). `internal/tray/icons.go` programmatically generates 4 colored 16×16 PNG icons via `image/draw`+`image/png`, lazily cached. `StatusPoller.SetSnapshotChannel` feeds an `aggregateTrayState` goroutine in cli/gui.go that coalesces duplicate-state forwards. tray_windows.go selects on the new `Config.StateCh` and calls `systray.SetIcon`+`SetTooltip` per transition. | Spec §6 |
 | C4 | Toast notifications | Windows toast on `daemon-failed` / `auto-restart-triggered` / `manual-action-done`. Events already in `/api/events` stream, UI does not render them. | Spec §6 |
 
 ### D. Testing & frontend infrastructure

@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/gui"
 	"mcp-local-hub/internal/tray"
 
@@ -98,6 +99,19 @@ activates the first window and exits 0.`,
 
 			// Poll daemon status every 5s and push daemon-state events onto /api/events.
 			poller := gui.NewStatusPoller(gui.RealStatusProvider{}, s.Broadcaster(), 5*time.Second)
+			// Tray state plumbing (C3): wire a snapshot channel between
+			// poller and tray. Aggregator goroutine reads each snapshot,
+			// computes a TrayState, and pushes onto trayStateCh ONLY when
+			// the aggregate changes — avoids redundant SetIcon calls when
+			// individual daemons flap but the overall state is steady.
+			//
+			// Both channels are size-1 buffered with non-blocking sends
+			// at every send site so a stalled tray cannot back up the
+			// poller, and a stalled poller cannot back up status reads.
+			snapshotCh := make(chan []api.DaemonStatus, 1)
+			trayStateCh := make(chan tray.TrayState, 1)
+			poller.SetSnapshotChannel(snapshotCh)
+			go aggregateTrayState(ctx, snapshotCh, trayStateCh)
 			go poller.Run(ctx)
 
 			select {
@@ -135,6 +149,7 @@ activates the first window and exits 0.`,
 							// (Phase 3B-II: focus browser window).
 							_ = gui.TryActivateIncumbent(pidportPath, 500*time.Millisecond)
 						},
+						StateCh: trayStateCh,
 						Quit: stop, // signal.NotifyContext's cancel function
 					})
 				}()

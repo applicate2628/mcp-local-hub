@@ -10,7 +10,12 @@ import (
 
 func runImpl(ctx context.Context, cfg Config) error {
 	onReady := func() {
-		systray.SetTooltip("mcp-local-hub")
+		// Initial icon + tooltip default to Healthy. State events
+		// (when StateCh is wired) overwrite both as transitions
+		// arrive. SetIcon before any AddMenuItem so the very first
+		// systray.Run frame already has the correct image.
+		systray.SetIcon(IconBytes(StateHealthy))
+		systray.SetTooltip("mcp-local-hub: healthy")
 		mOpen := systray.AddMenuItem("Open dashboard", "Bring the GUI window to front")
 		systray.AddSeparator()
 		mQuit := systray.AddMenuItem("Quit (keep daemons)", "Close the GUI but leave scheduler tasks running")
@@ -30,6 +35,16 @@ func runImpl(ctx context.Context, cfg Config) error {
 					}
 					systray.Quit()
 					return
+				case state, ok := <-cfg.StateCh:
+					if !ok {
+						// Producer closed the channel — treat as
+						// context cancellation so we don't spin on
+						// a closed-receive that always fires.
+						systray.Quit()
+						return
+					}
+					systray.SetIcon(IconBytes(state))
+					systray.SetTooltip("mcp-local-hub: " + state.String())
 				}
 			}
 		}()
