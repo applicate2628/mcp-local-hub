@@ -90,20 +90,6 @@ export function useSectionSaveFlow(
       }
     }
 
-    // Codex PR P1 (compare-and-swap): drop a saved key from edits ONLY if
-    // its current local value still equals what was sent. If the user
-    // edited it again during the in-flight PUT, the newer edit stays
-    // dirty and is preserved.
-    setEdits((prev) => {
-      const next = { ...prev };
-      for (const { key, sentValue } of successes) {
-        if (next[key] === sentValue) {
-          delete next[key];
-        }
-      }
-      return next;
-    });
-
     // Memo §4.4 + Codex r7 P2: errors map clears successes BEFORE merging
     // new failures (retry-success drops stale errors).
     setErrors((prev) => {
@@ -113,18 +99,56 @@ export function useSectionSaveFlow(
       return next;
     });
 
+    // Refresh snapshot. If it fails, we KEEP successful edits in the local
+    // edits map so effective() still surfaces the user's value (Codex r6 P2).
+    // Without this guard, a transient GET failure right after a successful
+    // PUT would clear edits, fall back to the stale snapshot's old value,
+    // and visually undo the save in the UI even though disk has the new value.
+    let refreshOK = true;
+    try {
+      await snapshot.refresh();
+    } catch {
+      refreshOK = false;
+    }
+
+    if (refreshOK) {
+      // Codex PR P1 (compare-and-swap): drop a saved key from edits ONLY if
+      // its current local value still equals what was sent. If the user
+      // edited it again during the in-flight PUT, the newer edit stays
+      // dirty and is preserved.
+      setEdits((prev) => {
+        const next = { ...prev };
+        for (const { key, sentValue } of successes) {
+          if (next[key] === sentValue) {
+            delete next[key];
+          }
+        }
+        return next;
+      });
+    }
+    // refresh failed: edits stay; effective() returns the saved values;
+    // dirty stays true; user can re-click Save (idempotent) when connection
+    // recovers.
+
     setBusy(false);
     if (Object.keys(failures).length === 0) {
-      setBanner({ kind: "ok", text: "Saved." });
-      setTimeout(() => setBanner(null), 2000);
+      if (refreshOK) {
+        setBanner({ kind: "ok", text: "Saved." });
+        setTimeout(() => setBanner(null), 2000);
+      } else {
+        // All PUTs succeeded but refresh failed — disk has the new values,
+        // UI still shows them, but live snapshot is stale.
+        setBanner({
+          kind: "partial",
+          text: "Saved on disk. Couldn't refresh the live view — click Save again when connection recovers.",
+        });
+      }
     } else {
       setBanner({
         kind: "partial",
         text: `Saved ${successes.length} of ${dirtyKeys.length} settings. Fix errors below and try again.`,
       });
     }
-    // Refresh the snapshot AFTER the merge so successful keys re-anchor cleanly.
-    await snapshot.refresh();
   }
 
   return { effective, setLocal, reset, save, dirty, busy, errors, banner };

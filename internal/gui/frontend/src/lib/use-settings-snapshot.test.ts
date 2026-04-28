@@ -52,9 +52,31 @@ describe("useSettingsSnapshot", () => {
     await waitFor(() => expect(result.current.status).toBe("ok"));
     expect(result.current.data).toEqual(goodEnvelope);
     // Second fetch (manual refresh) throws — must NOT clear data.
+    // r6 P2: refresh now re-throws so callers can detect failure; swallow here.
     vi.spyOn(api, "getSettings").mockRejectedValue(new Error("transient"));
-    await act(async () => { await result.current.refresh(); });
+    await act(async () => { await result.current.refresh().catch(() => {}); });
     // State stays ok with the previous good data.
+    expect(result.current.status).toBe("ok");
+    expect(result.current.data).toEqual(goodEnvelope);
+  });
+
+  it("Codex r6 P2: refresh() rejects on failure even though stale data is preserved", async () => {
+    vi.spyOn(api, "getSettings").mockResolvedValue(goodEnvelope);
+    const { result } = renderHook(() => useSettingsSnapshot());
+    await waitFor(() => expect(result.current.status).toBe("ok"));
+    // Now make refresh throw.
+    vi.spyOn(api, "getSettings").mockRejectedValue(new Error("transient"));
+    let caught: Error | null = null;
+    await act(async () => {
+      try {
+        await result.current.refresh();
+      } catch (e) {
+        caught = e as Error;
+      }
+    });
+    expect(caught).not.toBeNull();
+    expect(caught!.message).toBe("transient");
+    // Stale data preserved (r4 P2 guarantee still holds).
     expect(result.current.status).toBe("ok");
     expect(result.current.data).toEqual(goodEnvelope);
   });

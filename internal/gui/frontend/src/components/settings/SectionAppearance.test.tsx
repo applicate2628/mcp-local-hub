@@ -133,6 +133,29 @@ describe("SectionAppearance", () => {
     expect(shellField?.getAttribute("aria-describedby")).toBe("appearance.shell-error");
   });
 
+  it("Codex r6 P2: keeps saved edits dirty when snapshot refresh fails", async () => {
+    // Successful PUT but refresh fails. Edit must remain in `edits` so
+    // effective() returns the saved value (not the stale snapshot's old).
+    vi.spyOn(api, "putSetting").mockResolvedValue(undefined);
+    const refresh = vi.fn(async () => { throw new Error("network"); });
+    const onDirty = vi.fn();
+    const { container, findByText } = render(
+      <SectionAppearance snapshot={makeSnapshot(refresh)} onDirtyChange={onDirty} />,
+    );
+    const sel = container.querySelector("#appearance\\.theme") as HTMLSelectElement;
+    fireEvent.change(sel, { target: { value: "dark" } });
+    await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(true));
+    fireEvent.click(Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Save")!);
+    // Banner indicates partial: "Saved on disk. Couldn't refresh the live view..."
+    expect(await findByText(/Saved on disk/)).toBeTruthy();
+    // The select STILL shows "dark" (the saved value, not reverted to stale snapshot).
+    await waitFor(() => expect(sel.value).toBe("dark"));
+    // dirty stays true — Save button still enabled.
+    await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(true));
+    const saveBtn = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Save")!;
+    expect(saveBtn.disabled).toBe(false);
+  });
+
   it("Codex PR P1: edit during in-flight Save preserves newer edit (compare-and-swap)", async () => {
     // User clicks Save, then edits same field BEFORE PUT returns.
     // Newer edit must survive the merge step — old behavior would silently

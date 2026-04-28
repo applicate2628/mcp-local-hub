@@ -9,6 +9,12 @@ export function useSettingsSnapshot(): SettingsSnapshot {
     error: null,
   });
   const generation = useRef(0);
+  // Track whether a successful load has ever completed. Used to decide
+  // whether to propagate a refresh error to the caller (r6 P2) — only when
+  // there is stale data to preserve does a caller need to know the refresh
+  // failed; during the initial-load path the error is already shown in state
+  // and the useEffect void-caller does not need the rejection.
+  const hasOkRef = useRef(false);
 
   const refresh = useCallback(async () => {
     const myGen = ++generation.current;
@@ -17,6 +23,7 @@ export function useSettingsSnapshot(): SettingsSnapshot {
     try {
       const data = await getSettings();
       if (myGen !== generation.current) return;
+      hasOkRef.current = true;
       setState({ status: "ok", data, error: null });
     } catch (e) {
       if (myGen !== generation.current) return;
@@ -31,6 +38,14 @@ export function useSettingsSnapshot(): SettingsSnapshot {
         }
         return { status: "error", data: null, error: e as Error };
       });
+      // Codex PR #20 r6 P2: propagate so callers (useSectionSaveFlow.save)
+      // can detect refresh failure and decide whether to clear in-flight edits.
+      // Only propagate when we have stale data (hasOkRef=true); initial-load
+      // failures are consumed by the error state above and must not surface as
+      // an unhandled rejection from the void-discarded useEffect call.
+      if (hasOkRef.current) {
+        throw e;
+      }
     }
   }, []);
 

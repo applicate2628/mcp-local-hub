@@ -119,5 +119,9 @@ function formatBytes(n: number): string {
 function relTime(rfc3339: string): string {
   const t = Date.parse(rfc3339);
   if (Number.isNaN(t)) return rfc3339;
-  return new Date(t).toISOString().replace("T", " ").slice(0, 16);
+  const d = new Date(t);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  // Codex PR #20 r6 P3: use local time components so users in non-UTC
+  // timezones see the time in their own zone, not UTC.
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
