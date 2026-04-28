@@ -705,10 +705,19 @@ menu button[disabled] {
 }
 @media (prefers-color-scheme: dark) {
   :root[data-theme="system"] {
+    /* New A4-a tokens (Settings + Backups). */
     --bg-color: #0f172a;
     --text-color: #e5e7eb;
     --muted-color: #9ca3af;
     --border-color: #334155;
+    /* Codex PR #20 r10 P2: also override the legacy variables that the
+     * rest of the app reads (Servers, Migration, Add server, Secrets,
+     * Dashboard, Logs use --bg/--text/--border at the top of this file).
+     * Without this, `system` theme on a dark OS would only flip the
+     * Settings screen to dark while every other screen stayed light. */
+    --bg: #0d1117;
+    --text: #c9d1d9;
+    --border: #30363d;
   }
 }
 :root[data-density="compact"]    { --row-height: 24px; --section-gap: 12px; }
