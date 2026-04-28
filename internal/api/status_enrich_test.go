@@ -285,6 +285,125 @@ func TestEnrichStatusWithRegistry_MaintenanceRowsNoTriggerBecomeStopped(t *testi
 	}
 }
 
+// TestEnrichStatus_StateLifecycleTransitions walks ONE daemon row
+// through the realistic Running → Starting → Scheduled → Stopped →
+// Running lifecycle by varying the inputs to enrichStatus across
+// successive calls. Each step represents a real production state:
+//
+//  1. Running    — port bound by a foreign PID (healthy daemon)
+//  2. Starting   — port not bound but raw scheduler state still
+//                  "Running" (Task Scheduler mid-launch action)
+//  3. Scheduled  — port not bound, raw "Ready", future trigger
+//                  (weekly-refresh-style task waiting for next fire)
+//  4. Stopped    — port not bound, raw "Ready", no future trigger
+//                  (logon-only task whose process exited)
+//  5. Running    — port re-bound after operator hits Restart
+//
+// TestDeriveState covers the same mappings via deriveState() in
+// isolation, but DM-1's narrowing guard, the DM-2 selfPID skip, and
+// the IsMaintenance-bypass interaction are all in enrichStatus's
+// second pass. A regression that misroutes a row (e.g., re-broadens
+// the Port==0 guard or bypasses deriveState entirely) would still
+// leave TestDeriveState green; only a pipeline-level test catches it.
+//
+// IsMaintenance is false here — this is a per-daemon row, not a
+// weekly-refresh maintenance row. The lifecycle below is exactly
+// what an operator sees on `mcphub status` for a stdio bridge daemon
+// like memory or wolfram.
+func TestEnrichStatus_StateLifecycleTransitions(t *testing.T) {
+	dir := t.TempDir()
+	makeFakeManifest(t, dir+"/memory", "memory", 9123)
+
+	const foreignPID = 999998
+	if foreignPID == os.Getpid() {
+		t.Skip("test PID happens to be the foreignPID literal")
+	}
+
+	origBatch := lookupProcessBatch
+	defer func() { lookupProcessBatch = origBatch }()
+
+	// Helper: install a batch lookup that reports the daemon as alive
+	// at the given foreignPID for `port`. Empty map == port not bound.
+	setBatch := func(alivePort int) {
+		lookupProcessBatch = func(ports []int) map[int]struct {
+			PID       int
+			RAMBytes  uint64
+			UptimeSec int64
+		} {
+			out := make(map[int]struct {
+				PID       int
+				RAMBytes  uint64
+				UptimeSec int64
+			})
+			if alivePort != 0 {
+				for _, p := range ports {
+					if p == alivePort {
+						out[p] = struct {
+							PID       int
+							RAMBytes  uint64
+							UptimeSec int64
+						}{PID: foreignPID, RAMBytes: 50_000_000, UptimeSec: 10}
+					}
+				}
+			}
+			return out
+		}
+	}
+
+	steps := []struct {
+		name      string
+		raw       string
+		nextRun   string
+		alivePort int // 0 == port not bound; non-zero == bound by foreignPID
+		wantState string
+		wantPID   int
+	}{
+		{"1. Running (port bound, healthy)", "Running", "", 9123, "Running", foreignPID},
+		{"2. Starting (raw Running, port released mid-restart)", "Running", "", 0, "Starting", 0},
+		{"3. Scheduled (raw Ready + future trigger)", "Ready", "04.05.2026 3:00:00", 0, "Scheduled", 0},
+		{"4. Stopped (raw Ready, no future trigger)", "Ready", "", 0, "Stopped", 0},
+		{"5. Running again (port re-bound after Restart)", "Running", "", 9123, "Running", foreignPID},
+	}
+
+	for _, step := range steps {
+		t.Run(step.name, func(t *testing.T) {
+			setBatch(step.alivePort)
+			rows := []DaemonStatus{
+				{
+					TaskName: `\mcp-local-hub-memory-default`,
+					State:    step.raw,
+					NextRun:  step.nextRun,
+				},
+			}
+			enrichStatus(rows, dir)
+
+			if rows[0].State != step.wantState {
+				t.Errorf("State = %q, want %q (raw=%q alivePort=%d nextRun=%q)",
+					rows[0].State, step.wantState,
+					step.raw, step.alivePort, step.nextRun)
+			}
+			if rows[0].PID != step.wantPID {
+				t.Errorf("PID = %d, want %d", rows[0].PID, step.wantPID)
+			}
+			// Port mapping must work on every step regardless of liveness;
+			// regression guard against a future change that mishandles
+			// the manifest read inside one of the lifecycle states.
+			if rows[0].Port != 9123 {
+				t.Errorf("Port = %d, want 9123 (manifest mapping must be stable across states)",
+					rows[0].Port)
+			}
+			// Maintenance flag must stay false for per-daemon rows; a
+			// regression that flips this would route the row through
+			// deriveState even when the DM-1 guard should fire (e.g.,
+			// orphan global daemons), masking the very symptoms DM-1
+			// was written to fix.
+			if rows[0].IsMaintenance {
+				t.Errorf("IsMaintenance = true on per-daemon row (regression: would bypass DM-1 guard)")
+			}
+		})
+	}
+}
+
 // TestDeriveState documents the four derived-state labels. lookupProcess
 // is nil in unit tests so `alive` is always false at the enrichStatus
 // boundary — exercise deriveState directly.
