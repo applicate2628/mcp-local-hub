@@ -1361,6 +1361,18 @@ func (a *API) Restart(server, daemonFilter string) ([]RestartResult, error) {
 				results = append(results, RestartResult{TaskName: t.Name, Err: "kill daemon: " + err.Error()})
 				continue
 			}
+			// DM-3: wait for the OS to actually release the listening
+			// socket before triggering /Run. killDaemonByPort confirms
+			// process exit, but TIME_WAIT and Windows' AFD socket-close
+			// path can briefly hold the bind. Without this, the new
+			// daemon's bind fails immediately and Task Scheduler records
+			// last_result=1 with no useful diagnostic. 3s is small enough
+			// to be invisible in normal restarts and large enough to ride
+			// out the typical TIME_WAIT window.
+			if err := waitForPortFree(port, 3*time.Second); err != nil {
+				results = append(results, RestartResult{TaskName: t.Name, Err: "wait for port: " + err.Error()})
+				continue
+			}
 		}
 		_ = sch.Stop(t.Name)
 		if err := sch.Run(t.Name); err != nil {
@@ -1495,6 +1507,14 @@ func (a *API) RestartAll() ([]RestartResult, error) {
 			results = append(results, RestartResult{TaskName: t.Name, Err: "kill daemon: " + err.Error()})
 			continue
 		}
+		if port != 0 {
+			// DM-3: see Restart() comment. Same TIME_WAIT race applies
+			// to RestartAll's per-task kill-then-Run.
+			if err := waitForPortFree(port, 3*time.Second); err != nil {
+				results = append(results, RestartResult{TaskName: t.Name, Err: "wait for port: " + err.Error()})
+				continue
+			}
+		}
 		_ = sch.Stop(t.Name) // no-op for completed actions; preserve for the edge case of a mid-launch task
 		if err := sch.Run(t.Name); err != nil {
 			results = append(results, RestartResult{TaskName: t.Name, Err: err.Error()})
@@ -1503,6 +1523,35 @@ func (a *API) RestartAll() ([]RestartResult, error) {
 		results = append(results, RestartResult{TaskName: t.Name})
 	}
 	return results, nil
+}
+
+// waitForPortFree probes the local 127.0.0.1:port until net.Listen
+// succeeds or timeout elapses. Used by Restart paths between
+// killDaemonByPort and schtasks /Run to avoid the OS-level TIME_WAIT /
+// AFD socket-close race where a new daemon's bind fails immediately
+// after the old daemon exited (DM-3). The probe is loopback-only — we
+// only ever bind on 127.0.0.1, so a 0.0.0.0 listener probe would race
+// with unrelated services and add false negatives.
+func waitForPortFree(port int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	var lastErr error
+	for {
+		l, err := net.Listen("tcp", addr)
+		if err == nil {
+			_ = l.Close()
+			return nil
+		}
+		lastErr = err
+		if !time.Now().Before(deadline) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("port %d still in use after %v: %w", port, timeout, lastErr)
+	}
+	return fmt.Errorf("port %d still in use after %v", port, timeout)
 }
 
 // StopAll stops every running scheduler task under our prefix. Leaves tasks

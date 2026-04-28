@@ -1,6 +1,7 @@
 package api
 
 import (
+	"os"
 	"testing"
 )
 
@@ -64,6 +65,342 @@ func TestParseTaskName(t *testing.T) {
 			t.Errorf("parseTaskName(%q) = (%q, %q), want (%q, %q)",
 				tc.in, gotSrv, gotDaemon, tc.wantSrv, tc.wantDaemon)
 		}
+	}
+}
+
+// TestEnrichStatusWithRegistry_OrphanGlobalDaemonPreservesRawState
+// guards DM-1: a non-lazy-proxy global daemon row whose manifest is
+// not in this binary's embed (Port=0) must keep the raw scheduler
+// "Running" state instead of being mis-labeled as "Starting" forever.
+//
+// Real production case: the user's installed mcphub.exe owns a Task
+// Scheduler entry for `mcp-local-hub-foo-default`, but the dev binary
+// (running `go run` from a checkout missing servers/foo/) issues the
+// status query. The dev binary can't resolve foo's port, so Port=0;
+// without DM-1, deriveState would render foo as permanently
+// "Starting" while the actual installed daemon is healthy.
+func TestEnrichStatusWithRegistry_OrphanGlobalDaemonPreservesRawState(t *testing.T) {
+	dir := t.TempDir()
+	regPath := dir + "/ws.yaml"
+	// Manifest dir is empty — every global row's port stays 0.
+	rows := []DaemonStatus{
+		{
+			TaskName: `\mcp-local-hub-unknown-server-default`,
+			State:    "Running",
+			NextRun:  "",
+		},
+	}
+	enrichStatusWithRegistry(rows, dir, regPath)
+	if rows[0].State != "Running" {
+		t.Errorf("orphan global daemon (Port=0): State = %q, want %q (raw scheduler state must be preserved when manifest is unknown)",
+			rows[0].State, "Running")
+	}
+	if rows[0].Port != 0 {
+		t.Errorf("expected Port=0 for unknown manifest; got %d", rows[0].Port)
+	}
+}
+
+// TestEnrichStatusWithRegistry_SelfPIDIsNotAlive guards DM-2: when
+// netstat finds the running mcphub process bound to a daemon's port
+// (port collision: e.g. wolfram manifest declares 9125 and mcphub
+// GUI's --port also defaults to 9125), the row must NOT be reported
+// as alive. Counting the GUI as the daemon would render a misleading
+// "Running" with the GUI's PID/RAM/uptime, hiding the real failure
+// from the operator.
+func TestEnrichStatusWithRegistry_SelfPIDIsNotAlive(t *testing.T) {
+	dir := t.TempDir()
+	makeFakeManifest(t, dir+"/wolfram", "wolfram", 9125)
+
+	origBatch := lookupProcessBatch
+	defer func() { lookupProcessBatch = origBatch }()
+	lookupProcessBatch = func(ports []int) map[int]struct {
+		PID       int
+		RAMBytes  uint64
+		UptimeSec int64
+	} {
+		out := make(map[int]struct {
+			PID       int
+			RAMBytes  uint64
+			UptimeSec int64
+		})
+		for _, p := range ports {
+			out[p] = struct {
+				PID       int
+				RAMBytes  uint64
+				UptimeSec int64
+			}{PID: os.Getpid(), RAMBytes: 12345, UptimeSec: 67}
+		}
+		return out
+	}
+
+	rows := []DaemonStatus{
+		{TaskName: `\mcp-local-hub-wolfram-default`, State: "Running"},
+	}
+	enrichStatus(rows, dir)
+
+	// PID, RAM, Uptime must NOT be populated from the self-PID.
+	if rows[0].PID != 0 {
+		t.Errorf("self-PID leaked into row: PID = %d, want 0", rows[0].PID)
+	}
+	if rows[0].RAMBytes != 0 {
+		t.Errorf("self-RAM leaked into row: RAMBytes = %d, want 0", rows[0].RAMBytes)
+	}
+	if rows[0].UptimeSec != 0 {
+		t.Errorf("self-uptime leaked into row: UptimeSec = %d, want 0", rows[0].UptimeSec)
+	}
+	// alive=false → raw "Running" with no future trigger maps to "Starting"
+	// via deriveState. The test asserts the row is NOT mis-marked Running.
+	if rows[0].State == "Running" {
+		t.Errorf("State = %q after self-PID skip; must not be %q (alive should be false)",
+			rows[0].State, "Running")
+	}
+}
+
+// TestEnrichStatusWithRegistry_ForeignPIDIsAlive ensures the DM-2 fix
+// is a strict refinement of the previous behavior: a non-self PID at
+// the daemon's port still produces alive=true and populates
+// PID/RAM/Uptime exactly like before. Regression guard against an
+// over-broad selfPID skip that would suppress every healthy daemon.
+func TestEnrichStatusWithRegistry_ForeignPIDIsAlive(t *testing.T) {
+	dir := t.TempDir()
+	makeFakeManifest(t, dir+"/serena", "serena", 9121)
+
+	const foreignPID = 999999 // pid that's not the test process
+	if foreignPID == os.Getpid() {
+		t.Skip("test PID happens to be 999999")
+	}
+
+	origBatch := lookupProcessBatch
+	defer func() { lookupProcessBatch = origBatch }()
+	lookupProcessBatch = func(ports []int) map[int]struct {
+		PID       int
+		RAMBytes  uint64
+		UptimeSec int64
+	} {
+		out := make(map[int]struct {
+			PID       int
+			RAMBytes  uint64
+			UptimeSec int64
+		})
+		for _, p := range ports {
+			out[p] = struct {
+				PID       int
+				RAMBytes  uint64
+				UptimeSec int64
+			}{PID: foreignPID, RAMBytes: 50_000_000, UptimeSec: 3600}
+		}
+		return out
+	}
+
+	rows := []DaemonStatus{
+		{TaskName: `\mcp-local-hub-serena-claude`, State: "Running"},
+	}
+	enrichStatus(rows, dir)
+
+	if rows[0].PID != foreignPID {
+		t.Errorf("foreign-PID daemon: PID = %d, want %d", rows[0].PID, foreignPID)
+	}
+	if rows[0].RAMBytes != 50_000_000 {
+		t.Errorf("foreign-PID daemon: RAMBytes = %d, want 50000000", rows[0].RAMBytes)
+	}
+	if rows[0].State != "Running" {
+		t.Errorf("foreign-PID daemon: State = %q, want Running", rows[0].State)
+	}
+}
+
+// TestEnrichStatusWithRegistry_MaintenanceRowsBypassPortGuard guards the
+// Codex r1 P2 finding on PR #21 (DM-1 narrowing): the hub-wide
+// `mcp-local-hub-weekly-refresh` task is intentionally portless, and
+// status consumers rely on deriveState to convert its raw scheduler
+// state ("Ready" + future trigger) into the user-facing "Scheduled"
+// label. The DM-1 guard skipped deriveState for every Port==0 row,
+// which leaked raw "Ready" for the maintenance task and broke the
+// dashboard's maintenance-job state badge.
+//
+// The fix narrows the guard to `Port==0 && !IsMaintenance` — this test
+// asserts a maintenance row with raw "Ready" and a future NextRun
+// renders as "Scheduled" (post-deriveState), proving the guard no
+// longer over-skips. The companion DM-1 test
+// (TestEnrichStatusWithRegistry_OrphanGlobalDaemonPreservesRawState)
+// still passes because that row is non-maintenance so the guard fires
+// for it as before.
+func TestEnrichStatusWithRegistry_MaintenanceRowsBypassPortGuard(t *testing.T) {
+	dir := t.TempDir()
+	regPath := dir + "/ws.yaml"
+
+	rows := []DaemonStatus{
+		// Hub-wide weekly refresh — server="", daemon="weekly-refresh".
+		// IsMaintenance is set in the first pass of enrichStatus.
+		{
+			TaskName: `\mcp-local-hub-weekly-refresh`,
+			State:    "Ready",
+			NextRun:  "04.05.2026 3:00:00",
+		},
+		// Per-server weekly refresh — same maintenance treatment.
+		{
+			TaskName: `\mcp-local-hub-serena-weekly-refresh`,
+			State:    "Ready",
+			NextRun:  "04.05.2026 3:00:00",
+		},
+	}
+	enrichStatusWithRegistry(rows, dir, regPath)
+
+	for i, row := range rows {
+		if !row.IsMaintenance {
+			t.Errorf("rows[%d] (%s): IsMaintenance = false, want true",
+				i, row.TaskName)
+		}
+		if row.Port != 0 {
+			t.Errorf("rows[%d] (%s): Port = %d, want 0 (maintenance task)",
+				i, row.TaskName, row.Port)
+		}
+		if row.State != "Scheduled" {
+			t.Errorf("rows[%d] (%s): State = %q, want %q (deriveState must run for maintenance rows; raw Ready + future trigger → Scheduled)",
+				i, row.TaskName, row.State, "Scheduled")
+		}
+	}
+}
+
+// TestEnrichStatusWithRegistry_MaintenanceRowsNoTriggerBecomeStopped
+// verifies the same bypass produces the correct "Stopped" state when
+// the maintenance task has no future trigger (deriveState's other
+// branch). Without the bypass this row would also leak raw "Ready"
+// to the GUI.
+func TestEnrichStatusWithRegistry_MaintenanceRowsNoTriggerBecomeStopped(t *testing.T) {
+	dir := t.TempDir()
+	regPath := dir + "/ws.yaml"
+
+	rows := []DaemonStatus{
+		{
+			TaskName: `\mcp-local-hub-weekly-refresh`,
+			State:    "Ready",
+			NextRun:  "", // no upcoming trigger
+		},
+	}
+	enrichStatusWithRegistry(rows, dir, regPath)
+
+	if rows[0].State != "Stopped" {
+		t.Errorf("maintenance row with no trigger: State = %q, want %q",
+			rows[0].State, "Stopped")
+	}
+}
+
+// TestEnrichStatus_StateLifecycleTransitions walks ONE daemon row
+// through the realistic Running → Starting → Scheduled → Stopped →
+// Running lifecycle by varying the inputs to enrichStatus across
+// successive calls. Each step represents a real production state:
+//
+//  1. Running    — port bound by a foreign PID (healthy daemon)
+//  2. Starting   — port not bound but raw scheduler state still
+//                  "Running" (Task Scheduler mid-launch action)
+//  3. Scheduled  — port not bound, raw "Ready", future trigger
+//                  (weekly-refresh-style task waiting for next fire)
+//  4. Stopped    — port not bound, raw "Ready", no future trigger
+//                  (logon-only task whose process exited)
+//  5. Running    — port re-bound after operator hits Restart
+//
+// TestDeriveState covers the same mappings via deriveState() in
+// isolation, but DM-1's narrowing guard, the DM-2 selfPID skip, and
+// the IsMaintenance-bypass interaction are all in enrichStatus's
+// second pass. A regression that misroutes a row (e.g., re-broadens
+// the Port==0 guard or bypasses deriveState entirely) would still
+// leave TestDeriveState green; only a pipeline-level test catches it.
+//
+// IsMaintenance is false here — this is a per-daemon row, not a
+// weekly-refresh maintenance row. The lifecycle below is exactly
+// what an operator sees on `mcphub status` for a stdio bridge daemon
+// like memory or wolfram.
+func TestEnrichStatus_StateLifecycleTransitions(t *testing.T) {
+	dir := t.TempDir()
+	makeFakeManifest(t, dir+"/memory", "memory", 9123)
+
+	const foreignPID = 999998
+	if foreignPID == os.Getpid() {
+		t.Skip("test PID happens to be the foreignPID literal")
+	}
+
+	origBatch := lookupProcessBatch
+	defer func() { lookupProcessBatch = origBatch }()
+
+	// Helper: install a batch lookup that reports the daemon as alive
+	// at the given foreignPID for `port`. Empty map == port not bound.
+	setBatch := func(alivePort int) {
+		lookupProcessBatch = func(ports []int) map[int]struct {
+			PID       int
+			RAMBytes  uint64
+			UptimeSec int64
+		} {
+			out := make(map[int]struct {
+				PID       int
+				RAMBytes  uint64
+				UptimeSec int64
+			})
+			if alivePort != 0 {
+				for _, p := range ports {
+					if p == alivePort {
+						out[p] = struct {
+							PID       int
+							RAMBytes  uint64
+							UptimeSec int64
+						}{PID: foreignPID, RAMBytes: 50_000_000, UptimeSec: 10}
+					}
+				}
+			}
+			return out
+		}
+	}
+
+	steps := []struct {
+		name      string
+		raw       string
+		nextRun   string
+		alivePort int // 0 == port not bound; non-zero == bound by foreignPID
+		wantState string
+		wantPID   int
+	}{
+		{"1. Running (port bound, healthy)", "Running", "", 9123, "Running", foreignPID},
+		{"2. Starting (raw Running, port released mid-restart)", "Running", "", 0, "Starting", 0},
+		{"3. Scheduled (raw Ready + future trigger)", "Ready", "04.05.2026 3:00:00", 0, "Scheduled", 0},
+		{"4. Stopped (raw Ready, no future trigger)", "Ready", "", 0, "Stopped", 0},
+		{"5. Running again (port re-bound after Restart)", "Running", "", 9123, "Running", foreignPID},
+	}
+
+	for _, step := range steps {
+		t.Run(step.name, func(t *testing.T) {
+			setBatch(step.alivePort)
+			rows := []DaemonStatus{
+				{
+					TaskName: `\mcp-local-hub-memory-default`,
+					State:    step.raw,
+					NextRun:  step.nextRun,
+				},
+			}
+			enrichStatus(rows, dir)
+
+			if rows[0].State != step.wantState {
+				t.Errorf("State = %q, want %q (raw=%q alivePort=%d nextRun=%q)",
+					rows[0].State, step.wantState,
+					step.raw, step.alivePort, step.nextRun)
+			}
+			if rows[0].PID != step.wantPID {
+				t.Errorf("PID = %d, want %d", rows[0].PID, step.wantPID)
+			}
+			// Port mapping must work on every step regardless of liveness;
+			// regression guard against a future change that mishandles
+			// the manifest read inside one of the lifecycle states.
+			if rows[0].Port != 9123 {
+				t.Errorf("Port = %d, want 9123 (manifest mapping must be stable across states)",
+					rows[0].Port)
+			}
+			// Maintenance flag must stay false for per-daemon rows; a
+			// regression that flips this would route the row through
+			// deriveState even when the DM-1 guard should fire (e.g.,
+			// orphan global daemons), masking the very symptoms DM-1
+			// was written to fix.
+			if rows[0].IsMaintenance {
+				t.Errorf("IsMaintenance = true on per-daemon row (regression: would bypass DM-1 guard)")
+			}
+		})
 	}
 }
 
