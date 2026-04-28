@@ -3,46 +3,195 @@ package api
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
-func TestSettingsRoundTrip(t *testing.T) {
-	tmp := t.TempDir()
-	path := filepath.Join(tmp, "gui-preferences.yaml")
+func tmpSettings(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	return filepath.Join(dir, "gui-preferences.yaml")
+}
 
-	a := NewAPI()
-	if err := a.SettingsSetIn(path, "theme", "dark"); err != nil {
+func TestSettings_DefaultsResolve(t *testing.T) {
+	a := &API{}
+	all, err := a.SettingsListIn(tmpSettings(t))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := a.SettingsSetIn(path, "shell", "sidebar"); err != nil {
+	if all["appearance.theme"] != "system" {
+		t.Errorf("expected default 'system', got %q", all["appearance.theme"])
+	}
+	if _, has := all["advanced.open_app_data_folder"]; has {
+		t.Error("action keys must not appear in SettingsList output")
+	}
+}
+
+func TestSettings_SetAndGet(t *testing.T) {
+	a := &API{}
+	path := tmpSettings(t)
+	if err := a.SettingsSetIn(path, "appearance.theme", "dark"); err != nil {
 		t.Fatal(err)
 	}
+	got, err := a.SettingsGetIn(path, "appearance.theme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "dark" {
+		t.Errorf("expected 'dark', got %q", got)
+	}
+}
 
+func TestSettings_Set_RejectsUnknownKey(t *testing.T) {
+	a := &API{}
+	err := a.SettingsSetIn(tmpSettings(t), "no.such.key", "x")
+	if err == nil || !contains(err.Error(), "unknown setting") {
+		t.Fatalf("expected unknown-setting error, got %v", err)
+	}
+}
+
+func TestSettings_Set_RejectsBadValue(t *testing.T) {
+	a := &API{}
+	err := a.SettingsSetIn(tmpSettings(t), "appearance.theme", "puce")
+	if err == nil || !contains(err.Error(), "invalid value") {
+		t.Fatalf("expected validation error, got %v", err)
+	}
+}
+
+func TestSettings_Set_RejectsAction(t *testing.T) {
+	a := &API{}
+	err := a.SettingsSetIn(tmpSettings(t), "advanced.open_app_data_folder", "anything")
+	if err == nil {
+		t.Fatal("expected action-set rejection")
+	}
+}
+
+func TestSettings_Set_PreservesUnknownKeys(t *testing.T) {
+	// Codex r1 P2.1: a stale or future-unknown key must round-trip.
+	a := &API{}
+	path := tmpSettings(t)
+	// Seed a file with a known + an unknown key.
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	seeded := []byte("appearance.theme: dark\nfuture_unknown.key: hello\n")
+	if err := os.WriteFile(path, seeded, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Mutate a known key.
+	if err := a.SettingsSetIn(path, "appearance.theme", "light"); err != nil {
+		t.Fatal(err)
+	}
+	// Reload raw and assert the unknown key survived.
+	raw, err := readRawSettingsMap(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw["appearance.theme"] != "light" {
+		t.Errorf("known-key write lost: got %q", raw["appearance.theme"])
+	}
+	if raw["future_unknown.key"] != "hello" {
+		t.Errorf("unknown-key NOT preserved on rewrite (Codex r1 P2.1): got %q", raw["future_unknown.key"])
+	}
+	// And ensure SettingsList still doesn't expose the unknown.
 	all, err := a.SettingsListIn(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if all["theme"] != "dark" || all["shell"] != "sidebar" {
-		t.Errorf("round-trip: got %v, want {theme:dark, shell:sidebar}", all)
-	}
-
-	val, err := a.SettingsGetIn(path, "theme")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if val != "dark" {
-		t.Errorf("get theme: got %q, want dark", val)
+	if _, has := all["future_unknown.key"]; has {
+		t.Error("SettingsList must not expose unknown keys")
 	}
 }
 
-func TestSettingsGetMissingKey(t *testing.T) {
-	tmp := t.TempDir()
-	path := filepath.Join(tmp, "gui-preferences.yaml")
-	_ = os.WriteFile(path, []byte("theme: light\n"), 0600)
+func TestSettings_Concurrent_DistinctKeys(t *testing.T) {
+	// Codex r1 P1.5 + r3 P2.2: 10 settable registry keys, 10 goroutines,
+	// each writing one distinct key concurrently. After Wait, every key
+	// must still be present in the file.
+	a := &API{}
+	path := tmpSettings(t)
 
-	a := NewAPI()
-	_, err := a.SettingsGetIn(path, "nonexistent")
-	if err == nil {
-		t.Error("expected error for missing key, got nil")
+	type kv struct{ k, v string }
+	pairs := []kv{
+		{"appearance.theme", "dark"},
+		{"appearance.density", "compact"},
+		{"appearance.shell", "bash"},
+		{"appearance.default_home", "/home/x"},
+		{"gui_server.browser_on_launch", "false"},
+		{"gui_server.port", "9999"},
+		{"gui_server.tray", "false"},
+		{"daemons.weekly_schedule", "daily Mon 04:00"},
+		{"daemons.retry_policy", "linear"},
+		{"backups.keep_n", "12"},
 	}
+	var wg sync.WaitGroup
+	for _, p := range pairs {
+		wg.Add(1)
+		go func(p kv) {
+			defer wg.Done()
+			if err := a.SettingsSetIn(path, p.k, p.v); err != nil {
+				t.Errorf("set %q: %v", p.k, err)
+			}
+		}(p)
+	}
+	wg.Wait()
+	raw, err := readRawSettingsMap(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range pairs {
+		if raw[p.k] != p.v {
+			t.Errorf("lost write: %q expected %q got %q", p.k, p.v, raw[p.k])
+		}
+	}
+}
+
+func TestSettings_Concurrent_SameKey(t *testing.T) {
+	// Codex r3 P2.2: 20 goroutines writing the same key; round-robin
+	// through 3 valid enum values. File must always parse cleanly and
+	// final value must be one of the 3.
+	a := &API{}
+	path := tmpSettings(t)
+	values := []string{"light", "dark", "system"}
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if err := a.SettingsSetIn(path, "appearance.theme", values[i%3]); err != nil {
+				t.Errorf("set %d: %v", i, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	raw, err := readRawSettingsMap(path)
+	if err != nil {
+		t.Fatalf("file did not parse cleanly after concurrent writes: %v", err)
+	}
+	got := raw["appearance.theme"]
+	ok := false
+	for _, v := range values {
+		if got == v {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		t.Errorf("final value %q not in %v (torn write?)", got, values)
+	}
+}
+
+// contains is a tiny substring helper (avoids importing strings just here).
+func contains(haystack, needle string) bool {
+	return len(haystack) >= len(needle) && (haystack == needle ||
+		(len(haystack) > len(needle) && (haystack[:len(needle)] == needle ||
+			haystack[len(haystack)-len(needle):] == needle ||
+			indexOf(haystack, needle) >= 0)))
+}
+func indexOf(h, n string) int {
+	for i := 0; i+len(n) <= len(h); i++ {
+		if h[i:i+len(n)] == n {
+			return i
+		}
+	}
+	return -1
 }
