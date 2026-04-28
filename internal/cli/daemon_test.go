@@ -123,6 +123,83 @@ func TestWriteLaunchFailure_CreatesParentDir(t *testing.T) {
 	}
 }
 
+// TestDaemonWorkspaceProxyCmd_PreCanonicalizationFailure_LogsToFallback
+// guards the Codex r1 P2 finding on PR #21: the launch-failure defer
+// in newDaemonWorkspaceProxyCmd MUST be installed BEFORE
+// api.CanonicalWorkspacePath. The bot's concern: a stale workspace
+// registration (path moved/deleted) returns from
+// CanonicalWorkspacePath with an error before any defer was active in
+// the original code, leaving last_result=1 with no diagnostic — the
+// exact observability gap DM-3 set out to close.
+//
+// The fix moves the defer above CanonicalWorkspacePath and seeds
+// logPath with a `lazy-proxy-<lang>-pre.log` fallback (refined to the
+// canonical lsp-<wsKey>-<lang>.log after canonicalization succeeds).
+// This test exercises the failure path:
+//
+//   - --workspace points at a non-existent dir → CanonicalWorkspacePath
+//     fails → defer fires → writeLaunchFailure must land in the
+//     fallback log path under the redirected logBaseDir.
+//
+// If the defer regresses (someone moves it back below
+// CanonicalWorkspacePath, or the fallback path is dropped), the
+// fallback log won't exist and this test fails.
+func TestDaemonWorkspaceProxyCmd_PreCanonicalizationFailure_LogsToFallback(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("LOCALAPPDATA", tmpHome)
+	t.Setenv("XDG_STATE_HOME", tmpHome)
+
+	// Workspace path that cannot be canonicalized — never created on
+	// disk. CanonicalWorkspacePath calls EvalSymlinks → os.Stat which
+	// returns ENOENT here. The closure-captured logPath at defer time
+	// is still the pre-canonicalization fallback, which is what we
+	// want this test to verify.
+	missingWS := filepath.Join(tmpHome, "this-workspace-does-not-exist")
+
+	cmd := newDaemonWorkspaceProxyCmd()
+	var stderr bytes.Buffer
+	cmd.SetErr(&stderr)
+	cmd.SetOut(io.Discard)
+	cmd.SetArgs([]string{
+		"--port", "9999",
+		"--workspace", missingWS,
+		"--language", "go",
+	})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected workspace-proxy command to fail with non-existent workspace, got nil")
+	}
+
+	// The failure must land in the pre-canonicalization fallback path:
+	// <logBaseDir>/lazy-proxy-<lang>-pre.log. lsp-<wsKey>-<lang>.log
+	// would not exist because wsKey was never computed.
+	fallbackLog := filepath.Join(tmpHome, "mcp-local-hub", "logs", "lazy-proxy-go-pre.log")
+	data, readErr := os.ReadFile(fallbackLog)
+	if readErr != nil {
+		t.Fatalf("expected fallback log at %s, got read error: %v", fallbackLog, readErr)
+	}
+	content := string(data)
+
+	// Assert the diagnostic line was actually written. The daemon label
+	// in the pre-canonicalization branch is "lazy-proxy-<lang>", which
+	// is what users will grep for after seeing last_result=1 on the
+	// scheduler task.
+	for _, want := range []string{
+		"[mcphub-launch-failure",
+		"server=mcp-language-server",
+		"daemon=lazy-proxy-go",
+		// The original error must reach the log; the substring
+		// "canonical workspace path" is the exact wrap from
+		// daemon_workspace.go and proves the underlying error wasn't
+		// replaced by a generic message.
+		"canonical workspace path",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("fallback log missing %q; got:\n%s", want, content)
+		}
+	}
+}
+
 // TestDaemonCmd_RunFailure_AppendsToLog is the E2E for DM-3a: it
 // invokes the cobra `mcphub daemon` Cmd against an unknown server name
 // so the embedded manifest open fails. The defer-wrap on RunE MUST

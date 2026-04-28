@@ -208,6 +208,83 @@ func TestEnrichStatusWithRegistry_ForeignPIDIsAlive(t *testing.T) {
 	}
 }
 
+// TestEnrichStatusWithRegistry_MaintenanceRowsBypassPortGuard guards the
+// Codex r1 P2 finding on PR #21 (DM-1 narrowing): the hub-wide
+// `mcp-local-hub-weekly-refresh` task is intentionally portless, and
+// status consumers rely on deriveState to convert its raw scheduler
+// state ("Ready" + future trigger) into the user-facing "Scheduled"
+// label. The DM-1 guard skipped deriveState for every Port==0 row,
+// which leaked raw "Ready" for the maintenance task and broke the
+// dashboard's maintenance-job state badge.
+//
+// The fix narrows the guard to `Port==0 && !IsMaintenance` — this test
+// asserts a maintenance row with raw "Ready" and a future NextRun
+// renders as "Scheduled" (post-deriveState), proving the guard no
+// longer over-skips. The companion DM-1 test
+// (TestEnrichStatusWithRegistry_OrphanGlobalDaemonPreservesRawState)
+// still passes because that row is non-maintenance so the guard fires
+// for it as before.
+func TestEnrichStatusWithRegistry_MaintenanceRowsBypassPortGuard(t *testing.T) {
+	dir := t.TempDir()
+	regPath := dir + "/ws.yaml"
+
+	rows := []DaemonStatus{
+		// Hub-wide weekly refresh — server="", daemon="weekly-refresh".
+		// IsMaintenance is set in the first pass of enrichStatus.
+		{
+			TaskName: `\mcp-local-hub-weekly-refresh`,
+			State:    "Ready",
+			NextRun:  "04.05.2026 3:00:00",
+		},
+		// Per-server weekly refresh — same maintenance treatment.
+		{
+			TaskName: `\mcp-local-hub-serena-weekly-refresh`,
+			State:    "Ready",
+			NextRun:  "04.05.2026 3:00:00",
+		},
+	}
+	enrichStatusWithRegistry(rows, dir, regPath)
+
+	for i, row := range rows {
+		if !row.IsMaintenance {
+			t.Errorf("rows[%d] (%s): IsMaintenance = false, want true",
+				i, row.TaskName)
+		}
+		if row.Port != 0 {
+			t.Errorf("rows[%d] (%s): Port = %d, want 0 (maintenance task)",
+				i, row.TaskName, row.Port)
+		}
+		if row.State != "Scheduled" {
+			t.Errorf("rows[%d] (%s): State = %q, want %q (deriveState must run for maintenance rows; raw Ready + future trigger → Scheduled)",
+				i, row.TaskName, row.State, "Scheduled")
+		}
+	}
+}
+
+// TestEnrichStatusWithRegistry_MaintenanceRowsNoTriggerBecomeStopped
+// verifies the same bypass produces the correct "Stopped" state when
+// the maintenance task has no future trigger (deriveState's other
+// branch). Without the bypass this row would also leak raw "Ready"
+// to the GUI.
+func TestEnrichStatusWithRegistry_MaintenanceRowsNoTriggerBecomeStopped(t *testing.T) {
+	dir := t.TempDir()
+	regPath := dir + "/ws.yaml"
+
+	rows := []DaemonStatus{
+		{
+			TaskName: `\mcp-local-hub-weekly-refresh`,
+			State:    "Ready",
+			NextRun:  "", // no upcoming trigger
+		},
+	}
+	enrichStatusWithRegistry(rows, dir, regPath)
+
+	if rows[0].State != "Stopped" {
+		t.Errorf("maintenance row with no trigger: State = %q, want %q",
+			rows[0].State, "Stopped")
+	}
+}
+
 // TestDeriveState documents the four derived-state labels. lookupProcess
 // is nil in unit tests so `alive` is always false at the enrichStatus
 // boundary — exercise deriveState directly.

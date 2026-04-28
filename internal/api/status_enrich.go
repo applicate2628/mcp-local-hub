@@ -156,8 +156,9 @@ func enrichStatusWithRegistry(rows []DaemonStatus, manifestDir, registryPath str
 	// Second pass: fill PID/RAM/Uptime + derive state.
 	selfPID := selfPIDFn()
 	for i := range rows {
-		// DM-1 (extends the lazy-proxy escape hatch): any row with Port=0
-		// means we don't know which port to probe. Two real causes:
+		// DM-1 (extends the lazy-proxy escape hatch): orphan/lazy-proxy
+		// daemon rows with Port=0 mean we don't know which port to
+		// probe. Two real causes:
 		//   1) Workspace-scoped lazy-proxy whose registry entry couldn't
 		//      be resolved (corrupt / stale registry, orphan task).
 		//   2) Global daemon whose manifest isn't in this binary's embed
@@ -170,11 +171,14 @@ func enrichStatusWithRegistry(rows []DaemonStatus, manifestDir, registryPath str
 		// operator sees a permanently "Starting" daemon that is actually
 		// healthy. The lazy-proxy reasoning generalizes: if we don't know
 		// the port we can't probe alive, so the raw scheduler state is
-		// the most honest signal we have. The IsLazyProxyTaskName check
-		// is now redundant but harmless — keep the comment-anchor for
-		// the original lazy-proxy fix while the broader Port==0 guard
-		// catches the new orphan / manifest-asymmetry cases.
-		if rows[i].Port == 0 {
+		// the most honest signal we have.
+		//
+		// Maintenance rows (weekly-refresh) are intentionally portless;
+		// deriveState handles them correctly (raw "Ready" → "Scheduled",
+		// raw "Running" → "Refreshing"), so do NOT skip those — the
+		// IsMaintenance flag set in the first pass narrows this guard
+		// to the daemon-orphan case it was written for.
+		if rows[i].Port == 0 && !rows[i].IsMaintenance {
 			continue
 		}
 		alive := false

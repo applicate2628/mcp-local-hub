@@ -65,31 +65,44 @@ construct the backend lifecycle. Human invocation is not supported.`,
 			if serverFlag == "" {
 				serverFlag = "mcp-language-server"
 			}
+			// DM-3 mirror: capture launch failure into the lazy-proxy log
+			// file. Same reasoning as newDaemonCmdReal — Task Scheduler
+			// records last_result=1 but loses mcphub's stderr, so without
+			// this wrap registry/manifest/bind errors leave no diagnostic
+			// trail.
+			//
+			// Codex r1 P2 fix: install the defer BEFORE
+			// CanonicalWorkspacePath so stale workspace registrations
+			// (path moved/deleted) also produce a diagnostic line — that
+			// is the most common scheduler-failure path and the one with
+			// the worst observability gap. logPath starts as a
+			// pre-canonicalization fallback (`lazy-proxy-<lang>-pre.log`)
+			// and gets refined to `lsp-<wsKey>-<lang>.log` once wsKey is
+			// known. The deferred closure captures `logPath` by reference
+			// so the refinement is visible at fire time.
+			logPath := filepath.Join(logBaseDir(),
+				fmt.Sprintf("lazy-proxy-%s-pre.log", languageFlag))
+			daemonLabel := "lazy-proxy-" + languageFlag
+			defer func() {
+				if err != nil {
+					writeLaunchFailure(logPath,
+						"mcp-language-server",
+						daemonLabel,
+						err)
+				}
+			}()
 			canonical, err := api.CanonicalWorkspacePath(workspaceFlag)
 			if err != nil {
 				return fmt.Errorf("canonical workspace path: %w", err)
 			}
 			wsKey := api.WorkspaceKey(canonical)
-			// DM-3 mirror: capture launch failure into the lazy-proxy log
-			// file. Same reasoning as newDaemonCmdReal — Task Scheduler
-			// records last_result=1 but loses mcphub's stderr, so without
-			// this wrap registry/manifest/bind errors leave no diagnostic
-			// trail. logPath here matches what the proxy itself writes:
-			// `lsp-<wsKey>-<language>.log`. Computing it requires
-			// canonicalization (above) so the wrap is installed only after
-			// wsKey is known; the workspace+language guard above runs
-			// before any operation that can fail in a way the user would
-			// need help diagnosing.
-			launchLogPath := filepath.Join(logBaseDir(),
+			// Refine to the canonical lsp-<wsKey>-<lang>.log path now
+			// that wsKey is known; subsequent failures (registry, bind,
+			// manifest, …) land in the same file the proxy itself
+			// writes, so the GUI Logs picker can surface them too.
+			logPath = filepath.Join(logBaseDir(),
 				fmt.Sprintf("lsp-%s-%s.log", wsKey, languageFlag))
-			defer func() {
-				if err != nil {
-					writeLaunchFailure(launchLogPath,
-						"mcp-language-server",
-						"lsp-"+wsKey+"-"+languageFlag,
-						err)
-				}
-			}()
+			daemonLabel = "lsp-" + wsKey + "-" + languageFlag
 
 			regPath := registryOverride
 			if regPath == "" {
@@ -166,13 +179,13 @@ construct the backend lifecycle. Human invocation is not supported.`,
 				return fmt.Errorf("manifest %s lacks language %q", serverFlag, languageFlag)
 			}
 
-			// Reuse launchLogPath (computed above for the launch-failure
-			// defer) so the backend's child stdout/stderr and any
-			// pre-Serve mcphub-side error diagnostic land in the same
-			// file. Two log files for one daemon would split the log
-			// dropdown in the GUI and confuse "where did the failure
-			// go?" debugging.
-			logPath := launchLogPath
+			// Reuse the canonical logPath (refined above to
+			// lsp-<wsKey>-<lang>.log after canonicalization) so the
+			// backend's child stdout/stderr and any pre-Serve
+			// mcphub-side diagnostic land in the same file. Two log
+			// files for one daemon would split the log dropdown in
+			// the GUI and confuse "where did the failure go?"
+			// debugging.
 			lc := buildWorkspaceBackendLifecycle(spec, canonical, languageFlag, logPath)
 			if lc == nil {
 				return fmt.Errorf("unsupported backend %q for language %q", spec.Backend, languageFlag)
