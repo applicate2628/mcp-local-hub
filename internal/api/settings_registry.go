@@ -107,7 +107,9 @@ func findDef(key string) *SettingDef {
 }
 
 // stringHasControlChars returns true if s contains any byte < 0x20 or
-// the DEL byte 0x7F. Used by TypeString/TypePath syntactic validators.
+// the DEL byte 0x7F. Used by the TypeString and TypePath syntactic
+// validators to reject paths/strings with embedded control characters
+// (newlines, tabs, etc.) that break CLI output and downstream consumers.
 func stringHasControlChars(s string) bool {
 	for _, r := range s {
 		if r < 0x20 || r == 0x7F {
@@ -175,6 +177,9 @@ func validate(def *SettingDef, value string) error {
 		}
 		if strings.ContainsRune(value, 0) {
 			return fmt.Errorf("contains null byte")
+		}
+		if stringHasControlChars(value) {
+			return fmt.Errorf("contains control characters")
 		}
 		if value != strings.TrimSpace(value) {
 			return fmt.Errorf("has leading or trailing whitespace")

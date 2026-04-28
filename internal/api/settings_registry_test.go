@@ -117,6 +117,52 @@ func TestValidate_Path_OptionalEmpty(t *testing.T) {
 	}
 }
 
+func TestValidate_Path_RejectsControlChars(t *testing.T) {
+	// Codex PR #20 r14 P2: TypePath must reject embedded control chars
+	// (newline, tab, etc.) — same guard as TypeString. Without this,
+	// a path like "/tmp/foo\nbar" reaches the CLI output and downstream
+	// launch-path consumers, breaking both.
+	def := findDef("appearance.default_home")
+	if def.Type != TypePath {
+		t.Fatal("test setup: appearance.default_home must be TypePath")
+	}
+	cases := []struct {
+		name  string
+		value string
+	}{
+		{"newline in middle", "/tmp/foo\nbar"},
+		{"tab in middle", "/tmp/foo\tbar"},
+		{"carriage return", "/tmp/foo\rbar"},
+		{"DEL (0x7F)", "/tmp/foo\x7Fbar"},
+		{"vertical tab", "/tmp/foo\vbar"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validate(def, tc.value); err == nil {
+				t.Errorf("%s: expected control-char rejection, got nil", tc.name)
+			}
+		})
+	}
+}
+
+func TestValidate_Path_AcceptsValidNonEmpty(t *testing.T) {
+	// Sanity: ensure the new control-char guard doesn't reject normal paths.
+	def := findDef("appearance.default_home")
+	cases := []string{
+		"/home/user",
+		"C:\\Users\\dima",
+		"/tmp/foo bar with spaces in middle",
+		"relative/path",
+		"./dot-prefix",
+		"../parent",
+	}
+	for _, p := range cases {
+		if err := validate(def, p); err != nil {
+			t.Errorf("normal path %q must validate, got %v", p, err)
+		}
+	}
+}
+
 func TestValidate_Action_AlwaysRejects(t *testing.T) {
 	def := findDef("advanced.open_app_data_folder")
 	if err := validate(def, "anything"); err == nil {
