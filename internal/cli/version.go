@@ -4,29 +4,17 @@ import (
 	"runtime"
 
 	"github.com/spf13/cobra"
+
+	"mcp-local-hub/internal/buildinfo"
 )
 
-// Build metadata set by main.main() via SetBuildInfo. Unset defaults
-// ("dev", "unknown") apply to `go run` / non-build-script invocations.
-var (
-	buildVersion = "dev"
-	buildCommit  = "unknown"
-	buildDate    = "unknown"
-)
-
-// SetBuildInfo is called by main.main() before executing the root
-// command. Keeps build-time constants centralized in the cli package
-// instead of passed through every subcommand's context.
+// SetBuildInfo retains the cli package's existing public surface so
+// main.main() doesn't need to switch to a new import path. It
+// forwards into the canonical buildinfo store, which both this
+// package's `mcphub version` command and the gui's /api/version
+// handler read from.
 func SetBuildInfo(version, commit, date string) {
-	if version != "" {
-		buildVersion = version
-	}
-	if commit != "" {
-		buildCommit = commit
-	}
-	if date != "" {
-		buildDate = date
-	}
+	buildinfo.Set(version, commit, date)
 }
 
 func newVersionCmdReal() *cobra.Command {
@@ -50,9 +38,10 @@ Example:
       go version: go1.26.2
       platform:   windows/amd64`,
 		Run: func(cmd *cobra.Command, args []string) {
-			cmd.Printf("mcp-local-hub %s\n", buildVersion)
-			cmd.Printf("  commit:     %s\n", buildCommit)
-			cmd.Printf("  build date: %s\n", buildDate)
+			version, commit, date := buildinfo.Get()
+			cmd.Printf("mcp-local-hub %s\n", version)
+			cmd.Printf("  commit:     %s\n", commit)
+			cmd.Printf("  build date: %s\n", date)
 			cmd.Printf("  go version: %s\n", runtime.Version())
 			cmd.Printf("  platform:   %s/%s\n", runtime.GOOS, runtime.GOARCH)
 			cmd.Println()

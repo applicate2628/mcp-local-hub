@@ -3,6 +3,7 @@ import { useState, useEffect } from "preact/hooks";
 import { useRouter, type RouterState } from "./hooks/useRouter";
 import { useUnsavedChangesGuard } from "./hooks/useUnsavedChangesGuard";
 import { useSettingsSnapshot } from "./lib/use-settings-snapshot";
+import { AboutScreen } from "./screens/About";
 import { AddServerScreen } from "./screens/AddServer";
 import { DashboardScreen } from "./screens/Dashboard";
 import { LogsScreen } from "./screens/Logs";
@@ -108,6 +109,9 @@ export function App() {
       // Settings never creates a competing instance.
       body = <SettingsScreen key={discardKey} route={route} onDirtyChange={setSettingsDirty} snapshot={globalSettings} />;
       break;
+    case "about":
+      body = <AboutScreen />;
+      break;
     default:
       body = <p>Unknown screen: {route.screen}</p>;
   }
@@ -124,6 +128,7 @@ export function App() {
           <a href="#/dashboard"  class={route.screen === "dashboard"  ? "active" : ""} onClick={guardClick("dashboard")}>Dashboard</a>
           <a href="#/logs"       class={route.screen === "logs"       ? "active" : ""} onClick={guardClick("logs")}>Logs</a>
           <a href="#/settings"   class={route.screen === "settings"   ? "active" : ""} onClick={guardClick("settings")}>Settings</a>
+          <a href="#/about"      class={route.screen === "about"      ? "active" : ""} onClick={guardClick("about")}>About</a>
         </nav>
       </aside>
       <main id="screen-root">

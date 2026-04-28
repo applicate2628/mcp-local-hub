@@ -338,6 +338,7 @@ func NewServer(cfg Config) *Server {
 	registerSecretsRoutes(s)
 	registerSettingsRoutes(s)
 	registerBackupsRoutes(s)
+	registerVersionRoutes(s)
 	return s
 }
 
