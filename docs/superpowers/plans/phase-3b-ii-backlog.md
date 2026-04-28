@@ -73,6 +73,14 @@ Tracking document for Phase 3B-II — the "everything I cut from Phase 3B-I MVP"
 12. **C1 + C2** — `--force` take-over + browser focus (CLI/UX polish, Windows-specific wiring)
 13. **Release hardening** — D2 + D3 manual smoke matrix, write `docs/phase-3b-ii-verification.md`
 
+### Daemon-management hygiene follow-ups (post-A4-a, separate sprint)
+
+Surfaced during A4-a local smoke (2026-04-28) and confirmed via Codex consult. Independent of A4-a; deferred to a dedicated sprint.
+
+- **DM-1: Status `Starting` forever when manifest missing.** `deriveState(raw="Running", alive=false)` returns `"Starting"` whenever `Port=0`. For non-lazy daemons that means: any TaskScheduler entry without a corresponding manifest (e.g. `gdb` in repo dev tree, where the manifest only ships in `~/.local/bin/servers/`) gets stuck in `Starting` forever. Fix: (a) add `servers/gdb/manifest.yaml` to the repo so dev and installed binaries see the same set; (b) when `Port=0` and not a lazy proxy, preserve raw scheduler state instead of re-labeling to `Starting`. Cite memo §10.2 / `internal/api/status_enrich.go:200`.
+- **DM-2: Self-PID false-positive `Running`.** When mcphub-GUI is bound to a port that also appears in some daemon's manifest (e.g. `wolfram` declares port 9125, GUI defaults to `--port 9125`), the netstat-based liveness check sees the GUI's own PID and reports the daemon as alive with PID/RAM/uptime equal to the GUI process. Fix: skip rows whose detected PID matches the running mcphub-GUI's own `os.Getpid()`. Long-term: enforce disjoint port ranges for GUI vs daemon manifests. File: `internal/api/status_enrich.go` (`lookupProcessBatch` / `lookupProcess` consumers).
+- **DM-3: Restart race + lost spawn diagnostics.** Restart endpoint's stop→start window can fail with bind-port-already-in-use (manual `mcphub.exe daemon ...` invocation succeeds for the same daemon, confirming the daemon code is fine). Symptom: TaskScheduler `last_result=1` persists indefinitely after a failed restart cycle. Fix: (a) Restart should wait for port release before triggering `schtasks /Run`; (b) daemon wrapper (`internal/cli/daemon.go`) should write its own pre-child / RunE failure diagnostics to the daemon log path BEFORE returning non-zero, so the cause survives in `%LOCALAPPDATA%\mcp-local-hub\logs\<server>-<daemon>.log`. Codex Q3 diagnostic.
+
 **Estimated scope:** ~35-45 implementation tasks. D0 adds ~9-10 migration tasks; Playwright adds ~5-8 test-authoring tasks on top of UI tasks; budget accordingly.
 
 **Not included here** (out of scope for 3B-II entirely):
