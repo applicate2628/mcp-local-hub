@@ -40,6 +40,14 @@ export function ServersScreen() {
   const [statusByServer, setStatusByServer] = useState<Record<string, { state: string; port: number | null }>>({});
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState<DirtyMap>(new Map());
+  // PR #22 retry-queue UX fix: persist last-Apply outcomes so toggleCell
+  // can detect cells with a pending failed/gated retry and preserve
+  // their dirty entry instead of pruning on toggle-back. Without this,
+  // unticking a via-hub cell + Apply-fails + re-ticking would silently
+  // drop the failed retry from the queue (Apply gauge would gray out
+  // even though backend state never changed). The user lost their
+  // ability to re-Apply without leaving and reloading the page.
+  const [outcomes, setOutcomes] = useState<OutcomeMap>(new Map());
   const [applyMsg, setApplyMsg] = useState<string>("");
   const [applying, setApplying] = useState<boolean>(false);
   const [reloadToken, setReloadToken] = useState<number>(0);
@@ -90,7 +98,18 @@ export function ServersScreen() {
         }
         clients.set(client, direction);
       } else {
-        // Toggle-back: enforce the prune invariant (see DirtyMap doc).
+        // Toggle-back: prune invariant by default (DirtyMap doc).
+        // EXCEPTION (PR #22 retry-queue fix): if the cell carries a
+        // retained-failure outcome from the last applyChanges, preserve
+        // the dirty entry so the user can still re-click Apply for a
+        // retry. Without this exception, the user's reaction to a
+        // failure ("oops, let me put the box back") silently empties
+        // the retry queue and Apply gauge grays out — they have no
+        // way to retry without reloading the page.
+        const lastOutcome = outcomes.get(server)?.get(client);
+        if (lastOutcome === "failed" || lastOutcome === "gated") {
+          return prev;
+        }
         const clients = next.get(server);
         if (clients) {
           clients.delete(client);
@@ -208,6 +227,12 @@ export function ServersScreen() {
       }
       return next;
     });
+    // PR #22 retry-queue fix: hoist outcomes to state so toggleCell
+    // can detect retained-failure cells. Without this, outcomes
+    // (local var) is GC'd at end of applyChanges and the toggle-back
+    // path can't tell "user dismissing" from "user dismissing a
+    // pending retry".
+    setOutcomes(outcomes);
 
     // Always reload, regardless of failure count. §4 D6 rationale: the
     // Checkbox useEffect syncs local `checked` from `initialChecked`
@@ -275,6 +300,7 @@ export function ServersScreen() {
               key={server.name}
               server={server}
               status={statusByServer[server.name]}
+              outcomes={outcomes.get(server.name)}
               onToggle={toggleCell}
             />
           ))}
@@ -287,9 +313,10 @@ export function ServersScreen() {
 function ServerRowView(props: {
   server: ServerRow;
   status?: { state: string; port: number | null };
+  outcomes?: Map<string, Outcome>;
   onToggle: (server: string, client: string, nextChecked: boolean, initialChecked: boolean) => void;
 }) {
-  const { server, status, onToggle } = props;
+  const { server, status, outcomes, onToggle } = props;
   return (
     <tr>
       <td>
@@ -301,7 +328,13 @@ function ServerRowView(props: {
         </a>
       </td>
       {CLIENTS.map((client) => (
-        <CellView key={client} server={server} client={client} onToggle={onToggle} />
+        <CellView
+          key={client}
+          server={server}
+          client={client}
+          lastOutcome={outcomes?.get(client)}
+          onToggle={onToggle}
+        />
       ))}
       <td>{status?.port ?? "—"}</td>
       <td>{status?.state ?? "—"}</td>
@@ -312,9 +345,10 @@ function ServerRowView(props: {
 function CellView(props: {
   server: ServerRow;
   client: string;
+  lastOutcome?: Outcome;
   onToggle: (server: string, client: string, nextChecked: boolean, initialChecked: boolean) => void;
 }) {
-  const { server, client, onToggle } = props;
+  const { server, client, lastOutcome, onToggle } = props;
   // Treat undefined routing as "not-installed" — perClientRouting only
   // populates keys present in /api/scan's client_presence map.
   const routing: Routing = server.routing[client] ?? "not-installed";
@@ -341,13 +375,22 @@ function CellView(props: {
   } else if (routing === "unsupported") {
     title = `${client} cannot route this server through the hub (e.g., per-session servers).`;
   }
+  // PR #22 retry-queue fix: cell with a retained failure from the
+  // last applyChanges renders a red outline so the user sees the
+  // pending retry. The cell's checkbox visual still reflects the
+  // last user toggle; the outline is the "click Apply again to
+  // retry" affordance.
+  const retryPending = lastOutcome === "failed" || lastOutcome === "gated";
+  const cellTitle = retryPending
+    ? `${title ?? ""}\n\nLast Apply for this cell ${lastOutcome === "gated" ? "was gated by another failure on this client" : "failed"}; click Apply changes to retry.`.trim()
+    : title;
   return (
-    <td>
+    <td class={retryPending ? "matrix-cell-retry-pending" : ""} data-retry-pending={retryPending ? "true" : undefined}>
       <input
         type="checkbox"
         checked={checked}
         disabled={disabled}
-        title={title}
+        title={cellTitle}
         onChange={(ev) => {
           const next = (ev.currentTarget as HTMLInputElement).checked;
           setChecked(next);

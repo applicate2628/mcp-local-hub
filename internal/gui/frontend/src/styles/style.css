@@ -238,6 +238,15 @@ main { padding: 24px; overflow: auto; }
   margin-top: 0;
 }
 
+/* PR #22 retry-queue UX fix — Servers matrix cell with retained
+   failure from last applyChanges. Outlines the cell so the user
+   sees a pending retry that's preserved across toggle-back. The
+   `outline` (vs border) avoids re-flowing the cell layout. */
+.matrix-cell-retry-pending {
+  outline: 2px solid var(--danger, #cf222e);
+  outline-offset: -2px;
+}
+
 /* A5 About screen — Phase 3B-II completion (PR #22) */
 .about-screen {
   padding: 1rem;
