@@ -66,7 +66,8 @@ Tracking document for Phase 3B-II — the "everything I cut from Phase 3B-I MVP"
 6. **A2** — Add/Edit manifest form (largest UI surface; depends on B2 for prefill)
 7. **A3-a** — Secrets registry screen ✅ — see [docs/superpowers/plans/2026-04-25-phase-3b-ii-a3a-secrets-screen.md](2026-04-25-phase-3b-ii-a3a-secrets-screen.md). Memo: [docs/superpowers/specs/2026-04-25-phase-3b-ii-a3a-secrets-screen-design.md](../specs/2026-04-25-phase-3b-ii-a3a-secrets-screen-design.md). PR pending user review.
 8. **A3-b** — env.secret picker in AddServer/EditServer forms ✅ — see [docs/superpowers/plans/2026-04-26-phase-3b-ii-a3b-env-secret-picker.md](2026-04-26-phase-3b-ii-a3b-env-secret-picker.md). Memo: [docs/superpowers/specs/2026-04-26-phase-3b-ii-a3b-env-secret-picker-design.md](../specs/2026-04-26-phase-3b-ii-a3b-env-secret-picker-design.md).
-9. **A4** — Settings screen
+9. **A4-a** — Settings screen ✅ — see [docs/superpowers/plans/2026-04-27-phase-3b-ii-a4-settings.md](2026-04-27-phase-3b-ii-a4-settings.md). Memo: [docs/superpowers/specs/2026-04-27-phase-3b-ii-a4-settings-design.md](../specs/2026-04-27-phase-3b-ii-a4-settings-design.md). Merge SHA: <FILL-AT-MERGE>.
+9b. **A4-b** — Settings lifecycle: tray, port live-rebind, weekly schedule edit, retry policy, Clean now confirm, export bundle.
 10. **A5** — About screen
 11. **C3 + C4** — Tray icon state variants + toast notifications (polish after SSE event handling is mature)
 12. **C1 + C2** — `--force` take-over + browser focus (CLI/UX polish, Windows-specific wiring)
