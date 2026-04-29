@@ -312,7 +312,32 @@ func runForceKill(cmd *cobra.Command, pidportPath string, yes bool) (*gui.Single
 	// Print diagnostic so the operator sees what we're about to kill.
 	fmt.Fprintln(cmd.OutOrStdout(), formatDiagnostic(v, pidportPath))
 
-	// Gate 2: confirmation prompt unless --yes.
+	// Gate 2 (Codex iter-6 P2 #1): only LiveUnreachable is a kill
+	// target. Malformed and DeadPID skip the destructive prompt and
+	// exit with the documented unrecoverable / already-recovered
+	// codes. Without this gate, a corrupt pidport (PID 0) or a dead
+	// recorded PID would still ask "Kill PID 0?" before any kill,
+	// and "Enter to cancel" would silently exit 0 even though
+	// nothing could have been killed.
+	switch v.Class {
+	case gui.VerdictMalformed:
+		return nil, 2
+	case gui.VerdictDeadPID:
+		// Probe says the recorded PID is already gone — the OS
+		// should have released the flock as a side effect. Map to
+		// exit 3 (race-lost / already-recovered semantic per memo
+		// §Exit codes).
+		return nil, 3
+	case gui.VerdictLiveUnreachable:
+		// fall through to prompt + KillRecordedHolder
+	default:
+		fmt.Fprintf(cmd.OutOrStderr(),
+			"internal: unexpected verdict class %q from Probe; refusing kill\n",
+			v.Class.String())
+		return nil, 1
+	}
+
+	// Gate 3: confirmation prompt unless --yes.
 	if !yes {
 		fmt.Fprintf(cmd.OutOrStdout(), "Kill PID %d (mcphub gui)? [y/N]: ", v.PID)
 		var resp string

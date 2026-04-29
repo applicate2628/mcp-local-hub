@@ -431,6 +431,87 @@ func TestForce_KillNonInteractiveWithoutYesExits6(t *testing.T) {
 }
 
 // ---------------------------------------------------------------
+// Codex iter-6 P2 #1: --force --kill against non-killable verdicts
+// must NOT prompt the operator.
+// ---------------------------------------------------------------
+
+// TestForce_KillMalformedPidport_NoPromptExits2 pins the iter-6 fix:
+// a corrupt pidport (Probe → VerdictMalformed) must skip the kill
+// confirmation prompt entirely and return exit 2 — pre-fix behavior
+// was to ask "Kill PID 0 (mcphub gui)? [y/N]" and let Enter "cancel"
+// silently exit 0 even though no kill was possible.
+func TestForce_KillMalformedPidport_NoPromptExits2(t *testing.T) {
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+	if err := os.WriteFile(pidport, []byte("garbage not a pidport"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fl := flock.New(pidport + ".lock")
+	if ok, _ := fl.TryLock(); !ok {
+		t.Fatal("could not pre-lock")
+	}
+	defer fl.Unlock()
+
+	c := newGuiCmdRealForTest()
+	// --yes ensures we don't depend on TTY check (which fires first
+	// at exit 6 in go test). The iter-6 gating is between Probe and
+	// the prompt and must fire even in --yes mode.
+	c.SetArgs([]string{"--port", "0", "--no-browser", "--no-tray", "--force", "--kill", "--yes"})
+	t.Setenv("MCPHUB_GUI_TEST_PIDPORT_DIR", dir)
+	err := c.Execute()
+	var fe interface{ ExitCode() int }
+	if !errors.As(err, &fe) {
+		t.Fatalf("expected typed exit code error; got %v", err)
+	}
+	if fe.ExitCode() != 2 {
+		t.Errorf("exit code = %d, want 2 (Malformed skips kill prompt)", fe.ExitCode())
+	}
+}
+
+// TestForce_KillDeadPID_NoPromptExits3 pins iter-6 P2 #1 for the
+// VerdictDeadPID branch: a pidport pointing at a dead PID skips the
+// prompt and returns exit 3 (race-lost / already-recovered).
+func TestForce_KillDeadPID_NoPromptExits3(t *testing.T) {
+	// Find a likely-dead PID: spawn a short-lived child, capture its
+	// PID, wait for it to exit. PID may recycle on long-uptime
+	// systems, but the probability over a sub-second test window is
+	// negligible.
+	var deadCmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		deadCmd = exec.Command("cmd", "/C", "exit", "0")
+	} else {
+		deadCmd = exec.Command("sh", "-c", "exit 0")
+	}
+	if err := deadCmd.Run(); err != nil {
+		t.Skipf("cannot spawn short-lived child: %v", err)
+	}
+	deadPid := deadCmd.Process.Pid
+
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+	if err := os.WriteFile(pidport, []byte(fmt.Sprintf("%d 1\n", deadPid)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fl := flock.New(pidport + ".lock")
+	if ok, _ := fl.TryLock(); !ok {
+		t.Fatal("could not pre-lock")
+	}
+	defer fl.Unlock()
+
+	c := newGuiCmdRealForTest()
+	c.SetArgs([]string{"--port", "0", "--no-browser", "--no-tray", "--force", "--kill", "--yes"})
+	t.Setenv("MCPHUB_GUI_TEST_PIDPORT_DIR", dir)
+	err := c.Execute()
+	var fe interface{ ExitCode() int }
+	if !errors.As(err, &fe) {
+		t.Fatalf("expected typed exit code error; got %v", err)
+	}
+	if fe.ExitCode() != 3 {
+		t.Errorf("exit code = %d, want 3 (DeadPID skips kill prompt)", fe.ExitCode())
+	}
+}
+
+// ---------------------------------------------------------------
 // Scenario 7: --force --kill race-lost → exit 3
 // ---------------------------------------------------------------
 
