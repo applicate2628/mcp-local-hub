@@ -930,7 +930,11 @@ func TestForce_KillNonGUIMcphubSubcommand_RefusedBeforePrompt(t *testing.T) {
 	if !strings.Contains(got, "kill refused") {
 		t.Errorf("output = %q; want a 'kill refused' line so operator sees the refusal reason", got)
 	}
-	if !strings.Contains(got, "argv subcommand is not 'gui'") {
+	// Codex iter-10 P2 #2 redacted: format is now `argv subcommand
+	// is "<token>", not 'gui'` (only the offending subcommand, not
+	// the full argv, to avoid leaking secrets from commands like
+	// `mcphub secrets set --value <SECRET>`).
+	if !strings.Contains(got, `argv subcommand is "daemon", not 'gui'`) {
 		t.Errorf("output = %q; want the argv-gate diagnose so operator knows WHICH gate refused", got)
 	}
 }

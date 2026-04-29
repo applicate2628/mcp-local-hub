@@ -595,8 +595,11 @@ func TestKillRecordedHolder_LongArgv0_DoesNotPassGate(t *testing.T) {
 	}
 	// Diagnose must mention the argv gate, NOT image basename or
 	// start-time, to prove the truncation bug is what we caught.
-	if !strings.Contains(v.Diagnose, "argv subcommand is not 'gui'") {
-		t.Errorf("Diagnose = %q; want argv-gate message proving the gate read raw argv", v.Diagnose)
+	// Codex iter-10 P2 #2 redacted the diagnostic to print only the
+	// offending subcommand token (here "daemon"), not the full argv,
+	// to avoid leaking secrets from `mcphub secrets set --value …`.
+	if !strings.Contains(v.Diagnose, `argv subcommand is "daemon", not 'gui'`) {
+		t.Errorf("Diagnose = %q; want argv-gate message proving the gate read raw argv (post-iter-10 redacted format)", v.Diagnose)
 	}
 	// PIDCmdline (public/display field) should be truncated to ~1KB
 	// for safe display; pidCmdlineRaw on the verdict should still

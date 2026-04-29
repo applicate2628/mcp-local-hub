@@ -94,7 +94,12 @@ activates the first window and exits 0.`,
 				//     appropriate exit code.
 				if force {
 					if kill {
-						newLock, exitCode := runForceKill(cmd, pidportPath, yes)
+						// Codex iter-10 P2 #1: pass signal-aware ctx
+						// (from signal.NotifyContext above) so Ctrl+C
+						// during the kill path actually cancels the
+						// destructive operation. cmd.Context() is the
+						// cobra parent context and ignores SIGINT.
+						newLock, exitCode := runForceKill(ctx, cmd, pidportPath, yes)
 						if newLock != nil {
 							// Take-over succeeded: continue into Phase B
 							// with the freshly-acquired lock. Helper
@@ -103,7 +108,7 @@ activates the first window and exits 0.`,
 						}
 						return forceExit(exitCode)
 					}
-					exitCode := runForceDiagnostic(cmd, pidportPath)
+					exitCode := runForceDiagnostic(ctx, cmd, pidportPath)
 					return forceExit(exitCode)
 				}
 				if err := gui.TryActivateIncumbent(pidportPath, 2*time.Second); err != nil {
@@ -270,8 +275,12 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 // runForceDiagnostic implements the bare `--force` flow: Probe,
 // print structured block, open lock folder, return exit code 2 (or
 // 0 on Healthy fall-through to handshake).
-func runForceDiagnostic(cmd *cobra.Command, pidportPath string) int {
-	v := gui.Probe(cmd.Context(), pidportPath)
+//
+// ctx is the signal-aware context from RunE so Ctrl+C/SIGTERM
+// during Probe (which makes a network call) cancels promptly.
+// (Codex iter-10 P2 #1.)
+func runForceDiagnostic(ctx context.Context, cmd *cobra.Command, pidportPath string) int {
+	v := gui.Probe(ctx, pidportPath)
 	if v.Class == gui.VerdictHealthy {
 		// Healthy → fall through to TryActivateIncumbent (legacy
 		// handshake). Returning 0 signals the caller to handshake.
@@ -290,14 +299,20 @@ func runForceDiagnostic(cmd *cobra.Command, pidportPath string) int {
 // runForceKill implements `--force --kill`. Returns
 // (acquiredLock, exitCode). On success acquiredLock is non-nil and
 // exitCode==0; the caller continues into Phase B.
-func runForceKill(cmd *cobra.Command, pidportPath string, yes bool) (*gui.SingleInstanceLock, int) {
+//
+// ctx is the signal-aware context from RunE (from signal.NotifyContext)
+// so Ctrl+C/SIGTERM during the kill path is honored — including the
+// post-kill wait-for-exit loop and the acquire-poll loop inside
+// KillRecordedHolder. cmd.Context() would NOT receive SIGINT.
+// (Codex iter-10 P2 #1.)
+func runForceKill(ctx context.Context, cmd *cobra.Command, pidportPath string, yes bool) (*gui.SingleInstanceLock, int) {
 	// Gate 0 (Claude r2 #3): non-TTY without --yes → exit 6.
 	if !yes && !term.IsTerminal(int(os.Stdin.Fd())) {
 		fmt.Fprintln(cmd.OutOrStderr(), "non-interactive shell — pass --yes to confirm --kill")
 		return nil, 6
 	}
 
-	v := gui.Probe(cmd.Context(), pidportPath)
+	v := gui.Probe(ctx, pidportPath)
 
 	// Gate 1: Healthy early-exit (Codex r5 #7b): never kill a healthy gui.
 	if v.Class == gui.VerdictHealthy {
@@ -374,7 +389,7 @@ func runForceKill(cmd *cobra.Command, pidportPath string, yes bool) (*gui.Single
 	// guard runs even on --yes because the prompt-skip path still
 	// has a sub-second TOCTOU window between this Probe and the one
 	// inside KillRecordedHolder.
-	lock, killVerdict, err := gui.KillRecordedHolder(cmd.Context(), pidportPath, gui.KillOpts{
+	lock, killVerdict, err := gui.KillRecordedHolder(ctx, pidportPath, gui.KillOpts{
 		Expected: gui.ExpectedIdentity{PID: v.PID, Port: v.Port, Mtime: v.Mtime},
 	})
 	if killVerdict.Class == gui.VerdictKilledRecovered {

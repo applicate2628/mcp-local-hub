@@ -744,8 +744,21 @@ func checkIdentityGateInternal(v Verdict) (refused bool, diagnose, hint, errReas
 	// non-GUI mcphub subcommand whose long path triggers truncation
 	// to pass the len(argv)==1 branch.
 	if !cmdlineIsGui(v.pidCmdlineRaw) {
+		// Codex iter-10 P2 #2: print ONLY the offending subcommand
+		// token (argv[1]), not the full argv. mcphub commands like
+		// `mcphub secrets set --value <SECRET>` carry secret material
+		// in argv; if a stale/recycled/corrupt pidport points at one
+		// of those processes, echoing the full argv leaks the secret
+		// into stderr/CI logs. The gate decision only depends on
+		// argv[1], so that's all the diagnostic needs.
+		var subcommand string
+		if len(v.pidCmdlineRaw) >= 2 {
+			subcommand = v.pidCmdlineRaw[1]
+		} else {
+			subcommand = "(none)"
+		}
 		return true,
-			fmt.Sprintf("recorded PID %d argv subcommand is not 'gui' (argv=%v)", v.PID, v.PIDCmdline),
+			fmt.Sprintf("recorded PID %d argv subcommand is %q, not 'gui'", v.PID, subcommand),
 			"Identity-gate (argv subcommand) failed; the recorded PID is a different mcphub subcommand.",
 			"argv gate"
 	}
