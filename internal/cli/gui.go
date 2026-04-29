@@ -321,7 +321,11 @@ func runForceKill(cmd *cobra.Command, pidportPath string, yes bool) (*gui.Single
 	// nothing could have been killed.
 	switch v.Class {
 	case gui.VerdictMalformed:
-		return nil, 2
+		// Codex iter-8 P2 #2: kill-mode malformed maps to exit 4
+		// (pidport unrecoverable) per memo §"Exit codes". Bare
+		// --force diagnostic uses exit 2; --force --kill is a
+		// distinct contract and CI scripts must distinguish them.
+		return nil, 4
 	case gui.VerdictDeadPID:
 		// Probe says the recorded PID is already gone — the OS
 		// should have released the flock as a side effect. Map to

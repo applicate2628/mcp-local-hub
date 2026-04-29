@@ -415,6 +415,22 @@ func probeOnce(ctx context.Context, pidportPath string, pingTimeout time.Duratio
 		v.Hint = "Reboot to clear the lock; do NOT delete gui.pidport.lock under a live holder (see CLAUDE.md §Stuck-instance recovery)."
 		return v
 	}
+	// Codex iter-8 P2 #1: out-of-range port is also a Malformed
+	// verdict. A corrupt port (e.g., -1, 70000) parses fine through
+	// ReadPidport but causes ping to fail unconditionally; without
+	// this guard, --force --kill could classify the holder as
+	// LiveUnreachable and kill an otherwise-healthy GUI whose only
+	// flaw is bad metadata. TCP ports are 0..65535; 0 is the
+	// well-known "auto-assign placeholder" that AcquireSingleInstance
+	// writes before Server.Start binds, so it's not an error.
+	if port < 0 || port > 65535 {
+		v.Class = VerdictMalformed
+		v.PID = pid
+		v.Port = port
+		v.Diagnose = fmt.Sprintf("pidport port %d out of range (0..65535)", port)
+		v.Hint = "Reboot to clear the lock; do NOT delete gui.pidport.lock under a live holder (see CLAUDE.md §Stuck-instance recovery)."
+		return v
+	}
 	v.PID = pid
 	v.Port = port
 	if st, statErr := os.Stat(pidportPath); statErr == nil {

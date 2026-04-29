@@ -435,12 +435,12 @@ func TestForce_KillNonInteractiveWithoutYesExits6(t *testing.T) {
 // must NOT prompt the operator.
 // ---------------------------------------------------------------
 
-// TestForce_KillMalformedPidport_NoPromptExits2 pins the iter-6 fix:
-// a corrupt pidport (Probe → VerdictMalformed) must skip the kill
-// confirmation prompt entirely and return exit 2 — pre-fix behavior
-// was to ask "Kill PID 0 (mcphub gui)? [y/N]" and let Enter "cancel"
-// silently exit 0 even though no kill was possible.
-func TestForce_KillMalformedPidport_NoPromptExits2(t *testing.T) {
+// TestForce_KillMalformedPidport_NoPromptExits4 pins the iter-6 fix
+// (no destructive prompt for non-killable verdicts) AND the iter-8
+// P2 #2 exit-code update: kill-mode malformed → exit 4 ("pidport
+// unrecoverable" per memo §Exit codes), not exit 2 (which is
+// reserved for bare --force diagnostic).
+func TestForce_KillMalformedPidport_NoPromptExits4(t *testing.T) {
 	dir := t.TempDir()
 	pidport := filepath.Join(dir, "gui.pidport")
 	if err := os.WriteFile(pidport, []byte("garbage not a pidport"), 0o600); err != nil {
@@ -463,8 +463,43 @@ func TestForce_KillMalformedPidport_NoPromptExits2(t *testing.T) {
 	if !errors.As(err, &fe) {
 		t.Fatalf("expected typed exit code error; got %v", err)
 	}
-	if fe.ExitCode() != 2 {
-		t.Errorf("exit code = %d, want 2 (Malformed skips kill prompt)", fe.ExitCode())
+	if fe.ExitCode() != 4 {
+		t.Errorf("exit code = %d, want 4 (kill-mode pidport unrecoverable per iter-8 P2 #2)", fe.ExitCode())
+	}
+}
+
+// TestForce_KillOutOfRangePort_ClassifiesMalformed pins the iter-8
+// P2 #1 fix: a pidport with a live PID but a corrupt out-of-range
+// port (e.g. 70000) must classify as VerdictMalformed and exit 4
+// in kill mode — NOT pass through to the LiveUnreachable kill path
+// where the otherwise-healthy GUI would be terminated for bad
+// metadata alone.
+func TestForce_KillOutOfRangePort_ClassifiesMalformed(t *testing.T) {
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+	// Use os.Getpid() so PID is alive (we want to assert the port
+	// validation kicks in BEFORE the kill path; without the iter-8
+	// fix this would have classified as LiveUnreachable and tried
+	// to kill the test runner itself via the identity gate).
+	if err := os.WriteFile(pidport, []byte(fmt.Sprintf("%d 70000\n", os.Getpid())), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fl := flock.New(pidport + ".lock")
+	if ok, _ := fl.TryLock(); !ok {
+		t.Fatal("could not pre-lock")
+	}
+	defer fl.Unlock()
+
+	c := newGuiCmdRealForTest()
+	c.SetArgs([]string{"--port", "0", "--no-browser", "--no-tray", "--force", "--kill", "--yes"})
+	t.Setenv("MCPHUB_GUI_TEST_PIDPORT_DIR", dir)
+	err := c.Execute()
+	var fe interface{ ExitCode() int }
+	if !errors.As(err, &fe) {
+		t.Fatalf("expected typed exit code error; got %v", err)
+	}
+	if fe.ExitCode() != 4 {
+		t.Errorf("exit code = %d, want 4 (out-of-range port → Malformed in kill mode)", fe.ExitCode())
 	}
 }
 

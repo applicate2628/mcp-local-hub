@@ -243,7 +243,7 @@ func fmtSscanf(s, format string, args ...any) (int, error) {
 - [ ] **Step 1.2: Run tests to verify they fail (no implementation yet)**
 
 ```bash
-cd d:/dev/mcp-local-hub
+cd <repo-root>  # i.e. the directory containing go.mod
 go test ./internal/gui/ -run "TestProcessID_|TestPingIncumbent_|TestKillProcess_" -v
 ```
 
@@ -721,7 +721,7 @@ func matchBasename(path string) bool {
 - [ ] **Step 1.6: Run tests to verify they pass**
 
 ```bash
-cd d:/dev/mcp-local-hub
+cd <repo-root>  # i.e. the directory containing go.mod
 go test ./internal/gui/ -run "TestProcessID_|TestPingIncumbent_|TestKillProcess_" -v
 ```
 
@@ -844,7 +844,7 @@ func (*spawnTestError) Error() string { return "spawn-test-error" }
 - [ ] **Step 2.2: Run test to verify it fails**
 
 ```bash
-cd d:/dev/mcp-local-hub
+cd <repo-root>  # i.e. the directory containing go.mod
 go test ./internal/gui/ -run "TestOpenFolderAt_" -v
 ```
 
@@ -932,7 +932,7 @@ func openFolderImpl(path string) error {
 - [ ] **Step 2.6: Run test to verify it passes**
 
 ```bash
-cd d:/dev/mcp-local-hub
+cd <repo-root>  # i.e. the directory containing go.mod
 go test ./internal/gui/ -run "TestOpenFolderAt_" -v
 ```
 
@@ -973,7 +973,7 @@ swallowed spawn error)."
 - [ ] **Step 3.1: Confirm no existing `single_instance_test.go`**
 
 ```bash
-cd d:/dev/mcp-local-hub
+cd <repo-root>  # i.e. the directory containing go.mod
 ls internal/gui/single_instance_test.go 2>&1
 ```
 
@@ -1183,7 +1183,7 @@ var _ = time.Now
 - [ ] **Step 3.3: Run tests to verify they fail**
 
 ```bash
-cd d:/dev/mcp-local-hub
+cd <repo-root>  # i.e. the directory containing go.mod
 go test ./internal/gui/ -run "TestProbe_|TestKillRecordedHolder_|TestVerdict" -v
 ```
 
@@ -1488,7 +1488,7 @@ import (
 - [ ] **Step 3.5: Run tests to verify they pass**
 
 ```bash
-cd d:/dev/mcp-local-hub
+cd <repo-root>  # i.e. the directory containing go.mod
 go test ./internal/gui/ -run "TestProbe_|TestKillRecordedHolder_|TestVerdict" -v
 ```
 
@@ -1497,7 +1497,7 @@ Expected: all 7 tests PASS.
 - [ ] **Step 3.6: Run full gui package tests to verify no regression**
 
 ```bash
-cd d:/dev/mcp-local-hub
+cd <repo-root>  # i.e. the directory containing go.mod
 go test ./internal/gui/ -v 2>&1 | tail -10
 ```
 
@@ -1561,7 +1561,7 @@ gate-fail + healthy early-exit + json:'-' tag enforcement."
 - [ ] **Step 4.1: Read current state**
 
 ```bash
-cd d:/dev/mcp-local-hub
+cd <repo-root>  # i.e. the directory containing go.mod
 sed -n '37,80p' internal/cli/gui.go
 ```
 
@@ -1855,7 +1855,7 @@ if err != nil {
 - [ ] **Step 4.3: Verify compile**
 
 ```bash
-cd d:/dev/mcp-local-hub
+cd <repo-root>  # i.e. the directory containing go.mod
 go build ./...
 ```
 
@@ -2404,7 +2404,7 @@ if postKillHook != nil {
 - [ ] **Step 5.2: Run all 8 scenarios**
 
 ```bash
-cd d:/dev/mcp-local-hub
+cd <repo-root>  # i.e. the directory containing go.mod
 go test ./internal/cli/ -run "TestForce_" -v -timeout 60s
 ```
 
@@ -2413,7 +2413,7 @@ Expected: all 8 PASS (some may take ~5-10s for the subprocess scenario).
 - [ ] **Step 5.3: Run full test suite to verify no regression**
 
 ```bash
-cd d:/dev/mcp-local-hub
+cd <repo-root>  # i.e. the directory containing go.mod
 go test ./... 2>&1 | tail -15
 ```
 
@@ -2582,7 +2582,7 @@ locally."
 - [ ] **Step 7.1: Run all unit + e2e tests**
 
 ```bash
-cd d:/dev/mcp-local-hub
+cd <repo-root>  # i.e. the directory containing go.mod
 go test ./... 2>&1 | tail -25
 ```
 
@@ -2591,7 +2591,7 @@ Expected: every line ends with `ok` or shows skip/no-tests; no `FAIL`.
 - [ ] **Step 7.2: Vet + typecheck**
 
 ```bash
-cd d:/dev/mcp-local-hub
+cd <repo-root>  # i.e. the directory containing go.mod
 go vet ./...
 ```
 
@@ -2600,7 +2600,7 @@ Expected: no diagnostic output.
 - [ ] **Step 7.3: Build the binary and verify version**
 
 ```bash
-cd d:/dev/mcp-local-hub
+cd <repo-root>  # i.e. the directory containing go.mod
 go build -o /tmp/mcphub_c1_test ./cmd/mcphub
 /tmp/mcphub_c1_test gui --help 2>&1 | head -20
 ```
@@ -2610,7 +2610,7 @@ Expected: `gui --help` shows Use/Short/Long; `--force / --kill / --yes` are NOT 
 - [ ] **Step 7.4: Verify branch has the expected commits**
 
 ```bash
-cd d:/dev/mcp-local-hub
+cd <repo-root>  # i.e. the directory containing go.mod
 git log --oneline master..HEAD
 ```
 
