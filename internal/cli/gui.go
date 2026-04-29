@@ -101,13 +101,30 @@ activates the first window and exits 0.`,
 				// terminals running in the repo dir, file explorer,
 				// etc.). Without the unique suffix the focus call
 				// silently steals foreground for the wrong window.
-				if err := gui.FocusBrowserWindow("Local Dashboard"); err != nil {
-					url := fmt.Sprintf("http://127.0.0.1:%d/", s.Port())
-					if launchErr := gui.LaunchBrowser(url); launchErr != nil {
-						fmt.Fprintf(cmd.OutOrStderr(),
-							"activate-window: focus failed (%v); browser launch also failed: %v\n",
-							err, launchErr)
-					}
+				err := gui.FocusBrowserWindow("Local Dashboard")
+				if err == nil {
+					return
+				}
+				// Codex PR #22 r3 P2: only fall back to LaunchBrowser
+				// when enumeration completed without a matching
+				// window (gui.ErrFocusNoWindow sentinel). Other
+				// failures — Win32 transient SetForegroundWindow
+				// rejection on Windows 10+ when our thread isn't
+				// foreground, syscall plumbing regressions, etc. —
+				// must NOT spawn a duplicate dashboard. The
+				// non-Windows stub also wraps ErrFocusNoWindow so
+				// "Open dashboard" on Linux/macOS still launches a
+				// fresh browser (no tray to focus there anyway).
+				if !errors.Is(err, gui.ErrFocusNoWindow) {
+					fmt.Fprintf(cmd.OutOrStderr(),
+						"activate-window: focus failed (no fallback for non-no-window error): %v\n", err)
+					return
+				}
+				url := fmt.Sprintf("http://127.0.0.1:%d/", s.Port())
+				if launchErr := gui.LaunchBrowser(url); launchErr != nil {
+					fmt.Fprintf(cmd.OutOrStderr(),
+						"activate-window: focus failed (%v); browser launch also failed: %v\n",
+						err, launchErr)
 				}
 			})
 

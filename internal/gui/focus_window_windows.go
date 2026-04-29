@@ -4,6 +4,7 @@
 package gui
 
 import (
+	"fmt"
 	"strings"
 	"syscall"
 	"unsafe"
@@ -79,17 +80,14 @@ func FocusBrowserWindow(titleSubstring string) error {
 	enumWindows.Call(cb, 0)
 
 	if foundHwnd == 0 {
-		return errFocusNoWindow{want: titleSubstring}
+		// Wrap the cross-platform sentinel so callers can branch on
+		// errors.Is(err, ErrFocusNoWindow) without coupling to Win32.
+		return fmt.Errorf("%w: no top-level window with title containing %q",
+			ErrFocusNoWindow, titleSubstring)
 	}
 	// SW_RESTORE un-minimizes if the window was minimized; for an
 	// already-visible window it is effectively a no-op.
 	showWindow.Call(foundHwnd, swRestore)
 	setForegroundWindow.Call(foundHwnd)
 	return nil
-}
-
-type errFocusNoWindow struct{ want string }
-
-func (e errFocusNoWindow) Error() string {
-	return "no top-level window with title containing " + e.want
 }
