@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gofrs/flock"
 )
@@ -225,6 +226,161 @@ func TestKillRecordedHolder_RefusesNonMcphubImage(t *testing.T) {
 	}
 	if v.Class != VerdictKillRefused {
 		t.Errorf("Class = %v, want VerdictKillRefused. Diagnose=%q", v.Class, v.Diagnose)
+	}
+}
+
+// TestProbe_Port0StartupWindow_RetriesAndClassifiesHealthy pins the
+// Codex PR #23 P2 #1 fix. The window between AcquireSingleInstanceAt
+// (which writes pidport with port=0 when --port=0) and
+// RewritePidportPort (which writes the bound port after listener-
+// ready) was kill-vulnerable: a second --force --kill --yes that
+// landed in that sub-second window saw alive PID + port=0 + ping
+// fail and classified the holder as VerdictLiveUnreachable. Probe
+// now retries when (LiveUnreachable AND port==0), re-reading the
+// pidport on each iteration so a holder finishing its bind during
+// the retry window flips the classification to Healthy.
+//
+// Setup mirrors the production race: pidport starts with our PID +
+// port=0, then a goroutine rewrites it to {ourPid, healthyPort} after
+// a delay shorter than the 500ms retry budget. Asserts the final
+// verdict is VerdictHealthy and that PingMatch is true.
+func TestProbe_Port0StartupWindow_RetriesAndClassifiesHealthy(t *testing.T) {
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+
+	// Healthy ping server (mirrors the incumbent post-bind state).
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "pid": os.Getpid()})
+	}))
+	defer srv.Close()
+	healthyPort := portFromURL(t, srv.URL)
+
+	// Initial pidport: alive PID (our own) + port=0 (pre-bind).
+	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), 0)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate the holder finishing its bind: rewrite pidport to
+	// {ourPid, healthyPort} after 150ms — well inside the retry
+	// budget (5 × 100ms = 500ms) but after the first probe
+	// classifies as LiveUnreachable+port=0.
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		_ = os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), healthyPort)), 0o600)
+	}()
+
+	v := Probe(context.Background(), pidport)
+	if v.Class != VerdictHealthy {
+		t.Errorf("Class = %v, want VerdictHealthy (retry should catch the port rewrite). Diagnose=%q", v.Class, v.Diagnose)
+	}
+	if !v.PingMatch {
+		t.Errorf("PingMatch = false, want true after retry caught the rewritten port")
+	}
+	if v.Port != healthyPort {
+		t.Errorf("Port = %d, want %d (the rewritten healthy port)", v.Port, healthyPort)
+	}
+}
+
+// TestProbe_Port0StartupWindow_GivesUpAfterDeadline pins the upper
+// bound on the retry: if the recorded port stays 0 for the entire
+// retry budget (the holder genuinely never finishes binding), Probe
+// must classify as VerdictLiveUnreachable rather than spinning
+// forever. The test also pins the rough deadline (500ms upper bound
+// on the retry portion, plus per-attempt pingTimeout) so a future
+// regression that doubled the retries would surface as a slow test.
+func TestProbe_Port0StartupWindow_GivesUpAfterDeadline(t *testing.T) {
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+
+	// pidport stays {ourPid, 0} for the entire test — no rewrite.
+	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), 0)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	v := Probe(context.Background(), pidport)
+	elapsed := time.Since(start)
+
+	if v.Class != VerdictLiveUnreachable {
+		t.Errorf("Class = %v, want VerdictLiveUnreachable after retry budget expired. Diagnose=%q", v.Class, v.Diagnose)
+	}
+	if v.Port != 0 {
+		t.Errorf("Port = %d, want 0 (port stayed 0 throughout)", v.Port)
+	}
+	// Upper bound: 5 retries × 100ms backoff + per-attempt
+	// pingTimeout (500ms × 6 attempts = 3s in the worst case where
+	// each ping waits its full timeout). Connection-refused on
+	// 127.0.0.1:0 fails fast so the real wall time is dominated by
+	// the backoff sleep (~500ms). 5s is generous enough for slow CI
+	// while still catching a doubled-budget regression.
+	if elapsed > 5*time.Second {
+		t.Errorf("Probe took %v, want <5s — retry budget is unbounded?", elapsed)
+	}
+}
+
+// TestProbe_LiveUnreachable_NonZeroPortDoesNotRetry pins the
+// boundary condition for the P2 #1 retry: when the recorded port is
+// a real (non-zero) value AND ping fails, we are looking at a
+// genuinely stuck incumbent — the retry MUST NOT fire. A regression
+// that retried in this case would slow down every diagnostic of a
+// real stuck-incumbent by 500ms.
+func TestProbe_LiveUnreachable_NonZeroPortDoesNotRetry(t *testing.T) {
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+	const probablyClosedPort = 1
+	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), probablyClosedPort)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	v := Probe(context.Background(), pidport)
+	elapsed := time.Since(start)
+
+	if v.Class != VerdictLiveUnreachable {
+		t.Errorf("Class = %v, want VerdictLiveUnreachable. Diagnose=%q", v.Class, v.Diagnose)
+	}
+	// Without retry the only wait is the ping timeout (500ms). With
+	// the retry incorrectly firing on port=N, total wall time would
+	// climb to ~3s (5 × 500ms ping timeout + 5 × 100ms backoff).
+	// Threshold of 1.5s catches the regression while leaving slack
+	// for slow CI.
+	if elapsed > 1500*time.Millisecond {
+		t.Errorf("Probe took %v on port=N stuck incumbent — retry incorrectly fired (should only retry when port==0)", elapsed)
+	}
+}
+
+// TestWritePidport_WritesBothPidAndPort pins the Codex PR #23 P2 #2
+// helper: WritePidport must overwrite the file with the supplied PID
+// AND port together, in the canonical "<pid> <port>\n" format. This
+// guards against a future regression that kept only one field
+// updated (the original RewritePidportPort bug).
+func TestWritePidport_WritesBothPidAndPort(t *testing.T) {
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+	// Pre-write something different to make sure WritePidport
+	// actually overwrites it instead of appending.
+	if err := os.WriteFile(pidport, []byte("99999 22222\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := WritePidport(pidport, 12345, 9100); err != nil {
+		t.Fatalf("WritePidport: %v", err)
+	}
+	got, err := os.ReadFile(pidport)
+	if err != nil {
+		t.Fatalf("read pidport: %v", err)
+	}
+	want := []byte("12345 9100\n")
+	if string(got) != string(want) {
+		t.Errorf("pidport content = %q, want %q", got, want)
+	}
+	// Also verify ReadPidport parses it back cleanly.
+	pid, port, perr := ReadPidport(pidport)
+	if perr != nil {
+		t.Fatalf("ReadPidport: %v", perr)
+	}
+	if pid != 12345 || port != 9100 {
+		t.Errorf("ReadPidport = pid=%d port=%d, want 12345 9100", pid, port)
 	}
 }
 

@@ -130,6 +130,22 @@ func RewritePidportPort(pidportPath string, port int) error {
 	return os.WriteFile(pidportPath, []byte(formatPidport(os.Getpid(), port)), 0o600)
 }
 
+// WritePidport overwrites the pidport file with the supplied PID and
+// port. Used by the CLI after Server.Start signals ready, called
+// unconditionally so the takeover path (--force --kill) replaces the
+// killed incumbent's PID + port with the current process's PID + bound
+// port. Idempotent for the normal-acquire path (PID + port are already
+// what AcquireSingleInstanceAt wrote, modulo --port 0 ephemeral
+// resolution). The caller must hold the single-instance lock.
+//
+// Codex PR #23 P2 #2: replaces the previous conditional
+// RewritePidportPort(actualPort) call which only fired when actualPort
+// != requestedPort and only updated the port field — leaving the
+// killed incumbent's PID stale in the pidport after a successful kill.
+func WritePidport(pidportPath string, pid, port int) error {
+	return os.WriteFile(pidportPath, []byte(formatPidport(pid, port)), 0o600)
+}
+
 // VerdictClass enumerates the result of Probe / KillRecordedHolder.
 type VerdictClass int
 
@@ -213,10 +229,68 @@ func Probe(ctx context.Context, pidportPath string) Verdict {
 	return probe(ctx, pidportPath, 500*time.Millisecond)
 }
 
+// probeStartupRetries / probeStartupBackoff bound the retry loop that
+// covers the AcquireSingleInstanceAt(--port 0) → RewritePidportPort
+// startup window (Codex PR #23 P2 #1). Total retry budget is bounded
+// at 5 × 100ms = 500ms (plus per-attempt pingTimeout on the final
+// successful read, which short-circuits via Healthy).
+const (
+	probeStartupRetries = 5
+	probeStartupBackoff = 100 * time.Millisecond
+)
+
 // probe is the internal implementation shared by Probe and
 // KillRecordedHolder. pingTimeout controls how long pingIncumbent
 // waits before declaring the incumbent unreachable.
+//
+// Startup-window retry (Codex PR #23 P2 #1): when classification
+// would otherwise be VerdictLiveUnreachable AND the recorded port is
+// 0, the function retries up to probeStartupRetries times spaced by
+// probeStartupBackoff, re-reading the pidport on each iteration. This
+// closes the kill-vulnerable window between AcquireSingleInstanceAt
+// (which writes pidport with port=0 when --port=0) and
+// RewritePidportPort (which writes the bound port after listener-
+// ready): a holder finishing its bind during the retry loop flips the
+// verdict from LiveUnreachable to Healthy. The retry only runs in the
+// (LiveUnreachable AND port==0) case so genuinely stuck instances
+// with a real-but-wrong port keep their immediate LiveUnreachable
+// classification.
 func probe(ctx context.Context, pidportPath string, pingTimeout time.Duration) Verdict {
+	v := probeOnce(ctx, pidportPath, pingTimeout)
+	if !(v.Class == VerdictLiveUnreachable && v.Port == 0) {
+		return v
+	}
+	// Retry loop: re-read pidport on each iteration in case the
+	// holder finishes its bind and writes a non-zero port. We deal
+	// with port=0 specifically — a real stuck-incumbent verdict
+	// keeps its LiveUnreachable classification with port==N and
+	// does not get retried.
+	for i := 0; i < probeStartupRetries; i++ {
+		select {
+		case <-ctx.Done():
+			return v
+		case <-time.After(probeStartupBackoff):
+		}
+		retry := probeOnce(ctx, pidportPath, pingTimeout)
+		// Any verdict OTHER than (LiveUnreachable AND port==0)
+		// is final — return it. This includes:
+		//   - Healthy (holder finished bind + ping matches)
+		//   - LiveUnreachable with port==N (real stuck instance)
+		//   - DeadPID (holder exited mid-startup)
+		//   - Malformed (pidport corrupted under us)
+		if !(retry.Class == VerdictLiveUnreachable && retry.Port == 0) {
+			return retry
+		}
+		// Still port==0 — keep the latest verdict (its mtime/
+		// PIDStart are the freshest) and try again.
+		v = retry
+	}
+	return v
+}
+
+// probeOnce runs a single classification pass without retry. Split
+// out from probe so the retry loop above can call it cleanly.
+func probeOnce(ctx context.Context, pidportPath string, pingTimeout time.Duration) Verdict {
 	v := Verdict{}
 	pid, port, err := ReadPidport(pidportPath)
 	if err != nil || pid <= 0 {

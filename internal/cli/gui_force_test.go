@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -202,6 +203,168 @@ func TestForce_KillHappyPath_SeamMocked(t *testing.T) {
 			}
 		}
 	}
+}
+
+// ---------------------------------------------------------------
+// Scenario 4b: --force --kill rewrites pidport with current PID + port
+// (Codex PR #23 P2 #2)
+// ---------------------------------------------------------------
+
+// TestForce_KillRewritesPidportWithCurrentPID pins the Codex PR #23
+// P2 #2 fix. After --force --kill takeover succeeds, startGuiServer
+// must write a fresh pidport with the current process's PID + the
+// actually-bound port — NOT leave the killed incumbent's stale PID +
+// port in the file. Before the fix, the conditional
+// RewritePidportPort(actualPort) only fired when actualPort !=
+// requestedPort and only updated the port field; if the operator
+// passed --port=N and the bind succeeded on N, the pidport kept the
+// killed incumbent's PID forever.
+//
+// To exercise the actualPort==requestedPort case (where the bug
+// silently elided the rewrite), discover a free ephemeral port by
+// briefly binding+closing it, then pass that port via --port=N.
+// There's a microsecond-wide race where another process could grab
+// the port between close and re-bind; on a quiet test machine this
+// is reliable, and a one-off bind failure is a clear test signal
+// rather than a silent false-pass.
+//
+// Approach: simulate the takeover via the IdentityGateForTest seam
+// (same pattern as scenario 4), spawn a real sleep child that the
+// kill path actually terminates so the flock auto-releases, then run
+// the gui command with --port=N and a deadline-bounded context.
+// Poll the pidport until it contains os.Getpid() (proof the rewrite
+// happened) OR the deadline expires, then assert.
+func TestForce_KillRewritesPidportWithCurrentPID(t *testing.T) {
+	prevGate := gui.IdentityGateForTest()
+	defer gui.RestoreIdentityGate(prevGate)
+	gui.SetIdentityGate(func(v gui.Verdict) (refused bool, reason string) { return false, "" })
+
+	// Discover a free ephemeral port: bind on :0, read the port the
+	// OS picked, close. The actualPort==requestedPort branch is the
+	// one the P2 #2 bug hid in.
+	freePort := pickFreePort(t)
+
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+
+	// Spawn a sleep helper so Probe sees a live PID. The kill path
+	// then terminates this child, the OS releases its flock, and our
+	// acquire-poll succeeds.
+	var sleepCmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		sleepCmd = exec.Command("powershell", "-NoExit", "-Command", "Start-Sleep -Seconds 60")
+	} else {
+		sleepCmd = exec.Command("sleep", "60")
+	}
+	if err := sleepCmd.Start(); err != nil {
+		t.Skipf("cannot spawn sleep helper: %v", err)
+	}
+	defer func() { _ = sleepCmd.Process.Kill() }()
+	stalePid := sleepCmd.Process.Pid
+	const stalePort = 1
+	if err := os.WriteFile(pidport, []byte(fmt.Sprintf("%d %d\n", stalePid, stalePort)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	fl := flock.New(pidport + ".lock")
+	if ok, _ := fl.TryLock(); !ok {
+		t.Fatal("could not pre-lock")
+	}
+	// Release the flock when the child dies — simulate the OS
+	// auto-release so the acquire-poll loop inside KillRecordedHolder
+	// can succeed.
+	go func() {
+		_, _ = sleepCmd.Process.Wait()
+		_ = fl.Unlock()
+	}()
+
+	// Run the command with a context that we cancel as soon as the
+	// pidport has been rewritten with our PID. 10s overall deadline
+	// keeps the test bounded if the rewrite never happens.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	c := newGuiCmdRealForTest()
+	c.SetArgs([]string{"--port", fmt.Sprintf("%d", freePort), "--no-browser", "--no-tray", "--force", "--kill", "--yes"})
+	t.Setenv("MCPHUB_GUI_TEST_PIDPORT_DIR", dir)
+
+	cmdDone := make(chan error, 1)
+	go func() { cmdDone <- c.ExecuteContext(ctx) }()
+
+	// Poll the pidport: succeed as soon as we observe
+	// (os.Getpid(), freePort) — that's the proof startGuiServer's
+	// WritePidport landed in the actualPort==requestedPort branch.
+	// Fail if the takeover happened (cmdDone fires early) without
+	// ever rewriting the pidport with our PID.
+	deadline := time.Now().Add(8 * time.Second)
+	var observedPid, observedPort int
+	for time.Now().Before(deadline) {
+		pid, port, rerr := gui.ReadPidport(pidport)
+		if rerr == nil && pid == os.Getpid() && port == freePort {
+			observedPid = pid
+			observedPort = port
+			break
+		}
+		select {
+		case err := <-cmdDone:
+			// Command exited before we observed the rewrite.
+			// Re-check the pidport (it may have written and then
+			// the test's polling missed the window before
+			// shutdown). If still stale, fail with the command
+			// error for context.
+			pid2, port2, rerr2 := gui.ReadPidport(pidport)
+			if rerr2 == nil && pid2 == os.Getpid() && port2 == freePort {
+				observedPid = pid2
+				observedPort = port2
+				break
+			}
+			t.Fatalf("command exited (err=%v) but pidport still has pid=%d port=%d (stale=%d:%d, want %d:%d)",
+				err, pid2, port2, stalePid, stalePort, os.Getpid(), freePort)
+		case <-time.After(50 * time.Millisecond):
+		}
+		if observedPid != 0 {
+			break
+		}
+	}
+	// Cancel the context so startGuiServer shuts down cleanly.
+	cancel()
+	// Drain the command goroutine so the test doesn't leak it.
+	select {
+	case <-cmdDone:
+	case <-time.After(5 * time.Second):
+		t.Logf("warning: command did not exit within 5s after cancel")
+	}
+
+	if observedPid == 0 {
+		t.Fatalf("pidport never rewritten with current PID + freePort=%d; last read: pid=%d port=%d (stale incumbent was pid=%d port=%d)",
+			freePort, observedPid, observedPort, stalePid, stalePort)
+	}
+	if observedPid == stalePid {
+		t.Errorf("pidport still contains the killed incumbent's PID %d — WritePidport did not run", stalePid)
+	}
+	if observedPid != os.Getpid() {
+		t.Errorf("pidport pid = %d, want os.Getpid() = %d", observedPid, os.Getpid())
+	}
+	if observedPort != freePort {
+		t.Errorf("pidport port = %d, want freePort = %d", observedPort, freePort)
+	}
+}
+
+// pickFreePort returns an ephemeral port discovered by binding :0 and
+// immediately closing. There's a small race window before the next
+// caller binds the same port; tests using this helper accept that on
+// a quiet machine (and a port collision is loud, not silent).
+func pickFreePort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("pickFreePort: listen: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	if cerr := ln.Close(); cerr != nil {
+		t.Fatalf("pickFreePort: close: %v", cerr)
+	}
+	return port
 }
 
 // ---------------------------------------------------------------

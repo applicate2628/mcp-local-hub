@@ -218,16 +218,24 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 
 	select {
 	case <-ready:
-		// Now we know the actual bound port. If the user passed
-		// --port 0, rewrite the pidport file so the
-		// second-instance handshake hits the right place. The
-		// flock on *.lock still gates ownership; the pidport file
-		// is ownership metadata the lock holder freely updates.
+		// Now we know the actual bound port. Unconditionally rewrite
+		// the pidport with our PID + the bound port. The flock on
+		// *.lock still gates ownership; the pidport file is
+		// ownership metadata the lock holder freely updates.
+		//
+		// Codex PR #23 P2 #2: previously this branch only ran when
+		// actualPort != port (the requested port). After a
+		// successful --force --kill takeover the pidport still held
+		// the killed incumbent's PID + port; if the user requested
+		// an explicit port that we then bound, the conditional
+		// short-circuited and the stale PID/port persisted forever.
+		// The new unconditional write is idempotent on the normal-
+		// acquire path (pidport already has our PID + the requested
+		// port from AcquireSingleInstanceAt) and corrective on the
+		// takeover path.
 		actualPort := s.Port()
-		if actualPort != port {
-			if err := gui.RewritePidportPort(pidportPath, actualPort); err != nil {
-				fmt.Fprintf(cmd.OutOrStderr(), "warning: pidport rewrite: %v\n", err)
-			}
+		if err := gui.WritePidport(pidportPath, os.Getpid(), actualPort); err != nil {
+			fmt.Fprintf(cmd.OutOrStderr(), "warning: pidport rewrite: %v\n", err)
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "GUI listening on http://127.0.0.1:%d\n", actualPort)
 	case err := <-errCh:
