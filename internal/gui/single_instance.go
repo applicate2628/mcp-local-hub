@@ -238,6 +238,21 @@ type KillOpts struct {
 	// AcquireBackoff is the inter-attempt delay during the
 	// post-kill TryLock poll. Default 50ms when zero.
 	AcquireBackoff time.Duration
+	// KillExitDeadline is the maximum total time KillRecordedHolder
+	// waits between killProcess and the acquire-poll for the kernel
+	// to register the kill via processID(pid).Alive==false. Default
+	// 5s when zero.
+	//
+	// Per memo §"Take-over protocol" step 5f: TerminateProcess on
+	// Windows is asynchronous, and Unix kernel cleanup (zombie
+	// reaping, fd close, flock release) is not instant. Without an
+	// explicit wait the AcquireDeadline (default 2s) can elapse
+	// before the kernel releases the flock, producing a spurious
+	// VerdictRaceLost. Codex iter-9 P2 #2.
+	KillExitDeadline time.Duration
+	// KillExitBackoff is the inter-poll delay during the kill-exit
+	// wait. Default 50ms when zero.
+	KillExitBackoff time.Duration
 	// Expected, when populated (non-zero PID), is the identity the
 	// caller already showed to the user (e.g. via runForceKill's
 	// confirmation prompt). KillRecordedHolder's internal re-probe
@@ -528,6 +543,12 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 	if opts.AcquireBackoff == 0 {
 		opts.AcquireBackoff = 50 * time.Millisecond
 	}
+	if opts.KillExitDeadline == 0 {
+		opts.KillExitDeadline = 5 * time.Second
+	}
+	if opts.KillExitBackoff == 0 {
+		opts.KillExitBackoff = 50 * time.Millisecond
+	}
 
 	v := probe(ctx, pidportPath, opts.PingTimeout)
 	switch v.Class {
@@ -565,71 +586,67 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 		}
 	}
 
-	// Codex iter-3 P2 #2: macOS shortcut — when probeOnce flagged
-	// the verdict as macOSUnsupported, processIDImpl returned no
-	// useful identity signals. Refuse the kill explicitly with a
-	// macOS-specific diagnose instead of letting the gate emit
-	// "image '' is not an mcphub binary". Production gate semantics
-	// are unchanged on linux/windows where macOSUnsupported is
-	// always false. The override seam is honored first so existing
-	// scenario-4/4b tests can still mock the gate.
-	if v.macOSUnsupported && identityGateOverride == nil {
+	// Codex iter-9 P2 #1: defense in depth — even though the cli
+	// runs CheckIdentityGate before the prompt, KillRecordedHolder
+	// re-runs the identical gate on its own re-probe so a future
+	// caller (HTTP API in A4-b, ad-hoc Go consumer) cannot bypass
+	// the identity protections by skipping the cli's pre-prompt
+	// check. Both call sites share checkIdentityGateInternal so the
+	// gate logic is not duplicated.
+	if refused, diagnose, hint, errReason := checkIdentityGateInternal(v); refused {
 		v.Class = VerdictKillRefused
-		v.Diagnose = "kill refused: macOS identity probe not supported; reboot is the recovery path"
-		v.Hint = "Tracked as backlog: macOS libproc/sysctl-based identity (see probe_darwin.go)."
-		return nil, v, fmt.Errorf("kill refused: macOS identity probe not supported")
-	}
-
-	// LiveUnreachable: run the three-part identity gate.
-	//
-	// identityGateOverride, when set by tests, replaces the full
-	// three-part (image/argv/start-time) check. Production builds
-	// always use the real gate below (identityGateOverride is nil
-	// by default).
-	if identityGateOverride != nil {
-		if refused, reason := identityGateOverride(v); refused {
-			v.Class = VerdictKillRefused
-			v.Diagnose = "identity gate (test override): " + reason
-			v.Hint = ""
-			return nil, v, fmt.Errorf("kill refused (override): %s", reason)
-		}
-	} else {
-		if !matchBasename(v.PIDImage) {
-			v.Class = VerdictKillRefused
-			v.Diagnose = fmt.Sprintf("recorded PID %d image %q is not an mcphub binary", v.PID, v.PIDImage)
-			v.Hint = "Identity-gate (image basename) failed; identify and kill the actual flock holder via OS tools."
-			return nil, v, fmt.Errorf("kill refused: image gate")
-		}
-		// Codex iter-3 P2 #1: read v.pidCmdlineRaw (the unmodified
-		// argv populated by probeOnce), not v.PIDCmdline (truncated
-		// for display). Truncating before this gate would drop
-		// argv[1] when argv[0] (the binary path) exceeds 1KB and
-		// allow a non-GUI mcphub subcommand whose long path triggers
-		// the truncation to pass the len(argv)==1 branch.
-		if !cmdlineIsGui(v.pidCmdlineRaw) {
-			v.Class = VerdictKillRefused
-			v.Diagnose = fmt.Sprintf("recorded PID %d argv subcommand is not 'gui' (argv=%v)", v.PID, v.PIDCmdline)
-			v.Hint = "Identity-gate (argv subcommand) failed; the recorded PID is a different mcphub subcommand."
-			return nil, v, fmt.Errorf("kill refused: argv gate")
-		}
-		if !startTimeBeforeMtime(v.PIDStart, v.Mtime, time.Second) {
-			v.Class = VerdictKillRefused
-			v.Diagnose = fmt.Sprintf("recorded PID %d start-time %s postdates pidport mtime %s — PID-recycled", v.PID, v.PIDStart.Format(time.RFC3339), v.Mtime.Format(time.RFC3339))
-			v.Hint = "Identity-gate (start-time) failed; the PID has been recycled to a different process."
-			return nil, v, fmt.Errorf("kill refused: start-time gate")
-		}
+		v.Diagnose = diagnose
+		v.Hint = hint
+		return nil, v, fmt.Errorf("kill refused: %s", errReason)
 	}
 
 	// All three gates passed. Kill.
-	if err := killProcess(v.PID); err != nil {
+	//
+	// killProcessOverride is the test seam for the kill helper.
+	// Lets the wait-for-exit unit test (Codex iter-9 P2 #2) replace
+	// killProcess with a no-op so the test doesn't actually
+	// SIGKILL/TerminateProcess any real process. Production code
+	// path is unchanged when this is nil.
+	kill := killProcess
+	if killProcessOverride != nil {
+		kill = killProcessOverride
+	}
+	if err := kill(v.PID); err != nil {
 		v.Class = VerdictKillFailed
 		v.Diagnose = fmt.Sprintf("kill PID %d failed: %v", v.PID, err)
 		v.Hint = "Permission denied or process already gone; rerun mcphub gui without --force to handshake."
 		return nil, v, err
 	}
 
-	// postKillHook fires between the kill and the acquire-poll loop.
-	// Tests use it to simulate a race-winner competing for the flock.
+	// Codex iter-9 P2 #2 / memo §"Take-over protocol" step 5f: wait
+	// for the kernel to register the kill before the acquire-poll
+	// loop. Without this, async TerminateProcess on Windows or slow
+	// Unix cleanup (zombie reaping, fd close, flock release) could
+	// keep the flock held past the acquire deadline and produce a
+	// spurious VerdictRaceLost. The acquire-poll's own deadline is
+	// the final safety net if processID telemetry lags.
+	exitDeadline := time.Now().Add(opts.KillExitDeadline)
+	for time.Now().Before(exitDeadline) {
+		id, _ := processID(v.PID)
+		if !id.Alive {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			v.Class = VerdictKillFailed
+			v.Diagnose = "context cancelled while waiting for killed process to exit"
+			v.Hint = ""
+			return nil, v, ctx.Err()
+		case <-time.After(opts.KillExitBackoff):
+		}
+	}
+
+	// postKillHook fires between the kill+wait and the acquire-poll
+	// loop. Tests use it to simulate a race-winner competing for the
+	// flock. Note: this fires AFTER the iter-9 wait-for-exit so
+	// existing tests that simulate "kernel released flock" via the
+	// hook still work — the wait short-circuits when processID
+	// reports alive=false (which the override seam can simulate).
 	if postKillHook != nil {
 		postKillHook()
 	}
@@ -656,6 +673,89 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 	v.Diagnose = fmt.Sprintf("kill succeeded but a competitor acquired the lock during %s deadline", opts.AcquireDeadline)
 	v.Hint = "Rerun mcphub gui without --force to handshake with the new incumbent."
 	return nil, v, fmt.Errorf("race lost")
+}
+
+// CheckIdentityGate runs the three-part identity gate (image basename
+// / argv subcommand / start-time vs pidport mtime) and the macOS
+// shortcut against a Verdict, without sending any signal. Callers run
+// this BEFORE the destructive confirmation prompt so the operator
+// never confirms a kill that the gate would later refuse. Returns
+// (refused=false, "") when all checks pass and the kill should
+// proceed.
+//
+// KillRecordedHolder still re-runs the same gate internally for
+// defense in depth (so a non-cli caller cannot skip the check), and
+// the second invocation is the production source of truth — its
+// re-probe sees the latest pidport state. The pre-prompt invocation
+// guards UX, not safety.
+//
+// Codex iter-9 P2 #1.
+func CheckIdentityGate(v Verdict) (refused bool, reason string) {
+	refused, reason, _, _ = checkIdentityGateInternal(v)
+	return refused, reason
+}
+
+// checkIdentityGateInternal is the shared gate implementation used
+// by both CheckIdentityGate (UX pre-prompt check) and
+// KillRecordedHolder (defense-in-depth post-prompt check). Returns
+// the user-facing diagnose, the user-facing hint, and a short
+// machine-readable errReason all derived from the gate that tripped.
+//
+// The override seam (identityGateOverride) is honored first so
+// existing seam-mocked tests continue to work; macOS shortcut runs
+// only when the override is nil. Codex iter-9 P2 #1 deduplicates the
+// production gate cascade so the public CheckIdentityGate and the
+// internal KillRecordedHolder gate cannot drift.
+func checkIdentityGateInternal(v Verdict) (refused bool, diagnose, hint, errReason string) {
+	// Test override comes first so seam-mocked tests reach this
+	// branch on linux/windows even when v.macOSUnsupported is true.
+	if identityGateOverride != nil {
+		if r, reason := identityGateOverride(v); r {
+			return true,
+				"identity gate (test override): " + reason,
+				"",
+				"override: " + reason
+		}
+		return false, "", "", ""
+	}
+
+	// Codex iter-3 P2 #2: macOS shortcut — when probeOnce flagged
+	// the verdict as macOSUnsupported, processIDImpl returned no
+	// useful identity signals. Refuse the kill explicitly with a
+	// macOS-specific diagnose instead of letting the cascade emit
+	// "image '' is not an mcphub binary".
+	if v.macOSUnsupported {
+		return true,
+			"kill refused: macOS identity probe not supported; reboot is the recovery path",
+			"Tracked as backlog: macOS libproc/sysctl-based identity (see probe_darwin.go).",
+			"macOS identity probe not supported"
+	}
+
+	if !matchBasename(v.PIDImage) {
+		return true,
+			fmt.Sprintf("recorded PID %d image %q is not an mcphub binary", v.PID, v.PIDImage),
+			"Identity-gate (image basename) failed; identify and kill the actual flock holder via OS tools.",
+			"image gate"
+	}
+	// Codex iter-3 P2 #1: read v.pidCmdlineRaw (the unmodified
+	// argv populated by probeOnce), not v.PIDCmdline (truncated for
+	// display). Truncating before this gate would drop argv[1]
+	// when argv[0] (the binary path) exceeds 1KB and allow a
+	// non-GUI mcphub subcommand whose long path triggers truncation
+	// to pass the len(argv)==1 branch.
+	if !cmdlineIsGui(v.pidCmdlineRaw) {
+		return true,
+			fmt.Sprintf("recorded PID %d argv subcommand is not 'gui' (argv=%v)", v.PID, v.PIDCmdline),
+			"Identity-gate (argv subcommand) failed; the recorded PID is a different mcphub subcommand.",
+			"argv gate"
+	}
+	if !startTimeBeforeMtime(v.PIDStart, v.Mtime, time.Second) {
+		return true,
+			fmt.Sprintf("recorded PID %d start-time %s postdates pidport mtime %s — PID-recycled", v.PID, v.PIDStart.Format(time.RFC3339), v.Mtime.Format(time.RFC3339)),
+			"Identity-gate (start-time) failed; the PID has been recycled to a different process.",
+			"start-time gate"
+	}
+	return false, "", "", ""
 }
 
 // cmdlineIsGui implements the rev 9 argv-subcommand gate:

@@ -832,6 +832,121 @@ func TestForce_RealSubprocessE2E(t *testing.T) {
 }
 
 // ---------------------------------------------------------------
+// Codex iter-9 P2 #1: identity gate must run BEFORE the destructive
+// confirmation prompt. Without this, the operator could be asked
+// "Kill PID X (mcphub gui)?" for a PID that the gate later refuses
+// (e.g. recorded PID is `mcphub daemon`, recycled PID, macOS
+// unsupported), and the refusal arrives only AFTER consent.
+// ---------------------------------------------------------------
+
+// TestForce_KillNonGUIMcphubSubcommand_RefusedBeforePrompt pins the
+// iter-9 P2 #1 fix. Setup: pidport refers to a live PID whose
+// argv[1] is "daemon" (not "gui"). The image basename matches, so
+// the basename gate passes; the argv-subcommand gate refuses.
+//
+// With --yes (which would normally skip the prompt), the cli's
+// pre-prompt CheckIdentityGate must observe the refusal and exit 7
+// without ever proceeding to KillRecordedHolder. The diagnostic on
+// stderr must mention the argv-gate refusal so the operator knows
+// why the kill didn't fire.
+//
+// Cross-platform: ProcessIDOverride seam injects the synthetic
+// identity on every runner (linux/windows/macOS), so the test runs
+// uniformly without needing a real `mcphub daemon` subprocess.
+func TestForce_KillNonGUIMcphubSubcommand_RefusedBeforePrompt(t *testing.T) {
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+
+	// pidport must record a live PID so probeOnce reaches
+	// LiveUnreachable (and the gate runs). Use os.Getpid() — the
+	// processID override below replaces the result regardless.
+	const probablyClosedPort = 1
+	if err := os.WriteFile(pidport, []byte(fmt.Sprintf("%d %d\n", os.Getpid(), probablyClosedPort)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Backdate mtime so probe doesn't retry the LiveUnreachable
+	// classification.
+	oldMtime := time.Now().Add(-1 * time.Hour)
+	if err := os.Chtimes(pidport, oldMtime, oldMtime); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	// Pre-acquire flock so AcquireSingleInstance returns busy and
+	// the --force --kill path is exercised.
+	fl := flock.New(pidport + ".lock")
+	if ok, _ := fl.TryLock(); !ok {
+		t.Fatal("could not pre-lock")
+	}
+	defer fl.Unlock()
+
+	// Inject a synthetic identity that mimics a `mcphub daemon`
+	// subprocess: image basename passes (mcphub / mcphub.exe), but
+	// argv[1] == "daemon" fails the argv-gate.
+	prevProcessID := gui.ProcessIDForTest()
+	defer gui.RestoreProcessID(prevProcessID)
+	mcphubBinary := mcphubBinaryNameForCliTest()
+	gui.SetProcessIDOverride(func(pid int) (gui.ProcessIdentity, error) {
+		return gui.ProcessIdentity{
+			Alive:     true,
+			ImagePath: mcphubBinary,
+			Cmdline:   []string{mcphubBinary, "daemon", "wolfram"},
+			// Start time well before pidport mtime so the
+			// start-time gate would also pass — the argv gate is
+			// what we want to trip.
+			StartTime: time.Now().Add(-2 * time.Hour),
+		}, nil
+	})
+
+	// If the gate ran AFTER the prompt instead of before, the
+	// destructive prompt would block reading from stdin (no TTY in
+	// `go test`). The non-TTY guard fires earlier (exit 6) without
+	// --yes, so we use --yes to confirm the gate runs in the
+	// post-non-TTY path.
+
+	// Buffer both stdout and stderr because cobra's OutOrStderr()
+	// returns the OUT writer when set (which the test helper sets
+	// to os.Stdout). Capturing both leaves the assertion robust
+	// against minor stream-routing changes in the cli.
+	var buf bytes.Buffer
+	c := newGuiCmdRealForTest()
+	c.SetOut(&buf)
+	c.SetErr(&buf)
+	c.SetArgs([]string{"--port", "0", "--no-browser", "--no-tray", "--force", "--kill", "--yes"})
+	t.Setenv("MCPHUB_GUI_TEST_PIDPORT_DIR", dir)
+	err := c.Execute()
+
+	// Exit code 7 — VerdictKillRefused per the exit-code map.
+	var fe interface{ ExitCode() int }
+	if !errors.As(err, &fe) {
+		t.Fatalf("expected typed exit code error; got %v", err)
+	}
+	if fe.ExitCode() != 7 {
+		t.Errorf("exit code = %d, want 7 (kill refused at argv gate before prompt)", fe.ExitCode())
+	}
+
+	// Refusal message names the argv gate so the operator can act
+	// on the refusal.
+	got := buf.String()
+	if !strings.Contains(got, "kill refused") {
+		t.Errorf("output = %q; want a 'kill refused' line so operator sees the refusal reason", got)
+	}
+	if !strings.Contains(got, "argv subcommand is not 'gui'") {
+		t.Errorf("output = %q; want the argv-gate diagnose so operator knows WHICH gate refused", got)
+	}
+}
+
+// mcphubBinaryNameForCliTest mirrors the in-package helper from
+// internal/gui/single_instance_test.go for cli-side use. Kept
+// duplicated rather than exported because matchBasename's per-OS
+// rule is an implementation detail of the gui package.
+func mcphubBinaryNameForCliTest() string {
+	if runtime.GOOS == "windows" {
+		return `C:\Program Files\mcphub\mcphub.exe`
+	}
+	return "/usr/local/bin/mcphub"
+}
+
+// ---------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------
 

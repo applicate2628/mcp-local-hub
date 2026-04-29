@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -942,6 +943,177 @@ func TestKillRecordedHolder_ExpectedZeroValueDisablesCheck(t *testing.T) {
 	// guard fired despite Expected being zero-valued.
 	if v.Class == VerdictRaceLost {
 		t.Errorf("Class = VerdictRaceLost; want non-race refusal (Expected zero-value should disable the TOCTOU guard). Diagnose=%q", v.Diagnose)
+	}
+}
+
+// TestKillRecordedHolder_WaitsForKillBeforeAcquirePoll pins the
+// Codex iter-9 P2 #2 fix (memo §"Take-over protocol" step 5f).
+// Before the fix, KillRecordedHolder went straight from killProcess
+// to the acquire-poll loop. On Windows TerminateProcess is async
+// and on Unix the kernel needs time to reap zombies / release the
+// flock; without an explicit wait the 2-second AcquireDeadline
+// could elapse before the kernel released the flock, producing a
+// spurious VerdictRaceLost on a successful kill.
+//
+// Setup: the processID override returns Alive=true on the first
+// few calls and Alive=false thereafter. KillRecordedHolder must:
+//  1. probe (call 1, Alive=true → reaches LiveUnreachable)
+//  2. killProcess (no processID call — but in this test we have
+//     no real PID; killProcess on os.Getppid is real and would
+//     either succeed or fail. We avoid that by using a fake PID
+//     ONLY safe inside this seam-driven test: the gate is
+//     overridden, so identity validation is bypassed; killProcess
+//     itself is the only real interaction. We use a guaranteed-
+//     dead PID that killProcess will return an error on; the
+//     test asserts that BEFORE the wait loop runs the call site
+//     never observed killSucceeded.) Actually a cleaner approach:
+//     use os.Getpid() — alive but the kill seam below replaces
+//     killProcess.
+//
+// The test instead overrides processID to count invocations and
+// returns alive=true the first 2 times, alive=false afterward.
+// killProcess targets os.Getpid() — but we DO NOT actually want
+// to kill the test runner. Solution: use the IdentityGateForTest
+// seam to pass the gate, the postKillHook to record state, and
+// trust that os.Getpid() is alive enough that killProcess returns
+// nil; the override on processID makes the wait-loop scoreboard
+// independent of whether kernel telemetry agrees. This is a unit
+// test of the wait loop's control flow, not an end-to-end kill.
+//
+// Key invariants:
+//   - When postKillHook fires, processIDOverride must have been
+//     called at least 2 times (probe + at least one wait-loop
+//     iteration). One call would mean the wait loop never ran.
+//   - The wait loop must observe at least one alive=true sample
+//     before exiting (proven by the controlled false-after-N seq).
+//   - postKillHook fires exactly once.
+//
+// We don't actually run killProcess in this test: that would risk
+// killing the test runner. Instead we rely on a kill helper override
+// to no-op the kill — see killProcessOverride below.
+func TestKillRecordedHolder_WaitsForKillBeforeAcquirePoll(t *testing.T) {
+	// Bypass the three-part identity gate so we reach the kill +
+	// wait-for-exit path even though our injected ProcessIdentity
+	// is synthetic.
+	prevGate := IdentityGateForTest()
+	defer RestoreIdentityGate(prevGate)
+	SetIdentityGate(func(v Verdict) (refused bool, reason string) { return false, "" })
+
+	// Track processID call counts and whether the wait loop saw
+	// alive=true at least once. The first call (from probeOnce)
+	// returns alive=true because the verdict must reach
+	// LiveUnreachable. The second call (wait-loop iteration 1) also
+	// returns alive=true so the loop iterates at least once.
+	// Subsequent calls return alive=false so the wait loop exits
+	// promptly and the test stays bounded.
+	var (
+		processIDCallCount atomic.Int32
+		sawAliveInWait     atomic.Bool
+	)
+	prevProcessID := ProcessIDForTest()
+	defer RestoreProcessID(prevProcessID)
+	SetProcessIDOverride(func(pid int) (ProcessIdentity, error) {
+		n := processIDCallCount.Add(1)
+		// Calls 1 (probeOnce) and 2 (first wait-loop iteration):
+		// alive=true. The second alive=true sample proves the wait
+		// loop ran at least one iteration before observing a dead
+		// process.
+		if n <= 2 {
+			if n == 2 {
+				sawAliveInWait.Store(true)
+			}
+			return ProcessIdentity{
+				Alive:     true,
+				ImagePath: mcphubBinaryNameForTest(),
+				// argv passes the gate but the override above
+				// short-circuits anyway; populate for realism.
+				Cmdline:   []string{mcphubBinaryNameForTest(), "gui"},
+				StartTime: time.Now().Add(-1 * time.Hour),
+			}, nil
+		}
+		// Subsequent calls (further wait-loop iterations OR
+		// late post-kill probes that don't exist): alive=false.
+		return ProcessIdentity{Alive: false}, nil
+	})
+
+	// Replace the kill helper with a no-op so we don't actually
+	// SIGKILL/TerminateProcess the test runner. The wait-loop
+	// behavior we're testing is independent of whether killProcess
+	// did anything real — the loop polls processID, which is
+	// already overridden above.
+	prevKill := killProcessOverride
+	defer func() { killProcessOverride = prevKill }()
+	killProcessOverride = func(pid int) error { return nil }
+
+	// Capture state at the moment postKillHook fires. The hook is
+	// invoked by KillRecordedHolder AFTER the wait-for-exit loop
+	// completes and BEFORE the acquire-poll loop, so this is the
+	// natural seam to observe wait-loop completion.
+	var hookFiredCount atomic.Int32
+	var processIDCountAtHook atomic.Int32
+	prevHook := PostKillHookForTest()
+	defer RestorePostKillHook(prevHook)
+	SetPostKillHook(func() {
+		hookFiredCount.Add(1)
+		processIDCountAtHook.Store(processIDCallCount.Load())
+	})
+
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+	// Use os.Getpid() so probeOnce treats the PID as alive when
+	// the override seam is bypassed. (The override above replaces
+	// the result regardless of PID.) Port 1 makes ping fail so the
+	// verdict reaches VerdictLiveUnreachable.
+	const probablyClosedPort = 1
+	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), probablyClosedPort)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Backdate mtime so probe doesn't retry — we want a single
+	// LiveUnreachable observation for predictable counts.
+	oldMtime := time.Now().Add(-1 * time.Hour)
+	if err := os.Chtimes(pidport, oldMtime, oldMtime); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	// Pre-acquire the flock so KillRecordedHolder reaches the gate
+	// path. The acquire-poll loop after the wait will see this
+	// flock busy and return VerdictRaceLost — which is fine for
+	// this test: the assertion is on wait-loop behavior, not on
+	// the recovered verdict.
+	fl := flock.New(pidport + ".lock")
+	if ok, _ := fl.TryLock(); !ok {
+		t.Fatal("could not pre-lock")
+	}
+	defer fl.Unlock()
+
+	// Use short backoff so the test doesn't sit through the
+	// default 50ms inter-poll delay multiple times. KillExitBackoff
+	// of 5ms keeps total runtime well under the test timeout.
+	opts := KillOpts{
+		KillExitBackoff:  5 * time.Millisecond,
+		KillExitDeadline: 1 * time.Second,
+		AcquireBackoff:   5 * time.Millisecond,
+		AcquireDeadline:  100 * time.Millisecond, // Race-lost expected.
+	}
+	_, _, _ = KillRecordedHolder(context.Background(), pidport, opts)
+
+	// Assertions:
+	// - postKillHook fired exactly once (kill happened).
+	if got := hookFiredCount.Load(); got != 1 {
+		t.Errorf("postKillHook fire count = %d, want 1", got)
+	}
+	// - At hook time, processID was called >= 2 (probe + at
+	//   least one wait-loop iteration). Without the wait loop
+	//   this would be exactly 1 (probe only).
+	if got := processIDCountAtHook.Load(); got < 2 {
+		t.Errorf("processID call count at postKillHook = %d, want >= 2 (probe + wait-loop iteration); wait-for-exit step 5f did not run", got)
+	}
+	// - The wait loop observed alive=true at least once (the
+	//   second sample) before exiting on the first alive=false.
+	//   This pins the polling shape: call processID, observe alive,
+	//   sleep backoff, call again.
+	if !sawAliveInWait.Load() {
+		t.Errorf("wait loop never observed alive=true; control flow may have skipped the loop body")
 	}
 }
 

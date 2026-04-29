@@ -104,3 +104,14 @@ func RestoreProcessID(fn func(pid int) (ProcessIdentity, error)) { processIDOver
 // build override results that simulate the darwin processIDImpl
 // stub on linux/windows runners.
 func ErrMacOSProbeUnsupportedForTest() error { return errMacOSProbeUnsupported }
+
+// --- killProcessOverride seam ---
+
+// killProcessOverride, when non-nil, replaces the killProcess helper
+// inside KillRecordedHolder. Used only by the wait-for-exit unit
+// test (Codex iter-9 P2 #2) so the test can drive the wait loop
+// without actually SIGKILLing/TerminateProcessing any real process.
+// Kept package-private — same-package tests can assign to it
+// directly, and there is no production caller that should ever
+// install it.
+var killProcessOverride func(pid int) error

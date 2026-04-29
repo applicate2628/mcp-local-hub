@@ -333,12 +333,26 @@ func runForceKill(cmd *cobra.Command, pidportPath string, yes bool) (*gui.Single
 		// §Exit codes).
 		return nil, 3
 	case gui.VerdictLiveUnreachable:
-		// fall through to prompt + KillRecordedHolder
+		// fall through to identity gate + prompt + KillRecordedHolder
 	default:
 		fmt.Fprintf(cmd.OutOrStderr(),
 			"internal: unexpected verdict class %q from Probe; refusing kill\n",
 			v.Class.String())
 		return nil, 1
+	}
+
+	// Codex iter-9 P2 #1: run the identity gate BEFORE the prompt.
+	// Without this, the operator could be asked "Kill PID X
+	// (mcphub gui)?" for a PID that the gate later refuses (e.g.
+	// the recorded PID is `mcphub daemon`, a recycled PID belonging
+	// to another process, or macOS-unsupported) — they consent to a
+	// kill that never happens, then see the refusal afterward.
+	// KillRecordedHolder still re-runs the same gate internally for
+	// defense in depth; this pre-prompt invocation guards UX, not
+	// safety.
+	if refused, reason := gui.CheckIdentityGate(v); refused {
+		fmt.Fprintln(cmd.OutOrStderr(), "kill refused:", reason)
+		return nil, 7
 	}
 
 	// Gate 3: confirmation prompt unless --yes.
