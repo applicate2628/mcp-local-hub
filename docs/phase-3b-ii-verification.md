@@ -106,6 +106,31 @@ RestartOnFailure semantics.
 | 7. Trigger a real launch failure (`mcphub install memory` after deleting `npx` from PATH) | scheduler task fires, daemon command exits non-zero, `[mcphub-launch-failure ...]` line appears in `%LOCALAPPDATA%\mcp-local-hub\logs\memory-default.log` | |
 | 8. Run `mcphub restart memory` from cmd | Restart waits for port release (DM-3b), `schtasks /Run` succeeds, daemon Running again | |
 
+### D2.5 — `mcphub gui --force` stuck-instance recovery (PR #23)
+
+**Test:** Reproduce a stuck single-instance lock via debugger pause:
+
+1. `mcphub gui` (binds default port; tray icon visible).
+2. Attach a debugger (e.g. `dlv attach <PID>`) and pause the gui
+   process.
+3. From a second terminal: `mcphub gui --force`.
+4. Verify: structured diagnostic prints (Lock file path, recorded
+   PID, port, alive=true, /api/ping=connection refused).
+   Explorer/Finder window opens at the pidport directory.
+5. From the same terminal: `mcphub gui --force --kill --yes`.
+6. Verify: "force-killed previous incumbent PID `<pid>` and acquired
+   lock" prints; new gui starts on a fresh port.
+7. Detach the debugger. The original gui is gone (TerminateProcess'd).
+
+**Expected outcomes:**
+
+- Step 4: exit code 2 (bare diagnostic).
+- Step 6: exit code 0 (kill succeeded).
+
+**If exit 7:** the recorded PID is a different mcphub subcommand
+(e.g. `mcphub daemon`); rerun without `--kill` and identify the
+actual flock holder via `handle.exe` (admin shell) or reboot.
+
 ---
 
 ## D3 — Multi-language workspace smoke
