@@ -38,10 +38,28 @@ func ShowToast(title, body string) error {
 	psTitle := psEscape(title)
 	psBody := psEscape(body)
 
-	// Single-line PowerShell so we don't depend on a here-doc
-	// pipeline. Using app id "mcp-local-hub" so toasts group in
-	// Action Center under one source.
+	// Codex PR #22 r4 P1: ensure AppUserModelID is registered before
+	// CreateToastNotifier. Modern Windows toasts require a registered
+	// AUMI; without one, ToastNotificationManager silently rejects
+	// the .Show() call on a clean install — daemon-failure
+	// notifications never reach the user even though C4 is wired.
+	//
+	// The Start-menu-shortcut path (the canonical AUMI registration
+	// route) would require install/uninstall surface in mcphub. The
+	// registry path documented at
+	//   https://learn.microsoft.com/en-us/windows/win32/shell/appsforwindows-appsfolder
+	// (HKCU\Software\Classes\AppUserModelId\<id> + DisplayName) is
+	// self-contained and per-user, and works for toast delivery
+	// without a shortcut. Idempotent — running it before every
+	// toast adds ~50ms to the first call and is a no-op afterwards.
 	script := fmt.Sprintf(`
+$appId = 'mcp-local-hub';
+$regPath = "HKCU:\Software\Classes\AppUserModelId\$appId";
+if (-not (Test-Path $regPath)) {
+  New-Item -Path $regPath -Force | Out-Null;
+  Set-ItemProperty -Path $regPath -Name 'DisplayName' -Value 'mcp-local-hub' -Force;
+  Set-ItemProperty -Path $regPath -Name 'ShowInSettings' -Value 1 -Type DWord -Force;
+}
 [Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime] | Out-Null;
 $template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02);
 $xml = [xml]$template.GetXml();
@@ -49,7 +67,7 @@ $xml.toast.visual.binding.text[0].InnerText = '%s';
 $xml.toast.visual.binding.text[1].InnerText = '%s';
 $doc = [Windows.Data.Xml.Dom.XmlDocument]::new();
 $doc.LoadXml($xml.OuterXml);
-[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('mcp-local-hub').Show([Windows.UI.Notifications.ToastNotification]::new($doc));
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($appId).Show([Windows.UI.Notifications.ToastNotification]::new($doc));
 `, psTitle, psBody)
 
 	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
