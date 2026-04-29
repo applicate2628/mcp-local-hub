@@ -198,7 +198,14 @@ func splitCommandLineW(s string) []string {
 			i++
 			continue
 		}
-		if !inQuote && c == ' ' {
+		if !inQuote && (c == ' ' || c == '\t') {
+			// CommandLineToArgvW treats both space and tab as
+			// argv separators. The remaining-args loop already
+			// handles tab; the first-arg loop must too, otherwise
+			// `mcphub.exe<TAB>daemon` returns a single argv element
+			// and cmdlineIsGui's len(argv)==1 branch (Explorer
+			// no-arg auto-gui) would pass for a non-GUI subcommand.
+			// (Codex iter-4 P2 #1.)
 			i++
 			break
 		}
