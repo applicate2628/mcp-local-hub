@@ -224,6 +224,40 @@ func TestAggregateTrayState_ToastIgnoresTaskSchedulerInfoCodes(t *testing.T) {
 	}
 }
 
+// TestAggregateTrayState_ToastIgnoresNeverRunSentinel guards the
+// Codex r2 P2 finding: internal/scheduler/scheduler.go:53 documents
+// LastResult = -1 as the never-run sentinel (the default in
+// parseTaskQueryOutput when schtasks /Query output omits
+// "Last Result:"). Without this filter, freshly installed daemons
+// — before any execution attempt — fire false "daemon failed"
+// toasts on the first poll snapshot.
+//
+// Different sentinel from the 0x41303 case above: that's the modern
+// Task Scheduler 2.0 info-code that schtasks does report; -1 is the
+// internal-API fallback when no value is parsed at all.
+func TestAggregateTrayState_ToastIgnoresNeverRunSentinel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	snaps := make(chan []api.DaemonStatus, 8)
+	out := make(chan tray.TrayState, 8)
+	toaster := &fakeToaster{}
+	go aggregateTrayStateWithToast(ctx, snaps, out, toaster.show)
+
+	for i := 0; i < 3; i++ {
+		snaps <- []api.DaemonStatus{
+			{Server: "memory", State: "Ready", LastResult: -1},
+		}
+	}
+
+	time.Sleep(300 * time.Millisecond)
+	calls := toaster.snapshot()
+	if len(calls) != 0 {
+		t.Errorf("LastResult = -1 (never-run sentinel) must NOT fire toasts; got %d calls: %+v",
+			len(calls), calls)
+	}
+}
+
 // TestAggregateTrayState_ToastUsesLastResult asserts a row whose
 // LastResult != 0 (Task Scheduler's most-recent exit code) fires a
 // toast even if its state field is currently "Running" — the

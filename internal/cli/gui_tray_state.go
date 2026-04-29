@@ -49,12 +49,18 @@ const (
 // matches tray icon onset — the user sees the icon turn red and the
 // toast pop at the same transition.
 //
-// LastResult contributes only when it's outside the Task Scheduler
-// informational range (see tsInfoCodeMin/Max comment). State-string
-// "fail" match is kept as a separate signal because some daemon paths
-// emit Failed without a corresponding LastResult update.
+// LastResult is treated as a real failure only when it is non-zero,
+// not -1 (internal/scheduler/scheduler.go:53 sentinel for "task has
+// never run" — Codex PR #22 r2 P2: without this filter the very
+// first snapshot post-install would fire "daemon failed" toasts for
+// every never-run task, exactly the spam the spam-toast fix set out
+// to prevent), and not in the Task Scheduler 2.0 informational range
+// (0x41300-0x4130F). State-string "fail" match is kept as a separate
+// signal because some daemon paths emit Failed without a matching
+// LastResult update.
 func isFailedRow(r api.DaemonStatus) bool {
-	if r.LastResult != 0 && (r.LastResult < tsInfoCodeMin || r.LastResult > tsInfoCodeMax) {
+	if r.LastResult != 0 && r.LastResult != -1 &&
+		(r.LastResult < tsInfoCodeMin || r.LastResult > tsInfoCodeMax) {
 		return true
 	}
 	return strings.Contains(strings.ToLower(r.State), "fail")

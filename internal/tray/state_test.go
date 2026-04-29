@@ -65,6 +65,12 @@ func TestAggregate(t *testing.T) {
 			},
 			StateDown,
 		},
+		{"-1 sentinel (internal/scheduler never-run default) is NOT a failure — Codex r2 P1",
+			[]api.DaemonStatus{
+				{Server: "memory", State: "Ready", LastResult: -1},
+			},
+			StateDown,
+		},
 		{"HRESULT-shaped failure (high bit set, negative int32) IS a failure",
 			[]api.DaemonStatus{
 				{Server: "memory", State: "Running", LastResult: -2147467259}, // E_FAIL

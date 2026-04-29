@@ -59,12 +59,29 @@ const (
 	tsInfoCodeMax = 0x4130F
 )
 
-// isRealFailure returns true only for LastResult codes outside the
-// Task Scheduler informational range. Real user-program exit codes
-// (typically 1-127) and HRESULT-shaped codes (high bit set, negative
-// when interpreted as int32) both pass this check.
+// isRealFailure returns true only for LastResult codes that represent
+// an actual daemon failure. Excludes:
+//
+//   - 0 — clean success.
+//   - -1 — internal/scheduler/scheduler.go:53 documented sentinel for
+//     "task has never run" (parseTaskQueryOutput's default when
+//     schtasks /Query output omits the "Last Result:" line). Without
+//     this filter, freshly installed never-run tasks render as red
+//     error tray icons (Codex PR #22 r2 P1).
+//   - 0x41300-0x4130F — Windows Task Scheduler 2.0 informational
+//     codes (e.g. 0x41303 "task has not yet run").
+//
+// Real user-program exit codes (typically 1-127) and HRESULT-shaped
+// codes (high bit set, negative when interpreted as int32 but
+// distinct from -1) both pass this check.
 func isRealFailure(lastResult int32) bool {
-	return lastResult != 0 && (lastResult < tsInfoCodeMin || lastResult > tsInfoCodeMax)
+	if lastResult == 0 || lastResult == -1 {
+		return false
+	}
+	if lastResult >= tsInfoCodeMin && lastResult <= tsInfoCodeMax {
+		return false
+	}
+	return true
 }
 
 // Aggregate maps a slice of daemon rows to one TrayState. Rules,
