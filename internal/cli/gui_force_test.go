@@ -183,11 +183,24 @@ func TestForce_KillHappyPath_SeamMocked(t *testing.T) {
 		fl.Unlock()
 	}()
 
-	// Use a pre-cancelled context so that if kill+acquire succeeds and
-	// startGuiServer is entered, it exits immediately via <-ctx.Done()
-	// rather than blocking until the test timeout fires.
+	// Use a delayed cancel: ctx stays active long enough for the
+	// kill+acquire path to complete (so iter-11's pre-kill ctx
+	// check doesn't refuse), then cancels to make startGuiServer
+	// exit via <-ctx.Done() rather than blocking until the test
+	// timeout. Pre-iter-11 used immediate cancel; that legitimately
+	// short-circuits the new cancel-before-kill safety check.
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // cancel immediately — startGuiServer will see Done on first select
+	defer cancel()
+	go func() {
+		// 3s gives runForceKill enough time for: cli Probe (~50ms +
+		// any retry) + KillRecordedHolder's internal probe (~50ms) +
+		// killProcess (instant) + wait-for-exit (~100ms typical) +
+		// acquire-poll (~50ms when flock is released). Then cancel
+		// triggers startGuiServer's <-ctx.Done() path so the test
+		// terminates instead of blocking until the suite timeout.
+		time.Sleep(3 * time.Second)
+		cancel()
+	}()
 
 	c := newGuiCmdRealForTest()
 	c.SetArgs([]string{"--port", "0", "--no-browser", "--no-tray", "--force", "--kill", "--yes"})

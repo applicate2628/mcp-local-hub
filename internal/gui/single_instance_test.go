@@ -1120,6 +1120,73 @@ func TestKillRecordedHolder_WaitsForKillBeforeAcquirePoll(t *testing.T) {
 	}
 }
 
+// TestKillRecordedHolder_CancelledContextRefusesKill pins the Codex
+// iter-11 P1 fix: when ctx.Done() has fired before the destructive
+// step, KillRecordedHolder must NOT call killProcess. signal.Notify
+// Context only marks the context done — it does not preempt the
+// running goroutine — so without an explicit ctx.Err() check the
+// kill would still go through after Ctrl+C/SIGTERM.
+func TestKillRecordedHolder_CancelledContextRefusesKill(t *testing.T) {
+	prevGate := IdentityGateForTest()
+	defer RestoreIdentityGate(prevGate)
+	SetIdentityGate(func(v Verdict) (refused bool, reason string) { return false, "" })
+
+	// Track whether killProcess was actually invoked. Spy via the
+	// override seam — a no-op on production is fine; we just need
+	// to record the call.
+	var killCalled atomic.Bool
+	prevKill := killProcessOverride
+	defer func() { killProcessOverride = prevKill }()
+	killProcessOverride = func(pid int) error {
+		killCalled.Store(true)
+		return nil
+	}
+
+	// processID returns alive=true so the verdict reaches
+	// LiveUnreachable and the gate (overridden above) admits it.
+	prevProcessID := ProcessIDForTest()
+	defer RestoreProcessID(prevProcessID)
+	SetProcessIDOverride(func(pid int) (ProcessIdentity, error) {
+		return ProcessIdentity{
+			Alive:     true,
+			ImagePath: mcphubBinaryNameForTest(),
+			Cmdline:   []string{mcphubBinaryNameForTest(), "gui"},
+			StartTime: time.Now().Add(-1 * time.Hour),
+		}, nil
+	})
+
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fl := flock.New(pidport + ".lock")
+	if ok, _ := fl.TryLock(); !ok {
+		t.Fatal("could not pre-lock")
+	}
+	defer fl.Unlock()
+
+	// Cancel BEFORE calling KillRecordedHolder. This simulates the
+	// operator pressing Ctrl+C between Probe and the destructive
+	// step (or any race where ctx.Done() fires first).
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, v, err := KillRecordedHolder(ctx, pidport, KillOpts{})
+	if err == nil {
+		t.Fatalf("expected non-nil error from cancelled context; got nil")
+	}
+	if v.Class != VerdictKillFailed {
+		t.Errorf("Class = %v, want VerdictKillFailed", v.Class)
+	}
+	if !strings.Contains(v.Diagnose, "cancelled") {
+		t.Errorf("Diagnose = %q; want 'cancelled' message", v.Diagnose)
+	}
+	if killCalled.Load() {
+		t.Errorf("killProcess was called despite cancelled context — this is the bug iter-11 P1 fixes")
+	}
+}
+
 // mcphubBinaryNameForTest returns the platform-appropriate mcphub
 // binary name so cross-platform tests can build an ImagePath that
 // passes matchBasename. Mirrors the per-platform matchBasename

@@ -602,6 +602,22 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 
 	// All three gates passed. Kill.
 	//
+	// Codex iter-11 P1: check ctx.Done() in the smallest possible
+	// window before the destructive call. signal.NotifyContext
+	// marks ctx.Done() when SIGINT/SIGTERM arrives but does NOT
+	// preempt the running goroutine; without this guard, an
+	// operator who Ctrl+C's between the probe and this point still
+	// sees the kill go through. The check is best-effort (a SIGINT
+	// arriving between the check and killProcess still wins the
+	// race), but closes the obvious window. Apply BEFORE the seam
+	// override so production behavior matches test behavior.
+	if err := ctx.Err(); err != nil {
+		v.Class = VerdictKillFailed
+		v.Diagnose = fmt.Sprintf("kill cancelled before SIGKILL: %v", err)
+		v.Hint = "Operator cancelled (Ctrl+C/SIGTERM) before the destructive step; no kill was attempted."
+		return nil, v, err
+	}
+	//
 	// killProcessOverride is the test seam for the kill helper.
 	// Lets the wait-for-exit unit test (Codex iter-9 P2 #2) replace
 	// killProcess with a no-op so the test doesn't actually
