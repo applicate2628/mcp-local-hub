@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -517,6 +518,228 @@ func TestVerdictDiagnoseHintNotInJSON(t *testing.T) {
 	if strings.Contains(string(b), "should not appear") {
 		t.Errorf("Diagnose/Hint leaked into JSON: %s", b)
 	}
+}
+
+// TestKillRecordedHolder_LongArgv0_DoesNotPassGate pins Codex iter-3
+// P2 #1. Pre-fix code truncated argv to 1024 bytes BEFORE running
+// cmdlineIsGui, so a process whose argv[0] (binary path) exceeded
+// 1KB had argv[1] dropped from the truncation buffer; cmdlineIsGui
+// then read len(argv)==1 and returned true (the Explorer no-arg
+// auto-gui branch). A `--force --kill --yes` against a non-GUI
+// mcphub subcommand whose launch path was long enough could pass
+// the argv gate even though argv[1] != "gui".
+//
+// Post-fix: the gate reads Verdict.pidCmdlineRaw (untruncated),
+// observes argv[1] == "daemon", and refuses with
+// "argv subcommand is not 'gui'". Verdict.PIDCmdline (the public
+// JSON/display field) remains truncated.
+//
+// The test injects ProcessIdentity via processIDOverride. Image
+// path is set to the platform-correct mcphub basename so the FIRST
+// gate (matchBasename) passes — the bug being tested is in the
+// SECOND (argv) gate.
+func TestKillRecordedHolder_LongArgv0_DoesNotPassGate(t *testing.T) {
+	// Build the platform-appropriate "mcphub" image path so the
+	// matchBasename gate passes. Linux/darwin use "mcphub";
+	// Windows uses "mcphub.exe".
+	mcphubBinary := mcphubBinaryNameForTest()
+
+	// Construct argv whose argv[0] alone exceeds the 1KB
+	// truncation budget — pre-fix truncation would drop argv[1].
+	const oversize = 1500
+	longArgv0 := strings.Repeat("a", oversize)
+	rawArgv := []string{longArgv0, "daemon"}
+
+	prev := ProcessIDForTest()
+	defer RestoreProcessID(prev)
+	SetProcessIDOverride(func(pid int) (ProcessIdentity, error) {
+		return ProcessIdentity{
+			Alive:     true,
+			Denied:    false,
+			ImagePath: mcphubBinary,
+			Cmdline:   rawArgv,
+			// StartTime well before pidport mtime so the
+			// start-time gate would also pass (we're isolating
+			// the argv-gate bug).
+			StartTime: time.Now().Add(-1 * time.Hour),
+		}, nil
+	})
+
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+	const probablyClosedPort = 1
+	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), probablyClosedPort)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Backdate pidport mtime so probe doesn't retry.
+	oldMtime := time.Now().Add(-1 * time.Hour)
+	if err := os.Chtimes(pidport, oldMtime, oldMtime); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	// Pre-acquire flock so KillRecordedHolder reaches the gate path.
+	fl := flock.New(pidport + ".lock")
+	if ok, _ := fl.TryLock(); !ok {
+		t.Fatal("could not pre-lock")
+	}
+	defer fl.Unlock()
+
+	_, v, err := KillRecordedHolder(context.Background(), pidport, KillOpts{})
+	if err == nil {
+		t.Fatalf("expected non-nil error on kill-refused; got nil")
+	}
+	if v.Class != VerdictKillRefused {
+		t.Fatalf("Class = %v, want VerdictKillRefused. Diagnose=%q", v.Class, v.Diagnose)
+	}
+	// Diagnose must mention the argv gate, NOT image basename or
+	// start-time, to prove the truncation bug is what we caught.
+	if !strings.Contains(v.Diagnose, "argv subcommand is not 'gui'") {
+		t.Errorf("Diagnose = %q; want argv-gate message proving the gate read raw argv", v.Diagnose)
+	}
+	// PIDCmdline (public/display field) should be truncated to ~1KB
+	// for safe display; pidCmdlineRaw on the verdict should still
+	// hold both elements. This pins the truncation move.
+	if len(v.pidCmdlineRaw) != 2 {
+		t.Errorf("pidCmdlineRaw len = %d, want 2 (raw argv preserved for the gate)", len(v.pidCmdlineRaw))
+	}
+	if len(v.pidCmdlineRaw) >= 2 && v.pidCmdlineRaw[1] != "daemon" {
+		t.Errorf("pidCmdlineRaw[1] = %q, want %q", v.pidCmdlineRaw[1], "daemon")
+	}
+	// PIDCmdline truncated: the long argv[0] is clipped at 1024
+	// bytes and there is no room for argv[1] in the bounded buffer.
+	totalDisplayBytes := 0
+	for _, a := range v.PIDCmdline {
+		totalDisplayBytes += len(a)
+	}
+	if totalDisplayBytes > 1024 {
+		t.Errorf("PIDCmdline total bytes = %d, want <= 1024 (display truncation)", totalDisplayBytes)
+	}
+}
+
+// TestProbe_MacOSUnsupported_HealthyPing_StillClassifiesHealthy pins
+// Codex iter-3 P2 #2: on macOS (or any platform where processIDImpl
+// returns errMacOSProbeUnsupported) a healthy incumbent must still
+// classify as VerdictHealthy if /api/ping matches the recorded PID.
+// Pre-fix code returned VerdictMalformed before reaching the ping,
+// breaking bare `mcphub gui --force` activate-window on macOS.
+//
+// The test uses processIDOverride to simulate the darwin sentinel
+// on every platform so the regression coverage is portable.
+func TestProbe_MacOSUnsupported_HealthyPing_StillClassifiesHealthy(t *testing.T) {
+	prev := ProcessIDForTest()
+	defer RestoreProcessID(prev)
+	SetProcessIDOverride(func(pid int) (ProcessIdentity, error) {
+		return ProcessIdentity{}, ErrMacOSProbeUnsupportedForTest()
+	})
+
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+
+	// Healthy ping server reporting our own PID.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/ping" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "pid": os.Getpid()})
+	}))
+	defer srv.Close()
+	port := portFromURL(t, srv.URL)
+
+	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), port)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Backdate so retry doesn't fire (Healthy short-circuits anyway,
+	// but explicit is safer).
+	oldMtime := time.Now().Add(-1 * time.Hour)
+	if err := os.Chtimes(pidport, oldMtime, oldMtime); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	v := Probe(context.Background(), pidport)
+	if v.Class != VerdictHealthy {
+		t.Fatalf("Class = %v, want VerdictHealthy. Diagnose=%q", v.Class, v.Diagnose)
+	}
+	if !v.PingMatch {
+		t.Errorf("PingMatch = false, want true (ping-only Healthy verdict)")
+	}
+	if v.PID != os.Getpid() {
+		t.Errorf("PID = %d, want %d", v.PID, os.Getpid())
+	}
+}
+
+// TestProbe_MacOSUnsupported_NoPing_ClassifiesLiveUnreachable pins
+// Codex iter-3 P2 #2 part 2: when ping fails AND processIDImpl
+// returns errMacOSProbeUnsupported, the verdict must be
+// VerdictLiveUnreachable (with macOSUnsupported flagged), NOT
+// VerdictMalformed. Pre-fix code returned Malformed in this case,
+// which made the bare `--force` diagnostic block emit "Stuck-instance
+// kill recovery is platform-specific..." but skipped the LiveUnreachable
+// path that KillRecordedHolder needs to surface a clear macOS-specific
+// KillRefused.
+func TestProbe_MacOSUnsupported_NoPing_ClassifiesLiveUnreachable(t *testing.T) {
+	prev := ProcessIDForTest()
+	defer RestoreProcessID(prev)
+	SetProcessIDOverride(func(pid int) (ProcessIdentity, error) {
+		return ProcessIdentity{}, ErrMacOSProbeUnsupportedForTest()
+	})
+
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+	// Port 1 has no listener — ping will fail.
+	const probablyClosedPort = 1
+	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), probablyClosedPort)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Backdate so the retry loop doesn't fire (LiveUnreachable on a
+	// fresh pidport would otherwise burn the retry budget).
+	oldMtime := time.Now().Add(-1 * time.Hour)
+	if err := os.Chtimes(pidport, oldMtime, oldMtime); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	v := Probe(context.Background(), pidport)
+	if v.Class != VerdictLiveUnreachable {
+		t.Fatalf("Class = %v, want VerdictLiveUnreachable (NOT Malformed). Diagnose=%q", v.Class, v.Diagnose)
+	}
+	if !v.macOSUnsupported {
+		t.Errorf("macOSUnsupported = false, want true (probe should flag the platform-unsupported case)")
+	}
+	if !strings.Contains(v.Hint, "macOS") {
+		t.Errorf("Hint = %q; want macOS-specific message", v.Hint)
+	}
+
+	// Bonus: KillRecordedHolder against this verdict must refuse
+	// with the macOS-specific diagnose, NOT cascade through the
+	// image gate.
+	fl := flock.New(pidport + ".lock")
+	if ok, _ := fl.TryLock(); !ok {
+		t.Fatal("could not pre-lock")
+	}
+	defer fl.Unlock()
+
+	_, killV, err := KillRecordedHolder(context.Background(), pidport, KillOpts{})
+	if err == nil {
+		t.Errorf("KillRecordedHolder on macOS-unsupported verdict returned nil error; expected refused")
+	}
+	if killV.Class != VerdictKillRefused {
+		t.Errorf("Class = %v, want VerdictKillRefused on macOS shortcut", killV.Class)
+	}
+	if !strings.Contains(killV.Diagnose, "macOS") {
+		t.Errorf("Diagnose = %q; want macOS-specific message (not the image-gate cascade)", killV.Diagnose)
+	}
+}
+
+// mcphubBinaryNameForTest returns the platform-appropriate mcphub
+// binary name so cross-platform tests can build an ImagePath that
+// passes matchBasename. Mirrors the per-platform matchBasename
+// logic in probe_windows.go vs probe_linux.go/probe_darwin.go.
+func mcphubBinaryNameForTest() string {
+	if runtime.GOOS == "windows" {
+		return `C:\Program Files\mcphub\mcphub.exe`
+	}
+	return "/usr/local/bin/mcphub"
 }
 
 // portFromURL is shared with probe_test.go; kept package-private.

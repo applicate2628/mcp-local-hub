@@ -185,6 +185,22 @@ func (c VerdictClass) String() string {
 // Verdict bundles the Probe result. JSON marshaling skips Diagnose
 // and Hint (Codex r6 #4): A4-b's POST /api/force-kill returns the
 // raw structured fields and the UI formats locally.
+//
+// pidCmdlineRaw and macOSUnsupported are unexported and therefore
+// invisible to encoding/json. They carry signals that must NOT
+// reach JSON or the diagnostic block: pidCmdlineRaw is the full,
+// untruncated argv the identity-gate (cmdlineIsGui) reads; the
+// public PIDCmdline is the truncated display/JSON copy. Truncating
+// argv before the gate would drop argv[1] when argv[0] (the
+// binary path) exceeds 1KB and let a non-GUI mcphub subcommand
+// pass the gate's len(argv)==1 branch (Codex iter-3 P2 #1).
+//
+// macOSUnsupported, when true, marks a Verdict produced on a
+// platform where processIDImpl returned errMacOSProbeUnsupported
+// (currently darwin). KillRecordedHolder reads it to short-circuit
+// to a macOS-specific KillRefused message instead of cascading
+// through the image/argv/start-time gates with empty fields and
+// emitting "image '' is not an mcphub binary" (Codex iter-3 P2 #2).
 type Verdict struct {
 	Class      VerdictClass `json:"class"`
 	PID        int          `json:"pid"`
@@ -197,6 +213,17 @@ type Verdict struct {
 	PingMatch  bool         `json:"ping_match"`
 	Diagnose   string       `json:"-"`
 	Hint       string       `json:"-"`
+
+	// pidCmdlineRaw is the untruncated argv used by the identity
+	// gate. Unexported so encoding/json never serializes it; the
+	// truncated PIDCmdline above is the only argv that reaches
+	// display, JSON, or the diagnostic block.
+	pidCmdlineRaw []string
+
+	// macOSUnsupported flags Verdicts produced when processIDImpl
+	// returned errMacOSProbeUnsupported. KillRecordedHolder uses
+	// this to refuse the kill with a macOS-specific message.
+	macOSUnsupported bool
 }
 
 // KillOpts controls KillRecordedHolder behavior.
@@ -328,6 +355,23 @@ func shouldRetryProbe(v Verdict) bool {
 
 // probeOnce runs a single classification pass without retry. Split
 // out from probe so the retry loop above can call it cleanly.
+//
+// Ordering invariant (Codex iter-3 P2 #2): ping runs FIRST, before
+// processID. Healthy classification depends on ping match alone —
+// processID telemetry is needed for the LiveUnreachable vs DeadPID
+// distinction and for the destructive identity gate, but Healthy
+// is a ping-only verdict. This lets bare `mcphub gui --force` on
+// macOS detect a healthy incumbent and route to handshake, even
+// though processIDImpl returns errMacOSProbeUnsupported. Pre-fix
+// code returned VerdictMalformed early on macOS and never reached
+// the ping branch, breaking activate-window for healthy incumbents.
+//
+// Truncation invariant (Codex iter-3 P2 #1): id.Cmdline is the
+// raw, untruncated argv. We store it on Verdict.pidCmdlineRaw
+// (unexported) for the identity gate, and truncate only when
+// populating the display field Verdict.PIDCmdline. Truncating
+// before the gate would let a non-GUI mcphub subcommand whose
+// argv[0] exceeds 1KB pass cmdlineIsGui's len(argv)==1 branch.
 func probeOnce(ctx context.Context, pidportPath string, pingTimeout time.Duration) Verdict {
 	v := Verdict{}
 	pid, port, err := ReadPidport(pidportPath)
@@ -343,23 +387,45 @@ func probeOnce(ctx context.Context, pidportPath string, pingTimeout time.Duratio
 		v.Mtime = st.ModTime()
 	}
 
+	// Ping first. A successful ping that matches the recorded PID
+	// is a complete Healthy verdict regardless of whether processID
+	// is supported on this platform.
+	matched, perr := pingIncumbent(ctx, port, pingTimeout)
+	pingMatched := perr == nil && matched == pid
+
 	id, idErr := processID(pid)
 	v.PIDAlive = id.Alive
 	v.PIDImage = id.ImagePath
+	v.pidCmdlineRaw = id.Cmdline
 	v.PIDCmdline = truncateCmdline(id.Cmdline, 1024)
 	v.PIDStart = id.StartTime
+	v.macOSUnsupported = errors.Is(idErr, errMacOSProbeUnsupported)
 
-	// Codex PR #23 P2 #3 (iter-2): on platforms where the identity
-	// probe is unimplemented (currently macOS — see probe_darwin.go),
-	// processIDImpl returns ProcessIdentity{} + a sentinel error. We
-	// surface that error as a Malformed-class verdict with the
-	// platform's own message so --force --kill emits a clear
-	// "unsupported on macOS" diagnostic instead of the misleading
-	// "PID not alive" or "image is not an mcphub binary" cascade.
-	if idErr != nil && !id.Alive && id.ImagePath == "" {
-		v.Class = VerdictMalformed
-		v.Diagnose = idErr.Error()
-		v.Hint = "Stuck-instance kill recovery is platform-specific; reboot is the universally available recovery path."
+	if pingMatched {
+		v.Class = VerdictHealthy
+		v.PingMatch = true
+		v.Diagnose = fmt.Sprintf("incumbent PID %d is healthy on port %d", pid, port)
+		v.Hint = ""
+		return v
+	}
+
+	// Codex PR #23 P2 #3 (iter-2, refined iter-3): on platforms
+	// where the identity probe is unimplemented (currently macOS —
+	// see probe_darwin.go), processIDImpl returns ProcessIdentity{}
+	// + a sentinel error. Without a healthy ping we have no useful
+	// liveness signal, so classify as VerdictLiveUnreachable with
+	// macOS-specific diagnose/hint. KillRecordedHolder reads
+	// macOSUnsupported and refuses with a clear message instead of
+	// cascading through identity gates that read empty fields.
+	if v.macOSUnsupported {
+		v.Class = VerdictLiveUnreachable
+		v.PIDAlive = false
+		if perr != nil {
+			v.Diagnose = fmt.Sprintf("recorded PID %d: macOS identity probe not supported and /api/ping on %d failed: %v", pid, port, perr)
+		} else {
+			v.Diagnose = fmt.Sprintf("recorded PID %d: macOS identity probe not supported and /api/ping on %d returned PID %d", pid, port, matched)
+		}
+		v.Hint = "macOS: identity probe not supported; --force --kill is blocked. Reboot is the recovery path."
 		return v
 	}
 
@@ -370,14 +436,6 @@ func probeOnce(ctx context.Context, pidportPath string, pingTimeout time.Duratio
 		return v
 	}
 
-	matched, perr := pingIncumbent(ctx, port, pingTimeout)
-	if perr == nil && matched == pid {
-		v.Class = VerdictHealthy
-		v.PingMatch = true
-		v.Diagnose = fmt.Sprintf("incumbent PID %d is healthy on port %d", pid, port)
-		v.Hint = ""
-		return v
-	}
 	v.Class = VerdictLiveUnreachable
 	if perr != nil {
 		v.Diagnose = fmt.Sprintf("recorded PID %d alive but /api/ping on %d failed: %v", pid, port, perr)
@@ -433,6 +491,21 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 		return nil, v, nil
 	}
 
+	// Codex iter-3 P2 #2: macOS shortcut — when probeOnce flagged
+	// the verdict as macOSUnsupported, processIDImpl returned no
+	// useful identity signals. Refuse the kill explicitly with a
+	// macOS-specific diagnose instead of letting the gate emit
+	// "image '' is not an mcphub binary". Production gate semantics
+	// are unchanged on linux/windows where macOSUnsupported is
+	// always false. The override seam is honored first so existing
+	// scenario-4/4b tests can still mock the gate.
+	if v.macOSUnsupported && identityGateOverride == nil {
+		v.Class = VerdictKillRefused
+		v.Diagnose = "kill refused: macOS identity probe not supported; reboot is the recovery path"
+		v.Hint = "Tracked as backlog: macOS libproc/sysctl-based identity (see probe_darwin.go)."
+		return nil, v, fmt.Errorf("kill refused: macOS identity probe not supported")
+	}
+
 	// LiveUnreachable: run the three-part identity gate.
 	//
 	// identityGateOverride, when set by tests, replaces the full
@@ -453,7 +526,13 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 			v.Hint = "Identity-gate (image basename) failed; identify and kill the actual flock holder via OS tools."
 			return nil, v, fmt.Errorf("kill refused: image gate")
 		}
-		if !cmdlineIsGui(v.PIDCmdline) {
+		// Codex iter-3 P2 #1: read v.pidCmdlineRaw (the unmodified
+		// argv populated by probeOnce), not v.PIDCmdline (truncated
+		// for display). Truncating before this gate would drop
+		// argv[1] when argv[0] (the binary path) exceeds 1KB and
+		// allow a non-GUI mcphub subcommand whose long path triggers
+		// the truncation to pass the len(argv)==1 branch.
+		if !cmdlineIsGui(v.pidCmdlineRaw) {
 			v.Class = VerdictKillRefused
 			v.Diagnose = fmt.Sprintf("recorded PID %d argv subcommand is not 'gui' (argv=%v)", v.PID, v.PIDCmdline)
 			v.Hint = "Identity-gate (argv subcommand) failed; the recorded PID is a different mcphub subcommand."
@@ -530,11 +609,15 @@ func startTimeBeforeMtime(start, mtime time.Time, tolerance time.Duration) bool 
 }
 
 // truncateCmdline caps the total argv string length at maxBytes for
-// safe logging/JSON. The image gate runs before the argv gate
-// (matchBasename then cmdlineIsGui), so a pathologically large
-// argv[0] from a non-mcphub process is rejected before the
-// (truncated) argv[1] is read by cmdlineIsGui. Truncation is
-// display/JSON-bounding only, not a security mitigation.
+// safe logging/JSON. The identity gate (cmdlineIsGui) reads the raw
+// argv from Verdict.pidCmdlineRaw, NOT the truncated PIDCmdline this
+// function produces, so truncation cannot influence the gate's
+// decision. (Codex iter-3 P2 #1: pre-fix code truncated before the
+// gate, which dropped argv[1] when argv[0] exceeded maxBytes and
+// let the len(argv)==1 branch of cmdlineIsGui pass for a non-GUI
+// mcphub subcommand whose binary path was long enough.)
+//
+// Truncation is display/JSON-bounding only, not a security mitigation.
 func truncateCmdline(argv []string, maxBytes int) []string {
 	if len(argv) == 0 {
 		return argv

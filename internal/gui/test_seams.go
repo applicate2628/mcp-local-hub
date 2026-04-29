@@ -75,3 +75,32 @@ func SetPostKillHook(fn func()) { postKillHook = fn }
 
 // RestorePostKillHook reinstates a previously-snapshotted hook value.
 func RestorePostKillHook(fn func()) { postKillHook = fn }
+
+// --- processID seam ---
+
+// processIDOverride, when non-nil, replaces processID() inside
+// probeOnce. Tests use it to inject specific ProcessIdentity
+// payloads (e.g. an oversize argv[0] for the truncation regression
+// in Codex iter-3 P2 #1, or errMacOSProbeUnsupported on
+// linux/windows runners for the macOS regression in Codex iter-3
+// P2 #2). Production code path is unchanged when this is nil.
+var processIDOverride func(pid int) (ProcessIdentity, error)
+
+// ProcessIDForTest returns the current processIDOverride so callers
+// can snapshot it before installing an override.
+func ProcessIDForTest() func(pid int) (ProcessIdentity, error) { return processIDOverride }
+
+// SetProcessIDOverride installs a function that replaces processID()
+// inside probeOnce. Tests must restore the original via
+// RestoreProcessID(prev) in a defer.
+func SetProcessIDOverride(fn func(pid int) (ProcessIdentity, error)) { processIDOverride = fn }
+
+// RestoreProcessID reinstates a previously-snapshotted override.
+// Passing nil disables the override and returns to production behavior.
+func RestoreProcessID(fn func(pid int) (ProcessIdentity, error)) { processIDOverride = fn }
+
+// ErrMacOSProbeUnsupportedForTest exposes the package-private
+// errMacOSProbeUnsupported sentinel so tests in any package can
+// build override results that simulate the darwin processIDImpl
+// stub on linux/windows runners.
+func ErrMacOSProbeUnsupportedForTest() error { return errMacOSProbeUnsupported }

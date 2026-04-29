@@ -4,7 +4,6 @@
 package gui
 
 import (
-	"errors"
 	"path/filepath"
 )
 
@@ -34,7 +33,9 @@ import (
 // an mcphub binary" — confusing) or require additional Verdict
 // fields to disambiguate. The fully-stubbed return is cleaner.
 
-var errMacOSProbeUnsupported = errors.New("--force --kill identity probe not supported on macOS (reboot is the recovery path; tracked as backlog: macOS libproc/sysctl-based identity)")
+// errMacOSProbeUnsupported is defined in probe.go (cross-platform
+// var) so single_instance.go can errors.Is against it on every
+// build. Only this darwin processIDImpl actually returns it.
 
 // processIDImpl is the macOS stub. Returns a zero-valued
 // ProcessIdentity plus the sentinel error. Single instance code

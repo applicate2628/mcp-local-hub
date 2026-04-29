@@ -4,10 +4,19 @@ package gui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
 )
+
+// errMacOSProbeUnsupported is the cross-platform sentinel returned by
+// processIDImpl on darwin (see probe_darwin.go). It lives here in
+// probe.go (not probe_darwin.go) so single_instance.go can compare
+// against it via errors.Is on every platform without breaking the
+// linux/windows builds. The literal value is darwin-specific; on
+// non-darwin platforms processIDImpl never returns it.
+var errMacOSProbeUnsupported = errors.New("--force --kill identity probe not supported on macOS (reboot is the recovery path; tracked as backlog: macOS libproc/sysctl-based identity)")
 
 // ProcessIdentity is the cross-platform result of inspecting an OS
 // process. Used by single_instance.go's Probe + KillRecordedHolder
@@ -59,11 +68,20 @@ func pingIncumbent(ctx context.Context, port int, timeout time.Duration) (int, e
 }
 
 // processID is the platform-specific process inspector; defined in
-// probe_windows.go and probe_unix.go. Called by single_instance.go
-// only — keep callers narrow.
+// probe_windows.go, probe_linux.go, and probe_darwin.go. Called by
+// single_instance.go only — keep callers narrow.
+//
+// processIDOverride (test seam in test_seams.go), when non-nil,
+// replaces the platform implementation. Production code path is
+// unchanged when the override is nil. Tests use it to inject
+// specific ProcessIdentity payloads or to simulate the darwin
+// errMacOSProbeUnsupported sentinel on linux/windows runners.
 func processID(pid int) (ProcessIdentity, error) {
 	if pid <= 0 {
 		return ProcessIdentity{Alive: false}, nil
+	}
+	if processIDOverride != nil {
+		return processIDOverride(pid)
 	}
 	return processIDImpl(pid)
 }
