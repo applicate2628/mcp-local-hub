@@ -98,18 +98,26 @@ export function ServersScreen() {
         }
         clients.set(client, direction);
       } else {
-        // Toggle-back: prune invariant by default (DirtyMap doc).
-        // EXCEPTION (PR #22 retry-queue fix): if the cell carries a
-        // retained-failure outcome from the last applyChanges, preserve
-        // the dirty entry so the user can still re-click Apply for a
-        // retry. Without this exception, the user's reaction to a
-        // failure ("oops, let me put the box back") silently empties
-        // the retry queue and Apply gauge grays out — they have no
-        // way to retry without reloading the page.
-        const lastOutcome = outcomes.get(server)?.get(client);
-        if (lastOutcome === "failed" || lastOutcome === "gated") {
-          return prev;
-        }
+        // Toggle-back: prune invariant (DirtyMap doc).
+        //
+        // Earlier draft (Codex PR #22 r3 P1 fix) tried to preserve
+        // the dirty entry when there was a retained-failure outcome,
+        // hoping to keep the retry queue alive across an accidental
+        // re-tick. That was WRONG: the visual checkbox is already at
+        // `initialChecked`, but the preserved dirty entry still
+        // carries the OLD direction (e.g., "demigrate"). A subsequent
+        // Apply then fires /api/demigrate against a cell that the
+        // user has visually returned to via-hub — UI and intent
+        // diverge.
+        //
+        // Retry affordance is preserved through the outcome map's
+        // visual indicator (`.matrix-cell-retry-pending` red outline
+        // — see CellView). When the user re-toggles the cell, the
+        // dirty entry is recreated with a direction that matches the
+        // current visual state, and Apply re-runs the failed action
+        // honestly. The outline keeps the failure context visible
+        // across the toggle-back so the user knows there was a prior
+        // problem on this cell even if Apply is currently inactive.
         const clients = next.get(server);
         if (clients) {
           clients.delete(client);
