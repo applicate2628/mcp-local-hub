@@ -324,7 +324,16 @@ func runForceKill(cmd *cobra.Command, pidportPath string, yes bool) (*gui.Single
 		}
 	}
 
-	lock, killVerdict, err := gui.KillRecordedHolder(cmd.Context(), pidportPath, gui.KillOpts{})
+	// Codex iter-5 P1: pass the identity tuple the cli already saw
+	// (and printed/confirmed with the user) into KillRecordedHolder
+	// so its internal re-probe refuses with VerdictRaceLost (exit 3)
+	// if a competitor rewrote pidport during the prompt window. The
+	// guard runs even on --yes because the prompt-skip path still
+	// has a sub-second TOCTOU window between this Probe and the one
+	// inside KillRecordedHolder.
+	lock, killVerdict, err := gui.KillRecordedHolder(cmd.Context(), pidportPath, gui.KillOpts{
+		Expected: gui.ExpectedIdentity{PID: v.PID, Port: v.Port, Mtime: v.Mtime},
+	})
 	if killVerdict.Class == gui.VerdictKilledRecovered {
 		fmt.Fprintln(cmd.OutOrStdout(), killVerdict.Diagnose)
 		return lock, 0
@@ -412,13 +421,23 @@ func formatDiagnostic(v gui.Verdict, pidportPath string) string {
 }
 
 // forceExitError is a typed error that carries an exit code. cmd/mcphub/main.go
-// uses errors.As(err, &fe) where fe is `interface{ ExitCode() int }` to map
-// these errors onto os.Exit(code) — without that branch cobra defaults to
+// uses errors.As(err, &fe) where fe is the combined
+// `interface{ ExitCode() int; IsMcphubForceExit() bool }` to map these
+// errors onto os.Exit(code) — without that branch cobra defaults to
 // exit 1 on error and the distinct exit codes (2/3/4/6/7) are lost.
 type forceExitError struct{ code int }
 
 func (e *forceExitError) Error() string { return fmt.Sprintf("force exit %d", e.code) }
 func (e *forceExitError) ExitCode() int { return e.code }
+
+// IsMcphubForceExit is the marker that distinguishes this CLI sentinel
+// from os/exec.ExitError (which also satisfies `interface{ ExitCode() int }`).
+// cmd/mcphub/main.go must match against this method to avoid silently
+// suppressing diagnostic context from wrapped subprocess failures
+// (editor in `mcphub manifest edit` / `mcphub secrets edit`, taskkill,
+// etc. — see fmt.Errorf("...: %w", err) wrappings in those files).
+// Codex iter-5 P2.
+func (e *forceExitError) IsMcphubForceExit() bool { return true }
 
 func forceExit(code int) error {
 	return &forceExitError{code: code}

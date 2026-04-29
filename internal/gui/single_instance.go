@@ -238,7 +238,34 @@ type KillOpts struct {
 	// AcquireBackoff is the inter-attempt delay during the
 	// post-kill TryLock poll. Default 50ms when zero.
 	AcquireBackoff time.Duration
+	// Expected, when populated (non-zero PID), is the identity the
+	// caller already showed to the user (e.g. via runForceKill's
+	// confirmation prompt). KillRecordedHolder's internal re-probe
+	// must observe an identical (PID, Port, Mtime) tuple before any
+	// kill happens; otherwise classification flips to
+	// VerdictRaceLost and no signal is sent. Closes the TOCTOU
+	// window between the cli's first Probe and the internal probe
+	// where a competitor could rewrite the pidport with a different
+	// PID and trick the gate into killing the wrong process.
+	// Codex iter-5 P1.
+	Expected ExpectedIdentity
 }
+
+// ExpectedIdentity carries the (PID, Port, Mtime) tuple the caller
+// already validated against before invoking KillRecordedHolder.
+// A zero PID disables the check (back-compat for callers that do not
+// pre-Probe). Codex iter-5 P1.
+type ExpectedIdentity struct {
+	PID   int
+	Port  int
+	Mtime time.Time
+}
+
+// IsZero reports whether the ExpectedIdentity carries no expectation.
+// PID == 0 is the canonical "unset" sentinel — any pidport with a
+// recorded PID of 0 is malformed and would already be rejected by
+// probe/ReadPidport before reaching here.
+func (e ExpectedIdentity) IsZero() bool { return e.PID == 0 }
 
 // Probe inspects the pidport file and classifies the incumbent's
 // state without taking any destructive action. Used by bare
@@ -489,6 +516,30 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 		// the cli layer can print "incumbent is healthy; activating
 		// instead of killing" before TryActivateIncumbent.
 		return nil, v, nil
+	}
+
+	// Codex iter-5 P1: TOCTOU guard between the caller's confirmed
+	// identity (the PID it showed to the user, or the cli's first
+	// Probe in --yes mode) and the identity our internal re-probe
+	// just observed. A competitor that rewrote the pidport between
+	// the two probes would flip PID/Port/Mtime; if we proceed here
+	// we may signal a different process than the user confirmed.
+	// Mismatch → VerdictRaceLost; no kill attempted. The check is
+	// gated on Expected.PID != 0 so callers that don't pre-Probe
+	// (no production callers today, but the seam is preserved for
+	// older tests) keep their original behavior.
+	if !opts.Expected.IsZero() {
+		if v.PID != opts.Expected.PID || v.Port != opts.Expected.Port || !v.Mtime.Equal(opts.Expected.Mtime) {
+			confirmed := opts.Expected
+			v.Class = VerdictRaceLost
+			v.Diagnose = fmt.Sprintf(
+				"pidport changed between user confirmation and kill: confirmed PID %d port %d mtime %s, found PID %d port %d mtime %s",
+				confirmed.PID, confirmed.Port, confirmed.Mtime.UTC().Format(time.RFC3339Nano),
+				v.PID, v.Port, v.Mtime.UTC().Format(time.RFC3339Nano),
+			)
+			v.Hint = "Rerun mcphub gui without --force to handshake with the new incumbent."
+			return nil, v, fmt.Errorf("pidport changed mid-prompt")
+		}
 	}
 
 	// Codex iter-3 P2 #2: macOS shortcut — when probeOnce flagged

@@ -3,6 +3,7 @@ package gui
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -728,6 +729,219 @@ func TestProbe_MacOSUnsupported_NoPing_ClassifiesLiveUnreachable(t *testing.T) {
 	}
 	if !strings.Contains(killV.Diagnose, "macOS") {
 		t.Errorf("Diagnose = %q; want macOS-specific message (not the image-gate cascade)", killV.Diagnose)
+	}
+}
+
+// TestKillRecordedHolder_PidportChangedMidPrompt_ReturnsRaceLost pins
+// the Codex iter-5 P1 TOCTOU fix. Before the fix, the cli would
+// Probe the pidport, print PID X to the user, prompt for confirmation,
+// then call KillRecordedHolder which Probes a SECOND time. A
+// competitor that rewrote the pidport between the two probes could
+// flip the recorded PID; the gate would then admit the new PID and
+// SIGKILL/TerminateProcess would fire on a different process than the
+// user confirmed.
+//
+// Post-fix: KillOpts.Expected carries the (PID, Port, Mtime) the
+// caller already showed to the user. The internal re-probe asserts
+// the recorded fields are unchanged; otherwise it returns
+// VerdictRaceLost without sending any signal.
+//
+// This test deterministically simulates the race by populating the
+// pidport with one identity and calling KillRecordedHolder with an
+// Expected tuple that disagrees on PID. No real second-prober is
+// needed — the production code path is the same:
+// 1. probe reads the current pidport,
+// 2. the Expected guard compares against the caller-supplied tuple,
+// 3. mismatch → VerdictRaceLost.
+//
+// The full race (with a goroutine racing the probe) cannot be made
+// deterministic without an additional probe-level seam, and the
+// boundary semantics being tested here are identical: when probe's
+// observation differs from Expected, the function refuses with
+// VerdictRaceLost. (Codex iter-5 P1.)
+func TestKillRecordedHolder_PidportChangedMidPrompt_ReturnsRaceLost(t *testing.T) {
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+
+	// The probe must classify as VerdictLiveUnreachable for the
+	// Expected guard to fire — Malformed/DeadPID/Healthy short-
+	// circuit before the guard. To reach LiveUnreachable we need:
+	//   - alive PID (use os.Getpid() — always alive)
+	//   - failing ping (use port 1 — closed on test runners)
+	//
+	// The pidport thus records the "after competitor rewrote it"
+	// state with a real PID we can probe.
+	observedPID := os.Getpid()
+	const observedPort = 1
+	if err := os.WriteFile(pidport, []byte(formatPidport(observedPID, observedPort)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(pidport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observedMtime := st.ModTime()
+
+	// Pre-acquire the flock so the verdict reaches LiveUnreachable
+	// rather than a flock-clear path.
+	fl := flock.New(pidport + ".lock")
+	if ok, _ := fl.TryLock(); !ok {
+		t.Fatal("could not pre-lock")
+	}
+	defer fl.Unlock()
+
+	// Expected disagrees on PID: simulates the cli's first Probe
+	// having captured a different PID before the competitor rewrote
+	// the file. os.Getppid() is also alive (the test runner) but
+	// distinct from os.Getpid().
+	confirmedPID := os.Getppid()
+	if confirmedPID == observedPID {
+		t.Skip("os.Getpid() == os.Getppid(); cannot distinguish confirmed from observed identity")
+	}
+	confirmed := ExpectedIdentity{
+		PID:   confirmedPID,
+		Port:  observedPort,
+		Mtime: observedMtime,
+	}
+
+	_, v, err := KillRecordedHolder(context.Background(), pidport, KillOpts{
+		Expected: confirmed,
+	})
+	if err == nil {
+		t.Fatalf("expected error from Expected mismatch; got nil (verdict=%+v)", v)
+	}
+	if v.Class != VerdictRaceLost {
+		t.Errorf("Class = %v, want VerdictRaceLost. Diagnose=%q", v.Class, v.Diagnose)
+	}
+	if !strings.Contains(v.Diagnose, "pidport changed between user confirmation and kill") {
+		t.Errorf("Diagnose = %q; want 'pidport changed between user confirmation and kill'", v.Diagnose)
+	}
+	// Confirmed PID and observed PID must both appear in the
+	// diagnose so an operator can see what changed.
+	confirmedStr := fmt.Sprintf("%d", confirmedPID)
+	observedStr := fmt.Sprintf("%d", observedPID)
+	if !strings.Contains(v.Diagnose, confirmedStr) || !strings.Contains(v.Diagnose, observedStr) {
+		t.Errorf("Diagnose = %q; want both confirmed PID %d and observed PID %d", v.Diagnose, confirmedPID, observedPID)
+	}
+}
+
+// TestKillRecordedHolder_PidportPortChanged_ReturnsRaceLost covers
+// the Port axis of the Expected guard: an attacker that kept the
+// recorded PID stable but flipped the recorded port (e.g. to redirect
+// a follow-up probe at a different listener) must also be rejected
+// with VerdictRaceLost. (Codex iter-5 P1.)
+func TestKillRecordedHolder_PidportPortChanged_ReturnsRaceLost(t *testing.T) {
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+
+	pid := os.Getpid()
+	const observedPort = 1
+	if err := os.WriteFile(pidport, []byte(formatPidport(pid, observedPort)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(pidport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observedMtime := st.ModTime()
+
+	fl := flock.New(pidport + ".lock")
+	if ok, _ := fl.TryLock(); !ok {
+		t.Fatal("could not pre-lock")
+	}
+	defer fl.Unlock()
+
+	// Expected disagrees on Port.
+	const confirmedPort = 1234
+	confirmed := ExpectedIdentity{
+		PID:   pid,
+		Port:  confirmedPort,
+		Mtime: observedMtime,
+	}
+
+	_, v, err := KillRecordedHolder(context.Background(), pidport, KillOpts{
+		Expected: confirmed,
+	})
+	if err == nil {
+		t.Fatalf("expected error from Expected mismatch; got nil (verdict=%+v)", v)
+	}
+	if v.Class != VerdictRaceLost {
+		t.Errorf("Class = %v, want VerdictRaceLost. Diagnose=%q", v.Class, v.Diagnose)
+	}
+}
+
+// TestKillRecordedHolder_PidportMtimeChanged_ReturnsRaceLost covers
+// the Mtime axis of the Expected guard. (Codex iter-5 P1.)
+func TestKillRecordedHolder_PidportMtimeChanged_ReturnsRaceLost(t *testing.T) {
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+
+	pid := os.Getpid()
+	const port = 1
+	if err := os.WriteFile(pidport, []byte(formatPidport(pid, port)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(pidport)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fl := flock.New(pidport + ".lock")
+	if ok, _ := fl.TryLock(); !ok {
+		t.Fatal("could not pre-lock")
+	}
+	defer fl.Unlock()
+
+	// Expected disagrees on Mtime — even by 1 nanosecond.
+	confirmed := ExpectedIdentity{
+		PID:   pid,
+		Port:  port,
+		Mtime: st.ModTime().Add(1 * time.Nanosecond),
+	}
+
+	_, v, err := KillRecordedHolder(context.Background(), pidport, KillOpts{
+		Expected: confirmed,
+	})
+	if err == nil {
+		t.Fatalf("expected error from Expected mismatch; got nil (verdict=%+v)", v)
+	}
+	if v.Class != VerdictRaceLost {
+		t.Errorf("Class = %v, want VerdictRaceLost. Diagnose=%q", v.Class, v.Diagnose)
+	}
+}
+
+// TestKillRecordedHolder_ExpectedZeroValueDisablesCheck verifies
+// back-compat: callers that don't populate KillOpts.Expected (e.g.
+// older tests) still see the original behavior — the Expected guard
+// is gated on Expected.PID != 0. (Codex iter-5 P1.)
+func TestKillRecordedHolder_ExpectedZeroValueDisablesCheck(t *testing.T) {
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+
+	// Use a non-mcphub image so the production identity gate refuses
+	// — that's the verdict we expect when the Expected guard is
+	// disabled (rather than VerdictRaceLost). os.Getppid() is the
+	// shell or test runner, which fails matchBasename.
+	if err := os.WriteFile(pidport, []byte(fmt.Sprintf("%d 1\n", os.Getppid())), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fl := flock.New(pidport + ".lock")
+	if ok, _ := fl.TryLock(); !ok {
+		t.Fatal("could not pre-lock")
+	}
+	defer fl.Unlock()
+
+	// Empty Expected (zero PID) disables the guard — KillRecordedHolder
+	// should behave exactly as before iter-5: identity gate runs and
+	// refuses on the non-mcphub image.
+	_, v, err := KillRecordedHolder(context.Background(), pidport, KillOpts{})
+	if err == nil {
+		t.Fatalf("expected refusal verdict; got nil error (verdict=%+v)", v)
+	}
+	// Specifically must NOT be VerdictRaceLost — that would mean the
+	// guard fired despite Expected being zero-valued.
+	if v.Class == VerdictRaceLost {
+		t.Errorf("Class = VerdictRaceLost; want non-race refusal (Expected zero-value should disable the TOCTOU guard). Diagnose=%q", v.Diagnose)
 	}
 }
 

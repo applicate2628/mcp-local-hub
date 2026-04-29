@@ -769,3 +769,96 @@ func newGuiCmdRealForTest() *cobra.Command {
 	c.SetErr(os.Stderr)
 	return c
 }
+
+// ---------------------------------------------------------------
+// Codex iter-5 P2: main.go's force-exit branch must only match the
+// cli's own sentinel, not arbitrary errors that happen to satisfy
+// `interface{ ExitCode() int }` such as *os/exec.ExitError.
+// ---------------------------------------------------------------
+
+// TestForceExitError_SatisfiesMcphubMarker pins the positive case:
+// the cli's forceExitError implements the combined matcher main.go
+// uses, so legitimate --force / --force --kill exit codes still
+// route through os.Exit(code).
+func TestForceExitError_SatisfiesMcphubMarker(t *testing.T) {
+	err := forceExit(7)
+	var fe interface {
+		ExitCode() int
+		IsMcphubForceExit() bool
+	}
+	if !errors.As(err, &fe) {
+		t.Fatalf("forceExit(7) should satisfy the combined matcher; got %v", err)
+	}
+	if fe.ExitCode() != 7 {
+		t.Errorf("ExitCode() = %d, want 7", fe.ExitCode())
+	}
+	if !fe.IsMcphubForceExit() {
+		t.Errorf("IsMcphubForceExit() = false, want true")
+	}
+}
+
+// TestExecExitError_DoesNotShortCircuitMain pins the iter-5 P2 fix.
+// Cobra commands like `mcp manifest edit` and `mcp secrets edit`
+// wrap subprocess failures with `fmt.Errorf("...: %w", err)`. The
+// child's *exec.ExitError satisfies `interface{ ExitCode() int }`,
+// so a bare ExitCode-only matcher in main.go would have routed those
+// errors to `os.Exit(<child code>)` and silently dropped the
+// contextual "error: ..." diagnostic.
+//
+// Post-fix: main.go matches the combined
+// `interface{ ExitCode() int; IsMcphubForceExit() bool }`, which
+// *exec.ExitError does NOT satisfy. This test runs a child process
+// that exits non-zero, wraps the error the same way the editor
+// callsites in cli/manifest.go and cli/secrets.go do, and asserts
+// the combined matcher rejects it.
+func TestExecExitError_DoesNotShortCircuitMain(t *testing.T) {
+	// Generate a real *exec.ExitError. On Windows, `cmd /C exit 7`
+	// reliably yields exit code 7 without needing a POSIX shell.
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd", "/C", "exit 7")
+	} else {
+		cmd = exec.Command("sh", "-c", "exit 7")
+	}
+	runErr := cmd.Run()
+	if runErr == nil {
+		t.Fatal("child process exited 0; expected non-zero exit for *exec.ExitError")
+	}
+	var ee *exec.ExitError
+	if !errors.As(runErr, &ee) {
+		t.Fatalf("child error is not *exec.ExitError: %T (%v)", runErr, runErr)
+	}
+	if ee.ExitCode() != 7 {
+		t.Fatalf("child exit code = %d, want 7", ee.ExitCode())
+	}
+
+	// Wrap exactly like cli/manifest.go ("editor %s: %w") and
+	// cli/secrets.go ("editor: %w") — main.go's matcher must reject
+	// the wrapped form.
+	wrapped := fmt.Errorf("editor %s: %w", "vim", runErr)
+
+	// Bare ExitCode-only match (the pre-fix matcher) MUST still
+	// match — that demonstrates the bug we're guarding against.
+	var feBare interface{ ExitCode() int }
+	if !errors.As(wrapped, &feBare) {
+		t.Fatalf("regression: pre-fix bare ExitCode matcher should still match wrapped *exec.ExitError; got false")
+	}
+	if feBare.ExitCode() != 7 {
+		t.Errorf("bare matcher ExitCode = %d, want 7 (exec.ExitError)", feBare.ExitCode())
+	}
+
+	// Post-fix combined matcher — the one main.go now uses — MUST
+	// NOT match the wrapped *exec.ExitError, because *exec.ExitError
+	// does not implement IsMcphubForceExit().
+	var feCombined interface {
+		ExitCode() int
+		IsMcphubForceExit() bool
+	}
+	if errors.As(wrapped, &feCombined) {
+		t.Errorf(
+			"combined matcher must reject wrapped *exec.ExitError; matched ExitCode=%d "+
+				"(this would silently suppress the 'error: ...' diagnostic in main.go)",
+			feCombined.ExitCode(),
+		)
+	}
+}
