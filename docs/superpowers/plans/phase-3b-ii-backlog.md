@@ -34,9 +34,9 @@ Tracking document for Phase 3B-II — the "everything I cut from Phase 3B-I MVP"
 | # | Area | Description | Source |
 |---|---|---|---|
 | C1 | `--force` take-over flag | Currently hidden placeholder. Realize: detect stale single-instance mutex, confirm with user, delete `<pidport>.lock`, acquire. | PR #5 cleanup |
-| C2 | Browser focus on activate-window | Currently logs only. Wire `SetForegroundWindow` (Windows) on the Chrome app-mode window. Tray "Open dashboard" shares the limitation. | PR #5 final review |
-| C3 | Tray icon state variants | MVP ships a single icon (`SetTooltip` only). Add 4-state icon switching (`healthy` / `degraded` / `down` / `migrating`) driven by SSE `daemon-state` events. | Spec §6 |
-| C4 | Toast notifications | Windows toast on `daemon-failed` / `auto-restart-triggered` / `manual-action-done`. Events already in `/api/events` stream, UI does not render them. | Spec §6 |
+| C2 | Browser focus on activate-window | ✅ PR #22 — `gui.FocusBrowserWindow` enumerates visible top-level windows by title substring "mcp-local-hub", calls SW_RESTORE then SetForegroundWindow. Activate-window callback in cli/gui.go now invokes it instead of logging. Manual real-match smoke in `docs/phase-3b-ii-verification.md` D2.1. | PR #5 final review |
+| C3 | Tray icon state variants | ✅ PR #22 — `internal/tray/state.go::Aggregate` maps DaemonStatus rows to one of 4 spec-§6 variants (`healthy / partial / down / error`). `internal/tray/icons.go` programmatically generates 4 colored 16×16 PNG icons via `image/draw`+`image/png`, lazily cached. `StatusPoller.SetSnapshotChannel` feeds an `aggregateTrayState` goroutine in cli/gui.go that coalesces duplicate-state forwards. tray_windows.go selects on the new `Config.StateCh` and calls `systray.SetIcon`+`SetTooltip` per transition. | Spec §6 |
+| C4 | Toast notifications | ✅ PR #22 — `internal/tray/toast_windows.go::ShowToast` invokes Windows.UI.Notifications via PowerShell (no extra Go deps). Failure-onset detection inside `aggregateTrayStateWithToast` (cli/gui_tray_state.go) compares per-row `(LastResult != 0 OR state-contains-fail)` between adjacent snapshots; fires a toast on each new failure key, never on repeats. `auto-restart-triggered` and `manual-action-done` events are not yet emitted by any publisher — when they are added, the same listener pattern can subscribe to broadcaster directly. | Spec §6 |
 
 ### D. Testing & frontend infrastructure
 
@@ -68,10 +68,11 @@ Tracking document for Phase 3B-II — the "everything I cut from Phase 3B-I MVP"
 8. **A3-b** — env.secret picker in AddServer/EditServer forms ✅ — see [docs/superpowers/plans/2026-04-26-phase-3b-ii-a3b-env-secret-picker.md](2026-04-26-phase-3b-ii-a3b-env-secret-picker.md). Memo: [docs/superpowers/specs/2026-04-26-phase-3b-ii-a3b-env-secret-picker-design.md](../specs/2026-04-26-phase-3b-ii-a3b-env-secret-picker-design.md).
 9. **A4-a** — Settings screen ✅ — see [docs/superpowers/plans/2026-04-27-phase-3b-ii-a4-settings.md](2026-04-27-phase-3b-ii-a4-settings.md). Memo: [docs/superpowers/specs/2026-04-27-phase-3b-ii-a4-settings-design.md](../specs/2026-04-27-phase-3b-ii-a4-settings-design.md). Merge SHA: `2529c33d` (PR #20, 14 Codex bot review rounds).
 9b. **A4-b** — Settings lifecycle: tray, port live-rebind, weekly schedule edit, retry policy, Clean now confirm, export bundle.
-10. **A5** — About screen
-11. **C3 + C4** — Tray icon state variants + toast notifications (polish after SSE event handling is mature)
-12. **C1 + C2** — `--force` take-over + browser focus (CLI/UX polish, Windows-specific wiring)
-13. **Release hardening** — D2 + D3 manual smoke matrix, write `docs/phase-3b-ii-verification.md`
+10. **A5** — About screen ✅ PR #22 (cleanup + reliability harness + A5 + C2 + C3 + C4 + D2/D3 docs).
+11. **C3 + C4** — Tray icon state variants + toast notifications ✅ PR #22.
+12. **C1** — `--force` take-over (single-instance lock recovery) — **PR #23 (next).** C2 browser focus closed in PR #22.
+13. **A4-b** — Settings lifecycle (tray toggle, weekly schedule edit, retry policy, port live-rebind, Clean-now confirm, export bundle) — **PR #24 (last).**
+14. **Release hardening** — execute `docs/phase-3b-ii-verification.md` D2 + D3 manual smoke on a real Windows desktop session before tagging.
 
 ### Daemon-management hygiene follow-ups (post-A4-a, separate sprint)
 
@@ -84,11 +85,11 @@ Surfaced during A4-a local smoke (2026-04-28) and confirmed via Codex consult. I
 - **DM-3a: Lost spawn diagnostics.** ✅ Fixed in `internal/cli/daemon.go` and `internal/cli/daemon_workspace.go` — both cobra `RunE` paths install a `defer` that calls `writeLaunchFailure(logPath, server, daemon, err)` when `err != nil`, appending `[mcphub-launch-failure <RFC3339-UTC> server=<s> daemon=<d>] <err>` to the per-daemon log file. That makes the cause of `last_result=1` discoverable instead of a Task Scheduler black hole. Codex r1 P2 (workspace mirror) moved the defer above `CanonicalWorkspacePath` so stale-workspace registrations also get diagnosed; `logPath` starts as `lazy-proxy-<lang>-pre.log` and is refined to `lsp-<wsKey>-<lang>.log` after canonicalization succeeds.
 - **DM-3b: Restart race.** ✅ Fixed in `internal/api/install.go` — `Restart` and `RestartAll` now call `waitForPortFree(port, 5s)` between the stop and the `schtasks /Run` so the kernel's TIME_WAIT window can drain before the daemon tries to rebind. Without this, the second `bind` would race the first connection's TIME_WAIT and fail with `bind: address already in use`, leaving `last_result=1`.
 
-**Out of scope of PR #21 (open):**
+**Out of scope of PR #21:**
 
-- Add `servers/gdb/manifest.yaml` to the repo so dev and installed mcphub binaries embed the same set (DM-1 root cause, not just the symptom). The `Port==0 && !IsMaintenance` bypass is the right fix when a manifest legitimately can't be resolved (registry-corrupt orphan, dev-only task), but for daemons that should always work the manifest gap itself is worth closing.
-- Enforce disjoint port ranges for GUI vs daemon manifests (DM-2 root cause). Today the GUI's `--port` default is `9125` and the wolfram manifest also declares 9125; the self-PID skip turns the symptom into a silent no-op but the collision is still bad operator UX (e.g. `mcphub status` reports the daemon as `Stopped` when the user's actual hub server IS bound to that port).
-- Cover `TestInstallAllInstallsEverything` flake on dev workstations: hardcoded ports 9130/9131 collide with TIME_WAIT residue from prior test runs. Tracked in `work-items/bugs/install-test-hardcoded-ports.md`. Predates DM-1/DM-2/DM-3, fix is to allocate via `net.Listen("tcp", ":0")` like the sibling test does.
+- ~~Add `servers/gdb/manifest.yaml` to the repo.~~ **Withdrawn (2026-04-28):** gdb was intentionally retired in PR #13 — see `retiredServerNames` in `internal/api/install.go:707` (manifest-less uninstall fallback for stale state) AND `perSessionServers` in `internal/api/scan.go:34` (gdb is a debugger, always per-session, not hub-managed). Restoring the manifest contradicts both contracts. DM-1 narrowing is the correct production fix; users with stale Task Scheduler entries clear them via `mcphub uninstall gdb`.
+- ~~`TestInstallAllInstallsEverything` flake (hardcoded 9130/9131).~~ **Closed (PR #22 commit 1):** test now uses `pickFreeLocalPort` so it survives TIME_WAIT residue and parallel daemon ownership.
+- Enforce disjoint port ranges for GUI vs daemon manifests (DM-2 root cause — **open**). Today the GUI's `--port` default is `9125` and the wolfram manifest also declares 9125; the self-PID skip turns the symptom into a silent no-op but the collision is still bad operator UX (e.g. `mcphub status` reports the daemon as `Stopped` when the user's actual hub server IS bound to that port).
 
 **Estimated scope:** ~35-45 implementation tasks. D0 adds ~9-10 migration tasks; Playwright adds ~5-8 test-authoring tasks on top of UI tasks; budget accordingly.
 

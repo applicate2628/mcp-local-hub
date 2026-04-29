@@ -1,9 +1,9 @@
 # TestInstallAllInstallsEverything fails on dev workstations binding 9130/9131
 
-**Status:** open
+**Status:** closed (PR #22 commit 1, 2026-04-28)
 **Context:** adjacent-finding
 **Found during:** DM-1/DM-2/DM-3 daemon-mgmt-hygiene PR (2026-04-27)
-**Phase:** out-of-scope of current PR
+**Resolution:** test now allocates ports via `pickFreeLocalPort` (Option 1 from "Fix candidates" below).
 
 ## Summary
 

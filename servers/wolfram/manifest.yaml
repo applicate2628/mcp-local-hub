@@ -12,7 +12,7 @@ env:
 
 daemons:
   - name: default
-    port: 9125
+    port: 9132
 
 client_bindings:
   - client: claude-code

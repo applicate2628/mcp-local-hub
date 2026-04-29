@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/gui"
 	"mcp-local-hub/internal/tray"
 
@@ -79,8 +80,52 @@ activates the first window and exits 0.`,
 			// once the listener is live.
 			s := gui.NewServer(gui.Config{Port: port, Version: versionString()})
 			s.OnActivateWindow(func() {
-				// Phase 3B-II will wire tray/browser here. MVP: just log.
-				fmt.Fprintln(cmd.OutOrStdout(), "activate-window received")
+				// Phase 3B-II C2: bring the Chrome app-mode window to
+				// foreground via Win32 SetForegroundWindow. Match by
+				// page <title> ("mcp-local-hub"), which is stable
+				// across Chrome versions in app-mode (chromeless
+				// window keeps page title as window title). On
+				// non-Windows, FocusBrowserWindow returns an error
+				// (logged below); the tray "Open dashboard" action
+				// shares the same surface and the same limitation.
+				//
+				// Fallback: if no matching window exists (user closed
+				// the Chrome dashboard earlier, or GUI was spawned
+				// with --no-browser), open a fresh window. Without
+				// this fallback the tray "Open dashboard" action
+				// silently no-ops when there's nothing to focus.
+				// "Local Dashboard" is the unique suffix in the page
+				// <title>; it disambiguates from other apps that
+				// happen to have "mcp-local-hub" in their window
+				// title (Cursor IDE has "mcp-local-hub - Cursor",
+				// terminals running in the repo dir, file explorer,
+				// etc.). Without the unique suffix the focus call
+				// silently steals foreground for the wrong window.
+				err := gui.FocusBrowserWindow("Local Dashboard")
+				if err == nil {
+					return
+				}
+				// Codex PR #22 r3 P2: only fall back to LaunchBrowser
+				// when enumeration completed without a matching
+				// window (gui.ErrFocusNoWindow sentinel). Other
+				// failures — Win32 transient SetForegroundWindow
+				// rejection on Windows 10+ when our thread isn't
+				// foreground, syscall plumbing regressions, etc. —
+				// must NOT spawn a duplicate dashboard. The
+				// non-Windows stub also wraps ErrFocusNoWindow so
+				// "Open dashboard" on Linux/macOS still launches a
+				// fresh browser (no tray to focus there anyway).
+				if !errors.Is(err, gui.ErrFocusNoWindow) {
+					fmt.Fprintf(cmd.OutOrStderr(),
+						"activate-window: focus failed (no fallback for non-no-window error): %v\n", err)
+					return
+				}
+				url := fmt.Sprintf("http://127.0.0.1:%d/", s.Port())
+				if launchErr := gui.LaunchBrowser(url); launchErr != nil {
+					fmt.Fprintf(cmd.OutOrStderr(),
+						"activate-window: focus failed (%v); browser launch also failed: %v\n",
+						err, launchErr)
+				}
 			})
 
 			ready := make(chan struct{})
@@ -89,6 +134,19 @@ activates the first window and exits 0.`,
 
 			// Poll daemon status every 5s and push daemon-state events onto /api/events.
 			poller := gui.NewStatusPoller(gui.RealStatusProvider{}, s.Broadcaster(), 5*time.Second)
+			// Tray state plumbing (C3): wire a snapshot channel between
+			// poller and tray. Aggregator goroutine reads each snapshot,
+			// computes a TrayState, and pushes onto trayStateCh ONLY when
+			// the aggregate changes — avoids redundant SetIcon calls when
+			// individual daemons flap but the overall state is steady.
+			//
+			// Both channels are size-1 buffered with non-blocking sends
+			// at every send site so a stalled tray cannot back up the
+			// poller, and a stalled poller cannot back up status reads.
+			snapshotCh := make(chan []api.DaemonStatus, 1)
+			trayStateCh := make(chan tray.TrayState, 1)
+			poller.SetSnapshotChannel(snapshotCh)
+			go aggregateTrayState(ctx, snapshotCh, trayStateCh)
 			go poller.Run(ctx)
 
 			select {
@@ -126,6 +184,7 @@ activates the first window and exits 0.`,
 							// (Phase 3B-II: focus browser window).
 							_ = gui.TryActivateIncumbent(pidportPath, 500*time.Millisecond)
 						},
+						StateCh: trayStateCh,
 						Quit: stop, // signal.NotifyContext's cancel function
 					})
 				}()

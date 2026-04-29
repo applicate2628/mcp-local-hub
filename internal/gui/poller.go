@@ -29,10 +29,25 @@ import (
 // deltas on the next cycle. An empty Daemon falls back to "default" so
 // single-daemon servers stay correct.
 type StatusPoller struct {
-	status   statusProvider
-	events   *Broadcaster
-	interval time.Duration
-	last     map[string]api.DaemonStatus // key: "<server>/<daemon>"
+	status     statusProvider
+	events     *Broadcaster
+	interval   time.Duration
+	last       map[string]api.DaemonStatus // key: "<server>/<daemon>"
+	snapshotCh chan<- []api.DaemonStatus   // optional, see SetSnapshotChannel
+}
+
+// SetSnapshotChannel installs an optional sink that receives the full
+// status snapshot on every poll (not just deltas). The tray uses this
+// to compute an aggregate TrayState without re-querying api.Status()
+// itself, avoiding double work. Send is non-blocking via buffered
+// channel + select-default; consumers should make ch buffered = 1
+// so a slow consumer drops to "latest snapshot" instead of stalling
+// the poller.
+//
+// Pass nil (or never call) to disable. SetSnapshotChannel is not
+// safe to call concurrently with Run; wire it before Run starts.
+func (p *StatusPoller) SetSnapshotChannel(ch chan<- []api.DaemonStatus) {
+	p.snapshotCh = ch
 }
 
 // NewStatusPoller constructs a StatusPoller. It does not start any
@@ -81,6 +96,16 @@ func (p *StatusPoller) poll(ctx context.Context) {
 	if err != nil {
 		p.events.Publish(Event{Type: "poller-error", Body: map[string]any{"err": err.Error()}})
 		return
+	}
+	// Snapshot fan-out: non-blocking send. A slow consumer's old
+	// snapshot is dropped in favor of this fresh one; the tray loop
+	// is the only consumer today and it only cares about the latest
+	// state for icon updates, so drop-stale is the desired behavior.
+	if p.snapshotCh != nil {
+		select {
+		case p.snapshotCh <- rows:
+		default:
+		}
 	}
 	seen := map[string]struct{}{}
 	for _, r := range rows {
