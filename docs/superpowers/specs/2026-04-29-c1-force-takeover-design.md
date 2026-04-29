@@ -421,8 +421,19 @@ cleanup only across a session reset.
 ## Out of scope
 
 - macOS `processID` and `killProcess` — Windows-first; Linux gets a
-  full implementation; macOS stub (best-effort same as Linux via
-  posix kill).
+  full implementation. macOS lacks `/proc/<pid>/{exe,cmdline,stat}`,
+  so the Linux-style identity probe is unimplemented; `probe_darwin.go`
+  returns an explicit "not supported on macOS" sentinel that
+  `probeOnce` surfaces as a `Malformed`-class verdict with a clear
+  diagnostic. `mcphub gui --force` (Probe-only) still produces a
+  diagnostic block on macOS, but `--force --kill` is unsupported in
+  this PR — reboot is the recovery path. A future libproc/sysctl-
+  based macOS probe is tracked in the Phase 3B-II backlog. (Codex
+  PR #23 P2 #3 iter-2 corrected the previous "best-effort same as
+  Linux via posix kill" framing — sharing the Linux probe via
+  `//go:build !windows` made every macOS kill refusal look like
+  "image is not an mcphub binary" because /proc reads silently
+  returned empty fields.)
 - A4-b's Settings UI for stuck-instance recovery (PR #24).
 - Automatic recovery for "PID dead but flock still held by stuck
   kernel handle" — only `reboot` clears that, not in scope.

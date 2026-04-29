@@ -92,6 +92,10 @@ Surfaced during A4-a local smoke (2026-04-28) and confirmed via Codex consult. I
 - ~~`TestInstallAllInstallsEverything` flake (hardcoded 9130/9131).~~ **Closed (PR #22 commit 1):** test now uses `pickFreeLocalPort` so it survives TIME_WAIT residue and parallel daemon ownership.
 - Enforce disjoint port ranges for GUI vs daemon manifests (DM-2 root cause — **open**). Today the GUI's `--port` default is `9125` and the wolfram manifest also declares 9125; the self-PID skip turns the symptom into a silent no-op but the collision is still bad operator UX (e.g. `mcphub status` reports the daemon as `Stopped` when the user's actual hub server IS bound to that port).
 
+### Cross-platform follow-ups
+
+- **macOS `--force --kill` probe (libproc / sysctl-based identity).** PR #23 ships a Linux+Windows identity probe; `probe_darwin.go` is a stub that surfaces "not supported on macOS" via Verdict.Diagnose. Implement the same three-part identity gate on darwin via `libproc.proc_pidpath` (image), `sysctl(KERN_PROCARGS2)` (cmdline), and `sysctl(KERN_PROC_PID).kp_proc.p_starttime` (start-time). Tracks the iter-2 review's P2 #3 follow-up.
+
 **Estimated scope:** ~35-45 implementation tasks. D0 adds ~9-10 migration tasks; Playwright adds ~5-8 test-authoring tasks on top of UI tasks; budget accordingly.
 
 **Not included here** (out of scope for 3B-II entirely):

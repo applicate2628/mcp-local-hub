@@ -229,14 +229,14 @@ func TestKillRecordedHolder_RefusesNonMcphubImage(t *testing.T) {
 	}
 }
 
-// TestProbe_Port0StartupWindow_RetriesAndClassifiesHealthy pins the
-// Codex PR #23 P2 #1 fix. The window between AcquireSingleInstanceAt
-// (which writes pidport with port=0 when --port=0) and
-// RewritePidportPort (which writes the bound port after listener-
-// ready) was kill-vulnerable: a second --force --kill --yes that
-// landed in that sub-second window saw alive PID + port=0 + ping
-// fail and classified the holder as VerdictLiveUnreachable. Probe
-// now retries when (LiveUnreachable AND port==0), re-reading the
+// TestProbe_RecentPidport_StartupWindow_RetriesAndClassifiesHealthy
+// pins the Codex PR #23 P2 #1 fix (iter-2 widened gate). The window
+// between AcquireSingleInstanceAt (which writes pidport immediately)
+// and Server.Start binding the requested port was kill-vulnerable:
+// a second --force --kill --yes that landed in that sub-second
+// window saw alive PID + ping fail and classified the holder as
+// VerdictLiveUnreachable. Probe now retries when (LiveUnreachable
+// AND PIDAlive AND mtime within probeStartupWindow), re-reading the
 // pidport on each iteration so a holder finishing its bind during
 // the retry window flips the classification to Healthy.
 //
@@ -244,7 +244,11 @@ func TestKillRecordedHolder_RefusesNonMcphubImage(t *testing.T) {
 // port=0, then a goroutine rewrites it to {ourPid, healthyPort} after
 // a delay shorter than the 500ms retry budget. Asserts the final
 // verdict is VerdictHealthy and that PingMatch is true.
-func TestProbe_Port0StartupWindow_RetriesAndClassifiesHealthy(t *testing.T) {
+//
+// Was named TestProbe_Port0StartupWindow_… in iter-1; the iter-2
+// fix widens the gate from `port==0` to `recent mtime`, so the
+// `Port0` framing no longer accurately describes the contract.
+func TestProbe_RecentPidport_StartupWindow_RetriesAndClassifiesHealthy(t *testing.T) {
 	dir := t.TempDir()
 	pidport := filepath.Join(dir, "gui.pidport")
 
@@ -282,14 +286,19 @@ func TestProbe_Port0StartupWindow_RetriesAndClassifiesHealthy(t *testing.T) {
 	}
 }
 
-// TestProbe_Port0StartupWindow_GivesUpAfterDeadline pins the upper
-// bound on the retry: if the recorded port stays 0 for the entire
-// retry budget (the holder genuinely never finishes binding), Probe
-// must classify as VerdictLiveUnreachable rather than spinning
-// forever. The test also pins the rough deadline (500ms upper bound
-// on the retry portion, plus per-attempt pingTimeout) so a future
+// TestProbe_RecentPidport_StartupWindow_GivesUpAfterDeadline pins
+// the upper bound on the retry: if pidport mtime stays recent and
+// ping keeps failing for the entire retry budget (the holder
+// genuinely never finishes binding within ~500ms), Probe must
+// classify as VerdictLiveUnreachable rather than spinning forever.
+// The test also pins the rough deadline (500ms upper bound on the
+// retry portion, plus per-attempt pingTimeout) so a future
 // regression that doubled the retries would surface as a slow test.
-func TestProbe_Port0StartupWindow_GivesUpAfterDeadline(t *testing.T) {
+//
+// Was named TestProbe_Port0StartupWindow_… in iter-1; the iter-2
+// fix widens the gate from `port==0` to `recent mtime`, so the
+// `Port0` framing no longer accurately describes the contract.
+func TestProbe_RecentPidport_StartupWindow_GivesUpAfterDeadline(t *testing.T) {
 	dir := t.TempDir()
 	pidport := filepath.Join(dir, "gui.pidport")
 
@@ -319,18 +328,35 @@ func TestProbe_Port0StartupWindow_GivesUpAfterDeadline(t *testing.T) {
 	}
 }
 
-// TestProbe_LiveUnreachable_NonZeroPortDoesNotRetry pins the
-// boundary condition for the P2 #1 retry: when the recorded port is
-// a real (non-zero) value AND ping fails, we are looking at a
-// genuinely stuck incumbent — the retry MUST NOT fire. A regression
-// that retried in this case would slow down every diagnostic of a
-// real stuck-incumbent by 500ms.
-func TestProbe_LiveUnreachable_NonZeroPortDoesNotRetry(t *testing.T) {
+// TestProbe_LiveUnreachable_OldMtimeDoesNotRetry pins the boundary
+// condition for the iter-2 retry gate: when the pidport mtime is
+// older than probeStartupWindow, the holder is genuinely stuck
+// (its startup race window has long since passed) and the retry
+// MUST NOT fire. A regression that retried in this case would slow
+// down every diagnostic of a real stuck-incumbent by ~500ms.
+//
+// Replaces TestProbe_LiveUnreachable_NonZeroPortDoesNotRetry, which
+// locked in the iter-1 (port==0) gate semantic that was wrong: a
+// real stuck incumbent could record port==N while still failing
+// ping, and the iter-1 gate gave it the same fast-path classification
+// as the startup-race case. The iter-2 gate uses pidport mtime
+// (set by AcquireSingleInstanceAt) to distinguish startup-race from
+// stuck-incumbent: recent mtime → race-in-progress, retry; old
+// mtime → real stuck, no retry.
+func TestProbe_LiveUnreachable_OldMtimeDoesNotRetry(t *testing.T) {
 	dir := t.TempDir()
 	pidport := filepath.Join(dir, "gui.pidport")
 	const probablyClosedPort = 1
 	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), probablyClosedPort)), 0o600); err != nil {
 		t.Fatal(err)
+	}
+	// Backdate pidport mtime to 1 hour ago so it falls outside the
+	// startup window (5s). A real stuck incumbent's pidport mtime
+	// is whatever time it wrote pidport at — typically minutes/hours
+	// ago by the time the operator notices and runs --force.
+	oldMtime := time.Now().Add(-1 * time.Hour)
+	if err := os.Chtimes(pidport, oldMtime, oldMtime); err != nil {
+		t.Fatalf("Chtimes: %v", err)
 	}
 
 	start := time.Now()
@@ -341,12 +367,69 @@ func TestProbe_LiveUnreachable_NonZeroPortDoesNotRetry(t *testing.T) {
 		t.Errorf("Class = %v, want VerdictLiveUnreachable. Diagnose=%q", v.Class, v.Diagnose)
 	}
 	// Without retry the only wait is the ping timeout (500ms). With
-	// the retry incorrectly firing on port=N, total wall time would
-	// climb to ~3s (5 × 500ms ping timeout + 5 × 100ms backoff).
-	// Threshold of 1.5s catches the regression while leaving slack
-	// for slow CI.
+	// the retry incorrectly firing on old-mtime entries, total wall
+	// time would climb to ~3s (5 × 500ms ping timeout + 5 × 100ms
+	// backoff). Threshold of 1.5s catches the regression while
+	// leaving slack for slow CI.
 	if elapsed > 1500*time.Millisecond {
-		t.Errorf("Probe took %v on port=N stuck incumbent — retry incorrectly fired (should only retry when port==0)", elapsed)
+		t.Errorf("Probe took %v on old-mtime stuck incumbent — retry incorrectly fired (should only retry when mtime is recent)", elapsed)
+	}
+}
+
+// TestProbe_LiveUnreachable_RecentPidport_PortN_RetriesAndClassifiesHealthy
+// pins the iter-2 fix for the --port=N startup race. AcquireSingleInstanceAt
+// writes pidport with {pid, N} immediately, but Server.Start may not
+// be listening yet when a concurrent --force --kill --yes lands. The
+// iter-1 gate (port==0) missed this entirely; the iter-2 gate (recent
+// mtime) covers it. Without this fix, a healthy starting GUI invoked
+// with --port=N would be killed by a racing kill command.
+//
+// Setup: write pidport with {ourPid, 8080} and current mtime — note
+// 8080 is closed (ping will fail), so probeOnce returns
+// LiveUnreachable initially. A goroutine rewrites pidport to
+// {ourPid, healthyPort} after 150ms, where healthyPort hosts a
+// matching ping server. The retry loop must observe the rewrite and
+// flip to VerdictHealthy.
+func TestProbe_LiveUnreachable_RecentPidport_PortN_RetriesAndClassifiesHealthy(t *testing.T) {
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+
+	// Healthy ping server on the eventual port (mirrors the post-bind
+	// state of the starting GUI).
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "pid": os.Getpid()})
+	}))
+	defer srv.Close()
+	healthyPort := portFromURL(t, srv.URL)
+
+	// Initial pidport: alive PID + an unrelated port (8080) that has
+	// no listener — first probe will classify as LiveUnreachable.
+	// Mtime is current (just written), so the iter-2 retry gate
+	// fires.
+	const racePort = 8080
+	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), racePort)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate the holder finishing its bind: rewrite pidport to
+	// {ourPid, healthyPort} after 150ms — well inside the retry
+	// budget but after the first probe classifies as
+	// LiveUnreachable.
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		_ = os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), healthyPort)), 0o600)
+	}()
+
+	v := Probe(context.Background(), pidport)
+	if v.Class != VerdictHealthy {
+		t.Errorf("Class = %v, want VerdictHealthy (retry should catch the port=N rewrite). Diagnose=%q", v.Class, v.Diagnose)
+	}
+	if !v.PingMatch {
+		t.Errorf("PingMatch = false, want true after retry caught the rewritten port")
+	}
+	if v.Port != healthyPort {
+		t.Errorf("Port = %d, want %d (the rewritten healthy port)", v.Port, healthyPort)
 	}
 }
 

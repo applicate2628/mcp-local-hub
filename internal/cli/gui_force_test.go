@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -532,6 +533,118 @@ func TestForce_MalformedPidport(t *testing.T) {
 	}
 	if fe.ExitCode() != 2 {
 		t.Errorf("exit code = %d, want 2 (Malformed reaches the diagnostic-only path)", fe.ExitCode())
+	}
+}
+
+// ---------------------------------------------------------------
+// Scenario 8b: KillRecordedHolder re-probe sees Healthy after
+// cli's first Probe saw LiveUnreachable (Codex PR #23 P2 #2 iter-2).
+// ---------------------------------------------------------------
+
+// TestForce_KillRecoveryHealthyBetweenProbes pins the iter-2 fix for
+// the runForceKill switch's missing VerdictHealthy arm.
+// KillRecordedHolder's internal probe runs AFTER cli's first Probe
+// (and AFTER the user confirmation prompt — `--yes` skips the prompt
+// but the timing window is real). If the incumbent recovers to
+// healthy in between (e.g., Server.Start finally bound during the
+// prompt), KillRecordedHolder honors "never kill healthy" and
+// returns Verdict{Class: Healthy}. Without the iter-2 arm this
+// fell to the default "internal: unrecognized verdict class" arm
+// and exited 1.
+//
+// Setup: a counting ping handler returns {ok:false} on the first
+// request and {ok:true,pid:ourPid} on subsequent requests. Pidport
+// mtime is backdated past probeStartupWindow so neither cli's first
+// Probe nor KillRecordedHolder's internal probe triggers the
+// startup-window retry (ensures each call makes exactly one ping
+// request and we control the transition timing). cli's first Probe
+// → ok:false → LiveUnreachable; KillRecordedHolder's probe →
+// ok:true → Healthy → cli's iter-2 switch arm fires →
+// "incumbent recovered to healthy" + exit 0.
+func TestForce_KillRecoveryHealthyBetweenProbes(t *testing.T) {
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+
+	// Counting ping handler: first request fails, subsequent succeed.
+	// Activate-window handler returns 204 so TryActivateIncumbent
+	// doesn't error.
+	var pingCount int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/activate-window" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.URL.Path != "/api/ping" {
+			http.NotFound(w, r)
+			return
+		}
+		count := atomic.AddInt32(&pingCount, 1)
+		w.Header().Set("Content-Type", "application/json")
+		if count == 1 {
+			// First probe (cli) sees a failed ping.
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false})
+			return
+		}
+		// Subsequent probes (KillRecordedHolder's internal probe)
+		// see a healthy incumbent.
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "pid": os.Getpid()})
+	}))
+	defer srv.Close()
+	port := portFromHTTPTestURL(t, srv.URL)
+
+	if err := os.WriteFile(pidport, []byte(fmt.Sprintf("%d %d\n", os.Getpid(), port)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Backdate pidport mtime past probeStartupWindow (5s) so the
+	// retry loop is disabled and each Probe call makes exactly one
+	// ping request. Without this, cli's first Probe might retry-
+	// then-succeed and we'd never reach KillRecordedHolder.
+	oldMtime := time.Now().Add(-1 * time.Hour)
+	if err := os.Chtimes(pidport, oldMtime, oldMtime); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	// Pre-acquire flock so AcquireSingleInstance returns busy and
+	// the --force --kill path is exercised. The seam below makes
+	// the identity gate pass so we reach KillRecordedHolder's
+	// internal Probe (which is what populates the Healthy verdict).
+	fl := flock.New(pidport + ".lock")
+	if ok, _ := fl.TryLock(); !ok {
+		t.Fatal("could not pre-lock")
+	}
+	defer fl.Unlock()
+
+	prevGate := gui.IdentityGateForTest()
+	defer gui.RestoreIdentityGate(prevGate)
+	gui.SetIdentityGate(func(v gui.Verdict) (refused bool, reason string) { return false, "" })
+
+	var buf bytes.Buffer
+	c := newGuiCmdRealForTest()
+	c.SetOut(&buf)
+	c.SetErr(&buf)
+	c.SetArgs([]string{"--port", "0", "--no-browser", "--no-tray", "--force", "--kill", "--yes"})
+	t.Setenv("MCPHUB_GUI_TEST_PIDPORT_DIR", dir)
+	err := c.Execute()
+
+	// Expect exit code 0. The cli wraps the exit code in
+	// forceExitError even on success (so cmd/mcphub/main.go can
+	// route via os.Exit(code)), so a forceExitError with
+	// ExitCode()==0 is the success signal here, not nil.
+	if err == nil {
+		// Surprising — cobra returned nil. Acceptable only if the
+		// output contains the success notice; fall through to the
+		// output check.
+	} else {
+		var fe interface{ ExitCode() int }
+		if !errors.As(err, &fe) {
+			t.Errorf("expected typed forceExitError with ExitCode()==0; got %v", err)
+		} else if fe.ExitCode() != 0 {
+			t.Errorf("exit code = %d, want 0 (Healthy re-verdict success)", fe.ExitCode())
+		}
+	}
+	out := buf.String()
+	if !strings.Contains(out, "incumbent recovered to healthy") {
+		t.Errorf("expected 'incumbent recovered to healthy' notice; got %q", out)
 	}
 }
 

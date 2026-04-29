@@ -230,41 +230,56 @@ func Probe(ctx context.Context, pidportPath string) Verdict {
 }
 
 // probeStartupRetries / probeStartupBackoff bound the retry loop that
-// covers the AcquireSingleInstanceAt(--port 0) → RewritePidportPort
-// startup window (Codex PR #23 P2 #1). Total retry budget is bounded
-// at 5 × 100ms = 500ms (plus per-attempt pingTimeout on the final
-// successful read, which short-circuits via Healthy).
+// covers the AcquireSingleInstanceAt → ReadyHook startup window
+// (Codex PR #23 P2 #1, widened in iter-2). Total retry budget is
+// bounded at 5 × 100ms = 500ms (plus per-attempt pingTimeout on the
+// final successful read, which short-circuits via Healthy).
+//
+// probeStartupWindow is the mtime threshold separating "incumbent
+// just wrote pidport, listener may still be binding" from "real stuck
+// incumbent". 5s is intentionally generous: it is far better to add
+// ~500ms latency to a 5-seconds-old "real stuck" case than to kill a
+// healthy-but-slow startup. Real stuck incumbents will always have
+// pidport mtime well past 5s old, so they skip the retry and are
+// classified LiveUnreachable on the first probe.
 const (
 	probeStartupRetries = 5
 	probeStartupBackoff = 100 * time.Millisecond
+	probeStartupWindow  = 5 * time.Second
 )
 
 // probe is the internal implementation shared by Probe and
 // KillRecordedHolder. pingTimeout controls how long pingIncumbent
 // waits before declaring the incumbent unreachable.
 //
-// Startup-window retry (Codex PR #23 P2 #1): when classification
-// would otherwise be VerdictLiveUnreachable AND the recorded port is
-// 0, the function retries up to probeStartupRetries times spaced by
-// probeStartupBackoff, re-reading the pidport on each iteration. This
-// closes the kill-vulnerable window between AcquireSingleInstanceAt
-// (which writes pidport with port=0 when --port=0) and
-// RewritePidportPort (which writes the bound port after listener-
-// ready): a holder finishing its bind during the retry loop flips the
-// verdict from LiveUnreachable to Healthy. The retry only runs in the
-// (LiveUnreachable AND port==0) case so genuinely stuck instances
-// with a real-but-wrong port keep their immediate LiveUnreachable
-// classification.
+// Startup-window retry (Codex PR #23 P2 #1, widened in iter-2):
+// when classification would otherwise be VerdictLiveUnreachable AND
+// the recorded PID is alive AND the pidport mtime is recent
+// (within probeStartupWindow), the function retries up to
+// probeStartupRetries times spaced by probeStartupBackoff, re-reading
+// the pidport on each iteration. This closes the kill-vulnerable
+// window between AcquireSingleInstanceAt (which writes pidport with
+// {pid, requestedPort} immediately) and Server.Start binding
+// 127.0.0.1:requestedPort (which signals ready and triggers the
+// final pidport rewrite): a holder finishing its bind during the
+// retry loop flips the verdict from LiveUnreachable to Healthy.
+//
+// The mtime gate (instead of the iter-1 `port==0` gate) is the right
+// signal because the same race exists for explicit `--port=N`:
+// AcquireSingleInstanceAt writes pidport with `{pid, N}` before
+// Server.Start binds. The iter-1 gate missed that case entirely.
+// Real stuck incumbents have pidport mtimes far older than the
+// startup window, so they still skip the retry and classify
+// LiveUnreachable immediately.
 func probe(ctx context.Context, pidportPath string, pingTimeout time.Duration) Verdict {
 	v := probeOnce(ctx, pidportPath, pingTimeout)
-	if !(v.Class == VerdictLiveUnreachable && v.Port == 0) {
+	if !shouldRetryProbe(v) {
 		return v
 	}
 	// Retry loop: re-read pidport on each iteration in case the
-	// holder finishes its bind and writes a non-zero port. We deal
-	// with port=0 specifically — a real stuck-incumbent verdict
-	// keeps its LiveUnreachable classification with port==N and
-	// does not get retried.
+	// holder finishes its bind. The mtime gate and PIDAlive gate
+	// keep this loop bounded — once mtime ages past the startup
+	// window, or the PID dies, retries stop.
 	for i := 0; i < probeStartupRetries; i++ {
 		select {
 		case <-ctx.Done():
@@ -272,20 +287,43 @@ func probe(ctx context.Context, pidportPath string, pingTimeout time.Duration) V
 		case <-time.After(probeStartupBackoff):
 		}
 		retry := probeOnce(ctx, pidportPath, pingTimeout)
-		// Any verdict OTHER than (LiveUnreachable AND port==0)
-		// is final — return it. This includes:
+		// Any verdict that no longer meets the retry conditions is
+		// final — return it. This includes:
 		//   - Healthy (holder finished bind + ping matches)
-		//   - LiveUnreachable with port==N (real stuck instance)
+		//   - LiveUnreachable with old mtime (real stuck instance)
 		//   - DeadPID (holder exited mid-startup)
 		//   - Malformed (pidport corrupted under us)
-		if !(retry.Class == VerdictLiveUnreachable && retry.Port == 0) {
+		if !shouldRetryProbe(retry) {
 			return retry
 		}
-		// Still port==0 — keep the latest verdict (its mtime/
-		// PIDStart are the freshest) and try again.
+		// Still in the startup window — keep the latest verdict
+		// (its mtime/PIDStart are the freshest) and try again.
 		v = retry
 	}
 	return v
+}
+
+// shouldRetryProbe reports whether a Verdict represents a transient
+// startup-race state worth retrying. Returns true iff:
+//
+//  1. Class == VerdictLiveUnreachable (alive PID, ping fails);
+//  2. PIDAlive == true (defensive — Class implies it, but pin it);
+//  3. Pidport mtime is non-zero and within probeStartupWindow.
+//
+// The mtime gate replaces the iter-1 (port==0) gate, which only
+// covered the --port=0 startup race and missed the analogous
+// --port=N startup race entirely. (Codex PR #23 P2 #1 iter-2.)
+func shouldRetryProbe(v Verdict) bool {
+	if v.Class != VerdictLiveUnreachable {
+		return false
+	}
+	if !v.PIDAlive {
+		return false
+	}
+	if v.Mtime.IsZero() {
+		return false
+	}
+	return time.Since(v.Mtime) < probeStartupWindow
 }
 
 // probeOnce runs a single classification pass without retry. Split
@@ -305,11 +343,25 @@ func probeOnce(ctx context.Context, pidportPath string, pingTimeout time.Duratio
 		v.Mtime = st.ModTime()
 	}
 
-	id, _ := processID(pid)
+	id, idErr := processID(pid)
 	v.PIDAlive = id.Alive
 	v.PIDImage = id.ImagePath
 	v.PIDCmdline = truncateCmdline(id.Cmdline, 1024)
 	v.PIDStart = id.StartTime
+
+	// Codex PR #23 P2 #3 (iter-2): on platforms where the identity
+	// probe is unimplemented (currently macOS — see probe_darwin.go),
+	// processIDImpl returns ProcessIdentity{} + a sentinel error. We
+	// surface that error as a Malformed-class verdict with the
+	// platform's own message so --force --kill emits a clear
+	// "unsupported on macOS" diagnostic instead of the misleading
+	// "PID not alive" or "image is not an mcphub binary" cascade.
+	if idErr != nil && !id.Alive && id.ImagePath == "" {
+		v.Class = VerdictMalformed
+		v.Diagnose = idErr.Error()
+		v.Hint = "Stuck-instance kill recovery is platform-specific; reboot is the universally available recovery path."
+		return v
+	}
 
 	if !id.Alive {
 		v.Class = VerdictDeadPID

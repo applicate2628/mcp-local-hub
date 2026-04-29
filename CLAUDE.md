@@ -176,6 +176,12 @@ holder splits ownership. If admin tooling isn't available, reboot
 is the universally available recovery (stuck file handles survive
 user-mode cleanup only across a session reset).
 
+**macOS:** `--force --kill` is unsupported on macOS in this PR (the
+identity probe relies on `/proc`, which is Linux-only). `mcphub gui
+--force` for the diagnostic still works, but kill recovery on macOS
+is not yet implemented; reboot is the recovery path. Tracked as
+follow-up in phase-3b-ii-backlog.md.
+
 Exit codes:
 
 ```text

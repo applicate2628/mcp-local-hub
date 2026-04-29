@@ -329,6 +329,22 @@ func runForceKill(cmd *cobra.Command, pidportPath string, yes bool) (*gui.Single
 		fmt.Fprintln(cmd.OutOrStdout(), killVerdict.Diagnose)
 		return lock, 0
 	}
+	if killVerdict.Class == gui.VerdictHealthy {
+		// Codex PR #23 P2 #2 (iter-2): KillRecordedHolder's internal
+		// re-probe found the incumbent healthy after this cli's first
+		// Probe (e.g., Server.Start finally bound during the user
+		// confirmation prompt above). Honor "never kill healthy"
+		// exactly as the early-exit at the top of runForceKill:
+		// route to TryActivateIncumbent and exit 0. Handled before
+		// the stderr-diagnose preamble below so the success path
+		// stays on stdout.
+		fmt.Fprintf(cmd.OutOrStdout(), "incumbent recovered to healthy (PID %d); activating instead of killing\n", killVerdict.PID)
+		if err := gui.TryActivateIncumbent(pidportPath, 2*time.Second); err != nil {
+			fmt.Fprintf(cmd.OutOrStderr(), "activate-window failed: %v\n", err)
+			return nil, 1
+		}
+		return nil, 0
+	}
 	// Map class to exit code.
 	fmt.Fprintln(cmd.OutOrStderr(), killVerdict.Diagnose)
 	if killVerdict.Hint != "" {

@@ -17,6 +17,13 @@ import (
 // as alive with a non-empty image path, an argv that includes "test"
 // (the Go test binary's name pattern), and a non-zero start time.
 func TestProcessID_SelfAlive(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		// Codex PR #23 P2 #3 (iter-2): darwin's processIDImpl is a
+		// stub returning ProcessIdentity{} + sentinel error until a
+		// libproc/sysctl-based macOS probe lands. Self-alive contract
+		// resumes once that backlog item is implemented.
+		t.Skip("processIDImpl unimplemented on darwin (see probe_darwin.go)")
+	}
 	got, err := processID(os.Getpid())
 	if err != nil {
 		t.Fatalf("processID(self): %v", err)

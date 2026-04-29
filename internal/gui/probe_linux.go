@@ -1,5 +1,5 @@
-// internal/gui/probe_unix.go
-//go:build !windows
+// internal/gui/probe_linux.go
+//go:build linux
 
 package gui
 
@@ -14,9 +14,15 @@ import (
 	"time"
 )
 
-// processIDImpl is the POSIX implementation. Uses Kill(0) for
+// processIDImpl is the Linux implementation. Uses Kill(0) for
 // liveness; reads /proc/<pid>/exe + /proc/<pid>/cmdline +
-// /proc/<pid>/stat for image, argv, and start-time.
+// /proc/<pid>/stat for image, argv, and start-time. macOS is split
+// out into probe_darwin.go (Codex PR #23 P2 #3 iter-2) — macOS lacks
+// /proc and the previous //go:build !windows tag let darwin compile
+// against this Linux-only code path, where every read returned empty
+// fields and the identity gate refused every kill with mysterious
+// exit 7. Until a libproc/sysctl-based macOS probe lands, macOS
+// returns an explicit "not supported" error from probe_darwin.go.
 //
 // EPERM (we're not allowed to signal the target) is treated as
 // alive=true,denied=true to mirror Windows ACCESS_DENIED handling.
