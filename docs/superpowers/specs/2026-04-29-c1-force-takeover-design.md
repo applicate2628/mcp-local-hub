@@ -185,15 +185,15 @@ Single block emitted before any optional Explorer/kill action:
 ```
 Cannot acquire mcphub gui single-instance lock.
 
-Lock file:  C:\Users\dima_\AppData\Local\mcp-local-hub\gui.pidport.lock
-Pidport:    C:\Users\dima_\AppData\Local\mcp-local-hub\gui.pidport
+Lock file:  %LOCALAPPDATA%\mcp-local-hub\gui.pidport.lock
+Pidport:    %LOCALAPPDATA%\mcp-local-hub\gui.pidport
   recorded PID:  4128
   recorded port: 9125
   pidport mtime: 2026-04-29T08:14:32Z
 
 Live-holder probe:
   PID 4128 status:    alive
-  PID 4128 image:     C:\Users\dima_\.local\bin\mcphub.exe
+  PID 4128 image:     %USERPROFILE%\.local\bin\mcphub.exe
   /api/ping on 9125:  connection refused
 
 Recovery options:

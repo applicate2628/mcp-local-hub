@@ -405,7 +405,14 @@ func probeOnce(ctx context.Context, pidportPath string, pingTimeout time.Duratio
 	if err != nil || pid <= 0 {
 		v.Class = VerdictMalformed
 		v.Diagnose = fmt.Sprintf("pidport unreadable or empty: %v", err)
-		v.Hint = "Reboot the OS or remove the pidport directory contents manually."
+		// Codex iter-7 P2 #2: do NOT tell operators to delete the
+		// pidport directory contents — that directory contains
+		// gui.pidport.lock, and removing it under a live flock
+		// holder splits ownership (the exact scenario the runbook
+		// warns against). Reboot is the only safe universal recovery
+		// when the pidport itself is corrupt; the lock file is left
+		// to the OS to release when the holder exits.
+		v.Hint = "Reboot to clear the lock; do NOT delete gui.pidport.lock under a live holder (see CLAUDE.md §Stuck-instance recovery)."
 		return v
 	}
 	v.PID = pid
