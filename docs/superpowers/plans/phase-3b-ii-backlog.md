@@ -96,6 +96,16 @@ Surfaced during A4-a local smoke (2026-04-28) and confirmed via Codex consult. I
 
 - **macOS `--force --kill` probe (libproc / sysctl-based identity).** PR #23 ships a Linux+Windows identity probe; `probe_darwin.go` is a stub that surfaces "not supported on macOS" via Verdict.Diagnose. Implement the same three-part identity gate on darwin via `libproc.proc_pidpath` (image), `sysctl(KERN_PROCARGS2)` (cmdline), and `sysctl(KERN_PROC_PID).kp_proc.p_starttime` (start-time). Tracks the iter-2 review's P2 #3 follow-up.
 
+### Long-runtime stability follow-ups
+
+- **Tray menu hangs after long uptime / state-event flood.** Reported 2026-04-30 (post PR #22): after ~hours of runtime with the daemon-status poller pushing state every 5s, the systray right-click menu stops appearing entirely (the icon still shows the correct partial/healthy/error color via `SetIcon`). Restart of `mcphub gui` clears it. Root-cause hypothesis: `getlantern/systray`'s message-pump goroutine starves under continuous `SetIcon` + `SetTooltip` traffic, OR the goroutine reading `cfg.StateCh` blocks on a Win32 callback inside SetIcon and starves `mOpen.ClickedCh`/`mQuit.ClickedCh` consumption.
+  - Likely fixes (pick after profiling):
+    1. Throttle: only call `SetIcon`/`SetTooltip` when `state` actually changed (track previous value in the goroutine).
+    2. Decouple: state updates drain `cfg.StateCh` on a separate goroutine and post via a sync.Mutex-protected last-state field; the click-loop only reads it.
+    3. Audit `getlantern/systray` versions for upstream fixes; consider switching to a different tray library if the message-pump issue is structural.
+  - Acceptance: tray menu remains responsive after 24h+ continuous uptime with state churn (drive via a synthetic test that flips fake daemon states ~once/sec).
+  - Cross-cuts: should ship before A4-b's "Recover stuck instance" Settings UI button so users have a working escape hatch from the tray.
+
 **Estimated scope:** ~35-45 implementation tasks. D0 adds ~9-10 migration tasks; Playwright adds ~5-8 test-authoring tasks on top of UI tasks; budget accordingly.
 
 **Not included here** (out of scope for 3B-II entirely):
