@@ -308,23 +308,37 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 	}
 
 	// LiveUnreachable: run the three-part identity gate.
-	if !matchBasename(v.PIDImage) {
-		v.Class = VerdictKillRefused
-		v.Diagnose = fmt.Sprintf("recorded PID %d image %q is not an mcphub binary", v.PID, v.PIDImage)
-		v.Hint = "Identity-gate (image basename) failed; identify and kill the actual flock holder via OS tools."
-		return nil, v, fmt.Errorf("kill refused: image gate")
-	}
-	if !cmdlineIsGui(v.PIDCmdline) {
-		v.Class = VerdictKillRefused
-		v.Diagnose = fmt.Sprintf("recorded PID %d argv subcommand is not 'gui' (argv=%v)", v.PID, v.PIDCmdline)
-		v.Hint = "Identity-gate (argv subcommand) failed; the recorded PID is a different mcphub subcommand."
-		return nil, v, fmt.Errorf("kill refused: argv gate")
-	}
-	if !startTimeBeforeMtime(v.PIDStart, v.Mtime, time.Second) {
-		v.Class = VerdictKillRefused
-		v.Diagnose = fmt.Sprintf("recorded PID %d start-time %s postdates pidport mtime %s — PID-recycled", v.PID, v.PIDStart.Format(time.RFC3339), v.Mtime.Format(time.RFC3339))
-		v.Hint = "Identity-gate (start-time) failed; the PID has been recycled to a different process."
-		return nil, v, fmt.Errorf("kill refused: start-time gate")
+	//
+	// identityGateOverride, when set by tests, replaces the full
+	// three-part (image/argv/start-time) check. Production builds
+	// always use the real gate below (identityGateOverride is nil
+	// by default).
+	if identityGateOverride != nil {
+		if refused, reason := identityGateOverride(v); refused {
+			v.Class = VerdictKillRefused
+			v.Diagnose = "identity gate (test override): " + reason
+			v.Hint = ""
+			return nil, v, fmt.Errorf("kill refused (override): %s", reason)
+		}
+	} else {
+		if !matchBasename(v.PIDImage) {
+			v.Class = VerdictKillRefused
+			v.Diagnose = fmt.Sprintf("recorded PID %d image %q is not an mcphub binary", v.PID, v.PIDImage)
+			v.Hint = "Identity-gate (image basename) failed; identify and kill the actual flock holder via OS tools."
+			return nil, v, fmt.Errorf("kill refused: image gate")
+		}
+		if !cmdlineIsGui(v.PIDCmdline) {
+			v.Class = VerdictKillRefused
+			v.Diagnose = fmt.Sprintf("recorded PID %d argv subcommand is not 'gui' (argv=%v)", v.PID, v.PIDCmdline)
+			v.Hint = "Identity-gate (argv subcommand) failed; the recorded PID is a different mcphub subcommand."
+			return nil, v, fmt.Errorf("kill refused: argv gate")
+		}
+		if !startTimeBeforeMtime(v.PIDStart, v.Mtime, time.Second) {
+			v.Class = VerdictKillRefused
+			v.Diagnose = fmt.Sprintf("recorded PID %d start-time %s postdates pidport mtime %s — PID-recycled", v.PID, v.PIDStart.Format(time.RFC3339), v.Mtime.Format(time.RFC3339))
+			v.Hint = "Identity-gate (start-time) failed; the PID has been recycled to a different process."
+			return nil, v, fmt.Errorf("kill refused: start-time gate")
+		}
 	}
 
 	// All three gates passed. Kill.
@@ -333,6 +347,12 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 		v.Diagnose = fmt.Sprintf("kill PID %d failed: %v", v.PID, err)
 		v.Hint = "Permission denied or process already gone; rerun mcphub gui without --force to handshake."
 		return nil, v, err
+	}
+
+	// postKillHook fires between the kill and the acquire-poll loop.
+	// Tests use it to simulate a race-winner competing for the flock.
+	if postKillHook != nil {
+		postKillHook()
 	}
 
 	// Acquire-poll loop (memo §"Take-over protocol" step 5g).
