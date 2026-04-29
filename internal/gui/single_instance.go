@@ -628,10 +628,22 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 		kill = killProcessOverride
 	}
 	if err := kill(v.PID); err != nil {
-		v.Class = VerdictKillFailed
-		v.Diagnose = fmt.Sprintf("kill PID %d failed: %v", v.PID, err)
-		v.Hint = "Permission denied or process already gone; rerun mcphub gui without --force to handshake."
-		return nil, v, err
+		// Codex iter-12 P2 #1: if the recorded PID exited between
+		// probe and kill, Linux returns ESRCH and Windows fails
+		// OpenProcess. The process exit is exactly what releases the
+		// flock — fall through to acquire-poll instead of returning
+		// VerdictKillFailed and forcing a rerun. processID's alive
+		// telemetry confirms the PID is gone before we proceed.
+		if id, idErr := processID(v.PID); idErr == nil && !id.Alive {
+			// PID is genuinely gone; proceed to acquire-poll. The
+			// loop below will succeed quickly when the kernel
+			// finishes releasing the flock.
+		} else {
+			v.Class = VerdictKillFailed
+			v.Diagnose = fmt.Sprintf("kill PID %d failed: %v", v.PID, err)
+			v.Hint = "Permission denied or process already gone; rerun mcphub gui without --force to handshake."
+			return nil, v, err
+		}
 	}
 
 	// Codex iter-9 P2 #2 / memo §"Take-over protocol" step 5f: wait
@@ -670,6 +682,18 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 	// Acquire-poll loop (memo §"Take-over protocol" step 5g).
 	deadline := time.Now().Add(opts.AcquireDeadline)
 	for time.Now().Before(deadline) {
+		// Codex iter-12 P2 #2: honor cancellation before each
+		// acquire attempt. signal.NotifyContext marks ctx.Done()
+		// when SIGINT/SIGTERM arrives; without this check the loop
+		// would keep trying and could acquire+rewrite pidport AFTER
+		// the user cancelled (the cancellation only surfaces later
+		// in startGuiServer).
+		if err := ctx.Err(); err != nil {
+			v.Class = VerdictKillFailed
+			v.Diagnose = "context cancelled during post-kill acquire poll"
+			v.Hint = "Operator cancelled (Ctrl+C/SIGTERM) after the kill but before the new lock was acquired; the killed incumbent is gone but no replacement gui was started."
+			return nil, v, err
+		}
 		lock, err := AcquireSingleInstanceAt(pidportPath, v.Port)
 		if err == nil {
 			v.Class = VerdictKilledRecovered
@@ -683,7 +707,17 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 			v.Hint = ""
 			return nil, v, err
 		}
-		time.Sleep(opts.AcquireBackoff)
+		// Sleep with cancellation awareness so a SIGINT during
+		// the back-off interval is observed promptly rather than
+		// after the full opts.AcquireBackoff elapses.
+		select {
+		case <-ctx.Done():
+			v.Class = VerdictKillFailed
+			v.Diagnose = "context cancelled during post-kill acquire poll"
+			v.Hint = "Operator cancelled (Ctrl+C/SIGTERM) after the kill but before the new lock was acquired; the killed incumbent is gone but no replacement gui was started."
+			return nil, v, ctx.Err()
+		case <-time.After(opts.AcquireBackoff):
+		}
 	}
 	v.Class = VerdictRaceLost
 	v.Diagnose = fmt.Sprintf("kill succeeded but a competitor acquired the lock during %s deadline", opts.AcquireDeadline)
