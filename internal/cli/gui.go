@@ -88,8 +88,26 @@ activates the first window and exits 0.`,
 				// non-Windows, FocusBrowserWindow returns an error
 				// (logged below); the tray "Open dashboard" action
 				// shares the same surface and the same limitation.
-				if err := gui.FocusBrowserWindow("mcp-local-hub"); err != nil {
-					fmt.Fprintf(cmd.OutOrStderr(), "activate-window: %v\n", err)
+				//
+				// Fallback: if no matching window exists (user closed
+				// the Chrome dashboard earlier, or GUI was spawned
+				// with --no-browser), open a fresh window. Without
+				// this fallback the tray "Open dashboard" action
+				// silently no-ops when there's nothing to focus.
+				// "Local Dashboard" is the unique suffix in the page
+				// <title>; it disambiguates from other apps that
+				// happen to have "mcp-local-hub" in their window
+				// title (Cursor IDE has "mcp-local-hub - Cursor",
+				// terminals running in the repo dir, file explorer,
+				// etc.). Without the unique suffix the focus call
+				// silently steals foreground for the wrong window.
+				if err := gui.FocusBrowserWindow("Local Dashboard"); err != nil {
+					url := fmt.Sprintf("http://127.0.0.1:%d/", s.Port())
+					if launchErr := gui.LaunchBrowser(url); launchErr != nil {
+						fmt.Fprintf(cmd.OutOrStderr(),
+							"activate-window: focus failed (%v); browser launch also failed: %v\n",
+							err, launchErr)
+					}
 				}
 			})
 
