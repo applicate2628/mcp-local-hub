@@ -202,17 +202,30 @@ func (c VerdictClass) String() string {
 // through the image/argv/start-time gates with empty fields and
 // emitting "image '' is not an mcphub binary" (Codex iter-3 P2 #2).
 type Verdict struct {
-	Class      VerdictClass `json:"class"`
-	PID        int          `json:"pid"`
-	Port       int          `json:"port"`
-	Mtime      time.Time    `json:"mtime"`
-	PIDAlive   bool         `json:"pid_alive"`
-	PIDImage   string       `json:"pid_image"`
-	PIDCmdline []string     `json:"pid_cmdline"` // truncated to 1KB display
-	PIDStart   time.Time    `json:"pid_start"`
-	PingMatch  bool         `json:"ping_match"`
-	Diagnose   string       `json:"-"`
-	Hint       string       `json:"-"`
+	Class    VerdictClass `json:"class"`
+	PID      int          `json:"pid"`
+	Port     int          `json:"port"`
+	Mtime    time.Time    `json:"mtime"`
+	PIDAlive bool         `json:"pid_alive"`
+	PIDImage string       `json:"pid_image"`
+	// PIDCmdline is the truncated argv kept for in-process consumers.
+	// It is NOT serialized to JSON (Codex iter-13 P2): the future
+	// POST /api/force-kill API/UI must not echo full argv because
+	// commands like `mcphub secrets set --value <SECRET>` carry
+	// secrets there. PIDSubcommand below carries the gate-relevant
+	// token (argv[1]) which is what the operator actually needs to
+	// see — "the recorded PID is `daemon`, not `gui`".
+	PIDCmdline []string `json:"-"`
+	// PIDSubcommand is argv[1] (or "" when len(argv) < 2). Safe to
+	// expose because the identity gate's argv check is exactly
+	// "argv[1] == 'gui' OR len(argv) == 1"; argv[1] alone is enough
+	// to explain a refusal without leaking the rest of the command
+	// line.
+	PIDSubcommand string    `json:"pid_subcommand"`
+	PIDStart      time.Time `json:"pid_start"`
+	PingMatch     bool      `json:"ping_match"`
+	Diagnose      string    `json:"-"`
+	Hint          string    `json:"-"`
 
 	// pidCmdlineRaw is the untruncated argv used by the identity
 	// gate. Unexported so encoding/json never serializes it; the
@@ -463,6 +476,14 @@ func probeOnce(ctx context.Context, pidportPath string, pingTimeout time.Duratio
 	v.PIDImage = id.ImagePath
 	v.pidCmdlineRaw = id.Cmdline
 	v.PIDCmdline = truncateCmdline(id.Cmdline, 1024)
+	// Codex iter-13 P2: populate PIDSubcommand (the safe-to-serialize
+	// gate token) so JSON consumers can distinguish gui/daemon/etc
+	// without seeing the full argv. Empty string when argv has fewer
+	// than 2 elements (which the gate treats as the no-arg Explorer
+	// auto-gui case anyway).
+	if len(id.Cmdline) >= 2 {
+		v.PIDSubcommand = id.Cmdline[1]
+	}
 	v.PIDStart = id.StartTime
 	v.macOSUnsupported = errors.Is(idErr, errMacOSProbeUnsupported)
 
