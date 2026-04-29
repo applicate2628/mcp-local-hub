@@ -7,6 +7,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -33,6 +34,15 @@ func main() {
 	}
 
 	if err := cli.NewRootCmd().Execute(); err != nil {
+		// PR #23 C1 stuck-instance recovery: propagate distinct exit
+		// codes from --force / --force --kill (2/3/4/6/7) instead of
+		// cobra's default "1 on error". cli.forceExitError implements
+		// `interface{ ExitCode() int }`; errors.As keeps this main.go
+		// branch agnostic to the concrete unexported type.
+		var fe interface{ ExitCode() int }
+		if errors.As(err, &fe) {
+			os.Exit(fe.ExitCode())
+		}
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
