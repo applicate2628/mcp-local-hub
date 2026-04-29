@@ -1,9 +1,16 @@
 package gui
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/gofrs/flock"
 )
 
 func TestAcquireSingleInstance_FirstCallerSucceeds(t *testing.T) {
@@ -117,3 +124,161 @@ func TestRelease_LeavesPidportFileAlone(t *testing.T) {
 		t.Errorf("Release modified pidport: got %q want %q", got, rewritten)
 	}
 }
+
+// TestProbe_Healthy verifies a Probe call against a live incumbent
+// (here: an httptest server bound to a real port) returns
+// VerdictHealthy with PingMatch=true.
+func TestProbe_Healthy(t *testing.T) {
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+
+	// Spin up a fake /api/ping that reports our own PID.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/ping" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "pid": os.Getpid()})
+	}))
+	defer srv.Close()
+	port := portFromURL(t, srv.URL)
+
+	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), port)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	v := Probe(context.Background(), pidport)
+	if v.Class != VerdictHealthy {
+		t.Errorf("Class = %v, want VerdictHealthy. Diagnose=%q", v.Class, v.Diagnose)
+	}
+	if !v.PingMatch {
+		t.Errorf("PingMatch = false, want true")
+	}
+	if v.PID != os.Getpid() {
+		t.Errorf("PID = %d, want %d", v.PID, os.Getpid())
+	}
+}
+
+// TestProbe_LiveUnreachable: alive PID, no listener.
+func TestProbe_LiveUnreachable(t *testing.T) {
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+	const probablyClosedPort = 1
+	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), probablyClosedPort)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	v := Probe(context.Background(), pidport)
+	if v.Class != VerdictLiveUnreachable {
+		t.Errorf("Class = %v, want VerdictLiveUnreachable. Diagnose=%q", v.Class, v.Diagnose)
+	}
+}
+
+// TestProbe_DeadPID: pid is impossible.
+func TestProbe_DeadPID(t *testing.T) {
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+	const impossible = 2147483646
+	if err := os.WriteFile(pidport, []byte(formatPidport(impossible, 9125)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	v := Probe(context.Background(), pidport)
+	if v.Class != VerdictDeadPID {
+		t.Errorf("Class = %v, want VerdictDeadPID. Diagnose=%q", v.Class, v.Diagnose)
+	}
+}
+
+// TestProbe_Malformed: garbage in pidport.
+func TestProbe_Malformed(t *testing.T) {
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+	if err := os.WriteFile(pidport, []byte("not a pidport file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	v := Probe(context.Background(), pidport)
+	if v.Class != VerdictMalformed {
+		t.Errorf("Class = %v, want VerdictMalformed. Diagnose=%q", v.Class, v.Diagnose)
+	}
+}
+
+// TestKillRecordedHolder_RefusesNonMcphubImage: pidport refers to
+// the test process (image is the test binary, NOT mcphub.exe), so
+// the three-part identity gate's image-basename check refuses.
+// Asserts Class=VerdictKillRefused, no kill attempted.
+func TestKillRecordedHolder_RefusesNonMcphubImage(t *testing.T) {
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+	const port = 9125
+	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), port)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Acquire a flock so KillRecordedHolder reaches the gate path.
+	fl := flock.New(pidport + ".lock")
+	if ok, _ := fl.TryLock(); !ok {
+		t.Fatal("could not pre-lock")
+	}
+	defer fl.Unlock()
+
+	_, v, err := KillRecordedHolder(context.Background(), pidport, KillOpts{})
+	if err == nil {
+		t.Errorf("expected non-nil error on kill-refused; got nil")
+	}
+	if v.Class != VerdictKillRefused {
+		t.Errorf("Class = %v, want VerdictKillRefused. Diagnose=%q", v.Class, v.Diagnose)
+	}
+}
+
+// TestKillRecordedHolder_HealthyEarlyExit: incumbent is healthy
+// (ping matches) — KillRecordedHolder must NOT kill, must report
+// VerdictHealthy so the caller can route to handshake.
+func TestKillRecordedHolder_HealthyEarlyExit(t *testing.T) {
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "pid": os.Getpid()})
+	}))
+	defer srv.Close()
+	port := portFromURL(t, srv.URL)
+	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), port)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fl := flock.New(pidport + ".lock")
+	if ok, _ := fl.TryLock(); !ok {
+		t.Fatal("could not pre-lock")
+	}
+	defer fl.Unlock()
+
+	_, v, err := KillRecordedHolder(context.Background(), pidport, KillOpts{})
+	if err != nil {
+		t.Errorf("expected nil error on healthy early-exit; got %v", err)
+	}
+	if v.Class != VerdictHealthy {
+		t.Errorf("Class = %v, want VerdictHealthy. Diagnose=%q", v.Class, v.Diagnose)
+	}
+	if !v.PingMatch {
+		t.Errorf("PingMatch should be true on healthy")
+	}
+}
+
+// TestVerdictDiagnoseHintNotInJSON guards the json:"-" tags so
+// A4-b's HTTP API doesn't ship pre-formatted strings to the UI.
+func TestVerdictDiagnoseHintNotInJSON(t *testing.T) {
+	v := Verdict{
+		Class:    VerdictDeadPID,
+		PID:      123,
+		Port:     9125,
+		Diagnose: "should not appear in JSON",
+		Hint:     "should not appear either",
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "should not appear") {
+		t.Errorf("Diagnose/Hint leaked into JSON: %s", b)
+	}
+}
+
+// portFromURL is shared with probe_test.go; kept package-private.
+// (Defined in probe_test.go; redefining would conflict.)

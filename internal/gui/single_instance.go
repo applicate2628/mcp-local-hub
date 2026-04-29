@@ -1,11 +1,13 @@
 package gui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gofrs/flock"
 )
@@ -126,4 +128,283 @@ func AcquireSingleInstanceAt(pidportPath string, port int) (*SingleInstanceLock,
 // ownership metadata the lock holder freely updates.
 func RewritePidportPort(pidportPath string, port int) error {
 	return os.WriteFile(pidportPath, []byte(formatPidport(os.Getpid(), port)), 0o600)
+}
+
+// VerdictClass enumerates the result of Probe / KillRecordedHolder.
+type VerdictClass int
+
+const (
+	VerdictHealthy         VerdictClass = iota // incumbent ping matches recorded PID
+	VerdictLiveUnreachable                     // recorded PID is alive but not serving HTTP
+	VerdictDeadPID                             // recorded PID does not exist
+	VerdictMalformed                           // pidport is missing/garbage/incomplete
+	VerdictKilledRecovered                     // KillRecordedHolder succeeded; new flock acquired
+	VerdictKillRefused                         // three-part identity gate failed
+	VerdictKillFailed                          // SIGKILL/TerminateProcess returned error
+	VerdictRaceLost                            // post-kill, a competitor won the new acquire
+)
+
+func (c VerdictClass) String() string {
+	switch c {
+	case VerdictHealthy:
+		return "Healthy"
+	case VerdictLiveUnreachable:
+		return "LiveUnreachable"
+	case VerdictDeadPID:
+		return "DeadPID"
+	case VerdictMalformed:
+		return "Malformed"
+	case VerdictKilledRecovered:
+		return "KilledRecovered"
+	case VerdictKillRefused:
+		return "KillRefused"
+	case VerdictKillFailed:
+		return "KillFailed"
+	case VerdictRaceLost:
+		return "RaceLost"
+	}
+	return fmt.Sprintf("VerdictClass(%d)", int(c))
+}
+
+// Verdict bundles the Probe result. JSON marshaling skips Diagnose
+// and Hint (Codex r6 #4): A4-b's POST /api/force-kill returns the
+// raw structured fields and the UI formats locally.
+type Verdict struct {
+	Class      VerdictClass `json:"class"`
+	PID        int          `json:"pid"`
+	Port       int          `json:"port"`
+	Mtime      time.Time    `json:"mtime"`
+	PIDAlive   bool         `json:"pid_alive"`
+	PIDImage   string       `json:"pid_image"`
+	PIDCmdline []string     `json:"pid_cmdline"` // truncated to 1KB display
+	PIDStart   time.Time    `json:"pid_start"`
+	PingMatch  bool         `json:"ping_match"`
+	Diagnose   string       `json:"-"`
+	Hint       string       `json:"-"`
+}
+
+// KillOpts controls KillRecordedHolder behavior.
+type KillOpts struct {
+	// PingTimeout is how long pingIncumbent waits before declaring
+	// "unreachable". Default 500ms when zero.
+	PingTimeout time.Duration
+	// AcquireDeadline is the maximum total time KillRecordedHolder
+	// waits for TryLock to succeed after sending the kill signal.
+	// Default 2s when zero.
+	AcquireDeadline time.Duration
+	// AcquireBackoff is the inter-attempt delay during the
+	// post-kill TryLock poll. Default 50ms when zero.
+	AcquireBackoff time.Duration
+}
+
+// Probe inspects the pidport file and classifies the incumbent's
+// state without taking any destructive action. Used by bare
+// `mcphub gui --force` to build the diagnostic block.
+//
+// Class progression:
+//   - Pidport unreadable / unparseable → VerdictMalformed.
+//   - processID(pid).Alive == false   → VerdictDeadPID.
+//   - PID alive AND ping matches      → VerdictHealthy.
+//   - PID alive AND ping fails/wrong  → VerdictLiveUnreachable.
+//
+// Three-part identity gate is NOT run here — it's specific to
+// KillRecordedHolder. Probe is read-only and provides display data.
+func Probe(ctx context.Context, pidportPath string) Verdict {
+	return probe(ctx, pidportPath, 500*time.Millisecond)
+}
+
+// probe is the internal implementation shared by Probe and
+// KillRecordedHolder. pingTimeout controls how long pingIncumbent
+// waits before declaring the incumbent unreachable.
+func probe(ctx context.Context, pidportPath string, pingTimeout time.Duration) Verdict {
+	v := Verdict{}
+	pid, port, err := ReadPidport(pidportPath)
+	if err != nil || pid <= 0 {
+		v.Class = VerdictMalformed
+		v.Diagnose = fmt.Sprintf("pidport unreadable or empty: %v", err)
+		v.Hint = "Reboot the OS or remove the pidport directory contents manually."
+		return v
+	}
+	v.PID = pid
+	v.Port = port
+	if st, statErr := os.Stat(pidportPath); statErr == nil {
+		v.Mtime = st.ModTime()
+	}
+
+	id, _ := processID(pid)
+	v.PIDAlive = id.Alive
+	v.PIDImage = id.ImagePath
+	v.PIDCmdline = truncateCmdline(id.Cmdline, 1024)
+	v.PIDStart = id.StartTime
+
+	if !id.Alive {
+		v.Class = VerdictDeadPID
+		v.Diagnose = fmt.Sprintf("recorded PID %d is not alive", pid)
+		v.Hint = "The previous incumbent process has exited. The lock should release on its own; if not, reboot."
+		return v
+	}
+
+	matched, perr := pingIncumbent(ctx, port, pingTimeout)
+	if perr == nil && matched == pid {
+		v.Class = VerdictHealthy
+		v.PingMatch = true
+		v.Diagnose = fmt.Sprintf("incumbent PID %d is healthy on port %d", pid, port)
+		v.Hint = ""
+		return v
+	}
+	v.Class = VerdictLiveUnreachable
+	if perr != nil {
+		v.Diagnose = fmt.Sprintf("recorded PID %d alive but /api/ping on %d failed: %v", pid, port, perr)
+	} else {
+		v.Diagnose = fmt.Sprintf("recorded PID %d alive but /api/ping on %d returned PID %d", pid, port, matched)
+	}
+	v.Hint = "Kill the recorded PID manually OR rerun with --force --kill (subject to identity gate)."
+	return v
+}
+
+// KillRecordedHolder is the destructive opt-in path for
+// `mcphub gui --force --kill`. Runs the healthy-incumbent early-exit,
+// then the three-part identity gate, then SIGKILL/TerminateProcess
+// on the recorded PID, then a TryLock poll loop until acquired or
+// AcquireDeadline expires.
+//
+// Returns (lock, verdict, err). On VerdictKilledRecovered, lock is
+// the freshly-acquired SingleInstanceLock the caller must Release.
+// On all other Verdicts lock is nil.
+//
+// Three-part identity gate (memo §"Why automation is opt-in"):
+//
+//  1. matchBasename(image) — "mcphub.exe" Windows / "mcphub" POSIX.
+//  2. argv subcommand: argv[1] == "gui" OR len(argv) == 1.
+//     The len(argv)==1 branch covers cmd/mcphub/main.go:32 which
+//     internally appends "gui" to os.Args when invoked with no
+//     arguments (Explorer/Start-menu double-click); externally the
+//     command line is just the executable path.
+//  3. process start time ≤ pidport mtime + 1s tolerance.
+//
+// Codex r4 #7: never os.Remove the lock file. The OS releases the
+// flock as a side effect of process termination.
+func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) (*SingleInstanceLock, Verdict, error) {
+	if opts.PingTimeout == 0 {
+		opts.PingTimeout = 500 * time.Millisecond
+	}
+	if opts.AcquireDeadline == 0 {
+		opts.AcquireDeadline = 2 * time.Second
+	}
+	if opts.AcquireBackoff == 0 {
+		opts.AcquireBackoff = 50 * time.Millisecond
+	}
+
+	v := probe(ctx, pidportPath, opts.PingTimeout)
+	switch v.Class {
+	case VerdictMalformed, VerdictDeadPID:
+		return nil, v, fmt.Errorf("kill skipped: %s", v.Class)
+	case VerdictHealthy:
+		// Codex r5 #7b: incumbent is healthy — do NOT kill. Caller
+		// routes to handshake instead. Verdict is returned as-is so
+		// the cli layer can print "incumbent is healthy; activating
+		// instead of killing" before TryActivateIncumbent.
+		return nil, v, nil
+	}
+
+	// LiveUnreachable: run the three-part identity gate.
+	if !matchBasename(v.PIDImage) {
+		v.Class = VerdictKillRefused
+		v.Diagnose = fmt.Sprintf("recorded PID %d image %q is not an mcphub binary", v.PID, v.PIDImage)
+		v.Hint = "Identity-gate (image basename) failed; identify and kill the actual flock holder via OS tools."
+		return nil, v, fmt.Errorf("kill refused: image gate")
+	}
+	if !cmdlineIsGui(v.PIDCmdline) {
+		v.Class = VerdictKillRefused
+		v.Diagnose = fmt.Sprintf("recorded PID %d argv subcommand is not 'gui' (argv=%v)", v.PID, v.PIDCmdline)
+		v.Hint = "Identity-gate (argv subcommand) failed; the recorded PID is a different mcphub subcommand."
+		return nil, v, fmt.Errorf("kill refused: argv gate")
+	}
+	if !startTimeBeforeMtime(v.PIDStart, v.Mtime, time.Second) {
+		v.Class = VerdictKillRefused
+		v.Diagnose = fmt.Sprintf("recorded PID %d start-time %s postdates pidport mtime %s — PID-recycled", v.PID, v.PIDStart.Format(time.RFC3339), v.Mtime.Format(time.RFC3339))
+		v.Hint = "Identity-gate (start-time) failed; the PID has been recycled to a different process."
+		return nil, v, fmt.Errorf("kill refused: start-time gate")
+	}
+
+	// All three gates passed. Kill.
+	if err := killProcess(v.PID); err != nil {
+		v.Class = VerdictKillFailed
+		v.Diagnose = fmt.Sprintf("kill PID %d failed: %v", v.PID, err)
+		v.Hint = "Permission denied or process already gone; rerun mcphub gui without --force to handshake."
+		return nil, v, err
+	}
+
+	// Acquire-poll loop (memo §"Take-over protocol" step 5g).
+	deadline := time.Now().Add(opts.AcquireDeadline)
+	for time.Now().Before(deadline) {
+		lock, err := AcquireSingleInstanceAt(pidportPath, v.Port)
+		if err == nil {
+			v.Class = VerdictKilledRecovered
+			v.Diagnose = fmt.Sprintf("force-killed previous incumbent PID %d and acquired lock", v.PID)
+			v.Hint = ""
+			return lock, v, nil
+		}
+		if !errors.Is(err, ErrSingleInstanceBusy) {
+			v.Class = VerdictKillFailed
+			v.Diagnose = fmt.Sprintf("post-kill acquire failed: %v", err)
+			v.Hint = ""
+			return nil, v, err
+		}
+		time.Sleep(opts.AcquireBackoff)
+	}
+	v.Class = VerdictRaceLost
+	v.Diagnose = fmt.Sprintf("kill succeeded but a competitor acquired the lock during %s deadline", opts.AcquireDeadline)
+	v.Hint = "Rerun mcphub gui without --force to handshake with the new incumbent."
+	return nil, v, fmt.Errorf("race lost")
+}
+
+// cmdlineIsGui implements the rev 9 argv-subcommand gate:
+// argv[1] == "gui" OR len(argv) == 1 (Explorer no-arg auto-gui).
+func cmdlineIsGui(argv []string) bool {
+	if len(argv) == 1 {
+		return true
+	}
+	if len(argv) >= 2 && argv[1] == "gui" {
+		return true
+	}
+	return false
+}
+
+// startTimeBeforeMtime returns true iff start ≤ mtime + tolerance.
+// A start time strictly later than the pidport mtime indicates the
+// PID was recycled to a process that began AFTER our pidport was
+// written.
+func startTimeBeforeMtime(start, mtime time.Time, tolerance time.Duration) bool {
+	if start.IsZero() || mtime.IsZero() {
+		// Defensive: missing telemetry → fail closed.
+		return false
+	}
+	return !start.After(mtime.Add(tolerance))
+}
+
+// truncateCmdline caps the total argv string length at maxBytes for
+// safe logging/JSON. The image gate runs before the argv gate
+// (matchBasename then cmdlineIsGui), so a pathologically large
+// argv[0] from a non-mcphub process is rejected before the
+// (truncated) argv[1] is read by cmdlineIsGui. Truncation is
+// display/JSON-bounding only, not a security mitigation.
+func truncateCmdline(argv []string, maxBytes int) []string {
+	if len(argv) == 0 {
+		return argv
+	}
+	out := make([]string, 0, len(argv))
+	used := 0
+	for _, a := range argv {
+		if used+len(a) > maxBytes {
+			remaining := maxBytes - used
+			if remaining > 0 {
+				out = append(out, a[:remaining])
+			}
+			break
+		}
+		out = append(out, a)
+		used += len(a)
+	}
+	return out
 }
