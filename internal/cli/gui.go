@@ -308,6 +308,23 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 				},
 				StateCh: trayStateCh,
 				Quit:    stop, // signal.NotifyContext's cancel function
+				QuitAndStopAll: func() {
+					// Tray "Quit and stop all daemons": stop every running
+					// daemon first, then trigger the same GUI shutdown
+					// path as plain Quit. Failures from individual tasks
+					// are surfaced to stderr but don't block the shutdown
+					// — partial cleanup is better than a hung GUI.
+					if results, err := api.NewAPI().StopAll(); err != nil {
+						fmt.Fprintf(cmd.OutOrStderr(), "tray: StopAll: %v\n", err)
+					} else {
+						for _, r := range results {
+							if r.Err != "" {
+								fmt.Fprintf(cmd.OutOrStderr(), "tray: stop %s: %s\n", r.TaskName, r.Err)
+							}
+						}
+					}
+					stop()
+				},
 			}); err != nil {
 				fmt.Fprintf(cmd.OutOrStderr(), "tray: %v (GUI continues without tray)\n", err)
 			}

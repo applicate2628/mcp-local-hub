@@ -26,6 +26,22 @@ import (
 // 200/207/500 contract; only the response key (restart_results vs
 // stop_results) and the error code differ.
 func registerServerRoutes(s *Server) {
+	// Bulk action routes — POST /api/restart-all and /api/stop-all back
+	// the Dashboard "Run all" / "Stop all" header buttons and the tray
+	// "Quit and stop all daemons" menu item. Same 200/207/500 contract
+	// as the per-server routes; daemon filter is meaningless here so
+	// no ?daemon query is parsed.
+	s.mux.HandleFunc("/api/restart-all", s.requireSameOrigin(func(w http.ResponseWriter, r *http.Request) {
+		writeServerActionResult(w, r, "", func() ([]api.RestartResult, error) {
+			return s.restart.RestartAll()
+		}, "restart_results", "RESTART_FAILED")
+	}))
+	s.mux.HandleFunc("/api/stop-all", s.requireSameOrigin(func(w http.ResponseWriter, r *http.Request) {
+		writeServerActionResult(w, r, "", func() ([]api.RestartResult, error) {
+			return s.stop.StopAll()
+		}, "stop_results", "STOP_FAILED")
+	}))
+
 	s.mux.HandleFunc("/api/servers/", s.requireSameOrigin(func(w http.ResponseWriter, r *http.Request) {
 		rest := strings.TrimPrefix(r.URL.Path, "/api/servers/")
 		parts := strings.Split(rest, "/")

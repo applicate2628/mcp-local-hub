@@ -12,15 +12,21 @@ import (
 )
 
 type fakeRestart struct {
-	calledServer string
-	calledDaemon string
-	results      []api.RestartResult
-	err          error
+	calledServer     string
+	calledDaemon     string
+	calledRestartAll bool
+	results          []api.RestartResult
+	err              error
 }
 
 func (f *fakeRestart) Restart(server, daemon string) ([]api.RestartResult, error) {
 	f.calledServer = server
 	f.calledDaemon = daemon
+	return f.results, f.err
+}
+
+func (f *fakeRestart) RestartAll() ([]api.RestartResult, error) {
+	f.calledRestartAll = true
 	return f.results, f.err
 }
 
@@ -109,15 +115,21 @@ func TestRestart_OrchestrationFailureReturns500(t *testing.T) {
 }
 
 type fakeStop struct {
-	calledServer string
-	calledDaemon string
-	results      []api.RestartResult
-	err          error
+	calledServer  string
+	calledDaemon  string
+	calledStopAll bool
+	results       []api.RestartResult
+	err           error
 }
 
 func (f *fakeStop) Stop(server, daemon string) ([]api.RestartResult, error) {
 	f.calledServer = server
 	f.calledDaemon = daemon
+	return f.results, f.err
+}
+
+func (f *fakeStop) StopAll() ([]api.RestartResult, error) {
+	f.calledStopAll = true
 	return f.results, f.err
 }
 
@@ -341,5 +353,89 @@ func TestRestart_NoDaemonQueryEmptyResultsStill200(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d, want 200 (empty results without ?daemon is normal)", rec.Code)
+	}
+}
+
+// --- Bulk action routes (Run all / Stop all on Dashboard, Quit-and-stop in tray) ---
+
+func TestRestartAll_DispatchesBulkRoute(t *testing.T) {
+	fr := &fakeRestart{
+		results: []api.RestartResult{
+			{TaskName: "mcp-local-hub-memory-default"},
+			{TaskName: "mcp-local-hub-time-default"},
+		},
+	}
+	s := NewServer(Config{})
+	s.restart = fr
+
+	req := httptest.NewRequest(http.MethodPost, "/api/restart-all", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200, body=%q", rec.Code, rec.Body.String())
+	}
+	if !fr.calledRestartAll {
+		t.Error("RestartAll was not invoked — bulk route did not dispatch to s.restart.RestartAll")
+	}
+	var body struct {
+		RestartResults []api.RestartResult `json:"restart_results"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(body.RestartResults) != 2 {
+		t.Errorf("expected 2 results, got %+v", body.RestartResults)
+	}
+}
+
+func TestStopAll_DispatchesBulkRoute(t *testing.T) {
+	fs := &fakeStop{
+		results: []api.RestartResult{
+			{TaskName: "mcp-local-hub-memory-default"},
+			{TaskName: "mcp-local-hub-time-default"},
+		},
+	}
+	s := NewServer(Config{})
+	s.stop = fs
+
+	req := httptest.NewRequest(http.MethodPost, "/api/stop-all", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200, body=%q", rec.Code, rec.Body.String())
+	}
+	if !fs.calledStopAll {
+		t.Error("StopAll was not invoked — bulk route did not dispatch to s.stop.StopAll")
+	}
+}
+
+func TestRestartAll_PartialFailureReturns207(t *testing.T) {
+	fr := &fakeRestart{
+		results: []api.RestartResult{
+			{TaskName: "mcp-local-hub-memory-default"},
+			{TaskName: "mcp-local-hub-time-default", Err: "kill timeout"},
+		},
+	}
+	s := NewServer(Config{})
+	s.restart = fr
+
+	req := httptest.NewRequest(http.MethodPost, "/api/restart-all", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMultiStatus {
+		t.Fatalf("status=%d, want 207 (partial failure)", rec.Code)
+	}
+}
+
+func TestStopAll_MethodNotAllowed(t *testing.T) {
+	s := NewServer(Config{})
+	req := httptest.NewRequest(http.MethodGet, "/api/stop-all", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status=%d, want 405", rec.Code)
 	}
 }

@@ -119,6 +119,38 @@ export function DashboardScreen() {
   const stop = (server: string, daemon: string | undefined) =>
     postServerAction(server, daemon, "stop");
 
+  // Bulk actions back the Dashboard header buttons. Backend routes
+  // /api/restart-all and /api/stop-all share the same 200/207/500
+  // contract as per-server actions, only without ?daemon scoping.
+  async function postBulkAction(action: "restart" | "stop") {
+    const resultsKey = `${action}_results` as const;
+    try {
+      const resp = await fetch(`/api/${action}-all`, { method: "POST" });
+      const body = (await resp.json().catch(() => ({}))) as {
+        error?: string;
+        code?: string;
+        [k: string]: unknown;
+      };
+      if (resp.status === 500) {
+        throw new Error(body.error ?? String(resp.status));
+      }
+      if (resp.status === 207) {
+        const rows = (body[resultsKey] as Array<{ task_name: string; error: string }>) ?? [];
+        const failed = rows.filter((r) => r.error !== "");
+        const summary = failed.map((r) => `${r.task_name}: ${r.error}`).join("; ");
+        throw new Error(`partial ${action}-all failure: ${summary}`);
+      }
+      if (!resp.ok) {
+        throw new Error(body.error ?? String(resp.status));
+      }
+    } catch (e) {
+      console.error(`${action}-all: ${(e as Error).message}`);
+      throw e;
+    }
+  }
+  const runAll = () => postBulkAction("restart");
+  const stopAll = () => postBulkAction("stop");
+
   if (error) {
     return (
       <div>
@@ -132,7 +164,13 @@ export function DashboardScreen() {
 
   return (
     <div>
-      <h1>Dashboard</h1>
+      <header class="dashboard-header">
+        <h1>Dashboard</h1>
+        <div class="dashboard-bulk-actions">
+          <BulkActionButton onClick={runAll} idleLabel="Run all" workingLabel="Starting…" doneLabel="Started" disabled={sorted.length === 0} />
+          <BulkActionButton onClick={stopAll} idleLabel="Stop all" workingLabel="Stopping…" doneLabel="Stopped" disabled={sorted.length === 0} variant="danger" />
+        </div>
+      </header>
       <div class="cards">
         {sorted.map((d) => (
           <Card
@@ -144,6 +182,39 @@ export function DashboardScreen() {
         ))}
       </div>
     </div>
+  );
+}
+
+// BulkActionButton reuses the same idle → working → done|error → idle
+// state machine as per-card useActionButton, but as a standalone
+// component because the bulk buttons live outside any Card. Keeping
+// the state machine identical ensures consistent UX: the same 1.5s
+// flash of "Started" / "Stopped" / "Failed" before snapping back.
+function BulkActionButton(props: {
+  onClick: () => Promise<void>;
+  idleLabel: string;
+  workingLabel: string;
+  doneLabel: string;
+  disabled?: boolean;
+  variant?: "danger";
+}) {
+  const btn = useActionButton(props.onClick);
+  const label = {
+    idle: props.idleLabel,
+    working: props.workingLabel,
+    done: props.doneLabel,
+    error: "Failed",
+  }[btn.state];
+  const cls = props.variant === "danger" ? "btn-stop" : "";
+  return (
+    <button
+      onClick={btn.click}
+      disabled={props.disabled || btn.state !== "idle"}
+      class={cls}
+      aria-busy={btn.state === "working"}
+    >
+      {label}
+    </button>
   );
 }
 

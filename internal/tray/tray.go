@@ -54,6 +54,12 @@ type Config struct {
 	ActivateWindow func()
 	// Quit is called when the user picks "Quit (keep daemons)".
 	Quit func()
+	// QuitAndStopAll is called when the user picks "Quit and stop all
+	// daemons" from the tray menu. Implementer should stop every
+	// running daemon (api.StopAll) and then trigger the same GUI
+	// shutdown path as Quit. Optional: if nil, the menu falls back
+	// to plain Quit semantics so the menu item never silently no-ops.
+	QuitAndStopAll func()
 	// StateCh delivers TrayState transitions. The parent forwards
 	// each value to the child as a JSON state line.
 	StateCh <-chan TrayState
@@ -202,6 +208,18 @@ func Run(ctx context.Context, cfg Config) error {
 			}
 		case "quit":
 			if cfg.Quit != nil {
+				cfg.Quit()
+			}
+		case "quit-and-stop-all":
+			// Fall back to plain Quit if the GUI didn't wire the
+			// stronger callback — never silently swallow a user
+			// click. The fallback at least closes the GUI; daemons
+			// keep running, which mirrors the existing "Quit (keep
+			// daemons)" item rather than failing closed.
+			switch {
+			case cfg.QuitAndStopAll != nil:
+				cfg.QuitAndStopAll()
+			case cfg.Quit != nil:
 				cfg.Quit()
 			}
 		default:

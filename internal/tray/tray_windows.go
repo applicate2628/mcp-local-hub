@@ -526,6 +526,10 @@ func (tc *trayChild) showPopupMenuAt(x, y int32) {
 		fmt.Fprintf(os.Stderr, "tray child: AppendMenu(quit): %v\n", err)
 		return
 	}
+	if err := appendMenuStringW(hmenu, cmdQuitAndStopDaemons, "Quit and stop all daemons"); err != nil {
+		fmt.Fprintf(os.Stderr, "tray child: AppendMenu(quit-stop): %v\n", err)
+		return
+	}
 
 	// Required Win32 dance: the calling thread must be the
 	// foreground thread for TrackPopupMenu to display reliably.
@@ -581,6 +585,13 @@ func (tc *trayChild) showPopupMenuAt(x, y int32) {
 		// Emit BEFORE PostQuitMessage so the parent gets the event
 		// before the pipe closes on shutdown.
 		tc.emitEvent("quit")
+		postQuitMessage(0)
+	case cmdQuitAndStopDaemons:
+		// Same ordering as cmdQuit: emit first, post-quit second so the
+		// parent has time to act on the event before our pipe closes.
+		// The parent reacts to "quit-and-stop-all" by calling api.StopAll
+		// and only then triggering its own shutdown.
+		tc.emitEvent("quit-and-stop-all")
 		postQuitMessage(0)
 	}
 }

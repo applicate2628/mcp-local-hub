@@ -200,6 +200,7 @@ func (realManifestEditor) ManifestEditWithHash(name, yaml, expectedHash string) 
 //	                         results (memo §D9).
 type restarter interface {
 	Restart(server, daemon string) ([]api.RestartResult, error)
+	RestartAll() ([]api.RestartResult, error)
 }
 
 type realRestarter struct{}
@@ -219,6 +220,18 @@ func (realRestarter) Restart(server, daemon string) ([]api.RestartResult, error)
 	return results, err
 }
 
+// RestartAll restarts every scheduler-tracked daemon under our prefix.
+// Backs the Dashboard "Run all" / "Restart all" header button. Same
+// 200/207/500 contract as Restart — empty results means "no scheduler
+// tasks at all," which is normal on a fresh setup and stays 200.
+func (realRestarter) RestartAll() ([]api.RestartResult, error) {
+	results, err := api.NewAPI().RestartAll()
+	if results == nil {
+		results = []api.RestartResult{}
+	}
+	return results, err
+}
+
 // stopper is the narrow interface the /api/servers/:name/stop handler
 // needs. Same shape as restarter — api.Stop returns the same per-task
 // RestartResult slice plus orchestration error. Handler maps:
@@ -228,6 +241,7 @@ func (realRestarter) Restart(server, daemon string) ([]api.RestartResult, error)
 //	err != nil             → 500 + STOP_FAILED, body has partial results
 type stopper interface {
 	Stop(server, daemon string) ([]api.RestartResult, error)
+	StopAll() ([]api.RestartResult, error)
 }
 
 type realStopper struct{}
@@ -238,6 +252,17 @@ type realStopper struct{}
 // api.Stop and api.Restart share the RestartResult schema.
 func (realStopper) Stop(server, daemon string) ([]api.RestartResult, error) {
 	results, err := api.NewAPI().Stop(server, daemon)
+	if results == nil {
+		results = []api.RestartResult{}
+	}
+	return results, err
+}
+
+// StopAll stops every running daemon under our prefix. Backs the
+// Dashboard "Stop all" header button and the tray "Quit and stop all
+// daemons" menu item.
+func (realStopper) StopAll() ([]api.RestartResult, error) {
+	results, err := api.NewAPI().StopAll()
 	if results == nil {
 		results = []api.RestartResult{}
 	}
