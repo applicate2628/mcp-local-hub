@@ -303,6 +303,8 @@ export function DashboardScreen() {
             daemon={d}
             onRestart={() => restart(d.server, d.daemon)}
             onStop={() => stop(d.server, d.daemon)}
+            bulkInflight={bulkInflight}
+            bulkOutcome={bulkOutcome}
           />
         ))}
       </div>
@@ -405,34 +407,70 @@ function Card(props: {
   daemon: DaemonStatus;
   onRestart: () => Promise<void>;
   onStop: () => Promise<void>;
+  // Bulk action signals from the parent — when a Run all / Stop all
+  // is in flight, every Card's matching button reflects it. By
+  // definition Run all === click each per-card Restart, so the
+  // affordance must mirror that.
+  bulkInflight: BulkAction | null;
+  bulkOutcome: BulkOutcome | null;
 }) {
-  const { daemon: d, onRestart, onStop } = props;
+  const { daemon: d, onRestart, onStop, bulkInflight, bulkOutcome } = props;
   const restartBtn = useActionButton(onRestart);
   const stopBtn = useActionButton(onStop);
 
   const cls = d.state === "Running" ? "card ok" : "card down";
   const title = d.daemon && d.daemon !== "default" ? `${d.server} (${d.daemon})` : d.server;
 
-  // Guard against concurrent same-daemon ops: while one button is in
-  // flight, the other is disabled. Stop is additionally disabled when
-  // the daemon is already not running — there is nothing to stop.
-  const anyWorking = restartBtn.state === "working" || stopBtn.state === "working";
-  const restartDisabled = restartBtn.state !== "idle" || stopBtn.state === "working";
+  // Effective per-button state merges local click-driven state with
+  // the parent's bulk-action state. Precedence (top wins):
+  //   1. local "working"        — local click in flight; preserve
+  //   2. bulkInflight match     — bulk in flight → "working"
+  //   3. bulkOutcome match      — bulk terminal flash overrides stale
+  //                                local "done"/"error" so every card
+  //                                shows the bulk result uniformly
+  //   4. local state            — idle / done / error from prior local
+  //                                click outside any bulk window
+  //
+  // Codex bot PR #39 P2 ("Let bulk outcome override stale per-card
+  // flash state"): an `=== "idle"` guard on rule 3 was wrong — a
+  // recent local click leaves state "done"/"error" for 1.5s, and
+  // during that window a bulk outcome would NOT cascade to that
+  // card, breaking the "all cards mirror bulk action" invariant.
+  function effective(local: ActionState, action: BulkAction): ActionState {
+    if (local === "working") return "working";
+    if (bulkInflight === action) return "working";
+    if (bulkOutcome && bulkOutcome.action === action) return bulkOutcome.state;
+    return local;
+  }
+  const restartEffective = effective(restartBtn.state, "restart");
+  const stopEffective = effective(stopBtn.state, "stop");
+
+  // While a bulk action is in flight, every per-card button is
+  // disabled — clicking one would race the global fan-out. The
+  // existing per-card mutual exclusion (one button locks the other)
+  // is preserved.
+  const anyBulk = bulkInflight !== null;
+  const anyWorking = restartEffective === "working" || stopEffective === "working";
+  const restartDisabled =
+    anyBulk || restartBtn.state !== "idle" || stopBtn.state === "working";
   const stopDisabled =
-    stopBtn.state !== "idle" || restartBtn.state === "working" || d.state !== "Running";
+    anyBulk ||
+    stopBtn.state !== "idle" ||
+    restartBtn.state === "working" ||
+    d.state !== "Running";
 
   const restartLabel = {
     idle: "Restart",
     working: "Restarting…",
     done: "Restarted",
     error: "Failed",
-  }[restartBtn.state];
+  }[restartEffective];
   const stopLabel = {
     idle: "Stop",
     working: "Stopping…",
     done: "Stopped",
     error: "Failed",
-  }[stopBtn.state];
+  }[stopEffective];
 
   return (
     <div class={cls}>
