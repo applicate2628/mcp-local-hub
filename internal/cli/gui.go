@@ -70,7 +70,19 @@ activates the first window and exits 0.`,
 						// useful guidance instead of "unreachable".
 						// Re-read pidport so we can quote the actual
 						// port the operator should SSH-tunnel to.
-						_, p, _ := gui.ReadPidport(pidportPath)
+						// Codex bot review on PR #26 P2: surface the
+						// pidport-read failure instead of printing
+						// `http://127.0.0.1:0/` (which would happen
+						// if the incumbent shut down between the
+						// activate call and this reread, or the file
+						// got truncated).
+						_, p, readErr := gui.ReadPidport(pidportPath)
+						if readErr != nil || p == 0 {
+							return fmt.Errorf(
+								"incumbent reachable but headless and pidport unreadable (%v); "+
+									"check ~/.local/state/mcp-local-hub for the running port",
+								readErr)
+						}
 						fmt.Fprintf(cmd.OutOrStdout(),
 							"mcphub gui is already running headless on port %d. SSH-tunnel and visit http://127.0.0.1:%d/\n",
 							p, p)
