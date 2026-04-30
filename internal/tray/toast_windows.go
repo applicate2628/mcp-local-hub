@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"mcp-local-hub/internal/process"
 )
 
 // ShowToast displays a Windows toast notification with the given
@@ -71,6 +73,7 @@ $doc.LoadXml($xml.OuterXml);
 `, psTitle, psBody)
 
 	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	process.NoConsole(cmd) // suppress PS console flash on windowsgui parent
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("toast failed: %w (output: %s)", err, strings.TrimSpace(string(out)))
 	}

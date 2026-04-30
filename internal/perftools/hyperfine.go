@@ -10,6 +10,8 @@ import (
 	"strconv"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"mcp-local-hub/internal/process"
 )
 
 // hyperfineTool runs hyperfine against one or more commands and returns
@@ -59,6 +61,7 @@ func (tb *PerfToolbox) hyperfineTool(ctx context.Context, req *mcp.CallToolReque
 	cmdArgs = append(cmdArgs, args.Commands...)
 
 	cmd := exec.CommandContext(ctx, tb.tools.Hyperfine.Path, cmdArgs...)
+	process.NoConsole(cmd) // suppress console flash on windowsgui parent
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	cmd.Stdout = &stderr // ignore human-readable output; we only need the JSON export

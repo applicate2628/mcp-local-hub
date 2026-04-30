@@ -4,11 +4,18 @@ package gui
 import (
 	"os/exec"
 	"runtime"
+
+	"mcp-local-hub/internal/process"
 )
 
 // spawnProcess is the injectable seam for LaunchBrowser tests.
+// Uses process.NoConsole so the OS-default browser launcher (rundll32
+// on Windows, etc.) does not flash a console window when invoked from
+// a windowsgui-subsystem parent.
 var spawnProcess = func(name string, args ...string) error {
-	return exec.Command(name, args...).Start()
+	cmd := exec.Command(name, args...)
+	process.NoConsole(cmd)
+	return cmd.Start()
 }
 
 // LaunchBrowser opens the GUI URL in the user's browser. Preference:

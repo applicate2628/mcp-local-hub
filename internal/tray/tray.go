@@ -42,6 +42,8 @@ import (
 	"runtime"
 	"sync"
 	"time"
+
+	"mcp-local-hub/internal/process"
 )
 
 // Config is what Run needs to produce the menu and route actions.
@@ -95,6 +97,7 @@ func Run(ctx context.Context, cfg Config) error {
 	// would Process.Kill() on ctx cancel, skipping that path.
 	// Codex bot review on PR #24 P2.
 	c := exec.Command(selfPath, "tray")
+	process.NoConsole(c) // child mcphub.exe is windowsgui too; belt-and-braces
 	stdin, err := c.StdinPipe()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "tray: stdin pipe: %v; tray disabled\n", err)

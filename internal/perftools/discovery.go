@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"mcp-local-hub/internal/process"
 )
 
 // ToolInfo describes whether a perf tool is available on this host,
@@ -59,7 +61,9 @@ func probe(bin string, versionExtract func(string) string) *ToolInfo {
 	if err != nil {
 		return &ToolInfo{Installed: false, Error: fmt.Sprintf("not on PATH: %v", err)}
 	}
-	out, err := exec.Command(bin, "--version").CombinedOutput()
+	cmd := exec.Command(bin, "--version")
+	process.NoConsole(cmd) // suppress console flash on windowsgui parent
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return &ToolInfo{
 			Installed: false,
