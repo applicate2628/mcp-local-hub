@@ -199,8 +199,29 @@ export function DashboardScreen() {
       throw e;
     }
   }
-  const runAll = () => postBulkAction("restart");
-  const stopAll = () => postBulkAction("stop");
+  // Local-fallback wrappers around postBulkAction. Codex bot review on
+  // PR #38 P2: a rejected fetch (network-down, connection refused,
+  // DNS) means the backend never received the request, so no SSE
+  // event will EVER arrive — without a fallback the button stays in
+  // idle and the click looks ignored. We catch the rejection and
+  // set bulkOutcome to error UNLESS the SSE pipeline already ran
+  // (200/207/500 cases all publish SSE before the response returns,
+  // so prev is non-null). prev ?? error preserves SSE-driven outcome
+  // when both arrive — idempotent for the "error" case where SSE
+  // also says error.
+  const setLocalErrorFallback = useCallback((action: BulkAction) => {
+    setBulkInflight(null);
+    setBulkOutcome((prev) => prev ?? { action, state: "error" });
+    if (bulkResetTimerRef.current) clearTimeout(bulkResetTimerRef.current);
+    bulkResetTimerRef.current = setTimeout(() => {
+      setBulkOutcome(null);
+      bulkResetTimerRef.current = null;
+    }, 1500);
+  }, []);
+  const runAll = () =>
+    postBulkAction("restart").catch(() => setLocalErrorFallback("restart"));
+  const stopAll = () =>
+    postBulkAction("stop").catch(() => setLocalErrorFallback("stop"));
 
   if (error) {
     return (

@@ -504,6 +504,47 @@ func TestStopAll_PublishesSseLifecycleEvents(t *testing.T) {
 	}
 }
 
+// Codex bot PR #38 P1: partial failures (any per-task Err non-empty,
+// HTTP 207) must publish SSE phase "error", not "completed". The
+// frontend derives the bulk button outcome solely from the SSE phase,
+// so if 207 says "completed" the button flashes "Started"/"Stopped"
+// on partial failure — wrong.
+func TestRestartAll_PartialFailurePublishesErrorPhase(t *testing.T) {
+	fr := &fakeRestart{
+		results: []api.RestartResult{
+			{TaskName: "mcp-local-hub-memory-default"},
+			{TaskName: "mcp-local-hub-time-default", Err: "kill timeout"},
+		},
+	}
+	s := NewServer(Config{})
+	s.restart = fr
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sub := s.Broadcaster().Subscribe(ctx)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/restart-all", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMultiStatus {
+		t.Fatalf("HTTP=%d, want 207 partial", rec.Code)
+	}
+	var got []Event
+	for len(got) < 2 {
+		select {
+		case ev := <-sub:
+			got = append(got, ev)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out: %d events", len(got))
+		}
+	}
+	// Lifecycle: started → error (because per-task Err non-empty).
+	if got[1].Body["phase"] != "error" {
+		t.Errorf("event[1].phase = %v, want error (any per-task Err triggers error phase)", got[1].Body["phase"])
+	}
+}
+
 // Failure path: when the underlying api errors, the second event must
 // be {phase: "error"} so the frontend flashes "Failed".
 func TestRestartAll_FailurePublishesErrorPhase(t *testing.T) {

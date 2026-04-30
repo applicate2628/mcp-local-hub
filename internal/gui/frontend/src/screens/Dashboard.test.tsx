@@ -358,6 +358,55 @@ describe("DashboardScreen — Stop button", () => {
   // final state would depend on request timing rather than user intent.
   // BulkActionsRow holds a shared in-flight lock so the second click
   // is a no-op until the first completes.
+  // Codex bot PR #38 P2: rejected fetch (network down, connection
+  // refused, DNS failure) means backend never receives request → no
+  // SSE arrives → button stays idle without this fallback.
+  it("local fallback: rejected fetch sets bulk outcome to Failed when no SSE arrives", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") return Promise.resolve(statusResponse([runningRow]));
+      if (url === "/api/restart-all") return Promise.reject(new Error("net::ERR_CONNECTION_REFUSED"));
+      return Promise.reject(new Error(`unexpected: ${url}`));
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { findAllByRole } = render(<DashboardScreen />);
+    await waitFor(async () => {
+      const buttons = await findAllByRole("button");
+      expect(buttons.length).toBe(4);
+    });
+    const buttons = await findAllByRole("button");
+    const runAllBtn = buttons[0] as HTMLButtonElement;
+
+    fireEvent.click(runAllBtn);
+    // No SSE event will ever arrive — only the local catch fallback
+    // can set the button to Failed.
+    await waitFor(() => expect(runAllBtn.textContent).toBe("Failed"));
+  });
+
+  // P1 verification: when backend publishes phase=error (the partial-
+  // failure 207 path now does this), Run all flashes Failed not
+  // Started. Drives the same SSE handler the real backend would.
+  it("partial failure on /api/restart-all: SSE phase=error → button shows Failed", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(statusResponse([runningRow]));
+    const { findAllByRole } = render(<DashboardScreen />);
+    await waitFor(async () => {
+      const buttons = await findAllByRole("button");
+      expect(buttons.length).toBe(4);
+    });
+    const buttons = await findAllByRole("button");
+    const runAllBtn = buttons[0] as HTMLButtonElement;
+
+    dispatchSse("bulk-action", { phase: "started", action: "restart" });
+    await waitFor(() => expect(runAllBtn.textContent).toBe("Starting…"));
+    dispatchSse("bulk-action", {
+      phase: "error",
+      action: "restart",
+      results: [{ task_name: "x", error: "kill timeout" }],
+    });
+    await waitFor(() => expect(runAllBtn.textContent).toBe("Failed"));
+  });
+
   it("bulk-action lock: Stop all is disabled while Run all is in flight (SSE-driven)", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")

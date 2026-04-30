@@ -138,7 +138,19 @@ func writeBulkActionResult(
 		results = []api.RestartResult{}
 	}
 	body := map[string]any{resultsKey: results}
-	completedBody := map[string]any{
+	// Compute per-task partial-failure first; the SSE phase must
+	// reflect it. Codex bot review on PR #38 P1: previously phase was
+	// hard-coded to "completed" before evaluating per-task errors,
+	// so a partial 207 was indistinguishable from a clean 200 on the
+	// SSE wire and the Dashboard flashed "Started" on partial failure.
+	anyTaskFailed := false
+	for _, row := range results {
+		if row.Err != "" {
+			anyTaskFailed = true
+			break
+		}
+	}
+	finalBody := map[string]any{
 		"phase":   "completed",
 		"action":  action,
 		"results": results,
@@ -146,10 +158,10 @@ func writeBulkActionResult(
 	if err != nil {
 		body["error"] = err.Error()
 		body["code"] = errCode
-		completedBody["phase"] = "error"
-		completedBody["error"] = err.Error()
+		finalBody["phase"] = "error"
+		finalBody["error"] = err.Error()
 		if events != nil {
-			events.Publish(Event{Type: "bulk-action", Body: completedBody})
+			events.Publish(Event{Type: "bulk-action", Body: finalBody})
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -157,14 +169,16 @@ func writeBulkActionResult(
 		return
 	}
 	status := http.StatusOK
-	for _, row := range results {
-		if row.Err != "" {
-			status = http.StatusMultiStatus // 207
-			break
-		}
+	if anyTaskFailed {
+		status = http.StatusMultiStatus // 207
+		// Partial failure: surface as "error" phase on SSE. The UI
+		// shows "Failed" on the active button — same affordance as a
+		// 500 — and the per-task results array still rides along for
+		// future detailed-error UI.
+		finalBody["phase"] = "error"
 	}
 	if events != nil {
-		events.Publish(Event{Type: "bulk-action", Body: completedBody})
+		events.Publish(Event{Type: "bulk-action", Body: finalBody})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
