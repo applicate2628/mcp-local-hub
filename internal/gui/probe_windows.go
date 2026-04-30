@@ -181,6 +181,16 @@ func queryCmdline(pid uint32) []string {
 		(*byte)(unsafe.Pointer(&wbuf[0])), uintptr(readLen), &n); err != nil {
 		return nil
 	}
+	// Verify the kernel actually filled the whole buffer. If the
+	// CommandLine spans a page boundary and only the first page maps,
+	// ReadProcessMemory can succeed with `n < readLen` (or surface
+	// ERROR_PARTIAL_COPY); trailing slots stay zero-valued uint16
+	// NULs which utf16.Decode renders as '\x00' runes, corrupting
+	// the argv slice the identity gate consumes. Sonnet review on
+	// PR #23 F1 (probe_windows.go partial RPM check).
+	if n != uintptr(readLen) {
+		return nil
+	}
 	cmdline := string(utf16.Decode(wbuf))
 	return splitCommandLineW(cmdline)
 }

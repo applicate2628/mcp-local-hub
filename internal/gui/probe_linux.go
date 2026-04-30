@@ -37,7 +37,43 @@ import (
 var (
 	clkTckOnce  sync.Once
 	clkTckValue int64
+
+	// bootTime is the wall-clock instant of system boot, computed
+	// once from /proc/uptime + time.Now() at first use and cached for
+	// the process's lifetime. Without caching, every call to
+	// readStartTimeLinux recomputes bootTime from a fresh time.Now()
+	// vs the same /proc/uptime, so two probes of the same PID
+	// (Probe + KillRecordedHolder's internal re-probe) produce
+	// drifting startTime estimates. The identity gate's 1s tolerance
+	// bounds the practical risk, but the same physical event should
+	// yield the same logical timestamp. Sonnet review on PR #23 F3.
+	bootTimeOnce  sync.Once
+	bootTimeValue time.Time
+	bootTimeOK    bool
 )
+
+// systemBootTime returns the cached wall-clock instant of system boot,
+// reading /proc/uptime once on first call. Returns (time.Time{}, false)
+// if /proc/uptime can't be read or parsed.
+func systemBootTime() (time.Time, bool) {
+	bootTimeOnce.Do(func() {
+		uptimeData, err := os.ReadFile("/proc/uptime")
+		if err != nil {
+			return
+		}
+		upFields := strings.Fields(string(uptimeData))
+		if len(upFields) < 1 {
+			return
+		}
+		uptimeSec, err := strconv.ParseFloat(upFields[0], 64)
+		if err != nil {
+			return
+		}
+		bootTimeValue = time.Now().Add(-time.Duration(uptimeSec * float64(time.Second)))
+		bootTimeOK = true
+	})
+	return bootTimeValue, bootTimeOK
+}
 
 const (
 	atClkTckType = 17                  // AT_CLKTCK in <elf.h>
@@ -202,16 +238,8 @@ func readStartTimeLinux(pid int) time.Time {
 	// only when /proc/self/auxv is unreadable.
 	hz := clkTck()
 
-	uptimeData, err := os.ReadFile("/proc/uptime")
-	if err != nil {
-		return time.Time{}
-	}
-	upFields := strings.Fields(string(uptimeData))
-	if len(upFields) < 1 {
-		return time.Time{}
-	}
-	uptimeSec, err := strconv.ParseFloat(upFields[0], 64)
-	if err != nil {
+	bootTime, ok := systemBootTime()
+	if !ok {
 		return time.Time{}
 	}
 	// Preserve sub-second jiffy precision: the prior
@@ -225,7 +253,6 @@ func readStartTimeLinux(pid int) time.Time {
 	// start as nanoseconds since boot, then add to bootTime, so the
 	// full jiffy resolution survives.
 	startNanosSinceBoot := startJiffies * int64(time.Second) / hz
-	bootTime := time.Now().Add(-time.Duration(uptimeSec * float64(time.Second)))
 	return bootTime.Add(time.Duration(startNanosSinceBoot))
 }
 

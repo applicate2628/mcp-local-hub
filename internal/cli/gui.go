@@ -423,21 +423,32 @@ func runForceKill(ctx context.Context, cmd *cobra.Command, pidportPath string, y
 	// Gate 3: confirmation prompt unless --yes.
 	if !yes {
 		fmt.Fprintf(cmd.OutOrStdout(), "Kill PID %d (mcphub gui)? [y/N]: ", v.PID)
-		// Codex bot review on PR #23 P2: use cmd.InOrStdin() so
-		// callers (tests, embedded invocations) that override the
-		// input stream via cmd.SetIn(...) get their scripted input
-		// honored. Codex bot review on PR #23 P1: read in a
-		// goroutine + select on ctx.Done() so Ctrl+C / SIGTERM
-		// during the prompt actually unblocks the wait — the
-		// previous Fscanln-on-os.Stdin sat in a read syscall that
-		// signal.NotifyContext could not interrupt, leaving the
-		// destructive flow hung at exactly the point operators
-		// expect immediate abort.
+		// Read in a goroutine + select on ctx.Done so Ctrl+C / SIGTERM
+		// during the prompt actually unblocks the wait. cmd.InOrStdin()
+		// is the prompt's input stream so callers using cmd.SetIn(...)
+		// for scripted input get honored.
+		//
+		// Sonnet review on PR #23 F2: pipe the read through an
+		// io.Pipe whose write end we close on ctx.Done. Without it,
+		// the Fscanln goroutine sat blocked forever on the underlying
+		// stream after ctx canceled — an unbounded goroutine leak in
+		// any embedding context (the CLI single-shot path was
+		// process-bounded and harmless, but the planned A4-b HTTP
+		// `/api/force-kill` path would compound). Closing the pipe
+		// reader unblocks Fscanln with io.ErrClosedPipe so the
+		// scanner goroutine actually exits when ctx fires.
+		pr, pw := io.Pipe()
+		copyDone := make(chan struct{})
+		go func() {
+			defer close(copyDone)
+			_, _ = io.Copy(pw, cmd.InOrStdin())
+			_ = pw.Close()
+		}()
 		respCh := make(chan string, 1)
 		errCh := make(chan error, 1)
 		go func() {
 			var resp string
-			_, err := fmt.Fscanln(cmd.InOrStdin(), &resp)
+			_, err := fmt.Fscanln(pr, &resp)
 			if err != nil {
 				errCh <- err
 				return
@@ -449,15 +460,19 @@ func runForceKill(ctx context.Context, cmd *cobra.Command, pidportPath string, y
 		case resp = <-respCh:
 		case <-errCh:
 			// Fscanln error (EOF, bad input). Treat as cancel:
-			// Fscanln returns nothing useful, the prompt was
-			// implicitly declined. Don't propagate the error —
-			// the user's intent maps to "cancelled".
+			// the prompt was implicitly declined.
+			_ = pr.Close()
 			fmt.Fprintln(cmd.OutOrStdout(), "cancelled")
 			return nil, 0
 		case <-ctx.Done():
+			// Unblock the Fscanln goroutine via pipe close.
+			_ = pr.Close()
 			fmt.Fprintln(cmd.OutOrStderr(), "interrupted")
 			return nil, 1
 		}
+		// Drain pipe reader so the io.Copy goroutine can finish on
+		// stdin EOF without blocking on a write to a still-open pipe.
+		_ = pr.Close()
 		resp = strings.TrimSpace(strings.ToLower(resp))
 		if resp != "y" && resp != "yes" {
 			fmt.Fprintln(cmd.OutOrStdout(), "cancelled")

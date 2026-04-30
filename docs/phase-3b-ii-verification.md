@@ -75,18 +75,20 @@ to the parent console when the parent has one.
 ### D2.3 Single-instance recovery through OS reboot
 
 The single-instance lock uses `gofrs/flock` against
-`%LOCALAPPDATA%\mcp-local-hub\gui.flock`. After an OS reboot the
-file persists but no process holds the lock; the next `mcphub gui`
-must succeed cleanly without manual intervention.
+`%LOCALAPPDATA%\mcp-local-hub\gui.pidport.lock`, with the adjacent
+`gui.pidport` recording `<pid> <port>` for the second-instance
+handshake. After an OS reboot both files persist but no process
+holds the flock; the next `mcphub gui` must succeed cleanly without
+manual intervention.
 
 | Step | Expectation | Result |
 |---|---|---|
 | 1. Launch `mcphub gui`; verify tray + dashboard | Process active, port 9125 bound, lock held | |
 | 2. Reboot the OS via Start menu (clean shutdown) | Windows shuts down without hang from mcphub | |
 | 3. After reboot, log back in | Logon-triggered scheduler tasks fire daemons | |
-| 4. Check `gui.flock` exists in `%LOCALAPPDATA%\mcp-local-hub\` | File present (it's just a leftover marker) | |
-| 5. Launch `mcphub gui` from cmd | Tray + dashboard appear; lock is re-acquired without error | |
-| 6. Force-kill mcphub gui via Task Manager | Process gone, port released, lock file remains | |
+| 4. Check `gui.pidport` + `gui.pidport.lock` exist in `%LOCALAPPDATA%\mcp-local-hub\` | Both files present (leftover markers; lock is unheld) | |
+| 5. Launch `mcphub gui` from cmd | Tray + dashboard appear; flock is re-acquired without error; pidport is rewritten with the new PID/port | |
+| 6. Force-kill mcphub gui via Task Manager | Process gone, port released, files remain (kernel releases flock as a side effect) | |
 | 7. Launch `mcphub gui` again | Tray + dashboard appear; second-instance handshake handles the leftover; new instance acquires lock cleanly | |
 
 ### D2.4 Real daemon kill via Task Manager
