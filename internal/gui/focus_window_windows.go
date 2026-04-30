@@ -38,6 +38,7 @@ func FocusBrowserWindow(titleSubstring string) error {
 	getWindowText := user32.NewProc("GetWindowTextW")
 	getWindowTextLen := user32.NewProc("GetWindowTextLengthW")
 	isWindowVisible := user32.NewProc("IsWindowVisible")
+	isIconic := user32.NewProc("IsIconic")
 	setForegroundWindow := user32.NewProc("SetForegroundWindow")
 	showWindow := user32.NewProc("ShowWindow")
 
@@ -85,9 +86,17 @@ func FocusBrowserWindow(titleSubstring string) error {
 		return fmt.Errorf("%w: no top-level window with title containing %q",
 			ErrFocusNoWindow, titleSubstring)
 	}
-	// SW_RESTORE un-minimizes if the window was minimized; for an
-	// already-visible window it is effectively a no-op.
-	showWindow.Call(foundHwnd, swRestore)
+	// Only un-minimize if the window is actually iconic. A previous
+	// version called SW_RESTORE unconditionally, which downgrades a
+	// maximized window to its prior non-maximized size — wrong: the
+	// user's "Open dashboard" intent is "bring to front", not
+	// "resize". For non-iconic windows (normal AND maximized),
+	// SetForegroundWindow alone handles the focus part without
+	// touching size/state.
+	iconic, _, _ := isIconic.Call(foundHwnd)
+	if iconic != 0 {
+		showWindow.Call(foundHwnd, swRestore)
+	}
 	setForegroundWindow.Call(foundHwnd)
 	return nil
 }
