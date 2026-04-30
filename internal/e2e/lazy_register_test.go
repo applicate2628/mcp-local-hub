@@ -12,7 +12,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -141,6 +143,16 @@ func (e *fakeEndpoint) Close() error { e.closed.Store(true); return nil }
 //  6. api.Unregister(workspace, nil) — scheduler task deleted, client
 //     entries removed, registry empty.
 func TestE2E_LazyRegisterFullLifecycle(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		// api.Status calls scheduler.New() directly (no test seam), and
+		// the Linux/macOS scheduler returns "linux scheduler not yet
+		// implemented" until F2 (systemd backend) lands. The e2e flow
+		// reaches Status() at step 4 to assert lifecycle progression,
+		// so the test can't run on non-Windows even though Register's
+		// scheduler use IS faked via api.InstallTestHooks. Tracked as
+		// backlog F2 (Linux scheduler) + a follow-up Status test seam.
+		t.Skip("e2e flow exercises api.Status which uses real scheduler.New(); not implemented on non-Windows yet")
+	}
 	dir := t.TempDir()
 	regPath := filepath.Join(dir, "workspaces.yaml")
 
@@ -157,6 +169,17 @@ func TestE2E_LazyRegisterFullLifecycle(t *testing.T) {
 		regPath,
 	)
 	defer restore()
+
+	// Stub the canonical mcphub binary so Register's `mcphub setup`
+	// preflight succeeds. CI runners (and any clean dev box without a
+	// prior `mcphub setup`) lack ~/.local/bin/mcphub, so without this
+	// override the very first Register call fails with a "run mcphub
+	// setup once" error before the lazy-lifecycle path is exercised.
+	stubPath := filepath.Join(dir, api.MCPHubBinaryName())
+	if err := os.WriteFile(stubPath, []byte("stub-binary\n"), 0o755); err != nil {
+		t.Fatalf("create stub mcphub binary: %v", err)
+	}
+	defer api.SetTestCanonicalMcphubPath(stubPath)()
 
 	ws := t.TempDir()
 	m := &config.ServerManifest{

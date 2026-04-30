@@ -1,0 +1,87 @@
+name: CI
+
+# Cross-platform build + test matrix. Catches Linux regressions early
+# so the project stays Linux-server-deployable (per Phase 3B-II §F1-F7
+# roadmap in docs/superpowers/plans/phase-3b-ii-backlog.md).
+#
+# Job split:
+#   - build-and-test: ubuntu-latest + windows-latest. Each runs
+#     `go vet ./...`, `go build ./...`, `go test ./...`. Build-tag
+#     splits in the codebase (//go:build windows / !windows) ensure
+#     each runner only compiles the relevant platform paths.
+#   - cross-compile: ubuntu-latest cross-builds for darwin/amd64 and
+#     darwin/arm64 to catch macOS regressions without spinning up a
+#     macos-latest runner (those minutes cost 10x more on GitHub-hosted).
+#     Cross-build is build-only — no test execution on macOS until F6
+#     (libproc-based process probe) lands.
+#
+# Out of scope here:
+#   - E2E browser tests live under internal/gui/e2e/ and are pinned to
+#     windows-latest in a separate workflow (see CLAUDE.md). The
+#     scheduler.New() stub returns "not implemented" on non-Windows,
+#     which 500s /api/status — those tests can't run on ubuntu yet.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build-and-test:
+    name: build-and-test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Verify Go modules tidy
+        # Ensures go.mod/go.sum are up-to-date. Catches any forgotten
+        # `go mod tidy` after dep changes.
+        run: |
+          go mod download
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        # -count=1 disables the test result cache so we always re-run
+        # against the current source. CI minutes are the cost; signal
+        # is worth it.
+        run: go test -count=1 -timeout 5m ./...
+
+  cross-compile:
+    name: cross-compile (darwin)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Build darwin/amd64
+        run: GOOS=darwin GOARCH=amd64 go build ./...
+
+      - name: Build darwin/arm64
+        run: GOOS=darwin GOARCH=arm64 go build ./...

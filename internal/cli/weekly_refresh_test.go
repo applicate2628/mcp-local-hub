@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -44,6 +45,13 @@ func TestWeeklyRefreshCmd_HasJSONFlag(t *testing.T) {
 // WeeklyRefreshAll reads from the default registry path, we point it at a
 // fresh temp dir so the call produces a clean zero-restart report.
 func TestWeeklyRefreshCmd_InvokesWeeklyRefreshAll(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		// scheduler.New() on non-Windows returns "linux scheduler not
+		// yet implemented" (Phase 0-1 is Windows-first; F2 will land
+		// the systemd backend). Until then this end-to-end CLI test
+		// can't exercise WeeklyRefreshAll on Linux/macOS.
+		t.Skip("scheduler not implemented on non-Windows; tracked as backlog F2 (systemd backend)")
+	}
 	t.Setenv("LOCALAPPDATA", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	buf := &bytes.Buffer{}
@@ -64,6 +72,9 @@ func TestWeeklyRefreshCmd_InvokesWeeklyRefreshAll(t *testing.T) {
 // TestWeeklyRefreshCmd_JSONOutput confirms --json produces a valid JSON
 // report shape with the fields callers need.
 func TestWeeklyRefreshCmd_JSONOutput(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("scheduler not implemented on non-Windows; tracked as backlog F2 (systemd backend)")
+	}
 	t.Setenv("LOCALAPPDATA", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	buf := &bytes.Buffer{}
