@@ -199,17 +199,20 @@ func (realManifestEditor) ManifestEditWithHash(name, yaml, expectedHash string) 
 //	err != nil             → 500 + RESTART_FAILED, body has partial
 //	                         results (memo §D9).
 type restarter interface {
-	Restart(server string) ([]api.RestartResult, error)
+	Restart(server, daemon string) ([]api.RestartResult, error)
 }
 
 type realRestarter struct{}
 
-// Restart delegates to api.Restart(server, daemonFilter). The GUI handler
-// targets "restart all daemons for one server," so daemonFilter is "".
+// Restart delegates to api.Restart(server, daemonFilter). When daemon is
+// empty, every daemon of the server is restarted (existing contract).
+// When daemon is non-empty, api.Restart filters to a task whose name has
+// the suffix "-<daemon>" — multi-daemon servers like serena (claude/codex)
+// rely on this to avoid restarting siblings on a single-card click.
 // Per-task results are returned as-is; the handler inspects each Err field
 // to decide 200 vs 207 (all empty vs any non-empty).
-func (realRestarter) Restart(server string) ([]api.RestartResult, error) {
-	results, err := api.NewAPI().Restart(server, "")
+func (realRestarter) Restart(server, daemon string) ([]api.RestartResult, error) {
+	results, err := api.NewAPI().Restart(server, daemon)
 	if results == nil {
 		results = []api.RestartResult{}
 	}
@@ -224,17 +227,17 @@ func (realRestarter) Restart(server string) ([]api.RestartResult, error) {
 //	results any non-empty  → 207 {stop_results:[…]}
 //	err != nil             → 500 + STOP_FAILED, body has partial results
 type stopper interface {
-	Stop(server string) ([]api.RestartResult, error)
+	Stop(server, daemon string) ([]api.RestartResult, error)
 }
 
 type realStopper struct{}
 
-// Stop delegates to api.Stop(server, daemonFilter). The GUI handler targets
-// "stop all daemons for one server," so daemonFilter is "". Mirrors the
-// realRestarter shape — same RestartResult type since api.Stop and
-// api.Restart share that result schema.
-func (realStopper) Stop(server string) ([]api.RestartResult, error) {
-	results, err := api.NewAPI().Stop(server, "")
+// Stop delegates to api.Stop(server, daemonFilter). Empty daemon = all
+// daemons of the server (existing contract); non-empty = a single
+// daemon by suffix match. Mirrors realRestarter.Restart shape since
+// api.Stop and api.Restart share the RestartResult schema.
+func (realStopper) Stop(server, daemon string) ([]api.RestartResult, error) {
+	results, err := api.NewAPI().Stop(server, daemon)
 	if results == nil {
 		results = []api.RestartResult{}
 	}

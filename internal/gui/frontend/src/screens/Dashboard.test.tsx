@@ -89,7 +89,7 @@ describe("DashboardScreen — Stop button", () => {
       .mockImplementation((input: Request | string | URL) => {
         const url = typeof input === "string" ? input : input.toString();
         if (url === "/api/status") return Promise.resolve(statusResponse([runningRow]));
-        if (url === "/api/servers/memory/stop") {
+        if (url === "/api/servers/memory/stop?daemon=default") {
           return Promise.resolve(jsonResponse(200, { stop_results: [] }));
         }
         return Promise.reject(new Error(`unexpected fetch: ${url}`));
@@ -108,7 +108,7 @@ describe("DashboardScreen — Stop button", () => {
       expect(stopBtn.textContent).toBe("Stopped");
     });
     expect(fetchSpy).toHaveBeenCalledWith(
-      "/api/servers/memory/stop",
+      "/api/servers/memory/stop?daemon=default",
       expect.objectContaining({ method: "POST" }),
     );
   });
@@ -117,7 +117,7 @@ describe("DashboardScreen — Stop button", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
       const url = typeof input === "string" ? input : input.toString();
       if (url === "/api/status") return Promise.resolve(statusResponse([runningRow]));
-      if (url === "/api/servers/memory/stop") {
+      if (url === "/api/servers/memory/stop?daemon=default") {
         return Promise.resolve(
           jsonResponse(500, { stop_results: [], error: "scheduler unavailable", code: "STOP_FAILED" }),
         );
@@ -142,6 +142,64 @@ describe("DashboardScreen — Stop button", () => {
     });
   });
 
+  // Multi-daemon regression: serena ships claude (9121) + codex (9122).
+  // Clicking Restart on the codex card MUST NOT restart claude. The bug
+  // was that the request fired POST /api/servers/serena/restart with no
+  // daemon filter — backend interpreted that as "all daemons" and
+  // restarted both. Frontend must include ?daemon=<daemon-name> in the
+  // URL so the backend can narrow the restart to the clicked card only.
+  it("multi-daemon: Restart on codex card sends ?daemon=codex (not all)", async () => {
+    const serenaClaude: DaemonStatus = {
+      server: "serena",
+      daemon: "claude",
+      port: 9121,
+      pid: 1001,
+      state: "Running",
+    };
+    const serenaCodex: DaemonStatus = {
+      server: "serena",
+      daemon: "codex",
+      port: 9122,
+      pid: 1002,
+      state: "Running",
+    };
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation((input: Request | string | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url === "/api/status") {
+          return Promise.resolve(statusResponse([serenaClaude, serenaCodex]));
+        }
+        if (url === "/api/servers/serena/restart?daemon=codex") {
+          return Promise.resolve(
+            jsonResponse(200, { restart_results: [{ task_name: "mcp-local-hub-serena-codex", error: "" }] }),
+          );
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`));
+      });
+
+    const { findAllByRole } = render(<DashboardScreen />);
+    await waitFor(async () => {
+      const buttons = await findAllByRole("button");
+      expect(buttons.length).toBe(4); // 2 cards × (Restart + Stop)
+    });
+    const buttons = await findAllByRole("button");
+    // Cards are sorted by keyFor(): "serena/claude" < "serena/codex".
+    // Buttons render Restart-then-Stop per card in document order.
+    // Indexes: [0] claude Restart, [1] claude Stop, [2] codex Restart, [3] codex Stop.
+    const codexRestartBtn = buttons[2] as HTMLButtonElement;
+
+    fireEvent.click(codexRestartBtn);
+    await waitFor(() => expect(codexRestartBtn.textContent).toBe("Restarted"));
+
+    // The request MUST carry ?daemon=codex. A bare /restart would (per
+    // backend api.Restart with empty daemonFilter) restart claude too —
+    // the regression we're guarding against.
+    const calls = fetchSpy.mock.calls.map((c) => (typeof c[0] === "string" ? c[0] : c[0]?.toString()));
+    expect(calls).toContain("/api/servers/serena/restart?daemon=codex");
+    expect(calls).not.toContain("/api/servers/serena/restart");
+  });
+
   it("disables Restart while Stop is in flight (mutual exclusion per card)", async () => {
     let resolveStop: (r: Response) => void = () => {};
     const stopInFlight = new Promise<Response>((resolve) => {
@@ -150,7 +208,7 @@ describe("DashboardScreen — Stop button", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
       const url = typeof input === "string" ? input : input.toString();
       if (url === "/api/status") return Promise.resolve(statusResponse([runningRow]));
-      if (url === "/api/servers/memory/stop") return stopInFlight;
+      if (url === "/api/servers/memory/stop?daemon=default") return stopInFlight;
       return Promise.reject(new Error(`unexpected fetch: ${url}`));
     });
 

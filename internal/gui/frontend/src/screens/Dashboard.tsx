@@ -65,20 +65,32 @@ export function DashboardScreen() {
 
   useEventSource("/api/events", { "daemon-state": onDelta });
 
-  // Backend contract: POST /api/servers/<name>/<action> returns
+  // Backend contract:
+  //   POST /api/servers/<server>/<action>             — all daemons
+  //   POST /api/servers/<server>/<action>?daemon=<n>  — only that daemon
+  //
   //   200 { <action>_results: [...] }            — all OK
   //   207 { <action>_results: [...] }            — partial: some Err non-empty
+  //   400                                         — empty/repeated ?daemon
+  //   404 { error, code: DAEMON_NOT_FOUND }       — ?daemon matched no task
   //   500 { <action>_results: [...], error, code } — orchestration failure
-  // restart and stop share the same shape; only the response key and
-  // the human label differ. Re-throws on failure so the Card button
-  // state machine can flash "Failed". Caller logs for operator triage.
-  async function postServerAction(server: string, action: "restart" | "stop") {
+  //
+  // The ?daemon scope is REQUIRED for multi-daemon servers (serena ships
+  // claude + codex). Without it, clicking Restart on the codex card was
+  // restarting claude too — see PR #32 / 2026-04-30 bug report.
+  //
+  // Re-throws on failure so the Card button state machine can flash
+  // "Failed". Caller logs for operator triage.
+  async function postServerAction(
+    server: string,
+    daemon: string | undefined,
+    action: "restart" | "stop",
+  ) {
     const resultsKey = `${action}_results` as const;
+    let url = `/api/servers/${encodeURIComponent(server)}/${action}`;
+    if (daemon) url += `?daemon=${encodeURIComponent(daemon)}`;
     try {
-      const resp = await fetch(
-        `/api/servers/${encodeURIComponent(server)}/${action}`,
-        { method: "POST" },
-      );
+      const resp = await fetch(url, { method: "POST" });
       const body = (await resp.json().catch(() => ({}))) as {
         error?: string;
         code?: string;
@@ -97,13 +109,15 @@ export function DashboardScreen() {
         throw new Error(body.error ?? String(resp.status));
       }
     } catch (e) {
-      console.error(`${action} ${server}: ${(e as Error).message}`);
+      console.error(`${action} ${server}/${daemon ?? "*"}: ${(e as Error).message}`);
       throw e;
     }
   }
 
-  const restart = (server: string) => postServerAction(server, "restart");
-  const stop = (server: string) => postServerAction(server, "stop");
+  const restart = (server: string, daemon: string | undefined) =>
+    postServerAction(server, daemon, "restart");
+  const stop = (server: string, daemon: string | undefined) =>
+    postServerAction(server, daemon, "stop");
 
   if (error) {
     return (
@@ -121,7 +135,12 @@ export function DashboardScreen() {
       <h1>Dashboard</h1>
       <div class="cards">
         {sorted.map((d) => (
-          <Card key={keyFor(d)} daemon={d} onRestart={restart} onStop={stop} />
+          <Card
+            key={keyFor(d)}
+            daemon={d}
+            onRestart={() => restart(d.server, d.daemon)}
+            onStop={() => stop(d.server, d.daemon)}
+          />
         ))}
       </div>
     </div>
@@ -167,12 +186,12 @@ function useActionButton(
 
 function Card(props: {
   daemon: DaemonStatus;
-  onRestart: (server: string) => Promise<void>;
-  onStop: (server: string) => Promise<void>;
+  onRestart: () => Promise<void>;
+  onStop: () => Promise<void>;
 }) {
   const { daemon: d, onRestart, onStop } = props;
-  const restartBtn = useActionButton(() => onRestart(d.server));
-  const stopBtn = useActionButton(() => onStop(d.server));
+  const restartBtn = useActionButton(onRestart);
+  const stopBtn = useActionButton(onStop);
 
   const cls = d.state === "Running" ? "card ok" : "card down";
   const title = d.daemon && d.daemon !== "default" ? `${d.server} (${d.daemon})` : d.server;
