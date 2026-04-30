@@ -57,6 +57,10 @@ func killProcessImpl(pid int) error {
 	return errMacOSProbeUnsupported
 }
 
+// closeProcessHandle is a no-op on darwin (no handle-pinning until
+// the F8 / libproc lane lands).
+func closeProcessHandle(_ uintptr) {}
+
 // matchBasename mirrors the Linux POSIX rule (no .exe suffix).
 // Defined here to keep probe_linux.go tagged `linux` exactly —
 // the helper is pure path manipulation, identical to the Linux

@@ -35,12 +35,37 @@ var errWindowsArchUnsupported = errors.New("--force --kill identity probe is amd
 // Codex r5 #1 + r6 #5 + r7 #6: image basename + (argv[1]=="gui" OR
 // len(argv)==1) + start-time vs pidport mtime. All three checks live
 // in single_instance.go; this struct just exposes the raw signals.
+//
+// Codex CLI xhigh review on PR #23 P2: Handle pins the kernel
+// PID-table entry between probe and kill so a successful kill
+// can't land on a recycled successor PID.
 type ProcessIdentity struct {
 	Alive     bool      // process is alive (cross-platform: Kill(0) on Unix; OpenProcess on Windows)
 	Denied    bool      // privilege rejected the query — treat as alive (refuse take-over)
 	ImagePath string    // canonical executable path, empty on Denied
 	Cmdline   []string  // argv split honoring CommandLineToArgvW (Win) / NUL-delimited (Linux)
 	StartTime time.Time // process creation time; opaque token for identity equality
+
+	// Handle is the kernel reference taken at probe time. While held,
+	// the OS pins the PID-table entry (Windows: PROCESS handle reserves
+	// the PID; Linux: pidfd reserves analogous state), preventing
+	// PID-reuse between gate-pass and kill. Zero when probe couldn't
+	// open the process (Denied=true) or the platform has no
+	// handle-reservation primitive (macOS today; Linux <5.3 fallback).
+	// killProcess uses it via killProcessByIdentity when non-zero,
+	// falls back to PID-based signal otherwise.
+	Handle uintptr
+}
+
+// Close releases any kernel handle held by Handle. Safe to call
+// multiple times; safe to call on a zero ProcessIdentity (no-op).
+// Callers MUST invoke Close once the handle is no longer needed.
+func (id *ProcessIdentity) Close() {
+	if id == nil || id.Handle == 0 {
+		return
+	}
+	closeProcessHandle(id.Handle)
+	id.Handle = 0
 }
 
 // pingIncumbent issues GET http://127.0.0.1:<port>/api/ping and

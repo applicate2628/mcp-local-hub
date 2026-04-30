@@ -844,11 +844,17 @@ func TestForce_RealSubprocessE2E(t *testing.T) {
 	if err := first.Start(); err != nil {
 		t.Fatalf("spawn first gui: %v", err)
 	}
-	defer func() {
+	// t.Cleanup (NOT defer) so the process is reaped BEFORE t.TempDir
+	// removes pidportDir — Wait closes the kernel handle to the
+	// pidport.lock file; without it, RemoveAll fails on Windows with
+	// "file in use by another process". Sonnet review on PR #23
+	// codex P1 (TestForce_RealSubprocessE2E zombie + cleanup race).
+	t.Cleanup(func() {
 		if first.Process != nil {
 			_ = first.Process.Kill()
 		}
-	}()
+		_ = first.Wait()
+	})
 
 	// Wait for first gui to write pidport.
 	deadline := time.Now().Add(5 * time.Second)
