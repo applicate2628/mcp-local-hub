@@ -201,6 +201,24 @@ func (h *HTTPHost) waitForReady(ctx context.Context) error {
 // ChildExited returns a channel closed when the subprocess exits.
 func (h *HTTPHost) ChildExited() <-chan struct{} { return h.childExited }
 
+// ExitState returns the subprocess's ProcessState after it has exited,
+// or nil if the process has not yet been spawned or is still running.
+// Callers should select on ChildExited() before reading this — calling
+// it before exit is racy and may return a partially-populated state.
+//
+// The returned state carries the exit code and (on POSIX) signal info,
+// useful for diagnosing silent failures: a `ProcessState.ExitCode()` of
+// 1 with empty stderr is an obvious "controlled sys.exit()" pattern;
+// negative or 137 hints at parent SIGKILL; a Windows status like
+// 0xC0000005 points at a native crash. Without this, the caller only
+// knows "child exited" — the actual reason was lost.
+func (h *HTTPHost) ExitState() *os.ProcessState {
+	if h.cmd == nil {
+		return nil
+	}
+	return h.cmd.ProcessState
+}
+
 // Stop kills the subprocess and waits briefly for the watcher to
 // observe exit. Mirrors StdioHost.Stop semantics.
 func (h *HTTPHost) Stop() error {
