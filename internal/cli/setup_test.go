@@ -11,8 +11,25 @@ import (
 // command to decide whether ~/.local/bin is already on PATH. The real
 // targetDirOnPath wraps this over os.Getenv; exercising the splitter
 // directly keeps the test independent of the running process's PATH.
+//
+// Test inputs are built at runtime to match the host's PATH conventions
+// (drive-letter colons collide with the POSIX `:` separator on Linux,
+// so a literal `C:\...` entry would split inside the colon and break
+// the assertion).
 func TestDirOnPath(t *testing.T) {
 	sep := string(os.PathListSeparator)
+	target := `C:\Users\dima_\.local\bin`
+	other1, other2 := `C:\Go\bin`, `C:\Windows`
+	mixedCaseEntry := `C:\Users\dima_/.local/bin`
+	if runtime.GOOS != "windows" {
+		// POSIX-style entries: `:` is the separator, so absolute POSIX
+		// paths split cleanly. The function still needs to see a
+		// non-trivial path for the "absent" / "single entry" cases.
+		target = "/home/u/.local/bin"
+		other1, other2 = "/usr/local/go/bin", "/usr/bin"
+		mixedCaseEntry = "/home/u/.local/bin" // POSIX is case-sensitive; same string still matches
+	}
+
 	cases := []struct {
 		name    string
 		dir     string
@@ -21,39 +38,39 @@ func TestDirOnPath(t *testing.T) {
 	}{
 		{
 			name:    "present in middle",
-			dir:     `C:\Users\dima_\.local\bin`,
-			pathEnv: strings.Join([]string{`C:\Go\bin`, `C:\Users\dima_\.local\bin`, `C:\Windows`}, sep),
+			dir:     target,
+			pathEnv: strings.Join([]string{other1, target, other2}, sep),
 			want:    true,
 		},
 		{
 			name:    "absent",
-			dir:     `C:\Users\dima_\.local\bin`,
-			pathEnv: strings.Join([]string{`C:\Go\bin`, `C:\Windows`}, sep),
+			dir:     target,
+			pathEnv: strings.Join([]string{other1, other2}, sep),
 			want:    false,
 		},
 		{
 			name:    "empty PATH",
-			dir:     `C:\Users\dima_\.local\bin`,
+			dir:     target,
 			pathEnv: "",
 			want:    false,
 		},
 		{
 			name:    "trailing separator (empty entry tolerated)",
-			dir:     `C:\Users\dima_\.local\bin`,
-			pathEnv: `C:\Users\dima_\.local\bin` + sep,
+			dir:     target,
+			pathEnv: target + sep,
 			want:    true,
 		},
 		{
 			name:    "single entry match",
-			dir:     `C:\Users\dima_\.local\bin`,
-			pathEnv: `C:\Users\dima_\.local\bin`,
+			dir:     target,
+			pathEnv: target,
 			want:    true,
 		},
 	}
 
 	if runtime.GOOS == "windows" {
-		// samePath folds case on Windows — a mixed-case/separator entry
-		// must still match the canonical target.
+		// samePath folds case + slashes on Windows — a mixed-case /
+		// separator entry must still match the canonical target.
 		cases = append(cases, struct {
 			name    string
 			dir     string
@@ -61,8 +78,8 @@ func TestDirOnPath(t *testing.T) {
 			want    bool
 		}{
 			name:    "mixed slashes and case (Windows semantics)",
-			dir:     `C:\Users\dima_\.local\bin`,
-			pathEnv: `C:\Users\dima_/.local/bin`,
+			dir:     target,
+			pathEnv: mixedCaseEntry,
 			want:    true,
 		})
 	}

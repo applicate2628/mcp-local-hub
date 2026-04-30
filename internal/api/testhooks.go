@@ -83,6 +83,31 @@ func InstallTestHooks(newScheduler func() (TestSchedulerIface, error),
 	}
 }
 
+// SetTestCanonicalMcphubPath overrides the path that canonicalMcphubPath()
+// returns. Production code uses ~/.local/bin/mcphub[.exe]; tests that
+// need a deterministic stub (or a deliberately missing binary path) set
+// this and reset it via the returned restore function.
+//
+// Intended for cross-package test helpers (internal/e2e and unit tests
+// in other packages that exercise the Register/Install paths). The
+// in-package register_test.go harness writes to the unexported variable
+// directly. Production code must never call this.
+func SetTestCanonicalMcphubPath(path string) (restore func()) {
+	orig := testCanonicalMcphubPathOverride
+	testCanonicalMcphubPathOverride = path
+	return func() {
+		testCanonicalMcphubPathOverride = orig
+	}
+}
+
+// MCPHubBinaryName returns the platform-correct basename for the
+// canonical mcphub binary ("mcphub" on POSIX, "mcphub.exe" on Windows).
+// Cross-package tests use it to pick a stub-file name that matches what
+// canonicalMcphubPath() would return after SetTestCanonicalMcphubPath.
+func MCPHubBinaryName() string {
+	return mcphubShortName
+}
+
 // testSchedulerShim adapts a caller-supplied TestSchedulerIface to the
 // package-private testScheduler interface.
 type testSchedulerShim struct{ s TestSchedulerIface }

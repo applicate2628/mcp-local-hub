@@ -37,6 +37,21 @@ func newRegisterHarness(t *testing.T) *registerHarness {
 	origClientFactory := testClientFactory
 	origRegistryPath := testRegistryPathOverride
 	origReadiness := proxyReadinessFn
+	origCanonical := testCanonicalMcphubPathOverride
+
+	// Create a stub mcphub binary so canonicalMcphubPath()'s
+	// os.Stat preflight succeeds. Production code calls it to verify
+	// `mcphub setup` ran; tests don't actually exec the binary, so
+	// content doesn't matter — only that the path exists. Without
+	// this, every Register-touching test fails on a clean CI runner
+	// (no $HOME/.local/bin/mcphub) with "run `mcphub setup` once".
+	// Tests that want to exercise the missing-binary path override
+	// the seam back to a non-existent path inside their own bodies.
+	stubPath := filepath.Join(dir, mcphubShortName)
+	if err := os.WriteFile(stubPath, []byte("stub-binary\n"), 0o755); err != nil {
+		t.Fatalf("create stub mcphub binary: %v", err)
+	}
+	testCanonicalMcphubPathOverride = stubPath
 
 	sch := &fakeScheduler{tasks: map[string]bool{}, xml: map[string][]byte{}}
 	testSchedulerFactory = func() (testScheduler, error) { return sch, nil }
@@ -70,6 +85,7 @@ func newRegisterHarness(t *testing.T) *registerHarness {
 			testClientFactory = origClientFactory
 			testRegistryPathOverride = origRegistryPath
 			proxyReadinessFn = origReadiness
+			testCanonicalMcphubPathOverride = origCanonical
 		},
 	}
 }
