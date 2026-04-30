@@ -2,9 +2,20 @@
 package gui
 
 import (
+	"errors"
 	"os"
 	"runtime"
 )
+
+// ErrActivationNoTarget is returned by an OnActivateWindow callback when
+// the request to bring the dashboard to front is impossible in this
+// session — currently only the headless-Linux case (no $DISPLAY /
+// $WAYLAND_DISPLAY, no browser to launch). The /api/activate-window
+// handler maps this to 503 Service Unavailable so the client of
+// TryActivateIncumbent can distinguish "incumbent reached and
+// activated" from "incumbent reached but cannot activate". Codex bot
+// review on PR #26 P2.
+var ErrActivationNoTarget = errors.New("no activation target (headless session — no display server, no browser to launch)")
 
 // HeadlessSession reports whether the current process is running in a
 // session without an attached display server. Used by the GUI command

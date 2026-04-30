@@ -2,10 +2,20 @@ package gui
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
 )
+
+// ErrIncumbentNoActivationTarget signals that the incumbent GUI process
+// was reachable but reported it cannot bring a window to front (currently
+// the headless-Linux case — see ErrActivationNoTarget). Callers of
+// TryActivateIncumbent (cli/gui.go) use errors.Is to distinguish this
+// non-fatal "incumbent alive but headless" outcome from "incumbent
+// unreachable" and print useful guidance to the operator. Codex bot
+// review on PR #26 P2.
+var ErrIncumbentNoActivationTarget = errors.New("incumbent reachable but cannot activate window (headless session)")
 
 // TryActivateIncumbent is called by a second `mcphub gui` invocation when
 // AcquireSingleInstance returned ErrSingleInstanceBusy. It reads the
@@ -90,10 +100,20 @@ func TryActivateIncumbent(pidportPath string, totalTimeout time.Duration) error 
 			return fmt.Errorf("activate-window: %w", err)
 		}
 		resp2.Body.Close()
-		if resp2.StatusCode != http.StatusNoContent {
+		switch resp2.StatusCode {
+		case http.StatusNoContent:
+			return nil
+		case http.StatusServiceUnavailable:
+			// Incumbent reachable but cannot focus / launch a window
+			// (headless). Surface as a typed sentinel so the cli
+			// caller can print "incumbent running headless on port
+			// N; SSH-tunnel and visit http://127.0.0.1:N/" instead
+			// of falsely claiming "activated existing mcphub gui".
+			// Codex bot review on PR #26 P2.
+			return fmt.Errorf("activate-window on port %d: %w", port, ErrIncumbentNoActivationTarget)
+		default:
 			return fmt.Errorf("activate-window status %d", resp2.StatusCode)
 		}
-		return nil
 	}
 	return fmt.Errorf("incumbent unreachable: %w", lastErr)
 }
