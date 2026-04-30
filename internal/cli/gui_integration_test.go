@@ -44,6 +44,17 @@ func TestGuiCmd_SecondInstanceActivates(t *testing.T) {
 		// Named-object isolation between CI containers is unreliable.
 		t.Skip("flaky in Windows CI sandbox")
 	}
+	// PR #26 F4: on a headless Linux session (no $DISPLAY, no
+	// $WAYLAND_DISPLAY — the standard ubuntu-latest CI shape) the
+	// incumbent's OnActivateWindow callback returns ErrActivationNoTarget,
+	// the handler maps to 503, and the second instance prints the
+	// SSH-tunnel guidance instead of "activated existing mcphub gui".
+	// The "activated" assertion below would spuriously fail on that
+	// path, even though the headless contract is working as designed.
+	// Sonnet review on PR #26 P1 (gui_integration_test.go:107).
+	if runtime.GOOS == "linux" && os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
+		t.Skip("headless Linux: second instance prints SSH-tunnel guidance, not 'activated' (PR #26 F4 contract)")
+	}
 	// Use a standalone temp dir we control manually: go-exec's child
 	// process (the built mcphub.exe) can outlive Cmd.Wait on Windows
 	// because `go run` spawns a grandchild, and t.TempDir's cleanup

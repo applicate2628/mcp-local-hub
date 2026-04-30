@@ -65,37 +65,18 @@ activates the first window and exits 0.`,
 					fmt.Fprintln(cmd.OutOrStderr(), "warning: --force not implemented yet; falling back to handshake")
 				}
 				if err := gui.TryActivateIncumbent(pidportPath, 2*time.Second); err != nil {
-					if errors.Is(err, gui.ErrIncumbentNoActivationTarget) {
+					var ina *gui.IncumbentNoActivationTargetError
+					if errors.As(err, &ina) {
 						// Incumbent reachable but headless — print
-						// useful guidance instead of "unreachable".
-						// Re-read pidport so we can quote the actual
-						// port the operator should SSH-tunnel to.
-						// Codex bot review on PR #26 P2: surface the
-						// pidport-read failure instead of printing
-						// `http://127.0.0.1:0/` (which would happen
-						// if the incumbent shut down between the
-						// activate call and this reread, or the file
-						// got truncated).
-						_, p, readErr := gui.ReadPidport(pidportPath)
-						if readErr != nil {
-							return fmt.Errorf(
-								"incumbent reachable but headless and pidport unreadable (%v); "+
-									"check ~/.local/state/mcp-local-hub for the running port",
-								readErr)
-						}
-						if p == 0 {
-							// Read succeeded but file records port=0 —
-							// successor wrote pidport before bind.
-							// Distinct diagnostic so the operator doesn't
-							// see misleading "unreadable (<nil>)". Codex
-							// CLI review on PR #26 P3.
-							return fmt.Errorf(
-								"incumbent reachable but headless and pidport recorded port=0 (incumbent likely restarting); " +
-									"retry in a moment, or check ~/.local/state/mcp-local-hub")
-						}
+						// SSH-tunnel guidance using the port the
+						// handshake already verified via /api/ping.
+						// We do NOT re-read the pidport: that races a
+						// successor's pre-bind port=0 write and turns
+						// usable guidance into a spurious error.
+						// Codex CLI xhigh review on PR #26 P3.
 						fmt.Fprintf(cmd.OutOrStdout(),
 							"mcphub gui is already running headless on port %d. SSH-tunnel and visit http://127.0.0.1:%d/\n",
-							p, p)
+							ina.Port, ina.Port)
 						return nil
 					}
 					return fmt.Errorf(

@@ -17,6 +17,27 @@ import (
 // review on PR #26 P2.
 var ErrIncumbentNoActivationTarget = errors.New("incumbent reachable but cannot activate window (headless session)")
 
+// IncumbentNoActivationTargetError is the typed error returned when the
+// 503 path fires. It carries the port `TryActivateIncumbent` already
+// verified via /api/ping, so callers can use it directly for SSH-tunnel
+// guidance instead of re-reading the pidport (which races a successor's
+// pre-bind port=0 write). Implements Is so
+// `errors.Is(err, ErrIncumbentNoActivationTarget)` keeps working.
+// Codex CLI xhigh review on PR #26 P3.
+type IncumbentNoActivationTargetError struct {
+	// Port is the port the incumbent was successfully ping'd on before
+	// the activate-window POST returned 503.
+	Port int
+}
+
+func (e *IncumbentNoActivationTargetError) Error() string {
+	return fmt.Sprintf("activate-window on port %d: %s", e.Port, ErrIncumbentNoActivationTarget.Error())
+}
+
+func (e *IncumbentNoActivationTargetError) Is(target error) bool {
+	return target == ErrIncumbentNoActivationTarget
+}
+
 // TryActivateIncumbent is called by a second `mcphub gui` invocation when
 // AcquireSingleInstance returned ErrSingleInstanceBusy. It reads the
 // pidport file to locate the running instance, probes /api/ping with a
@@ -105,12 +126,14 @@ func TryActivateIncumbent(pidportPath string, totalTimeout time.Duration) error 
 			return nil
 		case http.StatusServiceUnavailable:
 			// Incumbent reachable but cannot focus / launch a window
-			// (headless). Surface as a typed sentinel so the cli
-			// caller can print "incumbent running headless on port
-			// N; SSH-tunnel and visit http://127.0.0.1:N/" instead
-			// of falsely claiming "activated existing mcphub gui".
-			// Codex bot review on PR #26 P2.
-			return fmt.Errorf("activate-window on port %d: %w", port, ErrIncumbentNoActivationTarget)
+			// (headless). Return a typed error carrying the verified
+			// port so the cli caller can print SSH-tunnel guidance
+			// without re-reading the pidport (which races a
+			// successor's pre-bind port=0 write). errors.Is against
+			// ErrIncumbentNoActivationTarget keeps working via the
+			// Is method on the typed error. Codex CLI xhigh review
+			// on PR #26 P3.
+			return &IncumbentNoActivationTargetError{Port: port}
 		default:
 			return fmt.Errorf("activate-window status %d", resp2.StatusCode)
 		}
