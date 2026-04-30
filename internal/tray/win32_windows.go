@@ -124,6 +124,7 @@ const (
 	TPM_BOTTOMALIGN = 0x0020
 	TPM_RIGHTBUTTON = 0x0002
 	TPM_RETURNCMD   = 0x0100
+	TPM_NONOTIFY    = 0x0080
 
 	// NOTIFYICONDATAW flags
 	NIF_MESSAGE = 0x00000001
@@ -249,16 +250,40 @@ func registerClassExW(cls *WNDCLASSEXW) (uint16, error) {
 	return uint16(r), nil
 }
 
-func createMessageOnlyWindow(className *uint16, hInstance uintptr) (uintptr, error) {
-	// CreateWindowExW(0, className, "", 0, 0, 0, 0, 0,
-	//                 HWND_MESSAGE, NULL, hInstance, NULL)
+func createTrayHostWindow(className *uint16, hInstance uintptr) (uintptr, error) {
+	// CreateWindowExW(WS_EX_TOOLWINDOW, className, "", WS_POPUP,
+	//                 0, 0, 0, 0, 0 (no parent), 0 (no menu),
+	//                 hInstance, NULL).
+	//
+	// Why a top-level invisible window instead of HWND_MESSAGE:
+	//   1. HWND_MESSAGE is a message-only window. The shell broadcasts
+	//      "TaskbarCreated" only to TOP-LEVEL windows. Without a
+	//      top-level host, our tray icon never re-registers after
+	//      explorer.exe restart (Codex bot review on PR #24 P2).
+	//   2. SetForegroundWindow's foreground-window requirement for
+	//      TrackPopupMenu only honors top-level activatable windows.
+	//      Message-only windows can't satisfy it, so the popup
+	//      sometimes fails to appear when another app owns focus
+	//      (Codex bot review on PR #24 P1).
+	//
+	// The window is created with style WS_POPUP and WS_EX_TOOLWINDOW:
+	//   - WS_POPUP: top-level, no caption, no border. The window is
+	//     hidden (we never call ShowWindow with SW_SHOW), so the user
+	//     never sees it; size 0x0 keeps the back buffer trivial.
+	//   - WS_EX_TOOLWINDOW: keeps the (always-hidden) window out of
+	//     Alt+Tab and the taskbar. Required so a stray repaint can't
+	//     accidentally surface a 0x0 ghost.
+	const (
+		WS_POPUP        = uintptr(0x80000000)
+		WS_EX_TOOLWINDOW = uintptr(0x00000080)
+	)
 	r, _, e := procCreateWindowExW.Call(
-		0,
+		WS_EX_TOOLWINDOW,
 		uintptr(unsafe.Pointer(className)),
-		0, // window name (NULL)
-		0, // style
+		0,        // window name (NULL)
+		WS_POPUP, // style
 		0, 0, 0, 0,
-		HWND_MESSAGE,
+		0, // no parent — top-level
 		0, // menu
 		hInstance,
 		0, // lpParam
@@ -394,10 +419,21 @@ func createIconFromResourceEx(data []byte, w, h int32) (uintptr, error) {
 	// `wrapPngInIco`). If a different IconBytes layout ships, this
 	// must be adjusted to read ICONDIRENTRY.imageOffset.
 	const icoHeaderBytes = 22
-	payload := data
+	src := data
 	if len(data) > icoHeaderBytes {
-		payload = data[icoHeaderBytes:]
+		src = data[icoHeaderBytes:]
 	}
+	// CreateIconFromResourceEx requires a DWORD-aligned (4-byte
+	// aligned) presbits buffer. data[icoHeaderBytes:] starts at
+	// offset 22 inside whatever Go heap allocation backed the
+	// caller's slice — typically 2-byte misaligned because Go
+	// allocations are 8-byte aligned at the slice header but the
+	// 22-byte offset breaks that. Copy into a fresh allocation so
+	// the start is guaranteed 4-byte aligned (Go's allocator
+	// returns at least 8-byte alignment for fresh slices).
+	// Codex bot review on PR #24 P1.
+	payload := make([]byte, len(src))
+	copy(payload, src)
 	r, _, e := procCreateIconFromResourceEx.Call(
 		uintptr(unsafe.Pointer(&payload[0])),
 		uintptr(len(payload)),

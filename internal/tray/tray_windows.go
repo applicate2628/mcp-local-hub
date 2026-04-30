@@ -184,7 +184,7 @@ func newTrayChild(w io.Writer) (*trayChild, error) {
 	// invoke WndProc; CreateWindowEx does (synchronously).
 	setActiveChild(tc)
 
-	hwnd, err := createMessageOnlyWindow(tc.classNamePtr, tc.hInstance)
+	hwnd, err := createTrayHostWindow(tc.classNamePtr, tc.hInstance)
 	if err != nil {
 		setActiveChild(nil)
 		return nil, fmt.Errorf("CreateWindowExW: %w", err)
@@ -485,7 +485,12 @@ func (tc *trayChild) showPopupMenuAt(x, y int32) {
 	// (top-half = grow down, bottom-half = grow up) still applies
 	// via monitorWorkArea so menus from a top-of-screen tray don't
 	// extend off the top.
-	flags := uint32(TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_CENTERALIGN)
+	//
+	// TPM_NONOTIFY suppresses the WM_COMMAND notification path —
+	// without it, the shell sends BOTH the synchronous return value
+	// (TPM_RETURNCMD) AND a WM_COMMAND message, making each menu
+	// action fire twice. Codex bot review on PR #24 P1.
+	flags := uint32(TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_CENTERALIGN | TPM_NONOTIFY)
 	if work, ok := monitorWorkArea(x, y); ok {
 		midY := (work.Top + work.Bottom) / 2
 		if y > midY {
@@ -639,6 +644,17 @@ func (tc *trayChild) handleMessage(hwnd uintptr, msg uint32, wparam, lparam uint
 		return 0
 
 	case WM_CLOSE:
+		// Codex bot review on PR #24 P2: NIM_DELETE BEFORE
+		// destroyWindow + zero-hwnd. Otherwise the close path
+		// drops the icon registration without telling the shell,
+		// leaving a ghost icon visible until the user mouses over
+		// it.
+		nid := NOTIFYICONDATAW{
+			CbSize: uint32(unsafe.Sizeof(NOTIFYICONDATAW{})),
+			HWnd:   tc.hwnd,
+			UID:    tc.uid,
+		}
+		shellNotifyIcon(NIM_DELETE, &nid)
 		destroyWindow(tc.hwnd)
 		// hwnd will be invalidated post-destroy; clear so shutdown
 		// doesn't try to delete twice.
@@ -651,18 +667,11 @@ func (tc *trayChild) handleMessage(hwnd uintptr, msg uint32, wparam, lparam uint
 		postQuitMessage(0)
 		return 0
 
-	case WM_COMMAND:
-		// Menu commands when not using TPM_RETURNCMD would arrive
-		// here. We use TPM_RETURNCMD in showPopupMenu, so this is
-		// only a defensive fallback (e.g. accelerators we never set).
-		switch uint32(wparam) & 0xFFFF {
-		case cmdOpenDashboard:
-			tc.emitEvent("open-dashboard")
-		case cmdQuit:
-			tc.emitEvent("quit")
-			postQuitMessage(0)
-		}
-		return 0
+	// WM_COMMAND case removed: TrackPopupMenu now uses TPM_NONOTIFY
+	// (see showPopupMenuAt), so menu selections come back ONLY via
+	// TPM_RETURNCMD. Without TPM_NONOTIFY, the shell sent BOTH
+	// channels for one click, firing each menu action twice
+	// (Codex bot review on PR #24 P1).
 	}
 	return defWindowProcW(hwnd, msg, wparam, lparam)
 }

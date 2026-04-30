@@ -39,6 +39,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"time"
 )
 
 // Config is what Run needs to produce the menu and route actions.
@@ -72,7 +73,13 @@ func Run(ctx context.Context, cfg Config) error {
 		return nil
 	}
 
-	c := exec.CommandContext(ctx, selfPath, "tray")
+	// Plain exec.Command (NOT exec.CommandContext): the child needs a
+	// graceful shutdown sequence — close stdin → child reads EOF →
+	// child's WM_CLOSE handler runs NIM_DELETE before destroying the
+	// window — to avoid leaving a ghost tray icon. exec.CommandContext
+	// would Process.Kill() on ctx cancel, skipping that path.
+	// Codex bot review on PR #24 P2.
+	c := exec.Command(selfPath, "tray")
 	stdin, err := c.StdinPipe()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "tray: stdin pipe: %v; tray disabled\n", err)
@@ -93,7 +100,17 @@ func Run(ctx context.Context, cfg Config) error {
 		return nil
 	}
 
-	// Goroutine: drain cfg.StateCh, write JSON state lines to child's stdin.
+	// childDone closes when the child exits. Used by the stdin writer
+	// to stop encoding state to a dead pipe — without this signal the
+	// writer goroutine would leak for the rest of the GUI lifetime
+	// after the child crashed or stdin EOF'd. Codex bot review on
+	// PR #24 P2 (tray.go:105).
+	childDone := make(chan struct{})
+
+	// Stdin writer: drain cfg.StateCh, write JSON state lines.
+	// Exits when ctx cancels OR cfg.StateCh closes OR the child
+	// process exits (childDone). Closes stdin on exit so the child
+	// reads EOF and runs its graceful shutdown path.
 	go func() {
 		enc := json.NewEncoder(stdin)
 		defer stdin.Close()
@@ -101,11 +118,30 @@ func Run(ctx context.Context, cfg Config) error {
 			select {
 			case <-ctx.Done():
 				return
+			case <-childDone:
+				return
 			case state, ok := <-cfg.StateCh:
 				if !ok {
 					return
 				}
 				_ = enc.Encode(stateMessage{State: state.String()})
+			}
+		}
+	}()
+
+	// Cancellation watchdog: when parent ctx cancels, close stdin so
+	// the child receives EOF and exits gracefully (running NIM_DELETE).
+	// If the child doesn't exit within a bounded fallback window,
+	// kill it to avoid a hung GUI shutdown.
+	go func() {
+		<-ctx.Done()
+		_ = stdin.Close() // signal child to exit gracefully
+		select {
+		case <-childDone:
+			// graceful exit — done
+		case <-time.After(2 * time.Second):
+			if c.Process != nil {
+				_ = c.Process.Kill()
 			}
 		}
 	}()
@@ -132,8 +168,10 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 	}
 	// scanner.Err() may be context.Canceled on parent shutdown — not
-	// worth logging. Child process cleanup is managed by exec.CommandContext.
+	// worth logging. Wait for child reap; signal childDone so the
+	// stdin-writer + cancellation watchdog goroutines exit.
 	_ = c.Wait()
+	close(childDone)
 	return nil
 }
 
