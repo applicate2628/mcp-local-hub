@@ -281,7 +281,11 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 	}
 	if !noTray {
 		go func() {
-			_ = tray.Run(ctx, tray.Config{
+			// PR #24 added child-failure propagation: tray.Run
+			// returns non-nil when the tray subprocess exits
+			// unexpectedly while ctx is alive. Surface the error
+			// so the GUI doesn't silently lose tray functionality.
+			if err := tray.Run(ctx, tray.Config{
 				ActivateWindow: func() {
 					// In-process handshake: hit our own activate handler to
 					// trigger whatever OnActivateWindow callback is registered
@@ -290,7 +294,9 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 				},
 				StateCh: trayStateCh,
 				Quit:    stop, // signal.NotifyContext's cancel function
-			})
+			}); err != nil {
+				fmt.Fprintf(cmd.OutOrStderr(), "tray: %v (GUI continues without tray)\n", err)
+			}
 		}()
 	}
 	return <-errCh
