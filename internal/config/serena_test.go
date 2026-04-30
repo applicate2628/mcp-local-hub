@@ -44,6 +44,17 @@ func TestSerenaManifestParses(t *testing.T) {
 			t.Errorf("binding for client %q not found", client)
 		}
 	}
+
+	// PYTHONUNBUFFERED=1 must reach the serena child env so Python
+	// flushes stdout/stderr per-line into the rotated log file.
+	// Without it, the codex daemon's silent crashes leave no
+	// traceback (Python's 4 KB block-buffer never flushes before
+	// exit). Codex CLI review on PR #34 — make this contract a
+	// regression-guarded invariant, not a manifest comment that
+	// might silently get dropped on a future edit.
+	if got := m.Env["PYTHONUNBUFFERED"]; got != "1" {
+		t.Errorf("manifest env PYTHONUNBUFFERED = %q, want \"1\" (required for line-buffered Python stderr → log diagnostics)", got)
+	}
 }
 
 func TestPortsRegistryValid(t *testing.T) {

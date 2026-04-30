@@ -562,3 +562,21 @@ func parsePort(t *testing.T, urlStr string) int {
 	fmt.Sscanf(port, "%d", &p)
 	return p
 }
+
+// ExitState must return nil safely before the subprocess is even
+// spawned. The cli/daemon.go fallback formatChildExit also accepts nil,
+// so the contract is "nil before exit is normal." This guards against a
+// regression where ExitState dereferences h.cmd (which is nil during
+// the no-spawn-yet window between NewHTTPHost and Start).
+func TestHTTPHost_ExitState_NilBeforeStart(t *testing.T) {
+	h, err := NewHTTPHost(HTTPHostConfig{
+		Command:      "true",
+		UpstreamPort: 9999,
+	})
+	if err != nil {
+		t.Fatalf("NewHTTPHost: %v", err)
+	}
+	if got := h.ExitState(); got != nil {
+		t.Errorf("ExitState() before Start = %v, want nil", got)
+	}
+}

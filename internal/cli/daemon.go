@@ -130,7 +130,14 @@ See also: install, logs, restart, status.`,
 				}
 				ctx := cmd.Context()
 				if err := h.Start(ctx); err != nil {
-					return fmt.Errorf("httphost.Start: %w", err)
+					// h.Start can fail two ways: (a) cmd.Start() itself fails
+					// (process never spawned, ProcessState nil → no suffix) or
+					// (b) waitForReady saw childExited mid-probe (process did
+					// spawn, ProcessState set by the watcher goroutine before
+					// close(childExited), so formatChildExit gets pid+exit code).
+					// Codex CLI review on PR #34 P2 — startup-before-ready was
+					// previously a silent diagnostic hole.
+					return fmt.Errorf("httphost.Start: %w%s", err, formatChildExit(h.ExitState()))
 				}
 				srv := &http.Server{
 					Addr:              fmt.Sprintf("127.0.0.1:%d", spec.Port),
@@ -156,11 +163,19 @@ See also: install, logs, restart, status.`,
 				case <-h.ChildExited():
 					// Upstream server died. Same recovery policy as stdio-bridge:
 					// return non-zero → Task Scheduler's RestartOnFailure respawns.
+					//
+					// Capture the child's ProcessState BEFORE Stop() — exit code,
+					// PID, and (on POSIX) signal info are the only diagnostic
+					// we get when the subprocess crashed silently with no
+					// stderr. Without this the launch-failure log line just
+					// said "exited unexpectedly" with no way to tell controlled
+					// sys.exit from native crash from parent kill.
+					exitMsg := formatChildExit(h.ExitState())
 					_ = h.Stop()
 					shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 					defer cancel()
 					_ = srv.Shutdown(shutdownCtx)
-					return fmt.Errorf("native-http upstream exited unexpectedly")
+					return fmt.Errorf("native-http upstream exited unexpectedly%s", exitMsg)
 				}
 			} else if m.Transport == config.TransportStdioBridge {
 				// Native Go stdio-host: spawns the inner stdio MCP server as
@@ -247,6 +262,43 @@ func logBaseDir() string {
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".local", "state", "mcp-local-hub", "logs")
+}
+
+// formatChildExit renders the child's ProcessState as a diagnostic
+// suffix appended to "native-http upstream exited unexpectedly". The
+// goal is to distinguish silent-exit failure modes that the log file
+// alone cannot — Codex CLI consult, 2026-04-30:
+//
+//	exit code 0    — controlled sys.exit(0); upstream thinks it shut
+//	                 down cleanly. Hints at swallowed exception.
+//	exit code 1    — generic error path; matches Python's sys.exit(1).
+//	signal=killed  — POSIX SIGKILL (parent kill or OOM).
+//	signal=segfault — POSIX native crash.
+//	0xC0000005 / 0xC000013A — Windows native crash or CTRL_BREAK.
+//
+// On POSIX, ProcessState.ExitCode() returns -1 for signal-terminated
+// processes — that loses exactly the SIGKILL distinction the
+// diagnostic is meant to capture. extractSignal pulls the signal name
+// out of the WaitStatus on Unix; it is a no-op on Windows where the
+// NTSTATUS is already encoded in ExitCode. Codex bot review on PR #33 P2.
+//
+// Returns "" when state is nil (process never spawned, still running,
+// or Wait() not yet called) so the caller's Errorf format stays clean.
+func formatChildExit(state *os.ProcessState) string {
+	if state == nil {
+		return ""
+	}
+	ec := state.ExitCode()
+	// On Windows, native crashes surface as NTSTATUS reinterpreted as
+	// int32 — e.g. 0xC0000005 (access violation) is exit_code=-1073741819
+	// in decimal. Useless without hex. Emit exit_hex= when the value is
+	// outside the typical 0-255 POSIX range. uint32 cast preserves the
+	// NTSTATUS bit pattern. Codex CLI review on PR #34 P3.
+	hex := ""
+	if ec < 0 || ec > 255 {
+		hex = fmt.Sprintf(" exit_hex=0x%x", uint32(ec))
+	}
+	return fmt.Sprintf(" (pid=%d exit_code=%d%s%s)", state.Pid(), ec, hex, extractSignal(state))
 }
 
 // writeLaunchFailure appends a timestamped failure diagnostic to the
