@@ -286,6 +286,54 @@ describe("DashboardScreen — Stop button", () => {
     expect((buttons[1] as HTMLButtonElement).disabled).toBe(true);
   });
 
+  // Codex bot PR #36 P2: bulk actions are global; clicking Stop all
+  // while Run all is in flight (or vice versa) would race
+  // /api/restart-all with /api/stop-all against every daemon and the
+  // final state would depend on request timing rather than user intent.
+  // BulkActionsRow holds a shared in-flight lock so the second click
+  // is a no-op until the first completes.
+  it("bulk-action lock: Stop all is disabled while Run all is in flight", async () => {
+    let resolveRun: (r: Response) => void = () => {};
+    const runInFlight = new Promise<Response>((resolve) => {
+      resolveRun = resolve;
+    });
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation((input: Request | string | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url === "/api/status") return Promise.resolve(statusResponse([runningRow]));
+        if (url === "/api/restart-all") return runInFlight;
+        return Promise.reject(new Error(`unexpected fetch: ${url}`));
+      });
+    const { findAllByRole } = render(<DashboardScreen />);
+    await waitFor(async () => {
+      const buttons = await findAllByRole("button");
+      expect(buttons.length).toBe(4);
+    });
+    const buttons = await findAllByRole("button");
+    const runAllBtn = buttons[0] as HTMLButtonElement;
+    const stopAllBtn = buttons[1] as HTMLButtonElement;
+
+    fireEvent.click(runAllBtn);
+    await waitFor(() => expect(runAllBtn.textContent).toBe("Starting…"));
+
+    // Stop all MUST be disabled — the second click would race against
+    // the first and reach overlapping /api/stop-all + /api/restart-all.
+    expect(stopAllBtn.disabled).toBe(true);
+
+    // Verify a defensive click doesn't smuggle through anyway.
+    fireEvent.click(stopAllBtn);
+    expect(fetchSpy.mock.calls.find((c) => {
+      const url = typeof c[0] === "string" ? c[0] : c[0]?.toString();
+      return url === "/api/stop-all";
+    })).toBeUndefined();
+
+    resolveRun(jsonResponse(200, { restart_results: [] }));
+    await waitFor(() => expect(runAllBtn.textContent).toBe("Started"));
+    // After Run all settles, Stop all is re-enabled.
+    expect(stopAllBtn.disabled).toBe(false);
+  });
+
   it("disables Restart while Stop is in flight (mutual exclusion per card)", async () => {
     let resolveStop: (r: Response) => void = () => {};
     const stopInFlight = new Promise<Response>((resolve) => {

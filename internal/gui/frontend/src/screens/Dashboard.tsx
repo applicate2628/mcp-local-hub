@@ -166,10 +166,11 @@ export function DashboardScreen() {
     <div>
       <header class="dashboard-header">
         <h1>Dashboard</h1>
-        <div class="dashboard-bulk-actions">
-          <BulkActionButton onClick={runAll} idleLabel="Run all" workingLabel="Starting…" doneLabel="Started" disabled={sorted.length === 0} />
-          <BulkActionButton onClick={stopAll} idleLabel="Stop all" workingLabel="Stopping…" doneLabel="Stopped" disabled={sorted.length === 0} variant="danger" />
-        </div>
+        <BulkActionsRow
+          runAll={runAll}
+          stopAll={stopAll}
+          disabled={sorted.length === 0}
+        />
       </header>
       <div class="cards">
         {sorted.map((d) => (
@@ -185,36 +186,79 @@ export function DashboardScreen() {
   );
 }
 
-// BulkActionButton reuses the same idle → working → done|error → idle
-// state machine as per-card useActionButton, but as a standalone
-// component because the bulk buttons live outside any Card. Keeping
-// the state machine identical ensures consistent UX: the same 1.5s
-// flash of "Started" / "Stopped" / "Failed" before snapping back.
-function BulkActionButton(props: {
-  onClick: () => Promise<void>;
-  idleLabel: string;
-  workingLabel: string;
-  doneLabel: string;
+// BulkActionsRow owns ONE shared in-flight state for both bulk buttons.
+// Run all and Stop all are global operations — clicking them in quick
+// succession would issue overlapping /api/restart-all + /api/stop-all
+// against every daemon and the final state would depend on request
+// timing rather than user intent. Codex bot review on PR #36 P2:
+// "These are global operations, so they should be mutually exclusive
+// (shared in-flight lock/state) to avoid racing starts/stops across
+// all daemons."
+//
+// While one bulk action is in flight, BOTH buttons are disabled. The
+// active one shows working/done/error labels; the other stays on its
+// idle label so the UI remains readable.
+function BulkActionsRow(props: {
+  runAll: () => Promise<void>;
+  stopAll: () => Promise<void>;
   disabled?: boolean;
-  variant?: "danger";
 }) {
-  const btn = useActionButton(props.onClick);
-  const label = {
-    idle: props.idleLabel,
-    working: props.workingLabel,
-    done: props.doneLabel,
-    error: "Failed",
-  }[btn.state];
-  const cls = props.variant === "danger" ? "btn-stop" : "";
+  type Active = "restart" | "stop";
+  const [inflight, setInflight] = useState<Active | null>(null);
+  const [outcome, setOutcome] = useState<{ action: Active; state: "done" | "error" } | null>(null);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+    },
+    [],
+  );
+
+  async function doBulk(action: Active, run: () => Promise<void>) {
+    if (inflight !== null) return; // shared lock — second click is a no-op
+    setInflight(action);
+    setOutcome(null);
+    try {
+      await run();
+      setOutcome({ action, state: "done" });
+    } catch {
+      setOutcome({ action, state: "error" });
+    }
+    setInflight(null);
+    if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+    resetTimerRef.current = setTimeout(() => {
+      setOutcome(null);
+      resetTimerRef.current = null;
+    }, 1500);
+  }
+
+  function labelFor(action: Active, idle: string, working: string, done: string): string {
+    if (inflight === action) return working;
+    if (outcome && outcome.action === action) {
+      return outcome.state === "done" ? done : "Failed";
+    }
+    return idle;
+  }
+
+  const lockDisabled = inflight !== null || props.disabled;
   return (
-    <button
-      onClick={btn.click}
-      disabled={props.disabled || btn.state !== "idle"}
-      class={cls}
-      aria-busy={btn.state === "working"}
-    >
-      {label}
-    </button>
+    <div class="dashboard-bulk-actions">
+      <button
+        onClick={() => doBulk("restart", props.runAll)}
+        disabled={lockDisabled}
+        aria-busy={inflight === "restart"}
+      >
+        {labelFor("restart", "Run all", "Starting…", "Started")}
+      </button>
+      <button
+        onClick={() => doBulk("stop", props.stopAll)}
+        disabled={lockDisabled}
+        class="btn-stop"
+        aria-busy={inflight === "stop"}
+      >
+        {labelFor("stop", "Stop all", "Stopping…", "Stopped")}
+      </button>
+    </div>
   );
 }
 
