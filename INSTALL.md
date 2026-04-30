@@ -205,7 +205,7 @@ daemon serializes all writes through one subprocess.
 Runs `npx -y @modelcontextprotocol/server-sequential-thinking`. Stateless
 reasoning helper. No env needed.
 
-### wolfram (port 9125)
+### wolfram (port 9132)
 
 Runs `node ${HOME}/.local/mcp-servers/wolframalpha-llm-mcp/build/index.js`.
 Clone the Wolfram LLM MCP server into that location and build it:
