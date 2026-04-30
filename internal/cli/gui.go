@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -299,63 +300,62 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 			// returns non-nil when the tray subprocess exits
 			// unexpectedly while ctx is alive. Surface the error
 			// so the GUI doesn't silently lose tray functionality.
+			// Tray callbacks dispatch through the SAME HTTP endpoints as the
+			// Dashboard buttons. Going through HTTP (rather than calling
+			// api.NewAPI() directly) means the SSE Broadcaster fires
+			// bulk-action lifecycle events that any open Dashboard tab
+			// observes — buttons flash "Starting…" / "Stopping…" exactly
+			// as if the user had clicked them in the browser. Without
+			// this round-trip the tray would mutate daemon state silently
+			// and the Dashboard would only catch up via the per-daemon
+			// SSE updates, with no overall progress indicator. One
+			// pipeline, one source of truth.
+			port := int(s.Port())
+			postBulk := func(action string) error {
+				url := fmt.Sprintf("http://127.0.0.1:%d/api/%s-all", port, action)
+				req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+				if err != nil {
+					return err
+				}
+				// requireSameOrigin gate accepts requests with no Origin
+				// header (CSRF middleware allows non-browser clients);
+				// adding the loopback Origin makes the request indistinguishable
+				// from a Dashboard fetch on the wire.
+				req.Header.Set("Origin", fmt.Sprintf("http://127.0.0.1:%d", port))
+				resp, err := http.DefaultClient.Do(req)
+				if err != nil {
+					return err
+				}
+				defer resp.Body.Close()
+				if resp.StatusCode >= 500 {
+					return fmt.Errorf("HTTP %d", resp.StatusCode)
+				}
+				return nil
+			}
 			if err := tray.Run(ctx, tray.Config{
 				ActivateWindow: func() {
-					// In-process handshake: hit our own activate handler to
-					// trigger whatever OnActivateWindow callback is registered
-					// (Phase 3B-II: focus browser window).
 					_ = gui.TryActivateIncumbent(pidportPath, 500*time.Millisecond)
 				},
 				StateCh: trayStateCh,
-				Quit:    stop, // signal.NotifyContext's cancel function
+				Quit:    stop,
 				QuitAndStopAll: func() {
-					// Tray "Quit and stop all daemons": stop every running
-					// daemon first, then trigger the same GUI shutdown
-					// path as plain Quit. Failures from individual tasks
-					// are surfaced to stderr but don't block the shutdown
-					// — partial cleanup is better than a hung GUI.
-					if results, err := api.NewAPI().StopAll(); err != nil {
-						fmt.Fprintf(cmd.OutOrStderr(), "tray: StopAll: %v\n", err)
-					} else {
-						for _, r := range results {
-							if r.Err != "" {
-								fmt.Fprintf(cmd.OutOrStderr(), "tray: stop %s: %s\n", r.TaskName, r.Err)
-							}
-						}
+					// Stop all via HTTP (so the Dashboard sees the SSE
+					// lifecycle), then trigger the GUI shutdown. Errors
+					// don't block the shutdown — partial cleanup beats
+					// a hung GUI.
+					if err := postBulk("stop"); err != nil {
+						fmt.Fprintf(cmd.OutOrStderr(), "tray: POST /api/stop-all: %v\n", err)
 					}
 					stop()
 				},
 				RunAllDaemons: func() {
-					// Tray "Run all daemons": fire-and-forget restart of
-					// every scheduler-tracked task. Same fan-out and
-					// per-task error surface as the Dashboard "Run all"
-					// button (which routes through the GUI HTTP API);
-					// here we go through the in-process api directly
-					// because the tray click does not have an HTTP
-					// channel to the GUI server. GUI stays open.
-					if results, err := api.NewAPI().RestartAll(); err != nil {
-						fmt.Fprintf(cmd.OutOrStderr(), "tray: RestartAll: %v\n", err)
-					} else {
-						for _, r := range results {
-							if r.Err != "" {
-								fmt.Fprintf(cmd.OutOrStderr(), "tray: restart %s: %s\n", r.TaskName, r.Err)
-							}
-						}
+					if err := postBulk("restart"); err != nil {
+						fmt.Fprintf(cmd.OutOrStderr(), "tray: POST /api/restart-all: %v\n", err)
 					}
 				},
 				StopAllDaemons: func() {
-					// Tray "Stop all daemons": fire-and-forget. Mirrors
-					// QuitAndStopAll's StopAll path but does NOT trigger
-					// GUI shutdown — user keeps the GUI open to monitor
-					// the resulting state via Dashboard.
-					if results, err := api.NewAPI().StopAll(); err != nil {
-						fmt.Fprintf(cmd.OutOrStderr(), "tray: StopAll: %v\n", err)
-					} else {
-						for _, r := range results {
-							if r.Err != "" {
-								fmt.Fprintf(cmd.OutOrStderr(), "tray: stop %s: %s\n", r.TaskName, r.Err)
-							}
-						}
+					if err := postBulk("stop"); err != nil {
+						fmt.Fprintf(cmd.OutOrStderr(), "tray: POST /api/stop-all: %v\n", err)
 					}
 				},
 			}); err != nil {

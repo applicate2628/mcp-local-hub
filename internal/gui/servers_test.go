@@ -2,11 +2,13 @@
 package gui
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/api"
 )
@@ -437,5 +439,99 @@ func TestStopAll_MethodNotAllowed(t *testing.T) {
 	s.mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status=%d, want 405", rec.Code)
+	}
+}
+
+// PR #38 unified pipeline: bulk-action handlers publish SSE lifecycle
+// events on the existing Broadcaster so any open Dashboard sees the
+// action's progress regardless of trigger source. Without this, tray-
+// triggered fan-outs would be invisible to the Dashboard's bulk-action
+// UI state.
+func TestRestartAll_PublishesSseLifecycleEvents(t *testing.T) {
+	fr := &fakeRestart{results: []api.RestartResult{{TaskName: "mcp-local-hub-memory-default"}}}
+	s := NewServer(Config{})
+	s.restart = fr
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sub := s.Broadcaster().Subscribe(ctx)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/restart-all", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	var got []Event
+	for len(got) < 2 {
+		select {
+		case ev := <-sub:
+			got = append(got, ev)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for SSE events; got %d: %+v", len(got), got)
+		}
+	}
+	if got[0].Type != "bulk-action" || got[0].Body["phase"] != "started" || got[0].Body["action"] != "restart" {
+		t.Errorf("event[0] = %+v, want {bulk-action started restart}", got[0])
+	}
+	if got[1].Type != "bulk-action" || got[1].Body["phase"] != "completed" || got[1].Body["action"] != "restart" {
+		t.Errorf("event[1] = %+v, want {bulk-action completed restart}", got[1])
+	}
+}
+
+func TestStopAll_PublishesSseLifecycleEvents(t *testing.T) {
+	fs := &fakeStop{results: []api.RestartResult{{TaskName: "mcp-local-hub-memory-default"}}}
+	s := NewServer(Config{})
+	s.stop = fs
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sub := s.Broadcaster().Subscribe(ctx)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/stop-all", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	var got []Event
+	for len(got) < 2 {
+		select {
+		case ev := <-sub:
+			got = append(got, ev)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out: %d events", len(got))
+		}
+	}
+	if got[1].Body["phase"] != "completed" || got[1].Body["action"] != "stop" {
+		t.Errorf("event[1] = %+v, want completed/stop", got[1])
+	}
+}
+
+// Failure path: when the underlying api errors, the second event must
+// be {phase: "error"} so the frontend flashes "Failed".
+func TestRestartAll_FailurePublishesErrorPhase(t *testing.T) {
+	fr := &fakeRestart{
+		results: []api.RestartResult{},
+		err:     fmt.Errorf("scheduler unavailable"),
+	}
+	s := NewServer(Config{})
+	s.restart = fr
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sub := s.Broadcaster().Subscribe(ctx)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/restart-all", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	var got []Event
+	for len(got) < 2 {
+		select {
+		case ev := <-sub:
+			got = append(got, ev)
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out")
+		}
+	}
+	if got[1].Body["phase"] != "error" {
+		t.Errorf("event[1].phase = %v, want error", got[1].Body["phase"])
 	}
 }

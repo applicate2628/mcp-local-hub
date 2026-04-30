@@ -3,20 +3,46 @@ import { render, waitFor, cleanup, fireEvent } from "@testing-library/preact";
 import { DashboardScreen } from "./Dashboard";
 import type { DaemonStatus } from "../types";
 
-// happy-dom does not ship EventSource. Dashboard mounts useEventSource
-// for /api/events, so we install an inert stub: construct + addEventListener +
-// close are no-ops. These tests drive state changes via direct fetch
-// responses, not SSE, so the stub never needs to dispatch.
+// happy-dom does not ship EventSource. Dashboard's bulk-action UI state
+// is SSE-driven (PR #38: unified pipeline — backend publishes
+// bulk-action events, frontend mirrors them). The stub captures
+// listeners so tests can dispatch synthetic events that drive the same
+// state transitions a real backend would.
+type StubListener = (ev: MessageEvent) => void;
+const stubInstances = new Set<StubEventSource>();
 class StubEventSource {
   url: string;
+  listeners = new Map<string, Set<StubListener>>();
   constructor(url: string) {
     this.url = url;
+    stubInstances.add(this);
   }
-  addEventListener(_name: string, _handler: (ev: MessageEvent) => void): void {}
-  removeEventListener(_name: string, _handler: (ev: MessageEvent) => void): void {}
-  close(): void {}
+  addEventListener(name: string, handler: StubListener): void {
+    let bucket = this.listeners.get(name);
+    if (!bucket) {
+      bucket = new Set();
+      this.listeners.set(name, bucket);
+    }
+    bucket.add(handler);
+  }
+  removeEventListener(name: string, handler: StubListener): void {
+    this.listeners.get(name)?.delete(handler);
+  }
+  close(): void {
+    stubInstances.delete(this);
+  }
 }
 (globalThis as unknown as { EventSource: typeof StubEventSource }).EventSource = StubEventSource;
+
+// dispatchSse fires a synthetic SSE event into every live
+// StubEventSource. Used by bulk-action tests to drive UI state the
+// way a real backend would.
+function dispatchSse(eventName: string, data: unknown) {
+  const ev = new MessageEvent(eventName, { data: JSON.stringify(data) });
+  for (const inst of stubInstances) {
+    inst.listeners.get(eventName)?.forEach((h) => h(ev));
+  }
+}
 
 const runningRow: DaemonStatus = {
   server: "memory",
@@ -217,7 +243,12 @@ describe("DashboardScreen — Stop button", () => {
     expect(buttons[1]?.textContent).toBe("Stop all");
   });
 
-  it("Run all posts to /api/restart-all and flashes Started", async () => {
+  // PR #38 unified pipeline: bulk-action UI state is driven by SSE
+  // events, not local onClick. Click → POST /api/restart-all →
+  // backend publishes "started" → frontend animates. The test
+  // simulates the SSE round-trip with dispatchSse so the assertion
+  // mirrors how a real backend drives the UI.
+  it("Run all posts to /api/restart-all and flashes Started on SSE completion", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation((input: Request | string | URL) => {
@@ -237,15 +268,20 @@ describe("DashboardScreen — Stop button", () => {
     const runAllBtn = buttons[0] as HTMLButtonElement;
 
     fireEvent.click(runAllBtn);
-    await waitFor(() => expect(runAllBtn.textContent).toBe("Started"));
-
     expect(fetchSpy).toHaveBeenCalledWith(
       "/api/restart-all",
       expect.objectContaining({ method: "POST" }),
     );
+
+    // Backend would publish these — synthesize the round-trip.
+    dispatchSse("bulk-action", { phase: "started", action: "restart" });
+    await waitFor(() => expect(runAllBtn.textContent).toBe("Starting…"));
+
+    dispatchSse("bulk-action", { phase: "completed", action: "restart" });
+    await waitFor(() => expect(runAllBtn.textContent).toBe("Started"));
   });
 
-  it("Stop all posts to /api/stop-all and flashes Stopped", async () => {
+  it("Stop all posts to /api/stop-all and flashes Stopped on SSE completion", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation((input: Request | string | URL) => {
@@ -265,12 +301,42 @@ describe("DashboardScreen — Stop button", () => {
     const stopAllBtn = buttons[1] as HTMLButtonElement;
 
     fireEvent.click(stopAllBtn);
-    await waitFor(() => expect(stopAllBtn.textContent).toBe("Stopped"));
-
     expect(fetchSpy).toHaveBeenCalledWith(
       "/api/stop-all",
       expect.objectContaining({ method: "POST" }),
     );
+
+    dispatchSse("bulk-action", { phase: "started", action: "stop" });
+    await waitFor(() => expect(stopAllBtn.textContent).toBe("Stopping…"));
+
+    dispatchSse("bulk-action", { phase: "completed", action: "stop" });
+    await waitFor(() => expect(stopAllBtn.textContent).toBe("Stopped"));
+  });
+
+  // Tray-triggered fan-out goes through the SAME pipeline: tray POSTs
+  // /api/restart-all → backend publishes "started" → any open Dashboard
+  // animates. This guards the unified-pipeline contract: an SSE event
+  // alone (no local fetch) should drive the UI.
+  it("tray-triggered: bulk-action SSE alone animates the buttons (no local fetch needed)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(statusResponse([runningRow]));
+    const { findAllByRole } = render(<DashboardScreen />);
+    await waitFor(async () => {
+      const buttons = await findAllByRole("button");
+      expect(buttons.length).toBe(4);
+    });
+    const buttons = await findAllByRole("button");
+    const runAllBtn = buttons[0] as HTMLButtonElement;
+    const stopAllBtn = buttons[1] as HTMLButtonElement;
+
+    // Simulate a tray click somewhere else → backend published.
+    dispatchSse("bulk-action", { phase: "started", action: "restart" });
+    await waitFor(() => expect(runAllBtn.textContent).toBe("Starting…"));
+    // Lock applies — Stop all must also be disabled.
+    expect(stopAllBtn.disabled).toBe(true);
+
+    dispatchSse("bulk-action", { phase: "completed", action: "restart" });
+    await waitFor(() => expect(runAllBtn.textContent).toBe("Started"));
+    expect(stopAllBtn.disabled).toBe(false);
   });
 
   it("disables Run all and Stop all when no daemons are listed", async () => {
@@ -292,17 +358,14 @@ describe("DashboardScreen — Stop button", () => {
   // final state would depend on request timing rather than user intent.
   // BulkActionsRow holds a shared in-flight lock so the second click
   // is a no-op until the first completes.
-  it("bulk-action lock: Stop all is disabled while Run all is in flight", async () => {
-    let resolveRun: (r: Response) => void = () => {};
-    const runInFlight = new Promise<Response>((resolve) => {
-      resolveRun = resolve;
-    });
+  it("bulk-action lock: Stop all is disabled while Run all is in flight (SSE-driven)", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation((input: Request | string | URL) => {
         const url = typeof input === "string" ? input : input.toString();
         if (url === "/api/status") return Promise.resolve(statusResponse([runningRow]));
-        if (url === "/api/restart-all") return runInFlight;
+        if (url === "/api/restart-all") return Promise.resolve(jsonResponse(200, { restart_results: [] }));
+        if (url === "/api/stop-all") return Promise.resolve(jsonResponse(200, { stop_results: [] }));
         return Promise.reject(new Error(`unexpected fetch: ${url}`));
       });
     const { findAllByRole } = render(<DashboardScreen />);
@@ -314,23 +377,23 @@ describe("DashboardScreen — Stop button", () => {
     const runAllBtn = buttons[0] as HTMLButtonElement;
     const stopAllBtn = buttons[1] as HTMLButtonElement;
 
-    fireEvent.click(runAllBtn);
+    // Simulate the start of a Run all (no completion yet).
+    dispatchSse("bulk-action", { phase: "started", action: "restart" });
     await waitFor(() => expect(runAllBtn.textContent).toBe("Starting…"));
 
-    // Stop all MUST be disabled — the second click would race against
-    // the first and reach overlapping /api/stop-all + /api/restart-all.
+    // Stop all MUST be disabled — the lock keeps overlapping fan-outs out.
     expect(stopAllBtn.disabled).toBe(true);
 
-    // Verify a defensive click doesn't smuggle through anyway.
+    // Defensive click on Stop all must NOT smuggle a fetch through.
     fireEvent.click(stopAllBtn);
     expect(fetchSpy.mock.calls.find((c) => {
       const url = typeof c[0] === "string" ? c[0] : c[0]?.toString();
       return url === "/api/stop-all";
     })).toBeUndefined();
 
-    resolveRun(jsonResponse(200, { restart_results: [] }));
+    // Backend completes; lock releases.
+    dispatchSse("bulk-action", { phase: "completed", action: "restart" });
     await waitFor(() => expect(runAllBtn.textContent).toBe("Started"));
-    // After Run all settles, Stop all is re-enabled.
     expect(stopAllBtn.disabled).toBe(false);
   });
 
