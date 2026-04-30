@@ -444,6 +444,57 @@ func TestForce_KillNonInteractiveWithoutYesExits6(t *testing.T) {
 }
 
 // ---------------------------------------------------------------
+// PreRunE flag validation (GitHub Codex bot review on PR #23, P2)
+// ---------------------------------------------------------------
+
+// TestForce_FlagValidation_KillRequiresForce, _YesRequiresKill cover
+// the cobra PreRunE rejecting destructive-flag misuse before any
+// runtime path runs. PreRunE errors surface as plain cobra errors
+// (NOT typed forceExitError); cobra's default handling is exit 1
+// after printing usage. We assert the error message text and that
+// the error is NOT a forceExitError (the runtime exit-code map is
+// reserved for runtime outcomes, not operator misuse).
+func TestForce_FlagValidation_KillRequiresForce(t *testing.T) {
+	c := newGuiCmdRealForTest()
+	c.SetArgs([]string{"--no-browser", "--no-tray", "--kill"})
+	err := c.Execute()
+	if err == nil {
+		t.Fatal("expected validation error for --kill without --force; got nil")
+	}
+	if !strings.Contains(err.Error(), "--kill requires --force") {
+		t.Errorf("error = %q; want substring '--kill requires --force'", err)
+	}
+	var fe interface{ ExitCode() int }
+	if errors.As(err, &fe) {
+		t.Errorf("validation error should NOT be a forceExitError; got %T", err)
+	}
+}
+
+func TestForce_FlagValidation_YesRequiresKill(t *testing.T) {
+	for _, args := range [][]string{
+		// --yes alone: covered by --yes && !kill (kill not set → trips)
+		{"--no-browser", "--no-tray", "--yes"},
+		// --force --yes (forgot --kill): the bug Codex bot flagged on PR #23.
+		{"--no-browser", "--no-tray", "--force", "--yes"},
+	} {
+		c := newGuiCmdRealForTest()
+		c.SetArgs(args)
+		err := c.Execute()
+		if err == nil {
+			t.Errorf("args=%v: expected validation error; got nil", args)
+			continue
+		}
+		if !strings.Contains(err.Error(), "--yes requires --force --kill") {
+			t.Errorf("args=%v: error = %q; want substring '--yes requires --force --kill'", args, err)
+		}
+		var fe interface{ ExitCode() int }
+		if errors.As(err, &fe) {
+			t.Errorf("args=%v: validation error should NOT be a forceExitError; got %T", args, err)
+		}
+	}
+}
+
+// ---------------------------------------------------------------
 // Codex iter-6 P2 #1: --force --kill against non-killable verdicts
 // must NOT prompt the operator.
 // ---------------------------------------------------------------

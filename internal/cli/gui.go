@@ -50,8 +50,15 @@ activates the first window and exits 0.`,
 			if kill && !force {
 				return fmt.Errorf("--kill requires --force; pass `--force --kill` for stuck-instance kill recovery")
 			}
-			if yes && !force {
-				return fmt.Errorf("--yes requires --force; pass `--force --kill --yes` to confirm non-interactive kill")
+			// `--yes` is the confirmation bypass for `--force --kill`,
+			// not for bare `--force`. Reject `--force --yes` (without
+			// --kill) too — otherwise `mcphub gui --force --yes` runs
+			// the bare-diagnostic path silently and a typo-skipped
+			// `--kill` looks like a handled force flow in automation.
+			// `kill && !force` is enforced above, so `yes && !kill`
+			// also covers the lone `--yes` case (no --force, no --kill).
+			if yes && !kill {
+				return fmt.Errorf("--yes requires --force --kill; pass `--force --kill --yes` to confirm non-interactive kill")
 			}
 			return nil
 		},
