@@ -51,7 +51,11 @@ type HTTPHost struct {
 	wg          sync.WaitGroup
 	done        chan struct{}
 	childExited chan struct{}
-	logCloser   io.Closer // non-nil when LogPath was opened; closed by Stop
+	logCloser   io.Closer    // non-nil when LogPath was opened; closed by Stop
+	job         *process.Job // Windows Job Object: kills descendant tree
+	// (uvx → python → serena dashboards) when the parent daemon process
+	// is force-killed. POSIX is a no-op stub for now. See
+	// internal/process/jobobject_windows.go.
 }
 
 var errBodyTooLarge = errors.New("body too large")
@@ -150,6 +154,23 @@ func (h *HTTPHost) Start(ctx context.Context) error {
 	}
 	h.cmd = cmd
 	h.started = true
+	// Place the freshly-spawned upstream into a Windows Job Object with
+	// KILL_ON_JOB_CLOSE so that if our daemon process is force-killed
+	// (taskkill /F mcphub.exe) the kernel reaps the upstream tree
+	// (uvx → python → serena dashboards) instead of leaving orphans.
+	// POSIX implementation is a no-op pending PR_SET_PDEATHSIG / kqueue
+	// follow-up. Failures are logged but not fatal — orphan protection
+	// is defense-in-depth, not a startup precondition.
+	if job, jobErr := process.NewKillOnCloseJob(); jobErr == nil {
+		if err := job.Assign(cmd); err != nil {
+			_ = job.Close()
+			fmt.Fprintf(os.Stderr, "warn: assign upstream to Job Object: %v (orphan protection disabled for this child)\n", err)
+		} else {
+			h.job = job
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "warn: create Job Object: %v (orphan protection disabled)\n", jobErr)
+	}
 
 	// Watcher goroutine owns Wait() so Stop() never double-waits.
 	go func() {
@@ -252,6 +273,13 @@ func (h *HTTPHost) stopLocked() error {
 	h.wg.Wait()
 	if h.logCloser != nil {
 		_ = h.logCloser.Close()
+	}
+	if h.job != nil {
+		// Closing the job handle releases the kill-on-close limit.
+		// killProcessTree above already terminated members; this is
+		// the final handle release so the kernel can reclaim the
+		// job. No-op on POSIX.
+		_ = h.job.Close()
 	}
 	return nil
 }
