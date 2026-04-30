@@ -107,14 +107,23 @@ func processIDImpl(pid int) (ProcessIdentity, error) {
 	// /proc/<pid>/exe
 	imagePath, _ := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
 
-	// /proc/<pid>/cmdline (NUL-delimited args)
+	// /proc/<pid>/cmdline (NUL-delimited args). Preserve empty argv
+	// tokens — they're valid in /proc/<pid>/cmdline and the identity
+	// gate's `argv[1] == "gui" OR len(argv) == 1` check uses
+	// positional semantics, so collapsing `mcphub ""` to a single-arg
+	// argv would let a non-GUI invocation pass len(argv)==1 and
+	// incorrectly authorize --force --kill. Codex bot review on PR
+	// #23 P2 (matches splitCommandLineW's empty-token preservation
+	// on Windows). Trim the single trailing NUL the kernel always
+	// emits, then split on NUL — Split returns one empty trailing
+	// element only when there's a trailing separator, which we just
+	// stripped, so the resulting slice has no spurious empties at
+	// the end while still preserving genuine middle empties.
 	var cmdline []string
 	if data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid)); err == nil {
-		raw := strings.Split(strings.TrimRight(string(data), "\x00"), "\x00")
-		for _, a := range raw {
-			if a != "" {
-				cmdline = append(cmdline, a)
-			}
+		s := strings.TrimRight(string(data), "\x00")
+		if s != "" {
+			cmdline = strings.Split(s, "\x00")
 		}
 	}
 
@@ -182,7 +191,6 @@ func readStartTimeLinux(pid int) time.Time {
 	// (AT_CLKTCK entry) — pure Go, no CGo — falling back to 100
 	// only when /proc/self/auxv is unreadable.
 	hz := clkTck()
-	startSecsSinceBoot := startJiffies / hz
 
 	uptimeData, err := os.ReadFile("/proc/uptime")
 	if err != nil {
@@ -196,8 +204,19 @@ func readStartTimeLinux(pid int) time.Time {
 	if err != nil {
 		return time.Time{}
 	}
+	// Preserve sub-second jiffy precision: the prior
+	// `startJiffies / hz` integer division truncated up to a full
+	// jiffy ÷ Hz (≈10ms on Hz=100, but compounded across the int
+	// boundary at the second-mark). The identity gate allows
+	// start <= mtime + 1s, so even ~990ms of truncation could let
+	// a recycled PID that started just past the threshold appear
+	// valid and pass the kill gate against the wrong process.
+	// Codex bot review on PR #23 P2 (jiffy precision). Compute the
+	// start as nanoseconds since boot, then add to bootTime, so the
+	// full jiffy resolution survives.
+	startNanosSinceBoot := startJiffies * int64(time.Second) / hz
 	bootTime := time.Now().Add(-time.Duration(uptimeSec * float64(time.Second)))
-	return bootTime.Add(time.Duration(startSecsSinceBoot) * time.Second)
+	return bootTime.Add(time.Duration(startNanosSinceBoot))
 }
 
 // matchBasename returns true iff filepath.Base(path) equals "mcphub"

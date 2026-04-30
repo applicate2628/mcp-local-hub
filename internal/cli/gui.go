@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -19,6 +20,22 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
+
+// inputIsTerminal reports whether r is a terminal-backed *os.File. The
+// non-TTY guard for --force --kill must check the SAME stream the
+// confirmation prompt reads from (cmd.InOrStdin) so test / embedded
+// callers that override input via cmd.SetIn(...) get consistent
+// behavior. term.IsTerminal needs an int fd, so non-*os.File readers
+// (bytes.Buffer, strings.Reader) return false unconditionally —
+// matching the documented "scripted input ⇒ non-interactive" intent.
+// Codex bot review on PR #23 P2 (round 3).
+func inputIsTerminal(r io.Reader) bool {
+	f, ok := r.(*os.File)
+	if !ok {
+		return false
+	}
+	return term.IsTerminal(int(f.Fd()))
+}
 
 func newGuiCmdReal() *cobra.Command {
 	var (
@@ -373,9 +390,15 @@ func runForceKill(ctx context.Context, cmd *cobra.Command, pidportPath string, y
 	// Reached only when verdict == LiveUnreachable — the path that
 	// actually attempts a kill. Non-TTY callers that truly want the
 	// kill must pass --yes. Healthy / Malformed / DeadPID short-circuit
-	// above without consent (no kill happens). Codex bot review on
-	// PR #23 P2 (round 2).
-	if !yes && !term.IsTerminal(int(os.Stdin.Fd())) {
+	// above without consent (no kill happens).
+	//
+	// Codex bot review on PR #23 P2 (round 3): probe TTY-ness on the
+	// SAME stream the prompt reads from (cmd.InOrStdin), not os.Stdin.
+	// Otherwise tests / embedded callers that override input via
+	// cmd.SetIn(...) get inconsistent behavior — guard skips --yes
+	// even though scripted input is non-interactive, then the prompt
+	// EOFs and silently exits 0 without performing the recovery.
+	if !yes && !inputIsTerminal(cmd.InOrStdin()) {
 		fmt.Fprintln(cmd.OutOrStderr(), "non-interactive shell — pass --yes to confirm --kill")
 		return nil, 6
 	}
