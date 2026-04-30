@@ -313,12 +313,13 @@ func runForceDiagnostic(ctx context.Context, cmd *cobra.Command, pidportPath str
 // KillRecordedHolder. cmd.Context() would NOT receive SIGINT.
 // (Codex iter-10 P2 #1.)
 func runForceKill(ctx context.Context, cmd *cobra.Command, pidportPath string, yes bool) (*gui.SingleInstanceLock, int) {
-	// Gate 0 (Claude r2 #3): non-TTY without --yes → exit 6.
-	if !yes && !term.IsTerminal(int(os.Stdin.Fd())) {
-		fmt.Fprintln(cmd.OutOrStderr(), "non-interactive shell — pass --yes to confirm --kill")
-		return nil, 6
-	}
-
+	// Probe FIRST so the healthy-incumbent early-exit can run without
+	// requiring --yes in non-TTY contexts. The original ordering put
+	// Gate 0 (non-TTY ⇒ require --yes) before the probe, which broke
+	// CI/cron usage of `mcphub gui --force --kill` as a defensive
+	// idempotent activate: a healthy incumbent should always route to
+	// activate-only (no kill, no destructive consent needed). Codex
+	// bot review on PR #23 P1.
 	v := gui.Probe(ctx, pidportPath)
 
 	// Gate 1: Healthy early-exit (Codex r5 #7b): never kill a healthy gui.
@@ -329,6 +330,16 @@ func runForceKill(ctx context.Context, cmd *cobra.Command, pidportPath string, y
 			return nil, 1
 		}
 		return nil, 0
+	}
+
+	// Gate 0 (Claude r2 #3): non-TTY without --yes → exit 6.
+	// Reached only when Probe says the verdict is NOT Healthy — i.e.
+	// the kill path is actually about to run. Non-TTY callers that
+	// truly want the kill must pass --yes. Healthy callers above
+	// short-circuit without consent (no kill happens).
+	if !yes && !term.IsTerminal(int(os.Stdin.Fd())) {
+		fmt.Fprintln(cmd.OutOrStderr(), "non-interactive shell — pass --yes to confirm --kill")
+		return nil, 6
 	}
 
 	// Print diagnostic so the operator sees what we're about to kill.
