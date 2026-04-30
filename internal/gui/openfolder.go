@@ -1,15 +1,24 @@
 // internal/gui/openfolder.go
 package gui
 
-import "os/exec"
+import (
+	"os/exec"
+
+	"mcp-local-hub/internal/process"
+)
 
 // openFolderSpawn is the injectable seam used by OpenFolderAt.
 // Tests overwrite it; production callers use exec.Command(...).Start()
 // via openFolderDefault below.
 var openFolderSpawn = openFolderDefault
 
+// openFolderDefault wraps exec.Command + Start. NoConsole keeps the
+// explorer / xdg-open / open invocation from flashing a console
+// window when called from a windowsgui-subsystem parent.
 func openFolderDefault(name string, args ...string) error {
-	return exec.Command(name, args...).Start()
+	cmd := exec.Command(name, args...)
+	process.NoConsole(cmd)
+	return cmd.Start()
 }
 
 // OpenFolderAt opens the file manager focused on the given file's

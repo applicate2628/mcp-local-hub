@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"math"
 	"os/exec"
+
+	"mcp-local-hub/internal/process"
 )
 
 // captureResult is the shared subprocess output bundle used by every
@@ -63,6 +65,7 @@ func runCapture(ctx context.Context, binPath, workingDir string, args []string) 
 // runCaptureLimited is runCapture with explicit stdout/stderr limits in bytes.
 func runCaptureLimited(ctx context.Context, binPath, workingDir string, args []string, stdoutLimit, stderrLimit int) (*captureResult, error) {
 	cmd := exec.CommandContext(ctx, binPath, args...)
+	process.NoConsole(cmd) // suppress console flash on windowsgui parent
 	if workingDir != "" {
 		cmd.Dir = workingDir
 	}
