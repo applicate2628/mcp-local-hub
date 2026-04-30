@@ -58,8 +58,10 @@ main { padding: 24px; overflow: auto; }
 .card-kv { display: flex; justify-content: space-between; padding: 4px 0; font-size: 14px; }
 .card.ok .state { color: var(--success); }
 .card.down .state { color: var(--danger); }
-.card-actions { margin-top: 12px; }
-.card-actions button { width: 100%; padding: 6px; border: 1px solid var(--border); background: var(--sidebar-bg); color: var(--text); border-radius: 4px; cursor: pointer; }
+.card-actions { margin-top: 12px; display: flex; gap: 8px; }
+.card-actions button { flex: 1; padding: 6px; border: 1px solid var(--border); background: var(--sidebar-bg); color: var(--text); border-radius: 4px; cursor: pointer; }
+.card-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+.card-actions button.btn-stop:not(:disabled) { color: var(--danger); border-color: var(--danger); }
 
 /* --- Logs screen --- */
 #logs-controls { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
