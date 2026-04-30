@@ -120,6 +120,21 @@ type trayChild struct {
 	hIconMu sync.Mutex
 	hIcon   uintptr
 
+	// iconRegistered reflects whether NIM_ADD has succeeded and not
+	// yet been undone by NIM_DELETE. Both shutdown() and the WM_CLOSE
+	// path consult this flag so neither double-deletes (causing shell
+	// errors in the next NIM_ADD on a re-spawned child) nor leaves a
+	// ghost icon (skipping NIM_DELETE because WM_CLOSE already cleared
+	// hwnd). Codex bot review on PR #24 P2 (NIM_DELETE invariant).
+	iconRegistered bool
+
+	// versionV4 reflects whether NIM_SETVERSION(NOTIFYICON_VERSION_4)
+	// succeeded. Under V4, wParam in the tray callback carries screen
+	// X/Y coords; in legacy mode it carries the icon UID instead and
+	// must NOT be decoded as coordinates (the menu would anchor near
+	// (1,0)). Codex bot review on PR #24 P2 (legacy callback fallback).
+	versionV4 bool
+
 	// JSON encoder for child→parent events. Mutex-protected because
 	// menu clicks fire on the pump thread and (unlikely but cheap to
 	// guard) state updates could arrive concurrently if the design
@@ -203,19 +218,27 @@ func newTrayChild(w io.Writer) (*trayChild, error) {
 
 // shutdown removes the icon, destroys the window, and frees the
 // last HICON. Idempotent — callable from defer regardless of which
-// failure path got us here.
+// failure path got us here. The WM_CLOSE handler typically issues
+// NIM_DELETE first (and clears iconRegistered), so this function's
+// guarded NIM_DELETE only fires on early-failure paths where the
+// pump never reached WM_CLOSE.
 func (tc *trayChild) shutdown() {
 	if tc == nil {
 		return
 	}
-	if tc.hwnd != 0 {
-		// Build a minimal NID with just hwnd+uid for delete.
+	// NIM_DELETE invariant: drop the icon while we still hold a
+	// valid hwnd. Skipping this when iconRegistered=false avoids a
+	// double-delete after WM_CLOSE has already done it.
+	if tc.iconRegistered && tc.hwnd != 0 {
 		nid := NOTIFYICONDATAW{
 			CbSize: uint32(unsafe.Sizeof(NOTIFYICONDATAW{})),
 			HWnd:   tc.hwnd,
 			UID:    tc.uid,
 		}
 		shellNotifyIcon(NIM_DELETE, &nid)
+		tc.iconRegistered = false
+	}
+	if tc.hwnd != 0 {
 		destroyWindow(tc.hwnd)
 		tc.hwnd = 0
 	}
@@ -247,23 +270,26 @@ func (tc *trayChild) installIcon(state TrayState) error {
 		tc.hIconMu.Unlock()
 		return fmt.Errorf("Shell_NotifyIcon NIM_ADD failed")
 	}
+	tc.iconRegistered = true
 	// Switch to the Win7+ callback ABI so click coords arrive in
 	// wParam directly. Without NIM_SETVERSION the shell uses the
-	// legacy XP-era encoding (lParam = mouse event, no coords),
-	// forcing callers to fall back to cursor or icon-rect heuristics
-	// — both of which fail when the icon is in the overflow flyout
-	// (the chevron rect lives next to the system clock, hence
-	// "menu appears near the clock" symptoms).
+	// legacy XP-era encoding (wParam = icon UID, lParam = mouse
+	// event), forcing callers to fall back to icon-rect or cursor
+	// heuristics for anchor coordinates.
 	verNID := NOTIFYICONDATAW{
 		CbSize:   uint32(unsafe.Sizeof(NOTIFYICONDATAW{})),
 		HWnd:     tc.hwnd,
 		UID:      tc.uid,
 		UVersion: NOTIFYICON_VERSION_4,
 	}
-	if !shellNotifyIcon(NIM_SETVERSION, &verNID) {
-		// Non-fatal: we'll fall back to cursor coords in showPopupMenu
-		// if the version-4 callback never delivers click coords.
-		fmt.Fprintf(os.Stderr, "tray child: NIM_SETVERSION(4) failed; click coords will fall back to cursor\n")
+	if shellNotifyIcon(NIM_SETVERSION, &verNID) {
+		tc.versionV4 = true
+	} else {
+		// Non-fatal: handleMessage's wmTrayCallback path detects
+		// !versionV4 and avoids decoding wParam as XY (in legacy mode
+		// wParam carries the icon UID, which would anchor the popup
+		// near (1,0)). Codex bot review on PR #24 P2.
+		fmt.Fprintf(os.Stderr, "tray child: NIM_SETVERSION(4) failed; falling back to icon-rect/cursor anchor\n")
 	}
 	return nil
 }
@@ -317,14 +343,21 @@ func (tc *trayChild) reAddIcon() {
 		fmt.Fprintf(os.Stderr, "tray child: TaskbarCreated re-add: NIM_ADD failed\n")
 		return
 	}
-	// Re-establish the V4 callback ABI on the new registration.
+	tc.iconRegistered = true
+	// Re-establish the V4 callback ABI on the new registration. If
+	// it fails again we keep the prior versionV4 value — the previous
+	// SETVERSION attempt's success is unchanged for the new shell
+	// instance, but a transient TaskbarCreated re-add failure must
+	// not silently downgrade the click decoder.
 	verNID := NOTIFYICONDATAW{
 		CbSize:   uint32(unsafe.Sizeof(NOTIFYICONDATAW{})),
 		HWnd:     tc.hwnd,
 		UID:      tc.uid,
 		UVersion: NOTIFYICON_VERSION_4,
 	}
-	shellNotifyIcon(NIM_SETVERSION, &verNID)
+	if shellNotifyIcon(NIM_SETVERSION, &verNID) {
+		tc.versionV4 = true
+	}
 	// Swap HICON ownership and free the old (now-orphan) handle.
 	tc.hIconMu.Lock()
 	old := tc.hIcon
@@ -599,23 +632,33 @@ func (tc *trayChild) handleMessage(hwnd uintptr, msg uint32, wparam, lparam uint
 		// reliably for pinned icons. A stale cache from an earlier
 		// flyout hover would then override the click's own valid
 		// wParam and aim the menu at the wrong screen quadrant.
+		// In legacy callback mode (V4 setup failed), wParam carries
+		// the icon UID, NOT screen coordinates. Decoding it as XY in
+		// that case anchors the popup near (1,0). Codex bot review
+		// on PR #24 P2 (legacy callback fallback). Under V4, the
+		// shell-encoded message lives in the low word of lParam;
+		// under legacy, it lives in the entire lParam (mouse-message
+		// constants fit in 16 bits, so masking is a no-op for the
+		// values we care about — WM_RBUTTONUP=0x0205, etc).
 		event := uint32(lparam) & 0xFFFF
-		wpx := int32(int16(uint16(wparam & 0xFFFF)))
-		wpy := int32(int16(uint16((wparam >> 16) & 0xFFFF)))
 		switch event {
 		case WM_RBUTTONUP, WM_LBUTTONUP, NIN_SELECT, NIN_KEYSELECT:
 			// Anchor at the icon's deterministic screen rect.
-			// V4 wParam X/Y tracks cursor pixel at click time —
-			// not the icon's stable center — so two right-clicks
-			// on the same pinned icon produce different wParams
-			// (empirical: 5 clicks → 5 distinct coords spanning
-			// ~30x25 pixels). Shell_NotifyIconGetRect returns the
-			// icon's own rect; we use its top-edge horizontal
-			// center as anchor. Combined with the forced
-			// TPM_CENTERALIGN + adaptive TPM_BOTTOMALIGN below,
-			// the menu's bottom edge sits flush against the icon's
-			// top edge, horizontally centered on the icon.
-			x, y := wpx, wpy
+			// Even under V4 the wParam X/Y tracks the cursor pixel
+			// at click time — not the icon's stable center — so two
+			// right-clicks on the same pinned icon produce different
+			// wParams (empirical: 5 clicks → 5 distinct coords
+			// spanning ~30x25 pixels). Shell_NotifyIconGetRect
+			// returns the icon's own rect; we use its top-edge
+			// horizontal center as anchor. Combined with the forced
+			// TPM_CENTERALIGN + adaptive TPM_BOTTOMALIGN below, the
+			// menu's bottom edge sits flush against the icon's top
+			// edge, horizontally centered on the icon.
+			var x, y int32
+			if tc.versionV4 {
+				x = int32(int16(uint16(wparam & 0xFFFF)))
+				y = int32(int16(uint16((wparam >> 16) & 0xFFFF)))
+			}
 			id := NOTIFYICONIDENTIFIER{
 				CbSize: uint32(unsafe.Sizeof(NOTIFYICONIDENTIFIER{})),
 				HWnd:   tc.hwnd,
@@ -625,6 +668,14 @@ func (tc *trayChild) handleMessage(hwnd uintptr, msg uint32, wparam, lparam uint
 			if shellNotifyIconGetRect(&id, &rect) {
 				x = (rect.Left + rect.Right) / 2
 				y = rect.Top
+			} else if !tc.versionV4 {
+				// Legacy path with no icon-rect API: cursor is the
+				// only sensible anchor. wParam is the icon UID, not
+				// coordinates, so skipping it is mandatory.
+				var pt POINT
+				if getCursorPos(&pt) {
+					x, y = pt.X, pt.Y
+				}
 			}
 			tc.showPopupMenuAt(x, y)
 		}
@@ -648,13 +699,18 @@ func (tc *trayChild) handleMessage(hwnd uintptr, msg uint32, wparam, lparam uint
 		// destroyWindow + zero-hwnd. Otherwise the close path
 		// drops the icon registration without telling the shell,
 		// leaving a ghost icon visible until the user mouses over
-		// it.
-		nid := NOTIFYICONDATAW{
-			CbSize: uint32(unsafe.Sizeof(NOTIFYICONDATAW{})),
-			HWnd:   tc.hwnd,
-			UID:    tc.uid,
+		// it. iconRegistered prevents the deferred shutdown() from
+		// double-deleting (which would error and could disturb a
+		// future child re-spawn's NIM_ADD on the same UID).
+		if tc.iconRegistered {
+			nid := NOTIFYICONDATAW{
+				CbSize: uint32(unsafe.Sizeof(NOTIFYICONDATAW{})),
+				HWnd:   tc.hwnd,
+				UID:    tc.uid,
+			}
+			shellNotifyIcon(NIM_DELETE, &nid)
+			tc.iconRegistered = false
 		}
-		shellNotifyIcon(NIM_DELETE, &nid)
 		destroyWindow(tc.hwnd)
 		// hwnd will be invalidated post-destroy; clear so shutdown
 		// doesn't try to delete twice.

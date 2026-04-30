@@ -39,6 +39,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 )
 
@@ -100,25 +101,33 @@ func Run(ctx context.Context, cfg Config) error {
 		return nil
 	}
 
-	// childDone closes when the child exits. Used by the stdin writer
-	// to stop encoding state to a dead pipe — without this signal the
-	// writer goroutine would leak for the rest of the GUI lifetime
-	// after the child crashed or stdin EOF'd. Codex bot review on
-	// PR #24 P2 (tray.go:105).
+	// childDone closes when the child exits — used by the watchdog to
+	// stop waiting for ctx cancellation if the child died on its own.
+	// runCtx is a parent-derived context that we explicitly cancel as
+	// soon as scanning completes, so the stdin writer exits immediately
+	// instead of one extra encode-to-dead-pipe iteration. Codex bot
+	// review on PR #24 P2 (tray.go: stdin-writer race on early child
+	// exit).
 	childDone := make(chan struct{})
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
+
+	// wg waits on the stdin-writer goroutine so Run does not return
+	// while it is still alive. The watchdog is bounded by ctx anyway.
+	var wg sync.WaitGroup
+	wg.Add(1)
 
 	// Stdin writer: drain cfg.StateCh, write JSON state lines.
-	// Exits when ctx cancels OR cfg.StateCh closes OR the child
-	// process exits (childDone). Closes stdin on exit so the child
-	// reads EOF and runs its graceful shutdown path.
+	// Exits when runCtx cancels (parent ctx OR cancelRun on child exit)
+	// OR cfg.StateCh closes. Closes stdin on exit so the child reads
+	// EOF and runs its graceful shutdown path.
 	go func() {
+		defer wg.Done()
 		enc := json.NewEncoder(stdin)
 		defer stdin.Close()
 		for {
 			select {
-			case <-ctx.Done():
-				return
-			case <-childDone:
+			case <-runCtx.Done():
 				return
 			case state, ok := <-cfg.StateCh:
 				if !ok {
@@ -132,17 +141,24 @@ func Run(ctx context.Context, cfg Config) error {
 	// Cancellation watchdog: when parent ctx cancels, close stdin so
 	// the child receives EOF and exits gracefully (running NIM_DELETE).
 	// If the child doesn't exit within a bounded fallback window,
-	// kill it to avoid a hung GUI shutdown.
+	// kill it to avoid a hung GUI shutdown. If the child exits on its
+	// own first (childDone), the watchdog has nothing to do — exit
+	// instead of leaking until parent cancels.
 	go func() {
-		<-ctx.Done()
-		_ = stdin.Close() // signal child to exit gracefully
 		select {
-		case <-childDone:
-			// graceful exit — done
-		case <-time.After(2 * time.Second):
-			if c.Process != nil {
-				_ = c.Process.Kill()
+		case <-ctx.Done():
+			_ = stdin.Close() // signal child to exit gracefully
+			select {
+			case <-childDone:
+				// graceful exit — done
+			case <-time.After(2 * time.Second):
+				if c.Process != nil {
+					_ = c.Process.Kill()
+				}
 			}
+		case <-childDone:
+			// Child exited on its own; nothing to do.
+			return
 		}
 	}()
 
@@ -168,10 +184,13 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 	}
 	// scanner.Err() may be context.Canceled on parent shutdown — not
-	// worth logging. Wait for child reap; signal childDone so the
-	// stdin-writer + cancellation watchdog goroutines exit.
+	// worth logging. Cancel runCtx FIRST so the writer exits without
+	// any further encode attempts on the now-dying pipe, then reap and
+	// signal childDone for the watchdog.
+	cancelRun()
 	_ = c.Wait()
 	close(childDone)
+	wg.Wait()
 	return nil
 }
 
