@@ -332,19 +332,6 @@ func runForceKill(ctx context.Context, cmd *cobra.Command, pidportPath string, y
 		return nil, 0
 	}
 
-	// Gate 0 (Claude r2 #3): non-TTY without --yes → exit 6.
-	// Reached only when Probe says the verdict is NOT Healthy — i.e.
-	// the kill path is actually about to run. Non-TTY callers that
-	// truly want the kill must pass --yes. Healthy callers above
-	// short-circuit without consent (no kill happens).
-	if !yes && !term.IsTerminal(int(os.Stdin.Fd())) {
-		fmt.Fprintln(cmd.OutOrStderr(), "non-interactive shell — pass --yes to confirm --kill")
-		return nil, 6
-	}
-
-	// Print diagnostic so the operator sees what we're about to kill.
-	fmt.Fprintln(cmd.OutOrStdout(), formatDiagnostic(v, pidportPath))
-
 	// Gate 2 (Codex iter-6 P2 #1): only LiveUnreachable is a kill
 	// target. Malformed and DeadPID skip the destructive prompt and
 	// exit with the documented unrecoverable / already-recovered
@@ -352,18 +339,26 @@ func runForceKill(ctx context.Context, cmd *cobra.Command, pidportPath string, y
 	// recorded PID would still ask "Kill PID 0?" before any kill,
 	// and "Enter to cancel" would silently exit 0 even though
 	// nothing could have been killed.
+	//
+	// Codex bot review on PR #23 P2 (round 2): this verdict-classification
+	// MUST run BEFORE the non-TTY/--yes guard. Otherwise CI/cron
+	// callers hit exit 6 even for VerdictMalformed (4) or DeadPID (3)
+	// where no kill is attempted; that masks the proper exit codes
+	// and forces automation to add --yes for non-destructive paths.
 	switch v.Class {
 	case gui.VerdictMalformed:
 		// Codex iter-8 P2 #2: kill-mode malformed maps to exit 4
 		// (pidport unrecoverable) per memo §"Exit codes". Bare
 		// --force diagnostic uses exit 2; --force --kill is a
 		// distinct contract and CI scripts must distinguish them.
+		fmt.Fprintln(cmd.OutOrStdout(), formatDiagnostic(v, pidportPath))
 		return nil, 4
 	case gui.VerdictDeadPID:
 		// Probe says the recorded PID is already gone — the OS
 		// should have released the flock as a side effect. Map to
 		// exit 3 (race-lost / already-recovered semantic per memo
 		// §Exit codes).
+		fmt.Fprintln(cmd.OutOrStdout(), formatDiagnostic(v, pidportPath))
 		return nil, 3
 	case gui.VerdictLiveUnreachable:
 		// fall through to identity gate + prompt + KillRecordedHolder
@@ -373,6 +368,20 @@ func runForceKill(ctx context.Context, cmd *cobra.Command, pidportPath string, y
 			v.Class.String())
 		return nil, 1
 	}
+
+	// Gate 0 (Claude r2 #3): non-TTY without --yes → exit 6.
+	// Reached only when verdict == LiveUnreachable — the path that
+	// actually attempts a kill. Non-TTY callers that truly want the
+	// kill must pass --yes. Healthy / Malformed / DeadPID short-circuit
+	// above without consent (no kill happens). Codex bot review on
+	// PR #23 P2 (round 2).
+	if !yes && !term.IsTerminal(int(os.Stdin.Fd())) {
+		fmt.Fprintln(cmd.OutOrStderr(), "non-interactive shell — pass --yes to confirm --kill")
+		return nil, 6
+	}
+
+	// Print diagnostic so the operator sees what we're about to kill.
+	fmt.Fprintln(cmd.OutOrStdout(), formatDiagnostic(v, pidportPath))
 
 	// Codex iter-9 P2 #1: run the identity gate BEFORE the prompt.
 	// Without this, the operator could be asked "Kill PID X
