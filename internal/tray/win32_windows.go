@@ -156,8 +156,9 @@ const (
 
 // menu command IDs (used in WM_COMMAND.LOWORD(wParam))
 const (
-	cmdOpenDashboard = 1
-	cmdQuit          = 2
+	cmdOpenDashboard      = 1
+	cmdQuit               = 2
+	cmdQuitAndStopDaemons = 3
 )
 
 // POINT matches Win32 POINT.

@@ -58,16 +58,19 @@ describe("DashboardScreen — Stop button", () => {
     cleanup();
   });
 
+  // Bulk action buttons (Run all + Stop all) live in the dashboard
+  // header — index 0 and 1. Per-card Restart and Stop start at index 2.
+  // Total button count = 2 (header) + 2 × cards.
   it("renders Stop button alongside Restart for a Running daemon", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(statusResponse([runningRow]));
     const { findAllByRole } = render(<DashboardScreen />);
     await waitFor(async () => {
       const buttons = await findAllByRole("button");
-      expect(buttons.length).toBe(2);
+      expect(buttons.length).toBe(4); // 2 bulk + 2 per-card
     });
     const buttons = await findAllByRole("button");
-    expect(buttons[0]?.textContent).toBe("Restart");
-    expect(buttons[1]?.textContent).toBe("Stop");
+    expect(buttons[2]?.textContent).toBe("Restart");
+    expect(buttons[3]?.textContent).toBe("Stop");
   });
 
   it("disables Stop when daemon state is Stopped (nothing to stop)", async () => {
@@ -75,10 +78,10 @@ describe("DashboardScreen — Stop button", () => {
     const { findAllByRole } = render(<DashboardScreen />);
     await waitFor(async () => {
       const buttons = await findAllByRole("button");
-      expect(buttons.length).toBe(2);
+      expect(buttons.length).toBe(4);
     });
     const buttons = await findAllByRole("button");
-    const stopBtn = buttons[1] as HTMLButtonElement;
+    const stopBtn = buttons[3] as HTMLButtonElement;
     expect(stopBtn.textContent).toBe("Stop");
     expect(stopBtn.disabled).toBe(true);
   });
@@ -97,10 +100,10 @@ describe("DashboardScreen — Stop button", () => {
     const { findAllByRole } = render(<DashboardScreen />);
     await waitFor(async () => {
       const buttons = await findAllByRole("button");
-      expect(buttons.length).toBe(2);
+      expect(buttons.length).toBe(4);
     });
     const buttons = await findAllByRole("button");
-    const stopBtn = buttons[1] as HTMLButtonElement;
+    const stopBtn = buttons[3] as HTMLButtonElement;
 
     fireEvent.click(stopBtn);
 
@@ -130,10 +133,10 @@ describe("DashboardScreen — Stop button", () => {
     const { findAllByRole } = render(<DashboardScreen />);
     await waitFor(async () => {
       const buttons = await findAllByRole("button");
-      expect(buttons.length).toBe(2);
+      expect(buttons.length).toBe(4);
     });
     const buttons = await findAllByRole("button");
-    const stopBtn = buttons[1] as HTMLButtonElement;
+    const stopBtn = buttons[3] as HTMLButtonElement;
 
     fireEvent.click(stopBtn);
 
@@ -181,13 +184,14 @@ describe("DashboardScreen — Stop button", () => {
     const { findAllByRole } = render(<DashboardScreen />);
     await waitFor(async () => {
       const buttons = await findAllByRole("button");
-      expect(buttons.length).toBe(4); // 2 cards × (Restart + Stop)
+      expect(buttons.length).toBe(6); // 2 bulk header + 2 cards × (Restart + Stop)
     });
     const buttons = await findAllByRole("button");
-    // Cards are sorted by keyFor(): "serena/claude" < "serena/codex".
-    // Buttons render Restart-then-Stop per card in document order.
-    // Indexes: [0] claude Restart, [1] claude Stop, [2] codex Restart, [3] codex Stop.
-    const codexRestartBtn = buttons[2] as HTMLButtonElement;
+    // Indexes: [0] Run all, [1] Stop all (header).
+    // Cards sort by keyFor(): "serena/claude" < "serena/codex". Per-card
+    // buttons render Restart-then-Stop in document order.
+    // [2] claude Restart, [3] claude Stop, [4] codex Restart, [5] codex Stop.
+    const codexRestartBtn = buttons[4] as HTMLButtonElement;
 
     fireEvent.click(codexRestartBtn);
     await waitFor(() => expect(codexRestartBtn.textContent).toBe("Restarted"));
@@ -198,6 +202,136 @@ describe("DashboardScreen — Stop button", () => {
     const calls = fetchSpy.mock.calls.map((c) => (typeof c[0] === "string" ? c[0] : c[0]?.toString()));
     expect(calls).toContain("/api/servers/serena/restart?daemon=codex");
     expect(calls).not.toContain("/api/servers/serena/restart");
+  });
+
+  it("renders Run all and Stop all bulk buttons in dashboard header", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(statusResponse([runningRow]));
+    const { findAllByRole } = render(<DashboardScreen />);
+    await waitFor(async () => {
+      const buttons = await findAllByRole("button");
+      // 2 bulk (Run all + Stop all) + 2 per-card (Restart + Stop) = 4
+      expect(buttons.length).toBe(4);
+    });
+    const buttons = await findAllByRole("button");
+    expect(buttons[0]?.textContent).toBe("Run all");
+    expect(buttons[1]?.textContent).toBe("Stop all");
+  });
+
+  it("Run all posts to /api/restart-all and flashes Started", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation((input: Request | string | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url === "/api/status") return Promise.resolve(statusResponse([runningRow]));
+        if (url === "/api/restart-all") {
+          return Promise.resolve(jsonResponse(200, { restart_results: [] }));
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`));
+      });
+    const { findAllByRole } = render(<DashboardScreen />);
+    await waitFor(async () => {
+      const buttons = await findAllByRole("button");
+      expect(buttons.length).toBe(4);
+    });
+    const buttons = await findAllByRole("button");
+    const runAllBtn = buttons[0] as HTMLButtonElement;
+
+    fireEvent.click(runAllBtn);
+    await waitFor(() => expect(runAllBtn.textContent).toBe("Started"));
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/api/restart-all",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("Stop all posts to /api/stop-all and flashes Stopped", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation((input: Request | string | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url === "/api/status") return Promise.resolve(statusResponse([runningRow]));
+        if (url === "/api/stop-all") {
+          return Promise.resolve(jsonResponse(200, { stop_results: [] }));
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`));
+      });
+    const { findAllByRole } = render(<DashboardScreen />);
+    await waitFor(async () => {
+      const buttons = await findAllByRole("button");
+      expect(buttons.length).toBe(4);
+    });
+    const buttons = await findAllByRole("button");
+    const stopAllBtn = buttons[1] as HTMLButtonElement;
+
+    fireEvent.click(stopAllBtn);
+    await waitFor(() => expect(stopAllBtn.textContent).toBe("Stopped"));
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/api/stop-all",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("disables Run all and Stop all when no daemons are listed", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(statusResponse([]));
+    const { findAllByRole } = render(<DashboardScreen />);
+    // With empty list there are no Cards, only the 2 bulk header buttons.
+    await waitFor(async () => {
+      const buttons = await findAllByRole("button");
+      expect(buttons.length).toBe(2);
+    });
+    const buttons = await findAllByRole("button");
+    expect((buttons[0] as HTMLButtonElement).disabled).toBe(true);
+    expect((buttons[1] as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  // Codex bot PR #36 P2: bulk actions are global; clicking Stop all
+  // while Run all is in flight (or vice versa) would race
+  // /api/restart-all with /api/stop-all against every daemon and the
+  // final state would depend on request timing rather than user intent.
+  // BulkActionsRow holds a shared in-flight lock so the second click
+  // is a no-op until the first completes.
+  it("bulk-action lock: Stop all is disabled while Run all is in flight", async () => {
+    let resolveRun: (r: Response) => void = () => {};
+    const runInFlight = new Promise<Response>((resolve) => {
+      resolveRun = resolve;
+    });
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation((input: Request | string | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url === "/api/status") return Promise.resolve(statusResponse([runningRow]));
+        if (url === "/api/restart-all") return runInFlight;
+        return Promise.reject(new Error(`unexpected fetch: ${url}`));
+      });
+    const { findAllByRole } = render(<DashboardScreen />);
+    await waitFor(async () => {
+      const buttons = await findAllByRole("button");
+      expect(buttons.length).toBe(4);
+    });
+    const buttons = await findAllByRole("button");
+    const runAllBtn = buttons[0] as HTMLButtonElement;
+    const stopAllBtn = buttons[1] as HTMLButtonElement;
+
+    fireEvent.click(runAllBtn);
+    await waitFor(() => expect(runAllBtn.textContent).toBe("Starting…"));
+
+    // Stop all MUST be disabled — the second click would race against
+    // the first and reach overlapping /api/stop-all + /api/restart-all.
+    expect(stopAllBtn.disabled).toBe(true);
+
+    // Verify a defensive click doesn't smuggle through anyway.
+    fireEvent.click(stopAllBtn);
+    expect(fetchSpy.mock.calls.find((c) => {
+      const url = typeof c[0] === "string" ? c[0] : c[0]?.toString();
+      return url === "/api/stop-all";
+    })).toBeUndefined();
+
+    resolveRun(jsonResponse(200, { restart_results: [] }));
+    await waitFor(() => expect(runAllBtn.textContent).toBe("Started"));
+    // After Run all settles, Stop all is re-enabled.
+    expect(stopAllBtn.disabled).toBe(false);
   });
 
   it("disables Restart while Stop is in flight (mutual exclusion per card)", async () => {
@@ -215,11 +349,11 @@ describe("DashboardScreen — Stop button", () => {
     const { findAllByRole } = render(<DashboardScreen />);
     await waitFor(async () => {
       const buttons = await findAllByRole("button");
-      expect(buttons.length).toBe(2);
+      expect(buttons.length).toBe(4); // 2 bulk + 2 per-card
     });
     const buttons = await findAllByRole("button");
-    const restartBtn = buttons[0] as HTMLButtonElement;
-    const stopBtn = buttons[1] as HTMLButtonElement;
+    const restartBtn = buttons[2] as HTMLButtonElement;
+    const stopBtn = buttons[3] as HTMLButtonElement;
 
     fireEvent.click(stopBtn);
     await waitFor(() => expect(stopBtn.textContent).toBe("Stopping…"));

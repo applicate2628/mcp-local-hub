@@ -52,6 +52,12 @@ main { padding: 24px; overflow: auto; }
 .error { color: var(--danger); }
 
 /* --- Dashboard cards --- */
+.dashboard-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.dashboard-header h1 { margin: 0; }
+.dashboard-bulk-actions { display: flex; gap: 8px; }
+.dashboard-bulk-actions button { padding: 8px 16px; border: 1px solid var(--border); background: var(--sidebar-bg); color: var(--text); border-radius: 4px; cursor: pointer; font-size: 14px; }
+.dashboard-bulk-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+.dashboard-bulk-actions button.btn-stop:not(:disabled) { color: var(--danger); border-color: var(--danger); }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-top: 16px; }
 .card { border: 1px solid var(--border); border-radius: 8px; padding: 16px; background: var(--bg); }
 .card-title { font-weight: 600; margin-bottom: 12px; }

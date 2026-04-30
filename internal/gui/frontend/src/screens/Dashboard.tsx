@@ -119,6 +119,38 @@ export function DashboardScreen() {
   const stop = (server: string, daemon: string | undefined) =>
     postServerAction(server, daemon, "stop");
 
+  // Bulk actions back the Dashboard header buttons. Backend routes
+  // /api/restart-all and /api/stop-all share the same 200/207/500
+  // contract as per-server actions, only without ?daemon scoping.
+  async function postBulkAction(action: "restart" | "stop") {
+    const resultsKey = `${action}_results` as const;
+    try {
+      const resp = await fetch(`/api/${action}-all`, { method: "POST" });
+      const body = (await resp.json().catch(() => ({}))) as {
+        error?: string;
+        code?: string;
+        [k: string]: unknown;
+      };
+      if (resp.status === 500) {
+        throw new Error(body.error ?? String(resp.status));
+      }
+      if (resp.status === 207) {
+        const rows = (body[resultsKey] as Array<{ task_name: string; error: string }>) ?? [];
+        const failed = rows.filter((r) => r.error !== "");
+        const summary = failed.map((r) => `${r.task_name}: ${r.error}`).join("; ");
+        throw new Error(`partial ${action}-all failure: ${summary}`);
+      }
+      if (!resp.ok) {
+        throw new Error(body.error ?? String(resp.status));
+      }
+    } catch (e) {
+      console.error(`${action}-all: ${(e as Error).message}`);
+      throw e;
+    }
+  }
+  const runAll = () => postBulkAction("restart");
+  const stopAll = () => postBulkAction("stop");
+
   if (error) {
     return (
       <div>
@@ -132,7 +164,14 @@ export function DashboardScreen() {
 
   return (
     <div>
-      <h1>Dashboard</h1>
+      <header class="dashboard-header">
+        <h1>Dashboard</h1>
+        <BulkActionsRow
+          runAll={runAll}
+          stopAll={stopAll}
+          disabled={sorted.length === 0}
+        />
+      </header>
       <div class="cards">
         {sorted.map((d) => (
           <Card
@@ -143,6 +182,82 @@ export function DashboardScreen() {
           />
         ))}
       </div>
+    </div>
+  );
+}
+
+// BulkActionsRow owns ONE shared in-flight state for both bulk buttons.
+// Run all and Stop all are global operations — clicking them in quick
+// succession would issue overlapping /api/restart-all + /api/stop-all
+// against every daemon and the final state would depend on request
+// timing rather than user intent. Codex bot review on PR #36 P2:
+// "These are global operations, so they should be mutually exclusive
+// (shared in-flight lock/state) to avoid racing starts/stops across
+// all daemons."
+//
+// While one bulk action is in flight, BOTH buttons are disabled. The
+// active one shows working/done/error labels; the other stays on its
+// idle label so the UI remains readable.
+function BulkActionsRow(props: {
+  runAll: () => Promise<void>;
+  stopAll: () => Promise<void>;
+  disabled?: boolean;
+}) {
+  type Active = "restart" | "stop";
+  const [inflight, setInflight] = useState<Active | null>(null);
+  const [outcome, setOutcome] = useState<{ action: Active; state: "done" | "error" } | null>(null);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+    },
+    [],
+  );
+
+  async function doBulk(action: Active, run: () => Promise<void>) {
+    if (inflight !== null) return; // shared lock — second click is a no-op
+    setInflight(action);
+    setOutcome(null);
+    try {
+      await run();
+      setOutcome({ action, state: "done" });
+    } catch {
+      setOutcome({ action, state: "error" });
+    }
+    setInflight(null);
+    if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+    resetTimerRef.current = setTimeout(() => {
+      setOutcome(null);
+      resetTimerRef.current = null;
+    }, 1500);
+  }
+
+  function labelFor(action: Active, idle: string, working: string, done: string): string {
+    if (inflight === action) return working;
+    if (outcome && outcome.action === action) {
+      return outcome.state === "done" ? done : "Failed";
+    }
+    return idle;
+  }
+
+  const lockDisabled = inflight !== null || props.disabled;
+  return (
+    <div class="dashboard-bulk-actions">
+      <button
+        onClick={() => doBulk("restart", props.runAll)}
+        disabled={lockDisabled}
+        aria-busy={inflight === "restart"}
+      >
+        {labelFor("restart", "Run all", "Starting…", "Started")}
+      </button>
+      <button
+        onClick={() => doBulk("stop", props.stopAll)}
+        disabled={lockDisabled}
+        class="btn-stop"
+        aria-busy={inflight === "stop"}
+      >
+        {labelFor("stop", "Stop all", "Stopping…", "Stopped")}
+      </button>
     </div>
   );
 }
