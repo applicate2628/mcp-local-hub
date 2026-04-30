@@ -112,16 +112,26 @@ func processIDImpl(pid int) (ProcessIdentity, error) {
 	// gate's `argv[1] == "gui" OR len(argv) == 1` check uses
 	// positional semantics, so collapsing `mcphub ""` to a single-arg
 	// argv would let a non-GUI invocation pass len(argv)==1 and
-	// incorrectly authorize --force --kill. Codex bot review on PR
-	// #23 P2 (matches splitCommandLineW's empty-token preservation
-	// on Windows). Trim the single trailing NUL the kernel always
-	// emits, then split on NUL — Split returns one empty trailing
-	// element only when there's a trailing separator, which we just
-	// stripped, so the resulting slice has no spurious empties at
-	// the end while still preserving genuine middle empties.
+	// incorrectly authorize --force --kill.
+	//
+	// Subtlety: Linux always appends ONE extra trailing NUL after the
+	// last argument as a record terminator. A round 1 fix used
+	// strings.TrimRight which stripped that trailing NUL but ALSO
+	// stripped the preceding NUL of a final-empty argv (e.g.
+	// `argv=['mcphub','']` is encoded as "mcphub\x00\x00\x00" — TrimRight
+	// to "" or "mcphub" loses the empty arg). Codex bot review on
+	// PR #23 P1.
+	//
+	// Correct: strip exactly ONE trailing NUL (the kernel-emitted
+	// terminator) before Split. That preserves trailing empty argv
+	// while still avoiding the spurious tail-empty Split would otherwise
+	// produce.
 	var cmdline []string
 	if data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid)); err == nil {
-		s := strings.TrimRight(string(data), "\x00")
+		s := string(data)
+		if strings.HasSuffix(s, "\x00") {
+			s = s[:len(s)-1]
+		}
 		if s != "" {
 			cmdline = strings.Split(s, "\x00")
 		}
