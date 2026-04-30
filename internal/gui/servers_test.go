@@ -12,13 +12,15 @@ import (
 )
 
 type fakeRestart struct {
-	called  string
-	results []api.RestartResult
-	err     error
+	calledServer string
+	calledDaemon string
+	results      []api.RestartResult
+	err          error
 }
 
-func (f *fakeRestart) Restart(server string) ([]api.RestartResult, error) {
-	f.called = server
+func (f *fakeRestart) Restart(server, daemon string) ([]api.RestartResult, error) {
+	f.calledServer = server
+	f.calledDaemon = daemon
 	return f.results, f.err
 }
 
@@ -32,8 +34,11 @@ func TestRestartServer_InvokesAPI(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%q", rec.Code, rec.Body.String())
 	}
-	if fr.called != "memory" {
-		t.Errorf("Restart called with %q, want memory", fr.called)
+	if fr.calledServer != "memory" {
+		t.Errorf("Restart called with server=%q, want memory", fr.calledServer)
+	}
+	if fr.calledDaemon != "" {
+		t.Errorf("Restart called with daemon=%q, want empty (no ?daemon)", fr.calledDaemon)
 	}
 	var got map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
@@ -104,13 +109,15 @@ func TestRestart_OrchestrationFailureReturns500(t *testing.T) {
 }
 
 type fakeStop struct {
-	called  string
-	results []api.RestartResult
-	err     error
+	calledServer string
+	calledDaemon string
+	results      []api.RestartResult
+	err          error
 }
 
-func (f *fakeStop) Stop(server string) ([]api.RestartResult, error) {
-	f.called = server
+func (f *fakeStop) Stop(server, daemon string) ([]api.RestartResult, error) {
+	f.calledServer = server
+	f.calledDaemon = daemon
 	return f.results, f.err
 }
 
@@ -124,8 +131,11 @@ func TestStopServer_InvokesAPI(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%q", rec.Code, rec.Body.String())
 	}
-	if fs.called != "memory" {
-		t.Errorf("Stop called with %q, want memory", fs.called)
+	if fs.calledServer != "memory" {
+		t.Errorf("Stop called with server=%q, want memory", fs.calledServer)
+	}
+	if fs.calledDaemon != "" {
+		t.Errorf("Stop called with daemon=%q, want empty (no ?daemon)", fs.calledDaemon)
 	}
 	var got map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
@@ -205,5 +215,131 @@ func TestStop_MethodNotAllowed(t *testing.T) {
 	}
 	if got := rec.Header().Get("Allow"); got != "POST" {
 		t.Errorf("Allow header = %q, want POST", got)
+	}
+}
+
+// --- ?daemon= query parameter (Codex CLI consult matrix, 2026-04-30) ---
+
+func TestRestart_DaemonQueryNarrowsToOneTask(t *testing.T) {
+	fr := &fakeRestart{
+		results: []api.RestartResult{
+			{TaskName: "mcp-local-hub-serena-codex"},
+		},
+	}
+	s := NewServer(Config{})
+	s.restart = fr
+
+	req := httptest.NewRequest(http.MethodPost, "/api/servers/serena/restart?daemon=codex", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200, body=%q", rec.Code, rec.Body.String())
+	}
+	if fr.calledServer != "serena" {
+		t.Errorf("server=%q, want serena", fr.calledServer)
+	}
+	if fr.calledDaemon != "codex" {
+		t.Errorf("daemon=%q, want codex — backend MUST receive the filter", fr.calledDaemon)
+	}
+}
+
+func TestRestart_EmptyDaemonQueryRejected(t *testing.T) {
+	s := NewServer(Config{})
+	s.restart = &fakeRestart{} // would silently succeed if not rejected upstream
+	req := httptest.NewRequest(http.MethodPost, "/api/servers/serena/restart?daemon=", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400 (empty daemon must not silently mean 'all')", rec.Code)
+	}
+}
+
+func TestRestart_RepeatedDaemonQueryRejected(t *testing.T) {
+	s := NewServer(Config{})
+	s.restart = &fakeRestart{}
+	req := httptest.NewRequest(http.MethodPost, "/api/servers/serena/restart?daemon=claude&daemon=codex", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400 (multiple daemon values not supported)", rec.Code)
+	}
+}
+
+func TestRestart_UnknownDaemonReturns404(t *testing.T) {
+	// api.Restart with an unknown daemonFilter returns an empty results
+	// slice and nil error — there are no matching tasks. The handler
+	// must convert that to 404 instead of "Restarted" no-op.
+	fr := &fakeRestart{results: []api.RestartResult{}}
+	s := NewServer(Config{})
+	s.restart = fr
+
+	req := httptest.NewRequest(http.MethodPost, "/api/servers/serena/restart?daemon=ghost", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status=%d, want 404 (unknown daemon must surface as error, not silent no-op)", rec.Code)
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body.Code != "DAEMON_NOT_FOUND" {
+		t.Errorf("code=%q, want DAEMON_NOT_FOUND", body.Code)
+	}
+}
+
+func TestStop_DaemonQueryNarrowsToOneTask(t *testing.T) {
+	fs := &fakeStop{
+		results: []api.RestartResult{{TaskName: "mcp-local-hub-serena-codex"}},
+	}
+	s := NewServer(Config{})
+	s.stop = fs
+
+	req := httptest.NewRequest(http.MethodPost, "/api/servers/serena/stop?daemon=codex", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200", rec.Code)
+	}
+	if fs.calledDaemon != "codex" {
+		t.Errorf("daemon=%q, want codex", fs.calledDaemon)
+	}
+}
+
+func TestStop_UnknownDaemonReturns404(t *testing.T) {
+	fs := &fakeStop{results: []api.RestartResult{}}
+	s := NewServer(Config{})
+	s.stop = fs
+
+	req := httptest.NewRequest(http.MethodPost, "/api/servers/serena/stop?daemon=ghost", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status=%d, want 404", rec.Code)
+	}
+}
+
+func TestRestart_NoDaemonQueryEmptyResultsStill200(t *testing.T) {
+	// A server with no scheduler tasks at all (newly-installed, never
+	// scheduled) returns empty results with nil error from api.Restart.
+	// Without ?daemon=, that is normal "no daemons to restart" — must
+	// stay 200, not 404. The 404 conversion only applies when
+	// ?daemon=<name> was given (= filter targeted nothing).
+	fr := &fakeRestart{results: []api.RestartResult{}}
+	s := NewServer(Config{})
+	s.restart = fr
+
+	req := httptest.NewRequest(http.MethodPost, "/api/servers/empty/restart", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200 (empty results without ?daemon is normal)", rec.Code)
 	}
 }
