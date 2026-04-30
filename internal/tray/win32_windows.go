@@ -130,6 +130,11 @@ const (
 	NIF_MESSAGE = 0x00000001
 	NIF_ICON    = 0x00000002
 	NIF_TIP     = 0x00000004
+	// NIF_SHOWTIP forces the standard tooltip on Vista+ when V4 callback
+	// ABI is in use. Without it, NOTIFYICON_VERSION_4 documentation says
+	// the standard tooltip is suppressed, even when SzTip is populated.
+	// Codex CLI xhigh review on PR #24 P2.
+	NIF_SHOWTIP = 0x00000080
 
 	// Shell_NotifyIcon dwMessage
 	NIM_ADD        = 0x00000000

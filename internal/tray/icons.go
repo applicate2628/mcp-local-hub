@@ -42,9 +42,12 @@ func IconBytes(s TrayState) []byte {
 		return b
 	}
 	// Defensive default: an unknown state still produces a renderable
-	// icon (gray circle) so a regression that adds a new TrayState
-	// without an entry doesn't crash the tray loop.
-	iconCache.once = sync.Once{}
+	// icon so a regression that adds a new TrayState without an entry
+	// doesn't crash the tray loop. We do NOT reset iconCache.once —
+	// buildIconCache already populated bytes[StateHealthy] on the
+	// first .Do, and a reset would (a) race any concurrent .Do call,
+	// (b) re-run buildIconCache pointlessly. Sonnet review on PR #24
+	// P2 (icons.go:47).
 	return iconCache.bytes[StateHealthy]
 }
 

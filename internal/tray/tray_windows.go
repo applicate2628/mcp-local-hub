@@ -385,7 +385,11 @@ func (tc *trayChild) buildNID(state TrayState, hicon uintptr) NOTIFYICONDATAW {
 		CbSize:           uint32(unsafe.Sizeof(NOTIFYICONDATAW{})),
 		HWnd:             tc.hwnd,
 		UID:              tc.uid,
-		UFlags:           NIF_ICON | NIF_MESSAGE | NIF_TIP,
+		// NIF_SHOWTIP forces the standard tooltip on V4 (the Win7+
+		// callback ABI we use); without it, NOTIFYICONDATA docs say
+		// the standard tooltip is suppressed and SzTip never reaches
+		// the user. Codex CLI xhigh review on PR #24 P2.
+		UFlags:           NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP,
 		UCallbackMessage: wmTrayCallback,
 		HIcon:            hicon,
 	}
@@ -426,6 +430,13 @@ func utf16FromString(s string, cap int) []uint16 {
 // (parent gone), it posts a single wmShutdown so the pump tears
 // down cleanly.
 func (tc *trayChild) readStdinLoop(r io.Reader) {
+	// Snapshot hwnd at goroutine start. tc.hwnd is set once before
+	// this goroutine launches (in newTrayChild) and zeroed by
+	// shutdown()/WM_CLOSE on another thread; reading the field
+	// concurrently would be a Go memory-model race AND would let
+	// PostMessageW(NULL, ...) broadcast wmShutdown to all top-level
+	// windows in the process. Sonnet review on PR #24 P2.
+	hwnd := tc.hwnd
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		var msg stateMessage
@@ -440,9 +451,16 @@ func (tc *trayChild) readStdinLoop(r io.Reader) {
 		}
 		// PostMessageW is thread-safe; the pump pulls the value out
 		// of lParam and runs the actual NIM_MODIFY on its own thread.
-		postMessageW(tc.hwnd, wmStateUpdate, uintptr(state), 0)
+		if hwnd != 0 {
+			postMessageW(hwnd, wmStateUpdate, uintptr(state), 0)
+		}
 	}
-	postMessageW(tc.hwnd, wmShutdown, 0, 0)
+	// Stdin EOF (parent gone) — wake the pump so its WM_CLOSE handler
+	// runs NIM_DELETE before the child exits. Skip if hwnd was never
+	// initialized (we'd broadcast wmShutdown to all top-levels).
+	if hwnd != 0 {
+		postMessageW(hwnd, wmShutdown, 0, 0)
+	}
 }
 
 // runMessagePump is the classic Win32 GetMessage loop. Returns on
