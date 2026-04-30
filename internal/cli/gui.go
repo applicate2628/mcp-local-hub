@@ -120,6 +120,16 @@ activates the first window and exits 0.`,
 						"activate-window: focus failed (no fallback for non-no-window error): %v\n", err)
 					return
 				}
+				if gui.HeadlessSession() {
+					// No display server (e.g. SSH session without X11
+					// forwarding, systemd-managed install). Browser
+					// launch would print xdg-open errors and fail; skip
+					// silently so /api/activate-window callers see a
+					// non-fatal "no fallback" return without log noise.
+					fmt.Fprintln(cmd.OutOrStderr(),
+						"activate-window: focus failed and headless session — no browser to open")
+					return
+				}
 				url := fmt.Sprintf("http://127.0.0.1:%d/", s.Port())
 				if launchErr := gui.LaunchBrowser(url); launchErr != nil {
 					fmt.Fprintf(cmd.OutOrStderr(),
