@@ -10,6 +10,67 @@ Tracking document for Phase 3B-II — the "everything I cut from Phase 3B-I MVP"
 
 ---
 
+## Outstanding gaps vs spec — comprehensive audit (2026-05-01)
+
+Codex CLI read-only audit comparing spec sections vs shipped code. Item rows below are NEW additions on top of the original A/B/C/D/E/F sections farther down. Severity:
+
+- **blocker** — substantial spec capability missing or misshapen
+- **nice-to-have** — secondary affordance or polish
+- **cosmetic** — visual-only divergence
+
+### Screen-specific gaps
+
+| Sev | Screen | Gap | Location |
+|---|---|---|---|
+| blocker | Servers | Matrix has Server + 4 clients + Port + State only. Spec wants RAM/Uptime/Status columns and a row drawer with manifest preview / lifetime stats / Stop & Restart. | [Servers.tsx](../../../internal/gui/frontend/src/screens/Servers.tsx) |
+| blocker | Dashboard | Cards show Port/PID/State + Restart/Stop only. Spec wants green/red dot, RAM, Uptime, connected-clients count, requests-per-minute, RAM sparkline, View logs link, retry count. | [Dashboard.tsx](../../../internal/gui/frontend/src/screens/Dashboard.tsx) |
+| blocker | Logs | Server dropdown + tail + Follow SSE present. Missing regex/substring filter, Open folder action, amber/red line highlighting on warn/error. | [Logs.tsx](../../../internal/gui/frontend/src/screens/Logs.tsx) |
+| blocker | Settings | `appearance.layout` registry key + sidebar/tabs switcher absent. tray, daemons.weekly_schedule, daemons.retry_policy, backups.clean_now, advanced.export_config_bundle still Deferred. | [settings_registry.go](../../../internal/api/settings_registry.go), [SectionBackups.tsx](../../../internal/gui/frontend/src/components/settings/SectionBackups.tsx) |
+| nice-to-have | Servers | "Servers — default home" per spec; we ship Dashboard as default per user request — keep, document override. | — |
+| nice-to-have | Servers | `unsupported` UI state checked but routing mapper outputs only `via-hub/direct/not-installed`. | [routing.ts](../../../internal/gui/frontend/src/lib/routing.ts) |
+| nice-to-have | Migration | "Via hub" should be readonly; we expose Edit-manifest + Demigrate. | [Migration.tsx](../../../internal/gui/frontend/src/screens/Migration.tsx) |
+| nice-to-have | Add/Edit | `cwd` missing in manifest model; env supports literal/secret only — no file/env prefix selectors. | [manifest.go](../../../internal/config/manifest.go), [SecretPicker.tsx](../../../internal/gui/frontend/src/components/SecretPicker.tsx) |
+| nice-to-have | Secrets | "Edit vault shells out" not implemented — UI only displays the `mcphub secrets edit` command. | [Secrets.tsx](../../../internal/gui/frontend/src/screens/Secrets.tsx) |
+| nice-to-have | About | No README / INSTALL / verification docs links. | [About.tsx](../../../internal/gui/frontend/src/screens/About.tsx) |
+
+### Cross-section gaps
+
+| Sev | Section | Gap | Location |
+|---|---|---|---|
+| blocker | §3.5 Backups | `BackupKeep` + `BackupsClean` exist but install/migrate paths call `Backup()` without enforcing keep-N — retention not automatic. | [clients.go](../../../internal/clients/clients.go), [install.go](../../../internal/api/install.go), [migrate.go](../../../internal/api/migrate.go) |
+| blocker | §3.6 Event bus | Production publishes only `daemon-state`, `bulk-action`, `log-line`, `poller-error`. Missing: `daemon-failed`, `install-progress`, `install-done`, `scan-result`, `client-config-changed`. No fsnotify watcher. | [events.go](../../../internal/gui/events.go), [poller.go](../../../internal/gui/poller.go) |
+| blocker | §4.3 HTTP API | Drift: missing `/api/install-all`, `DELETE /api/install/:server`, REST `/api/manifests*`, `/api/backups/clean`, `/api/backups/content`, `/api/rollback`, scheduler endpoints, bulk `PUT /api/settings`. | [install.go](../../../internal/gui/install.go), [manifest.go](../../../internal/gui/manifest.go), [backups.go](../../../internal/gui/backups.go), [settings.go](../../../internal/gui/settings.go) |
+| blocker | §6 Tray menu | Actual menu: Open dashboard, Run/Stop all, Quit variants. Missing: disabled status header, Rescan client configs, recent-activity submenu, Open logs folder, Open data folder. | [tray_windows.go](../../../internal/tray/tray_windows.go) |
+| nice-to-have | §5 Layout | Sidebar-only; spec wants top-tabs alternative, Settings-switchable. | [app.tsx](../../../internal/gui/frontend/src/app.tsx), [settings_registry.go](../../../internal/api/settings_registry.go) |
+| nice-to-have | §6 Toasts | Failure-onset toast wired; auto-restart and manual-action-completed toasts plus Settings on/off toggle missing. | [gui_tray_state.go](../../../internal/cli/gui_tray_state.go) |
+| nice-to-have | §7 Density | `data-density` applied at root, but variables consumed only in Settings/Backups; main screens still hardcode spacing. | [app.tsx](../../../internal/gui/frontend/src/app.tsx), [style.css](../../../internal/gui/frontend/src/styles/style.css) |
+| nice-to-have | §7 Status shapes | Status is text + color only; no `●/○` shape indicator (color-blind affordance). | [Dashboard.tsx](../../../internal/gui/frontend/src/screens/Dashboard.tsx) |
+| cosmetic | §7 Icons | No SVG `<symbol>` sprite; UI uses unicode/emoji (🔑, ×, ⚠) instead of canonical Lucide/Feather set. | [SecretPicker.tsx](../../../internal/gui/frontend/src/components/SecretPicker.tsx), [AddServer.tsx](../../../internal/gui/frontend/src/screens/AddServer.tsx) |
+
+### Solo-closeable subset (no design decisions, ship before user manual smoke)
+
+Tracked as "Round 1" items I can land without UI verification beyond Codex bot review:
+
+1. `appearance.layout` registry + Settings dropdown + sidebar/tabs switcher (PR #29-style follow-up)
+2. Status shapes (●/○) on Dashboard cards + Servers state column
+3. Density variables consumed across all screens (audit grep, expand var usage)
+4. Backups keep-N enforcement on install/migrate paths
+5. Logs regex/substring filter + amber/red highlight + Open folder action
+6. Tray menu items: status header (disabled), Rescan client configs, Open logs folder, Open data folder
+7. About: README/INSTALL/verification docs links
+
+### Design-decision subset (parked until user weighs in)
+
+Each requires a design memo (per-metric Dashboard fields, Servers drawer layout, event bus shape, HTTP API contract reconciliation). Not closing solo:
+
+- Dashboard expanded card (RAM, Uptime, sparkline, requests/min, retry count, View logs)
+- Servers row drawer (manifest preview, lifetime stats)
+- §3.6 event bus completion + fsnotify watcher
+- §4.3 HTTP API contract reconciliation (decide: spec is canonical → rewrite handlers, or current code is canonical → spec gets aligned)
+- A4-b Settings lifecycle Action items (Clean now / export bundle / weekly schedule / retry policy / tray toggle backend wiring)
+
+---
+
 ## Scope items
 
 ### A. Secondary screens (spec §5)
