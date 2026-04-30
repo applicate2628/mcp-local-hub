@@ -708,10 +708,17 @@ func (tc *trayChild) handleMessage(hwnd uintptr, msg uint32, wparam, lparam uint
 			if shellNotifyIconGetRect(&id, &rect) {
 				x = (rect.Left + rect.Right) / 2
 				y = rect.Top
-			} else if !tc.versionV4 {
-				// Legacy path with no icon-rect API: cursor is the
-				// only sensible anchor. wParam is the icon UID, not
-				// coordinates, so skipping it is mandatory.
+			} else if event == WM_CONTEXTMENU || !tc.versionV4 {
+				// Cursor fallback when icon-rect API failed AND
+				// either:
+				//   - we're handling WM_CONTEXTMENU under V4 (wParam
+				//     is undefined for keyboard Apps-key/Shift+F10
+				//     invocation; without this branch x/y stay (0,0)
+				//     and the menu opens in the screen corner), or
+				//   - we're in legacy-callback mode (wParam carries
+				//     the icon UID, NOT screen coords).
+				// Codex bot review on PR #24 P2 (V4 WM_CONTEXTMENU
+				// anchor fallback).
 				var pt POINT
 				if getCursorPos(&pt) {
 					x, y = pt.X, pt.Y
