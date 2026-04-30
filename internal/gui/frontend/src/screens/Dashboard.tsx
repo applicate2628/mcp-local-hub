@@ -303,6 +303,8 @@ export function DashboardScreen() {
             daemon={d}
             onRestart={() => restart(d.server, d.daemon)}
             onStop={() => stop(d.server, d.daemon)}
+            bulkInflight={bulkInflight}
+            bulkOutcome={bulkOutcome}
           />
         ))}
       </div>
@@ -405,34 +407,65 @@ function Card(props: {
   daemon: DaemonStatus;
   onRestart: () => Promise<void>;
   onStop: () => Promise<void>;
+  // Bulk action signals from the parent — when a Run all / Stop all
+  // is in flight, every Card's matching button reflects it. By
+  // definition Run all === click each per-card Restart, so the
+  // affordance must mirror that.
+  bulkInflight: BulkAction | null;
+  bulkOutcome: BulkOutcome | null;
 }) {
-  const { daemon: d, onRestart, onStop } = props;
+  const { daemon: d, onRestart, onStop, bulkInflight, bulkOutcome } = props;
   const restartBtn = useActionButton(onRestart);
   const stopBtn = useActionButton(onStop);
 
   const cls = d.state === "Running" ? "card ok" : "card down";
   const title = d.daemon && d.daemon !== "default" ? `${d.server} (${d.daemon})` : d.server;
 
-  // Guard against concurrent same-daemon ops: while one button is in
-  // flight, the other is disabled. Stop is additionally disabled when
-  // the daemon is already not running — there is nothing to stop.
-  const anyWorking = restartBtn.state === "working" || stopBtn.state === "working";
-  const restartDisabled = restartBtn.state !== "idle" || stopBtn.state === "working";
+  // Effective per-button state merges local click-driven state with
+  // the parent's bulk-action state. If a bulk Restart is in flight,
+  // every Card's Restart button is "working" + disabled regardless
+  // of whether THIS card's button was the one clicked. Same for
+  // Stop. The bulk outcome flash (Restarted/Stopped/Failed) cascades
+  // to all cards' matching button after the SSE terminal event.
+  const restartEffective: ActionState =
+    bulkInflight === "restart"
+      ? "working"
+      : bulkOutcome && bulkOutcome.action === "restart" && restartBtn.state === "idle"
+        ? bulkOutcome.state
+        : restartBtn.state;
+  const stopEffective: ActionState =
+    bulkInflight === "stop"
+      ? "working"
+      : bulkOutcome && bulkOutcome.action === "stop" && stopBtn.state === "idle"
+        ? bulkOutcome.state
+        : stopBtn.state;
+
+  // While a bulk action is in flight, every per-card button is
+  // disabled — clicking one would race the global fan-out. The
+  // existing per-card mutual exclusion (one button locks the other)
+  // is preserved.
+  const anyBulk = bulkInflight !== null;
+  const anyWorking = restartEffective === "working" || stopEffective === "working";
+  const restartDisabled =
+    anyBulk || restartBtn.state !== "idle" || stopBtn.state === "working";
   const stopDisabled =
-    stopBtn.state !== "idle" || restartBtn.state === "working" || d.state !== "Running";
+    anyBulk ||
+    stopBtn.state !== "idle" ||
+    restartBtn.state === "working" ||
+    d.state !== "Running";
 
   const restartLabel = {
     idle: "Restart",
     working: "Restarting…",
     done: "Restarted",
     error: "Failed",
-  }[restartBtn.state];
+  }[restartEffective];
   const stopLabel = {
     idle: "Stop",
     working: "Stopping…",
     done: "Stopped",
     error: "Failed",
-  }[stopBtn.state];
+  }[stopEffective];
 
   return (
     <div class={cls}>

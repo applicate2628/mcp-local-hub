@@ -396,6 +396,65 @@ describe("DashboardScreen — Stop button", () => {
   // rapid clicks before that fire two POSTs and reintroduce
   // overlapping fan-outs. Optimistic-set on click closes the window:
   // the second click sees bulkInflight!==null and is gated.
+  // Per-card buttons must cascade with bulk-action state. Run all
+  // is by definition "click each per-card Restart" so every card's
+  // Restart button must show "Restarting…" + disabled while the
+  // bulk operation is in flight. Without this the Dashboard
+  // showed bulk header animation but per-card buttons looked
+  // idle/clickable, which lies about the state.
+  it("bulk cascade: Run all puts every Card's Restart button into Restarting…", async () => {
+    const serenaClaude: DaemonStatus = {
+      server: "serena",
+      daemon: "claude",
+      port: 9121,
+      pid: 1,
+      state: "Running",
+    };
+    const serenaCodex: DaemonStatus = {
+      server: "serena",
+      daemon: "codex",
+      port: 9122,
+      pid: 2,
+      state: "Running",
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(statusResponse([serenaClaude, serenaCodex]));
+    const { findAllByRole } = render(<DashboardScreen />);
+    await waitFor(async () => {
+      const buttons = await findAllByRole("button");
+      // 2 bulk header + 2 cards × (Restart + Stop) = 6
+      expect(buttons.length).toBe(6);
+    });
+    // Indexes: [0] Run all, [1] Stop all, [2/4] Restart per card,
+    // [3/5] Stop per card.
+    let buttons = await findAllByRole("button");
+    expect(buttons[2]?.textContent).toBe("Restart");
+    expect(buttons[4]?.textContent).toBe("Restart");
+
+    // Tray (or anyone) triggers a bulk Restart — SSE arrives.
+    dispatchSse("bulk-action", { phase: "started", action: "restart" });
+    await waitFor(() => {
+      const btns = (Array.from(document.querySelectorAll("button"))) as HTMLButtonElement[];
+      expect(btns[0].textContent).toBe("Starting…");
+    });
+    buttons = await findAllByRole("button");
+    // Both per-card Restart buttons MUST cascade to Restarting…
+    expect(buttons[2].textContent).toBe("Restarting…");
+    expect(buttons[4].textContent).toBe("Restarting…");
+    // ALL buttons disabled (bulk-in-flight gates everything).
+    for (const b of buttons) {
+      expect((b as HTMLButtonElement).disabled).toBe(true);
+    }
+
+    // Bulk completes — outcome flash cascades to every Restart.
+    dispatchSse("bulk-action", { phase: "completed", action: "restart" });
+    buttons = await findAllByRole("button");
+    await waitFor(() => {
+      const btns = (Array.from(document.querySelectorAll("button"))) as HTMLButtonElement[];
+      expect(btns[2].textContent).toBe("Restarted");
+      expect(btns[4].textContent).toBe("Restarted");
+    });
+  });
+
   // Codex bot PR #38 P1 (commit ef0f4ea, "Correlate bulk-action
   // terminal events before unlocking UI"): concurrent triggers
   // (Dashboard + tray, or two Dashboards) can interleave SSE events.
