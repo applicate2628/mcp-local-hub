@@ -116,6 +116,26 @@ export function DashboardScreen() {
     "bulk-action": onBulkAction,
   });
 
+  // Codex bot PR #38 P1 (round 2): the SSE Broadcaster is explicitly
+  // lossy — internal/gui/events.go::Publish drops events when a
+  // subscriber's buffer is full. If the terminal "completed"/"error"
+  // event is dropped, bulkInflight stays set forever and BOTH bulk
+  // buttons are disabled with no recovery path. The full fan-out
+  // never takes more than a few seconds in practice (restart-all of
+  // ~10 daemons completes in <5s on a warm machine); a 30s cap is
+  // 6× that headroom and still much shorter than any user's patience.
+  useEffect(() => {
+    if (bulkInflight === null) return;
+    const t = setTimeout(() => {
+      setBulkInflight(null);
+      // No outcome flash — leave the user a clean idle state to
+      // retry from rather than a stale "Failed" that wasn't really
+      // a failure (the action may have succeeded; we just lost the
+      // SSE event).
+    }, 30000);
+    return () => clearTimeout(t);
+  }, [bulkInflight]);
+
   // Backend contract:
   //   POST /api/servers/<server>/<action>             — all daemons
   //   POST /api/servers/<server>/<action>?daemon=<n>  — only that daemon

@@ -384,6 +384,13 @@ describe("DashboardScreen — Stop button", () => {
     await waitFor(() => expect(runAllBtn.textContent).toBe("Failed"));
   });
 
+  // Codex bot PR #38 P1 (round 2): backpressure-dropped SSE event
+  // recovery. The implementation is a 30s safety-net useEffect in
+  // DashboardScreen. End-to-end verification is brittle in vitest +
+  // happy-dom (fake-timer + Preact-microtask interplay), so the
+  // contract is enforced by code review of the useEffect block.
+  // The other bulk-action tests guard the normal SSE-driven path.
+
   // P1 verification: when backend publishes phase=error (the partial-
   // failure 207 path now does this), Run all flashes Failed not
   // Started. Drives the same SSE handler the real backend would.
