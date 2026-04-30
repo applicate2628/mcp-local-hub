@@ -327,6 +327,15 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 					return err
 				}
 				defer resp.Body.Close()
+				// 207 Multi-Status is partial failure (per-task errors).
+				// Tray surfaces these to stderr as actionable failures —
+				// previously postBulk only flagged >=500 so 207 was
+				// silently treated as success and QuitAndStopAll exited
+				// before the user could see partial-stop diagnostics.
+				// Codex bot review on PR #38 commit d92aa2c P2.
+				if resp.StatusCode == http.StatusMultiStatus {
+					return fmt.Errorf("HTTP 207 partial: at least one task failed; see daemon logs")
+				}
 				if resp.StatusCode >= 500 {
 					return fmt.Errorf("HTTP %d", resp.StatusCode)
 				}

@@ -95,6 +95,10 @@ export function DashboardScreen() {
       action: BulkAction;
     };
     if (body.phase === "started") {
+      // Idempotent confirmation — runAll/stopAll already set this
+      // optimistically on click for immediate UI feedback. SSE
+      // re-confirms in case of tray-triggered fan-out (no local
+      // click) or event reordering.
       setBulkInflight(body.action);
       setBulkOutcome(null);
       return;
@@ -116,23 +120,23 @@ export function DashboardScreen() {
     "bulk-action": onBulkAction,
   });
 
-  // Codex bot PR #38 P1 (round 2): the SSE Broadcaster is explicitly
-  // lossy — internal/gui/events.go::Publish drops events when a
-  // subscriber's buffer is full. If the terminal "completed"/"error"
-  // event is dropped, bulkInflight stays set forever and BOTH bulk
-  // buttons are disabled with no recovery path. The full fan-out
-  // never takes more than a few seconds in practice (restart-all of
-  // ~10 daemons completes in <5s on a warm machine); a 30s cap is
-  // 6× that headroom and still much shorter than any user's patience.
+  // Codex bot PR #38 P1 (round 3): safety-net for dropped SSE events.
+  // The Broadcaster is lossy (internal/gui/events.go::Publish drops on
+  // full subscriber buffer), so bulkInflight could stay set forever if
+  // the terminal event is dropped.
+  //
+  // Timeout MUST exceed realistic fan-out duration. api.Restart calls
+  // killDaemonByPort(5s) + waitForPortFree(3s) per daemon = up to 8s
+  // each, and runs sequentially. With 11 daemons × 8s = 88s worst-case
+  // legit. Plus serena spawn-up time (~3-6s each). 5min cap is well
+  // beyond any realistic fan-out and short enough that a truly stuck
+  // UI doesn't trap the user indefinitely. Codex bot review on commit
+  // d92aa2c P1 ("Keep bulk-action lock until terminal SSE event").
   useEffect(() => {
     if (bulkInflight === null) return;
     const t = setTimeout(() => {
       setBulkInflight(null);
-      // No outcome flash — leave the user a clean idle state to
-      // retry from rather than a stale "Failed" that wasn't really
-      // a failure (the action may have succeeded; we just lost the
-      // SSE event).
-    }, 30000);
+    }, 300_000);
     return () => clearTimeout(t);
   }, [bulkInflight]);
 
@@ -219,16 +223,18 @@ export function DashboardScreen() {
       throw e;
     }
   }
-  // Local-fallback wrappers around postBulkAction. Codex bot review on
-  // PR #38 P2: a rejected fetch (network-down, connection refused,
-  // DNS) means the backend never received the request, so no SSE
-  // event will EVER arrive — without a fallback the button stays in
-  // idle and the click looks ignored. We catch the rejection and
-  // set bulkOutcome to error UNLESS the SSE pipeline already ran
-  // (200/207/500 cases all publish SSE before the response returns,
-  // so prev is non-null). prev ?? error preserves SSE-driven outcome
-  // when both arrive — idempotent for the "error" case where SSE
-  // also says error.
+  // Codex bot PR #38 P2 (rejected fetch fallback) + P1 (re-entrant
+  // double-click). Optimistic-update pattern handles BOTH:
+  //
+  //   click → setBulkInflight("restart") IMMEDIATELY → buttons
+  //   disable, re-entrant click is gated by the same state check.
+  //   SSE "started" arrives ~50ms later; idempotent setter no-ops.
+  //   SSE terminal arrives → clear inflight, set outcome.
+  //
+  // A rejected fetch (network failure, no SSE will arrive) lands in
+  // .catch → setLocalErrorFallback restores idle + flashes Failed.
+  // For 207/500 fetch also rejects, but SSE error event already set
+  // outcome=error so prev ?? wins (idempotent).
   const setLocalErrorFallback = useCallback((action: BulkAction) => {
     setBulkInflight(null);
     setBulkOutcome((prev) => prev ?? { action, state: "error" });
@@ -238,10 +244,13 @@ export function DashboardScreen() {
       bulkResetTimerRef.current = null;
     }, 1500);
   }, []);
-  const runAll = () =>
-    postBulkAction("restart").catch(() => setLocalErrorFallback("restart"));
-  const stopAll = () =>
-    postBulkAction("stop").catch(() => setLocalErrorFallback("stop"));
+  function fireBulk(action: BulkAction): Promise<void> {
+    if (bulkInflight !== null) return Promise.resolve();
+    setBulkInflight(action); // optimistic: locks UI immediately
+    return postBulkAction(action).catch(() => setLocalErrorFallback(action));
+  }
+  const runAll = () => fireBulk("restart");
+  const stopAll = () => fireBulk("stop");
 
   if (error) {
     return (

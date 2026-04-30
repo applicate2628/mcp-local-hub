@@ -385,11 +385,57 @@ describe("DashboardScreen — Stop button", () => {
   });
 
   // Codex bot PR #38 P1 (round 2): backpressure-dropped SSE event
-  // recovery. The implementation is a 30s safety-net useEffect in
+  // recovery. The implementation is a 5min safety-net useEffect in
   // DashboardScreen. End-to-end verification is brittle in vitest +
   // happy-dom (fake-timer + Preact-microtask interplay), so the
   // contract is enforced by code review of the useEffect block.
   // The other bulk-action tests guard the normal SSE-driven path.
+
+  // Codex bot PR #38 P1 (round 3): re-entrant double-click guard.
+  // props.inflight only flips after SSE "started" round-trip; two
+  // rapid clicks before that fire two POSTs and reintroduce
+  // overlapping fan-outs. Optimistic-set on click closes the window:
+  // the second click sees bulkInflight!==null and is gated.
+  it("re-entrant guard: rapid second click does not fire a second POST", async () => {
+    vi.useRealTimers();
+    let restartFireCount = 0;
+    let resolveFirst: (r: Response) => void = () => {};
+    const firstInFlight = new Promise<Response>((resolve) => {
+      resolveFirst = resolve;
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") return Promise.resolve(statusResponse([runningRow]));
+      if (url === "/api/restart-all") {
+        restartFireCount++;
+        return firstInFlight;
+      }
+      return Promise.reject(new Error(`unexpected: ${url}`));
+    });
+    const { findAllByRole } = render(<DashboardScreen />);
+    await waitFor(async () => {
+      const buttons = await findAllByRole("button");
+      expect(buttons.length).toBe(4);
+    });
+    const buttons = await findAllByRole("button");
+    const runAllBtn = buttons[0] as HTMLButtonElement;
+
+    // Click 1 — optimistic state flips bulkInflight immediately;
+    // button becomes disabled + "Starting…" before SSE arrives.
+    fireEvent.click(runAllBtn);
+    await waitFor(() => expect(runAllBtn.textContent).toBe("Starting…"));
+    expect(restartFireCount).toBe(1);
+
+    // Click 2/3 — must be gated. Without the optimistic update, these
+    // would fire additional /api/restart-all before SSE "started"
+    // updated bulkInflight.
+    fireEvent.click(runAllBtn);
+    fireEvent.click(runAllBtn);
+    expect(restartFireCount).toBe(1);
+
+    // Cleanup — resolve the in-flight fetch so it doesn't leak.
+    resolveFirst(jsonResponse(200, { restart_results: [] }));
+  });
 
   // P1 verification: when backend publishes phase=error (the partial-
   // failure 207 path now does this), Run all flashes Failed not
