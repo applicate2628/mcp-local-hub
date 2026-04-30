@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -258,5 +259,43 @@ func TestDaemonCmd_RunFailure_AppendsToLog(t *testing.T) {
 		if !strings.Contains(content, want) {
 			t.Errorf("log missing %q; got:\n%s", want, content)
 		}
+	}
+}
+
+// formatChildExit is the diagnostic suffix appended to "native-http
+// upstream exited unexpectedly" when the child crashes silently. The
+// nil case must be safe (process never spawned / still running) and
+// produce no suffix so the caller's Errorf format stays clean.
+func TestFormatChildExit_NilStateProducesEmptySuffix(t *testing.T) {
+	got := formatChildExit(nil)
+	if got != "" {
+		t.Errorf("formatChildExit(nil) = %q, want empty", got)
+	}
+}
+
+// Real-process exercise: spawn a tiny child that exits with a known
+// code, Wait for it, and confirm formatChildExit captures the exit
+// code into the suffix. Uses os.Args[0] re-exec — the standard Go
+// pattern for testing process-exit behavior without a platform-
+// specific helper script.
+func TestFormatChildExit_RealProcessShowsExitCode(t *testing.T) {
+	if os.Getenv("CHILD_EXIT_CODE") != "" {
+		// We are the child. Exit with the requested code so the parent
+		// can read it back via ProcessState.
+		code := 0
+		fmt.Sscanf(os.Getenv("CHILD_EXIT_CODE"), "%d", &code)
+		os.Exit(code)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestFormatChildExit_RealProcessShowsExitCode$")
+	cmd.Env = append(os.Environ(), "CHILD_EXIT_CODE=42")
+	if err := cmd.Run(); err == nil {
+		t.Fatalf("child should have failed with exit code 42; got nil")
+	}
+	suffix := formatChildExit(cmd.ProcessState)
+	if !strings.Contains(suffix, "exit_code=42") {
+		t.Errorf("suffix=%q must contain exit_code=42", suffix)
+	}
+	if !strings.Contains(suffix, "pid=") {
+		t.Errorf("suffix=%q must contain pid=...", suffix)
 	}
 }

@@ -156,11 +156,19 @@ See also: install, logs, restart, status.`,
 				case <-h.ChildExited():
 					// Upstream server died. Same recovery policy as stdio-bridge:
 					// return non-zero → Task Scheduler's RestartOnFailure respawns.
+					//
+					// Capture the child's ProcessState BEFORE Stop() — exit code,
+					// PID, and (on POSIX) signal info are the only diagnostic
+					// we get when the subprocess crashed silently with no
+					// stderr. Without this the launch-failure log line just
+					// said "exited unexpectedly" with no way to tell controlled
+					// sys.exit from native crash from parent kill.
+					exitMsg := formatChildExit(h.ExitState())
 					_ = h.Stop()
 					shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 					defer cancel()
 					_ = srv.Shutdown(shutdownCtx)
-					return fmt.Errorf("native-http upstream exited unexpectedly")
+					return fmt.Errorf("native-http upstream exited unexpectedly%s", exitMsg)
 				}
 			} else if m.Transport == config.TransportStdioBridge {
 				// Native Go stdio-host: spawns the inner stdio MCP server as
@@ -247,6 +255,27 @@ func logBaseDir() string {
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".local", "state", "mcp-local-hub", "logs")
+}
+
+// formatChildExit renders the child's ProcessState as a diagnostic
+// suffix appended to "native-http upstream exited unexpectedly". The
+// goal is to distinguish silent-exit failure modes that the log file
+// alone cannot — Codex CLI consult, 2026-04-30:
+//
+//	exit code 0   — controlled sys.exit(0); upstream thinks it shut down
+//	                cleanly. Hints at swallowed exception or misconfig.
+//	exit code 1   — generic error path; matches Python's `sys.exit(1)`.
+//	exit code 137 (POSIX) — SIGKILL from parent or OOM.
+//	exit code -1 / 0xC0000005 / 0xC000013A — Windows native crash or
+//	                CTRL_BREAK from parent.
+//
+// Returns "" when state is nil (process never spawned, still running,
+// or Wait() not yet called) so the caller's Errorf format stays clean.
+func formatChildExit(state *os.ProcessState) string {
+	if state == nil {
+		return ""
+	}
+	return fmt.Sprintf(" (pid=%d exit_code=%d)", state.Pid(), state.ExitCode())
 }
 
 // writeLaunchFailure appends a timestamped failure diagnostic to the

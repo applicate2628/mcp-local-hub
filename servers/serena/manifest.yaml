@@ -9,7 +9,14 @@ base_args:
   - start-mcp-server
   - --transport
   - streamable-http
-env: {}
+# PYTHONUNBUFFERED disables Python's block-buffered stdout/stderr when
+# the streams are redirected to a file (which they are: mcphub tees both
+# into logs/serena-<daemon>.log). Without this, the codex daemon's
+# silent crash at startup left no traceback because Python's 4KB
+# buffers never flushed before exit. With unbuffered I/O the final
+# stderr lines reach the log file and the failure is diagnosable.
+env:
+  PYTHONUNBUFFERED: "1"
 
 # Two daemons, two Serena contexts:
 #   - claude (9121, context=claude-code) is shared by Claude Code and Gemini CLI.
