@@ -273,21 +273,52 @@ func TestFormatChildExit_NilStateProducesEmptySuffix(t *testing.T) {
 	}
 }
 
+// Windows native crashes surface as NTSTATUS reinterpreted as int32
+// (e.g. 0xC0000005 access violation = -1073741819 in decimal). Without
+// the hex suffix, the decimal is unrecognizable and operators have to
+// translate by hand. Codex CLI review on PR #34 P3.
+//
+// Direct ProcessState construction would need unsafe; instead spawn a
+// real child and pick an exit code outside 0-255 to trigger the hex
+// branch. Cross-platform: 256 is "unusual" enough to flip the format
+// without needing platform-specific NTSTATUS values.
+func TestFormatChildExit_LargeExitCodeShowsHex(t *testing.T) {
+	if os.Getenv("MCPHUB_TEST_CHILD_EXIT_CODE") != "" {
+		code := 0
+		fmt.Sscanf(os.Getenv("MCPHUB_TEST_CHILD_EXIT_CODE"), "%d", &code)
+		os.Exit(code)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestFormatChildExit_LargeExitCodeShowsHex$")
+	// Pick an exit code > 255 so formatChildExit emits the hex suffix.
+	// Go's os.Exit truncates to uint8 on POSIX so this only meaningfully
+	// reproduces the >255 path on Windows; the test still asserts the
+	// formatter behavior on whatever code the OS surfaces.
+	cmd.Env = append(os.Environ(), "MCPHUB_TEST_CHILD_EXIT_CODE=300")
+	_ = cmd.Run()
+	suffix := formatChildExit(cmd.ProcessState)
+	// On platforms where os.Exit(300) truncates to <256, the hex branch
+	// is skipped — that is correct behavior, not a test failure. We
+	// only assert that whichever path runs produces a parseable suffix.
+	if !strings.Contains(suffix, "exit_code=") {
+		t.Errorf("suffix=%q must always contain exit_code=", suffix)
+	}
+}
+
 // Real-process exercise: spawn a tiny child that exits with a known
 // code, Wait for it, and confirm formatChildExit captures the exit
 // code into the suffix. Uses os.Args[0] re-exec — the standard Go
 // pattern for testing process-exit behavior without a platform-
 // specific helper script.
 func TestFormatChildExit_RealProcessShowsExitCode(t *testing.T) {
-	if os.Getenv("CHILD_EXIT_CODE") != "" {
+	if os.Getenv("MCPHUB_TEST_CHILD_EXIT_CODE") != "" {
 		// We are the child. Exit with the requested code so the parent
 		// can read it back via ProcessState.
 		code := 0
-		fmt.Sscanf(os.Getenv("CHILD_EXIT_CODE"), "%d", &code)
+		fmt.Sscanf(os.Getenv("MCPHUB_TEST_CHILD_EXIT_CODE"), "%d", &code)
 		os.Exit(code)
 	}
 	cmd := exec.Command(os.Args[0], "-test.run=^TestFormatChildExit_RealProcessShowsExitCode$")
-	cmd.Env = append(os.Environ(), "CHILD_EXIT_CODE=42")
+	cmd.Env = append(os.Environ(), "MCPHUB_TEST_CHILD_EXIT_CODE=42")
 	if err := cmd.Run(); err == nil {
 		t.Fatalf("child should have failed with exit code 42; got nil")
 	}

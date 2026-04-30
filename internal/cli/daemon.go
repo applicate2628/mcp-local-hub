@@ -130,7 +130,14 @@ See also: install, logs, restart, status.`,
 				}
 				ctx := cmd.Context()
 				if err := h.Start(ctx); err != nil {
-					return fmt.Errorf("httphost.Start: %w", err)
+					// h.Start can fail two ways: (a) cmd.Start() itself fails
+					// (process never spawned, ProcessState nil → no suffix) or
+					// (b) waitForReady saw childExited mid-probe (process did
+					// spawn, ProcessState set by the watcher goroutine before
+					// close(childExited), so formatChildExit gets pid+exit code).
+					// Codex CLI review on PR #34 P2 — startup-before-ready was
+					// previously a silent diagnostic hole.
+					return fmt.Errorf("httphost.Start: %w%s", err, formatChildExit(h.ExitState()))
 				}
 				srv := &http.Server{
 					Addr:              fmt.Sprintf("127.0.0.1:%d", spec.Port),
@@ -281,7 +288,17 @@ func formatChildExit(state *os.ProcessState) string {
 	if state == nil {
 		return ""
 	}
-	return fmt.Sprintf(" (pid=%d exit_code=%d%s)", state.Pid(), state.ExitCode(), extractSignal(state))
+	ec := state.ExitCode()
+	// On Windows, native crashes surface as NTSTATUS reinterpreted as
+	// int32 — e.g. 0xC0000005 (access violation) is exit_code=-1073741819
+	// in decimal. Useless without hex. Emit exit_hex= when the value is
+	// outside the typical 0-255 POSIX range. uint32 cast preserves the
+	// NTSTATUS bit pattern. Codex CLI review on PR #34 P3.
+	hex := ""
+	if ec < 0 || ec > 255 {
+		hex = fmt.Sprintf(" exit_hex=0x%x", uint32(ec))
+	}
+	return fmt.Sprintf(" (pid=%d exit_code=%d%s%s)", state.Pid(), ec, hex, extractSignal(state))
 }
 
 // writeLaunchFailure appends a timestamped failure diagnostic to the
