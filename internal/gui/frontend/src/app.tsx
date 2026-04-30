@@ -56,7 +56,11 @@ export function App() {
     return ok;
   };
 
-  const route = useRouter("servers", guard);
+  // Dashboard is the default landing screen — it is the primary monitoring
+  // surface (live daemon state, ports, PIDs, restart). Servers matrix is one
+  // click away in the sidebar. A persisted "default screen" preference lives
+  // in the Settings backlog as appearance.default_screen.
+  const route = useRouter("dashboard", guard);
   useUnsavedChangesGuard(dirtyAny);
 
   function guardClick(targetScreen: string): (e: MouseEvent) => void {
