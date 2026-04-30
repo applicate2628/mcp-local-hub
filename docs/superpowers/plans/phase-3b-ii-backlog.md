@@ -113,3 +113,7 @@ Surfaced during A4-a local smoke (2026-04-28) and confirmed via Codex consult. I
 - Multi-user / remote access — explicit non-goal per spec §2.2
 - Real-time log search across daemons — explicit non-goal per spec §2.2
 - JSON Schema inline validation in manifest form — explicit non-goal per spec §2.2 (save-time validation via `api.ManifestValidate` is sufficient)
+
+### Closed by PR #24 (tray rewrite, 2026-04-30)
+
+✅ **Tray subprocess + direct-Win32**: PR #24 spawns the tray as a separate `mcphub tray` child process and implements it via direct `golang.org/x/sys/windows` syscalls (no CGo, no third-party tray library). Click handler uses `Shell_NotifyIconGetRect` for deterministic icon-anchored popup placement; `NIM_SETVERSION(4)` + `MonitorFromPoint`/`GetMonitorInfoW` for multi-monitor-correct alignment; `TaskbarCreated` re-add survives explorer restart; `SetProcessDpiAwarenessContext` aligns coord spaces on scaled monitors. Supersedes any earlier `getlantern/systray` → `fyne.io/systray` → `energye/systray` migration plans — direct-Win32 is the chosen end state.
