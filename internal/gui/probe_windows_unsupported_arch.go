@@ -16,15 +16,11 @@
 
 package gui
 
-import (
-	"errors"
-)
-
-// errWindowsArchUnsupported mirrors the macOS sentinel pattern in
-// probe.go. KillRecordedHolder short-circuits on this error with a
-// VerdictKillRefused + clear message instead of cascading through
-// image/argv/start-time gates with empty fields.
-var errWindowsArchUnsupported = errors.New("--force --kill identity probe is amd64-only on Windows; this build (other arch) cannot enumerate cmdline/start-time")
+// errWindowsArchUnsupported is defined in probe.go (cross-platform
+// surface) so the probeOnce classifier can errors.Is against it on
+// every platform without splitting the arch-handling logic across
+// build-tagged files. This stub-arch impl just returns the shared
+// sentinel.
 
 func processIDImpl(pid int) (ProcessIdentity, error) {
 	return ProcessIdentity{}, errWindowsArchUnsupported

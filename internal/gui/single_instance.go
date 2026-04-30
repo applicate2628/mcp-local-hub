@@ -237,6 +237,14 @@ type Verdict struct {
 	// returned errMacOSProbeUnsupported. KillRecordedHolder uses
 	// this to refuse the kill with a macOS-specific message.
 	macOSUnsupported bool
+
+	// archUnsupported flags Verdicts produced when processIDImpl
+	// returned errWindowsArchUnsupported (windows && !amd64 builds
+	// where PEB offsets don't apply). probeOnce routes such verdicts
+	// to VerdictLiveUnreachable instead of VerdictDeadPID, and
+	// checkIdentityGateInternal refuses the kill with an
+	// arch-specific reason. Codex bot review on PR #23 P2.
+	archUnsupported bool
 }
 
 // KillOpts controls KillRecordedHolder behavior.
@@ -486,6 +494,7 @@ func probeOnce(ctx context.Context, pidportPath string, pingTimeout time.Duratio
 	}
 	v.PIDStart = id.StartTime
 	v.macOSUnsupported = errors.Is(idErr, errMacOSProbeUnsupported)
+	v.archUnsupported = errors.Is(idErr, errWindowsArchUnsupported)
 
 	if pingMatched {
 		v.Class = VerdictHealthy
@@ -512,6 +521,25 @@ func probeOnce(ctx context.Context, pidportPath string, pingTimeout time.Duratio
 			v.Diagnose = fmt.Sprintf("recorded PID %d: macOS identity probe not supported and /api/ping on %d returned PID %d", pid, port, matched)
 		}
 		v.Hint = "macOS: identity probe not supported; --force --kill is blocked. Reboot is the recovery path."
+		return v
+	}
+
+	// Same shape on Windows non-amd64 builds. processIDImpl returns
+	// errWindowsArchUnsupported because PEB offsets are 64-bit-only,
+	// and reading them on a 32-bit/arm64 layout would mis-classify a
+	// legitimate stuck holder as PID-recycled. Without arch-aware
+	// short-circuit, the !id.Alive cascade below would emit
+	// VerdictDeadPID — implying "the holder exited" when in reality
+	// we just couldn't observe it. Codex bot review on PR #23 P2.
+	if v.archUnsupported {
+		v.Class = VerdictLiveUnreachable
+		v.PIDAlive = false
+		if perr != nil {
+			v.Diagnose = fmt.Sprintf("recorded PID %d: Windows non-amd64 build cannot enumerate cmdline/start-time and /api/ping on %d failed: %v", pid, port, perr)
+		} else {
+			v.Diagnose = fmt.Sprintf("recorded PID %d: Windows non-amd64 build cannot enumerate cmdline/start-time and /api/ping on %d returned PID %d", pid, port, matched)
+		}
+		v.Hint = "This Windows build (non-amd64) lacks PEB-offset support; --force --kill is blocked. Use OS tools (Task Manager) to identify and end the stuck process, or rebuild for amd64."
 		return v
 	}
 
@@ -800,6 +828,17 @@ func checkIdentityGateInternal(v Verdict) (refused bool, diagnose, hint, errReas
 			"kill refused: macOS identity probe not supported; reboot is the recovery path",
 			"Tracked as backlog: macOS libproc/sysctl-based identity (see probe_darwin.go).",
 			"macOS identity probe not supported"
+	}
+
+	// Same shape on Windows non-amd64 builds: probeOnce sets
+	// archUnsupported because PEB offsets are amd64-only. Refuse the
+	// kill with an arch-specific diagnose. Codex bot review on PR
+	// #23 P2 (probeOnce arch sentinel handling).
+	if v.archUnsupported {
+		return true,
+			"kill refused: Windows non-amd64 build cannot enumerate cmdline/start-time; identity gate cannot run",
+			"This Windows build lacks PEB-offset support for the running architecture. Use Task Manager / Get-Process to identify the stuck mcphub PID and end it manually, or rebuild mcphub for amd64.",
+			"Windows arch identity probe not supported"
 	}
 
 	if !matchBasename(v.PIDImage) {

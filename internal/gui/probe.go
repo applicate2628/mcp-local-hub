@@ -18,6 +18,16 @@ import (
 // non-darwin platforms processIDImpl never returns it.
 var errMacOSProbeUnsupported = errors.New("--force --kill identity probe not supported on macOS (reboot is the recovery path; tracked as backlog: macOS libproc/sysctl-based identity)")
 
+// errWindowsArchUnsupported is the cross-platform sentinel for Windows
+// builds whose architecture lacks PEB-offset support. Only the
+// `windows && !amd64` build tag's processIDImpl returns it (see
+// probe_windows_unsupported_arch.go); on all other platforms
+// processIDImpl never returns this value. Defined here so probeOnce
+// can errors.Is against it on every platform without splitting the
+// classifier across build-tagged files. Codex bot review on PR #23 P2
+// (probeOnce arch sentinel handling).
+var errWindowsArchUnsupported = errors.New("--force --kill identity probe is amd64-only on Windows; this build (other arch) cannot enumerate cmdline/start-time")
+
 // ProcessIdentity is the cross-platform result of inspecting an OS
 // process. Used by single_instance.go's Probe + KillRecordedHolder
 // to run the three-part identity gate before any destructive action.

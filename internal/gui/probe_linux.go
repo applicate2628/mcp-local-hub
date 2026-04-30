@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math/bits"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -24,9 +25,12 @@ import (
 // auxv is unreadable or the entry is missing; this keeps probe
 // telemetry usable on minimal containers that hide /proc/self/auxv.
 //
-// Each auxv entry on 64-bit Linux is two unsigned longs (16 bytes
-// total, little-endian on x86_64/aarch64). The list terminates
-// with type AT_NULL = 0.
+// Each auxv entry is two C unsigned longs — 16 bytes on 64-bit
+// builds (amd64/arm64), 8 bytes on 32-bit builds (386/arm). The
+// list terminates with type AT_NULL = 0. Word size is constant
+// per Go build, so we pick the right decoder at compile time via
+// math/bits.UintSize. Codex bot review on PR #23 P2 (auxv 32-bit
+// parsing).
 //
 // Cached after first successful read because CLK_TCK is a kernel
 // build-time constant — it never changes for the life of the process.
@@ -36,10 +40,21 @@ var (
 )
 
 const (
-	atClkTckType = 17 // AT_CLKTCK in <elf.h>
-	atNullType   = 0  // AT_NULL terminator
-	auxvEntryLen = 16 // 2 × 8 bytes on 64-bit Linux
+	atClkTckType = 17                  // AT_CLKTCK in <elf.h>
+	atNullType   = 0                   // AT_NULL terminator
+	auxvWordSize = bits.UintSize / 8   // 4 on 32-bit, 8 on 64-bit Go builds
+	auxvEntryLen = 2 * auxvWordSize    // 8 on 32-bit, 16 on 64-bit
 )
+
+// readAuxvWord decodes one auxv field (sized to the native pointer)
+// at offset i in data as a uint64. Compile-time constant branching
+// — the wrong-arch arm is dead-code-eliminated.
+func readAuxvWord(data []byte, i int) uint64 {
+	if auxvWordSize == 8 {
+		return binary.LittleEndian.Uint64(data[i : i+8])
+	}
+	return uint64(binary.LittleEndian.Uint32(data[i : i+4]))
+}
 
 func clkTck() int64 {
 	clkTckOnce.Do(func() {
@@ -49,8 +64,8 @@ func clkTck() int64 {
 			return
 		}
 		for i := 0; i+auxvEntryLen <= len(data); i += auxvEntryLen {
-			atype := binary.LittleEndian.Uint64(data[i : i+8])
-			avalue := binary.LittleEndian.Uint64(data[i+8 : i+auxvEntryLen])
+			atype := readAuxvWord(data, i)
+			avalue := readAuxvWord(data, i+auxvWordSize)
 			if atype == atNullType {
 				break
 			}
