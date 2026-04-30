@@ -95,15 +95,26 @@ export function DashboardScreen() {
       action: BulkAction;
     };
     if (body.phase === "started") {
-      // Idempotent confirmation — runAll/stopAll already set this
-      // optimistically on click for immediate UI feedback. SSE
-      // re-confirms in case of tray-triggered fan-out (no local
-      // click) or event reordering.
-      setBulkInflight(body.action);
+      // Idempotent confirmation — local click already optimistically
+      // set bulkInflight. SSE re-confirms for tray-triggered fan-out
+      // (no local click) and event reordering.
+      //
+      // Codex bot PR #38 P1 (commit ef0f4ea, "Correlate bulk-action
+      // terminal events before unlocking UI"): with the shared SSE
+      // pipeline, concurrent triggers (Dashboard + tray, or two
+      // Dashboards) can interleave events. Don't OVERWRITE the
+      // currently-tracked inflight action from a different
+      // started — keep the first-tracked action so terminal-match
+      // logic below stays sound.
+      setBulkInflight((cur) => cur ?? body.action);
       setBulkOutcome(null);
       return;
     }
-    setBulkInflight(null);
+    // Terminal phase. Only clear inflight if the event's action
+    // matches what we're tracking — otherwise this is a sibling
+    // operation's terminal and the locally-tracked operation may
+    // still be running.
+    setBulkInflight((cur) => (cur === body.action ? null : cur));
     setBulkOutcome({
       action: body.action,
       state: body.phase === "error" ? "error" : "done",

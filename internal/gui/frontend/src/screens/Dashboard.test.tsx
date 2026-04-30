@@ -396,6 +396,47 @@ describe("DashboardScreen — Stop button", () => {
   // rapid clicks before that fire two POSTs and reintroduce
   // overlapping fan-outs. Optimistic-set on click closes the window:
   // the second click sees bulkInflight!==null and is gated.
+  // Codex bot PR #38 P1 (commit ef0f4ea, "Correlate bulk-action
+  // terminal events before unlocking UI"): concurrent triggers
+  // (Dashboard + tray, or two Dashboards) can interleave SSE events.
+  // Sibling operation's terminal must NOT clear the locally-tracked
+  // inflight, otherwise the UI re-enables buttons mid-action.
+  it("event correlation: sibling terminal does not clear locally-tracked inflight", async () => {
+    vi.useRealTimers();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(statusResponse([runningRow]));
+    const { findAllByRole } = render(<DashboardScreen />);
+    await waitFor(async () => {
+      const buttons = await findAllByRole("button");
+      expect(buttons.length).toBe(4);
+    });
+    const buttons = await findAllByRole("button");
+    const runAllBtn = buttons[0] as HTMLButtonElement;
+    const stopAllBtn = buttons[1] as HTMLButtonElement;
+
+    // Track restart locally (started for restart sets inflight).
+    dispatchSse("bulk-action", { phase: "started", action: "restart" });
+    await waitFor(() => expect(runAllBtn.textContent).toBe("Starting…"));
+
+    // Sibling stop also fires (someone else triggered it). Started
+    // for stop must NOT overwrite — first-tracked wins so terminal
+    // matching stays consistent.
+    dispatchSse("bulk-action", { phase: "started", action: "stop" });
+    expect(runAllBtn.textContent).toBe("Starting…"); // unchanged
+    expect(stopAllBtn.disabled).toBe(true);          // both disabled
+
+    // Stop's completed arrives FIRST. Since we tracked restart,
+    // this terminal must NOT unlock our UI — restart still running.
+    dispatchSse("bulk-action", { phase: "completed", action: "stop" });
+    expect(runAllBtn.textContent).toBe("Starting…"); // STILL starting
+    expect(runAllBtn.disabled).toBe(true);
+
+    // Restart finally completes — NOW our tracked terminal arrives.
+    dispatchSse("bulk-action", { phase: "completed", action: "restart" });
+    await waitFor(() => expect(runAllBtn.textContent).toBe("Started"));
+    expect(runAllBtn.disabled).toBe(false);
+    expect(stopAllBtn.disabled).toBe(false);
+  });
+
   // Codex bot PR #38 P2 (commit ff656fe): "Report failed click even
   // when prior bulk outcome is visible". prev ?? error suppressed
   // new failures when a previous outcome was still in its 1.5s flash.
