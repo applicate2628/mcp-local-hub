@@ -122,6 +122,22 @@ activates the first window and exits 0.`,
 					// even if focus jitter happened.
 					return nil
 				}
+				// SECURITY: --no-browser MUST disable every browser-
+				// launch path, not just the initial startup one. The
+				// fallback below calls gui.LaunchBrowser when no
+				// existing window is found; if --no-browser was set
+				// (e.g. test orphan, headless install, automation
+				// run) any local POST to /api/activate-window would
+				// otherwise spawn a Chrome window the operator never
+				// asked for. That's a real surprise + the orphan-
+				// process attack surface (any local actor pings
+				// /api/activate-window on a leftover gui server →
+				// browser opens). Honor the flag here.
+				if noBrowser {
+					fmt.Fprintln(cmd.OutOrStderr(),
+						"activate-window: focus failed and --no-browser set — refusing to launch")
+					return gui.ErrActivationNoTarget
+				}
 				if gui.HeadlessSession() {
 					// No display server. Surface ErrActivationNoTarget
 					// so the handler returns 503 and the second
