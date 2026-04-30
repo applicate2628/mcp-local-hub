@@ -180,9 +180,20 @@ activates the first window and exits 0.`,
 			}
 
 			if !noBrowser {
-				url := fmt.Sprintf("http://127.0.0.1:%d/", s.Port())
-				if err := gui.LaunchBrowser(url); err != nil {
-					fmt.Fprintf(cmd.OutOrStderr(), "warning: could not auto-launch browser: %v\n", err)
+				if gui.HeadlessSession() {
+					// Headless Linux server (no $DISPLAY / $WAYLAND_DISPLAY).
+					// Print the dashboard URL so the operator can SSH-tunnel
+					// + browse from a workstation (-L 9120:127.0.0.1:9120).
+					// Skipping the launch quietly avoids xdg-open's
+					// "Couldn't find a suitable web browser" error.
+					fmt.Fprintf(cmd.OutOrStdout(),
+						"headless session detected; skipping auto-launch. SSH-tunnel and visit http://127.0.0.1:%d/\n",
+						s.Port())
+				} else {
+					url := fmt.Sprintf("http://127.0.0.1:%d/", s.Port())
+					if err := gui.LaunchBrowser(url); err != nil {
+						fmt.Fprintf(cmd.OutOrStderr(), "warning: could not auto-launch browser: %v\n", err)
+					}
 				}
 			}
 			if !noTray {
