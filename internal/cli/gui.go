@@ -77,11 +77,21 @@ activates the first window and exits 0.`,
 						// activate call and this reread, or the file
 						// got truncated).
 						_, p, readErr := gui.ReadPidport(pidportPath)
-						if readErr != nil || p == 0 {
+						if readErr != nil {
 							return fmt.Errorf(
 								"incumbent reachable but headless and pidport unreadable (%v); "+
 									"check ~/.local/state/mcp-local-hub for the running port",
 								readErr)
+						}
+						if p == 0 {
+							// Read succeeded but file records port=0 —
+							// successor wrote pidport before bind.
+							// Distinct diagnostic so the operator doesn't
+							// see misleading "unreadable (<nil>)". Codex
+							// CLI review on PR #26 P3.
+							return fmt.Errorf(
+								"incumbent reachable but headless and pidport recorded port=0 (incumbent likely restarting); " +
+									"retry in a moment, or check ~/.local/state/mcp-local-hub")
 						}
 						fmt.Fprintf(cmd.OutOrStdout(),
 							"mcphub gui is already running headless on port %d. SSH-tunnel and visit http://127.0.0.1:%d/\n",
@@ -219,7 +229,7 @@ activates the first window and exits 0.`,
 							_ = gui.TryActivateIncumbent(pidportPath, 500*time.Millisecond)
 						},
 						StateCh: trayStateCh,
-						Quit: stop, // signal.NotifyContext's cancel function
+						Quit:    stop, // signal.NotifyContext's cancel function
 					})
 				}()
 			}

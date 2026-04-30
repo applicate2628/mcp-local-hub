@@ -274,28 +274,28 @@ type RealStatusProvider = realStatusProvider
 // Server is the GUI HTTP server. It owns a net/http.Server bound to
 // 127.0.0.1, a ready-to-register mux, and a best-effort shutdown path.
 type Server struct {
-	cfg              Config
-	mux              *http.ServeMux
-	srv              *http.Server
-	port             atomic.Int32 // set after Listen, read by Port()
-	onActivateWindow func() error
-	scanner          scanner
-	status           statusProvider
-	migrator         migrator
-	demigrater       demigrater
-	dismisser        dismisser
+	cfg               Config
+	mux               *http.ServeMux
+	srv               *http.Server
+	port              atomic.Int32 // set after Listen, read by Port()
+	onActivateWindow  func() error
+	scanner           scanner
+	status            statusProvider
+	migrator          migrator
+	demigrater        demigrater
+	dismisser         dismisser
 	manifestCreator   manifestCreator
 	manifestValidator manifestValidator
 	manifestGetter    manifestGetter
 	manifestEditor    manifestEditor
-	installer        installer
-	restart          restarter
-	logs             logsProvider
-	extractor        extractor
-	events           *Broadcaster
-	secrets          secretsAPI
-	settings         settingsAPI
-	backups          backupsAPI
+	installer         installer
+	restart           restarter
+	logs              logsProvider
+	extractor         extractor
+	events            *Broadcaster
+	secrets           secretsAPI
+	settings          settingsAPI
+	backups           backupsAPI
 }
 
 // NewServer constructs the Server. It registers the ping handler
