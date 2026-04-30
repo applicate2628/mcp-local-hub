@@ -159,6 +159,8 @@ const (
 	cmdOpenDashboard      = 1
 	cmdQuit               = 2
 	cmdQuitAndStopDaemons = 3
+	cmdRunAllDaemons      = 4
+	cmdStopAllDaemons     = 5
 )
 
 // POINT matches Win32 POINT.

@@ -325,6 +325,39 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 					}
 					stop()
 				},
+				RunAllDaemons: func() {
+					// Tray "Run all daemons": fire-and-forget restart of
+					// every scheduler-tracked task. Same fan-out and
+					// per-task error surface as the Dashboard "Run all"
+					// button (which routes through the GUI HTTP API);
+					// here we go through the in-process api directly
+					// because the tray click does not have an HTTP
+					// channel to the GUI server. GUI stays open.
+					if results, err := api.NewAPI().RestartAll(); err != nil {
+						fmt.Fprintf(cmd.OutOrStderr(), "tray: RestartAll: %v\n", err)
+					} else {
+						for _, r := range results {
+							if r.Err != "" {
+								fmt.Fprintf(cmd.OutOrStderr(), "tray: restart %s: %s\n", r.TaskName, r.Err)
+							}
+						}
+					}
+				},
+				StopAllDaemons: func() {
+					// Tray "Stop all daemons": fire-and-forget. Mirrors
+					// QuitAndStopAll's StopAll path but does NOT trigger
+					// GUI shutdown — user keeps the GUI open to monitor
+					// the resulting state via Dashboard.
+					if results, err := api.NewAPI().StopAll(); err != nil {
+						fmt.Fprintf(cmd.OutOrStderr(), "tray: StopAll: %v\n", err)
+					} else {
+						for _, r := range results {
+							if r.Err != "" {
+								fmt.Fprintf(cmd.OutOrStderr(), "tray: stop %s: %s\n", r.TaskName, r.Err)
+							}
+						}
+					}
+				},
 			}); err != nil {
 				fmt.Fprintf(cmd.OutOrStderr(), "tray: %v (GUI continues without tray)\n", err)
 			}
