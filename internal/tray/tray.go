@@ -39,6 +39,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -67,6 +68,19 @@ type Config struct {
 // state lines from its stdin and writes JSON event lines to its
 // stdout; see RunChild for the wire format.
 func Run(ctx context.Context, cfg Config) error {
+	// Tray is Windows-only in MVP — the non-Windows runChildImpl is a
+	// no-op (returns immediately on stdin EOF). Spawning a child just
+	// to have it exit instantly would (a) violate Run's "block until
+	// ctx.Done()" contract for any caller relying on it for lifecycle
+	// coordination, and (b) waste a process spawn on every Linux/macOS
+	// GUI start. Block on ctx here directly so the goroutine that
+	// `mcphub gui` launches stays alive for the GUI's lifetime.
+	// Codex bot review on PR #24 P2 (bypass non-Windows spawn).
+	if runtime.GOOS != "windows" {
+		<-ctx.Done()
+		return nil
+	}
+
 	selfPath, err := os.Executable()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "tray: cannot resolve self path (%v); tray disabled\n", err)
@@ -93,7 +107,15 @@ func Run(ctx context.Context, cfg Config) error {
 		<-ctx.Done()
 		return nil
 	}
-	c.Stderr = os.Stderr // forward child diagnostics
+	// Forward child diagnostics ONLY when the parent's stderr is a
+	// valid handle. Windows GUI apps launched without a console (the
+	// normal Explorer-launch path) have invalid std handles; passing
+	// an invalid *os.File to exec.Cmd would make Start() fail with
+	// invalid-handle, disabling the tray entirely. Codex bot review
+	// on PR #24 P1 (avoid inheriting invalid stderr).
+	if stderrIsValid() {
+		c.Stderr = os.Stderr
+	}
 
 	if err := c.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "tray: spawn: %v; tray disabled\n", err)
