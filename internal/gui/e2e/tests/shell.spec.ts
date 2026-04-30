@@ -19,19 +19,20 @@ test.describe("shell", () => {
     await expect(links.nth(7)).toHaveText("About");
   });
 
-  test("default route is Servers and nav highlights on click", async ({ page, hub }) => {
+  test("default route is Dashboard and nav highlights on click", async ({ page, hub }) => {
     await page.goto(`${hub.url}/`);
-    const serversLink = page.locator(".sidebar nav a", { hasText: "Servers" });
-    await expect(serversLink).toHaveClass(/active/);
+    const dashboardLink = page.locator(".sidebar nav a", { hasText: "Dashboard" });
+    await expect(dashboardLink).toHaveClass(/active/);
+    await expect(page.locator("h1")).toHaveText("Dashboard");
+    await page.locator(".sidebar nav a", { hasText: "Servers" }).click();
+    await expect(page.locator(".sidebar nav a", { hasText: "Servers" })).toHaveClass(/active/);
+    await expect(page.locator("h1")).toHaveText("Servers");
     await page.locator(".sidebar nav a", { hasText: "Migration" }).click();
     await expect(page.locator(".sidebar nav a", { hasText: "Migration" })).toHaveClass(/active/);
     await expect(page.locator("h1")).toHaveText("Migration");
     await page.locator(".sidebar nav a", { hasText: "Add server" }).click();
     await expect(page.locator(".sidebar nav a", { hasText: "Add server" })).toHaveClass(/active/);
     await expect(page.locator("h1")).toHaveText("Add server");
-    await page.locator(".sidebar nav a", { hasText: "Dashboard" }).click();
-    await expect(page.locator(".sidebar nav a", { hasText: "Dashboard" })).toHaveClass(/active/);
-    await expect(page.locator("h1")).toHaveText("Dashboard");
     await page.locator(".sidebar nav a", { hasText: "Logs" }).click();
     await expect(page.locator(".sidebar nav a", { hasText: "Logs" })).toHaveClass(/active/);
     await expect(page.locator("h1")).toHaveText("Logs");
