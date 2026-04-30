@@ -1,5 +1,14 @@
 // internal/gui/probe_windows.go
-//go:build windows
+//go:build windows && amd64
+
+// PEB layout offsets in this file (PEB.ProcessParameters at 0x20,
+// RTL_USER_PROCESS_PARAMETERS.CommandLine at 0x70) are documented
+// for x64 only. windows/386, windows/arm64, and any future Windows
+// architecture would read at the wrong offsets and silently return
+// empty cmdline / start-time, causing the identity gate to refuse
+// --force --kill against legitimate stuck holders. The
+// probe_windows_unsupported_arch.go sibling provides a clear
+// "arch not supported" stub for non-amd64 Windows builds.
 
 package gui
 
@@ -179,14 +188,28 @@ func queryCmdline(pid uint32) []string {
 // splitCommandLineW honors CommandLineToArgvW quoting rules so paths
 // with spaces and quoted args parse correctly. Reimplemented here to
 // avoid a syscall to a UI DLL (shell32).
+//
+// Empty argv tokens (e.g. `mcphub.exe ""`) ARE preserved as empty
+// strings to match CommandLineToArgvW behavior. Without that,
+// downstream cmdlineIsGui would see len(argv)==1 for a process
+// launched as `mcphub.exe ""` — a different command line than a
+// no-arg launch — and incorrectly authorize a kill via the
+// Explorer-no-arg auto-gui branch. (Codex bot review on PR #23 P3.)
+//
+// State: sawArg becomes true whenever we enter an argument context
+// (a quote toggle or any non-separator byte). flush emits the
+// current builder as an argv token, even if empty, when sawArg is
+// true; then resets to "between args".
 func splitCommandLineW(s string) []string {
 	var args []string
 	var cur strings.Builder
 	inQuote := false
+	sawArg := false
 	flush := func() {
-		if cur.Len() > 0 {
+		if sawArg {
 			args = append(args, cur.String())
 			cur.Reset()
+			sawArg = false
 		}
 	}
 	i := 0
@@ -195,6 +218,7 @@ func splitCommandLineW(s string) []string {
 		c := s[i]
 		if c == '"' {
 			inQuote = !inQuote
+			sawArg = true
 			i++
 			continue
 		}
@@ -209,6 +233,7 @@ func splitCommandLineW(s string) []string {
 			i++
 			break
 		}
+		sawArg = true
 		cur.WriteByte(c)
 		i++
 	}
@@ -216,12 +241,10 @@ func splitCommandLineW(s string) []string {
 	// Remaining args use full backslash-aware Microsoft rules.
 	for i < len(s) {
 		c := s[i]
-		if c == ' ' || c == '\t' {
-			if !inQuote {
-				flush()
-				i++
-				continue
-			}
+		if (c == ' ' || c == '\t') && !inQuote {
+			flush()
+			i++
+			continue
 		}
 		if c == '\\' {
 			// Count backslashes.
@@ -233,6 +256,7 @@ func splitCommandLineW(s string) []string {
 			if j < len(s) && s[j] == '"' {
 				// 2N backslashes + " → N backslashes + toggle quote
 				// 2N+1 + " → N backslashes + literal "
+				sawArg = true
 				cur.WriteString(strings.Repeat(`\`, backslashes/2))
 				if backslashes%2 == 1 {
 					cur.WriteByte('"')
@@ -242,15 +266,18 @@ func splitCommandLineW(s string) []string {
 				i = j + 1
 				continue
 			}
+			sawArg = true
 			cur.WriteString(strings.Repeat(`\`, backslashes))
 			i = j
 			continue
 		}
 		if c == '"' {
+			sawArg = true
 			inQuote = !inQuote
 			i++
 			continue
 		}
+		sawArg = true
 		cur.WriteByte(c)
 		i++
 	}

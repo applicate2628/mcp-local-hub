@@ -1,4 +1,8 @@
-//go:build windows
+//go:build windows && amd64
+
+// Tests for splitCommandLineW + matchBasename. Tagged windows&&amd64
+// to match probe_windows.go's tag — the implementation it tests is
+// amd64-only because of the embedded PEB struct offsets.
 
 package gui
 
@@ -47,6 +51,25 @@ func TestSplitCommandLineW_TabSeparatorBetweenExeAndArgs(t *testing.T) {
 			name: "tab inside quoted argv[0] is preserved",
 			in:   `"weird` + "\t" + `name.exe"` + "\tdaemon",
 			want: []string{"weird\tname.exe", "daemon"},
+		},
+		// Codex bot review on PR #23 P3: empty quoted argv tokens
+		// must be preserved (CommandLineToArgvW behavior). Without
+		// this, len(argv)==1 misclassifies `mcphub.exe ""` as the
+		// no-arg auto-gui case in cmdlineIsGui.
+		{
+			name: "empty quoted arg preserved",
+			in:   `mcphub.exe ""`,
+			want: []string{"mcphub.exe", ""},
+		},
+		{
+			name: "two empty quoted args preserved",
+			in:   `mcphub.exe "" ""`,
+			want: []string{"mcphub.exe", "", ""},
+		},
+		{
+			name: "empty quoted argv[0] preserved",
+			in:   `"" daemon`,
+			want: []string{"", "daemon"},
 		},
 	}
 	for _, tc := range cases {
