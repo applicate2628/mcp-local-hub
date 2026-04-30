@@ -115,7 +115,16 @@ func TestGuiCmd_SecondInstanceActivates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second instance failed: %v\noutput: %s", err, out)
 	}
-	if !strings.Contains(string(out), "activated") {
-		t.Errorf("second instance output should confirm activation; got: %s", out)
+	// Both instances spawn with --no-browser, so the SECURITY guard
+	// (--no-browser refuses LaunchBrowser fallback in the callback)
+	// makes the activate-window handler return 503 → handshake
+	// returns ErrIncumbentNoActivationTarget → second instance prints
+	// the headless-style guidance instead of "activated". Either
+	// output proves the handshake reached the incumbent.
+	out2 := string(out)
+	ok := strings.Contains(out2, "activated") ||
+		strings.Contains(out2, "already running headless")
+	if !ok {
+		t.Errorf("second instance output should confirm handshake (activated OR headless guidance); got: %s", out2)
 	}
 }
