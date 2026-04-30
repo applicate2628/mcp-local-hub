@@ -47,13 +47,18 @@ const (
 )
 
 // readAuxvWord decodes one auxv field (sized to the native pointer)
-// at offset i in data as a uint64. Compile-time constant branching
-// — the wrong-arch arm is dead-code-eliminated.
+// at offset i in data as a uint64. Uses binary.NativeEndian because
+// /proc/self/auxv is emitted in native-endian unsigned long words —
+// the prior LittleEndian decoder produced wrong AT_CLKTCK values on
+// big-endian Linux targets (mips, ppc, s390x), silently falling back
+// to the 100-default and breaking start-time reconstruction. Codex
+// bot review on PR #23 P2 (native endianness). Compile-time constant
+// branching on word size — wrong-arch arm is dead-code-eliminated.
 func readAuxvWord(data []byte, i int) uint64 {
 	if auxvWordSize == 8 {
-		return binary.LittleEndian.Uint64(data[i : i+8])
+		return binary.NativeEndian.Uint64(data[i : i+8])
 	}
-	return uint64(binary.LittleEndian.Uint32(data[i : i+4]))
+	return uint64(binary.NativeEndian.Uint32(data[i : i+4]))
 }
 
 func clkTck() int64 {

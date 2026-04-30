@@ -400,8 +400,41 @@ func runForceKill(ctx context.Context, cmd *cobra.Command, pidportPath string, y
 	// Gate 3: confirmation prompt unless --yes.
 	if !yes {
 		fmt.Fprintf(cmd.OutOrStdout(), "Kill PID %d (mcphub gui)? [y/N]: ", v.PID)
+		// Codex bot review on PR #23 P2: use cmd.InOrStdin() so
+		// callers (tests, embedded invocations) that override the
+		// input stream via cmd.SetIn(...) get their scripted input
+		// honored. Codex bot review on PR #23 P1: read in a
+		// goroutine + select on ctx.Done() so Ctrl+C / SIGTERM
+		// during the prompt actually unblocks the wait — the
+		// previous Fscanln-on-os.Stdin sat in a read syscall that
+		// signal.NotifyContext could not interrupt, leaving the
+		// destructive flow hung at exactly the point operators
+		// expect immediate abort.
+		respCh := make(chan string, 1)
+		errCh := make(chan error, 1)
+		go func() {
+			var resp string
+			_, err := fmt.Fscanln(cmd.InOrStdin(), &resp)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			respCh <- resp
+		}()
 		var resp string
-		_, _ = fmt.Fscanln(os.Stdin, &resp)
+		select {
+		case resp = <-respCh:
+		case <-errCh:
+			// Fscanln error (EOF, bad input). Treat as cancel:
+			// Fscanln returns nothing useful, the prompt was
+			// implicitly declined. Don't propagate the error —
+			// the user's intent maps to "cancelled".
+			fmt.Fprintln(cmd.OutOrStdout(), "cancelled")
+			return nil, 0
+		case <-ctx.Done():
+			fmt.Fprintln(cmd.OutOrStderr(), "interrupted")
+			return nil, 1
+		}
 		resp = strings.TrimSpace(strings.ToLower(resp))
 		if resp != "y" && resp != "yes" {
 			fmt.Fprintln(cmd.OutOrStdout(), "cancelled")
