@@ -368,7 +368,18 @@ const DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = ^uintptr(3) // -4 cast as uin
 // already-set, or syscall error). Best-effort; we log but continue
 // even on failure since the existing behaviour pre-fix was unaware,
 // so worst case is the prior (broken) behaviour.
+//
+// SetProcessDpiAwarenessContext was added in Windows 10 1607. On
+// older builds (Win7/8.1/early 10) the user32 export does not exist,
+// and LazyProc.Call would panic when Find() fails internally.
+// procSetProcessDpiAwarenessContext.Find() is the lazy resolver — we
+// call it explicitly first so the missing-API path returns false
+// instead of crashing the tray child at startup. Codex bot review
+// on PR #24 P2 (guard optional DPI API).
 func setProcessDpiAwareV2() bool {
+	if err := procSetProcessDpiAwarenessContext.Find(); err != nil {
+		return false
+	}
 	r, _, _ := procSetProcessDpiAwarenessContext.Call(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
 	return r != 0
 }

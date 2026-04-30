@@ -642,7 +642,15 @@ func (tc *trayChild) handleMessage(hwnd uintptr, msg uint32, wparam, lparam uint
 		// values we care about — WM_RBUTTONUP=0x0205, etc).
 		event := uint32(lparam) & 0xFFFF
 		switch event {
-		case WM_RBUTTONUP, WM_LBUTTONUP, NIN_SELECT, NIN_KEYSELECT:
+		case WM_LBUTTONUP, NIN_SELECT, NIN_KEYSELECT:
+			// Left click + accessibility activation (Enter/Space when
+			// the icon has focus) bring the dashboard to the front,
+			// matching the Config.ActivateWindow contract documented
+			// in tray.go. Right click is the popup-menu trigger
+			// (handled in the case below). Codex bot review on PR
+			// #24 P2 (preserve left-click activation).
+			tc.emitEvent("open-dashboard")
+		case WM_RBUTTONUP:
 			// Anchor at the icon's deterministic screen rect.
 			// Even under V4 the wParam X/Y tracks the cursor pixel
 			// at click time — not the icon's stable center — so two

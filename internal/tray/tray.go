@@ -188,9 +188,21 @@ func Run(ctx context.Context, cfg Config) error {
 	// any further encode attempts on the now-dying pipe, then reap and
 	// signal childDone for the watchdog.
 	cancelRun()
-	_ = c.Wait()
+	waitErr := c.Wait()
 	close(childDone)
 	wg.Wait()
+	// If the child exited with a non-zero status AND the parent ctx
+	// is still alive, surface the failure so the GUI doesn't silently
+	// lose tray functionality. Common failure modes: spawn went OK but
+	// the child crashed mid-pump (Win32 shell init error,
+	// CreateWindowExW failure, panic). Without surfacing, the GUI runs
+	// without a tray and the user gets no signal — Windows desktop
+	// builds typically have no visible stderr console to read the
+	// child's diagnostics. Codex bot review on PR #24 P2.
+	if waitErr != nil && ctx.Err() == nil {
+		fmt.Fprintf(os.Stderr, "tray: subprocess exited unexpectedly: %v\n", waitErr)
+		return fmt.Errorf("tray subprocess exited: %w", waitErr)
+	}
 	return nil
 }
 
