@@ -216,6 +216,31 @@ func (realRestarter) Restart(server string) ([]api.RestartResult, error) {
 	return results, err
 }
 
+// stopper is the narrow interface the /api/servers/:name/stop handler
+// needs. Same shape as restarter — api.Stop returns the same per-task
+// RestartResult slice plus orchestration error. Handler maps:
+//
+//	results all empty Err  → 200 {stop_results:[…]}
+//	results any non-empty  → 207 {stop_results:[…]}
+//	err != nil             → 500 + STOP_FAILED, body has partial results
+type stopper interface {
+	Stop(server string) ([]api.RestartResult, error)
+}
+
+type realStopper struct{}
+
+// Stop delegates to api.Stop(server, daemonFilter). The GUI handler targets
+// "stop all daemons for one server," so daemonFilter is "". Mirrors the
+// realRestarter shape — same RestartResult type since api.Stop and
+// api.Restart share that result schema.
+func (realStopper) Stop(server string) ([]api.RestartResult, error) {
+	results, err := api.NewAPI().Stop(server, "")
+	if results == nil {
+		results = []api.RestartResult{}
+	}
+	return results, err
+}
+
 // secretsAPI is the narrow interface the /api/secrets/* handlers need.
 // Wraps api.API methods so tests can inject a fake. Per memo §5.6.
 type secretsAPI interface {
@@ -290,6 +315,7 @@ type Server struct {
 	manifestEditor    manifestEditor
 	installer         installer
 	restart           restarter
+	stop              stopper
 	logs              logsProvider
 	extractor         extractor
 	events            *Broadcaster
@@ -316,6 +342,7 @@ func NewServer(cfg Config) *Server {
 	s.manifestEditor = realManifestEditor{}
 	s.installer = realInstaller{}
 	s.restart = realRestarter{}
+	s.stop = realStopper{}
 	s.logs = realLogs{}
 	s.extractor = realExtractor{}
 	s.events = NewBroadcaster()

@@ -65,38 +65,45 @@ export function DashboardScreen() {
 
   useEventSource("/api/events", { "daemon-state": onDelta });
 
-  async function restart(server: string) {
-    // Re-throws on failure so the Card's button state machine can
-    // transition to "error" and flash "Failed". Visual feedback lives
-    // in the Card component; here we only log for operator diagnostics.
+  // Backend contract: POST /api/servers/<name>/<action> returns
+  //   200 { <action>_results: [...] }            — all OK
+  //   207 { <action>_results: [...] }            — partial: some Err non-empty
+  //   500 { <action>_results: [...], error, code } — orchestration failure
+  // restart and stop share the same shape; only the response key and
+  // the human label differ. Re-throws on failure so the Card button
+  // state machine can flash "Failed". Caller logs for operator triage.
+  async function postServerAction(server: string, action: "restart" | "stop") {
+    const resultsKey = `${action}_results` as const;
     try {
-      const resp = await fetch(`/api/servers/${encodeURIComponent(server)}/restart`, { method: "POST" });
+      const resp = await fetch(
+        `/api/servers/${encodeURIComponent(server)}/${action}`,
+        { method: "POST" },
+      );
       const body = (await resp.json().catch(() => ({}))) as {
         error?: string;
         code?: string;
-        restart_results?: Array<{ task_name: string; error: string }>;
+        [k: string]: unknown;
       };
-      // 500 → orchestration failure, throw
       if (resp.status === 500) {
         throw new Error(body.error ?? String(resp.status));
       }
-      // 207 → some tasks failed; surface them as a single error with details
       if (resp.status === 207) {
-        const failed = (body.restart_results ?? []).filter((r) => r.error !== "");
-        const summary = failed
-          .map((r) => `${r.task_name}: ${r.error}`)
-          .join("; ");
-        throw new Error(`partial restart failure: ${summary}`);
+        const rows = (body[resultsKey] as Array<{ task_name: string; error: string }>) ?? [];
+        const failed = rows.filter((r) => r.error !== "");
+        const summary = failed.map((r) => `${r.task_name}: ${r.error}`).join("; ");
+        throw new Error(`partial ${action} failure: ${summary}`);
       }
-      // 200 → all OK, even if restart_results is non-empty (all empty errors)
       if (!resp.ok) {
         throw new Error(body.error ?? String(resp.status));
       }
     } catch (e) {
-      console.error(`restart ${server}: ${(e as Error).message}`);
+      console.error(`${action} ${server}: ${(e as Error).message}`);
       throw e;
     }
   }
+
+  const restart = (server: string) => postServerAction(server, "restart");
+  const stop = (server: string) => postServerAction(server, "stop");
 
   if (error) {
     return (
@@ -114,52 +121,82 @@ export function DashboardScreen() {
       <h1>Dashboard</h1>
       <div class="cards">
         {sorted.map((d) => (
-          <Card key={keyFor(d)} daemon={d} onRestart={restart} />
+          <Card key={keyFor(d)} daemon={d} onRestart={restart} onStop={stop} />
         ))}
       </div>
     </div>
   );
 }
 
-function Card(props: { daemon: DaemonStatus; onRestart: (server: string) => Promise<void> }) {
-  const { daemon: d, onRestart } = props;
-  const [btnState, setBtnState] = useState<"idle" | "working" | "done" | "error">("idle");
-  // Track the pending "snap back to idle" timer so (a) a second click can
-  // cancel the stale timer before replacing it — otherwise the old timer
-  // fires mid-way through the new restart and resets btnState to idle
-  // while the new POST is still in flight — and (b) unmount cleans up.
+type ActionState = "idle" | "working" | "done" | "error";
+
+// useActionButton owns one button's state machine: idle → working →
+// done|error → snap-back-to-idle after 1.5s. Stable across the timer
+// lifecycle (cancels a pending reset before queueing a new one) and
+// cleans up on unmount.
+function useActionButton(
+  run: () => Promise<void>,
+): { state: ActionState; click: () => Promise<void> } {
+  const [state, setState] = useState<ActionState>("idle");
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => {
+  useEffect(
+    () => () => {
+      if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+    },
+    [],
+  );
+
+  async function click() {
+    if (state !== "idle") return;
+    setState("working");
+    try {
+      await run();
+      setState("done");
+    } catch {
+      setState("error");
+    }
     if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
-  }, []);
+    resetTimerRef.current = setTimeout(() => {
+      setState("idle");
+      resetTimerRef.current = null;
+    }, 1500);
+  }
+
+  return { state, click };
+}
+
+function Card(props: {
+  daemon: DaemonStatus;
+  onRestart: (server: string) => Promise<void>;
+  onStop: (server: string) => Promise<void>;
+}) {
+  const { daemon: d, onRestart, onStop } = props;
+  const restartBtn = useActionButton(() => onRestart(d.server));
+  const stopBtn = useActionButton(() => onStop(d.server));
 
   const cls = d.state === "Running" ? "card ok" : "card down";
   const title = d.daemon && d.daemon !== "default" ? `${d.server} (${d.daemon})` : d.server;
-  const btnText = {
+
+  // Guard against concurrent same-daemon ops: while one button is in
+  // flight, the other is disabled. Stop is additionally disabled when
+  // the daemon is already not running — there is nothing to stop.
+  const anyWorking = restartBtn.state === "working" || stopBtn.state === "working";
+  const restartDisabled = restartBtn.state !== "idle" || stopBtn.state === "working";
+  const stopDisabled =
+    stopBtn.state !== "idle" || restartBtn.state === "working" || d.state !== "Running";
+
+  const restartLabel = {
     idle: "Restart",
     working: "Restarting…",
     done: "Restarted",
     error: "Failed",
-  }[btnState];
-
-  async function click() {
-    // The disabled prop already blocks clicks when btnState !== "idle",
-    // but guard here too in case a race delivers a click event before
-    // the disabled attribute has been applied by the renderer.
-    if (btnState !== "idle") return;
-    setBtnState("working");
-    try {
-      await onRestart(d.server);
-      setBtnState("done");
-    } catch {
-      setBtnState("error");
-    }
-    if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
-    resetTimerRef.current = setTimeout(() => {
-      setBtnState("idle");
-      resetTimerRef.current = null;
-    }, 1500);
-  }
+  }[restartBtn.state];
+  const stopLabel = {
+    idle: "Stop",
+    working: "Stopping…",
+    done: "Stopped",
+    error: "Failed",
+  }[stopBtn.state];
 
   return (
     <div class={cls}>
@@ -177,8 +214,16 @@ function Card(props: { daemon: DaemonStatus; onRestart: (server: string) => Prom
         <span class="state">{d.state}</span>
       </div>
       <div class="card-actions">
-        <button onClick={click} disabled={btnState !== "idle"}>
-          {btnText}
+        <button onClick={restartBtn.click} disabled={restartDisabled} aria-busy={anyWorking}>
+          {restartLabel}
+        </button>
+        <button
+          onClick={stopBtn.click}
+          disabled={stopDisabled}
+          aria-busy={anyWorking}
+          class="btn-stop"
+        >
+          {stopLabel}
         </button>
       </div>
     </div>
