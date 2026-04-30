@@ -37,10 +37,21 @@ export function App() {
     if (globalSettings.status !== "ok") return;
     const theme = globalSettings.data.settings.find((s) => s.key === "appearance.theme");
     const density = globalSettings.data.settings.find((s) => s.key === "appearance.density");
+    const layout = globalSettings.data.settings.find((s) => s.key === "appearance.layout");
     if (theme && "value" in theme) document.documentElement.setAttribute("data-theme", theme.value);
     if (density && "value" in density) document.documentElement.setAttribute("data-density", density.value);
+    if (layout && "value" in layout) document.documentElement.setAttribute("data-layout", layout.value);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [globalSettings.status, globalSettings.status === "ok" ? globalSettings.data : null]);
+
+  // Layout switcher (spec §5 line 241): sidebar (default) vs top tabs.
+  // Driven from the SAME snapshot; live-applies on Save without
+  // requiring a relaunch.
+  const layoutValue = (() => {
+    if (globalSettings.status !== "ok") return "sidebar";
+    const entry = globalSettings.data.settings.find((s) => s.key === "appearance.layout");
+    return entry && "value" in entry && entry.value ? entry.value : "sidebar";
+  })();
 
   const guard = (target: RouterState): boolean => {
     if (!dirtyAny) return true;
@@ -120,20 +131,39 @@ export function App() {
       body = <p>Unknown screen: {route.screen}</p>;
   }
 
+  // Nav links — same set in both layouts; CSS swaps direction.
+  const navLinks = (
+    <nav>
+      <a href="#/servers"    class={route.screen === "servers"    ? "active" : ""} onClick={guardClick("servers")}>Servers</a>
+      <a href="#/migration"  class={route.screen === "migration"  ? "active" : ""} onClick={guardClick("migration")}>Migration</a>
+      <a href="#/add-server" class={route.screen === "add-server" ? "active" : ""} onClick={guardClick("add-server")}>Add server</a>
+      <a href="#/secrets"    class={route.screen === "secrets"    ? "active" : ""} onClick={guardClick("secrets")}>Secrets</a>
+      <a href="#/dashboard"  class={route.screen === "dashboard"  ? "active" : ""} onClick={guardClick("dashboard")}>Dashboard</a>
+      <a href="#/logs"       class={route.screen === "logs"       ? "active" : ""} onClick={guardClick("logs")}>Logs</a>
+      <a href="#/settings"   class={route.screen === "settings"   ? "active" : ""} onClick={guardClick("settings")}>Settings</a>
+      <a href="#/about"      class={route.screen === "about"      ? "active" : ""} onClick={guardClick("about")}>About</a>
+    </nav>
+  );
+
+  if (layoutValue === "tabs") {
+    return (
+      <>
+        <header class="topbar">
+          <div class="brand">mcp-local-hub</div>
+          {navLinks}
+        </header>
+        <main id="screen-root">
+          {body}
+        </main>
+      </>
+    );
+  }
+
   return (
     <>
       <aside class="sidebar">
         <div class="brand">mcp-local-hub</div>
-        <nav>
-          <a href="#/servers"    class={route.screen === "servers"    ? "active" : ""} onClick={guardClick("servers")}>Servers</a>
-          <a href="#/migration"  class={route.screen === "migration"  ? "active" : ""} onClick={guardClick("migration")}>Migration</a>
-          <a href="#/add-server" class={route.screen === "add-server" ? "active" : ""} onClick={guardClick("add-server")}>Add server</a>
-          <a href="#/secrets"    class={route.screen === "secrets"    ? "active" : ""} onClick={guardClick("secrets")}>Secrets</a>
-          <a href="#/dashboard"  class={route.screen === "dashboard"  ? "active" : ""} onClick={guardClick("dashboard")}>Dashboard</a>
-          <a href="#/logs"       class={route.screen === "logs"       ? "active" : ""} onClick={guardClick("logs")}>Logs</a>
-          <a href="#/settings"   class={route.screen === "settings"   ? "active" : ""} onClick={guardClick("settings")}>Settings</a>
-          <a href="#/about"      class={route.screen === "about"      ? "active" : ""} onClick={guardClick("about")}>About</a>
-        </nav>
+        {navLinks}
       </aside>
       <main id="screen-root">
         {body}

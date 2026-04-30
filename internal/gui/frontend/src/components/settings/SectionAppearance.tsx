@@ -11,6 +11,8 @@ const SECTION_KEYS = [
   "appearance.theme",
   "appearance.density",
   "appearance.shell",
+  "appearance.layout",
+  "appearance.default_screen",
   "appearance.default_home",
 ];
 
