@@ -12,13 +12,15 @@ import (
 )
 
 // IconBytes returns the bytes for a 16×16 state indicator in the
-// format `getlantern/systray.SetIcon` requires on the host OS:
+// format the host OS's tray surface expects:
 //
-//   - Windows: ICO container wrapping the PNG payload (per
-//     systray library docs: Windows tray needs ICO; PNG bytes
-//     are silently rejected by Shell_NotifyIcon → empty tray
-//     square is the user-visible symptom of getting this wrong).
-//   - macOS / Linux: raw PNG bytes.
+//   - Windows: ICO container wrapping the PNG payload. The Win32
+//     CreateIconFromResourceEx path used by tray_windows.go takes
+//     ICO-format bytes; raw PNG is silently rejected by
+//     Shell_NotifyIcon → empty tray square is the user-visible
+//     symptom of getting this wrong.
+//   - macOS / Linux: raw PNG bytes (kept for parity / future use;
+//     the runtime tray is Windows-only today).
 //
 // Lazy-generated once per state and cached. The generated icon is
 // a filled circle in the state's color centered on a transparent

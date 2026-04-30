@@ -31,8 +31,8 @@ func TestIconBytes_AllStatesHaveDistinctIcons(t *testing.T) {
 	}
 }
 
-// TestIconBytes_FormatPerOS asserts the output format matches the
-// systray library's expectation for the host OS:
+// TestIconBytes_FormatPerOS asserts the output format matches what
+// the consumer expects per host OS:
 //
 //   - Windows: ICO header (22-byte ICONDIR + ICONDIRENTRY) followed
 //     by a PNG payload. Without the ICO wrap, Shell_NotifyIcon
