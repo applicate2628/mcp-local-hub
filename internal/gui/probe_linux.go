@@ -4,15 +4,64 @@
 package gui
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
+
+// clkTck reads CLK_TCK (kernel clock-ticks-per-second) from the
+// process's ELF auxiliary vector at /proc/self/auxv. The auxv is a
+// kernel-emitted array of (type, value) pairs; AT_CLKTCK (type 17)
+// carries what sysconf(_SC_CLK_TCK) would return — without needing
+// CGo. Falls back to 100 (the most common kernel default) if the
+// auxv is unreadable or the entry is missing; this keeps probe
+// telemetry usable on minimal containers that hide /proc/self/auxv.
+//
+// Each auxv entry on 64-bit Linux is two unsigned longs (16 bytes
+// total, little-endian on x86_64/aarch64). The list terminates
+// with type AT_NULL = 0.
+//
+// Cached after first successful read because CLK_TCK is a kernel
+// build-time constant — it never changes for the life of the process.
+var (
+	clkTckOnce  sync.Once
+	clkTckValue int64
+)
+
+const (
+	atClkTckType = 17 // AT_CLKTCK in <elf.h>
+	atNullType   = 0  // AT_NULL terminator
+	auxvEntryLen = 16 // 2 × 8 bytes on 64-bit Linux
+)
+
+func clkTck() int64 {
+	clkTckOnce.Do(func() {
+		clkTckValue = 100 // safe default if auxv is unreadable
+		data, err := os.ReadFile("/proc/self/auxv")
+		if err != nil {
+			return
+		}
+		for i := 0; i+auxvEntryLen <= len(data); i += auxvEntryLen {
+			atype := binary.LittleEndian.Uint64(data[i : i+8])
+			avalue := binary.LittleEndian.Uint64(data[i+8 : i+auxvEntryLen])
+			if atype == atNullType {
+				break
+			}
+			if atype == atClkTckType && avalue > 0 {
+				clkTckValue = int64(avalue)
+				return
+			}
+		}
+	})
+	return clkTckValue
+}
 
 // processIDImpl is the Linux implementation. Uses Kill(0) for
 // liveness; reads /proc/<pid>/exe + /proc/<pid>/cmdline +
@@ -101,7 +150,18 @@ func readStartTimeLinux(pid int) time.Time {
 	if err != nil {
 		return time.Time{}
 	}
-	hz := int64(100) // CLK_TCK on most Linux configs; sysconf(_SC_CLK_TCK) would be more correct
+	// CLK_TCK varies by kernel build (commonly 100/250/1000).
+	// Hard-coding 100 was wrong: on hosts where the kernel ships
+	// 250 or 1000, the computed PIDStart is off by 2.5x/10x and
+	// the start-time identity gate (startTimeBeforeMtime)
+	// misclassifies a legitimate mcphub gui holder as PID-recycled,
+	// so --force --kill refuses with exit 7 against the correct
+	// stuck incumbent. Codex bot review on PR #23.
+	//
+	// We read the kernel-published value via /proc/self/auxv
+	// (AT_CLKTCK entry) — pure Go, no CGo — falling back to 100
+	// only when /proc/self/auxv is unreadable.
+	hz := clkTck()
 	startSecsSinceBoot := startJiffies / hz
 
 	uptimeData, err := os.ReadFile("/proc/uptime")
