@@ -5,7 +5,7 @@ command: uv
 base_args:
   - "run"
   - "--directory"
-  - "C:/Users/dima_/.local/mcp-servers/GDB-MCP"
+  - "${HOME}/.local/mcp-servers/GDB-MCP"
   - "python"
   - "server.py"
 
