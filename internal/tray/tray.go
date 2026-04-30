@@ -60,6 +60,16 @@ type Config struct {
 	// shutdown path as Quit. Optional: if nil, the menu falls back
 	// to plain Quit semantics so the menu item never silently no-ops.
 	QuitAndStopAll func()
+	// RunAllDaemons is called when the user picks "Run all daemons"
+	// from the tray menu. Implementer should call api.RestartAll —
+	// restart of a stopped daemon is functionally a start, so this
+	// serves as "Run all" for the user. Fire-and-forget: GUI stays
+	// open. Optional: silently no-op if nil.
+	RunAllDaemons func()
+	// StopAllDaemons is called when the user picks "Stop all daemons"
+	// from the tray menu. Implementer should call api.StopAll.
+	// Fire-and-forget: GUI stays open. Optional: silently no-op if nil.
+	StopAllDaemons func()
 	// StateCh delivers TrayState transitions. The parent forwards
 	// each value to the child as a JSON state line.
 	StateCh <-chan TrayState
@@ -221,6 +231,14 @@ func Run(ctx context.Context, cfg Config) error {
 				cfg.QuitAndStopAll()
 			case cfg.Quit != nil:
 				cfg.Quit()
+			}
+		case "run-all":
+			if cfg.RunAllDaemons != nil {
+				cfg.RunAllDaemons()
+			}
+		case "stop-all":
+			if cfg.StopAllDaemons != nil {
+				cfg.StopAllDaemons()
 			}
 		default:
 			fmt.Fprintf(os.Stderr, "tray: unknown event %q\n", ev.Event)

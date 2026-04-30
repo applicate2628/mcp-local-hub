@@ -519,7 +519,19 @@ func (tc *trayChild) showPopupMenuAt(x, y int32) {
 		return
 	}
 	if err := appendMenuSeparator(hmenu); err != nil {
-		fmt.Fprintf(os.Stderr, "tray child: AppendMenu(sep): %v\n", err)
+		fmt.Fprintf(os.Stderr, "tray child: AppendMenu(sep1): %v\n", err)
+		return
+	}
+	if err := appendMenuStringW(hmenu, cmdRunAllDaemons, "Run all daemons"); err != nil {
+		fmt.Fprintf(os.Stderr, "tray child: AppendMenu(run-all): %v\n", err)
+		return
+	}
+	if err := appendMenuStringW(hmenu, cmdStopAllDaemons, "Stop all daemons"); err != nil {
+		fmt.Fprintf(os.Stderr, "tray child: AppendMenu(stop-all): %v\n", err)
+		return
+	}
+	if err := appendMenuSeparator(hmenu); err != nil {
+		fmt.Fprintf(os.Stderr, "tray child: AppendMenu(sep2): %v\n", err)
 		return
 	}
 	if err := appendMenuStringW(hmenu, cmdQuit, "Quit (keep daemons)"); err != nil {
@@ -593,6 +605,14 @@ func (tc *trayChild) showPopupMenuAt(x, y int32) {
 		// and only then triggering its own shutdown.
 		tc.emitEvent("quit-and-stop-all")
 		postQuitMessage(0)
+	case cmdRunAllDaemons:
+		// Fire-and-forget: parent calls api.RestartAll. Restart of a
+		// stopped daemon is functionally a start, so this serves as
+		// "Run all" for the user. No PostQuitMessage — GUI stays open.
+		tc.emitEvent("run-all")
+	case cmdStopAllDaemons:
+		// Fire-and-forget: parent calls api.StopAll. GUI stays open.
+		tc.emitEvent("stop-all")
 	}
 }
 
