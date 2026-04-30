@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"mcp-local-hub/internal/process"
 )
 
 // HTTPHost is the stdio-bridge counterpart for MCP servers that speak
@@ -122,6 +124,7 @@ func (h *HTTPHost) Start(ctx context.Context) error {
 	}
 
 	cmd := exec.CommandContext(ctx, h.cfg.Command, h.cfg.Args...)
+	process.NoConsole(cmd) // suppress per-child console pop on windowsgui parents
 	cmd.Dir = h.cfg.WorkingDir
 	if len(h.cfg.Env) > 0 {
 		env := append([]string{}, os.Environ()...)

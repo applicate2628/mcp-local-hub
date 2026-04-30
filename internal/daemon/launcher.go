@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+
+	"mcp-local-hub/internal/process"
 )
 
 // LaunchSpec describes one child-process invocation.
@@ -58,6 +60,7 @@ func Launch(spec LaunchSpec) (int, error) {
 	defer logFile.Close()
 
 	cmd := exec.Command(spec.Command, spec.Args...)
+	process.NoConsole(cmd) // suppress per-child console pop on windowsgui parents
 	cmd.Stdout = io.MultiWriter(logFile, os.Stdout)
 	cmd.Stderr = io.MultiWriter(logFile, os.Stderr)
 	cmd.Dir = spec.WorkingDir

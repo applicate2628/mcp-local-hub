@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"mcp-local-hub/internal/process"
 )
 
 // isOurOwnProcess returns true when the cmdline's executable token is one
@@ -133,7 +135,9 @@ func (a *API) CleanupOrphans(opts CleanupOpts) ([]OrphanProcess, error) {
 	// per-orphan report instead of silently swallowing the error.
 	if !opts.DryRun {
 		for i := range filtered {
-			out, err := exec.Command("taskkill", "/PID", strconv.Itoa(filtered[i].PID), "/F").CombinedOutput()
+			cmd := exec.Command("taskkill", "/PID", strconv.Itoa(filtered[i].PID), "/F")
+			process.NoConsole(cmd)
+			out, err := cmd.CombinedOutput()
 			if err != nil {
 				msg := strings.TrimSpace(string(out))
 				if msg == "" {

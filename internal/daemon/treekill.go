@@ -4,6 +4,8 @@ import (
 	"os/exec"
 	"runtime"
 	"strconv"
+
+	"mcp-local-hub/internal/process"
 )
 
 // killProcessTree terminates the process rooted at pid along with its
@@ -38,6 +40,7 @@ func killProcessTree(pid int) error {
 		// branch is only compiled but not executed.
 		cmd = exec.Command("pkill", "-TERM", "-P", strconv.Itoa(pid))
 	}
+	process.NoConsole(cmd) // suppress per-child console pop on windowsgui parents
 	// Ignore cmd output — Windows taskkill prints "SUCCESS: ..." /
 	// "ERROR: The process <pid> not found" and we treat both the same.
 	_ = cmd.Run()

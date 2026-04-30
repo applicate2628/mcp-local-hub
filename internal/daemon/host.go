@@ -15,6 +15,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"mcp-local-hub/internal/process"
 )
 
 // HostConfig describes one stdio-host instance.
@@ -112,6 +114,7 @@ func (h *StdioHost) Start(ctx context.Context) error {
 	}
 
 	cmd := exec.CommandContext(ctx, h.cfg.Command, h.cfg.Args...)
+	process.NoConsole(cmd) // suppress per-child console pop on windowsgui parents
 	cmd.Dir = h.cfg.WorkingDir
 	if len(h.cfg.Env) > 0 {
 		env := append([]string{}, os.Environ()...)

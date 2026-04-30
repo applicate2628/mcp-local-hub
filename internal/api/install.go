@@ -21,6 +21,7 @@ import (
 
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/process"
 	"mcp-local-hub/internal/scheduler"
 	"mcp-local-hub/internal/secrets"
 )
@@ -1608,7 +1609,9 @@ func killDaemonByPort(port int, timeout time.Duration) error {
 	if !ok {
 		return nil
 	}
-	out, err := exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/F", "/T").CombinedOutput()
+	cmd := exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/F", "/T")
+	process.NoConsole(cmd)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("taskkill %d: %w: %s", pid, err, strings.TrimSpace(string(out)))
 	}

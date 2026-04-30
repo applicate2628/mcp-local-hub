@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"mcp-local-hub/internal/process"
 )
 
 // windowsScheduler shells out to `schtasks.exe` for all operations.
@@ -201,6 +203,7 @@ func (w *windowsScheduler) Create(spec TaskSpec) error {
 	tmp.Close()
 
 	cmd := exec.Command(w.schtasksPath, "/Create", "/TN", spec.Name, "/XML", tmp.Name(), "/F")
+	process.NoConsole(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("schtasks /Create: %w: %s", err, string(out))
@@ -234,6 +237,7 @@ func utf8ToUTF16WithBOM(s string) []byte {
 
 func (w *windowsScheduler) Delete(name string) error {
 	cmd := exec.Command(w.schtasksPath, "/Delete", "/TN", name, "/F")
+	process.NoConsole(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		// If the task does not exist, schtasks returns exit 1 with "ERROR: The system cannot find the file specified."
@@ -252,6 +256,7 @@ func (w *windowsScheduler) Delete(name string) error {
 // failures) when the task does not exist.
 func (w *windowsScheduler) ExportXML(name string) ([]byte, error) {
 	cmd := exec.Command(w.schtasksPath, "/Query", "/TN", name, "/XML")
+	process.NoConsole(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if strings.Contains(string(out), "cannot find") || strings.Contains(string(out), "does not exist") {
@@ -279,6 +284,7 @@ func (w *windowsScheduler) ImportXML(name string, xml []byte) error {
 	}
 	tmp.Close()
 	cmd := exec.Command(w.schtasksPath, "/Create", "/TN", name, "/XML", tmp.Name(), "/F")
+	process.NoConsole(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("schtasks /Create /XML: %w: %s", err, string(out))
@@ -288,6 +294,7 @@ func (w *windowsScheduler) ImportXML(name string, xml []byte) error {
 
 func (w *windowsScheduler) Run(name string) error {
 	cmd := exec.Command(w.schtasksPath, "/Run", "/TN", name)
+	process.NoConsole(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("schtasks /Run: %w: %s", err, string(out))
@@ -297,6 +304,7 @@ func (w *windowsScheduler) Run(name string) error {
 
 func (w *windowsScheduler) Stop(name string) error {
 	cmd := exec.Command(w.schtasksPath, "/End", "/TN", name)
+	process.NoConsole(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		// "ERROR: There is no running instance of the task." → nil
@@ -310,6 +318,7 @@ func (w *windowsScheduler) Stop(name string) error {
 
 func (w *windowsScheduler) Status(name string) (TaskStatus, error) {
 	cmd := exec.Command(w.schtasksPath, "/Query", "/TN", name, "/V", "/FO", "LIST")
+	process.NoConsole(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return TaskStatus{}, fmt.Errorf("schtasks /Query: %w: %s", err, string(out))
@@ -319,6 +328,7 @@ func (w *windowsScheduler) Status(name string) (TaskStatus, error) {
 
 func (w *windowsScheduler) List(prefix string) ([]TaskStatus, error) {
 	cmd := exec.Command(w.schtasksPath, "/Query", "/V", "/FO", "LIST")
+	process.NoConsole(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("schtasks /Query: %w: %s", err, string(out))

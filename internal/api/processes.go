@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"mcp-local-hub/internal/process"
 )
 
 // CountProcesses returns how many OS processes currently match the given
@@ -81,9 +83,11 @@ func (a *API) CountProcessesFromSnapshot(snap processSnapshot, patterns []string
 // single string for convenience; callers wrap in strings.NewReader.
 func runProcessSnapshot() (string, error) {
 	// Legacy path: wmic (present on Windows 10 and older Windows 11).
-	wmicOut, wmicErr := exec.Command("wmic", "process", "get",
+	wmicCmd := exec.Command("wmic", "process", "get",
 		"CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize",
-		"/format:csv").Output()
+		"/format:csv")
+	process.NoConsole(wmicCmd)
+	wmicOut, wmicErr := wmicCmd.Output()
 	if wmicErr == nil {
 		return string(wmicOut), nil
 	}
@@ -98,7 +102,9 @@ func runProcessSnapshot() (string, error) {
 		$created = $_.CreationDate.ToString('yyyyMMddHHmmss') + '.000000+000'
 		[string]::Format('HOST,"{0}",{1},{2},{3},{4}', $cmdline, $created, $_.ParentProcessId, $_.ProcessId, $_.WorkingSetSize)
 	}`
-	psOut, psErr := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript).Output()
+	psCmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
+	process.NoConsole(psCmd)
+	psOut, psErr := psCmd.Output()
 	if psErr != nil {
 		return "", fmt.Errorf("both wmic and PowerShell process snapshot failed: wmic=%v; powershell=%v", wmicErr, psErr)
 	}
@@ -140,6 +146,7 @@ func (a *API) ListMatchingProcesses(patterns []string) ([]ProcessInfo, error) {
 		return nil, nil
 	}
 	cmd := exec.Command("wmic", "process", "get", "CommandLine,ProcessId,WorkingSetSize", "/format:csv")
+	process.NoConsole(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("wmic: %w", err)
@@ -232,7 +239,9 @@ func init() {
 			return 0, 0, 0, false
 		}
 		// Step 1: PID via netstat
-		out, err := exec.Command("netstat", "-ano").Output()
+		netstatCmd := exec.Command("netstat", "-ano")
+		process.NoConsole(netstatCmd)
+		out, err := netstatCmd.Output()
 		if err != nil {
 			return 0, 0, 0, false
 		}
@@ -247,9 +256,11 @@ func init() {
 			return 0, 0, 0, false
 		}
 		// Step 2: RAM + CreationDate via wmic
-		out2, err := exec.Command("wmic", "process", "where",
+		wmicLookupCmd := exec.Command("wmic", "process", "where",
 			fmt.Sprintf("ProcessId=%d", pid),
-			"get", "WorkingSetSize,CreationDate", "/format:csv").Output()
+			"get", "WorkingSetSize,CreationDate", "/format:csv")
+		process.NoConsole(wmicLookupCmd)
+		out2, err := wmicLookupCmd.Output()
 		if err != nil {
 			return pid, 0, 0, true
 		}
@@ -289,7 +300,9 @@ func init() {
 		}
 
 		// Step 1: one netstat -ano → build port→pid map.
-		out, err := exec.Command("netstat", "-ano").Output()
+		netCmd := exec.Command("netstat", "-ano")
+		process.NoConsole(netCmd)
+		out, err := netCmd.Output()
 		if err != nil {
 			return result
 		}
@@ -342,9 +355,11 @@ func init() {
 			first = false
 			fmt.Fprintf(&wmicWhere, "ProcessId=%d", pid)
 		}
-		out2, err := exec.Command("wmic", "process", "where",
+		wmicMultiCmd := exec.Command("wmic", "process", "where",
 			wmicWhere.String(),
-			"get", "ProcessId,WorkingSetSize,CreationDate", "/format:csv").Output()
+			"get", "ProcessId,WorkingSetSize,CreationDate", "/format:csv")
+		process.NoConsole(wmicMultiCmd)
+		out2, err := wmicMultiCmd.Output()
 		if err != nil {
 			// Fall back to PIDs without RAM/uptime — still useful.
 			for port, pid := range portToPID {
