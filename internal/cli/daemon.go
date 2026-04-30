@@ -262,12 +262,18 @@ func logBaseDir() string {
 // goal is to distinguish silent-exit failure modes that the log file
 // alone cannot — Codex CLI consult, 2026-04-30:
 //
-//	exit code 0   — controlled sys.exit(0); upstream thinks it shut down
-//	                cleanly. Hints at swallowed exception or misconfig.
-//	exit code 1   — generic error path; matches Python's `sys.exit(1)`.
-//	exit code 137 (POSIX) — SIGKILL from parent or OOM.
-//	exit code -1 / 0xC0000005 / 0xC000013A — Windows native crash or
-//	                CTRL_BREAK from parent.
+//	exit code 0    — controlled sys.exit(0); upstream thinks it shut
+//	                 down cleanly. Hints at swallowed exception.
+//	exit code 1    — generic error path; matches Python's sys.exit(1).
+//	signal=killed  — POSIX SIGKILL (parent kill or OOM).
+//	signal=segfault — POSIX native crash.
+//	0xC0000005 / 0xC000013A — Windows native crash or CTRL_BREAK.
+//
+// On POSIX, ProcessState.ExitCode() returns -1 for signal-terminated
+// processes — that loses exactly the SIGKILL distinction the
+// diagnostic is meant to capture. extractSignal pulls the signal name
+// out of the WaitStatus on Unix; it is a no-op on Windows where the
+// NTSTATUS is already encoded in ExitCode. Codex bot review on PR #33 P2.
 //
 // Returns "" when state is nil (process never spawned, still running,
 // or Wait() not yet called) so the caller's Errorf format stays clean.
@@ -275,7 +281,7 @@ func formatChildExit(state *os.ProcessState) string {
 	if state == nil {
 		return ""
 	}
-	return fmt.Sprintf(" (pid=%d exit_code=%d)", state.Pid(), state.ExitCode())
+	return fmt.Sprintf(" (pid=%d exit_code=%d%s)", state.Pid(), state.ExitCode(), extractSignal(state))
 }
 
 // writeLaunchFailure appends a timestamped failure diagnostic to the
