@@ -29,10 +29,17 @@ type ScanOpts struct {
 
 // perSessionServers are MCP servers whose sessions must remain isolated
 // per local client/process. Even when an upstream tool supports a session_id
-// parameter, we conservatively keep debuggers per-session unless the hub
+// parameter, we conservatively keep them per-session unless the hub
 // enforces caller authentication and session ownership.
+//
+// gdb was previously listed here; PR #24 restored servers/gdb/manifest.yaml
+// as a hub-managed daemon because GDB-MCP has built-in session management
+// (modules/{gdb,lldb}/sessionManager.py) where each client call carries a
+// session_id, so one daemon serves N concurrent debug sessions safely.
+// Keeping gdb in this map after restoring the manifest would force
+// CanMigrate=false in scan results and contradict the manifest contract.
+// Codex bot review on PR #24.
 var perSessionServers = map[string]bool{
-	"gdb":        true,
 	"playwright": true,
 }
 

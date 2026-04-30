@@ -54,6 +54,30 @@ Tracking document for Phase 3B-II — the "everything I cut from Phase 3B-I MVP"
 | §2.1 #3 | Create manifest from unknown stdio — "I have cursor-mcp-fetch configured as stdio, wrap it into a hub daemon" | A1 + A2 + B2 |
 | §2.1 #7 | Backup management UX — list + restore + delete timestamped backups, keep-N enforcement UI | A4 Settings screen |
 
+### F. Linux-server readiness (post-Phase 3B-II)
+
+**Strategic goal:** project ships first on Windows desktop, but should be deployable on a **headless Linux server** without rewriting cross-cutting subsystems. Scoped under "server" deliberately — Linux DESKTOP (tray icons, browser focus, GNOME-tray-extension territory) is OUT of scope; on a server these are no-ops by design.
+
+| # | Item | Effort | Description |
+|---|---|---|---|
+| F1 | **Platform-lane refactor** | ~1d | Move Windows-specific implementations into `internal/platform/windows/` behind a `Platform` interface; `internal/platform/linux/` and `internal/platform/darwin/` start as stubs. No behavior change. Goal: future Linux/macOS work touches ONE directory, not 17 scattered build-tagged files. Pre-req for everything else in F. |
+| F2 | **Linux scheduler — systemd user units** | ~3-5d | Replace `not implemented` stub with a real systemd backend in `internal/scheduler/scheduler_linux.go` (or via the F1 lane). Generate `~/.config/systemd/user/mcp-local-hub-<server>-<daemon>.service` units, `systemctl --user enable/start/stop/status` plumbing, log forwarding. CI: spawn ubuntu-latest container, run `mcphub install --server time` smoke test. |
+| F3 | **`mcphub setup --server`** | ~1d | Server-mode setup that registers the binary path AND enables `systemctl --user start mcp-local-hub-*.service` on boot via `loginctl enable-linger <user>`. Skip the GUI auto-launch + tray + browser config emitted by desktop setup. |
+| F4 | **Headless guards in GUI subsystem** | ~half-day | `mcphub gui` on Linux server should: skip `LaunchBrowser` if `$DISPLAY`/`$WAYLAND_DISPLAY` is unset, skip tray spawn (already no-op via `tray_other.go`), still bind HTTP server on `127.0.0.1` so admin can SSH-tunnel and use the dashboard remotely. |
+| F5 | **journald logging adapter** | ~1d | Optional: when running under systemd, write structured logs to journald (via `systemd-cat` pipe or `sd_journal_send`-style in pure Go) instead of file-rotated logs. Not a blocker; the file-based logs work fine on a server. |
+| F6 | **macOS process probe (libproc / sysctl)** | ~half-day | Currently `probe_darwin.go` returns "macOS not supported" for `--force --kill`. Implement via `libproc.proc_pidpath` (image), `sysctl(KERN_PROCARGS2)` (cmdline), and `sysctl(KERN_PROC_PID).kp_proc.p_starttime` (start-time). Earned during F1 lane refactor — needed on any Mac contributor / dev machine. Tracked as iter-2 P2 #3 follow-up from PR #23. |
+| F7 | **CI Linux build matrix** | ~1d | Add `GOOS=linux` build + `go test ./...` on `ubuntu-latest` to GitHub Actions, alongside existing `windows-latest` E2E job. Catches Linux regressions early; F1-F4 enable green CI status on Linux. |
+
+**Explicitly OUT of scope for F (Linux desktop, not server):**
+
+- Linux tray icon (DBus StatusNotifierItem + AppIndicator + GNOME-without-tray edge case + Wayland constraints — substantial sub-project, no value on a server)
+- Linux browser focus (X11 `xdotool`, Wayland blocks foreground steal entirely — no value on a server)
+- macOS desktop tray (NSStatusItem via CGo to Cocoa — no value on a server)
+
+These remain documented as "Cross-platform tray (Linux/macOS) — explicit non-goal per spec §2.2" further down.
+
+**Sequencing within F:** F1 → F7 (so future work has CI safety net) → F2/F3 in either order → F4/F5/F6 as needed.
+
 ---
 
 ## Suggested sequencing
@@ -74,6 +98,10 @@ Tracking document for Phase 3B-II — the "everything I cut from Phase 3B-I MVP"
 12. **C1** — `--force` take-over (single-instance lock recovery) — **PR #23 (next).** C2 browser focus closed in PR #22.
 13. **A4-b** — Settings lifecycle (tray toggle, weekly schedule edit, retry policy, port live-rebind, Clean-now confirm, export bundle) — **PR #24 (last).**
 14. **Release hardening** — execute `docs/phase-3b-ii-verification.md` D2 + D3 manual smoke on a real Windows desktop session before tagging.
+15. **F1** — Platform-lane refactor (move Windows-specific impl'ы into `internal/platform/windows/`; pre-req for any Linux/macOS work). See § F.
+16. **F7** — CI Linux build matrix (catches regressions before F2-F6 land). See § F.
+17. **F2 + F3** — Linux scheduler (systemd user units) + `mcphub setup --server`. Unlocks `mcphub install` on a Linux server. See § F.
+18. **F4 + F5 + F6** — Headless GUI guards, journald adapter, macOS probe. Polish + Mac dev machine support. See § F.
 
 ### Daemon-management hygiene follow-ups (post-A4-a, separate sprint)
 
@@ -88,7 +116,7 @@ Surfaced during A4-a local smoke (2026-04-28) and confirmed via Codex consult. I
 
 **Out of scope of PR #21:**
 
-- ~~Add `servers/gdb/manifest.yaml` to the repo.~~ **Withdrawn (2026-04-28):** gdb was intentionally retired in PR #13 — see `retiredServerNames` in `internal/api/install.go:707` (manifest-less uninstall fallback for stale state) AND `perSessionServers` in `internal/api/scan.go:34` (gdb is a debugger, always per-session, not hub-managed). Restoring the manifest contradicts both contracts. DM-1 narrowing is the correct production fix; users with stale Task Scheduler entries clear them via `mcphub uninstall gdb`.
+- ~~Add `servers/gdb/manifest.yaml` to the repo.~~ **Withdrawn (2026-04-28):** gdb was intentionally retired in PR #13 — see `retiredServerNames` in `internal/api/install.go:707` (manifest-less uninstall fallback for stale state) AND `perSessionServers` in `internal/api/scan.go:34` (gdb is a debugger, always per-session, not hub-managed). Restoring the manifest contradicts both contracts. DM-1 narrowing is the correct production fix; users with stale Task Scheduler entries clear them via `mcphub uninstall gdb`. **Reversed (2026-04-30):** gdb manifest IS now in the repo at `servers/gdb/manifest.yaml` — re-added as part of PR #24 because the GDB-MCP project has built-in session management (`modules/gdb/sessionManager.py` + `modules/lldb/sessionManager.py`) where each client call carries a `session_id`, so one daemon serves N concurrent debug sessions on the hub. That breaks the original "always per-session" assumption that motivated the withdrawal. The hub-managed daemon model fits this server. Restoration ships gdb at port 9129 with session management server-side.
 - ~~`TestInstallAllInstallsEverything` flake (hardcoded 9130/9131).~~ **Closed (PR #22 commit 1):** test now uses `pickFreeLocalPort` so it survives TIME_WAIT residue and parallel daemon ownership.
 - Enforce disjoint port ranges for GUI vs daemon manifests (DM-2 root cause — **open**). Today the GUI's `--port` default is `9125` and the wolfram manifest also declares 9125; the self-PID skip turns the symptom into a silent no-op but the collision is still bad operator UX (e.g. `mcphub status` reports the daemon as `Stopped` when the user's actual hub server IS bound to that port).
 
@@ -113,3 +141,7 @@ Surfaced during A4-a local smoke (2026-04-28) and confirmed via Codex consult. I
 - Multi-user / remote access — explicit non-goal per spec §2.2
 - Real-time log search across daemons — explicit non-goal per spec §2.2
 - JSON Schema inline validation in manifest form — explicit non-goal per spec §2.2 (save-time validation via `api.ManifestValidate` is sufficient)
+
+### Closed by PR #24 (tray rewrite, 2026-04-30)
+
+✅ **Tray subprocess + direct-Win32**: PR #24 spawns the tray as a separate `mcphub tray` child process and implements it via direct `golang.org/x/sys/windows` syscalls (no CGo, no third-party tray library). Click handler uses `Shell_NotifyIconGetRect` for deterministic icon-anchored popup placement; `NIM_SETVERSION(4)` + `MonitorFromPoint`/`GetMonitorInfoW` for multi-monitor-correct alignment; `TaskbarCreated` re-add survives explorer restart; `SetProcessDpiAwarenessContext` aligns coord spaces on scaled monitors. Supersedes any earlier `getlantern/systray` → `fyne.io/systray` → `energye/systray` migration plans — direct-Win32 is the chosen end state.

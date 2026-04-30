@@ -1,0 +1,35 @@
+name: gdb
+kind: global
+transport: stdio-bridge
+command: uv
+base_args:
+  - "run"
+  - "--directory"
+  - "${HOME}/.local/mcp-servers/GDB-MCP"
+  - "python"
+  - "server.py"
+
+# GDB-MCP is a multi-debugger MCP server (gdb + lldb submodules) with built-in
+# session management (modules/gdb/sessionManager.py + modules/lldb/sessionManager.py).
+# Each client call includes a session_id; one daemon serves N concurrent debug
+# sessions. This is why it belongs on the hub instead of in perSessionServers.
+
+daemons:
+  - name: default
+    port: 9129
+
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+  - client: codex-cli
+    daemon: default
+    url_path: /mcp
+  - client: gemini-cli
+    daemon: default
+    url_path: /mcp
+  - client: antigravity
+    daemon: default
+    url_path: /mcp
+
+weekly_refresh: false

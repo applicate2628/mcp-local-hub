@@ -30,22 +30,28 @@ Capture the binary version at the bottom for the audit trail.
 
 ### D2.1 Tray icon rendering and state variants
 
-The tray icon is rendered by `getlantern/systray` from a 16×16 PNG
-embedded into the binary at four state variants
-(healthy / degraded / down / migrating). State changes are driven
-by SSE `daemon-state` events the GUI poller publishes every 5s.
+The tray icon is rendered by direct Win32 syscalls (user32 + shell32
+via `golang.org/x/sys/windows` lazy DLL imports — no CGo, no
+third-party tray library) running in a separate `mcphub tray`
+subprocess spawned from `mcphub gui`. PR #24 replaced the prior
+`getlantern/systray`-based path. Programmatically generated 16×16
+PNG icons (`internal/tray/icons.go`) are pushed via stdin JSON IPC
+at four state variants (healthy / partial / down / error). State
+changes are driven by SSE `daemon-state` events the GUI poller
+publishes every 5s.
 
 | Step | Expectation | Result |
 |---|---|---|
-| 1. Launch `mcphub gui` | Tray icon appears in notification area; left-click opens dashboard at `http://127.0.0.1:9125` | |
-| 2. Hover the icon | Tooltip shows current daemon-state summary, ≤127 characters | |
-| 3. Right-click | Menu shows: Open dashboard, Restart all daemons, Rescan client configs, "Show recent activity" submenu (last 5 events), Open logs folder, Open data folder, Quit (keep daemons), Quit and stop all | |
-| 4. With all daemons running, observe the icon | "healthy" variant rendered (color-coded green or check-mark) | |
-| 5. Stop one daemon via `mcphub stop <server>` | Icon switches to "degraded" within ~5s | |
+| 1. Launch `mcphub gui` | Tray icon appears in notification area; left-click brings the dashboard window to front (`gui.FocusBrowserWindow`); on no-window fallback opens a fresh `http://127.0.0.1:<port>/` | |
+| 2. Hover the icon | Tooltip shows `mcp-local-hub: <state>` (one-word state label) | |
+| 3. Right-click OR keyboard Apps-key / Shift+F10 on the focused icon | Two-item popup menu anchored at the icon's screen rect: "Open dashboard", "Quit (keep daemons)". A single right-click delivers BOTH `WM_RBUTTONUP` AND `WM_CONTEXTMENU` on Win11 — the 200ms `lastMenuShow` debounce in `tray_windows.go` absorbs the second event so the menu does NOT re-open after dismissal. | |
+| 4. With all daemons running, observe the icon | "healthy" variant rendered (color-coded green) | |
+| 5. Stop one daemon via `mcphub stop <server>` | Icon switches to "partial" within ~5s | |
 | 6. Stop all daemons | Icon switches to "down" within ~5s | |
-| 7. Trigger weekly-refresh (`mcphub weekly-refresh`) | Icon switches to "migrating" while the task runs | |
-| 8. Click "Quit (keep daemons)" | GUI closes, tray icon disappears, scheduler tasks remain ACTIVE (`mcphub status` still shows them) | |
-| 9. Re-launch `mcphub gui`, click "Quit and stop all" | GUI closes, daemons stopped (`mcphub status` shows Stopped) | |
+| 7. Trigger a daemon failure | Icon switches to "error" with a single failure-onset toast (`internal/tray/toast_windows.go::ShowToast`); subsequent identical failures do NOT re-toast | |
+| 8. Click "Quit (keep daemons)" | GUI closes, tray icon disappears (NIM_DELETE before destroyWindow), scheduler tasks remain ACTIVE (`mcphub status` still shows them) | |
+| 9. Re-launch `mcphub gui`, kill `mcphub tray` child via Task Manager | Parent GUI surfaces "tray subprocess exited" stderr line; GUI continues serving `http://127.0.0.1:<port>/`; tray child does NOT auto-respawn (deliberate — restart `mcphub gui` to recover the tray) | |
+| 10. Restart Explorer (Task Manager → "Restart") | Tray icon re-appears at the same state via the `TaskbarCreated` re-register path; `versionV4` is reset to the new SETVERSION outcome (legacy mode if the new shell instance refuses V4) | |
 
 ### D2.2 AttachConsole + windowsgui subsystem matrix
 

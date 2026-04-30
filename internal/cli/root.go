@@ -45,6 +45,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newMigrateLegacyCmd())
 	root.AddCommand(newWeeklyRefreshCmd())
 	root.AddCommand(newGuiCmd())
+	root.AddCommand(newTrayCmd())
 	root.AddCommand(lldb.NewCommand())
 	root.AddCommand(godbolt.NewCommand())
 	root.AddCommand(perftools.NewCommand())
@@ -88,3 +89,4 @@ func newWorkspacesCmd() *cobra.Command    { return newWorkspacesCmdReal() }
 func newMigrateLegacyCmd() *cobra.Command { return newMigrateLegacyCmdReal() }
 func newWeeklyRefreshCmd() *cobra.Command { return newWeeklyRefreshCmdReal() }
 func newGuiCmd() *cobra.Command           { return newGuiCmdReal() }
+func newTrayCmd() *cobra.Command          { return newTrayCmdReal() }
