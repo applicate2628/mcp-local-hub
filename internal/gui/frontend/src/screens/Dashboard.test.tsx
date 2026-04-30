@@ -455,6 +455,54 @@ describe("DashboardScreen — Stop button", () => {
     });
   });
 
+  // Codex bot PR #39 P2 ("Let bulk outcome override stale per-card
+  // flash state"): a recent local click leaves the per-card button
+  // state in "done"/"error" for 1.5s. If a bulk action lands during
+  // that flash window, every card MUST show the bulk outcome —
+  // otherwise the card with the stale local flash diverges from
+  // siblings, breaking the "all cards mirror bulk action" invariant.
+  it("bulk outcome overrides stale per-card flash state", async () => {
+    vi.useRealTimers();
+    let resolveLocal: (r: Response) => void = () => {};
+    const localStop = new Promise<Response>((resolve) => {
+      resolveLocal = resolve;
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") return Promise.resolve(statusResponse([runningRow]));
+      if (url === "/api/servers/memory/stop?daemon=default") return localStop;
+      return Promise.reject(new Error(`unexpected: ${url}`));
+    });
+
+    const { findAllByRole } = render(<DashboardScreen />);
+    await waitFor(async () => {
+      const buttons = await findAllByRole("button");
+      expect(buttons.length).toBe(4);
+    });
+    const buttons = await findAllByRole("button");
+    const cardStop = buttons[3] as HTMLButtonElement;
+
+    // Local click on per-card Stop, resolve to "Stopped" flash.
+    fireEvent.click(cardStop);
+    resolveLocal(jsonResponse(200, { stop_results: [] }));
+    await waitFor(() => expect(cardStop.textContent).toBe("Stopped"));
+
+    // Tray triggers Run all DURING the 1.5s "Stopped" flash window.
+    // Card's Restart button is also in stale-idle, but its Stop is
+    // showing "Stopped" — when the bulk Restart completes, every
+    // card's Restart MUST show the bulk outcome ("Restarted").
+    dispatchSse("bulk-action", { phase: "started", action: "restart" });
+    dispatchSse("bulk-action", { phase: "completed", action: "restart" });
+    await waitFor(() => {
+      const btns = (Array.from(document.querySelectorAll("button"))) as HTMLButtonElement[];
+      expect(btns[2].textContent).toBe("Restarted"); // bulk cascade wins
+    });
+    // Stop button's local "Stopped" flash is unaffected (different
+    // action than the bulk one).
+    const cardStopAfter = (await findAllByRole("button"))[3] as HTMLButtonElement;
+    expect(cardStopAfter.textContent).toBe("Stopped");
+  });
+
   // Codex bot PR #38 P1 (commit ef0f4ea, "Correlate bulk-action
   // terminal events before unlocking UI"): concurrent triggers
   // (Dashboard + tray, or two Dashboards) can interleave SSE events.
