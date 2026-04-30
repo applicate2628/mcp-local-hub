@@ -237,7 +237,17 @@ export function DashboardScreen() {
   // outcome=error so prev ?? wins (idempotent).
   const setLocalErrorFallback = useCallback((action: BulkAction) => {
     setBulkInflight(null);
-    setBulkOutcome((prev) => prev ?? { action, state: "error" });
+    // Codex bot PR #38 P2 (commit ff656fe): prev ?? error preserved
+    // STALE outcomes from prior actions. If user clicked Run all
+    // (success → outcome=done flash), then clicked Stop all within
+    // the 1.5s flash window and Stop's POST rejected → prev=done
+    // (restart) ?? would suppress the new error → user sees no
+    // feedback for the failed Stop click. Fix: only keep prev if
+    // it's for the SAME action (idempotent on real partial-fail
+    // where SSE 'error' already arrived); otherwise set new error.
+    setBulkOutcome((prev) =>
+      prev && prev.action === action ? prev : { action, state: "error" },
+    );
     if (bulkResetTimerRef.current) clearTimeout(bulkResetTimerRef.current);
     bulkResetTimerRef.current = setTimeout(() => {
       setBulkOutcome(null);

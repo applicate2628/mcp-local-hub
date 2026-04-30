@@ -396,6 +396,50 @@ describe("DashboardScreen — Stop button", () => {
   // rapid clicks before that fire two POSTs and reintroduce
   // overlapping fan-outs. Optimistic-set on click closes the window:
   // the second click sees bulkInflight!==null and is gated.
+  // Codex bot PR #38 P2 (commit ff656fe): "Report failed click even
+  // when prior bulk outcome is visible". prev ?? error suppressed
+  // new failures when a previous outcome was still in its 1.5s flash.
+  // Fix: only preserve prev if prev.action === action (same action,
+  // SSE-driven error overrides idempotently). For different actions,
+  // the new error wins.
+  it("local fallback: stale prior outcome does NOT mask a new failed click", async () => {
+    vi.useRealTimers();
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") return Promise.resolve(statusResponse([runningRow]));
+      if (url === "/api/restart-all") return Promise.resolve(jsonResponse(200, { restart_results: [] }));
+      if (url === "/api/stop-all") return Promise.reject(new Error("net::ERR"));
+      return Promise.reject(new Error(`unexpected: ${url}`));
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { findAllByRole } = render(<DashboardScreen />);
+    await waitFor(async () => {
+      const buttons = await findAllByRole("button");
+      expect(buttons.length).toBe(4);
+    });
+    let buttons = await findAllByRole("button");
+    let runAllBtn = buttons[0] as HTMLButtonElement;
+    let stopAllBtn = buttons[1] as HTMLButtonElement;
+
+    // First action: Run all succeeds via SSE.
+    fireEvent.click(runAllBtn);
+    dispatchSse("bulk-action", { phase: "started", action: "restart" });
+    dispatchSse("bulk-action", { phase: "completed", action: "restart" });
+    await waitFor(() => expect(runAllBtn.textContent).toBe("Started"));
+
+    // Second action: Stop all REJECTS — different action than the
+    // stale outcome (which is restart=done). New error MUST win;
+    // prior `Started` flash on Run all gets cleared.
+    fireEvent.click(stopAllBtn);
+    await waitFor(() => expect(stopAllBtn.textContent).toBe("Failed"));
+    // Run all button should NOT still show "Started" — outcome is now
+    // for stop, so it falls back to idle.
+    buttons = await findAllByRole("button");
+    runAllBtn = buttons[0] as HTMLButtonElement;
+    expect(runAllBtn.textContent).toBe("Run all");
+  });
+
   it("re-entrant guard: rapid second click does not fire a second POST", async () => {
     vi.useRealTimers();
     let restartFireCount = 0;
