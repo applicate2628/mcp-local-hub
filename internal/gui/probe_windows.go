@@ -85,9 +85,10 @@ func processIDImpl(pid int) (ProcessIdentity, error) {
 // Residual TOCTOU window: between processID's gate evaluation and
 // this OpenProcess call, the target PID can in theory be recycled
 // by the kernel. Pinning a PROCESS handle from probe-time through
-// kill-time would close the window — tracked as backlog F8 (handle
-// pinning). The window is microseconds in practice; Windows' PID
-// allocator returns from a pool with a multi-second minimum recycle
+// kill-time (via the `Handle` field on ProcessIdentity, currently
+// always 0) would close the window — left as a follow-up hardening
+// task. The window is microseconds in practice; Windows' PID
+// allocator returns from a pool with multi-second minimum recycle
 // latency, so the race is documented residual risk rather than an
 // immediate-exploit gap.
 func killProcessImpl(pid int) error {
@@ -104,8 +105,8 @@ func killProcessImpl(pid int) error {
 }
 
 // closeProcessHandle is the no-op companion to ProcessIdentity.Handle.
-// Reserved for the F8 hardening lane; when Handle is populated it
-// will release the kernel reference.
+// Reserved for the future handle-pinning hardening; when Handle is
+// populated it will release the kernel reference.
 func closeProcessHandle(_ uintptr) {}
 
 // queryImagePath returns the canonical executable path for an open

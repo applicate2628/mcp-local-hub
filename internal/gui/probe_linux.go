@@ -190,9 +190,10 @@ func processIDImpl(pid int) (ProcessIdentity, error) {
 }
 
 // killProcessImpl sends SIGKILL by PID. Residual TOCTOU: between
-// gate-pass and Kill the kernel can in theory recycle the PID. Backlog
-// F8 (handle pinning) will switch to pidfd_send_signal on Linux 5.3+
-// to close the race; documented as residual risk for now.
+// gate-pass and Kill the kernel can in theory recycle the PID. A
+// future hardening lane will switch to pidfd_send_signal on Linux
+// 5.3+ (with PID-fallback on older kernels) to close the race;
+// documented as residual risk for now.
 func killProcessImpl(pid int) error {
 	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
 		return fmt.Errorf("kill(%d, SIGKILL): %w", pid, err)
@@ -201,7 +202,7 @@ func killProcessImpl(pid int) error {
 }
 
 // closeProcessHandle no-op companion to ProcessIdentity.Handle.
-// Linux populates Handle only when F8 (pidfd) lands.
+// Linux will populate Handle when the pidfd-based hardening lands.
 func closeProcessHandle(_ uintptr) {}
 
 // readStartTimeLinux returns the process's wall-clock start time by

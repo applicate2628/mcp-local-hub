@@ -429,18 +429,24 @@ func runForceKill(ctx context.Context, cmd *cobra.Command, pidportPath string, y
 		// for scripted input get honored.
 		//
 		// Sonnet review on PR #23 F2: pipe the read through an
-		// io.Pipe whose write end we close on ctx.Done. Without it,
-		// the Fscanln goroutine sat blocked forever on the underlying
-		// stream after ctx canceled — an unbounded goroutine leak in
-		// any embedding context (the CLI single-shot path was
-		// process-bounded and harmless, but the planned A4-b HTTP
-		// `/api/force-kill` path would compound). Closing the pipe
-		// reader unblocks Fscanln with io.ErrClosedPipe so the
-		// scanner goroutine actually exits when ctx fires.
+		// io.Pipe whose reader we close on ctx.Done. Closing pr
+		// unblocks Fscanln with io.ErrClosedPipe so the consumer
+		// goroutine exits cleanly when ctx fires.
+		//
+		// Codex CLI xhigh round-4 follow-up: the source-side io.Copy
+		// goroutine still blocks on the original cmd.InOrStdin (an
+		// os.File or buffer with no cancellation primitive that we
+		// own). This is a documented residual leak bounded by process
+		// lifetime: the CLI is single-shot, so on ctx-cancel the
+		// process is exiting anyway and the goroutine is reaped by
+		// the OS. The Fscanln consumer side (the actual blocker the
+		// prior bug worried about — operator hits Ctrl+C and stays
+		// stuck) IS unblocked. A future embedding context (planned
+		// A4-b HTTP /api/force-kill) needs a longer-lived solution
+		// (close the source-side fd via an *os.File assertion + ctx
+		// goroutine) — out of scope for the CLI surface.
 		pr, pw := io.Pipe()
-		copyDone := make(chan struct{})
 		go func() {
-			defer close(copyDone)
 			_, _ = io.Copy(pw, cmd.InOrStdin())
 			_ = pw.Close()
 		}()

@@ -58,7 +58,7 @@ func killProcessImpl(pid int) error {
 }
 
 // closeProcessHandle is a no-op on darwin (no handle-pinning until
-// the F8 / libproc lane lands).
+// the libproc-based macOS probe lane lands).
 func closeProcessHandle(_ uintptr) {}
 
 // matchBasename mirrors the Linux POSIX rule (no .exe suffix).
