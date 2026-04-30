@@ -33,7 +33,7 @@ Tracking document for Phase 3B-II — the "everything I cut from Phase 3B-I MVP"
 
 | # | Area | Description | Source |
 |---|---|---|---|
-| C1 | `--force` take-over flag | Currently hidden placeholder. Realize: detect stale single-instance mutex, confirm with user, delete `<pidport>.lock`, acquire. | PR #5 cleanup |
+| C1 | `--force` take-over flag | ✅ PR #23 — bare `--force` prints structured Verdict diagnostic + opens lock folder + exit 2. `--force --kill` enforces a three-part identity gate (image basename + argv[1]=="gui"\|\|len(argv)==1 + start-time vs pidport mtime), SIGKILL/TerminateProcess the recorded PID, and acquire-polls TryLock until success or 2s deadline. **MUST NOT delete `<pidport>.lock`** — flock is the source of truth; deletion would race a successor's pidport rewrite (`internal/gui/single_instance.go::Release` invariant). The PR #5-era proposal to "delete `<pidport>.lock`, acquire" was rewritten during the C1 design memo; current contract is kill-and-wait, not delete-and-acquire. | PR #5 cleanup |
 | C2 | Browser focus on activate-window | ✅ PR #22 — `gui.FocusBrowserWindow` enumerates visible top-level windows by title substring "mcp-local-hub", calls SW_RESTORE then SetForegroundWindow. Activate-window callback in cli/gui.go now invokes it instead of logging. Manual real-match smoke in `docs/phase-3b-ii-verification.md` D2.1. | PR #5 final review |
 | C3 | Tray icon state variants | ✅ PR #22 — `internal/tray/state.go::Aggregate` maps DaemonStatus rows to one of 4 spec-§6 variants (`healthy / partial / down / error`). `internal/tray/icons.go` programmatically generates 4 colored 16×16 PNG icons via `image/draw`+`image/png`, lazily cached. `StatusPoller.SetSnapshotChannel` feeds an `aggregateTrayState` goroutine in cli/gui.go that coalesces duplicate-state forwards. tray_windows.go selects on the new `Config.StateCh` and calls `systray.SetIcon`+`SetTooltip` per transition. | Spec §6 |
 | C4 | Toast notifications | ✅ PR #22 — `internal/tray/toast_windows.go::ShowToast` invokes Windows.UI.Notifications via PowerShell (no extra Go deps). Failure-onset detection inside `aggregateTrayStateWithToast` (cli/gui_tray_state.go) compares per-row `(LastResult != 0 OR state-contains-fail)` between adjacent snapshots; fires a toast on each new failure key, never on repeats. `auto-restart-triggered` and `manual-action-done` events are not yet emitted by any publisher — when they are added, the same listener pattern can subscribe to broadcaster directly. | Spec §6 |
@@ -68,6 +68,7 @@ Tracking document for Phase 3B-II — the "everything I cut from Phase 3B-I MVP"
 8. **A3-b** — env.secret picker in AddServer/EditServer forms ✅ — see [docs/superpowers/plans/2026-04-26-phase-3b-ii-a3b-env-secret-picker.md](2026-04-26-phase-3b-ii-a3b-env-secret-picker.md). Memo: [docs/superpowers/specs/2026-04-26-phase-3b-ii-a3b-env-secret-picker-design.md](../specs/2026-04-26-phase-3b-ii-a3b-env-secret-picker-design.md).
 9. **A4-a** — Settings screen ✅ — see [docs/superpowers/plans/2026-04-27-phase-3b-ii-a4-settings.md](2026-04-27-phase-3b-ii-a4-settings.md). Memo: [docs/superpowers/specs/2026-04-27-phase-3b-ii-a4-settings-design.md](../specs/2026-04-27-phase-3b-ii-a4-settings-design.md). Merge SHA: `2529c33d` (PR #20, 14 Codex bot review rounds).
 9b. **A4-b** — Settings lifecycle: tray, port live-rebind, weekly schedule edit, retry policy, Clean now confirm, export bundle.
+   - **Forward-ref to PR #23 C1:** A4-b's "Recover stuck instance" Settings UI button posts to a new `POST /api/force-kill` HTTP handler that returns the `gui.Verdict` JSON contract from PR #23 (`internal/gui/single_instance.go::Verdict`). Diagnose/Hint are not on the wire (`json:"-"`); UI formats from the structured fields.
 10. **A5** — About screen ✅ PR #22 (cleanup + reliability harness + A5 + C2 + C3 + C4 + D2/D3 docs).
 11. **C3 + C4** — Tray icon state variants + toast notifications ✅ PR #22.
 12. **C1** — `--force` take-over (single-instance lock recovery) — **PR #23 (next).** C2 browser focus closed in PR #22.
@@ -90,6 +91,20 @@ Surfaced during A4-a local smoke (2026-04-28) and confirmed via Codex consult. I
 - ~~Add `servers/gdb/manifest.yaml` to the repo.~~ **Withdrawn (2026-04-28):** gdb was intentionally retired in PR #13 — see `retiredServerNames` in `internal/api/install.go:707` (manifest-less uninstall fallback for stale state) AND `perSessionServers` in `internal/api/scan.go:34` (gdb is a debugger, always per-session, not hub-managed). Restoring the manifest contradicts both contracts. DM-1 narrowing is the correct production fix; users with stale Task Scheduler entries clear them via `mcphub uninstall gdb`.
 - ~~`TestInstallAllInstallsEverything` flake (hardcoded 9130/9131).~~ **Closed (PR #22 commit 1):** test now uses `pickFreeLocalPort` so it survives TIME_WAIT residue and parallel daemon ownership.
 - Enforce disjoint port ranges for GUI vs daemon manifests (DM-2 root cause — **open**). Today the GUI's `--port` default is `9125` and the wolfram manifest also declares 9125; the self-PID skip turns the symptom into a silent no-op but the collision is still bad operator UX (e.g. `mcphub status` reports the daemon as `Stopped` when the user's actual hub server IS bound to that port).
+
+### Cross-platform follow-ups
+
+- **macOS `--force --kill` probe (libproc / sysctl-based identity).** PR #23 ships a Linux+Windows identity probe; `probe_darwin.go` is a stub that surfaces "not supported on macOS" via Verdict.Diagnose. Implement the same three-part identity gate on darwin via `libproc.proc_pidpath` (image), `sysctl(KERN_PROCARGS2)` (cmdline), and `sysctl(KERN_PROC_PID).kp_proc.p_starttime` (start-time). Tracks the iter-2 review's P2 #3 follow-up.
+
+### Long-runtime stability follow-ups
+
+- **Tray menu hangs after long uptime / state-event flood.** Reported 2026-04-30 (post PR #22): after ~hours of runtime with the daemon-status poller pushing state every 5s, the systray right-click menu stops appearing entirely (the icon still shows the correct partial/healthy/error color via `SetIcon`). Restart of `mcphub gui` clears it. Root-cause hypothesis: `getlantern/systray`'s message-pump goroutine starves under continuous `SetIcon` + `SetTooltip` traffic, OR the goroutine reading `cfg.StateCh` blocks on a Win32 callback inside SetIcon and starves `mOpen.ClickedCh`/`mQuit.ClickedCh` consumption.
+  - Likely fixes (pick after profiling):
+    1. Throttle: only call `SetIcon`/`SetTooltip` when `state` actually changed (track previous value in the goroutine).
+    2. Decouple: state updates drain `cfg.StateCh` on a separate goroutine and post via a sync.Mutex-protected last-state field; the click-loop only reads it.
+    3. Audit `getlantern/systray` versions for upstream fixes; consider switching to a different tray library if the message-pump issue is structural.
+  - Acceptance: tray menu remains responsive after 24h+ continuous uptime with state churn (drive via a synthetic test that flips fake daemon states ~once/sec).
+  - Cross-cuts: should ship before A4-b's "Recover stuck instance" Settings UI button so users have a working escape hatch from the tray.
 
 **Estimated scope:** ~35-45 implementation tasks. D0 adds ~9-10 migration tasks; Playwright adds ~5-8 test-authoring tasks on top of UI tasks; budget accordingly.
 

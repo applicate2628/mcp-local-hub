@@ -7,6 +7,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -33,6 +34,28 @@ func main() {
 	}
 
 	if err := cli.NewRootCmd().Execute(); err != nil {
+		// PR #23 C1 stuck-instance recovery: propagate distinct exit
+		// codes from --force / --force --kill (2/3/4/6/7) instead of
+		// cobra's default "1 on error". cli.forceExitError implements
+		// the combined interface below; errors.As keeps this main.go
+		// branch agnostic to the concrete unexported type.
+		//
+		// Codex iter-5 P2: the matcher MUST require IsMcphubForceExit
+		// in addition to ExitCode. *os/exec.ExitError also satisfies
+		// `interface{ ExitCode() int }`, so a bare ExitCode-only
+		// match would silently route wrapped subprocess failures
+		// (e.g. `mcphub manifest edit` / `mcphub secrets edit` editor
+		// fmt.Errorf("...: %w", err) wrappings) to os.Exit(<child>),
+		// hiding the contextual "error: ..." diagnostic. The marker
+		// method is unique to cli.forceExitError; *exec.ExitError
+		// does not implement it.
+		var fe interface {
+			ExitCode() int
+			IsMcphubForceExit() bool
+		}
+		if errors.As(err, &fe) {
+			os.Exit(fe.ExitCode())
+		}
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}

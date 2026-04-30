@@ -48,8 +48,10 @@ func TestCanonicalWorkspacePath_WindowsDriveLetterLowercased(t *testing.T) {
 	}
 	// Create a real directory to canonicalize.
 	dir := t.TempDir()
-	// Craft an uppercased-drive variant of dir (TempDir returns lowercase on most
-	// setups; manually uppercase if possible).
+	// Craft an uppercased-drive variant of dir to verify the
+	// canonicalizer always returns lowercase regardless of input case.
+	// CI Windows runners return uppercase-drive temp dirs ('C:\...'),
+	// so we can't assume `dir[0]` is already lowercase.
 	if len(dir) < 2 || dir[1] != ':' {
 		t.Skipf("unexpected temp dir shape: %q", dir)
 	}
@@ -58,8 +60,10 @@ func TestCanonicalWorkspacePath_WindowsDriveLetterLowercased(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CanonicalWorkspacePath: %v", err)
 	}
-	if got[0] != dir[0] || strings.ToLower(string(got[0])) != string(got[0]) {
-		t.Errorf("drive letter not lowercased: input %q -> %q", upper, got)
+	wantDrive := byte(strings.ToLower(string(dir[0]))[0])
+	if got[0] != wantDrive {
+		t.Errorf("drive letter not lowercased: input %q -> %q (got drive %q, want %q)",
+			upper, got, string(got[0]), string(wantDrive))
 	}
 }
 

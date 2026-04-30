@@ -20,7 +20,7 @@ Every modern coding assistant (Claude Code, Codex CLI, Gemini CLI, Antigravity, 
    ┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐
    │seren││memor││seq- ││wolf-││god- ││paper││time │ │gdb  ││lldb ││perf │
    │×2   ││y    ││think││ram  ││bolt ││-srch││     │ │     ││     ││tools│
-   │/22  ││9123 ││9124 ││9125 ││9126 ││9127 ││9128 │ │9129 ││9130 ││9131 │
+   │/22  ││9123 ││9124 ││9132 ││9126 ││9127 ││9128 │ │9129 ││9130 ││9131 │
    └──┬──┘└──┬──┘└──┬──┘└──┬──┘└──┬──┘└──┬──┘└──┬──┘ └──┬──┘└──┬──┘└──┬──┘
       │      │      │      │      │      │      │       │      │      │
       └──────┴──────┴──────┴──────┴──────┴──────┴───────┴──────┴──────┘
@@ -70,7 +70,7 @@ Detailed setup, per-client behaviour, and troubleshooting in [INSTALL.md](INSTAL
 | **serena** (×2 daemons) | 9121 / 9122 | native-http (uvx) | Flagship: per-client daemons (claude / codex) for context isolation |
 | **memory** | 9123 | stdio-bridge (npx) | Shared JSONL write-serialized across all clients |
 | **sequential-thinking** | 9124 | stdio-bridge (npx) | Stateless reasoning helper |
-| **wolfram** | 9125 | stdio-bridge (node) | Requires `wolfram_app_id` secret |
+| **wolfram** | 9132 | stdio-bridge (node) | Requires `wolfram_app_id` secret |
 | **godbolt** | 9126 | **embedded Go** | Compiler Explorer — compile/execute/disasm via godbolt.org + optimization remarks, llvm-mca, pahole |
 | **paper-search-mcp** | 9127 | stdio-bridge (uvx) | Requires `unpaywall_email` secret |
 | **time** | 9128 | stdio-bridge (npx) | Trivial stateless |

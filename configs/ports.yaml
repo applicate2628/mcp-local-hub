@@ -13,7 +13,7 @@ global:
     port: 9124
   - server: wolfram
     daemon: default
-    port: 9125
+    port: 9132
   - server: godbolt
     daemon: default
     port: 9126

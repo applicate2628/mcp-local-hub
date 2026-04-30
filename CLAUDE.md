@@ -137,3 +137,60 @@ jobs:
 - Tray icon rendering (4-state variants + toast notifications wired in PR #22; native surface Playwright can't reach — manual smoke per `docs/phase-3b-ii-verification.md` D2.1 + D2.4).
 - Browser focus on activate-window (PR #22 wires SetForegroundWindow; manual smoke per D2.1).
 - Linux/macOS (blocked on scheduler test seam).
+
+## Stuck-instance recovery
+
+If `mcphub gui` exits with the structured "Cannot acquire mcphub gui
+single-instance lock" block, run `mcphub gui --force` for the
+diagnostic — it also opens the lock folder in your file manager so
+the offending files are visible.
+
+To recover automatically:
+
+```bash
+mcphub gui --force --kill              # prompts before killing
+mcphub gui --force --kill --yes        # no prompt; for scripts
+```
+
+`--kill` only terminates the recorded PID after a three-part identity
+gate: (1) image basename is `mcphub.exe` (Windows) or `mcphub` (POSIX);
+(2) `argv[1]` (cobra subcommand token) equals `gui` exactly OR the
+process was launched with no args (Explorer/Start-menu double-click,
+which `cmd/mcphub/main.go:32` defaults to gui internally); (3) process
+start time precedes pidport mtime. If any gate fails (e.g. PID
+recycled to a `mcphub.exe daemon` Task Scheduler child), `--kill`
+refuses with exit 7.
+
+Manual recovery when `--kill` refuses:
+
+```text
+Windows: download Sysinternals `handle.exe`, then
+         `handle.exe -a "<lock-path>"` (REQUIRES ELEVATED shell).
+Linux:   `lsof "<lock-path>"` or `fuser "<lock-path>"` (use `sudo`
+         for cross-user holders).
+```
+
+Then `kill -9 <pid>` (Linux) or Task Manager → End Task on that
+PID (Windows). DO NOT delete the lock file — deleting under a live
+holder splits ownership. If admin tooling isn't available, reboot
+is the universally available recovery (stuck file handles survive
+user-mode cleanup only across a session reset).
+
+**macOS:** `--force --kill` is unsupported on macOS in this PR (the
+identity probe relies on `/proc`, which is Linux-only). `mcphub gui
+--force` for the diagnostic still works, but kill recovery on macOS
+is not yet implemented; reboot is the recovery path. Tracked as
+follow-up in phase-3b-ii-backlog.md.
+
+Exit codes:
+
+```text
+0 — success
+1 — non-force startup error
+2 — bare --force exited after diagnostic
+3 — race lost or pidport changed mid-prompt
+4 — kill failed / pidport unrecoverable
+5 — RESERVED (not emitted)
+6 — non-interactive shell with --kill but no --yes
+7 — --kill refused by identity gate
+```
