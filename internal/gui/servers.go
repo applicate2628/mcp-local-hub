@@ -26,18 +26,27 @@ import (
 // 200/207/500 contract; only the response key (restart_results vs
 // stop_results) and the error code differ.
 func registerServerRoutes(s *Server) {
-	// Bulk action routes — POST /api/restart-all and /api/stop-all back
-	// the Dashboard "Run all" / "Stop all" header buttons and the tray
-	// "Quit and stop all daemons" menu item. Same 200/207/500 contract
-	// as the per-server routes; daemon filter is meaningless here so
-	// no ?daemon query is parsed.
+	// Bulk action routes back the Dashboard "Run all" / "Stop all"
+	// header buttons AND the tray "Run all daemons" / "Stop all daemons"
+	// / "Quit and stop all daemons" menu items. ALL of these go through
+	// the SAME HTTP endpoint — tray callbacks make HTTP POST rather than
+	// calling api.NewAPI() directly — so there is exactly one pipeline.
+	//
+	// The pipeline emits SSE lifecycle events on the existing Broadcaster
+	// (used since Phase 3B-I for daemon-state); subscribed Dashboards
+	// flip BulkActionsRow into Starting…/Stopping… → Started/Stopped
+	// regardless of who triggered the action. Without the SSE wrap a
+	// tray-triggered fan-out would be invisible to any open Dashboard.
+	//
+	// Same 200/207/500 contract as the per-server routes; daemon filter
+	// is meaningless here so no ?daemon query is parsed.
 	s.mux.HandleFunc("/api/restart-all", s.requireSameOrigin(func(w http.ResponseWriter, r *http.Request) {
-		writeServerActionResult(w, r, "", func() ([]api.RestartResult, error) {
+		writeBulkActionResult(w, r, s.events, "restart", func() ([]api.RestartResult, error) {
 			return s.restart.RestartAll()
 		}, "restart_results", "RESTART_FAILED")
 	}))
 	s.mux.HandleFunc("/api/stop-all", s.requireSameOrigin(func(w http.ResponseWriter, r *http.Request) {
-		writeServerActionResult(w, r, "", func() ([]api.RestartResult, error) {
+		writeBulkActionResult(w, r, s.events, "stop", func() ([]api.RestartResult, error) {
 			return s.stop.StopAll()
 		}, "stop_results", "STOP_FAILED")
 	}))
@@ -93,6 +102,87 @@ func parseDaemonQuery(w http.ResponseWriter, r *http.Request) (daemon string, ok
 		return "", false
 	}
 	return values[0], true
+}
+
+// writeBulkActionResult is the shared response writer for /api/restart-all
+// and /api/stop-all. It wraps the per-task fan-out with SSE lifecycle
+// events on the existing Broadcaster so any connected Dashboard sees
+// the action's progress regardless of trigger source (Dashboard click,
+// tray menu, future API call).
+//
+// Event sequence:
+//   bulk-action {phase: "started", action: "restart"|"stop"}
+//   bulk-action {phase: "completed", action, results}        (200 / 207)
+//   bulk-action {phase: "error", action, results, error}     (500)
+//
+// Frontend listens to "bulk-action" events and drives BulkActionsRow
+// state from them, instead of from a local onClick state machine.
+func writeBulkActionResult(
+	w http.ResponseWriter, r *http.Request, events *Broadcaster, action string,
+	run func() ([]api.RestartResult, error),
+	resultsKey, errCode string,
+) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if events != nil {
+		events.Publish(Event{Type: "bulk-action", Body: map[string]any{
+			"phase":  "started",
+			"action": action,
+		}})
+	}
+	results, err := run()
+	if results == nil {
+		results = []api.RestartResult{}
+	}
+	body := map[string]any{resultsKey: results}
+	// Compute per-task partial-failure first; the SSE phase must
+	// reflect it. Codex bot review on PR #38 P1: previously phase was
+	// hard-coded to "completed" before evaluating per-task errors,
+	// so a partial 207 was indistinguishable from a clean 200 on the
+	// SSE wire and the Dashboard flashed "Started" on partial failure.
+	anyTaskFailed := false
+	for _, row := range results {
+		if row.Err != "" {
+			anyTaskFailed = true
+			break
+		}
+	}
+	finalBody := map[string]any{
+		"phase":   "completed",
+		"action":  action,
+		"results": results,
+	}
+	if err != nil {
+		body["error"] = err.Error()
+		body["code"] = errCode
+		finalBody["phase"] = "error"
+		finalBody["error"] = err.Error()
+		if events != nil {
+			events.Publish(Event{Type: "bulk-action", Body: finalBody})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(body)
+		return
+	}
+	status := http.StatusOK
+	if anyTaskFailed {
+		status = http.StatusMultiStatus // 207
+		// Partial failure: surface as "error" phase on SSE. The UI
+		// shows "Failed" on the active button — same affordance as a
+		// 500 — and the per-task results array still rides along for
+		// future detailed-error UI.
+		finalBody["phase"] = "error"
+	}
+	if events != nil {
+		events.Publish(Event{Type: "bulk-action", Body: finalBody})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 // writeServerActionResult is the shared response writer for the restart and

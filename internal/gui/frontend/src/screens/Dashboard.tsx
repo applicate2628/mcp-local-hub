@@ -10,9 +10,31 @@ function keyFor(r: { server: string; daemon?: string }): string {
   return `${r.server}/${r.daemon ?? "default"}`;
 }
 
+// BulkAction is the action verb used in /api/{restart,stop}-all and in
+// the SSE "bulk-action" lifecycle events. Single source of truth: any
+// trigger (Dashboard click, tray menu, future API client) flows through
+// the same HTTP endpoint and produces the same SSE events. The UI
+// state below is a pure projection of those events.
+type BulkAction = "restart" | "stop";
+type BulkOutcome = { action: BulkAction; state: "done" | "error" };
+
 export function DashboardScreen() {
   const [state, setState] = useState<Record<string, DaemonStatus>>({});
   const [error, setError] = useState<string | null>(null);
+  // Bulk-action state driven ENTIRELY by SSE "bulk-action" events. A
+  // local click sends HTTP POST → server publishes "started" → this
+  // handler flips inflight; "completed"/"error" clears inflight and
+  // sets outcome for the flash. Tray-triggered runs reach the same
+  // event stream so any open Dashboard sees the same animation.
+  const [bulkInflight, setBulkInflight] = useState<BulkAction | null>(null);
+  const [bulkOutcome, setBulkOutcome] = useState<BulkOutcome | null>(null);
+  const bulkResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (bulkResetTimerRef.current) clearTimeout(bulkResetTimerRef.current);
+    },
+    [],
+  );
 
   // Initial bootstrap. Non-ok status OR non-array body → error state.
   useEffect(() => {
@@ -63,7 +85,71 @@ export function DashboardScreen() {
     });
   }, []);
 
-  useEventSource("/api/events", { "daemon-state": onDelta });
+  // SSE handler for bulk-action lifecycle (PR #38: unified pipeline).
+  // Backend publishes started → completed|error around every fan-out;
+  // we mirror that into local UI state. The outcome flash auto-clears
+  // after 1.5s so the button label snaps back to "Run all"/"Stop all".
+  const onBulkAction = useCallback((ev: MessageEvent) => {
+    const body = JSON.parse(ev.data) as {
+      phase: "started" | "completed" | "error";
+      action: BulkAction;
+    };
+    if (body.phase === "started") {
+      // Idempotent confirmation — local click already optimistically
+      // set bulkInflight. SSE re-confirms for tray-triggered fan-out
+      // (no local click) and event reordering.
+      //
+      // Codex bot PR #38 P1 (commit ef0f4ea, "Correlate bulk-action
+      // terminal events before unlocking UI"): with the shared SSE
+      // pipeline, concurrent triggers (Dashboard + tray, or two
+      // Dashboards) can interleave events. Don't OVERWRITE the
+      // currently-tracked inflight action from a different
+      // started — keep the first-tracked action so terminal-match
+      // logic below stays sound.
+      setBulkInflight((cur) => cur ?? body.action);
+      setBulkOutcome(null);
+      return;
+    }
+    // Terminal phase. Only clear inflight if the event's action
+    // matches what we're tracking — otherwise this is a sibling
+    // operation's terminal and the locally-tracked operation may
+    // still be running.
+    setBulkInflight((cur) => (cur === body.action ? null : cur));
+    setBulkOutcome({
+      action: body.action,
+      state: body.phase === "error" ? "error" : "done",
+    });
+    if (bulkResetTimerRef.current) clearTimeout(bulkResetTimerRef.current);
+    bulkResetTimerRef.current = setTimeout(() => {
+      setBulkOutcome(null);
+      bulkResetTimerRef.current = null;
+    }, 1500);
+  }, []);
+
+  useEventSource("/api/events", {
+    "daemon-state": onDelta,
+    "bulk-action": onBulkAction,
+  });
+
+  // Codex bot PR #38 P1 (round 3): safety-net for dropped SSE events.
+  // The Broadcaster is lossy (internal/gui/events.go::Publish drops on
+  // full subscriber buffer), so bulkInflight could stay set forever if
+  // the terminal event is dropped.
+  //
+  // Timeout MUST exceed realistic fan-out duration. api.Restart calls
+  // killDaemonByPort(5s) + waitForPortFree(3s) per daemon = up to 8s
+  // each, and runs sequentially. With 11 daemons × 8s = 88s worst-case
+  // legit. Plus serena spawn-up time (~3-6s each). 5min cap is well
+  // beyond any realistic fan-out and short enough that a truly stuck
+  // UI doesn't trap the user indefinitely. Codex bot review on commit
+  // d92aa2c P1 ("Keep bulk-action lock until terminal SSE event").
+  useEffect(() => {
+    if (bulkInflight === null) return;
+    const t = setTimeout(() => {
+      setBulkInflight(null);
+    }, 300_000);
+    return () => clearTimeout(t);
+  }, [bulkInflight]);
 
   // Backend contract:
   //   POST /api/servers/<server>/<action>             — all daemons
@@ -148,8 +234,44 @@ export function DashboardScreen() {
       throw e;
     }
   }
-  const runAll = () => postBulkAction("restart");
-  const stopAll = () => postBulkAction("stop");
+  // Codex bot PR #38 P2 (rejected fetch fallback) + P1 (re-entrant
+  // double-click). Optimistic-update pattern handles BOTH:
+  //
+  //   click → setBulkInflight("restart") IMMEDIATELY → buttons
+  //   disable, re-entrant click is gated by the same state check.
+  //   SSE "started" arrives ~50ms later; idempotent setter no-ops.
+  //   SSE terminal arrives → clear inflight, set outcome.
+  //
+  // A rejected fetch (network failure, no SSE will arrive) lands in
+  // .catch → setLocalErrorFallback restores idle + flashes Failed.
+  // For 207/500 fetch also rejects, but SSE error event already set
+  // outcome=error so prev ?? wins (idempotent).
+  const setLocalErrorFallback = useCallback((action: BulkAction) => {
+    setBulkInflight(null);
+    // Codex bot PR #38 P2 (commit ff656fe): prev ?? error preserved
+    // STALE outcomes from prior actions. If user clicked Run all
+    // (success → outcome=done flash), then clicked Stop all within
+    // the 1.5s flash window and Stop's POST rejected → prev=done
+    // (restart) ?? would suppress the new error → user sees no
+    // feedback for the failed Stop click. Fix: only keep prev if
+    // it's for the SAME action (idempotent on real partial-fail
+    // where SSE 'error' already arrived); otherwise set new error.
+    setBulkOutcome((prev) =>
+      prev && prev.action === action ? prev : { action, state: "error" },
+    );
+    if (bulkResetTimerRef.current) clearTimeout(bulkResetTimerRef.current);
+    bulkResetTimerRef.current = setTimeout(() => {
+      setBulkOutcome(null);
+      bulkResetTimerRef.current = null;
+    }, 1500);
+  }, []);
+  function fireBulk(action: BulkAction): Promise<void> {
+    if (bulkInflight !== null) return Promise.resolve();
+    setBulkInflight(action); // optimistic: locks UI immediately
+    return postBulkAction(action).catch(() => setLocalErrorFallback(action));
+  }
+  const runAll = () => fireBulk("restart");
+  const stopAll = () => fireBulk("stop");
 
   if (error) {
     return (
@@ -170,6 +292,8 @@ export function DashboardScreen() {
           runAll={runAll}
           stopAll={stopAll}
           disabled={sorted.length === 0}
+          inflight={bulkInflight}
+          outcome={bulkOutcome}
         />
       </header>
       <div class="cards">
@@ -186,75 +310,53 @@ export function DashboardScreen() {
   );
 }
 
-// BulkActionsRow owns ONE shared in-flight state for both bulk buttons.
-// Run all and Stop all are global operations — clicking them in quick
-// succession would issue overlapping /api/restart-all + /api/stop-all
-// against every daemon and the final state would depend on request
-// timing rather than user intent. Codex bot review on PR #36 P2:
-// "These are global operations, so they should be mutually exclusive
-// (shared in-flight lock/state) to avoid racing starts/stops across
-// all daemons."
+// BulkActionsRow is a pure presentational component driven by SSE-fed
+// state from DashboardScreen. inflight + outcome both come from the
+// "bulk-action" event stream so any trigger source — Dashboard click,
+// tray menu, future API client — produces the same visual feedback.
 //
-// While one bulk action is in flight, BOTH buttons are disabled. The
-// active one shows working/done/error labels; the other stays on its
-// idle label so the UI remains readable.
+// Click handlers fire HTTP POST and return immediately; they do NOT
+// set local state. The visual state (Starting…/Started/Failed) flows
+// in via SSE. This is the ONE source of truth: backend is canonical,
+// UI is a projection.
+//
+// Mutual exclusion is preserved by the shared inflight prop — while
+// one bulk action is in flight, BOTH buttons are disabled. Codex bot
+// review on PR #36 P2 (race-prone independent state machines).
 function BulkActionsRow(props: {
   runAll: () => Promise<void>;
   stopAll: () => Promise<void>;
   disabled?: boolean;
+  inflight: BulkAction | null;
+  outcome: BulkOutcome | null;
 }) {
-  type Active = "restart" | "stop";
-  const [inflight, setInflight] = useState<Active | null>(null);
-  const [outcome, setOutcome] = useState<{ action: Active; state: "done" | "error" } | null>(null);
-  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
-    },
-    [],
-  );
-
-  async function doBulk(action: Active, run: () => Promise<void>) {
-    if (inflight !== null) return; // shared lock — second click is a no-op
-    setInflight(action);
-    setOutcome(null);
-    try {
-      await run();
-      setOutcome({ action, state: "done" });
-    } catch {
-      setOutcome({ action, state: "error" });
-    }
-    setInflight(null);
-    if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
-    resetTimerRef.current = setTimeout(() => {
-      setOutcome(null);
-      resetTimerRef.current = null;
-    }, 1500);
-  }
-
-  function labelFor(action: Active, idle: string, working: string, done: string): string {
-    if (inflight === action) return working;
-    if (outcome && outcome.action === action) {
-      return outcome.state === "done" ? done : "Failed";
+  function labelFor(action: BulkAction, idle: string, working: string, done: string): string {
+    if (props.inflight === action) return working;
+    if (props.outcome && props.outcome.action === action) {
+      return props.outcome.state === "done" ? done : "Failed";
     }
     return idle;
   }
 
-  const lockDisabled = inflight !== null || props.disabled;
+  const lockDisabled = props.inflight !== null || props.disabled;
   return (
     <div class="dashboard-bulk-actions">
       <button
-        onClick={() => doBulk("restart", props.runAll)}
+        onClick={() => {
+          if (!lockDisabled) void props.runAll();
+        }}
         disabled={lockDisabled}
-        aria-busy={inflight === "restart"}
+        aria-busy={props.inflight === "restart"}
       >
         {labelFor("restart", "Run all", "Starting…", "Started")}
       </button>
       <button
-        onClick={() => doBulk("stop", props.stopAll)}
+        onClick={() => {
+          if (!lockDisabled) void props.stopAll();
+        }}
         disabled={lockDisabled}
         class="btn-stop"
-        aria-busy={inflight === "stop"}
+        aria-busy={props.inflight === "stop"}
       >
         {labelFor("stop", "Stop all", "Stopping…", "Stopped")}
       </button>
