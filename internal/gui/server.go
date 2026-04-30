@@ -274,28 +274,28 @@ type RealStatusProvider = realStatusProvider
 // Server is the GUI HTTP server. It owns a net/http.Server bound to
 // 127.0.0.1, a ready-to-register mux, and a best-effort shutdown path.
 type Server struct {
-	cfg              Config
-	mux              *http.ServeMux
-	srv              *http.Server
-	port             atomic.Int32 // set after Listen, read by Port()
-	onActivateWindow func()
-	scanner          scanner
-	status           statusProvider
-	migrator         migrator
-	demigrater       demigrater
-	dismisser        dismisser
+	cfg               Config
+	mux               *http.ServeMux
+	srv               *http.Server
+	port              atomic.Int32 // set after Listen, read by Port()
+	onActivateWindow  func() error
+	scanner           scanner
+	status            statusProvider
+	migrator          migrator
+	demigrater        demigrater
+	dismisser         dismisser
 	manifestCreator   manifestCreator
 	manifestValidator manifestValidator
 	manifestGetter    manifestGetter
 	manifestEditor    manifestEditor
-	installer        installer
-	restart          restarter
-	logs             logsProvider
-	extractor        extractor
-	events           *Broadcaster
-	secrets          secretsAPI
-	settings         settingsAPI
-	backups          backupsAPI
+	installer         installer
+	restart           restarter
+	logs              logsProvider
+	extractor         extractor
+	events            *Broadcaster
+	secrets           secretsAPI
+	settings          settingsAPI
+	backups           backupsAPI
 }
 
 // NewServer constructs the Server. It registers the ping handler
@@ -350,7 +350,13 @@ func (s *Server) Broadcaster() *Broadcaster { return s.events }
 // /api/activate-window is received. A second `mcphub gui` invocation
 // posts here after handshaking with the incumbent; the callback is the
 // hook that the tray + main window use to come to front.
-func (s *Server) OnActivateWindow(fn func()) { s.onActivateWindow = fn }
+//
+// The callback returns an error so the handler can surface a non-success
+// status when activation is genuinely impossible (e.g. headless session
+// — no window to focus, no browser to launch). nil → 204 No Content,
+// ErrActivationNoTarget → 503 Service Unavailable, other → 500. Codex
+// bot review on PR #26 P2 (headless activate-window no-op masks failure).
+func (s *Server) OnActivateWindow(fn func() error) { s.onActivateWindow = fn }
 
 // Port returns the actual TCP port the server is bound to. Zero until
 // Start has signaled ready.

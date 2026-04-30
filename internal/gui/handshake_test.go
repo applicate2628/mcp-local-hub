@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,41 @@ import (
 	"testing"
 	"time"
 )
+
+// TestHandshake_503ActivateReturnsErrIncumbentNoActivationTarget covers
+// the F4 headless path: incumbent reachable on /api/ping, but its
+// OnActivateWindow callback returned ErrActivationNoTarget, so the
+// handler responds 503. TryActivateIncumbent must wrap that into the
+// typed sentinel so cli/gui.go can print SSH-tunnel guidance instead
+// of falsely claiming "activated existing mcphub gui". Sonnet review
+// on PR #26 I2 (handshake_test.go missing 503 coverage).
+func TestHandshake_503ActivateReturnsErrIncumbentNoActivationTarget(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/ping", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"pid":111,"version":"t"}`))
+	})
+	mux.HandleFunc("/api/activate-window", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "headless session", http.StatusServiceUnavailable)
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	port := parseTestServerPort(t, ts.URL)
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+	if err := os.WriteFile(pidport, []byte(formatPidport(111, port)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := TryActivateIncumbent(pidport, 2*time.Second)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrIncumbentNoActivationTarget) {
+		t.Errorf("expected ErrIncumbentNoActivationTarget, got: %v", err)
+	}
+}
 
 func TestHandshake_PingOKThenActivate(t *testing.T) {
 	activated := make(chan struct{}, 1)

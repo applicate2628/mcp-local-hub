@@ -2,6 +2,7 @@ package gui
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -32,7 +33,7 @@ func TestPing_ReturnsJSONWithPIDAndVersion(t *testing.T) {
 func TestActivateWindow_MarksSignalReceived(t *testing.T) {
 	s := NewServer(Config{})
 	got := make(chan struct{}, 1)
-	s.OnActivateWindow(func() { got <- struct{}{} })
+	s.OnActivateWindow(func() error { got <- struct{}{}; return nil })
 	req := httptest.NewRequest(http.MethodPost, "/api/activate-window", nil)
 	rec := httptest.NewRecorder()
 	s.mux.ServeHTTP(rec, req)
@@ -45,6 +46,37 @@ func TestActivateWindow_MarksSignalReceived(t *testing.T) {
 		t.Error("activate-window did not invoke callback")
 	}
 }
+
+// TestActivateWindow_HeadlessReturns503 verifies the handler maps
+// ErrActivationNoTarget to 503 Service Unavailable so the second
+// invocation's TryActivateIncumbent can surface a useful message
+// instead of falsely claiming activation succeeded.
+func TestActivateWindow_HeadlessReturns503(t *testing.T) {
+	s := NewServer(Config{})
+	s.OnActivateWindow(func() error { return ErrActivationNoTarget })
+	req := httptest.NewRequest(http.MethodPost, "/api/activate-window", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", rec.Code)
+	}
+}
+
+// TestActivateWindow_OtherErrorReturns500 confirms unexpected callback
+// errors map to 500 (not 503 — that's reserved for the documented
+// "headless" sentinel).
+func TestActivateWindow_OtherErrorReturns500(t *testing.T) {
+	s := NewServer(Config{})
+	s.OnActivateWindow(func() error { return errPingTestSentinel })
+	req := httptest.NewRequest(http.MethodPost, "/api/activate-window", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", rec.Code)
+	}
+}
+
+var errPingTestSentinel = errors.New("ping test sentinel")
 
 func TestPing_WrongMethodIs405(t *testing.T) {
 	s := NewServer(Config{})

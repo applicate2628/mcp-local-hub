@@ -136,6 +136,20 @@ activates the first window and exits 0.`,
 					return forceExit(exitCode)
 				}
 				if err := gui.TryActivateIncumbent(pidportPath, 2*time.Second); err != nil {
+					var ina *gui.IncumbentNoActivationTargetError
+					if errors.As(err, &ina) {
+						// Incumbent reachable but headless — print
+						// SSH-tunnel guidance using the port the
+						// handshake already verified via /api/ping.
+						// We do NOT re-read the pidport: that races a
+						// successor's pre-bind port=0 write and turns
+						// usable guidance into a spurious error.
+						// Codex CLI xhigh review on PR #26 P3.
+						fmt.Fprintf(cmd.OutOrStdout(),
+							"mcphub gui is already running headless on port %d. SSH-tunnel and visit http://127.0.0.1:%d/\n",
+							ina.Port, ina.Port)
+						return nil
+					}
 					return fmt.Errorf(
 						"another mcphub gui is running but unreachable (%v); "+
 							"rerun with --force for diagnostic, or --force --kill to recover",
@@ -175,53 +189,53 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 	// on the configured port (0 = OS-assigned) and signals ready
 	// once the listener is live.
 	s := gui.NewServer(gui.Config{Port: port, Version: versionString()})
-	s.OnActivateWindow(func() {
-		// Phase 3B-II C2: bring the Chrome app-mode window to
-		// foreground via Win32 SetForegroundWindow. Match by
-		// page <title> ("mcp-local-hub"), which is stable
-		// across Chrome versions in app-mode (chromeless
-		// window keeps page title as window title). On
-		// non-Windows, FocusBrowserWindow returns an error
-		// (logged below); the tray "Open dashboard" action
-		// shares the same surface and the same limitation.
-		//
-		// Fallback: if no matching window exists (user closed
-		// the Chrome dashboard earlier, or GUI was spawned
-		// with --no-browser), open a fresh window. Without
-		// this fallback the tray "Open dashboard" action
-		// silently no-ops when there's nothing to focus.
-		// "Local Dashboard" is the unique suffix in the page
-		// <title>; it disambiguates from other apps that
-		// happen to have "mcp-local-hub" in their window
-		// title (Cursor IDE has "mcp-local-hub - Cursor",
-		// terminals running in the repo dir, file explorer,
-		// etc.). Without the unique suffix the focus call
-		// silently steals foreground for the wrong window.
+	s.OnActivateWindow(func() error {
+		// Phase 3B-II C2: focus the existing Chrome app-mode dashboard
+		// via Win32 SetForegroundWindow. Title-substring "Local
+		// Dashboard" disambiguates from other "mcp-local-hub" windows
+		// (Cursor IDE, terminals, file explorer).
 		err := gui.FocusBrowserWindow("Local Dashboard")
 		if err == nil {
-			return
+			return nil
 		}
-		// Codex PR #22 r3 P2: only fall back to LaunchBrowser
-		// when enumeration completed without a matching
-		// window (gui.ErrFocusNoWindow sentinel). Other
-		// failures — Win32 transient SetForegroundWindow
-		// rejection on Windows 10+ when our thread isn't
-		// foreground, syscall plumbing regressions, etc. —
-		// must NOT spawn a duplicate dashboard. The
-		// non-Windows stub also wraps ErrFocusNoWindow so
-		// "Open dashboard" on Linux/macOS still launches a
-		// fresh browser (no tray to focus there anyway).
 		if !errors.Is(err, gui.ErrFocusNoWindow) {
+			// Win32 transient failure — log + best-effort 204 so the
+			// second invocation prints "activated" (incumbent IS
+			// reachable, just focus jitter happened).
 			fmt.Fprintf(cmd.OutOrStderr(),
 				"activate-window: focus failed (no fallback for non-no-window error): %v\n", err)
-			return
+			return nil
+		}
+		// SECURITY: --no-browser MUST disable every launch path.
+		// Without this guard, ANY local actor POSTing
+		// /api/activate-window on a leftover --no-browser orphan
+		// could spawn a Chrome window the operator never asked for
+		// (real bug observed when test orphans piled up). The
+		// /api/activate-window handler maps ErrActivationNoTarget to
+		// 503; the second-instance handshake reads the typed
+		// sentinel and prints diagnostic instead of falsely claiming
+		// activation.
+		if noBrowser {
+			fmt.Fprintln(cmd.OutOrStderr(),
+				"activate-window: focus failed and --no-browser set — refusing to launch")
+			return gui.ErrActivationNoTarget
+		}
+		// Headless Linux: no display server, browser launch would
+		// xdg-open-fail noisily. Surface ErrActivationNoTarget so
+		// the second instance prints SSH-tunnel guidance (PR #26 F4).
+		if gui.HeadlessSession() {
+			fmt.Fprintln(cmd.OutOrStderr(),
+				"activate-window: focus failed and headless session — no browser to open")
+			return gui.ErrActivationNoTarget
 		}
 		url := fmt.Sprintf("http://127.0.0.1:%d/", s.Port())
 		if launchErr := gui.LaunchBrowser(url); launchErr != nil {
 			fmt.Fprintf(cmd.OutOrStderr(),
 				"activate-window: focus failed (%v); browser launch also failed: %v\n",
 				err, launchErr)
+			return nil
 		}
+		return nil
 	})
 
 	ready := make(chan struct{})
