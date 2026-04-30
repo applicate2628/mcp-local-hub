@@ -581,6 +581,15 @@ func (e *forceExitError) ExitCode() int { return e.code }
 func (e *forceExitError) IsMcphubForceExit() bool { return true }
 
 func forceExit(code int) error {
+	// Code 0 is a successful outcome (e.g. healthy-incumbent activate
+	// short-circuit, normal acquire after take-over). Wrapping it in
+	// forceExitError would make cmd.Execute() report a non-nil error,
+	// breaking the standard Cobra success contract for in-process
+	// callers and emitting spurious usage output. Codex bot review on
+	// PR #23 P2 (round 4).
+	if code == 0 {
+		return nil
+	}
 	return &forceExitError{code: code}
 }
 
