@@ -30,6 +30,40 @@ function writeCachedLayout(v: string): void {
   }
 }
 
+// DEFAULT_SCREEN_CACHE_KEY mirrors the layout cache for
+// appearance.default_screen. useRouter caches the FIRST defaultScreen
+// it receives — and useSettingsSnapshot always starts in `loading`,
+// so without a synchronous source the router locks to "dashboard"
+// before the snapshot resolves and the saved preference is never
+// applied. Codex bot review on PR #40 P1.
+const DEFAULT_SCREEN_CACHE_KEY = "mcphub.appearance.default_screen";
+
+// VALID_DEFAULT_SCREENS mirrors the registry enum. Cached values are
+// validated against this set so a corrupted or stale localStorage
+// entry can't drop the router into an unknown screen and crash on
+// the switch fall-through.
+const VALID_DEFAULT_SCREENS = new Set([
+  "dashboard", "servers", "migration", "add-server",
+  "secrets", "logs", "settings", "about",
+]);
+
+function readCachedDefaultScreen(): string {
+  try {
+    const v = localStorage.getItem(DEFAULT_SCREEN_CACHE_KEY);
+    return v && VALID_DEFAULT_SCREENS.has(v) ? v : "dashboard";
+  } catch {
+    return "dashboard";
+  }
+}
+
+function writeCachedDefaultScreen(v: string): void {
+  try {
+    localStorage.setItem(DEFAULT_SCREEN_CACHE_KEY, v);
+  } catch {
+    /* ignore */
+  }
+}
+
 // Synchronously seed data-layout from the cached value at module load,
 // BEFORE the first render. Without this the JSX that conditionally
 // renders <header class="topbar"> fires fine, but the CSS rules gated
@@ -85,6 +119,13 @@ export function App() {
       // failed write doesn't affect this run's correctness.
       writeCachedLayout(layout.value);
     }
+    // Mirror the cache write for default_screen — same pattern, same
+    // rationale. Without this the next launch's useRouter would cache
+    // the previous value forever (or "dashboard" on first install).
+    const defaultScreen = globalSettings.data.settings.find((s) => s.key === "appearance.default_screen");
+    if (defaultScreen && "value" in defaultScreen && defaultScreen.value) {
+      writeCachedDefaultScreen(defaultScreen.value);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [globalSettings.status, globalSettings.status === "ok" ? globalSettings.data : null]);
 
@@ -118,11 +159,27 @@ export function App() {
     return ok;
   };
 
-  // Dashboard is the default landing screen — it is the primary monitoring
-  // surface (live daemon state, ports, PIDs, restart). Servers matrix is one
-  // click away in the sidebar. A persisted "default screen" preference lives
-  // in the Settings backlog as appearance.default_screen.
-  const route = useRouter("dashboard", guard);
+  // Default landing screen comes from the persisted preference
+  // appearance.default_screen (Settings → Appearance). useRouter caches
+  // the FIRST defaultScreen it receives — re-renders don't re-route
+  // mid-session, which is intentional: the user shouldn't see the page
+  // swap out from under them after they save a new preference.
+  //
+  // Codex bot review on PR #40 P1: useSettingsSnapshot always starts
+  // in `loading`, so reading from the snapshot on first render gives
+  // "dashboard" and locks the router there forever — the saved
+  // preference never wins, even after restart. Reading the localStorage
+  // cache synchronously gives us the SAME value the user saw last time
+  // before useRouter latches. After the snapshot resolves the useEffect
+  // above refreshes the cache for next launch.
+  const persistedDefaultScreen = (() => {
+    if (globalSettings.status === "ok") {
+      const entry = globalSettings.data.settings.find((s) => s.key === "appearance.default_screen");
+      if (entry && "value" in entry && entry.value) return entry.value;
+    }
+    return readCachedDefaultScreen();
+  })();
+  const route = useRouter(persistedDefaultScreen, guard);
   useUnsavedChangesGuard(dirtyAny);
 
   function guardClick(targetScreen: string): (e: MouseEvent) => void {
