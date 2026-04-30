@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -134,6 +135,16 @@ type trayChild struct {
 	// must NOT be decoded as coordinates (the menu would anchor near
 	// (1,0)). Codex bot review on PR #24 P2 (legacy callback fallback).
 	versionV4 bool
+
+	// lastMenuShow is when we last invoked the right-click popup
+	// menu. Used to debounce the Win11 dual-fire pattern: a single
+	// mouse right-click delivers BOTH WM_RBUTTONUP AND WM_CONTEXTMENU
+	// through the V4 callback. Without dedup the popup shows twice.
+	// 200ms is comfortably longer than the dual-fire interval
+	// (empirically <10ms) but shorter than the slowest deliberate
+	// double-click. Codex bot review on PR #24 P2 (keyboard menu
+	// access via WM_CONTEXTMENU).
+	lastMenuShow time.Time
 
 	// JSON encoder for child→parent events. Mutex-protected because
 	// menu clicks fire on the pump thread and (unlikely but cheap to
@@ -344,20 +355,20 @@ func (tc *trayChild) reAddIcon() {
 		return
 	}
 	tc.iconRegistered = true
-	// Re-establish the V4 callback ABI on the new registration. If
-	// it fails again we keep the prior versionV4 value — the previous
-	// SETVERSION attempt's success is unchanged for the new shell
-	// instance, but a transient TaskbarCreated re-add failure must
-	// not silently downgrade the click decoder.
+	// Re-establish the V4 callback ABI on the new registration. The
+	// versionV4 flag MUST track the OUTCOME on this fresh registration
+	// — keeping the previous true value when SETVERSION fails would
+	// make handleMessage decode wParam as V4 coords against a legacy
+	// callback ABI on the new shell instance, mis-anchoring the menu
+	// (Codex bot review on PR #24 P2). Reset both ways: success →
+	// true, failure → false.
 	verNID := NOTIFYICONDATAW{
 		CbSize:   uint32(unsafe.Sizeof(NOTIFYICONDATAW{})),
 		HWnd:     tc.hwnd,
 		UID:      tc.uid,
 		UVersion: NOTIFYICON_VERSION_4,
 	}
-	if shellNotifyIcon(NIM_SETVERSION, &verNID) {
-		tc.versionV4 = true
-	}
+	tc.versionV4 = shellNotifyIcon(NIM_SETVERSION, &verNID)
 	// Swap HICON ownership and free the old (now-orphan) handle.
 	tc.hIconMu.Lock()
 	old := tc.hIcon
@@ -643,14 +654,32 @@ func (tc *trayChild) handleMessage(hwnd uintptr, msg uint32, wparam, lparam uint
 		event := uint32(lparam) & 0xFFFF
 		switch event {
 		case WM_LBUTTONUP, NIN_SELECT, NIN_KEYSELECT:
-			// Left click + accessibility activation (Enter/Space when
-			// the icon has focus) bring the dashboard to the front,
-			// matching the Config.ActivateWindow contract documented
-			// in tray.go. Right click is the popup-menu trigger
-			// (handled in the case below). Codex bot review on PR
-			// #24 P2 (preserve left-click activation).
+			// Mouse left-click (WM_LBUTTONUP / NIN_SELECT) and keyboard
+			// activation via Enter/Space (NIN_KEYSELECT) bring the
+			// dashboard to the front, matching the
+			// Config.ActivateWindow contract documented in tray.go.
+			// Per MS Shell_NotifyIcon docs, NIN_KEYSELECT is the
+			// keyboard equivalent of NIN_SELECT (single primary
+			// action), NOT the menu invocation. The dedicated
+			// WM_CONTEXTMENU branch below handles keyboard menu
+			// invocation (Shift+F10 / Apps key). Codex bot review
+			// on PR #24 P2.
 			tc.emitEvent("open-dashboard")
-		case WM_RBUTTONUP:
+		case WM_RBUTTONUP, WM_CONTEXTMENU:
+			// Win11 quirk: a single mouse right-click delivers BOTH
+			// WM_RBUTTONUP AND WM_CONTEXTMENU through the V4 callback
+			// in quick succession (<10ms apart, empirically). Without
+			// dedup the popup menu would flash open, close as the user
+			// dismisses it, then re-open from the second event. Keyboard
+			// Menu key / Shift+F10 invocation arrives ONLY as
+			// WM_CONTEXTMENU, so adding it to the case is required for
+			// keyboard accessibility (Codex bot review on PR #24 P2).
+			now := time.Now()
+			if now.Sub(tc.lastMenuShow) < 200*time.Millisecond {
+				return 0
+			}
+			tc.lastMenuShow = now
+
 			// Anchor at the icon's deterministic screen rect.
 			// Even under V4 the wParam X/Y tracks the cursor pixel
 			// at click time — not the icon's stable center — so two
@@ -663,7 +692,10 @@ func (tc *trayChild) handleMessage(hwnd uintptr, msg uint32, wparam, lparam uint
 			// menu's bottom edge sits flush against the icon's top
 			// edge, horizontally centered on the icon.
 			var x, y int32
-			if tc.versionV4 {
+			if tc.versionV4 && event == WM_RBUTTONUP {
+				// WM_CONTEXTMENU's wParam in the V4 callback is
+				// undefined for keyboard invocation — don't trust it
+				// for coords. WM_RBUTTONUP carries valid mouse X/Y.
 				x = int32(int16(uint16(wparam & 0xFFFF)))
 				y = int32(int16(uint16((wparam >> 16) & 0xFFFF)))
 			}
