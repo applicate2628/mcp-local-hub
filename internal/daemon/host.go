@@ -81,6 +81,14 @@ type StdioHost struct {
 
 	done        chan struct{} // closed by Stop() to unblock pending handlers
 	childExited chan struct{} // closed by the watcher goroutine when cmd.Wait() returns
+
+	// job is a Windows Job Object (no-op on POSIX) configured with
+	// KILL_ON_JOB_CLOSE so the kernel reaps any descendant tree the
+	// subprocess spawned (e.g. npx → node → mcp server) when our
+	// daemon process is force-killed without a chance to run cleanup.
+	// Set after cmd.Start(); released in Stop after killProcessTree.
+	// See internal/process/jobobject_windows.go.
+	job *process.Job
 }
 
 const maxMCPPostBodyBytes int64 = 1 << 20 // 1 MiB
@@ -141,6 +149,20 @@ func (h *StdioHost) Start(ctx context.Context) error {
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start subprocess: %w", err)
+	}
+	// Place subprocess into a Windows Job Object with KILL_ON_JOB_CLOSE
+	// so descendant processes (npx → node → mcp server, etc.) cannot
+	// outlive our parent on force-kill. POSIX is a no-op stub for now.
+	// See internal/process/jobobject_windows.go.
+	if job, jobErr := process.NewKillOnCloseJob(); jobErr == nil {
+		if err := job.Assign(cmd); err != nil {
+			_ = job.Close()
+			fmt.Fprintf(os.Stderr, "warn: assign stdio child to Job Object: %v (orphan protection disabled for this child)\n", err)
+		} else {
+			h.job = job
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "warn: create Job Object: %v (orphan protection disabled)\n", jobErr)
 	}
 	// Forward stderr to os.Stderr AND (if LogPath set) to a rotated
 	// log file. Mirrors daemon.Launch / HTTPHost behavior so
@@ -235,6 +257,12 @@ func (h *StdioHost) Stop() error {
 	h.wg.Wait()
 	if h.logFile != nil {
 		_ = h.logFile.Close()
+	}
+	if h.job != nil {
+		// Final handle release. killProcessTree above already terminated
+		// in-job processes; closing here lets the kernel reclaim the job
+		// object resource. No-op on POSIX.
+		_ = h.job.Close()
 	}
 	return nil
 }
