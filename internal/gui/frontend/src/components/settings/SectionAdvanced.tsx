@@ -1,6 +1,7 @@
 import { useState } from "preact/hooks";
 import { postAction } from "../../lib/settings-api";
 import type { SettingsSnapshot } from "../../lib/settings-types";
+import { SectionAdvancedDiagnostics } from "./SectionAdvancedDiagnostics";
 
 export type SectionAdvancedProps = {
   snapshot: SettingsSnapshot;
@@ -58,6 +59,7 @@ export function SectionAdvanced({ snapshot: _ }: SectionAdvancedProps): preact.J
         </button>
       </div>
       {err ? <p class="error-banner" role="alert">Could not open folder: {err}</p> : null}
+      <SectionAdvancedDiagnostics />
     </section>
   );
 }
