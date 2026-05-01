@@ -133,13 +133,12 @@ test("Port pending-restart badge appears after Save (Codex r3 P2.1 + r4 P2.1)", 
   expect(await badge.textContent()).toContain("9200");
 });
 
-test("Daemons read-only with 'Configured ... (effective in A4-b)' wording (Codex r1 P1.7)", async ({ page, hub }) => {
-  await page.goto(hub.url + "#/settings?section=daemons");
-  await expect(page.locator('section[data-section="daemons"]')).toContainText("Configured schedule:");
-  await expect(page.locator('section[data-section="daemons"]')).toContainText("(effective in A4-b)");
-  await expect(page.locator('section[data-section="daemons"] button')).toHaveCount(0);
-  await expect(page.locator('section[data-section="daemons"]')).not.toContainText(/^Current schedule:/);
-});
+// "Daemons read-only with Configured ... (effective in A4-b)" test removed —
+// A4-b PR #1 Task 1 flipped Deferred:false on weekly_schedule + retry_policy
+// and Task 11 rewrote SectionDaemons to be editable. The new editable surface
+// is covered end-to-end by the A4-b PR #1 T1-T5 scenarios at the bottom of
+// this file (membership table render, toggle persistence, Select all/Clear all,
+// cron valid + invalid).
 
 test("Backups list renders 4 client groups", async ({ page, hub }) => {
   await page.goto(hub.url + "#/settings?section=backups");
@@ -168,15 +167,10 @@ test("Backups preview marks would-prune rows", async ({ page, hub }) => {
   expect(await eligible.count()).toBeGreaterThanOrEqual(4);
 });
 
-test("Disabled Clean now button has the locked tooltip (memo §9.4)", async ({ page, hub }) => {
-  await page.goto(hub.url + "#/settings?section=backups");
-  const btn = page.locator('[data-test-id="clean-now-disabled"]');
-  await expect(btn).toBeDisabled();
-  await expect(btn).toHaveAttribute(
-    "title",
-    "Cleanup arrives in A4-b. This view only previews which timestamped backups cleanup would target.",
-  );
-});
+// "Disabled Clean now button has the locked tooltip" test removed — A4-b PR #1
+// Task 1 flipped Deferred:false on backups.clean_now and Task 10 wired it via
+// ConfirmModal. The new active flow is covered by T6 in the A4-b PR #1 block
+// (clean-now ConfirmModal Cancel preserves; Confirm invokes endpoint).
 
 test("Open app-data folder action triggers POST (mocked, no real spawn)", async ({ page, hub }) => {
   // Codex r2 P2: intercept the POST so the real backend never actually
