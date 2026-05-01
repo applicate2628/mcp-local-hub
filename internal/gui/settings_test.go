@@ -261,19 +261,24 @@ func TestSettings_POST_OpenAppDataFolder_Success(t *testing.T) {
 	}
 }
 
-func TestSettings_POST_DeferredAction_Returns404(t *testing.T) {
+func TestSettings_POST_UnknownActionRoute_Returns404(t *testing.T) {
+	// backups.clean_now has no dedicated handler in the settings POST route;
+	// its actual UI flow is ConfirmModal → POST /api/backups/clean (Task 10).
+	// The settings POST route correctly returns 404 + unknown_action for it.
+	// (Task 1 flipped backups.clean_now Deferred:true→false; this test was
+	// updated from deferred_action_not_implemented to match current behavior.)
 	s, _ := newTestServer(t)
 	req := httptest.NewRequest("POST", "/api/settings/backups.clean_now", nil)
 	req.Header = sameOriginHeaders()
 	rr := httptest.NewRecorder()
 	s.mux.ServeHTTP(rr, req)
 	if rr.Code != 404 {
-		t.Fatalf("expected 404 deferred, got %d", rr.Code)
+		t.Fatalf("expected 404 unknown_action, got %d", rr.Code)
 	}
 	var resp map[string]any
 	json.Unmarshal(rr.Body.Bytes(), &resp)
-	if resp["error"] != "deferred_action_not_implemented" {
-		t.Errorf("expected deferred_action_not_implemented, got %v", resp["error"])
+	if resp["error"] != "unknown_action" {
+		t.Errorf("expected unknown_action, got %v", resp["error"])
 	}
 }
 
