@@ -115,6 +115,8 @@ const (
 	// CreatePopupMenu flags
 	MF_STRING    = 0x00000000
 	MF_SEPARATOR = 0x00000800
+	MF_GRAYED    = 0x00000001
+	MF_DISABLED  = 0x00000002
 
 	// TrackPopupMenu flags (alignment + return value)
 	TPM_LEFTALIGN   = 0x0000
@@ -161,6 +163,9 @@ const (
 	cmdQuitAndStopDaemons = 3
 	cmdRunAllDaemons      = 4
 	cmdStopAllDaemons     = 5
+	cmdRescanClients      = 6
+	cmdOpenLogsFolder     = 7
+	cmdOpenDataFolder     = 8
 )
 
 // POINT matches Win32 POINT.
@@ -501,6 +506,27 @@ func appendMenuStringW(hmenu uintptr, id uintptr, text string) error {
 
 func appendMenuSeparator(hmenu uintptr) error {
 	r, _, e := procAppendMenuW.Call(hmenu, MF_SEPARATOR, 0, 0)
+	if r == 0 {
+		return e
+	}
+	return nil
+}
+
+// appendMenuStringDisabled appends a non-clickable label item — used for
+// the "Status: ..." header at the top of the tray menu. id is still
+// passed (Win32 requires unique IDs per menu) but never reaches the
+// WM_COMMAND switch because MF_GRAYED|MF_DISABLED suppresses the click.
+func appendMenuStringDisabled(hmenu uintptr, id uintptr, text string) error {
+	p, err := windows.UTF16PtrFromString(text)
+	if err != nil {
+		return err
+	}
+	r, _, e := procAppendMenuW.Call(
+		hmenu,
+		MF_STRING|MF_GRAYED|MF_DISABLED,
+		id,
+		uintptr(unsafe.Pointer(p)),
+	)
 	if r == 0 {
 		return e
 	}

@@ -369,6 +369,26 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 						fmt.Fprintf(cmd.OutOrStderr(), "tray: POST /api/stop-all: %v\n", err)
 					}
 				},
+				RescanClients: func() {
+					// Publish an SSE event so any open Servers/Migration
+					// screen re-fetches its scan state. Same SSE bus the
+					// Dashboard already subscribes to (PR #38), so the
+					// pipeline stays single-source-of-truth.
+					s.Broadcaster().Publish(gui.Event{Type: "clients-rescan"})
+				},
+				OpenLogsFolder: func() {
+					// In-process spawn — best-effort, errors logged to
+					// the parent's stderr so a failed spawn doesn't
+					// silently no-op the menu click.
+					if err := gui.OpenPath(api.DefaultLogDir()); err != nil {
+						fmt.Fprintf(cmd.OutOrStderr(), "tray: open logs folder: %v\n", err)
+					}
+				},
+				OpenDataFolder: func() {
+					if err := gui.OpenPath(filepath.Dir(api.SettingsPath())); err != nil {
+						fmt.Fprintf(cmd.OutOrStderr(), "tray: open data folder: %v\n", err)
+					}
+				},
 			}); err != nil {
 				fmt.Fprintf(cmd.OutOrStderr(), "tray: %v (GUI continues without tray)\n", err)
 			}

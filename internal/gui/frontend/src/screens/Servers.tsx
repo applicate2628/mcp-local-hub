@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import { fetchOrThrow } from "../api";
+import { useEventSource } from "../hooks/useEventSource";
 import { collectServers } from "../lib/routing";
 import { aggregateStatus, stateShape } from "../lib/status";
 import type { DaemonStatus, ScanResult, ServerRow, Routing } from "../types";
@@ -51,6 +52,14 @@ export function ServersScreen() {
   const [applyMsg, setApplyMsg] = useState<string>("");
   const [applying, setApplying] = useState<boolean>(false);
   const [reloadToken, setReloadToken] = useState<number>(0);
+
+  // Tray "Rescan client configs" — backend publishes clients-rescan,
+  // every open Servers tab re-fetches. Bumping reloadToken composes
+  // with the existing useEffect dep so the same path serves both
+  // user-triggered Apply and tray-triggered rescan.
+  useEventSource("/api/events", {
+    "clients-rescan": () => setReloadToken((n) => n + 1),
+  });
 
   useEffect(() => {
     let cancelled = false;

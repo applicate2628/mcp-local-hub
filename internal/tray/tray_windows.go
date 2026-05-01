@@ -514,6 +514,20 @@ func (tc *trayChild) showPopupMenuAt(x, y int32) {
 	}
 	defer destroyMenu(hmenu)
 
+	// Disabled status header — gives the user at-a-glance daemon health
+	// without opening the GUI. Reflects the most recent TrayState the
+	// parent has streamed in. Spec §6 (tray): "Status: <state> (disabled)".
+	tc.currentStateMu.Lock()
+	headerLabel := "Status: " + tc.currentState.String()
+	tc.currentStateMu.Unlock()
+	if err := appendMenuStringDisabled(hmenu, 0xFFF0, headerLabel); err != nil {
+		fmt.Fprintf(os.Stderr, "tray child: AppendMenu(status-header): %v\n", err)
+		return
+	}
+	if err := appendMenuSeparator(hmenu); err != nil {
+		fmt.Fprintf(os.Stderr, "tray child: AppendMenu(sep0): %v\n", err)
+		return
+	}
 	if err := appendMenuStringW(hmenu, cmdOpenDashboard, "Open dashboard"); err != nil {
 		fmt.Fprintf(os.Stderr, "tray child: AppendMenu(open): %v\n", err)
 		return
@@ -528,6 +542,22 @@ func (tc *trayChild) showPopupMenuAt(x, y int32) {
 	}
 	if err := appendMenuStringW(hmenu, cmdStopAllDaemons, "Stop all daemons"); err != nil {
 		fmt.Fprintf(os.Stderr, "tray child: AppendMenu(stop-all): %v\n", err)
+		return
+	}
+	if err := appendMenuSeparator(hmenu); err != nil {
+		fmt.Fprintf(os.Stderr, "tray child: AppendMenu(sep-rescan): %v\n", err)
+		return
+	}
+	if err := appendMenuStringW(hmenu, cmdRescanClients, "Rescan client configs"); err != nil {
+		fmt.Fprintf(os.Stderr, "tray child: AppendMenu(rescan): %v\n", err)
+		return
+	}
+	if err := appendMenuStringW(hmenu, cmdOpenLogsFolder, "Open logs folder"); err != nil {
+		fmt.Fprintf(os.Stderr, "tray child: AppendMenu(open-logs): %v\n", err)
+		return
+	}
+	if err := appendMenuStringW(hmenu, cmdOpenDataFolder, "Open data folder"); err != nil {
+		fmt.Fprintf(os.Stderr, "tray child: AppendMenu(open-data): %v\n", err)
 		return
 	}
 	if err := appendMenuSeparator(hmenu); err != nil {
@@ -613,6 +643,18 @@ func (tc *trayChild) showPopupMenuAt(x, y int32) {
 	case cmdStopAllDaemons:
 		// Fire-and-forget: parent calls api.StopAll. GUI stays open.
 		tc.emitEvent("stop-all")
+	case cmdRescanClients:
+		// Triggers /api/scan reload in the GUI process. Useful when the
+		// user has just edited a client config externally and wants the
+		// Servers matrix to pick up the new state without re-opening.
+		tc.emitEvent("rescan-clients")
+	case cmdOpenLogsFolder:
+		// Spawns the OS file manager at api.DefaultLogDir. GUI stays open.
+		tc.emitEvent("open-logs-folder")
+	case cmdOpenDataFolder:
+		// Spawns the OS file manager at api.SettingsPath()'s parent
+		// (mcp-local-hub data dir holding manifests, secrets, settings).
+		tc.emitEvent("open-data-folder")
 	}
 }
 

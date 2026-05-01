@@ -7,6 +7,21 @@ import * as settingsApi from "./lib/settings-api";
 import type { SettingsEnvelope } from "./lib/settings-types";
 import { isConfig } from "./lib/settings-types";
 
+// happy-dom does not ship EventSource. Servers + Migration now subscribe
+// to /api/events for the tray "rescan-clients" event (PR #N), so a bare
+// render(<App/>) on those routes hits `new EventSource(...)` and crashes.
+// Stub matches the Dashboard test's pattern: minimal API surface, no I/O.
+class StubEventSource {
+  url: string;
+  onmessage: ((ev: MessageEvent) => void) | null = null;
+  onerror: ((ev: Event) => void) | null = null;
+  constructor(url: string) { this.url = url; }
+  addEventListener(_t: string, _l: (ev: MessageEvent) => void) {}
+  removeEventListener(_t: string, _l: (ev: MessageEvent) => void) {}
+  close() {}
+}
+(globalThis as unknown as { EventSource: typeof StubEventSource }).EventSource = StubEventSource;
+
 // Minimal SettingsEnvelope with non-default appearance values so the test
 // can confirm the attributes were written (not just that defaults were kept).
 const fakeEnv: SettingsEnvelope = {
