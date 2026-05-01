@@ -350,12 +350,16 @@ test.describe("A4-b PR #1: Settings lifecycle", () => {
     });
     await page.goto(hub.url + "#/settings?section=daemons");
     const schedInput = page.locator('[data-testid="daemons-weekly-schedule-input"]');
-    // Wait for snapshot to anchor the input before editing — same race guard
-    // as the invalid-input test below.
+    // Wait for snapshot to anchor the input before editing — filling before
+    // the re-anchor useEffect fires causes the persisted default to overwrite
+    // the typed value, leaving schedDirty=false and the Save button disabled.
     await expect(schedInput).not.toHaveValue("");
     // Change the schedule input
     await schedInput.fill("weekly Tue 14:30");
-    await page.locator('[data-testid="daemons-save"]').click();
+    const saveBtn = page.locator('[data-testid="daemons-save"]');
+    // Wait for Preact to re-render with dirty=true before clicking.
+    await expect(saveBtn).toBeEnabled();
+    await saveBtn.click();
     // Expect the "Saved." success banner
     const banner = page.locator('[data-testid="daemons-save-banner"]');
     await expect(banner).toBeVisible();
@@ -379,7 +383,10 @@ test.describe("A4-b PR #1: Settings lifecycle", () => {
     await expect(schedInput).not.toHaveValue("");
     // Now fill with an invalid schedule
     await schedInput.fill("daily 03:00");
-    await page.locator('[data-testid="daemons-save"]').click();
+    const saveBtn = page.locator('[data-testid="daemons-save"]');
+    // Wait for Preact to re-render with dirty=true before clicking.
+    await expect(saveBtn).toBeEnabled();
+    await saveBtn.click();
     // The inline error element should appear under the schedule input
     const inlineError = page.locator('[id="daemons-weekly-schedule-error"]');
     await expect(inlineError).toBeVisible();
