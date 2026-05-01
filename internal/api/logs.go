@@ -90,17 +90,11 @@ func (a *API) LogsStream(server, daemon string, out *bufio.Writer) error {
 }
 
 // DefaultLogDir returns the canonical per-platform location of the
-<<<<<<< HEAD
 // daemon log directory. Exported so external callers (GUI tray "Open
-// logs folder", future remote consumers) resolve the same path the
-// daemon writer + log reader use, instead of duplicating the
-// LOCALAPPDATA / XDG_STATE_HOME / ~/.local/state fallback chain.
-=======
-// daemon log directory. Exported so the GUI's "Open logs folder" action
-// resolves the same path the daemon writer + log reader use, instead of
-// the GUI duplicating the env-var fallback chain. Production-only —
-// tests set HOME/LOCALAPPDATA/XDG_STATE_HOME and call through.
->>>>>>> b9d0403 (feat(gui): Logs filter + ERROR/WARN highlight + Open folder)
+// logs folder" action, /api/logs-folder backend handler, future
+// remote consumers) resolve the same path the daemon writer + log
+// reader use, instead of duplicating the LOCALAPPDATA / XDG_STATE_HOME
+// / ~/.local/state fallback chain.
 func DefaultLogDir() string { return defaultLogDir() }
 
 func defaultLogDir() string {
