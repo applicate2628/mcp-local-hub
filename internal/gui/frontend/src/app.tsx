@@ -3,6 +3,44 @@ import { useState, useEffect } from "preact/hooks";
 import { useRouter, type RouterState } from "./hooks/useRouter";
 import { useUnsavedChangesGuard } from "./hooks/useUnsavedChangesGuard";
 import { useSettingsSnapshot } from "./lib/use-settings-snapshot";
+
+// LAYOUT_CACHE_KEY caches the last-known appearance.layout in
+// localStorage so the second-and-later open of the GUI renders the
+// correct layout SYNCHRONOUSLY on first paint, rather than flashing
+// the default sidebar shell while /api/settings is in flight.
+// Codex bot review on PR #43 r2 P2.
+const LAYOUT_CACHE_KEY = "mcphub.appearance.layout";
+
+function readCachedLayout(): "sidebar" | "tabs" {
+  // localStorage may be unavailable (private mode, SSR, sandbox); fall
+  // back to "sidebar" so the contract is the same as a fresh first run.
+  try {
+    const v = localStorage.getItem(LAYOUT_CACHE_KEY);
+    return v === "tabs" ? "tabs" : "sidebar";
+  } catch {
+    return "sidebar";
+  }
+}
+
+function writeCachedLayout(v: string): void {
+  try {
+    localStorage.setItem(LAYOUT_CACHE_KEY, v);
+  } catch {
+    /* ignore — quota / disabled storage */
+  }
+}
+
+// Synchronously seed data-layout from the cached value at module load,
+// BEFORE the first render. Without this the JSX that conditionally
+// renders <header class="topbar"> fires fine, but the CSS rules gated
+// on :root[data-layout="tabs"] never apply — so the topbar shows
+// without tabs styling. Codex bot review on PR #43 r3 P1.
+//
+// guard typeof document for SSR / test bootstraps where document
+// doesn't exist yet; the test setup mounts a JSDOM later.
+if (typeof document !== "undefined") {
+  document.documentElement.setAttribute("data-layout", readCachedLayout());
+}
 import { AboutScreen } from "./screens/About";
 import { AddServerScreen } from "./screens/AddServer";
 import { DashboardScreen } from "./screens/Dashboard";
@@ -37,10 +75,34 @@ export function App() {
     if (globalSettings.status !== "ok") return;
     const theme = globalSettings.data.settings.find((s) => s.key === "appearance.theme");
     const density = globalSettings.data.settings.find((s) => s.key === "appearance.density");
+    const layout = globalSettings.data.settings.find((s) => s.key === "appearance.layout");
     if (theme && "value" in theme) document.documentElement.setAttribute("data-theme", theme.value);
     if (density && "value" in density) document.documentElement.setAttribute("data-density", density.value);
+    if (layout && "value" in layout) {
+      document.documentElement.setAttribute("data-layout", layout.value);
+      // Update the localStorage cache so the next-load synchronous read
+      // reflects the latest persisted value. Cache is best-effort; a
+      // failed write doesn't affect this run's correctness.
+      writeCachedLayout(layout.value);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [globalSettings.status, globalSettings.status === "ok" ? globalSettings.data : null]);
+
+  // Layout switcher (spec §5 line 241): sidebar (default) vs top tabs.
+  //
+  // The snapshot from /api/settings is async, so on every page open the
+  // first paint runs before the snapshot resolves. Reading the layout
+  // from localStorage gives us the SAME value the user saw last time
+  // synchronously — eliminating the sidebar→tabs flash flagged by Codex
+  // bot on r2 P2. The first-ever open (no cache) defaults to "sidebar"
+  // exactly as before. After the snapshot resolves the useEffect above
+  // refreshes the cache for next time.
+  const cachedLayout = readCachedLayout();
+  const layoutValue = (() => {
+    if (globalSettings.status !== "ok") return cachedLayout;
+    const entry = globalSettings.data.settings.find((s) => s.key === "appearance.layout");
+    return entry && "value" in entry && entry.value ? entry.value : "sidebar";
+  })();
 
   const guard = (target: RouterState): boolean => {
     if (!dirtyAny) return true;
@@ -120,20 +182,39 @@ export function App() {
       body = <p>Unknown screen: {route.screen}</p>;
   }
 
+  // Nav links — same set in both layouts; CSS swaps direction.
+  const navLinks = (
+    <nav>
+      <a href="#/servers"    class={route.screen === "servers"    ? "active" : ""} onClick={guardClick("servers")}>Servers</a>
+      <a href="#/migration"  class={route.screen === "migration"  ? "active" : ""} onClick={guardClick("migration")}>Migration</a>
+      <a href="#/add-server" class={route.screen === "add-server" ? "active" : ""} onClick={guardClick("add-server")}>Add server</a>
+      <a href="#/secrets"    class={route.screen === "secrets"    ? "active" : ""} onClick={guardClick("secrets")}>Secrets</a>
+      <a href="#/dashboard"  class={route.screen === "dashboard"  ? "active" : ""} onClick={guardClick("dashboard")}>Dashboard</a>
+      <a href="#/logs"       class={route.screen === "logs"       ? "active" : ""} onClick={guardClick("logs")}>Logs</a>
+      <a href="#/settings"   class={route.screen === "settings"   ? "active" : ""} onClick={guardClick("settings")}>Settings</a>
+      <a href="#/about"      class={route.screen === "about"      ? "active" : ""} onClick={guardClick("about")}>About</a>
+    </nav>
+  );
+
+  if (layoutValue === "tabs") {
+    return (
+      <>
+        <header class="topbar">
+          <div class="brand">mcp-local-hub</div>
+          {navLinks}
+        </header>
+        <main id="screen-root">
+          {body}
+        </main>
+      </>
+    );
+  }
+
   return (
     <>
       <aside class="sidebar">
         <div class="brand">mcp-local-hub</div>
-        <nav>
-          <a href="#/servers"    class={route.screen === "servers"    ? "active" : ""} onClick={guardClick("servers")}>Servers</a>
-          <a href="#/migration"  class={route.screen === "migration"  ? "active" : ""} onClick={guardClick("migration")}>Migration</a>
-          <a href="#/add-server" class={route.screen === "add-server" ? "active" : ""} onClick={guardClick("add-server")}>Add server</a>
-          <a href="#/secrets"    class={route.screen === "secrets"    ? "active" : ""} onClick={guardClick("secrets")}>Secrets</a>
-          <a href="#/dashboard"  class={route.screen === "dashboard"  ? "active" : ""} onClick={guardClick("dashboard")}>Dashboard</a>
-          <a href="#/logs"       class={route.screen === "logs"       ? "active" : ""} onClick={guardClick("logs")}>Logs</a>
-          <a href="#/settings"   class={route.screen === "settings"   ? "active" : ""} onClick={guardClick("settings")}>Settings</a>
-          <a href="#/about"      class={route.screen === "about"      ? "active" : ""} onClick={guardClick("about")}>About</a>
-        </nav>
+        {navLinks}
       </aside>
       <main id="screen-root">
         {body}

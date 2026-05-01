@@ -60,6 +60,9 @@ var SettingsRegistry = []SettingDef{
 	{Key: "appearance.default_home", Section: "appearance", Type: TypePath,
 		Default: "", Optional: true,
 		Help: "Default home directory for new servers. Used by future launches."},
+	{Key: "appearance.layout", Section: "appearance", Type: TypeEnum,
+		Default: "sidebar", Enum: []string{"sidebar", "tabs"},
+		Help: "Navigation layout. 'sidebar' shows screen links in a left rail (default); 'tabs' shows them across the top. Spec §5 line 241."},
 
 	// ----- gui_server -----
 	{Key: "gui_server.browser_on_launch", Section: "gui_server", Type: TypeBool,
