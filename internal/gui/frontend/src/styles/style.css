@@ -124,7 +124,7 @@ main { padding: var(--screen-padding); overflow: auto; }
 
 /* --- Logs screen --- */
 #logs-controls { display: flex; gap: var(--gap-sm); align-items: center; margin-bottom: var(--gap-md); }
-#logs-body { background: var(--sidebar-bg); border: 1px solid var(--border); padding: var(--card-padding); overflow: auto; max-height: 70vh; font-family: monospace; font-size: 12px; white-space: pre-wrap; }
+#logs-body { background: var(--sidebar-bg); border: 1px solid var(--border); padding: var(--logs-body-padding); overflow: auto; max-height: 70vh; font-family: monospace; font-size: 12px; white-space: pre-wrap; }
 
 /* Migration screen group tones (spec §5.2) */
 .screen.migration .group { margin: var(--migration-group-margin) 0;
@@ -851,6 +851,11 @@ menu button[disabled] {
   --migration-group-margin: 1.25rem;
   --migration-group-padding-y: 0.75rem;
   --migration-group-padding-x: 1rem;
+  /* Logs body has its own padding token so comfortable preserves the
+     historical 12px exactly — the panel was visibly tight before this
+     PR and 16px (--card-padding) felt loose. Codex bot review on PR #45
+     r2 P2: comfortable must match pre-density layout. */
+  --logs-body-padding: 12px;
 }
 :root[data-theme="dark"] {
   --bg-color: #0f172a;
@@ -882,6 +887,7 @@ menu button[disabled] {
   --migration-group-margin: 0.75rem;
   --migration-group-padding-y: 0.5rem;
   --migration-group-padding-x: 0.75rem;
+  --logs-body-padding: 8px;
 }
 :root[data-density="comfortable"] {
   --row-height: 32px; --section-gap: 24px;
@@ -890,6 +896,7 @@ menu button[disabled] {
   --migration-group-margin: 1.25rem;
   --migration-group-padding-y: 0.75rem;
   --migration-group-padding-x: 1rem;
+  --logs-body-padding: 12px;
 }
 :root[data-density="spacious"] {
   --row-height: 40px; --section-gap: 36px;
@@ -898,6 +905,7 @@ menu button[disabled] {
   --migration-group-margin: 1.75rem;
   --migration-group-padding-y: 1.1rem;
   --migration-group-padding-x: 1.4rem;
+  --logs-body-padding: 18px;
 }
 
 /* ============================================================
