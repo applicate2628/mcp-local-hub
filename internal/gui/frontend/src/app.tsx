@@ -3,6 +3,32 @@ import { useState, useEffect } from "preact/hooks";
 import { useRouter, type RouterState } from "./hooks/useRouter";
 import { useUnsavedChangesGuard } from "./hooks/useUnsavedChangesGuard";
 import { useSettingsSnapshot } from "./lib/use-settings-snapshot";
+
+// LAYOUT_CACHE_KEY caches the last-known appearance.layout in
+// localStorage so the second-and-later open of the GUI renders the
+// correct layout SYNCHRONOUSLY on first paint, rather than flashing
+// the default sidebar shell while /api/settings is in flight.
+// Codex bot review on PR #43 r2 P2.
+const LAYOUT_CACHE_KEY = "mcphub.appearance.layout";
+
+function readCachedLayout(): "sidebar" | "tabs" {
+  // localStorage may be unavailable (private mode, SSR, sandbox); fall
+  // back to "sidebar" so the contract is the same as a fresh first run.
+  try {
+    const v = localStorage.getItem(LAYOUT_CACHE_KEY);
+    return v === "tabs" ? "tabs" : "sidebar";
+  } catch {
+    return "sidebar";
+  }
+}
+
+function writeCachedLayout(v: string): void {
+  try {
+    localStorage.setItem(LAYOUT_CACHE_KEY, v);
+  } catch {
+    /* ignore — quota / disabled storage */
+  }
+}
 import { AboutScreen } from "./screens/About";
 import { AddServerScreen } from "./screens/AddServer";
 import { DashboardScreen } from "./screens/Dashboard";
@@ -40,15 +66,28 @@ export function App() {
     const layout = globalSettings.data.settings.find((s) => s.key === "appearance.layout");
     if (theme && "value" in theme) document.documentElement.setAttribute("data-theme", theme.value);
     if (density && "value" in density) document.documentElement.setAttribute("data-density", density.value);
-    if (layout && "value" in layout) document.documentElement.setAttribute("data-layout", layout.value);
+    if (layout && "value" in layout) {
+      document.documentElement.setAttribute("data-layout", layout.value);
+      // Update the localStorage cache so the next-load synchronous read
+      // reflects the latest persisted value. Cache is best-effort; a
+      // failed write doesn't affect this run's correctness.
+      writeCachedLayout(layout.value);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [globalSettings.status, globalSettings.status === "ok" ? globalSettings.data : null]);
 
   // Layout switcher (spec §5 line 241): sidebar (default) vs top tabs.
-  // Driven from the SAME snapshot; live-applies on Save without
-  // requiring a relaunch.
+  //
+  // The snapshot from /api/settings is async, so on every page open the
+  // first paint runs before the snapshot resolves. Reading the layout
+  // from localStorage gives us the SAME value the user saw last time
+  // synchronously — eliminating the sidebar→tabs flash flagged by Codex
+  // bot on r2 P2. The first-ever open (no cache) defaults to "sidebar"
+  // exactly as before. After the snapshot resolves the useEffect above
+  // refreshes the cache for next time.
+  const cachedLayout = readCachedLayout();
   const layoutValue = (() => {
-    if (globalSettings.status !== "ok") return "sidebar";
+    if (globalSettings.status !== "ok") return cachedLayout;
     const entry = globalSettings.data.settings.find((s) => s.key === "appearance.layout");
     return entry && "value" in entry && entry.value ? entry.value : "sidebar";
   })();
