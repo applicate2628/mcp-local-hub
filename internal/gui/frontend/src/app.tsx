@@ -182,6 +182,29 @@ export function App() {
   const route = useRouter(persistedDefaultScreen, guard);
   useUnsavedChangesGuard(dirtyAny);
 
+  // Cold-start reconciliation: when the snapshot resolves for the
+  // first time AND the user is still on the synthetic default with
+  // no URL hash, navigate to the persisted preference. Covers the
+  // edge case Codex bot r2 P2 flagged — new browser profile, cleared
+  // localStorage, or a value set via CLI (`mcphub settings set
+  // appearance.default_screen X`) without ever opening the GUI: the
+  // cache is empty so useRouter latches "dashboard", but the snapshot
+  // then arrives with the real preference. The guard on "no hash" +
+  // "on cached/default screen" keeps this from yanking a user who
+  // already navigated manually.
+  const [coldStartHandled, setColdStartHandled] = useState(false);
+  useEffect(() => {
+    if (coldStartHandled) return;
+    if (globalSettings.status !== "ok") return;
+    setColdStartHandled(true);
+    const entry = globalSettings.data.settings.find((s) => s.key === "appearance.default_screen");
+    const persisted = entry && "value" in entry && entry.value ? entry.value : "dashboard";
+    if (persisted === route.screen) return;
+    if (window.location.hash && window.location.hash !== "#/") return;
+    if (route.screen !== readCachedDefaultScreen()) return;
+    window.location.hash = `#/${persisted}`;
+  }, [globalSettings.status, coldStartHandled, route.screen]);
+
   function guardClick(targetScreen: string): (e: MouseEvent) => void {
     return (e) => {
       if (!dirtyAny) return;
