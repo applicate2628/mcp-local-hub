@@ -121,7 +121,7 @@ func TestSettings_Concurrent_DistinctKeys(t *testing.T) {
 		{"gui_server.browser_on_launch", "false"},
 		{"gui_server.port", "9999"},
 		{"gui_server.tray", "false"},
-		{"daemons.weekly_schedule", "daily Mon 04:00"},
+		{"daemons.weekly_schedule", "weekly Mon 04:00"},
 		{"daemons.retry_policy", "linear"},
 		{"backups.keep_n", "12"},
 	}
@@ -370,4 +370,86 @@ func indexOf(h, n string) int {
 		}
 	}
 	return -1
+}
+
+func TestSettingsRegistry_WeeklyRefreshDefault(t *testing.T) {
+	def := findDef("daemons.weekly_refresh_default")
+	if def == nil {
+		t.Fatal("daemons.weekly_refresh_default not in registry")
+	}
+	if def.Type != TypeBool {
+		t.Errorf("type = %v, want bool", def.Type)
+	}
+	if def.Default != "false" {
+		t.Errorf("default = %q, want false (D1: opt-in default)", def.Default)
+	}
+	if def.Section != "daemons" {
+		t.Errorf("section = %q, want daemons", def.Section)
+	}
+}
+
+func TestSettingsRegistry_WeeklySchedulePatternBounds(t *testing.T) {
+	def := findDef("daemons.weekly_schedule")
+	if def == nil {
+		t.Fatal("daemons.weekly_schedule missing")
+	}
+	if def.Deferred {
+		t.Error("daemons.weekly_schedule still Deferred:true; A4-b PR #1 must flip to false")
+	}
+	cases := []struct {
+		in    string
+		valid bool
+	}{
+		{"weekly Sun 03:00", true},
+		{"weekly Mon 14:30", true},
+		{"weekly sun 03:00", true},
+		{"weekly Sun 24:00", false},
+		{"weekly Sun 99:99", false},
+		{"weekly Sun 23:60", false},
+		{"daily 03:00", false},
+		{"weekly Funday 03:00", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		err := validate(def, c.in)
+		got := err == nil
+		if got != c.valid {
+			t.Errorf("validate(%q): got valid=%v, want %v (err=%v)", c.in, got, c.valid, err)
+		}
+	}
+}
+
+func TestSettingsRegistry_DeferredFlipsForA4bPR1(t *testing.T) {
+	mustNotBeDeferred := []string{
+		"daemons.weekly_schedule",
+		"daemons.retry_policy",
+		"backups.clean_now",
+		"advanced.export_config_bundle",
+	}
+	for _, k := range mustNotBeDeferred {
+		def := findDef(k)
+		if def == nil {
+			t.Errorf("key %q missing from registry", k)
+			continue
+		}
+		if def.Deferred {
+			t.Errorf("key %q still Deferred:true (A4-b PR #1 must flip)", k)
+		}
+	}
+}
+
+func TestSettingsRegistry_ForceKillCustomRender(t *testing.T) {
+	for _, k := range []string{"advanced.force_kill_diagnose", "advanced.force_kill"} {
+		def := findDef(k)
+		if def == nil {
+			t.Errorf("key %q missing from registry", k)
+			continue
+		}
+		if def.Type != TypeAction {
+			t.Errorf("key %q type = %v, want action", k, def.Type)
+		}
+		if def.RenderKind != RenderCustom {
+			t.Errorf("key %q RenderKind = %q, want %q", k, def.RenderKind, RenderCustom)
+		}
+	}
 }
