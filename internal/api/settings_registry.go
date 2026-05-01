@@ -97,6 +97,8 @@ var SettingsRegistry = []SettingDef{
 		Help:    "When registering a new workspace, enroll it in weekly refresh by default. Existing workspaces are not affected."},
 	{Key: "daemons.weekly_schedule", Section: "daemons", Type: TypeString,
 		Default: "weekly Sun 03:00",
+		// Pattern: (?:[01]\d|2[0-3]) accepts 00-09, 10-19, 20-23; rejects 24+.
+		//          [0-5]\d accepts 00-59; rejects 60+. D7 bounded HH:MM.
 		Pattern: `^weekly\s+(?i:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+(?:[01]\d|2[0-3]):[0-5]\d$`,
 		Help:    "Weekly refresh schedule (format: weekly DAY HH:MM, 24-hour local time)."},
 	{Key: "daemons.retry_policy", Section: "daemons", Type: TypeEnum,

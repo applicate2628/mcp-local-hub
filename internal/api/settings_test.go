@@ -408,6 +408,7 @@ func TestSettingsRegistry_WeeklySchedulePatternBounds(t *testing.T) {
 		{"weekly Sun 23:60", false},
 		{"daily 03:00", false},
 		{"weekly Funday 03:00", false},
+		{"weekly Sun 03:00 ", false}, // trailing space rejected by $ anchor
 		{"", false},
 	}
 	for _, c := range cases {
@@ -419,6 +420,8 @@ func TestSettingsRegistry_WeeklySchedulePatternBounds(t *testing.T) {
 	}
 }
 
+// Memo §13 acceptance #4: four pre-existing Deferred flags flipped;
+// force_kill_* keys added in this same task without Deferred.
 func TestSettingsRegistry_DeferredFlipsForA4bPR1(t *testing.T) {
 	mustNotBeDeferred := []string{
 		"daemons.weekly_schedule",
@@ -438,6 +441,8 @@ func TestSettingsRegistry_DeferredFlipsForA4bPR1(t *testing.T) {
 	}
 }
 
+// D14: force_kill_* keys use RenderCustom because the default single-button
+// affordance is insufficient for a two-step diagnose-then-kill flow.
 func TestSettingsRegistry_ForceKillCustomRender(t *testing.T) {
 	for _, k := range []string{"advanced.force_kill_diagnose", "advanced.force_kill"} {
 		def := findDef(k)
