@@ -29,6 +29,18 @@ function writeCachedLayout(v: string): void {
     /* ignore — quota / disabled storage */
   }
 }
+
+// Synchronously seed data-layout from the cached value at module load,
+// BEFORE the first render. Without this the JSX that conditionally
+// renders <header class="topbar"> fires fine, but the CSS rules gated
+// on :root[data-layout="tabs"] never apply — so the topbar shows
+// without tabs styling. Codex bot review on PR #43 r3 P1.
+//
+// guard typeof document for SSR / test bootstraps where document
+// doesn't exist yet; the test setup mounts a JSDOM later.
+if (typeof document !== "undefined") {
+  document.documentElement.setAttribute("data-layout", readCachedLayout());
+}
 import { AboutScreen } from "./screens/About";
 import { AddServerScreen } from "./screens/AddServer";
 import { DashboardScreen } from "./screens/Dashboard";
