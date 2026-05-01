@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aggregateStatus } from "./status";
+import { aggregateStatus, stateShape } from "./status";
 import type { DaemonStatus } from "../types";
 
 function row(overrides: Partial<DaemonStatus>): DaemonStatus {
@@ -61,5 +61,21 @@ describe("aggregateStatus", () => {
 
   it("tolerates null input", () => {
     expect(aggregateStatus(null)).toEqual({});
+  });
+});
+
+describe("stateShape", () => {
+  it("returns ● for Running", () => {
+    expect(stateShape("Running")).toBe("●");
+  });
+
+  it("returns ○ for everything else", () => {
+    // Spec dichotomy is binary: only "Running" gets the filled shape.
+    // Stopped, Failed, Partial (mixed multi-daemon), and any future
+    // state value all map to the open shape, matching the existing
+    // .card.ok / .card.down two-class CSS.
+    for (const s of ["Stopped", "Failed", "Partial", "Gone", "Starting", ""]) {
+      expect(stateShape(s)).toBe("○");
+    }
   });
 });

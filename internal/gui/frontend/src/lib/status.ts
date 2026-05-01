@@ -1,5 +1,17 @@
 import type { DaemonStatus, ServerAggregate } from "../types";
 
+// stateShape returns the shape glyph that augments color for daemon-state
+// rendering. Spec §5.7 line 289 requires status cells to include a shape
+// indicator (● vs ○) so red/green color is not the sole carrier of meaning
+// — users with a red-green color deficit can still read state at a glance.
+//
+// The dichotomy is binary: Running → ●, everything else (Stopped, Failed,
+// Partial, Gone) → ○. The text label still carries the precise state, so
+// the shape only has to convey "fully running" vs "not fully running".
+export function stateShape(state: string): string {
+  return state === "Running" ? "●" : "○";
+}
+
 // aggregateStatus collapses /api/status's per-(server, daemon) rows into one
 // row per server for the matrix display. Multi-daemon servers (serena ships
 // claude + codex) otherwise had the second iterated daemon overwrite the

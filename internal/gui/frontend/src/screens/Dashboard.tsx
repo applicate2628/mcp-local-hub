@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { fetchOrThrow } from "../api";
 import { useEventSource } from "../hooks/useEventSource";
+import { stateShape } from "../lib/status";
 import type { DaemonStatus } from "../types";
 
 // Key state map by "<server>/<daemon>" — matches the poller convention.
@@ -485,7 +486,10 @@ function Card(props: {
       </div>
       <div class="card-kv">
         <span>State</span>
-        <span class="state">{d.state}</span>
+        <span class="state">
+          <span class="state-shape" aria-hidden="true">{stateShape(d.state)}</span>{" "}
+          {d.state}
+        </span>
       </div>
       <div class="card-actions">
         <button onClick={restartBtn.click} disabled={restartDisabled} aria-busy={anyWorking}>
