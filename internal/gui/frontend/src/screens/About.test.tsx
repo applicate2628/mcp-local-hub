@@ -60,6 +60,32 @@ describe("AboutScreen", () => {
     expect(errBox.textContent).toMatch(/boom/);
   });
 
+  it("renders documentation links derived from the homepage URL (Round 1 #7)", async () => {
+    // Audit gap: spec calls for README / INSTALL / verification doc
+    // links on the About screen so users can find canonical docs without
+    // leaving the GUI. The links must be derived from the homepage URL
+    // (not hardcoded) so a future repo rename automatically follows.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(fakeVersion), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const { findByTestId } = render(<AboutScreen />);
+    const readme = await findByTestId("about-readme-link");
+    expect(readme.getAttribute("href")).toBe(
+      "https://github.com/applicate2628/mcp-local-hub/blob/master/README.md",
+    );
+    const install = await findByTestId("about-install-link");
+    expect(install.getAttribute("href")).toBe(
+      "https://github.com/applicate2628/mcp-local-hub/blob/master/INSTALL.md",
+    );
+    const verification = await findByTestId("about-verification-link");
+    expect(verification.getAttribute("href")).toBe(
+      "https://github.com/applicate2628/mcp-local-hub/blob/master/docs/phase-3b-ii-verification.md",
+    );
+  });
+
   it("links open in new tab with rel=noopener noreferrer", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify(fakeVersion), {
