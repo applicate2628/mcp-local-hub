@@ -1,5 +1,5 @@
 import type { JSX } from "preact";
-import { useState, useEffect } from "preact/hooks";
+import { useState, useEffect, useRef } from "preact/hooks";
 import { useRouter, type RouterState } from "./hooks/useRouter";
 import { useUnsavedChangesGuard } from "./hooks/useUnsavedChangesGuard";
 import { useSettingsSnapshot } from "./lib/use-settings-snapshot";
@@ -105,6 +105,11 @@ export function App() {
   // the race where App's stale fetch could overwrite post-Save values is
   // eliminated.
   const globalSettings = useSettingsSnapshot();
+  // Capture the cache value at mount — before the settings effect overwrites it with
+  // the snapshot value. useRouter latches whatever was in cache at first render; this
+  // ref lets the cold-start reconciliation know what screen the router was given, even
+  // after writeCachedDefaultScreen() has already updated localStorage. Codex r3 P2.
+  const initialDefaultScreenRef = useRef(readCachedDefaultScreen());
   useEffect(() => {
     if (globalSettings.status !== "ok") return;
     const theme = globalSettings.data.settings.find((s) => s.key === "appearance.theme");
@@ -192,6 +197,11 @@ export function App() {
   // then arrives with the real preference. The guard on "no hash" +
   // "on cached/default screen" keeps this from yanking a user who
   // already navigated manually.
+  //
+  // Codex bot r3 P2: the guard uses initialDefaultScreenRef (captured at
+  // mount) instead of re-reading localStorage, because the settings effect
+  // above runs first (same dependency) and overwrites the cache before this
+  // effect reads it — causing the guard to see the NEW value and bail early.
   const [coldStartHandled, setColdStartHandled] = useState(false);
   useEffect(() => {
     if (coldStartHandled) return;
@@ -201,7 +211,7 @@ export function App() {
     const persisted = entry && "value" in entry && entry.value ? entry.value : "dashboard";
     if (persisted === route.screen) return;
     if (window.location.hash && window.location.hash !== "#/") return;
-    if (route.screen !== readCachedDefaultScreen()) return;
+    if (route.screen !== initialDefaultScreenRef.current) return;
     window.location.hash = `#/${persisted}`;
   }, [globalSettings.status, coldStartHandled, route.screen]);
 
