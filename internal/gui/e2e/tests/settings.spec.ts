@@ -349,8 +349,11 @@ test.describe("A4-b PR #1: Settings lifecycle", () => {
       });
     });
     await page.goto(hub.url + "#/settings?section=daemons");
-    // Change the schedule input
     const schedInput = page.locator('[data-testid="daemons-weekly-schedule-input"]');
+    // Wait for snapshot to anchor the input before editing — same race guard
+    // as the invalid-input test below.
+    await expect(schedInput).not.toHaveValue("");
+    // Change the schedule input
     await schedInput.fill("weekly Tue 14:30");
     await page.locator('[data-testid="daemons-save"]').click();
     // Expect the "Saved." success banner
@@ -367,7 +370,14 @@ test.describe("A4-b PR #1: Settings lifecycle", () => {
   test("Cron edit invalid string shows inline parse-error with canonical example", async ({ page, hub }) => {
     await page.goto(hub.url + "#/settings?section=daemons");
     const schedInput = page.locator('[data-testid="daemons-weekly-schedule-input"]');
-    // Clear the existing value and type an invalid schedule
+    // Wait for snapshot to load: the input starts empty during load and is
+    // populated via useEffect once the settings snapshot resolves. Filling
+    // before that fires causes SectionDaemons's re-anchor effect to overwrite
+    // our typed value with the persisted default, leaving schedDirty=false and
+    // the Save button disabled. Waiting for a non-empty value ensures the anchor
+    // is stable before we modify it.
+    await expect(schedInput).not.toHaveValue("");
+    // Now fill with an invalid schedule
     await schedInput.fill("daily 03:00");
     await page.locator('[data-testid="daemons-save"]').click();
     // The inline error element should appear under the schedule input
