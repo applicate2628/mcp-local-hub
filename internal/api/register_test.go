@@ -891,7 +891,7 @@ func TestRegister_NoWeeklyRefreshOpt(t *testing.T) {
 	defer h.restore()
 	ws := t.TempDir()
 	m := nineLanguageManifest()
-	_, err := mustNewAPI(t).registerWithManifest(m, ws, []string{"python"}, RegisterOpts{WeeklyRefresh: false, Writer: &bytes.Buffer{}})
+	_, err := mustNewAPI(t).registerWithManifest(m, ws, []string{"python"}, RegisterOpts{WeeklyRefreshExplicit: true, WeeklyRefresh: false, Writer: &bytes.Buffer{}})
 	if err != nil {
 		t.Fatal(err)
 	}

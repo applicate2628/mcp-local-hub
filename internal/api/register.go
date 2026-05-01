@@ -66,6 +66,12 @@ type RegisterOpts struct {
 // new entry per memo D1: explicit caller override beats the persisted
 // knob; absent explicit override, read daemons.weekly_refresh_default
 // from settings (default "false").
+//
+// Error/empty handling: if SettingsGet returns an error (settings file
+// absent on first install, or unreadable due to corruption), the
+// fallback is false (the opt-out default). A corrupt-YAML error is
+// treated the same as "key absent" and is not surfaced here; the
+// caller may surface it separately if diagnosability is required.
 func resolveWeeklyRefresh(a *API, opts RegisterOpts) bool {
 	if opts.WeeklyRefreshExplicit {
 		return opts.WeeklyRefresh
