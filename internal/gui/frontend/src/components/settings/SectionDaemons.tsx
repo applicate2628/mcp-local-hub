@@ -84,24 +84,14 @@ export function SectionDaemons({
   const [banner, setBanner] = useState<Banner | null>(null);
   const [schedError, setSchedError] = useState<string | null>(null);
 
-  // Re-anchor field state when the underlying snapshot value changes (e.g.
-  // a successful refresh after Save committed op 1 but op 2 failed —
-  // op 1's keys catch up to disk, so the field baselines must move with
-  // them). Mirrors SectionBackups's baseline pattern.
-  useEffect(() => {
-    setSchedValue((v) => (v === schedValue ? persistedSched : v));
-    // Only auto-sync when there is no local edit — avoid clobbering an
-    // in-progress user edit.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [persistedSched]);
-  useEffect(() => {
-    setRetryValue((v) => (v === retryValue ? persistedRetry : v));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [persistedRetry]);
-  useEffect(() => {
-    setKnobValue((v) => (v === knobValue ? persistedKnob : v));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [persistedKnob]);
+  // Re-anchor field state when the underlying snapshot value changes
+  // (e.g. a successful refresh after a save). Fields are disabled during
+  // busy=true so the user cannot edit during save; once persistedX moves,
+  // the baseline moves and dirty correctly drops back to false. Mirrors
+  // SectionBackups's `useEffect(() => setDraft(baseline), [baseline])`.
+  useEffect(() => { setSchedValue(persistedSched); }, [persistedSched]);
+  useEffect(() => { setRetryValue(persistedRetry); }, [persistedRetry]);
+  useEffect(() => { setKnobValue(persistedKnob); }, [persistedKnob]);
 
   const schedDirty = schedValue !== persistedSched;
   const retryDirty = retryValue !== persistedRetry;
