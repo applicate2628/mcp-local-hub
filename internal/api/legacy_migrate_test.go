@@ -2,9 +2,35 @@ package api
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
 )
+
+// Memo D1 exemption regression guard: legacy_migrate.go preserves
+// hardcoded WeeklyRefresh:true with WeeklyRefreshExplicit:true so it
+// bypasses the knob. Source-level assertions catch any future flip.
+func TestLegacyMigrate_ExemptionFromKnob(t *testing.T) {
+	src, err := os.ReadFile("legacy_migrate.go")
+	if err != nil {
+		t.Fatalf("read legacy_migrate.go: %v", err)
+	}
+	body := string(src)
+
+	// Must still hardcode WeeklyRefresh:true with explicit override.
+	if !strings.Contains(body, "WeeklyRefreshExplicit: true") {
+		t.Error("legacy_migrate.go missing WeeklyRefreshExplicit:true (memo D1 exemption)")
+	}
+	if !strings.Contains(body, "WeeklyRefresh:        true") &&
+		!strings.Contains(body, "WeeklyRefresh: true") {
+		t.Error("legacy_migrate.go no longer hardcodes WeeklyRefresh:true (memo D1 exemption violated)")
+	}
+
+	// Must contain the rationale comment so future readers see why.
+	if !strings.Contains(body, "Legacy import preserves the pre-A4-b register-time default") {
+		t.Error("legacy_migrate.go missing memo-D1 rationale comment")
+	}
+}
 
 // TestMigrateLegacy_DryRun confirms dry-run prints a plan but makes no
 // registry or client changes.
