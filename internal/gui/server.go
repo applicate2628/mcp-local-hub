@@ -357,6 +357,21 @@ type Server struct {
 	// deterministic outcomes without touching real Task Scheduler.
 	swapForRoute      func(spec *api.ScheduleSpec, priorXML []byte) (string, error)
 	exportXMLForRoute func(taskName string) ([]byte, error)
+
+	// Force-kill HTTP wrapper test seams (memo D12 + D13). Production:
+	// nil — the handlers fall back to gui.Probe / gui.KillRecordedHolder
+	// against the real PidportPath(). Tests inject closures to drive
+	// deterministic outcomes without touching real file locks or
+	// processes. probeForRoute backs POST /api/force-kill/probe; the
+	// returned Verdict is encoded as JSON. killForRoute backs POST
+	// /api/force-kill; the returned (Verdict, error) tuple is mapped
+	// onto HTTP status by Verdict.Class:
+	//   - VerdictKilledRecovered / VerdictHealthy   -> 200
+	//   - VerdictKillRefused (identity gate failed) -> 403
+	//   - VerdictRaceLost   (lock changed mid-flight) -> 412
+	//   - other err != nil  (kill failed/unknown)  -> 500
+	probeForRoute func() Verdict
+	killForRoute  func() (Verdict, error)
 }
 
 // NewServer constructs the Server. It registers the ping handler
@@ -403,6 +418,7 @@ func NewServer(cfg Config) *Server {
 	registerVersionRoutes(s)
 	registerDaemonsRoutes(s)
 	registerExportBundleRoutes(s)
+	registerForceKillRoutes(s)
 	return s
 }
 
