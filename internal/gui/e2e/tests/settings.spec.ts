@@ -237,3 +237,247 @@ test("Deferred field 'tray' rendered disabled with (coming in A4-b)", async ({ p
   await expect(page.locator("#gui_server\\.tray")).toBeDisabled();
   await expect(page.locator('section[data-section="gui_server"]')).toContainText("coming in A4-b");
 });
+
+// ---------------------------------------------------------------------------
+// A4-b PR #1 scenarios (Task 15)
+// ---------------------------------------------------------------------------
+//
+// Seed helper: workspaces.yaml lives at <home>/mcp-local-hub/workspaces.yaml
+// on Windows because the hub fixture sets LOCALAPPDATA=home.
+// DefaultRegistryPath() checks LOCALAPPDATA first on Windows.
+
+type WorkspaceRow = {
+  key: string;
+  path: string;
+  lang: string;
+  weekly: boolean;
+};
+
+async function seedWorkspacesYAML(home: string, rows: WorkspaceRow[]): Promise<void> {
+  const lines: string[] = ["version: 1", "workspaces:"];
+  for (const r of rows) {
+    const port = 9100 + Math.floor(Math.random() * 100);
+    const taskName = `t-${r.key.replace(/[^a-z0-9]/gi, "_")}-${r.lang}`;
+    lines.push(`  - workspace_key: ${r.key}`);
+    lines.push(`    workspace_path: ${r.path}`);
+    lines.push(`    language: ${r.lang}`);
+    lines.push(`    backend: mcp-language-server`);
+    lines.push(`    port: ${port}`);
+    lines.push(`    task_name: ${taskName}`);
+    lines.push(`    client_entries: {}`);
+    lines.push(`    weekly_refresh: ${r.weekly}`);
+  }
+  // LOCALAPPDATA=home on Windows → mcp-local-hub subdir is the registry dir
+  const dir = path.join(home, "mcp-local-hub");
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(path.join(dir, "workspaces.yaml"), lines.join("\n") + "\n");
+}
+
+test.describe("A4-b PR #1: Settings lifecycle", () => {
+  // Test 1 — Membership table renders mixed initial state
+  test("Membership table renders mixed initial state (seed 2 rows with weekly true/false)", async ({ page, hub }) => {
+    await seedWorkspacesYAML(hub.home, [
+      { key: "D:/dev/proj-alpha", path: "D:/dev/proj-alpha", lang: "python",     weekly: true  },
+      { key: "D:/dev/proj-beta",  path: "D:/dev/proj-beta",  lang: "typescript", weekly: false },
+    ]);
+    await page.goto(hub.url + "#/settings?section=daemons");
+    // Wait for membership table to finish loading (replaces "Loading workspaces…")
+    await expect(page.locator('[data-testid="weekly-membership-table"]')).not.toContainText("Loading workspaces");
+    // Row for proj-alpha / python should be checked
+    const alpha = page.locator('[data-testid="membership-D:/dev/proj-alpha-python"]');
+    await expect(alpha).toBeChecked();
+    // Row for proj-beta / typescript should be unchecked
+    const beta = page.locator('[data-testid="membership-D:/dev/proj-beta-typescript"]');
+    await expect(beta).not.toBeChecked();
+  });
+
+  // Test 2 — Toggle one row + Save → reload → state persisted
+  test("Toggle one row + Save persists to disk (reload round-trip)", async ({ page, hub }) => {
+    await seedWorkspacesYAML(hub.home, [
+      { key: "D:/dev/ws-toggle", path: "D:/dev/ws-toggle", lang: "go", weekly: true },
+    ]);
+    await page.goto(hub.url + "#/settings?section=daemons");
+    // Wait for membership table rows
+    await expect(page.locator('[data-testid="weekly-membership-table"]')).not.toContainText("Loading workspaces");
+    const checkbox = page.locator('[data-testid="membership-D:/dev/ws-toggle-go"]');
+    await expect(checkbox).toBeChecked();
+    // Toggle from true → false
+    await checkbox.click();
+    await expect(checkbox).not.toBeChecked();
+    // Save (daemons Save button)
+    await page.locator('[data-testid="daemons-save"]').click();
+    await expect(page.locator('[data-testid="daemons-save-banner"]')).toBeVisible();
+    await expect(page.locator('[data-testid="daemons-save-banner"]')).toContainText("Saved");
+    // Reload and re-open settings section
+    await page.goto(hub.url + "#/settings?section=daemons");
+    await expect(page.locator('[data-testid="weekly-membership-table"]')).not.toContainText("Loading workspaces");
+    // State must be persisted as false after reload
+    await expect(page.locator('[data-testid="membership-D:/dev/ws-toggle-go"]')).not.toBeChecked();
+  });
+
+  // Test 3 — Select all / Clear all bulk affordance
+  test("Select all flips every row to enabled; Clear all flips every row to disabled", async ({ page, hub }) => {
+    await seedWorkspacesYAML(hub.home, [
+      { key: "D:/dev/ws-a", path: "D:/dev/ws-a", lang: "rust",   weekly: false },
+      { key: "D:/dev/ws-b", path: "D:/dev/ws-b", lang: "python", weekly: true  },
+    ]);
+    await page.goto(hub.url + "#/settings?section=daemons");
+    await expect(page.locator('[data-testid="weekly-membership-table"]')).not.toContainText("Loading workspaces");
+    // Click "Select all" — both rows should become checked
+    await page.locator('[data-testid="weekly-membership-select-all"]').click();
+    await expect(page.locator('[data-testid="membership-D:/dev/ws-a-rust"]')).toBeChecked();
+    await expect(page.locator('[data-testid="membership-D:/dev/ws-b-python"]')).toBeChecked();
+    // Click "Clear all" — both rows should become unchecked
+    await page.locator('[data-testid="weekly-membership-clear-all"]').click();
+    await expect(page.locator('[data-testid="membership-D:/dev/ws-a-rust"]')).not.toBeChecked();
+    await expect(page.locator('[data-testid="membership-D:/dev/ws-b-python"]')).not.toBeChecked();
+  });
+
+  // Test 4 — Cron edit valid + Save → "Saved." banner
+  // The E2E environment runs MCPHUB_E2E_SCHEDULER=none which makes the
+  // real scheduler reject SwapWeeklyTrigger. We intercept the PUT route
+  // and return a mocked 200 so the frontend's "Saved." success path is
+  // exercised end-to-end, matching the same pattern used by the open-
+  // app-data-folder test (line 181 above).
+  test("Cron edit valid + Save shows Saved banner (schedule route mocked OK)", async ({ page, hub }) => {
+    await page.route("**/api/daemons/weekly-schedule", async (route, req) => {
+      if (req.method() !== "PUT") { await route.fallback(); return; }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ updated: true, schedule: "weekly Tue 14:30", restore_status: "n/a" }),
+      });
+    });
+    await page.goto(hub.url + "#/settings?section=daemons");
+    // Change the schedule input
+    const schedInput = page.locator('[data-testid="daemons-weekly-schedule-input"]');
+    await schedInput.fill("weekly Tue 14:30");
+    await page.locator('[data-testid="daemons-save"]').click();
+    // Expect the "Saved." success banner
+    const banner = page.locator('[data-testid="daemons-save-banner"]');
+    await expect(banner).toBeVisible();
+    await expect(banner).toContainText("Saved");
+  });
+
+  // Test 5 — Cron edit invalid string → inline parse-error visible with canonical example
+  // The real PUT /api/daemons/weekly-schedule returns 400 parse_error for
+  // unsupported formats. "daily 03:00" is not accepted by ParseSchedule
+  // (only "weekly DAY HH:MM" is valid per memo D7). The response carries
+  // {error:"parse_error", detail:"...", example:"weekly Sun 03:00"}.
+  test("Cron edit invalid string shows inline parse-error with canonical example", async ({ page, hub }) => {
+    await page.goto(hub.url + "#/settings?section=daemons");
+    const schedInput = page.locator('[data-testid="daemons-weekly-schedule-input"]');
+    // Clear the existing value and type an invalid schedule
+    await schedInput.fill("daily 03:00");
+    await page.locator('[data-testid="daemons-save"]').click();
+    // The inline error element should appear under the schedule input
+    const inlineError = page.locator('[id="daemons-weekly-schedule-error"]');
+    await expect(inlineError).toBeVisible();
+    // The canonical example from memo D8 must appear in the error text
+    await expect(inlineError).toContainText("weekly Sun 03:00");
+  });
+
+  // Test 6 — Clean-now ConfirmModal → Cancel preserves backups (no fetch); Confirm invokes endpoint
+  //
+  // Implementation note: SectionBackups and SectionAdvancedDiagnostics both
+  // render a <ConfirmModal data-testid="confirm-modal"> in the DOM. To avoid
+  // Playwright's strict-mode "resolved to 2 elements" error we scope the
+  // locator to the Backups section using `.within()` style — filter on the
+  // modal that is inside section[data-section="backups"].
+  test("Clean-now Cancel closes modal without invoking endpoint; Confirm invokes it", async ({ page, hub }) => {
+    await page.goto(hub.url + "#/settings?section=backups");
+    // Scope all modal locators to the backups section to avoid ambiguity
+    // with the diagnostics ConfirmModal that is also in the DOM.
+    const backupsSection = page.locator('section[data-section="backups"]');
+    // Dialogs rendered by SectionBackups are siblings of the section in the
+    // DOM (Preact renders <dialog> into the nearest parent that is not the
+    // modal itself). Use page-level locator scoped by the "open" attribute
+    // to target only the backups clean dialog once it opens.
+
+    // --- Cancel path: verify no POST fires ---
+    // cleanBackups() in settings-api.ts calls POST /api/backups/clean
+    let cleanCalled = false;
+    await page.route("**/api/backups/clean", async (route, req) => {
+      if (req.method() === "POST") {
+        cleanCalled = true;
+        await route.fallback();
+        return;
+      }
+      await route.fallback();
+    });
+    await backupsSection.locator('[data-testid="clean-now-button"]').click();
+    // Wait for the open dialog that contains "Delete eligible backups?" text
+    const openModal = page.locator('[data-testid="confirm-modal"][open]');
+    await expect(openModal).toContainText("Delete eligible backups?");
+    await openModal.locator('[data-testid="confirm-modal-cancel"]').click();
+    await expect(openModal).not.toBeVisible();
+    expect(cleanCalled).toBe(false);
+
+    // --- Confirm path: verify endpoint is invoked ---
+    // Intercept and mock the POST so we don't actually delete files.
+    // Note: POST /api/backups/clean is called by cleanBackups() in settings-api.ts.
+    let confirmFired = false;
+    await page.route("**/api/backups/clean", async (route, req) => {
+      if (req.method() === "POST") {
+        confirmFired = true;
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ cleaned: 0 }) });
+        return;
+      }
+      await route.fallback();
+    });
+    await backupsSection.locator('[data-testid="clean-now-button"]').click();
+    await expect(openModal).toContainText("Delete eligible backups?");
+    const confirmReq = page.waitForRequest(
+      (r) => r.method() === "POST" && r.url().endsWith("/api/backups/clean"),
+    );
+    await openModal.locator('[data-testid="confirm-modal-confirm"]').click();
+    await confirmReq;
+    expect(confirmFired).toBe(true);
+  });
+
+  // Test 7 — Export bundle button → response stream → file download triggered
+  // The real POST /api/export-config-bundle returns a ZIP stream with
+  // Content-Disposition: attachment; filename="mcphub-bundle-<ts>.zip".
+  // We mock the route to return a minimal ZIP stub so Playwright can
+  // observe the download event without depending on the real bundle size.
+  test("Export bundle button triggers file download with mcphub-bundle- filename", async ({ page, hub }) => {
+    // Intercept to return a minimal stub so download fires reliably in headless
+    await page.route("**/api/export-config-bundle", async (route, req) => {
+      if (req.method() !== "POST") { await route.fallback(); return; }
+      // Minimal valid ZIP local file header magic bytes + empty central directory
+      const minZip = Buffer.from(
+        "504b0506" + "0000000000000000000000000000",
+        "hex",
+      );
+      await route.fulfill({
+        status: 200,
+        headers: {
+          "Content-Type": "application/zip",
+          "Content-Disposition": `attachment; filename="mcphub-bundle-test.zip"`,
+        },
+        body: minZip,
+      });
+    });
+    await page.goto(hub.url + "#/settings?section=advanced");
+    const downloadPromise = page.waitForEvent("download");
+    await page.locator('[data-testid="export-bundle"]').click();
+    const download = await downloadPromise;
+    // The frontend synthesizes the filename from the current timestamp so
+    // we cannot assert the exact name; we assert prefix + extension.
+    expect(download.suggestedFilename()).toMatch(/^mcphub-bundle-.+\.zip$/);
+  });
+
+  // Test 8 — Force-kill probe → Healthy verdict → no kill button
+  // In E2E the running mcphub process IS the single-instance holder and
+  // answers /api/ping (ping_match===true), so Probe returns Healthy.
+  // The canKill() client gate (pid_alive===true && ping_match===false)
+  // is NOT satisfied → kill button must NOT render.
+  test("Force-kill probe Healthy verdict shows verdict strip but no kill button", async ({ page, hub }) => {
+    await page.goto(hub.url + "#/settings?section=advanced");
+    await page.locator('[data-testid="probe-button"]').click();
+    // Wait for verdict strip to appear
+    await expect(page.locator('[data-testid="verdict-strip"]')).toBeVisible();
+    // Healthy instance → kill button must be absent
+    await expect(page.locator('[data-testid="kill-button"]')).toHaveCount(0);
+  });
+});
