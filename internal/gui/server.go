@@ -350,6 +350,13 @@ type Server struct {
 	secrets           secretsAPI
 	settings          settingsAPI
 	backups           backupsAPI
+
+	// Weekly-schedule swap test seams (memo D8). Production: nil — the
+	// handler falls back to api.SwapWeeklyTrigger and a real
+	// scheduler.New() ExportXML adapter. Tests inject closures to drive
+	// deterministic outcomes without touching real Task Scheduler.
+	swapForRoute      func(spec *api.ScheduleSpec, priorXML []byte) (string, error)
+	exportXMLForRoute func(taskName string) ([]byte, error)
 }
 
 // NewServer constructs the Server. It registers the ping handler
