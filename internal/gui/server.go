@@ -402,6 +402,7 @@ func NewServer(cfg Config) *Server {
 	registerBackupsRoutes(s)
 	registerVersionRoutes(s)
 	registerDaemonsRoutes(s)
+	registerExportBundleRoutes(s)
 	return s
 }
 

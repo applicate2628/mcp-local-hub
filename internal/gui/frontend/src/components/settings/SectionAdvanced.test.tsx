@@ -30,10 +30,23 @@ describe("SectionAdvanced", () => {
     expect(await findByText(/Could not open folder: not found/)).toBeTruthy();
   });
 
-  it("Export bundle button is disabled with (coming in A4-b)", () => {
+  it("Export bundle button fetches /api/export-config-bundle and triggers download", async () => {
+    const blob = new Blob(["PK"], { type: "application/zip" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(blob, { status: 200, headers: { "Content-Type": "application/zip" } })
+    );
+    const createObjectURLSpy = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:fake");
+    const revokeObjectURLSpy = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+
     const { container } = render(<SectionAdvanced snapshot={snap} />);
-    const btn = container.querySelector('[data-test-id="export-bundle-disabled"]') as HTMLButtonElement;
-    expect(btn.disabled).toBe(true);
-    expect(btn.textContent).toMatch(/coming in A4-b/);
+    const btn = container.querySelector('[data-testid="export-bundle"]') as HTMLButtonElement;
+    expect(btn).toBeTruthy();
+    expect(btn.disabled).toBe(false);
+    expect(btn.textContent).not.toMatch(/coming in A4-b/);
+
+    fireEvent.click(btn);
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith("/api/export-config-bundle", { method: "POST" }));
+    await waitFor(() => expect(createObjectURLSpy).toHaveBeenCalled());
+    await waitFor(() => expect(revokeObjectURLSpy).toHaveBeenCalled());
   });
 });
