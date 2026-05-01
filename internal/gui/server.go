@@ -394,6 +394,7 @@ func NewServer(cfg Config) *Server {
 	registerSettingsRoutes(s)
 	registerBackupsRoutes(s)
 	registerVersionRoutes(s)
+	registerDaemonsRoutes(s)
 	return s
 }
 
