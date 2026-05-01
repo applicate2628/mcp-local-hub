@@ -84,13 +84,107 @@ func TestMembershipHandler_UnknownPair_400(t *testing.T) {
 }
 
 func TestMembershipHandler_BadMethod(t *testing.T) {
+	// Task 11: GET is now a supported method (snapshot endpoint), so the
+	// bad-method test must use a method that ISN'T in the allow list.
+	// DELETE is a safe choice — neither verb is wired.
 	srv, _ := newMembershipTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/daemons/weekly-refresh-membership", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/daemons/weekly-refresh-membership", nil)
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
 	rec := httptest.NewRecorder()
 	srv.mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("status = %d, want 405", rec.Code)
+	}
+	if got := rec.Header().Get("Allow"); got != "GET, PUT" {
+		t.Errorf("Allow header = %q, want %q", got, "GET, PUT")
+	}
+}
+
+// TestMembershipSnapshotHandler_GET exercises the new GET handler that
+// feeds the SectionDaemons WeeklyMembershipTable on mount (Task 11). The
+// snapshot must return rows in registry order with the same field set the
+// frontend's MembershipRow type expects (workspace_key, workspace_path,
+// language, weekly_refresh).
+func TestMembershipSnapshotHandler_GET(t *testing.T) {
+	srv, tmp := newMembershipTestServer(t)
+	// Seed registry with three rows spanning two workspaces / three
+	// languages / mixed enrollment. Tests both registry order (k1.python
+	// before k1.rust before k2.go) and the boolean is faithfully wired.
+	regPath := filepath.Join(tmp, "mcp-local-hub", "workspaces.yaml")
+	reg := api.NewRegistry(regPath)
+	reg.Workspaces = []api.WorkspaceEntry{
+		{WorkspaceKey: "k1", WorkspacePath: "D:/p1", Language: "python", Port: 9100, WeeklyRefresh: true, Backend: "mcp-language-server"},
+		{WorkspaceKey: "k1", WorkspacePath: "D:/p1", Language: "rust", Port: 9101, WeeklyRefresh: false, Backend: "mcp-language-server"},
+		{WorkspaceKey: "k2", WorkspacePath: "/p2", Language: "go", Port: 9102, WeeklyRefresh: true, Backend: "mcp-language-server"},
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/daemons/weekly-refresh-membership", nil)
+	req.Header = sameOriginHeaders()
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Rows []struct {
+			WorkspaceKey  string `json:"workspace_key"`
+			WorkspacePath string `json:"workspace_path"`
+			Language      string `json:"language"`
+			WeeklyRefresh bool   `json:"weekly_refresh"`
+		} `json:"rows"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Rows) != 3 {
+		t.Fatalf("rows = %d, want 3", len(resp.Rows))
+	}
+	// Registry order — the frontend trusts the server's ordering.
+	if resp.Rows[0].WorkspaceKey != "k1" || resp.Rows[0].Language != "python" {
+		t.Errorf("row[0] = %+v, want k1/python", resp.Rows[0])
+	}
+	if resp.Rows[2].WorkspaceKey != "k2" || resp.Rows[2].Language != "go" {
+		t.Errorf("row[2] = %+v, want k2/go", resp.Rows[2])
+	}
+	// Boolean flag is round-tripped faithfully.
+	if !resp.Rows[0].WeeklyRefresh {
+		t.Errorf("row[0].weekly_refresh = false, want true")
+	}
+	if resp.Rows[1].WeeklyRefresh {
+		t.Errorf("row[1].weekly_refresh = true, want false")
+	}
+}
+
+// TestMembershipSnapshotHandler_GET_EmptyRegistry covers the empty-state
+// fallthrough: a missing or freshly-initialized registry must yield 200
+// with an empty rows array (NOT 404, NOT a null payload). The frontend
+// treats {"rows": []} as the trigger for the "No workspaces registered"
+// empty state copy (memo D6).
+func TestMembershipSnapshotHandler_GET_EmptyRegistry(t *testing.T) {
+	srv, _ := newMembershipTestServer(t)
+	// No seed — DefaultRegistryPath points at a non-existent file under
+	// tmpdir, which Registry.Load tolerates as the empty-registry case.
+	req := httptest.NewRequest(http.MethodGet, "/api/daemons/weekly-refresh-membership", nil)
+	req.Header = sameOriginHeaders()
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Rows []membershipRowDTO `json:"rows"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Rows) != 0 {
+		t.Errorf("rows = %d, want 0 on empty registry", len(resp.Rows))
+	}
+	if resp.Rows == nil {
+		t.Error("rows must be [] (not null) on empty registry — frontend uses array length")
 	}
 }
 

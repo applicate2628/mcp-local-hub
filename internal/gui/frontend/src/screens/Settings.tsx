@@ -23,8 +23,9 @@ const SECTION_IDS: Section[] = ["appearance", "gui_server", "daemons", "backups"
 export function SettingsScreen({ route, onDirtyChange, snapshot }: SettingsScreenProps): preact.JSX.Element {
   const [appearanceDirty, setAppearanceDirty] = useState(false);
   const [guiServerDirty, setGuiServerDirty] = useState(false);
+  const [daemonsDirty, setDaemonsDirty] = useState(false);
   const [backupsDirty, setBackupsDirty] = useState(false);
-  const anyDirty = appearanceDirty || guiServerDirty || backupsDirty;
+  const anyDirty = appearanceDirty || guiServerDirty || daemonsDirty || backupsDirty;
 
   useEffect(() => {
     onDirtyChange(anyDirty);
@@ -100,7 +101,7 @@ export function SettingsScreen({ route, onDirtyChange, snapshot }: SettingsScree
         <h1>Settings</h1>
         <SectionAppearance snapshot={snapshot} onDirtyChange={setAppearanceDirty} />
         <SectionGuiServer  snapshot={snapshot} onDirtyChange={setGuiServerDirty}  />
-        <SectionDaemons    snapshot={snapshot} />
+        <SectionDaemons    snapshot={snapshot} onDirtyChange={setDaemonsDirty} />
         <SectionBackups    snapshot={snapshot} onDirtyChange={setBackupsDirty}    />
         <SectionAdvanced   snapshot={snapshot} />
       </div>

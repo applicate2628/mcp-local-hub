@@ -24,12 +24,77 @@ func registerDaemonsRoutes(s *Server) {
 		s.requireSameOrigin(s.weeklyScheduleHandler))
 }
 
+// membershipRowDTO is the on-the-wire shape of one row in the weekly-refresh
+// membership snapshot returned by GET /api/daemons/weekly-refresh-membership
+// (memo D6). It is intentionally a strict subset of WorkspaceEntry: the GUI
+// only needs key + path + language + the boolean enrollment flag to render
+// the membership table.
+type membershipRowDTO struct {
+	WorkspaceKey  string `json:"workspace_key"`
+	WorkspacePath string `json:"workspace_path"`
+	Language      string `json:"language"`
+	WeeklyRefresh bool   `json:"weekly_refresh"`
+}
+
+// weeklyRefreshMembershipHandler is the method multiplexer for
+// /api/daemons/weekly-refresh-membership:
+//
+//   - GET → list current membership rows in registry order (memo D6).
+//   - PUT → idempotent partial update of (workspace_key, language) toggles
+//     (memo D5).
+//
+// All other methods return 405 with an Allow header. The GET handler exists
+// to feed the SectionDaemons WeeklyMembershipTable on mount; the PUT handler
+// is op 3 of the multi-op save flow described in memo D4.
 func (s *Server) weeklyRefreshMembershipHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut {
-		w.Header().Set("Allow", "PUT")
+	switch r.Method {
+	case http.MethodGet:
+		s.weeklyRefreshMembershipList(w, r)
+	case http.MethodPut:
+		s.weeklyRefreshMembershipPut(w, r)
+	default:
+		w.Header().Set("Allow", "GET, PUT")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// weeklyRefreshMembershipList serves the GET snapshot. Loads the registry
+// fresh on each request — there is no in-memory cache. Empty registries
+// yield {"rows": []} with status 200 (the GUI distinguishes loading vs
+// empty by HTTP status, not row count).
+func (s *Server) weeklyRefreshMembershipList(w http.ResponseWriter, _ *http.Request) {
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error":  "registry_path",
+			"detail": err.Error(),
+		})
 		return
 	}
+	reg := api.NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error":  "registry_load",
+			"detail": err.Error(),
+		})
+		return
+	}
+	rows := make([]membershipRowDTO, 0, len(reg.Workspaces))
+	for _, e := range reg.Workspaces {
+		rows = append(rows, membershipRowDTO{
+			WorkspaceKey:  e.WorkspaceKey,
+			WorkspacePath: e.WorkspacePath,
+			Language:      e.Language,
+			WeeklyRefresh: e.WeeklyRefresh,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"rows": rows})
+}
+
+// weeklyRefreshMembershipPut applies the structured-array delta body to
+// workspaces.yaml under registryMu via api.UpdateWeeklyRefreshMembership.
+// Memo D5 contract: idempotent partial update; entries not in body unchanged.
+func (s *Server) weeklyRefreshMembershipPut(w http.ResponseWriter, r *http.Request) {
 	var body []api.MembershipDelta
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
