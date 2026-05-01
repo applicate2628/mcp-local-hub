@@ -10,6 +10,45 @@ interface PickerEntry {
   daemon: string;
 }
 
+// Compile a user-supplied filter string into a predicate. The format mimics
+// editor conventions: `/<expr>/` is a regex, anything else is a case-
+// insensitive substring. Invalid regex syntax is reported via the second
+// return so the UI can show an inline error rather than silently dropping
+// every line. An empty string returns null — the caller renders unfiltered.
+function compileFilter(s: string): { match: (line: string) => boolean; error: string | null } | null {
+  const trimmed = s.trim();
+  if (trimmed === "") return null;
+  if (trimmed.length >= 2 && trimmed.startsWith("/") && trimmed.endsWith("/")) {
+    try {
+      const re = new RegExp(trimmed.slice(1, -1));
+      return { match: (line) => re.test(line), error: null };
+    } catch (e) {
+      return { match: () => true, error: (e as Error).message };
+    }
+  }
+  const needle = trimmed.toLowerCase();
+  return { match: (line) => line.toLowerCase().includes(needle), error: null };
+}
+
+// classifyLine tags a log line for severity coloring. Spec §5.7 calls
+// out amber/red highlight for warnings/errors so the user can spot
+// anomalies without reading every line. Detection is start-of-word
+// case-insensitive: "ERROR:", "[error]", "errors during startup",
+// "fatal", and "WARNING" all light up; "terrorist" / "swarm" don't
+// because they don't start at a word boundary.
+//
+// `\berror` matches "error", "errors", "ERR_BAD" — anything that
+// begins on a word boundary and starts with the stem. The trailing
+// `\b` is intentionally absent: in real logs the stem is often
+// followed by `:` or `s` (plural / possessive / message punctuation),
+// and a `\b` after the stem would correctly anchor "error" but
+// reject the very common "errors" plural.
+export function classifyLine(line: string): "error" | "warn" | null {
+  if (/\b(error|fatal|panic)/i.test(line)) return "error";
+  if (/\bwarn/i.test(line)) return "warn";
+  return null;
+}
+
 export function LogsScreen() {
   const [entries, setEntries] = useState<PickerEntry[] | null>(null);
   const [selected, setSelected] = useState<string>("");
@@ -18,6 +57,8 @@ export function LogsScreen() {
   const [body, setBody] = useState<string>("");
   const [notice, setNotice] = useState<string>("");
   const [reloadToken, setReloadToken] = useState<number>(0);
+  const [filter, setFilter] = useState<string>("");
+  const [openFolderError, setOpenFolderError] = useState<string>("");
   const preRef = useRef<HTMLPreElement | null>(null);
 
   // Snapshot-versus-SSE race coordination (reviewer finding 3 on PR-internal
@@ -142,6 +183,41 @@ export function LogsScreen() {
 
   const controlsDisabled = entries !== null && entries.length === 0;
 
+  // Open the OS file manager at the logs directory. Backend resolves
+  // the canonical %LOCALAPPDATA%/mcp-local-hub/logs (or XDG fallback)
+  // — the GUI must not duplicate that path computation. Spec §5.7
+  // "Logs: per-daemon log file picker; tail (last N lines); … Open
+  // folder action".
+  async function openLogsFolder() {
+    setOpenFolderError("");
+    try {
+      const resp = await fetch("/api/logs/open-folder", { method: "POST" });
+      if (!resp.ok) {
+        const body = (await resp.json().catch(() => ({}))) as { reason?: string; error?: string };
+        setOpenFolderError(body.reason || body.error || `HTTP ${resp.status}`);
+      }
+    } catch (e) {
+      setOpenFolderError((e as Error).message);
+    }
+  }
+
+  // Filter + classify the body. Lines beyond the filter predicate are
+  // dropped; surviving lines are tagged for color via classifyLine.
+  // Empty body / notice short-circuit so the no-daemons state still
+  // renders the original notice text.
+  const compiled = compileFilter(filter);
+  const lines = body ? body.split("\n") : [];
+  const renderedLines = compiled
+    ? lines.filter((l) => compiled.match(l))
+    : lines;
+  const filterError = compiled ? compiled.error : null;
+  // Keep a trailing blank line out of the rendered output — split("\n")
+  // on a buffer that ends with "\n" produces an empty trailing element
+  // that would render as an empty highlighted line.
+  while (renderedLines.length > 0 && renderedLines[renderedLines.length - 1] === "") {
+    renderedLines.pop();
+  }
+
   return (
     <div>
       <h1>Logs</h1>
@@ -180,12 +256,42 @@ export function LogsScreen() {
           />
           {" "}Follow
         </label>
+        <input
+          type="text"
+          value={filter}
+          placeholder="Filter (substring or /regex/)"
+          aria-label="Filter log lines"
+          disabled={controlsDisabled}
+          onInput={(ev) => setFilter((ev.currentTarget as HTMLInputElement).value)}
+          class={filterError ? "logs-filter logs-filter-error" : "logs-filter"}
+          title={filterError ?? undefined}
+        />
         <button disabled={controlsDisabled} onClick={() => setReloadToken((x) => x + 1)}>
           Refresh
         </button>
+        <button onClick={openLogsFolder} title="Open the logs folder in your file manager">
+          Open folder
+        </button>
       </div>
+      {openFolderError && (
+        <p class="error" role="alert">Open folder failed: {openFolderError}</p>
+      )}
       <pre id="logs-body" ref={preRef}>
-        {notice || body}
+        {notice
+          ? notice
+          : renderedLines.map((line, i) => {
+              const cls = classifyLine(line);
+              const lineCls = cls ? `log-line log-line-${cls}` : "log-line";
+              // Trailing "\n" preserves the line-break inside the <pre>;
+              // last line gets one too so streaming append doesn't
+              // visually butt up against the next incoming line.
+              return (
+                <span key={i} class={lineCls}>
+                  {line}
+                  {"\n"}
+                </span>
+              );
+            })}
       </pre>
     </div>
   );

@@ -16,6 +16,7 @@ package gui
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -76,6 +77,12 @@ func validName(s string) bool {
 // server name decides the mode — absent = snapshot, "stream" = SSE.
 // Spec §4.6.
 func registerLogsRoutes(s *Server) {
+	// Exact-path match (no trailing slash) — net/http.ServeMux selects
+	// the longer/more-specific pattern, so this dispatches BEFORE the
+	// "/api/logs/" prefix catch-all below; without this carve-out the
+	// prefix handler would treat "open-folder" as a server name and
+	// try to read a file named open-folder-default.log.
+	s.mux.HandleFunc("/api/logs/open-folder", s.requireSameOrigin(s.logsOpenFolderHandler))
 	s.mux.HandleFunc("/api/logs/", func(w http.ResponseWriter, r *http.Request) {
 		rest := strings.TrimPrefix(r.URL.Path, "/api/logs/")
 		parts := strings.SplitN(rest, "/", 2)
@@ -132,6 +139,40 @@ func registerLogsRoutes(s *Server) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte(body))
 	})
+}
+
+// logsOpenFolderHandler opens the OS file manager at the daemon-log
+// directory (api.DefaultLogDir resolves the canonical per-platform
+// path). POST-only, same-origin gate, mkdir-on-demand for first-run
+// hosts where the daemon hasn't written any log yet.
+//
+// Mirrors the settings.go advanced.open_app_data_folder flow (Codex
+// PR #20 r3 P2): explorer / xdg-open / open all fail on a non-
+// existent path, so the directory is created if missing before the
+// spawn. Best-effort spawn — failures surface as 500 with a reason
+// the UI can render inline.
+func (s *Server) logsOpenFolderHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	dir := api.DefaultLogDir()
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"error":  "mkdir_failed",
+			"reason": err.Error(),
+		})
+		return
+	}
+	if err := OpenPath(dir); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"error":  "spawn_failed",
+			"reason": err.Error(),
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"opened": dir})
 }
 
 // streamLogs implements the SSE tail-follow. Each tick we ask the
