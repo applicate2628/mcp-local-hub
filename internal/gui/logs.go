@@ -77,12 +77,15 @@ func validName(s string) bool {
 // server name decides the mode — absent = snapshot, "stream" = SSE.
 // Spec §4.6.
 func registerLogsRoutes(s *Server) {
-	// Exact-path match (no trailing slash) — net/http.ServeMux selects
-	// the longer/more-specific pattern, so this dispatches BEFORE the
-	// "/api/logs/" prefix catch-all below; without this carve-out the
-	// prefix handler would treat "open-folder" as a server name and
-	// try to read a file named open-folder-default.log.
-	s.mux.HandleFunc("/api/logs/open-folder", s.requireSameOrigin(s.logsOpenFolderHandler))
+	// Open-logs-folder lives at a sibling path (not a child of /api/logs/)
+	// so it can never collide with a server name — the prefix catch-all
+	// uses parts[0] as the server name, and a manifest legitimately
+	// named "open-folder" would race with an in-prefix exact match.
+	// Codex bot review on PR #47 P2 ("Avoid shadowing logs for server
+	// named open-folder"): sibling path is the cleanest fix — same
+	// requireSameOrigin gate, no prefix collision, no special-case
+	// reservation in the manifest validator.
+	s.mux.HandleFunc("/api/logs-folder", s.requireSameOrigin(s.logsOpenFolderHandler))
 	s.mux.HandleFunc("/api/logs/", func(w http.ResponseWriter, r *http.Request) {
 		rest := strings.TrimPrefix(r.URL.Path, "/api/logs/")
 		parts := strings.SplitN(rest, "/", 2)

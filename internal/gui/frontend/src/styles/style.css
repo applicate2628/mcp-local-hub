@@ -123,12 +123,8 @@ main { padding: var(--screen-padding); overflow: auto; }
 .card-actions button.btn-stop:not(:disabled) { color: var(--danger); border-color: var(--danger); }
 
 /* --- Logs screen --- */
-<<<<<<< HEAD
-#logs-controls { display: flex; gap: var(--gap-sm); align-items: center; margin-bottom: var(--gap-md); }
+#logs-controls { display: flex; gap: var(--gap-sm); align-items: center; margin-bottom: var(--gap-md); flex-wrap: wrap; }
 #logs-body { background: var(--sidebar-bg); border: 1px solid var(--border); padding: var(--logs-body-padding); overflow: auto; max-height: 70vh; font-family: monospace; font-size: 12px; white-space: pre-wrap; }
-=======
-#logs-controls { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
-#logs-body { background: var(--sidebar-bg); border: 1px solid var(--border); padding: 12px; overflow: auto; max-height: 70vh; font-family: monospace; font-size: 12px; white-space: pre-wrap; }
 .logs-filter { padding: 4px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); font: inherit; min-width: 220px; }
 .logs-filter-error { border-color: var(--danger); }
 /* Spec §5.7 line 289: amber/red highlight so warnings and errors are
@@ -136,7 +132,6 @@ main { padding: var(--screen-padding); overflow: auto; }
 .log-line { display: inline; }
 .log-line-error { color: var(--danger); }
 .log-line-warn { color: var(--warning, #bf8700); }
->>>>>>> b9d0403 (feat(gui): Logs filter + ERROR/WARN highlight + Open folder)
 
 /* Migration screen group tones (spec §5.2) */
 .screen.migration .group { margin: var(--migration-group-margin) 0;

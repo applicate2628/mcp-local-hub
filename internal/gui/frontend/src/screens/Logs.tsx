@@ -191,7 +191,7 @@ export function LogsScreen() {
   async function openLogsFolder() {
     setOpenFolderError("");
     try {
-      const resp = await fetch("/api/logs/open-folder", { method: "POST" });
+      const resp = await fetch("/api/logs-folder", { method: "POST" });
       if (!resp.ok) {
         const body = (await resp.json().catch(() => ({}))) as { reason?: string; error?: string };
         setOpenFolderError(body.reason || body.error || `HTTP ${resp.status}`);
