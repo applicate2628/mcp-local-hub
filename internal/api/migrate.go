@@ -70,6 +70,12 @@ type FailedMigration struct {
 func (a *API) MigrateFrom(opts MigrateOpts) (*MigrateReport, error) {
 	report := &MigrateReport{}
 	allClients := clients.AllClients()
+	// Read backups.keep_n once per migrate run — settings file IO is
+	// cheap, but the loop below can fan out to N servers × M clients
+	// and re-reading on every iteration would be wasteful. The adapter
+	// prunes in-place after each fresh timestamped backup so the
+	// on-disk set never exceeds keepN.
+	keepN := a.effectiveBackupKeepN()
 
 	includedClient := func(c string) bool {
 		if len(opts.ClientsInclude) == 0 {
@@ -127,7 +133,7 @@ func (a *API) MigrateFrom(opts MigrateOpts) (*MigrateReport, error) {
 				// clients and keeps the report focused on actual attempts.
 				continue
 			}
-			if _, err := adapter.Backup(); err != nil {
+			if _, err := adapter.BackupKeep(keepN); err != nil {
 				report.Failed = append(report.Failed, FailedMigration{
 					Server: server, Client: binding.Client, Err: err.Error(),
 				})

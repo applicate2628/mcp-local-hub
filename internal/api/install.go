@@ -180,7 +180,7 @@ func (a *API) Install(opts InstallOpts) error {
 		return printPlanTo(w, plan)
 	}
 	// 5. Execute.
-	return executeInstallTo(w, m, plan)
+	return executeInstallTo(w, m, plan, a.effectiveBackupKeepN())
 }
 
 // InstallAll is the production entry point for bulk install. Reads
@@ -292,7 +292,7 @@ func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 	if opts.DryRun {
 		return printPlanTo(w, plan)
 	}
-	return executeInstallTo(w, m, plan)
+	return executeInstallTo(w, m, plan, a.effectiveBackupKeepN())
 }
 
 // installFromManifestDir is Install-like but with an explicit manifestDir
@@ -323,7 +323,7 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 	if opts.DryRun {
 		return printPlanTo(w, plan)
 	}
-	return executeInstallTo(w, m, plan)
+	return executeInstallTo(w, m, plan, a.effectiveBackupKeepN())
 }
 
 // Status returns the current scheduler view of all mcp-local-hub tasks,
@@ -1020,7 +1020,11 @@ func printPlanTo(w io.Writer, p *Plan) error {
 	return nil
 }
 
-func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan) error {
+// executeInstallTo materializes the plan: scheduler tasks, then per-client
+// config backup + entry add. keepN caps the rolling timestamped-backup
+// set per client (older copies are pruned in-place by the adapter); 0
+// disables pruning. Production callers feed it via a.effectiveBackupKeepN().
+func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int) error {
 	sch, err := scheduler.New()
 	if err != nil {
 		return fmt.Errorf("scheduler: %w", err)
@@ -1139,7 +1143,11 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan) error {
 		// would leave the client with no entry at all.
 		priorEntry, _ := client.GetEntry(m.Name)
 
-		bak, err := client.Backup()
+		// keepN is the user's `backups.keep_n` setting (default 5). The
+		// adapter writes a fresh timestamped backup, then prunes older
+		// timestamped copies in-place so the on-disk set stays bounded.
+		// The pristine `-original` sentinel is never affected.
+		bak, err := client.BackupKeep(keepN)
 		if err != nil {
 			runRollback()
 			return fmt.Errorf("backup %s: %w", u.Client, err)
