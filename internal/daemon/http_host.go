@@ -128,7 +128,12 @@ func (h *HTTPHost) Start(ctx context.Context) error {
 	}
 
 	cmd := exec.CommandContext(ctx, h.cfg.Command, h.cfg.Args...)
-	process.NoConsole(cmd) // suppress per-child console pop on windowsgui parents
+	process.NoConsole(cmd) // Windows: suppress console pop (windowsgui parent)
+	// Linux: PR_SET_PDEATHSIG=SIGKILL — best-effort direct-child
+	// orphan mitigation if mcphub is force-killed. Strictly weaker
+	// than Windows Job Object: does NOT cascade through wrappers
+	// like uvx/npx that fork-and-stay. See pdeathsig_linux.go.
+	process.SetParentDeathSignal(cmd)
 	cmd.Dir = h.cfg.WorkingDir
 	if len(h.cfg.Env) > 0 {
 		env := append([]string{}, os.Environ()...)
