@@ -47,8 +47,34 @@ var defaultClientBindings = []config.ClientBinding{
 
 // RegisterOpts controls a Register invocation.
 type RegisterOpts struct {
-	WeeklyRefresh bool      // persist weekly_refresh=true on each created entry
-	Writer        io.Writer // progress output; nil = os.Stderr
+	// WeeklyRefreshExplicit selects between two interpretation modes:
+	//   - true:  use WeeklyRefresh literally (caller has decided).
+	//   - false: ignore WeeklyRefresh; read daemons.weekly_refresh_default
+	//            from settings and use that. Memo D1 (opt-in knob).
+	// CLI surface: --weekly-refresh / --no-weekly-refresh both flip this
+	// to true; absent flag leaves it false (knob path).
+	WeeklyRefreshExplicit bool
+
+	// WeeklyRefresh is the value persisted on each created entry when
+	// WeeklyRefreshExplicit==true. Ignored otherwise.
+	WeeklyRefresh bool
+
+	Writer io.Writer // progress output; nil = os.Stderr
+}
+
+// resolveWeeklyRefresh picks the effective WeeklyRefresh value for a
+// new entry per memo D1: explicit caller override beats the persisted
+// knob; absent explicit override, read daemons.weekly_refresh_default
+// from settings (default "false").
+func resolveWeeklyRefresh(a *API, opts RegisterOpts) bool {
+	if opts.WeeklyRefreshExplicit {
+		return opts.WeeklyRefresh
+	}
+	v, err := a.SettingsGet("daemons.weekly_refresh_default")
+	if err != nil || v == "" {
+		return false
+	}
+	return v == "true"
 }
 
 // RegisterReport summarizes what Register actually created.
@@ -380,11 +406,11 @@ func (a *API) registerOneLanguage(
 	// On re-register (idempotent path, had == true), preserve the prior
 	// weekly_refresh value. Otherwise a user who previously registered
 	// with --no-weekly-refresh would have it silently re-enabled by any
-	// later `mcphub register` invocation, since opts.WeeklyRefresh
-	// defaults to true in the CLI flow. A caller that wants to CHANGE
+	// later `mcphub register` invocation. A caller that wants to CHANGE
 	// the setting on re-register must use a dedicated path (e.g., a
 	// future `mcphub workspaces set weekly-refresh=...`).
-	weeklyRefresh := opts.WeeklyRefresh
+	// Memo D1: knob-aware default. Explicit caller flag still wins.
+	weeklyRefresh := resolveWeeklyRefresh(a, opts)
 	if had {
 		weeklyRefresh = prior.WeeklyRefresh
 	}

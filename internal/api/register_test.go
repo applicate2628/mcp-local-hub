@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -1197,6 +1198,90 @@ func TestUnregister_KillProxyFailureIsWarning(t *testing.T) {
 	_ = reg.Load()
 	if len(reg.Workspaces) != 0 {
 		t.Errorf("registry rows remain after Unregister: %+v", reg.Workspaces)
+	}
+}
+
+// --- Install refusal for workspace-scoped manifests ---------------------
+
+// --- KnobDefault tests (D1: knob-driven weekly_refresh_default) ----------
+
+// D1: when caller does NOT explicitly set RegisterOpts.WeeklyRefresh,
+// Register reads daemons.weekly_refresh_default from settings. Explicit
+// override always wins.
+func TestRegister_KnobDefault_FalseByDefault(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("LOCALAPPDATA", tmp)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(tmp, "state"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(tmp, "data"))
+
+	h := newRegisterHarness(t)
+	defer h.restore()
+
+	a := NewAPI()
+	report, err := a.registerWithManifest(nineLanguageManifest(), t.TempDir(), []string{"python"}, RegisterOpts{
+		Writer:                io.Discard,
+		WeeklyRefreshExplicit: false,
+		WeeklyRefresh:         false,
+	})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	for _, e := range report.Entries {
+		if e.WeeklyRefresh != false {
+			t.Errorf("entry %s WeeklyRefresh = true, want false (knob default)", e.Language)
+		}
+	}
+}
+
+func TestRegister_KnobDefault_HonorsExplicitTrue(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("LOCALAPPDATA", tmp)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(tmp, "state"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(tmp, "data"))
+
+	h := newRegisterHarness(t)
+	defer h.restore()
+
+	a := NewAPI()
+	report, err := a.registerWithManifest(nineLanguageManifest(), t.TempDir(), []string{"python"}, RegisterOpts{
+		Writer:                io.Discard,
+		WeeklyRefreshExplicit: true,
+		WeeklyRefresh:         true,
+	})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	for _, e := range report.Entries {
+		if !e.WeeklyRefresh {
+			t.Errorf("entry %s WeeklyRefresh = false, want true (explicit override)", e.Language)
+		}
+	}
+}
+
+func TestRegister_KnobDefault_ReadsKnobTrue(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("LOCALAPPDATA", tmp)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(tmp, "state"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(tmp, "data"))
+
+	h := newRegisterHarness(t)
+	defer h.restore()
+
+	a := NewAPI()
+	if err := a.SettingsSet("daemons.weekly_refresh_default", "true"); err != nil {
+		t.Fatalf("SettingsSet: %v", err)
+	}
+	report, err := a.registerWithManifest(nineLanguageManifest(), t.TempDir(), []string{"python"}, RegisterOpts{
+		Writer:                io.Discard,
+		WeeklyRefreshExplicit: false,
+	})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	for _, e := range report.Entries {
+		if !e.WeeklyRefresh {
+			t.Errorf("entry %s WeeklyRefresh = false, want true (knob=true)", e.Language)
+		}
 	}
 }
 

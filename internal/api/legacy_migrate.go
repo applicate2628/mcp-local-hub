@@ -158,7 +158,7 @@ func (a *API) MigrateLegacy(entries []LegacyLSEntry, opts LegacyMigrateOpts) (*L
 				continue
 			}
 		}
-		if _, err := a.Register(ws, nil, RegisterOpts{Writer: w, WeeklyRefresh: true}); err != nil {
+		if _, err := a.Register(ws, nil, RegisterOpts{Writer: w, WeeklyRefreshExplicit: true, WeeklyRefresh: true}); err != nil {
 			// Register failed — keep every legacy row intact, record per-row failure.
 			for _, e := range rows {
 				report.Failed = append(report.Failed, FailedLegacyEntry{
