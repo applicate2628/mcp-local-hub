@@ -380,12 +380,34 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 					// In-process spawn — best-effort, errors logged to
 					// the parent's stderr so a failed spawn doesn't
 					// silently no-op the menu click.
-					if err := gui.OpenPath(api.DefaultLogDir()); err != nil {
+					//
+					// MkdirAll first: on first-run hosts the daemon
+					// hasn't written any log yet so the dir doesn't
+					// exist, and explorer.exe / xdg-open / open all
+					// fail on a non-existent path. Same precedent as
+					// /api/logs-folder backend handler and the
+					// advanced.open_app_data_folder Settings action.
+					// Codex bot review on PR #48 P2.
+					dir := api.DefaultLogDir()
+					if err := os.MkdirAll(dir, 0700); err != nil {
+						fmt.Fprintf(cmd.OutOrStderr(), "tray: mkdir logs folder: %v\n", err)
+						return
+					}
+					if err := gui.OpenPath(dir); err != nil {
 						fmt.Fprintf(cmd.OutOrStderr(), "tray: open logs folder: %v\n", err)
 					}
 				},
 				OpenDataFolder: func() {
-					if err := gui.OpenPath(filepath.Dir(api.SettingsPath())); err != nil {
+					// Same MkdirAll-before-spawn precedent as
+					// OpenLogsFolder. The data dir holds gui-preferences
+					// + secrets; first-run hosts have neither yet.
+					// Codex bot review on PR #48 P2.
+					dir := filepath.Dir(api.SettingsPath())
+					if err := os.MkdirAll(dir, 0700); err != nil {
+						fmt.Fprintf(cmd.OutOrStderr(), "tray: mkdir data folder: %v\n", err)
+						return
+					}
+					if err := gui.OpenPath(dir); err != nil {
 						fmt.Fprintf(cmd.OutOrStderr(), "tray: open data folder: %v\n", err)
 					}
 				},
