@@ -43,7 +43,7 @@ nav { display: flex; flex-direction: column; gap: 4px; }
 nav a { color: var(--text); text-decoration: none; padding: 8px 12px; border-radius: 6px; }
 nav a:hover { background: var(--border); }
 nav a.active { background: var(--border); font-weight: 500; }
-main { padding: 24px; overflow: auto; }
+main { padding: var(--screen-padding); overflow: auto; }
 
 /* Top-tabs layout (data-layout="tabs"). Spec §5 line 241: horizontal
    tabs across the top instead of left rail. Brand sits inline so the
@@ -86,20 +86,20 @@ main { padding: 24px; overflow: auto; }
 
 /* --- Servers matrix --- */
 .servers-matrix { border-collapse: collapse; width: 100%; max-width: 960px; }
-.servers-matrix th, .servers-matrix td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
+.servers-matrix th, .servers-matrix td { border: 1px solid var(--border); padding: var(--cell-padding-y) var(--cell-padding-x); text-align: left; }
 .servers-matrix thead th { background: var(--sidebar-bg); font-weight: 500; }
 .servers-matrix input[type="checkbox"] { margin: 0; }
 .error { color: var(--danger); }
 
 /* --- Dashboard cards --- */
-.dashboard-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.dashboard-header { display: flex; align-items: center; justify-content: space-between; gap: var(--gap-md); flex-wrap: wrap; }
 .dashboard-header h1 { margin: 0; }
-.dashboard-bulk-actions { display: flex; gap: 8px; }
-.dashboard-bulk-actions button { padding: 8px 16px; border: 1px solid var(--border); background: var(--sidebar-bg); color: var(--text); border-radius: 4px; cursor: pointer; font-size: 14px; }
+.dashboard-bulk-actions { display: flex; gap: var(--gap-sm); }
+.dashboard-bulk-actions button { padding: var(--cell-padding-y) var(--gap-md); border: 1px solid var(--border); background: var(--sidebar-bg); color: var(--text); border-radius: 4px; cursor: pointer; font-size: 14px; }
 .dashboard-bulk-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
 .dashboard-bulk-actions button.btn-stop:not(:disabled) { color: var(--danger); border-color: var(--danger); }
-.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-top: 16px; }
-.card { border: 1px solid var(--border); border-radius: 8px; padding: 16px; background: var(--bg); }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--gap-md); margin-top: var(--gap-md); }
+.card { border: 1px solid var(--border); border-radius: 8px; padding: var(--card-padding); background: var(--bg); }
 .card-title { font-weight: 600; margin-bottom: 12px; }
 .card-kv { display: flex; justify-content: space-between; padding: 4px 0; font-size: 14px; }
 .card.ok .state { color: var(--success); }
@@ -123,11 +123,11 @@ main { padding: 24px; overflow: auto; }
 .card-actions button.btn-stop:not(:disabled) { color: var(--danger); border-color: var(--danger); }
 
 /* --- Logs screen --- */
-#logs-controls { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
-#logs-body { background: var(--sidebar-bg); border: 1px solid var(--border); padding: 12px; overflow: auto; max-height: 70vh; font-family: monospace; font-size: 12px; white-space: pre-wrap; }
+#logs-controls { display: flex; gap: var(--gap-sm); align-items: center; margin-bottom: var(--gap-md); }
+#logs-body { background: var(--sidebar-bg); border: 1px solid var(--border); padding: var(--card-padding); overflow: auto; max-height: 70vh; font-family: monospace; font-size: 12px; white-space: pre-wrap; }
 
 /* Migration screen group tones (spec §5.2) */
-.screen.migration .group { margin: 1.25rem 0; padding: 0.75rem 1rem;
+.screen.migration .group { margin: var(--gap-md) 0; padding: var(--cell-padding-y) var(--cell-padding-x);
     border-left: 4px solid var(--border, #d0d7de); border-radius: 4px; }
 .screen.migration .group > h2 { margin: 0 0 0.5rem; font-size: 1.05rem; }
 .screen.migration .group > .empty { color: var(--text-muted, #656d76);
@@ -831,6 +831,17 @@ menu button[disabled] {
   --warning-color: #92400e;
   --row-height: 32px;
   --section-gap: 24px;
+  /* Density-keyed visible-spacing tokens applied across screens.
+     comfortable defaults match the historical hardcoded values, so an
+     unset/legacy snapshot renders unchanged. compact / spacious overrides
+     below are what give the user a real difference between density modes
+     on every screen, not just Settings. */
+  --card-padding: 16px;
+  --cell-padding-y: 8px;
+  --cell-padding-x: 12px;
+  --gap-md: 16px;
+  --gap-sm: 12px;
+  --screen-padding: 24px;
 }
 :root[data-theme="dark"] {
   --bg-color: #0f172a;
@@ -855,9 +866,21 @@ menu button[disabled] {
     --border: #30363d;
   }
 }
-:root[data-density="compact"]    { --row-height: 24px; --section-gap: 12px; }
-:root[data-density="comfortable"] { --row-height: 32px; --section-gap: 24px; }
-:root[data-density="spacious"]   { --row-height: 40px; --section-gap: 36px; }
+:root[data-density="compact"] {
+  --row-height: 24px; --section-gap: 12px;
+  --card-padding: 10px; --cell-padding-y: 4px; --cell-padding-x: 8px;
+  --gap-md: 8px; --gap-sm: 6px; --screen-padding: 14px;
+}
+:root[data-density="comfortable"] {
+  --row-height: 32px; --section-gap: 24px;
+  --card-padding: 16px; --cell-padding-y: 8px; --cell-padding-x: 12px;
+  --gap-md: 16px; --gap-sm: 12px; --screen-padding: 24px;
+}
+:root[data-density="spacious"] {
+  --row-height: 40px; --section-gap: 36px;
+  --card-padding: 24px; --cell-padding-y: 12px; --cell-padding-x: 16px;
+  --gap-md: 24px; --gap-sm: 16px; --screen-padding: 32px;
+}
 
 /* ============================================================
  * A4-a — Settings screen layout (memo §3.4, §8.4)
