@@ -1,7 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { fetchOrThrow } from "../api";
 import { collectServers } from "../lib/routing";
-import { aggregateStatus } from "../lib/status";
+import { aggregateStatus, stateShape } from "../lib/status";
 import type { DaemonStatus, ScanResult, ServerRow, Routing } from "../types";
 
 const CLIENTS = ["claude-code", "codex-cli", "gemini-cli", "antigravity"] as const;
@@ -345,7 +345,16 @@ function ServerRowView(props: {
         />
       ))}
       <td>{status?.port ?? "—"}</td>
-      <td>{status?.state ?? "—"}</td>
+      <td class={status ? `state-cell ${status.state === "Running" ? "state-ok" : "state-down"}` : ""}>
+        {status ? (
+          <>
+            <span class="state-shape" aria-hidden="true">{stateShape(status.state)}</span>{" "}
+            {status.state}
+          </>
+        ) : (
+          "—"
+        )}
+      </td>
     </tr>
   );
 }

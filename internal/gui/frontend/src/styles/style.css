@@ -104,6 +104,19 @@ main { padding: 24px; overflow: auto; }
 .card-kv { display: flex; justify-content: space-between; padding: 4px 0; font-size: 14px; }
 .card.ok .state { color: var(--success); }
 .card.down .state { color: var(--danger); }
+
+/* Spec §5.7 line 289: status cells include a shape indicator (●/○) so
+   color is not the sole carrier of meaning. The glyph inherits color
+   from the parent (.state in Dashboard cards, .state-cell on the
+   Servers matrix) — kept as a sibling span so the text label stays
+   readable when a screen reader reads the cell. */
+.state-shape { font-size: 0.85em; line-height: 1; vertical-align: 0.1em; }
+
+/* Servers matrix State column color — Dashboard already inherits color
+   via .card.ok/down; Servers had no per-state coloring before. */
+.servers-matrix .state-cell.state-ok { color: var(--success); }
+.servers-matrix .state-cell.state-down { color: var(--danger); }
+
 .card-actions { margin-top: 12px; display: flex; gap: 8px; }
 .card-actions button { flex: 1; padding: 6px; border: 1px solid var(--border); background: var(--sidebar-bg); color: var(--text); border-radius: 4px; cursor: pointer; }
 .card-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
