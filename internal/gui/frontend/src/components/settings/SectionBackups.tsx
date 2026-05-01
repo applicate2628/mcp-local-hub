@@ -1,15 +1,17 @@
 import { useState, useEffect } from "preact/hooks";
-import { putSetting } from "../../lib/settings-api";
+import { putSetting, cleanBackups } from "../../lib/settings-api";
+import { ConfirmModal } from "../ConfirmModal";
 import { BackupsList } from "./BackupsList";
 import { BACKUPS_COPY } from "./backups-copy";
 import type { SettingsSnapshot, ConfigSettingDTO } from "../../lib/settings-types";
 
 export type SectionBackupsProps = {
   snapshot: SettingsSnapshot;
-  onDirtyChange: (b: boolean) => void;
+  /** Called whenever the section's dirty state changes. Optional; defaults to no-op. */
+  onDirtyChange?: (b: boolean) => void;
 };
 
-export function SectionBackups({ snapshot, onDirtyChange }: SectionBackupsProps): preact.JSX.Element {
+export function SectionBackups({ snapshot, onDirtyChange = () => {} }: SectionBackupsProps): preact.JSX.Element {
   if (snapshot.status !== "ok") return <section data-section="backups"><h2>Backups</h2></section>;
   const def = snapshot.data.settings.find((s) => s.key === "backups.keep_n") as ConfigSettingDTO;
   const persisted = Number(def.value);
@@ -22,6 +24,7 @@ export function SectionBackups({ snapshot, onDirtyChange }: SectionBackupsProps)
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   // When persisted catches up with lastSent (refresh succeeded later),
   // drop lastSent. Avoids a stale fallback once the snapshot is fresh.
@@ -85,6 +88,12 @@ export function SectionBackups({ snapshot, onDirtyChange }: SectionBackupsProps)
     setBanner(null);
   }
 
+  async function doClean() {
+    await cleanBackups();
+    setConfirmOpen(false);
+    await snapshot.refresh();
+  }
+
   return (
     <section data-section="backups" class="settings-section">
       <h2>Backups</h2>
@@ -112,15 +121,22 @@ export function SectionBackups({ snapshot, onDirtyChange }: SectionBackupsProps)
       <div class="backups-clean-row">
         <button
           type="button"
-          disabled
-          title={BACKUPS_COPY.cleanTooltip}
-          aria-label={BACKUPS_COPY.cleanTooltip}
-          data-test-id="clean-now-disabled"
+          onClick={() => setConfirmOpen(true)}
+          data-testid="clean-now-button"
         >
-          Clean now
+          Clean now eligible backups
         </button>
-        <span class="deferred-badge">(coming in A4-b)</span>
       </div>
+
+      <ConfirmModal
+        open={confirmOpen}
+        title="Delete eligible backups?"
+        body={<>Originals are never cleaned.</>}
+        confirmLabel="Delete"
+        danger
+        onConfirm={doClean}
+        onCancel={() => setConfirmOpen(false)}
+      />
 
       <div class="settings-section-footer">
         {banner ? <span class="save-banner ok">{banner}</span> : null}

@@ -54,3 +54,13 @@ export async function getBackupsCleanPreview(keepN: number): Promise<string[]> {
   const body = await jsonOrThrow(res);
   return (body.would_remove ?? []) as string[];
 }
+
+export async function cleanBackups(): Promise<{ cleaned: number }> {
+  const res = await fetch("/api/backups/clean", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  return await jsonOrThrow(res);
+}
