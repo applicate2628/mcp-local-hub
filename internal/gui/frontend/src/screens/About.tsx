@@ -97,6 +97,47 @@ export function AboutScreen() {
           </a>
         </li>
       </ul>
+
+      <h2>Documentation</h2>
+      <ul class="about-links">
+        {/* Doc links are derived from the canonical homepage URL so a
+            future repo rename automatically follows. /blob/master/<path>
+            is the GitHub URL convention; if a future release pins the
+            doc viewer to a tag, this is the single place to change. */}
+        <li>
+          <a
+            href={`${v.homepage}/blob/master/README.md`}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid="about-readme-link"
+          >
+            README
+          </a>{" "}
+          — overview, capabilities, supported clients
+        </li>
+        <li>
+          <a
+            href={`${v.homepage}/blob/master/INSTALL.md`}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid="about-install-link"
+          >
+            INSTALL
+          </a>{" "}
+          — installation walkthrough
+        </li>
+        <li>
+          <a
+            href={`${v.homepage}/blob/master/docs/phase-3b-ii-verification.md`}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid="about-verification-link"
+          >
+            Phase 3B-II verification guide
+          </a>{" "}
+          — manual smoke checklist for current GUI features
+        </li>
+      </ul>
     </section>
   );
 }
