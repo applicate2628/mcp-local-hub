@@ -68,6 +68,91 @@ func TestLogs_GetReturnsText(t *testing.T) {
 	}
 }
 
+// TestLogs_OpenFolder verifies that POST /api/logs-folder
+// resolves api.DefaultLogDir, mkdir's it on first-run, and spawns
+// the OS file manager via the same seam used by openpath. Returns
+// 200 + {"opened": <dir>} on success. Audit gap (Round 1 #5):
+// spec calls for an "Open folder" action on Logs.
+//
+// Sibling path (not under /api/logs/) avoids a prefix collision
+// with a manifest legitimately named "open-folder" — Codex bot
+// review on PR #47 P2.
+func TestLogs_OpenFolder(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("LOCALAPPDATA", tmp)
+
+	captured := struct {
+		name string
+		args []string
+	}{}
+	orig := spawnProcess
+	spawnProcess = func(name string, args ...string) error {
+		captured.name = name
+		captured.args = args
+		return nil
+	}
+	defer func() { spawnProcess = orig }()
+
+	s := NewServer(Config{})
+	req := httptest.NewRequest(http.MethodPost, "/api/logs-folder", nil)
+	// Same-origin gate requires Origin or no Sec-Fetch-Site; httptest
+	// requests have no Origin so the gate's no-origin path applies.
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, body=%q", rec.Code, rec.Body.String())
+	}
+	if captured.name == "" {
+		t.Fatal("spawnProcess seam was never invoked")
+	}
+	// The spawned arg must be the canonical DefaultLogDir under the
+	// test's redirected LOCALAPPDATA (...mcp-local-hub/logs). Verifying
+	// the suffix pins the path computation against api.defaultLogDir
+	// without depending on the os-specific path separator the test
+	// machine uses.
+	if len(captured.args) == 0 || !strings.Contains(captured.args[0], "mcp-local-hub") {
+		t.Errorf("spawn args do not point at the logs dir: %v", captured.args)
+	}
+	if !strings.Contains(rec.Body.String(), "opened") {
+		t.Errorf("response body lacks opened field: %q", rec.Body.String())
+	}
+}
+
+// TestLogs_ServerNamedOpenFolder pins the regression Codex bot
+// flagged on PR #47: the open-logs-folder route lives at the
+// SIBLING path /api/logs-folder, not under /api/logs/, so a
+// manifest legitimately named "open-folder" can still hit
+// /api/logs/open-folder for its log file. Without this contract
+// the prefix-vs-exact-match shadow would 404 the manifest's logs.
+func TestLogs_ServerNamedOpenFolder(t *testing.T) {
+	fl := &fakeLogs{body: "open-folder log line\n"}
+	s := NewServer(Config{})
+	s.logs = fl
+	req := httptest.NewRequest(http.MethodGet, "/api/logs/open-folder?tail=10", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("server-named-open-folder logs request: status = %d", rec.Code)
+	}
+	if fl.gotServer != "open-folder" {
+		t.Errorf("server name not forwarded: got %q want open-folder", fl.gotServer)
+	}
+}
+
+// TestLogs_OpenFolderRejectsGet pins the method gate — same-origin
+// POST is the only accepted shape so the route does not become a
+// drive-by GET that fires on a malicious page navigation.
+func TestLogs_OpenFolderRejectsGet(t *testing.T) {
+	s := NewServer(Config{})
+	req := httptest.NewRequest(http.MethodGet, "/api/logs-folder", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", rec.Code)
+	}
+}
+
 // TestLogs_DaemonQueryParamForwarded confirms that ?daemon= on
 // /api/logs/:server reaches the logsProvider. Multi-daemon servers
 // (serena: claude + codex) depend on this — without it they get the
