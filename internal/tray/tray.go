@@ -70,6 +70,19 @@ type Config struct {
 	// from the tray menu. Implementer should call api.StopAll.
 	// Fire-and-forget: GUI stays open. Optional: silently no-op if nil.
 	StopAllDaemons func()
+	// RescanClients triggers a fresh /api/scan reload. The GUI process
+	// is the only place that holds the cached scan state, so the tray
+	// hands the click off via SSE/event broadcaster. Optional: nil
+	// silently no-ops.
+	RescanClients func()
+	// OpenLogsFolder opens the OS file manager at the canonical
+	// daemon-log directory. Implementer typically calls
+	// gui.OpenPath(api.DefaultLogDir()). Optional.
+	OpenLogsFolder func()
+	// OpenDataFolder opens the OS file manager at the mcp-local-hub
+	// per-user data directory (parent of gui-preferences.yaml /
+	// secrets vault). Optional.
+	OpenDataFolder func()
 	// StateCh delivers TrayState transitions. The parent forwards
 	// each value to the child as a JSON state line.
 	StateCh <-chan TrayState
@@ -211,38 +224,7 @@ func Run(ctx context.Context, cfg Config) error {
 			fmt.Fprintf(os.Stderr, "tray: bad event line %q: %v\n", scanner.Bytes(), err)
 			continue
 		}
-		switch ev.Event {
-		case "open-dashboard":
-			if cfg.ActivateWindow != nil {
-				cfg.ActivateWindow()
-			}
-		case "quit":
-			if cfg.Quit != nil {
-				cfg.Quit()
-			}
-		case "quit-and-stop-all":
-			// Fall back to plain Quit if the GUI didn't wire the
-			// stronger callback — never silently swallow a user
-			// click. The fallback at least closes the GUI; daemons
-			// keep running, which mirrors the existing "Quit (keep
-			// daemons)" item rather than failing closed.
-			switch {
-			case cfg.QuitAndStopAll != nil:
-				cfg.QuitAndStopAll()
-			case cfg.Quit != nil:
-				cfg.Quit()
-			}
-		case "run-all":
-			if cfg.RunAllDaemons != nil {
-				cfg.RunAllDaemons()
-			}
-		case "stop-all":
-			if cfg.StopAllDaemons != nil {
-				cfg.StopAllDaemons()
-			}
-		default:
-			fmt.Fprintf(os.Stderr, "tray: unknown event %q\n", ev.Event)
-		}
+		dispatchEvent(ev.Event, cfg)
 	}
 	// scanner.Err() may be context.Canceled on parent shutdown — not
 	// worth logging. Cancel runCtx FIRST so the writer exits without
@@ -283,6 +265,62 @@ func Run(ctx context.Context, cfg Config) error {
 // either end is logged to stderr but does not kill the connection.
 func RunChild(r io.Reader, w io.Writer) error {
 	return runChildImpl(r, w)
+}
+
+// dispatchEvent routes one tray event name to the matching cfg
+// callback. Extracted from Run's scanner loop so unit tests can
+// exercise the full event-name → callback mapping (including the
+// nil-callback no-op behavior and the QuitAndStopAll fallback)
+// without spawning the tray subprocess.
+//
+// Unknown event names land on the default branch which logs to
+// stderr — keeps the helper a single source of truth for "which
+// event names this tray understands".
+func dispatchEvent(name string, cfg Config) {
+	switch name {
+	case "open-dashboard":
+		if cfg.ActivateWindow != nil {
+			cfg.ActivateWindow()
+		}
+	case "quit":
+		if cfg.Quit != nil {
+			cfg.Quit()
+		}
+	case "quit-and-stop-all":
+		// Fall back to plain Quit if the GUI didn't wire the
+		// stronger callback — never silently swallow a user
+		// click. The fallback at least closes the GUI; daemons
+		// keep running, which mirrors the existing "Quit (keep
+		// daemons)" item rather than failing closed.
+		switch {
+		case cfg.QuitAndStopAll != nil:
+			cfg.QuitAndStopAll()
+		case cfg.Quit != nil:
+			cfg.Quit()
+		}
+	case "run-all":
+		if cfg.RunAllDaemons != nil {
+			cfg.RunAllDaemons()
+		}
+	case "stop-all":
+		if cfg.StopAllDaemons != nil {
+			cfg.StopAllDaemons()
+		}
+	case "rescan-clients":
+		if cfg.RescanClients != nil {
+			cfg.RescanClients()
+		}
+	case "open-logs-folder":
+		if cfg.OpenLogsFolder != nil {
+			cfg.OpenLogsFolder()
+		}
+	case "open-data-folder":
+		if cfg.OpenDataFolder != nil {
+			cfg.OpenDataFolder()
+		}
+	default:
+		fmt.Fprintf(os.Stderr, "tray: unknown event %q\n", name)
+	}
 }
 
 // stateMessage is the wire-format payload parent sends to child on stdin.

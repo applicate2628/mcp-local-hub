@@ -78,6 +78,11 @@ export function MigrationScreen() {
   // pointless rescans.
   useEventSource("/api/events", {
     "daemon-state": () => setScanReloadToken((n) => n + 1),
+    // Tray "Rescan client configs" → backend publishes clients-rescan
+    // → every open Servers/Migration screen re-fetches. The UI side
+    // is a thin re-trigger of the existing reload mechanism so the
+    // tray click and a manual refresh share one code path.
+    "clients-rescan": () => setScanReloadToken((n) => n + 1),
   });
 
   async function runDemigrate(serverName: string) {

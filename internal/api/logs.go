@@ -89,6 +89,13 @@ func (a *API) LogsStream(server, daemon string, out *bufio.Writer) error {
 	return fmt.Errorf("LogsStream not yet implemented — use LogsGet with Tail")
 }
 
+// DefaultLogDir returns the canonical per-platform location of the
+// daemon log directory. Exported so external callers (GUI tray "Open
+// logs folder", future remote consumers) resolve the same path the
+// daemon writer + log reader use, instead of duplicating the
+// LOCALAPPDATA / XDG_STATE_HOME / ~/.local/state fallback chain.
+func DefaultLogDir() string { return defaultLogDir() }
+
 func defaultLogDir() string {
 	if v := os.Getenv("LOCALAPPDATA"); v != "" {
 		return filepath.Join(v, "mcp-local-hub", "logs")
