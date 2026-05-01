@@ -102,9 +102,11 @@ func TestCLI_Get_ActionKey_Exit1(t *testing.T) {
 }
 
 func TestCLI_Get_Deferred_PrintsValueAndStderrWarning(t *testing.T) {
-	path := withTempHome(t)
-	_ = os.MkdirAll(filepath.Dir(path), 0700)
-	stdout, stderr, err := runCLI(t, "get", "daemons.weekly_schedule")
+	// gui_server.tray is the canonical Deferred:true TypeBool key that
+	// Task 1 did NOT flip (PR #2 will flip it). daemons.weekly_schedule was
+	// flipped to Deferred:false by Task 1 so it no longer emits the warning.
+	withTempHome(t)
+	stdout, stderr, err := runCLI(t, "get", "gui_server.tray")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,8 +143,11 @@ func TestCLI_Set_Validation_RejectsBadValue(t *testing.T) {
 }
 
 func TestCLI_Set_DeferredNonAction_SucceedsWithStderrWarning(t *testing.T) {
+	// gui_server.tray is the canonical Deferred:true TypeBool key that
+	// Task 1 did NOT flip (PR #2 will flip it). daemons.retry_policy was
+	// flipped to Deferred:false by Task 1 so it no longer emits the warning.
 	withTempHome(t)
-	_, stderr, err := runCLI(t, "set", "daemons.retry_policy", "linear")
+	_, stderr, err := runCLI(t, "set", "gui_server.tray", "false")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,9 +156,9 @@ func TestCLI_Set_DeferredNonAction_SucceedsWithStderrWarning(t *testing.T) {
 	}
 	// Confirm value persisted.
 	a := api.NewAPI()
-	v, err := a.SettingsGet("daemons.retry_policy")
-	if err != nil || v != "linear" {
-		t.Errorf("expected linear persisted, got %q err=%v", v, err)
+	v, err := a.SettingsGet("gui_server.tray")
+	if err != nil || v != "false" {
+		t.Errorf("expected false persisted, got %q err=%v", v, err)
 	}
 }
 
