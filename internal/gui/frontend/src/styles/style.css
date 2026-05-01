@@ -127,7 +127,8 @@ main { padding: var(--screen-padding); overflow: auto; }
 #logs-body { background: var(--sidebar-bg); border: 1px solid var(--border); padding: var(--card-padding); overflow: auto; max-height: 70vh; font-family: monospace; font-size: 12px; white-space: pre-wrap; }
 
 /* Migration screen group tones (spec §5.2) */
-.screen.migration .group { margin: var(--gap-md) 0; padding: var(--cell-padding-y) var(--cell-padding-x);
+.screen.migration .group { margin: var(--migration-group-margin) 0;
+    padding: var(--migration-group-padding-y) var(--migration-group-padding-x);
     border-left: 4px solid var(--border, #d0d7de); border-radius: 4px; }
 .screen.migration .group > h2 { margin: 0 0 0.5rem; font-size: 1.05rem; }
 .screen.migration .group > .empty { color: var(--text-muted, #656d76);
@@ -842,6 +843,14 @@ menu button[disabled] {
   --gap-md: 16px;
   --gap-sm: 12px;
   --screen-padding: 24px;
+  /* Migration screen has its own tokens because the historical
+     spec values (1.25rem margin, 0.75rem 1rem padding) are
+     intentionally different from card padding. Codex bot review
+     on PR #45 P2: comfortable must keep the historical values
+     exactly so the default density renders unchanged. */
+  --migration-group-margin: 1.25rem;
+  --migration-group-padding-y: 0.75rem;
+  --migration-group-padding-x: 1rem;
 }
 :root[data-theme="dark"] {
   --bg-color: #0f172a;
@@ -870,16 +879,25 @@ menu button[disabled] {
   --row-height: 24px; --section-gap: 12px;
   --card-padding: 10px; --cell-padding-y: 4px; --cell-padding-x: 8px;
   --gap-md: 8px; --gap-sm: 6px; --screen-padding: 14px;
+  --migration-group-margin: 0.75rem;
+  --migration-group-padding-y: 0.5rem;
+  --migration-group-padding-x: 0.75rem;
 }
 :root[data-density="comfortable"] {
   --row-height: 32px; --section-gap: 24px;
   --card-padding: 16px; --cell-padding-y: 8px; --cell-padding-x: 12px;
   --gap-md: 16px; --gap-sm: 12px; --screen-padding: 24px;
+  --migration-group-margin: 1.25rem;
+  --migration-group-padding-y: 0.75rem;
+  --migration-group-padding-x: 1rem;
 }
 :root[data-density="spacious"] {
   --row-height: 40px; --section-gap: 36px;
   --card-padding: 24px; --cell-padding-y: 12px; --cell-padding-x: 16px;
   --gap-md: 24px; --gap-sm: 16px; --screen-padding: 32px;
+  --migration-group-margin: 1.75rem;
+  --migration-group-padding-y: 1.1rem;
+  --migration-group-padding-x: 1.4rem;
 }
 
 /* ============================================================
