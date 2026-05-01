@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -18,11 +19,14 @@ func TestLegacyMigrate_ExemptionFromKnob(t *testing.T) {
 	body := string(src)
 
 	// Must still hardcode WeeklyRefresh:true with explicit override.
-	if !strings.Contains(body, "WeeklyRefreshExplicit: true") {
+	// Robust to both single-line ("WeeklyRefreshExplicit: true") and multi-line
+	// gofmt-aligned ("WeeklyRefreshExplicit:         true") forms.
+	if !regexp.MustCompile(`WeeklyRefreshExplicit:\s+true`).MatchString(body) {
 		t.Error("legacy_migrate.go missing WeeklyRefreshExplicit:true (memo D1 exemption)")
 	}
-	if !strings.Contains(body, "WeeklyRefresh:        true") &&
-		!strings.Contains(body, "WeeklyRefresh: true") {
+	// Robust to both single-line ("WeeklyRefresh: true") and multi-line
+	// gofmt-aligned ("WeeklyRefresh:         true") forms.
+	if !regexp.MustCompile(`WeeklyRefresh:\s+true`).MatchString(body) {
 		t.Error("legacy_migrate.go no longer hardcodes WeeklyRefresh:true (memo D1 exemption violated)")
 	}
 
