@@ -296,6 +296,30 @@ func TestWeeklyScheduleHandler_SwapFails_RollbackOK(t *testing.T) {
 	}
 }
 
+func TestWeeklyScheduleHandler_NormalizesInput(t *testing.T) {
+	srv := newDaemonsTestServer(t)
+	srv.swapForRoute = func(spec *api.ScheduleSpec, priorXML []byte) (string, error) { return "n/a", nil }
+	srv.exportXMLForRoute = func(name string) ([]byte, error) { return nil, nil }
+	body := `{"schedule": "  weekly mon 14:30  "}`
+	req := httptest.NewRequest(http.MethodPut, "/api/daemons/weekly-schedule", strings.NewReader(body))
+	req.Header = sameOriginHeaders()
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]any
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp["schedule"] != "weekly Mon 14:30" {
+		t.Errorf("schedule = %v, want canonical 'weekly Mon 14:30'", resp["schedule"])
+	}
+	// Verify persisted value is canonical, not raw input.
+	persisted, _ := api.NewAPI().SettingsGet("daemons.weekly_schedule")
+	if persisted != "weekly Mon 14:30" {
+		t.Errorf("persisted = %q, want canonical", persisted)
+	}
+}
+
 func TestWeeklyScheduleHandler_SwapFails_DegradedRestore(t *testing.T) {
 	srv := newDaemonsTestServer(t)
 	srv.exportXMLForRoute = func(name string) ([]byte, error) { return []byte("<Task/>"), nil }

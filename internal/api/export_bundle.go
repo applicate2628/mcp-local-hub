@@ -15,6 +15,21 @@ import (
 
 var mcphubVersionForBundle = func() string { return "dev" }
 
+// PreflightExportBundle checks that the data and state directories can be
+// resolved before the handler commits stream headers. Returns nil if both
+// resolve (even if missing — bundle composition gracefully skips missing
+// optional files); returns an error only if the path resolution itself fails.
+// Memo D11.
+func PreflightExportBundle() (warnings []string, err error) {
+	if _, err := dataDirForBundle(); err != nil {
+		return nil, fmt.Errorf("locate data dir: %w", err)
+	}
+	if _, err := stateDirForBundle(); err != nil {
+		return nil, fmt.Errorf("locate state dir: %w", err)
+	}
+	return nil, nil
+}
+
 // WriteConfigBundle writes a .zip stream to w containing all config
 // artifacts (memo D11). Returns nil on success; partial writes propagate
 // the underlying io.Writer error.

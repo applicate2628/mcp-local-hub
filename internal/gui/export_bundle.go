@@ -21,6 +21,16 @@ func (s *Server) exportConfigBundleHandler(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	// Pre-flight: surface composition errors that occur BEFORE headers commit.
+	// Once we set Content-Type+Disposition and start streaming, we cannot
+	// re-write status; mid-stream WriteConfigBundle failures only log.
+	if _, err := api.PreflightExportBundle(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error":  "export_unavailable",
+			"detail": err.Error(),
+		})
+		return
+	}
 	filename := fmt.Sprintf("mcphub-bundle-%s.zip", time.Now().UTC().Format("20060102-150405"))
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)

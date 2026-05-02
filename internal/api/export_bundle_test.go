@@ -17,9 +17,18 @@ func TestWriteConfigBundle_Composition(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", filepath.Join(tmp, "data"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(tmp, "state"))
 
-	// Seed fake artifacts.
-	dataDir := filepath.Join(tmp, "mcp-local-hub")
-	stateDir := filepath.Join(tmp, "state", "mcp-local-hub")
+	// Resolve actual paths the bundle composer will read; cross-platform.
+	// On Linux dataDirForBundle() returns $XDG_DATA_HOME/mcp-local-hub which
+	// differs from $LOCALAPPDATA/mcp-local-hub, so we must seed at the paths
+	// the function resolves rather than hard-coding the Windows layout.
+	dataDir, err := dataDirForBundle()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateDir, err := stateDirForBundle()
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, d := range []string{dataDir, stateDir, filepath.Join(dataDir, "servers", "wolfram")} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
@@ -86,7 +95,12 @@ func TestWriteConfigBundle_Composition(t *testing.T) {
 func TestWriteConfigBundle_ExcludesBackupFiles(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("LOCALAPPDATA", tmp)
-	dataDir := filepath.Join(tmp, "mcp-local-hub")
+	t.Setenv("XDG_DATA_HOME", filepath.Join(tmp, "data"))
+	// Resolve actual path the bundle composer will read (cross-platform).
+	dataDir, err := dataDirForBundle()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		t.Fatal(err)
 	}

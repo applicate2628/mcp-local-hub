@@ -10,6 +10,17 @@ import (
 	"strings"
 )
 
+// canonicalDays maps DayOfWeek index (0=Sun..6=Sat) to the title-case
+// three-letter abbreviation used in canonical schedule strings.
+var canonicalDays = []string{"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}
+
+// Canonical returns the normalized schedule string for s, e.g.
+// "weekly Mon 14:30". Day names are title-case three-letter abbreviations;
+// hour and minute are zero-padded to two digits.
+func (s *ScheduleSpec) Canonical() string {
+	return fmt.Sprintf("weekly %s %02d:%02d", canonicalDays[s.DayOfWeek], s.Hour, s.Minute)
+}
+
 type ScheduleKind string
 
 const (

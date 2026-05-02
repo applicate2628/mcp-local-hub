@@ -25,6 +25,7 @@ export function SectionBackups({ snapshot, onDirtyChange = () => {} }: SectionBa
   const [err, setErr] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [cleanErr, setCleanErr] = useState<string | null>(null);
 
   // When persisted catches up with lastSent (refresh succeeded later),
   // drop lastSent. Avoids a stale fallback once the snapshot is fresh.
@@ -89,9 +90,15 @@ export function SectionBackups({ snapshot, onDirtyChange = () => {} }: SectionBa
   }
 
   async function doClean() {
-    await cleanBackups();
-    setConfirmOpen(false);
-    await snapshot.refresh();
+    setCleanErr(null);
+    try {
+      await cleanBackups();
+      setConfirmOpen(false);
+      await snapshot.refresh();
+    } catch (e: any) {
+      setConfirmOpen(false);
+      setCleanErr(e?.message ?? "Clean-now failed");
+    }
   }
 
   return (
@@ -137,6 +144,7 @@ export function SectionBackups({ snapshot, onDirtyChange = () => {} }: SectionBa
         onConfirm={doClean}
         onCancel={() => setConfirmOpen(false)}
       />
+      {cleanErr ? <p class="error-banner" role="alert">Clean-now failed: {cleanErr}</p> : null}
 
       <div class="settings-section-footer">
         {banner ? <span class="save-banner ok">{banner}</span> : null}

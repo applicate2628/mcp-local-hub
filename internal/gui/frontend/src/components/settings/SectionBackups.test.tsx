@@ -153,6 +153,22 @@ describe("SectionBackups clean-now A4-b PR #1", () => {
     vi.unstubAllGlobals();
   });
 
+  it("shows error banner on clean-now POST failure", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "server_error" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SectionBackups snapshot={snapshotWithBackups()} />);
+    fireEvent.click(screen.getByText(/clean.*now/i));
+    await waitFor(() => screen.getByTestId("confirm-modal"));
+    fireEvent.click(screen.getByTestId("confirm-modal-confirm"));
+    await waitFor(() => expect(screen.getByText(/clean.*now failed/i)).toBeTruthy());
+    vi.unstubAllGlobals();
+  });
+
   it("does NOT invoke endpoint on Cancel", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

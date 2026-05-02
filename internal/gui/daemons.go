@@ -214,12 +214,17 @@ func (s *Server) weeklyScheduleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Normalize the input to canonical form (title-case day, zero-padded
+	// HH:MM) before persisting. This ensures round-trips like
+	// "  weekly mon 14:30  " are stored and returned as "weekly Mon 14:30".
+	canonical := spec.Canonical()
+
 	// Settings YAML phase: snapshot the prior value (best-effort —
 	// even on read error we proceed with empty string as the rollback
 	// target, which is acceptable because SettingsSet validates and
 	// rejects invalid values uniformly), then write the new value.
 	priorScheduleValue, _ := api.NewAPI().SettingsGet("daemons.weekly_schedule")
-	if err := api.NewAPI().SettingsSet("daemons.weekly_schedule", body.Schedule); err != nil {
+	if err := api.NewAPI().SettingsSet("daemons.weekly_schedule", canonical); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
 			"error":          "settings_write_failed",
 			"detail":         err.Error(),
@@ -241,7 +246,7 @@ func (s *Server) weeklyScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	if swapErr == nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"updated":        true,
-			"schedule":       body.Schedule,
+			"schedule":       canonical,
 			"restore_status": "n/a",
 		})
 		return
