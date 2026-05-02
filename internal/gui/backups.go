@@ -14,12 +14,14 @@ import (
 type backupsAPI interface {
 	List() ([]api.BackupInfo, error)
 	CleanPreview(keepN int) ([]string, error)
+	Clean(keepN int) ([]string, error)
 }
 
 type realBackupsAPI struct{}
 
 func (realBackupsAPI) List() ([]api.BackupInfo, error)      { return api.NewAPI().BackupsList() }
 func (realBackupsAPI) CleanPreview(n int) ([]string, error) { return api.NewAPI().BackupsCleanPreview(n) }
+func (realBackupsAPI) Clean(n int) ([]string, error)        { return api.NewAPI().BackupsClean(n) }
 
 // backupDTO is the JSON shape of one entry in GET /api/backups.
 // ModTime is serialized as RFC3339 for predictable wire format.
@@ -34,6 +36,7 @@ type backupDTO struct {
 func registerBackupsRoutes(s *Server) {
 	s.mux.HandleFunc("/api/backups", s.requireSameOrigin(s.backupsListHandler))
 	s.mux.HandleFunc("/api/backups/clean-preview", s.requireSameOrigin(s.backupsCleanPreviewHandler))
+	s.mux.HandleFunc("/api/backups/clean", s.requireSameOrigin(s.backupsCleanHandler))
 }
 
 func (s *Server) backupsListHandler(w http.ResponseWriter, r *http.Request) {
@@ -58,6 +61,35 @@ func (s *Server) backupsListHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"backups": dtos})
+}
+
+func (s *Server) backupsCleanHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	// Read the user's persisted keep_n from settings; fall back to 5 (registry
+	// default) if missing, unset, or unparseable — same guard used throughout
+	// the api package for this setting.
+	keepN := 5
+	if s, err := api.NewAPI().SettingsGet("backups.keep_n"); err == nil && s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n >= 0 {
+			keepN = n
+		}
+	}
+	removed, err := s.backups.Clean(keepN)
+	if err != nil {
+		writeAPIError(w, err, http.StatusInternalServerError, "BACKUPS_CLEAN_FAILED")
+		return
+	}
+	if removed == nil {
+		removed = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"cleaned": len(removed),
+		"errors":  []string{},
+	})
 }
 
 func (s *Server) backupsCleanPreviewHandler(w http.ResponseWriter, r *http.Request) {

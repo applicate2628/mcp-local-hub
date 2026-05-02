@@ -9,6 +9,7 @@ type BaseSettingDTO = {
   section: Section;
   deferred: boolean;
   help: string;
+  render_kind?: string; // memo D14: "" or "custom"
 };
 
 export type ConfigSettingDTO = BaseSettingDTO & {

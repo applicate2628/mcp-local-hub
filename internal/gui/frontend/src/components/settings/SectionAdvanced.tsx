@@ -1,6 +1,7 @@
 import { useState } from "preact/hooks";
 import { postAction } from "../../lib/settings-api";
 import type { SettingsSnapshot } from "../../lib/settings-types";
+import { SectionAdvancedDiagnostics } from "./SectionAdvancedDiagnostics";
 
 export type SectionAdvancedProps = {
   snapshot: SettingsSnapshot;
@@ -22,6 +23,31 @@ export function SectionAdvanced({ snapshot: _ }: SectionAdvancedProps): preact.J
     }
   }
 
+  async function exportBundle() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await fetch("/api/export-config-bundle", { method: "POST" });
+      if (!r.ok) {
+        setErr(`Export failed: HTTP ${r.status}`);
+        return;
+      }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `mcphub-bundle-${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      setErr(`Export failed: ${e?.message ?? String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <section data-section="advanced" class="settings-section">
       <h2>Advanced</h2>
@@ -30,12 +56,12 @@ export function SectionAdvanced({ snapshot: _ }: SectionAdvancedProps): preact.J
         <button type="button" onClick={() => void openFolder()} disabled={busy} data-test-id="open-folder">
           Open app-data folder
         </button>
-        <button type="button" disabled data-test-id="export-bundle-disabled">
+        <button type="button" onClick={() => void exportBundle()} disabled={busy} data-testid="export-bundle">
           Export bundle
-          <span class="deferred-badge"> (coming in A4-b)</span>
         </button>
       </div>
       {err ? <p class="error-banner" role="alert">Could not open folder: {err}</p> : null}
+      <SectionAdvancedDiagnostics />
     </section>
   );
 }

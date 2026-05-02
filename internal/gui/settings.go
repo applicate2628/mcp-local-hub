@@ -39,29 +39,31 @@ func (realSettingsAPI) OpenPath(path string) error         { return OpenPath(pat
 // the only way to guarantee the wire contract: actions omit, configs
 // always include.
 type configSettingDTO struct {
-	Key      string   `json:"key"`
-	Section  string   `json:"section"`
-	Type     string   `json:"type"`
-	Default  string   `json:"default"`        // ALWAYS emitted — no omitempty
-	Value    string   `json:"value"`          // ALWAYS emitted — no omitempty
-	Enum     []string `json:"enum,omitempty"`
-	Min      *int     `json:"min,omitempty"`
-	Max      *int     `json:"max,omitempty"`
-	Pattern  string   `json:"pattern,omitempty"`
-	Optional bool     `json:"optional,omitempty"`
-	Deferred bool     `json:"deferred"`
-	Help     string   `json:"help"`
+	Key        string   `json:"key"`
+	Section    string   `json:"section"`
+	Type       string   `json:"type"`
+	Default    string   `json:"default"` // ALWAYS emitted — no omitempty
+	Value      string   `json:"value"`   // ALWAYS emitted — no omitempty
+	Enum       []string `json:"enum,omitempty"`
+	Min        *int     `json:"min,omitempty"`
+	Max        *int     `json:"max,omitempty"`
+	Pattern    string   `json:"pattern,omitempty"`
+	Optional   bool     `json:"optional,omitempty"`
+	Deferred   bool     `json:"deferred"`
+	Help       string   `json:"help"`
+	RenderKind string   `json:"render_kind,omitempty"` // memo D14
 }
 
 // actionSettingDTO is the JSON shape for action settings entries.
 // `default` and `value` are deliberately absent — actions have no
 // stored value. Codex r1 P2.2 + r2 P1.2.
 type actionSettingDTO struct {
-	Key      string `json:"key"`
-	Section  string `json:"section"`
-	Type     string `json:"type"` // always "action"
-	Deferred bool   `json:"deferred"`
-	Help     string `json:"help"`
+	Key        string `json:"key"`
+	Section    string `json:"section"`
+	Type       string `json:"type"` // always "action"
+	Deferred   bool   `json:"deferred"`
+	Help       string `json:"help"`
+	RenderKind string `json:"render_kind,omitempty"` // memo D14
 }
 
 func registerSettingsRoutes(s *Server) {
@@ -88,11 +90,12 @@ func (s *Server) settingsListHandler(w http.ResponseWriter, r *http.Request) {
 	for _, def := range api.SettingsRegistry {
 		if def.Type == api.TypeAction {
 			settings = append(settings, actionSettingDTO{
-				Key:      def.Key,
-				Section:  def.Section,
-				Type:     string(def.Type),
-				Deferred: def.Deferred,
-				Help:     def.Help,
+				Key:        def.Key,
+				Section:    def.Section,
+				Type:       string(def.Type),
+				Deferred:   def.Deferred,
+				Help:       def.Help,
+				RenderKind: string(def.RenderKind),
 			})
 			continue
 		}
@@ -101,18 +104,19 @@ func (s *Server) settingsListHandler(w http.ResponseWriter, r *http.Request) {
 			v = def.Default
 		}
 		settings = append(settings, configSettingDTO{
-			Key:      def.Key,
-			Section:  def.Section,
-			Type:     string(def.Type),
-			Default:  def.Default,
-			Value:    v,
-			Enum:     def.Enum,
-			Min:      def.Min,
-			Max:      def.Max,
-			Pattern:  def.Pattern,
-			Optional: def.Optional,
-			Deferred: def.Deferred,
-			Help:     def.Help,
+			Key:        def.Key,
+			Section:    def.Section,
+			Type:       string(def.Type),
+			Default:    def.Default,
+			Value:      v,
+			Enum:       def.Enum,
+			Min:        def.Min,
+			Max:        def.Max,
+			Pattern:    def.Pattern,
+			Optional:   def.Optional,
+			Deferred:   def.Deferred,
+			Help:       def.Help,
+			RenderKind: string(def.RenderKind),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

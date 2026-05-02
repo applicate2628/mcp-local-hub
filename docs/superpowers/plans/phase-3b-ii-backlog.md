@@ -152,12 +152,14 @@ These remain documented as "Cross-platform tray (Linux/macOS) — explicit non-g
 7. **A3-a** — Secrets registry screen ✅ — see [docs/superpowers/plans/2026-04-25-phase-3b-ii-a3a-secrets-screen.md](2026-04-25-phase-3b-ii-a3a-secrets-screen.md). Memo: [docs/superpowers/specs/2026-04-25-phase-3b-ii-a3a-secrets-screen-design.md](../specs/2026-04-25-phase-3b-ii-a3a-secrets-screen-design.md). PR pending user review.
 8. **A3-b** — env.secret picker in AddServer/EditServer forms ✅ — see [docs/superpowers/plans/2026-04-26-phase-3b-ii-a3b-env-secret-picker.md](2026-04-26-phase-3b-ii-a3b-env-secret-picker.md). Memo: [docs/superpowers/specs/2026-04-26-phase-3b-ii-a3b-env-secret-picker-design.md](../specs/2026-04-26-phase-3b-ii-a3b-env-secret-picker-design.md).
 9. **A4-a** — Settings screen ✅ — see [docs/superpowers/plans/2026-04-27-phase-3b-ii-a4-settings.md](2026-04-27-phase-3b-ii-a4-settings.md). Memo: [docs/superpowers/specs/2026-04-27-phase-3b-ii-a4-settings-design.md](../specs/2026-04-27-phase-3b-ii-a4-settings-design.md). Merge SHA: `2529c33d` (PR #20, 14 Codex bot review rounds).
-9b. **A4-b** — Settings lifecycle: tray, port live-rebind, weekly schedule edit, retry policy, Clean now confirm, export bundle.
-   - **Forward-ref to PR #23 C1:** A4-b's "Recover stuck instance" Settings UI button posts to a new `POST /api/force-kill` HTTP handler that returns the `gui.Verdict` JSON contract from PR #23 (`internal/gui/single_instance.go::Verdict`). Diagnose/Hint are not on the wire (`json:"-"`); UI formats from the structured fields.
+9b. **A4-b PR #1** ✅ — Settings lifecycle (polish half): weekly schedule edit, retry policy edit (preference-only; runtime applier in PR #2), Clean now confirm, export bundle, force-kill button, per-workspace weekly-refresh membership UI. Memo: [docs/superpowers/specs/2026-05-01-a4b-pr1-settings-lifecycle-design.md](../specs/2026-05-01-a4b-pr1-settings-lifecycle-design.md). Plan: [docs/superpowers/plans/2026-05-01-a4b-pr1-settings-lifecycle.md](2026-05-01-a4b-pr1-settings-lifecycle.md). Merge SHA: `<TBD-after-merge>`.
+   - **A4-b PR #2 (deferred):** tray show/hide runtime mutator + port live-rebind + retry policy runtime applier wiring. Separate PR.
+   - **Forward-ref to PR #23 C1:** preserved (force-kill button posts to /api/force-kill which wraps gui.Verdict).
+   - (Membership-decision detail block from earlier remains as historical record.)
 10. **A5** — About screen ✅ PR #22 (cleanup + reliability harness + A5 + C2 + C3 + C4 + D2/D3 docs).
 11. **C3 + C4** — Tray icon state variants + toast notifications ✅ PR #22.
 12. **C1** — `--force` take-over (single-instance lock recovery) — **PR #23 (next).** C2 browser focus closed in PR #22.
-13. **A4-b** — Settings lifecycle (tray toggle, weekly schedule edit, retry policy, port live-rebind, Clean-now confirm, export bundle) — **PR #24 (last).**
+13. **A4-b** — Settings lifecycle (tray toggle, weekly schedule edit, retry policy, port live-rebind, Clean-now confirm, export bundle, per-workspace weekly-refresh membership) — **PR #24 (last).**
 14. **Release hardening** — execute `docs/phase-3b-ii-verification.md` D2 + D3 manual smoke on a real Windows desktop session before tagging.
 15. **F1** — Platform-lane refactor (move Windows-specific impl'ы into `internal/platform/windows/`; pre-req for any Linux/macOS work). See § F.
 16. **F7** — CI Linux build matrix (catches regressions before F2-F6 land). See § F.

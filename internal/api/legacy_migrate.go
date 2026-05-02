@@ -158,7 +158,17 @@ func (a *API) MigrateLegacy(entries []LegacyLSEntry, opts LegacyMigrateOpts) (*L
 				continue
 			}
 		}
-		if _, err := a.Register(ws, nil, RegisterOpts{Writer: w, WeeklyRefresh: true}); err != nil {
+		// Memo D1 exemption: Legacy import preserves the pre-A4-b register-time default
+		// (WeeklyRefresh: true). New register operations honor daemons.weekly_refresh_default,
+		// but legacy migration is a one-time intent-known operation that imports a
+		// pre-existing user setup. Flipping legacy entries to false would surprise users
+		// whose pre-A4-b workflow relied on every imported workspace getting weekly
+		// refresh by default. This is regression-tested in legacy_migrate_test.go.
+		if _, err := a.Register(ws, nil, RegisterOpts{
+			Writer:                w,
+			WeeklyRefreshExplicit: true,
+			WeeklyRefresh:         true,
+		}); err != nil {
 			// Register failed — keep every legacy row intact, record per-row failure.
 			for _, e := range rows {
 				report.Failed = append(report.Failed, FailedLegacyEntry{

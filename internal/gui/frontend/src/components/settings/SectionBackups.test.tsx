@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, fireEvent, waitFor } from "@testing-library/preact";
+import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/preact";
 import { SectionBackups } from "./SectionBackups";
 import * as api from "../../lib/settings-api";
 import { BACKUPS_COPY } from "./backups-copy";
@@ -28,10 +28,11 @@ describe("SectionBackups", () => {
     expect(await findByText(new RegExp(BACKUPS_COPY.sliderLabel))).toBeTruthy();
     expect(await findByText(BACKUPS_COPY.helperText)).toBeTruthy();
     expect(await findByText(BACKUPS_COPY.groupNote)).toBeTruthy();
-    // Tooltip: title attribute on the disabled Clean button.
-    const btn = document.querySelector('[data-test-id="clean-now-disabled"]') as HTMLButtonElement;
-    expect(btn.title).toBe(BACKUPS_COPY.cleanTooltip);
-    expect(btn.disabled).toBe(true);
+    // A4-b PR #1 (Task 10): clean-now is now a live button, not a disabled
+    // deferred stub. Assert the new live button is present and enabled.
+    const btn = document.querySelector('[data-testid="clean-now-button"]') as HTMLButtonElement;
+    expect(btn).toBeTruthy();
+    expect(btn.disabled).toBe(false);
     // The eligible-badge + preview-unavailable copy come from BackupsList
     // and are tested in BackupsList.test.tsx; this test asserts the
     // section-level surface only.
@@ -90,10 +91,94 @@ describe("SectionBackups", () => {
     await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(false));
   });
 
-  it("disabled Clean now button has the locked tooltip", () => {
+  it("Clean-now button is live (A4-b PR #1: deferred state replaced)", () => {
     const { container } = render(<SectionBackups snapshot={snap()} onDirtyChange={() => {}} />);
-    const btn = container.querySelector('[data-test-id="clean-now-disabled"]') as HTMLButtonElement;
-    expect(btn.disabled).toBe(true);
-    expect(btn.title).toBe(BACKUPS_COPY.cleanTooltip);
+    const btn = container.querySelector('[data-testid="clean-now-button"]') as HTMLButtonElement;
+    expect(btn).toBeTruthy();
+    expect(btn.disabled).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// New tests: clean-now ConfirmModal wire-up (A4-b PR #1 Task 10, memo D10)
+// ---------------------------------------------------------------------------
+
+describe("SectionBackups clean-now A4-b PR #1", () => {
+  beforeEach(() => {
+    cleanup();
+    HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+    HTMLDialogElement.prototype.close = function () { this.open = false; };
+  });
+
+  function snapshotWithBackups(): any {
+    return {
+      status: "ok",
+      data: {
+        settings: [
+          { key: "backups.keep_n", section: "backups", type: "int", default: "5", value: "5", deferred: false, help: "" },
+          { key: "backups.clean_now", section: "backups", type: "action", deferred: false, help: "Delete eligible timestamped backups." },
+        ],
+        actual_port: 9125,
+      },
+      error: null,
+      refresh: () => Promise.resolve(),
+    };
+  }
+
+  it("opens ConfirmModal on Clean-now button click", async () => {
+    render(<SectionBackups snapshot={snapshotWithBackups()} />);
+    fireEvent.click(screen.getByText(/clean.*now/i));
+    await waitFor(() => expect(screen.getByTestId("confirm-modal")).toBeTruthy());
+    expect(screen.getByRole("heading", { name: /delete.*backups/i })).toBeTruthy();
+  });
+
+  it("invokes POST /api/backups/clean on Confirm", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ cleaned: 3 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SectionBackups snapshot={snapshotWithBackups()} />);
+    fireEvent.click(screen.getByText(/clean.*now/i));
+    await waitFor(() => screen.getByTestId("confirm-modal"));
+    fireEvent.click(screen.getByTestId("confirm-modal-confirm"));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/backups/clean"),
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it("shows error banner on clean-now POST failure", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "server_error" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SectionBackups snapshot={snapshotWithBackups()} />);
+    fireEvent.click(screen.getByText(/clean.*now/i));
+    await waitFor(() => screen.getByTestId("confirm-modal"));
+    fireEvent.click(screen.getByTestId("confirm-modal-confirm"));
+    await waitFor(() => expect(screen.getByText(/clean.*now failed/i)).toBeTruthy());
+    vi.unstubAllGlobals();
+  });
+
+  it("does NOT invoke endpoint on Cancel", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SectionBackups snapshot={snapshotWithBackups()} />);
+    fireEvent.click(screen.getByText(/clean.*now/i));
+    await waitFor(() => screen.getByTestId("confirm-modal"));
+    fireEvent.click(screen.getByTestId("confirm-modal-cancel"));
+    await waitFor(() => {
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+    vi.unstubAllGlobals();
   });
 });

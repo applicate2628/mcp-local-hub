@@ -23,6 +23,7 @@ import (
 // Zero positional language args = default-all (every language declared in
 // the shipped mcp-language-server manifest).
 func newRegisterCmdReal() *cobra.Command {
+	var weekly bool
 	var noWeekly bool
 	c := &cobra.Command{
 		Use:   "register <workspace> [language...]",
@@ -39,9 +40,15 @@ Lazy mode:
   - Entry names are ` + "`mcp-language-server-<lang>`" + `; a cross-workspace
     collision appends ` + "`-<4hex>`" + ` from the workspace key.
 
+Weekly refresh enrollment:
+  - --weekly-refresh         force-enroll new entries (override knob).
+  - --no-weekly-refresh      force-skip new entries (override knob).
+  - (neither)                read daemons.weekly_refresh_default from
+                             settings (default: false). Memo D1.
+
 Examples:
-  mcphub register D:\projects\foo                         # every language
-  mcphub register D:\projects\foo python typescript rust  # three languages
+  mcphub register D:\projects\foo
+  mcphub register D:\projects\foo python typescript rust --weekly-refresh
   mcphub register /home/u/web typescript --no-weekly-refresh
 
 See also: unregister, workspaces, status.`,
@@ -52,11 +59,15 @@ See also: unregister, workspaces, status.`,
 			if len(args) > 1 {
 				languages = args[1:]
 			}
-			// nil slice = default-all semantics inside api.Register.
+			if weekly && noWeekly {
+				return fmt.Errorf("cannot use both --weekly-refresh and --no-weekly-refresh")
+			}
+			explicit := weekly || noWeekly
 			a := api.NewAPI()
 			report, err := a.Register(workspace, languages, api.RegisterOpts{
-				WeeklyRefresh: !noWeekly,
-				Writer:        cmd.OutOrStdout(),
+				WeeklyRefreshExplicit: explicit,
+				WeeklyRefresh:         weekly,
+				Writer:                cmd.OutOrStdout(),
 			})
 			if err != nil {
 				return err
@@ -71,8 +82,10 @@ See also: unregister, workspaces, status.`,
 			return nil
 		},
 	}
+	c.Flags().BoolVar(&weekly, "weekly-refresh", false,
+		"force-enroll new entries in weekly refresh (override daemons.weekly_refresh_default)")
 	c.Flags().BoolVar(&noWeekly, "no-weekly-refresh", false,
-		"set weekly_refresh=false for every new registry entry")
+		"force-skip new entries from weekly refresh (override daemons.weekly_refresh_default)")
 	return c
 }
 

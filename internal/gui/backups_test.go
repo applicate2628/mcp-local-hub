@@ -18,12 +18,19 @@ type fakeBackups struct {
 	preview    []string
 	previewErr error
 	previewN   int
+	cleaned    []string
+	cleanErr   error
+	cleanN     int
 }
 
 func (f *fakeBackups) List() ([]api.BackupInfo, error) { return f.list, f.listErr }
 func (f *fakeBackups) CleanPreview(n int) ([]string, error) {
 	f.previewN = n
 	return f.preview, f.previewErr
+}
+func (f *fakeBackups) Clean(n int) ([]string, error) {
+	f.cleanN = n
+	return f.cleaned, f.cleanErr
 }
 
 func newBackupsTestServer(t *testing.T) (*Server, *fakeBackups) {
@@ -168,5 +175,53 @@ func TestBackups_WrongMethod_405(t *testing.T) {
 		if rr.Header().Get("Allow") != "GET" {
 			t.Errorf("%s %s: expected Allow:GET header", c.method, c.path)
 		}
+	}
+}
+
+func TestBackupsClean_POST_HappyPath(t *testing.T) {
+	s, fb := newBackupsTestServer(t)
+	fb.cleaned = []string{"a.bak", "b.bak"}
+	req := httptest.NewRequest("POST", "/api/backups/clean", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Cleaned int      `json:"cleaned"`
+		Errors  []string `json:"errors"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Cleaned != 2 {
+		t.Errorf("cleaned = %d, want 2", resp.Cleaned)
+	}
+}
+
+func TestBackupsClean_BadMethod(t *testing.T) {
+	s, _ := newBackupsTestServer(t)
+	req := httptest.NewRequest("GET", "/api/backups/clean", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want 405", rr.Code)
+	}
+}
+
+func TestBackupsClean_StorageError_500(t *testing.T) {
+	s, fb := newBackupsTestServer(t)
+	fb.cleanErr = errors.New("disk full")
+	req := httptest.NewRequest("POST", "/api/backups/clean", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "BACKUPS_CLEAN_FAILED") {
+		t.Errorf("body missing error code: %s", rr.Body.String())
 	}
 }
