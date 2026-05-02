@@ -41,6 +41,8 @@ export function SectionAdvanced({ snapshot: _ }: SectionAdvancedProps): preact.J
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
+    } catch (e: any) {
+      setErr(`Export failed: ${e?.message ?? String(e)}`);
     } finally {
       setBusy(false);
     }

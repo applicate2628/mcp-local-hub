@@ -15,9 +15,10 @@
 // The banner copy MUST explicitly tell the user which prior ops committed
 // and which remain dirty — that is the D4 "UI messaging contract".
 //
-// Reset reverts the three field values to baseline. The WeeklyMembershipTable
-// resets via section-level remount (parent's `key={discardKey}` pattern in
-// app.tsx); this component does NOT call into the table to clear it.
+// Reset reverts the three field values to baseline and bumps tableResetKey,
+// which remounts WeeklyMembershipTable (same `key` pattern app.tsx uses for
+// navigation discard via discardKey). Remount clears the edits map and fires
+// onDirtyChange(false), so tableDirty drops back to false.
 
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { putSetting } from "../../lib/settings-api";
@@ -80,6 +81,7 @@ export function SectionDaemons({
   const [knobValue, setKnobValue] = useState<boolean>(persistedKnob);
   const [tableDirty, setTableDirty] = useState(false);
   const [tableDeltas, setTableDeltas] = useState<MembershipDelta[]>([]);
+  const [tableResetKey, setTableResetKey] = useState(0);
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<Banner | null>(null);
   const [schedError, setSchedError] = useState<string | null>(null);
@@ -108,7 +110,10 @@ export function SectionDaemons({
     setKnobValue(persistedKnob);
     setBanner(null);
     setSchedError(null);
-    // tableDirty resets via parent's discardKey remount (app.tsx pattern).
+    // Bump key → WeeklyMembershipTable remounts → edits map clears + re-fetch
+    // fires → onDirtyChange(false) bubbles. Mirrors the discardKey pattern in
+    // app.tsx used for navigation discard.
+    setTableResetKey((k) => k + 1);
   }
 
   async function save() {
@@ -299,6 +304,7 @@ export function SectionDaemons({
       </div>
 
       <WeeklyMembershipTable
+        key={tableResetKey}
         onDirtyChange={setTableDirty}
         onDeltasChange={setTableDeltas}
       />

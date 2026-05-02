@@ -106,6 +106,46 @@ describe("SectionDaemons (editable, A4-b PR #1 / Task 11)", () => {
     await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(true));
   });
 
+  it("Reset clears membership edits and resets dirty state (P2-A)", async () => {
+    const onDirty = vi.fn();
+    // Seed one membership row so the table renders a checkbox.
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        rows: [
+          { workspace_key: "ws1", workspace_path: "/ws1", language: "python", weekly_refresh: false },
+        ],
+      })
+    );
+    render(<SectionDaemons snapshot={snap()} onDirtyChange={onDirty} />);
+    // Wait for the table to finish loading.
+    await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+    // Wait for initial dirty=false to stabilise.
+    await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(false));
+
+    // Toggle the membership checkbox → dirty=true bubbles.
+    const checkbox = (await waitFor(() =>
+      document.querySelector('[data-testid="membership-ws1-python"]')
+    )) as HTMLInputElement;
+    fireEvent.change(checkbox, { target: { checked: true } });
+    await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(true));
+
+    // Seed the re-fetch that happens after Reset remounts the table.
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        rows: [
+          { workspace_key: "ws1", workspace_path: "/ws1", language: "python", weekly_refresh: false },
+        ],
+      })
+    );
+
+    // Click Reset — bumps tableResetKey → WeeklyMembershipTable remounts → edits cleared.
+    const resetBtn = document.querySelector('[data-testid="daemons-reset"]') as HTMLButtonElement;
+    fireEvent.click(resetBtn);
+
+    // After remount and re-fetch, onDirtyChange must be called with false.
+    await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(false));
+  });
+
   it("shows 'Schedule unavailable' on snapshot error", () => {
     const errSnap: SettingsSnapshot = {
       status: "error",

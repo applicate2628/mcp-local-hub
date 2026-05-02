@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, fireEvent, waitFor } from "@testing-library/preact";
 import { SectionAdvanced } from "./SectionAdvanced";
 import * as api from "../../lib/settings-api";
@@ -13,6 +13,7 @@ const snap: SettingsSnapshot = {
 
 describe("SectionAdvanced", () => {
   beforeEach(() => vi.restoreAllMocks());
+  afterEach(() => vi.unstubAllGlobals());
 
   it("Open folder button calls postAction", async () => {
     const spy = vi.spyOn(api, "postAction").mockResolvedValue({ opened: "/x" });
@@ -48,5 +49,15 @@ describe("SectionAdvanced", () => {
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith("/api/export-config-bundle", { method: "POST" }));
     await waitFor(() => expect(createObjectURLSpy).toHaveBeenCalled());
     await waitFor(() => expect(revokeObjectURLSpy).toHaveBeenCalled());
+  });
+
+  it("shows error banner when exportBundle fetch throws (P2-B)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
+    const { container } = render(<SectionAdvanced snapshot={snap} />);
+    const btn = container.querySelector('[data-testid="export-bundle"]') as HTMLButtonElement;
+    fireEvent.click(btn);
+    await waitFor(() =>
+      expect(container.querySelector('[role="alert"]')?.textContent).toMatch(/network down/)
+    );
   });
 });
