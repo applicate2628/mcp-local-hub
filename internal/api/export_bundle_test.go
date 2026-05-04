@@ -40,7 +40,7 @@ func TestWriteConfigBundle_Composition(t *testing.T) {
 		}
 	}
 	must(filepath.Join(dataDir, "servers", "wolfram", "manifest.yaml"), "name: wolfram\nport: 9001\n")
-	must(filepath.Join(dataDir, "secrets.json"), `{"ciphertext":"AAA"}`)
+	must(filepath.Join(dataDir, "secrets.age"), `AGE-ENCRYPTED-BLOB`)
 	must(filepath.Join(dataDir, "gui-preferences.yaml"), "theme: dark\n")
 	must(filepath.Join(stateDir, "workspaces.yaml"), "version: 1\nworkspaces: []\n")
 
@@ -64,7 +64,7 @@ func TestWriteConfigBundle_Composition(t *testing.T) {
 	}
 	for _, expectedName := range []string{
 		"servers/wolfram/manifest.yaml",
-		"secrets.json",
+		"secrets.age",
 		"gui-preferences.yaml",
 		"workspaces.yaml",
 		"bundle-meta.json",
@@ -104,11 +104,11 @@ func TestWriteConfigBundle_ExcludesBackupFiles(t *testing.T) {
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	bak := filepath.Join(dataDir, "secrets.json.bak.20260101120000")
+	bak := filepath.Join(dataDir, "secrets.age.bak.20260101120000")
 	if err := os.WriteFile(bak, []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dataDir, "secrets.json"), []byte("new"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dataDir, "secrets.age"), []byte("new"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

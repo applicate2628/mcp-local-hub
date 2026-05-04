@@ -51,9 +51,13 @@ func WriteConfigBundle(w io.Writer) error {
 	if err := addDirGlob(zw, serversRoot, "servers", "manifest.yaml"); err != nil {
 		return fmt.Errorf("add servers: %w", err)
 	}
-	// Top-level data files.
+	// Top-level data files. The encrypted vault is `secrets.age` (per
+	// internal/secrets/paths.go DefaultVaultPath), NOT `secrets.json`.
+	// PR #51 originally referenced secrets.json — the file never existed,
+	// so the bundle silently shipped without secrets. Fixed via Codex
+	// bot PR #93 finding (closed in favor of this in-PR fix).
 	for _, item := range []struct{ src, name string }{
-		{filepath.Join(dataDir, "secrets.json"), "secrets.json"},
+		{filepath.Join(dataDir, "secrets.age"), "secrets.age"},
 		{filepath.Join(dataDir, "gui-preferences.yaml"), "gui-preferences.yaml"},
 	} {
 		if err := addFileIfExists(zw, item.src, item.name); err != nil {
