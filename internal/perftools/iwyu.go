@@ -3,8 +3,11 @@ package perftools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -47,6 +50,12 @@ type iwyuResult struct {
 	ExitCode  int          `json:"exit_code"`
 }
 
+const (
+	iwyuMaxStdoutBytes = 256 * 1024
+	iwyuMaxStderrBytes = 2 * 1024 * 1024
+	iwyuTimeout        = 30 * time.Second
+)
+
 // iwyuTool runs include-what-you-use against one source file. IWYU is
 // intentionally one-file-per-invocation — batching is the iwyu_tool.py
 // wrapper's job, which we don't use here because parsing its output
@@ -67,12 +76,22 @@ func (tb *PerfToolbox) iwyuTool(ctx context.Context, req *mcp.CallToolRequest) (
 	if args.File == "" {
 		return errResult("missing required parameter: file"), nil
 	}
+	if err := validateIWYUInputs(args.ProjectRoot, args.File, args.ExtraArgs); err != nil {
+		return errResult(err.Error()), nil
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, iwyuTimeout)
+	defer cancel()
 
 	cmdArgs := append([]string{}, args.ExtraArgs...)
+	cmdArgs = append(cmdArgs, "--")
 	cmdArgs = append(cmdArgs, args.File)
 
-	cap, err := runCapture(ctx, tb.tools.IWYU.Path, args.ProjectRoot, cmdArgs)
+	cap, err := runCaptureLimited(ctx, tb.tools.IWYU.Path, args.ProjectRoot, cmdArgs, iwyuMaxStdoutBytes, iwyuMaxStderrBytes)
 	if err != nil {
+		if errors.Is(err, errOutputLimitExceeded) {
+			return errResult(fmt.Sprintf("include-what-you-use output exceeded limits (stdout=%d bytes, stderr=%d bytes)", iwyuMaxStdoutBytes, iwyuMaxStderrBytes)), nil
+		}
 		return errResult(fmt.Sprintf("include-what-you-use failed: %v", err)), nil
 	}
 
@@ -96,6 +115,44 @@ func (tb *PerfToolbox) iwyuTool(ctx context.Context, req *mcp.CallToolRequest) (
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: string(body)}},
 	}, nil
+}
+
+func validateIWYUInputs(projectRoot, file string, extraArgs []string) error {
+	if strings.HasPrefix(projectRoot, "-") {
+		return fmt.Errorf("invalid project_root: must not start with '-'")
+	}
+	if filepath.IsAbs(projectRoot) && filepath.Clean(projectRoot) == "/" {
+		return fmt.Errorf("invalid project_root: '/' is not allowed")
+	}
+	if strings.HasPrefix(file, "-") {
+		return fmt.Errorf("invalid file path %q: must not start with '-'.", file)
+	}
+	for _, a := range extraArgs {
+		if isDisallowedIWYUArg(a) {
+			return fmt.Errorf("disallowed include-what-you-use argument: %s", a)
+		}
+	}
+	return nil
+}
+
+func isDisallowedIWYUArg(arg string) bool {
+	trimmed := strings.TrimSpace(arg)
+	if trimmed == "" {
+		return false
+	}
+	disallowed := []string{
+		"-E", "-M", "-MM", "-MD", "-MMD", "-fsyntax-only",
+		"-o", "--output", "-Xclang", "-load", "-plugin", "--plugin",
+	}
+	for _, flag := range disallowed {
+		if trimmed == flag || strings.HasPrefix(trimmed, flag+"=") {
+			return true
+		}
+	}
+	if strings.HasPrefix(trimmed, "@") {
+		return true
+	}
+	return false
 }
 
 // classifyIWYUStatus decides the three-way status based on the parsed

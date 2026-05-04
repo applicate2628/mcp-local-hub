@@ -227,6 +227,30 @@ func TestValidateClangTidyInputs_AllowsSafeArgs(t *testing.T) {
 	}
 }
 
+func TestValidateIWYUInputs_DisallowedExtraArgs(t *testing.T) {
+	tests := []string{
+		"-E",
+		"-MMD",
+		"-o=/tmp/out.iwyu",
+		"-Xclang",
+		"@response.rsp",
+	}
+
+	for _, arg := range tests {
+		err := validateIWYUInputs(".", "main.cpp", []string{arg})
+		if err == nil {
+			t.Fatalf("expected error for disallowed arg %q", arg)
+		}
+	}
+}
+
+func TestValidateIWYUInputs_AllowsSafeArgs(t *testing.T) {
+	err := validateIWYUInputs(".", "main.cpp", []string{"-std=c++17", "-Iinclude"})
+	if err != nil {
+		t.Fatalf("expected safe args to pass validation, got error: %v", err)
+	}
+}
+
 // contentText extracts the Text field from the first TextContent in a
 // CallToolResult. Used by every handler test in this file.
 func contentText(r *mcp.CallToolResult) string {
