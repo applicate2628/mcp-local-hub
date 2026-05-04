@@ -155,3 +155,44 @@ func TestRequireSameOrigin_AcceptsViteOriginRewrittenByConfigureHook(t *testing.
 		t.Fatalf("status = %d, want 204 (configure-hook-rewritten Origin must be accepted)", rec.Code)
 	}
 }
+
+// TestAllowedHost_BareHostAcceptedOnPort80 covers the Codex P2 fix:
+// when the GUI is bound to the default HTTP port 80, browsers omit
+// `:80` from both Host and Origin headers. allowedHost must accept the
+// bare-host form for loopback, but still reject foreign hosts and any
+// explicit non-matching port.
+func TestAllowedHost_BareHostAcceptedOnPort80(t *testing.T) {
+	s := NewServer(Config{Port: 80})
+	cases := []struct {
+		host string
+		want bool
+	}{
+		{"localhost", true},
+		{"127.0.0.1", true},
+		{"localhost:80", true},
+		{"127.0.0.1:80", true},
+		{"localhost:81", false},
+		{"evil.example", false},
+		{"evil.example:80", false},
+	}
+	for _, c := range cases {
+		if got := s.allowedHost(c.host); got != c.want {
+			t.Errorf("allowedHost(%q) = %v, want %v", c.host, got, c.want)
+		}
+	}
+}
+
+// TestAllowedHost_BareHostRejectedOnNonDefaultPort guards the inverse:
+// when bound to a non-default port, bare hosts MUST be rejected because
+// browsers will always send the explicit `:<port>` and the bare form
+// can only originate from a different scheme/origin (or an attacker
+// crafting a Host header).
+func TestAllowedHost_BareHostRejectedOnNonDefaultPort(t *testing.T) {
+	s := NewServer(Config{Port: 9125})
+	if s.allowedHost("localhost") {
+		t.Error("allowedHost(\"localhost\") = true on port 9125, want false (browsers send :9125)")
+	}
+	if s.allowedHost("127.0.0.1") {
+		t.Error("allowedHost(\"127.0.0.1\") = true on port 9125, want false")
+	}
+}

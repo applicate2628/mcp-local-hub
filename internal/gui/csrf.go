@@ -29,12 +29,19 @@ func (s *Server) requireAllowedHost(next http.Handler) http.Handler {
 }
 
 func (s *Server) allowedHost(hostport string) bool {
-	host, port, err := net.SplitHostPort(hostport)
-	if err != nil {
+	wantPort := s.effectivePort()
+	if wantPort <= 0 {
 		return false
 	}
-	wantPort := s.effectivePort()
-	if wantPort <= 0 || port != fmt.Sprintf("%d", wantPort) {
+	host, port, err := net.SplitHostPort(hostport)
+	if err != nil {
+		// No explicit port: browsers omit :80 for default HTTP port.
+		// Accept the bare-host form only when the GUI is bound to port 80.
+		if wantPort != 80 {
+			return false
+		}
+		host = hostport
+	} else if port != fmt.Sprintf("%d", wantPort) {
 		return false
 	}
 	return strings.EqualFold(host, "localhost") || host == "127.0.0.1"
