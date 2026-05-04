@@ -8,7 +8,10 @@ import * as path from "node:path";
 const LIVE_BY_CLIENT: Record<string, string> = {
   "claude-code": ".claude.json",
   "codex-cli": ".codex/config.toml",
+  "cursor": ".cursor/mcp.json",
+  "vscode": "AppData/Roaming/Code/User/mcp.json",
   "gemini-cli": ".gemini/settings.json",
+  "qwen-cli": ".qwen/settings.json",
   "antigravity": ".gemini/antigravity/mcp_config.json",
 };
 
@@ -140,10 +143,10 @@ test("Port pending-restart badge appears after Save (Codex r3 P2.1 + r4 P2.1)", 
 // this file (membership table render, toggle persistence, Select all/Clear all,
 // cron valid + invalid).
 
-test("Backups list renders 4 client groups", async ({ page, hub }) => {
+test("Backups list renders 7 client groups", async ({ page, hub }) => {
   await page.goto(hub.url + "#/settings?section=backups");
-  await expect(page.locator(".backups-client-group")).toHaveCount(4);
-  for (const c of ["claude-code", "codex-cli", "gemini-cli", "antigravity"]) {
+  await expect(page.locator(".backups-client-group")).toHaveCount(7);
+  for (const c of ["claude-code", "codex-cli", "cursor", "vscode", "gemini-cli", "qwen-cli", "antigravity"]) {
     await expect(page.locator(".backups-client-group summary", { hasText: c })).toBeVisible();
   }
 });

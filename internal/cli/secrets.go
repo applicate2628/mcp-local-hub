@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/secrets"
 
 	"github.com/spf13/cobra"
@@ -331,28 +332,13 @@ func newSecretsMigrateCmd() *cobra.Command {
 			return nil
 		},
 	}
-	c.Flags().StringVar(&fromClient, "from-client", "", "client name: claude-code | codex-cli | gemini-cli | antigravity")
+	c.Flags().StringVar(&fromClient, "from-client", "", "client name: claude-code | codex-cli | cursor | vscode | gemini-cli | qwen-cli | antigravity")
 	_ = c.MarkFlagRequired("from-client")
 	return c
 }
 
 func clientConfigPath(name string) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	switch name {
-	case "claude-code":
-		return filepath.Join(home, ".claude.json"), nil
-	case "codex-cli":
-		return filepath.Join(home, ".codex", "config.toml"), nil
-	case "gemini-cli":
-		return filepath.Join(home, ".gemini", "settings.json"), nil
-	case "antigravity":
-		return filepath.Join(home, ".gemini", "antigravity", "mcp_config.json"), nil
-	default:
-		return "", fmt.Errorf("unknown client %q (expected claude-code | codex-cli | gemini-cli | antigravity)", name)
-	}
+	return clients.ConfigPathForName(name)
 }
 
 func maskValue(v string) string {

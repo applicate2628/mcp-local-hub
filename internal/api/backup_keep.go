@@ -10,7 +10,7 @@ import "strconv"
 //
 // Why this exists: backups are appended to disk on every install and
 // every Apply-from-Servers/migrate run. Without auto-prune they grow
-// without bound — a workspace with 4 clients × dozens of migrate cycles
+// without bound — a workspace with several clients and dozens of migrate cycles
 // leaves hundreds of `.bak-mcp-local-hub-<ts>` files next to each
 // config. The user-facing setting always existed (registry §appearance
 // row `backups.keep_n`, default 5) but no caller ever consumed it on

@@ -63,8 +63,8 @@ func newRegisterHarness(t *testing.T) *registerHarness {
 	proxyReadinessFn = func(port int, timeout time.Duration) error { return nil }
 
 	fc := &fakeClientsMap{entries: map[string]map[string]string{}, exists: map[string]bool{}}
-	// Pre-populate the three HTTP clients so Exists() returns true in tests.
-	for _, n := range []string{"codex-cli", "claude-code", "gemini-cli"} {
+	// Pre-populate the default HTTP clients so Exists() returns true in tests.
+	for _, n := range []string{"claude-code", "codex-cli", "cursor"} {
 		fc.entries[n] = map[string]string{}
 		fc.exists[n] = true
 	}
@@ -115,9 +115,9 @@ func nineLanguageManifest() *config.ServerManifest {
 		PortPool:  &config.PortPool{Start: 9200, End: 9299},
 		Languages: langs,
 		ClientBindings: []config.ClientBinding{
-			{Client: "codex-cli", URLPath: "/mcp"},
 			{Client: "claude-code", URLPath: "/mcp"},
-			{Client: "gemini-cli", URLPath: "/mcp"},
+			{Client: "codex-cli", URLPath: "/mcp"},
+			{Client: "cursor", URLPath: "/mcp"},
 		},
 	}
 }

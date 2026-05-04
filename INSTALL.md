@@ -67,7 +67,7 @@ Ten servers ship with manifests: `serena`, `memory`, `sequential-thinking`, `wol
 # Preview what would happen (no side effects)
 ./mcphub.exe install --server serena --dry-run
 
-# Apply: creates 2 Task Scheduler tasks (claude + codex daemons), writes 4 client configs, starts both daemons
+# Apply: creates 2 Task Scheduler tasks (claude + codex daemons), writes default client configs, starts both daemons
 ./mcphub.exe install --server serena
 ```
 
@@ -80,10 +80,8 @@ Expected output:
 ✓ claude-code → http://localhost:9121/mcp
   backup: C:\Users\<you>\.codex\config.toml.bak-mcp-local-hub-<timestamp>
 ✓ codex-cli → http://localhost:9122/mcp
-  backup: C:\Users\<you>\.gemini\settings.json.bak-mcp-local-hub-<timestamp>
-✓ gemini-cli → http://localhost:9121/mcp
-  backup: C:\Users\<you>\.gemini\antigravity\mcp_config.json.bak-mcp-local-hub-<timestamp>
-✓ antigravity → relay (mcphub.exe relay --server serena --daemon claude)
+  backup: C:\Users\<you>\.cursor\mcp.json.bak-mcp-local-hub-<timestamp>
+✓ cursor → http://localhost:9121/mcp
 ✓ Started: mcp-local-hub-serena-claude
 ✓ Started: mcp-local-hub-serena-codex
 
@@ -99,6 +97,39 @@ Verify:
 claude mcp get serena   # Status: ✓ Connected, Type: http, URL: http://localhost:9121/mcp
 codex mcp get serena    # enabled: true, transport: streamable_http
 ```
+
+### Client selection
+
+By default, `install` writes only `claude-code`, `codex-cli`, and `cursor`.
+Heavier or more experimental clients are explicit opt-ins so a bulk install
+does not silently burn config churn across every assistant on the machine.
+
+```bash
+# Explicit subset
+./mcphub.exe install --server serena --clients claude-code,codex-cli,cursor
+./mcphub.exe install --server serena --clients qwen-cli,vscode
+
+# All manifest client bindings, including opt-in clients
+./mcphub.exe install --server serena --all-clients
+./mcphub.exe install --all --all-clients
+```
+
+Default clients:
+
+| Client id | Config path |
+|---|---|
+| `claude-code` | `~/.claude.json` |
+| `codex-cli` | `~/.codex/config.toml` |
+| `cursor` | `~/.cursor/mcp.json` |
+
+Opt-in clients:
+
+| Client id | Config path |
+|---|---|
+| `vscode` | VS Code user-profile `mcp.json` |
+| `gemini-cli` | `~/.gemini/settings.json` |
+| `qwen-cli` | `~/.qwen/settings.json` |
+| `antigravity` | `~/.gemini/antigravity/mcp_config.json` |
 
 ### Partial install (one daemon only)
 
@@ -137,7 +168,52 @@ url = 'http://localhost:9122/mcp'
 
 Same session-cache caveat as Claude: restart the Codex CLI after install for its agent to pick up the new MCP. `codex exec` always starts a fresh session, so experiments via `codex exec "use find_symbol..."` bypass the caching issue.
 
+### Cursor
+
+Writes to `~/.cursor/mcp.json`:
+
+```json
+"mcpServers": {
+  "serena": {
+    "type": "http",
+    "url": "http://localhost:9121/mcp"
+  }
+}
+```
+
+Cursor is part of the default install target set. If Cursor has never created
+`~/.cursor/` on this machine, install reports it as not installed and skips it;
+open Cursor once or create the directory, then rerun install.
+
+### VS Code
+
+VS Code is opt-in via `--clients vscode` or `--all-clients`. The installer
+writes the user-profile MCP config:
+
+| OS | Default path |
+|---|---|
+| Windows | `%APPDATA%\Code\User\mcp.json` |
+| macOS | `~/Library/Application Support/Code/User/mcp.json` |
+| Linux | `$XDG_CONFIG_HOME/Code/User/mcp.json` or `~/.config/Code/User/mcp.json` |
+
+Entry shape:
+
+```json
+"servers": {
+  "serena": {
+    "type": "http",
+    "url": "http://localhost:9121/mcp"
+  }
+}
+```
+
+VS Code also supports workspace `.vscode/mcp.json`; this preview install path
+intentionally writes the user profile. Workspace import/JSON5 compatibility is
+tracked as follow-up work.
+
 ### Gemini CLI
+
+Gemini CLI is opt-in via `--clients gemini-cli` or `--all-clients`.
 
 Writes to `~/.gemini/settings.json`:
 ```json
@@ -155,7 +231,24 @@ Namespace for Serena tools inside a Gemini prompt is `mcp_serena_*` (single unde
 gemini -p "use mcp_serena_find_symbol with name_path=main" -m gemini-2.5-flash --yolo
 ```
 
+### Qwen Code CLI
+
+Qwen Code CLI is opt-in via `--clients qwen-cli` or `--all-clients`.
+
+Writes to `~/.qwen/settings.json`:
+
+```json
+"mcpServers": {
+  "serena": {
+    "httpUrl": "http://localhost:9121/mcp",
+    "timeout": 10000
+  }
+}
+```
+
 ### Antigravity (Cascade)
+
+Antigravity is opt-in via `--clients antigravity` or `--all-clients`.
 
 Antigravity's Cascade agent silently drops any `mcp_config.json` entry pointing at a loopback HTTP URL. `mcp-local-hub` works around this by writing a **stdio relay** entry instead:
 
@@ -169,7 +262,7 @@ Antigravity's Cascade agent silently drops any `mcp_config.json` entry pointing 
 
 `<absolute-path-to>` is filled in by `mcphub install` using `os.Executable()` — whatever absolute path points at the `mcphub.exe` that ran the install. If you move the binary afterwards, re-run `mcphub install --server serena` so the entry is rewritten with the new path.
 
-Cascade spawns `mcphub.exe relay` as a normal stdio subprocess. The relay translates JSON-RPC between stdin/stdout and the shared HTTP daemon on port 9121. No extra Serena process per Antigravity session — it shares the same daemon as Claude Code and Gemini CLI.
+Cascade spawns `mcphub.exe relay` as a normal stdio subprocess. The relay translates JSON-RPC between stdin/stdout and the shared HTTP daemon on port 9121. No extra Serena process per Antigravity session — it shares the same `claude` context daemon as Claude Code, Cursor, VS Code, Gemini CLI, and Qwen CLI.
 
 **After install, restart Antigravity** for Cascade to pick up the new entry:
 ```powershell
@@ -402,7 +495,7 @@ To confirm the gate state:
 ```
 resource://tools
 → clang-tidy / llvm-objdump / include-what-you-use present; hyperfine absent  (gate closed)
-→ all four listed                                                             (gate open)
+→ all tools listed                                                            (gate open)
 ```
 
 **The complete perf loop in one chat:**
@@ -462,7 +555,8 @@ binary is on `PATH`.
 ### context7 (no daemon)
 
 Available at `https://mcp.context7.com/mcp` as a remote HTTPS endpoint.
-Codex CLI, Gemini CLI, and Antigravity typically have it pre-configured.
+Codex CLI, Gemini CLI, Antigravity, Cursor, VS Code, and Qwen may have their
+own preferred registry or built-in setup for this kind of remote entry.
 For Claude Code, add it manually:
 
 ```bash
@@ -562,7 +656,7 @@ If the error mentions a specific XML element (`(N,M):ElementName:`), it's a sche
 
 ### Serena installs but client doesn't see it
 
-- Did you restart the client session? (Claude/Codex/Gemini cache MCP list at start — see per-client notes above.)
+- Did you restart the client session? Many MCP clients cache the MCP list at startup; see per-client notes above.
 - Is port 9121 / 9122 actually listening? `powershell "Get-NetTCPConnection -LocalPort 9121"`
 - Does `<client> mcp get serena` report Connected? If yes but tools aren't used, it's a prompt-interpretation issue — try `"use mcp__serena__find_symbol with name=main"` instead of `"use serena find_symbol"`.
 
@@ -586,3 +680,13 @@ Scheduler view: `%SystemRoot%\System32\Tasks\mcp-local-hub-*` are the XML task d
 - Read [docs/phase-1-verification.md](docs/phase-1-verification.md) for the full live-test matrix and the nine post-plan fixes applied during real testing.
 - Read [docs/superpowers/specs/2026-04-16-mcp-local-hub-design.md](docs/superpowers/specs/2026-04-16-mcp-local-hub-design.md) for the architectural rationale (global vs workspace-scoped daemons, port pool allocation, transport choice, secrets handling).
 - If you want to add a new MCP server beyond Serena, copy `servers/serena/manifest.yaml` to `servers/<your-server>/manifest.yaml`, adjust fields, then `mcphub install --server <your-server>`. Port must be in 9121–9139 (global range) or 9200–9299 (workspace-scoped) and registered in `configs/ports.yaml`.
+
+## Terms and Abbreviations
+
+- `CLI`: Command-Line Interface; `mcphub.exe` and external clients such as
+  Claude Code, Codex CLI, and Qwen Code CLI.
+- `MCP`: Model Context Protocol; the protocol used by the managed clients and
+  servers.
+- `Qwen Code CLI`: Qwen command-line agent client; opt-in install target.
+- `VS Code`: Visual Studio Code; opt-in install target through the user-profile
+  `mcp.json`.

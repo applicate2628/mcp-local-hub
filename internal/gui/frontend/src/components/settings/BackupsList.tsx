@@ -8,7 +8,15 @@ export type BackupsListProps = {
   keepN: number;
 };
 
-const CLIENT_ORDER = ["claude-code", "codex-cli", "gemini-cli", "antigravity"];
+const CLIENT_ORDER = [
+  "claude-code",
+  "codex-cli",
+  "cursor",
+  "vscode",
+  "gemini-cli",
+  "qwen-cli",
+  "antigravity",
+];
 
 export function BackupsList({ keepN }: BackupsListProps): preact.JSX.Element {
   const [backups, setBackups] = useState<BackupInfo[] | null>(null);

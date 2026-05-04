@@ -110,7 +110,7 @@ mcp-local-hub dev
 
   homepage:   https://github.com/applicate2628/mcp-local-hub
   issues:     https://github.com/applicate2628/mcp-local-hub/issues
-  commercial: https://github.com/applicate2628/mcp-local-hub/blob/master/COMMERCIAL.md
+  commercial: https://github.com/applicate2628/mcp-local-hub/blob/master/README.md#license
   license:    MPL-2.0
   author:     Dmitry Denisenko (@applicate2628)
 ```

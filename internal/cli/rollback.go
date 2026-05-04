@@ -18,10 +18,9 @@ func newRollbackCmdReal() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "rollback",
 		Short: "Restore the latest mcp-local-hub backup for each client",
-		Long: `Restore client config files (claude-code / codex-cli / gemini-cli /
-antigravity) from their most recent '.bak-mcp-local-hub-<timestamp>'
-sibling. Useful for 'I just installed and it broke something, revert
-everything' workflows.
+		Long: `Restore managed client config files from their most recent
+'.bak-mcp-local-hub-<timestamp>' sibling. Useful for 'I just installed and it
+broke something, revert everything' workflows.
 
 Two modes:
   Default:    restore the LATEST timestamped backup (pre-last-install state)

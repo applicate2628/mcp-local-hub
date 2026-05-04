@@ -67,10 +67,10 @@ func TestScanClassifiesEntries(t *testing.T) {
 	}
 }
 
-// TestScanCoversAllFourClients seeds a Codex TOML, Gemini JSON, and
-// Antigravity JSON with "memory" entries of different transports and checks
+// TestScanCoversManagedClients seeds Codex TOML plus JSON configs for Gemini,
+// Antigravity, Cursor, VS Code, and Qwen with "memory" entries and checks
 // each is represented in the ClientPresence map with the correct transport tag.
-func TestScanCoversAllFourClients(t *testing.T) {
+func TestScanCoversManagedClients(t *testing.T) {
 	tmp := t.TempDir()
 
 	// Codex (TOML)
@@ -87,11 +87,23 @@ url = "http://localhost:9123/mcp"
 	agPath := filepath.Join(tmp, "mcp_config.json")
 	_ = os.WriteFile(agPath, []byte(`{"mcpServers":{"memory":{"command":"D:/dev/mcphub.exe","args":["relay","--server","memory","--daemon","default"],"disabled":false}}}`), 0600)
 
+	cursorPath := filepath.Join(tmp, "cursor-mcp.json")
+	_ = os.WriteFile(cursorPath, []byte(`{"mcpServers":{"memory":{"url":"http://localhost:9123/mcp","type":"http"}}}`), 0600)
+
+	vscodePath := filepath.Join(tmp, "vscode-mcp.json")
+	_ = os.WriteFile(vscodePath, []byte(`{"servers":{"memory":{"url":"http://localhost:9123/mcp","type":"http"}}}`), 0600)
+
+	qwenPath := filepath.Join(tmp, "qwen-settings.json")
+	_ = os.WriteFile(qwenPath, []byte(`{"mcpServers":{"memory":{"httpUrl":"http://localhost:9123/mcp","timeout":10000}}}`), 0600)
+
 	a := NewAPI()
 	result, err := a.ScanFrom(ScanOpts{
 		CodexConfigPath:       codexPath,
 		GeminiConfigPath:      geminiPath,
 		AntigravityConfigPath: agPath,
+		CursorConfigPath:      cursorPath,
+		VSCodeConfigPath:      vscodePath,
+		QwenConfigPath:        qwenPath,
 		ManifestDir:           t.TempDir(),
 	})
 	if err != nil {
@@ -114,6 +126,15 @@ url = "http://localhost:9123/mcp"
 	}
 	if got := memEntry.ClientPresence["antigravity"].Transport; got != "relay" {
 		t.Errorf("antigravity.Transport: got %q, want relay", got)
+	}
+	if got := memEntry.ClientPresence["cursor"].Transport; got != "http" {
+		t.Errorf("cursor.Transport: got %q, want http", got)
+	}
+	if got := memEntry.ClientPresence["vscode"].Transport; got != "http" {
+		t.Errorf("vscode.Transport: got %q, want http", got)
+	}
+	if got := memEntry.ClientPresence["qwen-cli"].Transport; got != "http" {
+		t.Errorf("qwen-cli.Transport: got %q, want http", got)
 	}
 }
 

@@ -7,14 +7,17 @@ test.describe("servers", () => {
     const matrix = page.locator("table.servers-matrix");
     await expect(matrix).toBeVisible();
     const headerCells = matrix.locator("thead th");
-    await expect(headerCells).toHaveCount(7);
+    await expect(headerCells).toHaveCount(10);
     await expect(headerCells.nth(0)).toHaveText("Server");
     await expect(headerCells.nth(1)).toHaveText("claude-code");
     await expect(headerCells.nth(2)).toHaveText("codex-cli");
-    await expect(headerCells.nth(3)).toHaveText("gemini-cli");
-    await expect(headerCells.nth(4)).toHaveText("antigravity");
-    await expect(headerCells.nth(5)).toHaveText("Port");
-    await expect(headerCells.nth(6)).toHaveText("State");
+    await expect(headerCells.nth(3)).toHaveText("cursor");
+    await expect(headerCells.nth(4)).toHaveText("vscode");
+    await expect(headerCells.nth(5)).toHaveText("gemini-cli");
+    await expect(headerCells.nth(6)).toHaveText("qwen-cli");
+    await expect(headerCells.nth(7)).toHaveText("antigravity");
+    await expect(headerCells.nth(8)).toHaveText("Port");
+    await expect(headerCells.nth(9)).toHaveText("State");
   });
 
   test("empty body when tmpHome has no client configs", async ({ page, hub }) => {

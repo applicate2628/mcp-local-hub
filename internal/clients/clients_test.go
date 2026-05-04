@@ -20,10 +20,10 @@ func TestBackupSentinelWrittenOnlyFirstTime(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// jsonMCPClient is the shared base adapter used by both Gemini and
-	// Antigravity; its Backup path exercises the same writeBackup helper
-	// that all four adapters now delegate to, so one adapter is enough to
-	// lock in the sentinel contract.
+	// jsonMCPClient is the shared base adapter used by several JSON clients;
+	// its Backup path exercises the same writeBackup helper that managed
+	// adapters delegate to, so one adapter is enough to lock in the sentinel
+	// contract.
 	adapter := &jsonMCPClient{path: livePath, clientName: "claude-code", urlField: "url"}
 
 	// First backup — should create the sentinel.
@@ -281,6 +281,35 @@ func TestIsHubHTTPURL(t *testing.T) {
 				t.Errorf("IsHubHTTPURL(%q) = %v, want %v", tc.url, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestDefaultInstallClientsExcludeOptInHeavyClients(t *testing.T) {
+	got := DefaultInstallClientNames()
+	want := []string{"claude-code", "codex-cli", "cursor"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("DefaultInstallClientNames() = %v, want %v", got, want)
+	}
+	excluded := map[string]bool{}
+	for _, c := range got {
+		excluded[c] = true
+	}
+	for _, optIn := range []string{"gemini-cli", "antigravity", "qwen-cli", "vscode"} {
+		if excluded[optIn] {
+			t.Fatalf("opt-in client %q must not be default", optIn)
+		}
+	}
+}
+
+func TestSupportedClientNamesIncludesNewClients(t *testing.T) {
+	got := map[string]bool{}
+	for _, c := range SupportedClientNames() {
+		got[c] = true
+	}
+	for _, want := range []string{"claude-code", "codex-cli", "gemini-cli", "antigravity", "cursor", "vscode", "qwen-cli"} {
+		if !got[want] {
+			t.Fatalf("supported client %q missing from %v", want, SupportedClientNames())
+		}
 	}
 }
 

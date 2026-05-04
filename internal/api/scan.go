@@ -21,7 +21,10 @@ import (
 type ScanOpts struct {
 	ClaudeConfigPath      string
 	CodexConfigPath       string
+	CursorConfigPath      string
+	VSCodeConfigPath      string
 	GeminiConfigPath      string
+	QwenConfigPath        string
 	AntigravityConfigPath string
 	ManifestDir           string
 	WithProcessCount      bool // populate ScanEntry.ProcessCount via wmic
@@ -58,9 +61,24 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 			return nil, fmt.Errorf("codex: %w", err)
 		}
 	}
+	if opts.CursorConfigPath != "" {
+		if err := scanCursor(entries, opts.CursorConfigPath); err != nil {
+			return nil, fmt.Errorf("cursor: %w", err)
+		}
+	}
+	if opts.VSCodeConfigPath != "" {
+		if err := scanVSCode(entries, opts.VSCodeConfigPath); err != nil {
+			return nil, fmt.Errorf("vscode: %w", err)
+		}
+	}
 	if opts.GeminiConfigPath != "" {
 		if err := scanGemini(entries, opts.GeminiConfigPath); err != nil {
 			return nil, fmt.Errorf("gemini: %w", err)
+		}
+	}
+	if opts.QwenConfigPath != "" {
+		if err := scanQwen(entries, opts.QwenConfigPath); err != nil {
+			return nil, fmt.Errorf("qwen: %w", err)
 		}
 	}
 	if opts.AntigravityConfigPath != "" {
@@ -104,7 +122,7 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 // isOurRelayBinary returns true when the given path points at our CLI
 // binary — either the current name (mcphub.exe) or the legacy name
 // (mcp.exe) that early installations may still have in client configs.
-// Delegates to clients.IsMcphubBinary so the 4-name allowlist lives in
+// Delegates to clients.IsMcphubBinary so the binary-name allowlist lives in
 // exactly one place; this wrapper is kept only because the classifier
 // below reads better when paired with a local name. If a future client
 // ever persists a different binary name, update only IsMcphubBinary.
@@ -245,6 +263,72 @@ func shapeCodexEntry(raw map[string]any) ClientEntry {
 	return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: raw}
 }
 
+func scanCursor(entries map[string]*ScanEntry, path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var cfg struct {
+		MCPServers map[string]map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return err
+	}
+	for name, raw := range cfg.MCPServers {
+		e := entries[name]
+		if e == nil {
+			e = &ScanEntry{ClientPresence: map[string]ClientEntry{}}
+			entries[name] = e
+		}
+		e.ClientPresence["cursor"] = shapeCursorEntry(raw)
+	}
+	return nil
+}
+
+func shapeCursorEntry(raw map[string]any) ClientEntry {
+	if url, ok := raw["url"].(string); ok {
+		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
+	}
+	cmd, _ := raw["command"].(string)
+	return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: raw}
+}
+
+func scanVSCode(entries map[string]*ScanEntry, path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var cfg struct {
+		Servers map[string]map[string]any `json:"servers"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return err
+	}
+	for name, raw := range cfg.Servers {
+		e := entries[name]
+		if e == nil {
+			e = &ScanEntry{ClientPresence: map[string]ClientEntry{}}
+			entries[name] = e
+		}
+		e.ClientPresence["vscode"] = shapeVSCodeEntry(raw)
+	}
+	return nil
+}
+
+func shapeVSCodeEntry(raw map[string]any) ClientEntry {
+	if url, ok := raw["url"].(string); ok {
+		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
+	}
+	cmd, _ := raw["command"].(string)
+	return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: raw}
+}
+
 func scanGemini(entries map[string]*ScanEntry, path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -275,6 +359,42 @@ func shapeGeminiEntry(raw map[string]any) ClientEntry {
 		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
 	}
 	if url, ok := raw["httpUrl"].(string); ok {
+		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
+	}
+	cmd, _ := raw["command"].(string)
+	return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: raw}
+}
+
+func scanQwen(entries map[string]*ScanEntry, path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var cfg struct {
+		MCPServers map[string]map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return err
+	}
+	for name, raw := range cfg.MCPServers {
+		e := entries[name]
+		if e == nil {
+			e = &ScanEntry{ClientPresence: map[string]ClientEntry{}}
+			entries[name] = e
+		}
+		e.ClientPresence["qwen-cli"] = shapeQwenEntry(raw)
+	}
+	return nil
+}
+
+func shapeQwenEntry(raw map[string]any) ClientEntry {
+	if url, ok := raw["httpUrl"].(string); ok {
+		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
+	}
+	if url, ok := raw["url"].(string); ok {
 		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
 	}
 	cmd, _ := raw["command"].(string)
@@ -403,7 +523,10 @@ func (a *API) Scan() (*ScanResult, error) {
 	return a.ScanFrom(ScanOpts{
 		ClaudeConfigPath:      filepath.Join(home, ".claude.json"),
 		CodexConfigPath:       filepath.Join(home, ".codex", "config.toml"),
+		CursorConfigPath:      filepath.Join(home, ".cursor", "mcp.json"),
+		VSCodeConfigPath:      mustClientConfigPath("vscode"),
 		GeminiConfigPath:      filepath.Join(home, ".gemini", "settings.json"),
+		QwenConfigPath:        filepath.Join(home, ".qwen", "settings.json"),
 		AntigravityConfigPath: filepath.Join(home, ".gemini", "antigravity", "mcp_config.json"),
 		// Empty ManifestDir → ScanFrom uses the embed-first resolution
 		// path. The on-disk defaultManifestDir stays available as a
@@ -411,6 +534,14 @@ func (a *API) Scan() (*ScanResult, error) {
 		// added manifest hasn't been compiled into the binary yet.
 		ManifestDir: "",
 	})
+}
+
+func mustClientConfigPath(name string) string {
+	path, err := clients.ConfigPathForName(name)
+	if err != nil {
+		return ""
+	}
+	return path
 }
 
 // defaultManifestDir returns the path to `servers/` resolved against the
@@ -445,8 +576,8 @@ func defaultManifestDir() string {
 
 // ExtractManifestFromClient reads a stdio entry from the specified client
 // config and renders a draft manifest.yaml suitable for the GUI "Create
-// manifest" flow. The draft always includes bindings for all four clients;
-// users edit as desired before saving.
+// manifest" flow. The draft includes bindings for every supported managed
+// client; users edit as desired before saving.
 func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts) (string, error) {
 	var raw map[string]any
 
@@ -484,11 +615,59 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 			raw, _ = servers[serverName].(map[string]any)
 		}
 
+	case "cursor":
+		if opts.CursorConfigPath == "" {
+			return "", fmt.Errorf("CursorConfigPath empty")
+		}
+		data, err := os.ReadFile(opts.CursorConfigPath)
+		if err != nil {
+			return "", err
+		}
+		var cfg struct {
+			MCPServers map[string]map[string]any `json:"mcpServers"`
+		}
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return "", err
+		}
+		raw = cfg.MCPServers[serverName]
+
+	case "vscode":
+		if opts.VSCodeConfigPath == "" {
+			return "", fmt.Errorf("VSCodeConfigPath empty")
+		}
+		data, err := os.ReadFile(opts.VSCodeConfigPath)
+		if err != nil {
+			return "", err
+		}
+		var cfg struct {
+			Servers map[string]map[string]any `json:"servers"`
+		}
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return "", err
+		}
+		raw = cfg.Servers[serverName]
+
 	case "gemini-cli":
 		if opts.GeminiConfigPath == "" {
 			return "", fmt.Errorf("GeminiConfigPath empty")
 		}
 		data, err := os.ReadFile(opts.GeminiConfigPath)
+		if err != nil {
+			return "", err
+		}
+		var cfg struct {
+			MCPServers map[string]map[string]any `json:"mcpServers"`
+		}
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return "", err
+		}
+		raw = cfg.MCPServers[serverName]
+
+	case "qwen-cli":
+		if opts.QwenConfigPath == "" {
+			return "", fmt.Errorf("QwenConfigPath empty")
+		}
+		data, err := os.ReadFile(opts.QwenConfigPath)
 		if err != nil {
 			return "", err
 		}
@@ -548,7 +727,7 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 	// line and ServerManifest.Validate would then fail with a less
 	// actionable error). The most common case is a user trying to
 	// extract from a server they already migrated — the entry is now
-	// hub-HTTP (Claude/Codex/Gemini) or hub-relay with empty-command
+	// hub-HTTP (HTTP-native clients) or hub-relay with empty-command
 	// downgrades — so we guide them toward demigrate instead.
 	if cmd == "" {
 		return "", fmt.Errorf("server %q in client %q has no `command` field — it is an HTTP-only or hub-managed entry, not user-configured stdio (run `mcphub demigrate %s` to restore the pre-migrate shape first if this server was migrated)", serverName, client, serverName)
@@ -632,7 +811,10 @@ func renderDraftManifestYAML(name, cmd string, args []string, env map[string]str
 		ClientBindings: []map[string]any{
 			{"client": "claude-code", "daemon": "default", "url_path": "/mcp"},
 			{"client": "codex-cli", "daemon": "default", "url_path": "/mcp"},
+			{"client": "cursor", "daemon": "default", "url_path": "/mcp"},
+			{"client": "vscode", "daemon": "default", "url_path": "/mcp"},
 			{"client": "gemini-cli", "daemon": "default", "url_path": "/mcp"},
+			{"client": "qwen-cli", "daemon": "default", "url_path": "/mcp"},
 			{"client": "antigravity", "daemon": "default", "url_path": "/mcp"},
 		},
 		WeeklyRefresh: false,

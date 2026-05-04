@@ -5,7 +5,15 @@ import { collectServers } from "../lib/routing";
 import { aggregateStatus, stateShape } from "../lib/status";
 import type { DaemonStatus, ScanResult, ServerRow, Routing } from "../types";
 
-const CLIENTS = ["claude-code", "codex-cli", "gemini-cli", "antigravity"] as const;
+const CLIENTS = [
+  "claude-code",
+  "codex-cli",
+  "cursor",
+  "vscode",
+  "gemini-cli",
+  "qwen-cli",
+  "antigravity",
+] as const;
 
 // Per-cell dirty tracking with direction preserved. Outer key: server name.
 // Inner map: client → Direction.

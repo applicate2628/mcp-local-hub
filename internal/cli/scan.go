@@ -3,10 +3,9 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/clients"
 
 	"github.com/spf13/cobra"
 )
@@ -16,8 +15,9 @@ func newScanCmdReal() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "scan",
 		Short: "Scan client configs: which MCP servers are hub-routed, can-migrate, unknown, or per-session",
-		Long: `Walk every managed client config (claude-code, codex-cli, gemini-cli,
-antigravity) and classify each MCP server entry into one of five buckets:
+		Long: `Walk every managed client config (claude-code, codex-cli, cursor,
+vscode, gemini-cli, qwen-cli, antigravity) and classify each MCP server entry
+into one of five buckets:
 
   via-hub        — already routed through mcp-local-hub (HTTP or relay)
   can-migrate    — has a manifest but still stdio in this client;
@@ -29,7 +29,10 @@ antigravity) and classify each MCP server entry into one of five buckets:
 Per-entry column encodes which clients reference the server:
   cc=<transport>  Claude Code
   cx=<transport>  Codex CLI
+  cu=<transport>  Cursor
+  vs=<transport>  VS Code
   gm=<transport>  Gemini CLI
+  qw=<transport>  Qwen CLI
   ag=<transport>  Antigravity (relay = hub-managed stdio relay)
 
 Examples:
@@ -40,15 +43,14 @@ Examples:
 See also: migrate, manifest list, install.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a := api.NewAPI()
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return err
-			}
 			result, err := a.ScanFrom(api.ScanOpts{
-				ClaudeConfigPath:      filepath.Join(home, ".claude.json"),
-				CodexConfigPath:       filepath.Join(home, ".codex", "config.toml"),
-				GeminiConfigPath:      filepath.Join(home, ".gemini", "settings.json"),
-				AntigravityConfigPath: filepath.Join(home, ".gemini", "antigravity", "mcp_config.json"),
+				ClaudeConfigPath:      clientConfigPathOrEmpty("claude-code"),
+				CodexConfigPath:       clientConfigPathOrEmpty("codex-cli"),
+				CursorConfigPath:      clientConfigPathOrEmpty("cursor"),
+				VSCodeConfigPath:      clientConfigPathOrEmpty("vscode"),
+				GeminiConfigPath:      clientConfigPathOrEmpty("gemini-cli"),
+				QwenConfigPath:        clientConfigPathOrEmpty("qwen-cli"),
+				AntigravityConfigPath: clientConfigPathOrEmpty("antigravity"),
 				ManifestDir:           scanManifestDir(),
 				WithProcessCount:      withProcs,
 			})
@@ -88,7 +90,7 @@ See also: migrate, manifest list, install.`,
 
 func presenceSummary(e api.ScanEntry) string {
 	var parts []string
-	for _, c := range []string{"claude-code", "codex-cli", "gemini-cli", "antigravity"} {
+	for _, c := range clients.SupportedClientNames() {
 		if p, ok := e.ClientPresence[c]; ok {
 			parts = append(parts, fmt.Sprintf("%s=%s", shortClient(c), p.Transport))
 		}
@@ -112,12 +114,26 @@ func shortClient(c string) string {
 		return "cc"
 	case "codex-cli":
 		return "cx"
+	case "cursor":
+		return "cu"
+	case "vscode":
+		return "vs"
 	case "gemini-cli":
 		return "gm"
+	case "qwen-cli":
+		return "qw"
 	case "antigravity":
 		return "ag"
 	}
 	return c
+}
+
+func clientConfigPathOrEmpty(name string) string {
+	path, err := clients.ConfigPathForName(name)
+	if err != nil {
+		return ""
+	}
+	return path
 }
 
 // scanManifestDir returns "" to tell the api layer to use the

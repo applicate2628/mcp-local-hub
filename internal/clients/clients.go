@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -36,7 +37,7 @@ type MCPEntry struct {
 // Client is the OS-/format-abstracted interface for a single MCP client config file.
 // Implementations live in one file per client.
 type Client interface {
-	// Name returns a stable identifier ("claude-code", "codex-cli", "gemini-cli", "antigravity")
+	// Name returns a stable identifier such as "claude-code" or "codex-cli"
 	// used in manifest client_bindings.
 	Name() string
 
@@ -177,6 +178,71 @@ func IsMcphubBinary(cmd string) bool {
 		base == "mcp" || base == "mcp.exe"
 }
 
+// SupportedClientNames returns every client id understood by this build.
+// The order is stable for CLI help, docs, and tests.
+func SupportedClientNames() []string {
+	return []string{
+		"claude-code",
+		"codex-cli",
+		"cursor",
+		"vscode",
+		"gemini-cli",
+		"qwen-cli",
+		"antigravity",
+	}
+}
+
+// DefaultInstallClientNames returns the clients touched by install when the
+// user does not request a narrower or wider target set. Heavy/experimental
+// clients remain opt-in so a fresh install does not silently mutate every
+// assistant on the workstation.
+func DefaultInstallClientNames() []string {
+	return []string{"claude-code", "codex-cli", "cursor"}
+}
+
+// ConfigPathForName returns the default config path for a supported client.
+func ConfigPathForName(name string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	switch name {
+	case "claude-code":
+		return filepath.Join(home, ".claude.json"), nil
+	case "codex-cli":
+		return filepath.Join(home, ".codex", "config.toml"), nil
+	case "cursor":
+		return filepath.Join(home, ".cursor", "mcp.json"), nil
+	case "vscode":
+		return defaultVSCodeConfigPath(home), nil
+	case "gemini-cli":
+		return filepath.Join(home, ".gemini", "settings.json"), nil
+	case "qwen-cli":
+		return filepath.Join(home, ".qwen", "settings.json"), nil
+	case "antigravity":
+		return filepath.Join(home, ".gemini", "antigravity", "mcp_config.json"), nil
+	default:
+		return "", fmt.Errorf("unknown client %q (expected %s)", name, strings.Join(SupportedClientNames(), " | "))
+	}
+}
+
+func defaultVSCodeConfigPath(home string) string {
+	switch runtime.GOOS {
+	case "windows":
+		if appData := os.Getenv("APPDATA"); appData != "" {
+			return filepath.Join(appData, "Code", "User", "mcp.json")
+		}
+		return filepath.Join(home, "AppData", "Roaming", "Code", "User", "mcp.json")
+	case "darwin":
+		return filepath.Join(home, "Library", "Application Support", "Code", "User", "mcp.json")
+	default:
+		if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+			return filepath.Join(xdg, "Code", "User", "mcp.json")
+		}
+		return filepath.Join(home, ".config", "Code", "User", "mcp.json")
+	}
+}
+
 // AllClients returns the map of {client-name -> Client} for every supported
 // adapter. Factories that return an error (e.g. UserHomeDir failure) are
 // silently skipped, so callers that iterate the map see only adapters that
@@ -185,7 +251,7 @@ func IsMcphubBinary(cmd string) bool {
 func AllClients() map[string]Client {
 	result := map[string]Client{}
 	for _, factory := range []func() (Client, error){
-		NewClaudeCode, NewCodexCLI, NewGeminiCLI, NewAntigravity,
+		NewClaudeCode, NewCodexCLI, NewCursor, NewVSCode, NewGeminiCLI, NewQwenCLI, NewAntigravity,
 	} {
 		c, err := factory()
 		if err != nil {

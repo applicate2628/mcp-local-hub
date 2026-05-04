@@ -22,13 +22,13 @@ describe("BackupsList", () => {
   });
   afterEach(() => cleanup());
 
-  it("renders 4 client groups", async () => {
+  it("renders 7 client groups", async () => {
     const { findAllByText } = render(<BackupsList keepN={5} />);
     // Wait for load.
     await findAllByText(/claude-code/);
     // Each client has its own <details><summary>.
     const summaries = document.querySelectorAll(".backups-client-group summary");
-    expect(summaries.length).toBe(4);
+    expect(summaries.length).toBe(7);
   });
 
   it("renders the locked group note (Codex copy §9.4)", async () => {

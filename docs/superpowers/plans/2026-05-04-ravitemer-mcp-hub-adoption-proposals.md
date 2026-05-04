@@ -32,10 +32,19 @@ compatibility surfaces as optional Phase 3C+ work.
 | P2 | Remote MCP manifests | Extend manifest handling for remote `url + headers + secrets` entries so direct HTTPS servers like `context7` are first-class instead of special-case wiring. |
 | P2 | Capability browser | In GUI, show probed tools/resources/prompts per server with timestamps and probe errors. Tool execution should stay disabled or explicitly gated because some tools execute local commands. |
 | P2 | Marketplace/import flow | Add browse/import from an MCP registry as a draft-manifest flow: inspect metadata and README, generate YAML, validate, dry-run, then install. Avoid automatic install side effects. |
-| P2 | VS Code/JSON5 import compatibility | Import `.vscode/mcp.json`, accept both `servers` and `mcpServers`, and support common placeholders such as `${env:VAR}`, `${workspaceFolder}`, `${userHome}`, and `${pathSeparator}`. |
+| P2 | VS Code workspace/JSON5 import compatibility | VS Code user-profile install support is now in tree. Still add import for workspace `.vscode/mcp.json`, accept both `servers` and `mcpServers`, and support common placeholders such as `${env:VAR}`, `${workspaceFolder}`, `${userHome}`, and `${pathSeparator}`. |
 | P2 | Config watch/dev reload | For development manifests, watch selected files and restart only affected daemons while publishing SSE lifecycle events. |
 | P2 | Structured logs/events | Add consistent JSON event envelopes for GUI/API lifecycle events and daemon failures while preserving the existing human-readable logs. |
 | P2 | Public contribution/security docs | Add `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, and `CHANGELOG.md` before broader publication or commercial outreach. |
+
+## Client Expansion Note (2026-05-04)
+
+The install/read surfaces now distinguish default and opt-in clients:
+
+| Group | Client ids | Planning note |
+|---|---|---|
+| Default | `claude-code`, `codex-cli`, `cursor` | Safe first-run write set for `install` and workspace `register`. |
+| Opt-in | `vscode`, `gemini-cli`, `qwen-cli`, `antigravity` | User must pass `--clients ...` or `--all-clients`; keep live smoke and import compatibility in the release-hardening backlog. |
 
 ## Do Not Copy Directly
 
@@ -73,11 +82,14 @@ compatibility surfaces as optional Phase 3C+ work.
 ## Terms and Abbreviations
 
 - `API`: Application Programming Interface; here, local HTTP routes used by the GUI and CLI wrappers.
+- `CLI`: Command-Line Interface; shell commands such as `mcphub install`.
+- `Cursor`: Cursor editor/agent client; now part of the default install target set.
 - `GUI`: Graphical User Interface; the embedded local web interface and tray surface.
 - `JSON5`: JSON-compatible config format that supports comments and trailing commas.
 - `MCP`: Model Context Protocol; the protocol used by managed clients and servers.
 - `OAuth`: authorization flow commonly used by remote services.
 - `P1` / `P2`: rough priority labels; `P1` is higher priority than `P2`.
+- `Qwen CLI`: Qwen Code command-line client; opt-in install target.
 - `RCE`: Remote Code Execution; a security risk where a caller can cause command execution.
 - `SSE`: Server-Sent Events; HTTP event streams used for live updates.
 - `VS Code`: Visual Studio Code; editor whose `.vscode/mcp.json` format is useful as an import target.

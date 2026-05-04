@@ -47,7 +47,7 @@ Example:
 			cmd.Println()
 			cmd.Println("  homepage:   https://github.com/applicate2628/mcp-local-hub")
 			cmd.Println("  issues:     https://github.com/applicate2628/mcp-local-hub/issues")
-			cmd.Println("  commercial: https://github.com/applicate2628/mcp-local-hub/blob/master/COMMERCIAL.md")
+			cmd.Println("  commercial: https://github.com/applicate2628/mcp-local-hub/blob/master/README.md#license")
 			cmd.Println("  license:    MPL-2.0")
 			cmd.Println("  author:     Dmitry Denisenko (@applicate2628)")
 		},

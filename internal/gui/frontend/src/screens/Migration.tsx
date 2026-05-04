@@ -13,7 +13,7 @@ interface DismissedResponse {
 }
 
 // MigrationScreen is the §5.2 Migration view: scan-driven grouping of
-// MCP server entries across all four supported clients, with per-group
+// MCP server entries across all managed clients, with per-group
 // actions (Demigrate in Task 6; Migrate selected + Dismiss + gated
 // Create-manifest in Task 7; Per-session readonly in Task 8). This
 // scaffolding ships h1, parallel /api/scan + /api/dismissed fetches,

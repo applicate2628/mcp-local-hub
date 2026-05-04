@@ -19,9 +19,10 @@ env:
   PYTHONUNBUFFERED: "1"
 
 # Two daemons, two Serena contexts:
-#   - claude (9121, context=claude-code) is shared by Claude Code and Gemini CLI.
-#     Both accept the claude-code context's tool preset. Sharing reduces Serena
-#     instance count and lets the gopls LSP cache serve both client sessions.
+#   - claude (9121, context=claude-code) is shared by Claude Code, Cursor,
+#     VS Code, Gemini CLI, Qwen CLI, and Antigravity relay. They accept the
+#     claude-code context's tool preset. Sharing reduces Serena instance count
+#     and lets the gopls LSP cache serve multiple client sessions.
 #   - codex (9122, context=codex) is separate because Codex CLI requires its
 #     own Serena context's tool preset.
 daemons:
@@ -51,10 +52,19 @@ client_bindings:
   - client: codex-cli
     daemon: codex
     url_path: /mcp
-  - client: antigravity
+  - client: cursor
+    daemon: claude
+    url_path: /mcp
+  - client: vscode
     daemon: claude
     url_path: /mcp
   - client: gemini-cli
+    daemon: claude
+    url_path: /mcp
+  - client: qwen-cli
+    daemon: claude
+    url_path: /mcp
+  - client: antigravity
     daemon: claude
     url_path: /mcp
 

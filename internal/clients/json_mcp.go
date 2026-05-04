@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 )
 
 // jsonMCPClient is a reusable struct that handles JSON-format MCP configs
@@ -74,6 +75,9 @@ func (j *jsonMCPClient) writeJSON(m map[string]any) error {
 	if err != nil {
 		return err
 	}
+	if err := os.MkdirAll(filepath.Dir(j.path), 0755); err != nil {
+		return err
+	}
 	return os.WriteFile(j.path, append(out, '\n'), 0600)
 }
 
@@ -141,7 +145,8 @@ func (j *jsonMCPClient) LatestBackupPath() (string, bool, error) {
 //
 // Defensively refuses if the backup's copy of the named entry is
 // already in hub-managed shape. Shape detection is adapter-specific:
-//   - For Gemini CLI (urlField = "url"): entry has `url` and no `command`.
+//   - For URL-native JSON clients (urlField = "url" or "httpUrl"): entry
+//     has a hub loopback URL and no `command`.
 //   - For Antigravity (urlField = "command"): entry's `command` is the
 //     mcphub binary AND args[0] == "relay".
 //
@@ -170,12 +175,11 @@ func (j *jsonMCPClient) RestoreEntryFromBackup(backupPath, name string) error {
 	if backupServers != nil {
 		if backupEntry, present := backupServers[name]; present {
 			if rawMap, ok := backupEntry.(map[string]any); ok {
-				if j.urlField == "url" {
-					// Gemini CLI hub-HTTP shape: loopback `url`
-					// (http://localhost:<port>/) present, `command`
-					// absent. User-configured remote HTTP entries
-					// pass through.
-					if urlStr, _ := rawMap["url"].(string); IsHubHTTPURL(urlStr) {
+				if j.urlField == "url" || j.urlField == "httpUrl" {
+					// Hub-HTTP shape: loopback URL present,
+					// `command` absent. User-configured remote HTTP
+					// entries pass through.
+					if urlStr, _ := rawMap[j.urlField].(string); IsHubHTTPURL(urlStr) {
 						if _, hasCmd := rawMap["command"]; !hasCmd {
 							return ErrBackupEntryAlreadyMigrated
 						}

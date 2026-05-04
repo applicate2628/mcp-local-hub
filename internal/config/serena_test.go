@@ -18,19 +18,27 @@ func TestSerenaManifestParses(t *testing.T) {
 	if m.Name != "serena" {
 		t.Errorf("Name = %q", m.Name)
 	}
-	// Shared-daemon layout: claude (claude-code context, shared by Claude
-	// Code, Gemini CLI, and Antigravity) + codex (separate, Codex-specific).
-	// Antigravity connects via `mcp relay` subprocess (stdio→HTTP bridge)
-	// because its Cascade agent rejects direct loopback-HTTP entries.
+	// Shared-daemon layout: claude context for Claude-family clients and
+	// opt-in clients that can use that tool preset + codex (separate,
+	// Codex-specific). Antigravity connects via `mcp relay` subprocess
+	// (stdio->HTTP bridge) because its Cascade agent rejects direct
+	// loopback-HTTP entries.
 	if len(m.Daemons) != 2 {
 		t.Errorf("len(Daemons) = %d, want 2 (claude + codex)", len(m.Daemons))
 	}
-	if len(m.ClientBindings) != 4 {
-		t.Errorf("len(ClientBindings) = %d, want 4 (claude-code, codex-cli, antigravity, gemini-cli)", len(m.ClientBindings))
+	if len(m.ClientBindings) != 7 {
+		t.Errorf("len(ClientBindings) = %d, want 7 managed clients", len(m.ClientBindings))
 	}
-	// Claude Code, Gemini CLI, and Antigravity all route to the "claude" daemon.
-	// Antigravity gets there via a stdio-relay spawn; the other two via HTTP.
-	sharedClaude := map[string]bool{"claude-code": false, "gemini-cli": false, "antigravity": false}
+	// Non-Codex clients route to the "claude" daemon. Antigravity gets there
+	// via a stdio-relay spawn; the others use HTTP client entries.
+	sharedClaude := map[string]bool{
+		"claude-code": false,
+		"cursor":      false,
+		"vscode":      false,
+		"gemini-cli":  false,
+		"qwen-cli":    false,
+		"antigravity": false,
+	}
 	for _, b := range m.ClientBindings {
 		if _, ok := sharedClaude[b.Client]; ok {
 			if b.Daemon != "claude" {

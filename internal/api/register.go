@@ -35,14 +35,13 @@ import (
 
 // defaultClientBindings is the implicit client binding set used when a
 // workspace-scoped manifest does not declare client_bindings. Matches the
-// three HTTP-native clients that support per-entry URLs. Antigravity (a
-// stdio-relay client) is intentionally excluded; its relay model presumes
-// a single (server, daemon) tuple which workspace-scoped entries do not
-// have (decision recorded in the plan's Self-Review §7).
+// default install clients that support per-entry URLs. Opt-in clients and
+// Antigravity's stdio-relay model are intentionally excluded from the implicit
+// workspace-scoped write set.
 var defaultClientBindings = []config.ClientBinding{
-	{Client: "codex-cli", URLPath: "/mcp"},
 	{Client: "claude-code", URLPath: "/mcp"},
-	{Client: "gemini-cli", URLPath: "/mcp"},
+	{Client: "codex-cli", URLPath: "/mcp"},
+	{Client: "cursor", URLPath: "/mcp"},
 }
 
 // RegisterOpts controls a Register invocation.

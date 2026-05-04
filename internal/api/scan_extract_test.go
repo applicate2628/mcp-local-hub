@@ -12,7 +12,7 @@ import (
 
 // TestExtractManifestFromClientPreservesCommandAndEnv asserts that the
 // extracted manifest has command/base_args/env matching the original stdio
-// entry, plus a port auto-picked and all-four client bindings as defaults.
+// entry, plus a port auto-picked and all supported client bindings as defaults.
 func TestExtractManifestFromClientPreservesCommandAndEnv(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := map[string]any{
@@ -142,6 +142,66 @@ func TestExtractManifestFromClient_GeminiCLI(t *testing.T) {
 	}
 	if m.Command != "npx" {
 		t.Errorf("Command = %q, want npx", m.Command)
+	}
+}
+
+func TestExtractManifestFromClient_NewJSONClients(t *testing.T) {
+	tmp := t.TempDir()
+	cases := []struct {
+		name   string
+		client string
+		path   string
+		opts   func(string) ScanOpts
+		body   string
+	}{
+		{
+			name:   "cursor",
+			client: "cursor",
+			path:   filepath.Join(tmp, ".cursor", "mcp.json"),
+			opts:   func(p string) ScanOpts { return ScanOpts{CursorConfigPath: p, ManifestDir: t.TempDir()} },
+			body:   `{"mcpServers":{"memory":{"command":"npx","args":["-y","mem"]}}}`,
+		},
+		{
+			name:   "vscode",
+			client: "vscode",
+			path:   filepath.Join(tmp, "Code", "User", "mcp.json"),
+			opts:   func(p string) ScanOpts { return ScanOpts{VSCodeConfigPath: p, ManifestDir: t.TempDir()} },
+			body:   `{"servers":{"memory":{"command":"npx","args":["-y","mem"]}}}`,
+		},
+		{
+			name:   "qwen",
+			client: "qwen-cli",
+			path:   filepath.Join(tmp, ".qwen", "settings.json"),
+			opts:   func(p string) ScanOpts { return ScanOpts{QwenConfigPath: p, ManifestDir: t.TempDir()} },
+			body:   `{"mcpServers":{"memory":{"command":"npx","args":["-y","mem"]}}}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := os.MkdirAll(filepath.Dir(tc.path), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(tc.path, []byte(tc.body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			yaml, err := NewAPI().ExtractManifestFromClient(tc.client, "memory", tc.opts(tc.path))
+			if err != nil {
+				t.Fatalf("ExtractManifestFromClient: %v", err)
+			}
+			m, err := config.ParseManifest(strings.NewReader(yaml))
+			if err != nil {
+				t.Fatalf("ParseManifest: %v\n%s", err, yaml)
+			}
+			if err := m.Validate(); err != nil {
+				t.Fatalf("Validate: %v", err)
+			}
+			if m.Command != "npx" {
+				t.Errorf("Command = %q, want npx", m.Command)
+			}
+			if len(m.ClientBindings) != 7 {
+				t.Errorf("len(ClientBindings) = %d, want 7", len(m.ClientBindings))
+			}
+		})
 	}
 }
 

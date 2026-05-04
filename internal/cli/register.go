@@ -29,8 +29,8 @@ func newRegisterCmdReal() *cobra.Command {
 		Use:   "register <workspace> [language...]",
 		Short: "Register workspace-scoped mcp-language-server daemons (lazy-mode)",
 		Long: `Allocate one lazy proxy per (workspace, language), create the scheduler
-task that launches it, and write managed entries into every installed MCP
-client config (codex-cli, claude-code, gemini-cli).
+task that launches it, and write managed entries into every default MCP client
+config (claude-code, codex-cli, cursor).
 
 Lazy mode:
   - No LSP binary preflight at register time. A missing binary surfaces

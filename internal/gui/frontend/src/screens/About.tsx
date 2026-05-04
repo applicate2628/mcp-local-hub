@@ -104,7 +104,7 @@ export function AboutScreen() {
             rel="noopener noreferrer"
             data-testid="about-commercial-link"
           >
-            Commercial licensing
+            License and commercial options
           </a>
         </li>
       </ul>

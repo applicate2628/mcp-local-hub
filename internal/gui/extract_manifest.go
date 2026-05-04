@@ -4,10 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/clients"
 )
 
 // extractor is the narrow interface the /api/extract-manifest handler needs.
@@ -16,8 +15,8 @@ import (
 // The client+server pair is what A1's Create-manifest button sends as query
 // parameters. The opts argument is ignored by realExtractor (it builds its
 // own ScanOpts from the user's home dir, mirroring internal/cli/manifest.go's
-// `manifest extract` command) — it exists so tests can redirect the four
-// client config paths without faking HOME.
+// `manifest extract` command) — it exists so tests can redirect client config
+// paths without faking HOME.
 type extractor interface {
 	ExtractManifestFromClient(client, server string, opts api.ScanOpts) (string, error)
 }
@@ -25,25 +24,32 @@ type extractor interface {
 type realExtractor struct{}
 
 // ExtractManifestFromClient delegates to api.ExtractManifestFromClient with
-// ScanOpts fully populated from the user's home dir — the four client config
-// paths and an empty ManifestDir (embed-first resolution). This mirrors
+// ScanOpts fully populated from the user's home dir — all managed client
+// config paths and an empty ManifestDir (embed-first resolution). This mirrors
 // internal/cli/manifest.go:newManifestExtractCmd so behavior is identical
 // between the CLI and the GUI wrapper.
 //
 // The opts argument is intentionally ignored by the production path; tests
 // inject their own extractor stub to redirect paths under a temp home.
 func (realExtractor) ExtractManifestFromClient(client, server string, _ api.ScanOpts) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
 	return api.NewAPI().ExtractManifestFromClient(client, server, api.ScanOpts{
-		ClaudeConfigPath:      filepath.Join(home, ".claude.json"),
-		CodexConfigPath:       filepath.Join(home, ".codex", "config.toml"),
-		GeminiConfigPath:      filepath.Join(home, ".gemini", "settings.json"),
-		AntigravityConfigPath: filepath.Join(home, ".gemini", "antigravity", "mcp_config.json"),
+		ClaudeConfigPath:      guiClientConfigPath("claude-code"),
+		CodexConfigPath:       guiClientConfigPath("codex-cli"),
+		CursorConfigPath:      guiClientConfigPath("cursor"),
+		VSCodeConfigPath:      guiClientConfigPath("vscode"),
+		GeminiConfigPath:      guiClientConfigPath("gemini-cli"),
+		QwenConfigPath:        guiClientConfigPath("qwen-cli"),
+		AntigravityConfigPath: guiClientConfigPath("antigravity"),
 		ManifestDir:           "", // embed-first; matches CLI scanManifestDir() in prod
 	})
+}
+
+func guiClientConfigPath(name string) string {
+	path, err := clients.ConfigPathForName(name)
+	if err != nil {
+		return ""
+	}
+	return path
 }
 
 type extractManifestResponse struct {

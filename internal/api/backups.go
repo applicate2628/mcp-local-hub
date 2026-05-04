@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"mcp-local-hub/internal/clients"
 	"os"
 	"path/filepath"
 	"sort"
@@ -9,9 +10,9 @@ import (
 	"time"
 )
 
-// BackupsList returns all mcp-local-hub backups found next to the four
-// managed client config files, classified as "original" (sentinel) or
-// "timestamped". Missing client configs are silently skipped.
+// BackupsList returns all mcp-local-hub backups found next to managed client
+// config files, classified as "original" (sentinel) or "timestamped". Missing
+// client configs are silently skipped.
 func (a *API) BackupsList() ([]BackupInfo, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -19,9 +20,12 @@ func (a *API) BackupsList() ([]BackupInfo, error) {
 	}
 	var all []BackupInfo
 	for _, c := range clientFiles(home) {
-		rows, err := a.BackupsListIn(filepath.Dir(c), filepath.Base(c))
+		rows, err := a.BackupsListIn(filepath.Dir(c.Path), filepath.Base(c.Path))
 		if err != nil {
 			continue
+		}
+		for i := range rows {
+			rows[i].Client = c.Client
 		}
 		all = append(all, rows...)
 	}
@@ -63,7 +67,7 @@ func (a *API) BackupsListIn(dir, liveName string) ([]BackupInfo, error) {
 	return out, nil
 }
 
-// BackupsClean prunes timestamped backups for all 4 clients, keeping only
+// BackupsClean prunes timestamped backups for managed clients, keeping only
 // keepN most recent per client. Sentinels never touched.
 func (a *API) BackupsClean(keepN int) ([]string, error) {
 	return a.backupsCleanAll(keepN, false)
@@ -89,7 +93,7 @@ func (a *API) backupsCleanAll(keepN int, dryRun bool) ([]string, error) {
 	}
 	var removed []string
 	for _, c := range clientFiles(home) {
-		r, err := a.backupsCleanInImpl(filepath.Dir(c), filepath.Base(c), keepN, dryRun)
+		r, err := a.backupsCleanInImpl(filepath.Dir(c.Path), filepath.Base(c.Path), keepN, dryRun)
 		if err != nil {
 			continue
 		}
@@ -173,8 +177,8 @@ func (a *API) RollbackOriginal() ([]RollbackResult, error) {
 	}
 	var results []RollbackResult
 	for _, live := range clientFiles(home) {
-		sentinel := live + ".bak-mcp-local-hub-original"
-		client := clientNameFromLive(filepath.Base(live))
+		sentinel := live.Path + ".bak-mcp-local-hub-original"
+		client := live.Client
 		if _, err := os.Stat(sentinel); os.IsNotExist(err) {
 			results = append(results, RollbackResult{Client: client, Err: "no original backup"})
 			continue
@@ -184,11 +188,11 @@ func (a *API) RollbackOriginal() ([]RollbackResult, error) {
 			results = append(results, RollbackResult{Client: client, Err: err.Error()})
 			continue
 		}
-		if err := os.WriteFile(live, data, 0600); err != nil {
+		if err := os.WriteFile(live.Path, data, 0600); err != nil {
 			results = append(results, RollbackResult{Client: client, Err: err.Error()})
 			continue
 		}
-		results = append(results, RollbackResult{Client: client, Restored: live})
+		results = append(results, RollbackResult{Client: client, Restored: live.Path})
 	}
 	return results, nil
 }
@@ -200,14 +204,22 @@ type RollbackResult struct {
 	Err      string
 }
 
-// clientFiles returns absolute paths to all 4 managed client configs.
-func clientFiles(home string) []string {
-	return []string{
-		filepath.Join(home, ".claude.json"),
-		filepath.Join(home, ".codex", "config.toml"),
-		filepath.Join(home, ".gemini", "settings.json"),
-		filepath.Join(home, ".gemini", "antigravity", "mcp_config.json"),
+type clientFile struct {
+	Client string
+	Path   string
+}
+
+// clientFiles returns absolute paths to all managed client configs.
+func clientFiles(home string) []clientFile {
+	var out []clientFile
+	for _, name := range clients.SupportedClientNames() {
+		path, err := clients.ConfigPathForName(name)
+		if err != nil {
+			continue
+		}
+		out = append(out, clientFile{Client: name, Path: path})
 	}
+	return out
 }
 
 // clientNameFromLive maps a live config filename to the canonical client id.

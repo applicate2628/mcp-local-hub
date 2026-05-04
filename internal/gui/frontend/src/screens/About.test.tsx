@@ -10,7 +10,7 @@ const fakeVersion = {
   platform: "windows/amd64",
   homepage: "https://github.com/applicate2628/mcp-local-hub",
   issues: "https://github.com/applicate2628/mcp-local-hub/issues",
-  commercial: "https://github.com/applicate2628/mcp-local-hub/blob/master/COMMERCIAL.md",
+  commercial: "https://github.com/applicate2628/mcp-local-hub/blob/master/README.md#license",
   license: "MPL-2.0",
   author: "Dmitry Denisenko (@applicate2628)",
 };
@@ -87,7 +87,7 @@ describe("AboutScreen", () => {
     );
     const commercial = await findByTestId("about-commercial-link");
     expect(commercial.getAttribute("href")).toBe(
-      "https://github.com/applicate2628/mcp-local-hub/blob/master/COMMERCIAL.md",
+      "https://github.com/applicate2628/mcp-local-hub/blob/master/README.md#license",
     );
   });
 

@@ -34,7 +34,15 @@ const TRANSPORT_OPTIONS = [
   { value: "stdio-bridge", label: "stdio-bridge (daemon multiplexes stdio child)" },
   { value: "native-http", label: "native-http (upstream speaks HTTP directly)" },
 ] as const;
-const KNOWN_CLIENTS = ["claude-code", "codex-cli", "gemini-cli", "antigravity"] as const;
+const KNOWN_CLIENTS = [
+  "claude-code",
+  "codex-cli",
+  "cursor",
+  "vscode",
+  "gemini-cli",
+  "qwen-cli",
+  "antigravity",
+] as const;
 
 // deepEqualForm compares two ManifestFormState instances structurally. Used
 // by the Q8 dirty check. JSON.stringify is defensible for this shape: all

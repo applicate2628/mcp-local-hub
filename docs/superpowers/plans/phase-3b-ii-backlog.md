@@ -23,7 +23,7 @@ Codex CLI read-only audit comparing spec sections vs shipped code. Item rows bel
 
 | Sev | Screen | Gap | Location |
 |---|---|---|---|
-| blocker | Servers | Matrix has Server + 4 clients + Port + State only. Spec wants RAM/Uptime/Status columns and a row drawer with manifest preview / lifetime stats / Stop & Restart. | [Servers.tsx](../../../internal/gui/frontend/src/screens/Servers.tsx) |
+| blocker | Servers | Matrix has Server + managed-client columns + Port + State only. Spec wants RAM/Uptime/Status columns and a row drawer with manifest preview / lifetime stats / Stop & Restart. | [Servers.tsx](../../../internal/gui/frontend/src/screens/Servers.tsx) |
 | blocker | Dashboard | Cards show Port/PID/State + Restart/Stop only. Spec wants green/red dot, RAM, Uptime, connected-clients count, requests-per-minute, RAM sparkline, View logs link, retry count. | [Dashboard.tsx](../../../internal/gui/frontend/src/screens/Dashboard.tsx) |
 | blocker | Logs | Server dropdown + tail + Follow SSE present. Missing regex/substring filter, Open folder action, amber/red line highlighting on warn/error. | [Logs.tsx](../../../internal/gui/frontend/src/screens/Logs.tsx) |
 | blocker | Settings | `appearance.layout` registry key + sidebar/tabs switcher absent. tray, daemons.weekly_schedule, daemons.retry_policy, backups.clean_now, advanced.export_config_bundle still Deferred. | [settings_registry.go](../../../internal/api/settings_registry.go), [SectionBackups.tsx](../../../internal/gui/frontend/src/components/settings/SectionBackups.tsx) |
@@ -85,7 +85,7 @@ development ideas. The durable intake note is
 | G1 | Feature-support/readiness matrix | Phase 3B-II hardening | Align public docs with preview status and tested/untested surfaces. |
 | G2 | Unified health endpoint | Phase 3B-II / Phase 3C | Combine version, GUI, daemons, clients, ports, workspaces, and probe summaries. |
 | G3 | Optional unified MCP endpoint | Phase 3C | Add a single `Hub` endpoint with namespaced capabilities without replacing per-daemon endpoints. |
-| G4 | Remote manifests + VS Code/JSON5 import | Phase 3C/3D | Make remote `url + headers + secrets` and `.vscode/mcp.json` import first-class. |
+| G4 | Remote manifests + VS Code workspace/JSON5 import | Phase 3C/3D | VS Code user-profile install target now exists; make remote `url + headers + secrets`, workspace `.vscode/mcp.json`, and JSON5 import first-class. |
 | G5 | Marketplace draft-manifest flow | Phase 3C/3D | Browse/import as inspect -> validate -> dry-run -> apply, never auto-install. |
 
 ### A. Secondary screens (spec §5)
@@ -223,3 +223,14 @@ Surfaced during A4-a local smoke (2026-04-28) and confirmed via Codex consult. I
 ### Closed by PR #24 (tray rewrite, 2026-04-30)
 
 ✅ **Tray subprocess + direct-Win32**: PR #24 spawns the tray as a separate `mcphub tray` child process and implements it via direct `golang.org/x/sys/windows` syscalls (no CGo, no third-party tray library). Click handler uses `Shell_NotifyIconGetRect` for deterministic icon-anchored popup placement; `NIM_SETVERSION(4)` + `MonitorFromPoint`/`GetMonitorInfoW` for multi-monitor-correct alignment; `TaskbarCreated` re-add survives explorer restart; `SetProcessDpiAwarenessContext` aligns coord spaces on scaled monitors. Supersedes any earlier `getlantern/systray` → `fyne.io/systray` → `energye/systray` migration plans — direct-Win32 is the chosen end state.
+
+## Terms and Abbreviations
+
+- `API`: Application Programming Interface; local HTTP routes shared by CLI and GUI surfaces.
+- `CLI`: Command-Line Interface; commands such as `mcphub install`.
+- `GUI`: Graphical User Interface; the embedded local web interface and tray surface.
+- `JSON5`: JSON-compatible config format with comments and trailing commas.
+- `MCP`: Model Context Protocol; the protocol used by managed clients and servers.
+- `Qwen CLI`: Qwen Code command-line client; opt-in install target.
+- `SSE`: Server-Sent Events; the GUI event stream.
+- `VS Code`: Visual Studio Code; opt-in install target and future workspace-import surface.

@@ -45,6 +45,7 @@ See also: scan, install, rollback.`,
 			if err != nil {
 				return err
 			}
+			vscodePath, _ := clientConfigPath("vscode")
 			report, err := a.MigrateFrom(api.MigrateOpts{
 				Servers:        args,
 				ClientsInclude: include,
@@ -52,7 +53,10 @@ See also: scan, install, rollback.`,
 				ScanOpts: api.ScanOpts{
 					ClaudeConfigPath:      filepath.Join(home, ".claude.json"),
 					CodexConfigPath:       filepath.Join(home, ".codex", "config.toml"),
+					CursorConfigPath:      filepath.Join(home, ".cursor", "mcp.json"),
+					VSCodeConfigPath:      vscodePath,
 					GeminiConfigPath:      filepath.Join(home, ".gemini", "settings.json"),
+					QwenConfigPath:        filepath.Join(home, ".qwen", "settings.json"),
 					AntigravityConfigPath: filepath.Join(home, ".gemini", "antigravity", "mcp_config.json"),
 					ManifestDir:           scanManifestDir(),
 				},
@@ -89,7 +93,7 @@ See also: scan, install, rollback.`,
 			return nil
 		},
 	}
-	c.Flags().StringVar(&clientsFlag, "clients", "", "comma-separated subset of clients (default: all four)")
+	c.Flags().StringVar(&clientsFlag, "clients", "", "comma-separated subset of clients (default: every binding in the manifest)")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change, don't write")
 	c.Flags().BoolVar(&jsonOut, "json", false, "machine-readable JSON output")
 	return c

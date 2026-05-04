@@ -11,7 +11,7 @@ Run one copy of each [Model Context Protocol](https://modelcontextprotocol.io) s
 
 ## The problem
 
-Every modern coding assistant (Claude Code, Codex CLI, Gemini CLI, Antigravity, Cursor, Continue, …) speaks MCP, and each client independently `exec`s whatever stdio servers you configure — `uvx serena`, `npx @modelcontextprotocol/server-memory`, `mcp-language-server`, and so on. If you use three assistants side-by-side on the same project, you get **three Serena processes**, **three gopls subprocesses**, **three separate memory stores**. Each per-session spawn re-downloads dependencies, re-indexes your code, and competes for RAM.
+Every modern coding assistant (Claude Code, Codex CLI, Cursor, VS Code, Gemini CLI, Qwen Code CLI, Antigravity, Continue, ...) speaks MCP, and each client independently `exec`s whatever stdio servers you configure — `uvx serena`, `npx @modelcontextprotocol/server-memory`, `mcp-language-server`, and so on. If you use three assistants side-by-side on the same project, you get **three Serena processes**, **three gopls subprocesses**, **three separate memory stores**. Each per-session spawn re-downloads dependencies, re-indexes your code, and competes for RAM.
 
 ## What this tool does
 
@@ -32,13 +32,13 @@ Every modern coding assistant (Claude Code, Codex CLI, Gemini CLI, Antigravity, 
       │      │      │      │      │      │      │       │      │      │
       └──────┴──────┴──────┴──────┴──────┴──────┴───────┴──────┴──────┘
                                     │
-                      shared by all 4 MCP clients
+                 shared by default + opt-in MCP clients
                                     │
-                    ┌───────────────┼───────────────┐
-                    ▼       ▼       ▼       ▼       ▼
-                 Claude  Gemini  Antigravity  Codex CLI
-                 Code    CLI     (stdio       (HTTP)
-                 (HTTP)  (HTTP)   relay)
+         ┌───────────┬───────────┬───────────┬───────────┬───────────┐
+         ▼           ▼           ▼           ▼           ▼
+      Claude      Codex       Cursor      VS Code   Gemini/Qwen/
+      Code        CLI         (HTTP)      (HTTP)    Antigravity
+      (HTTP)      (HTTP)                            (opt-in)
 ```
 
 Stdio-only MCP servers (memory, time, sequential-thinking, wolfram, gdb, paper-search-mcp) run behind a native Go **stdio-host** (`internal/daemon/host.go`): one subprocess per daemon, multiplexed across concurrent HTTP clients via JSON-RPC `id` rewriting and a cached `initialize` response. Three servers (**godbolt**, **lldb-bridge**, **perftools**) ship as Go code **embedded directly in the mcphub binary** — no npm/pip dependency, starts instantly.
@@ -60,8 +60,12 @@ pwsh ./build.ps1
 ./mcphub.exe setup
 
 # 3. Install the MCP servers you want shared
-./mcphub.exe install --server serena       # Phase 1 flagship
-./mcphub.exe install --all                 # or all 10 at once
+./mcphub.exe install --server serena       # default clients: Claude/Codex/Cursor
+./mcphub.exe install --all                 # all 10 servers, default clients
+
+# Optional client targeting
+./mcphub.exe install --server serena --clients qwen-cli,vscode
+./mcphub.exe install --server serena --all-clients
 
 # 4. Verify
 ./mcphub.exe status
@@ -110,12 +114,20 @@ perftools.llvm_objdump(binary="./new_bin", function="hot_loop")
 
 ## Supported clients
 
-| Client | Version tested | Config path | Transport |
-|---|---|---|---|
-| Claude Code CLI | 2.1.112 | `~/.claude.json` | HTTP (`type: "http"`) |
-| Codex CLI | 0.121.0 | `~/.codex/config.toml` | HTTP (streamable_http) |
-| Gemini CLI | 0.38.1 | `~/.gemini/settings.json` | HTTP (`type: "http"`) |
-| Antigravity IDE | v0.x | `~/.gemini/antigravity/mcp_config.json` | stdio relay → HTTP |
+Default install targets are `claude-code`, `codex-cli`, and `cursor`.
+`vscode`, `gemini-cli`, `qwen-cli`, and `antigravity` are opt-in via
+`--clients ...` or `--all-clients`, so install does not silently mutate every
+assistant installed on the workstation.
+
+| Client | Install mode | Version/status | Config path | Transport |
+|---|---|---|---|---|
+| Claude Code CLI | Default | 2.1.112 tested | `~/.claude.json` | HTTP (`type: "http"`) |
+| Codex CLI | Default | 0.121.0 tested | `~/.codex/config.toml` | HTTP (streamable_http) |
+| Cursor | Default | Preview; live smoke pending | `~/.cursor/mcp.json` | HTTP (`type: "http"`) |
+| VS Code | Opt-in | Preview; live smoke pending | user-profile `mcp.json` | HTTP (`type: "http"`) |
+| Gemini CLI | Opt-in | 0.38.1 tested | `~/.gemini/settings.json` | HTTP (`type: "http"`) |
+| Qwen Code CLI | Opt-in | Preview; live smoke pending | `~/.qwen/settings.json` | HTTP (`httpUrl`) |
+| Antigravity IDE | Opt-in | v0.x tested | `~/.gemini/antigravity/mcp_config.json` | stdio relay -> HTTP |
 
 **Antigravity note:** Cascade rejects loopback-HTTP MCP entries, so `mcp-local-hub` writes a **stdio relay** entry instead — `mcphub.exe relay --server <name> --daemon <d>`. Cascade spawns the relay as a normal stdio subprocess; the relay forwards JSON-RPC to the shared HTTP daemon. No extra server process per Antigravity session.
 
@@ -126,8 +138,10 @@ perftools.llvm_objdump(binary="./new_bin", function="hot_loop")
 | Command | What it does |
 |---|---|
 | `mcphub setup` | Install binary to `~/.local/bin` and register on user PATH (idempotent) |
-| `mcphub install --server <name>` | Create scheduler tasks, write client configs, start daemons |
-| `mcphub install --all` | Bulk install every manifest under `servers/` |
+| `mcphub install --server <name>` | Create scheduler tasks, write default client configs, start daemons |
+| `mcphub install --server <name> --clients <ids>` | Install only the named client bindings |
+| `mcphub install --server <name> --all-clients` | Install every client binding declared by the manifest |
+| `mcphub install --all` | Bulk install every manifest under `servers/` into default clients |
 | `mcphub install --server <n> --dry-run` | Print plan without applying |
 | `mcphub uninstall --server <name>` | Remove scheduler tasks + client entries (backups retained) |
 | `mcphub status` | Show state of every `mcp-local-hub-*` task (Running / Scheduled / Stopped) with PID, RAM, uptime, next-run |
@@ -139,7 +153,7 @@ perftools.llvm_objdump(binary="./new_bin", function="hot_loop")
 
 | Command | What it does |
 |---|---|
-| `mcphub scan` | Classify every MCP entry across all 4 clients into `via-hub`, `can-migrate`, `unknown`, `per-session`, `not-installed` |
+| `mcphub scan` | Classify every MCP entry across managed clients into `via-hub`, `can-migrate`, `unknown`, `per-session`, `not-installed` |
 | `mcphub migrate --server <n>` | Rewrite stdio client entries to hub HTTP for a given server |
 | `mcphub manifest list` | List every manifest under `servers/*/manifest.yaml` |
 | `mcphub manifest show <name>` | Print a manifest's contents |
@@ -149,7 +163,7 @@ perftools.llvm_objdump(binary="./new_bin", function="hot_loop")
 | Command | What it does |
 |---|---|
 | `mcphub logs <server> [--tail N]` | Tail daemon's stdout/stderr log |
-| `mcphub backups list` | Every `.bak-mcp-local-hub-*` across all 4 clients |
+| `mcphub backups list` | Every `.bak-mcp-local-hub-*` across managed clients |
 | `mcphub backups clean` | Prune old timestamped backups, keep N most recent + pristine sentinel |
 | `mcphub backups show <file>` | Diff a backup against the live config |
 | `mcphub rollback` | Restore the latest backup for every client |
@@ -228,7 +242,7 @@ Delivered and documented:
 
 Phase evidence:
 
-- **Phase 1** — Serena consolidation across 4 clients ([docs/phase-1-verification.md](docs/phase-1-verification.md)).
+- **Phase 1** — Serena consolidation across the original 4 clients ([docs/phase-1-verification.md](docs/phase-1-verification.md)).
 - **Phase 2** — 7 global daemons added, supergateway -> native Go stdio-host ([docs/phase-2-verification.md](docs/phase-2-verification.md)).
 - **Phase 3A** — CLI parity and Go-embedded servers ([docs/phase-3a-verification.md](docs/phase-3a-verification.md)).
 - **Phase 3B-I** — GUI Installer MVP ([docs/phase-3b-verification.md](docs/phase-3b-verification.md)).
@@ -242,7 +256,7 @@ Forward development proposals:
 Roadmap / remaining work:
 
 - **Phase 3B-II release hardening** — execute the D2/D3 live/manual smoke matrix and reconcile the remaining backlog before tagging.
-- **Phase 3C+ candidate work** — optional unified MCP endpoint, richer health/capability status, remote-server manifests, marketplace/import flow, and VS Code/JSON5 compatibility.
+- **Phase 3C+ candidate work** — optional unified MCP endpoint, richer health/capability status, remote-server manifests, marketplace/import flow, and VS Code workspace/JSON5 import compatibility.
 - **Phase 4+** — Linux/macOS scheduler backends (systemd user units + launchd agents).
 
 ## Platform support
@@ -253,8 +267,16 @@ Roadmap / remaining work:
 
 Mozilla Public License Version 2.0 (`MPL-2.0`) — see [LICENSE](LICENSE).
 
-Commercial licenses and commercial versions are available by separate
-agreement; see [COMMERCIAL.md](COMMERCIAL.md).
+Commercial licenses and commercial versions are available by separate agreement
+for teams that need different licensing terms, private distribution, support,
+warranty, indemnity, integration, packaging, or proprietary deployment terms.
+To discuss a commercial version or commercial license, contact Dmitry Denisenko
+through GitHub at [@applicate2628](https://github.com/applicate2628).
+
+Unless and until a separate commercial agreement is signed, use, modification,
+and distribution of this repository remain governed by `MPL-2.0`. A commercial
+offer does not reduce the rights granted for the public source code under
+`MPL-2.0`.
 
 Copyright 2026 Dmitry Denisenko ([@applicate2628](https://github.com/applicate2628))
 
@@ -262,10 +284,18 @@ Copyright 2026 Dmitry Denisenko ([@applicate2628](https://github.com/applicate26
 
 - `CLI`: Command-Line Interface; commands such as `mcphub install` and
   `mcphub status`.
+- `Commercial license`: separate private agreement for different licensing,
+  support, distribution, warranty, indemnity, integration, packaging, or
+  deployment terms.
+- `Cursor`: Cursor editor/agent client; default MCP client target in this
+  preview.
 - `GUI`: Graphical User Interface; the embedded local web interface and tray
   surface.
 - `MCP`: Model Context Protocol; the protocol used by managed clients and
   servers.
 - `MPL-2.0`: Mozilla Public License Version 2.0; the open-source license used
   by this repository.
+- `Qwen Code CLI`: Qwen command-line agent client; opt-in MCP client target.
 - `SSE`: Server-Sent Events; the HTTP event stream used by the GUI.
+- `VS Code`: Visual Studio Code; opt-in MCP client target and future
+  workspace-import surface.

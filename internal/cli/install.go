@@ -20,8 +20,10 @@ import (
 func newInstallCmdReal() *cobra.Command {
 	var server string
 	var daemonFilter string
+	var clientsFlag string
 	var dryRun bool
 	var all bool
+	var allClients bool
 	c := &cobra.Command{
 		Use:   "install",
 		Short: "Install an MCP server as shared daemon(s)",
@@ -34,10 +36,13 @@ What install does:
   3. Starts the scheduler tasks immediately (won't wait for next logon)
   4. Writes a timestamped backup for each client config it touches
   5. Patches each client's config per the manifest's client_bindings list:
-     HTTP entries for Claude/Codex/Gemini, stdio-relay entries for Antigravity
+     default clients are Claude Code, Codex CLI, and Cursor; Gemini CLI,
+     Qwen CLI, VS Code, and Antigravity are opt-in via --clients or --all-clients
 
 Examples:
-  mcphub install --server serena               # install all daemons in the manifest
+  mcphub install --server serena               # default clients: claude-code,codex-cli,cursor
+  mcphub install --server serena --clients qwen-cli,vscode
+  mcphub install --server serena --all-clients # every manifest client binding
   mcphub install --server serena --daemon codex # install only one daemon
   mcphub install --server serena --dry-run     # preview actions, change nothing
   mcphub install --all                         # install every shipped manifest
@@ -75,7 +80,16 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 					return fmt.Errorf("--all is mutually exclusive with --server/--daemon")
 				}
 				a := api.NewAPI()
-				results := a.InstallAll(dryRun, cmd.OutOrStdout())
+				include, err := parseInstallClientsFlag(clientsFlag, allClients)
+				if err != nil {
+					return err
+				}
+				results := a.InstallAllWithOpts(api.InstallAllOpts{
+					ClientsInclude:    include,
+					IncludeAllClients: allClients,
+					DryRun:            dryRun,
+					Writer:            cmd.OutOrStdout(),
+				})
 				failed := 0
 				for _, r := range results {
 					if r.Err != nil {
@@ -93,20 +107,46 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 			if server == "" {
 				return fmt.Errorf("--server is required")
 			}
+			include, err := parseInstallClientsFlag(clientsFlag, allClients)
+			if err != nil {
+				return err
+			}
 			a := api.NewAPI()
 			return a.Install(api.InstallOpts{
-				Server:       server,
-				DaemonFilter: daemonFilter,
-				DryRun:       dryRun,
-				Writer:       cmd.OutOrStdout(),
+				Server:            server,
+				DaemonFilter:      daemonFilter,
+				ClientsInclude:    include,
+				IncludeAllClients: allClients,
+				DryRun:            dryRun,
+				Writer:            cmd.OutOrStdout(),
 			})
 		},
 	}
 	c.Flags().StringVar(&server, "server", "", "server name (matches servers/<name>/manifest.yaml)")
 	c.Flags().StringVar(&daemonFilter, "daemon", "", "install only this daemon (+ its client bindings); omit to install all")
+	c.Flags().StringVar(&clientsFlag, "clients", "", "comma-separated subset of clients (default: claude-code,codex-cli,cursor)")
+	c.Flags().BoolVar(&allClients, "all-clients", false, "install into every client binding declared by the manifest")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print planned actions without making changes")
 	c.Flags().BoolVar(&all, "all", false, "install every manifest under servers/")
 	return c
+}
+
+func parseInstallClientsFlag(clientsFlag string, allClients bool) ([]string, error) {
+	if allClients && strings.TrimSpace(clientsFlag) != "" {
+		return nil, fmt.Errorf("--clients is mutually exclusive with --all-clients")
+	}
+	if strings.TrimSpace(clientsFlag) == "" {
+		return nil, nil
+	}
+	parts := strings.Split(clientsFlag, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out, nil
 }
 
 // maybeBootstrapInteractively asks the user whether to bootstrap mcphub to

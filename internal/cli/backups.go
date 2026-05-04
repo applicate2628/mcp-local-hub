@@ -20,7 +20,7 @@ recent, 'rollback --original' uses the pristine '-original' sentinel
 (written exactly once on the first-ever backup per client).
 
 Subcommands:
-  backups list           # table of all backups across all 4 clients
+  backups list           # table of all backups across managed clients
   backups clean          # prune old timestamped backups (keep N most recent)
   backups clean --dry-run # preview the prune set without deleting
   backups show <path>    # print a backup file's contents

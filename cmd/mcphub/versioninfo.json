@@ -17,7 +17,7 @@
         "OriginalFilename": "mcphub.exe",
         "ProductName":      "mcp-local-hub",
         "ProductVersion":   "0.3.0.0",
-        "Comments":         "Homepage: https://github.com/applicate2628/mcp-local-hub | Issues: https://github.com/applicate2628/mcp-local-hub/issues | License: MPL-2.0 | Commercial: https://github.com/applicate2628/mcp-local-hub/blob/master/COMMERCIAL.md"
+        "Comments":         "Homepage: https://github.com/applicate2628/mcp-local-hub | Issues: https://github.com/applicate2628/mcp-local-hub/issues | License: MPL-2.0 | Commercial: https://github.com/applicate2628/mcp-local-hub/blob/master/README.md#license"
     },
     "VarFileInfo": {
         "Translation": {

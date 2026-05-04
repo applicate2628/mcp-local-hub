@@ -14,7 +14,9 @@ import (
 )
 
 // serenaLikeManifest returns a manifest resembling the Serena manifest:
-// 3 daemons, weekly refresh, 4 client bindings (one shared daemon).
+// 3 daemons, weekly refresh, and client bindings where Claude, Gemini,
+// Antigravity, Cursor, VS Code, and Qwen share the claude-compatible daemon
+// while Codex keeps its own daemon.
 func serenaLikeManifest() *config.ServerManifest {
 	return &config.ServerManifest{
 		Name:      "serena",
@@ -29,8 +31,11 @@ func serenaLikeManifest() *config.ServerManifest {
 		ClientBindings: []config.ClientBinding{
 			{Client: "claude-code", Daemon: "claude", URLPath: "/mcp"},
 			{Client: "codex-cli", Daemon: "codex", URLPath: "/mcp"},
-			{Client: "antigravity", Daemon: "antigravity", URLPath: "/mcp"},
-			{Client: "gemini-cli", Daemon: "antigravity", URLPath: "/mcp"}, // shared daemon
+			{Client: "antigravity", Daemon: "claude", URLPath: "/mcp"},
+			{Client: "gemini-cli", Daemon: "claude", URLPath: "/mcp"},
+			{Client: "cursor", Daemon: "claude", URLPath: "/mcp"},
+			{Client: "vscode", Daemon: "claude", URLPath: "/mcp"},
+			{Client: "qwen-cli", Daemon: "claude", URLPath: "/mcp"},
 		},
 		WeeklyRefresh: true,
 	}
@@ -63,9 +68,23 @@ func TestBuildPlan_NoFilter_FullInstall(t *testing.T) {
 	if len(p.SchedulerTasks) != 4 {
 		t.Errorf("len(SchedulerTasks) = %d, want 4", len(p.SchedulerTasks))
 	}
-	// 4 client bindings.
-	if len(p.ClientUpdates) != 4 {
-		t.Errorf("len(ClientUpdates) = %d, want 4", len(p.ClientUpdates))
+	// Default install targets only safe/default clients.
+	if len(p.ClientUpdates) != 3 {
+		t.Errorf("len(ClientUpdates) = %d, want 3", len(p.ClientUpdates))
+	}
+	gotClients := map[string]bool{}
+	for _, u := range p.ClientUpdates {
+		gotClients[u.Client] = true
+	}
+	for _, want := range []string{"claude-code", "codex-cli", "cursor"} {
+		if !gotClients[want] {
+			t.Errorf("default client %q missing from plan: %+v", want, p.ClientUpdates)
+		}
+	}
+	for _, optIn := range []string{"gemini-cli", "antigravity", "qwen-cli", "vscode"} {
+		if gotClients[optIn] {
+			t.Errorf("opt-in client %q should not be in default plan: %+v", optIn, p.ClientUpdates)
+		}
 	}
 	// Weekly refresh present.
 	var sawWeekly bool
@@ -76,6 +95,50 @@ func TestBuildPlan_NoFilter_FullInstall(t *testing.T) {
 	}
 	if !sawWeekly {
 		t.Error("weekly-refresh task missing in full install")
+	}
+}
+
+func TestBuildPlan_AllClientsIncludesOptInClients(t *testing.T) {
+	m := serenaLikeManifest()
+	p, err := BuildPlanWithOpts(m, BuildPlanOpts{IncludeAllClients: true})
+	if err != nil {
+		t.Fatalf("BuildPlanWithOpts: %v", err)
+	}
+	if len(p.ClientUpdates) != 7 {
+		t.Fatalf("len(ClientUpdates) = %d, want 7: %+v", len(p.ClientUpdates), p.ClientUpdates)
+	}
+	got := map[string]bool{}
+	for _, u := range p.ClientUpdates {
+		got[u.Client] = true
+	}
+	for _, want := range []string{"claude-code", "codex-cli", "cursor", "vscode", "gemini-cli", "qwen-cli", "antigravity"} {
+		if !got[want] {
+			t.Errorf("client %q missing from all-clients plan", want)
+		}
+	}
+}
+
+func TestBuildPlan_ClientFilterOnlyIncludesRequestedClients(t *testing.T) {
+	m := serenaLikeManifest()
+	p, err := BuildPlanWithOpts(m, BuildPlanOpts{ClientsInclude: []string{"qwen-cli", "vscode"}})
+	if err != nil {
+		t.Fatalf("BuildPlanWithOpts: %v", err)
+	}
+	if len(p.ClientUpdates) != 2 {
+		t.Fatalf("len(ClientUpdates) = %d, want 2: %+v", len(p.ClientUpdates), p.ClientUpdates)
+	}
+	got := map[string]bool{}
+	for _, u := range p.ClientUpdates {
+		got[u.Client] = true
+		if u.DaemonName != "claude" {
+			t.Errorf("client %s daemon = %q, want claude", u.Client, u.DaemonName)
+		}
+	}
+	if !got["qwen-cli"] || !got["vscode"] {
+		t.Fatalf("filtered clients missing: %+v", p.ClientUpdates)
+	}
+	if got["gemini-cli"] || got["antigravity"] || got["claude-code"] || got["cursor"] || got["codex-cli"] {
+		t.Fatalf("unexpected client in filtered plan: %+v", p.ClientUpdates)
 	}
 }
 
@@ -106,28 +169,26 @@ func TestBuildPlan_SingleDaemonFilter_SkipsOthersAndWeeklyRefresh(t *testing.T) 
 
 func TestBuildPlan_SharedDaemonFilter_IncludesAllReferencingBindings(t *testing.T) {
 	m := serenaLikeManifest()
-	// antigravity daemon is referenced by TWO bindings: antigravity + gemini-cli.
-	p, err := BuildPlan(m, "antigravity")
+	// claude daemon is referenced by every non-Codex binding; all-clients mode
+	// preserves that relationship when explicitly requested.
+	p, err := BuildPlanWithOpts(m, BuildPlanOpts{DaemonFilter: "claude", IncludeAllClients: true})
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
 	if len(p.SchedulerTasks) != 1 {
 		t.Errorf("len(SchedulerTasks) = %d, want 1", len(p.SchedulerTasks))
 	}
-	if len(p.ClientUpdates) != 2 {
-		t.Errorf("len(ClientUpdates) = %d, want 2 (antigravity + gemini-cli share the daemon)", len(p.ClientUpdates))
+	if len(p.ClientUpdates) != 6 {
+		t.Errorf("len(ClientUpdates) = %d, want 6 (all non-Codex clients share claude daemon)", len(p.ClientUpdates))
 	}
-	sawAG, sawGemini := false, false
+	saw := map[string]bool{}
 	for _, u := range p.ClientUpdates {
-		if u.Client == "antigravity" {
-			sawAG = true
-		}
-		if u.Client == "gemini-cli" {
-			sawGemini = true
-		}
+		saw[u.Client] = true
 	}
-	if !sawAG || !sawGemini {
-		t.Errorf("expected both antigravity and gemini-cli bindings; got: %+v", p.ClientUpdates)
+	for _, want := range []string{"claude-code", "gemini-cli", "antigravity", "cursor", "vscode", "qwen-cli"} {
+		if !saw[want] {
+			t.Errorf("expected %s binding; got: %+v", want, p.ClientUpdates)
+		}
 	}
 }
 

@@ -17,8 +17,7 @@ func newUninstallCmdReal() *cobra.Command {
 		Use:   "uninstall",
 		Short: "Remove an installed MCP server (scheduler + client bindings)",
 		Long: `Reverse of 'install': deletes the scheduler tasks and removes the
-server's entry from every managed client config (claude-code, codex-cli,
-gemini-cli, antigravity).
+server's entry from every managed client config declared by the manifest.
 
 What uninstall does:
   1. Reads the manifest to know which tasks + which clients to touch

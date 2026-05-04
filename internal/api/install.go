@@ -94,17 +94,21 @@ type ClientUpdatePlan struct {
 
 // InstallOpts controls an install invocation.
 type InstallOpts struct {
-	Server       string
-	DaemonFilter string // empty = all daemons in the manifest
-	DryRun       bool
-	Writer       io.Writer // progress output destination; nil = os.Stderr
+	Server            string
+	DaemonFilter      string   // empty = all daemons in the manifest
+	ClientsInclude    []string // empty = default install clients
+	IncludeAllClients bool
+	DryRun            bool
+	Writer            io.Writer // progress output destination; nil = os.Stderr
 }
 
 // InstallAllOpts controls a bulk install.
 type InstallAllOpts struct {
-	ManifestDir string
-	DryRun      bool
-	Writer      io.Writer
+	ManifestDir       string
+	ClientsInclude    []string
+	IncludeAllClients bool
+	DryRun            bool
+	Writer            io.Writer
 }
 
 // InstallResult is one row in an InstallAll report.
@@ -171,7 +175,11 @@ func (a *API) Install(opts InstallOpts) error {
 		return err
 	}
 	// 3. Build plan.
-	plan, err := BuildPlan(m, opts.DaemonFilter)
+	plan, err := BuildPlanWithOpts(m, BuildPlanOpts{
+		DaemonFilter:      opts.DaemonFilter,
+		ClientsInclude:    opts.ClientsInclude,
+		IncludeAllClients: opts.IncludeAllClients,
+	})
 	if err != nil {
 		return err
 	}
@@ -193,6 +201,10 @@ func (a *API) Install(opts InstallOpts) error {
 // `mcphub register` flow; a notice is emitted to w so the user knows why
 // those names were omitted.
 func (a *API) InstallAll(dryRun bool, w io.Writer) []InstallResult {
+	return a.InstallAllWithOpts(InstallAllOpts{DryRun: dryRun, Writer: w})
+}
+
+func (a *API) InstallAllWithOpts(opts InstallAllOpts) []InstallResult {
 	names, err := listManifestNamesEmbedFirst()
 	if err != nil {
 		return []InstallResult{{Err: err}}
@@ -210,14 +222,16 @@ func (a *API) InstallAll(dryRun bool, w io.Writer) []InstallResult {
 			}
 		}
 		err := a.installUsingEmbedFirst(InstallOpts{
-			Server: name,
-			DryRun: dryRun,
-			Writer: w,
+			Server:            name,
+			ClientsInclude:    opts.ClientsInclude,
+			IncludeAllClients: opts.IncludeAllClients,
+			DryRun:            opts.DryRun,
+			Writer:            opts.Writer,
 		})
 		results = append(results, InstallResult{Server: name, Err: err})
 	}
-	if len(skipped) > 0 && w != nil {
-		fmt.Fprintf(w, "Skipped %d workspace-scoped manifest(s); use `mcphub register` instead: %v\n",
+	if len(skipped) > 0 && opts.Writer != nil {
+		fmt.Fprintf(opts.Writer, "Skipped %d workspace-scoped manifest(s); use `mcphub register` instead: %v\n",
 			len(skipped), skipped)
 	}
 	return results
@@ -254,9 +268,11 @@ func (a *API) InstallAllFrom(opts InstallAllOpts) []InstallResult {
 			}
 		}
 		err := a.installFromManifestDir(InstallOpts{
-			Server: e.Name(),
-			DryRun: opts.DryRun,
-			Writer: opts.Writer,
+			Server:            e.Name(),
+			ClientsInclude:    opts.ClientsInclude,
+			IncludeAllClients: opts.IncludeAllClients,
+			DryRun:            opts.DryRun,
+			Writer:            opts.Writer,
 		}, opts.ManifestDir)
 		results = append(results, InstallResult{Server: e.Name(), Err: err})
 	}
@@ -285,7 +301,11 @@ func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 	if err := Preflight(m, opts.DaemonFilter); err != nil {
 		return err
 	}
-	plan, err := BuildPlan(m, opts.DaemonFilter)
+	plan, err := BuildPlanWithOpts(m, BuildPlanOpts{
+		DaemonFilter:      opts.DaemonFilter,
+		ClientsInclude:    opts.ClientsInclude,
+		IncludeAllClients: opts.IncludeAllClients,
+	})
 	if err != nil {
 		return err
 	}
@@ -316,7 +336,11 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 	if err := Preflight(m, opts.DaemonFilter); err != nil {
 		return err
 	}
-	plan, err := BuildPlan(m, opts.DaemonFilter)
+	plan, err := BuildPlanWithOpts(m, BuildPlanOpts{
+		DaemonFilter:      opts.DaemonFilter,
+		ClientsInclude:    opts.ClientsInclude,
+		IncludeAllClients: opts.IncludeAllClients,
+	})
 	if err != nil {
 		return err
 	}
@@ -809,16 +833,33 @@ func (a *API) uninstallWithoutManifest(server string) (*UninstallReport, error) 
 	return report, nil
 }
 
-// BuildPlan translates a manifest into concrete intended actions.
-// If daemonFilter is non-empty, only that daemon and its referencing client
-// bindings are included; weekly refresh is skipped because a partial install
-// does not imply a full-server restart. An unknown daemonFilter is an error
-// surfaced before any side effects.
+// BuildPlanOpts controls plan-time filtering.
+type BuildPlanOpts struct {
+	DaemonFilter      string
+	ClientsInclude    []string
+	IncludeAllClients bool
+}
+
+// BuildPlan translates a manifest into concrete intended actions using the
+// default install clients.
 func BuildPlan(m *config.ServerManifest, daemonFilter string) (*Plan, error) {
-	if daemonFilter != "" {
-		if _, ok := findDaemon(m, daemonFilter); !ok {
-			return nil, fmt.Errorf("no daemon %q in manifest %s", daemonFilter, m.Name)
+	return BuildPlanWithOpts(m, BuildPlanOpts{DaemonFilter: daemonFilter})
+}
+
+// BuildPlanWithOpts translates a manifest into concrete intended actions.
+// If DaemonFilter is non-empty, only that daemon and its referencing client
+// bindings are included; weekly refresh is skipped because a partial install
+// does not imply a full-server restart. An unknown DaemonFilter or client
+// selector is an error surfaced before any side effects.
+func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, error) {
+	if opts.DaemonFilter != "" {
+		if _, ok := findDaemon(m, opts.DaemonFilter); !ok {
+			return nil, fmt.Errorf("no daemon %q in manifest %s", opts.DaemonFilter, m.Name)
 		}
+	}
+	includeClient, err := installClientPredicate(opts)
+	if err != nil {
+		return nil, err
 	}
 	// Scheduler tasks reference the canonical ~/.local/bin/mcphub.exe
 	// path (not dev location). See canonicalMcphubPath for the rationale.
@@ -826,10 +867,10 @@ func BuildPlan(m *config.ServerManifest, daemonFilter string) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &Plan{Server: m.Name, FullInstall: daemonFilter == ""}
+	p := &Plan{Server: m.Name, FullInstall: opts.DaemonFilter == ""}
 	// Scheduler tasks — one per daemon (global) or lazy (workspace-scoped).
 	for _, d := range m.Daemons {
-		if daemonFilter != "" && d.Name != daemonFilter {
+		if opts.DaemonFilter != "" && d.Name != opts.DaemonFilter {
 			continue
 		}
 		p.SchedulerTasks = append(p.SchedulerTasks, ScheduledTaskPlan{
@@ -840,7 +881,7 @@ func BuildPlan(m *config.ServerManifest, daemonFilter string) (*Plan, error) {
 		})
 	}
 	// Weekly refresh restarts the whole server, so it only makes sense for full installs.
-	if m.WeeklyRefresh && daemonFilter == "" {
+	if m.WeeklyRefresh && opts.DaemonFilter == "" {
 		p.SchedulerTasks = append(p.SchedulerTasks, ScheduledTaskPlan{
 			Name:    "mcp-local-hub-" + m.Name + "-weekly-refresh",
 			Command: canonicalPath,
@@ -850,7 +891,10 @@ func BuildPlan(m *config.ServerManifest, daemonFilter string) (*Plan, error) {
 	}
 	// Client updates — one per binding; with a filter, only bindings pointing at the chosen daemon.
 	for _, b := range m.ClientBindings {
-		if daemonFilter != "" && b.Daemon != daemonFilter {
+		if opts.DaemonFilter != "" && b.Daemon != opts.DaemonFilter {
+			continue
+		}
+		if !includeClient(b.Client) {
 			continue
 		}
 		daemon, ok := findDaemon(m, b.Daemon)
@@ -878,6 +922,37 @@ func BuildPlan(m *config.ServerManifest, daemonFilter string) (*Plan, error) {
 		})
 	}
 	return p, nil
+}
+
+func installClientPredicate(opts BuildPlanOpts) (func(string) bool, error) {
+	if opts.IncludeAllClients && len(opts.ClientsInclude) > 0 {
+		return nil, fmt.Errorf("IncludeAllClients is mutually exclusive with ClientsInclude")
+	}
+	if opts.IncludeAllClients {
+		return func(string) bool { return true }, nil
+	}
+	var names []string
+	if len(opts.ClientsInclude) > 0 {
+		names = opts.ClientsInclude
+	} else {
+		names = clients.DefaultInstallClientNames()
+	}
+	supported := map[string]bool{}
+	for _, name := range clients.SupportedClientNames() {
+		supported[name] = true
+	}
+	selected := map[string]bool{}
+	for _, name := range names {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+		if !supported[trimmed] {
+			return nil, fmt.Errorf("unknown client %q (expected %s)", trimmed, strings.Join(clients.SupportedClientNames(), " | "))
+		}
+		selected[trimmed] = true
+	}
+	return func(name string) bool { return selected[name] }, nil
 }
 
 func validateClientURLPath(urlPath string) error {
@@ -1277,22 +1352,7 @@ func pruneObsoleteServerTasks(sch schedulerLister, server string, planned map[st
 // Private helper owned by the api package; a parallel copy lives in cli for
 // commands that do not yet call through api (secrets, rollback).
 func clientConfigPath(name string) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	switch name {
-	case "claude-code":
-		return filepath.Join(home, ".claude.json"), nil
-	case "codex-cli":
-		return filepath.Join(home, ".codex", "config.toml"), nil
-	case "gemini-cli":
-		return filepath.Join(home, ".gemini", "settings.json"), nil
-	case "antigravity":
-		return filepath.Join(home, ".gemini", "antigravity", "mcp_config.json"), nil
-	default:
-		return "", fmt.Errorf("unknown client %q (expected claude-code | codex-cli | gemini-cli | antigravity)", name)
-	}
+	return clients.ConfigPathForName(name)
 }
 
 // Stop stops a running daemon without removing its scheduler task or client

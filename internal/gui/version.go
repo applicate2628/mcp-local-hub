@@ -50,7 +50,7 @@ func (s *Server) versionHandler(w http.ResponseWriter, r *http.Request) {
 		Platform:   runtime.GOOS + "/" + runtime.GOARCH,
 		Homepage:   "https://github.com/applicate2628/mcp-local-hub",
 		Issues:     "https://github.com/applicate2628/mcp-local-hub/issues",
-		Commercial: "https://github.com/applicate2628/mcp-local-hub/blob/master/COMMERCIAL.md",
+		Commercial: "https://github.com/applicate2628/mcp-local-hub/blob/master/README.md#license",
 		License:    "MPL-2.0",
 		Author:     "Dmitry Denisenko (@applicate2628)",
 	}
