@@ -32,15 +32,12 @@ type ScanOpts struct {
 // parameter, we conservatively keep them per-session unless the hub
 // enforces caller authentication and session ownership.
 //
-// gdb was previously listed here; PR #24 restored servers/gdb/manifest.yaml
-// as a hub-managed daemon because GDB-MCP has built-in session management
-// (modules/{gdb,lldb}/sessionManager.py) where each client call carries a
-// session_id, so one daemon serves N concurrent debug sessions safely.
-// Keeping gdb in this map after restoring the manifest would force
-// CanMigrate=false in scan results and contradict the manifest contract.
-// Codex bot review on PR #24.
+// gdb remains per-session until the hub enforces caller authentication
+// and session ownership for shared HTTP daemons. Upstream session_id
+// support alone is not sufficient to make migration safe.
 var perSessionServers = map[string]bool{
 	"playwright": true,
+	"gdb":        true,
 }
 
 // ScanFrom builds a unified cross-client view. Exposed (rather than Scan) so

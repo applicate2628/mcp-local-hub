@@ -1,5 +1,5 @@
 name: gdb
-kind: global
+kind: workspace-scoped
 transport: stdio-bridge
 command: uv
 base_args:
@@ -9,10 +9,8 @@ base_args:
   - "python"
   - "server.py"
 
-# GDB-MCP is a multi-debugger MCP server (gdb + lldb submodules) with built-in
-# session management (modules/gdb/sessionManager.py + modules/lldb/sessionManager.py).
-# Each client call includes a session_id; one daemon serves N concurrent debug
-# sessions. This is why it belongs on the hub instead of in perSessionServers.
+# Security note: this server remains workspace-scoped while hub-level
+# authentication/ownership checks for shared daemon POST requests are pending.
 
 daemons:
   - name: default
