@@ -24,6 +24,23 @@ name: CI
 on:
   pull_request:
     branches: [master]
+    # Skip CI when only docs/markdown change. Note: a PR that touches BOTH
+    # code AND docs still runs CI (paths-ignore is "if ALL changed paths
+    # match these globs, skip"). Adjust this list when adding new
+    # docs-only directories.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE*'
+      - '.gitignore'
+
+# Cancel in-flight CI when a new commit arrives on the same branch. Saves
+# ~70% of CI minutes during the typical "push fix-up, push fix-up" review
+# loop — the bot and the user only see the latest run, not stale results
+# from already-superseded commits.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-and-test:
