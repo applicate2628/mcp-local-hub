@@ -33,7 +33,7 @@ func TestEffectiveBackupKeepNFallbacks(t *testing.T) {
 	}{
 		{"missing key falls back to registry default", "", false, 5},
 		{"explicit value 3 is honored", "3", false, 3},
-		{"explicit value 0 disables pruning", "0", false, 0},
+		{"explicit value 0 normalizes to bounded retention", "0", false, 1},
 		{"non-integer falls back to registry default", "", true, 5},
 	}
 	for _, tc := range cases {

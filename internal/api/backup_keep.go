@@ -29,6 +29,13 @@ func (a *API) effectiveBackupKeepN() int {
 	if err != nil || n < 0 {
 		return fallback
 	}
+	// BackupKeep(0) means "write without pruning", but user-facing
+	// backups.keep_n=0 means "keep zero timestamped backups". Normalize to 1
+	// here so install/migrate writes stay bounded rather than growing
+	// unboundedly.
+	if n == 0 {
+		return 1
+	}
 	return n
 }
 
