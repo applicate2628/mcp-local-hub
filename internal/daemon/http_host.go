@@ -269,7 +269,15 @@ func (h *HTTPHost) stopLocked() error {
 	h.stopped = true
 	close(h.done)
 	if h.cmd != nil && h.cmd.Process != nil {
-		_ = killProcessTree(h.cmd.Process.Pid)
+		// Only tree-kill if the watcher has not already observed process
+		// exit. This avoids PID-reuse hazards from issuing a fresh
+		// PID-based taskkill/pkill after the original process is gone.
+		select {
+		case <-h.childExited:
+			// already exited; no kill needed
+		default:
+			_ = killProcessTree(h.cmd.Process.Pid)
+		}
 	}
 	select {
 	case <-h.childExited:
