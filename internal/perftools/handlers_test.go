@@ -232,6 +232,57 @@ func TestValidateClangTidyInputs_AllowsSafeArgs(t *testing.T) {
 	}
 }
 
+// TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag asserts the tool
+// handler surface returns IsError for path-valued llvm-objdump flags
+// like `--build-id=/tmp/foo` or `--dsym=/tmp/foo` that previously
+// passed the basic "starts with -" gate but read attacker-chosen
+// files.
+func TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag(t *testing.T) {
+	root := t.TempDir()
+	bin := filepath.Join(root, "build", "app.exe")
+	if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
+		t.Fatalf("mkdir build dir: %v", err)
+	}
+	if err := os.WriteFile(bin, []byte("fake"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	tb := &PerfToolbox{tools: &ToolCatalog{
+		LLVMObjdump: &ToolInfo{Installed: true, Path: "not-used"},
+	}}
+
+	cases := []struct {
+		name      string
+		extraArgs []string
+	}{
+		{"build-id-eq", []string{"--build-id=/tmp/foo"}},
+		{"build-id-bare", []string{"--build-id"}},
+		{"debug-file-directory-eq", []string{"--debug-file-directory=/tmp/foo"}},
+		{"dsym-eq", []string{"--dsym=/tmp/foo"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			args, _ := json.Marshal(map[string]any{
+				"binary":       bin,
+				"project_root": root,
+				"extra_args":   tc.extraArgs,
+			})
+			req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: args}}
+
+			res, err := tb.llvmObjdumpTool(t.Context(), req)
+			if err != nil {
+				t.Fatalf("llvmObjdumpTool: %v", err)
+			}
+			if !res.IsError {
+				t.Fatalf("expected IsError=true for hostile extra_args %v", tc.extraArgs)
+			}
+			if body := contentText(res); !strings.Contains(body, "path-valued") {
+				t.Fatalf("expected path-valued error, got: %s", body)
+			}
+		})
+	}
+}
+
 // contentText extracts the Text field from the first TextContent in a
 // CallToolResult. Used by every handler test in this file.
 func contentText(r *mcp.CallToolResult) string {

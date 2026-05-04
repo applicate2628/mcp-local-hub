@@ -47,14 +47,51 @@ export default defineConfig({
   // case (Host rewrite without Origin rewrite) still gets rejected, so
   // a future proxy edit that drops the hook fails closed instead of
   // silently bypassing CSRF.
+  //
+  // SECURITY (LAN deputy threat model):
+  //   The proxy rewrites Origin/Host to the backend's trusted-loopback
+  //   origin (`127.0.0.1:9125`). If the dev server itself is reachable
+  //   from the LAN (e.g. `npm run dev -- --host`), Vite would launder
+  //   LAN-attacker requests into the backend's loopback-only API —
+  //   classic confused-deputy. We defend in two layers:
+  //     1) `server.host = '127.0.0.1'` + `strictPort: true` keep the dev
+  //        server bound to loopback by default. NOTE: Vite's CLI `--host`
+  //        flag still overrides config, so layer 2 below is the actual
+  //        backstop, not just the bind.
+  //     2) The `configure(proxy)` hook below rejects any request whose
+  //        ORIGINAL `Host` header is non-loopback BEFORE `changeOrigin`
+  //        and the Origin rewrite run. That means a LAN attacker reaching
+  //        Vite via its LAN-bound listener cannot deputy-forward.
   server: {
+    host: "127.0.0.1",
+    strictPort: true,
     proxy: {
       "/api": {
         target: "http://127.0.0.1:9125",
         changeOrigin: true,
         ws: false,
         configure(proxy) {
-          proxy.on("proxyReq", (proxyReq, req) => {
+          proxy.on("proxyReq", (proxyReq, req, res) => {
+            // Layer 2 of the LAN-deputy guard (see comment block above):
+            // refuse to forward unless the browser-side Host header is
+            // loopback. We check the ORIGINAL `req.headers.host` (the
+            // value the client sent), not the post-rewrite Host that
+            // changeOrigin synthesises — that's always loopback by
+            // definition and would let LAN clients through.
+            const origHost = (req.headers.host || "").toLowerCase();
+            const ok =
+              origHost === "" ||
+              origHost.startsWith("localhost") ||
+              origHost.startsWith("127.0.0.1") ||
+              origHost.startsWith("[::1]");
+            if (!ok) {
+              if (res && !res.headersSent) {
+                res.statusCode = 403;
+                res.end("forbidden: Vite dev proxy is loopback-only");
+              }
+              proxyReq.destroy();
+              return;
+            }
             if (req.headers.origin) {
               proxyReq.setHeader("Origin", "http://127.0.0.1:9125");
             }

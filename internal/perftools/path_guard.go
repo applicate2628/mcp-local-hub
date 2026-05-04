@@ -79,18 +79,25 @@ func validateBinaryInsideRoot(projectRoot, targetPath, kind string) (string, err
 	return targetReal, nil
 }
 
-// validatePerfToolExtraArgs rejects extra_args entries that would let a
-// caller bypass the binary/file path guard by smuggling additional input
-// files into the subprocess argv. Both llvm-objdump and IWYU accept
-// multiple input files positionally and treat tokens starting with '@'
-// as response-file directives ("@FILE" reads more arguments from FILE).
+// validatePerfToolExtraArgsBasic rejects extra_args entries that would
+// let a caller bypass the binary/file path guard by smuggling additional
+// input files into the subprocess argv. Both llvm-objdump and IWYU
+// accept multiple input files positionally and treat tokens starting
+// with '@' as response-file directives ("@FILE" reads more arguments
+// from FILE).
 //
 // Rule: every entry must look like a flag — start with '-' or '--'.
 // Positional inputs and '@'-response-files are rejected because they
 // cannot be path-validated without re-implementing each tool's argv
-// grammar; a flag like "--demangle" or "--x86-asm-syntax=intel" cannot
-// be re-interpreted as a file path.
-func validatePerfToolExtraArgs(extra []string) error {
+// grammar.
+//
+// This is the shared base check. Each tool then layers its own
+// forbidden-flag-prefix list on top to reject path-VALUED flags
+// (e.g. `--build-id=<dir>`, `--mapping_file=<file>`) that would
+// otherwise pass the "starts with -" gate but read attacker-chosen
+// files outside project_root. See validateLLVMObjdumpExtraArgs and
+// validateIWYUExtraArgs.
+func validatePerfToolExtraArgsBasic(extra []string) error {
 	for _, a := range extra {
 		if a == "" {
 			return fmt.Errorf("invalid extra_args: empty entry not allowed")
@@ -103,4 +110,93 @@ func validatePerfToolExtraArgs(extra []string) error {
 		}
 	}
 	return nil
+}
+
+// forbiddenLLVMObjdumpFlagPrefixes lists llvm-objdump flags that take a
+// path value (file or directory). Allowing them in extra_args would let
+// a caller read arbitrary filesystem paths despite the project_root
+// guard on `binary` — llvm-objdump opens these paths with the running
+// process's privileges.
+//
+// Both spellings (`--flag=PATH` and `--flag PATH`) must be rejected:
+// the equals-form is caught by HasPrefix(arg, "--flag="), the
+// space-separated form is caught by exact equality (arg == "--flag")
+// because the value would land on the next argv slot which we can't
+// path-validate without re-implementing llvm-objdump's grammar.
+//
+// Reference: `llvm-objdump --help` documents these as path-valued.
+var forbiddenLLVMObjdumpFlagPrefixes = []string{
+	"--build-id",
+	"--debug-file-directory",
+	"--dsym",
+	"--prefix",
+	"--prefix-strip",
+}
+
+// validateLLVMObjdumpExtraArgs runs the shared basic check then rejects
+// path-valued llvm-objdump flags listed in
+// forbiddenLLVMObjdumpFlagPrefixes. Benign flags like `-d`, `--demangle`,
+// `--x86-asm-syntax=intel` continue to pass.
+func validateLLVMObjdumpExtraArgs(extra []string) error {
+	if err := validatePerfToolExtraArgsBasic(extra); err != nil {
+		return err
+	}
+	for _, a := range extra {
+		if matchesForbiddenFlagPrefix(a, forbiddenLLVMObjdumpFlagPrefixes) {
+			return fmt.Errorf("invalid extra_args: %q is a path-valued llvm-objdump flag; not allowed in extra_args because it bypasses the project_root guard", a)
+		}
+	}
+	return nil
+}
+
+// forbiddenIWYUFlagPrefixes lists IWYU flags whose value is a filesystem
+// path. IWYU exposes these via the `-Xiwyu` pass-through, so the
+// HasPrefix check covers both `-Xiwyu --mapping_file=PATH` (where
+// `-Xiwyu` is one arg and `--mapping_file=PATH` is the next) and the
+// degenerate cases.
+//
+// `-Xiwyu` itself is also rejected as a bare token because the next
+// argv slot is unbounded — we cannot path-validate it without
+// re-implementing IWYU's grammar.
+//
+// Plain clang flags `-std=...`, `-I...`, `-D...`, `-W...` are NOT
+// rejected: they affect compile semantics, not file access via IWYU's
+// own flag set.
+var forbiddenIWYUFlagPrefixes = []string{
+	"-Xiwyu",
+	"--mapping_file",
+	"--export_mappings",
+	"--check_also",
+	"--keep",
+}
+
+// validateIWYUExtraArgs runs the shared basic check then rejects
+// path-valued IWYU flags. Returns the original args unchanged on
+// success — the signature returns the slice so future callers can
+// add rewriting (e.g. canonicalizing relative paths inside extra_args)
+// without changing the call sites.
+func validateIWYUExtraArgs(extra []string) ([]string, error) {
+	if err := validatePerfToolExtraArgsBasic(extra); err != nil {
+		return nil, err
+	}
+	for _, a := range extra {
+		if matchesForbiddenFlagPrefix(a, forbiddenIWYUFlagPrefixes) {
+			return nil, fmt.Errorf("invalid extra_args: %q is a path-valued IWYU flag; not allowed in extra_args because it bypasses the project_root guard", a)
+		}
+	}
+	return extra, nil
+}
+
+// matchesForbiddenFlagPrefix returns true when arg equals any forbidden
+// prefix (the bare-flag-with-separate-value form, e.g. `--mapping_file
+// /etc/passwd`) or starts with `<prefix>=` (the equals-form). No other
+// prefix-matching is performed — `--build-id` must not falsely match
+// `--build-id-something-unrelated`.
+func matchesForbiddenFlagPrefix(arg string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if arg == p || strings.HasPrefix(arg, p+"=") {
+			return true
+		}
+	}
+	return false
 }

@@ -44,13 +44,16 @@ func (tb *PerfToolbox) llvmObjdumpTool(ctx context.Context, req *mcp.CallToolReq
 	if err != nil {
 		return errResult(err.Error()), nil
 	}
-	// extra_args runs through validatePerfToolExtraArgs to block
-	// positional input files and @-response-file directives that would
-	// bypass the safeBinary guard. llvm-objdump accepts multiple input
-	// files; without this check, extra_args=["@/etc/passwd"] or
+	// extra_args runs through validateLLVMObjdumpExtraArgs to block
+	// (a) positional input files and @-response-file directives that
+	// would bypass the safeBinary guard (llvm-objdump accepts multiple
+	// input files; without this check, extra_args=["@/etc/passwd"] or
 	// extra_args=["/path/to/secret.bin"] would be honored alongside
-	// safeBinary at the end of cmdArgs.
-	if err := validatePerfToolExtraArgs(args.ExtraArgs); err != nil {
+	// safeBinary), and (b) path-valued llvm-objdump flags such as
+	// `--build-id=<dir>`, `--debug-file-directory=<dir>`, `--dsym=<file>`
+	// that read arbitrary filesystem locations even when the binary
+	// argument is path-bounded.
+	if err := validateLLVMObjdumpExtraArgs(args.ExtraArgs); err != nil {
 		return errResult(err.Error()), nil
 	}
 

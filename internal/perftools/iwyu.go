@@ -85,12 +85,16 @@ func (tb *PerfToolbox) iwyuTool(ctx context.Context, req *mcp.CallToolRequest) (
 	// extra_args must be flags only — IWYU also accepts multiple input
 	// files positionally and uses '@FILE' response-file syntax. Without
 	// this check, extra_args=["/etc/passwd"] or extra_args=["@evil"]
-	// would smuggle inputs alongside safeFile.
-	if err := validatePerfToolExtraArgs(args.ExtraArgs); err != nil {
+	// would smuggle inputs alongside safeFile. validateIWYUExtraArgs
+	// also rejects IWYU's path-valued passthrough flags such as
+	// `-Xiwyu --mapping_file=<file>` and `-Xiwyu --export_mappings=<dir>`
+	// that would read attacker-chosen paths even when `file` is bounded.
+	safeExtra, err := validateIWYUExtraArgs(args.ExtraArgs)
+	if err != nil {
 		return errResult(err.Error()), nil
 	}
 
-	cmdArgs := append([]string{}, args.ExtraArgs...)
+	cmdArgs := append([]string{}, safeExtra...)
 	cmdArgs = append(cmdArgs, safeFile)
 
 	// args.ProjectRoot is the still-user-supplied form here; switching

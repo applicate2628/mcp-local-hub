@@ -272,7 +272,9 @@ func TestManifestEditIn_AtomicWrite_TargetUnchangedOnFailure(t *testing.T) {
 // "../escaped", or an absolute path could escape the manifest root —
 // for ManifestDeleteIn that would have meant os.RemoveAll on an
 // arbitrary directory. The name validator rejects anything outside
-// [a-z0-9][a-z0-9._-]*.
+// [a-z0-9][a-z0-9._-]*. It also rejects reserved Windows device names
+// (CON/PRN/AUX/NUL/COMn/LPTn, case-insensitive, with-or-without
+// extension) and trailing-dot/space aliases that Windows would rewrite.
 func TestManifestCRUD_RejectsPathTraversalNames(t *testing.T) {
 	a := NewAPI()
 	tmp := t.TempDir()
@@ -291,6 +293,28 @@ func TestManifestCRUD_RejectsPathTraversalNames(t *testing.T) {
 		"",
 		" space",
 		"name with spaces",
+		// Reserved Windows device names — bare. Lower-case is what
+		// validManifestName allows; CON/Con etc. are already rejected
+		// by the regex's charset, but the new rejector defends in depth
+		// at the post-regex layer.
+		"con",
+		"prn",
+		"aux",
+		"nul",
+		"com1",
+		"com9",
+		"lpt1",
+		"lpt9",
+		// Reserved-with-extension: Windows treats `nul.yaml` as the
+		// nul device too (extension is immaterial for these names).
+		"con.txt",
+		"nul.yaml",
+		"aux.json",
+		"lpt1.json",
+		"com1.dat",
+		// Trailing-dot alias: `foo.` is a regex-valid name but Windows
+		// rewrites it to `foo`, leading to ambiguous targets.
+		"foo.",
 	}
 
 	for _, bad := range cases {
@@ -316,6 +340,71 @@ func TestManifestCRUD_RejectsPathTraversalNames(t *testing.T) {
 		}
 		if _, _, err := a.ManifestGetInWithHash(tmp, bad); err == nil {
 			t.Errorf("ManifestGetInWithHash(_, %q): expected rejection, got nil", bad)
+		}
+	}
+}
+
+// TestCheckManifestName_AcceptsLegitNamesWithReservedPrefix asserts
+// that the new Windows-reserved-name layer does NOT have a
+// false-positive on legitimate names whose lower-case form merely
+// STARTS with a reserved device name (e.g. `confidence` starts with
+// `con`, `nullptr-helper` starts with `nul`). The rule is exact match
+// of the part-before-first-dot, not a prefix.
+func TestCheckManifestName_AcceptsLegitNamesWithReservedPrefix(t *testing.T) {
+	cases := []string{
+		"confidence",
+		"console-bridge",
+		"nullptr-helper",
+		"auxiliary",
+		"prndaemon",
+		"com10", // not in [com0..com9]
+		"lpt10",
+		// The reserved-name rule is exact-match-on-base; a legit
+		// name like `console.txt` (regex-valid) must also pass.
+		"console.txt",
+	}
+	for _, n := range cases {
+		if err := checkManifestName(n); err != nil {
+			t.Errorf("checkManifestName(%q): expected ok, got %v", n, err)
+		}
+	}
+}
+
+// TestRejectWindowsReservedManifestName_TableDriven exercises the
+// helper directly — covers the case-insensitive contract (the helper
+// must work even when called with mixed-case input that bypassed the
+// regex for some reason) and the trailing-space variant that the
+// regex already rejects on the wrapper side.
+func TestRejectWindowsReservedManifestName_TableDriven(t *testing.T) {
+	bad := []string{
+		"con", "CON", "Con",
+		"prn", "aux", "nul",
+		"com1", "COM9",
+		"lpt1", "LPT9",
+		"con.txt", "CON.TXT",
+		"nul.yaml",
+		"aux.json",
+		"foo.",
+		"foo ",
+	}
+	for _, n := range bad {
+		if err := rejectWindowsReservedManifestName(n); err == nil {
+			t.Errorf("rejectWindowsReservedManifestName(%q): expected rejection, got nil", n)
+		}
+	}
+	good := []string{
+		"",
+		"foo",
+		"confidence",
+		"console-bridge",
+		"nullptr",
+		"com10",
+		"lpt10",
+		"my-server",
+	}
+	for _, n := range good {
+		if err := rejectWindowsReservedManifestName(n); err != nil {
+			t.Errorf("rejectWindowsReservedManifestName(%q): expected ok, got %v", n, err)
 		}
 	}
 }

@@ -104,11 +104,11 @@ func TestValidateLLVMObjdumpBinaryPath_RejectsSymlinkEscape(t *testing.T) {
 	}
 }
 
-// TestValidatePerfToolExtraArgs_AllowsFlags asserts the valid surface:
-// short flags, long flags, and equals-shaped long flags pass through.
-// These are the only forms llvm-objdump's argv grammar supports
-// without smuggling additional input files.
-func TestValidatePerfToolExtraArgs_AllowsFlags(t *testing.T) {
+// TestValidateLLVMObjdumpExtraArgs_AllowsFlags asserts the valid
+// surface: short flags, long flags, and equals-shaped long flags
+// pass through. These are the only forms llvm-objdump's argv grammar
+// supports without smuggling additional input files.
+func TestValidateLLVMObjdumpExtraArgs_AllowsFlags(t *testing.T) {
 	cases := [][]string{
 		{"-d"},
 		{"--demangle"},
@@ -117,18 +117,18 @@ func TestValidatePerfToolExtraArgs_AllowsFlags(t *testing.T) {
 		{"-d", "--demangle", "--x86-asm-syntax=intel"},
 	}
 	for _, c := range cases {
-		if err := validatePerfToolExtraArgs(c); err != nil {
-			t.Errorf("validatePerfToolExtraArgs(%q): expected ok, got %v", c, err)
+		if err := validateLLVMObjdumpExtraArgs(c); err != nil {
+			t.Errorf("validateLLVMObjdumpExtraArgs(%q): expected ok, got %v", c, err)
 		}
 	}
 }
 
-// TestValidatePerfToolExtraArgs_RejectsResponseFile guards the
+// TestValidateLLVMObjdumpExtraArgs_RejectsResponseFile guards the
 // '@FILE' bypass: llvm-objdump and IWYU both honor "@/path/to/file"
 // as a response-file directive that injects more arguments. Allowing
 // those would let an attacker smuggle alternate input files past the
 // project_root path guard.
-func TestValidatePerfToolExtraArgs_RejectsResponseFile(t *testing.T) {
+func TestValidateLLVMObjdumpExtraArgs_RejectsResponseFile(t *testing.T) {
 	cases := [][]string{
 		{"@evil"},
 		{"@/etc/passwd"},
@@ -136,23 +136,23 @@ func TestValidatePerfToolExtraArgs_RejectsResponseFile(t *testing.T) {
 		{`@C:\Users\user\secret.txt`},
 	}
 	for _, c := range cases {
-		err := validatePerfToolExtraArgs(c)
+		err := validateLLVMObjdumpExtraArgs(c)
 		if err == nil {
-			t.Errorf("validatePerfToolExtraArgs(%q): expected rejection, got nil", c)
+			t.Errorf("validateLLVMObjdumpExtraArgs(%q): expected rejection, got nil", c)
 			continue
 		}
 		if !strings.Contains(err.Error(), "must be a flag") {
-			t.Errorf("validatePerfToolExtraArgs(%q): expected flag-only error, got %v", c, err)
+			t.Errorf("validateLLVMObjdumpExtraArgs(%q): expected flag-only error, got %v", c, err)
 		}
 	}
 }
 
-// TestValidatePerfToolExtraArgs_RejectsPositional guards the
+// TestValidateLLVMObjdumpExtraArgs_RejectsPositional guards the
 // "additional input file" bypass: llvm-objdump accepts multiple input
 // files positionally. Allowing those would let extra_args=["foo.o"]
 // or extra_args=["/etc/passwd"] read alternate files alongside the
 // path-validated `binary` argument.
-func TestValidatePerfToolExtraArgs_RejectsPositional(t *testing.T) {
+func TestValidateLLVMObjdumpExtraArgs_RejectsPositional(t *testing.T) {
 	cases := [][]string{
 		{"foo.o"},
 		{"/etc/passwd"},
@@ -161,14 +161,78 @@ func TestValidatePerfToolExtraArgs_RejectsPositional(t *testing.T) {
 		{""},
 	}
 	for _, c := range cases {
-		err := validatePerfToolExtraArgs(c)
+		err := validateLLVMObjdumpExtraArgs(c)
 		if err == nil {
-			t.Errorf("validatePerfToolExtraArgs(%q): expected rejection, got nil", c)
+			t.Errorf("validateLLVMObjdumpExtraArgs(%q): expected rejection, got nil", c)
 			continue
 		}
 		if !strings.Contains(err.Error(), "must be a flag") &&
 			!strings.Contains(err.Error(), "empty entry") {
-			t.Errorf("validatePerfToolExtraArgs(%q): expected flag-only or empty error, got %v", c, err)
+			t.Errorf("validateLLVMObjdumpExtraArgs(%q): expected flag-only or empty error, got %v", c, err)
+		}
+	}
+}
+
+// TestValidateLLVMObjdumpExtraArgs_RejectsPathValuedFlags guards the
+// path-valued-flag bypass that the original "starts with '-'" check
+// missed. llvm-objdump accepts several flags whose value is a
+// filesystem path (file or directory); allowing them in extra_args
+// would let a caller read paths outside project_root despite the
+// `binary` guard. Both the equals-form (`--flag=PATH`) and the
+// space-separated form (`--flag PATH`) must be rejected.
+func TestValidateLLVMObjdumpExtraArgs_RejectsPathValuedFlags(t *testing.T) {
+	cases := [][]string{
+		{"--build-id=/tmp/foo"},
+		{"--build-id"},
+		{"--debug-file-directory=/tmp/foo"},
+		{"--debug-file-directory"},
+		{"--dsym=/tmp/foo.dSYM"},
+		{"--dsym"},
+		{"--prefix=/tmp/foo"},
+		{"--prefix-strip=/tmp/foo"},
+		{"--demangle", "--build-id=/etc"},
+	}
+	for _, c := range cases {
+		err := validateLLVMObjdumpExtraArgs(c)
+		if err == nil {
+			t.Errorf("validateLLVMObjdumpExtraArgs(%q): expected rejection, got nil", c)
+			continue
+		}
+		if !strings.Contains(err.Error(), "path-valued") {
+			t.Errorf("validateLLVMObjdumpExtraArgs(%q): expected path-valued error, got %v", c, err)
+		}
+	}
+}
+
+// TestMatchesForbiddenFlagPrefix_DoesNotFalseMatch asserts that the
+// prefix matcher rejects ONLY exact equality and the equals-form
+// (`--flag=...`), so a future longer flag that happens to start with
+// `--build-id` (e.g. a hypothetical `--build-id-something-unrelated`)
+// does not get incorrectly flagged.
+func TestMatchesForbiddenFlagPrefix_DoesNotFalseMatch(t *testing.T) {
+	prefixes := []string{"--build-id", "--prefix"}
+	// These must NOT match (false positive guard).
+	notMatch := []string{
+		"--build-id-something-unrelated",
+		"--prefix-but-different",
+		"--build",
+		"-b",
+	}
+	for _, a := range notMatch {
+		if matchesForbiddenFlagPrefix(a, prefixes) {
+			t.Errorf("matchesForbiddenFlagPrefix(%q) = true, want false", a)
+		}
+	}
+	// These MUST match (true positives).
+	match := []string{
+		"--build-id",
+		"--build-id=/tmp",
+		"--prefix",
+		"--prefix=/tmp",
+	}
+	for _, a := range match {
+		if !matchesForbiddenFlagPrefix(a, prefixes) {
+			t.Errorf("matchesForbiddenFlagPrefix(%q) = false, want true", a)
 		}
 	}
 }
