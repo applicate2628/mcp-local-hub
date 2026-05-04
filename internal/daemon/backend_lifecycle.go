@@ -288,7 +288,8 @@ func (b *mcpLanguageServerStdio) Materialize(ctx context.Context) (MCPEndpoint, 
 	if err != nil {
 		return nil, err
 	}
-	if err := h.Start(ctx); err != nil {
+	startCtx := context.WithoutCancel(ctx)
+	if err := h.Start(startCtx); err != nil {
 		return nil, wrapInitErr(err)
 	}
 	// Bootstrap the backend's MCP session BEFORE publishing the endpoint.
@@ -369,7 +370,8 @@ func (b *goplsMCPStdio) Materialize(ctx context.Context) (MCPEndpoint, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := h.Start(ctx); err != nil {
+	startCtx := context.WithoutCancel(ctx)
+	if err := h.Start(startCtx); err != nil {
 		return nil, wrapInitErr(err)
 	}
 	// Bootstrap the backend's MCP session BEFORE publishing the endpoint.
