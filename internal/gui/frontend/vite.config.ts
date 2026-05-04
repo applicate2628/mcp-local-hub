@@ -78,12 +78,28 @@ export default defineConfig({
             // value the client sent), not the post-rewrite Host that
             // changeOrigin synthesises — that's always loopback by
             // definition and would let LAN clients through.
-            const origHost = (req.headers.host || "").toLowerCase();
+            //
+            // Codex P2 (PR #51 r2): exact host-token match. Earlier code
+            // used .startsWith("localhost") which let `localhost.attacker.tld`
+            // and similar prefixed hostnames pass the gate. Parse host portion
+            // (strip :port and IPv6 brackets) and equality-match the loopback
+            // allowlist.
+            const origHost = (req.headers.host || "").toLowerCase().trim();
+            // Strip port. IPv6 forms are `[::1]:5173` or `[::1]`; IPv4/name
+            // forms are `host:port` or `host`.
+            let hostOnly: string;
+            if (origHost.startsWith("[")) {
+              const close = origHost.indexOf("]");
+              hostOnly = close >= 0 ? origHost.slice(1, close) : origHost.slice(1);
+            } else {
+              const colon = origHost.lastIndexOf(":");
+              hostOnly = colon >= 0 ? origHost.slice(0, colon) : origHost;
+            }
             const ok =
               origHost === "" ||
-              origHost.startsWith("localhost") ||
-              origHost.startsWith("127.0.0.1") ||
-              origHost.startsWith("[::1]");
+              hostOnly === "localhost" ||
+              hostOnly === "127.0.0.1" ||
+              hostOnly === "::1";
             if (!ok) {
               if (res && !res.headersSent) {
                 res.statusCode = 403;
