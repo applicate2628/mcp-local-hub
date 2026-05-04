@@ -69,11 +69,9 @@ type StdioHost struct {
 	// machinery without duplication.
 	bridge *ProtocolBridge
 
-	// SSE subscribers: GET /mcp opens a server-sent-events stream that
-	// receives subprocess-originated notifications (JSON-RPC messages with
-	// no `id` or unrouted ids). Each subscriber holds one buffered channel.
-	// Subscriptions are session-scoped via validSession; sseActive caps the
-	// number of concurrent streams so a client cannot exhaust goroutines.
+	// SSE subscribers: GET /mcp opens a server-sent-events stream. We do not
+	// broadcast unrouted subprocess output because it cannot be attributed to
+	// a specific HTTP caller safely.
 	sseMu      sync.Mutex
 	sseClients []chan []byte
 	sseActive  atomic.Int32
@@ -343,18 +341,6 @@ func (h *StdioHost) readStdoutLoop() {
 				}
 			}
 		}
-		// Unrouted line = notification or untracked id → fan out to SSE
-		// subscribers so Streamable HTTP clients receive server-initiated
-		// traffic. Non-blocking send: a slow subscriber cannot stall the
-		// reader loop for other clients.
-		h.sseMu.Lock()
-		for _, c := range h.sseClients {
-			select {
-			case c <- line:
-			default:
-			}
-		}
-		h.sseMu.Unlock()
 		// Also keep the testStdout path for tests that watch raw output.
 		select {
 		case h.testStdout <- line:
