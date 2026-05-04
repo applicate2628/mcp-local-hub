@@ -750,8 +750,9 @@ func (a *API) Uninstall(server string) (*UninstallReport, error) {
 		return nil, err
 	}
 	report := &UninstallReport{Server: m.Name}
-	// Delete all tasks that begin with our prefix.
-	prefix := "mcp-local-hub-" + m.Name
+	// Delete only this server's tasks. Trailing '-' prevents collisions with
+	// similarly-prefixed servers (e.g. "foo" vs "foobar").
+	prefix := "mcp-local-hub-" + m.Name + "-"
 	tasks, err := sch.List(prefix)
 	if err != nil {
 		return nil, err
