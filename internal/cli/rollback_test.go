@@ -85,3 +85,30 @@ func TestFindLatestBackupSentinelOnly(t *testing.T) {
 		t.Errorf("expected empty (only sentinel present), got %q", got)
 	}
 }
+
+func TestFindLatestBackupSkipsInvalidAndNonRegularEntries(t *testing.T) {
+	dir := t.TempDir()
+	live := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(live, []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	base := live + ".bak-mcp-local-hub-"
+	if err := os.Mkdir(base+"99999999-999999", 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(base+"not-a-timestamp", []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	want := base + "20260418-030645"
+	if err := os.WriteFile(want, []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := findLatestBackup(live)
+	if err != nil {
+		t.Fatalf("findLatestBackup: %v", err)
+	}
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
