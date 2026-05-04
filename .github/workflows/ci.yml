@@ -4,6 +4,21 @@ name: CI
 # so the project stays Linux-server-deployable (per Phase 3B-II §F1-F7
 # roadmap in docs/superpowers/plans/phase-3b-ii-backlog.md).
 #
+# CI minute budget is tight. CI does NOT auto-trigger on PRs — open a PR,
+# iterate locally with `go test ./...`, then explicitly request CI ONLY
+# when the work is finished and you want a final cross-platform sweep
+# before merge. This keeps GitHub Actions minutes free for the moments
+# that actually need them.
+#
+# How to trigger CI on a PR or branch:
+#
+#   1. Actions tab → "CI" workflow → "Run workflow" → pick branch.
+#   2. Or from CLI:  `gh workflow run ci.yml --ref <branch> -f reason=<why>`
+#
+# CI also runs automatically on pushes to master (post-merge sanity check
+# so a broken main is caught immediately), and on tag pushes (release
+# verification). Neither path adds noise during the normal review loop.
+#
 # Job split:
 #   - build-and-test: ubuntu-latest + windows-latest. Each runs
 #     `go vet ./...`, `go build ./...`, `go test ./...`. Build-tag
@@ -12,8 +27,6 @@ name: CI
 #   - cross-compile: ubuntu-latest cross-builds for darwin/amd64 and
 #     darwin/arm64 to catch macOS regressions without spinning up a
 #     macos-latest runner (those minutes cost 10x more on GitHub-hosted).
-#     Cross-build is build-only — no test execution on macOS until F6
-#     (libproc-based process probe) lands.
 #
 # Out of scope here:
 #   - E2E browser tests live under internal/gui/e2e/ and are pinned to
@@ -22,22 +35,25 @@ name: CI
 #     which 500s /api/status — those tests can't run on ubuntu yet.
 
 on:
-  pull_request:
-    branches: [master]
-    # Skip CI when only docs/markdown change. Note: a PR that touches BOTH
-    # code AND docs still runs CI (paths-ignore is "if ALL changed paths
-    # match these globs, skip"). Adjust this list when adding new
-    # docs-only directories.
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'LICENSE*'
-      - '.gitignore'
+  # Manual trigger — the primary path for PR review checkpoints. Pass a
+  # short reason so the run history is self-documenting.
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why running CI now (review checkpoint, pre-merge, etc.)"
+        required: false
+        default: "manual"
 
-# Cancel in-flight CI when a new commit arrives on the same branch. Saves
-# ~70% of CI minutes during the typical "push fix-up, push fix-up" review
-# loop — the bot and the user only see the latest run, not stale results
-# from already-superseded commits.
+  # Run on master after merge to catch regressions in the main branch
+  # immediately. This is the safety net that makes the manual-only PR
+  # model OK — even if reviewers forget to manually run CI before merge,
+  # this catches a broken master within minutes.
+  push:
+    branches: [master]
+    tags: ["v*"]
+
+# Cancel superseded runs on the same ref. Useful when triggering manually
+# multiple times on the same branch — the latest manual request wins.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -45,9 +61,6 @@ concurrency:
 jobs:
   build-and-test:
     name: build-and-test (${{ matrix.os }})
-    # Skip CI on draft PRs. Convert a PR to draft (`gh pr ready --undo`)
-    # to pause CI on it; mark ready for review (`gh pr ready`) to resume.
-    if: github.event.pull_request.draft == false
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -86,7 +99,6 @@ jobs:
 
   cross-compile:
     name: cross-compile (darwin)
-    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
 
     steps:
