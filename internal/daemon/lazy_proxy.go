@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -197,6 +199,14 @@ func (p *LazyProxy) handleMCP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !isJSONContentType(r.Header.Get("Content-Type")) {
+		http.Error(w, "unsupported media type", http.StatusUnsupportedMediaType)
+		return
+	}
+	if !isAllowedOrigin(r.Header.Get("Origin")) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20)) // 4 MiB cap
 	if err != nil {
 		writeRPCError(w, nil, rpcErrParseError, "read body: "+err.Error())
@@ -256,6 +266,26 @@ func (p *LazyProxy) handleMCP(w http.ResponseWriter, r *http.Request) {
 		// LastToolsCallAt timestamp.
 		p.handleForward(w, r, &req)
 	}
+}
+
+func isJSONContentType(contentType string) bool {
+	if contentType == "" {
+		return false
+	}
+	mt, _, err := mime.ParseMediaType(contentType)
+	return err == nil && mt == "application/json"
+}
+
+func isAllowedOrigin(origin string) bool {
+	if origin == "" || origin == "null" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
 func (p *LazyProxy) handleToolsCall(w http.ResponseWriter, r *http.Request, req *JSONRPCRequest) {

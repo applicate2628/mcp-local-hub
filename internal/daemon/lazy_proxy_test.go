@@ -136,6 +136,18 @@ func postRPC(t *testing.T, h http.Handler, method string, id int) *httptest.Resp
 	return rr
 }
 
+func postRPCWithHeaders(t *testing.T, h http.Handler, method string, id int, headers map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+	body := fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":%q,"params":{}}`, id, method)
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	return rr
+}
+
 func parseRPC(t *testing.T, body []byte) map[string]any {
 	t.Helper()
 	var got map[string]any
@@ -194,6 +206,35 @@ func TestLazyProxy_InitializeSyntheticNoMaterialize(t *testing.T) {
 	}
 	if f.materializeCount.Load() != 0 {
 		t.Errorf("initialize triggered materialize: count=%d", f.materializeCount.Load())
+	}
+}
+
+func TestLazyProxy_RejectsNonJSONContentType(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server"}
+	p, _ := newTestProxy(t, "mcp-language-server", f)
+	rr := postRPCWithHeaders(t, p.Handler(), "tools/list", 1, map[string]string{
+		"Content-Type": "text/plain",
+	})
+	if rr.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("code = %d, want 415; body=%s", rr.Code, rr.Body.String())
+	}
+	if f.materializeCount.Load() != 0 {
+		t.Errorf("request triggered materialize: count=%d", f.materializeCount.Load())
+	}
+}
+
+func TestLazyProxy_RejectsCrossSiteOrigin(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server"}
+	p, _ := newTestProxy(t, "mcp-language-server", f)
+	rr := postRPCWithHeaders(t, p.Handler(), "tools/list", 1, map[string]string{
+		"Content-Type": "application/json",
+		"Origin":       "https://attacker.example",
+	})
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("code = %d, want 403; body=%s", rr.Code, rr.Body.String())
+	}
+	if f.materializeCount.Load() != 0 {
+		t.Errorf("request triggered materialize: count=%d", f.materializeCount.Load())
 	}
 }
 
