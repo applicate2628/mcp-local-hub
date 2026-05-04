@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/daemon"
@@ -65,15 +67,15 @@ func resolveRelayURL(server, daemonName, explicitURL string) (string, error) {
 	if server == "" || daemonName == "" {
 		return "", errors.New("either --url or both --server and --daemon are required")
 	}
-	// Read the manifest out of the binary's embedded FS. Relay is
-	// typically invoked by a stdio client from the user's project cwd,
-	// so the old disk-resolution path (servers/<name>/manifest.yaml next
-	// to the exe) broke the moment the canonical binary sat in
-	// ~/.local/bin without a sibling source tree. The embed FS always
-	// travels with the binary.
+	// Use embed-first resolution with deterministic on-disk fallback so
+	// disk-only dev/custom manifests stay usable with relay too.
 	data, err := servers.Manifests.ReadFile(server + "/manifest.yaml")
 	if err != nil {
-		return "", fmt.Errorf("load embedded manifest %s: %w", server, err)
+		path := filepath.Join(relayManifestDir(), server, "manifest.yaml")
+		data, err = os.ReadFile(path)
+		if err != nil {
+			return "", fmt.Errorf("load manifest %s: %w", server, err)
+		}
 	}
 	m, err := config.ParseManifest(bytes.NewReader(data))
 	if err != nil {
@@ -85,4 +87,21 @@ func resolveRelayURL(server, daemonName, explicitURL string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no daemon %q in manifest %s", daemonName, server)
+}
+
+func relayManifestDir() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return filepath.Join(string(os.PathSeparator), "nonexistent", "mcphub", "servers")
+	}
+	exeDir := filepath.Dir(exe)
+	sibling := filepath.Join(exeDir, "servers")
+	if st, err := os.Stat(sibling); err == nil && st.IsDir() {
+		return sibling
+	}
+	parent := filepath.Join(exeDir, "..", "servers")
+	if st, err := os.Stat(parent); err == nil && st.IsDir() {
+		return parent
+	}
+	return sibling
 }
