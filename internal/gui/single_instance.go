@@ -666,6 +666,20 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 		v.Hint = "Operator cancelled (Ctrl+C/SIGTERM) before the destructive step; no kill was attempted."
 		return nil, v, err
 	}
+	// Re-validate process identity in the smallest possible window
+	// before kill to reduce PID-reuse risk between gate-pass and the
+	// destructive syscall. Gate this on Expected being present (the
+	// cli always sets it) to preserve older direct-call test seams.
+	if !opts.Expected.IsZero() {
+		if idNow, idErr := processID(v.PID); idErr == nil && idNow.Alive {
+			if !v.PIDStart.IsZero() && !idNow.StartTime.IsZero() && !idNow.StartTime.Equal(v.PIDStart) {
+				v.Class = VerdictKillRefused
+				v.Diagnose = fmt.Sprintf("recorded PID %d changed start-time between probe and kill (%s -> %s)", v.PID, v.PIDStart.Format(time.RFC3339Nano), idNow.StartTime.Format(time.RFC3339Nano))
+				v.Hint = "PID identity changed before kill; rerun without --force or retry --force --kill to re-probe safely."
+				return nil, v, fmt.Errorf("kill refused: PID identity changed pre-kill")
+			}
+		}
+	}
 	//
 	// killProcessOverride is the test seam for the kill helper.
 	// Lets the wait-for-exit unit test (Codex iter-9 P2 #2) replace
