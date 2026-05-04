@@ -191,6 +191,9 @@ func (p *LazyProxy) inflightKey() string {
 
 // handleMCP is the per-request dispatch.
 func (p *LazyProxy) handleMCP(w http.ResponseWriter, r *http.Request) {
+	if rejectUnsafeLoopbackRequest(w, r) {
+		return
+	}
 	if r.Method == http.MethodGet {
 		p.handleSSE(w, r)
 		return

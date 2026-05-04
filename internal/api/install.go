@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -173,7 +172,7 @@ func (a *API) Install(opts InstallOpts) error {
 	if err != nil {
 		return fmt.Errorf("load manifest %s: %w", opts.Server, err)
 	}
-	m, err := config.ParseManifest(bytes.NewReader(data))
+	m, err := parseManifestForName(opts.Server, data)
 	if err != nil {
 		return err
 	}
@@ -228,7 +227,7 @@ func (a *API) InstallAllWithOpts(opts InstallAllOpts) []InstallResult {
 		// fatal — the normal install path will surface the same error
 		// with its usual wrapping — so we fall through on failure.
 		if data, derr := loadManifestYAMLEmbedFirst(name); derr == nil {
-			if mf, perr := config.ParseManifest(bytes.NewReader(data)); perr == nil && mf.Kind == config.KindWorkspaceScoped {
+			if mf, perr := parseManifestForName(name, data); perr == nil && mf.Kind == config.KindWorkspaceScoped {
 				skipped = append(skipped, name)
 				continue
 			}
@@ -271,10 +270,8 @@ func (a *API) InstallAllFrom(opts InstallAllOpts) []InstallResult {
 			continue
 		}
 		// Skip workspace-scoped manifests — same contract as InstallAll.
-		if f, oerr := os.Open(manifestPath); oerr == nil {
-			mf, perr := config.ParseManifest(f)
-			_ = f.Close()
-			if perr == nil && mf.Kind == config.KindWorkspaceScoped {
+		if data, oerr := os.ReadFile(manifestPath); oerr == nil {
+			if mf, perr := parseManifestForName(e.Name(), data); perr == nil && mf.Kind == config.KindWorkspaceScoped {
 				skipped = append(skipped, e.Name())
 				continue
 			}
@@ -306,7 +303,7 @@ func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 	if err != nil {
 		return fmt.Errorf("load manifest %s: %w", opts.Server, err)
 	}
-	m, err := config.ParseManifest(bytes.NewReader(data))
+	m, err := parseManifestForName(opts.Server, data)
 	if err != nil {
 		return err
 	}
@@ -336,12 +333,11 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 		w = os.Stderr
 	}
 	manifestPath := filepath.Join(manifestDir, opts.Server, "manifest.yaml")
-	f, err := os.Open(manifestPath)
+	data, err := os.ReadFile(manifestPath)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", manifestPath, err)
 	}
-	defer f.Close()
-	m, err := config.ParseManifest(f)
+	m, err := parseManifestForName(opts.Server, data)
 	if err != nil {
 		return err
 	}
@@ -753,7 +749,7 @@ func (a *API) Uninstall(server string) (*UninstallReport, error) {
 		}
 		return nil, fmt.Errorf("load manifest %s: %w", server, err)
 	}
-	m, err := config.ParseManifest(bytes.NewReader(data))
+	m, err := parseManifestForName(server, data)
 	if err != nil {
 		return nil, err
 	}
@@ -1578,7 +1574,7 @@ func serverIsWorkspaceScoped(server string) bool {
 	if err != nil {
 		return false
 	}
-	m, err := config.ParseManifest(bytes.NewReader(data))
+	m, err := parseManifestForName(server, data)
 	if err != nil {
 		return false
 	}

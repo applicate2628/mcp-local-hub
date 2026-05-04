@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -180,14 +179,13 @@ func loadManifestForServer(dir, name string) (*config.ServerManifest, error) {
 		if err != nil {
 			return nil, err
 		}
-		return config.ParseManifest(bytes.NewReader(data))
+		return parseManifestForName(name, data)
 	}
-	f, err := os.Open(filepath.Join(dir, name, "manifest.yaml"))
+	data, err := os.ReadFile(filepath.Join(dir, name, "manifest.yaml"))
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-	return config.ParseManifest(f)
+	return parseManifestForName(name, data)
 }
 
 // findDaemonPort returns the port of the named daemon from the manifest.

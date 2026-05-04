@@ -3,6 +3,7 @@ package perftools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -47,6 +48,11 @@ type iwyuResult struct {
 	ExitCode  int          `json:"exit_code"`
 }
 
+const (
+	iwyuMaxStdoutBytes = 2 * 1024 * 1024
+	iwyuMaxStderrBytes = 2 * 1024 * 1024
+)
+
 // iwyuTool runs include-what-you-use against one source file. IWYU is
 // intentionally one-file-per-invocation — batching is the iwyu_tool.py
 // wrapper's job, which we don't use here because parsing its output
@@ -67,12 +73,36 @@ func (tb *PerfToolbox) iwyuTool(ctx context.Context, req *mcp.CallToolRequest) (
 	if args.File == "" {
 		return errResult("missing required parameter: file"), nil
 	}
+	// Path-traversal guard. Identical contract to llvm-objdump:
+	// project_root is required, file must resolve inside project_root
+	// real path after EvalSymlinks. Closes "iwyu reads /etc/passwd via
+	// a relative ../ path under an attacker-supplied project_root" plus
+	// the symlink-escape variant.
+	safeFile, err := validateIWYUFilePath(args.ProjectRoot, args.File)
+	if err != nil {
+		return errResult(err.Error()), nil
+	}
+	// extra_args must be flags only — IWYU also accepts multiple input
+	// files positionally and uses '@FILE' response-file syntax. Without
+	// this check, extra_args=["/etc/passwd"] or extra_args=["@evil"]
+	// would smuggle inputs alongside safeFile.
+	if err := validatePerfToolExtraArgs(args.ExtraArgs); err != nil {
+		return errResult(err.Error()), nil
+	}
 
 	cmdArgs := append([]string{}, args.ExtraArgs...)
-	cmdArgs = append(cmdArgs, args.File)
+	cmdArgs = append(cmdArgs, safeFile)
 
-	cap, err := runCapture(ctx, tb.tools.IWYU.Path, args.ProjectRoot, cmdArgs)
+	// args.ProjectRoot is the still-user-supplied form here; switching
+	// to the resolved real path would change the working directory the
+	// subprocess sees, which is observable for relative -I include
+	// flags. Path validation has already proven the directory exists
+	// and is bounded, so passing it through unchanged is safe.
+	cap, err := runCaptureLimited(ctx, tb.tools.IWYU.Path, args.ProjectRoot, cmdArgs, iwyuMaxStdoutBytes, iwyuMaxStderrBytes)
 	if err != nil {
+		if errors.Is(err, errOutputLimitExceeded) {
+			return errResult(fmt.Sprintf("include-what-you-use output exceeded limits (stdout=%d bytes, stderr=%d bytes); narrow extra_args or run IWYU on a smaller translation unit", iwyuMaxStdoutBytes, iwyuMaxStderrBytes)), nil
+		}
 		return errResult(fmt.Sprintf("include-what-you-use failed: %v", err)), nil
 	}
 
@@ -96,6 +126,19 @@ func (tb *PerfToolbox) iwyuTool(ctx context.Context, req *mcp.CallToolRequest) (
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: string(body)}},
 	}, nil
+}
+
+// validateIWYUFilePath is a thin wrapper around the shared
+// validateBinaryInsideRoot helper that preserves the "file" wording
+// the IWYU tool surfaces in error messages.
+func validateIWYUFilePath(projectRoot, file string) (string, error) {
+	if strings.TrimSpace(projectRoot) == "" {
+		return "", fmt.Errorf("missing required parameter: project_root (directory boundary containing the source file)")
+	}
+	if strings.TrimSpace(file) == "" {
+		return "", fmt.Errorf("missing required parameter: file")
+	}
+	return validateBinaryInsideRoot(projectRoot, file, "file")
 }
 
 // classifyIWYUStatus decides the three-way status based on the parsed

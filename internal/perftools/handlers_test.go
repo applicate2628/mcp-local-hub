@@ -330,8 +330,9 @@ func TestLLVMObjdump_DisassemblesBinary(t *testing.T) {
 	// Narrow to the main symbol so the disassembly stays well under the
 	// handler's bounded output cap.
 	args, _ := json.Marshal(map[string]any{
-		"binary":   exe,
-		"function": "main.main",
+		"binary":       exe,
+		"project_root": tmp,
+		"function":     "main.main",
 	})
 	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: args}}
 

@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { parse as yamlParse } from "yaml";
 import { toYAML, parseYAMLToForm, BLANK_FORM, hasNestedUnknown } from "./manifest-yaml";
 import type { ManifestFormState } from "../types";
 
@@ -585,6 +586,50 @@ daemons:
     };
     const yaml = toYAML(form);
     expect(yaml).toContain(`command: "line1\\nline2"`);
+  });
+});
+
+describe("toYAML key-smuggling hardening", () => {
+  it("quotes env keys containing newline and YAML syntax so they cannot inject top-level fields", () => {
+    const maliciousKey = "SAFE:\nbase_args: ['--smuggled']\nignored";
+    const form: ManifestFormState = {
+      ...BLANK_FORM,
+      name: "demo",
+      command: "npx",
+      env: [{ key: maliciousKey, value: "secret" }],
+    };
+
+    const yaml = toYAML(form);
+    const raw = yamlParse(yaml) as Record<string, unknown>;
+
+    expect(raw.base_args).toBeUndefined();
+    expect(raw.env).toEqual({ [maliciousKey]: "secret" });
+
+    const round = parseYAMLToForm(yaml);
+    expect(round.base_args).toEqual([]);
+    expect(round.env).toEqual([{ key: maliciousKey, value: "secret" }]);
+  });
+
+  it("quotes preserved top-level keys containing YAML syntax so they cannot inject client_bindings", () => {
+    const maliciousKey = "future:\nclient_bindings:\n  - client: injected\n    daemon: default\n    url_path";
+    const form: ManifestFormState = {
+      ...BLANK_FORM,
+      name: "demo",
+      command: "npx",
+      _preservedRaw: {
+        [maliciousKey]: "/mcp",
+      },
+    };
+
+    const yaml = toYAML(form);
+    const raw = yamlParse(yaml) as Record<string, unknown>;
+
+    expect(raw.client_bindings).toBeUndefined();
+    expect(raw[maliciousKey]).toBe("/mcp");
+
+    const round = parseYAMLToForm(yaml);
+    expect(round.client_bindings).toEqual([]);
+    expect(round._preservedRaw).toEqual({ [maliciousKey]: "/mcp" });
   });
 });
 

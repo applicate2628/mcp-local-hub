@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,7 +9,6 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/clients"
-	"mcp-local-hub/internal/config"
 
 	toml "github.com/pelletier/go-toml/v2"
 	"gopkg.in/yaml.v3"
@@ -165,7 +163,7 @@ func patternsForServer(serverName, manifestDir string) []string {
 	if err != nil {
 		return []string{serverName}
 	}
-	m, err := config.ParseManifest(bytes.NewReader(data))
+	m, err := parseManifestForName(serverName, data)
 	if err != nil {
 		return []string{serverName}
 	}

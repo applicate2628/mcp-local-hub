@@ -520,7 +520,7 @@ hyperfine(commands=["./build-old/mybin", "./build-new/mybin"],
           warmup=3, min_runs=10)
   → new is 1.28× faster (±0.4%)
 
-llvm_objdump(binary="./build-new/mybin", function="hot_loop")
+llvm_objdump(binary="./build-new/mybin", project_root=".", function="hot_loop")
   → confirm LTO-linked final output still retains the vectorization
 ```
 

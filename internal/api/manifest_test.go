@@ -64,6 +64,22 @@ func TestManifestCreateWritesYAML(t *testing.T) {
 	}
 }
 
+func TestManifestCreateRejectsYAMLNameMismatch(t *testing.T) {
+	tmp := t.TempDir()
+	a := NewAPI()
+	body := "name: other\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9202\nclient_bindings: []\nweekly_refresh: false\n"
+	err := a.ManifestCreateIn(tmp, "newsrv", body)
+	if err == nil {
+		t.Fatal("expected YAML name mismatch error, got nil")
+	}
+	if !strings.Contains(err.Error(), `manifest yaml name "other" must match requested server "newsrv"`) {
+		t.Fatalf("error = %v, want YAML/requested name mismatch", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(tmp, "newsrv", "manifest.yaml")); !os.IsNotExist(statErr) {
+		t.Fatalf("mismatched manifest was written, stat err = %v", statErr)
+	}
+}
+
 func TestManifestDeleteRemovesDir(t *testing.T) {
 	tmp := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(tmp, "doomed"), 0755)
@@ -182,6 +198,29 @@ func TestManifestEditIn_AcceptsMatchingHash_ReturnsNewHash(t *testing.T) {
 	}
 }
 
+func TestManifestEditIn_RejectsYAMLNameMismatch(t *testing.T) {
+	dir := t.TempDir()
+	a := &API{}
+	name := "demo"
+	orig := "name: demo\nkind: global\ntransport: stdio-bridge\ncommand: npx\ndaemons:\n  - name: default\n    port: 9221\n"
+	if err := a.ManifestCreateIn(dir, name, orig); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	_, hash, _ := a.ManifestGetInWithHash(dir, name)
+	mismatched := "name: other\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9221\n"
+	_, err := a.ManifestEditInWithHash(dir, name, mismatched, hash)
+	if err == nil {
+		t.Fatal("expected YAML name mismatch error, got nil")
+	}
+	if !strings.Contains(err.Error(), `manifest yaml name "other" must match requested server "demo"`) {
+		t.Fatalf("error = %v, want YAML/requested name mismatch", err)
+	}
+	got, _, _ := a.ManifestGetInWithHash(dir, name)
+	if got != orig {
+		t.Fatalf("target yaml changed on rejected mismatch: %q", got)
+	}
+}
+
 func TestManifestEditIn_EmptyExpectedHash_SkipsCheck(t *testing.T) {
 	dir := t.TempDir()
 	a := &API{}
@@ -267,11 +306,42 @@ func TestManifestCRUD_RejectsPathTraversalNames(t *testing.T) {
 		if _, err := a.ManifestGet(bad); err == nil {
 			t.Errorf("ManifestGet(%q): expected rejection, got nil", bad)
 		}
+		// ManifestGetIn / ManifestGetInWithHash are reachable directly
+		// (not just via ManifestGet's wrapper), so they MUST also reject
+		// bad names. Otherwise a future caller bypassing the production
+		// wrapper would raw-join name into the path and read whatever
+		// ../escape resolves to.
 		if _, err := a.ManifestGetIn(tmp, bad); err == nil {
 			t.Errorf("ManifestGetIn(_, %q): expected rejection, got nil", bad)
 		}
 		if _, _, err := a.ManifestGetInWithHash(tmp, bad); err == nil {
 			t.Errorf("ManifestGetInWithHash(_, %q): expected rejection, got nil", bad)
 		}
+	}
+}
+
+// TestManifestGetIn_RejectsPathTraversal asserts the entry-point guard
+// in detail: error matches the same "manifest name" wording the rest
+// of the *In family produces, so an attacker-controlled name returns
+// the same error envelope regardless of the API surface used.
+func TestManifestGetIn_RejectsPathTraversal(t *testing.T) {
+	tmp := t.TempDir()
+	a := NewAPI()
+
+	bad := "../escape"
+	_, err := a.ManifestGetIn(tmp, bad)
+	if err == nil {
+		t.Fatalf("ManifestGetIn(_, %q): expected rejection, got nil", bad)
+	}
+	if !strings.Contains(err.Error(), "manifest name") {
+		t.Errorf("ManifestGetIn error = %v, want 'manifest name' wording", err)
+	}
+
+	_, _, err = a.ManifestGetInWithHash(tmp, bad)
+	if err == nil {
+		t.Fatalf("ManifestGetInWithHash(_, %q): expected rejection, got nil", bad)
+	}
+	if !strings.Contains(err.Error(), "manifest name") {
+		t.Errorf("ManifestGetInWithHash error = %v, want 'manifest name' wording", err)
 	}
 }

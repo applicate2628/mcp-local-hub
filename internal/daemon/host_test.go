@@ -36,6 +36,110 @@ func acquireSessionID(t *testing.T, baseURL string) string {
 	return sid
 }
 
+func TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	h, err := NewStdioHost(HostConfig{Command: echoSubprocCommand(), Args: echoSubprocArgs()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer h.Stop()
+
+	handler := h.HTTPHandler()
+	for _, tc := range []struct {
+		name         string
+		method       string
+		host         string
+		origin       string
+		secFetchSite string
+	}{
+		{
+			name:         "post hostile host same-origin fetch",
+			method:       http.MethodPost,
+			host:         "evil.example",
+			secFetchSite: "same-origin",
+		},
+		{
+			name:         "post hostile origin cross-site fetch",
+			method:       http.MethodPost,
+			origin:       "https://evil.example",
+			secFetchSite: "cross-site",
+		},
+		{
+			name:         "sse hostile host same-origin fetch",
+			method:       http.MethodGet,
+			host:         "evil.example",
+			secFetchSite: "same-origin",
+		},
+		{
+			name:         "sse hostile origin cross-site fetch",
+			method:       http.MethodGet,
+			origin:       "https://evil.example",
+			secFetchSite: "cross-site",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reqCtx, cancel := context.WithCancel(context.Background())
+			cancel()
+			var body io.Reader
+			if tc.method == http.MethodPost {
+				body = strings.NewReader(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+			}
+			req := httptest.NewRequestWithContext(reqCtx, tc.method, "http://127.0.0.1/mcp", body)
+			req.Header.Set("Mcp-Session-Id", h.sessionID)
+			req.Header.Set("Content-Type", "application/json")
+			if tc.host != "" {
+				req.Host = tc.host
+			}
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+			if tc.secFetchSite != "" {
+				req.Header.Set("Sec-Fetch-Site", tc.secFetchSite)
+			}
+
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+			if rr.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusForbidden, rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestStdioHostLoopbackGuardAllowsNoOriginPOST(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	h, err := NewStdioHost(HostConfig{Command: echoSubprocCommand(), Args: echoSubprocArgs()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer h.Stop()
+	ts := httptest.NewServer(h.HTTPHandler())
+	defer ts.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","method":"ping"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST without Origin: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST without Origin status=%d want %d body=%s", resp.StatusCode, http.StatusAccepted, body)
+	}
+	if resp.Header.Get("Mcp-Session-Id") == "" {
+		t.Fatal("POST without Origin did not return Mcp-Session-Id")
+	}
+}
+
 // TestHostSubprocessLifecycle verifies the stdio-host can spawn a subprocess,
 // forward a write to its stdin, and capture the matching line from stdout.
 // Uses a tiny echo-subprocess (writes each stdin line unchanged to stdout).

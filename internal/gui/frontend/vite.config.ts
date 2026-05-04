@@ -32,12 +32,34 @@ export default defineConfig({
   // fixed port (e.g. `go run ./cmd/mcphub gui --no-browser --no-tray --port 9125`)
   // and Vite's dev server on 5173 forwards /api/* to it so same-origin CSRF
   // guards keep working.
+  //
+  // BOTH `changeOrigin: true` AND the Origin-rewrite hook are required:
+  //   - `changeOrigin: true` rewrites the Host header so `requireAllowedHost`
+  //     (the DNS-rebinding gate) sees `127.0.0.1:9125` instead of the
+  //     dev-server host the browser sent (`localhost:5173`).
+  //   - The `configure` hook rewrites the Origin header from the browser's
+  //     `http://localhost:5173` to the backend's loopback origin, so
+  //     `requireSameOrigin` accepts the proxied request. Without this
+  //     hook, the strict CSRF check rejects every dev POST as cross-origin.
+  // Tightening either guard without loosening the other would break
+  // `npm run dev` end-to-end; a backend regression test in
+  // `internal/gui/csrf_test.go` asserts the bare `changeOrigin: true`
+  // case (Host rewrite without Origin rewrite) still gets rejected, so
+  // a future proxy edit that drops the hook fails closed instead of
+  // silently bypassing CSRF.
   server: {
     proxy: {
       "/api": {
         target: "http://127.0.0.1:9125",
-        changeOrigin: false,
+        changeOrigin: true,
         ws: false,
+        configure(proxy) {
+          proxy.on("proxyReq", (proxyReq, req) => {
+            if (req.headers.origin) {
+              proxyReq.setHeader("Origin", "http://127.0.0.1:9125");
+            }
+          });
+        },
       },
     },
   },

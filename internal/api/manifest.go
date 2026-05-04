@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -102,6 +103,12 @@ func (a *API) ManifestGet(name string) (string, error) {
 }
 
 // ManifestGetIn is the tempdir-capable form of ManifestGet.
+//
+// checkManifestName must run at entry: production wrappers gate on it,
+// but ManifestGetIn is also reachable directly (tests, future callers,
+// embedded toolchain code) and the path is built by raw-joining dir +
+// name. Without the check, a name like "../escape" would let a caller
+// read any manifest.yaml under dir's parent.
 func (a *API) ManifestGetIn(dir, name string) (string, error) {
 	if err := checkManifestName(name); err != nil {
 		return "", err
@@ -118,6 +125,10 @@ func (a *API) ManifestGetIn(dir, name string) (string, error) {
 // text and its SHA-256 content hash. Used by the GUI edit flow so
 // ManifestEdit can detect external writes that occurred between Load
 // and Save (A2b D3 stale-file detection).
+//
+// Like ManifestGetIn, checkManifestName runs at entry so this entry
+// point cannot be confused-deputy'd into reading manifests outside
+// dir even when called directly (bypassing ManifestGetWithHash).
 func (a *API) ManifestGetInWithHash(dir, name string) (string, string, error) {
 	if err := checkManifestName(name); err != nil {
 		return "", "", err
@@ -158,7 +169,7 @@ func (a *API) ManifestCreateIn(dir, name, yaml string) error {
 	if _, err := os.Stat(target); err == nil {
 		return fmt.Errorf("manifest %q already exists at %s; use edit instead", name, target)
 	}
-	if warnings := a.ManifestValidate(yaml); len(warnings) > 0 {
+	if warnings := a.validateManifestForStorageName(name, yaml); len(warnings) > 0 {
 		return fmt.Errorf("manifest has validation errors: %s", strings.Join(warnings, "; "))
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
@@ -182,7 +193,7 @@ func (a *API) ManifestEditIn(dir, name, yaml string) error {
 	if _, err := os.Stat(target); err != nil {
 		return fmt.Errorf("manifest %q does not exist; use create instead", name)
 	}
-	if warnings := a.ManifestValidate(yaml); len(warnings) > 0 {
+	if warnings := a.validateManifestForStorageName(name, yaml); len(warnings) > 0 {
 		return fmt.Errorf("manifest has validation errors: %s", strings.Join(warnings, "; "))
 	}
 	return os.WriteFile(target, []byte(yaml), 0644)
@@ -194,7 +205,6 @@ func (a *API) ManifestEditIn(dir, name, yaml string) error {
 // referenced binaries, ports, or secrets actually exist — that's caller
 // responsibility at install time.
 func (a *API) ManifestValidate(yaml string) []string {
-	var warnings []string
 	reader := strings.NewReader(yaml)
 	m, err := config.ParseManifest(reader)
 	if err != nil {
@@ -202,6 +212,23 @@ func (a *API) ManifestValidate(yaml string) []string {
 	}
 	// ParseManifest calls m.Validate internally, so if we reach here the
 	// structural validation passed. Add secondary soft checks:
+	return manifestValidationWarnings(m)
+}
+
+func (a *API) validateManifestForStorageName(name, yaml string) []string {
+	m, err := parseManifestForName(name, []byte(yaml))
+	if err != nil {
+		return []string{err.Error()}
+	}
+	return manifestValidationWarnings(m)
+}
+
+// manifestValidationWarnings collects soft warnings (declared-but-empty
+// fields, etc.) for a structurally valid ServerManifest. Workspace-scoped
+// manifests legitimately have no daemons (PR #108) so the daemon-empty
+// check is gated on Kind.
+func manifestValidationWarnings(m *config.ServerManifest) []string {
+	var warnings []string
 	if m.Kind != config.KindWorkspaceScoped && len(m.Daemons) == 0 {
 		warnings = append(warnings, "no daemons declared")
 	}
@@ -211,6 +238,23 @@ func (a *API) ManifestValidate(yaml string) []string {
 		}
 	}
 	return warnings
+}
+
+func parseManifestForName(name string, data []byte) (*config.ServerManifest, error) {
+	if err := checkManifestName(name); err != nil {
+		return nil, err
+	}
+	m, err := config.ParseManifest(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	if err := checkManifestName(m.Name); err != nil {
+		return nil, fmt.Errorf("manifest yaml name: %w", err)
+	}
+	if m.Name != name {
+		return nil, fmt.Errorf("manifest yaml name %q must match requested server %q", m.Name, name)
+	}
+	return m, nil
 }
 
 // ErrManifestHashMismatch is returned by ManifestEditInWithHash when
@@ -241,7 +285,7 @@ func (a *API) ManifestEditInWithHash(dir, name, yaml, expectedHash string) (newH
 			return "", ErrManifestHashMismatch
 		}
 	}
-	if warnings := a.ManifestValidate(yaml); len(warnings) > 0 {
+	if warnings := a.validateManifestForStorageName(name, yaml); len(warnings) > 0 {
 		return "", fmt.Errorf("manifest has validation errors: %s", strings.Join(warnings, "; "))
 	}
 	// Atomic write: unique tmp in the same directory, defer cleanup,

@@ -482,6 +482,9 @@ func (h *StdioHost) readStdoutLoop() {
 func (h *StdioHost) HTTPHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
+		if rejectUnsafeLoopbackRequest(w, r) {
+			return
+		}
 		switch r.Method {
 		case http.MethodPost:
 			h.handlePOST(w, r)
