@@ -4,6 +4,8 @@ package gui
 import (
 	"encoding/json"
 	"net/http"
+
+	"mcp-local-hub/internal/api"
 )
 
 func registerScanRoutes(s *Server) {
@@ -18,9 +20,28 @@ func registerScanRoutes(s *Server) {
 			writeAPIError(w, err, http.StatusInternalServerError, "SCAN_FAILED")
 			return
 		}
+		result = sanitizeScanResult(result)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(result)
 	}))
+}
+
+func sanitizeScanResult(in *api.ScanResult) *api.ScanResult {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	out.Entries = make([]api.ScanEntry, len(in.Entries))
+	for i, entry := range in.Entries {
+		entryCopy := entry
+		entryCopy.ClientPresence = make(map[string]api.ClientEntry, len(entry.ClientPresence))
+		for client, clientEntry := range entry.ClientPresence {
+			clientEntry.Raw = nil
+			entryCopy.ClientPresence[client] = clientEntry
+		}
+		out.Entries[i] = entryCopy
+	}
+	return &out
 }
 
 // writeAPIError is the canonical error-envelope shape from spec §4.3.
