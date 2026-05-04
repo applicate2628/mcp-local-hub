@@ -24,3 +24,23 @@ HOST,"uv run --directory .../GDB-MCP python server.py",20260417170000.000000+180
 		t.Errorf("orphan PID: got %d, want 2002", orphans[0].PID)
 	}
 }
+
+func TestParseOrphansIgnoresBroadLauncherTokens(t *testing.T) {
+	wmicCsv := `Node,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize
+HOST,"node /home/alice/work/unrelated-vite-dev-server.js",20260417170000.000000+180,1,4242,20000000
+HOST,"npx create-vite unrelated-project",20260417170000.000000+180,1,4243,21000000
+HOST,"python /tmp/server.py --serves-other-app",20260417170000.000000+180,1,4244,22000000
+`
+	for _, tok := range []string{"node", "npx", "python"} {
+		if !isBroadLauncherToken(tok) {
+			t.Fatalf("expected %q to be broad", tok)
+		}
+	}
+
+	// After broad-token filtering in CleanupOrphans, parseOrphans sees no
+	// matching patterns and should not classify any unrelated process.
+	orphans := parseOrphans(strings.NewReader(wmicCsv), nil)
+	if len(orphans) != 0 {
+		t.Fatalf("expected 0 orphans, got %d", len(orphans))
+	}
+}

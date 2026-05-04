@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -104,9 +105,15 @@ func (a *API) CleanupOrphans(opts CleanupOpts) ([]OrphanProcess, error) {
 	}
 
 	// Flat list of patterns — any match counts this PID as a candidate orphan.
+	// Drop broad launcher tokens to avoid matching unrelated processes.
 	var allPatterns []string
 	for _, ps := range patterns {
-		allPatterns = append(allPatterns, ps...)
+		for _, p := range ps {
+			if isBroadLauncherToken(p) {
+				continue
+			}
+			allPatterns = append(allPatterns, p)
+		}
 	}
 	orphans := parseOrphans(strings.NewReader(string(out)), allPatterns)
 
@@ -118,6 +125,9 @@ func (a *API) CleanupOrphans(opts CleanupOpts) ([]OrphanProcess, error) {
 		}
 		for name, ps := range patterns {
 			for _, p := range ps {
+				if isBroadLauncherToken(p) {
+					continue
+				}
 				if strings.Contains(o.Cmdline, p) {
 					o.Server = name
 					break
@@ -149,6 +159,14 @@ func (a *API) CleanupOrphans(opts CleanupOpts) ([]OrphanProcess, error) {
 	}
 
 	return filtered, nil
+}
+
+func isBroadLauncherToken(pattern string) bool {
+	p := strings.TrimSpace(strings.ToLower(pattern))
+	if p == "" {
+		return true
+	}
+	return slices.Contains([]string{"node", "npx", "uv", "uvx", "python", "python3", "py"}, p)
 }
 
 // parseOrphans reads `wmic process get CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize`
