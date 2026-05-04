@@ -96,15 +96,15 @@ Nine commits beyond the original 27 tasks, all empirically driven — each one c
 
 | Commit | Fix |
 |---|---|
-| `cdc55c3` | Claude Code reads `~/.claude.json` (not `~/.claude/settings.json`), entries need `"type": "http"` |
-| `2438830` | `--daemon` flag for selective installation (filter both scheduler tasks and client bindings) |
-| `434139e` | Task Scheduler XML: nest restart policy inside `<RestartOnFailure>` container |
-| `106e29b` | Preflight respects `--daemon` filter — a partial install must not probe sibling daemons' ports |
-| `987e4b7` | Gemini CLI 0.38+ HTTP schema is `{url, type: "http", timeout}`, not legacy `{httpUrl, disabled}` |
-| `153cfb8` | Shared-daemon redesign: 2 daemons instead of 3 (−33% Serena processes, shared gopls cache) |
-| `2d147b3` | Task Scheduler XML: weekly recurrence inside `<CalendarTrigger>/<ScheduleByWeek>`, not bare `<WeeklyTrigger>` |
-| `d3a9358` | Antigravity HTTP schema uses `serverUrl` field (not `url`) — verified empirically against `context7` entry |
-| `96c9aa3` | Antigravity excluded from client bindings — Cascade rejects loopback HTTP regardless of schema |
+| `eca8153` | Claude Code reads `~/.claude.json` (not `~/.claude/settings.json`), entries need `"type": "http"` |
+| `7eaa6ba` | `--daemon` flag for selective installation (filter both scheduler tasks and client bindings) |
+| `5668ed8` | Task Scheduler XML: nest restart policy inside `<RestartOnFailure>` container |
+| `1aac01c` | Preflight respects `--daemon` filter — a partial install must not probe sibling daemons' ports |
+| `052da13` | Gemini CLI 0.38+ HTTP schema is `{url, type: "http", timeout}`, not legacy `{httpUrl, disabled}` |
+| `f14f951` | Shared-daemon redesign: 2 daemons instead of 3 (−33% Serena processes, shared gopls cache) |
+| `4f47b39` | Task Scheduler XML: weekly recurrence inside `<CalendarTrigger>/<ScheduleByWeek>`, not bare `<WeeklyTrigger>` |
+| `964951b` | Antigravity HTTP schema uses `serverUrl` field (not `url`) — verified empirically against `context7` entry |
+| `357df94` | Antigravity excluded from client bindings — Cascade rejects loopback HTTP regardless of schema |
 
 Pattern across most fixes: **unit test asserted our assumed output shape and passed** because production code produced that shape. Only live integration surfaced the mismatch. Compound guard for each fix now: test explicitly forbids the old buggy shape from returning.
 
