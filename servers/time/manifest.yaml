@@ -4,7 +4,7 @@ transport: stdio-bridge
 command: npx
 base_args:
   - "-y"
-  - "@mcpcentral/mcp-time"
+  - "@mcpcentral/mcp-time@0.0.5"
 
 daemons:
   - name: default
