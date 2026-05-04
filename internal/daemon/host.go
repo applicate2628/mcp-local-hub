@@ -341,6 +341,14 @@ func (h *StdioHost) readStdoutLoop() {
 					}
 					continue
 				}
+				// Untracked response id (e.g. a late reply after caller timeout).
+				// Do not broadcast this over SSE; it may belong to a different
+				// canceled client and could leak response contents.
+				select {
+				case h.testStdout <- line:
+				default:
+				}
+				continue
 			}
 		}
 		// Unrouted line = notification or untracked id → fan out to SSE
