@@ -770,6 +770,14 @@ func (a *API) Uninstall(server string) (*UninstallReport, error) {
 		if client == nil || !client.Exists() {
 			continue
 		}
+		entry, err := client.GetEntry(m.Name)
+		if err != nil {
+			report.ClientWarns = append(report.ClientWarns, fmt.Sprintf("lookup %s in %s: %v", m.Name, b.Client, err))
+			continue
+		}
+		if entry == nil || !isHubManagedClientEntry(entry) {
+			continue
+		}
 		if err := client.RemoveEntry(m.Name); err != nil {
 			report.ClientWarns = append(report.ClientWarns, fmt.Sprintf("remove %s from %s: %v", m.Name, b.Client, err))
 			continue
@@ -777,6 +785,17 @@ func (a *API) Uninstall(server string) (*UninstallReport, error) {
 		report.ClientsUpdated = append(report.ClientsUpdated, b.Client)
 	}
 	return report, nil
+}
+
+
+func isHubManagedClientEntry(e *clients.MCPEntry) bool {
+	if e == nil {
+		return false
+	}
+	if clients.IsHubHTTPURL(e.URL) {
+		return true
+	}
+	return clients.IsMcphubBinary(e.RelayExePath) && e.RelayServer != "" && e.RelayDaemon != ""
 }
 
 // uninstallWithoutManifest cleans up stale scheduler tasks and client
