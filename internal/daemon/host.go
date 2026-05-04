@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -92,6 +93,7 @@ type StdioHost struct {
 }
 
 const maxMCPPostBodyBytes int64 = 1 << 20 // 1 MiB
+const maxPendingRequests = 128
 
 func NewStdioHost(cfg HostConfig) (*StdioHost, error) {
 	if cfg.Command == "" {
@@ -391,6 +393,10 @@ func (h *StdioHost) HTTPHandler() http.Handler {
 }
 
 func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
+	if ct := r.Header.Get("Content-Type"); ct != "" && !strings.HasPrefix(strings.ToLower(ct), "application/json") {
+		http.Error(w, "unsupported content type", http.StatusUnsupportedMediaType)
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxMCPPostBodyBytes)
 	defer r.Body.Close()
 	w.Header().Set("Mcp-Session-Id", h.sessionID)
@@ -466,6 +472,11 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 
 	respCh := make(chan json.RawMessage, 1)
 	h.pendingMu.Lock()
+	if len(h.pending) >= maxPendingRequests {
+		h.pendingMu.Unlock()
+		http.Error(w, "too many pending requests", http.StatusTooManyRequests)
+		return
+	}
 	h.pending[internalID] = respCh
 	h.pendingMu.Unlock()
 	defer func() {

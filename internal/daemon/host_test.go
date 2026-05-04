@@ -262,6 +262,58 @@ func TestHostHTTPRejectsOversizedPOSTBody(t *testing.T) {
 	}
 }
 
+func TestHostHTTPRejectsUnsupportedContentType(t *testing.T) {
+	h, err := NewStdioHost(HostConfig{
+		Command: echoSubprocCommand(),
+		Args:    echoSubprocArgs(),
+	})
+	if err != nil {
+		t.Fatalf("NewStdioHost: %v", err)
+	}
+	ts := httptest.NewServer(h.HTTPHandler())
+	defer ts.Close()
+
+	req, _ := http.NewRequest("POST", ts.URL+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","method":"ping"}`))
+	req.Header.Set("Content-Type", "text/plain")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST unsupported content-type: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnsupportedMediaType {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d, want=%d, body=%q", resp.StatusCode, http.StatusUnsupportedMediaType, string(body))
+	}
+}
+
+func TestHostHTTPRejectsWhenPendingLimitExceeded(t *testing.T) {
+	h, err := NewStdioHost(HostConfig{
+		Command: echoSubprocCommand(),
+		Args:    echoSubprocArgs(),
+	})
+	if err != nil {
+		t.Fatalf("NewStdioHost: %v", err)
+	}
+	h.pendingMu.Lock()
+	for i := 0; i < maxPendingRequests; i++ {
+		h.pending[int64(i+1)] = make(chan json.RawMessage, 1)
+	}
+	h.pendingMu.Unlock()
+
+	ts := httptest.NewServer(h.HTTPHandler())
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/mcp", "application/json", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
+	if err != nil {
+		t.Fatalf("POST pending overflow: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d, want=%d, body=%q", resp.StatusCode, http.StatusTooManyRequests, string(body))
+	}
+}
+
 // TestHostInitializeCached verifies that after the first client sends
 // `initialize`, subsequent `initialize` requests return the cached response
 // without being forwarded to the subprocess. This is the contract
