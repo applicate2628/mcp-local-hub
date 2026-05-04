@@ -801,6 +801,13 @@ func TestRegister_StartsProxyImmediately(t *testing.T) {
 func TestRegister_RollsBackIfRunFails(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
+	origKill := killByPortFn
+	defer func() { killByPortFn = origKill }()
+	var killed []int
+	killByPortFn = func(port int, _ time.Duration) error {
+		killed = append(killed, port)
+		return nil
+	}
 	ws := t.TempDir()
 	m := nineLanguageManifest()
 	// Compute the expected task name for the second language (typescript)
@@ -819,6 +826,9 @@ func TestRegister_RollsBackIfRunFails(t *testing.T) {
 	}
 	if n := countEntries(h.fakeClients); n != 0 {
 		t.Errorf("client entries not rolled back after Run failure: %d remain", n)
+	}
+	if len(killed) != 1 {
+		t.Fatalf("killByPortFn calls = %d, want 1 (only started language should be killed); killed=%v", len(killed), killed)
 	}
 }
 
