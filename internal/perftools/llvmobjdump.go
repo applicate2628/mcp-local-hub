@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -33,8 +34,8 @@ func (tb *PerfToolbox) llvmObjdumpTool(ctx context.Context, req *mcp.CallToolReq
 	if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
 		return errResult(fmt.Sprintf("invalid arguments: %v", err)), nil
 	}
-	if args.Binary == "" {
-		return errResult("missing required parameter: binary (path to a built .exe / .o / .so / .a)"), nil
+	if err := validateLLVMObjdumpInputs(args.Binary, args.ExtraArgs); err != nil {
+		return errResult(err.Error()), nil
 	}
 
 	var cmdArgs []string
@@ -72,4 +73,19 @@ func (tb *PerfToolbox) llvmObjdumpTool(ctx context.Context, req *mcp.CallToolReq
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: string(cap.Stdout)}},
 	}, nil
+}
+
+func validateLLVMObjdumpInputs(binary string, extraArgs []string) error {
+	if binary == "" {
+		return errors.New("missing required parameter: binary (path to a built .exe / .o / .so / .a)")
+	}
+	if strings.HasPrefix(binary, "@") {
+		return errors.New("invalid binary path: @response-file syntax is not allowed")
+	}
+	for _, arg := range extraArgs {
+		if strings.HasPrefix(arg, "@") {
+			return fmt.Errorf("invalid extra_args entry %q: @response-file syntax is not allowed", arg)
+		}
+	}
+	return nil
 }

@@ -227,6 +227,33 @@ func TestValidateClangTidyInputs_AllowsSafeArgs(t *testing.T) {
 	}
 }
 
+func TestValidateLLVMObjdumpInputs_RejectsResponseFileSyntax(t *testing.T) {
+	tests := []struct {
+		name      string
+		binary    string
+		extraArgs []string
+	}{
+		{name: "binary response-file", binary: "@/tmp/secret"},
+		{name: "extra arg response-file", binary: "/bin/true", extraArgs: []string{"@/tmp/secret"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateLLVMObjdumpInputs(tc.binary, tc.extraArgs)
+			if err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+}
+
+func TestValidateLLVMObjdumpInputs_AllowsSafeInputs(t *testing.T) {
+	err := validateLLVMObjdumpInputs("/bin/true", []string{"--no-show-raw-insn"})
+	if err != nil {
+		t.Fatalf("expected safe args to pass validation, got error: %v", err)
+	}
+}
+
 // contentText extracts the Text field from the first TextContent in a
 // CallToolResult. Used by every handler test in this file.
 func contentText(r *mcp.CallToolResult) string {
