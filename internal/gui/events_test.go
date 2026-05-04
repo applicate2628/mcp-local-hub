@@ -92,6 +92,7 @@ func TestEventsSSE_StreamsPublishedEvents(t *testing.T) {
 	}()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	req.Header.Set("Accept", "text/event-stream")
 	// Bound the test: give the handler a short-lived context via httptest request.
 	ctx, cancel := context.WithTimeout(req.Context(), 800*time.Millisecond)
 	defer cancel()
@@ -115,4 +116,27 @@ func TestEventsSSE_StreamsPublishedEvents(t *testing.T) {
 	cancel()
 	<-done
 	t.Fatalf("never saw event in stream; body: %q", rec.body())
+}
+
+func TestEventsSSE_RejectsNonSSEAccept(t *testing.T) {
+	s := NewServer(Config{})
+	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	req.Header.Set("Accept", "text/html")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotAcceptable {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotAcceptable)
+	}
+}
+
+func TestEventsSSE_RejectsCrossSite(t *testing.T) {
+	s := NewServer(Config{})
+	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
 }

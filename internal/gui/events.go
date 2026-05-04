@@ -18,8 +18,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 )
+
+const maxEventSubscribers = 128
 
 // Event is the shape pushed onto /api/events. Type matches spec §3.6;
 // Body is an arbitrary JSON-serializable payload.
@@ -47,8 +50,20 @@ func NewBroadcaster() *Broadcaster {
 // while ctx is alive. The channel is closed when ctx is canceled.
 // Buffered at 16 — a slow consumer drops events rather than backpressures.
 func (b *Broadcaster) Subscribe(ctx context.Context) <-chan Event {
+	ch, _ := b.TrySubscribe(ctx, maxEventSubscribers)
+	return ch
+}
+
+// TrySubscribe registers a new subscriber up to maxSubs.
+// It returns (nil, false) when the limit is reached.
+func (b *Broadcaster) TrySubscribe(ctx context.Context, maxSubs int) (<-chan Event, bool) {
 	ch := make(chan Event, 16)
 	b.mu.Lock()
+	if maxSubs > 0 && len(b.subs) >= maxSubs {
+		b.mu.Unlock()
+		close(ch)
+		return nil, false
+	}
 	b.subs[ch] = struct{}{}
 	b.mu.Unlock()
 	go func() {
@@ -58,7 +73,7 @@ func (b *Broadcaster) Subscribe(ctx context.Context) <-chan Event {
 		b.mu.Unlock()
 		close(ch)
 	}()
-	return ch
+	return ch, true
 }
 
 // Publish fans out to all subscribers. Non-blocking: a subscriber with
@@ -90,6 +105,14 @@ func registerEventsRoutes(s *Server) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		if !strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
+			http.Error(w, "not acceptable", http.StatusNotAcceptable)
+			return
+		}
+		if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
 		flusher, ok := w.(http.Flusher)
 		if !ok {
 			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
@@ -101,7 +124,11 @@ func registerEventsRoutes(s *Server) {
 		flusher.Flush()
 
 		ctx := r.Context()
-		ch := s.events.Subscribe(ctx)
+		ch, ok := s.events.TrySubscribe(ctx, maxEventSubscribers)
+		if !ok {
+			http.Error(w, "too many subscribers", http.StatusServiceUnavailable)
+			return
+		}
 		for {
 			select {
 			case <-ctx.Done():
