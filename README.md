@@ -2,6 +2,13 @@
 
 Run one copy of each [Model Context Protocol](https://modelcontextprotocol.io) server on your workstation, shared across every MCP client that needs it — instead of each client spawning its own redundant stdio process.
 
+> [!WARNING]
+> Preview version: `mcp-local-hub` is actively under development. Interfaces,
+> manifests, GUI flows, install/migration behavior, and supported-client wiring
+> may still change. Windows 11 is the primary tested path, but not every
+> feature, server, client combination, or platform path is fully tested yet; use
+> dry-runs and backups before applying changes to important MCP client configs.
+
 ## The problem
 
 Every modern coding assistant (Claude Code, Codex CLI, Gemini CLI, Antigravity, Cursor, Continue, …) speaks MCP, and each client independently `exec`s whatever stdio servers you configure — `uvx serena`, `npx @modelcontextprotocol/server-memory`, `mcp-language-server`, and so on. If you use three assistants side-by-side on the same project, you get **three Serena processes**, **three gopls subprocesses**, **three separate memory stores**. Each per-session spawn re-downloads dependencies, re-indexes your code, and competes for RAM.
