@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -499,5 +500,50 @@ func TestStreamLogs_PreservesPartialLineAcrossTicks(t *testing.T) {
 	<-done
 	if !sawMerged {
 		t.Fatalf("never saw merged line; body: %q", rec.body())
+	}
+}
+
+func TestStreamLogs_BoundsPendingLineBuffer(t *testing.T) {
+	long := strings.Repeat("x", maxPendingLineBytes+5)
+	fl := &scriptedLogs{seq: []string{
+		"",
+		long,
+		long + "\n",
+	}}
+	s := NewServer(Config{})
+	s.logs = fl
+
+	rec := newSSERecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/logs/test/stream", nil)
+	ctx, cancel := context.WithTimeout(req.Context(), 2*time.Second)
+	defer cancel()
+	req = req.WithContext(ctx)
+	done := make(chan struct{})
+	go func() {
+		s.mux.ServeHTTP(rec, req)
+		close(done)
+	}()
+
+	deadline := time.Now().Add(1800 * time.Millisecond)
+	wantOverflow := "data: " + strings.Repeat("x", 5) + "\n\n"
+	wantBounded := "data: " + strings.Repeat("x", maxPendingLineBytes) + "\n\n"
+	sawOverflow, sawBounded := false, false
+	for time.Now().Before(deadline) {
+		body := rec.body()
+		if strings.Contains(body, wantOverflow) {
+			sawOverflow = true
+		}
+		if strings.Contains(body, wantBounded) {
+			sawBounded = true
+		}
+		if sawOverflow && sawBounded {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	if !sawOverflow || !sawBounded {
+		t.Fatalf("missing expected bounded events (overflow=%v bounded=%v, maxPendingLineBytes=%s)", sawOverflow, sawBounded, strconv.Itoa(maxPendingLineBytes))
 	}
 }

@@ -25,6 +25,8 @@ import (
 	"mcp-local-hub/internal/api"
 )
 
+const maxPendingLineBytes = 64 * 1024
+
 // validNameRe is the safe charset for server + daemon names that flow
 // into the log-file path composed by api.LogsGet, which reads
 // "<logDir>/<server>-<daemon>.log". Without this gate a query like
@@ -243,6 +245,12 @@ func streamLogs(s *Server, server, daemon string, w http.ResponseWriter, r *http
 	// line boundaries. Holding the unterminated fragment until its
 	// newline arrives merges the writes back into one event.
 	var pendingLine string
+	emitLine := func(line string) {
+		if line == "" {
+			return
+		}
+		fmt.Fprintf(w, "event: log-line\ndata: %s\n\n", line)
+	}
 	if body, err := s.logs.Logs(server, daemon, 0); err == nil && !isLogPlaceholder(body, server, daemon) {
 		lastLen = len(body)
 		// We deliberately do NOT seed pendingLine from the prime. The
@@ -316,20 +324,22 @@ func streamLogs(s *Server, server, daemon string, w http.ResponseWriter, r *http
 				// suffix ended cleanly on a newline; drop the empty
 				// tail so it isn't emitted as a blank line event.
 				if n := len(lines); n > 0 && lines[n-1] != "" {
-					pendingLine = lines[n-1]
+					frag := lines[n-1]
+					if len(frag) > maxPendingLineBytes {
+						emitLine(frag[:len(frag)-maxPendingLineBytes])
+						frag = frag[len(frag)-maxPendingLineBytes:]
+					}
+					pendingLine = frag
 					lines = lines[:n-1]
 				} else if n > 0 && lines[n-1] == "" {
 					lines = lines[:n-1]
 				}
 				for _, line := range lines {
-					if line == "" {
-						// Interior blank lines inside the suffix
-						// (e.g. two consecutive newlines) are not
-						// emitted as blank SSE events; keep the
-						// pre-R22 behavior of skipping them.
-						continue
-					}
-					fmt.Fprintf(w, "event: log-line\ndata: %s\n\n", line)
+					// Interior blank lines inside the suffix
+					// (e.g. two consecutive newlines) are not
+					// emitted as blank SSE events; keep the
+					// pre-R22 behavior of skipping them.
+					emitLine(line)
 				}
 				lastLen = len(body)
 				flusher.Flush()
