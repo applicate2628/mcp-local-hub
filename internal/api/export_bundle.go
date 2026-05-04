@@ -53,7 +53,7 @@ func WriteConfigBundle(w io.Writer) error {
 	}
 	// Top-level data files.
 	for _, item := range []struct{ src, name string }{
-		{filepath.Join(dataDir, "secrets.json"), "secrets.json"},
+		{filepath.Join(dataDir, "secrets.age"), "secrets.age"},
 		{filepath.Join(dataDir, "gui-preferences.yaml"), "gui-preferences.yaml"},
 	} {
 		if err := addFileIfExists(zw, item.src, item.name); err != nil {
