@@ -574,6 +574,11 @@ func (a *API) unregisterWithManifest(m *config.ServerManifest, workspacePath str
 		return nil, err
 	}
 	wsKey := WorkspaceKey(canonical)
+	legacyCanonical, err := CanonicalWorkspacePathLegacyCompat(workspacePath)
+	if err != nil {
+		return nil, err
+	}
+	legacyWSKey := WorkspaceKey(legacyCanonical)
 	regPath, err := registryPathForRegister()
 	if err != nil {
 		return nil, err
@@ -588,6 +593,13 @@ func (a *API) unregisterWithManifest(m *config.ServerManifest, workspacePath str
 		return nil, err
 	}
 	existing := reg.ListByWorkspace(wsKey)
+	activeWSKey := wsKey
+	if len(existing) == 0 && legacyWSKey != wsKey {
+		existing = reg.ListByWorkspace(legacyWSKey)
+		if len(existing) > 0 {
+			activeWSKey = legacyWSKey
+		}
+	}
 	if len(existing) == 0 {
 		return nil, fmt.Errorf("workspace %s (key %s) is not registered", canonical, wsKey)
 	}
@@ -602,9 +614,9 @@ func (a *API) unregisterWithManifest(m *config.ServerManifest, workspacePath str
 		return nil, err
 	}
 	allClients := clientsAllForRegister()
-	report := &UnregisterReport{Workspace: canonical, WorkspaceKey: wsKey}
+	report := &UnregisterReport{Workspace: canonical, WorkspaceKey: activeWSKey}
 	for _, lang := range targets {
-		entry, ok := reg.Get(wsKey, lang)
+		entry, ok := reg.Get(activeWSKey, lang)
 		if !ok {
 			report.Warnings = append(report.Warnings,
 				fmt.Sprintf("language %s not registered for workspace %s", lang, canonical))
@@ -650,7 +662,7 @@ func (a *API) unregisterWithManifest(m *config.ServerManifest, workspacePath str
 			}
 		}
 		// 3. Drop registry row.
-		reg.Remove(wsKey, lang)
+		reg.Remove(activeWSKey, lang)
 		report.Removed = append(report.Removed, lang)
 	}
 	if err := reg.Save(); err != nil {

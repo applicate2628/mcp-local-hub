@@ -146,6 +146,23 @@ func resolveSymlinksBestEffort(abs string) string {
 //
 // Collision risk within a single user: birthday bound ≈ 77k workspaces for
 // 50% collision probability. Real users have <100.
+
+
+// CanonicalWorkspacePathLegacyCompat returns the pre-symlink-resolution
+// canonical form (abs+clean plus Windows drive normalization). It exists
+// only for backward-compatible lookup/migration of registry rows created
+// before full-path EvalSymlinks canonicalization was introduced.
+func CanonicalWorkspacePathLegacyCompat(p string) (string, error) {
+	abs, err := filepath.Abs(filepath.Clean(p))
+	if err != nil {
+		return "", fmt.Errorf("workspace path: %w", err)
+	}
+	if runtime.GOOS == "windows" && len(abs) >= 2 && abs[1] == ':' {
+		abs = strings.ToLower(string(abs[0])) + abs[1:]
+	}
+	return abs, nil
+}
+
 func WorkspaceKey(canonicalPath string) string {
 	sum := sha256.Sum256([]byte(canonicalPath))
 	return hex.EncodeToString(sum[:])[:8]
