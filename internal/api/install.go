@@ -1677,6 +1677,9 @@ func killDaemonByPort(port int, timeout time.Duration) error {
 	if !ok {
 		return nil
 	}
+	if !isHubDaemonPID(pid) {
+		return fmt.Errorf("refusing to kill non-hub pid %d on port %d", pid, port)
+	}
 	cmd := exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/F", "/T")
 	process.NoConsole(cmd)
 	out, err := cmd.CombinedOutput()
@@ -1691,4 +1694,28 @@ func killDaemonByPort(port int, timeout time.Duration) error {
 		time.Sleep(200 * time.Millisecond)
 	}
 	return fmt.Errorf("port %d still bound after %s", port, timeout)
+}
+
+// isHubDaemonPID verifies that the PID belongs to a hub-managed daemon before
+// we force-kill its process tree.
+func isHubDaemonPID(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	// taskkill/schtasks flow is Windows-only; avoid false positives elsewhere.
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	cmd := exec.Command("wmic", "process", "where",
+		fmt.Sprintf("ProcessId=%d", pid),
+		"get", "Name,CommandLine", "/format:csv")
+	process.NoConsole(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	lower := strings.ToLower(string(out))
+	return strings.Contains(lower, "mcp-local-hub") &&
+		strings.Contains(lower, "daemon") &&
+		strings.Contains(lower, "run")
 }
