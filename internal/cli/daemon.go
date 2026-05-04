@@ -1,19 +1,19 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
+	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/daemon"
 	"mcp-local-hub/internal/secrets"
-	"mcp-local-hub/servers"
 
 	"github.com/spf13/cobra"
 )
@@ -61,18 +61,13 @@ See also: install, logs, restart, status.`,
 					writeLaunchFailure(logPath, server, daemonName, err)
 				}
 			}()
-			// Load the manifest from the embed.FS baked into the binary.
-			// This works regardless of where mcphub.exe is installed
-			// (canonical ~/.local/bin, dev checkout, anywhere on PATH)
-			// — manifests travel with the binary so scheduler tasks
-			// don't need to find a servers/ directory on disk.
-			f, err := servers.Manifests.Open(server + "/manifest.yaml")
+			// Load manifest bytes embed-first with disk fallback so a GUI-created
+			// manifest can be installed and launched immediately without rebuild.
+			raw, err := api.NewAPI().ManifestGet(server)
 			if err != nil {
-				return fmt.Errorf("open embedded manifest %s: %w", server, err)
+				return fmt.Errorf("load manifest %s: %w", server, err)
 			}
-			defer f.Close()
-			var mReader io.Reader = f
-			m, err := config.ParseManifest(mReader)
+			m, err := config.ParseManifest(bytes.NewReader([]byte(raw)))
 			if err != nil {
 				return err
 			}
