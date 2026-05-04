@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"fmt"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -28,21 +29,25 @@ func killProcessTree(pid int) error {
 	if pid <= 0 {
 		return nil
 	}
-	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
 		// /F = force, /T = tree (kill children too).
-		cmd = exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid))
-	} else {
-		// -TERM to the whole process group. Requires the child to have
-		// been started with Setpgid — falls back to plain kill(pid)
-		// via the standard library's cmd.Process.Kill if the caller
-		// did not set up a group. For our purposes on Windows this
-		// branch is only compiled but not executed.
-		cmd = exec.Command("pkill", "-TERM", "-P", strconv.Itoa(pid))
+		cmd := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid))
+		process.NoConsole(cmd) // suppress per-child console pop on windowsgui parents
+		// Ignore cmd output — Windows taskkill prints "SUCCESS: ..." /
+		// "ERROR: The process <pid> not found" and we treat both the same.
+		_ = cmd.Run()
+		return nil
 	}
-	process.NoConsole(cmd) // suppress per-child console pop on windowsgui parents
-	// Ignore cmd output — Windows taskkill prints "SUCCESS: ..." /
-	// "ERROR: The process <pid> not found" and we treat both the same.
-	_ = cmd.Run()
+
+	// POSIX: best-effort terminate descendants and then the root.
+	// pkill -P targets direct children only; follow with kill(pid) so
+	// the root process is always signaled too.
+	childTerm := exec.Command("pkill", "-TERM", "-P", strconv.Itoa(pid))
+	process.NoConsole(childTerm)
+	_ = childTerm.Run()
+
+	rootTerm := exec.Command("kill", "-TERM", fmt.Sprintf("%d", pid))
+	process.NoConsole(rootTerm)
+	_ = rootTerm.Run()
 	return nil
 }
