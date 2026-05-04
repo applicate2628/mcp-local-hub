@@ -94,6 +94,9 @@ func (a *API) ManifestGet(name string) (string, error) {
 
 // ManifestGetIn is the tempdir-capable form of ManifestGet.
 func (a *API) ManifestGetIn(dir, name string) (string, error) {
+	if err := checkManifestName(name); err != nil {
+		return "", err
+	}
 	path := filepath.Join(dir, name, "manifest.yaml")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -107,6 +110,9 @@ func (a *API) ManifestGetIn(dir, name string) (string, error) {
 // ManifestEdit can detect external writes that occurred between Load
 // and Save (A2b D3 stale-file detection).
 func (a *API) ManifestGetInWithHash(dir, name string) (string, string, error) {
+	if err := checkManifestName(name); err != nil {
+		return "", "", err
+	}
 	path := filepath.Join(dir, name, "manifest.yaml")
 	data, err := os.ReadFile(path)
 	if err != nil {
