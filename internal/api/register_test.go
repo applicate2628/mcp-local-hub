@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -1114,6 +1115,53 @@ func TestUnregister_PartialKeepsOthers(t *testing.T) {
 		if e.Language == "typescript" {
 			t.Errorf("typescript should have been removed: %+v", e)
 		}
+	}
+}
+
+
+func TestUnregister_FallsBackToLegacyWorkspaceKey(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation on Windows requires developer mode / admin")
+	}
+	realParent := filepath.Join(t.TempDir(), "real")
+	wsReal := filepath.Join(realParent, "ws")
+	if err := os.MkdirAll(wsReal, 0755); err != nil {
+		t.Fatalf("mkdir real workspace: %v", err)
+	}
+	aliasBase := t.TempDir()
+	aliasParent := filepath.Join(aliasBase, "alias-parent")
+	if err := os.Symlink(realParent, aliasParent); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	wsAlias := filepath.Join(aliasParent, "ws")
+	legacyCanonical, err := CanonicalWorkspacePathLegacyCompat(wsAlias)
+	if err != nil {
+		t.Fatalf("legacy canonical: %v", err)
+	}
+	legacyKey := WorkspaceKey(legacyCanonical)
+	reg := NewRegistry(h.regPath)
+	reg.Put(WorkspaceEntry{WorkspaceKey: legacyKey, WorkspacePath: legacyCanonical, Language: "python", TaskName: "task-legacy", ClientEntries: map[string]string{}})
+	if err := reg.Save(); err != nil {
+		t.Fatalf("save registry: %v", err)
+	}
+	a := mustNewAPI(t)
+	report, err := a.unregisterWithManifest(nineLanguageManifest(), wsAlias, nil, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("unregister fallback: %v", err)
+	}
+	if report.WorkspaceKey != legacyKey {
+		t.Fatalf("workspace key mismatch: got %s want %s", report.WorkspaceKey, legacyKey)
+	}
+	if len(report.Removed) != 1 || report.Removed[0] != "python" {
+		t.Fatalf("removed = %v, want [python]", report.Removed)
+	}
+	if err := reg.Load(); err != nil {
+		t.Fatalf("reload registry: %v", err)
+	}
+	if len(reg.Workspaces) != 0 {
+		t.Fatalf("legacy row not removed: %+v", reg.Workspaces)
 	}
 }
 

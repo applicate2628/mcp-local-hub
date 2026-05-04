@@ -96,6 +96,11 @@ construct the backend lifecycle. Human invocation is not supported.`,
 				return fmt.Errorf("canonical workspace path: %w", err)
 			}
 			wsKey := api.WorkspaceKey(canonical)
+			legacyCanonical, err := api.CanonicalWorkspacePathLegacyCompat(workspaceFlag)
+			if err != nil {
+				return fmt.Errorf("legacy canonical workspace path: %w", err)
+			}
+			legacyWSKey := api.WorkspaceKey(legacyCanonical)
 			// Refine to the canonical lsp-<wsKey>-<lang>.log path now
 			// that wsKey is known; subsequent failures (registry, bind,
 			// manifest, …) land in the same file the proxy itself
@@ -132,6 +137,13 @@ construct the backend lifecycle. Human invocation is not supported.`,
 				return fmt.Errorf("load registry: %w", err)
 			}
 			entry, ok := reg.Get(wsKey, languageFlag)
+			activeWSKey := wsKey
+			if !ok && legacyWSKey != wsKey {
+				entry, ok = reg.Get(legacyWSKey, languageFlag)
+				if ok {
+					activeWSKey = legacyWSKey
+				}
+			}
 			if !ok {
 				return fmt.Errorf("not registered: workspace %s language %s (key %s)",
 					canonical, languageFlag, wsKey)
@@ -145,7 +157,7 @@ construct the backend lifecycle. Human invocation is not supported.`,
 			// explicitly re-register to reconcile.
 			if entry.Port != portFlag {
 				return fmt.Errorf("port mismatch: --port=%d but registry entry for (%s, %s) has port %d; run `mcphub register` to reconcile",
-					portFlag, wsKey, languageFlag, entry.Port)
+					portFlag, activeWSKey, languageFlag, entry.Port)
 			}
 			// Re-assert Configured lifecycle on startup using the already-
 			// loaded Registry (no new flock acquisition — we hold it).
