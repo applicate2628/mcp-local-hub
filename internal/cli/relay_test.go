@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -62,5 +64,30 @@ func TestResolveRelayURL_MissingFlags(t *testing.T) {
 		if err == nil {
 			t.Errorf("expected error for server=%q daemon=%q", c.server, c.daemon)
 		}
+	}
+}
+
+func TestResolveRelayURL_FallsBackToDiskManifest(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	server := "relay-disk-only-test"
+	manifestPath := filepath.Join(filepath.Dir(exe), "servers", server, "manifest.yaml")
+	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o755); err != nil {
+		t.Fatalf("mkdir manifest dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(filepath.Join(filepath.Dir(exe), "servers", server)) })
+	content := "name: relay-disk-only-test\nkind: global\ntransport: native-http\ncommand: testcmd\ndaemons:\n  - name: claude\n    context: claude-code\n    port: 45678\n"
+	if err := os.WriteFile(manifestPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	u, err := resolveRelayURL(server, "claude", "")
+	if err != nil {
+		t.Fatalf("resolveRelayURL(%s, claude): %v", server, err)
+	}
+	if !strings.Contains(u, ":45678/mcp") {
+		t.Fatalf("url = %q, want ...:45678/mcp", u)
 	}
 }
