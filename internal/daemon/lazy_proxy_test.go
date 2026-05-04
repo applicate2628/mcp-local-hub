@@ -197,6 +197,47 @@ func TestLazyProxy_InitializeSyntheticNoMaterialize(t *testing.T) {
 	}
 }
 
+func TestLazyProxy_CrossSitePOSTRejected(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server"}
+	p, _ := newTestProxy(t, "mcp-language-server", f)
+	p.cfg.Port = 9200
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{}}`
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+	req.Header.Set("Content-Type", "text/plain;charset=UTF-8")
+	req.Header.Set("Origin", "https://attacker.invalid")
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	rr := httptest.NewRecorder()
+	p.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("code = %d, want 403; body=%s", rr.Code, rr.Body.String())
+	}
+	if f.materializeCount.Load() != 0 {
+		t.Fatalf("cross-site request triggered materialize: count=%d", f.materializeCount.Load())
+	}
+}
+
+func TestLazyProxy_LoopbackOriginAllowed(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server"}
+	p, _ := newTestProxy(t, "mcp-language-server", f)
+	p.cfg.Port = 9200
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{}}`
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://127.0.0.1:9200")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rr := httptest.NewRecorder()
+	p.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if f.materializeCount.Load() != 1 {
+		t.Fatalf("materialize count = %d, want 1", f.materializeCount.Load())
+	}
+}
+
 // TestLazyProxy_PingEchoesClientID guards the JSON-RPC request/response
 // correlation contract: when a client sends `ping` with a real id, the
 // proxy must echo that same id in its reply. A hard-coded null (or any

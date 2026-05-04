@@ -185,6 +185,30 @@ func (p *LazyProxy) inflightKey() string {
 	return p.cfg.WorkspaceKey + "|" + p.cfg.Language
 }
 
+func isTrustedLoopbackOrigin(origin string, port int) bool {
+	if origin == "" {
+		return true
+	}
+	want := map[string]struct{}{
+		fmt.Sprintf("http://127.0.0.1:%d", port): {},
+		fmt.Sprintf("http://localhost:%d", port): {},
+	}
+	_, ok := want[origin]
+	return ok
+}
+
+func rejectCrossSiteBrowserPost(w http.ResponseWriter, r *http.Request, port int) bool {
+	if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return true
+	}
+	if !isTrustedLoopbackOrigin(r.Header.Get("Origin"), port) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return true
+	}
+	return false
+}
+
 // --- JSON-RPC dispatch -----------------------------------------------------
 
 // handleMCP is the per-request dispatch.
@@ -195,6 +219,9 @@ func (p *LazyProxy) handleMCP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if rejectCrossSiteBrowserPost(w, r, p.cfg.Port) {
 		return
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20)) // 4 MiB cap
