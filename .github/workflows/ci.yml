@@ -22,8 +22,6 @@ name: CI
 #     which 500s /api/status — those tests can't run on ubuntu yet.
 
 on:
-  push:
-    branches: [master]
   pull_request:
     branches: [master]
 

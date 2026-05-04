@@ -7,6 +7,7 @@ Tracking document for Phase 3B-II — the "everything I cut from Phase 3B-I MVP"
 - [docs/superpowers/specs/2026-04-17-phase-3-gui-installer-design.md](../specs/2026-04-17-phase-3-gui-installer-design.md) — original GUI design spec (full scope before MVP split)
 - [docs/phase-3b-verification.md](../../phase-3b-verification.md) — Phase 3B-I MVP closeout, "Deferred to Phase 3B-II" section
 - [docs/phase-3b-pr5-codex-walkthrough.md](../../phase-3b-pr5-codex-walkthrough.md) — PR #5 review walkthrough with R17 / final-review deferrals
+- [docs/superpowers/plans/2026-05-04-ravitemer-mcp-hub-adoption-proposals.md](2026-05-04-ravitemer-mcp-hub-adoption-proposals.md) — advisory intake from comparing `ravitemer/mcp-hub` against this project's Phase 3/3B surface
 
 ---
 
@@ -72,6 +73,20 @@ Each requires a design memo (per-metric Dashboard fields, Servers drawer layout,
 ---
 
 ## Scope items
+
+### G. External adoption proposals (post-Phase 3B-II intake)
+
+`ravitemer/mcp-hub` was reviewed as an external reference for future
+development ideas. The durable intake note is
+[docs/superpowers/plans/2026-05-04-ravitemer-mcp-hub-adoption-proposals.md](2026-05-04-ravitemer-mcp-hub-adoption-proposals.md).
+
+| # | Candidate | Phase fit | Notes |
+|---|---|---|---|
+| G1 | Feature-support/readiness matrix | Phase 3B-II hardening | Align public docs with preview status and tested/untested surfaces. |
+| G2 | Unified health endpoint | Phase 3B-II / Phase 3C | Combine version, GUI, daemons, clients, ports, workspaces, and probe summaries. |
+| G3 | Optional unified MCP endpoint | Phase 3C | Add a single `Hub` endpoint with namespaced capabilities without replacing per-daemon endpoints. |
+| G4 | Remote manifests + VS Code/JSON5 import | Phase 3C/3D | Make remote `url + headers + secrets` and `.vscode/mcp.json` import first-class. |
+| G5 | Marketplace draft-manifest flow | Phase 3C/3D | Browse/import as inspect -> validate -> dry-run -> apply, never auto-install. |
 
 ### A. Secondary screens (spec §5)
 

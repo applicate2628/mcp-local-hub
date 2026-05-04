@@ -164,7 +164,7 @@ perftools.llvm_objdump(binary="./new_bin", function="hot_loop")
 | `mcphub scheduler weekly-refresh set "SUN 03:00"` | Install a hub-wide weekly `restart --all` task |
 | `mcphub scheduler weekly-refresh disable` | Remove the hub-wide weekly task |
 | `mcphub secrets {init,set,get,list,delete,edit,migrate}` | Age-encrypted vault for API keys |
-| `mcphub settings {get,set,list}` | GUI preferences (theme/shell/default-home — forward-compat for Phase 3B) |
+| `mcphub settings {get,set,list}` | GUI preference registry for Phase 3B/3B-II surfaces |
 
 ### Transport shims (Hidden; called by scheduler, not by humans)
 
@@ -203,26 +203,47 @@ Stdio-bridge daemons run external stdio servers (npx/uvx/node/python) via a Go h
 
 ## Current status
 
-**Phase 3A complete** — full CLI parity delivered plus the session additions documented in [docs/phase-3a-verification.md](docs/phase-3a-verification.md):
+**Preview / Phase 3B-II hardening** — the core CLI, daemon layer, Windows GUI,
+tray, secrets, settings, backup, migration, and workspace-scoped LSP surfaces
+are in the tree. Phase 3A and Phase 3B-I are closed; Phase 3B-II has delivered
+multiple follow-up slices, but still needs the live/manual smoke matrix and
+backlog reconciliation before a release-ready claim.
 
-- 10 shipped servers (was 8 after Phase 2)
-- 22 user-facing CLI commands
-- Go rewrite of godbolt and lldb, embedded as dual-entry servers
-- New perftools server wrapping clang-tidy/hyperfine/llvm-objdump/iwyu
-- PATH-based install model with `mcphub setup`
-- go:embed manifests for filesystem-independent binary
-- stdio-child-exit detection integrated with Task Scheduler restart policy
+Delivered and documented:
 
-**Earlier phases:**
+- 10 shipped servers plus the direct HTTPS `context7` entry.
+- 22 user-facing CLI commands across install, migration, logs, backups,
+  scheduler, secrets, settings, cleanup, and version surfaces.
+- Go rewrites of godbolt and lldb, embedded as dual-entry servers.
+- Perftools wrapping clang-tidy, opt-in hyperfine, llvm-objdump, and iwyu.
+- PATH-based install model with `mcphub setup`.
+- go:embed manifests for filesystem-independent binaries.
+- Native stdio-host, child-exit detection, and Task Scheduler restart policy.
+- Local-loopback GUI, SSE event bus, dashboard, logs, migration matrix,
+  secrets/settings/about screens, Windows tray subprocess, and Playwright/E2E
+  infrastructure.
+- Workspace-scoped LSP lazy proxies and a Phase 3B-II live/manual smoke
+  checklist for tray, console, reboot, daemon kill, and multi-language LSP
+  validation.
 
-- **Phase 1** — Serena consolidation across 4 clients ([docs/phase-1-verification.md](docs/phase-1-verification.md))
-- **Phase 2** — 7 global daemons added, supergateway → native Go stdio-host ([docs/phase-2-verification.md](docs/phase-2-verification.md))
-- **Phase 3A** — CLI parity (scan/migrate/manifest/backups/scheduler/settings) and Go-embedded servers ([docs/phase-3a-verification.md](docs/phase-3a-verification.md))
+Phase evidence:
 
-**Roadmap (not yet started):**
+- **Phase 1** — Serena consolidation across 4 clients ([docs/phase-1-verification.md](docs/phase-1-verification.md)).
+- **Phase 2** — 7 global daemons added, supergateway -> native Go stdio-host ([docs/phase-2-verification.md](docs/phase-2-verification.md)).
+- **Phase 3A** — CLI parity and Go-embedded servers ([docs/phase-3a-verification.md](docs/phase-3a-verification.md)).
+- **Phase 3B-I** — GUI Installer MVP ([docs/phase-3b-verification.md](docs/phase-3b-verification.md)).
+- **Phase 3B-II** — backlog and manual smoke matrix ([docs/superpowers/plans/phase-3b-ii-backlog.md](docs/superpowers/plans/phase-3b-ii-backlog.md), [docs/phase-3b-ii-verification.md](docs/phase-3b-ii-verification.md)).
 
-- **Phase 3B — GUI layer** (spec at `docs/superpowers/specs/2026-04-17-phase-3-gui-installer-design.md`) — HTTP + SSE + embedded web UI + system tray + unified "servers × clients" migration matrix
-- **Phase 4+** — Linux/macOS scheduler backends (systemd user units + launchd agents)
+Forward development proposals:
+
+- Ideas to evaluate from `ravitemer/mcp-hub` are captured in
+  [docs/superpowers/plans/2026-05-04-ravitemer-mcp-hub-adoption-proposals.md](docs/superpowers/plans/2026-05-04-ravitemer-mcp-hub-adoption-proposals.md).
+
+Roadmap / remaining work:
+
+- **Phase 3B-II release hardening** — execute the D2/D3 live/manual smoke matrix and reconcile the remaining backlog before tagging.
+- **Phase 3C+ candidate work** — optional unified MCP endpoint, richer health/capability status, remote-server manifests, marketplace/import flow, and VS Code/JSON5 compatibility.
+- **Phase 4+** — Linux/macOS scheduler backends (systemd user units + launchd agents).
 
 ## Platform support
 
