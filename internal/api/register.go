@@ -334,6 +334,7 @@ func (a *API) registerOneLanguage(
 	capturedTaskName := taskName
 	capturedPriorXML := priorXML
 	capturedPort := port
+	startedNewTask := false
 	*rollback = append(*rollback, func() {
 		// Kill the running proxy BEFORE deleting the task. On Windows,
 		// sch.Delete removes the task definition but does NOT terminate
@@ -342,7 +343,7 @@ func (a *API) registerOneLanguage(
 		// rollback stack runs — without this kill, an orphan proxy would
 		// keep the allocated port bound and break immediate re-register
 		// attempts. killByPortFn is a no-op if nothing is listening.
-		if capturedPort > 0 {
+		if startedNewTask && capturedPort > 0 {
 			_ = killByPortFn(capturedPort, 5*time.Second)
 		}
 		_ = sch.Delete(capturedTaskName)
@@ -489,6 +490,7 @@ func (a *API) registerOneLanguage(
 	if err := sch.Run(taskName); err != nil {
 		return WorkspaceEntry{}, fmt.Errorf("run task %s: %w", taskName, err)
 	}
+	startedNewTask = true
 	// Verify readiness. Windows schtasks /Run only triggers the task
 	// action; it does not report whether the action actually succeeded.
 	// Without this probe, a bad binary path, port contention, startup
