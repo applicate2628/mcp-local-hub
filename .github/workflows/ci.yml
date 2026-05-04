@@ -45,6 +45,9 @@ concurrency:
 jobs:
   build-and-test:
     name: build-and-test (${{ matrix.os }})
+    # Skip CI on draft PRs. Convert a PR to draft (`gh pr ready --undo`)
+    # to pause CI on it; mark ready for review (`gh pr ready`) to resume.
+    if: github.event.pull_request.draft == false
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -83,6 +86,7 @@ jobs:
 
   cross-compile:
     name: cross-compile (darwin)
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
 
     steps:
