@@ -223,6 +223,21 @@ Stdio-bridge daemons run external stdio servers (npx/uvx/node/python) via a Go h
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE).
+Mozilla Public License Version 2.0 (`MPL-2.0`) — see [LICENSE](LICENSE).
+
+Commercial licenses and commercial versions are available by separate
+agreement; see [COMMERCIAL.md](COMMERCIAL.md).
 
 Copyright 2026 Dmitry Denisenko ([@applicate2628](https://github.com/applicate2628))
+
+## Terms and Abbreviations
+
+- `CLI`: Command-Line Interface; commands such as `mcphub install` and
+  `mcphub status`.
+- `GUI`: Graphical User Interface; the embedded local web interface and tray
+  surface.
+- `MCP`: Model Context Protocol; the protocol used by managed clients and
+  servers.
+- `MPL-2.0`: Mozilla Public License Version 2.0; the open-source license used
+  by this repository.
+- `SSE`: Server-Sent Events; the HTTP event stream used by the GUI.

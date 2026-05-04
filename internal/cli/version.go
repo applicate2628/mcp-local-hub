@@ -23,7 +23,7 @@ func newVersionCmdReal() *cobra.Command {
 		Short: "Print version, commit, build metadata, and project homepage",
 		Long: `Print build metadata: semantic version, short git commit, build date,
 Go toolchain version, target platform, plus homepage / issue tracker
-/ license / author links.
+/ commercial licensing / license / author links.
 
 Values are baked in at build time via build.sh / build.ps1 (which
 injects ldflags). A bare 'go build ./cmd/mcphub' produces a binary
@@ -47,7 +47,8 @@ Example:
 			cmd.Println()
 			cmd.Println("  homepage:   https://github.com/applicate2628/mcp-local-hub")
 			cmd.Println("  issues:     https://github.com/applicate2628/mcp-local-hub/issues")
-			cmd.Println("  license:    Apache-2.0")
+			cmd.Println("  commercial: https://github.com/applicate2628/mcp-local-hub/blob/master/COMMERCIAL.md")
+			cmd.Println("  license:    MPL-2.0")
 			cmd.Println("  author:     Dmitry Denisenko (@applicate2628)")
 		},
 	}

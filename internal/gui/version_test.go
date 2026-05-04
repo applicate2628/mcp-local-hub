@@ -48,8 +48,11 @@ func TestVersion_GET_ReturnsBuildInfo(t *testing.T) {
 	if !strings.Contains(dto.Homepage, "github.com/applicate2628") {
 		t.Errorf("Homepage = %q, want github URL", dto.Homepage)
 	}
-	if dto.License != "Apache-2.0" {
-		t.Errorf("License = %q, want Apache-2.0", dto.License)
+	if !strings.Contains(dto.Commercial, "COMMERCIAL.md") {
+		t.Errorf("Commercial = %q, want COMMERCIAL.md URL", dto.Commercial)
+	}
+	if dto.License != "MPL-2.0" {
+		t.Errorf("License = %q, want MPL-2.0", dto.License)
 	}
 	// runtime-derived fields: GoVersion + Platform must be non-empty.
 	if dto.GoVersion == "" || dto.Platform == "" {

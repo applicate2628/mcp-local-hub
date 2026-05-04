@@ -11,19 +11,20 @@ import (
 
 // versionDTO is the JSON payload of GET /api/version. Mirrors the
 // fields rendered by `mcphub version` so the About screen can show
-// the same metadata. Homepage / issues / license / author links are
-// static strings owned by this layer because they're presentational
-// constants, not build inputs.
+// the same metadata. Homepage / issues / commercial / license /
+// author links are static strings owned by this layer because they're
+// presentational constants, not build inputs.
 type versionDTO struct {
-	Version   string `json:"version"`
-	Commit    string `json:"commit"`
-	BuildDate string `json:"build_date"`
-	GoVersion string `json:"go_version"`
-	Platform  string `json:"platform"`
-	Homepage  string `json:"homepage"`
-	Issues    string `json:"issues"`
-	License   string `json:"license"`
-	Author    string `json:"author"`
+	Version    string `json:"version"`
+	Commit     string `json:"commit"`
+	BuildDate  string `json:"build_date"`
+	GoVersion  string `json:"go_version"`
+	Platform   string `json:"platform"`
+	Homepage   string `json:"homepage"`
+	Issues     string `json:"issues"`
+	Commercial string `json:"commercial"`
+	License    string `json:"license"`
+	Author     string `json:"author"`
 }
 
 func registerVersionRoutes(s *Server) {
@@ -42,15 +43,16 @@ func (s *Server) versionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	v, c, d := buildinfo.Get()
 	dto := versionDTO{
-		Version:   v,
-		Commit:    c,
-		BuildDate: d,
-		GoVersion: runtime.Version(),
-		Platform:  runtime.GOOS + "/" + runtime.GOARCH,
-		Homepage:  "https://github.com/applicate2628/mcp-local-hub",
-		Issues:    "https://github.com/applicate2628/mcp-local-hub/issues",
-		License:   "Apache-2.0",
-		Author:    "Dmitry Denisenko (@applicate2628)",
+		Version:    v,
+		Commit:     c,
+		BuildDate:  d,
+		GoVersion:  runtime.Version(),
+		Platform:   runtime.GOOS + "/" + runtime.GOARCH,
+		Homepage:   "https://github.com/applicate2628/mcp-local-hub",
+		Issues:     "https://github.com/applicate2628/mcp-local-hub/issues",
+		Commercial: "https://github.com/applicate2628/mcp-local-hub/blob/master/COMMERCIAL.md",
+		License:    "MPL-2.0",
+		Author:     "Dmitry Denisenko (@applicate2628)",
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if err := json.NewEncoder(w).Encode(dto); err != nil {

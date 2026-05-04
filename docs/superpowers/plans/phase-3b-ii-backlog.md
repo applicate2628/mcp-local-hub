@@ -81,7 +81,7 @@ Each requires a design memo (per-metric Dashboard fields, Servers drawer layout,
 | A2 | **Add/Edit manifest** | §5.4 | Accordion form: Basics → Command → Environment → Daemons → Client bindings → Advanced. Live YAML preview. Validate + Save & Install / Save only actions. |
 | A3 | **Secrets** | §5.6 | Key names table with "Used by" counts. Values never displayed. Add/Rotate/Delete flows. |
 | A4 | **Settings** | §5.7 | Appearance / GUI server / Daemons / Backups / Advanced sections. Persists to `gui-preferences.yaml`. |
-| A5 | **About** | §5.8 | Version, commit, build date, GitHub link, Apache 2.0 license, credits. |
+| A5 | **About** | §5.8 | Version, commit, build date, GitHub link, MPL-2.0 license, commercial licensing link, credits. |
 
 ### B. Backend API gaps
 

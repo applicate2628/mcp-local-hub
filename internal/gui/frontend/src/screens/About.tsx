@@ -12,6 +12,7 @@ interface VersionInfo {
   platform: string;
   homepage: string;
   issues: string;
+  commercial: string;
   license: string;
   author: string;
 }
@@ -94,6 +95,16 @@ export function AboutScreen() {
         <li>
           <a href={v.issues} target="_blank" rel="noopener noreferrer">
             Issue tracker
+          </a>
+        </li>
+        <li>
+          <a
+            href={v.commercial}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid="about-commercial-link"
+          >
+            Commercial licensing
           </a>
         </li>
       </ul>

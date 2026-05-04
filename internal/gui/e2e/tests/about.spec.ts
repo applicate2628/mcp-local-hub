@@ -28,8 +28,9 @@ test.describe("about", () => {
     // Wait for the loaded state so links exist.
     await expect(page.getByTestId("about-loaded")).toBeVisible();
     const links = page.locator(".about-links a");
-    await expect(links).toHaveCount(2);
-    for (let i = 0; i < (await links.count()); i++) {
+    const count = await links.count();
+    expect(count).toBeGreaterThanOrEqual(3);
+    for (let i = 0; i < count; i++) {
       const link = links.nth(i);
       await expect(link).toHaveAttribute("target", "_blank");
       await expect(link).toHaveAttribute("rel", "noopener noreferrer");

@@ -272,7 +272,7 @@ Sections: Appearance (theme, shell, default home, density), GUI server (port, br
 
 ### 5.8 About
 
-Version, commit, build date, GitHub link, Apache 2.0 license, credits. Links to README, INSTALL, verification docs.
+Version, commit, build date, GitHub link, MPL-2.0 license, commercial licensing link, credits. Links to README, INSTALL, verification docs.
 
 ## 6. Tray
 
