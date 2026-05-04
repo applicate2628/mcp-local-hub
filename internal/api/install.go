@@ -63,6 +63,18 @@ func canonicalMcphubPath() (string, error) {
 	return filepath.Join(home, ".local", "bin", mcphubShortName), nil
 }
 
+
+func ensureCanonicalMcphubPresent() (string, error) {
+	canonicalPath, err := canonicalMcphubPath()
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(canonicalPath); err != nil {
+		return "", fmt.Errorf("%s not present — run `mcphub setup` once to install the canonical binary: %w", canonicalPath, err)
+	}
+	return canonicalPath, nil
+}
+
 // Plan describes the side effects that `mcp install --server X` would produce.
 // Returned by BuildPlan and rendered by `install --dry-run`.
 type Plan struct {
@@ -999,12 +1011,8 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 	// Scheduler's CreateProcess call skips PATH lookup. Antigravity
 	// relay entries also use this canonical absolute path to avoid
 	// PATH/CWD resolution and binary planting.
-	canonicalPath, err := canonicalMcphubPath()
-	if err != nil {
+	if _, err := ensureCanonicalMcphubPresent(); err != nil {
 		return err
-	}
-	if _, err := os.Stat(canonicalPath); err != nil {
-		return fmt.Errorf("%s not present — run `mcphub setup` once to install the canonical binary: %w", canonicalPath, err)
 	}
 	// 3. Ports free — only for daemons in the filtered scope.
 	//
