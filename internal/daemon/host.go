@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"os/exec"
@@ -417,6 +418,19 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 	var origMethod string
 	if m, ok := msg["method"]; ok {
 		_ = json.Unmarshal(m, &origMethod)
+	}
+	// Reject non-JSON content types so browser cross-site form posts
+	// (text/plain, form-urlencoded, multipart/form-data) cannot drive the
+	// local bridge without triggering CORS preflight.
+	if ct := r.Header.Get("Content-Type"); ct != "" {
+		mt, _, err := mime.ParseMediaType(ct)
+		if err != nil || mt != "application/json" {
+			http.Error(w, "content type must be application/json", http.StatusUnsupportedMediaType)
+			return
+		}
+	} else {
+		http.Error(w, "missing content type", http.StatusUnsupportedMediaType)
+		return
 	}
 
 	// Initialize-cache short-circuit. Stdio MCP servers expect `initialize`
