@@ -294,6 +294,38 @@ func TestMigrateLegacy_ClosedStdinDeclinesConfirmation(t *testing.T) {
 	}
 }
 
+// TestMigrateLegacy_PartialEOFConfirmationYes ensures interactive input
+// without a trailing newline still honors explicit confirmation.
+// bufio.Reader.ReadString('\n') can return ("y", io.EOF); migration
+// should parse that partial line before deciding to skip.
+func TestMigrateLegacy_PartialEOFConfirmationYes(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	ws := t.TempDir()
+	h.fakeClients.entries["codex-cli"]["legacy"] = "legacy-url"
+	entries := []LegacyLSEntry{
+		{Client: "codex-cli", EntryName: "legacy", Workspace: ws, Language: "python", LspCommand: "pyright-langserver"},
+	}
+	a := NewAPI()
+	report, err := a.MigrateLegacy(entries, LegacyMigrateOpts{
+		Yes:    false,
+		In:     strings.NewReader("y"),
+		Writer: &bytes.Buffer{},
+	})
+	if err != nil {
+		t.Fatalf("MigrateLegacy: %v", err)
+	}
+	if len(report.Applied) != 1 {
+		t.Fatalf("expected Applied=1 for explicit y without newline, got %+v", report)
+	}
+	if len(report.Skipped) != 0 {
+		t.Fatalf("expected Skipped=0 for explicit y without newline, got %+v", report.Skipped)
+	}
+	if _, ok := h.fakeClients.entries["codex-cli"]["legacy"]; ok {
+		t.Error("legacy entry still present after explicit confirmation")
+	}
+}
+
 // TestMigrateLegacy_InPlaceCheckScopedToCurrentWorkspace guards the
 // global-vs-local-scope fix for entryJustWrittenByRegister. If another
 // workspace happened to have an entry with the same (client, name) as
