@@ -252,3 +252,28 @@ func TestInflight_IndependentKeysDoNotInterfere(t *testing.T) {
 		t.Errorf("k2 throttled by k1's failure; ran = %d", ran.Load())
 	}
 }
+
+func TestInflight_ConcurrentFailureBurstHonorsRetryThrottle(t *testing.T) {
+	g := NewInflightGate(time.Hour)
+	boom := errors.New("boom")
+
+	var calls atomic.Int32
+	fn := func(ctx context.Context) (any, error) {
+		calls.Add(1)
+		// Keep first singleflight winner busy long enough to build a burst.
+		time.Sleep(5 * time.Millisecond)
+		return nil, boom
+	}
+
+	var wg sync.WaitGroup
+	for range 200 {
+		wg.Go(func() {
+			_, _ = g.Do(context.Background(), "k", fn)
+		})
+	}
+	wg.Wait()
+
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("retry throttle bypassed in concurrent burst: fn called %d times", got)
+	}
+}
