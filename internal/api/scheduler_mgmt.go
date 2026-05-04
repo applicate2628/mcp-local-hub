@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -146,7 +147,14 @@ func (a *API) SchedulerUpgrade() ([]SchedulerUpgradeResult, error) {
 // needs refreshing after a binary move. Snapshot + restore on failure
 // mirrors the rest of the upgrade loop.
 func upgradeWorkspaceWeeklyRefreshTask(sch scheduler.Scheduler, taskName, canonicalPath string) *SchedulerUpgradeResult {
-	priorXML, _ := sch.ExportXML(taskName)
+	var priorXML []byte
+	if xml, err := sch.ExportXML(taskName); err != nil {
+		if !errors.Is(err, scheduler.ErrTaskNotFound) {
+			return &SchedulerUpgradeResult{TaskName: taskName, Err: fmt.Sprintf("export: %v", err)}
+		}
+	} else {
+		priorXML = xml
+	}
 	if err := sch.Delete(taskName); err != nil {
 		return &SchedulerUpgradeResult{TaskName: taskName, Err: fmt.Sprintf("delete: %v", err)}
 	}
@@ -180,7 +188,14 @@ func upgradeLazyProxyTask(sch scheduler.Scheduler, taskName, normalizedName, can
 	if !ok {
 		return &SchedulerUpgradeResult{TaskName: taskName, Err: "no registry entry for workspace-proxy task; run mcphub register to rebuild"}
 	}
-	priorXML, _ := sch.ExportXML(taskName)
+	var priorXML []byte
+	if xml, err := sch.ExportXML(taskName); err != nil {
+		if !errors.Is(err, scheduler.ErrTaskNotFound) {
+			return &SchedulerUpgradeResult{TaskName: taskName, Err: fmt.Sprintf("export: %v", err)}
+		}
+	} else {
+		priorXML = xml
+	}
 	if err := sch.Delete(taskName); err != nil {
 		return &SchedulerUpgradeResult{TaskName: taskName, Err: fmt.Sprintf("delete: %v", err)}
 	}
