@@ -134,6 +134,8 @@ func isDisallowedClangTidyArg(arg string) bool {
 		"-load", "--load",
 		"-fix", "--fix", "--fix-errors",
 		"-export-fixes", "--export-fixes",
+		"-extra-arg", "--extra-arg",
+		"-extra-arg-before", "--extra-arg-before",
 	}
 	for _, flag := range disallowed {
 		if trimmed == flag || strings.HasPrefix(trimmed, flag+"=") {

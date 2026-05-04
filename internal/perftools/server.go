@@ -97,7 +97,7 @@ func registerTools(tb *PerfToolbox) {
 				"extra_args": map[string]any{
 					"type":        "array",
 					"items":       map[string]any{"type": "string"},
-					"description": "Optional. Additional raw arguments passed verbatim before file list (e.g. ['--header-filter=.*', '--quiet']).",
+					"description": "Optional. Additional clang-tidy arguments passed before file list (e.g. ['--header-filter=.*', '--quiet']). Unsafe mutating/plugin/compiler-injection flags are rejected.",
 				},
 			},
 			"required": []string{"files", "project_root"},

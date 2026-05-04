@@ -203,6 +203,9 @@ func TestValidateClangTidyInputs_DisallowedExtraArgs(t *testing.T) {
 		"-fix",
 		"--fix-errors",
 		"--export-fixes=/tmp/fixes.yaml",
+		"--extra-arg=-fplugin=./evil.so",
+		"--extra-arg-before=-fplugin=./evil.so",
+		"--extra-arg",
 	}
 
 	for _, arg := range tests {
