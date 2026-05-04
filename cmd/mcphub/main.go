@@ -3,7 +3,7 @@
 // Explorer Properties is embedded via cmd/mcphub/resource.syso, regenerated
 // from versioninfo.json whenever the file changes:
 //
-//go:generate go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest -64 -o resource.syso versioninfo.json
+//go:generate go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.5.0 -64 -o resource.syso versioninfo.json
 package main
 
 import (
