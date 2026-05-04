@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // Registry entry for the resources-capability bridge. Translates
@@ -42,6 +43,9 @@ func mapReadResourceArgs(toolArgs json.RawMessage) (json.RawMessage, error) {
 	}
 	if args.URI == "" {
 		return nil, errors.New("missing required argument: uri")
+	}
+	if !strings.HasPrefix(args.URI, "resource://") {
+		return nil, errors.New("invalid uri: must start with resource://")
 	}
 	return json.Marshal(map[string]string{"uri": args.URI})
 }
