@@ -59,6 +59,17 @@ describe("aggregateStatus", () => {
     expect(Object.keys(out)).toEqual(["s"]);
   });
 
+
+  it("handles server names that collide with Object prototype keys", () => {
+    const out = aggregateStatus([row({ server: "constructor", port: 9100 })]);
+    expect(out["constructor"]).toEqual({
+      server: "constructor",
+      state: "Running",
+      port: 9100,
+      daemonCount: 1,
+    });
+  });
+
   it("tolerates null input", () => {
     expect(aggregateStatus(null)).toEqual({});
   });
