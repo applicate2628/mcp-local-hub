@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -391,6 +393,10 @@ func (h *StdioHost) HTTPHandler() http.Handler {
 }
 
 func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
+	if !isTrustedLoopbackRequest(r) {
+		http.Error(w, "forbidden cross-site request", http.StatusForbidden)
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxMCPPostBodyBytes)
 	defer r.Body.Close()
 	w.Header().Set("Mcp-Session-Id", h.sessionID)
@@ -590,6 +596,25 @@ func randomSessionID() (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("%x", b[:]), nil
+}
+
+func isTrustedLoopbackRequest(r *http.Request) bool {
+	// Browser CSRF hardening: block explicit cross-site fetches and only
+	// allow Origin-bearing callers from localhost/loopback origins.
+	if strings.EqualFold(r.Header.Get("Sec-Fetch-Site"), "cross-site") {
+		return false
+	}
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" || strings.EqualFold(origin, "null") {
+		// Non-browser clients typically omit Origin; keep compatibility.
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
 // readStdoutTest exposes the raw stdout stream for unit tests only.
