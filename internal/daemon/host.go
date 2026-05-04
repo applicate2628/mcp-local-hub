@@ -58,7 +58,7 @@ type StdioHost struct {
 	pendingMu      sync.Mutex
 	pending        map[int64]chan json.RawMessage
 
-	// logFile is the optional rotated log file for child stderr.
+	// logFile is the optional rotated log sink for child stderr.
 	// nil when HostConfig.LogPath is empty.
 	logFile io.Closer
 
@@ -92,6 +92,71 @@ type StdioHost struct {
 }
 
 const maxMCPPostBodyBytes int64 = 1 << 20 // 1 MiB
+
+const (
+	stderrLogMaxSize int64 = 10 * 1024 * 1024
+	stderrLogKeep          = 5
+)
+
+type rotatingFileWriter struct {
+	path string
+	file *os.File
+	mu   sync.Mutex
+}
+
+func newRotatingFileWriter(path string) (*rotatingFileWriter, error) {
+	w := &rotatingFileWriter{path: path}
+	if err := w.openLocked(); err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
+func (w *rotatingFileWriter) openLocked() error {
+	if err := RotateIfLarge(w.path, stderrLogMaxSize, stderrLogKeep); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(w.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	w.file = f
+	return nil
+}
+
+func (w *rotatingFileWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.file == nil {
+		if err := w.openLocked(); err != nil {
+			return 0, err
+		}
+	}
+	if info, err := w.file.Stat(); err == nil && info.Size()+int64(len(p)) > stderrLogMaxSize {
+		_ = w.file.Close()
+		w.file = nil
+		if err := RotateIfLarge(w.path, stderrLogMaxSize, stderrLogKeep); err != nil {
+			return 0, err
+		}
+		f, err := os.OpenFile(w.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+		if err != nil {
+			return 0, err
+		}
+		w.file = f
+	}
+	return w.file.Write(p)
+}
+
+func (w *rotatingFileWriter) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.file == nil {
+		return nil
+	}
+	err := w.file.Close()
+	w.file = nil
+	return err
+}
 
 func NewStdioHost(cfg HostConfig) (*StdioHost, error) {
 	if cfg.Command == "" {
@@ -285,16 +350,13 @@ func (h *StdioHost) openStderrSink() io.Writer {
 		fmt.Fprintf(os.Stderr, "warn: mkdir log dir: %v\n", err)
 		return os.Stderr
 	}
-	if err := RotateIfLarge(h.cfg.LogPath, 10*1024*1024, 5); err != nil {
-		fmt.Fprintf(os.Stderr, "warn: rotate log: %v\n", err)
-	}
-	f, err := os.OpenFile(h.cfg.LogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	rw, err := newRotatingFileWriter(h.cfg.LogPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warn: open log %q: %v\n", h.cfg.LogPath, err)
 		return os.Stderr
 	}
-	h.logFile = f
-	return io.MultiWriter(f, os.Stderr)
+	h.logFile = rw
+	return io.MultiWriter(rw, os.Stderr)
 }
 
 // writeStdin sends a line (terminated with '\n') to the subprocess stdin.
