@@ -42,7 +42,7 @@ when moving to a new machine.
 
 Subcommands:
   secrets init                      # generate .age-key + empty secrets.age
-  secrets set <key> --value <val>   # add or update a secret
+  secrets set <key>                 # add or update a secret
   secrets get <key>                 # print value (clipboard by default)
   secrets get <key> --show          # print to stdout
   secrets list                      # list keys (not values)
@@ -93,7 +93,6 @@ func newSecretsInitCmd() *cobra.Command {
 }
 
 func newSecretsSetCmd() *cobra.Command {
-	var valueFlag string
 	var fromStdin bool
 	c := &cobra.Command{
 		Use:   "set <key>",
@@ -103,8 +102,6 @@ func newSecretsSetCmd() *cobra.Command {
 			key := args[0]
 			var value string
 			switch {
-			case valueFlag != "":
-				value = valueFlag
 			case fromStdin:
 				b, err := readAllStdin()
 				if err != nil {
@@ -130,7 +127,6 @@ func newSecretsSetCmd() *cobra.Command {
 			return nil
 		},
 	}
-	c.Flags().StringVar(&valueFlag, "value", "", "provide value on command line (non-interactive)")
 	c.Flags().BoolVar(&fromStdin, "from-stdin", false, "read value from stdin")
 	return c
 }
