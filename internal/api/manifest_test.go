@@ -37,6 +37,16 @@ func TestManifestValidateCatchesMissingFields(t *testing.T) {
 	}
 }
 
+func TestManifestValidateWorkspaceScopedAllowsNoDaemons(t *testing.T) {
+	a := NewAPI()
+	yaml := "name: mcp-language-server\nkind: workspace-scoped\ntransport: stdio-bridge\ncommand: mcp-language-server\nport_pool: {start: 9200, end: 9299}\nlanguages:\n  - name: go\n    backend: gopls-mcp\n    transport: stdio\n    lsp_command: gopls\n"
+	warnings := a.ManifestValidate(yaml)
+	for _, w := range warnings {
+		if w == "no daemons declared" {
+			t.Fatalf("unexpected warning for workspace-scoped manifest: %v", warnings)
+		}
+	}
+}
 func TestManifestCreateWritesYAML(t *testing.T) {
 	tmp := t.TempDir()
 	a := NewAPI()
