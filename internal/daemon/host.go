@@ -174,9 +174,13 @@ func (h *StdioHost) Start(ctx context.Context) error {
 	// `mcphub logs <server>` shows actual subprocess output instead of
 	// "(no output yet)" for stdio-bridge daemons.
 	stderrSink := h.openStderrSink()
+	var pipesDrained sync.WaitGroup
+	pipesDrained.Add(2)
+
 	h.wg.Add(1)
 	go func() {
 		defer h.wg.Done()
+		defer pipesDrained.Done()
 		s := bufio.NewScanner(stderr)
 		s.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for s.Scan() {
@@ -195,16 +199,16 @@ func (h *StdioHost) Start(ctx context.Context) error {
 	// Reader goroutine: pipes every stdout line to testStdout (and, in later
 	// tasks, to the ID-routing map for HTTP response delivery).
 	h.wg.Add(1)
-	go h.readStdoutLoop()
+	go func() {
+		defer pipesDrained.Done()
+		h.readStdoutLoop()
+	}()
 
 	// Watcher goroutine: owns cmd.Wait() exclusively so no other call site
-	// double-waits. When the child exits for any reason (normal exit, crash,
-	// signal, Stop-initiated Kill), we close h.childExited so:
-	//   - in-flight HTTP handlers can return 502 instead of blocking 30s
-	//   - Stop() can observe the termination without calling Wait() itself
-	//   - the outer daemon loop (internal/cli/daemon.go) can observe
-	//     unexpected death and exit non-zero so the scheduler restarts us
+	// double-waits. Wait is deferred until after both stdout/stderr readers
+	// return so the pipes are fully drained before Wait closes them.
 	go func() {
+		pipesDrained.Wait()
 		_ = cmd.Wait()
 		close(h.childExited)
 	}()
@@ -477,6 +481,28 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 	if err := h.writeStdin(rewritten); err != nil {
 		http.Error(w, "write stdin: "+err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	// Prefer a ready subprocess response over child-exit so a valid final
+	// reply is not dropped when the child exits immediately after writing it.
+	select {
+	case respBody := <-respCh:
+		if origMethod == "initialize" {
+			h.bridge.CacheInitialize(respBody)
+		}
+		respBody = h.bridge.TransformResponse(origMethod, action.Active, respBody)
+		var respMsg map[string]json.RawMessage
+		if err := json.Unmarshal(respBody, &respMsg); err != nil {
+			http.Error(w, "subprocess returned invalid JSON", http.StatusBadGateway)
+			return
+		}
+		respMsg["id"] = origIDRaw
+		out, _ := json.Marshal(respMsg)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(out)
+		return
+	default:
 	}
 
 	select {
