@@ -87,6 +87,15 @@ func (g *InflightGate) Do(ctx context.Context, key string, fn func(context.Conte
 	}
 
 	v, err, _ := g.sf.Do(key, func() (any, error) {
+		// Re-check throttle inside the singleflight winner path so callers
+		// that raced past the outer fast-path cannot bypass minRetryGap.
+		g.mu.Lock()
+		if fe, ok := g.lastFailure[key]; ok && time.Since(fe.at) < g.minRetryGap {
+			g.mu.Unlock()
+			return nil, fe.err
+		}
+		g.mu.Unlock()
+
 		res, err := fn(materializeCtx)
 		g.mu.Lock()
 		defer g.mu.Unlock()
