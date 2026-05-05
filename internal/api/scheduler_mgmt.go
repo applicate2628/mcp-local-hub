@@ -28,7 +28,7 @@ type SchedulerUpgradeResult struct {
 // Preserves scheduler task names and trigger configurations; only the
 // <Command> and <WorkingDirectory> fields are updated.
 func (a *API) SchedulerUpgrade() ([]SchedulerUpgradeResult, error) {
-	canonicalPath, err := canonicalMcphubPath()
+	canonicalPath, err := ensureCanonicalMcphubPresent()
 	if err != nil {
 		return nil, err
 	}
@@ -230,7 +230,7 @@ func (a *API) WeeklyRefreshSet(schedule string) error {
 	if err != nil {
 		return err
 	}
-	canonicalPath, err := canonicalMcphubPath()
+	canonicalPath, err := ensureCanonicalMcphubPresent()
 	if err != nil {
 		return err
 	}
