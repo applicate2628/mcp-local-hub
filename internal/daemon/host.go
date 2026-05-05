@@ -303,10 +303,17 @@ func (h *StdioHost) Stop() error {
 }
 
 // openStderrSink returns a writer for child stderr. When LogPath is set
-// the writer tees to both the rotated log file (so `mcphub logs` works
-// for stdio-bridge daemons) and os.Stderr (so the operator's terminal
-// keeps showing live diagnostics). When LogPath is empty, falls back to
-// os.Stderr only — matches the pre-LogPath behavior.
+// the writer tees to both a runtime-rotating log file (so `mcphub logs`
+// works for long-lived stdio-bridge daemons without unbounded growth)
+// and os.Stderr (so the operator's terminal keeps showing live
+// diagnostics). When LogPath is empty, falls back to os.Stderr only —
+// matches the pre-LogPath behavior.
+//
+// The file leg is wrapped in a best-effort writer that rotates inline
+// when the on-disk size grows past the cap and absorbs all rotation /
+// write / open errors. Stderr forwarding must never stop because the
+// log file became unwritable: that would suppress operator diagnostics
+// for the rest of the daemon's life.
 func (h *StdioHost) openStderrSink() io.Writer {
 	if h.cfg.LogPath == "" {
 		return os.Stderr
@@ -323,8 +330,88 @@ func (h *StdioHost) openStderrSink() io.Writer {
 		fmt.Fprintf(os.Stderr, "warn: open log %q: %v\n", h.cfg.LogPath, err)
 		return os.Stderr
 	}
-	h.logFile = f
-	return io.MultiWriter(f, os.Stderr)
+	rfw := &rotatingFileWriter{path: h.cfg.LogPath, file: f, maxBytes: 10 * 1024 * 1024, keep: 5}
+	h.logFile = rfw
+	return io.MultiWriter(rfw, os.Stderr)
+}
+
+// rotatingFileWriter writes to a log file, rotating it inline when its
+// on-disk size grows past maxBytes. All errors (rotation, reopen, write)
+// are absorbed and surfaced as a single warn line on os.Stderr so that
+// the surrounding io.MultiWriter(rfw, os.Stderr) keeps the stderr leg
+// alive when the file leg breaks.
+//
+// Write always returns (len(p), nil) — Codex-finding fix for PR #72.
+type rotatingFileWriter struct {
+	mu          sync.Mutex
+	path        string
+	file        *os.File
+	maxBytes    int64
+	keep        int
+	written     int64
+	rotateBroke bool // log "leg disabled" once
+}
+
+func (r *rotatingFileWriter) Write(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.maybeRotateLocked()
+	if r.file != nil {
+		if n, werr := r.file.Write(p); werr != nil {
+			r.disableLocked(fmt.Errorf("write log: %w", werr))
+		} else {
+			r.written += int64(n)
+		}
+	}
+	return len(p), nil
+}
+
+func (r *rotatingFileWriter) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.file == nil {
+		return nil
+	}
+	err := r.file.Close()
+	r.file = nil
+	return err
+}
+
+func (r *rotatingFileWriter) maybeRotateLocked() {
+	if r.file == nil || r.maxBytes <= 0 {
+		return
+	}
+	if r.written < r.maxBytes {
+		// Cheap path — no stat call until our write counter hints we
+		// might be near the threshold.
+		return
+	}
+	r.written = 0
+	if err := r.file.Close(); err != nil {
+		r.disableLocked(fmt.Errorf("close before rotate: %w", err))
+		return
+	}
+	if err := RotateIfLarge(r.path, r.maxBytes, r.keep); err != nil {
+		r.disableLocked(fmt.Errorf("rotate: %w", err))
+		return
+	}
+	f, err := os.OpenFile(r.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		r.disableLocked(fmt.Errorf("reopen after rotate: %w", err))
+		return
+	}
+	r.file = f
+}
+
+func (r *rotatingFileWriter) disableLocked(cause error) {
+	if r.file != nil {
+		_ = r.file.Close()
+		r.file = nil
+	}
+	if !r.rotateBroke {
+		fmt.Fprintf(os.Stderr, "warn: stdio log file leg disabled (%v); stderr forwarding continues\n", cause)
+		r.rotateBroke = true
+	}
 }
 
 // writeStdin sends a line (terminated with '\n') to the subprocess stdin.
