@@ -81,8 +81,8 @@ type StdioHost struct {
 
 	done        chan struct{} // closed by Stop() to unblock pending handlers
 	procExited  chan struct{} // closed by the watcher goroutine when cmd.Process.Wait() returns (Phase 1 — OS-exit detected, before pipe drain)
-	childExited chan struct{} // closed by the watcher goroutine after cmd.Wait() returns (Phase 4 — pipes drained or bounded timeout)
-	exitState   atomic.Pointer[os.ProcessState] // saved by Phase 1 before Phase 3's cmd.Wait clears cmd.ProcessState (Codex bot P2 on f2dbea0); read via ExitState()
+	childExited chan struct{} // closed by the watcher goroutine after the bounded pipe-drain wait (Phase 4 — pipes drained or pipeDrainTimeout fired); cmd.Wait runs out-of-line AFTER this close
+	exitState   atomic.Pointer[os.ProcessState] // saved by Phase 1 from cmd.Process.Wait's return; the out-of-line cmd.Wait would otherwise rewrite cmd.ProcessState to nil (Codex bot P2 on f2dbea0); read via ExitState()
 
 	// job is a Windows Job Object (no-op on POSIX) configured with
 	// KILL_ON_JOB_CLOSE so the kernel reaps any descendant tree the

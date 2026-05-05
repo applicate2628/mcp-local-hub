@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -175,7 +176,9 @@ func (p *LazyProxy) Stop(ctx context.Context) error {
 		p.endpoint = nil
 	}
 	p.mu.Unlock()
-	_ = p.cfg.Lifecycle.Stop()
+	if stopErr := p.cfg.Lifecycle.Stop(); stopErr != nil {
+		fmt.Fprintf(os.Stderr, "warn: lazy_proxy: lifecycle stop: %v\n", stopErr)
+	}
 	p.gate.Forget(p.inflightKey())
 	if p.server != nil {
 		return p.server.Shutdown(ctx)
@@ -479,7 +482,9 @@ func (p *LazyProxy) onSendFailure(err error) {
 	// if the child already exited on its own. This invalidates the impl's
 	// cached host so any concurrent Materialize that slips in after the
 	// next Forget() will re-spawn rather than reuse the dead host.
-	_ = p.cfg.Lifecycle.Stop()
+	if stopErr := p.cfg.Lifecycle.Stop(); stopErr != nil {
+		fmt.Fprintf(os.Stderr, "warn: lazy_proxy: lifecycle stop after failure: %v\n", stopErr)
+	}
 	p.gate.Forget(p.inflightKey())
 	_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycle(
 		p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleFailed, err.Error())

@@ -222,7 +222,9 @@ See also: install, logs, restart, status.`,
 				go func() { errCh <- srv.ListenAndServe() }()
 				select {
 				case err := <-errCh:
-					_ = h.Stop()
+					if stopErr := h.Stop(); stopErr != nil {
+						fmt.Fprintf(os.Stderr, "warn: %v\n", stopErr)
+					}
 					if errors.Is(err, http.ErrServerClosed) {
 						return nil
 					}
@@ -230,7 +232,9 @@ See also: install, logs, restart, status.`,
 				case <-ctx.Done():
 					// Stop() first so handleSSE and handlePOST goroutines observe h.done
 					// and return; then Shutdown can complete without waiting on long-lived SSE.
-					_ = h.Stop()
+					if stopErr := h.Stop(); stopErr != nil {
+						fmt.Fprintf(os.Stderr, "warn: %v\n", stopErr)
+					}
 					shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 					defer cancel()
 					_ = srv.Shutdown(shutdownCtx)
@@ -245,7 +249,9 @@ See also: install, logs, restart, status.`,
 					// scheduler_windows.go) will re-launch the task, which
 					// respawns the child. Scheduler owns the retry budget; we
 					// do not add in-process respawn logic here.
-					_ = h.Stop()
+					if stopErr := h.Stop(); stopErr != nil {
+						fmt.Fprintf(os.Stderr, "warn: %v\n", stopErr)
+					}
 					shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 					defer cancel()
 					_ = srv.Shutdown(shutdownCtx)

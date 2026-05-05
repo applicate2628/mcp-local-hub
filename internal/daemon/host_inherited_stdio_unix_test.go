@@ -76,10 +76,12 @@ func TestStdioHostInheritedStdioDescendantDoesNotWedgeChildExited(t *testing.T) 
 	// ChildExited MUST close in BOUNDED time after the immediate child
 	// exited. Before PR #117's pipesDrained.Wait gate this select blocked
 	// indefinitely because the descendant kept fds open. The fix here
-	// re-bounds the wait at pipeDrainTimeout (5s): the watcher fires the
+	// re-bounds the wait at pipeDrainTimeout: the watcher fires the
 	// timeout, calls cmd.Wait to close the parent's pipe read-ends, and
-	// then closes childExited (Phase 4). Total budget includes the 5s
-	// timeout + watcher reap; 8s gives comfortable headroom.
+	// then closes childExited (Phase 4). Budget below derives from
+	// pipeDrainTimeout (the only meaningful constant) plus a 3s watcher
+	// reap headroom — Codex CLI xhigh P3 on e26209a flagged the prior
+	// hardcoded 8s as brittle.
 	//
 	// Codex bot P1 on 34b1a30 was the reason childExited closes AFTER
 	// pipe drain rather than immediately on Process.Wait return: closing
@@ -87,15 +89,17 @@ func TestStdioHostInheritedStdioDescendantDoesNotWedgeChildExited(t *testing.T) 
 	// dispatch a final reply to respCh AFTER childExited closed, and
 	// handlePOST would non-deterministically pick the childExited branch
 	// and return 502 even though a valid response existed.
+	childExitedBudget := pipeDrainTimeout + 3*time.Second
 	select {
 	case <-h.ChildExited():
-	case <-time.After(8 * time.Second):
-		t.Fatalf("ChildExited() did not close within 8s — supervisor would never restart this daemon")
+	case <-time.After(childExitedBudget):
+		t.Fatalf("ChildExited() did not close within %s — supervisor would never restart this daemon", childExitedBudget)
 	}
 
 	// Stop must also return within a bounded window. The fix added a
-	// 5s cap on h.wg.Wait() inside Stop, so even with the descendant
-	// holding pipes open, Stop returns by ~5-6s wall time.
+	// 1s cap on h.wg.Wait() inside Stop, so even with the descendant
+	// holding pipes open, Stop returns within seconds of childExited.
+	stopBudget := pipeDrainTimeout + 3*time.Second
 	stopDone := make(chan error, 1)
 	go func() { stopDone <- h.Stop() }()
 	select {
@@ -103,7 +107,66 @@ func TestStdioHostInheritedStdioDescendantDoesNotWedgeChildExited(t *testing.T) 
 		if err != nil {
 			t.Fatalf("Stop returned error: %v", err)
 		}
-	case <-time.After(8 * time.Second):
-		t.Fatalf("Stop did not return within 8s — Stop would hang the outer daemon shutdown path")
+	case <-time.After(stopBudget):
+		t.Fatalf("Stop did not return within %s — Stop would hang the outer daemon shutdown path", stopBudget)
+	}
+}
+
+// TestStdioHostProcExitedGateSkipsKillAfterReap is the regression test
+// for the procExited PID-reuse gate (Codex CLI xhigh P2 on e26209a:
+// "procExited gate is not directly covered"). After cmd.Process.Wait
+// reaps the OS child in Phase 1, the original PID is eligible for
+// reuse on POSIX. Stop's kill-skip select MUST consult procExited (not
+// childExited, which closes only after the up-to-pipeDrainTimeout
+// drain wait) so it doesn't issue a fresh PID-based pkill/kill against
+// a possibly-reused PID.
+//
+// Test approach: spawn a /bin/sh that exits immediately, give the
+// watcher a moment to reach Phase 1 (Process.Wait returned, procExited
+// closed), then call Stop. Assert Stop succeeds without error and
+// returns within bounded time. The kill-skip path is exercised because
+// procExited is closed at that point but childExited is not yet.
+func TestStdioHostProcExitedGateSkipsKillAfterReap(t *testing.T) {
+	h, err := NewStdioHost(HostConfig{
+		Command: "/bin/sh",
+		Args:    []string{"-c", "exit 0"},
+	})
+	if err != nil {
+		t.Fatalf("NewStdioHost: %v", err)
+	}
+	if err := h.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Wait for Phase 1 (Process.Wait → procExited close) but NOT for
+	// Phase 4 (childExited close). The window between these is what the
+	// procExited gate protects.
+	procDeadline := time.After(2 * time.Second)
+	for {
+		select {
+		case <-procDeadline:
+			t.Fatal("procExited did not close within 2s of immediate exit-0 child")
+		default:
+		}
+		select {
+		case <-h.procExited:
+			goto procClosed
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+procClosed:
+
+	// Stop now. The kill-skip select inside Stop reads procExited
+	// (closed) and skips killProcessTree, avoiding the PID-reuse hazard.
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- h.Stop() }()
+	select {
+	case err := <-stopDone:
+		if err != nil {
+			t.Fatalf("Stop returned unexpected error after procExited gate: %v", err)
+		}
+	case <-time.After(pipeDrainTimeout + 3*time.Second):
+		t.Fatalf("Stop did not return within bounded window after procExited gate")
 	}
 }

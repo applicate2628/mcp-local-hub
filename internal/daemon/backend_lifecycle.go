@@ -114,6 +114,18 @@ func (h *StdioHost) SendRPC(ctx context.Context, body []byte) ([]byte, error) {
 		return nil, fmt.Errorf("write stdin: %w", err)
 	}
 
+	// Prefer a ready subprocess response over child-exit so a valid
+	// final reply is not dropped when the child writes its last
+	// JSON-RPC response and exits before the select picks. Mirrors the
+	// HTTP path at handlePOST (internal/daemon/host.go) — Codex CLI
+	// xhigh review on e26209a flagged the missing guard here as a P2
+	// architecture finding.
+	select {
+	case resp := <-respCh:
+		return []byte(resp), nil
+	default:
+	}
+
 	select {
 	case resp := <-respCh:
 		return []byte(resp), nil
