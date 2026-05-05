@@ -149,6 +149,24 @@ func TestProtocolBridge_TransformRequest_MissingURIReturnsError(t *testing.T) {
 	}
 }
 
+
+func TestProtocolBridge_TransformRequest_InvalidURISchemeReturnsError(t *testing.T) {
+	b := NewProtocolBridge()
+	b.CacheInitialize(json.RawMessage(`{"result":{"capabilities":{"resources":{}}}}`))
+
+	raw := json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"__read_resource__","arguments":{"uri":"secret://workspace-token"}}}`)
+	var msg map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &msg)
+
+	action := b.TransformRequest(msg)
+	if action.Active == nil {
+		t.Fatal("Active should be set so caller can write error response")
+	}
+	if action.SynthError == nil {
+		t.Fatal("SynthError should be non-nil for invalid uri scheme")
+	}
+}
+
 func TestProtocolBridge_TransformRequest_CapabilityGate(t *testing.T) {
 	b := NewProtocolBridge()
 	// Cache an initialize that does NOT declare resources.
