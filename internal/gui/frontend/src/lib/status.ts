@@ -26,12 +26,12 @@ export function stateShape(state: string): string {
 // The representative port is the lowest non-zero port for stability and so
 // one running daemon's port stays visible even when another daemon is down.
 export function aggregateStatus(rows: DaemonStatus[] | null): Record<string, ServerAggregate> {
-  const grouped: Record<string, DaemonStatus[]> = {};
+  const grouped: Record<string, DaemonStatus[]> = Object.create(null);
   for (const r of (rows ?? []).filter((x) => !x.is_maintenance)) {
     if (!grouped[r.server]) grouped[r.server] = [];
     grouped[r.server].push(r);
   }
-  const out: Record<string, ServerAggregate> = {};
+  const out: Record<string, ServerAggregate> = Object.create(null);
   for (const [server, daemons] of Object.entries(grouped)) {
     const states = daemons.map((d) => d.state);
     const unique = [...new Set(states)];
