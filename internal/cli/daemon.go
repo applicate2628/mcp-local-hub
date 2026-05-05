@@ -1,19 +1,19 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
+	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/daemon"
 	"mcp-local-hub/internal/secrets"
-	"mcp-local-hub/servers"
 
 	"github.com/spf13/cobra"
 )
@@ -61,20 +61,34 @@ See also: install, logs, restart, status.`,
 					writeLaunchFailure(logPath, server, daemonName, err)
 				}
 			}()
-			// Load the manifest from the embed.FS baked into the binary.
-			// This works regardless of where mcphub.exe is installed
-			// (canonical ~/.local/bin, dev checkout, anywhere on PATH)
-			// — manifests travel with the binary so scheduler tasks
-			// don't need to find a servers/ directory on disk.
-			f, err := servers.Manifests.Open(server + "/manifest.yaml")
-			if err != nil {
-				return fmt.Errorf("open embedded manifest %s: %w", server, err)
+			// Validate the requested name before any path resolution.
+			// Without this, a disk-fallback path that joins `server`
+			// into a filesystem location would re-open the manifest-
+			// name confused-deputy hardening from PR #51 S4.
+			if err := api.CheckManifestName(server); err != nil {
+				return err
 			}
-			defer f.Close()
-			var mReader io.Reader = f
-			m, err := config.ParseManifest(mReader)
+			// Load manifest bytes embed-first with disk fallback so a
+			// GUI-created manifest can be installed and launched
+			// immediately without rebuild. The fallback goes through
+			// api.NewAPI().ManifestGet, which itself runs
+			// CheckManifestName and the embed-first/disk-fallback
+			// composition in one place. After parse, cross-check that
+			// the manifest's own `name` field equals the requested
+			// server: a disk manifest at servers/<server>/manifest.yaml
+			// could legally name itself something else, and trusting
+			// that name in scheduler/log paths would split-brain disk
+			// vs embed lookups.
+			raw, err := api.NewAPI().ManifestGet(server)
+			if err != nil {
+				return fmt.Errorf("load manifest %s: %w", server, err)
+			}
+			m, err := config.ParseManifest(bytes.NewReader([]byte(raw)))
 			if err != nil {
 				return err
+			}
+			if m.Name != server {
+				return fmt.Errorf("manifest name %q does not match requested server %q (refuse to launch with mismatched identity)", m.Name, server)
 			}
 			var spec *config.DaemonSpec
 			for i := range m.Daemons {

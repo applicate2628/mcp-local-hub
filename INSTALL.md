@@ -312,7 +312,9 @@ npm install && npm run build
 `WOLFRAM_LLM_APP_ID` is stored in the encrypted vault:
 
 ```bash
-mcphub secrets set wolfram_app_id --value <your-app-id>
+mcphub secrets set wolfram_app_id            # interactive prompt (no echo)
+# or, for scripts:
+printf '%s' "$WOLFRAM_APP_ID" | mcphub secrets set wolfram_app_id --from-stdin
 ```
 
 ### godbolt (port 9126)
@@ -394,7 +396,9 @@ Runs `uvx --from paper-search-mcp python -m paper_search_mcp.server`.
 Requires `uvx`. `PAPER_SEARCH_MCP_UNPAYWALL_EMAIL` is stored in the vault:
 
 ```bash
-mcphub secrets set unpaywall_email --value <your-email>
+mcphub secrets set unpaywall_email            # interactive prompt
+# or, for scripts:
+printf '%s' "$UNPAYWALL_EMAIL" | mcphub secrets set unpaywall_email --from-stdin
 ```
 
 First install may take ~30s as `uvx` downloads `paper-search-mcp`.
@@ -594,7 +598,8 @@ For servers that need API keys (wolfram, paper-search-mcp, any OAuth-bearer serv
 
 ```bash
 ./bin/mcphub.exe secrets init                         # generate .age-key + empty secrets.age
-./bin/mcphub.exe secrets set WOLFRAM_APP_ID --value AB123...
+./bin/mcphub.exe secrets set WOLFRAM_APP_ID           # interactive prompt
+# scripted: printf '%s' "$VAL" | ./bin/mcphub.exe secrets set WOLFRAM_APP_ID --from-stdin
 ./bin/mcphub.exe secrets list                         # shows keys, not values
 ./bin/mcphub.exe secrets get WOLFRAM_APP_ID           # copies to clipboard by default
 ./bin/mcphub.exe secrets get WOLFRAM_APP_ID --show    # prints to stdout

@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -90,6 +92,32 @@ type StdioHost struct {
 }
 
 const maxMCPPostBodyBytes int64 = 1 << 20 // 1 MiB
+
+// maxPendingRequests caps the number of concurrent in-flight JSON-RPC
+// requests routed through one StdioHost subprocess. Beyond this the
+// handler returns 429; legitimate MCP usage rarely exceeds a handful of
+// concurrent requests per client, so 128 is a generous bound.
+const maxPendingRequests = 128
+
+// requireJSONContentType returns true if Content-Type parses as exactly
+// `application/json` (case-insensitive media type, parameters allowed).
+// Empty Content-Type is rejected — MCP POST clients are required to set
+// it; admitting empty would let CSRF probes bypass the gate via simple
+// `text/plain` form posts that browsers can issue cross-origin.
+//
+// strings.HasPrefix(ct, "application/json") was the prior shape and
+// admits `application/jsonx`. mime.ParseMediaType handles params (e.g.
+// `application/json; charset=utf-8`) correctly.
+func requireJSONContentType(ct string) bool {
+	if ct == "" {
+		return false
+	}
+	mt, _, err := mime.ParseMediaType(ct)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(mt, "application/json")
+}
 
 func NewStdioHost(cfg HostConfig) (*StdioHost, error) {
 	if cfg.Command == "" {
@@ -275,10 +303,17 @@ func (h *StdioHost) Stop() error {
 }
 
 // openStderrSink returns a writer for child stderr. When LogPath is set
-// the writer tees to both the rotated log file (so `mcphub logs` works
-// for stdio-bridge daemons) and os.Stderr (so the operator's terminal
-// keeps showing live diagnostics). When LogPath is empty, falls back to
-// os.Stderr only — matches the pre-LogPath behavior.
+// the writer tees to both a runtime-rotating log file (so `mcphub logs`
+// works for long-lived stdio-bridge daemons without unbounded growth)
+// and os.Stderr (so the operator's terminal keeps showing live
+// diagnostics). When LogPath is empty, falls back to os.Stderr only —
+// matches the pre-LogPath behavior.
+//
+// The file leg is wrapped in a best-effort writer that rotates inline
+// when the on-disk size grows past the cap and absorbs all rotation /
+// write / open errors. Stderr forwarding must never stop because the
+// log file became unwritable: that would suppress operator diagnostics
+// for the rest of the daemon's life.
 func (h *StdioHost) openStderrSink() io.Writer {
 	if h.cfg.LogPath == "" {
 		return os.Stderr
@@ -295,8 +330,88 @@ func (h *StdioHost) openStderrSink() io.Writer {
 		fmt.Fprintf(os.Stderr, "warn: open log %q: %v\n", h.cfg.LogPath, err)
 		return os.Stderr
 	}
-	h.logFile = f
-	return io.MultiWriter(f, os.Stderr)
+	rfw := &rotatingFileWriter{path: h.cfg.LogPath, file: f, maxBytes: 10 * 1024 * 1024, keep: 5}
+	h.logFile = rfw
+	return io.MultiWriter(rfw, os.Stderr)
+}
+
+// rotatingFileWriter writes to a log file, rotating it inline when its
+// on-disk size grows past maxBytes. All errors (rotation, reopen, write)
+// are absorbed and surfaced as a single warn line on os.Stderr so that
+// the surrounding io.MultiWriter(rfw, os.Stderr) keeps the stderr leg
+// alive when the file leg breaks.
+//
+// Write always returns (len(p), nil) — Codex-finding fix for PR #72.
+type rotatingFileWriter struct {
+	mu          sync.Mutex
+	path        string
+	file        *os.File
+	maxBytes    int64
+	keep        int
+	written     int64
+	rotateBroke bool // log "leg disabled" once
+}
+
+func (r *rotatingFileWriter) Write(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.maybeRotateLocked()
+	if r.file != nil {
+		if n, werr := r.file.Write(p); werr != nil {
+			r.disableLocked(fmt.Errorf("write log: %w", werr))
+		} else {
+			r.written += int64(n)
+		}
+	}
+	return len(p), nil
+}
+
+func (r *rotatingFileWriter) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.file == nil {
+		return nil
+	}
+	err := r.file.Close()
+	r.file = nil
+	return err
+}
+
+func (r *rotatingFileWriter) maybeRotateLocked() {
+	if r.file == nil || r.maxBytes <= 0 {
+		return
+	}
+	if r.written < r.maxBytes {
+		// Cheap path — no stat call until our write counter hints we
+		// might be near the threshold.
+		return
+	}
+	r.written = 0
+	if err := r.file.Close(); err != nil {
+		r.disableLocked(fmt.Errorf("close before rotate: %w", err))
+		return
+	}
+	if err := RotateIfLarge(r.path, r.maxBytes, r.keep); err != nil {
+		r.disableLocked(fmt.Errorf("rotate: %w", err))
+		return
+	}
+	f, err := os.OpenFile(r.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		r.disableLocked(fmt.Errorf("reopen after rotate: %w", err))
+		return
+	}
+	r.file = f
+}
+
+func (r *rotatingFileWriter) disableLocked(cause error) {
+	if r.file != nil {
+		_ = r.file.Close()
+		r.file = nil
+	}
+	if !r.rotateBroke {
+		fmt.Fprintf(os.Stderr, "warn: stdio log file leg disabled (%v); stderr forwarding continues\n", cause)
+		r.rotateBroke = true
+	}
 }
 
 // writeStdin sends a line (terminated with '\n') to the subprocess stdin.
@@ -389,6 +504,16 @@ func (h *StdioHost) HTTPHandler() http.Handler {
 }
 
 func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
+	// Content-Type gate runs FIRST — before body read, JSON parse, or
+	// pending-slot reservation. A `text/plain` CSRF probe must not
+	// consume the body parser, the unmarshal path, or a pending slot.
+	// Codex finding: PR #62 placed this AFTER body parse (still
+	// readable to CSRF as far as DoS goes); PR #123 used a prefix
+	// match that admits `application/jsonx`.
+	if !requireJSONContentType(r.Header.Get("Content-Type")) {
+		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxMCPPostBodyBytes)
 	defer r.Body.Close()
 	w.Header().Set("Mcp-Session-Id", h.sessionID)
@@ -464,6 +589,11 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 
 	respCh := make(chan json.RawMessage, 1)
 	h.pendingMu.Lock()
+	if len(h.pending) >= maxPendingRequests {
+		h.pendingMu.Unlock()
+		http.Error(w, "too many pending requests", http.StatusTooManyRequests)
+		return
+	}
 	h.pending[internalID] = respCh
 	h.pendingMu.Unlock()
 	defer func() {

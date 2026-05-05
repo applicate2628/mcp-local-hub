@@ -104,13 +104,23 @@ func (a *API) CleanupOrphans(opts CleanupOpts) ([]OrphanProcess, error) {
 	}
 
 	// Flat list of patterns — any match counts this PID as a candidate orphan.
+	// Drop broad launcher tokens (node, npx, uv, uvx, python, ...) so we
+	// don't sweep the operator's unrelated dev-tooling processes that
+	// happen to share an interpreter with one of our manifest commands.
 	var allPatterns []string
 	for _, ps := range patterns {
-		allPatterns = append(allPatterns, ps...)
+		for _, p := range ps {
+			if isBroadLauncherToken(p) {
+				continue
+			}
+			allPatterns = append(allPatterns, p)
+		}
 	}
 	orphans := parseOrphans(strings.NewReader(string(out)), allPatterns)
 
-	// Age filter + assign server.
+	// Age filter + assign server. Same broad-token filter applies here:
+	// matching o.Cmdline against `node` would label any unrelated node
+	// process with the manifest's server name.
 	filtered := orphans[:0]
 	for _, o := range orphans {
 		if o.AgeSec < opts.MinAgeSec {
@@ -118,6 +128,9 @@ func (a *API) CleanupOrphans(opts CleanupOpts) ([]OrphanProcess, error) {
 		}
 		for name, ps := range patterns {
 			for _, p := range ps {
+				if isBroadLauncherToken(p) {
+					continue
+				}
 				if strings.Contains(o.Cmdline, p) {
 					o.Server = name
 					break
@@ -149,6 +162,55 @@ func (a *API) CleanupOrphans(opts CleanupOpts) ([]OrphanProcess, error) {
 	}
 
 	return filtered, nil
+}
+
+// isBroadLauncherToken returns true if the manifest pattern is a bare
+// generic interpreter / launcher name (node, npx, python, ...). Such
+// tokens are too noisy as orphan-match patterns: nearly every dev box
+// has unrelated node/python/npx processes running, and a `Contains`
+// match against `cmdline` would sweep them into our cleanup.
+//
+// The check normalizes the pattern before comparing:
+//
+//   - trim whitespace and surrounding single/double quotes
+//   - lowercase
+//   - split on BOTH `\\` and `/` separators so `C:\Users\...\python.exe`
+//     and `/usr/bin/python3` both reduce to a bare interpreter name —
+//     filepath.Base would NOT strip backslashes when running under
+//     Linux/macOS CI, so we walk both separators ourselves.
+//   - strip Windows executable suffixes (.exe, .cmd, .bat, .ps1) so
+//     `node.exe`, `npx.cmd`, `uvx.exe` all reduce to the bare token
+//
+// Codex finding fix: PR #121 only matched bare tokens (e.g. `"node"`)
+// and missed the .exe-suffixed and absolute-path forms that real wmic
+// output produces. Cross-platform fix: use platform-independent base()
+// since this code path runs in the orphan-cleanup logic that consumes
+// wmic CSV output (Windows-style paths) on any platform's CI.
+func isBroadLauncherToken(pattern string) bool {
+	p := strings.TrimSpace(pattern)
+	p = strings.Trim(p, `"'`)
+	if p == "" {
+		return true
+	}
+	p = strings.ToLower(p)
+	// Platform-independent basename: take everything after the last
+	// '/' or '\\', whichever comes later. Don't use filepath.Base on
+	// Unix runners — it would treat `C:\Users\...\node.exe` as a
+	// single token because '\\' is not a separator there.
+	if i := strings.LastIndexAny(p, `\/`); i >= 0 {
+		p = p[i+1:]
+	}
+	for _, suffix := range []string{".exe", ".cmd", ".bat", ".ps1"} {
+		if strings.HasSuffix(p, suffix) {
+			p = strings.TrimSuffix(p, suffix)
+			break
+		}
+	}
+	switch p {
+	case "node", "npx", "uv", "uvx", "python", "python3", "py":
+		return true
+	}
+	return false
 }
 
 // parseOrphans reads `wmic process get CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize`

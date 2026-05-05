@@ -1,6 +1,10 @@
 package api
 
-import "strconv"
+import (
+	"fmt"
+	"os"
+	"strconv"
+)
 
 // effectiveBackupKeepN returns the auto-prune retention count to apply
 // when install or migrate writes a fresh timestamped client-config
@@ -16,6 +20,14 @@ import "strconv"
 // row `backups.keep_n`, default 5) but no caller ever consumed it on
 // the write path, so the dial did nothing.
 //
+// keep_n = 0 semantics: rejected, falls back to the registry default
+// with a stderr warning. PR #90 originally normalized 0 → 1, which
+// silently lied to a user who explicitly chose 0; true zero retention
+// would also delete the backup we just wrote, defeating its purpose.
+// Negative values follow the same path. To genuinely disable backups,
+// the future schema should expose a separate "backups.enabled" toggle
+// rather than overloading keep_n with a magic-zero meaning.
+//
 // The pristine `-original` sentinel is never affected — it lives
 // outside the timestamped set the prune algorithm walks, so a full
 // uninstall + rollback always has somewhere to land.
@@ -26,7 +38,11 @@ func (a *API) effectiveBackupKeepN() int {
 		return fallback
 	}
 	n, err := strconv.Atoi(s)
-	if err != nil || n < 0 {
+	if err != nil {
+		return fallback
+	}
+	if n <= 0 {
+		fmt.Fprintf(os.Stderr, "warn: backups.keep_n=%d is invalid (must be >=1); falling back to default %d. To disable backups entirely, future schema will expose backups.enabled.\n", n, fallback)
 		return fallback
 	}
 	return n

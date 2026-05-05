@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 
+	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/daemon"
 	"mcp-local-hub/servers"
@@ -65,19 +68,36 @@ func resolveRelayURL(server, daemonName, explicitURL string) (string, error) {
 	if server == "" || daemonName == "" {
 		return "", errors.New("either --url or both --server and --daemon are required")
 	}
-	// Read the manifest out of the binary's embedded FS. Relay is
-	// typically invoked by a stdio client from the user's project cwd,
-	// so the old disk-resolution path (servers/<name>/manifest.yaml next
-	// to the exe) broke the moment the canonical binary sat in
-	// ~/.local/bin without a sibling source tree. The embed FS always
-	// travels with the binary.
+	// Validate the requested name BEFORE any path-resolution decision
+	// — both the embed lookup and the disk fallback below compose the
+	// name into a path. Without this, a relay invocation with a
+	// crafted `server` value could resolve to an arbitrary manifest
+	// on disk (PR #51 S4 hardened this for the API path; the relay
+	// path needs the same gate).
+	if err := api.CheckManifestName(server); err != nil {
+		return "", err
+	}
+	// Read the manifest. Embed FS first (production: manifests travel
+	// with the binary), with disk fallback so dev/custom manifests
+	// stay usable when relay is invoked from a project cwd.
 	data, err := servers.Manifests.ReadFile(server + "/manifest.yaml")
 	if err != nil {
-		return "", fmt.Errorf("load embedded manifest %s: %w", server, err)
+		path := filepath.Join(relayManifestDir(), server, "manifest.yaml")
+		data, err = os.ReadFile(path)
+		if err != nil {
+			return "", fmt.Errorf("load manifest %s: %w", server, err)
+		}
 	}
 	m, err := config.ParseManifest(bytes.NewReader(data))
 	if err != nil {
 		return "", fmt.Errorf("parse manifest %s: %w", server, err)
+	}
+	// Cross-check the manifest's own `name` field against the
+	// requested server. A disk manifest could legally name itself
+	// something else; trusting that name in URL composition would
+	// split-brain disk vs embed lookups.
+	if m.Name != server {
+		return "", fmt.Errorf("manifest name %q does not match requested server %q", m.Name, server)
 	}
 	for _, d := range m.Daemons {
 		if d.Name == daemonName {
@@ -85,4 +105,24 @@ func resolveRelayURL(server, daemonName, explicitURL string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no daemon %q in manifest %s", daemonName, server)
+}
+
+// relayManifestDir returns the directory where disk-only manifests
+// live. Searches the binary's exe-dir/servers first, then ../servers
+// for dev checkouts where the binary sits in cmd/mcphub/.
+func relayManifestDir() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return filepath.Join(string(os.PathSeparator), "nonexistent", "mcphub", "servers")
+	}
+	exeDir := filepath.Dir(exe)
+	sibling := filepath.Join(exeDir, "servers")
+	if st, err := os.Stat(sibling); err == nil && st.IsDir() {
+		return sibling
+	}
+	parent := filepath.Join(exeDir, "..", "servers")
+	if st, err := os.Stat(parent); err == nil && st.IsDir() {
+		return parent
+	}
+	return sibling
 }

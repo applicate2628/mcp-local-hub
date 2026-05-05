@@ -41,15 +41,16 @@ lose access. Copy via password manager / encrypted USB / trusted scp
 when moving to a new machine.
 
 Subcommands:
-  secrets init                      # generate .age-key + empty secrets.age
-  secrets set <key> --value <val>   # add or update a secret
-  secrets get <key>                 # print value (clipboard by default)
-  secrets get <key> --show          # print to stdout
-  secrets list                      # list keys (not values)
-  secrets delete <key>              # remove a key
-  secrets edit                      # open decrypted vault in $EDITOR
-  secrets migrate --from-client X   # scan client configs for API keys,
-                                    # interactively import into vault
+  secrets init                          # generate .age-key + empty secrets.age
+  secrets set <key>                     # interactive prompt (hidden input)
+  secrets set <key> --from-stdin        # read value from stdin (scripts/pipes)
+  secrets get <key>                     # print value (clipboard by default)
+  secrets get <key> --show              # print to stdout
+  secrets list                          # list keys (not values)
+  secrets delete <key>                  # remove a key
+  secrets edit                          # open decrypted vault in $EDITOR
+  secrets migrate --from-client X       # scan client configs for API keys,
+                                        # interactively import into vault
 
 Manifest env-reference prefixes:
   secret:KEY   — look up in encrypted vault (this)
@@ -93,18 +94,28 @@ func newSecretsInitCmd() *cobra.Command {
 }
 
 func newSecretsSetCmd() *cobra.Command {
-	var valueFlag string
 	var fromStdin bool
 	c := &cobra.Command{
 		Use:   "set <key>",
 		Short: "Create or replace a secret value",
-		Args:  cobra.ExactArgs(1),
+		Long: `Create or replace a secret value in the encrypted vault.
+
+By default the value is read from an interactive hidden prompt so it
+never appears on the command line, in shell history, or in process
+listings (ps/wmic). For non-interactive use, pipe the value to stdin
+with --from-stdin:
+
+  printf '%s' "$VAL" | mcphub secrets set my_key --from-stdin
+
+The previous --value flag was removed because argv-delivered secrets
+leak into shell history files (~/.bash_history, PSReadLine), process
+listings visible to other local users, and the running process's own
+environment after argument parsing.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			key := args[0]
 			var value string
 			switch {
-			case valueFlag != "":
-				value = valueFlag
 			case fromStdin:
 				b, err := readAllStdin()
 				if err != nil {
@@ -130,8 +141,7 @@ func newSecretsSetCmd() *cobra.Command {
 			return nil
 		},
 	}
-	c.Flags().StringVar(&valueFlag, "value", "", "provide value on command line (non-interactive)")
-	c.Flags().BoolVar(&fromStdin, "from-stdin", false, "read value from stdin")
+	c.Flags().BoolVar(&fromStdin, "from-stdin", false, "read value from stdin (use this for scripts/pipes)")
 	return c
 }
 

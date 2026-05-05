@@ -130,10 +130,24 @@ func isDisallowedClangTidyArg(arg string) bool {
 	if trimmed == "" {
 		return false
 	}
+	// Two classes of bypass closed by the larger denylist:
+	//
+	//  1. Mutating flags that re-enable in-place rewrites:
+	//     `-fix-notes` is documented by clang-tidy as implicitly
+	//     enabling `-fix`, so blocking only `-fix*` was insufficient.
+	//
+	//  2. Config-file injection that re-introduces arbitrary compiler
+	//     flags through ExtraArgs / ExtraArgsBefore keys. Blocking
+	//     `--config` and `--config-file` keeps the schema-controlled
+	//     surface (`extra_args`, `--checks`) the only entry point for
+	//     compiler influence; users who genuinely need a project-local
+	//     config can place it as `.clang-tidy` in the project root,
+	//     which clang-tidy auto-discovers without a CLI flag.
 	disallowed := []string{
 		"-load", "--load",
-		"-fix", "--fix", "--fix-errors",
+		"-fix", "--fix", "--fix-errors", "-fix-notes", "--fix-notes",
 		"-export-fixes", "--export-fixes",
+		"-config", "--config", "-config-file", "--config-file",
 	}
 	for _, flag := range disallowed {
 		if trimmed == flag || strings.HasPrefix(trimmed, flag+"=") {

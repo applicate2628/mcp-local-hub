@@ -25,6 +25,14 @@ import (
 	"mcp-local-hub/internal/api"
 )
 
+// maxPendingLineBytes caps the unterminated-fragment buffer in
+// streamLogs. A daemon that writes a long line without a newline (or
+// hangs after a partial write) cannot grow this string without limit;
+// once exceeded, the held fragment is emitted truncated and only the
+// last maxPendingLineBytes are retained so the eventual newline arrival
+// can still complete a coherent line.
+const maxPendingLineBytes = 64 * 1024 // 64 KiB
+
 // validNameRe is the safe charset for server + daemon names that flow
 // into the log-file path composed by api.LogsGet, which reads
 // "<logDir>/<server>-<daemon>.log". Without this gate a query like
@@ -330,6 +338,21 @@ func streamLogs(s *Server, server, daemon string, w http.ResponseWriter, r *http
 						continue
 					}
 					fmt.Fprintf(w, "event: log-line\ndata: %s\n\n", line)
+				}
+				// Bound pendingLine so a daemon emitting a single
+				// unterminated line forever can't grow this string
+				// without limit. When the held fragment exceeds the
+				// cap, emit it as one truncated log-line event AFTER
+				// the complete lines from this tick (preserves arrival
+				// order) and retain only the last maxPendingLineBytes
+				// of the fragment so the eventual newline arrival can
+				// still complete a coherent line. Codex finding:
+				// PR #66 emitted the overflow BEFORE complete lines,
+				// reordering input like "ready\n" + long_fragment.
+				if len(pendingLine) > maxPendingLineBytes {
+					truncated := pendingLine[:maxPendingLineBytes]
+					fmt.Fprintf(w, "event: log-line\ndata: %s [truncated unterminated line]\n\n", truncated)
+					pendingLine = pendingLine[len(pendingLine)-maxPendingLineBytes:]
 				}
 				lastLen = len(body)
 				flusher.Flush()

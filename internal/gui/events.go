@@ -17,9 +17,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"mime"
 	"net/http"
+	"strings"
 	"sync"
 )
+
+// maxSSESubscribers is the per-Broadcaster admission cap applied via
+// TrySubscribe at /api/events. Internal callers that use Subscribe are
+// not bounded — the cap exists to prevent an attacker holding open
+// long-lived browser SSE streams from exhausting GUI memory.
+const maxSSESubscribers = 64
 
 // Event is the shape pushed onto /api/events. Type matches spec §3.6;
 // Body is an arbitrary JSON-serializable payload.
@@ -46,7 +54,16 @@ func NewBroadcaster() *Broadcaster {
 // Subscribe returns a channel that will receive every Event published
 // while ctx is alive. The channel is closed when ctx is canceled.
 // Buffered at 16 — a slow consumer drops events rather than backpressures.
+//
+// Subscribe is unbounded by design: internal callers (poller, tests) rely
+// on always getting a channel. Untrusted external callers (e.g. the
+// /api/events HTTP handler) should use TrySubscribe to participate in
+// the global subscriber cap.
 func (b *Broadcaster) Subscribe(ctx context.Context) <-chan Event {
+	return b.subscribeUnchecked(ctx)
+}
+
+func (b *Broadcaster) subscribeUnchecked(ctx context.Context) chan Event {
 	ch := make(chan Event, 16)
 	b.mu.Lock()
 	b.subs[ch] = struct{}{}
@@ -59,6 +76,36 @@ func (b *Broadcaster) Subscribe(ctx context.Context) <-chan Event {
 		close(ch)
 	}()
 	return ch
+}
+
+// TrySubscribe attempts to add a subscriber, returning the channel and
+// true on success or (nil, false) if the global subscriber cap is
+// reached. The capacity check + insertion happen under one lock-acquire
+// of b.mu so two concurrent callers cannot both observe room and then
+// both insert, overflowing the cap. The unsubscribe goroutine must
+// take b.mu separately, so this insertion CANNOT call back into any
+// path that also locks b.mu.
+//
+// /api/events uses this so a 503 can be returned before HTTP headers
+// are committed; replacing Subscribe with this for that path lets the
+// existing browser client see the rejection cleanly.
+func (b *Broadcaster) TrySubscribe(ctx context.Context) (<-chan Event, bool) {
+	ch := make(chan Event, 16)
+	b.mu.Lock()
+	if len(b.subs) >= maxSSESubscribers {
+		b.mu.Unlock()
+		return nil, false
+	}
+	b.subs[ch] = struct{}{}
+	b.mu.Unlock()
+	go func() {
+		<-ctx.Done()
+		b.mu.Lock()
+		delete(b.subs, ch)
+		b.mu.Unlock()
+		close(ch)
+	}()
+	return ch, true
 }
 
 // Publish fans out to all subscribers. Non-blocking: a subscriber with
@@ -79,10 +126,42 @@ func (b *Broadcaster) Publish(ev Event) {
 	}
 }
 
+// acceptsEventStream returns true if the Accept header contains a
+// structured `text/event-stream` media-type token. Empty Accept is
+// treated as accepting anything (browsers do this on EventSource
+// requests). Wildcards (`*/*`, `text/*`) also accept.
+//
+// The handler must NOT use a substring match like
+// `strings.Contains(accept, "text/event-stream")` because that admits
+// bogus tokens such as `text/event-streamx` or content with the
+// substring buried in a parameter value.
+func acceptsEventStream(accept string) bool {
+	if accept == "" {
+		return true
+	}
+	for _, part := range strings.Split(accept, ",") {
+		mt, _, err := mime.ParseMediaType(part)
+		if err != nil {
+			continue
+		}
+		switch mt {
+		case "text/event-stream", "text/*", "*/*":
+			return true
+		}
+	}
+	return false
+}
+
 // registerEventsRoutes wires GET /api/events as a text/event-stream
-// handler. Each connected client gets its own Subscribe channel; the
+// handler. Each connected client gets its own TrySubscribe channel; the
 // handler exits when either the client disconnects (request context
 // canceled) or the subscription channel is closed.
+//
+// Admission is checked BEFORE setting/flushing stream headers so a 503
+// (subscriber cap) or 406 (bad Accept) can return as a real error code
+// to the browser. Once headers are flushed, the connection is committed
+// to a 200/text-event-stream response and the only signal we have left
+// is closing the stream.
 func registerEventsRoutes(s *Server) {
 	s.mux.HandleFunc("/api/events", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -90,9 +169,19 @@ func registerEventsRoutes(s *Server) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		if !acceptsEventStream(r.Header.Get("Accept")) {
+			http.Error(w, "Accept must include text/event-stream", http.StatusNotAcceptable)
+			return
+		}
 		flusher, ok := w.(http.Flusher)
 		if !ok {
 			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+		ctx := r.Context()
+		ch, ok := s.events.TrySubscribe(ctx)
+		if !ok {
+			http.Error(w, "too many SSE subscribers", http.StatusServiceUnavailable)
 			return
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -100,8 +189,6 @@ func registerEventsRoutes(s *Server) {
 		w.Header().Set("Connection", "keep-alive")
 		flusher.Flush()
 
-		ctx := r.Context()
-		ch := s.events.Subscribe(ctx)
 		for {
 			select {
 			case <-ctx.Done():
