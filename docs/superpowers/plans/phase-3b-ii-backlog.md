@@ -176,28 +176,44 @@ These remain documented as "Cross-platform tray (Linux/macOS) — explicit non-g
 
 ## Suggested sequencing
 
-1. **D0** — Frontend toolchain migration → Vite + TS + React (must come first; a later migration forces rewriting every new screen)
-2. **D1** — Playwright E2E suite (foundational for everything downstream; unlocks regression-safe iteration on A1–A5)
-3. **B1** — Reverse-migrate API (unblocks proper uncheck semantics in Servers matrix; small backend change)
-4. **B2** — ExtractManifestFromClient API (unblocks A1 "Create manifest" action)
-5. **A1** — Migration screen (primary deferred UX; depends on B2)
-6. **A2** — Add/Edit manifest form (largest UI surface; depends on B2 for prefill)
-7. **A3-a** — Secrets registry screen ✅ — see [docs/superpowers/plans/2026-04-25-phase-3b-ii-a3a-secrets-screen.md](2026-04-25-phase-3b-ii-a3a-secrets-screen.md). Memo: [docs/superpowers/specs/2026-04-25-phase-3b-ii-a3a-secrets-screen-design.md](../specs/2026-04-25-phase-3b-ii-a3a-secrets-screen-design.md). PR pending user review.
-8. **A3-b** — env.secret picker in AddServer/EditServer forms ✅ — see [docs/superpowers/plans/2026-04-26-phase-3b-ii-a3b-env-secret-picker.md](2026-04-26-phase-3b-ii-a3b-env-secret-picker.md). Memo: [docs/superpowers/specs/2026-04-26-phase-3b-ii-a3b-env-secret-picker-design.md](../specs/2026-04-26-phase-3b-ii-a3b-env-secret-picker-design.md).
-9. **A4-a** — Settings screen ✅ — see [docs/superpowers/plans/2026-04-27-phase-3b-ii-a4-settings.md](2026-04-27-phase-3b-ii-a4-settings.md). Memo: [docs/superpowers/specs/2026-04-27-phase-3b-ii-a4-settings-design.md](../specs/2026-04-27-phase-3b-ii-a4-settings-design.md). Merge SHA: `2529c33d` (PR #20, 14 Codex bot review rounds).
-9b. **A4-b PR #1** ✅ — Settings lifecycle (polish half): weekly schedule edit, retry policy edit (preference-only; runtime applier in PR #2), Clean now confirm, export bundle, force-kill button, per-workspace weekly-refresh membership UI. Memo: [docs/superpowers/specs/2026-05-01-a4b-pr1-settings-lifecycle-design.md](../specs/2026-05-01-a4b-pr1-settings-lifecycle-design.md). Plan: [docs/superpowers/plans/2026-05-01-a4b-pr1-settings-lifecycle.md](2026-05-01-a4b-pr1-settings-lifecycle.md). Merge SHA: `<TBD-after-merge>`.
-   - **A4-b PR #2 (deferred):** tray show/hide runtime mutator + port live-rebind + retry policy runtime applier wiring. Separate PR.
-   - **Forward-ref to PR #23 C1:** preserved (force-kill button posts to /api/force-kill which wraps gui.Verdict).
-   - (Membership-decision detail block from earlier remains as historical record.)
-10. **A5** — About screen ✅ PR #22 (cleanup + reliability harness + A5 + C2 + C3 + C4 + D2/D3 docs).
+### Updated 2026-05-05 (Codex xhigh plan review, "Scenario D" PASS)
+
+After the 2026-05-04 stabilization wave (35+ bug-fix PRs merged, security audit `#51`, REVISE bundle `#128`), the original PR #24 "A4-b PR #2 last" plan has been reshaped. New sequence prioritizes a publishable preview tag over runtime mutation:
+
+1. **G10** — public governance docs (½d). Done before tag.
+2. **G1** — README feature/readiness matrix (½d). Done before tag.
+3. **G2** — unified `/api/health` endpoint (~1d). Owns canonical health/capability snapshot backend that G3+G4 will consume.
+4. **Pre-tag fix** — `daemons.retry_policy` Settings UI must label "saved only; runtime applier deferred" OR be disabled. Do not tag while implying it is active.
+5. **Manual smoke `D2/D3`** per `docs/phase-3b-ii-verification.md`.
+6. **Tag Phase 3B-II preview**.
+7. **G3** — capability status display, read-only (~1-2d). Reuses G2 backend.
+8. **G4** — opt-in unified `Hub` MCP endpoint (~3-5d). Headline new feature; reuses G2/G3 namespace+capability model.
+
+### Dropped / deferred from the prior sequence
+
+- **A4-b PR #2 `gui_server.port` live-rebind** — DROPPED. Fragile, rare, not central to a local hub. Keep restart-required badge and stop spending roadmap budget unless a real user report appears.
+- **A4-b PR #2 tray show/hide runtime mutator** — DEFERRED indefinitely. One-time setting; restart works.
+- **A4-b PR #2 retry-policy runtime applier** — DEFERRED to AFTER G4. Pre-tag fix above is the only correctness requirement.
+- **G8 config watch / dev reload (fsnotify)** — DROPPED from current scope. G4 starts with explicit refresh/polling. Re-evaluate later if user reports demand it.
+- **F1/F2/F3/F4/F5/F6/F7 Linux-server readiness** — separate strategic lane; not pulled into this release. G1 matrix must explicitly state "Linux scheduler install is not ready".
+
+### Historical sequence (kept for reference)
+
+1. **D0** — Frontend toolchain migration → Vite + TS + React ✅
+2. **D1** — Playwright E2E suite ✅
+3. **B1** — Reverse-migrate API ✅
+4. **B2** — ExtractManifestFromClient API ✅
+5. **A1** — Migration screen ✅
+6. **A2** — Add/Edit manifest form ✅
+7. **A3-a** — Secrets registry screen ✅ — Memo: [docs/superpowers/specs/2026-04-25-phase-3b-ii-a3a-secrets-screen-design.md](../specs/2026-04-25-phase-3b-ii-a3a-secrets-screen-design.md).
+8. **A3-b** — env.secret picker ✅ — Memo: [docs/superpowers/specs/2026-04-26-phase-3b-ii-a3b-env-secret-picker-design.md](../specs/2026-04-26-phase-3b-ii-a3b-env-secret-picker-design.md).
+9. **A4-a** — Settings screen ✅ Merge SHA: `2529c33d` (PR #20).
+9b. **A4-b PR #1** ✅ Memo: [docs/superpowers/specs/2026-05-01-a4b-pr1-settings-lifecycle-design.md](../specs/2026-05-01-a4b-pr1-settings-lifecycle-design.md). Merge SHA: `f41cb58` (PR #50).
+10. **A5** — About screen ✅ PR #22.
 11. **C3 + C4** — Tray icon state variants + toast notifications ✅ PR #22.
-12. **C1** — `--force` take-over (single-instance lock recovery) — **PR #23 (next).** C2 browser focus closed in PR #22.
-13. **A4-b** — Settings lifecycle (tray toggle, weekly schedule edit, retry policy, port live-rebind, Clean-now confirm, export bundle, per-workspace weekly-refresh membership) — **PR #24 (last).**
-14. **Release hardening** — execute `docs/phase-3b-ii-verification.md` D2 + D3 manual smoke on a real Windows desktop session before tagging.
-15. **F1** — Platform-lane refactor (move Windows-specific impl'ы into `internal/platform/windows/`; pre-req for any Linux/macOS work). See § F.
-16. **F7** — CI Linux build matrix (catches regressions before F2-F6 land). See § F.
-17. **F2 + F3** — Linux scheduler (systemd user units) + `mcphub setup --server`. Unlocks `mcphub install` on a Linux server. See § F.
-18. **F4 + F5 + F6** — Headless GUI guards, journald adapter, macOS probe. Polish + Mac dev machine support. See § F.
+12. **C1** — `--force` take-over ✅ PR #23.
+13. **Security audit (S1–S4)** ✅ Merge SHA: `fa1da58` (PR #51).
+14. **Codex REVISE bundle** ✅ Merge SHA: `bf71ba8` (PR #128).
 
 ### G. Gateway/discovery adoption from `ravitemer/mcp-hub` (Phase 3C/3D candidates)
 
@@ -238,9 +254,12 @@ These remain rejected and should NOT be reconsidered without a separate threat m
 - **Automatic marketplace install** — violates inspect→validate→dry-run→backup→apply contract.
 - **Remote access as default** — current GUI binds loopback only; no auth/TLS layer exists. Section S security work specifically tightens loopback assumptions.
 
-#### Sequencing within G
+#### Sequencing within G (updated 2026-05-05)
 
-G10 → G1 → G2 → G3 (low-risk Phase 3B-II hardening); then G4/G5 in either order (Phase 3C opt-in surfaces); then G6/G7/G8/G9 as separately threat-modeled (Phase 3C/3D).
+**Pre-tag (Phase 3B-II hardening):** G10 → G1 → G2.
+**Post-tag (Phase 3C):** G3 (consumes G2 snapshot backend) → G4 (consumes G2/G3 namespace+capability model).
+**Phase 3C/3D, separately threat-modeled:** G5 marketplace draft-import → G7 VS Code/JSON5 import → G6 remote MCP manifests → G9 structured event envelopes.
+**Dropped from current roadmap:** G8 config watch / fsnotify dev reload — replaced by explicit refresh in G4.
 
 #### Client expansion (already shipped 2026-05-04, commit `59dcf12`)
 

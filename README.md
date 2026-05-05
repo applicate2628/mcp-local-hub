@@ -259,9 +259,34 @@ Roadmap / remaining work:
 - **Phase 3C+ candidate work** — optional unified MCP endpoint, richer health/capability status, remote-server manifests, marketplace/import flow, and VS Code workspace/JSON5 import compatibility.
 - **Phase 4+** — Linux/macOS scheduler backends (systemd user units + launchd agents).
 
-## Platform support
+## Feature & readiness matrix
 
-**Windows 11** is first-class (tested on 10.0.26100). Linux and macOS cross-compile but `mcphub install` fails with "not yet implemented" — the scheduler backend for those platforms is Phase 4 scope. The embedded stdio-bridge / godbolt / perftools servers themselves run fine on Linux and macOS; you just can't yet wire them up as persistent daemons through the OS scheduler.
+A surface-by-surface map of what this project actually does today, with explicit honesty about preview-state coverage. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the promotion rules a row follows.
+
+- **✅ Stable** — fresh automated test coverage OR a recent live-smoke pass for the exact user-visible surface, AND no open critical caveat. Not "production-ready"; "works as advertised in this preview, with evidence."
+- **⚠ Preview** — feature is shipped and reachable, but live-smoke coverage is partial, an open caveat exists in `work-items/bugs/` or the backlog, OR the surface may change in incompatible ways. Backups and dry-run before applying.
+- **🚧 Roadmap** — feature is acknowledged in the backlog but not yet shipped, OR currently exists only as a cross-compile path with no runtime evidence.
+
+| Surface | Status | Notes |
+|---|---|---|
+| Run on Windows | ✅ Stable | Tested on Windows 11 (10.0.26100); primary platform |
+| Run on Linux | 🚧 Roadmap | Ubuntu CI builds/tests; install/scheduler not implemented |
+| Run on macOS | 🚧 Roadmap | darwin cross-build only; scheduler + force-kill probe stubbed |
+| Auto-start on logon — Windows | ✅ Stable | Task Scheduler with restart-on-failure |
+| Auto-start on logon — Linux | 🚧 Roadmap | systemd user units (F2) + `mcphub setup --server` with `loginctl enable-linger` (F3) tracked in backlog |
+| Auto-start on logon — macOS | 🚧 Roadmap | launchd auto-start is not currently tracked in the backlog F-tier; manual launch only |
+| Default client install | ⚠ Preview | Claude Code, Codex CLI, Cursor; Cursor live-smoke pending in verification matrix |
+| Opt-in client install | ⚠ Preview | VS Code, Gemini-CLI, Qwen-CLI, Antigravity (stdio-relay); manual smoke pending |
+| GUI dashboard (`mcphub gui`) | ⚠ Preview | Loopback-only; CSRF/DNS-rebind hardened (PR #51); manual GUI browser smoke pending |
+| GUI logs viewer (`/api/logs/:server`) | ⚠ Preview | SSE tail follow + filter + ERROR/WARN highlight + Open folder all shipped |
+| Workspace-scoped LSP lazy proxies | ⚠ Preview | `mcphub register` + per-language proxy; D3 manual multi-language smoke pending |
+| Encrypted secrets vault | ⚠ Preview | age-encrypted; argv-leak removed (PR #128); open cross-process last-write-wins limitation tracked in `work-items/bugs/a3a-vault-concurrent-edit-lww.md` |
+| Local manifest authoring (GUI Add server / `mcphub manifest create`) | ⚠ Preview | Form + `Paste YAML` import; YAML smuggling hardened (PR #51) but still surface-may-change before 1.0 |
+| Backups, rollback, migration | ⚠ Preview | `backups.keep_n` enforced + per-write timestamped; tracked race in interleaved migrate/demigrate (`work-items/bugs/b1-backup-file-race.md`) |
+| Per-server HTTP API (`/mcp` per daemon) | ⚠ Preview | DNS-rebind + Content-Type + body-size guards; GET/SSE server-notification semantics still being reconciled |
+| Unified health/status snapshot | 🚧 Roadmap | G2, immediately ahead of preview tag — combines ping/status/version + probes |
+| Capability browser (tools/resources/prompts) | 🚧 Roadmap | G3, post preview-tag |
+| Marketplace / remote manifests | 🚧 Roadmap | G5/G6/G7 — Phase 3C/3D |
 
 ## License
 
