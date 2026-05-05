@@ -42,6 +42,7 @@ type HTTPHost struct {
 	cmd          *exec.Cmd
 	httpClient   *http.Client // request-response POSTs (60 s timeout)
 	streamClient *http.Client // long-lived GET SSE (no timeout)
+	getTokens    chan struct{} // concurrency limiter for GET /mcp passthrough streams
 	upstreamURL  string
 	bridge       *ProtocolBridge
 
@@ -61,6 +62,7 @@ type HTTPHost struct {
 var errBodyTooLarge = errors.New("body too large")
 
 const maxHTTPHostBodyBytes int64 = 4 << 20 // 4 MiB
+const maxHTTPHostGETStreams = 32
 
 // HTTPHostConfig describes one native-http-host instance.
 type HTTPHostConfig struct {
@@ -110,6 +112,7 @@ func NewHTTPHost(cfg HTTPHostConfig) (*HTTPHost, error) {
 		// overall deadline; cancellation is driven purely by the
 		// per-request context (client disconnect or host Shutdown).
 		streamClient: &http.Client{Timeout: 0},
+		getTokens:    make(chan struct{}, maxHTTPHostGETStreams),
 		upstreamURL:  fmt.Sprintf("http://127.0.0.1:%d%s", cfg.UpstreamPort, path),
 		bridge:       NewProtocolBridge(),
 		done:         make(chan struct{}),
@@ -478,6 +481,14 @@ func copyResponseHeaders(dst, src http.Header) {
 // stays open for the client session lifetime — the 60 s httpClient
 // deadline would tear it down every minute otherwise.
 func (h *HTTPHost) forwardPassthrough(w http.ResponseWriter, r *http.Request) {
+	select {
+	case h.getTokens <- struct{}{}:
+		defer func() { <-h.getTokens }()
+	default:
+		http.Error(w, "too many active streams", http.StatusTooManyRequests)
+		return
+	}
+
 	upstreamReq, err := http.NewRequestWithContext(r.Context(), r.Method, h.upstreamURL, r.Body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

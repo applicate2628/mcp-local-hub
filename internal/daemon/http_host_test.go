@@ -103,6 +103,7 @@ func newHTTPHostAgainstMock(t *testing.T, upstream *mockUpstream) *HTTPHost {
 	h := &HTTPHost{
 		httpClient:   upstream.server.Client(),
 		streamClient: upstream.server.Client(),
+		getTokens:    make(chan struct{}, maxHTTPHostGETStreams),
 		upstreamURL:  upstream.URL(),
 		bridge:       NewProtocolBridge(),
 		done:         make(chan struct{}),
@@ -523,6 +524,22 @@ func TestHTTPHost_GETUsesStreamClient_NoClientTimeout(t *testing.T) {
 	}
 	if realHost.httpClient.Timeout == 0 {
 		t.Error("httpClient.Timeout = 0 — POST requests should have a finite bound to avoid stuck handlers")
+	}
+}
+
+func TestHTTPHost_GETPassthrough_RejectsWhenStreamLimitReached(t *testing.T) {
+	upstream := newMockUpstream(t, "json")
+	defer upstream.Close()
+	h := newHTTPHostAgainstMock(t, upstream)
+	h.getTokens = make(chan struct{}, 1)
+	h.getTokens <- struct{}{} // simulate an already active stream
+
+	req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
+	rr := httptest.NewRecorder()
+	h.forwardPassthrough(rr, req)
+
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("status=%d, want %d", rr.Code, http.StatusTooManyRequests)
 	}
 }
 
