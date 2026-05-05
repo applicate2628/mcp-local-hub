@@ -666,6 +666,53 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 		v.Hint = "Operator cancelled (Ctrl+C/SIGTERM) before the destructive step; no kill was attempted."
 		return nil, v, err
 	}
+
+	// Final pre-kill identity recheck — runs unconditionally, NOT
+	// gated on opts.Expected. Closes the window between the gate-pass
+	// at line ~645 and the destructive syscall: a PID could be reused
+	// in that interval (process exited and the OS reissued the same
+	// PID to a new launch). Codex finding fix: PR #81 gated this on
+	// opts.Expected, which the GUI HTTP path passes empty, so the
+	// production force-kill skipped the recheck entirely. We rebuild
+	// a fresh Verdict from the live identity probe and re-run the
+	// shared three-part gate (image basename + argv[1]==gui + start
+	// time ≤ pidport mtime) so future code paths cannot weaken the
+	// production gate by skipping opts.Expected.
+	if !v.macOSUnsupported && !v.archUnsupported {
+		idNow, idErr := processID(v.PID)
+		if idErr != nil && !errors.Is(idErr, errMacOSProbeUnsupported) && !errors.Is(idErr, errWindowsArchUnsupported) {
+			// Fail closed: identity telemetry unavailable in the
+			// final window means we cannot prove the recorded PID
+			// still belongs to this mcphub gui instance.
+			v.Class = VerdictKillRefused
+			v.Diagnose = fmt.Sprintf("pre-kill identity probe failed for PID %d: %v", v.PID, idErr)
+			v.Hint = "Identity could not be reverified before kill; rerun mcphub gui --force --kill to retry, or use the manual recovery path."
+			return nil, v, fmt.Errorf("kill refused: pre-kill identity probe failed")
+		}
+		if idErr == nil {
+			// Build a fresh Verdict carrying just the identity
+			// fields the gate consults, then re-run the shared
+			// gate so any future widening of the gate logic
+			// applies here automatically.
+			vNow := Verdict{
+				PID:           v.PID,
+				PIDAlive:      idNow.Alive,
+				PIDImage:      idNow.ImagePath,
+				pidCmdlineRaw: idNow.Cmdline,
+				PIDStart:      idNow.StartTime,
+				Mtime:         v.Mtime,
+			}
+			if len(idNow.Cmdline) >= 2 {
+				vNow.PIDSubcommand = idNow.Cmdline[1]
+			}
+			if refused, diagnose, hint, errReason := checkIdentityGateInternal(vNow); refused {
+				v.Class = VerdictKillRefused
+				v.Diagnose = "pre-kill recheck: " + diagnose
+				v.Hint = hint
+				return nil, v, fmt.Errorf("kill refused: pre-kill identity recheck: %s", errReason)
+			}
+		}
+	}
 	//
 	// killProcessOverride is the test seam for the kill helper.
 	// Lets the wait-for-exit unit test (Codex iter-9 P2 #2) replace
