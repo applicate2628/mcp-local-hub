@@ -96,10 +96,24 @@ construct the backend lifecycle. Human invocation is not supported.`,
 				return fmt.Errorf("canonical workspace path: %w", err)
 			}
 			wsKey := api.WorkspaceKey(canonical)
+			// Legacy key for one-shot migration of registry rows
+			// created before EvalSymlinks-based canonicalization
+			// landed. Computed up-front so the registry-load fallback
+			// below has it without re-reading the filesystem.
+			legacyCanonical, err := api.CanonicalWorkspacePathLegacyCompat(workspaceFlag)
+			if err != nil {
+				return fmt.Errorf("legacy canonical workspace path: %w", err)
+			}
+			legacyWSKey := api.WorkspaceKey(legacyCanonical)
 			// Refine to the canonical lsp-<wsKey>-<lang>.log path now
 			// that wsKey is known; subsequent failures (registry, bind,
 			// manifest, …) land in the same file the proxy itself
 			// writes, so the GUI Logs picker can surface them too.
+			// We intentionally use the PRIMARY wsKey here for the
+			// initial bootstrap path so a fresh install always lands
+			// in the new-style filename. If we fall back to the legacy
+			// key below, logPath is re-refined post-fallback so the
+			// proxy and the cli agree on the file.
 			logPath = filepath.Join(logBaseDir(),
 				fmt.Sprintf("lsp-%s-%s.log", wsKey, languageFlag))
 			daemonLabel = "lsp-" + wsKey + "-" + languageFlag
@@ -132,6 +146,23 @@ construct the backend lifecycle. Human invocation is not supported.`,
 				return fmt.Errorf("load registry: %w", err)
 			}
 			entry, ok := reg.Get(wsKey, languageFlag)
+			activeWSKey := wsKey
+			if !ok && legacyWSKey != wsKey {
+				entry, ok = reg.Get(legacyWSKey, languageFlag)
+				if ok {
+					activeWSKey = legacyWSKey
+					// Re-refine logPath/daemonLabel so the proxy
+					// and the cli agree on the same log file. A
+					// proxy launched by a scheduler task created
+					// under the legacy key writes to the legacy
+					// filename; without this re-refine, our own
+					// error logging would split into the new-key
+					// filename and the operator would miss them.
+					logPath = filepath.Join(logBaseDir(),
+						fmt.Sprintf("lsp-%s-%s.log", activeWSKey, languageFlag))
+					daemonLabel = "lsp-" + activeWSKey + "-" + languageFlag
+				}
+			}
 			if !ok {
 				return fmt.Errorf("not registered: workspace %s language %s (key %s)",
 					canonical, languageFlag, wsKey)
@@ -145,7 +176,7 @@ construct the backend lifecycle. Human invocation is not supported.`,
 			// explicitly re-register to reconcile.
 			if entry.Port != portFlag {
 				return fmt.Errorf("port mismatch: --port=%d but registry entry for (%s, %s) has port %d; run `mcphub register` to reconcile",
-					portFlag, wsKey, languageFlag, entry.Port)
+					portFlag, activeWSKey, languageFlag, entry.Port)
 			}
 			// Re-assert Configured lifecycle on startup using the already-
 			// loaded Registry (no new flock acquisition — we hold it).
@@ -192,7 +223,7 @@ construct the backend lifecycle. Human invocation is not supported.`,
 			}
 
 			proxy := daemon.NewLazyProxy(daemon.LazyProxyConfig{
-				WorkspaceKey:  wsKey,
+				WorkspaceKey:  activeWSKey,
 				WorkspacePath: canonical,
 				Language:      languageFlag,
 				BackendKind:   spec.Backend,

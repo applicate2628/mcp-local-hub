@@ -139,6 +139,24 @@ func resolveSymlinksBestEffort(abs string) string {
 	}
 }
 
+// CanonicalWorkspacePathLegacyCompat returns the pre-symlink-resolution
+// canonical form (abs+clean plus Windows drive normalization). It exists
+// only for backward-compatible lookup of registry rows created before
+// full-path EvalSymlinks canonicalization was introduced. New rows are
+// always written under the EvalSymlinks-resolved key from
+// CanonicalWorkspacePath; this helper only enables one-shot migration
+// reads/deletes.
+func CanonicalWorkspacePathLegacyCompat(p string) (string, error) {
+	abs, err := filepath.Abs(filepath.Clean(p))
+	if err != nil {
+		return "", fmt.Errorf("workspace path: %w", err)
+	}
+	if runtime.GOOS == "windows" && len(abs) >= 2 && abs[1] == ':' {
+		abs = strings.ToLower(string(abs[0])) + abs[1:]
+	}
+	return abs, nil
+}
+
 // WorkspaceKey returns a short deterministic hex identifier for a canonical
 // workspace path. 8 hex chars = 32 bits of entropy. Used in scheduler task
 // names and client entry suffixes — the raw path (with backslashes, colons,
