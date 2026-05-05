@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the existing one-paragraph `## Platform support` section in `README.md` with a structured `## Feature & readiness matrix` section containing a 16-row × 3-column table that lets a first-time visitor scan project maturity in 10 seconds without overclaiming.
+**Goal:** Replace the existing one-paragraph `## Platform support` section in `README.md` with a structured `## Feature & readiness matrix` section containing an 18-row × 3-column table that lets a first-time visitor scan project maturity in 10 seconds without overclaiming.
 
 **Architecture:** Pure documentation change. One file modified (`README.md`). No code, no tests, no API, no schema. The matrix uses three fixed status states (`✅ Stable` / `⚠ Preview` / `🚧 Roadmap`) with explicit promotion rules defined in the spec.
 
@@ -61,7 +61,7 @@ Use the Edit tool with `file_path: README.md`.
 **Windows 11** is first-class (tested on 10.0.26100). Linux and macOS cross-compile but `mcphub install` fails with "not yet implemented" — the scheduler backend for those platforms is Phase 4 scope. The embedded stdio-bridge / godbolt / perftools servers themselves run fine on Linux and macOS; you just can't yet wire them up as persistent daemons through the OS scheduler.
 ```
 
-`new_string` (the new section — heading + intro line + 3 status-state legend lines + table; 16 data rows + 1 header row + 1 separator row inside the table):
+`new_string` (the new section — heading + intro line + 3 status-state legend lines + table; 18 data rows + 1 header row + 1 separator row inside the table):
 
 ```
 ## Feature & readiness matrix
@@ -78,13 +78,15 @@ A surface-by-surface map of what this project actually does today, with explicit
 | Run on Linux | 🚧 Roadmap | Ubuntu CI builds/tests; install/scheduler not implemented |
 | Run on macOS | 🚧 Roadmap | darwin cross-build only; scheduler + force-kill probe stubbed |
 | Auto-start on logon — Windows | ✅ Stable | Task Scheduler with restart-on-failure |
-| Auto-start on logon — Linux/macOS | 🚧 Roadmap | systemd user units (F2) and launchd (F3) tracked in backlog |
+| Auto-start on logon — Linux | 🚧 Roadmap | systemd user units (F2) + `mcphub setup --server` with `loginctl enable-linger` (F3) tracked in backlog |
+| Auto-start on logon — macOS | 🚧 Roadmap | launchd auto-start is not currently tracked in the backlog F-tier; manual launch only |
 | Default client install | ⚠ Preview | Claude Code, Codex CLI, Cursor; Cursor live-smoke pending in verification matrix |
 | Opt-in client install | ⚠ Preview | VS Code, Gemini-CLI, Qwen-CLI, Antigravity (stdio-relay); manual smoke pending |
 | GUI dashboard (`mcphub gui`) | ⚠ Preview | Loopback-only; CSRF/DNS-rebind hardened (PR #51); manual GUI browser smoke pending |
 | GUI logs viewer (`/api/logs/:server`) | ⚠ Preview | SSE tail follow + filter + ERROR/WARN highlight + Open folder all shipped |
 | Workspace-scoped LSP lazy proxies | ⚠ Preview | `mcphub register` + per-language proxy; D3 manual multi-language smoke pending |
-| Encrypted secrets vault | ✅ Stable | age-encrypted; argv-leak removed (`secrets set --value` deleted, PR #128) |
+| Encrypted secrets vault | ⚠ Preview | age-encrypted; argv-leak removed (PR #128); open cross-process last-write-wins limitation tracked in `work-items/bugs/a3a-vault-concurrent-edit-lww.md` |
+| Local manifest authoring (GUI Add server / `mcphub manifest create`) | ⚠ Preview | Form + `Paste YAML` import; YAML smuggling hardened (PR #51) but still surface-may-change before 1.0 |
 | Backups, rollback, migration | ⚠ Preview | `backups.keep_n` enforced + per-write timestamped; tracked race in interleaved migrate/demigrate (`work-items/bugs/b1-backup-file-race.md`) |
 | Per-server HTTP API (`/mcp` per daemon) | ⚠ Preview | DNS-rebind + Content-Type + body-size guards; GET/SSE server-notification semantics still being reconciled |
 | Unified health/status snapshot | 🚧 Roadmap | G2, immediately ahead of preview tag — combines ping/status/version + probes |
@@ -94,39 +96,18 @@ A surface-by-surface map of what this project actually does today, with explicit
 
 Note: the table-render-friendly compact format `|---|---|---|` is used for the column-separator row. Each cell is single-line (no embedded newlines) so GitHub renders it as a clean grid.
 
-- [ ] **Step 3: Verify the table has 16 data rows + 1 header + 1 separator**
+- [ ] **Step 3: Verify the table has 18 data rows + 1 header + 1 separator**
 
-Run:
-```bash
-awk '/^\| Surface/,/^$/' README.md | wc -l
-```
-
-Expected output: `19` (1 blank trailing line + 1 header + 1 separator + 16 data rows + 1 trailing blank — `awk` includes the trailing blank that ends the table block; if your awk variant produces 18, that's also fine, the row count assertion below is the authoritative check).
-
-Run the authoritative row-count assertion:
-```bash
-grep -c '^| ' README.md
-```
-
-Expected output: `19` (16 data rows + 1 header + plus 2 in the existing `## Ten shipped servers` table at line 79). If the count does not match `(16 + 1) + (existing table row count)`, the new table is malformed — re-check the Edit.
-
-To isolate just the new table's row count:
+Run the authoritative isolated-table row-count assertion:
 ```bash
 awk '/^## Feature & readiness matrix/,/^## License/' README.md | grep -c '^| '
 ```
 
-Expected output: `17` (1 header + 16 data rows; the separator `|---|...|` does not match `^| ` because the second char after `|` is `-`, not space).
+Expected output: `19` (1 header + 18 data rows; the separator `|---|...|` does not match `^| ` because the second char after `|` is `-`, not space).
+
+If the count is off, the new table is malformed — re-check the Edit.
 
 - [ ] **Step 4: Verify each status emoji renders correctly**
-
-Run:
-```bash
-awk '/^## Feature & readiness matrix/,/^## License/' README.md | grep -E '✅ Stable|⚠ Preview|🚧 Roadmap' | wc -l
-```
-
-Expected output: `19` (3 lines in the legend describing each state, plus 16 data rows that each carry one of the three emojis = 3 + 16 = 19).
-
-If any data row is missing an emoji or carries a stray character, this number is off; re-inspect the table.
 
 Run the per-state distribution check:
 ```bash
@@ -135,9 +116,12 @@ awk '/^## Feature & readiness matrix/,/^## License/' README.md | grep -c '⚠ Pr
 awk '/^## Feature & readiness matrix/,/^## License/' README.md | grep -c '🚧 Roadmap'
 ```
 
-Expected outputs: `4` Stable (1 legend + 3 data rows: Run on Windows, Auto-start Windows, Encrypted secrets vault), `9` Preview (1 legend + 8 data rows), `8` Roadmap (1 legend + 7 data rows).
+Expected outputs:
+- `3` Stable (1 legend + 2 data rows: Run on Windows, Auto-start on logon — Windows)
+- `10` Preview (1 legend + 9 data rows: Default client install, Opt-in client install, GUI dashboard, GUI logs viewer, Workspace LSP lazy proxies, Encrypted secrets vault, Local manifest authoring, Backups/rollback/migration, Per-server HTTP API)
+- `8` Roadmap (1 legend + 7 data rows: Run on Linux, Run on macOS, Auto-start Linux, Auto-start macOS, Unified health, Capability browser, Marketplace)
 
-If any of those numbers is off, the spec's status distribution drifted from the planned 3 / 8 / 7 split — re-inspect the table content.
+If any of those numbers is off, the status distribution drifted from the planned 2 / 9 / 7 split — re-inspect the table content.
 
 - [ ] **Step 5: Confirm no other section was accidentally damaged**
 
@@ -183,7 +167,7 @@ Run:
 git diff README.md | head -50
 ```
 
-Expected: a clean diff showing the 4-line `## Platform support` block removed and the new 24-line block inserted (1 heading + 1 blank + 1 intro + 3 legend bullets + 1 blank + 1 header + 1 separator + 16 data rows + 1 blank or end-of-section).
+Expected: a clean diff showing the 4-line `## Platform support` block removed and the new 26-line block inserted (1 heading + 1 blank + 1 intro + 3 legend bullets + 1 blank + 1 header + 1 separator + 18 data rows + 1 blank or end-of-section).
 
 If the diff shows changes elsewhere in the file, the Edit affected something it shouldn't have — abort with `git checkout README.md` and retry.
 
@@ -208,7 +192,7 @@ Expected output: `[feat/g10-g1-g2-preview-prep <SHA>] docs(readme): replace Plat
 - [x] `### Section heading` — Task 1 Step 2 uses `## Feature & readiness matrix`.
 - [x] `### Table structure` — Task 1 Step 2 has Surface / Status / Notes as the 3 columns.
 - [x] `### Status states` — Task 1 Step 2 includes the 3-bullet legend before the table.
-- [x] `### Initial rows (15)` — Task 1 Step 2 has all 16 data rows verbatim from the spec.
+- [x] `### Initial rows (18)` — Task 1 Step 2 has all 18 data rows verbatim from the spec.
 - [x] `## Out of scope` — n/a, no implementation needed.
 - [x] `## Maintenance contract` — already addressed in CONTRIBUTING.md (commit `2e161a5` on this branch).
 - [x] `## Testing` — Task 1 Steps 3-5 cover the manual review acceptance.
