@@ -187,7 +187,7 @@ func (a *API) ManifestValidate(yaml string) []string {
 	}
 	// ParseManifest calls m.Validate internally, so if we reach here the
 	// structural validation passed. Add secondary soft checks:
-	if len(m.Daemons) == 0 {
+	if m.Kind != config.KindWorkspaceScoped && len(m.Daemons) == 0 {
 		warnings = append(warnings, "no daemons declared")
 	}
 	for _, d := range m.Daemons {
