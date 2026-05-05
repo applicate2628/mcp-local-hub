@@ -73,14 +73,24 @@ func TestStdioHostInheritedStdioDescendantDoesNotWedgeChildExited(t *testing.T) 
 		}
 	})
 
-	// ChildExited MUST close within a short window after the immediate
-	// child exited. Before the fix, this select blocked indefinitely
-	// because the watcher goroutine waited on pipe EOF that never
-	// arrived (the descendant kept the fds open).
+	// ChildExited MUST close in BOUNDED time after the immediate child
+	// exited. Before PR #117's pipesDrained.Wait gate this select blocked
+	// indefinitely because the descendant kept fds open. The fix here
+	// re-bounds the wait at pipeDrainTimeout (5s): the watcher fires the
+	// timeout, calls cmd.Wait to close the parent's pipe read-ends, and
+	// then closes childExited (Phase 4). Total budget includes the 5s
+	// timeout + watcher reap; 8s gives comfortable headroom.
+	//
+	// Codex bot P1 on 34b1a30 was the reason childExited closes AFTER
+	// pipe drain rather than immediately on Process.Wait return: closing
+	// it on OS-exit raced with response delivery — the scanner could
+	// dispatch a final reply to respCh AFTER childExited closed, and
+	// handlePOST would non-deterministically pick the childExited branch
+	// and return 502 even though a valid response existed.
 	select {
 	case <-h.ChildExited():
-	case <-time.After(2 * time.Second):
-		t.Fatalf("ChildExited() did not close within 2s — supervisor would never restart this daemon")
+	case <-time.After(8 * time.Second):
+		t.Fatalf("ChildExited() did not close within 8s — supervisor would never restart this daemon")
 	}
 
 	// Stop must also return within a bounded window. The fix added a
