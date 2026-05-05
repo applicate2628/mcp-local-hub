@@ -247,7 +247,7 @@ func (h *StdioHost) Start(ctx context.Context) error {
 		h.readStdoutLoop()
 	}()
 
-	// Watcher goroutine: four phases reconciling four constraints.
+	// Watcher goroutine: four phases reconciling five constraints.
 	//
 	// 1. Codex Cloud finding 63b417d2: childExited must close in
 	//    BOUNDED time after OS-exit even when a descendant inherited
@@ -277,16 +277,25 @@ func (h *StdioHost) Start(ctx context.Context) error {
 	//    arrived. Closing childExited after pipe drain (or the bounded
 	//    timeout) ensures handlePOST sees a ready respCh first.
 	//
+	// 5. Codex bot P2 on f2dbea0: cmd.Process.Wait()'s returned
+	//    ProcessState must be persisted onto cmd.ProcessState so the
+	//    exit code / signal info is recoverable for diagnostics.
+	//    Discarding it leaves cmd.ProcessState nil and turns every
+	//    exit into the same syscall error shape, breaking any caller
+	//    that wants to distinguish controlled sys.exit from native
+	//    crash from parent kill.
+	//
 	// Phase 1: cmd.Process.Wait() reaps the OS child WITHOUT closing
-	// the pipe read-ends. The zombie is collected immediately so the
-	// child PID is no longer reusable, but childExited stays unsignaled
-	// until Phase 4 — Codex bot P1 finding on 34b1a30: closing
-	// childExited ahead of pipe drain races with response delivery.
-	// A child can write its last JSON-RPC reply, exit, then have the
-	// scanner deliver that reply to respCh AFTER childExited closed,
-	// and handlePOST's select would non-deterministically pick the
-	// childExited branch and return 502 even though a valid response
-	// arrived.
+	// the pipe read-ends. We persist the returned ProcessState onto
+	// cmd.ProcessState so callers (supervisor diagnostics, future
+	// ExitState() readers) can recover the exit code / signal info —
+	// Codex bot P2 on f2dbea0: discarding the wait result drops exit
+	// diagnostics and turns every exit into the same syscall error
+	// shape. childExited stays unsignaled until Phase 4 (Codex bot P1
+	// on 34b1a30: closing childExited ahead of pipe drain races with
+	// response delivery — handlePOST's select could non-deterministically
+	// pick the childExited branch and 502 a valid response that the
+	// scanner is about to dispatch to respCh).
 	//
 	// Phase 2: bounded wait for scanners to drain the buffered output
 	// the child wrote before exit. The bound only arms here, after
@@ -296,11 +305,13 @@ func (h *StdioHost) Start(ctx context.Context) error {
 	// restart latency for the inherited-stdio descendant case
 	// (descendant holds parent's stdout/stderr fds open).
 	//
-	// Phase 3: cmd.Wait() closes parentIOPipes. For the descendant-
-	// inherited case this is what unblocks the still-running scanners
-	// (read returns "file already closed"). cmd.Wait's internal
-	// Process.Wait re-call returns ECHILD harmlessly because Phase 1
-	// already reaped the zombie; closeDescriptors still runs.
+	// Phase 3: close stdout/stderr read-ends MANUALLY (not via cmd.Wait).
+	// cmd.Wait would early-return with "exec: Wait was already called"
+	// because Phase 1 set cmd.ProcessState, which means Wait skips
+	// closeDescriptors as a side effect — leaving scanners blocked on
+	// inherited pipes forever. The two ReadCloser handles are precisely
+	// what cmd.Wait would have closed (they are c.parentIOPipes), so
+	// closing them here is the same operation minus the early return.
 	//
 	// Phase 4: close(childExited) NOW — after scanners drained or the
 	// bounded timeout fired. Any final response the child wrote before
@@ -308,7 +319,10 @@ func (h *StdioHost) Start(ctx context.Context) error {
 	// observes a ready respCh in the same iteration and prefers it
 	// over childExited.
 	go func() {
-		_, _ = cmd.Process.Wait()
+		state, _ := cmd.Process.Wait()
+		if state != nil {
+			cmd.ProcessState = state
+		}
 		close(h.procExited)
 
 		drained := make(chan struct{})
@@ -324,7 +338,8 @@ func (h *StdioHost) Start(ctx context.Context) error {
 				"warn: stdout/stderr scanners did not reach EOF within %s after stdio child exited; a descendant likely inherited the pipes — proceeding so daemon liveness is reported\n",
 				pipeDrainTimeout)
 		}
-		_ = cmd.Wait()
+		_ = stdout.Close()
+		_ = stderr.Close()
 		close(h.childExited)
 	}()
 
