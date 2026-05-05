@@ -23,6 +23,15 @@ import (
 // disagree.
 var validManifestName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
+// CheckManifestName is the exported gate for callers outside this
+// package (cli/daemon.go disk fallback, cli/relay.go disk fallback)
+// that need the same input validation as internal API entry points.
+// Keeping a single implementation prevents the gate from drifting
+// across surfaces.
+func CheckManifestName(name string) error {
+	return checkManifestName(name)
+}
+
 // checkManifestName rejects names that could escape the manifest
 // directory via path traversal, contain absolute-path semantics, or
 // land on reserved Windows filenames. Returns a descriptive error so
