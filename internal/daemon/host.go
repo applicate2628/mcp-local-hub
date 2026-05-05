@@ -82,6 +82,7 @@ type StdioHost struct {
 	done        chan struct{} // closed by Stop() to unblock pending handlers
 	procExited  chan struct{} // closed by the watcher goroutine when cmd.Process.Wait() returns (Phase 1 — OS-exit detected, before pipe drain)
 	childExited chan struct{} // closed by the watcher goroutine after cmd.Wait() returns (Phase 4 — pipes drained or bounded timeout)
+	exitState   atomic.Pointer[os.ProcessState] // saved by Phase 1 before Phase 3's cmd.Wait clears cmd.ProcessState (Codex bot P2 on f2dbea0); read via ExitState()
 
 	// job is a Windows Job Object (no-op on POSIX) configured with
 	// KILL_ON_JOB_CLOSE so the kernel reaps any descendant tree the
@@ -247,7 +248,7 @@ func (h *StdioHost) Start(ctx context.Context) error {
 		h.readStdoutLoop()
 	}()
 
-	// Watcher goroutine: four phases reconciling five constraints.
+	// Watcher goroutine: five phases reconciling six constraints.
 	//
 	// 1. Codex Cloud finding 63b417d2: childExited must close in
 	//    BOUNDED time after OS-exit even when a descendant inherited
@@ -278,17 +279,27 @@ func (h *StdioHost) Start(ctx context.Context) error {
 	//    timeout) ensures handlePOST sees a ready respCh first.
 	//
 	// 5. Codex bot P2 on f2dbea0: cmd.Process.Wait()'s returned
-	//    ProcessState must be persisted onto cmd.ProcessState so the
-	//    exit code / signal info is recoverable for diagnostics.
-	//    Discarding it leaves cmd.ProcessState nil and turns every
-	//    exit into the same syscall error shape, breaking any caller
-	//    that wants to distinguish controlled sys.exit from native
-	//    crash from parent kill.
+	//    ProcessState must be persisted somewhere readable so the exit
+	//    code / signal info is recoverable for diagnostics. Phase 1
+	//    saves it to h.exitState (read via ExitState()) — NOT to
+	//    cmd.ProcessState, because Phase 3's cmd.Wait would rewrite
+	//    cmd.ProcessState to nil during its ECHILD-returning internal
+	//    Process.Wait re-call.
+	//
+	// 6. Codex bot P1 on 0e903bd: cmd.Wait MUST be called so os/exec
+	//    releases its internal resources. exec.CommandContext's
+	//    Start() launches a context-watcher goroutine that only
+	//    exits when cmd.Wait drains its result channel; never
+	//    calling cmd.Wait leaks that goroutine for the host context's
+	//    lifetime. Phase 3 calls cmd.Wait — its closeDescriptors does
+	//    double duty as the unblock-the-scanners path for inherited
+	//    descendants holding the pipes.
 	//
 	// Phase 1: cmd.Process.Wait() reaps the OS child WITHOUT closing
 	// the pipe read-ends. We persist the returned ProcessState onto
-	// cmd.ProcessState so callers (supervisor diagnostics, future
-	// ExitState() readers) can recover the exit code / signal info —
+	// h.exitState (NOT cmd.ProcessState — Phase 3's cmd.Wait would
+	// rewrite cmd.ProcessState to nil because its internal Process.Wait
+	// re-call returns ECHILD). Callers read h.exitState via ExitState().
 	// Codex bot P2 on f2dbea0: discarding the wait result drops exit
 	// diagnostics and turns every exit into the same syscall error
 	// shape. childExited stays unsignaled until Phase 4 (Codex bot P1
@@ -305,23 +316,35 @@ func (h *StdioHost) Start(ctx context.Context) error {
 	// restart latency for the inherited-stdio descendant case
 	// (descendant holds parent's stdout/stderr fds open).
 	//
-	// Phase 3: close stdout/stderr read-ends MANUALLY (not via cmd.Wait).
-	// cmd.Wait would early-return with "exec: Wait was already called"
-	// because Phase 1 set cmd.ProcessState, which means Wait skips
-	// closeDescriptors as a side effect — leaving scanners blocked on
-	// inherited pipes forever. The two ReadCloser handles are precisely
-	// what cmd.Wait would have closed (they are c.parentIOPipes), so
-	// closing them here is the same operation minus the early return.
+	// Phase 3: close stdout/stderr read-ends manually. This unblocks
+	// any scanners blocked on inherited-descendant pipes (read returns
+	// "file already closed") quickly — without waiting for cmd.Wait's
+	// internal Process.Wait re-call, which under heavy parallel load
+	// on Windows has been observed to add seconds of latency to Stop.
 	//
 	// Phase 4: close(childExited) NOW — after scanners drained or the
 	// bounded timeout fired. Any final response the child wrote before
 	// exit has reached respCh by this point, so handlePOST's select
 	// observes a ready respCh in the same iteration and prefers it
-	// over childExited.
+	// over childExited. Closing childExited here keeps Stop fast
+	// because Stop's wait on h.childExited returns immediately.
+	//
+	// Phase 5: cmd.Wait() in a SEPARATE goroutine — REQUIRED so os/exec
+	// releases its internal resources. exec.CommandContext's Start()
+	// spawns a context-watcher goroutine that only exits when cmd.Wait
+	// drains its result channel (Codex bot P1 on 0e903bd: never calling
+	// cmd.Wait leaks that goroutine). Running it in a SEPARATE goroutine
+	// after the watcher has already signaled childExited means the slow
+	// cmd.Wait path (seconds under heavy parallel load on Windows due
+	// to its internal Process.Wait re-call) does not extend Stop's wall
+	// time. The ProcessState we want is already in h.exitState; pipes
+	// are already closed; cmd.Wait's only remaining work is the watchCtx
+	// drain plus an idempotent closeDescriptors on the parentIOPipes
+	// we already closed manually.
 	go func() {
 		state, _ := cmd.Process.Wait()
 		if state != nil {
-			cmd.ProcessState = state
+			h.exitState.Store(state)
 		}
 		close(h.procExited)
 
@@ -341,6 +364,8 @@ func (h *StdioHost) Start(ctx context.Context) error {
 		_ = stdout.Close()
 		_ = stderr.Close()
 		close(h.childExited)
+
+		go func() { _ = cmd.Wait() }()
 	}()
 
 	return nil
@@ -351,6 +376,21 @@ func (h *StdioHost) Start(ctx context.Context) error {
 // (the outer daemon loop) or to confirm clean shutdown (Stop()).
 func (h *StdioHost) ChildExited() <-chan struct{} {
 	return h.childExited
+}
+
+// ExitState returns the subprocess's ProcessState after it has exited,
+// or nil before exit. Mirrors HTTPHost.ExitState() so the supervisor
+// can capture exit code / signal info for diagnostics. Codex bot P2
+// on f2dbea0 — without this, callers that want to distinguish a
+// controlled sys.exit from a native crash from a parent kill see only
+// "subprocess died unexpectedly" with no further detail.
+//
+// Backed by an atomic.Pointer rather than cmd.ProcessState because the
+// watcher's Phase 3 cmd.Wait rewrites cmd.ProcessState to nil during
+// its ECHILD-returning internal Process.Wait re-call. Reading is safe
+// concurrent with the writer in Phase 1.
+func (h *StdioHost) ExitState() *os.ProcessState {
+	return h.exitState.Load()
 }
 
 // Stop terminates the subprocess and closes all pipes.

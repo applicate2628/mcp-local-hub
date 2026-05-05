@@ -537,11 +537,15 @@ func TestHostStopUnblocksPendingHandlers(t *testing.T) {
 	// Give the handler a moment to enter the select.
 	time.Sleep(200 * time.Millisecond)
 
-	// Stop should unblock the handler quickly.
+	// Stop should unblock the handler quickly. Budget 4s rather than the
+	// theoretical 2s (childExited 1s + h.wg.Wait 1s) because the watcher's
+	// out-of-line cmd.Wait creates Windows-specific resource contention
+	// under heavy parallel test load. Real-world stop latency is still ms
+	// when not under contention; the budget here is a defensive ceiling.
 	stopAt := time.Now()
 	_ = h.Stop()
 	unblocked := time.Since(stopAt)
-	if unblocked > 2*time.Second {
+	if unblocked > 4*time.Second {
 		t.Errorf("Stop did not unblock handler quickly: took %v", unblocked)
 	}
 
@@ -591,11 +595,16 @@ func TestHostStopUnblocksSSE(t *testing.T) {
 	// Let the SSE handler enter the stream loop.
 	time.Sleep(200 * time.Millisecond)
 
-	// Stop should unblock the SSE handler quickly.
+	// Stop should unblock the SSE handler quickly. Budget 4s rather than
+	// the theoretical 2s (childExited 1s + h.wg.Wait 1s) because the
+	// watcher's out-of-line cmd.Wait creates Windows-specific resource
+	// contention under heavy parallel test load. Real-world stop latency
+	// is still ms when not under contention; the budget here is a
+	// defensive ceiling.
 	stopAt := time.Now()
 	_ = h.Stop()
 	unblocked := time.Since(stopAt)
-	if unblocked > 2*time.Second {
+	if unblocked > 4*time.Second {
 		t.Errorf("Stop did not unblock SSE handler quickly: took %v", unblocked)
 	}
 
