@@ -504,6 +504,20 @@ func (a *API) registerOneLanguage(
 		return WorkspaceEntry{}, fmt.Errorf("proxy readiness on port %d: %w", port, err)
 	}
 	fmt.Fprintf(w, "\u2713 Scheduler task started: %s\n", taskName)
+	// Phase 3: re-acquire flock before client config writes. Client
+	// adapters perform read-modify-write updates, so these writes must be
+	// serialized against concurrent register/unregister operations.
+	unlock, err = reg.Lock()
+	if err != nil {
+		return WorkspaceEntry{}, fmt.Errorf("re-acquire registry lock: %w", err)
+	}
+	defer releaseUnlock()
+	if err := reg.Load(); err != nil {
+		return WorkspaceEntry{}, fmt.Errorf("reload registry: %w", err)
+	}
+	if _, ok := reg.Get(wsKey, lang); !ok {
+		return WorkspaceEntry{}, fmt.Errorf("registry entry disappeared before client updates for %s/%s", wsKey, lang)
+	}
 	// 2. Write client entries. Names + entry were pre-composed above;
 	// this loop just pushes entries into each client's config and
 	// registers per-client rollbacks.
