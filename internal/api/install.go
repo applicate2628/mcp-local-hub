@@ -804,8 +804,9 @@ func (a *API) Uninstall(server string) (*UninstallReport, error) {
 			// removed manually or the client never received it.
 			continue
 		}
-		if !isHubOwnedEntry(entry, m.Name, b.Daemon) {
-			report.ClientWarns = append(report.ClientWarns, fmt.Sprintf("refusing to remove %s from %s: entry is not hub-managed (relay tuple does not match)", m.Name, b.Client))
+		expectedURL := expectedHubURL(m, b)
+		if !isHubOwnedEntry(entry, m.Name, b.Daemon, expectedURL) {
+			report.ClientWarns = append(report.ClientWarns, fmt.Sprintf("refusing to remove %s from %s: entry is not hub-managed (neither relay tuple nor URL matches what this manifest would install)", m.Name, b.Client))
 			continue
 		}
 		if err := client.RemoveEntry(m.Name); err != nil {
@@ -817,26 +818,55 @@ func (a *API) Uninstall(server string) (*UninstallReport, error) {
 	return report, nil
 }
 
+// expectedHubURL returns the URL that BuildPlan would install for this
+// (manifest, binding) combination. Used by uninstall to recognize
+// HTTP-native client entries (codex-cli, claude-code, cursor, gemini-cli,
+// qwen-cli, vscode) that the hub installed but cannot mark with relay
+// metadata because their adapters persist only Name + URL. Returns ""
+// if the binding's daemon is unresolvable; callers must treat empty as
+// "no URL match available".
+func expectedHubURL(m *config.ServerManifest, b config.ClientBinding) string {
+	daemon, ok := findDaemon(m, b.Daemon)
+	if !ok {
+		return ""
+	}
+	urlPath := b.URLPath
+	if urlPath == "" {
+		urlPath = "/mcp"
+	}
+	return fmt.Sprintf("http://localhost:%d%s", daemon.Port, urlPath)
+}
+
 // isHubOwnedEntry reports whether the client entry was placed by this
-// hub for the given (server, daemon) binding. Hub installs use the
-// RelayServer/RelayDaemon/RelayExePath triple to mark ownership; an
-// entry that lacks those fields, or carries a different RelayServer /
-// RelayDaemon, was not placed by this hub for this manifest and must
-// not be deleted by uninstall.
-func isHubOwnedEntry(entry *clients.MCPEntry, server, daemon string) bool {
+// hub for the given (server, daemon) binding. Two ownership signals are
+// accepted:
+//
+//  1. Relay-tuple match: RelayExePath set + RelayServer == manifest name
+//     + RelayDaemon == binding daemon. Antigravity (the only relay-style
+//     adapter today) persists this triple in client config.
+//
+//  2. Exact URL match: entry.URL equals what BuildPlan would install
+//     (http://localhost:<port><urlPath>). HTTP-native adapters
+//     (codex-cli, claude-code, cursor, gemini-cli, qwen-cli, vscode)
+//     persist only Name + URL — relay-tuple recognition would leave
+//     their entries behind on uninstall (Codex finding on PR #128).
+//
+// Either signal is sufficient. An entry that matches NEITHER (e.g. a
+// user-owned MCP server happening to share the manifest name and
+// pointing at a different URL or running externally) is preserved.
+func isHubOwnedEntry(entry *clients.MCPEntry, server, daemon, expectedURL string) bool {
 	if entry == nil {
 		return false
 	}
-	if entry.RelayExePath == "" {
-		return false
+	// Signal 1: relay-tuple match.
+	if entry.RelayExePath != "" && entry.RelayServer == server && entry.RelayDaemon == daemon {
+		return true
 	}
-	if entry.RelayServer != server {
-		return false
+	// Signal 2: URL match against what BuildPlan would install.
+	if expectedURL != "" && entry.URL == expectedURL {
+		return true
 	}
-	if entry.RelayDaemon != daemon {
-		return false
-	}
-	return true
+	return false
 }
 
 // uninstallWithoutManifest cleans up stale scheduler tasks and client

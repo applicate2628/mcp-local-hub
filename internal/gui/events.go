@@ -80,20 +80,32 @@ func (b *Broadcaster) subscribeUnchecked(ctx context.Context) chan Event {
 
 // TrySubscribe attempts to add a subscriber, returning the channel and
 // true on success or (nil, false) if the global subscriber cap is
-// reached. The capacity check + insertion is atomic under b.mu so two
-// concurrent callers cannot both observe room and overflow the cap.
+// reached. The capacity check + insertion happen under one lock-acquire
+// of b.mu so two concurrent callers cannot both observe room and then
+// both insert, overflowing the cap. The unsubscribe goroutine must
+// take b.mu separately, so this insertion CANNOT call back into any
+// path that also locks b.mu.
 //
 // /api/events uses this so a 503 can be returned before HTTP headers
 // are committed; replacing Subscribe with this for that path lets the
 // existing browser client see the rejection cleanly.
 func (b *Broadcaster) TrySubscribe(ctx context.Context) (<-chan Event, bool) {
+	ch := make(chan Event, 16)
 	b.mu.Lock()
 	if len(b.subs) >= maxSSESubscribers {
 		b.mu.Unlock()
 		return nil, false
 	}
+	b.subs[ch] = struct{}{}
 	b.mu.Unlock()
-	return b.subscribeUnchecked(ctx), true
+	go func() {
+		<-ctx.Done()
+		b.mu.Lock()
+		delete(b.subs, ch)
+		b.mu.Unlock()
+		close(ch)
+	}()
+	return ch, true
 }
 
 // Publish fans out to all subscribers. Non-blocking: a subscriber with

@@ -174,14 +174,18 @@ func (a *API) CleanupOrphans(opts CleanupOpts) ([]OrphanProcess, error) {
 //
 //   - trim whitespace and surrounding single/double quotes
 //   - lowercase
-//   - filepath.Base, so `C:\Users\...\python.exe` and `/usr/bin/python3`
-//     both reduce to a bare interpreter name
+//   - split on BOTH `\\` and `/` separators so `C:\Users\...\python.exe`
+//     and `/usr/bin/python3` both reduce to a bare interpreter name —
+//     filepath.Base would NOT strip backslashes when running under
+//     Linux/macOS CI, so we walk both separators ourselves.
 //   - strip Windows executable suffixes (.exe, .cmd, .bat, .ps1) so
 //     `node.exe`, `npx.cmd`, `uvx.exe` all reduce to the bare token
 //
 // Codex finding fix: PR #121 only matched bare tokens (e.g. `"node"`)
 // and missed the .exe-suffixed and absolute-path forms that real wmic
-// output produces.
+// output produces. Cross-platform fix: use platform-independent base()
+// since this code path runs in the orphan-cleanup logic that consumes
+// wmic CSV output (Windows-style paths) on any platform's CI.
 func isBroadLauncherToken(pattern string) bool {
 	p := strings.TrimSpace(pattern)
 	p = strings.Trim(p, `"'`)
@@ -189,7 +193,13 @@ func isBroadLauncherToken(pattern string) bool {
 		return true
 	}
 	p = strings.ToLower(p)
-	p = filepath.Base(p)
+	// Platform-independent basename: take everything after the last
+	// '/' or '\\', whichever comes later. Don't use filepath.Base on
+	// Unix runners — it would treat `C:\Users\...\node.exe` as a
+	// single token because '\\' is not a separator there.
+	if i := strings.LastIndexAny(p, `\/`); i >= 0 {
+		p = p[i+1:]
+	}
 	for _, suffix := range []string{".exe", ".cmd", ".bat", ".ps1"} {
 		if strings.HasSuffix(p, suffix) {
 			p = strings.TrimSuffix(p, suffix)
