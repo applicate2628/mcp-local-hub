@@ -31,7 +31,7 @@
 
 ### Style
 
-- Go: gofmt + the staticcheck output that `go vet ./...` produces. No new linter rules added without discussion.
+- Go: `gofmt -d ./...` (or `goimports`) clean and `go vet ./...` clean. `staticcheck ./...` is encouraged when available but not strictly required to pass — install via `go install honnef.co/go/tools/cmd/staticcheck@latest`. (`go vet` does NOT run `staticcheck`; treat them as two separate tools.) No new linter rules added without discussion.
 - Frontend: `cd internal/gui/frontend && npm run typecheck && npm test -- --run` must pass. The embedded bundle (`internal/gui/assets/{index.html,app.js,style.css}`) must be regenerated via `go generate ./internal/gui/...` before commit if frontend source changed.
 - Commits: one focused commit per logical change, message starts with a conventional-commits prefix (`fix:`, `feat:`, `chore:`, `docs:`, `security:`, `refactor:`, `test:`).
 
@@ -69,5 +69,5 @@ For commercial licensing inquiries, see the README.
 - `E2E` — end-to-end test; here, the Playwright suite under `internal/gui/e2e/`.
 - `MPL-2.0` — Mozilla Public License 2.0; the project's open-source license.
 - `MCP` — Model Context Protocol.
-- `staticcheck` — the static analyzer surfaced by `go vet ./...` in this project.
+- `staticcheck` — third-party Go static analyzer (`honnef.co/go/tools/cmd/staticcheck`). Separate tool from `go vet`; install explicitly to use.
 - `xhigh` — short for "extra-high reasoning effort", a Codex CLI mode used for second-opinion review.
