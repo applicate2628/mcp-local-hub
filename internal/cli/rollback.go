@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
+	"time"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/clients"
@@ -105,20 +105,34 @@ func findLatestBackup(configPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	var backups []string
+	var latestName string
+	var latestPath string
 	for _, e := range entries {
 		name := e.Name()
 		if !strings.HasPrefix(name, base) {
 			continue
 		}
-		if name[len(base):] == sentinel {
+		suffix := name[len(base):]
+		if suffix == sentinel {
 			continue
 		}
-		backups = append(backups, filepath.Join(dir, name))
+		if _, err := time.Parse("20060102-150405", suffix); err != nil {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if !info.Mode().IsRegular() {
+			continue
+		}
+		if latestName == "" || suffix > latestName {
+			latestName = suffix
+			latestPath = filepath.Join(dir, name)
+		}
 	}
-	if len(backups) == 0 {
+	if latestPath == "" {
 		return "", nil
 	}
-	sort.Strings(backups) // lexicographic == chronological due to timestamp format
-	return backups[len(backups)-1], nil
+	return latestPath, nil
 }
