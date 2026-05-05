@@ -202,7 +202,12 @@ func TestValidateClangTidyInputs_DisallowedExtraArgs(t *testing.T) {
 		"--load=plugin.so",
 		"-fix",
 		"--fix-errors",
+		"--fix-notes",         // implicitly enables --fix per clang-tidy docs
+		"-fix-notes",          // single-dash form
 		"--export-fixes=/tmp/fixes.yaml",
+		"--config=path",       // config file can carry ExtraArgs / ExtraArgsBefore
+		"-config-file=foo",    // single-dash form
+		"--config-file=/etc/x",
 	}
 
 	for _, arg := range tests {
