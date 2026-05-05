@@ -5,6 +5,46 @@ import (
 	"testing"
 )
 
+// TestIsBroadLauncherToken covers the input forms the normalizer must
+// strip before comparing against the launcher denylist. PR #121's
+// initial implementation only matched bare lowercase tokens and missed
+// .exe-suffixed names, absolute paths, and quoted forms that real
+// wmic CommandLine output contains.
+func TestIsBroadLauncherToken(t *testing.T) {
+	broad := []string{
+		"node", "npx", "python", "python3", "py", "uv", "uvx",
+		// .exe / .cmd / .bat / .ps1 suffixed (Windows scripts call these)
+		"node.exe", "npx.cmd", "uvx.exe", "python.exe", "python3.exe",
+		// absolute paths (wmic on Windows often emits these)
+		`C:\Program Files\nodejs\node.exe`,
+		`C:\Users\dima_\AppData\Roaming\npm\npx.cmd`,
+		`/usr/bin/python3`,
+		// quoted (PowerShell command-line style)
+		`'node'`, `"python"`,
+		// upper / mixed case
+		"NODE", "Python.EXE",
+		// trailing whitespace
+		"node ", "  npx  ",
+		// empty / whitespace-only — should be filtered too so we don't
+		// pollute the pattern list
+		"", "   ",
+	}
+	for _, p := range broad {
+		if !isBroadLauncherToken(p) {
+			t.Errorf("isBroadLauncherToken(%q) = false, want true", p)
+		}
+	}
+	specific := []string{
+		"GDB-MCP", "wolfram", "paper-search-mcp", "node-grpc-server",
+		"my-python-tool", "/usr/bin/wolfram",
+	}
+	for _, p := range specific {
+		if isBroadLauncherToken(p) {
+			t.Errorf("isBroadLauncherToken(%q) = true, want false (specific identifier)", p)
+		}
+	}
+}
+
 // TestParseOrphanDetectionIgnoresOurDaemons verifies that a wmic line whose
 // CommandLine references our own daemon invocation (`mcphub.exe daemon`) is
 // NOT counted as an orphan — the child of that daemon is legitimate.
