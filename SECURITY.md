@@ -43,7 +43,7 @@ These are out of scope for security reports — file them as regular GitHub issu
 | DNS-rebinding browser attack on GUI | `127.0.0.1` HTTP server | `requireAllowedHost` Host-allowlist + Origin/Sec-Fetch-Site CSRF gate |
 | LAN-attacker via Vite dev proxy | `npm run dev` proxy | Loopback-only Host preflight + same-origin Origin rewrite |
 | DNS-rebinding browser attack on stdio daemons | each `127.0.0.1:<port>/mcp` | `rejectUnsafeLoopbackRequest` (`net/netip.IsLoopback`) + Content-Type gate |
-| Path-traversal in subprocess invocation | `perftools.llvm_objdump`, `perftools.iwyu` | `validateBinaryInsideRoot` (double `filepath.EvalSymlinks` of root + target, then `filepath.Rel` inside-root assertion); required `project_root` parameter; filesystem root rejected as project boundary; `extra_args` denylist rejects `@FILE` response-files, positional inputs, and path-valued flags (`--build-id=`, `--debug-file-directory=`, `--prefix=`, `--prefix-strip=`, IWYU-specific `-Xiwyu`, `--mapping_file=`, `--export_mappings=`, `--check_also=`, `--keep=`) |
+| Path-traversal in subprocess invocation | `perftools.llvm_objdump`, `perftools.iwyu` | `validateBinaryInsideRoot` (double `filepath.EvalSymlinks` of root + target, then `filepath.Rel` inside-root assertion); required `project_root` parameter; filesystem root rejected as project boundary; `extra_args` denylist rejects `@FILE` response-files, positional inputs, and path-valued flags such as `--build-id=`, `--debug-file-directory=`, `--dsym=`, `--prefix=`, `--prefix-strip=`, plus IWYU-specific `-Xiwyu`, `--mapping_file=`, `--export_mappings=`, `--check_also=`, `--keep=` (see `internal/perftools/path_guard.go` for the full live list) |
 | Hostile compiler-flag injection in clang-tidy | `perftools.clang_tidy` | `extra_args` denylist for mutating flags (`-fix`, `--fix`, `--fix-errors`, `-fix-notes`, `--fix-notes`), plugin loading (`-load`, `--load`), config-file injection (`-config`/`--config`/`-config-file`/`--config-file` — those re-enable arbitrary `ExtraArgs`/`ExtraArgsBefore` through YAML), and fixture export (`-export-fixes`, `--export-fixes`). Note: clang-tidy does NOT use `validateBinaryInsideRoot`; its files come from a project's `compile_commands.json`, so the gate is on flag shape, not on disk path. |
 | Manifest-name confused-deputy | `install`, `migrate`, `register`, `scan`, `status` paths | `parseManifestForName(name, data)` validates name regex + Windows reserved-name + asserts YAML `m.Name` matches requested name |
 | Stuck-instance recovery PID-spoof | `mcphub gui --force --kill` | Three-part identity gate: image basename + `argv[1]=="gui"` (or no-args) + start-time precedes pidport mtime |
@@ -74,3 +74,19 @@ Reporters who have helped harden the project:
 - **OpenAI Codex security cloud** — automated audit findings, batched into PR `#51` (DNS-rebind, path-traversal, manifest hardening) and PR `#128` (REVISE bundle for partial-fix improvements).
 
 (Add yourself here when you report a valid issue, or ask us to credit you.)
+
+## Terms and Abbreviations
+
+- `argv` — the program-arguments array a process sees on launch; visible to other local users via `ps`/`wmic` and persisted in shell history.
+- `CSRF` — Cross-Site Request Forgery; a browser-driven attack that uses a victim's authenticated session to trigger unwanted actions.
+- `DNS-rebinding` — an attack that binds an attacker-controlled hostname to `127.0.0.1` so a victim's browser sends loopback requests on the attacker's behalf.
+- `DoS` — Denial of Service; making a service unavailable, usually via resource exhaustion.
+- `EvalSymlinks` — Go's `filepath.EvalSymlinks`, which resolves symlinks at every path component to the real on-disk path.
+- `IPv4-mapped IPv6 loopback` — IPv6 addresses of the form `::ffff:127.0.0.1` that represent the IPv4 loopback inside an IPv6 socket.
+- `loopback` — network traffic that does not leave the local machine (`127.0.0.0/8`, `::1`).
+- `MCP` — Model Context Protocol; the protocol this hub multiplexes between clients and servers.
+- `pidport` — the per-instance lock+metadata file that records a running `mcphub gui` process's PID and bound port.
+- `RCE` — Remote Code Execution; a vulnerability that lets an attacker run arbitrary code on a target.
+- `S1`–`S4` — section labels in the 2026-05-04 security audit (PR `#51`): `S1` DNS-rebind/Host gate, `S2` daemon HTTP loopback guard, `S3` subprocess path traversal, `S4` manifest name confused-deputy guard.
+- `Sec-Fetch-Site` — a browser-emitted request header indicating whether a request is same-origin or cross-site.
+- `SSE` — Server-Sent Events; a long-lived HTTP event stream the GUI uses for live updates.

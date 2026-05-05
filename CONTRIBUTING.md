@@ -59,3 +59,15 @@ If you are unsure whether your change touches one of these surfaces, ask before 
 Contributions are accepted under the [Mozilla Public License 2.0](LICENSE) (the project license). By submitting a PR you affirm that you have the right to license your contribution under MPL-2.0.
 
 For commercial licensing inquiries, see the README.
+
+## Terms and Abbreviations
+
+- `Codex bot` — OpenAI Codex Cloud's automated PR review agent; comments on PR open with security findings.
+- `codex exec -c model_reasoning_effort=xhigh` — invocation of OpenAI Codex CLI in "extra-high reasoning" mode used by maintainers for security-sensitive review.
+- `CSRF` — Cross-Site Request Forgery; an attack class the GUI's same-origin gate defends against.
+- `DNS-rebinding` — an attack that binds an attacker hostname to `127.0.0.1`; the GUI's Host-allowlist defends against it.
+- `E2E` — end-to-end test; here, the Playwright suite under `internal/gui/e2e/`.
+- `MPL-2.0` — Mozilla Public License 2.0; the project's open-source license.
+- `MCP` — Model Context Protocol.
+- `staticcheck` — the static analyzer surfaced by `go vet ./...` in this project.
+- `xhigh` — short for "extra-high reasoning effort", a Codex CLI mode used for second-opinion review.
