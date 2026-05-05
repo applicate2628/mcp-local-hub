@@ -267,5 +267,11 @@ func TestManifestCRUD_RejectsPathTraversalNames(t *testing.T) {
 		if _, err := a.ManifestGet(bad); err == nil {
 			t.Errorf("ManifestGet(%q): expected rejection, got nil", bad)
 		}
+		if _, err := a.ManifestGetIn(tmp, bad); err == nil {
+			t.Errorf("ManifestGetIn(_, %q): expected rejection, got nil", bad)
+		}
+		if _, _, err := a.ManifestGetInWithHash(tmp, bad); err == nil {
+			t.Errorf("ManifestGetInWithHash(_, %q): expected rejection, got nil", bad)
+		}
 	}
 }
