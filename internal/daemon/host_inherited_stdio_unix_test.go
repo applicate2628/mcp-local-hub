@@ -1,0 +1,94 @@
+//go:build linux || darwin
+
+// Regression test for Codex security finding 63b417d2 (medium severity).
+//
+// PR #117 (commit 68791c9) fixed a child-exit response race by gating
+// cmd.Wait() on stdout/stderr scanner EOF via a pipesDrained WaitGroup.
+// That coupling was wrong: when an immediate stdio child exits but
+// leaves a descendant that inherited the stdout/stderr pipes (the
+// classic POSIX `( sleep 60 ) & exit 0` pattern), the scanners never
+// see EOF, so:
+//
+//   - cmd.Wait() never returns
+//   - childExited never closes
+//   - the outer daemon supervisor never sees ChildExited()
+//   - scheduler restart-on-failure is suppressed
+//   - Stop() hangs on h.wg.Wait()
+//
+// The fix in this commit decouples childExited from pipe EOF (cmd.Wait
+// runs immediately in the watcher goroutine) and bounds h.wg.Wait()
+// inside Stop() so reparented descendants holding inherited pipes
+// open cannot wedge shutdown.
+//
+// Test approach: spawn /bin/sh that backgrounds a long sleep into the
+// inherited fds, then exits the immediate shell. Assert ChildExited()
+// closes within 2s (proves the lifecycle decoupling) and Stop() returns
+// within ~6s total (within the bounded h.wg.Wait timeout). Clean up
+// the descendant via its written PID so the test does not leak
+// processes.
+
+package daemon
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"testing"
+	"time"
+)
+
+func TestStdioHostInheritedStdioDescendantDoesNotWedgeChildExited(t *testing.T) {
+	tmp := t.TempDir()
+	pidFile := filepath.Join(tmp, "descendant.pid")
+
+	// Background `sleep 60` keeps the inherited stdout/stderr fds open
+	// after the immediate shell exits. /bin/sh exits with 0 promptly.
+	script := `( sleep 60 ) >/dev/null 2>&1 & echo $! > ` + pidFile + `; exit 0`
+
+	h, err := NewStdioHost(HostConfig{
+		Command: "/bin/sh",
+		Args:    []string{"-c", script},
+	})
+	if err != nil {
+		t.Fatalf("NewStdioHost: %v", err)
+	}
+	if err := h.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		// Always clean up the inherited-stdio descendant so the test
+		// does not leak processes across the run.
+		if data, err := os.ReadFile(pidFile); err == nil {
+			if pid, perr := strconv.Atoi(strings.TrimSpace(string(data))); perr == nil {
+				_ = syscall.Kill(pid, syscall.SIGKILL)
+			}
+		}
+	})
+
+	// ChildExited MUST close within a short window after the immediate
+	// child exited. Before the fix, this select blocked indefinitely
+	// because the watcher goroutine waited on pipe EOF that never
+	// arrived (the descendant kept the fds open).
+	select {
+	case <-h.ChildExited():
+	case <-time.After(2 * time.Second):
+		t.Fatalf("ChildExited() did not close within 2s — supervisor would never restart this daemon")
+	}
+
+	// Stop must also return within a bounded window. The fix added a
+	// 5s cap on h.wg.Wait() inside Stop, so even with the descendant
+	// holding pipes open, Stop returns by ~5-6s wall time.
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- h.Stop() }()
+	select {
+	case err := <-stopDone:
+		if err != nil {
+			t.Fatalf("Stop returned error: %v", err)
+		}
+	case <-time.After(8 * time.Second):
+		t.Fatalf("Stop did not return within 8s — Stop would hang the outer daemon shutdown path")
+	}
+}

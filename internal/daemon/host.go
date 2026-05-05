@@ -200,13 +200,10 @@ func (h *StdioHost) Start(ctx context.Context) error {
 	// `mcphub logs <server>` shows actual subprocess output instead of
 	// "(no output yet)" for stdio-bridge daemons.
 	stderrSink := h.openStderrSink()
-	var pipesDrained sync.WaitGroup
-	pipesDrained.Add(2)
 
 	h.wg.Add(1)
 	go func() {
 		defer h.wg.Done()
-		defer pipesDrained.Done()
 		s := bufio.NewScanner(stderr)
 		s.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for s.Scan() {
@@ -225,16 +222,18 @@ func (h *StdioHost) Start(ctx context.Context) error {
 	// Reader goroutine: pipes every stdout line to testStdout (and, in later
 	// tasks, to the ID-routing map for HTTP response delivery).
 	h.wg.Add(1)
-	go func() {
-		defer pipesDrained.Done()
-		h.readStdoutLoop()
-	}()
+	go h.readStdoutLoop()
 
 	// Watcher goroutine: owns cmd.Wait() exclusively so no other call site
-	// double-waits. Wait is deferred until after both stdout/stderr readers
-	// return so the pipes are fully drained before Wait closes them.
+	// double-waits. childExited must reflect the immediate child process
+	// exit — NOT pipe EOF — so the outer daemon supervisor can detect
+	// child death and trigger scheduler restart even when a descendant
+	// inherited stdout/stderr fds and is keeping them open. Codex finding
+	// 63b417d2: the prior pipesDrained.Wait() before cmd.Wait() coupled
+	// liveness to descendant-pipe lifetime, suppressing restart and hanging
+	// Stop. Pipes are drained separately by reader goroutines tracked by
+	// h.wg, which Stop bounds with its own timeout.
 	go func() {
-		pipesDrained.Wait()
 		_ = cmd.Wait()
 		close(h.childExited)
 	}()
@@ -289,15 +288,35 @@ func (h *StdioHost) Stop() error {
 	case <-h.childExited:
 	case <-time.After(5 * time.Second):
 	}
-	h.wg.Wait()
+	// Release the Job Object handle BEFORE waiting on reader goroutines.
+	// On Windows, KILL_ON_JOB_CLOSE then terminates any descendants that
+	// inherited stdout/stderr fds, which unblocks the readers and lets
+	// h.wg.Wait() return. Doing this AFTER h.wg.Wait() created the
+	// deadlock Codex finding 63b417d2 reported: a reparented descendant
+	// holding the pipes open made the readers wait forever, and the job
+	// object was never closed because we were stuck.
+	if h.job != nil {
+		_ = h.job.Close()
+		h.job = nil
+	}
+	// Bound the reader-goroutine wait. POSIX has no equivalent of the
+	// Windows Job Object kill-on-close path, so an inherited-stdio
+	// descendant on Linux/macOS may still block reader EOF after the
+	// watcher saw cmd.Wait() return. Cap the wait so Stop cannot hang
+	// indefinitely; the outer daemon will exit the host process anyway,
+	// and orphaned descendants are reparented to PID 1 / launchd /
+	// systemd which will reap them on session teardown.
+	wgDone := make(chan struct{})
+	go func() {
+		h.wg.Wait()
+		close(wgDone)
+	}()
+	select {
+	case <-wgDone:
+	case <-time.After(5 * time.Second):
+	}
 	if h.logFile != nil {
 		_ = h.logFile.Close()
-	}
-	if h.job != nil {
-		// Final handle release. killProcessTree above already terminated
-		// in-job processes; closing here lets the kernel reclaim the job
-		// object resource. No-op on POSIX.
-		_ = h.job.Close()
 	}
 	return nil
 }
@@ -441,9 +460,18 @@ func (h *StdioHost) readStdoutLoop() {
 	defer h.wg.Done()
 	for h.stdoutScan.Scan() {
 		line := append([]byte(nil), h.stdoutScan.Bytes()...)
-		// Try to parse id and route to pending request.
+		// Peek both id and method. The id alone is not enough to
+		// classify a message as a stale response: JSON-RPC requests
+		// (responses' opposite) carry an id AND a method, and MCP
+		// servers can legitimately send server-initiated requests
+		// (e.g. `sampling/createMessage`) with numeric ids. Codex
+		// finding 6290ce6e: a method-blind id filter would suppress
+		// those server-initiated requests as if they were stale
+		// responses. Only the (id, no method) shape is unambiguously
+		// a response and safe to drop.
 		var peek struct {
-			ID json.RawMessage `json:"id"`
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
 		}
 		if err := json.Unmarshal(line, &peek); err == nil && len(peek.ID) > 0 {
 			var id int64
@@ -458,14 +486,28 @@ func (h *StdioHost) readStdoutLoop() {
 					}
 					continue
 				}
-				// Untracked response id (e.g. a late reply after caller timeout).
-				// Do not broadcast this over SSE; it may belong to a different
-				// canceled client and could leak response contents.
-				select {
-				case h.testStdout <- line:
-				default:
+				if peek.Method == "" {
+					// Untracked response id (e.g. a late reply
+					// after caller timeout). Do not propagate
+					// further; it may belong to a different
+					// canceled client and could leak response
+					// contents. testStdout-only retains
+					// observability for unit tests.
+					select {
+					case h.testStdout <- line:
+					default:
+					}
+					continue
 				}
-				continue
+				// id + method = server-initiated request. Fall
+				// through to the testStdout fallback so future
+				// SSE work can pick it up uniformly with
+				// notifications. SSE fan-out from this loop was
+				// removed in PR #64 because unrouted output
+				// cannot be attributed to a specific HTTP caller
+				// safely; if/when SSE broadcast is reintroduced
+				// (separately threat-modeled), it should
+				// branch from here rather than from this filter.
 			}
 		}
 		// Also keep the testStdout path for tests that watch raw output.
