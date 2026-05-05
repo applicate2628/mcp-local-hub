@@ -61,7 +61,19 @@ func embeddedManifestNames() []string {
 // loadManifestYAMLEmbedFirst returns the raw YAML bytes for the named
 // server. Consults the embed FS first; on miss (server not in the
 // binary's shipped set), falls back to the on-disk dev-checkout path.
+//
+// checkManifestName runs at the loader boundary so a bad server name
+// cannot drive a pre-validation filesystem probe (existence check,
+// special-file open, etc.) via callers that validated only after the
+// raw read. Production wrappers ManifestGet/ManifestEdit/etc. already
+// gate on the same regex, so the redundant call here is cheap; the
+// guard exists for the direct callers (install, uninstall, scan,
+// status_enrich, secrets_scan, migrate) that compose `name` straight
+// into the loader without their own pre-load check.
 func loadManifestYAMLEmbedFirst(name string) ([]byte, error) {
+	if err := checkManifestName(name); err != nil {
+		return nil, err
+	}
 	if dir := manifestDirForTests(); dir != "" {
 		// Test-only override: skip the embed FS entirely.
 		return os.ReadFile(filepath.Join(dir, name, "manifest.yaml"))
