@@ -63,3 +63,33 @@ func TestScan_AllowsSameOrigin(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 }
+
+func TestScan_RedactsRawClientConfig(t *testing.T) {
+	s := NewServer(Config{})
+	s.scanner = fakeScanner{result: &api.ScanResult{Entries: []api.ScanEntry{{
+		Name: "demo",
+		ClientPresence: map[string]api.ClientEntry{
+			"claude-code": {
+				Transport: "stdio",
+				Endpoint:  "node",
+				Raw: map[string]any{
+					"env": map[string]any{"OPENAI_API_KEY": "sk-secret"},
+				},
+			},
+		},
+	}}}}
+	req := httptest.NewRequest(http.MethodGet, "/api/scan", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var out api.ScanResult
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got := out.Entries[0].ClientPresence["claude-code"].Raw; got != nil {
+		t.Fatalf("raw should be redacted, got: %#v", got)
+	}
+}
