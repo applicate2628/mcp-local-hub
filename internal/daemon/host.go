@@ -99,6 +99,21 @@ const maxMCPPostBodyBytes int64 = 1 << 20 // 1 MiB
 // concurrent requests per client, so 128 is a generous bound.
 const maxPendingRequests = 128
 
+// pipeDrainTimeout caps how long the watcher goroutine waits for
+// stdout/stderr scanners to drain to EOF before calling cmd.Wait.
+//
+// - Fast-exiting children: scanners reach EOF within milliseconds; the
+//   wait is essentially a no-op and Go's StdoutPipe/StderrPipe contract
+//   is preserved (no truncation of the final response).
+// - Inherited-stdio descendants (Codex Cloud finding 63b417d2): a
+//   descendant that inherited stdout/stderr can keep pipes open after
+//   the immediate child exits. Without a deadline, the watcher would
+//   never call cmd.Wait, childExited would never close, the supervisor
+//   would never trigger scheduler restart, and Stop would wedge.
+// - Five seconds is enough for legitimate slow-flush patterns and
+//   short enough to fail fast when descendants are reparenting.
+const pipeDrainTimeout = 5 * time.Second
+
 // requireJSONContentType returns true if Content-Type parses as exactly
 // `application/json` (case-insensitive media type, parameters allowed).
 // Empty Content-Type is rejected — MCP POST clients are required to set
@@ -200,10 +215,13 @@ func (h *StdioHost) Start(ctx context.Context) error {
 	// `mcphub logs <server>` shows actual subprocess output instead of
 	// "(no output yet)" for stdio-bridge daemons.
 	stderrSink := h.openStderrSink()
+	var pipesDrained sync.WaitGroup
+	pipesDrained.Add(2)
 
 	h.wg.Add(1)
 	go func() {
 		defer h.wg.Done()
+		defer pipesDrained.Done()
 		s := bufio.NewScanner(stderr)
 		s.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for s.Scan() {
@@ -222,18 +240,54 @@ func (h *StdioHost) Start(ctx context.Context) error {
 	// Reader goroutine: pipes every stdout line to testStdout (and, in later
 	// tasks, to the ID-routing map for HTTP response delivery).
 	h.wg.Add(1)
-	go h.readStdoutLoop()
-
-	// Watcher goroutine: owns cmd.Wait() exclusively so no other call site
-	// double-waits. childExited must reflect the immediate child process
-	// exit — NOT pipe EOF — so the outer daemon supervisor can detect
-	// child death and trigger scheduler restart even when a descendant
-	// inherited stdout/stderr fds and is keeping them open. Codex finding
-	// 63b417d2: the prior pipesDrained.Wait() before cmd.Wait() coupled
-	// liveness to descendant-pipe lifetime, suppressing restart and hanging
-	// Stop. Pipes are drained separately by reader goroutines tracked by
-	// h.wg, which Stop bounds with its own timeout.
 	go func() {
+		defer pipesDrained.Done()
+		h.readStdoutLoop()
+	}()
+
+	// Watcher goroutine: owns cmd.Wait() exclusively so no other call
+	// site double-waits.
+	//
+	// Two competing constraints:
+	//
+	// 1. Go's StdoutPipe/StderrPipe contract: cmd.Wait closes the pipes
+	//    once the process exits, so calling Wait before the readers
+	//    have drained to EOF can truncate the final buffered output.
+	//    Fast-exiting children (e.g. a shell that writes one JSON line
+	//    and exits) lose their last response otherwise.
+	//
+	// 2. Codex Cloud finding 63b417d2: gating Wait on unconditional
+	//    pipesDrained.Wait() wedges shutdown when a descendant inherits
+	//    the stdout/stderr fds and keeps them open after the immediate
+	//    child has exited (`( sleep 60 ) & exit 0` pattern). The
+	//    supervisor never sees ChildExited and Stop hangs.
+	//
+	// Reconcile: wait up to a bounded window for pipes to drain; fall
+	// through to cmd.Wait once the deadline expires. Fast-exit children
+	// drain in milliseconds and never hit the deadline; inherited-stdio
+	// descendants give up after `pipeDrainTimeout` so liveness still
+	// fires. Lost output in the deadline-hit case is unavoidable on
+	// POSIX without proc/pidfd integration.
+	go func() {
+		drained := make(chan struct{})
+		go func() {
+			pipesDrained.Wait()
+			close(drained)
+		}()
+		select {
+		case <-drained:
+			// Normal termination: scanners reached EOF.
+		case <-h.done:
+			// Stop() was called. Don't wait the full
+			// pipeDrainTimeout — the kill-and-readers path is
+			// driving exit, and we want childExited to close
+			// quickly so blocked HTTP handlers and Stop's own
+			// wait can return.
+		case <-time.After(pipeDrainTimeout):
+			fmt.Fprintf(os.Stderr,
+				"warn: stdio child exited but stdout/stderr scanners did not reach EOF within %s; a descendant likely inherited the pipes — proceeding so daemon liveness is reported\n",
+				pipeDrainTimeout)
+		}
 		_ = cmd.Wait()
 		close(h.childExited)
 	}()
@@ -279,14 +333,15 @@ func (h *StdioHost) Stop() error {
 			_ = killProcessTree(h.cmd.Process.Pid)
 		}
 	}
-	// Wait for the watcher goroutine to observe cmd.Wait() returning. This
-	// is bounded: either the child was already dead (immediate) or Kill()
-	// just terminated it (milliseconds). We still cap the wait so a truly
-	// wedged process (e.g. unkillable kernel state on Windows) cannot hang
-	// Stop forever — the outer daemon will exit the host process anyway.
+	// Wait for the watcher goroutine to observe cmd.Wait() returning.
+	// Capped at 1s: h.done was just closed which unblocks the watcher's
+	// pipe-drain select immediately, and Kill() above terminates the
+	// child synchronously on Windows / via SIGTERM on POSIX. A 1s cap
+	// is enough for the watcher's cmd.Wait reap and short enough to
+	// stay under the 2s test budget.
 	select {
 	case <-h.childExited:
-	case <-time.After(5 * time.Second):
+	case <-time.After(1 * time.Second):
 	}
 	// Release the Job Object handle BEFORE waiting on reader goroutines.
 	// On Windows, KILL_ON_JOB_CLOSE then terminates any descendants that
@@ -302,10 +357,10 @@ func (h *StdioHost) Stop() error {
 	// Bound the reader-goroutine wait. POSIX has no equivalent of the
 	// Windows Job Object kill-on-close path, so an inherited-stdio
 	// descendant on Linux/macOS may still block reader EOF after the
-	// watcher saw cmd.Wait() return. Cap the wait so Stop cannot hang
-	// indefinitely; the outer daemon will exit the host process anyway,
-	// and orphaned descendants are reparented to PID 1 / launchd /
-	// systemd which will reap them on session teardown.
+	// watcher saw cmd.Wait() return. Cap is short — the outer daemon
+	// will exit the host process anyway, and orphaned descendants are
+	// reparented to PID 1 / launchd / systemd which will reap them on
+	// session teardown.
 	wgDone := make(chan struct{})
 	go func() {
 		h.wg.Wait()
@@ -313,7 +368,7 @@ func (h *StdioHost) Stop() error {
 	}()
 	select {
 	case <-wgDone:
-	case <-time.After(5 * time.Second):
+	case <-time.After(1 * time.Second):
 	}
 	if h.logFile != nil {
 		_ = h.logFile.Close()
