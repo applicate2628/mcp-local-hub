@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 
 	"mcp-local-hub/internal/api"
@@ -42,6 +43,9 @@ Pair with 'stop --all' for a nuclear reset:
 
 See also: stop, restart, status.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if !confirm && !dryRun {
+				return errors.New("refusing to kill without --confirm (remove --dry-run=false or pass --confirm)")
+			}
 			if confirm {
 				dryRun = false
 			}
@@ -91,7 +95,7 @@ See also: stop, restart, status.`,
 		},
 	}
 	c.Flags().BoolVar(&dryRun, "dry-run", true, "report only, do not kill (default)")
-	c.Flags().BoolVar(&confirm, "confirm", false, "actually kill the orphans (overrides --dry-run)")
+	c.Flags().BoolVar(&confirm, "confirm", false, "actually kill the orphans (required for kill mode)")
 	c.Flags().StringVar(&server, "server", "", "limit scan to this server's pattern (default: all manifests)")
 	c.Flags().Int64Var(&minAge, "min-age-sec", 60, "ignore processes younger than this (seconds)")
 	return c
