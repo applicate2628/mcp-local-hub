@@ -64,6 +64,22 @@ func TestManifestCreateWritesYAML(t *testing.T) {
 	}
 }
 
+func TestManifestCreateRejectsYAMLNameMismatch(t *testing.T) {
+	tmp := t.TempDir()
+	a := NewAPI()
+	body := "name: other\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9202\nclient_bindings: []\nweekly_refresh: false\n"
+	err := a.ManifestCreateIn(tmp, "newsrv", body)
+	if err == nil {
+		t.Fatal("expected YAML name mismatch error, got nil")
+	}
+	if !strings.Contains(err.Error(), `manifest yaml name "other" must match requested server "newsrv"`) {
+		t.Fatalf("error = %v, want YAML/requested name mismatch", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(tmp, "newsrv", "manifest.yaml")); !os.IsNotExist(statErr) {
+		t.Fatalf("mismatched manifest was written, stat err = %v", statErr)
+	}
+}
+
 func TestManifestDeleteRemovesDir(t *testing.T) {
 	tmp := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(tmp, "doomed"), 0755)
@@ -182,6 +198,29 @@ func TestManifestEditIn_AcceptsMatchingHash_ReturnsNewHash(t *testing.T) {
 	}
 }
 
+func TestManifestEditIn_RejectsYAMLNameMismatch(t *testing.T) {
+	dir := t.TempDir()
+	a := &API{}
+	name := "demo"
+	orig := "name: demo\nkind: global\ntransport: stdio-bridge\ncommand: npx\ndaemons:\n  - name: default\n    port: 9221\n"
+	if err := a.ManifestCreateIn(dir, name, orig); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	_, hash, _ := a.ManifestGetInWithHash(dir, name)
+	mismatched := "name: other\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9221\n"
+	_, err := a.ManifestEditInWithHash(dir, name, mismatched, hash)
+	if err == nil {
+		t.Fatal("expected YAML name mismatch error, got nil")
+	}
+	if !strings.Contains(err.Error(), `manifest yaml name "other" must match requested server "demo"`) {
+		t.Fatalf("error = %v, want YAML/requested name mismatch", err)
+	}
+	got, _, _ := a.ManifestGetInWithHash(dir, name)
+	if got != orig {
+		t.Fatalf("target yaml changed on rejected mismatch: %q", got)
+	}
+}
+
 func TestManifestEditIn_EmptyExpectedHash_SkipsCheck(t *testing.T) {
 	dir := t.TempDir()
 	a := &API{}
@@ -233,7 +272,9 @@ func TestManifestEditIn_AtomicWrite_TargetUnchangedOnFailure(t *testing.T) {
 // "../escaped", or an absolute path could escape the manifest root —
 // for ManifestDeleteIn that would have meant os.RemoveAll on an
 // arbitrary directory. The name validator rejects anything outside
-// [a-z0-9][a-z0-9._-]*.
+// [a-z0-9][a-z0-9._-]*. It also rejects reserved Windows device names
+// (CON/PRN/AUX/NUL/COMn/LPTn, case-insensitive, with-or-without
+// extension) and trailing-dot/space aliases that Windows would rewrite.
 func TestManifestCRUD_RejectsPathTraversalNames(t *testing.T) {
 	a := NewAPI()
 	tmp := t.TempDir()
@@ -252,6 +293,28 @@ func TestManifestCRUD_RejectsPathTraversalNames(t *testing.T) {
 		"",
 		" space",
 		"name with spaces",
+		// Reserved Windows device names — bare. Lower-case is what
+		// validManifestName allows; CON/Con etc. are already rejected
+		// by the regex's charset, but the new rejector defends in depth
+		// at the post-regex layer.
+		"con",
+		"prn",
+		"aux",
+		"nul",
+		"com1",
+		"com9",
+		"lpt1",
+		"lpt9",
+		// Reserved-with-extension: Windows treats `nul.yaml` as the
+		// nul device too (extension is immaterial for these names).
+		"con.txt",
+		"nul.yaml",
+		"aux.json",
+		"lpt1.json",
+		"com1.dat",
+		// Trailing-dot alias: `foo.` is a regex-valid name but Windows
+		// rewrites it to `foo`, leading to ambiguous targets.
+		"foo.",
 	}
 
 	for _, bad := range cases {
@@ -267,11 +330,107 @@ func TestManifestCRUD_RejectsPathTraversalNames(t *testing.T) {
 		if _, err := a.ManifestGet(bad); err == nil {
 			t.Errorf("ManifestGet(%q): expected rejection, got nil", bad)
 		}
+		// ManifestGetIn / ManifestGetInWithHash are reachable directly
+		// (not just via ManifestGet's wrapper), so they MUST also reject
+		// bad names. Otherwise a future caller bypassing the production
+		// wrapper would raw-join name into the path and read whatever
+		// ../escape resolves to.
 		if _, err := a.ManifestGetIn(tmp, bad); err == nil {
 			t.Errorf("ManifestGetIn(_, %q): expected rejection, got nil", bad)
 		}
 		if _, _, err := a.ManifestGetInWithHash(tmp, bad); err == nil {
 			t.Errorf("ManifestGetInWithHash(_, %q): expected rejection, got nil", bad)
 		}
+	}
+}
+
+// TestCheckManifestName_AcceptsLegitNamesWithReservedPrefix asserts
+// that the new Windows-reserved-name layer does NOT have a
+// false-positive on legitimate names whose lower-case form merely
+// STARTS with a reserved device name (e.g. `confidence` starts with
+// `con`, `nullptr-helper` starts with `nul`). The rule is exact match
+// of the part-before-first-dot, not a prefix.
+func TestCheckManifestName_AcceptsLegitNamesWithReservedPrefix(t *testing.T) {
+	cases := []string{
+		"confidence",
+		"console-bridge",
+		"nullptr-helper",
+		"auxiliary",
+		"prndaemon",
+		"com10", // not in [com0..com9]
+		"lpt10",
+		// The reserved-name rule is exact-match-on-base; a legit
+		// name like `console.txt` (regex-valid) must also pass.
+		"console.txt",
+	}
+	for _, n := range cases {
+		if err := checkManifestName(n); err != nil {
+			t.Errorf("checkManifestName(%q): expected ok, got %v", n, err)
+		}
+	}
+}
+
+// TestRejectWindowsReservedManifestName_TableDriven exercises the
+// helper directly — covers the case-insensitive contract (the helper
+// must work even when called with mixed-case input that bypassed the
+// regex for some reason) and the trailing-space variant that the
+// regex already rejects on the wrapper side.
+func TestRejectWindowsReservedManifestName_TableDriven(t *testing.T) {
+	bad := []string{
+		"con", "CON", "Con",
+		"prn", "aux", "nul",
+		"com1", "COM9",
+		"lpt1", "LPT9",
+		"con.txt", "CON.TXT",
+		"nul.yaml",
+		"aux.json",
+		"foo.",
+		"foo ",
+	}
+	for _, n := range bad {
+		if err := rejectWindowsReservedManifestName(n); err == nil {
+			t.Errorf("rejectWindowsReservedManifestName(%q): expected rejection, got nil", n)
+		}
+	}
+	good := []string{
+		"",
+		"foo",
+		"confidence",
+		"console-bridge",
+		"nullptr",
+		"com10",
+		"lpt10",
+		"my-server",
+	}
+	for _, n := range good {
+		if err := rejectWindowsReservedManifestName(n); err != nil {
+			t.Errorf("rejectWindowsReservedManifestName(%q): expected ok, got %v", n, err)
+		}
+	}
+}
+
+// TestManifestGetIn_RejectsPathTraversal asserts the entry-point guard
+// in detail: error matches the same "manifest name" wording the rest
+// of the *In family produces, so an attacker-controlled name returns
+// the same error envelope regardless of the API surface used.
+func TestManifestGetIn_RejectsPathTraversal(t *testing.T) {
+	tmp := t.TempDir()
+	a := NewAPI()
+
+	bad := "../escape"
+	_, err := a.ManifestGetIn(tmp, bad)
+	if err == nil {
+		t.Fatalf("ManifestGetIn(_, %q): expected rejection, got nil", bad)
+	}
+	if !strings.Contains(err.Error(), "manifest name") {
+		t.Errorf("ManifestGetIn error = %v, want 'manifest name' wording", err)
+	}
+
+	_, _, err = a.ManifestGetInWithHash(tmp, bad)
+	if err == nil {
+		t.Fatalf("ManifestGetInWithHash(_, %q): expected rejection, got nil", bad)
+	}
+	if !strings.Contains(err.Error(), "manifest name") {
+		t.Errorf("ManifestGetInWithHash error = %v, want 'manifest name' wording", err)
 	}
 }

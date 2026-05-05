@@ -12,7 +12,21 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const maxGodboltResponseBytes int64 = 10 * 1024 * 1024
+// Keep the raw Godbolt body below the StdioHost 1 MiB stdout scanner cap
+// (internal/daemon/host.go:188). The body is embedded as TextContent.Text
+// inside a JSON-RPC envelope, so JSON string escaping (quotes, backslashes,
+// newlines) and the envelope itself consume additional line budget on top
+// of the raw bytes — a worst-case escape-heavy payload near the scanner
+// limit silently terminates readStdoutLoop (host.go:323-364 does not handle
+// scanner.Err()) and wedges every future request on this StdioHost.
+//
+// 480 KiB leaves practical headroom for envelope + ~2x JSON escaping. Live
+// Godbolt resource sizes are far below this (languages ~6.6 KiB, compilers/c++
+// ~146 KiB, libraries/c++ ~213 KiB), and the workflow doc already points
+// heavy disassembly to `perftools.llvm_objdump` which has its own 512 KiB
+// cap (internal/perftools/llvmobjdump.go). Matches perftools convention
+// "tool body cap < scanner cap" from commit f64a3f2.
+const maxGodboltResponseBytes int64 = 480 * 1024
 
 // registerResources attaches the six read-only resources (five HTTP GET
 // endpoints plus one static version resource) to the MCP server. Called

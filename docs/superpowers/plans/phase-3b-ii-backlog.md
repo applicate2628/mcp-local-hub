@@ -130,6 +130,24 @@ development ideas. The durable intake note is
 | §2.1 #3 | Create manifest from unknown stdio — "I have cursor-mcp-fetch configured as stdio, wrap it into a hub daemon" | A1 + A2 + B2 |
 | §2.1 #7 | Backup management UX — list + restore + delete timestamped backups, keep-N enforcement UI | A4 Settings screen |
 
+### S. Security hardening (audit 2026-05-04)
+
+**Status:** four primary items plus Codex-xhigh follow-up fixes implemented in the working tree as of 2026-05-04 and bundled into a single PR (`fix/security-2026-05-04-audit`). They were surfaced during a security-focused audit that compared the GUI/daemon HTTP surface, manifest loading paths, and external-tool subprocess invocation against typical local-binding RCE and DNS-rebinding attack patterns. A second Codex review at xhigh reasoning effort surfaced two additional critical/important gaps that low-effort review missed (S3a extra_args bypass on `llvm-objdump`, S3b "IWYU not actually hardened despite the prior S3 row claim"). All gaps are closed in the same PR. Before commit, run the full Go suite + frontend tests to confirm no behavior regression.
+
+| # | Item | Files | Rationale |
+|---|---|---|---|
+| S1 | **DNS-rebinding & Host-allowlist gate on GUI** | `internal/gui/csrf.go`, `internal/gui/server.go`, `internal/gui/csrf_test.go`, `internal/gui/frontend/vite.config.ts` | Wraps the entire mux in a new `requireAllowedHost` middleware: any request whose `Host` header is not `127.0.0.1:<port>` or `localhost:<port>` returns `403 HOST_NOT_ALLOWED` before route match. Tightens `requireSameOrigin` so `Origin` and `Sec-Fetch-Site` are both honored when present (no OR fallback). New `allowedOrigin()` parses origin via `net/url` and rejects auth/query/fragment/non-root path. Closes browser-driven DNS-rebinding where `evil.com → 127.0.0.1`. **S1b (vite-proxy fix):** `vite.config.ts` now sets `changeOrigin: true` AND uses a `configure` hook to rewrite `Origin` to the backend's loopback origin so `npm run dev` keeps working against the strict CSRF guard. Backend regression test in `csrf_test.go` asserts that the bare `changeOrigin:true` form (Host rewritten, Origin still `localhost:5173`) STILL gets rejected, so a future proxy edit that drops the hook fails closed instead of silently bypassing CSRF. |
+| S2 | **Loopback guard on daemon HTTP endpoints** | `internal/daemon/loopback_guard.go` (new), `internal/daemon/host.go`, `internal/daemon/lazy_proxy.go`, `internal/daemon/host_test.go`, `internal/daemon/lazy_proxy_test.go` | Same Host+Origin+Sec-Fetch-Site triad applied to `StdioHost.HTTPHandler` (`/mcp` POST stdio bridge) and `LazyProxy.handleMCP`. Uses `net/netip.IsLoopback` for strict loopback classification (catches `127.0.0.0/8`, IPv4-mapped IPv6 loopback, etc.). |
+| S3 | **Path-traversal guard for `llvm-objdump` AND `iwyu`** | `internal/perftools/llvmobjdump.go`, `internal/perftools/llvmobjdump_test.go` (new), `internal/perftools/handlers_test.go`, `internal/perftools/iwyu.go`, `internal/perftools/iwyu_test.go` (new), `internal/perftools/path_guard.go` (new), `internal/perftools/path_guard_test.go` (new), `internal/perftools/server.go`, `internal/perftools/workflow.go` | Adds required `project_root` parameter; `validateBinaryInsideRoot` (shared helper) resolves both root and target via double `filepath.EvalSymlinks` and asserts the target's real path is inside the root real path. Filesystem root rejected as project boundary. Closes "binary is symlink to /etc/passwd" disassembly leak. **S3b (Codex-xhigh fix):** Same hardening NOW ACTUALLY applied to `iwyu` — its file path is validated identically and `project_root` is required by both runtime and `InputSchema.required`. **S3a (Codex-xhigh fix):** `validatePerfToolExtraArgs` rejects entries that don't start with `-` or `--`, including `@FILE` response-file directives and positional input files. This closes the "extra_args=['/etc/passwd']" or "extra_args=['@evil']" bypass: both tools accept multiple input files positionally, so without the flag-only check, hostile extra_args would be honored alongside the path-validated `binary`/`file` argument. |
+| S4 | **Manifest name confused-deputy guard** | `internal/api/manifest.go`, `internal/api/manifest_test.go`, `internal/api/install.go`, `internal/api/install_test.go`, `internal/api/migrate.go`, `internal/api/register.go`, `internal/api/scan.go`, `internal/api/status_enrich.go` | New `parseManifestForName(name, data)` wrapper validates the requested `name` via `checkManifestName` and asserts the YAML's `m.Name` field equals the requested `name`. Migrated 9 call sites in `install.go` plus migrate/register/scan/status. Closes attack where `servers/wolfram/manifest.yaml` with YAML `name: postgres` would be installed as wolfram but route via postgres port pool. **S4 (Codex-xhigh fix):** `ManifestGetIn` and `ManifestGetInWithHash` now also call `checkManifestName` at entry; production wrappers already gated on it but the `*In` direct callers raw-joined `name` into the path, leaving the guard bypassable from any future direct caller. |
+
+**Pre-commit checklist:**
+
+1. `go test ./... -count=1` — full suite must pass.
+2. `cd internal/gui/frontend && npm run typecheck && npm test -- --run` — manifest-yaml frontend tests cover the same parser path.
+3. `go generate ./internal/gui/...` — bundle regen if `app.js` differs from current `manifest-yaml.ts`.
+4. Single squash-merge PR with title like `security: DNS-rebind guard + manifest name validation + path-traversal hardening`.
+
 ### F. Linux-server readiness (post-Phase 3B-II)
 
 **Strategic goal:** project ships first on Windows desktop, but should be deployable on a **headless Linux server** without rewriting cross-cutting subsystems. Scoped under "server" deliberately — Linux DESKTOP (tray icons, browser focus, GNOME-tray-extension territory) is OUT of scope; on a server these are no-ops by design.
@@ -180,6 +198,54 @@ These remain documented as "Cross-platform tray (Linux/macOS) — explicit non-g
 16. **F7** — CI Linux build matrix (catches regressions before F2-F6 land). See § F.
 17. **F2 + F3** — Linux scheduler (systemd user units) + `mcphub setup --server`. Unlocks `mcphub install` on a Linux server. See § F.
 18. **F4 + F5 + F6** — Headless GUI guards, journald adapter, macOS probe. Polish + Mac dev machine support. See § F.
+
+### G. Gateway/discovery adoption from `ravitemer/mcp-hub` (Phase 3C/3D candidates)
+
+**Status:** intake notes only. NOT scope for Phase 3B-II completion. See [docs/superpowers/plans/2026-05-04-ravitemer-mcp-hub-adoption-proposals.md](2026-05-04-ravitemer-mcp-hub-adoption-proposals.md) for the full audit + Do-Not-Copy list. Items selected here are the additive ones that fit our Windows-first, daemon-isolated model without weakening the existing inspect→validate→dry-run→backup→apply contract.
+
+#### Phase 3B-II hardening tier (low-risk, complements current scope)
+
+| # | Item | Effort | Description |
+|---|---|---|---|
+| G1 | **Feature/readiness matrix in README** | ~half-day | Add a docs table for transports, auth, capabilities, GUI/CLI/API surfaces, tested platforms, and known untested paths. Supports the existing preview-version warning and prevents accidental over-claiming when the README is read out of context. |
+| G2 | **Unified health endpoint** | ~1d | Add one JSON endpoint that combines GUI state, version/build info, daemon status, client routing, ports, process info, workspace registry, and probe summaries. Sits beside existing `/api/ping`, `/api/status`, `/api/version` — does NOT replace them. Useful for ops tooling and the `--force --kill` recovery flow. |
+| G3 | **Capability status display (read-only)** | ~1-2d | In GUI, surface probed tools/resources/prompts per server with timestamps and probe errors. **Tool execution stays disabled or explicitly gated** because tools like shell/debugger/perftools execute local commands (separate threat-model gate required). |
+
+#### Phase 3C tier (opt-in gateway surfaces, additive)
+
+| # | Item | Effort | Description |
+|---|---|---|---|
+| G4 | **Optional unified MCP endpoint (opt-in)** | ~3-5d | Opt-in `Hub` endpoint that lists tools/resources/prompts from selected daemons with stable namespacing (`memory__...`, `godbolt__...`). Per-server endpoints stay the canonical path; the unified endpoint is an aggregator a power-user enables. **Mandatory single endpoint is rejected** — would weaken daemon isolation and migration model. |
+| G5 | **Marketplace/import flow as draft-manifest** | ~2-3d | Browse/import from an MCP registry: inspect metadata + README, generate YAML, validate, dry-run, then install. **Automatic install side effects rejected** — must preserve inspect→validate→dry-run→backup→apply. Cache metadata with explicit freshness; stale data must NOT silently auto-install. |
+
+#### Phase 3C/3D tier (compatibility, more complex)
+
+| # | Item | Effort | Description |
+|---|---|---|---|
+| G6 | **Remote MCP manifests** | ~2-3d | Extend manifest handling for `url + headers + secrets` entries so direct HTTPS servers (e.g., context7) are first-class instead of special-case wiring. Secrets routed through existing encrypted vault. **Remote access as default rejected** — current GUI/daemon surfaces intentionally bind loopback only and have no auth/TLS layer. |
+| G7 | **VS Code workspace + JSON5 import** | ~1-2d | Import `.vscode/mcp.json`, accept both `servers` and `mcpServers`, support placeholders `${env:VAR}`, `${workspaceFolder}`, `${userHome}`, `${pathSeparator}`. **Treat external config as untrusted** — show generated manifest before writing client configs or scheduler tasks. |
+| G8 | **Config watch / dev reload** | ~1d | For development manifests, watch selected files and restart only affected daemons while publishing SSE lifecycle events. Preserves the existing crontab-style + tray-state model; this is dev ergonomics, not production reload. |
+| G9 | **Structured JSON event envelopes** | ~half-day | Add consistent JSON event envelopes for GUI/API lifecycle events and daemon failures while preserving the existing human-readable logs. Useful for the unified health endpoint (G2) and external monitoring. |
+| G10 | **Public contribution/security docs** | ~half-day | Add `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `CHANGELOG.md` before broader publication or commercial outreach. Required by GitHub's community-standards template; aligns with the new MPL-2.0 license commit (`1e00015`). |
+
+#### Explicit "do NOT copy" from `ravitemer/mcp-hub`
+
+These remain rejected and should NOT be reconsidered without a separate threat model:
+
+- **Mandatory single `/mcp` endpoint** — weakens current client-specific daemon isolation + migration model. Single endpoint is OK as opt-in (G4); not as default.
+- **Node/JavaScript runtime architecture** — local project is Go + embedded servers + Windows Task Scheduler + static embedded GUI. Migration cost is unjustified.
+- **Unrestricted `${cmd:...}` placeholders** — RCE surface. If adopted, requires explicit unsafe gate, dry-run display, and audit output.
+- **Automatic marketplace install** — violates inspect→validate→dry-run→backup→apply contract.
+- **Remote access as default** — current GUI binds loopback only; no auth/TLS layer exists. Section S security work specifically tightens loopback assumptions.
+
+#### Sequencing within G
+
+G10 → G1 → G2 → G3 (low-risk Phase 3B-II hardening); then G4/G5 in either order (Phase 3C opt-in surfaces); then G6/G7/G8/G9 as separately threat-modeled (Phase 3C/3D).
+
+#### Client expansion (already shipped 2026-05-04, commit `59dcf12`)
+
+- **Default install set:** `claude-code`, `codex-cli`, `cursor`. Safe first-run write set for `install` and workspace `register`.
+- **Opt-in install set:** `vscode`, `gemini-cli`, `qwen-cli`, `antigravity`. User must pass `--clients ...` or `--all-clients`. Live smoke + import compatibility remain in the release-hardening backlog.
 
 ### Daemon-management hygiene follow-ups (post-A4-a, separate sprint)
 

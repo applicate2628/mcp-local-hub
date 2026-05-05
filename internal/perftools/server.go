@@ -159,7 +159,11 @@ func registerTools(tb *PerfToolbox) {
 			"properties": map[string]any{
 				"binary": map[string]any{
 					"type":        "string",
-					"description": "Path to the binary file (executable, object, shared lib, or archive).",
+					"description": "Path to the binary file (executable, object, shared lib, or archive). Relative paths resolve under project_root; the resolved file must stay inside project_root.",
+				},
+				"project_root": map[string]any{
+					"type":        "string",
+					"description": "Required project/workspace boundary. llvm_objdump refuses binaries that resolve outside this directory.",
 				},
 				"function": map[string]any{
 					"type":        "string",
@@ -180,10 +184,10 @@ func registerTools(tb *PerfToolbox) {
 				"extra_args": map[string]any{
 					"type":        "array",
 					"items":       map[string]any{"type": "string"},
-					"description": "Optional. Additional raw llvm-objdump args (e.g. ['--no-show-raw-insn']).",
+					"description": "Optional. Additional raw llvm-objdump flags (e.g. ['--no-show-raw-insn']). Each entry must start with '-' or '--' — positional input files and @-response-file directives are rejected.",
 				},
 			},
-			"required": []string{"binary"},
+			"required": []string{"binary", "project_root"},
 		},
 	}, tb.llvmObjdumpTool)
 
@@ -198,19 +202,19 @@ func registerTools(tb *PerfToolbox) {
 			"properties": map[string]any{
 				"file": map[string]any{
 					"type":        "string",
-					"description": "Source file path to analyze.",
+					"description": "Source file path to analyze. Relative paths resolve under project_root; the resolved file must stay inside project_root.",
 				},
 				"project_root": map[string]any{
 					"type":        "string",
-					"description": "Optional. Working directory for iwyu; relative #include paths resolve from here.",
+					"description": "Required project/workspace boundary. iwyu refuses files that resolve outside this directory. Working directory for relative #include paths.",
 				},
 				"extra_args": map[string]any{
 					"type":        "array",
 					"items":       map[string]any{"type": "string"},
-					"description": "Optional. Additional raw iwyu args (e.g. ['-std=c++17', '-Iinclude']).",
+					"description": "Optional. Additional raw iwyu flags (e.g. ['-std=c++17', '-Iinclude']). Each entry must start with '-' or '--' — positional input files and @-response-file directives are rejected.",
 				},
 			},
-			"required": []string{"file"},
+			"required": []string{"file", "project_root"},
 		},
 	}, tb.iwyuTool)
 

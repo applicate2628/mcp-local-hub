@@ -129,7 +129,7 @@ func newTestProxyWithCfg(t *testing.T, kind string, f *fakeLifecycle, retryGap, 
 func postRPC(t *testing.T, h http.Handler, method string, id int) *httptest.ResponseRecorder {
 	t.Helper()
 	body := fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":%q,"params":{}}`, id, method)
-	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/mcp", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
@@ -188,6 +188,87 @@ func wrapMissing(cmdName string) error {
 }
 
 // --- tests -----------------------------------------------------------------
+
+func TestLazyProxyLoopbackGuardRejectsHostilePOSTAndSSE(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server"}
+	p, _ := newTestProxy(t, "mcp-language-server", f)
+	handler := p.Handler()
+
+	for _, tc := range []struct {
+		name         string
+		method       string
+		host         string
+		origin       string
+		secFetchSite string
+	}{
+		{
+			name:         "post hostile host same-origin fetch",
+			method:       http.MethodPost,
+			host:         "evil.example",
+			secFetchSite: "same-origin",
+		},
+		{
+			name:         "post hostile origin cross-site fetch",
+			method:       http.MethodPost,
+			origin:       "https://evil.example",
+			secFetchSite: "cross-site",
+		},
+		{
+			name:         "sse hostile host same-origin fetch",
+			method:       http.MethodGet,
+			host:         "evil.example",
+			secFetchSite: "same-origin",
+		},
+		{
+			name:         "sse hostile origin cross-site fetch",
+			method:       http.MethodGet,
+			origin:       "https://evil.example",
+			secFetchSite: "cross-site",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reqCtx, cancel := context.WithCancel(context.Background())
+			cancel()
+			var body io.Reader
+			if tc.method == http.MethodPost {
+				body = strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{}}`)
+			}
+			req := httptest.NewRequestWithContext(reqCtx, tc.method, "http://127.0.0.1/mcp", body)
+			req.Header.Set("Content-Type", "application/json")
+			if tc.host != "" {
+				req.Host = tc.host
+			}
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+			if tc.secFetchSite != "" {
+				req.Header.Set("Sec-Fetch-Site", tc.secFetchSite)
+			}
+
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+			if rr.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusForbidden, rr.Body.String())
+			}
+		})
+	}
+	if got := f.materializeCount.Load(); got != 0 {
+		t.Fatalf("rejected requests materialized backend %d time(s), want 0", got)
+	}
+}
+
+func TestLazyProxyLoopbackGuardAllowsNoOriginPOST(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server"}
+	p, _ := newTestProxy(t, "mcp-language-server", f)
+	rr := postRPC(t, p.Handler(), "initialize", 1)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("POST without Origin code=%d want %d body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	got := parseRPC(t, rr.Body.Bytes())
+	if got["result"] == nil {
+		t.Fatalf("POST without Origin returned no result: %+v", got)
+	}
+}
 
 func TestLazyProxy_InitializeSyntheticNoMaterialize(t *testing.T) {
 	f := &fakeLifecycle{kind: "mcp-language-server"}
@@ -533,7 +614,7 @@ func TestLazyProxy_ClientCancelDoesNotTearDownBackend(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call"}`)
-	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/mcp", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "http://127.0.0.1/mcp", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)

@@ -1,12 +1,9 @@
 package api
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
-
-	"mcp-local-hub/internal/config"
 )
 
 // selfPIDFn returns the current process PID. Test seam for DM-2: tests
@@ -353,7 +350,7 @@ func manifestPortMap(manifestDir string) map[string]map[string]int {
 			if err != nil {
 				continue
 			}
-			m, err := config.ParseManifest(bytes.NewReader(data))
+			m, err := parseManifestForName(name, data)
 			if err != nil {
 				continue
 			}
@@ -373,12 +370,11 @@ func manifestPortMap(manifestDir string) map[string]map[string]int {
 		if !e.IsDir() {
 			continue
 		}
-		f, err := os.Open(filepath.Join(manifestDir, e.Name(), "manifest.yaml"))
+		data, err := os.ReadFile(filepath.Join(manifestDir, e.Name(), "manifest.yaml"))
 		if err != nil {
 			continue
 		}
-		m, err := config.ParseManifest(f)
-		f.Close()
+		m, err := parseManifestForName(e.Name(), data)
 		if err != nil {
 			continue
 		}

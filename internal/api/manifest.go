@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -32,6 +33,76 @@ func CheckManifestName(name string) error {
 	return checkManifestName(name)
 }
 
+// reservedWinNames is the set of legacy DOS device names that Windows
+// resolves specially regardless of working directory or extension.
+// Stored lower-case for case-insensitive matching against ToLower(name).
+//
+// Reference: https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file
+//
+// "Do not use the following reserved names for the name of a file:
+//
+//	CON, PRN, AUX, NUL, COM0, COM1, COM2, COM3, COM4, COM5, COM6,
+//	COM7, COM8, COM9, COM¹, COM², COM³, LPT0, LPT1, LPT2, LPT3,
+//	LPT4, LPT5, LPT6, LPT7, LPT8, LPT9, LPT¹, LPT², and LPT³.
+//	Also avoid these names followed immediately by an extension; for
+//	example, NUL.txt and NUL.tar.gz are both equivalent to NUL."
+//
+// We omit the COM0/LPT0 and superscript variants because the manifest
+// regex (`[a-z0-9][a-z0-9._-]*`) already rejects superscripts via
+// charset; COM0/LPT0 are vanishingly unlikely to be a typo'd manifest
+// name but are listed below for completeness.
+var reservedWinNames = map[string]struct{}{
+	"con":  {},
+	"prn":  {},
+	"aux":  {},
+	"nul":  {},
+	"com0": {}, "com1": {}, "com2": {}, "com3": {}, "com4": {},
+	"com5": {}, "com6": {}, "com7": {}, "com8": {}, "com9": {},
+	"lpt0": {}, "lpt1": {}, "lpt2": {}, "lpt3": {}, "lpt4": {},
+	"lpt5": {}, "lpt6": {}, "lpt7": {}, "lpt8": {}, "lpt9": {},
+}
+
+// rejectWindowsReservedManifestName implements the reserved-name half
+// of checkManifestName's documented contract. The validManifestName
+// regex blocks every form of path-separator and capital ASCII, so by
+// the time we get here `name` is lower-case ASCII, but it does NOT
+// stop names like "con", "nul.yaml", "aux.json", or trailing-dot
+// aliases from passing — Windows will rewrite all of these to the
+// underlying device, leaving manifest CRUD with ambiguous on-disk
+// targets and (for delete) potentially device-handle behavior.
+//
+// Rules enforced:
+//   - bare reserved device names (CON, PRN, AUX, NUL, COMn, LPTn)
+//   - reserved-with-extension forms (`con.txt`, `nul.yaml`, ...) —
+//     Windows treats `<RESERVED>.<EXT>` as the device too
+//   - trailing '.' or ' ' — Windows trims these on file create, which
+//     means two distinct manifest names could resolve to the same
+//     on-disk file.
+func rejectWindowsReservedManifestName(name string) error {
+	if name == "" {
+		return nil // checkManifestName handles empty separately
+	}
+	// Trailing dot or space. Cheap check first; doesn't depend on
+	// any allocation.
+	if strings.HasSuffix(name, ".") || strings.HasSuffix(name, " ") {
+		return fmt.Errorf("manifest name %q: trailing '.' or ' ' is reserved on Windows (filesystem rewrites the path, leading to ambiguous on-disk targets)", name)
+	}
+	// The manifest regex already lower-cases the input, but call
+	// ToLower defensively — the helper is exposed unit-tested so a
+	// caller bypassing the regex still gets the right answer.
+	lower := strings.ToLower(name)
+	// Take everything up to the first '.': Windows treats any extension
+	// suffix as immaterial (`NUL.tar.gz` == `NUL`).
+	base := lower
+	if i := strings.Index(lower, "."); i >= 0 {
+		base = lower[:i]
+	}
+	if _, ok := reservedWinNames[base]; ok {
+		return fmt.Errorf("manifest name %q: reserved Windows device name %q (with or without extension) is not allowed", name, base)
+	}
+	return nil
+}
+
 // checkManifestName rejects names that could escape the manifest
 // directory via path traversal, contain absolute-path semantics, or
 // land on reserved Windows filenames. Returns a descriptive error so
@@ -48,6 +119,12 @@ func checkManifestName(name string) error {
 	// forms like '.../..' that a future looser regex might miss.
 	if clean := filepath.Clean(name); clean != name || clean == "." || clean == ".." {
 		return fmt.Errorf("manifest name %q: resolves to non-canonical path %q", name, clean)
+	}
+	// Final layer: reserved Windows device names + trailing-dot/space
+	// aliases. The regex above enforces lower-case ASCII so this only
+	// has to handle the device-name semantics, not casing.
+	if err := rejectWindowsReservedManifestName(name); err != nil {
+		return err
 	}
 	return nil
 }
@@ -102,6 +179,12 @@ func (a *API) ManifestGet(name string) (string, error) {
 }
 
 // ManifestGetIn is the tempdir-capable form of ManifestGet.
+//
+// checkManifestName must run at entry: production wrappers gate on it,
+// but ManifestGetIn is also reachable directly (tests, future callers,
+// embedded toolchain code) and the path is built by raw-joining dir +
+// name. Without the check, a name like "../escape" would let a caller
+// read any manifest.yaml under dir's parent.
 func (a *API) ManifestGetIn(dir, name string) (string, error) {
 	if err := checkManifestName(name); err != nil {
 		return "", err
@@ -118,6 +201,10 @@ func (a *API) ManifestGetIn(dir, name string) (string, error) {
 // text and its SHA-256 content hash. Used by the GUI edit flow so
 // ManifestEdit can detect external writes that occurred between Load
 // and Save (A2b D3 stale-file detection).
+//
+// Like ManifestGetIn, checkManifestName runs at entry so this entry
+// point cannot be confused-deputy'd into reading manifests outside
+// dir even when called directly (bypassing ManifestGetWithHash).
 func (a *API) ManifestGetInWithHash(dir, name string) (string, string, error) {
 	if err := checkManifestName(name); err != nil {
 		return "", "", err
@@ -158,7 +245,7 @@ func (a *API) ManifestCreateIn(dir, name, yaml string) error {
 	if _, err := os.Stat(target); err == nil {
 		return fmt.Errorf("manifest %q already exists at %s; use edit instead", name, target)
 	}
-	if warnings := a.ManifestValidate(yaml); len(warnings) > 0 {
+	if warnings := a.validateManifestForStorageName(name, yaml); len(warnings) > 0 {
 		return fmt.Errorf("manifest has validation errors: %s", strings.Join(warnings, "; "))
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
@@ -182,7 +269,7 @@ func (a *API) ManifestEditIn(dir, name, yaml string) error {
 	if _, err := os.Stat(target); err != nil {
 		return fmt.Errorf("manifest %q does not exist; use create instead", name)
 	}
-	if warnings := a.ManifestValidate(yaml); len(warnings) > 0 {
+	if warnings := a.validateManifestForStorageName(name, yaml); len(warnings) > 0 {
 		return fmt.Errorf("manifest has validation errors: %s", strings.Join(warnings, "; "))
 	}
 	return os.WriteFile(target, []byte(yaml), 0644)
@@ -194,7 +281,6 @@ func (a *API) ManifestEditIn(dir, name, yaml string) error {
 // referenced binaries, ports, or secrets actually exist — that's caller
 // responsibility at install time.
 func (a *API) ManifestValidate(yaml string) []string {
-	var warnings []string
 	reader := strings.NewReader(yaml)
 	m, err := config.ParseManifest(reader)
 	if err != nil {
@@ -202,6 +288,23 @@ func (a *API) ManifestValidate(yaml string) []string {
 	}
 	// ParseManifest calls m.Validate internally, so if we reach here the
 	// structural validation passed. Add secondary soft checks:
+	return manifestValidationWarnings(m)
+}
+
+func (a *API) validateManifestForStorageName(name, yaml string) []string {
+	m, err := parseManifestForName(name, []byte(yaml))
+	if err != nil {
+		return []string{err.Error()}
+	}
+	return manifestValidationWarnings(m)
+}
+
+// manifestValidationWarnings collects soft warnings (declared-but-empty
+// fields, etc.) for a structurally valid ServerManifest. Workspace-scoped
+// manifests legitimately have no daemons (PR #108) so the daemon-empty
+// check is gated on Kind.
+func manifestValidationWarnings(m *config.ServerManifest) []string {
+	var warnings []string
 	if m.Kind != config.KindWorkspaceScoped && len(m.Daemons) == 0 {
 		warnings = append(warnings, "no daemons declared")
 	}
@@ -211,6 +314,23 @@ func (a *API) ManifestValidate(yaml string) []string {
 		}
 	}
 	return warnings
+}
+
+func parseManifestForName(name string, data []byte) (*config.ServerManifest, error) {
+	if err := checkManifestName(name); err != nil {
+		return nil, err
+	}
+	m, err := config.ParseManifest(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	if err := checkManifestName(m.Name); err != nil {
+		return nil, fmt.Errorf("manifest yaml name: %w", err)
+	}
+	if m.Name != name {
+		return nil, fmt.Errorf("manifest yaml name %q must match requested server %q", m.Name, name)
+	}
+	return m, nil
 }
 
 // ErrManifestHashMismatch is returned by ManifestEditInWithHash when
@@ -241,7 +361,7 @@ func (a *API) ManifestEditInWithHash(dir, name, yaml, expectedHash string) (newH
 			return "", ErrManifestHashMismatch
 		}
 	}
-	if warnings := a.ManifestValidate(yaml); len(warnings) > 0 {
+	if warnings := a.validateManifestForStorageName(name, yaml); len(warnings) > 0 {
 		return "", fmt.Errorf("manifest has validation errors: %s", strings.Join(warnings, "; "))
 	}
 	// Atomic write: unique tmp in the same directory, defer cleanup,

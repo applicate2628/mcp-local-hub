@@ -86,14 +86,14 @@ recipe.
   4. <rebuild via user's cmake>
   5. hyperfine(commands=["./build-old/mybin", "./build-new/mybin"], warmup=3, min_runs=10)
      → statistical comparison: new is 1.28× faster (±0.4%)
-  6. llvm_objdump(binary="./build-new/mybin", function="hot_loop")
+  6. llvm_objdump(binary="./build-new/mybin", project_root=".", function="hot_loop")
      → confirm the LTO-linked final binary retains the vectorization
 ` + "```" + `
 
 ### 2. Include-hygiene audit (compile-time perf)
 
 ` + "```" + `
-  iwyu(file="src/hot.cpp", extra_args=["-std=c++17", "-Iinclude"])
+  iwyu(file="src/hot.cpp", project_root=".", extra_args=["-std=c++17", "-Iinclude"])
   → reports[]: each with add[], remove[], full_list[] for the file
 ` + "```" + `
 
@@ -109,7 +109,7 @@ Interpretation:
                           filters={optOutput: true})
      → godbolt claims vectorized
   2. <rebuild real project>
-  3. llvm_objdump(binary="./build/mybin", function="hot_loop", intel=true)
+  3. llvm_objdump(binary="./build/mybin", project_root=".", function="hot_loop", intel=true)
      → sanity-check: the real binary's disassembly shows vpaddd/vmovups too
 ` + "```" + `
 
@@ -164,6 +164,7 @@ is enough for commands that run in 100ms+. For sub-10ms commands, bump
 
 ### llvm_objdump
 
+- ` + "`project_root`" + ` — required workspace boundary. ` + "`binary`" + ` must resolve inside it; relative binary paths resolve from this directory.
 - ` + "`function`" + ` — **always pass this**. Full .text disassembly of a real binary is multi-MB and overwhelms context.
 - ` + "`intel: true`" + ` — Intel syntax instead of AT&T
 - ` + "`with_source: true`" + ` — interleave source lines; requires binary built with ` + "`-g`" + `
@@ -171,7 +172,8 @@ is enough for commands that run in 100ms+. For sub-10ms commands, bump
 
 ### iwyu
 
-- Requires the same include paths your real build uses. Pass them via ` + "`extra_args: [\"-std=c++17\", \"-Iinclude\", \"-Ithird-party/eigen\"]`" + `.
+- ` + "`project_root`" + ` — required workspace boundary. ` + "`file`" + ` must resolve inside it; relative file paths resolve from this directory.
+- Requires the same include paths your real build uses. Pass them via ` + "`extra_args: [\"-std=c++17\", \"-Iinclude\", \"-Ithird-party/eigen\"]`" + `. Each entry must be a flag (` + "`-`" + ` / ` + "`--`" + `); positional input files and ` + "`@-response-file`" + ` directives are rejected.
 - Run on one file at a time; iwyu doesn't natively batch (iwyu_tool.py does, but we don't wrap it).
 - The ` + "`status`" + ` field in response distinguishes "nothing to suggest" from "environment broken" — check it before treating empty ` + "`reports[]`" + ` as "file is clean".
 

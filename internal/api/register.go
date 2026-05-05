@@ -119,7 +119,7 @@ func (a *API) Register(workspacePath string, languages []string, opts RegisterOp
 	if err != nil {
 		return nil, fmt.Errorf("load manifest mcp-language-server: %w", err)
 	}
-	m, err := config.ParseManifest(bytes.NewReader(data))
+	m, err := parseManifestForName("mcp-language-server", data)
 	if err != nil {
 		return nil, err
 	}
@@ -571,7 +571,7 @@ func (a *API) Unregister(workspacePath string, languages []string) (*UnregisterR
 	if err != nil {
 		return nil, fmt.Errorf("load manifest mcp-language-server: %w", err)
 	}
-	m, err := config.ParseManifest(bytes.NewReader(data))
+	m, err := parseManifestForName("mcp-language-server", data)
 	if err != nil {
 		return nil, err
 	}

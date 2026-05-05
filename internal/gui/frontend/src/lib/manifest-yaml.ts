@@ -77,12 +77,19 @@ export const BLANK_FORM: ManifestFormState = {
 // JSON.stringify which emits valid YAML double-quoted strings with proper
 // newline escaping. Reviewer #R2b-Q1.
 function quote(s: string): string {
-  if (s.includes("'") || s.includes("\n")) {
+  if (s.includes("'") || s.includes("\n") || s.includes("\r")) {
     // JSON.stringify handles both cases with correct escape sequences;
     // YAML flow-style double-quoted scalars are a strict superset of JSON.
     return JSON.stringify(s);
   }
   return `'${s}'`;
+}
+
+// Dynamic mapping keys must not be emitted raw: newlines and YAML syntax can
+// otherwise escape the current map and create sibling top-level fields. Keep
+// simple identifier-like keys bare to preserve the existing manifest shape.
+function quoteKey(s: string): string {
+  return /^[A-Za-z_][A-Za-z0-9_-]*$/.test(s) ? s : quote(s);
 }
 
 function asString(v: unknown, fallback: string): string {
@@ -324,7 +331,7 @@ export function toYAML(state: ManifestFormState): string {
   if (state.env.length > 0) {
     lines.push("env:");
     for (const { key, value } of state.env) {
-      lines.push(`  ${key}: ${quote(value)}`);
+      lines.push(`  ${quoteKey(key)}: ${quote(value)}`);
     }
   }
   if (state.daemons.length > 0) {
@@ -384,14 +391,14 @@ export function toYAML(state: ManifestFormState): string {
   // complex values. Simple scalars inlined.
   for (const [k, v] of Object.entries(state._preservedRaw)) {
     if (typeof v === "string") {
-      lines.push(`${k}: ${quote(v)}`);
+      lines.push(`${quoteKey(k)}: ${quote(v)}`);
     } else if (typeof v === "number" || typeof v === "boolean") {
-      lines.push(`${k}: ${v}`);
+      lines.push(`${quoteKey(k)}: ${v}`);
     } else {
       // Fallback: delegate to JSON (YAML accepts JSON-like inline). Not
       // pretty, but we don't know the shape. Users editing via GUI
       // won't touch these anyway.
-      lines.push(`${k}: ${JSON.stringify(v)}`);
+      lines.push(`${quoteKey(k)}: ${JSON.stringify(v)}`);
     }
   }
   return lines.join("\n") + "\n";

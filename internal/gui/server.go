@@ -453,7 +453,7 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 	}
 	s.port.Store(int32(ln.Addr().(*net.TCPAddr).Port))
 	s.srv = &http.Server{
-		Handler:           s.mux,
+		Handler:           s.httpHandler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	close(ready)

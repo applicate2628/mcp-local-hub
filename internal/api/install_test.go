@@ -483,6 +483,38 @@ func TestInstallAllFrom_PortConflictFailsThatServer(t *testing.T) {
 	}
 }
 
+func TestInstallFromManifestDirRejectsYAMLNameMismatch(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "demo")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	body := `name: other
+kind: global
+transport: stdio-bridge
+command: go
+daemons:
+  - name: default
+    port: 0
+client_bindings: []
+weekly_refresh: false
+`
+	if err := os.WriteFile(filepath.Join(dir, "manifest.yaml"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	err := NewAPI().installFromManifestDir(InstallOpts{
+		Server: "demo",
+		DryRun: true,
+		Writer: &bytes.Buffer{},
+	}, tmp)
+	if err == nil {
+		t.Fatal("expected YAML name mismatch error, got nil")
+	}
+	if !strings.Contains(err.Error(), `manifest yaml name "other" must match requested server "demo"`) {
+		t.Fatalf("error = %v, want YAML/requested name mismatch", err)
+	}
+}
+
 func makeFakeManifest(t *testing.T, dir, name string, port int) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0755); err != nil {

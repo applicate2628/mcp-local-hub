@@ -25,12 +25,12 @@ Every modern coding assistant (Claude Code, Codex CLI, Cursor, VS Code, Gemini C
       │      │      │      │      │      │      │      │      │      │
       ▼      ▼      ▼      ▼      ▼      ▼      ▼      ▼      ▼      ▼
    ┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐
-   │seren││memor││seq- ││wolf-││god- ││paper││time │ │gdb  ││lldb ││perf │
-   │×2   ││y    ││think││ram  ││bolt ││-srch││     │ │     ││     ││tools│
-   │/22  ││9123 ││9124 ││9132 ││9126 ││9127 ││9128 │ │9129 ││9130 ││9131 │
-   └──┬──┘└──┬──┘└──┬──┘└──┬──┘└──┬──┘└──┬──┘└──┬──┘ └──┬──┘└──┬──┘└──┬──┘
-      │      │      │      │      │      │      │       │      │      │
-      └──────┴──────┴──────┴──────┴──────┴──────┴───────┴──────┴──────┘
+   │seren││memor││seq- ││wolf-││god- ││paper││time ││gdb  ││lldb ││perf │
+   │×2   ││y    ││think││ram  ││bolt ││-srch││     ││     ││     ││tools│
+   │/22  ││9123 ││9124 ││9132 ││9126 ││9127 ││9128 ││9129 ││9130 ││9131 │
+   └──┬──┘└──┬──┘└──┬──┘└──┬──┘└──┬──┘└──┬──┘└──┬──┘└──┬──┘└──┬──┘└──┬──┘
+      │      │      │      │      │      │      │      │      │      │
+      └──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┘
                                     │
                  shared by default + opt-in MCP clients
                                     │
@@ -109,7 +109,7 @@ godbolt.compile_code(source=..., filters={optOutput: true, intel: true})
 perftools.hyperfine(commands=["./old_bin", "./new_bin"], warmup=3)
 
 # verify the LTO-linked final binary keeps the vectorization
-perftools.llvm_objdump(binary="./new_bin", function="hot_loop")
+perftools.llvm_objdump(binary="./new_bin", project_root=".", function="hot_loop")
 ```
 
 ## Supported clients

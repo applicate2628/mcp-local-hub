@@ -192,6 +192,8 @@ func (p *LazyProxy) inflightKey() string {
 // handleMCP is the per-request dispatch.
 func (p *LazyProxy) handleMCP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
+		// SSE path — let the SSE handler apply its own admission
+		// (loopback + Accept) so headers commit cleanly.
 		p.handleSSE(w, r)
 		return
 	}
@@ -199,8 +201,15 @@ func (p *LazyProxy) handleMCP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	// Content-Type is a syntactic gate (415 Unsupported Media Type) and
+	// fires before any auth/origin check (403). Browsers issuing
+	// non-JSON cross-origin posts get a clear 415 rather than a
+	// generic 403 that obscures the real reason.
 	if !isJSONContentType(r.Header.Get("Content-Type")) {
 		http.Error(w, "unsupported media type", http.StatusUnsupportedMediaType)
+		return
+	}
+	if rejectUnsafeLoopbackRequest(w, r) {
 		return
 	}
 	if !isAllowedOrigin(r.Header.Get("Origin")) {
@@ -378,6 +387,9 @@ func isClientCancelErr(ctx context.Context, err error) bool {
 // connection open until the client cancels. Post-materialization a future
 // revision will bridge upstream SSE frames through the endpoint adapter.
 func (p *LazyProxy) handleSSE(w http.ResponseWriter, r *http.Request) {
+	if rejectUnsafeLoopbackRequest(w, r) {
+		return
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
