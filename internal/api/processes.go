@@ -320,8 +320,12 @@ func init() {
 			if len(fields) < 2 {
 				continue
 			}
-			// Local-addr field format: "127.0.0.1:<port>" or "[::]:<port>".
+			// Match the single-port lookup semantics: only 127.0.0.1 listeners
+			// are valid daemon candidates for status enrichment.
 			addr := fields[1]
+			if !strings.HasPrefix(addr, "127.0.0.1:") {
+				continue
+			}
 			idx := strings.LastIndex(addr, ":")
 			if idx < 0 {
 				continue
