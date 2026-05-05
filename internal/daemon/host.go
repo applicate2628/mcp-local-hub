@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -90,6 +92,32 @@ type StdioHost struct {
 }
 
 const maxMCPPostBodyBytes int64 = 1 << 20 // 1 MiB
+
+// maxPendingRequests caps the number of concurrent in-flight JSON-RPC
+// requests routed through one StdioHost subprocess. Beyond this the
+// handler returns 429; legitimate MCP usage rarely exceeds a handful of
+// concurrent requests per client, so 128 is a generous bound.
+const maxPendingRequests = 128
+
+// requireJSONContentType returns true if Content-Type parses as exactly
+// `application/json` (case-insensitive media type, parameters allowed).
+// Empty Content-Type is rejected — MCP POST clients are required to set
+// it; admitting empty would let CSRF probes bypass the gate via simple
+// `text/plain` form posts that browsers can issue cross-origin.
+//
+// strings.HasPrefix(ct, "application/json") was the prior shape and
+// admits `application/jsonx`. mime.ParseMediaType handles params (e.g.
+// `application/json; charset=utf-8`) correctly.
+func requireJSONContentType(ct string) bool {
+	if ct == "" {
+		return false
+	}
+	mt, _, err := mime.ParseMediaType(ct)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(mt, "application/json")
+}
 
 func NewStdioHost(cfg HostConfig) (*StdioHost, error) {
 	if cfg.Command == "" {
@@ -389,6 +417,16 @@ func (h *StdioHost) HTTPHandler() http.Handler {
 }
 
 func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
+	// Content-Type gate runs FIRST — before body read, JSON parse, or
+	// pending-slot reservation. A `text/plain` CSRF probe must not
+	// consume the body parser, the unmarshal path, or a pending slot.
+	// Codex finding: PR #62 placed this AFTER body parse (still
+	// readable to CSRF as far as DoS goes); PR #123 used a prefix
+	// match that admits `application/jsonx`.
+	if !requireJSONContentType(r.Header.Get("Content-Type")) {
+		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxMCPPostBodyBytes)
 	defer r.Body.Close()
 	w.Header().Set("Mcp-Session-Id", h.sessionID)
@@ -464,6 +502,11 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 
 	respCh := make(chan json.RawMessage, 1)
 	h.pendingMu.Lock()
+	if len(h.pending) >= maxPendingRequests {
+		h.pendingMu.Unlock()
+		http.Error(w, "too many pending requests", http.StatusTooManyRequests)
+		return
+	}
 	h.pending[internalID] = respCh
 	h.pendingMu.Unlock()
 	defer func() {
