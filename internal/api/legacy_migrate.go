@@ -143,11 +143,12 @@ func (a *API) MigrateLegacy(entries []LegacyLSEntry, opts LegacyMigrateOpts) (*L
 			// with a real terminal still hits the default-Y branch below
 			// because readErr is nil and line == "\n" → trimmed empty.
 			if readErr != nil && errors.Is(readErr, io.EOF) {
-				fmt.Fprintf(w, "  stdin closed without confirmation; skipping %s\n", ws)
-				report.Skipped = append(report.Skipped, rows...)
-				continue
-			}
-			if readErr != nil {
+				if strings.TrimSpace(line) == "" {
+					fmt.Fprintf(w, "  stdin closed without confirmation; skipping %s\n", ws)
+					report.Skipped = append(report.Skipped, rows...)
+					continue
+				}
+			} else if readErr != nil {
 				fmt.Fprintf(w, "  read confirmation for %s: %v — skipping\n", ws, readErr)
 				report.Skipped = append(report.Skipped, rows...)
 				continue
