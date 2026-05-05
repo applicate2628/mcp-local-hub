@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { fetchOrThrow, postDismiss } from "../api";
 import { useEventSource } from "../hooks/useEventSource";
 import { groupMigrationEntries, type MigrationGroups } from "../lib/migration-grouping";
@@ -29,6 +29,7 @@ export function MigrationScreen() {
   const [scanReloadToken, setScanReloadToken] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [migrateBusy, setMigrateBusy] = useState<boolean>(false);
+  const didInitSelection = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,7 +61,18 @@ export function MigrationScreen() {
           const canMigrateNames = (s.entries ?? [])
             .filter((e) => e.status === "can-migrate")
             .map((e) => e.name);
-          setSelected(new Set(canMigrateNames));
+          const canMigrateSet = new Set(canMigrateNames);
+          setSelected((prev) => {
+            if (!didInitSelection.current) {
+              didInitSelection.current = true;
+              return new Set(canMigrateNames);
+            }
+            const next = new Set<string>();
+            prev.forEach((name) => {
+              if (canMigrateSet.has(name)) next.add(name);
+            });
+            return next;
+          });
         }
       } catch (err) {
         if (!cancelled) setError((err as Error).message);
