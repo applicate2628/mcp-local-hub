@@ -245,30 +245,44 @@ func (h *StdioHost) Start(ctx context.Context) error {
 		h.readStdoutLoop()
 	}()
 
-	// Watcher goroutine: owns cmd.Wait() exclusively so no other call
-	// site double-waits.
+	// Watcher goroutine: three phases reconciling three constraints.
 	//
-	// Two competing constraints:
+	// 1. Codex Cloud finding 63b417d2: childExited must reflect the
+	//    immediate child's OS-exit, NOT pipe EOF, so the supervisor
+	//    can restart even when a descendant inherited stdout/stderr
+	//    and keeps the pipes open.
 	//
-	// 1. Go's StdoutPipe/StderrPipe contract: cmd.Wait closes the pipes
-	//    once the process exits, so calling Wait before the readers
-	//    have drained to EOF can truncate the final buffered output.
-	//    Fast-exiting children (e.g. a shell that writes one JSON line
-	//    and exits) lose their last response otherwise.
+	// 2. Go's StdoutPipe/StderrPipe contract: cmd.Wait closes the
+	//    pipes once it returns, so calling Wait before the scanners
+	//    have drained to EOF truncates the final buffered output.
+	//    Fast-exiting children (a shell that writes one JSON line and
+	//    exits) lose their last response otherwise.
 	//
-	// 2. Codex Cloud finding 63b417d2: gating Wait on unconditional
-	//    pipesDrained.Wait() wedges shutdown when a descendant inherits
-	//    the stdout/stderr fds and keeps them open after the immediate
-	//    child has exited (`( sleep 60 ) & exit 0` pattern). The
-	//    supervisor never sees ChildExited and Stop hangs.
+	// 3. Codex bot P1 on f2512fe: the bounded pipe-drain timeout must
+	//    only arm after the child has exited. Otherwise any daemon
+	//    that runs longer than `pipeDrainTimeout` always falls into
+	//    the timeout path while it is still healthy, which both
+	//    truncates final output AND emits a misleading "child exited"
+	//    warning while the child is alive.
 	//
-	// Reconcile: wait up to a bounded window for pipes to drain; fall
-	// through to cmd.Wait once the deadline expires. Fast-exit children
-	// drain in milliseconds and never hit the deadline; inherited-stdio
-	// descendants give up after `pipeDrainTimeout` so liveness still
-	// fires. Lost output in the deadline-hit case is unavoidable on
-	// POSIX without proc/pidfd integration.
+	// Phase 1: cmd.Process.Wait() reaps the OS child WITHOUT closing
+	// the pipe read-ends, so we can fire childExited immediately on
+	// OS-exit while a descendant still holds the inherited fds.
+	//
+	// Phase 2: bounded wait for scanners to drain the buffered output
+	// the child wrote before exit. The bound only arms here, after
+	// Phase 1 completes — so it cannot fire while the child is
+	// healthy. h.done short-circuits this on Stop.
+	//
+	// Phase 3: cmd.Wait() closes parentIOPipes. For the descendant-
+	// inherited case this is what unblocks the still-running scanners
+	// (read returns "file already closed"). cmd.Wait's internal
+	// Process.Wait re-call returns ECHILD harmlessly because Phase 1
+	// already reaped the zombie; closeDescriptors still runs.
 	go func() {
+		_, _ = cmd.Process.Wait()
+		close(h.childExited)
+
 		drained := make(chan struct{})
 		go func() {
 			pipesDrained.Wait()
@@ -276,20 +290,13 @@ func (h *StdioHost) Start(ctx context.Context) error {
 		}()
 		select {
 		case <-drained:
-			// Normal termination: scanners reached EOF.
 		case <-h.done:
-			// Stop() was called. Don't wait the full
-			// pipeDrainTimeout — the kill-and-readers path is
-			// driving exit, and we want childExited to close
-			// quickly so blocked HTTP handlers and Stop's own
-			// wait can return.
 		case <-time.After(pipeDrainTimeout):
 			fmt.Fprintf(os.Stderr,
-				"warn: stdio child exited but stdout/stderr scanners did not reach EOF within %s; a descendant likely inherited the pipes — proceeding so daemon liveness is reported\n",
+				"warn: stdout/stderr scanners did not reach EOF within %s after stdio child exited; a descendant likely inherited the pipes — proceeding so daemon liveness is reported\n",
 				pipeDrainTimeout)
 		}
 		_ = cmd.Wait()
-		close(h.childExited)
 	}()
 
 	return nil

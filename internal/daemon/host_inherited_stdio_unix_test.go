@@ -44,9 +44,14 @@ func TestStdioHostInheritedStdioDescendantDoesNotWedgeChildExited(t *testing.T) 
 	tmp := t.TempDir()
 	pidFile := filepath.Join(tmp, "descendant.pid")
 
-	// Background `sleep 60` keeps the inherited stdout/stderr fds open
-	// after the immediate shell exits. /bin/sh exits with 0 promptly.
-	script := `( sleep 60 ) >/dev/null 2>&1 & echo $! > ` + pidFile + `; exit 0`
+	// Background `sleep 60` MUST inherit /bin/sh's stdout/stderr (which
+	// are our StdoutPipe/StderrPipe read-ends on the parent side) — that
+	// is the deadlock condition Codex Cloud finding 63b417d2 reported.
+	// No `>/dev/null 2>&1` redirect: that would hand sleep its own
+	// /dev/null fds and the test would pass even with the bug present
+	// (Codex bot P2 on f2512fe). Using `sleep 60 &` directly (no
+	// subshell) so $! is sleep's PID and the cleanup SIGKILL is precise.
+	script := `sleep 60 & echo $! > ` + pidFile + `; exit 0`
 
 	h, err := NewStdioHost(HostConfig{
 		Command: "/bin/sh",
