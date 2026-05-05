@@ -27,6 +27,7 @@
 - Every PR runs `go test ./...` locally before push (CI is `workflow_dispatch`-only to conserve build minutes; the maintainers trigger CI manually for non-trivial PRs).
 - The Codex bot may add automated security review comments on PR open. Treat them as input, not gates — the maintainers decide which findings to act on.
 - For PRs that touch security-sensitive surfaces (auth, manifest parsing, subprocess execution, HTTP endpoints, Windows scheduler XML), expect a `codex exec -c model_reasoning_effort=xhigh` second-opinion review before merge.
+- **Readiness matrix gate (`README.md` Feature & readiness matrix):** if the PR introduces a new user-visible capability, lands the live-smoke evidence that promotes a row from `🚧 Roadmap` → `⚠ Preview` → `✅ Stable`, or removes a documented surface, the PR must include the matrix update in the same commit. Reviewers explicitly verify this row was touched when applicable.
 
 ### Style
 

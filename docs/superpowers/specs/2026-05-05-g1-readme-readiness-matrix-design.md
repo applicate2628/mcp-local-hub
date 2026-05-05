@@ -34,35 +34,38 @@ Three columns:
 
 ### Status states
 
-Three states, fixed:
+Three states, fixed, with explicit promotion rules so a future maintainer can correctly classify a new row:
 
-- **✅ Stable** — feature exists, tested, expected to keep working between preview tags. Not "production-ready" — just "works as advertised in this preview".
-- **⚠ Preview** — feature exists and is reachable, but live-smoke coverage is partial or the surface may change in incompatible ways. Backups and dry-run before applying.
-- **🚧 Roadmap** — feature is acknowledged in the backlog but not yet shipped. The row exists so visitors can stop guessing whether it's planned.
+- **✅ Stable** — fresh automated test coverage OR a recent live-smoke pass for the exact user-visible surface, AND no open critical caveat (no open work-item bug, no missing manual-smoke matrix entry). "Stable" does not mean "production-ready"; it means "works as advertised in this preview, with evidence".
+- **⚠ Preview** — feature is shipped and reachable, but live-smoke coverage is partial, an open caveat exists in `work-items/bugs/` or the backlog, OR the surface may change in incompatible ways. Backups and dry-run before applying.
+- **🚧 Roadmap** — feature is acknowledged in the backlog but not yet shipped, OR currently exists only as a cross-compile path with no runtime evidence. The row exists so visitors stop guessing whether it's planned.
 
 No fourth "❌ Not planned" state in the matrix. Items we explicitly decline (e.g., "Mandatory single `/mcp` endpoint", "Remote access as default") live in `SECURITY.md` Out-of-scope section, not the readiness matrix.
 
-### Initial rows (12)
+### Initial rows (15)
 
-```
-| Surface                                       | Status     | Notes                                                                  |
-|-----------------------------------------------|------------|------------------------------------------------------------------------|
-| Run on Windows                                | ✅ Stable  | Tested on Windows 11 (10.0.26100); primary platform                    |
-| Run on Linux (manual launch)                  | ⚠ Preview  | Cross-compiles and runs; no live smoke matrix yet                      |
-| Run on macOS (manual launch)                  | ⚠ Preview  | Cross-compiles and runs; `--force --kill` identity probe is Linux/Win  |
-| Auto-start on logon — Windows                 | ✅ Stable  | Task Scheduler with restart-on-failure                                 |
-| Auto-start on logon — Linux/macOS             | 🚧 Roadmap | systemd user units (F2) and launchd (F3) tracked in backlog            |
-| Default client install                        | ✅ Stable  | Claude Code, Codex CLI, Cursor (`mcphub install --server X`)           |
-| Opt-in client install                         | ⚠ Preview  | VS Code, Gemini-CLI, Qwen-CLI, Antigravity (`--clients ...`)           |
-| GUI dashboard (`mcphub gui`)                  | ✅ Stable  | Loopback-only; CSRF + DNS-rebind hardened (PR #51)                     |
-| Encrypted secrets vault                       | ✅ Stable  | age-encrypted; argv-leak removed (`secrets set --value` deleted)       |
-| Backups, rollback, migration                  | ✅ Stable  | Per-write timestamped + `backups.keep_n` enforced + `mcphub migrate`   |
-| Per-server HTTP API                           | ⚠ Preview  | `/mcp` per daemon; unified `/api/health` is G2 (next)                  |
-| Capability browser (tools/resources/prompts)  | 🚧 Roadmap | G3, post preview-tag                                                   |
-| Marketplace / remote manifests                | 🚧 Roadmap | G5/G6/G7 — Phase 3C/3D                                                 |
+```text
+| Surface                                       | Status     | Notes                                                                              |
+|-----------------------------------------------|------------|------------------------------------------------------------------------------------|
+| Run on Windows                                | ✅ Stable  | Tested on Windows 11 (10.0.26100); primary platform                                |
+| Run on Linux                                  | 🚧 Roadmap | Ubuntu CI builds/tests; install/scheduler not implemented                          |
+| Run on macOS                                  | 🚧 Roadmap | darwin cross-build only; scheduler + force-kill probe stubbed                      |
+| Auto-start on logon — Windows                 | ✅ Stable  | Task Scheduler with restart-on-failure                                             |
+| Auto-start on logon — Linux/macOS             | 🚧 Roadmap | systemd user units (F2) and launchd (F3) tracked in backlog                        |
+| Default client install                        | ⚠ Preview  | Claude Code, Codex CLI, Cursor; Cursor live-smoke pending in verification matrix   |
+| Opt-in client install                         | ⚠ Preview  | VS Code, Gemini-CLI, Qwen-CLI, Antigravity (stdio-relay); manual smoke pending     |
+| GUI dashboard (`mcphub gui`)                  | ⚠ Preview  | Loopback-only; CSRF/DNS-rebind hardened (PR #51); manual GUI browser smoke pending |
+| GUI logs viewer (`/api/logs/:server`)         | ⚠ Preview  | SSE tail follow + filter + ERROR/WARN highlight + Open folder all shipped          |
+| Workspace-scoped LSP lazy proxies             | ⚠ Preview  | `mcphub register` + per-language proxy; D3 manual multi-language smoke pending     |
+| Encrypted secrets vault                       | ✅ Stable  | age-encrypted; argv-leak removed (`secrets set --value` deleted, PR #128)          |
+| Backups, rollback, migration                  | ⚠ Preview  | `backups.keep_n` enforced + per-write timestamped; tracked race in interleaved migrate/demigrate (`work-items/bugs/b1-backup-file-race.md`) |
+| Per-server HTTP API (`/mcp` per daemon)       | ⚠ Preview  | DNS-rebind + Content-Type + body-size guards; GET/SSE server-notification semantics still being reconciled |
+| Unified health/status snapshot                | 🚧 Roadmap | G2, immediately ahead of preview tag — combines ping/status/version + probes      |
+| Capability browser (tools/resources/prompts)  | 🚧 Roadmap | G3, post preview-tag                                                               |
+| Marketplace / remote manifests                | 🚧 Roadmap | G5/G6/G7 — Phase 3C/3D                                                             |
 ```
 
-13 rows in the actual table (one over the proposed 12 — the marketplace/remote-manifest row was added to close the obvious "is this thing connected to a registry?" question).
+16 rows in the actual table (one Stable, eight Preview, seven Roadmap). The honest distribution skews toward Preview because the project is mid-stabilization after the 2026-05-04 audit wave; rows promote to Stable as live-smoke evidence lands.
 
 ## Out of scope
 
@@ -74,8 +77,9 @@ No fourth "❌ Not planned" state in the matrix. Items we explicitly decline (e.
 ## Maintenance contract
 
 - New row added when a new user-visible capability is introduced. Rows are not added for internal refactors.
-- Status flip from 🚧 → ⚠ → ✅ happens at PR-merge time; the PR description must update the matrix row in the same commit.
-- Removing a row requires an explicit "deprecated in vX" comment plus a CHANGELOG entry.
+- Status flip from 🚧 → ⚠ → ✅ happens **as a commit on the same PR** that earns the promotion (e.g., the PR that adds live-smoke evidence is the PR that flips the status). PR descriptions are not commit content and cannot enforce this; instead the project's PR review checklist (in `CONTRIBUTING.md`) names the matrix as one of the items reviewers verify.
+- Removing a row requires an explicit "deprecated in vX" CHANGELOG entry.
+- A future-iteration `make docs-check` target (or equivalent CI step) MAY be added to lint the matrix shape (column count, status emoji set), but is not required for this initial G1 rollout. Until then the gate is human review per the `CONTRIBUTING.md` checklist row.
 
 ## Testing
 
