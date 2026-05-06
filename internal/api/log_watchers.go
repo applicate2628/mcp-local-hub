@@ -1,0 +1,450 @@
+package api
+
+import (
+	"bufio"
+	"encoding/csv"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"regexp"
+	"runtime"
+	"strconv"
+	"strings"
+	"time"
+
+	"mcp-local-hub/internal/process"
+)
+
+// LogWatcher describes one orphan tail/grep/bash watcher process.
+// Mirrors the shape `scripts/cleanup-orphan-watchers.ps1` produces in
+// dry-run output, so an operator can compare GUI dashboard rows
+// against the standalone script's report.
+type LogWatcher struct {
+	PID         int    `json:"pid"`
+	ParentPID   int    `json:"parent_pid"`
+	ParentAlive bool   `json:"parent_alive"`
+	Name        string `json:"name"`
+	AgeSec      int64  `json:"age_sec"`
+	Cmdline     string `json:"cmdline"`
+	KillErr     string `json:"kill_err,omitempty"` // populated only on apply
+}
+
+// LogWatcherCleanupOpts controls the watcher scan + kill.
+//
+// PathRegex matches the watcher's command-line path; defaults to a broad
+// `\.scratch[\\/].*\.(log|txt)` pattern that catches typical agent
+// shell-snapshot launcher pipelines (Claude Code, codex CLI etc.).
+//
+// OrphanGrepRegex is consulted on `grep` processes whose parent is no
+// longer in the snapshot — grep's command-line typically carries only
+// the regex (no path), so a name-only match would over-fire on
+// legitimate grep usage. Tokens here match the script defaults.
+//
+// IncludeLive — if true, processes whose parent IS still alive are also
+// killed. Default false: a path-matched live-parent process almost
+// always represents a CURRENT active agent session, not a zombie.
+//
+// DryRun — if true, return matches without calling kill.
+type LogWatcherCleanupOpts struct {
+	PathRegex       string
+	OrphanGrepRegex string
+	IncludeLive     bool
+	DryRun          bool
+}
+
+const (
+	defaultLogWatcherPathRegex   = `\.scratch[\\/].*\.(log|txt)`
+	defaultOrphanGrepRegexTokens = `BOBYQA|Traceback|Done|early_kill|S11|Sonnet|AXIEM|ERROR|Error|stage_|tick`
+)
+
+// neverKillLogWatcher names processes that must NEVER be killed by the
+// log-watcher sweep, even if their command-line happened to match the
+// path pattern. Belt-and-suspenders against future broadening of the
+// match rule. Mirrors scripts/cleanup-orphan-watchers.ps1's NeverKill.
+var neverKillLogWatcher = map[string]bool{
+	// Active simulation runners
+	"em.exe":          true,
+	"python.exe":      true,
+	"pythonw.exe":     true,
+	"python":          true,
+	"python3":         true,
+	// Agent runtimes
+	"mcphub.exe":      true,
+	"mcphub":          true,
+	"codex.exe":       true,
+	"codex":           true,
+	"claude.exe":      true,
+	"claude":          true,
+	// Editors
+	"cursor.exe":      true,
+	"cursor":          true,
+	"code.exe":        true,
+	"code":            true,
+	"antigravity.exe": true,
+	"antigravity":     true,
+	// Shells (legitimate active shells)
+	"powershell.exe":  true,
+	"pwsh.exe":        true,
+	"cmd.exe":         true,
+}
+
+// watcherProcessNames are the only process names we INSPECT for the
+// path/orphan-grep heuristics. Limiting to shell + tail + grep keeps
+// the sweep narrow.
+var watcherProcessNames = map[string]bool{
+	"bash.exe": true,
+	"bash":     true,
+	"sh.exe":   true,
+	"sh":       true,
+	"tail.exe": true,
+	"tail":     true,
+	"grep.exe": true,
+	"grep":     true,
+}
+
+// processRow is the platform-agnostic shape every snapshot path produces.
+type processRow struct {
+	PID       int
+	ParentPID int
+	Name      string
+	Cmdline   string
+	StartTime int64 // Unix seconds; 0 if unknown
+}
+
+// CleanupLogWatchers scans for orphan tail/grep/bash watcher processes
+// and (unless DryRun) kills them. Returns the matched set with KillErr
+// populated for apply failures.
+//
+// Per docs/superpowers/specs/2026-05-06-cleanup-buttons-design.md Q3:
+// detection is implemented via shell-out (matching the existing
+// internal/api/processes.go house style — `Get-CimInstance` on Windows,
+// `ps -e -o ...` on POSIX) rather than Go-native x/sys, even though
+// the codex consult initially recommended stdlib + x/sys. House-style
+// consistency wins; the deviation is documented in the design memo.
+func (a *API) CleanupLogWatchers(opts LogWatcherCleanupOpts) ([]LogWatcher, error) {
+	pathRe, err := compileWatcherRegex(opts.PathRegex, defaultLogWatcherPathRegex)
+	if err != nil {
+		return nil, fmt.Errorf("path regex: %w", err)
+	}
+	orphanRe, err := compileWatcherRegex(opts.OrphanGrepRegex, defaultOrphanGrepRegexTokens)
+	if err != nil {
+		return nil, fmt.Errorf("orphan grep regex: %w", err)
+	}
+
+	rows, err := snapshotProcessesForWatcherScan()
+	if err != nil {
+		return nil, err
+	}
+
+	pidSet := make(map[int]bool, len(rows))
+	for _, r := range rows {
+		pidSet[r.PID] = true
+	}
+
+	matches := filterWatcherCandidates(rows, pidSet, pathRe, orphanRe)
+	if opts.DryRun {
+		return matches, nil
+	}
+
+	for i := range matches {
+		// Honor IncludeLive default: skip kill if parent still alive.
+		if matches[i].ParentAlive && !opts.IncludeLive {
+			continue
+		}
+		if err := killOnePID(matches[i].PID); err != nil {
+			matches[i].KillErr = err.Error()
+		}
+	}
+	return matches, nil
+}
+
+func compileWatcherRegex(user, fallback string) (*regexp.Regexp, error) {
+	src := user
+	if src == "" {
+		src = fallback
+	}
+	return regexp.Compile(src)
+}
+
+// filterWatcherCandidates is the platform-agnostic filter step. Two
+// passes are unioned by PID:
+//   1. Path-matched: process name in watcherProcessNames + cmdline
+//      matches PathRegex.
+//   2. Orphan-grep: process name == "grep[.exe]" + parent absent +
+//      cmdline matches OrphanGrepRegex.
+// NeverKill names are excluded from both passes.
+func filterWatcherCandidates(rows []processRow, pidSet map[int]bool, pathRe, orphanRe *regexp.Regexp) []LogWatcher {
+	now := time.Now().Unix()
+	dedup := make(map[int]LogWatcher)
+	for _, r := range rows {
+		if neverKillLogWatcher[strings.ToLower(r.Name)] {
+			continue
+		}
+		isWatcher := watcherProcessNames[strings.ToLower(r.Name)]
+		matched := false
+		if isWatcher && pathRe.MatchString(r.Cmdline) {
+			matched = true
+		}
+		if !matched && strings.HasPrefix(strings.ToLower(r.Name), "grep") {
+			parentAlive := r.ParentPID != 0 && pidSet[r.ParentPID]
+			if !parentAlive && orphanRe.MatchString(r.Cmdline) {
+				matched = true
+			}
+		}
+		if !matched {
+			continue
+		}
+		parentAlive := r.ParentPID != 0 && pidSet[r.ParentPID]
+		ageSec := int64(0)
+		if r.StartTime > 0 {
+			ageSec = now - r.StartTime
+		}
+		dedup[r.PID] = LogWatcher{
+			PID:         r.PID,
+			ParentPID:   r.ParentPID,
+			ParentAlive: parentAlive,
+			Name:        r.Name,
+			AgeSec:      ageSec,
+			Cmdline:     r.Cmdline,
+		}
+	}
+	out := make([]LogWatcher, 0, len(dedup))
+	for _, w := range dedup {
+		out = append(out, w)
+	}
+	return out
+}
+
+// snapshotProcessesForWatcherScan delegates to the platform-specific
+// snapshot. Windows reuses the existing runProcessSnapshot() (CSV from
+// wmic / PowerShell). POSIX uses `ps -e -o pid,ppid,comm,etime,args`.
+//
+// Test seam: snapshotProcessesFn — tests inject a fixed roster.
+var snapshotProcessesFn = func() ([]processRow, error) {
+	if runtime.GOOS == "windows" {
+		raw, err := runProcessSnapshot()
+		if err != nil {
+			return nil, err
+		}
+		return parseWmicProcessRows(strings.NewReader(raw))
+	}
+	return runPosixPS()
+}
+
+func snapshotProcessesForWatcherScan() ([]processRow, error) {
+	return snapshotProcessesFn()
+}
+
+// runPosixPS shells out to `ps` with a fixed column order so we can
+// parse without depending on the locale's BSD vs. SysV argv quirks.
+// Output sample (Linux):
+//
+//	  PID  PPID COMMAND        ELAPSED ARGS
+//	 1234   500 bash           00:01:23 /bin/bash -c "tail -F ...| grep ..."
+func runPosixPS() ([]processRow, error) {
+	cmd := exec.Command("ps", "-e", "-o", "pid=,ppid=,comm=,etime=,args=")
+	process.NoConsole(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("ps: %w", err)
+	}
+	return parsePosixPSRows(strings.NewReader(string(out))), nil
+}
+
+func parsePosixPSRows(r io.Reader) []processRow {
+	now := time.Now().Unix()
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	var rows []processRow
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		// Split on whitespace, but bound to first 4 fields; the rest
+		// (ARGS) keeps internal spaces intact.
+		fields := strings.SplitN(line, " ", 5)
+		// Re-collapse leading whitespace tokens that SplitN preserves
+		// when ps right-pads numeric columns.
+		fields = compactFields(fields, 5)
+		if len(fields) < 5 {
+			continue
+		}
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil {
+			continue
+		}
+		ppid, _ := strconv.Atoi(fields[1])
+		comm := fields[2]
+		ageSec := parseEtime(fields[3])
+		args := fields[4]
+		startTime := int64(0)
+		if ageSec > 0 {
+			startTime = now - ageSec
+		}
+		rows = append(rows, processRow{
+			PID:       pid,
+			ParentPID: ppid,
+			Name:      comm,
+			Cmdline:   args,
+			StartTime: startTime,
+		})
+	}
+	return rows
+}
+
+func compactFields(fields []string, want int) []string {
+	out := make([]string, 0, want)
+	for _, f := range fields {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+// parseEtime parses ps's ELAPSED format, e.g. "00:01:23", "1-02:03:04",
+// "23:45". Returns the elapsed seconds, 0 if unparseable.
+func parseEtime(s string) int64 {
+	days := int64(0)
+	rest := s
+	if i := strings.Index(s, "-"); i >= 0 {
+		d, err := strconv.ParseInt(s[:i], 10, 64)
+		if err != nil {
+			return 0
+		}
+		days = d
+		rest = s[i+1:]
+	}
+	parts := strings.Split(rest, ":")
+	for i, p := range parts {
+		parts[i] = strings.TrimSpace(p)
+	}
+	var h, m, sec int64
+	switch len(parts) {
+	case 2:
+		mm, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil {
+			return 0
+		}
+		ss, err := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil {
+			return 0
+		}
+		m = mm
+		sec = ss
+	case 3:
+		hh, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil {
+			return 0
+		}
+		mm, err := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil {
+			return 0
+		}
+		ss, err := strconv.ParseInt(parts[2], 10, 64)
+		if err != nil {
+			return 0
+		}
+		h = hh
+		m = mm
+		sec = ss
+	default:
+		return 0
+	}
+	return days*86400 + h*3600 + m*60 + sec
+}
+
+// parseWmicProcessRows reads wmic-CSV (Windows snapshot) into the
+// neutral processRow shape. Reuses CIM_DATETIME via parseWmicDate().
+func parseWmicProcessRows(r io.Reader) ([]processRow, error) {
+	cr := csv.NewReader(r)
+	cr.FieldsPerRecord = -1
+	var rows []processRow
+	header := true
+	colIdx := map[string]int{}
+	for {
+		rec, err := cr.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if header {
+			for i, h := range rec {
+				colIdx[strings.TrimSpace(h)] = i
+			}
+			header = false
+			continue
+		}
+		get := func(name string) string {
+			if i, ok := colIdx[name]; ok && i < len(rec) {
+				return rec[i]
+			}
+			return ""
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(get("ProcessId")))
+		if err != nil {
+			continue
+		}
+		ppid, _ := strconv.Atoi(strings.TrimSpace(get("ParentProcessId")))
+		cmd := get("CommandLine")
+		// Best-effort: derive image basename from cmdline. Many MCP
+		// launchers carry an absolute exe path as argv[0].
+		name := basenameFromCmdline(cmd)
+		startTime := int64(0)
+		if dt := parseWmicDate(get("CreationDate")); !dt.IsZero() {
+			startTime = dt.Unix()
+		}
+		rows = append(rows, processRow{
+			PID:       pid,
+			ParentPID: ppid,
+			Name:      name,
+			Cmdline:   cmd,
+			StartTime: startTime,
+		})
+	}
+	return rows, nil
+}
+
+func basenameFromCmdline(cmd string) string {
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		return ""
+	}
+	// Quoted exe path?
+	if cmd[0] == '"' {
+		if end := strings.Index(cmd[1:], `"`); end >= 0 {
+			cmd = cmd[1 : 1+end]
+		}
+	} else if i := strings.Index(cmd, " "); i >= 0 {
+		cmd = cmd[:i]
+	}
+	// Strip directory.
+	for i := len(cmd) - 1; i >= 0; i-- {
+		if cmd[i] == '/' || cmd[i] == '\\' {
+			return cmd[i+1:]
+		}
+	}
+	return cmd
+}
+
+// killOnePID best-effort kills a single PID. Uses os.Process.Kill which
+// resolves to TerminateProcess on Windows and SIGKILL on POSIX — same
+// semantic as `taskkill /F` and `kill -KILL` respectively. Operates on
+// a single PID rather than a tree — log watchers do not have descendants
+// we own (they are themselves descendants of agent shells).
+func killOnePID(pid int) error {
+	if pid <= 0 {
+		return fmt.Errorf("invalid pid %d", pid)
+	}
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return p.Kill()
+}

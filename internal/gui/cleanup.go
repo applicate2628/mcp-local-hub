@@ -17,6 +17,7 @@ import (
 // `dry_run` to false.
 func registerCleanupRoutes(s *Server) {
 	s.mux.HandleFunc("/api/cleanup/orphans", s.requireSameOrigin(s.cleanupOrphansHandler))
+	s.mux.HandleFunc("/api/cleanup/log-watchers", s.requireSameOrigin(s.cleanupLogWatchersHandler))
 }
 
 // cleanupRequest is the JSON body for POST /api/cleanup/orphans.
@@ -88,6 +89,85 @@ func (s *Server) cleanupOrphansHandler(w http.ResponseWriter, r *http.Request) {
 		for _, o := range orphans {
 			if o.KillErr == "" {
 				resp.Killed++
+			} else {
+				resp.Skipped++
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// logWatcherRequest is the JSON body for POST /api/cleanup/log-watchers.
+//
+//   - DryRun=true     → preview; lists candidates, kills nothing.
+//   - DryRun=false    → kills matched processes (subject to IncludeLive).
+//   - IncludeLive     → also kill path-matched processes whose parent
+//                       is still alive. Default false: those almost
+//                       always represent CURRENT active agent sessions.
+//   - PathRegex       → optional override for the path-shape match.
+//   - OrphanGrepRegex → optional override for the orphan-grep token list.
+type logWatcherRequest struct {
+	DryRun          bool   `json:"dry_run"`
+	IncludeLive     bool   `json:"include_live"`
+	PathRegex       string `json:"path_regex"`
+	OrphanGrepRegex string `json:"orphan_grep_regex"`
+}
+
+// logWatcherResponse mirrors cleanupResponse — same shape so the GUI
+// can use one rendering pipeline for both Maintenance buttons.
+type logWatcherResponse struct {
+	Watchers []api.LogWatcher `json:"watchers"`
+	Killed   int              `json:"killed"`
+	Skipped  int              `json:"skipped"`
+}
+
+// cleanupLogWatchersHandler handles POST /api/cleanup/log-watchers.
+// Same method/auth/error contract as cleanupOrphansHandler, but the
+// detection target is orphan tail/grep/bash watcher pipelines spawned
+// by agent shell-snapshot launchers (Claude Code, codex CLI etc.) per
+// the brief at d:/dev/orphaned-log-watchers-report.md.
+func (s *Server) cleanupLogWatchersHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req logWatcherRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	watchers, err := s.cleanup.CleanupLogWatchers(api.LogWatcherCleanupOpts{
+		PathRegex:       req.PathRegex,
+		OrphanGrepRegex: req.OrphanGrepRegex,
+		IncludeLive:     req.IncludeLive,
+		DryRun:          req.DryRun,
+	})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"error": err.Error(),
+			"code":  "CLEANUP_LOG_WATCHERS_FAILED",
+		})
+		return
+	}
+
+	resp := logWatcherResponse{Watchers: watchers}
+	if !req.DryRun {
+		for _, wch := range watchers {
+			if wch.KillErr == "" {
+				// Mirror PS1 script semantics: a process whose parent
+				// is alive is SKIPPED unless IncludeLive is set, even
+				// in apply mode. The empty KillErr in that case means
+				// "we deliberately did not call kill", not "kill
+				// succeeded" — the API.CleanupLogWatchers function
+				// honors that distinction.
+				if wch.ParentAlive && !req.IncludeLive {
+					resp.Skipped++
+				} else {
+					resp.Killed++
+				}
 			} else {
 				resp.Skipped++
 			}

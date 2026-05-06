@@ -11,14 +11,20 @@ import (
 	"mcp-local-hub/internal/api"
 )
 
-// fakeCleanupAPI is the test seam for /api/cleanup/orphans. CleanupOrphansFn
-// is invoked once per request; tests assert what opts arrived.
+// fakeCleanupAPI is the test seam for both /api/cleanup/* routes. Tests
+// set whichever Fn they need; the unset one is left nil and tests must
+// not exercise that route.
 type fakeCleanupAPI struct {
-	CleanupOrphansFn func(opts api.CleanupOpts) ([]api.OrphanProcess, error)
+	CleanupOrphansFn     func(opts api.CleanupOpts) ([]api.OrphanProcess, error)
+	CleanupLogWatchersFn func(opts api.LogWatcherCleanupOpts) ([]api.LogWatcher, error)
 }
 
 func (f fakeCleanupAPI) CleanupOrphans(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
 	return f.CleanupOrphansFn(opts)
+}
+
+func (f fakeCleanupAPI) CleanupLogWatchers(opts api.LogWatcherCleanupOpts) ([]api.LogWatcher, error) {
+	return f.CleanupLogWatchersFn(opts)
 }
 
 // newCleanupTestServer wires a fake cleanup API into a Server with the
@@ -161,5 +167,109 @@ func TestCleanupOrphansHandler_RequiresSameOrigin(t *testing.T) {
 
 	if rr.Code == http.StatusOK {
 		t.Errorf("cross-origin request should be rejected; got 200")
+	}
+}
+
+// TestCleanupLogWatchersHandler_DryRun_OK posts dry_run=true and asserts
+// the returned watcher list comes from the API verbatim.
+func TestCleanupLogWatchersHandler_DryRun_OK(t *testing.T) {
+	gotOpts := api.LogWatcherCleanupOpts{}
+	want := []api.LogWatcher{
+		{PID: 1234, ParentPID: 555, ParentAlive: false, Name: "tail.exe", AgeSec: 3600,
+			Cmdline: `tail.exe -F /d/dev/.scratch/x.log`},
+	}
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		CleanupLogWatchersFn: func(opts api.LogWatcherCleanupOpts) ([]api.LogWatcher, error) {
+			gotOpts = opts
+			return want, nil
+		},
+	})
+
+	body := strings.NewReader(`{"dry_run": true, "include_live": false}`)
+	req := httptest.NewRequest("POST", "/api/cleanup/log-watchers", body)
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if !gotOpts.DryRun {
+		t.Errorf("LogWatcherCleanupOpts.DryRun = false, want true")
+	}
+	if gotOpts.IncludeLive {
+		t.Errorf("LogWatcherCleanupOpts.IncludeLive = true, want false")
+	}
+
+	var got struct {
+		Watchers []api.LogWatcher `json:"watchers"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v; body=%s", err, rr.Body.String())
+	}
+	if len(got.Watchers) != 1 || got.Watchers[0].PID != 1234 {
+		t.Errorf("watchers = %+v, want one with PID 1234", got.Watchers)
+	}
+}
+
+// TestCleanupLogWatchersHandler_Apply_SkipsLiveParent_KilledCount verifies
+// the apply-mode counter logic: a watcher whose parent is still alive
+// is NOT counted as killed when IncludeLive=false (it was deliberately
+// skipped by the API), even when KillErr is empty.
+func TestCleanupLogWatchersHandler_Apply_SkipsLiveParent_KilledCount(t *testing.T) {
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		CleanupLogWatchersFn: func(opts api.LogWatcherCleanupOpts) ([]api.LogWatcher, error) {
+			// API returns: one orphan (killed), one live-parent (skipped
+			// per IncludeLive=false), one dead-parent with kill error.
+			return []api.LogWatcher{
+				{PID: 1, ParentPID: 99, ParentAlive: false, Name: "tail.exe"},
+				{PID: 2, ParentPID: 100, ParentAlive: true, Name: "bash.exe"},
+				{PID: 3, ParentPID: 99, ParentAlive: false, Name: "grep.exe", KillErr: "no such process"},
+			}, nil
+		},
+	})
+
+	body := strings.NewReader(`{"dry_run": false, "include_live": false}`)
+	req := httptest.NewRequest("POST", "/api/cleanup/log-watchers", body)
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	var got struct {
+		Killed  int `json:"killed"`
+		Skipped int `json:"skipped"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Killed != 1 {
+		t.Errorf("killed = %d, want 1 (only the dead-parent orphan)", got.Killed)
+	}
+	if got.Skipped != 2 {
+		t.Errorf("skipped = %d, want 2 (live-parent skipped + kill-err)", got.Skipped)
+	}
+}
+
+// TestCleanupLogWatchersHandler_GET_405 — same destructive-op gate as
+// orphans handler.
+func TestCleanupLogWatchersHandler_GET_405(t *testing.T) {
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		CleanupLogWatchersFn: func(opts api.LogWatcherCleanupOpts) ([]api.LogWatcher, error) {
+			t.Fatal("CleanupLogWatchers must not be called on GET")
+			return nil, nil
+		},
+	})
+	req := httptest.NewRequest("GET", "/api/cleanup/log-watchers", nil)
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status: got %d, want 405", rr.Code)
 	}
 }

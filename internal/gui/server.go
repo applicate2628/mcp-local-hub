@@ -285,12 +285,17 @@ type secretsAPI interface {
 // inject a fake without spinning up real Win32_Process scans.
 type cleanupAPI interface {
 	CleanupOrphans(opts api.CleanupOpts) ([]api.OrphanProcess, error)
+	CleanupLogWatchers(opts api.LogWatcherCleanupOpts) ([]api.LogWatcher, error)
 }
 
 type realCleanupAPI struct{}
 
 func (realCleanupAPI) CleanupOrphans(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
 	return api.NewAPI().CleanupOrphans(opts)
+}
+
+func (realCleanupAPI) CleanupLogWatchers(opts api.LogWatcherCleanupOpts) ([]api.LogWatcher, error) {
+	return api.NewAPI().CleanupLogWatchers(opts)
 }
 
 type realSecretsAPI struct{}
