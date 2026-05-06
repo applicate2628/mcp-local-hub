@@ -68,10 +68,16 @@ export async function cleanBackups(): Promise<{ cleaned: number }> {
 // Maintenance section helpers — Cleanup-5 per
 // docs/superpowers/specs/2026-05-06-cleanup-buttons-design.md.
 //
-// Each cleanup endpoint accepts the same body shape: dry_run + filter
-// flags. Dry-run mode returns the candidate list without calling kill;
-// apply mode (dry_run=false) returns the same list with kill_err
-// populated for any per-PID failures and counters for the summary.
+// Each cleanup endpoint accepts the same body shape: apply + filter
+// flags. apply=false (or omitted) lists candidates without killing
+// (dry-run); apply=true returns the same list with kill_err populated
+// for any per-PID failures and counters for the summary.
+//
+// Codex Cloud bot P2 on PR #131 / kosyak
+// 2026-05-07-destructive-endpoint-with-unsafe-zero-value-default.md:
+// the prior wire used `dry_run` whose Go zero-value (false) inverted
+// safety polarity — `{}` body triggered the kill path. Switched to
+// `apply` so the zero-value path is safe.
 
 export type OrphanProcess = {
   pid: number;
@@ -105,25 +111,25 @@ export type CleanupLogWatchersResponse = {
   skipped: number;
 };
 
-export async function cleanupOrphans(dryRun: boolean): Promise<CleanupOrphansResponse> {
+export async function cleanupOrphans(apply: boolean): Promise<CleanupOrphansResponse> {
   const res = await fetch("/api/cleanup/orphans", {
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ dry_run: dryRun }),
+    body: JSON.stringify({ apply }),
   });
   return await jsonOrThrow(res);
 }
 
 export async function cleanupLogWatchers(
-  dryRun: boolean,
+  apply: boolean,
   includeLive: boolean,
 ): Promise<CleanupLogWatchersResponse> {
   const res = await fetch("/api/cleanup/log-watchers", {
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ dry_run: dryRun, include_live: includeLive }),
+    body: JSON.stringify({ apply, include_live: includeLive }),
   });
   return await jsonOrThrow(res);
 }

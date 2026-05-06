@@ -22,14 +22,23 @@ func registerCleanupRoutes(s *Server) {
 
 // cleanupRequest is the JSON body for POST /api/cleanup/orphans.
 //
-//   - DryRun=true  → preview; lists candidates, kills nothing.
-//   - DryRun=false → execute; kills the matched processes.
-//   - MinAgeSec    → ignore processes younger than this. 0 → backend
-//                    default (60s). Anti-foot-gun for legitimate
-//                    in-flight installs.
-//   - Server       → optional manifest-name filter. Empty → all manifests.
+//   - Apply=false → preview (DRY-RUN); lists candidates, kills nothing.
+//                   This is the SAFE default — Go's zero value for
+//                   omitted bool is false, so `{}` or any body that
+//                   omits `apply` lands on the dry-run path.
+//   - Apply=true  → execute; kills the matched processes. Requires
+//                   explicit operator opt-in.
+//   - MinAgeSec   → ignore processes younger than this. 0 → backend
+//                   default (60s). Anti-foot-gun for legitimate
+//                   in-flight installs.
+//   - Server      → optional manifest-name filter. Empty → all manifests.
+//
+// Codex Cloud bot P2 on PR #131 / kosyak
+// 2026-05-07-destructive-endpoint-with-unsafe-zero-value-default.md:
+// the prior `DryRun bool` shape inverted safety polarity — a `{}` body
+// triggered the kill path. Renamed to `Apply` so zero value = safe.
 type cleanupRequest struct {
-	DryRun    bool   `json:"dry_run"`
+	Apply     bool   `json:"apply"`
 	MinAgeSec int64  `json:"min_age_sec"`
 	Server    string `json:"server"`
 }
@@ -94,10 +103,13 @@ func (s *Server) cleanupOrphansHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Empty ManifestDir → embed-first path (mirrors the convention in
 	// internal/gui/extract_manifest.go and migrate.go).
+	// api.CleanupOpts still uses DryRun semantics — flip Apply at the
+	// boundary so the wire shape is safe-by-default while the backend
+	// helper keeps its existing contract.
 	orphans, err := s.cleanup.CleanupOrphans(api.CleanupOpts{
 		ManifestDir: "",
 		Server:      req.Server,
-		DryRun:      req.DryRun,
+		DryRun:      !req.Apply,
 		MinAgeSec:   req.MinAgeSec,
 	})
 	if err != nil {
@@ -109,7 +121,7 @@ func (s *Server) cleanupOrphansHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := cleanupResponse{Orphans: orphans}
-	if !req.DryRun {
+	if req.Apply {
 		for _, o := range orphans {
 			if o.KillErr == "" {
 				resp.Killed++
@@ -123,15 +135,22 @@ func (s *Server) cleanupOrphansHandler(w http.ResponseWriter, r *http.Request) {
 
 // logWatcherRequest is the JSON body for POST /api/cleanup/log-watchers.
 //
-//   - DryRun=true     → preview; lists candidates, kills nothing.
-//   - DryRun=false    → kills matched processes (subject to IncludeLive).
+//   - Apply=false     → preview (DRY-RUN); lists candidates, kills
+//                       nothing. SAFE default — Go's zero value for
+//                       omitted bool is false.
+//   - Apply=true      → kills matched processes (subject to IncludeLive).
+//                       Requires explicit operator opt-in.
 //   - IncludeLive     → also kill path-matched processes whose parent
 //                       is still alive. Default false: those almost
 //                       always represent CURRENT active agent sessions.
 //   - PathRegex       → optional override for the path-shape match.
 //   - OrphanGrepRegex → optional override for the orphan-grep token list.
+//
+// Codex Cloud bot P2 on PR #131 / kosyak
+// 2026-05-07-destructive-endpoint-with-unsafe-zero-value-default.md:
+// renamed from DryRun bool so the zero-value path is safe.
 type logWatcherRequest struct {
-	DryRun          bool   `json:"dry_run"`
+	Apply           bool   `json:"apply"`
 	IncludeLive     bool   `json:"include_live"`
 	PathRegex       string `json:"path_regex"`
 	OrphanGrepRegex string `json:"orphan_grep_regex"`
@@ -163,11 +182,13 @@ func (s *Server) cleanupLogWatchersHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// api.LogWatcherCleanupOpts still uses DryRun semantics — flip
+	// Apply at the boundary so the wire shape is safe-by-default.
 	watchers, err := s.cleanup.CleanupLogWatchers(api.LogWatcherCleanupOpts{
 		PathRegex:       req.PathRegex,
 		OrphanGrepRegex: req.OrphanGrepRegex,
 		IncludeLive:     req.IncludeLive,
-		DryRun:          req.DryRun,
+		DryRun:          !req.Apply,
 	})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
@@ -178,7 +199,7 @@ func (s *Server) cleanupLogWatchersHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	resp := logWatcherResponse{Watchers: watchers}
-	if !req.DryRun {
+	if req.Apply {
 		for _, wch := range watchers {
 			if wch.KillErr == "" {
 				// Mirror PS1 script semantics: a process whose parent

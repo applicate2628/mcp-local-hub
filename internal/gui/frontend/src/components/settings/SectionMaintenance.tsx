@@ -70,7 +70,11 @@ function CardOrphanMcpServers(): preact.JSX.Element {
   async function preview() {
     setState({ kind: "loading" });
     try {
-      const r = await cleanupOrphans(true);
+      // apply=false → dry-run / preview path on the server. Wire-shape
+      // change per Codex bot P2 on PR #131 (kosyak
+      // 2026-05-07-destructive-endpoint-with-unsafe-zero-value-default.md):
+      // safe zero-value polarity.
+      const r = await cleanupOrphans(false);
       setState({ kind: "preview", orphans: r.orphans });
     } catch (e) {
       setState({ kind: "error", error: friendlyError(e) });
@@ -84,7 +88,8 @@ function CardOrphanMcpServers(): preact.JSX.Element {
     if (!confirm(`Kill ${n} orphan MCP server process${n === 1 ? "" : "es"}?`)) return;
     setState({ kind: "loading" });
     try {
-      const r = await cleanupOrphans(false);
+      // apply=true → explicit destructive opt-in.
+      const r = await cleanupOrphans(true);
       setState({ kind: "applied", killed: r.killed, skipped: r.skipped });
     } catch (e) {
       setState({ kind: "error", error: friendlyError(e) });
@@ -156,7 +161,10 @@ function CardOrphanLogWatchers(): preact.JSX.Element {
   async function preview() {
     setState({ kind: "loading" });
     try {
-      const r = await cleanupLogWatchers(true, includeLive);
+      // apply=false → preview / dry-run. Same wire-shape change as the
+      // orphan-MCP card per Codex bot P2 / kosyak
+      // 2026-05-07-destructive-endpoint-with-unsafe-zero-value-default.md.
+      const r = await cleanupLogWatchers(false, includeLive);
       setState({ kind: "preview", watchers: r.watchers });
     } catch (e) {
       setState({ kind: "error", error: asError(e) });
@@ -173,7 +181,8 @@ function CardOrphanLogWatchers(): preact.JSX.Element {
     if (!confirm(`Kill ${n} orphan log watcher process${n === 1 ? "" : "es"}?${includeLive ? " (Includes live-parent processes — those are usually CURRENT active agent sessions.)" : ""}`)) return;
     setState({ kind: "loading" });
     try {
-      const r = await cleanupLogWatchers(false, includeLive);
+      // apply=true → explicit destructive opt-in.
+      const r = await cleanupLogWatchers(true, includeLive);
       setState({ kind: "applied", killed: r.killed, skipped: r.skipped });
     } catch (e) {
       setState({ kind: "error", error: asError(e) });

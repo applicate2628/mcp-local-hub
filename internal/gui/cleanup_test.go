@@ -50,8 +50,11 @@ func newCleanupTestServer(t *testing.T, f fakeCleanupAPI) *Server {
 	return s
 }
 
-// TestCleanupOrphansHandler_DryRun_OK posts dry_run=true and asserts the
-// returned orphan list comes from the API verbatim, with HTTP 200 + JSON.
+// TestCleanupOrphansHandler_DryRun_OK posts apply=false (preview /
+// dry-run) and asserts the returned orphan list comes from the API
+// verbatim, with HTTP 200 + JSON. Wire-shape uses `apply` so the
+// zero-value path is safe (Codex bot P2 — kosyak
+// 2026-05-07-destructive-endpoint-with-unsafe-zero-value-default.md).
 func TestCleanupOrphansHandler_DryRun_OK(t *testing.T) {
 	gotOpts := api.CleanupOpts{}
 	want := []api.OrphanProcess{
@@ -64,7 +67,7 @@ func TestCleanupOrphansHandler_DryRun_OK(t *testing.T) {
 		},
 	})
 
-	body := strings.NewReader(`{"dry_run": true, "min_age_sec": 60}`)
+	body := strings.NewReader(`{"apply": false, "min_age_sec": 60}`)
 	req := httptest.NewRequest("POST", "/api/cleanup/orphans", body)
 	req.Header.Set("Origin", "http://127.0.0.1:9125")
 	req.Header.Set("Content-Type", "application/json")
@@ -75,7 +78,7 @@ func TestCleanupOrphansHandler_DryRun_OK(t *testing.T) {
 		t.Fatalf("status: got %d, want 200; body=%s", rr.Code, rr.Body.String())
 	}
 	if !gotOpts.DryRun {
-		t.Errorf("CleanupOpts.DryRun = false, want true")
+		t.Errorf("CleanupOpts.DryRun = false, want true (apply=false → handler flips)")
 	}
 	if gotOpts.MinAgeSec != 60 {
 		t.Errorf("CleanupOpts.MinAgeSec = %d, want 60", gotOpts.MinAgeSec)
@@ -92,8 +95,8 @@ func TestCleanupOrphansHandler_DryRun_OK(t *testing.T) {
 	}
 }
 
-// TestCleanupOrphansHandler_Apply_OK posts dry_run=false and asserts the
-// API was invoked with DryRun=false (kill mode).
+// TestCleanupOrphansHandler_Apply_OK posts apply=true (explicit kill
+// mode) and asserts the API was invoked with DryRun=false (kill).
 func TestCleanupOrphansHandler_Apply_OK(t *testing.T) {
 	gotOpts := api.CleanupOpts{}
 	s := newCleanupTestServer(t, fakeCleanupAPI{
@@ -103,7 +106,7 @@ func TestCleanupOrphansHandler_Apply_OK(t *testing.T) {
 		},
 	})
 
-	body := strings.NewReader(`{"dry_run": false}`)
+	body := strings.NewReader(`{"apply": true}`)
 	req := httptest.NewRequest("POST", "/api/cleanup/orphans", body)
 	req.Header.Set("Origin", "http://127.0.0.1:9125")
 	req.Header.Set("Content-Type", "application/json")
@@ -114,7 +117,37 @@ func TestCleanupOrphansHandler_Apply_OK(t *testing.T) {
 		t.Fatalf("status: got %d, want 200; body=%s", rr.Code, rr.Body.String())
 	}
 	if gotOpts.DryRun {
-		t.Errorf("CleanupOpts.DryRun = true, want false (apply mode)")
+		t.Errorf("CleanupOpts.DryRun = true, want false (apply=true → kill mode)")
+	}
+}
+
+// TestCleanupOrphansHandler_EmptyBody_DryRun is the regression test
+// for Codex bot P2 / kosyak
+// 2026-05-07-destructive-endpoint-with-unsafe-zero-value-default.md:
+// `{}` (or any body that omits `apply`) MUST land on the dry-run
+// path because `Apply` zero-value is false. Older / buggy clients
+// must not accidentally trigger the destructive path.
+func TestCleanupOrphansHandler_EmptyBody_DryRun(t *testing.T) {
+	gotOpts := api.CleanupOpts{}
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		CleanupOrphansFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+			gotOpts = opts
+			return []api.OrphanProcess{}, nil
+		},
+	})
+
+	body := strings.NewReader(`{}`)
+	req := httptest.NewRequest("POST", "/api/cleanup/orphans", body)
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if !gotOpts.DryRun {
+		t.Errorf("empty body must land on DRY-RUN path (CleanupOpts.DryRun=true); got DryRun=false")
 	}
 }
 
@@ -170,7 +203,7 @@ func TestCleanupOrphansHandler_RequiresSameOrigin(t *testing.T) {
 		},
 	})
 
-	body := strings.NewReader(`{"dry_run": true}`)
+	body := strings.NewReader(`{"apply": false}`)
 	req := httptest.NewRequest("POST", "/api/cleanup/orphans", body)
 	req.Header.Set("Origin", "http://evil.example.com")
 	req.Header.Set("Content-Type", "application/json")
@@ -197,7 +230,7 @@ func TestCleanupLogWatchersHandler_DryRun_OK(t *testing.T) {
 		},
 	})
 
-	body := strings.NewReader(`{"dry_run": true, "include_live": false}`)
+	body := strings.NewReader(`{"apply": false, "include_live": false}`)
 	req := httptest.NewRequest("POST", "/api/cleanup/log-watchers", body)
 	req.Header.Set("Origin", "http://127.0.0.1:9125")
 	req.Header.Set("Content-Type", "application/json")
@@ -242,7 +275,7 @@ func TestCleanupLogWatchersHandler_Apply_SkipsLiveParent_KilledCount(t *testing.
 		},
 	})
 
-	body := strings.NewReader(`{"dry_run": false, "include_live": false}`)
+	body := strings.NewReader(`{"apply": true, "include_live": false}`)
 	req := httptest.NewRequest("POST", "/api/cleanup/log-watchers", body)
 	req.Header.Set("Origin", "http://127.0.0.1:9125")
 	req.Header.Set("Content-Type", "application/json")
@@ -283,7 +316,7 @@ func TestCleanupOrphansHandler_Unsupported_501(t *testing.T) {
 		},
 	})
 
-	body := strings.NewReader(`{"dry_run": true}`)
+	body := strings.NewReader(`{"apply": false}`)
 	req := httptest.NewRequest("POST", "/api/cleanup/orphans", body)
 	req.Header.Set("Origin", "http://127.0.0.1:9125")
 	req.Header.Set("Content-Type", "application/json")
