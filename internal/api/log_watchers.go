@@ -215,6 +215,34 @@ func compileWatcherRegex(user, fallback string) (*regexp.Regexp, error) {
 	return regexp.Compile(src)
 }
 
+// effectiveParentAlive answers "is this process's recorded parent
+// still its meaningful parent" — accounting for POSIX init/subreaper
+// reparenting that makes the bare `pidSet[ppid]` check insufficient.
+//
+// Codex Cloud bot P1 on PR #131 / kosyak
+// 2026-05-07-posix-reparenting-defeats-parent-alive-orphan-heuristic.md:
+// when an agent shell exits on POSIX, the kernel reparents its
+// descendants to PID 1 (init) — which is always alive — so a naive
+// `pidSet[ppid]` returns true even though the original parent is gone.
+// Effect: default Apply path with IncludeLive=false skips the very
+// orphans we want to clean. Treat ppid==1 on POSIX as effectively
+// orphan. Windows does not auto-reparent, so the bare check stays
+// correct there.
+func effectiveParentAlive(ppid int, pidSet map[int]bool) bool {
+	if ppid == 0 {
+		return false
+	}
+	if !pidSet[ppid] {
+		return false
+	}
+	if runtime.GOOS != "windows" && ppid == 1 {
+		// POSIX init / systemd as PID 1 has adopted us — original
+		// parent already exited. Classify as orphan.
+		return false
+	}
+	return true
+}
+
 // filterWatcherCandidates is the platform-agnostic filter step. Two
 // passes are unioned by PID:
 //   1. Path-matched: process name in watcherProcessNames + cmdline
@@ -235,7 +263,7 @@ func filterWatcherCandidates(rows []processRow, pidSet map[int]bool, pathRe, orp
 			matched = true
 		}
 		if !matched && strings.HasPrefix(strings.ToLower(r.Name), "grep") {
-			parentAlive := r.ParentPID != 0 && pidSet[r.ParentPID]
+			parentAlive := effectiveParentAlive(r.ParentPID, pidSet)
 			if !parentAlive && orphanRe.MatchString(r.Cmdline) {
 				matched = true
 			}
@@ -243,7 +271,7 @@ func filterWatcherCandidates(rows []processRow, pidSet map[int]bool, pathRe, orp
 		if !matched {
 			continue
 		}
-		parentAlive := r.ParentPID != 0 && pidSet[r.ParentPID]
+		parentAlive := effectiveParentAlive(r.ParentPID, pidSet)
 		ageSec := int64(0)
 		if r.StartTime > 0 {
 			ageSec = now - r.StartTime
