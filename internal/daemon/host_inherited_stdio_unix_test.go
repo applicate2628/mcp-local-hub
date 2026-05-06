@@ -121,22 +121,35 @@ func TestStdioHostInheritedStdioDescendantDoesNotWedgeChildExited(t *testing.T) 
 // drain wait) so it doesn't issue a fresh PID-based pkill/kill against
 // a possibly-reused PID.
 //
-// Codex CLI xhigh re-review on 479cbc3 (P2): the original test could
-// not distinguish "kill was skipped" from "kill happened against a
-// reused PID with permission denied". This version explicitly:
-//   1. asserts ChildExited() is STILL OPEN at Stop time (proving we
-//      are inside the procExited-closed / childExited-open window
-//      that the gate protects).
-//   2. snapshots killProcessTreeCalls before Stop and asserts it did
-//      NOT increment, proving the kill-skip path was actually taken.
+// Two assertions, both load-bearing:
+//   1. ChildExited() is STILL OPEN at Stop time — proves we are inside
+//      the procExited-closed / childExited-open window the gate
+//      protects.
+//   2. killProcessTreeCalls counter does NOT increment during Stop —
+//      proves the kill was actually skipped, not "happened to do
+//      nothing against a recycled PID".
 //
-// Test approach: spawn a /bin/sh that exits immediately, give the
-// watcher a moment to reach Phase 1 (Process.Wait returned, procExited
-// closed), then call Stop while childExited is still open.
+// Codex Cloud bot P1 on cd2c118 flagged that a fast-exit child
+// (`exit 0` with no descendant) collapses the window on fast machines,
+// making assertion #1 nondeterministic. This redesign uses the same
+// inherited-stdio descendant pattern as the deadlock test directly
+// above: `sleep 60 &` keeps stdout/stderr open after /bin/sh exits, so
+// Phase 2 hits pipeDrainTimeout (5s). The procExited-closed /
+// childExited-open window is then GUARANTEED open for ~5 seconds
+// regardless of machine speed, far larger than any scheduler jitter.
+// kosyak: 2026-05-06-claude-brittle-test-assertion-non-deterministic-window.md
 func TestStdioHostProcExitedGateSkipsKillAfterReap(t *testing.T) {
+	tmp := t.TempDir()
+	pidFile := filepath.Join(tmp, "descendant.pid")
+
+	// sleep 60 inherits /bin/sh's stdout/stderr, holding our pipes open
+	// after /bin/sh exits — Phase 2 then hits pipeDrainTimeout, opening
+	// the procExited→childExited window for the full pipeDrainTimeout.
+	script := `sleep 60 & echo $! > ` + pidFile + `; exit 0`
+
 	h, err := NewStdioHost(HostConfig{
 		Command: "/bin/sh",
-		Args:    []string{"-c", "exit 0"},
+		Args:    []string{"-c", script},
 	})
 	if err != nil {
 		t.Fatalf("NewStdioHost: %v", err)
@@ -144,34 +157,29 @@ func TestStdioHostProcExitedGateSkipsKillAfterReap(t *testing.T) {
 	if err := h.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
+	t.Cleanup(func() {
+		if data, err := os.ReadFile(pidFile); err == nil {
+			if pid, perr := strconv.Atoi(strings.TrimSpace(string(data))); perr == nil {
+				_ = syscall.Kill(pid, syscall.SIGKILL)
+			}
+		}
+	})
 
-	// Wait for Phase 1 (Process.Wait → procExited close) but NOT for
-	// Phase 4 (childExited close). The window between these is what the
-	// procExited gate protects.
-	procDeadline := time.After(2 * time.Second)
-	for {
-		select {
-		case <-procDeadline:
-			t.Fatal("procExited did not close within 2s of immediate exit-0 child")
-		default:
-		}
-		select {
-		case <-h.procExited:
-			goto procClosed
-		default:
-			time.Sleep(10 * time.Millisecond)
-		}
+	// Wait for procExited (Phase 1 done — /bin/sh OS-exited).
+	select {
+	case <-h.procExited:
+	case <-time.After(2 * time.Second):
+		t.Fatal("procExited did not close within 2s of /bin/sh exit-0")
 	}
-procClosed:
 
-	// Assert we are actually in the procExited-closed / childExited-open
-	// window that the gate protects (Codex CLI xhigh re-review P2 #2).
-	// Without this assertion, the test would silently pass on fast
-	// machines where Phase 4 runs before we even get here, and the
-	// kill-skip path would never be exercised.
+	// ChildExited MUST still be open: Phase 2 is now blocked on
+	// pipeDrainTimeout because the descendant `sleep 60` holds our
+	// stdout/stderr pipes open. This is GUARANTEED by the
+	// inherited-stdio pattern — unlike a fast-exit child where the
+	// window collapses on fast machines (Cloud bot P1 on cd2c118).
 	select {
 	case <-h.ChildExited():
-		t.Fatal("ChildExited closed before Stop — test cannot prove kill-skip path; window collapsed")
+		t.Fatal("ChildExited closed unexpectedly while sleep descendant should be holding pipes — Phase 2 escape route under test")
 	default:
 	}
 
@@ -191,8 +199,8 @@ procClosed:
 	}
 
 	// Prove kill was actually skipped, not just "succeeded against
-	// nothing". This is the load-bearing assertion for P2 #2 — without
-	// it, a regression that issues a kill against a recycled PID would
+	// nothing". Load-bearing assertion for P2 #2 — without it, a
+	// regression that issues a kill against a recycled PID would still
 	// pass the test.
 	if killsAfter := killProcessTreeCalls.Load(); killsAfter != killsBefore {
 		t.Errorf("killProcessTree was invoked %d times during Stop after procExited closed (want 0); kill-skip gate is broken", killsAfter-killsBefore)
