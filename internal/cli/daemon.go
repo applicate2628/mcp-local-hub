@@ -222,14 +222,15 @@ See also: install, logs, restart, status.`,
 				go func() { errCh <- srv.ListenAndServe() }()
 				select {
 				case err := <-errCh:
-					// Codex CLI xhigh re-review on 479cbc3 (P2): embed
-					// Stop's error in the returned exit message so it
-					// reaches the scheduler's exit log, not just stderr
-					// which scheduled paths can drop. Stderr stays as a
-					// secondary diagnostic channel for interactive runs.
+					// Codex CLI xhigh re-review on 479cbc3 (P2 #4) and
+					// kosyak 2026-05-06-claude-stop-error-durability-sham-fix.md:
+					// Use h.LogSupervisorEvent so Stop errors land in the
+					// rotated LogPath (durable across scheduled paths) AND
+					// stderr (interactive). Cobra exit message goes through
+					// os.Stderr alone, which scheduled paths can drop.
 					stopErr := h.Stop()
 					if stopErr != nil {
-						fmt.Fprintf(os.Stderr, "warn: %v\n", stopErr)
+						h.LogSupervisorEvent(fmt.Sprintf("stop after http server error: %v (server err: %v)", stopErr, err))
 					}
 					if errors.Is(err, http.ErrServerClosed) {
 						if stopErr != nil {
@@ -246,15 +247,12 @@ See also: install, logs, restart, status.`,
 					// and return; then Shutdown can complete without waiting on long-lived SSE.
 					stopErr := h.Stop()
 					if stopErr != nil {
-						fmt.Fprintf(os.Stderr, "warn: %v\n", stopErr)
+						h.LogSupervisorEvent(fmt.Sprintf("stop after ctx.Done graceful shutdown: %v", stopErr))
 					}
 					shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 					defer cancel()
 					_ = srv.Shutdown(shutdownCtx)
 					if stopErr != nil {
-						// Even on graceful ctx.Done shutdown, an unclean
-						// teardown is a non-zero exit so the scheduler logs
-						// it (Codex CLI xhigh P2 — durable visibility).
 						return fmt.Errorf("graceful shutdown: %w", stopErr)
 					}
 					return nil
@@ -269,9 +267,11 @@ See also: install, logs, restart, status.`,
 					// respawns the child. Scheduler owns the retry budget; we
 					// do not add in-process respawn logic here.
 					stopErr := h.Stop()
+					exitMsg := fmt.Sprintf("child exited unexpectedly: %s", formatChildExit(h.ExitState()))
 					if stopErr != nil {
-						fmt.Fprintf(os.Stderr, "warn: %v\n", stopErr)
+						exitMsg += fmt.Sprintf("; stop: %v", stopErr)
 					}
+					h.LogSupervisorEvent(exitMsg)
 					shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 					defer cancel()
 					_ = srv.Shutdown(shutdownCtx)

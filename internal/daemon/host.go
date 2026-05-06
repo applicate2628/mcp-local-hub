@@ -378,6 +378,40 @@ func (h *StdioHost) ChildExited() <-chan struct{} {
 	return h.childExited
 }
 
+// LogSupervisorEvent appends a structured "supervisor: <event>" line
+// to the daemon's LogPath (if configured) AND mirrors to os.Stderr.
+// Designed for callers in the cobra supervisor (internal/cli/daemon.go)
+// to record Stop errors and other late-stage events with end-to-end
+// durability — Codex CLI xhigh re-review on 479cbc3 (P2 #4): stderr
+// alone is not durable under scheduled paths (Task Scheduler etc. can
+// drop daemon stderr), and embedding the error in the cobra exit
+// message routes it through the same os.Stderr channel via
+// cmd.PrintErrln, providing zero additional durability. The rotated
+// LogPath file IS durable because it is the same file `mcphub logs`
+// reads from, the same file the scheduler does NOT need to redirect
+// stderr to capture, and the same file rotated under the daemon's
+// own retention.
+//
+// Re-opens the log file on each call rather than reusing h.logFile so
+// it remains usable AFTER Stop has closed h.logFile (the supervisor
+// callers run after Stop returns).
+//
+// Best effort: open / write errors are absorbed; the stderr leg fires
+// regardless so the operator's interactive console always sees the
+// event.
+func (h *StdioHost) LogSupervisorEvent(event string) {
+	fmt.Fprintf(os.Stderr, "warn: supervisor: %s\n", event)
+	if h.cfg.LogPath == "" {
+		return
+	}
+	f, err := os.OpenFile(h.cfg.LogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = fmt.Fprintf(f, "[%s] supervisor: %s\n", time.Now().UTC().Format(time.RFC3339Nano), event)
+}
+
 // ExitState returns the subprocess's ProcessState after it has exited,
 // or nil before exit. Mirrors HTTPHost.ExitState() so the supervisor
 // can capture exit code / signal info for diagnostics. Codex bot P2
