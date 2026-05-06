@@ -121,11 +121,18 @@ func TestStdioHostInheritedStdioDescendantDoesNotWedgeChildExited(t *testing.T) 
 // drain wait) so it doesn't issue a fresh PID-based pkill/kill against
 // a possibly-reused PID.
 //
+// Codex CLI xhigh re-review on 479cbc3 (P2): the original test could
+// not distinguish "kill was skipped" from "kill happened against a
+// reused PID with permission denied". This version explicitly:
+//   1. asserts ChildExited() is STILL OPEN at Stop time (proving we
+//      are inside the procExited-closed / childExited-open window
+//      that the gate protects).
+//   2. snapshots killProcessTreeCalls before Stop and asserts it did
+//      NOT increment, proving the kill-skip path was actually taken.
+//
 // Test approach: spawn a /bin/sh that exits immediately, give the
 // watcher a moment to reach Phase 1 (Process.Wait returned, procExited
-// closed), then call Stop. Assert Stop succeeds without error and
-// returns within bounded time. The kill-skip path is exercised because
-// procExited is closed at that point but childExited is not yet.
+// closed), then call Stop while childExited is still open.
 func TestStdioHostProcExitedGateSkipsKillAfterReap(t *testing.T) {
 	h, err := NewStdioHost(HostConfig{
 		Command: "/bin/sh",
@@ -157,6 +164,19 @@ func TestStdioHostProcExitedGateSkipsKillAfterReap(t *testing.T) {
 	}
 procClosed:
 
+	// Assert we are actually in the procExited-closed / childExited-open
+	// window that the gate protects (Codex CLI xhigh re-review P2 #2).
+	// Without this assertion, the test would silently pass on fast
+	// machines where Phase 4 runs before we even get here, and the
+	// kill-skip path would never be exercised.
+	select {
+	case <-h.ChildExited():
+		t.Fatal("ChildExited closed before Stop — test cannot prove kill-skip path; window collapsed")
+	default:
+	}
+
+	killsBefore := killProcessTreeCalls.Load()
+
 	// Stop now. The kill-skip select inside Stop reads procExited
 	// (closed) and skips killProcessTree, avoiding the PID-reuse hazard.
 	stopDone := make(chan error, 1)
@@ -168,5 +188,13 @@ procClosed:
 		}
 	case <-time.After(pipeDrainTimeout + 3*time.Second):
 		t.Fatalf("Stop did not return within bounded window after procExited gate")
+	}
+
+	// Prove kill was actually skipped, not just "succeeded against
+	// nothing". This is the load-bearing assertion for P2 #2 — without
+	// it, a regression that issues a kill against a recycled PID would
+	// pass the test.
+	if killsAfter := killProcessTreeCalls.Load(); killsAfter != killsBefore {
+		t.Errorf("killProcessTree was invoked %d times during Stop after procExited closed (want 0); kill-skip gate is broken", killsAfter-killsBefore)
 	}
 }

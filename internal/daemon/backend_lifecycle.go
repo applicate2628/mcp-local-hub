@@ -116,10 +116,13 @@ func (h *StdioHost) SendRPC(ctx context.Context, body []byte) ([]byte, error) {
 
 	// Prefer a ready subprocess response over child-exit so a valid
 	// final reply is not dropped when the child writes its last
-	// JSON-RPC response and exits before the select picks. Mirrors the
-	// HTTP path at handlePOST (internal/daemon/host.go) — Codex CLI
-	// xhigh review on e26209a flagged the missing guard here as a P2
-	// architecture finding.
+	// JSON-RPC response and exits before the select picks. Codex CLI
+	// xhigh re-review on 479cbc3 (P2): a single non-blocking pre-check
+	// is insufficient because respCh may fill BETWEEN the pre-check
+	// and the blocking select while childExited/done/ctx is also
+	// ready, and Go's select would choose non-deterministically. The
+	// fix below also re-checks respCh inside each failure arm so a
+	// race-filled response wins over the failure verdict.
 	select {
 	case resp := <-respCh:
 		return []byte(resp), nil
@@ -130,8 +133,18 @@ func (h *StdioHost) SendRPC(ctx context.Context, body []byte) ([]byte, error) {
 	case resp := <-respCh:
 		return []byte(resp), nil
 	case <-h.done:
+		select {
+		case resp := <-respCh:
+			return []byte(resp), nil
+		default:
+		}
 		return nil, errors.New("backend host stopped")
 	case <-h.childExited:
+		select {
+		case resp := <-respCh:
+			return []byte(resp), nil
+		default:
+		}
 		return nil, errors.New("backend subprocess exited")
 	case <-ctx.Done():
 		return nil, ctx.Err()

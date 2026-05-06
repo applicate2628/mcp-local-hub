@@ -176,14 +176,25 @@ func (p *LazyProxy) Stop(ctx context.Context) error {
 		p.endpoint = nil
 	}
 	p.mu.Unlock()
-	if stopErr := p.cfg.Lifecycle.Stop(); stopErr != nil {
+	stopErr := p.cfg.Lifecycle.Stop()
+	if stopErr != nil {
 		fmt.Fprintf(os.Stderr, "warn: lazy_proxy: lifecycle stop: %v\n", stopErr)
 	}
 	p.gate.Forget(p.inflightKey())
 	if p.server != nil {
-		return p.server.Shutdown(ctx)
+		shutdownErr := p.server.Shutdown(ctx)
+		// Codex CLI xhigh re-review on 479cbc3 (P2): embed lifecycle
+		// stop error in the returned err so callers get durable
+		// visibility, not just stderr (which scheduled paths drop).
+		if shutdownErr != nil && stopErr != nil {
+			return fmt.Errorf("%w; lifecycle stop: %v", shutdownErr, stopErr)
+		}
+		if shutdownErr != nil {
+			return shutdownErr
+		}
+		return stopErr
 	}
-	return nil
+	return stopErr
 }
 
 func (p *LazyProxy) inflightKey() string {
@@ -482,8 +493,14 @@ func (p *LazyProxy) onSendFailure(err error) {
 	// if the child already exited on its own. This invalidates the impl's
 	// cached host so any concurrent Materialize that slips in after the
 	// next Forget() will re-spawn rather than reuse the dead host.
+	//
+	// Codex CLI xhigh re-review on 479cbc3 (P2): embed any lifecycle
+	// stop error into the registry message below so it survives where
+	// stderr might not — the LifecycleFailed registry write is the
+	// canonical durable surface for lazy-proxy failure attribution.
 	if stopErr := p.cfg.Lifecycle.Stop(); stopErr != nil {
 		fmt.Fprintf(os.Stderr, "warn: lazy_proxy: lifecycle stop after failure: %v\n", stopErr)
+		err = fmt.Errorf("%w; lifecycle stop: %v", err, stopErr)
 	}
 	p.gate.Forget(p.inflightKey())
 	_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycle(

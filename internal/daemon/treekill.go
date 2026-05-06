@@ -5,9 +5,19 @@ import (
 	"os/exec"
 	"runtime"
 	"strconv"
+	"sync/atomic"
 
 	"mcp-local-hub/internal/process"
 )
+
+// killProcessTreeCalls is a test-observable counter incremented on each
+// killProcessTree invocation. Tests use it to assert that a kill-skip
+// path (e.g. Stop's procExited gate) actually skipped the kill rather
+// than just happening to "succeed" — Codex CLI xhigh P2 re-review on
+// 479cbc3 flagged that the procExited regression test could not
+// distinguish "kill skipped" from "kill happened to hit a recycled
+// PID with permission denied". Production code does not read it.
+var killProcessTreeCalls atomic.Int64
 
 // killProcessTree terminates the process rooted at pid along with its
 // descendants. Mirror of taskkill /F /T on Windows and pkill -KILL on
@@ -39,6 +49,7 @@ func killProcessTree(pid int) error {
 	if pid <= 0 {
 		return nil
 	}
+	killProcessTreeCalls.Add(1)
 	if runtime.GOOS == "windows" {
 		// /F = force, /T = tree (kill children too).
 		cmd := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid))

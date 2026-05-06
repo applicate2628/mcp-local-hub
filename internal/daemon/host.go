@@ -434,7 +434,21 @@ func (h *StdioHost) Stop() error {
 			// its stdin/stdout pipes open past the Wait-watcher close
 			// and the port bound past Stop's return. POSIX uses SIGKILL
 			// (not SIGTERM) so TERM-ignoring children cannot survive.
-			_ = killProcessTree(h.cmd.Process.Pid)
+			//
+			// Codex CLI xhigh re-review on 479cbc3 (P2): the outer
+			// default-arm-then-kill shape is racy — procExited can
+			// close BETWEEN the arm and the syscall, freeing the PID
+			// for OS reuse, and we'd kill an unrelated reused PID.
+			// Re-check inside the inner select to narrow the race
+			// window from "any time" to "between the inner default
+			// and the actual syscall" — microseconds rather than
+			// scheduling-bounded.
+			select {
+			case <-h.procExited:
+				// raced; just exited, skip kill
+			default:
+				_ = killProcessTree(h.cmd.Process.Pid)
+			}
 		}
 	}
 	// Wait for the watcher goroutine to close childExited (Phase 4 —
@@ -867,12 +881,50 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(out)
 	case <-h.done:
+		// Codex CLI xhigh re-review on 479cbc3 (P2): a race-filled response
+		// must beat the failure verdict — re-check respCh non-blockingly
+		// before declaring shutdown, so a reply that arrived between the
+		// peer-arm select and now is not lost.
+		select {
+		case respBody := <-respCh:
+			respBody = h.bridge.TransformResponse(origMethod, action.Active, respBody)
+			var respMsg map[string]json.RawMessage
+			if err := json.Unmarshal(respBody, &respMsg); err != nil {
+				http.Error(w, "subprocess returned invalid JSON", http.StatusBadGateway)
+				return
+			}
+			respMsg["id"] = origIDRaw
+			out, _ := json.Marshal(respMsg)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(out)
+			return
+		default:
+		}
 		http.Error(w, "host shutting down", http.StatusServiceUnavailable)
 	case <-h.childExited:
 		// Child died while we were waiting for its reply. Return 502 so the
 		// client sees a distinct, immediate failure instead of blocking the
 		// full 30s timeout. The outer daemon loop observes the same signal
 		// and exits non-zero so the scheduler can restart the whole task.
+		// Codex CLI xhigh re-review on 479cbc3 (P2): re-check respCh — a
+		// reply that landed between the peer-arm select and here must win.
+		select {
+		case respBody := <-respCh:
+			respBody = h.bridge.TransformResponse(origMethod, action.Active, respBody)
+			var respMsg map[string]json.RawMessage
+			if err := json.Unmarshal(respBody, &respMsg); err != nil {
+				http.Error(w, "subprocess returned invalid JSON", http.StatusBadGateway)
+				return
+			}
+			respMsg["id"] = origIDRaw
+			out, _ := json.Marshal(respMsg)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(out)
+			return
+		default:
+		}
 		http.Error(w, "subprocess died unexpectedly", http.StatusBadGateway)
 	case <-r.Context().Done():
 		http.Error(w, "client canceled", http.StatusRequestTimeout)
