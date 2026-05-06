@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -284,11 +285,22 @@ type secretsAPI interface {
 // Wraps `internal/api/cleanup.go`'s API.CleanupOrphans so tests can
 // inject a fake without spinning up real Win32_Process scans.
 type cleanupAPI interface {
+	// CleanupOrphansSupported reports whether the underlying backend
+	// can run the orphan-MCP scan on this OS. Production checks
+	// runtime.GOOS; tests can return true unconditionally so the
+	// handler's JSON/auth/seam paths are exercised cross-platform.
+	// Codex Cloud bot P1 on PR #131 (commit 460e7ff) — moved here from
+	// a hard-coded handler check that short-circuited the test seam.
+	CleanupOrphansSupported() bool
 	CleanupOrphans(opts api.CleanupOpts) ([]api.OrphanProcess, error)
 	CleanupLogWatchers(opts api.LogWatcherCleanupOpts) ([]api.LogWatcher, error)
 }
 
 type realCleanupAPI struct{}
+
+func (realCleanupAPI) CleanupOrphansSupported() bool {
+	return runtime.GOOS == "windows"
+}
 
 func (realCleanupAPI) CleanupOrphans(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
 	return api.NewAPI().CleanupOrphans(opts)

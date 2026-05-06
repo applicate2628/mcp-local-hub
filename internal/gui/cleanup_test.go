@@ -13,10 +13,22 @@ import (
 
 // fakeCleanupAPI is the test seam for both /api/cleanup/* routes. Tests
 // set whichever Fn they need; the unset one is left nil and tests must
-// not exercise that route.
+// not exercise that route. SupportedFn (default true) drives the OS
+// gate — tests can flip it to simulate POSIX-unsupported runs even on
+// a Windows host. Codex Cloud bot P1 on PR #131 (commit 460e7ff): the
+// production gate uses runtime.GOOS, but the test seam returns true
+// so non-Windows CI exercises the full handler path.
 type fakeCleanupAPI struct {
+	SupportedFn          func() bool
 	CleanupOrphansFn     func(opts api.CleanupOpts) ([]api.OrphanProcess, error)
 	CleanupLogWatchersFn func(opts api.LogWatcherCleanupOpts) ([]api.LogWatcher, error)
+}
+
+func (f fakeCleanupAPI) CleanupOrphansSupported() bool {
+	if f.SupportedFn != nil {
+		return f.SupportedFn()
+	}
+	return true
 }
 
 func (f fakeCleanupAPI) CleanupOrphans(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
@@ -253,6 +265,36 @@ func TestCleanupLogWatchersHandler_Apply_SkipsLiveParent_KilledCount(t *testing.
 	}
 	if got.Skipped != 2 {
 		t.Errorf("skipped = %d, want 2 (live-parent skipped + kill-err)", got.Skipped)
+	}
+}
+
+// TestCleanupOrphansHandler_Unsupported_501 verifies the OS gate path.
+// Tests inject SupportedFn returning false to simulate non-Windows
+// without depending on the actual host OS — Codex Cloud bot P1 on
+// PR #131 (commit 460e7ff): the platform gate must go through the
+// cleanupAPI seam, not runtime.GOOS, so this test is identical on
+// Windows and POSIX runners.
+func TestCleanupOrphansHandler_Unsupported_501(t *testing.T) {
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		SupportedFn: func() bool { return false },
+		CleanupOrphansFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+			t.Fatal("CleanupOrphans must not be called when CleanupOrphansSupported returns false")
+			return nil, nil
+		},
+	})
+
+	body := strings.NewReader(`{"dry_run": true}`)
+	req := httptest.NewRequest("POST", "/api/cleanup/orphans", body)
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotImplemented {
+		t.Fatalf("status: got %d, want 501; body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "not_supported_on_this_os") {
+		t.Errorf("body should contain not_supported_on_this_os; got %s", rr.Body.String())
 	}
 }
 

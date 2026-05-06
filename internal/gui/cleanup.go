@@ -4,7 +4,6 @@ package gui
 import (
 	"encoding/json"
 	"net/http"
-	"runtime"
 
 	"mcp-local-hub/internal/api"
 )
@@ -71,7 +70,15 @@ func (s *Server) cleanupOrphansHandler(w http.ResponseWriter, r *http.Request) {
 	// OS yet" instead of a misleading empty list. Mirrors the
 	// pattern at internal/gui/force_kill.go:54 for macOS lock
 	// recovery.
-	if runtime.GOOS != "windows" {
+	//
+	// Codex Cloud bot P1 on PR #131 (commit 460e7ff) / kosyak
+	// `2026-05-06-os-gate-bypassed-test-seam.md`: the platform check
+	// must read from the s.cleanup interface seam, NOT runtime.GOOS
+	// directly, so tests on non-Windows can inject a fake that
+	// returns true and exercise the full handler (JSON validation,
+	// auth, response shape). realCleanupAPI's impl checks runtime.GOOS;
+	// fakeCleanupAPI's stub returns true for cross-platform tests.
+	if !s.cleanup.CleanupOrphansSupported() {
 		writeJSON(w, http.StatusNotImplemented, map[string]any{
 			"error":  "not_supported_on_this_os",
 			"detail": "Orphan MCP-server cleanup is currently Windows-only. POSIX support is on the roadmap — track via docs/superpowers/specs/2026-05-06-cleanup-buttons-design.md.",
