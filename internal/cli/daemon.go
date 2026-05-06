@@ -222,18 +222,39 @@ See also: install, logs, restart, status.`,
 				go func() { errCh <- srv.ListenAndServe() }()
 				select {
 				case err := <-errCh:
-					_ = h.Stop()
+					// Codex CLI xhigh re-review on 479cbc3 (P2 #4) and
+					// kosyak 2026-05-06-claude-stop-error-durability-sham-fix.md:
+					// Use h.LogSupervisorEvent so Stop errors land in the
+					// rotated LogPath (durable across scheduled paths) AND
+					// stderr (interactive). Cobra exit message goes through
+					// os.Stderr alone, which scheduled paths can drop.
+					stopErr := h.Stop()
+					if stopErr != nil {
+						h.LogSupervisorEvent(fmt.Sprintf("stop after http server error: %v (server err: %v)", stopErr, err))
+					}
 					if errors.Is(err, http.ErrServerClosed) {
+						if stopErr != nil {
+							return fmt.Errorf("http server closed; %w", stopErr)
+						}
 						return nil
+					}
+					if stopErr != nil {
+						return fmt.Errorf("http server: %w; stop: %v", err, stopErr)
 					}
 					return fmt.Errorf("http server: %w", err)
 				case <-ctx.Done():
 					// Stop() first so handleSSE and handlePOST goroutines observe h.done
 					// and return; then Shutdown can complete without waiting on long-lived SSE.
-					_ = h.Stop()
+					stopErr := h.Stop()
+					if stopErr != nil {
+						h.LogSupervisorEvent(fmt.Sprintf("stop after ctx.Done graceful shutdown: %v", stopErr))
+					}
 					shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 					defer cancel()
 					_ = srv.Shutdown(shutdownCtx)
+					if stopErr != nil {
+						return fmt.Errorf("graceful shutdown: %w", stopErr)
+					}
 					return nil
 				case <-h.ChildExited():
 					// Stdio child died unexpectedly (npx/uvx servers like memory,
@@ -245,10 +266,18 @@ See also: install, logs, restart, status.`,
 					// scheduler_windows.go) will re-launch the task, which
 					// respawns the child. Scheduler owns the retry budget; we
 					// do not add in-process respawn logic here.
-					_ = h.Stop()
+					stopErr := h.Stop()
+					exitMsg := fmt.Sprintf("child exited unexpectedly: %s", formatChildExit(h.ExitState()))
+					if stopErr != nil {
+						exitMsg += fmt.Sprintf("; stop: %v", stopErr)
+					}
+					h.LogSupervisorEvent(exitMsg)
 					shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 					defer cancel()
 					_ = srv.Shutdown(shutdownCtx)
+					if stopErr != nil {
+						return fmt.Errorf("stdio child exited unexpectedly; stop: %w", stopErr)
+					}
 					return fmt.Errorf("stdio child exited unexpectedly")
 				}
 			} else {

@@ -80,7 +80,9 @@ type StdioHost struct {
 	sessionID  string
 
 	done        chan struct{} // closed by Stop() to unblock pending handlers
-	childExited chan struct{} // closed by the watcher goroutine when cmd.Wait() returns
+	procExited  chan struct{} // closed by the watcher goroutine when cmd.Process.Wait() returns (Phase 1 — OS-exit detected, before pipe drain)
+	childExited chan struct{} // closed by the watcher goroutine after the bounded pipe-drain wait (Phase 4 — pipes drained or pipeDrainTimeout fired); cmd.Wait runs out-of-line AFTER this close
+	exitState   atomic.Pointer[os.ProcessState] // saved by Phase 1 from cmd.Process.Wait's return; the out-of-line cmd.Wait would otherwise rewrite cmd.ProcessState to nil (Codex bot P2 on f2dbea0); read via ExitState()
 
 	// job is a Windows Job Object (no-op on POSIX) configured with
 	// KILL_ON_JOB_CLOSE so the kernel reaps any descendant tree the
@@ -98,6 +100,21 @@ const maxMCPPostBodyBytes int64 = 1 << 20 // 1 MiB
 // handler returns 429; legitimate MCP usage rarely exceeds a handful of
 // concurrent requests per client, so 128 is a generous bound.
 const maxPendingRequests = 128
+
+// pipeDrainTimeout caps how long the watcher goroutine waits for
+// stdout/stderr scanners to drain to EOF before calling cmd.Wait.
+//
+// - Fast-exiting children: scanners reach EOF within milliseconds; the
+//   wait is essentially a no-op and Go's StdoutPipe/StderrPipe contract
+//   is preserved (no truncation of the final response).
+// - Inherited-stdio descendants (Codex Cloud finding 63b417d2): a
+//   descendant that inherited stdout/stderr can keep pipes open after
+//   the immediate child exits. Without a deadline, the watcher would
+//   never call cmd.Wait, childExited would never close, the supervisor
+//   would never trigger scheduler restart, and Stop would wedge.
+// - Five seconds is enough for legitimate slow-flush patterns and
+//   short enough to fail fast when descendants are reparenting.
+const pipeDrainTimeout = 5 * time.Second
 
 // requireJSONContentType returns true if Content-Type parses as exactly
 // `application/json` (case-insensitive media type, parameters allowed).
@@ -133,6 +150,7 @@ func NewStdioHost(cfg HostConfig) (*StdioHost, error) {
 		pending:     make(map[int64]chan json.RawMessage),
 		bridge:      NewProtocolBridge(),
 		done:        make(chan struct{}),
+		procExited:  make(chan struct{}),
 		childExited: make(chan struct{}),
 		sessionID:   sid,
 	}, nil
@@ -230,13 +248,138 @@ func (h *StdioHost) Start(ctx context.Context) error {
 		h.readStdoutLoop()
 	}()
 
-	// Watcher goroutine: owns cmd.Wait() exclusively so no other call site
-	// double-waits. Wait is deferred until after both stdout/stderr readers
-	// return so the pipes are fully drained before Wait closes them.
+	// Watcher goroutine: five phases reconciling six constraints.
+	//
+	// 1. Codex Cloud finding 63b417d2: childExited must close in
+	//    BOUNDED time after OS-exit even when a descendant inherited
+	//    stdout/stderr — supervisor restart cannot wait indefinitely.
+	//    PR #117's unbounded pipesDrained.Wait() before close was the
+	//    bug; bounding it via pipeDrainTimeout below preserves the
+	//    fix.
+	//
+	// 2. Go's StdoutPipe/StderrPipe contract: cmd.Wait closes the
+	//    pipes once it returns, so calling Wait before the scanners
+	//    have drained to EOF truncates the final buffered output.
+	//    Fast-exiting children (a shell that writes one JSON line and
+	//    exits) lose their last response otherwise.
+	//
+	// 3. Codex bot P1 on f2512fe: the bounded pipe-drain timeout must
+	//    only arm after the child has exited. Otherwise any daemon
+	//    that runs longer than `pipeDrainTimeout` always falls into
+	//    the timeout path while it is still healthy, which both
+	//    truncates final output AND emits a misleading "child exited"
+	//    warning while the child is alive.
+	//
+	// 4. Codex bot P1 on 34b1a30: childExited must NOT close ahead of
+	//    pipe drain. A child can write its final reply, exit, and have
+	//    the scanner deliver that reply AFTER childExited closes —
+	//    handlePOST's select would non-deterministically pick the
+	//    childExited branch and return 502 even though a valid response
+	//    arrived. Closing childExited after pipe drain (or the bounded
+	//    timeout) ensures handlePOST sees a ready respCh first.
+	//
+	// 5. Codex bot P2 on f2dbea0: cmd.Process.Wait()'s returned
+	//    ProcessState must be persisted somewhere readable so the exit
+	//    code / signal info is recoverable for diagnostics. Phase 1
+	//    saves it to h.exitState (read via ExitState()) — NOT to
+	//    cmd.ProcessState, because Phase 3's cmd.Wait would rewrite
+	//    cmd.ProcessState to nil during its ECHILD-returning internal
+	//    Process.Wait re-call.
+	//
+	// 6. Codex bot P1 on 0e903bd: cmd.Wait MUST be called so os/exec
+	//    releases its internal resources. exec.CommandContext's
+	//    Start() launches a context-watcher goroutine that only
+	//    exits when cmd.Wait drains its result channel; never
+	//    calling cmd.Wait leaks that goroutine for the host context's
+	//    lifetime. Phase 3 calls cmd.Wait — its closeDescriptors does
+	//    double duty as the unblock-the-scanners path for inherited
+	//    descendants holding the pipes.
+	//
+	// Phase 1: cmd.Process.Wait() reaps the OS child WITHOUT closing
+	// the pipe read-ends. We persist the returned ProcessState onto
+	// h.exitState (NOT cmd.ProcessState — Phase 3's cmd.Wait would
+	// rewrite cmd.ProcessState to nil because its internal Process.Wait
+	// re-call returns ECHILD). Callers read h.exitState via ExitState().
+	// Codex bot P2 on f2dbea0: discarding the wait result drops exit
+	// diagnostics and turns every exit into the same syscall error
+	// shape. childExited stays unsignaled until Phase 4 (Codex bot P1
+	// on 34b1a30: closing childExited ahead of pipe drain races with
+	// response delivery — handlePOST's select could non-deterministically
+	// pick the childExited branch and 502 a valid response that the
+	// scanner is about to dispatch to respCh).
+	//
+	// Phase 2: bounded wait for scanners to drain the buffered output
+	// the child wrote before exit. The bound only arms here, after
+	// Phase 1 completes — so it cannot fire while the child is
+	// healthy. h.done short-circuits this on Stop. The pipeDrainTimeout
+	// is the upper bound on Codex Cloud finding 63b417d2 supervisor
+	// restart latency for the inherited-stdio descendant case
+	// (descendant holds parent's stdout/stderr fds open).
+	//
+	// Phase 3: close stdout/stderr read-ends manually. This unblocks
+	// any scanners blocked on inherited-descendant pipes (read returns
+	// "file already closed") quickly — without waiting for cmd.Wait's
+	// internal Process.Wait re-call, which under heavy parallel load
+	// on Windows has been observed to add seconds of latency to Stop.
+	//
+	// Phase 4: close(childExited) NOW — after scanners drained or the
+	// bounded timeout fired. Any final response the child wrote before
+	// exit has reached respCh by this point, so handlePOST's select
+	// observes a ready respCh in the same iteration and prefers it
+	// over childExited. Closing childExited here keeps Stop fast
+	// because Stop's wait on h.childExited returns immediately.
+	//
+	// Phase 5: cmd.Wait() in a SEPARATE goroutine — REQUIRED so os/exec
+	// releases its internal resources. exec.CommandContext's Start()
+	// spawns a context-watcher goroutine that only exits when cmd.Wait
+	// drains its result channel (Codex bot P1 on 0e903bd: never calling
+	// cmd.Wait leaks that goroutine). Running it in a SEPARATE goroutine
+	// after the watcher has already signaled childExited means the slow
+	// cmd.Wait path (seconds under heavy parallel load on Windows due
+	// to its internal Process.Wait re-call) does not extend Stop's wall
+	// time. The ProcessState we want is already in h.exitState; pipes
+	// are already closed; cmd.Wait's only remaining work is the watchCtx
+	// drain plus an idempotent closeDescriptors on the parentIOPipes
+	// we already closed manually.
 	go func() {
-		pipesDrained.Wait()
-		_ = cmd.Wait()
+		state, _ := cmd.Process.Wait()
+		if state != nil {
+			h.exitState.Store(state)
+		}
+		close(h.procExited)
+
+		drained := make(chan struct{})
+		go func() {
+			pipesDrained.Wait()
+			close(drained)
+		}()
+		select {
+		case <-drained:
+		case <-h.done:
+		case <-time.After(pipeDrainTimeout):
+			fmt.Fprintf(os.Stderr,
+				"warn: stdout/stderr scanners did not reach EOF within %s after stdio child exited; a descendant likely inherited the pipes — proceeding so daemon liveness is reported\n",
+				pipeDrainTimeout)
+		}
+		_ = stdout.Close()
+		_ = stderr.Close()
 		close(h.childExited)
+
+		go func() {
+			_ = cmd.Wait()
+			// cmd.Wait's internal Process.Wait re-call returns ECHILD
+			// because Phase 1 already reaped the zombie, so cmd.Wait
+			// leaves cmd.ProcessState = nil. Under GODEBUG=execwait=1|2
+			// Go's exec leak checker panics on nil ProcessState with
+			// "Cmd started a Process but leaked without a call to Wait"
+			// even though we DID call Wait — Codex Cloud bot P2 on
+			// d49cffc (host.go:345) flagged this as a debug/CI hazard.
+			// Restore cmd.ProcessState from h.exitState so the leak
+			// checker sees a non-nil state when its finalizer runs.
+			if state := h.exitState.Load(); state != nil {
+				cmd.ProcessState = state
+			}
+		}()
 	}()
 
 	return nil
@@ -249,12 +392,67 @@ func (h *StdioHost) ChildExited() <-chan struct{} {
 	return h.childExited
 }
 
+// LogSupervisorEvent appends a structured "supervisor: <event>" line
+// to the daemon's LogPath (if configured) AND mirrors to os.Stderr.
+// Designed for callers in the cobra supervisor (internal/cli/daemon.go)
+// to record Stop errors and other late-stage events with end-to-end
+// durability — Codex CLI xhigh re-review on 479cbc3 (P2 #4): stderr
+// alone is not durable under scheduled paths (Task Scheduler etc. can
+// drop daemon stderr), and embedding the error in the cobra exit
+// message routes it through the same os.Stderr channel via
+// cmd.PrintErrln, providing zero additional durability. The rotated
+// LogPath file IS durable because it is the same file `mcphub logs`
+// reads from, the same file the scheduler does NOT need to redirect
+// stderr to capture, and the same file rotated under the daemon's
+// own retention.
+//
+// Re-opens the log file on each call rather than reusing h.logFile so
+// it remains usable AFTER Stop has closed h.logFile (the supervisor
+// callers run after Stop returns).
+//
+// Best effort: open / write errors are absorbed; the stderr leg fires
+// regardless so the operator's interactive console always sees the
+// event.
+func (h *StdioHost) LogSupervisorEvent(event string) {
+	fmt.Fprintf(os.Stderr, "warn: supervisor: %s\n", event)
+	if h.cfg.LogPath == "" {
+		return
+	}
+	f, err := os.OpenFile(h.cfg.LogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = fmt.Fprintf(f, "[%s] supervisor: %s\n", time.Now().UTC().Format(time.RFC3339Nano), event)
+}
+
+// ExitState returns the subprocess's ProcessState after it has exited,
+// or nil before exit. Mirrors HTTPHost.ExitState() so the supervisor
+// can capture exit code / signal info for diagnostics. Codex bot P2
+// on f2dbea0 — without this, callers that want to distinguish a
+// controlled sys.exit from a native crash from a parent kill see only
+// "subprocess died unexpectedly" with no further detail.
+//
+// Backed by an atomic.Pointer rather than cmd.ProcessState because the
+// watcher's Phase 3 cmd.Wait rewrites cmd.ProcessState to nil during
+// its ECHILD-returning internal Process.Wait re-call. Reading is safe
+// concurrent with the writer in Phase 1.
+func (h *StdioHost) ExitState() *os.ProcessState {
+	return h.exitState.Load()
+}
+
 // Stop terminates the subprocess and closes all pipes.
 //
 // Stop does NOT call cmd.Process.Wait(); that call is owned exclusively by
 // the watcher goroutine spawned in Start() so there is no double-Wait race.
 // Instead, Stop signals Kill() (if the child is still alive) and then blocks
 // on h.childExited to confirm the watcher saw the exit and closed the pipes.
+//
+// Returns a non-nil error if the subprocess did not exit within the 1s
+// post-kill window. This communicates the leaked-daemon risk to callers
+// (Codex bot P2 on 34b1a30) so they can log, alert, or escalate; previously
+// Stop returned nil unconditionally and callers believed shutdown succeeded
+// while the old child + watcher could still be alive.
 func (h *StdioHost) Stop() error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -265,41 +463,90 @@ func (h *StdioHost) Stop() error {
 	close(h.done) // unblock any pending HTTP handlers waiting on the subprocess
 	_ = h.stdin.Close()
 	if h.cmd != nil && h.cmd.Process != nil {
-		// Only tree-kill if the watcher has not already observed process
-		// exit. This avoids PID-reuse hazards from issuing a fresh
-		// PID-based taskkill/pkill after the original process is gone.
+		// Only tree-kill if the OS has not already exited the immediate
+		// child. After cmd.Process.Wait() reaps the zombie (Phase 1), the
+		// PID is eligible for reuse on POSIX, so issuing a fresh
+		// PID-based taskkill/pkill could kill an unrelated process.
+		// procExited (closed in Phase 1) — NOT childExited (closed in
+		// Phase 4 after pipe drain) — is the correct gate: childExited
+		// can stay open for up to pipeDrainTimeout after OS-exit when an
+		// inherited-stdio descendant holds pipes, and during that window
+		// the original PID may already have been reused.
 		select {
-		case <-h.childExited:
+		case <-h.procExited:
 			// already exited; no kill needed
 		default:
 			// Tree-kill so wrappers (npx, uvx, uv, node launchers) and
 			// their real child servers all go down together. Plain
 			// Process.Kill only kills the wrapper; its child would keep
 			// its stdin/stdout pipes open past the Wait-watcher close
-			// and the port bound past Stop's return.
-			_ = killProcessTree(h.cmd.Process.Pid)
+			// and the port bound past Stop's return. POSIX uses SIGKILL
+			// (not SIGTERM) so TERM-ignoring children cannot survive.
+			//
+			// Codex CLI xhigh re-review on 479cbc3 (P2): the outer
+			// default-arm-then-kill shape is racy — procExited can
+			// close BETWEEN the arm and the syscall, freeing the PID
+			// for OS reuse, and we'd kill an unrelated reused PID.
+			// Re-check inside the inner select to narrow the race
+			// window from "any time" to "between the inner default
+			// and the actual syscall" — microseconds rather than
+			// scheduling-bounded.
+			select {
+			case <-h.procExited:
+				// raced; just exited, skip kill
+			default:
+				_ = killProcessTree(h.cmd.Process.Pid)
+			}
 		}
 	}
-	// Wait for the watcher goroutine to observe cmd.Wait() returning. This
-	// is bounded: either the child was already dead (immediate) or Kill()
-	// just terminated it (milliseconds). We still cap the wait so a truly
-	// wedged process (e.g. unkillable kernel state on Windows) cannot hang
-	// Stop forever — the outer daemon will exit the host process anyway.
+	// Wait for the watcher goroutine to close childExited (Phase 4 —
+	// after pipe drain). Capped at 1s: h.done was just closed which
+	// unblocks the watcher's pipe-drain select immediately, killProcessTree
+	// terminates the child synchronously on both Windows (taskkill /F)
+	// and POSIX (SIGKILL via the updated treekill.go), and Phase 4 only
+	// needs the watcher's cmd.Wait reap to run. Returning an error on
+	// timeout surfaces the leaked-daemon risk per Codex bot P2.
+	var stopErr error
 	select {
 	case <-h.childExited:
-	case <-time.After(5 * time.Second):
+	case <-time.After(1 * time.Second):
+		pid := -1
+		if h.cmd != nil && h.cmd.Process != nil {
+			pid = h.cmd.Process.Pid
+		}
+		stopErr = fmt.Errorf("stdio host stop: subprocess did not exit within 1s after tree-kill (pid=%d) — child or watcher may still be alive, expect port-collision on restart", pid)
 	}
-	h.wg.Wait()
+	// Release the Job Object handle BEFORE waiting on reader goroutines.
+	// On Windows, KILL_ON_JOB_CLOSE then terminates any descendants that
+	// inherited stdout/stderr fds, which unblocks the readers and lets
+	// h.wg.Wait() return. Doing this AFTER h.wg.Wait() created the
+	// deadlock Codex finding 63b417d2 reported: a reparented descendant
+	// holding the pipes open made the readers wait forever, and the job
+	// object was never closed because we were stuck.
+	if h.job != nil {
+		_ = h.job.Close()
+		h.job = nil
+	}
+	// Bound the reader-goroutine wait. POSIX has no equivalent of the
+	// Windows Job Object kill-on-close path, so an inherited-stdio
+	// descendant on Linux/macOS may still block reader EOF after the
+	// watcher saw cmd.Wait() return. Cap is short — the outer daemon
+	// will exit the host process anyway, and orphaned descendants are
+	// reparented to PID 1 / launchd / systemd which will reap them on
+	// session teardown.
+	wgDone := make(chan struct{})
+	go func() {
+		h.wg.Wait()
+		close(wgDone)
+	}()
+	select {
+	case <-wgDone:
+	case <-time.After(1 * time.Second):
+	}
 	if h.logFile != nil {
 		_ = h.logFile.Close()
 	}
-	if h.job != nil {
-		// Final handle release. killProcessTree above already terminated
-		// in-job processes; closing here lets the kernel reclaim the job
-		// object resource. No-op on POSIX.
-		_ = h.job.Close()
-	}
-	return nil
+	return stopErr
 }
 
 // openStderrSink returns a writer for child stderr. When LogPath is set
@@ -441,9 +688,18 @@ func (h *StdioHost) readStdoutLoop() {
 	defer h.wg.Done()
 	for h.stdoutScan.Scan() {
 		line := append([]byte(nil), h.stdoutScan.Bytes()...)
-		// Try to parse id and route to pending request.
+		// Peek both id and method. The id alone is not enough to
+		// classify a message as a stale response: JSON-RPC requests
+		// (responses' opposite) carry an id AND a method, and MCP
+		// servers can legitimately send server-initiated requests
+		// (e.g. `sampling/createMessage`) with numeric ids. Codex
+		// finding 6290ce6e: a method-blind id filter would suppress
+		// those server-initiated requests as if they were stale
+		// responses. Only the (id, no method) shape is unambiguously
+		// a response and safe to drop.
 		var peek struct {
-			ID json.RawMessage `json:"id"`
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
 		}
 		if err := json.Unmarshal(line, &peek); err == nil && len(peek.ID) > 0 {
 			var id int64
@@ -458,14 +714,28 @@ func (h *StdioHost) readStdoutLoop() {
 					}
 					continue
 				}
-				// Untracked response id (e.g. a late reply after caller timeout).
-				// Do not broadcast this over SSE; it may belong to a different
-				// canceled client and could leak response contents.
-				select {
-				case h.testStdout <- line:
-				default:
+				if peek.Method == "" {
+					// Untracked response id (e.g. a late reply
+					// after caller timeout). Do not propagate
+					// further; it may belong to a different
+					// canceled client and could leak response
+					// contents. testStdout-only retains
+					// observability for unit tests.
+					select {
+					case h.testStdout <- line:
+					default:
+					}
+					continue
 				}
-				continue
+				// id + method = server-initiated request. Fall
+				// through to the testStdout fallback so future
+				// SSE work can pick it up uniformly with
+				// notifications. SSE fan-out from this loop was
+				// removed in PR #64 because unrouted output
+				// cannot be attributed to a specific HTTP caller
+				// safely; if/when SSE broadcast is reintroduced
+				// (separately threat-modeled), it should
+				// branch from here rather than from this filter.
 			}
 		}
 		// Also keep the testStdout path for tests that watch raw output.
@@ -659,12 +929,50 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(out)
 	case <-h.done:
+		// Codex CLI xhigh re-review on 479cbc3 (P2): a race-filled response
+		// must beat the failure verdict — re-check respCh non-blockingly
+		// before declaring shutdown, so a reply that arrived between the
+		// peer-arm select and now is not lost.
+		select {
+		case respBody := <-respCh:
+			respBody = h.bridge.TransformResponse(origMethod, action.Active, respBody)
+			var respMsg map[string]json.RawMessage
+			if err := json.Unmarshal(respBody, &respMsg); err != nil {
+				http.Error(w, "subprocess returned invalid JSON", http.StatusBadGateway)
+				return
+			}
+			respMsg["id"] = origIDRaw
+			out, _ := json.Marshal(respMsg)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(out)
+			return
+		default:
+		}
 		http.Error(w, "host shutting down", http.StatusServiceUnavailable)
 	case <-h.childExited:
 		// Child died while we were waiting for its reply. Return 502 so the
 		// client sees a distinct, immediate failure instead of blocking the
 		// full 30s timeout. The outer daemon loop observes the same signal
 		// and exits non-zero so the scheduler can restart the whole task.
+		// Codex CLI xhigh re-review on 479cbc3 (P2): re-check respCh — a
+		// reply that landed between the peer-arm select and here must win.
+		select {
+		case respBody := <-respCh:
+			respBody = h.bridge.TransformResponse(origMethod, action.Active, respBody)
+			var respMsg map[string]json.RawMessage
+			if err := json.Unmarshal(respBody, &respMsg); err != nil {
+				http.Error(w, "subprocess returned invalid JSON", http.StatusBadGateway)
+				return
+			}
+			respMsg["id"] = origIDRaw
+			out, _ := json.Marshal(respMsg)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(out)
+			return
+		default:
+		}
 		http.Error(w, "subprocess died unexpectedly", http.StatusBadGateway)
 	case <-r.Context().Done():
 		http.Error(w, "client canceled", http.StatusRequestTimeout)
