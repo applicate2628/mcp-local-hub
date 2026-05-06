@@ -180,6 +180,23 @@ function CardOrphanLogWatchers(): preact.JSX.Element {
     }
   }
 
+  // Codex Cloud bot P3 on PR #131 (commit c0fe229): when all preview
+  // rows have parent_alive=true and IncludeLive=false, the action
+  // count is 0 but the button rendered as "Clean (0)" with no
+  // explanation — clicking returned early silently. Compute the
+  // kill-target count once and use it for BOTH the label and the
+  // disabled/title state so the UI reads "Clean (0)" disabled with a
+  // tooltip explaining the IncludeLive checkbox lever, never
+  // a clickable-but-no-op button.
+  const watchers = state.kind === "preview" ? (state.watchers ?? []) : [];
+  const killCount = includeLive
+    ? watchers.length
+    : watchers.filter((w) => !w.parent_alive).length;
+  const noKillReason =
+    state.kind === "preview" && watchers.length > 0 && killCount === 0
+      ? `All ${watchers.length} watcher${watchers.length === 1 ? "" : "s"} belong to active sessions (live parent). Toggle "Include live-parent processes" above to clean them anyway.`
+      : "";
+
   return (
     <div data-card="orphan-log-watchers" class="maintenance-card">
       <h3>Orphan log watchers (tail / grep / bash)</h3>
@@ -200,11 +217,9 @@ function CardOrphanLogWatchers(): preact.JSX.Element {
         <button onClick={preview} disabled={state.kind === "loading"}>
           Preview
         </button>
-        {state.kind === "preview" && state.watchers && state.watchers.length > 0 && (
-          <button onClick={apply} disabled={false}>
-            Clean ({includeLive
-              ? state.watchers.length
-              : state.watchers.filter((w) => !w.parent_alive).length})
+        {state.kind === "preview" && watchers.length > 0 && (
+          <button onClick={apply} disabled={killCount === 0} title={noKillReason}>
+            Clean ({killCount})
           </button>
         )}
       </div>
