@@ -365,7 +365,21 @@ func (h *StdioHost) Start(ctx context.Context) error {
 		_ = stderr.Close()
 		close(h.childExited)
 
-		go func() { _ = cmd.Wait() }()
+		go func() {
+			_ = cmd.Wait()
+			// cmd.Wait's internal Process.Wait re-call returns ECHILD
+			// because Phase 1 already reaped the zombie, so cmd.Wait
+			// leaves cmd.ProcessState = nil. Under GODEBUG=execwait=1|2
+			// Go's exec leak checker panics on nil ProcessState with
+			// "Cmd started a Process but leaked without a call to Wait"
+			// even though we DID call Wait — Codex Cloud bot P2 on
+			// d49cffc (host.go:345) flagged this as a debug/CI hazard.
+			// Restore cmd.ProcessState from h.exitState so the leak
+			// checker sees a non-nil state when its finalizer runs.
+			if state := h.exitState.Load(); state != nil {
+				cmd.ProcessState = state
+			}
+		}()
 	}()
 
 	return nil
