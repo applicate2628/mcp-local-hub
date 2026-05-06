@@ -131,14 +131,24 @@ export async function cleanupLogWatchers(
 // stopAll wraps /api/stop-all (existing route in
 // internal/gui/servers.go) so the Maintenance "Stop all daemons"
 // button has a single import surface alongside the cleanup helpers.
-export async function stopAllDaemons(): Promise<unknown> {
+//
+// /api/stop-all returns HTTP 207 + per-daemon stop_results[*].err on
+// partial failure, HTTP 200 on full success. Codex Cloud bot P2 on
+// PR #131 / kosyak `2026-05-06-stop-all-card-ignored-multi-status-response.md`:
+// jsonOrThrow treats 207 as success (status<400), so the caller MUST
+// inspect stop_results to surface partial failures rather than just
+// rendering "Done." on any non-throwing response.
+export type StopResult = { name: string; err: string };
+export type StopAllResponse = { stop_results: StopResult[] };
+
+export async function stopAllDaemons(): Promise<StopAllResponse> {
   const res = await fetch("/api/stop-all", {
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({}),
   });
-  return await jsonOrThrow(res);
+  return (await jsonOrThrow(res)) as StopAllResponse;
 }
 
 // forceKillProbe / forceKillApply wrap the existing /api/force-kill/*

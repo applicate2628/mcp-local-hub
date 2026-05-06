@@ -17,13 +17,14 @@ import {
   stopAllDaemons,
   type OrphanProcess,
   type LogWatcher,
+  type StopResult,
 } from "../../lib/settings-api";
 
 type ActionState =
   | { kind: "idle" }
   | { kind: "loading" }
   | { kind: "preview"; orphans?: OrphanProcess[]; watchers?: LogWatcher[]; verdict?: unknown }
-  | { kind: "applied"; killed?: number; skipped?: number; result?: unknown }
+  | { kind: "applied"; killed?: number; skipped?: number; result?: unknown; stopResults?: StopResult[] }
   | { kind: "error"; error: string };
 
 function asError(e: unknown): string {
@@ -295,7 +296,19 @@ function CardStopAllDaemons(): preact.JSX.Element {
     setState({ kind: "loading" });
     try {
       const r = await stopAllDaemons();
-      setState({ kind: "applied", result: r });
+      // Codex Cloud bot P2 on PR #131 / kosyak
+      // 2026-05-06-stop-all-card-ignored-multi-status-response.md:
+      // /api/stop-all returns HTTP 207 + per-daemon err on partial
+      // failure. Inspect stop_results explicitly so the operator
+      // doesn't see "Done." while half the daemons failed.
+      const results = r?.stop_results ?? [];
+      const failed = results.filter((sr) => sr.err && sr.err !== "");
+      setState({
+        kind: "applied",
+        stopResults: results,
+        killed: results.length - failed.length,
+        skipped: failed.length,
+      });
     } catch (e) {
       setState({ kind: "error", error: asError(e) });
     }
@@ -315,7 +328,40 @@ function CardStopAllDaemons(): preact.JSX.Element {
         </button>
       </div>
       <CardResult state={state} />
+      {state.kind === "applied" && state.stopResults && (
+        <StopResultsTable results={state.stopResults} />
+      )}
     </div>
+  );
+}
+
+// StopResultsTable lists the daemons /api/stop-all returned, marking
+// any with non-empty err as failed. Empty results array (no daemons
+// running) renders an explicit "no daemons" line rather than a blank
+// table — Codex Cloud bot P2 review feedback.
+function StopResultsTable({ results }: { results: StopResult[] }): preact.JSX.Element {
+  if (results.length === 0) {
+    return <p class="maintenance-empty">No daemons were running.</p>;
+  }
+  return (
+    <table class="maintenance-table">
+      <thead>
+        <tr>
+          <th>Daemon</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {results.map((sr) => (
+          <tr key={sr.name}>
+            <td>{sr.name}</td>
+            <td class={sr.err ? "maintenance-error" : ""}>
+              {sr.err ? `Failed: ${sr.err}` : "Stopped"}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
@@ -325,7 +371,26 @@ function CardResult({ state }: { state: ActionState }): preact.JSX.Element | nul
   switch (state.kind) {
     case "loading":
       return <p class="maintenance-status">Working…</p>;
-    case "applied":
+    case "applied": {
+      // Stop-All has its own per-daemon table below; render a banner
+      // that distinguishes full success from partial failure (HTTP 207).
+      // Codex Cloud bot P2 on PR #131: "Done." alone hid 207 partial
+      // failures; the failed count must surface in the summary too.
+      if (state.stopResults !== undefined) {
+        const total = state.stopResults.length;
+        const failed = state.skipped ?? 0;
+        if (total === 0) {
+          return <p class="maintenance-status">Done. No daemons were running.</p>;
+        }
+        if (failed === 0) {
+          return <p class="maintenance-status">Stopped all {total} daemon{total === 1 ? "" : "s"}.</p>;
+        }
+        return (
+          <p class="maintenance-status maintenance-error">
+            Partial: {total - failed} stopped, {failed} failed.
+          </p>
+        );
+      }
       if (state.killed !== undefined || state.skipped !== undefined) {
         return (
           <p class="maintenance-status">
@@ -334,6 +399,7 @@ function CardResult({ state }: { state: ActionState }): preact.JSX.Element | nul
         );
       }
       return <p class="maintenance-status">Done.</p>;
+    }
     case "error":
       return <p class="maintenance-status maintenance-error">Error: {state.error}</p>;
     default:
