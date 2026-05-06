@@ -132,13 +132,17 @@ export async function cleanupLogWatchers(
 // internal/gui/servers.go) so the Maintenance "Stop all daemons"
 // button has a single import surface alongside the cleanup helpers.
 //
-// /api/stop-all returns HTTP 207 + per-daemon stop_results[*].err on
-// partial failure, HTTP 200 on full success. Codex Cloud bot P2 on
-// PR #131 / kosyak `2026-05-06-stop-all-card-ignored-multi-status-response.md`:
-// jsonOrThrow treats 207 as success (status<400), so the caller MUST
-// inspect stop_results to surface partial failures rather than just
-// rendering "Done." on any non-throwing response.
-export type StopResult = { name: string; err: string };
+// /api/stop-all returns HTTP 207 + per-daemon stop_results[*] on
+// partial failure, HTTP 200 on full success. The per-row shape is
+// `api.RestartResult` (internal/api/install.go:1623) which has JSON
+// tags `task_name` and `error` — NOT `name` and `err`.
+//
+// Codex Cloud bot P1 on PR #131 / kosyak
+// `2026-05-06-third-time-shipped-without-checking-json-tags.md`: the
+// prior "fix" used {name, err} from imagination; sr.err was always
+// undefined, partial failures rendered as "Stopped all". Field names
+// here are now verified against the Go struct's actual json tags.
+export type StopResult = { task_name: string; error: string };
 export type StopAllResponse = { stop_results: StopResult[] };
 
 export async function stopAllDaemons(): Promise<StopAllResponse> {

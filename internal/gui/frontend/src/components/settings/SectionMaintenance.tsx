@@ -296,13 +296,15 @@ function CardStopAllDaemons(): preact.JSX.Element {
     setState({ kind: "loading" });
     try {
       const r = await stopAllDaemons();
-      // Codex Cloud bot P2 on PR #131 / kosyak
-      // 2026-05-06-stop-all-card-ignored-multi-status-response.md:
-      // /api/stop-all returns HTTP 207 + per-daemon err on partial
-      // failure. Inspect stop_results explicitly so the operator
-      // doesn't see "Done." while half the daemons failed.
+      // Codex Cloud bot P1+P2 chain on PR #131 / kosyaks
+      // stop-all-card-ignored-multi-status-response.md +
+      // third-time-shipped-without-checking-json-tags.md:
+      // /api/stop-all returns HTTP 207 + per-daemon stop_results
+      // where each row is api.RestartResult with JSON tags
+      // `task_name` and `error` (NOT `name`/`err` as the prior fix
+      // assumed). Read those exact field names to detect failures.
       const results = r?.stop_results ?? [];
-      const failed = results.filter((sr) => sr.err && sr.err !== "");
+      const failed = results.filter((sr) => sr.error && sr.error !== "");
       setState({
         kind: "applied",
         stopResults: results,
@@ -353,10 +355,10 @@ function StopResultsTable({ results }: { results: StopResult[] }): preact.JSX.El
       </thead>
       <tbody>
         {results.map((sr) => (
-          <tr key={sr.name}>
-            <td>{sr.name}</td>
-            <td class={sr.err ? "maintenance-error" : ""}>
-              {sr.err ? `Failed: ${sr.err}` : "Stopped"}
+          <tr key={sr.task_name}>
+            <td>{sr.task_name}</td>
+            <td class={sr.error ? "maintenance-error" : ""}>
+              {sr.error ? `Failed: ${sr.error}` : "Stopped"}
             </td>
           </tr>
         ))}
