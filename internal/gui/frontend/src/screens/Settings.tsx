@@ -6,6 +6,7 @@ import { SectionAppearance } from "../components/settings/SectionAppearance";
 import { SectionGuiServer } from "../components/settings/SectionGuiServer";
 import { SectionDaemons } from "../components/settings/SectionDaemons";
 import { SectionBackups } from "../components/settings/SectionBackups";
+import { SectionMaintenance } from "../components/settings/SectionMaintenance";
 import { SectionAdvanced } from "../components/settings/SectionAdvanced";
 
 export type SettingsScreenProps = {
@@ -17,7 +18,7 @@ export type SettingsScreenProps = {
   snapshot: SettingsSnapshot;
 };
 
-const SECTION_IDS: Section[] = ["appearance", "gui_server", "daemons", "backups", "advanced"];
+const SECTION_IDS: Section[] = ["appearance", "gui_server", "daemons", "backups", "maintenance", "advanced"];
 
 // Codex r1 P3.1 — destructure all props.
 export function SettingsScreen({ route, onDirtyChange, snapshot }: SettingsScreenProps): preact.JSX.Element {
@@ -103,6 +104,7 @@ export function SettingsScreen({ route, onDirtyChange, snapshot }: SettingsScree
         <SectionGuiServer  snapshot={snapshot} onDirtyChange={setGuiServerDirty}  />
         <SectionDaemons    snapshot={snapshot} onDirtyChange={setDaemonsDirty} />
         <SectionBackups    snapshot={snapshot} onDirtyChange={setBackupsDirty}    />
+        <SectionMaintenance />
         <SectionAdvanced   snapshot={snapshot} />
       </div>
     </div>
