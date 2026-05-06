@@ -55,13 +55,25 @@ export function SectionMaintenance(): preact.JSX.Element {
 function CardOrphanMcpServers(): preact.JSX.Element {
   const [state, setState] = useState<ActionState>({ kind: "idle" });
 
+  // Codex Cloud bot P2 on PR #131 (commit 99938e7): non-Windows backend
+  // returns 501 with `not_supported_on_this_os`. Detect that body and
+  // render a clearer "Windows only" message rather than the generic
+  // "Error: not_supported_on_this_os" string.
+  function friendlyError(e: unknown): string {
+    const raw = asError(e);
+    if (raw.includes("not_supported_on_this_os")) {
+      return "Not supported on this OS yet — Windows only. POSIX support is on the roadmap.";
+    }
+    return raw;
+  }
+
   async function preview() {
     setState({ kind: "loading" });
     try {
       const r = await cleanupOrphans(true);
       setState({ kind: "preview", orphans: r.orphans });
     } catch (e) {
-      setState({ kind: "error", error: asError(e) });
+      setState({ kind: "error", error: friendlyError(e) });
     }
   }
 
@@ -75,7 +87,7 @@ function CardOrphanMcpServers(): preact.JSX.Element {
       const r = await cleanupOrphans(false);
       setState({ kind: "applied", killed: r.killed, skipped: r.skipped });
     } catch (e) {
-      setState({ kind: "error", error: asError(e) });
+      setState({ kind: "error", error: friendlyError(e) });
     }
   }
 

@@ -4,6 +4,7 @@ package gui
 import (
 	"encoding/json"
 	"net/http"
+	"runtime"
 
 	"mcp-local-hub/internal/api"
 )
@@ -59,6 +60,22 @@ func (s *Server) cleanupOrphansHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Codex Cloud bot P2 on PR #131 (commit 99938e7): the wrapped
+	// API.CleanupOrphans is Windows-only and returns (nil, nil) on
+	// POSIX, so an empty 200 indistinguishable from "no orphans
+	// found" misleads operators. Surface the unsupported state
+	// explicitly so the frontend can render "Not supported on this
+	// OS yet" instead of a misleading empty list. Mirrors the
+	// pattern at internal/gui/force_kill.go:54 for macOS lock
+	// recovery.
+	if runtime.GOOS != "windows" {
+		writeJSON(w, http.StatusNotImplemented, map[string]any{
+			"error":  "not_supported_on_this_os",
+			"detail": "Orphan MCP-server cleanup is currently Windows-only. POSIX support is on the roadmap — track via docs/superpowers/specs/2026-05-06-cleanup-buttons-design.md.",
+		})
 		return
 	}
 
