@@ -258,27 +258,28 @@ func parsePosixPSRows(r io.Reader) []processRow {
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	var rows []processRow
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
+		line := scanner.Text()
+		// Codex Cloud bot P1 on PR #131 / kosyak
+		// 2026-05-06-shipped-frontend-without-checking-json-wire-shape.md:
+		// `ps -e -o pid=,ppid=,comm=,etime=,args=` right-pads the
+		// numeric / short columns with spaces, so SplitN on " " spends
+		// budget on consecutive separators and skips legitimate rows.
+		// strings.Fields collapses any-whitespace runs to single
+		// tokens; we take 4 fixed columns then preserve ARGS verbatim
+		// from the position where the 5th token begins so internal
+		// spaces in cmdline survive.
+		toks := strings.Fields(line)
+		if len(toks) < 4 {
 			continue
 		}
-		// Split on whitespace, but bound to first 4 fields; the rest
-		// (ARGS) keeps internal spaces intact.
-		fields := strings.SplitN(line, " ", 5)
-		// Re-collapse leading whitespace tokens that SplitN preserves
-		// when ps right-pads numeric columns.
-		fields = compactFields(fields, 5)
-		if len(fields) < 5 {
-			continue
-		}
-		pid, err := strconv.Atoi(fields[0])
+		pid, err := strconv.Atoi(toks[0])
 		if err != nil {
 			continue
 		}
-		ppid, _ := strconv.Atoi(fields[1])
-		comm := fields[2]
-		ageSec := parseEtime(fields[3])
-		args := fields[4]
+		ppid, _ := strconv.Atoi(toks[1])
+		comm := toks[2]
+		ageSec := parseEtime(toks[3])
+		args := readArgsAfter4Tokens(line)
 		startTime := int64(0)
 		if ageSec > 0 {
 			startTime = now - ageSec
@@ -294,16 +295,37 @@ func parsePosixPSRows(r io.Reader) []processRow {
 	return rows
 }
 
-func compactFields(fields []string, want int) []string {
-	out := make([]string, 0, want)
-	for _, f := range fields {
-		f = strings.TrimSpace(f)
-		if f == "" {
-			continue
+// readArgsAfter4Tokens returns the substring of line starting at the
+// 5th whitespace-delimited token. Walks the line by hand rather than
+// using SplitN/Fields so inner whitespace (including double spaces in
+// command arguments) is preserved verbatim from the 5th token onward.
+// Returns "" if there are fewer than 5 tokens.
+func readArgsAfter4Tokens(line string) string {
+	i := 0
+	tokensSeen := 0
+	for tokensSeen < 4 && i < len(line) {
+		// Skip leading whitespace before this token.
+		for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
+			i++
 		}
-		out = append(out, f)
+		if i >= len(line) {
+			return ""
+		}
+		// Consume the token body.
+		for i < len(line) && line[i] != ' ' && line[i] != '\t' {
+			i++
+		}
+		tokensSeen++
 	}
-	return out
+	// Skip whitespace before the 5th token, then return everything
+	// from there to end-of-line.
+	for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
+		i++
+	}
+	if i >= len(line) {
+		return ""
+	}
+	return line[i:]
 }
 
 // parseEtime parses ps's ELAPSED format, e.g. "00:01:23", "1-02:03:04",

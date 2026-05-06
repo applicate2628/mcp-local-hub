@@ -51,13 +51,13 @@ func isOurOwnProcess(cmdline string) bool {
 // KillErr is populated only when DryRun=false and taskkill failed for this PID
 // (access denied, process already gone, etc.); empty on success or dry-run.
 type OrphanProcess struct {
-	PID      int
-	ParentID int
-	Server   string // inferred from matching manifest
-	RAMBytes uint64
-	Cmdline  string
-	AgeSec   int64
-	KillErr  string
+	PID      int    `json:"pid"`
+	ParentID int    `json:"parent_pid"`
+	Server   string `json:"server"` // inferred from matching manifest
+	RAMBytes uint64 `json:"ram_bytes"`
+	Cmdline  string `json:"cmdline"`
+	AgeSec   int64  `json:"age_sec"`
+	KillErr  string `json:"kill_err,omitempty"`
 }
 
 // CleanupOpts controls CleanupOrphans.
