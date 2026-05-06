@@ -162,7 +162,16 @@ func (a *API) CleanupLogWatchers(opts LogWatcherCleanupOpts) ([]LogWatcher, erro
 func compileWatcherRegex(user, fallback string) (*regexp.Regexp, error) {
 	src := user
 	if src == "" {
-		src = fallback
+		// Mirror the PowerShell `-match` operator's default
+		// case-insensitive behavior the source script uses.
+		// Codex Cloud bot P2 on PR #131 / kosyak
+		// `2026-05-06-go-regex-case-sensitive-while-ps1-source-was-insensitive.md`:
+		// Go's regexp.Compile is case-sensitive by default, so
+		// without (?i) here the default fallbacks would silently miss
+		// mixed-case paths like `.SCRATCH/foo.LOG` or lowercase
+		// tokens like `traceback`. User-provided overrides keep
+		// whatever case sensitivity they encode (operator authority).
+		src = "(?i)" + fallback
 	}
 	return regexp.Compile(src)
 }

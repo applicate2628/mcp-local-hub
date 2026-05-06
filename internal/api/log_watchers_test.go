@@ -77,3 +77,33 @@ func TestParsePosixPSRows_FewerThan4Tokens(t *testing.T) {
 		t.Errorf("rows = %d, want 0 (all malformed); got %+v", len(rows), rows)
 	}
 }
+
+// TestFilterWatcherCandidates_DefaultCaseInsensitive verifies that
+// uppercase paths and lowercase tokens still match the default regex
+// patterns, mirroring PowerShell -match operator's case-insensitive
+// default. Codex Cloud bot P2 on PR #131 caught this — Go regexp is
+// case-sensitive by default, but the source PS1 detection isn't.
+func TestFilterWatcherCandidates_DefaultCaseInsensitive(t *testing.T) {
+	// Path-matched watcher with UPPERCASE .SCRATCH/.LOG path.
+	// Orphan-grep with lowercase `traceback` token (PS1 default
+	// includes `Traceback` capitalized).
+	rows := []processRow{
+		{PID: 100, ParentPID: 50, Name: "tail.exe", Cmdline: `tail -F /D/Dev/.SCRATCH/run.LOG`},
+		{PID: 200, ParentPID: 99999, Name: "grep.exe", Cmdline: `grep -E --line-buffered "traceback|fail"`},
+	}
+	pidSet := map[int]bool{100: true, 50: true, 200: true} // 99999 absent → row 200 is orphan
+
+	pathRe, err := compileWatcherRegex("", defaultLogWatcherPathRegex)
+	if err != nil {
+		t.Fatalf("compile path regex: %v", err)
+	}
+	orphanRe, err := compileWatcherRegex("", defaultOrphanGrepRegexTokens)
+	if err != nil {
+		t.Fatalf("compile orphan regex: %v", err)
+	}
+
+	matches := filterWatcherCandidates(rows, pidSet, pathRe, orphanRe)
+	if len(matches) != 2 {
+		t.Errorf("matches = %d, want 2 (uppercase path + lowercase orphan-grep token); got %+v", len(matches), matches)
+	}
+}
