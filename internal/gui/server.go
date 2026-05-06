@@ -280,6 +280,19 @@ type secretsAPI interface {
 	Delete(name string, confirm bool) error
 }
 
+// cleanupAPI is the narrow interface the /api/cleanup/* routes need.
+// Wraps `internal/api/cleanup.go`'s API.CleanupOrphans so tests can
+// inject a fake without spinning up real Win32_Process scans.
+type cleanupAPI interface {
+	CleanupOrphans(opts api.CleanupOpts) ([]api.OrphanProcess, error)
+}
+
+type realCleanupAPI struct{}
+
+func (realCleanupAPI) CleanupOrphans(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+	return api.NewAPI().CleanupOrphans(opts)
+}
+
 type realSecretsAPI struct{}
 
 func (realSecretsAPI) Init() (api.SecretsInitResult, error) { return api.NewAPI().SecretsInit() }
@@ -350,6 +363,7 @@ type Server struct {
 	secrets           secretsAPI
 	settings          settingsAPI
 	backups           backupsAPI
+	cleanup           cleanupAPI
 
 	// Weekly-schedule swap test seams (memo D8). Production: nil — the
 	// handler falls back to api.SwapWeeklyTrigger and a real
@@ -399,6 +413,7 @@ func NewServer(cfg Config) *Server {
 	s.secrets = realSecretsAPI{}
 	s.settings = realSettingsAPI{}
 	s.backups = realBackupsAPI{}
+	s.cleanup = realCleanupAPI{}
 	registerPingRoutes(s)
 	registerAssetRoutes(s)
 	registerScanRoutes(s)
@@ -418,6 +433,7 @@ func NewServer(cfg Config) *Server {
 	registerVersionRoutes(s)
 	registerDaemonsRoutes(s)
 	registerExportBundleRoutes(s)
+	registerCleanupRoutes(s)
 	registerForceKillRoutes(s)
 	return s
 }
