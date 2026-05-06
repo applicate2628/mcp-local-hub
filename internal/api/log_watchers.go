@@ -185,6 +185,21 @@ func (a *API) CleanupLogWatchers(opts LogWatcherCleanupOpts) ([]LogWatcher, erro
 			matches[i].KillErr = "skipped: process exited between snapshot and kill"
 			continue
 		}
+		// Identity revalidation requires a non-zero StartTime anchor.
+		// When wmic/PowerShell can't parse CIM_DATETIME (parseWmicProcessRows
+		// fallback at log_watchers.go:497-500) or `ps -o etime=` returns
+		// unparseable elapsed time, StartTime falls back to 0. If both
+		// the original and fresh rows have StartTime==0, the check
+		// `cur.StartTime != original.StartTime` becomes `0 != 0` = false
+		// and the guard degenerates to pure name equality — letting a
+		// recycled same-named PID through. xhigh+subagents reliability
+		// finding on PR #131 / kosyak
+		// 2026-05-07-startime-zero-fail-open-bypasses-pid-reuse-guard.md.
+		// Fail closed: refuse to kill when we cannot prove identity.
+		if original.StartTime == 0 {
+			matches[i].KillErr = "skipped: snapshot start-time unknown (cannot revalidate identity)"
+			continue
+		}
 		// Identity: comm name + start time. Same comm with different
 		// start time means a fresh unrelated process took the slot.
 		if cur.Name != original.Name || cur.StartTime != original.StartTime {

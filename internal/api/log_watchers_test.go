@@ -238,3 +238,46 @@ func TestFilterWatcherCandidates_DefaultCaseInsensitive(t *testing.T) {
 		t.Errorf("matches = %d, want 2 (uppercase path + lowercase orphan-grep token); got %+v", len(matches), matches)
 	}
 }
+
+// TestCleanupLogWatchers_FailClosedOnZeroStartTime is the regression
+// test for the xhigh+subagents reliability-engineer finding on PR #131
+// commit 4e46eba (kosyak
+// 2026-05-07-startime-zero-fail-open-bypasses-pid-reuse-guard.md):
+// when wmic CIM_DATETIME parse or ps etime parse fails, StartTime
+// falls back to 0. If both the original snapshot row AND the fresh
+// revalidation row have StartTime==0, the identity check
+// `cur.StartTime != original.StartTime` evaluates to `0 != 0` = false
+// and the guard degenerates to pure name equality, letting a
+// recycled same-named PID through — defeating the very kosyak-#11
+// PID-reuse protection. Apply must refuse the kill and record an
+// explicit "snapshot start-time unknown" skip.
+func TestCleanupLogWatchers_FailClosedOnZeroStartTime(t *testing.T) {
+	originalSnap := snapshotProcessesFn
+	defer func() { snapshotProcessesFn = originalSnap }()
+
+	// Both snapshots return PID 1234 with StartTime=0 — the degenerate
+	// case the revalidation guard cannot anchor against.
+	snapshotProcessesFn = func() ([]processRow, error) {
+		return []processRow{
+			{PID: 1234, ParentPID: 99999, Name: "tail.exe",
+				Cmdline:   `tail -F /d/dev/.scratch/x.log`,
+				StartTime: 0},
+		}, nil
+	}
+
+	a := NewAPI()
+	got, err := a.CleanupLogWatchers(LogWatcherCleanupOpts{
+		IncludeLive: true, // skip parent-alive gate so kill loop runs
+		DryRun:      false,
+	})
+	if err != nil {
+		t.Fatalf("CleanupLogWatchers: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 candidate, got %d: %+v", len(got), got)
+	}
+	want := "skipped: snapshot start-time unknown (cannot revalidate identity)"
+	if got[0].KillErr != want {
+		t.Errorf("expected start-time-unknown skip, got KillErr=%q want %q", got[0].KillErr, want)
+	}
+}
