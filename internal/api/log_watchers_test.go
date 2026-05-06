@@ -78,6 +78,98 @@ func TestParsePosixPSRows_FewerThan4Tokens(t *testing.T) {
 	}
 }
 
+// TestCleanupLogWatchers_ApplyRevalidatesPIDIdentity is the regression
+// test for Codex Cloud bot P2 advisory on PR #131 (kosyak
+// 2026-05-07-pid-reuse-race-in-watcher-kill-loop.md): between the
+// initial snapshot and the kill syscall, a watcher can exit and the
+// OS can recycle the PID. Apply must revalidate identity (Name +
+// StartTime) before killing.
+//
+// Test: inject snapshotProcessesFn that returns DIFFERENT rosters on
+// the first vs second call. First call (filter) sees PID 1234 as a
+// matching watcher with StartTime=1000. Second call (revalidate) sees
+// PID 1234 as a different process (Name and StartTime changed) — that
+// PID got recycled. CleanupLogWatchers must skip the kill and record
+// the identity-mismatch reason.
+func TestCleanupLogWatchers_ApplyRevalidatesPIDIdentity(t *testing.T) {
+	originalSnap := snapshotProcessesFn
+	defer func() { snapshotProcessesFn = originalSnap }()
+
+	calls := 0
+	snapshotProcessesFn = func() ([]processRow, error) {
+		calls++
+		if calls == 1 {
+			// First call: filter step sees a real watcher candidate.
+			return []processRow{
+				{PID: 1234, ParentPID: 99999, Name: "tail.exe",
+					Cmdline: `tail -F /d/dev/.scratch/x.log`,
+					StartTime: 1000},
+			}, nil
+		}
+		// Second call: PID 1234 is now an unrelated recycled process.
+		return []processRow{
+			{PID: 1234, ParentPID: 1, Name: "explorer.exe",
+				Cmdline: "C:\\Windows\\explorer.exe",
+				StartTime: 9999},
+		}, nil
+	}
+
+	a := NewAPI()
+	got, err := a.CleanupLogWatchers(LogWatcherCleanupOpts{
+		IncludeLive: true, // skip the parent-alive gate to ensure kill loop runs
+		DryRun:      false,
+	})
+	if err != nil {
+		t.Fatalf("CleanupLogWatchers: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 candidate, got %d: %+v", len(got), got)
+	}
+	if got[0].KillErr != "skipped: PID reused (identity mismatch)" {
+		t.Errorf("expected identity-mismatch skip, got KillErr=%q", got[0].KillErr)
+	}
+	if calls != 2 {
+		t.Errorf("expected 2 snapshots (filter + revalidate); got %d", calls)
+	}
+}
+
+// TestCleanupLogWatchers_ApplySkipsExitedPID verifies the fail-safe
+// path when a candidate PID disappears between snapshots (process
+// exited cleanly with no recycler taking its slot yet).
+func TestCleanupLogWatchers_ApplySkipsExitedPID(t *testing.T) {
+	originalSnap := snapshotProcessesFn
+	defer func() { snapshotProcessesFn = originalSnap }()
+
+	calls := 0
+	snapshotProcessesFn = func() ([]processRow, error) {
+		calls++
+		if calls == 1 {
+			return []processRow{
+				{PID: 1234, ParentPID: 99999, Name: "tail.exe",
+					Cmdline: `tail -F /d/dev/.scratch/x.log`,
+					StartTime: 1000},
+			}, nil
+		}
+		// Second call: PID 1234 missing — process exited cleanly.
+		return []processRow{}, nil
+	}
+
+	a := NewAPI()
+	got, err := a.CleanupLogWatchers(LogWatcherCleanupOpts{
+		IncludeLive: true,
+		DryRun:      false,
+	})
+	if err != nil {
+		t.Fatalf("CleanupLogWatchers: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 candidate, got %d", len(got))
+	}
+	if got[0].KillErr != "skipped: process exited between snapshot and kill" {
+		t.Errorf("expected exited-PID skip, got KillErr=%q", got[0].KillErr)
+	}
+}
+
 // TestFilterWatcherCandidates_DefaultCaseInsensitive verifies that
 // uppercase paths and lowercase tokens still match the default regex
 // patterns, mirroring PowerShell -match operator's case-insensitive

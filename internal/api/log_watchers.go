@@ -138,8 +138,10 @@ func (a *API) CleanupLogWatchers(opts LogWatcherCleanupOpts) ([]LogWatcher, erro
 	}
 
 	pidSet := make(map[int]bool, len(rows))
+	rowByPID := make(map[int]processRow, len(rows))
 	for _, r := range rows {
 		pidSet[r.PID] = true
+		rowByPID[r.PID] = r
 	}
 
 	matches := filterWatcherCandidates(rows, pidSet, pathRe, orphanRe)
@@ -147,9 +149,46 @@ func (a *API) CleanupLogWatchers(opts LogWatcherCleanupOpts) ([]LogWatcher, erro
 		return matches, nil
 	}
 
+	// Codex Cloud bot P2 advisory on PR #131 / kosyak
+	// 2026-05-07-pid-reuse-race-in-watcher-kill-loop.md: between the
+	// initial snapshot and the kill syscall, a watcher can exit and
+	// the OS can recycle its PID for an unrelated process. Re-snapshot
+	// once and require identity (Name + StartTime) match before killing.
+	// One re-snapshot per call (~ms POSIX, ~500ms Windows wmic) bounds
+	// the apply-loop cost.
+	fresh, err := snapshotProcessesForWatcherScan()
+	if err != nil {
+		// Fail-safe: if revalidation snapshot fails, refuse all kills
+		// rather than proceed with stale identity. Mark each candidate
+		// as skipped with the reason so the operator sees the gap.
+		for i := range matches {
+			if matches[i].ParentAlive && !opts.IncludeLive {
+				continue
+			}
+			matches[i].KillErr = "skipped: revalidation snapshot failed: " + err.Error()
+		}
+		return matches, nil
+	}
+	freshByPID := make(map[int]processRow, len(fresh))
+	for _, r := range fresh {
+		freshByPID[r.PID] = r
+	}
+
 	for i := range matches {
 		// Honor IncludeLive default: skip kill if parent still alive.
 		if matches[i].ParentAlive && !opts.IncludeLive {
+			continue
+		}
+		cur, stillThere := freshByPID[matches[i].PID]
+		original := rowByPID[matches[i].PID]
+		if !stillThere {
+			matches[i].KillErr = "skipped: process exited between snapshot and kill"
+			continue
+		}
+		// Identity: comm name + start time. Same comm with different
+		// start time means a fresh unrelated process took the slot.
+		if cur.Name != original.Name || cur.StartTime != original.StartTime {
+			matches[i].KillErr = "skipped: PID reused (identity mismatch)"
 			continue
 		}
 		if err := killOnePID(matches[i].PID); err != nil {
