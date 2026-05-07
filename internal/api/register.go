@@ -520,6 +520,12 @@ func (a *API) registerOneLanguage(
 		return WorkspaceEntry{}, fmt.Errorf("proxy readiness on port %d: %w", port, err)
 	}
 	fmt.Fprintf(w, "\u2713 Scheduler task started: %s\n", taskName)
+	// Task 10 plan \u00a765: AFTER scheduler create + sch.Run + readiness
+	// PASS, record Desired=running intent + workspace-registered audit
+	// entry. Audit / intent failures are logged + tolerated \u2014 the
+	// workspace is already registered (registry on disk + scheduler
+	// task created + proxy started + readiness probe passed).
+	a.recordRegisterIntentForTask(taskName, w)
 	// Phase 3: re-acquire flock before client config writes. Client
 	// adapters perform read-modify-write updates, so these writes must be
 	// serialized against concurrent register/unregister operations.

@@ -158,6 +158,16 @@ func refuseWorkspaceScopedInstall(m *config.ServerManifest, w io.Writer) error {
 // Install performs the full install flow for one server: reads manifest,
 // runs preflight, builds plan, creates scheduler tasks, writes client configs,
 // starts daemons.
+//
+// Task 10 wiring (plan v13 §62 audit-first canonical timing): on a
+// non-dry-run path the function emits one Action=server-install audit
+// entry per planned scheduler task BEFORE any scheduler / intent / client
+// mutation. If audit append fails (incl. ErrIdentityOversize per §51 +
+// §62), the install is REJECTED with a wrapped error and end-state is
+// identical to never-attempted install. After a successful install the
+// function records Desired=running intent for each created task; intent
+// failures there are logged + tolerated because the install already
+// happened.
 func (a *API) Install(opts InstallOpts) error {
 	w := opts.Writer
 	if w == nil {
@@ -198,8 +208,23 @@ func (a *API) Install(opts InstallOpts) error {
 	if opts.DryRun {
 		return printPlanTo(w, plan)
 	}
+	// 4a. AUDIT-FIRST per plan §62 v12 canonical timing: emit one
+	// server-install audit entry per planned task BEFORE any mutation.
+	// Failure here (incl. ErrIdentityOversize per §51) aborts with an
+	// end-state identical to never-attempted install — no scheduler
+	// tasks created, no intent file modifications, no client configs
+	// touched.
+	if err := a.recordInstallAuditPreMutation(m, opts.DaemonFilter); err != nil {
+		return err
+	}
 	// 5. Execute.
-	return executeInstallTo(w, m, plan, a.effectiveBackupKeepN())
+	if err := executeInstallTo(w, m, plan, a.effectiveBackupKeepN()); err != nil {
+		return err
+	}
+	// 5a. Post-success: record Desired=running intent for each created
+	// scheduler task. Intent failures here are logged + tolerated.
+	a.recordInstallIntentPostSuccess(m, opts.DaemonFilter, w)
+	return nil
 }
 
 // InstallAll is the production entry point for bulk install. Reads
@@ -293,7 +318,8 @@ func (a *API) InstallAllFrom(opts InstallAllOpts) []InstallResult {
 }
 
 // installUsingEmbedFirst is the install entry that loads the manifest
-// via loadManifestYAMLEmbedFirst.
+// via loadManifestYAMLEmbedFirst. Mirrors Install's audit-first +
+// intent-after wiring per Task 10 (plan §62 audit-first canonical).
 func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 	w := opts.Writer
 	if w == nil {
@@ -321,12 +347,20 @@ func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 	if opts.DryRun {
 		return printPlanTo(w, plan)
 	}
-	return executeInstallTo(w, m, plan, a.effectiveBackupKeepN())
+	if err := a.recordInstallAuditPreMutation(m, opts.DaemonFilter); err != nil {
+		return err
+	}
+	if err := executeInstallTo(w, m, plan, a.effectiveBackupKeepN()); err != nil {
+		return err
+	}
+	a.recordInstallIntentPostSuccess(m, opts.DaemonFilter, w)
+	return nil
 }
 
 // installFromManifestDir is Install-like but with an explicit manifestDir
 // override. Used by InstallAllFrom so tests can point at a tempdir without
-// mutating global executable-path state.
+// mutating global executable-path state. Mirrors Install's audit-first +
+// intent-after wiring per Task 10.
 func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error {
 	w := opts.Writer
 	if w == nil {
@@ -355,7 +389,14 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 	if opts.DryRun {
 		return printPlanTo(w, plan)
 	}
-	return executeInstallTo(w, m, plan, a.effectiveBackupKeepN())
+	if err := a.recordInstallAuditPreMutation(m, opts.DaemonFilter); err != nil {
+		return err
+	}
+	if err := executeInstallTo(w, m, plan, a.effectiveBackupKeepN()); err != nil {
+		return err
+	}
+	a.recordInstallIntentPostSuccess(m, opts.DaemonFilter, w)
+	return nil
 }
 
 // Status returns the current scheduler view of all mcp-local-hub tasks,
@@ -767,6 +808,16 @@ func (a *API) Uninstall(server string) (*UninstallReport, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Task 10 plan §65: BEFORE deleting tasks, mark each as
+	// Desired=stopped + Reason=uninstalled and append a
+	// server-uninstalled audit entry. Audit / intent failures are
+	// logged + tolerated — uninstall is idempotent and must remove
+	// tasks regardless.
+	taskNamesForIntent := make([]string, 0, len(tasks))
+	for _, t := range tasks {
+		taskNamesForIntent = append(taskNamesForIntent, strings.TrimPrefix(t.Name, "\\"))
+	}
+	a.recordUninstallIntentForTasks(taskNamesForIntent, nil)
 	for _, t := range tasks {
 		if err := sch.Delete(t.Name); err != nil {
 			report.TaskDeleteWarns = append(report.TaskDeleteWarns, fmt.Sprintf("delete %s: %v", t.Name, err))
@@ -888,6 +939,13 @@ func (a *API) uninstallWithoutManifest(server string) (*UninstallReport, error) 
 	if err != nil {
 		return nil, err
 	}
+	// Task 10 plan §65: same uninstall intent + audit recording as
+	// the manifest-backed path.
+	retiredTaskNames := make([]string, 0, len(tasks))
+	for _, t := range tasks {
+		retiredTaskNames = append(retiredTaskNames, strings.TrimPrefix(t.Name, "\\"))
+	}
+	a.recordUninstallIntentForTasks(retiredTaskNames, nil)
 	for _, t := range tasks {
 		if err := sch.Delete(t.Name); err != nil {
 			report.TaskDeleteWarns = append(report.TaskDeleteWarns, fmt.Sprintf("delete %s: %v", t.Name, err))
@@ -1444,7 +1502,27 @@ func clientConfigPath(name string) (string, error) {
 // calls sch.Stop to clean up the scheduler state. Returns a per-task
 // result set so callers can surface partial failures without bailing
 // after the first row.
+//
+// Task 10 wiring (plan §8 + §11 + §51): Stop is the back-compat entry
+// for the no-force path. It records Desired=stopped intent + a
+// user-stop audit entry BEFORE killing; intent OR audit failure
+// (incl. ErrIdentityOversize) returns the error verbatim and skips
+// the kill. New callers that need --force should use StopWithOpts.
 func (a *API) Stop(server, daemonFilter string) ([]RestartResult, error) {
+	taskNames, err := stopTaskNamesForServer(server, daemonFilter)
+	if err != nil {
+		return nil, err
+	}
+	if err := a.recordStopIntent(taskNames, false); err != nil {
+		return nil, err
+	}
+	return a.stopKillCore(server, daemonFilter)
+}
+
+// stopKillCore is the original kill body of Stop. Extracted so Stop
+// (no-force) and StopWithOpts (Force toggle) can share the kill path
+// after each one has run its own intent/audit recording.
+func (a *API) stopKillCore(server, daemonFilter string) ([]RestartResult, error) {
 	sch, err := scheduler.New()
 	if err != nil {
 		return nil, err
@@ -1483,6 +1561,12 @@ func (a *API) Stop(server, daemonFilter string) ([]RestartResult, error) {
 // Restart kills the live daemons for one server (+ optional daemon
 // filter) by port and re-runs their scheduler tasks. The --server
 // counterpart of RestartAll: same semantics, narrower scope.
+//
+// Task 10 wiring (plan §65 fail-handling table): per task, AFTER a
+// successful sch.Run, the function records Desired=running intent +
+// a server-restarted audit entry. Audit / intent failures are logged
+// to opts.Writer (or os.Stderr by default) and never propagate — the
+// restart already happened.
 func (a *API) Restart(server, daemonFilter string) ([]RestartResult, error) {
 	sch, err := scheduler.New()
 	if err != nil {
@@ -1530,6 +1614,12 @@ func (a *API) Restart(server, daemonFilter string) ([]RestartResult, error) {
 			results = append(results, RestartResult{TaskName: t.Name, Err: err.Error()})
 			continue
 		}
+		// Task 10 plan §65: AFTER /Run success, record Desired=running
+		// intent + restart audit entry. Failures are logged + tolerated.
+		// Use the leading-backslash form to match the watchdog driver's
+		// canonical scheduler row TaskName (status_enrich.go normalizes
+		// the same way on lookup).
+		a.recordRestartIntentForTask(normalized, nil)
 		results = append(results, RestartResult{TaskName: t.Name})
 	}
 	return results, nil
