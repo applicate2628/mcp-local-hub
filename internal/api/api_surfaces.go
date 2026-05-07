@@ -17,11 +17,16 @@
 //   its 4-min ctx deadline.
 //
 // Stubs deferred to later tasks:
-//   - DaemonIntent / IntentDesired* / ReadDaemonIntent / IsActiveStop  → Task 2
 //   - IntentAuditEntry / AppendIntentAudit                              → Task 3
 //   - OwnedXMLValidator real validation logic (XML export/parse/limits) → Task 6
 //   The minimal interfaces / structs / package-level seams below let
 //   later tasks satisfy the contract without re-shaping Task 0 surfaces.
+//
+// Task 2 wired-up surfaces (now owned by daemon_intent.go):
+//   - DaemonIntent struct, Reason / Desired enum constants, IsActiveStop
+//     predicate, ReadDaemonIntent / WriteDaemonIntent / ClearDaemonIntent
+//     methods. The readDaemonIntentFn seam below is bound during init()
+//     in daemon_intent.go to a thin adapter over ReadDaemonIntent.
 package api
 
 import (
@@ -85,60 +90,9 @@ var readDaemonIntentFn func(taskName string) (DaemonIntent, bool, error)
 // Stub types pending later tasks.
 // ---------------------------------------------------------------------------
 
-// DaemonIntent is the desired-state record for one daemon. Concrete
-// schema and persistence are owned by Task 2 (daemon_intent.go); this
-// minimal struct lets Task 0's IntentStillRunning compile and test
-// against a deterministic fake.
-//
-// TODO(task 2): replace this stub with the canonical DaemonIntent
-// declared in daemon_intent.go. Task 2 must keep the IsActiveStop
-// method shape so IntentStillRunning continues to compile.
-type DaemonIntent struct {
-	// Desired is one of IntentDesiredRunning / IntentDesiredStopped.
-	Desired string
-	// Reason is the operator-provided rationale (e.g. "user-stop",
-	// "watchdog-fail-closed"). Free-form for v0.3.0.
-	Reason string
-	// At is the UTC RFC3339Nano timestamp the intent was recorded.
-	At time.Time
-}
-
-const (
-	// IntentDesiredRunning marks a daemon that should be alive.
-	IntentDesiredRunning = "running"
-	// IntentDesiredStopped marks a daemon the operator (or a fail-closed
-	// path) explicitly suppressed. The watchdog must NOT auto-revive it.
-	IntentDesiredStopped = "stopped"
-)
-
-// intentStopTTL is the upper bound on a stopped-intent's effective life.
-// After TTL elapses the entry is treated as stale and the daemon becomes
-// eligible for auto-revive. Task 2 owns the canonical TTL; for Task 0 we
-// pick 24h, matching the v13 plan's "TTL with clock-skew" intent.
-//
-// TODO(task 2): align this constant with the Task 2 canonical TTL.
-const intentStopTTL = 24 * time.Hour
-
-// IsActiveStop reports whether the intent is an active stop directive at
-// the given evaluation time. False if Desired != stopped or At is older
-// than intentStopTTL (stale).
-//
-// TODO(task 2): the real Task 2 implementation will add clock-skew
-// tolerance and three-state read (missing/corrupt/valid). Task 0's stub
-// suffices for IntentStillRunning's contract.
-func (d DaemonIntent) IsActiveStop(now time.Time) (bool, string) {
-	if d.Desired != IntentDesiredStopped {
-		return false, ""
-	}
-	if d.At.IsZero() {
-		// No timestamp → cannot evaluate freshness; treat as inactive.
-		return false, ""
-	}
-	if now.Sub(d.At) > intentStopTTL {
-		return false, ""
-	}
-	return true, d.Reason
-}
+// (DaemonIntent / IntentDesired* / IsActiveStop moved to daemon_intent.go
+// when Task 2 landed. The readDaemonIntentFn seam above is bound to the
+// production reader by daemon_intent.go's init().)
 
 // IntentAuditEntry is one row in the append-only audit log. Task 3
 // (intent_audit.go) owns the canonical schema (incl. caller fields,
@@ -653,20 +607,17 @@ func (a *API) daemonIsRunning(ctx context.Context, taskName string) bool {
 //   - intent.Desired = stopped + fresh (within TTL) → false
 //   - intent.Desired = stopped + stale (past TTL)   → true
 //
-// Wraps ReadDaemonIntent (Task 2 owner) + DaemonIntent.IsActiveStop.
-// For Task 0 the readDaemonIntentFn seam stands in for the on-disk
-// daemon-intent.json reader; Task 2 will populate the production path.
-//
-// TODO(task 2): wire this to the real ReadDaemonIntent implementation
-// once daemon_intent.go lands. The signature contract here (taskName,
-// now → bool) must remain stable so the watchdog driver in Task 9 does
-// not need to change.
+// Wraps ReadDaemonIntent (Task 2 owner, daemon_intent.go) +
+// DaemonIntent.IsActiveStop. The readDaemonIntentFn seam is bound by
+// daemon_intent.go's init() to a thin adapter over ReadDaemonIntent;
+// tests overwrite it via installTestIntentReader for deterministic
+// fakes (cleanup restores the production binding).
 func (a *API) IntentStillRunning(taskName string, now time.Time) bool {
 	if readDaemonIntentFn == nil {
-		// Production fallback: until Task 2 lands, assume no recorded
-		// intent (every daemon is "still running" from the watchdog's
-		// perspective, so auto-revive proceeds as expected). Task 2
-		// must replace this with the real read.
+		// Defensive: daemon_intent.go's init() should always have wired
+		// this. If we ever observe nil here it means Task 2's init()
+		// never ran (unlikely; would imply a binary built without
+		// daemon_intent.go), so degrade to "no recorded preference".
 		return true
 	}
 	intent, ok, err := readDaemonIntentFn(taskName)

@@ -272,9 +272,9 @@ func TestIntentStillRunning_FalseWhenUserStop(t *testing.T) {
 	now := time.Now().UTC()
 	installTestIntentReader(t, func(taskName string) (DaemonIntent, bool, error) {
 		return DaemonIntent{
-			Desired: IntentDesiredStopped,
-			Reason:  "user-stop",
-			At:      now.Add(-5 * time.Minute),
+			Desired:   IntentDesiredStopped,
+			Reason:    IntentReasonUserStop,
+			UpdatedAt: now.Add(-5 * time.Minute),
 		}, true, nil
 	})
 	if a.IntentStillRunning("\\mcp-local-hub-time-default", now) {
@@ -288,9 +288,9 @@ func TestIntentStillRunning_TrueWhenStopExpired(t *testing.T) {
 	// Stop intent older than TTL → IsActiveStop returns false → still running.
 	installTestIntentReader(t, func(taskName string) (DaemonIntent, bool, error) {
 		return DaemonIntent{
-			Desired: IntentDesiredStopped,
-			Reason:  "user-stop",
-			At:      now.Add(-48 * time.Hour),
+			Desired:   IntentDesiredStopped,
+			Reason:    IntentReasonUserStop,
+			UpdatedAt: now.Add(-48 * time.Hour),
 		}, true, nil
 	})
 	if !a.IntentStillRunning("\\mcp-local-hub-time-default", now) {
