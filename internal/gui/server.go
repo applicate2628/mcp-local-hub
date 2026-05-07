@@ -52,12 +52,22 @@ func (realStatusProvider) Status() ([]api.DaemonStatus, error) {
 	return api.NewAPI().Status()
 }
 
-// healthBackend is the narrow interface the /api/health handler needs.
-// Wired in NewServer to a realHealthBackend whose `api` field references
-// the long-lived Server.api instance — Phase G2's TTL+singleflight cache
-// lives on that *API, so per-request api.NewAPI() would defeat it.
+// healthBackend is the narrow interface the /api/health and /api/status
+// handlers need. Wired in NewServer to a realHealthBackend whose `api`
+// field references the long-lived Server.api instance — Phase G2's
+// TTL+singleflight cache lives on that *API, so per-request api.NewAPI()
+// would defeat it.
+//
+// Phase 6 of G2: /api/status now also routes through this backend (via
+// DaemonStatusSnapshot) so both endpoints share one cache. Adding a
+// method here MUST be matched by both realHealthBackend (production)
+// and fakeHealth (test seam in health_test.go).
 type healthBackend interface {
 	HealthSnapshot(opts api.HealthOpts) (api.HealthSnapshot, error)
+	// DaemonStatusSnapshot returns the canonical []DaemonStatus that
+	// /api/status emits. Shares the daemons-section cache with
+	// HealthSnapshot — one StatusWithOpts call serves both surfaces.
+	DaemonStatusSnapshot() ([]api.DaemonStatus, error)
 }
 
 type realHealthBackend struct {
@@ -66,6 +76,10 @@ type realHealthBackend struct {
 
 func (r realHealthBackend) HealthSnapshot(opts api.HealthOpts) (api.HealthSnapshot, error) {
 	return r.api.HealthSnapshot(opts)
+}
+
+func (r realHealthBackend) DaemonStatusSnapshot() ([]api.DaemonStatus, error) {
+	return r.api.DaemonStatusSnapshot()
 }
 
 // migrator is the narrow interface the /api/migrate handler needs.

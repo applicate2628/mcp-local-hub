@@ -6,6 +6,18 @@ import (
 	"net/http"
 )
 
+// registerStatusRoutes wires GET /api/status. Phase 6 of G2 re-sourced
+// this handler from s.health (shared with /api/health) so both
+// endpoints serve from one TTL+singleflight cache: a single underlying
+// StatusWithOpts call inside the daemons-section TTL window now feeds
+// /api/status, /api/health, /api/health?include=probes, and
+// /api/health?include=capabilities (when the latter two need the
+// daemons backbone). Zero drift between surfaces.
+//
+// Wire shape is preserved byte-for-byte: DaemonStatusSnapshot returns
+// the canonical []api.DaemonStatus (TaskName, NextRun, Health, and
+// workspace-scoped fields all intact). The thinner DaemonRow form lives
+// only inside HealthSnapshot.Daemons.Items.
 func registerStatusRoutes(s *Server) {
 	s.mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -13,7 +25,7 @@ func registerStatusRoutes(s *Server) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		rows, err := s.status.Status()
+		rows, err := s.health.DaemonStatusSnapshot()
 		if err != nil {
 			writeAPIError(w, err, http.StatusInternalServerError, "STATUS_FAILED")
 			return

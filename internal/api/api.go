@@ -73,6 +73,17 @@ type healthCache struct {
 
 	daemonsAt int64 // ms since epoch when last computed
 	daemons   DaemonsSection
+	// daemonStatuses caches the canonical []DaemonStatus rows produced
+	// by the same underlying StatusWithOpts call that fed `daemons`.
+	// /api/status (DaemonStatusSnapshot) reads from this slot; /api/health
+	// reads the projected `daemons` (DaemonRow) form. One fetch serves
+	// both surfaces — Phase 6 of G2 per
+	// docs/superpowers/specs/2026-05-07-g2-unified-health-endpoint-design.md.
+	//
+	// Field order: keep canonical (DaemonStatus) above projected (DaemonRow)
+	// so future readers see "rich source -> thin view" rather than the
+	// reverse.
+	daemonStatuses []DaemonStatus
 
 	probesAt int64
 	probes   ProbesSection

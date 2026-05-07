@@ -13,17 +13,31 @@ import (
 
 // fakeHealth is the test seam for healthBackend. Captures the most
 // recent opts so handler tests can assert query-parameter parsing.
+//
+// Phase 6 (G2): adds the DaemonStatusSnapshot path used by the
+// re-sourced /api/status handler. Counts are tracked separately
+// (calls vs. daemonStatusCalls) so tests can assert which surface
+// the handler hit.
 type fakeHealth struct {
 	calls      int
 	lastOpts   api.HealthOpts
 	returnSnap api.HealthSnapshot
 	returnErr  error
+
+	daemonStatusCalls    int
+	returnDaemonStatuses []api.DaemonStatus
+	returnDaemonErr      error
 }
 
 func (f *fakeHealth) HealthSnapshot(opts api.HealthOpts) (api.HealthSnapshot, error) {
 	f.calls++
 	f.lastOpts = opts
 	return f.returnSnap, f.returnErr
+}
+
+func (f *fakeHealth) DaemonStatusSnapshot() ([]api.DaemonStatus, error) {
+	f.daemonStatusCalls++
+	return f.returnDaemonStatuses, f.returnDaemonErr
 }
 
 // healthSentinelErr is a small implementation of error suitable for

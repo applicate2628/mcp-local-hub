@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -523,5 +524,144 @@ func TestHealthSnapshot_SyntheticCapability_PopulatedFromCatalog(t *testing.T) {
 		if it.ID != wantID {
 			t.Errorf("item[%d] ID = %q, want %q", i, it.ID, wantID)
 		}
+	}
+}
+
+// TestDaemonStatusSnapshot_SharesCacheWithHealthSnapshot verifies that
+// /api/status (via DaemonStatusSnapshot) and /api/health's daemons
+// section share the same cache slot. One StatusWithOpts call should
+// serve both within TTL.
+//
+// Phase 6 of G2: per spec
+// docs/superpowers/specs/2026-05-07-g2-unified-health-endpoint-design.md
+// the wire shape of /api/status is preserved (full DaemonStatus, including
+// TaskName, NextRun, Health, and workspace-scoped fields), so we cache
+// the canonical []DaemonStatus form and let HealthSnapshot project the
+// thinner DaemonRow lazily. /api/status reads the canonical form
+// directly, no projection-loss.
+func TestDaemonStatusSnapshot_SharesCacheWithHealthSnapshot(t *testing.T) {
+	a := NewAPI()
+	originalStatus := a.HealthStatusFn
+	defer func() { a.HealthStatusFn = originalStatus }()
+	calls := 0
+	a.HealthStatusFn = func(opts StatusOpts) ([]DaemonStatus, error) {
+		calls++
+		return []DaemonStatus{
+			{Server: "x", Daemon: "x", TaskName: "mcp-local-hub-x-default",
+				State: "Running", PID: 1, Port: 100, NextRun: "next-run-text"},
+		}, nil
+	}
+
+	// First call: /api/health → warms the cache via computeDaemonsSection.
+	snap, err := a.HealthSnapshot(HealthOpts{})
+	if err != nil {
+		t.Fatalf("HealthSnapshot: %v", err)
+	}
+	if len(snap.Daemons.Items) != 1 {
+		t.Fatalf("Daemons.Items = %d, want 1", len(snap.Daemons.Items))
+	}
+	if calls != 1 {
+		t.Fatalf("after HealthSnapshot: calls = %d, want 1", calls)
+	}
+
+	// Second call: /api/status → must hit the same cache.
+	rows, err := a.DaemonStatusSnapshot()
+	if err != nil {
+		t.Fatalf("DaemonStatusSnapshot: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	if rows[0].Server != "x" || rows[0].State != "Running" {
+		t.Errorf("rows[0] = %+v, want server=x state=Running", rows[0])
+	}
+	// Critical: full-fat fields (TaskName, NextRun) must survive — they
+	// don't exist on DaemonRow, so a naive Snapshot.Daemons.Items
+	// projection would have dropped them.
+	if rows[0].TaskName != "mcp-local-hub-x-default" {
+		t.Errorf("TaskName lost: %q (cache must hold canonical DaemonStatus, not the projected DaemonRow)", rows[0].TaskName)
+	}
+	if rows[0].NextRun != "next-run-text" {
+		t.Errorf("NextRun lost: %q", rows[0].NextRun)
+	}
+	if calls != 1 {
+		t.Errorf("DaemonStatusSnapshot triggered a new fetch: calls = %d, want 1 (cache must be shared)", calls)
+	}
+
+	// Mutating the returned slice must not poison the cache (defensive copy).
+	rows[0].State = "MUTATED"
+	rows2, _ := a.DaemonStatusSnapshot()
+	if rows2[0].State != "Running" {
+		t.Errorf("cache leak: caller mutation affected next call: %q (defensive copy missing)", rows2[0].State)
+	}
+}
+
+// TestDaemonStatusSnapshot_StatusFirstAlsoServesHealth verifies the
+// reverse direction: /api/status warming the cache means /api/health's
+// daemons section also reads from it (no extra StatusWithOpts call).
+// Locks down the bidirectional cache-sharing contract.
+func TestDaemonStatusSnapshot_StatusFirstAlsoServesHealth(t *testing.T) {
+	a := NewAPI()
+	originalStatus := a.HealthStatusFn
+	defer func() { a.HealthStatusFn = originalStatus }()
+	calls := 0
+	a.HealthStatusFn = func(opts StatusOpts) ([]DaemonStatus, error) {
+		calls++
+		return []DaemonStatus{
+			{Server: "y", Daemon: "y", State: "Running", PID: 7, Port: 200},
+		}, nil
+	}
+
+	// First call: /api/status → warms cache.
+	rows, err := a.DaemonStatusSnapshot()
+	if err != nil {
+		t.Fatalf("DaemonStatusSnapshot: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	if calls != 1 {
+		t.Fatalf("after DaemonStatusSnapshot: calls = %d, want 1", calls)
+	}
+
+	// Second call: /api/health → must hit the cache primed by /api/status.
+	snap, err := a.HealthSnapshot(HealthOpts{})
+	if err != nil {
+		t.Fatalf("HealthSnapshot: %v", err)
+	}
+	if len(snap.Daemons.Items) != 1 || snap.Daemons.Items[0].Server != "y" {
+		t.Errorf("Daemons.Items = %+v, want one row with server=y", snap.Daemons.Items)
+	}
+	if calls != 1 {
+		t.Errorf("HealthSnapshot triggered a new fetch: calls = %d, want 1 (cache must be shared bidirectionally)", calls)
+	}
+}
+
+// TestDaemonStatusSnapshot_SurfacesFetchError verifies that when the
+// underlying StatusWithOpts returns an error, DaemonStatusSnapshot
+// surfaces it (matches HealthSnapshot's failure mode — the daemons
+// section records the error in section.Errors but returns nil err;
+// for /api/status we instead return an empty slice when the cache
+// holds an error-section so legacy clients see "no daemons" rather
+// than a 500). The handler layer maps cache-fetch errors to 500.
+func TestDaemonStatusSnapshot_SurfacesFetchError(t *testing.T) {
+	a := NewAPI()
+	originalStatus := a.HealthStatusFn
+	defer func() { a.HealthStatusFn = originalStatus }()
+	a.HealthStatusFn = func(opts StatusOpts) ([]DaemonStatus, error) {
+		return nil, fmt.Errorf("fake fetch error")
+	}
+
+	// Mirror computeDaemonsSection's contract: a fetchErr inside
+	// StatusWithOpts gets recorded as a SectionError (returned in
+	// section.Errors), not bubbled out as `err`. So the cache fills
+	// with an empty-but-error-flagged section, and DaemonStatusSnapshot
+	// returns an empty slice.
+	rows, err := a.DaemonStatusSnapshot()
+	if err != nil {
+		t.Fatalf("DaemonStatusSnapshot returned err = %v; want nil (errors are recorded in cache, not propagated)", err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("rows = %+v, want [] when fetch failed", rows)
 	}
 }

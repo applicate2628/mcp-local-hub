@@ -213,6 +213,50 @@ func (a *API) HealthSnapshot(opts HealthOpts) (HealthSnapshot, error) {
 	return snap, nil
 }
 
+// DaemonStatusSnapshot returns the cached []DaemonStatus rows that
+// /api/status consumes. Shares the daemons-section cache with
+// HealthSnapshot — one StatusWithOpts call serves both endpoints
+// within the daemons TTL, preventing drift and amortizing the wmic
+// (Windows) / ps (POSIX) cost.
+//
+// Returns the rich canonical form (TaskName, NextRun, Health,
+// workspace-scoped fields) so /api/status preserves its existing
+// wire shape; the thinner DaemonRow projection lives only inside
+// HealthSnapshot.Daemons.Items.
+//
+// The returned slice is a defensive copy so callers can mutate it
+// freely (e.g. sorting) without poisoning the cache. On a fetch error
+// recorded inside the cache (see computeDaemonsSection), this returns
+// an empty non-nil slice — the error is already surfaced to operators
+// via DaemonsSection.Errors when /api/health is consulted; /api/status
+// historically returned an empty list rather than 500ing on stale
+// scheduler state, and Phase 6 preserves that.
+//
+// Phase 6 of G2 per spec
+// docs/superpowers/specs/2026-05-07-g2-unified-health-endpoint-design.md.
+func (a *API) DaemonStatusSnapshot() ([]DaemonStatus, error) {
+	nowMs := a.healthNow()
+	// Reuse computeDaemonsSection's TTL+singleflight logic. We discard
+	// the returned DaemonsSection — what we want is the side-effect of
+	// having `daemonStatuses` populated in the same critical section.
+	if _, err := a.computeDaemonsSection(nowMs, false); err != nil {
+		return nil, err
+	}
+	a.healthCache.mu.RLock()
+	rows := a.healthCache.daemonStatuses
+	a.healthCache.mu.RUnlock()
+	if len(rows) == 0 {
+		// Distinguish nil-from-uninitialized vs. empty-by-design: both
+		// resolve to the same zero-length response, but the consumers
+		// (frontend, csrf_test, e2e) decode `[]` not `null`. Return a
+		// fresh empty slice so the JSON encoder always emits `[]`.
+		return []DaemonStatus{}, nil
+	}
+	out := make([]DaemonStatus, len(rows))
+	copy(out, rows)
+	return out, nil
+}
+
 // computeHubSection populates the hub section. Build info comes from
 // internal/buildinfo (the same source GET /api/version uses). Lock state
 // is best-effort — Phase 2 returns HubLock{} since the API struct doesn't
@@ -287,6 +331,11 @@ func (a *API) computeDaemonsSection(nowMs int64, refresh bool) (DaemonsSection, 
 			})
 			a.healthCache.mu.Lock()
 			a.healthCache.daemons = section
+			// On fetch error, store an empty canonical slice (not nil)
+			// so DaemonStatusSnapshot returns []DaemonStatus{} instead
+			// of nil — preserves the "always returns a non-nil slice"
+			// contract the existing /api/status wire-shape consumers expect.
+			a.healthCache.daemonStatuses = []DaemonStatus{}
 			a.healthCache.daemonsAt = nowMs
 			a.healthCache.mu.Unlock()
 			return section, nil
@@ -308,6 +357,16 @@ func (a *API) computeDaemonsSection(nowMs int64, refresh bool) (DaemonsSection, 
 		}
 		a.healthCache.mu.Lock()
 		a.healthCache.daemons = section
+		// Cache the canonical []DaemonStatus alongside the projected
+		// DaemonsSection so /api/status (DaemonStatusSnapshot) can serve
+		// reads from the same slot WITHOUT calling StatusWithOpts again.
+		// Phase 6 of G2: one fetch, two surfaces — zero drift between
+		// /api/status and /api/health's daemons section.
+		//
+		// We store the rows as-is from statusFn. Snapshot reads make a
+		// defensive copy before returning so a mutation by one reader
+		// can't poison the next.
+		a.healthCache.daemonStatuses = rows
 		a.healthCache.daemonsAt = nowMs
 		a.healthCache.mu.Unlock()
 		return section, nil
@@ -742,8 +801,11 @@ func ensureCanonicalIDs(row CapabilityRow) CapabilityRow {
 // normalizeDaemonState maps the existing ("Running"|"Ready"|"Failed"|"Stopped")
 // vocabulary to the spec's lowercase ("running"|"stopped"|"starting"|"failed").
 //
-// FIXME(phase-6): project back to DaemonStatus.State Title Case during
-// /api/status re-source so the existing wire shape stays unchanged.
+// Used only by computeDaemonsSection when projecting into DaemonRow
+// (the lowercase wire form for HealthSnapshot.Daemons.Items). The
+// /api/status surface bypasses this projection entirely after Phase 6 —
+// DaemonStatusSnapshot returns the canonical []DaemonStatus with the
+// original Title-Case state vocabulary intact, no round-trip needed.
 func normalizeDaemonState(s string) string {
 	switch s {
 	case "Running", "Ready":
