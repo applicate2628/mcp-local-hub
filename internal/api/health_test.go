@@ -2,7 +2,7 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -637,31 +637,77 @@ func TestDaemonStatusSnapshot_StatusFirstAlsoServesHealth(t *testing.T) {
 	}
 }
 
-// TestDaemonStatusSnapshot_SurfacesFetchError verifies that when the
-// underlying StatusWithOpts returns an error, DaemonStatusSnapshot
-// surfaces it (matches HealthSnapshot's failure mode — the daemons
-// section records the error in section.Errors but returns nil err;
-// for /api/status we instead return an empty slice when the cache
-// holds an error-section so legacy clients see "no daemons" rather
-// than a 500). The handler layer maps cache-fetch errors to 500.
+// TestDaemonStatusSnapshot_SurfacesFetchError verifies that
+// /api/status's underlying DaemonStatusSnapshot propagates a fetch
+// error from StatusWithOpts so the handler returns 500 STATUS_FAILED
+// instead of 200 with empty []. Cloud bot P1 on PR #132 commit
+// a8a54c1: the prior swallow behavior masked real backend failures
+// (operational incidents looked like "no daemons running" instead
+// of "status backend broken").
+//
+// Contract change vs. pre-fix: section.Errors[] still gets populated
+// (so /api/health introspection clients see the failure scope), but
+// the error ALSO bubbles out to the caller so /api/status restores
+// its pre-G2 fail-loud HTTP-500 contract.
 func TestDaemonStatusSnapshot_SurfacesFetchError(t *testing.T) {
 	a := NewAPI()
 	originalStatus := a.HealthStatusFn
 	defer func() { a.HealthStatusFn = originalStatus }()
+
+	sentinelErr := errors.New("status backend unavailable")
 	a.HealthStatusFn = func(opts StatusOpts) ([]DaemonStatus, error) {
-		return nil, fmt.Errorf("fake fetch error")
+		return nil, sentinelErr
 	}
 
-	// Mirror computeDaemonsSection's contract: a fetchErr inside
-	// StatusWithOpts gets recorded as a SectionError (returned in
-	// section.Errors), not bubbled out as `err`. So the cache fills
-	// with an empty-but-error-flagged section, and DaemonStatusSnapshot
-	// returns an empty slice.
 	rows, err := a.DaemonStatusSnapshot()
-	if err != nil {
-		t.Fatalf("DaemonStatusSnapshot returned err = %v; want nil (errors are recorded in cache, not propagated)", err)
+	if err == nil {
+		t.Fatalf("DaemonStatusSnapshot returned nil error on backend failure; want propagated err. rows=%+v", rows)
 	}
-	if len(rows) != 0 {
-		t.Errorf("rows = %+v, want [] when fetch failed", rows)
+	if !strings.Contains(err.Error(), "status backend unavailable") {
+		t.Errorf("err = %v, want to contain sentinel string", err)
+	}
+}
+
+// TestHealthSnapshot_PropagatesDaemonFetchError verifies that a
+// total backend failure on the daemons fetch surfaces as a non-nil
+// error from HealthSnapshot too — Cloud bot P1 fix for PR #132.
+// /api/health handler returns 500 + HEALTH_BACKEND_FAILED (not 200
+// with empty Daemons.Items + section.Errors[] only).
+func TestHealthSnapshot_PropagatesDaemonFetchError(t *testing.T) {
+	a := NewAPI()
+	originalStatus := a.HealthStatusFn
+	defer func() { a.HealthStatusFn = originalStatus }()
+	a.HealthStatusFn = func(opts StatusOpts) ([]DaemonStatus, error) {
+		return nil, errors.New("scheduler down")
+	}
+	_, err := a.HealthSnapshot(HealthOpts{})
+	if err == nil {
+		t.Fatalf("HealthSnapshot returned nil err on total backend failure; want propagated")
+	}
+	if !strings.Contains(err.Error(), "scheduler down") {
+		t.Errorf("err = %v, want to contain sentinel", err)
+	}
+}
+
+// TestHealthSnapshot_PropagatesProbeFetchError verifies probes path
+// has the same fail-loud behavior on backend total failure. Cloud
+// bot P1 fix for PR #132 — symmetric with the daemons-section fix.
+func TestHealthSnapshot_PropagatesProbeFetchError(t *testing.T) {
+	a := NewAPI()
+	originalStatus := a.HealthStatusFn
+	defer func() { a.HealthStatusFn = originalStatus }()
+	a.HealthStatusFn = func(opts StatusOpts) ([]DaemonStatus, error) {
+		if !opts.ProbeHealth {
+			// First call (daemons) succeeds; second call (probes) fails.
+			return []DaemonStatus{}, nil
+		}
+		return nil, errors.New("probe backend down")
+	}
+	_, err := a.HealthSnapshot(HealthOpts{IncludeProbes: true})
+	if err == nil {
+		t.Fatalf("HealthSnapshot(IncludeProbes) returned nil err on probe fetch failure")
+	}
+	if !strings.Contains(err.Error(), "probe backend down") {
+		t.Errorf("err = %v, want to contain sentinel", err)
 	}
 }

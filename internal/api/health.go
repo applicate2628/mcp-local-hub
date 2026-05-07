@@ -225,15 +225,19 @@ func (a *API) HealthSnapshot(opts HealthOpts) (HealthSnapshot, error) {
 // HealthSnapshot.Daemons.Items.
 //
 // The returned slice is a defensive copy so callers can mutate it
-// freely (e.g. sorting) without poisoning the cache. On a fetch error
-// recorded inside the cache (see computeDaemonsSection), this returns
-// an empty non-nil slice — the error is already surfaced to operators
-// via DaemonsSection.Errors when /api/health is consulted; /api/status
-// historically returned an empty list rather than 500ing on stale
-// scheduler state, and Phase 6 preserves that.
+// freely (e.g. sorting) without poisoning the cache. On total-backend
+// failure (StatusWithOpts returns an error), the error is propagated
+// out as the second return value AND recorded in DaemonsSection.Errors
+// for /api/health partial-failure introspection — /api/status's
+// handler maps the propagated error to 500 + STATUS_FAILED, restoring
+// the pre-G2 fail-loud contract that operations dashboards rely on.
 //
 // Phase 6 of G2 per spec
 // docs/superpowers/specs/2026-05-07-g2-unified-health-endpoint-design.md.
+// Error-propagation contract restored on PR #132 follow-up after the
+// Cloud bot P1 escalation: prior implementation swallowed fetchErr
+// into section.Errors and returned nil, so operators saw 200 [] on
+// total backend failure instead of 500 STATUS_FAILED.
 func (a *API) DaemonStatusSnapshot() ([]DaemonStatus, error) {
 	nowMs := a.healthNow()
 	// Reuse computeDaemonsSection's TTL+singleflight logic. We discard
@@ -338,7 +342,13 @@ func (a *API) computeDaemonsSection(nowMs int64, refresh bool) (DaemonsSection, 
 			a.healthCache.daemonStatuses = []DaemonStatus{}
 			a.healthCache.daemonsAt = nowMs
 			a.healthCache.mu.Unlock()
-			return section, nil
+			// Propagate the error so /api/status returns 500 STATUS_FAILED
+			// and /api/health returns 500 HEALTH_BACKEND_FAILED on total
+			// backend failure. section.Errors[] is also populated for any
+			// future client that introspects partial-failure scopes.
+			// Cloud bot P1 fix on PR #132 commit a8a54c1: prior swallow
+			// behavior masked real backend failures as "no daemons".
+			return section, fetchErr
 		}
 		for _, r := range rows {
 			section.Items = append(section.Items, DaemonRow{
@@ -435,7 +445,12 @@ func (a *API) computeProbesSection(nowMs int64, refresh bool) (ProbesSection, er
 			a.healthCache.probes = section
 			a.healthCache.probesAt = nowMs
 			a.healthCache.mu.Unlock()
-			return section, nil
+			// Propagate the error so /api/health returns 500
+			// HEALTH_BACKEND_FAILED on total probe-backend failure.
+			// section.Errors[] is also populated for partial-failure
+			// introspection. Symmetric with the daemons-section fix —
+			// Cloud bot P1 on PR #132 commit a8a54c1.
+			return section, fetchErr
 		}
 		for _, r := range rows {
 			pr := ProbeRow{Server: r.Server, Daemon: r.Daemon}
