@@ -42,6 +42,13 @@ type API struct {
 	// Tests overwrite this to inject deterministic []DaemonStatus.
 	HealthStatusFn func(StatusOpts) ([]DaemonStatus, error)
 
+	// HealthCapabilityFn is the test seam used by HealthSnapshot to project
+	// one daemon row into a CapabilityRow. Production: nil → falls back to
+	// a.realCapabilityRow (live MCP roundtrip / synthetic-catalog answer).
+	// Tests overwrite this to inject deterministic CapabilityRow values
+	// without spinning up a real MCP backend.
+	HealthCapabilityFn func(DaemonStatus) (CapabilityRow, error)
+
 	// HealthNowMs is the test seam used by HealthSnapshot to read the
 	// current time in milliseconds. Production: nil → time.Now().UnixMilli().
 	// Tests advance this manually to drive TTL boundaries deterministically.

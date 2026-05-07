@@ -259,17 +259,26 @@ func TestHealthSnapshot_PartialFailureDoesNotPoisonProbes(t *testing.T) {
 				Health: &HealthProbe{OK: true, ToolCount: 3}},
 			{Server: "broken", Daemon: "broken", State: "Running",
 				Health: &HealthProbe{OK: false, Err: "connection refused"}},
+			// Third row: Health == nil. Exercises the else-branch where
+			// the projection synthesizes the "no probe" sentinel so
+			// downstream consumers don't see a phantom successful probe.
+			{Server: "noprobe", Daemon: "noprobe", State: "Stopped"},
 		}, nil
 	}
 
 	snap, _ := a.HealthSnapshot(HealthOpts{IncludeProbes: true})
-	if snap.Probes == nil || len(snap.Probes.Items) != 2 {
-		t.Fatalf("expected both rows, got: %+v", snap.Probes)
+	if snap.Probes == nil || len(snap.Probes.Items) != 3 {
+		t.Fatalf("expected three rows, got: %+v", snap.Probes)
 	}
 	gotOK := snap.Probes.Items[0].OK && snap.Probes.Items[0].ToolCount == 3
 	gotBroken := !snap.Probes.Items[1].OK && snap.Probes.Items[1].Err == "connection refused"
 	if !gotOK || !gotBroken {
 		t.Errorf("partial-failure rows mis-projected: %+v", snap.Probes.Items)
+	}
+	noProbe := snap.Probes.Items[2]
+	if noProbe.OK || noProbe.Err != "no probe (daemon not running or probe disabled)" {
+		t.Errorf("nil-health row mis-projected: %+v, want OK=false err=%q",
+			noProbe, "no probe (daemon not running or probe disabled)")
 	}
 }
 
@@ -298,5 +307,107 @@ func TestHealthSnapshot_LazyProxyDoesNotMaterialize(t *testing.T) {
 	if snap.Probes.Items[0].Source != "proxy-synthetic" {
 		t.Errorf("Source = %q, want proxy-synthetic (preserve lazy-proxy semantic)",
 			snap.Probes.Items[0].Source)
+	}
+}
+
+func TestHealthSnapshot_IncludeCapabilities_AddsBothProbesAndCapabilities(t *testing.T) {
+	a := NewAPI()
+	originalStatus := a.HealthStatusFn
+	originalCap := a.HealthCapabilityFn
+	defer func() {
+		a.HealthStatusFn = originalStatus
+		a.HealthCapabilityFn = originalCap
+	}()
+	a.HealthStatusFn = func(opts StatusOpts) ([]DaemonStatus, error) {
+		return []DaemonStatus{
+			{Server: "fs", Daemon: "fs-default", State: "Running",
+				Health: &HealthProbe{OK: true, ToolCount: 1}},
+		}, nil
+	}
+	a.HealthCapabilityFn = func(_ DaemonStatus) (CapabilityRow, error) {
+		return CapabilityRow{
+			Server: "fs", Daemon: "fs-default",
+			Tools: CapabilitySubSection{State: "ok",
+				Items: []CapabilityItem{{Name: "read_file",
+					ID: "fs/fs-default/tool/read_file", Namespace: "fs", Kind: "tool"}}},
+			Prompts:   CapabilitySubSection{State: "unsupported"},
+			Resources: CapabilitySubSection{State: "empty"},
+		}, nil
+	}
+
+	snap, err := a.HealthSnapshot(HealthOpts{IncludeCapabilities: true})
+	if err != nil {
+		t.Fatalf("HealthSnapshot: %v", err)
+	}
+	if snap.Probes == nil {
+		t.Errorf("IncludeCapabilities must imply IncludeProbes (Probes section missing)")
+	}
+	if snap.Capabilities == nil || len(snap.Capabilities.Items) != 1 {
+		t.Fatalf("Capabilities = %+v, want 1 row", snap.Capabilities)
+	}
+	row := snap.Capabilities.Items[0]
+	if row.Tools.State != "ok" || len(row.Tools.Items) != 1 {
+		t.Errorf("tools = %+v, want state=ok with 1 item", row.Tools)
+	}
+	if row.Tools.Items[0].ID != "fs/fs-default/tool/read_file" {
+		t.Errorf("canonical id = %q, want fs/fs-default/tool/read_file", row.Tools.Items[0].ID)
+	}
+	if row.Prompts.State != "unsupported" || row.Resources.State != "empty" {
+		t.Errorf("state vocab = prompts:%s resources:%s, want unsupported/empty",
+			row.Prompts.State, row.Resources.State)
+	}
+	if snap.Capabilities.TTLMs != 60000 {
+		t.Errorf("Capabilities.TTLMs = %d, want 60000", snap.Capabilities.TTLMs)
+	}
+}
+
+func TestHealthSnapshot_PartialFailureDoesNotPoisonCapabilities(t *testing.T) {
+	a := NewAPI()
+	a.HealthStatusFn = func(opts StatusOpts) ([]DaemonStatus, error) {
+		return []DaemonStatus{
+			{Server: "ok", Daemon: "ok", State: "Running",
+				Health: &HealthProbe{OK: true}},
+			{Server: "broken", Daemon: "broken", State: "Running",
+				Health: &HealthProbe{OK: true}},
+		}, nil
+	}
+	a.HealthCapabilityFn = func(d DaemonStatus) (CapabilityRow, error) {
+		if d.Server == "broken" {
+			return CapabilityRow{Server: d.Server, Daemon: d.Daemon,
+				Tools: CapabilitySubSection{State: "error", Err: "tools/list timeout"}}, nil
+		}
+		return CapabilityRow{Server: d.Server, Daemon: d.Daemon,
+			Tools: CapabilitySubSection{State: "ok",
+				Items: []CapabilityItem{{Name: "x", ID: "ok/ok/tool/x", Kind: "tool"}}}}, nil
+	}
+
+	snap, _ := a.HealthSnapshot(HealthOpts{IncludeCapabilities: true})
+	if snap.Capabilities == nil || len(snap.Capabilities.Items) != 2 {
+		t.Fatalf("want 2 rows: %+v", snap.Capabilities)
+	}
+	if snap.Capabilities.Items[0].Tools.State != "ok" {
+		t.Errorf("ok row = %+v, want state=ok", snap.Capabilities.Items[0].Tools)
+	}
+	if snap.Capabilities.Items[1].Tools.State != "error" {
+		t.Errorf("broken row = %+v, want state=error", snap.Capabilities.Items[1].Tools)
+	}
+}
+
+func TestHealthSnapshot_CapabilitySkipsFailedProbe(t *testing.T) {
+	a := NewAPI()
+	a.HealthStatusFn = func(opts StatusOpts) ([]DaemonStatus, error) {
+		return []DaemonStatus{
+			{Server: "down", Daemon: "down", State: "Failed",
+				Health: &HealthProbe{OK: false, Err: "refused"}},
+		}, nil
+	}
+	calls := 0
+	a.HealthCapabilityFn = func(d DaemonStatus) (CapabilityRow, error) {
+		calls++
+		return CapabilityRow{}, nil
+	}
+	_, _ = a.HealthSnapshot(HealthOpts{IncludeCapabilities: true})
+	if calls != 0 {
+		t.Errorf("capability fn called %d times for failed-probe daemon, want 0", calls)
 	}
 }

@@ -1,6 +1,12 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
 	"time"
 
 	"mcp-local-hub/internal/buildinfo"
@@ -160,15 +166,25 @@ func (a *API) HealthSnapshot(opts HealthOpts) (HealthSnapshot, error) {
 		Daemons:       daemons,
 	}
 
+	// IncludeCapabilities implies IncludeProbes — the capabilities section
+	// only walks daemons whose probe succeeded (capability discovery
+	// requires a reachable backend), so the probes section must be
+	// computed first regardless of whether the caller asked for it.
 	if opts.IncludeProbes || opts.IncludeCapabilities {
 		probes, err := a.computeProbesSection(now, opts.Refresh)
 		if err != nil {
 			return HealthSnapshot{}, err
 		}
 		snap.Probes = &probes
+
+		if opts.IncludeCapabilities {
+			caps, err := a.computeCapabilitiesSection(now, opts.Refresh, probes)
+			if err != nil {
+				return HealthSnapshot{}, err
+			}
+			snap.Capabilities = &caps
+		}
 	}
-	// IncludeCapabilities is wired in Phase 4 (consumes the probes section above).
-	_ = opts.IncludeCapabilities
 
 	return snap, nil
 }
@@ -344,6 +360,329 @@ func (a *API) computeProbesSection(nowMs int64, refresh bool) (ProbesSection, er
 		return ProbesSection{}, err
 	}
 	return v.(ProbesSection), nil
+}
+
+// computeCapabilitiesSection populates the per-daemon capability section.
+// Walks the (already-computed) probes section, skips rows whose probe
+// failed (capability discovery requires a reachable backend), and for the
+// rest invokes a.HealthCapabilityFn (or its production fallback,
+// a.realCapabilityRow) to project tools/list, prompts/list, resources/list
+// into a CapabilityRow with the spec's 5-state vocabulary
+// (ok|empty|unsupported|error|stale).
+//
+// 60s TTL — capability discovery is expensive (one initialize+list
+// roundtrip per sub-section per daemon) and the result rarely changes
+// outside of an upgrade. Same per-section RWMutex + singleflight pattern
+// as daemons/probes; the cache key is "capabilities" (NOT "daemons" or
+// "probes") so concurrent callers across different sections don't collide
+// on the singleflight slot.
+func (a *API) computeCapabilitiesSection(nowMs int64, refresh bool, probes ProbesSection) (CapabilitiesSection, error) {
+	a.healthCache.mu.RLock()
+	cached := a.healthCache.capabilities
+	cachedAt := a.healthCache.capabilitiesAt
+	a.healthCache.mu.RUnlock()
+
+	if !refresh && cachedAt > 0 && nowMs-cachedAt < capabilitiesTTLMs {
+		return cached, nil
+	}
+
+	v, err, _ := a.healthCache.sf.Do("capabilities", func() (any, error) {
+		// Re-check after acquiring the singleflight slot — earlier waiters
+		// may have refreshed while we queued.
+		a.healthCache.mu.RLock()
+		recheckAt := a.healthCache.capabilitiesAt
+		recheckSection := a.healthCache.capabilities
+		a.healthCache.mu.RUnlock()
+		if !refresh && nowMs-recheckAt < capabilitiesTTLMs && recheckAt > 0 {
+			return recheckSection, nil
+		}
+
+		// Build a server/daemon → port lookup so the capability fn can
+		// reach the daemon's MCP endpoint. The probes section doesn't
+		// carry Port (intentional — ProbeRow is a thin projection); pull
+		// it from the daemons cache instead.
+		daemons, _ := a.computeDaemonsSection(nowMs, false)
+		portByServerDaemon := make(map[string]int, len(daemons.Items))
+		for _, d := range daemons.Items {
+			portByServerDaemon[d.Server+"/"+d.Daemon] = d.Port
+		}
+
+		section := CapabilitiesSection{
+			Items:       make([]CapabilityRow, 0, len(probes.Items)),
+			GeneratedAt: nowMs / 1000,
+			TTLMs:       capabilitiesTTLMs,
+			Errors:      []SectionError{},
+		}
+		fn := a.HealthCapabilityFn
+		if fn == nil {
+			fn = a.realCapabilityRow
+		}
+		for _, p := range probes.Items {
+			if !p.OK {
+				continue // Skip failed-probe daemons; capability discovery requires reachable backend.
+			}
+			row, rowErr := fn(DaemonStatus{
+				Server: p.Server, Daemon: p.Daemon,
+				Port:   portByServerDaemon[p.Server+"/"+p.Daemon],
+				Health: &HealthProbe{OK: p.OK, ToolCount: p.ToolCount, Source: p.Source},
+			})
+			if rowErr != nil {
+				section.Errors = append(section.Errors, SectionError{
+					Scope: "capability:" + p.Server + "/" + p.Daemon,
+					Err:   rowErr.Error(),
+				})
+				continue
+			}
+			row = ensureCanonicalIDs(row)
+			section.Items = append(section.Items, row)
+		}
+		a.healthCache.mu.Lock()
+		a.healthCache.capabilities = section
+		a.healthCache.capabilitiesAt = nowMs
+		a.healthCache.mu.Unlock()
+		return section, nil
+	})
+	if err != nil {
+		return CapabilitiesSection{}, err
+	}
+	return v.(CapabilitiesSection), nil
+}
+
+// realCapabilityRow does the live MCP roundtrip for one daemon. Calls
+// tools/list, prompts/list, resources/list and projects each into one
+// CapabilitySubSection per spec's 5-state vocabulary
+// (ok|empty|unsupported|error|stale).
+//
+// Synthetic-source rows (Health.Source=="proxy-synthetic") answer from
+// the embedded ToolCatalogForBackend(d.Backend) catalog — same path the
+// lazy proxy uses for its synthetic tools/list response. NEVER
+// materializes the heavy backend (matches Phase 3's lazy-proxy contract:
+// the operator can enumerate capabilities without spawning subprocesses).
+//
+// Per spec the embedded catalog ONLY models tools (no prompts or
+// resources for any current backend kind), so the synthetic prompts and
+// resources sub-sections are reported as "unsupported" — that is honest
+// about the data we have.
+func (a *API) realCapabilityRow(d DaemonStatus) (CapabilityRow, error) {
+	row := CapabilityRow{Server: d.Server, Daemon: d.Daemon}
+
+	if d.Health != nil && d.Health.Source == "proxy-synthetic" {
+		row.Tools = a.syntheticToolsSubSection(d)
+		row.Prompts = a.syntheticPromptsSubSection(d)
+		row.Resources = a.syntheticResourcesSubSection(d)
+		return row, nil
+	}
+
+	if d.Port == 0 {
+		// No port → cannot reach the backend. All three sub-sections
+		// report "error" with a concrete reason so the operator sees
+		// the gap rather than a phantom "empty" / "unsupported".
+		msg := "no port for daemon"
+		row.Tools = CapabilitySubSection{State: "error", Err: msg}
+		row.Prompts = CapabilitySubSection{State: "error", Err: msg}
+		row.Resources = CapabilitySubSection{State: "error", Err: msg}
+		return row, nil
+	}
+
+	row.Tools = a.liveCapabilitySubSection(d, "tools/list", "tool")
+	row.Prompts = a.liveCapabilitySubSection(d, "prompts/list", "prompt")
+	row.Resources = a.liveCapabilitySubSection(d, "resources/list", "resource")
+	return row, nil
+}
+
+// liveCapabilitySubSection does one JSON-RPC call against the daemon's
+// MCP endpoint and projects the response. Mirrors singleHealthProbe's
+// shape (initialize → method call → SSE-or-JSON parse).
+//
+// State mapping per spec:
+//   - response with non-empty list  → "ok"
+//   - response with empty list      → "empty"
+//   - JSON-RPC error code -32601    → "unsupported" (method not found)
+//   - any other failure             → "error" + Err populated
+func (a *API) liveCapabilitySubSection(d DaemonStatus, method, kind string) CapabilitySubSection {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	url := fmt.Sprintf("http://127.0.0.1:%d/mcp", d.Port)
+	client := &http.Client{Timeout: 3 * time.Second}
+
+	initBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"mcphub-health","version":"1"}}}`
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(initBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	resp, err := client.Do(req)
+	if err != nil {
+		return CapabilitySubSection{State: "error", Err: "initialize: " + err.Error()}
+	}
+	sessionID := resp.Header.Get("Mcp-Session-Id")
+	_ = resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return CapabilitySubSection{State: "error", Err: fmt.Sprintf("initialize: HTTP %d", resp.StatusCode)}
+	}
+
+	listBody := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"%s"}`, method)
+	req2, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(listBody))
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("Accept", "application/json, text/event-stream")
+	if sessionID != "" {
+		req2.Header.Set("Mcp-Session-Id", sessionID)
+	}
+	resp2, err := client.Do(req2)
+	if err != nil {
+		return CapabilitySubSection{State: "error", Err: method + ": " + err.Error()}
+	}
+	defer resp2.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp2.Body, maxHealthProbeResponseBytes+1))
+	if err != nil {
+		return CapabilitySubSection{State: "error", Err: method + ": read: " + err.Error()}
+	}
+	if len(raw) > maxHealthProbeResponseBytes {
+		return CapabilitySubSection{State: "error", Err: fmt.Sprintf("%s: response too large (> %d bytes)", method, maxHealthProbeResponseBytes)}
+	}
+	payload := raw
+	// SSE-wrapped response: pull JSON out of the first data: line. Same
+	// shape as singleHealthProbe — keep them in sync.
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(line, "data: ") {
+			payload = []byte(strings.TrimPrefix(line, "data: "))
+			break
+		}
+	}
+
+	// Parse: error first (preserve method-not-found code so the spec's
+	// "unsupported" state is distinguishable from generic "error").
+	var errEnv struct {
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(payload, &errEnv); err == nil && errEnv.Error != nil {
+		if errEnv.Error.Code == -32601 {
+			return CapabilitySubSection{State: "unsupported"}
+		}
+		return CapabilitySubSection{State: "error", Err: fmt.Sprintf("%s: %s", method, errEnv.Error.Message)}
+	}
+
+	// Decode the kind-specific result list.
+	var raws []json.RawMessage
+	switch kind {
+	case "tool":
+		var p struct {
+			Result struct {
+				Tools []json.RawMessage `json:"tools"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal(payload, &p); err != nil {
+			return CapabilitySubSection{State: "error", Err: method + ": parse: " + err.Error()}
+		}
+		raws = p.Result.Tools
+	case "prompt":
+		var p struct {
+			Result struct {
+				Prompts []json.RawMessage `json:"prompts"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal(payload, &p); err != nil {
+			return CapabilitySubSection{State: "error", Err: method + ": parse: " + err.Error()}
+		}
+		raws = p.Result.Prompts
+	case "resource":
+		var p struct {
+			Result struct {
+				Resources []json.RawMessage `json:"resources"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal(payload, &p); err != nil {
+			return CapabilitySubSection{State: "error", Err: method + ": parse: " + err.Error()}
+		}
+		raws = p.Result.Resources
+	}
+
+	items := make([]CapabilityItem, 0, len(raws))
+	for _, rm := range raws {
+		var named struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(rm, &named); err != nil || named.Name == "" {
+			continue
+		}
+		items = append(items, CapabilityItem{
+			Name:      named.Name,
+			ID:        capabilityID(d.Server, d.Daemon, kind, named.Name),
+			Namespace: d.Server,
+			Kind:      kind,
+		})
+	}
+	if len(items) == 0 {
+		return CapabilitySubSection{State: "empty", Items: items}
+	}
+	return CapabilitySubSection{State: "ok", Items: items}
+}
+
+// syntheticToolsSubSection answers from the embedded ToolCatalogForBackend
+// catalog — same path the lazy proxy uses for its synthetic tools/list
+// response (see internal/api/tool_catalog.go::SyntheticToolsListResponse).
+// Backend kind is sourced from DaemonStatus.Backend
+// ("mcp-language-server" | "gopls-mcp"). When the backend kind is unknown
+// the catalog is empty → state "empty".
+func (a *API) syntheticToolsSubSection(d DaemonStatus) CapabilitySubSection {
+	cat, ok := ToolCatalogForBackend(d.Backend)
+	if !ok || len(cat.Tools) == 0 {
+		return CapabilitySubSection{State: "empty", Items: []CapabilityItem{}}
+	}
+	items := make([]CapabilityItem, 0, len(cat.Tools))
+	for _, t := range cat.Tools {
+		items = append(items, CapabilityItem{
+			Name:      t.Name,
+			ID:        capabilityID(d.Server, d.Daemon, "tool", t.Name),
+			Namespace: d.Server,
+			Kind:      "tool",
+		})
+	}
+	return CapabilitySubSection{State: "ok", Items: items}
+}
+
+// syntheticPromptsSubSection: the embedded catalog only models tools.
+// Reporting "unsupported" here is more honest than "empty" because we
+// know up front that no synthetic-prompt path exists for any current
+// backend kind — the lazy proxy never declares "prompts" capability in
+// its synthetic initialize response unless and until someone wires one.
+func (a *API) syntheticPromptsSubSection(d DaemonStatus) CapabilitySubSection {
+	return CapabilitySubSection{State: "unsupported"}
+}
+
+// syntheticResourcesSubSection: same rationale as syntheticPromptsSubSection.
+// The synthetic catalog has no resource entries; "unsupported" tells the
+// operator that this is a deliberate gap rather than a transient failure.
+func (a *API) syntheticResourcesSubSection(d DaemonStatus) CapabilitySubSection {
+	return CapabilitySubSection{State: "unsupported"}
+}
+
+// ensureCanonicalIDs backfills ID/Kind/Namespace on every CapabilityItem
+// the producer (test seam or live MCP roundtrip) didn't fully populate.
+// Canonical form is {server}/{daemon}/{kind}/{name} per spec — G4's
+// Hub-MCP routing layer relies on this exact shape, so any producer that
+// forgets the field gets the right value here. Idempotent: a fully
+// populated row is unchanged.
+func ensureCanonicalIDs(row CapabilityRow) CapabilityRow {
+	backfill := func(sub CapabilitySubSection, kind string) CapabilitySubSection {
+		for i := range sub.Items {
+			if sub.Items[i].ID == "" {
+				sub.Items[i].ID = capabilityID(row.Server, row.Daemon, kind, sub.Items[i].Name)
+			}
+			if sub.Items[i].Kind == "" {
+				sub.Items[i].Kind = kind
+			}
+			if sub.Items[i].Namespace == "" {
+				sub.Items[i].Namespace = row.Server
+			}
+		}
+		return sub
+	}
+	row.Tools = backfill(row.Tools, "tool")
+	row.Prompts = backfill(row.Prompts, "prompt")
+	row.Resources = backfill(row.Resources, "resource")
+	return row
 }
 
 // normalizeDaemonState maps the existing ("Running"|"Ready"|"Failed"|"Stopped")
