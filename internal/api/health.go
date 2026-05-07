@@ -153,6 +153,24 @@ const (
 	capabilitiesTTLMs int64 = 60000
 )
 
+// Per-section refresh-rate-limit minimums in ms. When a caller sets
+// HealthOpts.Refresh=true, the rate-limit gate (in compute*Section)
+// silently downgrades the request to a cache-read if the previous
+// refresh happened within this window. Singleflight already collapses
+// CONCURRENT refreshes; this guards against ABSENT-singleflight
+// back-to-back refreshes (e.g. a malicious or bug-driven client
+// repeatedly hitting /api/health?refresh=true).
+//
+// Numbers chosen to bound the per-section refresh rate at 1/window:
+//   - daemons:      1/s   — wmic / ps scans are cheap but not free
+//   - probes:       1/5s  — initialize+tools/list per daemon
+//   - capabilities: 1/30s — three list calls per daemon
+const (
+	daemonsRefreshMinMs      int64 = 1000
+	probesRefreshMinMs       int64 = 5000
+	capabilitiesRefreshMinMs int64 = 30000
+)
+
 // HealthSnapshot builds the snapshot per opts. Each section is cached
 // separately with its own TTL; concurrent expired-cache callers collapse
 // onto one underlying fn via singleflight. Phase 2 wires hub + daemons.
@@ -225,6 +243,16 @@ func (a *API) computeDaemonsSection(nowMs int64, refresh bool) (DaemonsSection, 
 	cached := a.healthCache.daemons
 	cachedAt := a.healthCache.daemonsAt
 	a.healthCache.mu.RUnlock()
+
+	// Per-section refresh rate-limit gate. Excess refresh requests
+	// within the minimum-interval window get the cached value rather
+	// than triggering a fresh probe. This bounds the cost of repeated
+	// ?refresh=true on the handler. Singleflight (below) collapses
+	// concurrent refreshes; this gates ABSENT-singleflight back-to-back
+	// refreshes that arrive in series.
+	if refresh && cachedAt > 0 && nowMs-cachedAt < daemonsRefreshMinMs {
+		refresh = false
+	}
 
 	if !refresh && cachedAt > 0 && nowMs-cachedAt < daemonsTTLMs {
 		return cached, nil
@@ -303,6 +331,11 @@ func (a *API) computeProbesSection(nowMs int64, refresh bool) (ProbesSection, er
 	cached := a.healthCache.probes
 	cachedAt := a.healthCache.probesAt
 	a.healthCache.mu.RUnlock()
+
+	// Per-section refresh rate-limit gate (see computeDaemonsSection).
+	if refresh && cachedAt > 0 && nowMs-cachedAt < probesRefreshMinMs {
+		refresh = false
+	}
 
 	if !refresh && cachedAt > 0 && nowMs-cachedAt < probesTTLMs {
 		return cached, nil
@@ -388,6 +421,11 @@ func (a *API) computeCapabilitiesSection(nowMs int64, refresh bool, probes Probe
 	cached := a.healthCache.capabilities
 	cachedAt := a.healthCache.capabilitiesAt
 	a.healthCache.mu.RUnlock()
+
+	// Per-section refresh rate-limit gate (see computeDaemonsSection).
+	if refresh && cachedAt > 0 && nowMs-cachedAt < capabilitiesRefreshMinMs {
+		refresh = false
+	}
 
 	if !refresh && cachedAt > 0 && nowMs-cachedAt < capabilitiesTTLMs {
 		return cached, nil

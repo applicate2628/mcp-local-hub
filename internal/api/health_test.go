@@ -155,6 +155,14 @@ func TestHealthSnapshot_CacheExpiresAfterTTL(t *testing.T) {
 
 // TestHealthSnapshot_RefreshBustsCache: Refresh=true triggers a re-run
 // even within TTL.
+//
+// NB: as of Phase 5 the per-section refresh rate-limit downgrades
+// Refresh=true to a cache-read when fired within
+// daemonsRefreshMinMs (1s) of the previous compute. To exercise the
+// "Refresh busts within TTL" property without tripping the rate-limit,
+// the test advances `now` past the rate-limit window but still within
+// daemonsTTLMs (2s). Rate-limit-window-internal Refresh behavior has
+// its own coverage in TestHealthSnapshot_RefreshRateLimited.
 func TestHealthSnapshot_RefreshBustsCache(t *testing.T) {
 	a := NewAPI()
 	originalStatus := a.HealthStatusFn
@@ -172,11 +180,53 @@ func TestHealthSnapshot_RefreshBustsCache(t *testing.T) {
 	}
 
 	_, _ = a.HealthSnapshot(HealthOpts{})
-	now += 100 // well within TTL
+	now += 1100 // past 1s rate-limit window, still within 2s TTL
 	_, _ = a.HealthSnapshot(HealthOpts{Refresh: true})
 
 	if calls != 2 {
 		t.Errorf("underlying fn called %d times, want 2 (Refresh must bust within TTL)", calls)
+	}
+}
+
+// TestHealthSnapshot_RefreshRateLimited verifies that consecutive
+// Refresh=true calls within the per-section minimum-interval get the
+// cached value rather than triggering a fresh probe. Prevents local-DoS
+// via repeated ?refresh=true on the handler.
+func TestHealthSnapshot_RefreshRateLimited(t *testing.T) {
+	a := NewAPI()
+	originalStatus := a.HealthStatusFn
+	originalNow := a.HealthNowMs
+	defer func() {
+		a.HealthStatusFn = originalStatus
+		a.HealthNowMs = originalNow
+	}()
+	now := int64(1_000_000)
+	a.HealthNowMs = func() int64 { return now }
+	calls := 0
+	a.HealthStatusFn = func(opts StatusOpts) ([]DaemonStatus, error) {
+		calls++
+		return []DaemonStatus{}, nil
+	}
+
+	// First Refresh: warms the cache.
+	_, _ = a.HealthSnapshot(HealthOpts{Refresh: true})
+	if calls != 1 {
+		t.Fatalf("first refresh: calls = %d, want 1", calls)
+	}
+
+	// Second Refresh within rate-limit window (1s for daemons): should
+	// be downgraded to cached value, no new call.
+	now += 100 // 100ms — well under 1000ms rate limit
+	_, _ = a.HealthSnapshot(HealthOpts{Refresh: true})
+	if calls != 1 {
+		t.Errorf("second refresh within rate limit: calls = %d, want 1 (rate-limit downgrade); now=%d", calls, now)
+	}
+
+	// Third Refresh after rate-limit window: triggers a real fetch.
+	now += 1100 // total +1200ms from first call, > 1000ms rate limit
+	_, _ = a.HealthSnapshot(HealthOpts{Refresh: true})
+	if calls != 2 {
+		t.Errorf("third refresh after window: calls = %d, want 2", calls)
 	}
 }
 
