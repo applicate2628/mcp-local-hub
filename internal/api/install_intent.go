@@ -82,18 +82,39 @@ const AuditActionServerUninstalled = "server-uninstalled"
 // through the registry state on disk.
 const AuditActionWorkspaceRegistered = "workspace-registered"
 
+// AuditActionWatchdogInstallElevatedOverride is emitted by
+// `mcphub setup` (and `mcphub watchdog install`) when the operator
+// uses the --allow-elevated flag to bypass the §42 elevated-install
+// refusal. Per §61 the audit write is fail-closed: any error
+// translates to exit 11 (audit-required-but-failed) and the
+// scheduled task is NOT installed.
+const AuditActionWatchdogInstallElevatedOverride = "watchdog-install-elevated-override"
+
 // auditWhoMcphubStop / auditWhoMcphubInstall / ... are the stable
 // `who` labels recorded on every command-side audit entry. Kept
 // human-readable and identical to the CLI surface so log readers
 // can filter by command.
 const (
-	auditWhoMcphubStop      = "mcphub stop"
-	auditWhoMcphubStopForce = "mcphub stop --force"
-	auditWhoMcphubInstall   = "mcphub install"
-	auditWhoMcphubRestart   = "mcphub restart"
-	auditWhoMcphubUninstall = "mcphub uninstall"
-	auditWhoMcphubRegister  = "mcphub register"
+	auditWhoMcphubStop          = "mcphub stop"
+	auditWhoMcphubStopForce     = "mcphub stop --force"
+	auditWhoMcphubInstall       = "mcphub install"
+	auditWhoMcphubRestart       = "mcphub restart"
+	auditWhoMcphubUninstall     = "mcphub uninstall"
+	auditWhoMcphubRegister      = "mcphub register"
+	auditWhoMcphubSetup         = "mcphub setup"
+	auditWhoMcphubWatchdogInst  = "mcphub watchdog install"
 )
+
+// AuditWhoMcphubSetup is the public form of auditWhoMcphubSetup so
+// the cli package can attach the same `who` label to the elevated-
+// override audit entry that mcphub setup writes. Wrapping the
+// unexported constant keeps both call-sites synchronized.
+const AuditWhoMcphubSetup = auditWhoMcphubSetup
+
+// AuditWhoMcphubWatchdogInstall is the public form of the watchdog-
+// install `who` label so the cli surface can use the same audit
+// label that the watchdog install path recorded historically.
+const AuditWhoMcphubWatchdogInstall = auditWhoMcphubWatchdogInst
 
 // ---------------------------------------------------------------------------
 // StopOpts — fail-closed-aware stop entry point (plan §8, §11, §51).

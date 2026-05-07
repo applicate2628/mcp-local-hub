@@ -305,23 +305,70 @@ disable persists until explicitly cleared.`,
 
 // newWatchdogInstallCmd installs the scheduled task that runs
 // `mcphub watchdog --once` every 5 minutes. Idempotent.
+//
+// Plan v13 §42 + §61: refuses to proceed when the current process
+// is elevated (Administrator/root) UNLESS --allow-elevated is set.
+// With --allow-elevated, a high-priority audit entry is written
+// FIRST per §61; audit-write failure → exit 11 (audit-required-
+// but-failed) and the scheduled task is NOT installed.
 func newWatchdogInstallCmd() *cobra.Command {
+	var allowElevated bool
 	c := &cobra.Command{
 		Use:   "install",
-		Short: "Install the watchdog scheduled task (idempotent)",
+		Short: "Install the watchdog scheduled task (idempotent; plan §42 + §61)",
 		Long: `Create the \mcp-local-hub-watchdog scheduled task. Re-running this
-overwrites any existing task with the canonical XML body. Plan §42's
-elevated-install refusal lives in 'mcphub setup'; this subcommand is
-the unconditional execution path.`,
+overwrites any existing task with the canonical XML body.
+
+Plan §42 elevation refusal: refuses to install when invoked from an
+elevated process (Administrator on Windows; root on POSIX) UNLESS
+--allow-elevated is passed. The watchdog runs as a per-user task; an
+install from an elevated context could land with the wrong principal.
+
+Plan §61 fail-closed audit: with --allow-elevated, a high-priority
+audit entry is written FIRST. If the audit write fails (any error),
+exit 11 (audit-required-but-failed) and the scheduled task is NOT
+installed.
+
+Exit codes:
+  0   success
+  11  --allow-elevated audit write failed (plan §61)
+  Other failures use cobra's default non-zero exit.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			out := cmd.OutOrStdout()
+
+			// §42 elevation detection (shared with mcphub setup).
+			elevated, elevErr := setupIsElevated()
+			if elevErr != nil {
+				fmt.Fprintf(out, "⚠ elevation detector failed: %v (treating as elevated)\n", elevErr)
+				elevated = true
+			}
+			if elevated && !allowElevated {
+				return fmt.Errorf(
+					"mcphub watchdog install must run un-elevated (plan §42); use --allow-elevated to override (audit fail-closed per §61)")
+			}
 			a := api.NewAPI()
+			if elevated && allowElevated {
+				if err := a.AppendIntentAudit(api.NewIntentAuditEntry(
+					api.WithAction(api.AuditActionWatchdogInstallElevatedOverride),
+					api.WithTask(api.WatchdogTaskName),
+					api.WithWho(api.AuditWhoMcphubWatchdogInstall),
+					api.WithPriority("high"),
+					api.WithReason("--allow-elevated flag explicit override"),
+				)); err != nil {
+					fmt.Fprintf(out,
+						"✗ audit log unwritable; --allow-elevated requires audit trail (plan §61): %v\n", err)
+					return forceExit(exitSetupAuditRequiredButFailed)
+				}
+			}
 			if err := a.InstallWatchdogTask(); err != nil {
 				return fmt.Errorf("install watchdog task: %w", err)
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), "✓ Installed scheduled task: \\mcp-local-hub-watchdog (cadence 5 min)")
+			fmt.Fprintln(out, "✓ Installed scheduled task: \\mcp-local-hub-watchdog (cadence 5 min)")
 			return nil
 		},
 	}
+	c.Flags().BoolVar(&allowElevated, "allow-elevated", false,
+		"override plan §42 elevation refusal (records a high-priority audit entry; fail-closed if audit fails per §61)")
 	return c
 }
 
