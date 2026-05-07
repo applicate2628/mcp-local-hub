@@ -14,15 +14,27 @@ import (
 
 // apiSurfacesFakeScheduler is a lightweight in-memory scheduler.Scheduler
 // used by Task 0 tests to drive UninstallWatchdogTask /
-// UninstallWatchdogTaskInternal without touching the host's real Task
-// Scheduler. Only Delete is exercised; the other methods return
-// errNotImplementedForTest so accidental misuse is loud. (Distinct name
-// from register_test.go's `fakeScheduler` to avoid in-package collision.)
+// UninstallWatchdogTaskInternal + Task 8 tests to drive InstallWatchdogTask
+// without touching the host's real Task Scheduler. Delete and ImportXML
+// are exercised; the other methods return errNotImplementedForTest so
+// accidental misuse is loud. (Distinct name from register_test.go's
+// `fakeScheduler` to avoid in-package collision.)
 type apiSurfacesFakeScheduler struct {
-	mu          sync.Mutex
-	deleteCalls []string
+	mu             sync.Mutex
+	deleteCalls    []string
+	importXMLCalls []importXMLCall
 	// deleteErr, when non-nil, is returned by Delete instead of nil.
 	deleteErr error
+	// importXMLErr, when non-nil, is returned by ImportXML instead of nil.
+	importXMLErr error
+}
+
+// importXMLCall captures the (name, xml) tuple of a single ImportXML
+// invocation so Task 8 install tests can assert the watchdog XML body
+// matches buildWatchdogXML's output.
+type importXMLCall struct {
+	name string
+	xml  []byte
 }
 
 var errNotImplementedForTest = errors.New("apiSurfacesFakeScheduler: not implemented")
@@ -47,8 +59,14 @@ func (f *apiSurfacesFakeScheduler) List(string) ([]scheduler.TaskStatus, error) 
 func (f *apiSurfacesFakeScheduler) ExportXML(string) ([]byte, error) {
 	return nil, errNotImplementedForTest
 }
-func (f *apiSurfacesFakeScheduler) ImportXML(string, []byte) error {
-	return errNotImplementedForTest
+func (f *apiSurfacesFakeScheduler) ImportXML(name string, xml []byte) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	// Defensive copy of the xml slice — callers should not mutate.
+	cp := make([]byte, len(xml))
+	copy(cp, xml)
+	f.importXMLCalls = append(f.importXMLCalls, importXMLCall{name: name, xml: cp})
+	return f.importXMLErr
 }
 
 func (f *apiSurfacesFakeScheduler) calls() []string {
@@ -56,6 +74,16 @@ func (f *apiSurfacesFakeScheduler) calls() []string {
 	defer f.mu.Unlock()
 	out := make([]string, len(f.deleteCalls))
 	copy(out, f.deleteCalls)
+	return out
+}
+
+// importCalls returns a defensive copy of the recorded ImportXML calls.
+// Used by Task 8 install tests to assert task name + XML body.
+func (f *apiSurfacesFakeScheduler) importCalls() []importXMLCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]importXMLCall, len(f.importXMLCalls))
+	copy(out, f.importXMLCalls)
 	return out
 }
 
@@ -459,6 +487,172 @@ func TestRestartContextWithSnapshot_UsesSnapshotPortMap(t *testing.T) {
 	}
 	if captured.PortMap["\\mcp-local-hub-time-default"] != wantPort {
 		t.Errorf("snapshot PortMap not forwarded: captured=%+v want port %d", captured.PortMap, wantPort)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// InstallWatchdogTask (Task 8)
+// ---------------------------------------------------------------------------
+
+// TestInstallWatchdogTask_HappyPath asserts the install method:
+//
+//   - Resolves the canonical mcphub path via the canonicalMcphubPathFn seam.
+//   - Resolves the current user via the currentWindowsUserFn seam.
+//   - Calls scheduler.ImportXML with task name == WatchdogTaskName.
+//   - The XML body matches buildWatchdogXML(canonical, workingDir, user).
+//
+// The seams are existing surfaces in watchdog_xml_validator.go; reusing them
+// keeps the Task 8 install path consistent with the validator's
+// canonical-path / current-user assumptions.
+func TestInstallWatchdogTask_HappyPath(t *testing.T) {
+	a := NewAPI()
+	f := &apiSurfacesFakeScheduler{}
+	installTestScheduler(t, f)
+	installTestCanonicalMcphubPath(t, `C:\Users\test\.local\bin\mcphub.exe`)
+	installTestCurrentWindowsUser(t, "test")
+
+	if err := a.InstallWatchdogTask(); err != nil {
+		t.Fatalf("InstallWatchdogTask: %v", err)
+	}
+
+	imports := f.importCalls()
+	if len(imports) != 1 {
+		t.Fatalf("expected 1 ImportXML call, got %d", len(imports))
+	}
+	if imports[0].name != WatchdogTaskName {
+		t.Errorf("ImportXML target name: got %q, want %q", imports[0].name, WatchdogTaskName)
+	}
+	body := string(imports[0].xml)
+	// Sanity-pin a few canonical fragments of the watchdog XML. Full
+	// builder coverage lives in scheduler_windows_test.go; here we only
+	// confirm the install path forwards the right bytes.
+	wantFragments := []string{
+		"<Hidden>false</Hidden>",
+		"<Priority>9</Priority>",
+		"<Interval>PT5M</Interval>",
+		"<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>",
+		"<Arguments>watchdog --once</Arguments>",
+		`<Command>C:\Users\test\.local\bin\mcphub.exe</Command>`,
+		"<UserId>test</UserId>",
+	}
+	for _, w := range wantFragments {
+		if !strings.Contains(body, w) {
+			t.Errorf("ImportXML body missing %q; full body:\n%s", w, body)
+		}
+	}
+}
+
+// TestInstallWatchdogTask_Idempotent asserts that running install twice
+// is safe. scheduler.ImportXML on Windows uses `schtasks /Create /XML /F`
+// which overwrites an existing task; the second call must not error.
+func TestInstallWatchdogTask_Idempotent(t *testing.T) {
+	a := NewAPI()
+	f := &apiSurfacesFakeScheduler{}
+	installTestScheduler(t, f)
+	installTestCanonicalMcphubPath(t, `C:\Users\test\.local\bin\mcphub.exe`)
+	installTestCurrentWindowsUser(t, "test")
+
+	if err := a.InstallWatchdogTask(); err != nil {
+		t.Fatalf("first InstallWatchdogTask: %v", err)
+	}
+	if err := a.InstallWatchdogTask(); err != nil {
+		t.Fatalf("second InstallWatchdogTask (idempotent): %v", err)
+	}
+	imports := f.importCalls()
+	if len(imports) != 2 {
+		t.Errorf("expected 2 ImportXML calls, got %d", len(imports))
+	}
+}
+
+// TestInstallWatchdogTask_PropagatesImportXMLError asserts a scheduler
+// failure is surfaced verbatim — the install path does not swallow errors.
+func TestInstallWatchdogTask_PropagatesImportXMLError(t *testing.T) {
+	a := NewAPI()
+	want := errors.New("simulated schtasks failure")
+	f := &apiSurfacesFakeScheduler{importXMLErr: want}
+	installTestScheduler(t, f)
+	installTestCanonicalMcphubPath(t, `C:\Users\test\.local\bin\mcphub.exe`)
+	installTestCurrentWindowsUser(t, "test")
+
+	err := a.InstallWatchdogTask()
+	if err == nil {
+		t.Fatal("InstallWatchdogTask: want error, got nil")
+	}
+	if !errors.Is(err, want) {
+		t.Errorf("InstallWatchdogTask: want errors.Is(err, want); got %v", err)
+	}
+}
+
+// TestInstallWatchdogTask_PropagatesPathError asserts a canonical-path
+// resolution failure aborts install before any scheduler call.
+func TestInstallWatchdogTask_PropagatesPathError(t *testing.T) {
+	a := NewAPI()
+	f := &apiSurfacesFakeScheduler{}
+	installTestScheduler(t, f)
+	want := errors.New("simulated path resolution failure")
+	orig := canonicalMcphubPathFn
+	canonicalMcphubPathFn = func() (string, error) { return "", want }
+	t.Cleanup(func() { canonicalMcphubPathFn = orig })
+	installTestCurrentWindowsUser(t, "test")
+
+	err := a.InstallWatchdogTask()
+	if err == nil {
+		t.Fatal("InstallWatchdogTask: want error, got nil")
+	}
+	if !errors.Is(err, want) {
+		t.Errorf("InstallWatchdogTask: want errors.Is(err, want); got %v", err)
+	}
+	if len(f.importCalls()) != 0 {
+		t.Errorf("scheduler must not be called when canonical path resolution fails; got %d calls", len(f.importCalls()))
+	}
+}
+
+// TestInstallWatchdogTask_PropagatesUserError asserts a current-user
+// resolution failure aborts install before any scheduler call.
+func TestInstallWatchdogTask_PropagatesUserError(t *testing.T) {
+	a := NewAPI()
+	f := &apiSurfacesFakeScheduler{}
+	installTestScheduler(t, f)
+	installTestCanonicalMcphubPath(t, `C:\Users\test\.local\bin\mcphub.exe`)
+	want := errors.New("simulated user lookup failure")
+	orig := currentWindowsUserFn
+	currentWindowsUserFn = func() (string, error) { return "", want }
+	t.Cleanup(func() { currentWindowsUserFn = orig })
+
+	err := a.InstallWatchdogTask()
+	if err == nil {
+		t.Fatal("InstallWatchdogTask: want error, got nil")
+	}
+	if !errors.Is(err, want) {
+		t.Errorf("InstallWatchdogTask: want errors.Is(err, want); got %v", err)
+	}
+	if len(f.importCalls()) != 0 {
+		t.Errorf("scheduler must not be called when user resolution fails; got %d calls", len(f.importCalls()))
+	}
+}
+
+// TestInstallWatchdogTask_WorkingDirIsExeDir asserts the WorkingDirectory
+// in the resulting XML is the directory containing the canonical exe.
+// Per plan Task 8: resolved working directory should be "probably same
+// dir as canonical exe".
+func TestInstallWatchdogTask_WorkingDirIsExeDir(t *testing.T) {
+	a := NewAPI()
+	f := &apiSurfacesFakeScheduler{}
+	installTestScheduler(t, f)
+	installTestCanonicalMcphubPath(t, `C:\Users\test\.local\bin\mcphub.exe`)
+	installTestCurrentWindowsUser(t, "test")
+
+	if err := a.InstallWatchdogTask(); err != nil {
+		t.Fatalf("InstallWatchdogTask: %v", err)
+	}
+	imports := f.importCalls()
+	if len(imports) != 1 {
+		t.Fatalf("expected 1 ImportXML call, got %d", len(imports))
+	}
+	body := string(imports[0].xml)
+	want := `<WorkingDirectory>C:\Users\test\.local\bin</WorkingDirectory>`
+	if !strings.Contains(body, want) {
+		t.Errorf("expected %q in watchdog XML; got:\n%s", want, body)
 	}
 }
 

@@ -31,6 +31,7 @@ package api
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -596,6 +597,57 @@ func (a *API) UninstallWatchdogTask() error {
 		return err
 	}
 	return sch.Delete(WatchdogTaskName)
+}
+
+// InstallWatchdogTask is the public idempotent install of the scheduled
+// task that drives `mcphub watchdog --once` per watchdog plan v13 Task 8.
+//
+// Steps:
+//
+//  1. Resolve the canonical mcphub path via canonicalMcphubPathFn (the
+//     same seam the XML validator uses, so install + revalidation agree).
+//  2. Resolve the current per-user principal via currentWindowsUserFn
+//     (strips DOMAIN\\ prefix; matches the validator's principal check).
+//  3. Compute the working directory as the directory containing the
+//     canonical exe (filepath.Dir). Tasks invoked by Task Scheduler
+//     get a deterministic cwd this way; relative paths inside the
+//     watchdog driver behave the same on logon-trigger and 5-min
+//     repetition runs.
+//  4. Build the canonical XML via scheduler.BuildWatchdogXML — function
+//     is pure for fixed inputs, so two calls produce byte-identical XML.
+//  5. Hand the XML body to scheduler.ImportXML, which on Windows pipes it
+//     to `schtasks /Create /XML /TN <name> /F`. The /F flag makes this
+//     idempotent: re-running install overwrites the existing task without
+//     a "task already exists" error.
+//
+// Re-uses the canonicalMcphubPathFn / currentWindowsUserFn seams that
+// already exist for the XML validator (Task 6) so install and validation
+// share one source-of-truth for both fields.
+//
+// Errors propagate verbatim — failure at any step aborts before the next.
+// In particular, a path or user resolution failure short-circuits before
+// any scheduler call, so the scheduled task is never partially installed.
+//
+// CLI-level concerns (admin elevation refusal per §42, audit entry per
+// §10/§61, interactive confirm) live in the CLI layer (Task 9 / Task 10);
+// this API method is the unconditional execution path.
+func (a *API) InstallWatchdogTask() error {
+	canonicalExe, err := canonicalMcphubPathFn()
+	if err != nil {
+		return err
+	}
+	userName, err := currentWindowsUserFn()
+	if err != nil {
+		return err
+	}
+	workingDir := filepath.Dir(canonicalExe)
+	xmlDoc := scheduler.BuildWatchdogXML(canonicalExe, workingDir, userName)
+
+	sch, err := newScheduler()
+	if err != nil {
+		return err
+	}
+	return sch.ImportXML(WatchdogTaskName, []byte(xmlDoc))
 }
 
 // UninstallWatchdogTaskInternal is the typed-reason variant called
