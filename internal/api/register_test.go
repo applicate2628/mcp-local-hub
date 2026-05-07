@@ -185,6 +185,58 @@ func TestRegister_DefaultAllLanguages(t *testing.T) {
 	}
 }
 
+// TestRegister_TaskWorkingDirIsWorkspace is the regression test for
+// v0.3.0-blockers bug #1 (D3 backend lookup): the scheduler task's
+// WorkingDir must be the canonical workspace path, NOT the install
+// directory (filepath.Dir(canonicalExe)).
+//
+// Prior behavior: WorkingDir was set to the install dir (~/.local/bin/),
+// which (a) breaks LSP backends that expect cwd == project root for
+// compile_commands.json / Cargo.toml / go.mod discovery, and (b) on
+// Windows triggers Go 1.19 CVE-2022-30580 ErrDot when the install dir
+// happens to contain a stale copy of the wrapper binary
+// (`mcp-language-server.exe`) — exec.LookPath finds the cwd-relative
+// match first and refuses to return it, surfacing as "missing binary"
+// even when the wrapper IS available on PATH.
+//
+// The fix anchors cwd to the workspace path. Workspaces contain source
+// files only, never the wrapper binary, so LookPath falls through to
+// PATH cleanly.
+func TestRegister_TaskWorkingDirIsWorkspace(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	ws := t.TempDir()
+	m := nineLanguageManifest()
+	_, err := mustNewAPI(t).registerWithManifest(m, ws, []string{"python"}, RegisterOpts{Writer: &bytes.Buffer{}})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	var langSpec *scheduler.TaskSpec
+	for i := range h.fakeSch.createdSpecs {
+		s := &h.fakeSch.createdSpecs[i]
+		if s.Name != WeeklyRefreshTaskName {
+			langSpec = s
+			break
+		}
+	}
+	if langSpec == nil {
+		t.Fatal("no per-language scheduler task spec captured")
+	}
+	// Compare against the canonical form because CanonicalWorkspacePath
+	// (Windows) normalizes path case (e.g. r:\TEMP\... vs r:\Temp\...).
+	wsCanonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("canonicalize ws: %v", err)
+	}
+	if langSpec.WorkingDir != wsCanonical {
+		t.Errorf("scheduler task WorkingDir = %q, want %q (canonical workspace path) — "+
+			"setting it to the install dir would break LSP cwd-relative discovery "+
+			"AND trigger Go's exec.LookPath ErrDot on Windows when a stale wrapper "+
+			"binary lives in the install dir",
+			langSpec.WorkingDir, wsCanonical)
+	}
+}
+
 func TestRegister_PartialLanguages(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()

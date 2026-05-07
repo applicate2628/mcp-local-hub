@@ -24,7 +24,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sort"
 	"time"
 
@@ -374,11 +373,28 @@ func (a *API) registerOneLanguage(
 	}
 	_ = sch.Delete(taskName)
 	taskSpec := scheduler.TaskSpec{
-		Name:             taskName,
-		Description:      fmt.Sprintf("mcp-local-hub: workspace %s lang %s", canonical, lang),
-		Command:          canonicalExe,
-		Args:             args,
-		WorkingDir:       filepath.Dir(canonicalExe),
+		Name:        taskName,
+		Description: fmt.Sprintf("mcp-local-hub: workspace %s lang %s", canonical, lang),
+		Command:     canonicalExe,
+		Args:        args,
+		// WorkingDir is the canonical workspace path, NOT the install
+		// directory. Two reasons:
+		//
+		// 1. LSP backends (clangd, rust-analyzer, gopls, …) expect cwd to
+		//    be the project root for compile_commands.json / Cargo.toml /
+		//    go.mod discovery. Running them from ~/.local/bin/ broke that.
+		//
+		// 2. v0.3.0-blockers bug #1: Go 1.19+ exec.LookPath enforces
+		//    CVE-2022-30580 — refuses to return a cwd-relative match. The
+		//    install dir ~/.local/bin/ may contain a stale copy of the
+		//    wrapper binary (mcp-language-server.exe), and Windows lookup
+		//    semantics check cwd FIRST, so the cwd-relative match
+		//    shadows the on-PATH copy and triggers ErrDot. Setting cwd
+		//    to the workspace removes the shadow: the workspace
+		//    contains source files only, never the wrapper binary, so
+		//    LookPath falls through to PATH and finds the canonical
+		//    install (~/go/bin or wherever the user has it).
+		WorkingDir:       canonical,
 		RestartOnFailure: true,
 		LogonTrigger:     true,
 	}
