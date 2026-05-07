@@ -73,6 +73,13 @@ type healthCache struct {
 
 	daemonsAt int64 // ms since epoch when last computed
 	daemons   DaemonsSection
+	// daemonsErr caches the last fetch error (nil on success). Read on
+	// the cache-hit fast path AND inner re-check so /api/status and
+	// /api/health stay fail-loud while the backend is down — the cached
+	// section alone (with section.Errors[] populated) is not enough,
+	// because the function's second return value drives the HTTP-status
+	// gate in cmd/mcphub. Cloud bot P1×2 fix on PR #132 commit 2062818.
+	daemonsErr error
 	// daemonStatuses caches the canonical []DaemonStatus rows produced
 	// by the same underlying StatusWithOpts call that fed `daemons`.
 	// /api/status (DaemonStatusSnapshot) reads from this slot; /api/health
@@ -87,6 +94,11 @@ type healthCache struct {
 
 	probesAt int64
 	probes   ProbesSection
+	// probesErr caches the last probe-fetch error (nil on success).
+	// Symmetric with daemonsErr — required so /api/health?include=probes
+	// stays 500 HEALTH_BACKEND_FAILED on cache-hit retries while probe
+	// backend is still down. Cloud bot P1×2 fix on PR #132 commit 2062818.
+	probesErr error
 
 	capabilitiesAt int64
 	capabilities   CapabilitiesSection

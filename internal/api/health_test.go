@@ -711,3 +711,142 @@ func TestHealthSnapshot_PropagatesProbeFetchError(t *testing.T) {
 		t.Errorf("err = %v, want to contain sentinel", err)
 	}
 }
+
+// TestDaemonStatusSnapshot_PropagatesErrorOnCacheHit is the regression
+// test for Cloud bot P1 #1 on PR #132 commit 2062818: after a fetch
+// failure, the next call within TTL must STILL return the error
+// rather than the cached empty section. Otherwise /api/status flips
+// from 500 to 200 within 2s while the backend is still down.
+func TestDaemonStatusSnapshot_PropagatesErrorOnCacheHit(t *testing.T) {
+	a := NewAPI()
+	originalStatus := a.HealthStatusFn
+	originalNow := a.HealthNowMs
+	defer func() {
+		a.HealthStatusFn = originalStatus
+		a.HealthNowMs = originalNow
+	}()
+	now := int64(1_000_000)
+	a.HealthNowMs = func() int64 { return now }
+	callCount := 0
+	a.HealthStatusFn = func(opts StatusOpts) ([]DaemonStatus, error) {
+		callCount++
+		return nil, errors.New("scheduler down")
+	}
+
+	// First call: backend fails → err propagated.
+	_, err1 := a.DaemonStatusSnapshot()
+	if err1 == nil {
+		t.Fatalf("first call: expected err, got nil")
+	}
+
+	// Second call within TTL: must STILL return the err. The bug was
+	// that the cache-hit fast-path returned (cached, nil) and the
+	// 500 flipped to 200 even though the backend was still broken.
+	now += 100 // well within 2s daemons TTL
+	_, err2 := a.DaemonStatusSnapshot()
+	if err2 == nil {
+		t.Fatalf("second call (cache hit) returned nil err — error masking regression on /api/status")
+	}
+	if !strings.Contains(err2.Error(), "scheduler down") {
+		t.Errorf("err2 = %v, want propagated 'scheduler down'", err2)
+	}
+
+	// Third call after TTL expires: backend re-attempted (still failing,
+	// call counter increments).
+	now += 2000 // total 2100ms — past 2s TTL
+	_, err3 := a.DaemonStatusSnapshot()
+	if err3 == nil {
+		t.Fatalf("third call (TTL expired): expected err, got nil")
+	}
+	if callCount < 2 {
+		t.Errorf("callCount = %d, want >= 2 (TTL expiry should re-attempt)", callCount)
+	}
+}
+
+// TestHealthSnapshot_PropagatesProbeErrorOnCacheHit is the regression
+// test for Cloud bot P1 #2 on PR #132 commit 2062818. Same pattern
+// as daemons but for the probes section (10s TTL).
+func TestHealthSnapshot_PropagatesProbeErrorOnCacheHit(t *testing.T) {
+	a := NewAPI()
+	originalStatus := a.HealthStatusFn
+	originalNow := a.HealthNowMs
+	defer func() {
+		a.HealthStatusFn = originalStatus
+		a.HealthNowMs = originalNow
+	}()
+	now := int64(2_000_000)
+	a.HealthNowMs = func() int64 { return now }
+	a.HealthStatusFn = func(opts StatusOpts) ([]DaemonStatus, error) {
+		if opts.ProbeHealth {
+			return nil, errors.New("probe backend down")
+		}
+		// Daemons fetch (no probe) succeeds — empty list is fine.
+		return []DaemonStatus{}, nil
+	}
+
+	// First call: probes fetch fails.
+	_, err1 := a.HealthSnapshot(HealthOpts{IncludeProbes: true})
+	if err1 == nil {
+		t.Fatalf("first call: expected err on probe failure, got nil")
+	}
+
+	// Second call within probes TTL (10s): err must still propagate.
+	now += 500 // well within 10s probes TTL
+	_, err2 := a.HealthSnapshot(HealthOpts{IncludeProbes: true})
+	if err2 == nil {
+		t.Fatalf("second call (cache hit) returned nil err — probe error masking on /api/health")
+	}
+	if !strings.Contains(err2.Error(), "probe backend down") {
+		t.Errorf("err2 = %v, want propagated 'probe backend down'", err2)
+	}
+}
+
+// TestDaemonStatusSnapshot_RecoversAfterBackendComesBack verifies the
+// happy path: when the backend recovers, subsequent calls succeed and
+// the cached error is cleared.
+func TestDaemonStatusSnapshot_RecoversAfterBackendComesBack(t *testing.T) {
+	a := NewAPI()
+	originalStatus := a.HealthStatusFn
+	originalNow := a.HealthNowMs
+	defer func() {
+		a.HealthStatusFn = originalStatus
+		a.HealthNowMs = originalNow
+	}()
+	now := int64(3_000_000)
+	a.HealthNowMs = func() int64 { return now }
+	failing := true
+	a.HealthStatusFn = func(opts StatusOpts) ([]DaemonStatus, error) {
+		if failing {
+			return nil, errors.New("transient failure")
+		}
+		return []DaemonStatus{{Server: "ok", Daemon: "ok", State: "Running"}}, nil
+	}
+
+	// Fail.
+	_, err1 := a.DaemonStatusSnapshot()
+	if err1 == nil {
+		t.Fatalf("expected initial error")
+	}
+
+	// Backend recovers; advance past TTL so the cache re-fetches.
+	failing = false
+	now += 2100 // past 2s daemons TTL
+
+	rows, err2 := a.DaemonStatusSnapshot()
+	if err2 != nil {
+		t.Fatalf("after recovery + TTL expiry: expected nil err, got %v", err2)
+	}
+	if len(rows) != 1 || rows[0].Server != "ok" {
+		t.Errorf("expected one row Server=ok after recovery; got %+v", rows)
+	}
+
+	// Subsequent calls within TTL should also succeed (cached err cleared).
+	now += 100
+	rows3, err3 := a.DaemonStatusSnapshot()
+	if err3 != nil {
+		t.Errorf("post-recovery cache hit: expected nil err, got %v", err3)
+	}
+	if len(rows3) != 1 {
+		t.Errorf("post-recovery cache hit: expected 1 row, got %d", len(rows3))
+	}
+}

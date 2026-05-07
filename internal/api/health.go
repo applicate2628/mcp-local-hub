@@ -286,10 +286,19 @@ func (a *API) computeHubSection(nowMs int64) HubSection {
 
 // computeDaemonsSection populates the daemons section, with TTL+refresh
 // gate and singleflight collapsing on concurrent expired-cache callers.
+//
+// Cache-hit error propagation: after a fetch failure the error is stored
+// alongside the cached section (healthCache.daemonsErr). Subsequent
+// in-TTL callers see (cached, cachedErr) — without this, the operator-
+// visible 500 STATUS_FAILED flips back to 200 within the 2s daemons TTL
+// while the backend is still down. Slow-path success clears the cached
+// error; slow-path fetchErr writes it. Cloud bot P1×2 fix on PR #132
+// commit 2062818 (kosyak: incomplete-fix-only-slow-path-cache-hit-still-masks-errors).
 func (a *API) computeDaemonsSection(nowMs int64, refresh bool) (DaemonsSection, error) {
 	a.healthCache.mu.RLock()
 	cached := a.healthCache.daemons
 	cachedAt := a.healthCache.daemonsAt
+	cachedErr := a.healthCache.daemonsErr
 	a.healthCache.mu.RUnlock()
 
 	// Per-section refresh rate-limit gate. Excess refresh requests
@@ -303,7 +312,11 @@ func (a *API) computeDaemonsSection(nowMs int64, refresh bool) (DaemonsSection, 
 	}
 
 	if !refresh && cachedAt > 0 && nowMs-cachedAt < daemonsTTLMs {
-		return cached, nil
+		// Fast path: return both the cached section AND the cached error
+		// pair atomically. Returning (cached, nil) here was the bug — a
+		// freshly-cached error result must keep failing loud until the
+		// TTL expires and a re-fetch can succeed.
+		return cached, cachedErr
 	}
 
 	v, err, _ := a.healthCache.sf.Do("daemons", func() (any, error) {
@@ -312,9 +325,13 @@ func (a *API) computeDaemonsSection(nowMs int64, refresh bool) (DaemonsSection, 
 		a.healthCache.mu.RLock()
 		recheckAt := a.healthCache.daemonsAt
 		recheckSection := a.healthCache.daemons
+		recheckErr := a.healthCache.daemonsErr
 		a.healthCache.mu.RUnlock()
 		if !refresh && nowMs-recheckAt < daemonsTTLMs && recheckAt > 0 {
-			return recheckSection, nil
+			// Inner re-check returns the cached (section, err) pair so
+			// queued waiters that find a freshly-cached error see the
+			// error too — symmetric with the fast path above.
+			return recheckSection, recheckErr
 		}
 
 		statusFn := a.HealthStatusFn
@@ -341,6 +358,9 @@ func (a *API) computeDaemonsSection(nowMs int64, refresh bool) (DaemonsSection, 
 			// contract the existing /api/status wire-shape consumers expect.
 			a.healthCache.daemonStatuses = []DaemonStatus{}
 			a.healthCache.daemonsAt = nowMs
+			// Cache the err so the fast-path return AND the inner re-check
+			// both keep failing loud while the cache is fresh.
+			a.healthCache.daemonsErr = fetchErr
 			a.healthCache.mu.Unlock()
 			// Propagate the error so /api/status returns 500 STATUS_FAILED
 			// and /api/health returns 500 HEALTH_BACKEND_FAILED on total
@@ -378,10 +398,24 @@ func (a *API) computeDaemonsSection(nowMs int64, refresh bool) (DaemonsSection, 
 		// can't poison the next.
 		a.healthCache.daemonStatuses = rows
 		a.healthCache.daemonsAt = nowMs
+		// Clear the cached err on success so post-recovery cache hits
+		// stop reporting the stale failure.
+		a.healthCache.daemonsErr = nil
 		a.healthCache.mu.Unlock()
 		return section, nil
 	})
 	if err != nil {
+		// err is either the slow-path fetchErr OR the inner-re-check
+		// recheckErr from a queued waiter that found a cached error.
+		// Either way the cached section (with section.Errors[] populated)
+		// also rides along in v so callers can introspect partial-failure
+		// scopes. Earlier code returned DaemonsSection{} unconditionally,
+		// which dropped the structural error context.
+		if v != nil {
+			if section, ok := v.(DaemonsSection); ok {
+				return section, err
+			}
+		}
 		return DaemonsSection{}, err
 	}
 	return v.(DaemonsSection), nil
@@ -395,10 +429,16 @@ func (a *API) computeDaemonsSection(nowMs int64, refresh bool) (DaemonsSection, 
 // to enumerate tools, defeating the lazy-proxy contract.
 //
 // 10s TTL. Same per-section RWMutex + singleflight pattern as daemons.
+//
+// Cache-hit error propagation: mirrors computeDaemonsSection — see the
+// commentary there. Without this, /api/health?include=probes flips from
+// 500 HEALTH_BACKEND_FAILED to 200 within 10s while probe backend is
+// still down. Cloud bot P1×2 fix on PR #132 commit 2062818.
 func (a *API) computeProbesSection(nowMs int64, refresh bool) (ProbesSection, error) {
 	a.healthCache.mu.RLock()
 	cached := a.healthCache.probes
 	cachedAt := a.healthCache.probesAt
+	cachedErr := a.healthCache.probesErr
 	a.healthCache.mu.RUnlock()
 
 	// Per-section refresh rate-limit gate (see computeDaemonsSection).
@@ -407,7 +447,9 @@ func (a *API) computeProbesSection(nowMs int64, refresh bool) (ProbesSection, er
 	}
 
 	if !refresh && cachedAt > 0 && nowMs-cachedAt < probesTTLMs {
-		return cached, nil
+		// Fast path: return both the cached section AND the cached error
+		// pair atomically. See computeDaemonsSection for the rationale.
+		return cached, cachedErr
 	}
 
 	v, err, _ := a.healthCache.sf.Do("probes", func() (any, error) {
@@ -416,9 +458,13 @@ func (a *API) computeProbesSection(nowMs int64, refresh bool) (ProbesSection, er
 		a.healthCache.mu.RLock()
 		recheckAt := a.healthCache.probesAt
 		recheckSection := a.healthCache.probes
+		recheckErr := a.healthCache.probesErr
 		a.healthCache.mu.RUnlock()
 		if !refresh && nowMs-recheckAt < probesTTLMs && recheckAt > 0 {
-			return recheckSection, nil
+			// Inner re-check returns the cached (section, err) pair so
+			// queued waiters that find a freshly-cached error see the
+			// error too — symmetric with the fast path above.
+			return recheckSection, recheckErr
 		}
 
 		statusFn := a.HealthStatusFn
@@ -444,6 +490,7 @@ func (a *API) computeProbesSection(nowMs int64, refresh bool) (ProbesSection, er
 			a.healthCache.mu.Lock()
 			a.healthCache.probes = section
 			a.healthCache.probesAt = nowMs
+			a.healthCache.probesErr = fetchErr
 			a.healthCache.mu.Unlock()
 			// Propagate the error so /api/health returns 500
 			// HEALTH_BACKEND_FAILED on total probe-backend failure.
@@ -467,10 +514,20 @@ func (a *API) computeProbesSection(nowMs int64, refresh bool) (ProbesSection, er
 		a.healthCache.mu.Lock()
 		a.healthCache.probes = section
 		a.healthCache.probesAt = nowMs
+		// Clear the cached err on success so post-recovery cache hits
+		// stop reporting the stale failure.
+		a.healthCache.probesErr = nil
 		a.healthCache.mu.Unlock()
 		return section, nil
 	})
 	if err != nil {
+		// Symmetric with computeDaemonsSection: preserve cached section
+		// (with section.Errors[]) for partial-failure introspection.
+		if v != nil {
+			if section, ok := v.(ProbesSection); ok {
+				return section, err
+			}
+		}
 		return ProbesSection{}, err
 	}
 	return v.(ProbesSection), nil
