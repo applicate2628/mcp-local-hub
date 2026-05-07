@@ -3,6 +3,7 @@ package api
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -438,6 +439,31 @@ func TestSettingsRegistry_DeferredFlipsForA4bPR1(t *testing.T) {
 		if def.Deferred {
 			t.Errorf("key %q still Deferred:true (A4-b PR #1 must flip)", k)
 		}
+	}
+}
+
+// TestSettingsRegistry_RetryPolicySavedOnlyLabel locks the pre-tag
+// honesty fix from docs/superpowers/plans/phase-3b-ii-backlog.md (the
+// "Suggested sequencing" Pre-tag fix line): retry_policy's Help must
+// label the field "saved only" and indicate the runtime applier is
+// "deferred", since A4-b PR #2 (the runtime applier) was deferred to
+// post-G4. Without this label the Settings UI would imply retry_policy
+// is enforced, which it is not.
+func TestSettingsRegistry_RetryPolicySavedOnlyLabel(t *testing.T) {
+	def := findDef("daemons.retry_policy")
+	if def == nil {
+		t.Fatal("daemons.retry_policy missing from registry")
+	}
+	if !strings.Contains(strings.ToLower(def.Help), "saved only") {
+		t.Errorf("Help must contain 'saved only' (pre-tag honesty fix); got %q", def.Help)
+	}
+	if !strings.Contains(strings.ToLower(def.Help), "deferred") {
+		t.Errorf("Help must indicate runtime applier is 'deferred'; got %q", def.Help)
+	}
+	// Sanity: still NOT Deferred:true, so the field stays editable per the
+	// "label OR disable" choice in the backlog (we picked label).
+	if def.Deferred {
+		t.Errorf("def.Deferred should be false (we chose 'label' over 'disable'); got true")
 	}
 }
 
