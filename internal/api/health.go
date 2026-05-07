@@ -62,8 +62,14 @@ type DaemonsSection struct {
 }
 
 type DaemonRow struct {
-	Server        string  `json:"server"`
-	Daemon        string  `json:"daemon"`
+	Server string `json:"server"`
+	Daemon string `json:"daemon"`
+	// Backend is the workspace-scoped lazy-proxy backend kind
+	// ("mcp-language-server", "gopls-mcp", etc.); empty for global daemons.
+	// Required so computeCapabilitiesSection can rebuild a synthetic
+	// DaemonStatus with the kind ToolCatalogForBackend keys on — without
+	// it, every workspace-scoped lazy proxy reports an empty tools list.
+	Backend       string  `json:"backend,omitempty"`
 	PID           int     `json:"pid"`
 	Port          int     `json:"port"`
 	RAMBytes      uint64  `json:"ram_bytes"`
@@ -261,6 +267,7 @@ func (a *API) computeDaemonsSection(nowMs int64, refresh bool) (DaemonsSection, 
 			section.Items = append(section.Items, DaemonRow{
 				Server:    r.Server,
 				Daemon:    r.Daemon,
+				Backend:   r.Backend, // empty for global daemons; carries lazy-proxy kind for workspace-scoped rows
 				PID:       r.PID,
 				Port:      r.Port,
 				RAMBytes:  r.RAMBytes,
@@ -397,14 +404,21 @@ func (a *API) computeCapabilitiesSection(nowMs int64, refresh bool, probes Probe
 			return recheckSection, nil
 		}
 
-		// Build a server/daemon → port lookup so the capability fn can
-		// reach the daemon's MCP endpoint. The probes section doesn't
-		// carry Port (intentional — ProbeRow is a thin projection); pull
-		// it from the daemons cache instead.
+		// Build server/daemon → {port, backend} lookups so the capability
+		// fn can reach the daemon's MCP endpoint and (for workspace-scoped
+		// lazy proxies) keep the Backend kind for ToolCatalogForBackend.
+		// The probes section doesn't carry either field (intentional —
+		// ProbeRow is a thin projection); pull from the daemons cache.
+		// Backend is critical for the synthetic-source branch in
+		// realCapabilityRow → syntheticToolsSubSection: dropping it makes
+		// ToolCatalogForBackend("") return (zero, false) and reports
+		// state="empty" for every lazy-proxy daemon.
 		daemons, _ := a.computeDaemonsSection(nowMs, false)
 		portByServerDaemon := make(map[string]int, len(daemons.Items))
+		backendByServerDaemon := make(map[string]string, len(daemons.Items))
 		for _, d := range daemons.Items {
 			portByServerDaemon[d.Server+"/"+d.Daemon] = d.Port
+			backendByServerDaemon[d.Server+"/"+d.Daemon] = d.Backend
 		}
 
 		section := CapabilitiesSection{
@@ -422,9 +436,11 @@ func (a *API) computeCapabilitiesSection(nowMs int64, refresh bool, probes Probe
 				continue // Skip failed-probe daemons; capability discovery requires reachable backend.
 			}
 			row, rowErr := fn(DaemonStatus{
-				Server: p.Server, Daemon: p.Daemon,
-				Port:   portByServerDaemon[p.Server+"/"+p.Daemon],
-				Health: &HealthProbe{OK: p.OK, ToolCount: p.ToolCount, Source: p.Source},
+				Server:  p.Server,
+				Daemon:  p.Daemon,
+				Backend: backendByServerDaemon[p.Server+"/"+p.Daemon],
+				Port:    portByServerDaemon[p.Server+"/"+p.Daemon],
+				Health:  &HealthProbe{OK: p.OK, ToolCount: p.ToolCount, Source: p.Source},
 			})
 			if rowErr != nil {
 				section.Errors = append(section.Errors, SectionError{

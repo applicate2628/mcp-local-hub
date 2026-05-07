@@ -411,3 +411,67 @@ func TestHealthSnapshot_CapabilitySkipsFailedProbe(t *testing.T) {
 		t.Errorf("capability fn called %d times for failed-probe daemon, want 0", calls)
 	}
 }
+
+// TestHealthSnapshot_SyntheticCapability_PopulatedFromCatalog is the
+// regression test for the Task-4 review's Critical finding: Backend
+// was dropped on the ProbeRow projection, so realCapabilityRow saw
+// Backend="" for workspace-scoped lazy proxies and returned an empty
+// synthetic tool list instead of the embedded catalog. Without the
+// fix, every mcp-language-server / gopls-mcp daemon would silently
+// report state="empty" tools in production.
+//
+// This test runs realCapabilityRow (via the default fn=nil path,
+// NOT HealthCapabilityFn) so the synthetic branch is exercised
+// end-to-end with a real Backend value.
+func TestHealthSnapshot_SyntheticCapability_PopulatedFromCatalog(t *testing.T) {
+	// Pick any backend that ToolCatalogForBackend has tools for; the
+	// test asserts Tools.State == "ok" with at least one item — the
+	// exact tool count is implementation-dependent (the catalog can
+	// grow), but it must NOT be zero.
+	backendKind := "mcp-language-server"
+	catalog, ok := ToolCatalogForBackend(backendKind)
+	if !ok || len(catalog.Tools) == 0 {
+		t.Skipf("no synthetic catalog for backend kind %q in this build; skipping", backendKind)
+	}
+
+	a := NewAPI()
+	originalStatus := a.HealthStatusFn
+	defer func() { a.HealthStatusFn = originalStatus }()
+	a.HealthStatusFn = func(opts StatusOpts) ([]DaemonStatus, error) {
+		return []DaemonStatus{
+			{
+				Server:  "lsp-go",
+				Daemon:  "lsp-go-default",
+				Backend: backendKind,
+				Port:    9999, // never used: synthetic branch returns before any HTTP call
+				State:   "Ready",
+				Health:  &HealthProbe{OK: true, ToolCount: len(catalog.Tools), Source: "proxy-synthetic"},
+			},
+		}, nil
+	}
+	// Critical: leave HealthCapabilityFn nil so the production
+	// realCapabilityRow path runs end-to-end.
+
+	snap, err := a.HealthSnapshot(HealthOpts{IncludeCapabilities: true})
+	if err != nil {
+		t.Fatalf("HealthSnapshot: %v", err)
+	}
+	if snap.Capabilities == nil || len(snap.Capabilities.Items) != 1 {
+		t.Fatalf("Capabilities = %+v, want 1 row", snap.Capabilities)
+	}
+	row := snap.Capabilities.Items[0]
+	if row.Tools.State != "ok" {
+		t.Errorf("Tools.State = %q, want \"ok\" (synthetic catalog must populate, not return empty); items=%+v",
+			row.Tools.State, row.Tools.Items)
+	}
+	if len(row.Tools.Items) == 0 {
+		t.Errorf("Tools.Items empty — Backend=%q was dropped during projection?", backendKind)
+	}
+	// Sanity: every populated item has a canonical ID.
+	for i, it := range row.Tools.Items {
+		wantID := capabilityID(row.Server, row.Daemon, "tool", it.Name)
+		if it.ID != wantID {
+			t.Errorf("item[%d] ID = %q, want %q", i, it.ID, wantID)
+		}
+	}
+}
