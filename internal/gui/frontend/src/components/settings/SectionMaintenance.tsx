@@ -24,7 +24,13 @@ type ActionState =
   | { kind: "idle" }
   | { kind: "loading" }
   | { kind: "preview"; orphans?: OrphanProcess[]; watchers?: LogWatcher[]; verdict?: unknown }
-  | { kind: "applied"; killed?: number; skipped?: number; result?: unknown; stopResults?: StopResult[] }
+  // applied carries the post-kill row list so the table can render
+  // per-row kill_err. Codex Cloud bot P2 on PR #131 commit 72757c6
+  // (escalates QA F1): apply state previously stored only counts and
+  // the table was gated on kind==="preview", so revalidation skips
+  // (PID-reuse, exited-PID, snapshot start-time unknown), access
+  // denials, and other partial failures were invisible in production.
+  | { kind: "applied"; killed?: number; skipped?: number; result?: unknown; stopResults?: StopResult[]; orphans?: OrphanProcess[]; watchers?: LogWatcher[] }
   | { kind: "error"; error: string };
 
 function asError(e: unknown): string {
@@ -90,7 +96,13 @@ function CardOrphanMcpServers(): preact.JSX.Element {
     try {
       // apply=true → explicit destructive opt-in.
       const r = await cleanupOrphans(true);
-      setState({ kind: "applied", killed: r.killed, skipped: r.skipped });
+      // Retain the row list so the post-apply table can render per-row
+      // kill_err. Bot P2 on commit 72757c6 / kosyak
+      // 2026-05-07-startime-zero-fail-open-bypasses-pid-reuse-guard.md
+      // (mitigation visibility): without the rows the operator sees
+      // only "Done. Killed N, skipped M." with no actionable diagnostic
+      // for the very revalidation skips the kill loop now produces.
+      setState({ kind: "applied", killed: r.killed, skipped: r.skipped, orphans: r.orphans });
     } catch (e) {
       setState({ kind: "error", error: friendlyError(e) });
     }
@@ -115,7 +127,7 @@ function CardOrphanMcpServers(): preact.JSX.Element {
         )}
       </div>
       <CardResult state={state} />
-      {state.kind === "preview" && state.orphans && (
+      {(state.kind === "preview" || state.kind === "applied") && state.orphans && (
         <OrphansTable orphans={state.orphans} />
       )}
     </div>
@@ -126,6 +138,12 @@ function OrphansTable({ orphans }: { orphans: OrphanProcess[] }): preact.JSX.Ele
   if (orphans.length === 0) {
     return <p class="maintenance-empty">No orphan processes found.</p>;
   }
+  // Codex Cloud bot P2 on PR #131 commit 72757c6: per-row kill_err
+  // was invisible in apply state, hiding revalidation skips
+  // (PID-reuse, exited-PID, snapshot start-time unknown), access
+  // denials, and other partial failures. Render a Result column
+  // whenever any row carries a non-empty kill_err.
+  const showResult = orphans.some((o) => !!o.kill_err);
   return (
     <table class="maintenance-table">
       <thead>
@@ -135,6 +153,7 @@ function OrphansTable({ orphans }: { orphans: OrphanProcess[] }): preact.JSX.Ele
           <th>Age</th>
           <th>RAM (MB)</th>
           <th>Cmd</th>
+          {showResult && <th>Result</th>}
         </tr>
       </thead>
       <tbody>
@@ -145,6 +164,11 @@ function OrphansTable({ orphans }: { orphans: OrphanProcess[] }): preact.JSX.Ele
             <td>{Math.round(o.age_sec)}s</td>
             <td>{Math.round(o.ram_bytes / (1024 * 1024))}</td>
             <td class="maintenance-cmd">{o.cmdline}</td>
+            {showResult && (
+              <td class={o.kill_err ? "maintenance-error" : ""}>
+                {o.kill_err || "killed"}
+              </td>
+            )}
           </tr>
         ))}
       </tbody>
@@ -183,7 +207,10 @@ function CardOrphanLogWatchers(): preact.JSX.Element {
     try {
       // apply=true → explicit destructive opt-in.
       const r = await cleanupLogWatchers(true, includeLive);
-      setState({ kind: "applied", killed: r.killed, skipped: r.skipped });
+      // Retain the row list so the post-apply table renders per-row
+      // kill_err. Same fix as CardOrphanMcpServers above (Codex Cloud
+      // bot P2 on commit 72757c6).
+      setState({ kind: "applied", killed: r.killed, skipped: r.skipped, watchers: r.watchers });
     } catch (e) {
       setState({ kind: "error", error: asError(e) });
     }
@@ -233,7 +260,7 @@ function CardOrphanLogWatchers(): preact.JSX.Element {
         )}
       </div>
       <CardResult state={state} />
-      {state.kind === "preview" && state.watchers && (
+      {(state.kind === "preview" || state.kind === "applied") && state.watchers && (
         <WatchersTable watchers={state.watchers} />
       )}
     </div>
@@ -244,6 +271,9 @@ function WatchersTable({ watchers }: { watchers: LogWatcher[] }): preact.JSX.Ele
   if (watchers.length === 0) {
     return <p class="maintenance-empty">No orphan watchers found.</p>;
   }
+  // Same Result column rule as OrphansTable — visible only when at
+  // least one row has a non-empty kill_err.
+  const showResult = watchers.some((w) => !!w.kill_err);
   return (
     <table class="maintenance-table">
       <thead>
@@ -253,6 +283,7 @@ function WatchersTable({ watchers }: { watchers: LogWatcher[] }): preact.JSX.Ele
           <th>Name</th>
           <th>Age</th>
           <th>Cmd</th>
+          {showResult && <th>Result</th>}
         </tr>
       </thead>
       <tbody>
@@ -263,6 +294,11 @@ function WatchersTable({ watchers }: { watchers: LogWatcher[] }): preact.JSX.Ele
             <td>{w.name}</td>
             <td>{w.age_sec > 0 ? `${Math.round(w.age_sec / 60)}m` : "?"}</td>
             <td class="maintenance-cmd">{w.cmdline}</td>
+            {showResult && (
+              <td class={w.kill_err ? "maintenance-error" : ""}>
+                {w.kill_err || "killed"}
+              </td>
+            )}
           </tr>
         ))}
       </tbody>
