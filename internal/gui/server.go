@@ -52,6 +52,36 @@ func (realStatusProvider) Status() ([]api.DaemonStatus, error) {
 	return api.NewAPI().Status()
 }
 
+// healthBackend is the narrow interface the /api/health and /api/status
+// handlers need. Wired in NewServer to a realHealthBackend whose `api`
+// field references the long-lived Server.api instance — Phase G2's
+// TTL+singleflight cache lives on that *API, so per-request api.NewAPI()
+// would defeat it.
+//
+// Phase 6 of G2: /api/status now also routes through this backend (via
+// DaemonStatusSnapshot) so both endpoints share one cache. Adding a
+// method here MUST be matched by both realHealthBackend (production)
+// and fakeHealth (test seam in health_test.go).
+type healthBackend interface {
+	HealthSnapshot(opts api.HealthOpts) (api.HealthSnapshot, error)
+	// DaemonStatusSnapshot returns the canonical []DaemonStatus that
+	// /api/status emits. Shares the daemons-section cache with
+	// HealthSnapshot — one StatusWithOpts call serves both surfaces.
+	DaemonStatusSnapshot() ([]api.DaemonStatus, error)
+}
+
+type realHealthBackend struct {
+	api *api.API // long-lived; populated from Server.api during NewServer.
+}
+
+func (r realHealthBackend) HealthSnapshot(opts api.HealthOpts) (api.HealthSnapshot, error) {
+	return r.api.HealthSnapshot(opts)
+}
+
+func (r realHealthBackend) DaemonStatusSnapshot() ([]api.DaemonStatus, error) {
+	return r.api.DaemonStatusSnapshot()
+}
+
 // migrator is the narrow interface the /api/migrate handler needs.
 // The handler treats the operation as a bulk "apply changes" — any failed
 // (server, client) row inside the MigrateReport is surfaced as an error.
@@ -357,13 +387,22 @@ type RealStatusProvider = realStatusProvider
 // Server is the GUI HTTP server. It owns a net/http.Server bound to
 // 127.0.0.1, a ready-to-register mux, and a best-effort shutdown path.
 type Server struct {
-	cfg               Config
-	mux               *http.ServeMux
-	srv               *http.Server
-	port              atomic.Int32 // set after Listen, read by Port()
+	cfg  Config
+	mux  *http.ServeMux
+	srv  *http.Server
+	port atomic.Int32 // set after Listen, read by Port()
+	// api is the long-lived shared *api.API handle. Phase G2 places the
+	// HealthSnapshot TTL+singleflight cache on this struct, so the
+	// healthBackend adapter MUST reuse this instance — per-request
+	// api.NewAPI() would create a fresh cache every call and defeat the
+	// caching machinery. Other handlers still use the per-request
+	// api.NewAPI() pattern (out of scope for this task; can adopt later
+	// if their workloads benefit).
+	api               *api.API
 	onActivateWindow  func() error
 	scanner           scanner
 	status            statusProvider
+	health            healthBackend
 	migrator          migrator
 	demigrater        demigrater
 	dismisser         dismisser
@@ -412,8 +451,15 @@ func NewServer(cfg Config) *Server {
 		cfg.PID = os.Getpid()
 	}
 	s := &Server{cfg: cfg, mux: http.NewServeMux()}
+	// Long-lived shared *API handle. Phase G2 (/api/health) places the
+	// TTL+singleflight HealthSnapshot cache here so concurrent requests
+	// reuse the same cache; the healthBackend adapter below references
+	// THIS instance. Other handlers continue to use api.NewAPI() per
+	// request — out of scope for this task.
+	s.api = api.NewAPI()
 	s.scanner = realScanner{}
 	s.status = realStatusProvider{}
+	s.health = realHealthBackend{api: s.api}
 	s.migrator = realMigrator{}
 	s.demigrater = realDemigrater{}
 	s.dismisser = realDismisser{}
@@ -435,6 +481,7 @@ func NewServer(cfg Config) *Server {
 	registerAssetRoutes(s)
 	registerScanRoutes(s)
 	registerStatusRoutes(s)
+	registerHealthRoute(s)
 	registerMigrateRoutes(s)
 	registerDemigrateRoutes(s)
 	registerDismissRoutes(s)
