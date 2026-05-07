@@ -498,10 +498,10 @@ func isUTCInstant(raw []byte, taskName string) bool {
 // ---------------------------------------------------------------------------
 
 // WriteDaemonIntent records (or replaces) the entry for taskName.
-// `who` carries the operator/caller identity for the audit trail
-// (Task 3 wires this into IntentAuditEntry). For Task 2 the audit
-// hook is a TODO stub — write succeeds even when audit isn't wired,
-// so production-watchdog rollouts can land Task 2 ahead of Task 3.
+// `who` carries the operator/caller identity for the audit trail.
+// Task 3 wired the AppendIntentAudit dispatcher; this function now
+// emits a "set-intent" audit entry with the pre-mutation Before
+// snapshot and the post-mutation After snapshot.
 //
 // Atomicity:
 //  1. Acquire gofrs/flock on the sibling `.lock` file.
@@ -510,15 +510,20 @@ func isUTCInstant(raw []byte, taskName string) bool {
 //     write proceeds against the cleared state. This honors the
 //     "no silent data loss" principle: forensic copies live in
 //     `.corrupt-{ts}` siblings.
-//  3. Update the in-memory map.
-//  4. Marshal with UTC normalization on UpdatedAt.
-//  5. Write to a fresh temp file (`${stem}.tmp.${pid}.${nano}`) at 0600.
-//  6. os.Rename onto the canonical path. POSIX guarantees atomicity;
+//  3. Capture the Before snapshot (current value for taskName, if any).
+//  4. Update the in-memory map.
+//  5. Marshal with UTC normalization on UpdatedAt.
+//  6. Write to a fresh temp file (`${stem}.tmp.${pid}.${nano}`) at 0600.
+//  7. os.Rename onto the canonical path. POSIX guarantees atomicity;
 //     Windows ReplaceFile semantics achieve the same effect.
+//  8. Emit "set-intent" audit entry with Before / After / Who.
 //
 // Failure semantics: any error is returned verbatim and the canonical
 // file is left in its prior state (rename happens last). The temp file
-// is best-effort cleaned up on error paths.
+// is best-effort cleaned up on error paths. Audit-write failure (e.g.,
+// ErrIdentityOversize from a malicious task name slipping past the
+// 1KB intent gate) is surfaced to the caller; install/stop are
+// expected to fail closed per §51.
 func (a *API) WriteDaemonIntent(taskName string, intent DaemonIntent, who string) error {
 	// v9 identity oversize rejection (plan §35 + Task 2.1).
 	if len(taskName) > IdentityFieldByteCap {
@@ -546,6 +551,14 @@ func (a *API) WriteDaemonIntent(taskName string, intent DaemonIntent, who string
 		current.Tasks = map[string]DaemonIntent{}
 	}
 
+	// Capture Before snapshot for the audit entry. Pointer is nil when
+	// no prior intent exists (clean install case).
+	var before *DaemonIntent
+	if prior, ok := current.Tasks[taskName]; ok {
+		priorCopy := prior
+		before = &priorCopy
+	}
+
 	// Normalize timestamp to UTC. Caller may pass any location; we want
 	// disk and downstream code to see UTC instants only.
 	intent.UpdatedAt = intent.UpdatedAt.UTC()
@@ -558,24 +571,29 @@ func (a *API) WriteDaemonIntent(taskName string, intent DaemonIntent, who string
 		return err
 	}
 
-	// TODO(task 3): when intent_audit.go lands, append an
-	// IntentAuditEntry with Action="set-intent" / Before / After /
-	// Who=who. For Task 2 the audit hook is intentionally absent —
-	// the watchdog driver in Task 9 still depends on Task 3 landing
-	// before going live. Leaving this as a no-op preserves Task 2's
-	// scope while keeping the call site discoverable for Task 3.
-	_ = who
+	// Task 3 audit emit: set-intent with Before / After / Who. Routed
+	// through the appendIntentAuditFn seam (api_surfaces.go) which
+	// intent_audit.go's init() binds to the real (*API).AppendIntentAudit.
+	after := intent
+	if appendIntentAuditFn != nil {
+		_ = appendIntentAuditFn(NewIntentAuditEntry(
+			WithAction("set-intent"),
+			WithTask(taskName),
+			WithWho(who),
+			WithReason(intent.Reason),
+			WithBefore(before),
+			WithAfter(&after),
+		))
+	}
 	return nil
 }
 
 // ClearDaemonIntent removes the entry for taskName. Idempotent — a
 // missing entry is treated as success. Same atomic rename + flock
-// semantics as WriteDaemonIntent.
-//
-// Used by `mcphub install` (record desired=running) followed by a
-// downstream cleanup, by `mcphub uninstall` to drop intent for a
-// removed daemon, and by the watchdog's TTL-expiry path to convert
-// a stale `user-stop` into "no recorded preference".
+// semantics as WriteDaemonIntent. Emits a "clear-intent" audit entry
+// when the prior entry actually existed (Before != nil); a no-op
+// clear (entry missing or map empty) does NOT emit an audit entry
+// since there is nothing to record.
 func (a *API) ClearDaemonIntent(taskName string, who string) error {
 	if len(taskName) > IdentityFieldByteCap {
 		return ErrEntryOversize
@@ -600,11 +618,10 @@ func (a *API) ClearDaemonIntent(taskName string, who string) error {
 	current := readIntentLocked(statePath)
 	if current.Tasks == nil {
 		// Already empty; clearing is a no-op.
-		_ = who
 		return nil
 	}
-	if _, ok := current.Tasks[taskName]; !ok {
-		_ = who
+	prior, ok := current.Tasks[taskName]
+	if !ok {
 		return nil
 	}
 	delete(current.Tasks, taskName)
@@ -612,9 +629,20 @@ func (a *API) ClearDaemonIntent(taskName string, who string) error {
 	if err := writeIntentLocked(statePath, current); err != nil {
 		return err
 	}
-	// TODO(task 3): same note as WriteDaemonIntent — append audit
-	// entry once Task 3 wires the production audit log.
-	_ = who
+
+	// Task 3 audit emit: clear-intent with Before snapshot (the
+	// directive being cleared). After is nil because the entry no
+	// longer exists. Routed through the appendIntentAuditFn seam.
+	before := prior
+	if appendIntentAuditFn != nil {
+		_ = appendIntentAuditFn(NewIntentAuditEntry(
+			WithAction("clear-intent"),
+			WithTask(taskName),
+			WithWho(who),
+			WithReason(prior.Reason),
+			WithBefore(&before),
+		))
+	}
 	return nil
 }
 

@@ -94,32 +94,13 @@ var readDaemonIntentFn func(taskName string) (DaemonIntent, bool, error)
 // when Task 2 landed. The readDaemonIntentFn seam above is bound to the
 // production reader by daemon_intent.go's init().)
 
-// IntentAuditEntry is one row in the append-only audit log. Task 3
-// (intent_audit.go) owns the canonical schema (incl. caller fields,
-// sealed systemEntry, identity-preserving 16KB cap, Priority field).
-// For Task 0 the minimal shape carries Action + Reason so the
-// UninstallWatchdogTaskInternal audit contract is testable.
-//
-// TODO(task 3): replace this stub with the full Task 3 IntentAuditEntry
-// (TS / Who / Action / Task / Before / After / CallerPID / CallerExe /
-// CallerStartTime / CallerUser / Reason / Priority / sealed systemEntry).
-// Task 3 must keep Action and Reason on the struct so existing
-// UninstallWatchdogTaskInternal callers continue to compile.
-type IntentAuditEntry struct {
-	// TS is the UTC RFC3339Nano timestamp the entry was minted.
-	TS time.Time
-	// Action is the canonical action label (§63 v11).
-	// Watchdog self-quarantine MUST use the literal "watchdog-self-quarantined".
-	Action string
-	// Task is the targeted task name (identity field; never truncated per §35).
-	Task string
-	// Reason carries the SelfQuarantineReason enum value when Action is
-	// "watchdog-self-quarantined", or the operator-provided rationale otherwise.
-	Reason string
-	// Priority is "high" for elevated-override / quarantine / uninstall
-	// events, empty for routine entries (§55 v9).
-	Priority string
-}
+// (IntentAuditEntry / NewIntentAuditEntry / newSystemAuditEntry /
+// MarshalJSON / UnmarshalJSON / IsSystemEntry / RedactIntentAuditEntryForNonOwner
+// moved to intent_audit.go when Task 3 landed. The appendIntentAuditFn
+// seam above is bound to the production AppendIntentAudit by
+// intent_audit.go's init(); UninstallWatchdogTaskInternal continues to
+// reach the real audit log through the unchanged appendAudit dispatcher
+// below.)
 
 // ---------------------------------------------------------------------------
 // SelfQuarantineReason — typed enum (§39, §56).
@@ -676,6 +657,11 @@ func (a *API) UninstallWatchdogTaskInternal(reason SelfQuarantineReason) error {
 		// exactly what the caller passed.
 	}
 
+	// Task 3 wired AppendIntentAudit behind the appendAudit dispatcher
+	// via init() in intent_audit.go. Caller-fingerprint fields (CallerPID,
+	// CallerExe, CallerStartTime, CallerUser) are auto-populated by
+	// AppendIntentAudit; we only set the canonical contract fields here
+	// (Action literal, Task identity, Reason enum value, Priority high).
 	entry := IntentAuditEntry{
 		TS:       time.Now().UTC(),
 		Action:   "watchdog-self-quarantined",
