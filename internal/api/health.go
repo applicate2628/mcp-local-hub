@@ -1,5 +1,11 @@
 package api
 
+import (
+	"time"
+
+	"mcp-local-hub/internal/buildinfo"
+)
+
 // HealthSnapshot is the canonical snapshot returned by GET /api/health.
 // Owns the contract G3 (capability display) and G4 (Hub MCP routing)
 // consume. Per spec docs/superpowers/specs/2026-05-07-g2-unified-health-endpoint-design.md.
@@ -126,13 +132,166 @@ func capabilityID(server, daemon, kind, name string) string {
 	return server + "/" + daemon + "/" + kind + "/" + name
 }
 
-// HealthSnapshot returns the current snapshot. Phase 1 stub: returns
-// SchemaVersion="1" + zero-valued Hub/Daemons + nil Probes/Capabilities
-// regardless of opts. Wired in Phase 2+.
+// Per-section TTLs in ms. Daemons refresh quickly because operators
+// expect near-real-time process state; probes and capabilities are
+// expensive and tolerate longer staleness.
+const (
+	daemonsTTLMs      int64 = 2000
+	probesTTLMs       int64 = 10000
+	capabilitiesTTLMs int64 = 60000
+)
+
+// HealthSnapshot builds the snapshot per opts. Each section is cached
+// separately with its own TTL; concurrent expired-cache callers collapse
+// onto one underlying fn via singleflight. Phase 2 wires hub + daemons.
+// Phases 3 + 4 add probes + capabilities.
 func (a *API) HealthSnapshot(opts HealthOpts) (HealthSnapshot, error) {
-	return HealthSnapshot{
+	now := a.healthNow()
+
+	hub := a.computeHubSection(now)
+	daemons, err := a.computeDaemonsSection(now, opts.Refresh)
+	if err != nil {
+		return HealthSnapshot{}, err
+	}
+
+	snap := HealthSnapshot{
 		SchemaVersion: "1",
-		Hub:           HubSection{},
-		Daemons:       DaemonsSection{Items: []DaemonRow{}, Errors: []SectionError{}},
-	}, nil
+		Hub:           hub,
+		Daemons:       daemons,
+	}
+
+	// IncludeProbes / IncludeCapabilities are honored in Phases 3-4.
+	// Reading them here keeps the lints quiet and documents the deferral.
+	_ = opts.IncludeProbes
+	_ = opts.IncludeCapabilities
+
+	return snap, nil
+}
+
+// computeHubSection populates the hub section. Build info comes from
+// internal/buildinfo (the same source GET /api/version uses). Lock state
+// is best-effort — Phase 2 returns HubLock{} since the API struct doesn't
+// have a back-reference to the running server. Future phase (or G3
+// integration) wires the lock if needed.
+//
+// Cached once per process via sync.Once — hub never changes after startup.
+func (a *API) computeHubSection(nowMs int64) HubSection {
+	a.healthCache.hubOnce.Do(func() {
+		v, c, d := buildinfo.Get()
+		a.healthCache.hub = HubSection{
+			Version:     v,
+			Commit:      c,
+			BuildDate:   d,
+			StartedAt:   a.startedAtRFC3339(),
+			Lock:        HubLock{}, // wired later if needed
+			GeneratedAt: nowMs / 1000,
+			TTLMs:       nil, // immutable — never expires
+		}
+	})
+	return a.healthCache.hub
+}
+
+// computeDaemonsSection populates the daemons section, with TTL+refresh
+// gate and singleflight collapsing on concurrent expired-cache callers.
+func (a *API) computeDaemonsSection(nowMs int64, refresh bool) (DaemonsSection, error) {
+	a.healthCache.mu.RLock()
+	cached := a.healthCache.daemons
+	cachedAt := a.healthCache.daemonsAt
+	a.healthCache.mu.RUnlock()
+
+	if !refresh && cachedAt > 0 && nowMs-cachedAt < daemonsTTLMs {
+		return cached, nil
+	}
+
+	v, err, _ := a.healthCache.sf.Do("daemons", func() (any, error) {
+		// Re-check after acquiring the singleflight slot — earlier waiters
+		// may have refreshed while we queued.
+		a.healthCache.mu.RLock()
+		recheckAt := a.healthCache.daemonsAt
+		recheckSection := a.healthCache.daemons
+		a.healthCache.mu.RUnlock()
+		if !refresh && nowMs-recheckAt < daemonsTTLMs && recheckAt > 0 {
+			return recheckSection, nil
+		}
+
+		statusFn := a.HealthStatusFn
+		if statusFn == nil {
+			statusFn = a.StatusWithOpts
+		}
+		rows, fetchErr := statusFn(StatusOpts{}) // ProbeHealth=false; probes come in Phase 3
+		section := DaemonsSection{
+			Items:       make([]DaemonRow, 0, len(rows)),
+			GeneratedAt: nowMs / 1000,
+			TTLMs:       daemonsTTLMs,
+			Errors:      []SectionError{},
+		}
+		if fetchErr != nil {
+			section.Errors = append(section.Errors, SectionError{
+				Scope: "daemons",
+				Err:   fetchErr.Error(),
+			})
+			a.healthCache.mu.Lock()
+			a.healthCache.daemons = section
+			a.healthCache.daemonsAt = nowMs
+			a.healthCache.mu.Unlock()
+			return section, nil
+		}
+		for _, r := range rows {
+			section.Items = append(section.Items, DaemonRow{
+				Server:    r.Server,
+				Daemon:    r.Daemon,
+				PID:       r.PID,
+				Port:      r.Port,
+				RAMBytes:  r.RAMBytes,
+				UptimeSec: r.UptimeSec,
+				State:     normalizeDaemonState(r.State),
+				// RestartCount + LastRestartAt: existing DaemonStatus
+				// doesn't currently expose them; default 0/nil. Future
+				// scheduler integration fills them.
+			})
+		}
+		a.healthCache.mu.Lock()
+		a.healthCache.daemons = section
+		a.healthCache.daemonsAt = nowMs
+		a.healthCache.mu.Unlock()
+		return section, nil
+	})
+	if err != nil {
+		return DaemonsSection{}, err
+	}
+	return v.(DaemonsSection), nil
+}
+
+// normalizeDaemonState maps the existing ("Running"|"Ready"|"Failed"|"Stopped")
+// vocabulary to the spec's lowercase ("running"|"stopped"|"starting"|"failed").
+//
+// FIXME(phase-6): project back to DaemonStatus.State Title Case during
+// /api/status re-source so the existing wire shape stays unchanged.
+func normalizeDaemonState(s string) string {
+	switch s {
+	case "Running", "Ready":
+		return "running"
+	case "Failed":
+		return "failed"
+	case "Stopped":
+		return "stopped"
+	default:
+		return "starting"
+	}
+}
+
+// healthNow returns current time in ms. Test seam.
+func (a *API) healthNow() int64 {
+	if a.HealthNowMs != nil {
+		return a.HealthNowMs()
+	}
+	return time.Now().UnixMilli()
+}
+
+// startedAtRFC3339 returns the API's start time. If not tracked, returns "".
+func (a *API) startedAtRFC3339() string {
+	if a.StartedAt.IsZero() {
+		return ""
+	}
+	return a.StartedAt.Format(time.RFC3339)
 }

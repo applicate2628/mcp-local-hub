@@ -11,6 +11,13 @@
 // subcommand; adding one is a separate follow-up.
 package api
 
+import (
+	"sync"
+	"time"
+
+	"golang.org/x/sync/singleflight"
+)
+
 // API is the orchestration handle held by cli and gui. Methods are safe for
 // concurrent use unless noted otherwise.
 //
@@ -25,6 +32,46 @@ package api
 type API struct {
 	state *State
 	bus   *EventBus
+
+	// G2 health snapshot cache + test seams. See internal/api/health.go for
+	// the cache lifecycle, TTL constants, and singleflight collapsing logic.
+	healthCache healthCache
+
+	// HealthStatusFn is the test seam used by HealthSnapshot to read the
+	// daemons section. Production: nil → falls back to a.StatusWithOpts.
+	// Tests overwrite this to inject deterministic []DaemonStatus.
+	HealthStatusFn func(StatusOpts) ([]DaemonStatus, error)
+
+	// HealthNowMs is the test seam used by HealthSnapshot to read the
+	// current time in milliseconds. Production: nil → time.Now().UnixMilli().
+	// Tests advance this manually to drive TTL boundaries deterministically.
+	HealthNowMs func() int64
+
+	// StartedAt is the API's process-start timestamp. Surfaced as
+	// HubSection.StartedAt in HealthSnapshot's hub section.
+	StartedAt time.Time
+}
+
+// healthCache holds per-section cache state for HealthSnapshot. Embedded
+// in API. Mutex guards cached values; singleflight collapses concurrent
+// refreshes per section so N callers waiting on an expired cache trigger
+// exactly one underlying call. The hub section uses sync.Once instead of
+// the TTL machinery because it's immutable across process lifetime.
+type healthCache struct {
+	mu sync.RWMutex
+	sf singleflight.Group
+
+	hubOnce sync.Once
+	hub     HubSection
+
+	daemonsAt int64 // ms since epoch when last computed
+	daemons   DaemonsSection
+
+	probesAt int64
+	probes   ProbesSection
+
+	capabilitiesAt int64
+	capabilities   CapabilitiesSection
 }
 
 // NewAPI constructs a fresh API with an initialized state and event bus.
@@ -33,7 +80,8 @@ type API struct {
 // per-request lifecycle caveat.
 func NewAPI() *API {
 	return &API{
-		state: &State{Daemons: make(map[string]DaemonStatus)},
-		bus:   newEventBus(),
+		state:     &State{Daemons: make(map[string]DaemonStatus)},
+		bus:       newEventBus(),
+		StartedAt: time.Now(),
 	}
 }
