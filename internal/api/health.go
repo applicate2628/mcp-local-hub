@@ -160,9 +160,14 @@ func (a *API) HealthSnapshot(opts HealthOpts) (HealthSnapshot, error) {
 		Daemons:       daemons,
 	}
 
-	// IncludeProbes / IncludeCapabilities are honored in Phases 3-4.
-	// Reading them here keeps the lints quiet and documents the deferral.
-	_ = opts.IncludeProbes
+	if opts.IncludeProbes || opts.IncludeCapabilities {
+		probes, err := a.computeProbesSection(now, opts.Refresh)
+		if err != nil {
+			return HealthSnapshot{}, err
+		}
+		snap.Probes = &probes
+	}
+	// IncludeCapabilities is wired in Phase 4 (consumes the probes section above).
 	_ = opts.IncludeCapabilities
 
 	return snap, nil
@@ -260,6 +265,85 @@ func (a *API) computeDaemonsSection(nowMs int64, refresh bool) (DaemonsSection, 
 		return DaemonsSection{}, err
 	}
 	return v.(DaemonsSection), nil
+}
+
+// computeProbesSection populates the per-daemon probe results.
+// Calls StatusWithOpts(ProbeHealth=true, ForceMaterialize=false) so the
+// existing probe orchestration (synthetic answers for proxy-synthetic
+// rows; live MCP roundtrip for real backends) is reused as-is. Per spec,
+// ForceMaterialize MUST stay false — it would spawn heavy backends just
+// to enumerate tools, defeating the lazy-proxy contract.
+//
+// 10s TTL. Same per-section RWMutex + singleflight pattern as daemons.
+func (a *API) computeProbesSection(nowMs int64, refresh bool) (ProbesSection, error) {
+	a.healthCache.mu.RLock()
+	cached := a.healthCache.probes
+	cachedAt := a.healthCache.probesAt
+	a.healthCache.mu.RUnlock()
+
+	if !refresh && cachedAt > 0 && nowMs-cachedAt < probesTTLMs {
+		return cached, nil
+	}
+
+	v, err, _ := a.healthCache.sf.Do("probes", func() (any, error) {
+		// Re-check after acquiring the singleflight slot — earlier waiters
+		// may have refreshed while we queued.
+		a.healthCache.mu.RLock()
+		recheckAt := a.healthCache.probesAt
+		recheckSection := a.healthCache.probes
+		a.healthCache.mu.RUnlock()
+		if !refresh && nowMs-recheckAt < probesTTLMs && recheckAt > 0 {
+			return recheckSection, nil
+		}
+
+		statusFn := a.HealthStatusFn
+		if statusFn == nil {
+			statusFn = a.StatusWithOpts
+		}
+		// ProbeHealth=true triggers per-daemon initialize+tools/list;
+		// ForceMaterialize=false (zero value) preserves lazy-proxy semantic
+		// — synthetic rows answer from the embedded catalog without
+		// spawning the heavy backend.
+		rows, fetchErr := statusFn(StatusOpts{ProbeHealth: true})
+		section := ProbesSection{
+			Items:       make([]ProbeRow, 0, len(rows)),
+			GeneratedAt: nowMs / 1000,
+			TTLMs:       probesTTLMs,
+			Errors:      []SectionError{},
+		}
+		if fetchErr != nil {
+			section.Errors = append(section.Errors, SectionError{
+				Scope: "probes",
+				Err:   fetchErr.Error(),
+			})
+			a.healthCache.mu.Lock()
+			a.healthCache.probes = section
+			a.healthCache.probesAt = nowMs
+			a.healthCache.mu.Unlock()
+			return section, nil
+		}
+		for _, r := range rows {
+			pr := ProbeRow{Server: r.Server, Daemon: r.Daemon}
+			if r.Health != nil {
+				pr.OK = r.Health.OK
+				pr.ToolCount = r.Health.ToolCount
+				pr.Err = r.Health.Err
+				pr.Source = r.Health.Source
+			} else {
+				pr.Err = "no probe (daemon not running or probe disabled)"
+			}
+			section.Items = append(section.Items, pr)
+		}
+		a.healthCache.mu.Lock()
+		a.healthCache.probes = section
+		a.healthCache.probesAt = nowMs
+		a.healthCache.mu.Unlock()
+		return section, nil
+	})
+	if err != nil {
+		return ProbesSection{}, err
+	}
+	return v.(ProbesSection), nil
 }
 
 // normalizeDaemonState maps the existing ("Running"|"Ready"|"Failed"|"Stopped")

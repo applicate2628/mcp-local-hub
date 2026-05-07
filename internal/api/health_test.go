@@ -211,3 +211,92 @@ func TestHealthSnapshot_SingleflightCollapsesConcurrent(t *testing.T) {
 		t.Errorf("underlying fn called %d times across %d goroutines, want 1 (singleflight)", got, N)
 	}
 }
+
+func TestHealthSnapshot_IncludeProbes_AddsProbesSection(t *testing.T) {
+	a := NewAPI()
+	original := a.HealthStatusFn
+	defer func() { a.HealthStatusFn = original }()
+	a.HealthStatusFn = func(opts StatusOpts) ([]DaemonStatus, error) {
+		// When ProbeHealth=true, populate the Health field; when false,
+		// leave it nil. Phase 3 must call StatusWithOpts(ProbeHealth=true)
+		// only when IncludeProbes is set.
+		if opts.ProbeHealth {
+			return []DaemonStatus{
+				{Server: "fs", Daemon: "fs-default", PID: 1234, Port: 9100, State: "Running",
+					Health: &HealthProbe{OK: true, ToolCount: 5}},
+			}, nil
+		}
+		return []DaemonStatus{
+			{Server: "fs", Daemon: "fs-default", PID: 1234, Port: 9100, State: "Running"},
+		}, nil
+	}
+
+	snap, err := a.HealthSnapshot(HealthOpts{IncludeProbes: true})
+	if err != nil {
+		t.Fatalf("HealthSnapshot: %v", err)
+	}
+	if snap.Probes == nil {
+		t.Fatal("Probes is nil, want populated section")
+	}
+	if len(snap.Probes.Items) != 1 {
+		t.Fatalf("Probes.Items = %d, want 1: %+v", len(snap.Probes.Items), snap.Probes.Items)
+	}
+	if !snap.Probes.Items[0].OK || snap.Probes.Items[0].ToolCount != 5 {
+		t.Errorf("probe row = %+v, want OK=true tool_count=5", snap.Probes.Items[0])
+	}
+	if snap.Probes.TTLMs != 10000 {
+		t.Errorf("Probes.TTLMs = %d, want 10000", snap.Probes.TTLMs)
+	}
+}
+
+func TestHealthSnapshot_PartialFailureDoesNotPoisonProbes(t *testing.T) {
+	a := NewAPI()
+	original := a.HealthStatusFn
+	defer func() { a.HealthStatusFn = original }()
+	a.HealthStatusFn = func(opts StatusOpts) ([]DaemonStatus, error) {
+		return []DaemonStatus{
+			{Server: "ok", Daemon: "ok", State: "Running",
+				Health: &HealthProbe{OK: true, ToolCount: 3}},
+			{Server: "broken", Daemon: "broken", State: "Running",
+				Health: &HealthProbe{OK: false, Err: "connection refused"}},
+		}, nil
+	}
+
+	snap, _ := a.HealthSnapshot(HealthOpts{IncludeProbes: true})
+	if snap.Probes == nil || len(snap.Probes.Items) != 2 {
+		t.Fatalf("expected both rows, got: %+v", snap.Probes)
+	}
+	gotOK := snap.Probes.Items[0].OK && snap.Probes.Items[0].ToolCount == 3
+	gotBroken := !snap.Probes.Items[1].OK && snap.Probes.Items[1].Err == "connection refused"
+	if !gotOK || !gotBroken {
+		t.Errorf("partial-failure rows mis-projected: %+v", snap.Probes.Items)
+	}
+}
+
+func TestHealthSnapshot_LazyProxyDoesNotMaterialize(t *testing.T) {
+	a := NewAPI()
+	original := a.HealthStatusFn
+	defer func() { a.HealthStatusFn = original }()
+
+	a.HealthStatusFn = func(opts StatusOpts) ([]DaemonStatus, error) {
+		// Critical: ForceMaterialize must remain false when G2 calls in,
+		// even when IncludeProbes is true. Synthetic rows answer
+		// initialize+tools/list without spawning the heavy backend.
+		if opts.ForceMaterialize {
+			t.Fatalf("HealthSnapshot must NOT pass ForceMaterialize=true (lazy-proxy preservation)")
+		}
+		return []DaemonStatus{
+			{Server: "ws-proxy", Daemon: "ws-proxy", State: "Ready",
+				Health: &HealthProbe{OK: true, ToolCount: 7, Source: "proxy-synthetic"}},
+		}, nil
+	}
+
+	snap, _ := a.HealthSnapshot(HealthOpts{IncludeProbes: true})
+	if snap.Probes == nil || len(snap.Probes.Items) != 1 {
+		t.Fatalf("want 1 probe row: %+v", snap.Probes)
+	}
+	if snap.Probes.Items[0].Source != "proxy-synthetic" {
+		t.Errorf("Source = %q, want proxy-synthetic (preserve lazy-proxy semantic)",
+			snap.Probes.Items[0].Source)
+	}
+}
