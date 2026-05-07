@@ -45,6 +45,19 @@ func TestBuildCreateXML_Logon(t *testing.T) {
 	if strings.Contains(xml, "<RestartInterval>") || strings.Contains(xml, "<RestartCount>") {
 		t.Errorf("flat RestartInterval/RestartCount must not appear: %s", xml)
 	}
+	// v0.3.0-blockers bug #2 regression: MultipleInstancesPolicy must be
+	// StopExisting, not IgnoreNew. With IgnoreNew, RestartOnFailure does
+	// NOT fire after Task Manager kill — TS sees the just-killed instance
+	// as still "running" in its internal state machine and ignores the
+	// restart attempt. StopExisting tells TS "stop the lingering instance
+	// (no-op when already dead) and start the new one", which is what
+	// auto-recovery actually requires. D2.4 manual smoke 2026-05-07.
+	if !strings.Contains(xml, "<MultipleInstancesPolicy>StopExisting</MultipleInstancesPolicy>") {
+		t.Errorf("expected MultipleInstancesPolicy=StopExisting (not IgnoreNew); RestartOnFailure won't fire after kill otherwise: %s", xml)
+	}
+	if strings.Contains(xml, "<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>") {
+		t.Errorf("MultipleInstancesPolicy=IgnoreNew breaks RestartOnFailure auto-recovery (bug #2): %s", xml)
+	}
 }
 
 func TestBuildCreateXML_Weekly(t *testing.T) {
