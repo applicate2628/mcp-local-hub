@@ -64,3 +64,123 @@ export async function cleanBackups(): Promise<{ cleaned: number }> {
   });
   return await jsonOrThrow(res);
 }
+
+// Maintenance section helpers — Cleanup-5 per
+// docs/superpowers/specs/2026-05-06-cleanup-buttons-design.md.
+//
+// Each cleanup endpoint accepts the same body shape: apply + filter
+// flags. apply=false (or omitted) lists candidates without killing
+// (dry-run); apply=true returns the same list with kill_err populated
+// for any per-PID failures and counters for the summary.
+//
+// Codex Cloud bot P2 on PR #131 / kosyak
+// 2026-05-07-destructive-endpoint-with-unsafe-zero-value-default.md:
+// the prior wire used `dry_run` whose Go zero-value (false) inverted
+// safety polarity — `{}` body triggered the kill path. Switched to
+// `apply` so the zero-value path is safe.
+
+export type OrphanProcess = {
+  pid: number;
+  parent_pid: number;
+  server: string;
+  cmdline: string;
+  age_sec: number;
+  ram_bytes: number;
+  kill_err?: string;
+};
+
+export type LogWatcher = {
+  pid: number;
+  parent_pid: number;
+  parent_alive: boolean;
+  name: string;
+  age_sec: number;
+  cmdline: string;
+  kill_err?: string;
+};
+
+export type CleanupOrphansResponse = {
+  orphans: OrphanProcess[];
+  killed: number;
+  skipped: number;
+};
+
+export type CleanupLogWatchersResponse = {
+  watchers: LogWatcher[];
+  killed: number;
+  skipped: number;
+};
+
+export async function cleanupOrphans(apply: boolean): Promise<CleanupOrphansResponse> {
+  const res = await fetch("/api/cleanup/orphans", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ apply }),
+  });
+  return await jsonOrThrow(res);
+}
+
+export async function cleanupLogWatchers(
+  apply: boolean,
+  includeLive: boolean,
+): Promise<CleanupLogWatchersResponse> {
+  const res = await fetch("/api/cleanup/log-watchers", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ apply, include_live: includeLive }),
+  });
+  return await jsonOrThrow(res);
+}
+
+// stopAll wraps /api/stop-all (existing route in
+// internal/gui/servers.go) so the Maintenance "Stop all daemons"
+// button has a single import surface alongside the cleanup helpers.
+//
+// /api/stop-all returns HTTP 207 + per-daemon stop_results[*] on
+// partial failure, HTTP 200 on full success. The per-row shape is
+// `api.RestartResult` (internal/api/install.go:1623) which has JSON
+// tags `task_name` and `error` — NOT `name` and `err`.
+//
+// Codex Cloud bot P1 on PR #131 / kosyak
+// `2026-05-06-third-time-shipped-without-checking-json-tags.md`: the
+// prior "fix" used {name, err} from imagination; sr.err was always
+// undefined, partial failures rendered as "Stopped all". Field names
+// here are now verified against the Go struct's actual json tags.
+export type StopResult = { task_name: string; error: string };
+export type StopAllResponse = { stop_results: StopResult[] };
+
+export async function stopAllDaemons(): Promise<StopAllResponse> {
+  const res = await fetch("/api/stop-all", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  return (await jsonOrThrow(res)) as StopAllResponse;
+}
+
+// forceKillProbe / forceKillApply wrap the existing /api/force-kill/*
+// routes (internal/gui/force_kill.go). Probe is read-only and returns
+// the C1 Verdict struct as JSON; Apply runs the 3-part identity gate
+// and returns the post-kill Verdict.
+export async function forceKillProbe(): Promise<unknown> {
+  const res = await fetch("/api/force-kill/probe", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  return await jsonOrThrow(res);
+}
+
+export async function forceKillApply(): Promise<unknown> {
+  const res = await fetch("/api/force-kill", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  return await jsonOrThrow(res);
+}

@@ -5,6 +5,7 @@ const SECTION_ORDER: { id: Section; label: string }[] = [
   { id: "gui_server", label: "GUI server" },
   { id: "daemons", label: "Daemons" },
   { id: "backups", label: "Backups" },
+  { id: "maintenance", label: "Maintenance" },
   { id: "advanced", label: "Advanced" },
 ];
 

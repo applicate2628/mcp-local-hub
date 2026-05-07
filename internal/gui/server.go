@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -280,6 +281,35 @@ type secretsAPI interface {
 	Delete(name string, confirm bool) error
 }
 
+// cleanupAPI is the narrow interface the /api/cleanup/* routes need.
+// Wraps `internal/api/cleanup.go`'s API.CleanupOrphans so tests can
+// inject a fake without spinning up real Win32_Process scans.
+type cleanupAPI interface {
+	// CleanupOrphansSupported reports whether the underlying backend
+	// can run the orphan-MCP scan on this OS. Production checks
+	// runtime.GOOS; tests can return true unconditionally so the
+	// handler's JSON/auth/seam paths are exercised cross-platform.
+	// Codex Cloud bot P1 on PR #131 (commit 460e7ff) — moved here from
+	// a hard-coded handler check that short-circuited the test seam.
+	CleanupOrphansSupported() bool
+	CleanupOrphans(opts api.CleanupOpts) ([]api.OrphanProcess, error)
+	CleanupLogWatchers(opts api.LogWatcherCleanupOpts) ([]api.LogWatcher, error)
+}
+
+type realCleanupAPI struct{}
+
+func (realCleanupAPI) CleanupOrphansSupported() bool {
+	return runtime.GOOS == "windows"
+}
+
+func (realCleanupAPI) CleanupOrphans(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+	return api.NewAPI().CleanupOrphans(opts)
+}
+
+func (realCleanupAPI) CleanupLogWatchers(opts api.LogWatcherCleanupOpts) ([]api.LogWatcher, error) {
+	return api.NewAPI().CleanupLogWatchers(opts)
+}
+
 type realSecretsAPI struct{}
 
 func (realSecretsAPI) Init() (api.SecretsInitResult, error) { return api.NewAPI().SecretsInit() }
@@ -350,6 +380,7 @@ type Server struct {
 	secrets           secretsAPI
 	settings          settingsAPI
 	backups           backupsAPI
+	cleanup           cleanupAPI
 
 	// Weekly-schedule swap test seams (memo D8). Production: nil — the
 	// handler falls back to api.SwapWeeklyTrigger and a real
@@ -399,6 +430,7 @@ func NewServer(cfg Config) *Server {
 	s.secrets = realSecretsAPI{}
 	s.settings = realSettingsAPI{}
 	s.backups = realBackupsAPI{}
+	s.cleanup = realCleanupAPI{}
 	registerPingRoutes(s)
 	registerAssetRoutes(s)
 	registerScanRoutes(s)
@@ -418,6 +450,7 @@ func NewServer(cfg Config) *Server {
 	registerVersionRoutes(s)
 	registerDaemonsRoutes(s)
 	registerExportBundleRoutes(s)
+	registerCleanupRoutes(s)
 	registerForceKillRoutes(s)
 	return s
 }
