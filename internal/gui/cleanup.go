@@ -120,6 +120,15 @@ func (s *Server) cleanupOrphansHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Normalize nil to empty slice so the JSON wire shape is always
+	// `"orphans": []` not `"orphans": null`. Codex Cloud bot P2 on
+	// PR #131 commit 1f59a65: `CleanupOrphans` legitimately returns
+	// nil on no-candidates (and on non-Windows hosts), and forwarding
+	// nil through json.Marshal emits `null`, which TypeScript clients
+	// have to defensively check separately from empty-array `[]`.
+	if orphans == nil {
+		orphans = []api.OrphanProcess{}
+	}
 	resp := cleanupResponse{Orphans: orphans}
 	if req.Apply {
 		for _, o := range orphans {
@@ -198,6 +207,11 @@ func (s *Server) cleanupLogWatchersHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Same nil → [] normalization as cleanupOrphansHandler above so
+	// the wire shape never emits `"watchers": null`.
+	if watchers == nil {
+		watchers = []api.LogWatcher{}
+	}
 	resp := logWatcherResponse{Watchers: watchers}
 	if req.Apply {
 		for _, wch := range watchers {

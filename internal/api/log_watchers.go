@@ -2,7 +2,6 @@ package api
 
 import (
 	"bufio"
-	"encoding/csv"
 	"fmt"
 	"io"
 	"os"
@@ -333,8 +332,15 @@ func snapshotProcessesForWatcherScan() ([]processRow, error) {
 //
 //	  PID  PPID COMMAND        ELAPSED ARGS
 //	 1234   500 bash           00:01:23 /bin/bash -c "tail -F ...| grep ..."
+//
+// Codex Cloud bot P2 on PR #131 commit 1f59a65: without `-ww`, ps
+// truncates the ARGS column at the controlling terminal width (or
+// 80 cols if no tty). Watcher detection depends on finding `.scratch`
+// path substrings deep in `bash -c "tail -F /full/path/here"` argv,
+// which are exactly the strings ps would truncate. `-ww` widens
+// the column to unlimited on both Linux procps and BSD ps (macOS).
 func runPosixPS() ([]processRow, error) {
-	cmd := exec.Command("ps", "-e", "-o", "pid=,ppid=,comm=,etime=,args=")
+	cmd := exec.Command("ps", "-eww", "-o", "pid=,ppid=,comm=,etime=,args=")
 	process.NoConsole(cmd)
 	out, err := cmd.Output()
 	if err != nil {
@@ -473,35 +479,55 @@ func parseEtime(s string) int64 {
 
 // parseWmicProcessRows reads wmic-CSV (Windows snapshot) into the
 // neutral processRow shape. Reuses CIM_DATETIME via parseWmicDate().
+//
+// Codex Cloud bot 3 P1 findings on PR #131 commit 1f59a65 / kosyak
+// 2026-05-07-wmic-csv-parse-not-tolerant-shipped-parallel-mechanism.md:
+// the prior implementation used encoding/csv.Reader, which is RFC 4180
+// strict. wmic /format:csv violates RFC 4180 in three real-world ways:
+//
+//  1. Quotes inside quoted fields are NOT doubled (wmic predates the
+//     RFC). csv.Reader rejects with ErrBareQuote on those rows.
+//  2. wmic emits leading blank lines on some Windows versions; the
+//     prior loop treated blank as the header and lost colIdx entirely.
+//  3. csv.Reader.Read() returning err on a single malformed row caused
+//     return nil, err, killing the whole snapshot.
+//
+// Fix: line-based read + the existing tolerant splitCSVLine
+// (internal/api/processes.go:184), with per-row continue on errors,
+// blank-line skip, and "first non-blank line == header" gate.
 func parseWmicProcessRows(r io.Reader) ([]processRow, error) {
-	cr := csv.NewReader(r)
-	cr.FieldsPerRecord = -1
+	s := bufio.NewScanner(r)
+	s.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	var rows []processRow
-	header := true
-	colIdx := map[string]int{}
-	for {
-		rec, err := cr.Read()
-		if err == io.EOF {
-			break
+	var colIdx map[string]int
+	for s.Scan() {
+		line := s.Text()
+		if strings.TrimSpace(line) == "" {
+			// Skip leading and intra-stream blanks. wmic /format:csv
+			// emits a blank line before the header on some Windows
+			// versions; treating it as the header poisons colIdx.
+			continue
 		}
-		if err != nil {
-			return nil, err
-		}
-		if header {
-			for i, h := range rec {
+		fields := splitCSVLine(line)
+		if colIdx == nil {
+			// First non-blank line is the header.
+			colIdx = make(map[string]int, len(fields))
+			for i, h := range fields {
 				colIdx[strings.TrimSpace(h)] = i
 			}
-			header = false
 			continue
 		}
 		get := func(name string) string {
-			if i, ok := colIdx[name]; ok && i < len(rec) {
-				return rec[i]
+			if i, ok := colIdx[name]; ok && i < len(fields) {
+				return fields[i]
 			}
 			return ""
 		}
 		pid, err := strconv.Atoi(strings.TrimSpace(get("ProcessId")))
 		if err != nil {
+			// Malformed numeric PID: skip just this row, not the
+			// whole snapshot. One bad row out of thousands shouldn't
+			// block the cleanup feature.
 			continue
 		}
 		ppid, _ := strconv.Atoi(strings.TrimSpace(get("ParentProcessId")))
@@ -521,7 +547,7 @@ func parseWmicProcessRows(r io.Reader) ([]processRow, error) {
 			StartTime: startTime,
 		})
 	}
-	return rows, nil
+	return rows, s.Err()
 }
 
 func basenameFromCmdline(cmd string) string {

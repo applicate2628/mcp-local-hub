@@ -281,3 +281,91 @@ func TestCleanupLogWatchers_FailClosedOnZeroStartTime(t *testing.T) {
 		t.Errorf("expected start-time-unknown skip, got KillErr=%q want %q", got[0].KillErr, want)
 	}
 }
+
+// TestParseWmicProcessRows_LeadingBlankLine is the regression test
+// for Codex Cloud bot P1 on PR #131 commit 1f59a65 / kosyak
+// 2026-05-07-wmic-csv-parse-not-tolerant-shipped-parallel-mechanism.md:
+// wmic /format:csv on some Windows versions emits a blank line before
+// the header. The prior csv.Reader-based parser treated that blank
+// record AS the header, leaving colIdx empty so every subsequent
+// per-row column lookup returned "" and processRow.Name/Cmdline were
+// always empty. The line-based rewrite skips blanks before the
+// "first non-blank line == header" gate.
+func TestParseWmicProcessRows_LeadingBlankLine(t *testing.T) {
+	// Three blank lines, then header, then two rows. Paths kept
+	// space-free because basenameFromCmdline splits on first space
+	// when the path isn't surrounded by inner quotes (existing helper
+	// semantics, unchanged here — see processes.go:184 and the
+	// basenameFromCmdline contract).
+	sample := "\n\n\nNode,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize\n" +
+		`HOST,"C:\Apps\app.exe --flag",20260507030000.000000+000,500,1234,1048576` + "\n" +
+		`HOST,"powershell.exe -NoProfile",20260507031500.000000+000,500,5678,2097152` + "\n"
+	rows, err := parseWmicProcessRows(strings.NewReader(sample))
+	if err != nil {
+		t.Fatalf("parseWmicProcessRows: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2 (blank lines must be skipped before header); got %+v", len(rows), rows)
+	}
+	if rows[0].PID != 1234 {
+		t.Errorf("row 0 PID = %d, want 1234 (header parse must consume the column-name line, not a blank)", rows[0].PID)
+	}
+	if rows[0].Name != "app.exe" {
+		t.Errorf("row 0 Name = %q, want app.exe (basenameFromCmdline of C:\\Apps\\app.exe)", rows[0].Name)
+	}
+	if rows[1].PID != 5678 {
+		t.Errorf("row 1 PID = %d, want 5678", rows[1].PID)
+	}
+}
+
+// TestParseWmicProcessRows_UnescapedQuotesInCommandLine verifies that
+// rows with quotes inside quoted fields (which wmic does NOT escape per
+// RFC 4180) parse without aborting the snapshot. Codex Cloud bot P1 on
+// PR #131 commit 1f59a65: the prior csv.Reader rejected such rows with
+// ErrBareQuote and `return nil, err` killed the entire snapshot.
+func TestParseWmicProcessRows_UnescapedQuotesInCommandLine(t *testing.T) {
+	// The middle row carries a CommandLine with an unbalanced literal
+	// quote that strict RFC 4180 csv.Reader rejects but the tolerant
+	// splitCSVLine handles (simple state machine that toggles inQuote
+	// on every quote regardless of escaping).
+	sample := "Node,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize\n" +
+		`HOST,"normal.exe",20260507030000.000000+000,500,1000,1024` + "\n" +
+		`HOST,"weird.exe --json={"key":"value"}",20260507030500.000000+000,500,2000,2048` + "\n" +
+		`HOST,"trailing.exe",20260507031000.000000+000,500,3000,4096` + "\n"
+	rows, err := parseWmicProcessRows(strings.NewReader(sample))
+	if err != nil {
+		t.Fatalf("parseWmicProcessRows must NOT error on unescaped quotes; got: %v", err)
+	}
+	if len(rows) < 2 {
+		t.Fatalf("rows = %d, want >= 2 (at minimum the well-formed first and last rows must survive); got %+v", len(rows), rows)
+	}
+	pids := make(map[int]bool)
+	for _, r := range rows {
+		pids[r.PID] = true
+	}
+	if !pids[1000] || !pids[3000] {
+		t.Errorf("expected well-formed rows (PID 1000 and 3000) to survive; got pids=%v", pids)
+	}
+}
+
+// TestParseWmicProcessRows_MalformedPIDRowSkipped verifies that one
+// row with a non-numeric ProcessId field is `continue`'d, not the
+// whole-snapshot `return nil, err` the prior code did. Codex Cloud
+// bot P1 on PR #131 commit 1f59a65.
+func TestParseWmicProcessRows_MalformedPIDRowSkipped(t *testing.T) {
+	sample := "Node,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize\n" +
+		`HOST,"good.exe",20260507030000.000000+000,500,1000,1024` + "\n" +
+		`HOST,"bad.exe",20260507030500.000000+000,500,NOTANUMBER,2048` + "\n" +
+		`HOST,"alsogood.exe",20260507031000.000000+000,500,2000,4096` + "\n"
+	rows, err := parseWmicProcessRows(strings.NewReader(sample))
+	if err != nil {
+		t.Fatalf("parseWmicProcessRows: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2 (good rows survive, bad row skipped, snapshot not aborted); got %+v", len(rows), rows)
+	}
+	if rows[0].PID != 1000 || rows[1].PID != 2000 {
+		t.Errorf("PIDs = %d/%d, want 1000/2000 (the malformed-PID row must be skipped between them)",
+			rows[0].PID, rows[1].PID)
+	}
+}
