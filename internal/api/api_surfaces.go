@@ -283,57 +283,23 @@ type OwnedXMLValidator interface {
 	IsOwnedAndValid(taskName string) bool
 }
 
-// ownedXMLValidatorImpl is the snapshot-bound stub. It answers
-// "is this task structurally part of the snapshot's ownership set?"
-// — i.e. either declared in ManifestDaemons (global daemon) or
-// registered in WorkspaceTasksByKey (workspace-scoped lazy proxy).
-//
-// TODO(task 6): replace the body of IsOwnedAndValid with the full XML
-// export/parse/limits check defined in §5 v6 + v9 §47 (DOCTYPE rejection
-// + depth cap + 64KB+1 limit reader + 2s schtasks deadline + name +
-// command + args + principal assertions). Keep this method shape so the
-// interface contract is stable.
-type ownedXMLValidatorImpl struct {
-	snap OwnershipSnapshot
-}
-
-// IsOwnedAndValid for the snapshot-bound stub: a task is "owned" if
-// either (a) the snapshot's PortMap declares an expected port for it
-// (covers global daemons and workspace tasks alike) or (b) its name
-// pattern resolves to a (server, daemon) pair where ManifestDaemons
-// declares the daemon. Task 6 will tighten this with the XML check.
-func (v *ownedXMLValidatorImpl) IsOwnedAndValid(taskName string) bool {
-	// Fast path: the snapshot's PortMap was populated at snapshot time
-	// from the same manifest pass that drove install. Presence in PortMap
-	// is the strongest available structural signal until Task 6 lands.
-	if _, ok := v.snap.PortMap[taskName]; ok {
-		return true
-	}
-	// Workspace-scoped tasks may have empty PortMap entries (port lives
-	// in the registry, not the manifest). Fall back to the per-key map.
-	for _, registered := range v.snap.WorkspaceTasksByKey {
-		if registered == taskName {
-			return true
-		}
-	}
-	// Last fall-back: parse the task name and consult ManifestDaemons.
-	srv, dmn := parseTaskName(taskName)
-	if srv == "" {
-		return false
-	}
-	if daemons, ok := v.snap.ManifestDaemons[srv]; ok {
-		if daemons[dmn] {
-			return true
-		}
-	}
-	return false
-}
-
 // NewOwnedXMLValidatorFromSnapshot constructs a snapshot-bound validator.
+// Per Task 6 (watchdog_xml_validator.go) the returned validator runs the
+// FULL hardened check chain on each call: schtasks /Query /XML with a 2s
+// deadline, 64KB+1 size cap, byte-level DOCTYPE rejection, depth cap (32),
+// strict decoder with Entity=nil + CharsetReader=nil, command / principal /
+// run-level / logon-type field assertions, and structural ownership
+// (manifest server+daemon or workspace registry TaskName byte-match).
+//
 // The snap argument is captured by reference; callers must NOT mutate it
 // after passing (LoadOwnershipSnapshot already returns a defensive copy).
+//
+// Tests in watchdog_xml_validator_test.go inject the schtasksQueryXMLFn,
+// canonicalMcphubPathFn, and currentWindowsUserFn seams to drive
+// deterministic XML payloads without touching the host's real Task
+// Scheduler.
 func NewOwnedXMLValidatorFromSnapshot(snap OwnershipSnapshot) OwnedXMLValidator {
-	return &ownedXMLValidatorImpl{snap: snap}
+	return &ownedXMLValidator{snap: snap}
 }
 
 // ---------------------------------------------------------------------------

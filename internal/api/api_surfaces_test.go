@@ -541,11 +541,13 @@ func TestSelfQuarantineReason_SuggestedAction(t *testing.T) {
 	}
 }
 
-// TestNewOwnedXMLValidatorFromSnapshot_StubInterface verifies the constructor
-// returns a non-nil OwnedXMLValidator wrapping the snapshot. Real validation
-// logic lands in Task 6 (ValidateOwnedTaskXML); for now the stub at minimum
-// reports that a snapshot-known task is "owned" structurally.
-func TestNewOwnedXMLValidatorFromSnapshot_StubInterface(t *testing.T) {
+// TestNewOwnedXMLValidatorFromSnapshot_NonNil verifies the constructor
+// returns a non-nil OwnedXMLValidator wrapping the snapshot. Behavioural
+// coverage of the full Task 6 validation chain (schtasks query, XML
+// hardening, structural ownership) lives in watchdog_xml_validator_test.go;
+// this test only smokes the constructor + interface satisfaction so the
+// Task 0 surface contract stays loud against future refactors.
+func TestNewOwnedXMLValidatorFromSnapshot_NonNil(t *testing.T) {
 	snap := OwnershipSnapshot{
 		ManifestServers: map[string]bool{"time": true},
 		ManifestDaemons: map[string]map[string]bool{"time": {"default": true}},
@@ -556,18 +558,17 @@ func TestNewOwnedXMLValidatorFromSnapshot_StubInterface(t *testing.T) {
 	if v == nil {
 		t.Fatal("NewOwnedXMLValidatorFromSnapshot returned nil")
 	}
-	// A snapshot-known task SHOULD pass the structural check (ownership-only;
-	// real XML validation lands in Task 6). An unknown task must NOT.
-	if !v.IsOwnedAndValid("\\mcp-local-hub-time-default") {
-		t.Errorf("validator: snapshot-known task should be owned, got false")
-	}
-	if v.IsOwnedAndValid("\\mcp-local-hub-orphan-server-orphan-daemon") {
-		t.Errorf("validator: unknown task should NOT be owned, got true")
+	// A task that is definitively NOT under our prefix must short-circuit
+	// false without consulting schtasks (ErrNotOwnedTask in the underlying
+	// validate path). This is the only deterministic check we can make
+	// without driving the schtasks seam — the seam is exercised end-to-end
+	// in watchdog_xml_validator_test.go.
+	if v.IsOwnedAndValid("\\some-foreign-task") {
+		t.Errorf("validator: foreign task name must not be valid, got true")
 	}
 }
 
-// Compile-time assertion: the registry impl and validator impl satisfy the
-// declared interfaces. If a future refactor renames a method, this test
-// fails to compile rather than silently skipping coverage.
+// Compile-time assertion: the registry impl satisfies the declared
+// interface. The OwnedXMLValidator assertion lives in
+// watchdog_xml_validator.go (Task 6 owns the impl type now).
 var _ DaemonRegistry = (*daemonRegistryImpl)(nil)
-var _ OwnedXMLValidator = (*ownedXMLValidatorImpl)(nil)
