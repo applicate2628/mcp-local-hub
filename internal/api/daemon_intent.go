@@ -557,10 +557,6 @@ func isUTCInstant(raw []byte, taskName string) bool {
 // 1KB intent gate) is surfaced to the caller; install/stop are
 // expected to fail closed per §51.
 func (a *API) WriteDaemonIntent(taskName string, intent DaemonIntent, who string) error {
-	// v9 identity oversize rejection (plan §35 + Task 2.1).
-	if len(taskName) > IdentityFieldByteCap {
-		return ErrEntryOversize
-	}
 	if len(who) > IdentityFieldByteCap {
 		return ErrEntryOversize
 	}
@@ -569,11 +565,20 @@ func (a *API) WriteDaemonIntent(taskName string, intent DaemonIntent, who string
 	// canonical leading-backslash form BEFORE any persistence work so every
 	// intent record lands on the same key shape that recovery.go indexes
 	// (`intent.Tasks[row.TaskName]` where row.TaskName comes from Status()
-	// with the leading "\"). The cap check above ran on the caller-supplied
-	// name; the normalized key is at most one byte longer than that and we
-	// already capped at 1KB, so a 1-byte prefix cannot exceed any meaningful
-	// downstream limit.
+	// with the leading "\").
+	//
+	// PR #135 round 3 P2: cap-check on the CANONICAL key, not the raw
+	// input. canonicalIntentTaskKey can prepend exactly one byte ("\\"),
+	// so a bare 1024-byte input becomes a 1025-byte key — that key flows
+	// to the audit log, where AuditIdentityFieldByteCap (intent_audit.go)
+	// rejects it via ErrIdentityOversize. WriteDaemonIntent ignores audit
+	// append errors, so the audit record was being silently dropped for
+	// max-length valid task identifiers. Capping the canonical form
+	// keeps disk + audit storage symmetric on a single 1KB ceiling.
 	taskName = canonicalIntentTaskKey(taskName)
+	if len(taskName) > IdentityFieldByteCap {
+		return ErrEntryOversize
+	}
 
 	dir, err := DaemonStateDir()
 	if err != nil {
@@ -637,9 +642,6 @@ func (a *API) WriteDaemonIntent(taskName string, intent DaemonIntent, who string
 // clear (entry missing or map empty) does NOT emit an audit entry
 // since there is nothing to record.
 func (a *API) ClearDaemonIntent(taskName string, who string) error {
-	if len(taskName) > IdentityFieldByteCap {
-		return ErrEntryOversize
-	}
 	if len(who) > IdentityFieldByteCap {
 		return ErrEntryOversize
 	}
@@ -647,7 +649,14 @@ func (a *API) ClearDaemonIntent(taskName string, who string) error {
 	// Codex deep-sec PR #135 Finding 1: same normalization as WriteDaemonIntent
 	// so a clear-by-bare-form locates the canonical leading-backslash entry
 	// instead of leaving the canonical record untouched (silent no-op).
+	// PR #135 round 3 P2: cap-check on the CANONICAL key (one byte longer
+	// in the worst case) so disk + audit storage share one 1KB ceiling
+	// and the audit record can never be silently dropped on edge-case
+	// max-length names.
 	taskName = canonicalIntentTaskKey(taskName)
+	if len(taskName) > IdentityFieldByteCap {
+		return ErrEntryOversize
+	}
 
 	dir, err := DaemonStateDir()
 	if err != nil {

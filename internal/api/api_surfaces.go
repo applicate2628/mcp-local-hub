@@ -36,7 +36,6 @@ import (
 	"strings"
 	"time"
 
-	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/scheduler"
 )
 
@@ -355,13 +354,16 @@ func (a *API) LoadOwnershipSnapshotChecked() (OwnershipSnapshot, error) {
 // errors are absorbed per-entry and never propagate (see comment on
 // LoadOwnershipSnapshotChecked for the asymmetry rationale).
 //
-// Workspace-registry failures are scoped: they propagate only when the
-// installation actually has at least one workspace-scoped manifest
-// (Codex bot P2 on PR #135 round 2). On a global-only installation
-// (no workspace-scoped servers in the manifest set), registry data is
-// architecturally irrelevant — fail-closed there would block watchdog
-// auto-recovery for unrelated global daemons whenever DefaultRegistryPath
-// errored (e.g. service accounts without a resolvable home dir).
+// Workspace-registry failures are scoped: they propagate only when this
+// host actually has at least one workspace-scoped daemon installed in
+// Task Scheduler (Codex bot P1 on PR #135 round 3). The earlier
+// catalog-based gate (round 2) was too broad — every shipped manifest
+// catalog includes the `mcp-language-server` workspace-scoped entry,
+// so a global-only deployment that never installed any lazy-proxy
+// task still tripped the fail-closed path on every watchdog tick
+// whenever DefaultRegistryPath / reg.Load errored. The installed-task
+// gate restricts fail-closed to hosts that genuinely depend on
+// registry data while keeping global-only hosts auto-recoverable.
 func (a *API) loadOwnershipSnapshotInternal() (OwnershipSnapshot, error) {
 	snap := OwnershipSnapshot{
 		ManifestServers:     make(map[string]bool),
@@ -371,8 +373,10 @@ func (a *API) loadOwnershipSnapshotInternal() (OwnershipSnapshot, error) {
 		SnapshottedAt:       time.Now().UTC(),
 	}
 
-	// Manifest set + per-server daemons + per-task PortMap.
-	hasWorkspaceScoped := false
+	// Manifest set + per-server daemons + per-task PortMap. The manifest
+	// catalog drives ManifestServers/ManifestDaemons/PortMap; the
+	// workspace-scoped fail-closed gate is decided separately below
+	// from installed-task observation, NOT from this catalog walk.
 	names, _ := listManifestNamesEmbedFirst()
 	for _, name := range names {
 		data, err := loadManifestYAMLEmbedFirst(name)
@@ -384,9 +388,6 @@ func (a *API) loadOwnershipSnapshotInternal() (OwnershipSnapshot, error) {
 			continue
 		}
 		snap.ManifestServers[m.Name] = true
-		if m.Kind == config.KindWorkspaceScoped {
-			hasWorkspaceScoped = true
-		}
 		inner := make(map[string]bool, len(m.Daemons))
 		for _, d := range m.Daemons {
 			inner[d.Name] = true
@@ -398,12 +399,20 @@ func (a *API) loadOwnershipSnapshotInternal() (OwnershipSnapshot, error) {
 		snap.ManifestDaemons[m.Name] = inner
 	}
 
+	// PR #135 round 3 P1: detect workspace-scoped dependence from
+	// installed scheduler tasks (lazy-proxy `mcp-local-hub-lsp-*`),
+	// not from the manifest catalog. The fail-closed gate fires only
+	// for hosts that actually run lazy proxies — global-only hosts
+	// keep watchdog auto-recovery on registry errors as intended.
+	hasWorkspaceScoped := hasInstalledWorkspaceScopedDaemon()
+
 	// Workspace registry: task name keyed by (workspace, language).
 	// Path-resolve failures and load failures propagate as errors when
 	// the installation depends on workspace data (PR #135 Finding 4 +
-	// PR #135 round 2 P2 scope-narrowing). Global-only installs (no
-	// workspace-scoped manifests) get an empty workspace section
-	// silently — registry state cannot affect them.
+	// PR #135 round 3 P1 installed-task gate). Hosts with no installed
+	// lazy-proxy tasks (no `mcp-local-hub-lsp-*` in scheduler) get an
+	// empty workspace section silently — registry state cannot affect
+	// them.
 	regPath, regErr := DefaultRegistryPath()
 	if regErr != nil {
 		if hasWorkspaceScoped {
@@ -810,6 +819,41 @@ func newScheduler() (scheduler.Scheduler, error) {
 		return schedulerFactoryFn()
 	}
 	return scheduler.New()
+}
+
+// lazyProxyTaskNamePrefix is the bare (no leading-backslash) prefix
+// for installed workspace-scoped lazy-proxy tasks. The Windows scheduler
+// stores the canonical name with a leading "\" but List filters on the
+// trim-prefix form (see scheduler_windows.go::List + install.go:1650).
+const lazyProxyTaskNamePrefix = "mcp-local-hub-lsp-"
+
+// hasInstalledWorkspaceScopedDaemon reports whether at least one
+// `mcp-local-hub-lsp-*` task is currently installed in the host
+// scheduler. This is the installed-task gate per Codex bot PR #135
+// round 3 P1 — the watchdog tick fail-closes on workspace-registry
+// errors only for hosts that actually depend on the registry.
+//
+// Failure semantics: if the scheduler factory cannot produce a
+// scheduler (Linux/macOS where the production factory returns
+// "not implemented", or any transient construction failure) OR
+// the List call itself errors, return false. Returning false here
+// is the conservative direction: the watchdog already has nothing
+// it can do without a working scheduler, and downgrading the gate
+// to fail-benignly on registry errors gives global-only hosts the
+// auto-recovery the bot requested. The alternative ("fail closed
+// on scheduler probe failure") would be a strict regression
+// relative to round 2 — registry errors would still abort the
+// tick on hosts that have no lazy-proxy tasks at all.
+func hasInstalledWorkspaceScopedDaemon() bool {
+	sch, err := newScheduler()
+	if err != nil {
+		return false
+	}
+	tasks, err := sch.List(lazyProxyTaskNamePrefix)
+	if err != nil {
+		return false
+	}
+	return len(tasks) > 0
 }
 
 // appendAudit is the package-level audit dispatcher. Routes through

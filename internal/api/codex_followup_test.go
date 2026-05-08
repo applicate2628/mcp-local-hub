@@ -40,6 +40,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/scheduler"
 )
 
 // ---------------------------------------------------------------------------
@@ -303,9 +305,15 @@ func TestStopWithOpts_RegistryLoadFails_AuditFailedNoKill(t *testing.T) {
 // Checked variant of LoadOwnershipSnapshot returns the error instead of
 // silently degrading to a partial snapshot. This lets the watchdog driver
 // refuse the tick rather than make decisions on incomplete ownership data.
+//
+// PR #135 round 3 P1: the fail-closed gate is keyed on installed lazy-
+// proxy tasks (`mcp-local-hub-lsp-*`) instead of the manifest catalog,
+// so this test now stubs the scheduler factory with one synthetic
+// installed task to drive the gate deterministically.
 func TestLoadOwnershipSnapshotChecked_RegistryLoadError_ReturnsError(t *testing.T) {
 	a := NewAPI()
 	daemonIntentTestHelper(t)
+	installLazyProxySchedulerStub(t, 1)
 	regPath := pointRegistryAtTempDir(t)
 	if err := os.WriteFile(regPath, []byte("this: is: not\n  - valid: ["), 0o600); err != nil {
 		t.Fatalf("seed corrupt registry: %v", err)
@@ -415,39 +423,96 @@ func TestStopTaskNamesForServer_Workspace_RegistryLoadFails_PreservesWrap(t *tes
 }
 
 // ---------------------------------------------------------------------------
-// PR #135 round 2 P2 — LoadOwnershipSnapshotChecked must scope fail-closed
-// to installations that actually depend on workspace registry data. Global-
-// only installations (no workspace-scoped manifests) must tolerate registry
-// path-resolve / load failures benignly so unrelated global daemons keep
-// auto-recovery wiring on hosts where the registry path is unreachable
-// (service accounts without a resolvable home dir, etc.).
+// PR #135 round 3 P1 — LoadOwnershipSnapshotChecked must scope fail-closed
+// to hosts that actually have at least one `mcp-local-hub-lsp-*` task
+// installed, NOT to whatever workspace-scoped manifests ship in the catalog.
+// The catalog gate (round 2) was too broad: every shipped build includes
+// the `mcp-language-server` workspace-scoped manifest, so global-only
+// deployments still tripped fail-closed on every watchdog tick whenever
+// DefaultRegistryPath / reg.Load failed.
 // ---------------------------------------------------------------------------
 
-// TestLoadOwnershipSnapshotChecked_GlobalOnly_RegistryPathFailsBenignly
-// verifies the round-2 P2 scope narrowing: when the manifest set has zero
-// workspace-scoped servers, a DefaultRegistryPath resolution failure must
-// not propagate. The watchdog's runWatchdogOnceInner is otherwise broken
-// by an unreachable registry path on global-only hosts.
-func TestLoadOwnershipSnapshotChecked_GlobalOnly_RegistryPathFailsBenignly(t *testing.T) {
+// schedulerWithLazyProxyTasks returns a scheduler.Scheduler stub whose
+// List(prefix) call returns nLazyProxy synthetic lazy-proxy entries
+// when prefix == "mcp-local-hub-lsp-", and nil otherwise. All other
+// methods return errNotImplementedForTest. Used by the round-3 P1
+// tests to drive the installed-task gate deterministically without
+// depending on the developer's host scheduler state.
+type schedulerWithLazyProxyTasks struct {
+	nLazyProxy int
+	listErr    error
+}
+
+func (s *schedulerWithLazyProxyTasks) Create(scheduler.TaskSpec) error {
+	return errNotImplementedForTest
+}
+func (s *schedulerWithLazyProxyTasks) Delete(string) error { return errNotImplementedForTest }
+func (s *schedulerWithLazyProxyTasks) Run(string) error    { return errNotImplementedForTest }
+func (s *schedulerWithLazyProxyTasks) Stop(string) error   { return errNotImplementedForTest }
+func (s *schedulerWithLazyProxyTasks) Status(string) (scheduler.TaskStatus, error) {
+	return scheduler.TaskStatus{}, errNotImplementedForTest
+}
+func (s *schedulerWithLazyProxyTasks) List(prefix string) ([]scheduler.TaskStatus, error) {
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
+	if prefix != lazyProxyTaskNamePrefix {
+		return nil, nil
+	}
+	out := make([]scheduler.TaskStatus, 0, s.nLazyProxy)
+	for i := 0; i < s.nLazyProxy; i++ {
+		out = append(out, scheduler.TaskStatus{Name: fmt.Sprintf("\\mcp-local-hub-lsp-%08x-go", i)})
+	}
+	return out, nil
+}
+func (s *schedulerWithLazyProxyTasks) ExportXML(string) ([]byte, error) {
+	return nil, errNotImplementedForTest
+}
+func (s *schedulerWithLazyProxyTasks) ImportXML(string, []byte) error {
+	return errNotImplementedForTest
+}
+
+// installLazyProxySchedulerStub patches schedulerFactoryFn to return a
+// stub whose List("mcp-local-hub-lsp-") yields nLazyProxy entries.
+// Restores on cleanup.
+func installLazyProxySchedulerStub(t *testing.T, nLazyProxy int) {
+	t.Helper()
+	stub := &schedulerWithLazyProxyTasks{nLazyProxy: nLazyProxy}
+	prev := schedulerFactoryFn
+	schedulerFactoryFn = func() (scheduler.Scheduler, error) { return stub, nil }
+	t.Cleanup(func() { schedulerFactoryFn = prev })
+}
+
+// TestLoadOwnershipSnapshotChecked_NoLspTasksInstalled_RegistryPathFailsBenignly
+// is the round-3 P1 primary case: the catalog ships at least one
+// workspace-scoped manifest (mcp-language-server) but the host has no
+// `mcp-local-hub-lsp-*` task installed, so the watchdog must NOT fail
+// closed when DefaultRegistryPath errors. Without this, every global-
+// only deployment with a service-account-style unreachable home dir
+// would block recovery for unrelated global daemons.
+func TestLoadOwnershipSnapshotChecked_NoLspTasksInstalled_RegistryPathFailsBenignly(t *testing.T) {
 	a := NewAPI()
 	daemonIntentTestHelper(t)
 
-	// Seed a global-only manifest. listManifestNamesEmbedFirst will see
-	// just this one entry under the override and never report any
-	// workspace-scoped server, so registry-load failure must be benign.
+	// Catalog still contains the workspace-scoped server (this is the
+	// realistic shipped-build state — catalog catalog cannot be opted
+	// out of). The gate must look at INSTALLED tasks only.
 	manifestDir := t.TempDir()
 	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", manifestDir)
-	subdir := filepath.Join(manifestDir, "global-only")
+	subdir := filepath.Join(manifestDir, "workspace-srv")
 	if err := os.MkdirAll(subdir, 0o700); err != nil {
 		t.Fatalf("mkdir manifest dir: %v", err)
 	}
-	body := "name: global-only\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9210\n"
+	body := "name: workspace-srv\nkind: workspace-scoped\ntransport: stdio-bridge\ncommand: workspace-srv\nport_pool: {start: 9300, end: 9399}\nlanguages:\n  - name: go\n    backend: gopls-mcp\n    transport: stdio\n    lsp_command: gopls\n"
 	if err := os.WriteFile(filepath.Join(subdir, "manifest.yaml"), []byte(body), 0o600); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
 
-	// Force DefaultRegistryPath to error — exactly the production scenario
-	// the bot flagged (service account without home dir).
+	// Empty scheduler — zero installed lazy-proxy tasks.
+	installLazyProxySchedulerStub(t, 0)
+
+	// Force DefaultRegistryPath to error — the production scenario the
+	// bot flagged (service account without home dir).
 	sentinel := errors.New("synthetic resolve failure")
 	prev := defaultRegistryPathFn
 	defaultRegistryPathFn = func() (string, error) { return "", sentinel }
@@ -455,37 +520,41 @@ func TestLoadOwnershipSnapshotChecked_GlobalOnly_RegistryPathFailsBenignly(t *te
 
 	snap, err := a.LoadOwnershipSnapshotChecked()
 	if err != nil {
-		t.Fatalf("LoadOwnershipSnapshotChecked (global-only host, registry path fails): want nil error, got %v", err)
+		t.Fatalf("LoadOwnershipSnapshotChecked (no lsp tasks, registry path fails): want nil error, got %v", err)
 	}
-	if !snap.ManifestServers["global-only"] {
-		t.Errorf("expected global-only server present in snapshot.ManifestServers, got %+v", snap.ManifestServers)
+	if !snap.ManifestServers["workspace-srv"] {
+		t.Errorf("expected workspace-srv server present in snapshot.ManifestServers (catalog still walked), got %+v", snap.ManifestServers)
 	}
 	if len(snap.WorkspaceTasksByKey) != 0 {
 		t.Errorf("WorkspaceTasksByKey: want empty, got %+v", snap.WorkspaceTasksByKey)
 	}
 }
 
-// TestLoadOwnershipSnapshotChecked_WorkspaceScoped_RegistryPathFailsClosed
-// is the safety counterpart: when the manifest set DOES include at least
-// one workspace-scoped server, registry path-resolve failure must still
-// propagate (Finding 4 contract preserved) — fail-closed so the watchdog
-// refuses the tick rather than make orphan/lazy-proxy classifications on
-// partial ownership data.
-func TestLoadOwnershipSnapshotChecked_WorkspaceScoped_RegistryPathFailsClosed(t *testing.T) {
+// TestLoadOwnershipSnapshotChecked_LspTaskInstalled_RegistryPathFailsClosed
+// is the round-3 P1 safety counterpart: when ≥1 `mcp-local-hub-lsp-*`
+// task IS installed, registry path-resolve failure must propagate as
+// before (Finding 4 contract preserved) — fail-closed so the watchdog
+// refuses the tick rather than make orphan/lazy-proxy classifications
+// on partial ownership data.
+func TestLoadOwnershipSnapshotChecked_LspTaskInstalled_RegistryPathFailsClosed(t *testing.T) {
 	a := NewAPI()
 	daemonIntentTestHelper(t)
 
+	// Catalog content does not matter for the new gate, but provide a
+	// realistic shape so ManifestServers is non-empty.
 	manifestDir := t.TempDir()
 	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", manifestDir)
 	subdir := filepath.Join(manifestDir, "workspace-srv")
 	if err := os.MkdirAll(subdir, 0o700); err != nil {
 		t.Fatalf("mkdir manifest dir: %v", err)
 	}
-	// Workspace-scoped manifest exercises the fail-closed gate.
 	body := "name: workspace-srv\nkind: workspace-scoped\ntransport: stdio-bridge\ncommand: workspace-srv\nport_pool: {start: 9300, end: 9399}\nlanguages:\n  - name: go\n    backend: gopls-mcp\n    transport: stdio\n    lsp_command: gopls\n"
 	if err := os.WriteFile(filepath.Join(subdir, "manifest.yaml"), []byte(body), 0o600); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
+
+	// Exactly one installed lazy-proxy task — the gate must trip.
+	installLazyProxySchedulerStub(t, 1)
 
 	sentinel := errors.New("synthetic resolve failure")
 	prev := defaultRegistryPathFn
@@ -494,17 +563,18 @@ func TestLoadOwnershipSnapshotChecked_WorkspaceScoped_RegistryPathFailsClosed(t 
 
 	_, err := a.LoadOwnershipSnapshotChecked()
 	if err == nil {
-		t.Fatal("LoadOwnershipSnapshotChecked (workspace-scoped present, registry path fails): want non-nil error to fail closed, got nil")
+		t.Fatal("LoadOwnershipSnapshotChecked (lsp task installed, registry path fails): want non-nil error to fail closed, got nil")
 	}
 	if !errors.Is(err, sentinel) {
 		t.Errorf("error chain: want sentinel via errors.Is, got %v", err)
 	}
 }
 
-// TestLoadOwnershipSnapshotChecked_GlobalOnly_RegistryLoadFailsBenignly
-// covers the symmetric path: registry path resolves, but the file itself
-// is unparseable. Global-only host: must tolerate the load error.
-func TestLoadOwnershipSnapshotChecked_GlobalOnly_RegistryLoadFailsBenignly(t *testing.T) {
+// TestLoadOwnershipSnapshotChecked_NoLspTasksInstalled_RegistryLoadFailsBenignly
+// covers the symmetric load-error path: the registry path resolves but
+// the file itself is unparseable. With zero installed lazy-proxy tasks,
+// the load failure must be tolerated.
+func TestLoadOwnershipSnapshotChecked_NoLspTasksInstalled_RegistryLoadFailsBenignly(t *testing.T) {
 	a := NewAPI()
 	daemonIntentTestHelper(t)
 
@@ -519,6 +589,8 @@ func TestLoadOwnershipSnapshotChecked_GlobalOnly_RegistryLoadFailsBenignly(t *te
 		t.Fatalf("write manifest: %v", err)
 	}
 
+	installLazyProxySchedulerStub(t, 0)
+
 	regPath := pointRegistryAtTempDir(t)
 	if err := os.WriteFile(regPath, []byte("this: is: not\n  - valid: ["), 0o600); err != nil {
 		t.Fatalf("seed corrupt registry: %v", err)
@@ -526,10 +598,45 @@ func TestLoadOwnershipSnapshotChecked_GlobalOnly_RegistryLoadFailsBenignly(t *te
 
 	snap, err := a.LoadOwnershipSnapshotChecked()
 	if err != nil {
-		t.Fatalf("LoadOwnershipSnapshotChecked (global-only host, registry load fails): want nil error, got %v", err)
+		t.Fatalf("LoadOwnershipSnapshotChecked (no lsp tasks, registry load fails): want nil error, got %v", err)
 	}
 	if !snap.ManifestServers["global-only"] {
 		t.Errorf("expected global-only present in snapshot, got %+v", snap.ManifestServers)
+	}
+}
+
+// TestHasInstalledWorkspaceScopedDaemon_SchedulerListErrorTreatedAsAbsent
+// pins down the helper's scheduler-error contract: a List failure (e.g.
+// schtasks transient error) must collapse to "no installed task" rather
+// than fail-closed on the watchdog tick. The watchdog already cannot
+// run without a working scheduler downstream, so adding a separate
+// fail-closed path here would only block recovery for global daemons
+// the watchdog could otherwise revive once the transient clears.
+func TestHasInstalledWorkspaceScopedDaemon_SchedulerListErrorTreatedAsAbsent(t *testing.T) {
+	stub := &schedulerWithLazyProxyTasks{listErr: errors.New("synthetic schtasks failure")}
+	prev := schedulerFactoryFn
+	schedulerFactoryFn = func() (scheduler.Scheduler, error) { return stub, nil }
+	t.Cleanup(func() { schedulerFactoryFn = prev })
+
+	if hasInstalledWorkspaceScopedDaemon() {
+		t.Error("hasInstalledWorkspaceScopedDaemon: want false on List error, got true")
+	}
+}
+
+// TestHasInstalledWorkspaceScopedDaemon_SchedulerFactoryErrorTreatedAsAbsent
+// covers the symmetric construction-failure path. The production factory
+// returns a "not implemented" error on Linux/macOS; the gate must read
+// that as "no installed lazy proxies on this host" rather than stalling
+// the watchdog tick on a registry error.
+func TestHasInstalledWorkspaceScopedDaemon_SchedulerFactoryErrorTreatedAsAbsent(t *testing.T) {
+	prev := schedulerFactoryFn
+	schedulerFactoryFn = func() (scheduler.Scheduler, error) {
+		return nil, errors.New("synthetic factory failure")
+	}
+	t.Cleanup(func() { schedulerFactoryFn = prev })
+
+	if hasInstalledWorkspaceScopedDaemon() {
+		t.Error("hasInstalledWorkspaceScopedDaemon: want false on factory error, got true")
 	}
 }
 
