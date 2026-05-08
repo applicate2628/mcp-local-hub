@@ -570,8 +570,26 @@ func runWatchdogOnceInner(ctx context.Context, a *api.API, now time.Time, diagno
 	}
 
 	// 8. Defensive-copy snapshots.
+	//
+	// Codex deep-sec PR #135 Finding 4: ownership snapshot loads MUST
+	// fail-closed when the workspace registry is corrupt or unreachable
+	// — running a tick on a partial snapshot risks classifying a real
+	// lazy-proxy task as orphan (lost recovery) OR a phantom task as
+	// owned (false-positive restart). Drop the tick on this exit path
+	// with the same backend exit code (1) that other persistence-side
+	// failures use.
 	registry := a.LoadDaemonRegistry()
-	ownership := a.LoadOwnershipSnapshot()
+	ownership, ownershipErr := a.LoadOwnershipSnapshotChecked()
+	if ownershipErr != nil {
+		fmt.Fprintf(diagnostic, "watchdog: LoadOwnershipSnapshotChecked: %v\n", ownershipErr)
+		_ = a.AppendWatchdogLog(api.WatchdogLogEntry{
+			Task:   "<once-driver>",
+			Action: "ownership-snapshot-failed",
+			Err:    ownershipErr.Error(),
+		})
+		_ = persistEndOfTickState(a, &coolR, now, diagnostic)
+		return exitWatchdogBackend
+	}
 
 	// 9. StatusContext.
 	rows, statusErr := a.StatusContext(ctx)

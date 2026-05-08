@@ -31,6 +31,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
@@ -318,6 +319,52 @@ func NewOwnedXMLValidatorFromSnapshot(snap OwnershipSnapshot) OwnedXMLValidator 
 // driver treats an empty PortMap as "no kill-by-port targets known"
 // and falls back to scheduler-only restart, which is conservative.
 func (a *API) LoadOwnershipSnapshot() OwnershipSnapshot {
+	// Back-compat best-effort variant. Drops registry load errors silently
+	// to preserve callers that historically tolerated partial snapshots
+	// (tests, exploratory tooling, etc.). The watchdog driver MUST use
+	// LoadOwnershipSnapshotChecked instead — see Codex deep-sec PR #135
+	// Finding 4 for the rationale (a phantom-vs-orphan classification on
+	// a partial snapshot is unsafe).
+	snap, _ := a.loadOwnershipSnapshotInternal()
+	return snap
+}
+
+// LoadOwnershipSnapshotChecked is the fail-closed variant of
+// LoadOwnershipSnapshot per Codex deep-sec PR #135 Finding 4. The watchdog
+// driver consumes the snapshot to decide ownership (orphan vs lazy-proxy)
+// and to drive the snapshot-bound XML validator's structural ownership
+// check. A silently-dropped workspace registry leaves the
+// WorkspaceTasksByKey + PortMap maps incomplete → a real lazy-proxy task
+// could be marked orphan (no recovery) OR a phantom task could be marked
+// owned (false-positive restart). The driver should refuse the tick on
+// any registry load error rather than make decisions on partial data.
+//
+// Manifest read failures are still tolerated (per-server `continue` inside
+// the loop) because individual broken manifests are an ordinary disk-state
+// concern that pre-dates the watchdog — failing the entire tick on one
+// unparseable YAML would be more dangerous than running with what we have.
+// Registry-level failures are different: they are global to all
+// workspace-scoped tasks at once.
+func (a *API) LoadOwnershipSnapshotChecked() (OwnershipSnapshot, error) {
+	return a.loadOwnershipSnapshotInternal()
+}
+
+// loadOwnershipSnapshotInternal builds the snapshot and returns the first
+// fatal error encountered while loading the workspace registry. Manifest
+// errors are absorbed per-entry and never propagate (see comment on
+// LoadOwnershipSnapshotChecked for the asymmetry rationale).
+//
+// Workspace-registry failures are scoped: they propagate only when this
+// host actually has at least one workspace-scoped daemon installed in
+// Task Scheduler (Codex bot P1 on PR #135 round 3). The earlier
+// catalog-based gate (round 2) was too broad — every shipped manifest
+// catalog includes the `mcp-language-server` workspace-scoped entry,
+// so a global-only deployment that never installed any lazy-proxy
+// task still tripped the fail-closed path on every watchdog tick
+// whenever DefaultRegistryPath / reg.Load errored. The installed-task
+// gate restricts fail-closed to hosts that genuinely depend on
+// registry data while keeping global-only hosts auto-recoverable.
+func (a *API) loadOwnershipSnapshotInternal() (OwnershipSnapshot, error) {
 	snap := OwnershipSnapshot{
 		ManifestServers:     make(map[string]bool),
 		ManifestDaemons:     make(map[string]map[string]bool),
@@ -326,7 +373,10 @@ func (a *API) LoadOwnershipSnapshot() OwnershipSnapshot {
 		SnapshottedAt:       time.Now().UTC(),
 	}
 
-	// Manifest set + per-server daemons + per-task PortMap.
+	// Manifest set + per-server daemons + per-task PortMap. The manifest
+	// catalog drives ManifestServers/ManifestDaemons/PortMap; the
+	// workspace-scoped fail-closed gate is decided separately below
+	// from installed-task observation, NOT from this catalog walk.
 	names, _ := listManifestNamesEmbedFirst()
 	for _, name := range names {
 		data, err := loadManifestYAMLEmbedFirst(name)
@@ -349,25 +399,45 @@ func (a *API) LoadOwnershipSnapshot() OwnershipSnapshot {
 		snap.ManifestDaemons[m.Name] = inner
 	}
 
-	// Workspace registry: task name keyed by (workspace, language).
-	// Best-effort; failure leaves the map empty.
-	if regPath, regErr := DefaultRegistryPath(); regErr == nil {
-		reg := NewRegistry(regPath)
-		if err := reg.Load(); err == nil {
-			for _, e := range reg.Workspaces {
-				if e.TaskName == "" {
-					continue
-				}
-				key := e.WorkspaceKey + "-" + e.Language
-				snap.WorkspaceTasksByKey[key] = e.TaskName
-				if e.Port != 0 {
-					snap.PortMap[e.TaskName] = e.Port
-				}
-			}
-		}
+	// PR #135 round 4: structurally early-exit for global-only hosts
+	// before touching the workspace registry. This makes the fix to
+	// PR #135 round 3 P1 obvious: when scheduler.List finds zero
+	// `mcp-local-hub-lsp-*` tasks installed, the host has no workspace-
+	// scoped daemons and CANNOT depend on workspace registry data.
+	// Path-resolve / load failures of the registry are therefore
+	// IRRELEVANT to recovery for that host. Returning the global-only
+	// snapshot early makes it impossible for `DefaultRegistryPath()`
+	// errors (e.g. service accounts without a resolvable home dir) to
+	// block watchdog recovery for the global daemons that are present.
+	if !hasInstalledWorkspaceScopedDaemon() {
+		return snap, nil
 	}
 
-	return snap
+	// Workspace registry: at least one `mcp-local-hub-lsp-*` task IS
+	// installed in this host's scheduler — the watchdog DOES depend on
+	// workspace registry data. Path-resolve and load failures from here
+	// onward propagate as errors (PR #135 Finding 4: fail-closed when
+	// the installation actually uses workspace data; PR #135 round 3
+	// P1: gate on installed tasks not manifest catalog).
+	regPath, regErr := DefaultRegistryPath()
+	if regErr != nil {
+		return snap, fmt.Errorf("resolve workspace registry path: %w", regErr)
+	}
+	reg := NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		return snap, fmt.Errorf("load workspace registry: %w", err)
+	}
+	for _, e := range reg.Workspaces {
+		if e.TaskName == "" {
+			continue
+		}
+		key := e.WorkspaceKey + "-" + e.Language
+		snap.WorkspaceTasksByKey[key] = e.TaskName
+		if e.Port != 0 {
+			snap.PortMap[e.TaskName] = e.Port
+		}
+	}
+	return snap, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -568,6 +638,10 @@ func (a *API) IntentStillRunning(taskName string, now time.Time) bool {
 		// daemon_intent.go), so degrade to "no recorded preference".
 		return true
 	}
+	// Codex deep-sec PR #135 Finding 1: normalize the lookup key so a
+	// caller that passed the bare form still hits the canonical leading-
+	// backslash entry that WriteDaemonIntent persists.
+	taskName = canonicalIntentTaskKey(taskName)
 	intent, ok, err := readDaemonIntentFn(taskName)
 	if err != nil || !ok {
 		// Read failure or no entry → no active stop directive.
@@ -745,6 +819,41 @@ func newScheduler() (scheduler.Scheduler, error) {
 		return schedulerFactoryFn()
 	}
 	return scheduler.New()
+}
+
+// lazyProxyTaskNamePrefix is the bare (no leading-backslash) prefix
+// for installed workspace-scoped lazy-proxy tasks. The Windows scheduler
+// stores the canonical name with a leading "\" but List filters on the
+// trim-prefix form (see scheduler_windows.go::List + install.go:1650).
+const lazyProxyTaskNamePrefix = "mcp-local-hub-lsp-"
+
+// hasInstalledWorkspaceScopedDaemon reports whether at least one
+// `mcp-local-hub-lsp-*` task is currently installed in the host
+// scheduler. This is the installed-task gate per Codex bot PR #135
+// round 3 P1 — the watchdog tick fail-closes on workspace-registry
+// errors only for hosts that actually depend on the registry.
+//
+// Failure semantics: if the scheduler factory cannot produce a
+// scheduler (Linux/macOS where the production factory returns
+// "not implemented", or any transient construction failure) OR
+// the List call itself errors, return false. Returning false here
+// is the conservative direction: the watchdog already has nothing
+// it can do without a working scheduler, and downgrading the gate
+// to fail-benignly on registry errors gives global-only hosts the
+// auto-recovery the bot requested. The alternative ("fail closed
+// on scheduler probe failure") would be a strict regression
+// relative to round 2 — registry errors would still abort the
+// tick on hosts that have no lazy-proxy tasks at all.
+func hasInstalledWorkspaceScopedDaemon() bool {
+	sch, err := newScheduler()
+	if err != nil {
+		return false
+	}
+	tasks, err := sch.List(lazyProxyTaskNamePrefix)
+	if err != nil {
+		return false
+	}
+	return len(tasks) > 0
 }
 
 // appendAudit is the package-level audit dispatcher. Routes through

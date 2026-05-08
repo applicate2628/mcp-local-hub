@@ -79,19 +79,22 @@ func TestParsePosixPSRows_FewerThan4Tokens(t *testing.T) {
 	}
 }
 
-// TestEffectiveParentAlive_PosixInitReparenting is the regression
-// test for Codex Cloud bot P1 on PR #131 (kosyak
-// 2026-05-07-posix-reparenting-defeats-parent-alive-orphan-heuristic.md):
-// on POSIX, an orphan reparented to PID 1 (init/systemd) must be
-// classified as effectively orphan even though PID 1 is alive in the
-// snapshot. Windows behavior (no auto-reparent) is preserved.
+// TestEffectiveParentAlive verifies the parent-alive contract used by
+// log-watcher cleanup gating: missing/zero parent is treated as not
+// alive, real parent PIDs in the snapshot are alive, and POSIX
+// ppid==1 (init/systemd reparenting) is treated as orphaned.
 //
-// We can't truly switch runtime.GOOS in a unit test, so this test
-// validates the behavior at the function's contract level: pidSet
-// containing PID 1, ppid=1. On POSIX (non-windows) this returns false
-// (orphan). On windows it returns true. We assert based on actual
-// runtime.GOOS.
-func TestEffectiveParentAlive_PosixInitReparenting(t *testing.T) {
+// Background: Codex Cloud bot P1 on PR #131 caught the original
+// regression — without the POSIX init special case, every reparented
+// orphan watcher (`tail`, `grep` adopted by PID 1) appeared as
+// "parent alive" and the default IncludeLive=false apply path skipped
+// it. Codex Cloud bot P1 on PR #135 round 2 caught the over-correction
+// in #139 (which removed the special case wholesale). The current
+// helper restores the special case but documents WHY it's safe in this
+// caller's narrow context (watcherProcessNames gate filters to
+// bash/sh/tail/grep — none of which are legitimate direct init
+// children).
+func TestEffectiveParentAlive(t *testing.T) {
 	pidSet := map[int]bool{1: true, 100: true}
 
 	if got := effectiveParentAlive(0, pidSet); got {
@@ -104,7 +107,10 @@ func TestEffectiveParentAlive_PosixInitReparenting(t *testing.T) {
 		t.Errorf("ppid=100 in snapshot → got %v, want true (real parent)", got)
 	}
 
-	// PID 1 special-case on POSIX:
+	// PID 1 special-case on POSIX: when ppid is init we classify as
+	// orphan because watcher-class processes aren't legitimately
+	// spawned directly by init. On Windows, PID 1 has no special
+	// reparent semantics (the snapshot is authoritative).
 	got := effectiveParentAlive(1, pidSet)
 	if runtime.GOOS == "windows" {
 		if !got {
@@ -114,6 +120,27 @@ func TestEffectiveParentAlive_PosixInitReparenting(t *testing.T) {
 		if got {
 			t.Errorf("POSIX: ppid=1 (init) → got %v, want false (orphan reparented to init)", got)
 		}
+	}
+}
+
+// TestEffectiveParentAlive_PosixReparentedToInit_OrphanDetected is the
+// regression test for Codex Cloud bot P1 on PR #135 round 2. When a
+// watcher's original parent (e.g. an agent shell at PID 42) exits on
+// POSIX, the kernel reparents the watcher to PID 1. Because we have
+// only a single live snapshot — no separate "original parent" field
+// in processRow — the helper must use ppid==1 itself as the
+// reparented-to-init signal. Without this branch the default Apply
+// path (IncludeLive=false) silently skips orphan termination.
+func TestEffectiveParentAlive_PosixReparentedToInit_OrphanDetected(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not auto-reparent on parent exit; this contract is POSIX-only")
+	}
+	// Snapshot AFTER the original parent exited and the watcher was
+	// reparented to PID 1. The original parent (42) is no longer in
+	// the pidSet — only init (1) and the watcher itself (200).
+	pidSet := map[int]bool{1: true, 200: true}
+	if got := effectiveParentAlive(1, pidSet); got {
+		t.Errorf("POSIX reparented to init: ppid=1 → got %v, want false (orphan)", got)
 	}
 }
 

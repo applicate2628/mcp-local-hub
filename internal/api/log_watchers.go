@@ -2,6 +2,7 @@ package api
 
 import (
 	"bufio"
+	"encoding/csv"
 	"fmt"
 	"io"
 	"os"
@@ -233,15 +234,25 @@ func compileWatcherRegex(user, fallback string) (*regexp.Regexp, error) {
 // still its meaningful parent" — accounting for POSIX init/subreaper
 // reparenting that makes the bare `pidSet[ppid]` check insufficient.
 //
-// Codex Cloud bot P1 on PR #131 / kosyak
-// 2026-05-07-posix-reparenting-defeats-parent-alive-orphan-heuristic.md:
-// when an agent shell exits on POSIX, the kernel reparents its
-// descendants to PID 1 (init) — which is always alive — so a naive
-// `pidSet[ppid]` returns true even though the original parent is gone.
-// Effect: default Apply path with IncludeLive=false skips the very
-// orphans we want to clean. Treat ppid==1 on POSIX as effectively
-// orphan. Windows does not auto-reparent, so the bare check stays
-// correct there.
+// Why the POSIX ppid==1 special case is correct here: this helper is
+// consulted only from filterWatcherCandidates against rows that already
+// passed the watcherProcessNames gate (`bash`, `sh`, `tail`, `grep`).
+// Those user-space utility processes are NEVER spawned directly by
+// init/systemd as services in normal operation. So when they appear
+// with ppid==1 on POSIX, the only realistic way for that to happen
+// is reparenting after their original parent (an agent shell, codex
+// CLI, mcphub watchdog, etc.) exited — exactly the orphan case the
+// log-watcher sweep targets. Treating ppid==1 as "parent alive" would
+// keep `tail`/`grep` adopted by PID 1 untouched on the IncludeLive=false
+// default path, defeating the cleanup feature.
+//
+// Codex Cloud bot P1 on PR #135 round 2: the prior fix that simply
+// returned `pidSet[ppid]` regressed orphan detection for reparented
+// POSIX watchers. Restoring the POSIX-init special case is the
+// architectural fix because we have no separate record of the
+// original parent PID — but limited to the watcher-process subset,
+// the heuristic is sound. Windows does not auto-reparent on parent
+// exit, so the bare check stays correct there.
 func effectiveParentAlive(ppid int, pidSet map[int]bool) bool {
 	if ppid == 0 {
 		return false
@@ -251,7 +262,9 @@ func effectiveParentAlive(ppid int, pidSet map[int]bool) bool {
 	}
 	if runtime.GOOS != "windows" && ppid == 1 {
 		// POSIX init / systemd as PID 1 has adopted us — original
-		// parent already exited. Classify as orphan.
+		// parent already exited. Classify as orphan. Safe because
+		// callers gate by watcherProcessNames (bash/sh/tail/grep),
+		// which are not legitimate direct init children.
 		return false
 	}
 	return true
@@ -492,25 +505,31 @@ func parseEtime(s string) int64 {
 //  3. csv.Reader.Read() returning err on a single malformed row caused
 //     return nil, err, killing the whole snapshot.
 //
-// Fix: line-based read + the existing tolerant splitCSVLine
-// (internal/api/processes.go:184), with per-row continue on errors,
-// blank-line skip, and "first non-blank line == header" gate.
+// Fix: use encoding/csv.Reader with LazyQuotes to preserve multiline
+// quoted records while tolerating wmic quote oddities. Keep per-row
+// continue semantics for malformed rows and blank-line skip.
 func parseWmicProcessRows(r io.Reader) ([]processRow, error) {
-	s := bufio.NewScanner(r)
-	s.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	cr := csv.NewReader(r)
+	cr.FieldsPerRecord = -1
+	cr.LazyQuotes = true
+	cr.TrimLeadingSpace = true
+
 	var rows []processRow
 	var colIdx map[string]int
-	for s.Scan() {
-		line := s.Text()
-		if strings.TrimSpace(line) == "" {
-			// Skip leading and intra-stream blanks. wmic /format:csv
-			// emits a blank line before the header on some Windows
-			// versions; treating it as the header poisons colIdx.
+	for {
+		fields, err := cr.Read()
+		if err == io.EOF {
+			return rows, nil
+		}
+		if err != nil {
+			// Keep snapshot resilient: malformed rows should not abort
+			// the whole cleanup pass.
 			continue
 		}
-		fields := splitCSVLine(line)
+		if len(fields) == 1 && strings.TrimSpace(fields[0]) == "" {
+			continue
+		}
 		if colIdx == nil {
-			// First non-blank line is the header.
 			colIdx = make(map[string]int, len(fields))
 			for i, h := range fields {
 				colIdx[strings.TrimSpace(h)] = i
@@ -525,29 +544,17 @@ func parseWmicProcessRows(r io.Reader) ([]processRow, error) {
 		}
 		pid, err := strconv.Atoi(strings.TrimSpace(get("ProcessId")))
 		if err != nil {
-			// Malformed numeric PID: skip just this row, not the
-			// whole snapshot. One bad row out of thousands shouldn't
-			// block the cleanup feature.
 			continue
 		}
 		ppid, _ := strconv.Atoi(strings.TrimSpace(get("ParentProcessId")))
 		cmd := get("CommandLine")
-		// Best-effort: derive image basename from cmdline. Many MCP
-		// launchers carry an absolute exe path as argv[0].
 		name := basenameFromCmdline(cmd)
 		startTime := int64(0)
 		if dt := parseWmicDate(get("CreationDate")); !dt.IsZero() {
 			startTime = dt.Unix()
 		}
-		rows = append(rows, processRow{
-			PID:       pid,
-			ParentPID: ppid,
-			Name:      name,
-			Cmdline:   cmd,
-			StartTime: startTime,
-		})
+		rows = append(rows, processRow{PID: pid, ParentPID: ppid, Name: name, Cmdline: cmd, StartTime: startTime})
 	}
-	return rows, s.Err()
 }
 
 func basenameFromCmdline(cmd string) string {

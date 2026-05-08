@@ -566,6 +566,130 @@ func TestDaemonIntent_Write_IdentityOversize(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// PR #135 round 3 P2 — canonical-form size recheck.
+//
+// canonicalIntentTaskKey prepends "\\" to a bare task name when needed.
+// The pre-fix code size-checked the RAW input, so a bare 1024-byte name
+// passed validation and became a 1025-byte canonical key — over the
+// AuditIdentityFieldByteCap (intent_audit.go) ceiling. WriteDaemonIntent
+// ignores audit append errors, so the audit record was silently dropped
+// for max-length valid task identifiers. The fix is to canonicalize
+// FIRST, then size-check.
+// ---------------------------------------------------------------------------
+
+// TestWriteDaemonIntent_CanonicalSizeRecheck_RejectsAt1024PreCanonical
+// verifies the round-3 P2 boundary: a bare task name of exactly the
+// IdentityFieldByteCap (1024 bytes, no leading "\") becomes 1025 bytes
+// after canonicalIntentTaskKey prepends "\". The post-canonicalization
+// size-check must reject it with ErrEntryOversize so the audit log
+// can never silently drop the set-intent record.
+func TestWriteDaemonIntent_CanonicalSizeRecheck_RejectsAt1024PreCanonical(t *testing.T) {
+	a := NewAPI()
+	daemonIntentTestHelper(t)
+
+	// Snapshot the file before the bad write so we can verify the
+	// rejection leaves the canonical state untouched.
+	if err := a.WriteDaemonIntent("\\mcp-local-hub-anchor", DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserStop,
+		UpdatedAt: time.Now().UTC(),
+	}, "tester"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	prePath, _ := DaemonStateDir()
+	preRaw, err := os.ReadFile(filepath.Join(prePath, intentFileLeaf))
+	if err != nil {
+		t.Fatalf("read seed: %v", err)
+	}
+
+	// Bare 1024-byte name → canonical "\" + 1024 = 1025 bytes.
+	bareAt1024 := strings.Repeat("a", IdentityFieldByteCap)
+	if len(bareAt1024) != IdentityFieldByteCap {
+		t.Fatalf("test prep: bare name length = %d, want %d", len(bareAt1024), IdentityFieldByteCap)
+	}
+	canonical := canonicalIntentTaskKey(bareAt1024)
+	if len(canonical) != IdentityFieldByteCap+1 {
+		t.Fatalf("test prep: canonical length = %d, want %d", len(canonical), IdentityFieldByteCap+1)
+	}
+
+	err = a.WriteDaemonIntent(bareAt1024, DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserStop,
+		UpdatedAt: time.Now().UTC(),
+	}, "tester")
+	if err == nil {
+		t.Fatalf("WriteDaemonIntent(bareAt1024): want ErrEntryOversize on canonical recheck, got nil")
+	}
+	if !errors.Is(err, ErrEntryOversize) {
+		t.Fatalf("WriteDaemonIntent(bareAt1024): want ErrEntryOversize, got %v", err)
+	}
+
+	// File must be unchanged.
+	postRaw, err := os.ReadFile(filepath.Join(prePath, intentFileLeaf))
+	if err != nil {
+		t.Fatalf("read post: %v", err)
+	}
+	if string(preRaw) != string(postRaw) {
+		t.Errorf("intent file changed by oversize-canonical write; want unchanged\nbefore=%q\nafter =%q", preRaw, postRaw)
+	}
+}
+
+// TestWriteDaemonIntent_AlreadyCanonical1024_Accepted is the boundary
+// counterpart: an already-canonical 1024-byte key (leading "\" + 1023
+// bytes of payload) must STILL be accepted because canonicalIntentTaskKey
+// is a no-op on inputs that already start with "\". This pins the
+// round-3 P2 fix as a tightening, not an across-the-board reduction.
+func TestWriteDaemonIntent_AlreadyCanonical1024_Accepted(t *testing.T) {
+	a := NewAPI()
+	daemonIntentTestHelper(t)
+
+	// "\" + 1023-byte name = 1024 bytes total — exactly at the cap.
+	canonicalAt1024 := "\\" + strings.Repeat("a", IdentityFieldByteCap-1)
+	if len(canonicalAt1024) != IdentityFieldByteCap {
+		t.Fatalf("test prep: canonical length = %d, want %d", len(canonicalAt1024), IdentityFieldByteCap)
+	}
+	// canonicalIntentTaskKey on already-canonical input must be the
+	// identity function — pin that contract here.
+	if got := canonicalIntentTaskKey(canonicalAt1024); got != canonicalAt1024 {
+		t.Fatalf("canonicalIntentTaskKey(already-canonical): got len=%d, want identity (len=%d)", len(got), len(canonicalAt1024))
+	}
+
+	if err := a.WriteDaemonIntent(canonicalAt1024, DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserStop,
+		UpdatedAt: time.Now().UTC(),
+	}, "tester"); err != nil {
+		t.Fatalf("WriteDaemonIntent(canonicalAt1024): want accepted, got %v", err)
+	}
+
+	res := a.ReadDaemonIntent()
+	if res.State != IntentStateValid {
+		t.Fatalf("State = %q, want valid", res.State)
+	}
+	if _, ok := res.File.Tasks[canonicalAt1024]; !ok {
+		t.Errorf("Tasks[canonicalAt1024]: missing — write accepted but key absent. Tasks=%+v", res.File.Tasks)
+	}
+}
+
+// TestClearDaemonIntent_CanonicalSizeRecheck_RejectsAt1024PreCanonical
+// mirrors the recheck on the Clear path. ClearDaemonIntent shares the
+// same audit-write step (clear-intent action) and would otherwise drop
+// audit records for the same edge case as Write.
+func TestClearDaemonIntent_CanonicalSizeRecheck_RejectsAt1024PreCanonical(t *testing.T) {
+	a := NewAPI()
+	daemonIntentTestHelper(t)
+
+	bareAt1024 := strings.Repeat("a", IdentityFieldByteCap)
+	err := a.ClearDaemonIntent(bareAt1024, "tester")
+	if err == nil {
+		t.Fatalf("ClearDaemonIntent(bareAt1024): want ErrEntryOversize on canonical recheck, got nil")
+	}
+	if !errors.Is(err, ErrEntryOversize) {
+		t.Fatalf("ClearDaemonIntent(bareAt1024): want ErrEntryOversize, got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

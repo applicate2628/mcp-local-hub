@@ -61,12 +61,21 @@ func NewRegistry(path string) *Registry {
 	return &Registry{path: path, Version: registryVersion}
 }
 
+// defaultRegistryPathFn is the test seam used by Codex deep-sec PR #135
+// Finding 5 to inject a synthetic resolver failure (e.g. UserHomeDir error
+// on a CI host that has no $HOME) without manipulating real env vars.
+// Production callers reach the actual resolver through DefaultRegistryPath.
+var defaultRegistryPathFn func() (string, error)
+
 // DefaultRegistryPath returns the platform-appropriate registry path.
 // Windows: %LOCALAPPDATA%\mcp-local-hub\workspaces.yaml
 // Linux/macOS: $XDG_STATE_HOME/mcp-local-hub/workspaces.yaml
 //
 //	(fallback ~/.local/state/mcp-local-hub/workspaces.yaml)
 func DefaultRegistryPath() (string, error) {
+	if defaultRegistryPathFn != nil {
+		return defaultRegistryPathFn()
+	}
 	if runtime.GOOS == "windows" {
 		if v := os.Getenv("LOCALAPPDATA"); v != "" {
 			return filepath.Join(v, "mcp-local-hub", "workspaces.yaml"), nil

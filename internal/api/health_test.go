@@ -850,3 +850,42 @@ func TestDaemonStatusSnapshot_RecoversAfterBackendComesBack(t *testing.T) {
 		t.Errorf("post-recovery cache hit: expected 1 row, got %d", len(rows3))
 	}
 }
+
+// TestNormalizeDaemonState_EnrichedAndUnexpectedStates verifies the
+// closed wire enum contract for DaemonRow.State. The mapping covers
+// the existing Title-Case vocabulary that bubbles up from the
+// scheduler/health pipeline; unexpected inputs (and the empty string)
+// must collapse to "failed" so the wire enum remains exhaustive.
+//
+// Codex Cloud bot P1 on PR #135 round 2: a permissive default branch
+// that lower-cased and passed through arbitrary scheduler states
+// (e.g. "Disabled", "Queued") leaked off-spec values onto the
+// 4-value wire enum, breaking health consumers that branch on it.
+func TestNormalizeDaemonState_EnrichedAndUnexpectedStates(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{in: "Running", want: "running"},
+		{in: "Starting", want: "starting"},
+		{in: "Ready", want: "stopped"},
+		{in: "Scheduled", want: "stopped"},
+		{in: "Stopped", want: "stopped"},
+		{in: "Failed", want: "failed"},
+		// Unknown scheduler vocabulary collapses to the conservative
+		// "failed" wire value rather than leaking through unchanged.
+		{in: "Disabled", want: "failed"},
+		{in: "Queued", want: "failed"},
+		// Empty / blank source is also conservative-failed; never
+		// promote no-data into a misleading wire enum slot.
+		{in: "", want: "failed"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			if got := normalizeDaemonState(tc.in); got != tc.want {
+				t.Fatalf("normalizeDaemonState(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}

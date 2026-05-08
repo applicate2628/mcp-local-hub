@@ -20,6 +20,8 @@ package api
 import (
 	"bytes"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -92,17 +94,20 @@ func TestRecordStopIntent_NoForce_HappyPath(t *testing.T) {
 		t.Fatalf("recordStopIntent: %v", err)
 	}
 	// Two audit entries per task: set-intent (auto from
-	// WriteDaemonIntent) + user-stop (explicit).
+	// WriteDaemonIntent) + user-stop (explicit). Codex deep-sec PR #135
+	// Finding 1: every audit entry now carries the canonical leading-
+	// backslash task identity so log filters pivot on one shape.
 	wantActions := map[string]bool{
 		"set-intent":          false,
 		AuditActionUserStop:   false,
 	}
+	canonicalTask := "\\" + taskNames[0]
 	for _, e := range r.entries {
 		if _, ok := wantActions[e.Action]; ok {
 			wantActions[e.Action] = true
 		}
-		if e.Task != taskNames[0] {
-			t.Errorf("audit Task = %q, want %q", e.Task, taskNames[0])
+		if e.Task != canonicalTask {
+			t.Errorf("audit Task = %q, want %q (canonical leading-backslash form)", e.Task, canonicalTask)
 		}
 	}
 	for action, seen := range wantActions {
@@ -115,9 +120,9 @@ func TestRecordStopIntent_NoForce_HappyPath(t *testing.T) {
 	if res.State != IntentStateValid {
 		t.Fatalf("intent state = %q, want valid (dir=%s)", res.State, dir)
 	}
-	got, ok := res.File.Tasks[taskNames[0]]
+	got, ok := res.File.Tasks[canonicalTask]
 	if !ok {
-		t.Fatalf("intent file missing entry for %s", taskNames[0])
+		t.Fatalf("intent file missing entry for %s; tasks=%+v", canonicalTask, res.File.Tasks)
 	}
 	if got.Desired != IntentDesiredStopped {
 		t.Errorf("Desired = %q, want %q", got.Desired, IntentDesiredStopped)
@@ -188,15 +193,17 @@ func TestRecordStopIntent_Force_HappyPath(t *testing.T) {
 	if got.Priority != "high" {
 		t.Errorf("Priority = %q, want %q", got.Priority, "high")
 	}
-	if got.Task != taskNames[0] {
-		t.Errorf("Task = %q, want %q", got.Task, taskNames[0])
+	// Codex deep-sec PR #135 Finding 1: audit Task field is canonical.
+	canonicalTask := "\\" + taskNames[0]
+	if got.Task != canonicalTask {
+		t.Errorf("Task = %q, want %q", got.Task, canonicalTask)
 	}
 	// Intent file MUST NOT contain an entry for this task: --force
 	// explicitly skips the intent write so the watchdog auto-revives.
 	res := a.ReadDaemonIntent()
-	if _, ok := res.File.Tasks[taskNames[0]]; ok {
+	if _, ok := res.File.Tasks[canonicalTask]; ok {
 		t.Errorf("intent file unexpectedly contains entry for %s after --force stop: %+v",
-			taskNames[0], res.File.Tasks[taskNames[0]])
+			canonicalTask, res.File.Tasks[canonicalTask])
 	}
 }
 
@@ -253,7 +260,9 @@ func TestRecordInstallAuditPreMutation_HappyPath(t *testing.T) {
 	if len(r.entries) != 2 {
 		t.Fatalf("audit entries = %d, want 2 (one per daemon): %+v", len(r.entries), r.entries)
 	}
-	wantTasks := []string{"mcp-local-hub-task10test-alpha", "mcp-local-hub-task10test-beta"}
+	// Codex deep-sec PR #135 Finding 1: audit Task field is the canonical
+	// leading-backslash form so log filters pivot on one shape.
+	wantTasks := []string{"\\mcp-local-hub-task10test-alpha", "\\mcp-local-hub-task10test-beta"}
 	for i, e := range r.entries {
 		if e.Action != AuditActionServerInstall {
 			t.Errorf("entries[%d].Action = %q, want %q", i, e.Action, AuditActionServerInstall)
@@ -303,8 +312,9 @@ func TestRecordInstallAuditPreMutation_DaemonFilter_OnlyOneTask(t *testing.T) {
 	if len(r.entries) != 1 {
 		t.Fatalf("audit entries = %d, want 1 (filter=beta): %+v", len(r.entries), r.entries)
 	}
-	if got := r.entries[0].Task; got != "mcp-local-hub-task10test-beta" {
-		t.Errorf("entries[0].Task = %q, want mcp-local-hub-task10test-beta", got)
+	// Codex deep-sec PR #135 Finding 1: canonical leading-backslash form.
+	if got := r.entries[0].Task; got != "\\mcp-local-hub-task10test-beta" {
+		t.Errorf("entries[0].Task = %q, want \\mcp-local-hub-task10test-beta", got)
 	}
 }
 
@@ -327,10 +337,11 @@ func TestRecordInstallIntentPostSuccess_HappyPath(t *testing.T) {
 	if res.State != IntentStateValid {
 		t.Fatalf("intent state = %q, want valid", res.State)
 	}
-	for _, name := range []string{"mcp-local-hub-task10test-alpha", "mcp-local-hub-task10test-beta"} {
+	// Codex deep-sec PR #135 Finding 1: canonical leading-backslash key.
+	for _, name := range []string{"\\mcp-local-hub-task10test-alpha", "\\mcp-local-hub-task10test-beta"} {
 		got, ok := res.File.Tasks[name]
 		if !ok {
-			t.Errorf("intent file missing entry for %s", name)
+			t.Errorf("intent file missing entry for %s; tasks=%+v", name, res.File.Tasks)
 			continue
 		}
 		if got.Desired != IntentDesiredRunning {
@@ -389,6 +400,125 @@ func TestStopTaskNamesForServer_UnknownServer_Errors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "load manifest") {
 		t.Errorf("error message: want 'load manifest', got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// stopTaskNamesForServer — workspace registry fail-closed (bot P1.2).
+//
+// For workspace-scoped servers, registry path/load failures must NOT
+// silently return an empty task-name set: the caller (Stop / StopWithOpts)
+// would proceed to stopKillCore with no intent/audit recording, killing
+// daemons that the watchdog could immediately revive. Plan §8 "Stop
+// fail-closed both ways" requires that if intent paths can't be
+// determined, the kill is skipped.
+// ---------------------------------------------------------------------------
+
+// pointRegistryAtTempDir routes DefaultRegistryPath()'s env-driven lookup
+// at a fresh temp directory. Returns the path that the registry helper
+// would resolve to so the caller can plant a corrupt file there. Both
+// LOCALAPPDATA (Windows) and XDG_STATE_HOME (POSIX) are set so the test
+// is platform-agnostic — DefaultRegistryPath consults LOCALAPPDATA first
+// on Windows and XDG_STATE_HOME on Linux/macOS.
+func pointRegistryAtTempDir(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	t.Setenv("LOCALAPPDATA", root)
+	t.Setenv("XDG_STATE_HOME", root)
+	regPath, err := DefaultRegistryPath()
+	if err != nil {
+		t.Fatalf("DefaultRegistryPath: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(regPath), 0o700); err != nil {
+		t.Fatalf("mkdir registry dir: %v", err)
+	}
+	return regPath
+}
+
+// TestStopTaskNamesForServer_Workspace_RegistryLoadFails_ReturnsError
+// covers bot P1.2: a corrupt workspaces.yaml causes reg.Load() to error.
+// The previous behavior returned (nil, nil) and let Stop proceed; now it
+// must propagate the error so the caller refuses to kill.
+func TestStopTaskNamesForServer_Workspace_RegistryLoadFails_ReturnsError(t *testing.T) {
+	regPath := pointRegistryAtTempDir(t)
+	// Corrupt YAML — reg.Load wraps the parse error.
+	if err := os.WriteFile(regPath, []byte("this: is: not\n  - valid: ["), 0o600); err != nil {
+		t.Fatalf("seed corrupt registry: %v", err)
+	}
+	// mcp-language-server is the shipped workspace-scoped manifest; it
+	// reaches the workspace registry branch in stopTaskNamesForServer.
+	_, err := stopTaskNamesForServer("mcp-language-server", "")
+	if err == nil {
+		t.Fatal("stopTaskNamesForServer: want error on registry load failure, got nil")
+	}
+	if !strings.Contains(err.Error(), "registry") {
+		t.Errorf("error message: want mention of registry, got %v", err)
+	}
+}
+
+// TestStopWithOpts_Workspace_RegistryLoadFails_NoKill is the end-to-end
+// equivalent of bot P1.2: when registry load fails for a workspace-scoped
+// server, StopWithOpts must return the error WITHOUT calling stopKillCore.
+// The kill counter (stopFakeKillCounter) confirms that the kill path
+// never runs — daemons stay alive instead of being killed without any
+// intent/audit record.
+func TestStopWithOpts_Workspace_RegistryLoadFails_NoKill(t *testing.T) {
+	a := NewAPI()
+	daemonIntentTestHelper(t)
+	regPath := pointRegistryAtTempDir(t)
+	if err := os.WriteFile(regPath, []byte("this: is: not\n  - valid: ["), 0o600); err != nil {
+		t.Fatalf("seed corrupt registry: %v", err)
+	}
+	r := &recordingAuditWriter{}
+	installRecordingAudit(t, r)
+	killCounter := stopFakeKillCounter(t)
+
+	_, err := a.StopWithOpts(StopOpts{Server: "mcp-language-server", Force: false})
+	if err == nil {
+		t.Fatal("StopWithOpts: want error on registry load failure, got nil")
+	}
+	if got := atomic.LoadInt32(killCounter); got != 0 {
+		t.Errorf("kill path invoked %d times on registry-load fail-closed; want 0 (plan §8)", got)
+	}
+	// Codex deep-sec PR #135 Finding 3: forensic-trail audit entry recorded
+	// on the early-exit fail-closed path. Exactly one stop-failed-no-kill
+	// entry; no set-intent / user-stop because the kill path never ran.
+	if len(r.entries) != 1 {
+		t.Fatalf("audit entries on fail-closed = %d, want 1 (stop-failed-no-kill): %+v", len(r.entries), r.entries)
+	}
+	if r.entries[0].Action != AuditActionStopFailedNoKill {
+		t.Errorf("audit Action = %q, want %q", r.entries[0].Action, AuditActionStopFailedNoKill)
+	}
+}
+
+// TestStop_Workspace_RegistryLoadFails_NoKill mirrors the StopWithOpts
+// case for the back-compat Stop entry point so both surfaces share the
+// fail-closed contract.
+func TestStop_Workspace_RegistryLoadFails_NoKill(t *testing.T) {
+	a := NewAPI()
+	daemonIntentTestHelper(t)
+	regPath := pointRegistryAtTempDir(t)
+	if err := os.WriteFile(regPath, []byte("this: is: not\n  - valid: ["), 0o600); err != nil {
+		t.Fatalf("seed corrupt registry: %v", err)
+	}
+	r := &recordingAuditWriter{}
+	installRecordingAudit(t, r)
+	killCounter := stopFakeKillCounter(t)
+
+	_, err := a.Stop("mcp-language-server", "")
+	if err == nil {
+		t.Fatal("Stop: want error on registry load failure, got nil")
+	}
+	if got := atomic.LoadInt32(killCounter); got != 0 {
+		t.Errorf("kill path invoked %d times on registry-load fail-closed; want 0 (plan §8)", got)
+	}
+	// Codex deep-sec PR #135 Finding 3: forensic-trail audit entry recorded
+	// on the early-exit fail-closed path.
+	if len(r.entries) != 1 {
+		t.Fatalf("audit entries on fail-closed = %d, want 1 (stop-failed-no-kill): %+v", len(r.entries), r.entries)
+	}
+	if r.entries[0].Action != AuditActionStopFailedNoKill {
+		t.Errorf("audit Action = %q, want %q", r.entries[0].Action, AuditActionStopFailedNoKill)
 	}
 }
 
@@ -464,10 +594,13 @@ func TestRecordUninstallIntentForTasks_HappyPath(t *testing.T) {
 	if res.State != IntentStateValid {
 		t.Fatalf("intent state = %q, want valid", res.State)
 	}
-	for _, name := range tasks {
+	// Codex deep-sec PR #135 Finding 1: storage uses canonical leading-
+	// backslash form regardless of caller-supplied shape.
+	canonicalTasks := []string{"\\" + tasks[0], "\\" + tasks[1]}
+	for _, name := range canonicalTasks {
 		got, ok := res.File.Tasks[name]
 		if !ok {
-			t.Errorf("intent file missing entry for %s", name)
+			t.Errorf("intent file missing entry for %s; tasks=%+v", name, res.File.Tasks)
 			continue
 		}
 		if got.Desired != IntentDesiredStopped {
@@ -519,9 +652,12 @@ func TestRecordRegisterIntentForTask_HappyPath(t *testing.T) {
 	a.recordRegisterIntentForTask(taskName, &buf)
 
 	res := a.ReadDaemonIntent()
-	got, ok := res.File.Tasks[taskName]
+	// Codex deep-sec PR #135 Finding 1: storage uses canonical leading-
+	// backslash form regardless of caller-supplied shape.
+	canonicalTask := "\\" + taskName
+	got, ok := res.File.Tasks[canonicalTask]
 	if !ok {
-		t.Fatalf("intent file missing entry for %s; res.State=%q", taskName, res.State)
+		t.Fatalf("intent file missing entry for %s; res.State=%q tasks=%+v", canonicalTask, res.State, res.File.Tasks)
 	}
 	if got.Desired != IntentDesiredRunning {
 		t.Errorf("Desired = %q, want %q", got.Desired, IntentDesiredRunning)

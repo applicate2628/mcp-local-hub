@@ -878,16 +878,29 @@ func ensureCanonicalIDs(row CapabilityRow) CapabilityRow {
 // /api/status surface bypasses this projection entirely after Phase 6 —
 // DaemonStatusSnapshot returns the canonical []DaemonStatus with the
 // original Title-Case state vocabulary intact, no round-trip needed.
+//
+// Codex Cloud bot P1 on PR #135 round 2: DaemonRow.State is documented
+// as the closed 4-value wire enum `running|stopped|starting|failed`.
+// The default branch must NOT pass through arbitrary scheduler states
+// (e.g. "Disabled", "Queued", "Unknown") nor the empty string — health
+// consumers depend on the enum being exhaustive. Map all unrecognized
+// inputs (and blank input) to "failed" — the most conservative
+// classification for unexpected scheduler/state vocabulary.
 func normalizeDaemonState(s string) string {
 	switch s {
-	case "Running", "Ready":
+	case "Running":
 		return "running"
+	case "Starting":
+		return "starting"
 	case "Failed":
 		return "failed"
-	case "Stopped":
+	case "Ready", "Scheduled", "Stopped":
 		return "stopped"
 	default:
-		return "starting"
+		// Conservative classification: unknown (or blank) source state
+		// surfaces as "failed" rather than leaking arbitrary
+		// scheduler vocabulary onto the wire enum.
+		return "failed"
 	}
 }
 

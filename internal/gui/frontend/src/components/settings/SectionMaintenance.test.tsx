@@ -166,6 +166,92 @@ describe("SectionMaintenance — kill_err visibility on apply (Cloud bot P2 on 7
     });
   });
 
+  it("does not mislabel live-parent skipped log-watchers as killed in mixed apply results", async () => {
+    let phase: "preview" | "apply" = "preview";
+    vi.spyOn(api, "cleanupLogWatchers").mockImplementation(async (apply) => {
+      if (apply) phase = "apply";
+      return {
+        watchers: phase === "preview"
+          ? [
+              { pid: 200, parent_pid: 100, parent_alive: true, name: "tail.exe", age_sec: 30, cmdline: "tail live.log" },
+              { pid: 300, parent_pid: 1, parent_alive: false, name: "grep.exe", age_sec: 60, cmdline: "grep orphan.log" },
+            ]
+          : [
+              { pid: 200, parent_pid: 100, parent_alive: true, name: "tail.exe", age_sec: 30, cmdline: "tail live.log" },
+              { pid: 300, parent_pid: 1, parent_alive: false, name: "grep.exe", age_sec: 60, cmdline: "grep orphan.log", kill_err: "access denied" },
+            ],
+        killed: apply ? 0 : 0,
+        skipped: apply ? 2 : 0,
+      };
+    });
+
+    const { container } = render(<SectionMaintenance />);
+    const card = container.querySelector('[data-card="orphan-log-watchers"]')!;
+    fireEvent.click(card.querySelectorAll("button")[0]); // Preview
+    await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
+    fireEvent.click(card.querySelectorAll("button")[1]); // Clean
+
+    await waitFor(() => {
+      const cells = Array.from(card.querySelectorAll("td")).map((td) => td.textContent);
+      expect(cells).toContain("skipped (live parent)");
+      expect(cells).not.toContain("killed");
+    });
+  });
+
+  // Codex Cloud bot P2 on PR #135 round 2: rendering the Result column
+  // off the LIVE includeLive checkbox state means a post-apply toggle
+  // re-labels rows that were already executed. Pin the labelling lever
+  // to the apply-time includeLive value so the audit trail is stable.
+  it("preserves apply-time skipped-live-parent labels after a post-apply checkbox toggle", async () => {
+    let phase: "preview" | "apply" = "preview";
+    vi.spyOn(api, "cleanupLogWatchers").mockImplementation(async (apply, _includeLive) => {
+      if (apply) phase = "apply";
+      return {
+        watchers: phase === "preview"
+          ? [
+              { pid: 200, parent_pid: 100, parent_alive: true, name: "tail.exe", age_sec: 30, cmdline: "tail live.log" },
+              { pid: 300, parent_pid: 1, parent_alive: false, name: "grep.exe", age_sec: 60, cmdline: "grep orphan.log" },
+            ]
+          : [
+              { pid: 200, parent_pid: 100, parent_alive: true, name: "tail.exe", age_sec: 30, cmdline: "tail live.log" },
+              { pid: 300, parent_pid: 1, parent_alive: false, name: "grep.exe", age_sec: 60, cmdline: "grep orphan.log", kill_err: "access denied" },
+            ],
+        killed: apply ? 0 : 0,
+        skipped: apply ? 2 : 0,
+      };
+    });
+
+    const { container } = render(<SectionMaintenance />);
+    const card = container.querySelector('[data-card="orphan-log-watchers"]')!;
+    // Apply with includeLive=false (the default checkbox state). The
+    // live-parent row should render as "skipped (live parent)".
+    fireEvent.click(card.querySelectorAll("button")[0]); // Preview
+    await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
+    fireEvent.click(card.querySelectorAll("button")[1]); // Clean
+    await waitFor(() => {
+      const cells = Array.from(card.querySelectorAll("td")).map((td) => td.textContent);
+      expect(cells).toContain("skipped (live parent)");
+    });
+
+    // Now flip the checkbox AFTER the apply. The post-apply label must
+    // NOT change to "killed" — the request that already executed used
+    // includeLive=false, so the rendered audit row must reflect that.
+    const checkbox = card.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    fireEvent.change(checkbox, { target: { checked: true } });
+
+    // A short waitFor lets any preact re-render flush.
+    await waitFor(() => {
+      const cells = Array.from(card.querySelectorAll("td")).map((td) => td.textContent);
+      expect(cells).toContain("skipped (live parent)");
+      // The skipped-live row must NOT be re-labelled as "killed" by
+      // the toggle — it must remain pinned to the apply-time flag.
+      // (The other row's cell is `kill_err: "access denied"` so the
+      // total td list legitimately also contains that error string;
+      // we're explicitly asserting the live-parent label stays.)
+      expect(cells).not.toContain("killed");
+    });
+  });
+
   it("renders HTTP 207 partial-failure banner + per-daemon error on Stop-All", async () => {
     vi.spyOn(api, "stopAllDaemons").mockResolvedValue({
       stop_results: [

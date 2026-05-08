@@ -191,6 +191,46 @@ func TestCleanupOrphansHandler_BadJSON_400(t *testing.T) {
 	}
 }
 
+func TestCleanupOrphansHandler_NegativeMinAge_400(t *testing.T) {
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		CleanupOrphansFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+			t.Fatal("CleanupOrphans must not be called for negative min_age_sec")
+			return nil, nil
+		},
+	})
+
+	body := strings.NewReader(`{"apply": true, "min_age_sec": -1}`)
+	req := httptest.NewRequest("POST", "/api/cleanup/orphans", body)
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400", rr.Code)
+	}
+}
+
+func TestCleanupOrphansHandler_UnknownServer_400(t *testing.T) {
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		CleanupOrphansFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+			t.Fatal("CleanupOrphans must not be called for unknown server")
+			return nil, nil
+		},
+	})
+
+	body := strings.NewReader(`{"apply": true, "server": "__not_a_real_manifest__"}`)
+	req := httptest.NewRequest("POST", "/api/cleanup/orphans", body)
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400", rr.Code)
+	}
+}
+
 // TestCleanupOrphansHandler_RequiresSameOrigin verifies the same-origin
 // gate (CSRF defense) rejects requests from foreign origins. The shared
 // requireSameOrigin wrapper handles this; this test just confirms it is
