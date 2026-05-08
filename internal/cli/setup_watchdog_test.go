@@ -25,6 +25,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -507,6 +508,161 @@ func TestUninstall_ListError_FailsClosed(t *testing.T) {
 		if name == api.WatchdogTaskName {
 			t.Errorf("List error must fail-closed (keep watchdog); got delete %q", name)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// runUninstall orchestration (bot P1.1) — per-server before watchdog.
+//
+// runUninstall is the testable orchestration body for `mcphub uninstall`.
+// Bot P1.1 finding: the previous ordering called runUninstallWatchdog
+// FIRST and api.Uninstall second. On a last-server uninstall this could
+// strip the watchdog scheduled task and EventLog wiring even when the
+// subsequent per-server uninstall failed, leaving daemons installed but
+// without auto-recovery. The reordered flow runs api.Uninstall FIRST and
+// invokes the watchdog teardown ONLY on success.
+// ---------------------------------------------------------------------------
+
+// uninstallCallRecord captures the order in which runUninstall invokes
+// its injected dependencies. Each entry tags the step (`uninstall` or
+// `watchdog`) so tests can assert ordering and gating.
+type uninstallCallRecord struct {
+	step   string
+	server string
+}
+
+// TestRunUninstall_PerServerFailure_KeepsWatchdog covers bot P1.1: when
+// the per-server uninstall returns an error, the watchdog teardown MUST
+// NOT run. The user is left with the watchdog still installed so it can
+// keep recovering whatever scheduler tasks remained after the partial
+// failure.
+func TestRunUninstall_PerServerFailure_KeepsWatchdog(t *testing.T) {
+	stubErr := errors.New("synthetic per-server uninstall failure")
+	var calls []uninstallCallRecord
+
+	doUninstall := func(s string) (*api.UninstallReport, error) {
+		calls = append(calls, uninstallCallRecord{step: "uninstall", server: s})
+		return nil, stubErr
+	}
+	doWatchdogUninstall := func(_ io.Writer, s string) error {
+		calls = append(calls, uninstallCallRecord{step: "watchdog", server: s})
+		return nil
+	}
+
+	out := &bytes.Buffer{}
+	err := runUninstall(out, "time", doUninstall, doWatchdogUninstall)
+	if err == nil {
+		t.Fatal("runUninstall: want per-server uninstall error, got nil")
+	}
+	if !errors.Is(err, stubErr) {
+		t.Errorf("error chain: want stubErr, got %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("calls = %d, want exactly 1 (per-server only): %+v", len(calls), calls)
+	}
+	if calls[0].step != "uninstall" {
+		t.Errorf("call[0].step = %q, want %q", calls[0].step, "uninstall")
+	}
+	if calls[0].server != "time" {
+		t.Errorf("call[0].server = %q, want %q", calls[0].server, "time")
+	}
+	for _, c := range calls {
+		if c.step == "watchdog" {
+			t.Errorf("watchdog teardown invoked despite per-server failure; calls=%+v", calls)
+		}
+	}
+	// Output must NOT contain the success-completion line — partial
+	// failure surfaces as an error to the caller.
+	if strings.Contains(out.String(), "Uninstall complete") {
+		t.Errorf("stdout should not contain 'Uninstall complete' on per-server failure; got %q", out.String())
+	}
+}
+
+// TestRunUninstall_LastServerSuccess_RemovesWatchdog covers the happy
+// path: when the per-server uninstall succeeds, the watchdog teardown
+// is invoked AFTER it. The actual gate that decides whether to remove
+// the watchdog scheduled task lives inside runUninstallWatchdog (Codex
+// bot P2 gate) and is exercised by the existing
+// TestUninstall_LastServer_RemovesWatchdog. This test only verifies the
+// orchestration: per-server first, watchdog second, both invoked.
+func TestRunUninstall_LastServerSuccess_RemovesWatchdog(t *testing.T) {
+	var calls []uninstallCallRecord
+
+	doUninstall := func(s string) (*api.UninstallReport, error) {
+		calls = append(calls, uninstallCallRecord{step: "uninstall", server: s})
+		return &api.UninstallReport{
+			Server:       s,
+			TasksDeleted: []string{"\\mcp-local-hub-time-default"},
+		}, nil
+	}
+	doWatchdogUninstall := func(_ io.Writer, s string) error {
+		calls = append(calls, uninstallCallRecord{step: "watchdog", server: s})
+		return nil
+	}
+
+	out := &bytes.Buffer{}
+	if err := runUninstall(out, "time", doUninstall, doWatchdogUninstall); err != nil {
+		t.Fatalf("runUninstall: %v", err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("calls = %d, want 2 (per-server + watchdog): %+v", len(calls), calls)
+	}
+	if calls[0].step != "uninstall" {
+		t.Errorf("call[0].step = %q, want %q (per-server FIRST)", calls[0].step, "uninstall")
+	}
+	if calls[1].step != "watchdog" {
+		t.Errorf("call[1].step = %q, want %q (watchdog SECOND)", calls[1].step, "watchdog")
+	}
+	if !strings.Contains(out.String(), "Uninstall complete") {
+		t.Errorf("stdout missing 'Uninstall complete' on success; got %q", out.String())
+	}
+}
+
+// TestRunUninstall_RequiresServer covers the bare-flag error path so
+// the cobra wrapper's `--server is required` contract is preserved
+// after the helper extraction.
+func TestRunUninstall_RequiresServer(t *testing.T) {
+	doUninstall := func(string) (*api.UninstallReport, error) {
+		t.Fatal("doUninstall must NOT be called when --server is empty")
+		return nil, nil
+	}
+	doWatchdogUninstall := func(io.Writer, string) error {
+		t.Fatal("doWatchdogUninstall must NOT be called when --server is empty")
+		return nil
+	}
+	err := runUninstall(&bytes.Buffer{}, "", doUninstall, doWatchdogUninstall)
+	if err == nil {
+		t.Fatal("runUninstall: want error on empty --server, got nil")
+	}
+	if !strings.Contains(err.Error(), "--server is required") {
+		t.Errorf("error message: want '--server is required', got %v", err)
+	}
+}
+
+// TestRunUninstall_WatchdogTeardownFailure_PropagatesError covers the
+// error-propagation contract on the watchdog step: when the per-server
+// uninstall succeeded but runUninstallWatchdog itself returns an error,
+// runUninstall surfaces that error to the cobra wrapper so the user
+// sees a non-zero exit. The per-server uninstall is still recorded in
+// stdout (it actually happened), but the success-completion line is
+// suppressed.
+func TestRunUninstall_WatchdogTeardownFailure_PropagatesError(t *testing.T) {
+	stubErr := errors.New("synthetic watchdog teardown failure")
+	doUninstall := func(s string) (*api.UninstallReport, error) {
+		return &api.UninstallReport{Server: s}, nil
+	}
+	doWatchdogUninstall := func(io.Writer, string) error { return stubErr }
+
+	out := &bytes.Buffer{}
+	err := runUninstall(out, "time", doUninstall, doWatchdogUninstall)
+	if err == nil {
+		t.Fatal("runUninstall: want watchdog teardown error, got nil")
+	}
+	if !errors.Is(err, stubErr) {
+		t.Errorf("error chain: want stubErr, got %v", err)
+	}
+	if strings.Contains(out.String(), "Uninstall complete") {
+		t.Errorf("stdout should not contain 'Uninstall complete' on watchdog failure; got %q", out.String())
 	}
 }
 

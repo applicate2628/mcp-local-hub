@@ -20,6 +20,8 @@ package api
 import (
 	"bytes"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -389,6 +391,115 @@ func TestStopTaskNamesForServer_UnknownServer_Errors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "load manifest") {
 		t.Errorf("error message: want 'load manifest', got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// stopTaskNamesForServer — workspace registry fail-closed (bot P1.2).
+//
+// For workspace-scoped servers, registry path/load failures must NOT
+// silently return an empty task-name set: the caller (Stop / StopWithOpts)
+// would proceed to stopKillCore with no intent/audit recording, killing
+// daemons that the watchdog could immediately revive. Plan §8 "Stop
+// fail-closed both ways" requires that if intent paths can't be
+// determined, the kill is skipped.
+// ---------------------------------------------------------------------------
+
+// pointRegistryAtTempDir routes DefaultRegistryPath()'s env-driven lookup
+// at a fresh temp directory. Returns the path that the registry helper
+// would resolve to so the caller can plant a corrupt file there. Both
+// LOCALAPPDATA (Windows) and XDG_STATE_HOME (POSIX) are set so the test
+// is platform-agnostic — DefaultRegistryPath consults LOCALAPPDATA first
+// on Windows and XDG_STATE_HOME on Linux/macOS.
+func pointRegistryAtTempDir(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	t.Setenv("LOCALAPPDATA", root)
+	t.Setenv("XDG_STATE_HOME", root)
+	regPath, err := DefaultRegistryPath()
+	if err != nil {
+		t.Fatalf("DefaultRegistryPath: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(regPath), 0o700); err != nil {
+		t.Fatalf("mkdir registry dir: %v", err)
+	}
+	return regPath
+}
+
+// TestStopTaskNamesForServer_Workspace_RegistryLoadFails_ReturnsError
+// covers bot P1.2: a corrupt workspaces.yaml causes reg.Load() to error.
+// The previous behavior returned (nil, nil) and let Stop proceed; now it
+// must propagate the error so the caller refuses to kill.
+func TestStopTaskNamesForServer_Workspace_RegistryLoadFails_ReturnsError(t *testing.T) {
+	regPath := pointRegistryAtTempDir(t)
+	// Corrupt YAML — reg.Load wraps the parse error.
+	if err := os.WriteFile(regPath, []byte("this: is: not\n  - valid: ["), 0o600); err != nil {
+		t.Fatalf("seed corrupt registry: %v", err)
+	}
+	// mcp-language-server is the shipped workspace-scoped manifest; it
+	// reaches the workspace registry branch in stopTaskNamesForServer.
+	_, err := stopTaskNamesForServer("mcp-language-server", "")
+	if err == nil {
+		t.Fatal("stopTaskNamesForServer: want error on registry load failure, got nil")
+	}
+	if !strings.Contains(err.Error(), "registry") {
+		t.Errorf("error message: want mention of registry, got %v", err)
+	}
+}
+
+// TestStopWithOpts_Workspace_RegistryLoadFails_NoKill is the end-to-end
+// equivalent of bot P1.2: when registry load fails for a workspace-scoped
+// server, StopWithOpts must return the error WITHOUT calling stopKillCore.
+// The kill counter (stopFakeKillCounter) confirms that the kill path
+// never runs — daemons stay alive instead of being killed without any
+// intent/audit record.
+func TestStopWithOpts_Workspace_RegistryLoadFails_NoKill(t *testing.T) {
+	a := NewAPI()
+	daemonIntentTestHelper(t)
+	regPath := pointRegistryAtTempDir(t)
+	if err := os.WriteFile(regPath, []byte("this: is: not\n  - valid: ["), 0o600); err != nil {
+		t.Fatalf("seed corrupt registry: %v", err)
+	}
+	r := &recordingAuditWriter{}
+	installRecordingAudit(t, r)
+	killCounter := stopFakeKillCounter(t)
+
+	_, err := a.StopWithOpts(StopOpts{Server: "mcp-language-server", Force: false})
+	if err == nil {
+		t.Fatal("StopWithOpts: want error on registry load failure, got nil")
+	}
+	if got := atomic.LoadInt32(killCounter); got != 0 {
+		t.Errorf("kill path invoked %d times on registry-load fail-closed; want 0 (plan §8)", got)
+	}
+	// No audit entries — fail-closed before any intent/audit dispatch.
+	if len(r.entries) != 0 {
+		t.Errorf("audit entries on fail-closed = %d, want 0: %+v", len(r.entries), r.entries)
+	}
+}
+
+// TestStop_Workspace_RegistryLoadFails_NoKill mirrors the StopWithOpts
+// case for the back-compat Stop entry point so both surfaces share the
+// fail-closed contract.
+func TestStop_Workspace_RegistryLoadFails_NoKill(t *testing.T) {
+	a := NewAPI()
+	daemonIntentTestHelper(t)
+	regPath := pointRegistryAtTempDir(t)
+	if err := os.WriteFile(regPath, []byte("this: is: not\n  - valid: ["), 0o600); err != nil {
+		t.Fatalf("seed corrupt registry: %v", err)
+	}
+	r := &recordingAuditWriter{}
+	installRecordingAudit(t, r)
+	killCounter := stopFakeKillCounter(t)
+
+	_, err := a.Stop("mcp-language-server", "")
+	if err == nil {
+		t.Fatal("Stop: want error on registry load failure, got nil")
+	}
+	if got := atomic.LoadInt32(killCounter); got != 0 {
+		t.Errorf("kill path invoked %d times on registry-load fail-closed; want 0 (plan §8)", got)
+	}
+	if len(r.entries) != 0 {
+		t.Errorf("audit entries on fail-closed = %d, want 0: %+v", len(r.entries), r.entries)
 	}
 }
 

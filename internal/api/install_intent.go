@@ -471,13 +471,22 @@ func stopTaskNamesForServer(server, daemonFilter string) ([]string, error) {
 		// Workspace-scoped: the per-(workspace, language) task names
 		// live in the workspace registry. Build the set + apply the
 		// optional daemonFilter (matches by the language suffix).
+		//
+		// Bot P1.2 fix: registry path/load failures must propagate as
+		// errors. Silently returning (nil, nil) would let Stop /
+		// StopWithOpts proceed to stopKillCore with an empty intent
+		// task-name set — daemons would be killed without any
+		// stop intent recorded, and the watchdog would immediately
+		// revive them. Plan §8 "Stop fail-closed both ways" requires
+		// that if the intent task-name set cannot be determined, the
+		// kill is skipped.
 		regPath, regErr := DefaultRegistryPath()
 		if regErr != nil {
-			return nil, nil
+			return nil, fmt.Errorf("stop: resolve workspace registry path for %s: %w", server, regErr)
 		}
 		reg := NewRegistry(regPath)
 		if err := reg.Load(); err != nil {
-			return nil, nil
+			return nil, fmt.Errorf("stop: load workspace registry for %s: %w", server, err)
 		}
 		var out []string
 		for _, e := range reg.Workspaces {
