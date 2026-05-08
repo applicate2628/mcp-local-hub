@@ -321,8 +321,14 @@ func fakeIntentReader(file api.DaemonIntentFile) intentReaderFn {
 // the operator runs `mcphub stop --server memory`, the daemon exits
 // with code 1 (Node MCP server graceful-stdin-close behavior), and a
 // fresh status snapshot lands. Without the intent suppression: red
-// tray icon + spurious toast. With suppression: StateDown classification
-// + no toast.
+// tray icon + spurious toast.
+//
+// With the codex deep-sec round-1 MED fix: a suppressed row is also
+// excluded from the running/total denominator, so a sole intentionally-
+// stopped daemon → total=0 → StateHealthy. ("Everything I wanted
+// stopped IS stopped.") The aggregator coalesces same-state forwards,
+// so snapshot 1 (Running) and snapshot 2 (Stopped+suppressed) both
+// classify as StateHealthy and only one forward fires.
 func TestAggregateTrayState_IntentSuppressesUserStop_NoToast_NoError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -365,14 +371,23 @@ collectLoop:
 		}
 	}
 
-	// Last forwarded state must be StateDown (intent suppressed the
-	// failure → fell through to the "none Running" branch).
+	// Last forwarded state must be StateHealthy: suppressed rows are
+	// excluded from the denominator (codex deep-sec round 1 MED), so a
+	// sole user-stopped daemon → total=0 → StateHealthy. The critical
+	// negative invariant is "no StateError forward" — the icon must
+	// not turn red on a clean operator-initiated stop.
 	if len(got) == 0 {
 		t.Fatalf("expected at least 1 tray-state forward, got 0")
 	}
 	last := got[len(got)-1]
-	if last != tray.StateDown {
-		t.Errorf("last tray state = %v, want StateDown (bug #3 — intent must demote real-failure to StateDown)", last)
+	if last != tray.StateHealthy {
+		t.Errorf("last tray state = %v, want StateHealthy (bug #3 + codex deep-sec MED — suppressed row excluded from denominator)", last)
+	}
+	for _, s := range got {
+		if s == tray.StateError {
+			t.Errorf("forwarded state stream included StateError = %v (intent must hide clean stops)", got)
+			break
+		}
 	}
 	// Toast count must be zero — the failure was suppressed.
 	if calls := toaster.snapshot(); len(calls) != 0 {

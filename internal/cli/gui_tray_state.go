@@ -192,9 +192,12 @@ func aggregateTrayStateWithToast(ctx context.Context, snapshots <-chan []api.Dae
 			}
 			prevFailed = currentFailed
 
-			// Tray-state coalescing as before — intent-aware variant
-			// so a user-stop's exit-code-1 lands at StateDown, not
-			// StateError.
+			// Tray-state coalescing as before — intent-aware variant so
+			// a user-stop's exit-code-1 does not land at StateError.
+			// Codex deep-sec round 1 (MED): a suppressed row is also
+			// excluded from the running/total denominator, so a sole
+			// user-stopped daemon classifies as StateHealthy ("nothing
+			// the operator wanted running is failing"), not StateDown.
 			s := tray.AggregateWithIntent(rows, intent, now)
 			if s == last {
 				continue

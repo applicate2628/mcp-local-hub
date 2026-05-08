@@ -74,8 +74,10 @@ func Aggregate(rows []api.DaemonStatus) TrayState {
 //     IsActiveStop(now). If active AND the reason is one of
 //     {user-stop within TTL, user-disabled, uninstalled,
 //     clock-skew-future-suspect, install/register that decayed to
-//     stopped}, the failure is suppressed — the row contributes
-//     to the running/total accounting instead of forcing StateError.
+//     stopped}, the failure is suppressed — the row is excluded
+//     from BOTH the error path AND the running/total accounting
+//     ("intentionally not running" must be invisible to the
+//     healthy-ratio calculation, not just the failure path).
 //     ChronicFailure is NOT suppressed — that reason exists precisely
 //     to surface watchdog-quarantined daemons; the operator must see
 //     them.
@@ -85,6 +87,16 @@ func Aggregate(rows []api.DaemonStatus) TrayState {
 //     None Running → StateDown. Else → StatePartial.
 //  5. Empty input → StateHealthy.
 //
+// `now` zero-value handling: when the caller passes time.Time{} AND
+// the intent map is non-empty, `now` is promoted to time.Now() so
+// IsActiveStop evaluates against real wall-clock instead of year 0001
+// (which would otherwise hit IsActiveStop's future-skew fail-closed
+// branch and silently re-classify every active-stop reason as
+// "clock-skew-future-suspect"). The legacy Aggregate(rows) path
+// passes an empty intent map and is unaffected: empty intent → no
+// row matches the lookup → no suppression, exactly the legacy
+// semantic. Codex deep-sec finding round 1 (LOW).
+//
 // Bug #3 motivation: Node-based MCP servers (e.g.
 // @modelcontextprotocol/server-memory) exit with code 1 on graceful
 // stdin-close. After `mcphub stop --server memory` Task Scheduler
@@ -93,14 +105,34 @@ func Aggregate(rows []api.DaemonStatus) TrayState {
 // (PR #134 watchdog feature) already records the user's stop intent;
 // AggregateWithIntent re-uses that signal here.
 func AggregateWithIntent(rows []api.DaemonStatus, intent api.DaemonIntentFile, now time.Time) TrayState {
+	// Defend against the back-compat shim and any caller that passes
+	// time.Time{} with a non-empty intent. IsActiveStop's future-skew
+	// fail-closed branch would otherwise mis-attribute every reason as
+	// "clock-skew-future-suspect", silently dropping the chronic-failure
+	// carve-out. Legacy Aggregate(rows) path keeps its semantics because
+	// the intent map is always empty there → lookup misses → no suppression.
+	if now.IsZero() && len(intent.Tasks) > 0 {
+		now = time.Now()
+	}
 	running, total := 0, 0
 	for _, r := range rows {
 		looksFailed := api.IsRealFailure(r.LastResult) ||
 			strings.Contains(strings.ToLower(r.State), "fail")
-		if looksFailed && !intentSuppressesFailure(r, intent, now) {
+		suppressed := looksFailed && intentSuppressesFailure(r, intent, now)
+		if looksFailed && !suppressed {
 			return StateError
 		}
 		if r.IsMaintenance {
+			continue
+		}
+		// A row whose failure was suppressed by an active stop intent
+		// is "intentionally not running" — exclude it from the
+		// running/total denominator so 2 Running + 1 user-stopped
+		// classifies as StateHealthy, not StatePartial. Without this
+		// exclusion the suppression only covered the StateError path
+		// and the icon still flashed yellow on a clean stop. Codex
+		// deep-sec finding round 1 (MED).
+		if suppressed {
 			continue
 		}
 		total++
@@ -136,11 +168,17 @@ func AggregateWithIntent(rows []api.DaemonStatus, intent api.DaemonIntentFile, n
 //   - any other active-stop reason (user-stop within TTL, user-disabled,
 //     uninstalled, clock-skew-future-suspect) → suppress.
 //
-// `now` of zero value is permitted (legacy Aggregate path); IsActiveStop
-// then evaluates against the unix epoch and returns false for every
-// realistic intent record (UpdatedAt is always in the future relative
-// to year 0001), which is exactly the back-compat semantic Aggregate
-// needs: empty intent = no suppression.
+// `now` of zero value is permitted only when the intent map is empty:
+// callers that pass non-empty intent + zero now would otherwise hit
+// IsActiveStop's future-skew fail-closed branch (year 0001 < UpdatedAt
+// - 5m for any realistic record), silently re-attributing every reason
+// as "clock-skew-future-suspect" and dropping the chronic-failure
+// carve-out. AggregateWithIntent guards against that misuse by
+// promoting zero now → time.Now() before reaching this function.
+// The legacy Aggregate(rows) path passes an empty intent map, so
+// the lookup misses on every row and the zero-now value is never
+// observed by IsActiveStop — exactly the back-compat semantic
+// Aggregate needs (no rows, no suppression).
 func intentSuppressesFailure(row api.DaemonStatus, intent api.DaemonIntentFile, now time.Time) bool {
 	if row.TaskName == "" {
 		return false

@@ -45,13 +45,16 @@ func TestAggregateWithIntent_RealFailure_NoIntent_StillError(t *testing.T) {
 	}
 }
 
-// TestAggregateWithIntent_RealFailure_UserStop_DownNotError is the
+// TestAggregateWithIntent_RealFailure_UserStop_HealthyNotError is the
 // core regression guard for bug #3. Node-based MCP servers exit with
 // code 1 on graceful stdin-close; after `mcphub stop --server memory`
 // LastResult=1 used to classify as StateError (red icon for a clean
-// user stop). With an active user-stop intent the row must classify
-// as StateDown instead.
-func TestAggregateWithIntent_RealFailure_UserStop_DownNotError(t *testing.T) {
+// user stop). With an active user-stop intent the row is excluded
+// from BOTH the error path and the running/total denominator
+// (codex deep-sec round 1 MED), so a single intentionally-stopped
+// daemon → total=0 → StateHealthy. "Everything I wanted stopped is
+// stopped" surfaces as a green icon, not a gray one.
+func TestAggregateWithIntent_RealFailure_UserStop_HealthyNotError(t *testing.T) {
 	now := time.Now().UTC()
 	intent := intentFile("\\mcp-local-hub-memory-default",
 		stoppedIntent(api.IntentReasonUserStop, now.Add(-1*time.Minute)))
@@ -60,8 +63,8 @@ func TestAggregateWithIntent_RealFailure_UserStop_DownNotError(t *testing.T) {
 		{Server: "memory", TaskName: "\\mcp-local-hub-memory-default", State: "Stopped", LastResult: 1},
 	}
 	got := AggregateWithIntent(rows, intent, now)
-	if got != StateDown {
-		t.Errorf("user-stop intent within TTL → got %v, want StateDown (bug #3)", got)
+	if got != StateHealthy {
+		t.Errorf("user-stop intent within TTL (sole row) → got %v, want StateHealthy (bug #3 + codex deep-sec MED: suppressed row excluded from denominator)", got)
 	}
 }
 
@@ -85,12 +88,13 @@ func TestAggregateWithIntent_RealFailure_UserStop_TTLExpired_BackToError(t *test
 	}
 }
 
-// TestAggregateWithIntent_RealFailure_UserDisabled_DownNotError covers
+// TestAggregateWithIntent_RealFailure_UserDisabled_HealthyNotError covers
 // the permanent-suppress reason. user-disabled never expires; the
 // operator deliberately turned this daemon off, so a non-zero LastResult
 // (likely the exit code from the stop that flipped it to disabled) must
-// not surface as an error.
-func TestAggregateWithIntent_RealFailure_UserDisabled_DownNotError(t *testing.T) {
+// not surface as an error. Sole row → after exclusion total=0 → Healthy
+// (codex deep-sec round 1 MED).
+func TestAggregateWithIntent_RealFailure_UserDisabled_HealthyNotError(t *testing.T) {
 	now := time.Now().UTC()
 	// Even very old user-disabled intents stay active (no TTL).
 	intent := intentFile("\\mcp-local-hub-memory-default",
@@ -100,17 +104,18 @@ func TestAggregateWithIntent_RealFailure_UserDisabled_DownNotError(t *testing.T)
 		{Server: "memory", TaskName: "\\mcp-local-hub-memory-default", State: "Stopped", LastResult: 1},
 	}
 	got := AggregateWithIntent(rows, intent, now)
-	if got != StateDown {
-		t.Errorf("user-disabled intent → got %v, want StateDown (permanent suppress must hide failure)", got)
+	if got != StateHealthy {
+		t.Errorf("user-disabled intent (sole row) → got %v, want StateHealthy (permanent-suppress + denominator exclusion)", got)
 	}
 }
 
-// TestAggregateWithIntent_RealFailure_Uninstalled_DownNotError covers
+// TestAggregateWithIntent_RealFailure_Uninstalled_HealthyNotError covers
 // the cleanup-side reason. After uninstall there should be no row left
 // at all, but if status enumeration races with intent record (rare,
 // observable during the uninstall handshake) the aggregator must not
-// flash a red icon for the in-flight removal.
-func TestAggregateWithIntent_RealFailure_Uninstalled_DownNotError(t *testing.T) {
+// flash a red icon for the in-flight removal. Sole row → after exclusion
+// total=0 → Healthy (codex deep-sec round 1 MED).
+func TestAggregateWithIntent_RealFailure_Uninstalled_HealthyNotError(t *testing.T) {
 	now := time.Now().UTC()
 	intent := intentFile("\\mcp-local-hub-memory-default",
 		stoppedIntent(api.IntentReasonUninstalled, now.Add(-30*time.Second)))
@@ -119,8 +124,8 @@ func TestAggregateWithIntent_RealFailure_Uninstalled_DownNotError(t *testing.T) 
 		{Server: "memory", TaskName: "\\mcp-local-hub-memory-default", State: "Stopped", LastResult: 1},
 	}
 	got := AggregateWithIntent(rows, intent, now)
-	if got != StateDown {
-		t.Errorf("uninstalled intent → got %v, want StateDown (removal in-flight must not flash error)", got)
+	if got != StateHealthy {
+		t.Errorf("uninstalled intent (sole row) → got %v, want StateHealthy (in-flight removal + denominator exclusion)", got)
 	}
 }
 
@@ -166,7 +171,8 @@ func TestAggregateWithIntent_Running_IgnoresIntent(t *testing.T) {
 // the LastResult-based path for the state-string predicate. Some daemon
 // paths emit "Failed" without a matching LastResult update; the same
 // user-stop suppression must apply, otherwise the bug recurs through
-// the alternative entry point.
+// the alternative entry point. Sole row → after exclusion total=0 →
+// Healthy (codex deep-sec round 1 MED).
 func TestAggregateWithIntent_StateContainsFail_UserStop_Suppressed(t *testing.T) {
 	now := time.Now().UTC()
 	intent := intentFile("\\mcp-local-hub-memory-default",
@@ -176,8 +182,8 @@ func TestAggregateWithIntent_StateContainsFail_UserStop_Suppressed(t *testing.T)
 		{Server: "memory", TaskName: "\\mcp-local-hub-memory-default", State: "FailedToLaunch"},
 	}
 	got := AggregateWithIntent(rows, intent, now)
-	if got != StateDown {
-		t.Errorf("state=FailedToLaunch + user-stop → got %v, want StateDown (state-string path must respect intent)", got)
+	if got != StateHealthy {
+		t.Errorf("state=FailedToLaunch + user-stop (sole row) → got %v, want StateHealthy (state-string path + denominator exclusion)", got)
 	}
 }
 
@@ -187,7 +193,8 @@ func TestAggregateWithIntent_StateContainsFail_UserStop_Suppressed(t *testing.T)
 // canonicalIntentTaskKey normalization); rows from Status() also
 // carry the leading backslash. Mismatched normalization here would
 // re-introduce the bug under a different guise (lookup misses,
-// row classified as error despite recorded intent).
+// row classified as error despite recorded intent). Sole row →
+// after suppression+exclusion total=0 → Healthy.
 func TestAggregateWithIntent_TaskNameNormalization(t *testing.T) {
 	now := time.Now().UTC()
 	intent := intentFile("\\mcp-local-hub-memory-default",
@@ -199,8 +206,126 @@ func TestAggregateWithIntent_TaskNameNormalization(t *testing.T) {
 		{Server: "memory", TaskName: "\\mcp-local-hub-memory-default", State: "Stopped", LastResult: 1},
 	}
 	got := AggregateWithIntent(rows, intent, now)
-	if got != StateDown {
-		t.Errorf("canonical leading-backslash key lookup → got %v, want StateDown (key normalization regression)", got)
+	if got != StateHealthy {
+		t.Errorf("canonical leading-backslash key lookup → got %v, want StateHealthy (key normalization regression)", got)
+	}
+}
+
+// TestAggregateWithIntent_MixedRunningPlusUserStopped_Healthy is the
+// codex deep-sec round-1 finding (MED). With 2 Running rows + 1
+// LastResult=1 row that has an active user-stop intent, the suppressed
+// row was still counted in the running/total denominator, producing
+// StatePartial (running=2, total=3). The operator's intent says "this
+// daemon is intentionally not running" so it must be invisible to the
+// healthy-ratio calculation as well — every row with an active
+// suppressed-stop intent is excluded from BOTH the error AND the ratio
+// counters. Expected: StateHealthy (running=2, total=2 after exclusion).
+func TestAggregateWithIntent_MixedRunningPlusUserStopped_Healthy(t *testing.T) {
+	now := time.Now().UTC()
+	intent := api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{
+		"\\mcp-local-hub-memory-default": stoppedIntent(api.IntentReasonUserStop, now.Add(-1*time.Minute)),
+	}}
+
+	rows := []api.DaemonStatus{
+		{Server: "fs", TaskName: "\\mcp-local-hub-fs-default", State: "Running"},
+		{Server: "git", TaskName: "\\mcp-local-hub-git-default", State: "Running"},
+		// User-stopped row with the canonical Node-MCP exit-1 signature.
+		{Server: "memory", TaskName: "\\mcp-local-hub-memory-default", State: "Stopped", LastResult: 1},
+	}
+	got := AggregateWithIntent(rows, intent, now)
+	if got != StateHealthy {
+		t.Errorf("2 Running + 1 user-stopped (suppressed) → got %v, want StateHealthy "+
+			"(suppressed row must be excluded from running/total ratio, not just the error path)", got)
+	}
+}
+
+// TestAggregateWithIntent_MultiRow_OneUserStoppedPlusOneRealFailure
+// guards the inverse: even with one row legitimately suppressed, a
+// SECOND row with a real failure but NO intent must still dominate
+// to StateError. The new exclusion rule must not weaken error
+// detection on adjacent rows.
+func TestAggregateWithIntent_MultiRow_OneUserStoppedPlusOneRealFailure(t *testing.T) {
+	now := time.Now().UTC()
+	intent := api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{
+		"\\mcp-local-hub-memory-default": stoppedIntent(api.IntentReasonUserStop, now.Add(-1*time.Minute)),
+	}}
+
+	rows := []api.DaemonStatus{
+		{Server: "fs", TaskName: "\\mcp-local-hub-fs-default", State: "Running"},
+		// User-stopped + suppressed.
+		{Server: "memory", TaskName: "\\mcp-local-hub-memory-default", State: "Stopped", LastResult: 1},
+		// Real failure with NO recorded intent → must dominate.
+		{Server: "git", TaskName: "\\mcp-local-hub-git-default", State: "Stopped", LastResult: 1},
+	}
+	got := AggregateWithIntent(rows, intent, now)
+	if got != StateError {
+		t.Errorf("1 Running + 1 suppressed + 1 real failure (no intent) → got %v, want StateError "+
+			"(real failure on a non-suppressed row must still raise red badge)", got)
+	}
+}
+
+// TestAggregateWithIntent_ZeroNow_FallsBackToTimeNow is the codex
+// deep-sec round-1 finding (LOW): the comment claimed
+// IsActiveStop(time.Time{}) returns false for realistic intents, but
+// in fact it hits the future-skew fail-closed branch (because
+// time.Time{} < UpdatedAt - 5m for any realistic UpdatedAt) and
+// returns (true, "clock-skew-future-suspect") — exactly the OPPOSITE
+// of the comment's claim. With now=zero AND a non-empty intent file,
+// AggregateWithIntent would mis-suppress the row.
+//
+// Defense: AggregateWithIntent must promote zero `now` to time.Now()
+// internally, making the back-compat Aggregate(rows) path implicitly
+// safe (empty intent + now=time.Now() → no suppression) AND making
+// AggregateWithIntent(non-empty, zero) behave like a sensible "use
+// current wall-clock" call instead of an exported foot-gun.
+//
+// Multi-row variant: a Running peer + a user-stopped (suppressed) row
+// is the cleanest assertion target. Without the fallback the future-skew
+// suppression still fires on the user-stop reason (same outcome by
+// accident); the dangerous reason-confusion case is in the
+// ZeroNow_ChronicFailure test below.
+func TestAggregateWithIntent_ZeroNow_FallsBackToTimeNow(t *testing.T) {
+	// UpdatedAt anchored "now-ish" so a sane wall-clock would classify
+	// it as an active user-stop within TTL → suppression should fire.
+	intent := api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{
+		"\\mcp-local-hub-memory-default": stoppedIntent(
+			api.IntentReasonUserStop, time.Now().UTC().Add(-1*time.Minute)),
+	}}
+
+	rows := []api.DaemonStatus{
+		{Server: "fs", TaskName: "\\mcp-local-hub-fs-default", State: "Running"},
+		{Server: "memory", TaskName: "\\mcp-local-hub-memory-default", State: "Stopped", LastResult: 1},
+	}
+	got := AggregateWithIntent(rows, intent, time.Time{})
+	if got != StateHealthy {
+		t.Errorf("zero now + active user-stop intent (1 Running peer) → got %v, want StateHealthy "+
+			"(zero-now must promote to time.Now(); suppressed row excluded from denominator)", got)
+	}
+}
+
+// TestAggregateWithIntent_ZeroNow_ChronicFailure_StaysError exercises
+// the dangerous reason-confusion path the zero-now defense actually
+// closes. Without the defense, IsActiveStop(time.Time{}) returns
+// (true, "clock-skew-future-suspect") regardless of the recorded
+// reason, so chronic-failure (which the operator NEEDS to see) would
+// be silently re-classified as a clock-skew suppression. With the
+// defense, IsActiveStop runs against real wall-clock and the
+// chronic-failure carve-out fires correctly → StateError.
+func TestAggregateWithIntent_ZeroNow_ChronicFailure_StaysError(t *testing.T) {
+	intent := api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{
+		"\\mcp-local-hub-memory-default": stoppedIntent(
+			api.IntentReasonChronicFailure, time.Now().UTC().Add(-1*time.Minute)),
+	}}
+
+	rows := []api.DaemonStatus{
+		{Server: "memory", TaskName: "\\mcp-local-hub-memory-default", State: "Stopped", LastResult: 1},
+	}
+	got := AggregateWithIntent(rows, intent, time.Time{})
+	if got != StateError {
+		t.Errorf("zero now + chronic-failure intent → got %v, want StateError "+
+			"(chronic-failure carve-out must survive the zero-now fallback; "+
+			"without the fallback, IsActiveStop misreports clock-skew-future-suspect "+
+			"and the watchdog quarantine vanishes from the icon)", got)
 	}
 }
 
