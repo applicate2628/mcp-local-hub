@@ -155,6 +155,31 @@ describe("CapabilitiesScreen — Phase 3 Refresh", () => {
     consoleSpy.mockRestore();
   });
 
+  it("error-state Refresh failure surfaces LATEST retry error, not stale initial-load error (codex bot PR #144 round 3 P2)", async () => {
+    // Codex bot finding: when initial load fails, state.error holds
+    // the first error. If user clicks Refresh in error state and the
+    // retry ALSO fails (with a different error), only refreshError was
+    // updated — state.error stayed stale, and the error branch only
+    // displays state.error. Result: user kept seeing the original
+    // diagnostic and lost context on what just failed.
+    vi.spyOn(api, "fetchOrThrow")
+      .mockRejectedValueOnce(new Error("first error: daemon starting"))
+      .mockRejectedValueOnce(new Error("second error: rate limited"));
+
+    const { findByRole, findByTestId } = render(<CapabilitiesScreen />);
+    const initialAlert = await findByRole("alert");
+    expect(initialAlert.textContent).toContain("first error: daemon starting");
+    const button = await findByTestId("capabilities-refresh-btn");
+    fireEvent.click(button);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    // After retry failure, the alert MUST reflect the LATEST error.
+    const updatedAlert = await findByRole("alert");
+    expect(updatedAlert.textContent).toContain("second error: rate limited");
+    expect(updatedAlert.textContent).not.toContain("first error: daemon starting");
+  });
+
   it("error state still renders Refresh button so initial-load failure isn't a dead end (codex bot PR #144 round 2 P2)", async () => {
     // Codex bot finding: when /api/health initial fetch fails, the
     // error branch must not strip the Refresh affordance. Operators

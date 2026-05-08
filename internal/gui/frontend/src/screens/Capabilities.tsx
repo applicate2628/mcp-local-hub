@@ -55,6 +55,20 @@ export function CapabilitiesScreen() {
       })
       .catch((err: Error) => {
         if (!mountedRef.current) return;
+        // Codex bot PR #144 round-3 P2: if the screen is currently in
+        // the error branch (initial load failed), updating only
+        // `refreshError` leaves `state.error` stale — the alert keeps
+        // showing the original failure message after every retry. Use
+        // the functional updater to read current status; when error,
+        // promote the new error to state.error so the displayed
+        // message reflects the LATEST retry. When ok, keep state
+        // unchanged and surface the inline refresh-error in the header.
+        setState((prev) => {
+          if (prev.status === "error") {
+            return { status: "error", error: err.message };
+          }
+          return prev;
+        });
         setRefreshError(err.message);
         setRefreshing(false);
       });
