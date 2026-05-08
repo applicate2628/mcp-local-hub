@@ -234,15 +234,25 @@ func compileWatcherRegex(user, fallback string) (*regexp.Regexp, error) {
 // still its meaningful parent" — accounting for POSIX init/subreaper
 // reparenting that makes the bare `pidSet[ppid]` check insufficient.
 //
-// Codex Cloud bot P1 on PR #131 / kosyak
-// 2026-05-07-posix-reparenting-defeats-parent-alive-orphan-heuristic.md:
-// when an agent shell exits on POSIX, the kernel reparents its
-// descendants to PID 1 (init) — which is always alive — so a naive
-// `pidSet[ppid]` returns true even though the original parent is gone.
-// Effect: default Apply path with IncludeLive=false skips the very
-// orphans we want to clean. Treat ppid==1 on POSIX as effectively
-// orphan. Windows does not auto-reparent, so the bare check stays
-// correct there.
+// Why the POSIX ppid==1 special case is correct here: this helper is
+// consulted only from filterWatcherCandidates against rows that already
+// passed the watcherProcessNames gate (`bash`, `sh`, `tail`, `grep`).
+// Those user-space utility processes are NEVER spawned directly by
+// init/systemd as services in normal operation. So when they appear
+// with ppid==1 on POSIX, the only realistic way for that to happen
+// is reparenting after their original parent (an agent shell, codex
+// CLI, mcphub watchdog, etc.) exited — exactly the orphan case the
+// log-watcher sweep targets. Treating ppid==1 as "parent alive" would
+// keep `tail`/`grep` adopted by PID 1 untouched on the IncludeLive=false
+// default path, defeating the cleanup feature.
+//
+// Codex Cloud bot P1 on PR #135 round 2: the prior fix that simply
+// returned `pidSet[ppid]` regressed orphan detection for reparented
+// POSIX watchers. Restoring the POSIX-init special case is the
+// architectural fix because we have no separate record of the
+// original parent PID — but limited to the watcher-process subset,
+// the heuristic is sound. Windows does not auto-reparent on parent
+// exit, so the bare check stays correct there.
 func effectiveParentAlive(ppid int, pidSet map[int]bool) bool {
 	if ppid == 0 {
 		return false
@@ -252,7 +262,9 @@ func effectiveParentAlive(ppid int, pidSet map[int]bool) bool {
 	}
 	if runtime.GOOS != "windows" && ppid == 1 {
 		// POSIX init / systemd as PID 1 has adopted us — original
-		// parent already exited. Classify as orphan.
+		// parent already exited. Classify as orphan. Safe because
+		// callers gate by watcherProcessNames (bash/sh/tail/grep),
+		// which are not legitimate direct init children.
 		return false
 	}
 	return true
