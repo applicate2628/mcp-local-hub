@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"io"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -20,22 +19,18 @@ import (
 // Used by the orphan detector to skip processes that are running by
 // design — their parent is typically the Task Scheduler service, so the
 // parent-is-our-daemon heuristic alone cannot protect them.
+//
+// Codex deep-sec PR #143 round 4 finding A1: this function used to ship
+// its own first-token parser (split at first space, fall through to
+// filepath.Base). That was inconsistent with redactCmdlineForDisplay's
+// shape-aware parser and would mis-classify a cmdline like
+// `C:\Program Files\mcphub\mcphub.exe daemon --server gdb` — the naive
+// split returned `Program` instead of `mcphub.exe`, so isOurOwnProcess
+// returned false and parseOrphans would have flagged a real hub daemon
+// as orphan and killed it. The shared helper below now performs the
+// extension-lookup walk for both functions.
 func isOurOwnProcess(cmdline string) bool {
-	if cmdline == "" {
-		return false
-	}
-	// Extract the first token (the exe path). Handles both quoted and
-	// unquoted cmdlines: `"C:\path with spaces\mcphub.exe" daemon ...`
-	// and `C:\path\mcphub.exe daemon ...`.
-	first := cmdline
-	if cmdline[0] == '"' {
-		if end := strings.IndexByte(cmdline[1:], '"'); end > 0 {
-			first = cmdline[1 : 1+end]
-		}
-	} else if sp := strings.IndexByte(cmdline, ' '); sp > 0 {
-		first = cmdline[:sp]
-	}
-	base := strings.ToLower(filepath.Base(first))
+	base := strings.ToLower(firstTokenBasename(cmdline))
 	switch base {
 	case "mcphub.exe", "mcphub",
 		"mcp.exe", "mcp",
@@ -50,14 +45,254 @@ func isOurOwnProcess(cmdline string) bool {
 // OrphanProcess describes one orphan MCP subprocess discovered by CleanupOrphans.
 // KillErr is populated only when DryRun=false and taskkill failed for this PID
 // (access denied, process already gone, etc.); empty on success or dry-run.
+//
+// Wire-format note (Cleanup-6 security fix): the raw Cmdline is kept on
+// the struct for server-side use (manifest-pattern match in CleanupOrphans,
+// CLI display via `mcphub cleanup`, NeverKill enforcement) but is hidden
+// from JSON output (`json:"-"`) because full command lines often carry
+// workspace paths, username segments, file paths, and process arguments
+// that may include API keys or tokens. The GUI/HTTP wire instead exposes
+// `cmdline_display` populated by redactCmdlineForDisplay — basename of
+// the executable only — which is enough for an operator to recognize
+// the process while keeping sensitive context off-wire and out of
+// browser dev-tools / screenshots.
 type OrphanProcess struct {
-	PID      int    `json:"pid"`
-	ParentID int    `json:"parent_pid"`
-	Server   string `json:"server"` // inferred from matching manifest
-	RAMBytes uint64 `json:"ram_bytes"`
-	Cmdline  string `json:"cmdline"`
-	AgeSec   int64  `json:"age_sec"`
-	KillErr  string `json:"kill_err,omitempty"`
+	PID             int    `json:"pid"`
+	ParentID        int    `json:"parent_pid"`
+	Server          string `json:"server"` // inferred from matching manifest
+	RAMBytes        uint64 `json:"ram_bytes"`
+	Cmdline         string `json:"-"`               // server-side use only; redacted from wire
+	CmdlineDisplay  string `json:"cmdline_display"` // basename of executable for GUI display
+	AgeSec          int64  `json:"age_sec"`
+	KillErr         string `json:"kill_err,omitempty"`
+}
+
+// firstTokenBasename returns the basename (no directory prefix) of the
+// FIRST token of a cmdline string — the executable path component before
+// any arguments. Returns "" for empty/whitespace-only input.
+//
+// Codex deep-sec PR #143 round 4 finding A1: this helper exists so the
+// orphan detector and the redaction pipeline share ONE shape-aware parser.
+// Two divergent first-token parsers used to ship — `isOurOwnProcess` had
+// a naive first-space split (so `C:\Program Files\mcphub\mcphub.exe ...`
+// returned `Program` and could be classified as an orphan and killed),
+// while `redactCmdlineForDisplay` already knew the WMIC-stripped Windows
+// path shape. Unified here to eliminate the safety bug.
+//
+// Parsing rules:
+//   - Empty / whitespace-only input: returns "".
+//   - Opening double-quote: take everything between the matching quotes
+//     (handles `"C:\Program Files\foo.exe" arg1`).
+//   - Unterminated opening quote: take the rest of the string as the
+//     path token (best-effort, no panic on malformed wmic output).
+//   - First token contains a path separator AND a recognized Windows
+//     executable extension (.exe/.com/.cmd/.bat/.ps1) precedes the
+//     earliest whitespace: anchor on `<ext><whitespace>` so a path
+//     with an embedded space (the WMIC-stripped `Program Files` case)
+//     stays intact.
+//   - Otherwise: first-whitespace split — handles bare-basename launchers
+//     (`uvx mcp-server-time --cache C:\tmp\helper.exe` correctly returns
+//     `uvx`, NOT `helper.exe` from a later argument).
+//
+// Codex deep-sec finding A3 / Q1: the whitespace separator set is
+// ` \t\n\r` (NOT just space + tab). A cmdline like
+// `node.exe\n--api-key=sk-secret` previously merged the entire string
+// into the "first token" because `\n` was not a separator, and the
+// returned basename would have leaked the API key into cmdline_display.
+//
+// Codex deep-sec finding S2: the result is capped at 256 bytes to keep
+// pathological inputs (long unicode-decoded basename, etc.) from bloating
+// JSON output and the orphan-table UI. Real exe basenames are <100 chars;
+// the cap is forgiving but bounded.
+func firstTokenBasename(cmdline string) string {
+	c := strings.TrimSpace(cmdline)
+	if c == "" {
+		return ""
+	}
+	first := c
+	if c[0] == '"' {
+		if end := strings.IndexByte(c[1:], '"'); end > 0 {
+			first = c[1 : 1+end]
+		} else {
+			// Unterminated quote → treat the rest as the path token.
+			first = c[1:]
+		}
+	} else {
+		// Whitespace separators include `\n` and `\r` so a cmdline like
+		// `node.exe\n--api-key=sk-secret` cannot smuggle the API-key
+		// suffix into the "first token" and through filepath.Base into
+		// cmdline_display (codex deep-sec finding A3 / Q1).
+		sp := strings.IndexAny(c, " \t\n\r")
+		switch {
+		case sp < 0:
+			// No whitespace anywhere — single-token cmdline, the whole
+			// thing is the executable path.
+			first = c
+		case strings.ContainsAny(c[:sp], `\/`):
+			// First token has a path separator — could be a partial
+			// Windows path with embedded spaces. The character right
+			// after the first whitespace decides:
+			//   - Flag-like (`-` or `/-` for old-style switches) → the
+			//     path is COMPLETE before the whitespace; the rest is
+			//     CLI arguments. Use first-whitespace as the boundary.
+			//     Defends against extensionless-executable + later
+			//     `.exe`-bearing argument case (codex bot PR #143
+			//     round 5 P2: `C:\tools\python -m server --cache
+			//     C:\tmp\helper.exe` used to return `helper.exe`
+			//     because the extension scan ran over the entire
+			//     cmdline; now flag detection terminates the path
+			//     at `python`).
+			//   - Anything else (path continuation like `Files\...`
+			//     or non-flag arg) → the path may have embedded
+			//     spaces (WMIC-stripped quotes case); try extension
+			//     lookup; fall back to first-whitespace if no
+			//     extension is found.
+			if firstWhitespaceTerminatesPath(c, sp) {
+				first = c[:sp]
+			} else if extEnd := findWindowsExeExtensionEnd(c); extEnd > 0 {
+				first = c[:extEnd]
+			} else {
+				first = c[:sp]
+			}
+		default:
+			// First token is a bare basename (e.g. `uvx`, `python3`,
+			// `node.exe`) — first-whitespace IS the boundary. Skip the
+			// extension lookup so a later argument's `.exe` substring
+			// cannot win.
+			first = c[:sp]
+		}
+	}
+	first = strings.TrimSpace(first)
+	if first == "" {
+		return ""
+	}
+	// filepath.Base handles both backslash and forward-slash separators on
+	// Windows; on POSIX it splits on forward-slash only. The orphan
+	// detector consumes Windows-shaped CommandLine values from CIM/wmic,
+	// so we walk both separators ourselves to stay platform-independent.
+	if i := strings.LastIndexAny(first, `\/`); i >= 0 {
+		first = first[i+1:]
+	}
+	if first == "" {
+		return ""
+	}
+	// Codex deep-sec finding S2: cap pathologically long basenames so a
+	// rogue input cannot bloat the JSON wire / UI table. 256 bytes is
+	// more than 2.5× the longest real exe basename ever observed.
+	const cmdlineDisplayCap = 256
+	if len(first) > cmdlineDisplayCap {
+		// Reserve 3 bytes for the truncation marker so the UI shows the
+		// "this was clipped" affordance.
+		first = first[:cmdlineDisplayCap-3] + "..."
+	}
+	return first
+}
+
+// redactCmdlineForDisplay returns the executable's basename only, with no
+// path and no arguments. Cleanup-6 security fix: full command lines often
+// embed workspace paths (D:\dev\client-confidential-project\...), username
+// segments (C:\Users\<name>\...), filesystem paths to private files, and
+// process arguments that may contain API keys or tokens (--api-key=sk-...).
+// The orphan-table UI in the GUI and any operator screenshots / browser
+// dev-tools that observe the wire MUST see only the basename — the PID,
+// inferred Server, RAM, and Age columns carry the operational info needed
+// to confirm a kill.
+//
+// Behavior is delegated to firstTokenBasename; this thin wrapper just maps
+// the empty-input sentinel to the UI-visible `<unknown>` string. Both
+// `isOurOwnProcess` and `redactCmdlineForDisplay` consume the same parser
+// to keep the orphan-allowlist gate consistent with the displayed name
+// (codex deep-sec PR #143 round 4 finding A1).
+func redactCmdlineForDisplay(cmdline string) string {
+	first := firstTokenBasename(cmdline)
+	if first == "" {
+		return "<unknown>"
+	}
+	return first
+}
+
+// windowsExeExtensions enumerates the recognized Windows executable
+// suffixes. Listed shortest-first so the loop terminates on the first
+// match without overrunning into a longer suffix that happens to share
+// a prefix. Case-insensitive comparison is performed by the caller.
+var windowsExeExtensions = []string{".exe", ".com", ".cmd", ".bat", ".ps1"}
+
+// findWindowsExeExtensionEnd returns the byte index immediately AFTER the
+// first occurrence of a known Windows executable extension that is followed
+// by either whitespace or end-of-string, or -1 if no such boundary exists.
+// The lookup is case-insensitive: `.exe`, `.EXE`, `.Exe` all match.
+//
+// The function exists to handle WMIC-stripped quoted Windows paths where
+// the quotes vanish but the path still contains an embedded space (the
+// most common case is `C:\Program Files\...`). Splitting at the first
+// space would put the boundary inside the path; splitting at the first
+// `.exe<space>` keeps the executable intact.
+//
+// Codex bot PR #143 round 1 P2: prior implementation truncated
+// `C:\Program Files\nodejs\node.exe -y server-memory` to `C:\Program`
+// because the first space won. This helper finds `.exe ` and returns
+// the index after the extension instead.
+func findWindowsExeExtensionEnd(s string) int {
+	lower := strings.ToLower(s)
+	bestIdx := -1
+	for _, ext := range windowsExeExtensions {
+		// Walk every occurrence; pick the first one that is followed by
+		// whitespace or end-of-string. Short-circuit at the earliest hit
+		// so an extension inside a later argument cannot overshadow the
+		// path's actual executable.
+		searchFrom := 0
+		for searchFrom < len(lower) {
+			idx := strings.Index(lower[searchFrom:], ext)
+			if idx < 0 {
+				break
+			}
+			abs := searchFrom + idx
+			end := abs + len(ext)
+			// Boundary check: end-of-string OR next char is whitespace.
+			// Newline/CR included alongside space/tab so a cmdline that
+			// uses `\n` or `\r\n` between exe and args still anchors here
+			// (codex deep-sec PR #143 round 4 finding A3 / Q1).
+			if end == len(s) || s[end] == ' ' || s[end] == '\t' || s[end] == '\n' || s[end] == '\r' {
+				if bestIdx < 0 || end < bestIdx {
+					bestIdx = end
+				}
+				break
+			}
+			searchFrom = abs + 1
+		}
+	}
+	return bestIdx
+}
+
+// firstWhitespaceTerminatesPath returns true when the character
+// immediately after the first whitespace at index `sp` is a flag-like
+// marker (`-`), meaning the executable path is complete BEFORE that
+// whitespace and the rest is CLI arguments. Used by firstTokenBasename
+// to decide whether to bother running the Windows extension lookup.
+//
+// Codex bot PR #143 round 5 P2: prior implementation always ran the
+// full-cmdline extension scan whenever the first token contained a
+// path separator. For an extensionless executable plus a later
+// `.exe`-bearing argument (e.g. `C:\tools\python -m server --cache
+// C:\tmp\helper.exe`), the scan anchored on the argument's `helper.exe`
+// instead of the actual executable `python`. This helper short-circuits
+// the scan when the first space is followed by a flag character, so
+// the executable token stays at `c[:sp]` (`C:\tools\python`).
+//
+// We deliberately treat ONLY `-` as the flag marker; `/` is reserved
+// for POSIX paths and old-style Windows switches (`/c`), but a `/` at
+// position sp+1 is overwhelmingly more likely to be a POSIX path
+// continuation (e.g. `node /usr/local/share/foo`) than a switch.
+// Erring on the side of running the extension lookup in the `/` case
+// preserves WMIC-stripped quoted Windows paths while accepting the
+// (vanishingly rare) miss on `cmd.exe /c something`-style invocations
+// where the `/` would terminate the path token cleanly anyway.
+func firstWhitespaceTerminatesPath(c string, sp int) bool {
+	if sp+1 >= len(c) {
+		return true // nothing after the whitespace; path is complete.
+	}
+	next := c[sp+1]
+	return next == '-'
 }
 
 // CleanupOpts controls CleanupOrphans.
@@ -218,6 +453,14 @@ func isBroadLauncherToken(pattern string) bool {
 // patterns BUT whose parent is NOT an `mcp.exe daemon` process.
 //
 // Visible for unit tests so fixture CSVs can drive the logic without wmic.
+//
+// Known limitation (codex deep-sec PR #143 round 4 finding Q2): the
+// bufio.Scanner below splits strictly on newline, so a CommandLine field
+// that contains an embedded `\n` (rare; quotes around such fields would
+// normally protect them) would prematurely end the row. Real WMIC /
+// CIM output never produces this shape in practice; rewriting the
+// parser to a state-machine CSV reader is deferred until a real-world
+// case appears.
 func parseOrphans(r io.Reader, patterns []string) []OrphanProcess {
 	s := bufio.NewScanner(r)
 	s.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -306,11 +549,12 @@ func parseOrphans(r io.Reader, patterns []string) []OrphanProcess {
 			age = int64(time.Since(r.created).Seconds())
 		}
 		out = append(out, OrphanProcess{
-			PID:      r.pid,
-			ParentID: r.ppid,
-			RAMBytes: r.ram,
-			Cmdline:  r.cmdline,
-			AgeSec:   age,
+			PID:            r.pid,
+			ParentID:       r.ppid,
+			RAMBytes:       r.ram,
+			Cmdline:        r.cmdline,
+			CmdlineDisplay: redactCmdlineForDisplay(r.cmdline),
+			AgeSec:         age,
 		})
 	}
 	return out

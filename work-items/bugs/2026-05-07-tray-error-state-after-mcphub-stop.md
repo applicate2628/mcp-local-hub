@@ -88,16 +88,24 @@ Or accept the false-positive error tooltip; the dashboard shows the actual Stopp
 
 ## Resolution
 
-**Status:** closed (Option A shipped)
+**Status:** closed (Option A shipped + 5 review rounds of refinement)
 **Date:** 2026-05-08
-**Branch:** `fix/v0.3.0-bug3-tray-state`
+**PR:** #142 merged as `d8e3999` (squash across 7 commits / 6 review rounds)
 
-Implemented Option A using the existing `daemon-intent.json` user-stop marker (already shipped with watchdog feature in PR #134 commit `982c366`). Added `tray.AggregateWithIntent(rows, intent, now)` that suppresses `StateError` classification when the daemon row's intent is actively stopped (user-stop within TTL, user-disabled, uninstalled, or chronic-failure). Existing `tray.Aggregate(rows)` wrapper preserved for back-compat (passes empty intent).
+Implemented Option A using the existing `daemon-intent.json` user-stop marker (already shipped with watchdog feature in PR #134 commit `982c366`). Added `tray.AggregateWithIntent(rows, intent, now)` that suppresses `StateError` classification when the daemon row's intent is actively stopped (user-stop within TTL, user-disabled, uninstalled — chronic-failure carve-out keeps StateError so the watchdog quarantine remains visible).
 
-Tray caller (`internal/cli/gui_tray_state.go`) updated to `aggregateTrayStateWithToast` — accepts an `intentReaderFn` injection so it consults `daemon-intent.json` per Status snapshot. Production wiring uses `(*api.API).ReadDaemonIntent`. Read errors degrade gracefully to the back-compat empty-intent path so a corrupt intent file doesn't break the tray.
+Final shape after rounds 1-6 of bot + codex deep-sec review:
+
+- **Suppression hides red** for non-Running rows with active stop intent (regardless of LastResult shape — operator intent overrides exit-code shape).
+- **Suppression excludes from ratio** so "2 Running + 1 user-stopped" classifies as StateHealthy, not StatePartial.
+- **Running rows ignore intent** — `r.State != "Running"` guard preserves `Running_IgnoresIntent` semantic.
+- **All-suppressed → StateDown**: `total==0 + suppressedCount>0` returns StateDown ("operator stopped everything; nothing running"), not StateHealthy. No green icon over an entirely-stopped system.
+- **Tray hot path bounded**: `(*api.API).TryReadDaemonIntent(timeout)` uses `flock.TryLockContext` with a 250ms cap so a held lock cannot freeze the snapshot loop. Aggregator carries an in-process intent cache (5-min TTL) so transient flock contention does NOT regress suppression.
 
 Files:
-- `internal/tray/state.go` — added `AggregateWithIntent`
-- `internal/tray/state_intent_test.go` — 10 new tests covering user-stop suppression, TTL expiry, user-disabled, uninstalled, chronic-failure, Running ignores intent, task-name canonical-form lookup
-- `internal/cli/gui_tray_state.go` — `aggregateTrayStateWithToast` now consults intent each tick
-- `internal/cli/gui_tray_state_test.go` — extended coverage for intent-aware path
+- `internal/tray/state.go` — added `AggregateWithIntent` with intent-aware suppression + `suppressedCount` for the `total==0` fork
+- `internal/tray/state_intent_test.go` — 21 tests covering all suppression branches, ratio rules, all-suppressed→StateDown, Plain+UserStop cross-product
+- `internal/api/daemon_intent.go` — added `TryReadDaemonIntent(timeout)` for non-blocking tray hot-path; existing blocking `ReadDaemonIntent` unchanged for one-shot install/stop/uninstall
+- `internal/api/daemon_intent_test.go` — 5 new tests covering contention, missing/corrupt paths, zero/negative timeout boundaries, errors.Is(DeadlineExceeded)
+- `internal/cli/gui_tray_state.go` — `aggregateTrayStateWithToast` consults intent each tick + holds in-process cache; `defaultIntentReader` calls `TryReadDaemonIntent(250ms)`
+- `internal/cli/gui_tray_state_test.go` — 12 tests including LockContentionPreservesUserStopSuppression (cache contract regression guard)

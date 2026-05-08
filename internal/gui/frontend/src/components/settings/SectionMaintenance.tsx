@@ -2,11 +2,14 @@
 // Cleanup-5 per docs/superpowers/specs/2026-05-06-cleanup-buttons-design.md.
 //
 // Each card follows the same pattern: Preview button (dry-run) lists the
-// matched processes inline; the Apply button (with browser-confirm gate)
-// kills them. The browser confirm() is a streamlined stand-in for a
-// proper ConfirmModal — TODO: upgrade to typed-confirmation modal in a
-// follow-up commit, mirroring the secrets D5 escalation flow already
-// used in SectionBackups.
+// matched processes inline; the Apply button opens a <ConfirmModal>
+// whose Confirm action kills them. Cleanup-6 swapped the prior native
+// browser confirm() for the in-app ConfirmModal so destructive actions
+// share the same a11y/theme/dirty-guard semantics as SectionBackups
+// (clean-now) and SectionAdvancedDiagnostics (force-kill probe). The
+// modal also gives us room to surface per-orphan context (basename + PID
+// + Server) on the confirm screen so the operator can sanity-check
+// before clicking Clean.
 
 import { useState } from "preact/hooks";
 import {
@@ -19,6 +22,7 @@ import {
   type LogWatcher,
   type StopResult,
 } from "../../lib/settings-api";
+import { ConfirmModal } from "../ConfirmModal";
 
 type ActionState =
   | { kind: "idle" }
@@ -69,6 +73,21 @@ export function SectionMaintenance(): preact.JSX.Element {
 
 function CardOrphanMcpServers(): preact.JSX.Element {
   const [state, setState] = useState<ActionState>({ kind: "idle" });
+  // Cleanup-6: replaced native confirm() with ConfirmModal. Open state
+  // is tracked separately from action state so a Cancel keeps the
+  // preview rows visible (the modal closes without mutating state).
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  // Codex deep-sec PR #143 round 4 finding R1: capture the orphan list
+  // at modal-open time and render the modal from THIS snapshot, not
+  // live `state.orphans`. Pre-fix, the modal title/body derived from
+  // live state — if the user clicked Preview again (or any concurrent
+  // path mutated state) while the modal was open, the modal data went
+  // stale and Confirm would apply against fresh, unconfirmed data.
+  // Post-fix, the snapshot is the only source of truth for the open
+  // modal; mutations to `state.orphans` after open do NOT bleed into
+  // the visible confirm body.
+  const [orphansSnapshot, setOrphansSnapshot] =
+    useState<OrphanProcess[] | null>(null);
 
   // Codex Cloud bot P2 on PR #131 (commit 99938e7): non-Windows backend
   // returns 501 with `not_supported_on_this_os`. Detect that body and
@@ -83,6 +102,15 @@ function CardOrphanMcpServers(): preact.JSX.Element {
   }
 
   async function preview() {
+    // Defense-in-depth: if a Preview is requested while a modal is
+    // open, close the modal and clear the snapshot. The user must
+    // re-confirm against the new preview. This guarantees Confirm
+    // always applies to a snapshot the user just acknowledged
+    // (codex deep-sec finding R1).
+    if (confirmOpen) {
+      setConfirmOpen(false);
+      setOrphansSnapshot(null);
+    }
     setState({ kind: "loading" });
     try {
       // apply=false → dry-run / preview path on the server. Wire-shape
@@ -96,14 +124,38 @@ function CardOrphanMcpServers(): preact.JSX.Element {
     }
   }
 
-  async function apply() {
+  function openConfirm() {
     if (state.kind !== "preview" || !state.orphans) return;
-    const n = state.orphans.length;
-    if (n === 0) return;
-    if (!confirm(`Kill ${n} orphan MCP server process${n === 1 ? "" : "es"}?`)) return;
+    if (state.orphans.length === 0) return;
+    // Snapshot the orphan list AT the moment the modal opens. The modal
+    // renders exclusively from this snapshot, so post-open state
+    // mutations cannot change what the user is confirming (codex
+    // deep-sec finding R1). Shallow-copy so a future setState on the
+    // same row reference can't bleed in either.
+    setOrphansSnapshot([...state.orphans]);
+    setConfirmOpen(true);
+  }
+
+  function cancelConfirm() {
+    setConfirmOpen(false);
+    setOrphansSnapshot(null);
+  }
+
+  async function apply() {
+    // Apply uses the SNAPSHOT, not live state. If the snapshot is
+    // somehow null (cancelled mid-flight, defensive guard) we abort.
+    if (!orphansSnapshot || orphansSnapshot.length === 0) {
+      cancelConfirm();
+      return;
+    }
+    setConfirmOpen(false);
     setState({ kind: "loading" });
     try {
-      // apply=true → explicit destructive opt-in.
+      // apply=true → explicit destructive opt-in. Backend re-resolves
+      // the orphan set from a fresh process snapshot; the per-row
+      // identity gate (PID-reuse, start-time precedes snapshot, etc.)
+      // is the authoritative kill filter. The frontend snapshot is
+      // about UI consent, not about pinning the kill set.
       const r = await cleanupOrphans(true);
       // Retain the row list so the post-apply table can render per-row
       // kill_err. Bot P2 on commit 72757c6 / kosyak
@@ -112,11 +164,21 @@ function CardOrphanMcpServers(): preact.JSX.Element {
       // only "Done. Killed N, skipped M." with no actionable diagnostic
       // for the very revalidation skips the kill loop now produces.
       setState({ kind: "applied", killed: r.killed, skipped: r.skipped, orphans: r.orphans });
+      // Clear the snapshot after a successful apply so a stale list
+      // can't be used by any subsequent path.
+      setOrphansSnapshot(null);
     } catch (e) {
       setState({ kind: "error", error: friendlyError(e) });
+      setOrphansSnapshot(null);
     }
   }
 
+  // Codex deep-sec finding R1: the modal renders from the SNAPSHOT
+  // captured at modal-open, not from live state.orphans. While the
+  // modal is closed snapshot is null and the body collapses to an
+  // empty list (the dialog is hidden anyway).
+  const confirmOrphans = orphansSnapshot ?? [];
+  const confirmCount = confirmOrphans.length;
   return (
     <div data-card="orphan-mcp-servers" class="maintenance-card">
       <h3>Orphan MCP server processes</h3>
@@ -130,7 +192,11 @@ function CardOrphanMcpServers(): preact.JSX.Element {
           Preview
         </button>
         {state.kind === "preview" && state.orphans && state.orphans.length > 0 && (
-          <button onClick={apply} disabled={false}>
+          <button
+            onClick={openConfirm}
+            disabled={false}
+            data-testid="orphan-mcp-clean-button"
+          >
             Clean ({state.orphans.length})
           </button>
         )}
@@ -139,8 +205,43 @@ function CardOrphanMcpServers(): preact.JSX.Element {
       {(state.kind === "preview" || state.kind === "applied") && state.orphans && (
         <OrphansTable orphans={state.orphans} />
       )}
+      <ConfirmModal
+        open={confirmOpen}
+        title={`Clean ${confirmCount} orphan MCP process${confirmCount === 1 ? "" : "es"}?`}
+        body={
+          <ul class="maintenance-confirm-list" data-testid="orphan-mcp-confirm-list">
+            {confirmOrphans.map((o) => (
+              <li key={o.pid}>
+                <code>{cmdlineDisplayOf(o)}</code>
+                {" "}PID {o.pid}
+                {o.server ? <> — server <code>{o.server}</code></> : null}
+              </li>
+            ))}
+          </ul>
+        }
+        confirmLabel="Clean"
+        danger
+        onConfirm={apply}
+        onCancel={cancelConfirm}
+      />
     </div>
   );
+}
+
+// Cleanup-6: the orphans table renders the redacted cmdline_display
+// field (basename only — no path, no args).
+//
+// Codex deep-sec PR #143 round 4 finding A2: the deprecated `cmdline`
+// fallback was removed. If a future backend response (or a test fixture)
+// omits cmdline_display, render `<unknown>` rather than re-exposing the
+// raw command line — full cmdlines carry workspace paths, username
+// segments, and possible API keys/tokens in argv. Production wire ALWAYS
+// carries cmdline_display; the fallback could only matter in a regression
+// scenario, and a regression scenario is exactly when re-leaking the raw
+// field would be most damaging. Fail closed: opt-out beats opt-in here.
+function cmdlineDisplayOf(o: OrphanProcess): string {
+  if (o.cmdline_display && o.cmdline_display.length > 0) return o.cmdline_display;
+  return "<unknown>";
 }
 
 function OrphansTable({ orphans }: { orphans: OrphanProcess[] }): preact.JSX.Element {
@@ -172,7 +273,11 @@ function OrphansTable({ orphans }: { orphans: OrphanProcess[] }): preact.JSX.Ele
             <td>{o.server}</td>
             <td>{Math.round(o.age_sec)}s</td>
             <td>{Math.round(o.ram_bytes / (1024 * 1024))}</td>
-            <td class="maintenance-cmd">{o.cmdline}</td>
+            {/* Cleanup-6: render the redacted basename via cmdline_display.
+                Full cmdlines often carry workspace paths, username
+                segments, and possible API-keys-in-args; the wire now
+                hides the raw `cmdline` field (`json:"-"` server-side). */}
+            <td class="maintenance-cmd">{cmdlineDisplayOf(o)}</td>
             {showResult && (
               <td class={o.kill_err ? "maintenance-error" : ""}>
                 {o.kill_err || "killed"}
@@ -190,6 +295,9 @@ function OrphansTable({ orphans }: { orphans: OrphanProcess[] }): preact.JSX.Ele
 function CardOrphanLogWatchers(): preact.JSX.Element {
   const [state, setState] = useState<ActionState>({ kind: "idle" });
   const [includeLive, setIncludeLive] = useState(false);
+  // Cleanup-6: replaced native confirm() with ConfirmModal, mirroring
+  // the orphan-MCP card.
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   async function preview() {
     setState({ kind: "loading" });
@@ -204,6 +312,15 @@ function CardOrphanLogWatchers(): preact.JSX.Element {
     }
   }
 
+  function openConfirm() {
+    if (state.kind !== "preview" || !state.watchers) return;
+    const targets = includeLive
+      ? state.watchers
+      : state.watchers.filter((w) => !w.parent_alive);
+    if (targets.length === 0) return;
+    setConfirmOpen(true);
+  }
+
   async function apply() {
     if (state.kind !== "preview" || !state.watchers) return;
     const targets = includeLive
@@ -211,7 +328,7 @@ function CardOrphanLogWatchers(): preact.JSX.Element {
       : state.watchers.filter((w) => !w.parent_alive);
     const n = targets.length;
     if (n === 0) return;
-    if (!confirm(`Kill ${n} orphan log watcher process${n === 1 ? "" : "es"}?${includeLive ? " (Includes live-parent processes — those are usually CURRENT active agent sessions.)" : ""}`)) return;
+    setConfirmOpen(false);
     // Capture the apply-time includeLive lever so the post-apply
     // label rendering is independent of subsequent checkbox toggles.
     // Codex Cloud bot P2 on PR #135 round 2 — see ActionState comment.
@@ -267,7 +384,12 @@ function CardOrphanLogWatchers(): preact.JSX.Element {
           Preview
         </button>
         {state.kind === "preview" && watchers.length > 0 && (
-          <button onClick={apply} disabled={killCount === 0} title={noKillReason}>
+          <button
+            onClick={openConfirm}
+            disabled={killCount === 0}
+            title={noKillReason}
+            data-testid="orphan-log-watchers-clean-button"
+          >
             Clean ({killCount})
           </button>
         )}
@@ -289,6 +411,31 @@ function CardOrphanLogWatchers(): preact.JSX.Element {
           }
         />
       )}
+      <ConfirmModal
+        open={confirmOpen}
+        title={`Clean ${killCount} orphan log watcher${killCount === 1 ? "" : "s"}?`}
+        body={
+          <>
+            <p>
+              {includeLive
+                ? "Includes live-parent processes — those are usually CURRENT active agent sessions and will be killed."
+                : "Only dead-parent watchers will be killed."}
+            </p>
+            <ul class="maintenance-confirm-list" data-testid="orphan-log-watchers-confirm-list">
+              {(includeLive ? watchers : watchers.filter((w) => !w.parent_alive)).map((w) => (
+                <li key={w.pid}>
+                  <code>{w.name}</code>{" "}PID {w.pid}
+                  {" "}— parent {w.parent_pid}{w.parent_alive ? " (alive)" : " (dead)"}
+                </li>
+              ))}
+            </ul>
+          </>
+        }
+        confirmLabel="Clean"
+        danger
+        onConfirm={apply}
+        onCancel={() => setConfirmOpen(false)}
+      />
     </div>
   );
 }
@@ -338,6 +485,8 @@ function WatchersTable(
 
 function CardForceKillInstance(): preact.JSX.Element {
   const [state, setState] = useState<ActionState>({ kind: "idle" });
+  // Cleanup-6: replaced native confirm() with ConfirmModal.
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   async function diagnose() {
     setState({ kind: "loading" });
@@ -350,7 +499,7 @@ function CardForceKillInstance(): preact.JSX.Element {
   }
 
   async function apply() {
-    if (!confirm("Force-kill the recorded single-instance lock holder? The 3-part identity gate (executable basename, argv[1]=gui, start-time precedes pidport mtime) will refuse if the recorded PID has been recycled to an unrelated process.")) return;
+    setConfirmOpen(false);
     setState({ kind: "loading" });
     try {
       const v = await forceKillApply();
@@ -372,7 +521,11 @@ function CardForceKillInstance(): preact.JSX.Element {
         <button onClick={diagnose} disabled={state.kind === "loading"}>
           Diagnose
         </button>
-        <button onClick={apply} disabled={state.kind === "loading"}>
+        <button
+          onClick={() => setConfirmOpen(true)}
+          disabled={state.kind === "loading"}
+          data-testid="force-kill-button"
+        >
           Force-kill
         </button>
       </div>
@@ -382,6 +535,21 @@ function CardForceKillInstance(): preact.JSX.Element {
           {JSON.stringify(state.verdict, null, 2)}
         </pre>
       )}
+      <ConfirmModal
+        open={confirmOpen}
+        title="Force-kill the single-instance lock holder?"
+        body={
+          <p>
+            The 3-part identity gate (executable basename, argv[1]=gui,
+            start-time precedes pidport mtime) will refuse if the
+            recorded PID has been recycled to an unrelated process.
+          </p>
+        }
+        confirmLabel="Force-kill"
+        danger
+        onConfirm={apply}
+        onCancel={() => setConfirmOpen(false)}
+      />
     </div>
   );
 }
@@ -390,9 +558,11 @@ function CardForceKillInstance(): preact.JSX.Element {
 
 function CardStopAllDaemons(): preact.JSX.Element {
   const [state, setState] = useState<ActionState>({ kind: "idle" });
+  // Cleanup-6: replaced native confirm() with ConfirmModal.
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   async function apply() {
-    if (!confirm("Stop ALL running mcphub daemons? Each daemon's subprocess tree will be tree-killed; clients reconnect on next request.")) return;
+    setConfirmOpen(false);
     setState({ kind: "loading" });
     try {
       const r = await stopAllDaemons();
@@ -425,7 +595,11 @@ function CardStopAllDaemons(): preact.JSX.Element {
         reset. Wraps the existing <code>/api/stop-all</code> endpoint.
       </p>
       <div class="maintenance-card-actions">
-        <button onClick={apply} disabled={state.kind === "loading"}>
+        <button
+          onClick={() => setConfirmOpen(true)}
+          disabled={state.kind === "loading"}
+          data-testid="stop-all-button"
+        >
           Stop all
         </button>
       </div>
@@ -433,6 +607,20 @@ function CardStopAllDaemons(): preact.JSX.Element {
       {state.kind === "applied" && state.stopResults && (
         <StopResultsTable results={state.stopResults} />
       )}
+      <ConfirmModal
+        open={confirmOpen}
+        title="Stop ALL running mcphub daemons?"
+        body={
+          <p>
+            Each daemon's subprocess tree will be tree-killed; clients
+            reconnect on next request.
+          </p>
+        }
+        confirmLabel="Stop all"
+        danger
+        onConfirm={apply}
+        onCancel={() => setConfirmOpen(false)}
+      />
     </div>
   );
 }
