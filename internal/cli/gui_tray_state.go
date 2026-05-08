@@ -334,9 +334,13 @@ func aggregateTrayStateWithToast(ctx context.Context, snapshots <-chan []api.Dae
 			// Tray-state coalescing as before — intent-aware variant so
 			// a user-stop's exit-code-1 does not land at StateError.
 			// Codex deep-sec round 1 (MED): a suppressed row is also
-			// excluded from the running/total denominator, so a sole
-			// user-stopped daemon classifies as StateHealthy ("nothing
-			// the operator wanted running is failing"), not StateDown.
+			// excluded from the running/total denominator, so a Running
+			// peer alongside a user-stopped row classifies as
+			// StateHealthy (only the wanted-running peer counts toward
+			// the ratio). When EVERY non-maintenance row is suppressed
+			// (codex bot PR #142 round 4 P2), total==0 + suppressedCount>0
+			// classifies as StateDown — operator-stopped systems must
+			// surface "nothing running", not green-icon-over-stopped.
 			s := tray.AggregateWithIntent(rows, intent, now)
 			if s == last {
 				continue

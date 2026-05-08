@@ -45,15 +45,17 @@ func TestAggregateWithIntent_RealFailure_NoIntent_StillError(t *testing.T) {
 	}
 }
 
-// TestAggregateWithIntent_RealFailure_UserStop_HealthyNotError is the
+// TestAggregateWithIntent_RealFailure_UserStop_DownNotError is the
 // core regression guard for bug #3. Node-based MCP servers exit with
 // code 1 on graceful stdin-close; after `mcphub stop --server memory`
 // LastResult=1 used to classify as StateError (red icon for a clean
 // user stop). With an active user-stop intent the row is excluded
 // from BOTH the error path and the running/total denominator
-// (codex deep-sec round 1 MED), so a single intentionally-stopped
-// daemon → total=0 → StateHealthy. "Everything I wanted stopped is
-// stopped" surfaces as a green icon, not a gray one.
+// (codex deep-sec round 1 MED). When the suppressed row is the SOLE
+// non-maintenance row, total==0 + suppressedCount==1 classifies as
+// StateDown (codex bot PR #142 round 4 P2: operator-stopped sole
+// daemon must surface "nothing running" — gray-icon honesty —
+// rather than the original wrong "green icon over stopped system").
 func TestAggregateWithIntent_RealFailure_UserStop_DownNotError(t *testing.T) {
 	now := time.Now().UTC()
 	intent := intentFile("\\mcp-local-hub-memory-default",
@@ -393,6 +395,33 @@ func TestAggregateWithIntent_AllUserDisabled_StateDown(t *testing.T) {
 	got := AggregateWithIntent(rows, intent, now)
 	if got != StateDown {
 		t.Errorf("two user-disabled daemons (both stopped, LastResult=1) → got %v, want StateDown", got)
+	}
+}
+
+// TestAggregateWithIntent_PlainStoppedPlusUserStopped_StateDown covers
+// the codex r5 QA finding: a plain-Stopped row (no recorded intent)
+// alongside a user-stopped suppressed row must classify as StateDown.
+// The plain row is NOT suppressed (no intent → no exclusion), so
+// total=1, running=0 → StateDown via the running==0 path. The
+// suppressed peer is excluded from the denominator; if the
+// suppression branch had bled into the plain row, the test would
+// fail because total=0 + suppressed>0 would also produce StateDown
+// — but the test is specifically about the running==0 fork being
+// reached, not the total==0 fallback.
+func TestAggregateWithIntent_PlainStoppedPlusUserStopped_StateDown(t *testing.T) {
+	now := time.Now().UTC()
+	intent := api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{
+		"\\mcp-local-hub-memory-default": stoppedIntent(api.IntentReasonUserStop, now.Add(-1*time.Minute)),
+	}}
+	rows := []api.DaemonStatus{
+		// Plain-Stopped, no intent: contributes to total but not running.
+		{Server: "fs", TaskName: "\\mcp-local-hub-fs-default", State: "Stopped"},
+		// User-stopped + suppressed: excluded from total/running.
+		{Server: "memory", TaskName: "\\mcp-local-hub-memory-default", State: "Stopped", LastResult: 1},
+	}
+	got := AggregateWithIntent(rows, intent, now)
+	if got != StateDown {
+		t.Errorf("plain-stopped + user-stopped → got %v, want StateDown (running==0 fork; not the total==0 + suppressed fork)", got)
 	}
 }
 

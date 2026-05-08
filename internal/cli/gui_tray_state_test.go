@@ -345,11 +345,18 @@ func fakeIntentReader(file api.DaemonIntentFile) intentReaderFn {
 // tray icon + spurious toast.
 //
 // With the codex deep-sec round-1 MED fix: a suppressed row is also
-// excluded from the running/total denominator, so a sole intentionally-
-// stopped daemon → total=0 → StateHealthy. ("Everything I wanted
-// stopped IS stopped.") The aggregator coalesces same-state forwards,
-// so snapshot 1 (Running) and snapshot 2 (Stopped+suppressed) both
-// classify as StateHealthy and only one forward fires.
+// excluded from the running/total denominator. With the codex bot
+// PR #142 round 4 P2 fix: a sole intentionally-stopped daemon →
+// total=0 + suppressedCount=1 → StateDown ("operator stopped
+// everything; nothing running"), not StateHealthy.
+//
+// The critical contract held by this test:
+//   - Suppression hides StateError (no red icon flash for clean stop).
+//   - Toast count stays at 0 (no spurious failure-onset alert).
+//   - Final state is StateDown — honest about what's running.
+// The aggregator coalesces same-state forwards, so snapshot 1 (Running
+// → StateHealthy) and snapshot 2 (Stopped+suppressed → StateDown)
+// produce two distinct forwards.
 func TestAggregateTrayState_IntentSuppressesUserStop_NoToast_NoError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
