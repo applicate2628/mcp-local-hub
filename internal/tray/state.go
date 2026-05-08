@@ -117,26 +117,37 @@ func AggregateWithIntent(rows []api.DaemonStatus, intent api.DaemonIntentFile, n
 	running, total := 0, 0
 	suppressedCount := 0
 	for _, r := range rows {
+		// intentSuppresses is computed INDEPENDENTLY of looksFailed
+		// (codex bot PR #142 round 6 P2): the operator's intent file is
+		// authoritative regardless of how the daemon exited. A Stopped
+		// row with LastResult=0 (graceful exit), LastResult=-1 (never-
+		// run sentinel), or a TS info code (e.g. 0x41306) used to slip
+		// past the gate because looksFailed was false, so the row
+		// counted toward total even though the operator said stop.
+		// That downgraded "1 Running + 1 user-stopped (clean exit)"
+		// from StateHealthy to StatePartial — exit-code shape leaking
+		// into a contract that should be operator-intent-driven.
+		intentSuppresses := intentSuppressesFailure(r, intent, now)
 		looksFailed := api.IsRealFailure(r.LastResult) ||
 			strings.Contains(strings.ToLower(r.State), "fail")
-		suppressed := looksFailed && intentSuppressesFailure(r, intent, now)
-		if looksFailed && !suppressed {
+		if looksFailed && !intentSuppresses {
 			return StateError
 		}
 		if r.IsMaintenance {
 			continue
 		}
-		// A row whose failure was suppressed by an active stop intent
-		// is "intentionally not running" — exclude it from the
-		// running/total denominator so 2 Running + 1 user-stopped
-		// classifies as StateHealthy, not StatePartial. Without this
-		// exclusion the suppression only covered the StateError path
-		// and the icon still flashed yellow on a clean stop. Codex
-		// deep-sec finding round 1 (MED). suppressedCount lets the
-		// total==0 branch below distinguish "every daemon
+		// Suppression excludes the row from the running/total
+		// denominator so 2 Running + 1 user-stopped classifies as
+		// StateHealthy, not StatePartial. The `r.State != "Running"`
+		// guard preserves TestAggregateWithIntent_Running_IgnoresIntent:
+		// a daemon that IS Running should be counted toward the ratio
+		// even with an active stop intent (the next snapshot will
+		// catch the actual transition; the current snapshot is
+		// honest about what is running NOW). suppressedCount lets
+		// the total==0 branch below distinguish "every daemon
 		// intentionally stopped" (StateDown) from "no daemons exist"
 		// (StateHealthy) — codex bot PR #142 round 4 P2.
-		if suppressed {
+		if intentSuppresses && r.State != "Running" {
 			suppressedCount++
 			continue
 		}

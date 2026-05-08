@@ -398,6 +398,72 @@ func TestAggregateWithIntent_AllUserDisabled_StateDown(t *testing.T) {
 	}
 }
 
+// TestAggregateWithIntent_RunningPlusUserStop_LastResultZero_Healthy
+// is the codex bot PR #142 round 6 P2 regression guard. The original
+// gate `suppressed = looksFailed && intentSuppressesFailure` skipped
+// the suppression branch whenever LastResult shape was non-failure
+// (0, -1, or TS info codes). A Running peer + a user-stopped daemon
+// that exited cleanly (LastResult=0) used to classify as StatePartial
+// because the user-stopped row counted toward total but not running.
+// The fix decouples intentSuppresses from looksFailed so operator
+// intent overrides exit-code shape.
+func TestAggregateWithIntent_RunningPlusUserStop_LastResultZero_Healthy(t *testing.T) {
+	now := time.Now().UTC()
+	intent := api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{
+		"\\mcp-local-hub-memory-default": stoppedIntent(api.IntentReasonUserStop, now.Add(-1*time.Minute)),
+	}}
+	rows := []api.DaemonStatus{
+		{Server: "fs", TaskName: "\\mcp-local-hub-fs-default", State: "Running"},
+		// Active user-stop intent + LastResult=0 (graceful exit):
+		// must be excluded from total/running, not counted as a
+		// non-running peer that drags the ratio to Partial.
+		{Server: "memory", TaskName: "\\mcp-local-hub-memory-default", State: "Stopped", LastResult: 0},
+	}
+	got := AggregateWithIntent(rows, intent, now)
+	if got != StateHealthy {
+		t.Errorf("Running peer + user-stopped clean-exit row → got %v, want StateHealthy (suppression must apply unconditionally to non-Running rows)", got)
+	}
+}
+
+// TestAggregateWithIntent_RunningPlusUserStop_NeverRunSentinel_Healthy
+// covers the LastResult=-1 case (the internal/scheduler never-run
+// sentinel). Before the round 6 fix this was treated as "not a real
+// failure" → not suppressed → counted in total → StatePartial.
+func TestAggregateWithIntent_RunningPlusUserStop_NeverRunSentinel_Healthy(t *testing.T) {
+	now := time.Now().UTC()
+	intent := api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{
+		"\\mcp-local-hub-memory-default": stoppedIntent(api.IntentReasonUserStop, now.Add(-1*time.Minute)),
+	}}
+	rows := []api.DaemonStatus{
+		{Server: "fs", TaskName: "\\mcp-local-hub-fs-default", State: "Running"},
+		{Server: "memory", TaskName: "\\mcp-local-hub-memory-default", State: "Stopped", LastResult: -1},
+	}
+	got := AggregateWithIntent(rows, intent, now)
+	if got != StateHealthy {
+		t.Errorf("Running peer + user-stopped never-run-sentinel row → got %v, want StateHealthy", got)
+	}
+}
+
+// TestAggregateWithIntent_RunningPlusUserStop_TaskSchedulerInfoCode_Healthy
+// covers TS informational codes (0x41306 = "this task has not yet
+// run", 0x41303 = "never run"). Before the round 6 fix these slipped
+// past the suppression gate because IsRealFailure(0x41306) is false.
+func TestAggregateWithIntent_RunningPlusUserStop_TaskSchedulerInfoCode_Healthy(t *testing.T) {
+	now := time.Now().UTC()
+	intent := api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{
+		"\\mcp-local-hub-memory-default": stoppedIntent(api.IntentReasonUserStop, now.Add(-1*time.Minute)),
+	}}
+	rows := []api.DaemonStatus{
+		{Server: "fs", TaskName: "\\mcp-local-hub-fs-default", State: "Running"},
+		// 0x41306 = SCHED_S_TASK_HAS_NOT_RUN (TS info code, not a failure).
+		{Server: "memory", TaskName: "\\mcp-local-hub-memory-default", State: "Stopped", LastResult: 0x41306},
+	}
+	got := AggregateWithIntent(rows, intent, now)
+	if got != StateHealthy {
+		t.Errorf("Running peer + user-stopped TS-info-code row → got %v, want StateHealthy", got)
+	}
+}
+
 // TestAggregateWithIntent_PlainStoppedPlusUserStopped_StateDown covers
 // the codex r5 QA finding: a plain-Stopped row (no recorded intent)
 // alongside a user-stopped suppressed row must classify as StateDown.
