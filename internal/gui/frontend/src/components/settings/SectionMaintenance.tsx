@@ -30,7 +30,16 @@ type ActionState =
   // the table was gated on kind==="preview", so revalidation skips
   // (PID-reuse, exited-PID, snapshot start-time unknown), access
   // denials, and other partial failures were invisible in production.
-  | { kind: "applied"; killed?: number; skipped?: number; result?: unknown; stopResults?: StopResult[]; orphans?: OrphanProcess[]; watchers?: LogWatcher[] }
+  //
+  // appliedIncludeLive is the includeLive value at the moment the
+  // apply request was issued (only meaningful for the log-watchers
+  // card). Codex Cloud bot P2 on PR #135 round 2: deriving the
+  // skipped/killed label from the LIVE checkbox state would re-label
+  // already-applied rows whenever the user toggled the checkbox after
+  // apply — making the post-action audit trail inaccurate. Pin to
+  // the apply-time flag so the rendered label reflects the request
+  // that was actually executed.
+  | { kind: "applied"; killed?: number; skipped?: number; result?: unknown; stopResults?: StopResult[]; orphans?: OrphanProcess[]; watchers?: LogWatcher[]; appliedIncludeLive?: boolean }
   | { kind: "error"; error: string };
 
 function asError(e: unknown): string {
@@ -203,14 +212,18 @@ function CardOrphanLogWatchers(): preact.JSX.Element {
     const n = targets.length;
     if (n === 0) return;
     if (!confirm(`Kill ${n} orphan log watcher process${n === 1 ? "" : "es"}?${includeLive ? " (Includes live-parent processes — those are usually CURRENT active agent sessions.)" : ""}`)) return;
+    // Capture the apply-time includeLive lever so the post-apply
+    // label rendering is independent of subsequent checkbox toggles.
+    // Codex Cloud bot P2 on PR #135 round 2 — see ActionState comment.
+    const appliedIncludeLive = includeLive;
     setState({ kind: "loading" });
     try {
       // apply=true → explicit destructive opt-in.
-      const r = await cleanupLogWatchers(true, includeLive);
+      const r = await cleanupLogWatchers(true, appliedIncludeLive);
       // Retain the row list so the post-apply table renders per-row
       // kill_err. Same fix as CardOrphanMcpServers above (Codex Cloud
       // bot P2 on commit 72757c6).
-      setState({ kind: "applied", killed: r.killed, skipped: r.skipped, watchers: r.watchers });
+      setState({ kind: "applied", killed: r.killed, skipped: r.skipped, watchers: r.watchers, appliedIncludeLive });
     } catch (e) {
       setState({ kind: "error", error: asError(e) });
     }
@@ -261,13 +274,28 @@ function CardOrphanLogWatchers(): preact.JSX.Element {
       </div>
       <CardResult state={state} />
       {(state.kind === "preview" || state.kind === "applied") && state.watchers && (
-        <WatchersTable watchers={state.watchers} />
+        <WatchersTable
+          watchers={state.watchers}
+          includeLive={
+            // Pin the label-rendering lever to the apply-time
+            // includeLive value so post-apply audit rows don't
+            // re-label when the user toggles the checkbox afterwards
+            // (Codex bot P2 on PR #135 round 2). The preview path
+            // stays live — preview rows are recomputed by the
+            // backend on every Preview click anyway.
+            state.kind === "applied"
+              ? state.appliedIncludeLive ?? includeLive
+              : includeLive
+          }
+        />
       )}
     </div>
   );
 }
 
-function WatchersTable({ watchers }: { watchers: LogWatcher[] }): preact.JSX.Element {
+function WatchersTable(
+  { watchers, includeLive }: { watchers: LogWatcher[]; includeLive: boolean },
+): preact.JSX.Element {
   if (watchers.length === 0) {
     return <p class="maintenance-empty">No orphan watchers found.</p>;
   }
@@ -296,7 +324,7 @@ function WatchersTable({ watchers }: { watchers: LogWatcher[] }): preact.JSX.Ele
             <td class="maintenance-cmd">{w.cmdline}</td>
             {showResult && (
               <td class={w.kill_err ? "maintenance-error" : ""}>
-                {w.kill_err || "killed"}
+                {w.kill_err || (w.parent_alive && !includeLive ? "skipped (live parent)" : "killed")}
               </td>
             )}
           </tr>
