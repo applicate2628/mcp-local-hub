@@ -122,3 +122,97 @@ export interface GetManifestResponse {
   yaml: string;
   hash: string;
 }
+
+// G3 — wire types mirroring internal/api/health.go HealthSnapshot.
+// Field names and JSON tags match the Go side; keep in sync if the
+// backend type evolves. Items[] may be null for unsupported/error/
+// synthetic-empty subsections (Go has no `omitempty`); frontend MUST
+// normalize via `sub.items ?? []` at the screen boundary.
+
+export interface HealthSnapshot {
+  schema_version: string;
+  hub: HubSection;
+  daemons: DaemonsSection;
+  probes?: ProbesSection;
+  capabilities?: CapabilitiesSection;
+}
+
+export interface HubSection {
+  version: string;
+  commit: string;
+  build_date: string;
+  started_at: number;
+  lock?: { pid: number; port: number };
+  generated_at: number;
+  ttl_ms: number;
+}
+
+export interface DaemonsSection {
+  items: DaemonRow[];
+  generated_at: number;
+  ttl_ms: number;
+  errors: SectionError[];
+}
+
+export interface DaemonRow {
+  server: string;
+  daemon: string;
+  backend: string;
+  pid: number;
+  port: number;
+  ram_bytes: number;
+  uptime_sec: number;
+  state: string;
+  restart_count: number;
+  last_restart_at: number | null;
+}
+
+export interface ProbesSection {
+  items: ProbeRow[];
+  generated_at: number;
+  ttl_ms: number;
+  errors: SectionError[];
+}
+
+export interface ProbeRow {
+  server: string;
+  daemon: string;
+  ok: boolean;
+  tool_count: number;
+  err?: string;
+  source?: "" | "proxy-synthetic";
+}
+
+export interface CapabilitiesSection {
+  items: CapabilityRow[];
+  generated_at: number;
+  ttl_ms: number;
+  errors: SectionError[];
+}
+
+export interface CapabilityRow {
+  server: string;
+  daemon: string;
+  tools: CapabilitySubSection;
+  prompts: CapabilitySubSection;
+  resources: CapabilitySubSection;
+}
+
+export interface CapabilitySubSection {
+  state: "ok" | "empty" | "unsupported" | "error" | "stale";
+  // null on unsupported/error/synthetic-empty paths — see types.ts header note.
+  items: CapabilityItem[] | null;
+  err?: string;
+}
+
+export interface CapabilityItem {
+  name: string;
+  id: string;        // canonical "server/daemon/kind/name"
+  namespace: string; // == server name
+  kind: "tool" | "prompt" | "resource";
+}
+
+export interface SectionError {
+  scope: string;
+  err: string;
+}
