@@ -186,15 +186,16 @@ After the 2026-05-04 stabilization wave (35+ bug-fix PRs merged, security audit 
 4. **Pre-tag fix** — `daemons.retry_policy` Settings UI must label "saved only; runtime applier deferred" OR be disabled. Do not tag while implying it is active.
 5. **Manual smoke `D2/D3`** per `docs/phase-3b-ii-verification.md`.
 6. **Tag Phase 3B-II preview**.
-7. **G3** — capability status display, read-only (~1-2d). Reuses G2 backend.
-8. **G4** — opt-in unified `Hub` MCP endpoint (~3-5d). Headline new feature; reuses G2/G3 namespace+capability model.
+7. **G3** — capability status display, read-only (~1-2d). Reuses G2 backend. ✅ Shipped in PR #144 (commit `0a32264`).
+8. **G4** — opt-in unified `Hub` MCP endpoint — **DEFERRED to v0.4.x**. v2 design spec at `docs/superpowers/specs/2026-05-08-g4-unified-hub-mcp-design.md` after two codex review rounds (24 findings between r1+r2; 11/12 round-1 PARTIAL after v2). Realistic implementation effort grew to ~12-15d carefully + bot/codex deep-sec review. v0.4.x picks up the spec as round-3 intake.
 
 ### Dropped / deferred from the prior sequence
 
 - **A4-b PR #2 `gui_server.port` live-rebind** — DROPPED. Fragile, rare, not central to a local hub. Keep restart-required badge and stop spending roadmap budget unless a real user report appears.
 - **A4-b PR #2 tray show/hide runtime mutator** — DEFERRED indefinitely. One-time setting; restart works.
-- **A4-b PR #2 retry-policy runtime applier** — DEFERRED to AFTER G4. Pre-tag fix above is the only correctness requirement.
-- **G8 config watch / dev reload (fsnotify)** — DROPPED from current scope. G4 starts with explicit refresh/polling. Re-evaluate later if user reports demand it.
+- **A4-b PR #2 retry-policy runtime applier** — DEFERRED to v0.4.x (originally was "after G4"; now both are in v0.4.x). Pre-tag fix above is the only correctness requirement.
+- **G4 unified hub MCP endpoint** — DEFERRED to v0.4.x. See sequence step 8 above.
+- **G8 config watch / dev reload (fsnotify)** — DROPPED from current scope. v0.4.x G4 will start with explicit refresh/polling. Re-evaluate later if user reports demand it.
 - **F1/F2/F3/F4/F5/F6/F7 Linux-server readiness** — separate strategic lane; not pulled into this release. G1 matrix must explicitly state "Linux scheduler install is not ready".
 
 ### Historical sequence (kept for reference)
@@ -231,7 +232,7 @@ After the 2026-05-04 stabilization wave (35+ bug-fix PRs merged, security audit 
 
 | # | Item | Effort | Description |
 |---|---|---|---|
-| G4 | **Optional unified MCP endpoint (opt-in)** | ~3-5d | Opt-in `Hub` endpoint that lists tools/resources/prompts from selected daemons with stable namespacing (`memory__...`, `godbolt__...`). Per-server endpoints stay the canonical path; the unified endpoint is an aggregator a power-user enables. **Mandatory single endpoint is rejected** — would weaken daemon isolation and migration model. |
+| G4 | **Optional unified MCP endpoint (opt-in)** | ~12-15d (revised after r2 review) | **DEFERRED to v0.4.x.** Opt-in `Hub` endpoint that lists tools/resources/prompts from selected daemons with stable namespacing (`memory__...`, `godbolt__...`). v2 spec at `docs/superpowers/specs/2026-05-08-g4-unified-hub-mcp-design.md` after two codex review rounds (24 findings between r1+r2). Realistic effort grew far past the original 3-5d estimate; v0.4.x picks up as round-3 intake. **Mandatory single endpoint is rejected** — would weaken daemon isolation and migration model. |
 | G5 | **Marketplace/import flow as draft-manifest** | ~2-3d | Browse/import from an MCP registry: inspect metadata + README, generate YAML, validate, dry-run, then install. **Automatic install side effects rejected** — must preserve inspect→validate→dry-run→backup→apply. Cache metadata with explicit freshness; stale data must NOT silently auto-install. |
 
 #### Phase 3C/3D tier (compatibility, more complex)
@@ -256,10 +257,11 @@ These remain rejected and should NOT be reconsidered without a separate threat m
 
 #### Sequencing within G (updated 2026-05-05)
 
-**Pre-tag (Phase 3B-II hardening):** G10 → G1 → G2.
-**Post-tag (Phase 3C):** G3 (consumes G2 snapshot backend) → G4 (consumes G2/G3 namespace+capability model).
+**Pre-tag (Phase 3B-II hardening):** G10 → G1 → G2 ✅ all shipped.
+**Phase 3B-II tail:** G3 ✅ shipped (PR #144). G4 → DEFERRED to v0.4.x (see entry above).
+**v0.4.x:** G4 round-3 intake (resume from v2 spec + r2 findings) → A4-b PR #2 retry-policy runtime applier.
 **Phase 3C/3D, separately threat-modeled:** G5 marketplace draft-import → G7 VS Code/JSON5 import → G6 remote MCP manifests → G9 structured event envelopes.
-**Dropped from current roadmap:** G8 config watch / fsnotify dev reload — replaced by explicit refresh in G4.
+**Dropped from current roadmap:** G8 config watch / fsnotify dev reload.
 
 #### Client expansion (already shipped 2026-05-04, commit `59dcf12`)
 
