@@ -1,6 +1,44 @@
 # G4 — Unified Hub MCP Endpoint Design
 
-**Status:** v2, 2026-05-08. Revised from v1 (commit `ff02f23`) after stage-0 codex general-lane review (`.reports/2026-05/report(architecture-reviewer)-2026-05-08_22-30_g4-spec-stage0-general.md`) and security-lane review (`.reports/2026-05/report(security-reviewer)-2026-05-08_22-30_g4-spec-stage0-security.md`). All 12 findings (1 HIGH, 4 MED, 1 LOW security; 5 P1, 1 P2 general) addressed below.
+**Status: DEFERRED to v0.4.x.** v2, 2026-05-08, after stage-0 round-2 codex review (general + security lanes) found significant remaining issues. v0.3.0 ships without G4. This spec is preserved as the v0.4.x intake document.
+
+## Why deferred
+
+Round-1 codex review (xhigh, both lanes) returned REVISE with 12 findings (1 HIGH, 4 MED, 1 LOW security; 5 P1, 1 P2 general). v2 addressed all 12.
+
+Round-2 codex review (xhigh, both lanes) returned REVISE again with 12 more findings (1 HIGH, 4 MED security; 6 P1, 1 P2 general). Round-1 closure: 1 CLOSED (general F-G3 resolver), 11 PARTIAL or new findings introduced by v2's added mechanisms.
+
+Round-2 findings (paraphrased; full reports in `.reports/2026-05/` — gitignored, local-only):
+
+**Security r2 (REVISE):**
+
+- F-S1 (HIGH, partial): per-user random port still has stale-URL token-capture window after restart; need persistent port + hub-instance-id challenge OR a fundamentally different transport.
+- F-S2 (MED, partial): token-bearing client config files + backups are outside the hardening contract; pre-write DACL verify on client config target needed; redaction must extend across stderr / argv / syscall errors.
+- F-S3 (MED, partial): Windows reparse / handle-bound state-file validation underspecified; parent-dir DACL check + reject inherited broad-SID ACEs + map generic rights before mask check.
+- F-S4 (MED, NEW): stale route map can outlive authorization (manifest binding removed mid-session); need resolver generation counter + per-call revalidation.
+- F-S5 (MED, NEW): authenticated `initialize` flood is an unbounded DoS against daemons + hub session memory; need hard limits as acceptance criteria (per-client session cap, init rate limit, fan-out concurrency, per-daemon init timeout, eviction/429).
+
+**General r2 (REVISE):**
+
+- F-G1 (P1): path client IDs (`/clients/claude/`) don't match canonical adapter IDs (`claude-code`, `codex-cli`); need canonical IDs everywhere or a tested alias resolver.
+- F-G2 (P1): `tools/call` body rewriting missing — spec says "forward unchanged" but route map has RawName; daemons would receive namespaced tool names and reject.
+- F-G3 (P1): `initialize` failures are lost before `tools/list` — session must store intended-participating-set + per-daemon init failures; merge with current list failures; all-init-failed → `-32000`.
+- F-G4 (P1): cancellation + DELETE session termination underspecified — need in-flight-request map keyed by client JSON-RPC id; `DELETE /clients/{id}/mcp` for hub-session termination; cancellation forwards using stored daemon sid.
+- F-G5 (P1): gate-OFF rollback leaves stale `mcphub-hub` entries — need bidirectional reconciler; extend `ClientUpdatePlan` with `EntryName`, `Headers`, `add/replace/remove` action discriminator.
+- F-G6 (P1): `__` validation strict-vs-warn rollout — startup loaders break on existing `__` manifests if unconditionally strict; need separate strict (add/edit/install/new-hub-binding) vs compat-warn (startup inventory) modes.
+- F-G7 (P2): session-map concurrency + bounds unspecified — need `RWMutex`, atomic route-map swap, idle sweeper, max sessions per client/global, no delete during in-flight calls.
+
+## Why this is v0.4.x material, not v0.3.0
+
+After two review rounds the spec is at ~488 lines and growing; round-3 review almost certainly surfaces more issues (Windows DACL fine-grain semantics, gemini-cli/qwen-cli adapter capability verification, idle-sweeper semantics, instance-id challenge UX). Realistic implementation effort: ~12–15 days carefully, plus 4-lane bot + codex deep-sec PR review. v0.3.0 was scoped as the "ship the GUI" milestone; G4 was always called out as an opt-in advanced surface (see `docs/superpowers/plans/2026-05-04-ravitemer-mcp-hub-adoption-proposals.md`).
+
+v0.4.x will pick up this spec as round-3 intake, fold in the round-2 findings, verify adapter capability matrix, and ship hardened.
+
+## Pre-existing v2 design body (kept verbatim for v0.4.x)
+
+The text below is the v2 design as committed at `d98005a`. **Do not implement from this spec without addressing the round-2 findings above.**
+
+---
 
 **Pre-gate**: rejecting `__` in manifest server names is a **blocking prerequisite** for G4 implementation, not deferred (security F-S4 + general F-G4). It lands in the first plan task.
 
