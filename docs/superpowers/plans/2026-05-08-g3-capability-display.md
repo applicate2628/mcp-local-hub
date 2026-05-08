@@ -226,27 +226,34 @@ import { CapabilitiesScreen } from "./screens/Capabilities";
 The final navLinks order must be:
 1. Servers / 2. Migration / 3. Add server / 4. Secrets / 5. Dashboard / 6. Logs / **7. Capabilities** / 8. Settings / 9. About.
 
-- [ ] **Step 6: Update E2E shell.spec.ts**
+- [ ] **Step 6: Update E2E shell.spec.ts (full diff including title/comments per codex stage-1 finding #5)**
 
-Modify `internal/gui/e2e/tests/shell.spec.ts`. Find the `toHaveCount(8)` assertion and update to 9. If the file enumerates link labels, insert "Capabilities" at index 6 (zero-indexed: between "Logs" and "Settings"). Concrete change:
+Modify `internal/gui/e2e/tests/shell.spec.ts`. The current state (verified via grep) has:
+- Line 4: test title `"renders sidebar with brand + eight nav links"`
+- Lines 9-10: comments `// Phase 3B-II A4-a added Settings as the 7th link.` and `// Phase 3B-II A5 added About as the 8th link.`
+- Line 11: `await expect(links).toHaveCount(8);`
+- Lines 18-19: `await expect(links.nth(6)).toHaveText("Settings");` and `await expect(links.nth(7)).toHaveText("About");`
 
-```ts
-// Before
-await expect(navLinks).toHaveCount(8);
-// After
-await expect(navLinks).toHaveCount(9);
-```
-
-If there's a label-text assertion array, update from:
+Apply ALL of these changes (codex stage-1 review insisted the test stay self-documenting):
 
 ```ts
-const expected = ["Servers", "Migration", "Add server", "Secrets", "Dashboard", "Logs", "Settings", "About"];
-```
+// Line 4 — title:
+test("renders sidebar with brand + nine nav links", async ({ page, hub }) => {
 
-To:
+// Lines 9-10 — comments:
+// Phase 3B-II A4-a added Settings as the 7th link.
+// Phase 3B-II A5 added About as the 8th link.
+// Phase 3B-II G3 added Capabilities as the 7th link;
+// Settings is now 8th and About is 9th.
 
-```ts
-const expected = ["Servers", "Migration", "Add server", "Secrets", "Dashboard", "Logs", "Capabilities", "Settings", "About"];
+// Line 11 — count:
+await expect(links).toHaveCount(9);
+
+// After the existing `links.nth(5)` Logs assertion (or wherever Logs is asserted),
+// insert the Capabilities assertion BEFORE Settings:
+await expect(links.nth(6)).toHaveText("Capabilities");
+await expect(links.nth(7)).toHaveText("Settings");
+await expect(links.nth(8)).toHaveText("About");
 ```
 
 - [ ] **Step 7: Run test to verify it passes**
@@ -487,7 +494,39 @@ describe("CapabilitiesScreen — Phase 3 Refresh", () => {
     expect(spy).toHaveBeenCalledTimes(2);
   });
 
-  it("mid-fetch unmount does NOT call setState (AC #18)", async () => {
+  it("mid-REFRESH-fetch unmount does NOT call setState (AC #18, codex stage-1 BLOCKER fix)", async () => {
+    // Codex stage-1 review finding #1: AC #18 wants the REFRESH path
+    // tested, not the initial mount fetch. The mountedRef guard added
+    // to onRefresh below must prevent setRefreshing(false) /
+    // setRefreshError() / setState({status:"ok"}) from firing on a
+    // stale instance. Pattern: render → wait for OK state → click
+    // Refresh (deferred fetch) → unmount BEFORE refresh resolves →
+    // resolve the refresh → assert no console.error.
+    let resolveRefresh!: (value: HealthSnapshot) => void;
+    const refreshDeferred = new Promise<HealthSnapshot>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    vi.spyOn(api, "fetchOrThrow")
+      .mockResolvedValueOnce(emptySnapshot)   // initial mount fetch resolves
+      .mockReturnValueOnce(refreshDeferred);  // refresh stays pending
+
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { findByTestId, unmount } = render(<CapabilitiesScreen />);
+    const button = await findByTestId("capabilities-refresh-btn");
+    fireEvent.click(button);
+    await Promise.resolve();          // refresh fetch fires
+    unmount();                        // unmount BEFORE refresh resolves
+    resolveRefresh(emptySnapshot);
+    await refreshDeferred;
+    await Promise.resolve();
+    expect(consoleSpy).not.toHaveBeenCalled();
+    consoleSpy.mockRestore();
+  });
+
+  it("mid-MOUNT-fetch unmount does NOT call setState (companion guard)", async () => {
+    // Companion test for the initial-mount cancelled-flag pattern.
+    // The original AC #18 plan tested only this path; codex stage-1
+    // requires both this AND the refresh-path test above.
     let resolveFn!: (value: HealthSnapshot) => void;
     const deferred = new Promise<HealthSnapshot>((resolve) => { resolveFn = resolve; });
     vi.spyOn(api, "fetchOrThrow").mockReturnValue(deferred);
@@ -498,9 +537,6 @@ describe("CapabilitiesScreen — Phase 3 Refresh", () => {
     resolveFn(emptySnapshot);
     await deferred;
     await Promise.resolve();
-    // Preact does not throw the React-style "setState on unmounted" warning
-    // by default, but the cancelled-flag guarantees no internal state-mutation
-    // side effects occur; assert no console.error fired.
     expect(consoleSpy).not.toHaveBeenCalled();
     consoleSpy.mockRestore();
   });
@@ -539,7 +575,7 @@ Expected: FAIL on the 4 new Phase-3 tests (no Refresh button rendered yet).
 Replace `internal/gui/frontend/src/screens/Capabilities.tsx` with:
 
 ```tsx
-import { useEffect, useState, useCallback } from "preact/hooks";
+import { useEffect, useRef, useState, useCallback } from "preact/hooks";
 import { fetchOrThrow } from "../api";
 import type { HealthSnapshot } from "../types";
 
@@ -552,6 +588,18 @@ export function CapabilitiesScreen() {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+
+  // Codex stage-1 BLOCKER fix: mountedRef gates ALL setState in the
+  // event-handler-driven refresh path. The mount effect's local
+  // cancelled-flag covers only the initial fetch — refreshes fired
+  // from a click handler need their own mounted check, otherwise
+  // setState fires on a stale instance after unmount.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // On-mount fetch. cancelled-flag prevents setState after unmount
   // (mirrors Dashboard.tsx:41-63 / About.tsx:28-40 — pattern preserved).
@@ -571,25 +619,17 @@ export function CapabilitiesScreen() {
     if (refreshing) return;  // belt + suspenders for the disabled button
     setRefreshing(true);
     setRefreshError(null);
-    let cancelled = false;
     fetchOrThrow<HealthSnapshot>("/api/health?include=capabilities&refresh=true", "object")
       .then((data) => {
-        if (!cancelled) {
-          setState({ status: "ok", data });
-          setRefreshing(false);
-        }
+        if (!mountedRef.current) return;
+        setState({ status: "ok", data });
+        setRefreshing(false);
       })
       .catch((err: Error) => {
-        if (!cancelled) {
-          setRefreshError(err.message);
-          setRefreshing(false);
-        }
+        if (!mountedRef.current) return;
+        setRefreshError(err.message);
+        setRefreshing(false);
       });
-    // No cleanup needed — this is an event-handler closure, not an effect.
-    // The component-unmount cancellation is handled by the mount-effect's
-    // cancelled flag; if a refresh is inflight at unmount, we accept the
-    // setRefreshing(false) on a stale instance — Preact swallows it.
-    void cancelled;
   }, [refreshing]);
 
   if (state.status === "loading") {
@@ -1010,9 +1050,9 @@ export function CapabilitySection({ kind, sub }: Props) {
 }
 ```
 
-- [ ] **Step 5: Wire CapabilitySection into CapabilityCard**
+- [ ] **Step 5: Wire CapabilitySection into CapabilityCard (delete Phase-4 itemCount helper per codex stage-1 finding #4)**
 
-Modify `internal/gui/frontend/src/components/CapabilityCard.tsx`. Replace the body's three placeholder `<div class="capability-section">…</div>` blocks with three `<CapabilitySection>` invocations:
+Modify `internal/gui/frontend/src/components/CapabilityCard.tsx`. THIS IS A FULL FILE REWRITE — the new `CapabilitySection` owns count rendering internally, so the local `itemCount` helper introduced in Phase 4 is now dead code and MUST be removed. The full file content after Phase 5 (replacing the entire current contents) is:
 
 ```tsx
 import type { CapabilityRow, ProbeRow } from "../types";
@@ -1122,8 +1162,22 @@ describe("CapabilitiesScreen — Phase 6 item-list rendering + items-null", () =
     expect(items[0].textContent).toContain("alpha");
     expect(items[1].textContent).toContain("beta");
 
-    // Critical: NO buttons, NO click handlers on items (AC #7).
-    expect(list!.querySelectorAll("button").length).toBe(0);
+    // Critical: NO actionable Run-tool affordances on items (AC #7).
+    // Codex stage-1 review finding #3: broaden the assertion beyond
+    // <button>. Reject buttons, anchors-with-href, role="button"
+    // descendants, and onclick handlers on every .capability-item node.
+    // Section toggles, Refresh, and legend controls live OUTSIDE
+    // .capability-item-list so they are not affected by this scoped
+    // assertion.
+    const itemNodes = list!.querySelectorAll(".capability-item");
+    for (const node of Array.from(itemNodes)) {
+      expect(node.querySelectorAll("button").length).toBe(0);
+      expect(node.querySelectorAll("a[href]").length).toBe(0);
+      expect(node.querySelectorAll('[role="button"]').length).toBe(0);
+      // The <li> itself must not be actionable either.
+      expect((node as HTMLElement).getAttribute("role")).not.toBe("button");
+      expect((node as HTMLElement).onclick).toBeNull();
+    }
   });
 
   it("items: null normalizes to empty list without crashing (AC #19)", async () => {
@@ -1520,7 +1574,7 @@ git commit -m "feat(g3): phase 7 — synthetic-source pill + state legend"
 - Modify: `internal/gui/frontend/src/style.css` (or create `capabilities.css` and import)
 - Regenerate: `internal/gui/assets/{index.html,app.js,style.css}`
 
-- [ ] **Step 1: Write the failing E2E spec**
+- [ ] **Step 1: Write the failing E2E spec (codex stage-1 finding #2: E2E must be run fail-first)**
 
 Create `internal/gui/e2e/tests/capabilities.spec.ts`:
 
@@ -1561,7 +1615,22 @@ test.describe("capabilities", () => {
 });
 ```
 
-- [ ] **Step 2: Add CSS for the new components**
+- [ ] **Step 2: Run E2E spec to verify it fails (codex stage-1 finding #2)**
+
+Run: `cd internal/gui/e2e && npx playwright test capabilities.spec.ts --reporter=list`
+
+Expected: FAIL on all 3 tests because Phase 7's GUI bundle in
+`internal/gui/assets/` does NOT yet contain the new screen
+(bundle regen happens in Step 4 below). The Capabilities sidebar link
+exists in `app.tsx` source as of Phase 1, but the embedded `app.js`
+asset still reflects the pre-Phase-1 master state until Step 4
+regenerates it.
+
+Note: if the E2E command fails to even start because the playwright
+binary or fixture setup is broken, that's a different failure mode
+worth flagging to the orchestrator.
+
+- [ ] **Step 3: Add CSS for the new components**
 
 Append to `internal/gui/frontend/src/style.css` (at the end of the file):
 
@@ -1622,12 +1691,12 @@ Append to `internal/gui/frontend/src/style.css` (at the end of the file):
 .state-badge-stale       { background: #ffe0b2; color: #e65100; }
 ```
 
-- [ ] **Step 3: Regenerate the embedded GUI bundle**
+- [ ] **Step 4: Regenerate the embedded GUI bundle**
 
 Run: `cd d:/dev/mcp-local-hub && go generate ./internal/gui/...`
 Expected: vite build success message + updated `internal/gui/assets/{index.html,app.js,style.css}`.
 
-- [ ] **Step 4: Run all tests**
+- [ ] **Step 5: Run all tests (frontend unit + Go + E2E to PASS — codex stage-1 finding #2)**
 
 Run: `cd internal/gui/frontend && npm test -- --run`
 Expected: all frontend tests pass (369+ existing + 20 new = 389+ total).
@@ -1641,7 +1710,24 @@ Expected: empty.
 Run: `cd d:/dev/mcp-local-hub && go test ./internal/gui/...`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+Run: `cd internal/gui/e2e && npx playwright test capabilities.spec.ts --reporter=list`
+Expected: PASS — all 3 tests in the new spec succeed against the
+just-regenerated bundle. Concretely:
+  ✓ sidebar Capabilities link navigates to #/capabilities and shows h1
+  ✓ empty-state copy renders when no servers are installed
+  ✓ Refresh button issues a /api/health?include=capabilities&refresh=true request
+
+Run: `cd internal/gui/e2e && npx playwright test shell.spec.ts --reporter=list`
+Expected: PASS — the `nine nav links` test (renamed in Phase 1) plus
+the existing nav-highlight test both succeed.
+
+Note on full E2E suite: a `cd internal/gui/e2e && npm test` run is
+nice-to-have but adds ~55s wall-time and exercises 100+ tests
+unrelated to G3. The two targeted Playwright runs above (`shell` +
+`capabilities`) are the gating set for this PR; the full suite runs
+post-merge in CI.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add internal/gui/frontend/src/style.css \
