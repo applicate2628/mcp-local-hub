@@ -115,6 +115,7 @@ func AggregateWithIntent(rows []api.DaemonStatus, intent api.DaemonIntentFile, n
 		now = time.Now()
 	}
 	running, total := 0, 0
+	suppressedCount := 0
 	for _, r := range rows {
 		looksFailed := api.IsRealFailure(r.LastResult) ||
 			strings.Contains(strings.ToLower(r.State), "fail")
@@ -131,8 +132,12 @@ func AggregateWithIntent(rows []api.DaemonStatus, intent api.DaemonIntentFile, n
 		// classifies as StateHealthy, not StatePartial. Without this
 		// exclusion the suppression only covered the StateError path
 		// and the icon still flashed yellow on a clean stop. Codex
-		// deep-sec finding round 1 (MED).
+		// deep-sec finding round 1 (MED). suppressedCount lets the
+		// total==0 branch below distinguish "every daemon
+		// intentionally stopped" (StateDown) from "no daemons exist"
+		// (StateHealthy) — codex bot PR #142 round 4 P2.
 		if suppressed {
+			suppressedCount++
 			continue
 		}
 		total++
@@ -141,7 +146,18 @@ func AggregateWithIntent(rows []api.DaemonStatus, intent api.DaemonIntentFile, n
 		}
 	}
 	if total == 0 {
-		// No non-maintenance daemons at all; nothing to be wrong.
+		// Codex bot PR #142 round 4 P2: when EVERY non-maintenance
+		// row was intent-suppressed (e.g. a single daemon with
+		// LastResult=1 + active user-stop, OR every daemon disabled),
+		// the operator wants nothing running. Surfacing StateHealthy
+		// here would paint a green icon over an entirely-stopped
+		// system — the inverse of the truth. StateDown ("nothing
+		// running") matches reality and the operator's intent.
+		if suppressedCount > 0 {
+			return StateDown
+		}
+		// No rows at all (or only maintenance daemons) — nothing
+		// to classify; default to StateHealthy.
 		return StateHealthy
 	}
 	if running == total {

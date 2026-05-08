@@ -392,17 +392,19 @@ collectLoop:
 		}
 	}
 
-	// Last forwarded state must be StateHealthy: suppressed rows are
-	// excluded from the denominator (codex deep-sec round 1 MED), so a
-	// sole user-stopped daemon → total=0 → StateHealthy. The critical
-	// negative invariant is "no StateError forward" — the icon must
-	// not turn red on a clean operator-initiated stop.
+	// Last forwarded state must be StateDown: suppression hides the
+	// red badge so the icon does not flash error, but a sole
+	// user-stopped daemon means "nothing running" → StateDown, not
+	// StateHealthy. Codex bot PR #142 round 4 P2 — total==0 +
+	// suppressedCount>0 must classify as down (operator deliberately
+	// stopped everything), not healthy (green icon over an
+	// entirely-stopped system was the original wrong semantic).
 	if len(got) == 0 {
 		t.Fatalf("expected at least 1 tray-state forward, got 0")
 	}
 	last := got[len(got)-1]
-	if last != tray.StateHealthy {
-		t.Errorf("last tray state = %v, want StateHealthy (bug #3 + codex deep-sec MED — suppressed row excluded from denominator)", last)
+	if last != tray.StateDown {
+		t.Errorf("last tray state = %v, want StateDown (suppression hides red, but sole-row user-stop is down, not healthy)", last)
 	}
 	for _, s := range got {
 		if s == tray.StateError {
@@ -648,9 +650,12 @@ collectLoop:
 		t.Fatalf("expected at least 1 tray-state forward, got 0")
 	}
 
-	// Cycle 1 produces the very first forward (sentinel → Healthy).
-	if got[0] != tray.StateHealthy {
-		t.Errorf("forward[0] = %v, want StateHealthy (cycle 1: valid user-stop intent)", got[0])
+	// Cycle 1 produces the very first forward (sentinel → StateDown).
+	// Codex bot PR #142 round 4 P2: a sole row with active user-stop
+	// intent must classify as StateDown (suppression hides red, but
+	// operator stopped everything → "nothing running"), NOT StateHealthy.
+	if got[0] != tray.StateDown {
+		t.Errorf("forward[0] = %v, want StateDown (cycle 1: valid user-stop intent on sole row)", got[0])
 	}
 
 	// The last forward MUST be StateError (cycle 3: cache replaced,
@@ -664,10 +669,10 @@ collectLoop:
 	// Critical NEGATIVE invariant: cycles 1+2 must NOT produce a
 	// StateError forward. The aggregator coalesces same-state forwards,
 	// so seeing StateError BEFORE the final cycle would mean cycle 2
-	// dropped suppression and forwarded StateError before cycle 3.
-	// We assert that the StateError forward is the FINAL element in
-	// the stream — there must be no second StateError forward, and
-	// no Healthy → Error → Healthy → Error oscillation.
+	// dropped suppression (cache failed) and forwarded StateError
+	// before cycle 3. The expected stream shape is [StateDown, StateError]
+	// (cycle 1+2 coalesced as StateDown via the cache, then cycle 3
+	// flips to StateError as the cache is replaced by the empty file).
 	for i, s := range got {
 		if s == tray.StateError && i < len(got)-1 {
 			t.Errorf("StateError forwarded at index %d (not final) — cache should have suppressed cycle 2; full stream: %v",

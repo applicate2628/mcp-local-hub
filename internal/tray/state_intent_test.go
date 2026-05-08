@@ -54,7 +54,7 @@ func TestAggregateWithIntent_RealFailure_NoIntent_StillError(t *testing.T) {
 // (codex deep-sec round 1 MED), so a single intentionally-stopped
 // daemon → total=0 → StateHealthy. "Everything I wanted stopped is
 // stopped" surfaces as a green icon, not a gray one.
-func TestAggregateWithIntent_RealFailure_UserStop_HealthyNotError(t *testing.T) {
+func TestAggregateWithIntent_RealFailure_UserStop_DownNotError(t *testing.T) {
 	now := time.Now().UTC()
 	intent := intentFile("\\mcp-local-hub-memory-default",
 		stoppedIntent(api.IntentReasonUserStop, now.Add(-1*time.Minute)))
@@ -63,8 +63,13 @@ func TestAggregateWithIntent_RealFailure_UserStop_HealthyNotError(t *testing.T) 
 		{Server: "memory", TaskName: "\\mcp-local-hub-memory-default", State: "Stopped", LastResult: 1},
 	}
 	got := AggregateWithIntent(rows, intent, now)
-	if got != StateHealthy {
-		t.Errorf("user-stop intent within TTL (sole row) → got %v, want StateHealthy (bug #3 + codex deep-sec MED: suppressed row excluded from denominator)", got)
+	// Codex bot PR #142 round 4 P2: a sole user-stopped row must
+	// classify as StateDown ("nothing running"), NOT StateHealthy
+	// ("everything fine"). Suppression hides the red badge so the
+	// icon does not flash error on a clean stop, but a green icon
+	// over an entirely-stopped system is the inverse of truth.
+	if got != StateDown {
+		t.Errorf("user-stop intent within TTL (sole row) → got %v, want StateDown (suppression hides red, but operator-stopped sole row is down, not healthy)", got)
 	}
 }
 
@@ -88,13 +93,14 @@ func TestAggregateWithIntent_RealFailure_UserStop_TTLExpired_BackToError(t *test
 	}
 }
 
-// TestAggregateWithIntent_RealFailure_UserDisabled_HealthyNotError covers
+// TestAggregateWithIntent_RealFailure_UserDisabled_DownNotError covers
 // the permanent-suppress reason. user-disabled never expires; the
 // operator deliberately turned this daemon off, so a non-zero LastResult
-// (likely the exit code from the stop that flipped it to disabled) must
-// not surface as an error. Sole row → after exclusion total=0 → Healthy
-// (codex deep-sec round 1 MED).
-func TestAggregateWithIntent_RealFailure_UserDisabled_HealthyNotError(t *testing.T) {
+// (likely the exit code from the stop that flipped it to disabled)
+// must not surface as a red error badge. Sole row → after suppression
+// total=0 + suppressedCount=1 → StateDown (codex bot PR #142 round 4
+// P2: an entirely-suppressed system is operator-stopped, not healthy).
+func TestAggregateWithIntent_RealFailure_UserDisabled_DownNotError(t *testing.T) {
 	now := time.Now().UTC()
 	// Even very old user-disabled intents stay active (no TTL).
 	intent := intentFile("\\mcp-local-hub-memory-default",
@@ -104,18 +110,20 @@ func TestAggregateWithIntent_RealFailure_UserDisabled_HealthyNotError(t *testing
 		{Server: "memory", TaskName: "\\mcp-local-hub-memory-default", State: "Stopped", LastResult: 1},
 	}
 	got := AggregateWithIntent(rows, intent, now)
-	if got != StateHealthy {
-		t.Errorf("user-disabled intent (sole row) → got %v, want StateHealthy (permanent-suppress + denominator exclusion)", got)
+	if got != StateDown {
+		t.Errorf("user-disabled intent (sole row) → got %v, want StateDown (permanent suppression hides red badge; sole-row stopped system is down, not healthy)", got)
 	}
 }
 
-// TestAggregateWithIntent_RealFailure_Uninstalled_HealthyNotError covers
-// the cleanup-side reason. After uninstall there should be no row left
-// at all, but if status enumeration races with intent record (rare,
-// observable during the uninstall handshake) the aggregator must not
-// flash a red icon for the in-flight removal. Sole row → after exclusion
-// total=0 → Healthy (codex deep-sec round 1 MED).
-func TestAggregateWithIntent_RealFailure_Uninstalled_HealthyNotError(t *testing.T) {
+// TestAggregateWithIntent_RealFailure_Uninstalled_DownNotError covers
+// the cleanup-side reason. After uninstall there should be no row
+// left at all, but if status enumeration races with intent record
+// (rare, observable during the uninstall handshake) the aggregator
+// must not flash a red icon for the in-flight removal. Sole row →
+// after suppression total=0 + suppressedCount=1 → StateDown (codex
+// bot PR #142 round 4 P2: an in-flight uninstall is "the operator
+// wants this gone" — not running, not healthy).
+func TestAggregateWithIntent_RealFailure_Uninstalled_DownNotError(t *testing.T) {
 	now := time.Now().UTC()
 	intent := intentFile("\\mcp-local-hub-memory-default",
 		stoppedIntent(api.IntentReasonUninstalled, now.Add(-30*time.Second)))
@@ -124,8 +132,8 @@ func TestAggregateWithIntent_RealFailure_Uninstalled_HealthyNotError(t *testing.
 		{Server: "memory", TaskName: "\\mcp-local-hub-memory-default", State: "Stopped", LastResult: 1},
 	}
 	got := AggregateWithIntent(rows, intent, now)
-	if got != StateHealthy {
-		t.Errorf("uninstalled intent (sole row) → got %v, want StateHealthy (in-flight removal + denominator exclusion)", got)
+	if got != StateDown {
+		t.Errorf("uninstalled intent (sole row) → got %v, want StateDown (in-flight removal hides red badge; sole-row stopped system is down, not healthy)", got)
 	}
 }
 
@@ -182,8 +190,13 @@ func TestAggregateWithIntent_StateContainsFail_UserStop_Suppressed(t *testing.T)
 		{Server: "memory", TaskName: "\\mcp-local-hub-memory-default", State: "FailedToLaunch"},
 	}
 	got := AggregateWithIntent(rows, intent, now)
-	if got != StateHealthy {
-		t.Errorf("state=FailedToLaunch + user-stop (sole row) → got %v, want StateHealthy (state-string path + denominator exclusion)", got)
+	// Codex bot PR #142 round 4 P2: a sole user-stopped row must not
+	// surface StateHealthy — the operator deliberately stopped it, so
+	// "nothing running" (StateDown) is the truthful classification.
+	// The state-string failure path is still suppressed (no red badge),
+	// but a green badge over an entirely-stopped system was wrong.
+	if got != StateDown {
+		t.Errorf("state=FailedToLaunch + user-stop (sole row) → got %v, want StateDown (suppression hides red, but operator-stopped system is down, not healthy)", got)
 	}
 }
 
@@ -194,7 +207,9 @@ func TestAggregateWithIntent_StateContainsFail_UserStop_Suppressed(t *testing.T)
 // carry the leading backslash. Mismatched normalization here would
 // re-introduce the bug under a different guise (lookup misses,
 // row classified as error despite recorded intent). Sole row →
-// after suppression+exclusion total=0 → Healthy.
+// after suppression+exclusion total=0 + suppressedCount=1 →
+// StateDown (codex bot PR #142 round 4 P2: an entirely-suppressed
+// system is operator-stopped, not healthy).
 func TestAggregateWithIntent_TaskNameNormalization(t *testing.T) {
 	now := time.Now().UTC()
 	intent := intentFile("\\mcp-local-hub-memory-default",
@@ -206,8 +221,8 @@ func TestAggregateWithIntent_TaskNameNormalization(t *testing.T) {
 		{Server: "memory", TaskName: "\\mcp-local-hub-memory-default", State: "Stopped", LastResult: 1},
 	}
 	got := AggregateWithIntent(rows, intent, now)
-	if got != StateHealthy {
-		t.Errorf("canonical leading-backslash key lookup → got %v, want StateHealthy (key normalization regression)", got)
+	if got != StateDown {
+		t.Errorf("canonical leading-backslash key lookup → got %v, want StateDown (suppression applies via canonical key; sole-row stopped system is down, not healthy)", got)
 	}
 }
 
@@ -333,6 +348,74 @@ func TestAggregateWithIntent_ZeroNow_ChronicFailure_StaysError(t *testing.T) {
 // API back-compat: with an empty intent file passed in, the function
 // must produce the exact same verdict as the legacy Aggregate(rows)
 // across every existing classification case.
+// TestAggregateWithIntent_AllUserStopped_StateDown is the codex bot
+// PR #142 round 4 P2 regression guard. A single daemon with
+// LastResult=1 (Node MCP graceful stdin-close after `mcphub stop`)
+// plus active user-stop intent must classify as StateDown — the
+// operator deliberately stopped everything. The PR #142 round 1 fix
+// excluded user-stopped rows from the running/total denominator
+// (correct for "2 Running + 1 user-stopped → Healthy" — kept healthy
+// even when one is intentionally stopped) but accidentally regressed
+// "1 user-stopped (only row) → StateHealthy" through the
+// `if total == 0 { return StateHealthy }` fast path. The fix tracks
+// suppressed count and returns StateDown when total==0 + suppressed>0.
+func TestAggregateWithIntent_AllUserStopped_StateDown(t *testing.T) {
+	now := time.Now().UTC()
+	intent := api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{
+		"\\mcp-local-hub-memory-default": stoppedIntent(api.IntentReasonUserStop, now.Add(-1*time.Minute)),
+	}}
+	rows := []api.DaemonStatus{
+		// The exact bot scenario: one daemon, LastResult=1, active user-stop.
+		{Server: "memory", TaskName: "\\mcp-local-hub-memory-default", State: "Stopped", LastResult: 1},
+	}
+	got := AggregateWithIntent(rows, intent, now)
+	if got != StateDown {
+		t.Errorf("single user-stopped daemon (LastResult=1) → got %v, want StateDown "+
+			"(operator stopped everything; tray must show down, NOT healthy)", got)
+	}
+}
+
+// TestAggregateWithIntent_AllUserDisabled_StateDown covers the
+// second bot scenario: every daemon has user-disabled intent. The
+// suppression carve-out for user-disabled is identical to user-stop
+// at the StateError gate, but the down-not-healthy invariant must
+// hold across all stop reasons.
+func TestAggregateWithIntent_AllUserDisabled_StateDown(t *testing.T) {
+	now := time.Now().UTC()
+	intent := api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{
+		"\\mcp-local-hub-fs-default":     stoppedIntent(api.IntentReasonUserDisabled, now.Add(-1*time.Hour)),
+		"\\mcp-local-hub-memory-default": stoppedIntent(api.IntentReasonUserDisabled, now.Add(-1*time.Hour)),
+	}}
+	rows := []api.DaemonStatus{
+		{Server: "fs", TaskName: "\\mcp-local-hub-fs-default", State: "Stopped", LastResult: 1},
+		{Server: "memory", TaskName: "\\mcp-local-hub-memory-default", State: "Stopped", LastResult: 1},
+	}
+	got := AggregateWithIntent(rows, intent, now)
+	if got != StateDown {
+		t.Errorf("two user-disabled daemons (both stopped, LastResult=1) → got %v, want StateDown", got)
+	}
+}
+
+// TestAggregateWithIntent_NoRows_StateHealthy pins the OTHER half of
+// the total==0 fork: when no rows exist at all (or every row is
+// IsMaintenance), suppressedCount stays 0 and the function returns
+// StateHealthy ("nothing to classify"). Catches a future regression
+// that might fold the no-rows case into the all-suppressed branch.
+func TestAggregateWithIntent_NoRows_StateHealthy(t *testing.T) {
+	now := time.Now().UTC()
+	emptyIntent := api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{}}
+	if got := AggregateWithIntent(nil, emptyIntent, now); got != StateHealthy {
+		t.Errorf("no rows, empty intent → got %v, want StateHealthy", got)
+	}
+	// Maintenance-only rows must also classify as healthy.
+	rows := []api.DaemonStatus{
+		{Server: "fs", TaskName: "\\mcp-local-hub-fs-default", State: "Stopped", IsMaintenance: true},
+	}
+	if got := AggregateWithIntent(rows, emptyIntent, now); got != StateHealthy {
+		t.Errorf("maintenance-only rows → got %v, want StateHealthy", got)
+	}
+}
+
 func TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate(t *testing.T) {
 	cases := []struct {
 		name string
