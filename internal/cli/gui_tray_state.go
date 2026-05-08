@@ -21,9 +21,35 @@ import (
 // brick tray classification.
 type intentReaderFn func() api.DaemonIntentFile
 
-// defaultIntentReader reads the on-disk intent via api.ReadDaemonIntent.
-// Per IntentReadResult contract:
-//   - State="missing"  → empty Tasks map, treat as no preference.
+// defaultIntentReaderTimeout caps how long the tray-side intent read
+// is willing to wait on the daemon-intent.json flock per snapshot
+// cycle. Sized at 250ms — 5% of the StatusPoller's 5-second snapshot
+// cadence. The choice is a deliberate tradeoff:
+//
+//   - Anything over ~500ms would visibly delay tray icon / toast
+//     updates if the lock is held by a slow writer (e.g. the watchdog
+//     mid-`set-intent` audit append on a network-mounted state dir).
+//   - Anything under ~50ms would race against legitimate writes that
+//     hold the lock for tens of milliseconds during atomic
+//     temp+rename, so the tray would degrade to "no preference" on
+//     normal operation and start surfacing red-icon false positives
+//     for user-stopped daemons.
+//
+// 250ms gives ~25 retry polls at the 10ms retryDelay inside
+// (*api.API).TryReadDaemonIntent — ample slack for routine writes
+// while still bounding the tray's hot path. Bot finding (PR #142
+// round 2 P2): the prior wiring used the blocking ReadDaemonIntent,
+// so an extended lock hold (or a stalled writer process) would
+// freeze tray updates and prevent ctx.Done() observation.
+const defaultIntentReaderTimeout = 250 * time.Millisecond
+
+// defaultIntentReader reads the on-disk intent via api.TryReadDaemonIntent
+// with the bounded timeout above so a held lock cannot stall the tray
+// snapshot loop. Per IntentReadResult contract:
+//   - State="missing"  → empty Tasks map, treat as no preference. Also
+//     the path taken on lock-acquisition timeout (Err is non-nil but
+//     we discard it; the empty map is the same fallback the tray
+//     already applies on corrupt or genuinely-missing files).
 //   - State="corrupt"  → File still has an empty Tasks map (the read
 //     auto-quarantined the corrupt file); no preference, no spam.
 //   - State="valid"    → Tasks map is authoritative.
@@ -33,7 +59,7 @@ type intentReaderFn func() api.DaemonIntentFile
 // see corruption events through the watchdog's audit log, not the tray.
 func defaultIntentReader() api.DaemonIntentFile {
 	a := api.NewAPI()
-	res := a.ReadDaemonIntent()
+	res := a.TryReadDaemonIntent(defaultIntentReaderTimeout)
 	if res.File.Tasks == nil {
 		return api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{}}
 	}

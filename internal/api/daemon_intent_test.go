@@ -19,6 +19,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/gofrs/flock"
 )
 
 // daemonIntentTestHelper resets every package-level seam touched by the
@@ -686,6 +688,138 @@ func TestClearDaemonIntent_CanonicalSizeRecheck_RejectsAt1024PreCanonical(t *tes
 	}
 	if !errors.Is(err, ErrEntryOversize) {
 		t.Fatalf("ClearDaemonIntent(bareAt1024): want ErrEntryOversize, got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TryReadDaemonIntent — bounded-timeout variant (PR #142 round 2 P2).
+// ---------------------------------------------------------------------------
+
+// TestTryReadDaemonIntent_TimesOutWhenLockHeld guards the regression
+// from PR #142 round 2 P2: the tray aggregator's snapshot loop must
+// not stall behind a long-held daemon-intent.json flock. The test
+// holds the flock on a sibling goroutine for 2 s, calls
+// TryReadDaemonIntent with a 50 ms budget, and asserts the read
+// returns within ~100 ms with State=missing and a timeout-flavoured
+// error — never the 2 s blocking stall the prior wiring exhibited.
+//
+// The lock-holder goroutine acquires the same `daemon-intent.json.lock`
+// sibling file the API uses, so the production code path is exercised
+// without any test-only seam.
+func TestTryReadDaemonIntent_TimesOutWhenLockHeld(t *testing.T) {
+	a := NewAPI()
+	root := daemonIntentTestHelper(t)
+
+	// Resolve the same lock path the API uses. DaemonStateDir() is
+	// already redirected to the per-test temp dir by the helper.
+	dir, err := DaemonStateDir()
+	if err != nil {
+		t.Fatalf("DaemonStateDir: %v", err)
+	}
+	lockPath := filepath.Join(dir, intentLockLeaf)
+
+	// Hold the lock for 2 s on a sibling goroutine. The release
+	// happens unconditionally; even if the test's assertions fail
+	// the goroutine still unwinds cleanly within the 2 s window.
+	holder := flock.New(lockPath)
+	if err := holder.Lock(); err != nil {
+		t.Fatalf("holder lock: %v", err)
+	}
+	holderDone := make(chan struct{})
+	go func() {
+		defer close(holderDone)
+		time.Sleep(2 * time.Second)
+		_ = holder.Unlock()
+	}()
+	t.Cleanup(func() {
+		// Defensive: ensure the holder releases even if the test
+		// panics earlier than expected. Unlock is idempotent in the
+		// "already unlocked" case at the gofrs/flock level.
+		_ = holder.Unlock()
+		<-holderDone
+	})
+
+	// Sanity: confirm the holder actually has the lock by trying a
+	// non-blocking acquire on a probe — if the holder failed silently
+	// the rest of the test would race a phantom timeout. We don't
+	// fail the test on this branch; just emit a hint in the log so a
+	// future regression in the helper is visible.
+	probe := flock.New(lockPath)
+	if got, _ := probe.TryLock(); got {
+		t.Logf("warning: holder did not appear to hold the lock; the timeout assertion may pass for the wrong reason")
+		_ = probe.Unlock()
+	}
+
+	// Tight per-call budget: 50 ms timeout. The wallclock budget for
+	// the call itself adds the cost of TryLockContext's last poll
+	// before ctx fires (~10 ms retryDelay) plus our own measurement
+	// overhead, so we accept up to 200 ms before declaring the
+	// implementation broken. The point is that 50 ms must NOT
+	// degenerate into the holder's full 2 s hold.
+	const callBudget = 50 * time.Millisecond
+	const wallclockCap = 200 * time.Millisecond
+
+	start := time.Now()
+	res := a.TryReadDaemonIntent(callBudget)
+	elapsed := time.Since(start)
+
+	if elapsed > wallclockCap {
+		t.Fatalf("TryReadDaemonIntent took %s with %s timeout (cap %s) — should not block on held lock",
+			elapsed, callBudget, wallclockCap)
+	}
+	if res.State != IntentStateMissing {
+		t.Errorf("State = %q, want %q (timeout fallback)", res.State, IntentStateMissing)
+	}
+	if res.File.Tasks == nil {
+		t.Errorf("File.Tasks = nil, want empty (non-nil) map for graceful-degrade contract")
+	}
+	if res.Err == nil {
+		t.Fatalf("Err = nil, want a non-nil timeout error")
+	}
+	if !strings.Contains(strings.ToLower(res.Err.Error()), "timeout") {
+		t.Errorf("Err = %q, want substring \"timeout\"", res.Err.Error())
+	}
+	_ = root
+}
+
+// TestTryReadDaemonIntent_SucceedsWhenLockFree confirms the happy path:
+// no contention → TryReadDaemonIntent returns the parsed file with
+// State=valid, the seeded entry, and Err=nil. Same shape as the
+// roundtrip test but routed through the bounded-timeout method.
+func TestTryReadDaemonIntent_SucceedsWhenLockFree(t *testing.T) {
+	a := NewAPI()
+	daemonIntentTestHelper(t)
+
+	now := time.Now().UTC().Truncate(time.Nanosecond)
+	intent := DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserStop,
+		UpdatedAt: now,
+	}
+	taskName := "\\mcp-local-hub-time-default"
+	if err := a.WriteDaemonIntent(taskName, intent, "tester"); err != nil {
+		t.Fatalf("WriteDaemonIntent: %v", err)
+	}
+
+	res := a.TryReadDaemonIntent(1 * time.Second)
+	if res.Err != nil {
+		t.Fatalf("Err = %v, want nil for uncontested read", res.Err)
+	}
+	if res.State != IntentStateValid {
+		t.Fatalf("State = %q, want %q", res.State, IntentStateValid)
+	}
+	got, ok := res.File.Tasks[taskName]
+	if !ok {
+		t.Fatalf("missing entry %q after roundtrip; got tasks: %v", taskName, res.File.Tasks)
+	}
+	if got.Desired != intent.Desired {
+		t.Errorf("Desired: got %q, want %q", got.Desired, intent.Desired)
+	}
+	if got.Reason != intent.Reason {
+		t.Errorf("Reason: got %q, want %q", got.Reason, intent.Reason)
+	}
+	if !got.UpdatedAt.Equal(intent.UpdatedAt) {
+		t.Errorf("UpdatedAt: got %v, want %v", got.UpdatedAt, intent.UpdatedAt)
 	}
 }
 

@@ -2,9 +2,12 @@ package cli
 
 import (
 	"context"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/gofrs/flock"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/tray"
@@ -510,5 +513,70 @@ func TestAggregateTrayState_IntentTTLExpired_BackToError(t *testing.T) {
 		default:
 			time.Sleep(20 * time.Millisecond)
 		}
+	}
+}
+
+// TestDefaultIntentReader_DoesNotBlockOnHeldLock guards the regression
+// from PR #142 round 2 P2: the tray hot path must not freeze behind a
+// long-held daemon-intent.json flock.
+//
+// Setup: redirect the per-user state dir to a temp location, hold the
+// daemon-intent.json.lock sibling on a goroutine for 3 seconds, then
+// invoke defaultIntentReader. Assert that the call returns within ~500ms
+// (well under the holder's 3s grip) with a non-nil empty Tasks map —
+// the graceful-degrade contract the aggregator relies on.
+//
+// The 250ms intent-read timeout inside defaultIntentReader plus
+// retryDelay slack puts the realistic per-call upper bound at ~300ms;
+// 500ms is the wallclock cap with a comfortable safety margin against
+// CI hosts under load.
+func TestDefaultIntentReader_DoesNotBlockOnHeldLock(t *testing.T) {
+	root := t.TempDir()
+	restore := api.SetDaemonStateRootForTest(root)
+	t.Cleanup(restore)
+
+	// Resolve the lock path the same way the API does. DaemonStateDir()
+	// will create the per-user state dir under the override on first
+	// call. We rely on the API package's own resolution to land on the
+	// same path defaultIntentReader → TryReadDaemonIntent acquires.
+	stateDir, err := api.DaemonStateDir()
+	if err != nil {
+		t.Fatalf("api.DaemonStateDir: %v", err)
+	}
+	lockPath := filepath.Join(stateDir, "daemon-intent.json.lock")
+
+	holder := flock.New(lockPath)
+	if err := holder.Lock(); err != nil {
+		t.Fatalf("holder lock: %v", err)
+	}
+	holderDone := make(chan struct{})
+	go func() {
+		defer close(holderDone)
+		time.Sleep(3 * time.Second)
+		_ = holder.Unlock()
+	}()
+	t.Cleanup(func() {
+		_ = holder.Unlock()
+		<-holderDone
+	})
+
+	// Wallclock cap: defaultIntentReaderTimeout (250ms) + slack. If
+	// defaultIntentReader regressed to blocking semantics it would
+	// stall ~3s here (the holder's grip).
+	const wallclockCap = 500 * time.Millisecond
+
+	start := time.Now()
+	got := defaultIntentReader()
+	elapsed := time.Since(start)
+
+	if elapsed > wallclockCap {
+		t.Fatalf("defaultIntentReader took %s with %s timeout (cap %s) — must not block on held lock",
+			elapsed, defaultIntentReaderTimeout, wallclockCap)
+	}
+	if got.Tasks == nil {
+		t.Fatalf("Tasks = nil, want empty (non-nil) map for graceful-degrade contract")
+	}
+	if len(got.Tasks) != 0 {
+		t.Errorf("Tasks length = %d, want 0 on lock-acquisition timeout fallback", len(got.Tasks))
 	}
 }
