@@ -196,6 +196,34 @@ describe("CapabilitiesScreen — Phase 3 Refresh", () => {
     expect(queryByTestId("capabilities-empty")).toBeNull();
   });
 
+  it("daemons present but NO errors → canonical empty (not failure-empty) (codex bot PR #144 round 6 P2)", async () => {
+    // Codex bot finding (round 6): daemons with probe.ok=false are
+    // SKIPPED from capabilities.items by computeCapabilitiesSection
+    // (legitimately yielding rows=[] without errors). Showing the
+    // red "failed for N daemons" alert misreports a healthy-but-
+    // stopped setup as a failure. The failure-empty branch must
+    // trigger ONLY on real backend errors, NOT on daemonCount alone.
+    const stoppedSnapshot: HealthSnapshot = {
+      ...emptySnapshot,
+      daemons: {
+        items: [
+          { server: "fs", daemon: "default", pid: 0, port: 0, ram_bytes: 0,
+            uptime_sec: 0, state: "stopped", restart_count: 0, last_restart_at: null },
+        ],
+        generated_at: 0, ttl_ms: 2000, errors: [],
+      },
+      probes: { items: [], generated_at: 0, ttl_ms: 10000, errors: [] },
+      capabilities: { items: [], generated_at: 1715164800, ttl_ms: 60000, errors: [] },
+    };
+    vi.spyOn(api, "fetchOrThrow").mockResolvedValue(stoppedSnapshot);
+
+    const { findByTestId, queryByTestId } = render(<CapabilitiesScreen />);
+    // Should show the canonical empty-state, NOT the failure-empty.
+    const empty = await findByTestId("capabilities-empty");
+    expect(empty.textContent).toContain("No capabilities found");
+    expect(queryByTestId("capabilities-empty-failures")).toBeNull();
+  });
+
   it("true empty state renders the install-servers copy when no daemons + no errors (codex bot PR #144 round 4 P2 negative case)", async () => {
     // Companion: when daemons.items=[] AND no errors, show the
     // canonical "No capabilities found — install servers" copy.
@@ -418,6 +446,27 @@ describe("CapabilitiesScreen — Phase 5 collapsible + StateBadge", () => {
 
     fireEvent.click(header);
     expect(section.classList.contains("expanded")).toBe(false);
+  });
+
+  it("section header exposes aria-expanded for assistive tech (codex bot PR #144 round 6 P3)", async () => {
+    // Codex bot a11y finding: role="button" + custom toggle handler
+    // must publish aria-expanded so screen readers announce
+    // collapsed/expanded state after activation.
+    const row: CapabilityRow = {
+      server: "s", daemon: "d",
+      tools:     { state: "ok", items: [{ name: "x", id: "s/d/tool/x", namespace: "s", kind: "tool" }] },
+      prompts:   { state: "empty", items: [] },
+      resources: { state: "empty", items: [] },
+    };
+    const { findByTestId } = renderWithRow(row);
+    const section = await findByTestId("capability-section-tools");
+    const header = section.querySelector(".capability-section-header") as HTMLElement;
+
+    expect(header.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(header);
+    expect(header.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(header);
+    expect(header.getAttribute("aria-expanded")).toBe("false");
   });
 });
 

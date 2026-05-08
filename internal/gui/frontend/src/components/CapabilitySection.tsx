@@ -32,6 +32,10 @@ export function CapabilitySection({ kind, sub }: Props) {
         class="capability-section-header"
         role="button"
         tabIndex={0}
+        // Codex bot PR #144 round-6 P3: expose collapsed/expanded
+        // state to assistive tech so screen readers announce section
+        // open/close after click or Enter/Space activation.
+        aria-expanded={expanded}
         onClick={() => setExpanded((e) => !e)}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
