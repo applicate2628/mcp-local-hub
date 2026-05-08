@@ -2,6 +2,7 @@ package api
 
 import (
 	"bufio"
+	"encoding/csv"
 	"fmt"
 	"io"
 	"os"
@@ -492,25 +493,31 @@ func parseEtime(s string) int64 {
 //  3. csv.Reader.Read() returning err on a single malformed row caused
 //     return nil, err, killing the whole snapshot.
 //
-// Fix: line-based read + the existing tolerant splitCSVLine
-// (internal/api/processes.go:184), with per-row continue on errors,
-// blank-line skip, and "first non-blank line == header" gate.
+// Fix: use encoding/csv.Reader with LazyQuotes to preserve multiline
+// quoted records while tolerating wmic quote oddities. Keep per-row
+// continue semantics for malformed rows and blank-line skip.
 func parseWmicProcessRows(r io.Reader) ([]processRow, error) {
-	s := bufio.NewScanner(r)
-	s.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	cr := csv.NewReader(r)
+	cr.FieldsPerRecord = -1
+	cr.LazyQuotes = true
+	cr.TrimLeadingSpace = true
+
 	var rows []processRow
 	var colIdx map[string]int
-	for s.Scan() {
-		line := s.Text()
-		if strings.TrimSpace(line) == "" {
-			// Skip leading and intra-stream blanks. wmic /format:csv
-			// emits a blank line before the header on some Windows
-			// versions; treating it as the header poisons colIdx.
+	for {
+		fields, err := cr.Read()
+		if err == io.EOF {
+			return rows, nil
+		}
+		if err != nil {
+			// Keep snapshot resilient: malformed rows should not abort
+			// the whole cleanup pass.
 			continue
 		}
-		fields := splitCSVLine(line)
+		if len(fields) == 1 && strings.TrimSpace(fields[0]) == "" {
+			continue
+		}
 		if colIdx == nil {
-			// First non-blank line is the header.
 			colIdx = make(map[string]int, len(fields))
 			for i, h := range fields {
 				colIdx[strings.TrimSpace(h)] = i
@@ -525,29 +532,17 @@ func parseWmicProcessRows(r io.Reader) ([]processRow, error) {
 		}
 		pid, err := strconv.Atoi(strings.TrimSpace(get("ProcessId")))
 		if err != nil {
-			// Malformed numeric PID: skip just this row, not the
-			// whole snapshot. One bad row out of thousands shouldn't
-			// block the cleanup feature.
 			continue
 		}
 		ppid, _ := strconv.Atoi(strings.TrimSpace(get("ParentProcessId")))
 		cmd := get("CommandLine")
-		// Best-effort: derive image basename from cmdline. Many MCP
-		// launchers carry an absolute exe path as argv[0].
 		name := basenameFromCmdline(cmd)
 		startTime := int64(0)
 		if dt := parseWmicDate(get("CreationDate")); !dt.IsZero() {
 			startTime = dt.Unix()
 		}
-		rows = append(rows, processRow{
-			PID:       pid,
-			ParentPID: ppid,
-			Name:      name,
-			Cmdline:   cmd,
-			StartTime: startTime,
-		})
+		rows = append(rows, processRow{PID: pid, ParentPID: ppid, Name: name, Cmdline: cmd, StartTime: startTime})
 	}
-	return rows, s.Err()
 }
 
 func basenameFromCmdline(cmd string) string {
