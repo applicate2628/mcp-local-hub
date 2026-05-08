@@ -7,6 +7,16 @@ import type { HealthSnapshot, CapabilityRow, ProbeRow } from "../types";
 afterEach(cleanup);
 
 describe("CapabilitiesScreen — Phase 1 placeholder", () => {
+  // Codex bot PR #144 r10 qa MINOR: mock the on-mount fetch in these
+  // placeholder tests. Without it, vitest runs unmocked fetch against
+  // jsdom localhost:3000 and emits ECONNREFUSED stderr noise after
+  // each render. Tests pass either way (heading renders before fetch
+  // resolves), but the noise pollutes CI output.
+  beforeEach(() => {
+    vi.spyOn(api, "fetchOrThrow").mockReturnValue(new Promise(() => { /* never resolves */ }));
+  });
+  afterEach(() => vi.restoreAllMocks());
+
   it("renders the h1 'Capabilities' heading", () => {
     const { getByRole } = render(<CapabilitiesScreen />);
     const h1 = getByRole("heading", { level: 1 });
@@ -351,6 +361,34 @@ describe("CapabilitiesScreen — Phase 3 Refresh", () => {
     const empty = await findByTestId("capabilities-empty");
     expect(empty.textContent).toContain("No capabilities found");
     expect(queryByTestId("capabilities-empty-failures")).toBeNull();
+  });
+
+  it("two same-tick Refresh clicks fire only ONE fetch (codex deep-sec PR #144 r10 reliability MINOR)", async () => {
+    // Codex deep-sec finding: refresh single-flight guard. The
+    // `refreshing` state alone has a one-tick gap before Preact
+    // commits the disabled prop. Two same-tick click handlers both
+    // observe `refreshing===false` and would both fire fetches with
+    // last-writer-wins races. The synchronous refreshInFlightRef
+    // closes that gap.
+    let resolveRefresh!: (value: HealthSnapshot) => void;
+    const refreshDeferred = new Promise<HealthSnapshot>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    const spy = vi.spyOn(api, "fetchOrThrow")
+      .mockResolvedValueOnce(emptySnapshot)   // initial mount fetch
+      .mockReturnValueOnce(refreshDeferred);  // refresh stays pending
+
+    const { findByTestId } = render(<CapabilitiesScreen />);
+    const button = await findByTestId("capabilities-refresh-btn");
+    // Two clicks in the same synchronous tick.
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await Promise.resolve();
+    // Only ONE refresh fetch should have fired (initial + 1 refresh = 2 total).
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(spy).toHaveBeenLastCalledWith("/api/health?include=capabilities&refresh=true", "object");
+    resolveRefresh(emptySnapshot);
+    await refreshDeferred;
   });
 
   it("error-state Refresh failure surfaces LATEST retry error, not stale initial-load error (codex bot PR #144 round 3 P2)", async () => {

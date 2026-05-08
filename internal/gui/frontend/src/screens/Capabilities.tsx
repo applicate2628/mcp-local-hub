@@ -1,6 +1,21 @@
 import { useEffect, useRef, useState, useCallback } from "preact/hooks";
 import { fetchOrThrow } from "../api";
-import type { HealthSnapshot } from "../types";
+import type { HealthSnapshot, ProbeRow } from "../types";
+
+// Codex bot PR #144 round-8 P2 + r10 architecture MINOR: the sentinel
+// err string emitted by health.go::computeProbesSection for stopped /
+// probe-disabled daemons. NOT a hard failure — operator state.
+// If the backend wording changes, both sides need updating in lockstep.
+// Future-proof: G4 should add a stable `probe.reason` enum on the wire.
+const PROBE_NOT_RUNNING_SENTINEL = "no probe (daemon not running or probe disabled)";
+
+// isActionableProbeFailure returns true ONLY for probe rows that
+// represent a real backend error (HTTP 500, parse failures, timeouts).
+// Stopped / probe-disabled daemons (sentinel err) return false —
+// they're a normal operator state, not a failure to display.
+function isActionableProbeFailure(p: ProbeRow): boolean {
+  return !p.ok && p.err !== PROBE_NOT_RUNNING_SENTINEL;
+}
 import { CapabilityCard } from "../components/CapabilityCard";
 import { CapabilityLegend } from "../components/CapabilityLegend";
 
@@ -29,6 +44,14 @@ export function CapabilitiesScreen() {
     };
   }, []);
 
+  // Codex bot PR #144 r10 reliability MINOR: single-flight guard for
+  // refresh. The `refreshing` state alone races: two click handlers
+  // firing in the same browser tick read the SAME stale `refreshing
+  // === false` value before Preact commits the disabled prop. A
+  // synchronous ref captures the in-flight state instantly so any
+  // second-click in the same tick early-exits.
+  const refreshInFlightRef = useRef(false);
+
   // On-mount fetch. cancelled-flag prevents setState after unmount
   // (mirrors Dashboard.tsx:41-63 / About.tsx:28-40 — pattern preserved).
   useEffect(() => {
@@ -44,16 +67,24 @@ export function CapabilitiesScreen() {
   }, []);
 
   const onRefresh = useCallback(() => {
-    if (refreshing) return;  // belt + suspenders for the disabled button
+    // Codex bot PR #144 r10 reliability MINOR: synchronous single-flight
+    // guard. `refreshing` state alone has a one-tick gap before Preact
+    // commits the disabled prop; the ref closes that gap. Set the ref
+    // BEFORE setRefreshing so two same-tick clicks both observe the
+    // ref-true and the second early-exits.
+    if (refreshInFlightRef.current) return;
+    refreshInFlightRef.current = true;
     setRefreshing(true);
     setRefreshError(null);
     fetchOrThrow<HealthSnapshot>("/api/health?include=capabilities&refresh=true", "object")
       .then((data) => {
+        refreshInFlightRef.current = false;
         if (!mountedRef.current) return;
         setState({ status: "ok", data });
         setRefreshing(false);
       })
       .catch((err: Error) => {
+        refreshInFlightRef.current = false;
         if (!mountedRef.current) return;
         // Codex bot PR #144 round-3 P2: if the screen is currently in
         // the error branch (initial load failed), updating only
@@ -72,7 +103,7 @@ export function CapabilitiesScreen() {
         setRefreshError(err.message);
         setRefreshing(false);
       });
-  }, [refreshing]);
+  }, []);
 
   if (state.status === "loading") {
     return (
@@ -127,17 +158,10 @@ export function CapabilitiesScreen() {
   const probeErrors = state.data.probes?.errors ?? [];
   const capabilityErrors = caps?.errors ?? [];
   const daemonErrors = state.data.daemons?.errors ?? [];
-  // Codex bot PR #144 round-8 P2: probe.ok=false alone is NOT a hard
-  // failure. health.go::computeProbesSection emits the sentinel
-  // err="no probe (daemon not running or probe disabled)" for daemons
-  // that are intentionally stopped or have probing disabled — that's
-  // a normal operator state, not a backend failure. Filter the
-  // sentinel out so failure-classification only fires on TRUE probe
-  // errors (HTTP 500, parse errors, timeouts, etc.).
-  const PROBE_NOT_RUNNING_SENTINEL = "no probe (daemon not running or probe disabled)";
-  const failedProbes = state.data.probes?.items.filter(
-    (p) => !p.ok && p.err !== PROBE_NOT_RUNNING_SENTINEL,
-  ) ?? [];
+  // Codex bot PR #144 r8 P2 + r10 architecture MINOR: predicate
+  // extracted to module level (isActionableProbeFailure) so the
+  // sentinel string isn't duplicated in two places.
+  const failedProbes = state.data.probes?.items.filter(isActionableProbeFailure) ?? [];
   const hasFailures =
     probeErrors.length > 0 ||
     capabilityErrors.length > 0 ||

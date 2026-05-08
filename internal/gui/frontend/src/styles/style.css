@@ -1151,4 +1151,3 @@ menu button[disabled] {
 .state-badge-unsupported { background: #fff9c4; color: #795548; }
 .state-badge-error       { background: #ffcdd2; color: #b71c1c; }
 .state-badge-stale       { background: #ffe0b2; color: #e65100; }
-
