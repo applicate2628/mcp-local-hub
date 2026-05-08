@@ -399,33 +399,33 @@ func (a *API) loadOwnershipSnapshotInternal() (OwnershipSnapshot, error) {
 		snap.ManifestDaemons[m.Name] = inner
 	}
 
-	// PR #135 round 3 P1: detect workspace-scoped dependence from
-	// installed scheduler tasks (lazy-proxy `mcp-local-hub-lsp-*`),
-	// not from the manifest catalog. The fail-closed gate fires only
-	// for hosts that actually run lazy proxies — global-only hosts
-	// keep watchdog auto-recovery on registry errors as intended.
-	hasWorkspaceScoped := hasInstalledWorkspaceScopedDaemon()
+	// PR #135 round 4: structurally early-exit for global-only hosts
+	// before touching the workspace registry. This makes the fix to
+	// PR #135 round 3 P1 obvious: when scheduler.List finds zero
+	// `mcp-local-hub-lsp-*` tasks installed, the host has no workspace-
+	// scoped daemons and CANNOT depend on workspace registry data.
+	// Path-resolve / load failures of the registry are therefore
+	// IRRELEVANT to recovery for that host. Returning the global-only
+	// snapshot early makes it impossible for `DefaultRegistryPath()`
+	// errors (e.g. service accounts without a resolvable home dir) to
+	// block watchdog recovery for the global daemons that are present.
+	if !hasInstalledWorkspaceScopedDaemon() {
+		return snap, nil
+	}
 
-	// Workspace registry: task name keyed by (workspace, language).
-	// Path-resolve failures and load failures propagate as errors when
-	// the installation depends on workspace data (PR #135 Finding 4 +
-	// PR #135 round 3 P1 installed-task gate). Hosts with no installed
-	// lazy-proxy tasks (no `mcp-local-hub-lsp-*` in scheduler) get an
-	// empty workspace section silently — registry state cannot affect
-	// them.
+	// Workspace registry: at least one `mcp-local-hub-lsp-*` task IS
+	// installed in this host's scheduler — the watchdog DOES depend on
+	// workspace registry data. Path-resolve and load failures from here
+	// onward propagate as errors (PR #135 Finding 4: fail-closed when
+	// the installation actually uses workspace data; PR #135 round 3
+	// P1: gate on installed tasks not manifest catalog).
 	regPath, regErr := DefaultRegistryPath()
 	if regErr != nil {
-		if hasWorkspaceScoped {
-			return snap, fmt.Errorf("resolve workspace registry path: %w", regErr)
-		}
-		return snap, nil
+		return snap, fmt.Errorf("resolve workspace registry path: %w", regErr)
 	}
 	reg := NewRegistry(regPath)
 	if err := reg.Load(); err != nil {
-		if hasWorkspaceScoped {
-			return snap, fmt.Errorf("load workspace registry: %w", err)
-		}
-		return snap, nil
+		return snap, fmt.Errorf("load workspace registry: %w", err)
 	}
 	for _, e := range reg.Workspaces {
 		if e.TaskName == "" {
