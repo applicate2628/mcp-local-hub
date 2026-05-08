@@ -169,6 +169,24 @@ func isMaintenanceTaskName(name string) bool {
 		strings.HasSuffix(name, "-weekly-refresh")
 }
 
+// IsMaintenanceTaskName is the exported alias used by cross-package
+// callers (e.g. internal/cli/uninstall.go's "is this the last managed
+// server?" gate). Same suffix-match contract as the unexported helper.
+func IsMaintenanceTaskName(name string) bool {
+	return isMaintenanceTaskName(name)
+}
+
+// ServerFromTaskName parses a Task Scheduler name like
+// "\\mcp-local-hub-<server>-<daemon>" and returns the server segment.
+// Returns "" for unparseable or hub-wide tasks (watchdog,
+// hub-wide weekly-refresh). Mirrors parseTaskName's first return value
+// from status_enrich.go but is exported for cross-package consumers
+// that need only the server identity (e.g. partial-uninstall gating).
+func ServerFromTaskName(taskName string) string {
+	srv, _ := parseTaskName(taskName)
+	return srv
+}
+
 // ---------------------------------------------------------------------------
 // RecoverStoppedDaemons — strictly-pure decision tree (plan §1, §12).
 // ---------------------------------------------------------------------------

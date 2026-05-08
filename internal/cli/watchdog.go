@@ -560,13 +560,13 @@ func runWatchdogOnceInner(ctx context.Context, a *api.API, now time.Time, diagno
 	coolR := a.ReadWatchdogState()
 
 	// 6. Wall-clock jump check (§29).
-	if code, suppressed := wallClockJumpCheck(a, coolR, intentR, now, diagnostic); suppressed {
+	if code, suppressed := wallClockJumpCheck(a, &coolR, intentR, now, diagnostic); suppressed {
 		return code
 	}
 
 	// 7. Corrupt-strike accumulation + self-quarantine (§28).
 	if intentR.State == api.IntentStateCorrupt || coolR.State == api.WatchdogStateCorrupt {
-		return runCorruptStrikePath(a, coolR, intentR, now, diagnostic)
+		return runCorruptStrikePath(a, &coolR, intentR, now, diagnostic)
 	}
 
 	// 8. Defensive-copy snapshots.
@@ -584,7 +584,7 @@ func runWatchdogOnceInner(ctx context.Context, a *api.API, now time.Time, diagno
 		})
 		// Final state write (records LastWallClockSeen even on partial
 		// tick) so the next tick can detect wall-clock baseline.
-		_ = persistEndOfTickState(a, coolR, now, diagnostic)
+		_ = persistEndOfTickState(a, &coolR, now, diagnostic)
 		// Distinguish ctx-deadline (exit 2) from generic backend (exit 1).
 		if errors.Is(statusErr, context.DeadlineExceeded) || errors.Is(statusErr, context.Canceled) {
 			return exitWatchdogCtxDeadline
@@ -616,12 +616,12 @@ func runWatchdogOnceInner(ctx context.Context, a *api.API, now time.Time, diagno
 				Err:    ctx.Err().Error(),
 			})
 			// Persist + return 2 per §58 + §10 v8.
-			_ = persistEndOfTickState(a, coolR, now, diagnostic)
+			_ = persistEndOfTickState(a, &coolR, now, diagnostic)
 			return exitWatchdogCtxDeadline
 		}
 		switch d.Action {
 		case "restart":
-			applyRestartDecision(ctx, a, coolR, ownership, d, now, diagnostic)
+			applyRestartDecision(ctx, a, &coolR, ownership, d, now, diagnostic)
 		case "chronic-failure":
 			applyChronicFailureDecision(a, d, diagnostic)
 		case "suspicious-xml":
@@ -642,7 +642,7 @@ func runWatchdogOnceInner(ctx context.Context, a *api.API, now time.Time, diagno
 	}
 
 	// 14. End-of-tick state write (§36 err-first contract).
-	if !persistEndOfTickState(a, coolR, now, diagnostic) {
+	if !persistEndOfTickState(a, &coolR, now, diagnostic) {
 		return exitWatchdogBackend
 	}
 	return exitWatchdogSuccess
@@ -650,10 +650,16 @@ func runWatchdogOnceInner(ctx context.Context, a *api.API, now time.Time, diagno
 
 // applyRestartDecision implements the restart branch from plan §10 v8 +
 // §30. Idempotent against ctx-cancel and audit-failure paths.
+//
+// coolR is taken by pointer so stale-clear strike accumulation
+// (Codex bot P3 — populate coolR.StaleClearWindow) is visible to the
+// caller's end-of-tick WriteWatchdogState. Cooldown engine mutation
+// already worked via interface reference, but the StaleClearWindow
+// slice header is value-typed and would not propagate by value.
 func applyRestartDecision(
 	ctx context.Context,
 	a *api.API,
-	coolR api.WatchdogStateRead,
+	coolR *api.WatchdogStateRead,
 	ownership api.OwnershipSnapshot,
 	d api.RecoveryDecision,
 	now time.Time,
@@ -686,7 +692,7 @@ func applyRestartDecision(
 	coolR.Cool.RecordAttempt(d.TaskName, mutNow)
 
 	// 4. PERSIST IMMEDIATELY (§30) — durability against mid-restart kill.
-	staleEvents, writeErr := a.WriteWatchdogState(coolR, mutNow)
+	staleEvents, writeErr := a.WriteWatchdogState(*coolR, mutNow)
 	if writeErr != nil {
 		// Per §36 staleEvents is guaranteed nil on err.
 		_ = a.AppendWatchdogLog(api.WatchdogLogEntry{
@@ -698,7 +704,13 @@ func applyRestartDecision(
 		// Next tick re-reads stale state and re-evaluates fresh.
 		return
 	}
-	// Successful write: log any stale-clear events surfaced by the sweep.
+	// Successful write: log any stale-clear events surfaced by the sweep
+	// AND populate coolR.StaleClearWindow so `mcphub watchdog status`
+	// stops reporting a perpetual zero (Codex bot P3). The strikes are
+	// persisted by the end-of-tick WriteWatchdogState in
+	// runWatchdogOnceInner; if the process is killed before that final
+	// write, the next tick re-reads the older window — acceptable per
+	// the §45 v9 best-effort observability contract.
 	for _, name := range staleEvents {
 		_ = a.AppendWatchdogLog(api.WatchdogLogEntry{
 			Task:      name,
@@ -706,7 +718,9 @@ func applyRestartDecision(
 			Note:      "likely process kill mid-restart on prior tick",
 			ClearedAt: mutNow,
 		})
+		coolR.StaleClearWindow = api.AppendStrike(coolR.StaleClearWindow, mutNow, api.StaleClearThreshold)
 	}
+	maybeEmitStaleClearStrikeAlert(a, coolR.StaleClearWindow, mutNow)
 
 	// 5. Snapshot-bound restart (§59) — kill-by-port targets snap.PortMap,
 	//    not the live manifest.
@@ -775,8 +789,16 @@ func applyChronicFailureDecision(a *api.API, d api.RecoveryDecision, diagnostic 
 // persistEndOfTickState writes coolR's state to disk and logs any
 // stale-clear events. Returns true on success, false on write failure
 // (caller maps to exit 1 per §10 v8).
-func persistEndOfTickState(a *api.API, coolR api.WatchdogStateRead, now time.Time, diagnostic io.Writer) bool {
-	staleEvents, err := a.WriteWatchdogState(coolR, now)
+//
+// Codex bot P3: each stale-clear event surfaced by the sweep also
+// appends a timestamp to coolR.StaleClearWindow so the documented
+// 4-events-in-30min threshold can actually trigger. The newly
+// appended strikes won't be persisted by THIS write (the write has
+// already committed); they land on the next tick's
+// WriteWatchdogState. That one-tick lag is acceptable for an
+// observability-only signal (no quarantine action).
+func persistEndOfTickState(a *api.API, coolR *api.WatchdogStateRead, now time.Time, diagnostic io.Writer) bool {
+	staleEvents, err := a.WriteWatchdogState(*coolR, now)
 	if err != nil {
 		_ = a.AppendWatchdogLog(api.WatchdogLogEntry{
 			Task:   "<once-driver>",
@@ -793,8 +815,44 @@ func persistEndOfTickState(a *api.API, coolR api.WatchdogStateRead, now time.Tim
 			Note:      "end-of-tick stale-clear",
 			ClearedAt: now,
 		})
+		coolR.StaleClearWindow = api.AppendStrike(coolR.StaleClearWindow, now, api.StaleClearThreshold)
 	}
+	maybeEmitStaleClearStrikeAlert(a, coolR.StaleClearWindow, now)
 	return true
+}
+
+// maybeEmitStaleClearStrikeAlert emits a single high-priority
+// `stale-clear-strike-alert` watchdog.log entry when the supplied
+// StaleClearWindow has reached the §45 v9 threshold of 4 events
+// within a 30-minute sliding window. Mirrors the §28 corrupt-strike
+// self-quarantine check shape, but observability-only — no
+// quarantine, no scheduler.Delete.
+//
+// The alert fires when len(window) >= StaleClearThreshold AND the
+// span between the oldest and newest entries is <= 30 minutes. The
+// in-window check is redundant given AppendStrike's drop-old-then-
+// append shape, but the explicit guard documents the contract and
+// defends against future callers that bypass AppendStrike.
+func maybeEmitStaleClearStrikeAlert(a *api.API, window []time.Time, now time.Time) {
+	if len(window) < api.StaleClearThreshold {
+		return
+	}
+	oldest := oldestStrike(window)
+	if oldest.IsZero() {
+		return
+	}
+	if now.Sub(oldest) > api.StrikeWindowDuration {
+		return
+	}
+	_ = a.AppendWatchdogLog(api.WatchdogLogEntry{
+		Task:     "<once-driver>",
+		Action:   "stale-clear-strike-alert",
+		Priority: "high",
+		Note: fmt.Sprintf(
+			"%d stale-clear events in last 30min; observability-only (no quarantine)",
+			len(window),
+		),
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -804,9 +862,13 @@ func persistEndOfTickState(a *api.API, coolR api.WatchdogStateRead, now time.Tim
 // wallClockJumpCheck implements the §29 decision tree. Returns
 // (exitCode, suppressed) — suppressed=true means the tick is over and
 // the caller returns exitCode immediately.
+//
+// coolR is a pointer so the persistEndOfTickState call inside this
+// helper can append to coolR.StaleClearWindow (Codex bot P3) when
+// WriteWatchdogState surfaces stale-clear events.
 func wallClockJumpCheck(
 	a *api.API,
-	coolR api.WatchdogStateRead,
+	coolR *api.WatchdogStateRead,
 	intentR api.IntentReadResult,
 	now time.Time,
 	diagnostic io.Writer,
@@ -868,9 +930,14 @@ func wallClockJumpCheck(
 
 // runCorruptStrikePath implements the §28 strike accumulation +
 // self-quarantine path. Returns the desired exit code.
+//
+// coolR is a pointer so AppendStrike mutations to
+// CorruptStrikeWindow propagate back to the caller (and
+// persistEndOfTickState picks up StaleClearWindow updates per
+// Codex bot P3).
 func runCorruptStrikePath(
 	a *api.API,
-	coolR api.WatchdogStateRead,
+	coolR *api.WatchdogStateRead,
 	intentR api.IntentReadResult,
 	now time.Time,
 	diagnostic io.Writer,

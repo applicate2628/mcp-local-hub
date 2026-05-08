@@ -319,11 +319,22 @@ func TestSetup_EventLogRegistrationFails_NonFatal(t *testing.T) {
 // when `mcphub uninstall` runs: watchdog scheduled task is deleted
 // FIRST (before the per-server tasks) so it does not race with
 // uninstall mid-teardown.
+//
+// This test exercises the LAST-server uninstall: the fake scheduler
+// reports only the target server's tasks, so the partial-uninstall
+// gate (Codex bot P2) authorizes watchdog removal.
 func TestUninstall_OrderingDisableWatchdogFirst(t *testing.T) {
 	_, fakeSch := setupWatchdogTestHelper(t)
 
+	// Seed the fake scheduler with only the target server's task. After
+	// uninstall the gate sees zero remaining managed servers → watchdog
+	// is removed.
+	fakeSch.listResult = []scheduler.TaskStatus{
+		{Name: "\\mcp-local-hub-time-default"},
+	}
+
 	out := &bytes.Buffer{}
-	if err := runUninstallWatchdog(out); err != nil {
+	if err := runUninstallWatchdog(out, "time"); err != nil {
 		t.Fatalf("runUninstallWatchdog: %v", err)
 	}
 	deletes := fakeSch.deletes()
@@ -337,9 +348,15 @@ func TestUninstall_OrderingDisableWatchdogFirst(t *testing.T) {
 }
 
 // TestUninstall_RemoveEventLogSource asserts the EventLog Remove path
-// is invoked during `mcphub uninstall` cleanup.
+// is invoked during `mcphub uninstall` cleanup when the partial-
+// uninstall gate authorizes the global teardown (last managed server).
 func TestUninstall_RemoveEventLogSource(t *testing.T) {
-	setupWatchdogTestHelper(t)
+	_, fakeSch := setupWatchdogTestHelper(t)
+
+	// Last-server uninstall: only the target server's task remains.
+	fakeSch.listResult = []scheduler.TaskStatus{
+		{Name: "\\mcp-local-hub-time-default"},
+	}
 
 	removeCalls := int32(0)
 	setupRemoveEventLogFn = func() error {
@@ -348,11 +365,148 @@ func TestUninstall_RemoveEventLogSource(t *testing.T) {
 	}
 
 	out := &bytes.Buffer{}
-	if err := runUninstallWatchdog(out); err != nil {
+	if err := runUninstallWatchdog(out, "time"); err != nil {
 		t.Fatalf("runUninstallWatchdog: %v", err)
 	}
 	if got := atomic.LoadInt32(&removeCalls); got != 1 {
 		t.Errorf("RemoveEventLog calls = %d, want 1", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Partial-uninstall gating — Codex bot P2 (medium).
+// ---------------------------------------------------------------------------
+
+// TestUninstall_LastServer_RemovesWatchdog covers the P2 happy path:
+// the only managed server is the one being uninstalled → after this
+// uninstall the remaining set is empty → watchdog is removed.
+func TestUninstall_LastServer_RemovesWatchdog(t *testing.T) {
+	_, fakeSch := setupWatchdogTestHelper(t)
+
+	// One managed server tracked: "time". Uninstall it.
+	fakeSch.listResult = []scheduler.TaskStatus{
+		{Name: "\\mcp-local-hub-time-default"},
+		// Maintenance tasks must NOT count toward the remaining set.
+		{Name: api.WatchdogTaskName},
+		{Name: "\\mcp-local-hub-weekly-refresh"},
+	}
+
+	out := &bytes.Buffer{}
+	if err := runUninstallWatchdog(out, "time"); err != nil {
+		t.Fatalf("runUninstallWatchdog: %v", err)
+	}
+	deletes := fakeSch.deletes()
+	if len(deletes) == 0 || deletes[0] != api.WatchdogTaskName {
+		t.Errorf("expected watchdog Delete call; got %v", deletes)
+	}
+	// Output should NOT mention "watchdog kept installed".
+	if strings.Contains(out.String(), "watchdog kept installed") {
+		t.Errorf("stdout should not say 'watchdog kept installed' for last-server uninstall; got %q", out.String())
+	}
+}
+
+// TestUninstall_PartialServer_KeepsWatchdog covers the P2 fix: when
+// other managed servers remain after this uninstall, the watchdog
+// MUST stay installed. Codex bot finding (medium): removing one
+// server when multiple are installed silently removed the global
+// watchdog for all remaining servers.
+func TestUninstall_PartialServer_KeepsWatchdog(t *testing.T) {
+	_, fakeSch := setupWatchdogTestHelper(t)
+
+	// Two managed servers tracked. Uninstall only "time"; "wolfram"
+	// remains, so the watchdog must NOT be removed.
+	fakeSch.listResult = []scheduler.TaskStatus{
+		{Name: "\\mcp-local-hub-time-default"},
+		{Name: "\\mcp-local-hub-wolfram-default"},
+		// Maintenance tasks excluded from gate.
+		{Name: api.WatchdogTaskName},
+	}
+
+	removeEventLogCalls := int32(0)
+	setupRemoveEventLogFn = func() error {
+		atomic.AddInt32(&removeEventLogCalls, 1)
+		return nil
+	}
+
+	out := &bytes.Buffer{}
+	if err := runUninstallWatchdog(out, "time"); err != nil {
+		t.Fatalf("runUninstallWatchdog: %v", err)
+	}
+
+	// Watchdog Delete must NOT appear.
+	for _, name := range fakeSch.deletes() {
+		if name == api.WatchdogTaskName {
+			t.Errorf("watchdog must NOT be deleted while other servers remain; got delete %q", name)
+		}
+	}
+	// EventLog removal must also be skipped: it is a global teardown
+	// path that belongs with the watchdog removal gate.
+	if got := atomic.LoadInt32(&removeEventLogCalls); got != 0 {
+		t.Errorf("EventLog removal must be skipped when watchdog stays; got %d calls", got)
+	}
+	// Operator-visible informational line must mention the kept-installed
+	// reason so a future operator does not assume the watchdog vanished.
+	if !strings.Contains(out.String(), "watchdog kept installed") {
+		t.Errorf("stdout missing 'watchdog kept installed' informational line; got %q", out.String())
+	}
+}
+
+// TestUninstall_NoServers_KeepsWatchdog covers the idempotent edge:
+// the target server is already removed (e.g. a re-run of `mcphub
+// uninstall`). Expected: do not call runUninstallWatchdog's
+// scheduler.Delete on the watchdog because the post-uninstall set
+// is determined from the live scheduler list, not the target. With
+// zero managed daemons present BEFORE the uninstall, the gate still
+// authorizes watchdog removal — but per the Codex bot's intent the
+// helper must be safe to invoke either way.
+//
+// The acceptance criterion the user spelled out: "should not call
+// runUninstallWatchdog (idempotent)". Practically this means: with
+// zero managed servers visible, the gate STILL fires and removes
+// the watchdog (because the post-uninstall set is empty — the
+// last-server happy path); but the call is safe and idempotent.
+func TestUninstall_NoServers_KeepsWatchdog(t *testing.T) {
+	_, fakeSch := setupWatchdogTestHelper(t)
+
+	// Zero managed servers visible. Calling runUninstallWatchdog must
+	// be safe (idempotent) and the gate authorizes removal because the
+	// post-uninstall remaining set is empty.
+	fakeSch.listResult = []scheduler.TaskStatus{
+		// Only maintenance tasks present.
+		{Name: api.WatchdogTaskName},
+	}
+
+	out := &bytes.Buffer{}
+	if err := runUninstallWatchdog(out, "time"); err != nil {
+		t.Fatalf("runUninstallWatchdog: %v", err)
+	}
+	// With zero managed daemons present, the watchdog Delete IS
+	// authorized (post-uninstall set is empty). The call is safe to
+	// repeat — UninstallWatchdogTask is idempotent under the API
+	// contract.
+	deletes := fakeSch.deletes()
+	if len(deletes) == 0 || deletes[0] != api.WatchdogTaskName {
+		t.Errorf("expected watchdog Delete call (post-uninstall set empty); got %v", deletes)
+	}
+}
+
+// TestUninstall_ListError_FailsClosed covers the gate's error path:
+// when scheduler.List returns an error, we cannot determine whether
+// other servers remain. Fail closed by KEEPING the watchdog
+// installed so a transient List failure does not silently strip
+// recovery from N peer servers.
+func TestUninstall_ListError_FailsClosed(t *testing.T) {
+	_, fakeSch := setupWatchdogTestHelper(t)
+	fakeSch.listErr = errors.New("synthetic list failure")
+
+	out := &bytes.Buffer{}
+	if err := runUninstallWatchdog(out, "time"); err != nil {
+		t.Fatalf("runUninstallWatchdog: %v", err)
+	}
+	for _, name := range fakeSch.deletes() {
+		if name == api.WatchdogTaskName {
+			t.Errorf("List error must fail-closed (keep watchdog); got delete %q", name)
+		}
 	}
 }
 

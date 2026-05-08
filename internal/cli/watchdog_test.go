@@ -62,11 +62,18 @@ func watchdogTestHelper(t *testing.T) string {
 
 // watchdogFakeScheduler captures Delete and ImportXML calls. Other
 // methods return errNotImplementedForTest so accidental misuse is loud.
+//
+// listResult / listErr provide a configurable response for List —
+// needed by tests that exercise the partial-uninstall gate (Codex bot
+// P2) which lists `mcp-local-hub-*` tasks before deciding whether to
+// remove the global watchdog.
 type watchdogFakeScheduler struct {
 	mu             sync.Mutex
 	deleteCalls    []string
 	importXMLCalls []watchdogImportXMLCall
 	deleteErr      error
+	listResult     []scheduler.TaskStatus
+	listErr        error
 }
 
 type watchdogImportXMLCall struct {
@@ -90,8 +97,22 @@ func (f *watchdogFakeScheduler) Stop(string) error { return errNotImplementedFor
 func (f *watchdogFakeScheduler) Status(string) (scheduler.TaskStatus, error) {
 	return scheduler.TaskStatus{}, errNotImplementedForCLITest
 }
-func (f *watchdogFakeScheduler) List(string) ([]scheduler.TaskStatus, error) {
-	return nil, errNotImplementedForCLITest
+func (f *watchdogFakeScheduler) List(prefix string) ([]scheduler.TaskStatus, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	// Default = empty slice (no managed tasks). Tests that exercise
+	// the partial-uninstall gate (Codex bot P2) seed listResult
+	// explicitly; tests that don't care about the gate get the
+	// "no remaining servers → uninstall watchdog" behavior.
+	if f.listResult == nil {
+		return []scheduler.TaskStatus{}, nil
+	}
+	out := make([]scheduler.TaskStatus, len(f.listResult))
+	copy(out, f.listResult)
+	return out, nil
 }
 func (f *watchdogFakeScheduler) ExportXML(string) ([]byte, error) {
 	return nil, errNotImplementedForCLITest
@@ -551,7 +572,7 @@ func TestWatchdogOnce_ApplyRestartDecision_PersistsBeforeRestart(t *testing.T) {
 	// Need >= 60s budget so the restart-budget guard does not trip.
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
-	applyRestartDecision(ctx, a, coolR, snap, dec, now, &bytes.Buffer{})
+	applyRestartDecision(ctx, a, &coolR, snap, dec, now, &bytes.Buffer{})
 
 	if !cap.called {
 		t.Fatalf("RestartContextWithSnapshot was not called")
@@ -618,7 +639,7 @@ func TestWatchdogOnce_ApplyRestartDecision_StopRace_NoRestart(t *testing.T) {
 	// stop-race check. Stop-race must take precedence.
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
-	applyRestartDecision(ctx, a, coolR, snap, dec, now, &bytes.Buffer{})
+	applyRestartDecision(ctx, a, &coolR, snap, dec, now, &bytes.Buffer{})
 
 	if restartCalls.Load() != 0 {
 		t.Errorf("Restart MUST NOT be called when intent stop-race detected; calls=%d", restartCalls.Load())
@@ -659,7 +680,7 @@ func TestWatchdogOnce_ApplyRestartDecision_CtxBudgetExhausted_Skipped(t *testing
 	// 30s remaining — below the 60s budget guard.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	applyRestartDecision(ctx, a, coolR, snap, dec, now, &bytes.Buffer{})
+	applyRestartDecision(ctx, a, &coolR, snap, dec, now, &bytes.Buffer{})
 
 	if restartCalls.Load() != 0 {
 		t.Errorf("Restart MUST NOT be called when ctx budget exhausted; calls=%d", restartCalls.Load())
@@ -724,7 +745,7 @@ func TestWatchdogOnce_UsesSnapshotRestartPath(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
-	applyRestartDecision(ctx, a, coolR, snap, dec, now, &bytes.Buffer{})
+	applyRestartDecision(ctx, a, &coolR, snap, dec, now, &bytes.Buffer{})
 
 	if plainCalls.Load() != 0 {
 		t.Errorf("Plain RestartContext MUST NOT be called by watchdog driver; calls=%d", plainCalls.Load())
@@ -1357,9 +1378,308 @@ func TestWatchdogOnce_BootstrapMissingIntent_RestartsManaged(t *testing.T) {
 	snap := api.OwnershipSnapshot{}
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
-	applyRestartDecision(ctx, a, coolR, snap, dec, now, &bytes.Buffer{})
+	applyRestartDecision(ctx, a, &coolR, snap, dec, now, &bytes.Buffer{})
 	if called.Load() != 1 {
 		t.Errorf("RestartContextWithSnapshot called %d times, want 1", called.Load())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// StaleClearWindow population — Codex bot P3 (low).
+//
+// Plan §45 v9: 4 stale-clear events in a 30-min sliding window must
+// emit `stale-clear-strike-alert` in watchdog.log. The window itself
+// is persisted as `stale_clear_window` inside watchdog-state.json so
+// `mcphub watchdog status` can surface the count. Before this fix
+// the driver only LOGGED stale-clear events; it never appended
+// timestamps to coolR.StaleClearWindow, so the documented threshold
+// could never trigger.
+// ---------------------------------------------------------------------------
+
+// TestStaleClearWindow_PopulatedFromDriver covers the P3 invariant:
+// when WriteWatchdogState surfaces a stale-clear event during
+// applyRestartDecision's pre-restart persist, the driver appends a
+// timestamp to coolR.StaleClearWindow AND the end-of-tick state
+// write persists it.
+func TestStaleClearWindow_PopulatedFromDriver(t *testing.T) {
+	dir := watchdogTestHelper(t)
+	a := api.NewAPI()
+	now := time.Date(2026, 5, 7, 12, 0, 0, 0, time.UTC)
+
+	// Pin watchdogNow so applyRestartDecision's persist-write
+	// timestamp is deterministic relative to the seeded staleAt.
+	watchdogNowFn = func() time.Time { return now }
+
+	// Decision target — applyRestartDecision overwrites this task's
+	// RestartPendingAt with `now`, so the stale-clear event must
+	// come from a DIFFERENT task in the persisted map.
+	const decisionTaskName = "\\mcp-local-hub-fake-default"
+	const otherStaleTaskName = "\\mcp-local-hub-other-stale"
+
+	// Pre-seed watchdog-state.json with a cooldown entry on
+	// otherStaleTaskName whose RestartPendingAt is older than
+	// RestartPendingTTL. WriteWatchdogState's sweep clears it and
+	// returns the task name as a stale-clear event.
+	staleAt := now.Add(-10 * time.Minute) // > 6-min RestartPendingTTL
+	state := struct {
+		Cooldowns         map[string]map[string]any `json:"cooldowns"`
+		LastWallClockSeen time.Time                 `json:"last_wall_clock_seen"`
+	}{
+		Cooldowns: map[string]map[string]any{
+			otherStaleTaskName: {
+				"first_attempt_at":   staleAt,
+				"attempts_in_window": 1,
+				"last_running_at":    time.Time{},
+				"chronic_cycles":     0,
+				"restart_pending_at": staleAt,
+			},
+		},
+		LastWallClockSeen: now.Add(-2 * time.Minute),
+	}
+	raw, _ := json.Marshal(state)
+	if err := os.WriteFile(filepath.Join(dir, "watchdog-state.json"), raw, 0o600); err != nil {
+		t.Fatalf("seed state: %v", err)
+	}
+
+	// Wire seams so applyRestartDecision proceeds past stop-race +
+	// restart and reaches the stale-clear logging branch.
+	restoreIntent := api.SetTestIntentReaderFn(func(taskName string) (api.DaemonIntent, bool, error) {
+		return api.DaemonIntent{}, false, nil
+	})
+	t.Cleanup(restoreIntent)
+	restoreRestart := api.SetTestRestartWithSnapshotFn(func(server, filter string, snap api.OwnershipSnapshot) ([]api.RestartResult, error) {
+		return []api.RestartResult{{TaskName: decisionTaskName}}, nil
+	})
+	t.Cleanup(restoreRestart)
+	restoreStatus := api.SetTestStatusFn(func() ([]api.DaemonStatus, error) {
+		return []api.DaemonStatus{{TaskName: decisionTaskName, State: "Running"}}, nil
+	})
+	t.Cleanup(restoreStatus)
+
+	coolR := a.ReadWatchdogState()
+	// Pre-condition: StaleClearWindow starts empty + state parsed
+	// successfully (corrupt path would make the sweep see no entries).
+	if got := len(coolR.StaleClearWindow); got != 0 {
+		t.Fatalf("StaleClearWindow seed length = %d, want 0", got)
+	}
+	if coolR.State != api.WatchdogStateValid {
+		t.Fatalf("seeded state must parse as valid; got State=%q QuarantinePath=%q", coolR.State, coolR.QuarantinePath)
+	}
+
+	dec := api.RecoveryDecision{
+		TaskName: decisionTaskName,
+		Server:   "fake",
+		Daemon:   "default",
+		Action:   "restart",
+		Attempt:  1,
+	}
+	snap := api.OwnershipSnapshot{}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	applyRestartDecision(ctx, a, &coolR, snap, dec, now, &bytes.Buffer{})
+
+	// Post-condition: a stale-clear event was logged AND coolR's
+	// StaleClearWindow received exactly one strike.
+	logTail := a.ReadWatchdogLogTail(20)
+	if !containsAction(logTail, "restart-pending-stale-cleared") {
+		t.Fatalf("watchdog.log missing restart-pending-stale-cleared; got %+v", logTail)
+	}
+	if got := len(coolR.StaleClearWindow); got != 1 {
+		t.Errorf("StaleClearWindow length after driver tick = %d, want 1", got)
+	}
+
+	// Persist the end-of-tick state so the on-disk file shows the
+	// strike too (matches what runWatchdogOnceInner does at step 14).
+	persistEndOfTickState(a, &coolR, now, &bytes.Buffer{})
+
+	// Read back from disk and assert the persisted StaleClearWindow.
+	rawBack, err := os.ReadFile(filepath.Join(dir, "watchdog-state.json"))
+	if err != nil {
+		t.Fatalf("re-read state: %v", err)
+	}
+	var diskBack struct {
+		StaleClearWindow []time.Time `json:"stale_clear_window"`
+	}
+	if err := json.Unmarshal(rawBack, &diskBack); err != nil {
+		t.Fatalf("re-parse state: %v", err)
+	}
+	if got := len(diskBack.StaleClearWindow); got != 1 {
+		t.Errorf("on-disk stale_clear_window length = %d, want 1", got)
+	}
+}
+
+// TestStaleClearStrikeAlert_EmittedOn4InWindow covers the P3 alert:
+// when the StaleClearWindow already holds 3 entries within 30 min,
+// a fresh stale-clear during this tick pushes it to >= threshold (4)
+// and the driver emits a high-priority `stale-clear-strike-alert`
+// log entry. Observability-only — no quarantine action.
+func TestStaleClearStrikeAlert_EmittedOn4InWindow(t *testing.T) {
+	dir := watchdogTestHelper(t)
+	a := api.NewAPI()
+	now := time.Date(2026, 5, 7, 12, 0, 0, 0, time.UTC)
+
+	// applyRestartDecision uses watchdogNow() (real clock by default)
+	// for the persist-write timestamp; without this seam the AppendStrike
+	// cutoff would drop our seeded strikes as "older than 30 min".
+	watchdogNowFn = func() time.Time { return now }
+
+	const decisionTaskName = "\\mcp-local-hub-stale-default"
+	const otherStaleTaskName = "\\mcp-local-hub-stale-peer"
+
+	// Pre-seed three prior strikes within the 30-min window AND a
+	// cooldown entry on a SEPARATE task with a stale RestartPendingAt
+	// (otherwise applyRestartDecision overwrites the decision target's
+	// RestartPendingAt with `now` before the sweep runs). The sweep
+	// clears otherStaleTaskName → fourth strike accumulates → alert.
+	staleAt := now.Add(-10 * time.Minute) // > 6-min TTL
+	priorStrikes := []time.Time{
+		now.Add(-25 * time.Minute),
+		now.Add(-15 * time.Minute),
+		now.Add(-5 * time.Minute),
+	}
+	state := struct {
+		Cooldowns         map[string]map[string]any `json:"cooldowns"`
+		LastWallClockSeen time.Time                 `json:"last_wall_clock_seen"`
+		StaleClearWindow  []time.Time               `json:"stale_clear_window"`
+	}{
+		Cooldowns: map[string]map[string]any{
+			otherStaleTaskName: {
+				"first_attempt_at":   staleAt,
+				"attempts_in_window": 1,
+				"restart_pending_at": staleAt,
+			},
+		},
+		LastWallClockSeen: now.Add(-2 * time.Minute),
+		StaleClearWindow:  priorStrikes,
+	}
+	raw, _ := json.Marshal(state)
+	if err := os.WriteFile(filepath.Join(dir, "watchdog-state.json"), raw, 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	restoreIntent := api.SetTestIntentReaderFn(func(taskName string) (api.DaemonIntent, bool, error) {
+		return api.DaemonIntent{}, false, nil
+	})
+	t.Cleanup(restoreIntent)
+	restoreRestart := api.SetTestRestartWithSnapshotFn(func(server, filter string, snap api.OwnershipSnapshot) ([]api.RestartResult, error) {
+		return []api.RestartResult{{TaskName: decisionTaskName}}, nil
+	})
+	t.Cleanup(restoreRestart)
+	restoreStatus := api.SetTestStatusFn(func() ([]api.DaemonStatus, error) {
+		return []api.DaemonStatus{{TaskName: decisionTaskName, State: "Running"}}, nil
+	})
+	t.Cleanup(restoreStatus)
+
+	coolR := a.ReadWatchdogState()
+	if got := len(coolR.StaleClearWindow); got != 3 {
+		t.Fatalf("seeded StaleClearWindow length = %d, want 3", got)
+	}
+
+	dec := api.RecoveryDecision{
+		TaskName: decisionTaskName,
+		Server:   "stale",
+		Daemon:   "default",
+		Action:   "restart",
+		Attempt:  1,
+	}
+	snap := api.OwnershipSnapshot{}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	applyRestartDecision(ctx, a, &coolR, snap, dec, now, &bytes.Buffer{})
+
+	// Post-condition: 4 strikes recorded AND the alert appears.
+	if got := len(coolR.StaleClearWindow); got != 4 {
+		t.Errorf("StaleClearWindow length after driver tick = %d, want 4", got)
+	}
+	logTail := a.ReadWatchdogLogTail(40)
+	if !containsAction(logTail, "stale-clear-strike-alert") {
+		t.Errorf("watchdog.log missing stale-clear-strike-alert; got %+v", logTail)
+	}
+	// And the alert must be Priority=high (observability salience).
+	for _, e := range logTail {
+		if e.Action == "stale-clear-strike-alert" {
+			if e.Priority != "high" {
+				t.Errorf("stale-clear-strike-alert Priority = %q, want %q", e.Priority, "high")
+			}
+		}
+	}
+}
+
+// TestStaleClearStrikeAlert_NotEmittedWhenSpreadOutsideWindow covers
+// the negative path: 3 stale-clear strikes outside the 30-min window
+// + 1 fresh strike → window shrinks to 1 entry due to AppendStrike's
+// cutoff drop → no alert.
+func TestStaleClearStrikeAlert_NotEmittedWhenSpreadOutsideWindow(t *testing.T) {
+	dir := watchdogTestHelper(t)
+	a := api.NewAPI()
+	now := time.Date(2026, 5, 7, 12, 0, 0, 0, time.UTC)
+
+	// Pin watchdogNow so the AppendStrike cutoff is deterministic.
+	watchdogNowFn = func() time.Time { return now }
+
+	const decisionTaskName = "\\mcp-local-hub-spread-default"
+	const otherStaleTaskName = "\\mcp-local-hub-spread-peer"
+
+	staleAt := now.Add(-10 * time.Minute)
+	priorStrikes := []time.Time{
+		now.Add(-90 * time.Minute), // outside 30-min window
+		now.Add(-60 * time.Minute),
+		now.Add(-45 * time.Minute),
+	}
+	state := struct {
+		Cooldowns         map[string]map[string]any `json:"cooldowns"`
+		LastWallClockSeen time.Time                 `json:"last_wall_clock_seen"`
+		StaleClearWindow  []time.Time               `json:"stale_clear_window"`
+	}{
+		Cooldowns: map[string]map[string]any{
+			otherStaleTaskName: {
+				"first_attempt_at":   staleAt,
+				"attempts_in_window": 1,
+				"restart_pending_at": staleAt,
+			},
+		},
+		LastWallClockSeen: now.Add(-2 * time.Minute),
+		StaleClearWindow:  priorStrikes,
+	}
+	raw, _ := json.Marshal(state)
+	if err := os.WriteFile(filepath.Join(dir, "watchdog-state.json"), raw, 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	restoreIntent := api.SetTestIntentReaderFn(func(taskName string) (api.DaemonIntent, bool, error) {
+		return api.DaemonIntent{}, false, nil
+	})
+	t.Cleanup(restoreIntent)
+	restoreRestart := api.SetTestRestartWithSnapshotFn(func(server, filter string, snap api.OwnershipSnapshot) ([]api.RestartResult, error) {
+		return []api.RestartResult{{TaskName: decisionTaskName}}, nil
+	})
+	t.Cleanup(restoreRestart)
+	restoreStatus := api.SetTestStatusFn(func() ([]api.DaemonStatus, error) {
+		return []api.DaemonStatus{{TaskName: decisionTaskName, State: "Running"}}, nil
+	})
+	t.Cleanup(restoreStatus)
+
+	coolR := a.ReadWatchdogState()
+	dec := api.RecoveryDecision{
+		TaskName: decisionTaskName,
+		Server:   "spread",
+		Daemon:   "default",
+		Action:   "restart",
+		Attempt:  1,
+	}
+	snap := api.OwnershipSnapshot{}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	applyRestartDecision(ctx, a, &coolR, snap, dec, now, &bytes.Buffer{})
+
+	// All three prior strikes were outside the window, so AppendStrike
+	// keeps only the fresh one. len < threshold → no alert.
+	if got := len(coolR.StaleClearWindow); got != 1 {
+		t.Errorf("StaleClearWindow length = %d, want 1 (old strikes pruned)", got)
+	}
+	logTail := a.ReadWatchdogLogTail(40)
+	if containsAction(logTail, "stale-clear-strike-alert") {
+		t.Errorf("stale-clear-strike-alert must NOT fire when window < threshold; got %+v", logTail)
 	}
 }
 

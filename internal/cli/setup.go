@@ -410,13 +410,41 @@ func runSetupWatchdog(out io.Writer, allowElevated bool) error {
 // `api.Uninstall` are non-fatal per the §65 fail-handling table
 // (`mcphub uninstall: log + proceed`).
 //
+// Codex bot P2 (medium): the watchdog + EventLog cleanup is GATED
+// on "no remaining managed servers AFTER this uninstall". Removing
+// one server when multiple are installed must NOT silently strip
+// the global watchdog from peer servers — that would defeat
+// auto-recovery for every non-target daemon.
+//
+// Gate algorithm:
+//
+//  1. List all `mcp-local-hub-*` scheduled tasks.
+//  2. Filter out maintenance tasks (api.IsMaintenanceTaskName).
+//  3. Map each remaining task to its server (api.ServerFromTaskName).
+//  4. Subtract the server about to be uninstalled.
+//  5. If the resulting set is empty → last managed server →
+//     authorize watchdog + EventLog teardown.
+//     Otherwise → log "watchdog kept installed" and skip both.
+//
+// Fail-closed on List error: a transient list failure cannot be
+// allowed to silently uninstall the watchdog. Log the error and
+// keep the watchdog installed.
+//
 // Returns nil on the watchdog teardown success path; per-step
 // failures are logged via `out` and never propagate so the caller
 // can continue with the per-server uninstall regardless.
-func runUninstallWatchdog(out io.Writer) error {
+func runUninstallWatchdog(out io.Writer, serverBeingUninstalled string) error {
 	a := api.NewAPI()
 
-	// 1. Watchdog scheduled task deletion FIRST.
+	// 1. Partial-uninstall gate (Codex bot P2).
+	if !shouldRemoveGlobalWatchdog(out, serverBeingUninstalled) {
+		// Watchdog stays installed for the remaining servers; EventLog
+		// source registration also stays in place (it is a global
+		// resource paired with the watchdog).
+		return nil
+	}
+
+	// 2. Watchdog scheduled task deletion FIRST.
 	if err := a.UninstallWatchdogTask(); err != nil {
 		// Non-fatal: idempotent contract on the API. Log + continue
 		// so the per-server uninstall and eventlog cleanup still run.
@@ -434,6 +462,67 @@ func runUninstallWatchdog(out io.Writer) error {
 		fmt.Fprintf(out, "⚠ EventLog source removal failed (continuing): %v\n", err)
 	}
 	return nil
+}
+
+// shouldRemoveGlobalWatchdog implements the partial-uninstall gate
+// (Codex bot P2). Returns true when the post-uninstall remaining
+// managed-server set is empty, meaning this is the last server and
+// the global watchdog can be removed safely.
+//
+// Fail-closed: any error from the live scheduler list keeps the
+// watchdog installed. Operators get a single informational line on
+// `out` either way so the decision is visible.
+func shouldRemoveGlobalWatchdog(out io.Writer, serverBeingUninstalled string) bool {
+	// Use the live scheduler view (raw List, no status enrichment).
+	// api.ListManagedTasks routes through the same scheduler factory
+	// seam that UninstallWatchdogTask uses, so tests with a fake
+	// scheduler (setupWatchdogTestHelper) can drive deterministic
+	// list responses for the gate decision.
+	a := api.NewAPI()
+	rows, err := a.ListManagedTasks()
+	if err != nil {
+		fmt.Fprintf(out, "⚠ watchdog gate: list failed (keeping watchdog installed): %v\n", err)
+		return false
+	}
+	remaining := map[string]struct{}{}
+	for _, row := range rows {
+		if api.IsMaintenanceTaskName(row.Name) {
+			continue
+		}
+		srv := api.ServerFromTaskName(row.Name)
+		if srv == "" {
+			// Hub-wide / unparseable mcp-local-hub-* task that is not
+			// a maintenance task. Defensively count it as "still
+			// present" so we do not strip the watchdog while an
+			// unrecognized task is around.
+			remaining[row.Name] = struct{}{}
+			continue
+		}
+		if srv == serverBeingUninstalled {
+			continue
+		}
+		remaining[srv] = struct{}{}
+	}
+	if len(remaining) == 0 {
+		return true
+	}
+	// Surface the names so an operator can see which servers retained
+	// the watchdog. Order is non-deterministic from a map; sort for
+	// stable output across calls.
+	names := make([]string, 0, len(remaining))
+	for k := range remaining {
+		names = append(names, k)
+	}
+	// Cheap stable sort: compare-and-swap for typical small sets.
+	for i := 1; i < len(names); i++ {
+		for j := i; j > 0 && names[j] < names[j-1]; j-- {
+			names[j], names[j-1] = names[j-1], names[j]
+		}
+	}
+	fmt.Fprintf(out,
+		"ℹ watchdog kept installed; %d other server(s) still managed: %s\n",
+		len(names), strings.Join(names, ", "))
+	return false
 }
 
 // ---------------------------------------------------------------------------

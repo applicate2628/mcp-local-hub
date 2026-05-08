@@ -58,7 +58,13 @@ See also: install, stop, rollback, backups list.`,
 				return fmt.Errorf("--server is required")
 			}
 			// Plan Task 11.1 step 1: watchdog teardown FIRST.
-			if err := runUninstallWatchdog(cmd.OutOrStdout()); err != nil {
+			//
+			// Codex bot P2: pass the target server name so the helper
+			// can gate watchdog + EventLog removal on "no remaining
+			// managed servers AFTER this uninstall". Removing one
+			// server when multiple are installed must not silently
+			// strip the global watchdog from peer servers.
+			if err := runUninstallWatchdog(cmd.OutOrStdout(), server); err != nil {
 				return err
 			}
 			// Step 2: per-server uninstall (existing flow).

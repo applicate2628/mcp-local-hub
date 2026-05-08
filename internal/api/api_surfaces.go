@@ -599,6 +599,28 @@ func (a *API) UninstallWatchdogTask() error {
 	return sch.Delete(WatchdogTaskName)
 }
 
+// ListManagedTasks returns the raw scheduler view of every task
+// whose name starts with `mcp-local-hub-`. Used by the CLI partial-
+// uninstall gate (Codex bot P2) which must determine the post-
+// uninstall remaining-server set before deciding whether to remove
+// the global watchdog.
+//
+// Routes through the schedulerFactoryFn seam so test callers can
+// drive deterministic returns without spinning up the real Task
+// Scheduler. Production path falls back to scheduler.New().
+//
+// The returned slice mirrors scheduler.TaskStatus directly; callers
+// only need the Name field for the gate decision but the full row
+// is surfaced in case future gating policies want to consult State /
+// LastResult / Owner.
+func (a *API) ListManagedTasks() ([]scheduler.TaskStatus, error) {
+	sch, err := newScheduler()
+	if err != nil {
+		return nil, err
+	}
+	return sch.List("mcp-local-hub-")
+}
+
 // InstallWatchdogTask is the public idempotent install of the scheduled
 // task that drives `mcphub watchdog --once` per watchdog plan v13 Task 8.
 //
