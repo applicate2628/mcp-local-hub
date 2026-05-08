@@ -8,6 +8,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -776,8 +777,15 @@ func TestTryReadDaemonIntent_TimesOutWhenLockHeld(t *testing.T) {
 	if res.Err == nil {
 		t.Fatalf("Err = nil, want a non-nil timeout error")
 	}
-	if !strings.Contains(strings.ToLower(res.Err.Error()), "timeout") {
-		t.Errorf("Err = %q, want substring \"timeout\"", res.Err.Error())
+	// Round 3 codex finding R6+Q3: assert via errors.Is(res.Err,
+	// context.DeadlineExceeded) — the canonical timeout taxonomy.
+	// The prior strings.Contains("timeout") check was both fragile
+	// (locale/wording-sensitive) and would tolerate a non-timeout
+	// flock error mislabelled as a timeout in the message body. The
+	// %w-wrapped chain inside TryReadDaemonIntent guarantees the
+	// errors.Is relation.
+	if !errors.Is(res.Err, context.DeadlineExceeded) {
+		t.Errorf("Err = %v, want errors.Is(_, context.DeadlineExceeded) for timeout taxonomy", res.Err)
 	}
 	_ = root
 }
@@ -820,6 +828,231 @@ func TestTryReadDaemonIntent_SucceedsWhenLockFree(t *testing.T) {
 	}
 	if !got.UpdatedAt.Equal(intent.UpdatedAt) {
 		t.Errorf("UpdatedAt: got %v, want %v", got.UpdatedAt, intent.UpdatedAt)
+	}
+}
+
+// TestTryReadDaemonIntent_ZeroTimeoutTriesOnce exercises the round 3
+// codex finding R2 fix: timeout==0 must take a single non-blocking
+// TryLock() attempt instead of going through context.WithTimeout(0)
+// (which fires immediately and would short-circuit even on a free
+// lock). With no contention the call must succeed and return the
+// seeded entry.
+func TestTryReadDaemonIntent_ZeroTimeoutTriesOnce(t *testing.T) {
+	a := NewAPI()
+	daemonIntentTestHelper(t)
+
+	now := time.Now().UTC().Truncate(time.Nanosecond)
+	intent := DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserStop,
+		UpdatedAt: now,
+	}
+	taskName := "\\mcp-local-hub-zero-default"
+	if err := a.WriteDaemonIntent(taskName, intent, "tester"); err != nil {
+		t.Fatalf("WriteDaemonIntent: %v", err)
+	}
+
+	res := a.TryReadDaemonIntent(0)
+	if res.State != IntentStateValid {
+		t.Errorf("State = %q, want %q with timeout=0 when lock free; err=%v",
+			res.State, IntentStateValid, res.Err)
+	}
+	if res.Err != nil {
+		t.Errorf("Err = %v, want nil for free-lock zero-timeout", res.Err)
+	}
+	if _, ok := res.File.Tasks[taskName]; !ok {
+		t.Errorf("entry %q missing from result; got tasks: %v", taskName, res.File.Tasks)
+	}
+}
+
+// TestTryReadDaemonIntent_NegativeTimeoutTreatedAsZero confirms that
+// negative timeouts share the zero-timeout non-blocking path. Same
+// expectation as the zero case — a free lock yields the seeded entry,
+// never a fake DeadlineExceeded.
+func TestTryReadDaemonIntent_NegativeTimeoutTreatedAsZero(t *testing.T) {
+	a := NewAPI()
+	daemonIntentTestHelper(t)
+
+	now := time.Now().UTC().Truncate(time.Nanosecond)
+	intent := DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserStop,
+		UpdatedAt: now,
+	}
+	taskName := "\\mcp-local-hub-neg-default"
+	if err := a.WriteDaemonIntent(taskName, intent, "tester"); err != nil {
+		t.Fatalf("WriteDaemonIntent: %v", err)
+	}
+
+	res := a.TryReadDaemonIntent(-time.Second)
+	if res.State != IntentStateValid {
+		t.Errorf("State = %q, want %q with negative timeout when lock free; err=%v",
+			res.State, IntentStateValid, res.Err)
+	}
+	if res.Err != nil {
+		t.Errorf("Err = %v, want nil for free-lock negative-timeout", res.Err)
+	}
+	if _, ok := res.File.Tasks[taskName]; !ok {
+		t.Errorf("entry %q missing from result; got tasks: %v", taskName, res.File.Tasks)
+	}
+}
+
+// TestTryReadDaemonIntent_LockFreeMissingFile is the round 3 codex
+// finding Q1 boundary case: no on-disk file, lock free, expect
+// State=missing with Err=nil and a non-nil empty Tasks map (the
+// graceful-degrade contract callers depend on).
+func TestTryReadDaemonIntent_LockFreeMissingFile(t *testing.T) {
+	a := NewAPI()
+	daemonIntentTestHelper(t)
+
+	res := a.TryReadDaemonIntent(time.Second)
+	if res.State != IntentStateMissing {
+		t.Errorf("State = %q, want %q for absent file", res.State, IntentStateMissing)
+	}
+	if res.Err != nil {
+		t.Errorf("Err = %v, want nil for genuinely missing file", res.Err)
+	}
+	if res.File.Tasks == nil {
+		t.Errorf("File.Tasks = nil, want empty (non-nil) map for missing file")
+	}
+	if got := len(res.File.Tasks); got != 0 {
+		t.Errorf("len(File.Tasks) = %d, want 0 for missing file", got)
+	}
+	if res.QuarantinePath != "" {
+		t.Errorf("QuarantinePath = %q, want empty for missing file", res.QuarantinePath)
+	}
+}
+
+// TestTryReadDaemonIntent_LockFreeCorruptFile is the round 3 codex
+// finding Q2 boundary case: garbage bytes on disk, lock free, expect
+// State=corrupt with QuarantinePath set, a non-nil parse error, an
+// empty Tasks map, and the original file moved aside under the
+// `.corrupt-*` quarantine sibling.
+func TestTryReadDaemonIntent_LockFreeCorruptFile(t *testing.T) {
+	a := NewAPI()
+	daemonIntentTestHelper(t)
+
+	// Seed garbage directly via os.WriteFile (bypasses WriteDaemonIntent's
+	// validation so we land genuine corruption on disk).
+	if err := writeIntentRaw(t, []byte("not-json-{{{}")); err != nil {
+		t.Fatalf("writeIntentRaw: %v", err)
+	}
+
+	res := a.TryReadDaemonIntent(time.Second)
+	if res.State != IntentStateCorrupt {
+		t.Errorf("State = %q, want %q for garbage file", res.State, IntentStateCorrupt)
+	}
+	if res.Err == nil {
+		t.Fatalf("Err = nil, want a parse error for corrupt file")
+	}
+	if res.QuarantinePath == "" {
+		t.Fatalf("QuarantinePath = empty, want non-empty for quarantined corrupt file")
+	}
+	if res.File.Tasks == nil {
+		t.Errorf("File.Tasks = nil, want empty (non-nil) map for corrupt file")
+	}
+	if got := len(res.File.Tasks); got != 0 {
+		t.Errorf("len(File.Tasks) = %d, want 0 for corrupt file", got)
+	}
+	if _, statErr := os.Stat(res.QuarantinePath); statErr != nil {
+		t.Errorf("quarantine sibling missing on disk at %q: %v", res.QuarantinePath, statErr)
+	}
+
+	// Original canonical path should no longer exist (the rename moved
+	// it to QuarantinePath).
+	dir, err := DaemonStateDir()
+	if err != nil {
+		t.Fatalf("DaemonStateDir: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, intentFileLeaf)); statErr == nil {
+		t.Errorf("original canonical intent file still exists after corrupt-quarantine rename")
+	}
+}
+
+// TestTryReadDaemonIntent_CorruptFileUnderLockContention guards the
+// round 3 codex finding Q1 contention boundary: when a holder pins
+// the flock for longer than the read budget, the corrupt file MUST
+// remain on disk (no quarantine without the lock) and the call MUST
+// return the timeout-flavoured fallback. This proves the quarantine
+// rename only happens under successful lock acquisition — a guard
+// against splitting the lock-held invariants of
+// readIntentParseAndQuarantine.
+func TestTryReadDaemonIntent_CorruptFileUnderLockContention(t *testing.T) {
+	a := NewAPI()
+	daemonIntentTestHelper(t)
+
+	// Seed garbage on disk first; we do not want the holder's lock
+	// dance to influence whether the file is corrupt.
+	if err := writeIntentRaw(t, []byte("not-json-{{{}")); err != nil {
+		t.Fatalf("writeIntentRaw: %v", err)
+	}
+
+	dir, err := DaemonStateDir()
+	if err != nil {
+		t.Fatalf("DaemonStateDir: %v", err)
+	}
+	statePath := filepath.Join(dir, intentFileLeaf)
+	lockPath := filepath.Join(dir, intentLockLeaf)
+
+	// Snapshot pre-call quarantine sibling count so we can assert no
+	// fresh `.corrupt-*` files appear during the contended call.
+	prefix := intentFileLeaf + ".corrupt-"
+	preEntries, _ := os.ReadDir(dir)
+	preCount := 0
+	for _, e := range preEntries {
+		if strings.HasPrefix(e.Name(), prefix) {
+			preCount++
+		}
+	}
+
+	holder := flock.New(lockPath)
+	if lockErr := holder.Lock(); lockErr != nil {
+		t.Fatalf("holder lock: %v", lockErr)
+	}
+	holderDone := make(chan struct{})
+	go func() {
+		defer close(holderDone)
+		time.Sleep(2 * time.Second)
+		_ = holder.Unlock()
+	}()
+	t.Cleanup(func() {
+		_ = holder.Unlock()
+		<-holderDone
+	})
+
+	// 50ms budget — far smaller than the 2s holder grip. The call
+	// must return promptly with a timeout-flavoured error.
+	res := a.TryReadDaemonIntent(50 * time.Millisecond)
+	if res.State != IntentStateMissing {
+		t.Errorf("State = %q, want %q (timeout fallback under contention)", res.State, IntentStateMissing)
+	}
+	if res.Err == nil {
+		t.Fatalf("Err = nil, want a timeout error under contention")
+	}
+	if !errors.Is(res.Err, context.DeadlineExceeded) {
+		t.Errorf("Err = %v, want errors.Is(_, context.DeadlineExceeded)", res.Err)
+	}
+	if res.QuarantinePath != "" {
+		t.Errorf("QuarantinePath = %q, want empty (no quarantine without lock)", res.QuarantinePath)
+	}
+
+	// The original corrupt file MUST still be on disk — quarantine
+	// rename requires the lock, which we never acquired.
+	if _, statErr := os.Stat(statePath); statErr != nil {
+		t.Errorf("corrupt canonical file unexpectedly removed under contention: %v", statErr)
+	}
+
+	// No new `.corrupt-*` siblings should have appeared.
+	postEntries, _ := os.ReadDir(dir)
+	postCount := 0
+	for _, e := range postEntries {
+		if strings.HasPrefix(e.Name(), prefix) {
+			postCount++
+		}
+	}
+	if postCount != preCount {
+		t.Errorf("found %d new corrupt-* siblings under contention; want %d (no rename without lock)",
+			postCount-preCount, 0)
 	}
 }
 

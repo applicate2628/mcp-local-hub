@@ -391,12 +391,29 @@ func (a *API) ReadDaemonIntent() IntentReadResult {
 //   IntentReadResult{
 //     State: IntentStateMissing,
 //     File:  DaemonIntentFile{Tasks: map[string]DaemonIntent{}},
-//     Err:   <error wrapping context.DeadlineExceeded; mentions "timeout">,
+//     Err:   <error wrapping context.DeadlineExceeded — caller can
+//            test with errors.Is(res.Err, context.DeadlineExceeded)>,
 //   }
 // The empty-Tasks fallback matches the existing graceful-degrade
 // contract `defaultIntentReader` already handles — a momentary lack
 // of intent data degrades to "no preference", which is the same
 // fallback the tray applies when the file is genuinely missing.
+//
+// Round 3 codex finding R6+Q3: the wrapped error precisely tags
+// timeout (via errors.Is + context.DeadlineExceeded) only on the
+// real ctx-deadline path; non-timeout flock errors (permission/IO at
+// lock-acquire time) are surfaced verbatim without being mislabelled
+// as a timeout. Callers that need to distinguish "tray's 250ms budget
+// elapsed under contention" from "filesystem permission failure on the
+// state dir" can branch on errors.Is(res.Err, context.DeadlineExceeded).
+//
+// Round 3 codex finding R2: timeout <= 0 is a single non-blocking
+// TryLock() attempt — context.WithTimeout(0) creates an already-fired
+// context, so flock.TryLockContext would short-circuit with
+// DeadlineExceeded EVEN IF the lock was free. The non-blocking branch
+// preserves the caller's "try once" intent (a free lock returns the
+// real file; a held lock returns ErrLockUnavailable WITHOUT a fake
+// timeout label).
 //
 // On lock acquisition: identical body to ReadDaemonIntent — same
 // parse + quarantine + prune flow via the shared helper
@@ -423,18 +440,56 @@ func (a *API) TryReadDaemonIntent(timeout time.Duration) IntentReadResult {
 	lockPath := filepath.Join(dir, intentLockLeaf)
 
 	lock := flock.New(lockPath)
+
+	// Round 3 codex finding R2: zero/negative timeout is a single
+	// non-blocking probe. Going through context.WithTimeout(0) would
+	// short-circuit with DeadlineExceeded even if the lock was free,
+	// because the context is already past its deadline before
+	// TryLockContext's first poll. The bare TryLock() preserves caller
+	// intent ("try once non-blocking") and reports lock-unavailable as
+	// a non-timeout error (callers will not confuse it with the
+	// retry-budget-exhausted path).
+	if timeout <= 0 {
+		locked, lockErr := lock.TryLock()
+		if lockErr != nil {
+			return IntentReadResult{
+				State: IntentStateMissing,
+				File:  DaemonIntentFile{Tasks: map[string]DaemonIntent{}},
+				Err:   fmt.Errorf("flock TryLock: %w", lockErr),
+			}
+		}
+		if !locked {
+			return IntentReadResult{
+				State: IntentStateMissing,
+				File:  DaemonIntentFile{Tasks: map[string]DaemonIntent{}},
+				Err:   fmt.Errorf("flock TryLock: lock unavailable (non-blocking probe)"),
+			}
+		}
+		defer func() { _ = lock.Unlock() }()
+		return readIntentParseAndQuarantine(statePath)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	const retryDelay = 10 * time.Millisecond
 	locked, lockErr := lock.TryLockContext(ctx, retryDelay)
 	if lockErr != nil {
-		// ctx.DeadlineExceeded → caller sees a timeout-flavoured error
-		// while the on-disk state is left untouched. Other errors (rare:
-		// permission/IO at lock-acquire time) are surfaced verbatim.
+		// Distinguish timeout (caller's budget elapsed under contention)
+		// from non-timeout errors (rare: permission/IO at lock-acquire
+		// time). The wrapped chain preserves errors.Is behaviour so
+		// callers can test errors.Is(res.Err, context.DeadlineExceeded)
+		// to branch on contention vs. real I/O failure.
+		if errors.Is(lockErr, context.DeadlineExceeded) {
+			return IntentReadResult{
+				State: IntentStateMissing,
+				File:  DaemonIntentFile{Tasks: map[string]DaemonIntent{}},
+				Err:   fmt.Errorf("flock TryLockContext: timeout after %s: %w", timeout, lockErr),
+			}
+		}
 		return IntentReadResult{
 			State: IntentStateMissing,
 			File:  DaemonIntentFile{Tasks: map[string]DaemonIntent{}},
-			Err:   fmt.Errorf("flock TryLockContext timeout after %s: %w", timeout, lockErr),
+			Err:   fmt.Errorf("flock TryLockContext: %w", lockErr),
 		}
 	}
 	if !locked {

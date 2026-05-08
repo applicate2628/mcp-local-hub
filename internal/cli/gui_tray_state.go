@@ -13,13 +13,32 @@ import (
 
 // intentReaderFn returns the operator-recorded daemon-intent file
 // snapshot used by the tray aggregator + toast onset gate. Production
-// wires this to (*api.API).ReadDaemonIntent (defaultIntentReader);
-// tests inject a deterministic fake to drive the user-stop / chronic-
-// failure / TTL paths without touching disk. Returning the empty file
-// on read error is the existing "no preference" fallback semantic
-// shared with api.IntentStillRunning — a corrupt intent file must not
-// brick tray classification.
-type intentReaderFn func() api.DaemonIntentFile
+// wires this to defaultIntentReader (a thin api.TryReadDaemonIntent
+// wrapper); tests inject a deterministic fake to drive the user-stop
+// / chronic-failure / TTL paths without touching disk.
+//
+// Returns the full IntentReadResult so the aggregator can distinguish:
+//   - "valid" — fresh authoritative snapshot from disk.
+//   - "missing" with Err == nil — file genuinely absent (clean install
+//     or operator cleared every entry); the empty-Tasks map IS the
+//     authoritative answer, not a fallback.
+//   - "missing" with Err != nil — degraded read (lock timeout, parent
+//     dir resolution failure, etc.); aggregator falls back to its
+//     in-process intentCache so transient flock contention does not
+//     regress user-stop suppression (Bug #3 → red icon flash).
+//   - "corrupt" — file existed but parse failed; QuarantinePath is set
+//     (the read auto-quarantined). Aggregator treats this as "no
+//     fresh data" — cache stays, operator sees the rename event in
+//     the watchdog audit log.
+//
+// Round 3 codex finding R1: returning bare DaemonIntentFile collapsed
+// the "lock timeout" and "genuinely empty" cases to the same value, so
+// the aggregator could not tell whether the empty Tasks map was
+// authoritative or a degraded fallback. The richer return type fixes
+// the regression where Bug #3 reappeared under flock contention
+// (e.g. mid-`mcphub install` audit append) — empty Tasks bypassed
+// the user-stop suppression branch in tray.AggregateWithIntent.
+type intentReaderFn func() api.IntentReadResult
 
 // defaultIntentReaderTimeout caps how long the tray-side intent read
 // is willing to wait on the daemon-intent.json flock per snapshot
@@ -43,27 +62,50 @@ type intentReaderFn func() api.DaemonIntentFile
 // freeze tray updates and prevent ctx.Done() observation.
 const defaultIntentReaderTimeout = 250 * time.Millisecond
 
+// intentCacheTTL bounds how long the aggregator's in-process intent
+// cache survives without a fresh successful read. 5 minutes is well
+// past any realistic mcphub operation window (longest known writer
+// hold: install audit-append on a slow disk, ~hundreds of ms;
+// watchdog --once with audit-degraded cascade, <30s); a stuck holder
+// for 5 full minutes is no longer "transient contention" — it is an
+// operator-visible incident that should not let stale stop intents
+// continue to suppress error icons indefinitely.
+//
+// At 5s snapshot cadence the cache covers ~60 cycles before eviction.
+const intentCacheTTL = 5 * time.Minute
+
 // defaultIntentReader reads the on-disk intent via api.TryReadDaemonIntent
 // with the bounded timeout above so a held lock cannot stall the tray
 // snapshot loop. Per IntentReadResult contract:
-//   - State="missing"  → empty Tasks map, treat as no preference. Also
-//     the path taken on lock-acquisition timeout (Err is non-nil but
-//     we discard it; the empty map is the same fallback the tray
-//     already applies on corrupt or genuinely-missing files).
-//   - State="corrupt"  → File still has an empty Tasks map (the read
-//     auto-quarantined the corrupt file); no preference, no spam.
-//   - State="valid"    → Tasks map is authoritative.
+//   - State="missing" + Err=nil  → file genuinely absent (clean install
+//     or operator cleared every entry). Empty Tasks map IS authoritative.
+//   - State="missing" + Err!=nil → degraded read (lock timeout etc.).
+//     The aggregator's intent cache covers the gap; this avoids the
+//     Bug #3 regression where flock contention would flash a red icon
+//     even though the operator's user-stop intent was still active.
+//   - State="corrupt"            → File has an empty Tasks map (the
+//     read auto-quarantined the corrupt file). Aggregator treats it
+//     as "no fresh data" — cache stays, no UI noise. Operators see
+//     corruption via the watchdog audit log surface, not the tray.
+//   - State="valid"              → Tasks map is authoritative.
 //
-// We discard the QuarantinePath / Err fields here because the tray's
-// only job is "use intent if available, fall back if not". Operators
-// see corruption events through the watchdog's audit log, not the tray.
-func defaultIntentReader() api.DaemonIntentFile {
+// Round 3 codex finding A2: timeout-induced fallbacks ARE silent BY
+// DESIGN at this layer (the tray is a low-noise visual surface, not a
+// diagnostic log; corrupt-file events surface separately through the
+// audit log). The in-process intent cache added per R1 ensures the
+// silent fallback does NOT cause a UX regression — a stale-but-recent
+// snapshot keeps user-stop suppression alive across short flock
+// contention windows.
+func defaultIntentReader() api.IntentReadResult {
 	a := api.NewAPI()
 	res := a.TryReadDaemonIntent(defaultIntentReaderTimeout)
 	if res.File.Tasks == nil {
-		return api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{}}
+		// Defensive: every documented IntentReadResult path returns a
+		// non-nil Tasks map, but a future regression on the api side
+		// must not nil-panic the tray aggregator.
+		res.File.Tasks = map[string]api.DaemonIntent{}
 	}
-	return res.File
+	return res
 }
 
 // rowKey produces the (server, daemon) tuple used for per-daemon
@@ -167,13 +209,54 @@ func aggregateTrayState(ctx context.Context, snapshots <-chan []api.DaemonStatus
 	aggregateTrayStateWithToast(ctx, snapshots, trayCh, tray.ShowToast, defaultIntentReader)
 }
 
+// intentCacheState carries the most-recent successfully-read intent
+// snapshot so the aggregator can survive transient flock contention
+// without dropping user-stop suppression. Owned by the aggregator
+// goroutine — never escapes — so no synchronisation is required (the
+// aggregator is the sole reader and writer per cycle, single-threaded
+// by construction). The value-type fields keep `go vet -race` happy
+// even if a future refactor accidentally shares the struct: there is
+// no shared pointer aliasing into the cached map (api.DaemonIntentFile
+// holds the only reference, and we replace it whole on each refresh).
+//
+// Round 3 codex finding R1: empty-Tasks fallback under contention
+// regressed Bug #3 — a daemon with LastResult=1 (Node MCP graceful
+// stdin-close) classified as StateError because the user-stop intent
+// was unavailable for that snapshot cycle. The cache holds the last
+// known-good snapshot so contention windows shorter than intentCacheTTL
+// preserve suppression.
+type intentCacheState struct {
+	file   api.DaemonIntentFile
+	seenAt time.Time
+	valid  bool // true once we've successfully read at least once
+}
+
 // aggregateTrayStateWithToast is the testable inner form.
 // Production wrappers pass tray.ShowToast + defaultIntentReader; tests
 // pass a recorder + a deterministic intent fake.
+//
+// Cache eviction policy (round 3 codex finding R1):
+//   - A successful read with State == valid OR (State == missing && Err
+//     == nil) replaces the cache. "Missing with nil Err" means the file
+//     is genuinely absent on disk (operator cleared every entry or fresh
+//     install) — that empty Tasks map IS authoritative and must overwrite
+//     stale stop intents.
+//   - State == corrupt or State == missing with non-nil Err (lock timeout,
+//     parent-dir resolution failure, etc.) leaves the cache untouched —
+//     the read produced no fresh information.
+//   - Cache age > intentCacheTTL (5 min) evicts the cache regardless;
+//     a stuck holder for 5 full minutes is operator-visible and stale
+//     suppression is no longer the lesser evil.
+//
+// The cache is per-aggregator-goroutine; it lives on the stack of this
+// function. Tests that exercise contention flow synthesise IntentReadResult
+// values via a fake intentReaderFn and assert the cache preserves
+// suppression across the contended cycle.
 func aggregateTrayStateWithToast(ctx context.Context, snapshots <-chan []api.DaemonStatus, trayCh chan<- tray.TrayState, showToast toastFn, readIntent intentReaderFn) {
 	const sentinel = tray.TrayState(-1)
 	last := sentinel
 	prevFailed := map[string]bool{}
+	cache := intentCacheState{}
 	for {
 		select {
 		case <-ctx.Done():
@@ -182,17 +265,47 @@ func aggregateTrayStateWithToast(ctx context.Context, snapshots <-chan []api.Dae
 			if !ok {
 				return
 			}
+			now := time.Now().UTC()
+
 			// Snapshot the intent file once per cycle. Reading once per
 			// cycle (not once per row) is intentional: the watchdog
 			// poll cadence is 5s and the intent file is human-edit-
-			// frequency, so a per-row stat would be wasted work. A
-			// stale snapshot for one cycle is acceptable — the next
-			// cycle picks up any change.
+			// frequency, so a per-row stat would be wasted work.
+			//
+			// Round 3 codex finding R1: when readIntent returns a
+			// degraded result (lock timeout / corrupt-quarantine / etc.)
+			// we use the cached snapshot if still within intentCacheTTL,
+			// so transient flock contention does not drop user-stop
+			// suppression. This is the second layer of the graceful-
+			// degrade contract: TryReadDaemonIntent's empty-Tasks
+			// fallback covers the lock-timeout error path; this cache
+			// covers the resulting blank intent so Bug #3 stays fixed
+			// even when the watchdog/install holds the lock past
+			// defaultIntentReaderTimeout.
 			intent := api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{}}
 			if readIntent != nil {
-				intent = readIntent()
+				res := readIntent()
+				usable := res.State == api.IntentStateValid ||
+					(res.State == api.IntentStateMissing && res.Err == nil)
+				if usable {
+					if res.File.Tasks == nil {
+						res.File.Tasks = map[string]api.DaemonIntent{}
+					}
+					intent = res.File
+					cache.file = res.File
+					cache.seenAt = now
+					cache.valid = true
+				} else if cache.valid && now.Sub(cache.seenAt) <= intentCacheTTL {
+					// Use the last known-good snapshot — survives short
+					// flock contention windows. The cache is per-cycle
+					// owned by this goroutine; a value-type assignment
+					// is sufficient (api.DaemonIntentFile holds the only
+					// reference into Tasks).
+					intent = cache.file
+				}
+				// else: cache empty or expired → fall back to the
+				// already-initialized empty intent (no preference).
 			}
-			now := time.Now().UTC()
 
 			// Failure-onset diff: for each row failed in this
 			// snapshot, fire a toast if it wasn't failed in the

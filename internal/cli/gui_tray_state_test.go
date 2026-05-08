@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -143,11 +145,19 @@ func TestAggregateTrayState_ExitsOnSnapshotChannelClose(t *testing.T) {
 
 // emptyIntentReader is the test-side intentReaderFn that yields the
 // "no recorded preference" outcome (production fallback when the file
-// is missing or corrupt). All pre-bug-#3 tests use this — they assert
+// is genuinely missing). All pre-bug-#3 tests use this — they assert
 // behavior under "no intent" semantics, identical to the legacy
 // Aggregate / isFailedRow predicates.
-func emptyIntentReader() api.DaemonIntentFile {
-	return api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{}}
+//
+// Round 3 codex finding R1: returns IntentReadResult with State=missing
+// and Err=nil so the aggregator's cache treats it as authoritative
+// (operator has cleared every entry / fresh install) — the empty Tasks
+// map IS the intended snapshot, not a degraded fallback.
+func emptyIntentReader() api.IntentReadResult {
+	return api.IntentReadResult{
+		State: api.IntentStateMissing,
+		File:  api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{}},
+	}
 }
 
 // TestAggregateTrayState_ToastFiresOnFailureOnset asserts the
@@ -312,11 +322,19 @@ func TestAggregateTrayState_ToastUsesLastResult(t *testing.T) {
 	}
 }
 
-// fakeIntentReader returns the supplied DaemonIntentFile on every
-// invocation. Tests use this to drive the intent-aware suppression
-// branch deterministically (no disk I/O, no DaemonStateDir resolution).
+// fakeIntentReader returns the supplied DaemonIntentFile wrapped in a
+// State=valid IntentReadResult on every invocation. Tests use this to
+// drive the intent-aware suppression branch deterministically (no disk
+// I/O, no DaemonStateDir resolution). The wrapped result models the
+// happy path; tests that need to exercise the cache fallback synthesise
+// their own IntentReadResult (e.g. State=missing + Err=context.DeadlineExceeded).
 func fakeIntentReader(file api.DaemonIntentFile) intentReaderFn {
-	return func() api.DaemonIntentFile { return file }
+	return func() api.IntentReadResult {
+		return api.IntentReadResult{
+			State: api.IntentStateValid,
+			File:  file,
+		}
+	}
 }
 
 // TestAggregateTrayState_IntentSuppressesUserStop_NoToast_NoError is
@@ -516,20 +534,176 @@ func TestAggregateTrayState_IntentTTLExpired_BackToError(t *testing.T) {
 	}
 }
 
+// TestAggregateTrayState_LockContentionPreservesUserStopSuppression is
+// the round 3 codex finding R1 regression guard. The flow:
+//
+//   1. Snapshot 1: row with active user-stop intent → aggregator reads
+//      a valid IntentReadResult, populates the cache, classifies as
+//      StateHealthy (suppressed user-stop excluded from denominator).
+//   2. Snapshot 2: SAME row, but the intent reader returns a degraded
+//      result (State=missing + Err=context.DeadlineExceeded — the
+//      shape TryReadDaemonIntent emits on flock contention). The cache
+//      from cycle 1 must apply, so the row STAYS suppressed.
+//   3. Snapshot 3: SAME row, intent reader now returns a valid empty
+//      file (State=valid + empty Tasks) — operator cleared the intent
+//      via `mcphub watchdog enable`. Cache REPLACES with the fresh
+//      empty snapshot; suppression no longer applies; row classifies
+//      as StateError (and a toast fires for the failure onset).
+//
+// This is the regression that was BROKEN by PR #142 round 3 P2's
+// initial wiring: under flock contention the aggregator dropped to
+// the empty intent fallback inline, bypassing user-stop suppression
+// and flashing the red icon Bug #3 was supposed to suppress.
+func TestAggregateTrayState_LockContentionPreservesUserStopSuppression(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	now := time.Now().UTC()
+	taskName := "\\mcp-local-hub-memory-default"
+	intentFile := api.DaemonIntentFile{
+		Tasks: map[string]api.DaemonIntent{
+			taskName: {
+				Desired:   api.IntentDesiredStopped,
+				Reason:    api.IntentReasonUserStop,
+				UpdatedAt: now.Add(-1 * time.Minute),
+			},
+		},
+	}
+
+	// Programmable reader: returns the next IntentReadResult per call,
+	// indexed by an int counter the aggregator goroutine reads via the
+	// channel-fronted closure. Using a channel-fronted queue keeps the
+	// reader goroutine-safe (the aggregator runs in its own goroutine
+	// and may call the reader from there).
+	type readerStep struct {
+		res api.IntentReadResult
+	}
+	stepCh := make(chan readerStep, 8)
+	reader := func() api.IntentReadResult {
+		select {
+		case s := <-stepCh:
+			return s.res
+		default:
+			// Default to last known shape — empty valid (operator cleared).
+			// Should never be hit in this test if the producer keeps up.
+			return api.IntentReadResult{
+				State: api.IntentStateValid,
+				File:  api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{}},
+			}
+		}
+	}
+
+	// Cycle 1: valid intent (active user-stop).
+	stepCh <- readerStep{res: api.IntentReadResult{
+		State: api.IntentStateValid,
+		File:  intentFile,
+	}}
+	// Cycle 2: lock-timeout fallback (degraded).
+	stepCh <- readerStep{res: api.IntentReadResult{
+		State: api.IntentStateMissing,
+		File:  api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{}},
+		Err:   fmt.Errorf("flock TryLockContext: timeout after 250ms: %w", context.DeadlineExceeded),
+	}}
+	// Cycle 3: operator cleared intent → fresh empty valid snapshot.
+	stepCh <- readerStep{res: api.IntentReadResult{
+		State: api.IntentStateValid,
+		File:  api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{}},
+	}}
+
+	snaps := make(chan []api.DaemonStatus, 8)
+	out := make(chan tray.TrayState, 8)
+	toaster := &fakeToaster{}
+	go aggregateTrayStateWithToast(ctx, snaps, out, toaster.show, reader)
+
+	// Each snapshot is the same failed-but-user-stopped row. The
+	// aggregator's behaviour must follow the cache contract:
+	//   cycle 1 → suppressed (intent valid)
+	//   cycle 2 → suppressed (cache covers the contention)
+	//   cycle 3 → NOT suppressed (cache REPLACED by fresh empty file)
+	row := api.DaemonStatus{
+		Server:     "memory",
+		TaskName:   taskName,
+		State:      "Stopped",
+		LastResult: 1, // exit code 1 = the Node MCP graceful-stdin-close case
+	}
+	snaps <- []api.DaemonStatus{row}
+	snaps <- []api.DaemonStatus{row}
+	snaps <- []api.DaemonStatus{row}
+
+	// Drain forwarded states for ~1s. Cycle 3's transition produces
+	// a Healthy → Error forward.
+	got := []tray.TrayState{}
+	deadline := time.After(1500 * time.Millisecond)
+collectLoop:
+	for {
+		select {
+		case s := <-out:
+			got = append(got, s)
+		case <-deadline:
+			break collectLoop
+		}
+	}
+
+	if len(got) == 0 {
+		t.Fatalf("expected at least 1 tray-state forward, got 0")
+	}
+
+	// Cycle 1 produces the very first forward (sentinel → Healthy).
+	if got[0] != tray.StateHealthy {
+		t.Errorf("forward[0] = %v, want StateHealthy (cycle 1: valid user-stop intent)", got[0])
+	}
+
+	// The last forward MUST be StateError (cycle 3: cache replaced,
+	// suppression no longer applies, exit-code-1 row classifies error).
+	last := got[len(got)-1]
+	if last != tray.StateError {
+		t.Errorf("forward[last] = %v, want StateError after fresh empty intent replaces cache; full stream: %v",
+			last, got)
+	}
+
+	// Critical NEGATIVE invariant: cycles 1+2 must NOT produce a
+	// StateError forward. The aggregator coalesces same-state forwards,
+	// so seeing StateError BEFORE the final cycle would mean cycle 2
+	// dropped suppression and forwarded StateError before cycle 3.
+	// We assert that the StateError forward is the FINAL element in
+	// the stream — there must be no second StateError forward, and
+	// no Healthy → Error → Healthy → Error oscillation.
+	for i, s := range got {
+		if s == tray.StateError && i < len(got)-1 {
+			t.Errorf("StateError forwarded at index %d (not final) — cache should have suppressed cycle 2; full stream: %v",
+				i, got)
+			break
+		}
+	}
+
+	// Toast count: cycle 3 produces ONE failure-onset toast (cycle 1+2
+	// were suppressed). The cycle-2 cache hit must NOT have fired a
+	// toast either.
+	calls := toaster.snapshot()
+	if len(calls) != 1 {
+		t.Errorf("toast count = %d, want exactly 1 (cycle 3 onset only); calls: %+v", len(calls), calls)
+	}
+}
+
 // TestDefaultIntentReader_DoesNotBlockOnHeldLock guards the regression
 // from PR #142 round 2 P2: the tray hot path must not freeze behind a
 // long-held daemon-intent.json flock.
 //
 // Setup: redirect the per-user state dir to a temp location, hold the
 // daemon-intent.json.lock sibling on a goroutine for 3 seconds, then
-// invoke defaultIntentReader. Assert that the call returns within ~500ms
-// (well under the holder's 3s grip) with a non-nil empty Tasks map —
-// the graceful-degrade contract the aggregator relies on.
+// invoke defaultIntentReader. Assert that the call returns within
+// the wallclock cap (well under the holder's 3s grip) with a non-nil
+// empty Tasks map and a non-nil timeout-flavoured error — the
+// graceful-degrade contract the aggregator relies on.
 //
-// The 250ms intent-read timeout inside defaultIntentReader plus
-// retryDelay slack puts the realistic per-call upper bound at ~300ms;
-// 500ms is the wallclock cap with a comfortable safety margin against
-// CI hosts under load.
+// Round 3 codex finding R4: previous wallclockCap (500ms) was tight
+// enough to flake on slow CI hosts (250ms intent-read timeout + a
+// loaded scheduler can produce ~600ms wallclock). Loosened to 1.5s,
+// which still proves "non-blocking" against the 3s holder grip with
+// generous CI headroom. The point of this test is to detect the
+// regression where TryReadDaemonIntent reverts to a kernel-level
+// blocking flock (that would observe the full 3s grip), NOT to
+// measure the exact retry-budget timing.
 func TestDefaultIntentReader_DoesNotBlockOnHeldLock(t *testing.T) {
 	root := t.TempDir()
 	restore := api.SetDaemonStateRootForTest(root)
@@ -560,10 +734,12 @@ func TestDefaultIntentReader_DoesNotBlockOnHeldLock(t *testing.T) {
 		<-holderDone
 	})
 
-	// Wallclock cap: defaultIntentReaderTimeout (250ms) + slack. If
-	// defaultIntentReader regressed to blocking semantics it would
-	// stall ~3s here (the holder's grip).
-	const wallclockCap = 500 * time.Millisecond
+	// Wallclock cap (round 3 codex finding R4): defaultIntentReaderTimeout
+	// is 250ms, but a loaded CI host can add several hundred ms of
+	// scheduler/syscall overhead before the goroutine returns. 1.5s
+	// is the loosened cap — still well below the 3s holder grip that
+	// a regression to blocking flock would observe.
+	const wallclockCap = 1500 * time.Millisecond
 
 	start := time.Now()
 	got := defaultIntentReader()
@@ -573,10 +749,22 @@ func TestDefaultIntentReader_DoesNotBlockOnHeldLock(t *testing.T) {
 		t.Fatalf("defaultIntentReader took %s with %s timeout (cap %s) — must not block on held lock",
 			elapsed, defaultIntentReaderTimeout, wallclockCap)
 	}
-	if got.Tasks == nil {
+	if got.File.Tasks == nil {
 		t.Fatalf("Tasks = nil, want empty (non-nil) map for graceful-degrade contract")
 	}
-	if len(got.Tasks) != 0 {
-		t.Errorf("Tasks length = %d, want 0 on lock-acquisition timeout fallback", len(got.Tasks))
+	if len(got.File.Tasks) != 0 {
+		t.Errorf("Tasks length = %d, want 0 on lock-acquisition timeout fallback", len(got.File.Tasks))
+	}
+	// Round 3 codex finding R6: timeout fallback must propagate a
+	// DeadlineExceeded-wrapped error so callers (and the aggregator's
+	// cache) can branch on contention vs. real I/O failure.
+	if got.State != api.IntentStateMissing {
+		t.Errorf("State = %q, want %q on lock-timeout fallback", got.State, api.IntentStateMissing)
+	}
+	if got.Err == nil {
+		t.Fatalf("Err = nil, want a non-nil timeout error on lock-acquisition timeout fallback")
+	}
+	if !errors.Is(got.Err, context.DeadlineExceeded) {
+		t.Errorf("Err = %v, want errors.Is(_, context.DeadlineExceeded) (timeout taxonomy)", got.Err)
 	}
 }
