@@ -333,7 +333,39 @@ describe("CapabilitiesScreen — Phase 4 CapabilityCard", () => {
     const card = await findByTestId("capability-card-filesystem-default");
     const errPill = card.querySelector(".capability-card-probe-status.err");
     expect(errPill).not.toBeNull();
+    expect(errPill?.textContent).toContain("✗ probe err");
     expect(card.textContent).toContain("initialize: HTTP 500");
+  });
+
+  it("renders 'not probed' unknown state when no probe row exists for the server (codex bot PR #144 round 5 P2)", async () => {
+    // Codex bot finding: cache drift / daemon churn can produce a
+    // capabilities row WITHOUT a matching probe row. Defaulting
+    // probeOk to true would mis-render green ✓ probed when nothing
+    // was probed. UI must show explicit unknown/not-probed state.
+    const row: CapabilityRow = {
+      server: "memory",
+      daemon: "default",
+      tools:     { state: "ok", items: [{ name: "a", id: "memory/default/tool/a", namespace: "memory", kind: "tool" }] },
+      prompts:   { state: "empty", items: [] },
+      resources: { state: "empty", items: [] },
+    };
+    // Capabilities row exists; NO matching probe row in probes.items.
+    const snap: HealthSnapshot = {
+      ...emptySnapshot,
+      probes:       { ...emptySnapshot.probes!, items: [] },
+      capabilities: { items: [row], generated_at: 1715164800, ttl_ms: 60000, errors: [] },
+    };
+    vi.spyOn(api, "fetchOrThrow").mockResolvedValue(snap);
+
+    const { findByTestId } = render(<CapabilitiesScreen />);
+    const card = await findByTestId("capability-card-memory-default");
+    const unknownPill = card.querySelector(".capability-card-probe-status.unknown");
+    expect(unknownPill).not.toBeNull();
+    expect(unknownPill?.textContent).toContain("? not probed");
+    // Critical negative: must NOT render the green "probed" pill when
+    // probe is null.
+    expect(card.querySelector(".capability-card-probe-status.ok")).toBeNull();
+    expect(card.querySelector(".capability-card-probe-status.err")).toBeNull();
   });
 });
 

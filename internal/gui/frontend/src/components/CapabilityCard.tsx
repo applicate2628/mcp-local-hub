@@ -8,7 +8,21 @@ interface Props {
 
 export function CapabilityCard({ row, probe }: Props) {
   const testId = `capability-card-${row.server}-${row.daemon}`;
-  const probeOk = probe?.ok ?? true;
+  // Codex bot PR #144 round-5 P2: probe === null means NO probe row
+  // exists for this server/daemon — cache drift or daemon churn can
+  // produce capabilities without a matching probe. Defaulting probeOk
+  // to true would mis-render a green "✓ probed" pill when nothing was
+  // probed. Three states now:
+  //   - probe === null         → "? not probed" (unknown, gray)
+  //   - probe.ok === true      → "✓ probed"    (success, green)
+  //   - probe.ok === false     → "✗ probe err" (failure, red)
+  const probeStatus: "unknown" | "ok" | "err" =
+    probe === null ? "unknown" : probe.ok ? "ok" : "err";
+  const probeStatusLabel: Record<typeof probeStatus, string> = {
+    unknown: "? not probed",
+    ok: "✓ probed",
+    err: "✗ probe err",
+  };
   const probeErr = probe?.err ?? "";
   const isSynthetic = probe?.source === "proxy-synthetic";
 
@@ -17,8 +31,8 @@ export function CapabilityCard({ row, probe }: Props) {
       <header class="capability-card-header">
         <span class="capability-card-server">{row.server}</span>
         <span class="capability-card-daemon">{row.daemon}</span>
-        <span class={`capability-card-probe-status ${probeOk ? "ok" : "err"}`}>
-          {probeOk ? "✓ probed" : "✗ probe err"}
+        <span class={`capability-card-probe-status ${probeStatus}`}>
+          {probeStatusLabel[probeStatus]}
         </span>
         {isSynthetic && (
           <span
@@ -29,7 +43,7 @@ export function CapabilityCard({ row, probe }: Props) {
             synthetic
           </span>
         )}
-        {!probeOk && probeErr && (
+        {probeStatus === "err" && probeErr && (
           <span class="capability-card-probe-err">{probeErr}</span>
         )}
       </header>
