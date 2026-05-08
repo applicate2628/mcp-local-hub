@@ -43,13 +43,20 @@ func (f *fakeToaster) snapshot() []toastCall {
 // states is the whole point — a regression that forwards every
 // snapshot regardless would cause SetIcon to fire on every poll
 // cycle, flickering the tray.
+//
+// Uses the inner form with emptyIntentReader to avoid invoking
+// defaultIntentReader (which hits disk via api.ReadDaemonIntent).
+// Disk-bound tests are flaky on bloated dev intent files; the
+// production wrapper still binds defaultIntentReader and is exercised
+// by TestAggregateTrayState_IntentSuppressesUserStop below.
 func TestAggregateTrayState_ForwardsOnChange(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	snaps := make(chan []api.DaemonStatus, 8)
 	out := make(chan tray.TrayState, 8)
-	go aggregateTrayState(ctx, snaps, out)
+	toaster := &fakeToaster{}
+	go aggregateTrayStateWithToast(ctx, snaps, out, toaster.show, emptyIntentReader)
 
 	// Sequence: Healthy, Healthy (dup), Partial, Partial (dup),
 	// Healthy. Expect: Healthy, Partial, Healthy — exactly 3
@@ -93,9 +100,10 @@ func TestAggregateTrayState_ExitsOnCtxCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	snaps := make(chan []api.DaemonStatus, 1)
 	out := make(chan tray.TrayState, 1)
+	toaster := &fakeToaster{}
 	done := make(chan struct{})
 	go func() {
-		aggregateTrayState(ctx, snaps, out)
+		aggregateTrayStateWithToast(ctx, snaps, out, toaster.show, emptyIntentReader)
 		close(done)
 	}()
 	cancel()
@@ -116,9 +124,10 @@ func TestAggregateTrayState_ExitsOnSnapshotChannelClose(t *testing.T) {
 	defer cancel()
 	snaps := make(chan []api.DaemonStatus)
 	out := make(chan tray.TrayState, 1)
+	toaster := &fakeToaster{}
 	done := make(chan struct{})
 	go func() {
-		aggregateTrayState(ctx, snaps, out)
+		aggregateTrayStateWithToast(ctx, snaps, out, toaster.show, emptyIntentReader)
 		close(done)
 	}()
 	close(snaps)
@@ -127,6 +136,15 @@ func TestAggregateTrayState_ExitsOnSnapshotChannelClose(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("aggregateTrayState did not return within 2s of snapshot channel close")
 	}
+}
+
+// emptyIntentReader is the test-side intentReaderFn that yields the
+// "no recorded preference" outcome (production fallback when the file
+// is missing or corrupt). All pre-bug-#3 tests use this — they assert
+// behavior under "no intent" semantics, identical to the legacy
+// Aggregate / isFailedRow predicates.
+func emptyIntentReader() api.DaemonIntentFile {
+	return api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{}}
 }
 
 // TestAggregateTrayState_ToastFiresOnFailureOnset asserts the
@@ -142,7 +160,7 @@ func TestAggregateTrayState_ToastFiresOnFailureOnset(t *testing.T) {
 	snaps := make(chan []api.DaemonStatus, 8)
 	out := make(chan tray.TrayState, 8)
 	toaster := &fakeToaster{}
-	go aggregateTrayStateWithToast(ctx, snaps, out, toaster.show)
+	go aggregateTrayStateWithToast(ctx, snaps, out, toaster.show, emptyIntentReader)
 
 	// Snapshot 1: all healthy.
 	snaps <- []api.DaemonStatus{{Server: "memory", State: "Running"}}
@@ -203,7 +221,7 @@ func TestAggregateTrayState_ToastIgnoresTaskSchedulerInfoCodes(t *testing.T) {
 	snaps := make(chan []api.DaemonStatus, 8)
 	out := make(chan tray.TrayState, 8)
 	toaster := &fakeToaster{}
-	go aggregateTrayStateWithToast(ctx, snaps, out, toaster.show)
+	go aggregateTrayStateWithToast(ctx, snaps, out, toaster.show, emptyIntentReader)
 
 	// Three snapshots of an orphan daemon with TS info-code "never
 	// run yet" — no toast may fire.
@@ -242,7 +260,7 @@ func TestAggregateTrayState_ToastIgnoresNeverRunSentinel(t *testing.T) {
 	snaps := make(chan []api.DaemonStatus, 8)
 	out := make(chan tray.TrayState, 8)
 	toaster := &fakeToaster{}
-	go aggregateTrayStateWithToast(ctx, snaps, out, toaster.show)
+	go aggregateTrayStateWithToast(ctx, snaps, out, toaster.show, emptyIntentReader)
 
 	for i := 0; i < 3; i++ {
 		snaps <- []api.DaemonStatus{
@@ -270,7 +288,7 @@ func TestAggregateTrayState_ToastUsesLastResult(t *testing.T) {
 	snaps := make(chan []api.DaemonStatus, 8)
 	out := make(chan tray.TrayState, 8)
 	toaster := &fakeToaster{}
-	go aggregateTrayStateWithToast(ctx, snaps, out, toaster.show)
+	go aggregateTrayStateWithToast(ctx, snaps, out, toaster.show, emptyIntentReader)
 
 	// Snapshot 1: clean.
 	snaps <- []api.DaemonStatus{{Server: "memory", State: "Running"}}
@@ -285,6 +303,195 @@ func TestAggregateTrayState_ToastUsesLastResult(t *testing.T) {
 		select {
 		case <-deadline:
 			t.Fatalf("expected 1 toast within 2s, got %d", len(toaster.snapshot()))
+		default:
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+}
+
+// fakeIntentReader returns the supplied DaemonIntentFile on every
+// invocation. Tests use this to drive the intent-aware suppression
+// branch deterministically (no disk I/O, no DaemonStateDir resolution).
+func fakeIntentReader(file api.DaemonIntentFile) intentReaderFn {
+	return func() api.DaemonIntentFile { return file }
+}
+
+// TestAggregateTrayState_IntentSuppressesUserStop_NoToast_NoError is
+// the headline bug #3 regression guard. Sequence: a daemon was Running,
+// the operator runs `mcphub stop --server memory`, the daemon exits
+// with code 1 (Node MCP server graceful-stdin-close behavior), and a
+// fresh status snapshot lands. Without the intent suppression: red
+// tray icon + spurious toast. With suppression: StateDown classification
+// + no toast.
+func TestAggregateTrayState_IntentSuppressesUserStop_NoToast_NoError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	now := time.Now().UTC()
+	intent := api.DaemonIntentFile{
+		Tasks: map[string]api.DaemonIntent{
+			"\\mcp-local-hub-memory-default": {
+				Desired:   api.IntentDesiredStopped,
+				Reason:    api.IntentReasonUserStop,
+				UpdatedAt: now.Add(-1 * time.Minute),
+			},
+		},
+	}
+
+	snaps := make(chan []api.DaemonStatus, 4)
+	out := make(chan tray.TrayState, 4)
+	toaster := &fakeToaster{}
+	go aggregateTrayStateWithToast(ctx, snaps, out, toaster.show, fakeIntentReader(intent))
+
+	// Snapshot 1: clean (running, no intent suppression needed).
+	snaps <- []api.DaemonStatus{
+		{Server: "memory", TaskName: "\\mcp-local-hub-memory-default", State: "Running"},
+	}
+	// Snapshot 2: post-stop with exit code 1. Intent says user-stop.
+	snaps <- []api.DaemonStatus{
+		{Server: "memory", TaskName: "\\mcp-local-hub-memory-default", State: "Stopped", LastResult: 1},
+	}
+
+	// Collect tray-state forwards for ~500ms.
+	got := []tray.TrayState{}
+	deadline := time.After(500 * time.Millisecond)
+collectLoop:
+	for {
+		select {
+		case s := <-out:
+			got = append(got, s)
+		case <-deadline:
+			break collectLoop
+		}
+	}
+
+	// Last forwarded state must be StateDown (intent suppressed the
+	// failure → fell through to the "none Running" branch).
+	if len(got) == 0 {
+		t.Fatalf("expected at least 1 tray-state forward, got 0")
+	}
+	last := got[len(got)-1]
+	if last != tray.StateDown {
+		t.Errorf("last tray state = %v, want StateDown (bug #3 — intent must demote real-failure to StateDown)", last)
+	}
+	// Toast count must be zero — the failure was suppressed.
+	if calls := toaster.snapshot(); len(calls) != 0 {
+		t.Errorf("expected 0 toasts (intent suppressed failure), got %d: %+v", len(calls), calls)
+	}
+}
+
+// TestAggregateTrayState_ChronicFailureIntent_StillFiresToast is the
+// inverse guard. ChronicFailure is the watchdog's quarantine reason
+// — the operator MUST see this. Even though Desired=stopped, the
+// suppression must NOT apply for chronic-failure.
+func TestAggregateTrayState_ChronicFailureIntent_StillFiresToast(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	now := time.Now().UTC()
+	intent := api.DaemonIntentFile{
+		Tasks: map[string]api.DaemonIntent{
+			"\\mcp-local-hub-memory-default": {
+				Desired:   api.IntentDesiredStopped,
+				Reason:    api.IntentReasonChronicFailure,
+				UpdatedAt: now.Add(-1 * time.Minute),
+			},
+		},
+	}
+
+	snaps := make(chan []api.DaemonStatus, 4)
+	out := make(chan tray.TrayState, 4)
+	toaster := &fakeToaster{}
+	go aggregateTrayStateWithToast(ctx, snaps, out, toaster.show, fakeIntentReader(intent))
+
+	// Snapshot 1: healthy (no rows match intent yet).
+	snaps <- []api.DaemonStatus{
+		{Server: "other", TaskName: "\\mcp-local-hub-other-default", State: "Running"},
+	}
+	// Snapshot 2: memory now appears, exit-code-1, with chronic-failure
+	// intent. Toast must fire; tray must classify as StateError.
+	snaps <- []api.DaemonStatus{
+		{Server: "other", TaskName: "\\mcp-local-hub-other-default", State: "Running"},
+		{Server: "memory", TaskName: "\\mcp-local-hub-memory-default", State: "Stopped", LastResult: 1},
+	}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		if len(toaster.snapshot()) >= 1 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("expected 1 toast for chronic-failure within 2s, got %d (chronic-failure must NOT be suppressed)", len(toaster.snapshot()))
+		default:
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+
+	// Drain forwarded states briefly and confirm StateError reaches the
+	// channel.
+	sawError := false
+	deadline2 := time.After(500 * time.Millisecond)
+forwardLoop:
+	for {
+		select {
+		case s := <-out:
+			if s == tray.StateError {
+				sawError = true
+			}
+		case <-deadline2:
+			break forwardLoop
+		}
+	}
+	if !sawError {
+		t.Errorf("expected StateError forward for chronic-failure intent (must remain visible)")
+	}
+}
+
+// TestAggregateTrayState_IntentTTLExpired_BackToError guards the TTL
+// boundary at the cli layer. user-stop intent older than StopIntentTTL
+// (24h) must no longer suppress — a daemon that crashes a day after
+// the operator stopped it should once again surface as StateError +
+// fire a toast (operator forgot about it; the daemon keeps failing).
+func TestAggregateTrayState_IntentTTLExpired_BackToError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	now := time.Now().UTC()
+	// 25h-old intent → past StopIntentTTL.
+	intent := api.DaemonIntentFile{
+		Tasks: map[string]api.DaemonIntent{
+			"\\mcp-local-hub-memory-default": {
+				Desired:   api.IntentDesiredStopped,
+				Reason:    api.IntentReasonUserStop,
+				UpdatedAt: now.Add(-25 * time.Hour),
+			},
+		},
+	}
+
+	snaps := make(chan []api.DaemonStatus, 4)
+	out := make(chan tray.TrayState, 4)
+	toaster := &fakeToaster{}
+	go aggregateTrayStateWithToast(ctx, snaps, out, toaster.show, fakeIntentReader(intent))
+
+	// Snapshot 1: healthy.
+	snaps <- []api.DaemonStatus{
+		{Server: "memory", TaskName: "\\mcp-local-hub-memory-default", State: "Running"},
+	}
+	// Snapshot 2: post-stop with exit code 1, intent TTL expired.
+	snaps <- []api.DaemonStatus{
+		{Server: "memory", TaskName: "\\mcp-local-hub-memory-default", State: "Stopped", LastResult: 1},
+	}
+
+	// Toast must fire (intent suppression no longer applies after TTL).
+	deadline := time.After(2 * time.Second)
+	for {
+		if len(toaster.snapshot()) >= 1 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("expected 1 toast for TTL-expired intent within 2s, got %d (TTL expiry must restore failure visibility)", len(toaster.snapshot()))
 		default:
 			time.Sleep(20 * time.Millisecond)
 		}
