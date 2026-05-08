@@ -4,6 +4,7 @@ package gui
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 
 	"mcp-local-hub/internal/api"
 )
@@ -99,6 +100,24 @@ func (s *Server) cleanupOrphansHandler(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
+	}
+	if req.MinAgeSec < 0 {
+		http.Error(w, "min_age_sec must be >= 0", http.StatusBadRequest)
+		return
+	}
+	if req.Server != "" {
+		names, err := api.NewAPI().ManifestList()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{
+				"error": "failed to list manifests",
+				"code":  "CLEANUP_MANIFEST_LIST_FAILED",
+			})
+			return
+		}
+		if !slices.Contains(names, req.Server) {
+			http.Error(w, "unknown server", http.StatusBadRequest)
+			return
+		}
 	}
 
 	// Empty ManifestDir → embed-first path (mirrors the convention in
