@@ -36,6 +36,7 @@ import (
 	"strings"
 	"time"
 
+	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/scheduler"
 )
 
@@ -353,6 +354,14 @@ func (a *API) LoadOwnershipSnapshotChecked() (OwnershipSnapshot, error) {
 // fatal error encountered while loading the workspace registry. Manifest
 // errors are absorbed per-entry and never propagate (see comment on
 // LoadOwnershipSnapshotChecked for the asymmetry rationale).
+//
+// Workspace-registry failures are scoped: they propagate only when the
+// installation actually has at least one workspace-scoped manifest
+// (Codex bot P2 on PR #135 round 2). On a global-only installation
+// (no workspace-scoped servers in the manifest set), registry data is
+// architecturally irrelevant — fail-closed there would block watchdog
+// auto-recovery for unrelated global daemons whenever DefaultRegistryPath
+// errored (e.g. service accounts without a resolvable home dir).
 func (a *API) loadOwnershipSnapshotInternal() (OwnershipSnapshot, error) {
 	snap := OwnershipSnapshot{
 		ManifestServers:     make(map[string]bool),
@@ -363,6 +372,7 @@ func (a *API) loadOwnershipSnapshotInternal() (OwnershipSnapshot, error) {
 	}
 
 	// Manifest set + per-server daemons + per-task PortMap.
+	hasWorkspaceScoped := false
 	names, _ := listManifestNamesEmbedFirst()
 	for _, name := range names {
 		data, err := loadManifestYAMLEmbedFirst(name)
@@ -374,6 +384,9 @@ func (a *API) loadOwnershipSnapshotInternal() (OwnershipSnapshot, error) {
 			continue
 		}
 		snap.ManifestServers[m.Name] = true
+		if m.Kind == config.KindWorkspaceScoped {
+			hasWorkspaceScoped = true
+		}
 		inner := make(map[string]bool, len(m.Daemons))
 		for _, d := range m.Daemons {
 			inner[d.Name] = true
@@ -386,16 +399,24 @@ func (a *API) loadOwnershipSnapshotInternal() (OwnershipSnapshot, error) {
 	}
 
 	// Workspace registry: task name keyed by (workspace, language).
-	// Path-resolve failures and load failures both propagate as errors so
-	// the Checked variant can refuse the tick (PR #135 Finding 4). The
-	// back-compat LoadOwnershipSnapshot wrapper drops the error.
+	// Path-resolve failures and load failures propagate as errors when
+	// the installation depends on workspace data (PR #135 Finding 4 +
+	// PR #135 round 2 P2 scope-narrowing). Global-only installs (no
+	// workspace-scoped manifests) get an empty workspace section
+	// silently — registry state cannot affect them.
 	regPath, regErr := DefaultRegistryPath()
 	if regErr != nil {
-		return snap, fmt.Errorf("resolve workspace registry path: %w", regErr)
+		if hasWorkspaceScoped {
+			return snap, fmt.Errorf("resolve workspace registry path: %w", regErr)
+		}
+		return snap, nil
 	}
 	reg := NewRegistry(regPath)
 	if err := reg.Load(); err != nil {
-		return snap, fmt.Errorf("load workspace registry: %w", err)
+		if hasWorkspaceScoped {
+			return snap, fmt.Errorf("load workspace registry: %w", err)
+		}
+		return snap, nil
 	}
 	for _, e := range reg.Workspaces {
 		if e.TaskName == "" {

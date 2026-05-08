@@ -414,6 +414,125 @@ func TestStopTaskNamesForServer_Workspace_RegistryLoadFails_PreservesWrap(t *tes
 	}
 }
 
+// ---------------------------------------------------------------------------
+// PR #135 round 2 P2 — LoadOwnershipSnapshotChecked must scope fail-closed
+// to installations that actually depend on workspace registry data. Global-
+// only installations (no workspace-scoped manifests) must tolerate registry
+// path-resolve / load failures benignly so unrelated global daemons keep
+// auto-recovery wiring on hosts where the registry path is unreachable
+// (service accounts without a resolvable home dir, etc.).
+// ---------------------------------------------------------------------------
+
+// TestLoadOwnershipSnapshotChecked_GlobalOnly_RegistryPathFailsBenignly
+// verifies the round-2 P2 scope narrowing: when the manifest set has zero
+// workspace-scoped servers, a DefaultRegistryPath resolution failure must
+// not propagate. The watchdog's runWatchdogOnceInner is otherwise broken
+// by an unreachable registry path on global-only hosts.
+func TestLoadOwnershipSnapshotChecked_GlobalOnly_RegistryPathFailsBenignly(t *testing.T) {
+	a := NewAPI()
+	daemonIntentTestHelper(t)
+
+	// Seed a global-only manifest. listManifestNamesEmbedFirst will see
+	// just this one entry under the override and never report any
+	// workspace-scoped server, so registry-load failure must be benign.
+	manifestDir := t.TempDir()
+	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", manifestDir)
+	subdir := filepath.Join(manifestDir, "global-only")
+	if err := os.MkdirAll(subdir, 0o700); err != nil {
+		t.Fatalf("mkdir manifest dir: %v", err)
+	}
+	body := "name: global-only\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9210\n"
+	if err := os.WriteFile(filepath.Join(subdir, "manifest.yaml"), []byte(body), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	// Force DefaultRegistryPath to error — exactly the production scenario
+	// the bot flagged (service account without home dir).
+	sentinel := errors.New("synthetic resolve failure")
+	prev := defaultRegistryPathFn
+	defaultRegistryPathFn = func() (string, error) { return "", sentinel }
+	t.Cleanup(func() { defaultRegistryPathFn = prev })
+
+	snap, err := a.LoadOwnershipSnapshotChecked()
+	if err != nil {
+		t.Fatalf("LoadOwnershipSnapshotChecked (global-only host, registry path fails): want nil error, got %v", err)
+	}
+	if !snap.ManifestServers["global-only"] {
+		t.Errorf("expected global-only server present in snapshot.ManifestServers, got %+v", snap.ManifestServers)
+	}
+	if len(snap.WorkspaceTasksByKey) != 0 {
+		t.Errorf("WorkspaceTasksByKey: want empty, got %+v", snap.WorkspaceTasksByKey)
+	}
+}
+
+// TestLoadOwnershipSnapshotChecked_WorkspaceScoped_RegistryPathFailsClosed
+// is the safety counterpart: when the manifest set DOES include at least
+// one workspace-scoped server, registry path-resolve failure must still
+// propagate (Finding 4 contract preserved) — fail-closed so the watchdog
+// refuses the tick rather than make orphan/lazy-proxy classifications on
+// partial ownership data.
+func TestLoadOwnershipSnapshotChecked_WorkspaceScoped_RegistryPathFailsClosed(t *testing.T) {
+	a := NewAPI()
+	daemonIntentTestHelper(t)
+
+	manifestDir := t.TempDir()
+	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", manifestDir)
+	subdir := filepath.Join(manifestDir, "workspace-srv")
+	if err := os.MkdirAll(subdir, 0o700); err != nil {
+		t.Fatalf("mkdir manifest dir: %v", err)
+	}
+	// Workspace-scoped manifest exercises the fail-closed gate.
+	body := "name: workspace-srv\nkind: workspace-scoped\ntransport: stdio-bridge\ncommand: workspace-srv\nport_pool: {start: 9300, end: 9399}\nlanguages:\n  - name: go\n    backend: gopls-mcp\n    transport: stdio\n    lsp_command: gopls\n"
+	if err := os.WriteFile(filepath.Join(subdir, "manifest.yaml"), []byte(body), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	sentinel := errors.New("synthetic resolve failure")
+	prev := defaultRegistryPathFn
+	defaultRegistryPathFn = func() (string, error) { return "", sentinel }
+	t.Cleanup(func() { defaultRegistryPathFn = prev })
+
+	_, err := a.LoadOwnershipSnapshotChecked()
+	if err == nil {
+		t.Fatal("LoadOwnershipSnapshotChecked (workspace-scoped present, registry path fails): want non-nil error to fail closed, got nil")
+	}
+	if !errors.Is(err, sentinel) {
+		t.Errorf("error chain: want sentinel via errors.Is, got %v", err)
+	}
+}
+
+// TestLoadOwnershipSnapshotChecked_GlobalOnly_RegistryLoadFailsBenignly
+// covers the symmetric path: registry path resolves, but the file itself
+// is unparseable. Global-only host: must tolerate the load error.
+func TestLoadOwnershipSnapshotChecked_GlobalOnly_RegistryLoadFailsBenignly(t *testing.T) {
+	a := NewAPI()
+	daemonIntentTestHelper(t)
+
+	manifestDir := t.TempDir()
+	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", manifestDir)
+	subdir := filepath.Join(manifestDir, "global-only")
+	if err := os.MkdirAll(subdir, 0o700); err != nil {
+		t.Fatalf("mkdir manifest dir: %v", err)
+	}
+	body := "name: global-only\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9211\n"
+	if err := os.WriteFile(filepath.Join(subdir, "manifest.yaml"), []byte(body), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	regPath := pointRegistryAtTempDir(t)
+	if err := os.WriteFile(regPath, []byte("this: is: not\n  - valid: ["), 0o600); err != nil {
+		t.Fatalf("seed corrupt registry: %v", err)
+	}
+
+	snap, err := a.LoadOwnershipSnapshotChecked()
+	if err != nil {
+		t.Fatalf("LoadOwnershipSnapshotChecked (global-only host, registry load fails): want nil error, got %v", err)
+	}
+	if !snap.ManifestServers["global-only"] {
+		t.Errorf("expected global-only present in snapshot, got %+v", snap.ManifestServers)
+	}
+}
+
 // ensureLeadingBackslashHelper is a tiny safety net for tests in this file
 // that need to compute the canonical key.
 func ensureLeadingBackslashHelper(s string) string {
