@@ -90,6 +90,16 @@ const AuditActionWorkspaceRegistered = "workspace-registered"
 // scheduled task is NOT installed.
 const AuditActionWatchdogInstallElevatedOverride = "watchdog-install-elevated-override"
 
+// AuditActionStopFailedNoKill is emitted by `mcphub stop` when
+// stopTaskNamesForServer fails (workspace registry corrupt, manifest
+// missing, etc.) BEFORE the intent path runs. Per Codex deep-sec PR #135
+// Finding 3: the kill is skipped (fail-closed), but without an audit
+// entry the operator is left with only stderr — a forensic gap. The
+// audit append itself is best-effort: failure here is logged through the
+// caller's diagnostic path (when one is available) and never masks the
+// underlying load error returned to the caller.
+const AuditActionStopFailedNoKill = "stop-failed-no-kill"
+
 // auditWhoMcphubStop / auditWhoMcphubInstall / ... are the stable
 // `who` labels recorded on every command-side audit entry. Kept
 // human-readable and identical to the CLI surface so log readers
@@ -168,6 +178,14 @@ type StopOpts struct {
 func (a *API) StopWithOpts(opts StopOpts) ([]RestartResult, error) {
 	taskNames, err := stopTaskNamesForServer(opts.Server, opts.DaemonFilter)
 	if err != nil {
+		// Codex deep-sec PR #135 Finding 3: emit a stop-failed-no-kill audit
+		// entry so the forensic trail records the blocked stop attempt even
+		// when stopTaskNamesForServer fails before recordStopIntent could
+		// run. The audit append is best-effort (failures here would be
+		// logged in production through the caller's diagnostic path); the
+		// underlying load error still propagates verbatim so the CLI prints
+		// it and exits non-zero.
+		recordStopFailedNoKill(opts.Server, opts.Force, err)
 		return nil, err
 	}
 	if err := a.recordStopIntent(taskNames, opts.Force); err != nil {
@@ -193,18 +211,25 @@ func (a *API) StopWithOpts(opts StopOpts) ([]RestartResult, error) {
 func (a *API) recordStopIntent(taskNames []string, force bool) error {
 	now := time.Now().UTC()
 	for _, tn := range taskNames {
+		// Codex deep-sec PR #135 Finding 1: every audit entry carries
+		// the canonical leading-backslash task identity so the on-disk
+		// intent-audit log uses one shape downstream filters can pivot
+		// on. The intent file itself is normalized inside
+		// WriteDaemonIntent; we explicitly canonicalize here so audit
+		// entries match.
+		canonical := canonicalIntentTaskKey(tn)
 		if force {
 			// Audit-only path (--force). Plan §51: ErrIdentityOversize
 			// from AppendIntentAudit fails closed.
 			entry := NewIntentAuditEntry(
 				WithAction(AuditActionForcedStopWithoutIntent),
-				WithTask(tn),
+				WithTask(canonical),
 				WithWho(auditWhoMcphubStopForce),
 				WithPriority("high"),
 				WithReason("operator forced stop without recording intent"),
 			)
 			if err := emitCommandAudit(entry); err != nil {
-				return fmt.Errorf("forced-stop audit failed for %s: %w", tn, err)
+				return fmt.Errorf("forced-stop audit failed for %s: %w", canonical, err)
 			}
 			continue
 		}
@@ -215,8 +240,8 @@ func (a *API) recordStopIntent(taskNames []string, force bool) error {
 			Reason:    IntentReasonUserStop,
 			UpdatedAt: now,
 		}
-		if err := a.WriteDaemonIntent(tn, intent, auditWhoMcphubStop); err != nil {
-			return fmt.Errorf("stop intent failed for %s: %w", tn, err)
+		if err := a.WriteDaemonIntent(canonical, intent, auditWhoMcphubStop); err != nil {
+			return fmt.Errorf("stop intent failed for %s: %w", canonical, err)
 		}
 		// Explicit Action=user-stop audit entry (distinct from
 		// WriteDaemonIntent's auto-emitted Action=set-intent record).
@@ -225,13 +250,13 @@ func (a *API) recordStopIntent(taskNames []string, force bool) error {
 		// ErrIdentityOversize.
 		entry := NewIntentAuditEntry(
 			WithAction(AuditActionUserStop),
-			WithTask(tn),
+			WithTask(canonical),
 			WithWho(auditWhoMcphubStop),
 			WithPriority("high"),
 			WithReason(IntentReasonUserStop),
 		)
 		if err := emitCommandAudit(entry); err != nil {
-			return fmt.Errorf("user-stop audit failed for %s: %w", tn, err)
+			return fmt.Errorf("user-stop audit failed for %s: %w", canonical, err)
 		}
 	}
 	return nil
@@ -252,6 +277,31 @@ func emitCommandAudit(entry IntentAuditEntry) error {
 		return nil
 	}
 	return appendIntentAuditFn(entry)
+}
+
+// recordStopFailedNoKill emits the stop-failed-no-kill audit entry per
+// Codex deep-sec PR #135 Finding 3. Best-effort: if the audit dispatcher
+// is not yet bound (init order edge case) or the append itself fails, the
+// caller still returns the underlying stop error — never lose forensic
+// context to a downstream audit hiccup. The Task field is intentionally
+// empty: stopTaskNamesForServer failed before any task identity could be
+// resolved, so there is no specific row to attribute. The Reason field
+// captures the root-cause error string and the originating server name so
+// log readers can pivot without parsing CLI stderr.
+func recordStopFailedNoKill(server string, force bool, cause error) {
+	who := auditWhoMcphubStop
+	if force {
+		who = auditWhoMcphubStopForce
+	}
+	reason := fmt.Sprintf("server=%s: %v", server, cause)
+	entry := NewIntentAuditEntry(
+		WithAction(AuditActionStopFailedNoKill),
+		WithTask(""),
+		WithWho(who),
+		WithPriority("high"),
+		WithReason(reason),
+	)
+	_ = emitCommandAudit(entry)
 }
 
 // ---------------------------------------------------------------------------
@@ -289,14 +339,18 @@ func installAuditTaskNames(m *config.ServerManifest, daemonFilter string) []stri
 // install_intent_test.go assert this end-state invariant.
 func (a *API) recordInstallAuditPreMutation(m *config.ServerManifest, daemonFilter string) error {
 	for _, tn := range installAuditTaskNames(m, daemonFilter) {
+		// Codex deep-sec PR #135 Finding 1: audit entries carry the
+		// canonical leading-backslash task identity so the on-disk audit
+		// log uses one shape downstream filters can pivot on.
+		canonical := canonicalIntentTaskKey(tn)
 		entry := NewIntentAuditEntry(
 			WithAction(AuditActionServerInstall),
-			WithTask(tn),
+			WithTask(canonical),
 			WithWho(auditWhoMcphubInstall),
 			WithReason(IntentReasonInstall),
 		)
 		if err := emitCommandAudit(entry); err != nil {
-			return fmt.Errorf("install audit failed for %s (refusing to proceed; manifest may have malicious oversized identifier): %w", tn, err)
+			return fmt.Errorf("install audit failed for %s (refusing to proceed; manifest may have malicious oversized identifier): %w", canonical, err)
 		}
 	}
 	return nil
@@ -311,18 +365,22 @@ func (a *API) recordInstallAuditPreMutation(m *config.ServerManifest, daemonFilt
 func (a *API) recordInstallIntentPostSuccess(m *config.ServerManifest, daemonFilter string, w io.Writer) {
 	now := time.Now().UTC()
 	for _, tn := range installAuditTaskNames(m, daemonFilter) {
+		// Codex deep-sec PR #135 Finding 1: WriteDaemonIntent normalizes
+		// internally, but pre-canonicalizing here keeps the diagnostic
+		// warning text consistent with what shows up on disk.
+		canonical := canonicalIntentTaskKey(tn)
 		intent := DaemonIntent{
 			Desired:   IntentDesiredRunning,
 			Reason:    IntentReasonInstall,
 			UpdatedAt: now,
 		}
-		if err := a.WriteDaemonIntent(tn, intent, auditWhoMcphubInstall); err != nil {
+		if err := a.WriteDaemonIntent(canonical, intent, auditWhoMcphubInstall); err != nil {
 			// Log + continue: install already happened. The watchdog
 			// treats missing intent entries as Desired=running per
 			// the bootstrap policy, so a write failure here just
 			// loses the explicit record.
 			if w != nil {
-				fmt.Fprintf(w, "warning: write install intent for %s: %v\n", tn, err)
+				fmt.Fprintf(w, "warning: write install intent for %s: %v\n", canonical, err)
 			}
 		}
 	}
@@ -337,25 +395,29 @@ func (a *API) recordInstallIntentPostSuccess(m *config.ServerManifest, daemonFil
 // and never propagate — the restart already happened.
 func (a *API) recordRestartIntentForTask(taskName string, w io.Writer) {
 	now := time.Now().UTC()
+	// Codex deep-sec PR #135 Finding 1: canonicalize identity before both
+	// the intent write and the audit emission so log filters pivot on
+	// one shape.
+	canonical := canonicalIntentTaskKey(taskName)
 	intent := DaemonIntent{
 		Desired:   IntentDesiredRunning,
 		Reason:    IntentReasonInstall, // re-asserts the install intent
 		UpdatedAt: now,
 	}
-	if err := a.WriteDaemonIntent(taskName, intent, auditWhoMcphubRestart); err != nil {
+	if err := a.WriteDaemonIntent(canonical, intent, auditWhoMcphubRestart); err != nil {
 		if w != nil {
-			fmt.Fprintf(w, "warning: write restart intent for %s: %v\n", taskName, err)
+			fmt.Fprintf(w, "warning: write restart intent for %s: %v\n", canonical, err)
 		}
 	}
 	entry := NewIntentAuditEntry(
 		WithAction(AuditActionServerRestarted),
-		WithTask(taskName),
+		WithTask(canonical),
 		WithWho(auditWhoMcphubRestart),
 		WithReason("operator-initiated restart"),
 	)
 	if err := emitCommandAudit(entry); err != nil {
 		if w != nil {
-			fmt.Fprintf(w, "warning: write restart audit for %s: %v\n", taskName, err)
+			fmt.Fprintf(w, "warning: write restart audit for %s: %v\n", canonical, err)
 		}
 	}
 }
@@ -367,25 +429,28 @@ func (a *API) recordRestartIntentForTask(taskName string, w io.Writer) {
 func (a *API) recordUninstallIntentForTasks(taskNames []string, w io.Writer) {
 	now := time.Now().UTC()
 	for _, tn := range taskNames {
+		// Codex deep-sec PR #135 Finding 1: canonicalize identity before
+		// both the intent write and the audit emission.
+		canonical := canonicalIntentTaskKey(tn)
 		intent := DaemonIntent{
 			Desired:   IntentDesiredStopped,
 			Reason:    IntentReasonUninstalled,
 			UpdatedAt: now,
 		}
-		if err := a.WriteDaemonIntent(tn, intent, auditWhoMcphubUninstall); err != nil {
+		if err := a.WriteDaemonIntent(canonical, intent, auditWhoMcphubUninstall); err != nil {
 			if w != nil {
-				fmt.Fprintf(w, "warning: write uninstall intent for %s: %v\n", tn, err)
+				fmt.Fprintf(w, "warning: write uninstall intent for %s: %v\n", canonical, err)
 			}
 		}
 		entry := NewIntentAuditEntry(
 			WithAction(AuditActionServerUninstalled),
-			WithTask(tn),
+			WithTask(canonical),
 			WithWho(auditWhoMcphubUninstall),
 			WithReason(IntentReasonUninstalled),
 		)
 		if err := emitCommandAudit(entry); err != nil {
 			if w != nil {
-				fmt.Fprintf(w, "warning: write uninstall audit for %s: %v\n", tn, err)
+				fmt.Fprintf(w, "warning: write uninstall audit for %s: %v\n", canonical, err)
 			}
 		}
 	}
@@ -398,31 +463,33 @@ func (a *API) recordUninstallIntentForTasks(taskNames []string, w io.Writer) {
 func (a *API) recordRegisterIntentForTask(taskName string, w io.Writer) {
 	now := time.Now().UTC()
 	// Register's task names come from the workspace registry path
-	// without the leading backslash (e.g. "mcp-local-hub-lsp-..."),
-	// while Stop/Install task names also lack the leading backslash
-	// here. The intent file uses the literal name passed in — the
-	// watchdog driver's status rows include the backslash, so plan
-	// §11 callers normalize on lookup. Task 10 records the canonical
-	// (no-backslash) form to match the install/stop path.
+	// without the leading backslash (e.g. "mcp-local-hub-lsp-...").
+	// Codex deep-sec PR #135 Finding 1 fixed the original key-mismatch
+	// bug: WriteDaemonIntent now prepends the canonical "\" before
+	// storage so the entry shape matches recovery.go's lookup
+	// (row.TaskName from Status() includes the leading backslash).
+	// Callers may pass either shape; canonicalIntentTaskKey enforces
+	// the storage invariant.
+	canonical := canonicalIntentTaskKey(taskName)
 	intent := DaemonIntent{
 		Desired:   IntentDesiredRunning,
 		Reason:    IntentReasonRegister,
 		UpdatedAt: now,
 	}
-	if err := a.WriteDaemonIntent(taskName, intent, auditWhoMcphubRegister); err != nil {
+	if err := a.WriteDaemonIntent(canonical, intent, auditWhoMcphubRegister); err != nil {
 		if w != nil {
-			fmt.Fprintf(w, "warning: write register intent for %s: %v\n", taskName, err)
+			fmt.Fprintf(w, "warning: write register intent for %s: %v\n", canonical, err)
 		}
 	}
 	entry := NewIntentAuditEntry(
 		WithAction(AuditActionWorkspaceRegistered),
-		WithTask(taskName),
+		WithTask(canonical),
 		WithWho(auditWhoMcphubRegister),
 		WithReason(IntentReasonRegister),
 	)
 	if err := emitCommandAudit(entry); err != nil {
 		if w != nil {
-			fmt.Fprintf(w, "warning: write register audit for %s: %v\n", taskName, err)
+			fmt.Fprintf(w, "warning: write register audit for %s: %v\n", canonical, err)
 		}
 	}
 }

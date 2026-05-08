@@ -121,6 +121,22 @@ func runUninstall(
 	for _, warn := range report.ClientWarns {
 		fmt.Fprintf(out, "⚠ %s\n", warn)
 	}
+	// Codex deep-sec PR #135 Finding 2 (HIGH): when a.Uninstall returns
+	// (report, nil) but report.TaskDeleteWarns is non-empty, scheduler
+	// tasks SURVIVED the per-task delete loop. The watchdog must stay
+	// installed so it can keep auto-recovering whatever tasks remain.
+	// Stripping it here would leave the user with installed-but-
+	// unrecoverable daemons.
+	//
+	// The error channel surfaces a non-nil error so the cobra wrapper
+	// returns a non-zero exit (operator-visible signal). The success-
+	// completion line is also suppressed.
+	if len(report.TaskDeleteWarns) > 0 {
+		fmt.Fprintf(out,
+			"⚠ watchdog kept installed; %d task(s) failed to delete — auto-recovery preserved for survivors\n",
+			len(report.TaskDeleteWarns))
+		return fmt.Errorf("uninstall %s: %d task(s) failed to delete; watchdog kept installed for survivors", server, len(report.TaskDeleteWarns))
+	}
 	// Step 3: watchdog teardown. The helper's internal partial-uninstall
 	// gate (Codex bot P2) keeps the watchdog installed when other
 	// managed servers remain.

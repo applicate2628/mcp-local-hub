@@ -31,6 +31,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
@@ -318,6 +319,41 @@ func NewOwnedXMLValidatorFromSnapshot(snap OwnershipSnapshot) OwnedXMLValidator 
 // driver treats an empty PortMap as "no kill-by-port targets known"
 // and falls back to scheduler-only restart, which is conservative.
 func (a *API) LoadOwnershipSnapshot() OwnershipSnapshot {
+	// Back-compat best-effort variant. Drops registry load errors silently
+	// to preserve callers that historically tolerated partial snapshots
+	// (tests, exploratory tooling, etc.). The watchdog driver MUST use
+	// LoadOwnershipSnapshotChecked instead — see Codex deep-sec PR #135
+	// Finding 4 for the rationale (a phantom-vs-orphan classification on
+	// a partial snapshot is unsafe).
+	snap, _ := a.loadOwnershipSnapshotInternal()
+	return snap
+}
+
+// LoadOwnershipSnapshotChecked is the fail-closed variant of
+// LoadOwnershipSnapshot per Codex deep-sec PR #135 Finding 4. The watchdog
+// driver consumes the snapshot to decide ownership (orphan vs lazy-proxy)
+// and to drive the snapshot-bound XML validator's structural ownership
+// check. A silently-dropped workspace registry leaves the
+// WorkspaceTasksByKey + PortMap maps incomplete → a real lazy-proxy task
+// could be marked orphan (no recovery) OR a phantom task could be marked
+// owned (false-positive restart). The driver should refuse the tick on
+// any registry load error rather than make decisions on partial data.
+//
+// Manifest read failures are still tolerated (per-server `continue` inside
+// the loop) because individual broken manifests are an ordinary disk-state
+// concern that pre-dates the watchdog — failing the entire tick on one
+// unparseable YAML would be more dangerous than running with what we have.
+// Registry-level failures are different: they are global to all
+// workspace-scoped tasks at once.
+func (a *API) LoadOwnershipSnapshotChecked() (OwnershipSnapshot, error) {
+	return a.loadOwnershipSnapshotInternal()
+}
+
+// loadOwnershipSnapshotInternal builds the snapshot and returns the first
+// fatal error encountered while loading the workspace registry. Manifest
+// errors are absorbed per-entry and never propagate (see comment on
+// LoadOwnershipSnapshotChecked for the asymmetry rationale).
+func (a *API) loadOwnershipSnapshotInternal() (OwnershipSnapshot, error) {
 	snap := OwnershipSnapshot{
 		ManifestServers:     make(map[string]bool),
 		ManifestDaemons:     make(map[string]map[string]bool),
@@ -350,24 +386,28 @@ func (a *API) LoadOwnershipSnapshot() OwnershipSnapshot {
 	}
 
 	// Workspace registry: task name keyed by (workspace, language).
-	// Best-effort; failure leaves the map empty.
-	if regPath, regErr := DefaultRegistryPath(); regErr == nil {
-		reg := NewRegistry(regPath)
-		if err := reg.Load(); err == nil {
-			for _, e := range reg.Workspaces {
-				if e.TaskName == "" {
-					continue
-				}
-				key := e.WorkspaceKey + "-" + e.Language
-				snap.WorkspaceTasksByKey[key] = e.TaskName
-				if e.Port != 0 {
-					snap.PortMap[e.TaskName] = e.Port
-				}
-			}
+	// Path-resolve failures and load failures both propagate as errors so
+	// the Checked variant can refuse the tick (PR #135 Finding 4). The
+	// back-compat LoadOwnershipSnapshot wrapper drops the error.
+	regPath, regErr := DefaultRegistryPath()
+	if regErr != nil {
+		return snap, fmt.Errorf("resolve workspace registry path: %w", regErr)
+	}
+	reg := NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		return snap, fmt.Errorf("load workspace registry: %w", err)
+	}
+	for _, e := range reg.Workspaces {
+		if e.TaskName == "" {
+			continue
+		}
+		key := e.WorkspaceKey + "-" + e.Language
+		snap.WorkspaceTasksByKey[key] = e.TaskName
+		if e.Port != 0 {
+			snap.PortMap[e.TaskName] = e.Port
 		}
 	}
-
-	return snap
+	return snap, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -568,6 +608,10 @@ func (a *API) IntentStillRunning(taskName string, now time.Time) bool {
 		// daemon_intent.go), so degrade to "no recorded preference".
 		return true
 	}
+	// Codex deep-sec PR #135 Finding 1: normalize the lookup key so a
+	// caller that passed the bare form still hits the canonical leading-
+	// backslash entry that WriteDaemonIntent persists.
+	taskName = canonicalIntentTaskKey(taskName)
 	intent, ok, err := readDaemonIntentFn(taskName)
 	if err != nil || !ok {
 		// Read failure or no entry → no active stop directive.

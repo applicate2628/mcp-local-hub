@@ -250,6 +250,38 @@ type IntentReadResult struct {
 }
 
 // ---------------------------------------------------------------------------
+// Task-name normalization (Codex deep-sec PR #135 Finding 1).
+// ---------------------------------------------------------------------------
+
+// canonicalIntentTaskKey returns the canonical leading-backslash form of
+// taskName so every intent file write/read lands on a single key shape.
+//
+// Background: scheduler.List() and the watchdog driver's Status() rows
+// expose Windows Task Scheduler names with the leading "\" the OS persists
+// (e.g. "\mcp-local-hub-memory-default"). recovery.go indexes the intent
+// file via `intent.Tasks[row.TaskName]`, so any caller that wrote intent
+// under the bare form (e.g. install/uninstall paths that manifest-derive
+// their task names) used to slip past the lookup → the watchdog auto-revived
+// a daemon the operator had just stopped/uninstalled. Per the security
+// review, Option A normalizes at this single boundary instead of asking
+// every call site to remember.
+//
+// The contract is purely lexical: prepend "\" if missing. Names that
+// already have the leading backslash are returned unchanged. Empty input
+// is returned unchanged so the IdentityFieldByteCap rejection in
+// WriteDaemonIntent / ClearDaemonIntent fires on its own message rather
+// than being masked by an artificially synthesized name.
+func canonicalIntentTaskKey(taskName string) string {
+	if taskName == "" {
+		return taskName
+	}
+	if len(taskName) > 0 && taskName[0] == '\\' {
+		return taskName
+	}
+	return "\\" + taskName
+}
+
+// ---------------------------------------------------------------------------
 // IsActiveStop — pure predicate (plan §4).
 // ---------------------------------------------------------------------------
 
@@ -533,6 +565,16 @@ func (a *API) WriteDaemonIntent(taskName string, intent DaemonIntent, who string
 		return ErrEntryOversize
 	}
 
+	// Codex deep-sec PR #135 Finding 1: normalize the storage key to the
+	// canonical leading-backslash form BEFORE any persistence work so every
+	// intent record lands on the same key shape that recovery.go indexes
+	// (`intent.Tasks[row.TaskName]` where row.TaskName comes from Status()
+	// with the leading "\"). The cap check above ran on the caller-supplied
+	// name; the normalized key is at most one byte longer than that and we
+	// already capped at 1KB, so a 1-byte prefix cannot exceed any meaningful
+	// downstream limit.
+	taskName = canonicalIntentTaskKey(taskName)
+
 	dir, err := DaemonStateDir()
 	if err != nil {
 		return err
@@ -601,6 +643,11 @@ func (a *API) ClearDaemonIntent(taskName string, who string) error {
 	if len(who) > IdentityFieldByteCap {
 		return ErrEntryOversize
 	}
+
+	// Codex deep-sec PR #135 Finding 1: same normalization as WriteDaemonIntent
+	// so a clear-by-bare-form locates the canonical leading-backslash entry
+	// instead of leaving the canonical record untouched (silent no-op).
+	taskName = canonicalIntentTaskKey(taskName)
 
 	dir, err := DaemonStateDir()
 	if err != nil {

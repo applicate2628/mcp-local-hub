@@ -1511,6 +1511,9 @@ func clientConfigPath(name string) (string, error) {
 func (a *API) Stop(server, daemonFilter string) ([]RestartResult, error) {
 	taskNames, err := stopTaskNamesForServer(server, daemonFilter)
 	if err != nil {
+		// Codex deep-sec PR #135 Finding 3: same forensic-trail emission as
+		// StopWithOpts (no-force path).
+		recordStopFailedNoKill(server, false, err)
 		return nil, err
 	}
 	if err := a.recordStopIntent(taskNames, false); err != nil {
@@ -1616,9 +1619,10 @@ func (a *API) Restart(server, daemonFilter string) ([]RestartResult, error) {
 		}
 		// Task 10 plan §65: AFTER /Run success, record Desired=running
 		// intent + restart audit entry. Failures are logged + tolerated.
-		// Use the leading-backslash form to match the watchdog driver's
-		// canonical scheduler row TaskName (status_enrich.go normalizes
-		// the same way on lookup).
+		// We pass `normalized` (no leading backslash) — the canonical
+		// task-key normalization in WriteDaemonIntent (Codex deep-sec
+		// PR #135 Finding 1) prepends "\" before storage so the entry
+		// lands under the same key recovery.go indexes via row.TaskName.
 		a.recordRestartIntentForTask(normalized, nil)
 		results = append(results, RestartResult{TaskName: t.Name})
 	}
