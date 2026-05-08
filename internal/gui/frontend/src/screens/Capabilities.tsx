@@ -114,22 +114,48 @@ export function CapabilitiesScreen() {
   const rows = caps?.items ?? [];
   const generatedAt = caps?.generated_at ?? 0;
 
-  // Codex bot PR #144 rounds 4 + 6 P2: rows.length === 0 alone is
+  // Codex bot PR #144 rounds 4 + 6 + 7 P2: rows.length === 0 alone is
   // ambiguous. health.go::computeCapabilitiesSection skips `if !p.OK`
   // (including intentionally stopped / probe-disabled daemons —
   // legitimate empty rows, NOT failures) and accumulates true
   // per-daemon fetch errors into section.Errors with `continue`.
-  // The failure-empty branch must trigger ONLY on real backend
-  // errors (probes.errors / capabilities.errors / daemons.errors),
-  // NOT on `daemonCount > 0` alone — a system with all daemons
-  // stopped is healthy-but-empty, not a failure.
+  // PLUS — round 7 P2 — probe failures arrive as
+  // `probes.items[*].ok === false` with non-empty err message, NOT
+  // necessarily into `probes.errors[]`. Both shapes signal failures,
+  // so the classifier must check both.
   const daemonCount = state.data.daemons?.items.length ?? 0;
   const probeErrors = state.data.probes?.errors ?? [];
   const capabilityErrors = caps?.errors ?? [];
   const daemonErrors = state.data.daemons?.errors ?? [];
+  const failedProbes = state.data.probes?.items.filter((p) => !p.ok) ?? [];
   const hasFailures =
-    probeErrors.length > 0 || capabilityErrors.length > 0 || daemonErrors.length > 0;
+    probeErrors.length > 0 ||
+    capabilityErrors.length > 0 ||
+    daemonErrors.length > 0 ||
+    failedProbes.length > 0;
   const showFailureEmpty = rows.length === 0 && hasFailures;
+  // Codex bot PR #144 round 7 P2 (#2): section errors must render
+  // alongside successful cards too — partial failures (one daemon
+  // succeeds, another fails) would otherwise lose visibility.
+  // Extract the renderer + render OUTSIDE the empty-state branch.
+  const renderSectionErrors = () => (
+    <ul class="capabilities-section-errors" data-testid="capabilities-section-errors">
+      {daemonErrors.map((e, i) => (
+        <li key={`daemon-${i}`}><strong>{e.scope}</strong>: {e.err}</li>
+      ))}
+      {probeErrors.map((e, i) => (
+        <li key={`probe-${i}`}><strong>{e.scope}</strong>: {e.err}</li>
+      ))}
+      {capabilityErrors.map((e, i) => (
+        <li key={`capability-${i}`}><strong>{e.scope}</strong>: {e.err}</li>
+      ))}
+      {failedProbes.map((p) => (
+        <li key={`failedprobe-${p.server}-${p.daemon}`}>
+          <strong>probe:{p.server}/{p.daemon}</strong>: {p.err || "ok=false (no message)"}
+        </li>
+      ))}
+    </ul>
+  );
 
   return (
     <section class="capabilities-screen" data-testid="capabilities-screen">
@@ -156,6 +182,15 @@ export function CapabilitiesScreen() {
         )}
       </header>
 
+      {/* Section errors banner: render whenever any failures exist,
+          even if some cards rendered successfully (round 7 P2 #2). */}
+      {hasFailures && rows.length > 0 && (
+        <div class="capabilities-partial-failures" data-testid="capabilities-partial-failures">
+          <p class="error" role="alert">Some daemons reported probe or capability failures:</p>
+          {renderSectionErrors()}
+        </div>
+      )}
+
       {rows.length === 0 ? (
         showFailureEmpty ? (
           <div class="capabilities-empty" data-testid="capabilities-empty-failures">
@@ -164,19 +199,7 @@ export function CapabilitiesScreen() {
                 ? `probes or capability fetch failed for ${daemonCount} daemon${daemonCount === 1 ? "" : "s"}`
                 : "see backend errors below"}.
             </p>
-            {(probeErrors.length > 0 || capabilityErrors.length > 0 || daemonErrors.length > 0) && (
-              <ul class="capabilities-section-errors">
-                {daemonErrors.map((e, i) => (
-                  <li key={`daemon-${i}`}><strong>{e.scope}</strong>: {e.err}</li>
-                ))}
-                {probeErrors.map((e, i) => (
-                  <li key={`probe-${i}`}><strong>{e.scope}</strong>: {e.err}</li>
-                ))}
-                {capabilityErrors.map((e, i) => (
-                  <li key={`capability-${i}`}><strong>{e.scope}</strong>: {e.err}</li>
-                ))}
-              </ul>
-            )}
+            {renderSectionErrors()}
           </div>
         ) : (
           <p class="capabilities-empty" data-testid="capabilities-empty">

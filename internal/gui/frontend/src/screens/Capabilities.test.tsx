@@ -196,6 +196,91 @@ describe("CapabilitiesScreen — Phase 3 Refresh", () => {
     expect(queryByTestId("capabilities-empty")).toBeNull();
   });
 
+  it("failed probe.items[*].ok=false with empty probes.errors triggers failure-empty (codex bot PR #144 round 7 P2 #1)", async () => {
+    // Codex bot finding (round 7 #1): probe failures often arrive as
+    // `probes.items[*].ok === false` with non-empty err, NOT in
+    // `probes.errors[]`. computeCapabilitiesSection skips !p.OK,
+    // leaving capabilities.items=[]. Without checking failedProbes,
+    // the screen would misdiagnose this as "No capabilities found".
+    const failedProbeSnapshot: HealthSnapshot = {
+      ...emptySnapshot,
+      daemons: {
+        items: [
+          { server: "fs", daemon: "default", pid: 0, port: 0, ram_bytes: 0,
+            uptime_sec: 0, state: "running", restart_count: 0, last_restart_at: null },
+        ],
+        generated_at: 0, ttl_ms: 2000, errors: [],
+      },
+      probes: {
+        items: [
+          { server: "fs", daemon: "default", ok: false, tool_count: 0,
+            err: "initialize: HTTP 500", source: "" },
+        ],
+        generated_at: 0, ttl_ms: 10000, errors: [],
+      },
+      capabilities: { items: [], generated_at: 1715164800, ttl_ms: 60000, errors: [] },
+    };
+    vi.spyOn(api, "fetchOrThrow").mockResolvedValue(failedProbeSnapshot);
+
+    const { findByTestId, queryByTestId } = render(<CapabilitiesScreen />);
+    const failureEmpty = await findByTestId("capabilities-empty-failures");
+    expect(failureEmpty.textContent).toContain("Capabilities not yet available");
+    expect(failureEmpty.textContent).toContain("probe:fs/default");
+    expect(failureEmpty.textContent).toContain("initialize: HTTP 500");
+    // Negative: must NOT show the canonical "install servers" copy.
+    expect(queryByTestId("capabilities-empty")).toBeNull();
+  });
+
+  it("partial failures show section-errors banner alongside successful cards (codex bot PR #144 round 7 P2 #2)", async () => {
+    // Codex bot finding (round 7 #2): when one daemon succeeds and
+    // another fails, section.errors WERE only rendered inside the
+    // empty-state branch. Operators with partial failures lost
+    // visibility into the failed daemons. The partial-failures banner
+    // must render alongside successful cards.
+    const partialSnapshot: HealthSnapshot = {
+      ...emptySnapshot,
+      daemons: {
+        items: [
+          { server: "memory", daemon: "default", pid: 0, port: 0, ram_bytes: 0,
+            uptime_sec: 0, state: "running", restart_count: 0, last_restart_at: null },
+          { server: "fs", daemon: "default", pid: 0, port: 0, ram_bytes: 0,
+            uptime_sec: 0, state: "running", restart_count: 0, last_restart_at: null },
+        ],
+        generated_at: 0, ttl_ms: 2000, errors: [],
+      },
+      probes: {
+        items: [
+          { server: "memory", daemon: "default", ok: true, tool_count: 1, err: "", source: "" },
+        ],
+        generated_at: 0, ttl_ms: 10000, errors: [],
+      },
+      capabilities: {
+        items: [
+          { server: "memory", daemon: "default",
+            tools:     { state: "ok", items: [{ name: "alpha", id: "memory/default/tool/alpha", namespace: "memory", kind: "tool" }] },
+            prompts:   { state: "empty", items: [] },
+            resources: { state: "empty", items: [] } },
+        ],
+        generated_at: 1715164800, ttl_ms: 60000,
+        errors: [{ scope: "capability:fs/default", err: "tools/list: timeout" }],
+      },
+    };
+    vi.spyOn(api, "fetchOrThrow").mockResolvedValue(partialSnapshot);
+
+    const { findByTestId, queryByTestId } = render(<CapabilitiesScreen />);
+    // Successful card renders.
+    const card = await findByTestId("capability-card-memory-default");
+    expect(card).toBeTruthy();
+    // Partial-failures banner ALSO renders alongside.
+    const banner = await findByTestId("capabilities-partial-failures");
+    expect(banner.textContent).toContain("Some daemons reported probe or capability failures");
+    expect(banner.textContent).toContain("capability:fs/default");
+    expect(banner.textContent).toContain("tools/list: timeout");
+    // Empty-state branch must NOT render — there are cards.
+    expect(queryByTestId("capabilities-empty")).toBeNull();
+    expect(queryByTestId("capabilities-empty-failures")).toBeNull();
+  });
+
   it("daemons present but NO errors → canonical empty (not failure-empty) (codex bot PR #144 round 6 P2)", async () => {
     // Codex bot finding (round 6): daemons with probe.ok=false are
     // SKIPPED from capabilities.items by computeCapabilitiesSection
