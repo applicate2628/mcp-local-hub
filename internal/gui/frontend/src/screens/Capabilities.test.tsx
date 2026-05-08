@@ -286,3 +286,83 @@ describe("CapabilitiesScreen — Phase 5 collapsible + StateBadge", () => {
     expect(section.classList.contains("expanded")).toBe(false);
   });
 });
+
+describe("CapabilitiesScreen — Phase 6 item-list rendering + items-null", () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  it("renders item list when section is expanded (AC #4 / #5)", async () => {
+    const row: CapabilityRow = {
+      server: "memory", daemon: "default",
+      tools: { state: "ok", items: [
+        { name: "alpha", id: "memory/default/tool/alpha", namespace: "memory", kind: "tool" },
+        { name: "beta",  id: "memory/default/tool/beta",  namespace: "memory", kind: "tool" },
+      ] },
+      prompts:   { state: "empty", items: [] },
+      resources: { state: "empty", items: [] },
+    };
+    const probe: ProbeRow = { server: "memory", daemon: "default", ok: true, tool_count: 2, err: "", source: "" };
+    const snap: HealthSnapshot = {
+      ...emptySnapshot,
+      probes:       { ...emptySnapshot.probes!, items: [probe] },
+      capabilities: { items: [row], generated_at: 1715164800, ttl_ms: 60000, errors: [] },
+    };
+    vi.spyOn(api, "fetchOrThrow").mockResolvedValue(snap);
+
+    const { findByTestId } = render(<CapabilitiesScreen />);
+    const section = await findByTestId("capability-section-tools");
+
+    // Collapsed: list NOT visible.
+    expect(section.querySelector(".capability-item-list")).toBeNull();
+
+    // Expand.
+    fireEvent.click(section.querySelector(".capability-section-header") as HTMLElement);
+    const list = section.querySelector(".capability-item-list");
+    expect(list).not.toBeNull();
+    const items = list!.querySelectorAll(".capability-item");
+    expect(items.length).toBe(2);
+    expect(items[0].textContent).toContain("alpha");
+    expect(items[1].textContent).toContain("beta");
+
+    // Critical: NO actionable Run-tool affordances on items (AC #7).
+    // Codex stage-1 review finding #3: broaden the assertion beyond
+    // <button>. Reject buttons, anchors-with-href, role="button"
+    // descendants, and onclick handlers on every .capability-item node.
+    // Section toggles, Refresh, and legend controls live OUTSIDE
+    // .capability-item-list so they are not affected by this scoped
+    // assertion.
+    const itemNodes = list!.querySelectorAll(".capability-item");
+    for (const node of Array.from(itemNodes)) {
+      expect(node.querySelectorAll("button").length).toBe(0);
+      expect(node.querySelectorAll("a[href]").length).toBe(0);
+      expect(node.querySelectorAll('[role="button"]').length).toBe(0);
+      // The <li> itself must not be actionable either.
+      expect((node as HTMLElement).getAttribute("role")).not.toBe("button");
+      expect((node as HTMLElement).onclick).toBeNull();
+    }
+  });
+
+  it("items: null normalizes to empty list without crashing (AC #19)", async () => {
+    const row: CapabilityRow = {
+      server: "fs", daemon: "default",
+      tools:     { state: "unsupported", items: null },
+      prompts:   { state: "error", items: null, err: "tools/list: parse: unexpected EOF" },
+      resources: { state: "empty", items: [] },
+    };
+    const probe: ProbeRow = { server: "fs", daemon: "default", ok: true, tool_count: 0, err: "", source: "" };
+    const snap: HealthSnapshot = {
+      ...emptySnapshot,
+      probes:       { ...emptySnapshot.probes!, items: [probe] },
+      capabilities: { items: [row], generated_at: 1715164800, ttl_ms: 60000, errors: [] },
+    };
+    vi.spyOn(api, "fetchOrThrow").mockResolvedValue(snap);
+
+    const { findByTestId } = render(<CapabilitiesScreen />);
+    const tools = await findByTestId("capability-section-tools");
+    expect(tools.textContent).toContain("Tools (0)");
+    fireEvent.click(tools.querySelector(".capability-section-header") as HTMLElement);
+    expect(tools.textContent).toContain("(no items)");
+
+    const prompts = await findByTestId("capability-section-prompts");
+    expect(prompts.textContent).toContain("tools/list: parse: unexpected EOF");
+  });
+});

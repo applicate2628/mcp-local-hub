@@ -14,9 +14,12 @@ const labels: Record<Props["kind"], string> = {
 };
 
 // Collapsed-by-default section. Header click toggles the .expanded
-// class on the wrapper. Item-list rendering arrives in Phase 6.
+// class on the wrapper. When expanded, renders the item list (or a
+// "(no items)" placeholder for empty/unsupported/error subsections).
 export function CapabilitySection({ kind, sub }: Props) {
   const [expanded, setExpanded] = useState(false);
+  // AC #19 — items: CapabilityItem[] | null; normalize at the section
+  // boundary so the rest of the component never sees null.
   const items = sub.items ?? [];
   const count = items.length;
 
@@ -40,10 +43,25 @@ export function CapabilitySection({ kind, sub }: Props) {
         <span class="capability-section-label">{labels[kind]} ({count})</span>
         <StateBadge state={sub.state} />
       </header>
+
       {sub.err && (
         <p class="capability-section-err" role="alert">{sub.err}</p>
       )}
-      {/* Phase 6 inserts the item-list here when expanded */}
+
+      {expanded && (
+        <ul class="capability-item-list">
+          {count === 0 ? (
+            <li class="capability-item capability-item-empty">(no items)</li>
+          ) : (
+            items.map((item) => (
+              <li key={item.id} class="capability-item">
+                <span class="capability-item-name">{item.name}</span>
+                <span class="capability-item-id">{item.id}</span>
+              </li>
+            ))
+          )}
+        </ul>
+      )}
     </div>
   );
 }
