@@ -850,3 +850,27 @@ func TestDaemonStatusSnapshot_RecoversAfterBackendComesBack(t *testing.T) {
 		t.Errorf("post-recovery cache hit: expected 1 row, got %d", len(rows3))
 	}
 }
+
+func TestNormalizeDaemonState_EnrichedAndUnexpectedStates(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{in: "Running", want: "running"},
+		{in: "Starting", want: "starting"},
+		{in: "Ready", want: "stopped"},
+		{in: "Scheduled", want: "stopped"},
+		{in: "Stopped", want: "stopped"},
+		{in: "Failed", want: "failed"},
+		{in: "Disabled", want: "disabled"},
+		{in: "Queued", want: "queued"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			if got := normalizeDaemonState(tc.in); got != tc.want {
+				t.Fatalf("normalizeDaemonState(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}

@@ -880,14 +880,18 @@ func ensureCanonicalIDs(row CapabilityRow) CapabilityRow {
 // original Title-Case state vocabulary intact, no round-trip needed.
 func normalizeDaemonState(s string) string {
 	switch s {
-	case "Running", "Ready":
+	case "Running":
 		return "running"
+	case "Starting":
+		return "starting"
 	case "Failed":
 		return "failed"
-	case "Stopped":
+	case "Ready", "Scheduled", "Stopped":
 		return "stopped"
 	default:
-		return "starting"
+		// Keep unexpected states visible to health consumers rather than
+		// collapsing them into "starting".
+		return strings.ToLower(strings.TrimSpace(s))
 	}
 }
 
