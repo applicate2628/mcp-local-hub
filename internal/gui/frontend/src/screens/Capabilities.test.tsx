@@ -155,6 +155,32 @@ describe("CapabilitiesScreen — Phase 3 Refresh", () => {
     consoleSpy.mockRestore();
   });
 
+  it("error state still renders Refresh button so initial-load failure isn't a dead end (codex bot PR #144 round 2 P2)", async () => {
+    // Codex bot finding: when /api/health initial fetch fails, the
+    // error branch must not strip the Refresh affordance. Operators
+    // hitting a transient failure (daemon still starting, network
+    // hiccup) need to retry from the screen itself.
+    const okSnapshot: HealthSnapshot = { ...emptySnapshot,
+      capabilities: { items: [], generated_at: 1715164800, ttl_ms: 60000, errors: [] } };
+    vi.spyOn(api, "fetchOrThrow")
+      .mockRejectedValueOnce(new Error("daemon still starting"))
+      .mockResolvedValueOnce(okSnapshot);
+
+    const { findByRole, findByTestId } = render(<CapabilitiesScreen />);
+    // Initial render should land on the error branch.
+    const alert = await findByRole("alert");
+    expect(alert.textContent).toContain("daemon still starting");
+    // Refresh button MUST be present in error state (regression guard).
+    const button = await findByTestId("capabilities-refresh-btn");
+    expect(button).toBeTruthy();
+    // Click Refresh: fetch resolves, state flips to ok-empty.
+    fireEvent.click(button);
+    await Promise.resolve();
+    await Promise.resolve();
+    const empty = await findByTestId("capabilities-empty");
+    expect(empty).toBeTruthy();
+  });
+
   it("Refresh failure shows inline error without losing prior data", async () => {
     const okSnapshot: HealthSnapshot = { ...emptySnapshot,
       capabilities: { items: [], generated_at: 1715164800, ttl_ms: 60000, errors: [] } };

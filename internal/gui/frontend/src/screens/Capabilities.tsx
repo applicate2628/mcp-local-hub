@@ -70,9 +70,27 @@ export function CapabilitiesScreen() {
   }
 
   if (state.status === "error") {
+    // Codex bot PR #144 round-2 P2: error state must keep the Refresh
+    // affordance so transient failures (daemon still starting, brief
+    // network hiccup) aren't a dead end. Operator clicks Refresh →
+    // onRefresh fires `?refresh=true`; on success state transitions
+    // to ok and the full screen renders. The Refresh button is the
+    // SAME control as in the ok-state header — single recovery path.
     return (
       <section class="capabilities-screen" data-testid="capabilities-screen">
-        <h1>Capabilities</h1>
+        <header class="capabilities-header">
+          <h1>Capabilities</h1>
+          <div class="capabilities-meta">
+            <button
+              class="capabilities-refresh-btn"
+              data-testid="capabilities-refresh-btn"
+              onClick={onRefresh}
+              disabled={refreshing}
+            >
+              {refreshing ? "Refreshing…" : "Refresh"}
+            </button>
+          </div>
+        </header>
         <p class="error" role="alert">Failed to load capabilities: {state.error}</p>
       </section>
     );
