@@ -47,6 +47,14 @@ import (
 	"github.com/gofrs/flock"
 )
 
+// normalizeIntentTaskName canonicalizes task identity keys used by the
+// daemon-intent map so Windows scheduler names with a leading backslash
+// ("\\mcp-local-hub-...") and manifest-derived names without it
+// ("mcp-local-hub-...") resolve to the same entry.
+func normalizeIntentTaskName(taskName string) string {
+	return strings.TrimPrefix(taskName, "\\")
+}
+
 // ---------------------------------------------------------------------------
 // File layout constants.
 // ---------------------------------------------------------------------------
@@ -867,6 +875,7 @@ func logQuarantine(event, path string, err error) {
 // instance for the purposes of this read.
 func init() {
 	readDaemonIntentFn = func(taskName string) (DaemonIntent, bool, error) {
+		taskName = normalizeIntentTaskName(taskName)
 		api := NewAPI()
 		res := api.ReadDaemonIntent()
 		if res.Err != nil && res.State != IntentStateCorrupt {
@@ -876,6 +885,9 @@ func init() {
 			return DaemonIntent{}, false, res.Err
 		}
 		intent, ok := res.File.Tasks[taskName]
+		if !ok {
+			intent, ok = res.File.Tasks[normalizeIntentTaskName(taskName)]
+		}
 		if !ok {
 			return DaemonIntent{}, false, nil
 		}

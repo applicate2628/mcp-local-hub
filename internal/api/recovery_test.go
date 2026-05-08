@@ -452,6 +452,36 @@ func TestRecoverStoppedDaemons_UserStop_WithinTTL(t *testing.T) {
 	expectAction(t, decs, taskName, "user-stop", "user-stop")
 }
 
+func TestRecoverStoppedDaemons_UserStop_WithinTTL_BackslashMismatchStillStops(t *testing.T) {
+	now := time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)
+	row := DaemonStatus{
+		TaskName: "\\mcp-local-hub-time-default",
+		Server:   "time",
+		Daemon:   "default",
+		State:    "Stopped",
+		// real failure
+		LastResult: 1,
+	}
+	rows := []DaemonStatus{row}
+	reg := newFakeRegistryAllManaged()
+	cool := &fakeCoolReader{
+		dueDefault: true,
+	}
+	v := newFakeXMLValidatorPass()
+
+	intent := DaemonIntentFile{
+		Tasks: map[string]DaemonIntent{
+			"mcp-local-hub-time-default": {
+				Desired:   IntentDesiredStopped,
+				Reason:    IntentReasonUserStop,
+				UpdatedAt: now.Add(-1 * time.Hour),
+			},
+		},
+	}
+	decs := RecoverStoppedDaemons(now, rows, intent, cool, v, reg)
+	expectAction(t, decs, row.TaskName, "user-stop", "user-stop")
+}
+
 func TestRecoverStoppedDaemons_UserStop_AfterTTL_Restart(t *testing.T) {
 	now := time.Date(2026, 5, 7, 12, 0, 0, 0, time.UTC)
 	taskName := "\\mcp-local-hub-memory-default"

@@ -295,7 +295,10 @@ func RecoverStoppedDaemons(
 		//    reason verbatim (user-stop / user-disabled / chronic-
 		//    failure / uninstalled / clock-skew-future-suspect) so
 		//    the decision carries forensic context.
-		entry := intent.Tasks[row.TaskName]
+		entry, ok := intent.Tasks[row.TaskName]
+		if !ok {
+			entry = intent.Tasks[normalizeIntentTaskName(row.TaskName)]
+		}
 		if active, reason := entry.IsActiveStop(now); active {
 			out = append(out, RecoveryDecision{
 				TaskName: row.TaskName,
