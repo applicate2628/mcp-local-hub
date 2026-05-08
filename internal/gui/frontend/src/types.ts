@@ -122,3 +122,107 @@ export interface GetManifestResponse {
   yaml: string;
   hash: string;
 }
+
+// G3 — wire types mirroring internal/api/health.go HealthSnapshot.
+// Field names and JSON tags match the Go side; keep in sync if the
+// backend type evolves. Items[] may be null for unsupported/error/
+// synthetic-empty subsections (Go has no `omitempty`); frontend MUST
+// normalize via `sub.items ?? []` at the screen boundary.
+
+export interface HealthSnapshot {
+  schema_version: string;
+  hub: HubSection;
+  daemons: DaemonsSection;
+  probes?: ProbesSection;
+  capabilities?: CapabilitiesSection;
+}
+
+export interface HubSection {
+  // health.go:43-49 — JSON tags exact mirror.
+  version: string;
+  commit: string;
+  build_date: string;
+  // health.go:45 StartedAt is `string` (RFC3339-ish), not unix seconds.
+  started_at: string;
+  // health.go:46 Lock is required (`json:"lock"` no omitempty).
+  lock: { pid: number; port: number };
+  generated_at: number;
+  // health.go:48 TTLMs is `*int64` — nullable.
+  ttl_ms: number | null;
+}
+
+export interface DaemonsSection {
+  items: DaemonRow[];
+  generated_at: number;
+  // health.go:60 TTLMs is `int64` (NOT nullable for daemons section).
+  ttl_ms: number;
+  errors: SectionError[];
+}
+
+export interface DaemonRow {
+  server: string;
+  daemon: string;
+  // health.go:72 Backend is `omitempty` — optional on the wire.
+  backend?: string;
+  pid: number;
+  port: number;
+  ram_bytes: number;
+  uptime_sec: number;
+  state: string;
+  restart_count: number;
+  // health.go:79 LastRestartAt is `*string` (RFC3339-ish or null).
+  last_restart_at: string | null;
+}
+
+export interface ProbesSection {
+  items: ProbeRow[];
+  generated_at: number;
+  // health.go:85 TTLMs is `int64` (NOT nullable for probes section).
+  ttl_ms: number;
+  errors: SectionError[];
+}
+
+export interface ProbeRow {
+  server: string;
+  daemon: string;
+  ok: boolean;
+  tool_count: number;
+  // health.go:94 Err is required `string` (always emitted, "" when no err).
+  err: string;
+  // health.go:95 Source is required `string` (always emitted, "" or "proxy-synthetic").
+  source: "" | "proxy-synthetic";
+}
+
+export interface CapabilitiesSection {
+  items: CapabilityRow[];
+  generated_at: number;
+  ttl_ms: number;
+  errors: SectionError[];
+}
+
+export interface CapabilityRow {
+  server: string;
+  daemon: string;
+  tools: CapabilitySubSection;
+  prompts: CapabilitySubSection;
+  resources: CapabilitySubSection;
+}
+
+export interface CapabilitySubSection {
+  state: "ok" | "empty" | "unsupported" | "error" | "stale";
+  // null on unsupported/error/synthetic-empty paths — see types.ts header note.
+  items: CapabilityItem[] | null;
+  err?: string;
+}
+
+export interface CapabilityItem {
+  name: string;
+  id: string;        // canonical "server/daemon/kind/name"
+  namespace: string; // == server name
+  kind: "tool" | "prompt" | "resource";
+}
+
+export interface SectionError {
+  scope: string;
+  err: string;
+}

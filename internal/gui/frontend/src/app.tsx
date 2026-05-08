@@ -44,7 +44,7 @@ const DEFAULT_SCREEN_CACHE_KEY = "mcphub.appearance.default_screen";
 // the switch fall-through.
 const VALID_DEFAULT_SCREENS = new Set([
   "dashboard", "servers", "migration", "add-server",
-  "secrets", "logs", "settings", "about",
+  "secrets", "logs", "capabilities", "settings", "about",
 ]);
 
 function readCachedDefaultScreen(): string {
@@ -77,6 +77,7 @@ if (typeof document !== "undefined") {
 }
 import { AboutScreen } from "./screens/About";
 import { AddServerScreen } from "./screens/AddServer";
+import { CapabilitiesScreen } from "./screens/Capabilities";
 import { DashboardScreen } from "./screens/Dashboard";
 import { LogsScreen } from "./screens/Logs";
 import { MigrationScreen } from "./screens/Migration";
@@ -258,6 +259,9 @@ export function App() {
     case "logs":
       body = <LogsScreen />;
       break;
+    case "capabilities":
+      body = <CapabilitiesScreen />;
+      break;
     case "settings":
       // `key={discardKey}` forces a full remount on confirmed discard so
       // every section's local draft state resets cleanly (Codex r2 P1).
@@ -281,6 +285,7 @@ export function App() {
       <a href="#/secrets"    class={route.screen === "secrets"    ? "active" : ""} onClick={guardClick("secrets")}>Secrets</a>
       <a href="#/dashboard"  class={route.screen === "dashboard"  ? "active" : ""} onClick={guardClick("dashboard")}>Dashboard</a>
       <a href="#/logs"       class={route.screen === "logs"       ? "active" : ""} onClick={guardClick("logs")}>Logs</a>
+      <a href="#/capabilities" class={route.screen === "capabilities" ? "active" : ""} onClick={guardClick("capabilities")}>Capabilities</a>
       <a href="#/settings"   class={route.screen === "settings"   ? "active" : ""} onClick={guardClick("settings")}>Settings</a>
       <a href="#/about"      class={route.screen === "about"      ? "active" : ""} onClick={guardClick("about")}>About</a>
     </nav>
