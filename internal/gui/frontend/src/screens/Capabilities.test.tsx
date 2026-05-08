@@ -234,3 +234,55 @@ describe("CapabilitiesScreen — Phase 4 CapabilityCard", () => {
     expect(card.textContent).toContain("initialize: HTTP 500");
   });
 });
+
+describe("CapabilitiesScreen — Phase 5 collapsible + StateBadge", () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  function renderWithRow(row: CapabilityRow) {
+    const probe: ProbeRow = { server: row.server, daemon: row.daemon, ok: true, tool_count: 0, err: "", source: "" };
+    const snap: HealthSnapshot = {
+      ...emptySnapshot,
+      probes:       { ...emptySnapshot.probes!, items: [probe] },
+      capabilities: { items: [row], generated_at: 1715164800, ttl_ms: 60000, errors: [] },
+    };
+    vi.spyOn(api, "fetchOrThrow").mockResolvedValue(snap);
+    return render(<CapabilitiesScreen />);
+  }
+
+  it("StateBadge renders the correct state class for each vocabulary value", async () => {
+    for (const state of ["ok", "empty", "unsupported", "error", "stale"] as const) {
+      const row: CapabilityRow = {
+        server: "s", daemon: "d",
+        tools:     { state, items: state === "ok" ? [] : null },
+        prompts:   { state: "empty", items: [] },
+        resources: { state: "empty", items: [] },
+      };
+      const { findByTestId, unmount } = renderWithRow(row);
+      const section = await findByTestId("capability-section-tools");
+      const badge = section.querySelector(".state-badge");
+      expect(badge).not.toBeNull();
+      expect(badge!.classList.contains(`state-badge-${state}`)).toBe(true);
+      unmount();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("clicking a section header toggles the .expanded class", async () => {
+    const row: CapabilityRow = {
+      server: "s", daemon: "d",
+      tools:     { state: "ok", items: [{ name: "x", id: "s/d/tool/x", namespace: "s", kind: "tool" }] },
+      prompts:   { state: "empty", items: [] },
+      resources: { state: "empty", items: [] },
+    };
+    const { findByTestId } = renderWithRow(row);
+    const section = await findByTestId("capability-section-tools");
+    expect(section.classList.contains("expanded")).toBe(false);
+
+    const header = section.querySelector(".capability-section-header") as HTMLElement;
+    fireEvent.click(header);
+    expect(section.classList.contains("expanded")).toBe(true);
+
+    fireEvent.click(header);
+    expect(section.classList.contains("expanded")).toBe(false);
+  });
+});

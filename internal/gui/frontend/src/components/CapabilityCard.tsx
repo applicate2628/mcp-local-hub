@@ -1,19 +1,15 @@
 import type { CapabilityRow, ProbeRow } from "../types";
+import { CapabilitySection } from "./CapabilitySection";
 
 interface Props {
   row: CapabilityRow;
   probe: ProbeRow | null;
 }
 
-// Per-server card. Header shows server + daemon + probe-status pill.
-// Body has 3 collapsible section placeholders (Phase 5 adds the
-// CapabilitySection collapsible mechanic; Phase 4 just shows counts).
 export function CapabilityCard({ row, probe }: Props) {
   const testId = `capability-card-${row.server}-${row.daemon}`;
   const probeOk = probe?.ok ?? true;
   const probeErr = probe?.err ?? "";
-
-  const itemCount = (items: { items: unknown[] | null }) => (items.items?.length ?? 0);
 
   return (
     <article class="capability-card" data-testid={testId}>
@@ -29,21 +25,9 @@ export function CapabilityCard({ row, probe }: Props) {
       </header>
 
       <div class="capability-card-body">
-        <div class="capability-section" data-testid="capability-section-tools">
-          <header class="capability-section-header">
-            Tools ({itemCount(row.tools)})
-          </header>
-        </div>
-        <div class="capability-section" data-testid="capability-section-prompts">
-          <header class="capability-section-header">
-            Prompts ({itemCount(row.prompts)})
-          </header>
-        </div>
-        <div class="capability-section" data-testid="capability-section-resources">
-          <header class="capability-section-header">
-            Resources ({itemCount(row.resources)})
-          </header>
-        </div>
+        <CapabilitySection kind="tools" sub={row.tools} />
+        <CapabilitySection kind="prompts" sub={row.prompts} />
+        <CapabilitySection kind="resources" sub={row.resources} />
       </div>
     </article>
   );
