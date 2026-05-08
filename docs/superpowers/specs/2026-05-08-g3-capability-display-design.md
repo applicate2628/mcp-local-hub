@@ -62,7 +62,12 @@ export interface CapabilityRow {
 
 export interface CapabilitySubSection {
   state: "ok" | "empty" | "unsupported" | "error" | "stale";
-  items: CapabilityItem[];
+  // Go backend may emit null for unsupported/error/synthetic-empty paths
+  // (Items has no `omitempty` but several Go branches return nil — see
+  // health.go:666 no-port errors, health.go:746 method-not-found,
+  // health.go:835 synthetic prompts/resources). Frontend MUST normalize
+  // via `sub.items ?? []` at the screen boundary; never assume always-array.
+  items: CapabilityItem[] | null;
   err?: string;
 }
 
@@ -174,9 +179,11 @@ BEM-ish, consistent with existing screens:
 
 ### Refresh button semantics
 
-Click → `fetchOrThrow<HealthSnapshot>("/api/health?include=capabilities&refresh=true", "object")`. While inflight: button text "Refreshing…", button disabled. Success: state replaced. Error: existing data retained, inline error shows `<p class="error">Refresh failed: <msg></p>` next to the button (clears on next successful fetch).
+Click → `fetchOrThrow<HealthSnapshot>("/api/health?include=capabilities&refresh=true", "object")`. While inflight: button text "Refreshing…", button disabled (prevents click-spam and keyboard re-trigger). Success: state replaced. Error: existing data retained, inline error shows `<p class="error">Refresh failed: <msg></p>` next to the button (clears on next successful fetch).
 
-The button acknowledges the backend's 30s refresh-rate-limit by showing a friendly error text "Backend rate-limited — try again in <N>s" if the response payload includes `errors` array entries with `scope: "capabilities"` indicating the rate-limit hit (TBD: confirm backend response shape on rate-limit during plan stage; if backend returns 200 with stale data + section error, we surface that inline; if backend returns 429, fetchOrThrow's existing error path handles it).
+**Rate-limit handling (resolved per codex stage-0 review):** the backend silently downgrades a refresh to cached data when the 30s rate-limit is active — it returns HTTP 200 with the existing cached snapshot, **no `SectionError`, no 429** ([api/health.go:556 capabilities rate-limit path](../../../internal/api/health.go), confirmed during stage-0 review). The frontend treats this transparently — operator clicking Refresh during the rate-limit window sees the cached data refreshed in the screen header (the `generated_at` may be unchanged), no error or banner. No backend changes needed. If the operator wants to know whether the data is fresh, they can read `generated_at`.
+
+**Mid-fetch unmount race:** the fetch effect uses the existing `let cancelled = false;` pattern (mirrors `Dashboard.tsx:41-63` and `About.tsx:28-40`). On unmount, `cancelled = true` prevents the resolved promise from calling `setState`. AbortController not used (existing screens don't use it; pattern stays consistent).
 
 ### Synthetic-source disclosure
 
@@ -224,6 +231,10 @@ New file `internal/gui/frontend/src/screens/Capabilities.test.tsx`:
 5. OK state with `tools.state="error" + err="..."` → red badge + err message visible BEFORE expansion.
 6. Refresh button click triggers a second fetch with `refresh=true`.
 7. Synthetic-source pill renders when `probe.source === "proxy-synthetic"`.
+8. **(codex stage-0 AC #17)** Refresh button has `disabled` attribute while fetch is inflight; cleared after resolve/reject.
+9. **(codex stage-0 AC #18)** Mid-fetch unmount: mount → click Refresh → unmount BEFORE promise resolves → assert no React `setState-after-unmount` warning. The component uses the `let cancelled = false;` pattern; the fixture controls promise resolution timing via a deferred wrapper.
+10. **(codex stage-0 AC #19)** `items: null` normalization: fixture with `tools.state="unsupported"` + `items: null` → card renders, "Tools (0)" header visible, click does NOT crash; expanded body says "no items".
+11. **(codex stage-0 AC #20)** `state: "stale"` badge: fixture with `tools.state="stale"` → orange badge renders. Note: backend does not currently emit this state; this is a forward-compat fixture-only test (NOT exercised in E2E).
 
 ## Out of scope
 
@@ -264,6 +275,10 @@ New file `internal/gui/frontend/src/screens/Capabilities.test.tsx`:
 14. New `Capabilities.test.tsx` covers loading / error / ok / refresh / state-badge / synthetic-pill paths.
 15. `go build ./...`, `go vet ./...`, `cd internal/gui/frontend && npm run build`, `npm test` all pass.
 16. `go generate ./internal/gui/...` regenerates the embedded bundle; no stale assets in the diff.
+17. **Refresh button is `disabled` while a fetch is inflight** (codex stage-0 review). Unit test asserts the button has `disabled` attribute set during the inflight window and cleared on success/failure.
+18. **Mid-fetch unmount does not call setState** (codex stage-0 review). Unit test mounts, triggers fetch, unmounts BEFORE the promise resolves, asserts no warning + no state-mutation-after-unmount React warning.
+19. **`items: null` from the wire normalizes to empty list** (codex stage-0 review MAJOR #1): unit fixture for `unsupported` and `error` subsections with `items: null` does NOT crash; the screen renders the section with count 0 and (for `error`) the err message visible.
+20. **`state: "stale"` badge renders correctly from a unit fixture only** (codex stage-0 review INFO #4 — backend doesn't currently emit this state; the UI is forward-compatible).
 
 ## Effort estimate
 
