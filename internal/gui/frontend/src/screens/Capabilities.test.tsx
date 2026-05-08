@@ -1,4 +1,4 @@
-import { render, cleanup } from "@testing-library/preact";
+import { render, cleanup, fireEvent } from "@testing-library/preact";
 import { describe, it, expect, afterEach, vi, beforeEach } from "vitest";
 import { CapabilitiesScreen } from "./Capabilities";
 import * as api from "../api";
@@ -68,5 +68,117 @@ describe("CapabilitiesScreen — Phase 2 LoadState", () => {
     render(<CapabilitiesScreen />);
     expect(spy).toHaveBeenCalledTimes(1);
     expect(spy).toHaveBeenCalledWith("/api/health?include=capabilities", "object");
+  });
+});
+
+describe("CapabilitiesScreen — Phase 3 Refresh", () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  it("Refresh button click triggers a second fetch with refresh=true", async () => {
+    const spy = vi.spyOn(api, "fetchOrThrow").mockResolvedValue(emptySnapshot);
+    const { findByTestId } = render(<CapabilitiesScreen />);
+    const button = await findByTestId("capabilities-refresh-btn");
+    fireEvent.click(button);
+    // Wait one microtask so the click handler's fetch fires.
+    await Promise.resolve();
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(spy).toHaveBeenLastCalledWith("/api/health?include=capabilities&refresh=true", "object");
+  });
+
+  it("Refresh button is disabled while a fetch is inflight (AC #17)", async () => {
+    let resolveFn!: (value: HealthSnapshot) => void;
+    const deferred = new Promise<HealthSnapshot>((resolve) => { resolveFn = resolve; });
+    const spy = vi.spyOn(api, "fetchOrThrow")
+      .mockResolvedValueOnce(emptySnapshot)   // initial mount fetch resolves
+      .mockReturnValueOnce(deferred);         // refresh stays pending
+
+    const { findByTestId } = render(<CapabilitiesScreen />);
+    const button = await findByTestId("capabilities-refresh-btn");
+
+    expect(button.hasAttribute("disabled")).toBe(false);  // idle initially
+    fireEvent.click(button);
+    await Promise.resolve();
+    expect(button.hasAttribute("disabled")).toBe(true);   // disabled while inflight
+    expect(button.textContent).toContain("Refreshing");
+
+    resolveFn(emptySnapshot);
+    await deferred;
+    await Promise.resolve();
+    expect(button.hasAttribute("disabled")).toBe(false);  // re-enabled after resolve
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it("mid-REFRESH-fetch unmount does NOT call setState (AC #18, codex stage-1 BLOCKER fix)", async () => {
+    // Codex stage-1 review finding #1: AC #18 wants the REFRESH path
+    // tested, not the initial mount fetch. The mountedRef guard added
+    // to onRefresh below must prevent setRefreshing(false) /
+    // setRefreshError() / setState({status:"ok"}) from firing on a
+    // stale instance. Pattern: render → wait for OK state → click
+    // Refresh (deferred fetch) → unmount BEFORE refresh resolves →
+    // resolve the refresh → assert no console.error.
+    let resolveRefresh!: (value: HealthSnapshot) => void;
+    const refreshDeferred = new Promise<HealthSnapshot>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    vi.spyOn(api, "fetchOrThrow")
+      .mockResolvedValueOnce(emptySnapshot)   // initial mount fetch resolves
+      .mockReturnValueOnce(refreshDeferred);  // refresh stays pending
+
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { findByTestId, unmount } = render(<CapabilitiesScreen />);
+    const button = await findByTestId("capabilities-refresh-btn");
+    fireEvent.click(button);
+    await Promise.resolve();          // refresh fetch fires
+    unmount();                        // unmount BEFORE refresh resolves
+    resolveRefresh(emptySnapshot);
+    await refreshDeferred;
+    await Promise.resolve();
+    expect(consoleSpy).not.toHaveBeenCalled();
+    consoleSpy.mockRestore();
+  });
+
+  it("mid-MOUNT-fetch unmount does NOT call setState (companion guard)", async () => {
+    // Companion test for the initial-mount cancelled-flag pattern.
+    // The original AC #18 plan tested only this path; codex stage-1
+    // requires both this AND the refresh-path test above.
+    let resolveFn!: (value: HealthSnapshot) => void;
+    const deferred = new Promise<HealthSnapshot>((resolve) => { resolveFn = resolve; });
+    vi.spyOn(api, "fetchOrThrow").mockReturnValue(deferred);
+
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { unmount } = render(<CapabilitiesScreen />);
+    unmount();
+    resolveFn(emptySnapshot);
+    await deferred;
+    await Promise.resolve();
+    expect(consoleSpy).not.toHaveBeenCalled();
+    consoleSpy.mockRestore();
+  });
+
+  it("Refresh failure shows inline error without losing prior data", async () => {
+    const okSnapshot: HealthSnapshot = { ...emptySnapshot,
+      capabilities: { items: [], generated_at: 1715164800, ttl_ms: 60000, errors: [] } };
+    vi.spyOn(api, "fetchOrThrow")
+      .mockResolvedValueOnce(okSnapshot)
+      .mockRejectedValueOnce(new Error("rate limited"));
+
+    const { findByTestId, queryByRole } = render(<CapabilitiesScreen />);
+    await findByTestId("capabilities-empty");  // initial OK render
+    const button = await findByTestId("capabilities-refresh-btn");
+    fireEvent.click(button);
+    await Promise.resolve();
+    await Promise.resolve();
+    // Third microtask hop: pre-rejected promise → .then → .catch → setStates
+    // → Preact's debounceRendering (Promise.resolve().then) → DOM commit. The
+    // catch path adds one extra microtask vs. the resolve path because the
+    // rejection has to traverse .then before reaching .catch.
+    await Promise.resolve();
+
+    const alert = queryByRole("alert");
+    expect(alert).not.toBeNull();
+    expect(alert!.textContent).toContain("rate limited");
+    // Prior empty-state still visible (we did not blank the screen).
+    const stillEmpty = await findByTestId("capabilities-empty");
+    expect(stillEmpty).toBeTruthy();
   });
 });

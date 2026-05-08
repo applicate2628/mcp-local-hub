@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState, useCallback } from "preact/hooks";
 import { fetchOrThrow } from "../api";
 import type { HealthSnapshot } from "../types";
 
@@ -12,7 +12,23 @@ type LoadState =
 
 export function CapabilitiesScreen() {
   const [state, setState] = useState<LoadState>({ status: "loading" });
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
 
+  // Codex stage-1 BLOCKER fix: mountedRef gates ALL setState in the
+  // event-handler-driven refresh path. The mount effect's local
+  // cancelled-flag covers only the initial fetch — refreshes fired
+  // from a click handler need their own mounted check, otherwise
+  // setState fires on a stale instance after unmount.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // On-mount fetch. cancelled-flag prevents setState after unmount
+  // (mirrors Dashboard.tsx:41-63 / About.tsx:28-40 — pattern preserved).
   useEffect(() => {
     let cancelled = false;
     fetchOrThrow<HealthSnapshot>("/api/health?include=capabilities", "object")
@@ -22,10 +38,25 @@ export function CapabilitiesScreen() {
       .catch((err: Error) => {
         if (!cancelled) setState({ status: "error", error: err.message });
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
+
+  const onRefresh = useCallback(() => {
+    if (refreshing) return;  // belt + suspenders for the disabled button
+    setRefreshing(true);
+    setRefreshError(null);
+    fetchOrThrow<HealthSnapshot>("/api/health?include=capabilities&refresh=true", "object")
+      .then((data) => {
+        if (!mountedRef.current) return;
+        setState({ status: "ok", data });
+        setRefreshing(false);
+      })
+      .catch((err: Error) => {
+        if (!mountedRef.current) return;
+        setRefreshError(err.message);
+        setRefreshing(false);
+      });
+  }, [refreshing]);
 
   if (state.status === "loading") {
     return (
@@ -47,22 +78,39 @@ export function CapabilitiesScreen() {
 
   const caps = state.data.capabilities;
   const rows = caps?.items ?? [];
-
-  if (rows.length === 0) {
-    return (
-      <section class="capabilities-screen" data-testid="capabilities-screen">
-        <h1>Capabilities</h1>
-        <p class="capabilities-empty" data-testid="capabilities-empty">
-          No capabilities found — install servers via the Add server screen.
-        </p>
-      </section>
-    );
-  }
+  const generatedAt = caps?.generated_at ?? 0;
 
   return (
     <section class="capabilities-screen" data-testid="capabilities-screen">
-      <h1>Capabilities</h1>
-      <p class="capabilities-empty">{/* placeholder — Phase 4 replaces with cards */}</p>
+      <header class="capabilities-header">
+        <h1>Capabilities</h1>
+        <div class="capabilities-meta">
+          {generatedAt > 0 && (
+            <span data-testid="capabilities-generated-at">
+              Generated {new Date(generatedAt * 1000).toISOString()}
+            </span>
+          )}
+          <button
+            class="capabilities-refresh-btn"
+            data-testid="capabilities-refresh-btn"
+            onClick={onRefresh}
+            disabled={refreshing}
+          >
+            {refreshing ? "Refreshing…" : "Refresh"}
+          </button>
+        </div>
+        {refreshError && (
+          <p class="error" role="alert">Refresh failed: {refreshError}</p>
+        )}
+      </header>
+
+      {rows.length === 0 ? (
+        <p class="capabilities-empty" data-testid="capabilities-empty">
+          No capabilities found — install servers via the Add server screen.
+        </p>
+      ) : (
+        <p>{/* placeholder — Phase 4 adds CapabilityCard list */}</p>
+      )}
     </section>
   );
 }
