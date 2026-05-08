@@ -85,27 +85,50 @@ type OrphanProcess struct {
 // Behavior:
 //   - Quoted form: `"C:\path with spaces\foo.exe" arg1 arg2` → `foo.exe`
 //   - Unquoted form: `C:\path\foo.exe arg1 arg2` → `foo.exe`
+//   - **Windows path with embedded space, quotes stripped by WMIC**:
+//     `C:\Program Files\nodejs\node.exe -y @modelcontextprotocol/server-memory`
+//     → `node.exe`. WMIC's `splitCSVLine` strips the surrounding quotes
+//     from CommandLine fields, so the unquoted-but-spaces-in-path case is
+//     common on real Windows installations under `Program Files`. Codex
+//     bot PR #143 round 1 P2 caught this — without the executable-extension
+//     lookup below the function used to return `Program`, misidentifying
+//     orphan rows.
 //   - POSIX path: `/usr/local/bin/uvx mcp-server-time` → `uvx`
 //   - Empty / whitespace-only: `<unknown>`
 //
 // The parsing matches the canonical pattern in isOurOwnProcess: an opening
-// quote selects the quoted token; otherwise the first space ends the
-// executable token. filepath.Base then strips the directory prefix.
+// quote selects the quoted token; otherwise we look for the first
+// recognized Windows executable extension followed by a space or end of
+// string (handles paths-with-spaces); finally we fall back to splitting
+// at the first whitespace (POSIX with no extension marker).
 func redactCmdlineForDisplay(cmdline string) string {
 	c := strings.TrimSpace(cmdline)
 	if c == "" {
 		return "<unknown>"
 	}
 	first := c
-	if c[0] == '"' {
+	switch {
+	case c[0] == '"':
 		if end := strings.IndexByte(c[1:], '"'); end > 0 {
 			first = c[1 : 1+end]
 		} else {
 			// Unterminated quote → treat the rest as the path token.
 			first = c[1:]
 		}
-	} else if sp := strings.IndexAny(c, " \t"); sp > 0 {
-		first = c[:sp]
+	default:
+		// Try Windows executable-extension boundary first so paths with
+		// embedded spaces (e.g. `C:\Program Files\foo.exe arg`) split on
+		// the executable instead of on the first space. The lookup is
+		// case-insensitive (real cmdlines see both `.exe` and `.EXE`).
+		// We bound the search to the first whitespace's position so an
+		// extension-shaped substring inside an argument cannot win over
+		// an earlier first-space split. If no extension is found, fall
+		// back to first-whitespace splitting (POSIX path or unusual case).
+		if extEnd := findWindowsExeExtensionEnd(c); extEnd > 0 {
+			first = c[:extEnd]
+		} else if sp := strings.IndexAny(c, " \t"); sp > 0 {
+			first = c[:sp]
+		}
 	}
 	first = strings.TrimSpace(first)
 	if first == "" {
@@ -122,6 +145,56 @@ func redactCmdlineForDisplay(cmdline string) string {
 		return "<unknown>"
 	}
 	return first
+}
+
+// windowsExeExtensions enumerates the recognized Windows executable
+// suffixes. Listed shortest-first so the loop terminates on the first
+// match without overrunning into a longer suffix that happens to share
+// a prefix. Case-insensitive comparison is performed by the caller.
+var windowsExeExtensions = []string{".exe", ".com", ".cmd", ".bat", ".ps1"}
+
+// findWindowsExeExtensionEnd returns the byte index immediately AFTER the
+// first occurrence of a known Windows executable extension that is followed
+// by either whitespace or end-of-string, or -1 if no such boundary exists.
+// The lookup is case-insensitive: `.exe`, `.EXE`, `.Exe` all match.
+//
+// The function exists to handle WMIC-stripped quoted Windows paths where
+// the quotes vanish but the path still contains an embedded space (the
+// most common case is `C:\Program Files\...`). Splitting at the first
+// space would put the boundary inside the path; splitting at the first
+// `.exe<space>` keeps the executable intact.
+//
+// Codex bot PR #143 round 1 P2: prior implementation truncated
+// `C:\Program Files\nodejs\node.exe -y server-memory` to `C:\Program`
+// because the first space won. This helper finds `.exe ` and returns
+// the index after the extension instead.
+func findWindowsExeExtensionEnd(s string) int {
+	lower := strings.ToLower(s)
+	bestIdx := -1
+	for _, ext := range windowsExeExtensions {
+		// Walk every occurrence; pick the first one that is followed by
+		// whitespace or end-of-string. Short-circuit at the earliest hit
+		// so an extension inside a later argument cannot overshadow the
+		// path's actual executable.
+		searchFrom := 0
+		for searchFrom < len(lower) {
+			idx := strings.Index(lower[searchFrom:], ext)
+			if idx < 0 {
+				break
+			}
+			abs := searchFrom + idx
+			end := abs + len(ext)
+			// Boundary check: end-of-string OR next char is whitespace.
+			if end == len(s) || s[end] == ' ' || s[end] == '\t' {
+				if bestIdx < 0 || end < bestIdx {
+					bestIdx = end
+				}
+				break
+			}
+			searchFrom = abs + 1
+		}
+	}
+	return bestIdx
 }
 
 // CleanupOpts controls CleanupOrphans.

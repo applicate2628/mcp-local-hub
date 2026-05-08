@@ -140,6 +140,70 @@ func TestRedactCmdlineForDisplay(t *testing.T) {
 			in:   "node.exe\t-y\t@scope/pkg",
 			want: "node.exe",
 		},
+		// Codex bot PR #143 round 1 P2: WMIC's splitCSVLine strips quotes
+		// from CommandLine fields, so a process launched as
+		// `"C:\Program Files\nodejs\node.exe" -y server-memory` arrives
+		// at parseOrphans as the unquoted-with-embedded-spaces form below.
+		// Pre-fix: first-space split produced "Program" (basename of
+		// "C:\Program"). Post-fix: findWindowsExeExtensionEnd locates
+		// `.exe ` and the boundary stays inside the path → "node.exe".
+		{
+			name: "Windows path with embedded space (WMIC-stripped quotes)",
+			in:   `C:\Program Files\nodejs\node.exe -y @modelcontextprotocol/server-memory`,
+			want: "node.exe",
+		},
+		{
+			name: "Windows path with embedded space + uppercase EXE",
+			in:   `C:\Program Files\My Tool\App.EXE --port 8080`,
+			want: "App.EXE",
+		},
+		{
+			name: "Windows .cmd with embedded space",
+			in:   `C:\Program Files\Common Files\runner.cmd /c task`,
+			want: "runner.cmd",
+		},
+		{
+			name: "Windows .bat with embedded space",
+			in:   `D:\Program Files (x86)\Tools\start.bat arg`,
+			want: "start.bat",
+		},
+		{
+			name: "Windows .ps1 with embedded space",
+			in:   `C:\My Scripts\run.ps1 -Mode Verbose`,
+			want: "run.ps1",
+		},
+		{
+			name: "Windows .com legacy executable with embedded space",
+			in:   `C:\Program Files\Old App\thing.com /flag`,
+			want: "thing.com",
+		},
+		// Defense: argument that happens to mention an extension must NOT
+		// take precedence over an earlier executable boundary. Here the
+		// real exe is `app.exe` at the front; the trailing `.exe` inside
+		// the argument should be ignored because we pick the EARLIEST
+		// boundary that's followed by whitespace.
+		{
+			name: "argument containing .exe must not win over earlier executable boundary",
+			in:   `app.exe --target C:\other\thing.exe`,
+			want: "app.exe",
+		},
+		// POSIX-shaped path where a directory contains the literal string
+		// ".exe" (rare but legal): no whitespace after the dir's `.exe`,
+		// so the helper skips it and falls back to first-space splitting,
+		// which here gives the actual first token correctly.
+		{
+			name: "POSIX path passes through (no .exe boundary)",
+			in:   `/opt/my-app/bin/runner --config /etc/runner.conf`,
+			want: "runner",
+		},
+		// Edge case: the cmdline IS just an exe path with embedded spaces
+		// and NO arguments. End-of-string takes the place of whitespace
+		// after the extension.
+		{
+			name: "Windows path with embedded space, no args",
+			in:   `C:\Program Files\Foo\bar.exe`,
+			want: "bar.exe",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
