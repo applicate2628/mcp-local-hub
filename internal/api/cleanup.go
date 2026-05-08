@@ -50,14 +50,78 @@ func isOurOwnProcess(cmdline string) bool {
 // OrphanProcess describes one orphan MCP subprocess discovered by CleanupOrphans.
 // KillErr is populated only when DryRun=false and taskkill failed for this PID
 // (access denied, process already gone, etc.); empty on success or dry-run.
+//
+// Wire-format note (Cleanup-6 security fix): the raw Cmdline is kept on
+// the struct for server-side use (manifest-pattern match in CleanupOrphans,
+// CLI display via `mcphub cleanup`, NeverKill enforcement) but is hidden
+// from JSON output (`json:"-"`) because full command lines often carry
+// workspace paths, username segments, file paths, and process arguments
+// that may include API keys or tokens. The GUI/HTTP wire instead exposes
+// `cmdline_display` populated by redactCmdlineForDisplay — basename of
+// the executable only — which is enough for an operator to recognize
+// the process while keeping sensitive context off-wire and out of
+// browser dev-tools / screenshots.
 type OrphanProcess struct {
-	PID      int    `json:"pid"`
-	ParentID int    `json:"parent_pid"`
-	Server   string `json:"server"` // inferred from matching manifest
-	RAMBytes uint64 `json:"ram_bytes"`
-	Cmdline  string `json:"cmdline"`
-	AgeSec   int64  `json:"age_sec"`
-	KillErr  string `json:"kill_err,omitempty"`
+	PID             int    `json:"pid"`
+	ParentID        int    `json:"parent_pid"`
+	Server          string `json:"server"` // inferred from matching manifest
+	RAMBytes        uint64 `json:"ram_bytes"`
+	Cmdline         string `json:"-"`               // server-side use only; redacted from wire
+	CmdlineDisplay  string `json:"cmdline_display"` // basename of executable for GUI display
+	AgeSec          int64  `json:"age_sec"`
+	KillErr         string `json:"kill_err,omitempty"`
+}
+
+// redactCmdlineForDisplay returns the executable's basename only, with no
+// path and no arguments. Cleanup-6 security fix: full command lines often
+// embed workspace paths (D:\dev\client-confidential-project\...), username
+// segments (C:\Users\<name>\...), filesystem paths to private files, and
+// process arguments that may contain API keys or tokens (--api-key=sk-...).
+// The orphan-table UI in the GUI and any operator screenshots / browser
+// dev-tools that observe the wire MUST see only the basename — the PID,
+// inferred Server, RAM, and Age columns carry the operational info needed
+// to confirm a kill.
+//
+// Behavior:
+//   - Quoted form: `"C:\path with spaces\foo.exe" arg1 arg2` → `foo.exe`
+//   - Unquoted form: `C:\path\foo.exe arg1 arg2` → `foo.exe`
+//   - POSIX path: `/usr/local/bin/uvx mcp-server-time` → `uvx`
+//   - Empty / whitespace-only: `<unknown>`
+//
+// The parsing matches the canonical pattern in isOurOwnProcess: an opening
+// quote selects the quoted token; otherwise the first space ends the
+// executable token. filepath.Base then strips the directory prefix.
+func redactCmdlineForDisplay(cmdline string) string {
+	c := strings.TrimSpace(cmdline)
+	if c == "" {
+		return "<unknown>"
+	}
+	first := c
+	if c[0] == '"' {
+		if end := strings.IndexByte(c[1:], '"'); end > 0 {
+			first = c[1 : 1+end]
+		} else {
+			// Unterminated quote → treat the rest as the path token.
+			first = c[1:]
+		}
+	} else if sp := strings.IndexAny(c, " \t"); sp > 0 {
+		first = c[:sp]
+	}
+	first = strings.TrimSpace(first)
+	if first == "" {
+		return "<unknown>"
+	}
+	// filepath.Base handles both backslash and forward-slash separators on
+	// Windows; on POSIX it splits on forward-slash only. The orphan
+	// detector consumes Windows-shaped CommandLine values from CIM/wmic,
+	// so we walk both separators ourselves to stay platform-independent.
+	if i := strings.LastIndexAny(first, `\/`); i >= 0 {
+		first = first[i+1:]
+	}
+	if first == "" {
+		return "<unknown>"
+	}
+	return first
 }
 
 // CleanupOpts controls CleanupOrphans.
@@ -306,11 +370,12 @@ func parseOrphans(r io.Reader, patterns []string) []OrphanProcess {
 			age = int64(time.Since(r.created).Seconds())
 		}
 		out = append(out, OrphanProcess{
-			PID:      r.pid,
-			ParentID: r.ppid,
-			RAMBytes: r.ram,
-			Cmdline:  r.cmdline,
-			AgeSec:   age,
+			PID:            r.pid,
+			ParentID:       r.ppid,
+			RAMBytes:       r.ram,
+			Cmdline:        r.cmdline,
+			CmdlineDisplay: redactCmdlineForDisplay(r.cmdline),
+			AgeSec:         age,
 		})
 	}
 	return out

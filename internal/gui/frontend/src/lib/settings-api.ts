@@ -79,11 +79,19 @@ export async function cleanBackups(): Promise<{ cleaned: number }> {
 // safety polarity — `{}` body triggered the kill path. Switched to
 // `apply` so the zero-value path is safe.
 
+// Cleanup-6: the GUI sees `cmdline_display` (executable basename only) on
+// the wire. The legacy `cmdline` field carried the full command line —
+// workspace paths, username segments, possible API keys/tokens in args —
+// and is now `json:"-"` on the Go struct. Keep `cmdline` typed as
+// optional for backward compatibility with any in-flight test fixtures
+// that still set it, but production code MUST consume `cmdline_display`.
 export type OrphanProcess = {
   pid: number;
   parent_pid: number;
   server: string;
-  cmdline: string;
+  cmdline_display: string;
+  /** @deprecated Cleanup-6: server no longer emits this; use cmdline_display. Test-fixture compatibility only. */
+  cmdline?: string;
   age_sec: number;
   ram_bytes: number;
   kill_err?: string;
