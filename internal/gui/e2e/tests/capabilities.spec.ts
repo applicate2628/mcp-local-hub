@@ -23,11 +23,17 @@ test.describe("capabilities", () => {
     await page.goto(`${hub.url}/#/capabilities`);
     const button = page.locator('[data-testid="capabilities-refresh-btn"]');
     await expect(button).toBeAttached();
-    const req = page.waitForRequest((r) =>
-      r.url().includes("/api/health") &&
-      r.url().includes("include=capabilities") &&
-      r.url().includes("refresh=true"),
-    );
+    // Codex Phase 8 review MINOR fix: assert exact pathname + search,
+    // not loose `.includes()` matches (which could match nearby
+    // endpoints or extra query variants the implementation never
+    // emits). Exact-shape match pins the contract: pathname is
+    // `/api/health` and the query string is exactly
+    // `include=capabilities&refresh=true` in that order.
+    const req = page.waitForRequest((r) => {
+      const u = new URL(r.url());
+      return u.pathname === "/api/health" &&
+        u.search === "?include=capabilities&refresh=true";
+    });
     await button.click();
     await req;
   });
