@@ -114,6 +114,22 @@ export function CapabilitiesScreen() {
   const rows = caps?.items ?? [];
   const generatedAt = caps?.generated_at ?? 0;
 
+  // Codex bot PR #144 round-4 P2: rows.length === 0 alone is ambiguous.
+  // health.go::computeCapabilitiesSection skips `if !p.OK` and accumulates
+  // per-daemon fetch errors into section.Errors with `continue`. So a
+  // system with installed daemons can legitimately return capabilities.
+  // items=[] — the screen must distinguish "truly nothing installed" from
+  // "probe/capability failures hid the real list" so operators don't
+  // chase the wrong remediation. Signals: daemons.items.length > 0 OR
+  // probes/capabilities/daemons section has errors[].
+  const daemonCount = state.data.daemons?.items.length ?? 0;
+  const probeErrors = state.data.probes?.errors ?? [];
+  const capabilityErrors = caps?.errors ?? [];
+  const daemonErrors = state.data.daemons?.errors ?? [];
+  const hasFailures =
+    probeErrors.length > 0 || capabilityErrors.length > 0 || daemonErrors.length > 0;
+  const showFailureEmpty = rows.length === 0 && (daemonCount > 0 || hasFailures);
+
   return (
     <section class="capabilities-screen" data-testid="capabilities-screen">
       <header class="capabilities-header">
@@ -140,9 +156,30 @@ export function CapabilitiesScreen() {
       </header>
 
       {rows.length === 0 ? (
-        <p class="capabilities-empty" data-testid="capabilities-empty">
-          No capabilities found — install servers via the Add server screen.
-        </p>
+        showFailureEmpty ? (
+          <div class="capabilities-empty" data-testid="capabilities-empty-failures">
+            <p class="error" role="alert">
+              Capabilities not yet available — probes or capability fetch failed for {daemonCount} daemon{daemonCount === 1 ? "" : "s"}.
+            </p>
+            {(probeErrors.length > 0 || capabilityErrors.length > 0 || daemonErrors.length > 0) && (
+              <ul class="capabilities-section-errors">
+                {daemonErrors.map((e, i) => (
+                  <li key={`daemon-${i}`}><strong>{e.scope}</strong>: {e.err}</li>
+                ))}
+                {probeErrors.map((e, i) => (
+                  <li key={`probe-${i}`}><strong>{e.scope}</strong>: {e.err}</li>
+                ))}
+                {capabilityErrors.map((e, i) => (
+                  <li key={`capability-${i}`}><strong>{e.scope}</strong>: {e.err}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : (
+          <p class="capabilities-empty" data-testid="capabilities-empty">
+            No capabilities found — install servers via the Add server screen.
+          </p>
+        )
       ) : (
         <div class="capabilities-list">
           {rows.map((row) => {

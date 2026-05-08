@@ -155,6 +155,57 @@ describe("CapabilitiesScreen — Phase 3 Refresh", () => {
     consoleSpy.mockRestore();
   });
 
+  it("distinguishes probe/capability failures from true empty state (codex bot PR #144 round 4 P2)", async () => {
+    // Codex bot finding: when daemons exist but probes/capabilities
+    // failed, the backend legitimately returns capabilities.items=[]
+    // (per health.go::computeCapabilitiesSection skip-on-failure).
+    // The UI MUST distinguish "no servers installed" (truly empty)
+    // from "servers installed but failed to probe" (real failure).
+    const failureSnapshot: HealthSnapshot = {
+      ...emptySnapshot,
+      daemons: {
+        items: [
+          { server: "fs", daemon: "default", pid: 0, port: 0, ram_bytes: 0,
+            uptime_sec: 0, state: "running", restart_count: 0, last_restart_at: null },
+        ],
+        generated_at: 0, ttl_ms: 2000, errors: [],
+      },
+      probes: {
+        items: [],
+        generated_at: 0, ttl_ms: 10000,
+        errors: [{ scope: "probe:fs/default", err: "initialize: HTTP 500" }],
+      },
+      capabilities: {
+        items: [],
+        generated_at: 1715164800, ttl_ms: 60000,
+        errors: [{ scope: "capability:fs/default", err: "tools/list: parse: unexpected EOF" }],
+      },
+    };
+    vi.spyOn(api, "fetchOrThrow").mockResolvedValue(failureSnapshot);
+
+    const { findByTestId, queryByTestId } = render(<CapabilitiesScreen />);
+    // Failure-empty branch should render with section errors listed.
+    const failureEmpty = await findByTestId("capabilities-empty-failures");
+    expect(failureEmpty.textContent).toContain("Capabilities not yet available");
+    expect(failureEmpty.textContent).toContain("1 daemon");
+    expect(failureEmpty.textContent).toContain("probe:fs/default");
+    expect(failureEmpty.textContent).toContain("initialize: HTTP 500");
+    expect(failureEmpty.textContent).toContain("capability:fs/default");
+    expect(failureEmpty.textContent).toContain("tools/list: parse: unexpected EOF");
+    // True empty-state copy MUST NOT be present (would misdirect operator).
+    expect(queryByTestId("capabilities-empty")).toBeNull();
+  });
+
+  it("true empty state renders the install-servers copy when no daemons + no errors (codex bot PR #144 round 4 P2 negative case)", async () => {
+    // Companion: when daemons.items=[] AND no errors, show the
+    // canonical "No capabilities found — install servers" copy.
+    vi.spyOn(api, "fetchOrThrow").mockResolvedValue(emptySnapshot);
+    const { findByTestId, queryByTestId } = render(<CapabilitiesScreen />);
+    const empty = await findByTestId("capabilities-empty");
+    expect(empty.textContent).toContain("No capabilities found");
+    expect(queryByTestId("capabilities-empty-failures")).toBeNull();
+  });
+
   it("error-state Refresh failure surfaces LATEST retry error, not stale initial-load error (codex bot PR #144 round 3 P2)", async () => {
     // Codex bot finding: when initial load fails, state.error holds
     // the first error. If user clicks Refresh in error state and the
