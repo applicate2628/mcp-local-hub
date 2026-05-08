@@ -204,6 +204,39 @@ func TestRedactCmdlineForDisplay(t *testing.T) {
 			in:   `C:\Program Files\Foo\bar.exe`,
 			want: "bar.exe",
 		},
+		// Codex bot PR #143 round 2 P2: when the actual executable is a
+		// bare basename (no extension, no path separator) and an
+		// argument later contains a Windows path WITH `.exe`, the
+		// extension lookup must NOT pick the argument as the boundary.
+		// Pre-fix: `uvx mcp-server-time --cache C:\tmp\helper.exe` →
+		// `helper.exe` (wrong). Post-fix: first-token has no separator,
+		// extension lookup is skipped, naive first-whitespace split
+		// returns `uvx`.
+		{
+			name: "extensionless first token + argument with .exe path (regression guard)",
+			in:   `uvx mcp-server-time --cache C:\tmp\helper.exe`,
+			want: "uvx",
+		},
+		{
+			name: "extensionless first token + argument with .cmd path",
+			in:   `python3 -m server --hook C:\hooks\post.cmd`,
+			want: "python3",
+		},
+		{
+			name: "extensionless first token + argument referencing UNC path",
+			in:   `node --inspect \\server\share\runner.exe`,
+			want: "node",
+		},
+		// Defense: bare-basename token like `app.exe` (HAS extension but
+		// NO path separator) — first-whitespace IS the boundary. The
+		// extension lookup is bypassed to keep the basename path simple
+		// and to avoid scanning past arguments that may contain
+		// extension-shaped substrings.
+		{
+			name: "basename with extension but no path separator",
+			in:   `app.exe arg1 C:\other\thing.exe`,
+			want: "app.exe",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

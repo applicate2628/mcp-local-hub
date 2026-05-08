@@ -116,17 +116,37 @@ func redactCmdlineForDisplay(cmdline string) string {
 			first = c[1:]
 		}
 	default:
-		// Try Windows executable-extension boundary first so paths with
-		// embedded spaces (e.g. `C:\Program Files\foo.exe arg`) split on
-		// the executable instead of on the first space. The lookup is
-		// case-insensitive (real cmdlines see both `.exe` and `.EXE`).
-		// We bound the search to the first whitespace's position so an
-		// extension-shaped substring inside an argument cannot win over
-		// an earlier first-space split. If no extension is found, fall
-		// back to first-whitespace splitting (POSIX path or unusual case).
-		if extEnd := findWindowsExeExtensionEnd(c); extEnd > 0 {
-			first = c[:extEnd]
-		} else if sp := strings.IndexAny(c, " \t"); sp > 0 {
+		// First-whitespace position is the naive boundary. We only deviate
+		// from it when the cmdline LOOKS LIKE a WMIC-stripped quoted Windows
+		// path: the first token contains a path separator (so a quoted
+		// `"C:\Program Files\..."` lost its quotes and the path got split
+		// at the embedded space). Bare basenames like `uvx mcp-server-time`
+		// or `python3 -m server` MUST use the naive first-whitespace split
+		// so a `.exe`-bearing argument later in the cmdline cannot mislead
+		// the boundary picker (codex bot PR #143 round 2 P2:
+		// `uvx mcp-server-time --cache C:\tmp\helper.exe` used to render
+		// as `helper.exe` instead of `uvx`).
+		sp := strings.IndexAny(c, " \t")
+		switch {
+		case sp < 0:
+			// No whitespace anywhere — single-token cmdline, the whole
+			// thing is the executable path.
+			first = c
+		case strings.ContainsAny(c[:sp], `\/`):
+			// First token has a path separator — could be a partial
+			// Windows path with embedded spaces. Try extension lookup
+			// to find the real executable boundary; fall back to
+			// first-whitespace if no extension is found.
+			if extEnd := findWindowsExeExtensionEnd(c); extEnd > 0 {
+				first = c[:extEnd]
+			} else {
+				first = c[:sp]
+			}
+		default:
+			// First token is a bare basename (e.g. `uvx`, `python3`,
+			// `node.exe`) — first-whitespace IS the boundary. Skip the
+			// extension lookup so a later argument's `.exe` substring
+			// cannot win.
 			first = c[:sp]
 		}
 	}
