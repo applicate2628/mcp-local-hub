@@ -237,6 +237,38 @@ func TestRedactCmdlineForDisplay(t *testing.T) {
 			in:   `app.exe arg1 C:\other\thing.exe`,
 			want: "app.exe",
 		},
+		// Codex bot PR #143 round 5 P2: extensionless executable WITH a
+		// path separator (so the round 2 fix's "bare basename" guard
+		// doesn't apply) plus a later argument containing `.exe`. The
+		// extension scan used to anchor on the argument's `helper.exe`
+		// because the search ran over the entire cmdline. Post-fix:
+		// the character after the first whitespace is `-` (flag marker)
+		// → first-whitespace terminates the path → returns `python`.
+		{
+			name: "extensionless path-with-separator + flag-arg + .exe in later arg (round 5 P2)",
+			in:   `C:\tools\python -m server --cache C:\tmp\helper.exe`,
+			want: "python",
+		},
+		{
+			name: "extensionless POSIX path + flag-arg",
+			in:   `/usr/local/bin/python3 -m server --hook /tmp/post.cmd`,
+			want: "python3",
+		},
+		// Defense: when the character after the first whitespace is NOT
+		// flag-like, the extension scan SHOULD still run (preserves the
+		// WMIC-stripped quoted Windows path case from round 1).
+		{
+			name: "WMIC-stripped path with extension still resolves correctly after r5 fix",
+			in:   `C:\Program Files\nodejs\node.exe -y server-memory`,
+			want: "node.exe",
+		},
+		// Defense: extensionless path with a PATH-LIKE arg continuation
+		// (no extension anywhere). Falls back to first-whitespace.
+		{
+			name: "extensionless path + non-flag arg without extension",
+			in:   `/usr/local/bin/runner config.json`,
+			want: "runner",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

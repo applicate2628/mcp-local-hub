@@ -411,7 +411,16 @@ describe("SectionMaintenance — kill_err visibility on apply (Cloud bot P2 on 7
 
 describe("SectionMaintenance — ConfirmModal swap (Cleanup-6)", () => {
   beforeEach(() => {
+    // Codex bot PR #143 round 5 P3: this describe block clicks
+    // ConfirmModal buttons and queries dialog-open state, so it MUST
+    // run the same setup as the other describes (dialog shim + DOM
+    // reset). Without this, running the block in isolation
+    // (`vitest -t "ConfirmModal swap"`) or under reordered execution
+    // could leave HTMLDialogElement.showModal undefined or stale
+    // `<dialog>` elements in document.body.
+    document.body.innerHTML = "";
     vi.restoreAllMocks();
+    installDialogShim();
     // If any code path slipped a native confirm() through, the stub
     // throws so the affected test fails loudly.
     (window as { confirm: (msg?: string) => boolean }).confirm = vi.fn(() => {

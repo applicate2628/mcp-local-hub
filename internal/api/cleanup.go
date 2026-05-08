@@ -130,10 +130,26 @@ func firstTokenBasename(cmdline string) string {
 			first = c
 		case strings.ContainsAny(c[:sp], `\/`):
 			// First token has a path separator — could be a partial
-			// Windows path with embedded spaces. Try extension lookup
-			// to find the real executable boundary; fall back to
-			// first-whitespace if no extension is found.
-			if extEnd := findWindowsExeExtensionEnd(c); extEnd > 0 {
+			// Windows path with embedded spaces. The character right
+			// after the first whitespace decides:
+			//   - Flag-like (`-` or `/-` for old-style switches) → the
+			//     path is COMPLETE before the whitespace; the rest is
+			//     CLI arguments. Use first-whitespace as the boundary.
+			//     Defends against extensionless-executable + later
+			//     `.exe`-bearing argument case (codex bot PR #143
+			//     round 5 P2: `C:\tools\python -m server --cache
+			//     C:\tmp\helper.exe` used to return `helper.exe`
+			//     because the extension scan ran over the entire
+			//     cmdline; now flag detection terminates the path
+			//     at `python`).
+			//   - Anything else (path continuation like `Files\...`
+			//     or non-flag arg) → the path may have embedded
+			//     spaces (WMIC-stripped quotes case); try extension
+			//     lookup; fall back to first-whitespace if no
+			//     extension is found.
+			if firstWhitespaceTerminatesPath(c, sp) {
+				first = c[:sp]
+			} else if extEnd := findWindowsExeExtensionEnd(c); extEnd > 0 {
 				first = c[:extEnd]
 			} else {
 				first = c[:sp]
@@ -246,6 +262,37 @@ func findWindowsExeExtensionEnd(s string) int {
 		}
 	}
 	return bestIdx
+}
+
+// firstWhitespaceTerminatesPath returns true when the character
+// immediately after the first whitespace at index `sp` is a flag-like
+// marker (`-`), meaning the executable path is complete BEFORE that
+// whitespace and the rest is CLI arguments. Used by firstTokenBasename
+// to decide whether to bother running the Windows extension lookup.
+//
+// Codex bot PR #143 round 5 P2: prior implementation always ran the
+// full-cmdline extension scan whenever the first token contained a
+// path separator. For an extensionless executable plus a later
+// `.exe`-bearing argument (e.g. `C:\tools\python -m server --cache
+// C:\tmp\helper.exe`), the scan anchored on the argument's `helper.exe`
+// instead of the actual executable `python`. This helper short-circuits
+// the scan when the first space is followed by a flag character, so
+// the executable token stays at `c[:sp]` (`C:\tools\python`).
+//
+// We deliberately treat ONLY `-` as the flag marker; `/` is reserved
+// for POSIX paths and old-style Windows switches (`/c`), but a `/` at
+// position sp+1 is overwhelmingly more likely to be a POSIX path
+// continuation (e.g. `node /usr/local/share/foo`) than a switch.
+// Erring on the side of running the extension lookup in the `/` case
+// preserves WMIC-stripped quoted Windows paths while accepting the
+// (vanishingly rare) miss on `cmd.exe /c something`-style invocations
+// where the `/` would terminate the path token cleanly anyway.
+func firstWhitespaceTerminatesPath(c string, sp int) bool {
+	if sp+1 >= len(c) {
+		return true // nothing after the whitespace; path is complete.
+	}
+	next := c[sp+1]
+	return next == '-'
 }
 
 // CleanupOpts controls CleanupOrphans.
