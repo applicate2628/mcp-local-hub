@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "preact/hooks";
 import { fetchOrThrow } from "../api";
 import type { HealthSnapshot } from "../types";
+import { CapabilityCard } from "../components/CapabilityCard";
 
 // G3 — capability status display screen. Read-only view of the G2
 // /api/health snapshot. NO tool execution; items render as labels only.
@@ -109,7 +110,20 @@ export function CapabilitiesScreen() {
           No capabilities found — install servers via the Add server screen.
         </p>
       ) : (
-        <p>{/* placeholder — Phase 4 adds CapabilityCard list */}</p>
+        <div class="capabilities-list">
+          {rows.map((row) => {
+            const probeMatch = state.data.probes?.items.find(
+              (p) => p.server === row.server && p.daemon === row.daemon,
+            );
+            return (
+              <CapabilityCard
+                key={`${row.server}-${row.daemon}`}
+                row={row}
+                probe={probeMatch ?? null}
+              />
+            );
+          })}
+        </div>
       )}
     </section>
   );

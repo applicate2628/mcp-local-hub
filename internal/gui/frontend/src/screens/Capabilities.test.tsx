@@ -2,7 +2,7 @@ import { render, cleanup, fireEvent } from "@testing-library/preact";
 import { describe, it, expect, afterEach, vi, beforeEach } from "vitest";
 import { CapabilitiesScreen } from "./Capabilities";
 import * as api from "../api";
-import type { HealthSnapshot } from "../types";
+import type { HealthSnapshot, CapabilityRow, ProbeRow } from "../types";
 
 afterEach(cleanup);
 
@@ -180,5 +180,57 @@ describe("CapabilitiesScreen — Phase 3 Refresh", () => {
     // Prior empty-state still visible (we did not blank the screen).
     const stillEmpty = await findByTestId("capabilities-empty");
     expect(stillEmpty).toBeTruthy();
+  });
+});
+
+describe("CapabilitiesScreen — Phase 4 CapabilityCard", () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  it("renders one card per server with header, daemon, and 3 section placeholders", async () => {
+    const row: CapabilityRow = {
+      server: "memory",
+      daemon: "default",
+      tools:     { state: "ok", items: [{ name: "a", id: "memory/default/tool/a", namespace: "memory", kind: "tool" }, { name: "b", id: "memory/default/tool/b", namespace: "memory", kind: "tool" }] },
+      prompts:   { state: "empty", items: [] },
+      resources: { state: "empty", items: [] },
+    };
+    const probe: ProbeRow = { server: "memory", daemon: "default", ok: true, tool_count: 2, err: "", source: "" };
+    const snap: HealthSnapshot = {
+      ...emptySnapshot,
+      probes:       { ...emptySnapshot.probes!, items: [probe] },
+      capabilities: { items: [row], generated_at: 1715164800, ttl_ms: 60000, errors: [] },
+    };
+    vi.spyOn(api, "fetchOrThrow").mockResolvedValue(snap);
+
+    const { findByTestId } = render(<CapabilitiesScreen />);
+    const card = await findByTestId("capability-card-memory-default");
+    expect(card.querySelector(".capability-card-server")?.textContent).toBe("memory");
+    expect(card.querySelector(".capability-card-daemon")?.textContent).toBe("default");
+    expect(card.querySelector('[data-testid="capability-section-tools"]')?.textContent).toContain("Tools (2)");
+    expect(card.querySelector('[data-testid="capability-section-prompts"]')?.textContent).toContain("Prompts (0)");
+    expect(card.querySelector('[data-testid="capability-section-resources"]')?.textContent).toContain("Resources (0)");
+  });
+
+  it("renders the probe error state when probe.ok is false", async () => {
+    const row: CapabilityRow = {
+      server: "filesystem",
+      daemon: "default",
+      tools:     { state: "error", items: null, err: "initialize: HTTP 500" },
+      prompts:   { state: "empty", items: [] },
+      resources: { state: "empty", items: [] },
+    };
+    const probe: ProbeRow = { server: "filesystem", daemon: "default", ok: false, tool_count: 0, err: "initialize: HTTP 500", source: "" };
+    const snap: HealthSnapshot = {
+      ...emptySnapshot,
+      probes:       { ...emptySnapshot.probes!, items: [probe] },
+      capabilities: { items: [row], generated_at: 1715164800, ttl_ms: 60000, errors: [] },
+    };
+    vi.spyOn(api, "fetchOrThrow").mockResolvedValue(snap);
+
+    const { findByTestId } = render(<CapabilitiesScreen />);
+    const card = await findByTestId("capability-card-filesystem-default");
+    const errPill = card.querySelector(".capability-card-probe-status.err");
+    expect(errPill).not.toBeNull();
+    expect(card.textContent).toContain("initialize: HTTP 500");
   });
 });
