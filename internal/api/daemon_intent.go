@@ -33,6 +33,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -367,6 +368,154 @@ func (a *API) ReadDaemonIntent() IntentReadResult {
 	}
 	defer func() { _ = lock.Unlock() }()
 
+	return readIntentParseAndQuarantine(statePath)
+}
+
+// TryReadDaemonIntent loads the on-disk intent file with a bounded
+// lock-acquisition timeout. Same three-state semantic as
+// ReadDaemonIntent (missing | corrupt | valid) but the underlying
+// flock acquisition uses Flock.TryLockContext(ctx, retryDelay) instead
+// of the blocking Flock.Lock(). This is the variant the tray
+// aggregator (internal/cli/gui_tray_state.go) calls on its 5-second
+// snapshot pump so a long-held writer (e.g. a noisy `mcphub install`
+// or a flaky AV scanner pinning the daemon-intent.json.lock file)
+// cannot freeze tray icon / toast updates.
+//
+// Bot finding (PR #142 round 2 P2, 2026-05-08): the prior wiring
+// embedded the blocking ReadDaemonIntent inline in the snapshot loop,
+// so a held lock would stall the goroutine until release — `ctx.Done()`
+// was unobservable while waiting on the kernel-level LockFileEx /
+// flock(2) call. This method gives the caller a real budget.
+//
+// Behaviour on the lock-acquisition timeout path: returns
+//   IntentReadResult{
+//     State: IntentStateMissing,
+//     File:  DaemonIntentFile{Tasks: map[string]DaemonIntent{}},
+//     Err:   <error wrapping context.DeadlineExceeded — caller can
+//            test with errors.Is(res.Err, context.DeadlineExceeded)>,
+//   }
+// The empty-Tasks fallback matches the existing graceful-degrade
+// contract `defaultIntentReader` already handles — a momentary lack
+// of intent data degrades to "no preference", which is the same
+// fallback the tray applies when the file is genuinely missing.
+//
+// Round 3 codex finding R6+Q3: the wrapped error precisely tags
+// timeout (via errors.Is + context.DeadlineExceeded) only on the
+// real ctx-deadline path; non-timeout flock errors (permission/IO at
+// lock-acquire time) are surfaced verbatim without being mislabelled
+// as a timeout. Callers that need to distinguish "tray's 250ms budget
+// elapsed under contention" from "filesystem permission failure on the
+// state dir" can branch on errors.Is(res.Err, context.DeadlineExceeded).
+//
+// Round 3 codex finding R2: timeout <= 0 is a single non-blocking
+// TryLock() attempt — context.WithTimeout(0) creates an already-fired
+// context, so flock.TryLockContext would short-circuit with
+// DeadlineExceeded EVEN IF the lock was free. The non-blocking branch
+// preserves the caller's "try once" intent (a free lock returns the
+// real file; a held lock returns ErrLockUnavailable WITHOUT a fake
+// timeout label).
+//
+// On lock acquisition: identical body to ReadDaemonIntent — same
+// parse + quarantine + prune flow via the shared helper
+// readIntentParseAndQuarantine. Callers must NOT use this method when
+// blocking semantics are required (e.g. install / stop / uninstall
+// one-shot flows that genuinely need to wait on the writer to finish).
+//
+// Tunable: retryDelay is fixed at 10ms inside the implementation —
+// short enough that a 50ms timeout still polls ~5 times before
+// giving up, and long enough not to spin on a busy disk. Callers
+// supply only the absolute timeout; callers that need a custom
+// retryDelay can refactor later.
+func (a *API) TryReadDaemonIntent(timeout time.Duration) IntentReadResult {
+	dir, err := DaemonStateDir()
+	if err != nil {
+		return IntentReadResult{
+			State: IntentStateMissing,
+			File:  DaemonIntentFile{Tasks: map[string]DaemonIntent{}},
+			Err:   err,
+		}
+	}
+
+	statePath := filepath.Join(dir, intentFileLeaf)
+	lockPath := filepath.Join(dir, intentLockLeaf)
+
+	lock := flock.New(lockPath)
+
+	// Round 3 codex finding R2: zero/negative timeout is a single
+	// non-blocking probe. Going through context.WithTimeout(0) would
+	// short-circuit with DeadlineExceeded even if the lock was free,
+	// because the context is already past its deadline before
+	// TryLockContext's first poll. The bare TryLock() preserves caller
+	// intent ("try once non-blocking") and reports lock-unavailable as
+	// a non-timeout error (callers will not confuse it with the
+	// retry-budget-exhausted path).
+	if timeout <= 0 {
+		locked, lockErr := lock.TryLock()
+		if lockErr != nil {
+			return IntentReadResult{
+				State: IntentStateMissing,
+				File:  DaemonIntentFile{Tasks: map[string]DaemonIntent{}},
+				Err:   fmt.Errorf("flock TryLock: %w", lockErr),
+			}
+		}
+		if !locked {
+			return IntentReadResult{
+				State: IntentStateMissing,
+				File:  DaemonIntentFile{Tasks: map[string]DaemonIntent{}},
+				Err:   fmt.Errorf("flock TryLock: lock unavailable (non-blocking probe)"),
+			}
+		}
+		defer func() { _ = lock.Unlock() }()
+		return readIntentParseAndQuarantine(statePath)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	const retryDelay = 10 * time.Millisecond
+	locked, lockErr := lock.TryLockContext(ctx, retryDelay)
+	if lockErr != nil {
+		// Distinguish timeout (caller's budget elapsed under contention)
+		// from non-timeout errors (rare: permission/IO at lock-acquire
+		// time). The wrapped chain preserves errors.Is behaviour so
+		// callers can test errors.Is(res.Err, context.DeadlineExceeded)
+		// to branch on contention vs. real I/O failure.
+		if errors.Is(lockErr, context.DeadlineExceeded) {
+			return IntentReadResult{
+				State: IntentStateMissing,
+				File:  DaemonIntentFile{Tasks: map[string]DaemonIntent{}},
+				Err:   fmt.Errorf("flock TryLockContext: timeout after %s: %w", timeout, lockErr),
+			}
+		}
+		return IntentReadResult{
+			State: IntentStateMissing,
+			File:  DaemonIntentFile{Tasks: map[string]DaemonIntent{}},
+			Err:   fmt.Errorf("flock TryLockContext: %w", lockErr),
+		}
+	}
+	if !locked {
+		// TryLockContext returned (false, nil) — never observed in
+		// practice, but defensive against future flock revisions.
+		return IntentReadResult{
+			State: IntentStateMissing,
+			File:  DaemonIntentFile{Tasks: map[string]DaemonIntent{}},
+			Err:   fmt.Errorf("flock TryLockContext: lock unavailable after %s timeout", timeout),
+		}
+	}
+	defer func() { _ = lock.Unlock() }()
+
+	return readIntentParseAndQuarantine(statePath)
+}
+
+// readIntentParseAndQuarantine is the lock-held body shared by
+// ReadDaemonIntent and TryReadDaemonIntent. Caller must already hold
+// the daemon-intent flock; this routine performs no locking of its
+// own. Returns the three-state IntentReadResult per plan §3 contract.
+//
+// Factored out so TryReadDaemonIntent can reuse the parse +
+// quarantine + prune flow without duplicating the logic. Production
+// invariants (corrupt-rename under flock, prune best-effort,
+// QuarantinePath surfaced to caller) are preserved exactly.
+func readIntentParseAndQuarantine(statePath string) IntentReadResult {
 	raw, err := os.ReadFile(statePath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
