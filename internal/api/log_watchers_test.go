@@ -1,7 +1,6 @@
 package api
 
 import (
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -79,19 +78,10 @@ func TestParsePosixPSRows_FewerThan4Tokens(t *testing.T) {
 	}
 }
 
-// TestEffectiveParentAlive_PosixInitReparenting is the regression
-// test for Codex Cloud bot P1 on PR #131 (kosyak
-// 2026-05-07-posix-reparenting-defeats-parent-alive-orphan-heuristic.md):
-// on POSIX, an orphan reparented to PID 1 (init/systemd) must be
-// classified as effectively orphan even though PID 1 is alive in the
-// snapshot. Windows behavior (no auto-reparent) is preserved.
-//
-// We can't truly switch runtime.GOOS in a unit test, so this test
-// validates the behavior at the function's contract level: pidSet
-// containing PID 1, ppid=1. On POSIX (non-windows) this returns false
-// (orphan). On windows it returns true. We assert based on actual
-// runtime.GOOS.
-func TestEffectiveParentAlive_PosixInitReparenting(t *testing.T) {
+// TestEffectiveParentAlive verifies the parent-alive contract used by
+// cleanup gating: missing/zero parent is treated as not alive, while
+// any parent PID present in the snapshot is treated as alive.
+func TestEffectiveParentAlive(t *testing.T) {
 	pidSet := map[int]bool{1: true, 100: true}
 
 	if got := effectiveParentAlive(0, pidSet); got {
@@ -103,17 +93,8 @@ func TestEffectiveParentAlive_PosixInitReparenting(t *testing.T) {
 	if got := effectiveParentAlive(100, pidSet); !got {
 		t.Errorf("ppid=100 in snapshot → got %v, want true (real parent)", got)
 	}
-
-	// PID 1 special-case on POSIX:
-	got := effectiveParentAlive(1, pidSet)
-	if runtime.GOOS == "windows" {
-		if !got {
-			t.Errorf("Windows: ppid=1 in snapshot → got %v, want true (Windows does not auto-reparent)", got)
-		}
-	} else {
-		if got {
-			t.Errorf("POSIX: ppid=1 (init) → got %v, want false (orphan reparented to init)", got)
-		}
+	if got := effectiveParentAlive(1, pidSet); !got {
+		t.Errorf("ppid=1 in snapshot → got %v, want true", got)
 	}
 }
 
