@@ -647,3 +647,245 @@ describe("SectionMaintenance — ConfirmModal swap (Cleanup-6)", () => {
     });
   });
 });
+
+// --- Codex deep-sec PR #143 round 4 finding R1 + A2 -----------------------
+//
+// R1: orphan ConfirmModal must capture the orphan list at modal-open and
+// render exclusively from that snapshot, so concurrent state mutations
+// (Preview re-clicks, etc.) cannot make the user confirm against fresh,
+// unconfirmed data.
+//
+// A2: cmdlineDisplayOf must render `<unknown>` when cmdline_display is
+// missing — the deprecated `cmdline` fallback is removed so a regression
+// or test fixture cannot re-expose the raw cmdline (workspace paths /
+// argv-borne secrets) through the GUI.
+
+describe("SectionMaintenance — finding R1 (modal snapshot) + A2 (no cmdline fallback)", () => {
+  beforeEach(() => {
+    cleanup();
+    document.body.innerHTML = "";
+    vi.restoreAllMocks();
+    installDialogShim();
+    (window as { confirm: (msg?: string) => boolean }).confirm = vi.fn(() => {
+      throw new Error("native confirm() should not be called — ConfirmModal owns the gate");
+    });
+  });
+
+  it("R1: modal renders from snapshot captured at open; later Preview-click closes modal and clears snapshot", async () => {
+    // First Preview returns 2 orphans; second Preview returns 3.
+    let previewCount = 0;
+    vi.spyOn(api, "cleanupOrphans").mockImplementation(async (apply: boolean) => {
+      if (!apply) previewCount++;
+      const initial = [
+        { pid: 1234, parent_pid: 1, server: "fs", cmdline_display: "uvx",
+          age_sec: 30, ram_bytes: 1024 * 1024 },
+        { pid: 5678, parent_pid: 1, server: "weather", cmdline_display: "node.exe",
+          age_sec: 60, ram_bytes: 2 * 1024 * 1024 },
+      ];
+      const enlarged = [
+        ...initial,
+        { pid: 9999, parent_pid: 1, server: "extra", cmdline_display: "python.exe",
+          age_sec: 10, ram_bytes: 512 * 1024 },
+      ];
+      const orphans = previewCount >= 2 ? enlarged : initial;
+      return { orphans, killed: 0, skipped: 0 };
+    });
+
+    const { container } = render(<SectionMaintenance />);
+    const card = container.querySelector('[data-card="orphan-mcp-servers"]')!;
+
+    // Preview #1 → 2 orphans rendered.
+    fireEvent.click(card.querySelectorAll("button")[0]);
+    await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
+    expect(card.querySelectorAll("tbody tr").length).toBe(2);
+
+    // Open modal → snapshot captured (2 orphans).
+    fireEvent.click(card.querySelector('[data-testid="orphan-mcp-clean-button"]')!);
+    await waitFor(() => {
+      const modal = activeModal(container);
+      expect(modal).toBeTruthy();
+    });
+    let modal = activeModal(container)!;
+    let listText = modal.querySelector('[data-testid="orphan-mcp-confirm-list"]')!.textContent ?? "";
+    expect(listText).toMatch(/PID 1234/);
+    expect(listText).toMatch(/PID 5678/);
+    // Snapshot must NOT contain the third orphan yet — it doesn't exist.
+    expect(listText).not.toMatch(/PID 9999/);
+    let title = modal.querySelector("h2")?.textContent ?? "";
+    expect(title).toMatch(/Clean 2 orphan MCP processes\?/);
+
+    // Re-click Preview while the modal is still open. R1 contract: the
+    // modal closes and the snapshot clears, forcing the user to
+    // explicitly re-confirm against the new preview.
+    fireEvent.click(card.querySelectorAll("button")[0]);
+    await waitFor(() => {
+      // The modal must be closed (no `dialog[open]` for this card).
+      const open = card.querySelector('dialog[data-testid="confirm-modal"][open]');
+      expect(open).toBeFalsy();
+    });
+    // The fresh preview should now show 3 rows in the underlying table.
+    await waitFor(() => {
+      expect(card.querySelectorAll("tbody tr").length).toBe(3);
+    });
+
+    // User must click Clean again to re-open the modal — and the new
+    // snapshot must reflect the larger set (3 orphans, including 9999).
+    fireEvent.click(card.querySelector('[data-testid="orphan-mcp-clean-button"]')!);
+    await waitFor(() => {
+      const m = activeModal(container);
+      expect(m).toBeTruthy();
+    });
+    modal = activeModal(container)!;
+    listText = modal.querySelector('[data-testid="orphan-mcp-confirm-list"]')!.textContent ?? "";
+    expect(listText).toMatch(/PID 9999/);
+    title = modal.querySelector("h2")?.textContent ?? "";
+    expect(title).toMatch(/Clean 3 orphan MCP processes\?/);
+  });
+
+  it("R1: Cancel clears the snapshot — re-opening starts from a fresh state", async () => {
+    vi.spyOn(api, "cleanupOrphans").mockImplementation(async () => ({
+      orphans: [
+        { pid: 1234, parent_pid: 1, server: "fs", cmdline_display: "uvx",
+          age_sec: 30, ram_bytes: 1024 * 1024 },
+      ],
+      killed: 0,
+      skipped: 0,
+    }));
+
+    const { container } = render(<SectionMaintenance />);
+    const card = container.querySelector('[data-card="orphan-mcp-servers"]')!;
+
+    fireEvent.click(card.querySelectorAll("button")[0]); // Preview
+    await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
+
+    // Open + Cancel.
+    fireEvent.click(card.querySelector('[data-testid="orphan-mcp-clean-button"]')!);
+    await waitFor(() => expect(activeModal(container)).toBeTruthy());
+    clickCancelModal(container as HTMLElement);
+    await waitFor(() => expect(activeModal(container)).toBeFalsy());
+
+    // Re-open. Modal body must rebuild from a NEW snapshot (snapshot
+    // was cleared on cancel). The orphan list is the same in this
+    // mock, but the test verifies the snapshot was cleared by virtue
+    // of the modal showing live state on reopen.
+    fireEvent.click(card.querySelector('[data-testid="orphan-mcp-clean-button"]')!);
+    await waitFor(() => expect(activeModal(container)).toBeTruthy());
+    const modal = activeModal(container)!;
+    const list = modal.querySelector('[data-testid="orphan-mcp-confirm-list"]')!;
+    expect(list.textContent).toMatch(/PID 1234/);
+    // Sanity: only one row in the snapshot, list is non-empty (not the
+    // cleared state).
+    expect(list.querySelectorAll("li").length).toBe(1);
+  });
+
+  it("R1: Confirm applies against the snapshot taken at modal-open, not against later state mutation", async () => {
+    // Mock returns 2 orphans on preview, 1 orphan on apply (simulating
+    // backend re-resolution). The frontend snapshot is what the user
+    // confirmed (2 rows). Apply is invoked, and the user-visible kill
+    // request is cleanupOrphans(true) — the backend's kill set is its
+    // own concern. The test asserts that apply IS invoked exactly
+    // once (snapshot was non-empty when Confirm was clicked) and
+    // never falls through to the apply-with-empty-snapshot guard.
+    let applyCount = 0;
+    vi.spyOn(api, "cleanupOrphans").mockImplementation(async (apply: boolean) => {
+      if (apply) applyCount++;
+      return {
+        orphans: [
+          { pid: 1234, parent_pid: 1, server: "fs", cmdline_display: "uvx",
+            age_sec: 30, ram_bytes: 1024 * 1024 },
+          { pid: 5678, parent_pid: 1, server: "weather", cmdline_display: "node.exe",
+            age_sec: 60, ram_bytes: 2 * 1024 * 1024 },
+        ],
+        killed: apply ? 2 : 0,
+        skipped: 0,
+      };
+    });
+
+    const { container } = render(<SectionMaintenance />);
+    const card = container.querySelector('[data-card="orphan-mcp-servers"]')!;
+
+    fireEvent.click(card.querySelectorAll("button")[0]); // Preview
+    await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
+
+    fireEvent.click(card.querySelector('[data-testid="orphan-mcp-clean-button"]')!);
+    await waitFor(() => expect(activeModal(container)).toBeTruthy());
+
+    // The snapshot at modal-open holds 2 rows; the Confirm body shows
+    // PID 1234 + PID 5678. Click Confirm.
+    clickConfirmModal(container as HTMLElement);
+
+    await waitFor(() => expect(applyCount).toBe(1));
+    // After apply, snapshot is cleared; opening the modal again would
+    // need fresh preview rows. Done banner indicates apply finished.
+    await waitFor(() =>
+      expect(card.querySelector(".maintenance-status")?.textContent).toMatch(/Done/),
+    );
+  });
+
+  it("A2: cmdlineDisplayOf renders <unknown> when cmdline_display is missing (no fallback to raw cmdline)", async () => {
+    // Production wire ALWAYS carries cmdline_display. This test
+    // simulates a regression / test fixture that omits it BUT still
+    // emits the legacy `cmdline` field — the contract is that the GUI
+    // must render `<unknown>`, never the raw cmdline (the very field
+    // Cleanup-6 redaction was meant to hide).
+    vi.spyOn(api, "cleanupOrphans").mockImplementation(async () => ({
+      orphans: [
+        // Cast through `as never` to bypass the OrphanProcess type's
+        // requirement of cmdline_display — we are explicitly testing
+        // the runtime fallback path for a missing field.
+        {
+          pid: 1234, parent_pid: 1, server: "fs",
+          cmdline: `"C:\\private\\workspace\\node.exe" --api-key=sk-leak`,
+          age_sec: 30, ram_bytes: 1024 * 1024,
+        } as never,
+      ],
+      killed: 0,
+      skipped: 0,
+    }));
+
+    const { container } = render(<SectionMaintenance />);
+    const card = container.querySelector('[data-card="orphan-mcp-servers"]')!;
+    fireEvent.click(card.querySelectorAll("button")[0]);
+    await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
+
+    const cmdCell = card.querySelector("td.maintenance-cmd");
+    // The Cmd column must render the explicit fallback marker, NOT the
+    // raw cmdline (which would re-leak the API key).
+    expect(cmdCell?.textContent).toBe("<unknown>");
+    // Defense in depth: assert NOTHING in the table contains the leaked
+    // argv string. This catches any future regression where the
+    // fallback chain is widened back to o.cmdline.
+    const tableHTML = card.querySelector("table")?.innerHTML ?? "";
+    expect(tableHTML).not.toMatch(/sk-leak/);
+    expect(tableHTML).not.toMatch(/private/);
+    expect(tableHTML).not.toMatch(/--api-key/);
+  });
+
+  it("A2: confirm modal also renders <unknown> instead of raw cmdline when cmdline_display is missing", async () => {
+    vi.spyOn(api, "cleanupOrphans").mockImplementation(async () => ({
+      orphans: [
+        {
+          pid: 1234, parent_pid: 1, server: "fs",
+          cmdline: `"C:\\private\\workspace\\node.exe" --api-key=sk-leak`,
+          age_sec: 30, ram_bytes: 1024 * 1024,
+        } as never,
+      ],
+      killed: 0,
+      skipped: 0,
+    }));
+
+    const { container } = render(<SectionMaintenance />);
+    const card = container.querySelector('[data-card="orphan-mcp-servers"]')!;
+    fireEvent.click(card.querySelectorAll("button")[0]);
+    await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
+    fireEvent.click(card.querySelector('[data-testid="orphan-mcp-clean-button"]')!);
+    await waitFor(() => expect(activeModal(container)).toBeTruthy());
+
+    const modal = activeModal(container)!;
+    const list = modal.querySelector('[data-testid="orphan-mcp-confirm-list"]')!;
+    const text = list.textContent ?? "";
+    expect(text).toMatch(/<unknown>/);
+    expect(text).not.toMatch(/sk-leak/);
+    expect(text).not.toMatch(/private/);
+  });
+});

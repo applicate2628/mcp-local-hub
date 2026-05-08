@@ -248,6 +248,199 @@ func TestRedactCmdlineForDisplay(t *testing.T) {
 	}
 }
 
+// TestIsOurOwnProcessSharedParser exercises isOurOwnProcess against the
+// scenarios that exposed the parser-inconsistency safety bug: codex
+// deep-sec PR #143 round 4 finding A1. Pre-fix, isOurOwnProcess used a
+// naive first-space split and returned `Program` for a real
+// `C:\Program Files\mcphub\mcphub.exe daemon ...` row, so parseOrphans
+// would NOT have skipped it — a live hub daemon could be classified as
+// orphan and killed. Post-fix, both functions delegate to the shared
+// firstTokenBasename helper.
+func TestIsOurOwnProcessSharedParser(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		// The architecture lane's exact safety scenario: WMIC-stripped
+		// quoted Windows path with embedded space lands on isOurOwnProcess
+		// AS-IS. Before the parser unification this returned false (split
+		// gave `Program`); after, the extension-anchor finds `.exe` and
+		// the basename `mcphub.exe` matches the allowlist.
+		{
+			name: "Windows Program Files mcphub.exe (WMIC-stripped quotes) — would have been killed",
+			in:   `C:\Program Files\mcphub\mcphub.exe daemon --server gdb`,
+			want: true,
+		},
+		// POSIX-style Program Files path WITHOUT the .exe extension —
+		// extension lookup fails, falls through to first-whitespace split.
+		// The first whitespace is between `mcphub` and `daemon`, so the
+		// first token is `C:\Program` and the basename is `Program`,
+		// which is NOT in the allowlist. Documented to anchor the
+		// behavior contract.
+		{
+			name: "Windows Program Files mcphub no-extension — false (first-space wins)",
+			in:   `C:\Program Files\mcphub\mcphub daemon`,
+			want: false,
+		},
+		{
+			name: "quoted exe with args",
+			in:   `"C:\path\mcp.exe" --foo`,
+			want: true,
+		},
+		{
+			name: "tab separator between exe and args",
+			in:   "mcphub.exe\tdaemon",
+			want: true,
+		},
+		{
+			name: "mixed-case basename matches allowlist",
+			in:   `MCPHUB.EXE daemon`,
+			want: true,
+		},
+		// Negative: a real-world unrelated process under Program Files
+		// must NOT match. The fix must not over-correct into a false
+		// positive that would skip a real orphan.
+		{
+			name: "unrelated nodejs under Program Files — false",
+			in:   `C:\Program Files\nodejs\node.exe -y server`,
+			want: false,
+		},
+		// Negative: bare basename not in the allowlist.
+		{
+			name: "bare uvx — false",
+			in:   `uvx mcp-server-time`,
+			want: false,
+		},
+		// Defense: empty / whitespace-only must NOT panic and must NOT
+		// classify as our process.
+		{
+			name: "empty",
+			in:   ``,
+			want: false,
+		},
+		{
+			name: "whitespace only",
+			in:   `   `,
+			want: false,
+		},
+		// Codex deep-sec finding A3 / Q1: a cmdline that uses `\n`
+		// between the executable and its first argument must still
+		// parse as our process by basename — if the parser swallowed
+		// the newline as part of the first token, isOurOwnProcess
+		// would have returned false for legitimate mcphub.exe rows.
+		{
+			name: "newline separator (LF) between exe and args",
+			in:   "mcphub.exe\ndaemon --server gdb",
+			want: true,
+		},
+		{
+			name: "Windows-style CRLF separator between exe and args",
+			in:   "mcphub.exe\r\ndaemon",
+			want: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := isOurOwnProcess(tc.in)
+			if got != tc.want {
+				t.Errorf("isOurOwnProcess(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRedactCmdlineNewlineHandling guards codex deep-sec PR #143 round 4
+// finding A3 / Q1: an executable cmdline that uses `\n` (or `\r\n`) as
+// the separator between the exe path and its arguments MUST split at the
+// newline. Pre-fix, only space/tab were treated as separators, so a
+// `node.exe\n--api-key=sk-secret` cmdline merged the entire string into
+// the "first token" and filepath.Base returned the WHOLE input — the
+// API-key argument leaked into cmdline_display.
+func TestRedactCmdlineNewlineHandling(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "newline between basename and arg containing API key",
+			in:   "node.exe\n--api-key=sk-secret",
+			want: "node.exe",
+		},
+		{
+			name: "CRLF between basename and arg",
+			in:   "python.exe\r\n-m server",
+			want: "python.exe",
+		},
+		// Newline ends the first token like a space — the path resolves
+		// to the basename of the directory + .exe component.
+		{
+			name: "Windows path with embedded space then newline-arg",
+			in:   "C:\\Program Files\\foo\\bar.exe\n-arg",
+			want: "bar.exe",
+		},
+		// CR alone (rare but legal as a separator) also ends the token.
+		{
+			name: "CR alone between basename and arg",
+			in:   "node.exe\r--key=sk-leak",
+			want: "node.exe",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := redactCmdlineForDisplay(tc.in)
+			if got != tc.want {
+				t.Errorf("redactCmdlineForDisplay(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+			// Defense in depth: the secret/argument string must NEVER
+			// appear in the output. Asserting absence catches future
+			// regressions where the separator set silently shrinks.
+			if strings.Contains(got, "sk-secret") || strings.Contains(got, "sk-leak") || strings.Contains(got, "--") {
+				t.Errorf("redactCmdlineForDisplay(%q) leaked argv: %q", tc.in, got)
+			}
+		})
+	}
+}
+
+// TestRedactCmdlineLengthCap verifies codex deep-sec PR #143 round 4
+// finding S2: a pathologically long basename input must not bloat the
+// JSON wire / orphan-table UI. The 256-byte cap is shared between the
+// helper and any consumer; truncation appends "..." so the UI shows the
+// "this was clipped" affordance.
+func TestRedactCmdlineLengthCap(t *testing.T) {
+	// Build a 1 KB basename — the entire string is one token (no
+	// whitespace, no path separator), so firstTokenBasename treats it
+	// as a single-token cmdline. After capping, length is exactly 256
+	// and the suffix is the truncation marker.
+	long := strings.Repeat("a", 1024)
+	got := redactCmdlineForDisplay(long)
+	if len(got) != 256 {
+		t.Errorf("redactCmdlineForDisplay(1KB basename) length = %d, want 256", len(got))
+	}
+	if !strings.HasSuffix(got, "...") {
+		t.Errorf("redactCmdlineForDisplay(1KB basename) = %q, want ... suffix", got[len(got)-10:])
+	}
+	// Defense: when the input is comfortably under the cap, output is
+	// returned unchanged (no spurious truncation marker).
+	short := "node.exe"
+	if redactCmdlineForDisplay(short) != "node.exe" {
+		t.Errorf("redactCmdlineForDisplay(short) modified an under-cap input")
+	}
+	// Boundary: a 256-byte basename must NOT be truncated (fits exactly).
+	exact := strings.Repeat("b", 256)
+	gotExact := redactCmdlineForDisplay(exact)
+	if gotExact != exact {
+		t.Errorf("redactCmdlineForDisplay(exactly 256) modified a fits-exactly input")
+	}
+	// Boundary: a 257-byte basename triggers the cap.
+	over := strings.Repeat("c", 257)
+	gotOver := redactCmdlineForDisplay(over)
+	if len(gotOver) != 256 || !strings.HasSuffix(gotOver, "...") {
+		t.Errorf("redactCmdlineForDisplay(257) = len=%d suffix=%q, want len=256 ending in ...", len(gotOver), gotOver[len(gotOver)-3:])
+	}
+}
+
 // TestOrphanProcessJSONOmitsRawCmdline guards the wire-format invariant:
 // the raw `Cmdline` field MUST NOT appear in JSON output (it carries
 // workspace paths and possible secrets-in-args). Only `cmdline_display`

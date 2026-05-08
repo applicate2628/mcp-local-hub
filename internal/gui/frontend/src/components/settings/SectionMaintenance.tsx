@@ -77,6 +77,17 @@ function CardOrphanMcpServers(): preact.JSX.Element {
   // is tracked separately from action state so a Cancel keeps the
   // preview rows visible (the modal closes without mutating state).
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // Codex deep-sec PR #143 round 4 finding R1: capture the orphan list
+  // at modal-open time and render the modal from THIS snapshot, not
+  // live `state.orphans`. Pre-fix, the modal title/body derived from
+  // live state — if the user clicked Preview again (or any concurrent
+  // path mutated state) while the modal was open, the modal data went
+  // stale and Confirm would apply against fresh, unconfirmed data.
+  // Post-fix, the snapshot is the only source of truth for the open
+  // modal; mutations to `state.orphans` after open do NOT bleed into
+  // the visible confirm body.
+  const [orphansSnapshot, setOrphansSnapshot] =
+    useState<OrphanProcess[] | null>(null);
 
   // Codex Cloud bot P2 on PR #131 (commit 99938e7): non-Windows backend
   // returns 501 with `not_supported_on_this_os`. Detect that body and
@@ -91,6 +102,15 @@ function CardOrphanMcpServers(): preact.JSX.Element {
   }
 
   async function preview() {
+    // Defense-in-depth: if a Preview is requested while a modal is
+    // open, close the modal and clear the snapshot. The user must
+    // re-confirm against the new preview. This guarantees Confirm
+    // always applies to a snapshot the user just acknowledged
+    // (codex deep-sec finding R1).
+    if (confirmOpen) {
+      setConfirmOpen(false);
+      setOrphansSnapshot(null);
+    }
     setState({ kind: "loading" });
     try {
       // apply=false → dry-run / preview path on the server. Wire-shape
@@ -107,17 +127,35 @@ function CardOrphanMcpServers(): preact.JSX.Element {
   function openConfirm() {
     if (state.kind !== "preview" || !state.orphans) return;
     if (state.orphans.length === 0) return;
+    // Snapshot the orphan list AT the moment the modal opens. The modal
+    // renders exclusively from this snapshot, so post-open state
+    // mutations cannot change what the user is confirming (codex
+    // deep-sec finding R1). Shallow-copy so a future setState on the
+    // same row reference can't bleed in either.
+    setOrphansSnapshot([...state.orphans]);
     setConfirmOpen(true);
   }
 
+  function cancelConfirm() {
+    setConfirmOpen(false);
+    setOrphansSnapshot(null);
+  }
+
   async function apply() {
-    if (state.kind !== "preview" || !state.orphans) return;
-    const n = state.orphans.length;
-    if (n === 0) return;
+    // Apply uses the SNAPSHOT, not live state. If the snapshot is
+    // somehow null (cancelled mid-flight, defensive guard) we abort.
+    if (!orphansSnapshot || orphansSnapshot.length === 0) {
+      cancelConfirm();
+      return;
+    }
     setConfirmOpen(false);
     setState({ kind: "loading" });
     try {
-      // apply=true → explicit destructive opt-in.
+      // apply=true → explicit destructive opt-in. Backend re-resolves
+      // the orphan set from a fresh process snapshot; the per-row
+      // identity gate (PID-reuse, start-time precedes snapshot, etc.)
+      // is the authoritative kill filter. The frontend snapshot is
+      // about UI consent, not about pinning the kill set.
       const r = await cleanupOrphans(true);
       // Retain the row list so the post-apply table can render per-row
       // kill_err. Bot P2 on commit 72757c6 / kosyak
@@ -126,17 +164,21 @@ function CardOrphanMcpServers(): preact.JSX.Element {
       // only "Done. Killed N, skipped M." with no actionable diagnostic
       // for the very revalidation skips the kill loop now produces.
       setState({ kind: "applied", killed: r.killed, skipped: r.skipped, orphans: r.orphans });
+      // Clear the snapshot after a successful apply so a stale list
+      // can't be used by any subsequent path.
+      setOrphansSnapshot(null);
     } catch (e) {
       setState({ kind: "error", error: friendlyError(e) });
+      setOrphansSnapshot(null);
     }
   }
 
-  // Build the confirmation body once based on the current preview rows.
-  // Cleanup-6: the orphans table renders cmdline_display (basename); the
-  // confirm body uses the same redacted field — full cmdlines are NEVER
-  // exposed to the GUI surface (workspace paths / argv-borne secrets).
-  const previewOrphans = state.kind === "preview" ? (state.orphans ?? []) : [];
-  const confirmCount = previewOrphans.length;
+  // Codex deep-sec finding R1: the modal renders from the SNAPSHOT
+  // captured at modal-open, not from live state.orphans. While the
+  // modal is closed snapshot is null and the body collapses to an
+  // empty list (the dialog is hidden anyway).
+  const confirmOrphans = orphansSnapshot ?? [];
+  const confirmCount = confirmOrphans.length;
   return (
     <div data-card="orphan-mcp-servers" class="maintenance-card">
       <h3>Orphan MCP server processes</h3>
@@ -168,7 +210,7 @@ function CardOrphanMcpServers(): preact.JSX.Element {
         title={`Clean ${confirmCount} orphan MCP process${confirmCount === 1 ? "" : "es"}?`}
         body={
           <ul class="maintenance-confirm-list" data-testid="orphan-mcp-confirm-list">
-            {previewOrphans.map((o) => (
+            {confirmOrphans.map((o) => (
               <li key={o.pid}>
                 <code>{cmdlineDisplayOf(o)}</code>
                 {" "}PID {o.pid}
@@ -180,20 +222,25 @@ function CardOrphanMcpServers(): preact.JSX.Element {
         confirmLabel="Clean"
         danger
         onConfirm={apply}
-        onCancel={() => setConfirmOpen(false)}
+        onCancel={cancelConfirm}
       />
     </div>
   );
 }
 
 // Cleanup-6: the orphans table renders the redacted cmdline_display
-// field (basename only — no path, no args). For backward compatibility
-// with in-flight test fixtures that still set the deprecated `cmdline`,
-// fall back to it when cmdline_display is missing. Production wire
-// always carries cmdline_display.
+// field (basename only — no path, no args).
+//
+// Codex deep-sec PR #143 round 4 finding A2: the deprecated `cmdline`
+// fallback was removed. If a future backend response (or a test fixture)
+// omits cmdline_display, render `<unknown>` rather than re-exposing the
+// raw command line — full cmdlines carry workspace paths, username
+// segments, and possible API keys/tokens in argv. Production wire ALWAYS
+// carries cmdline_display; the fallback could only matter in a regression
+// scenario, and a regression scenario is exactly when re-leaking the raw
+// field would be most damaging. Fail closed: opt-out beats opt-in here.
 function cmdlineDisplayOf(o: OrphanProcess): string {
   if (o.cmdline_display && o.cmdline_display.length > 0) return o.cmdline_display;
-  if (o.cmdline && o.cmdline.length > 0) return o.cmdline;
   return "<unknown>";
 }
 

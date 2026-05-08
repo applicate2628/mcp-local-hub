@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"io"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -20,22 +19,18 @@ import (
 // Used by the orphan detector to skip processes that are running by
 // design — their parent is typically the Task Scheduler service, so the
 // parent-is-our-daemon heuristic alone cannot protect them.
+//
+// Codex deep-sec PR #143 round 4 finding A1: this function used to ship
+// its own first-token parser (split at first space, fall through to
+// filepath.Base). That was inconsistent with redactCmdlineForDisplay's
+// shape-aware parser and would mis-classify a cmdline like
+// `C:\Program Files\mcphub\mcphub.exe daemon --server gdb` — the naive
+// split returned `Program` instead of `mcphub.exe`, so isOurOwnProcess
+// returned false and parseOrphans would have flagged a real hub daemon
+// as orphan and killed it. The shared helper below now performs the
+// extension-lookup walk for both functions.
 func isOurOwnProcess(cmdline string) bool {
-	if cmdline == "" {
-		return false
-	}
-	// Extract the first token (the exe path). Handles both quoted and
-	// unquoted cmdlines: `"C:\path with spaces\mcphub.exe" daemon ...`
-	// and `C:\path\mcphub.exe daemon ...`.
-	first := cmdline
-	if cmdline[0] == '"' {
-		if end := strings.IndexByte(cmdline[1:], '"'); end > 0 {
-			first = cmdline[1 : 1+end]
-		}
-	} else if sp := strings.IndexByte(cmdline, ' '); sp > 0 {
-		first = cmdline[:sp]
-	}
-	base := strings.ToLower(filepath.Base(first))
+	base := strings.ToLower(firstTokenBasename(cmdline))
 	switch base {
 	case "mcphub.exe", "mcphub",
 		"mcp.exe", "mcp",
@@ -72,61 +67,62 @@ type OrphanProcess struct {
 	KillErr         string `json:"kill_err,omitempty"`
 }
 
-// redactCmdlineForDisplay returns the executable's basename only, with no
-// path and no arguments. Cleanup-6 security fix: full command lines often
-// embed workspace paths (D:\dev\client-confidential-project\...), username
-// segments (C:\Users\<name>\...), filesystem paths to private files, and
-// process arguments that may contain API keys or tokens (--api-key=sk-...).
-// The orphan-table UI in the GUI and any operator screenshots / browser
-// dev-tools that observe the wire MUST see only the basename — the PID,
-// inferred Server, RAM, and Age columns carry the operational info needed
-// to confirm a kill.
+// firstTokenBasename returns the basename (no directory prefix) of the
+// FIRST token of a cmdline string — the executable path component before
+// any arguments. Returns "" for empty/whitespace-only input.
 //
-// Behavior:
-//   - Quoted form: `"C:\path with spaces\foo.exe" arg1 arg2` → `foo.exe`
-//   - Unquoted form: `C:\path\foo.exe arg1 arg2` → `foo.exe`
-//   - **Windows path with embedded space, quotes stripped by WMIC**:
-//     `C:\Program Files\nodejs\node.exe -y @modelcontextprotocol/server-memory`
-//     → `node.exe`. WMIC's `splitCSVLine` strips the surrounding quotes
-//     from CommandLine fields, so the unquoted-but-spaces-in-path case is
-//     common on real Windows installations under `Program Files`. Codex
-//     bot PR #143 round 1 P2 caught this — without the executable-extension
-//     lookup below the function used to return `Program`, misidentifying
-//     orphan rows.
-//   - POSIX path: `/usr/local/bin/uvx mcp-server-time` → `uvx`
-//   - Empty / whitespace-only: `<unknown>`
+// Codex deep-sec PR #143 round 4 finding A1: this helper exists so the
+// orphan detector and the redaction pipeline share ONE shape-aware parser.
+// Two divergent first-token parsers used to ship — `isOurOwnProcess` had
+// a naive first-space split (so `C:\Program Files\mcphub\mcphub.exe ...`
+// returned `Program` and could be classified as an orphan and killed),
+// while `redactCmdlineForDisplay` already knew the WMIC-stripped Windows
+// path shape. Unified here to eliminate the safety bug.
 //
-// The parsing matches the canonical pattern in isOurOwnProcess: an opening
-// quote selects the quoted token; otherwise we look for the first
-// recognized Windows executable extension followed by a space or end of
-// string (handles paths-with-spaces); finally we fall back to splitting
-// at the first whitespace (POSIX with no extension marker).
-func redactCmdlineForDisplay(cmdline string) string {
+// Parsing rules:
+//   - Empty / whitespace-only input: returns "".
+//   - Opening double-quote: take everything between the matching quotes
+//     (handles `"C:\Program Files\foo.exe" arg1`).
+//   - Unterminated opening quote: take the rest of the string as the
+//     path token (best-effort, no panic on malformed wmic output).
+//   - First token contains a path separator AND a recognized Windows
+//     executable extension (.exe/.com/.cmd/.bat/.ps1) precedes the
+//     earliest whitespace: anchor on `<ext><whitespace>` so a path
+//     with an embedded space (the WMIC-stripped `Program Files` case)
+//     stays intact.
+//   - Otherwise: first-whitespace split — handles bare-basename launchers
+//     (`uvx mcp-server-time --cache C:\tmp\helper.exe` correctly returns
+//     `uvx`, NOT `helper.exe` from a later argument).
+//
+// Codex deep-sec finding A3 / Q1: the whitespace separator set is
+// ` \t\n\r` (NOT just space + tab). A cmdline like
+// `node.exe\n--api-key=sk-secret` previously merged the entire string
+// into the "first token" because `\n` was not a separator, and the
+// returned basename would have leaked the API key into cmdline_display.
+//
+// Codex deep-sec finding S2: the result is capped at 256 bytes to keep
+// pathological inputs (long unicode-decoded basename, etc.) from bloating
+// JSON output and the orphan-table UI. Real exe basenames are <100 chars;
+// the cap is forgiving but bounded.
+func firstTokenBasename(cmdline string) string {
 	c := strings.TrimSpace(cmdline)
 	if c == "" {
-		return "<unknown>"
+		return ""
 	}
 	first := c
-	switch {
-	case c[0] == '"':
+	if c[0] == '"' {
 		if end := strings.IndexByte(c[1:], '"'); end > 0 {
 			first = c[1 : 1+end]
 		} else {
 			// Unterminated quote → treat the rest as the path token.
 			first = c[1:]
 		}
-	default:
-		// First-whitespace position is the naive boundary. We only deviate
-		// from it when the cmdline LOOKS LIKE a WMIC-stripped quoted Windows
-		// path: the first token contains a path separator (so a quoted
-		// `"C:\Program Files\..."` lost its quotes and the path got split
-		// at the embedded space). Bare basenames like `uvx mcp-server-time`
-		// or `python3 -m server` MUST use the naive first-whitespace split
-		// so a `.exe`-bearing argument later in the cmdline cannot mislead
-		// the boundary picker (codex bot PR #143 round 2 P2:
-		// `uvx mcp-server-time --cache C:\tmp\helper.exe` used to render
-		// as `helper.exe` instead of `uvx`).
-		sp := strings.IndexAny(c, " \t")
+	} else {
+		// Whitespace separators include `\n` and `\r` so a cmdline like
+		// `node.exe\n--api-key=sk-secret` cannot smuggle the API-key
+		// suffix into the "first token" and through filepath.Base into
+		// cmdline_display (codex deep-sec finding A3 / Q1).
+		sp := strings.IndexAny(c, " \t\n\r")
 		switch {
 		case sp < 0:
 			// No whitespace anywhere — single-token cmdline, the whole
@@ -152,7 +148,7 @@ func redactCmdlineForDisplay(cmdline string) string {
 	}
 	first = strings.TrimSpace(first)
 	if first == "" {
-		return "<unknown>"
+		return ""
 	}
 	// filepath.Base handles both backslash and forward-slash separators on
 	// Windows; on POSIX it splits on forward-slash only. The orphan
@@ -161,6 +157,38 @@ func redactCmdlineForDisplay(cmdline string) string {
 	if i := strings.LastIndexAny(first, `\/`); i >= 0 {
 		first = first[i+1:]
 	}
+	if first == "" {
+		return ""
+	}
+	// Codex deep-sec finding S2: cap pathologically long basenames so a
+	// rogue input cannot bloat the JSON wire / UI table. 256 bytes is
+	// more than 2.5× the longest real exe basename ever observed.
+	const cmdlineDisplayCap = 256
+	if len(first) > cmdlineDisplayCap {
+		// Reserve 3 bytes for the truncation marker so the UI shows the
+		// "this was clipped" affordance.
+		first = first[:cmdlineDisplayCap-3] + "..."
+	}
+	return first
+}
+
+// redactCmdlineForDisplay returns the executable's basename only, with no
+// path and no arguments. Cleanup-6 security fix: full command lines often
+// embed workspace paths (D:\dev\client-confidential-project\...), username
+// segments (C:\Users\<name>\...), filesystem paths to private files, and
+// process arguments that may contain API keys or tokens (--api-key=sk-...).
+// The orphan-table UI in the GUI and any operator screenshots / browser
+// dev-tools that observe the wire MUST see only the basename — the PID,
+// inferred Server, RAM, and Age columns carry the operational info needed
+// to confirm a kill.
+//
+// Behavior is delegated to firstTokenBasename; this thin wrapper just maps
+// the empty-input sentinel to the UI-visible `<unknown>` string. Both
+// `isOurOwnProcess` and `redactCmdlineForDisplay` consume the same parser
+// to keep the orphan-allowlist gate consistent with the displayed name
+// (codex deep-sec PR #143 round 4 finding A1).
+func redactCmdlineForDisplay(cmdline string) string {
+	first := firstTokenBasename(cmdline)
 	if first == "" {
 		return "<unknown>"
 	}
@@ -205,7 +233,10 @@ func findWindowsExeExtensionEnd(s string) int {
 			abs := searchFrom + idx
 			end := abs + len(ext)
 			// Boundary check: end-of-string OR next char is whitespace.
-			if end == len(s) || s[end] == ' ' || s[end] == '\t' {
+			// Newline/CR included alongside space/tab so a cmdline that
+			// uses `\n` or `\r\n` between exe and args still anchors here
+			// (codex deep-sec PR #143 round 4 finding A3 / Q1).
+			if end == len(s) || s[end] == ' ' || s[end] == '\t' || s[end] == '\n' || s[end] == '\r' {
 				if bestIdx < 0 || end < bestIdx {
 					bestIdx = end
 				}
@@ -375,6 +406,14 @@ func isBroadLauncherToken(pattern string) bool {
 // patterns BUT whose parent is NOT an `mcp.exe daemon` process.
 //
 // Visible for unit tests so fixture CSVs can drive the logic without wmic.
+//
+// Known limitation (codex deep-sec PR #143 round 4 finding Q2): the
+// bufio.Scanner below splits strictly on newline, so a CommandLine field
+// that contains an embedded `\n` (rare; quotes around such fields would
+// normally protect them) would prematurely end the row. Real WMIC /
+// CIM output never produces this shape in practice; rewriting the
+// parser to a state-machine CSV reader is deferred until a real-world
+// case appears.
 func parseOrphans(r io.Reader, patterns []string) []OrphanProcess {
 	s := bufio.NewScanner(r)
 	s.Buffer(make([]byte, 0, 64*1024), 1024*1024)
