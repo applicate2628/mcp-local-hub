@@ -10,6 +10,7 @@ export function CapabilityCard({ row, probe }: Props) {
   const testId = `capability-card-${row.server}-${row.daemon}`;
   const probeOk = probe?.ok ?? true;
   const probeErr = probe?.err ?? "";
+  const isSynthetic = probe?.source === "proxy-synthetic";
 
   return (
     <article class="capability-card" data-testid={testId}>
@@ -19,6 +20,15 @@ export function CapabilityCard({ row, probe }: Props) {
         <span class={`capability-card-probe-status ${probeOk ? "ok" : "err"}`}>
           {probeOk ? "✓ probed" : "✗ probe err"}
         </span>
+        {isSynthetic && (
+          <span
+            class="synthetic-source-pill"
+            data-testid="synthetic-source-pill"
+            title="Capabilities reported by the lazy-proxy stub; not a live MCP roundtrip."
+          >
+            synthetic
+          </span>
+        )}
         {!probeOk && probeErr && (
           <span class="capability-card-probe-err">{probeErr}</span>
         )}

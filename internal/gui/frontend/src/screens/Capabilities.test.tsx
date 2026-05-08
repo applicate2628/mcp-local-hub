@@ -366,3 +366,89 @@ describe("CapabilitiesScreen — Phase 6 item-list rendering + items-null", () =
     expect(prompts.textContent).toContain("tools/list: parse: unexpected EOF");
   });
 });
+
+describe("CapabilitiesScreen — Phase 7 synthetic pill + legend", () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  it("renders synthetic-source pill when probe.source === 'proxy-synthetic' (AC #8)", async () => {
+    const row: CapabilityRow = {
+      server: "lazy", daemon: "default",
+      tools:     { state: "unsupported", items: null },
+      prompts:   { state: "unsupported", items: null },
+      resources: { state: "unsupported", items: null },
+    };
+    const probe: ProbeRow = { server: "lazy", daemon: "default", ok: true, tool_count: 0, err: "", source: "proxy-synthetic" };
+    const snap: HealthSnapshot = {
+      ...emptySnapshot,
+      probes:       { ...emptySnapshot.probes!, items: [probe] },
+      capabilities: { items: [row], generated_at: 1715164800, ttl_ms: 60000, errors: [] },
+    };
+    vi.spyOn(api, "fetchOrThrow").mockResolvedValue(snap);
+
+    const { findByTestId } = render(<CapabilitiesScreen />);
+    const card = await findByTestId("capability-card-lazy-default");
+    const pill = card.querySelector('[data-testid="synthetic-source-pill"]');
+    expect(pill).not.toBeNull();
+    expect(pill!.textContent).toContain("synthetic");
+  });
+
+  it("does NOT render the synthetic pill when probe.source is empty", async () => {
+    const row: CapabilityRow = {
+      server: "real", daemon: "default",
+      tools:     { state: "ok", items: [] },
+      prompts:   { state: "empty", items: [] },
+      resources: { state: "empty", items: [] },
+    };
+    const probe: ProbeRow = { server: "real", daemon: "default", ok: true, tool_count: 0, err: "", source: "" };
+    const snap: HealthSnapshot = {
+      ...emptySnapshot,
+      probes:       { ...emptySnapshot.probes!, items: [probe] },
+      capabilities: { items: [row], generated_at: 1715164800, ttl_ms: 60000, errors: [] },
+    };
+    vi.spyOn(api, "fetchOrThrow").mockResolvedValue(snap);
+
+    const { findByTestId } = render(<CapabilitiesScreen />);
+    const card = await findByTestId("capability-card-real-default");
+    expect(card.querySelector('[data-testid="synthetic-source-pill"]')).toBeNull();
+  });
+
+  it("legend panel toggles open and lists all 5 states", async () => {
+    vi.spyOn(api, "fetchOrThrow").mockResolvedValue(emptySnapshot);
+    const { findByTestId } = render(<CapabilitiesScreen />);
+    const toggle = await findByTestId("capabilities-legend-toggle");
+    const legend = await findByTestId("capabilities-legend");
+    expect(legend.classList.contains("expanded")).toBe(false);
+
+    fireEvent.click(toggle);
+    expect(legend.classList.contains("expanded")).toBe(true);
+    expect(legend.textContent).toContain("ok");
+    expect(legend.textContent).toContain("empty");
+    expect(legend.textContent).toContain("unsupported");
+    expect(legend.textContent).toContain("error");
+    expect(legend.textContent).toContain("stale");
+
+    fireEvent.click(toggle);
+    expect(legend.classList.contains("expanded")).toBe(false);
+  });
+
+  it("forward-compat: state='stale' fixture renders the orange badge (AC #20)", async () => {
+    const row: CapabilityRow = {
+      server: "old", daemon: "default",
+      tools:     { state: "stale", items: [] },
+      prompts:   { state: "empty", items: [] },
+      resources: { state: "empty", items: [] },
+    };
+    const probe: ProbeRow = { server: "old", daemon: "default", ok: true, tool_count: 0, err: "", source: "" };
+    const snap: HealthSnapshot = {
+      ...emptySnapshot,
+      probes:       { ...emptySnapshot.probes!, items: [probe] },
+      capabilities: { items: [row], generated_at: 1715164800, ttl_ms: 60000, errors: [] },
+    };
+    vi.spyOn(api, "fetchOrThrow").mockResolvedValue(snap);
+
+    const { findByTestId } = render(<CapabilitiesScreen />);
+    const tools = await findByTestId("capability-section-tools");
+    const badge = tools.querySelector(".state-badge-stale");
+    expect(badge).not.toBeNull();
+  });
+});

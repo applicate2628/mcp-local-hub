@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "preact/hooks";
 import { fetchOrThrow } from "../api";
 import type { HealthSnapshot } from "../types";
 import { CapabilityCard } from "../components/CapabilityCard";
+import { CapabilityLegend } from "../components/CapabilityLegend";
 
 // G3 — capability status display screen. Read-only view of the G2
 // /api/health snapshot. NO tool execution; items render as labels only.
@@ -100,6 +101,7 @@ export function CapabilitiesScreen() {
             {refreshing ? "Refreshing…" : "Refresh"}
           </button>
         </div>
+        <CapabilityLegend />
         {refreshError && (
           <p class="error" role="alert">Refresh failed: {refreshError}</p>
         )}
