@@ -48,9 +48,22 @@ export interface HealthSnapshot {
 export interface CapabilitiesSection {
   items: CapabilityRow[];
   generated_at: number;  // unix seconds
-  ttl_ms: number;
+  ttl_ms: number;        // health.go:101 — non-nullable for caps section
   errors: SectionError[];
 }
+
+// Note (codex Phase 1 review correction): the wider HealthSnapshot has
+// some fields with subtler shapes than the spec's first draft assumed:
+//   - hub.started_at: string (RFC3339-ish, not unix seconds)
+//   - hub.lock: required (no omitempty / no pointer)
+//   - hub.ttl_ms: number | null (Go: *int64)
+//   - daemon.backend: optional (Go: omitempty)
+//   - daemon.last_restart_at: string | null (Go: *string)
+//   - probe.err: required string (always emitted, "" when no err)
+//   - probe.source: required string ("" | "proxy-synthetic")
+// G3's UI reads only the capabilities + probes sections, so these
+// hub/daemon corrections are noted for future consumers; the wire
+// types in `internal/gui/frontend/src/types.ts` reflect them.
 
 export interface CapabilityRow {
   server: string;
