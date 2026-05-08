@@ -154,7 +154,6 @@ export function CapabilitiesScreen() {
   // `probes.items[*].ok === false` with non-empty err message, NOT
   // necessarily into `probes.errors[]`. Both shapes signal failures,
   // so the classifier must check both.
-  const daemonCount = state.data.daemons?.items.length ?? 0;
   const probeErrors = state.data.probes?.errors ?? [];
   const capabilityErrors = caps?.errors ?? [];
   const daemonErrors = state.data.daemons?.errors ?? [];
@@ -162,6 +161,31 @@ export function CapabilitiesScreen() {
   // extracted to module level (isActionableProbeFailure) so the
   // sentinel string isn't duplicated in two places.
   const failedProbes = state.data.probes?.items.filter(isActionableProbeFailure) ?? [];
+
+  // Codex bot PR #144 r10 P2: the failure-empty banner used to
+  // interpolate `daemonCount` (total known daemons), which overstated
+  // impact when only some daemons failed (1 stopped + 1 real error
+  // misreported as "failed for 2 daemons"). Count UNIQUE failing
+  // daemons by extracting `<server>/<daemon>` identities from the
+  // error sources. SectionError.scope shapes seen in health.go:
+  //   - `daemon:<server>/<daemon>` (daemonErrors)
+  //   - `probe:<server>/<daemon>` (probeErrors)
+  //   - `capability:<server>/<daemon>` (capabilityErrors)
+  // failedProbes carries explicit `{server, daemon}` fields.
+  const failedDaemonSet = new Set<string>();
+  for (const p of failedProbes) {
+    failedDaemonSet.add(`${p.server}/${p.daemon}`);
+  }
+  const SCOPE_DAEMON_RE = /^(?:daemon|probe|capability):(.+)$/;
+  for (const e of [...probeErrors, ...capabilityErrors, ...daemonErrors]) {
+    const m = SCOPE_DAEMON_RE.exec(e.scope);
+    if (m) failedDaemonSet.add(m[1]);
+    // If scope doesn't match the daemon-specific pattern (e.g.
+    // `wmic` for system-level errors), it's NOT a per-daemon
+    // failure and is counted in the error-list but not the
+    // banner's daemon count.
+  }
+  const failedDaemonCount = failedDaemonSet.size;
   const hasFailures =
     probeErrors.length > 0 ||
     capabilityErrors.length > 0 ||
@@ -229,8 +253,8 @@ export function CapabilitiesScreen() {
         showFailureEmpty ? (
           <div class="capabilities-empty" data-testid="capabilities-empty-failures">
             <p class="error" role="alert">
-              Capabilities not yet available — {daemonCount > 0
-                ? `probes or capability fetch failed for ${daemonCount} daemon${daemonCount === 1 ? "" : "s"}`
+              Capabilities not yet available — {failedDaemonCount > 0
+                ? `probes or capability fetch failed for ${failedDaemonCount} daemon${failedDaemonCount === 1 ? "" : "s"}`
                 : "see backend errors below"}.
             </p>
             {renderSectionErrors()}

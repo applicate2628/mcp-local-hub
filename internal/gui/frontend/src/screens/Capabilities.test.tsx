@@ -325,6 +325,50 @@ describe("CapabilitiesScreen — Phase 3 Refresh", () => {
     expect(queryByTestId("capabilities-partial-failures")).toBeNull();
   });
 
+  it("failure-empty count reflects ONLY failed daemons, not total (codex bot PR #144 r10 P2)", async () => {
+    // Codex bot finding (round 10): the banner used to interpolate
+    // daemons.items.length (total known daemons), which overstated
+    // impact when only some failed. With 1 stopped daemon (not a
+    // failure, sentinel err) + 1 daemon with real probe error, the
+    // banner should say "failed for 1 daemon", NOT "failed for 2".
+    const mixedSnapshot: HealthSnapshot = {
+      ...emptySnapshot,
+      daemons: {
+        items: [
+          { server: "stopped-svc", daemon: "default", pid: 0, port: 0, ram_bytes: 0,
+            uptime_sec: 0, state: "stopped", restart_count: 0, last_restart_at: null },
+          { server: "broken-svc", daemon: "default", pid: 0, port: 0, ram_bytes: 0,
+            uptime_sec: 0, state: "running", restart_count: 0, last_restart_at: null },
+        ],
+        generated_at: 0, ttl_ms: 2000, errors: [],
+      },
+      probes: {
+        items: [
+          // Stopped daemon with sentinel — NOT counted as a failure.
+          { server: "stopped-svc", daemon: "default", ok: false, tool_count: 0,
+            err: "no probe (daemon not running or probe disabled)", source: "" },
+          // Real probe error — counted.
+          { server: "broken-svc", daemon: "default", ok: false, tool_count: 0,
+            err: "initialize: HTTP 500", source: "" },
+        ],
+        generated_at: 0, ttl_ms: 10000, errors: [],
+      },
+      capabilities: { items: [], generated_at: 1715164800, ttl_ms: 60000, errors: [] },
+    };
+    vi.spyOn(api, "fetchOrThrow").mockResolvedValue(mixedSnapshot);
+
+    const { findByTestId } = render(<CapabilitiesScreen />);
+    const failureEmpty = await findByTestId("capabilities-empty-failures");
+    // CRITICAL: must say "1 daemon" (singular), NOT "2 daemons" (total).
+    expect(failureEmpty.textContent).toContain("failed for 1 daemon");
+    expect(failureEmpty.textContent).not.toContain("failed for 2 daemons");
+    // The broken-svc probe error is visible.
+    expect(failureEmpty.textContent).toContain("broken-svc/default");
+    expect(failureEmpty.textContent).toContain("initialize: HTTP 500");
+    // The stopped-svc sentinel is NOT shown (filtered out by isActionableProbeFailure).
+    expect(failureEmpty.textContent).not.toContain("stopped-svc");
+  });
+
   it("daemons present but NO errors → canonical empty (not failure-empty) (codex bot PR #144 round 6 P2)", async () => {
     // Codex bot finding (round 6): daemons with probe.ok=false are
     // SKIPPED from capabilities.items by computeCapabilitiesSection
