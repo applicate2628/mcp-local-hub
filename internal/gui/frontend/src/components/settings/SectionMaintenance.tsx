@@ -261,13 +261,15 @@ function CardOrphanLogWatchers(): preact.JSX.Element {
       </div>
       <CardResult state={state} />
       {(state.kind === "preview" || state.kind === "applied") && state.watchers && (
-        <WatchersTable watchers={state.watchers} />
+        <WatchersTable watchers={state.watchers} includeLive={includeLive} />
       )}
     </div>
   );
 }
 
-function WatchersTable({ watchers }: { watchers: LogWatcher[] }): preact.JSX.Element {
+function WatchersTable(
+  { watchers, includeLive }: { watchers: LogWatcher[]; includeLive: boolean },
+): preact.JSX.Element {
   if (watchers.length === 0) {
     return <p class="maintenance-empty">No orphan watchers found.</p>;
   }
@@ -296,7 +298,7 @@ function WatchersTable({ watchers }: { watchers: LogWatcher[] }): preact.JSX.Ele
             <td class="maintenance-cmd">{w.cmdline}</td>
             {showResult && (
               <td class={w.kill_err ? "maintenance-error" : ""}>
-                {w.kill_err || "killed"}
+                {w.kill_err || (w.parent_alive && !includeLive ? "skipped (live parent)" : "killed")}
               </td>
             )}
           </tr>

@@ -166,6 +166,38 @@ describe("SectionMaintenance — kill_err visibility on apply (Cloud bot P2 on 7
     });
   });
 
+  it("does not mislabel live-parent skipped log-watchers as killed in mixed apply results", async () => {
+    let phase: "preview" | "apply" = "preview";
+    vi.spyOn(api, "cleanupLogWatchers").mockImplementation(async (apply) => {
+      if (apply) phase = "apply";
+      return {
+        watchers: phase === "preview"
+          ? [
+              { pid: 200, parent_pid: 100, parent_alive: true, name: "tail.exe", age_sec: 30, cmdline: "tail live.log" },
+              { pid: 300, parent_pid: 1, parent_alive: false, name: "grep.exe", age_sec: 60, cmdline: "grep orphan.log" },
+            ]
+          : [
+              { pid: 200, parent_pid: 100, parent_alive: true, name: "tail.exe", age_sec: 30, cmdline: "tail live.log" },
+              { pid: 300, parent_pid: 1, parent_alive: false, name: "grep.exe", age_sec: 60, cmdline: "grep orphan.log", kill_err: "access denied" },
+            ],
+        killed: apply ? 0 : 0,
+        skipped: apply ? 2 : 0,
+      };
+    });
+
+    const { container } = render(<SectionMaintenance />);
+    const card = container.querySelector('[data-card="orphan-log-watchers"]')!;
+    fireEvent.click(card.querySelectorAll("button")[0]); // Preview
+    await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
+    fireEvent.click(card.querySelectorAll("button")[1]); // Clean
+
+    await waitFor(() => {
+      const cells = Array.from(card.querySelectorAll("td")).map((td) => td.textContent);
+      expect(cells).toContain("skipped (live parent)");
+      expect(cells).not.toContain("killed");
+    });
+  });
+
   it("renders HTTP 207 partial-failure banner + per-daemon error on Stop-All", async () => {
     vi.spyOn(api, "stopAllDaemons").mockResolvedValue({
       stop_results: [
