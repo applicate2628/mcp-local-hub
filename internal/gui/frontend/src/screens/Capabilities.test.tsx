@@ -281,6 +281,40 @@ describe("CapabilitiesScreen — Phase 3 Refresh", () => {
     expect(queryByTestId("capabilities-empty-failures")).toBeNull();
   });
 
+  it("probe.ok=false with sentinel err (daemon not running) is NOT a failure (codex bot PR #144 round 8 P2)", async () => {
+    // Codex bot finding (round 8): health.go emits ok=false +
+    // err="no probe (daemon not running or probe disabled)" for
+    // daemons that are stopped or have probing disabled. This is a
+    // normal operator state. Treating it as a hard failure made the
+    // failure-empty banner fire for healthy stopped systems.
+    const sentinelSnapshot: HealthSnapshot = {
+      ...emptySnapshot,
+      daemons: {
+        items: [
+          { server: "fs", daemon: "default", pid: 0, port: 0, ram_bytes: 0,
+            uptime_sec: 0, state: "stopped", restart_count: 0, last_restart_at: null },
+        ],
+        generated_at: 0, ttl_ms: 2000, errors: [],
+      },
+      probes: {
+        items: [
+          { server: "fs", daemon: "default", ok: false, tool_count: 0,
+            err: "no probe (daemon not running or probe disabled)", source: "" },
+        ],
+        generated_at: 0, ttl_ms: 10000, errors: [],
+      },
+      capabilities: { items: [], generated_at: 1715164800, ttl_ms: 60000, errors: [] },
+    };
+    vi.spyOn(api, "fetchOrThrow").mockResolvedValue(sentinelSnapshot);
+
+    const { findByTestId, queryByTestId } = render(<CapabilitiesScreen />);
+    // Should show canonical empty-state, NOT failure-empty.
+    const empty = await findByTestId("capabilities-empty");
+    expect(empty.textContent).toContain("No capabilities found");
+    expect(queryByTestId("capabilities-empty-failures")).toBeNull();
+    expect(queryByTestId("capabilities-partial-failures")).toBeNull();
+  });
+
   it("daemons present but NO errors → canonical empty (not failure-empty) (codex bot PR #144 round 6 P2)", async () => {
     // Codex bot finding (round 6): daemons with probe.ok=false are
     // SKIPPED from capabilities.items by computeCapabilitiesSection

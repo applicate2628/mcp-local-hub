@@ -127,7 +127,17 @@ export function CapabilitiesScreen() {
   const probeErrors = state.data.probes?.errors ?? [];
   const capabilityErrors = caps?.errors ?? [];
   const daemonErrors = state.data.daemons?.errors ?? [];
-  const failedProbes = state.data.probes?.items.filter((p) => !p.ok) ?? [];
+  // Codex bot PR #144 round-8 P2: probe.ok=false alone is NOT a hard
+  // failure. health.go::computeProbesSection emits the sentinel
+  // err="no probe (daemon not running or probe disabled)" for daemons
+  // that are intentionally stopped or have probing disabled — that's
+  // a normal operator state, not a backend failure. Filter the
+  // sentinel out so failure-classification only fires on TRUE probe
+  // errors (HTTP 500, parse errors, timeouts, etc.).
+  const PROBE_NOT_RUNNING_SENTINEL = "no probe (daemon not running or probe disabled)";
+  const failedProbes = state.data.probes?.items.filter(
+    (p) => !p.ok && p.err !== PROBE_NOT_RUNNING_SENTINEL,
+  ) ?? [];
   const hasFailures =
     probeErrors.length > 0 ||
     capabilityErrors.length > 0 ||
