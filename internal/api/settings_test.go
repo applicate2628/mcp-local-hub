@@ -446,8 +446,8 @@ func TestSettingsRegistry_DeferredFlipsForA4bPR1(t *testing.T) {
 // honesty fix from docs/superpowers/plans/phase-3b-ii-backlog.md (the
 // "Suggested sequencing" Pre-tag fix line): retry_policy's Help must
 // label the field "saved only" and indicate the runtime applier is
-// "deferred", since A4-b PR #2 (the runtime applier) was deferred to
-// post-G4. Without this label the Settings UI would imply retry_policy
+// "deferred", since A4-b PR #2 (the runtime applier) is deferred to
+// v0.4.x. Without this label the Settings UI would imply retry_policy
 // is enforced, which it is not.
 func TestSettingsRegistry_RetryPolicySavedOnlyLabel(t *testing.T) {
 	def := findDef("daemons.retry_policy")

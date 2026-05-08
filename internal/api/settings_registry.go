@@ -103,15 +103,16 @@ var SettingsRegistry = []SettingDef{
 		Help:    "Weekly refresh schedule (format: weekly DAY HH:MM, 24-hour local time)."},
 	{Key: "daemons.retry_policy", Section: "daemons", Type: TypeEnum,
 		Default: "exponential", Enum: []string{"none", "linear", "exponential"},
-		// Pre-tag honesty: A4-b PR #2 (runtime applier) was deferred to
-		// post-G4 per docs/superpowers/plans/phase-3b-ii-backlog.md "Dropped
-		// / deferred" section. The field stays editable so operators can
-		// pre-set their preferred policy; the saved value persists across
-		// restarts. But until the runtime applier ships, this setting is
-		// purely declarative — daemon restart loops do not consult it.
-		// Help text must say "saved only" and "deferred" so the Settings
-		// UI does not imply the policy is active.
-		Help: "Saved only — runtime applier deferred (post-G4). Your value persists across restarts but does not yet affect daemon retry behavior."},
+		// Pre-tag honesty: A4-b PR #2 (runtime applier) is deferred to
+		// v0.4.x per docs/superpowers/plans/phase-3b-ii-backlog.md "Dropped
+		// / deferred" section (originally "after G4" — now both A4-b PR #2
+		// and G4 itself are v0.4.x). The field stays editable so operators
+		// can pre-set their preferred policy; the saved value persists
+		// across restarts. But until the runtime applier ships, this
+		// setting is purely declarative — daemon restart loops do not
+		// consult it. Help text must say "saved only" and "deferred" so
+		// the Settings UI does not imply the policy is active.
+		Help: "Saved only — runtime applier deferred (v0.4.x). Your value persists across restarts but does not yet affect daemon retry behavior."},
 
 	// ----- backups -----
 	{Key: "backups.keep_n", Section: "backups", Type: TypeInt,
