@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -9,7 +10,55 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"mcp-local-hub/internal/api"
 )
+
+// ---------------------------------------------------------------------------
+// Task 11 watchdog wiring — exit codes (plan §16, §61).
+// ---------------------------------------------------------------------------
+
+// exitSetupStatePathRejected is returned when DaemonStateDir() fails
+// during `mcphub setup` per plan §16. The watchdog can never run
+// without a valid per-user state dir; aborting before any scheduler
+// call leaves a clean rollback.
+const exitSetupStatePathRejected = 8
+
+// exitSetupAuditRequiredButFailed is returned when the
+// --allow-elevated audit entry write fails per plan §61. The audit
+// trail is a HARD requirement for the override; if we cannot record
+// the override, the install is rejected.
+const exitSetupAuditRequiredButFailed = 11
+
+// ---------------------------------------------------------------------------
+// Test seams (package-level fn vars).
+//
+// Production: nil → fall back to the real OS-bound implementation.
+// Tests in setup_watchdog_test.go set these to deterministic fakes
+// inside setupWatchdogTestHelper.
+// ---------------------------------------------------------------------------
+
+// setupIsElevatedFn, when non-nil, replaces the real
+// isElevatedReal() helper. Tests inject deterministic returns to
+// drive the §42 elevation refusal + §61 audit fail-closed paths
+// without needing to spawn a real elevated process.
+var setupIsElevatedFn func() (bool, error)
+
+// setupRegisterEventLogFn, when non-nil, replaces
+// registerEventLogSourceReal() during runSetupWatchdog. Tests
+// inject failures to verify the §60 non-fatal cascade.
+var setupRegisterEventLogFn func() error
+
+// setupRemoveEventLogFn, when non-nil, replaces
+// removeEventLogSourceReal() during runUninstallWatchdog. Tests
+// assert the call count to verify the §60 uninstall path runs.
+var setupRemoveEventLogFn func() error
+
+// setupStateDirSanityFn, when non-nil, replaces the api.DaemonStateDir
+// resolver call inside runSetupWatchdog. Tests inject the synthetic
+// rejection that the production resolver would emit on a hostile
+// environment (KnownFolderUnavailable / posixDirSanityCheck).
+var setupStateDirSanityFn func() (string, error)
 
 // mcphubShortName is the bare executable name that scheduler tasks and relay
 // entries reference. PATH resolution picks the correct binary from whatever
@@ -175,11 +224,14 @@ func Bootstrap(w io.Writer) error {
 
 // newSetupCmdReal returns the `mcphub setup` command.
 func newSetupCmdReal() *cobra.Command {
-	return &cobra.Command{
+	var allowElevated bool
+	c := &cobra.Command{
 		Use:   "setup",
-		Short: "Install mcphub to ~/.local/bin and register on user PATH",
+		Short: "Install mcphub to ~/.local/bin, register PATH, install watchdog task",
 		Long: `Canonicalize the mcphub binary at ~/.local/bin/mcphub.exe (Windows) or
-~/.local/bin/mcphub (Linux/macOS) and ensure that directory is on user PATH.
+~/.local/bin/mcphub (Linux/macOS), ensure that directory is on user PATH,
+and install the watchdog scheduled task that auto-recovers daemons every
+5 minutes.
 
 What setup does:
   1. Copies the currently-running mcphub binary to ~/.local/bin/
@@ -188,6 +240,17 @@ What setup does:
      broadcasts WM_SETTINGCHANGE so new shells pick it up
   3. Linux/macOS: prints the 'export PATH=...' line to paste into shell rc
      (does NOT modify rc files automatically)
+  4. Verifies the watchdog state directory is reachable (plan §16);
+     fails with exit 8 if not.
+  5. Installs \mcp-local-hub-watchdog scheduled task (cadence 5 min).
+     Refuses if the current process is elevated (plan §42) unless
+     --allow-elevated is passed; with --allow-elevated, a high-priority
+     audit entry is written first and audit-write failure is fail-
+     closed at exit 11 (plan §61).
+  6. Registers the Windows EventLog source 'mcp-local-hub' so the
+     audit-degraded cascade can use eventlog.Notify (plan §60).
+     Failure here is non-fatal — the cascade still has stderr/syslog
+     fallbacks.
 
 Why this exists:
   Scheduler tasks reference ~/.local/bin/mcphub.exe by absolute path
@@ -198,8 +261,9 @@ Why this exists:
   — scheduler tasks keep working without any rewrite.
 
 Examples:
-  mcphub setup    # after 'go build', before first 'install'
-  mcphub setup    # after pulling + rebuilding — replaces the canonical copy
+  mcphub setup                    # after 'go build', before first 'install'
+  mcphub setup                    # after pulling + rebuilding — replaces the canonical copy
+  mcphub setup --allow-elevated   # bypass §42 elevation refusal (audit fail-closed)
 
 Caveats:
   - The shell that ran 'setup' won't see the updated PATH — close and
@@ -207,10 +271,293 @@ Caveats:
   - If ~/.local/bin/mcphub.exe is currently running (as a hub daemon),
     the copy step fails with 'target is in use' — run 'mcphub stop --all'
     first, or kill the daemon processes manually.
+  - --allow-elevated overrides plan §42 administrator-install refusal.
+    Use it ONLY when you know the watchdog must run as the elevated
+    user. The override is recorded in intent-audit.log with Priority=high.
 
-See also: install, scheduler upgrade.`,
+Exit codes:
+  0   success
+  8   state-dir sanity rejected (plan §16: KnownFolder unavailable
+      or POSIX parent insecure)
+  11  --allow-elevated audit write failed (plan §61)
+  Other failures use cobra's default non-zero exit.
+
+See also: install, scheduler upgrade, watchdog install, watchdog uninstall.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return Bootstrap(cmd.OutOrStdout())
+			if err := Bootstrap(cmd.OutOrStdout()); err != nil {
+				return err
+			}
+			return runSetupWatchdog(cmd.OutOrStdout(), allowElevated)
 		},
 	}
+	c.Flags().BoolVar(&allowElevated, "allow-elevated", false,
+		"override plan §42 elevation refusal (records a high-priority audit entry; fail-closed if audit fails per §61)")
+	return c
 }
+
+// ---------------------------------------------------------------------------
+// runSetupWatchdog — Task 11 wiring (plan §16, §42, §60, §61).
+// ---------------------------------------------------------------------------
+
+// runSetupWatchdog runs the post-Bootstrap watchdog wiring per Task
+// 11. Caller (newSetupCmdReal) is responsible for Bootstrap; this
+// function is a pure follow-up that:
+//
+//  1. Verifies DaemonStateDir() resolves cleanly (plan §16). Failure
+//     → return forceExit(8) so cmd/mcphub/main.go maps to exit 8.
+//  2. Detects elevation (plan §42). If elevated AND --allow-elevated
+//     not passed, refuse with a clear error. If elevated AND
+//     --allow-elevated set, write the high-priority audit entry per
+//     §61; audit-write failure → forceExit(11).
+//  3. Calls (*API).InstallWatchdogTask() to install the scheduled
+//     task. Failure propagates verbatim (no special exit code).
+//  4. Registers the Windows EventLog source per §60. Failure is
+//     non-fatal: logged to watchdog.log and we continue.
+//  5. Prints the §16/§42 confirmation lines to stdout (task name,
+//     cadence, log paths, disable command).
+//
+// The function is the testable entrypoint for setup_watchdog_test.go.
+// All test seams (setupIsElevatedFn, setupRegisterEventLogFn,
+// setupStateDirSanityFn) are consulted here.
+func runSetupWatchdog(out io.Writer, allowElevated bool) error {
+	// 1. State path sanity (§16). Use the seam if set, otherwise the
+	//    production api.DaemonStateDir().
+	var (
+		stateDir string
+		err      error
+	)
+	if setupStateDirSanityFn != nil {
+		stateDir, err = setupStateDirSanityFn()
+	} else {
+		stateDir, err = api.DaemonStateDir()
+	}
+	if err != nil {
+		fmt.Fprintf(out, "✗ watchdog setup aborted: state-dir sanity rejection: %v\n", err)
+		fmt.Fprintln(out, "  See plan §16 (KnownFolder unavailable / POSIX parent insecure).")
+		return forceExit(exitSetupStatePathRejected)
+	}
+
+	// 2. Elevation detection (§42).
+	elevated, elevErr := setupIsElevated()
+	if elevErr != nil {
+		// Per plan §42 production fail-closed: treat resolution
+		// failure as elevated → require --allow-elevated.
+		fmt.Fprintf(out, "⚠ elevation detector failed: %v (treating as elevated)\n", elevErr)
+		elevated = true
+	}
+	if elevated && !allowElevated {
+		return fmt.Errorf(
+			"mcphub setup must run un-elevated (plan §42); use --allow-elevated to override (audit fail-closed per §61)")
+	}
+	if elevated && allowElevated {
+		// §61: high-priority audit entry BEFORE any mutation.
+		a := api.NewAPI()
+		if err := a.AppendIntentAudit(api.NewIntentAuditEntry(
+			api.WithAction(api.AuditActionWatchdogInstallElevatedOverride),
+			api.WithTask(api.WatchdogTaskName),
+			api.WithWho(api.AuditWhoMcphubSetup),
+			api.WithPriority("high"),
+			api.WithReason("--allow-elevated flag explicit override"),
+		)); err != nil {
+			fmt.Fprintf(out,
+				"✗ audit log unwritable; --allow-elevated requires audit trail (plan §61): %v\n", err)
+			return forceExit(exitSetupAuditRequiredButFailed)
+		}
+	}
+
+	// 3. Install the watchdog scheduled task.
+	a := api.NewAPI()
+	if err := a.InstallWatchdogTask(); err != nil {
+		return fmt.Errorf("install watchdog scheduled task: %w", err)
+	}
+	fmt.Fprintf(out, "✓ Installed scheduled task: %s (cadence 5 min)\n", api.WatchdogTaskName)
+	fmt.Fprintf(out, "  State directory: %s\n", stateDir)
+	fmt.Fprintf(out, "  Logs: watchdog.log + intent-audit.log under that directory.\n")
+	fmt.Fprintf(out, "  Disable: mcphub watchdog uninstall\n")
+
+	// 4. EventLog source registration (§60). Non-fatal.
+	if regErr := setupRegisterEventLog(); regErr != nil {
+		// Per §60 the failure is non-fatal: log + continue.
+		fmt.Fprintf(out, "⚠ EventLog source registration failed (non-fatal per §60): %v\n", regErr)
+		_ = a.AppendWatchdogLog(api.WatchdogLogEntry{
+			Task:     api.WatchdogTaskName,
+			Action:   "eventlog-source-registration-failed-non-fatal",
+			Priority: "high",
+			Err:      regErr.Error(),
+		})
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// runUninstallWatchdog — Task 11 ordering (plan §60).
+// ---------------------------------------------------------------------------
+
+// runUninstallWatchdog runs the watchdog-side teardown invoked by
+// `mcphub uninstall`. Per Task 11.1 the canonical ordering is:
+//
+//  1. Disable/delete the watchdog scheduled task FIRST so it does
+//     not race against per-server uninstall mid-teardown.
+//  2. Per-server uninstall (existing api.Uninstall flow) — already
+//     handles intent-marking + per-server task delete. Invoked by
+//     the cobra wrapper in uninstall.go AFTER this helper returns.
+//  3. EventLog source removal per §60 (Windows-only; POSIX no-op).
+//     Invoked by the cobra wrapper AFTER api.Uninstall returns.
+//
+// This helper owns step 1 + step 3. Step 2 stays inside the cobra
+// wrapper because it depends on the per-server `--server` flag the
+// wrapper already parses. Audit + intent failures inside
+// `api.Uninstall` are non-fatal per the §65 fail-handling table
+// (`mcphub uninstall: log + proceed`).
+//
+// Codex bot P2 (medium): the watchdog + EventLog cleanup is GATED
+// on "no remaining managed servers AFTER this uninstall". Removing
+// one server when multiple are installed must NOT silently strip
+// the global watchdog from peer servers — that would defeat
+// auto-recovery for every non-target daemon.
+//
+// Gate algorithm:
+//
+//  1. List all `mcp-local-hub-*` scheduled tasks.
+//  2. Filter out maintenance tasks (api.IsMaintenanceTaskName).
+//  3. Map each remaining task to its server (api.ServerFromTaskName).
+//  4. Subtract the server about to be uninstalled.
+//  5. If the resulting set is empty → last managed server →
+//     authorize watchdog + EventLog teardown.
+//     Otherwise → log "watchdog kept installed" and skip both.
+//
+// Fail-closed on List error: a transient list failure cannot be
+// allowed to silently uninstall the watchdog. Log the error and
+// keep the watchdog installed.
+//
+// Returns nil on the watchdog teardown success path; per-step
+// failures are logged via `out` and never propagate so the caller
+// can continue with the per-server uninstall regardless.
+func runUninstallWatchdog(out io.Writer, serverBeingUninstalled string) error {
+	a := api.NewAPI()
+
+	// 1. Partial-uninstall gate (Codex bot P2).
+	if !shouldRemoveGlobalWatchdog(out, serverBeingUninstalled) {
+		// Watchdog stays installed for the remaining servers; EventLog
+		// source registration also stays in place (it is a global
+		// resource paired with the watchdog).
+		return nil
+	}
+
+	// 2. Watchdog scheduled task deletion FIRST.
+	if err := a.UninstallWatchdogTask(); err != nil {
+		// Non-fatal: idempotent contract on the API. Log + continue
+		// so the per-server uninstall and eventlog cleanup still run.
+		fmt.Fprintf(out, "⚠ watchdog uninstall failed (continuing): %v\n", err)
+	} else {
+		fmt.Fprintf(out, "✓ Removed scheduled task: %s\n", api.WatchdogTaskName)
+	}
+
+	// 3. EventLog source removal (§60). Idempotent / non-fatal.
+	// Step 2 (per-server api.Uninstall) is owned by the cobra wrapper
+	// since this helper is also called by tests that don't drive
+	// per-server uninstall; the EventLog cleanup belongs with the
+	// watchdog teardown both topologically and in test coverage.
+	if err := setupRemoveEventLog(); err != nil {
+		fmt.Fprintf(out, "⚠ EventLog source removal failed (continuing): %v\n", err)
+	}
+	return nil
+}
+
+// shouldRemoveGlobalWatchdog implements the partial-uninstall gate
+// (Codex bot P2). Returns true when the post-uninstall remaining
+// managed-server set is empty, meaning this is the last server and
+// the global watchdog can be removed safely.
+//
+// Fail-closed: any error from the live scheduler list keeps the
+// watchdog installed. Operators get a single informational line on
+// `out` either way so the decision is visible.
+func shouldRemoveGlobalWatchdog(out io.Writer, serverBeingUninstalled string) bool {
+	// Use the live scheduler view (raw List, no status enrichment).
+	// api.ListManagedTasks routes through the same scheduler factory
+	// seam that UninstallWatchdogTask uses, so tests with a fake
+	// scheduler (setupWatchdogTestHelper) can drive deterministic
+	// list responses for the gate decision.
+	a := api.NewAPI()
+	rows, err := a.ListManagedTasks()
+	if err != nil {
+		fmt.Fprintf(out, "⚠ watchdog gate: list failed (keeping watchdog installed): %v\n", err)
+		return false
+	}
+	remaining := map[string]struct{}{}
+	for _, row := range rows {
+		if api.IsMaintenanceTaskName(row.Name) {
+			continue
+		}
+		srv := api.ServerFromTaskName(row.Name)
+		if srv == "" {
+			// Hub-wide / unparseable mcp-local-hub-* task that is not
+			// a maintenance task. Defensively count it as "still
+			// present" so we do not strip the watchdog while an
+			// unrecognized task is around.
+			remaining[row.Name] = struct{}{}
+			continue
+		}
+		if srv == serverBeingUninstalled {
+			continue
+		}
+		remaining[srv] = struct{}{}
+	}
+	if len(remaining) == 0 {
+		return true
+	}
+	// Surface the names so an operator can see which servers retained
+	// the watchdog. Order is non-deterministic from a map; sort for
+	// stable output across calls.
+	names := make([]string, 0, len(remaining))
+	for k := range remaining {
+		names = append(names, k)
+	}
+	// Cheap stable sort: compare-and-swap for typical small sets.
+	for i := 1; i < len(names); i++ {
+		for j := i; j > 0 && names[j] < names[j-1]; j-- {
+			names[j], names[j-1] = names[j-1], names[j]
+		}
+	}
+	fmt.Fprintf(out,
+		"ℹ watchdog kept installed; %d other server(s) still managed: %s\n",
+		len(names), strings.Join(names, ", "))
+	return false
+}
+
+// ---------------------------------------------------------------------------
+// Seam routers.
+// ---------------------------------------------------------------------------
+
+// setupIsElevated routes through the setupIsElevatedFn seam if set,
+// otherwise the production OS-bound isElevatedReal helper.
+func setupIsElevated() (bool, error) {
+	if setupIsElevatedFn != nil {
+		return setupIsElevatedFn()
+	}
+	return isElevatedReal()
+}
+
+// setupRegisterEventLog routes through the setupRegisterEventLogFn
+// seam if set, otherwise the production helper.
+func setupRegisterEventLog() error {
+	if setupRegisterEventLogFn != nil {
+		return setupRegisterEventLogFn()
+	}
+	return registerEventLogSourceReal()
+}
+
+// setupRemoveEventLog routes through the setupRemoveEventLogFn seam
+// if set, otherwise the production helper.
+func setupRemoveEventLog() error {
+	if setupRemoveEventLogFn != nil {
+		return setupRemoveEventLogFn()
+	}
+	return removeEventLogSourceReal()
+}
+
+// errSetupStubElevated is reserved for future tests that want a
+// typed sentinel for "stub returned elevated". Currently unused.
+//
+//nolint:unused // referenced by future setup tests per plan v13.
+var errSetupStubElevated = errors.New("cli: setup elevation stub returned elevated")

@@ -128,7 +128,19 @@ func buildCreateXML(spec TaskSpec, userName string) string {
 	buf.WriteString("    <AllowHardTerminate>true</AllowHardTerminate>\n")
 	buf.WriteString("    <StartWhenAvailable>false</StartWhenAvailable>\n")
 	buf.WriteString("    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>\n")
-	buf.WriteString("    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\n")
+	// MultipleInstancesPolicy=StopExisting (was IgnoreNew). v0.3.0-blockers
+	// bug #2: D2.4 manual smoke 2026-05-07 found that RestartOnFailure
+	// did NOT fire after Task Manager End Task even with correct
+	// <RestartOnFailure Count=3 Interval=PT1M> config. Root cause: with
+	// IgnoreNew, when TS attempts the auto-restart it sees the previous
+	// (just-killed) instance as still "running" in its internal state
+	// machine — Task Manager's TerminateProcess doesn't always cleanly
+	// transition TS's record — and the new instance is IGNORED. Switching
+	// to StopExisting tells TS "stop the lingering instance (no-op when
+	// already dead) and start the new one", which lets RestartOnFailure
+	// reliably revive killed daemons. mcphub.restart still works as
+	// before; status polling is read-only and unaffected.
+	buf.WriteString("    <MultipleInstancesPolicy>StopExisting</MultipleInstancesPolicy>\n")
 	buf.WriteString("    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\n")
 	buf.WriteString("    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\n")
 	buf.WriteString("    <IdleSettings>\n      <StopOnIdleEnd>false</StopOnIdleEnd>\n      <RestartOnIdle>false</RestartOnIdle>\n    </IdleSettings>\n")

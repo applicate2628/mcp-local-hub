@@ -22,45 +22,20 @@ func rowKey(r api.DaemonStatus) string {
 	return r.Server + "/" + d
 }
 
-// Task Scheduler informational LastResult codes — NOT real failures.
-// Documented in MS-TSCH and observed in production:
-//
-//	0x41300 (267008) — task is ready to run
-//	0x41301 (267009) — task is currently running
-//	0x41303 (267011) — task has not yet run (initial state)
-//	0x41304 (267012) — no more runs scheduled
-//	0x41306 (267014) — task is disabled
-//	0x41307 (267015) — task has not yet run for the user
-//
-// User-defined exit codes are typically small positive (1, 2, 87,
-// 1063) or HRESULT-shaped (high bit set → negative when read as
-// int32). Anything in the 0x41300-0x4130F informational range
-// must be excluded from the failure predicate or the tray spams
-// "daemon failed" toasts every poll for every never-run /
-// idle-state task on the host (regression observed in PR #22
-// initial push, fixed before merge).
-const (
-	tsInfoCodeMin = 0x41300
-	tsInfoCodeMax = 0x4130F
-)
-
 // isFailedRow returns true when a daemon row reports a real failure.
 // Mirrors the StateError predicates in tray.Aggregate so toast onset
 // matches tray icon onset — the user sees the icon turn red and the
 // toast pop at the same transition.
 //
-// LastResult is treated as a real failure only when it is non-zero,
-// not -1 (internal/scheduler/scheduler.go:53 sentinel for "task has
-// never run" — Codex PR #22 r2 P2: without this filter the very
-// first snapshot post-install would fire "daemon failed" toasts for
-// every never-run task, exactly the spam the spam-toast fix set out
-// to prevent), and not in the Task Scheduler 2.0 informational range
-// (0x41300-0x4130F). State-string "fail" match is kept as a separate
+// LastResult classification is delegated to api.IsRealFailure
+// (internal/api/recovery.go) — the single canonical predicate shared
+// with the watchdog and tray icon aggregator (plan §18 single-source-
+// of-truth). The state-string "fail" match is kept as a separate
 // signal because some daemon paths emit Failed without a matching
-// LastResult update.
+// LastResult update; that fallback is local to this consumer and not
+// part of the canonical failure predicate.
 func isFailedRow(r api.DaemonStatus) bool {
-	if r.LastResult != 0 && r.LastResult != -1 &&
-		(r.LastResult < tsInfoCodeMin || r.LastResult > tsInfoCodeMax) {
+	if api.IsRealFailure(r.LastResult) {
 		return true
 	}
 	return strings.Contains(strings.ToLower(r.State), "fail")

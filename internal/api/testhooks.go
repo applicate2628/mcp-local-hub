@@ -108,6 +108,118 @@ func MCPHubBinaryName() string {
 	return mcphubShortName
 }
 
+// SetDaemonStateRootForTest overrides the per-user state directory
+// resolver so cross-package tests (internal/cli/watchdog_test.go,
+// future internal/e2e watchdog tests) can route every state file
+// (daemon-intent.json, watchdog-state.json, intent-audit.log,
+// watchdog.log, --once.lock) into a temp directory without env vars.
+//
+// Returns a restore function that resets the override to "" (meaning
+// the platform resolver runs normally). Production callers must never
+// invoke this; the helper exists exclusively for test hygiene.
+//
+// Plan v13 §16: production binary refuses env-fallback resolution; this
+// override is the sanctioned cross-package equivalent.
+func SetDaemonStateRootForTest(root string) (restore func()) {
+	orig := daemonStateRootOverride
+	daemonStateRootOverride = root
+	return func() {
+		daemonStateRootOverride = orig
+	}
+}
+
+// SetTestStatusFn overrides the StatusContext source so cross-package
+// tests can inject deterministic []DaemonStatus rows without spinning
+// up Task Scheduler. The watchdog driver consumes both Status() and
+// StatusContext via the same seam (statusContextSrcFn).
+//
+// Returns a restore function that resets the seam.
+func SetTestStatusFn(fn func() ([]DaemonStatus, error)) (restore func()) {
+	orig := statusContextSrcFn
+	statusContextSrcFn = fn
+	return func() { statusContextSrcFn = orig }
+}
+
+// SetTestRestartWithSnapshotFn overrides the snapshot-bound restart
+// path so cross-package tests can capture the OwnershipSnapshot the
+// driver passes to RestartContextWithSnapshot.
+//
+// Returns a restore function that resets the seam.
+func SetTestRestartWithSnapshotFn(fn func(server, daemonFilter string, snap OwnershipSnapshot) ([]RestartResult, error)) (restore func()) {
+	orig := restartContextWithSnapshotSrcFn
+	restartContextWithSnapshotSrcFn = fn
+	return func() { restartContextWithSnapshotSrcFn = orig }
+}
+
+// SetTestRestartContextFn overrides the general-purpose ctx-aware
+// Restart wrapper. Used by cross-package tests that exercise paths
+// where the watchdog driver could fall back to a non-snapshot restart
+// (defensive — the driver should only ever take the snapshot path).
+//
+// Returns a restore function that resets the seam.
+func SetTestRestartContextFn(fn func(server, daemonFilter string) ([]RestartResult, error)) (restore func()) {
+	orig := restartContextSrcFn
+	restartContextSrcFn = fn
+	return func() { restartContextSrcFn = orig }
+}
+
+// SetTestSchedulerFactoryFn overrides the package-level scheduler
+// factory used by Uninstall paths. Returns a restore function.
+func SetTestSchedulerFactoryFn(fn func() (scheduler.Scheduler, error)) (restore func()) {
+	orig := schedulerFactoryFn
+	schedulerFactoryFn = fn
+	return func() { schedulerFactoryFn = orig }
+}
+
+// SetTestIntentReaderFn overrides the readDaemonIntentFn seam so
+// cross-package tests can drive IntentStillRunning without writing
+// intent files to disk. Returns a restore function.
+func SetTestIntentReaderFn(fn func(taskName string) (DaemonIntent, bool, error)) (restore func()) {
+	orig := readDaemonIntentFn
+	readDaemonIntentFn = fn
+	return func() { readDaemonIntentFn = orig }
+}
+
+// SetTestAuditAppendFn overrides the disk-append step inside
+// AppendIntentAudit. Cross-package tests inject targeted failures
+// (disk full, permission denied) without exercising the OS write path.
+//
+// Returns a restore function. The seam is the lower-level audit-append
+// step — appendIntentAuditFn (set by intent_audit.go's init()) still
+// routes through the production AppendIntentAudit, which then
+// dispatches via auditAppendWriteFn.
+func SetTestAuditAppendFn(fn func(path string, line []byte) error) (restore func()) {
+	orig := auditAppendWriteFn
+	auditAppendWriteFn = fn
+	return func() { auditAppendWriteFn = orig }
+}
+
+// SetTestWatchdogLogAppendFn overrides the disk-append step inside
+// AppendWatchdogLog. Returns a restore function.
+func SetTestWatchdogLogAppendFn(fn func(path string, line []byte) error) (restore func()) {
+	orig := watchdogLogAppendWriteFn
+	watchdogLogAppendWriteFn = fn
+	return func() { watchdogLogAppendWriteFn = orig }
+}
+
+// SetTestCanonicalMcphubPathFn overrides the canonical-mcphub-path
+// resolver consumed by the XML validator and InstallWatchdogTask.
+// Returns a restore function.
+func SetTestCanonicalMcphubPathFn(fn func() (string, error)) (restore func()) {
+	orig := canonicalMcphubPathFn
+	canonicalMcphubPathFn = fn
+	return func() { canonicalMcphubPathFn = orig }
+}
+
+// SetTestCurrentWindowsUserFn overrides the current-user resolver
+// consumed by the XML validator and InstallWatchdogTask. Returns a
+// restore function.
+func SetTestCurrentWindowsUserFn(fn func() (string, error)) (restore func()) {
+	orig := currentWindowsUserFn
+	currentWindowsUserFn = fn
+	return func() { currentWindowsUserFn = orig }
+}
+
 // testSchedulerShim adapts a caller-supplied TestSchedulerIface to the
 // package-private testScheduler interface.
 type testSchedulerShim struct{ s TestSchedulerIface }

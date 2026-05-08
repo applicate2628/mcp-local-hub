@@ -24,7 +24,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sort"
 	"time"
 
@@ -374,11 +373,28 @@ func (a *API) registerOneLanguage(
 	}
 	_ = sch.Delete(taskName)
 	taskSpec := scheduler.TaskSpec{
-		Name:             taskName,
-		Description:      fmt.Sprintf("mcp-local-hub: workspace %s lang %s", canonical, lang),
-		Command:          canonicalExe,
-		Args:             args,
-		WorkingDir:       filepath.Dir(canonicalExe),
+		Name:        taskName,
+		Description: fmt.Sprintf("mcp-local-hub: workspace %s lang %s", canonical, lang),
+		Command:     canonicalExe,
+		Args:        args,
+		// WorkingDir is the canonical workspace path, NOT the install
+		// directory. Two reasons:
+		//
+		// 1. LSP backends (clangd, rust-analyzer, gopls, …) expect cwd to
+		//    be the project root for compile_commands.json / Cargo.toml /
+		//    go.mod discovery. Running them from ~/.local/bin/ broke that.
+		//
+		// 2. v0.3.0-blockers bug #1: Go 1.19+ exec.LookPath enforces
+		//    CVE-2022-30580 — refuses to return a cwd-relative match. The
+		//    install dir ~/.local/bin/ may contain a stale copy of the
+		//    wrapper binary (mcp-language-server.exe), and Windows lookup
+		//    semantics check cwd FIRST, so the cwd-relative match
+		//    shadows the on-PATH copy and triggers ErrDot. Setting cwd
+		//    to the workspace removes the shadow: the workspace
+		//    contains source files only, never the wrapper binary, so
+		//    LookPath falls through to PATH and finds the canonical
+		//    install (~/go/bin or wherever the user has it).
+		WorkingDir:       canonical,
 		RestartOnFailure: true,
 		LogonTrigger:     true,
 	}
@@ -504,6 +520,12 @@ func (a *API) registerOneLanguage(
 		return WorkspaceEntry{}, fmt.Errorf("proxy readiness on port %d: %w", port, err)
 	}
 	fmt.Fprintf(w, "\u2713 Scheduler task started: %s\n", taskName)
+	// Task 10 plan \u00a765: AFTER scheduler create + sch.Run + readiness
+	// PASS, record Desired=running intent + workspace-registered audit
+	// entry. Audit / intent failures are logged + tolerated \u2014 the
+	// workspace is already registered (registry on disk + scheduler
+	// task created + proxy started + readiness probe passed).
+	a.recordRegisterIntentForTask(taskName, w)
 	// Phase 3: re-acquire flock before client config writes. Client
 	// adapters perform read-modify-write updates, so these writes must be
 	// serialized against concurrent register/unregister operations.
