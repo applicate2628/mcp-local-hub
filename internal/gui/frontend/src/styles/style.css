@@ -399,7 +399,7 @@ main { padding: var(--screen-padding); overflow: auto; }
 
 .empty-state {
   margin: var(--section-margin) 0;
-  padding: var(--cell-padding-y) var(--card-padding);
+  padding: var(--gap-sm) var(--card-padding);
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--sidebar-bg);
@@ -410,7 +410,7 @@ main { padding: var(--screen-padding); overflow: auto; }
 
 .banner {
   margin: var(--section-margin) 0;
-  padding: var(--cell-padding-y) var(--card-padding);
+  padding: var(--gap-sm) var(--card-padding);
   border-radius: 4px;
   border-left: 4px solid var(--border);
   background: var(--sidebar-bg);
@@ -1127,7 +1127,7 @@ menu button[disabled] {
 .capabilities-legend-table { margin-top: 0.5rem; border-collapse: collapse; }
 .capabilities-legend-table th, .capabilities-legend-table td { padding: 0.25rem 0.5rem; text-align: left; border-bottom: 1px solid var(--border, #e0e0e0); }
 
-.capability-card { border: 1px solid var(--border, #d0d0d0); border-radius: 4px; padding: var(--cell-padding-y) var(--card-padding); }
+.capability-card { border: 1px solid var(--border, #d0d0d0); border-radius: 4px; padding: var(--gap-sm) var(--card-padding); }
 .capability-card-header { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
 .capability-card-server { font-weight: 600; }
 .capability-card-daemon { opacity: 0.7; font-size: 0.875rem; }
