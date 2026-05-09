@@ -5,7 +5,8 @@ found-by: qa-engineer
 found-in-phase: PR #131 cleanup-buttons xhigh review (commit 4e46eba)
 affected-surface: internal/gui/frontend/src/components/settings/SectionMaintenance.tsx
 context: standalone (PR #131 follow-up; not blocking merge per QA verdict)
-status: open
+status: closed
+fixed-in: commit 1f59a65 (PR #131 follow-up landed 2026-05-07)
 ---
 
 ## Reproduction
@@ -53,3 +54,38 @@ list. Even if it didn't, `OrphansTable` (line 142) and `WatchersTable`
 After apply, retain the row list with `kill_err` populated and render a
 post-apply table (or annotate existing preview table). Add a `kill_err`
 column displayed only when any row has a non-empty value.
+
+## Resolution
+
+**Status:** closed
+**Date:** 2026-05-07
+**Commit:** `1f59a65` — `fix(gui): Codex bot P2 on 72757c6 — surface per-row kill_err in apply result tables (both cleanup cards)`
+
+The fix landed as a Codex Cloud bot P2 follow-up on PR #131 commit
+`72757c6` (escalated from QA F1):
+
+- Extended `ActionState["applied"]` with optional `orphans` and
+  `watchers` row lists so post-kill data survives the state transition.
+- Both apply paths (`cleanupOrphans`, `cleanupLogWatchers`) now retain
+  the returned row list in the new state.
+- `OrphansTable` + `WatchersTable` render in BOTH preview AND applied
+  states (no longer gated on `state.kind === "preview"`).
+- Conditional Result column appears only when at least one row has a
+  non-empty `kill_err`: shows the kill_err message for skipped rows
+  and "killed" for successful kills, with `.maintenance-error`
+  highlighting on the failure cells.
+
+Test coverage in `internal/gui/frontend/src/components/settings/SectionMaintenance.test.tsx`:
+
+- kill_err visibility on apply for both cards
+- no Result column on all-clean apply
+- OS-friendly 501 error rendering
+- disabled Clean(0) tooltip on log-watchers
+- HTTP 207 partial-failure banner + per-daemon error column on Stop-All
+- empty-result Done banner
+
+Verified live in current `internal/gui/frontend/src/components/settings/SectionMaintenance.tsx`:
+
+- `OrphansTable` lines ~247-291 — `showResult = orphans.some((o) => !!o.kill_err)`
+- Apply path line ~166 — `setState({ kind: "applied", ..., orphans: r.orphans })`
+- Render condition line ~205 — `(state.kind === "preview" || state.kind === "applied")`
