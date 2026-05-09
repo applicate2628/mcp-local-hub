@@ -844,12 +844,19 @@ menu button[disabled] {
      unset/legacy snapshot renders unchanged. compact / spacious overrides
      below are what give the user a real difference between density modes
      on every screen, not just Settings. */
-  --card-padding: var(--card-padding);
+  --card-padding: 16px;
   --cell-padding-y: 8px;
   --cell-padding-x: 12px;
   --gap-md: 16px;
   --gap-sm: 12px;
+  --gap-xs: 8px;
   --screen-padding: 24px;
+  --input-padding-y: 4px;
+  --input-padding-x: 8px;
+  --button-padding-y: 6px;
+  --button-padding-x: 12px;
+  --section-margin: 1rem;
+  --inline-gap: 0.5rem;
   /* Migration screen has its own tokens because the historical
      spec values (1.25rem margin, 0.75rem 1rem padding) are
      intentionally different from card padding. Codex bot review
@@ -901,7 +908,7 @@ menu button[disabled] {
 }
 :root[data-density="comfortable"] {
   --row-height: 32px; --section-gap: 24px;
-  --card-padding: var(--card-padding); --cell-padding-y: 8px; --cell-padding-x: 12px;
+  --card-padding: 16px; --cell-padding-y: 8px; --cell-padding-x: 12px;
   --gap-md: 16px; --gap-sm: 12px; --gap-xs: 8px; --screen-padding: 24px;
   --input-padding-y: 4px; --input-padding-x: 8px;
   --button-padding-y: 6px; --button-padding-x: 12px;
