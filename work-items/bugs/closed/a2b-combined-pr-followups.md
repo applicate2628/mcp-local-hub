@@ -43,7 +43,7 @@ sanitized message.
 
 **Originally flagged:** Task 4 code-quality review (confidence 85), concern that `newEventBus()` might spawn a goroutine making per-request `api.NewAPI()` a leak.
 
-**Resolution:** verified against [internal/api/events.go](../../internal/api/events.go):
+**Resolution:** verified against [internal/api/events.go](../../../internal/api/events.go):
 
 ```go
 type EventBus struct{}
