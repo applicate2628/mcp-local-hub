@@ -81,6 +81,11 @@ type Broadcaster struct {
 	persistCh     chan persistRequest
 	persistDoneCh chan struct{}
 	closeOnce     sync.Once
+	// closed is set under b.mu inside Close() before close(persistCh).
+	// Publish checks it under the same mutex so a concurrent Close()
+	// cannot cause a send-on-closed-channel panic (Codex P1 on PR #150
+	// line 227).
+	closed bool
 }
 
 // NewBroadcaster constructs an empty Broadcaster with no subscribers.
@@ -109,11 +114,20 @@ func (b *Broadcaster) SetAPI(a *api.API) {
 }
 
 // Close stops the drain goroutine and blocks until any in-flight or
-// queued persist calls finish. Idempotent. Tests use this to wait
-// for deterministic state before reading gui-events.log.
+// queued persist calls finish. Idempotent.
+//
+// Codex P1 on PR #150 line 227: a concurrent Publish (poller / HTTP
+// handler still emitting during teardown) racing with close(persistCh)
+// would panic on send-after-close. Fix: set b.closed=true and
+// close(persistCh) atomically under b.mu, so Publish's check + send
+// happens entirely before OR entirely after the close — never
+// interleaved.
 func (b *Broadcaster) Close() {
 	b.closeOnce.Do(func() {
+		b.mu.Lock()
+		b.closed = true
 		close(b.persistCh)
+		b.mu.Unlock()
 	})
 	<-b.persistDoneCh
 }
@@ -221,7 +235,12 @@ func (b *Broadcaster) Publish(ev Event) {
 		default: // drop
 		}
 	}
-	if !b.DisableGUIEventLog {
+	// Skip the persist enqueue once Close() has flipped the shutdown
+	// flag (Codex P1 on PR #150 line 227 — guards against send-on-
+	// closed-channel panic). Both the flag set and channel close
+	// happen under b.mu inside Close(), so checking + sending here is
+	// atomic with respect to teardown.
+	if !b.DisableGUIEventLog && !b.closed {
 		select {
 		case b.persistCh <- persistRequest{ev: ev}:
 		default: // persist channel full → drop (matches SSE drop-on-full policy)

@@ -114,6 +114,45 @@ func TestBroadcaster_DisableGUIEventLog_SkipsPersist(t *testing.T) {
 	}
 }
 
+// TestBroadcaster_Close_RaceWithConcurrentPublish guards Codex P1 on
+// PR #150 line 227: send-after-close panic when Publish runs
+// concurrently with Close(). Under -race this exercises the b.closed
+// flag + mutex coordination. Without the fix, sending on a closed
+// persistCh would panic the test binary.
+func TestBroadcaster_Close_RaceWithConcurrentPublish(t *testing.T) {
+	root := t.TempDir()
+	restore := api.SetDaemonStateRootForTest(root)
+	t.Cleanup(restore)
+	a := api.NewAPI()
+	b := NewBroadcaster()
+	b.SetAPI(a)
+
+	const publishers = 20
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(publishers)
+	for i := 0; i < publishers; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					b.Publish(Event{Type: "daemon-state", Body: map[string]any{"i": i}})
+				}
+			}
+		}()
+	}
+	// Let publishers spin briefly before Close() races them.
+	time.Sleep(10 * time.Millisecond)
+	b.Close()
+	close(stop)
+	wg.Wait()
+	// If we got here without panicking, the close-race guard worked.
+}
+
 // TestBroadcaster_Publish_OrderUnderConcurrency covers Codex P2 on PR
 // #150 line 156: with multiple concurrent publishers, the on-disk log
 // order must match the SSE fan-out order. Channel sends happen UNDER
