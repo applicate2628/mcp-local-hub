@@ -143,6 +143,13 @@ func (a *API) ImportVSCodeWorkspace(workspacePath string, opts VSCodeImportOpts)
 		result.Warnings = append(result.Warnings, fmt.Sprintf("placeholder ${env:%s} expanded to empty string (variable not set)", name))
 	}
 
+	// EmptyResult fires when NO entries projected, even if the source
+	// file had entries that were all skipped (e.g., all http/sse types
+	// deferred to G6). Tests + CLI use EmptyResult as the "no YAML to
+	// emit" signal.
+	if len(entries) == 0 {
+		result.EmptyResult = true
+	}
 	result.YAML = renderVSCodeProjectedYAML(entries)
 	return result, nil
 }
@@ -230,18 +237,30 @@ func projectVSCodeServer(name string, entry map[string]any, exp *vscodeExpander)
 		}
 		return projected, warnings
 	case "http", "sse":
-		if url == "" {
-			warnings = append(warnings, fmt.Sprintf("server %q: type=%s but no url — skipped", name, serverType))
-			return nil, warnings
-		}
-		headers, _ := entry["headers"].(map[string]any)
-		projected := &vscodeProjected{
-			Name:      name,
-			Transport: "native-http",
-			URL:       exp.expand(url),
-			Headers:   expandStringMap(headers, exp),
-		}
-		return projected, warnings
+		// VS Code's `type: http` and `type: sse` describe a REMOTE MCP
+		// server addressed by URL — the client opens an HTTP connection
+		// directly. mcp-local-hub's `transport: native-http` is
+		// different: it means a LOCALLY-spawned daemon that exposes an
+		// HTTP endpoint (see servers/serena/manifest.yaml: command: uvx
+		// ... --transport streamable-http). The current ServerManifest
+		// schema requires a `command` field for every manifest
+		// (internal/config/manifest.go Validate enforces this); no
+		// shape proxies to a remote URL.
+		//
+		// Remote URL imports belong to the G6 backlog ("Remote MCP
+		// manifests"), deferred to v0.4.x. Skip with a clear warning
+		// rather than emit YAML that ParseManifest would reject.
+		//
+		// Codex bot P1 on PR #151 line 289 caught the original
+		// invalid emission.
+		_ = url
+		warnings = append(warnings, fmt.Sprintf(
+			"server %q: type=%s describes a remote MCP server — current manifest "+
+				"schema requires a locally-spawned command (transport: stdio-bridge or "+
+				"native-http with command:). Remote URL imports land in backlog G6 "+
+				"(Remote MCP manifests), deferred to v0.4.x. Skipped.",
+			name, serverType))
+		return nil, warnings
 	default:
 		warnings = append(warnings, fmt.Sprintf("server %q: unknown type %q (expected stdio/http/sse) — skipped", name, serverType))
 		return nil, warnings

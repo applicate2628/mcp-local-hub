@@ -70,15 +70,25 @@ func TestImportVSCodeWorkspace_HTTPServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
-	if !strings.Contains(result.YAML, "transport: native-http") {
-		t.Errorf("YAML wrong transport: %s", result.YAML)
+	// G7 skips http/sse types — they describe remote URLs that require
+	// the G6 backlog item (Remote MCP manifests, v0.4.x) before they
+	// can produce valid mcp-local-hub manifests. Codex bot P1 on PR
+	// #151 line 289 caught the original invalid emission.
+	if !result.EmptyResult {
+		t.Errorf("EmptyResult should be true when only http/sse entries exist: %+v", result)
 	}
-	// URL contains `:` so it's quoted in YAML output; accept either form.
-	if !strings.Contains(result.YAML, "https://example.com/mcp") {
-		t.Errorf("YAML missing url: %s", result.YAML)
+	if result.YAML != "" {
+		t.Errorf("YAML should be empty (http skipped); got:\n%s", result.YAML)
 	}
-	if !strings.Contains(result.YAML, "Authorization") {
-		t.Errorf("YAML missing headers: %s", result.YAML)
+	foundSkip := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "remote MCP server") && strings.Contains(w, "G6") {
+			foundSkip = true
+			break
+		}
+	}
+	if !foundSkip {
+		t.Errorf("expected warning referencing G6 backlog deferral; got: %v", result.Warnings)
 	}
 }
 
@@ -291,8 +301,14 @@ func TestImportVSCodeWorkspace_TypeInferenceFromCommandOrURL(t *testing.T) {
 	if !strings.Contains(result.YAML, "stdio-bridge") {
 		t.Errorf("YAML missing stdio-bridge transport (implicit from command): %s", result.YAML)
 	}
-	if !strings.Contains(result.YAML, "native-http") {
-		t.Errorf("YAML missing native-http transport (implicit from url): %s", result.YAML)
+	// implicit-http inferred to type=http → skipped per G7 contract
+	// (remote URLs land in G6, v0.4.x). YAML must NOT contain a
+	// native-http projection for the url-only entry.
+	if strings.Contains(result.YAML, "native-http") {
+		t.Errorf("YAML must not project http to native-http (G6 territory): %s", result.YAML)
+	}
+	if len(result.Servers) != 1 || result.Servers[0] != "implicit-stdio" {
+		t.Errorf("only implicit-stdio should project; got servers = %v", result.Servers)
 	}
 }
 
