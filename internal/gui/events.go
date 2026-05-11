@@ -38,39 +38,107 @@ type Event struct {
 	Body map[string]any `json:"body,omitempty"`
 }
 
+// persistRequest carries one envelope-ready event onto the async
+// persist channel. The shape is intentionally small so the channel
+// buffer stays cheap.
+type persistRequest struct {
+	ev Event
+}
+
+// Capacity of the persist channel. When full, Publish drops the
+// envelope (matches the existing SSE drop-on-full policy). 256 is
+// chosen so a brief burst of bulk-action / daemon-state events
+// doesn't lose any in practice while keeping memory bounded.
+const persistChannelCap = 256
+
 // Broadcaster is a fan-out channel for Events. Each Subscribe call
 // returns a dedicated buffered channel; Publish writes to every
 // subscriber without blocking (dropped if the buffer is full).
 //
 // G9: each Publish also persists a structured envelope to
-// gui-events.log via api.AppendGUIEventLog. Tests that don't care
-// about disk persistence (or run before DaemonStateDir is initialized)
-// set DisableGUIEventLog=true. The api handle is injected via
-// SetAPI so tests can use a state-rooted instance; nil falls back to
-// api.NewAPI() for the production GUI path.
+// gui-events.log via api.AppendGUIEventLog. To keep Publish non-
+// blocking (Codex P2 on PR #150 line 162), persistence goes through a
+// buffered channel drained by a single background goroutine. The
+// single drain goroutine also guarantees publish ORDER survives to
+// disk (Codex P2 on PR #150 line 156) — channel sends happen under
+// b.mu in the same critical section as the SSE fan-out, and the
+// goroutine consumes in FIFO order.
+//
+// Lifecycle: NewBroadcaster spawns the drain goroutine. Close()
+// stops it (idempotent + blocks until all pending entries flushed,
+// so tests can verify persisted state deterministically).
+//
+// Tests that don't care about disk persistence (or run before
+// DaemonStateDir is initialized) set DisableGUIEventLog=true. The
+// api handle is injected via SetAPI so tests use a state-rooted
+// instance; nil falls back to api.NewAPI() for production GUI.
 type Broadcaster struct {
 	mu                 sync.Mutex
 	subs               map[chan Event]struct{}
 	api                *api.API
 	DisableGUIEventLog bool
+
+	persistCh     chan persistRequest
+	persistDoneCh chan struct{}
+	closeOnce     sync.Once
 }
 
 // NewBroadcaster constructs an empty Broadcaster with no subscribers.
-// It starts no goroutines — the poller that feeds it is owned by
-// Task 12 and started separately.
+// Spawns a single background goroutine that drains the persist queue;
+// callers that want clean shutdown should invoke Close() during
+// teardown.
 func NewBroadcaster() *Broadcaster {
-	return &Broadcaster{subs: map[chan Event]struct{}{}}
+	b := &Broadcaster{
+		subs:          map[chan Event]struct{}{},
+		persistCh:     make(chan persistRequest, persistChannelCap),
+		persistDoneCh: make(chan struct{}),
+	}
+	go b.drainPersist()
+	return b
 }
 
-// SetAPI threads an api.API handle through the broadcaster so persist
-// can call AppendGUIEventLog without constructing a fresh API per
-// Publish. Optional — nil/unset falls back to api.NewAPI() inside
-// persist. Production server bootstrap calls this once with the
-// process-wide api handle.
+// SetAPI threads an api.API handle through the broadcaster so the
+// drain goroutine can call AppendGUIEventLog without constructing a
+// fresh API per event. Optional — nil/unset falls back to
+// api.NewAPI() inside persistOne. Production server bootstrap calls
+// this once with the process-wide api handle.
 func (b *Broadcaster) SetAPI(a *api.API) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.api = a
+}
+
+// Close stops the drain goroutine and blocks until any in-flight or
+// queued persist calls finish. Idempotent. Tests use this to wait
+// for deterministic state before reading gui-events.log.
+func (b *Broadcaster) Close() {
+	b.closeOnce.Do(func() {
+		close(b.persistCh)
+	})
+	<-b.persistDoneCh
+}
+
+func (b *Broadcaster) drainPersist() {
+	defer close(b.persistDoneCh)
+	for req := range b.persistCh {
+		b.persistOne(req.ev)
+	}
+}
+
+func (b *Broadcaster) persistOne(ev Event) {
+	source, severity := classifyEvent(ev.Type)
+	b.mu.Lock()
+	a := b.api
+	b.mu.Unlock()
+	if a == nil {
+		a = api.NewAPI()
+	}
+	_ = a.AppendGUIEventLog(api.GUIEventEntry{
+		Type:     ev.Type,
+		Source:   source,
+		Severity: severity,
+		Body:     ev.Body,
+	})
 }
 
 // Subscribe returns a channel that will receive every Event published
@@ -130,19 +198,21 @@ func (b *Broadcaster) TrySubscribe(ctx context.Context) (<-chan Event, bool) {
 	return ch, true
 }
 
-// Publish fans out to all subscribers. Non-blocking: a subscriber with
-// a full buffer simply misses the event.
+// Publish fans out to all subscribers AND enqueues a persist request.
+// Both operations are non-blocking and complete in O(subscribers) wall
+// time — the persist channel is sized so a brief burst is queued
+// without blocking the caller.
 //
-// The send happens while holding b.mu so that a concurrent ctx-cancel
-// unsubscribe (which also holds b.mu before close) cannot close the
-// channel mid-send. Because the send is non-blocking (select/default),
-// holding the mutex through the fan-out cannot deadlock.
+// Codex P2 on PR #150 lines 156 + 162: the persist enqueue happens
+// UNDER b.mu so the FIFO order of channel sends matches the SSE fan-
+// out order. The single drainPersist goroutine consumes from the
+// channel sequentially and calls AppendGUIEventLog — order survives
+// to disk. The select/default on the channel makes the send non-
+// blocking, so a stalled filesystem cannot block Publish (the entry
+// is dropped instead; future work can add an atomic drop counter).
 //
-// G9: every Publish also persists a structured envelope to
-// gui-events.log via the api.AppendGUIEventLog seam (best-effort —
-// disk errors are silently dropped so a full disk cannot block the
-// in-memory fan-out). Set DisableGUIEventLog=true to opt out (used by
-// tests + ephemeral subscribers).
+// Set DisableGUIEventLog=true to opt out of persistence entirely
+// (tests + ephemeral subscribers).
 func (b *Broadcaster) Publish(ev Event) {
 	b.mu.Lock()
 	for c := range b.subs {
@@ -151,27 +221,13 @@ func (b *Broadcaster) Publish(ev Event) {
 		default: // drop
 		}
 	}
-	b.mu.Unlock()
 	if !b.DisableGUIEventLog {
-		_ = b.persist(ev)
+		select {
+		case b.persistCh <- persistRequest{ev: ev}:
+		default: // persist channel full → drop (matches SSE drop-on-full policy)
+		}
 	}
-}
-
-// persist appends ev to the gui-events.log envelope log. Best-effort:
-// disk errors are returned for tests but ignored by Publish so a full
-// disk cannot block the in-memory SSE fan-out.
-func (b *Broadcaster) persist(ev Event) error {
-	source, severity := classifyEvent(ev.Type)
-	a := b.api
-	if a == nil {
-		a = api.NewAPI()
-	}
-	return a.AppendGUIEventLog(api.GUIEventEntry{
-		Type:     ev.Type,
-		Source:   source,
-		Severity: severity,
-		Body:     ev.Body,
-	})
+	b.mu.Unlock()
 }
 
 // classifyEvent maps the wire event type to (source, severity). Keeps

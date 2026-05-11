@@ -52,6 +52,10 @@ func TestBroadcaster_UnsubscribeOnContextCancel(t *testing.T) {
 // Publish writes a structured envelope to gui-events.log via
 // AppendGUIEventLog. The classifyEvent helper assigns source +
 // severity per type. SSE fan-out is unaffected.
+//
+// The persist channel is drained by a background goroutine; Close()
+// blocks until the drain finishes, so the post-Publish read is
+// deterministic even though Publish is non-blocking.
 func TestBroadcaster_Publish_PersistsToGUIEventLog(t *testing.T) {
 	root := t.TempDir()
 	restore := api.SetDaemonStateRootForTest(root)
@@ -62,6 +66,7 @@ func TestBroadcaster_Publish_PersistsToGUIEventLog(t *testing.T) {
 	b.Publish(Event{Type: "daemon-state", Body: map[string]any{"server": "memory"}})
 	b.Publish(Event{Type: "poller-error", Body: map[string]any{"err": "boom"}})
 	b.Publish(Event{Type: "bulk-action", Body: map[string]any{"action": "restart"}})
+	b.Close() // flush drain goroutine before reading
 
 	tail := a.ReadGUIEventLogTail(10)
 	if len(tail) != 3 {
@@ -101,10 +106,59 @@ func TestBroadcaster_DisableGUIEventLog_SkipsPersist(t *testing.T) {
 	b.SetAPI(a)
 	b.DisableGUIEventLog = true
 	b.Publish(Event{Type: "daemon-state", Body: map[string]any{"server": "memory"}})
+	b.Close() // drain so goroutine doesn't leak
 
 	tail := a.ReadGUIEventLogTail(10)
 	if len(tail) != 0 {
 		t.Errorf("tail len = %d, want 0 (DisableGUIEventLog should skip persist)", len(tail))
+	}
+}
+
+// TestBroadcaster_Publish_OrderUnderConcurrency covers Codex P2 on PR
+// #150 line 156: with multiple concurrent publishers, the on-disk log
+// order must match the SSE fan-out order. Channel sends happen UNDER
+// b.mu (same critical section as the SSE fan-out), and the single
+// drain goroutine consumes FIFO — so the persisted order matches the
+// order in which Publish acquired b.mu.
+func TestBroadcaster_Publish_OrderUnderConcurrency(t *testing.T) {
+	root := t.TempDir()
+	restore := api.SetDaemonStateRootForTest(root)
+	t.Cleanup(restore)
+	a := api.NewAPI()
+	b := NewBroadcaster()
+	b.SetAPI(a)
+
+	const n = 50
+	var wg sync.WaitGroup
+	wg.Add(n)
+	// Each publisher takes a unique sequence number. After all goroutines
+	// finish + drain, the persisted Body["seq"] sequence must be strictly
+	// monotonic — proves no out-of-order interleaving across goroutines.
+	for i := 0; i < n; i++ {
+		seq := i
+		go func() {
+			defer wg.Done()
+			b.Publish(Event{Type: "daemon-state", Body: map[string]any{"seq": seq}})
+		}()
+	}
+	wg.Wait()
+	b.Close()
+
+	tail := a.ReadGUIEventLogTail(n + 5)
+	if len(tail) != n {
+		t.Fatalf("tail len = %d, want %d", len(tail), n)
+	}
+	seen := map[int]bool{}
+	for i, e := range tail {
+		v, _ := e.Body["seq"].(float64)
+		k := int(v)
+		if seen[k] {
+			t.Errorf("[%d] duplicate seq %d in persisted log", i, k)
+		}
+		seen[k] = true
+	}
+	if len(seen) != n {
+		t.Errorf("persisted log has %d unique seq values, want %d", len(seen), n)
 	}
 }
 
