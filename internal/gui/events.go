@@ -21,6 +21,8 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+
+	"mcp-local-hub/internal/api"
 )
 
 // maxSSESubscribers is the per-Broadcaster admission cap applied via
@@ -39,9 +41,18 @@ type Event struct {
 // Broadcaster is a fan-out channel for Events. Each Subscribe call
 // returns a dedicated buffered channel; Publish writes to every
 // subscriber without blocking (dropped if the buffer is full).
+//
+// G9: each Publish also persists a structured envelope to
+// gui-events.log via api.AppendGUIEventLog. Tests that don't care
+// about disk persistence (or run before DaemonStateDir is initialized)
+// set DisableGUIEventLog=true. The api handle is injected via
+// SetAPI so tests can use a state-rooted instance; nil falls back to
+// api.NewAPI() for the production GUI path.
 type Broadcaster struct {
-	mu   sync.Mutex
-	subs map[chan Event]struct{}
+	mu                 sync.Mutex
+	subs               map[chan Event]struct{}
+	api                *api.API
+	DisableGUIEventLog bool
 }
 
 // NewBroadcaster constructs an empty Broadcaster with no subscribers.
@@ -49,6 +60,17 @@ type Broadcaster struct {
 // Task 12 and started separately.
 func NewBroadcaster() *Broadcaster {
 	return &Broadcaster{subs: map[chan Event]struct{}{}}
+}
+
+// SetAPI threads an api.API handle through the broadcaster so persist
+// can call AppendGUIEventLog without constructing a fresh API per
+// Publish. Optional — nil/unset falls back to api.NewAPI() inside
+// persist. Production server bootstrap calls this once with the
+// process-wide api handle.
+func (b *Broadcaster) SetAPI(a *api.API) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.api = a
 }
 
 // Subscribe returns a channel that will receive every Event published
@@ -115,14 +137,57 @@ func (b *Broadcaster) TrySubscribe(ctx context.Context) (<-chan Event, bool) {
 // unsubscribe (which also holds b.mu before close) cannot close the
 // channel mid-send. Because the send is non-blocking (select/default),
 // holding the mutex through the fan-out cannot deadlock.
+//
+// G9: every Publish also persists a structured envelope to
+// gui-events.log via the api.AppendGUIEventLog seam (best-effort —
+// disk errors are silently dropped so a full disk cannot block the
+// in-memory fan-out). Set DisableGUIEventLog=true to opt out (used by
+// tests + ephemeral subscribers).
 func (b *Broadcaster) Publish(ev Event) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	for c := range b.subs {
 		select {
 		case c <- ev:
 		default: // drop
 		}
+	}
+	b.mu.Unlock()
+	if !b.DisableGUIEventLog {
+		_ = b.persist(ev)
+	}
+}
+
+// persist appends ev to the gui-events.log envelope log. Best-effort:
+// disk errors are returned for tests but ignored by Publish so a full
+// disk cannot block the in-memory SSE fan-out.
+func (b *Broadcaster) persist(ev Event) error {
+	source, severity := classifyEvent(ev.Type)
+	a := b.api
+	if a == nil {
+		a = api.NewAPI()
+	}
+	return a.AppendGUIEventLog(api.GUIEventEntry{
+		Type:     ev.Type,
+		Source:   source,
+		Severity: severity,
+		Body:     ev.Body,
+	})
+}
+
+// classifyEvent maps the wire event type to (source, severity). Keeps
+// the envelope concise so log consumers can filter by source without
+// inspecting the body. Type-to-source mapping reflects the current
+// emit sites; new event types should add a row here.
+func classifyEvent(eventType string) (source string, severity string) {
+	switch eventType {
+	case "daemon-state":
+		return "poller", api.GUIEventSeverityInfo
+	case "poller-error":
+		return "poller", api.GUIEventSeverityError
+	case "bulk-action":
+		return "servers", api.GUIEventSeverityInfo
+	default:
+		return "gui", api.GUIEventSeverityInfo
 	}
 }
 

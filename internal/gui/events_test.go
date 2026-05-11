@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/api"
 )
 
 func TestBroadcaster_SubscribeReceivesPublishedEvent(t *testing.T) {
@@ -43,6 +45,66 @@ func TestBroadcaster_UnsubscribeOnContextCancel(t *testing.T) {
 		}
 	case <-time.After(200 * time.Millisecond):
 		t.Error("cancelled subscriber should have returned from receive immediately")
+	}
+}
+
+// TestBroadcaster_Publish_PersistsToGUIEventLog covers G9: every
+// Publish writes a structured envelope to gui-events.log via
+// AppendGUIEventLog. The classifyEvent helper assigns source +
+// severity per type. SSE fan-out is unaffected.
+func TestBroadcaster_Publish_PersistsToGUIEventLog(t *testing.T) {
+	root := t.TempDir()
+	restore := api.SetDaemonStateRootForTest(root)
+	t.Cleanup(restore)
+	a := api.NewAPI()
+	b := NewBroadcaster()
+	b.SetAPI(a)
+	b.Publish(Event{Type: "daemon-state", Body: map[string]any{"server": "memory"}})
+	b.Publish(Event{Type: "poller-error", Body: map[string]any{"err": "boom"}})
+	b.Publish(Event{Type: "bulk-action", Body: map[string]any{"action": "restart"}})
+
+	tail := a.ReadGUIEventLogTail(10)
+	if len(tail) != 3 {
+		t.Fatalf("tail len = %d, want 3", len(tail))
+	}
+	cases := []struct {
+		etype, wantSource, wantSeverity string
+	}{
+		{"daemon-state", "poller", api.GUIEventSeverityInfo},
+		{"poller-error", "poller", api.GUIEventSeverityError},
+		{"bulk-action", "servers", api.GUIEventSeverityInfo},
+	}
+	for i, c := range cases {
+		if tail[i].Type != c.etype {
+			t.Errorf("[%d] type = %q, want %q", i, tail[i].Type, c.etype)
+		}
+		if tail[i].Source != c.wantSource {
+			t.Errorf("[%d] source = %q, want %q", i, tail[i].Source, c.wantSource)
+		}
+		if tail[i].Severity != c.wantSeverity {
+			t.Errorf("[%d] severity = %q, want %q", i, tail[i].Severity, c.wantSeverity)
+		}
+		if tail[i].SchemaVersion != api.GUIEventLogSchemaVersion {
+			t.Errorf("[%d] schema_version = %q, want %q", i, tail[i].SchemaVersion, api.GUIEventLogSchemaVersion)
+		}
+	}
+}
+
+// TestBroadcaster_DisableGUIEventLog_SkipsPersist guards the opt-out
+// path used by tests and ephemeral surfaces.
+func TestBroadcaster_DisableGUIEventLog_SkipsPersist(t *testing.T) {
+	root := t.TempDir()
+	restore := api.SetDaemonStateRootForTest(root)
+	t.Cleanup(restore)
+	a := api.NewAPI()
+	b := NewBroadcaster()
+	b.SetAPI(a)
+	b.DisableGUIEventLog = true
+	b.Publish(Event{Type: "daemon-state", Body: map[string]any{"server": "memory"}})
+
+	tail := a.ReadGUIEventLogTail(10)
+	if len(tail) != 0 {
+		t.Errorf("tail len = %d, want 0 (DisableGUIEventLog should skip persist)", len(tail))
 	}
 }
 
