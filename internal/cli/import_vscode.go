@@ -9,7 +9,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
@@ -63,9 +62,14 @@ env vars, schema collisions).`,
 				return err
 			}
 			// Warnings go to stderr so the YAML on stdout pipes
-			// cleanly to files / clipboards.
+			// cleanly to files / clipboards. Route through Cobra's
+			// configured stderr (cmd.ErrOrStderr) so tests that
+			// swap the stream via cmd.SetErr can capture warnings,
+			// and so a parent command's redirected stderr is
+			// honored (Codex P2 on PR #151 line 68).
+			errOut := cmd.ErrOrStderr()
 			for _, w := range result.Warnings {
-				fmt.Fprintf(os.Stderr, "warn: %s\n", w)
+				fmt.Fprintf(errOut, "warn: %s\n", w)
 			}
 			if result.EmptyResult {
 				// Exit 0 — empty isn't a failure; the operator
