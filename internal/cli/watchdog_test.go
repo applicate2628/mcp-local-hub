@@ -604,6 +604,18 @@ func TestWatchdogOnce_ApplyRestartDecision_StopRace_NoRestart(t *testing.T) {
 	a := api.NewAPI()
 	now := time.Date(2026, 5, 7, 12, 0, 0, 0, time.UTC)
 
+	// Pin watchdogNow() to the test's `now`. applyRestartDecision
+	// consults watchdogNow() (NOT the `now` parameter) for the
+	// IntentStillRunning staleness check at line ~699, and
+	// IsActiveStop applies a 24h TTL against the intent's UpdatedAt.
+	// Without this hook, watchdogNow() returns wall clock — minutes
+	// to days past the fixed test `now` — which makes the fake
+	// IntentDesiredStopped intent appear stale and IntentStillRunning
+	// returns true, bypassing the stop-race path we are trying to
+	// assert. Other watchdog tests (e.g. line ~957, ~1411, ~1524,
+	// ~1618) follow the same pattern; this one was missing the seam.
+	watchdogNowFn = func() time.Time { return now }
+
 	const taskName = "\\mcp-local-hub-fake-default"
 
 	// IntentStillRunning returns false — the user just stopped this
