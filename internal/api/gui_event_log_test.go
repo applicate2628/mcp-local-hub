@@ -196,4 +196,25 @@ func TestReadGUIEventLogTail_NoFile_EmptySlice(t *testing.T) {
 	if len(tail) != 0 {
 		t.Errorf("tail on missing file = %d entries, want 0", len(tail))
 	}
+	// Codex P3 on PR #150 line 236: non-happy paths must return an
+	// empty slice (not nil) so JSON encoders emit `[]` not `null`.
+	if tail == nil {
+		t.Errorf("tail on missing file is nil; want []GUIEventEntry{} so JSON renders as []")
+	}
+}
+
+// TestReadGUIEventLogTail_ZeroN_EmptySlice guards Codex P3 on PR #150
+// line 236 for the n<=0 branch.
+func TestReadGUIEventLogTail_ZeroN_EmptySlice(t *testing.T) {
+	root := t.TempDir()
+	restore := SetDaemonStateRootForTest(root)
+	t.Cleanup(restore)
+
+	a := NewAPI()
+	if tail := a.ReadGUIEventLogTail(0); tail == nil {
+		t.Errorf("n=0 returned nil; want []GUIEventEntry{}")
+	}
+	if tail := a.ReadGUIEventLogTail(-5); tail == nil {
+		t.Errorf("n=-5 returned nil; want []GUIEventEntry{}")
+	}
 }

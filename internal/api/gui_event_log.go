@@ -229,19 +229,22 @@ func defaultGUIEventLogAppend(path string, line []byte) error {
 // surface and tests. Lines that fail to unmarshal are skipped (best-
 // effort tail — corrupt lines should not block status output).
 //
-// Returns an empty slice when the file is missing.
+// Returns an empty slice (NOT nil) on every non-happy path so JSON
+// encoders emit `[]` not `null` — consumers that expect a stable
+// array shape don't break (Codex P3 on PR #150 line 236).
 func (a *API) ReadGUIEventLogTail(n int) []GUIEventEntry {
+	empty := []GUIEventEntry{}
 	if n <= 0 {
-		return nil
+		return empty
 	}
 	dir, err := DaemonStateDir()
 	if err != nil {
-		return nil
+		return empty
 	}
 	path := filepath.Join(dir, guiEventLogFileLeaf)
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil
+		return empty
 	}
 	return parseGUIEventLogTail(raw, n)
 }
