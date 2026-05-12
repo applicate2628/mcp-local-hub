@@ -61,7 +61,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -150,15 +149,29 @@ func AggregateInitialize(ctx context.Context, sess *hubSession) ([]byte, error) 
 	return body, nil
 }
 
+// listResult is the per-daemon outcome of a tools/list fan-out call.
+// On err == nil, tools + toolMap carry the namespaced contribution to
+// the merged response. On err != nil, the row turns into a
+// stage="tools/list" partialFailure.
+type listResult struct {
+	ref     canonicalDaemonRef
+	tools   []json.RawMessage
+	toolMap map[string]canonicalToolRef
+	err     error
+}
+
 // AggregateToolsList fans out tools/list to every daemon in
 // sess.InitSuccesses. Merges into a flat exposed-name route map keyed
 // "<server>__<rawname>". The session's RouteMap (atomic.Pointer) is
 // swapped to the freshly-built map.
 //
 // _meta.mcphub.partialFailures combines stored InitFailures with
-// list-time failures (stage="tools/list"). If len(InitSuccesses)==0
-// AND no list-time successes, the response is a JSON-RPC -32000
-// error envelope with data.mcphub.partialFailures.
+// list-time failures (stage="tools/list"). If no list calls succeeded
+// (whether because no init succeeded OR every list call failed), the
+// response is a JSON-RPC -32000 error envelope with
+// data.mcphub.partialFailures. Note: initialize succeeding but EVERY
+// list call failing also lands here — surfacing the call as a failure
+// is intentional, since the caller can't discover any tools.
 func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMessage) ([]byte, error) {
 	// Snapshot the inputs under the session mu.
 	sess.mu.Lock()
@@ -170,12 +183,15 @@ func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMes
 	copy(initFailures, sess.InitFailures)
 	sess.mu.Unlock()
 
-	type listResult struct {
-		ref     canonicalDaemonRef
-		tools   []json.RawMessage
-		toolMap map[string]canonicalToolRef
-		err     error
-	}
+	results := fanOutToolsList(ctx, successes)
+	return assembleToolsListResponse(reqID, results, initFailures, sess)
+}
+
+// fanOutToolsList issues parallel tools/list calls to every daemon
+// whose initialize succeeded. Returns one listResult per daemon. The
+// caller (assembleToolsListResponse) merges + namespaces + publishes
+// the route map.
+func fanOutToolsList(ctx context.Context, successes map[canonicalDaemonRef]string) []listResult {
 	results := make([]listResult, 0, len(successes))
 	var resultsMu sync.Mutex
 
@@ -201,11 +217,23 @@ func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMes
 		}()
 	}
 	wg.Wait()
+	return results
+}
 
-	// Build merged tools list, route map, and list-time failure rows.
+// assembleToolsListResponse merges per-daemon list results into the
+// final response envelope. Publishes the session's RouteMap atomically
+// before returning so a concurrent tools/call sees the new routes.
+//
+// Decision: all-failed (-32000) vs success-with-partial-failures uses
+// listSuccessCount > 0 as the sole criterion. An init success with
+// zero list successes is treated as all-failed — the caller cannot
+// discover any tools, so we surface the failures via the error
+// envelope rather than returning result.tools=[].
+func assembleToolsListResponse(reqID json.RawMessage, results []listResult, initFailures []DaemonFailure, sess *hubSession) ([]byte, error) {
 	mergedTools := make([]json.RawMessage, 0)
 	mergedRoutes := make(map[string]canonicalToolRef)
 	listFailures := make([]DaemonFailure, 0)
+	listSuccessCount := 0
 	for _, r := range results {
 		if r.err != nil {
 			listFailures = append(listFailures, DaemonFailure{
@@ -216,6 +244,7 @@ func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMes
 			})
 			continue
 		}
+		listSuccessCount++
 		mergedTools = append(mergedTools, r.tools...)
 		for k, v := range r.toolMap {
 			mergedRoutes[k] = v
@@ -226,27 +255,23 @@ func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMes
 	// concurrent tools/call sees it.
 	sess.RouteMap.Store(&mergedRoutes)
 
-	// All-failed path: no successes AND every fan-out failed.
-	hadAnySuccess := len(mergedRoutes) > 0 || (len(initFailures) == 0 && len(listFailures) == 0 && len(successes) == 0)
-	// Refine: "had any success" = at least one list result without err
-	// OR no list calls were made AND init had successes (which means
-	// initialize succeeded but tools/list found nothing — that's a
-	// legitimate empty tool list, not a failure).
-	listSuccessCount := 0
-	for _, r := range results {
-		if r.err == nil {
-			listSuccessCount++
-		}
-	}
-	hadAnySuccess = listSuccessCount > 0
-
 	allFailures := append([]DaemonFailure{}, initFailures...)
 	allFailures = append(allFailures, listFailures...)
 
-	if !hadAnySuccess {
+	if listSuccessCount == 0 {
 		return buildAllFailedToolsListResponse(reqID, allFailures)
 	}
 	return buildToolsListResponse(reqID, mergedTools, allFailures)
+}
+
+// resolvedCallTarget is the output of route lookup + resolver
+// revalidation. Either errBody is set (the caller returns it verbatim
+// as the final response) or the ref/daemonSID fields drive the
+// outbound HTTP forward.
+type resolvedCallTarget struct {
+	ref       canonicalToolRef
+	daemonSID string
+	errBody   []byte
 }
 
 // AggregateToolsCall looks up params.name in sess.RouteMap, revalidates
@@ -257,26 +282,50 @@ func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMes
 // On unknown name → -32601 "Method not found: <name>".
 // On daemon error → response body passed through verbatim.
 func AggregateToolsCall(ctx context.Context, sess *hubSession, clientReqID json.RawMessage, paramsRaw json.RawMessage) ([]byte, error) {
-	// Parse params to extract name + arguments.
+	target, err := resolveToolsCallRoute(sess, clientReqID, paramsRaw)
+	if err != nil {
+		return nil, err
+	}
+	if target.errBody != nil {
+		return target.errBody, nil
+	}
+	return dispatchToolsCall(ctx, sess, clientReqID, paramsRaw, target.ref, target.daemonSID)
+}
+
+// resolveToolsCallRoute parses params.name, looks it up in the
+// session's RouteMap, revalidates against the current resolver
+// snapshot, and resolves the daemon Mcp-Session-Id. On any client- or
+// state-level rejection (-32602, -32601, -32603) returns the error
+// envelope via target.errBody; the caller passes it through verbatim.
+// Returns (nil-target, err) only on internal JSON-marshal failure
+// inside buildJSONRPCError — never on routing rejection.
+func resolveToolsCallRoute(sess *hubSession, clientReqID, paramsRaw json.RawMessage) (resolvedCallTarget, error) {
+	// Parse params to extract name. Other fields (arguments, _meta,
+	// extension attrs) survive verbatim through buildRewrittenParams's
+	// generic-map round-trip; we only need name here to drive route
+	// lookup.
 	var p struct {
-		Name      string          `json:"name"`
-		Arguments json.RawMessage `json:"arguments,omitempty"`
+		Name string `json:"name"`
 	}
 	if err := json.Unmarshal(paramsRaw, &p); err != nil {
-		return buildJSONRPCError(clientReqID, -32602, "Invalid params: "+err.Error(), nil)
+		body, mErr := buildJSONRPCError(clientReqID, -32602, "Invalid params: "+err.Error(), nil)
+		return resolvedCallTarget{errBody: body}, mErr
 	}
 	if p.Name == "" {
-		return buildJSONRPCError(clientReqID, -32602, "Invalid params: missing name", nil)
+		body, mErr := buildJSONRPCError(clientReqID, -32602, "Invalid params: missing name", nil)
+		return resolvedCallTarget{errBody: body}, mErr
 	}
 
 	// Route lookup on the session's RouteMap.
 	rmPtr := sess.RouteMap.Load()
 	if rmPtr == nil {
-		return buildJSONRPCError(clientReqID, -32601, "Method not found: "+p.Name, nil)
+		body, mErr := buildJSONRPCError(clientReqID, -32601, "Method not found: "+p.Name, nil)
+		return resolvedCallTarget{errBody: body}, mErr
 	}
 	ref, ok := (*rmPtr)[p.Name]
 	if !ok {
-		return buildJSONRPCError(clientReqID, -32601, "Method not found: "+p.Name, nil)
+		body, mErr := buildJSONRPCError(clientReqID, -32601, "Method not found: "+p.Name, nil)
+		return resolvedCallTarget{errBody: body}, mErr
 	}
 
 	// Resolver-snapshot revalidation: refuse if (Server, Daemon) is
@@ -285,7 +334,8 @@ func AggregateToolsCall(ctx context.Context, sess *hubSession, clientReqID json.
 	current := LoadResolverSnapshot()
 	if current != nil && current != sess.SnapshotAtInit {
 		if !daemonStillBound(current, sess.Client, ref) {
-			return buildJSONRPCError(clientReqID, -32601, "tool moved out of scope; reinitialize session", nil)
+			body, mErr := buildJSONRPCError(clientReqID, -32601, "tool moved out of scope; reinitialize session", nil)
+			return resolvedCallTarget{errBody: body}, mErr
 		}
 	}
 
@@ -294,11 +344,19 @@ func AggregateToolsCall(ctx context.Context, sess *hubSession, clientReqID json.
 	daemonSID, hasSID := sess.InitSuccesses[canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port}]
 	sess.mu.Unlock()
 	if !hasSID {
-		return buildJSONRPCError(clientReqID, -32603, "Internal error: no daemon session id for target", nil)
+		body, mErr := buildJSONRPCError(clientReqID, -32603, "Internal error: no daemon session id for target", nil)
+		return resolvedCallTarget{errBody: body}, mErr
 	}
+	return resolvedCallTarget{ref: ref, daemonSID: daemonSID}, nil
+}
 
+// dispatchToolsCall builds the rewritten body, registers an in-flight
+// row, forwards to the daemon under PerCallWallClockCap, and rewrites
+// the daemon's response id back to the client's id. Removes the
+// in-flight row via defer.
+func dispatchToolsCall(ctx context.Context, sess *hubSession, clientReqID, paramsRaw json.RawMessage, ref canonicalToolRef, daemonSID string) ([]byte, error) {
 	// Build the rewritten body. params.name → RawName.
-	rewrittenParams, err := buildRewrittenParams(p.Name, ref.RawName, p.Arguments, paramsRaw)
+	rewrittenParams, err := buildRewrittenParams(ref.RawName, paramsRaw)
 	if err != nil {
 		return buildJSONRPCError(clientReqID, -32603, "Internal error: "+err.Error(), nil)
 	}
@@ -388,64 +446,84 @@ func daemonStillBound(snap *ResolverSnapshot, client string, ref canonicalToolRe
 
 // ---------------- HTTP plumbing ----------------
 
-// postInitialize sends an initialize call to a single daemon and
-// returns the Mcp-Session-Id from the response header.
-func postInitialize(ctx context.Context, ref canonicalDaemonRef, protoVer string) (string, error) {
-	url := fmt.Sprintf("http://127.0.0.1:%d/mcp", ref.Port)
-	hubVer, _, _ := buildinfo.Get()
-	body := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"%s","capabilities":{},"clientInfo":{"name":"mcphub-hub","version":"%s"}}}`,
-		protoVer, hubVer)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(body))
+// doDaemonPost issues a JSON-RPC POST to a daemon at 127.0.0.1:<port>
+// /mcp and returns the response body (drained + capped at
+// maxAggregatorResponseBytes) plus the response header. The caller
+// parses the body and reads any header fields it needs (e.g.,
+// Mcp-Session-Id on initialize). daemonSID is set as the
+// Mcp-Session-Id request header when non-empty.
+//
+// HTTP >= 400 turns into an error. Body-read failure or oversize
+// response also turns into an error. The body is fed through
+// extractJSONPayload by callers that need to parse it — doDaemonPost
+// itself is content-type-agnostic.
+//
+// Used by postInitialize, postToolsList, postToolsCall, and
+// postCancellation. The single helper keeps the request-shape +
+// retry policy + body-cap logic in one auditable place.
+func doDaemonPost(ctx context.Context, port int, body []byte, daemonSID string, timeout time.Duration) ([]byte, http.Header, error) {
+	url := fmt.Sprintf("http://127.0.0.1:%d/mcp", port)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
-	client := &http.Client{Timeout: PerDaemonInitTimeout}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	// Drain to avoid leaking the connection.
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxAggregatorResponseBytes+1))
-	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	return resp.Header.Get("Mcp-Session-Id"), nil
-}
-
-// postToolsList sends a tools/list call to a single daemon and
-// returns the tool entries from result.tools. Each entry is raw JSON
-// so we can re-emit it verbatim in the merged list (preserves any
-// extension fields).
-func postToolsList(ctx context.Context, ref canonicalDaemonRef, daemonSID string) ([]json.RawMessage, error) {
-	url := fmt.Sprintf("http://127.0.0.1:%d/mcp", ref.Port)
-	body := `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(body))
-	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	if daemonSID != "" {
 		req.Header.Set("Mcp-Session-Id", daemonSID)
 	}
-	client := &http.Client{Timeout: PerDaemonListTimeout}
+	client := &http.Client{Timeout: timeout}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxAggregatorResponseBytes+1))
 	if err != nil {
-		return nil, fmt.Errorf("read: %w", err)
+		return nil, resp.Header, fmt.Errorf("read: %w", err)
 	}
 	if len(raw) > maxAggregatorResponseBytes {
-		return nil, fmt.Errorf("response too large (> %d bytes)", maxAggregatorResponseBytes)
+		return nil, resp.Header, fmt.Errorf("response too large (> %d bytes)", maxAggregatorResponseBytes)
 	}
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+		return raw, resp.Header, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return raw, resp.Header, nil
+}
+
+// postInitialize sends an initialize call to a single daemon and
+// returns the Mcp-Session-Id from the response header.
+//
+// The outbound JSON-RPC id is hard-coded to 1: a fresh HTTP connection
+// is opened per call (no multiplexed responses), and the daemon's
+// response id is not validated — we extract the Mcp-Session-Id header
+// only. Phase 4 keeps the same shape; downstream callers see the
+// hub-generated client_session_id, not this internal id.
+func postInitialize(ctx context.Context, ref canonicalDaemonRef, protoVer string) (string, error) {
+	hubVer, _, _ := buildinfo.Get()
+	body := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"%s","capabilities":{},"clientInfo":{"name":"mcphub-hub","version":"%s"}}}`,
+		protoVer, hubVer)
+	_, hdr, err := doDaemonPost(ctx, ref.Port, []byte(body), "", PerDaemonInitTimeout)
+	if err != nil {
+		return "", err
+	}
+	return hdr.Get("Mcp-Session-Id"), nil
+}
+
+// postToolsList sends a tools/list call to a single daemon and
+// returns the tool entries from result.tools. Each entry is raw JSON
+// so we can re-emit it verbatim in the merged list (preserves any
+// extension fields).
+//
+// The outbound JSON-RPC id is hard-coded to 2: a fresh HTTP connection
+// is opened per call and the daemon response id is not validated —
+// the hub-generated id used downstream by the aggregator is the
+// session-level client_session_id, not this internal id.
+func postToolsList(ctx context.Context, ref canonicalDaemonRef, daemonSID string) ([]json.RawMessage, error) {
+	body := []byte(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
+	raw, _, err := doDaemonPost(ctx, ref.Port, body, daemonSID, PerDaemonListTimeout)
+	if err != nil {
+		return nil, err
 	}
 	payload := extractJSONPayload(raw)
 	var env struct {
@@ -472,35 +550,13 @@ func postToolsList(ctx context.Context, ref canonicalDaemonRef, daemonSID string
 // id; we keep the raw form here so partial-failure surfaces have
 // access to any structured error payload).
 func postToolsCall(ctx context.Context, ref canonicalToolRef, daemonSID string, daemonReqID, params json.RawMessage) ([]byte, error) {
-	url := fmt.Sprintf("http://127.0.0.1:%d/mcp", ref.Port)
 	body, err := buildToolsCallEnvelope(daemonReqID, params)
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	raw, _, err := doDaemonPost(ctx, ref.Port, body, daemonSID, PerCallWallClockCap)
 	if err != nil {
 		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
-	if daemonSID != "" {
-		req.Header.Set("Mcp-Session-Id", daemonSID)
-	}
-	client := &http.Client{Timeout: PerCallWallClockCap}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxAggregatorResponseBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("read: %w", err)
-	}
-	if len(raw) > maxAggregatorResponseBytes {
-		return nil, fmt.Errorf("response too large (> %d bytes)", maxAggregatorResponseBytes)
-	}
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return extractJSONPayload(raw), nil
 }
@@ -508,7 +564,6 @@ func postToolsCall(ctx context.Context, ref canonicalToolRef, daemonSID string, 
 // postCancellation sends a notifications/cancelled to a daemon.
 // Best-effort: errors are swallowed by the caller.
 func postCancellation(ctx context.Context, ref canonicalDaemonRef, daemonSID string, daemonReqID json.RawMessage) error {
-	url := fmt.Sprintf("http://127.0.0.1:%d/mcp", ref.Port)
 	envelope := struct {
 		JSONRPC string `json:"jsonrpc"`
 		Method  string `json:"method"`
@@ -524,22 +579,9 @@ func postCancellation(ctx context.Context, ref canonicalDaemonRef, daemonSID str
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
+	if _, _, err := doDaemonPost(ctx, ref.Port, body, daemonSID, PerDaemonInitTimeout); err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
-	if daemonSID != "" {
-		req.Header.Set("Mcp-Session-Id", daemonSID)
-	}
-	client := &http.Client{Timeout: PerDaemonInitTimeout}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxAggregatorResponseBytes+1))
 	return nil
 }
 
@@ -650,18 +692,17 @@ func buildToolsCallEnvelope(daemonReqID, params json.RawMessage) ([]byte, error)
 	return json.Marshal(envelope)
 }
 
-// buildRewrittenParams returns paramsRaw with `name` replaced by raw.
-// Other fields (arguments, _meta, etc.) survive verbatim. Falls back
-// to a full re-marshal when the original params shape can't be
-// rewritten with simple substitution.
-func buildRewrittenParams(_, raw string, _ json.RawMessage, paramsRaw json.RawMessage) (json.RawMessage, error) {
+// buildRewrittenParams returns paramsRaw with `name` replaced by
+// rawName. Other fields (arguments, _meta, etc.) survive verbatim by
+// way of a generic-map round-trip.
+func buildRewrittenParams(rawName string, paramsRaw json.RawMessage) (json.RawMessage, error) {
 	// Decode into a generic map, replace name, re-marshal. Preserves
 	// every extension field a daemon might care about.
 	var m map[string]any
 	if err := json.Unmarshal(paramsRaw, &m); err != nil {
 		return nil, err
 	}
-	m["name"] = raw
+	m["name"] = rawName
 	out, err := json.Marshal(m)
 	if err != nil {
 		return nil, err

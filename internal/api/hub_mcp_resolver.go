@@ -17,11 +17,12 @@
 // Bindings:    client_id -> [(server, daemon, port), ...]
 //   Used at initialize fan-out time: hub iterates this list to know
 //   which daemons to call initialize on for a given calling client.
-// Routes:      "<server>__<rawname>" -> canonicalToolRef
-//   Populated by the aggregator at tools/list merge time, NOT at
-//   manifest-build time. The build path leaves Routes empty; each
-//   session's RouteMap (separate atomic.Pointer on hubSession) is
-//   the per-session merged form.
+//
+// Routing is per-session, not snapshot-global: the aggregator builds
+// each session's RouteMap (atomic.Pointer on hubSession) at
+// tools/list merge time from per-daemon responses. ResolverSnapshot
+// owns only the binding topology — the (client, server, daemon, port)
+// edges read at initialize fan-out time.
 //
 // Spec: docs/superpowers/specs/2026-05-12-g4-unified-hub-mcp-design-v3.md
 // §"Per-hub session model" + §"Resolver state is published via atomic
@@ -68,7 +69,6 @@ type canonicalToolRef struct {
 type ResolverSnapshot struct {
 	Gen      int64
 	Bindings map[string][]canonicalDaemonRef
-	Routes   map[string]canonicalToolRef
 }
 
 // Package-level atomic pointer to the currently-published snapshot.
@@ -109,14 +109,15 @@ func LoadResolverSnapshot() *ResolverSnapshot {
 // for every (client, daemon) pair, the bindings list for that client
 // gains an entry naming the daemon's port + parent server.
 //
-// Routes is left empty by this build path. The aggregator populates
-// Routes at session-init time from per-daemon tools/list responses.
+// Routes are NOT carried by the snapshot: each session's RouteMap is
+// built per-call by the aggregator from per-daemon tools/list
+// responses. The snapshot owns only the binding topology used at
+// initialize fan-out time.
 func BuildResolverSnapshotFromManifests(manifests []config.ServerManifest) *ResolverSnapshot {
 	gen := resolverGen.Add(1)
 	snap := &ResolverSnapshot{
 		Gen:      gen,
 		Bindings: make(map[string][]canonicalDaemonRef),
-		Routes:   make(map[string]canonicalToolRef),
 	}
 	for _, m := range manifests {
 		// Index daemons by name so we can resolve port via

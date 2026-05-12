@@ -159,11 +159,12 @@ func TestBuildResolverSnapshotNamespacing(t *testing.T) {
 
 	// Note: at snapshot-build time we may not have the live tools list
 	// for each daemon (that's populated at session-init time by the
-	// aggregator from tools/list responses). The package-level Routes
-	// map is the canonical raw-name index used to verify membership;
-	// for the build-from-manifests path it's empty UNTIL the aggregator
-	// fills it. So this test focuses on what the build path DOES
-	// produce — namely Bindings keyed by client_id.
+	// aggregator from tools/list responses). Each session's RouteMap
+	// (atomic.Pointer on hubSession) is the canonical per-session
+	// merged route index built from per-daemon tools/list responses;
+	// ResolverSnapshot owns only the binding topology. This test
+	// focuses on what the build path DOES produce — namely Bindings
+	// keyed by client_id.
 	snap := BuildResolverSnapshotFromManifests([]config.ServerManifest{
 		minimalManifest(),
 		crossManifest(),

@@ -26,6 +26,16 @@ import (
 	"time"
 )
 
+// incInFlightForTest / decInFlightForTest synthesize an "in-flight"
+// state without going through InsertInFlight/RemoveInFlight. Tests
+// that exercise the sweeper's inFlightCount fast-path use this; the
+// production code path is Insert/Remove only.
+//
+// Defined in _test.go so the production binary does NOT expose
+// atomic-counter manipulation outside the insert/remove pair.
+func (s *hubSession) incInFlightForTest() { s.inFlightCount.Add(1) }
+func (s *hubSession) decInFlightForTest() { s.inFlightCount.Add(-1) }
+
 func TestCreateSessionRejectsAtPerClientCap(t *testing.T) {
 	store := NewHubSessionStore(SessionStoreOpts{
 		MaxPerClient:  2,
@@ -109,7 +119,7 @@ func TestIdleSweeperRespectsInFlightCount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.IncInFlight() // simulate an outstanding tools/call
+	s.incInFlightForTest() // simulate an outstanding tools/call
 
 	// Advance clock 31 min. LastUsedAt is still time.Unix(0,0).
 	store.now = func() time.Time { return time.Unix(31*60, 0) }
@@ -119,7 +129,7 @@ func TestIdleSweeperRespectsInFlightCount(t *testing.T) {
 	}
 
 	// Now drain in-flight and re-sweep — session should disappear.
-	s.DecInFlight()
+	s.decInFlightForTest()
 	store.sweepOnce()
 	if _, ok := store.Get(s.ClientSessionID); ok {
 		t.Errorf("sweep should have removed idle, inFlight=0 session")
@@ -302,7 +312,10 @@ func TestGenerateSessionIDUniqueAndShape(t *testing.T) {
 	seen := map[string]bool{}
 	const n = 100
 	for i := 0; i < n; i++ {
-		id := generateSessionID()
+		id, err := generateSessionID()
+		if err != nil {
+			t.Fatalf("generateSessionID: %v", err)
+		}
 		if len(id) != 32 {
 			t.Errorf("session id %q has length %d, want 32 (128-bit hex)", id, len(id))
 		}

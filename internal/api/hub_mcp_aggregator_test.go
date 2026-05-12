@@ -37,21 +37,30 @@ import (
 )
 
 // stubDaemon is an httptest.Server hosting a fake MCP daemon at /mcp.
-// init / list / call paths configurable via the handler hooks.
+// init / list / call / notify paths configurable via the handler
+// hooks. onNotify covers notifications/cancelled and any other future
+// notification method the aggregator forwards.
 type stubDaemon struct {
-	server   *httptest.Server
-	port     int
+	server    *httptest.Server
+	port      int
 	sessionID string
 
-	// hooks: nil means "default behavior"
-	onInit func(w http.ResponseWriter, r *http.Request)
-	onList func(w http.ResponseWriter, r *http.Request)
-	onCall func(w http.ResponseWriter, r *http.Request)
+	// hooks: nil means "default behavior". onNotify receives the
+	// already-drained request body bytes (the dispatch loop reads
+	// r.Body once at top to peek method, so hooks that re-call
+	// readAllBody on r get empty bytes; capturing the body in the
+	// dispatch closure keeps notification-payload assertions
+	// straightforward).
+	onInit   func(w http.ResponseWriter, r *http.Request)
+	onList   func(w http.ResponseWriter, r *http.Request)
+	onCall   func(w http.ResponseWriter, r *http.Request)
+	onNotify func(w http.ResponseWriter, r *http.Request, body []byte)
 
 	// counters
-	initCount atomic.Int32
-	listCount atomic.Int32
-	callCount atomic.Int32
+	initCount   atomic.Int32
+	listCount   atomic.Int32
+	callCount   atomic.Int32
+	notifyCount atomic.Int32
 }
 
 func newStubDaemon(t *testing.T, sessionID string) *stubDaemon {
@@ -108,6 +117,13 @@ func newStubDaemon(t *testing.T, sessionID string) *stubDaemon {
 			}
 			out, _ := json.Marshal(resp)
 			_, _ = w.Write(out)
+		case "notifications/cancelled":
+			sd.notifyCount.Add(1)
+			if sd.onNotify != nil {
+				sd.onNotify(w, r, body)
+				return
+			}
+			w.WriteHeader(http.StatusAccepted)
 		default:
 			w.WriteHeader(http.StatusBadRequest)
 		}
@@ -304,9 +320,13 @@ func TestAggregateToolsListReportsAllFailedAsErrorMinus32000(t *testing.T) {
 	}
 	var env struct {
 		Error *struct {
-			Code int             `json:"code"`
-			Message string       `json:"message"`
-			Data    json.RawMessage `json:"data"`
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+			Data    struct {
+				Mcphub struct {
+					PartialFailures []DaemonFailure `json:"partialFailures"`
+				} `json:"mcphub"`
+			} `json:"data"`
 		} `json:"error"`
 		Result json.RawMessage `json:"result"`
 	}
@@ -321,6 +341,100 @@ func TestAggregateToolsListReportsAllFailedAsErrorMinus32000(t *testing.T) {
 	}
 	if !strings.Contains(env.Error.Message, "all participating daemons failed") {
 		t.Errorf("Error.Message=%q want 'all participating daemons failed' substring", env.Error.Message)
+	}
+	// Cleanup #5 — partialFailures MUST include both init failures with
+	// stage="initialize" and err containing "HTTP 503". The aggregator
+	// emits one row per fan-out failure; here both daemons failed init
+	// so no list-stage rows are expected.
+	failures := env.Error.Data.Mcphub.PartialFailures
+	if len(failures) != 2 {
+		t.Fatalf("partialFailures=%d want 2: %+v", len(failures), failures)
+	}
+	servers := map[string]DaemonFailure{}
+	for _, f := range failures {
+		servers[f.Server] = f
+	}
+	for _, srv := range []string{"srv1", "srv2"} {
+		f, ok := servers[srv]
+		if !ok {
+			t.Errorf("partialFailures missing server %q: %+v", srv, failures)
+			continue
+		}
+		if f.Daemon != "claude-code" {
+			t.Errorf("partialFailures[%q].Daemon=%q want claude-code", srv, f.Daemon)
+		}
+		if f.Stage != "initialize" {
+			t.Errorf("partialFailures[%q].Stage=%q want initialize", srv, f.Stage)
+		}
+		if !strings.Contains(f.Err, "HTTP 503") {
+			t.Errorf("partialFailures[%q].Err=%q want substring 'HTTP 503'", srv, f.Err)
+		}
+	}
+}
+
+// Cleanup #1b — init succeeded for every daemon, but EVERY tools/list
+// call failed. listSuccessCount == 0 → -32000 all-failed envelope.
+// The partialFailures rows must be stage="tools/list" (NOT
+// "initialize"), since the initialize fan-out itself succeeded.
+func TestAggregateToolsListAllListFailedReturnsMinus32000(t *testing.T) {
+	d1 := newStubDaemon(t, "d1-sid")
+	d2 := newStubDaemon(t, "d2-sid")
+	// initialize OK, tools/list returns 503.
+	listBad := func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+	d1.onList = listBad
+	d2.onList = listBad
+
+	sess := sessionWithParticipants(d1, d2)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := AggregateInitialize(ctx, sess); err != nil {
+		t.Fatal(err)
+	}
+	if len(sess.InitSuccesses) != 2 {
+		t.Fatalf("want 2 init successes, got %d", len(sess.InitSuccesses))
+	}
+	if len(sess.InitFailures) != 0 {
+		t.Fatalf("want 0 init failures, got %d: %+v", len(sess.InitFailures), sess.InitFailures)
+	}
+
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`))
+	if err != nil {
+		t.Fatalf("AggregateToolsList: %v", err)
+	}
+	var env struct {
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+			Data    struct {
+				Mcphub struct {
+					PartialFailures []DaemonFailure `json:"partialFailures"`
+				} `json:"mcphub"`
+			} `json:"data"`
+		} `json:"error"`
+		Result json.RawMessage `json:"result"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("parse: %v body=%s", err, string(body))
+	}
+	if env.Error == nil {
+		t.Fatalf("expected -32000 error envelope, got result: %s", string(env.Result))
+	}
+	if env.Error.Code != -32000 {
+		t.Errorf("Error.Code=%d want -32000", env.Error.Code)
+	}
+	failures := env.Error.Data.Mcphub.PartialFailures
+	if len(failures) != 2 {
+		t.Fatalf("partialFailures=%d want 2: %+v", len(failures), failures)
+	}
+	for _, f := range failures {
+		if f.Stage != "tools/list" {
+			t.Errorf("partialFailures[%s].Stage=%q want tools/list (init succeeded, list failed)", f.Server, f.Stage)
+		}
+		if !strings.Contains(f.Err, "HTTP 503") {
+			t.Errorf("partialFailures[%s].Err=%q want substring 'HTTP 503'", f.Server, f.Err)
+		}
 	}
 }
 
@@ -343,7 +457,6 @@ func TestAggregateToolsCallCanonicalRewrite(t *testing.T) {
 	snap := &ResolverSnapshot{
 		Gen:      1,
 		Bindings: map[string][]canonicalDaemonRef{"claude-code": sess.IntendedParticipants},
-		Routes:   map[string]canonicalToolRef{},
 	}
 	sess.SnapshotAtInit = snap
 	PublishResolverSnapshot(snap)
@@ -384,14 +497,12 @@ func TestAggregateToolsCallStaleResolverRefuses(t *testing.T) {
 	old := &ResolverSnapshot{
 		Gen:      1,
 		Bindings: map[string][]canonicalDaemonRef{"claude-code": sess.IntendedParticipants},
-		Routes:   map[string]canonicalToolRef{},
 	}
 	sess.SnapshotAtInit = old
 	// Current snapshot: no daemons.
 	current := &ResolverSnapshot{
 		Gen:      2,
 		Bindings: map[string][]canonicalDaemonRef{"claude-code": nil},
-		Routes:   map[string]canonicalToolRef{},
 	}
 	PublishResolverSnapshot(current)
 
@@ -436,7 +547,6 @@ func TestAggregateToolsCallUnknownNameReturnsMinus32601(t *testing.T) {
 	snap := &ResolverSnapshot{
 		Gen:      1,
 		Bindings: map[string][]canonicalDaemonRef{"claude-code": sess.IntendedParticipants},
-		Routes:   map[string]canonicalToolRef{},
 	}
 	sess.SnapshotAtInit = snap
 	PublishResolverSnapshot(snap)
@@ -494,28 +604,19 @@ func TestAggregateInitializeConcurrencyBound(t *testing.T) {
 }
 
 // ForwardCancellation: insert an in-flight entry, then invoke
-// ForwardCancellation; the entry is removed and the daemon receives
-// a notifications/cancelled with the daemon's request id.
+// ForwardCancellation; the entry is removed AND the daemon receives a
+// notifications/cancelled envelope carrying the daemon's request id
+// in params.requestId. Cleanup #4 strengthens this from "entry
+// removed" only to also asserting the daemon-visible body.
 func TestForwardCancellationRemovesInFlight(t *testing.T) {
 	d1 := newStubDaemon(t, "d1-sid")
 	var notifyMu sync.Mutex
 	var notifyBodies [][]byte
-	d1.onCall = func(w http.ResponseWriter, r *http.Request) {
-		// Default tools/call response.
-		body, _ := readAllBody(r)
-		var env struct {
-			Method string `json:"method"`
-		}
-		_ = json.Unmarshal(body, &env)
-		if env.Method == "notifications/cancelled" {
-			notifyMu.Lock()
-			notifyBodies = append(notifyBodies, body)
-			notifyMu.Unlock()
-			w.WriteHeader(http.StatusAccepted)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
+	d1.onNotify = func(w http.ResponseWriter, r *http.Request, body []byte) {
+		notifyMu.Lock()
+		notifyBodies = append(notifyBodies, append([]byte(nil), body...))
+		notifyMu.Unlock()
+		w.WriteHeader(http.StatusAccepted)
 	}
 	sess := sessionWithParticipants(d1)
 	sess.InitSuccesses[sess.IntendedParticipants[0]] = "d1-sid"
@@ -536,5 +637,39 @@ func TestForwardCancellationRemovesInFlight(t *testing.T) {
 	ForwardCancellation(ctx, sess, clientReqID)
 	if sess.InFlightCount() != 0 {
 		t.Errorf("inFlight=%d after cancel want 0", sess.InFlightCount())
+	}
+
+	// Daemon must have received exactly one notifications/cancelled
+	// envelope whose params.requestId matches the daemon-side id we
+	// stored at InsertInFlight time (NOT the client-side id 99).
+	if d1.notifyCount.Load() != 1 {
+		t.Fatalf("daemon notifyCount=%d want 1", d1.notifyCount.Load())
+	}
+	notifyMu.Lock()
+	defer notifyMu.Unlock()
+	if len(notifyBodies) != 1 {
+		t.Fatalf("notifyBodies=%d want 1", len(notifyBodies))
+	}
+	var env struct {
+		JSONRPC string `json:"jsonrpc"`
+		Method  string `json:"method"`
+		Params  struct {
+			RequestID json.RawMessage `json:"requestId"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(notifyBodies[0], &env); err != nil {
+		t.Fatalf("parse notify body: %v raw=%s", err, string(notifyBodies[0]))
+	}
+	if env.JSONRPC != "2.0" {
+		t.Errorf("notify jsonrpc=%q want 2.0", env.JSONRPC)
+	}
+	if env.Method != "notifications/cancelled" {
+		t.Errorf("notify method=%q want notifications/cancelled", env.Method)
+	}
+	// The daemon receives the hub-generated daemon request id, not
+	// the client's id (99). The test inserted "hub-7" as the daemon
+	// request id.
+	if string(env.Params.RequestID) != `"hub-7"` {
+		t.Errorf("notify params.requestId=%s want \"hub-7\"", string(env.Params.RequestID))
 	}
 }

@@ -134,30 +134,42 @@ type hubSession struct {
 	mu                   sync.Mutex // protects LastUsedAt + lifecycle
 }
 
-// IncInFlight / DecInFlight: atomic counter manipulation. Insert/Remove
-// pair calls them under inflightMu so the count and map size stay
-// consistent. The sweeper reads the count under no lock — fast path.
-func (s *hubSession) IncInFlight() { s.inFlightCount.Add(1) }
-func (s *hubSession) DecInFlight() { s.inFlightCount.Add(-1) }
-
 // InFlightCount returns the current in-flight count (atomic load).
+//
+// Production callers MUST mutate the count only through InsertInFlight
+// + RemoveInFlight so the count stays in lockstep with map presence
+// under inflightMu. Tests that synthesize an "in-flight" state
+// without going through the insert path use incInFlightForTest /
+// decInFlightForTest (declared in hub_mcp_session_test.go).
 func (s *hubSession) InFlightCount() int32 { return s.inFlightCount.Load() }
 
 // InsertInFlight stores a per-call entry and increments inFlightCount
 // under inflightMu so the sweeper's lock-free count check stays
-// consistent with map presence.
-func (s *hubSession) InsertInFlight(key requestIDKey, entry inflightEntry) {
+// consistent with map presence. Returns true when a fresh row was
+// inserted, false when the entry was overwritten because a row was
+// ALREADY present under the same key.
+//
+// Callers MUST validate key uniqueness upstream: a duplicate insert
+// indicates either a hub-side bug (two outstanding calls sharing one
+// client_session_id + request id) OR a malicious client replaying
+// the request id. Phase 4 enforces uniqueness in the HTTP handler;
+// the false return surfaces the duplicate so the handler can refuse
+// the call with a -32603 internal error and a partialFailures row
+// rather than silently swap the stored entry.
+func (s *hubSession) InsertInFlight(key requestIDKey, entry inflightEntry) bool {
 	s.inflightMu.Lock()
 	defer s.inflightMu.Unlock()
 	if _, existed := s.InFlightRequests[key]; existed {
 		// Defensive: overwriting an existing entry would leak the
-		// count. Callers MUST use unique keys; if a duplicate slips
-		// in, replace WITHOUT bumping the count.
+		// count. Replace the entry WITHOUT bumping the count so the
+		// sweeper still sees a single in-flight row, and return false
+		// so the caller can refuse the racing call.
 		s.InFlightRequests[key] = entry
-		return
+		return false
 	}
 	s.InFlightRequests[key] = entry
 	s.inFlightCount.Add(1)
+	return true
 }
 
 // LookupInFlight returns the entry stored at key. Second return is
@@ -242,16 +254,23 @@ func (s *HubSessionStore) Close() {
 // Create allocates a new hubSession for the given client. Returns
 // ErrSessionCapExceeded when the per-client cap is full; at the
 // global cap, the LRU session is evicted and Create succeeds.
+//
+// crypto/rand exhaustion during id generation surfaces as a non-nil
+// error from Create — the HTTP handler maps that to 500 Internal
+// Server Error. No empty-string session id ever lands in s.sessions.
 func (s *HubSessionStore) Create(client, protoVer string, snap *ResolverSnapshot) (*hubSession, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.perClient[client] >= s.opts.MaxPerClient {
 		return nil, fmt.Errorf("per-client cap (%d): %w", s.opts.MaxPerClient, ErrSessionCapExceeded)
 	}
+	id, err := generateSessionID()
+	if err != nil {
+		return nil, fmt.Errorf("generate session id: %w", err)
+	}
 	if len(s.sessions) >= s.opts.MaxGlobal {
 		s.evictLRULocked()
 	}
-	id := generateSessionID()
 	now := s.now()
 	sess := &hubSession{
 		ClientSessionID:  id,
@@ -378,14 +397,15 @@ func (s *HubSessionStore) sweepOnce() {
 // generateSessionID returns a 128-bit random hex string. Used as the
 // Mcp-Session-Id header value handed back to the client at
 // initialize.
-func generateSessionID() string {
+//
+// crypto/rand exhaustion returns a non-nil error. Callers MUST treat
+// that as a 500 Internal Server Error path and refuse to register an
+// empty session id; the prior best-effort empty-string return was
+// silently aliased under one key in s.sessions, masking the failure.
+func generateSessionID() (string, error) {
 	var buf [sessionIDByteLength]byte
 	if _, err := rand.Read(buf[:]); err != nil {
-		// crypto/rand failing is catastrophic; the hub should not
-		// proceed. Return a clearly-bogus value and let the caller
-		// surface it. The HTTP handler maps unusable session ids
-		// to 500 Internal Server Error.
-		return ""
+		return "", fmt.Errorf("crypto/rand: %w", err)
 	}
-	return hex.EncodeToString(buf[:])
+	return hex.EncodeToString(buf[:]), nil
 }
