@@ -151,7 +151,7 @@ type canonicalToolRef struct {
 }
 ```
 
-`InFlightRequests` is **per-session and typed** (codex r3 F-S6 + r4 F6 closures): keyed by `requestIDKey` — a normalized comparable string built from the validated raw JSON-RPC id (string-vs-number discriminator preserved via the `s:` / `n:` prefix; numeric-equivalent forms like `1` / `1.0` / `1e0` collapse to one canonical bucket). Stores `{DaemonRef, DaemonSessionID, DaemonRequestID, StartedAt}` because the request id we send to the daemon is hub-generated (different from the client's). A forged `notifications/cancelled` from another session cannot collide because the lookup is scoped to `session.InFlightRequests` (per-session map), not a global structure; cross-session interference is impossible without bypassing the 5-step auth gate.
+`InFlightRequests` is **per-session and typed** (codex r3 F-S6 + r4 F6 closures): keyed by `requestIDKey` — a normalized comparable string built from the validated raw JSON-RPC id (string-vs-number discriminator preserved via the `s:` / `n:` prefix; numeric-equivalent forms like `1` / `1.0` / `1e0` collapse to one canonical bucket). Stores `{DaemonRef, DaemonSessionID, DaemonRequestID, StartedAt}` because the request id we send to the daemon is hub-generated (different from the client's). A forged `notifications/cancelled` from another session cannot collide because the lookup is scoped to `session.InFlightRequests` (per-session map), not a global structure; cross-session interference is impossible without bypassing the 6-check auth gate.
 
 **Lifecycle:**
 
@@ -394,7 +394,7 @@ Failure on any check refuses the write (hard-fail when installing hub-mode token
 | claude-code | `%USERPROFILE%\.claude.json` | `~/.claude.json` | per-user profile root |
 | codex-cli | `%USERPROFILE%\.codex\config.toml` | `~/.codex/config.toml` | per-user `.codex/` |
 | cursor | `%USERPROFILE%\.cursor\mcp.json` | `~/.cursor/mcp.json` | per-user `.cursor/` |
-| vscode | `%APPDATA%\Code\User\settings.json` (User scope) | `~/.config/Code/User/settings.json` | per-user VS Code profile |
+| vscode | `%APPDATA%\Code\User\mcp.json` (User scope) | `$XDG_CONFIG_HOME/Code/User/mcp.json` or `~/.config/Code/User/mcp.json` (Linux), `~/Library/Application Support/Code/User/mcp.json` (macOS) | per-user VS Code profile (verified against `internal/clients/clients.go:230-242`) |
 | gemini-cli | `%USERPROFILE%\.gemini\settings.json` | `~/.gemini/settings.json` | per-user `.gemini/` |
 | qwen-cli | `%USERPROFILE%\.qwen\settings.json` | `~/.qwen/settings.json` | per-user `.qwen/` |
 | antigravity | `%USERPROFILE%\.gemini\antigravity\mcp_config.json` | `~/.gemini/antigravity/mcp_config.json` | per-user `.gemini/antigravity/` — no hub-mode (relay-only); SecureWriteClientConfig not invoked for hub-mode tokens here (gate-OFF fall-back) |
