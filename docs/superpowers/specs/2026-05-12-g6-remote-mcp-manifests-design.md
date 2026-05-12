@@ -51,8 +51,7 @@ Updated `ServerManifest.Validate()`:
 - For `transport: remote-http`:
   - `URL` is required.
   - `URL` must start with `https://`. **Plain `http://` is rejected** — remote servers without TLS are out of scope (operator can self-host with TLS via a reverse proxy; we don't allow plaintext credentials over the wire).
-  - `Command`, `BaseArgs`, `Env`, `Daemons`, `PortPool`, `Languages`, `IdleTimeoutMin` are IGNORED (not validated for presence).
-  - `WeeklyRefresh` is IGNORED.
+  - `Command`, `BaseArgs`, `BaseArgsTemplate`, `Env`, `Daemons`, `PortPool`, `Languages`, `IdleTimeoutMin`, `WeeklyRefresh` are **REJECTED if set** (codex bot P2 r1 on PR #152: silent ignore would let malformed manifests slip through; reject-on-set keeps validation honest and the acceptance contract consistent). The empty zero-values (no daemons block, no command, etc.) are accepted because remote-http manifests don't use them.
   - `Headers` keys + values are normal strings; values may contain `${secret:KEY}` placeholders (expanded at install time).
 - For `transport: stdio-bridge | native-http`:
   - Existing validation unchanged.
@@ -186,8 +185,10 @@ Both surfaces still skip `type: sse` entries — SSE is a different transport co
 | `internal/api/manifest.go` | modify | manifest-name validation unchanged; schema additions visible |
 | `internal/api/secrets_placeholder.go` | new | `${secret:KEY}` expansion + injection-rejection (\r\n) |
 | `internal/api/install.go` | modify | remote-http branch: skip scheduler/log/daemon; expand-then-write client config |
-| `internal/api/manifest_remote_test.go` | new | `mcphub manifest test-remote` impl + tests |
-| `internal/cli/manifest_test_remote.go` | new | CLI subcommand |
+| `internal/api/manifest_remote.go` | new | `(*API).TestRemoteManifest(name)` runtime impl — sends `initialize` JSON-RPC to manifest URL with expanded headers, returns upstream's response or error |
+| `internal/api/manifest_remote_test.go` | new | unit tests for the above |
+| `internal/cli/manifest_test_remote.go` | new | `mcphub manifest test-remote <name>` cobra subcommand wiring the api method |
+| `internal/cli/manifest_test_remote_test.go` | new | CLI tests covering cmd.OutOrStdout / ErrOrStderr routing (mirrors G7 cobra-stderr pattern) |
 | `internal/cli/root.go` | modify | register subcommand |
 | `internal/api/import_vscode.go` | modify | G7's http/sse skip path: emit `transport: remote-http` for http entries (G6 closure for G7's TODO) |
 | `internal/api/marketplace_generate.go` | modify | G5's http skip path: emit `transport: remote-http` for http entries |
