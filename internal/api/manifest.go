@@ -248,6 +248,13 @@ func (a *API) ManifestCreateIn(dir, name, yaml string) error {
 	if warnings := a.validateManifestForStorageName(name, yaml); len(warnings) > 0 {
 		return fmt.Errorf("manifest has validation errors: %s", strings.Join(warnings, "; "))
 	}
+	// Strict-mode gate (codex bot r5 P1 closure): mutation surfaces
+	// must reject '__'-in-server-name per the spec's "Pre-gate" section.
+	// validateManifestForStorageName only emits warnings; strict mode
+	// is what produces a hard error.
+	if _, err := a.ManifestValidateMode(yaml, ValidateModeStrict); err != nil {
+		return fmt.Errorf("manifest rejected by strict validation: %w", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 		return err
 	}
@@ -271,6 +278,12 @@ func (a *API) ManifestEditIn(dir, name, yaml string) error {
 	}
 	if warnings := a.validateManifestForStorageName(name, yaml); len(warnings) > 0 {
 		return fmt.Errorf("manifest has validation errors: %s", strings.Join(warnings, "; "))
+	}
+	// Strict-mode gate (codex bot r5 P1 closure): same as ManifestCreateIn.
+	// Edit paths must enforce '__' rejection for the same reason as
+	// create paths — both are spec-mandated "mutation surfaces."
+	if _, err := a.ManifestValidateMode(yaml, ValidateModeStrict); err != nil {
+		return fmt.Errorf("manifest rejected by strict validation: %w", err)
 	}
 	return os.WriteFile(target, []byte(yaml), 0644)
 }

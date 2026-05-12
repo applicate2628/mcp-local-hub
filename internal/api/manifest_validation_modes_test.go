@@ -54,6 +54,46 @@ func TestManifestValidateForHubBindRejectsParseFailure(t *testing.T) {
 	}
 }
 
+// codex bot r5 P1 closure: ManifestCreateIn + ManifestEditIn are
+// "mutation surfaces" per the spec's Pre-gate section; they must
+// reject '__' in server names with a hard error, not just emit a
+// warning. Without this gate, a direct call like
+// ManifestCreateIn(tmp, "foo__bar", yaml) would write the manifest
+// to disk despite the strict-mode policy.
+func TestManifestCreateInRejectsDoubleUnderscore(t *testing.T) {
+	a := NewAPI()
+	tmp := t.TempDir()
+	body := "name: foo__bar\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9201\n"
+	err := a.ManifestCreateIn(tmp, "foo__bar", body)
+	if err == nil {
+		t.Fatalf("ManifestCreateIn must reject '__' in name via strict gate")
+	}
+	if !strings.Contains(err.Error(), "__") {
+		t.Errorf("error must mention '__'; got %v", err)
+	}
+}
+
+func TestManifestEditInRejectsDoubleUnderscore(t *testing.T) {
+	a := NewAPI()
+	tmp := t.TempDir()
+	// First create a legitimate (non-__) manifest to edit.
+	createBody := "name: legit\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9202\n"
+	if err := a.ManifestCreateIn(tmp, "legit", createBody); err != nil {
+		t.Fatalf("setup create: %v", err)
+	}
+	// Now try to edit with a '__' name. The directory-name 'legit'
+	// stays the same; the inner YAML's `name:` is what hits the
+	// strict gate.
+	editBody := "name: foo__bar\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9202\n"
+	err := a.ManifestEditIn(tmp, "legit", editBody)
+	if err == nil {
+		t.Fatalf("ManifestEditIn must reject '__' in inner manifest name via strict gate")
+	}
+	if !strings.Contains(err.Error(), "__") {
+		t.Errorf("error must mention '__'; got %v", err)
+	}
+}
+
 // Compat mode must still surface parse failures as warnings (not errors)
 // so existing GUI manifest-list callers don't break on legacy
 // __-named manifests with minor structural quirks.
