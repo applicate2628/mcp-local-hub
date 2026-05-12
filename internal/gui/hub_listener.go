@@ -43,6 +43,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"time"
 
@@ -219,8 +220,27 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 	})
 	mux.Handle("/internal/reload-tokens", reload)
 
+	// codex bot phase4 r23 P2 closure on PR #158: pre-filter the
+	// request path BEFORE http.ServeMux gets a chance to apply its
+	// built-in URL normalization (cleanPath collapsing `//`, `/./`,
+	// `/../`). ServeMux would otherwise issue a 301 redirect for
+	// any path that differs from path.Clean(path) — emitting a
+	// Location header for malformed POSTs that the handler contract
+	// says should return a quiet 404. Redirect-following POSTs may
+	// also rewrite to GET on the second hop, silently dropping the
+	// JSON-RPC body. Reject path-traversal / collapsed-slash inputs
+	// directly with empty-body 404, matching every other gate-2
+	// path-shape failure surface.
+	muxedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if cleaned := path.Clean(r.URL.Path); cleaned != r.URL.Path {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
+
 	srv := &http.Server{
-		Handler:           mux,
+		Handler:           muxedHandler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
