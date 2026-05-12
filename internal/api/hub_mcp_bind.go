@@ -176,6 +176,20 @@ func BindHubMcpListener(ctx context.Context, clients []string, validateManifests
 		return nil, fmt.Errorf("write endpoint.json: %w", perr)
 	}
 
+	// codex bot phase4 r14 P1 closure on PR #158: post-persist ctx
+	// check. ensureHubEndpointLocked is NOT ctx-aware
+	// (writeHubMcpStateFile → SecureWriteClientConfig is a blocking
+	// pipeline). If ctx was canceled DURING the write (a slow disk
+	// keeping the goroutine alive past Server.Start's 2 s post-cancel
+	// budget), close the listener and abort so we never return a
+	// live listener after the shutdown path already gave up. The
+	// on-disk endpoint.json is left mutated (the operator can
+	// `mcphub gui --reset-port` to clear it).
+	if cerr := ctx.Err(); cerr != nil {
+		_ = ln.Close()
+		return nil, fmt.Errorf("hub-mcp bind canceled after endpoint persist: %w", cerr)
+	}
+
 	// Step 8 — release the lock BEFORE starting to serve so
 	// concurrent /internal/reload-tokens (which acquires this same
 	// lock to fsync the new tokens) doesn't block on us. The

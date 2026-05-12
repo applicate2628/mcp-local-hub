@@ -613,6 +613,21 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 			log.Printf("hub-mcp listener startup failed (gate-OFF for this process): %v", hubErr)
 			hubComp = nil
 		}
+		// codex bot phase4 r14 P1 closure on PR #158: defense-in-
+		// depth against any blocking call inside startHubMcpListener
+		// that isn't ctx-aware (file I/O in writeHubMcpStateFile,
+		// SecureWriteClientConfig handle-relative open chain, the
+		// listener factory's syscall itself on Windows). If the
+		// goroutine raced past hubInitCancel() and produced a
+		// successful bundle anyway, tear it down ourselves BEFORE
+		// the atomic Store so the Start shutdown path that already
+		// ran with hubMcpComp == nil isn't bypassed. Use
+		// context.Background() for the teardown since hubInitCtx is
+		// already canceled by definition on this path.
+		if hubComp != nil && hubInitCtx.Err() != nil {
+			ShutdownHubListener(context.Background(), hubComp)
+			hubComp = nil
+		}
 		s.hubMcpComp.Store(hubComp)
 	}()
 
