@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"syscall"
 
 	"golang.org/x/sys/unix"
@@ -68,6 +69,31 @@ func verifyHubMcpStateDACLImpl(path string) error {
 	}
 	if mode&0o077 != 0 {
 		return fmt.Errorf("%w: path=%s mode=%04o", ErrTooLoose, path, mode)
+	}
+	// Parent-dir check (codex bot r7 P2 closure — symmetry with the
+	// Windows leg + secure-write parent-dir gate). A 0600 token file
+	// whose parent is 0755 still leaks presence/timing to every local
+	// user. The Windows verifier already opens the parent dir handle
+	// and applies the allowlist; POSIX must match: open parent dir
+	// via O_DIRECTORY (TOCTOU-safe relative to the file's open fd via
+	// AT_FDCWD on Linux), fstat it, reject any uid mismatch + any
+	// group/world permission bit.
+	parentPath := filepath.Dir(path)
+	pfd, err := unix.Open(parentPath, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return fmt.Errorf("open parent %s: %w", parentPath, err)
+	}
+	defer unix.Close(pfd)
+	var pst unix.Stat_t
+	if err := unix.Fstat(pfd, &pst); err != nil {
+		return fmt.Errorf("fstat parent %s: %w", parentPath, err)
+	}
+	pmode := uint32(pst.Mode)
+	if int(pst.Uid) != os.Getuid() {
+		return fmt.Errorf("%w: parent=%s uid=%d (need current uid %d)", ErrWrongOwner, parentPath, pst.Uid, os.Getuid())
+	}
+	if pmode&0o077 != 0 {
+		return fmt.Errorf("%w: parent=%s mode=%04o exposes bits to group/world", ErrTooLoose, parentPath, pmode&0o777)
 	}
 	return nil
 }

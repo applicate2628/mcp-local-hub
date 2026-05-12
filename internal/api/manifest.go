@@ -438,6 +438,14 @@ func (a *API) ManifestEditInWithHash(dir, name, yaml, expectedHash string) (newH
 	if warnings := a.validateManifestForStorageName(name, yaml); len(warnings) > 0 {
 		return "", fmt.Errorf("manifest has validation errors: %s", strings.Join(warnings, "; "))
 	}
+	// Strict-mode gate (codex bot r7 P1 closure): the hash-based edit
+	// path is ALSO a mutation surface and must reject '__' in server
+	// names per the spec's Pre-gate. Earlier wording wired strict mode
+	// only into ManifestEditIn; this is the second of the two edit
+	// paths (the GUI save uses the hash-based one).
+	if _, err := a.ManifestValidateMode(yaml, ValidateModeStrict); err != nil {
+		return "", fmt.Errorf("manifest rejected by strict validation: %w", err)
+	}
 	// Atomic write: unique tmp in the same directory, defer cleanup,
 	// os.Rename on success. Test-only hook manifestEditFailWriteHook
 	// lets tests inject a write/rename failure without relying on

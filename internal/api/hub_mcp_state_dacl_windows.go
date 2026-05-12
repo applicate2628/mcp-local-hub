@@ -44,6 +44,23 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// ACE type constants not exported by golang.org/x/sys/windows but
+// defined in ntsecapi.h. Used by the canonical-ACE evaluation loop
+// in verifyWindowsDACLFromHandle (codex bot r7 P1 closure).
+const (
+	aceTypeAuditBasic            uint8 = 0x02
+	aceTypeAlarmBasic            uint8 = 0x03
+	aceTypeAllowedObject         uint8 = 0x05
+	aceTypeDeniedObject          uint8 = 0x06
+	aceTypeAuditObject           uint8 = 0x07
+	aceTypeAlarmObject           uint8 = 0x08
+	aceTypeAllowedCallback       uint8 = 0x09
+	aceTypeDeniedCallback        uint8 = 0x0A
+	aceTypeAllowedCallbackObject uint8 = 0x0B
+	aceTypeDeniedCallbackObj     uint8 = 0x0C
+	aceTypeMandatoryLabel        uint8 = 0x11
+)
+
 func verifyHubMcpStateDACLImpl(path string) error {
 	pathW, err := windows.UTF16PtrFromString(path)
 	if err != nil {
@@ -207,10 +224,58 @@ func verifyWindowsDACLFromHandle(h windows.Handle) error {
 		if err := windows.GetAce(dacl, i, &ace); err != nil {
 			return fmt.Errorf("get ace %d: %w", i, err)
 		}
-		// ACCESS_ALLOWED_ACE_TYPE = 0, ACCESS_DENIED_ACE_TYPE = 1.
-		// Skip DENY ACEs — they cannot widen access.
-		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE {
+		// ACE types (Microsoft, ntsecapi.h):
+		//   0x00 ACCESS_ALLOWED_ACE_TYPE          (basic ALLOW)
+		//   0x01 ACCESS_DENIED_ACE_TYPE           (DENY — cannot widen access)
+		//   0x02 SYSTEM_AUDIT_ACE_TYPE            (audit — not access-granting)
+		//   0x03 SYSTEM_ALARM_ACE_TYPE            (alarm — not access-granting)
+		//   0x05 ACCESS_ALLOWED_OBJECT_ACE_TYPE   (object ALLOW)
+		//   0x06 ACCESS_DENIED_OBJECT_ACE_TYPE    (object DENY)
+		//   0x07 SYSTEM_AUDIT_OBJECT_ACE_TYPE     (object audit)
+		//   0x09 ACCESS_ALLOWED_CALLBACK_ACE_TYPE (callback ALLOW)
+		//   0x0A ACCESS_DENIED_CALLBACK_ACE_TYPE  (callback DENY)
+		//   0x0B ACCESS_ALLOWED_CALLBACK_OBJECT_ACE_TYPE
+		//   0x0C ACCESS_DENIED_CALLBACK_OBJECT_ACE_TYPE
+		//   0x11 SYSTEM_MANDATORY_LABEL_ACE_TYPE  (integrity label)
+		//
+		// codex bot r7 P1 closure: earlier loop treated ONLY basic ALLOW
+		// (0x00) as effective and silently skipped all others. That
+		// fail-OPEN'd against object-variant and callback-variant ALLOW
+		// ACEs that managed environments push via Group Policy. Now:
+		switch ace.Header.AceType {
+		case windows.ACCESS_ALLOWED_ACE_TYPE:
+			// Basic ALLOW — falls through to inspection below.
+		case windows.ACCESS_DENIED_ACE_TYPE,
+			aceTypeDeniedObject,        // 0x06
+			aceTypeAuditBasic,          // 0x02
+			aceTypeAlarmBasic,          // 0x03
+			aceTypeAuditObject,         // 0x07
+			aceTypeAlarmObject,         // 0x08
+			aceTypeDeniedCallback,      // 0x0A
+			aceTypeDeniedCallbackObj,   // 0x0C
+			aceTypeMandatoryLabel:      // 0x11
+			// DENY / audit / alarm / mandatory-label ACEs cannot widen
+			// access; safe to skip.
 			continue
+		case aceTypeAllowedObject,         // 0x05
+			aceTypeAllowedCallback,        // 0x09
+			aceTypeAllowedCallbackObject:  // 0x0B
+			// Object/callback ALLOW variants have a different on-the-
+			// wire layout (extra ObjectType + InheritedObjectType GUIDs
+			// before the SID). The basic ACCESS_ALLOWED_ACE struct's
+			// SidStart field points at the wrong location, so we cannot
+			// reliably extract the SID via sidFromAce. **Fail closed**:
+			// we'd rather refuse a managed-environment ACL than risk a
+			// silent fail-open against a Group-Policy-pushed object/
+			// callback ALLOW for a non-allowlisted SID.
+			return fmt.Errorf("%w: ACE %d has type 0x%02x (object/callback ALLOW); allowlist verifier does not parse this variant — fail closed",
+				ErrDaclOutsideAllowlist, i, ace.Header.AceType)
+		default:
+			// Unknown ACE type — also fail closed. New Windows versions
+			// may add types we haven't seen; the conservative read is
+			// "if we don't understand it, we cannot prove it's safe."
+			return fmt.Errorf("%w: ACE %d has unknown type 0x%02x — fail closed",
+				ErrDaclOutsideAllowlist, i, ace.Header.AceType)
 		}
 		// INHERIT_ONLY_ACE (0x08) flags an ACE that applies ONLY to
 		// child objects created under this object, never to the object
