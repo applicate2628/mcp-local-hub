@@ -173,8 +173,17 @@ func (s *hubSession) InsertInFlight(key requestIDKey, entry inflightEntry) bool 
 		// id").
 		return false
 	}
-	s.InFlightRequests[key] = entry
+	// codex bot r3 P1 closure on PR #157: increment BEFORE the map
+	// write so the sweeper's lock-free `inFlightCount.Load()` check
+	// never observes 0 during the window where the entry is being
+	// registered. Earlier order (write → increment) had a brief gap
+	// where a concurrent sweep could observe count=0 + idle-LastUsedAt
+	// and evict the session even though a call had just been
+	// registered. inflightMu prevents concurrent inserts; the atomic
+	// counter's pre-increment is the cross-mutex visibility hop the
+	// sweeper relies on.
 	s.inFlightCount.Add(1)
+	s.InFlightRequests[key] = entry
 	return true
 }
 
@@ -275,7 +284,18 @@ func (s *HubSessionStore) Create(client, protoVer string, snap *ResolverSnapshot
 		return nil, fmt.Errorf("generate session id: %w", err)
 	}
 	if len(s.sessions) >= s.opts.MaxGlobal {
-		s.evictLRULocked()
+		// codex bot r3 P1 closure on PR #157: skip in-flight sessions
+		// when evicting at global cap. Earlier code always evicted the
+		// LRU; under load a long-running tools/call could be evicted
+		// mid-flight, making subsequent requests + cancellations on
+		// that session fail lookup while daemon work was still running.
+		// Walk LRU tail → head, skip any session with inFlightCount > 0.
+		// If ALL sessions at global cap are in-flight, refuse the new
+		// session with ErrSessionCapExceeded — Phase 4 maps to 429
+		// with Retry-After: 30 + a clear "all sessions busy" log entry.
+		if !s.evictIdleLRULocked() {
+			return nil, fmt.Errorf("global cap (%d) reached and all sessions in-flight: %w", s.opts.MaxGlobal, ErrSessionCapExceeded)
+		}
 	}
 	now := s.now()
 	sess := &hubSession{
@@ -358,6 +378,29 @@ func (s *HubSessionStore) evictLRULocked() {
 	}
 	id, _ := back.Value.(string)
 	s.deleteLocked(id)
+}
+
+// evictIdleLRULocked walks the LRU list from tail (oldest) toward head
+// (newest) and evicts the first session it finds with inFlightCount
+// == 0. Returns true if a session was evicted; false if ALL sessions
+// at global cap are in-flight (caller must refuse the new session
+// with ErrSessionCapExceeded). Caller MUST hold s.mu.
+//
+// codex bot r3 P1 closure on PR #157: prevents eviction of an
+// active long-running tools/call.
+func (s *HubSessionStore) evictIdleLRULocked() bool {
+	for e := s.lru.Back(); e != nil; e = e.Prev() {
+		id, _ := e.Value.(string)
+		sess, ok := s.sessions[id]
+		if !ok {
+			continue
+		}
+		if sess.inFlightCount.Load() == 0 {
+			s.deleteLocked(id)
+			return true
+		}
+	}
+	return false
 }
 
 // sweepLoop runs forever (until sweepCtx is cancelled). Ticks every

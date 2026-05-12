@@ -374,3 +374,54 @@ func TestInsertInFlightPreservesOriginalOnDuplicate(t *testing.T) {
 		t.Errorf("DaemonRequestID overwritten: got %s want \"hub-original\"", got.DaemonRequestID)
 	}
 }
+
+// TestCreateAtGlobalCapSkipsInFlightSessions pins the codex bot r3
+// P1 closure: when the global cap is reached, Create must evict the
+// OLDEST IDLE session — not an in-flight one. If all sessions are
+// in-flight, Create returns ErrSessionCapExceeded.
+func TestCreateAtGlobalCapSkipsInFlightSessions(t *testing.T) {
+	store := NewHubSessionStore(SessionStoreOpts{MaxPerClient: 8, MaxGlobal: 3})
+	// Fill the store to capacity.
+	s1, err := store.Create("claude-code", "2025-06-18", nil)
+	if err != nil {
+		t.Fatalf("s1 Create: %v", err)
+	}
+	s2, err := store.Create("codex-cli", "2025-06-18", nil)
+	if err != nil {
+		t.Fatalf("s2 Create: %v", err)
+	}
+	s3, err := store.Create("cursor", "2025-06-18", nil)
+	if err != nil {
+		t.Fatalf("s3 Create: %v", err)
+	}
+	// Mark s1 (the LRU) as in-flight. Eviction should walk to the
+	// next-oldest (s2) which is idle.
+	s1.incInFlightForTest()
+	s4, err := store.Create("vscode", "2025-06-18", nil)
+	if err != nil {
+		t.Fatalf("s4 Create at cap with idle s2: %v", err)
+	}
+	if s4 == nil {
+		t.Fatal("expected s4 non-nil")
+	}
+	// s1 must STILL be present (in-flight, protected).
+	if _, ok := store.Get(s1.ClientSessionID); !ok {
+		t.Errorf("in-flight s1 was evicted")
+	}
+	// s2 (idle LRU) must be gone.
+	if _, ok := store.Get(s2.ClientSessionID); ok {
+		t.Errorf("idle s2 must have been evicted")
+	}
+	_ = s3
+	// Now mark every remaining session in-flight. Next Create must
+	// refuse with ErrSessionCapExceeded.
+	s3.incInFlightForTest()
+	s4.incInFlightForTest()
+	_, err = store.Create("gemini-cli", "2025-06-18", nil)
+	if err == nil {
+		t.Fatal("expected ErrSessionCapExceeded when all sessions in-flight")
+	}
+	if !errors.Is(err, ErrSessionCapExceeded) {
+		t.Errorf("want ErrSessionCapExceeded, got %v", err)
+	}
+}

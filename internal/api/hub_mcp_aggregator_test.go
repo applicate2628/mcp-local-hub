@@ -720,6 +720,11 @@ func TestAggregateToolsCallRejectsDuplicateInFlightID(t *testing.T) {
 	if _, err := AggregateInitialize(context.Background(), sess, json.RawMessage(`1`)); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	// Capture the current resolver snapshot into the session so
+	// AggregateToolsCall's per-call revalidation passes (snapshot
+	// pointer equality keeps the daemonStillBound check from firing
+	// on the leftover snapshot from prior tests).
+	sess.SnapshotAtInit = LoadResolverSnapshot()
 	// Pre-populate route + in-flight so a second InsertInFlight for
 	// the same client id collides.
 	ref := canonicalToolRef{Server: "srv1", Daemon: "claude-code", Port: d1.port, RawName: "read"}
@@ -754,5 +759,32 @@ func TestAggregateToolsCallRejectsDuplicateInFlightID(t *testing.T) {
 	}
 	if !strings.Contains(env.Error.Message, "duplicate") {
 		t.Errorf("error.message must mention 'duplicate'; got %q", env.Error.Message)
+	}
+}
+
+// TestBuildRewrittenParamsPreservesBigIntegerPrecision pins the codex
+// bot r3 P1 closure: rewriting the `name` field must NOT round numeric
+// argument values through float64. Earlier `map[string]any` round-trip
+// silently dropped precision for integers > 2^53, so tools could
+// execute against the wrong resource id.
+func TestBuildRewrittenParamsPreservesBigIntegerPrecision(t *testing.T) {
+	// 2^53 + 1, unrepresentable exactly as float64.
+	in := json.RawMessage(`{"name":"srv1__read","arguments":{"resource_id":9007199254740993,"nested":{"big":18446744073709551615}}}`)
+	out, err := buildRewrittenParams("read", in)
+	if err != nil {
+		t.Fatalf("buildRewrittenParams: %v", err)
+	}
+	if !strings.Contains(string(out), `9007199254740993`) {
+		t.Errorf("resource_id 9007199254740993 lost in rewrite: %s", out)
+	}
+	if !strings.Contains(string(out), `18446744073709551615`) {
+		t.Errorf("nested big int 18446744073709551615 lost in rewrite: %s", out)
+	}
+	// And `name` was rewritten to the raw form.
+	if !strings.Contains(string(out), `"name":"read"`) {
+		t.Errorf("name not rewritten: %s", out)
+	}
+	if strings.Contains(string(out), `"name":"srv1__read"`) {
+		t.Errorf("old namespaced name still present: %s", out)
 	}
 }

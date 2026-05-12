@@ -518,9 +518,28 @@ func postInitialize(ctx context.Context, ref canonicalDaemonRef, protoVer string
 	hubVer, _, _ := buildinfo.Get()
 	body := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"%s","capabilities":{},"clientInfo":{"name":"mcphub-hub","version":"%s"}}}`,
 		protoVer, hubVer)
-	_, hdr, err := doDaemonPost(ctx, ref.Port, []byte(body), "", PerDaemonInitTimeout)
+	raw, hdr, err := doDaemonPost(ctx, ref.Port, []byte(body), "", PerDaemonInitTimeout)
 	if err != nil {
 		return "", err
+	}
+	// codex bot r3 P1 closure on PR #157: inspect the JSON-RPC envelope
+	// for an `error` object. Daemons returning HTTP 200 + JSON-RPC
+	// error (protocol-version rejection, capability mismatch, etc.)
+	// would otherwise be recorded as init successes with an empty
+	// session id — misrouting follow-up tools/list / tools/call and
+	// surfacing the wrong stage in partialFailures.
+	payload := extractJSONPayload(raw)
+	var env struct {
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if uerr := json.Unmarshal(payload, &env); uerr != nil {
+		return "", fmt.Errorf("parse initialize response: %w", uerr)
+	}
+	if env.Error != nil {
+		return "", fmt.Errorf("daemon initialize error code=%d: %s", env.Error.Code, env.Error.Message)
 	}
 	return hdr.Get("Mcp-Session-Id"), nil
 }
@@ -720,16 +739,25 @@ func buildToolsCallEnvelope(daemonReqID, params json.RawMessage) ([]byte, error)
 }
 
 // buildRewrittenParams returns paramsRaw with `name` replaced by
-// rawName. Other fields (arguments, _meta, etc.) survive verbatim by
-// way of a generic-map round-trip.
+// rawName. Other fields (arguments, _meta, etc.) survive VERBATIM as
+// raw JSON — preserves number precision for large integers (>2^53)
+// inside arguments. Decoding into `map[string]any` would force every
+// number through float64 and silently round (codex bot r3 P1 closure
+// on PR #157 — tools could execute against the wrong resource id).
+//
+// Pattern: decode into `map[string]json.RawMessage`; rewrite ONLY the
+// `name` field as a fresh JSON string; re-marshal. The other fields'
+// RawMessage values pass through unchanged.
 func buildRewrittenParams(rawName string, paramsRaw json.RawMessage) (json.RawMessage, error) {
-	// Decode into a generic map, replace name, re-marshal. Preserves
-	// every extension field a daemon might care about.
-	var m map[string]any
+	var m map[string]json.RawMessage
 	if err := json.Unmarshal(paramsRaw, &m); err != nil {
 		return nil, err
 	}
-	m["name"] = rawName
+	nameRaw, err := json.Marshal(rawName)
+	if err != nil {
+		return nil, err
+	}
+	m["name"] = nameRaw
 	out, err := json.Marshal(m)
 	if err != nil {
 		return nil, err
