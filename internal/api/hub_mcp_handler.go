@@ -247,9 +247,20 @@ func (h *HubMcpHandler) handlePost(w http.ResponseWriter, r *http.Request, clien
 	// produce a synthetic null-id envelope and the client sees the
 	// protocol-level error. Missing id (notification) is handled
 	// per-method below — notifications get HTTP 202 with no body.
-	if isJSONRPCNullID(env.ID) {
-		writeJSONRPCErrorStatus(w, json.RawMessage(`null`), http.StatusBadRequest, -32600, "invalid request: id must be non-null per MCP", nil)
-		return
+	//
+	// codex bot phase4 r22 P2 closure on PR #158: extend validation
+	// to the full MCP id-type rule (string|number only, no null /
+	// boolean / array / object). Route through the canonical
+	// newRequestIDKey validator from hub_mcp_request_id.go so the
+	// dispatch path enforces exactly the same shape that downstream
+	// in-flight tracking expects. `id: true`, `id: {}`, `id: []` no
+	// longer slip past the gate and create sessions / cause
+	// inflightEntry collisions.
+	if !isJSONRPCNotificationID(env.ID) {
+		if _, idErr := newRequestIDKey(env.ID); idErr != nil {
+			writeJSONRPCErrorStatus(w, json.RawMessage(`null`), http.StatusBadRequest, -32600, idErr.Error(), nil)
+			return
+		}
 	}
 
 	// initialize is its own branch — Mcp-Session-Id MUST be absent
