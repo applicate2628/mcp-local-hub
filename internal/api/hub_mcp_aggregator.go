@@ -805,15 +805,52 @@ func postInitialized(ctx context.Context, ref canonicalDaemonRef, daemonSID, pro
 
 // extractJSONPayload returns the JSON body from an MCP daemon
 // response. MCP daemons may emit either plain application/json OR
-// a text/event-stream with one `data: <json>` line. This helper
-// handles both shapes (mirrors health.go:727-734).
+// a text/event-stream wrapping a JSON-RPC envelope.
+//
+// SSE handling follows the HTML5 EventSource parsing algorithm for
+// the `data` field (codex bot r10 P2 closure on PR #157):
+//
+//   - Lines start with the field name, then `:`, then optional space,
+//     then the value. Both `data: foo` AND `data:foo` are valid; the
+//     spec strips at most ONE leading space.
+//   - Multiple `data:` lines per event are joined with `\n`. Compliant
+//     SSE daemons may split a JSON-RPC envelope across several lines
+//     (especially under proxies that re-chunk long payloads).
+//   - CRLF and bare-LF terminators are both accepted.
+//   - Non-data fields (`event:`, `id:`, `retry:`, comments starting
+//     with `:`) and unrecognized fields are skipped.
+//
+// Fallback: if no `data:` line is found, the raw response is returned
+// unchanged. This preserves the plain `application/json` shape that
+// most MCP daemons emit by default.
+//
+// health.go has its own near-identical SSE parser (the comment used
+// to say "mirrors health.go:727-734"); that one is left untouched in
+// this PR per narrow-scope and is filed as a separate follow-up bug.
 func extractJSONPayload(raw []byte) []byte {
+	var parts [][]byte
+	seenData := false
 	for _, line := range bytes.Split(raw, []byte("\n")) {
-		if bytes.HasPrefix(line, []byte("data: ")) {
-			return bytes.TrimPrefix(line, []byte("data: "))
+		// Strip CRLF: split on `\n` leaves `\r` on each line of a
+		// CRLF-terminated stream.
+		line = bytes.TrimSuffix(line, []byte("\r"))
+		if !bytes.HasPrefix(line, []byte("data:")) {
+			continue
 		}
+		value := line[len("data:"):]
+		// Per SSE spec strip AT MOST ONE leading space. `data: foo`
+		// → `foo`; `data:foo` → `foo`; `data:  foo` → ` foo` (the
+		// second space is preserved verbatim — payload data).
+		if len(value) > 0 && value[0] == ' ' {
+			value = value[1:]
+		}
+		parts = append(parts, value)
+		seenData = true
 	}
-	return raw
+	if !seenData {
+		return raw
+	}
+	return bytes.Join(parts, []byte("\n"))
 }
 
 // ---------------- Response builders ----------------

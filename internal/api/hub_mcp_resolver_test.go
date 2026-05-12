@@ -214,6 +214,61 @@ func TestBumpResolverOnManifestChangeAdvancesGen(t *testing.T) {
 	}
 }
 
+// TestBuildResolverSnapshotDeduplicatesRepeatedBindings pins the
+// codex bot r10 P2 closure on PR #157. A manifest accidentally
+// repeating a ClientBinding row (no uniqueness check in current
+// validation) must NOT produce duplicate canonicalDaemonRef entries
+// for the same client. Otherwise AggregateInitialize would fan-out
+// the same daemon multiple times, both goroutines writing to the
+// same InitSuccesses key, leaving one daemon session orphaned and
+// the other un-tracked for cancellation / cleanup.
+func TestBuildResolverSnapshotDeduplicatesRepeatedBindings(t *testing.T) {
+	resetResolverForTest(t)
+
+	// Manifest with the SAME (client, daemon) row appearing THREE times.
+	// A second manifest contributes a distinct (client, daemon) so we
+	// can assert that dedupe is per-(client, ref) tuple, not global.
+	m := config.ServerManifest{
+		Name: "fs",
+		Kind: "global",
+		Daemons: []config.DaemonSpec{
+			{Name: "claude-code", Port: 9200},
+		},
+		ClientBindings: []config.ClientBinding{
+			{Client: "claude-code", Daemon: "claude-code"},
+			{Client: "claude-code", Daemon: "claude-code"}, // duplicate
+			{Client: "claude-code", Daemon: "claude-code"}, // duplicate
+		},
+	}
+	m2 := config.ServerManifest{
+		Name: "search",
+		Kind: "global",
+		Daemons: []config.DaemonSpec{
+			{Name: "claude-code", Port: 9210},
+		},
+		ClientBindings: []config.ClientBinding{
+			{Client: "claude-code", Daemon: "claude-code"},
+		},
+	}
+
+	snap := BuildResolverSnapshotFromManifests([]config.ServerManifest{m, m2})
+
+	got := snap.Bindings["claude-code"]
+	if len(got) != 2 {
+		t.Fatalf("want 2 distinct refs after dedupe (fs + search), got %d: %+v", len(got), got)
+	}
+	servers := map[string]bool{}
+	for _, ref := range got {
+		servers[ref.Server] = true
+	}
+	if !servers["fs"] {
+		t.Errorf("missing fs ref after dedupe: %+v", got)
+	}
+	if !servers["search"] {
+		t.Errorf("missing search ref after dedupe: %+v", got)
+	}
+}
+
 // Manifest without ClientBindings produces an empty Bindings map (no
 // implicit client routing — the install reconciler is the source of
 // (server, client) intent, but bindings are filled from the manifest

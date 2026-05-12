@@ -119,6 +119,17 @@ func BuildResolverSnapshotFromManifests(manifests []config.ServerManifest) *Reso
 		Gen:      gen,
 		Bindings: make(map[string][]canonicalDaemonRef),
 	}
+	// codex bot r10 P2 closure on PR #157: dedupe (client, ref) pairs
+	// so a manifest that accidentally repeats a ClientBinding row (no
+	// uniqueness check in validation yet) cannot make AggregateInitialize
+	// fan-out the same daemon twice. Duplicate fan-outs both write to
+	// the same InitSuccesses key, leaving one daemon session orphaned
+	// (and the other un-tracked for cancellation / cleanup).
+	type seenKey struct {
+		Client string
+		Ref    canonicalDaemonRef
+	}
+	seen := make(map[seenKey]bool)
 	for _, m := range manifests {
 		// Index daemons by name so we can resolve port via
 		// ClientBinding.Daemon.
@@ -141,6 +152,11 @@ func BuildResolverSnapshotFromManifests(manifests []config.ServerManifest) *Reso
 				Daemon: b.Daemon,
 				Port:   port,
 			}
+			key := seenKey{Client: b.Client, Ref: ref}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
 			snap.Bindings[b.Client] = append(snap.Bindings[b.Client], ref)
 		}
 	}

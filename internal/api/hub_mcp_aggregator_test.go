@@ -1033,6 +1033,43 @@ func TestAggregateToolsListPreservesRouteMapOnAllFail(t *testing.T) {
 	}
 }
 
+// TestExtractJSONPayloadSSECompliance pins the codex bot r10 P1+P2
+// closure on PR #157. extractJSONPayload must accept compliant SSE
+// frames including:
+//   - data lines with NO space after `:` (`data:{...}`)
+//   - data lines split across multiple `data:` events (joined with
+//     `\n`)
+//   - CRLF line endings (HTTP-style streams)
+//   - non-data fields (`event:`, `id:`, `retry:`) skipped
+//   - plain application/json bodies pass through unchanged (fallback)
+//
+// The previous implementation matched ONLY `data: ` (with mandatory
+// space) and returned just the first matching line, so compliant SSE
+// daemons would be misclassified as init/list/call failures.
+func TestExtractJSONPayloadSSECompliance(t *testing.T) {
+	cases := map[string]struct {
+		raw  string
+		want string
+	}{
+		"data-with-space":     {"data: {\"jsonrpc\":\"2.0\"}\n", `{"jsonrpc":"2.0"}`},
+		"data-without-space":  {"data:{\"jsonrpc\":\"2.0\"}\n", `{"jsonrpc":"2.0"}`},
+		"data-multi-line":     {"data: {\"jsonrpc\":\"2.0\",\ndata: \"id\":1}\n", "{\"jsonrpc\":\"2.0\",\n\"id\":1}"},
+		"event-prefix-stripped": {"event: message\ndata: {\"a\":1}\n", `{"a":1}`},
+		"id-prefix-stripped":   {"id: 7\ndata: {\"a\":1}\n", `{"a":1}`},
+		"crlf-terminated":      {"data: {\"a\":1}\r\n", `{"a":1}`},
+		"crlf-multi-line":      {"data: {\"jsonrpc\":\"2.0\",\r\ndata: \"id\":1}\r\n", "{\"jsonrpc\":\"2.0\",\n\"id\":1}"},
+		"plain-json-fallback":  {`{"jsonrpc":"2.0","id":1,"result":{}}`, `{"jsonrpc":"2.0","id":1,"result":{}}`},
+		"plain-json-multiline": {"{\n  \"a\": 1\n}", "{\n  \"a\": 1\n}"},
+		"data-second-space-preserved": {"data:  foo\n", " foo"},
+	}
+	for name, tc := range cases {
+		got := string(extractJSONPayload([]byte(tc.raw)))
+		if got != tc.want {
+			t.Errorf("%s: got %q want %q", name, got, tc.want)
+		}
+	}
+}
+
 // TestAggregateToolsListNamespaceCollision pins the codex bot r9 P2
 // closure on PR #157. When two daemons under the SAME server expose
 // the same raw tool name, the resulting exposed name
