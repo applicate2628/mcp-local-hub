@@ -284,6 +284,19 @@ func (h *HubMcpHandler) handlePost(w http.ResponseWriter, r *http.Request, clien
 	}
 	sess, ok := h.sessions.Get(sid)
 	if !ok {
+		// codex bot phase4 r21 P2 closure on PR #158: notification-
+		// shaped requests (e.g. notifications/cancelled) MUST NOT
+		// receive a response — they can legitimately arrive AFTER
+		// session teardown (client cancels in-flight request while
+		// the hub idle-sweeper just GC'd the session). Strict MCP
+		// clients treating an unexpected response object as a
+		// protocol error would otherwise drop subsequent valid
+		// responses. Real requests still get the -32600 envelope so
+		// the client can see why it was rejected.
+		if isJSONRPCNotificationID(env.ID) {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
 		// Unknown session → JSON-RPC -32600 body with HTTP 404.
 		writeJSONRPCErrorStatus(w, env.ID, http.StatusNotFound, -32600, "unknown session", nil)
 		return
@@ -305,6 +318,14 @@ func (h *HubMcpHandler) handlePost(w http.ResponseWriter, r *http.Request, clien
 		return
 	}
 	if !hubSupportedVersions[pv] || pv != sess.ProtocolVersion {
+		// codex bot phase4 r21 P2 closure on PR #158: same rule —
+		// notifications don't get a JSON-RPC response. A version
+		// mismatch on a notification path is unusual but stays
+		// silent to preserve notification semantics.
+		if isJSONRPCNotificationID(env.ID) {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
 		writeJSONRPCErrorStatus(w, env.ID, http.StatusBadRequest, -32600, "protocol-version mismatch", nil)
 		return
 	}
