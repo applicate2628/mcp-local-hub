@@ -473,7 +473,16 @@ func (h *HubMcpHandler) handleDelete(w http.ResponseWriter, r *http.Request, cli
 	// Best-effort fan-out: ignore errors. Even if every fan-out fails
 	// we still return 204 — the client considers the session
 	// terminated regardless of daemon-side state.
-	fanCtx, fanCancel := context.WithTimeout(r.Context(), 5*time.Second)
+	//
+	// codex bot phase4 r7 P2 closure on PR #158: derive fanCtx from
+	// context.Background() rather than r.Context(). A client that
+	// disconnects right after sending DELETE would otherwise cancel
+	// r.Context() immediately, short-circuiting every per-daemon
+	// fan-out call before it attempts the DELETE — daemon-side MCP
+	// sessions would then leak until their own idle-sweeper kicks
+	// in. The 5-second per-call budget remains in place via the
+	// fresh timeout; we just stop letting the client steer it.
+	fanCtx, fanCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer fanCancel()
 	for ref, dsid := range daemonSessions {
 		_ = bestEffortDeleteDaemonSession(fanCtx, ref, dsid)
