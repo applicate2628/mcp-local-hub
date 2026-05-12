@@ -282,3 +282,32 @@ func TestWrapHubMcpFileErrorRedactsWrappedCause(t *testing.T) {
 		t.Errorf("errors.Is broken across redacted wrapper")
 	}
 }
+
+// TestRedactTokenHandlesUppercaseAndMixedCase pins the codex bot r3 P1
+// closure: defense-in-depth against tokens rendered in uppercase or
+// mixed case. Our writers always emit lowercase, but user input
+// normalization, shell tooling, or an upstream formatter could change
+// the case before the sanitizer runs. An uppercase 64-hex leak is
+// equivalent to leaking the secret.
+func TestRedactTokenHandlesUppercaseAndMixedCase(t *testing.T) {
+	upper := "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF"
+	mixed := "0123456789AbCdEf0123456789aBcDeF0123456789AbCdEf0123456789aBcDeF"
+	cases := []struct {
+		name string
+		in   string
+	}{
+		{name: "all-upper", in: "token=" + upper},
+		{name: "mixed", in: "token=" + mixed},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := RedactToken(tc.in)
+			if strings.Contains(out, upper) || strings.Contains(out, mixed) {
+				t.Errorf("RedactToken leaked case-variant token: %q", out)
+			}
+			if !strings.Contains(out, "<token>") {
+				t.Errorf("RedactToken missed case-variant; output %q has no placeholder", out)
+			}
+		})
+	}
+}

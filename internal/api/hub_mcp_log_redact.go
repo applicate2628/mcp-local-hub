@@ -26,13 +26,20 @@ import "regexp"
 // same `crypto/rand` 32-byte → lower-hex pipeline (see hub_mcp_tokens.go
 // + hub_mcp_instance.go), so a single regex covers both surfaces.
 //
+// Pattern is case-insensitive: `[0-9A-Fa-f]{64}` (codex bot r3 P1
+// closure). Defense in depth — even though our writers always emit
+// lowercase, user input normalization, shell tooling, or an upstream
+// formatter could uppercase the token before it reaches this
+// sanitizer. An uppercase 64-hex leak is equivalent to leaking the
+// secret (trivially lowercased).
+//
 // Anchored to word boundaries via a surrounding negative lookbehind
 // would be ideal, but RE2 (Go's stdlib regexp engine) does NOT support
-// lookbehind. The trade-off: any 64-lower-hex run in the input is
-// treated as a credential and redacted. The golden test in
+// lookbehind. The trade-off: any 64-hex run in the input (either case)
+// is treated as a credential and redacted. The golden test in
 // hub_mcp_log_redaction_test.go (Task 2.5) exercises every documented
 // emit surface and would catch a false negative.
-var hexTokenRE = regexp.MustCompile(`[0-9a-f]{64}`)
+var hexTokenRE = regexp.MustCompile(`[0-9A-Fa-f]{64}`)
 
 // RedactToken replaces every 64-lower-hex substring with `<token>`.
 // Apply at every emit site that may carry a token or instance_id:
