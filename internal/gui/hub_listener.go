@@ -302,6 +302,16 @@ func ShutdownHubListener(parentCtx context.Context, c *HubListenerComponents) {
 				"port": c.port,
 				"err":  err.Error(),
 			})
+			// codex deep-sec phase4 r24 P2 closure on PR #158 (lane #3):
+			// Shutdown returned an error (typically context deadline
+			// exceeded) — graceful drain failed. The pre-r24 code
+			// continued to close store/reload, leaving active hub
+			// request goroutines alive (a long tools/call inside
+			// the 60s daemon POST keeps the request handler alive
+			// past the 5s graceful budget). Call srv.Close() to
+			// force-close active connections so request goroutines
+			// can unwind before the process exits.
+			_ = c.srv.Close()
 		}
 	}
 	if c.store != nil {

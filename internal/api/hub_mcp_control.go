@@ -121,9 +121,49 @@ func NewInternalReloadHandler(ctx context.Context) (*InternalReloadHandler, erro
 		_ = LogHubMcpEvent("error", "control-token-persist-failed", map[string]any{
 			"err": werr.Error(),
 		})
+		// codex deep-sec phase4 r24 P2 closure on PR #158 (lane #3):
+		// SecureWriteClientConfig can fail AFTER the rename has
+		// committed (e.g. post-rename DACL verification fails).
+		// In that case hub-mcp-control.token contains the
+		// generated token but the constructor returns error, so
+		// no handler is wired to that token — the file is a
+		// dangling sensitive artifact. Best-effort remove under
+		// flock; if the remove also fails (state-dir DACL pinned
+		// it read-only), log it — the operator can clean up by
+		// running the rotation CLI which rewrites the file under
+		// the same flock.
+		if rerr := removeHubMcpControlTokenLockedContext(ctx); rerr != nil {
+			_ = LogHubMcpEvent("warn", "control-token-cleanup-on-persist-fail", map[string]any{
+				"err": rerr.Error(),
+			})
+		}
+		// Clear the in-memory copy too — no longer authoritative.
+		var empty string
+		h.controlTok.Store(&empty)
 		return nil, fmt.Errorf("persist hub-mcp control token: %w", werr)
 	}
 	return h, nil
+}
+
+// removeHubMcpControlTokenLockedContext is the cleanup half used by
+// NewInternalReloadHandler when persistence fails after rename.
+// Idempotent — missing file returns nil. Errors that aren't
+// "file not found" surface to the caller for logging.
+func removeHubMcpControlTokenLockedContext(ctx context.Context) error {
+	lk, err := acquireHubMcpLockContext(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lk.Unlock() }()
+	dir, err := DaemonStateDir()
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(dir, hubMcpControlTokenFileLeaf)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 // ServeHTTP implements the POST-only contract with loopback-guard,

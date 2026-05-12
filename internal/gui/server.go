@@ -611,24 +611,42 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 			// already structured-logged via LogHubMcpEvent inside
 			// startHubMcpListener.
 			log.Printf("hub-mcp listener startup failed (gate-OFF for this process): %v", hubErr)
-			hubComp = nil
+			return
 		}
-		// codex bot phase4 r14 P1 closure on PR #158: defense-in-
-		// depth against any blocking call inside startHubMcpListener
-		// that isn't ctx-aware (file I/O in writeHubMcpStateFile,
-		// SecureWriteClientConfig handle-relative open chain, the
-		// listener factory's syscall itself on Windows). If the
-		// goroutine raced past hubInitCancel() and produced a
-		// successful bundle anyway, tear it down ourselves BEFORE
-		// the atomic Store so the Start shutdown path that already
-		// ran with hubMcpComp == nil isn't bypassed. Use
-		// context.Background() for the teardown since hubInitCtx is
-		// already canceled by definition on this path.
-		if hubComp != nil && hubInitCtx.Err() != nil {
+		if hubComp == nil {
+			return
+		}
+		// codex deep-sec phase4 r24 P1 closure on PR #158 (lane #1):
+		// CAS-based ownership transfer between hub-init goroutine
+		// and shutdown path. Pre-r24 code did:
+		//   if hubInitCtx.Err() != nil { tear down } else { Store }
+		// which is NOT one atomic transition: the goroutine could be
+		// descheduled between the Err() check and the Store, letting
+		// the shutdown path Load() == nil, return, THEN the goroutine
+		// publishes a live listener after Start has already returned.
+		//
+		// New protocol:
+		//   1. Goroutine attempts CAS(nil -> hubComp). If it fails,
+		//      something else already owns the slot (impossible in
+		//      practice, but defensive) — tear down our bundle.
+		//   2. Re-check ctx after the publish. If canceled NOW,
+		//      attempt CAS(hubComp -> nil) to take ownership back. If
+		//      THAT CAS succeeds, we still own the bundle and tear it
+		//      down. If it fails, the shutdown path already
+		//      atomically Swap'd to nil and will tear down itself.
+		//
+		// The shutdown path uses Swap(nil) (below) — single atomic
+		// take-the-bundle-or-take-nothing.
+		if !s.hubMcpComp.CompareAndSwap(nil, hubComp) {
 			ShutdownHubListener(context.Background(), hubComp)
-			hubComp = nil
+			return
 		}
-		s.hubMcpComp.Store(hubComp)
+		if hubInitCtx.Err() != nil {
+			if s.hubMcpComp.CompareAndSwap(hubComp, nil) {
+				ShutdownHubListener(context.Background(), hubComp)
+			}
+			// else: shutdown path already swapped — it owns teardown.
+		}
 	}()
 
 	select {
@@ -655,13 +673,27 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 		// Drain hub listener BEFORE the gui-server so any racing
 		// internal-reload writes complete via the still-flockable
 		// state-dir.
+		//
+		// codex deep-sec phase4 r24 P1 closure on PR #158 (lane #1):
+		// atomic.Swap takes ownership of the bundle (or nil). If the
+		// goroutine raced past us and stored a bundle, we get it
+		// here and tear it down. If we get nil, the goroutine either
+		// hasn't stored yet (its later CAS will tear down its own
+		// bundle when it sees ctx canceled) or it never produced
+		// a bundle (errored out). No double-shutdown.
 		hubCtx, hubCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		ShutdownHubListener(hubCtx, s.hubMcpComp.Load())
+		ShutdownHubListener(hubCtx, s.hubMcpComp.Swap(nil))
 		hubCancel()
 
 		guiCtx, guiCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer guiCancel()
 		if err := s.srv.Shutdown(guiCtx); err != nil {
+			// codex deep-sec phase4 r24 P2 closure on PR #158 (lane #3):
+			// graceful gui-server shutdown failed (typically context
+			// deadline exceeded). Force-close active connections so
+			// request goroutines unwind before we return — without
+			// this, hung requests survive Start's return.
+			_ = s.srv.Close()
 			s.events.Close()
 			return fmt.Errorf("graceful shutdown: %w", err)
 		}
@@ -687,8 +719,10 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 		case <-hubInitDone:
 		case <-time.After(2 * time.Second):
 		}
+		// codex deep-sec phase4 r24 P1 closure on PR #158 (lane #1):
+		// same atomic Swap ownership transfer as the ctx.Done branch.
 		drainCtx, drainCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		ShutdownHubListener(drainCtx, s.hubMcpComp.Load())
+		ShutdownHubListener(drainCtx, s.hubMcpComp.Swap(nil))
 		drainCancel()
 		s.events.Close()
 		if errors.Is(err, http.ErrServerClosed) {

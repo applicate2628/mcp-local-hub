@@ -234,33 +234,56 @@ func (h *HubMcpHandler) handlePost(w http.ResponseWriter, r *http.Request, clien
 		Params  json.RawMessage `json:"params"`
 	}
 	if uerr := json.Unmarshal(body, &env); uerr != nil {
-		writeJSONRPCErrorStatus(w, json.RawMessage(`null`), http.StatusBadRequest, -32700, "parse error: "+uerr.Error(), nil)
+		// codex deep-sec phase4 r24 P2 closure on PR #158 (lane #2):
+		// json.Unmarshal returns errors for BOTH invalid-JSON-text
+		// (true -32700 Parse error) AND valid-JSON-with-type-mismatch
+		// (e.g. {"jsonrpc": 42} — should be -32600 Invalid Request).
+		// We can't distinguish here without re-parsing, but the
+		// pragmatic rule per JSON-RPC §5.1 is: if it's a json.SyntaxError
+		// → -32700, else → -32600. Distinguish via errors.As.
+		var syntaxErr *json.SyntaxError
+		if errors.As(uerr, &syntaxErr) {
+			writeJSONRPCErrorStatus(w, json.RawMessage(`null`), http.StatusBadRequest, -32700, "parse error: "+uerr.Error(), nil)
+		} else {
+			writeJSONRPCErrorStatus(w, json.RawMessage(`null`), http.StatusBadRequest, -32600, "invalid request: "+uerr.Error(), nil)
+		}
 		return
 	}
-	if env.JSONRPC != "2.0" {
-		writeJSONRPCErrorStatus(w, env.ID, http.StatusBadRequest, -32600, "invalid request: jsonrpc must be \"2.0\"", nil)
-		return
-	}
-	// codex bot phase4 r19 P2 closure on PR #158: explicit `id: null`
-	// is invalid under MCP §1.5 (id must be a non-null String or
-	// Number). Reject upfront with -32600 so the response echo doesn't
-	// produce a synthetic null-id envelope and the client sees the
-	// protocol-level error. Missing id (notification) is handled
-	// per-method below — notifications get HTTP 202 with no body.
+
+	// codex deep-sec phase4 r24 P1 closure on PR #158 (lane #2):
+	// Validate id FIRST so subsequent error response paths can
+	// safely echo it. The pre-r24 order had jsonrpc!="2.0" check
+	// BEFORE id validation, so `{"jsonrpc":"1.0","id":true}` would
+	// echo back `"id": true` in the error envelope — MCP §1.5
+	// violation (id MUST be string|number, and JSON-RPC says
+	// invalid id MUST be echoed as null).
 	//
-	// codex bot phase4 r22 P2 closure on PR #158: extend validation
-	// to the full MCP id-type rule (string|number only, no null /
-	// boolean / array / object). Route through the canonical
-	// newRequestIDKey validator from hub_mcp_request_id.go so the
-	// dispatch path enforces exactly the same shape that downstream
-	// in-flight tracking expects. `id: true`, `id: {}`, `id: []` no
-	// longer slip past the gate and create sessions / cause
-	// inflightEntry collisions.
+	// Earlier closures kept:
+	// - r19 P2 closure: explicit `id: null` is invalid under MCP
+	// - r22 P2 closure: route through newRequestIDKey for full
+	//   id-type validation (rejects null, bool, array, object,
+	//   empty). Same canonical validator the in-flight tracker uses.
+	respID := env.ID
 	if !isJSONRPCNotificationID(env.ID) {
 		if _, idErr := newRequestIDKey(env.ID); idErr != nil {
 			writeJSONRPCErrorStatus(w, json.RawMessage(`null`), http.StatusBadRequest, -32600, idErr.Error(), nil)
 			return
 		}
+	}
+
+	// codex deep-sec phase4 r24 P2 closure on PR #158 (lane #2):
+	// jsonrpc!="2.0" is an invalid-request-shape error, not a
+	// parse error. -32600 per JSON-RPC §5.1.
+	if env.JSONRPC != "2.0" {
+		writeJSONRPCErrorStatus(w, respID, http.StatusBadRequest, -32600, "invalid request: jsonrpc must be \"2.0\"", nil)
+		return
+	}
+	// codex deep-sec phase4 r24 P2 closure on PR #158 (lane #2):
+	// missing method field = -32600 Invalid Request, not -32601
+	// (Method not found is for a valid-name-but-unknown method).
+	if env.Method == "" {
+		writeJSONRPCErrorStatus(w, respID, http.StatusBadRequest, -32600, "invalid request: method field required", nil)
+		return
 	}
 
 	// initialize is its own branch — Mcp-Session-Id MUST be absent
@@ -293,7 +316,14 @@ func (h *HubMcpHandler) handlePost(w http.ResponseWriter, r *http.Request, clien
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	sess, ok := h.sessions.Get(sid)
+	// codex deep-sec phase4 r24 P1 closure on PR #158 (lane #1):
+	// GetAndTouch is one atomic store-lock acquisition that fetches
+	// + refreshes LastUsedAt. The pre-r24 sequence of Get (RLock)
+	// then Touch (Lock) had a sweep-Delete race window; the handler
+	// could continue with a stale *hubSession after the sweep
+	// removed the map entry, causing later cancellation/DELETE on
+	// the same id to see "unknown session" mid-flight.
+	sess, ok := h.sessions.GetAndTouch(sid)
 	if !ok {
 		// codex bot phase4 r21 P2 closure on PR #158: notification-
 		// shaped requests (e.g. notifications/cancelled) MUST NOT
@@ -341,12 +371,25 @@ func (h *HubMcpHandler) handlePost(w http.ResponseWriter, r *http.Request, clien
 		return
 	}
 
-	// Refresh session activity timestamp for the idle-sweeper.
-	h.sessions.Touch(sid)
+	// codex deep-sec phase4 r24 P1 closure on PR #158 (lane #1):
+	// activity timestamp already refreshed by GetAndTouch above.
+	// Touch call removed — was the racing surface that prompted
+	// the GetAndTouch atomic refactor.
 
 	// Method dispatch.
 	switch env.Method {
 	case "notifications/initialized":
+		// codex deep-sec phase4 r24 P1 closure on PR #158 (lane #2):
+		// JSON-RPC §4.1 + MCP §1.5: a notification MUST omit id. If
+		// id IS present, this is a request with a notification-style
+		// method name — reject as invalid request (-32600). The
+		// pre-r24 code accepted any envelope with this method as a
+		// no-response notification, silently swallowing the
+		// presence-of-id protocol bug.
+		if !isJSONRPCNotificationID(env.ID) {
+			writeJSONRPCErrorStatus(w, env.ID, http.StatusBadRequest, -32600, "invalid request: notifications/* must not include id", nil)
+			return
+		}
 		// No body, just 202. The aggregator does not fan-out
 		// notifications/initialized at this stage — it was already
 		// dispatched per-daemon during initialize fan-out (see
@@ -356,6 +399,12 @@ func (h *HubMcpHandler) handlePost(w http.ResponseWriter, r *http.Request, clien
 		w.WriteHeader(http.StatusAccepted)
 		return
 	case "notifications/cancelled":
+		// codex deep-sec phase4 r24 P1 closure on PR #158 (lane #2):
+		// same notification-must-not-include-id rule.
+		if !isJSONRPCNotificationID(env.ID) {
+			writeJSONRPCErrorStatus(w, env.ID, http.StatusBadRequest, -32600, "invalid request: notifications/* must not include id", nil)
+			return
+		}
 		// Parse params.requestId; forward to the matching daemon
 		// in-flight row via ForwardCancellation.
 		var p struct {
@@ -444,38 +493,43 @@ func (h *HubMcpHandler) handleInitialize(w http.ResponseWriter, r *http.Request,
 	var initParams struct {
 		ProtocolVersion string `json:"protocolVersion"`
 	}
-	// codex bot phase4 r16 P2 closure on PR #158: explicitly reject
-	// syntactically valid but type-mismatched params (e.g.
-	// `"params": 42` or `"params": "string"`). Silently defaulting
-	// after a decode failure masks client bugs and accepts
-	// non-compliant protocol negotiation inputs at the handshake.
-	// Empty / missing params (paramsRaw is nil OR the literal "null"
-	// JSON token) is still allowed — protocolVersion defaults to
-	// the hub's preferred version. Strict clients always send one.
+	// codex bot phase4 r16 P2 closure on PR #158: reject
+	// syntactically-valid-but-type-mismatched params.
 	if len(paramsRaw) > 0 && string(paramsRaw) != "null" {
 		if uerr := json.Unmarshal(paramsRaw, &initParams); uerr != nil {
 			writeJSONRPCErrorStatus(w, reqID, http.StatusBadRequest, -32602, "invalid initialize params: "+uerr.Error(), nil)
 			return
 		}
 	}
+	// codex deep-sec phase4 r24 P2 closure on PR #158 (lane #2):
+	// MCP §1.6 Lifecycle requires the client to send a supported
+	// protocolVersion in `initialize` params. Missing/empty
+	// protocolVersion is an invalid-params error (-32602), not a
+	// "default to hub-preferred" path. Silently defaulting masks
+	// non-compliant clients that omit the field.
 	if initParams.ProtocolVersion == "" {
-		initParams.ProtocolVersion = "2025-11-25"
-	}
-	if !hubSupportedVersions[initParams.ProtocolVersion] {
-		// codex r7-bot-r2 P2 closure: reject at initialize, no session
-		// created. JSON-RPC error envelope with the supported list so
-		// the client can renegotiate.
-		writeJSONRPCErrorStatus(w, reqID, http.StatusOK, -32600, "unsupported protocolVersion", map[string]any{
-			"offered":   initParams.ProtocolVersion,
+		writeJSONRPCErrorStatus(w, reqID, http.StatusBadRequest, -32602, "invalid initialize params: protocolVersion required", map[string]any{
 			"supported": hubSupportedVersionsList(),
 		})
 		return
+	}
+	// codex deep-sec phase4 r24 P2 closure on PR #158 (lane #2):
+	// MCP §1.6: if the server doesn't support the offered version,
+	// it MUST respond with another supported version (i.e.
+	// negotiate). The pre-r24 path rejected with -32600 instead of
+	// negotiating. Now the server picks its preferred supported
+	// version and creates the session with that version. The
+	// client decides whether to continue or disconnect based on
+	// the InitializeResult.protocolVersion echo.
+	negotiatedVersion := initParams.ProtocolVersion
+	if !hubSupportedVersions[negotiatedVersion] {
+		negotiatedVersion = "2025-11-25"
 	}
 
 	// Capture the current resolver snapshot for the new session.
 	snap := LoadResolverSnapshot()
 
-	sess, err := h.sessions.Create(clientID, initParams.ProtocolVersion, snap)
+	sess, err := h.sessions.Create(clientID, negotiatedVersion, snap)
 	if err != nil {
 		if errors.Is(err, ErrSessionCapExceeded) {
 			w.Header().Set("Retry-After", "30")
