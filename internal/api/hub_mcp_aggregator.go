@@ -55,9 +55,11 @@
 package api
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -582,16 +584,24 @@ func daemonStillBound(snap *ResolverSnapshot, client string, ref canonicalToolRe
 // ---------------- HTTP plumbing ----------------
 
 // doDaemonPost issues a JSON-RPC POST to a daemon at 127.0.0.1:<port>
-// /mcp and returns the response body (drained + capped at
-// maxAggregatorResponseBytes) plus the response header. The caller
-// parses the body and reads any header fields it needs (e.g.,
-// Mcp-Session-Id on initialize). daemonSID is set as the
-// Mcp-Session-Id request header when non-empty.
+// /mcp and returns the JSON-RPC envelope bytes plus the response
+// header. The envelope is ready to feed into `json.Unmarshal`
+// directly — no SSE framing remains in the returned slice.
 //
-// HTTP >= 400 turns into an error. Body-read failure or oversize
-// response also turns into an error. The body is fed through
-// extractJSONPayload by callers that need to parse it — doDaemonPost
-// itself is content-type-agnostic.
+// Content-Type dispatch (codex bot r12 P1 closures on PR #157):
+//   - `application/json` (or default): read body to EOF up to
+//     maxAggregatorResponseBytes. Return raw bytes.
+//   - `text/event-stream`: stream-parse SSE events incrementally
+//     via readSSEResponse. Return the FIRST event whose data is a
+//     JSON-RPC response (has an `id` field). Connection is closed
+//     as soon as the response event arrives, so a daemon that keeps
+//     the SSE stream open for additional notifications never blocks
+//     us until the timeout. Pre-response notifications (progress
+//     events) are discarded.
+//
+// HTTP >= 400 turns into an error with the raw body returned for
+// the caller's error message. Body-read failure or oversize response
+// also turns into an error.
 //
 // Used by postInitialize, postToolsList, postToolsCall, and
 // postCancellation. The single helper keeps the request-shape +
@@ -624,15 +634,29 @@ func doDaemonPost(ctx context.Context, port int, body []byte, daemonSID, protoVe
 		return nil, nil, err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxAggregatorResponseBytes+1))
+		if len(raw) > maxAggregatorResponseBytes {
+			raw = raw[:maxAggregatorResponseBytes]
+		}
+		return raw, resp.Header, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	if isSSEContentType(resp.Header.Get("Content-Type")) {
+		payload, err := readSSEResponse(resp.Body, maxAggregatorResponseBytes)
+		if err != nil {
+			return nil, resp.Header, err
+		}
+		return payload, resp.Header, nil
+	}
+
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxAggregatorResponseBytes+1))
 	if err != nil {
 		return nil, resp.Header, fmt.Errorf("read: %w", err)
 	}
 	if len(raw) > maxAggregatorResponseBytes {
 		return nil, resp.Header, fmt.Errorf("response too large (> %d bytes)", maxAggregatorResponseBytes)
-	}
-	if resp.StatusCode >= 400 {
-		return raw, resp.Header, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return raw, resp.Header, nil
 }
@@ -688,14 +712,17 @@ func postInitialize(ctx context.Context, ref canonicalDaemonRef, protoVer string
 	// would otherwise be recorded as init successes with an empty
 	// session id — misrouting follow-up tools/list / tools/call and
 	// surfacing the wrong stage in partialFailures.
-	payload := extractJSONPayload(raw)
+	//
+	// `raw` is the JSON-RPC envelope: doDaemonPost already peeled off
+	// any SSE framing in the text/event-stream path (codex bot r12 P1
+	// closures on PR #157).
 	var env struct {
 		Error *struct {
 			Code    int    `json:"code"`
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-	if uerr := json.Unmarshal(payload, &env); uerr != nil {
+	if uerr := json.Unmarshal(raw, &env); uerr != nil {
 		return "", fmt.Errorf("parse initialize response: %w", uerr)
 	}
 	if env.Error != nil {
@@ -730,7 +757,8 @@ func postToolsList(ctx context.Context, ref canonicalDaemonRef, daemonSID, proto
 	if err != nil {
 		return nil, err
 	}
-	payload := extractJSONPayload(raw)
+	// `raw` is the JSON-RPC envelope; doDaemonPost peeled off any SSE
+	// framing (codex bot r12 P1 closures on PR #157).
 	var env struct {
 		Error *struct {
 			Code    int    `json:"code"`
@@ -740,7 +768,7 @@ func postToolsList(ctx context.Context, ref canonicalDaemonRef, daemonSID, proto
 			Tools []json.RawMessage `json:"tools"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal(payload, &env); err != nil {
+	if err := json.Unmarshal(raw, &env); err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
 	}
 	if env.Error != nil {
@@ -763,7 +791,9 @@ func postToolsCall(ctx context.Context, ref canonicalToolRef, daemonSID, protoVe
 	if err != nil {
 		return nil, err
 	}
-	return extractJSONPayload(raw), nil
+	// `raw` is the JSON-RPC envelope; doDaemonPost peeled off any SSE
+	// framing (codex bot r12 P1 closures on PR #157).
+	return raw, nil
 }
 
 // postCancellation sends a notifications/cancelled to a daemon.
@@ -803,54 +833,118 @@ func postInitialized(ctx context.Context, ref canonicalDaemonRef, daemonSID, pro
 	return nil
 }
 
-// extractJSONPayload returns the JSON body from an MCP daemon
-// response. MCP daemons may emit either plain application/json OR
-// a text/event-stream wrapping a JSON-RPC envelope.
+// isSSEContentType reports whether the Content-Type header value
+// denotes Server-Sent Events. Accepts media-type parameters and
+// case-insensitive match per RFC 7231.
+func isSSEContentType(ct string) bool {
+	base, _, _ := strings.Cut(ct, ";")
+	return strings.EqualFold(strings.TrimSpace(base), "text/event-stream")
+}
+
+// readSSEResponse parses a text/event-stream body INCREMENTALLY,
+// returning as soon as it sees the first event whose data is a
+// JSON-RPC response envelope (jsonrpc=="2.0" with a non-empty `id`
+// and no `method` field). codex bot r12 P1 closures on PR #157:
 //
-// SSE handling follows the HTML5 EventSource parsing algorithm for
-// the `data` field (codex bot r10 P2 closure on PR #157):
+//   - Stops at the response event without waiting for stream EOF —
+//     compliant Streamable HTTP daemons may keep the connection open
+//     to send post-response notifications. Earlier `io.ReadAll`
+//     blocked until timeout in that case.
+//   - Respects SSE event boundaries (empty line terminates an event).
+//     Earlier code flattened every `data:` line across the whole
+//     stream into one blob, producing invalid concatenated JSON when
+//     a daemon sent a notification before the response.
+//   - Skips non-data SSE fields (`event:`, `id:`, `retry:`) and
+//     comment lines (`:` prefix), matching HTML5 EventSource spec.
+//   - Strips at most one leading space from the data value per spec.
+//   - Joins multiple `data:` lines within a single event with `\n`.
 //
-//   - Lines start with the field name, then `:`, then optional space,
-//     then the value. Both `data: foo` AND `data:foo` are valid; the
-//     spec strips at most ONE leading space.
-//   - Multiple `data:` lines per event are joined with `\n`. Compliant
-//     SSE daemons may split a JSON-RPC envelope across several lines
-//     (especially under proxies that re-chunk long payloads).
-//   - CRLF and bare-LF terminators are both accepted.
-//   - Non-data fields (`event:`, `id:`, `retry:`, comments starting
-//     with `:`) and unrecognized fields are skipped.
-//
-// Fallback: if no `data:` line is found, the raw response is returned
-// unchanged. This preserves the plain `application/json` shape that
-// most MCP daemons emit by default.
-//
-// health.go has its own near-identical SSE parser (the comment used
-// to say "mirrors health.go:727-734"); that one is left untouched in
-// this PR per narrow-scope and is filed as a separate follow-up bug.
-func extractJSONPayload(raw []byte) []byte {
-	var parts [][]byte
-	seenData := false
-	for _, line := range bytes.Split(raw, []byte("\n")) {
-		// Strip CRLF: split on `\n` leaves `\r` on each line of a
-		// CRLF-terminated stream.
-		line = bytes.TrimSuffix(line, []byte("\r"))
+// maxBytes caps total bytes read; exceeding it returns an error so
+// a runaway daemon can't OOM the hub.
+func readSSEResponse(r io.Reader, maxBytes int) ([]byte, error) {
+	scanner := bufio.NewScanner(r)
+	// Allow a single line up to maxBytes — some daemons emit one
+	// large `data:` line containing the full JSON envelope.
+	scanner.Buffer(make([]byte, 64*1024), maxBytes+1)
+
+	var dataLines [][]byte
+	totalBytes := 0
+	for scanner.Scan() {
+		raw := scanner.Bytes()
+		totalBytes += len(raw) + 1 // +1 for the LF the scanner consumed
+		if totalBytes > maxBytes {
+			return nil, fmt.Errorf("SSE response too large (> %d bytes)", maxBytes)
+		}
+		line := bytes.TrimSuffix(raw, []byte("\r"))
+
+		if len(line) == 0 {
+			// Empty line: dispatch the accumulated event.
+			if len(dataLines) > 0 {
+				if payload, ok := selectJSONRPCResponse(dataLines); ok {
+					return payload, nil
+				}
+				dataLines = nil
+			}
+			continue
+		}
+		if line[0] == ':' {
+			// SSE comment line — ignored.
+			continue
+		}
 		if !bytes.HasPrefix(line, []byte("data:")) {
+			// Other SSE field (`event:`, `id:`, `retry:`, unknown).
 			continue
 		}
 		value := line[len("data:"):]
-		// Per SSE spec strip AT MOST ONE leading space. `data: foo`
-		// → `foo`; `data:foo` → `foo`; `data:  foo` → ` foo` (the
-		// second space is preserved verbatim — payload data).
 		if len(value) > 0 && value[0] == ' ' {
 			value = value[1:]
 		}
-		parts = append(parts, value)
-		seenData = true
+		// Copy: scanner reuses its buffer on the next Scan call, so
+		// retaining the slice across iterations would corrupt the
+		// accumulated event.
+		valueCopy := make([]byte, len(value))
+		copy(valueCopy, value)
+		dataLines = append(dataLines, valueCopy)
 	}
-	if !seenData {
-		return raw
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read SSE: %w", err)
 	}
-	return bytes.Join(parts, []byte("\n"))
+	// Stream ended without a trailing blank line — dispatch any
+	// final partial event.
+	if len(dataLines) > 0 {
+		if payload, ok := selectJSONRPCResponse(dataLines); ok {
+			return payload, nil
+		}
+	}
+	return nil, errors.New("SSE stream ended without a JSON-RPC response event")
+}
+
+// selectJSONRPCResponse joins the accumulated `data:` lines of an SSE
+// event with `\n`, parses the result, and returns it as the response
+// payload IFF it is a JSON-RPC response envelope (jsonrpc=="2.0"
+// with non-empty `id` and no `method`). Notifications (id absent,
+// method present) and unrelated events are rejected so the caller
+// keeps reading for the actual response.
+func selectJSONRPCResponse(dataLines [][]byte) ([]byte, bool) {
+	payload := bytes.Join(dataLines, []byte("\n"))
+	var env struct {
+		Jsonrpc string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Method  string          `json:"method"`
+	}
+	if err := json.Unmarshal(payload, &env); err != nil {
+		return nil, false
+	}
+	if env.Jsonrpc != "2.0" {
+		return nil, false
+	}
+	// JSON-RPC responses ALWAYS have an `id`. Notifications carry
+	// `method` and never `id`. Reject anything without an id or with
+	// a method field.
+	if len(env.ID) == 0 || env.Method != "" {
+		return nil, false
+	}
+	return payload, true
 }
 
 // ---------------- Response builders ----------------

@@ -27,6 +27,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -1033,41 +1034,159 @@ func TestAggregateToolsListPreservesRouteMapOnAllFail(t *testing.T) {
 	}
 }
 
-// TestExtractJSONPayloadSSECompliance pins the codex bot r10 P1+P2
-// closure on PR #157. extractJSONPayload must accept compliant SSE
-// frames including:
-//   - data lines with NO space after `:` (`data:{...}`)
-//   - data lines split across multiple `data:` events (joined with
-//     `\n`)
-//   - CRLF line endings (HTTP-style streams)
-//   - non-data fields (`event:`, `id:`, `retry:`) skipped
-//   - plain application/json bodies pass through unchanged (fallback)
+// TestReadSSEResponseHandlesCompliantFrames pins the codex bot r10
+// (P1+P2) + r12 (P1×3) closures on PR #157. readSSEResponse must:
+//   - Accept `data:` with or without a single leading space.
+//   - Join multiple `data:` lines within an event with `\n`.
+//   - Respect event boundaries (empty line terminates an event).
+//   - Skip events whose body is not a JSON-RPC response (pre-response
+//     notifications like progress events).
+//   - Handle CRLF line endings.
+//   - Skip non-data fields (`event:`, `id:`, `retry:`, `:` comments).
 //
-// The previous implementation matched ONLY `data: ` (with mandatory
-// space) and returned just the first matching line, so compliant SSE
-// daemons would be misclassified as init/list/call failures.
-func TestExtractJSONPayloadSSECompliance(t *testing.T) {
+// `id` discriminates JSON-RPC responses from notifications: responses
+// have a non-empty `id` and no `method`; notifications have `method`
+// and no `id`.
+func TestReadSSEResponseHandlesCompliantFrames(t *testing.T) {
+	const maxBytes = 16 * 1024
 	cases := map[string]struct {
 		raw  string
 		want string
 	}{
-		"data-with-space":     {"data: {\"jsonrpc\":\"2.0\"}\n", `{"jsonrpc":"2.0"}`},
-		"data-without-space":  {"data:{\"jsonrpc\":\"2.0\"}\n", `{"jsonrpc":"2.0"}`},
-		"data-multi-line":     {"data: {\"jsonrpc\":\"2.0\",\ndata: \"id\":1}\n", "{\"jsonrpc\":\"2.0\",\n\"id\":1}"},
-		"event-prefix-stripped": {"event: message\ndata: {\"a\":1}\n", `{"a":1}`},
-		"id-prefix-stripped":   {"id: 7\ndata: {\"a\":1}\n", `{"a":1}`},
-		"crlf-terminated":      {"data: {\"a\":1}\r\n", `{"a":1}`},
-		"crlf-multi-line":      {"data: {\"jsonrpc\":\"2.0\",\r\ndata: \"id\":1}\r\n", "{\"jsonrpc\":\"2.0\",\n\"id\":1}"},
-		"plain-json-fallback":  {`{"jsonrpc":"2.0","id":1,"result":{}}`, `{"jsonrpc":"2.0","id":1,"result":{}}`},
-		"plain-json-multiline": {"{\n  \"a\": 1\n}", "{\n  \"a\": 1\n}"},
-		"data-second-space-preserved": {"data:  foo\n", " foo"},
+		"data-with-space":    {"data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n", `{"jsonrpc":"2.0","id":1,"result":{}}`},
+		"data-without-space": {"data:{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n", `{"jsonrpc":"2.0","id":1,"result":{}}`},
+		"data-multi-line": {
+			"data: {\"jsonrpc\":\"2.0\",\ndata: \"id\":1,\"result\":{}}\n\n",
+			"{\"jsonrpc\":\"2.0\",\n\"id\":1,\"result\":{}}",
+		},
+		"event-prefix-stripped": {
+			"event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n",
+			`{"jsonrpc":"2.0","id":1,"result":{}}`,
+		},
+		"comment-line-ignored": {
+			": keepalive\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n",
+			`{"jsonrpc":"2.0","id":1,"result":{}}`,
+		},
+		"crlf-terminated": {
+			"data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\r\n\r\n",
+			`{"jsonrpc":"2.0","id":1,"result":{}}`,
+		},
+		"final-event-no-trailing-blank-line": {
+			"data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}",
+			`{"jsonrpc":"2.0","id":1,"result":{}}`,
+		},
 	}
 	for name, tc := range cases {
-		got := string(extractJSONPayload([]byte(tc.raw)))
-		if got != tc.want {
+		got, err := readSSEResponse(strings.NewReader(tc.raw), maxBytes)
+		if err != nil {
+			t.Errorf("%s: unexpected error %v", name, err)
+			continue
+		}
+		if string(got) != tc.want {
 			t.Errorf("%s: got %q want %q", name, got, tc.want)
 		}
 	}
+}
+
+// TestReadSSEResponseSkipsNotifications pins codex bot r12 P1 #3:
+// when the daemon emits one or more progress notifications BEFORE
+// the JSON-RPC response, the parser must skip those events and
+// return ONLY the response event. The prior implementation would
+// concatenate all `data:` payloads into one invalid JSON blob.
+func TestReadSSEResponseSkipsNotifications(t *testing.T) {
+	const maxBytes = 16 * 1024
+	// Two pre-response notifications, then the response.
+	raw := "" +
+		"event: progress\n" +
+		"data: {\"jsonrpc\":\"2.0\",\"method\":\"progress\",\"params\":{\"step\":1}}\n" +
+		"\n" +
+		"event: progress\n" +
+		"data: {\"jsonrpc\":\"2.0\",\"method\":\"progress\",\"params\":{\"step\":2}}\n" +
+		"\n" +
+		"event: response\n" +
+		"data: {\"jsonrpc\":\"2.0\",\"id\":42,\"result\":{\"tools\":[]}}\n" +
+		"\n"
+	got, err := readSSEResponse(strings.NewReader(raw), maxBytes)
+	if err != nil {
+		t.Fatalf("readSSEResponse: %v", err)
+	}
+	want := `{"jsonrpc":"2.0","id":42,"result":{"tools":[]}}`
+	if string(got) != want {
+		t.Errorf("got %q want %q (must skip pre-response notifications)", got, want)
+	}
+}
+
+// TestReadSSEResponseRejectsStreamWithoutResponse pins codex bot
+// r12 P1: a daemon emitting ONLY notifications (no JSON-RPC response
+// envelope before EOF) must surface as a parse failure rather than
+// silently succeed with an empty payload.
+func TestReadSSEResponseRejectsStreamWithoutResponse(t *testing.T) {
+	const maxBytes = 16 * 1024
+	raw := "" +
+		"event: progress\n" +
+		"data: {\"jsonrpc\":\"2.0\",\"method\":\"progress\"}\n" +
+		"\n"
+	_, err := readSSEResponse(strings.NewReader(raw), maxBytes)
+	if err == nil {
+		t.Fatalf("must reject a stream with no JSON-RPC response")
+	}
+}
+
+// TestReadSSEResponseEarlyExit pins codex bot r12 P1 #1: once the
+// response event arrives the parser MUST return, even if the underlying
+// stream remains open (compliant Streamable HTTP daemons may keep the
+// connection open to send post-response notifications). We simulate
+// the "open stream" via an io.Reader that blocks forever after
+// emitting the response — readSSEResponse must return before reading
+// past the response event.
+func TestReadSSEResponseEarlyExit(t *testing.T) {
+	const maxBytes = 16 * 1024
+	prefix := "" +
+		"event: response\n" +
+		"data: {\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{}}\n" +
+		"\n"
+	// Compose: response event + a Reader that blocks indefinitely. If
+	// readSSEResponse incorrectly waits for EOF, the test hangs and
+	// the test framework times out (no specific deadline here — the
+	// surrounding `go test -timeout` catches it).
+	blocker := &blockingReader{ch: make(chan struct{})}
+	mr := io.MultiReader(strings.NewReader(prefix), blocker)
+
+	done := make(chan struct{})
+	var got []byte
+	var gotErr error
+	go func() {
+		got, gotErr = readSSEResponse(mr, maxBytes)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good — returned without waiting for EOF.
+	case <-time.After(2 * time.Second):
+		// Force-unblock the goroutine so the test process can exit.
+		close(blocker.ch)
+		t.Fatalf("readSSEResponse blocked past the response event; expected early exit")
+	}
+	close(blocker.ch)
+	if gotErr != nil {
+		t.Fatalf("unexpected err: %v", gotErr)
+	}
+	want := `{"jsonrpc":"2.0","id":7,"result":{}}`
+	if string(got) != want {
+		t.Errorf("got %q want %q", got, want)
+	}
+}
+
+// blockingReader is an io.Reader that returns nothing until ch is
+// closed, at which point it returns io.EOF.
+type blockingReader struct {
+	ch chan struct{}
+}
+
+func (b *blockingReader) Read(p []byte) (int, error) {
+	<-b.ch
+	return 0, io.EOF
 }
 
 // TestAggregateToolsListNamespaceCollision pins the codex bot r9 P2
