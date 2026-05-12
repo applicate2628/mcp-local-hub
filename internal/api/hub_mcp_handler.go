@@ -34,6 +34,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
@@ -620,14 +621,21 @@ func writeRawJSON(w http.ResponseWriter, body []byte) {
 
 // writeJSONRPCResult emits {"jsonrpc":"2.0","id":<reqID>,"result":<result>}
 // with HTTP 200. Used by ping (and any future hub-local method).
+//
+// codex bot phase4 r17 P2 closure on PR #158: a JSON-RPC notification
+// (request without id) MUST NOT receive a response envelope per
+// JSON-RPC 2.0 §4.1 + MCP §1.5. Detect missing id and emit HTTP 202
+// with empty body instead of a synthetic id:null response — strict
+// clients treating an unexpected response as a protocol error would
+// otherwise drop subsequent valid responses on the same connection.
 func writeJSONRPCResult(w http.ResponseWriter, reqID json.RawMessage, result any) {
-	idField := reqID
-	if len(idField) == 0 {
-		idField = json.RawMessage(`null`)
+	if isJSONRPCNotificationID(reqID) {
+		w.WriteHeader(http.StatusAccepted)
+		return
 	}
 	envelope := map[string]any{
 		"jsonrpc": "2.0",
-		"id":      idField,
+		"id":      reqID,
 		"result":  result,
 	}
 	payload, err := json.Marshal(envelope)
@@ -638,6 +646,25 @@ func writeJSONRPCResult(w http.ResponseWriter, reqID json.RawMessage, result any
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(payload)
+}
+
+// isJSONRPCNotificationID returns true when reqID is absent or the
+// literal `null` token — both encode a JSON-RPC 2.0 notification per
+// §4.1 (server MUST NOT reply). An id of 0, "", or {} is a real id
+// and gets a response.
+//
+// Notification semantics in JSON-RPC 2.0:
+//   - Absent "id" field: notification
+//   - "id": null         : notification (legacy, discouraged but accepted)
+//   - any other value    : request, response required
+func isJSONRPCNotificationID(reqID json.RawMessage) bool {
+	if len(reqID) == 0 {
+		return true
+	}
+	// Trim whitespace around the raw token so encoders that pretty-
+	// print don't confuse us.
+	trimmed := bytes.TrimSpace(reqID)
+	return string(trimmed) == "null"
 }
 
 // writeJSONRPCErrorStatus emits a JSON-RPC error envelope with an
