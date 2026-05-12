@@ -175,7 +175,17 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 		// surface that as an additional log line — the operator
 		// must then manually `mcphub gui --reset-port` to clear the
 		// stale endpoint.
-		if rerr := api.ResetHubPort(); rerr != nil {
+		//
+		// codex bot phase4 r12 P1 closure on PR #158: use the
+		// ctx-aware variant so a sibling holder of hub-mcp.lock can
+		// not freeze the rollback past Server.Start's shutdown
+		// budget. If ctx is already canceled (the typical r10 race
+		// — gui-server gave up on hub init), the rollback fails
+		// fast with context.Canceled; the dead port + PID pair stays
+		// on disk and the operator runs `mcphub gui --reset-port`
+		// manually. That's strictly better than the goroutine
+		// blocking past Start's return and mutating state after.
+		if rerr := api.ResetHubPortContext(ctx); rerr != nil {
 			_ = api.LogHubMcpEvent("error", "hub-endpoint-rollback-failed", map[string]any{
 				"err": rerr.Error(),
 			})
@@ -188,6 +198,17 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 	// handler's path parser validates the trailing /mcp + the client
 	// id (gate 2).
 	mux.Handle("/clients/", handler)
+	// codex bot phase4 r12 P2 closure on PR #158: also register the
+	// bare /clients pattern (no trailing slash) so ServeMux does NOT
+	// auto-301 /clients → /clients/ before the auth/path gates run.
+	// The 301 would (a) emit a redirect response outside the
+	// handler's 404-empty contract and (b) some redirect-following
+	// clients may rewrite POST as GET on the redirect step,
+	// silently dropping the JSON-RPC body. Returning 404 directly
+	// matches the handler's gate-2 path-shape contract.
+	mux.HandleFunc("/clients", func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	})
 	mux.Handle("/internal/reload-tokens", reload)
 
 	srv := &http.Server{

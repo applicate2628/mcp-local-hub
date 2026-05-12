@@ -474,18 +474,30 @@ func (h *HubMcpHandler) handleDelete(w http.ResponseWriter, r *http.Request, cli
 	// we still return 204 — the client considers the session
 	// terminated regardless of daemon-side state.
 	//
-	// codex bot phase4 r7 P2 closure on PR #158: derive fanCtx from
-	// context.Background() rather than r.Context(). A client that
-	// disconnects right after sending DELETE would otherwise cancel
-	// r.Context() immediately, short-circuiting every per-daemon
-	// fan-out call before it attempts the DELETE — daemon-side MCP
-	// sessions would then leak until their own idle-sweeper kicks
-	// in. The 5-second per-call budget remains in place via the
-	// fresh timeout; we just stop letting the client steer it.
-	fanCtx, fanCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer fanCancel()
+	// codex bot phase4 r7 P2 closure on PR #158: derive per-iteration
+	// ctx from context.Background() rather than r.Context(). A client
+	// that disconnects right after sending DELETE would otherwise
+	// cancel r.Context() immediately, short-circuiting every per-
+	// daemon fan-out call before it attempts the DELETE — daemon-side
+	// MCP sessions would then leak until their own idle-sweeper kicks
+	// in. The 5-second budget remains; we just stop letting the
+	// client steer it.
+	//
+	// codex bot phase4 r12 P2 closure on PR #158: give EACH daemon
+	// its own 5 s budget rather than sharing one fanCtx across all
+	// daemons. The shared budget would let a single slow/unreachable
+	// daemon (a stuck `mcphub.exe daemon X` on its way to crashing)
+	// consume the entire 5 s, causing every subsequent
+	// bestEffortDeleteDaemonSession to short-circuit on its own
+	// timeout-check without firing the DELETE — daemon-side sessions
+	// on the FAST daemons would leak too. Per-iteration ctx makes
+	// each participant's best-effort attempt independent: slow
+	// participants are skipped after their own 5 s, but fast ones
+	// still complete their DELETE.
 	for ref, dsid := range daemonSessions {
+		fanCtx, fanCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = bestEffortDeleteDaemonSession(fanCtx, ref, dsid)
+		fanCancel()
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
