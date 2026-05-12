@@ -1,0 +1,705 @@
+// hub_mcp_handler.go — Phase 4 Task 4.2 (G4 unified hub MCP).
+//
+// HubMcpHandler implements the 7-check auth gate + JSON-RPC dispatch
+// for /clients/{client}/mcp (POST + DELETE + GET fallback).
+//
+// Auth gate ordering (spec §"Cross-client invariant — seven-check auth
+// gate"):
+//
+//   1. Loopback-guard: Host, Origin, Sec-Fetch-Site (rejects DNS-rebind
+//      + cross-site fetch).
+//   2. Path → canonical client_id. Unknown → 404 empty body.
+//   3. Token shape: 64-lowercase-hex header. Anything else → 401.
+//   4. Constant-time token compare via ConstantTimeCompareToken.
+//   5. Instance-id match: X-Mcphub-Instance-Id == endpoint.InstanceID
+//      (constant-time compare).
+//   6. Session-client binding: every non-initialize POST + every DELETE
+//      requires Mcp-Session-Id; the session's Client field MUST equal
+//      the path client_id. initialize REQUIRES the header to be ABSENT.
+//      GET is exempt from this check (codex r7-bot-r5 P2 closure).
+//   7. MCP-Protocol-Version validation: header required on every method
+//      OTHER than initialize and GET (codex r7-bot-r6 P2 closure).
+//      Value must equal the session's negotiated version AND be in
+//      hubSupportedVersions. Mismatch → 400 with JSON-RPC -32600.
+//
+// Every 401 returns an identical empty body — no oracle. The
+// JSON-RPC -32600 body is used only for the version-mismatch case
+// (400) and for the initialize-time unsupported-version response.
+//
+// Spec: docs/superpowers/specs/2026-05-12-g4-unified-hub-mcp-design-v3.md
+// §"Cross-client invariant" + §"Client-origin lifecycle methods" +
+// §"Tool-name namespacing".
+// Plan: docs/superpowers/plans/2026-05-12-g4-unified-hub-mcp.md Task 4.2.
+
+package api
+
+import (
+	"context"
+	"crypto/subtle"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/netip"
+	"net/url"
+	"strconv"
+	"strings"
+	"sync/atomic"
+	"time"
+
+	"mcp-local-hub/internal/clients"
+)
+
+// hubSupportedVersions enumerates the MCP protocol versions the hub
+// accepts during initialize negotiation. Add new versions as we test
+// against new clients; remove old versions only after confirming no
+// in-repo or known external caller still emits them. The current set
+// keeps `2025-03-26` because internal callers in
+// internal/daemon/backend_lifecycle.go + internal/api/health.go +
+// internal/api/register.go still emit it (codex r7-bot-r5 P1 closure).
+var hubSupportedVersions = map[string]bool{
+	"2025-11-25": true,
+	"2025-06-18": true,
+	"2025-03-26": true,
+}
+
+// hubSupportedVersionsList returns a deterministic slice of the
+// supported versions (sorted newest-first) for inclusion in
+// JSON-RPC error responses' data.supported field.
+func hubSupportedVersionsList() []string {
+	return []string{"2025-11-25", "2025-06-18", "2025-03-26"}
+}
+
+// HubMcpHandler holds the live atomic-pointer references to the hub's
+// instance state. Construction goes through NewHubMcpHandler so callers
+// can wire it onto the listener mux in internal/gui/hub_listener.go.
+type HubMcpHandler struct {
+	// instanceEndpoint is the persisted endpoint record, captured at
+	// hub bind time. The handler reads InstanceID at every request for
+	// gate 5 (instance-id match). Stored as atomic.Pointer so a future
+	// rotation path (Phase 5) can swap it without restarting the hub.
+	instanceEndpoint atomic.Pointer[HubEndpoint]
+	sessions         *HubSessionStore
+}
+
+// NewHubMcpHandler returns a handler ready to mount on
+// /clients/{client}/mcp. The session store owns aggregator-side state
+// (per-session route maps, in-flight requests); the handler delegates
+// every aggregator call to the store's hubSessions.
+//
+// SetEndpoint must be called once after construction to publish the
+// instance-id used by gate 5. Calling SetEndpoint with a nil/zero
+// HubEndpoint is a programming error — gate 5 would reject every
+// request with 401.
+func NewHubMcpHandler(store *HubSessionStore) *HubMcpHandler {
+	return &HubMcpHandler{sessions: store}
+}
+
+// SetEndpoint publishes the active endpoint state. Called by
+// internal/gui/hub_listener.go after EnsureHubEndpoint succeeds; the
+// handler reads InstanceID from this snapshot at every request.
+func (h *HubMcpHandler) SetEndpoint(ep HubEndpoint) {
+	cpy := ep
+	h.instanceEndpoint.Store(&cpy)
+}
+
+// currentInstanceID returns the published endpoint's InstanceID, or
+// "" if SetEndpoint has not yet been called. Used by gate 5 only.
+func (h *HubMcpHandler) currentInstanceID() string {
+	p := h.instanceEndpoint.Load()
+	if p == nil {
+		return ""
+	}
+	return p.InstanceID
+}
+
+// ServeHTTP routes every /clients/{client}/mcp request through the
+// 7-check auth gate. GET goes to the 405-with-Allow fallback after
+// gates 1-5. POST and DELETE require gates 1-7 in order.
+//
+// Spec §"Cross-client invariant" — checks 1-5 run for every method,
+// 6-7 for POST + DELETE only.
+func (h *HubMcpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Gate 1: loopback-guard. Rejects DNS-rebind via Host/Origin and
+	// cross-site fetch via Sec-Fetch-Site (mirrors
+	// internal/daemon/loopback_guard.go — duplicated here because
+	// internal/daemon imports internal/api, so we cannot import the
+	// other direction without a cycle).
+	if !isSafeLoopbackHubRequest(r) {
+		http.Error(w, "forbidden loopback request", http.StatusForbidden)
+		return
+	}
+
+	// Gate 2: path → canonical client_id.
+	clientID, ok := parseClientPathFromURL(r.URL.Path)
+	if !ok || !isSupportedClient(clientID) {
+		// Unknown path or unknown client → 404 with EMPTY body so the
+		// failure shape is identical regardless of whether the path is
+		// well-formed-but-unknown vs malformed.
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	// GET fallback (codex r7-bot-r5 P2 closure): runs gates 3-5 (token
+	// + instance id) but is EXEMPT from gates 6-7 (no Mcp-Session-Id
+	// or MCP-Protocol-Version requirement). MCP Streamable HTTP 2025-
+	// 11-25 mandates 405 + `Allow: POST, DELETE` for GET on the endpoint.
+	if r.Method == http.MethodGet {
+		if !h.checkTokenAndInstanceID(w, r, clientID) {
+			return
+		}
+		w.Header().Set("Allow", "POST, DELETE")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Gates 3-5: token shape + constant-time compare + instance id.
+	if !h.checkTokenAndInstanceID(w, r, clientID) {
+		return
+	}
+
+	// Gates 6-7 + dispatch live in per-method handlers.
+	switch r.Method {
+	case http.MethodPost:
+		h.handlePost(w, r, clientID)
+	case http.MethodDelete:
+		h.handleDelete(w, r, clientID)
+	default:
+		w.Header().Set("Allow", "POST, DELETE")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+// checkTokenAndInstanceID runs gates 3-5: token-shape, constant-time
+// token compare, instance-id match. Returns true iff all three pass.
+// Failure paths write a 401 with EMPTY body — no oracle on the
+// failed gate.
+//
+// Spec §"Cross-client invariant" steps 3-5: "Anything else → 401
+// (identical body)" — the response is intentionally bare so an
+// attacker cannot distinguish wrong-shape vs wrong-token vs
+// wrong-instance.
+func (h *HubMcpHandler) checkTokenAndInstanceID(w http.ResponseWriter, r *http.Request, clientID string) bool {
+	tok := r.Header.Get("X-Mcphub-Hub-Token")
+	// Gate 3: shape (64 lower-hex).
+	if !isLowerHex64(tok) {
+		w.WriteHeader(http.StatusUnauthorized)
+		return false
+	}
+	// Gate 4: constant-time compare. Returns 1 only when the table has
+	// a 64-hex entry for clientID AND it matches tok byte-for-byte.
+	if ConstantTimeCompareToken(clientID, tok) != 1 {
+		w.WriteHeader(http.StatusUnauthorized)
+		return false
+	}
+	// Gate 5: instance id match. Constant-time compare against the
+	// published endpoint's InstanceID. An empty currentInstanceID
+	// (handler not yet wired) defeats every request — that's the
+	// correct fail-closed posture.
+	wantID := h.currentInstanceID()
+	hdr := r.Header.Get("X-Mcphub-Instance-Id")
+	if len(hdr) == 0 || len(wantID) == 0 || subtle.ConstantTimeCompare([]byte(hdr), []byte(wantID)) != 1 {
+		w.WriteHeader(http.StatusUnauthorized)
+		return false
+	}
+	return true
+}
+
+// handlePost runs gates 6-7 (session + protocol version), then
+// dispatches the JSON-RPC method via aggregator entry points.
+func (h *HubMcpHandler) handlePost(w http.ResponseWriter, r *http.Request, clientID string) {
+	// Body-size cap: 4 MiB matches maxAggregatorResponseBytes (spec
+	// §"Concurrency + bounds" — same ceiling on inbound + outbound).
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxAggregatorResponseBytes+1))
+	if err != nil {
+		writeJSONRPCErrorStatus(w, json.RawMessage(`null`), http.StatusBadRequest, -32700, "parse error: "+err.Error(), nil)
+		return
+	}
+	if len(body) > maxAggregatorResponseBytes {
+		writeJSONRPCErrorStatus(w, json.RawMessage(`null`), http.StatusBadRequest, -32700, "request too large", nil)
+		return
+	}
+
+	// JSON-RPC envelope parse. Method + id + params extracted via
+	// raw-message round-trip so id preserves its number-vs-string
+	// discriminator verbatim.
+	var env struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Method  string          `json:"method"`
+		Params  json.RawMessage `json:"params"`
+	}
+	if uerr := json.Unmarshal(body, &env); uerr != nil {
+		writeJSONRPCErrorStatus(w, json.RawMessage(`null`), http.StatusBadRequest, -32700, "parse error: "+uerr.Error(), nil)
+		return
+	}
+	if env.JSONRPC != "2.0" {
+		writeJSONRPCErrorStatus(w, env.ID, http.StatusBadRequest, -32600, "invalid request: jsonrpc must be \"2.0\"", nil)
+		return
+	}
+
+	// initialize is its own branch — Mcp-Session-Id MUST be absent
+	// and version validation runs at initialize-time (codex r7-bot-r2
+	// P2 closure: no half-initialized session if version is rejected).
+	if env.Method == "initialize" {
+		h.handleInitialize(w, r, clientID, env.ID, env.Params)
+		return
+	}
+
+	// Gate 6: session required for every non-initialize POST.
+	sid := r.Header.Get("Mcp-Session-Id")
+	if sid == "" {
+		// Empty body per spec: "400 with empty body" for the missing-
+		// header case. We do not emit a JSON-RPC error body — clients
+		// that omit the header have not negotiated a session, so they
+		// have no id to echo back anyway.
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	sess, ok := h.sessions.Get(sid)
+	if !ok {
+		// Unknown session → JSON-RPC -32600 body with HTTP 404.
+		writeJSONRPCErrorStatus(w, env.ID, http.StatusNotFound, -32600, "unknown session", nil)
+		return
+	}
+	if sess.Client != clientID {
+		// Cross-client session reuse → 401 empty body (no oracle).
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	// Gate 7: MCP-Protocol-Version. Header is REQUIRED on every method
+	// other than initialize + GET (codex r7-bot-r6 P2 closure).
+	pv := r.Header.Get("MCP-Protocol-Version")
+	if pv == "" {
+		// Missing header → 400 with empty body. Protocol-level error
+		// (not auth), and the client has not provided an id we can
+		// safely echo back.
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	if !hubSupportedVersions[pv] || pv != sess.ProtocolVersion {
+		writeJSONRPCErrorStatus(w, env.ID, http.StatusBadRequest, -32600, "protocol-version mismatch", nil)
+		return
+	}
+
+	// Refresh session activity timestamp for the idle-sweeper.
+	h.sessions.Touch(sid)
+
+	// Method dispatch.
+	switch env.Method {
+	case "notifications/initialized":
+		// No body, just 202. The aggregator does not fan-out
+		// notifications/initialized at this stage — it was already
+		// dispatched per-daemon during initialize fan-out (see
+		// hub_mcp_aggregator.go AggregateInitialize). The client's
+		// initialized signal here just unblocks subsequent method
+		// calls on the hub side.
+		w.WriteHeader(http.StatusAccepted)
+		return
+	case "notifications/cancelled":
+		// Parse params.requestId; forward to the matching daemon
+		// in-flight row via ForwardCancellation.
+		var p struct {
+			RequestID json.RawMessage `json:"requestId"`
+		}
+		if uerr := json.Unmarshal(env.Params, &p); uerr != nil {
+			// Malformed notification — silently 202 per JSON-RPC
+			// notification semantics (no response is mandated).
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), PerCallWallClockCap)
+		defer cancel()
+		ForwardCancellation(ctx, sess, p.RequestID)
+		w.WriteHeader(http.StatusAccepted)
+		return
+	case "ping":
+		// Hub-local echo: empty result.
+		writeJSONRPCResult(w, env.ID, map[string]any{})
+		return
+	case "tools/list":
+		respBody, aerr := AggregateToolsList(r.Context(), sess, env.ID)
+		if aerr != nil {
+			writeJSONRPCErrorStatus(w, env.ID, http.StatusInternalServerError, -32603, "internal error: "+aerr.Error(), nil)
+			return
+		}
+		writeRawJSON(w, respBody)
+		return
+	case "tools/call":
+		respBody, aerr := AggregateToolsCall(r.Context(), sess, env.ID, env.Params)
+		if aerr != nil {
+			writeJSONRPCErrorStatus(w, env.ID, http.StatusInternalServerError, -32603, "internal error: "+aerr.Error(), nil)
+			return
+		}
+		writeRawJSON(w, respBody)
+		return
+	default:
+		writeJSONRPCErrorStatus(w, env.ID, http.StatusOK, -32601, "Method not found: "+env.Method, nil)
+		return
+	}
+}
+
+// handleInitialize is the initialize sub-handler. Mcp-Session-Id MUST
+// be absent; protocolVersion is validated synchronously before any
+// session is created (codex r7-bot-r2 P2 closure).
+func (h *HubMcpHandler) handleInitialize(w http.ResponseWriter, r *http.Request, clientID string, reqID json.RawMessage, paramsRaw json.RawMessage) {
+	if r.Header.Get("Mcp-Session-Id") != "" {
+		writeJSONRPCErrorStatus(w, reqID, http.StatusBadRequest, -32600, "session-id only valid after initialize", nil)
+		return
+	}
+	var initParams struct {
+		ProtocolVersion string `json:"protocolVersion"`
+	}
+	// Empty / missing params is allowed — protocolVersion default is
+	// the hub's preferred version. (Strict clients always send one.)
+	_ = json.Unmarshal(paramsRaw, &initParams)
+	if initParams.ProtocolVersion == "" {
+		initParams.ProtocolVersion = "2025-11-25"
+	}
+	if !hubSupportedVersions[initParams.ProtocolVersion] {
+		// codex r7-bot-r2 P2 closure: reject at initialize, no session
+		// created. JSON-RPC error envelope with the supported list so
+		// the client can renegotiate.
+		writeJSONRPCErrorStatus(w, reqID, http.StatusOK, -32600, "unsupported protocolVersion", map[string]any{
+			"offered":   initParams.ProtocolVersion,
+			"supported": hubSupportedVersionsList(),
+		})
+		return
+	}
+
+	// Capture the current resolver snapshot for the new session.
+	snap := LoadResolverSnapshot()
+
+	sess, err := h.sessions.Create(clientID, initParams.ProtocolVersion, snap)
+	if err != nil {
+		if errors.Is(err, ErrSessionCapExceeded) {
+			w.Header().Set("Retry-After", "30")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		writeJSONRPCErrorStatus(w, reqID, http.StatusInternalServerError, -32603, "internal error: "+err.Error(), nil)
+		return
+	}
+
+	// Populate IntendedParticipants from the snapshot's bindings for
+	// this client. AggregateInitialize fans out to every binding.
+	if snap != nil {
+		participants := make([]canonicalDaemonRef, len(snap.Bindings[clientID]))
+		copy(participants, snap.Bindings[clientID])
+		sess.IntendedParticipants = participants
+	}
+
+	respBody, aerr := AggregateInitialize(r.Context(), sess, reqID)
+	if aerr != nil {
+		// Roll back the session record so the failed initialize doesn't
+		// leak a slot. Delete is idempotent; safe to call even if the
+		// store eviction code is racing.
+		h.sessions.Delete(sess.ClientSessionID)
+		writeJSONRPCErrorStatus(w, reqID, http.StatusInternalServerError, -32603, "initialize fan-out: "+aerr.Error(), nil)
+		return
+	}
+
+	// Hand the client session id back via the response header — the
+	// client echoes this as Mcp-Session-Id on every subsequent call.
+	w.Header().Set("Mcp-Session-Id", sess.ClientSessionID)
+	writeRawJSON(w, respBody)
+}
+
+// handleDelete terminates a hub session + fans out best-effort
+// DELETE /mcp to every daemon-side session in InitSuccesses. Always
+// returns 204 on a known session (idempotent on a re-delete) and 404
+// on an unknown one.
+//
+// Spec §"Client-origin lifecycle methods" — F-G4 fix.
+func (h *HubMcpHandler) handleDelete(w http.ResponseWriter, r *http.Request, clientID string) {
+	sid := r.Header.Get("Mcp-Session-Id")
+	if sid == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	sess, ok := h.sessions.Get(sid)
+	if !ok {
+		// Idempotent: a repeat DELETE after a successful one also
+		// gets 404.
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	if sess.Client != clientID {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	// Snapshot init successes under the session mu so we don't race
+	// with a concurrent tools/list that may be mutating the map.
+	sess.mu.Lock()
+	daemonSessions := make(map[canonicalDaemonRef]string, len(sess.InitSuccesses))
+	for ref, dsid := range sess.InitSuccesses {
+		daemonSessions[ref] = dsid
+	}
+	sess.mu.Unlock()
+
+	// Best-effort fan-out: ignore errors. Even if every fan-out fails
+	// we still return 204 + remove the hub session — the client
+	// considers the session terminated regardless of daemon-side state.
+	fanCtx, fanCancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer fanCancel()
+	for ref, dsid := range daemonSessions {
+		_ = bestEffortDeleteDaemonSession(fanCtx, ref, dsid)
+	}
+	h.sessions.Delete(sid)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// bestEffortDeleteDaemonSession issues DELETE http://127.0.0.1:<port>/mcp
+// with Mcp-Session-Id: <daemonSID>. Errors are returned to the caller
+// but swallowed at the call site (the spec contract is "best-effort
+// fan-out; 204 regardless").
+func bestEffortDeleteDaemonSession(ctx context.Context, ref canonicalDaemonRef, daemonSID string) error {
+	u := fmt.Sprintf("http://127.0.0.1:%d/mcp", ref.Port)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, u, nil)
+	if err != nil {
+		return err
+	}
+	if daemonSID != "" {
+		req.Header.Set("Mcp-Session-Id", daemonSID)
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return nil
+}
+
+// parseClientPathFromURL extracts {client} from /clients/{client}/mcp.
+// Returns ("", false) on any other shape. The leading slash is
+// mandatory; trailing slashes and additional segments are rejected.
+//
+// Spec §"Cross-client invariant" step 2: only `/clients/<id>/mcp`
+// is accepted as a path; the strict shape closes off `/clients/foo/`
+// (could collide with a future route) and `/clients/foo/mcp/bar`
+// (drives the gate's lookup against an unrelated client id).
+func parseClientPathFromURL(p string) (string, bool) {
+	const prefix = "/clients/"
+	const suffix = "/mcp"
+	if !strings.HasPrefix(p, prefix) {
+		return "", false
+	}
+	rest := p[len(prefix):]
+	if !strings.HasSuffix(rest, suffix) {
+		return "", false
+	}
+	id := rest[:len(rest)-len(suffix)]
+	// Empty id, embedded slash, or whitespace → reject.
+	if id == "" || strings.ContainsAny(id, "/ \t\r\n") {
+		return "", false
+	}
+	return id, true
+}
+
+// isSupportedClient returns true iff name is in
+// clients.SupportedClientNames(). Centralizing the check here so a
+// future expansion of the client roster requires only the one update
+// in internal/clients/clients.go.
+func isSupportedClient(name string) bool {
+	for _, n := range clients.SupportedClientNames() {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
+// isLowerHex64 returns true iff s is exactly 64 lowercase hex chars.
+// Matches the auth gate's "X-Mcphub-Hub-Token MUST be 64-lower-hex"
+// rule (spec §"Cross-client invariant" step 3). Uppercase hex is
+// rejected — the persisted tokens are emitted via hex.EncodeToString
+// which is always lowercase, so an uppercase header on the wire
+// indicates a manually-crafted (and thus suspicious) request.
+func isLowerHex64(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for i := 0; i < 64; i++ {
+		c := s[i]
+		switch {
+		case c >= '0' && c <= '9':
+		case c >= 'a' && c <= 'f':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// writeRawJSON writes body as-is with Content-Type: application/json
+// + 200 OK. body is assumed to be a well-formed JSON-RPC envelope
+// (the aggregator's response builders all return one). The handler
+// uses this for tools/list and tools/call dispatch where the
+// aggregator already produced the final bytes.
+func writeRawJSON(w http.ResponseWriter, body []byte) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
+}
+
+// writeJSONRPCResult emits {"jsonrpc":"2.0","id":<reqID>,"result":<result>}
+// with HTTP 200. Used by ping (and any future hub-local method).
+func writeJSONRPCResult(w http.ResponseWriter, reqID json.RawMessage, result any) {
+	idField := reqID
+	if len(idField) == 0 {
+		idField = json.RawMessage(`null`)
+	}
+	envelope := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      idField,
+		"result":  result,
+	}
+	payload, err := json.Marshal(envelope)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(payload)
+}
+
+// writeJSONRPCErrorStatus emits a JSON-RPC error envelope with an
+// explicit HTTP status code. data is optional (nil omits the field).
+// id is echoed verbatim; an empty raw message renders as null.
+//
+// Used for spec-mandated error responses: -32700 parse error,
+// -32600 invalid request / unsupported version / unknown session
+// / protocol-version mismatch, -32601 method not found,
+// -32603 internal error.
+func writeJSONRPCErrorStatus(w http.ResponseWriter, reqID json.RawMessage, httpStatus, code int, message string, data any) {
+	idField := reqID
+	if len(idField) == 0 {
+		idField = json.RawMessage(`null`)
+	}
+	errObj := map[string]any{
+		"code":    code,
+		"message": message,
+	}
+	if data != nil {
+		errObj["data"] = data
+	}
+	envelope := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      idField,
+		"error":   errObj,
+	}
+	payload, err := json.Marshal(envelope)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(httpStatus)
+	_, _ = w.Write(payload)
+}
+
+// ----------------- Loopback guard (local copy) -----------------
+//
+// internal/daemon/loopback_guard.go already implements this logic for
+// per-daemon HTTP listeners. internal/daemon imports internal/api
+// (lazy_proxy.go), so we cannot import the other way without a cycle.
+// The implementation here mirrors the daemon one byte-for-byte —
+// keep both in sync if either evolves. (Spec §"Cross-client invariant"
+// step 1 names the daemon function as the canonical reference.)
+
+// isSafeLoopbackHubRequest returns true iff:
+//   - Host is a loopback hostport (127.0.0.1, ::1, localhost), and
+//   - Origin (if present) is also loopback, and
+//   - Sec-Fetch-Site is one of "", "none", "same-origin", "same-site".
+//
+// Rejecting non-loopback Host defeats DNS-rebind; rejecting cross-site
+// Sec-Fetch-Site defeats browser-driven CSRF via a token already
+// present in another origin's cookie jar.
+func isSafeLoopbackHubRequest(r *http.Request) bool {
+	if !isLoopbackHostHub(r.Host) {
+		return false
+	}
+	if origin := r.Header.Get("Origin"); origin != "" && !isLoopbackOriginHub(origin) {
+		return false
+	}
+	return isSafeFetchSiteHub(r.Header.Get("Sec-Fetch-Site"))
+}
+
+func isLoopbackOriginHub(origin string) bool {
+	u, err := url.Parse(strings.TrimSpace(origin))
+	if err != nil {
+		return false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return false
+	}
+	if u.Path != "" && u.Path != "/" {
+		return false
+	}
+	return isLoopbackHostHub(u.Host)
+}
+
+func isSafeFetchSiteHub(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "none", "same-origin", "same-site":
+		return true
+	default:
+		return false
+	}
+}
+
+func isLoopbackHostHub(hostport string) bool {
+	host, ok := splitHostForLoopbackCheckHub(hostport)
+	if !ok {
+		return false
+	}
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	if host == "localhost" {
+		return true
+	}
+	addr, err := netip.ParseAddr(host)
+	return err == nil && addr.IsLoopback()
+}
+
+func splitHostForLoopbackCheckHub(hostport string) (string, bool) {
+	hostport = strings.TrimSpace(hostport)
+	if hostport == "" || strings.ContainsAny(hostport, "/@") {
+		return "", false
+	}
+	if strings.HasPrefix(hostport, "[") {
+		if strings.Contains(hostport, "]:") {
+			host, port, err := net.SplitHostPort(hostport)
+			if err != nil || !validHostPortHub(port) {
+				return "", false
+			}
+			return host, true
+		}
+		if strings.HasSuffix(hostport, "]") {
+			return strings.TrimPrefix(strings.TrimSuffix(hostport, "]"), "["), true
+		}
+		return "", false
+	}
+	if strings.Count(hostport, ":") == 1 {
+		host, port, err := net.SplitHostPort(hostport)
+		if err != nil || !validHostPortHub(port) {
+			return "", false
+		}
+		return host, true
+	}
+	return hostport, true
+}
+
+func validHostPortHub(port string) bool {
+	n, err := strconv.Atoi(port)
+	return err == nil && n >= 0 && n <= 65535
+}
