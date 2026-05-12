@@ -4,6 +4,244 @@ This file documents developer workflows and conventions for this repo that
 are load-bearing enough to be worth surfacing to the agent by default. Add
 new sections as they become necessary.
 
+## PR review + merge workflow (MANDATORY)
+
+This is the canonical PR workflow for this repo. Every step is a hard gate;
+skipping any of them counts as a regression. The KOSYAK examples come from
+PR #134 (2026-05-08 — bot bypassed; CI run when disabled; "ТЕБЕ НЕ ДАЛИ
+PASS"). Read the kosyak summaries before each PR — they exist precisely to
+prevent the same mistakes again.
+
+### Step 1 — Pre-push local verification
+
+Before `git push`:
+
+```bash
+go build ./... && go vet ./... && go test -count=1 -timeout 5m ./...
+go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/
+```
+
+Both must be clean. If a subagent reported "all green" — do NOT trust;
+re-run these commands yourself before reporting status to the user.
+
+KOSYAK examples:
+- `feedback_kosyak_subagent_summary_overstates.md` — subagent claims "all
+  green" but build broken (or vice versa); always verify yourself.
+- `feedback_kosyak_trusted_ide_diagnostics_blindly.md` — IDE diagnostics
+  with `[darwin]`/`[linux]` markers + "undefined" after Edit = stale
+  gopls cache; verify with command-line first.
+
+### Step 2 — Sweep test processes
+
+After local tests:
+
+```powershell
+Get-Process -Name 'mcphub' -ErrorAction SilentlyContinue | Stop-Process -Force
+```
+
+Tests spawn `mcphub.exe` daemons on real ports; failing to sweep blocks the
+next test run with port-9128 collisions.
+
+KOSYAK example: `feedback_clean_test_processes.md`.
+
+### Step 3 — Push + open PR
+
+```bash
+git push -u origin <branch>
+gh pr create --title "..." --body "..."
+```
+
+Bot auto-triggers on PR open (per `.github/workflows/ci.yml`-adjacent
+Codex Cloud configuration). Wait for bot review on the HEAD commit.
+
+### Step 4 — Codex Cloud bot review LOOP
+
+Wait for bot to review the EXACT HEAD commit. Bot review is an inline
+comment AND a review record:
+
+```bash
+# Get current HEAD SHA FIRST — every downstream query must filter
+# to it. Stale reviews from earlier commits do NOT satisfy PASS.
+HEAD=$(gh pr view <N> --json headRefOid --jq .headRefOid)
+
+# IMPORTANT: `gh api`'s built-in `--jq` flag takes ONLY a single
+# expression string; it does NOT accept `--arg key value` like
+# standalone `jq` does. Pipe `gh api` output to external `jq` when
+# you need `--arg`. (Codex bot caught the incorrect `gh api --jq
+# --arg ...` form in an earlier revision of this doc; rewritten here
+# to the correct pipe-to-jq form.)
+
+# Bot review state — MUST filter to HEAD (avoid stale APPROVED
+# from an earlier commit satisfying PASS condition 1)
+gh api repos/<owner>/<repo>/pulls/<N>/reviews --paginate \
+  | jq --arg sha "$HEAD" '.[]
+      | select(.user.login == "chatgpt-codex-connector[bot]")
+      | select(.commit_id == $sha)
+      | {state, commit_id, submitted_at}'
+
+# Inline comments — MUST extract `original_commit_id` AND paginate
+# (GitHub auto-rebases inline-comment `commit_id` across pushes;
+# `original_commit_id` is the immutable anchor to the commit the bot
+# actually reviewed when it left the comment. Filtering by
+# `original_commit_id == $HEAD` is the only correct stale-filter.
+# `--paginate` is mandatory — default page is 30; older comments
+# beyond that would be invisible to a single-page query, making
+# the PASS-zero-inline check vacuous on long-lived PRs.)
+gh api repos/<owner>/<repo>/pulls/<N>/comments --paginate \
+  | jq --arg sha "$HEAD" '.[]
+      | select(.user.login == "chatgpt-codex-connector[bot]")
+      | select(.original_commit_id == $sha)
+      | {original_commit_id, line, path, body}'
+```
+
+PASS verdict — **all three of the following must hold on the CURRENT
+HEAD commit** (not any earlier commit on the PR):
+
+1. Either the bot's most-recent review summary contains a "no major
+   issues" phrase (variants: "Didn't find any major issues. Nice work!",
+   "Didn't find any major issues. Chef's kiss.", or similar — the bot
+   rotates the trailing flourish, the prefix is the load-bearing part);
+   OR the bot reacted with 👍 on the PR's HEAD-commit review event;
+   OR the bot review state = `APPROVED`.
+
+2. **AND** zero inline comments filtered to the current HEAD commit.
+   Verify with: `original_commit_id == $(gh pr view N --json headRefOid --jq .headRefOid)`.
+   GitHub auto-rebases inline comment line numbers across pushes, so
+   filter by `original_commit_id` not by line number alone.
+
+3. **AND** no inline comment has been added on the HEAD commit AFTER
+   the no-issues summary fired. The bot can post the summary first
+   and then attach inline observations as a single review event; the
+   inline observations still count as findings unless the summary
+   was issued after the inline activity stopped.
+
+This anti-bypass rule prevents a stale 👍 from an earlier commit
+satisfying PASS for a later commit that the bot hasn't yet seen.
+
+NOT PASS (continue the loop):
+- bot review state = `COMMENTED` with inline suggestions on HEAD commit
+- bot review state = `CHANGES_REQUESTED`
+- any of the three PASS conditions above fails
+
+If NOT PASS:
+
+1. **Fix EVERY finding**, regardless of severity (P0/P1/P2/P3 all). Do NOT
+   defer findings to "post-merge follow-up" without explicit user approval.
+2. Commit fix with descriptive message.
+3. `git push origin <branch>`.
+4. `gh pr comment <N> --body "@codex review"` to retrigger.
+5. Wait for bot re-review on new HEAD commit (≈3–5 min).
+6. Repeat until PASS.
+
+KOSYAK examples:
+- `feedback_kosyak_bot_state_misclassified.md` — `COMMENTED` ≠ APPROVE.
+  Never report "bot approved" when it's `COMMENTED` with suggestions.
+- `feedback_bot_pass_required_before_merge.md` — never merge before bot
+  PASS, even if internal reviewers approve.
+- `feedback_kosyak_passive_polling_when_user_yells.md` — when user asks
+  for status, run a direct `gh api ...` query NOW; do not say "жду
+  уведомлений".
+
+### Step 5 — Full local review + Codex deep security agents (parallel)
+
+After bot PASS, run a deeper review pass to catch what the bot missed:
+
+1. **Local diff read:** `git diff master..HEAD` — read every changed
+   file end-to-end. Verify the change matches the PR description.
+2. **Codex deep security agents in parallel** — write 3 separate review
+   prompts under `.scratch/codex-pr<N>-deep-security-{topic}.md` covering
+   different angles (e.g. race conditions, error propagation,
+   regression). Dispatch each via:
+
+   ```bash
+   codex exec - -c model_reasoning_effort=xhigh \
+     < .scratch/codex-pr<N>-deep-security-{topic}.md \
+     > .scratch/codex-pr<N>-deep-security-{topic}.out.md 2>&1 &
+   ```
+
+   Use `run_in_background=true` if invoking through the agent harness so
+   they execute in parallel.
+
+3. Aggregate findings. Fix EVERY finding before merge.
+
+KOSYAK examples:
+- `feedback_kosyak_review_prompt_bias.md` — review prompts must be
+  neutral. Never embed "user wants this merged" / "if APPROVE state so"
+  in the prompt body — biases reviewers toward rubber-stamp.
+- `feedback_codex_xhigh_default.md` — always pass
+  `-c model_reasoning_effort=xhigh` to `codex exec`.
+- `feedback_codex_file_prompt_only.md` — always feed prompts via
+  `codex exec - < file.md`; never argv.
+
+### Step 6 — CI is MANUAL-ONLY; do NOT auto-trigger
+
+`.github/workflows/ci.yml` is `workflow_dispatch` only by design. The
+project owner controls when CI runs to manage GH Actions minute budget.
+Do NOT call `gh workflow run ci.yml` unless the user explicitly asks.
+
+CI on master (post-merge) runs automatically per `push: branches: [master]`
+and acts as the safety net.
+
+KOSYAK example: `feedback_kosyak_ci_disabled_dont_trigger.md` — running
+CI when user said "CI отключены чтоб ты их не гоняло".
+
+### Step 7 — Merge
+
+After bot PASS + deep security agents clean + every finding fixed:
+
+```bash
+gh pr merge <N> --squash --delete-branch
+```
+
+NEVER use `--admin` to bypass missing bot pass. `--admin` is reserved for
+cases the user explicitly authorized for THE SPECIFIC PR.
+
+After merge: `git fetch origin master && git checkout master && git pull`.
+
+KOSYAK examples:
+- `feedback_kosyak_admin_merge_bypass.md` — `--admin` only with explicit
+  user authorization. Never as a default.
+- `feedback_dont_split_tiny_prs.md` — bundle small related additions
+  into the current PR; do not propose follow-up PRs unless the diff is
+  genuinely independent.
+- `feedback_build_then_install_order.md` — commit FIRST, then build.sh,
+  then install. Otherwise the installed binary is stale.
+
+### Step 8 — Surgical-edit consistency
+
+When a multi-section doc (plan, spec, design) is edited across several
+review rounds, every iteration MUST run a full consistency pass:
+
+```bash
+grep -n "<concept-name>\|<API-name>\|<canonical-string>" docs/.../plan.md
+```
+
+Surgical Edit calls leave stale text in the OTHER sections. Default to a
+full Write rewrite when v(N+1) introduces ≥3 cross-cutting changes.
+
+KOSYAK example: `feedback_kosyak_surgical_edits_leave_stale_text.md` —
+v3→v13 watchdog plan: every Codex round flagged stale-text contradictions
+because surgical Edit left old phrasing intact.
+
+### Quick reference — KOSYAK index
+
+These are the failure modes documented in
+`C:\Users\dima_\.claude\projects\d--dev-mcp-local-hub\memory\` from
+prior sessions. Read each file before starting work that hits the same
+surface:
+
+| File | Failure mode |
+|---|---|
+| `feedback_bot_pass_required_before_merge.md` | merged before bot 👍; used --admin; triggered disabled CI |
+| `feedback_kosyak_admin_merge_bypass.md` | --admin without explicit user auth |
+| `feedback_kosyak_ci_disabled_dont_trigger.md` | triggered manual-only CI |
+| `feedback_kosyak_bot_state_misclassified.md` | reported COMMENTED state as "approved" |
+| `feedback_kosyak_passive_polling_when_user_yells.md` | said "ждём" instead of direct query |
+| `feedback_kosyak_subagent_summary_overstates.md` | trusted subagent "all green" without verifying |
+| `feedback_kosyak_review_prompt_bias.md` | review prompts begged reviewers to APPROVE |
+| `feedback_kosyak_surgical_edits_leave_stale_text.md` | Edit-tool patches left contradictory stale sections |
+| `feedback_kosyak_trusted_ide_diagnostics_blindly.md` | reported IDE diagnostics as compile errors without command-line verify |
+
 ## GUI frontend (Phase 3B-II onward)
 
 The web UI lives under `internal/gui/frontend/` (Vite + TypeScript +
