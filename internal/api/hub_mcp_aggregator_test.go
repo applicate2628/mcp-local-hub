@@ -208,6 +208,7 @@ func sessionWithParticipants(daemons ...*stubDaemon) *hubSession {
 		Client:           "claude-code",
 		ProtocolVersion:  "2025-11-25",
 		InitSuccesses:    map[canonicalDaemonRef]string{},
+		DaemonProtoVer:   map[canonicalDaemonRef]string{},
 		InFlightRequests: map[requestIDKey]inflightEntry{},
 		InitAt:           time.Now(),
 		LastUsedAt:       time.Now(),
@@ -1312,6 +1313,222 @@ func TestAggregateToolsListDeterministicOrdering(t *testing.T) {
 	}
 }
 
+// TestAggregateToolsListRejectsMalformedDaemonResponse pins codex
+// bot r17 P1 closure on PR #157. postToolsList must surface a
+// daemon response missing `result.tools` (or even missing `result`
+// entirely) as a list-stage failure. The pre-r17 implementation
+// parsed `env.Result.Tools` as an empty slice when the field was
+// absent, so fanOutToolsList incremented listSuccessCount and
+// assembleToolsListResponse published an empty route map — silently
+// wiping any routes from a previous successful list. Later
+// tools/call would 404 with -32601 instead of operators seeing
+// the real malformed-response error.
+//
+// We feed the daemon a body without `result.tools` AND a body
+// without `result` entirely; both must produce stage="tools/list"
+// failure rows. RouteMap is NOT wiped because listSuccessCount
+// drops to 0 (r6 P1 closure) when every daemon fails the parse.
+func TestAggregateToolsListRejectsMalformedDaemonResponse(t *testing.T) {
+	cases := map[string]string{
+		"missing-result-tools": `{"jsonrpc":"2.0","id":2,"result":{}}`,
+		"missing-result":       `{"jsonrpc":"2.0","id":2}`,
+	}
+	for name, daemonBody := range cases {
+		t.Run(name, func(t *testing.T) {
+			d1 := newStubDaemon(t, "d1-sid")
+			d1.onList = func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(daemonBody))
+			}
+
+			sess := sessionWithParticipants(d1)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+				t.Fatalf("init: %v", err)
+			}
+
+			body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`))
+			if err != nil {
+				t.Fatalf("AggregateToolsList: %v", err)
+			}
+
+			// All daemons (only d1) failed → -32000 envelope. The
+			// partialFailure row must surface the malformed-response
+			// error so operators can fix the daemon.
+			var env struct {
+				Error *struct {
+					Code int `json:"code"`
+					Data struct {
+						Mcphub struct {
+							PartialFailures []DaemonFailure `json:"partialFailures"`
+						} `json:"mcphub"`
+					} `json:"data"`
+				} `json:"error"`
+			}
+			if uerr := json.Unmarshal(body, &env); uerr != nil {
+				t.Fatalf("parse: %v body=%s", uerr, body)
+			}
+			if env.Error == nil || env.Error.Code != -32000 {
+				t.Fatalf("want -32000 all-failed envelope; body=%s", body)
+			}
+			failures := env.Error.Data.Mcphub.PartialFailures
+			if len(failures) != 1 {
+				t.Fatalf("want 1 failure row, got %d: %+v", len(failures), failures)
+			}
+			f := failures[0]
+			if f.Stage != "tools/list" {
+				t.Errorf("Stage=%q want tools/list", f.Stage)
+			}
+			if !strings.Contains(f.Err, "missing") {
+				t.Errorf("err message should mention `missing`; got %q", f.Err)
+			}
+		})
+	}
+}
+
+// TestNegotiatedProtocolVersionPropagates pins codex bot r17 P1
+// closure on PR #157. When a daemon's initialize response carries
+// `result.protocolVersion: <X>` different from what the hub
+// requested, every follow-up request (notifications/initialized,
+// tools/list, tools/call, notifications/cancelled) must use <X>
+// as the MCP-Protocol-Version header — not the hub-requested
+// version.
+//
+// We rig a daemon to negotiate a downgraded version, then assert
+// the daemon-observed MCP-Protocol-Version header on each follow-up
+// request matches the daemon's negotiated value.
+func TestNegotiatedProtocolVersionPropagates(t *testing.T) {
+	const requestedProto = "2025-11-25"
+	const negotiatedProto = "2024-11-05" // daemon downgrades
+
+	var hdrMu sync.Mutex
+	listProtoHeader, callProtoHeader, cancelProtoHeader := "", "", ""
+	initNotifProtoHeader := ""
+
+	d1 := newStubDaemon(t, "d1-sid")
+	d1.onInit = func(w http.ResponseWriter, r *http.Request) {
+		// Echo a DIFFERENT protocolVersion than the requested one.
+		w.Header().Set("Mcp-Session-Id", "d1-sid")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"` + negotiatedProto + `","capabilities":{},"serverInfo":{"name":"stub","version":"1"}}}`))
+	}
+	d1.onList = func(w http.ResponseWriter, r *http.Request) {
+		hdrMu.Lock()
+		listProtoHeader = r.Header.Get("MCP-Protocol-Version")
+		hdrMu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"read"}]}}`))
+	}
+	d1.onCall = func(w http.ResponseWriter, r *http.Request) {
+		hdrMu.Lock()
+		callProtoHeader = r.Header.Get("MCP-Protocol-Version")
+		hdrMu.Unlock()
+		// r.Body was drained by the dispatch loop before this hook
+		// fires; read from lastCallBody instead.
+		d1.bodyMu.Lock()
+		body := d1.lastCallBody
+		d1.bodyMu.Unlock()
+		var env struct {
+			ID json.RawMessage `json:"id"`
+		}
+		_ = json.Unmarshal(body, &env)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		out := `{"jsonrpc":"2.0","id":` + string(env.ID) + `,"result":{"content":[]}}`
+		_, _ = w.Write([]byte(out))
+	}
+	d1.onNotify = func(w http.ResponseWriter, r *http.Request, body []byte) {
+		hdrMu.Lock()
+		// Distinguish notifications/initialized (sent in init flow,
+		// captured first) from notifications/cancelled (sent later).
+		if initNotifProtoHeader == "" {
+			initNotifProtoHeader = r.Header.Get("MCP-Protocol-Version")
+		} else {
+			cancelProtoHeader = r.Header.Get("MCP-Protocol-Version")
+		}
+		hdrMu.Unlock()
+		w.WriteHeader(http.StatusAccepted)
+	}
+
+	sess := sessionWithParticipants(d1)
+	sess.ProtocolVersion = requestedProto
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	// Per-daemon negotiated version stored on the session.
+	if got := sess.DaemonProtoVer[sess.IntendedParticipants[0]]; got != negotiatedProto {
+		t.Errorf("DaemonProtoVer[d1]=%q want %q", got, negotiatedProto)
+	}
+
+	// notifications/initialized used the negotiated version.
+	hdrMu.Lock()
+	gotInitNotif := initNotifProtoHeader
+	hdrMu.Unlock()
+	if gotInitNotif != negotiatedProto {
+		t.Errorf("notifications/initialized MCP-Protocol-Version=%q want %q",
+			gotInitNotif, negotiatedProto)
+	}
+
+	// tools/list uses the per-daemon negotiated version.
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`2`)); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	hdrMu.Lock()
+	gotList := listProtoHeader
+	hdrMu.Unlock()
+	if gotList != negotiatedProto {
+		t.Errorf("tools/list MCP-Protocol-Version=%q want %q", gotList, negotiatedProto)
+	}
+
+	// tools/call uses the per-daemon negotiated version (via
+	// inflightEntry.DaemonProtocol → postToolsCall).
+	params := json.RawMessage(`{"name":"srv1__read","arguments":{}}`)
+	// Set up resolver so tools/call route-validates.
+	resetResolverForTest(t)
+	snap := &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{"claude-code": sess.IntendedParticipants},
+	}
+	sess.SnapshotAtInit = snap
+	PublishResolverSnapshot(snap)
+	if _, err := AggregateToolsCall(ctx, sess, json.RawMessage(`3`), params); err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	hdrMu.Lock()
+	gotCall := callProtoHeader
+	hdrMu.Unlock()
+	if gotCall != negotiatedProto {
+		t.Errorf("tools/call MCP-Protocol-Version=%q want %q", gotCall, negotiatedProto)
+	}
+
+	// notifications/cancelled uses the per-daemon negotiated version
+	// stored on the inflightEntry. Insert an entry + cancel.
+	key, _ := newRequestIDKey(json.RawMessage(`88`))
+	sess.InsertInFlight(key, inflightEntry{
+		DaemonRef:       sess.IntendedParticipants[0],
+		DaemonSessionID: "d1-sid",
+		DaemonProtocol:  negotiatedProto,
+		DaemonRequestID: json.RawMessage(`"hub-y"`),
+		StartedAt:       time.Now(),
+	})
+	ForwardCancellation(ctx, sess, json.RawMessage(`88`))
+	hdrMu.Lock()
+	gotCancel := cancelProtoHeader
+	hdrMu.Unlock()
+	if gotCancel != negotiatedProto {
+		t.Errorf("notifications/cancelled MCP-Protocol-Version=%q want %q",
+			gotCancel, negotiatedProto)
+	}
+}
+
 // TestAggregateToolsListIntraDaemonDuplicateNotCollision pins codex
 // bot r13 P2 closure on PR #157. A single daemon returning the SAME
 // tool name twice in its tools/list response is non-conformant but
@@ -1437,6 +1654,7 @@ func TestAggregateToolsListNamespaceCollision(t *testing.T) {
 		Client:           "claude-code",
 		ProtocolVersion:  "2025-11-25",
 		InitSuccesses:    map[canonicalDaemonRef]string{},
+		DaemonProtoVer:   map[canonicalDaemonRef]string{},
 		InFlightRequests: map[requestIDKey]inflightEntry{},
 		InitAt:           time.Now(),
 		LastUsedAt:       time.Now(),

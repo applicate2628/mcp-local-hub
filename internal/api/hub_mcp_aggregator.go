@@ -122,9 +122,10 @@ func AggregateInitialize(ctx context.Context, sess *hubSession, reqID json.RawMe
 	sess.mu.Unlock()
 
 	type initResult struct {
-		ref       canonicalDaemonRef
-		sessionID string
-		err       error
+		ref             canonicalDaemonRef
+		sessionID       string
+		negotiatedProto string // codex bot r17 P1 closure on PR #157
+		err             error
 	}
 	results := make([]initResult, len(sess.IntendedParticipants))
 
@@ -139,7 +140,7 @@ func AggregateInitialize(ctx context.Context, sess *hubSession, reqID json.RawMe
 			defer func() { <-sem }()
 			subCtx, cancel := context.WithTimeout(ctx, PerDaemonInitTimeout)
 			defer cancel()
-			sid, err := postInitialize(subCtx, ref, protoVer)
+			sid, negotiated, err := postInitialize(subCtx, ref, protoVer)
 			// codex bot r4 P1 closure: per MCP lifecycle, the client
 			// (hub) MUST send notifications/initialized after
 			// initialize succeeds. codex bot r5 P2 closure on PR
@@ -152,14 +153,21 @@ func AggregateInitialize(ctx context.Context, sess *hubSession, reqID json.RawMe
 			// subCtx with the init timeout because the original
 			// subCtx is being torn down via defer cancel() at
 			// goroutine exit.
+			//
+			// codex bot r17 P1 closure on PR #157: send the
+			// notification with the DAEMON-NEGOTIATED protocol
+			// version, NOT the hub-requested one. A daemon may
+			// reply with a downgraded version per MCP negotiation;
+			// strict daemons reject follow-up headers carrying the
+			// original requested version with 400.
 			if err == nil {
 				notifyCtx, notifyCancel := context.WithTimeout(ctx, PerDaemonInitTimeout)
-				if nerr := postInitialized(notifyCtx, ref, sid, protoVer); nerr != nil {
+				if nerr := postInitialized(notifyCtx, ref, sid, negotiated); nerr != nil {
 					err = fmt.Errorf("notifications/initialized: %w", nerr)
 				}
 				notifyCancel()
 			}
-			results[i] = initResult{ref: ref, sessionID: sid, err: err}
+			results[i] = initResult{ref: ref, sessionID: sid, negotiatedProto: negotiated, err: err}
 		}()
 	}
 	wg.Wait()
@@ -167,6 +175,11 @@ func AggregateInitialize(ctx context.Context, sess *hubSession, reqID json.RawMe
 	// Apply results to the session.
 	sess.mu.Lock()
 	defer sess.mu.Unlock()
+	// Defensive lazy-init: tests + future direct constructors may
+	// allocate a hubSession without the DaemonProtoVer map.
+	if sess.DaemonProtoVer == nil {
+		sess.DaemonProtoVer = make(map[canonicalDaemonRef]string)
+	}
 	for _, r := range results {
 		if r.err != nil {
 			sess.InitFailures = append(sess.InitFailures, DaemonFailure{
@@ -178,6 +191,7 @@ func AggregateInitialize(ctx context.Context, sess *hubSession, reqID json.RawMe
 			continue
 		}
 		sess.InitSuccesses[r.ref] = r.sessionID
+		sess.DaemonProtoVer[r.ref] = r.negotiatedProto
 	}
 
 	// Build a synthetic initialize result envelope.
@@ -222,18 +236,35 @@ type listResult struct {
 // list call failing also lands here — surfacing the call as a failure
 // is intentional, since the caller can't discover any tools.
 func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMessage) ([]byte, error) {
-	// Snapshot the inputs under the session mu.
+	// Snapshot the inputs under the session mu. codex bot r17 P1
+	// closure on PR #157: capture each daemon's NEGOTIATED protocol
+	// version alongside its Mcp-Session-Id so the fan-out uses
+	// per-daemon headers instead of the session-level one.
 	sess.mu.Lock()
-	successes := make(map[canonicalDaemonRef]string, len(sess.InitSuccesses))
+	successes := make(map[canonicalDaemonRef]daemonInitState, len(sess.InitSuccesses))
 	for ref, sid := range sess.InitSuccesses {
-		successes[ref] = sid
+		proto := sess.DaemonProtoVer[ref]
+		if proto == "" {
+			proto = sess.ProtocolVersion
+		}
+		successes[ref] = daemonInitState{SessionID: sid, ProtocolVersion: proto}
 	}
 	initFailures := make([]DaemonFailure, len(sess.InitFailures))
 	copy(initFailures, sess.InitFailures)
 	sess.mu.Unlock()
 
-	results := fanOutToolsList(ctx, successes, sess.ProtocolVersion)
+	results := fanOutToolsList(ctx, successes)
 	return assembleToolsListResponse(reqID, results, initFailures, sess)
+}
+
+// daemonInitState bundles a daemon's per-daemon Mcp-Session-Id and
+// negotiated MCP protocol version. AggregateToolsList snapshots these
+// under sess.mu and passes the snapshot to fanOutToolsList so each
+// fan-out call carries the daemon's own negotiated header value
+// (codex bot r17 P1 closure on PR #157).
+type daemonInitState struct {
+	SessionID       string
+	ProtocolVersion string
 }
 
 // fanOutToolsList issues parallel tools/list calls to every daemon
@@ -241,17 +272,17 @@ func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMes
 // caller (assembleToolsListResponse) merges + namespaces + publishes
 // the route map.
 //
-// protoVer is the session's negotiated MCP protocol version, passed
-// to postToolsList for the MCP-Protocol-Version header (codex bot r4
-// P1 closure on PR #157).
-func fanOutToolsList(ctx context.Context, successes map[canonicalDaemonRef]string, protoVer string) []listResult {
+// Each successes entry carries the daemon's negotiated MCP protocol
+// version (codex bot r17 P1 closure on PR #157); postToolsList uses
+// it as the MCP-Protocol-Version header.
+func fanOutToolsList(ctx context.Context, successes map[canonicalDaemonRef]daemonInitState) []listResult {
 	results := make([]listResult, 0, len(successes))
 	var resultsMu sync.Mutex
 
 	sem := make(chan struct{}, FanOutConcurrency)
 	var wg sync.WaitGroup
-	for ref, sid := range successes {
-		ref, sid := ref, sid
+	for ref, state := range successes {
+		ref, state := ref, state
 		wg.Add(1)
 		sem <- struct{}{}
 		go func() {
@@ -259,7 +290,7 @@ func fanOutToolsList(ctx context.Context, successes map[canonicalDaemonRef]strin
 			defer func() { <-sem }()
 			subCtx, cancel := context.WithTimeout(ctx, PerDaemonListTimeout)
 			defer cancel()
-			tools, err := postToolsList(subCtx, ref, sid, protoVer)
+			tools, err := postToolsList(subCtx, ref, state.SessionID, state.ProtocolVersion)
 			r := listResult{ref: ref, err: err}
 			if err == nil {
 				r.tools = nameSpaceTools(ref, tools)
@@ -453,11 +484,14 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 // resolvedCallTarget is the output of route lookup + resolver
 // revalidation. Either errBody is set (the caller returns it verbatim
 // as the final response) or the ref/daemonSID fields drive the
-// outbound HTTP forward.
+// outbound HTTP forward. daemonProto is the per-daemon NEGOTIATED MCP
+// protocol version (codex bot r17 P1 closure on PR #157), used as
+// the MCP-Protocol-Version header on the daemon-facing tools/call.
 type resolvedCallTarget struct {
-	ref       canonicalToolRef
-	daemonSID string
-	errBody   []byte
+	ref         canonicalToolRef
+	daemonSID   string
+	daemonProto string
+	errBody     []byte
 }
 
 // AggregateToolsCall looks up params.name in sess.RouteMap, revalidates
@@ -475,7 +509,7 @@ func AggregateToolsCall(ctx context.Context, sess *hubSession, clientReqID json.
 	if target.errBody != nil {
 		return target.errBody, nil
 	}
-	return dispatchToolsCall(ctx, sess, clientReqID, paramsRaw, target.ref, target.daemonSID)
+	return dispatchToolsCall(ctx, sess, clientReqID, paramsRaw, target.ref, target.daemonSID, target.daemonProto)
 }
 
 // resolveToolsCallRoute parses params.name, looks it up in the
@@ -525,22 +559,31 @@ func resolveToolsCallRoute(sess *hubSession, clientReqID, paramsRaw json.RawMess
 		}
 	}
 
-	// Look up the daemon's Mcp-Session-Id.
+	// Look up the daemon's Mcp-Session-Id and negotiated protocol
+	// version. codex bot r17 P1 closure on PR #157: every daemon-
+	// facing header must use the version returned by the daemon's
+	// initialize, not the session-level requested version.
+	daemonKey := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port}
 	sess.mu.Lock()
-	daemonSID, hasSID := sess.InitSuccesses[canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port}]
+	daemonSID, hasSID := sess.InitSuccesses[daemonKey]
+	daemonProto := sess.DaemonProtoVer[daemonKey]
+	sessProto := sess.ProtocolVersion
 	sess.mu.Unlock()
 	if !hasSID {
 		body, mErr := buildJSONRPCError(clientReqID, -32603, "Internal error: no daemon session id for target", nil)
 		return resolvedCallTarget{errBody: body}, mErr
 	}
-	return resolvedCallTarget{ref: ref, daemonSID: daemonSID}, nil
+	if daemonProto == "" {
+		daemonProto = sessProto
+	}
+	return resolvedCallTarget{ref: ref, daemonSID: daemonSID, daemonProto: daemonProto}, nil
 }
 
 // dispatchToolsCall builds the rewritten body, registers an in-flight
 // row, forwards to the daemon under PerCallWallClockCap, and rewrites
 // the daemon's response id back to the client's id. Removes the
 // in-flight row via defer.
-func dispatchToolsCall(ctx context.Context, sess *hubSession, clientReqID, paramsRaw json.RawMessage, ref canonicalToolRef, daemonSID string) ([]byte, error) {
+func dispatchToolsCall(ctx context.Context, sess *hubSession, clientReqID, paramsRaw json.RawMessage, ref canonicalToolRef, daemonSID, daemonProto string) ([]byte, error) {
 	// Build the rewritten body. params.name → RawName.
 	rewrittenParams, err := buildRewrittenParams(ref.RawName, paramsRaw)
 	if err != nil {
@@ -571,10 +614,11 @@ func dispatchToolsCall(ctx context.Context, sess *hubSession, clientReqID, param
 	// MUST use distinct ids within a session — this is a protocol
 	// contract violation, surfaced as -32600.
 	inserted := sess.InsertInFlight(key, inflightEntry{
-		DaemonRef:       canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port},
-		DaemonSessionID: daemonSID,
-		DaemonRequestID: daemonReqID,
-		StartedAt:       time.Now(),
+		DaemonRef:        canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port},
+		DaemonSessionID:  daemonSID,
+		DaemonProtocol:   daemonProto,
+		DaemonRequestID:  daemonReqID,
+		StartedAt:        time.Now(),
 	})
 	if !inserted {
 		return buildJSONRPCError(clientReqID, -32600, "duplicate request id; original call still in flight", nil)
@@ -584,7 +628,10 @@ func dispatchToolsCall(ctx context.Context, sess *hubSession, clientReqID, param
 	subCtx, cancel := context.WithTimeout(ctx, PerCallWallClockCap)
 	defer cancel()
 
-	body, err := postToolsCall(subCtx, ref, daemonSID, sess.ProtocolVersion, daemonReqID, rewrittenParams)
+	// codex bot r17 P1 closure on PR #157: tools/call uses the
+	// DAEMON-NEGOTIATED protocol version, not the session-level
+	// requested one.
+	body, err := postToolsCall(subCtx, ref, daemonSID, daemonProto, daemonReqID, rewrittenParams)
 	if err != nil {
 		return buildJSONRPCError(clientReqID, -32000, "tools/call failed: "+err.Error(), nil)
 	}
@@ -629,9 +676,17 @@ func ForwardCancellation(ctx context.Context, sess *hubSession, clientReqID json
 		return // already removed or never existed
 	}
 
+	// codex bot r17 P1 closure on PR #157: notifications/cancelled
+	// uses the DAEMON-NEGOTIATED protocol version stored on the
+	// in-flight row at dispatch time, NOT the session-level requested
+	// version. Strict daemons reject mismatched headers with 400.
+	proto := entry.DaemonProtocol
+	if proto == "" {
+		proto = sess.ProtocolVersion
+	}
 	subCtx, cancel := context.WithTimeout(ctx, PerDaemonInitTimeout)
 	defer cancel()
-	_ = postCancellation(subCtx, entry.DaemonRef, entry.DaemonSessionID, sess.ProtocolVersion, entry.DaemonRequestID)
+	_ = postCancellation(subCtx, entry.DaemonRef, entry.DaemonSessionID, proto, entry.DaemonRequestID)
 }
 
 // daemonStillBound reports whether the (Server, Daemon, Port) tuple
@@ -775,7 +830,7 @@ func doDaemonPost(ctx context.Context, port int, body []byte, daemonSID, protoVe
 // (Phase 4 will receive this from the client handshake) cannot
 // corrupt the outbound JSON. codex bot r8 P2 closure on PR #157.
 // Same shape as postCancellation in this file.
-func postInitialize(ctx context.Context, ref canonicalDaemonRef, protoVer string) (string, error) {
+func postInitialize(ctx context.Context, ref canonicalDaemonRef, protoVer string) (sid string, negotiated string, err error) {
 	hubVer, _, _ := buildinfo.Get()
 	envelope := struct {
 		JSONRPC string `json:"jsonrpc"`
@@ -800,11 +855,11 @@ func postInitialize(ctx context.Context, ref canonicalDaemonRef, protoVer string
 	envelope.Params.ClientInfo.Version = hubVer
 	body, err := json.Marshal(envelope)
 	if err != nil {
-		return "", fmt.Errorf("marshal initialize envelope: %w", err)
+		return "", "", fmt.Errorf("marshal initialize envelope: %w", err)
 	}
 	raw, hdr, err := doDaemonPost(ctx, ref.Port, body, "", "", PerDaemonInitTimeout, true)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	// codex bot r3 P1 closure on PR #157: inspect the JSON-RPC envelope
 	// for an `error` object. Daemons returning HTTP 200 + JSON-RPC
@@ -816,17 +871,27 @@ func postInitialize(ctx context.Context, ref canonicalDaemonRef, protoVer string
 	// `raw` is the JSON-RPC envelope: doDaemonPost already peeled off
 	// any SSE framing in the text/event-stream path (codex bot r12 P1
 	// closures on PR #157).
+	//
+	// codex bot r17 P1 closure on PR #157: parse `result.protocolVersion`
+	// from the daemon's response. MCP version negotiation lets the
+	// daemon return a SUPPORTED version different from the requested
+	// `protoVer`; every subsequent header (notifications/initialized,
+	// tools/list, tools/call, notifications/cancelled) MUST use the
+	// daemon-negotiated value or strict daemons reject with 400.
 	var env struct {
 		Error *struct {
 			Code    int    `json:"code"`
 			Message string `json:"message"`
 		} `json:"error"`
+		Result struct {
+			ProtocolVersion string `json:"protocolVersion"`
+		} `json:"result"`
 	}
 	if uerr := json.Unmarshal(raw, &env); uerr != nil {
-		return "", fmt.Errorf("parse initialize response: %w", uerr)
+		return "", "", fmt.Errorf("parse initialize response: %w", uerr)
 	}
 	if env.Error != nil {
-		return "", fmt.Errorf("daemon initialize error code=%d: %s", env.Error.Code, env.Error.Message)
+		return "", "", fmt.Errorf("daemon initialize error code=%d: %s", env.Error.Code, env.Error.Message)
 	}
 	// codex bot r6 P1 closure on PR #157: reject HTTP 200 + no
 	// JSON-RPC error + empty Mcp-Session-Id. The header is mandatory
@@ -835,11 +900,18 @@ func postInitialize(ctx context.Context, ref canonicalDaemonRef, protoVer string
 	// case as success would record the daemon in InitSuccesses with
 	// daemonSID="", and subsequent calls would post without the
 	// session header. Surface this as an init-stage failure instead.
-	sid := hdr.Get("Mcp-Session-Id")
+	sid = hdr.Get("Mcp-Session-Id")
 	if sid == "" {
-		return "", fmt.Errorf("daemon initialize succeeded with empty Mcp-Session-Id header")
+		return "", "", fmt.Errorf("daemon initialize succeeded with empty Mcp-Session-Id header")
 	}
-	return sid, nil
+	// Fall back to the requested protoVer when the daemon doesn't
+	// emit a result.protocolVersion (older MCP daemons predating the
+	// version-negotiation field).
+	negotiated = env.Result.ProtocolVersion
+	if negotiated == "" {
+		negotiated = protoVer
+	}
+	return sid, negotiated, nil
 }
 
 // postToolsList sends a tools/list call to a single daemon and
@@ -859,13 +931,22 @@ func postToolsList(ctx context.Context, ref canonicalDaemonRef, daemonSID, proto
 	}
 	// `raw` is the JSON-RPC envelope; doDaemonPost peeled off any SSE
 	// framing (codex bot r12 P1 closures on PR #157).
+	//
+	// codex bot r17 P1 closure on PR #157: pointer types let us
+	// distinguish "result absent / result.tools absent" from "valid
+	// empty tools list". A daemon returning {"jsonrpc":"2.0","id":2}
+	// (no result, no error) must be surfaced as a list-stage failure
+	// — counting it as success would publish an empty route map and
+	// silently wipe routes from a previous good list, then later
+	// tools/call would 404 with -32601 instead of the operator
+	// seeing the real malformed-response error.
 	var env struct {
 		Error *struct {
 			Code    int    `json:"code"`
 			Message string `json:"message"`
 		} `json:"error"`
-		Result struct {
-			Tools []json.RawMessage `json:"tools"`
+		Result *struct {
+			Tools *[]json.RawMessage `json:"tools"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(raw, &env); err != nil {
@@ -874,7 +955,13 @@ func postToolsList(ctx context.Context, ref canonicalDaemonRef, daemonSID, proto
 	if env.Error != nil {
 		return nil, fmt.Errorf("daemon error code=%d: %s", env.Error.Code, env.Error.Message)
 	}
-	return env.Result.Tools, nil
+	if env.Result == nil {
+		return nil, fmt.Errorf("daemon tools/list response missing `result` field")
+	}
+	if env.Result.Tools == nil {
+		return nil, fmt.Errorf("daemon tools/list response missing `result.tools` field")
+	}
+	return *env.Result.Tools, nil
 }
 
 // postToolsCall forwards a tools/call to a single daemon with the

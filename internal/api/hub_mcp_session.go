@@ -98,6 +98,12 @@ type SessionStoreOpts struct {
 type inflightEntry struct {
 	DaemonRef       canonicalDaemonRef
 	DaemonSessionID string
+	// DaemonProtocol is the daemon's NEGOTIATED MCP protocol version
+	// captured at initialize time. Stored on the in-flight row so
+	// ForwardCancellation can emit notifications/cancelled with the
+	// daemon's own header value instead of the session-level requested
+	// version. codex bot r17 P1 closure on PR #157.
+	DaemonProtocol  string
 	DaemonRequestID json.RawMessage
 	StartedAt       time.Time
 }
@@ -120,18 +126,28 @@ type DaemonFailure struct {
 type hubSession struct {
 	ClientSessionID      string
 	Client               string
-	ProtocolVersion      string // captured at initialize for MCP-Protocol-Version validation
+	ProtocolVersion      string // version requested at hub-side initialize (used for daemons that don't return a negotiated version)
 	SnapshotAtInit       *ResolverSnapshot
 	IntendedParticipants []canonicalDaemonRef
 	InitSuccesses        map[canonicalDaemonRef]string // value = daemon Mcp-Session-Id
-	InitFailures         []DaemonFailure
-	RouteMap             atomic.Pointer[map[string]canonicalToolRef] // session-local; atomic swap
-	InFlightRequests     map[requestIDKey]inflightEntry
-	inflightMu           sync.Mutex
-	inFlightCount        atomic.Int32
-	InitAt               time.Time
-	LastUsedAt           time.Time
-	mu                   sync.Mutex // protects LastUsedAt + lifecycle
+	// DaemonProtoVer stores each daemon's NEGOTIATED protocol version,
+	// parsed from `result.protocolVersion` in the daemon's initialize
+	// response. MCP version negotiation allows daemons to reply with a
+	// supported version different from what the hub requested; every
+	// subsequent header (`notifications/initialized`, `tools/list`,
+	// `tools/call`, `notifications/cancelled`) MUST use the
+	// daemon-negotiated value or strict daemons reject with 400.
+	// Populated by AggregateInitialize alongside InitSuccesses; protected
+	// by the same `mu`. codex bot r17 P1 closure on PR #157.
+	DaemonProtoVer   map[canonicalDaemonRef]string
+	InitFailures     []DaemonFailure
+	RouteMap         atomic.Pointer[map[string]canonicalToolRef] // session-local; atomic swap
+	InFlightRequests map[requestIDKey]inflightEntry
+	inflightMu       sync.Mutex
+	inFlightCount    atomic.Int32
+	InitAt           time.Time
+	LastUsedAt       time.Time
+	mu               sync.Mutex // protects LastUsedAt + lifecycle
 }
 
 // InFlightCount returns the current in-flight count (atomic load).
@@ -304,6 +320,7 @@ func (s *HubSessionStore) Create(client, protoVer string, snap *ResolverSnapshot
 		ProtocolVersion:  protoVer,
 		SnapshotAtInit:   snap,
 		InitSuccesses:    map[canonicalDaemonRef]string{},
+		DaemonProtoVer:   map[canonicalDaemonRef]string{},
 		InFlightRequests: map[requestIDKey]inflightEntry{},
 		InitAt:           now,
 		LastUsedAt:       now,
