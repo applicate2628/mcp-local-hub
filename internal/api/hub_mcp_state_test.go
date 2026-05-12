@@ -37,6 +37,14 @@ func hubMcpStateTestHelper(t *testing.T) string {
 	t.Helper()
 	statePathsHelper(t)
 	root := hardenedTempDir(t)
+	// Restore daemonStateRootOverride after this test exits so
+	// subsequent tests in the same `go test` invocation (e.g.
+	// Register / WriteDaemonIntent paths in register_test.go) don't
+	// observe a leaked override pointing at this test's already-
+	// deleted temp dir, which can produce huge stale on-disk state
+	// or hangs when those tests reuse the path.
+	prevOverride := daemonStateRootOverride
+	t.Cleanup(func() { daemonStateRootOverride = prevOverride })
 	daemonStateRootOverride = root
 	// Sanity: DaemonStateDir should now return the hardened root
 	// directly (the override path bypasses the platform resolver, so
