@@ -11,14 +11,7 @@ import (
 // gate: a file just written by SecureWriteClientConfig must pass the
 // allowlist check. Build-neutral — the POSIX impl checks owner-uid +
 // mode mask, the Windows impl checks the canonical DACL.
-//
-// On Windows host this test is paired with Task 1.4 (Windows secure
-// write); until 1.4 lands the SecureWriteClientConfig call returns
-// a stub error so the test is gated to skip on Windows.
 func TestVerifyHubMcpStateDACLAcceptsFreshlyCreatedFile(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("activated by Task 1.4 (Windows secure-write impl)")
-	}
 	dir := t.TempDir()
 	target := filepath.Join(dir, "hub-mcp-tokens.json")
 	if err := SecureWriteClientConfig(target, []byte("{}")); err != nil {

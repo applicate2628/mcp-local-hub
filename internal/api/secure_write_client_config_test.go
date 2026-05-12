@@ -8,12 +8,9 @@ import (
 )
 
 // TestSecureWriteClientConfigBasicRoundTrip verifies the writer
-// produces the exact bytes at the requested path. POSIX-active in
-// Task 1.3; Windows leg activates in Task 1.4.
+// produces the exact bytes at the requested path. Build-neutral —
+// runs on every platform.
 func TestSecureWriteClientConfigBasicRoundTrip(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("activated by Task 1.4 (Windows leg); Task 1.3 POSIX-only commit")
-	}
 	dir := t.TempDir()
 	target := filepath.Join(dir, "client-config.json")
 	payload := []byte(`{"mcpServers":{"foo":{"url":"http://127.0.0.1:9200/mcp"}}}`)
@@ -41,9 +38,6 @@ func TestSecureWriteClientConfigBasicRoundTrip(t *testing.T) {
 // (Windows) / renameat-over-existing (POSIX) are the relevant
 // guarantees from the spec sequence.
 func TestSecureWriteClientConfigOverwritesExisting(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("activated by Task 1.4 (Windows leg); Task 1.3 POSIX-only commit")
-	}
 	dir := t.TempDir()
 	target := filepath.Join(dir, "client-config.json")
 	if err := SecureWriteClientConfig(target, []byte(`{"v":1}`)); err != nil {

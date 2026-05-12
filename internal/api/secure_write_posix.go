@@ -57,6 +57,15 @@ func secureWriteClientConfigImpl(path string, contents []byte) error {
 		return fmt.Errorf("secure write: parent %s not single-user safe: %w", parentDir, err)
 	}
 
+	// 2a. Refuse to overwrite a pre-existing symlink/junction at `base`.
+	// Renameat with POSIX semantics would silently replace the symlink
+	// with a regular file — caller might expect the symlink target to
+	// receive the write. Refuse outright so the caller is forced to
+	// clean up the symlink first.
+	if err := refusePreexistingSymlink(dirFd, base); err != nil {
+		return fmt.Errorf("secure write: target %s: %w", path, err)
+	}
+
 	// 3. Unpredictable temp name to defeat slot-squat races.
 	randBytes := make([]byte, 8)
 	if _, err := rand.Read(randBytes); err != nil {
@@ -141,6 +150,28 @@ func writeAllUnix(fd int, p []byte) error {
 			return fmt.Errorf("write returned 0 bytes")
 		}
 		p = p[n:]
+	}
+	return nil
+}
+
+// refusePreexistingSymlink rejects if `name` already exists under
+// dirFd as a symlink. If `name` doesn't exist at all, returns nil
+// (the write will atomically create it). If `name` exists as a
+// regular file the write proceeds (atomic replace).
+//
+// Renameat is atomic — without this check a pre-existing symlink at
+// `name` would be silently replaced by a regular file, surprising
+// callers who assumed they were updating the symlink target.
+func refusePreexistingSymlink(dirFd int, name string) error {
+	var st unix.Stat_t
+	err := unix.Fstatat(dirFd, name, &st, unix.AT_SYMLINK_NOFOLLOW)
+	if err != nil {
+		// ENOENT: name doesn't exist, fine.
+		return nil
+	}
+	// S_IFLNK (symlink) test against the file-type bits.
+	if (st.Mode & unix.S_IFMT) == unix.S_IFLNK {
+		return fmt.Errorf("pre-existing symlink refused")
 	}
 	return nil
 }
