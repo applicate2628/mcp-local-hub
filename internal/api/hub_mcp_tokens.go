@@ -180,19 +180,32 @@ func ReloadHubTokens() (HubTokenTable, error) {
 	return tbl, nil
 }
 
-// CurrentTokenTable returns the live snapshot for the auth gate
-// (Phase 4). Returns a zero table if no Ensure / Rotate / Reload has
-// run yet. Callers should treat the absence of a client entry as
-// "401 / unknown client" — never as "skip auth".
+// CurrentTokenTable returns a DEEP COPY of the live snapshot for the
+// auth gate (Phase 4). Returns a zero table if no Ensure / Rotate /
+// Reload has run yet. Callers should treat the absence of a client
+// entry as "401 / unknown client" — never as "skip auth".
 //
-// The returned struct is a copy: mutating its Tokens map does not
-// affect the published snapshot.
+// The returned struct AND its inner `Tokens` map are independent of
+// the published snapshot. Mutating the returned map cannot:
+//   - corrupt the live snapshot used by other goroutines
+//   - race with `ConstantTimeCompareToken` reads (which share the
+//     same published map pointer) and trigger a Go runtime
+//     "concurrent map read and map write" panic
+//
+// codex bot r1 P1 closure (PR #156): earlier `return *p` shallow-
+// copied the struct but the map field was still a reference to the
+// published map. A caller writing to the returned `Tokens` would
+// silently mutate the live auth snapshot.
 func CurrentTokenTable() HubTokenTable {
 	p := liveTokenTable.Load()
 	if p == nil {
 		return HubTokenTable{}
 	}
-	return *p
+	cpy := HubTokenTable{Tokens: make(map[string]string, len(p.Tokens))}
+	for k, v := range p.Tokens {
+		cpy.Tokens[k] = v
+	}
+	return cpy
 }
 
 // ConstantTimeCompareToken returns 1 iff `headerToken` matches the

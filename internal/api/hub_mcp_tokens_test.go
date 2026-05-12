@@ -175,6 +175,38 @@ func TestHubCurrentTokenTablePublishesAfterEnsure(t *testing.T) {
 	}
 }
 
+// codex bot r1 P1 closure: CurrentTokenTable must return a DEEP copy
+// (struct + Tokens map both independent of the published snapshot).
+// Earlier shallow copy of the struct shared the underlying map, so a
+// caller mutating its returned `Tokens` would silently corrupt the
+// live auth snapshot AND could race with ConstantTimeCompareToken
+// reads (concurrent map read + write panic).
+func TestHubCurrentTokenTableReturnsIndependentMap(t *testing.T) {
+	hubMcpStateTestHelper(t)
+
+	if _, err := EnsureHubTokens([]string{"claude-code"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	snap1 := CurrentTokenTable()
+	original := snap1.Tokens["claude-code"]
+	if original == "" {
+		t.Fatalf("expected token for claude-code in snap1")
+	}
+	// Mutate the returned map. If the deep-copy is correct, this must
+	// NOT affect the next CurrentTokenTable() read.
+	snap1.Tokens["claude-code"] = "ATTACKER_REPLACED_TOKEN_DEADBEEF"
+	snap1.Tokens["injected-client"] = "newly-injected-token-NOT-via-Ensure"
+
+	snap2 := CurrentTokenTable()
+	if snap2.Tokens["claude-code"] != original {
+		t.Errorf("live snapshot corrupted via caller mutation: got %q want %q",
+			snap2.Tokens["claude-code"], original)
+	}
+	if _, present := snap2.Tokens["injected-client"]; present {
+		t.Errorf("live snapshot accepted caller-injected key 'injected-client'; deep-copy is incomplete")
+	}
+}
+
 // TestReloadHubTokensPublishesFromDisk confirms ReloadHubTokens (the
 // /internal/reload-tokens path used in Phase 4) re-reads the file and
 // publishes a new snapshot. Simulated by writing a hand-crafted table
