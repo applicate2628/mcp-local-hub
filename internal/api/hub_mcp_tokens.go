@@ -95,21 +95,12 @@ func ensureHubTokensLocked(clients []string) (HubTokenTable, error) {
 	if tbl.Tokens == nil {
 		tbl.Tokens = map[string]string{}
 	}
-	// Codex bot r4 P2 closure: validate any pre-existing token entries
-	// before treating them as "already provisioned". A semantic
-	// corruption (empty string, wrong length, non-hex) would otherwise
-	// be preserved here and silently break auth — ConstantTimeCompareToken's
-	// length gate at every request would return 0 and the client gets
-	// a permanent 401 with no actionable error from Ensure.
-	//
-	// We reject corruption explicitly so the operator can investigate
-	// via `mcphub hub-mcp regenerate-token --client X` (the targeted
-	// rotation path) or restore from backup.
-	for client, tok := range tbl.Tokens {
-		if !isValidHexToken(tok) {
-			return HubTokenTable{}, fmt.Errorf("hub-mcp tokens corruption: client %q has malformed token (got %d bytes, want 64 hex); use `mcphub hub-mcp regenerate-token --client %s` to explicitly rotate, or restore the file", client, len(tok), client)
-		}
-	}
+	// (codex bot r4 P2 closure was originally implemented here as a
+	// per-call validation loop; r5 P2 closure moved the gate into
+	// loadHubTokensLocked so EVERY consumer of the load path —
+	// EnsureHubTokens, RotateHubToken, ReloadHubTokens — gets the
+	// same corruption-reject behavior. The check above is now dead
+	// here.)
 	changed := false
 	for _, c := range clients {
 		if c == "" {
@@ -289,6 +280,18 @@ func loadHubTokensLocked() (HubTokenTable, error) {
 	}
 	if tbl.Tokens == nil {
 		tbl.Tokens = map[string]string{}
+	}
+	// codex bot r5 P2 closure: validate every entry at load time so
+	// every consumer (EnsureHubTokens, RotateHubToken, ReloadHubTokens)
+	// fails closed on semantic corruption rather than publishing a bad
+	// entry that ConstantTimeCompareToken would then deny on every
+	// request (permanent 401 with no actionable error). Centralizing
+	// the gate here removes the need for each call site to repeat the
+	// check.
+	for client, tok := range tbl.Tokens {
+		if !isValidHexToken(tok) {
+			return HubTokenTable{}, fmt.Errorf("hub-mcp tokens corruption: client %q has malformed token (got %d bytes, want 64 hex); use `mcphub hub-mcp regenerate-token --client %s` to explicitly rotate, or restore the file", client, len(tok), client)
+		}
 	}
 	return tbl, nil
 }

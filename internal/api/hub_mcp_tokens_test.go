@@ -327,3 +327,44 @@ func TestEnsureHubTokensRejectsEmptyTokenString(t *testing.T) {
 		t.Fatalf("EnsureHubTokens must reject empty token; got nil")
 	}
 }
+
+// TestReloadHubTokensRejectsCorruption pins the codex bot r5 P2
+// closure: validation lives in loadHubTokensLocked so EVERY caller
+// (Ensure, Rotate, Reload) fails closed on semantic corruption.
+// Without this, ReloadHubTokens (called from Phase 4's
+// /internal/reload-tokens endpoint) would publish a corrupt entry
+// after a rotation that hit an interrupted-write/torn-write window.
+func TestReloadHubTokensRejectsCorruption(t *testing.T) {
+	hubMcpStateTestHelper(t)
+	if _, err := EnsureHubTokens([]string{"claude-code"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// Hand-write a corrupt table after seeding.
+	corrupt := []byte(`{"tokens":{"claude-code":"short"}}`)
+	if err := writeHubMcpStateFile(hubMcpTokensFileLeaf, corrupt); err != nil {
+		t.Fatalf("write corrupt: %v", err)
+	}
+	_, err := ReloadHubTokens()
+	if err == nil {
+		t.Fatalf("ReloadHubTokens must reject malformed token; got nil")
+	}
+	if !strings.Contains(err.Error(), "corruption") {
+		t.Errorf("error must mention 'corruption'; got %v", err)
+	}
+}
+
+// And RotateHubToken too — it also reads via loadHubTokensLocked.
+func TestRotateHubTokenRejectsCorruption(t *testing.T) {
+	hubMcpStateTestHelper(t)
+	if _, err := EnsureHubTokens([]string{"claude-code"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	corrupt := []byte(`{"tokens":{"other":""}}`)
+	if err := writeHubMcpStateFile(hubMcpTokensFileLeaf, corrupt); err != nil {
+		t.Fatalf("write corrupt: %v", err)
+	}
+	_, err := RotateHubToken("claude-code")
+	if err == nil {
+		t.Fatalf("RotateHubToken must reject corruption before rotating; got nil")
+	}
+}
