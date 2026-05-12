@@ -442,6 +442,11 @@ type Server struct {
 	//   - other err != nil  (kill failed/unknown)  -> 500
 	probeForRoute func() Verdict
 	killForRoute  func() (Verdict, error)
+
+	// Phase 4 (G4) — hub-mcp listener bundle. nil when the gate is
+	// off OR when bind failed. Owned by Start, drained by the same
+	// cancel/error branches that drain the gui-server listener.
+	hubMcpComp *HubListenerComponents
 }
 
 // NewServer constructs the Server. It registers the ping handler
@@ -526,6 +531,13 @@ func (s *Server) Port() int { return int(s.port.Load()) }
 // is accepting, then blocks in ListenAndServe. Returns when ctx is
 // canceled (graceful shutdown, 5s deadline) or the listener errors.
 // http.ErrServerClosed is returned as nil.
+//
+// Phase 4 (G4): after the gui-server listener is up and BEFORE
+// `ready` is signaled, this method ALSO binds the hub-mcp listener
+// when `gui_server.hub_endpoint_enabled=true` (separate socket at the
+// persisted hub-mcp port). Bind failure is non-fatal to the gui-server
+// — the operator still gets the GUI; the hub side stays gate-OFF until
+// the operator runs the documented rotation chain.
 func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", s.cfg.Port))
 	if err != nil {
@@ -536,6 +548,24 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 		Handler:           s.httpHandler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+
+	// Phase 4 (G4) — hub listener wiring. The gate is read from
+	// gui-preferences.yaml directly (Phase 5 adds the registry entry +
+	// Settings UI toggle). Bind failure surfaces via LogHubMcpEvent but
+	// does NOT abort gui-server startup; an operator can still reach
+	// the GUI to investigate.
+	hubEnabled := readHubEndpointGateFromSettings()
+	hubComp, hubErr := startHubMcpListener(ctx, hubEnabled, s.api)
+	if hubErr != nil {
+		// Already logged via LogHubMcpEvent inside startHubMcpListener;
+		// surface as a soft warning by stamping the hub bundle nil so
+		// shutdown skips it. The error itself is intentionally not
+		// returned — gate-OFF semantics keep gui-server running.
+		hubComp = nil
+		_ = hubErr // referenced for future diagnostics
+	}
+	s.hubMcpComp = hubComp
+
 	close(ready)
 
 	errCh := make(chan error, 1)
@@ -545,6 +575,10 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		// Drain hub listener BEFORE the gui-server so any racing
+		// internal-reload writes complete via the still-flockable
+		// state-dir.
+		ShutdownHubListener(shutdownCtx, s.hubMcpComp)
 		if err := s.srv.Shutdown(shutdownCtx); err != nil {
 			s.events.Close()
 			return fmt.Errorf("graceful shutdown: %w", err)
@@ -557,6 +591,11 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 		s.events.Close()
 		return nil
 	case err := <-errCh:
+		// gui-server listener died; drain the hub listener under a
+		// short timeout so we don't leak its goroutines.
+		drainCtx, drainCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ShutdownHubListener(drainCtx, s.hubMcpComp)
+		drainCancel()
 		s.events.Close()
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
