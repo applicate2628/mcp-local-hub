@@ -1,6 +1,6 @@
 # G4 — Unified Hub MCP Endpoint Design (v3)
 
-**Status:** active design, 2026-05-12. Replaces v2 (committed in `docs/superpowers/specs/2026-05-08-g4-unified-hub-mcp-design.md`, marked DEFERRED). All 24 codex-review findings from v1-r1 (12) and v2-r2 (12) are folded in as concrete design decisions. Implementation may begin once this v3 spec passes round-3 codex review.
+**Status:** active design, 2026-05-12 (v3.2 amendment). Replaces v2 (committed in `docs/superpowers/specs/2026-05-08-g4-unified-hub-mcp-design.md`, marked DEFERRED). All 24 codex-review findings from v1-r1 (12) and v2-r2 (12) plus all 9 r3 findings (3 general + 6 security) are folded in. v3.2 layer addresses codex r4 follow-ups (F1 instance_id persistence scrub, F2 crash-safe reconcile ordering, F4 SO_EXCLUSIVEADDRUSE local constant + error capture, F5 `/internal/reload-tokens` contract, F6 SecureWriteClientConfig handle-relative semantics, F7 DACL enterprise stance, plus the F6-r3 requestIDKey wrapper for the non-comparable JSON-RPC id map key). Implementation may begin once this spec passes round-5 codex review.
 
 **Scope decision:** G4 returns to v0.3.0 scope per user direction 2026-05-12 ("Phase 3 full includes all G-phases"). Realistic implementation effort: ~10-12 days carefully + bot/codex deep-sec PR cycles. Plan-time decomposition will split into ≥4 phased PRs to keep per-PR review surfaces manageable.
 
@@ -70,16 +70,38 @@ type hubSession struct {
     InitSuccesses    map[canonicalDaemonRef]string                // value = daemon Mcp-Session-Id
     InitFailures     []DaemonFailure                              // surface in tools/list result._meta.mcphub.partialFailures
     RouteMap         atomic.Pointer[map[string]canonicalToolRef]  // session-local route map (atomic swap)
-    InFlightRequests map[json.RawMessage]inflightEntry            // typed client req id → daemon-side info (F-S6 r3)
+    InFlightRequests map[requestIDKey]inflightEntry               // typed client req id → daemon-side info (F6-r3 closure)
     inflightMu       sync.Mutex                                   // protects InFlightRequests
     InitAt           time.Time
     LastUsedAt       time.Time
     mu               sync.Mutex                                   // protects LastUsedAt + lifecycle
 }
 
+// requestIDKey is a comparable wrapper for JSON-RPC request ids. The
+// codex r4 review correctly flagged that `json.RawMessage` ([]byte)
+// cannot be a Go map key (not comparable). requestIDKey is the
+// validated normalized form:
+//   - JSON strings: `s:<unescaped-string>`
+//   - JSON numbers: `n:<canonical-numeric-form>` — float64 ParseFloat
+//     then strconv.FormatFloat with -1 precision and 'g'. This collapses
+//     "1", "1.0", "1e0" to one bucket, matching JSON-RPC numeric-id
+//     equality semantics observed in real clients.
+//   - Anything else (null, array, object, bool): rejected at request
+//     parse time with -32600 "Invalid Request". JSON-RPC spec allows
+//     only string or number ids; we reject non-conforming early.
+type requestIDKey string
+
+// newRequestIDKey validates + normalizes a raw JSON-RPC id field.
+// Returns ("", err) on non-conforming input; caller surfaces -32600.
+// Fractional numeric IDs are accepted; their canonical form
+// disambiguates them from integer-equivalent strings.
+func newRequestIDKey(raw json.RawMessage) (requestIDKey, error) { /* impl */ }
+
 type inflightEntry struct {
     DaemonRef       canonicalDaemonRef
-    DaemonRequestID json.RawMessage // hub-generated request id sent to the daemon
+    DaemonSessionID string          // daemon-side Mcp-Session-Id
+    DaemonRequestID json.RawMessage // hub-generated request id sent to the daemon (raw JSON form for re-emit)
+    StartedAt       time.Time
 }
 
 type canonicalDaemonRef struct {
@@ -96,7 +118,7 @@ type canonicalToolRef struct {
 }
 ```
 
-`InFlightRequests` is **per-session and typed** (codex r3 security F-6 closure): keyed by the client's exact JSON-RPC id bytes (`json.RawMessage` — preserves number/string discriminator), stores `{DaemonRef, DaemonRequestID}` because the request id we sent to the daemon is hub-generated (different from the client's). A forged `notifications/cancelled` from another session cannot collide because the lookup is scoped to `session.InFlightRequests`, not a global map; cross-session interference is impossible without bypassing the 5-step auth gate.
+`InFlightRequests` is **per-session and typed** (codex r3 F-S6 + r4 F6 closures): keyed by `requestIDKey` — a normalized comparable string built from the validated raw JSON-RPC id (string-vs-number discriminator preserved via the `s:` / `n:` prefix; numeric-equivalent forms like `1` / `1.0` / `1e0` collapse to one canonical bucket). Stores `{DaemonRef, DaemonSessionID, DaemonRequestID, StartedAt}` because the request id we send to the daemon is hub-generated (different from the client's). A forged `notifications/cancelled` from another session cannot collide because the lookup is scoped to `session.InFlightRequests` (per-session map), not a global structure; cross-session interference is impossible without bypassing the 5-step auth gate.
 
 **Lifecycle:**
 
@@ -194,7 +216,100 @@ Windows DACL verification is **allowlist-based** (codex r3 security F-S3 closure
 - DENY ACEs do NOT "rescue" an unsafe ALLOW unless the canonical evaluation proves no effective-access path through to the bad SID. Conservative: reject anyway if an unsafe ALLOW exists, regardless of DENY siblings.
 - Inherited ACEs are validated against the same allowlist (no exemption for `INHERITED_ACE`).
 
-**Handle-bound client config writer** (codex r3 security F-S3 closure for client configs): the existing `internal/clients/*.go` adapters use path-based `os.WriteFile` and `os.OpenFile` which are TOCTOU-vulnerable for token-bearing writes. A new helper `SecureWriteClientConfig(path, contents []byte)` opens the parent dir, creates a temp file with `O_CREATE|O_EXCL|O_WRONLY|0600` + handle-bound DACL verify, writes bytes, fsyncs, atomic-renames into place, then re-opens the destination and re-verifies handle DACL before declaring success. Failure on any check refuses the write (hard-fail when installing hub-mode tokens; fall back + WARN already documented for adapters without header support). Same helper used for backups in `BackupKeep`.
+**Enterprise stance — Group Policy / MDM-managed ACLs** (codex r4 F7 closure): the allowlist (`current-user-SID, LocalSystem, BuiltinAdministrators`) is **intentionally narrow** and may reject configurations that an enterprise IT admin pushes via Group Policy, MDM, or AppLocker "managed application" templates that add inherited read ACEs for `Domain Users`, `Domain Admins`, a corporate management SID, or a backup-service SID. This is the correct behavior — `hub-mcp-tokens.json` carries bearer tokens for the local user's MCP clients, and exposing that read surface to "everyone in the domain" or "the IT support group" widens the trust boundary well beyond the desktop-dev threat model G4 assumes. The expected operator workflow when the allowlist rejects:
+
+1. The hub refuses to start with a CLEAR diagnostic: `state-dir DACL not single-user-safe: ALLOW for <SID> (<resolved-name>) exceeds allowlist {current-user, LocalSystem, BuiltinAdministrators}. Either remove the policy ACL or run the hub from a profile location outside policy scope.`
+2. Operator can either:
+   a. Move `<state-dir>` outside the policy-managed path (e.g., to a per-user folder NOT covered by the inheriting OU/GPO scope). Set `MCPHUB_STATE_DIR` env var if the test-tag build is in use, OR (production) place the profile on a non-managed volume.
+   b. Ask the IT admin to ADD the per-user `<state-dir>` (or its grandparent if `%LOCALAPPDATA%`) to the GPO's ACL exception list.
+   c. Accept the loss and disable G4 hub-endpoint mode (`gui_server.hub_endpoint_enabled=false`); fall back to per-daemon URLs which write to their respective adapter-managed locations (different DACL constraints).
+3. There is NO "trust this SID" config flag in v0.3.0. Adding one would be the natural escape hatch but every SID added widens the trust boundary; we keep the rejection hard until enterprise pilots tell us a specific shared-context scenario justifies the additional surface. Document this as a known enterprise constraint in `docs/phase-3b-ii-verification.md` D2.7 + `docs/operators-enterprise-notes.md` (new, light).
+4. Domain-joined machines where the operator IS the IT admin and Group Policy CAN'T be edited (rare but real): document the explicit move-to-non-managed-profile recovery path. The hub is a desktop-dev tool; "policy ACL hands my token to the help-desk group" is the FAR more common scenario than "I trust the help-desk group to read my tokens".
+
+**Tests** (`hub_mcp_state_dacl_test.go`): synthesize a state-dir with each of the above scenarios (vanilla single-user, allowlist-conforming, domain-user-add ACE present, Everyone-deny + Everyone-allow combo, deep INHERITED_ACE chain, etc.) and assert reject vs accept matches the allowlist semantics. Helper builds DACLs via `golang.org/x/sys/windows.ACL` + `BuildExplicitAccessWithName`.
+
+**Handle-bound client config writer** (codex r3 security F-S3 closure for client configs; F6-r4 follow-up detail): the existing `internal/clients/*.go` adapters use path-based `os.WriteFile` and `os.OpenFile` which are TOCTOU-vulnerable for token-bearing writes. A new helper `SecureWriteClientConfig(path, contents []byte)` operates handle-relative throughout.
+
+### SecureWriteClientConfig sequence (codex r4 F6 closure — TOCTOU-safe)
+
+```text
+1. parentDir, base := filepath.Split(path)
+2. dirHandle = open(parentDir, O_DIRECTORY|O_RDONLY)        // POSIX
+   dirHandle = CreateFile(parentDir, FILE_LIST_DIRECTORY,
+                          FILE_SHARE_READ|FILE_SHARE_WRITE,
+                          security=current-user-only,
+                          OPEN_EXISTING,
+                          FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT,
+                          0)                                  // Windows
+   - REPARSE_POINT flag rejects symlinks/junctions in the parent path
+   - defer dirHandle.Close()
+3. verify dirHandle DACL (handle-bound): owner == current-user,
+   only {current-user, LocalSystem, BuiltinAdministrators} allowlist
+   (same canonical-ACE evaluation as the state-dir DACL verify above).
+   On failure: reject with "<parent-dir>: DACL not single-user safe".
+4. tempName := fmt.Sprintf(".%s.tmp.%d.%x", base, os.Getpid(),
+                            crypto/rand 8 bytes)
+   - Why crypto/rand: defeats predictable-name races on Windows where
+     a competing process could pre-create the tempName under a
+     DACL the attacker controls.
+5. tempHandle = openat(dirHandle, tempName,
+                       O_CREATE|O_EXCL|O_WRONLY|O_NOFOLLOW, 0600)
+   - openat(2) (POSIX) / CreateFileEx-relative-to-dir-handle (Win32
+     via NtCreateFile + RootDirectory) — guarantees the open resolves
+     RELATIVE TO THE OPEN PARENT DIR HANDLE, not a re-walked path.
+     Defeats "swap parent dir between step 2 and step 5" races.
+   - O_EXCL: refuses if the tempName already exists.
+   - O_NOFOLLOW: refuses if tempName is a pre-existing symlink.
+   - On Windows there's no openat; use the same x/sys/windows trick
+     as the watchdog state writer: NtCreateFile with RootDirectory set
+     to the dirHandle, ObjectAttributes path = base only. Same TOCTOU
+     guarantee as POSIX openat.
+   - On failure: surface to caller, defer dirHandle.Close().
+6. set DACL on tempHandle BEFORE writing bytes (Windows only):
+   SetSecurityInfo(tempHandle, DACL_SECURITY_INFORMATION,
+                    nil, nil, restrictiveDACL, nil)
+   where restrictiveDACL = {Allow current-user GENERIC_ALL,
+                             Allow LocalSystem GENERIC_ALL,
+                             Allow BuiltinAdministrators GENERIC_ALL}.
+   - Done by HANDLE not path, so swap-between-create-and-DACL is impossible.
+   - On POSIX the O_CREATE used mode 0600; further fchmod is a no-op
+     unless umask interfered, in which case fchmod(tempHandle, 0600)
+     fixes it.
+7. write(tempHandle, contents)
+8. fsync(tempHandle)
+9. tempHandle.Close()                                          // flush + release
+10. renameat(dirHandle, tempName, dirHandle, base)             // POSIX
+    NtSetInformationFile(dirHandle, FileRenameInformationEx,
+                         {ReplaceIfExists: true, RootDirectory: dirHandle,
+                          FileName: base, Flags: POSIX_SEMANTICS})  // Windows
+    - Atomic rename via the SAME dirHandle (root-directory-relative).
+      Symlink/junction in the destination path is impossible because
+      the rename is path-string-relative-to-dirHandle, not re-walked
+      from root.
+    - POSIX_SEMANTICS flag on Windows 10+ makes the rename atomic
+      (replaces unconditionally without the legacy "in-use" lock).
+11. verifyHandle = openat(dirHandle, base, O_RDONLY|O_NOFOLLOW)
+    - Re-open the destination via the SAME dirHandle to re-verify DACL.
+      Path-based re-open here would be TOCTOU; the dirHandle anchor
+      eliminates the window.
+    - Sanity check: stat verifyHandle, assert (inode, size) match expectations.
+12. verify verifyHandle DACL (handle-bound, same allowlist as step 3).
+    - If the rename succeeded but the on-disk DACL is wrong (some
+      Windows policy ACLs auto-apply on certain paths — see DACL
+      enterprise stance below), surface a HARD ERROR; the caller
+      MUST refuse to write the token and fall back to per-daemon URLs.
+13. verifyHandle.Close(); dirHandle.Close()
+```
+
+**Why every step uses dirHandle-relative ops:**
+
+- The classic TOCTOU is "path-based open / set-DACL / rename / re-open" — each path resolution is a fresh walk from root, giving an attacker with write to any ancestor a swap window.
+- Anchoring every op to the parent-dir handle freezes ancestor-resolution at step 2. Once dirHandle is held, the open/rename/re-open ops see the SAME directory inode regardless of what happens to the parent path string in the tree.
+- On Windows, `NtCreateFile`/`NtSetInformationFile` with `RootDirectory=dirHandle` give the same semantic; the wrapper in `internal/api/secure_write_windows.go` exposes `openatLikeWindows(dirHandle, name, flags) (windows.Handle, error)` and `renameatLikeWindows(dirHandle, oldName, dirHandle, newName) error`.
+- The `crypto/rand` tempName + O_EXCL + DACL-set-before-write sequence prevents an attacker with write-to-parent from racing into the temp slot.
+- The final handle-bound re-verify is the actual safety net: even if some unanticipated policy ACL got applied between rename and re-open, we'd catch it at step 12 and refuse the write rather than leave a token in a file with leaked-read access.
+
+Failure on any check refuses the write (hard-fail when installing hub-mode tokens; fall back + WARN already documented for adapters without header support). Same helper used for backups in `BackupKeep`.
 
 **Bind ordering** (F-S3 closure for "no half-initialized state", patched per codex r3 general F3):
 
@@ -208,13 +323,47 @@ Windows DACL verification is **allowlist-based** (codex r3 security F-S3 closure
 5. resolve all manifests; validate no '__' in server names (strict mode for participating set) → exit 8 if any fail
 6. listener := newListenerWithSOExclusive("127.0.0.1:<port>")
    where newListenerWithSOExclusive is build-tagged:
-   - windows: net.ListenConfig{Control: func(_, _ string, c syscall.RawConn) error {
-         return c.Control(func(fd uintptr) {
-             windows.SetsockoptInt(windows.Handle(fd), windows.SOL_SOCKET, windows.SO_EXCLUSIVEADDRUSE, 1)
-         })
-     }}.Listen
-   - posix: net.ListenConfig{}.Listen (no analogue; loopback bind alone is sufficient on POSIX)
-   Note: golang.org/x/sys/windows exposes SO_EXCLUSIVEADDRUSE (not in syscall stdlib).
+   - windows (internal/api/hub_mcp_listener_windows.go): defines a local
+     constant — `golang.org/x/sys/windows` does NOT export
+     SO_EXCLUSIVEADDRUSE (codex r4 F4 closure; verified against
+     x/sys@v0.26.0/windows/types_windows.go which only defines
+     SO_REUSEADDR = 4). The Windows ws2def.h value is
+     `((u_int)(~SO_REUSEADDR))` = -5. We use the bitwise-NOT form so
+     intent reads at-a-glance and stays robust if x/sys ever updates
+     SO_REUSEADDR:
+       ```go
+       // soExclusiveAddrUse is the Windows-specific SO_EXCLUSIVEADDRUSE
+       // socket option. Defined locally because x/sys/windows does not
+       // export it. Value matches ws2def.h's `((u_int)(~SO_REUSEADDR))`.
+       const soExclusiveAddrUse = ^windows.SO_REUSEADDR // = -5 on Windows
+       ```
+     The listener factory is:
+       ```go
+       func newListenerWithSOExclusive(addr string) (net.Listener, error) {
+           lc := net.ListenConfig{
+               Control: func(_, _ string, c syscall.RawConn) error {
+                   var setErr error
+                   ctlErr := c.Control(func(fd uintptr) {
+                       setErr = windows.SetsockoptInt(
+                           windows.Handle(fd),
+                           windows.SOL_SOCKET,
+                           soExclusiveAddrUse,
+                           1,
+                       )
+                   })
+                   if ctlErr != nil {
+                       return ctlErr
+                   }
+                   return setErr // F4: surface SetsockoptInt error to caller
+               },
+           }
+           return lc.Listen(context.Background(), "tcp", addr)
+       }
+       ```
+     The `setErr` capture is mandatory (codex r4 F4 followup): a silently-dropped Setsockopt error means the listener still binds with default `SO_REUSEADDR` semantics, defeating the pre-bind safeguard.
+   - posix (internal/api/hub_mcp_listener_posix.go): plain
+     `net.ListenConfig{}.Listen` — no analogue; loopback bind alone is
+     sufficient on POSIX (the threat model treats pre-bind as DoS only).
    If port was 0 (first start), retrieve the assigned port via listener.Addr().(*net.TCPAddr).Port for step 7.
 7. write hub-mcp.endpoint.json {port, instance_id, pid, started_at} (atomic, under same lock).
    If write fails after listener exists → defer listener.Close() in error path. The contract is
@@ -304,6 +453,37 @@ Planner logic on gate-OFF full-reconcile pass:
 
 Result: toggling gate ON/OFF via the full-reconcile pass is round-trippable. Single-server install paths are scope-coherent — they don't damage unrelated server entries.
 
+### Crash-safe reconcile ordering (codex r4 F2 closure)
+
+The full-reconcile pass executes its plans against each client config file in this fixed order:
+
+1. **AddReplace entries are applied FIRST** (in any order — within one client, all AddReplace ops happen before any Remove op).
+2. **Remove entries are applied LAST** (after every AddReplace succeeds for that client).
+3. Each per-client mutation is one atomic config rewrite (`SecureWriteClientConfig`, see below) — partial-write torn states do not occur within a single client config.
+4. Per-client mutations are independent: if one client write fails, the reconcile continues with the next client and surfaces the failure as a partial result; the operator reruns to converge.
+
+**Why add-before-remove:** if `mcphub gui` crashes (or `mcphub install` is force-killed) BETWEEN clients or DURING a single client's mutation, the worst-case observable state is "two competing entries point to the same server" (one per-daemon + one `mcphub-hub`), NOT "no working entry". MCP clients tolerate duplicate entries — they may connect to one or both — but they do NOT tolerate a missing entry. The next reconcile pass converges to the intended state.
+
+**Gate-ON transition** (per-daemon → hub):
+
+1. For every client X with a non-empty participating set:
+   1. AddReplace `EntryName="mcphub-hub"` first.
+   2. THEN Remove every per-(server, X) entry the hub now serves.
+2. For every client X with an EMPTY participating set:
+   - Remove `EntryName="mcphub-hub"` (no AddReplace needed; there is no replacement entry).
+
+**Gate-OFF transition** (hub → per-daemon):
+
+1. For every client X with any previously-hub-routed manifest:
+   1. AddReplace each per-(server, X) entry FIRST (every server that used to be hub-routed).
+   2. THEN Remove `EntryName="mcphub-hub"`.
+
+**Per-client write atomicity:** every `client-config.json` rewrite uses `SecureWriteClientConfig` (open parent dir → create handle-bound temp file with O_EXCL + DACL → write expanded contents → fsync → atomic rename → re-open final to verify DACL). The on-disk file is either the old contents or the fully-new contents — never a torn intermediate. See "Client config write hardening" below for the full TOCTOU-safe sequence (F-S2 / F6-r3 closure).
+
+**Recovery on partial crash:** the next gui startup runs the full-reconcile pass implicitly (or operator explicitly via `mcphub install --reconcile-hub-mode`). The reconcile is **idempotent**: AddReplace is a no-op if the entry already matches; Remove is a no-op if the entry is absent. The "two competing entries" state from a partial crash converges to the intended state on the next pass — no operator intervention required, no data loss.
+
+**Bind-failure rollback (gate-ON):** if the gui process binds the hub listener AFTER writing client configs and the bind fails (`address in use`), clients now have an `mcphub-hub` entry pointing to a non-listening port. To avoid this, the bind is sequenced BEFORE the reconcile (see "Bind ordering" — steps 1-7 below): full-reconcile only runs after the hub listener is up. If the bind fails, the reconcile is SKIPPED, the operator sees the bind error, and existing client configs (still per-daemon) keep working — gate-ON is effectively a no-op until the bind succeeds.
+
 Adapter capability check (run at plan time):
 
 | Adapter | Custom-header support | Hub-mode |
@@ -346,12 +526,56 @@ The two TBDs are plan-time verification tasks; if unsupported, they join antigra
 
 1. Acquires `<state-dir>/hub-mcp.lock`.
 2. Reads + updates `hub-mcp-tokens.json` (atomic write).
-3. Sends a SIGHUP-equivalent reload signal to the running hub process via a hub-internal control channel: `POST http://127.0.0.1:<port>/internal/reload-tokens` on the loopback listener, authenticated by an additional control token rotated per hub start (stored under `<state-dir>/hub-mcp-control.token`, 0600 + DACL-verified, never sent to clients).
-4. Hub re-reads `hub-mcp-tokens.json` atomically (load → swap `tokenTable` under RWMutex Lock), responds 200.
+3. Sends a SIGHUP-equivalent reload signal to the running hub process via a hub-internal control channel: `POST http://127.0.0.1:<port>/internal/reload-tokens` on the loopback listener, authenticated by a per-start control token (see "Control endpoint contract" below).
+4. Hub re-reads `hub-mcp-tokens.json` atomically (load → swap `tokenTable` under RWMutex Lock), responds 204 No Content (no response body — see contract below).
 5. CLI returns success only after the hub confirms the swap. Old tokens become unaccepted within milliseconds; no restart required.
 6. Failure path: if the control endpoint is unreachable (hub stopped, crashed, etc.), the CLI returns with exit 1 + a message "rotate persisted to disk but live hub did not confirm; restart hub to apply or investigate". Worst case = old token still valid until next hub start, with operator surfaced clearly.
 
 An e2e regression test (`hub_mcp_rotate_live_test.go`) asserts: after `regenerate-token`, a request bearing the OLD token returns 401 within 500ms — without restarting the hub.
+
+### Control endpoint contract `/internal/reload-tokens` (codex r4 F5 closure)
+
+The control endpoint is a NEW attack surface introduced by the live-reload mechanism. Its contract is restrictive on purpose:
+
+**Auth + access gates:**
+
+- HTTP method: **POST only**. Any other method → 405 Method Not Allowed with empty body. Pre-flight OPTIONS rejected (no CORS opt-in).
+- Listener: same socket as the per-client `/clients/{id}/mcp` endpoints (single bind; one less moving part). Routed at `/internal/reload-tokens` — the `/internal/` prefix is **the only one** the hub uses; any other path under `/internal/` returns 404 with empty body. The token-bearing `/clients/{id}/mcp` paths never enter this branch.
+- **Loopback-guard runs first** — same `rejectUnsafeLoopbackRequest` middleware (`Host: 127.0.0.1[:port] | localhost[:port]`, Origin in the loopback set if present, `Sec-Fetch-Site` in `same-origin | none`). External hosts via DNS-rebind / cross-site fetch → 403.
+- Auth header: `X-Mcphub-Control-Token: <64-hex>`. **No fallback to per-client `X-Mcphub-Hub-Token` or `X-Mcphub-Instance-Id`** — those headers are IGNORED on this path. The control token is a separate keyspace; a leaked client token cannot reach this endpoint.
+- Comparison: `subtle.ConstantTimeCompare` after fixed-shape gate (64 hex bytes), identical to the per-client gate. Mismatch → 401 with empty body.
+- Body: ignored. The endpoint takes no parameters; reload is global. (If the CLI later wants to rotate per-client incrementally, that's a separate endpoint with a separate token; keep this one parameterless.)
+
+**Control token lifecycle:**
+
+- Generated by `crypto/rand` on every hub start (rotates per hub-process lifetime, not per-machine-lifetime). The persisted-instance_id model has nothing to do with the control token — control token rotation is unrelated to client-config invalidation.
+- Stored under `<state-dir>/hub-mcp-control.token` (file, NOT JSON; just the 64-hex value + newline). Mode 0600. Windows DACL via the same handle-bound writer used for `hub-mcp-tokens.json`. NEVER copied into client configs. NEVER printed by `mcphub hub-mcp status`. NEVER logged.
+- On hub shutdown (graceful OR signal): the file is removed under the same `hub-mcp.lock` flock. A crashed hub may leave a stale file; the next hub start overwrites it (write-then-flock-release; load by the CLI is best-effort with a "file missing → hub not running" diagnostic).
+- The CLI reads this file ONLY while holding `<state-dir>/hub-mcp.lock`. The lock guarantees the CLI's token snapshot was valid at read-time; the value goes straight into the HTTP header (in-memory) and is never logged or echoed.
+
+**Status + observability minimization:**
+
+- `mcphub hub-mcp status` does NOT print the control-token file path, mode, or presence. The token's existence is internal-only; even the most paranoid status output leaks only "control endpoint reachable: yes/no" via a probe round-trip with the operator-side CLI doing the auth.
+- The internal control endpoint does NOT appear in `hub-mcp.log` route summaries. Successful reloads emit one log line `event=tokens-reloaded source=internal-reload` with NO token bytes, NO instance ids, NO source PID. Failed-auth attempts log `event=internal-reload-rejected reason=<unauth|method|loopback>` with no header content.
+
+**Threat-model implications:**
+
+| Vector | Mitigation |
+|---|---|
+| Attacker captures control token via process memory dump | Same trust boundary as the per-client token (state-dir 0600/DACL). Memory-dump access ⇒ already root/admin or the running user; full local compromise. Acknowledged residual desktop-dev risk. |
+| Attacker captures control token via backup leak | `hub-mcp-control.token` is in `<state-dir>` (per-user) — same trust boundary as the watchdog state files. If state-dir is in a backup the operator already has bigger problems; document in `phase-3b-ii-verification.md` that backups of `<state-dir>` should be encrypted-at-rest or excluded. |
+| Force-reload via captured control token | Worst case: attacker can repeatedly call `/internal/reload-tokens` causing the hub to re-read `hub-mcp-tokens.json` from disk. That file is also under `<state-dir>` (per-user); the attacker needs filesystem write to flip token bytes. Reload alone (with the file unchanged) is a no-op other than CPU. Rate-limited via a 5s cooldown server-side; flood → 429. |
+| Replay across hub restarts | Control token rotates per hub start. A captured-and-replayed token from a previous hub-process is rejected by the constant-time compare (different keyspace). |
+
+**Tests** (`hub_mcp_internal_reload_test.go`):
+
+- POST with correct control token → 204; tokenTable swap observable on next per-client request.
+- GET / PUT / DELETE / OPTIONS → 405, empty body.
+- Wrong control token → 401, empty body, constant-time path exercised (hex-shape rejection vs compare-rejection both return identical bodies).
+- Non-loopback Host → 403.
+- Per-client `X-Mcphub-Hub-Token` header with control-token value → 401 (separate keyspace; per-client header NOT accepted for `/internal/*`).
+- Rate-limit: 3 valid reloads in 1s, 4th → 429 with `Retry-After: 5`.
+- Status + log surfaces: golden test asserts zero control-token bytes across `status`, `hub-mcp.log`, install error paths.
 
 ## Partial-failure visibility (closure for original F-G6 P2)
 
@@ -399,7 +623,7 @@ Settings registry (extends `internal/api/settings_registry.go`):
 ```go
 {Key: "gui_server.hub_endpoint_enabled", Section: "gui_server", Type: TypeBool,
     Default: "false", Deferred: true,
-    Help: "Expose a single aggregated hub URL per client instead of per-daemon URLs. Restart required. Hub instance ID rotates on every gui restart — clients must be reinstalled (`mcphub install`) after each restart to pick up the new ID."},
+    Help: "Expose a single aggregated hub URL per client instead of per-daemon URLs. Restart required. Hub instance ID is generated once on first start and persists across restarts; clients re-install only on explicit operator-rotation events (`mcphub hub-mcp regenerate-instance-id` or `regenerate-token`)."},
 ```
 
 New CLI subcommand `mcphub hub-mcp`:
@@ -412,6 +636,27 @@ mcphub hub-mcp status [--json]
 mcphub hub-mcp regenerate-token --client <id> [--yes]
     Rotate one client's token. Refuses non-TTY without --yes (exit 6).
     Prints re-install instruction. No grace window (stolen token rejected immediately).
+
+mcphub hub-mcp regenerate-instance-id [--yes]
+    Rotate the persistent hub instance id (full burn-down: every client config
+    becomes stale until reinstalled). For incident response — token leak that
+    might have included instance_id exposure, or any concern that an old
+    instance_id was captured by an attacker. Holds the same hub-mcp.lock as
+    `regenerate-token`. Refuses non-TTY without --yes (exit 6). After
+    rotation: every client must run `mcphub install` again. Stale-instance
+    requests get 401 immediately; no grace window.
+
+mcphub gui --reset-port [--yes]
+    Discard the current persistent hub-mcp port; the next `mcphub gui` start
+    picks a fresh ephemeral port. Use this when:
+      a) a local-attacker pre-bind blocks the port (DoS recovery — see
+         "Pre-bind handling" above),
+      b) the port has been published externally (logs, screenshots) and you
+         want to invalidate it pre-emptively,
+      c) the endpoint state file is corrupted past the parse-failure handler.
+    Implies a follow-up `mcphub install` to refresh every client config with
+    the new port. Refuses non-TTY without --yes (exit 6). Does NOT touch
+    instance_id (separate concern); use `regenerate-instance-id` for that.
 ```
 
 Exit codes: 0 success, 1 backend error, 6 non-TTY without --yes, 8 state path sanity rejected.
@@ -420,8 +665,8 @@ Exit codes: 0 success, 1 backend error, 6 non-TTY without --yes, 8 state path sa
 
 | Vector | Mitigation |
 |---|---|
-| Pre-bind on port (HIGH r1) | Persistent random port (per-user); SO_EXCLUSIVEADDRUSE bind; hub-instance-id challenge on every request. Captured token alone is useless if instance_id rotates on restart. |
-| Stale URL after restart (HIGH r2 partial) | Hub instance_id mismatch → 401. Operator workflow surfaces re-install requirement. |
+| Pre-bind on port (HIGH r1) | Persistent random port (per-user); SO_EXCLUSIVEADDRUSE bind. A local-attacker pre-bind is **denial of service, not confidentiality** (auth gate still rejects the attacker's connections); operator recovers via `mcphub gui --reset-port` + reinstall. Captured-token replay defense: per-client token + persistent `X-Mcphub-Instance-Id`; both must match the current hub state. A stolen token is rejected after `regenerate-token`; a stolen token + stolen instance_id is rejected after `regenerate-instance-id` — operator-driven invalidation, not restart-driven. |
+| Stale URL after explicit rotation event (HIGH r2 partial) | After `regenerate-token` or `regenerate-instance-id`, stale client configs fail with 401. Restart alone does NOT invalidate URLs by design (operator-installability tradeoff); only explicit operator action does. `regenerate-instance-id` is the burn-down for instance-compromise scenarios. |
 | Browser CSRF / DNS-rebind / cross-site-fetch | Existing `rejectUnsafeLoopbackRequest` (loopback Host, loopback Origin, Sec-Fetch-Site). Token + instance_id required. |
 | Token leak via process memory dump | Acknowledged residual risk for desktop dev threat model. |
 | Token leak via logs/status/install/stderr/argv (MED r2 partial) | Single `RedactToken` helper at every emit site; golden test asserts zero plain-token bytes across surfaces. |
@@ -437,17 +682,17 @@ Exit codes: 0 success, 1 backend error, 6 non-TTY without --yes, 8 state path sa
 | `mcphub install` race (LOW r1 partial) | Per-client config write held under flock; re-read gate state + token under same lock before write. |
 | Malicious CLI invocation | `regenerate-token` interactive confirm + `--yes`; status redacts; no grace window. |
 
-## Round-3 verification (must pass before implementation)
+## Round-5 verification (must pass before implementation)
 
-Codex review v3 must verify:
+Codex review v3.2 must verify:
 
-1. All 24 r1+r2 findings have explicit closure paths in this spec (cross-reference table).
-2. No NEW issues introduced by v3 mechanisms (resolver-gen, instance-id, persistent port, idle sweeper).
-3. Adapter capability matrix verified for gemini-cli + qwen-cli (TBDs resolved).
-4. Concurrency model self-consistent (atomic-swap route map + RWMutex sessionStore + sync.Map InFlightRequests + idle sweeper with try-lock).
-5. Bind ordering invariants honored (steps 1-7 sequential, no half-initialized state).
+1. All 33 cumulative findings (24 r1+r2 general/security + 9 r3 + 7 r4) have explicit closure paths in this spec (cross-reference table maintained in the commit message of `2b58b48` for r3 and the v3.2 commit for r4).
+2. No NEW issues introduced by v3.2 mechanisms: persistent instance_id model with operator-driven rotation, crash-safe add-before-remove reconcile ordering, local `soExclusiveAddrUse` constant with SetsockoptInt error capture, `/internal/reload-tokens` control endpoint with per-start control token + loopback-guard + rate-limit, handle-relative SecureWriteClientConfig with `dirHandle`-anchored open/rename/re-verify, DACL enterprise-rejection stance with no per-SID escape hatch in v0.3.0.
+3. Adapter capability matrix verified for gemini-cli + qwen-cli (TBDs resolved by impl phase).
+4. Concurrency model self-consistent (atomic-swap resolver snapshot + RWMutex sessionStore + requestIDKey-keyed InFlightRequests + idle sweeper with try-lock + tokenTable RWMutex swap on live-reload).
+5. Bind ordering invariants honored (steps 1-7 sequential, no half-initialized state); listener factory captures Setsockopt error.
 
-If round-3 returns REVISE, the v4 round is bounded — only NEW findings, not re-litigation of v1/v2 issues that have explicit closure paths here.
+If round-5 returns REVISE, the v3.3 round is bounded — only NEW findings, not re-litigation of issues that have explicit closure paths here.
 
 ## Files to create / modify (impl-time outline)
 
@@ -458,7 +703,7 @@ If round-3 returns REVISE, the v4 round is bounded — only NEW findings, not re
 | `internal/api/hub_mcp_resolver.go` | new | canonical resolver + resolver-gen counter (F-G3, F-S4) |
 | `internal/api/hub_mcp_state.go` | new | atomic write + handle-bound DACL verify (F-S3) |
 | `internal/api/hub_mcp_tokens.go` | new | generate/lookup/rotate + RedactToken helper (F-S2) |
-| `internal/api/hub_mcp_instance.go` | new | per-start instance_id generator + endpoint state (F-S1) |
+| `internal/api/hub_mcp_instance.go` | new | persistent-across-restarts instance_id (generated once, rotated only by `regenerate-instance-id`) + endpoint state file (port + instance_id + pid + started_at) (F-S1) |
 | `internal/api/hub_mcp_session.go` | new | hubSessionStore + idle sweeper + caps (F-G7, F-S5) |
 | `internal/api/hub_mcp_handler.go` | new | 5-step auth gate + JSON-RPC dispatch (F-G1) |
 | `internal/api/hub_mcp_aggregator.go` | new | fan-out + namespacing + partial-failure + canonical rewrite (F-G2, F-G3) |
@@ -466,7 +711,8 @@ If round-3 returns REVISE, the v4 round is bounded — only NEW findings, not re
 | `internal/api/settings_registry.go` | modify | add `gui_server.hub_endpoint_enabled` |
 | `internal/api/install.go` | modify | bidirectional reconciler (F-G5); pre-write DACL on client configs (F-S2) |
 | `internal/gui/server.go` | modify | start hub-mcp listener after state ready; SO_EXCLUSIVEADDRUSE bind |
-| `cmd/mcphub/hubmcp.go` | new | `mcphub hub-mcp status` + `regenerate-token` |
+| `cmd/mcphub/hubmcp.go` | new | `mcphub hub-mcp status` + `regenerate-token` + `regenerate-instance-id` |
+| `cmd/mcphub/gui.go` | modify | add `--reset-port` flag handler (rewrites endpoint file under hub-mcp.lock; clears persistent port; emits reinstall instruction) |
 | `internal/gui/frontend/src/screens/Settings.tsx` | modify | toggle row + pending-restart badge + instance_id display |
 
 ## Test surface
@@ -477,7 +723,7 @@ If round-3 returns REVISE, the v4 round is bounded — only NEW findings, not re
 - `hub_mcp_resolver_test.go`: join correctness; gen counter advances on manifest mutations; per-call revalidation rejects stale route entries.
 - `hub_mcp_state_test.go`: atomic write + load roundtrip; load rejects symlink, non-owner, wrong mode, wrong DACL, reparse-point parent dir.
 - `hub_mcp_tokens_test.go`: generate, persist, rotate; golden redaction across log/status/install/regenerate/stderr/argv emit surfaces.
-- `hub_mcp_instance_test.go`: instance_id rotates on every start; client config with stale instance_id is rejected with 401.
+- `hub_mcp_instance_test.go`: instance_id generated once on first start, persisted, and unchanged across the next 10 simulated restarts; only `regenerate-instance-id` rotates it; post-rotation a stale-id request gets 401; ephemeral-port reset via `--reset-port` rewrites endpoint file under flock without touching instance_id.
 - `hub_mcp_session_test.go`: session create + lookup + TTL expiry + max-sessions cap; idle sweeper respects InFlightRequests.
 - `hub_mcp_handler_test.go`: 5-step auth gate matrix (path-unknown, token-shape, constant-time, instance-id, session-client) — every 401 returns identical empty body.
 - `hub_mcp_aggregator_test.go`: fan-out partial-failure (init-failed daemon + tools/list-failed daemon → both surface in partialFailures); canonical rewrite (params.name rewritten to RawName); resolver-gen stale-route refusal.
@@ -485,11 +731,11 @@ If round-3 returns REVISE, the v4 round is bounded — only NEW findings, not re
 
 **Integration:**
 
-- `hub_mcp_e2e_test.go`: spin up `mcphub gui` with gate ON; hit `/clients/claude-code/mcp` with valid + invalid tokens / wrong instance ids; observe partial-failures, cancellation forwarding, DELETE session termination.
+- `hub_mcp_e2e_test.go`: spin up `mcphub gui` with gate ON; hit `/clients/claude-code/mcp` with valid + invalid tokens / wrong instance ids; observe partial-failures, cancellation forwarding, DELETE session termination. Asserts restart preserves instance_id (token + URL still work without reinstall) and that `regenerate-instance-id` invalidates the stale config.
 
 **Playwright E2E:**
 
-- `internal/gui/e2e/tests/hub-mcp.spec.ts`: gate OFF → no listener; gate ON after restart → 401 without token / wrong instance id; tools/list returns merged list; restart → old token rejected, fresh install works.
+- `internal/gui/e2e/tests/hub-mcp.spec.ts`: gate OFF → no listener; gate ON after restart → 401 without token / wrong instance id; tools/list returns merged list; restart → old token + URL still work (persistence positive); after `regenerate-token` → old token rejected, fresh install works; after `regenerate-instance-id` → both token-only and URL-only stale configs rejected, fresh install works.
 
 **Manual smoke** (added to `docs/phase-3b-ii-verification.md` D2.7): full flow with claude-code + codex-cli.
 
@@ -537,7 +783,7 @@ If round-3 returns REVISE, the v4 round is bounded — only NEW findings, not re
 - `route map`: per-session map keyed by exposed flat tool name → canonical `(server, daemon, port, raw_name)`. Hub rewrites `params.name` to `raw_name` before forwarding `tools/call`.
 - `5-step auth gate`: loopback-guard + path-client lookup + token-shape gate + constant-time compare + instance-id match + session-client invariant.
 - `resolver generation`: monotonic counter bumped on every manifest add/edit/uninstall; sessions capture at create; per-`tools/call` revalidation refuses entries that became stale.
-- `hub instance id`: 32-byte hex generated per `mcphub gui` start; required in every request via `X-Mcphub-Instance-Id`; rotates on restart so captured tokens from old instances are useless.
+- `hub instance id`: 32-byte hex generated ONCE on the first start with the gate ON and persisted in `<state-dir>/hub-mcp.endpoint.json`; required in every request via `X-Mcphub-Instance-Id`. Persistent across hub restarts (operator-installability tradeoff); rotated only by explicit `mcphub hub-mcp regenerate-instance-id` (or a successful endpoint-file recreate, e.g. after corruption-recovery).
 - `DACL`: Windows Discretionary Access Control List; per-file ACL entries that grant/deny per-SID access.
 - `handle-bound DACL verify`: query security info from an open file handle (not by path), so a swap between stat and read cannot leak access.
 - `golden redaction test`: enumerates every emit surface (log/status/install/regenerate/stderr/argv/syscall errors) and asserts zero plain-token bytes.
