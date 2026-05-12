@@ -95,6 +95,21 @@ func ensureHubTokensLocked(clients []string) (HubTokenTable, error) {
 	if tbl.Tokens == nil {
 		tbl.Tokens = map[string]string{}
 	}
+	// Codex bot r4 P2 closure: validate any pre-existing token entries
+	// before treating them as "already provisioned". A semantic
+	// corruption (empty string, wrong length, non-hex) would otherwise
+	// be preserved here and silently break auth — ConstantTimeCompareToken's
+	// length gate at every request would return 0 and the client gets
+	// a permanent 401 with no actionable error from Ensure.
+	//
+	// We reject corruption explicitly so the operator can investigate
+	// via `mcphub hub-mcp regenerate-token --client X` (the targeted
+	// rotation path) or restore from backup.
+	for client, tok := range tbl.Tokens {
+		if !isValidHexToken(tok) {
+			return HubTokenTable{}, fmt.Errorf("hub-mcp tokens corruption: client %q has malformed token (got %d bytes, want 64 hex); use `mcphub hub-mcp regenerate-token --client %s` to explicitly rotate, or restore the file", client, len(tok), client)
+		}
+	}
 	changed := false
 	for _, c := range clients {
 		if c == "" {
@@ -234,6 +249,29 @@ func ConstantTimeCompareToken(client, headerToken string) int {
 		return 0
 	}
 	return subtle.ConstantTimeCompare([]byte(stored), []byte(headerToken))
+}
+
+// isValidHexToken returns true iff `s` is exactly 64 hex characters
+// (either case). Used by ensureHubTokensLocked to reject corrupted
+// pre-existing entries before they leak into the live snapshot.
+// Mirrors the constant-time compare's length gate semantics so a
+// token that passes isValidHexToken can also be compared via
+// ConstantTimeCompare in O(64) without truncation.
+func isValidHexToken(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for i := 0; i < 64; i++ {
+		c := s[i]
+		switch {
+		case c >= '0' && c <= '9':
+		case c >= 'a' && c <= 'f':
+		case c >= 'A' && c <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // loadHubTokensLocked reads + parses the tokens file. Returns a zero

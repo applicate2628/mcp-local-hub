@@ -85,18 +85,30 @@ func EnsureHubEndpoint(ephemeralPort, pid int) (HubEndpoint, error) {
 // already hold hub-mcp.lock.
 func ensureHubEndpointLocked(ephemeralPort, pid int) (HubEndpoint, error) {
 	ep, err := loadHubEndpointLocked()
-	if err != nil && !isMissingEndpointErr(err) {
+	missing := isMissingEndpointErr(err)
+	if err != nil && !missing {
 		// A parse / DACL failure on an EXISTING file is not silently
 		// regenerated — the spec calls for refusing to proceed so an
 		// operator can investigate (§"Bind ordering" step 4).
 		return HubEndpoint{}, err
 	}
-	if ep.InstanceID == "" {
+	if missing {
+		// First-start path: file didn't exist; generate a fresh
+		// instance_id and write a new endpoint record.
 		fresh, gerr := generateHexToken()
 		if gerr != nil {
 			return HubEndpoint{}, gerr
 		}
 		ep.InstanceID = fresh
+	} else if ep.InstanceID == "" {
+		// Codex bot r4 P2 closure: file loaded successfully but
+		// JSON is valid + InstanceID is blank → semantic corruption.
+		// Earlier code path treated this as first-start and silently
+		// rotated the identity, invalidating every installed client.
+		// Refuse and surface — operator must investigate via
+		// `mcphub hub-mcp regenerate-instance-id` (explicit rotation)
+		// or restore the file from a backup.
+		return HubEndpoint{}, fmt.Errorf("hub-mcp endpoint corruption: instance_id is empty in %s (use `mcphub hub-mcp regenerate-instance-id` to explicitly rotate, or restore the file)", hubMcpEndpointFileLeaf)
 	}
 	if ephemeralPort > 0 {
 		ep.Port = ephemeralPort

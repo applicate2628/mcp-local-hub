@@ -224,3 +224,27 @@ func TestLoadHubEndpointReturnsErrWhenMissing(t *testing.T) {
 		t.Fatalf("LoadHubEndpoint on empty state-dir must return error; got nil")
 	}
 }
+
+// TestEnsureHubEndpointRejectsBlankInstanceIDCorruption pins the codex
+// bot r4 P2 closure: a loaded endpoint file with empty instance_id
+// must NOT be treated as first-start (which would silently rotate
+// identity). Operator must investigate explicitly.
+func TestEnsureHubEndpointRejectsBlankInstanceIDCorruption(t *testing.T) {
+	hubMcpStateTestHelper(t)
+
+	// Write a corrupted endpoint file: valid JSON, blank instance_id.
+	corrupt := []byte(`{"port":9120,"instance_id":"","pid":1,"started_at":"2026-05-12T00:00:00Z"}`)
+	if err := writeHubMcpStateFile(hubMcpEndpointFileLeaf, corrupt); err != nil {
+		t.Fatalf("write corrupt: %v", err)
+	}
+	_, err := EnsureHubEndpoint(0, 1234)
+	if err == nil {
+		t.Fatalf("EnsureHubEndpoint must reject blank instance_id; got nil")
+	}
+	if !strings.Contains(err.Error(), "corruption") {
+		t.Errorf("error must mention 'corruption'; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "regenerate-instance-id") {
+		t.Errorf("error must mention the recovery CLI; got %v", err)
+	}
+}

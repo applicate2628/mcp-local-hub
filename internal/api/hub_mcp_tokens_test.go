@@ -280,3 +280,50 @@ func TestHubConstantTimeCompareTokenAccepts(t *testing.T) {
 		t.Fatalf("subtle.ConstantTimeCompare sanity broke")
 	}
 }
+
+// codex bot r4 P2 closure: ensureHubTokensLocked must reject
+// pre-existing entries whose token value is corrupted. Earlier code
+// preserved the bad entry silently, which would always-fail the
+// length gate at ConstantTimeCompareToken and produce permanent 401s
+// without an Ensure-time error to alert the operator.
+func TestEnsureHubTokensRejectsCorruptedExistingEntry(t *testing.T) {
+	hubMcpStateTestHelper(t)
+
+	// Seed with one legitimate client.
+	if _, err := EnsureHubTokens([]string{"claude-code"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// Hand-craft a corrupt on-disk table — the value is the right
+	// length but contains non-hex bytes.
+	corrupt := []byte(`{"tokens":{"claude-code":"NOT_A_HEX_TOKEN_butSixtyFourCharsLong00000000000000000000000000000"}}`)
+	if err := writeHubMcpStateFile(hubMcpTokensFileLeaf, corrupt); err != nil {
+		t.Fatalf("write corrupt: %v", err)
+	}
+	_, err := EnsureHubTokens([]string{"claude-code"})
+	if err == nil {
+		t.Fatalf("EnsureHubTokens must reject malformed token; got nil")
+	}
+	if !strings.Contains(err.Error(), "corruption") {
+		t.Errorf("error must mention 'corruption'; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "regenerate-token") {
+		t.Errorf("error must mention recovery CLI; got %v", err)
+	}
+}
+
+// And the empty-string case (separate JSON-valid corruption form).
+func TestEnsureHubTokensRejectsEmptyTokenString(t *testing.T) {
+	hubMcpStateTestHelper(t)
+
+	if _, err := EnsureHubTokens([]string{"claude-code"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	corrupt := []byte(`{"tokens":{"claude-code":""}}`)
+	if err := writeHubMcpStateFile(hubMcpTokensFileLeaf, corrupt); err != nil {
+		t.Fatalf("write corrupt: %v", err)
+	}
+	_, err := EnsureHubTokens([]string{"claude-code"})
+	if err == nil {
+		t.Fatalf("EnsureHubTokens must reject empty token; got nil")
+	}
+}
