@@ -64,13 +64,20 @@ comment AND a review record:
 # to it. Stale reviews from earlier commits do NOT satisfy PASS.
 HEAD=$(gh pr view <N> --json headRefOid --jq .headRefOid)
 
+# IMPORTANT: `gh api`'s built-in `--jq` flag takes ONLY a single
+# expression string; it does NOT accept `--arg key value` like
+# standalone `jq` does. Pipe `gh api` output to external `jq` when
+# you need `--arg`. (Codex bot caught the incorrect `gh api --jq
+# --arg ...` form in an earlier revision of this doc; rewritten here
+# to the correct pipe-to-jq form.)
+
 # Bot review state — MUST filter to HEAD (avoid stale APPROVED
 # from an earlier commit satisfying PASS condition 1)
 gh api repos/<owner>/<repo>/pulls/<N>/reviews --paginate \
-  --jq --arg sha "$HEAD" '.[]
-    | select(.user.login == "chatgpt-codex-connector[bot]")
-    | select(.commit_id == $sha)
-    | {state, commit_id, submitted_at}'
+  | jq --arg sha "$HEAD" '.[]
+      | select(.user.login == "chatgpt-codex-connector[bot]")
+      | select(.commit_id == $sha)
+      | {state, commit_id, submitted_at}'
 
 # Inline comments — MUST extract `original_commit_id` AND paginate
 # (GitHub auto-rebases inline-comment `commit_id` across pushes;
@@ -81,10 +88,10 @@ gh api repos/<owner>/<repo>/pulls/<N>/reviews --paginate \
 # beyond that would be invisible to a single-page query, making
 # the PASS-zero-inline check vacuous on long-lived PRs.)
 gh api repos/<owner>/<repo>/pulls/<N>/comments --paginate \
-  --jq --arg sha "$HEAD" '.[]
-    | select(.user.login == "chatgpt-codex-connector[bot]")
-    | select(.original_commit_id == $sha)
-    | {original_commit_id, line, path, body}'
+  | jq --arg sha "$HEAD" '.[]
+      | select(.user.login == "chatgpt-codex-connector[bot]")
+      | select(.original_commit_id == $sha)
+      | {original_commit_id, line, path, body}'
 ```
 
 PASS verdict — **all three of the following must hold on the CURRENT
