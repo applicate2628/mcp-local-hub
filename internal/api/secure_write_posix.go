@@ -27,6 +27,7 @@ package api
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -166,8 +167,16 @@ func refusePreexistingSymlink(dirFd int, name string) error {
 	var st unix.Stat_t
 	err := unix.Fstatat(dirFd, name, &st, unix.AT_SYMLINK_NOFOLLOW)
 	if err != nil {
-		// ENOENT: name doesn't exist, fine.
-		return nil
+		// ENOENT: name doesn't exist, atomic create+rename proceeds.
+		// ANY OTHER error (EACCES, EIO, EBUSY, etc.) means we could not
+		// verify the slot is safe — fail closed (codex bot r2 P2 closure
+		// — earlier branch returned nil for every error, including
+		// permission/I-O anomalies, which would let the write proceed
+		// over an unverified slot).
+		if errors.Is(err, unix.ENOENT) {
+			return nil
+		}
+		return fmt.Errorf("symlink probe failed: %w", err)
 	}
 	// S_IFLNK (symlink) test against the file-type bits.
 	if (st.Mode & unix.S_IFMT) == unix.S_IFLNK {

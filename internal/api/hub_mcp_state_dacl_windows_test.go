@@ -291,3 +291,28 @@ func TestVerifyHubMcpStateDACLRejectsPermissiveParentDACL(t *testing.T) {
 		t.Errorf("error %q must use the word 'parent' to signal the dir-DACL gate", msg)
 	}
 }
+
+// TestVerifyHubMcpStateDACLRejectsDirectoryTarget asserts that the
+// verifier refuses a directory at the state-file path — a defense
+// against attacker-controlled directory substitutions on a path that
+// should hold a regular file. FILE_FLAG_BACKUP_SEMANTICS in the
+// CreateFile call (required to also open parent dirs) would otherwise
+// let the directory pass through to the DACL gate.
+//
+// codex bot r2 P2 closure.
+func TestVerifyHubMcpStateDACLRejectsDirectoryTarget(t *testing.T) {
+	dir := hardenedTempDir(t)
+	// Create a directory at the state-file path. Production callers
+	// expect this path to be a regular file.
+	target := filepath.Join(dir, "hub-mcp-tokens.json")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatalf("mkdir target as dir: %v", err)
+	}
+	err := VerifyHubMcpStateDACL(target)
+	if err == nil {
+		t.Fatalf("VerifyHubMcpStateDACL must reject directory target; got nil")
+	}
+	if !errors.Is(err, ErrIrregularFile) {
+		t.Errorf("expected ErrIrregularFile for directory; got %v", err)
+	}
+}

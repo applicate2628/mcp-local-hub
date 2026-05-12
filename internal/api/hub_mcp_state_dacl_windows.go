@@ -71,6 +71,18 @@ func verifyHubMcpStateDACLImpl(path string) error {
 	if fi.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 		return ErrIrregularFile
 	}
+	// Directory rejection (codex bot r2 P2 closure): FILE_FLAG_BACKUP_SEMANTICS
+	// is required to open the parent dir's handle later, but it ALSO
+	// permits the open of the path itself to succeed when path is a
+	// directory. A directory substitution at a state-file path would
+	// otherwise pass the DACL gate (an attacker who swapped
+	// hub-mcp-tokens.json for a same-named directory would silently
+	// satisfy the verifier). Reject FILE_ATTRIBUTE_DIRECTORY explicitly
+	// — the contract is "verify a state FILE", not "verify a state
+	// object of any type."
+	if fi.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY != 0 {
+		return ErrIrregularFile
+	}
 	if err := verifyWindowsDACLFromHandle(h); err != nil {
 		return err
 	}
