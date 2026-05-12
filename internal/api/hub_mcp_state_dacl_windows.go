@@ -1,0 +1,229 @@
+//go:build windows
+
+// hub_mcp_state_dacl_windows.go — Windows leg of VerifyHubMcpStateDACL.
+//
+// Sequence:
+//
+//  1. CreateFile(path, READ_CONTROL, FILE_FLAG_OPEN_REPARSE_POINT |
+//     FILE_FLAG_BACKUP_SEMANTICS). REPARSE_POINT here means "open the
+//     reparse point itself rather than its target"; BACKUP_SEMANTICS
+//     is required so the open works on directories too.
+//  2. GetSecurityInfo(handle, SE_FILE_OBJECT,
+//     OWNER | DACL_SECURITY_INFORMATION) — fetches owner SID + DACL.
+//  3. Owner SID == current user (else ErrWrongOwner).
+//  4. Iterate DACL ACEs via GetAce. For each ALLOW ACE whose mask,
+//     after MapGenericMask, contains FILE_GENERIC_READ or
+//     GENERIC_READ, resolve the SID and check it against the allowlist
+//     {current-user, S-1-5-18 (LocalSystem), S-1-5-32-544 (BuiltinAdministrators)}.
+//     Any read-capable ALLOW outside the allowlist → ErrDaclOutsideAllowlist.
+//  5. DENY ACEs are skipped — they cannot widen access.
+//
+// The per-package helper verifyWindowsDACLFromHandle is reused by
+// secure_write_windows.go's post-rename re-verify step.
+//
+// Spec: §"Windows DACL verification" (allowlist form, codex r3 F-S3
+// closure) and §"Enterprise stance — Group Policy / MDM-managed ACLs"
+// for operator-recovery guidance.
+
+package api
+
+import (
+	"fmt"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
+)
+
+func verifyHubMcpStateDACLImpl(path string) error {
+	pathW, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return fmt.Errorf("utf16 %q: %w", path, err)
+	}
+	h, err := windows.CreateFile(
+		pathW,
+		windows.READ_CONTROL|windows.SYNCHRONIZE,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_FLAG_OPEN_REPARSE_POINT|windows.FILE_FLAG_BACKUP_SEMANTICS,
+		0,
+	)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", path, err)
+	}
+	defer windows.CloseHandle(h)
+
+	// Reject reparse points / symlinks via the file attributes.
+	var fi windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(h, &fi); err != nil {
+		return fmt.Errorf("file info %s: %w", path, err)
+	}
+	if fi.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+		return ErrIrregularFile
+	}
+	return verifyWindowsDACLFromHandle(h)
+}
+
+// verifyWindowsDACLFromHandle reads the owner SID + DACL from `h` via
+// GetSecurityInfo, then enforces the allowlist. Exported within the
+// api package only — secure_write_windows.go uses it for the
+// post-rename re-verify step.
+func verifyWindowsDACLFromHandle(h windows.Handle) error {
+	currentSID, err := currentUserSID()
+	if err != nil {
+		return fmt.Errorf("current user sid: %w", err)
+	}
+	systemSID, err := windows.StringToSid("S-1-5-18")
+	if err != nil {
+		return fmt.Errorf("system sid: %w", err)
+	}
+	adminSID, err := windows.StringToSid("S-1-5-32-544")
+	if err != nil {
+		return fmt.Errorf("admin sid: %w", err)
+	}
+	allowlist := []*windows.SID{currentSID, systemSID, adminSID}
+
+	sd, err := windows.GetSecurityInfo(
+		h,
+		windows.SE_FILE_OBJECT,
+		windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION,
+	)
+	if err != nil {
+		return fmt.Errorf("get security info: %w", err)
+	}
+
+	ownerSID, _, err := sd.Owner()
+	if err != nil {
+		return fmt.Errorf("get owner: %w", err)
+	}
+	if !ownerSID.Equals(currentSID) {
+		return ErrWrongOwner
+	}
+
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		return fmt.Errorf("get dacl: %w", err)
+	}
+	// A NIL DACL means "all access" — fail closed.
+	if dacl == nil {
+		return fmt.Errorf("%w: nil DACL (implicit allow-all)", ErrDaclOutsideAllowlist)
+	}
+
+	// Iterate ACEs via GetAce. The ACL is laid out as a header
+	// followed by AceCount ACE entries; AceCount is exposed via the
+	// x/sys ACL accessor.
+	count := windowsACLAceCount(dacl)
+	readMask := uint32(windows.FILE_GENERIC_READ | windows.GENERIC_READ)
+	for i := uint32(0); i < count; i++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(dacl, i, &ace); err != nil {
+			return fmt.Errorf("get ace %d: %w", i, err)
+		}
+		// ACCESS_ALLOWED_ACE_TYPE = 0, ACCESS_DENIED_ACE_TYPE = 1.
+		// Skip DENY ACEs — they cannot widen access.
+		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE {
+			continue
+		}
+		mapped := mapGenericReadRights(uint32(ace.Mask))
+		if mapped&readMask == 0 {
+			// ALLOW ACE that doesn't grant read access — irrelevant
+			// to the confidentiality boundary we protect.
+			continue
+		}
+		sid := sidFromAce(ace)
+		if !sidInAllowlist(sid, allowlist) {
+			name := sidString(sid)
+			return fmt.Errorf("%w: SID %s grants read", ErrDaclOutsideAllowlist, name)
+		}
+	}
+	return nil
+}
+
+// windowsACLAceCount reads the AceCount field from an ACL header.
+// x/sys exposes the ACL pointer but not the layout; the field lives
+// at offset 4 (after AclRevision uint8 + Sbz1 uint8 + AclSize uint16).
+//
+// Layout per Microsoft:
+//
+//	typedef struct _ACL {
+//	  BYTE  AclRevision;
+//	  BYTE  Sbz1;
+//	  WORD  AclSize;
+//	  WORD  AceCount;
+//	  WORD  Sbz2;
+//	} ACL;
+func windowsACLAceCount(acl *windows.ACL) uint32 {
+	type aclHeader struct {
+		AclRevision uint8
+		_           uint8
+		AclSize     uint16
+		AceCount    uint16
+		_           uint16
+	}
+	hdr := (*aclHeader)(unsafe.Pointer(acl))
+	return uint32(hdr.AceCount)
+}
+
+// mapGenericReadRights expands GENERIC_READ in `mask` to its
+// specific-object equivalents per MapGenericMask semantics for files.
+// We only care whether the resulting mask contains a read right, so
+// we don't need to load advapi32 — the only generic right relevant
+// to confidentiality is GENERIC_READ → FILE_GENERIC_READ.
+func mapGenericReadRights(mask uint32) uint32 {
+	if mask&windows.GENERIC_READ != 0 {
+		mask |= uint32(windows.FILE_GENERIC_READ)
+	}
+	if mask&windows.GENERIC_ALL != 0 {
+		mask |= uint32(windows.FILE_GENERIC_READ)
+	}
+	return mask
+}
+
+// sidFromAce extracts the SID from an ACCESS_ALLOWED_ACE. The SID
+// starts at the SidStart offset within the ACE; we compute the SID
+// pointer by adding the offset of SidStart to the ACE base.
+func sidFromAce(ace *windows.ACCESS_ALLOWED_ACE) *windows.SID {
+	// The SID immediately follows the fixed ACE header. SidStart is
+	// the first byte of the SID — its address is the SID pointer.
+	return (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+}
+
+// sidInAllowlist returns true if sid equals any of allowlist's SIDs.
+func sidInAllowlist(sid *windows.SID, allowlist []*windows.SID) bool {
+	if sid == nil {
+		return false
+	}
+	for _, a := range allowlist {
+		if sid.Equals(a) {
+			return true
+		}
+	}
+	return false
+}
+
+// currentUserSID returns the SID of the current process token's user.
+// Cached for free since GetCurrentProcessToken is a pseudo-handle on
+// Windows. Used by verifyWindowsDACLFromHandle and by
+// setRestrictiveDACL (in secure_write_windows.go).
+func currentUserSID() (*windows.SID, error) {
+	t := windows.GetCurrentProcessToken()
+	u, err := t.GetTokenUser()
+	if err != nil {
+		return nil, fmt.Errorf("token user: %w", err)
+	}
+	return u.User.Sid.Copy()
+}
+
+// sidString returns the textual form of sid (S-1-5-... form). Used
+// in diagnostic error messages. Returns "<unresolved-sid>" if the
+// conversion fails (x/sys SID.String returns "" on failure).
+func sidString(sid *windows.SID) string {
+	if sid == nil {
+		return "<nil>"
+	}
+	s := sid.String()
+	if s == "" {
+		return "<unresolved-sid>"
+	}
+	return s
+}
