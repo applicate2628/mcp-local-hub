@@ -157,11 +157,11 @@ func TestRotateHubTokenAddsMissingClient(t *testing.T) {
 	}
 }
 
-// TestCurrentTokenTablePublishesAfterEnsure pins the live-snapshot
+// TestHubCurrentTokenTablePublishesAfterEnsure pins the live-snapshot
 // contract: after EnsureHubTokens publishes, CurrentTokenTable
 // returns the same map. Phase 4's auth gate reads via CurrentTokenTable;
 // the publish must be eventually-consistent with the on-disk file.
-func TestCurrentTokenTablePublishesAfterEnsure(t *testing.T) {
+func TestHubCurrentTokenTablePublishesAfterEnsure(t *testing.T) {
 	hubMcpStateTestHelper(t)
 
 	tbl, err := EnsureHubTokens([]string{"claude-code"})
@@ -207,12 +207,12 @@ func TestReloadHubTokensPublishesFromDisk(t *testing.T) {
 	}
 }
 
-// TestConstantTimeCompareTokenAccepts pins the auth gate primitive:
+// TestHubConstantTimeCompareTokenAccepts pins the auth gate primitive:
 // matching header against stored token returns 1; mismatch returns
 // 0; wrong-shape inputs (not 64 bytes) return 0 without consulting
 // the table. The wrapper around subtle.ConstantTimeCompare is the
 // only path Phase 4 callers should use.
-func TestConstantTimeCompareTokenAccepts(t *testing.T) {
+func TestHubConstantTimeCompareTokenAccepts(t *testing.T) {
 	hubMcpStateTestHelper(t)
 
 	tbl, err := EnsureHubTokens([]string{"claude-code"})
