@@ -195,6 +195,17 @@ func verifyWindowsDACLFromHandle(h windows.Handle) error {
 		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE {
 			continue
 		}
+		// INHERIT_ONLY_ACE (0x08) flags an ACE that applies ONLY to
+		// child objects created under this object, never to the object
+		// itself (codex bot r3 P2 closure — earlier loop treated every
+		// ALLOW read ACE as effective access, which would falsely
+		// reject managed environments where a GPO pushes a child-only
+		// inheritance rule onto the parent dir). Per the Microsoft
+		// canonical-ACE evaluation algorithm, inherit-only ACEs do not
+		// contribute to access decisions for the current object.
+		if ace.Header.AceFlags&windows.INHERIT_ONLY_ACE != 0 {
+			continue
+		}
 		mapped := mapGenericReadRights(uint32(ace.Mask))
 		if mapped&readMask == 0 {
 			// ALLOW ACE that doesn't grant read access — irrelevant
