@@ -275,20 +275,72 @@ func (a *API) ManifestEditIn(dir, name, yaml string) error {
 	return os.WriteFile(target, []byte(yaml), 0644)
 }
 
+// ValidateMode discriminates the '__'-substring policy in server names.
+// Strict mode is applied at manifest mutation surfaces (create / edit /
+// install + hub binding setup); compat mode at startup inventory + GUI
+// manifest reads so legacy '__'-named manifests stay readable.
+//
+// G4 §"Pre-gate" (docs/superpowers/specs/2026-05-12-g4-unified-hub-mcp-design-v3.md).
+type ValidateMode int
+
+const (
+	// ValidateModeCompat warns on '__' substring in server names but
+	// accepts the manifest. This is the default / existing-caller
+	// behavior preserved by ManifestValidate.
+	ValidateModeCompat ValidateMode = iota
+	// ValidateModeStrict rejects '__' substring in server names. Used
+	// by the hub bind-time gate and mutation surfaces.
+	ValidateModeStrict
+)
+
 // ManifestValidate parses a manifest YAML and returns any structural
 // issues (missing required fields, unknown kind/transport values). Empty
 // slice means the manifest passes basic validation. Does NOT check that
 // referenced binaries, ports, or secrets actually exist — that's caller
 // responsibility at install time.
+//
+// Existing callers receive COMPAT-mode semantics (warns on '__' but
+// accepts). New callers that need strict-mode rejection use
+// ManifestValidateMode or ManifestValidateForHubBind.
 func (a *API) ManifestValidate(yaml string) []string {
+	warnings, _ := a.ManifestValidateMode(yaml, ValidateModeCompat)
+	return warnings
+}
+
+// ManifestValidateMode is ManifestValidate with explicit mode. Returns
+// (warnings, err). err != nil ONLY in strict mode and ONLY on hard
+// violations (currently: '__' in server name). Warnings cover both
+// modes — structural parse errors are reported via warnings[0] for
+// backward compatibility with existing ManifestValidate callers.
+//
+// G4 §"Pre-gate".
+func (a *API) ManifestValidateMode(yaml string, mode ValidateMode) ([]string, error) {
 	reader := strings.NewReader(yaml)
 	m, err := config.ParseManifest(reader)
 	if err != nil {
-		return []string{err.Error()}
+		return []string{err.Error()}, nil
 	}
-	// ParseManifest calls m.Validate internally, so if we reach here the
-	// structural validation passed. Add secondary soft checks:
-	return manifestValidationWarnings(m)
+	warnings := manifestValidationWarnings(m)
+	if strings.Contains(m.Name, "__") {
+		switch mode {
+		case ValidateModeStrict:
+			return warnings, fmt.Errorf("manifest name %q: '__' substring rejected in strict mode (reserved for hub-mode tool-name namespacing)", m.Name)
+		case ValidateModeCompat:
+			warnings = append(warnings, fmt.Sprintf("manifest name %q contains '__' (deprecated; will be rejected in strict mode)", m.Name))
+		}
+	}
+	return warnings, nil
+}
+
+// ManifestValidateForHubBind wraps ManifestValidateMode in strict mode
+// and returns only the hard error (warnings dropped). Phase 4's hub
+// listener bring-up uses this from gui/server.go to gate on the
+// participating manifest set when gui_server.hub_endpoint_enabled=true.
+//
+// G4 §"Pre-gate".
+func (a *API) ManifestValidateForHubBind(yaml string) error {
+	_, err := a.ManifestValidateMode(yaml, ValidateModeStrict)
+	return err
 }
 
 func (a *API) validateManifestForStorageName(name, yaml string) []string {
