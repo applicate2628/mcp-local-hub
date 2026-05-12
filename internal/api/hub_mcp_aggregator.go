@@ -294,6 +294,26 @@ func fanOutToolsList(ctx context.Context, successes map[canonicalDaemonRef]strin
 // failure message names every daemon that claimed the key so
 // operators can resolve the duplicate at the manifest layer.
 func assembleToolsListResponse(reqID json.RawMessage, results []listResult, initFailures []DaemonFailure, sess *hubSession) ([]byte, error) {
+	// codex bot r14 P2 closure on PR #157: fanOutToolsList appends
+	// results in goroutine-completion order, so identical inputs
+	// produced different mergedTools / partialFailures order across
+	// requests. Sort results by ref tuple here so all downstream
+	// loops (collision-row emission, HTTP-failure-row emission,
+	// flat-tools collection) become deterministic. Tool-level sort
+	// happens at the end of pass 2 once flatTools is assembled.
+	sorted := append([]listResult{}, results...)
+	sort.Slice(sorted, func(i, j int) bool {
+		a, b := sorted[i].ref, sorted[j].ref
+		if a.Server != b.Server {
+			return a.Server < b.Server
+		}
+		if a.Daemon != b.Daemon {
+			return a.Daemon < b.Daemon
+		}
+		return a.Port < b.Port
+	})
+	results = sorted
+
 	// Pass 1 — for each successful daemon, record the SET of unique
 	// daemons that produced each exposed key. Keys claimed by more
 	// than one DISTINCT daemon become collisions. codex bot r13 P2
@@ -359,19 +379,20 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 		}
 	}
 
-	// Pass 2 — assemble merged tools + routes, dropping collided
-	// keys entirely. A daemon's tools/list call counts as a success
-	// even when every one of its tools is collided; the call itself
-	// returned cleanly, and dropping the daemon from listSuccessCount
-	// would mis-trigger the all-failed -32000 envelope path.
+	// Pass 2 — collect surviving tools into a flat slice, then sort
+	// by exposed name for deterministic emission (codex bot r14 P2
+	// closure on PR #157). A daemon's tools/list call counts as a
+	// success even when every one of its tools is collided; the call
+	// itself returned cleanly, and dropping the daemon from
+	// listSuccessCount would mis-trigger the all-failed -32000
+	// envelope path.
 	//
 	// `seenExposed` deduplicates within and across daemons even for
 	// NON-collision keys: a daemon returning the same tool name twice
 	// (intra-daemon duplicate — non-conformant but observed in the
 	// wild) yields one mergedTools entry, not two. codex bot r13 P2
 	// closure on PR #157.
-	mergedTools := make([]json.RawMessage, 0)
-	mergedRoutes := make(map[string]canonicalToolRef)
+	flatTools := make([]namespacedTool, 0)
 	seenExposed := make(map[string]bool)
 	listFailures := make([]DaemonFailure, 0)
 	listSuccessCount := 0
@@ -394,9 +415,20 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 				continue
 			}
 			seenExposed[t.Exposed] = true
-			mergedTools = append(mergedTools, t.Body)
-			mergedRoutes[t.Exposed] = t.Ref
+			flatTools = append(flatTools, t)
 		}
+	}
+	// Sort tools by exposed name so identical daemon/tool sets
+	// produce byte-identical result.tools across requests regardless
+	// of which goroutine completed first.
+	sort.Slice(flatTools, func(i, j int) bool {
+		return flatTools[i].Exposed < flatTools[j].Exposed
+	})
+	mergedTools := make([]json.RawMessage, 0, len(flatTools))
+	mergedRoutes := make(map[string]canonicalToolRef, len(flatTools))
+	for _, t := range flatTools {
+		mergedTools = append(mergedTools, t.Body)
+		mergedRoutes[t.Exposed] = t.Ref
 	}
 	listFailures = append(listFailures, collisionFailures...)
 

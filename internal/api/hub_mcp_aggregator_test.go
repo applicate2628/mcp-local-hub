@@ -1189,6 +1189,87 @@ func (b *blockingReader) Read(p []byte) (int, error) {
 	return 0, io.EOF
 }
 
+// TestAggregateToolsListDeterministicOrdering pins codex bot r14 P2
+// closure on PR #157. Two daemons returning disjoint tools must
+// produce a result.tools array in alphabetical exposed-name order
+// regardless of which goroutine completed its tools/list call
+// first. The pre-r14 implementation appended in goroutine-completion
+// order, so concurrent runs could yield different byte-identical
+// responses even with identical inputs → unnecessary client cache
+// churn.
+//
+// We run AggregateToolsList REPEATEDLY (5 times) with a deliberate
+// per-daemon stagger that randomizes completion order, and assert
+// every run produces the same sorted-by-exposed-name tools array.
+func TestAggregateToolsListDeterministicOrdering(t *testing.T) {
+	// d1 exposes one tool that sorts AFTER d2's; if completion order
+	// leaked into output, d1's tool would appear first when d1
+	// finished first, and second otherwise.
+	d1 := newStubDaemon(t, "d1-sid")
+	d1.onList = func(w http.ResponseWriter, r *http.Request) {
+		// Simulate variable latency so completion order varies
+		// across runs. Random sleep up to 5ms.
+		time.Sleep(time.Duration(time.Now().UnixNano()%5) * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"zeta","description":"d1-zeta"}]}}`))
+	}
+	d2 := newStubDaemon(t, "d2-sid")
+	d2.onList = func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(time.Duration(time.Now().UnixNano()%5) * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"alpha","description":"d2-alpha"}]}}`))
+	}
+
+	// Sessions: srv1 → d1, srv2 → d2. The exposed names will be
+	// "srv1__zeta" and "srv2__alpha". Sorted alphabetically:
+	// srv1__zeta < srv2__alpha (s-r-v-1 < s-r-v-2).
+	makeSess := func() *hubSession {
+		return sessionWithParticipants(d1, d2)
+	}
+
+	wantNames := []string{"srv1__zeta", "srv2__alpha"}
+	for i := 0; i < 5; i++ {
+		sess := makeSess()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+			cancel()
+			t.Fatalf("iter %d: init: %v", i, err)
+		}
+		body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`))
+		cancel()
+		if err != nil {
+			t.Fatalf("iter %d: list: %v", i, err)
+		}
+		var env struct {
+			Result struct {
+				Tools []json.RawMessage `json:"tools"`
+			} `json:"result"`
+		}
+		if uerr := json.Unmarshal(body, &env); uerr != nil {
+			t.Fatalf("iter %d: parse: %v body=%s", i, uerr, body)
+		}
+		gotNames := make([]string, 0, len(env.Result.Tools))
+		for _, raw := range env.Result.Tools {
+			var m struct {
+				Name string `json:"name"`
+			}
+			_ = json.Unmarshal(raw, &m)
+			gotNames = append(gotNames, m.Name)
+		}
+		if len(gotNames) != len(wantNames) {
+			t.Errorf("iter %d: got %d tools, want %d: %v", i, len(gotNames), len(wantNames), gotNames)
+			continue
+		}
+		for j := range wantNames {
+			if gotNames[j] != wantNames[j] {
+				t.Errorf("iter %d: tools[%d] = %q, want %q (deterministic alpha order)", i, j, gotNames[j], wantNames[j])
+			}
+		}
+	}
+}
+
 // TestAggregateToolsListIntraDaemonDuplicateNotCollision pins codex
 // bot r13 P2 closure on PR #157. A single daemon returning the SAME
 // tool name twice in its tools/list response is non-conformant but
