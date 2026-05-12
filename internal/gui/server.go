@@ -444,10 +444,15 @@ type Server struct {
 	probeForRoute func() Verdict
 	killForRoute  func() (Verdict, error)
 
-	// Phase 4 (G4) — hub-mcp listener bundle. nil when the gate is
-	// off OR when bind failed. Owned by Start, drained by the same
-	// cancel/error branches that drain the gui-server listener.
-	hubMcpComp *HubListenerComponents
+	// Phase 4 (G4) — hub-mcp listener bundle. Nil-stored when the
+	// gate is off OR when bind failed. Owned by Start, drained by
+	// the same cancel/error branches that drain the gui-server
+	// listener. Atomic-stored so the test goroutine waiting on
+	// ready can race-safely observe whether the hub came up
+	// (codex bot phase4 r8 P1 closure on PR #158 — close(ready) now
+	// happens BEFORE the hub init writes hubMcpComp, so a plain
+	// pointer read would race the assignment).
+	hubMcpComp atomic.Pointer[HubListenerComponents]
 }
 
 // NewServer constructs the Server. It registers the ping handler
@@ -555,6 +560,21 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 	// Settings UI toggle). Bind failure surfaces via LogHubMcpEvent but
 	// does NOT abort gui-server startup; an operator can still reach
 	// the GUI to investigate.
+	//
+	// codex bot phase4 r8 P1 closure on PR #158: signal GUI readiness
+	// BEFORE starting hub startup. BindHubMcpListener acquires
+	// hub-mcp.lock via blocking flock; under contention (e.g. a
+	// concurrent `mcphub hub-mcp regenerate-token` CLI run) the hub
+	// startup can block for several seconds. The pre-r8 order made
+	// callers waiting on `ready` block on that same flock even though
+	// the GUI listener was already bound — defeating the
+	// "hub failure is non-fatal to gui-server" contract. Close ready
+	// + start srv.Serve FIRST; run hub startup AFTER. Shutdown still
+	// handles a nil s.hubMcpComp cleanly.
+	close(ready)
+	errCh := make(chan error, 1)
+	go func() { errCh <- s.srv.Serve(ln) }()
+
 	hubEnabled := readHubEndpointGateFromSettings()
 	hubComp, hubErr := startHubMcpListener(ctx, hubEnabled, s.api)
 	if hubErr != nil {
@@ -565,19 +585,9 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 		// hub-mcp.log. The error is also already structured-logged
 		// via LogHubMcpEvent inside startHubMcpListener.
 		log.Printf("hub-mcp listener startup failed (gate-OFF for this process): %v", hubErr)
-		// Already logged via LogHubMcpEvent inside startHubMcpListener;
-		// surface as a soft warning by stamping the hub bundle nil so
-		// shutdown skips it. The error itself is intentionally not
-		// returned — gate-OFF semantics keep gui-server running.
 		hubComp = nil
-		_ = hubErr // referenced for future diagnostics
 	}
-	s.hubMcpComp = hubComp
-
-	close(ready)
-
-	errCh := make(chan error, 1)
-	go func() { errCh <- s.srv.Serve(ln) }()
+	s.hubMcpComp.Store(hubComp)
 
 	select {
 	case <-ctx.Done():
@@ -592,7 +602,7 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 		// internal-reload writes complete via the still-flockable
 		// state-dir.
 		hubCtx, hubCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		ShutdownHubListener(hubCtx, s.hubMcpComp)
+		ShutdownHubListener(hubCtx, s.hubMcpComp.Load())
 		hubCancel()
 
 		guiCtx, guiCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -612,7 +622,7 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 		// gui-server listener died; drain the hub listener under a
 		// short timeout so we don't leak its goroutines.
 		drainCtx, drainCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		ShutdownHubListener(drainCtx, s.hubMcpComp)
+		ShutdownHubListener(drainCtx, s.hubMcpComp.Load())
 		drainCancel()
 		s.events.Close()
 		if errors.Is(err, http.ErrServerClosed) {

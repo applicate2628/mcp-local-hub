@@ -146,6 +146,21 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 	if reloadErr != nil {
 		_ = ln.Close()
 		store.Close()
+		// codex bot phase4 r8 P2 closure on PR #158: roll back the
+		// persisted endpoint port so status / consumers of
+		// hub-mcp.endpoint.json don't discover a dead port + PID
+		// pair until the next successful startup. ResetHubPort sets
+		// Port=0 and preserves StartedAt + InstanceID (port-only
+		// mutation per its own r2 P2 closure). If the rollback
+		// itself fails (e.g. flock contention with a sibling CLI),
+		// surface that as an additional log line — the operator
+		// must then manually `mcphub gui --reset-port` to clear the
+		// stale endpoint.
+		if rerr := api.ResetHubPort(); rerr != nil {
+			_ = api.LogHubMcpEvent("error", "hub-endpoint-rollback-failed", map[string]any{
+				"err": rerr.Error(),
+			})
+		}
 		return nil, fmt.Errorf("hub-mcp: %w", reloadErr)
 	}
 

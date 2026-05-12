@@ -194,7 +194,7 @@ func TestServerStartContinuesWithGateOff(t *testing.T) {
 	if s.Port() == 0 {
 		t.Errorf("gui-server did not bind despite Start success")
 	}
-	if s.hubMcpComp != nil {
+	if s.hubMcpComp.Load() != nil {
 		t.Errorf("hub bundle non-nil with gate OFF")
 	}
 
@@ -252,8 +252,8 @@ func TestServerStartContinuesAfterHubBindFailure(t *testing.T) {
 	if s.Port() == 0 {
 		t.Errorf("gui-server did not bind despite Start success")
 	}
-	if s.hubMcpComp != nil {
-		ShutdownHubListener(context.Background(), s.hubMcpComp)
+	if hc := s.hubMcpComp.Load(); hc != nil {
+		ShutdownHubListener(context.Background(), hc)
 		t.Errorf("hub bundle non-nil despite simulated bind failure")
 	}
 	// Probe gui-server /api/ping (smoke): the gui-server is still up.
