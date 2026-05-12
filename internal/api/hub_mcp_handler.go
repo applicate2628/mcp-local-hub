@@ -316,14 +316,20 @@ func (h *HubMcpHandler) handlePost(w http.ResponseWriter, r *http.Request, clien
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	// codex deep-sec phase4 r24 P1 closure on PR #158 (lane #1):
-	// GetAndTouch is one atomic store-lock acquisition that fetches
-	// + refreshes LastUsedAt. The pre-r24 sequence of Get (RLock)
-	// then Touch (Lock) had a sweep-Delete race window; the handler
-	// could continue with a stale *hubSession after the sweep
-	// removed the map entry, causing later cancellation/DELETE on
-	// the same id to see "unknown session" mid-flight.
-	sess, ok := h.sessions.GetAndTouch(sid)
+	// codex bot phase4 r25 P2 closure on PR #158: split the atomic
+	// GetAndTouch (introduced in r24) back into Get + post-gate
+	// Touch. r24's combined operation refreshed LastUsedAt BEFORE
+	// the cross-client + protocol-version gates, so a malicious or
+	// buggy client could keep a session alive past its idle TTL by
+	// spamming requests with mismatched clientID or wrong
+	// MCP-Protocol-Version — every failed request still bumped
+	// LastUsedAt. The original r24 P1 (sweep-Delete race between
+	// Get and Touch) is still addressed: Touch returns bool, and
+	// the handler now checks it AFTER gates pass; if the session
+	// was swept mid-request, the handler aborts with the same
+	// "unknown session" path. Detection via bool is the correct
+	// minimal fix; atomicity was overengineering.
+	sess, ok := h.sessions.Get(sid)
 	if !ok {
 		// codex bot phase4 r21 P2 closure on PR #158: notification-
 		// shaped requests (e.g. notifications/cancelled) MUST NOT
@@ -371,10 +377,21 @@ func (h *HubMcpHandler) handlePost(w http.ResponseWriter, r *http.Request, clien
 		return
 	}
 
-	// codex deep-sec phase4 r24 P1 closure on PR #158 (lane #1):
-	// activity timestamp already refreshed by GetAndTouch above.
-	// Touch call removed — was the racing surface that prompted
-	// the GetAndTouch atomic refactor.
+	// codex bot phase4 r25 P2 closure on PR #158: refresh activity
+	// timestamp ONLY after all gates pass (auth + protocol-version).
+	// Touch returns false if the session was swept between the
+	// Get above and now — close the r24 P1 race window (sweep
+	// Delete vs handler keeping a stale *hubSession): treat the
+	// false return as an "unknown session" outcome for this
+	// request, abort. Notifications stay silent per r21.
+	if !h.sessions.Touch(sid) {
+		if isJSONRPCNotificationID(env.ID) {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		writeJSONRPCErrorStatus(w, env.ID, http.StatusNotFound, -32600, "unknown session", nil)
+		return
+	}
 
 	// Method dispatch.
 	switch env.Method {
