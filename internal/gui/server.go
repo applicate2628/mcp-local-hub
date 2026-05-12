@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -557,6 +558,13 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 	hubEnabled := readHubEndpointGateFromSettings()
 	hubComp, hubErr := startHubMcpListener(ctx, hubEnabled, s.api)
 	if hubErr != nil {
+		// codex bot phase4 r1 P2 closure on PR #158: surface non-bind
+		// hub failures (token gen/persist, endpoint load/write,
+		// manifest pre-gate refusal) on the gui-server log so
+		// operators get an actionable signal without tailing
+		// hub-mcp.log. The error is also already structured-logged
+		// via LogHubMcpEvent inside startHubMcpListener.
+		log.Printf("hub-mcp listener startup failed (gate-OFF for this process): %v", hubErr)
 		// Already logged via LogHubMcpEvent inside startHubMcpListener;
 		// surface as a soft warning by stamping the hub bundle nil so
 		// shutdown skips it. The error itself is intentionally not

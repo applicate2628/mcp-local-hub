@@ -255,8 +255,16 @@ func validateParticipatingManifestsForHubBind(a *api.API) error {
 		}
 		yaml, _, gerr := a.ManifestGetWithHash(entry.Name)
 		if gerr != nil {
-			// Missing-on-disk during scan window is non-fatal.
-			continue
+			// codex bot phase4 r1 P1 closure on PR #158: only the
+			// scan-window race (manifest deleted between scan and read)
+			// is benign. Permission errors, schema errors, or any
+			// other read failure MUST fail the bind so the strict
+			// pre-gate isn't silently bypassed. The race signature is
+			// fs.ErrNotExist via errors.Is — anything else propagates.
+			if errors.Is(gerr, os.ErrNotExist) {
+				continue
+			}
+			return fmt.Errorf("manifest %q: read: %w", entry.Name, gerr)
 		}
 		if verr := a.ManifestValidateForHubBind(yaml); verr != nil {
 			return fmt.Errorf("manifest %q: %w", entry.Name, verr)
