@@ -575,22 +575,45 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 	errCh := make(chan error, 1)
 	go func() { errCh <- s.srv.Serve(ln) }()
 
+	// codex bot phase4 r9 P1 closure on PR #158: run hub startup in
+	// a goroutine so ctx.Done() during the bind transaction (e.g. a
+	// sibling `mcphub hub-mcp regenerate-token` is holding
+	// hub-mcp.lock under blocking flock acquisition) can still tear
+	// down the gui-server promptly. We wait up to 2s for the init
+	// to settle at shutdown time so a successful bind doesn't leak
+	// its listener; beyond that the process-exit flock release
+	// unblocks the stuck acquireHubMcpLock anyway.
 	hubEnabled := readHubEndpointGateFromSettings()
-	hubComp, hubErr := startHubMcpListener(ctx, hubEnabled, s.api)
-	if hubErr != nil {
-		// codex bot phase4 r1 P2 closure on PR #158: surface non-bind
-		// hub failures (token gen/persist, endpoint load/write,
-		// manifest pre-gate refusal) on the gui-server log so
-		// operators get an actionable signal without tailing
-		// hub-mcp.log. The error is also already structured-logged
-		// via LogHubMcpEvent inside startHubMcpListener.
-		log.Printf("hub-mcp listener startup failed (gate-OFF for this process): %v", hubErr)
-		hubComp = nil
-	}
-	s.hubMcpComp.Store(hubComp)
+	hubInitDone := make(chan struct{})
+	go func() {
+		defer close(hubInitDone)
+		hubComp, hubErr := startHubMcpListener(ctx, hubEnabled, s.api)
+		if hubErr != nil {
+			// codex bot phase4 r1 P2 closure on PR #158: surface
+			// non-bind hub failures (token gen/persist, endpoint
+			// load/write, manifest pre-gate refusal) on the gui-
+			// server log so operators get an actionable signal
+			// without tailing hub-mcp.log. The error is also
+			// already structured-logged via LogHubMcpEvent inside
+			// startHubMcpListener.
+			log.Printf("hub-mcp listener startup failed (gate-OFF for this process): %v", hubErr)
+			hubComp = nil
+		}
+		s.hubMcpComp.Store(hubComp)
+	}()
 
 	select {
 	case <-ctx.Done():
+		// Wait up to 2s for the hub init goroutine to settle so a
+		// successful bind doesn't leak its listener (its
+		// hubMcpComp is set right before hubInitDone closes).
+		// Beyond 2s, abandon: the hub goroutine is presumably
+		// blocked on the hub-mcp flock and will release on
+		// process exit.
+		select {
+		case <-hubInitDone:
+		case <-time.After(2 * time.Second):
+		}
 		// codex bot phase4 r3 P2 closure on PR #158: each shutdown
 		// phase gets its OWN 5s budget. The earlier code shared one
 		// shutdownCtx between ShutdownHubListener and s.srv.Shutdown;
@@ -619,8 +642,12 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 		s.events.Close()
 		return nil
 	case err := <-errCh:
-		// gui-server listener died; drain the hub listener under a
-		// short timeout so we don't leak its goroutines.
+		// gui-server listener died; wait briefly for hub init to
+		// settle so we capture its components, then drain.
+		select {
+		case <-hubInitDone:
+		case <-time.After(2 * time.Second):
+		}
 		drainCtx, drainCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		ShutdownHubListener(drainCtx, s.hubMcpComp.Load())
 		drainCancel()
