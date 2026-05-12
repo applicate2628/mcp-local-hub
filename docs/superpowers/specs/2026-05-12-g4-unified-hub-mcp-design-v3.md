@@ -10,9 +10,11 @@ Give an MCP client (Claude Code / Codex CLI / Cursor / VS Code / etc.) **one URL
 
 ## Architecture
 
-A new HTTP listener on `127.0.0.1:<persistent-random-port>` owned by the running `mcphub gui` process. **Persistent port**: chosen once on the first start with the gate ON, written to `<state-dir>/hub-mcp.endpoint.json` (0600 + DACL-verified), reused on every subsequent start. Operators install client configs ONCE; reinstall only when they regenerate tokens or move workspaces. This addresses v2 F-S1 (random-port stale-URL window) while keeping a per-user random port rather than fixed `9120` (which any local user can pre-bind).
+A new HTTP listener on `127.0.0.1:<persistent-random-port>` owned by the running `mcphub gui` process. **Persistent port**: chosen once on the first start with the gate ON, written to `<state-dir>/hub-mcp.endpoint.json` (0600 + DACL-verified, see "Token + endpoint state hardening" below), reused on every subsequent start. Operators install client configs ONCE; reinstall only when they regenerate tokens. This addresses v2 F-S1 (random-port stale-URL window) while keeping a per-user random port rather than fixed `9120` (which any local user can pre-bind).
 
-**Hub instance ID + token binding** closes the residual replay surface: each hub start writes a fresh 32-byte hex `instance_id` to the endpoint file. The auth gate requires `X-Mcphub-Instance-Id` to match the current value; tokens captured from a previous hub instance fail at the gate because their stale instance id doesn't match. Operator workflow: hub restart invalidates client configs → operator runs `mcphub install` to refresh.
+**Pre-bind handling is DoS, not a security boundary** (codex r3 security F-S1 closure): `SO_EXCLUSIVEADDRUSE` protects only AFTER hub successfully binds; a local attacker that pre-binds the port BEFORE hub starts blocks the bind. On `bind: address in use`, hub exits with a non-zero status and a clear "port in use" diagnostic. Operator workflow: re-run `mcphub gui --reset-port` to pick a new ephemeral port + rewrite endpoint file; re-run `mcphub install` to refresh client configs with the new port. Confidentiality is preserved (auth gate still rejects the attacker's connections — see "Cross-client invariant" below); the attack is denial of service.
+
+**Hub instance ID — persistent across restarts** (codex r3 security F-S1 closure): instance_id is generated ONCE on first start (when the endpoint file is created), persists across hub restarts, and is rotated only by explicit operator action via `mcphub hub-mcp regenerate-instance-id`. This resolves the v2 contradiction between "install once" and "every restart needs reinstall". Auth gate still rejects requests with mismatched `X-Mcphub-Instance-Id` — but the routine restart path doesn't require operator action. Operators only re-install after explicit rotation events (token compromise → `regenerate-token`, instance compromise → `regenerate-instance-id`).
 
 **Per-client URL paths** use canonical adapter IDs (F-G1 fix):
 
@@ -42,19 +44,42 @@ This separation lets v0.3.0 ship without forcing every existing `__`-using manif
 
 Hub is **stateful** — necessary because MCP backends require `initialize` before `tools/list`/`tools/call` (`internal/daemon/backend_lifecycle.go:195,321`), native HTTP daemons issue a distinct `Mcp-Session-Id` per `initialize` (`internal/daemon/http_host.go:371`), and the existing capability prober already follows the init→capture-sid→reuse-sid pattern (`internal/api/health.go:693-712`).
 
+**Resolver state is published via atomic snapshot** (codex r3 security F-S4 closure). Instead of a `ResolverGen` int64 that can drift from the underlying binding state under concurrent mutation, the hub keeps:
+
+```go
+type ResolverSnapshot struct {
+    Gen      int64
+    Bindings map[string][]canonicalDaemonRef // canonical client_id → daemons
+    Routes   map[string]canonicalToolRef     // exposed name → canonical (per client, namespaced)
+}
+
+// Package-level pointer swapped atomically when any manifest mutation
+// completes. Sessions capture a pointer (immutable snapshot) at create
+// time; tools/call revalidates against the CURRENT snapshot pointer.
+var resolverSnapshot atomic.Pointer[ResolverSnapshot]
+```
+
+Each manifest add/edit/uninstall builds a fresh `ResolverSnapshot` (gen bumped, bindings + routes rebuilt) and publishes via `atomic.Pointer.Store`. Sessions hold one snapshot pointer captured at `initialize`; `tools/call` loads the CURRENT snapshot pointer, revalidates `(Client, Server, Daemon)` against it, and refuses with `-32601 "tool moved out of scope"` if stale. The snapshot is immutable after publish — no torn reads.
+
 ```go
 type hubSession struct {
-    ClientSessionID  string                                  // hub-issued UUID (Mcp-Session-Id header value)
-    Client           string                                  // canonical adapter id (claude-code, codex-cli, …)
-    ResolverGen      int64                                   // resolver generation captured at session create (F-S4)
-    IntendedParticipants []canonicalDaemonRef                // every daemon we tried to init (F-G3)
-    InitSuccesses    map[canonicalDaemonRef]string           // value = daemon Mcp-Session-Id
-    InitFailures     []DaemonFailure                          // surface in tools/list result._meta.mcphub.partialFailures
-    RouteMap         map[string]canonicalToolRef             // exposed-flat-name → canonical
-    InFlightRequests sync.Map                                 // clientReqID → daemon ref (F-G4 cancellation routing)
+    ClientSessionID  string                                       // hub-issued UUID (Mcp-Session-Id header value)
+    Client           string                                       // canonical adapter id (claude-code, codex-cli, …)
+    SnapshotAtInit   *ResolverSnapshot                            // captured at initialize; for diff vs current
+    IntendedParticipants []canonicalDaemonRef                     // every daemon we tried to init (F-G3)
+    InitSuccesses    map[canonicalDaemonRef]string                // value = daemon Mcp-Session-Id
+    InitFailures     []DaemonFailure                              // surface in tools/list result._meta.mcphub.partialFailures
+    RouteMap         atomic.Pointer[map[string]canonicalToolRef]  // session-local route map (atomic swap)
+    InFlightRequests map[json.RawMessage]inflightEntry            // typed client req id → daemon-side info (F-S6 r3)
+    inflightMu       sync.Mutex                                   // protects InFlightRequests
     InitAt           time.Time
     LastUsedAt       time.Time
-    mu               sync.Mutex                              // protects RouteMap atomic swap + LastUsedAt
+    mu               sync.Mutex                                   // protects LastUsedAt + lifecycle
+}
+
+type inflightEntry struct {
+    DaemonRef       canonicalDaemonRef
+    DaemonRequestID json.RawMessage // hub-generated request id sent to the daemon
 }
 
 type canonicalDaemonRef struct {
@@ -71,19 +96,21 @@ type canonicalToolRef struct {
 }
 ```
 
+`InFlightRequests` is **per-session and typed** (codex r3 security F-6 closure): keyed by the client's exact JSON-RPC id bytes (`json.RawMessage` — preserves number/string discriminator), stores `{DaemonRef, DaemonRequestID}` because the request id we sent to the daemon is hub-generated (different from the client's). A forged `notifications/cancelled` from another session cannot collide because the lookup is scoped to `session.InFlightRequests`, not a global map; cross-session interference is impossible without bypassing the 5-step auth gate.
+
 **Lifecycle:**
 
 1. **`initialize`**: hub assigns `client_session_id` (UUID), captures current `ResolverGen`, fans out `initialize` to every daemon in the calling client's bindings (concurrency cap from F-S5). Successful initializations populate `InitSuccesses`; failed ones populate `InitFailures` so `tools/list` can surface them (F-G3 fix). Returns synthetic `initialize` reply with hub `serverInfo`. Per-daemon init timeout 5s (F-S5).
 
 2. **`tools/list`**: hub fans out `tools/list` to the daemons in `InitSuccesses`. Concurrency cap = `FanOutConcurrency = 8`. Merges stored `InitFailures` with new list-time failures into `result._meta.mcphub.partialFailures`. If `len(InitSuccesses) == 0` after init phase OR all list-time fan-outs fail → JSON-RPC `-32000` with `data.mcphub.partialFailures` populated.
 
-3. **`tools/call`**: hub looks up `params.name` in the route map. Then revalidates `(Client, Server, Daemon)` against the current resolver state (F-S4 fix): if `ResolverGen` advanced AND the daemon was removed from the calling client's bindings, refuse with `-32601` "tool moved out of scope; reinitialize session". **Hub rewrites `params.name` to the canonical `RawName`** before forwarding (F-G2 fix). Records the client/daemon request-id pair in `InFlightRequests` for cancellation routing.
+3. **`tools/call`**: hub looks up `params.name` in the route map. Then loads the CURRENT `resolverSnapshot` via `atomic.Pointer.Load` and revalidates `(Client, Server, Daemon)` against it (F-S4 atomic closure): if the daemon is no longer in the calling client's bindings (snapshot vs session-captured snapshot diff), refuse with `-32601` "tool moved out of scope; reinitialize session". **Hub rewrites `params.name` to the canonical `RawName`** before forwarding (F-G2 fix). Hub generates a new `daemonRequestID` for the daemon-side request, records `{daemonRef, daemonSessionID, daemonRequestID, startedAt}` in `InFlightRequests` keyed by the client's exact JSON-RPC id bytes (codex r3 general F1 + security F-6 closure). On daemon response/error/timeout, the in-flight row is removed; the per-call wall-clock cap (60s) guarantees cleanup even when the daemon hangs.
 
-4. **`notifications/cancelled` (with `requestId`)**: hub looks up the client request id in `InFlightRequests`, finds the daemon ref + daemon-side request id, forwards `notifications/cancelled` to that daemon with the daemon's request id. Then removes the in-flight row.
+4. **`notifications/cancelled` (with `requestId`)**: hub looks up the client request id in `InFlightRequests` (per-session map; auth gate + session-client check have already run), finds the daemon ref + daemon-side request id, and forwards `notifications/cancelled` to that daemon with the daemon's request id. Then removes the in-flight row. **Stdio daemon caveat** (codex r3 general F1 sub-issue): the existing `internal/daemon/host.go:848` forwards no-id notifications unchanged — it does NOT remap inbound `requestId` for stdio backends, so hub cancellations through StdioHost are best-effort (daemon ignores unmatched ids without harm). HTTP-host daemons cancel correctly because their request-id space is hub-controlled. This caveat is documented as a known limitation; future task can extend StdioHost with a cancellation-id remap.
 
 5. **`DELETE /clients/{client}/mcp` with `Mcp-Session-Id` header** (F-G4 fix): terminate the hub session. Fan out best-effort `DELETE /mcp` to each daemon session in `InitSuccesses`. Return 204. Idempotent.
 
-6. **Session expiry**: idle-sweeper goroutine (ticks every 60s) removes sessions older than 30min idle. Sweeper acquires session mu, checks `InFlightRequests` is empty (skip if not), removes session. Hard cap `MaxSessionsPerClient = 16`, `MaxSessionsGlobal = 256` (F-S5 fix). LRU eviction at cap; client requesting a new session at cap → 429 with `Retry-After: 30`.
+6. **Session expiry**: idle-sweeper goroutine (ticks every 60s) removes sessions older than 30min idle. Sweeper holds session `mu`, atomically reads `len(InFlightRequests)` under `inflightMu` (skip session if not empty), then removes from `hubSessionStore`. Each session also keeps an `inFlightCount atomic.Int32` for fast "is there in-flight work" checks without taking the inflight mutex on every sweep tick. Hard cap `MaxSessionsPerClient = 16`, `MaxSessionsGlobal = 256` (F-S5). LRU eviction at cap; new `initialize` at cap → 429 with `Retry-After: 30` (codex r3 general F-G7 closure: explicit emptiness via atomic counter, not implicit).
 
 ## Tool-name namespacing — route map + canonical rewrite
 
@@ -134,8 +161,11 @@ funlock()
 Load-time validation:
 
 ```go
-// Open with reparse-defeat flags on Windows
-f := os.OpenFile(path, O_RDONLY|<windows: FILE_FLAG_NO_REPARSE>, 0)
+// Open with reparse-defeat flags on Windows. The Go stdlib doesn't
+// export FILE_FLAG_OPEN_REPARSE_POINT directly; the canonical path
+// is golang.org/x/sys/windows constants + a build-tagged custom
+// opener (windows: hub_mcp_state_windows.go; posix: hub_mcp_state_posix.go).
+f := openStateFileNoReparse(path)
 defer f.Close()
 
 // Stat from the OPEN handle so a swap between stat-and-read is impossible
@@ -150,33 +180,50 @@ if runtime.GOOS != "windows" {
 } else {
     // Windows: handle-bound DACL verify
     if err := verifyWindowsDACLFromHandle(f.Fd()); err != nil { return err }
-    // Parent dir DACL verify
+    // Parent dir DACL verify (per-handle of the parent dir)
     if err := verifyWindowsParentDACL(filepath.Dir(path)); err != nil { return err }
 }
 raw, _ := io.ReadAll(f)
 ```
 
-Windows DACL verification rejects:
-- Owner SID ≠ current process token's user SID.
-- Any ACE granting `FILE_GENERIC_READ` (via mapped generic-rights) to broad SIDs: `Everyone (S-1-1-0)`, `Authenticated Users (S-1-5-11)`, `Users (S-1-5-32-545)`, `Domain Users`, `Guests`, including inherited ACEs.
-- Generic rights are mapped to specific rights BEFORE the mask check.
+Windows DACL verification is **allowlist-based** (codex r3 security F-S3 closure replaces the v3 draft's blacklist):
 
-**Bind ordering** (F-S3 closure for "no half-initialized state"):
+- Owner SID MUST equal current process token's user SID.
+- DACL is canonically evaluated: process the ordered ACE list, applying ACE flags (INHERITED_ACE / OBJECT_INHERIT_ACE / NO_PROPAGATE_INHERIT_ACE), respecting ALLOW-vs-DENY ordering per Microsoft's documented DACL evaluation algorithm. Use `golang.org/x/sys/windows.GetSecurityInfo` to read the DACL and `golang.org/x/sys/windows.GetAce` to iterate.
+- After generic-right mapping (`GENERIC_READ` → `FILE_GENERIC_READ` etc.), the set of SIDs allowed to read MUST be a subset of `{current-user-SID, LocalSystem (S-1-5-18), BuiltinAdministrators (S-1-5-32-544)}`. Any read-capable ALLOW ACE to a SID outside this allowlist → reject.
+- DENY ACEs do NOT "rescue" an unsafe ALLOW unless the canonical evaluation proves no effective-access path through to the bad SID. Conservative: reject anyway if an unsafe ALLOW exists, regardless of DENY siblings.
+- Inherited ACEs are validated against the same allowlist (no exemption for `INHERITED_ACE`).
+
+**Handle-bound client config writer** (codex r3 security F-S3 closure for client configs): the existing `internal/clients/*.go` adapters use path-based `os.WriteFile` and `os.OpenFile` which are TOCTOU-vulnerable for token-bearing writes. A new helper `SecureWriteClientConfig(path, contents []byte)` opens the parent dir, creates a temp file with `O_CREATE|O_EXCL|O_WRONLY|0600` + handle-bound DACL verify, writes bytes, fsyncs, atomic-renames into place, then re-opens the destination and re-verifies handle DACL before declaring success. Failure on any check refuses the write (hard-fail when installing hub-mode tokens; fall back + WARN already documented for adapters without header support). Same helper used for backups in `BackupKeep`.
+
+**Bind ordering** (F-S3 closure for "no half-initialized state", patched per codex r3 general F3):
 
 ```text
 1. validate <state-dir> sanity (existing watchdog check)
 2. flock(<state-dir>/hub-mcp.lock)
 3. load OR generate hub-mcp-tokens.json (with above hardening)
-4. resolve all manifests; validate no '__' in server names (strict mode for participating set) → exit 8 if any fail
-5. generate fresh instance_id (32-byte hex from crypto/rand)
-6. listener := net.ListenConfig{Control: setSO_EXCLUSIVEADDRUSE}.Listen("tcp", "127.0.0.1:<persistent-port>")
-   (persistent-port = hub-mcp.endpoint.json.port; first start = ephemeral; subsequent starts reuse)
-7. write hub-mcp.endpoint.json with {port, instance_id, pid, started_at} (atomic, under same lock)
+4. load existing hub-mcp.endpoint.json if present → extract persistent port + instance_id;
+   if absent (first start with gate ON), allocate port=0 (ephemeral) for step 6 and generate fresh instance_id.
+   On parse/DACL failure: refuse to proceed (don't silently regenerate — operator must investigate first).
+5. resolve all manifests; validate no '__' in server names (strict mode for participating set) → exit 8 if any fail
+6. listener := newListenerWithSOExclusive("127.0.0.1:<port>")
+   where newListenerWithSOExclusive is build-tagged:
+   - windows: net.ListenConfig{Control: func(_, _ string, c syscall.RawConn) error {
+         return c.Control(func(fd uintptr) {
+             windows.SetsockoptInt(windows.Handle(fd), windows.SOL_SOCKET, windows.SO_EXCLUSIVEADDRUSE, 1)
+         })
+     }}.Listen
+   - posix: net.ListenConfig{}.Listen (no analogue; loopback bind alone is sufficient on POSIX)
+   Note: golang.org/x/sys/windows exposes SO_EXCLUSIVEADDRUSE (not in syscall stdlib).
+   If port was 0 (first start), retrieve the assigned port via listener.Addr().(*net.TCPAddr).Port for step 7.
+7. write hub-mcp.endpoint.json {port, instance_id, pid, started_at} (atomic, under same lock).
+   If write fails after listener exists → defer listener.Close() in error path. The contract is
+   "no listener accepts traffic until step 7 succeeds" — not "no listener exists".
 8. funlock()
 9. http.Serve(listener, mux)
 ```
 
-If steps 1-7 fail, the listener is never created and no requests can hit half-initialized state.
+If steps 1-5 fail, the listener was never created and no resource leaked. If step 6 fails (port in use → pre-bind DoS), exit cleanly with the "port in use" diagnostic. If step 7 fails after the listener exists, defer-close the listener so no connections accept traffic without a published endpoint file.
 
 ## Logging hygiene + golden test (F-S2 closure)
 
@@ -230,7 +277,14 @@ const (
 )
 ```
 
-Planner logic when `gui_server.hub_endpoint_enabled=true`:
+**Single-server install paths MUST NOT remove the `mcphub-hub` aggregate entry** (codex r3 general F2 closure). `mcphub install --server X` is a per-manifest path — it cannot determine whether OTHER manifests still need the hub entry. Removing `mcphub-hub` from a single-server install would deconfigure unrelated servers. Therefore:
+
+- Gate-ON / Gate-OFF transitions go through a **dedicated full-reconcile pass** (`mcphub install --reconcile-hub-mode` or implicit on every gui startup): walks ALL manifests, computes the per-client participating set, and emits the aggregate add/remove plan AS A WHOLE.
+- Per-manifest `mcphub install --server X` paths NEVER emit `Remove EntryName="mcphub-hub"`. They only emit the per-(server, client) entries the manifest demands.
+- On gate-OFF, the gui startup full-reconcile (or explicit `--reconcile-hub-mode`) removes `mcphub-hub` for every client AND restores per-daemon entries for every manifest that was hub-routed.
+- On gate-ON, the full-reconcile adds `mcphub-hub` for every client with at least one manifest needing it AND removes per-daemon entries that the hub now serves.
+
+Planner logic when `gui_server.hub_endpoint_enabled=true` AND full-reconcile pass:
 
 1. Compute per-client union of `(server, daemon)` bindings across ALL manifests.
 2. For each client with a non-empty participating set:
@@ -238,12 +292,17 @@ Planner logic when `gui_server.hub_endpoint_enabled=true`:
    - Plan `Remove` for every existing per-(server, client) entry (detected via `RelayServer != "" || URL matches the per-daemon shape`).
 3. For each client whose participating set becomes empty: plan `Remove EntryName="mcphub-hub"`.
 
-Planner logic when gate is OFF:
+Planner logic when `gui_server.hub_endpoint_enabled=true` AND single-server `mcphub install --server X`:
 
-1. Existing per-binding planner runs unchanged.
+1. Existing per-binding planner runs unchanged for server X.
+2. Skip `Remove EntryName="mcphub-hub"` (NOT a single-server concern; full-reconcile owns that).
+
+Planner logic on gate-OFF full-reconcile pass:
+
+1. Walk ALL manifests; emit per-binding plan for each (existing planner).
 2. PLUS: plan `Remove EntryName="mcphub-hub"` for every client that previously had it (detected by `EntryName=="mcphub-hub"` in the live config).
 
-Result: toggling gate ON/OFF is round-trippable — gate-OFF cleans up after gate-ON, no stale `mcphub-hub` entries.
+Result: toggling gate ON/OFF via the full-reconcile pass is round-trippable. Single-server install paths are scope-coherent — they don't damage unrelated server entries.
 
 Adapter capability check (run at plan time):
 
@@ -273,14 +332,26 @@ The two TBDs are plan-time verification tasks; if unsupported, they join antigra
 | `prompts/*`, `resources/*`, `logging/setLevel`, etc. | `-32601 Method not found`. (Out of scope for MVP; honest deferral per `Out of scope` below.) |
 | `DELETE /clients/{id}/mcp` (HTTP method, with Mcp-Session-Id) | terminate session, best-effort fan-out DELETE to daemons, 204. |
 
-## Concurrency + bounds (F-G7 closure)
+## Concurrency + bounds (F-G7 closure, refined per codex r3 general F-G7 + security F-S4)
 
 - `hubSessionStore` uses `sync.RWMutex`. Lookup under RLock; insert/delete under Lock.
-- Per-session `mu sync.Mutex` protects route-map atomic-swap + `LastUsedAt` updates.
+- Per-session `mu sync.Mutex` protects `LastUsedAt` updates + lifecycle transitions.
 - Route map updates use atomic pointer swap (`atomic.Pointer[map[string]canonicalToolRef]`) so concurrent `tools/call` lookups never see a half-built map.
-- `InFlightRequests` uses `sync.Map` — high-frequency read/write of small entries, no enumeration required.
-- Idle sweeper: dedicated goroutine, ticks every 60s. Per session: try-lock `mu` with `tryLock` semantics (or short timeout); skip-and-retry-next-tick if held. Only remove session if `LastUsedAt > 30min ago` AND `InFlightRequests` is empty.
+- `InFlightRequests` is a regular `map[json.RawMessage]inflightEntry` protected by `inflightMu sync.Mutex`. Sessions also hold `inFlightCount atomic.Int32`, incremented before storing + decremented on cleanup. The idle sweeper checks `inFlightCount.Load() == 0` cheaply without taking `inflightMu`; if non-zero, skip-this-tick.
+- Idle sweeper: dedicated goroutine, ticks every 60s. Per session: takes `mu` (lifecycle lock), checks `LastUsedAt > 30min ago` AND `inFlightCount.Load() == 0`; only then removes from `hubSessionStore`. Per-call cleanup invariants: response/error/timeout/cancel all decrement `inFlightCount`.
+- **Resolver snapshot** is a package-level `atomic.Pointer[ResolverSnapshot]`. Mutations build a fresh snapshot off-line (gen bumped, bindings + routes rebuilt) and publish via `Store`. The pointer swap is atomic — readers either see the OLD snapshot or the NEW snapshot, never a torn read. Sessions capture the pointer at `initialize`; `tools/call` loads the CURRENT pointer and compares against the session's captured pointer to detect "binding was removed since session init" (codex r3 security F-S4 closure).
 - Hard caps: `MaxSessionsPerClient = 16`, `MaxSessionsGlobal = 256`. New `initialize` at cap → 429 with `Retry-After: 30`.
+
+**Token-table reload on rotation** (codex r3 security F1 HIGH closure): `mcphub hub-mcp regenerate-token --client X` is no longer a "rotate file, operator restarts hub" path. The CLI:
+
+1. Acquires `<state-dir>/hub-mcp.lock`.
+2. Reads + updates `hub-mcp-tokens.json` (atomic write).
+3. Sends a SIGHUP-equivalent reload signal to the running hub process via a hub-internal control channel: `POST http://127.0.0.1:<port>/internal/reload-tokens` on the loopback listener, authenticated by an additional control token rotated per hub start (stored under `<state-dir>/hub-mcp-control.token`, 0600 + DACL-verified, never sent to clients).
+4. Hub re-reads `hub-mcp-tokens.json` atomically (load → swap `tokenTable` under RWMutex Lock), responds 200.
+5. CLI returns success only after the hub confirms the swap. Old tokens become unaccepted within milliseconds; no restart required.
+6. Failure path: if the control endpoint is unreachable (hub stopped, crashed, etc.), the CLI returns with exit 1 + a message "rotate persisted to disk but live hub did not confirm; restart hub to apply or investigate". Worst case = old token still valid until next hub start, with operator surfaced clearly.
+
+An e2e regression test (`hub_mcp_rotate_live_test.go`) asserts: after `regenerate-token`, a request bearing the OLD token returns 401 within 500ms — without restarting the hub.
 
 ## Partial-failure visibility (closure for original F-G6 P2)
 
