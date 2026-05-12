@@ -150,6 +150,14 @@ func expandEnvCrossPlatform(s string) (string, []string) {
 }
 
 // Validate checks required fields and enum values. Called automatically by ParseManifest.
+//
+// Validate is COMPAT mode for the '__'-in-name policy: structural fields
+// are enforced but '__'-substring names are accepted silently. The
+// compat path is used by startup inventory + manifest listing reads so
+// legacy '__'-named manifests stay readable. See ValidateStrict for the
+// mutation-path gate that rejects them.
+//
+// G4 §"Pre-gate" (docs/superpowers/specs/2026-05-12-g4-unified-hub-mcp-design-v3.md).
 func (m *ServerManifest) Validate() error {
 	if m.Name == "" {
 		return fmt.Errorf("manifest: name is required")
@@ -192,6 +200,25 @@ func (m *ServerManifest) Validate() error {
 				return fmt.Errorf("manifest %s: languages[%d].lsp_command is required", m.Name, i)
 			}
 		}
+	}
+	return nil
+}
+
+// ValidateStrict runs the standard Validate() checks PLUS the strict
+// '__'-substring rejection on the server name. Used by manifest
+// mutation surfaces (create / edit / install) and by the hub bind-time
+// gate when gui_server.hub_endpoint_enabled=true. Legacy manifests that
+// still carry '__' in their name continue to load through Validate()
+// (compat mode) so the v0.3.0 upgrade path doesn't break first-start
+// inventory reads.
+//
+// G4 §"Pre-gate" (docs/superpowers/specs/2026-05-12-g4-unified-hub-mcp-design-v3.md).
+func (m *ServerManifest) ValidateStrict() error {
+	if err := m.Validate(); err != nil {
+		return err
+	}
+	if strings.Contains(m.Name, "__") {
+		return fmt.Errorf("manifest %s: server name contains '__' (reserved for hub-mode tool-name namespacing; rename via `mcphub manifest edit`)", m.Name)
 	}
 	return nil
 }

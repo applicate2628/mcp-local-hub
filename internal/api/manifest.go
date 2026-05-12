@@ -248,6 +248,13 @@ func (a *API) ManifestCreateIn(dir, name, yaml string) error {
 	if warnings := a.validateManifestForStorageName(name, yaml); len(warnings) > 0 {
 		return fmt.Errorf("manifest has validation errors: %s", strings.Join(warnings, "; "))
 	}
+	// Strict-mode gate (codex bot r5 P1 closure): mutation surfaces
+	// must reject '__'-in-server-name per the spec's "Pre-gate" section.
+	// validateManifestForStorageName only emits warnings; strict mode
+	// is what produces a hard error.
+	if _, err := a.ManifestValidateMode(yaml, ValidateModeStrict); err != nil {
+		return fmt.Errorf("manifest rejected by strict validation: %w", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 		return err
 	}
@@ -272,23 +279,90 @@ func (a *API) ManifestEditIn(dir, name, yaml string) error {
 	if warnings := a.validateManifestForStorageName(name, yaml); len(warnings) > 0 {
 		return fmt.Errorf("manifest has validation errors: %s", strings.Join(warnings, "; "))
 	}
+	// Strict-mode gate (codex bot r5 P1 closure): same as ManifestCreateIn.
+	// Edit paths must enforce '__' rejection for the same reason as
+	// create paths — both are spec-mandated "mutation surfaces."
+	if _, err := a.ManifestValidateMode(yaml, ValidateModeStrict); err != nil {
+		return fmt.Errorf("manifest rejected by strict validation: %w", err)
+	}
 	return os.WriteFile(target, []byte(yaml), 0644)
 }
+
+// ValidateMode discriminates the '__'-substring policy in server names.
+// Strict mode is applied at manifest mutation surfaces (create / edit /
+// install + hub binding setup); compat mode at startup inventory + GUI
+// manifest reads so legacy '__'-named manifests stay readable.
+//
+// G4 §"Pre-gate" (docs/superpowers/specs/2026-05-12-g4-unified-hub-mcp-design-v3.md).
+type ValidateMode int
+
+const (
+	// ValidateModeCompat warns on '__' substring in server names but
+	// accepts the manifest. This is the default / existing-caller
+	// behavior preserved by ManifestValidate.
+	ValidateModeCompat ValidateMode = iota
+	// ValidateModeStrict rejects '__' substring in server names. Used
+	// by the hub bind-time gate and mutation surfaces.
+	ValidateModeStrict
+)
 
 // ManifestValidate parses a manifest YAML and returns any structural
 // issues (missing required fields, unknown kind/transport values). Empty
 // slice means the manifest passes basic validation. Does NOT check that
 // referenced binaries, ports, or secrets actually exist — that's caller
 // responsibility at install time.
+//
+// Existing callers receive COMPAT-mode semantics (warns on '__' but
+// accepts). New callers that need strict-mode rejection use
+// ManifestValidateMode or ManifestValidateForHubBind.
 func (a *API) ManifestValidate(yaml string) []string {
+	warnings, _ := a.ManifestValidateMode(yaml, ValidateModeCompat)
+	return warnings
+}
+
+// ManifestValidateMode is ManifestValidate with explicit mode. Returns
+// (warnings, err). In COMPAT mode, err is always nil — structural parse
+// errors are reported via warnings[0] for backward compatibility with
+// existing ManifestValidate callers that ignored the (returned but
+// unused) error channel. In STRICT mode, both parse failures AND hard
+// rule violations ('__' in server name) return a hard error;
+// admission gates that discard warnings (e.g. ManifestValidateForHubBind)
+// rely on this strict-mode error path being authoritative (codex bot
+// r1 P1 closure — earlier wording reported parse failures as warnings
+// only, so a malformed manifest passed the strict hub-bind gate as
+// valid).
+//
+// G4 §"Pre-gate".
+func (a *API) ManifestValidateMode(yaml string, mode ValidateMode) ([]string, error) {
 	reader := strings.NewReader(yaml)
 	m, err := config.ParseManifest(reader)
 	if err != nil {
-		return []string{err.Error()}
+		if mode == ValidateModeStrict {
+			return nil, fmt.Errorf("manifest parse failed: %w", err)
+		}
+		return []string{err.Error()}, nil
 	}
-	// ParseManifest calls m.Validate internally, so if we reach here the
-	// structural validation passed. Add secondary soft checks:
-	return manifestValidationWarnings(m)
+	warnings := manifestValidationWarnings(m)
+	if strings.Contains(m.Name, "__") {
+		switch mode {
+		case ValidateModeStrict:
+			return warnings, fmt.Errorf("manifest name %q: '__' substring rejected in strict mode (reserved for hub-mode tool-name namespacing)", m.Name)
+		case ValidateModeCompat:
+			warnings = append(warnings, fmt.Sprintf("manifest name %q contains '__' (deprecated; will be rejected in strict mode)", m.Name))
+		}
+	}
+	return warnings, nil
+}
+
+// ManifestValidateForHubBind wraps ManifestValidateMode in strict mode
+// and returns only the hard error (warnings dropped). Phase 4's hub
+// listener bring-up uses this from gui/server.go to gate on the
+// participating manifest set when gui_server.hub_endpoint_enabled=true.
+//
+// G4 §"Pre-gate".
+func (a *API) ManifestValidateForHubBind(yaml string) error {
+	_, err := a.ManifestValidateMode(yaml, ValidateModeStrict)
+	return err
 }
 
 func (a *API) validateManifestForStorageName(name, yaml string) []string {
@@ -363,6 +437,14 @@ func (a *API) ManifestEditInWithHash(dir, name, yaml, expectedHash string) (newH
 	}
 	if warnings := a.validateManifestForStorageName(name, yaml); len(warnings) > 0 {
 		return "", fmt.Errorf("manifest has validation errors: %s", strings.Join(warnings, "; "))
+	}
+	// Strict-mode gate (codex bot r7 P1 closure): the hash-based edit
+	// path is ALSO a mutation surface and must reject '__' in server
+	// names per the spec's Pre-gate. Earlier wording wired strict mode
+	// only into ManifestEditIn; this is the second of the two edit
+	// paths (the GUI save uses the hash-based one).
+	if _, err := a.ManifestValidateMode(yaml, ValidateModeStrict); err != nil {
+		return "", fmt.Errorf("manifest rejected by strict validation: %w", err)
 	}
 	// Atomic write: unique tmp in the same directory, defer cleanup,
 	// os.Rename on success. Test-only hook manifestEditFailWriteHook
