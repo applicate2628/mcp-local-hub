@@ -151,7 +151,20 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
-		_ = srv.Serve(ln)
+		// codex bot phase4 r2 P2 closure on PR #158: surface non-
+		// shutdown serve errors so operators can diagnose a hub
+		// listener that died after startup reported `hub-listener-up`.
+		// http.ErrServerClosed is the normal shutdown signal (returned
+		// by Serve after Shutdown / Close) and not load-bearing here.
+		// Anything else (accept loop fatal, unexpected close, etc.)
+		// is structured-logged via LogHubMcpEvent so it appears in
+		// the same hub-mcp.log stream as bind / lifecycle events.
+		if serveErr := srv.Serve(ln); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			_ = api.LogHubMcpEvent("error", "hub-listener-down", map[string]any{
+				"port": port,
+				"err":  serveErr.Error(),
+			})
+		}
 	}()
 
 	_ = api.LogHubMcpEvent("info", "hub-listener-up", map[string]any{
