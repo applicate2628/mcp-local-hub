@@ -564,11 +564,40 @@ func doDaemonPost(ctx context.Context, port int, body []byte, daemonSID, protoVe
 // response id is not validated — we extract the Mcp-Session-Id header
 // only. Phase 4 keeps the same shape; downstream callers see the
 // hub-generated client_session_id, not this internal id.
+//
+// The envelope is built with json.Marshal — never fmt.Sprintf into a
+// JSON template literal — so a protocolVersion containing `"` or `\`
+// (Phase 4 will receive this from the client handshake) cannot
+// corrupt the outbound JSON. codex bot r8 P2 closure on PR #157.
+// Same shape as postCancellation in this file.
 func postInitialize(ctx context.Context, ref canonicalDaemonRef, protoVer string) (string, error) {
 	hubVer, _, _ := buildinfo.Get()
-	body := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"%s","capabilities":{},"clientInfo":{"name":"mcphub-hub","version":"%s"}}}`,
-		protoVer, hubVer)
-	raw, hdr, err := doDaemonPost(ctx, ref.Port, []byte(body), "", "", PerDaemonInitTimeout)
+	envelope := struct {
+		JSONRPC string `json:"jsonrpc"`
+		ID      int    `json:"id"`
+		Method  string `json:"method"`
+		Params  struct {
+			ProtocolVersion string         `json:"protocolVersion"`
+			Capabilities    map[string]any `json:"capabilities"`
+			ClientInfo      struct {
+				Name    string `json:"name"`
+				Version string `json:"version"`
+			} `json:"clientInfo"`
+		} `json:"params"`
+	}{
+		JSONRPC: "2.0",
+		ID:      1,
+		Method:  "initialize",
+	}
+	envelope.Params.ProtocolVersion = protoVer
+	envelope.Params.Capabilities = map[string]any{}
+	envelope.Params.ClientInfo.Name = "mcphub-hub"
+	envelope.Params.ClientInfo.Version = hubVer
+	body, err := json.Marshal(envelope)
+	if err != nil {
+		return "", fmt.Errorf("marshal initialize envelope: %w", err)
+	}
+	raw, hdr, err := doDaemonPost(ctx, ref.Port, body, "", "", PerDaemonInitTimeout)
 	if err != nil {
 		return "", err
 	}

@@ -61,6 +61,17 @@ type stubDaemon struct {
 	listCount   atomic.Int32
 	callCount   atomic.Int32
 	notifyCount atomic.Int32
+
+	// bodyMu guards capture fields below. Updated by the dispatch
+	// loop AFTER reading r.Body, BEFORE delegating to the per-method
+	// hook (because r.Body is single-shot — hooks that re-call
+	// readAllBody on r get empty bytes). Tests assert on the captured
+	// bytes when they need to inspect the daemon-facing request
+	// payload (e.g. quote/backslash round-trip checks).
+	bodyMu        sync.Mutex
+	lastInitBody  []byte
+	lastListBody  []byte
+	lastCallBody  []byte
 }
 
 func newStubDaemon(t *testing.T, sessionID string) *stubDaemon {
@@ -76,6 +87,9 @@ func newStubDaemon(t *testing.T, sessionID string) *stubDaemon {
 		switch method {
 		case "initialize":
 			sd.initCount.Add(1)
+			sd.bodyMu.Lock()
+			sd.lastInitBody = append([]byte(nil), body...)
+			sd.bodyMu.Unlock()
 			if sd.onInit != nil {
 				sd.onInit(w, r)
 				return
@@ -86,6 +100,9 @@ func newStubDaemon(t *testing.T, sessionID string) *stubDaemon {
 			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"stub","version":"1"}}}`))
 		case "tools/list":
 			sd.listCount.Add(1)
+			sd.bodyMu.Lock()
+			sd.lastListBody = append([]byte(nil), body...)
+			sd.bodyMu.Unlock()
 			if sd.onList != nil {
 				sd.onList(w, r)
 				return
@@ -95,6 +112,9 @@ func newStubDaemon(t *testing.T, sessionID string) *stubDaemon {
 			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"read","description":"d1"},{"name":"write","description":"d2"}]}}`))
 		case "tools/call":
 			sd.callCount.Add(1)
+			sd.bodyMu.Lock()
+			sd.lastCallBody = append([]byte(nil), body...)
+			sd.bodyMu.Unlock()
 			if sd.onCall != nil {
 				sd.onCall(w, r)
 				return
@@ -1007,6 +1027,56 @@ func TestAggregateToolsListPreservesRouteMapOnAllFail(t *testing.T) {
 	}
 	if _, ok := (*after)["srv1__read"]; !ok {
 		t.Errorf("RouteMap lost srv1__read after all-failed list: %+v", *after)
+	}
+}
+
+// TestPostInitializeEscapesProtocolVersion pins the codex bot r8 P2
+// closure on PR #157. The initialize envelope MUST be built with
+// json.Marshal (struct) — never `fmt.Sprintf` into a JSON template
+// literal — so a protocolVersion containing `"` or `\` cannot
+// corrupt the outbound JSON. Phase 4 receives this value from the
+// client handshake, so the input is attacker-influenced.
+//
+// We feed a deliberately hostile string ("};DROP TABLE--\) through
+// sess.ProtocolVersion, drive AggregateInitialize, and confirm the
+// daemon receives a well-formed JSON document with the exact byte
+// content preserved by JSON encoding.
+func TestPostInitializeEscapesProtocolVersion(t *testing.T) {
+	const hostile = "evil-version-\"};DROP TABLE--\\"
+
+	d1 := newStubDaemon(t, "d1-sid")
+	sess := sessionWithParticipants(d1)
+	sess.ProtocolVersion = hostile
+
+	if _, err := AggregateInitialize(context.Background(), sess, json.RawMessage(`1`)); err != nil {
+		t.Fatalf("AggregateInitialize: %v", err)
+	}
+
+	d1.bodyMu.Lock()
+	body := d1.lastInitBody
+	d1.bodyMu.Unlock()
+	if len(body) == 0 {
+		t.Fatalf("dispatch loop did not capture the initialize request body")
+	}
+
+	// Parse the body the daemon received — it MUST be well-formed JSON.
+	// The bug the bot caught would have produced a body like
+	//   ...protocolVersion":"evil-version-"};DROP TABLE--\","capabilities":{}...
+	// which is NOT valid JSON (unescaped `"` inside the string).
+	var env struct {
+		Params struct {
+			ProtocolVersion string `json:"protocolVersion"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("daemon received malformed JSON: %v\nbody=%s", err, body)
+	}
+
+	// And the protocol version must round-trip byte-exactly through
+	// JSON encoding — proving the encoder did its job rather than
+	// dropping or mangling the hostile characters.
+	if env.Params.ProtocolVersion != hostile {
+		t.Errorf("protocolVersion round-trip lost data:\n  got  %q\n  want %q", env.Params.ProtocolVersion, hostile)
 	}
 }
 
