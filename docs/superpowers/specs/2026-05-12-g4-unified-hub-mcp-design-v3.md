@@ -310,38 +310,53 @@ Windows DACL verification is **allowlist-based** (codex r3 security F-S3 closure
      unless umask interfered, in which case fchmod(tempHandle, 0600)
      fixes it.
 7. write(tempHandle, contents)
-8. fsync(tempHandle)
-9. tempHandle.Close()                                          // flush + release
-10. renameat(dirHandle, tempName, dirHandle, base)             // POSIX
-    NtSetInformationFile(dirHandle, FileRenameInformationEx,
-                         {ReplaceIfExists: true, RootDirectory: dirHandle,
-                          FileName: base, Flags: POSIX_SEMANTICS})  // Windows
-    - Atomic rename via the SAME dirHandle (root-directory-relative).
-      Symlink/junction in the destination path is impossible because
-      the rename is path-string-relative-to-dirHandle, not re-walked
-      from root.
+8. fsync(tempHandle)            // POSIX: durable to disk
+   FlushFileBuffers(tempHandle) // Windows: equivalent durability
+9. **DO NOT close tempHandle yet** (codex r5 MED — Windows rename
+   semantics need the open file handle). On POSIX the renameat call
+   takes a directory handle + name string and does not need the open
+   file handle. On Windows `NtSetInformationFile` with
+   `FileRenameInformationEx` is invoked ON the file being renamed
+   (its handle), with `RootDirectory` specifying the destination
+   parent dir handle and `FileName` specifying the destination
+   basename. The file handle must remain open across the rename call.
+10. POSIX: renameat(dirHandle, tempName, dirHandle, base)
+    Windows: NtSetInformationFile(
+                 tempHandle,                 // <-- the file being renamed
+                 FileRenameInformationEx,
+                 {ReplaceIfExists: true,
+                  RootDirectory: dirHandle,  // <-- target parent dir handle
+                  FileName: base,
+                  Flags: REPLACE_IF_EXISTS | POSIX_SEMANTICS})
+    - Atomic rename relative to dirHandle (root-directory-relative).
+      Symlink/junction in the destination basename is impossible
+      because the rename does not re-walk a string path from root.
     - POSIX_SEMANTICS flag on Windows 10+ makes the rename atomic
-      (replaces unconditionally without the legacy "in-use" lock).
-11. verifyHandle = openat(dirHandle, base, O_RDONLY|O_NOFOLLOW)
+      (replaces unconditionally; no legacy "in-use" lock; concurrent
+      handles to the old path become invalidated cleanly).
+    - REPLACE_IF_EXISTS allows overwriting an existing destination
+      (the client config's prior content).
+11. tempHandle.Close()                                         // now safe to release
+12. verifyHandle = openat(dirHandle, base, O_RDONLY|O_NOFOLLOW)
     - Re-open the destination via the SAME dirHandle to re-verify DACL.
       Path-based re-open here would be TOCTOU; the dirHandle anchor
       eliminates the window.
     - Sanity check: stat verifyHandle, assert (inode, size) match expectations.
-12. verify verifyHandle DACL (handle-bound, same allowlist as step 3).
+13. verify verifyHandle DACL (handle-bound, same allowlist as step 3).
     - If the rename succeeded but the on-disk DACL is wrong (some
       Windows policy ACLs auto-apply on certain paths — see DACL
       enterprise stance below), surface a HARD ERROR; the caller
       MUST refuse to write the token and fall back to per-daemon URLs.
-13. verifyHandle.Close(); dirHandle.Close()
+14. verifyHandle.Close(); dirHandle.Close()
 ```
 
 **Why every step uses dirHandle-relative ops:**
 
 - The classic TOCTOU is "path-based open / set-DACL / rename / re-open" — each path resolution is a fresh walk from root, giving an attacker with write to any ancestor a swap window.
-- Anchoring every op to the parent-dir handle freezes ancestor-resolution at step 2. Once dirHandle is held, the open/rename/re-open ops see the SAME directory inode regardless of what happens to the parent path string in the tree.
-- On Windows, `NtCreateFile`/`NtSetInformationFile` with `RootDirectory=dirHandle` give the same semantic; the wrapper in `internal/api/secure_write_windows.go` exposes `openatLikeWindows(dirHandle, name, flags) (windows.Handle, error)` and `renameatLikeWindows(dirHandle, oldName, dirHandle, newName) error`.
+- Anchoring every op to the parent-dir handle freezes the final-component ancestor resolution at step 2. Once dirHandle is held, the open/rename/re-open ops resolve their `base` name relative to that handle, not via a fresh walk from root. **The dirHandle freezes the FINAL ancestor (the immediate parent), not the entire ancestor chain** (codex r5 MED clarification — `FILE_FLAG_OPEN_REPARSE_POINT` only refuses to open the final reparse point we opened, it doesn't prove every intermediate parent component is symlink-free). The full ancestor-chain safety comes from the state-dir trust boundary: the per-user `<state-dir>` is 0600/0700 (POSIX) or single-user DACL (Windows), so an attacker without write to the user profile cannot swap an ancestor. Adapters that write OUTSIDE `<state-dir>` (e.g., client config files in `~/.claude.json`) inherit the same per-user trust boundary; if a different attacker holds write on those ancestors, they could already corrupt the client config independent of the hub.
+- On Windows, `NtCreateFile`/`NtSetInformationFile` with `RootDirectory=dirHandle` give the same semantic; the wrapper in `internal/api/secure_write_windows.go` exposes `openatLikeWindows(dirHandle, name, flags) (windows.Handle, error)` and `renameWithRootDir(fileHandle, dirHandle, newBase) error`. Note the rename wrapper takes the FILE handle (the temp file being renamed) plus a SEPARATE target dir handle (`dirHandle`) — not two dir handles. The Windows API signature is `NtSetInformationFile(fileHandle, FileRenameInformationEx, { RootDirectory: dirHandle, FileName: newBase, ... })`.
 - The `crypto/rand` tempName + O_EXCL + DACL-set-before-write sequence prevents an attacker with write-to-parent from racing into the temp slot.
-- The final handle-bound re-verify is the actual safety net: even if some unanticipated policy ACL got applied between rename and re-open, we'd catch it at step 12 and refuse the write rather than leave a token in a file with leaked-read access.
+- The final handle-bound re-verify is the actual safety net: even if some unanticipated policy ACL got applied between rename and re-open, we'd catch it at step 13 and refuse the write rather than leave a token in a file with leaked-read access.
 
 Failure on any check refuses the write (hard-fail when installing hub-mode tokens; fall back + WARN already documented for adapters without header support). Same helper used for backups in `BackupKeep`.
 
@@ -556,14 +571,16 @@ The two TBDs are plan-time verification tasks; if unsupported, they join antigra
 - **Resolver snapshot** is a package-level `atomic.Pointer[ResolverSnapshot]`. Mutations build a fresh snapshot off-line (gen bumped, bindings + routes rebuilt) and publish via `Store`. The pointer swap is atomic — readers either see the OLD snapshot or the NEW snapshot, never a torn read. Sessions capture the pointer at `initialize`; `tools/call` loads the CURRENT pointer and compares against the session's captured pointer to detect "binding was removed since session init" (codex r3 security F-S4 closure).
 - Hard caps: `MaxSessionsPerClient = 16`, `MaxSessionsGlobal = 256`. New `initialize` at cap → 429 with `Retry-After: 30`.
 
-**Token-table reload on rotation** (codex r3 security F1 HIGH closure): `mcphub hub-mcp regenerate-token --client X` is no longer a "rotate file, operator restarts hub" path. The CLI:
+**Token-table reload on rotation** (codex r3 security F1 HIGH closure; CLI lock-scope tightened per codex r5 MED): `mcphub hub-mcp regenerate-token --client X` is no longer a "rotate file, operator restarts hub" path. The CLI:
 
-1. Acquires `<state-dir>/hub-mcp.lock`.
-2. Reads + updates `hub-mcp-tokens.json` (atomic write).
-3. Sends a SIGHUP-equivalent reload signal to the running hub process via a hub-internal control channel: `POST http://127.0.0.1:<port>/internal/reload-tokens` on the loopback listener, authenticated by a per-start control token (see "Control endpoint contract" below).
-4. Hub re-reads `hub-mcp-tokens.json` atomically (load → swap `tokenTable` under RWMutex Lock), responds 204 No Content (no response body — see contract below).
-5. CLI returns success only after the hub confirms the swap. Old tokens become unaccepted within milliseconds; no restart required.
-6. Failure path: if the control endpoint is unreachable (hub stopped, crashed, etc.), the CLI returns with exit 1 + a message "rotate persisted to disk but live hub did not confirm; restart hub to apply or investigate". Worst case = old token still valid until next hub start, with operator surfaced clearly.
+1. Acquires `<state-dir>/hub-mcp.lock` (flock). **The CLI holds this lock continuously through steps 2-5; it MUST NOT release it before the POST response returns** (codex r5 MED — otherwise the control-token snapshot the CLI reads in step 3 could become stale between read and POST if the hub restarted under a parallel operator run, and a 2nd `regenerate-token` could interleave token-table updates).
+2. Reads + updates `hub-mcp-tokens.json` (atomic write under flock).
+3. Reads `<state-dir>/hub-mcp-control.token` (under the same flock).
+4. Sends a SIGHUP-equivalent reload signal to the running hub process via a hub-internal control channel: `POST http://127.0.0.1:<port>/internal/reload-tokens` on the loopback listener, authenticated by the control token from step 3 (see "Control endpoint contract" below). **The hub-side handler MUST NOT acquire `hub-mcp.lock`** (would deadlock with the CLI's outstanding flock). The handler instead uses its own in-process `reloadMutex sync.Mutex` to serialize tokenTable swaps + rate-limit checks.
+5. Hub re-reads `hub-mcp-tokens.json` atomically (load → swap `tokenTable` under RWMutex Lock), responds 204 No Content (no response body — see contract below).
+6. CLI returns success only after the hub confirms the swap. Old tokens become unaccepted within milliseconds; no restart required.
+7. CLI releases `hub-mcp.lock` (defer-funlock).
+8. Failure path: if the control endpoint is unreachable (hub stopped, crashed, etc.), the CLI returns with exit 1 + a message "rotate persisted to disk but live hub did not confirm; restart hub to apply or investigate" — still under the flock; releases on return. Worst case = old token still valid until next hub start, with operator surfaced clearly.
 
 An e2e regression test (`hub_mcp_rotate_live_test.go`) asserts: after `regenerate-token`, a request bearing the OLD token returns 401 within 500ms — without restarting the hub.
 
@@ -598,7 +615,7 @@ The control endpoint is a NEW attack surface introduced by the live-reload mecha
 |---|---|
 | Attacker captures control token via process memory dump | Same trust boundary as the per-client token (state-dir 0600/DACL). Memory-dump access ⇒ already root/admin or the running user; full local compromise. Acknowledged residual desktop-dev risk. |
 | Attacker captures control token via backup leak | `hub-mcp-control.token` is in `<state-dir>` (per-user) — same trust boundary as the watchdog state files. If state-dir is in a backup the operator already has bigger problems; document in `phase-3b-ii-verification.md` that backups of `<state-dir>` should be encrypted-at-rest or excluded. |
-| Force-reload via captured control token | Worst case: attacker can repeatedly call `/internal/reload-tokens` causing the hub to re-read `hub-mcp-tokens.json` from disk. That file is also under `<state-dir>` (per-user); the attacker needs filesystem write to flip token bytes. Reload alone (with the file unchanged) is a no-op other than CPU. Rate-limited via a 5s cooldown server-side; flood → 429. |
+| Force-reload via captured control token | Worst case: attacker can repeatedly call `/internal/reload-tokens` causing the hub to re-read `hub-mcp-tokens.json` from disk. That file is also under `<state-dir>` (per-user); the attacker needs filesystem write to flip token bytes. Reload alone (with the file unchanged) is a no-op other than CPU. **Rate-limited server-side: minimum 5s between consecutive successful reloads, enforced via a single timestamp guarded by `reloadMutex sync.Mutex`** (codex r5 MED clarification — atomic CAS or mutex, NOT a 3-per-second bucket). A 2nd reload attempt within 5s of the previous SUCCESSFUL reload returns 429 with `Retry-After: 5` and does NOT trigger a tokenTable swap. Failed-auth attempts (401/403/405) do NOT count toward the cooldown (they couldn't have caused a swap anyway). Concurrent requests serialize on `reloadMutex`; the 2nd parallel request inherits the 1st's outcome and either returns 204 (if the 1st succeeded and the cooldown window opened) or 429 (if the 1st succeeded and we're still inside its cooldown window). |
 | Replay across hub restarts | Control token rotates per hub start. A captured-and-replayed token from a previous hub-process is rejected by the constant-time compare (different keyspace). |
 
 **Tests** (`hub_mcp_internal_reload_test.go`):
@@ -608,7 +625,7 @@ The control endpoint is a NEW attack surface introduced by the live-reload mecha
 - Wrong control token → 401, empty body, constant-time path exercised (hex-shape rejection vs compare-rejection both return identical bodies).
 - Non-loopback Host → 403.
 - Per-client `X-Mcphub-Hub-Token` header with control-token value → 401 (separate keyspace; per-client header NOT accepted for `/internal/*`).
-- Rate-limit: 3 valid reloads in 1s, 4th → 429 with `Retry-After: 5`.
+- Rate-limit: 2 consecutive valid reloads within 5s → first 204, second 429 with `Retry-After: 5` (no tokenTable swap on the 429 path). After the 5s cooldown elapses, the next valid reload again returns 204. Concurrent parallel reloads serialize on `reloadMutex`; one wins and the other gets the consistent outcome (204 if window opened, 429 otherwise).
 - Status + log surfaces: golden test asserts zero control-token bytes across `status`, `hub-mcp.log`, install error paths.
 
 ## Partial-failure visibility (closure for original F-G6 P2)
