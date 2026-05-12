@@ -660,24 +660,42 @@ func daemonStillBound(snap *ResolverSnapshot, client string, ref canonicalToolRe
 // header. The envelope is ready to feed into `json.Unmarshal`
 // directly — no SSE framing remains in the returned slice.
 //
+// `expectResponse` controls how the response body is processed:
+//   - true (postInitialize, postToolsList, postToolsCall): the caller
+//     sent a JSON-RPC method call and expects a response envelope
+//     with a matching `id`. SSE bodies route through readSSEResponse
+//     to find the response event; plain JSON returns the raw bytes.
+//   - false (postInitialized, postCancellation): the caller sent a
+//     JSON-RPC NOTIFICATION which by spec has no response. The body
+//     (if any — daemons routinely return 200/202 with an empty body,
+//     an SSE keepalive comment, or even a future event we don't
+//     care about) is drained and discarded. Returning success on
+//     2xx is the contract; trying to extract a JSON-RPC response
+//     event from a stream that legitimately has none was the
+//     codex bot r16 P1 bug — successful notifications got mis-
+//     reported as init/cancel failures.
+//
 // Content-Type dispatch (codex bot r12 P1 closures on PR #157):
 //   - `application/json` (or default): read body to EOF up to
-//     maxAggregatorResponseBytes. Return raw bytes.
-//   - `text/event-stream`: stream-parse SSE events incrementally
-//     via readSSEResponse. Return the FIRST event whose data is a
-//     JSON-RPC response (has an `id` field). Connection is closed
-//     as soon as the response event arrives, so a daemon that keeps
-//     the SSE stream open for additional notifications never blocks
-//     us until the timeout. Pre-response notifications (progress
-//     events) are discarded.
+//     maxAggregatorResponseBytes. Return raw bytes (or nil when
+//     !expectResponse).
+//   - `text/event-stream`: when expectResponse, stream-parse SSE
+//     events incrementally via readSSEResponse and return the FIRST
+//     event whose data is a JSON-RPC response (has an `id` field).
+//     When !expectResponse, drain + discard. In the response-
+//     expected case the connection is closed as soon as the
+//     response event arrives, so a daemon that keeps the SSE stream
+//     open for additional notifications never blocks us until the
+//     timeout.
 //
 // HTTP >= 400 turns into an error with the raw body returned for
 // the caller's error message. Body-read failure or oversize response
 // also turns into an error.
 //
-// Used by postInitialize, postToolsList, postToolsCall, and
-// postCancellation. The single helper keeps the request-shape +
-// retry policy + body-cap logic in one auditable place.
+// Used by postInitialize, postToolsList, postToolsCall (response
+// callers), postCancellation, and postInitialized (notification
+// callers). The single helper keeps the request-shape + retry policy
+// + body-cap logic in one auditable place.
 //
 // protoVer is the MCP-Protocol-Version header value to send. Per MCP
 // Streamable HTTP lifecycle, subsequent requests (after initialize)
@@ -686,7 +704,7 @@ func daemonStillBound(snap *ResolverSnapshot, client string, ref canonicalToolRe
 // (codex bot r4 P1 closure on PR #157). For the initialize call
 // itself, callers pass "" — initialize is the negotiation step and
 // the header is not yet known.
-func doDaemonPost(ctx context.Context, port int, body []byte, daemonSID, protoVer string, timeout time.Duration) ([]byte, http.Header, error) {
+func doDaemonPost(ctx context.Context, port int, body []byte, daemonSID, protoVer string, timeout time.Duration, expectResponse bool) ([]byte, http.Header, error) {
 	url := fmt.Sprintf("http://127.0.0.1:%d/mcp", port)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -713,6 +731,16 @@ func doDaemonPost(ctx context.Context, port int, body []byte, daemonSID, protoVe
 			raw = raw[:maxAggregatorResponseBytes]
 		}
 		return raw, resp.Header, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	// Notification path: drain + discard. The caller sent a method
+	// that by JSON-RPC spec has no response, so we DO NOT try to
+	// parse the body — daemons routinely return 200/202 with an
+	// empty body, an SSE keepalive comment, or just a future event
+	// we don't care about. codex bot r16 P1 closure on PR #157.
+	if !expectResponse {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxAggregatorResponseBytes+1))
+		return nil, resp.Header, nil
 	}
 
 	if isSSEContentType(resp.Header.Get("Content-Type")) {
@@ -774,7 +802,7 @@ func postInitialize(ctx context.Context, ref canonicalDaemonRef, protoVer string
 	if err != nil {
 		return "", fmt.Errorf("marshal initialize envelope: %w", err)
 	}
-	raw, hdr, err := doDaemonPost(ctx, ref.Port, body, "", "", PerDaemonInitTimeout)
+	raw, hdr, err := doDaemonPost(ctx, ref.Port, body, "", "", PerDaemonInitTimeout, true)
 	if err != nil {
 		return "", err
 	}
@@ -825,7 +853,7 @@ func postInitialize(ctx context.Context, ref canonicalDaemonRef, protoVer string
 // session-level client_session_id, not this internal id.
 func postToolsList(ctx context.Context, ref canonicalDaemonRef, daemonSID, protoVer string) ([]json.RawMessage, error) {
 	body := []byte(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
-	raw, _, err := doDaemonPost(ctx, ref.Port, body, daemonSID, protoVer, PerDaemonListTimeout)
+	raw, _, err := doDaemonPost(ctx, ref.Port, body, daemonSID, protoVer, PerDaemonListTimeout, true)
 	if err != nil {
 		return nil, err
 	}
@@ -859,7 +887,7 @@ func postToolsCall(ctx context.Context, ref canonicalToolRef, daemonSID, protoVe
 	if err != nil {
 		return nil, err
 	}
-	raw, _, err := doDaemonPost(ctx, ref.Port, body, daemonSID, protoVer, PerCallWallClockCap)
+	raw, _, err := doDaemonPost(ctx, ref.Port, body, daemonSID, protoVer, PerCallWallClockCap, true)
 	if err != nil {
 		return nil, err
 	}
@@ -886,7 +914,12 @@ func postCancellation(ctx context.Context, ref canonicalDaemonRef, daemonSID, pr
 	if err != nil {
 		return err
 	}
-	if _, _, err := doDaemonPost(ctx, ref.Port, body, daemonSID, protoVer, PerDaemonInitTimeout); err != nil {
+	// expectResponse=false: notifications/cancelled has no response
+	// per JSON-RPC spec. doDaemonPost drains+discards the body so a
+	// daemon emitting text/event-stream by default (common with
+	// streamable endpoints) doesn't trip the readSSEResponse error
+	// path. codex bot r16 P1 closure on PR #157.
+	if _, _, err := doDaemonPost(ctx, ref.Port, body, daemonSID, protoVer, PerDaemonInitTimeout, false); err != nil {
 		return err
 	}
 	return nil
@@ -899,7 +932,10 @@ func postCancellation(ctx context.Context, ref canonicalDaemonRef, daemonSID, pr
 // on PR #157).
 func postInitialized(ctx context.Context, ref canonicalDaemonRef, daemonSID, protoVer string) error {
 	body := []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)
-	if _, _, err := doDaemonPost(ctx, ref.Port, body, daemonSID, protoVer, PerDaemonInitTimeout); err != nil {
+	// expectResponse=false: notifications/initialized has no response
+	// per JSON-RPC spec. Same rationale as postCancellation above
+	// (codex bot r16 P1 closure on PR #157).
+	if _, _, err := doDaemonPost(ctx, ref.Port, body, daemonSID, protoVer, PerDaemonInitTimeout, false); err != nil {
 		return err
 	}
 	return nil

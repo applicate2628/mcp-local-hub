@@ -1538,6 +1538,80 @@ func TestAggregateToolsListNamespaceCollision(t *testing.T) {
 	}
 }
 
+// TestNotificationsAcceptSSEResponseWithoutPayload pins codex bot
+// r16 P1 closure on PR #157. JSON-RPC notifications
+// (notifications/initialized, notifications/cancelled) have no
+// response by spec. Daemons running streamable HTTP endpoints
+// commonly return Content-Type: text/event-stream for every
+// 2xx response, but for a notification the SSE stream legitimately
+// contains no JSON-RPC response event — only keepalive comments or
+// an empty body.
+//
+// The pre-r16 doDaemonPost routed every text/event-stream body
+// through readSSEResponse, which errored with "stream ended without
+// a JSON-RPC response event". For notifications/initialized this
+// propagated through AggregateInitialize and recorded the daemon
+// as a stage="initialize" InitFailure, even though the notification
+// was correctly accepted by a healthy daemon.
+//
+// Expected behavior post-r16: doDaemonPost drains the SSE body for
+// notification calls (expectResponse=false) without parsing,
+// returns success on 2xx, and AggregateInitialize records the
+// daemon in InitSuccesses.
+func TestNotificationsAcceptSSEResponseWithoutPayload(t *testing.T) {
+	d1 := newStubDaemon(t, "d1-sid")
+	// onNotify is called for both notifications/initialized AND
+	// notifications/cancelled. Make it emit an SSE keepalive-only
+	// body — no `data:` lines, just a comment. This mirrors what a
+	// real streamable-HTTP daemon returns when the request is a
+	// notification.
+	d1.onNotify = func(w http.ResponseWriter, r *http.Request, body []byte) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(": keepalive\n\n"))
+	}
+
+	sess := sessionWithParticipants(d1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatalf("AggregateInitialize: %v", err)
+	}
+
+	// Daemon MUST land in InitSuccesses despite the SSE-shaped
+	// notification response. The pre-r16 code would have recorded
+	// it in InitFailures with stage="initialize" and an error
+	// mentioning "notifications/initialized".
+	if len(sess.InitSuccesses) != 1 {
+		t.Errorf("want 1 init success, got %d: %+v", len(sess.InitSuccesses), sess.InitSuccesses)
+	}
+	if len(sess.InitFailures) != 0 {
+		t.Errorf("want 0 init failures, got %d: %+v", len(sess.InitFailures), sess.InitFailures)
+	}
+
+	// Stretch test: ForwardCancellation also sends a notification
+	// (notifications/cancelled). Insert an in-flight row + run a
+	// cancellation. The daemon's notify hook still returns SSE-
+	// without-payload. Cancellation MUST NOT propagate an error
+	// out (and ForwardCancellation has no return type anyway — the
+	// internal err is swallowed). The assertion here is that the
+	// daemon observed the notification arrive.
+	key, _ := newRequestIDKey(json.RawMessage(`42`))
+	sess.InsertInFlight(key, inflightEntry{
+		DaemonRef:       sess.IntendedParticipants[0],
+		DaemonSessionID: "d1-sid",
+		DaemonRequestID: json.RawMessage(`"hub-x"`),
+		StartedAt:       time.Now(),
+	})
+	ForwardCancellation(ctx, sess, json.RawMessage(`42`))
+	// d1.notifyCount counts BOTH notifications/initialized AND
+	// notifications/cancelled. AggregateInitialize sent one, then
+	// ForwardCancellation sent another → count == 2.
+	if got := d1.notifyCount.Load(); got != 2 {
+		t.Errorf("daemon notifyCount=%d want 2 (initialized + cancelled)", got)
+	}
+}
+
 // TestPostInitializeEscapesProtocolVersion pins the codex bot r8 P2
 // closure on PR #157. The initialize envelope MUST be built with
 // json.Marshal (struct) — never `fmt.Sprintf` into a JSON template
