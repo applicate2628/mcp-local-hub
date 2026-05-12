@@ -206,8 +206,16 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 	// clients may rewrite POST as GET on the redirect step,
 	// silently dropping the JSON-RPC body. Returning 404 directly
 	// matches the handler's gate-2 path-shape contract.
+	//
+	// codex bot phase4 r13 P2 closure on PR #158: use plain
+	// WriteHeader(404) with no body. http.NotFound writes
+	// "404 page not found\n" which breaks the handler's empty-body
+	// 404 contract for all other gate-2 path-shape failures. Now
+	// every gate-2 path-shape rejection returns the SAME shape:
+	// empty body, status 404. Eliminates route-fingerprinting and
+	// keeps callers from differentiating /clients vs /clients/foo.
 	mux.HandleFunc("/clients", func(w http.ResponseWriter, r *http.Request) {
-		http.NotFound(w, r)
+		w.WriteHeader(http.StatusNotFound)
 	})
 	mux.Handle("/internal/reload-tokens", reload)
 

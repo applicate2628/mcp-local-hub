@@ -92,9 +92,24 @@ func BindHubMcpListener(ctx context.Context, clients []string, validateManifests
 		}
 	}()
 
+	// codex bot phase4 r13 P1 closure on PR #158: re-check ctx
+	// between in-lock steps so a slow filesystem (manifest scan on
+	// a stalled disk, hanging DACL stat on a network mount) cannot
+	// keep the goroutine running past Server.Start's 2s post-cancel
+	// budget and then publish a live listener after Start returned.
+	// The acquireHubMcpLockContext call already gated flock
+	// contention; these checks gate post-lock work too.
+	if cerr := ctx.Err(); cerr != nil {
+		return nil, fmt.Errorf("hub-mcp bind canceled before tokens: %w", cerr)
+	}
+
 	// Step 3 — tokens. Locked variant; caller already holds flock.
 	if _, terr := ensureHubTokensLocked(clients); terr != nil {
 		return nil, fmt.Errorf("ensure tokens: %w", terr)
+	}
+
+	if cerr := ctx.Err(); cerr != nil {
+		return nil, fmt.Errorf("hub-mcp bind canceled before endpoint load: %w", cerr)
 	}
 
 	// Step 4 — load endpoint (port + instance_id). Missing file is
@@ -105,11 +120,19 @@ func BindHubMcpListener(ctx context.Context, clients []string, validateManifests
 		return nil, fmt.Errorf("load endpoint: %w", lerr)
 	}
 
+	if cerr := ctx.Err(); cerr != nil {
+		return nil, fmt.Errorf("hub-mcp bind canceled before manifest validation: %w", cerr)
+	}
+
 	// Step 5 — strict-mode manifest pre-gate.
 	if validateManifests != nil {
 		if verr := validateManifests(); verr != nil {
 			return nil, fmt.Errorf("bind refused: %w", verr)
 		}
+	}
+
+	if cerr := ctx.Err(); cerr != nil {
+		return nil, fmt.Errorf("hub-mcp bind canceled before listener bind: %w", cerr)
 	}
 
 	// Step 6 — bind. Pass port=0 if the persisted record had none
@@ -129,6 +152,17 @@ func BindHubMcpListener(ctx context.Context, clients []string, validateManifests
 			"reason": "pre-bind window — credentials may have leaked to pre-binding process",
 		})
 		return nil, fmt.Errorf("bind %s: %w", bindAddr, lnErr)
+	}
+
+	// codex bot phase4 r13 P1 closure on PR #158: if ctx was canceled
+	// AFTER step 6 succeeded but BEFORE we publish endpoint.json,
+	// close the listener and bail. Otherwise the caller's 2s post-
+	// cancel wait could expire while we're still in
+	// ensureHubEndpointLocked, leaving a published listener + dead
+	// goroutine after Server.Start returned.
+	if cerr := ctx.Err(); cerr != nil {
+		_ = ln.Close()
+		return nil, fmt.Errorf("hub-mcp bind canceled before endpoint persist: %w", cerr)
 	}
 
 	// Step 7 — persist endpoint.json with the OS-assigned port.
