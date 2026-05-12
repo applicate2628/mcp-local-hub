@@ -1,0 +1,182 @@
+//go:build !windows
+
+// secure_write_posix.go — POSIX leg of SecureWriteClientConfig (Task 1.3).
+//
+// Sequence:
+//
+//  1. open(parentDir, O_DIRECTORY|O_RDONLY|O_CLOEXEC) — dirFd
+//  2. fstat(dirFd): refuse if non-owner or group/world-writable
+//  3. crypto/rand 8 bytes -> hex; tempName = ".<base>.tmp.<pid>.<hex>"
+//  4. openat(dirFd, tempName, O_CREAT|O_EXCL|O_WRONLY|O_NOFOLLOW|O_CLOEXEC, 0600)
+//  5. fchmod(tempFd, 0600) — defense vs umask drift
+//  6. write(tempFd, contents)
+//  7. fsync(tempFd)
+//  8. renameat(dirFd, tempName, dirFd, base) — atomic + dirfd-relative
+//  9. close(tempFd)
+// 10. openat(dirFd, base, O_RDONLY|O_NOFOLLOW|O_CLOEXEC) — verifyFd
+// 11. fstat(verifyFd): re-verify owner + mode
+// 12. close(verifyFd); close(dirFd)
+//
+// Any error in steps 4-8 unlinks the temp file before returning. The
+// state-dir trust boundary (per-user 0700) is the ancestor-chain
+// guarantee; the dirHandle freezes the FINAL parent component for the
+// rest of the sequence.
+
+package api
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"golang.org/x/sys/unix"
+)
+
+func secureWriteClientConfigImpl(path string, contents []byte) error {
+	parentDir, base := filepath.Split(path)
+	if parentDir == "" {
+		parentDir = "."
+	}
+	if base == "" {
+		return fmt.Errorf("secure write: empty base name in path %q", path)
+	}
+
+	// 1. Open parent dir with O_DIRECTORY so a non-dir path is rejected
+	// fast, and O_NOFOLLOW so a symlinked final component is refused.
+	dirFd, err := unix.Open(parentDir, unix.O_DIRECTORY|unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	if err != nil {
+		return fmt.Errorf("secure write: open parent %s: %w", parentDir, err)
+	}
+	defer unix.Close(dirFd)
+
+	// 2. Parent DACL verify reduces to owner-uid + non-loose mode
+	// on POSIX. The per-user trust boundary covers ancestor chain.
+	if err := verifyPosixParentDirFromFd(dirFd); err != nil {
+		return fmt.Errorf("secure write: parent %s not single-user safe: %w", parentDir, err)
+	}
+
+	// 3. Unpredictable temp name to defeat slot-squat races.
+	randBytes := make([]byte, 8)
+	if _, err := rand.Read(randBytes); err != nil {
+		return fmt.Errorf("secure write: crypto/rand: %w", err)
+	}
+	tempName := fmt.Sprintf(".%s.tmp.%d.%s", base, os.Getpid(), hex.EncodeToString(randBytes))
+
+	// 4. Create the temp file relative to dirFd with O_EXCL|O_NOFOLLOW.
+	flags := unix.O_CREAT | unix.O_EXCL | unix.O_WRONLY | unix.O_NOFOLLOW | unix.O_CLOEXEC
+	fileFd, err := unix.Openat(dirFd, tempName, flags, 0o600)
+	if err != nil {
+		return fmt.Errorf("secure write: openat temp %s: %w", tempName, err)
+	}
+
+	// Helper to unlink+close on any post-create failure. Errors from
+	// cleanup are intentionally ignored — the caller already has a
+	// failure to surface; leaving a temp file is preferable to masking
+	// the original error.
+	cleanup := func() {
+		_ = unix.Close(fileFd)
+		_ = unix.Unlinkat(dirFd, tempName, 0)
+	}
+
+	// 5. fchmod defense vs umask drift. O_CREAT mode 0600 is the
+	// primary guarantee; this catches a hostile umask that widened it.
+	if err := unix.Fchmod(fileFd, 0o600); err != nil {
+		cleanup()
+		return fmt.Errorf("secure write: fchmod temp: %w", err)
+	}
+
+	// 6. Write contents. unix.Write may return a short write; loop
+	// until everything is committed.
+	if err := writeAllUnix(fileFd, contents); err != nil {
+		cleanup()
+		return fmt.Errorf("secure write: write temp: %w", err)
+	}
+
+	// 7. fsync the file before rename so the inode bytes are durable.
+	if err := unix.Fsync(fileFd); err != nil {
+		cleanup()
+		return fmt.Errorf("secure write: fsync temp: %w", err)
+	}
+
+	// 8. Atomic rename relative to dirFd. POSIX renameat replaces an
+	// existing destination atomically; the final-component path
+	// resolution is anchored to dirFd (not a re-walk).
+	if err := unix.Renameat(dirFd, tempName, dirFd, base); err != nil {
+		cleanup()
+		return fmt.Errorf("secure write: renameat %s -> %s: %w", tempName, base, err)
+	}
+
+	// 9. Now safe to close the file handle — rename completed.
+	if err := unix.Close(fileFd); err != nil {
+		return fmt.Errorf("secure write: close temp: %w", err)
+	}
+
+	// 10. Re-open destination via SAME dirFd to re-verify. Path-based
+	// re-open here would be TOCTOU; the dirFd anchor closes the window.
+	verifyFd, err := unix.Openat(dirFd, base, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return fmt.Errorf("secure write: re-open %s: %w", base, err)
+	}
+	defer unix.Close(verifyFd)
+
+	// 11. Re-verify mode + ownership on the persisted file.
+	if err := verifyPosixFileFromFd(verifyFd); err != nil {
+		return fmt.Errorf("secure write: post-rename verify %s: %w", base, err)
+	}
+	return nil
+}
+
+// writeAllUnix retries unix.Write until every byte in p is committed
+// or an error occurs. unix.Write may return a short count without an
+// error on some kernels (large buffers / signal interruption).
+func writeAllUnix(fd int, p []byte) error {
+	for len(p) > 0 {
+		n, err := unix.Write(fd, p)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return fmt.Errorf("write returned 0 bytes")
+		}
+		p = p[n:]
+	}
+	return nil
+}
+
+// verifyPosixParentDirFromFd stats the parent dir via the open fd and
+// rejects group/world-writable mode bits and non-owner uid. The
+// state-dir per-user trust boundary covers the ancestor chain; this
+// check only needs to confirm the immediate parent matches.
+func verifyPosixParentDirFromFd(fd int) error {
+	var st unix.Stat_t
+	if err := unix.Fstat(fd, &st); err != nil {
+		return err
+	}
+	if int(st.Uid) != os.Getuid() {
+		return fmt.Errorf("parent owned by uid %d, want %d", st.Uid, os.Getuid())
+	}
+	// 0o022 = group-write | world-write. A parent at 0700 or 0750 is
+	// fine; tighter (0700) is preferred but not required.
+	if st.Mode&uint32(0o022) != 0 {
+		return fmt.Errorf("parent mode %#o is group- or world-writable", st.Mode&0o777)
+	}
+	return nil
+}
+
+// verifyPosixFileFromFd stats the persisted file via the verify fd and
+// rejects any group/other-readable bits or non-owner uid.
+func verifyPosixFileFromFd(fd int) error {
+	var st unix.Stat_t
+	if err := unix.Fstat(fd, &st); err != nil {
+		return err
+	}
+	if int(st.Uid) != os.Getuid() {
+		return fmt.Errorf("file owned by uid %d, want %d", st.Uid, os.Getuid())
+	}
+	if st.Mode&uint32(0o077) != 0 {
+		return fmt.Errorf("file mode %#o is group- or other-accessible", st.Mode&0o777)
+	}
+	return nil
+}
