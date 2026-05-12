@@ -186,9 +186,16 @@ func refusePreexistingSymlink(dirFd int, name string) error {
 }
 
 // verifyPosixParentDirFromFd stats the parent dir via the open fd and
-// rejects group/world-writable mode bits and non-owner uid. The
+// rejects ANY group/other permission bits + non-owner uid. The
 // state-dir per-user trust boundary covers the ancestor chain; this
 // check only needs to confirm the immediate parent matches.
+//
+// Codex bot r4 P2 closure: earlier wording rejected only 0o022 (group/
+// world-WRITABLE) but accepted 0o755 / 0o750 (group/world-readable +
+// listable). Token-bearing state dirs MUST NOT be listable by other
+// local users — even directory enumeration leaks file presence and
+// timing. Windows leg already rejects any non-allowlist read access;
+// POSIX is now stricter to match.
 func verifyPosixParentDirFromFd(fd int) error {
 	var st unix.Stat_t
 	if err := unix.Fstat(fd, &st); err != nil {
@@ -197,10 +204,14 @@ func verifyPosixParentDirFromFd(fd int) error {
 	if int(st.Uid) != os.Getuid() {
 		return fmt.Errorf("parent owned by uid %d, want %d", st.Uid, os.Getuid())
 	}
-	// 0o022 = group-write | world-write. A parent at 0700 or 0750 is
-	// fine; tighter (0700) is preferred but not required.
-	if st.Mode&uint32(0o022) != 0 {
-		return fmt.Errorf("parent mode %#o is group- or world-writable", st.Mode&0o777)
+	// 0o077 = ANY group/world bit (read OR write OR execute). A parent
+	// must be 0700 or 0500 (read-only owner) — nothing weaker.
+	// unix.Stat_t.Mode is uint32 on Linux but uint16 on Darwin; widen
+	// to uint32 once and operate on the widened form so the mask
+	// expression typechecks under both build targets.
+	mode := uint32(st.Mode)
+	if mode&0o077 != 0 {
+		return fmt.Errorf("parent mode %#o exposes bits to group/world (require 0700-equivalent)", mode&0o777)
 	}
 	return nil
 }
@@ -215,8 +226,11 @@ func verifyPosixFileFromFd(fd int) error {
 	if int(st.Uid) != os.Getuid() {
 		return fmt.Errorf("file owned by uid %d, want %d", st.Uid, os.Getuid())
 	}
-	if st.Mode&uint32(0o077) != 0 {
-		return fmt.Errorf("file mode %#o is group- or other-accessible", st.Mode&0o777)
+	// Mode is uint32 on Linux, uint16 on Darwin; widen once for the
+	// mask expression to typecheck on both.
+	mode := uint32(st.Mode)
+	if mode&0o077 != 0 {
+		return fmt.Errorf("file mode %#o is group- or other-accessible", mode&0o777)
 	}
 	return nil
 }
