@@ -204,7 +204,22 @@ func ShutdownHubListener(parentCtx context.Context, c *HubListenerComponents) {
 	shutCtx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
 	defer cancel()
 	if c.srv != nil {
-		_ = c.srv.Shutdown(shutCtx)
+		// codex bot phase4 r6 P2 closure on PR #158: surface a
+		// graceful-shutdown failure (typically context.DeadlineExceeded
+		// when an in-flight /clients/.../mcp request did not finish
+		// within the budget). We still proceed to tear down the
+		// session store and reload handler — keeping them alive
+		// indefinitely would leak goroutines and the control-token
+		// file. But the operator now sees a structured log line
+		// indicating graceful shutdown did not complete cleanly,
+		// which can correlate with later "request timed out mid-
+		// flight" diagnostics on the client side.
+		if err := c.srv.Shutdown(shutCtx); err != nil {
+			_ = api.LogHubMcpEvent("warn", "hub-shutdown-incomplete", map[string]any{
+				"port": c.port,
+				"err":  err.Error(),
+			})
+		}
 	}
 	if c.store != nil {
 		c.store.Close()

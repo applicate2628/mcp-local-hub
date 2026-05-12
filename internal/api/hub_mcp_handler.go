@@ -461,15 +461,23 @@ func (h *HubMcpHandler) handleDelete(w http.ResponseWriter, r *http.Request, cli
 	}
 	sess.mu.Unlock()
 
+	// codex bot phase4 r6 P1 closure on PR #158: invalidate the hub
+	// session BEFORE the daemon fan-out. The fan-out can block up to
+	// ~5s on per-daemon timeouts; during that window a concurrent
+	// POST with the same Mcp-Session-Id would still pass gate 6 and
+	// execute tools/call against an in-process-terminated session.
+	// Deleting first gives the client immediate-revocation
+	// semantics while preserving best-effort downstream cleanup.
+	h.sessions.Delete(sid)
+
 	// Best-effort fan-out: ignore errors. Even if every fan-out fails
-	// we still return 204 + remove the hub session — the client
-	// considers the session terminated regardless of daemon-side state.
+	// we still return 204 — the client considers the session
+	// terminated regardless of daemon-side state.
 	fanCtx, fanCancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer fanCancel()
 	for ref, dsid := range daemonSessions {
 		_ = bestEffortDeleteDaemonSession(fanCtx, ref, dsid)
 	}
-	h.sessions.Delete(sid)
 	w.WriteHeader(http.StatusNoContent)
 }
 
