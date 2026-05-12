@@ -88,6 +88,73 @@ func TestNewRequestIDKeyZeroCanonical(t *testing.T) {
 	}
 }
 
+// Cross-form bucketing — every JSON-RPC number that denotes the
+// same mathematical value MUST collapse onto the same canonical key.
+// codex bot r7 P1 closure on PR #157.
+//
+// The earlier per-form-only normalization (strip leading zeros on
+// intMag, trailing zeros on fracMag, leading zeros on expMag) was
+// insufficient because it preserved each input's structural shape:
+// `1` and `10e-1` and `0.1e1` all denote 1, but mapped to three
+// distinct keys (`n:1`, `n:10e-1`, `n:0.1e1`). A client switching
+// encodings between requests would bypass duplicate-in-flight
+// detection AND cancellation lookup. The mantissa+exponent reduction
+// is what closes that gap.
+func TestNewRequestIDKeyCrossFormBucketing(t *testing.T) {
+	groups := map[requestIDKey][]string{
+		// Integer 1 in every plausible JSON-RPC encoding.
+		"n:1": {
+			`1`, `1.0`, `1.00`, `1e0`, `1E+0`, `10e-1`, `100e-2`,
+			`0.1e1`, `0.01e2`, `0.001e3`, `1000e-3`,
+		},
+		// Negative 1.
+		"n:-1": {`-1`, `-1.0`, `-1e0`, `-10e-1`, `-0.1e1`},
+		// Fractional 1.5.
+		"n:15e-1": {
+			`1.5`, `1.50`, `1.500`, `15e-1`, `150e-2`, `0.15e1`,
+			`0.015e2`, `1.5e0`,
+		},
+		// Negative fractional.
+		"n:-15e-1": {`-1.5`, `-15e-1`, `-0.15e1`, `-1.50`},
+		// Integer 100.
+		"n:1e2": {`100`, `1e2`, `10e1`, `0.1e3`, `1000e-1`, `100.0`, `100e0`},
+		// Tiny fractional.
+		"n:5e-2": {`0.05`, `5e-2`, `0.005e1`, `50e-3`},
+	}
+	for want, members := range groups {
+		for _, in := range members {
+			got, err := newRequestIDKey(json.RawMessage(in))
+			if err != nil {
+				t.Errorf("%s: %v", in, err)
+				continue
+			}
+			if got != want {
+				t.Errorf("%s -> %q, want %q (cross-form bucketing)", in, got, want)
+			}
+		}
+	}
+}
+
+// Reject implausibly-large exponent magnitudes (>1<<20 in absolute
+// value). The canonicalizer is for JSON-RPC request IDs which are
+// expected to be small integers; an exponent like `1e9999999999`
+// is more likely a malformed input than legitimate. Defense against
+// `strconv.Atoi` overflow on 32-bit platforms — the bound (1<<20)
+// is well below int32's range. codex bot r7 P1 closure on PR #157.
+func TestNewRequestIDKeyRejectsExtremeExponent(t *testing.T) {
+	cases := []string{
+		`1e99999999`,           // 8-digit exponent body
+		`1e9999999999`,         // longer
+		`1e1048577`,            // 1<<20 + 1
+		`1e-99999999`,
+	}
+	for _, in := range cases {
+		if _, err := newRequestIDKey(json.RawMessage(in)); err == nil {
+			t.Errorf("must reject extreme exponent %s", in)
+		}
+	}
+}
+
 // Zero with non-zero exponent magnitude — `0e5`, `-0e5`, `0.0e3`,
 // `-0.000e-5`, `0e10` all denote mathematical zero and MUST collapse
 // onto `n:0`. Otherwise a client sending `id: -0e5` and another sending
@@ -116,15 +183,17 @@ func TestNewRequestIDKeyZeroDropsNonZeroExponent(t *testing.T) {
 	}
 }
 
-// Fractional preserves significant digits, strips trailing zeros
-// (spec rule 4 + rule 6).
+// Fractional canonicalizes to `<mantissa>e<signed-exp>` form so all
+// cross-form encodings of the same value bucket together. codex bot
+// r7 P1 closure on PR #157: the prior decimal-preserving form let
+// `1.5` and `15e-1` (both denote 1.5) map to distinct keys.
 func TestNewRequestIDKeyFractionalPreserves(t *testing.T) {
 	cases := map[string]requestIDKey{
-		`1.5`:   "n:1.5",
-		`1.50`:  "n:1.5",
-		`1.5e0`: "n:1.5",
-		`1.500`: "n:1.5",
-		`1.05`:  "n:1.05",
+		`1.5`:   "n:15e-1",
+		`1.50`:  "n:15e-1",
+		`1.5e0`: "n:15e-1",
+		`1.500`: "n:15e-1",
+		`1.05`:  "n:105e-2",
 	}
 	for in, want := range cases {
 		key, err := newRequestIDKey(json.RawMessage(in))
@@ -138,12 +207,13 @@ func TestNewRequestIDKeyFractionalPreserves(t *testing.T) {
 	}
 }
 
-// Negative numbers preserve sign (spec rule 5).
+// Negative numbers preserve sign through mantissa+exponent
+// canonicalization (codex bot r7 P1 closure on PR #157).
 func TestNewRequestIDKeyNegative(t *testing.T) {
 	cases := map[string]requestIDKey{
 		`-1`:    "n:-1",
 		`-1.0`:  "n:-1",
-		`-1.5`:  "n:-1.5",
+		`-1.5`:  "n:-15e-1",
 		`-1e1`:  "n:-1e1",
 	}
 	for in, want := range cases {
@@ -197,6 +267,9 @@ func TestNewRequestIDKeyHugeIntegerPreserved(t *testing.T) {
 
 // Exponents normalize: `1e10` stays compact, `1E+10` → `n:1e10`,
 // leading zeros stripped from the exponent (`1e0010` → `n:1e10`).
+// Mantissas with fractional digits collapse onto the canonical
+// mantissa+exp form via trailing-zero strip (`1.5e2` → `n:15e1`,
+// equivalent to `150`). codex bot r7 P1 closure on PR #157.
 func TestNewRequestIDKeyExponentNormalize(t *testing.T) {
 	cases := map[string]requestIDKey{
 		`1e10`:    "n:1e10",
@@ -205,9 +278,9 @@ func TestNewRequestIDKeyExponentNormalize(t *testing.T) {
 		`1e0010`:  "n:1e10",
 		`1e-5`:    "n:1e-5",
 		`1E-05`:   "n:1e-5",
-		`1.5e2`:   "n:1.5e2",
-		`1.50e2`:  "n:1.5e2",
-		`1.500E2`: "n:1.5e2",
+		`1.5e2`:   "n:15e1",
+		`1.50e2`:  "n:15e1",
+		`1.500E2`: "n:15e1",
 	}
 	for in, want := range cases {
 		key, err := newRequestIDKey(json.RawMessage(in))

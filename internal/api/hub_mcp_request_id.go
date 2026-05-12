@@ -20,30 +20,45 @@
 // on `null`. Arrays, objects, and booleans are also rejected; the
 // JSON-RPC grammar permits only string and number.
 //
-// The number canonicalization follows seven pure-string steps so we
-// never allocate big.Int / big.Rat on the hot path:
+// Number canonicalization is pure-string mantissa+exponent reduction
+// — never any float64 arithmetic — so values larger than 2^53
+// canonicalize without precision loss. The algorithm:
 //
-//   1. Reject leading `+` (JSON grammar forbids it; json.Decoder
-//      grammar-validates).
-//   2. Strip leading zeros from the integer part (keep a single `0`
-//      if integer part is otherwise empty: `0.5` stays `0.5`).
-//   3. If an exponent is present: normalize sign (drop `+`, keep `-`),
-//      strip leading zeros from the exponent's magnitude (`1e0010` →
-//      `1e10`), and drop the entire `eN` suffix if the magnitude
-//      is zero (`1e0` → `1`).
-//   4. If a fractional part is present: strip trailing zeros after the
-//      decimal point. If the fractional becomes empty after the strip,
-//      drop the decimal point entirely (`1.50` → `1.5`; `1.00` → `1`).
-//   5. Normalize letter case for the exponent prefix to lowercase `e`
-//      (`1E10` → `1e10`).
-//   6. Treat `-0` (with any fractional/exponent that still evaluates
-//      to zero) as `0` (no negative zero in the canonical form).
-//   7. Preserve every other digit verbatim — never apply numeric
-//      arithmetic.
+//  1. Reject leading `+` (JSON grammar forbids it; json.Decoder
+//     grammar-validates).
+//  2. Split into intPart / fracPart / expPart sub-strings.
+//  3. Validate the digit-only sub-parts (defense in depth).
+//  4. Combine intPart + fracPart into a single digit-mantissa, and
+//     compute mantExp = (parsed exp) − len(fracPart). Each digit
+//     moved past the decimal point reduces the effective exponent.
+//  5. Strip leading zeros from the mantissa (no exponent shift).
+//  6. If the stripped mantissa is empty, the value is zero. Emit
+//     `0` with no sign and no exponent.
+//  7. Strip trailing zeros from the mantissa, shifting mantExp UP by
+//     the stripped count. This is what collapses `100`, `10e1`, `1e2`,
+//     `0.1e3` onto a single key — and what closes the r7 P1
+//     "exponent-shifted IDs map to different keys" finding.
+//  8. Emit the canonical form: optional leading `-` for negative,
+//     then mantissa, then `e<signed-exp>` if mantExp != 0. Exponents
+//     are signed via `e-<mag>` (no leading `+`); `e0` is never
+//     emitted (mantExp != 0 is the precondition).
+//
+// Two JSON numbers that denote the same mathematical value MUST map
+// to the same canonical key. Examples that bucket together:
+//
+//     `1`, `1.0`, `1e0`, `10e-1`, `100e-2`, `0.1e1` all → `n:1`
+//     `1.5`, `15e-1`, `150e-2`, `0.15e1` all → `n:15e-1`
+//     `100`, `1e2`, `0.01e4`, `10e1` all → `n:1e2`
+//     `0`, `-0`, `0e5`, `-0e5`, `0.0`, `-0.000e2` all → `n:0`
+//     `9007199254740993` (2^53+1) → `n:9007199254740993`
+//
+// The canonical form is purely an internal Go map key. It is NOT
+// surfaced in logs, responses, or external interfaces; only its
+// uniqueness contract matters.
 //
 // Spec: docs/superpowers/specs/2026-05-12-g4-unified-hub-mcp-design-v3.md
 // §"Per-hub session model" requestIDKey definition (codex r4 F6 +
-// r5 P1 + r6 MED closures). Plan: Task 3.1.
+// r5 P1 + r6 MED + r7 P1 closures). Plan: Task 3.1.
 
 package api
 
@@ -52,8 +67,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
+
+// maxCanonicalExponentMagnitude caps the absolute exponent magnitude
+// accepted by canonicalizeJSONNumber. JSON-RPC request IDs are
+// expected to be small integers in practice (often 0..1000 monotonic);
+// fractional or scientific forms are vanishingly rare. The cap
+// (1<<20) is well below int32's range so strconv.Atoi can never
+// overflow on platforms where int is 32-bit, and reasonable JSON
+// numbers like `1e308` (max float64) still fit. A 7-digit exponent
+// like `1e9999999` is rejected as malformed rather than parsed.
+const maxCanonicalExponentMagnitude = 1 << 20
 
 // requestIDKey is the comparable form of a JSON-RPC id. NEVER store
 // this anywhere readable by an attacker — the underlying id may carry
@@ -134,15 +160,17 @@ func newRequestIDKey(raw json.RawMessage) (requestIDKey, error) {
 	return requestIDKey("n:" + canon), nil
 }
 
-// canonicalizeJSONNumber returns the canonical decimal-string form of
-// a JSON number per the seven rules documented in the package comment.
+// canonicalizeJSONNumber returns a canonical mantissa+exponent form
+// keyed so two numerically-equal JSON numbers map to the same string.
 //
 // PRE: s is a json.Number string accepted by json.Decoder.UseNumber.
 //      The leading-plus check has ALREADY been applied by the caller.
 //
-// The implementation is intentionally pure string manipulation —
-// never any numeric arithmetic — so values larger than uint64
-// canonicalize without precision loss.
+// The implementation is pure string manipulation plus a single bounded
+// integer arithmetic for the exponent — never any float math — so
+// values whose mantissa exceeds 2^53 canonicalize without precision
+// loss. See the package comment for the algorithm and bucketing
+// examples (`1` / `10e-1` / `0.1e1` all → `n:1`).
 func canonicalizeJSONNumber(s string) (string, error) {
 	if s == "" {
 		return "", errors.New("invalid number: empty")
@@ -159,8 +187,6 @@ func canonicalizeJSONNumber(s string) (string, error) {
 	}
 
 	// Step 2 — Split into integer / fractional / exponent parts.
-	// Defensive: re-validate the rough shape json.Decoder already
-	// accepts. Use lowercase compare for the exponent prefix.
 	intPart, fracPart, expPart := splitJSONNumber(s)
 	if intPart == "" {
 		// json grammar requires at least one digit before `.` and
@@ -177,56 +203,80 @@ func canonicalizeJSONNumber(s string) (string, error) {
 	if fracPart != "" && !allDigits(fracPart) {
 		return "", fmt.Errorf("invalid number: fractional part %q", fracPart)
 	}
-	// expPart still carries its sign; validate the digit body.
 	expSign, expMag, err := splitExponent(expPart)
 	if err != nil {
 		return "", err
 	}
 
-	// Step 4 — Strip leading zeros from the integer magnitude. Keep
-	// a single `0` if the integer body would otherwise be empty.
-	intMag := strings.TrimLeft(intPart, "0")
-	if intMag == "" {
-		intMag = "0"
+	// Step 4 — Parse the exponent into a signed integer; combine
+	// intPart and fracPart into a single mantissa with mantExp
+	// adjusted by -len(fracPart) so the value is preserved.
+	mantExp := 0
+	if expMag != "" {
+		// Strip leading zeros from the exponent magnitude before
+		// parsing so json grammar variants like `1e0010` and `1e10`
+		// resolve to the same Go int (Atoi accepts leading zeros,
+		// but explicit stripping bounds the input length).
+		expMag = strings.TrimLeft(expMag, "0")
+		if expMag != "" {
+			if len(expMag) > 8 {
+				// Bound the input length before Atoi — defense
+				// against a hypothetically-huge exponent like
+				// `1e99999999999999` that would overflow int.
+				return "", fmt.Errorf("invalid number: exponent magnitude %q exceeds canonicalizer bound", expMag)
+			}
+			parsed, perr := strconv.Atoi(expMag)
+			if perr != nil {
+				return "", fmt.Errorf("invalid number: exponent magnitude %q: %w", expMag, perr)
+			}
+			if parsed > maxCanonicalExponentMagnitude {
+				return "", fmt.Errorf("invalid number: exponent magnitude %d exceeds canonicalizer bound %d", parsed, maxCanonicalExponentMagnitude)
+			}
+			if expSign == '-' {
+				parsed = -parsed
+			}
+			mantExp = parsed
+		}
+	}
+	mantissa := intPart + fracPart
+	mantExp -= len(fracPart)
+
+	// Step 5 — Strip leading zeros from the mantissa. No exponent
+	// shift — leading zeros do not change the value.
+	mantissa = strings.TrimLeft(mantissa, "0")
+
+	// Step 6 — All-zero mantissa means the number is zero. Drop the
+	// sign (no negative zero) AND the exponent (0e5 = 0, period).
+	if mantissa == "" {
+		return "0", nil
 	}
 
-	// Step 5 — Strip trailing zeros from the fractional part. Drop
-	// the decimal point altogether if nothing remains.
-	fracMag := strings.TrimRight(fracPart, "0")
-
-	// Step 6 — Strip leading zeros from the exponent magnitude.
-	expMag = strings.TrimLeft(expMag, "0")
-	// An empty exponent magnitude after stripping (e.g. `1e0`) → no
-	// exponent suffix in the canonical form.
-
-	// Step 7 — Zero magnitude: if the integer body is "0" and the
-	// fractional body is empty (or all-zeros, already stripped), the
-	// value is zero regardless of sign or exponent. Drop both. JSON
-	// numbers `0`, `-0`, `0e5`, `-0e5`, `0.0`, `0.00e-5` all denote the
-	// same mathematical value, so they MUST collapse to the same
-	// canonical key — otherwise duplicate-id detection misses pairs
-	// like `id: -0e5` vs `id: 0`. codex bot r6 P2 closure on PR #157.
-	if intMag == "0" && fracMag == "" {
-		neg = false
-		expMag = ""
+	// Step 7 — Strip trailing zeros from the mantissa, shifting
+	// mantExp UP by the stripped count. THIS is the step that closes
+	// the r7 P1 finding: `10e-1` → mantissa "10" → strip 1 trailing
+	// zero → mantissa "1", mantExp = -1 + 1 = 0 → canonical `1`,
+	// identical to bare `1`.
+	stripped := 0
+	for strings.HasSuffix(mantissa, "0") {
+		mantissa = mantissa[:len(mantissa)-1]
+		stripped++
 	}
+	mantExp += stripped
 
-	// Reassemble.
+	// Step 8 — Emit canonical form. Exponent 0 is implicit (omitted).
 	var b strings.Builder
 	if neg {
 		b.WriteByte('-')
 	}
-	b.WriteString(intMag)
-	if fracMag != "" {
-		b.WriteByte('.')
-		b.WriteString(fracMag)
-	}
-	if expMag != "" {
+	b.WriteString(mantissa)
+	if mantExp != 0 {
 		b.WriteByte('e')
-		if expSign == '-' {
+		if mantExp < 0 {
 			b.WriteByte('-')
+			b.WriteString(strconv.Itoa(-mantExp))
+		} else {
+			b.WriteString(strconv.Itoa(mantExp))
 		}
-		b.WriteString(expMag)
 	}
 	return b.String(), nil
 }
