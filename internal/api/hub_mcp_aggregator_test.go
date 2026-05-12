@@ -213,7 +213,7 @@ func TestAggregateInitializePopulatesSuccessesAndFailures(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if _, err := AggregateInitialize(ctx, sess); err != nil {
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
 		t.Fatalf("AggregateInitialize: %v", err)
 	}
 	if len(sess.InitSuccesses) != 1 {
@@ -245,7 +245,7 @@ func TestAggregateToolsListMergesAndNamespaces(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if _, err := AggregateInitialize(ctx, sess); err != nil {
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
 		t.Fatalf("AggregateInitialize: %v", err)
 	}
 	if len(sess.InitSuccesses) != 2 {
@@ -310,7 +310,7 @@ func TestAggregateToolsListReportsAllFailedAsErrorMinus32000(t *testing.T) {
 	sess := sessionWithParticipants(d1, d2)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_, _ = AggregateInitialize(ctx, sess)
+	_, _ = AggregateInitialize(ctx, sess, json.RawMessage(`1`))
 	if len(sess.InitSuccesses) != 0 {
 		t.Fatalf("expected 0 init successes, got %d", len(sess.InitSuccesses))
 	}
@@ -389,7 +389,7 @@ func TestAggregateToolsListAllListFailedReturnsMinus32000(t *testing.T) {
 	sess := sessionWithParticipants(d1, d2)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if _, err := AggregateInitialize(ctx, sess); err != nil {
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
 		t.Fatal(err)
 	}
 	if len(sess.InitSuccesses) != 2 {
@@ -443,7 +443,7 @@ func TestAggregateToolsCallCanonicalRewrite(t *testing.T) {
 	sess := sessionWithParticipants(d1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if _, err := AggregateInitialize(ctx, sess); err != nil {
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`)); err != nil {
@@ -484,7 +484,7 @@ func TestAggregateToolsCallStaleResolverRefuses(t *testing.T) {
 	sess := sessionWithParticipants(d1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if _, err := AggregateInitialize(ctx, sess); err != nil {
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`)); err != nil {
@@ -536,7 +536,7 @@ func TestAggregateToolsCallUnknownNameReturnsMinus32601(t *testing.T) {
 	sess := sessionWithParticipants(d1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if _, err := AggregateInitialize(ctx, sess); err != nil {
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`)); err != nil {
@@ -595,7 +595,7 @@ func TestAggregateInitializeConcurrencyBound(t *testing.T) {
 	sess := sessionWithParticipants(daemons...)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if _, err := AggregateInitialize(ctx, sess); err != nil {
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
 		t.Fatal(err)
 	}
 	if maxConcurrent.Load() > int32(FanOutConcurrency) {
@@ -671,5 +671,88 @@ func TestForwardCancellationRemovesInFlight(t *testing.T) {
 	// request id.
 	if string(env.Params.RequestID) != `"hub-7"` {
 		t.Errorf("notify params.requestId=%s want \"hub-7\"", string(env.Params.RequestID))
+	}
+}
+
+// TestAggregateInitializeEchoesClientRequestID pins the codex bot r1
+// P1 closure: synthetic initialize response must use the CLIENT's
+// JSON-RPC id, not a hardcoded id:1. Strict JSON-RPC clients validate
+// id correlation between request and response; a mismatch breaks the
+// initialize handshake even when the daemon fan-out succeeds.
+func TestAggregateInitializeEchoesClientRequestID(t *testing.T) {
+	cases := []struct {
+		name  string
+		reqID json.RawMessage
+		want  string
+	}{
+		{name: "string-id", reqID: json.RawMessage(`"hub-init-42"`), want: `"hub-init-42"`},
+		{name: "large-number-id", reqID: json.RawMessage(`9007199254740993`), want: `9007199254740993`},
+		{name: "small-number-id", reqID: json.RawMessage(`7`), want: `7`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d1 := newStubDaemon(t, "d1-sid")
+			sess := sessionWithParticipants(d1)
+			body, err := AggregateInitialize(context.Background(), sess, tc.reqID)
+			if err != nil {
+				t.Fatalf("AggregateInitialize: %v", err)
+			}
+			var env struct {
+				ID json.RawMessage `json:"id"`
+			}
+			if uerr := json.Unmarshal(body, &env); uerr != nil {
+				t.Fatalf("unmarshal: %v / body=%s", uerr, body)
+			}
+			if string(env.ID) != tc.want {
+				t.Errorf("response id = %s, want %s; body=%s", env.ID, tc.want, body)
+			}
+		})
+	}
+}
+
+// TestAggregateToolsCallRejectsDuplicateInFlightID pins codex bot r1
+// P2 closure: a second tools/call with the SAME client request id
+// (while the first is still in flight) must be refused with -32600
+// rather than overwrite the existing in-flight row.
+func TestAggregateToolsCallRejectsDuplicateInFlightID(t *testing.T) {
+	d1 := newStubDaemon(t, "d1-sid")
+	sess := sessionWithParticipants(d1)
+	if _, err := AggregateInitialize(context.Background(), sess, json.RawMessage(`1`)); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	// Pre-populate route + in-flight so a second InsertInFlight for
+	// the same client id collides.
+	ref := canonicalToolRef{Server: "srv1", Daemon: "claude-code", Port: d1.port, RawName: "read"}
+	sess.RouteMap.Store(&map[string]canonicalToolRef{"srv1__read": ref})
+	key, err := newRequestIDKey(json.RawMessage(`"dup-id-7"`))
+	if err != nil {
+		t.Fatalf("newRequestIDKey: %v", err)
+	}
+	sess.InsertInFlight(key, inflightEntry{
+		DaemonRef:       canonicalDaemonRef{Server: "srv1", Daemon: "claude-code", Port: d1.port},
+		DaemonRequestID: json.RawMessage(`"hub-orig"`),
+		StartedAt:       time.Now(),
+	})
+	// Now call AggregateToolsCall with the same client request id —
+	// must refuse.
+	params := json.RawMessage(`{"name":"srv1__read","arguments":{}}`)
+	body, err := AggregateToolsCall(context.Background(), sess, json.RawMessage(`"dup-id-7"`), params)
+	if err != nil {
+		t.Fatalf("AggregateToolsCall returned error: %v", err)
+	}
+	var env struct {
+		Error struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if uerr := json.Unmarshal(body, &env); uerr != nil {
+		t.Fatalf("unmarshal: %v / body=%s", uerr, body)
+	}
+	if env.Error.Code != -32600 {
+		t.Errorf("error.code = %d, want -32600; body=%s", env.Error.Code, body)
+	}
+	if !strings.Contains(env.Error.Message, "duplicate") {
+		t.Errorf("error.message must mention 'duplicate'; got %q", env.Error.Message)
 	}
 }

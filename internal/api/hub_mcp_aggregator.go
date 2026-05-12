@@ -95,7 +95,12 @@ const (
 // Returns a synthetic hub-side initialize result body. The body shape
 // reuses the daemon-facing protocol version + advertises tools as the
 // hub's only capability (Phase 3 — prompts/resources are deferred).
-func AggregateInitialize(ctx context.Context, sess *hubSession) ([]byte, error) {
+//
+// reqID is the CLIENT's JSON-RPC initialize-request id, echoed back
+// verbatim in the synthetic response. Hardcoding it would break
+// request/response correlation for clients sending string ids or
+// non-1 number ids (codex bot r1 P1 closure on PR #157).
+func AggregateInitialize(ctx context.Context, sess *hubSession, reqID json.RawMessage) ([]byte, error) {
 	protoVer := sess.ProtocolVersion
 	if protoVer == "" {
 		protoVer = hubProtocolVersionFallback
@@ -142,7 +147,7 @@ func AggregateInitialize(ctx context.Context, sess *hubSession) ([]byte, error) 
 	}
 
 	// Build a synthetic initialize result envelope.
-	body, err := buildSyntheticInitResult(protoVer)
+	body, err := buildSyntheticInitResult(reqID, protoVer)
 	if err != nil {
 		return nil, err
 	}
@@ -377,12 +382,22 @@ func dispatchToolsCall(ctx context.Context, sess *hubSession, clientReqID, param
 		// handler validates earlier — but be defensive).
 		return buildJSONRPCError(clientReqID, -32600, err.Error(), nil)
 	}
-	sess.InsertInFlight(key, inflightEntry{
+	// Reject duplicate client request id (codex bot r1 P2 closure on
+	// PR #157). InsertInFlight returns false on collision; we MUST
+	// refuse the second call rather than overwrite the first entry,
+	// otherwise cancellation/cleanup would target the wrong daemon
+	// request and leave the original call untracked. JSON-RPC clients
+	// MUST use distinct ids within a session — this is a protocol
+	// contract violation, surfaced as -32600.
+	inserted := sess.InsertInFlight(key, inflightEntry{
 		DaemonRef:       canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port},
 		DaemonSessionID: daemonSID,
 		DaemonRequestID: daemonReqID,
 		StartedAt:       time.Now(),
 	})
+	if !inserted {
+		return buildJSONRPCError(clientReqID, -32600, "duplicate request id; original call still in flight", nil)
+	}
 	defer sess.RemoveInFlight(key)
 
 	subCtx, cancel := context.WithTimeout(ctx, PerCallWallClockCap)
@@ -601,11 +616,23 @@ func extractJSONPayload(raw []byte) []byte {
 // ---------------- Response builders ----------------
 
 // buildSyntheticInitResult assembles the hub-side initialize response.
-func buildSyntheticInitResult(protoVer string) ([]byte, error) {
+// reqID echoes back the CLIENT's JSON-RPC id (codex bot r1 P1 closure
+// on Phase 3 PR #157 — hardcoded id:1 broke request/response
+// correlation for clients sending string ids or non-1 numbers). The
+// id is passed through as raw JSON (json.RawMessage) so the
+// discriminator between number and string ids is preserved verbatim.
+func buildSyntheticInitResult(reqID json.RawMessage, protoVer string) ([]byte, error) {
 	hubVer, _, _ := buildinfo.Get()
+	// Default to JSON null if reqID is empty (notification-shaped
+	// initialize would be invalid per MCP, but we never want to emit
+	// invalid JSON).
+	idField := reqID
+	if len(idField) == 0 {
+		idField = json.RawMessage(`null`)
+	}
 	body := map[string]any{
 		"jsonrpc": "2.0",
-		"id":      1,
+		"id":      idField,
 		"result": map[string]any{
 			"protocolVersion": protoVer,
 			"capabilities": map[string]any{
