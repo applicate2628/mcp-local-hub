@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -442,6 +443,16 @@ type Server struct {
 	//   - other err != nil  (kill failed/unknown)  -> 500
 	probeForRoute func() Verdict
 	killForRoute  func() (Verdict, error)
+
+	// Phase 4 (G4) — hub-mcp listener bundle. Nil-stored when the
+	// gate is off OR when bind failed. Owned by Start, drained by
+	// the same cancel/error branches that drain the gui-server
+	// listener. Atomic-stored so the test goroutine waiting on
+	// ready can race-safely observe whether the hub came up
+	// (codex bot phase4 r8 P1 closure on PR #158 — close(ready) now
+	// happens BEFORE the hub init writes hubMcpComp, so a plain
+	// pointer read would race the assignment).
+	hubMcpComp atomic.Pointer[HubListenerComponents]
 }
 
 // NewServer constructs the Server. It registers the ping handler
@@ -526,6 +537,13 @@ func (s *Server) Port() int { return int(s.port.Load()) }
 // is accepting, then blocks in ListenAndServe. Returns when ctx is
 // canceled (graceful shutdown, 5s deadline) or the listener errors.
 // http.ErrServerClosed is returned as nil.
+//
+// Phase 4 (G4): after the gui-server listener is up and BEFORE
+// `ready` is signaled, this method ALSO binds the hub-mcp listener
+// when `gui_server.hub_endpoint_enabled=true` (separate socket at the
+// persisted hub-mcp port). Bind failure is non-fatal to the gui-server
+// — the operator still gets the GUI; the hub side stays gate-OFF until
+// the operator runs the documented rotation chain.
 func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", s.cfg.Port))
 	if err != nil {
@@ -536,16 +554,146 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 		Handler:           s.httpHandler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	close(ready)
 
+	// Phase 4 (G4) — hub listener wiring. The gate is read from
+	// gui-preferences.yaml directly (Phase 5 adds the registry entry +
+	// Settings UI toggle). Bind failure surfaces via LogHubMcpEvent but
+	// does NOT abort gui-server startup; an operator can still reach
+	// the GUI to investigate.
+	//
+	// codex bot phase4 r8 P1 closure on PR #158: signal GUI readiness
+	// BEFORE starting hub startup. BindHubMcpListener acquires
+	// hub-mcp.lock via blocking flock; under contention (e.g. a
+	// concurrent `mcphub hub-mcp regenerate-token` CLI run) the hub
+	// startup can block for several seconds. The pre-r8 order made
+	// callers waiting on `ready` block on that same flock even though
+	// the GUI listener was already bound — defeating the
+	// "hub failure is non-fatal to gui-server" contract. Close ready
+	// + start srv.Serve FIRST; run hub startup AFTER. Shutdown still
+	// handles a nil s.hubMcpComp cleanly.
+	close(ready)
 	errCh := make(chan error, 1)
 	go func() { errCh <- s.srv.Serve(ln) }()
 
+	// codex bot phase4 r9 P1 closure on PR #158: run hub startup in
+	// a goroutine so ctx.Done() during the bind transaction (e.g. a
+	// sibling `mcphub hub-mcp regenerate-token` is holding
+	// hub-mcp.lock under blocking flock acquisition) can still tear
+	// down the gui-server promptly. We wait up to 2s for the init
+	// to settle at shutdown time so a successful bind doesn't leak
+	// its listener; beyond that the process-exit flock release
+	// unblocks the stuck acquireHubMcpLock anyway.
+	//
+	// codex bot phase4 r10 P1 closure on PR #158: hubInitCtx is a
+	// derived cancel context, NOT the parent ctx, so the shutdown
+	// path can issue an explicit hubInitCancel() to unwind a stuck
+	// goroutine BEFORE the 2s wait elapses. startHubMcpListener now
+	// honors ctx — its lock acquisition uses
+	// acquireHubMcpLockContext, so hubInitCancel() unblocks the
+	// flock acquisition within ~10 ms. Even the errCh-shutdown path
+	// (gui-server listener died unexpectedly) needs to cancel the
+	// goroutine so the goroutine does NOT later store a live
+	// listener into s.hubMcpComp after Start has already returned —
+	// the explicit cancel + defer below covers both shutdown paths.
+	hubEnabled := readHubEndpointGateFromSettings()
+	hubInitCtx, hubInitCancel := context.WithCancel(ctx)
+	defer hubInitCancel()
+	hubInitDone := make(chan struct{})
+	go func() {
+		defer close(hubInitDone)
+		hubComp, hubErr := startHubMcpListener(hubInitCtx, hubEnabled, s.api)
+		if hubErr != nil {
+			// codex bot phase4 r1 P2 closure on PR #158: surface
+			// non-bind hub failures (token gen/persist, endpoint
+			// load/write, manifest pre-gate refusal) on the gui-
+			// server log so operators get an actionable signal
+			// without tailing hub-mcp.log. The error is also
+			// already structured-logged via LogHubMcpEvent inside
+			// startHubMcpListener.
+			log.Printf("hub-mcp listener startup failed (gate-OFF for this process): %v", hubErr)
+			return
+		}
+		if hubComp == nil {
+			return
+		}
+		// codex deep-sec phase4 r24 P1 closure on PR #158 (lane #1):
+		// CAS-based ownership transfer between hub-init goroutine
+		// and shutdown path. Pre-r24 code did:
+		//   if hubInitCtx.Err() != nil { tear down } else { Store }
+		// which is NOT one atomic transition: the goroutine could be
+		// descheduled between the Err() check and the Store, letting
+		// the shutdown path Load() == nil, return, THEN the goroutine
+		// publishes a live listener after Start has already returned.
+		//
+		// New protocol:
+		//   1. Goroutine attempts CAS(nil -> hubComp). If it fails,
+		//      something else already owns the slot (impossible in
+		//      practice, but defensive) — tear down our bundle.
+		//   2. Re-check ctx after the publish. If canceled NOW,
+		//      attempt CAS(hubComp -> nil) to take ownership back. If
+		//      THAT CAS succeeds, we still own the bundle and tear it
+		//      down. If it fails, the shutdown path already
+		//      atomically Swap'd to nil and will tear down itself.
+		//
+		// The shutdown path uses Swap(nil) (below) — single atomic
+		// take-the-bundle-or-take-nothing.
+		if !s.hubMcpComp.CompareAndSwap(nil, hubComp) {
+			ShutdownHubListener(context.Background(), hubComp)
+			return
+		}
+		if hubInitCtx.Err() != nil {
+			if s.hubMcpComp.CompareAndSwap(hubComp, nil) {
+				ShutdownHubListener(context.Background(), hubComp)
+			}
+			// else: shutdown path already swapped — it owns teardown.
+		}
+	}()
+
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := s.srv.Shutdown(shutdownCtx); err != nil {
+		// codex bot phase4 r10 P1 closure on PR #158: cancel hub init
+		// BEFORE the 2s wait so a flock-stuck goroutine unwinds via
+		// context.Canceled within ~10 ms (the
+		// acquireHubMcpLockContext retry cadence). The wait then
+		// serves only to give a goroutine in late-stage bind enough
+		// time to publish its listener for the subsequent
+		// ShutdownHubListener call.
+		hubInitCancel()
+		select {
+		case <-hubInitDone:
+		case <-time.After(2 * time.Second):
+		}
+		// codex bot phase4 r3 P2 closure on PR #158: each shutdown
+		// phase gets its OWN 5s budget. The earlier code shared one
+		// shutdownCtx between ShutdownHubListener and s.srv.Shutdown;
+		// if a slow hub drain consumed most of the budget, the gui-
+		// server Shutdown would return "context deadline exceeded"
+		// even on a healthy gui server, turning a normal cancellation
+		// into an error and skipping graceful close under load.
+		// Drain hub listener BEFORE the gui-server so any racing
+		// internal-reload writes complete via the still-flockable
+		// state-dir.
+		//
+		// codex deep-sec phase4 r24 P1 closure on PR #158 (lane #1):
+		// atomic.Swap takes ownership of the bundle (or nil). If the
+		// goroutine raced past us and stored a bundle, we get it
+		// here and tear it down. If we get nil, the goroutine either
+		// hasn't stored yet (its later CAS will tear down its own
+		// bundle when it sees ctx canceled) or it never produced
+		// a bundle (errored out). No double-shutdown.
+		hubCtx, hubCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ShutdownHubListener(hubCtx, s.hubMcpComp.Swap(nil))
+		hubCancel()
+
+		guiCtx, guiCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer guiCancel()
+		if err := s.srv.Shutdown(guiCtx); err != nil {
+			// codex deep-sec phase4 r24 P2 closure on PR #158 (lane #3):
+			// graceful gui-server shutdown failed (typically context
+			// deadline exceeded). Force-close active connections so
+			// request goroutines unwind before we return — without
+			// this, hung requests survive Start's return.
+			_ = s.srv.Close()
 			s.events.Close()
 			return fmt.Errorf("graceful shutdown: %w", err)
 		}
@@ -557,6 +705,25 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 		s.events.Close()
 		return nil
 	case err := <-errCh:
+		// gui-server listener died; wait briefly for hub init to
+		// settle so we capture its components, then drain.
+		//
+		// codex bot phase4 r10 P1 closure on PR #158: cancel hub init
+		// here too. The defer hubInitCancel above guarantees
+		// eventual cancellation, but an explicit call ensures the
+		// goroutine unwinds DURING the 2s wait window (not after),
+		// avoiding the race where the goroutine stores a live
+		// listener into s.hubMcpComp after Start has returned.
+		hubInitCancel()
+		select {
+		case <-hubInitDone:
+		case <-time.After(2 * time.Second):
+		}
+		// codex deep-sec phase4 r24 P1 closure on PR #158 (lane #1):
+		// same atomic Swap ownership transfer as the ctx.Done branch.
+		drainCtx, drainCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ShutdownHubListener(drainCtx, s.hubMcpComp.Swap(nil))
+		drainCancel()
 		s.events.Close()
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil

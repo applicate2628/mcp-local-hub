@@ -32,6 +32,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -204,16 +205,31 @@ func RotateHubInstanceID() (HubEndpoint, error) {
 	return ep, nil
 }
 
-// ResetHubPort clears the persisted Port (sets it to 0) without
+// ResetHubPort is the blocking wrapper for short CLI flows. Threads
+// context.Background() through to ResetHubPortContext.
+func ResetHubPort() error {
+	return ResetHubPortContext(context.Background())
+}
+
+// ResetHubPortContext clears the persisted Port (sets it to 0) without
 // touching InstanceID. Triggered by `mcphub gui --reset-port` (Phase 5
-// CLI). The next listener-factory call will pass ephemeralPort=0 to
-// the OS, get a fresh allocation, then call EnsureHubEndpoint with
-// the new port to record it.
+// CLI) and by the hub-listener rollback path (internal/gui/hub_listener.go)
+// when post-bind setup fails. The next listener-factory call will pass
+// ephemeralPort=0 to the OS, get a fresh allocation, then call
+// EnsureHubEndpoint with the new port to record it.
 //
 // Holds hub-mcp.lock for the read-modify-write so a concurrent
 // EnsureHubEndpoint cannot overwrite the cleared Port mid-flight.
-func ResetHubPort() error {
-	lk, err := acquireHubMcpLock()
+//
+// codex bot phase4 r12 P1 closure on PR #158: the lock acquisition is
+// bounded by ctx so the rollback path inside startHubMcpListener does
+// not block past Server.Start's shutdown budget when a sibling
+// process is holding hub-mcp.lock. CLI callers can pass
+// context.Background() — they tolerate blocking — but
+// listener-rollback callers MUST pass the Start ctx so the goroutine
+// unwinds promptly on ctx cancellation.
+func ResetHubPortContext(ctx context.Context) error {
+	lk, err := acquireHubMcpLockContext(ctx)
 	if err != nil {
 		return err
 	}

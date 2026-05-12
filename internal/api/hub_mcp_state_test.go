@@ -20,10 +20,12 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/gofrs/flock"
 )
@@ -37,6 +39,14 @@ func hubMcpStateTestHelper(t *testing.T) string {
 	t.Helper()
 	statePathsHelper(t)
 	root := hardenedTempDir(t)
+	// Restore daemonStateRootOverride after this test exits so
+	// subsequent tests in the same `go test` invocation (e.g.
+	// Register / WriteDaemonIntent paths in register_test.go) don't
+	// observe a leaked override pointing at this test's already-
+	// deleted temp dir, which can produce huge stale on-disk state
+	// or hangs when those tests reuse the path.
+	prevOverride := daemonStateRootOverride
+	t.Cleanup(func() { daemonStateRootOverride = prevOverride })
 	daemonStateRootOverride = root
 	// Sanity: DaemonStateDir should now return the hardened root
 	// directly (the override path bypasses the platform resolver, so
@@ -179,4 +189,74 @@ func TestAcquireHubMcpLockSerializes(t *testing.T) {
 	if locked {
 		t.Errorf("probe acquired the lock while it should be held by lk1")
 	}
+}
+
+// TestAcquireHubMcpLockContextRespectsCancellation pins codex bot
+// phase4 r10 P1 closure on PR #158: the ctx-aware variant must return
+// promptly with a wrapped ctx error when the lock is held by an
+// out-of-process holder AND ctx is canceled or times out.
+//
+// Without this contract, gui-server startup / shutdown can stall
+// indefinitely if a sibling CLI (mcphub hub-mcp regenerate-token /
+// install reconciler) is holding hub-mcp.lock — the bot's stated
+// concern that shutdown budgets become unenforceable.
+//
+// Pattern adapted from internal/api/daemon_intent_test.go where the
+// same TryLockContext shape is pinned for the tray aggregator. Uses a
+// raw *flock.Flock as the "out-of-process" holder so the test doesn't
+// depend on a real sibling process — gofrs/flock LockFileEx on
+// Windows / flock(2) on POSIX serializes ACROSS *Flock objects on the
+// same path, so two distinct handles emulate the sibling-process race.
+func TestAcquireHubMcpLockContextRespectsCancellation(t *testing.T) {
+	hubMcpStateTestHelper(t)
+	dir, err := DaemonStateDir()
+	if err != nil {
+		t.Fatalf("DaemonStateDir: %v", err)
+	}
+
+	// Holder: a separate *flock.Flock keeps hub-mcp.lock held for the
+	// duration of the test. Released via t.Cleanup so failed
+	// assertions don't leak the lock to other tests.
+	holder := flock.New(filepath.Join(dir, hubMcpLockFileLeaf))
+	if err := holder.Lock(); err != nil {
+		t.Fatalf("holder.Lock: %v", err)
+	}
+	t.Cleanup(func() { _ = holder.Unlock() })
+
+	// Probe the deadline-exceeded path: ctx with a tight timeout MUST
+	// return within a small grace window. The 10 ms TryLockContext
+	// retry cadence means observed cancellation latency is < ~20 ms
+	// for a 100 ms budget.
+	t.Run("deadline-exceeded", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		start := time.Now()
+		_, err := acquireHubMcpLockContext(ctx)
+		elapsed := time.Since(start)
+		if err == nil {
+			t.Fatalf("acquireHubMcpLockContext succeeded under contention; want ctx error")
+		}
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("err chain missing context.DeadlineExceeded: %v", err)
+		}
+		// Allow generous slack for noisy CI: budget + 5x retry cadence.
+		if elapsed > 250*time.Millisecond {
+			t.Errorf("acquireHubMcpLockContext returned after %s; want < 250ms", elapsed)
+		}
+	})
+
+	// Probe the explicit-cancel path: a canceled ctx MUST short-circuit
+	// at the head of acquireHubMcpLockContext before TryLockContext
+	// even runs.
+	t.Run("canceled-before-call", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := acquireHubMcpLockContext(ctx)
+		if err == nil {
+			t.Fatalf("acquireHubMcpLockContext succeeded with pre-canceled ctx")
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("err chain missing context.Canceled: %v", err)
+		}
+	})
 }

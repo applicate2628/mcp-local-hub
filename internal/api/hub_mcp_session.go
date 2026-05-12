@@ -341,6 +341,40 @@ func (s *HubSessionStore) Get(id string) (*hubSession, bool) {
 	return sess, ok
 }
 
+// GetAndTouch is the atomic gate the HTTP handler uses on every
+// non-initialize POST: it fetches the session AND updates the
+// LastUsedAt timestamp under a single store-lock acquisition.
+//
+// codex deep-sec phase4 r24 P1 closure on PR #158 (lane #1): the
+// pre-r24 handler called Get(sid) then Touch(sid) separately. With
+// Get under RLock and Touch under Lock, the sweep goroutine could
+// Delete the session between those calls; the handler then
+// continued using the stale *hubSession pointer (the Delete only
+// removes the map entry, not the underlying struct), causing
+// subsequent cancellation / DELETE on the same id to see
+// "unknown session" mid-flight. GetAndTouch closes the window —
+// either we hold the session AND update its activity atomically,
+// or the session was already gone and we report it.
+//
+// Returns false if the session disappeared (idle-swept, manually
+// deleted, or never existed). Callers must treat false as
+// "unknown session" exactly the same way they treat Get's false.
+func (s *HubSessionStore) GetAndTouch(id string) (*hubSession, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[id]
+	if !ok {
+		return nil, false
+	}
+	sess.mu.Lock()
+	sess.LastUsedAt = s.now()
+	sess.mu.Unlock()
+	if el, ok := s.lruIndex[id]; ok {
+		s.lru.MoveToFront(el)
+	}
+	return sess, true
+}
+
 // Touch records activity: updates LastUsedAt + promotes the session
 // to the front of the LRU list. Called by the HTTP handler after
 // every successful per-session method invocation.

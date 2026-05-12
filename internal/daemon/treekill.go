@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"fmt"
+	"io"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -54,20 +55,39 @@ func killProcessTree(pid int) error {
 		// /F = force, /T = tree (kill children too).
 		cmd := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid))
 		process.NoConsole(cmd) // suppress per-child console pop on windowsgui parents
-		// Ignore cmd output — Windows taskkill prints "SUCCESS: ..." /
-		// "ERROR: The process <pid> not found" and we treat both the same.
+		// 2026-05-13: explicitly discard stdout/stderr. NoConsole sets
+		// CREATE_NO_WINDOW which suppresses a NEW console for the
+		// child process, but stdout/stderr STILL inherit the parent's
+		// handles by default. So when mcphub runs interactively
+		// (mcphub install / gui --force --kill / setup), Windows
+		// taskkill's chatty "SUCCESS: The process with PID N
+		// (child process of PID M) has been terminated." letters
+		// leak straight into the operator's shell, often clobbering
+		// the live prompt. io.Discard kills the spam at the source.
+		// The "ERROR: process not found" path is also irrelevant —
+		// caller already tolerates the "pid does not exist" case
+		// (see contract comment above).
+		cmd.Stdout = io.Discard
+		cmd.Stderr = io.Discard
 		_ = cmd.Run()
 		return nil
 	}
 
 	// POSIX: SIGKILL descendants then the root. pkill -P targets direct
 	// children only; follow with kill -KILL so the root is signaled too.
+	// pkill / kill are normally silent on success but can print to
+	// stderr on permission denied / missing PID — discard both to
+	// match the Windows treatment.
 	childKill := exec.Command("pkill", "-KILL", "-P", strconv.Itoa(pid))
 	process.NoConsole(childKill)
+	childKill.Stdout = io.Discard
+	childKill.Stderr = io.Discard
 	_ = childKill.Run()
 
 	rootKill := exec.Command("kill", "-KILL", fmt.Sprintf("%d", pid))
 	process.NoConsole(rootKill)
+	rootKill.Stdout = io.Discard
+	rootKill.Stderr = io.Discard
 	_ = rootKill.Run()
 	return nil
 }
