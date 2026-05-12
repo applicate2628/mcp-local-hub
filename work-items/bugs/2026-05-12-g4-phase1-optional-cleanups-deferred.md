@@ -84,6 +84,17 @@ not a "cleanup commit" change — better as a focused test-refactor PR.
 
 ## MINOR-7 — `setRestrictiveDACL` failure leaves empty file briefly readable
 
+### Bot affirmations
+
+- Codex bot review on PR #155 HEAD `128e7c4` (round 9), P3 inline at
+  `internal/api/secure_write_windows.go:146` — "Create temp file with
+  final DACL in one syscall". Bot explicitly classified as P3 (lowest
+  severity) and recommended the same `NtCreateFile` +
+  `OBJECT_ATTRIBUTES.SecurityDescriptor` approach the
+  architecture-reviewer flagged. Deferral rationale: still needs
+  dedicated security-engineer review pass (per architecture-reviewer
+  PASS verdict that classified this as "don't block on").
+
 ### What
 
 In `secure_write_windows.go::secureWriteClientConfigImpl` step 5,
