@@ -81,25 +81,43 @@ type Broadcaster struct {
 	persistCh     chan persistRequest
 	persistDoneCh chan struct{}
 	closeOnce     sync.Once
+	persistStart  sync.Once
 	// closed is set under b.mu inside Close() before close(persistCh).
 	// Publish checks it under the same mutex so a concurrent Close()
 	// cannot cause a send-on-closed-channel panic (Codex P1 on PR #150
 	// line 227).
 	closed bool
+	// persistStarted records whether the drain goroutine was spawned.
+	// Close() consults this to know whether to wait on persistDoneCh
+	// (drain closes it) or close it manually (no drain ever ran).
+	// Lazy spawn closes Codex P2 on PR #150 line 101: NewBroadcaster
+	// no longer leaks one goroutine per construction, because tests +
+	// handler-only call sites that never Publish never spawn anything.
+	persistStarted bool
 }
 
 // NewBroadcaster constructs an empty Broadcaster with no subscribers.
-// Spawns a single background goroutine that drains the persist queue;
-// callers that want clean shutdown should invoke Close() during
-// teardown.
+// Does NOT spawn any goroutine — the persist drain is started lazily
+// on the first Publish() with persistence enabled. This eliminates
+// goroutine leaks from short-lived test broadcasters and handler-only
+// call sites that never publish.
 func NewBroadcaster() *Broadcaster {
-	b := &Broadcaster{
+	return &Broadcaster{
 		subs:          map[chan Event]struct{}{},
 		persistCh:     make(chan persistRequest, persistChannelCap),
 		persistDoneCh: make(chan struct{}),
 	}
-	go b.drainPersist()
-	return b
+}
+
+// ensurePersistDrain spawns the persist drain goroutine once (sync.Once).
+// Called from Publish under b.mu so the persistStarted flag is set
+// atomically with the spawn — Close() reads the same field under the
+// same lock to decide whether to wait on persistDoneCh.
+func (b *Broadcaster) ensurePersistDrain() {
+	b.persistStart.Do(func() {
+		b.persistStarted = true
+		go b.drainPersist()
+	})
 }
 
 // SetAPI threads an api.API handle through the broadcaster so the
@@ -122,11 +140,22 @@ func (b *Broadcaster) SetAPI(a *api.API) {
 // close(persistCh) atomically under b.mu, so Publish's check + send
 // happens entirely before OR entirely after the close — never
 // interleaved.
+//
+// Codex P2 on PR #150 round 4 line 101: with lazy drain spawn,
+// Close() must also close persistDoneCh manually when no drain ever
+// ran (otherwise <-persistDoneCh hangs forever). Both branches keep
+// the API contract that Close is safe to call zero-or-once-or-many.
 func (b *Broadcaster) Close() {
 	b.closeOnce.Do(func() {
 		b.mu.Lock()
 		b.closed = true
+		started := b.persistStarted
 		close(b.persistCh)
+		if !started {
+			// No drain goroutine ever spawned — close the done
+			// channel ourselves so callers waiting on it return.
+			close(b.persistDoneCh)
+		}
 		b.mu.Unlock()
 	})
 	<-b.persistDoneCh
@@ -241,6 +270,10 @@ func (b *Broadcaster) Publish(ev Event) {
 	// happen under b.mu inside Close(), so checking + sending here is
 	// atomic with respect to teardown.
 	if !b.DisableGUIEventLog && !b.closed {
+		// Lazy-spawn the drain goroutine on first persistable Publish
+		// (Codex P2 on PR #150 round 4 line 101). Tests + handler-
+		// only call sites that never Publish never spawn anything.
+		b.ensurePersistDrain()
 		select {
 		case b.persistCh <- persistRequest{ev: ev}:
 		default: // persist channel full → drop (matches SSE drop-on-full policy)

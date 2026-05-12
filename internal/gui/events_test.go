@@ -114,6 +114,66 @@ func TestBroadcaster_DisableGUIEventLog_SkipsPersist(t *testing.T) {
 	}
 }
 
+// TestBroadcaster_Close_NeverPublished_DoesNotHang guards Codex P2 on
+// PR #150 round 4 line 101: with lazy drain spawn, Close() must
+// terminate cleanly when no drain goroutine ever ran. Without the
+// "close persistDoneCh manually if !persistStarted" branch in
+// Close(), this test would hang on <-persistDoneCh.
+func TestBroadcaster_Close_NeverPublished_DoesNotHang(t *testing.T) {
+	b := NewBroadcaster()
+	done := make(chan struct{})
+	go func() {
+		b.Close()
+		close(done)
+	}()
+	select {
+	case <-done:
+		// pass — Close returned promptly without a spawned drain.
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close hangs when no drain goroutine was spawned")
+	}
+}
+
+// TestBroadcaster_NoSpawn_WhenUnused guards the lazy-spawn contract:
+// a Broadcaster constructed via NewBroadcaster() that never Publishes
+// a persistable event MUST NOT spawn a goroutine. Codex P2 on PR #150
+// round 4 line 101 — verifies persistStarted stays false in the
+// no-publish path.
+func TestBroadcaster_NoSpawn_WhenUnused(t *testing.T) {
+	b := NewBroadcaster()
+	b.mu.Lock()
+	started := b.persistStarted
+	b.mu.Unlock()
+	if started {
+		t.Errorf("persistStarted = true after NewBroadcaster — drain spawned eagerly (regression)")
+	}
+	b.Close()
+	b.mu.Lock()
+	started = b.persistStarted
+	b.mu.Unlock()
+	if started {
+		t.Errorf("persistStarted = true after Close — drain spawned by Close (regression)")
+	}
+}
+
+// TestBroadcaster_NoSpawn_WhenDisabledPublish covers the
+// DisableGUIEventLog=true path: even with Publish calls, the drain
+// goroutine must not spawn because no persistence is requested.
+func TestBroadcaster_NoSpawn_WhenDisabledPublish(t *testing.T) {
+	b := NewBroadcaster()
+	b.DisableGUIEventLog = true
+	for i := 0; i < 5; i++ {
+		b.Publish(Event{Type: "daemon-state", Body: map[string]any{"i": i}})
+	}
+	b.mu.Lock()
+	started := b.persistStarted
+	b.mu.Unlock()
+	if started {
+		t.Errorf("persistStarted = true with DisableGUIEventLog=true — drain spawned despite opt-out")
+	}
+	b.Close()
+}
+
 // TestBroadcaster_Close_RaceWithConcurrentPublish guards Codex P1 on
 // PR #150 line 227: send-after-close panic when Publish runs
 // concurrently with Close(). Under -race this exercises the b.closed
