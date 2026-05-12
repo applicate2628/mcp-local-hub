@@ -311,7 +311,17 @@ func (h *HubMcpHandler) handlePost(w http.ResponseWriter, r *http.Request, clien
 			w.WriteHeader(http.StatusAccepted)
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), PerCallWallClockCap)
+		// codex bot phase4 r15 P2 closure on PR #158: derive cancel
+		// fan-out ctx from context.Background(), NOT r.Context().
+		// A client that disconnects right after sending the
+		// notifications/cancelled message would cancel r.Context()
+		// immediately, short-circuiting ForwardCancellation before
+		// it issues the daemon-side cancel — the daemon-side call
+		// would then keep running until its own timeout. Same r7 P2
+		// pattern that closed the DELETE fan-out leak. The
+		// PerCallWallClockCap budget remains; we just stop letting
+		// the client's disconnect steer the cancel-forwarding path.
+		ctx, cancel := context.WithTimeout(context.Background(), PerCallWallClockCap)
 		defer cancel()
 		ForwardCancellation(ctx, sess, p.RequestID)
 		w.WriteHeader(http.StatusAccepted)
