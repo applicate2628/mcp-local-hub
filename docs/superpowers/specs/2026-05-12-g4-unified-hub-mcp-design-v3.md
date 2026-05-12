@@ -222,11 +222,21 @@ Load-time validation:
 // export FILE_FLAG_OPEN_REPARSE_POINT directly; the canonical path
 // is golang.org/x/sys/windows constants + a build-tagged custom
 // opener (windows: hub_mcp_state_windows.go; posix: hub_mcp_state_posix.go).
-f := openStateFileNoReparse(path)
+f, err := openStateFileNoReparse(path)
+if err != nil {
+    return err
+}
 defer f.Close()
 
-// Stat from the OPEN handle so a swap between stat-and-read is impossible
-info, _ := f.Stat()
+// Stat from the OPEN handle so a swap between stat-and-read is impossible.
+// All errors propagate (codex r7 P2 closure — earlier "_ := f.Stat()" was
+// security-incorrect: a swallowed Stat error followed by info.Mode() would
+// nil-panic OR (if info happened to be non-nil zero-value) pass an
+// invariant check vacuously, undermining the hardening guarantees).
+info, err := f.Stat()
+if err != nil {
+    return fmt.Errorf("state file stat: %w", err)
+}
 if info.Mode().Type() & (os.ModeSymlink|os.ModeIrregular) != 0 {
     return ErrIrregularFile
 }
@@ -240,7 +250,10 @@ if runtime.GOOS != "windows" {
     // Parent dir DACL verify (per-handle of the parent dir)
     if err := verifyWindowsParentDACL(filepath.Dir(path)); err != nil { return err }
 }
-raw, _ := io.ReadAll(f)
+raw, err := io.ReadAll(f)
+if err != nil {
+    return fmt.Errorf("state file read: %w", err)  // never parse partial state silently
+}
 ```
 
 Windows DACL verification is **allowlist-based** (codex r3 security F-S3 closure replaces the v3 draft's blacklist):
@@ -631,7 +644,7 @@ The control endpoint is a NEW attack surface introduced by the live-reload mecha
 
 **Auth + access gates:**
 
-- HTTP method: **POST only**. Any other method → 405 Method Not Allowed with empty body. Pre-flight OPTIONS rejected (no CORS opt-in).
+- HTTP method: **POST only**. Any other method → 405 Method Not Allowed with **`Allow: POST` response header** (RFC 9110 §15.5.6 requires the `Allow` header on 405 responses to enumerate the supported methods; codex r7 P2 closure — earlier text said "empty body" but did not specify the header, which would have produced HTTP-noncompliant responses). The body remains empty; only the headers (`Allow: POST` + `Content-Length: 0`) accompany the status code. Pre-flight OPTIONS is rejected the same way (no CORS opt-in; 405 with `Allow: POST`).
 - Listener: same socket as the per-client `/clients/{id}/mcp` endpoints (single bind; one less moving part). Routed at `/internal/reload-tokens` — the `/internal/` prefix is **the only one** the hub uses; any other path under `/internal/` returns 404 with empty body. The token-bearing `/clients/{id}/mcp` paths never enter this branch.
 - **Loopback-guard runs first** — same `rejectUnsafeLoopbackRequest` middleware (`Host: 127.0.0.1[:port] | localhost[:port]`, Origin in the loopback set if present, `Sec-Fetch-Site` in `same-origin | none`). External hosts via DNS-rebind / cross-site fetch → 403.
 - Auth header: `X-Mcphub-Control-Token: <64-hex>`. **No fallback to per-client `X-Mcphub-Hub-Token` or `X-Mcphub-Instance-Id`** — those headers are IGNORED on this path. The control token is a separate keyspace; a leaked client token cannot reach this endpoint.
@@ -662,7 +675,7 @@ The control endpoint is a NEW attack surface introduced by the live-reload mecha
 **Tests** (`hub_mcp_internal_reload_test.go`):
 
 - POST with correct control token → 204; tokenTable swap observable on next per-client request.
-- GET / PUT / DELETE / OPTIONS → 405, empty body.
+- GET / PUT / DELETE / OPTIONS → 405 with `Allow: POST` response header and empty body (RFC 9110 §15.5.6 compliance).
 - Wrong control token → 401, empty body, constant-time path exercised (hex-shape rejection vs compare-rejection both return identical bodies).
 - Non-loopback Host → 403.
 - Per-client `X-Mcphub-Hub-Token` header with control-token value → 401 (separate keyspace; per-client header NOT accepted for `/internal/*`).

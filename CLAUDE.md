@@ -68,14 +68,34 @@ gh api repos/<owner>/<repo>/pulls/<N>/comments \
   --jq '.[] | select(.user.login == "chatgpt-codex-connector[bot]") | {commit_id, line, path, body}'
 ```
 
-PASS verdict = ONE of:
-- bot left a comment containing `Didn't find any major issues. Nice work!`
-- bot reacted with 👍 emoji on the PR
-- bot review state = `APPROVED` AND zero inline comments on HEAD commit
+PASS verdict — **all three of the following must hold on the CURRENT
+HEAD commit** (not any earlier commit on the PR):
+
+1. Either the bot's most-recent review summary contains a "no major
+   issues" phrase (variants: "Didn't find any major issues. Nice work!",
+   "Didn't find any major issues. Chef's kiss.", or similar — the bot
+   rotates the trailing flourish, the prefix is the load-bearing part);
+   OR the bot reacted with 👍 on the PR's HEAD-commit review event;
+   OR the bot review state = `APPROVED`.
+
+2. **AND** zero inline comments filtered to the current HEAD commit.
+   Verify with: `original_commit_id == $(gh pr view N --json headRefOid --jq .headRefOid)`.
+   GitHub auto-rebases inline comment line numbers across pushes, so
+   filter by `original_commit_id` not by line number alone.
+
+3. **AND** no inline comment has been added on the HEAD commit AFTER
+   the no-issues summary fired. The bot can post the summary first
+   and then attach inline observations as a single review event; the
+   inline observations still count as findings unless the summary
+   was issued after the inline activity stopped.
+
+This anti-bypass rule prevents a stale 👍 from an earlier commit
+satisfying PASS for a later commit that the bot hasn't yet seen.
 
 NOT PASS (continue the loop):
 - bot review state = `COMMENTED` with inline suggestions on HEAD commit
 - bot review state = `CHANGES_REQUESTED`
+- any of the three PASS conditions above fails
 
 If NOT PASS:
 
