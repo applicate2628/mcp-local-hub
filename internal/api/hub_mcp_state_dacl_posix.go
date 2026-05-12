@@ -20,6 +20,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"syscall"
 
@@ -50,11 +51,16 @@ func verifyHubMcpStateDACLImpl(path string) error {
 	if !ok {
 		return errors.New("hub-mcp state verify: stat sys() type unexpected")
 	}
+	// Wrap sentinels with operator-actionable context (path + uid/mode
+	// bits). Phase 2's hub-mcp loader surfaces these strings directly
+	// when refusing to start the hub; bare sentinels make debugging
+	// painful. Wrapped form remains errors.Is-compatible — callers
+	// that branch on `errors.Is(err, ErrWrongOwner)` continue to work.
 	if int(st.Uid) != os.Getuid() {
-		return ErrWrongOwner
+		return fmt.Errorf("%w: path=%s uid=%d (need current uid %d)", ErrWrongOwner, path, st.Uid, os.Getuid())
 	}
 	if info.Mode().Perm()&0o077 != 0 {
-		return ErrTooLoose
+		return fmt.Errorf("%w: path=%s mode=%04o", ErrTooLoose, path, info.Mode().Perm())
 	}
 	return nil
 }

@@ -190,10 +190,17 @@ func secureWriteClientConfigImpl(path string, contents []byte) error {
 	}
 
 	// 8. Close the file handle (rename complete, safe to release).
-	if err := windows.CloseHandle(fileHandle); err != nil {
-		return fmt.Errorf("secure write: close temp: %w", err)
-	}
+	//    Mark `closed` BEFORE checking the return value: after
+	//    CloseHandle returns, the handle is in an indeterminate state
+	//    regardless of err (Windows KB244617 handle-recycle risk).
+	//    Calling CloseHandle twice on the same value can target an
+	//    unrelated kernel object that the same numeric handle was
+	//    recycled to.
+	closeErr := windows.CloseHandle(fileHandle)
 	closed = true
+	if closeErr != nil {
+		return fmt.Errorf("secure write: close temp: %w", closeErr)
+	}
 
 	// 9. Re-open destination via SAME dirHandle and re-verify DACL.
 	//    GENERIC_READ + READ_CONTROL is needed for GetSecurityInfo to
@@ -488,21 +495,16 @@ func refusePreexistingReparsePoint(dirHandle windows.Handle, name string) error 
 
 // isNotFoundErr returns true if err is one of the Windows "object not
 // found" sentinels. NtCreateFile maps several NTSTATUS values into
-// this group; we widen via string-suffix match to catch the variants
-// the Go errno wrapper exposes.
+// this group; we match NTSTATUS values STATUS_OBJECT_NAME_NOT_FOUND
+// and STATUS_OBJECT_PATH_NOT_FOUND via direct typed comparison against
+// the x/sys/windows-exported constants.
 func isNotFoundErr(err error) bool {
 	if err == nil {
 		return false
 	}
-	// x/sys returns NTStatus directly for NtCreateFile failures. The
-	// "object name not found" status family is STATUS_OBJECT_NAME_NOT_FOUND
-	// (0xC0000034) — readable via NTStatus.Error().
-	type ntStatusErr interface {
-		Errno() uintptr
-	}
+	// x/sys returns NTStatus directly for NtCreateFile failures.
 	if ns, ok := err.(windows.NTStatus); ok {
-		// STATUS_OBJECT_NAME_NOT_FOUND, STATUS_OBJECT_PATH_NOT_FOUND
-		if ns == 0xC0000034 || ns == 0xC000003A {
+		if ns == windows.STATUS_OBJECT_NAME_NOT_FOUND || ns == windows.STATUS_OBJECT_PATH_NOT_FOUND {
 			return true
 		}
 	}
