@@ -199,11 +199,16 @@ func canonicalizeJSONNumber(s string) (string, error) {
 	// An empty exponent magnitude after stripping (e.g. `1e0`) → no
 	// exponent suffix in the canonical form.
 
-	// Step 7 — Negative zero: if the integer body is "0" and the
-	// fractional body is empty (or all-zeros, already stripped),
-	// the result is +0. Drop the sign.
-	if neg && intMag == "0" && fracMag == "" {
+	// Step 7 — Zero magnitude: if the integer body is "0" and the
+	// fractional body is empty (or all-zeros, already stripped), the
+	// value is zero regardless of sign or exponent. Drop both. JSON
+	// numbers `0`, `-0`, `0e5`, `-0e5`, `0.0`, `0.00e-5` all denote the
+	// same mathematical value, so they MUST collapse to the same
+	// canonical key — otherwise duplicate-id detection misses pairs
+	// like `id: -0e5` vs `id: 0`. codex bot r6 P2 closure on PR #157.
+	if intMag == "0" && fracMag == "" {
 		neg = false
+		expMag = ""
 	}
 
 	// Reassemble.

@@ -88,6 +88,34 @@ func TestNewRequestIDKeyZeroCanonical(t *testing.T) {
 	}
 }
 
+// Zero with non-zero exponent magnitude — `0e5`, `-0e5`, `0.0e3`,
+// `-0.000e-5`, `0e10` all denote mathematical zero and MUST collapse
+// onto `n:0`. Otherwise a client sending `id: -0e5` and another sending
+// `id: 0` would route to distinct in-flight slots even though the
+// JSON-RPC values are equal. codex bot r6 P2 closure on PR #157.
+//
+// Note: `0e0` already canonicalized to `n:0` before the fix because
+// Step 6 trimmed the exponent magnitude to empty. The fix matters for
+// any non-empty exponent magnitude (e.g. `0e5`, `-0e1`).
+func TestNewRequestIDKeyZeroDropsNonZeroExponent(t *testing.T) {
+	cases := []string{
+		`0e5`, `0E5`, `0E+5`, `0e-5`,
+		`-0e5`, `-0e-5`, `-0E10`,
+		`0.0e3`, `0.00e-7`, `-0.000e2`,
+		`0e10`, `-0e1`,
+	}
+	for _, in := range cases {
+		key, err := newRequestIDKey(json.RawMessage(in))
+		if err != nil {
+			t.Errorf("%s: %v", in, err)
+			continue
+		}
+		if key != "n:0" {
+			t.Errorf("%s -> %q, want n:0", in, key)
+		}
+	}
+}
+
 // Fractional preserves significant digits, strips trailing zeros
 // (spec rule 4 + rule 6).
 func TestNewRequestIDKeyFractionalPreserves(t *testing.T) {

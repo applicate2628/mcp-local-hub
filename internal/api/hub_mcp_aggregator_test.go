@@ -899,3 +899,148 @@ func TestRewriteResponseIDRejectsNullBody(t *testing.T) {
 		t.Errorf("error must explain why null is rejected; got %v", err)
 	}
 }
+
+// TestAggregateInitializePersistsFallbackProtocolVersion pins the codex
+// bot r6 P2 closure on PR #157. If a session is allocated without a
+// negotiated MCP protocol version (sess.ProtocolVersion==""),
+// AggregateInitialize must persist the fallback ONTO sess.ProtocolVersion
+// so subsequent tools/list + tools/call calls (which re-read
+// sess.ProtocolVersion at hub_mcp_aggregator.go:210 + :429) emit the
+// MCP-Protocol-Version header consistently. Without persistence,
+// initialize would carry the fallback but tools/list would send the
+// header empty, breaking strict daemons that require it post-initialize.
+func TestAggregateInitializePersistsFallbackProtocolVersion(t *testing.T) {
+	d1 := newStubDaemon(t, "d1-sid")
+	var listProtoHeader string
+	d1.onList = func(w http.ResponseWriter, r *http.Request) {
+		listProtoHeader = r.Header.Get("MCP-Protocol-Version")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[]}}`))
+	}
+
+	// Allocate a session with EMPTY ProtocolVersion to trip the fallback.
+	sess := sessionWithParticipants(d1)
+	sess.ProtocolVersion = ""
+
+	if _, err := AggregateInitialize(context.Background(), sess, json.RawMessage(`1`)); err != nil {
+		t.Fatalf("AggregateInitialize: %v", err)
+	}
+	// Fallback MUST be persisted onto the session, not just held locally.
+	if sess.ProtocolVersion != hubProtocolVersionFallback {
+		t.Errorf("sess.ProtocolVersion = %q after init; want %q (fallback must persist)",
+			sess.ProtocolVersion, hubProtocolVersionFallback)
+	}
+	// And the subsequent tools/list call MUST carry the same fallback in
+	// the MCP-Protocol-Version header — proves the persistence is wired
+	// into the read paths that fanOutToolsList + postToolsList exercise.
+	if _, err := AggregateToolsList(context.Background(), sess, json.RawMessage(`2`)); err != nil {
+		t.Fatalf("AggregateToolsList: %v", err)
+	}
+	if listProtoHeader != hubProtocolVersionFallback {
+		t.Errorf("tools/list MCP-Protocol-Version header = %q, want %q (fallback must reach the daemon)",
+			listProtoHeader, hubProtocolVersionFallback)
+	}
+}
+
+// TestAggregateToolsListPreservesRouteMapOnAllFail pins the codex bot
+// r6 P1 closure on PR #157. When every fan-out tools/list call fails
+// (transient outage), the route map from the previously-successful
+// tools/list must NOT be wiped. Otherwise a single bad list response
+// strands every follow-up tools/call with -32601 "tool moved out of
+// scope" even though the resolver state hasn't actually changed.
+func TestAggregateToolsListPreservesRouteMapOnAllFail(t *testing.T) {
+	d1 := newStubDaemon(t, "d1-sid")
+	sess := sessionWithParticipants(d1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// 1) First round: initialize + tools/list both succeed.
+	//    RouteMap is populated with srv1__read + srv1__write.
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`2`)); err != nil {
+		t.Fatalf("list#1: %v", err)
+	}
+	before := sess.RouteMap.Load()
+	if before == nil {
+		t.Fatalf("RouteMap unset after successful tools/list")
+	}
+	if _, ok := (*before)["srv1__read"]; !ok {
+		t.Fatalf("RouteMap missing srv1__read after successful tools/list: %+v", *before)
+	}
+	keysBefore := len(*before)
+
+	// 2) Daemon's list endpoint now fails — every fan-out returns HTTP 503.
+	d1.onList = func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`3`))
+	if err != nil {
+		t.Fatalf("list#2: %v", err)
+	}
+	// The response is the all-failed envelope (-32000), confirmed by parse.
+	var env struct {
+		Error *struct {
+			Code int `json:"code"`
+		} `json:"error"`
+	}
+	if uerr := json.Unmarshal(body, &env); uerr != nil {
+		t.Fatalf("parse list#2 body: %v", uerr)
+	}
+	if env.Error == nil || env.Error.Code != -32000 {
+		t.Fatalf("list#2 want -32000 error envelope; body=%s", string(body))
+	}
+
+	// 3) RouteMap MUST STILL hold the original routes — same pointer
+	//    (no Store happened) and the same key set. Pointer-identity is
+	//    the strongest assertion: it proves the route map was NEVER
+	//    re-published, not even with identical contents.
+	after := sess.RouteMap.Load()
+	if after != before {
+		t.Errorf("RouteMap pointer changed after all-failed tools/list; want preservation")
+	}
+	if got := len(*after); got != keysBefore {
+		t.Errorf("RouteMap size = %d after all-failed list, want %d (preserved)", got, keysBefore)
+	}
+	if _, ok := (*after)["srv1__read"]; !ok {
+		t.Errorf("RouteMap lost srv1__read after all-failed list: %+v", *after)
+	}
+}
+
+// TestPostInitializeRejectsEmptySessionIDHeader pins the codex bot r6
+// P1 closure on PR #157. A daemon that returns HTTP 200 + no JSON-RPC
+// error but omits the Mcp-Session-Id header is not a usable session:
+// the hub cannot route tools/list / tools/call / cancellation back
+// because the header is mandatory per the MCP Streamable HTTP spec.
+// AggregateInitialize must record such a daemon in InitFailures
+// (stage="initialize") and surface the missing-header reason.
+func TestPostInitializeRejectsEmptySessionIDHeader(t *testing.T) {
+	d1 := newStubDaemon(t, "d1-sid")
+	d1.onInit = func(w http.ResponseWriter, r *http.Request) {
+		// HTTP 200, no JSON-RPC error, NO Mcp-Session-Id header.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"stub","version":"1"}}}`))
+	}
+
+	sess := sessionWithParticipants(d1)
+	if _, err := AggregateInitialize(context.Background(), sess, json.RawMessage(`1`)); err != nil {
+		t.Fatalf("AggregateInitialize: %v", err)
+	}
+	if len(sess.InitSuccesses) != 0 {
+		t.Errorf("daemon must NOT be recorded as success without Mcp-Session-Id; got %+v", sess.InitSuccesses)
+	}
+	if len(sess.InitFailures) != 1 {
+		t.Fatalf("InitFailures=%d want 1: %+v", len(sess.InitFailures), sess.InitFailures)
+	}
+	f := sess.InitFailures[0]
+	if f.Stage != "initialize" {
+		t.Errorf("Stage=%q want initialize", f.Stage)
+	}
+	if !strings.Contains(f.Err, "Mcp-Session-Id") {
+		t.Errorf("error must mention Mcp-Session-Id; got %q", f.Err)
+	}
+}

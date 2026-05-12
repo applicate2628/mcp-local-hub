@@ -101,10 +101,21 @@ const (
 // request/response correlation for clients sending string ids or
 // non-1 number ids (codex bot r1 P1 closure on PR #157).
 func AggregateInitialize(ctx context.Context, sess *hubSession, reqID json.RawMessage) ([]byte, error) {
-	protoVer := sess.ProtocolVersion
-	if protoVer == "" {
-		protoVer = hubProtocolVersionFallback
+	// codex bot r6 P2 closure on PR #157: persist the fallback onto
+	// sess.ProtocolVersion when the session was allocated without a
+	// negotiated version. Earlier code took a local copy, so fanOutToolsList
+	// + postToolsCall (which re-read sess.ProtocolVersion at
+	// hub_mcp_aggregator.go:210 + :429) would later send an EMPTY
+	// MCP-Protocol-Version header — initialize used the fallback, but
+	// tools/list and tools/call did not. The header mismatch is exactly
+	// what the r4 protocol-version closure tried to prevent. Holding
+	// sess.mu here matches the lock guarding session-state mutations.
+	sess.mu.Lock()
+	if sess.ProtocolVersion == "" {
+		sess.ProtocolVersion = hubProtocolVersionFallback
 	}
+	protoVer := sess.ProtocolVersion
+	sess.mu.Unlock()
 
 	type initResult struct {
 		ref       canonicalDaemonRef
@@ -280,15 +291,20 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 	}
 
 	// Publish the route map to the session BEFORE returning so a
-	// concurrent tools/call sees it.
-	sess.RouteMap.Store(&mergedRoutes)
-
+	// concurrent tools/call sees it. codex bot r6 P1 closure on PR
+	// #157: skip the Store when every fan-out failed — otherwise a
+	// single transient outage (DNS hiccup, daemon restart, host paged
+	// out) wipes the entire previously-known routes table and any
+	// follow-up tools/call returns -32601 "tool moved out of scope"
+	// even though nothing structural changed. Preserve the last-good
+	// map and surface the list failures via the error envelope only.
 	allFailures := append([]DaemonFailure{}, initFailures...)
 	allFailures = append(allFailures, listFailures...)
 
 	if listSuccessCount == 0 {
 		return buildAllFailedToolsListResponse(reqID, allFailures)
 	}
+	sess.RouteMap.Store(&mergedRoutes)
 	return buildToolsListResponse(reqID, mergedTools, allFailures)
 }
 
@@ -575,7 +591,18 @@ func postInitialize(ctx context.Context, ref canonicalDaemonRef, protoVer string
 	if env.Error != nil {
 		return "", fmt.Errorf("daemon initialize error code=%d: %s", env.Error.Code, env.Error.Message)
 	}
-	return hdr.Get("Mcp-Session-Id"), nil
+	// codex bot r6 P1 closure on PR #157: reject HTTP 200 + no
+	// JSON-RPC error + empty Mcp-Session-Id. The header is mandatory
+	// per the MCP Streamable HTTP spec — every follow-up tools/list /
+	// tools/call / cancellation MUST echo it back. Treating the empty
+	// case as success would record the daemon in InitSuccesses with
+	// daemonSID="", and subsequent calls would post without the
+	// session header. Surface this as an init-stage failure instead.
+	sid := hdr.Get("Mcp-Session-Id")
+	if sid == "" {
+		return "", fmt.Errorf("daemon initialize succeeded with empty Mcp-Session-Id header")
+	}
+	return sid, nil
 }
 
 // postToolsList sends a tools/list call to a single daemon and
