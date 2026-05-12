@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/api"
 )
 
 func TestBroadcaster_SubscribeReceivesPublishedEvent(t *testing.T) {
@@ -43,6 +45,244 @@ func TestBroadcaster_UnsubscribeOnContextCancel(t *testing.T) {
 		}
 	case <-time.After(200 * time.Millisecond):
 		t.Error("cancelled subscriber should have returned from receive immediately")
+	}
+}
+
+// TestBroadcaster_Publish_PersistsToGUIEventLog covers G9: every
+// Publish writes a structured envelope to gui-events.log via
+// AppendGUIEventLog. The classifyEvent helper assigns source +
+// severity per type. SSE fan-out is unaffected.
+//
+// The persist channel is drained by a background goroutine; Close()
+// blocks until the drain finishes, so the post-Publish read is
+// deterministic even though Publish is non-blocking.
+func TestBroadcaster_Publish_PersistsToGUIEventLog(t *testing.T) {
+	root := t.TempDir()
+	restore := api.SetDaemonStateRootForTest(root)
+	t.Cleanup(restore)
+	a := api.NewAPI()
+	b := NewBroadcaster()
+	b.SetAPI(a)
+	b.Publish(Event{Type: "daemon-state", Body: map[string]any{"server": "memory"}})
+	b.Publish(Event{Type: "poller-error", Body: map[string]any{"err": "boom"}})
+	b.Publish(Event{Type: "bulk-action", Body: map[string]any{"action": "restart"}})
+	b.Close() // flush drain goroutine before reading
+
+	tail := a.ReadGUIEventLogTail(10)
+	if len(tail) != 3 {
+		t.Fatalf("tail len = %d, want 3", len(tail))
+	}
+	cases := []struct {
+		etype, wantSource, wantSeverity string
+	}{
+		{"daemon-state", "poller", api.GUIEventSeverityInfo},
+		{"poller-error", "poller", api.GUIEventSeverityError},
+		{"bulk-action", "servers", api.GUIEventSeverityInfo},
+	}
+	for i, c := range cases {
+		if tail[i].Type != c.etype {
+			t.Errorf("[%d] type = %q, want %q", i, tail[i].Type, c.etype)
+		}
+		if tail[i].Source != c.wantSource {
+			t.Errorf("[%d] source = %q, want %q", i, tail[i].Source, c.wantSource)
+		}
+		if tail[i].Severity != c.wantSeverity {
+			t.Errorf("[%d] severity = %q, want %q", i, tail[i].Severity, c.wantSeverity)
+		}
+		if tail[i].SchemaVersion != api.GUIEventLogSchemaVersion {
+			t.Errorf("[%d] schema_version = %q, want %q", i, tail[i].SchemaVersion, api.GUIEventLogSchemaVersion)
+		}
+	}
+}
+
+// TestBroadcaster_DisableGUIEventLog_SkipsPersist guards the opt-out
+// path used by tests and ephemeral surfaces.
+func TestBroadcaster_DisableGUIEventLog_SkipsPersist(t *testing.T) {
+	root := t.TempDir()
+	restore := api.SetDaemonStateRootForTest(root)
+	t.Cleanup(restore)
+	a := api.NewAPI()
+	b := NewBroadcaster()
+	b.SetAPI(a)
+	b.DisableGUIEventLog = true
+	b.Publish(Event{Type: "daemon-state", Body: map[string]any{"server": "memory"}})
+	b.Close() // drain so goroutine doesn't leak
+
+	tail := a.ReadGUIEventLogTail(10)
+	if len(tail) != 0 {
+		t.Errorf("tail len = %d, want 0 (DisableGUIEventLog should skip persist)", len(tail))
+	}
+}
+
+// TestBroadcaster_Close_HonorsDrainTimeout guards Codex P2 on PR
+// #150 round 5 line 557: AppendGUIEventLog uses blocking flock with
+// no timeout, so a stalled persist could block shutdown indefinitely.
+// Close() must return within ~closeDrainTimeout + slop even when the
+// drain goroutine is stuck. The happy-path Publish + Close case
+// returns in milliseconds — anything close to closeDrainTimeout
+// would indicate a regression in the bounded-wait branch.
+func TestBroadcaster_Close_HonorsDrainTimeout(t *testing.T) {
+	root := t.TempDir()
+	restore := api.SetDaemonStateRootForTest(root)
+	t.Cleanup(restore)
+	a := api.NewAPI()
+	b := NewBroadcaster()
+	b.SetAPI(a)
+	// Trigger the lazy spawn by publishing once.
+	b.Publish(Event{Type: "daemon-state", Body: map[string]any{"i": 0}})
+	start := time.Now()
+	b.Close()
+	elapsed := time.Since(start)
+	// closeDrainTimeout (3s) + slop. Normal happy path returns in ms.
+	if elapsed > 4*time.Second {
+		t.Errorf("Close() took %v, want <4s (closeDrainTimeout + slop)", elapsed)
+	}
+}
+
+// TestBroadcaster_Close_NeverPublished_DoesNotHang guards Codex P2 on
+// PR #150 round 4 line 101: with lazy drain spawn, Close() must
+// terminate cleanly when no drain goroutine ever ran. Without the
+// "close persistDoneCh manually if !persistStarted" branch in
+// Close(), this test would hang on <-persistDoneCh.
+func TestBroadcaster_Close_NeverPublished_DoesNotHang(t *testing.T) {
+	b := NewBroadcaster()
+	done := make(chan struct{})
+	go func() {
+		b.Close()
+		close(done)
+	}()
+	select {
+	case <-done:
+		// pass — Close returned promptly without a spawned drain.
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close hangs when no drain goroutine was spawned")
+	}
+}
+
+// TestBroadcaster_NoSpawn_WhenUnused guards the lazy-spawn contract:
+// a Broadcaster constructed via NewBroadcaster() that never Publishes
+// a persistable event MUST NOT spawn a goroutine. Codex P2 on PR #150
+// round 4 line 101 — verifies persistStarted stays false in the
+// no-publish path.
+func TestBroadcaster_NoSpawn_WhenUnused(t *testing.T) {
+	b := NewBroadcaster()
+	b.mu.Lock()
+	started := b.persistStarted
+	b.mu.Unlock()
+	if started {
+		t.Errorf("persistStarted = true after NewBroadcaster — drain spawned eagerly (regression)")
+	}
+	b.Close()
+	b.mu.Lock()
+	started = b.persistStarted
+	b.mu.Unlock()
+	if started {
+		t.Errorf("persistStarted = true after Close — drain spawned by Close (regression)")
+	}
+}
+
+// TestBroadcaster_NoSpawn_WhenDisabledPublish covers the
+// DisableGUIEventLog=true path: even with Publish calls, the drain
+// goroutine must not spawn because no persistence is requested.
+func TestBroadcaster_NoSpawn_WhenDisabledPublish(t *testing.T) {
+	b := NewBroadcaster()
+	b.DisableGUIEventLog = true
+	for i := 0; i < 5; i++ {
+		b.Publish(Event{Type: "daemon-state", Body: map[string]any{"i": i}})
+	}
+	b.mu.Lock()
+	started := b.persistStarted
+	b.mu.Unlock()
+	if started {
+		t.Errorf("persistStarted = true with DisableGUIEventLog=true — drain spawned despite opt-out")
+	}
+	b.Close()
+}
+
+// TestBroadcaster_Close_RaceWithConcurrentPublish guards Codex P1 on
+// PR #150 line 227: send-after-close panic when Publish runs
+// concurrently with Close(). Under -race this exercises the b.closed
+// flag + mutex coordination. Without the fix, sending on a closed
+// persistCh would panic the test binary.
+func TestBroadcaster_Close_RaceWithConcurrentPublish(t *testing.T) {
+	root := t.TempDir()
+	restore := api.SetDaemonStateRootForTest(root)
+	t.Cleanup(restore)
+	a := api.NewAPI()
+	b := NewBroadcaster()
+	b.SetAPI(a)
+
+	const publishers = 20
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(publishers)
+	for i := 0; i < publishers; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					b.Publish(Event{Type: "daemon-state", Body: map[string]any{"i": i}})
+				}
+			}
+		}()
+	}
+	// Let publishers spin briefly before Close() races them.
+	time.Sleep(10 * time.Millisecond)
+	b.Close()
+	close(stop)
+	wg.Wait()
+	// If we got here without panicking, the close-race guard worked.
+}
+
+// TestBroadcaster_Publish_OrderUnderConcurrency covers Codex P2 on PR
+// #150 line 156: with multiple concurrent publishers, the on-disk log
+// order must match the SSE fan-out order. Channel sends happen UNDER
+// b.mu (same critical section as the SSE fan-out), and the single
+// drain goroutine consumes FIFO — so the persisted order matches the
+// order in which Publish acquired b.mu.
+func TestBroadcaster_Publish_OrderUnderConcurrency(t *testing.T) {
+	root := t.TempDir()
+	restore := api.SetDaemonStateRootForTest(root)
+	t.Cleanup(restore)
+	a := api.NewAPI()
+	b := NewBroadcaster()
+	b.SetAPI(a)
+
+	const n = 50
+	var wg sync.WaitGroup
+	wg.Add(n)
+	// Each publisher takes a unique sequence number. After all goroutines
+	// finish + drain, the persisted Body["seq"] sequence must be strictly
+	// monotonic — proves no out-of-order interleaving across goroutines.
+	for i := 0; i < n; i++ {
+		seq := i
+		go func() {
+			defer wg.Done()
+			b.Publish(Event{Type: "daemon-state", Body: map[string]any{"seq": seq}})
+		}()
+	}
+	wg.Wait()
+	b.Close()
+
+	tail := a.ReadGUIEventLogTail(n + 5)
+	if len(tail) != n {
+		t.Fatalf("tail len = %d, want %d", len(tail), n)
+	}
+	seen := map[int]bool{}
+	for i, e := range tail {
+		v, _ := e.Body["seq"].(float64)
+		k := int(v)
+		if seen[k] {
+			t.Errorf("[%d] duplicate seq %d in persisted log", i, k)
+		}
+		seen[k] = true
+	}
+	if len(seen) != n {
+		t.Errorf("persisted log has %d unique seq values, want %d", len(seen), n)
 	}
 }
 

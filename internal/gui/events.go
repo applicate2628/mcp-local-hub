@@ -21,6 +21,9 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
+
+	"mcp-local-hub/internal/api"
 )
 
 // maxSSESubscribers is the per-Broadcaster admission cap applied via
@@ -36,19 +39,172 @@ type Event struct {
 	Body map[string]any `json:"body,omitempty"`
 }
 
+// persistRequest carries one envelope-ready event onto the async
+// persist channel. The shape is intentionally small so the channel
+// buffer stays cheap.
+type persistRequest struct {
+	ev Event
+}
+
+// Capacity of the persist channel. When full, Publish drops the
+// envelope (matches the existing SSE drop-on-full policy). 256 is
+// chosen so a brief burst of bulk-action / daemon-state events
+// doesn't lose any in practice while keeping memory bounded.
+const persistChannelCap = 256
+
 // Broadcaster is a fan-out channel for Events. Each Subscribe call
 // returns a dedicated buffered channel; Publish writes to every
 // subscriber without blocking (dropped if the buffer is full).
+//
+// G9: each Publish also persists a structured envelope to
+// gui-events.log via api.AppendGUIEventLog. To keep Publish non-
+// blocking (Codex P2 on PR #150 line 162), persistence goes through a
+// buffered channel drained by a single background goroutine. The
+// single drain goroutine also guarantees publish ORDER survives to
+// disk (Codex P2 on PR #150 line 156) — channel sends happen under
+// b.mu in the same critical section as the SSE fan-out, and the
+// goroutine consumes in FIFO order.
+//
+// Lifecycle: NewBroadcaster spawns the drain goroutine. Close()
+// stops it (idempotent + blocks until all pending entries flushed,
+// so tests can verify persisted state deterministically).
+//
+// Tests that don't care about disk persistence (or run before
+// DaemonStateDir is initialized) set DisableGUIEventLog=true. The
+// api handle is injected via SetAPI so tests use a state-rooted
+// instance; nil falls back to api.NewAPI() for production GUI.
 type Broadcaster struct {
-	mu   sync.Mutex
-	subs map[chan Event]struct{}
+	mu                 sync.Mutex
+	subs               map[chan Event]struct{}
+	api                *api.API
+	DisableGUIEventLog bool
+
+	persistCh     chan persistRequest
+	persistDoneCh chan struct{}
+	closeOnce     sync.Once
+	persistStart  sync.Once
+	// closed is set under b.mu inside Close() before close(persistCh).
+	// Publish checks it under the same mutex so a concurrent Close()
+	// cannot cause a send-on-closed-channel panic (Codex P1 on PR #150
+	// line 227).
+	closed bool
+	// persistStarted records whether the drain goroutine was spawned.
+	// Close() consults this to know whether to wait on persistDoneCh
+	// (drain closes it) or close it manually (no drain ever ran).
+	// Lazy spawn closes Codex P2 on PR #150 line 101: NewBroadcaster
+	// no longer leaks one goroutine per construction, because tests +
+	// handler-only call sites that never Publish never spawn anything.
+	persistStarted bool
 }
 
 // NewBroadcaster constructs an empty Broadcaster with no subscribers.
-// It starts no goroutines — the poller that feeds it is owned by
-// Task 12 and started separately.
+// Does NOT spawn any goroutine — the persist drain is started lazily
+// on the first Publish() with persistence enabled. This eliminates
+// goroutine leaks from short-lived test broadcasters and handler-only
+// call sites that never publish.
 func NewBroadcaster() *Broadcaster {
-	return &Broadcaster{subs: map[chan Event]struct{}{}}
+	return &Broadcaster{
+		subs:          map[chan Event]struct{}{},
+		persistCh:     make(chan persistRequest, persistChannelCap),
+		persistDoneCh: make(chan struct{}),
+	}
+}
+
+// ensurePersistDrain spawns the persist drain goroutine once (sync.Once).
+// Called from Publish under b.mu so the persistStarted flag is set
+// atomically with the spawn — Close() reads the same field under the
+// same lock to decide whether to wait on persistDoneCh.
+func (b *Broadcaster) ensurePersistDrain() {
+	b.persistStart.Do(func() {
+		b.persistStarted = true
+		go b.drainPersist()
+	})
+}
+
+// SetAPI threads an api.API handle through the broadcaster so the
+// drain goroutine can call AppendGUIEventLog without constructing a
+// fresh API per event. Optional — nil/unset falls back to
+// api.NewAPI() inside persistOne. Production server bootstrap calls
+// this once with the process-wide api handle.
+func (b *Broadcaster) SetAPI(a *api.API) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.api = a
+}
+
+// closeDrainTimeout caps how long Close() will wait for the persist
+// drain goroutine to finish. Codex P2 on PR #150 round 5 line 557:
+// AppendGUIEventLog uses a blocking flock.Lock() with no timeout, so
+// a stalled filesystem or contended lock could block shutdown
+// indefinitely. The 3s cap lets shutdown honor the gui server's 5s
+// graceful-shutdown budget — losing the in-flight persist write is
+// preferable to hanging the whole process.
+const closeDrainTimeout = 3 * time.Second
+
+// Close stops the drain goroutine and blocks until any in-flight or
+// queued persist calls finish (or until closeDrainTimeout elapses).
+// Idempotent.
+//
+// Codex P1 on PR #150 line 227: a concurrent Publish racing with
+// close(persistCh) would panic on send-after-close. Fix: set
+// b.closed=true and close(persistCh) atomically under b.mu, so
+// Publish's check + send happens entirely before OR entirely after
+// the close — never interleaved.
+//
+// Codex P2 on PR #150 round 4 line 101: with lazy drain spawn, Close()
+// must also close persistDoneCh manually when no drain ever ran
+// (otherwise the wait below would hang forever).
+//
+// Codex P2 on PR #150 round 5 line 557: cap the wait so a stalled
+// flock acquire in AppendGUIEventLog cannot block shutdown past the
+// gui server's 5s graceful-shutdown budget.
+func (b *Broadcaster) Close() {
+	b.closeOnce.Do(func() {
+		b.mu.Lock()
+		b.closed = true
+		started := b.persistStarted
+		close(b.persistCh)
+		if !started {
+			// No drain goroutine ever spawned — close the done
+			// channel ourselves so callers waiting on it return.
+			close(b.persistDoneCh)
+		}
+		b.mu.Unlock()
+	})
+	select {
+	case <-b.persistDoneCh:
+		// drain exited cleanly within the budget
+	case <-time.After(closeDrainTimeout):
+		// drain stalled (likely flock contention or slow disk).
+		// Abandon the wait — drain is a daemon-style goroutine and
+		// will eventually exit when the OS releases its lock; in
+		// the worst case it leaks past process exit, but shutdown
+		// won't hang. Any unflushed entries are lost — best-effort
+		// persist semantics already documented in Publish.
+	}
+}
+
+func (b *Broadcaster) drainPersist() {
+	defer close(b.persistDoneCh)
+	for req := range b.persistCh {
+		b.persistOne(req.ev)
+	}
+}
+
+func (b *Broadcaster) persistOne(ev Event) {
+	source, severity := classifyEvent(ev.Type)
+	b.mu.Lock()
+	a := b.api
+	b.mu.Unlock()
+	if a == nil {
+		a = api.NewAPI()
+	}
+	_ = a.AppendGUIEventLog(api.GUIEventEntry{
+		Type:     ev.Type,
+		Source:   source,
+		Severity: severity,
+		Body:     ev.Body,
+	})
 }
 
 // Subscribe returns a channel that will receive every Event published
@@ -108,21 +264,61 @@ func (b *Broadcaster) TrySubscribe(ctx context.Context) (<-chan Event, bool) {
 	return ch, true
 }
 
-// Publish fans out to all subscribers. Non-blocking: a subscriber with
-// a full buffer simply misses the event.
+// Publish fans out to all subscribers AND enqueues a persist request.
+// Both operations are non-blocking and complete in O(subscribers) wall
+// time — the persist channel is sized so a brief burst is queued
+// without blocking the caller.
 //
-// The send happens while holding b.mu so that a concurrent ctx-cancel
-// unsubscribe (which also holds b.mu before close) cannot close the
-// channel mid-send. Because the send is non-blocking (select/default),
-// holding the mutex through the fan-out cannot deadlock.
+// Codex P2 on PR #150 lines 156 + 162: the persist enqueue happens
+// UNDER b.mu so the FIFO order of channel sends matches the SSE fan-
+// out order. The single drainPersist goroutine consumes from the
+// channel sequentially and calls AppendGUIEventLog — order survives
+// to disk. The select/default on the channel makes the send non-
+// blocking, so a stalled filesystem cannot block Publish (the entry
+// is dropped instead; future work can add an atomic drop counter).
+//
+// Set DisableGUIEventLog=true to opt out of persistence entirely
+// (tests + ephemeral subscribers).
 func (b *Broadcaster) Publish(ev Event) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	for c := range b.subs {
 		select {
 		case c <- ev:
 		default: // drop
 		}
+	}
+	// Skip the persist enqueue once Close() has flipped the shutdown
+	// flag (Codex P1 on PR #150 line 227 — guards against send-on-
+	// closed-channel panic). Both the flag set and channel close
+	// happen under b.mu inside Close(), so checking + sending here is
+	// atomic with respect to teardown.
+	if !b.DisableGUIEventLog && !b.closed {
+		// Lazy-spawn the drain goroutine on first persistable Publish
+		// (Codex P2 on PR #150 round 4 line 101). Tests + handler-
+		// only call sites that never Publish never spawn anything.
+		b.ensurePersistDrain()
+		select {
+		case b.persistCh <- persistRequest{ev: ev}:
+		default: // persist channel full → drop (matches SSE drop-on-full policy)
+		}
+	}
+	b.mu.Unlock()
+}
+
+// classifyEvent maps the wire event type to (source, severity). Keeps
+// the envelope concise so log consumers can filter by source without
+// inspecting the body. Type-to-source mapping reflects the current
+// emit sites; new event types should add a row here.
+func classifyEvent(eventType string) (source string, severity string) {
+	switch eventType {
+	case "daemon-state":
+		return "poller", api.GUIEventSeverityInfo
+	case "poller-error":
+		return "poller", api.GUIEventSeverityError
+	case "bulk-action":
+		return "servers", api.GUIEventSeverityInfo
+	default:
+		return "gui", api.GUIEventSeverityInfo
 	}
 }
 

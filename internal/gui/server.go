@@ -546,10 +546,18 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := s.srv.Shutdown(shutdownCtx); err != nil {
+			s.events.Close()
 			return fmt.Errorf("graceful shutdown: %w", err)
 		}
+		// G9: stop the persist worker after HTTP is quiesced, so
+		// any pending events queued by in-flight handlers are
+		// flushed to gui-events.log before the goroutine exits
+		// (Codex P2 on PR #150 line 101 — without this, every
+		// Start/Stop cycle leaks one drain goroutine).
+		s.events.Close()
 		return nil
 	case err := <-errCh:
+		s.events.Close()
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
