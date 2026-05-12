@@ -308,16 +308,25 @@ func (a *API) ManifestValidate(yaml string) []string {
 }
 
 // ManifestValidateMode is ManifestValidate with explicit mode. Returns
-// (warnings, err). err != nil ONLY in strict mode and ONLY on hard
-// violations (currently: '__' in server name). Warnings cover both
-// modes — structural parse errors are reported via warnings[0] for
-// backward compatibility with existing ManifestValidate callers.
+// (warnings, err). In COMPAT mode, err is always nil — structural parse
+// errors are reported via warnings[0] for backward compatibility with
+// existing ManifestValidate callers that ignored the (returned but
+// unused) error channel. In STRICT mode, both parse failures AND hard
+// rule violations ('__' in server name) return a hard error;
+// admission gates that discard warnings (e.g. ManifestValidateForHubBind)
+// rely on this strict-mode error path being authoritative (codex bot
+// r1 P1 closure — earlier wording reported parse failures as warnings
+// only, so a malformed manifest passed the strict hub-bind gate as
+// valid).
 //
 // G4 §"Pre-gate".
 func (a *API) ManifestValidateMode(yaml string, mode ValidateMode) ([]string, error) {
 	reader := strings.NewReader(yaml)
 	m, err := config.ParseManifest(reader)
 	if err != nil {
+		if mode == ValidateModeStrict {
+			return nil, fmt.Errorf("manifest parse failed: %w", err)
+		}
 		return []string{err.Error()}, nil
 	}
 	warnings := manifestValidationWarnings(m)

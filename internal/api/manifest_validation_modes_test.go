@@ -19,6 +19,55 @@ func TestManifestValidateStrictRejectsDoubleUnderscore(t *testing.T) {
 	}
 }
 
+// codex bot r1 P1 closure: parse failures (malformed YAML, missing
+// required field, etc.) must return a hard error in strict mode so
+// admission gates that drop warnings (ManifestValidateForHubBind)
+// cannot let invalid manifests through.
+func TestManifestValidateStrictRejectsParseFailure(t *testing.T) {
+	a := NewAPI()
+	cases := []struct {
+		name string
+		yaml string
+	}{
+		{name: "malformed-yaml", yaml: "name: foo\nkind: [unclosed-list\n"},
+		{name: "missing-name", yaml: "kind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9200\n"},
+		{name: "unknown-kind", yaml: "name: foo\nkind: nonsense\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9200\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := a.ManifestValidateMode(tc.yaml, ValidateModeStrict)
+			if err == nil {
+				t.Fatalf("strict mode must reject %s as hard error", tc.name)
+			}
+		})
+	}
+}
+
+// And the parse-failure-rejection must propagate through the strict
+// hub-bind helper, which is the actual gate at hub startup.
+func TestManifestValidateForHubBindRejectsParseFailure(t *testing.T) {
+	a := NewAPI()
+	// Truncated / unparseable YAML — must NOT admit.
+	err := a.ManifestValidateForHubBind("name: foo\nkind: [unclosed\n")
+	if err == nil {
+		t.Fatalf("hub-bind gate must reject malformed YAML; got nil")
+	}
+}
+
+// Compat mode must still surface parse failures as warnings (not errors)
+// so existing GUI manifest-list callers don't break on legacy
+// __-named manifests with minor structural quirks.
+func TestManifestValidateCompatTreatsParseFailureAsWarning(t *testing.T) {
+	a := NewAPI()
+	warnings, err := a.ManifestValidateMode("name: foo\nkind: [unclosed\n", ValidateModeCompat)
+	if err != nil {
+		t.Fatalf("compat mode must NOT return error on parse failure; got %v", err)
+	}
+	if len(warnings) == 0 {
+		t.Fatalf("compat mode must surface parse failure as warning; got empty warnings")
+	}
+}
+
 func TestManifestValidateCompatWarnsOnDoubleUnderscore(t *testing.T) {
 	a := NewAPI()
 	yaml := "name: foo__bar\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9200\n"

@@ -38,18 +38,25 @@ func verifyHubMcpStateDACLImpl(path string) error {
 	defer unix.Close(fd)
 
 	// Stat from the open fd so a swap between stat-and-read is
-	// impossible.
-	f := os.NewFile(uintptr(fd), path)
-	info, err := f.Stat()
-	if err != nil {
-		return err
+	// impossible. Use unix.Fstat directly (NOT os.NewFile + f.Stat) —
+	// os.File installs a finalizer that may close fd after the
+	// surrounding unix.Close has already run, causing nondeterministic
+	// EBADF or unrelated-fd close in long-running processes (codex bot
+	// r1 P2 closure).
+	var st unix.Stat_t
+	if err := unix.Fstat(fd, &st); err != nil {
+		return fmt.Errorf("hub-mcp state verify: fstat: %w", err)
 	}
-	if info.Mode().Type()&(os.ModeSymlink|os.ModeIrregular) != 0 {
+	// Map mode to os.FileMode for symlink/irregular check.
+	mode := os.FileMode(st.Mode & 0o777)
+	switch st.Mode & syscall.S_IFMT {
+	case syscall.S_IFLNK:
 		return ErrIrregularFile
-	}
-	st, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return errors.New("hub-mcp state verify: stat sys() type unexpected")
+	case syscall.S_IFREG:
+		// regular file — proceed
+	default:
+		// FIFO, socket, block/char device, etc.
+		return ErrIrregularFile
 	}
 	// Wrap sentinels with operator-actionable context (path + uid/mode
 	// bits). Phase 2's hub-mcp loader surfaces these strings directly
@@ -59,8 +66,8 @@ func verifyHubMcpStateDACLImpl(path string) error {
 	if int(st.Uid) != os.Getuid() {
 		return fmt.Errorf("%w: path=%s uid=%d (need current uid %d)", ErrWrongOwner, path, st.Uid, os.Getuid())
 	}
-	if info.Mode().Perm()&0o077 != 0 {
-		return fmt.Errorf("%w: path=%s mode=%04o", ErrTooLoose, path, info.Mode().Perm())
+	if mode&0o077 != 0 {
+		return fmt.Errorf("%w: path=%s mode=%04o", ErrTooLoose, path, mode)
 	}
 	return nil
 }
