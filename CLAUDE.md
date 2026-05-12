@@ -63,9 +63,20 @@ comment AND a review record:
 # Bot review state
 gh api repos/<owner>/<repo>/pulls/<N>/reviews \
   --jq '.[] | select(.user.login == "chatgpt-codex-connector[bot]") | {state, commit_id}'
-# Inline comments
+
+# Get current HEAD SHA — needed for filtering inline comments
+HEAD=$(gh pr view <N> --json headRefOid --jq .headRefOid)
+
+# Inline comments — MUST extract `original_commit_id`
+# (GitHub auto-rebases inline-comment `commit_id` across pushes;
+# `original_commit_id` is the immutable anchor to the commit the bot
+# actually reviewed when it left the comment. Filtering by
+# `original_commit_id == $HEAD` is the only correct stale-filter.)
 gh api repos/<owner>/<repo>/pulls/<N>/comments \
-  --jq '.[] | select(.user.login == "chatgpt-codex-connector[bot]") | {commit_id, line, path, body}'
+  --jq --arg sha "$HEAD" '.[]
+    | select(.user.login == "chatgpt-codex-connector[bot]")
+    | select(.original_commit_id == $sha)
+    | {original_commit_id, line, path, body}'
 ```
 
 PASS verdict — **all three of the following must hold on the CURRENT

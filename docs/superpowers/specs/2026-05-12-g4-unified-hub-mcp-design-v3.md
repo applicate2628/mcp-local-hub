@@ -12,7 +12,28 @@ Give an MCP client (Claude Code / Codex CLI / Cursor / VS Code / etc.) **one URL
 
 A new HTTP listener on `127.0.0.1:<persistent-random-port>` owned by the running `mcphub gui` process. **Persistent port**: chosen once on the first start with the gate ON, written to `<state-dir>/hub-mcp.endpoint.json` (0600 + DACL-verified, see "Token + endpoint state hardening" below), reused on every subsequent start. Operators install client configs ONCE; reinstall only when they regenerate tokens. This addresses v2 F-S1 (random-port stale-URL window) while keeping a per-user random port rather than fixed `9120` (which any local user can pre-bind).
 
-**Pre-bind handling is DoS, not a security boundary** (codex r3 security F-S1 closure): `SO_EXCLUSIVEADDRUSE` protects only AFTER hub successfully binds; a local attacker that pre-binds the port BEFORE hub starts blocks the bind. On `bind: address in use`, hub exits with a non-zero status and a clear "port in use" diagnostic. Operator workflow: re-run `mcphub gui --reset-port` to pick a new ephemeral port + rewrite endpoint file; re-run `mcphub install` to refresh client configs with the new port. Confidentiality is preserved (the 6-check auth gate still rejects the attacker's connections — see "Cross-client invariant — six-check auth gate" below); the attack is denial of service.
+**Pre-bind handling is credential exfiltration AND DoS, NOT just DoS** (codex r7 P1 closure — supersedes the earlier "DoS-only" framing). `SO_EXCLUSIVEADDRUSE` protects only AFTER hub successfully binds; a local attacker that pre-binds `127.0.0.1:<persistent-port>` BEFORE hub starts blocks the bind, and any client whose config still points at that port will send its `X-Mcphub-Hub-Token` + `X-Mcphub-Instance-Id` headers TO THE ATTACKER'S LISTENER on its very first request. The 6-check auth gate runs only when the HUB is the listener; pre-bind means the auth gate never executes. Captured token + instance_id can then be replayed against the genuine hub once it eventually binds. **This is a confidentiality attack, not a pure-DoS attack.**
+
+Threat-model classification of pre-bind:
+
+| Attacker capability | Outcome |
+|---|---|
+| Can bind to `127.0.0.1:<port>` (local user-mode process under same uid) AND knows the port (from client config OR backup OR shoulder-surf) | Captures token + instance_id on the next client request; replay-capable. |
+| Can ONLY bind, but doesn't know the port | DoS only (clients won't connect to a wrong address). |
+
+The port number is in client configs (`~/.claude.json`, `~/.codex/config.toml`, etc.) which sit at per-user trust boundaries OUTSIDE `<state-dir>`. Any process that reads those configs can learn the port without state-dir write access; the persistent-port model intentionally trades port-secrecy for installability.
+
+**Pre-bind recovery workflow** (the correct burn-down sequence):
+
+1. `mcphub gui --reset-port` — picks a fresh ephemeral port, rewrites endpoint file. This invalidates the attacker's pre-bind on the OLD port. NOT a credential burn-down; it just stops new requests going to the attacker.
+
+2. `mcphub hub-mcp regenerate-token --client <every-client>` — REQUIRED if any client has already issued a request that reached the attacker since hub last bound. Treat ANY successful pre-bind window as "tokens may have been seen". Operator MUST rotate per-client tokens before re-installing.
+
+3. `mcphub hub-mcp regenerate-instance-id` — REQUIRED if the same pre-bind window may have leaked the instance_id. Per-client requests carry both headers; the attacker can correlate them and replay later if only the token rotates. Rotating both closes the replay window.
+
+4. `mcphub install <client>` for each rotated client — refreshes client config with new port + new token + new instance_id.
+
+The earlier "just `--reset-port` + reinstall" recovery was incomplete: it stops the immediate attack but does NOT invalidate already-captured credentials. The full burn-down is `regenerate-token` + `regenerate-instance-id` + reinstall. Operators must be told this in the `mcphub gui --reset-port` CLI help text + a clear "credentials may have leaked; rotate" warning printed on every `--reset-port` invocation.
 
 **Hub instance ID — persistent across restarts** (codex r3 security F-S1 closure): instance_id is generated ONCE on first start (when the endpoint file is created), persists across hub restarts, and is rotated only by explicit operator action via `mcphub hub-mcp regenerate-instance-id`. This resolves the v2 contradiction between "install once" and "every restart needs reinstall". Auth gate still rejects requests with mismatched `X-Mcphub-Instance-Id` — but the routine restart path doesn't require operator action. Operators only re-install after explicit rotation events (token compromise → `regenerate-token`, instance compromise → `regenerate-instance-id`).
 
@@ -465,8 +486,15 @@ Each adapter writer in `internal/clients/*.go` is replaced with a `SecureWriteCl
        ```
      The `setErr` capture is mandatory (codex r4 F4 followup): a silently-dropped Setsockopt error means the listener still binds with default `SO_REUSEADDR` semantics, defeating the pre-bind safeguard.
    - posix (internal/api/hub_mcp_listener_posix.go): plain
-     `net.ListenConfig{}.Listen` — no analogue; loopback bind alone is
-     sufficient on POSIX (the threat model treats pre-bind as DoS only).
+     `net.ListenConfig{}.Listen` — no `SO_EXCLUSIVEADDRUSE` analogue
+     exists on POSIX. Loopback bind alone is the available defense
+     against external-network exposure; pre-bind by a same-user
+     local process on POSIX has the SAME credential-exfiltration
+     consequences as on Windows (codex r7 P1 reclassification —
+     earlier text said "DoS only on POSIX", which understated the
+     threat). The POSIX recovery workflow is the same as Windows:
+     `--reset-port` + `regenerate-token` + `regenerate-instance-id`
+     + reinstall.
    If port was 0 (first start), retrieve the assigned port via listener.Addr().(*net.TCPAddr).Port for step 7.
 7. write hub-mcp.endpoint.json {port, instance_id, pid, started_at} (atomic, under same lock).
    If write fails after listener exists → defer listener.Close() in error path. The contract is
@@ -475,7 +503,7 @@ Each adapter writer in `internal/clients/*.go` is replaced with a `SecureWriteCl
 9. http.Serve(listener, mux)
 ```
 
-If steps 1-5 fail, the listener was never created and no resource leaked. If step 6 fails (port in use → pre-bind DoS), exit cleanly with the "port in use" diagnostic. If step 7 fails after the listener exists, defer-close the listener so no connections accept traffic without a published endpoint file.
+If steps 1-5 fail, the listener was never created and no resource leaked. If step 6 fails (port in use → pre-bind attack), exit cleanly with the "port in use" diagnostic AND emit a "**credentials may have leaked to the pre-binding process; rotate via `mcphub hub-mcp regenerate-token` + `mcphub hub-mcp regenerate-instance-id` before reinstalling**" warning (per the pre-bind credential-exfil reclassification at the top of this spec). If step 7 fails after the listener exists, defer-close the listener so no connections accept traffic without a published endpoint file.
 
 ## Logging hygiene + golden test (F-S2 closure)
 
@@ -754,14 +782,24 @@ mcphub hub-mcp regenerate-instance-id [--yes]
 mcphub gui --reset-port [--yes]
     Discard the current persistent hub-mcp port; the next `mcphub gui` start
     picks a fresh ephemeral port. Use this when:
-      a) a local-attacker pre-bind blocks the port (DoS recovery — see
-         "Pre-bind handling" above),
+      a) a local-attacker pre-bind blocks the port (CREDENTIAL EXFIL
+         recovery; --reset-port is the FIRST step but is NOT sufficient
+         alone — see "Pre-bind handling is credential exfiltration AND DoS"
+         in the architecture section above. After --reset-port you MUST
+         also run `mcphub hub-mcp regenerate-token --client <each>` AND
+         `mcphub hub-mcp regenerate-instance-id` to burn the credentials
+         that may have leaked to the pre-binding process before reinstalling).
       b) the port has been published externally (logs, screenshots) and you
-         want to invalidate it pre-emptively,
+         want to invalidate it pre-emptively.
       c) the endpoint state file is corrupted past the parse-failure handler.
     Implies a follow-up `mcphub install` to refresh every client config with
     the new port. Refuses non-TTY without --yes (exit 6). Does NOT touch
     instance_id (separate concern); use `regenerate-instance-id` for that.
+    Prints "WARNING: credentials may have leaked; rotate before reinstalling"
+    on every invocation as a safety net for case (a) — the operator cannot
+    distinguish "no pre-bind happened" from "pre-bind happened" without
+    out-of-band info, so we treat every --reset-port as potentially-
+    triggered-by-pre-bind and tell the operator to rotate.
 ```
 
 Exit codes: 0 success, 1 backend error, 6 non-TTY without --yes, 8 state path sanity rejected.
@@ -770,7 +808,7 @@ Exit codes: 0 success, 1 backend error, 6 non-TTY without --yes, 8 state path sa
 
 | Vector | Mitigation |
 |---|---|
-| Pre-bind on port (HIGH r1) | Persistent random port (per-user); SO_EXCLUSIVEADDRUSE bind. A local-attacker pre-bind is **denial of service, not confidentiality** (auth gate still rejects the attacker's connections); operator recovers via `mcphub gui --reset-port` + reinstall. Captured-token replay defense: per-client token + persistent `X-Mcphub-Instance-Id`; both must match the current hub state. A stolen token is rejected after `regenerate-token`; a stolen token + stolen instance_id is rejected after `regenerate-instance-id` — operator-driven invalidation, not restart-driven. |
+| Pre-bind on port (HIGH r1, **reclassified r7 P1** as credential exfiltration) | Persistent random port (per-user); SO_EXCLUSIVEADDRUSE bind. If a local-attacker pre-binds the port BEFORE hub binds, client requests carry `X-Mcphub-Hub-Token` + `X-Mcphub-Instance-Id` to the attacker — the 6-check auth gate NEVER runs because the attacker IS the listener. Captured headers can be replayed against the genuine hub once it eventually binds. **Recovery requires full credential burn-down**: `mcphub gui --reset-port` (stops the attacker getting more requests) + `mcphub hub-mcp regenerate-token --client <each>` (invalidates exfiltrated per-client tokens) + `mcphub hub-mcp regenerate-instance-id` (invalidates the exfiltrated instance_id) + reinstall. `--reset-port` alone is INSUFFICIENT. The CLI prints a "credentials may have leaked; rotate" warning on every `--reset-port` invocation. |
 | Stale URL after explicit rotation event (HIGH r2 partial) | After `regenerate-token` or `regenerate-instance-id`, stale client configs fail with 401. Restart alone does NOT invalidate URLs by design (operator-installability tradeoff); only explicit operator action does. `regenerate-instance-id` is the burn-down for instance-compromise scenarios. |
 | Browser CSRF / DNS-rebind / cross-site-fetch | Existing `rejectUnsafeLoopbackRequest` (loopback Host, loopback Origin, Sec-Fetch-Site). Token + instance_id required. |
 | Token leak via process memory dump | Acknowledged residual risk for desktop dev threat model. |
