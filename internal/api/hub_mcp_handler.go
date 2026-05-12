@@ -256,6 +256,18 @@ func (h *HubMcpHandler) handlePost(w http.ResponseWriter, r *http.Request, clien
 	// and version validation runs at initialize-time (codex r7-bot-r2
 	// P2 closure: no half-initialized session if version is rejected).
 	if env.Method == "initialize" {
+		// codex bot phase4 r20 P2 closure on PR #158: notification-
+		// shaped initialize ({"method":"initialize"} without id) MUST
+		// be rejected — initialize is the session-establishment
+		// handshake, not a fire-and-forget event. Allowing it would
+		// let a malformed client allocate session slots until the
+		// idle-sweeper kicks in, eventually starving legitimate
+		// clients at the session cap. -32600 surfaces the client bug
+		// instead of silently swallowing the request as a noop.
+		if isJSONRPCNotificationID(env.ID) {
+			writeJSONRPCErrorStatus(w, json.RawMessage(`null`), http.StatusBadRequest, -32600, "invalid request: initialize requires a non-null id", nil)
+			return
+		}
 		h.handleInitialize(w, r, clientID, env.ID, env.Params)
 		return
 	}
