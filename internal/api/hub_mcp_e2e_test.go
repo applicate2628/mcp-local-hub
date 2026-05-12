@@ -282,7 +282,10 @@ func TestHubMcpE2EInternalReloadCycle(t *testing.T) {
 	t.Cleanup(store.Close)
 	handler := NewHubMcpHandler(store)
 	handler.SetEndpoint(ep)
-	reload := NewInternalReloadHandler()
+	reload, rerr := NewInternalReloadHandler()
+	if rerr != nil {
+		t.Fatalf("NewInternalReloadHandler: %v", rerr)
+	}
 
 	mux := http.NewServeMux()
 	mux.Handle("/clients/", handler)

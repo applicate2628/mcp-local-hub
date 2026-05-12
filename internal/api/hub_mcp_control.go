@@ -40,6 +40,7 @@ package api
 
 import (
 	"crypto/subtle"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -80,22 +81,24 @@ type InternalReloadHandler struct {
 // — it is consumed only by the rotation CLI which reads the file
 // directly under the same flock the hub used to write it.
 //
-// If the on-disk write fails the handler still returns successfully
-// — the in-memory token remains valid for the lifetime of this
-// process, so a sibling CLI rotation that captures the file at hub
-// start can complete. Restart recovers the persisted state. Errors
-// are logged via LogHubMcpEvent so operators see the surface in
-// status output.
-func NewInternalReloadHandler() *InternalReloadHandler {
+// codex bot phase4 r5 P2 closure on PR #158: persistence failure is
+// surfaced as a returned error (rather than logged + ignored). An
+// empty hub-mcp-control.token on disk means no external caller can
+// discover the in-memory token, so /internal/reload-tokens is
+// effectively unusable for the lifetime of the process. Listener
+// startup callers (internal/gui/hub_listener.go) propagate the
+// error so the hub listener refuses to come up rather than coming
+// up with a silently-broken reload control plane. Operators can fix
+// the state-dir DACL / disk-full / antivirus interference, then
+// restart.
+func NewInternalReloadHandler() (*InternalReloadHandler, error) {
 	h := &InternalReloadHandler{}
 	tok, err := generateHexToken()
 	if err != nil {
-		// Falling back to an empty token would deny every reload
-		// silently; log + leave the handler functional-but-locked.
 		_ = LogHubMcpEvent("error", "control-token-generate-failed", map[string]any{
 			"err": err.Error(),
 		})
-		return h
+		return nil, fmt.Errorf("generate hub-mcp control token: %w", err)
 	}
 	h.controlTok.Store(&tok)
 	// Persist under flock so the CLI reading the file does not see a
@@ -107,8 +110,9 @@ func NewInternalReloadHandler() *InternalReloadHandler {
 		_ = LogHubMcpEvent("error", "control-token-persist-failed", map[string]any{
 			"err": werr.Error(),
 		})
+		return nil, fmt.Errorf("persist hub-mcp control token: %w", werr)
 	}
-	return h
+	return h, nil
 }
 
 // ServeHTTP implements the POST-only contract with loopback-guard,

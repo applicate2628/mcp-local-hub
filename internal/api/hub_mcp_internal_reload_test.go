@@ -34,7 +34,10 @@ func setupReloadTestEnv(t *testing.T) (string, *InternalReloadHandler) {
 	if _, err := EnsureHubTokens([]string{"claude-code"}); err != nil {
 		t.Fatalf("EnsureHubTokens: %v", err)
 	}
-	h := NewInternalReloadHandler()
+	h, err := NewInternalReloadHandler()
+	if err != nil {
+		t.Fatalf("NewInternalReloadHandler: %v", err)
+	}
 	return dir, h
 }
 

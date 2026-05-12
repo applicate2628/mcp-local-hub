@@ -137,7 +137,17 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 	store := api.NewHubSessionStore(api.SessionStoreOpts{})
 	handler := api.NewHubMcpHandler(store)
 	handler.SetEndpoint(ep)
-	reload := api.NewInternalReloadHandler()
+	// codex bot phase4 r5 P2 closure on PR #158: control-token
+	// persistence failure surfaces as a returned error so the hub
+	// listener refuses to come up with a silently-broken
+	// /internal/reload-tokens. Rollback the bound listener so we
+	// don't leave a half-initialized hub server running.
+	reload, reloadErr := api.NewInternalReloadHandler()
+	if reloadErr != nil {
+		_ = ln.Close()
+		store.Close()
+		return nil, fmt.Errorf("hub-mcp: %w", reloadErr)
+	}
 
 	mux := http.NewServeMux()
 	// /clients/ catches everything under /clients/<id>/mcp; the
