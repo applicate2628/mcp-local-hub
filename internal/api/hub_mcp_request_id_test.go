@@ -155,6 +155,60 @@ func TestNewRequestIDKeyRejectsExtremeExponent(t *testing.T) {
 	}
 }
 
+// Boundary at the parsed exponent cap (1<<20). codex r7 NIT closure
+// on PR #157. The bound check rejects values STRICTLY greater than
+// the cap, so the cap itself (1048576) must be accepted. Document
+// the boundary behavior so a future tightening of the limit doesn't
+// silently regress this contract.
+func TestNewRequestIDKeyExponentBoundary(t *testing.T) {
+	cases := map[string]requestIDKey{
+		`1e1048576`:  "n:1e1048576",  // exactly at the bound — accepted
+		`1e-1048576`: "n:1e-1048576", // negative bound — accepted
+	}
+	for in, want := range cases {
+		key, err := newRequestIDKey(json.RawMessage(in))
+		if err != nil {
+			t.Errorf("%s: unexpected error: %v", in, err)
+			continue
+		}
+		if key != want {
+			t.Errorf("%s -> %q, want %q (boundary value must be accepted)", in, key, want)
+		}
+	}
+}
+
+// Negative fractional × negative exponent combinations exercise the
+// `mantExp = parsedExp - len(fracPart)` shift in the underspecified
+// quadrant. codex r7 NIT closure on PR #157. Each pair below denotes
+// the same mathematical value via different fracPart/expPart splits.
+func TestNewRequestIDKeyNegativeFractionalExponentShift(t *testing.T) {
+	groups := map[requestIDKey][]string{
+		// -1.5e-3 = -0.0015 = -15e-4 = -150e-5 = -1500e-6
+		"n:-15e-4": {`-1.5e-3`, `-15e-4`, `-150e-5`, `-1500e-6`, `-0.0015`},
+		// -0.001 = -1e-3 = -10e-4 = -100e-5
+		"n:-1e-3": {`-0.001`, `-1e-3`, `-10e-4`, `-100e-5`, `-1.0e-3`},
+		// 1.05e-2 = 0.0105 = 105e-4
+		"n:105e-4": {`1.05e-2`, `0.0105`, `105e-4`, `1.050e-2`},
+		// Post-shift exponent exceeds parsed bound (intentional —
+		// see maxCanonicalExponentMagnitude doc comment): the parsed
+		// `1048575` plus the trailing-zero strip of "10" yields a
+		// final exponent of 1048576. Bound is on PARSED only.
+		"n:1e1048576": {`10e1048575`, `100e1048574`, `1e1048576`},
+	}
+	for want, members := range groups {
+		for _, in := range members {
+			got, err := newRequestIDKey(json.RawMessage(in))
+			if err != nil {
+				t.Errorf("%s: %v", in, err)
+				continue
+			}
+			if got != want {
+				t.Errorf("%s -> %q, want %q", in, got, want)
+			}
+		}
+	}
+}
+
 // Zero with non-zero exponent magnitude — `0e5`, `-0e5`, `0.0e3`,
 // `-0.000e-5`, `0e10` all denote mathematical zero and MUST collapse
 // onto `n:0`. Otherwise a client sending `id: -0e5` and another sending

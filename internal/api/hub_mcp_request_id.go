@@ -79,6 +79,16 @@ import (
 // overflow on platforms where int is 32-bit, and reasonable JSON
 // numbers like `1e308` (max float64) still fit. A 7-digit exponent
 // like `1e9999999` is rejected as malformed rather than parsed.
+//
+// The bound is applied to the PARSED exponent only — not to the post-
+// shift mantExp emitted in the canonical form. After `mantExp -=
+// len(fracPart)` and the trailing-zero strip shift, the final emitted
+// exponent can exceed `maxCanonicalExponentMagnitude` by up to
+// `len(mantissa)`. That is intentional: the parsed bound prevents int
+// overflow inside the algorithm, while the post-shift value is
+// bounded by the input mantissa length and therefore stays linear in
+// the JSON number's byte length (no exponential blow-up of the output
+// canonical string). codex r7 NIT closure on PR #157.
 const maxCanonicalExponentMagnitude = 1 << 20
 
 // requestIDKey is the comparable form of a JSON-RPC id. NEVER store
