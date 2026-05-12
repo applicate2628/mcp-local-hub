@@ -184,7 +184,24 @@ func verifyWindowsDACLFromHandle(h windows.Handle) error {
 	// followed by AceCount ACE entries; AceCount is exposed via the
 	// x/sys ACL accessor.
 	count := windowsACLAceCount(dacl)
-	readMask := uint32(windows.FILE_GENERIC_READ | windows.GENERIC_READ)
+	// readMask narrows to the bits that actually expose file CONTENTS
+	// (codex bot r6 P1 closure — earlier mask `FILE_GENERIC_READ |
+	// GENERIC_READ` included `READ_CONTROL` + `SYNCHRONIZE` which are
+	// ALSO present in `FILE_GENERIC_WRITE` and other non-read grants.
+	// An ACE granting write-only rights to a non-allowlisted SID would
+	// have been classified as read-capable and triggered a false
+	// rejection of otherwise-acceptable managed-environment ACLs).
+	//
+	// The bits that grant "view the token bytes":
+	//   FILE_READ_DATA  (0x01) — read file contents
+	//   FILE_READ_EA    (0x08) — read extended attributes (we don't
+	//                            use EAs for tokens today, but defense-
+	//                            in-depth in case a future version
+	//                            stores secret metadata there)
+	// FILE_READ_ATTRIBUTES (0x80) is metadata only (size, timestamps);
+	// it appears in FILE_GENERIC_WRITE too, so excluding it from the
+	// read-mask avoids the v3.2 false-reject.
+	readMask := uint32(windows.FILE_READ_DATA | windows.FILE_READ_EA)
 	for i := uint32(0); i < count; i++ {
 		var ace *windows.ACCESS_ALLOWED_ACE
 		if err := windows.GetAce(dacl, i, &ace); err != nil {
