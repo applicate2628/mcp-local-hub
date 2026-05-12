@@ -125,19 +125,23 @@ func AggregateInitialize(ctx context.Context, sess *hubSession, reqID json.RawMe
 			subCtx, cancel := context.WithTimeout(ctx, PerDaemonInitTimeout)
 			defer cancel()
 			sid, err := postInitialize(subCtx, ref, protoVer)
-			// codex bot r4 P1 closure on PR #157: per MCP lifecycle,
-			// the client (hub) MUST send notifications/initialized
-			// after initialize succeeds. Strict daemons can reject or
-			// ignore subsequent tools/list / tools/call until they
-			// observe this notification. Best-effort: a failed
-			// notification doesn't roll the init back — the per-call
-			// HTTP error path will surface any downstream issue with
-			// a clear stage label. Use a fresh subCtx with the init
-			// timeout because the original subCtx is being torn down
-			// via defer cancel() at goroutine exit.
+			// codex bot r4 P1 closure: per MCP lifecycle, the client
+			// (hub) MUST send notifications/initialized after
+			// initialize succeeds. codex bot r5 P2 closure on PR
+			// #157: propagate the notification error into the init-
+			// result. Earlier "best-effort" swallow recorded the
+			// daemon in InitSuccesses even when the required
+			// notification failed, leaving the session half-
+			// initialized and reporting subsequent tools/list /
+			// tools/call failures at the wrong stage. Use a fresh
+			// subCtx with the init timeout because the original
+			// subCtx is being torn down via defer cancel() at
+			// goroutine exit.
 			if err == nil {
 				notifyCtx, notifyCancel := context.WithTimeout(ctx, PerDaemonInitTimeout)
-				_ = postInitialized(notifyCtx, ref, sid, protoVer)
+				if nerr := postInitialized(notifyCtx, ref, sid, protoVer); nerr != nil {
+					err = fmt.Errorf("notifications/initialized: %w", nerr)
+				}
 				notifyCancel()
 			}
 			results[i] = initResult{ref: ref, sessionID: sid, err: err}
@@ -816,6 +820,15 @@ func rewriteResponseID(body []byte, clientReqID json.RawMessage) ([]byte, error)
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(body, &m); err != nil {
 		return nil, err
+	}
+	// codex bot r5 P1 closure on PR #157: guard against null/non-object
+	// daemon body. json.Unmarshal of `null` into a map type succeeds
+	// but leaves the map nil; the subsequent `m["id"] = ...` would panic
+	// with "assignment to entry in nil map". A buggy or non-conformant
+	// daemon returning HTTP 200 + body=`null` would crash the request
+	// path instead of surfacing a controlled JSON-RPC error.
+	if m == nil {
+		return nil, fmt.Errorf("daemon response body is not a JSON object")
 	}
 	m["id"] = clientReqID
 	out, err := json.Marshal(m)

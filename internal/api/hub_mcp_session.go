@@ -434,12 +434,24 @@ func (s *HubSessionStore) sweepLoop() {
 
 // sweepOnce iterates every session and removes those that are both
 // idle (LastUsedAt before cutoff) AND have inFlightCount == 0. The
-// in-flight check is a lock-free atomic load; only sessions that
-// pass both checks get Deleted.
+// initial scan uses a lock-free atomic load (cheap fast-path skip
+// for in-flight sessions); the actual delete re-checks under
+// sess.inflightMu to prevent a racing InsertInFlight from sliding
+// in between the scan and the delete (codex bot r5 P1 closure on
+// PR #157 — mirrors the evictIdleLRULocked guard).
+//
+// Lock ordering: s.mu held throughout. sess.inflightMu acquired
+// briefly per-delete. InsertInFlight only takes sess.inflightMu (no
+// s.mu reach), so the reverse ordering can't form.
 func (s *HubSessionStore) sweepOnce() {
 	cutoff := s.now().Add(-s.opts.IdleTimeout)
 	s.mu.Lock()
-	ids := make([]string, 0, len(s.sessions))
+	defer s.mu.Unlock()
+	type sweepCandidate struct {
+		id   string
+		sess *hubSession
+	}
+	cands := make([]sweepCandidate, 0, len(s.sessions))
 	for id, sess := range s.sessions {
 		if sess.inFlightCount.Load() != 0 {
 			continue // fast path: in-flight work in progress
@@ -448,13 +460,18 @@ func (s *HubSessionStore) sweepOnce() {
 		lastUsed := sess.LastUsedAt
 		sess.mu.Unlock()
 		if lastUsed.Before(cutoff) {
-			ids = append(ids, id)
+			cands = append(cands, sweepCandidate{id: id, sess: sess})
 		}
 	}
-	for _, id := range ids {
-		s.deleteLocked(id)
+	for _, c := range cands {
+		// Re-validate under inflightMu: a racing InsertInFlight may
+		// have bumped the count between our initial scan and now.
+		c.sess.inflightMu.Lock()
+		if c.sess.inFlightCount.Load() == 0 {
+			s.deleteLocked(c.id)
+		}
+		c.sess.inflightMu.Unlock()
 	}
-	s.mu.Unlock()
 }
 
 // generateSessionID returns a 128-bit random hex string. Used as the

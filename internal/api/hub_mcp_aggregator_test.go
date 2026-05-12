@@ -857,3 +857,45 @@ func TestNameSpaceToolsPreservesNumericPrecision(t *testing.T) {
 		t.Errorf("name not namespaced: %s", out[0])
 	}
 }
+
+// TestAggregateInitializeFailsOnInitializedNotificationError pins the
+// codex bot r5 P2 closure: if notifications/initialized fails after
+// initialize succeeds, the daemon must be recorded as an init failure
+// (stage="initialize") so subsequent calls report at the right stage.
+func TestAggregateInitializeFailsOnInitializedNotificationError(t *testing.T) {
+	d1 := newStubDaemon(t, "d1-sid")
+	d1.onNotify = func(w http.ResponseWriter, r *http.Request, body []byte) {
+		// Simulate strict daemon that rejects the lifecycle notification.
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+	sess := sessionWithParticipants(d1)
+	if _, err := AggregateInitialize(context.Background(), sess, json.RawMessage(`1`)); err != nil {
+		t.Fatalf("AggregateInitialize: %v", err)
+	}
+	if len(sess.InitSuccesses) != 0 {
+		t.Errorf("daemon must NOT be in InitSuccesses when notification failed; got %+v", sess.InitSuccesses)
+	}
+	if len(sess.InitFailures) != 1 {
+		t.Fatalf("InitFailures=%d want 1: %+v", len(sess.InitFailures), sess.InitFailures)
+	}
+	if sess.InitFailures[0].Stage != "initialize" {
+		t.Errorf("Stage=%q want initialize", sess.InitFailures[0].Stage)
+	}
+	if !strings.Contains(sess.InitFailures[0].Err, "notifications/initialized") {
+		t.Errorf("error must mention notifications/initialized; got %q", sess.InitFailures[0].Err)
+	}
+}
+
+// TestRewriteResponseIDRejectsNullBody pins the codex bot r5 P1
+// closure: a daemon returning body=`null` (HTTP 200) must NOT panic
+// the request path. Earlier code would crash with "assignment to
+// entry in nil map".
+func TestRewriteResponseIDRejectsNullBody(t *testing.T) {
+	_, err := rewriteResponseID([]byte("null"), json.RawMessage(`"client-id"`))
+	if err == nil {
+		t.Fatalf("expected error on null body; got nil")
+	}
+	if !strings.Contains(err.Error(), "JSON object") {
+		t.Errorf("error must explain why null is rejected; got %v", err)
+	}
+}
