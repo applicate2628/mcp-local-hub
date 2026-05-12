@@ -67,6 +67,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 )
@@ -144,10 +145,22 @@ func newRequestIDKey(raw json.RawMessage) (requestIDKey, error) {
 	if err := dec.Decode(&t); err != nil {
 		return "", fmt.Errorf("invalid request: %w", err)
 	}
-	// dec.Decode consumes one token. If there's still data left in
-	// the input (e.g. `1 2` or `1.5.6`), it's malformed — reject.
-	if dec.More() {
-		return "", errors.New("invalid request: id contains trailing data")
+	// dec.Decode consumes one JSON value. We MUST verify there is
+	// nothing after it. codex bot r11 P2 closure on PR #157: do not
+	// rely on dec.More() — More returns true only when the next byte
+	// is a plausible value-start. For inputs like `1]` or `1}` the
+	// trailing byte is NOT a value-start, More returns false, and the
+	// malformed id slips through canonicalized as `n:1`. Different
+	// callers passing `1` vs `1]` would alias onto the same in-flight
+	// slot. Use a second Decode and demand io.EOF — any other outcome
+	// (a successful decode meaning a second value, OR a non-EOF
+	// error like "invalid character ']'") means leftover input.
+	var trailing any
+	if err := dec.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return "", errors.New("invalid request: id contains a second JSON value")
+		}
+		return "", fmt.Errorf("invalid request: id contains trailing data: %w", err)
 	}
 	num, ok := t.(json.Number)
 	if !ok {

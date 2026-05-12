@@ -382,6 +382,37 @@ func TestNewRequestIDKeyRejectsEmpty(t *testing.T) {
 	}
 }
 
+// Reject inputs with trailing tokens after a valid JSON value.
+// codex bot r11 P2 closure on PR #157: the prior `dec.More()` check
+// returned false for `1]` because `]` is not a JSON value-start, so
+// malformed inputs aliased onto valid ids (`1]` and `1` both → n:1)
+// and broke duplicate-in-flight detection. The fix issues a second
+// dec.Decode that MUST return io.EOF; anything else (success or
+// non-EOF error) is leftover input.
+//
+// `dec.More() == true` cases (`1 2`, `42  43`) are also covered for
+// completeness; they were the cases the prior implementation DID
+// catch.
+func TestNewRequestIDKeyRejectsTrailingTokens(t *testing.T) {
+	cases := []string{
+		`1]`,
+		`1}`,
+		`1,`,
+		`1[`,
+		`1{`,
+		`42)`,
+		`1 2`,    // dec.More() catches this
+		`42  43`, // dec.More() with whitespace
+		`"abc"]`, // string path (json.Unmarshal rejects natively)
+		`1.5x`,   // garbage after number
+	}
+	for _, in := range cases {
+		if _, err := newRequestIDKey(json.RawMessage(in)); err == nil {
+			t.Errorf("must reject trailing-data input %s", in)
+		}
+	}
+}
+
 // Reject malformed numbers — `1.`, `.5`, `1e`, `1e+`, hex, etc.
 // json grammar refuses these; canonicalizer surfaces a parse error.
 func TestNewRequestIDKeyRejectsMalformedNumber(t *testing.T) {
