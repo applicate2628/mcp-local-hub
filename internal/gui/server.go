@@ -581,13 +581,23 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+		// codex bot phase4 r3 P2 closure on PR #158: each shutdown
+		// phase gets its OWN 5s budget. The earlier code shared one
+		// shutdownCtx between ShutdownHubListener and s.srv.Shutdown;
+		// if a slow hub drain consumed most of the budget, the gui-
+		// server Shutdown would return "context deadline exceeded"
+		// even on a healthy gui server, turning a normal cancellation
+		// into an error and skipping graceful close under load.
 		// Drain hub listener BEFORE the gui-server so any racing
 		// internal-reload writes complete via the still-flockable
 		// state-dir.
-		ShutdownHubListener(shutdownCtx, s.hubMcpComp)
-		if err := s.srv.Shutdown(shutdownCtx); err != nil {
+		hubCtx, hubCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ShutdownHubListener(hubCtx, s.hubMcpComp)
+		hubCancel()
+
+		guiCtx, guiCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer guiCancel()
+		if err := s.srv.Shutdown(guiCtx); err != nil {
 			s.events.Close()
 			return fmt.Errorf("graceful shutdown: %w", err)
 		}
