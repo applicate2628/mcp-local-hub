@@ -78,6 +78,16 @@ type HubMcpBindResult struct {
 // startup (internal/gui/server.go) MUST pass the Server.Start ctx so
 // ctx cancellation tears down the goroutine promptly.
 func BindHubMcpListener(ctx context.Context, clients []string, validateManifests func() error) (*HubMcpBindResult, error) {
+	// codex bot phase4 r19 P2 closure on PR #158: normalize a nil
+	// ctx to context.Background() so the subsequent ctx.Err() checks
+	// between bind steps (r13) don't nil-deref. acquireHubMcpLockContext
+	// already handles nil via fallback to the blocking lock, but the
+	// post-lock cancellation checks would panic on a nil interface.
+	// Future CLI/test callers that pass nil get the legacy
+	// blocking-lock semantics.
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	lk, err := acquireHubMcpLockContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("acquire hub-mcp.lock: %w", err)

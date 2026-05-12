@@ -241,6 +241,16 @@ func (h *HubMcpHandler) handlePost(w http.ResponseWriter, r *http.Request, clien
 		writeJSONRPCErrorStatus(w, env.ID, http.StatusBadRequest, -32600, "invalid request: jsonrpc must be \"2.0\"", nil)
 		return
 	}
+	// codex bot phase4 r19 P2 closure on PR #158: explicit `id: null`
+	// is invalid under MCP §1.5 (id must be a non-null String or
+	// Number). Reject upfront with -32600 so the response echo doesn't
+	// produce a synthetic null-id envelope and the client sees the
+	// protocol-level error. Missing id (notification) is handled
+	// per-method below — notifications get HTTP 202 with no body.
+	if isJSONRPCNullID(env.ID) {
+		writeJSONRPCErrorStatus(w, json.RawMessage(`null`), http.StatusBadRequest, -32600, "invalid request: id must be non-null per MCP", nil)
+		return
+	}
 
 	// initialize is its own branch — Mcp-Session-Id MUST be absent
 	// and version validation runs at initialize-time (codex r7-bot-r2
@@ -700,23 +710,37 @@ func writeJSONRPCResult(w http.ResponseWriter, reqID json.RawMessage, result any
 	_, _ = w.Write(payload)
 }
 
-// isJSONRPCNotificationID returns true when reqID is absent or the
-// literal `null` token — both encode a JSON-RPC 2.0 notification per
-// §4.1 (server MUST NOT reply). An id of 0, "", or {} is a real id
-// and gets a response.
+// isJSONRPCNotificationID returns true ONLY when reqID is absent (the
+// "id" field is missing from the JSON envelope entirely). A request
+// MUST be treated as a notification — server MUST NOT reply.
 //
-// Notification semantics in JSON-RPC 2.0:
-//   - Absent "id" field: notification
-//   - "id": null         : notification (legacy, discouraged but accepted)
-//   - any other value    : request, response required
+// codex bot phase4 r19 P2 closure on PR #158: the pre-r19 variant
+// also returned true for the literal `null` token, treating
+// `"id": null` as a notification. That conflicts with MCP §1.5 which
+// requires id to be a String or Number (non-null) — see
+// newRequestIDKey in hub_mcp_request_id.go for the canonicalization
+// rule. Now explicit `id:null` is classified as a real request that
+// fails downstream validation with -32600 Invalid Request, surfacing
+// the client bug instead of silently swallowing the response.
+//
+// Classification:
+//   - len(reqID) == 0           : notification, no response (HTTP 202)
+//   - reqID == "null"           : invalid request (rejected upstream)
+//   - any other value           : real request, response required
 func isJSONRPCNotificationID(reqID json.RawMessage) bool {
+	return len(reqID) == 0
+}
+
+// isJSONRPCNullID returns true when the request id is the literal
+// JSON `null` token. MCP §1.5 requires id to be a non-null
+// String/Number; the handler rejects such envelopes with -32600
+// before reaching method dispatch. Helper extracted so the rule is
+// auditable alongside isJSONRPCNotificationID.
+func isJSONRPCNullID(reqID json.RawMessage) bool {
 	if len(reqID) == 0 {
-		return true
+		return false
 	}
-	// Trim whitespace around the raw token so encoders that pretty-
-	// print don't confuse us.
-	trimmed := bytes.TrimSpace(reqID)
-	return string(trimmed) == "null"
+	return string(bytes.TrimSpace(reqID)) == "null"
 }
 
 // writeJSONRPCErrorStatus emits a JSON-RPC error envelope with an
