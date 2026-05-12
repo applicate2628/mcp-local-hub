@@ -190,6 +190,14 @@ func TestResetHubPortClearsPortKeepsInstanceID(t *testing.T) {
 	if loaded.InstanceID != ep1.InstanceID {
 		t.Errorf("instance_id rotated by ResetHubPort: %q -> %q", ep1.InstanceID, loaded.InstanceID)
 	}
+	// codex bot r2 P2 closure: ResetHubPort must preserve StartedAt
+	// (port-only mutation). The CLI invocation does NOT start a new
+	// hub process; status readers + restart-detection logic key off
+	// StartedAt and would see a spurious "fresh hub" signal if reset
+	// touched the field.
+	if loaded.StartedAt != ep1.StartedAt {
+		t.Errorf("ResetHubPort rewrote StartedAt: %q -> %q", ep1.StartedAt, loaded.StartedAt)
+	}
 
 	// And the next Ensure with ephemeralPort=0 sees Port=0 (caller
 	// supplies the listener-assigned port via a subsequent call).

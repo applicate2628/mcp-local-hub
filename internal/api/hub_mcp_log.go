@@ -124,11 +124,29 @@ func LogHubMcpEvent(level, event string, fields map[string]any) error {
 // returned value still matches the underlying cause via the %w
 // wrapper, so callers can branch on os.ErrPermission / os.ErrNotExist
 // across the redacted surface.
+//
+// codex bot r2 P1 closure (PR #156): redact the underlying cause
+// too. Syscall wrappers like *os.PathError include the original
+// path in .Error(); without scrubbing the rendered cause text a
+// tokenized basename would leak into the final message even after
+// the explicit `path` arg was redacted. We use a custom wrapped
+// type so:
+//   - errors.Is / errors.As keep working against the original cause
+//   - .Error() returns the redacted rendered text
+type hubMcpRedactedError struct {
+	rendered string
+	cause    error
+}
+
+func (e *hubMcpRedactedError) Error() string { return e.rendered }
+func (e *hubMcpRedactedError) Unwrap() error { return e.cause }
+
 func wrapHubMcpFileError(op, path string, cause error) error {
 	if cause == nil {
 		return nil
 	}
-	return fmt.Errorf("hub-mcp %s %s: %w", op, RedactToken(path), cause)
+	rendered := fmt.Sprintf("hub-mcp %s %s: %s", op, RedactToken(path), RedactToken(cause.Error()))
+	return &hubMcpRedactedError{rendered: rendered, cause: cause}
 }
 
 // redactArgvForLog returns a copy of argv with each element passed

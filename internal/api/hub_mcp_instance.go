@@ -36,6 +36,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 )
 
@@ -172,6 +173,14 @@ func RotateHubInstanceID() (HubEndpoint, error) {
 	}
 	ep.InstanceID = fresh
 	ep.StartedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	// PID refresh on rotate (codex bot r2 P2 closure): rotation is
+	// typically invoked from the `mcphub hub-mcp regenerate-instance-id`
+	// CLI process, which has a DIFFERENT PID from the running hub
+	// daemon. Leaving the stale daemon PID (or zero on first-write
+	// rotation) in the endpoint file gives status readers incorrect
+	// ownership metadata. Set PID to the calling process so subsequent
+	// `mcphub hub-mcp status` reflects who-rotated-last.
+	ep.PID = os.Getpid()
 
 	payload, perr := json.Marshal(ep)
 	if perr != nil {
@@ -205,8 +214,14 @@ func ResetHubPort() error {
 		// run yet" if appropriate.
 		return err
 	}
+	// Port-only mutation (codex bot r2 P2 closure): do NOT rewrite
+	// StartedAt or PID. ResetHubPort runs from the `mcphub gui
+	// --reset-port` CLI; the hub process (if any) is unchanged, so
+	// the on-disk StartedAt should still reflect when the daemon
+	// actually started. Status readers + restart-detection logic that
+	// keys off StartedAt would otherwise see a spurious "fresh hub"
+	// signal every time an operator resets the port.
 	ep.Port = 0
-	ep.StartedAt = time.Now().UTC().Format(time.RFC3339Nano)
 
 	payload, perr := json.Marshal(ep)
 	if perr != nil {

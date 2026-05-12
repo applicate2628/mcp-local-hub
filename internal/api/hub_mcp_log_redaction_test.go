@@ -250,3 +250,35 @@ func TestLogHubMcpEventRotatesAt10MB(t *testing.T) {
 		t.Errorf("seed bytes survived rotation into active log: %s", active)
 	}
 }
+
+// TestWrapHubMcpFileErrorRedactsWrappedCause asserts the codex bot r2
+// P1 closure: wrapHubMcpFileError must apply RedactToken to the
+// underlying cause's rendered text, not just the explicit path arg.
+// Syscall errors like *os.PathError include the original path in
+// .Error(), so a tokenized basename would leak via the wrap without
+// this layer.
+func TestWrapHubMcpFileErrorRedactsWrappedCause(t *testing.T) {
+	token := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	// Simulate a *os.PathError whose path leaks the token via .Error().
+	leakyCause := &os.PathError{
+		Op:   "open",
+		Path: "/tmp/sensitive/" + token + ".json",
+		Err:  errors.New("permission denied"),
+	}
+	wrapped := wrapHubMcpFileError("load", "/tmp/sensitive/"+token+".json", leakyCause)
+	if wrapped == nil {
+		t.Fatal("expected non-nil wrapped error")
+	}
+	msg := wrapped.Error()
+	if strings.Contains(msg, token) {
+		t.Errorf("wrapped error leaked token via cause.Error(): %q", msg)
+	}
+	if !strings.Contains(msg, "<token>") {
+		t.Errorf("wrapped error missing <token> placeholder: %q", msg)
+	}
+	// And errors.Is must still walk to the underlying *os.PathError so
+	// callers can branch on os.ErrPermission etc.
+	if !errors.Is(wrapped, leakyCause) {
+		t.Errorf("errors.Is broken across redacted wrapper")
+	}
+}
