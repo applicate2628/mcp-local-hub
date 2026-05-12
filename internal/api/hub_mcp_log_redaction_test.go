@@ -167,6 +167,48 @@ func TestRedactionGoldenAcrossAllSurfaces(t *testing.T) {
 	}
 }
 
+// TestLogHubMcpEventEnvelopeOverridesFieldsCollision pins the
+// envelope-keys-win merge order: when a caller supplies `fields` with
+// a reserved envelope key ("ts", "level", "event"), the envelope value
+// is authoritative — the caller's collision value MUST NOT survive to
+// disk. This prevents a misbehaving emit site from accidentally (or
+// maliciously) rewriting the observability envelope.
+//
+// Spec contract: LogHubMcpEvent doc comment "Envelope keys ts, level,
+// event are reserved and overwrite any caller-supplied fields entries
+// of the same name."
+func TestLogHubMcpEventEnvelopeOverridesFieldsCollision(t *testing.T) {
+	dir := hubMcpStateTestHelper(t)
+
+	// Caller passes a colliding "level" field. Envelope-wins means the
+	// persisted line carries the envelope's "warn" level, NOT "userwanted".
+	if err := LogHubMcpEvent("warn", "collision-test", map[string]any{
+		"level": "userwanted",
+	}); err != nil {
+		t.Fatalf("LogHubMcpEvent: %v", err)
+	}
+
+	logPath := filepath.Join(dir, "hub-mcp.log")
+	logBytes, rerr := os.ReadFile(logPath)
+	if rerr != nil {
+		t.Fatalf("read hub-mcp.log: %v", rerr)
+	}
+
+	// The envelope's "warn" level MUST be in the persisted line.
+	if !bytes.Contains(logBytes, []byte(`"level":"warn"`)) {
+		t.Errorf("envelope level missing or overwritten: %s", logBytes)
+	}
+	// The caller-supplied collision value MUST NOT survive.
+	if bytes.Contains(logBytes, []byte(`"userwanted"`)) {
+		t.Errorf("caller collision value leaked past envelope merge: %s", logBytes)
+	}
+	// And the event name (also an envelope key) must reflect the
+	// envelope value, not anything the caller might have stuffed.
+	if !bytes.Contains(logBytes, []byte(`"event":"collision-test"`)) {
+		t.Errorf("envelope event missing: %s", logBytes)
+	}
+}
+
 // TestLogHubMcpEventRotatesAt10MB asserts the rotation contract: when
 // the active log is at-or-above 10 MB, the next append rotates to
 // `.log.1` before writing the new line. We pre-seed the log file at

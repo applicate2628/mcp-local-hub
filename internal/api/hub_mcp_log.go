@@ -89,17 +89,24 @@ var hubMcpLogAppendMu sync.Mutex
 // observability path, not a load-bearing data path. A returned error
 // is informational; callers do not branch on it (Phase 4 handlers
 // should not 500 because the log is full).
+//
+// Envelope keys "ts", "level", "event" are reserved and overwrite any
+// caller-supplied `fields` entries of the same name — the merge runs
+// FIRST so envelope assignment is authoritative. This guarantees an
+// observability envelope a misbehaving emit site cannot rewrite.
 func LogHubMcpEvent(level, event string, fields map[string]any) error {
 	if level == "" {
 		level = "info"
 	}
 	rec := make(map[string]any, len(fields)+3)
-	rec["ts"] = time.Now().UTC().Format(time.RFC3339Nano)
-	rec["level"] = level
-	rec["event"] = event
+	// Merge caller fields FIRST so the envelope assignments below
+	// remain authoritative on collision (see doc comment above).
 	for k, v := range fields {
 		rec[k] = v
 	}
+	rec["ts"] = time.Now().UTC().Format(time.RFC3339Nano)
+	rec["level"] = level
+	rec["event"] = event
 	raw, err := json.Marshal(rec)
 	if err != nil {
 		return fmt.Errorf("marshal hub-mcp event: %w", err)
@@ -226,5 +233,9 @@ func appendHubMcpLogLineUnlocked(path string, line []byte) error {
 	if _, err := f.Write(append(line, '\n')); err != nil {
 		return fmt.Errorf("write hub-mcp log %s: %w", path, err)
 	}
+	// Sync to match watchdog_log.go durability — avoids losing the last
+	// appended line on power-cut/crash mid-rotation. Best-effort: the
+	// log path is observability-only, so sync errors are swallowed.
+	_ = f.Sync()
 	return nil
 }
