@@ -33,6 +33,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -109,6 +110,32 @@ func readHubMcpStateFile(name string) ([]byte, error) {
 		return nil, fmt.Errorf("hub-mcp state read %s: %w", name, err)
 	}
 	return raw, nil
+}
+
+// isHubMcpStateMissingErr returns true if err indicates the state
+// file does not yet exist on disk. Routine startup paths (first call
+// to EnsureHubEndpoint, first call to EnsureHubTokens on a fresh
+// install) get a "not found" error from readHubMcpStateFile and treat
+// it as "generate fresh state"; every other read error must surface
+// to the operator (a corrupt or DACL-violating file is NOT silently
+// regenerated per spec §"Bind ordering" step 4).
+//
+// The check unwraps through the fmt.Errorf wrapping installed by
+// readHubMcpStateFile. POSIX bubbles up os.ErrNotExist via syscall;
+// Windows surfaces STATUS_OBJECT_NAME_NOT_FOUND /
+// STATUS_OBJECT_PATH_NOT_FOUND from the NT relative-open inside
+// VerifyHubMcpStateDACL, plus ERROR_FILE_NOT_FOUND /
+// ERROR_PATH_NOT_FOUND from os.ReadFile. errors.Is(err,
+// os.ErrNotExist) matches the latter; the NTStatus branch is handled
+// by isHubMcpStateMissingErrPlatform (defined per-GOOS).
+func isHubMcpStateMissingErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return true
+	}
+	return isHubMcpStateMissingErrPlatform(err)
 }
 
 // acquireHubMcpLock obtains an exclusive flock on
