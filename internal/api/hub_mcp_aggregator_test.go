@@ -866,15 +866,18 @@ func TestNameSpaceToolsPreservesNumericPrecision(t *testing.T) {
 		json.RawMessage(`{"name":"read","inputSchema":{"properties":{"limit":{"default":9007199254740993}}}}`),
 	}
 	ref := canonicalDaemonRef{Server: "srv1", Daemon: "claude-code", Port: 9101}
-	out, _ := nameSpaceTools(ref, tools)
+	out := nameSpaceTools(ref, tools)
 	if len(out) != 1 {
 		t.Fatalf("want 1 tool, got %d", len(out))
 	}
-	if !strings.Contains(string(out[0]), `9007199254740993`) {
-		t.Errorf("default value 9007199254740993 lost in namespace rewrite: %s", out[0])
+	if !strings.Contains(string(out[0].Body), `9007199254740993`) {
+		t.Errorf("default value 9007199254740993 lost in namespace rewrite: %s", out[0].Body)
 	}
-	if !strings.Contains(string(out[0]), `"name":"srv1__read"`) {
-		t.Errorf("name not namespaced: %s", out[0])
+	if !strings.Contains(string(out[0].Body), `"name":"srv1__read"`) {
+		t.Errorf("name not namespaced: %s", out[0].Body)
+	}
+	if out[0].Exposed != "srv1__read" {
+		t.Errorf("Exposed=%q want srv1__read", out[0].Exposed)
 	}
 }
 
@@ -1027,6 +1030,152 @@ func TestAggregateToolsListPreservesRouteMapOnAllFail(t *testing.T) {
 	}
 	if _, ok := (*after)["srv1__read"]; !ok {
 		t.Errorf("RouteMap lost srv1__read after all-failed list: %+v", *after)
+	}
+}
+
+// TestAggregateToolsListNamespaceCollision pins the codex bot r9 P2
+// closure on PR #157. When two daemons under the SAME server expose
+// the same raw tool name, the resulting exposed name
+// "<server>__<rawname>" collides in the route map. The pre-r9
+// behavior was a silent last-writer-wins overwrite — fan-out
+// completion order is non-deterministic, so tools/call would route
+// to different daemons on different runs.
+//
+// Expected post-r9 behavior:
+//   - Colliding tool is dropped from result.tools (clients don't see
+//     a tool they couldn't reliably call).
+//   - One stage="tools/list" partialFailure row per colliding daemon,
+//     err message naming every daemon that claimed the key. The
+//     daemon-list ordering is deterministic (alphabetic by
+//     server/daemon) so operator-facing diagnostics are stable.
+//   - Non-colliding tools from the SAME daemons still appear in the
+//     response (collision is per-tool, not per-daemon).
+//   - listSuccessCount still counts collided daemons as successes;
+//     the call returned cleanly even though the merge dropped some
+//     tools.
+func TestAggregateToolsListNamespaceCollision(t *testing.T) {
+	// Two daemons both claiming srv1: one exposes {read, write},
+	// the other exposes {read, format}. `srv1__read` collides;
+	// `srv1__write` and `srv1__format` are unique.
+	d1 := newStubDaemon(t, "d1-sid")
+	d1.onList = func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"read","description":"d1-read"},{"name":"write","description":"d1-write"}]}}`))
+	}
+	d2 := newStubDaemon(t, "d2-sid")
+	d2.onList = func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"read","description":"d2-read"},{"name":"format","description":"d2-format"}]}}`))
+	}
+
+	// Both daemons must report Server="srv1". sessionWithParticipants
+	// auto-assigns srv1, srv2, … by index, so we override d2's ref
+	// after construction by swapping in a session built manually.
+	sess := &hubSession{
+		ClientSessionID:  "client-sid-1",
+		Client:           "claude-code",
+		ProtocolVersion:  "2025-11-25",
+		InitSuccesses:    map[canonicalDaemonRef]string{},
+		InFlightRequests: map[requestIDKey]inflightEntry{},
+		InitAt:           time.Now(),
+		LastUsedAt:       time.Now(),
+		IntendedParticipants: []canonicalDaemonRef{
+			{Server: "srv1", Daemon: "daemon-a", Port: d1.port},
+			{Server: "srv1", Daemon: "daemon-b", Port: d2.port},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	if len(sess.InitSuccesses) != 2 {
+		t.Fatalf("want 2 init successes, got %d", len(sess.InitSuccesses))
+	}
+
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`))
+	if err != nil {
+		t.Fatalf("AggregateToolsList: %v", err)
+	}
+	var env struct {
+		Result struct {
+			Tools []json.RawMessage `json:"tools"`
+			Meta  struct {
+				Mcphub struct {
+					PartialFailures []DaemonFailure `json:"partialFailures"`
+				} `json:"mcphub"`
+			} `json:"_meta"`
+		} `json:"result"`
+	}
+	if uerr := json.Unmarshal(body, &env); uerr != nil {
+		t.Fatalf("parse response: %v body=%s", uerr, body)
+	}
+
+	// 1) result.tools must contain ONLY srv1__write + srv1__format.
+	//    srv1__read is dropped because it collided.
+	names := make(map[string]int)
+	for _, t := range env.Result.Tools {
+		var m struct {
+			Name string `json:"name"`
+		}
+		_ = json.Unmarshal(t, &m)
+		names[m.Name]++
+	}
+	if names["srv1__read"] != 0 {
+		t.Errorf("colliding tool srv1__read leaked into result.tools (count=%d)", names["srv1__read"])
+	}
+	if names["srv1__write"] != 1 || names["srv1__format"] != 1 {
+		t.Errorf("non-colliding tools missing: write=%d format=%d (want 1 each)",
+			names["srv1__write"], names["srv1__format"])
+	}
+
+	// 2) partialFailures must contain one row per colliding daemon.
+	//    Stage="tools/list"; Err names BOTH daemons.
+	collisionRows := 0
+	for _, f := range env.Result.Meta.Mcphub.PartialFailures {
+		if f.Stage != "tools/list" {
+			continue
+		}
+		if !strings.Contains(f.Err, "namespace collision") {
+			continue
+		}
+		collisionRows++
+		// The err message must reference both daemons regardless of
+		// which one this row is for — operator needs the full list
+		// to disambiguate.
+		if !strings.Contains(f.Err, "srv1/daemon-a") {
+			t.Errorf("collision err omits srv1/daemon-a: %q", f.Err)
+		}
+		if !strings.Contains(f.Err, "srv1/daemon-b") {
+			t.Errorf("collision err omits srv1/daemon-b: %q", f.Err)
+		}
+		if !strings.Contains(f.Err, `"srv1__read"`) {
+			t.Errorf("collision err omits the colliding key: %q", f.Err)
+		}
+	}
+	if collisionRows != 2 {
+		t.Errorf("want 2 collision rows (one per daemon), got %d in partialFailures: %+v",
+			collisionRows, env.Result.Meta.Mcphub.PartialFailures)
+	}
+
+	// 3) RouteMap must NOT contain the colliding key — a subsequent
+	//    tools/call against srv1__read would otherwise resolve to
+	//    whichever daemon happened to land in the map last.
+	rmPtr := sess.RouteMap.Load()
+	if rmPtr == nil {
+		t.Fatalf("RouteMap unset after successful (non-empty) tools/list")
+	}
+	if _, ok := (*rmPtr)["srv1__read"]; ok {
+		t.Errorf("RouteMap retains colliding key srv1__read")
+	}
+	if _, ok := (*rmPtr)["srv1__write"]; !ok {
+		t.Errorf("RouteMap missing non-colliding key srv1__write")
+	}
+	if _, ok := (*rmPtr)["srv1__format"]; !ok {
+		t.Errorf("RouteMap missing non-colliding key srv1__format")
 	}
 }
 

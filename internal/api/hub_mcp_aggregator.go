@@ -61,6 +61,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -184,15 +186,25 @@ func AggregateInitialize(ctx context.Context, sess *hubSession, reqID json.RawMe
 	return body, nil
 }
 
+// namespacedTool is one daemon's contribution to the merged tools/list
+// response. Body is the original JSON blob with `name` rewritten to
+// the exposed `<server>__<rawname>` form; Exposed and Ref let the
+// merge step (assembleToolsListResponse) collision-detect by exact
+// key match without re-parsing Body. codex bot r9 P2 closure on PR
+// #157.
+type namespacedTool struct {
+	Exposed string
+	Body    json.RawMessage
+	Ref     canonicalToolRef
+}
+
 // listResult is the per-daemon outcome of a tools/list fan-out call.
-// On err == nil, tools + toolMap carry the namespaced contribution to
-// the merged response. On err != nil, the row turns into a
-// stage="tools/list" partialFailure.
+// On err == nil, tools carries the daemon's namespaced contribution.
+// On err != nil, the row turns into a stage="tools/list" partialFailure.
 type listResult struct {
-	ref     canonicalDaemonRef
-	tools   []json.RawMessage
-	toolMap map[string]canonicalToolRef
-	err     error
+	ref   canonicalDaemonRef
+	tools []namespacedTool
+	err   error
 }
 
 // AggregateToolsList fans out tools/list to every daemon in
@@ -248,7 +260,7 @@ func fanOutToolsList(ctx context.Context, successes map[canonicalDaemonRef]strin
 			tools, err := postToolsList(subCtx, ref, sid, protoVer)
 			r := listResult{ref: ref, err: err}
 			if err == nil {
-				r.tools, r.toolMap = nameSpaceTools(ref, tools)
+				r.tools = nameSpaceTools(ref, tools)
 			}
 			resultsMu.Lock()
 			results = append(results, r)
@@ -268,7 +280,72 @@ func fanOutToolsList(ctx context.Context, successes map[canonicalDaemonRef]strin
 // zero list successes is treated as all-failed — the caller cannot
 // discover any tools, so we surface the failures via the error
 // envelope rather than returning result.tools=[].
+//
+// Namespace-collision handling: when two daemons under the same
+// server expose the same raw tool name, the resulting exposed name
+// "<server>__<rawname>" claims the same canonical route. Silent
+// last-writer-wins routing produces non-deterministic tools/call
+// targets across runs (codex bot r9 P2 closure on PR #157). Detect
+// such collisions in a first pass, drop the colliding tool from
+// BOTH the merged response AND the route map, and emit one
+// stage="tools/list" partialFailure row per colliding daemon. The
+// failure message names every daemon that claimed the key so
+// operators can resolve the duplicate at the manifest layer.
 func assembleToolsListResponse(reqID json.RawMessage, results []listResult, initFailures []DaemonFailure, sess *hubSession) ([]byte, error) {
+	// Pass 1 — for each successful daemon, record which daemons
+	// produced each exposed key. Keys claimed by more than one daemon
+	// become collisions.
+	keyDaemons := make(map[string][]canonicalDaemonRef)
+	for _, r := range results {
+		if r.err != nil {
+			continue
+		}
+		for _, t := range r.tools {
+			keyDaemons[t.Exposed] = append(keyDaemons[t.Exposed], r.ref)
+		}
+	}
+	collisions := make(map[string]bool)
+	collisionFailures := make([]DaemonFailure, 0)
+	collisionKeys := make([]string, 0)
+	for k, refs := range keyDaemons {
+		if len(refs) > 1 {
+			collisions[k] = true
+			collisionKeys = append(collisionKeys, k)
+		}
+	}
+	// Sort collision keys + per-key daemon lists for deterministic
+	// emission order — assembleToolsListResponse is the ONLY surface
+	// that puts these in the response, so output stability matters
+	// for test golden files and for operator-facing diagnostics.
+	sort.Strings(collisionKeys)
+	for _, k := range collisionKeys {
+		refs := append([]canonicalDaemonRef{}, keyDaemons[k]...)
+		sort.Slice(refs, func(i, j int) bool {
+			if refs[i].Server != refs[j].Server {
+				return refs[i].Server < refs[j].Server
+			}
+			return refs[i].Daemon < refs[j].Daemon
+		})
+		daemonNames := make([]string, 0, len(refs))
+		for _, ref := range refs {
+			daemonNames = append(daemonNames, ref.Server+"/"+ref.Daemon)
+		}
+		joined := strings.Join(daemonNames, ", ")
+		for _, ref := range refs {
+			collisionFailures = append(collisionFailures, DaemonFailure{
+				Server: ref.Server,
+				Daemon: ref.Daemon,
+				Stage:  "tools/list",
+				Err:    fmt.Sprintf("namespace collision on exposed tool name %q claimed by daemons: %s", k, joined),
+			})
+		}
+	}
+
+	// Pass 2 — assemble merged tools + routes, dropping collided
+	// keys entirely. A daemon's tools/list call counts as a success
+	// even when every one of its tools is collided; the call itself
+	// returned cleanly, and dropping the daemon from listSuccessCount
+	// would mis-trigger the all-failed -32000 envelope path.
 	mergedTools := make([]json.RawMessage, 0)
 	mergedRoutes := make(map[string]canonicalToolRef)
 	listFailures := make([]DaemonFailure, 0)
@@ -284,11 +361,15 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 			continue
 		}
 		listSuccessCount++
-		mergedTools = append(mergedTools, r.tools...)
-		for k, v := range r.toolMap {
-			mergedRoutes[k] = v
+		for _, t := range r.tools {
+			if collisions[t.Exposed] {
+				continue
+			}
+			mergedTools = append(mergedTools, t.Body)
+			mergedRoutes[t.Exposed] = t.Ref
 		}
 	}
+	listFailures = append(listFailures, collisionFailures...)
 
 	// Publish the route map to the session BEFORE returning so a
 	// concurrent tools/call sees it. codex bot r6 P1 closure on PR
@@ -895,8 +976,12 @@ func rewriteResponseID(body []byte, clientReqID json.RawMessage) ([]byte, error)
 }
 
 // nameSpaceTools rewrites each tool's `name` field to
-// "<server>__<rawname>" and builds the per-daemon contribution to the
-// session's route map.
+// "<server>__<rawname>" and returns one namespacedTool per accepted
+// input. The caller (assembleToolsListResponse) does collision
+// detection across daemons via the Exposed field — silent overwrites
+// in a map would route tools/call non-deterministically when two
+// daemons under the same server expose the same raw tool name (codex
+// bot r9 P2 closure on PR #157).
 //
 // codex bot r4 P2 closure on PR #157: rewrite ONLY the name field;
 // every other field passes through as raw JSON bytes. Earlier
@@ -905,9 +990,8 @@ func rewriteResponseID(body []byte, clientReqID json.RawMessage) ([]byte, error)
 // inputSchema) through float64, silently rounding integers > 2^53
 // in tool metadata. Clients would receive corrupted definitions
 // even though only `name` should change.
-func nameSpaceTools(ref canonicalDaemonRef, tools []json.RawMessage) ([]json.RawMessage, map[string]canonicalToolRef) {
-	out := make([]json.RawMessage, 0, len(tools))
-	rm := make(map[string]canonicalToolRef, len(tools))
+func nameSpaceTools(ref canonicalDaemonRef, tools []json.RawMessage) []namespacedTool {
+	out := make([]namespacedTool, 0, len(tools))
 	for _, t := range tools {
 		var m map[string]json.RawMessage
 		if err := json.Unmarshal(t, &m); err != nil {
@@ -932,15 +1016,18 @@ func nameSpaceTools(ref canonicalDaemonRef, tools []json.RawMessage) ([]json.Raw
 		if err != nil {
 			continue
 		}
-		out = append(out, nb)
-		rm[exposed] = canonicalToolRef{
-			Server:  ref.Server,
-			Daemon:  ref.Daemon,
-			Port:    ref.Port,
-			RawName: rawName,
-		}
+		out = append(out, namespacedTool{
+			Exposed: exposed,
+			Body:    nb,
+			Ref: canonicalToolRef{
+				Server:  ref.Server,
+				Daemon:  ref.Daemon,
+				Port:    ref.Port,
+				RawName: rawName,
+			},
+		})
 	}
-	return out, rm
+	return out
 }
 
 // failuresOrEmpty returns failures if non-nil, otherwise an empty
