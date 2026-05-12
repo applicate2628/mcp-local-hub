@@ -47,6 +47,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -328,10 +329,21 @@ func (h *HubMcpHandler) handlePost(w http.ResponseWriter, r *http.Request, clien
 		w.WriteHeader(http.StatusAccepted)
 		return
 	case "ping":
-		// Hub-local echo: empty result.
+		// Hub-local echo: empty result. writeJSONRPCResult handles
+		// the notification-no-response case (r17 P2 closure) so a
+		// ping notification gets HTTP 202 with empty body.
 		writeJSONRPCResult(w, env.ID, map[string]any{})
 		return
 	case "tools/list":
+		// codex bot phase4 r18 P2 closure on PR #158: tools/list as
+		// a JSON-RPC notification (no id) MUST NOT receive a response
+		// body. The aggregator would otherwise emit an envelope with
+		// id:null, which strict MCP clients treat as a protocol error
+		// (server responded to a notification). Same r17 P2 pattern.
+		if isJSONRPCNotificationID(env.ID) {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
 		respBody, aerr := AggregateToolsList(r.Context(), sess, env.ID)
 		if aerr != nil {
 			writeJSONRPCErrorStatus(w, env.ID, http.StatusInternalServerError, -32603, "internal error: "+aerr.Error(), nil)
@@ -340,6 +352,12 @@ func (h *HubMcpHandler) handlePost(w http.ResponseWriter, r *http.Request, clien
 		writeRawJSON(w, respBody)
 		return
 	case "tools/call":
+		// codex bot phase4 r18 P2 closure on PR #158: same
+		// notification-no-response rule for tools/call.
+		if isJSONRPCNotificationID(env.ID) {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
 		respBody, aerr := AggregateToolsCall(r.Context(), sess, env.ID, env.Params)
 		if aerr != nil {
 			writeJSONRPCErrorStatus(w, env.ID, http.StatusInternalServerError, -32603, "internal error: "+aerr.Error(), nil)
@@ -348,6 +366,14 @@ func (h *HubMcpHandler) handlePost(w http.ResponseWriter, r *http.Request, clien
 		writeRawJSON(w, respBody)
 		return
 	default:
+		// codex bot phase4 r18 P2 closure (extension on PR #158):
+		// unknown methods arriving as notifications also stay silent
+		// per JSON-RPC 2.0 §4.1 (server MUST NOT respond to a
+		// notification, even with an error envelope).
+		if isJSONRPCNotificationID(env.ID) {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
 		writeJSONRPCErrorStatus(w, env.ID, http.StatusOK, -32601, "Method not found: "+env.Method, nil)
 		return
 	}
@@ -513,13 +539,39 @@ func (h *HubMcpHandler) handleDelete(w http.ResponseWriter, r *http.Request, cli
 	// bestEffortDeleteDaemonSession to short-circuit on its own
 	// timeout-check without firing the DELETE — daemon-side sessions
 	// on the FAST daemons would leak too. Per-iteration ctx makes
-	// each participant's best-effort attempt independent: slow
-	// participants are skipped after their own 5 s, but fast ones
-	// still complete their DELETE.
-	for ref, dsid := range daemonSessions {
-		fanCtx, fanCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = bestEffortDeleteDaemonSession(fanCtx, ref, dsid)
-		fanCancel()
+	// each participant's best-effort attempt independent.
+	//
+	// codex bot phase4 r18 P2 closure on PR #158: parallelize the
+	// fan-out. Sequential per-daemon (r12) bounded each daemon's
+	// share to 5 s but still made total DELETE latency = N × 5 s
+	// in the worst case (every daemon unreachable). With 4 daemons
+	// that's 20 s before the client gets its 204; clients would
+	// time out and retry while the hub-side session was already
+	// deleted. Goroutine-per-daemon under a single overall 5 s
+	// deadline: total latency stays at ~5 s regardless of N, and a
+	// single slow daemon doesn't serialize the others.
+	if len(daemonSessions) > 0 {
+		var wg sync.WaitGroup
+		for ref, dsid := range daemonSessions {
+			wg.Add(1)
+			go func(ref canonicalDaemonRef, dsid string) {
+				defer wg.Done()
+				fanCtx, fanCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer fanCancel()
+				_ = bestEffortDeleteDaemonSession(fanCtx, ref, dsid)
+			}(ref, dsid)
+		}
+		// Bound the total wait at 5 s + small slack so the HTTP
+		// response cannot block indefinitely even if a daemon DELETE
+		// goroutine is wedged in a non-cancellable syscall. The
+		// individual goroutines outlive the wait if needed —
+		// best-effort fan-out is fire-and-forget on the slow path.
+		waitDone := make(chan struct{})
+		go func() { wg.Wait(); close(waitDone) }()
+		select {
+		case <-waitDone:
+		case <-time.After(5500 * time.Millisecond):
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
