@@ -379,7 +379,8 @@ func TestHandlerGETWithoutAuthReturns401(t *testing.T) {
 
 // TestHandlerDELETETerminatesSessionReturns204 — F-G4 fix: DELETE
 // /clients/{id}/mcp with a known Mcp-Session-Id returns 204 + removes
-// the session from the store.
+// the session from the store. codex bot phase4 r1 P2 / codex deep-sec
+// P1 closure on PR #158: MCP-Protocol-Version header is mandatory.
 func TestHandlerDELETETerminatesSessionReturns204(t *testing.T) {
 	h := newTestHandler(t)
 	sess, err := h.sessions.Create("claude-code", "2025-11-25", nil)
@@ -388,6 +389,7 @@ func TestHandlerDELETETerminatesSessionReturns204(t *testing.T) {
 	}
 	req := authedRequest(t, http.MethodDelete, "/clients/claude-code/mcp", nil)
 	req.Header.Set("Mcp-Session-Id", sess.ClientSessionID)
+	req.Header.Set("MCP-Protocol-Version", "2025-11-25")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 	if w.Code != http.StatusNoContent {
@@ -395,6 +397,46 @@ func TestHandlerDELETETerminatesSessionReturns204(t *testing.T) {
 	}
 	if _, ok := h.sessions.Get(sess.ClientSessionID); ok {
 		t.Errorf("DELETE: session still present in store after termination")
+	}
+}
+
+// TestHandlerDELETERequiresProtocolVersionHeader — codex bot phase4
+// r1 P2 / codex deep-sec P1 closure on PR #158. DELETE must enforce
+// gate 7 (MCP-Protocol-Version) just like every other non-initialize
+// method. Missing header → 400 empty body. Mismatched version → 400
+// with JSON-RPC error envelope referencing null id.
+func TestHandlerDELETERequiresProtocolVersionHeader(t *testing.T) {
+	h := newTestHandler(t)
+	sess, err := h.sessions.Create("claude-code", "2025-11-25", nil)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	// Case 1: missing header → 400, session preserved (we did not
+	// even reach the terminate logic).
+	req := authedRequest(t, http.MethodDelete, "/clients/claude-code/mcp", nil)
+	req.Header.Set("Mcp-Session-Id", sess.ClientSessionID)
+	// Intentionally omit MCP-Protocol-Version.
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("missing header DELETE: got %d, want 400", w.Code)
+	}
+	if _, ok := h.sessions.Get(sess.ClientSessionID); !ok {
+		t.Errorf("missing-header DELETE removed the session; gate 7 should reject before terminating")
+	}
+
+	// Case 2: mismatched version → 400 with JSON-RPC error body,
+	// session still preserved.
+	req2 := authedRequest(t, http.MethodDelete, "/clients/claude-code/mcp", nil)
+	req2.Header.Set("Mcp-Session-Id", sess.ClientSessionID)
+	req2.Header.Set("MCP-Protocol-Version", "2024-11-05") // session is 2025-11-25
+	w2 := httptest.NewRecorder()
+	h.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusBadRequest {
+		t.Errorf("mismatch DELETE: got %d, want 400", w2.Code)
+	}
+	if _, ok := h.sessions.Get(sess.ClientSessionID); !ok {
+		t.Errorf("mismatch DELETE removed the session; gate 7 should reject before terminating")
 	}
 }
 
@@ -410,6 +452,7 @@ func TestHandlerDELETEIdempotentOnSecondCall(t *testing.T) {
 	// First DELETE succeeds.
 	req1 := authedRequest(t, http.MethodDelete, "/clients/claude-code/mcp", nil)
 	req1.Header.Set("Mcp-Session-Id", sess.ClientSessionID)
+	req1.Header.Set("MCP-Protocol-Version", "2025-11-25")
 	w1 := httptest.NewRecorder()
 	h.ServeHTTP(w1, req1)
 	if w1.Code != http.StatusNoContent {
@@ -418,6 +461,7 @@ func TestHandlerDELETEIdempotentOnSecondCall(t *testing.T) {
 	// Second DELETE returns 404 (session no longer present).
 	req2 := authedRequest(t, http.MethodDelete, "/clients/claude-code/mcp", nil)
 	req2.Header.Set("Mcp-Session-Id", sess.ClientSessionID)
+	req2.Header.Set("MCP-Protocol-Version", "2025-11-25")
 	w2 := httptest.NewRecorder()
 	h.ServeHTTP(w2, req2)
 	if w2.Code != http.StatusNotFound {

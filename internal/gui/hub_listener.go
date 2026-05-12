@@ -41,7 +41,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -110,69 +109,28 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 		return nil, nil
 	}
 
-	// Step 3 — load / generate per-client tokens. EnsureHubTokens
-	// holds hub-mcp.lock internally. We pass the full supported set
-	// so any client added since the last hub start gets a token
-	// pre-generated on this start. Phase 5's install reconciler later
-	// publishes the tokens into the matching client configs.
-	if _, err := api.EnsureHubTokens(clients.SupportedClientNames()); err != nil {
-		return nil, fmt.Errorf("hub-mcp: ensure tokens: %w", err)
+	// Steps 3-7 — lock-atomic bind transaction. codex deep-sec P1
+	// closure on PR #158: the pre-r2 implementation called
+	// EnsureHubTokens (locked), LoadHubEndpoint (no lock),
+	// validateManifests (no lock), bind (no lock), EnsureHubEndpoint
+	// (locked) — leaving four lock-free windows in between. Two
+	// concurrent gui-server starts could both clear the same
+	// persisted port=0 record, both bind distinct OS-assigned
+	// ports, and race the endpoint persist. BindHubMcpListener
+	// holds hub-mcp.lock across the entire sequence so concurrent
+	// starts serialize. SO_EXCLUSIVEADDRUSE (Windows) + ordinary
+	// loopback semantics (POSIX) make the second caller's bind fail
+	// fast against the first caller's already-persisted port.
+	res, berr := api.BindHubMcpListener(
+		clients.SupportedClientNames(),
+		func() error { return validateParticipatingManifestsForHubBind(a) },
+	)
+	if berr != nil {
+		return nil, fmt.Errorf("hub-mcp: %w", berr)
 	}
-
-	// Step 4 — load existing endpoint, capture port + instance_id.
-	// Missing file is acceptable (first-start path); other errors
-	// surface (DACL / parse / partial-write recovery).
-	ep, err := api.LoadHubEndpoint()
-	if err != nil && !os.IsNotExist(err) && !isMissingHubEndpoint(err) {
-		return nil, fmt.Errorf("hub-mcp: load endpoint: %w", err)
-	}
-
-	// Step 5 — validate participating manifests in strict mode. If
-	// no manifests are loaded the hub can still bind (operator may
-	// be configuring the hub from scratch); a STRICT violation in
-	// any one manifest refuses the bind entirely (spec §"Pre-gate").
-	if verr := validateParticipatingManifestsForHubBind(a); verr != nil {
-		return nil, fmt.Errorf("hub-mcp bind refused: %w", verr)
-	}
-
-	// Step 6 — bind. Pass port=0 to let the OS pick if the persisted
-	// port was zero (first start OR `mcphub gui --reset-port`).
-	bindAddr := fmt.Sprintf("127.0.0.1:%d", ep.Port)
-	ln, lnErr := api.NewListenerWithSOExclusive(bindAddr)
-	if lnErr != nil {
-		_ = api.LogHubMcpEvent("error", "hub-bind-failed", map[string]any{
-			"port": ep.Port,
-			"err":  lnErr.Error(),
-		})
-		// Spec §"Pre-bind handling": port-in-use on the persisted port
-		// is indistinguishable from a credential-harvest attack. The
-		// operator-facing recovery is the rotation chain documented
-		// in §"Bind ordering". One log line; the caller surfaces the
-		// error to the rest of gui-server startup.
-		_ = api.LogHubMcpEvent("warn", "credential-rotation-required", map[string]any{
-			"reason": "pre-bind window — credentials may have leaked to pre-binding process",
-		})
-		return nil, fmt.Errorf("hub-mcp: bind %s: %w", bindAddr, lnErr)
-	}
-
-	// Step 7 — write endpoint.json with the OS-assigned port.
-	port := ln.Addr().(*net.TCPAddr).Port
-	if _, eerr := api.EnsureHubEndpoint(port, os.Getpid()); eerr != nil {
-		// Step-7 failure with the listener already open: defer-close
-		// so no traffic is accepted without a published endpoint
-		// file. This is the spec §"Bind ordering" rollback rule.
-		_ = ln.Close()
-		return nil, fmt.Errorf("hub-mcp: write endpoint.json: %w", eerr)
-	}
-
-	// Re-load the endpoint record so the handler's SetEndpoint call
-	// carries the post-write instance_id (which EnsureHubEndpoint may
-	// have generated on first start).
-	ep, err = api.LoadHubEndpoint()
-	if err != nil {
-		_ = ln.Close()
-		return nil, fmt.Errorf("hub-mcp: reload endpoint: %w", err)
-	}
+	ln := res.Listener
+	ep := res.Endpoint
+	port := ep.Port
 
 	// Step 9 — set up mux + serve. Session store is per-listener so
 	// a future "stop hub mode" path can tear down sessions cleanly.
@@ -253,14 +211,19 @@ func validateParticipatingManifestsForHubBind(a *api.API) error {
 		if !entry.ManifestExists {
 			continue
 		}
-		yaml, _, gerr := a.ManifestGetWithHash(entry.Name)
+		// codex deep-sec P2 closure on PR #158: read with ManifestGet
+		// (embedded-first) so manifests baked into the binary AND
+		// disk overrides are validated against the same strict gate.
+		// ManifestGetWithHash was disk-only — an embedded-only
+		// manifest hit os.ErrNotExist and got silently skipped,
+		// bypassing the bind pre-gate for the shipped manifest set.
+		yaml, gerr := a.ManifestGet(entry.Name)
 		if gerr != nil {
 			// codex bot phase4 r1 P1 closure on PR #158: only the
 			// scan-window race (manifest deleted between scan and read)
 			// is benign. Permission errors, schema errors, or any
 			// other read failure MUST fail the bind so the strict
-			// pre-gate isn't silently bypassed. The race signature is
-			// fs.ErrNotExist via errors.Is — anything else propagates.
+			// pre-gate isn't silently bypassed.
 			if errors.Is(gerr, os.ErrNotExist) {
 				continue
 			}

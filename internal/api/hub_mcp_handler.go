@@ -414,6 +414,13 @@ func (h *HubMcpHandler) handleInitialize(w http.ResponseWriter, r *http.Request,
 // on an unknown one.
 //
 // Spec §"Client-origin lifecycle methods" — F-G4 fix.
+//
+// codex bot phase4 r1 P1 closure on PR #158: DELETE MUST enforce
+// gate 7 (MCP-Protocol-Version) just like every other non-initialize
+// method. The pre-r2 path validated token / instance / session /
+// client binding but skipped the version header, so a valid session
+// holder could terminate a session without negotiating the matching
+// version. Same shape as handlePost lines 273-286.
 func (h *HubMcpHandler) handleDelete(w http.ResponseWriter, r *http.Request, clientID string) {
 	sid := r.Header.Get("Mcp-Session-Id")
 	if sid == "" {
@@ -429,6 +436,19 @@ func (h *HubMcpHandler) handleDelete(w http.ResponseWriter, r *http.Request, cli
 	}
 	if sess.Client != clientID {
 		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	// Gate 7: MCP-Protocol-Version. Same contract as POST: missing
+	// → 400 empty body; mismatched → 400 with a JSON-RPC error
+	// envelope referencing the (null) id since DELETE has no request
+	// body to echo.
+	pv := r.Header.Get("MCP-Protocol-Version")
+	if pv == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	if !hubSupportedVersions[pv] || pv != sess.ProtocolVersion {
+		writeJSONRPCErrorStatus(w, json.RawMessage(`null`), http.StatusBadRequest, -32600, "protocol-version mismatch", nil)
 		return
 	}
 

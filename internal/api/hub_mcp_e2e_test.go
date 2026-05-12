@@ -125,6 +125,10 @@ func TestHubMcpE2EAuthGateAcceptsValidRequest(t *testing.T) {
 	delReq.Header.Set("X-Mcphub-Hub-Token", clientTok)
 	delReq.Header.Set("X-Mcphub-Instance-Id", ep.InstanceID)
 	delReq.Header.Set("Mcp-Session-Id", sid)
+	// codex bot phase4 r1 P2 / codex deep-sec P1 closure on PR #158:
+	// DELETE enforces gate 7 just like POST. The session's negotiated
+	// protocol version is required.
+	delReq.Header.Set("MCP-Protocol-Version", "2025-11-25")
 	delResp, err := http.DefaultClient.Do(delReq)
 	if err != nil {
 		t.Fatalf("DELETE: %v", err)
