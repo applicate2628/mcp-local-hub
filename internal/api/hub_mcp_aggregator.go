@@ -593,15 +593,29 @@ func dispatchToolsCall(ctx context.Context, sess *hubSession, clientReqID, param
 	return rewriteResponseID(body, clientReqID)
 }
 
-// ForwardCancellation looks up clientReqID in sess.InFlightRequests,
-// forwards notifications/cancelled to the daemon with the daemon's
-// request id, and removes the in-flight row.
+// ForwardCancellation looks up clientReqID in sess.InFlightRequests
+// and forwards notifications/cancelled to the daemon with the daemon's
+// request id. The in-flight row is NOT removed here.
 //
-// Best-effort: if the daemon is unreachable, the in-flight row is
-// still removed (the per-call wall-clock cap will clean it up
-// regardless). Stdio-host daemons do NOT remap inbound requestId
-// (per spec known limitation); the cancel may be dropped by the
-// daemon, no harm done.
+// codex bot r15 P2 closure on PR #157: MCP cancellation is best-
+// effort — the daemon may still finish the original call later. The
+// original tools/call goroutine in dispatchToolsCall owns the
+// in-flight row's lifecycle via its own `defer sess.RemoveInFlight`,
+// and PerCallWallClockCap guarantees the goroutine returns within
+// bounded time. Removing the row here would create a window in
+// which a second tools/call reusing the same client request id
+// would PASS InsertInFlight's duplicate-detection (the row is gone)
+// even though the first call is still mid-flight on the daemon.
+// Response correlation would then route both daemon responses to the
+// same client id, and any subsequent cancellation would target the
+// wrong daemon request. Hold the row until the original goroutine
+// cleans up.
+//
+// Stdio-host daemons do NOT remap inbound requestId (per spec known
+// limitation); the cancel may be dropped by the daemon — no harm
+// done. If the daemon is unreachable, postCancellation's error is
+// swallowed; the in-flight row still gets cleaned up by the
+// original call's wall-clock cap.
 func ForwardCancellation(ctx context.Context, sess *hubSession, clientReqID json.RawMessage) {
 	key, err := newRequestIDKey(clientReqID)
 	if err != nil {
@@ -614,7 +628,6 @@ func ForwardCancellation(ctx context.Context, sess *hubSession, clientReqID json
 	if !ok {
 		return // already removed or never existed
 	}
-	defer sess.RemoveInFlight(key)
 
 	subCtx, cancel := context.WithTimeout(ctx, PerDaemonInitTimeout)
 	defer cancel()

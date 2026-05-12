@@ -624,12 +624,28 @@ func TestAggregateInitializeConcurrencyBound(t *testing.T) {
 	}
 }
 
-// ForwardCancellation: insert an in-flight entry, then invoke
-// ForwardCancellation; the entry is removed AND the daemon receives a
-// notifications/cancelled envelope carrying the daemon's request id
-// in params.requestId. Cleanup #4 strengthens this from "entry
-// removed" only to also asserting the daemon-visible body.
-func TestForwardCancellationRemovesInFlight(t *testing.T) {
+// TestForwardCancellationKeepsInFlightUntilCompletion pins codex
+// bot r15 P2 closure on PR #157.
+//
+// MCP cancellation is best-effort. The daemon may still finish the
+// original call later, so the original tools/call goroutine in
+// dispatchToolsCall owns the in-flight row's lifecycle and removes
+// it via its own `defer sess.RemoveInFlight` when the call
+// completes. ForwardCancellation MUST NOT delete the row early —
+// doing so would let a second tools/call with the same client
+// request id slip past InsertInFlight's duplicate detection and
+// cause ambiguous response correlation.
+//
+// Expected behavior:
+//  1. ForwardCancellation sends notifications/cancelled to the
+//     daemon with the daemon-generated request id.
+//  2. The in-flight row stays until the original dispatch goroutine
+//     runs its defer.
+//  3. A second InsertInFlight with the same key returns false
+//     (duplicate-detection still works during the cancellation race).
+//  4. Daemon-visible body still carries the daemon-side request id
+//     (`"hub-7"`), not the client id (`99`).
+func TestForwardCancellationKeepsInFlightUntilCompletion(t *testing.T) {
 	d1 := newStubDaemon(t, "d1-sid")
 	var notifyMu sync.Mutex
 	var notifyBodies [][]byte
@@ -644,25 +660,43 @@ func TestForwardCancellationRemovesInFlight(t *testing.T) {
 
 	clientReqID := json.RawMessage(`99`)
 	key, _ := newRequestIDKey(clientReqID)
-	sess.InsertInFlight(key, inflightEntry{
+	originalEntry := inflightEntry{
 		DaemonRef:       sess.IntendedParticipants[0],
 		DaemonSessionID: "d1-sid",
 		DaemonRequestID: json.RawMessage(`"hub-7"`),
 		StartedAt:       time.Now(),
-	})
-	if sess.InFlightCount() != 1 {
-		t.Fatalf("inFlight=%d want 1", sess.InFlightCount())
 	}
+	if !sess.InsertInFlight(key, originalEntry) {
+		t.Fatalf("setup: InsertInFlight returned false on empty session")
+	}
+	if sess.InFlightCount() != 1 {
+		t.Fatalf("setup inFlight=%d want 1", sess.InFlightCount())
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	ForwardCancellation(ctx, sess, clientReqID)
-	if sess.InFlightCount() != 0 {
-		t.Errorf("inFlight=%d after cancel want 0", sess.InFlightCount())
+
+	// 1) In-flight row MUST still be present. The original
+	//    dispatchToolsCall goroutine owns removal.
+	if sess.InFlightCount() != 1 {
+		t.Errorf("inFlight=%d after cancel want 1 (lifecycle owned by dispatch goroutine)", sess.InFlightCount())
 	}
 
-	// Daemon must have received exactly one notifications/cancelled
-	// envelope whose params.requestId matches the daemon-side id we
-	// stored at InsertInFlight time (NOT the client-side id 99).
+	// 2) Duplicate-detection invariant: a second InsertInFlight with
+	//    the same key MUST return false. The cancellation race must
+	//    not open a window for duplicate slots.
+	if sess.InsertInFlight(key, inflightEntry{
+		DaemonRef:       sess.IntendedParticipants[0],
+		DaemonSessionID: "d1-sid",
+		DaemonRequestID: json.RawMessage(`"hub-8"`),
+		StartedAt:       time.Now(),
+	}) {
+		t.Errorf("InsertInFlight accepted duplicate during cancellation race — duplicate detection broken")
+	}
+
+	// 3) Daemon must have received exactly one
+	//    notifications/cancelled envelope carrying the daemon-side id.
 	if d1.notifyCount.Load() != 1 {
 		t.Fatalf("daemon notifyCount=%d want 1", d1.notifyCount.Load())
 	}
@@ -692,6 +726,14 @@ func TestForwardCancellationRemovesInFlight(t *testing.T) {
 	// request id.
 	if string(env.Params.RequestID) != `"hub-7"` {
 		t.Errorf("notify params.requestId=%s want \"hub-7\"", string(env.Params.RequestID))
+	}
+
+	// 4) Simulate dispatch-goroutine completion: explicit RemoveInFlight.
+	//    Confirms the row IS removable after ForwardCancellation, so
+	//    the change doesn't leak entries forever.
+	sess.RemoveInFlight(key)
+	if sess.InFlightCount() != 0 {
+		t.Errorf("inFlight=%d after dispatch completion want 0", sess.InFlightCount())
 	}
 }
 
