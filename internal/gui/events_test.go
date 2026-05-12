@@ -114,6 +114,31 @@ func TestBroadcaster_DisableGUIEventLog_SkipsPersist(t *testing.T) {
 	}
 }
 
+// TestBroadcaster_Close_HonorsDrainTimeout guards Codex P2 on PR
+// #150 round 5 line 557: AppendGUIEventLog uses blocking flock with
+// no timeout, so a stalled persist could block shutdown indefinitely.
+// Close() must return within ~closeDrainTimeout + slop even when the
+// drain goroutine is stuck. The happy-path Publish + Close case
+// returns in milliseconds — anything close to closeDrainTimeout
+// would indicate a regression in the bounded-wait branch.
+func TestBroadcaster_Close_HonorsDrainTimeout(t *testing.T) {
+	root := t.TempDir()
+	restore := api.SetDaemonStateRootForTest(root)
+	t.Cleanup(restore)
+	a := api.NewAPI()
+	b := NewBroadcaster()
+	b.SetAPI(a)
+	// Trigger the lazy spawn by publishing once.
+	b.Publish(Event{Type: "daemon-state", Body: map[string]any{"i": 0}})
+	start := time.Now()
+	b.Close()
+	elapsed := time.Since(start)
+	// closeDrainTimeout (3s) + slop. Normal happy path returns in ms.
+	if elapsed > 4*time.Second {
+		t.Errorf("Close() took %v, want <4s (closeDrainTimeout + slop)", elapsed)
+	}
+}
+
 // TestBroadcaster_Close_NeverPublished_DoesNotHang guards Codex P2 on
 // PR #150 round 4 line 101: with lazy drain spawn, Close() must
 // terminate cleanly when no drain goroutine ever ran. Without the

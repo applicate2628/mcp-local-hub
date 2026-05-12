@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"mcp-local-hub/internal/api"
 )
@@ -131,20 +132,32 @@ func (b *Broadcaster) SetAPI(a *api.API) {
 	b.api = a
 }
 
+// closeDrainTimeout caps how long Close() will wait for the persist
+// drain goroutine to finish. Codex P2 on PR #150 round 5 line 557:
+// AppendGUIEventLog uses a blocking flock.Lock() with no timeout, so
+// a stalled filesystem or contended lock could block shutdown
+// indefinitely. The 3s cap lets shutdown honor the gui server's 5s
+// graceful-shutdown budget — losing the in-flight persist write is
+// preferable to hanging the whole process.
+const closeDrainTimeout = 3 * time.Second
+
 // Close stops the drain goroutine and blocks until any in-flight or
-// queued persist calls finish. Idempotent.
+// queued persist calls finish (or until closeDrainTimeout elapses).
+// Idempotent.
 //
-// Codex P1 on PR #150 line 227: a concurrent Publish (poller / HTTP
-// handler still emitting during teardown) racing with close(persistCh)
-// would panic on send-after-close. Fix: set b.closed=true and
-// close(persistCh) atomically under b.mu, so Publish's check + send
-// happens entirely before OR entirely after the close — never
-// interleaved.
+// Codex P1 on PR #150 line 227: a concurrent Publish racing with
+// close(persistCh) would panic on send-after-close. Fix: set
+// b.closed=true and close(persistCh) atomically under b.mu, so
+// Publish's check + send happens entirely before OR entirely after
+// the close — never interleaved.
 //
-// Codex P2 on PR #150 round 4 line 101: with lazy drain spawn,
-// Close() must also close persistDoneCh manually when no drain ever
-// ran (otherwise <-persistDoneCh hangs forever). Both branches keep
-// the API contract that Close is safe to call zero-or-once-or-many.
+// Codex P2 on PR #150 round 4 line 101: with lazy drain spawn, Close()
+// must also close persistDoneCh manually when no drain ever ran
+// (otherwise the wait below would hang forever).
+//
+// Codex P2 on PR #150 round 5 line 557: cap the wait so a stalled
+// flock acquire in AppendGUIEventLog cannot block shutdown past the
+// gui server's 5s graceful-shutdown budget.
 func (b *Broadcaster) Close() {
 	b.closeOnce.Do(func() {
 		b.mu.Lock()
@@ -158,7 +171,17 @@ func (b *Broadcaster) Close() {
 		}
 		b.mu.Unlock()
 	})
-	<-b.persistDoneCh
+	select {
+	case <-b.persistDoneCh:
+		// drain exited cleanly within the budget
+	case <-time.After(closeDrainTimeout):
+		// drain stalled (likely flock contention or slow disk).
+		// Abandon the wait — drain is a daemon-style goroutine and
+		// will eventually exit when the OS releases its lock; in
+		// the worst case it leaks past process exit, but shutdown
+		// won't hang. Any unflushed entries are lost — best-effort
+		// persist semantics already documented in Publish.
+	}
 }
 
 func (b *Broadcaster) drainPersist() {
