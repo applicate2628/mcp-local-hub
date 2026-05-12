@@ -33,13 +33,22 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/gofrs/flock"
 )
+
+// hubMcpLockRetryDelay is the poll interval acquireHubMcpLockContext
+// passes to flock.TryLockContext. Matches the daemon-intent reader's
+// retry granularity (internal/api/daemon_intent.go) — short enough to
+// react to ctx cancellation within ~10 ms, long enough not to spin on
+// a busy disk.
+const hubMcpLockRetryDelay = 10 * time.Millisecond
 
 // hubMcpLockFileLeaf names the flock file serializing every state-
 // mutating path. One leaf shared by token/endpoint/control writes so
@@ -147,6 +156,13 @@ func isHubMcpStateMissingErr(err error) bool {
 // Returns the *flock.Flock so callers can release explicitly. The
 // flock file itself is created on-demand by gofrs/flock; no separate
 // initialization step is required.
+//
+// This is the blocking variant — appropriate for short CLI flows
+// (token rotate, install) that genuinely need to wait on a sibling
+// writer. Long-lived process paths (gui-server startup / shutdown)
+// MUST use acquireHubMcpLockContext so ctx cancellation can unblock
+// a stuck acquisition. See codex bot phase4 r10 P1 closure on
+// PR #158 for the contention-vs-shutdown analysis.
 func acquireHubMcpLock() (*flock.Flock, error) {
 	dir, err := DaemonStateDir()
 	if err != nil {
@@ -156,6 +172,54 @@ func acquireHubMcpLock() (*flock.Flock, error) {
 	lk := flock.New(lockPath)
 	if err := lk.Lock(); err != nil {
 		return nil, fmt.Errorf("hub-mcp flock: %w", err)
+	}
+	return lk, nil
+}
+
+// acquireHubMcpLockContext is the context-aware variant of
+// acquireHubMcpLock. Returns ctx.Err() (wrapped) as soon as ctx is
+// canceled or its deadline passes, even if a sibling holder of
+// hub-mcp.lock has not released yet. The retry cadence is fixed at
+// hubMcpLockRetryDelay (10 ms) so observed cancellation latency is
+// bounded by ~10 ms regardless of how long the sibling holder takes.
+//
+// Used by gui-server startup (BindHubMcpListener) and shutdown
+// (InternalReloadHandler.Shutdown) so the gui-server's shutdown
+// budget actually applies even when another process is sitting on
+// the flock — without this, a held lock would freeze gui-server
+// teardown indefinitely (codex bot phase4 r10 P1 closure on PR #158).
+//
+// Mirrors the daemon_intent.TryReadDaemonIntent pattern used by the
+// tray aggregator: short retry, context-bounded total wait, distinct
+// wrapping of ctx-deadline vs. non-timeout flock errors so callers
+// can branch on errors.Is(err, context.DeadlineExceeded) /
+// context.Canceled if needed.
+func acquireHubMcpLockContext(ctx context.Context) (*flock.Flock, error) {
+	if ctx == nil {
+		return acquireHubMcpLock()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("hub-mcp flock: %w", err)
+	}
+	dir, err := DaemonStateDir()
+	if err != nil {
+		return nil, err
+	}
+	lockPath := filepath.Join(dir, hubMcpLockFileLeaf)
+	lk := flock.New(lockPath)
+	locked, lockErr := lk.TryLockContext(ctx, hubMcpLockRetryDelay)
+	if lockErr != nil {
+		return nil, fmt.Errorf("hub-mcp flock: %w", lockErr)
+	}
+	if !locked {
+		// flock.TryLockContext returned (false, nil) is not documented
+		// in practice (ctx cancellation surfaces via lockErr) but stay
+		// defensive: report it as a context error so callers do not
+		// proceed thinking they hold the lock.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("hub-mcp flock: %w", ctxErr)
+		}
+		return nil, fmt.Errorf("hub-mcp flock: unavailable (TryLockContext returned false)")
 	}
 	return lk, nil
 }

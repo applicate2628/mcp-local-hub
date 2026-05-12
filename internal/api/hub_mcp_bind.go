@@ -25,6 +25,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -68,8 +69,16 @@ type HubMcpBindResult struct {
 // the second caller fails fast rather than silently sharing the
 // port. POSIX equivalent: only one process binds at a time per
 // (addr, port).
-func BindHubMcpListener(clients []string, validateManifests func() error) (*HubMcpBindResult, error) {
-	lk, err := acquireHubMcpLock()
+//
+// ctx (codex bot phase4 r10 P1 closure on PR #158): the lock is
+// acquired via acquireHubMcpLockContext so a sibling process holding
+// hub-mcp.lock cannot freeze gui-server startup past the caller's
+// shutdown budget. Callers from short CLI paths that genuinely want
+// to wait can pass context.Background(); callers from gui-server
+// startup (internal/gui/server.go) MUST pass the Server.Start ctx so
+// ctx cancellation tears down the goroutine promptly.
+func BindHubMcpListener(ctx context.Context, clients []string, validateManifests func() error) (*HubMcpBindResult, error) {
+	lk, err := acquireHubMcpLockContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("acquire hub-mcp.lock: %w", err)
 	}

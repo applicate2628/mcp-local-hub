@@ -39,6 +39,7 @@
 package api
 
 import (
+	"context"
 	"crypto/subtle"
 	"fmt"
 	"net/http"
@@ -206,13 +207,27 @@ func (h *InternalReloadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 // hub-listener teardown branch when ctx is canceled. The on-process
 // control token in h.controlTok also dies with the process; even if
 // the file removal fails, the in-memory token is gone.
-func (h *InternalReloadHandler) Shutdown() error {
+//
+// codex bot phase4 r10 P1 closure on PR #158: lock acquisition is now
+// bounded by ctx (acquireHubMcpLockContext). A sibling process
+// holding hub-mcp.lock cannot freeze gui-server teardown past the
+// caller's 5s budget — when ctx times out, the lock acquisition
+// returns context.DeadlineExceeded and the in-memory controlTok has
+// already been cleared. The on-disk hub-mcp-control.token may
+// remain, but the next hub start regenerates it under flock so a
+// stale file is harmless beyond the rotation-warning telemetry
+// surface. Pass context.Background() if cancellation is not needed
+// (test sites).
+func (h *InternalReloadHandler) Shutdown(ctx context.Context) error {
 	// Drop the in-memory reference first so any racing late ServeHTTP
-	// gets a 401 (controlTok.Load() returns nil → mismatch).
+	// gets a 401 (controlTok.Load() returns nil → mismatch). Done
+	// BEFORE the lock attempt so the in-memory effect is unconditional
+	// — even if the flock acquisition times out, the live process
+	// stops accepting reloads with the old token.
 	var empty string
 	h.controlTok.Store(&empty)
 
-	lk, err := acquireHubMcpLock()
+	lk, err := acquireHubMcpLockContext(ctx)
 	if err != nil {
 		return err
 	}

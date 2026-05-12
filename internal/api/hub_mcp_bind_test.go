@@ -12,6 +12,7 @@
 package api
 
 import (
+	"context"
 	"net"
 	"sync"
 	"testing"
@@ -22,7 +23,7 @@ import (
 func TestBindHubMcpListenerSucceedsOnFirstStart(t *testing.T) {
 	hubMcpStateTestHelper(t)
 
-	res, err := BindHubMcpListener([]string{"claude-code"}, nil)
+	res, err := BindHubMcpListener(context.Background(), []string{"claude-code"}, nil)
 	if err != nil {
 		t.Fatalf("BindHubMcpListener: %v", err)
 	}
@@ -86,7 +87,7 @@ func TestBindHubMcpListenerConcurrentFirstStartSerializesOnLock(t *testing.T) {
 	for range racers {
 		go func() {
 			defer wg.Done()
-			res, err := BindHubMcpListener([]string{"claude-code"}, nil)
+			res, err := BindHubMcpListener(context.Background(), []string{"claude-code"}, nil)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -148,7 +149,7 @@ func TestBindHubMcpListenerValidateManifestFailureClosesNothing(t *testing.T) {
 	hubMcpStateTestHelper(t)
 
 	wantErr := "manifest-validation-error-marker"
-	_, err := BindHubMcpListener([]string{"claude-code"}, func() error {
+	_, err := BindHubMcpListener(context.Background(), []string{"claude-code"}, func() error {
 		return errMarker(wantErr)
 	})
 	if err == nil {

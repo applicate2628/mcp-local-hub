@@ -109,6 +109,16 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 		return nil, nil
 	}
 
+	// codex bot phase4 r10 P1 closure on PR #158: short-circuit if
+	// ctx is already canceled BEFORE we touch hub-mcp.lock. The pre-r10
+	// code would still try to acquire the lock (blocking flock) even
+	// though the caller (Server.Start) already gave up — the goroutine
+	// could come back later, bind a listener, and store it in
+	// hubMcpComp AFTER Server.Start returned. Fail fast instead.
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("hub-mcp: %w", err)
+	}
+
 	// Steps 3-7 — lock-atomic bind transaction. codex deep-sec P1
 	// closure on PR #158: the pre-r2 implementation called
 	// EnsureHubTokens (locked), LoadHubEndpoint (no lock),
@@ -121,7 +131,16 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 	// starts serialize. SO_EXCLUSIVEADDRUSE (Windows) + ordinary
 	// loopback semantics (POSIX) make the second caller's bind fail
 	// fast against the first caller's already-persisted port.
+	//
+	// codex bot phase4 r10 P1 closure on PR #158: ctx is threaded
+	// into BindHubMcpListener so the lock acquisition itself is
+	// bounded — under contention with a sibling CLI holding
+	// hub-mcp.lock, ctx.Done() unwinds the bind transaction within
+	// ~10 ms (acquireHubMcpLockContext retry cadence). Without this,
+	// the goroutine would block on flock indefinitely past Start's
+	// shutdown budget.
 	res, berr := api.BindHubMcpListener(
+		ctx,
 		clients.SupportedClientNames(),
 		func() error { return validateParticipatingManifestsForHubBind(a) },
 	)
@@ -240,7 +259,19 @@ func ShutdownHubListener(parentCtx context.Context, c *HubListenerComponents) {
 		c.store.Close()
 	}
 	if c.reload != nil {
-		_ = c.reload.Shutdown()
+		// codex bot phase4 r10 P1 closure on PR #158: pass shutCtx
+		// (the 5s shutdown budget) so the reload-token flock
+		// acquisition cannot block past that budget. A sibling
+		// process holding hub-mcp.lock surfaces as
+		// context.DeadlineExceeded here; the in-memory control token
+		// is already cleared, so leaving the on-disk file behind is
+		// harmless — the next hub start regenerates it under flock.
+		if err := c.reload.Shutdown(shutCtx); err != nil {
+			_ = api.LogHubMcpEvent("warn", "hub-control-token-cleanup-incomplete", map[string]any{
+				"port": c.port,
+				"err":  err.Error(),
+			})
+		}
 	}
 }
 

@@ -583,11 +583,25 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 	// to settle at shutdown time so a successful bind doesn't leak
 	// its listener; beyond that the process-exit flock release
 	// unblocks the stuck acquireHubMcpLock anyway.
+	//
+	// codex bot phase4 r10 P1 closure on PR #158: hubInitCtx is a
+	// derived cancel context, NOT the parent ctx, so the shutdown
+	// path can issue an explicit hubInitCancel() to unwind a stuck
+	// goroutine BEFORE the 2s wait elapses. startHubMcpListener now
+	// honors ctx — its lock acquisition uses
+	// acquireHubMcpLockContext, so hubInitCancel() unblocks the
+	// flock acquisition within ~10 ms. Even the errCh-shutdown path
+	// (gui-server listener died unexpectedly) needs to cancel the
+	// goroutine so the goroutine does NOT later store a live
+	// listener into s.hubMcpComp after Start has already returned —
+	// the explicit cancel + defer below covers both shutdown paths.
 	hubEnabled := readHubEndpointGateFromSettings()
+	hubInitCtx, hubInitCancel := context.WithCancel(ctx)
+	defer hubInitCancel()
 	hubInitDone := make(chan struct{})
 	go func() {
 		defer close(hubInitDone)
-		hubComp, hubErr := startHubMcpListener(ctx, hubEnabled, s.api)
+		hubComp, hubErr := startHubMcpListener(hubInitCtx, hubEnabled, s.api)
 		if hubErr != nil {
 			// codex bot phase4 r1 P2 closure on PR #158: surface
 			// non-bind hub failures (token gen/persist, endpoint
@@ -604,12 +618,14 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 
 	select {
 	case <-ctx.Done():
-		// Wait up to 2s for the hub init goroutine to settle so a
-		// successful bind doesn't leak its listener (its
-		// hubMcpComp is set right before hubInitDone closes).
-		// Beyond 2s, abandon: the hub goroutine is presumably
-		// blocked on the hub-mcp flock and will release on
-		// process exit.
+		// codex bot phase4 r10 P1 closure on PR #158: cancel hub init
+		// BEFORE the 2s wait so a flock-stuck goroutine unwinds via
+		// context.Canceled within ~10 ms (the
+		// acquireHubMcpLockContext retry cadence). The wait then
+		// serves only to give a goroutine in late-stage bind enough
+		// time to publish its listener for the subsequent
+		// ShutdownHubListener call.
+		hubInitCancel()
 		select {
 		case <-hubInitDone:
 		case <-time.After(2 * time.Second):
@@ -644,6 +660,14 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 	case err := <-errCh:
 		// gui-server listener died; wait briefly for hub init to
 		// settle so we capture its components, then drain.
+		//
+		// codex bot phase4 r10 P1 closure on PR #158: cancel hub init
+		// here too. The defer hubInitCancel above guarantees
+		// eventual cancellation, but an explicit call ensures the
+		// goroutine unwinds DURING the 2s wait window (not after),
+		// avoiding the race where the goroutine stores a live
+		// listener into s.hubMcpComp after Start has returned.
+		hubInitCancel()
 		select {
 		case <-hubInitDone:
 		case <-time.After(2 * time.Second):

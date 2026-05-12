@@ -12,6 +12,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -347,14 +348,14 @@ func TestInternalReloadShutdownRemovesFile(t *testing.T) {
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("hub-mcp-control.token missing post-construction: %v", err)
 	}
-	if err := h.Shutdown(); err != nil {
+	if err := h.Shutdown(context.Background()); err != nil {
 		t.Fatalf("Shutdown: %v", err)
 	}
 	if _, err := os.Stat(path); err == nil {
 		t.Errorf("Shutdown did not remove hub-mcp-control.token")
 	}
 	// Idempotent.
-	if err := h.Shutdown(); err != nil {
+	if err := h.Shutdown(context.Background()); err != nil {
 		t.Errorf("second Shutdown: %v", err)
 	}
 }
@@ -368,7 +369,7 @@ func TestInternalReloadShutdownClearsInMemoryToken(t *testing.T) {
 	if tok == "" {
 		t.Fatal("test setup: control token empty before Shutdown")
 	}
-	if err := h.Shutdown(); err != nil {
+	if err := h.Shutdown(context.Background()); err != nil {
 		t.Fatalf("Shutdown: %v", err)
 	}
 	// Late POST with the captured token: 401 (mismatch against empty).
