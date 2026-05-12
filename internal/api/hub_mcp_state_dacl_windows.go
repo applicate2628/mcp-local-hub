@@ -37,6 +37,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"unsafe"
@@ -62,13 +63,24 @@ const (
 )
 
 func verifyHubMcpStateDACLImpl(path string) error {
-	pathW, err := windows.UTF16PtrFromString(path)
+	// Open + verify parent FIRST, then open the file relative to the
+	// parent dir handle. This binds the parent-DACL gate to the same
+	// directory object the file is reached through and eliminates the
+	// "swap parent between file-open and parent-open" TOCTOU window
+	// (codex bot r8 P1 closure — earlier sequence opened the file via
+	// path, then re-opened the parent via `filepath.Dir(path)` as a
+	// fresh path lookup, which could resolve to a different directory
+	// object than the one containing the file).
+	parentDir := filepath.Dir(path)
+	basename := filepath.Base(path)
+
+	parentW, err := windows.UTF16PtrFromString(parentDir)
 	if err != nil {
-		return fmt.Errorf("utf16 %q: %w", path, err)
+		return fmt.Errorf("utf16 parent %q: %w", parentDir, err)
 	}
-	h, err := windows.CreateFile(
-		pathW,
-		windows.READ_CONTROL|windows.SYNCHRONIZE,
+	parentHandle, err := windows.CreateFile(
+		parentW,
+		windows.FILE_LIST_DIRECTORY|windows.READ_CONTROL|windows.SYNCHRONIZE,
 		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
 		nil,
 		windows.OPEN_EXISTING,
@@ -76,6 +88,41 @@ func verifyHubMcpStateDACLImpl(path string) error {
 		0,
 	)
 	if err != nil {
+		return fmt.Errorf("open parent %s: %w", parentDir, err)
+	}
+	defer windows.CloseHandle(parentHandle)
+
+	// Verify parent DACL via handle (allowlist gate).
+	if err := verifyWindowsDACLFromHandle(parentHandle); err != nil {
+		return fmt.Errorf("parent %s not single-user safe: %w", parentDir, err)
+	}
+
+	// Open the file RELATIVE to the parent handle via NT API so the
+	// open resolves through the verified parent inode, not a fresh
+	// path walk. ntOpenRelative is the existing helper from
+	// secure_write_windows.go; it adds SYNCHRONIZE + FILE_OPEN
+	// (OPEN_EXISTING semantic) AND FILE_NON_DIRECTORY_FILE internally.
+	// We need FILE_READ_ATTRIBUTES so GetFileInformationByHandle can
+	// probe the file-type flags below, plus READ_CONTROL so
+	// verifyWindowsDACLFromHandle can read the DACL.
+	h, err := ntOpenRelative(parentHandle, basename, windows.READ_CONTROL|windows.FILE_READ_ATTRIBUTES)
+	if err != nil {
+		// FILE_NON_DIRECTORY_FILE inside ntOpenRelative makes NT
+		// fail the open with STATUS_FILE_IS_A_DIRECTORY (0xC00000BA)
+		// when the target is a directory. Map that to our portable
+		// ErrIrregularFile sentinel so callers can `errors.Is` it
+		// uniformly across the redundant FILE_ATTRIBUTE_DIRECTORY
+		// check below (which now serves as defense-in-depth in case
+		// some future Windows version stops enforcing
+		// FILE_NON_DIRECTORY_FILE at create time).
+		if ns, ok := err.(windows.NTStatus); ok && ns == 0xC00000BA {
+			return ErrIrregularFile
+		}
+		// Errno wrapper variant — Windows sometimes maps the NTSTATUS
+		// to ERROR_DIRECTORY (267) at the Win32 layer.
+		if errors.Is(err, windows.ERROR_DIRECTORY) {
+			return ErrIrregularFile
+		}
 		return fmt.Errorf("open %s: %w", path, err)
 	}
 	defer windows.CloseHandle(h)
@@ -88,30 +135,14 @@ func verifyHubMcpStateDACLImpl(path string) error {
 	if fi.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 		return ErrIrregularFile
 	}
-	// Directory rejection (codex bot r2 P2 closure): FILE_FLAG_BACKUP_SEMANTICS
-	// is required to open the parent dir's handle later, but it ALSO
-	// permits the open of the path itself to succeed when path is a
-	// directory. A directory substitution at a state-file path would
-	// otherwise pass the DACL gate (an attacker who swapped
-	// hub-mcp-tokens.json for a same-named directory would silently
-	// satisfy the verifier). Reject FILE_ATTRIBUTE_DIRECTORY explicitly
-	// — the contract is "verify a state FILE", not "verify a state
-	// object of any type."
+	// Directory rejection (codex bot r2 P2 closure): see codex r2.
 	if fi.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY != 0 {
 		return ErrIrregularFile
 	}
 	if err := verifyWindowsDACLFromHandle(h); err != nil {
 		return err
 	}
-
-	// Spec lines 277-281 require ALSO verifying the parent dir's DACL.
-	// A state file whose parent is broadened externally (Group Policy,
-	// MDM) leaks the directory listing to every domain user even when
-	// the file's own DACL is tight. The POSIX leg performs the
-	// equivalent check via verifyPosixParentDirFromFd in
-	// secure_write_posix.go's open-time gate; this mirrors that on
-	// the load-time read path.
-	return verifyWindowsParentDACL(filepath.Dir(path))
+	return nil
 }
 
 // verifyWindowsParentDACL opens parentDir with FILE_LIST_DIRECTORY +
@@ -201,24 +232,38 @@ func verifyWindowsDACLFromHandle(h windows.Handle) error {
 	// followed by AceCount ACE entries; AceCount is exposed via the
 	// x/sys ACL accessor.
 	count := windowsACLAceCount(dacl)
-	// readMask narrows to the bits that actually expose file CONTENTS
-	// (codex bot r6 P1 closure — earlier mask `FILE_GENERIC_READ |
-	// GENERIC_READ` included `READ_CONTROL` + `SYNCHRONIZE` which are
-	// ALSO present in `FILE_GENERIC_WRITE` and other non-read grants.
-	// An ACE granting write-only rights to a non-allowlisted SID would
-	// have been classified as read-capable and triggered a false
-	// rejection of otherwise-acceptable managed-environment ACLs).
+	// significantBits names the access bits whose presence in an ALLOW
+	// ACE for a non-allowlisted SID we treat as a guarantee violation.
+	// This is BOTH the confidentiality boundary (reads) AND the
+	// integrity boundary (writes/delete/dacl-edit/ownership-takeover) —
+	// state files holding tokens must allow ONLY allowlist SIDs ANY
+	// access at all (codex bot r8 P1 closure — earlier mask was
+	// read-only, which fail-OPEN'd against write-only ACEs that grant
+	// FILE_WRITE_DATA/GENERIC_WRITE to non-allowlist SIDs. A SID with
+	// only write rights can tamper with token contents — the
+	// confidentiality post-rename verify would pass even though the
+	// integrity guarantee is broken).
 	//
-	// The bits that grant "view the token bytes":
-	//   FILE_READ_DATA  (0x01) — read file contents
-	//   FILE_READ_EA    (0x08) — read extended attributes (we don't
-	//                            use EAs for tokens today, but defense-
-	//                            in-depth in case a future version
-	//                            stores secret metadata there)
-	// FILE_READ_ATTRIBUTES (0x80) is metadata only (size, timestamps);
-	// it appears in FILE_GENERIC_WRITE too, so excluding it from the
-	// read-mask avoids the v3.2 false-reject.
-	readMask := uint32(windows.FILE_READ_DATA | windows.FILE_READ_EA)
+	// Bits included:
+	//   - Read: FILE_READ_DATA | FILE_READ_EA (data + extended attrs)
+	//   - Write: FILE_WRITE_DATA | FILE_APPEND_DATA | FILE_WRITE_EA |
+	//            FILE_WRITE_ATTRIBUTES (data + EA + metadata)
+	//   - Execute: FILE_EXECUTE (typically equivalent to read for data files)
+	//   - Delete: DELETE (tamper via replace)
+	//   - Admin: WRITE_DAC (change the DACL itself → bootstrap to read)
+	//   - Admin: WRITE_OWNER (take ownership → change DACL → read)
+	//
+	// Bits excluded:
+	//   - FILE_READ_ATTRIBUTES (metadata-only; size/timestamps leak is acceptable)
+	//   - READ_CONTROL (read the DACL only; doesn't expose contents)
+	//   - SYNCHRONIZE (enables blocking I/O; not access-granting on its own)
+	significantBits := uint32(
+		windows.FILE_READ_DATA | windows.FILE_READ_EA |
+			windows.FILE_WRITE_DATA | windows.FILE_APPEND_DATA |
+			windows.FILE_WRITE_EA | windows.FILE_WRITE_ATTRIBUTES |
+			windows.FILE_EXECUTE |
+			windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER,
+	)
 	for i := uint32(0); i < count; i++ {
 		var ace *windows.ACCESS_ALLOWED_ACE
 		if err := windows.GetAce(dacl, i, &ace); err != nil {
@@ -288,16 +333,17 @@ func verifyWindowsDACLFromHandle(h windows.Handle) error {
 		if ace.Header.AceFlags&windows.INHERIT_ONLY_ACE != 0 {
 			continue
 		}
-		mapped := mapGenericReadRights(uint32(ace.Mask))
-		if mapped&readMask == 0 {
-			// ALLOW ACE that doesn't grant read access — irrelevant
-			// to the confidentiality boundary we protect.
+		mapped := mapGenericRights(uint32(ace.Mask))
+		if mapped&significantBits == 0 {
+			// ALLOW ACE that doesn't grant any meaningful access —
+			// either it's a vestigial zero-mask ACE or it only grants
+			// SYNCHRONIZE/READ_CONTROL which we don't gate on.
 			continue
 		}
 		sid := sidFromAce(ace)
 		if !sidInAllowlist(sid, allowlist) {
 			name := sidString(sid)
-			return fmt.Errorf("%w: SID %s grants read", ErrDaclOutsideAllowlist, name)
+			return fmt.Errorf("%w: SID %s grants access (mask=0x%08x)", ErrDaclOutsideAllowlist, name, mapped&significantBits)
 		}
 	}
 	return nil
@@ -339,6 +385,46 @@ func mapGenericReadRights(mask uint32) uint32 {
 	}
 	if mask&windows.GENERIC_ALL != 0 {
 		mask |= uint32(windows.FILE_GENERIC_READ)
+	}
+	return mask
+}
+
+// mapGenericRights expands the four GENERIC_* bits in `mask` to their
+// file-specific equivalents per Microsoft's MapGenericMask semantics for
+// file objects. Used by the DACL evaluation loop so that an ACE granting
+// GENERIC_WRITE / GENERIC_EXECUTE / GENERIC_ALL surfaces the underlying
+// FILE_WRITE_* / FILE_EXECUTE / FILE_ALL_ACCESS bits we gate on
+// (codex bot r8 P1 closure — earlier mapGenericReadRights expanded only
+// the read direction, so a write-only GENERIC_WRITE ACE evaded the
+// allowlist gate).
+//
+// FILE_GENERIC_READ    = STANDARD_RIGHTS_READ | FILE_READ_DATA |
+//                        FILE_READ_ATTRIBUTES | FILE_READ_EA |
+//                        SYNCHRONIZE
+// FILE_GENERIC_WRITE   = STANDARD_RIGHTS_WRITE | FILE_WRITE_DATA |
+//                        FILE_WRITE_ATTRIBUTES | FILE_WRITE_EA |
+//                        FILE_APPEND_DATA | SYNCHRONIZE
+// FILE_GENERIC_EXECUTE = STANDARD_RIGHTS_EXECUTE | FILE_READ_ATTRIBUTES |
+//                        FILE_EXECUTE | SYNCHRONIZE
+// FILE_ALL_ACCESS      = STANDARD_RIGHTS_REQUIRED | SYNCHRONIZE | 0x1FF
+func mapGenericRights(mask uint32) uint32 {
+	if mask&windows.GENERIC_READ != 0 {
+		mask |= uint32(windows.FILE_GENERIC_READ)
+	}
+	if mask&windows.GENERIC_WRITE != 0 {
+		mask |= uint32(windows.FILE_GENERIC_WRITE)
+	}
+	if mask&windows.GENERIC_EXECUTE != 0 {
+		mask |= uint32(windows.FILE_GENERIC_EXECUTE)
+	}
+	if mask&windows.GENERIC_ALL != 0 {
+		// GENERIC_ALL → FILE_ALL_ACCESS. Just OR all the file-specific
+		// rights bits in so the significantBits check sees write +
+		// delete + WRITE_DAC + WRITE_OWNER too.
+		mask |= uint32(windows.FILE_GENERIC_READ |
+			windows.FILE_GENERIC_WRITE |
+			windows.FILE_GENERIC_EXECUTE |
+			windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER)
 	}
 	return mask
 }
