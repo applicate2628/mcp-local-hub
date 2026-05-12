@@ -1756,6 +1756,110 @@ func TestAggregateToolsListNamespaceCollision(t *testing.T) {
 	}
 }
 
+// TestNotificationsReturnImmediatelyWithoutDrainingBody pins codex
+// bot r18 P1 closure on PR #157. The notification path
+// (expectResponse=false) must NOT drain the response body before
+// returning — for daemons that keep text/event-stream connections
+// open after accepting a notification, draining blocks until EOF
+// or client timeout, turning a successful notification into a
+// ~timeout-length stall that can cascade through AggregateInitialize.
+//
+// We simulate "stream stays open" via a daemon that writes a 200
+// status + flushes a keepalive line and then BLOCKS for a long
+// time before EOF. AggregateInitialize must complete in well
+// under the PerDaemonInitTimeout (5s).
+func TestNotificationsReturnImmediatelyWithoutDrainingBody(t *testing.T) {
+	d1 := newStubDaemon(t, "d1-sid")
+	notifyDone := make(chan struct{})
+	// onNotify keeps the connection open until notifyDone is closed.
+	// The hub's doDaemonPost (expectResponse=false) must return BEFORE
+	// the daemon closes the body, otherwise the call would block here.
+	d1.onNotify = func(w http.ResponseWriter, r *http.Request, body []byte) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if flusher, ok := w.(http.Flusher); ok {
+			_, _ = w.Write([]byte(": keepalive\n\n"))
+			flusher.Flush()
+		}
+		// Block: don't return until notifyDone closes. If the hub
+		// reads body-to-EOF it stalls here.
+		<-notifyDone
+	}
+
+	sess := sessionWithParticipants(d1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	done := make(chan struct{})
+	var initErr error
+	go func() {
+		_, initErr = AggregateInitialize(ctx, sess, json.RawMessage(`1`))
+		close(done)
+	}()
+	select {
+	case <-done:
+		// AggregateInitialize returned without waiting for the
+		// daemon's body EOF. Release the daemon goroutine so the
+		// test process can exit cleanly.
+		close(notifyDone)
+	case <-time.After(2 * time.Second):
+		// Force release; test will fail below.
+		close(notifyDone)
+		<-done
+		t.Fatalf("AggregateInitialize blocked past 2s; expected immediate return on notification 2xx (elapsed %v)", time.Since(start))
+	}
+	if initErr != nil {
+		t.Fatalf("AggregateInitialize: %v", initErr)
+	}
+	if len(sess.InitSuccesses) != 1 {
+		t.Errorf("want 1 init success, got %d: %+v", len(sess.InitSuccesses), sess.InitSuccesses)
+	}
+	if elapsed := time.Since(start); elapsed > 1*time.Second {
+		t.Errorf("AggregateInitialize took %v; expected sub-second (the daemon's body blocked indefinitely, hub should not have waited)", elapsed)
+	}
+}
+
+// TestPostInitializeRejectsMissingResultEnvelope pins codex bot r18
+// P2 closure on PR #157. A daemon returning HTTP 200 +
+// `{"jsonrpc":"2.0","id":1}` (no error, no result) + a valid
+// Mcp-Session-Id header must NOT be treated as a successful
+// initialize. The bot's concern: the previous decode used
+// `Result struct {...}` which silently became the zero value when
+// the field was absent, so postInitialize returned success despite
+// the missing result. Now a pointer type distinguishes absent vs
+// present, and missing result surfaces as an init-stage failure.
+func TestPostInitializeRejectsMissingResultEnvelope(t *testing.T) {
+	d1 := newStubDaemon(t, "d1-sid")
+	d1.onInit = func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Mcp-Session-Id", "d1-sid")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// No `result` field, no `error` field — protocol violation.
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1}`))
+	}
+
+	sess := sessionWithParticipants(d1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatalf("AggregateInitialize: %v", err)
+	}
+	if len(sess.InitSuccesses) != 0 {
+		t.Errorf("daemon must NOT be recorded as success on missing `result`; got %+v", sess.InitSuccesses)
+	}
+	if len(sess.InitFailures) != 1 {
+		t.Fatalf("want 1 init failure, got %d: %+v", len(sess.InitFailures), sess.InitFailures)
+	}
+	f := sess.InitFailures[0]
+	if f.Stage != "initialize" {
+		t.Errorf("Stage=%q want initialize", f.Stage)
+	}
+	if !strings.Contains(f.Err, "missing `result`") {
+		t.Errorf("error should mention missing result; got %q", f.Err)
+	}
+}
+
 // TestNotificationsAcceptSSEResponseWithoutPayload pins codex bot
 // r16 P1 closure on PR #157. JSON-RPC notifications
 // (notifications/initialized, notifications/cancelled) have no

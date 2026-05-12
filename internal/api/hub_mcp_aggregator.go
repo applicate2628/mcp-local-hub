@@ -788,13 +788,20 @@ func doDaemonPost(ctx context.Context, port int, body []byte, daemonSID, protoVe
 		return raw, resp.Header, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
-	// Notification path: drain + discard. The caller sent a method
-	// that by JSON-RPC spec has no response, so we DO NOT try to
-	// parse the body — daemons routinely return 200/202 with an
-	// empty body, an SSE keepalive comment, or just a future event
-	// we don't care about. codex bot r16 P1 closure on PR #157.
+	// Notification path: return IMMEDIATELY on 2xx without reading
+	// the body. codex bot r18 P1 closure on PR #157: io.Copy-then-
+	// discard would block until EOF for daemons that keep
+	// text/event-stream connections open after accepting a
+	// notification, turning successful notifications into ~5s stalls
+	// (and cascading into initialize-timeout failures under tighter
+	// parent contexts). The deferred resp.Body.Close() above tears
+	// down the connection without waiting for EOF, which is correct:
+	// JSON-RPC notifications by spec have no response payload so the
+	// body bytes are not load-bearing. The trade-off is a lost
+	// keep-alive slot (Go's transport pool won't reuse a connection
+	// whose body wasn't fully drained), but we open a fresh
+	// connection per call regardless.
 	if !expectResponse {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxAggregatorResponseBytes+1))
 		return nil, resp.Header, nil
 	}
 
@@ -878,12 +885,18 @@ func postInitialize(ctx context.Context, ref canonicalDaemonRef, protoVer string
 	// `protoVer`; every subsequent header (notifications/initialized,
 	// tools/list, tools/call, notifications/cancelled) MUST use the
 	// daemon-negotiated value or strict daemons reject with 400.
+	// codex bot r18 P2 closure on PR #157: use a pointer for `result`
+	// so the absent case is distinguishable from an empty object. A
+	// malformed daemon returning `{"jsonrpc":"2.0","id":1}` (no error,
+	// no result) plus the Mcp-Session-Id header would otherwise be
+	// treated as a successful initialize and recorded in InitSuccesses
+	// — masking the real protocol violation until a follow-up call.
 	var env struct {
 		Error *struct {
 			Code    int    `json:"code"`
 			Message string `json:"message"`
 		} `json:"error"`
-		Result struct {
+		Result *struct {
 			ProtocolVersion string `json:"protocolVersion"`
 		} `json:"result"`
 	}
@@ -892,6 +905,9 @@ func postInitialize(ctx context.Context, ref canonicalDaemonRef, protoVer string
 	}
 	if env.Error != nil {
 		return "", "", fmt.Errorf("daemon initialize error code=%d: %s", env.Error.Code, env.Error.Message)
+	}
+	if env.Result == nil {
+		return "", "", fmt.Errorf("daemon initialize response missing `result` field")
 	}
 	// codex bot r6 P1 closure on PR #157: reject HTTP 200 + no
 	// JSON-RPC error + empty Mcp-Session-Id. The header is mandatory
