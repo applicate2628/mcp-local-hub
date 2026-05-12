@@ -294,23 +294,32 @@ func fanOutToolsList(ctx context.Context, successes map[canonicalDaemonRef]strin
 // failure message names every daemon that claimed the key so
 // operators can resolve the duplicate at the manifest layer.
 func assembleToolsListResponse(reqID json.RawMessage, results []listResult, initFailures []DaemonFailure, sess *hubSession) ([]byte, error) {
-	// Pass 1 — for each successful daemon, record which daemons
-	// produced each exposed key. Keys claimed by more than one daemon
-	// become collisions.
-	keyDaemons := make(map[string][]canonicalDaemonRef)
+	// Pass 1 — for each successful daemon, record the SET of unique
+	// daemons that produced each exposed key. Keys claimed by more
+	// than one DISTINCT daemon become collisions. codex bot r13 P2
+	// closure on PR #157: a single daemon returning a duplicate tool
+	// name (`tools=[{name:"read"},{name:"read"}]`) must NOT be treated
+	// as a cross-daemon collision — routing is still unambiguous, and
+	// dedupe happens in pass 2.
+	keyDaemons := make(map[string]map[canonicalDaemonRef]bool)
 	for _, r := range results {
 		if r.err != nil {
 			continue
 		}
 		for _, t := range r.tools {
-			keyDaemons[t.Exposed] = append(keyDaemons[t.Exposed], r.ref)
+			set, ok := keyDaemons[t.Exposed]
+			if !ok {
+				set = make(map[canonicalDaemonRef]bool)
+				keyDaemons[t.Exposed] = set
+			}
+			set[r.ref] = true
 		}
 	}
 	collisions := make(map[string]bool)
 	collisionFailures := make([]DaemonFailure, 0)
 	collisionKeys := make([]string, 0)
-	for k, refs := range keyDaemons {
-		if len(refs) > 1 {
+	for k, set := range keyDaemons {
+		if len(set) > 1 {
 			collisions[k] = true
 			collisionKeys = append(collisionKeys, k)
 		}
@@ -321,7 +330,14 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 	// for test golden files and for operator-facing diagnostics.
 	sort.Strings(collisionKeys)
 	for _, k := range collisionKeys {
-		refs := append([]canonicalDaemonRef{}, keyDaemons[k]...)
+		// Drain the set into a slice and sort for deterministic
+		// emission AND to dedupe daemon-ref rows (one row per unique
+		// daemon, never two rows for the same daemon even if it
+		// happened to claim the key via multiple tool occurrences).
+		refs := make([]canonicalDaemonRef, 0, len(keyDaemons[k]))
+		for ref := range keyDaemons[k] {
+			refs = append(refs, ref)
+		}
 		sort.Slice(refs, func(i, j int) bool {
 			if refs[i].Server != refs[j].Server {
 				return refs[i].Server < refs[j].Server
@@ -348,8 +364,15 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 	// even when every one of its tools is collided; the call itself
 	// returned cleanly, and dropping the daemon from listSuccessCount
 	// would mis-trigger the all-failed -32000 envelope path.
+	//
+	// `seenExposed` deduplicates within and across daemons even for
+	// NON-collision keys: a daemon returning the same tool name twice
+	// (intra-daemon duplicate — non-conformant but observed in the
+	// wild) yields one mergedTools entry, not two. codex bot r13 P2
+	// closure on PR #157.
 	mergedTools := make([]json.RawMessage, 0)
 	mergedRoutes := make(map[string]canonicalToolRef)
+	seenExposed := make(map[string]bool)
 	listFailures := make([]DaemonFailure, 0)
 	listSuccessCount := 0
 	for _, r := range results {
@@ -367,6 +390,10 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 			if collisions[t.Exposed] {
 				continue
 			}
+			if seenExposed[t.Exposed] {
+				continue
+			}
+			seenExposed[t.Exposed] = true
 			mergedTools = append(mergedTools, t.Body)
 			mergedRoutes[t.Exposed] = t.Ref
 		}

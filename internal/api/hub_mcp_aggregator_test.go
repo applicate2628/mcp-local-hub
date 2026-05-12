@@ -1189,6 +1189,86 @@ func (b *blockingReader) Read(p []byte) (int, error) {
 	return 0, io.EOF
 }
 
+// TestAggregateToolsListIntraDaemonDuplicateNotCollision pins codex
+// bot r13 P2 closure on PR #157. A single daemon returning the SAME
+// tool name twice in its tools/list response is non-conformant but
+// observed in the wild. The previous r9 implementation appended the
+// daemon's ref per tool occurrence, so a single daemon's intra-list
+// duplicate looked like a TWO-DAEMON namespace collision and dropped
+// the tool from result.tools + RouteMap. Worse, two duplicate
+// partialFailure rows were emitted for the same daemon.
+//
+// Expected behavior after r13:
+//   - Tool stays in result.tools (deduplicated to ONE entry).
+//   - RouteMap contains the routing entry.
+//   - No partialFailure rows are emitted (routing is unambiguous).
+//   - listSuccessCount = 1.
+func TestAggregateToolsListIntraDaemonDuplicateNotCollision(t *testing.T) {
+	d1 := newStubDaemon(t, "d1-sid")
+	d1.onList = func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"read","description":"first"},{"name":"read","description":"second"}]}}`))
+	}
+
+	sess := sessionWithParticipants(d1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`))
+	if err != nil {
+		t.Fatalf("AggregateToolsList: %v", err)
+	}
+	var env struct {
+		Result struct {
+			Tools []json.RawMessage `json:"tools"`
+			Meta  struct {
+				Mcphub struct {
+					PartialFailures []DaemonFailure `json:"partialFailures"`
+				} `json:"mcphub"`
+			} `json:"_meta"`
+		} `json:"result"`
+	}
+	if uerr := json.Unmarshal(body, &env); uerr != nil {
+		t.Fatalf("parse response: %v body=%s", uerr, body)
+	}
+
+	// 1) Exactly one srv1__read entry in result.tools (deduplicated).
+	count := 0
+	for _, raw := range env.Result.Tools {
+		var m struct {
+			Name string `json:"name"`
+		}
+		_ = json.Unmarshal(raw, &m)
+		if m.Name == "srv1__read" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("want 1 srv1__read entry after intra-daemon dedupe, got %d (tools=%+v)", count, env.Result.Tools)
+	}
+
+	// 2) No collision failure rows — intra-daemon duplicates are not
+	// cross-daemon collisions.
+	for _, f := range env.Result.Meta.Mcphub.PartialFailures {
+		if strings.Contains(f.Err, "namespace collision") {
+			t.Errorf("unexpected collision row for intra-daemon duplicate: %+v", f)
+		}
+	}
+
+	// 3) RouteMap contains srv1__read — routing is unambiguous.
+	rmPtr := sess.RouteMap.Load()
+	if rmPtr == nil {
+		t.Fatalf("RouteMap unset after intra-daemon-dedup tools/list")
+	}
+	if _, ok := (*rmPtr)["srv1__read"]; !ok {
+		t.Errorf("RouteMap missing srv1__read after intra-daemon dedupe")
+	}
+}
+
 // TestAggregateToolsListNamespaceCollision pins the codex bot r9 P2
 // closure on PR #157. When two daemons under the SAME server expose
 // the same raw tool name, the resulting exposed name
