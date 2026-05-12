@@ -161,7 +161,7 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 	// listener refuses to come up with a silently-broken
 	// /internal/reload-tokens. Rollback the bound listener so we
 	// don't leave a half-initialized hub server running.
-	reload, reloadErr := api.NewInternalReloadHandler()
+	reload, reloadErr := api.NewInternalReloadHandler(ctx)
 	if reloadErr != nil {
 		_ = ln.Close()
 		store.Close()

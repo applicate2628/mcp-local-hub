@@ -92,7 +92,17 @@ type InternalReloadHandler struct {
 // up with a silently-broken reload control plane. Operators can fix
 // the state-dir DACL / disk-full / antivirus interference, then
 // restart.
-func NewInternalReloadHandler() (*InternalReloadHandler, error) {
+//
+// codex bot phase4 r11 P1 closure on PR #158: ctx threads through to
+// writeHubMcpControlTokenLockedContext so the flock acquisition
+// honors caller cancellation. Without this, gui-server startup
+// (internal/gui/server.go) could see ctx.Done() fire, give up after
+// the 2 s hubInitDone wait with hubMcpComp == nil, AND the goroutine
+// would later resume from a blocking acquireHubMcpLock() and bring
+// up the hub listener after Start has already returned — exactly the
+// race the r10 cycle was supposed to close. Test sites that don't
+// need cancellation can pass context.Background().
+func NewInternalReloadHandler(ctx context.Context) (*InternalReloadHandler, error) {
 	h := &InternalReloadHandler{}
 	tok, err := generateHexToken()
 	if err != nil {
@@ -107,7 +117,7 @@ func NewInternalReloadHandler() (*InternalReloadHandler, error) {
 	// SecureWriteClientConfig (handle-relative + DACL-set-before-write
 	// + atomic rename), so concurrent reads see either the old token
 	// or the new token, never a mix.
-	if werr := writeHubMcpControlTokenLocked(tok); werr != nil {
+	if werr := writeHubMcpControlTokenLockedContext(ctx, tok); werr != nil {
 		_ = LogHubMcpEvent("error", "control-token-persist-failed", map[string]any{
 			"err": werr.Error(),
 		})
@@ -244,17 +254,25 @@ func (h *InternalReloadHandler) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-// writeHubMcpControlTokenLocked writes the control token under flock
-// via writeHubMcpStateFile (the secure DACL/atomic-rename pipeline).
-// Caller MUST acquire hub-mcp.lock OR be already-locked (writes
-// always queue behind the lock since writeHubMcpStateFile delegates
-// to SecureWriteClientConfig which is its own atomic surface).
+// writeHubMcpControlTokenLockedContext writes the control token under
+// flock via writeHubMcpStateFile (the secure DACL/atomic-rename
+// pipeline). The flock is acquired via acquireHubMcpLockContext so
+// caller cancellation propagates — without this, NewInternalReloadHandler
+// could hang past gui-server's shutdown budget if a sibling CLI is
+// holding hub-mcp.lock.
+//
+// codex bot phase4 r11 P1 closure on PR #158: the pre-r11 variant
+// (writeHubMcpControlTokenLocked) used blocking acquireHubMcpLock.
+// The startup race that closed in r10 had a symmetric hole here —
+// fixed by routing through acquireHubMcpLockContext so the same
+// 10 ms cancellation cadence applies. Use context.Background() at
+// test sites that don't need cancellation.
 //
 // We split this out of NewInternalReloadHandler so the in-flock half
 // is small enough to audit; the constructor takes the flock once and
 // the file write is a single delegated call.
-func writeHubMcpControlTokenLocked(tok string) error {
-	lk, err := acquireHubMcpLock()
+func writeHubMcpControlTokenLockedContext(ctx context.Context, tok string) error {
+	lk, err := acquireHubMcpLockContext(ctx)
 	if err != nil {
 		return err
 	}

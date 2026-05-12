@@ -25,6 +25,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -282,7 +283,7 @@ func TestHubMcpE2EInternalReloadCycle(t *testing.T) {
 	t.Cleanup(store.Close)
 	handler := NewHubMcpHandler(store)
 	handler.SetEndpoint(ep)
-	reload, rerr := NewInternalReloadHandler()
+	reload, rerr := NewInternalReloadHandler(context.Background())
 	if rerr != nil {
 		t.Fatalf("NewInternalReloadHandler: %v", rerr)
 	}
