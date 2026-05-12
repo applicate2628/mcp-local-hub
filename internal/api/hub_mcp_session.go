@@ -160,11 +160,17 @@ func (s *hubSession) InsertInFlight(key requestIDKey, entry inflightEntry) bool 
 	s.inflightMu.Lock()
 	defer s.inflightMu.Unlock()
 	if _, existed := s.InFlightRequests[key]; existed {
-		// Defensive: overwriting an existing entry would leak the
-		// count. Replace the entry WITHOUT bumping the count so the
-		// sweeper still sees a single in-flight row, and return false
-		// so the caller can refuse the racing call.
-		s.InFlightRequests[key] = entry
+		// codex bot r2 P1 closure on PR #157: PRESERVE the original
+		// entry on duplicate. Earlier code overwrote even though it
+		// returned false, clobbering the original DaemonRef +
+		// DaemonRequestID. A cancellation arriving while the first
+		// call is still running would then be forwarded with the
+		// SECOND call's daemon ids — wrong daemon, wrong daemon-
+		// req-id — and the first call would become untrackable.
+		// The first writer's entry stays canonical; the second
+		// caller gets false and must refuse its own call
+		// (AggregateToolsCall does so with -32600 "duplicate request
+		// id").
 		return false
 	}
 	s.InFlightRequests[key] = entry

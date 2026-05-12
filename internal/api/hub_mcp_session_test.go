@@ -332,3 +332,45 @@ func TestGenerateSessionIDUniqueAndShape(t *testing.T) {
 		seen[id] = true
 	}
 }
+
+// TestInsertInFlightPreservesOriginalOnDuplicate pins the codex bot
+// r2 P1 closure: duplicate-key InsertInFlight must NOT overwrite the
+// existing entry. Earlier code silently replaced the entry while
+// returning false; a cancellation arriving for the duplicate-id
+// would then route to the SECOND caller's daemon ids and the first
+// call's daemon-side request would be untrackable.
+func TestInsertInFlightPreservesOriginalOnDuplicate(t *testing.T) {
+	store := NewHubSessionStore(SessionStoreOpts{})
+	sess, err := store.Create("claude-code", "2025-06-18", nil)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	key, err := newRequestIDKey(json.RawMessage(`"req-1"`))
+	if err != nil {
+		t.Fatalf("newRequestIDKey: %v", err)
+	}
+	original := inflightEntry{
+		DaemonRef:       canonicalDaemonRef{Server: "first", Daemon: "claude-code", Port: 9101},
+		DaemonRequestID: json.RawMessage(`"hub-original"`),
+	}
+	if !sess.InsertInFlight(key, original) {
+		t.Fatal("first InsertInFlight returned false unexpectedly")
+	}
+	dup := inflightEntry{
+		DaemonRef:       canonicalDaemonRef{Server: "second", Daemon: "claude-code", Port: 9102},
+		DaemonRequestID: json.RawMessage(`"hub-impostor"`),
+	}
+	if sess.InsertInFlight(key, dup) {
+		t.Fatal("duplicate InsertInFlight returned true")
+	}
+	got, ok := sess.LookupInFlight(key)
+	if !ok {
+		t.Fatal("LookupInFlight after duplicate: entry vanished")
+	}
+	if got.DaemonRef.Server != "first" {
+		t.Errorf("DaemonRef.Server overwritten: got %q want %q", got.DaemonRef.Server, "first")
+	}
+	if string(got.DaemonRequestID) != `"hub-original"` {
+		t.Errorf("DaemonRequestID overwritten: got %s want \"hub-original\"", got.DaemonRequestID)
+	}
+}
