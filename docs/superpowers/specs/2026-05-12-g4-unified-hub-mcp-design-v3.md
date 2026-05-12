@@ -80,21 +80,55 @@ type hubSession struct {
 // requestIDKey is a comparable wrapper for JSON-RPC request ids. The
 // codex r4 review correctly flagged that `json.RawMessage` ([]byte)
 // cannot be a Go map key (not comparable). requestIDKey is the
-// validated normalized form:
-//   - JSON strings: `s:<unescaped-string>`
-//   - JSON numbers: `n:<canonical-numeric-form>` — float64 ParseFloat
-//     then strconv.FormatFloat with -1 precision and 'g'. This collapses
-//     "1", "1.0", "1e0" to one bucket, matching JSON-RPC numeric-id
-//     equality semantics observed in real clients.
-//   - Anything else (null, array, object, bool): rejected at request
-//     parse time with -32600 "Invalid Request". JSON-RPC spec allows
-//     only string or number ids; we reject non-conforming early.
+// validated, **losslessly canonicalized** form (codex r5 P1 closure
+// — the v3.2 float64 path was rejected because float64 loses
+// precision for integers > 2^53, collapsing distinct ids onto the
+// same map key):
+//   - JSON strings: `s:<unescaped-string>` (json.Unmarshal into string
+//     then re-prefix; UTF-8 unmarshal handles escape sequences).
+//   - JSON numbers: `n:<canonical-decimal-string>` — DO NOT go through
+//     float64. Use `json.Decoder.UseNumber()` so the value is captured
+//     as `json.Number` (its raw decimal string), then canonicalize via
+//     pure string manipulation that preserves every digit:
+//       1) reject leading `+` (json grammar forbids it);
+//       2) strip leading zeros from the integer part (but keep a single
+//          zero before the decimal point if the integer part is empty);
+//       3) if there's an exponent, normalize the exponent sign and strip
+//          leading zeros from the exponent;
+//       4) if there's a fractional part, strip trailing zeros after the
+//          decimal point; if the resulting fractional part is empty, drop
+//          the decimal point entirely;
+//       5) integers `1`, `1.0`, `1.00`, `1e0`, `1E+0` collapse to `n:1`;
+//       6) `1.5`, `1.50`, `1.5e0` collapse to `n:1.5`;
+//       7) very large integers like `9007199254740993` (= 2^53 + 1,
+//          unrepresentable in float64) stay distinct from
+//          `9007199254740992` — the canonical string preserves all
+//          significant digits.
+//     `math/big.Rat` from `(*big.Rat).SetString` is one off-the-shelf
+//     option that yields a normalized rational form, but the string
+//     manipulation above is sufficient and avoids the big-int allocation
+//     on every request.
+//   - JSON null: `null` is **accepted** (codex r5 P2 closure: JSON-RPC
+//     2.0 permits string | number | null for id; rejecting null would
+//     be non-compliant). Canonical form: `z:` (the empty-suffix
+//     discriminator distinguishes it from an empty string `s:` and
+//     from a numeric zero `n:0`). Cancellation by null-id is undefined
+//     in MCP today; we accept the request but log a warning. If
+//     multiple concurrent requests use null-id within one session,
+//     the in-flight map collapses them; cancellation of "the null-id
+//     request" cancels the most-recently-inserted entry (last-writer-
+//     wins). Clients are responsible for using distinct ids if they
+//     want individual cancellation.
+//   - Arrays, objects, and booleans: rejected at parse time with -32600
+//     "Invalid Request" (JSON-RPC grammar does not permit these).
 type requestIDKey string
 
-// newRequestIDKey validates + normalizes a raw JSON-RPC id field.
-// Returns ("", err) on non-conforming input; caller surfaces -32600.
-// Fractional numeric IDs are accepted; their canonical form
-// disambiguates them from integer-equivalent strings.
+// newRequestIDKey validates + losslessly normalizes a raw JSON-RPC id
+// field. Returns ("", err) on non-conforming input; caller surfaces
+// -32600 for arrays/objects/booleans. Null ids return ("z:", nil).
+// Fractional numeric IDs are accepted; their canonical decimal-string
+// form disambiguates them from integer-equivalent strings and never
+// loses precision.
 func newRequestIDKey(raw json.RawMessage) (requestIDKey, error) { /* impl */ }
 
 type inflightEntry struct {
@@ -517,7 +551,7 @@ The two TBDs are plan-time verification tasks; if unsupported, they join antigra
 - `hubSessionStore` uses `sync.RWMutex`. Lookup under RLock; insert/delete under Lock.
 - Per-session `mu sync.Mutex` protects `LastUsedAt` updates + lifecycle transitions.
 - Route map updates use atomic pointer swap (`atomic.Pointer[map[string]canonicalToolRef]`) so concurrent `tools/call` lookups never see a half-built map.
-- `InFlightRequests` is a regular `map[json.RawMessage]inflightEntry` protected by `inflightMu sync.Mutex`. Sessions also hold `inFlightCount atomic.Int32`, incremented before storing + decremented on cleanup. The idle sweeper checks `inFlightCount.Load() == 0` cheaply without taking `inflightMu`; if non-zero, skip-this-tick.
+- `InFlightRequests` is a regular `map[requestIDKey]inflightEntry` protected by `inflightMu sync.Mutex` (codex r5 P1 closure — the v3.2 spec mistakenly carried over the old `map[json.RawMessage]inflightEntry` shape in this section; `json.RawMessage` is `[]byte` and not a valid Go map key, so an implementation following the unfixed version would not compile. The `requestIDKey` wrapper defined earlier — losslessly canonicalized comparable string form — is the correct key type for both insert and lookup). Sessions also hold `inFlightCount atomic.Int32`, incremented before storing + decremented on cleanup. The idle sweeper checks `inFlightCount.Load() == 0` cheaply without taking `inflightMu`; if non-zero, skip-this-tick.
 - Idle sweeper: dedicated goroutine, ticks every 60s. Per session: takes `mu` (lifecycle lock), checks `LastUsedAt > 30min ago` AND `inFlightCount.Load() == 0`; only then removes from `hubSessionStore`. Per-call cleanup invariants: response/error/timeout/cancel all decrement `inFlightCount`.
 - **Resolver snapshot** is a package-level `atomic.Pointer[ResolverSnapshot]`. Mutations build a fresh snapshot off-line (gen bumped, bindings + routes rebuilt) and publish via `Store`. The pointer swap is atomic — readers either see the OLD snapshot or the NEW snapshot, never a torn read. Sessions capture the pointer at `initialize`; `tools/call` loads the CURRENT pointer and compares against the session's captured pointer to detect "binding was removed since session init" (codex r3 security F-S4 closure).
 - Hard caps: `MaxSessionsPerClient = 16`, `MaxSessionsGlobal = 256`. New `initialize` at cap → 429 with `Retry-After: 30`.
