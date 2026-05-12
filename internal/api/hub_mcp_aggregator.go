@@ -125,6 +125,21 @@ func AggregateInitialize(ctx context.Context, sess *hubSession, reqID json.RawMe
 			subCtx, cancel := context.WithTimeout(ctx, PerDaemonInitTimeout)
 			defer cancel()
 			sid, err := postInitialize(subCtx, ref, protoVer)
+			// codex bot r4 P1 closure on PR #157: per MCP lifecycle,
+			// the client (hub) MUST send notifications/initialized
+			// after initialize succeeds. Strict daemons can reject or
+			// ignore subsequent tools/list / tools/call until they
+			// observe this notification. Best-effort: a failed
+			// notification doesn't roll the init back — the per-call
+			// HTTP error path will surface any downstream issue with
+			// a clear stage label. Use a fresh subCtx with the init
+			// timeout because the original subCtx is being torn down
+			// via defer cancel() at goroutine exit.
+			if err == nil {
+				notifyCtx, notifyCancel := context.WithTimeout(ctx, PerDaemonInitTimeout)
+				_ = postInitialized(notifyCtx, ref, sid, protoVer)
+				notifyCancel()
+			}
 			results[i] = initResult{ref: ref, sessionID: sid, err: err}
 		}()
 	}
@@ -188,7 +203,7 @@ func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMes
 	copy(initFailures, sess.InitFailures)
 	sess.mu.Unlock()
 
-	results := fanOutToolsList(ctx, successes)
+	results := fanOutToolsList(ctx, successes, sess.ProtocolVersion)
 	return assembleToolsListResponse(reqID, results, initFailures, sess)
 }
 
@@ -196,7 +211,11 @@ func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMes
 // whose initialize succeeded. Returns one listResult per daemon. The
 // caller (assembleToolsListResponse) merges + namespaces + publishes
 // the route map.
-func fanOutToolsList(ctx context.Context, successes map[canonicalDaemonRef]string) []listResult {
+//
+// protoVer is the session's negotiated MCP protocol version, passed
+// to postToolsList for the MCP-Protocol-Version header (codex bot r4
+// P1 closure on PR #157).
+func fanOutToolsList(ctx context.Context, successes map[canonicalDaemonRef]string, protoVer string) []listResult {
 	results := make([]listResult, 0, len(successes))
 	var resultsMu sync.Mutex
 
@@ -211,7 +230,7 @@ func fanOutToolsList(ctx context.Context, successes map[canonicalDaemonRef]strin
 			defer func() { <-sem }()
 			subCtx, cancel := context.WithTimeout(ctx, PerDaemonListTimeout)
 			defer cancel()
-			tools, err := postToolsList(subCtx, ref, sid)
+			tools, err := postToolsList(subCtx, ref, sid, protoVer)
 			r := listResult{ref: ref, err: err}
 			if err == nil {
 				r.tools, r.toolMap = nameSpaceTools(ref, tools)
@@ -403,7 +422,7 @@ func dispatchToolsCall(ctx context.Context, sess *hubSession, clientReqID, param
 	subCtx, cancel := context.WithTimeout(ctx, PerCallWallClockCap)
 	defer cancel()
 
-	body, err := postToolsCall(subCtx, ref, daemonSID, daemonReqID, rewrittenParams)
+	body, err := postToolsCall(subCtx, ref, daemonSID, sess.ProtocolVersion, daemonReqID, rewrittenParams)
 	if err != nil {
 		return buildJSONRPCError(clientReqID, -32000, "tools/call failed: "+err.Error(), nil)
 	}
@@ -437,7 +456,7 @@ func ForwardCancellation(ctx context.Context, sess *hubSession, clientReqID json
 
 	subCtx, cancel := context.WithTimeout(ctx, PerDaemonInitTimeout)
 	defer cancel()
-	_ = postCancellation(subCtx, entry.DaemonRef, entry.DaemonSessionID, entry.DaemonRequestID)
+	_ = postCancellation(subCtx, entry.DaemonRef, entry.DaemonSessionID, sess.ProtocolVersion, entry.DaemonRequestID)
 }
 
 // daemonStillBound reports whether the (Server, Daemon, Port) tuple
@@ -476,7 +495,15 @@ func daemonStillBound(snap *ResolverSnapshot, client string, ref canonicalToolRe
 // Used by postInitialize, postToolsList, postToolsCall, and
 // postCancellation. The single helper keeps the request-shape +
 // retry policy + body-cap logic in one auditable place.
-func doDaemonPost(ctx context.Context, port int, body []byte, daemonSID string, timeout time.Duration) ([]byte, http.Header, error) {
+//
+// protoVer is the MCP-Protocol-Version header value to send. Per MCP
+// Streamable HTTP lifecycle, subsequent requests (after initialize)
+// MUST carry this header; strict daemons may reject tools/list,
+// tools/call, or notifications/cancelled despite a successful init
+// (codex bot r4 P1 closure on PR #157). For the initialize call
+// itself, callers pass "" — initialize is the negotiation step and
+// the header is not yet known.
+func doDaemonPost(ctx context.Context, port int, body []byte, daemonSID, protoVer string, timeout time.Duration) ([]byte, http.Header, error) {
 	url := fmt.Sprintf("http://127.0.0.1:%d/mcp", port)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -486,6 +513,9 @@ func doDaemonPost(ctx context.Context, port int, body []byte, daemonSID string, 
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	if daemonSID != "" {
 		req.Header.Set("Mcp-Session-Id", daemonSID)
+	}
+	if protoVer != "" {
+		req.Header.Set("MCP-Protocol-Version", protoVer)
 	}
 	client := &http.Client{Timeout: timeout}
 	resp, err := client.Do(req)
@@ -518,7 +548,7 @@ func postInitialize(ctx context.Context, ref canonicalDaemonRef, protoVer string
 	hubVer, _, _ := buildinfo.Get()
 	body := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"%s","capabilities":{},"clientInfo":{"name":"mcphub-hub","version":"%s"}}}`,
 		protoVer, hubVer)
-	raw, hdr, err := doDaemonPost(ctx, ref.Port, []byte(body), "", PerDaemonInitTimeout)
+	raw, hdr, err := doDaemonPost(ctx, ref.Port, []byte(body), "", "", PerDaemonInitTimeout)
 	if err != nil {
 		return "", err
 	}
@@ -553,9 +583,9 @@ func postInitialize(ctx context.Context, ref canonicalDaemonRef, protoVer string
 // is opened per call and the daemon response id is not validated —
 // the hub-generated id used downstream by the aggregator is the
 // session-level client_session_id, not this internal id.
-func postToolsList(ctx context.Context, ref canonicalDaemonRef, daemonSID string) ([]json.RawMessage, error) {
+func postToolsList(ctx context.Context, ref canonicalDaemonRef, daemonSID, protoVer string) ([]json.RawMessage, error) {
 	body := []byte(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
-	raw, _, err := doDaemonPost(ctx, ref.Port, body, daemonSID, PerDaemonListTimeout)
+	raw, _, err := doDaemonPost(ctx, ref.Port, body, daemonSID, protoVer, PerDaemonListTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -583,12 +613,12 @@ func postToolsList(ctx context.Context, ref canonicalDaemonRef, daemonSID string
 // body (the caller rewrites the response id back to the client's
 // id; we keep the raw form here so partial-failure surfaces have
 // access to any structured error payload).
-func postToolsCall(ctx context.Context, ref canonicalToolRef, daemonSID string, daemonReqID, params json.RawMessage) ([]byte, error) {
+func postToolsCall(ctx context.Context, ref canonicalToolRef, daemonSID, protoVer string, daemonReqID, params json.RawMessage) ([]byte, error) {
 	body, err := buildToolsCallEnvelope(daemonReqID, params)
 	if err != nil {
 		return nil, err
 	}
-	raw, _, err := doDaemonPost(ctx, ref.Port, body, daemonSID, PerCallWallClockCap)
+	raw, _, err := doDaemonPost(ctx, ref.Port, body, daemonSID, protoVer, PerCallWallClockCap)
 	if err != nil {
 		return nil, err
 	}
@@ -597,7 +627,7 @@ func postToolsCall(ctx context.Context, ref canonicalToolRef, daemonSID string, 
 
 // postCancellation sends a notifications/cancelled to a daemon.
 // Best-effort: errors are swallowed by the caller.
-func postCancellation(ctx context.Context, ref canonicalDaemonRef, daemonSID string, daemonReqID json.RawMessage) error {
+func postCancellation(ctx context.Context, ref canonicalDaemonRef, daemonSID, protoVer string, daemonReqID json.RawMessage) error {
 	envelope := struct {
 		JSONRPC string `json:"jsonrpc"`
 		Method  string `json:"method"`
@@ -613,7 +643,20 @@ func postCancellation(ctx context.Context, ref canonicalDaemonRef, daemonSID str
 	if err != nil {
 		return err
 	}
-	if _, _, err := doDaemonPost(ctx, ref.Port, body, daemonSID, PerDaemonInitTimeout); err != nil {
+	if _, _, err := doDaemonPost(ctx, ref.Port, body, daemonSID, protoVer, PerDaemonInitTimeout); err != nil {
+		return err
+	}
+	return nil
+}
+
+// postInitialized sends notifications/initialized to a daemon after
+// a successful initialize. Per MCP lifecycle the client MUST send
+// this notification before issuing any other method calls. Best-
+// effort: callers ignore the returned error (codex bot r4 P1 closure
+// on PR #157).
+func postInitialized(ctx context.Context, ref canonicalDaemonRef, daemonSID, protoVer string) error {
+	body := []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+	if _, _, err := doDaemonPost(ctx, ref.Port, body, daemonSID, protoVer, PerDaemonInitTimeout); err != nil {
 		return err
 	}
 	return nil
@@ -785,20 +828,37 @@ func rewriteResponseID(body []byte, clientReqID json.RawMessage) ([]byte, error)
 // nameSpaceTools rewrites each tool's `name` field to
 // "<server>__<rawname>" and builds the per-daemon contribution to the
 // session's route map.
+//
+// codex bot r4 P2 closure on PR #157: rewrite ONLY the name field;
+// every other field passes through as raw JSON bytes. Earlier
+// `map[string]any` round-trip forced numeric fields in tool
+// schemas (default values, enum members, min/max constraints in
+// inputSchema) through float64, silently rounding integers > 2^53
+// in tool metadata. Clients would receive corrupted definitions
+// even though only `name` should change.
 func nameSpaceTools(ref canonicalDaemonRef, tools []json.RawMessage) ([]json.RawMessage, map[string]canonicalToolRef) {
 	out := make([]json.RawMessage, 0, len(tools))
 	rm := make(map[string]canonicalToolRef, len(tools))
 	for _, t := range tools {
-		var m map[string]any
+		var m map[string]json.RawMessage
 		if err := json.Unmarshal(t, &m); err != nil {
 			continue
 		}
-		rawName, _ := m["name"].(string)
+		var rawName string
+		if nameField, ok := m["name"]; ok {
+			if uerr := json.Unmarshal(nameField, &rawName); uerr != nil {
+				continue
+			}
+		}
 		if rawName == "" {
 			continue
 		}
 		exposed := ref.Server + "__" + rawName
-		m["name"] = exposed
+		exposedJSON, err := json.Marshal(exposed)
+		if err != nil {
+			continue
+		}
+		m["name"] = exposedJSON
 		nb, err := json.Marshal(m)
 		if err != nil {
 			continue

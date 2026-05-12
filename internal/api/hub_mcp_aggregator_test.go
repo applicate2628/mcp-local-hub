@@ -117,7 +117,7 @@ func newStubDaemon(t *testing.T, sessionID string) *stubDaemon {
 			}
 			out, _ := json.Marshal(resp)
 			_, _ = w.Write(out)
-		case "notifications/cancelled":
+		case "notifications/cancelled", "notifications/initialized":
 			sd.notifyCount.Add(1)
 			if sd.onNotify != nil {
 				sd.onNotify(w, r, body)
@@ -786,5 +786,74 @@ func TestBuildRewrittenParamsPreservesBigIntegerPrecision(t *testing.T) {
 	}
 	if strings.Contains(string(out), `"name":"srv1__read"`) {
 		t.Errorf("old namespaced name still present: %s", out)
+	}
+}
+
+// TestPostInitializeSendsInitializedNotification pins the codex bot
+// r4 P1 closure: after a successful initialize, the hub must send
+// notifications/initialized to the daemon. Strict daemons can reject
+// or ignore subsequent method calls until they observe this.
+func TestPostInitializeSendsInitializedNotification(t *testing.T) {
+	d1 := newStubDaemon(t, "d1-sid")
+	var sawInitialized atomic.Int32
+	d1.onNotify = func(w http.ResponseWriter, r *http.Request, body []byte) {
+		if strings.Contains(string(body), `"notifications/initialized"`) {
+			sawInitialized.Add(1)
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}
+	sess := sessionWithParticipants(d1)
+	if _, err := AggregateInitialize(context.Background(), sess, json.RawMessage(`1`)); err != nil {
+		t.Fatalf("AggregateInitialize: %v", err)
+	}
+	// Give the best-effort notification a moment to flush.
+	time.Sleep(100 * time.Millisecond)
+	if got := sawInitialized.Load(); got != 1 {
+		t.Errorf("daemon must receive notifications/initialized; got %d", got)
+	}
+}
+
+// TestPostToolsListIncludesProtocolVersionHeader pins the codex bot
+// r4 P1 closure: post-initialize HTTP calls must carry the
+// MCP-Protocol-Version header.
+func TestPostToolsListIncludesProtocolVersionHeader(t *testing.T) {
+	d1 := newStubDaemon(t, "d1-sid")
+	var protoHeader string
+	d1.onList = func(w http.ResponseWriter, r *http.Request) {
+		protoHeader = r.Header.Get("MCP-Protocol-Version")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[]}}`))
+	}
+	sess := sessionWithParticipants(d1)
+	sess.ProtocolVersion = "2025-11-25"
+	if _, err := AggregateInitialize(context.Background(), sess, json.RawMessage(`1`)); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	if _, err := AggregateToolsList(context.Background(), sess, json.RawMessage(`2`)); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if protoHeader != "2025-11-25" {
+		t.Errorf("tools/list MCP-Protocol-Version header = %q, want %q", protoHeader, "2025-11-25")
+	}
+}
+
+// TestNameSpaceToolsPreservesNumericPrecision pins the codex bot r4
+// P2 closure: rewriting `name` must not round numeric fields in tool
+// metadata (e.g. inputSchema defaults, enum values).
+func TestNameSpaceToolsPreservesNumericPrecision(t *testing.T) {
+	tools := []json.RawMessage{
+		json.RawMessage(`{"name":"read","inputSchema":{"properties":{"limit":{"default":9007199254740993}}}}`),
+	}
+	ref := canonicalDaemonRef{Server: "srv1", Daemon: "claude-code", Port: 9101}
+	out, _ := nameSpaceTools(ref, tools)
+	if len(out) != 1 {
+		t.Fatalf("want 1 tool, got %d", len(out))
+	}
+	if !strings.Contains(string(out[0]), `9007199254740993`) {
+		t.Errorf("default value 9007199254740993 lost in namespace rewrite: %s", out[0])
+	}
+	if !strings.Contains(string(out[0]), `"name":"srv1__read"`) {
+		t.Errorf("name not namespaced: %s", out[0])
 	}
 }

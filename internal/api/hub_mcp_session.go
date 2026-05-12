@@ -388,6 +388,17 @@ func (s *HubSessionStore) evictLRULocked() {
 //
 // codex bot r3 P1 closure on PR #157: prevents eviction of an
 // active long-running tools/call.
+//
+// codex bot r4 P1 closure on PR #157: the check + delete must be
+// atomic w.r.t. concurrent InsertInFlight. Earlier code loaded the
+// atomic counter, then called deleteLocked WITHOUT serializing
+// against the per-session inflightMu — a racing InsertInFlight
+// (which only takes sess.inflightMu, not s.mu) could bump the count
+// between those two operations and have its session evicted out from
+// under it. Lock ordering: s.mu (already held by caller) → sess.inflightMu
+// is safe because InsertInFlight never reaches for s.mu, so the
+// reverse ordering can't form. We hold sess.inflightMu just long enough
+// to confirm the count is still 0 at delete time.
 func (s *HubSessionStore) evictIdleLRULocked() bool {
 	for e := s.lru.Back(); e != nil; e = e.Prev() {
 		id, _ := e.Value.(string)
@@ -395,10 +406,13 @@ func (s *HubSessionStore) evictIdleLRULocked() bool {
 		if !ok {
 			continue
 		}
+		sess.inflightMu.Lock()
 		if sess.inFlightCount.Load() == 0 {
 			s.deleteLocked(id)
+			sess.inflightMu.Unlock()
 			return true
 		}
+		sess.inflightMu.Unlock()
 	}
 	return false
 }
