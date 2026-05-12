@@ -363,9 +363,20 @@ func (h *HubMcpHandler) handleInitialize(w http.ResponseWriter, r *http.Request,
 	var initParams struct {
 		ProtocolVersion string `json:"protocolVersion"`
 	}
-	// Empty / missing params is allowed — protocolVersion default is
-	// the hub's preferred version. (Strict clients always send one.)
-	_ = json.Unmarshal(paramsRaw, &initParams)
+	// codex bot phase4 r16 P2 closure on PR #158: explicitly reject
+	// syntactically valid but type-mismatched params (e.g.
+	// `"params": 42` or `"params": "string"`). Silently defaulting
+	// after a decode failure masks client bugs and accepts
+	// non-compliant protocol negotiation inputs at the handshake.
+	// Empty / missing params (paramsRaw is nil OR the literal "null"
+	// JSON token) is still allowed — protocolVersion defaults to
+	// the hub's preferred version. Strict clients always send one.
+	if len(paramsRaw) > 0 && string(paramsRaw) != "null" {
+		if uerr := json.Unmarshal(paramsRaw, &initParams); uerr != nil {
+			writeJSONRPCErrorStatus(w, reqID, http.StatusBadRequest, -32602, "invalid initialize params: "+uerr.Error(), nil)
+			return
+		}
+	}
 	if initParams.ProtocolVersion == "" {
 		initParams.ProtocolVersion = "2025-11-25"
 	}
