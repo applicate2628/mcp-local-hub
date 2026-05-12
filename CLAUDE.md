@@ -60,19 +60,27 @@ Wait for bot to review the EXACT HEAD commit. Bot review is an inline
 comment AND a review record:
 
 ```bash
-# Bot review state
-gh api repos/<owner>/<repo>/pulls/<N>/reviews \
-  --jq '.[] | select(.user.login == "chatgpt-codex-connector[bot]") | {state, commit_id}'
-
-# Get current HEAD SHA — needed for filtering inline comments
+# Get current HEAD SHA FIRST — every downstream query must filter
+# to it. Stale reviews from earlier commits do NOT satisfy PASS.
 HEAD=$(gh pr view <N> --json headRefOid --jq .headRefOid)
 
-# Inline comments — MUST extract `original_commit_id`
+# Bot review state — MUST filter to HEAD (avoid stale APPROVED
+# from an earlier commit satisfying PASS condition 1)
+gh api repos/<owner>/<repo>/pulls/<N>/reviews --paginate \
+  --jq --arg sha "$HEAD" '.[]
+    | select(.user.login == "chatgpt-codex-connector[bot]")
+    | select(.commit_id == $sha)
+    | {state, commit_id, submitted_at}'
+
+# Inline comments — MUST extract `original_commit_id` AND paginate
 # (GitHub auto-rebases inline-comment `commit_id` across pushes;
 # `original_commit_id` is the immutable anchor to the commit the bot
 # actually reviewed when it left the comment. Filtering by
-# `original_commit_id == $HEAD` is the only correct stale-filter.)
-gh api repos/<owner>/<repo>/pulls/<N>/comments \
+# `original_commit_id == $HEAD` is the only correct stale-filter.
+# `--paginate` is mandatory — default page is 30; older comments
+# beyond that would be invisible to a single-page query, making
+# the PASS-zero-inline check vacuous on long-lived PRs.)
+gh api repos/<owner>/<repo>/pulls/<N>/comments --paginate \
   --jq --arg sha "$HEAD" '.[]
     | select(.user.login == "chatgpt-codex-connector[bot]")
     | select(.original_commit_id == $sha)

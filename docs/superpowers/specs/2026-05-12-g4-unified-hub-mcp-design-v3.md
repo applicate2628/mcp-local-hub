@@ -12,7 +12,7 @@ Give an MCP client (Claude Code / Codex CLI / Cursor / VS Code / etc.) **one URL
 
 A new HTTP listener on `127.0.0.1:<persistent-random-port>` owned by the running `mcphub gui` process. **Persistent port**: chosen once on the first start with the gate ON, written to `<state-dir>/hub-mcp.endpoint.json` (0600 + DACL-verified, see "Token + endpoint state hardening" below), reused on every subsequent start. Operators install client configs ONCE; reinstall only when they regenerate tokens. This addresses v2 F-S1 (random-port stale-URL window) while keeping a per-user random port rather than fixed `9120` (which any local user can pre-bind).
 
-**Pre-bind handling is credential exfiltration AND DoS, NOT just DoS** (codex r7 P1 closure — supersedes the earlier "DoS-only" framing). `SO_EXCLUSIVEADDRUSE` protects only AFTER hub successfully binds; a local attacker that pre-binds `127.0.0.1:<persistent-port>` BEFORE hub starts blocks the bind, and any client whose config still points at that port will send its `X-Mcphub-Hub-Token` + `X-Mcphub-Instance-Id` headers TO THE ATTACKER'S LISTENER on its very first request. The 6-check auth gate runs only when the HUB is the listener; pre-bind means the auth gate never executes. Captured token + instance_id can then be replayed against the genuine hub once it eventually binds. **This is a confidentiality attack, not a pure-DoS attack.**
+**Pre-bind handling is credential exfiltration AND DoS, NOT just DoS** (codex r7 P1 closure — supersedes the earlier "DoS-only" framing). `SO_EXCLUSIVEADDRUSE` protects only AFTER hub successfully binds; a local attacker that pre-binds `127.0.0.1:<persistent-port>` BEFORE hub starts blocks the bind, and any client whose config still points at that port will send its `X-Mcphub-Hub-Token` + `X-Mcphub-Instance-Id` headers TO THE ATTACKER'S LISTENER on its very first request. The 7-check auth gate runs only when the HUB is the listener; pre-bind means the auth gate never executes. Captured token + instance_id can then be replayed against the genuine hub once it eventually binds. **This is a confidentiality attack, not a pure-DoS attack.**
 
 Threat-model classification of pre-bind:
 
@@ -172,7 +172,7 @@ type canonicalToolRef struct {
 }
 ```
 
-`InFlightRequests` is **per-session and typed** (codex r3 F-S6 + r4 F6 closures): keyed by `requestIDKey` — a normalized comparable string built from the validated raw JSON-RPC id (string-vs-number discriminator preserved via the `s:` / `n:` prefix; numeric-equivalent forms like `1` / `1.0` / `1e0` collapse to one canonical bucket). Stores `{DaemonRef, DaemonSessionID, DaemonRequestID, StartedAt}` because the request id we send to the daemon is hub-generated (different from the client's). A forged `notifications/cancelled` from another session cannot collide because the lookup is scoped to `session.InFlightRequests` (per-session map), not a global structure; cross-session interference is impossible without bypassing the 6-check auth gate.
+`InFlightRequests` is **per-session and typed** (codex r3 F-S6 + r4 F6 closures): keyed by `requestIDKey` — a normalized comparable string built from the validated raw JSON-RPC id (string-vs-number discriminator preserved via the `s:` / `n:` prefix; numeric-equivalent forms like `1` / `1.0` / `1e0` collapse to one canonical bucket). Stores `{DaemonRef, DaemonSessionID, DaemonRequestID, StartedAt}` because the request id we send to the daemon is hub-generated (different from the client's). A forged `notifications/cancelled` from another session cannot collide because the lookup is scoped to `session.InFlightRequests` (per-session map), not a global structure; cross-session interference is impossible without bypassing the 7-check auth gate.
 
 **Lifecycle:**
 
@@ -196,9 +196,9 @@ Exposed name = `<server>__<raw_tool_name>`. Hub does NOT split on `__` (F-G4 in 
 
 Raw tool names containing `__` are handled transparently — the map key is the WHOLE exposed string, no splitting.
 
-## Cross-client invariant — six-check auth gate
+## Cross-client invariant — seven-check auth gate
 
-In order, before any business logic runs (codex r6 LOW closure — earlier text said "five-step" but the gate has always enumerated six distinct checks; renamed to be honest about the count):
+In order, before any business logic runs (renamed to honest count: codex r6 LOW closure expanded 5→6 by splitting token-compare and instance-id; codex r7-bot P2 closure adds MCP-Protocol-Version validation as step 7):
 
 1. **Loopback-guard** via existing `rejectUnsafeLoopbackRequest` (`internal/daemon/loopback_guard.go:12-67`). Rejects non-loopback `Host`, non-loopback `Origin`, cross-site `Sec-Fetch-Site`.
 
@@ -212,7 +212,9 @@ In order, before any business logic runs (codex r6 LOW closure — earlier text 
 
 6. **Session-client binding**. If `Mcp-Session-Id` header is set, look up the session — its `Client` field must equal the path `client_id`. Mismatch → 401. This prevents cross-client session-id reuse.
 
-All six checks execute before route-map construction, so a hostile `Claude-Code-token + Codex-session-id + Codex-only-tool-name` combination is rejected at step 6 before any business logic.
+7. **MCP-Protocol-Version validation** (codex r7-bot P2 closure — required by MCP Streamable HTTP spec 2025-11-25). The MCP base spec mandates that every request AFTER `initialize` carry an `MCP-Protocol-Version` header naming the version the client agreed to during `initialize`. Hub checks: (a) header present on every method other than `initialize` itself; (b) value matches the version stored in the session record at `initialize` time; (c) value is one of the versions the hub supports (`hubSupportedVersions = ["2025-11-25", "2025-06-18"]` initially; add new versions as we test against new clients). Missing header → 400 with empty body (NOT 401 — this is a protocol-level error, not an auth-level error). Mismatch → 400 with `{"error":{"code":-32600,"message":"protocol-version mismatch"}}` body. **The `initialize` request itself is exempt from this check** because it negotiates the version; on `initialize` the hub reads the client's offered version from the JSON-RPC params and stores it in `session.ProtocolVersion`.
+
+All seven checks execute before route-map construction, so a hostile `Claude-Code-token + Codex-session-id + Codex-only-tool-name` combination is rejected at step 6 before any business logic, and an MCP-version-skew is rejected at step 7.
 
 ## Token + endpoint state hardening
 
@@ -642,6 +644,7 @@ The two TBDs are plan-time verification tasks; if unsupported, they join antigra
 | `tools/call` (id) | route via session map + canonical rewrite + resolver-gen revalidate + in-flight tracking (above). |
 | `prompts/*`, `resources/*`, `logging/setLevel`, etc. | `-32601 Method not found`. (Out of scope for MVP; honest deferral per `Out of scope` below.) |
 | `DELETE /clients/{id}/mcp` (HTTP method, with Mcp-Session-Id) | terminate session, best-effort fan-out DELETE to daemons, 204. |
+| `GET /clients/{id}/mcp` (HTTP method, codex r7-bot P2 closure) | MCP Streamable HTTP 2025-11-25 mandates that the server respond to GET on the endpoint either by opening an SSE stream (server-initiated notifications) OR by returning **405 Method Not Allowed with `Allow: POST, DELETE` header**. v0.3.0 does NOT implement server-initiated notifications (deferred per Out of scope below — `prompts/*`, `resources/*`, and server-side push are future G-phases). Therefore GET on `/clients/{id}/mcp` returns 405 with `Allow: POST, DELETE` and empty body. Tests assert this so compliant MCP clients that probe via GET don't get a misleading 404 / 500. The full 7-check auth gate runs first; an unauthenticated GET still gets 401, not 405. |
 
 ## Concurrency + bounds (F-G7 closure, refined per codex r3 general F-G7 + security F-S4)
 
@@ -808,13 +811,13 @@ Exit codes: 0 success, 1 backend error, 6 non-TTY without --yes, 8 state path sa
 
 | Vector | Mitigation |
 |---|---|
-| Pre-bind on port (HIGH r1, **reclassified r7 P1** as credential exfiltration) | Persistent random port (per-user); SO_EXCLUSIVEADDRUSE bind. If a local-attacker pre-binds the port BEFORE hub binds, client requests carry `X-Mcphub-Hub-Token` + `X-Mcphub-Instance-Id` to the attacker — the 6-check auth gate NEVER runs because the attacker IS the listener. Captured headers can be replayed against the genuine hub once it eventually binds. **Recovery requires full credential burn-down**: `mcphub gui --reset-port` (stops the attacker getting more requests) + `mcphub hub-mcp regenerate-token --client <each>` (invalidates exfiltrated per-client tokens) + `mcphub hub-mcp regenerate-instance-id` (invalidates the exfiltrated instance_id) + reinstall. `--reset-port` alone is INSUFFICIENT. The CLI prints a "credentials may have leaked; rotate" warning on every `--reset-port` invocation. |
+| Pre-bind on port (HIGH r1, **reclassified r7 P1** as credential exfiltration) | Persistent random port (per-user); SO_EXCLUSIVEADDRUSE bind. If a local-attacker pre-binds the port BEFORE hub binds, client requests carry `X-Mcphub-Hub-Token` + `X-Mcphub-Instance-Id` to the attacker — the 7-check auth gate NEVER runs because the attacker IS the listener. Captured headers can be replayed against the genuine hub once it eventually binds. **Recovery requires full credential burn-down**: `mcphub gui --reset-port` (stops the attacker getting more requests) + `mcphub hub-mcp regenerate-token --client <each>` (invalidates exfiltrated per-client tokens) + `mcphub hub-mcp regenerate-instance-id` (invalidates the exfiltrated instance_id) + reinstall. `--reset-port` alone is INSUFFICIENT. The CLI prints a "credentials may have leaked; rotate" warning on every `--reset-port` invocation. |
 | Stale URL after explicit rotation event (HIGH r2 partial) | After `regenerate-token` or `regenerate-instance-id`, stale client configs fail with 401. Restart alone does NOT invalidate URLs by design (operator-installability tradeoff); only explicit operator action does. `regenerate-instance-id` is the burn-down for instance-compromise scenarios. |
 | Browser CSRF / DNS-rebind / cross-site-fetch | Existing `rejectUnsafeLoopbackRequest` (loopback Host, loopback Origin, Sec-Fetch-Site). Token + instance_id required. |
 | Token leak via process memory dump | Acknowledged residual risk for desktop dev threat model. |
 | Token leak via logs/status/install/stderr/argv (MED r2 partial) | Single `RedactToken` helper at every emit site; golden test asserts zero plain-token bytes across surfaces. |
 | Token leak via client config + backups (MED r2 partial) | Pre-write DACL check on client config target; refuse + fall back if config DACL is loose. Backup files inherit ACL from the source config. |
-| Cross-client tool-call leakage | 6-check auth gate; route map built only from path-client's bindings; session-client field MUST match path client. |
+| Cross-client tool-call leakage | 7-check auth gate; route map built only from path-client's bindings; session-client field MUST match path client. |
 | Manifest namespace injection | Two-mode `__` validation; strict mode in mutation paths; bind-time refusal if participating set contains violators. |
 | Token-comparison timing oracle | `subtle.ConstantTimeCompare` after fixed 64-hex shape gate. All 401s identical body. |
 | Hub becoming privileged proxy | Hub forwards JSON-RPC bodies (with `params.name` rewritten); daemons retain full authority over tool execution. Hub adds aggregation + auth gate only. |
@@ -848,7 +851,7 @@ If round-5 returns REVISE, the v3.3 round is bounded — only NEW findings, not 
 | `internal/api/hub_mcp_tokens.go` | new | generate/lookup/rotate + RedactToken helper (F-S2) |
 | `internal/api/hub_mcp_instance.go` | new | persistent-across-restarts instance_id (generated once, rotated only by `regenerate-instance-id`) + endpoint state file (port + instance_id + pid + started_at) (F-S1) |
 | `internal/api/hub_mcp_session.go` | new | hubSessionStore + idle sweeper + caps (F-G7, F-S5) |
-| `internal/api/hub_mcp_handler.go` | new | 6-check auth gate + JSON-RPC dispatch (F-G1) |
+| `internal/api/hub_mcp_handler.go` | new | 7-check auth gate + JSON-RPC dispatch (F-G1) |
 | `internal/api/hub_mcp_aggregator.go` | new | fan-out + namespacing + partial-failure + canonical rewrite (F-G2, F-G3) |
 | `internal/api/hub_mcp_log_redact.go` | new | RedactToken + golden test helpers (F-S2) |
 | `internal/api/settings_registry.go` | modify | add `gui_server.hub_endpoint_enabled` |
@@ -868,7 +871,7 @@ If round-5 returns REVISE, the v3.3 round is bounded — only NEW findings, not 
 - `hub_mcp_tokens_test.go`: generate, persist, rotate; golden redaction across log/status/install/regenerate/stderr/argv emit surfaces.
 - `hub_mcp_instance_test.go`: instance_id generated once on first start, persisted, and unchanged across the next 10 simulated restarts; only `regenerate-instance-id` rotates it; post-rotation a stale-id request gets 401; ephemeral-port reset via `--reset-port` rewrites endpoint file under flock without touching instance_id.
 - `hub_mcp_session_test.go`: session create + lookup + TTL expiry + max-sessions cap; idle sweeper respects InFlightRequests.
-- `hub_mcp_handler_test.go`: 6-check auth gate matrix (loopback, path-unknown, token-shape, constant-time, instance-id, session-client) — every 401 returns identical empty body.
+- `hub_mcp_handler_test.go`: 7-check auth gate matrix (loopback, path-unknown, token-shape, constant-time, instance-id, session-client, mcp-protocol-version) — every 401 returns identical empty body; mcp-protocol-version mismatch returns 400 with explicit `-32600 protocol-version mismatch` error body.
 - `hub_mcp_aggregator_test.go`: fan-out partial-failure (init-failed daemon + tools/list-failed daemon → both surface in partialFailures); canonical rewrite (params.name rewritten to RawName); resolver-gen stale-route refusal.
 - `install_test.go` (extend): bidirectional reconciler — gate ON adds mcphub-hub + removes per-daemon; gate OFF removes mcphub-hub + restores per-daemon; pre-write DACL check refuses + falls back.
 
@@ -888,7 +891,7 @@ If round-5 returns REVISE, the v3.3 round is bounded — only NEW findings, not 
 - Settings toggle persists; pending-restart badge.
 - Strict `__` validation in mutation paths; compat warn at startup.
 - Persistent random port + hub-instance-id challenge defeats stale-URL replay.
-- Per-client token + instance-id required on every request; 6-check auth gate; all 401s identical body.
+- Per-client token + instance-id required on every request; 7-check auth gate; all 401s identical body.
 - Atomic state writes; handle-bound DACL verify on Windows; reject inherited broad-SID ACEs.
 - Bind happens AFTER all state validated; failures don't bind.
 - Route map per-session + per-call resolver-gen revalidation.
@@ -924,7 +927,7 @@ If round-5 returns REVISE, the v3.3 round is bounded — only NEW findings, not 
 - `state-dir`: per-user state directory; `%LOCALAPPDATA%\mcp-local-hub\` on Windows, `$XDG_STATE_HOME/mcp-local-hub` on POSIX.
 - `client adapter`: per-IDE installer logic (claude-code, codex-cli, cursor, etc.).
 - `route map`: per-session map keyed by exposed flat tool name → canonical `(server, daemon, port, raw_name)`. Hub rewrites `params.name` to `raw_name` before forwarding `tools/call`.
-- `6-check auth gate`: loopback-guard + path-client lookup + token-shape gate + constant-time compare + instance-id match + session-client invariant.
+- `7-check auth gate`: loopback-guard + path-client lookup + token-shape gate + constant-time compare + instance-id match + session-client invariant.
 - `resolver generation`: monotonic counter bumped on every manifest add/edit/uninstall; sessions capture at create; per-`tools/call` revalidation refuses entries that became stale.
 - `hub instance id`: 32-byte hex generated ONCE on the first start with the gate ON and persisted in `<state-dir>/hub-mcp.endpoint.json`; required in every request via `X-Mcphub-Instance-Id`. Persistent across hub restarts (operator-installability tradeoff); rotated only by explicit `mcphub hub-mcp regenerate-instance-id` (or a successful endpoint-file recreate, e.g. after corruption-recovery).
 - `DACL`: Windows Discretionary Access Control List; per-file ACL entries that grant/deny per-SID access.
