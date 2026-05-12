@@ -6,35 +6,46 @@
 //
 //  1. Open parent dir via CreateFile with FILE_LIST_DIRECTORY +
 //     FILE_FLAG_BACKUP_SEMANTICS + FILE_FLAG_OPEN_REPARSE_POINT.
-//     REPARSE_POINT here means "open the reparse point itself rather
-//     than its target"; combined with the subsequent DACL allowlist
-//     verify on the resulting handle, any reparse-point parent dir
-//     that doesn't match the allowlist is refused. Ancestor chain is
+//     REPARSE_POINT here means "open the metadata of the parent
+//     itself WITHOUT following any reparse link present on that final
+//     component"; combined with step 2's allowlist DACL verify on the
+//     resulting handle, any reparse-point parent dir whose underlying
+//     DACL falls outside the allowlist is rejected. Ancestor chain is
 //     covered by the per-user trust boundary documented in the spec.
-//  2. crypto/rand 8-byte hex tempName = ".<base>.tmp.<pid>.<hex>".
-//  3. NtCreateFile relative to dirHandle (RootDirectory=dirHandle,
+//  2. Handle-bound DACL verify on dirHandle via
+//     verifyWindowsDACLFromHandle — owner == current-user AND every
+//     read-capable ALLOW ACE names a SID in {current-user, LocalSystem,
+//     BuiltinAdministrators}. Spec lines 323-326 + 422-432 ("per-target
+//     parent-dir DACL check is THE confidentiality boundary"). Without
+//     this gate, an enterprise GPO that broadens %USERPROFILE% to
+//     Domain Users would silently leak tokens to every domain user.
+//  3. crypto/rand 8-byte hex tempName = ".<base>.tmp.<pid>.<hex>".
+//  4. NtCreateFile relative to dirHandle (RootDirectory=dirHandle,
 //     ObjectName=tempName, FILE_CREATE disposition, FILE_GENERIC_WRITE
 //     | DELETE | SYNCHRONIZE | WRITE_DAC desired access). DELETE is
-//     mandatory because the rename in step 6 requires it; WRITE_DAC
-//     enables step 4's SetSecurityInfo.
-//  4. SetSecurityInfo(fileHandle, DACL_SECURITY_INFORMATION |
+//     mandatory because the rename in step 7 requires it; WRITE_DAC
+//     enables step 5's SetSecurityInfo.
+//  5. SetSecurityInfo(fileHandle, DACL_SECURITY_INFORMATION |
 //     PROTECTED_DACL_SECURITY_INFORMATION, ..., restrictiveDACL) —
 //     restrictive DACL = ALLOW current-user | LocalSystem |
 //     BuiltinAdministrators with GENERIC_ALL. Done on the HANDLE
 //     before any bytes hit disk.
-//  5. WriteFile + FlushFileBuffers.
-//  6. NtSetInformationFile(fileHandle, FileRenameInformationEx,
+//  6. WriteFile + FlushFileBuffers.
+//  7. NtSetInformationFile(fileHandle, FileRenameInformationEx,
 //     { Flags: REPLACE_IF_EXISTS|POSIX_SEMANTICS,
 //       RootDirectory: dirHandle, FileName: base }).
 //     fileHandle stays open across the rename (codex r5 MED).
-//  7. Close fileHandle.
-//  8. Re-open destination via dirHandle (FILE_OPEN with
-//     FILE_OPEN_REPARSE_POINT to refuse junctions) and re-verify DACL
-//     using verifyWindowsDACLFromHandle (defined in
-//     hub_mcp_state_dacl_windows.go).
-//  9. Close verifyHandle; close dirHandle.
+//  8. Close fileHandle.
+//  9. Re-open destination via dirHandle (FILE_OPEN with
+//     FILE_OPEN_REPARSE_POINT so the open does NOT silently follow a
+//     reparse point swapped in between rename and re-open) and
+//     re-verify the file DACL using verifyWindowsDACLFromHandle
+//     (defined in hub_mcp_state_dacl_windows.go). Combined with the
+//     atomic rename's FILE_RENAME_POSIX_SEMANTICS this guarantees the
+//     post-rename handle refers to the file we wrote.
+// 10. Close verifyHandle; close dirHandle.
 //
-// On any error after step 3 the temp file is marked DELETE-on-close
+// On any error after step 4 the temp file is marked DELETE-on-close
 // via NtSetInformationFile(FileDispositionInformation). The fileHandle
 // close in the defer then drops the inode.
 
@@ -98,7 +109,19 @@ func secureWriteClientConfigImpl(path string, contents []byte) error {
 	}
 	defer windows.CloseHandle(dirHandle)
 
-	// 1a. Refuse to overwrite a pre-existing symlink/junction at base.
+	// 2. Handle-bound parent-dir DACL verify (spec lines 323-326 +
+	//    422-432). Wrap with parent-dir context so operators see
+	//    "secure write: parent <dir> not single-user safe" rather than
+	//    a file-path-only diagnostic. Without this gate, a parent dir
+	//    broadened via Group Policy (Domain Users / Authenticated Users
+	//    inherited ACE) would silently pass and the writer would
+	//    install a token under a directory listable by every domain
+	//    user. Mirror of secure_write_posix.go's verifyPosixParentDirFromFd.
+	if err := verifyWindowsDACLFromHandle(dirHandle); err != nil {
+		return fmt.Errorf("secure write: parent %s not single-user safe: %w", parentDir, err)
+	}
+
+	// 2a. Refuse to overwrite a pre-existing symlink/junction at base.
 	// Rename with POSIX semantics silently replaces a reparse point;
 	// the caller probably meant to update the symlink target rather
 	// than create a new restricted regular file at the symlink slot.
@@ -106,14 +129,14 @@ func secureWriteClientConfigImpl(path string, contents []byte) error {
 		return fmt.Errorf("secure write: target %s: %w", path, err)
 	}
 
-	// 2. Compose unpredictable temp name to defeat slot-squat races.
+	// 3. Compose unpredictable temp name to defeat slot-squat races.
 	randBytes := make([]byte, 8)
 	if _, err := rand.Read(randBytes); err != nil {
 		return fmt.Errorf("secure write: crypto/rand: %w", err)
 	}
 	tempName := fmt.Sprintf(".%s.tmp.%d.%s", base, os.Getpid(), hex.EncodeToString(randBytes))
 
-	// 3. NtCreateFile relative to dirHandle (FILE_CREATE disposition;
+	// 4. NtCreateFile relative to dirHandle (FILE_CREATE disposition;
 	//    fails if the temp slot already exists). DELETE | WRITE_DAC |
 	//    FILE_GENERIC_WRITE | SYNCHRONIZE desired access.
 	fileHandle, err := ntCreateRelative(
@@ -140,7 +163,7 @@ func secureWriteClientConfigImpl(path string, contents []byte) error {
 		_ = setFileDeleteOnClose(fileHandle)
 	}
 
-	// 4. SetSecurityInfo handle-bound — restrictive DACL applied
+	// 5. SetSecurityInfo handle-bound — restrictive DACL applied
 	//    BEFORE any bytes hit disk. PROTECTED_DACL prevents inherited
 	//    ACEs from re-broadening access between rename and re-verify.
 	if err := setRestrictiveDACL(fileHandle); err != nil {
@@ -148,7 +171,7 @@ func secureWriteClientConfigImpl(path string, contents []byte) error {
 		return fmt.Errorf("secure write: set DACL: %w", err)
 	}
 
-	// 5. WriteFile + FlushFileBuffers.
+	// 6. WriteFile + FlushFileBuffers.
 	if err := windowsWriteAll(fileHandle, contents); err != nil {
 		cleanup()
 		return fmt.Errorf("secure write: write temp: %w", err)
@@ -158,7 +181,7 @@ func secureWriteClientConfigImpl(path string, contents []byte) error {
 		return fmt.Errorf("secure write: flush temp: %w", err)
 	}
 
-	// 6. NtSetInformationFile(FileRenameInformationEx) — atomic rename
+	// 7. NtSetInformationFile(FileRenameInformationEx) — atomic rename
 	//    relative to dirHandle. fileHandle MUST stay open across the
 	//    call (codex r5 MED).
 	if err := ntRenameRelative(fileHandle, dirHandle, base); err != nil {
@@ -166,13 +189,13 @@ func secureWriteClientConfigImpl(path string, contents []byte) error {
 		return fmt.Errorf("secure write: ntrename %s -> %s: %w", tempName, base, err)
 	}
 
-	// 7. Close the file handle (rename complete, safe to release).
+	// 8. Close the file handle (rename complete, safe to release).
 	if err := windows.CloseHandle(fileHandle); err != nil {
 		return fmt.Errorf("secure write: close temp: %w", err)
 	}
 	closed = true
 
-	// 8. Re-open destination via SAME dirHandle and re-verify DACL.
+	// 9. Re-open destination via SAME dirHandle and re-verify DACL.
 	//    GENERIC_READ + READ_CONTROL is needed for GetSecurityInfo to
 	//    read the DACL.
 	verifyHandle, err := ntOpenRelative(
@@ -191,11 +214,16 @@ func secureWriteClientConfigImpl(path string, contents []byte) error {
 }
 
 // openDirHandleNoReparse opens a directory with FILE_LIST_DIRECTORY +
-// FILE_FLAG_BACKUP_SEMANTICS + FILE_FLAG_OPEN_REPARSE_POINT. The
-// reparse-point flag here means "open the reparse point itself rather
+// READ_CONTROL + FILE_FLAG_BACKUP_SEMANTICS + FILE_FLAG_OPEN_REPARSE_POINT.
+// The reparse-point flag here means "open the reparse point itself rather
 // than the target", which is the right behavior for our purposes —
 // the caller's downstream operations (NtCreateFile relative to this
 // handle) inherit the same anchor and can't be re-walked from root.
+// READ_CONTROL is required so the step-2 parent-DACL verify (which
+// calls GetSecurityInfo on this handle) can read the DACL; without it
+// GetSecurityInfo fails with ACCESS_DENIED on dirs whose DACL doesn't
+// happen to grant the current process token read-control via some
+// broader right.
 //
 // FILE_FLAG_OPEN_REPARSE_POINT alone doesn't fail on symlinks — but
 // any subsequent DACL allowlist check rejects mis-owned reparse points.
@@ -206,7 +234,7 @@ func openDirHandleNoReparse(path string) (windows.Handle, error) {
 	}
 	h, err := windows.CreateFile(
 		pathW,
-		windows.FILE_LIST_DIRECTORY|windows.SYNCHRONIZE,
+		windows.FILE_LIST_DIRECTORY|windows.READ_CONTROL|windows.SYNCHRONIZE,
 		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
 		nil,
 		windows.OPEN_EXISTING,
@@ -264,10 +292,21 @@ func ntCreateRelative(
 // ntOpenRelative wraps NtCreateFile with FILE_OPEN disposition for an
 // existing file. Used by the post-rename re-verify step.
 //
-// FILE_OPEN_REPARSE_POINT in createOptions makes the open FAIL if the
-// final component is a reparse point. Combined with the dirHandle
-// anchor this prevents an attacker from swapping in a junction
-// between rename and re-open.
+// FILE_OPEN_REPARSE_POINT in createOptions does NOT make the open
+// fail on a reparse point — it instructs NtCreateFile to open the
+// reparse point's metadata WITHOUT following the link. Callers that
+// must reject reparse points still need to inspect FileAttributes
+// after open (see refusePreexistingReparsePoint earlier in this file).
+//
+// The actual reparse-point reject for the destination filename comes
+// from the explicit refusePreexistingReparsePoint call in step 2a
+// (run BEFORE the temp write). The atomic rename in step 7 uses
+// FILE_RENAME_POSIX_SEMANTICS, which renames the file we just wrote
+// over the destination basename in one transactional step; the
+// post-rename re-open via this helper therefore lands on the file we
+// wrote, even if a hostile process swapped a reparse point into the
+// slot between rename and re-open (the rename was atomic on the
+// dirHandle-relative basename, not a path re-walk).
 func ntOpenRelative(
 	dirHandle windows.Handle,
 	name string,

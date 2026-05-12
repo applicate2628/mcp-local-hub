@@ -10,8 +10,12 @@ import (
 // TestSecureWriteClientConfigBasicRoundTrip verifies the writer
 // produces the exact bytes at the requested path. Build-neutral —
 // runs on every platform.
+//
+// Uses hardenedTempDir so the parent-dir DACL gate (added in the
+// parent-dir-dacl-missing fix) doesn't reject %TEMP%'s inherited
+// Authenticated Users ACE. The POSIX shim returns t.TempDir() as-is.
 func TestSecureWriteClientConfigBasicRoundTrip(t *testing.T) {
-	dir := t.TempDir()
+	dir := hardenedTempDir(t)
 	target := filepath.Join(dir, "client-config.json")
 	payload := []byte(`{"mcpServers":{"foo":{"url":"http://127.0.0.1:9200/mcp"}}}`)
 	if err := SecureWriteClientConfig(target, payload); err != nil {
@@ -38,7 +42,7 @@ func TestSecureWriteClientConfigBasicRoundTrip(t *testing.T) {
 // (Windows) / renameat-over-existing (POSIX) are the relevant
 // guarantees from the spec sequence.
 func TestSecureWriteClientConfigOverwritesExisting(t *testing.T) {
-	dir := t.TempDir()
+	dir := hardenedTempDir(t)
 	target := filepath.Join(dir, "client-config.json")
 	if err := SecureWriteClientConfig(target, []byte(`{"v":1}`)); err != nil {
 		t.Fatalf("first write: %v", err)
@@ -56,12 +60,16 @@ func TestSecureWriteClientConfigOverwritesExisting(t *testing.T) {
 }
 
 // TestSecureWriteClientConfigRefusesSymlinkTarget pins the
-// O_NOFOLLOW (POSIX) / FILE_FLAG_OPEN_REPARSE_POINT (Windows)
+// O_NOFOLLOW (POSIX) / refusePreexistingReparsePoint (Windows)
 // invariant: the writer must REFUSE to overwrite a pre-existing
 // symlink. On platforms where symlinks need elevated permissions
 // (Windows), the test skips when symlink creation fails.
+//
+// Uses hardenedTempDir so the parent-dir DACL gate doesn't pre-empt
+// the symlink check — we want to assert that the symlink-specific
+// refusal fires, not the parent-dir gate.
 func TestSecureWriteClientConfigRefusesSymlinkTarget(t *testing.T) {
-	dir := t.TempDir()
+	dir := hardenedTempDir(t)
 	real := filepath.Join(dir, "real.json")
 	if err := os.WriteFile(real, []byte("{}"), 0600); err != nil {
 		t.Fatal(err)
@@ -91,7 +99,7 @@ func TestSecureWriteClientConfigPosixMode0600(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("posix-specific")
 	}
-	dir := t.TempDir()
+	dir := hardenedTempDir(t)
 	target := filepath.Join(dir, "client-config.json")
 	if err := SecureWriteClientConfig(target, []byte("{}")); err != nil {
 		t.Fatalf("SecureWriteClientConfig: %v", err)

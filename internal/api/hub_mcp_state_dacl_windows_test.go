@@ -14,6 +14,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/windows"
@@ -25,8 +26,11 @@ import (
 // ErrDaclOutsideAllowlist. This is the canonical enterprise-stance
 // test: Group-Policy ACLs that grant read to Domain Users / Auth
 // Users / corporate management SIDs must fail closed.
+//
+// Uses hardenedTempDir so the parent-dir DACL gate accepts the
+// parent; the only failure signal under test is the FILE's own DACL.
 func TestVerifyHubMcpStateDACLRejectsAuthenticatedUsersAllow(t *testing.T) {
-	dir := t.TempDir()
+	dir := hardenedTempDir(t)
 	target := filepath.Join(dir, "loose.json")
 	if err := os.WriteFile(target, []byte("{}"), 0600); err != nil {
 		t.Fatal(err)
@@ -96,8 +100,12 @@ func TestVerifyHubMcpStateDACLRejectsAuthenticatedUsersAllow(t *testing.T) {
 // GENERIC_ALL) and asserts the verifier accepts. Symmetric coverage
 // for the synthesis suite — without this case we can't tell the
 // reject test passed for the right reason.
+//
+// Uses hardenedTempDir so both the parent-dir AND the file-DACL gates
+// pass; if either failed for a different reason, this test would
+// surface that ambiguity.
 func TestVerifyHubMcpStateDACLAcceptsAllowlistOnly(t *testing.T) {
-	dir := t.TempDir()
+	dir := hardenedTempDir(t)
 	target := filepath.Join(dir, "tight.json")
 	if err := os.WriteFile(target, []byte("{}"), 0600); err != nil {
 		t.Fatal(err)
@@ -166,5 +174,120 @@ func TestVerifyHubMcpStateDACLAcceptsAllowlistOnly(t *testing.T) {
 
 	if err := VerifyHubMcpStateDACL(target); err != nil {
 		t.Errorf("VerifyHubMcpStateDACL must accept allowlist-only DACL; got %v", err)
+	}
+}
+
+// applyAllowlistOnlyDACL applies an allowlist-conforming PROTECTED
+// DACL to target via SetNamedSecurityInfo. Used by the parent-DACL
+// reject test below to ensure the FILE's own DACL is conforming, so
+// the only signal under test is the parent-dir DACL gate.
+func applyAllowlistOnlyDACL(t *testing.T, target string) {
+	t.Helper()
+	currentSID, err := currentUserSID()
+	if err != nil {
+		t.Fatalf("currentUserSID: %v", err)
+	}
+	systemSID, err := windows.StringToSid("S-1-5-18")
+	if err != nil {
+		t.Fatalf("system sid: %v", err)
+	}
+	adminSID, err := windows.StringToSid("S-1-5-32-544")
+	if err != nil {
+		t.Fatalf("admin sid: %v", err)
+	}
+	entries := []windows.EXPLICIT_ACCESS{
+		{
+			AccessPermissions: windows.GENERIC_ALL,
+			AccessMode:        windows.GRANT_ACCESS,
+			Inheritance:       windows.NO_INHERITANCE,
+			Trustee: windows.TRUSTEE{
+				TrusteeForm:  windows.TRUSTEE_IS_SID,
+				TrusteeType:  windows.TRUSTEE_IS_USER,
+				TrusteeValue: windows.TrusteeValueFromSID(currentSID),
+			},
+		},
+		{
+			AccessPermissions: windows.GENERIC_ALL,
+			AccessMode:        windows.GRANT_ACCESS,
+			Inheritance:       windows.NO_INHERITANCE,
+			Trustee: windows.TRUSTEE{
+				TrusteeForm:  windows.TRUSTEE_IS_SID,
+				TrusteeType:  windows.TRUSTEE_IS_WELL_KNOWN_GROUP,
+				TrusteeValue: windows.TrusteeValueFromSID(systemSID),
+			},
+		},
+		{
+			AccessPermissions: windows.GENERIC_ALL,
+			AccessMode:        windows.GRANT_ACCESS,
+			Inheritance:       windows.NO_INHERITANCE,
+			Trustee: windows.TRUSTEE{
+				TrusteeForm:  windows.TRUSTEE_IS_SID,
+				TrusteeType:  windows.TRUSTEE_IS_GROUP,
+				TrusteeValue: windows.TrusteeValueFromSID(adminSID),
+			},
+		},
+	}
+	dacl, err := windows.ACLFromEntries(entries, nil)
+	if err != nil {
+		t.Fatalf("ACLFromEntries: %v", err)
+	}
+	if err := windows.SetNamedSecurityInfo(
+		target,
+		windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+		nil,
+		nil,
+		dacl,
+		nil,
+	); err != nil {
+		t.Fatalf("SetNamedSecurityInfo on file: %v", err)
+	}
+}
+
+// TestVerifyHubMcpStateDACLRejectsPermissiveParentDACL builds a
+// parent dir with an Authenticated Users:GenericRead ACE, then
+// creates a state file inside whose OWN DACL is allowlist-conforming.
+// VerifyHubMcpStateDACL must reject because the parent-dir DACL is
+// not single-user-safe (spec lines 277-281 + 422-432).
+//
+// Why this test matters: spec line 281 explicitly requires the
+// verifier to walk BOTH the file and its parent dir. Without the
+// parent-dir gate, a state-dir whose parent (%LOCALAPPDATA%) had
+// its DACL broadened externally (Group Policy, MDM, etc.) would
+// pass the check even though every domain user could list / read
+// the directory contents.
+func TestVerifyHubMcpStateDACLRejectsPermissiveParentDACL(t *testing.T) {
+	// Build an intermediate parent so the leaky DACL is on a dir we
+	// own outright (t.TempDir() itself sits under %TEMP% with inherited
+	// ACEs we shouldn't be reshaping).
+	parent := filepath.Join(t.TempDir(), "leaky-parent")
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatalf("mkdir parent: %v", err)
+	}
+	// Re-use the helper from secure_write_windows_test.go (same
+	// package, _windows.go build tag — both files compile together).
+	synthesizeDirWithAuthUsersReadACE(t, parent)
+
+	target := filepath.Join(parent, "hub-mcp-tokens.json")
+	if err := os.WriteFile(target, []byte("{}"), 0600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	// Lock down the FILE's own DACL to allowlist-only so the file
+	// check passes — the only failure path under test is the parent.
+	applyAllowlistOnlyDACL(t, target)
+
+	err := VerifyHubMcpStateDACL(target)
+	if err == nil {
+		t.Fatalf("VerifyHubMcpStateDACL must reject permissive parent dir; got nil")
+	}
+	if !errors.Is(err, ErrDaclOutsideAllowlist) {
+		t.Errorf("expected ErrDaclOutsideAllowlist (wrapped), got %v", err)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, parent) {
+		t.Errorf("error %q must mention parent dir %q", msg, parent)
+	}
+	if !strings.Contains(msg, "parent") {
+		t.Errorf("error %q must use the word 'parent' to signal the dir-DACL gate", msg)
 	}
 }

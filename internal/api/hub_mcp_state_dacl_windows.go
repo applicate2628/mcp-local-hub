@@ -6,8 +6,10 @@
 //
 //  1. CreateFile(path, READ_CONTROL, FILE_FLAG_OPEN_REPARSE_POINT |
 //     FILE_FLAG_BACKUP_SEMANTICS). REPARSE_POINT here means "open the
-//     reparse point itself rather than its target"; BACKUP_SEMANTICS
-//     is required so the open works on directories too.
+//     reparse point's metadata WITHOUT following it"; combined with
+//     the FILE_ATTRIBUTE_REPARSE_POINT check below, any symlink /
+//     junction at `path` is refused outright. BACKUP_SEMANTICS is
+//     required so the open works on directories too.
 //  2. GetSecurityInfo(handle, SE_FILE_OBJECT,
 //     OWNER | DACL_SECURITY_INFORMATION) — fetches owner SID + DACL.
 //  3. Owner SID == current user (else ErrWrongOwner).
@@ -17,6 +19,13 @@
 //     {current-user, S-1-5-18 (LocalSystem), S-1-5-32-544 (BuiltinAdministrators)}.
 //     Any read-capable ALLOW outside the allowlist → ErrDaclOutsideAllowlist.
 //  5. DENY ACEs are skipped — they cannot widen access.
+//  6. Open the immediate parent dir via FILE_LIST_DIRECTORY +
+//     FILE_FLAG_BACKUP_SEMANTICS + FILE_FLAG_OPEN_REPARSE_POINT and
+//     apply the SAME allowlist check via verifyWindowsParentDACL.
+//     Spec lines 277-281: a state file whose parent dir is broadened
+//     (Group Policy, MDM) leaks the directory listing to every
+//     domain user, even if the file's own DACL is tight. Mirror of
+//     the POSIX leg's verifyPosixParentDirFromFd (secure_write_posix.go).
 //
 // The per-package helper verifyWindowsDACLFromHandle is reused by
 // secure_write_windows.go's post-rename re-verify step.
@@ -29,6 +38,7 @@ package api
 
 import (
 	"fmt"
+	"path/filepath"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -61,7 +71,56 @@ func verifyHubMcpStateDACLImpl(path string) error {
 	if fi.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 		return ErrIrregularFile
 	}
-	return verifyWindowsDACLFromHandle(h)
+	if err := verifyWindowsDACLFromHandle(h); err != nil {
+		return err
+	}
+
+	// Spec lines 277-281 require ALSO verifying the parent dir's DACL.
+	// A state file whose parent is broadened externally (Group Policy,
+	// MDM) leaks the directory listing to every domain user even when
+	// the file's own DACL is tight. The POSIX leg performs the
+	// equivalent check via verifyPosixParentDirFromFd in
+	// secure_write_posix.go's open-time gate; this mirrors that on
+	// the load-time read path.
+	return verifyWindowsParentDACL(filepath.Dir(path))
+}
+
+// verifyWindowsParentDACL opens parentDir with FILE_LIST_DIRECTORY +
+// FILE_FLAG_BACKUP_SEMANTICS + FILE_FLAG_OPEN_REPARSE_POINT and applies
+// the same allowlist-based DACL check used for the file itself. Any
+// error is wrapped with parent-dir context ("parent <dir> not
+// single-user safe") so operators see the actionable cause (a GPO /
+// MDM-pushed ACL on the parent, not on the file) rather than chase
+// the file path.
+//
+// Mirror of POSIX `verifyPosixParentDirFromFd` (secure_write_posix.go).
+// Spec lines 277-281 + 422-432.
+func verifyWindowsParentDACL(parentDir string) error {
+	pathW, err := windows.UTF16PtrFromString(parentDir)
+	if err != nil {
+		return fmt.Errorf("utf16 parent %q: %w", parentDir, err)
+	}
+	h, err := windows.CreateFile(
+		pathW,
+		// READ_CONTROL is required so GetSecurityInfo can read the
+		// parent dir's owner + DACL via the resulting handle. Without
+		// it, GetSecurityInfo returns ERROR_ACCESS_DENIED even when
+		// the current user owns the directory.
+		windows.FILE_LIST_DIRECTORY|windows.READ_CONTROL|windows.SYNCHRONIZE,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT,
+		0,
+	)
+	if err != nil {
+		return fmt.Errorf("open parent %s: %w", parentDir, err)
+	}
+	defer windows.CloseHandle(h)
+	if err := verifyWindowsDACLFromHandle(h); err != nil {
+		return fmt.Errorf("parent %s not single-user safe: %w", parentDir, err)
+	}
+	return nil
 }
 
 // verifyWindowsDACLFromHandle reads the owner SID + DACL from `h` via

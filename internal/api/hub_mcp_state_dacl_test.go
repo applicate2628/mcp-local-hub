@@ -10,9 +10,14 @@ import (
 // TestVerifyHubMcpStateDACLAcceptsFreshlyCreatedFile is the happy-path
 // gate: a file just written by SecureWriteClientConfig must pass the
 // allowlist check. Build-neutral — the POSIX impl checks owner-uid +
-// mode mask, the Windows impl checks the canonical DACL.
+// mode mask, the Windows impl checks the canonical DACL on both the
+// file and its immediate parent dir.
+//
+// Uses hardenedTempDir so the parent-dir DACL gate (added in the
+// parent-dir-dacl-missing fix) doesn't reject %TEMP%'s inherited
+// Authenticated Users ACE on Windows. POSIX shim is pass-through.
 func TestVerifyHubMcpStateDACLAcceptsFreshlyCreatedFile(t *testing.T) {
-	dir := t.TempDir()
+	dir := hardenedTempDir(t)
 	target := filepath.Join(dir, "hub-mcp-tokens.json")
 	if err := SecureWriteClientConfig(target, []byte("{}")); err != nil {
 		t.Fatalf("SecureWriteClientConfig: %v", err)
