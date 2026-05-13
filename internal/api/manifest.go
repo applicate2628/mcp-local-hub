@@ -392,10 +392,19 @@ func (a *API) validateManifestForStorageName(name, yaml string) []string {
 	return manifestBlockingWarnings(m)
 }
 
-// manifestValidationWarnings returns blocking + advisory warnings
-// combined, in that order. Used by ManifestValidate (which returns
-// the full list to the caller for display) but NOT by storage
-// paths.
+// manifestValidationWarnings returns the BLOCKING warnings only.
+// Pre-r10 it returned blocking + advisory combined; codex bot r10
+// P2 closure (PR #169) flagged that the GUI save flow
+// (AddServer.tsx) treats ANY warnings.length > 0 as fatal, so
+// surfacing advisories through this path effectively blocks the
+// GUI save of accepted-but-no-op manifests like remote-http +
+// weekly_refresh:true.
+//
+// Advisories are surfaced separately via manifestAdvisoryWarnings
+// (consumed at install / daemon-launch time by sub-PR 2+ of G6).
+// The current API surface intentionally does NOT expose advisories
+// to ManifestValidate callers — that gate is for "this manifest
+// will fail to install/run", not "you might want to know".
 //
 // Daemons-empty exemptions:
 //   - Workspace-scoped manifests legitimately have no daemons
@@ -406,14 +415,8 @@ func (a *API) validateManifestForStorageName(name, yaml string) []string {
 // codex bot r3 P1 closure (PR #169): pre-fix, valid remote-http
 // manifests couldn't be created/edited because the daemon-empty
 // warning was treated as a hard error.
-// codex bot r7 P2 closure (PR #169): the weekly_refresh-on-remote-
-// http warning is spec'd as non-fatal but storage paths treated
-// any returned warning as a hard error. Split into blocking +
-// advisory categories; storage paths now consume only blocking.
 func manifestValidationWarnings(m *config.ServerManifest) []string {
-	out := manifestBlockingWarnings(m)
-	out = append(out, manifestAdvisoryWarnings(m)...)
-	return out
+	return manifestBlockingWarnings(m)
 }
 
 // manifestBlockingWarnings returns warnings that ManifestCreateIn /

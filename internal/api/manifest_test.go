@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"mcp-local-hub/internal/config"
 )
 
 func TestManifestListReturnsAllYAML(t *testing.T) {
@@ -73,51 +75,73 @@ client_bindings:
 	}
 }
 
-// TestManifestValidateRemoteHTTPWeeklyRefreshTrueWarns pins codex
-// bot r6 P2 closure (PR #169) + G6 spec §"Validation rules":
-// remote-http has no local daemon to refresh, so weekly_refresh:
-// true is a no-op. Emit a non-fatal warning so operators don't
-// believe weekly refresh is active when it's ignored. The YAML
-// bool collapses absent / false into the same Go value (false),
-// so we can only flag the explicit-true case.
-func TestManifestValidateRemoteHTTPWeeklyRefreshTrueWarns(t *testing.T) {
-	a := NewAPI()
-	yaml := `name: ctx7
-kind: global
-transport: remote-http
-url: https://mcp.context7.com/mcp
-weekly_refresh: true
-client_bindings:
-  - client: claude-code
-`
-	warnings := a.ManifestValidate(yaml)
+// TestManifestAdvisoryWarnings_RemoteHTTPWeeklyRefreshTrue pins
+// the G6 spec §"Validation rules" advisory: remote-http has no
+// local daemon to refresh, so weekly_refresh:true is a no-op.
+// We emit a NON-BLOCKING advisory so install-time / launch-time
+// surfaces can show it; the GUI save path (which gates on
+// ManifestValidate output) does NOT see this advisory — codex
+// bot r10 P2 closure (PR #169) showed surfacing it through
+// ManifestValidate would block GUI save of an accepted-but-no-op
+// configuration.
+//
+// The test exercises both halves of the contract:
+//   - advisory appears when WeeklyRefresh=true on remote-http
+//   - advisory does NOT leak into ManifestValidate output (the
+//     blocking surface)
+func TestManifestAdvisoryWarnings_RemoteHTTPWeeklyRefreshTrue(t *testing.T) {
+	m := &config.ServerManifest{
+		Name:          "ctx7",
+		Kind:          config.KindGlobal,
+		Transport:     config.TransportRemoteHTTP,
+		URL:           "https://x.example",
+		WeeklyRefresh: true,
+	}
+	advisories := manifestAdvisoryWarnings(m)
 	found := false
-	for _, w := range warnings {
+	for _, w := range advisories {
 		if strings.Contains(w, "weekly_refresh") && strings.Contains(w, "remote-http") {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("expected weekly_refresh-on-remote-http warning; got %v", warnings)
+		t.Errorf("expected weekly_refresh advisory; got %v", advisories)
+	}
+
+	// The advisory MUST NOT appear in ManifestValidate's blocking
+	// surface — that gate is for save-time errors. GUI save would
+	// otherwise treat the advisory as fatal.
+	a := NewAPI()
+	blocking := a.ManifestValidate(`name: ctx7
+kind: global
+transport: remote-http
+url: https://x.example
+weekly_refresh: true
+client_bindings:
+  - client: claude-code
+`)
+	for _, w := range blocking {
+		if strings.Contains(w, "weekly_refresh") {
+			t.Errorf("weekly_refresh advisory leaked into ManifestValidate output (would block GUI save): %v", blocking)
+		}
 	}
 }
 
-// TestManifestValidateRemoteHTTPWeeklyRefreshFalseSilent pins that
-// the warning ONLY fires for explicit true. Default (absent) maps
-// to false → no warning.
-func TestManifestValidateRemoteHTTPWeeklyRefreshFalseSilent(t *testing.T) {
-	a := NewAPI()
-	yaml := `name: ctx7
-kind: global
-transport: remote-http
-url: https://mcp.context7.com/mcp
-client_bindings:
-  - client: claude-code
-`
-	warnings := a.ManifestValidate(yaml)
-	for _, w := range warnings {
+// TestManifestAdvisoryWarnings_RemoteHTTPWeeklyRefreshFalse pins
+// that the advisory ONLY fires for explicit true. Default (absent)
+// maps to false → no advisory.
+func TestManifestAdvisoryWarnings_RemoteHTTPWeeklyRefreshFalse(t *testing.T) {
+	m := &config.ServerManifest{
+		Name:          "ctx7",
+		Kind:          config.KindGlobal,
+		Transport:     config.TransportRemoteHTTP,
+		URL:           "https://x.example",
+		WeeklyRefresh: false,
+	}
+	advisories := manifestAdvisoryWarnings(m)
+	for _, w := range advisories {
 		if strings.Contains(w, "weekly_refresh") {
-			t.Errorf("unexpected weekly_refresh warning when key absent: %v", warnings)
+			t.Errorf("unexpected weekly_refresh advisory when WeeklyRefresh==false: %v", advisories)
 		}
 	}
 }
