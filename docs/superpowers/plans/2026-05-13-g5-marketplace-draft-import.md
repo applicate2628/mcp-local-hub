@@ -116,32 +116,48 @@ func IsSensitiveEnvName(name string) bool {
 }
 ```
 
-**Full exported API surface** (codex r2 P1 closure — Phase 3 references these; pin them in Phase 0):
+**Full exported API surface** (codex r2 P1 #4 + r3 P1 #2 closures — preserve every G7 field including the existing `undefinedW` warning collector):
 
 ```go
 // PlaceholderExpander holds resolved environment + workspace path.
 // Shared between G7 (VS Code import) and G5 (marketplace generate).
-// G7 leaves SkipSensitiveEnv at its default (false): the local-trusted
-// VS Code file is expanded as before. G5 sets SkipSensitiveEnv: true
-// because catalog entries are untrusted; sensitive env names stay
-// verbatim in the projected draft.
+//
+// G7 callers leave SkipSensitiveEnv at its default (false): the
+// local-trusted VS Code file is expanded as before, and undefined
+// env vars are collected via UndefinedEnv for the existing
+// "placeholder ${env:%s} expanded to empty string" warning surface.
+//
+// G5 callers set SkipSensitiveEnv: true. Sensitive env names stay
+// verbatim in the projected draft, and SensitiveSkipped accumulates
+// the names for `WarningsForSensitive()`.
 type PlaceholderExpander struct {
 	Workspace        string             // ${workspaceFolder}
-	UserHome         string             // ${userHome}
-	PathSeparator    string             // ${pathSeparator}
+	UserHome         string             // ${userHome} — preserved from G7
+	PathSeparator    string             // ${pathSeparator} — preserved from G7
 	Getenv           func(string) string // injection point for tests
-	SkipSensitiveEnv bool                // when true, sensitive env names stay verbatim
 
-	// SensitiveSkipped collects the env-var names that were left
-	// verbatim under SkipSensitiveEnv. Caller reads this AFTER all
-	// Expand calls to emit one warning per name. Same expander can
-	// be reused across many Expand calls; the slice accumulates.
+	// UndefinedEnv is the existing G7 surface (was vscodeExpander.undefinedW).
+	// Empty-resolution env names are collected here. G7 reads this
+	// AFTER expansion to emit "placeholder ${env:%s} expanded to
+	// empty string" warnings. Caller initializes to non-nil; the
+	// expander writes via map-set semantics (no replacement of the
+	// map reference, so caller can keep a reference to read later).
+	UndefinedEnv map[string]struct{}
+
+	SkipSensitiveEnv bool // G5 sets this to true
+
+	// SensitiveSkipped collects env-var names left verbatim under
+	// SkipSensitiveEnv. G5 reads this AFTER all Expand calls to
+	// emit one stderr warning per name. Same expander is reused
+	// across many Expand calls; the slice accumulates with dedup.
 	SensitiveSkipped []string
 }
 
-// Expand replaces every ${...} placeholder in s. Returns the
-// expanded string. Mutates SensitiveSkipped when a sensitive env
-// name is encountered AND SkipSensitiveEnv is true.
+// Expand replaces every ${...} placeholder in s and returns the
+// expanded string. Mutates UndefinedEnv (when an env: form resolves
+// empty) and SensitiveSkipped (when SkipSensitiveEnv && the env name
+// is sensitive). Byte-equivalent to G7's existing `vscodeExpander.expand`
+// for the default (SkipSensitiveEnv=false) case.
 func (e *PlaceholderExpander) Expand(s string) string { /* impl */ }
 
 // WarningsForSensitive returns one stderr-friendly warning per
@@ -151,14 +167,45 @@ func (e *PlaceholderExpander) WarningsForSensitive() []string { /* impl */ }
 
 Concrete implementation notes for the Expand method:
 
-- Keep the existing `vscodePlaceholderRE` regex (`\$\{(env:([^}]+)|workspaceFolder|userHome|pathSeparator)\}`); rename the variable to `PlaceholderRE` but keep the body byte-identical so G7 stays stable.
-- For each `env:NAME` match, when `SkipSensitiveEnv && IsSensitiveEnvName(name)`: leave the original `${env:NAME}` token unchanged AND append `name` to `e.SensitiveSkipped` if not already present (deduplicate).
-- For all other matches, expand as G7 does today (`e.Getenv(name)` for env, `e.Workspace` for workspaceFolder, etc.).
+- Keep the existing `vscodePlaceholderRE` regex (`\$\{(env:([^}]+)|workspaceFolder|userHome|pathSeparator)\}`); rename the variable to `PlaceholderRE` but keep the body byte-identical.
+- For each `env:NAME` match:
+  - When `SkipSensitiveEnv && IsSensitiveEnvName(name)`: leave the original `${env:NAME}` token unchanged AND append `name` to `e.SensitiveSkipped` if not already present (dedup).
+  - Else: resolve via `e.Getenv(name)`. If the result is empty, write `e.UndefinedEnv[name] = struct{}{}` (matching G7's existing behavior).
+- For `workspaceFolder` / `userHome` / `pathSeparator` matches, expand as G7 does today.
 
-`WarningsForSensitive()` formats each entry as
-`catalog references ${env:NAME} — left verbatim in the draft so the value is never written to the YAML you'll commit; edit before saving`.
+`WarningsForSensitive()` formats each entry as `catalog references ${env:NAME} — left verbatim in the draft so the value is never written to the YAML you'll commit; edit before saving`.
 
-G7's existing call sites pass `PlaceholderExpander{Workspace, Getenv}` (defaults) — production behavior unchanged.
+**G7 migration call-site changes (Step 0.3 of this phase):** the existing G7 imports build the expander as:
+
+```go
+exp := vscodeExpander{
+    workspace:  workspacePath,
+    home:       home,
+    pathSep:    sep,
+    getenv:     getenv,
+    undefinedW: map[string]struct{}{},
+}
+```
+
+The promoted equivalent is byte-equivalent except for casing:
+
+```go
+exp := PlaceholderExpander{
+    Workspace:     workspacePath,
+    UserHome:      home,
+    PathSeparator: sep,
+    Getenv:        getenv,
+    UndefinedEnv:  map[string]struct{}{},
+}
+```
+
+Method/helper renames:
+- `vscodeExpander.expand(s)` → `(*PlaceholderExpander).Expand(s)`
+- `expandStringSlice(raw, exp)` keeps the signature but takes `*PlaceholderExpander`.
+- `expandStringMap(raw, exp)` keeps the signature but takes `*PlaceholderExpander`.
+- `exp.undefinedW` → `exp.UndefinedEnv` in the G7 warning-collection code (around `result.Warnings = append(...)`).
+
+Result: every existing G7 test (`TestImportVSCodeWorkspace_PlaceholderExpansion`, `EnvUndefinedWarning`, etc.) passes byte-equivalently — G7 reads `exp.UndefinedEnv` after expansion and formats the same warning string it did before.
 
 - [ ] **Step 0.4: Run all G7 tests + the new sensitive-env test**
 
@@ -546,7 +593,7 @@ git commit -m "feat(g5): catalog schema + parser + seed catalog with CheckManife
 - Create: `internal/api/marketplace_cache_test.go`
 - Modify: `internal/api/state_paths.go` (add `marketplaceCacheFileLeaf` + allow it via `validateStateFileName`)
 
-Cache uses `writeHubMcpStateFile`/`readHubMcpStateFile` (G4 hardening: flock + atomic rename + DACL re-verify). HTTPS-only client lives in its own file so tests can swap a TLS-injected client without affecting production.
+Cache uses `writeHubMcpStateFile`/`readHubMcpStateFile` (G4 hardening: atomic tempfile + rename + post-rename DACL re-verify (best-effort cache, no cross-process flock — see Architecture intro)). HTTPS-only client lives in its own file so tests can swap a TLS-injected client without affecting production.
 
 - [ ] **Step 2.1: Add cache file leaf constant**
 
@@ -963,8 +1010,9 @@ Create `internal/api/marketplace_cache.go`:
 // §"Cache strategy".
 //
 // codex r1 P1 closure: cache writes route through
-// writeHubMcpStateFile (G4-grade flock + atomic rename + DACL
-// re-verify). Reads route through readHubMcpStateFile
+// writeHubMcpStateFile (G4 SecureWriteClientConfig: atomic tempfile
+// + rename + post-rename DACL re-verify; best-effort, no cross-process
+// flock). Reads route through readHubMcpStateFile
 // (VerifyHubMcpStateDACL gates the open). Future fetched_at and
 // negative ages are clamped (P2 closure).
 
@@ -1435,47 +1483,104 @@ git commit -m "feat(g5): generator → stdio-bridge + sensitive-env redaction + 
 
 Four subcommands. `show` prints metadata only (NO README body fetch — operator opens `readme_url` themselves). Test harness uses `httptest.NewTLSServer` + injected client.
 
-**Test-client injection hook (codex r2 P1 closure):** the CLI subcommands need a way to swap the production HTTPS-only client (which would reject the self-signed cert from `httptest.NewTLSServer`) for a TLS-trusting client in tests. Define a package-level hook in `internal/api/marketplace_http.go`:
+**Test-client injection hook (codex r2 P1 #2 + r3 P1 #1 closures):** the CLI subcommands need a way to swap the production HTTPS-only client (which would reject the self-signed cert from `httptest.NewTLSServer`) for a TLS-trusting client in tests. Define the hook AND its TLS-building helper in **`internal/api/marketplace_testhook.go`** — a regular (non-`_test.go`) Go file in the api package. This is important: `_test.go` files are NOT visible to other packages' test code, but a regular file inside `internal/api` is reachable from `internal/cli/marketplace_test.go`. The function bodies live in production code but are intentionally only called from tests:
 
 ```go
-// MarketplaceTestClient is a test-only hook. When non-nil, the
-// marketplace CLI uses it instead of the production client. Set
-// from package-internal test helpers; cleared in t.Cleanup. The
-// hook lives in the api package (not cli) so api package tests
-// can use it too.
-var MarketplaceTestClient *http.Client
+// internal/api/marketplace_testhook.go — G5 test-injection surface.
+//
+// codex r3 P1 #1 closure: these helpers MUST live in a regular
+// Go file (not _test.go) so cross-package test code in
+// internal/cli/marketplace_test.go can call them via the
+// `mcp-local-hub/internal/api` import. The production paths
+// (LoadMarketplaceCatalog, RefreshMarketplaceCatalog) never call
+// them; the file only exists for the test-injection surface.
+
+package api
+
+import (
+	"crypto/tls"
+	"net/http"
+	"net/http/httptest"
+	"sync"
+)
+
+// marketplaceTestClient is the optional test-only client. nil in
+// production. Guarded by marketplaceTestClientMu so concurrent test
+// invocations don't race the hook pointer (codex r3 P3 #1 closure).
+var (
+	marketplaceTestClientMu sync.Mutex
+	marketplaceTestClient   *http.Client
+)
 
 // MarketplaceClientForCmd returns the test hook if set, else the
-// production client. Used by CLI subcommands so production paths
-// never need to know about test injection. Exported (uppercase)
-// because the cli package calls it.
+// production client. CLI subcommands call this to fetch a client.
+// Mutex-guarded so any test that flips the hook in parallel is
+// observably ordered against readers.
 func MarketplaceClientForCmd() *http.Client {
-	if MarketplaceTestClient != nil {
-		return MarketplaceTestClient
+	marketplaceTestClientMu.Lock()
+	defer marketplaceTestClientMu.Unlock()
+	if marketplaceTestClient != nil {
+		return marketplaceTestClient
 	}
 	return newMarketplaceClient()
 }
 
 // InstallMarketplaceTestClientForCLI builds a TLS-trusting client
 // for `httptest.NewTLSServer` and installs it as the CLI hook for
-// the duration of the test. Returns a cleanup closure.
+// the duration of the test. Returns a cleanup closure that restores
+// the previous hook (typically nil). Tests should pass the return
+// to `t.Cleanup`.
+//
+// The function itself is in production code; it just isn't called
+// from production code paths. CI builds compile it; the binary
+// never invokes it.
 func InstallMarketplaceTestClientForCLI(srv *httptest.Server) func() {
-	prev := MarketplaceTestClient
-	MarketplaceTestClient = injectTLSTestClient(srv)
-	return func() { MarketplaceTestClient = prev }
+	marketplaceTestClientMu.Lock()
+	defer marketplaceTestClientMu.Unlock()
+	prev := marketplaceTestClient
+	marketplaceTestClient = buildTLSTrustingClient(srv)
+	return func() {
+		marketplaceTestClientMu.Lock()
+		defer marketplaceTestClientMu.Unlock()
+		marketplaceTestClient = prev
+	}
+}
+
+// buildTLSTrustingClient is the body of injectTLSTestClient promoted
+// out of marketplace_http_test.go into production so the cli tests
+// can reach it. Inherits the production transport policy
+// (DisableCompression + CheckRedirect). MinTLS = 1.2 to keep parity
+// with mainstream Go HTTPS defaults.
+func buildTLSTrustingClient(srv *httptest.Server) *http.Client {
+	t := newMarketplaceTransport()
+	t.TLSClientConfig = &tls.Config{
+		RootCAs:    srv.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs,
+		MinVersion: tls.VersionTLS12,
+	}
+	return &http.Client{
+		Transport:     t,
+		CheckRedirect: rejectNonHTTPSRedirect,
+		Timeout:       marketplaceHTTPTimeout,
+	}
 }
 ```
 
-The CLI subcommands (`search`, `show`, `generate`, `refresh`) call `api.LoadMarketplaceCatalogWithClient(ctx, marketplaceClientForCmd(), url)` so production goes through the production client and tests go through the injected one.
-
-Tests use:
+The api package's own `marketplace_http_test.go` updates its `injectTLSTestClient` to be a one-line wrapper around `buildTLSTrustingClient`:
 
 ```go
-cleanup := api.InstallMarketplaceTestClientForCLI(srv)
-t.Cleanup(cleanup)
+// internal/api/marketplace_http_test.go
+func injectTLSTestClient(srv *httptest.Server) *http.Client {
+	return buildTLSTrustingClient(srv)
+}
 ```
 
-The `--insecure-tls-for-tests` flag idea from plan v2 first draft is REJECTED — exposing a CLI flag that disables TLS verification would be a footgun even guarded. The hook lives in test code only.
+This keeps the in-package test name short while making the implementation reachable from cross-package tests. CLI tests call:
+
+```go
+t.Cleanup(api.InstallMarketplaceTestClientForCLI(srv))
+```
+
+The `--insecure-tls-for-tests` CLI flag idea from plan v2 first draft is REJECTED — exposing a CLI flag that disables TLS verification would be a footgun even guarded. The hook lives in api package code only.
 
 - [ ] **Step 4.1: Write failing CLI tests**
 
@@ -1677,7 +1782,7 @@ discover MCP servers from a curated catalog. Default registry URL:
 - `refresh` — force re-fetch (bypass TTL + ETag).
 
 Cache: `<state-dir>/marketplace-cache.json` (routed through
-`writeHubMcpStateFile` — flock + atomic rename + DACL re-verify), 24h
+`writeHubMcpStateFile` — atomic tempfile + rename + post-rename DACL re-verify (best-effort cache, no cross-process flock — see Architecture intro)), 24h
 TTL, ETag revalidate. HTTPS-only; downgrade redirects rejected; gzip
 disabled. Native-http entries skip with a G6-deferral message until G6
 ships (no operator-side workaround in v0.3.0).
