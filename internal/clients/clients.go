@@ -433,3 +433,25 @@ func latestBackup(livePath, _ string) (string, bool, error) {
 	}
 	return "", false, nil
 }
+
+// extractHeaders pulls a string-keyed string map out of a parsed JSON/TOML
+// node at the given field name. Returns nil when the field is missing,
+// the wrong type, or contains no string values. Used by adapter GetEntry
+// implementations so install rollback's priorEntry snapshot round-trips
+// Headers losslessly.
+func extractHeaders(raw map[string]any, field string) map[string]string {
+	rawMap, ok := raw[field].(map[string]any)
+	if !ok {
+		return nil
+	}
+	hdrs := make(map[string]string, len(rawMap))
+	for k, v := range rawMap {
+		if s, ok := v.(string); ok {
+			hdrs[k] = s
+		}
+	}
+	if len(hdrs) == 0 {
+		return nil
+	}
+	return hdrs
+}

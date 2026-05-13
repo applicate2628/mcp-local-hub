@@ -77,5 +77,5 @@ func (g *geminiCLI) GetEntry(name string) (*MCPEntry, error) {
 		return nil, nil
 	}
 	url, _ := raw["url"].(string)
-	return &MCPEntry{Name: name, URL: url}, nil
+	return &MCPEntry{Name: name, URL: url, Headers: extractHeaders(raw, "headers")}, nil
 }
