@@ -80,6 +80,43 @@ func TestManifestTestRemote_SendsExpandedHeaders(t *testing.T) {
 	}
 }
 
+// TestManifestTestRemote_ManifestHeadersCannotOverrideProtocolHeaders
+// pins bot r3 P2 closure (PR #171): a manifest attempting to set
+// MCP-Protocol-Version, Accept, or Content-Type must NOT win against
+// the protocol headers we own. Apply user headers first, then force
+// the protocol headers — any conflicting manifest entry is silently
+// overwritten by the protocol baseline.
+func TestManifestTestRemote_ManifestHeadersCannotOverrideProtocolHeaders(t *testing.T) {
+	var gotMPV, gotAccept, gotContentType, gotAuth string
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMPV = r.Header.Get("MCP-Protocol-Version")
+		gotAccept = r.Header.Get("Accept")
+		gotContentType = r.Header.Get("Content-Type")
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","serverInfo":{"name":"x","version":"y"}}}`))
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	writeManifest(t, dir, "remote", "name: remote\nkind: global\ntransport: remote-http\nurl: "+srv.URL+"\nheaders:\n  Authorization: \"Bearer real-token\"\n  MCP-Protocol-Version: \"1.0-bad\"\n  Accept: \"text/html\"\n  Content-Type: \"text/plain\"\nclient_bindings:\n  - client: claude-code\n")
+	a := NewAPI()
+	if _, err := a.manifestTestRemoteWithClient(context.Background(), dir, "remote", buildTLSTrustingClient(srv)); err != nil {
+		t.Fatalf("test-remote: %v", err)
+	}
+	if gotMPV != testRemoteProtocolVersion {
+		t.Errorf("MCP-Protocol-Version=%q, want %q (manifest must not override)", gotMPV, testRemoteProtocolVersion)
+	}
+	if gotAccept != "application/json, text/event-stream" {
+		t.Errorf("Accept=%q, want default (manifest must not override)", gotAccept)
+	}
+	if gotContentType != "application/json" {
+		t.Errorf("Content-Type=%q, want application/json (manifest must not override)", gotContentType)
+	}
+	if gotAuth != "Bearer real-token" {
+		t.Errorf("Authorization=%q (non-protocol header should pass through unchanged)", gotAuth)
+	}
+}
+
 func TestManifestTestRemote_TransportGate(t *testing.T) {
 	dir := t.TempDir()
 	writeManifest(t, dir, "local", "name: local\nkind: global\ntransport: stdio-bridge\ncommand: echo\nbase_args: [\"hi\"]\ndaemons:\n  - name: default\n    port: 9999\nclient_bindings:\n  - client: claude-code\n    daemon: default\n")

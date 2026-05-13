@@ -147,14 +147,24 @@ func sendRemoteInitialize(ctx context.Context, client *http.Client, rawURL strin
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
+	// Apply manifest-supplied headers FIRST (typically Authorization,
+	// custom auth tokens, X-* metadata), then force the protocol
+	// headers so a manifest cannot redefine MCP transport semantics.
+	// ExpandSecretsMap already rejected CRLF in values, so
+	// http.Header.Set won't be tricked into header injection.
+	//
+	// Bot r3 P2 closure (PR #171): the prior order put protocol
+	// headers first and user headers last, letting a manifest
+	// override MCP-Protocol-Version, Accept, or Content-Type. That
+	// either silenced the pinned protocol version or made smoke
+	// reports diverge from production transport behavior — both
+	// failure modes break this command's smoke-test contract.
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	req.Header.Set("MCP-Protocol-Version", testRemoteProtocolVersion)
-	for k, v := range headers {
-		// ExpandSecretsMap rejected CRLF in values before we got here,
-		// so http.Header.Set won't be tricked into injecting headers.
-		req.Header.Set(k, v)
-	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("post initialize: %w", err)
