@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -114,6 +115,54 @@ func TestManifestTestRemote_ManifestHeadersCannotOverrideProtocolHeaders(t *test
 	}
 	if gotAuth != "Bearer real-token" {
 		t.Errorf("Authorization=%q (non-protocol header should pass through unchanged)", gotAuth)
+	}
+}
+
+// TestManifestTestRemote_RejectsRedirect pins bot r5 P1 closure
+// (PR #171): a credentialed smoke request must NOT follow any
+// redirect, regardless of scheme/host. Go's http.Client forwards
+// non-sensitive custom headers (X-API-Key, custom bearer tokens)
+// across host changes, so a single redirect could leak vault
+// secrets to whatever host the upstream chose. The test confirms:
+//   1. The redirect response surfaces as an error (no silent follow).
+//   2. The redirect target endpoint is NEVER contacted (proving the
+//      X-API-Key header could not have leaked).
+func TestManifestTestRemote_RejectsRedirect(t *testing.T) {
+	var targetHit bool
+	var targetMu sync.Mutex
+	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetMu.Lock()
+		targetHit = true
+		targetMu.Unlock()
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25"}}`))
+	}))
+	defer target.Close()
+	origin := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer origin.Close()
+
+	dir := t.TempDir()
+	writeManifest(t, dir, "remote", "name: remote\nkind: global\ntransport: remote-http\nurl: "+origin.URL+"\nheaders:\n  X-API-Key: \"sensitive-vault-secret\"\nclient_bindings:\n  - client: claude-code\n")
+	// Build a client mirroring the production redirect policy
+	// (rejectAllRedirects) so this test exercises what production
+	// callers see. We also need TLS to trust the origin server.
+	client := buildTLSTrustingClient(origin)
+	client.CheckRedirect = rejectAllRedirects
+	a := NewAPI()
+	_, err := a.manifestTestRemoteWithClient(context.Background(), dir, "remote", client)
+	if err == nil {
+		t.Fatal("expected redirect rejection")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "redirect") {
+		t.Errorf("error should name the redirect refusal: %v", err)
+	}
+	// Confirm the target was NEVER contacted so the X-API-Key
+	// header could not have leaked.
+	targetMu.Lock()
+	defer targetMu.Unlock()
+	if targetHit {
+		t.Error("redirect target was contacted — credentials may have leaked")
 	}
 }
 

@@ -38,17 +38,24 @@ func TestRemoteClientForCmd() *http.Client {
 // the duration of the test. Returns a cleanup closure that restores
 // the previous hook. Tests should pass it to t.Cleanup.
 //
-// The borrowed marketplace builder applies a hard 15s http.Client
-// Timeout that would mask the operator-visible --timeout flag (bot
-// r2 P2 closure, PR #171). Drop it here so the test hook matches the
-// production no-Timeout policy where ctx-deadline is the single
-// source of truth.
+// Two overrides over the borrowed marketplace builder:
+//   - Timeout=0: the operator-visible --timeout flag wraps the
+//     request in ctx, which is the single source of truth — a hard
+//     client cap would silently override it (bot r2 P2, PR #171).
+//   - CheckRedirect=rejectAllRedirects: test-remote sends manifest-
+//     defined headers (Authorization, X-API-Key) and Go forwards
+//     non-sensitive custom headers across host changes, so any
+//     followed redirect could leak credentials (bot r5 P1, PR #171).
+//
+// Test hook mirrors production redirect policy so test assertions
+// match the real refuse-and-surface behavior.
 func InstallTestRemoteTestClientForCLI(srv *httptest.Server) func() {
 	testRemoteTestClientMu.Lock()
 	defer testRemoteTestClientMu.Unlock()
 	prev := testRemoteTestClient
 	c := buildTLSTrustingClient(srv)
 	c.Timeout = 0
+	c.CheckRedirect = rejectAllRedirects
 	testRemoteTestClient = c
 	return func() {
 		testRemoteTestClientMu.Lock()

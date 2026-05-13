@@ -101,8 +101,8 @@ func (a *API) manifestTestRemoteFromYAML(ctx context.Context, name, yamlStr stri
 
 // newTestRemoteClient builds the production HTTPS-only client used
 // for test-remote. Shares transport defaults (proxy, keep-alive,
-// disable-compression) + redirect policy with the marketplace
-// fetcher.
+// disable-compression) with the marketplace fetcher but enforces a
+// stricter redirect policy.
 //
 // Timeout is intentionally zero: the operator-supplied --timeout on
 // the CLI wraps the request in a context.WithTimeout, and that
@@ -111,11 +111,30 @@ func (a *API) manifestTestRemoteFromYAML(ctx context.Context, name, yamlStr stri
 // above the constant — bot r2 P2 closure (PR #171): slow but healthy
 // remote endpoints were reported as failed at the 15s cap even when
 // operators explicitly requested a longer window.
+//
+// CheckRedirect = rejectAllRedirects: this request carries
+// manifest-defined headers (Authorization, X-API-Key, custom bearer
+// tokens) sourced from the encrypted vault. Go's http.Client strips
+// Authorization on cross-host redirects but forwards arbitrary
+// custom headers, so a hostile or misconfigured endpoint could 302
+// to a different host and harvest credentials in a single redirect.
+// Smoke checks should never silently re-credential — refuse all
+// redirects and let the operator update the manifest URL instead
+// (bot r5 P1 closure, PR #171).
 func newTestRemoteClient() *http.Client {
 	return &http.Client{
 		Transport:     newMarketplaceTransport(),
-		CheckRedirect: rejectNonHTTPSRedirect,
+		CheckRedirect: rejectAllRedirects,
 	}
+}
+
+// rejectAllRedirects forces http.Client to surface the redirect
+// status to the caller instead of following it. Returning an error
+// here propagates as the client's error; the original response
+// (with Location header) is still returned to the caller, so we can
+// surface "upstream returned 302" to the operator clearly.
+func rejectAllRedirects(req *http.Request, via []*http.Request) error {
+	return fmt.Errorf("refusing to follow redirect to %s — manifest test-remote does not follow redirects so credential-bearing headers can never reach an unintended host; update the manifest url to the final endpoint instead", req.URL.Redacted())
 }
 
 func sendRemoteInitialize(ctx context.Context, client *http.Client, rawURL string, headers map[string]string) (*RemoteInitializeResult, error) {
