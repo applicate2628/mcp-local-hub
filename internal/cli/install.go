@@ -410,6 +410,14 @@ func perServerInstalledSet(tasks []scheduler.TaskStatus) map[string]bool {
 //     a torn write from a concurrent SettingsSet, and yaml.Unmarshal
 //     returns nil for empty input — without this check we'd silently
 //     default to gate-OFF and apply a destructive teardown.
+//   - File present, parseable, key absent: treat as gate OFF (default
+//     when the operator has never toggled the gate). codex bot phase5
+//     r15 P2 closure on PR #160 raised the concern that a partial
+//     write could parse as "key absent" — that race is now mitigated
+//     by SettingsSetIn's tempfile+rename atomic-write path (added in
+//     the same r15 commit), so cross-process readers see EITHER the
+//     pre-write file (with the prior value) OR the post-write file
+//     (with the new value), never a partial-truncate in between.
 //   - File present and parseable with content: use the persisted value.
 func readHubEndpointGateForReconcile() (bool, error) {
 	path := api.SettingsPath()
