@@ -71,6 +71,18 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				if server != "" || daemonFilter != "" || all {
 					return fmt.Errorf("--reconcile-hub-mode is mutually exclusive with --server/--daemon/--all")
 				}
+				// codex bot phase5 r6 P2 closure on PR #160:
+				// --reconcile-hub-mode does NOT honor --clients /
+				// --all-clients. The reconcile walks every (manifest,
+				// client) tuple from disk; subsetting the reconcile
+				// would be a destructive partial migration that leaves
+				// the gate in an inconsistent state (e.g. only some
+				// clients pointed at the hub aggregate, others still
+				// on per-daemon URLs after a gate-ON toggle). Reject
+				// the flags loudly rather than silently ignoring them.
+				if strings.TrimSpace(clientsFlag) != "" || allClients {
+					return fmt.Errorf("--reconcile-hub-mode is mutually exclusive with --clients/--all-clients; reconcile walks every (manifest, client) tuple from disk")
+				}
 				return runReconcileHubMode(cmd, dryRun)
 			}
 			// If mcphub is not on PATH, try to bootstrap before we hit
@@ -203,29 +215,35 @@ func runReconcileHubMode(cmd *cobra.Command, dryRun bool) error {
 		}
 	}
 
-	// 3. Collect manifests for every supported server. The Scan
-	//    surface lists every server with a manifest; ManifestGet
-	//    returns the YAML; config.ParseManifest decodes into the
-	//    typed struct the reconcile planner expects.
-	scan, sErr := a.Scan()
-	if sErr != nil {
-		return fmt.Errorf("scan manifests: %w", sErr)
+	// 3. Collect manifests for every supported server.
+	//
+	// codex bot phase5 r6 P1 closure on PR #160: enumerate via
+	// ManifestList (canonical-source list of on-disk + embedded
+	// manifests) instead of Scan().Entries. Scan walks each CLIENT
+	// config file and produces entries only for servers a client
+	// currently references; after a gate-ON migration, clients
+	// hold `mcphub-hub` and nothing else, so Scan yields an empty
+	// (manifest-bearing) entry set even though the per-server
+	// manifests still exist on disk. That broke gate-OFF reconcile:
+	// the plan came out empty and per-daemon entries were never
+	// restored. ManifestList enumerates the manifest registry
+	// directly, which is the input the reconciler actually wants.
+	names, mlErr := a.ManifestList()
+	if mlErr != nil {
+		return fmt.Errorf("list manifests: %w", mlErr)
 	}
 	var manifests []config.ServerManifest
-	for _, entry := range scan.Entries {
-		if !entry.ManifestExists {
-			continue
-		}
-		yaml, gErr := a.ManifestGet(entry.Name)
+	for _, name := range names {
+		yaml, gErr := a.ManifestGet(name)
 		if gErr != nil {
 			if errors.Is(gErr, os.ErrNotExist) {
-				continue // benign scan-window race
+				continue // benign list-window race
 			}
-			return fmt.Errorf("read manifest %q: %w", entry.Name, gErr)
+			return fmt.Errorf("read manifest %q: %w", name, gErr)
 		}
 		m, pErr := config.ParseManifest(strings.NewReader(yaml))
 		if pErr != nil {
-			return fmt.Errorf("parse manifest %q: %w", entry.Name, pErr)
+			return fmt.Errorf("parse manifest %q: %w", name, pErr)
 		}
 		manifests = append(manifests, *m)
 	}

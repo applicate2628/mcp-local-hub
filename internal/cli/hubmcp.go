@@ -111,9 +111,12 @@ func newHubMcpRegenTokenCmd() *cobra.Command {
 to hub-mcp-tokens.json. The live hub picks up the new tokens via the
 internal /reload-tokens endpoint within ms.
 
-After a successful rotation, the existing client config is stale —
-rerun ` + "`mcphub install --server <each> --clients <client>`" + ` to
-refresh the live config with the new token.`,
+After a successful rotation, the existing client config is stale if
+the hub-endpoint gate is ON (client config carries the per-client
+token in its header). Run ` + "`mcphub install --reconcile-hub-mode`" + `
+to refresh every client's aggregate entry with the new token. Gate
+OFF: no client refresh needed (per-daemon URLs don't carry this
+token).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if client == "" {
 				return fmt.Errorf("--client is required")
@@ -311,15 +314,19 @@ func fallbackReloadWarning(cmd *cobra.Command, cause error) error {
 }
 
 func printRotationOK(cmd *cobra.Command, client, suffix string) {
-	// codex bot phase5 r5 P2 closure on PR #160: `mcphub install`
-	// uses `--clients` (plural) — `--client` does not exist and
-	// fails with "unknown flag". Operators following this guidance
-	// would think rotation completed while traffic continued to 401
-	// against the stale token until they discovered the correct
-	// flag form.
+	// codex bot phase5 r5+r6 P2 closures on PR #160:
+	// r5 caught `--client` (singular) doesn't exist (flag is
+	// `--clients` plural). r6 caught that `mcphub install` still
+	// requires `--server` or `--all` even with `--clients`, so
+	// `mcphub install --clients X` alone fails with "--server is
+	// required" and leaves the rotated token unapplied in client
+	// config. The runnable + gate-aware path is
+	// `--reconcile-hub-mode` (which walks every manifest from disk
+	// and rewrites every client entry with the new token). Gate-OFF
+	// client configs carry no hub token, so refresh is a no-op there.
 	msg := fmt.Sprintf(
-		"Rotated token for client %s. Run `mcphub install --clients %s` to refresh the live config with the new token.",
-		client, client,
+		"Rotated token for client %s. If the hub-endpoint gate is ON, run `mcphub install --reconcile-hub-mode` to refresh client configs with the new token. Gate OFF: no client refresh needed.",
+		client,
 	)
 	if suffix != "" {
 		msg = msg + " " + suffix
