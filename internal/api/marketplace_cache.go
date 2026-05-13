@@ -59,7 +59,19 @@ func LoadMarketplaceCatalog(ctx context.Context, rawURL string) (*MarketplaceCat
 // supplied client must enforce the same downgrade-redirect +
 // compression policy as production (use injectTLSTestClient).
 func LoadMarketplaceCatalogWithClient(ctx context.Context, client *http.Client, rawURL string) (*MarketplaceCatalog, MarketplaceSource, error) {
-	cf, _ := readMarketplaceCache()
+	// codex deep-sec PR #163 lane 1 P3 closure: cache READ errors
+	// (DACL rejection / corrupted JSON / unreadable bytes) used to
+	// be silently discarded — fail-closed for stale-cache use but
+	// invisible to operators. Surface them through the hub-mcp
+	// event log so `mcphub hub-mcp status` shows the recent
+	// failure without breaking the immediate query, which still
+	// goes ahead with a fresh fetch.
+	cf, readErr := readMarketplaceCache()
+	if readErr != nil {
+		_ = LogHubMcpEvent("warn", "marketplace-cache-read-failed", map[string]any{
+			"err": readErr.Error(),
+		})
+	}
 	// codex r5 P1 closure: a cache entry from a different registry
 	// URL must not be served for the current rawURL. Drop the
 	// reference so the rest of the function treats it as a miss
@@ -166,6 +178,15 @@ func RefreshMarketplaceCatalogWithClient(ctx context.Context, client *http.Clien
 // body, or 0 if no cache exists. codex r1 P2 closure: clamp to
 // non-negative so a future fetched_at does not look like a fresh
 // fetch from the operator's perspective.
+//
+// Note: this only addresses negative-age (future fetched_at)
+// corruption, not all clock-skew classes. A local clock that runs
+// backward then forward can land in a state where the cached age is
+// positive and under TTL, and the cache is treated as fresh. The
+// 24h TTL is the upper bound; defense against active clock
+// manipulation is out of scope for v0.3.0 — operators with hostile
+// local-time conditions must run `mcphub marketplace refresh`
+// before relying on the catalog.
 func MarketplaceCacheAge() time.Duration {
 	cf, err := readMarketplaceCache()
 	if err != nil || cf == nil {

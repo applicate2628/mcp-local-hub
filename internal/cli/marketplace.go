@@ -24,6 +24,7 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -88,8 +89,18 @@ func newMarketplaceSearchCmd() *cobra.Command {
 				if q != "" && !entryMatches(e, q) {
 					continue
 				}
+				// codex deep-sec PR #163 lane 3 P2 closure: catalog
+				// fields are untrusted strings — sanitize C0/C1
+				// control bytes and ESC before writing to a terminal
+				// so a hostile catalog cannot inject escape sequences
+				// or corrupt scripts that parse the table.
 				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-					e.ID, e.Name, e.Transport, strings.Join(e.Categories, ","), e.Summary)
+					sanitizeCatalogField(e.ID),
+					sanitizeCatalogField(e.Name),
+					sanitizeCatalogField(e.Transport),
+					sanitizeCatalogField(strings.Join(e.Categories, ",")),
+					sanitizeCatalogField(e.Summary),
+				)
 			}
 			return w.Flush()
 		},
@@ -119,30 +130,43 @@ func newMarketplaceShowCmd() *cobra.Command {
 					continue
 				}
 				out := cmd.OutOrStdout()
-				fmt.Fprintf(out, "ID:         %s\n", e.ID)
-				fmt.Fprintf(out, "Name:       %s\n", e.Name)
-				fmt.Fprintf(out, "Transport:  %s\n", e.Transport)
+				// codex deep-sec PR #163 lane 3 P2 closure: each
+				// catalog string is run through sanitizeCatalogField
+				// before reaching stdout so a hostile registry cannot
+				// inject ANSI/OSC escape sequences or terminal
+				// control characters via name/summary/etc.
+				fmt.Fprintf(out, "ID:         %s\n", sanitizeCatalogField(e.ID))
+				fmt.Fprintf(out, "Name:       %s\n", sanitizeCatalogField(e.Name))
+				fmt.Fprintf(out, "Transport:  %s\n", sanitizeCatalogField(e.Transport))
 				if e.Command != "" {
-					cmdLine := e.Command
+					cmdLine := sanitizeCatalogField(e.Command)
 					if len(e.Args) > 0 {
-						cmdLine += " " + strings.Join(e.Args, " ")
+						sanArgs := make([]string, len(e.Args))
+						for i, a := range e.Args {
+							sanArgs[i] = sanitizeCatalogField(a)
+						}
+						cmdLine += " " + strings.Join(sanArgs, " ")
 					}
 					fmt.Fprintf(out, "Command:    %s\n", cmdLine)
 				}
 				if e.URL != "" {
-					fmt.Fprintf(out, "URL:        %s\n", e.URL)
+					fmt.Fprintf(out, "URL:        %s\n", sanitizeCatalogField(e.URL))
 				}
 				if e.Homepage != "" {
-					fmt.Fprintf(out, "Homepage:   %s\n", e.Homepage)
+					fmt.Fprintf(out, "Homepage:   %s\n", sanitizeCatalogField(e.Homepage))
 				}
 				if e.License != "" {
-					fmt.Fprintf(out, "License:    %s\n", e.License)
+					fmt.Fprintf(out, "License:    %s\n", sanitizeCatalogField(e.License))
 				}
 				if e.Summary != "" {
-					fmt.Fprintf(out, "Summary:    %s\n", e.Summary)
+					fmt.Fprintf(out, "Summary:    %s\n", sanitizeCatalogField(e.Summary))
 				}
 				if len(e.Categories) > 0 {
-					fmt.Fprintf(out, "Categories: %s\n", strings.Join(e.Categories, ", "))
+					sanCats := make([]string, len(e.Categories))
+					for i, c := range e.Categories {
+						sanCats[i] = sanitizeCatalogField(c)
+					}
+					fmt.Fprintf(out, "Categories: %s\n", strings.Join(sanCats, ", "))
 				}
 				// codex r1 P1 closure: print readme_url STRING ONLY.
 				// We do NOT fetch the README body — the operator can
@@ -152,7 +176,7 @@ func newMarketplaceShowCmd() *cobra.Command {
 				// content-type guarding. Empty readme_url omits the
 				// line entirely to keep the block tidy.
 				if e.ReadmeURL != "" {
-					fmt.Fprintf(out, "Readme URL: %s\n", e.ReadmeURL)
+					fmt.Fprintf(out, "Readme URL: %s\n", sanitizeCatalogField(e.ReadmeURL))
 				}
 				return nil
 			}
@@ -179,9 +203,16 @@ func newMarketplaceGenerateCmd() *cobra.Command {
 			}
 			warnIfStale(cmd, src)
 			if workspace == "" {
-				if wd, gerr := os.Getwd(); gerr == nil {
-					workspace = wd
+				// codex deep-sec PR #163 lane 3 P3 closure: surface
+				// os.Getwd failures instead of silently letting the
+				// draft carry an empty ${workspaceFolder} (which the
+				// operator would not notice until the daemon ran
+				// with no working directory).
+				wd, gerr := os.Getwd()
+				if gerr != nil {
+					return fmt.Errorf("resolve --workspace default via os.Getwd: %w (pass --workspace=<path> explicitly)", gerr)
 				}
+				workspace = wd
 			}
 			for i := range cat.Entries {
 				e := &cat.Entries[i]
@@ -245,6 +276,62 @@ func entryMatches(e *api.MarketplaceEntry, q string) bool {
 		e.ID, e.Name, e.Summary, strings.Join(e.Categories, " "),
 	}, " "))
 	return strings.Contains(hay, q)
+}
+
+// sanitizeCatalogField scrubs untrusted catalog string fields before
+// they reach the operator's terminal. The threat model is a custom
+// HTTPS registry (--registry) that smuggles ANSI/OSC escape sequences,
+// terminal control characters, or whitespace tricks into name/
+// summary/categories/etc. — which would corrupt the search table,
+// confuse scripts parsing stdout, or inject hyperlinks.
+//
+// Rules:
+//   - U+001B (ESC, 0x1B) → '?' (defeats CSI/OSC escape sequences).
+//   - Other C0 controls (0x00-0x1F including TAB, LF, CR): replaced
+//     with a single space so the tabwriter doesn't see embedded
+//     \r/\n that would break row alignment.
+//   - DEL (0x7F) and C1 controls (0x80-0x9F): replaced with '?'.
+//   - Invalid UTF-8 bytes (raw 0x80-0xFF that don't form a valid
+//     rune): replaced with '?' to avoid letting a hostile catalog
+//     hide raw C1 bytes behind a UTF-8 decode failure.
+//   - Everything else (printable ASCII + UTF-8 above U+009F) passes
+//     through unchanged.
+//
+// We iterate byte-by-byte with utf8.DecodeRuneInString so invalid
+// UTF-8 sequences (e.g. a raw 0x9B byte) are caught explicitly
+// instead of yielding U+FFFD that the range form gives.
+//
+// codex deep-sec PR #163 lane 3 P2 closure.
+func sanitizeCatalogField(s string) string {
+	if s == "" {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && size == 1 {
+			// Raw byte that doesn't form valid UTF-8 — almost
+			// certainly a smuggled control byte. Drop it.
+			b.WriteByte('?')
+			i++
+			continue
+		}
+		switch {
+		case r == 0x1B:
+			b.WriteByte('?')
+		case r < 0x20:
+			b.WriteByte(' ')
+		case r == 0x7F:
+			b.WriteByte('?')
+		case r >= 0x80 && r <= 0x9F:
+			b.WriteByte('?')
+		default:
+			b.WriteRune(r)
+		}
+		i += size
+	}
+	return b.String()
 }
 
 // warnIfStale emits one stderr line when the cache fell back to

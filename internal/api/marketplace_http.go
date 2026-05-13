@@ -88,9 +88,33 @@ func MarketplaceFetch(ctx context.Context, rawURL, ifNoneMatch string, extraHead
 	return MarketplaceFetchWithClient(ctx, newMarketplaceClient(), rawURL, ifNoneMatch, extraHeaders)
 }
 
+// forbiddenMarketplaceHeaders enumerates auth/cookie headers that a
+// caller MUST NOT smuggle into a marketplace fetch. The threat model
+// is an unauthenticated GET against a curated public registry; any
+// Authorization/Cookie/Proxy-Authorization header carries operator
+// credentials that should never be sent to whatever URL the operator
+// (or a downstream caller) happens to pass through --registry.
+//
+// codex deep-sec PR #163 lane 1 P2 closure: prior to this fix
+// extraHeaders was set unfiltered, so a future internal caller could
+// accidentally leak credentials.
+//
+// Header names compared lowercase since http.Header canonicalizes on
+// set; we check the lowered key before letting it through.
+var forbiddenMarketplaceHeaders = map[string]struct{}{
+	"authorization":       {},
+	"cookie":              {},
+	"proxy-authorization": {},
+}
+
 // MarketplaceFetchWithClient is the injectable form. Tests pass a
 // client with a TLS test transport. Production callers go through
 // MarketplaceFetch.
+//
+// `extraHeaders` is permitted only for non-credentialed metadata
+// (e.g. a future User-Agent override). Authorization, Cookie, and
+// Proxy-Authorization are dropped with an error before the request
+// is built.
 func MarketplaceFetchWithClient(ctx context.Context, client *http.Client, rawURL, ifNoneMatch string, extraHeaders map[string]string) (*MarketplaceFetchResult, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -98,6 +122,15 @@ func MarketplaceFetchWithClient(ctx context.Context, client *http.Client, rawURL
 	}
 	if u.Scheme != "https" {
 		return nil, fmt.Errorf("marketplace url must be https:// (got scheme %q)", u.Scheme)
+	}
+	// Reject credential-bearing headers BEFORE building the request
+	// (defense-in-depth: if a future caller passes Authorization,
+	// fail loud, do not silently strip — the caller's intent is
+	// either a programming error or a privilege escalation).
+	for k := range extraHeaders {
+		if _, banned := forbiddenMarketplaceHeaders[strings.ToLower(k)]; banned {
+			return nil, fmt.Errorf("refusing to send credential-bearing header %q to marketplace registry — fetches are unauthenticated GETs", k)
+		}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {

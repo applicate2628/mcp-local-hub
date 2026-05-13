@@ -364,21 +364,59 @@ type PlaceholderExpander struct {
 // 1=full placeholder body, 2=env var name (only set for the env: form).
 var PlaceholderRE = regexp.MustCompile(`\$\{(env:([^}]+)|workspaceFolder|userHome|pathSeparator)\}`)
 
-// sensitiveEnvNameSuffixes / sensitiveEnvNamePrefixes enumerate env-var
-// name shapes that commonly carry secrets. The policy is intentionally
-// name-level: G5 leaves any catalog-controlled ${env:NAME} matching
-// these patterns VERBATIM in the generated draft so an operator must
-// edit before `mcphub manifest create`. G7 (VS Code import) reads
-// from a trusted local file, so it expands them as before — the
-// IsSensitiveEnvName check is opt-in at the caller via SkipSensitiveEnv.
-var sensitiveEnvNameSuffixes = []string{"_TOKEN", "_SECRET", "_PASSWORD", "_KEY", "_API_KEY"}
-var sensitiveEnvNamePrefixes = []string{"AWS_", "AZURE_", "GCP_", "GITHUB_"}
+// Sensitive-env name policy (G5 catalog placeholder redaction).
+//
+// Bias: prefer overflagging — a false positive emits an extra
+// "${env:NAME} left verbatim — edit before saving" warning, which the
+// operator dismisses if it's a legitimate non-secret. A false
+// negative writes a real secret value into a YAML the operator might
+// commit, which is the failure mode we are guarding against. G7's
+// trusted-local-file import keeps SkipSensitiveEnv=false and is not
+// affected by this policy.
+//
+// codex deep-sec PR #163 lane 2 closure: predicate expanded from
+// suffix-only to suffix + prefix + substring + exact-name shapes so
+// names like DATABASE_URL, CONNECTION_STRING, AUTHORIZATION,
+// GOOGLE_APPLICATION_CREDENTIALS, BEARER_TOKEN, and MY_TOKEN_VALUE
+// (infix TOKEN) are flagged instead of expanded into the draft YAML.
+var sensitiveEnvNameSuffixes = []string{
+	"_TOKEN", "_SECRET", "_PASSWORD", "_PASSWD",
+	"_KEY", "_API_KEY", "_AUTH", "_DSN",
+}
+var sensitiveEnvNamePrefixes = []string{
+	"AWS_", "AZURE_", "GCP_", "GITHUB_", "GOOGLE_", "OAUTH_",
+}
+var sensitiveEnvNameSubstrings = []string{
+	"TOKEN", "SECRET", "PASSWORD", "PASSWD",
+	"CREDENTIAL", "BEARER", "PRIVATE_KEY",
+}
+var sensitiveEnvNameExact = []string{
+	"DATABASE_URL", "CONNECTION_STRING", "DSN",
+	"AUTHORIZATION", "OAUTH",
+	"GOOGLE_APPLICATION_CREDENTIALS",
+}
 
-// IsSensitiveEnvName returns true if the env-var name matches the
-// sensitive-name allowlist used by G5's catalog placeholder policy.
-// Match is case-insensitive against ASCII suffixes / prefixes.
+// IsSensitiveEnvName returns true if the env-var name matches any of
+// the sensitive-name shapes used by G5's catalog placeholder policy.
+// Match is case-insensitive against the ASCII uppercase form.
+//
+// The four match families:
+//   - exact: `DATABASE_URL`, `CONNECTION_STRING`, `DSN`,
+//     `AUTHORIZATION`, `OAUTH`, `GOOGLE_APPLICATION_CREDENTIALS`.
+//   - prefix: cloud-provider env namespaces (`AWS_*`, `AZURE_*`,
+//     `GCP_*`, `GITHUB_*`, `GOOGLE_*`, `OAUTH_*`).
+//   - suffix: classic name-shapes (`*_TOKEN`, `*_SECRET`,
+//     `*_PASSWORD`, `*_PASSWD`, `*_KEY`, `*_API_KEY`, `*_AUTH`,
+//     `*_DSN`).
+//   - substring (anywhere in the name): `TOKEN`, `SECRET`,
+//     `PASSWORD`, `PASSWD`, `CREDENTIAL`, `BEARER`, `PRIVATE_KEY`.
 func IsSensitiveEnvName(name string) bool {
 	upper := strings.ToUpper(name)
+	for _, exact := range sensitiveEnvNameExact {
+		if upper == exact {
+			return true
+		}
+	}
 	for _, suf := range sensitiveEnvNameSuffixes {
 		if strings.HasSuffix(upper, suf) {
 			return true
@@ -386,6 +424,11 @@ func IsSensitiveEnvName(name string) bool {
 	}
 	for _, pre := range sensitiveEnvNamePrefixes {
 		if strings.HasPrefix(upper, pre) {
+			return true
+		}
+	}
+	for _, sub := range sensitiveEnvNameSubstrings {
+		if strings.Contains(upper, sub) {
 			return true
 		}
 	}

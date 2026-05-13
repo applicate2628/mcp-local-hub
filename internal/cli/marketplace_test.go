@@ -72,6 +72,77 @@ func TestMarketplaceShow_PrintsMetadataNotReadmeBody(t *testing.T) {
 	}
 }
 
+// TestSanitizeCatalogField_StripsControlAndEscape pins codex deep-sec
+// PR #163 lane 3 P2 closure: ANSI/OSC escape sequences and other
+// terminal-control bytes coming from an untrusted catalog must be
+// neutralized before they reach stdout. Catalog strings are otherwise
+// pass-through; printable UTF-8 (Cyrillic, em-dash, etc.) must
+// survive sanitization unchanged.
+func TestSanitizeCatalogField_StripsControlAndEscape(t *testing.T) {
+	for _, c := range []struct {
+		raw  string
+		want string
+		name string
+	}{
+		{"hello", "hello", "plain ascii"},
+		// CSI sequence: ESC + `[31mred...` → ESC becomes '?',
+		// the bracket+digits pass through (they're printable ASCII).
+		{"hello\x1b[31mred\x1b[0m", "hello?[31mred?[0m", "csi color"},
+		// OSC hyperlink: ESC + `]8;...` + ESC + `\`. Each ESC
+		// becomes '?'; backslash is printable ASCII, passes through.
+		{"hello\x1b]8;;https://evil.example/\x1b\\link\x1b]8;;\x1b\\", "hello?]8;;https://evil.example/?\\link?]8;;?\\", "osc hyperlink"},
+		{"line1\nline2", "line1 line2", "lf"},
+		{"col1\tcol2", "col1 col2", "tab"},
+		{"return\rOverwrite", "return Overwrite", "cr"},
+		{"del\x7Foops", "del?oops", "del"},
+		// Raw byte 0x9B (CSI control) is an invalid UTF-8 start
+		// byte — it's a C1 continuation byte by encoding rules. The
+		// utf8.DecodeRuneInString path catches it as RuneError/size=1
+		// and replaces with '?'.
+		{"high\x9Boops", "high?oops", "raw c1 byte"},
+		{"emoji✓ check", "emoji✓ check", "utf8 preserved"},
+		{"кириллица", "кириллица", "cyrillic preserved"},
+		{"em—dash", "em—dash", "em-dash preserved"},
+	} {
+		got := sanitizeCatalogField(c.raw)
+		if got != c.want {
+			t.Errorf("%s: sanitizeCatalogField(%q) = %q, want %q", c.name, c.raw, got, c.want)
+		}
+	}
+}
+
+// TestMarketplaceSearch_SanitizesHostileCatalogFields verifies that
+// search output strips control characters from the live catalog
+// fields, not just the standalone helper. Asserts the ESC bytes
+// never reach stdout regardless of which field they entered through.
+func TestMarketplaceSearch_SanitizesHostileCatalogFields(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Hostile registry: embed ESC sequences in name + summary.
+		_, _ = w.Write([]byte(`{"schema_version":"1","entries":[
+			{"id":"hostile","name":"AAA\u001b[31mEVIL\u001b[0m","summary":"line1\nline2","transport":"stdio","command":"npx"}
+		]}`))
+	}))
+	defer srv.Close()
+	t.Cleanup(api.InstallMarketplaceTestClientForCLI(srv))
+	c := newMarketplaceCmd()
+	var stdout, stderr bytes.Buffer
+	c.SetOut(&stdout)
+	c.SetErr(&stderr)
+	c.SetArgs([]string{"search", "hostile", "--registry", srv.URL})
+	if err := c.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("search: %v\nstderr: %s", err, stderr.String())
+	}
+	if strings.ContainsRune(stdout.String(), 0x1B) {
+		t.Errorf("stdout still contains ESC (0x1B) after sanitize:\n---\n%q", stdout.String())
+	}
+	// The newline in summary became a space; the table should now
+	// have ALL its rows on a single line per entry. We don't pin
+	// the exact byte count; we just pin the ESC strip.
+	if !strings.Contains(stdout.String(), "AAA?[31mEVIL?[0m") {
+		t.Errorf("name field not sanitized as expected:\n---\n%s", stdout.String())
+	}
+}
+
 func TestMarketplaceGenerate_HttpEntrySkipsToStderr(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"schema_version":"1","entries":[

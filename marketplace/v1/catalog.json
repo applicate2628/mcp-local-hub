@@ -16,19 +16,6 @@
       "license": "MIT"
     },
     {
-      "id": "memory",
-      "name": "Memory MCP server",
-      "summary": "Knowledge-graph-backed persistent memory store.",
-      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/memory",
-      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/memory/README.md",
-      "transport": "stdio",
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-memory"],
-      "env": {},
-      "categories": ["memory", "knowledge-graph"],
-      "license": "MIT"
-    },
-    {
       "id": "git",
       "name": "Git MCP server",
       "summary": "Read git repo state (status, log, diff, blame).",
@@ -68,19 +55,6 @@
       "license": "MIT"
     },
     {
-      "id": "serena",
-      "name": "Serena code-aware MCP server",
-      "summary": "Symbol-aware code navigation + edit via Language Server backends.",
-      "homepage": "https://github.com/oraios/serena",
-      "readme_url": "https://raw.githubusercontent.com/oraios/serena/main/README.md",
-      "transport": "stdio",
-      "command": "uvx",
-      "args": ["--from", "git+https://github.com/oraios/serena", "serena", "start-mcp-server"],
-      "env": {},
-      "categories": ["code", "lsp"],
-      "license": "MIT"
-    },
-    {
       "id": "playwright",
       "name": "Playwright MCP server",
       "summary": "Browser automation via Playwright (Chromium-headless by default).",
@@ -116,19 +90,6 @@
       "args": ["-y", "@modelcontextprotocol/server-everything"],
       "env": {},
       "categories": ["debug", "reference"],
-      "license": "MIT"
-    },
-    {
-      "id": "time",
-      "name": "Time MCP server",
-      "summary": "Timezone conversions and current-time queries.",
-      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/time",
-      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/time/README.md",
-      "transport": "stdio",
-      "command": "uvx",
-      "args": ["mcp-server-time"],
-      "env": {},
-      "categories": ["time"],
       "license": "MIT"
     }
   ]

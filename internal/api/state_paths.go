@@ -45,11 +45,20 @@ import (
 // later tasks (2, 3, 7, 9) reference one canonical literal.
 const stateDirName = "mcp-local-hub"
 
-// marketplaceCacheFileLeaf is the G5 Marketplace cache file. Joins
-// the validateStateFileName allowlist (single-component, no path
-// separators). Reads/writes route through readHubMcpStateFile /
-// writeHubMcpStateFile so the G4 hardening pipeline (atomic tempfile
-// + rename + post-rename DACL re-verify) applies unchanged.
+// marketplaceCacheFileLeaf is the G5 Marketplace cache file. The
+// runtime check that gates this leaf is validateStateFileName, which
+// is a single-component validator (rejects path separators, traversal,
+// reserved names) rather than an enumerated filename allowlist. The
+// constant is hard-coded so an attacker who controls the marketplace
+// code path still cannot reach an arbitrary state-file name. Reads/
+// writes route through readHubMcpStateFile / writeHubMcpStateFile so
+// the G4 hardening pipeline (atomic tempfile + rename + post-rename
+// DACL re-verify) applies unchanged.
+//
+// codex deep-sec PR #163 lane 1 P3 closure: comment narrowed from
+// "joins the validateStateFileName allowlist" since no enumerated
+// allowlist exists; the security guarantee comes from the hard-coded
+// leaf plus the single-component validator.
 const marketplaceCacheFileLeaf = "marketplace-cache.json"
 
 // ---------------------------------------------------------------------

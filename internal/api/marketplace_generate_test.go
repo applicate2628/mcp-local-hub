@@ -1,8 +1,11 @@
 package api
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+
+	"mcp-local-hub/internal/config"
 )
 
 // TestGenerateDraftManifest_StdioEntryMapsToStdioBridge pins codex
@@ -24,10 +27,14 @@ func TestGenerateDraftManifest_StdioEntryMapsToStdioBridge(t *testing.T) {
 	if len(warns) != 0 {
 		t.Errorf("unexpected warnings: %v", warns)
 	}
+	// codex deep-sec PR #163 lane 2 P3 closure: use config constants
+	// for transport names instead of string literals. A future rename
+	// of config.TransportStdioBridge would otherwise silently leave
+	// this test passing against the stale literal.
 	for _, want := range []string{
 		"name: filesystem",
 		"kind: global",
-		"transport: stdio-bridge", // not native-http
+		fmt.Sprintf("transport: %s", config.TransportStdioBridge),
 		"command: npx",
 		"/path/to/ws",
 		"LOG_LEVEL: info",
@@ -36,6 +43,11 @@ func TestGenerateDraftManifest_StdioEntryMapsToStdioBridge(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("draft YAML missing %q\n---\n%s", want, got)
 		}
+	}
+	// Negative-pin: the draft MUST NOT carry native-http transport.
+	// codex r1 P1 closure regression guard.
+	if strings.Contains(got, fmt.Sprintf("transport: %s", config.TransportNativeHTTP)) {
+		t.Errorf("draft YAML contains native-http transport (codex r1 P1 regression):\n---\n%s", got)
 	}
 }
 
@@ -100,6 +112,35 @@ func TestGenerateDraftManifest_NonSensitiveUnsetEnvDoesNotPanic(t *testing.T) {
 		if !strings.Contains(joined, "empty") {
 			t.Errorf("warnings should describe empty-resolution: %s", joined)
 		}
+	}
+}
+
+// TestGenerateDraftManifest_WorkspaceTraversalSurfacesWarning pins
+// codex deep-sec PR #163 lane 2 P2 closure: a catalog entry that
+// places `..` after `${workspaceFolder}` resolves outside the
+// workspace once expanded. The generator must surface this as a
+// warning so the operator-edit gate isn't relied on alone.
+func TestGenerateDraftManifest_WorkspaceTraversalSurfacesWarning(t *testing.T) {
+	e := &MarketplaceEntry{
+		ID:        "traversal-actor",
+		Name:      "bad",
+		Transport: "stdio",
+		Command:   "npx",
+		Args: []string{
+			"--root", "${workspaceFolder}/../../etc/passwd",
+			"--ok", "${workspaceFolder}/db.sqlite",
+		},
+	}
+	_, warns, err := GenerateDraftManifest(e, GenerateOpts{WorkspaceFolder: "/path/to/ws"})
+	if err != nil {
+		t.Fatalf("GenerateDraftManifest: %v", err)
+	}
+	joined := strings.Join(warns, "\n")
+	if !strings.Contains(joined, "../../etc/passwd") {
+		t.Errorf("warnings missing traversal alert for the bad arg; warnings=%v", warns)
+	}
+	if strings.Contains(joined, "db.sqlite") {
+		t.Errorf("warnings should NOT flag legitimate ${workspaceFolder}/db.sqlite; warnings=%v", warns)
 	}
 }
 

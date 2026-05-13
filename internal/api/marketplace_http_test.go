@@ -58,6 +58,45 @@ func TestMarketplaceHTTPClient_DisablesCompression(t *testing.T) {
 	}
 }
 
+// TestMarketplaceHTTPClient_RejectsCredentialHeaders pins codex r5
+// lane 1 P2 closure: MarketplaceFetchWithClient must refuse extra
+// headers that carry credentials (Authorization, Cookie,
+// Proxy-Authorization). The threat model is an unauthenticated GET
+// against a public registry, so any such header would leak operator
+// credentials to whatever URL --registry points at.
+func TestMarketplaceHTTPClient_RejectsCredentialHeaders(t *testing.T) {
+	// The server records what headers it actually received so the
+	// test can also prove the rejection happened CLIENT-side (before
+	// the request reached the wire). If the test ever sees one of
+	// these headers in srv-received headers, it has regressed.
+	var seenForbidden []string
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, k := range []string{"Authorization", "Cookie", "Proxy-Authorization"} {
+			if r.Header.Get(k) != "" {
+				seenForbidden = append(seenForbidden, k)
+			}
+		}
+		_, _ = w.Write([]byte(`{"schema_version":"1","entries":[]}`))
+	}))
+	defer srv.Close()
+	client := injectTLSTestClient(srv)
+	for _, hdr := range []string{"Authorization", "Cookie", "Proxy-Authorization", "authorization", "COOKIE"} {
+		_, err := MarketplaceFetchWithClient(context.Background(), client, srv.URL, "", map[string]string{
+			hdr: "leaked-credential-value",
+		})
+		if err == nil {
+			t.Errorf("header %q: expected rejection; got nil", hdr)
+			continue
+		}
+		if !strings.Contains(err.Error(), "credential-bearing header") {
+			t.Errorf("header %q: error %v missing 'credential-bearing header' text", hdr, err)
+		}
+	}
+	if len(seenForbidden) != 0 {
+		t.Errorf("server received forbidden headers despite client-side rejection: %v", seenForbidden)
+	}
+}
+
 // injectTLSTestClient builds an http.Client that trusts the
 // httptest TLS server's certificate AND inherits the marketplace
 // transport policy (DisableCompression + downgrade-redirect guard).

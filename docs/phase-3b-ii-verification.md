@@ -300,18 +300,39 @@ After completing D2.6, run `mcphub watchdog status` once more and
 attach a copy of the recent-events tail to the audit-trail entry at
 the bottom of this doc.
 
-### D2.8 — Marketplace draft-import (G5, v2 per codex r1)
+### D2.8 — Marketplace draft-import (G5, v3 per codex r5)
+
+Runs in PowerShell 7+ on Windows. Linux/macOS equivalents shown in
+parens where the command differs.
 
 1. `mcphub marketplace refresh` → "Refreshed catalog: N entries." on stdout.
 2. `mcphub marketplace search filesystem` → row for `filesystem` entry.
 3. `mcphub marketplace show filesystem` → metadata block + `Readme URL: <url>` (NO README body — open the URL yourself).
-4. `mcphub marketplace generate filesystem > /tmp/draft.yaml`
-5. **Operator-edit step (load-bearing):** open `/tmp/draft.yaml` and:
+4. Capture the draft to a file you can open:
+   - PowerShell: `$draft = Join-Path $env:TEMP 'marketplace-draft.yaml'; mcphub marketplace generate filesystem | Out-File -Encoding utf8 $draft`
+   - bash: `draft=$(mktemp --suffix=.yaml); mcphub marketplace generate filesystem > "$draft"`
+5. **Operator-edit step (load-bearing — codex r5 P1 secrets reminder):**
+   open the draft file (`$draft` / `"$draft"`) and:
    - change `name: filesystem` to a unique server id, e.g. `name: filesystem-test`
    - replace `port: 0` with a free port, e.g. `port: 9200`
-   - inspect `command` + `base_args` + `env`; replace any verbatim `${env:*}` placeholders with the values you want persisted
-   - the leading comment block reminds you of these three steps
-6. `mcphub manifest create filesystem-test < /tmp/draft.yaml` → manifest accepted; `mcphub manifest list` shows `filesystem-test`.
+   - inspect `command` + `base_args` + `env`. **Do NOT persist raw
+     tokens / passwords / API keys in the draft.** Replace any
+     verbatim `${env:*}` placeholders with one of:
+     - a `secret:<key>` reference resolved from your local secrets
+       vault (recommended for credential-bearing variables — see
+       `mcphub secrets` and the GUI Secrets section); or
+     - the operator-meaningful literal value when the variable is
+       non-secret (e.g. `LOG_LEVEL: info`).
+   - the leading comment block in the draft reminds you of these
+     three steps; the stderr warnings from `marketplace generate`
+     name each sensitive variable that was left verbatim and each
+     non-sensitive variable that expanded to empty.
+6. Apply the edited draft (the CLI accepts a file path via
+   `--from-file` AND stdin redirection; pick whichever your shell
+   supports more cleanly):
+   - PowerShell: `mcphub manifest create filesystem-test --from-file $draft`
+   - bash: `mcphub manifest create filesystem-test < "$draft"`
+   - `mcphub manifest list` then shows `filesystem-test`.
 7. `mcphub install --server filesystem-test --clients claude-code` → install succeeds; the daemon registers.
 8. `mcphub marketplace generate context7` → non-zero exit; stdout empty; stderr contains "G6" + "wait" + "workaround".
 9. Disconnect network; `mcphub marketplace search filesystem` → WARN line on stderr; cached output on stdout still works.

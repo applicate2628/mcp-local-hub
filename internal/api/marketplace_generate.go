@@ -36,9 +36,16 @@ func GenerateDraftManifest(e *MarketplaceEntry, opts GenerateOpts) (string, []st
 	}
 	workspace := opts.WorkspaceFolder
 	if workspace == "" {
-		if wd, err := os.Getwd(); err == nil {
-			workspace = wd
+		// codex deep-sec PR #163 lane 3 P3 closure: surface
+		// os.Getwd failures instead of silently producing a draft
+		// with an empty workspace placeholder. The CLI layer
+		// already pre-resolves this, so this path is mostly the
+		// API-direct-call fallback.
+		wd, err := os.Getwd()
+		if err != nil {
+			return "", nil, fmt.Errorf("resolve workspace folder via os.Getwd: %w (set GenerateOpts.WorkspaceFolder explicitly)", err)
 		}
+		workspace = wd
 	}
 	// codex r6 P1 closure (PR #163): PlaceholderExpander.Expand
 	// writes to UndefinedEnv for any non-sensitive ${env:VAR} that
@@ -74,6 +81,17 @@ func GenerateDraftManifest(e *MarketplaceEntry, opts GenerateOpts) (string, []st
 		sort.Strings(names)
 		for _, name := range names {
 			warnings = append(warnings, fmt.Sprintf("catalog references ${env:%s} which expanded to empty (variable unset in the current environment); the draft will contain an empty value at that position — edit before saving", name))
+		}
+	}
+	// codex deep-sec PR #163 lane 2 P2 closure: workspace traversal
+	// warning. A catalog entry can put `${workspaceFolder}/../foo`
+	// in args or env values to break out of the workspace sandbox
+	// after expansion. The operator-edit gate is the last line of
+	// defense; surface the suspect placeholders explicitly so the
+	// operator notices them before piping to manifest create.
+	for _, raw := range collectTraversalCandidates(e.Args, e.Env) {
+		if traversalSuffixContainsParentRef(raw) {
+			warnings = append(warnings, fmt.Sprintf("catalog string %q uses ${workspaceFolder} followed by a parent-directory reference (..); the expanded path escapes the workspace — review before saving", raw))
 		}
 	}
 	draft := map[string]any{
@@ -113,4 +131,65 @@ func GenerateDraftManifest(e *MarketplaceEntry, opts GenerateOpts) (string, []st
 		"",
 	}, "\n")
 	return header + string(data), warnings, nil
+}
+
+// collectTraversalCandidates returns every string from args + env
+// values that mentions `${workspaceFolder}` literally. Order is
+// stable: args first (in order), then env values sorted by key, so
+// the warning stream is reproducible across runs.
+func collectTraversalCandidates(args []string, env map[string]string) []string {
+	out := make([]string, 0, len(args)+len(env))
+	for _, a := range args {
+		if strings.Contains(a, "${workspaceFolder}") {
+			out = append(out, a)
+		}
+	}
+	keys := make([]string, 0, len(env))
+	for k, v := range env {
+		if strings.Contains(v, "${workspaceFolder}") {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		out = append(out, env[k])
+	}
+	return out
+}
+
+// traversalSuffixContainsParentRef returns true when the part of `s`
+// following `${workspaceFolder}` references a parent directory via
+// a `..` path segment. A `..` segment after the placeholder is the
+// load-bearing signal: a catalog entry like
+// `${workspaceFolder}/../../etc/passwd` resolves outside the
+// workspace once expanded, while a legitimate
+// `${workspaceFolder}/db.sqlite` does not.
+//
+// Match rules (case-insensitive on the path separator, but the
+// `..` segment itself is byte-literal):
+//   - any of `/../`, `\..\`, `/..\`, `\../` after the placeholder
+//   - a trailing `/..` or `\..` after the placeholder
+//
+// codex deep-sec PR #163 lane 2 P2 closure.
+func traversalSuffixContainsParentRef(s string) bool {
+	const ph = "${workspaceFolder}"
+	idx := strings.Index(s, ph)
+	if idx < 0 {
+		return false
+	}
+	tail := s[idx+len(ph):]
+	if tail == "" {
+		return false
+	}
+	for _, pat := range []string{"/../", `\..\`, `/..\`, `\../`} {
+		if strings.Contains(tail, pat) {
+			return true
+		}
+	}
+	for _, suf := range []string{"/..", `\..`} {
+		if strings.HasSuffix(tail, suf) {
+			return true
+		}
+	}
+	return false
 }

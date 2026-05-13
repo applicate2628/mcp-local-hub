@@ -587,17 +587,38 @@ discover MCP servers from a curated catalog. Default registry URL:
 - `search [query]` — table of catalog entries matching query (empty = list all).
 - `show <id>` — metadata block + `Readme URL:` line (operator opens the URL).
 - `generate <id>` — draft YAML to stdout. **Operator MUST edit before**
-  `manifest create`: rename `name:`, pick a real port, redact verbatim
-  `${env:*}` placeholders. Sensitive env names (`*_TOKEN`, `*_SECRET`,
-  `*_PASSWORD`, `*_KEY`, `*_API_KEY`, `AWS_*`, `AZURE_*`, `GCP_*`,
-  `GITHUB_*`) are LEFT VERBATIM with a stderr warning per occurrence.
+  `manifest create`: rename `name:`, pick a real port, **do NOT
+  persist raw tokens / passwords / API keys** — replace verbatim
+  `${env:*}` placeholders with a `secret:<key>` reference (from the
+  local vault — see `mcphub secrets`) or the operator-meaningful
+  literal when the variable is non-secret. Sensitive env names match
+  a broad classifier (suffixes `*_TOKEN`/`*_SECRET`/`*_PASSWORD`/
+  `*_KEY`/`*_API_KEY`/`*_AUTH`/`*_DSN`; prefixes `AWS_`/`AZURE_`/
+  `GCP_`/`GITHUB_`/`GOOGLE_`/`OAUTH_`; substrings `TOKEN`/`SECRET`/
+  `PASSWORD`/`CREDENTIAL`/`BEARER`/`PRIVATE_KEY`; exact names
+  `DATABASE_URL`/`CONNECTION_STRING`/`DSN`/`AUTHORIZATION`/`OAUTH`/
+  `GOOGLE_APPLICATION_CREDENTIALS`); each match is LEFT VERBATIM
+  with a stderr warning per occurrence. Workspace strings using
+  `${workspaceFolder}/..` (parent-directory escape) are also surfaced
+  as warnings before the draft prints.
 - `refresh` — force re-fetch (bypass TTL + ETag).
 
 Cache: `<state-dir>/marketplace-cache.json` (routed through
 `writeHubMcpStateFile` — atomic tempfile + rename + post-rename DACL re-verify (best-effort cache, no cross-process flock — see Architecture intro)), 24h
-TTL, ETag revalidate. HTTPS-only; downgrade redirects rejected; gzip
-disabled. Native-http entries skip with a G6-deferral message until G6
-ships (no operator-side workaround in v0.3.0).
+TTL, ETag revalidate. Cache entries carry the `source_url` they were
+fetched from; a `--registry` switch forces a fresh fetch instead of
+serving the prior registry's body. HTTPS-only; downgrade redirects
+rejected; gzip disabled. Catalog display fields (name, summary,
+categories, etc.) are stripped of C0/C1/ESC bytes before reaching
+stdout so a hostile registry cannot inject terminal control sequences.
+Credential-bearing extra HTTP headers (Authorization, Cookie,
+Proxy-Authorization) are refused at the fetch helper. Native-http
+(`transport: "http"`) entries refuse to generate; the CLI prints a
+G6-deferral error to stderr with the entry URL and explicit operator
+guidance: **wait for G6 (Remote MCP manifests, v0.4.x)** is the
+supported path. Operators who cannot wait may hand-author a local
+stdio wrapper that proxies to the remote URL; both options are surfaced
+in the CLI error message.
 
 ## Stuck-instance recovery
 
