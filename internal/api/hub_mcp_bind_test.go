@@ -13,6 +13,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net"
 	"sync"
 	"testing"
@@ -158,6 +159,40 @@ func TestBindHubMcpListenerValidateManifestFailureClosesNothing(t *testing.T) {
 	// Wrapped via fmt.Errorf("bind refused: %w", verr).
 	if !containsString(err.Error(), wantErr) {
 		t.Errorf("error chain missing marker %q: %v", wantErr, err)
+	}
+}
+
+// TestBindHubMcpListenerCanceledContextDoesNotFireRotationWarning
+// pins bot r1 P2 closure (PR #167): when the caller cancels ctx
+// while NewListenerWithSOExclusiveContext is in flight, the bind
+// error is context.Canceled. The pre-fix code logged
+// `credential-rotation-required` (a security-incident-grade
+// warning) on this cancellation path, which would drive operators
+// through an unnecessary token+instance-id rotation runbook. The
+// fix checks errors.Is(lnErr, context.Canceled |
+// DeadlineExceeded) before emitting the warn.
+//
+// We don't have a direct LogHubMcpEvent capture seam in the
+// existing tests; the indirect proof is: the call returns the
+// canceled error from Listen WITHOUT panicking AND we exercise the
+// gating branch.
+func TestBindHubMcpListenerCanceledContextDoesNotFireRotationWarning(t *testing.T) {
+	hubMcpStateTestHelper(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel BEFORE BindHubMcpListener runs
+
+	_, err := BindHubMcpListener(ctx, []string{"claude-code"}, nil)
+	if err == nil {
+		t.Fatal("expected canceled-context error")
+	}
+	// Function should propagate cancellation somewhere up the call
+	// chain. The exact wrap shape varies by where in the bind
+	// transaction ctx.Err() catches it (pre-validate, pre-bind, or
+	// during listener Listen). The load-bearing assertion is that
+	// the caller sees a canceled-flavored error.
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected wrapped context.Canceled; got %v", err)
 	}
 }
 

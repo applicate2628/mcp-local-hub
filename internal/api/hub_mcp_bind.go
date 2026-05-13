@@ -26,6 +26,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -164,9 +165,20 @@ func BindHubMcpListener(ctx context.Context, clients []string, validateManifests
 		// is indistinguishable from a credential-harvest attack. The
 		// operator-facing recovery is the rotation chain documented
 		// in §"Bind ordering". One log line; caller surfaces error.
-		_ = LogHubMcpEvent("warn", "credential-rotation-required", map[string]any{
-			"reason": "pre-bind window — credentials may have leaked to pre-binding process",
-		})
+		//
+		// Bot r1 P2 closure (PR #167): with ctx now threaded into
+		// Listen (issue #159 concurrency lane #3), lnErr can be
+		// context.Canceled / DeadlineExceeded when startup is
+		// canceled mid-listen. Those are NOT port-hijack signals —
+		// emitting credential-rotation-required on cancellation
+		// would drive operators through an unnecessary token+
+		// instance-id rotation runbook. Skip the warning when the
+		// error is ctx-shaped.
+		if !errors.Is(lnErr, context.Canceled) && !errors.Is(lnErr, context.DeadlineExceeded) {
+			_ = LogHubMcpEvent("warn", "credential-rotation-required", map[string]any{
+				"reason": "pre-bind window — credentials may have leaked to pre-binding process",
+			})
+		}
 		return nil, fmt.Errorf("bind %s: %w", bindAddr, lnErr)
 	}
 
