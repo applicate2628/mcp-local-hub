@@ -375,35 +375,109 @@ func AppendStrike(window []time.Time, now time.Time, capN int) []time.Time {
 // CooldownEntry map. Mutation is by-name so independent task names do
 // not interfere. Per the Cooldown interface contract, callers must not
 // invoke the engine concurrently.
+//
+// maxAttempts caps RecordAttempt invocations per 15-min window; the
+// driver consults Due() which compares e.AttemptsInWindow against
+// maxAttempts. Defaults to AttemptWindowMax; the watchdog --once
+// driver overrides it from daemons.retry_policy at tick start
+// (A4-b PR #2 runtime applier).
 type cooldownEngine struct {
-	entries map[string]CooldownEntry
+	entries     map[string]CooldownEntry
+	maxAttempts int
 }
 
 // newCooldownEngine builds a fresh engine from the supplied map. The
 // map is captured by reference; subsequent mutations land in the same
 // map so WriteWatchdogState can serialize the up-to-date state.
+// maxAttempts defaults to AttemptWindowMax — callers (the watchdog
+// driver) replace it with SetMaxAttempts after reading the operator's
+// daemons.retry_policy setting.
 func newCooldownEngine(m map[string]CooldownEntry) *cooldownEngine {
 	if m == nil {
 		m = map[string]CooldownEntry{}
 	}
-	return &cooldownEngine{entries: m}
+	return &cooldownEngine{entries: m, maxAttempts: AttemptWindowMax}
+}
+
+// SetMaxAttempts overrides the per-window attempt cap. Called by the
+// watchdog --once driver after resolving the daemons.retry_policy
+// setting via api.PolicyFromString. n must be >= 1; values below 1
+// are clamped to 1 (one shot then immediate cooldown — matches the
+// "none" policy semantic).
+//
+// A4-b PR #2 runtime applier closure: the policy's MaxAttempts() is
+// the only RetryPolicy dimension the watchdog can honor — Backoff()
+// is meaningless under a fixed 5-min scheduler-tick cadence.
+func (c *cooldownEngine) SetMaxAttempts(n int) {
+	if n < 1 {
+		n = 1
+	}
+	c.maxAttempts = n
+}
+
+// MaxAttemptsConfigured returns the engine's currently-configured
+// per-window attempt cap. Used by the driver to log the effective
+// policy + by tests to pin the wiring.
+func (c *cooldownEngine) MaxAttemptsConfigured() int { return c.maxAttempts }
+
+// ApplyRetryPolicy resolves the daemons.retry_policy value against
+// PolicyFromString and sets the per-window attempt cap on the
+// supplied WatchdogStateRead's cooldown engine accordingly.
+//
+// Returns the resolved policy name and effective MaxAttempts so
+// callers can log the runtime-applied policy for operator
+// observability. On unknown policy strings the function falls back
+// to the registry default ("exponential") and emits a hub-mcp event
+// log entry — operators should never see this in practice because
+// the settings validator rejects unknown values at save time, but
+// stale on-disk values from older builds are tolerated.
+//
+// Best-effort wiring: if the engine type is not *cooldownEngine
+// (e.g. suppressAllCooldown when state is corrupt), the function
+// is a no-op — the suppress engine already refuses every restart
+// regardless of policy.
+//
+// A4-b PR #2 runtime applier closure.
+func ApplyRetryPolicy(stateRead *WatchdogStateRead, policyName string) (resolved string, maxAttempts int) {
+	resolved = policyName
+	policy, err := PolicyFromString(policyName)
+	if err != nil {
+		// Fall back to the registry default; log so an operator
+		// running `mcphub hub-mcp status` notices the stale value.
+		_ = LogHubMcpEvent("warn", "retry-policy-unknown-fallback", map[string]any{
+			"given":   policyName,
+			"fallback": "exponential",
+			"err":     err.Error(),
+		})
+		policy, _ = PolicyFromString("exponential")
+		resolved = "exponential (fallback from unknown " + policyName + ")"
+	}
+	maxAttempts = policy.MaxAttempts()
+	if engine, ok := stateRead.Cool.(*cooldownEngine); ok {
+		engine.SetMaxAttempts(maxAttempts)
+	}
+	return resolved, maxAttempts
 }
 
 // Due implements §6 backoff math. Returns true iff:
 //
 //   - entry missing OR FirstAttemptAt.IsZero() (first-ever attempt), OR
-//   - AttemptsInWindow < AttemptWindowMax AND now <= FirstAttemptAt+15min
+//   - AttemptsInWindow < maxAttempts AND now <= FirstAttemptAt+15min
 //     (within attempt window — INCLUSIVE upper), OR
 //   - now >= FirstAttemptAt+30min (cooldown over → new cycle).
 //
 // Otherwise false (cooldown phase).
+//
+// maxAttempts defaults to AttemptWindowMax (4); the watchdog --once
+// driver overrides it via SetMaxAttempts based on the operator's
+// daemons.retry_policy setting (A4-b PR #2 runtime applier).
 func (c *cooldownEngine) Due(name string, now time.Time) bool {
 	e, ok := c.entries[name]
 	if !ok || e.FirstAttemptAt.IsZero() {
 		return true
 	}
-	// Attempt window: 1..4 inclusive of T+15min.
-	if e.AttemptsInWindow < AttemptWindowMax {
+	// Attempt window: 1..maxAttempts inclusive of T+15min.
+	if e.AttemptsInWindow < c.maxAttempts {
 		upper := e.FirstAttemptAt.Add(AttemptWindowDuration)
 		// `<= upper` per plan §6 inclusive boundary.
 		if !now.After(upper) {

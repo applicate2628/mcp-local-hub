@@ -442,28 +442,33 @@ func TestSettingsRegistry_DeferredFlipsForA4bPR1(t *testing.T) {
 	}
 }
 
-// TestSettingsRegistry_RetryPolicySavedOnlyLabel locks the pre-tag
-// honesty fix from docs/superpowers/plans/phase-3b-ii-backlog.md (the
-// "Suggested sequencing" Pre-tag fix line): retry_policy's Help must
-// label the field "saved only" and indicate the runtime applier is
-// "deferred", since A4-b PR #2 (the runtime applier) is deferred to
-// v0.4.x. Without this label the Settings UI would imply retry_policy
-// is enforced, which it is not.
-func TestSettingsRegistry_RetryPolicySavedOnlyLabel(t *testing.T) {
+// TestSettingsRegistry_RetryPolicyRuntimeApplied locks the A4-b
+// PR #2 runtime-applier shipping contract: retry_policy's Help text
+// must describe what the policy DOES (per-window attempt cap), not
+// the prior "saved only / deferred" placeholder. The "saved only"
+// language was pre-tag honesty wording from the time the applier
+// hadn't shipped yet; with the applier wired in
+// internal/cli/watchdog.go::runWatchdogOnceInner, the field is
+// fully active and the help text must reflect that.
+func TestSettingsRegistry_RetryPolicyRuntimeApplied(t *testing.T) {
 	def := findDef("daemons.retry_policy")
 	if def == nil {
 		t.Fatal("daemons.retry_policy missing from registry")
 	}
-	if !strings.Contains(strings.ToLower(def.Help), "saved only") {
-		t.Errorf("Help must contain 'saved only' (pre-tag honesty fix); got %q", def.Help)
+	low := strings.ToLower(def.Help)
+	// Help must NOT carry the pre-A4-b "saved only" disclaimer
+	// anymore — that would lie to operators about whether the
+	// setting takes effect.
+	if strings.Contains(low, "saved only") {
+		t.Errorf("Help still says 'saved only' but the runtime applier has shipped in A4-b PR #2; got %q", def.Help)
 	}
-	if !strings.Contains(strings.ToLower(def.Help), "deferred") {
-		t.Errorf("Help must indicate runtime applier is 'deferred'; got %q", def.Help)
+	// Help SHOULD mention the attempt cap or the watchdog cadence
+	// so operators understand the runtime semantic.
+	if !strings.Contains(low, "attempt") {
+		t.Errorf("Help must describe the attempt cap so operators understand the runtime semantic; got %q", def.Help)
 	}
-	// Sanity: still NOT Deferred:true, so the field stays editable per the
-	// "label OR disable" choice in the backlog (we picked label).
 	if def.Deferred {
-		t.Errorf("def.Deferred should be false (we chose 'label' over 'disable'); got true")
+		t.Errorf("def.Deferred should be false (applier shipped); got true")
 	}
 }
 

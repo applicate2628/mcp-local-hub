@@ -116,16 +116,15 @@ var SettingsRegistry = []SettingDef{
 		Help:    "Weekly refresh schedule (format: weekly DAY HH:MM, 24-hour local time)."},
 	{Key: "daemons.retry_policy", Section: "daemons", Type: TypeEnum,
 		Default: "exponential", Enum: []string{"none", "linear", "exponential"},
-		// Pre-tag honesty: A4-b PR #2 (runtime applier) is deferred to
-		// v0.4.x per docs/superpowers/plans/phase-3b-ii-backlog.md "Dropped
-		// / deferred" section (originally "after G4" — now both A4-b PR #2
-		// and G4 itself are v0.4.x). The field stays editable so operators
-		// can pre-set their preferred policy; the saved value persists
-		// across restarts. But until the runtime applier ships, this
-		// setting is purely declarative — daemon restart loops do not
-		// consult it. Help text must say "saved only" and "deferred" so
-		// the Settings UI does not imply the policy is active.
-		Help: "Saved only — runtime applier deferred (v0.4.x). Your value persists across restarts but does not yet affect daemon retry behavior."},
+		// A4-b PR #2 runtime applier shipped: the watchdog --once
+		// driver reads this setting at tick start and applies
+		// policy.MaxAttempts() as the per-15-min-window cap on
+		// daemon restart attempts. "none" → 1 attempt then cooldown,
+		// "linear" → 3 attempts then cooldown, "exponential" → 5
+		// attempts then cooldown (effectively unbounded under the
+		// fixed 5-min tick cadence). Backoff() is irrelevant here —
+		// the scheduler controls tick frequency, not the engine.
+		Help: "Per-15-min-window attempt cap before a failing daemon enters cooldown. none = 1 attempt; linear = 3 attempts; exponential = 5 attempts (effectively unbounded within a window). Takes effect on the next watchdog tick (~5 min)."},
 
 	// ----- backups -----
 	{Key: "backups.keep_n", Section: "backups", Type: TypeInt,
