@@ -390,12 +390,27 @@ func (a *API) validateManifestForStorageName(name, yaml string) []string {
 }
 
 // manifestValidationWarnings collects soft warnings (declared-but-empty
-// fields, etc.) for a structurally valid ServerManifest. Workspace-scoped
-// manifests legitimately have no daemons (PR #108) so the daemon-empty
-// check is gated on Kind.
+// fields, etc.) for a structurally valid ServerManifest.
+//
+// Daemons-empty exemptions:
+//   - Workspace-scoped manifests legitimately have no daemons
+//     (PR #108) — lazy-proxy per-(workspace, language).
+//   - Remote-http manifests have no local daemon at all (G6) — the
+//     client connects directly to the remote URL.
+//
+// Both exemptions are by-design "no local daemon" shapes; Validate()
+// has already proven the manifest is structurally consistent for
+// the declared transport/kind.
+//
+// codex bot r3 P1 closure (PR #169): pre-fix, valid remote-http
+// manifests couldn't be created/edited through the API/GUI surface
+// because ManifestCreate / ManifestEdit treated empty daemons as a
+// hard error.
 func manifestValidationWarnings(m *config.ServerManifest) []string {
 	var warnings []string
-	if m.Kind != config.KindWorkspaceScoped && len(m.Daemons) == 0 {
+	if m.Kind != config.KindWorkspaceScoped &&
+		m.Transport != config.TransportRemoteHTTP &&
+		len(m.Daemons) == 0 {
 		warnings = append(warnings, "no daemons declared")
 	}
 	for _, d := range m.Daemons {

@@ -47,6 +47,50 @@ func TestManifestValidateWorkspaceScopedAllowsNoDaemons(t *testing.T) {
 		}
 	}
 }
+
+// TestManifestValidateRemoteHTTPAllowsNoDaemons pins codex bot r3
+// P1 closure (PR #169): remote-http manifests legitimately have
+// no local daemon (client connects directly to the remote URL),
+// so the "no daemons declared" soft warning MUST be exempted.
+// Without this exemption, ManifestCreateIn/ManifestEditIn would
+// reject every valid remote-http manifest at the soft-warning gate.
+func TestManifestValidateRemoteHTTPAllowsNoDaemons(t *testing.T) {
+	a := NewAPI()
+	yaml := `name: ctx7
+kind: global
+transport: remote-http
+url: https://mcp.context7.com/mcp
+headers:
+  Authorization: Bearer ${secret:CONTEXT7_TOKEN}
+client_bindings:
+  - client: claude-code
+`
+	warnings := a.ManifestValidate(yaml)
+	for _, w := range warnings {
+		if w == "no daemons declared" {
+			t.Fatalf("unexpected warning for remote-http manifest: %v", warnings)
+		}
+	}
+}
+
+// TestManifestValidateGlobalStdioBridgeStillWarnsOnNoDaemons pins
+// the negative case: ordinary global stdio-bridge / native-http
+// manifests with no daemons SHOULD still emit the warning. The
+// remote-http exemption is narrow.
+func TestManifestValidateGlobalStdioBridgeStillWarnsOnNoDaemons(t *testing.T) {
+	a := NewAPI()
+	yaml := "name: bad-stdio\nkind: global\ntransport: stdio-bridge\ncommand: echo\nclient_bindings: []\nweekly_refresh: false\n"
+	warnings := a.ManifestValidate(yaml)
+	found := false
+	for _, w := range warnings {
+		if w == "no daemons declared" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("global stdio-bridge manifest with no daemons must still emit warning; got %v", warnings)
+	}
+}
 func TestManifestCreateWritesYAML(t *testing.T) {
 	tmp := t.TempDir()
 	a := NewAPI()
