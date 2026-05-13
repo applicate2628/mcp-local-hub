@@ -222,25 +222,45 @@ func runReconcileHubMode(cmd *cobra.Command, dryRun bool) error {
 		}
 	}
 
-	// 3. Collect manifests for every supported server.
+	// 3. Collect manifests for currently-installed servers.
 	//
-	// codex bot phase5 r6 P1 closure on PR #160: enumerate via
-	// ManifestList (canonical-source list of on-disk + embedded
-	// manifests) instead of Scan().Entries. Scan walks each CLIENT
-	// config file and produces entries only for servers a client
-	// currently references; after a gate-ON migration, clients
-	// hold `mcphub-hub` and nothing else, so Scan yields an empty
-	// (manifest-bearing) entry set even though the per-server
-	// manifests still exist on disk. That broke gate-OFF reconcile:
-	// the plan came out empty and per-daemon entries were never
-	// restored. ManifestList enumerates the manifest registry
-	// directly, which is the input the reconciler actually wants.
+	// codex bot phase5 r6 P1 closure on PR #160 (initial fix):
+	// switched from Scan().Entries to ManifestList because Scan
+	// returns empty after gate-ON migration (clients hold
+	// `mcphub-hub` only). ManifestList enumerates the on-disk +
+	// embedded manifest registry.
+	//
+	// codex bot phase5 r8 P1 closure on PR #160 (refinement):
+	// ManifestList alone over-includes — it returns EVERY shipped
+	// manifest (including templates the user never installed). In
+	// gate-OFF mode, that writes per-daemon AddReplace ops for
+	// servers the user never ran, polluting client configs with
+	// dead localhost URLs. Intersect ManifestList with the set of
+	// servers that have at least one scheduled daemon task
+	// (ListManagedTasks → ParseManagedTaskName) — those represent
+	// "the user ran `mcphub install --server X`" intent. The
+	// scheduler tasks survive gate transitions (reconcile only
+	// rewrites client configs, never tears down tasks), so this
+	// set is stable across gate ON ↔ OFF toggles.
+	tasks, tErr := a.ListManagedTasks()
+	if tErr != nil {
+		return fmt.Errorf("list managed tasks: %w", tErr)
+	}
+	installedServers := map[string]bool{}
+	for _, t := range tasks {
+		if srv, _ := api.ParseManagedTaskName(t.Name); srv != "" {
+			installedServers[srv] = true
+		}
+	}
 	names, mlErr := a.ManifestList()
 	if mlErr != nil {
 		return fmt.Errorf("list manifests: %w", mlErr)
 	}
 	var manifests []config.ServerManifest
 	for _, name := range names {
+		if !installedServers[name] {
+			continue
+		}
 		yaml, gErr := a.ManifestGet(name)
 		if gErr != nil {
 			if errors.Is(gErr, os.ErrNotExist) {
