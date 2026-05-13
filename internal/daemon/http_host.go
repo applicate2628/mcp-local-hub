@@ -338,7 +338,9 @@ func (h *HTTPHost) openLogWriters() (stdout, stderr io.Writer, closer io.Closer)
 		w := daemonDiagWriter()
 		return w, w, nil
 	}
-	if stderrIsTerminal() {
+	// codex deep-sec PR #164 r2 P2: same mutex-honoring helper as
+	// StdioHost.openStderrSink.
+	if isStderrTerminal() {
 		multi := io.MultiWriter(logFile, os.Stderr)
 		return multi, multi, logFile
 	}

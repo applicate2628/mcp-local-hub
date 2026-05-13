@@ -602,7 +602,10 @@ func (h *StdioHost) openStderrSink() io.Writer {
 	}
 	rfw := &rotatingFileWriter{path: h.cfg.LogPath, file: f, maxBytes: 10 * 1024 * 1024, keep: 5}
 	h.logFile = rfw
-	if stderrIsTerminal() {
+	// codex deep-sec PR #164 r2 P2: read the probe through the
+	// mutex-honoring helper so concurrent SetStderrIsTerminalForTest
+	// doesn't race with this hot-path check.
+	if isStderrTerminal() {
 		return io.MultiWriter(rfw, os.Stderr)
 	}
 	return rfw

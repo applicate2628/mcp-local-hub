@@ -168,6 +168,58 @@ func TestLogSupervisorEvent_NonTTYDiscardsStderrButAppendsToLogPath(t *testing.T
 	}
 }
 
+// TestSetStderrIsTerminalForTest_OverlappingPanics pins codex
+// deep-sec PR #164 r2 P2 closure: overlapping Set calls cannot be
+// supported under a defer-restore pattern (test A sets X, test B
+// sets Y, A's defer restores to X instead of orig if we just popped
+// blindly), so the helper panics on overlap instead. Tests using
+// `defer restore()` sequentially are unaffected.
+func TestSetStderrIsTerminalForTest_OverlappingPanics(t *testing.T) {
+	restoreA := SetStderrIsTerminalForTest(true)
+	defer restoreA()
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic on overlapping SetStderrIsTerminalForTest; got nil")
+		}
+	}()
+	// This second call must panic — restoreB never reached.
+	restoreB := SetStderrIsTerminalForTest(false)
+	defer restoreB() // unreachable; the panic deferred above handles it
+}
+
+// TestSetStderrIsTerminalForTest_SequentialReuse pins the
+// release-then-set pattern. After restoreA fires the next Set is
+// fine.
+func TestSetStderrIsTerminalForTest_SequentialReuse(t *testing.T) {
+	restoreA := SetStderrIsTerminalForTest(true)
+	if w := daemonDiagWriter(); w != os.Stderr {
+		t.Errorf("first Set(true): daemonDiagWriter() = %T, want os.Stderr", w)
+	}
+	restoreA()
+
+	restoreB := SetStderrIsTerminalForTest(false)
+	defer restoreB()
+	if w := daemonDiagWriter(); w != io.Discard {
+		t.Errorf("second Set(false) after first restore: daemonDiagWriter() = %T, want io.Discard", w)
+	}
+}
+
+// TestSetStderrIsTerminalForTest_DoubleRestoreIdempotent pins that
+// a second call to restore() is a no-op (uses an internal
+// `released` guard) — otherwise a defensive `defer restoreA();
+// restoreA()` (common when scoping is unclear) would corrupt the
+// override-active flag.
+func TestSetStderrIsTerminalForTest_DoubleRestoreIdempotent(t *testing.T) {
+	restoreA := SetStderrIsTerminalForTest(false)
+	restoreA() // first restore
+	restoreA() // double restore — must be a no-op, not panic
+
+	// Subsequent Set must succeed (active flag is correctly cleared).
+	restoreB := SetStderrIsTerminalForTest(true)
+	defer restoreB()
+}
+
 // TestLogSupervisorEvent_NoLogPathNonTTYIsBenign pins the no-op
 // branch: when LogPath is empty + non-TTY, the call must not panic
 // and must not leave any persistent state (the event is genuinely
