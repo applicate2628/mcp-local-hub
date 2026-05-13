@@ -206,9 +206,20 @@ func runReconcileHubMode(cmd *cobra.Command, dryRun bool) error {
 	// Gate-OFF mode does NOT use endpoint or tokens (URLs come
 	// from manifest bindings; no auth headers), so the same
 	// errors are tolerable there.
-	endpoint, epErr := api.LoadHubEndpoint()
-	tokens, tokErr := api.ReloadHubTokens()
+	// codex deep-sec phase5 r11 P3 closure on PR #160 (regression
+	// lane): only the gate-ON branch consumes endpoint + tokens
+	// (URL/headers in the AddReplace plan). Reading them
+	// unconditionally would call DaemonStateDir() which creates the
+	// state directory, even for a gate-OFF dry-run on a first-run
+	// system. Move the load INSIDE the gate-ON branch so gate-OFF
+	// reconcile (and its dry-run preview) leaves the state dir
+	// untouched.
+	var endpoint api.HubEndpoint
+	var tokens api.HubTokenTable
 	if gateOn {
+		var epErr, tokErr error
+		endpoint, epErr = api.LoadHubEndpoint()
+		tokens, tokErr = api.ReloadHubTokens()
 		if epErr != nil {
 			return fmt.Errorf("gate-ON reconcile requires hub-mcp.endpoint.json (start the hub at least once to generate it): %w", epErr)
 		}
@@ -220,6 +231,19 @@ func runReconcileHubMode(cmd *cobra.Command, dryRun bool) error {
 		}
 		if tokErr != nil {
 			return fmt.Errorf("gate-ON reconcile requires hub-mcp-tokens.json: %w", tokErr)
+		}
+		// codex deep-sec phase5 r11 P1 closure on PR #160 (protocol
+		// lane): the state-file fail-fast above does not prove the
+		// listener is actually up. A stale endpoint.json from a
+		// previous hub run passes every check, and the reconcile
+		// rewrites every client config to `http://127.0.0.1:<stale>
+		// /clients/<id>/mcp` even though nothing is listening. Probe
+		// the hub via the non-mutating HEAD /internal/reload-tokens
+		// (added in r10) — only the live hub responds 204 to an
+		// authenticated probe, so a stranger service or stale port
+		// fails closed.
+		if !hubProbeAlive(cmd, endpoint.Port) {
+			return fmt.Errorf("gate-ON reconcile requires the hub-mcp listener to be live on port %d; start `mcphub gui` (with hub_endpoint_enabled=true in Settings) before running reconcile", endpoint.Port)
 		}
 	}
 
@@ -380,7 +404,13 @@ func perServerInstalledSet(tasks []scheduler.TaskStatus) map[string]bool {
 //     is a no-op because there's nothing to tear down).
 //   - File present but unreadable / unparseable: fail with error.
 //     Operator must repair or delete settings.yaml.
-//   - File present and parseable: use the persisted value.
+//   - File present, parseable, but EMPTY (zero-byte or whitespace-
+//     only): fail with error. codex deep-sec phase5 r11 P2 closure
+//     on PR #160 (concurrency lane): a zero-byte read could indicate
+//     a torn write from a concurrent SettingsSet, and yaml.Unmarshal
+//     returns nil for empty input — without this check we'd silently
+//     default to gate-OFF and apply a destructive teardown.
+//   - File present and parseable with content: use the persisted value.
 func readHubEndpointGateForReconcile() (bool, error) {
 	path := api.SettingsPath()
 	data, err := os.ReadFile(path)
@@ -389,6 +419,9 @@ func readHubEndpointGateForReconcile() (bool, error) {
 			return false, nil
 		}
 		return false, fmt.Errorf("read settings %s: %w", path, err)
+	}
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return false, fmt.Errorf("settings %s is empty (concurrent write in progress, or file corrupted); refusing to default to OFF — wait for the writer to finish, or repair the file, then retry", path)
 	}
 	raw := map[string]string{}
 	if uerr := yaml.Unmarshal(data, &raw); uerr != nil {

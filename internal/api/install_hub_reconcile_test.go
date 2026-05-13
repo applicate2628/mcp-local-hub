@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
 )
 
@@ -133,6 +134,74 @@ func TestBuildHubReconcilePlanGateOnAddsMcphubHubAndRemovesPerDaemon(t *testing.
 				t.Errorf("gate ON %s Remove %s: URL = %q, want empty", client, name, op.URL)
 			}
 		}
+	}
+}
+
+// TestBuildHubReconcilePlanGateOffRemovesAggregateForAllSupportedClients
+// pins the codex deep-sec phase5 r11 P2 closure on PR #160 (protocol
+// lane): gate-OFF reconcile MUST emit a `Remove mcphub-hub` op for
+// every supported client adapter, NOT just clients that currently
+// have manifest bindings. The pre-r11 code skipped supported clients
+// without bindings, leaving a stale aggregate entry behind whenever
+// the operator uninstalled every server that bound to a particular
+// client (or whenever the manifest set changed between gate ON and
+// gate OFF). Antigravity is intentionally excluded
+// (hubReconcileSkipClients).
+func TestBuildHubReconcilePlanGateOffRemovesAggregateForAllSupportedClients(t *testing.T) {
+	// Only one manifest with one client binding — three other supported
+	// clients (vscode, gemini-cli, qwen-cli) have NO bindings in this set
+	// but MUST still receive a `Remove mcphub-hub` op.
+	manifests := []config.ServerManifest{{
+		Name:      "alpha",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportNativeHTTP,
+		Command:   "uvx",
+		Daemons:   []config.DaemonSpec{{Name: "default", Port: 9100}},
+		ClientBindings: []config.ClientBinding{
+			{Client: "claude-code", Daemon: "default", URLPath: "/mcp"},
+		},
+	}}
+	endpoint := HubEndpoint{Port: 9180, InstanceID: "irrelevant-for-gate-off"}
+	tokens := HubTokenTable{Tokens: map[string]string{}}
+
+	plan, err := BuildHubReconcilePlan(manifests, endpoint, tokens, HubReconcileOpts{GateOn: false})
+	if err != nil {
+		t.Fatalf("BuildHubReconcilePlan: %v", err)
+	}
+
+	// Collect clients that got a Remove mcphub-hub op.
+	gotRemove := map[string]bool{}
+	for _, op := range plan {
+		if op.Action == ClientUpdateRemove && op.EntryName == "mcphub-hub" {
+			gotRemove[op.Client] = true
+		}
+	}
+
+	// Every supported client EXCEPT antigravity (skip-listed) must
+	// be present in gotRemove, regardless of whether it had a
+	// binding in `manifests`.
+	for _, c := range clients.SupportedClientNames() {
+		if hubReconcileSkipClients[c] {
+			if gotRemove[c] {
+				t.Errorf("client %q is in hubReconcileSkipClients but got a Remove op — skip list ignored", c)
+			}
+			continue
+		}
+		if !gotRemove[c] {
+			t.Errorf("gate-OFF: missing Remove mcphub-hub for supported client %q (stale aggregate would persist)", c)
+		}
+	}
+
+	// Sanity: claude-code (with binding) also got AddReplace for the
+	// per-server entry.
+	gotAdd := false
+	for _, op := range plan {
+		if op.Client == "claude-code" && op.Action == ClientUpdateAddReplace && op.EntryName == "alpha" {
+			gotAdd = true
+		}
+	}
+	if !gotAdd {
+		t.Error("claude-code with binding must still get AddReplace for the alpha per-server entry")
 	}
 }
 

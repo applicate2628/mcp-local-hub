@@ -135,7 +135,37 @@ func BuildHubReconcilePlan(
 	}
 	sort.Strings(clientNames)
 
+	// codex deep-sec phase5 r11 P2 closure on PR #160 (protocol lane):
+	// gate-OFF must remove `mcphub-hub` from every supported client,
+	// not just clients with current manifest bindings. A client that
+	// previously had a `mcphub-hub` aggregate entry (e.g. installed via
+	// gate-ON reconcile before the user uninstalled every server bound
+	// to that client) would be skipped by the perClient-iterating loop
+	// below, leaving the stale hub URL in place after gate-OFF.
+	//
+	// Emit `Remove mcphub-hub` per supported client up-front; the
+	// per-binding loop below adds AddReplace ops for clients that DO
+	// have bindings. Adapter applier semantics: Remove on a missing
+	// entry is idempotent (no-op), so this is safe to fan out across
+	// every supported client.
 	var plan []ClientUpdatePlan
+	if !opts.GateOn {
+		for _, client := range clients.SupportedClientNames() {
+			if hubReconcileSkipClients[client] {
+				continue
+			}
+			path, err := clients.ConfigPathForName(client)
+			if err != nil {
+				continue
+			}
+			plan = append(plan, ClientUpdatePlan{
+				Client:    client,
+				Path:      path,
+				Action:    ClientUpdateRemove,
+				EntryName: "mcphub-hub",
+			})
+		}
+	}
 	for _, client := range clientNames {
 		refs := perClient[client]
 		if len(refs) == 0 {
@@ -242,6 +272,14 @@ func BuildHubReconcilePlan(
 			// "http://localhost:9128bad-path" if a manifest landed
 			// with a missing leading "/" or a scheme/host smuggled
 			// into url_path. Fail fast with manifest+client context.
+			// codex deep-sec phase5 r11 P2 closure on PR #160: the
+			// gate-OFF `Remove mcphub-hub` op for THIS client was
+			// already emitted up-front (above) as part of the
+			// "remove from every supported client" sweep. Don't
+			// emit it again here — the applier groups by client +
+			// partitions by action, so the dedup is cheap, but a
+			// single op is clearer. Just emit the AddReplace
+			// per-binding ops.
 			for _, ref := range refs {
 				p := ref.URLPath
 				if p == "" {
@@ -260,12 +298,6 @@ func BuildHubReconcilePlan(
 					DaemonName: ref.Daemon,
 				})
 			}
-			plan = append(plan, ClientUpdatePlan{
-				Client:    client,
-				Path:      path,
-				Action:    ClientUpdateRemove,
-				EntryName: "mcphub-hub",
-			})
 		}
 	}
 	return plan, nil

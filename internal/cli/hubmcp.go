@@ -200,34 +200,37 @@ client config snapshot). For routine per-client token compromise, use
 				fmt.Fprintln(cmd.ErrOrStderr(), "non-TTY input requires --yes to confirm rotation")
 				return &forceExitError{code: 6}
 			}
-			if _, err := api.RotateHubInstanceID(); err != nil {
-				return fmt.Errorf("rotate instance id: %w", err)
-			}
-
-			// codex bot phase5 r1 P1 closure on PR #160: the running hub
-			// caches instance_id from SetEndpoint at startup. Without a
-			// dedicated reload protocol for endpoint state, the live
-			// hub continues to accept the OLD id until restart — and
-			// newly-reinstalled clients carrying the NEW id get 401.
-			// Detect a live hub via /internal/reload-tokens probe and
-			// fail with a stern restart-required message; the on-disk
-			// id is already rotated so a hub restart picks it up.
+			// codex deep-sec phase5 r11 P1 closure on PR #160 (protocol
+			// + concurrency lanes agreed): probe liveness BEFORE
+			// mutating disk state. The pre-r11 ordering rotated the
+			// instance_id on disk first, then checked liveness — if
+			// the hub was alive, we ended up with a split-brain state
+			// (disk = NEW id, in-memory hub = OLD id) AND a cli-error
+			// exit. An operator interrupting the rotation (Ctrl-C
+			// between the write and the probe) would leave the same
+			// split state without seeing the warning. Probe first,
+			// refuse on live hub, then rotate — disk only ever gets
+			// the new id when the hub is actually stopped.
 			ep, epErr := api.LoadHubEndpoint()
 			if epErr == nil && ep.Port > 0 && hubProbeAlive(cmd, ep.Port) {
 				fmt.Fprintln(cmd.ErrOrStderr(),
-					"CRITICAL: instance_id rotated on disk but the live hub is still running with the OLD id.")
+					"CRITICAL: refusing to rotate instance_id while the hub is running.")
 				fmt.Fprintln(cmd.ErrOrStderr(),
 					"  The live hub caches instance_id in-memory at startup and has no live-reload for the endpoint state.")
 				fmt.Fprintln(cmd.ErrOrStderr(),
-					"  Stop the hub (close the GUI / kill the daemon), then start it again. Only after that, rerun `mcphub install` for every client.")
+					"  Rotating now would leave disk on the NEW id while the running hub keeps accepting the OLD id —")
 				fmt.Fprintln(cmd.ErrOrStderr(),
-					"  Newly-reinstalled clients with the new id will get 401 until the hub restart happens.")
+					"  any client reinstalled with the new id would get 401 until the hub restarts.")
+				fmt.Fprintln(cmd.ErrOrStderr(),
+					"  Stop the hub (close the GUI / kill the daemon) first, then rerun this command.")
 				return &forceExitError{code: 1}
 			}
-
+			if _, err := api.RotateHubInstanceID(); err != nil {
+				return fmt.Errorf("rotate instance id: %w", err)
+			}
 			fmt.Fprintln(cmd.OutOrStdout(),
 				"Rotated hub-mcp instance_id. Every client config is now stale.\n"+
-					"Rerun `mcphub install` for every client to refresh the live config.")
+					"Rerun `mcphub install --reconcile-hub-mode` for every client to refresh the live config.")
 			return nil
 		},
 	}
