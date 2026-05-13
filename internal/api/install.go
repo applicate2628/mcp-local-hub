@@ -1177,6 +1177,17 @@ func findDaemon(m *config.ServerManifest, name string) (config.DaemonSpec, bool)
 // daemons (already running from a prior install) occupy their assigned ports,
 // even though those ports are not being touched by the current invocation.
 func Preflight(m *config.ServerManifest, daemonFilter string) error {
+	// G6 gate (bot r2 P1 closure on PR #169): transport=remote-http
+	// schema is admissible (sub-PR 1 landed validation), but the
+	// install pipeline (Preflight + BuildPlanWithOpts) is not yet
+	// wired to handle daemonless / command-less manifests. Reject
+	// with a clear "implementation pending" message so operators
+	// who create a remote-http manifest don't hit a confusing
+	// exec.LookPath failure further down the chain. Sub-PR 2 of
+	// G6 wires the install branch and removes this gate.
+	if m.Transport == config.TransportRemoteHTTP {
+		return fmt.Errorf("manifest %s: transport=remote-http install pipeline is pending (G6 sub-PR 2); schema validates but install/uninstall + adapter matrix wiring lands in a follow-up. Use `mcphub manifest test-remote` to verify connectivity in the meantime once that subcommand ships", m.Name)
+	}
 	// 1. Command available.
 	if _, err := exec.LookPath(m.Command); err != nil {
 		return fmt.Errorf("command %q not found on PATH: %w", m.Command, err)

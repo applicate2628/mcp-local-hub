@@ -631,3 +631,31 @@ func TestWaitForPortFree_PortReleasedDuringWait(t *testing.T) {
 			elapsed, 150*time.Millisecond)
 	}
 }
+
+// TestPreflight_RemoteHTTPGatedPending pins bot r2 P1 closure
+// (PR #169): the new transport=remote-http schema validates (G6
+// sub-PR 1 lands the validator), but the install pipeline can't
+// process daemonless / command-less manifests yet. Preflight
+// REJECTS with a clear "implementation pending" message so
+// operators don't hit a confusing exec.LookPath failure further
+// down. Sub-PR 2 of G6 wires the install branch and removes the
+// gate.
+func TestPreflight_RemoteHTTPGatedPending(t *testing.T) {
+	preparePreflightBinaryChecks(t)
+	m := &config.ServerManifest{
+		Name:      "ctx7",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportRemoteHTTP,
+		URL:       "https://mcp.context7.com/mcp",
+	}
+	err := Preflight(m, "")
+	if err == nil {
+		t.Fatal("expected remote-http preflight rejection while install pipeline is pending; got nil")
+	}
+	if !strings.Contains(err.Error(), "remote-http") {
+		t.Errorf("error must name the transport for operator guidance; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "G6") {
+		t.Errorf("error should reference the G6 follow-up for operator forensics; got %v", err)
+	}
+}
