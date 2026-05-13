@@ -46,6 +46,7 @@ func newGuiCmdReal() *cobra.Command {
 		force     bool
 		kill      bool
 		yes       bool
+		resetPort bool
 	)
 	c := &cobra.Command{
 		Use:   "gui",
@@ -75,14 +76,45 @@ activates the first window and exits 0.`,
 			// `--kill` looks like a handled force flow in automation.
 			// `kill && !force` is enforced above, so `yes && !kill`
 			// also covers the lone `--yes` case (no --force, no --kill).
-			if yes && !kill {
-				return fmt.Errorf("--yes requires --force --kill; pass `--force --kill --yes` to confirm non-interactive kill")
+			// codex bot phase5 task 5.3 closure: --yes is also a valid
+			// modifier for --reset-port (confirms credential-rotation
+			// warning acceptance in non-TTY contexts). The check below
+			// rejects --yes only when neither --kill nor --reset-port
+			// is set.
+			if yes && !kill && !resetPort {
+				return fmt.Errorf("--yes requires --force --kill OR --reset-port; pass `--force --kill --yes` or `--reset-port --yes` to confirm non-interactive operation")
 			}
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
+
+			// Phase 5 Task 5.3: --reset-port runs BEFORE the
+			// single-instance lock acquisition. It's a state-dir
+			// operation (clears the persisted Port in
+			// hub-mcp.endpoint.json) that intentionally does NOT
+			// start a server. The credential-rotation warning is
+			// load-bearing — a previous bind to the persisted port
+			// could have leaked tokens to a pre-binding process per
+			// spec §"Pre-bind handling".
+			if resetPort {
+				if !yes && !inputIsTerminal(cmd.InOrStdin()) {
+					fmt.Fprintln(cmd.ErrOrStderr(), "non-TTY input requires --yes to confirm --reset-port (credential-rotation guidance below requires explicit acknowledgement)")
+					return &forceExitError{code: 6}
+				}
+				if err := api.ResetHubPort(); err != nil {
+					return fmt.Errorf("reset hub port: %w", err)
+				}
+				fmt.Fprintln(cmd.OutOrStdout(),
+					"Reset hub-mcp port. instance_id preserved (use `mcphub hub-mcp regenerate-instance-id` for full rotation).")
+				fmt.Fprintln(cmd.OutOrStdout(),
+					"WARNING: credentials may have leaked to a pre-binding process before --reset-port. "+
+						"Run `mcphub hub-mcp regenerate-token --client <each>` AND "+
+						"`mcphub hub-mcp regenerate-instance-id` before reinstalling.")
+				fmt.Fprintln(cmd.OutOrStdout(), "Then: `mcphub install` for each affected client.")
+				return nil
+			}
 
 			// Resolve pidport location (test seam: override via env for subprocess tests).
 			pidportPath, err := gui.PidportPath()
@@ -167,7 +199,8 @@ activates the first window and exits 0.`,
 	c.Flags().BoolVar(&noTray, "no-tray", false, "do not show the system-tray icon")
 	c.Flags().BoolVar(&force, "force", false, "stuck-instance recovery: print diagnostic + open lock folder. Add --kill to terminate the recorded PID after a three-part identity gate.")
 	c.Flags().BoolVar(&kill, "kill", false, "with --force: kill the recorded PID (image/argv/start-time gate); SIGKILL/TerminateProcess. The kernel releases the flock as a side effect.")
-	c.Flags().BoolVar(&yes, "yes", false, "with --force --kill: skip the confirmation prompt (required in non-interactive shells).")
+	c.Flags().BoolVar(&yes, "yes", false, "with --force --kill or --reset-port: skip the confirmation prompt (required in non-interactive shells).")
+	c.Flags().BoolVar(&resetPort, "reset-port", false, "discard the persistent hub-mcp port (instance_id preserved) and emit credential-rotation guidance — does NOT start the server")
 	_ = c.Flags().MarkHidden("force")
 	_ = c.Flags().MarkHidden("kill")
 	_ = c.Flags().MarkHidden("yes")
