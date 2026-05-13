@@ -19,6 +19,12 @@ const (
 const (
 	TransportNativeHTTP  = "native-http"
 	TransportStdioBridge = "stdio-bridge"
+	// TransportRemoteHTTP is the G6 remote-HTTPS-endpoint transport.
+	// No local daemon spawned; no per-daemon port. The manifest carries
+	// `url:` + `headers:` and install writes those directly into client
+	// configs after expanding ${secret:KEY} placeholders.
+	// Spec: docs/superpowers/specs/2026-05-12-g6-remote-mcp-manifests-design.md
+	TransportRemoteHTTP = "remote-http"
 )
 
 // NativeHTTPInternalPortOffset is the fixed delta between a native-http
@@ -52,6 +58,20 @@ type ServerManifest struct {
 	IdleTimeoutMin   int               `yaml:"idle_timeout_min"`
 	ClientBindings   []ClientBinding   `yaml:"client_bindings"`
 	WeeklyRefresh    bool              `yaml:"weekly_refresh"`
+
+	// URL is the remote HTTPS endpoint for TransportRemoteHTTP servers.
+	// REQUIRED for transport="remote-http"; REJECTED if set with any
+	// other transport. Must start with "https://" (G6 §"Validation
+	// rules": plain http:// rejected — plaintext credentials over the
+	// wire are out of scope).
+	URL string `yaml:"url"`
+
+	// Headers carries HTTP headers sent on every request to the remote
+	// endpoint. Values may contain ${secret:KEY} placeholders which
+	// are resolved at INSTALL time from the encrypted vault — the
+	// manifest stays cleartext-free on disk. REJECTED if set with any
+	// transport other than "remote-http".
+	Headers map[string]string `yaml:"headers"`
 }
 
 type DaemonSpec struct {
@@ -165,9 +185,65 @@ func (m *ServerManifest) Validate() error {
 	if m.Kind != KindGlobal && m.Kind != KindWorkspaceScoped {
 		return fmt.Errorf("manifest %s: kind must be %q or %q (got %q)", m.Name, KindGlobal, KindWorkspaceScoped, m.Kind)
 	}
-	if m.Transport != TransportNativeHTTP && m.Transport != TransportStdioBridge {
-		return fmt.Errorf("manifest %s: transport must be %q or %q (got %q)", m.Name, TransportNativeHTTP, TransportStdioBridge, m.Transport)
+	if m.Transport != TransportNativeHTTP && m.Transport != TransportStdioBridge && m.Transport != TransportRemoteHTTP {
+		return fmt.Errorf("manifest %s: transport must be %q, %q, or %q (got %q)", m.Name, TransportNativeHTTP, TransportStdioBridge, TransportRemoteHTTP, m.Transport)
 	}
+
+	// G6 remote-http branch (spec §"Validation rules"):
+	//   - URL required and must be https://
+	//   - Command / BaseArgs / BaseArgsTemplate / Env / Daemons /
+	//     PortPool / Languages / IdleTimeoutMin REJECTED if non-zero
+	//     (silent ignore would let malformed manifests slip through
+	//     — codex bot P2 r1 on PR #152 closure).
+	//   - Headers may carry ${secret:KEY} placeholders (expanded at
+	//     install time; not validated here).
+	//   - WeeklyRefresh:true emits a startup warning but does not
+	//     fail validation; false is silently accepted (G6 spec
+	//     §"Validation rules" — accepted-but-no-op semantic for the
+	//     YAML-bool-can't-distinguish-absent-vs-false edge).
+	if m.Transport == TransportRemoteHTTP {
+		if m.URL == "" {
+			return fmt.Errorf("manifest %s: transport=remote-http requires url:", m.Name)
+		}
+		if !strings.HasPrefix(m.URL, "https://") {
+			return fmt.Errorf("manifest %s: transport=remote-http url must start with https:// (got %q; plaintext rejected — operator must TLS-terminate)", m.Name, m.URL)
+		}
+		if m.Command != "" {
+			return fmt.Errorf("manifest %s: transport=remote-http rejects command (no local subprocess; remove the field)", m.Name)
+		}
+		if len(m.BaseArgs) != 0 {
+			return fmt.Errorf("manifest %s: transport=remote-http rejects base_args (no local subprocess)", m.Name)
+		}
+		if len(m.BaseArgsTemplate) != 0 {
+			return fmt.Errorf("manifest %s: transport=remote-http rejects base_args_template (no local subprocess)", m.Name)
+		}
+		if len(m.Env) != 0 {
+			return fmt.Errorf("manifest %s: transport=remote-http rejects env (no local subprocess; remote endpoint manages its own env)", m.Name)
+		}
+		if len(m.Daemons) != 0 {
+			return fmt.Errorf("manifest %s: transport=remote-http rejects daemons[] (no per-daemon-port model; clients connect directly to the remote URL)", m.Name)
+		}
+		if len(m.Languages) != 0 {
+			return fmt.Errorf("manifest %s: transport=remote-http rejects languages[] (workspace-scoped LSP backends incompatible with remote-only model)", m.Name)
+		}
+		if m.PortPool != nil {
+			return fmt.Errorf("manifest %s: transport=remote-http rejects port_pool (no local ports allocated)", m.Name)
+		}
+		if m.IdleTimeoutMin != 0 {
+			return fmt.Errorf("manifest %s: transport=remote-http rejects idle_timeout_min (no local daemon to idle-out)", m.Name)
+		}
+		return nil
+	}
+
+	// Non-remote-http branches reject URL and Headers — those fields
+	// are exclusive to remote-http.
+	if m.URL != "" {
+		return fmt.Errorf("manifest %s: url is only valid with transport=remote-http (got transport=%q)", m.Name, m.Transport)
+	}
+	if len(m.Headers) != 0 {
+		return fmt.Errorf("manifest %s: headers is only valid with transport=remote-http (got transport=%q)", m.Name, m.Transport)
+	}
+
 	if m.Command == "" {
 		return fmt.Errorf("manifest %s: command is required", m.Name)
 	}

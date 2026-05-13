@@ -270,3 +270,146 @@ languages:
 		t.Errorf("error should mention port_pool: %v", err)
 	}
 }
+
+// ===== G6 remote-http transport tests =====
+
+// TestParseManifest_RemoteHTTPHappyPath pins the G6 schema additions
+// (URL + Headers + transport=remote-http). The manifest carries
+// ${secret:KEY} placeholders cleartext-free; expansion happens at
+// install time.
+func TestParseManifest_RemoteHTTPHappyPath(t *testing.T) {
+	yaml := `
+name: context7
+kind: global
+transport: remote-http
+url: https://mcp.context7.com/mcp
+headers:
+  Authorization: "Bearer ${secret:CONTEXT7_TOKEN}"
+  X-Tenant: acme
+client_bindings:
+  - client: claude-code
+  - client: codex-cli
+`
+	m, err := ParseManifest(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v", err)
+	}
+	if m.Transport != "remote-http" {
+		t.Errorf("Transport = %q, want remote-http", m.Transport)
+	}
+	if m.URL != "https://mcp.context7.com/mcp" {
+		t.Errorf("URL = %q, want https://mcp.context7.com/mcp", m.URL)
+	}
+	if m.Headers["Authorization"] != "Bearer ${secret:CONTEXT7_TOKEN}" {
+		t.Errorf("Authorization header lost ${secret:KEY} placeholder: %q", m.Headers["Authorization"])
+	}
+	if m.Headers["X-Tenant"] != "acme" {
+		t.Errorf("X-Tenant header = %q", m.Headers["X-Tenant"])
+	}
+}
+
+// TestValidateRemoteHTTP_RejectsPlaintextURL pins the G6 §"Validation
+// rules" plaintext-URL rejection. Plain http:// is out of scope —
+// operators must TLS-terminate.
+func TestValidateRemoteHTTP_RejectsPlaintextURL(t *testing.T) {
+	m := &ServerManifest{
+		Name:      "ctx7-bad",
+		Kind:      KindGlobal,
+		Transport: TransportRemoteHTTP,
+		URL:       "http://insecure.example/mcp",
+	}
+	err := m.Validate()
+	if err == nil {
+		t.Fatal("expected plaintext-URL rejection; got nil")
+	}
+	if !strings.Contains(err.Error(), "https://") {
+		t.Errorf("error must mention https:// for operator guidance; got %v", err)
+	}
+}
+
+// TestValidateRemoteHTTP_RequiresURL pins that transport=remote-http
+// without url: is rejected.
+func TestValidateRemoteHTTP_RequiresURL(t *testing.T) {
+	m := &ServerManifest{
+		Name:      "no-url",
+		Kind:      KindGlobal,
+		Transport: TransportRemoteHTTP,
+	}
+	err := m.Validate()
+	if err == nil {
+		t.Fatal("expected url-required rejection; got nil")
+	}
+	if !strings.Contains(err.Error(), "url:") {
+		t.Errorf("error must mention url: for operator guidance; got %v", err)
+	}
+}
+
+// TestValidateRemoteHTTP_RejectsConflictingFields pins that fields
+// scoped to local-subprocess transports (command, base_args, env,
+// daemons, languages, port_pool, idle_timeout_min) are REJECTED on
+// a remote-http manifest. Silent ignore would let malformed
+// manifests slip through (G6 spec §"Validation rules" + codex bot
+// P2 r1 closure on PR #152).
+func TestValidateRemoteHTTP_RejectsConflictingFields(t *testing.T) {
+	base := func() *ServerManifest {
+		return &ServerManifest{
+			Name:      "ctx7",
+			Kind:      KindGlobal,
+			Transport: TransportRemoteHTTP,
+			URL:       "https://mcp.context7.com/mcp",
+		}
+	}
+	cases := []struct {
+		name  string
+		mutate func(m *ServerManifest)
+		want  string
+	}{
+		{"command", func(m *ServerManifest) { m.Command = "npx" }, "command"},
+		{"base_args", func(m *ServerManifest) { m.BaseArgs = []string{"foo"} }, "base_args"},
+		{"env", func(m *ServerManifest) { m.Env = map[string]string{"K": "V"} }, "env"},
+		{"daemons", func(m *ServerManifest) { m.Daemons = []DaemonSpec{{Name: "d", Port: 9100}} }, "daemons"},
+		{"languages", func(m *ServerManifest) {
+			m.Languages = []LanguageSpec{{Name: "go", Backend: "gopls-mcp", Transport: "stdio", LspCommand: "gopls"}}
+		}, "languages"},
+		{"port_pool", func(m *ServerManifest) { m.PortPool = &PortPool{Start: 9100, End: 9200} }, "port_pool"},
+		{"idle_timeout_min", func(m *ServerManifest) { m.IdleTimeoutMin = 30 }, "idle_timeout_min"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := base()
+			tc.mutate(m)
+			err := m.Validate()
+			if err == nil {
+				t.Fatalf("expected rejection of %s on remote-http manifest; got nil", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error must name %q for operator forensics; got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+// TestValidate_RejectsURLOnNonRemoteHTTP pins the symmetric guard:
+// the new URL field is REJECTED on stdio-bridge / native-http
+// transports. Silent acceptance would let a malformed manifest carry
+// dead fields.
+func TestValidate_RejectsURLOnNonRemoteHTTP(t *testing.T) {
+	for _, tp := range []string{TransportStdioBridge, TransportNativeHTTP} {
+		t.Run(tp, func(t *testing.T) {
+			m := &ServerManifest{
+				Name:      "x",
+				Kind:      KindGlobal,
+				Transport: tp,
+				Command:   "npx",
+				URL:       "https://nope.example",
+			}
+			err := m.Validate()
+			if err == nil {
+				t.Fatal("expected URL-on-non-remote rejection; got nil")
+			}
+			if !strings.Contains(err.Error(), "url") {
+				t.Errorf("error must mention url; got %v", err)
+			}
+		})
+	}
+}
