@@ -386,11 +386,16 @@ func (a *API) validateManifestForStorageName(name, yaml string) []string {
 	if err != nil {
 		return []string{err.Error()}
 	}
-	return manifestValidationWarnings(m)
+	// Storage paths (create / edit) gate on BLOCKING warnings only.
+	// Advisory warnings are returned by ManifestValidate (for the
+	// GUI/CLI to surface) but do not refuse the write.
+	return manifestBlockingWarnings(m)
 }
 
-// manifestValidationWarnings collects soft warnings (declared-but-empty
-// fields, etc.) for a structurally valid ServerManifest.
+// manifestValidationWarnings returns blocking + advisory warnings
+// combined, in that order. Used by ManifestValidate (which returns
+// the full list to the caller for display) but NOT by storage
+// paths.
 //
 // Daemons-empty exemptions:
 //   - Workspace-scoped manifests legitimately have no daemons
@@ -398,15 +403,24 @@ func (a *API) validateManifestForStorageName(name, yaml string) []string {
 //   - Remote-http manifests have no local daemon at all (G6) — the
 //     client connects directly to the remote URL.
 //
-// Both exemptions are by-design "no local daemon" shapes; Validate()
-// has already proven the manifest is structurally consistent for
-// the declared transport/kind.
-//
 // codex bot r3 P1 closure (PR #169): pre-fix, valid remote-http
-// manifests couldn't be created/edited through the API/GUI surface
-// because ManifestCreate / ManifestEdit treated empty daemons as a
-// hard error.
+// manifests couldn't be created/edited because the daemon-empty
+// warning was treated as a hard error.
+// codex bot r7 P2 closure (PR #169): the weekly_refresh-on-remote-
+// http warning is spec'd as non-fatal but storage paths treated
+// any returned warning as a hard error. Split into blocking +
+// advisory categories; storage paths now consume only blocking.
 func manifestValidationWarnings(m *config.ServerManifest) []string {
+	out := manifestBlockingWarnings(m)
+	out = append(out, manifestAdvisoryWarnings(m)...)
+	return out
+}
+
+// manifestBlockingWarnings returns warnings that ManifestCreateIn /
+// ManifestEditIn / ManifestEditInWithHash treat as hard errors.
+// These are structural issues that would produce a non-functional
+// manifest on disk.
+func manifestBlockingWarnings(m *config.ServerManifest) []string {
 	var warnings []string
 	if m.Kind != config.KindWorkspaceScoped &&
 		m.Transport != config.TransportRemoteHTTP &&
@@ -418,13 +432,17 @@ func manifestValidationWarnings(m *config.ServerManifest) []string {
 			warnings = append(warnings, fmt.Sprintf("daemon %q has port=0", d.Name))
 		}
 	}
-	// G6 spec §"Validation rules" + codex bot r6 P2 closure
-	// (PR #169): remote-http has no local daemon to refresh, so
-	// weekly_refresh:true is a no-op. The YAML decoder collapses
-	// absent / explicit-false / explicit-true into a single bool
-	// (false for the first two), so we can only flag the explicit-
-	// true case here. Operator sees the warning + the spec hint
-	// to remove the line.
+	return warnings
+}
+
+// manifestAdvisoryWarnings returns non-fatal observations: spec-
+// defined conditions that are accepted-but-no-op or otherwise
+// deserve operator attention without blocking the write.
+//
+// G6 spec §"Validation rules": weekly_refresh:true on remote-http
+// is accepted but emits a warning (no local daemon to refresh).
+func manifestAdvisoryWarnings(m *config.ServerManifest) []string {
+	var warnings []string
 	if m.Transport == config.TransportRemoteHTTP && m.WeeklyRefresh {
 		warnings = append(warnings, "weekly_refresh has no effect on remote-http manifests (no local daemon to refresh) — remove the line")
 	}

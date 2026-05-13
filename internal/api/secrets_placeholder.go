@@ -31,12 +31,23 @@ import (
 	"mcp-local-hub/internal/secrets"
 )
 
-// SecretPlaceholderRE matches `${secret:KEY}` tokens. Capture group 1
-// is the KEY; allowed characters mirror the vault's key-name policy
-// (alphanumeric + underscore + hyphen + period). The vault's own
-// Get/Set surface is the authoritative gate on key shape — this regex
-// just defines what counts as a placeholder to expand.
+// SecretPlaceholderRE matches well-formed `${secret:KEY}` tokens.
+// Capture group 1 is the KEY; allowed characters mirror the vault's
+// key-name policy (alphanumeric + underscore + hyphen + period).
+// The vault's own Get/Set surface is the authoritative gate on key
+// shape — this regex defines what counts as a placeholder to expand.
 var SecretPlaceholderRE = regexp.MustCompile(`\$\{secret:([A-Za-z0-9_\-.]+)\}`)
+
+// malformedSecretPrefixRE matches `${secret:` followed by anything
+// that ISN'T a well-formed key terminated by `}`. Used to detect
+// strings that intended a placeholder but ended up with an invalid
+// key shape (e.g. `${secret:BAD KEY}` with a space, or unterminated
+// `${secret:FOO`). Without this check, ExpandSecrets would silently
+// pass through the malformed token and let runtime auth failures
+// downstream be the first signal an operator sees.
+//
+// codex bot r7 P2 closure (PR #169).
+var malformedSecretPrefixRE = regexp.MustCompile(`\$\{secret:`)
 
 // SecretLookup is the vault accessor contract used by ExpandSecrets.
 // The default production resolver opens the encrypted vault at
@@ -85,6 +96,20 @@ func DefaultSecretLookup(key string) (string, error) {
 func ExpandSecrets(s string, lookup SecretLookup) (string, error) {
 	final := s
 	if strings.Contains(s, "${secret:") {
+		// codex bot r7 P2 closure (PR #169): detect malformed
+		// placeholders BEFORE expansion. Count `${secret:` prefixes
+		// vs well-formed `${secret:KEY}` matches; any unmatched
+		// prefix is a malformed placeholder (invalid key shape,
+		// unterminated, etc.) and gets a clear error instead of
+		// silently passing through to corrupt downstream client
+		// config.
+		wellFormed := SecretPlaceholderRE.FindAllString(s, -1)
+		allPrefixes := malformedSecretPrefixRE.FindAllString(s, -1)
+		if len(allPrefixes) > len(wellFormed) {
+			return "", fmt.Errorf("expand secrets: input contains malformed ${secret:KEY} placeholder — keys must match [A-Za-z0-9_.-]+ and be terminated with `}` (input had %d well-formed + %d total `${secret:` prefixes; %d malformed)",
+				len(wellFormed), len(allPrefixes), len(allPrefixes)-len(wellFormed))
+		}
+
 		if lookup == nil {
 			lookup = DefaultSecretLookup
 		}

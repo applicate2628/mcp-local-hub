@@ -142,6 +142,35 @@ func TestExpandSecrets_LiteralCRLFAroundPlaceholderRejected(t *testing.T) {
 	}
 }
 
+// TestExpandSecrets_MalformedPlaceholderRejected pins codex bot r7
+// P2 closure (PR #169): a `${secret:` prefix followed by an invalid
+// key shape (space, special char, no closing `}`) MUST be rejected.
+// Pre-fix the regex didn't match those forms so ExpandSecrets
+// returned them unchanged, letting malformed config flow to client
+// config and cause runtime auth failures.
+func TestExpandSecrets_MalformedPlaceholderRejected(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+	}{
+		{"space in key", "Bearer ${secret:BAD KEY}"},
+		{"colon in key", "Bearer ${secret:BAD:KEY}"},
+		{"slash in key", "Bearer ${secret:BAD/KEY}"},
+		{"unterminated", "Bearer ${secret:UNTERM"},
+		{"mixed valid + invalid", "Bearer ${secret:GOOD_KEY} + ${secret:BAD KEY}"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ExpandSecrets(tc.raw, fakeSecretLookup(map[string]string{"GOOD_KEY": "tk"}))
+			if err == nil {
+				t.Fatalf("expected malformed-placeholder rejection on %q; got nil", tc.raw)
+			}
+			if !strings.Contains(err.Error(), "malformed") {
+				t.Errorf("error must mention 'malformed' for operator forensics; got %v", err)
+			}
+		})
+	}
+}
+
 func TestExpandSecretsMap_HappyPath(t *testing.T) {
 	got, err := ExpandSecretsMap(
 		map[string]string{
