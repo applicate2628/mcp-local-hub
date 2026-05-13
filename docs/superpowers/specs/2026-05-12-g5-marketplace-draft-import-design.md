@@ -152,7 +152,7 @@ Warnings go to stderr (`cmd.ErrOrStderr()` per G7's Codex P2 fix). YAML on stdou
 - Future `fetched_at` (clock rollback / corrupted cache) forces revalidation; `MarketplaceCacheAge` is non-negative.
 - Catalog parser validates each `entry.id` via `CheckManifestName`; rejects entries that wouldn't pass `manifest create`'s gate.
 - Sensitive-env placeholders (`*_TOKEN`, `*_SECRET`, `*_PASSWORD`, `*_KEY`, `*_API_KEY`, `AWS_*`, `AZURE_*`, `GCP_*`, `GITHUB_*`) are left verbatim in the draft; generator emits a stderr WARN line per such placeholder.
-- Native-http / SSE entries skipped with G6-deferral warning that names today's workaround (none — wait for G6 or write a local stdio wrapper).
+- Native-http (`transport: "http"`) entries are accepted at parse time but refused by `generate` with a G6-deferral warning that names today's workaround (none — wait for G6 or write a local stdio wrapper). SSE entries are out of scope for v1 — the parser rejects any transport other than `stdio` or `http`, so an SSE entry never reaches the generator.
 - 10MB payload cap rejects oversized catalogs.
 - `marketplace refresh` forces unconditional fetch.
 

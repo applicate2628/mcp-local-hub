@@ -4,7 +4,7 @@
 
 **Goal:** Ship `mcphub marketplace {search,show,generate,refresh}` CLI subcommands that let an operator discover MCP servers from a curated registry, inspect metadata, and project a catalog entry into a draft mcp-local-hub manifest YAML. Zero auto-install side effects: drafts are printed to stdout; the operator edits + saves via `mcphub manifest create` + `mcphub install` separately.
 
-**Architecture:** Stateless metadata cache. Catalog lives at `marketplace/v1/catalog.json` (hand-maintained in this repo, served via GitHub raw URL). Hub fetches over an **HTTPS-only client with `DisableCompression: true` and downgrade-redirect rejection**, persists via the **G4 `writeHubMcpStateFile` helper** (atomic rename + flock + DACL re-verify). Native-http entries are LISTED but `generate` refuses them with a clear G6-deferral warning. Catalog entries map `transport: "stdio"` → `config.TransportStdioBridge` (NOT `native-http`).
+**Architecture:** Stateless metadata cache. Catalog lives at `marketplace/v1/catalog.json` (hand-maintained in this repo, served via GitHub raw URL). Hub fetches over an **HTTPS-only client with `DisableCompression: true` and downgrade-redirect rejection**, persists via the **G4 `writeHubMcpStateFile` helper** (which routes through `SecureWriteClientConfig`: atomic tempfile + rename + post-rename DACL re-verify on the parent dir handle). codex r2 P2: this does NOT provide a cross-process flock spanning multiple operations — the cache is best-effort metadata; concurrent writers settle on whichever rename committed last. A torn read would fail JSON parse on the next load and trigger a fresh fetch, so eventual consistency is good enough. Native-http entries are LISTED but `generate` refuses them with a clear G6-deferral warning. Catalog entries map `transport: "stdio"` → `config.TransportStdioBridge` (NOT `native-http`).
 
 **Tech Stack:** Go (`net/http` with custom transport, `crypto/sha256`, `gopkg.in/yaml.v3`), cobra CLI, existing `writeHubMcpStateFile`/`readHubMcpStateFile` + (newly-exported) `PlaceholderExpander` from internal/api.
 
@@ -116,7 +116,49 @@ func IsSensitiveEnvName(name string) bool {
 }
 ```
 
-Add an opt-in `SkipSensitiveEnv bool` field on `PlaceholderExpander`. In the `expand` method, when `SkipSensitiveEnv` is true AND the `env:` form matches `IsSensitiveEnvName(name)`, leave the original `${env:NAME}` token verbatim in the output AND append the name to a new `expander.SensitiveSkipped []string` field. Caller (G5 Phase 3) consumes that field to emit warnings to stderr.
+**Full exported API surface** (codex r2 P1 closure — Phase 3 references these; pin them in Phase 0):
+
+```go
+// PlaceholderExpander holds resolved environment + workspace path.
+// Shared between G7 (VS Code import) and G5 (marketplace generate).
+// G7 leaves SkipSensitiveEnv at its default (false): the local-trusted
+// VS Code file is expanded as before. G5 sets SkipSensitiveEnv: true
+// because catalog entries are untrusted; sensitive env names stay
+// verbatim in the projected draft.
+type PlaceholderExpander struct {
+	Workspace        string             // ${workspaceFolder}
+	UserHome         string             // ${userHome}
+	PathSeparator    string             // ${pathSeparator}
+	Getenv           func(string) string // injection point for tests
+	SkipSensitiveEnv bool                // when true, sensitive env names stay verbatim
+
+	// SensitiveSkipped collects the env-var names that were left
+	// verbatim under SkipSensitiveEnv. Caller reads this AFTER all
+	// Expand calls to emit one warning per name. Same expander can
+	// be reused across many Expand calls; the slice accumulates.
+	SensitiveSkipped []string
+}
+
+// Expand replaces every ${...} placeholder in s. Returns the
+// expanded string. Mutates SensitiveSkipped when a sensitive env
+// name is encountered AND SkipSensitiveEnv is true.
+func (e *PlaceholderExpander) Expand(s string) string { /* impl */ }
+
+// WarningsForSensitive returns one stderr-friendly warning per
+// distinct sensitive-env name seen. Empty when nothing matched.
+func (e *PlaceholderExpander) WarningsForSensitive() []string { /* impl */ }
+```
+
+Concrete implementation notes for the Expand method:
+
+- Keep the existing `vscodePlaceholderRE` regex (`\$\{(env:([^}]+)|workspaceFolder|userHome|pathSeparator)\}`); rename the variable to `PlaceholderRE` but keep the body byte-identical so G7 stays stable.
+- For each `env:NAME` match, when `SkipSensitiveEnv && IsSensitiveEnvName(name)`: leave the original `${env:NAME}` token unchanged AND append `name` to `e.SensitiveSkipped` if not already present (deduplicate).
+- For all other matches, expand as G7 does today (`e.Getenv(name)` for env, `e.Workspace` for workspaceFolder, etc.).
+
+`WarningsForSensitive()` formats each entry as
+`catalog references ${env:NAME} — left verbatim in the draft so the value is never written to the YAML you'll commit; edit before saving`.
+
+G7's existing call sites pass `PlaceholderExpander{Workspace, Getenv}` (defaults) — production behavior unchanged.
 
 - [ ] **Step 0.4: Run all G7 tests + the new sensitive-env test**
 
@@ -551,14 +593,15 @@ func TestMarketplaceHTTPClient_RejectsDowngradeRedirect(t *testing.T) {
 		_, _ = w.Write([]byte("OK"))
 	}))
 	defer plain.Close()
-	tls := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	tlsSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, plain.URL, http.StatusFound)
 	}))
-	defer tls.Close()
-	// Inject test client trusting the test server's cert.
-	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.TLS.Config}}
-	_, err := MarketplaceFetchWithClient(context.Background(), client, tls.URL, "", nil)
-	if err == nil || !strings.Contains(err.Error(), "https") {
+	defer tlsSrv.Close()
+	// Use the shared TLS-injecting helper so CheckRedirect +
+	// DisableCompression are inherited from production policy.
+	client := injectTLSTestClient(tlsSrv)
+	_, err := MarketplaceFetchWithClient(context.Background(), client, tlsSrv.URL, "", nil)
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "https") {
 		t.Errorf("expected https-downgrade rejection; got %v", err)
 	}
 }
@@ -987,6 +1030,19 @@ func LoadMarketplaceCatalogWithClient(ctx context.Context, client *http.Client, 
 	}
 	cat, err := ParseMarketplaceCatalog(res.Body)
 	if err != nil {
+		// codex r2 P2 closure: malformed fresh body falls back
+		// to stale cache when available (spec §"Cache strategy":
+		// "If the fetch fails for any reason ... cached stale
+		// data is used with a clear WARN"). The parse error is
+		// the same failure surface as a network error for the
+		// operator: the registry returned junk, but the local
+		// cache is still serviceable.
+		if cf != nil {
+			_ = LogHubMcpEvent("warn", "marketplace-catalog-parse-failed", map[string]any{
+				"err": err.Error(),
+			})
+			return &cf.Catalog, MarketplaceSourceStaleFallback, nil
+		}
 		return nil, 0, fmt.Errorf("parse fetched catalog: %w", err)
 	}
 	newCache := &marketplaceCacheFile{
@@ -995,14 +1051,20 @@ func LoadMarketplaceCatalogWithClient(ctx context.Context, client *http.Client, 
 		ETag:          res.ETag,
 		Catalog:       *cat,
 	}
-	if err := writeMarketplaceCache(newCache); err != nil {
-		// codex r1 P1 closure: cache persistence failure is
-		// non-fatal for the operator's immediate query — return
-		// the parsed catalog with a sentinel so the CLI can
-		// surface a WARN. We do NOT silently swallow.
-		// (The current `MarketplaceSource` lacks a
-		// "fresh-but-cache-write-failed" variant; the cli reads
-		// errors via the optional cb hook below.)
+	if werr := writeMarketplaceCache(newCache); werr != nil {
+		// codex r2 P1 closure: cache persistence failure is
+		// non-fatal for the operator's immediate query — the
+		// freshly-fetched catalog is still returned. Surface
+		// the write error to the hub-mcp event log so an
+		// operator running `mcphub hub-mcp status` sees the
+		// recent failure. The next successful refresh
+		// overwrites the file, so there's no permanent state to
+		// reconcile. (Best-effort cache persistence is the
+		// documented contract — the on-disk cache is
+		// optimization, not authoritative state.)
+		_ = LogHubMcpEvent("warn", "marketplace-cache-write-failed", map[string]any{
+			"err": werr.Error(),
+		})
 	}
 	return cat, MarketplaceSourceFresh, nil
 }
@@ -1022,12 +1084,19 @@ func RefreshMarketplaceCatalogWithClient(ctx context.Context, client *http.Clien
 	if err != nil {
 		return nil, fmt.Errorf("parse fetched catalog: %w", err)
 	}
-	_ = writeMarketplaceCache(&marketplaceCacheFile{
+	if werr := writeMarketplaceCache(&marketplaceCacheFile{
 		SchemaVersion: cat.SchemaVersion,
 		FetchedAt:     time.Now(),
 		ETag:          res.ETag,
 		Catalog:       *cat,
-	})
+	}); werr != nil {
+		// codex r2 P1 closure (Refresh path): same best-effort
+		// contract as Load — log + return the fresh catalog.
+		_ = LogHubMcpEvent("warn", "marketplace-cache-write-failed", map[string]any{
+			"err":  werr.Error(),
+			"path": "refresh",
+		})
+	}
 	return cat, nil
 }
 
@@ -1362,8 +1431,51 @@ git commit -m "feat(g5): generator → stdio-bridge + sensitive-env redaction + 
 - Create: `internal/cli/marketplace.go`
 - Create: `internal/cli/marketplace_test.go`
 - Modify: `internal/cli/root.go`
+- Modify: `internal/api/marketplace_http.go` (export the test-client hook)
 
 Four subcommands. `show` prints metadata only (NO README body fetch — operator opens `readme_url` themselves). Test harness uses `httptest.NewTLSServer` + injected client.
+
+**Test-client injection hook (codex r2 P1 closure):** the CLI subcommands need a way to swap the production HTTPS-only client (which would reject the self-signed cert from `httptest.NewTLSServer`) for a TLS-trusting client in tests. Define a package-level hook in `internal/api/marketplace_http.go`:
+
+```go
+// MarketplaceTestClient is a test-only hook. When non-nil, the
+// marketplace CLI uses it instead of the production client. Set
+// from package-internal test helpers; cleared in t.Cleanup. The
+// hook lives in the api package (not cli) so api package tests
+// can use it too.
+var MarketplaceTestClient *http.Client
+
+// MarketplaceClientForCmd returns the test hook if set, else the
+// production client. Used by CLI subcommands so production paths
+// never need to know about test injection. Exported (uppercase)
+// because the cli package calls it.
+func MarketplaceClientForCmd() *http.Client {
+	if MarketplaceTestClient != nil {
+		return MarketplaceTestClient
+	}
+	return newMarketplaceClient()
+}
+
+// InstallMarketplaceTestClientForCLI builds a TLS-trusting client
+// for `httptest.NewTLSServer` and installs it as the CLI hook for
+// the duration of the test. Returns a cleanup closure.
+func InstallMarketplaceTestClientForCLI(srv *httptest.Server) func() {
+	prev := MarketplaceTestClient
+	MarketplaceTestClient = injectTLSTestClient(srv)
+	return func() { MarketplaceTestClient = prev }
+}
+```
+
+The CLI subcommands (`search`, `show`, `generate`, `refresh`) call `api.LoadMarketplaceCatalogWithClient(ctx, marketplaceClientForCmd(), url)` so production goes through the production client and tests go through the injected one.
+
+Tests use:
+
+```go
+cleanup := api.InstallMarketplaceTestClientForCLI(srv)
+t.Cleanup(cleanup)
+```
+
+The `--insecure-tls-for-tests` flag idea from plan v2 first draft is REJECTED — exposing a CLI flag that disables TLS verification would be a footgun even guarded. The hook lives in test code only.
 
 - [ ] **Step 4.1: Write failing CLI tests**
 
@@ -1399,8 +1511,8 @@ func TestMarketplaceSearch_HappyPath(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	c.SetOut(&stdout)
 	c.SetErr(&stderr)
-	c.SetArgs([]string{"search", "fs", "--registry", srv.URL, "--insecure-tls-for-tests"})
-	api.InjectMarketplaceTestClientForCLI(srv) // see helper below
+	c.SetArgs([]string{"search", "fs", "--registry", srv.URL})
+	t.Cleanup(api.InstallMarketplaceTestClientForCLI(srv))
 	if err := c.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("search: %v\nstderr: %s", err, stderr.String())
 	}
@@ -1420,8 +1532,8 @@ func TestMarketplaceShow_PrintsMetadataNotReadmeBody(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	c.SetOut(&stdout)
 	c.SetErr(&stderr)
-	c.SetArgs([]string{"show", "filesystem", "--registry", srv.URL, "--insecure-tls-for-tests"})
-	api.InjectMarketplaceTestClientForCLI(srv)
+	c.SetArgs([]string{"show", "filesystem", "--registry", srv.URL})
+	t.Cleanup(api.InstallMarketplaceTestClientForCLI(srv))
 	if err := c.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("show: %v\nstderr: %s", err, stderr.String())
 	}
@@ -1444,8 +1556,8 @@ func TestMarketplaceGenerate_HttpEntrySkipsToStderr(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	c.SetOut(&stdout)
 	c.SetErr(&stderr)
-	c.SetArgs([]string{"generate", "ctx7", "--registry", srv.URL, "--insecure-tls-for-tests"})
-	api.InjectMarketplaceTestClientForCLI(srv)
+	c.SetArgs([]string{"generate", "ctx7", "--registry", srv.URL})
+	t.Cleanup(api.InstallMarketplaceTestClientForCLI(srv))
 	err := c.ExecuteContext(context.Background())
 	if err == nil {
 		t.Fatal("expected non-zero exit for http entry")
@@ -1472,12 +1584,12 @@ Expected: `undefined: newMarketplaceCmd`.
 Create `internal/cli/marketplace.go`. Same shape as plan v1 but with:
 
 1. `--registry` URL validated client-side (`https://` prefix only — friendlier error than the lib-level rejection).
-2. Internal `--insecure-tls-for-tests` flag (hidden via `c.Flags().MarkHidden`) that swaps in the TLS-injected client via the api hook.
+2. CLI calls `api.LoadMarketplaceCatalogWithClient(ctx, api.MarketplaceClientForCmd(), url)` — the `MarketplaceClientForCmd()` helper is the public form of `marketplaceClientForCmd()` defined in Phase 4 prelude. Production returns the canonical client; tests get the TLS-injecting client via `api.InstallMarketplaceTestClientForCLI`. No CLI-visible flag.
 3. `show` prints metadata only — including the `Readme URL: <url>` line (no body fetch).
-4. `generate` propagates warnings to stderr via `cmd.ErrOrStderr()`.
+4. `generate` propagates the sensitive-env warnings from `(api.PlaceholderExpander).WarningsForSensitive()` to stderr via `cmd.ErrOrStderr()`, one line per warning.
 5. `warnIfStale` mirrors plan v1.
 
-(Full body in the same shape as plan v1 §Phase 4 Step 4.3, but with `LoadMarketplaceCatalog` → `LoadMarketplaceCatalogWithClient` when the test hook fires, and `Readme URL: %s` swapped in for the previous README-body line.)
+(Full body in the same shape as plan v1 §Phase 4 Step 4.3, with `LoadMarketplaceCatalog` → `LoadMarketplaceCatalogWithClient(ctx, api.MarketplaceClientForCmd(), url)` and `Readme URL: %s` swapped in for the README-body line.)
 
 - [ ] **Step 4.4: Register the subcommand**
 
