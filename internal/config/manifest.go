@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -19,6 +20,12 @@ const (
 const (
 	TransportNativeHTTP  = "native-http"
 	TransportStdioBridge = "stdio-bridge"
+	// TransportRemoteHTTP is the G6 remote-HTTPS-endpoint transport.
+	// No local daemon spawned; no per-daemon port. The manifest carries
+	// `url:` + `headers:` and install writes those directly into client
+	// configs after expanding ${secret:KEY} placeholders.
+	// Spec: docs/superpowers/specs/2026-05-12-g6-remote-mcp-manifests-design.md
+	TransportRemoteHTTP = "remote-http"
 )
 
 // NativeHTTPInternalPortOffset is the fixed delta between a native-http
@@ -52,6 +59,20 @@ type ServerManifest struct {
 	IdleTimeoutMin   int               `yaml:"idle_timeout_min"`
 	ClientBindings   []ClientBinding   `yaml:"client_bindings"`
 	WeeklyRefresh    bool              `yaml:"weekly_refresh"`
+
+	// URL is the remote HTTPS endpoint for TransportRemoteHTTP servers.
+	// REQUIRED for transport="remote-http"; REJECTED if set with any
+	// other transport. Must start with "https://" (G6 §"Validation
+	// rules": plain http:// rejected — plaintext credentials over the
+	// wire are out of scope).
+	URL string `yaml:"url"`
+
+	// Headers carries HTTP headers sent on every request to the remote
+	// endpoint. Values may contain ${secret:KEY} placeholders which
+	// are resolved at INSTALL time from the encrypted vault — the
+	// manifest stays cleartext-free on disk. REJECTED if set with any
+	// transport other than "remote-http".
+	Headers map[string]string `yaml:"headers"`
 }
 
 type DaemonSpec struct {
@@ -88,12 +109,65 @@ type ClientBinding struct {
 // in BaseArgs and Env values are expanded against the host environment
 // at parse time (via os.ExpandEnv). This keeps shipped manifests portable
 // — the user's home path doesn't need to be hard-coded in the YAML.
+//
+// codex bot r5 P2 closure (PR #169): we cannot distinguish "key
+// absent" from "key explicit-empty/null" after decoding into a Go
+// struct, but we CAN distinguish them by also decoding into a
+// `map[string]any` and checking key presence. ParseManifest enforces
+// the transport-scoped field gates (url/headers are remote-http
+// only) BEFORE returning so an explicit `url:` or `headers: null`
+// on a non-remote-http transport gets rejected even though Go's
+// decoded value is the zero form.
 func ParseManifest(r io.Reader) (*ServerManifest, error) {
+	raw, readErr := io.ReadAll(r)
+	if readErr != nil {
+		return nil, fmt.Errorf("read manifest: %w", readErr)
+	}
 	var m ServerManifest
-	dec := yaml.NewDecoder(r)
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
 	dec.KnownFields(true)
 	if err := dec.Decode(&m); err != nil {
 		return nil, fmt.Errorf("yaml decode: %w", err)
+	}
+	// Second pass to detect key presence (yaml.v3 collapses
+	// `headers:` / `headers: null` / `headers: {}` into the same
+	// Go value when decoded into a struct field).
+	var keyed map[string]any
+	if err := yaml.Unmarshal(raw, &keyed); err != nil {
+		return nil, fmt.Errorf("yaml decode (keyed pass): %w", err)
+	}
+	_, urlMentioned := keyed["url"]
+	_, headersMentioned := keyed["headers"]
+	// Reject remote-http-only keys mentioned under non-remote
+	// transports. Done HERE (parse time) rather than in Validate()
+	// because Validate's input is a Go struct that has already
+	// lost the key-presence info. The transport-scoped field-gate
+	// errors from Validate() still cover programmatic callers that
+	// construct a ServerManifest directly (with non-zero URL or
+	// non-nil Headers); this guard adds the YAML-level signal.
+	if m.Transport != TransportRemoteHTTP {
+		if urlMentioned {
+			return nil, fmt.Errorf("manifest %s: url is only valid with transport=remote-http (got transport=%q; remove the url: key)", m.Name, m.Transport)
+		}
+		if headersMentioned {
+			return nil, fmt.Errorf("manifest %s: headers is only valid with transport=remote-http (got transport=%q; remove the headers: key)", m.Name, m.Transport)
+		}
+	}
+	// Symmetric guard (codex bot r9 P2 closure on PR #169): reject
+	// local-subprocess keys mentioned under transport=remote-http.
+	// The Go-struct Validate() can only spot non-zero values, so
+	// `command:` (bare) / `command: null` / `command: ""` would
+	// otherwise pass; same for `base_args:` / `env:` / `daemons:`.
+	// Key-presence detection requires the YAML-level second pass.
+	if m.Transport == TransportRemoteHTTP {
+		for _, k := range []string{
+			"command", "base_args", "base_args_template", "env",
+			"daemons", "languages", "port_pool", "idle_timeout_min",
+		} {
+			if _, mentioned := keyed[k]; mentioned {
+				return nil, fmt.Errorf("manifest %s: transport=remote-http rejects %s: (no local subprocess / no per-daemon port; remove the %s key)", m.Name, k, k)
+			}
+		}
 	}
 	var missing []string
 	for i, a := range m.BaseArgs {
@@ -165,9 +239,82 @@ func (m *ServerManifest) Validate() error {
 	if m.Kind != KindGlobal && m.Kind != KindWorkspaceScoped {
 		return fmt.Errorf("manifest %s: kind must be %q or %q (got %q)", m.Name, KindGlobal, KindWorkspaceScoped, m.Kind)
 	}
-	if m.Transport != TransportNativeHTTP && m.Transport != TransportStdioBridge {
-		return fmt.Errorf("manifest %s: transport must be %q or %q (got %q)", m.Name, TransportNativeHTTP, TransportStdioBridge, m.Transport)
+	if m.Transport != TransportNativeHTTP && m.Transport != TransportStdioBridge && m.Transport != TransportRemoteHTTP {
+		return fmt.Errorf("manifest %s: transport must be %q, %q, or %q (got %q)", m.Name, TransportNativeHTTP, TransportStdioBridge, TransportRemoteHTTP, m.Transport)
 	}
+
+	// G6 remote-http branch (spec §"Validation rules"):
+	//   - URL required and must be https://
+	//   - Command / BaseArgs / BaseArgsTemplate / Env / Daemons /
+	//     PortPool / Languages / IdleTimeoutMin REJECTED if non-zero
+	//     (silent ignore would let malformed manifests slip through
+	//     — codex bot P2 r1 on PR #152 closure).
+	//   - Headers may carry ${secret:KEY} placeholders (expanded at
+	//     install time; not validated here).
+	//   - WeeklyRefresh:true emits a startup warning but does not
+	//     fail validation; false is silently accepted (G6 spec
+	//     §"Validation rules" — accepted-but-no-op semantic for the
+	//     YAML-bool-can't-distinguish-absent-vs-false edge).
+	if m.Transport == TransportRemoteHTTP {
+		// codex bot r8 P2 closure (PR #169): workspace-scoped is
+		// per-(workspace, language) lazy-proxy. That model
+		// requires local LSP backends + port_pool — none of which
+		// remote-http can express. Reject the combination
+		// explicitly so the manifest doesn't pass Validate as an
+		// accepted-but-nonfunctional shape.
+		if m.Kind == KindWorkspaceScoped {
+			return fmt.Errorf("manifest %s: transport=remote-http is incompatible with kind=workspace-scoped (no local LSP per-language proxy; use kind=global)", m.Name)
+		}
+		if m.URL == "" {
+			return fmt.Errorf("manifest %s: transport=remote-http requires url:", m.Name)
+		}
+		if !strings.HasPrefix(m.URL, "https://") {
+			return fmt.Errorf("manifest %s: transport=remote-http url must start with https:// (got %q; plaintext rejected — operator must TLS-terminate)", m.Name, m.URL)
+		}
+		if m.Command != "" {
+			return fmt.Errorf("manifest %s: transport=remote-http rejects command (no local subprocess; remove the field)", m.Name)
+		}
+		if len(m.BaseArgs) != 0 {
+			return fmt.Errorf("manifest %s: transport=remote-http rejects base_args (no local subprocess)", m.Name)
+		}
+		if len(m.BaseArgsTemplate) != 0 {
+			return fmt.Errorf("manifest %s: transport=remote-http rejects base_args_template (no local subprocess)", m.Name)
+		}
+		if len(m.Env) != 0 {
+			return fmt.Errorf("manifest %s: transport=remote-http rejects env (no local subprocess; remote endpoint manages its own env)", m.Name)
+		}
+		if len(m.Daemons) != 0 {
+			return fmt.Errorf("manifest %s: transport=remote-http rejects daemons[] (no per-daemon-port model; clients connect directly to the remote URL)", m.Name)
+		}
+		if len(m.Languages) != 0 {
+			return fmt.Errorf("manifest %s: transport=remote-http rejects languages[] (workspace-scoped LSP backends incompatible with remote-only model)", m.Name)
+		}
+		if m.PortPool != nil {
+			return fmt.Errorf("manifest %s: transport=remote-http rejects port_pool (no local ports allocated)", m.Name)
+		}
+		if m.IdleTimeoutMin != 0 {
+			return fmt.Errorf("manifest %s: transport=remote-http rejects idle_timeout_min (no local daemon to idle-out)", m.Name)
+		}
+		return nil
+	}
+
+	// Non-remote-http branches reject URL and Headers — those fields
+	// are exclusive to remote-http.
+	//
+	// codex bot r4 P2 closure (PR #169): use Headers != nil rather
+	// than len(Headers) != 0 so an explicit `headers: {}` (decoded
+	// as a non-nil empty map) is also rejected. YAML doesn't
+	// distinguish `headers:` (absent) from `headers: {}` for slices
+	// — both decode to non-nil zero-length — so the only signal we
+	// have is the nil-vs-non-nil bit set by the decoder when the
+	// key is mentioned in the YAML at all.
+	if m.URL != "" {
+		return fmt.Errorf("manifest %s: url is only valid with transport=remote-http (got transport=%q)", m.Name, m.Transport)
+	}
+	if m.Headers != nil {
+		return fmt.Errorf("manifest %s: headers is only valid with transport=remote-http (got transport=%q; remove the headers: key entirely if you meant to declare none)", m.Name, m.Transport)
+	}
+
 	if m.Command == "" {
 		return fmt.Errorf("manifest %s: command is required", m.Name)
 	}

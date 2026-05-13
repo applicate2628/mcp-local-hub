@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"mcp-local-hub/internal/config"
 )
 
 func TestManifestListReturnsAllYAML(t *testing.T) {
@@ -45,6 +47,121 @@ func TestManifestValidateWorkspaceScopedAllowsNoDaemons(t *testing.T) {
 		if w == "no daemons declared" {
 			t.Fatalf("unexpected warning for workspace-scoped manifest: %v", warnings)
 		}
+	}
+}
+
+// TestManifestValidateRemoteHTTPAllowsNoDaemons pins codex bot r3
+// P1 closure (PR #169): remote-http manifests legitimately have
+// no local daemon (client connects directly to the remote URL),
+// so the "no daemons declared" soft warning MUST be exempted.
+// Without this exemption, ManifestCreateIn/ManifestEditIn would
+// reject every valid remote-http manifest at the soft-warning gate.
+func TestManifestValidateRemoteHTTPAllowsNoDaemons(t *testing.T) {
+	a := NewAPI()
+	yaml := `name: ctx7
+kind: global
+transport: remote-http
+url: https://mcp.context7.com/mcp
+headers:
+  Authorization: Bearer ${secret:CONTEXT7_TOKEN}
+client_bindings:
+  - client: claude-code
+`
+	warnings := a.ManifestValidate(yaml)
+	for _, w := range warnings {
+		if w == "no daemons declared" {
+			t.Fatalf("unexpected warning for remote-http manifest: %v", warnings)
+		}
+	}
+}
+
+// TestManifestAdvisoryWarnings_RemoteHTTPWeeklyRefreshTrue pins
+// the G6 spec §"Validation rules" advisory: remote-http has no
+// local daemon to refresh, so weekly_refresh:true is a no-op.
+// We emit a NON-BLOCKING advisory so install-time / launch-time
+// surfaces can show it; the GUI save path (which gates on
+// ManifestValidate output) does NOT see this advisory — codex
+// bot r10 P2 closure (PR #169) showed surfacing it through
+// ManifestValidate would block GUI save of an accepted-but-no-op
+// configuration.
+//
+// The test exercises both halves of the contract:
+//   - advisory appears when WeeklyRefresh=true on remote-http
+//   - advisory does NOT leak into ManifestValidate output (the
+//     blocking surface)
+func TestManifestAdvisoryWarnings_RemoteHTTPWeeklyRefreshTrue(t *testing.T) {
+	m := &config.ServerManifest{
+		Name:          "ctx7",
+		Kind:          config.KindGlobal,
+		Transport:     config.TransportRemoteHTTP,
+		URL:           "https://x.example",
+		WeeklyRefresh: true,
+	}
+	advisories := manifestAdvisoryWarnings(m)
+	found := false
+	for _, w := range advisories {
+		if strings.Contains(w, "weekly_refresh") && strings.Contains(w, "remote-http") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected weekly_refresh advisory; got %v", advisories)
+	}
+
+	// The advisory MUST NOT appear in ManifestValidate's blocking
+	// surface — that gate is for save-time errors. GUI save would
+	// otherwise treat the advisory as fatal.
+	a := NewAPI()
+	blocking := a.ManifestValidate(`name: ctx7
+kind: global
+transport: remote-http
+url: https://x.example
+weekly_refresh: true
+client_bindings:
+  - client: claude-code
+`)
+	for _, w := range blocking {
+		if strings.Contains(w, "weekly_refresh") {
+			t.Errorf("weekly_refresh advisory leaked into ManifestValidate output (would block GUI save): %v", blocking)
+		}
+	}
+}
+
+// TestManifestAdvisoryWarnings_RemoteHTTPWeeklyRefreshFalse pins
+// that the advisory ONLY fires for explicit true. Default (absent)
+// maps to false → no advisory.
+func TestManifestAdvisoryWarnings_RemoteHTTPWeeklyRefreshFalse(t *testing.T) {
+	m := &config.ServerManifest{
+		Name:          "ctx7",
+		Kind:          config.KindGlobal,
+		Transport:     config.TransportRemoteHTTP,
+		URL:           "https://x.example",
+		WeeklyRefresh: false,
+	}
+	advisories := manifestAdvisoryWarnings(m)
+	for _, w := range advisories {
+		if strings.Contains(w, "weekly_refresh") {
+			t.Errorf("unexpected weekly_refresh advisory when WeeklyRefresh==false: %v", advisories)
+		}
+	}
+}
+
+// TestManifestValidateGlobalStdioBridgeStillWarnsOnNoDaemons pins
+// the negative case: ordinary global stdio-bridge / native-http
+// manifests with no daemons SHOULD still emit the warning. The
+// remote-http exemption is narrow.
+func TestManifestValidateGlobalStdioBridgeStillWarnsOnNoDaemons(t *testing.T) {
+	a := NewAPI()
+	yaml := "name: bad-stdio\nkind: global\ntransport: stdio-bridge\ncommand: echo\nclient_bindings: []\nweekly_refresh: false\n"
+	warnings := a.ManifestValidate(yaml)
+	found := false
+	for _, w := range warnings {
+		if w == "no daemons declared" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("global stdio-bridge manifest with no daemons must still emit warning; got %v", warnings)
 	}
 }
 func TestManifestCreateWritesYAML(t *testing.T) {
