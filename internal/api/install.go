@@ -1543,6 +1543,7 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int)
 		entry := clients.MCPEntry{
 			Name:         m.Name,
 			URL:          u.URL,
+			Headers:      u.Headers,
 			RelayServer:  m.Name,
 			RelayDaemon:  u.DaemonName,
 			RelayExePath: canonical,

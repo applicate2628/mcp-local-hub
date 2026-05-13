@@ -824,6 +824,47 @@ func TestExpectedHubURL_RemoteHTTPHandlesMissingSecretsGracefully(t *testing.T) 
 	}
 }
 
+// TestBuildPlanWithOpts_RemoteHTTPHeadersPopulatedOnClientUpdate
+// pins bot r2 P1 closure on PR #170: the plan-builder MUST
+// populate Headers on every remote-http ClientUpdatePlan so the
+// applier (executeInstallTo) propagates them to MCPEntry.Headers
+// when writing client configs. Pre-fix, Headers were only set in
+// the plan but the applier ignored them, silently dropping
+// Authorization etc. and producing client configs that would 401
+// at runtime.
+func TestBuildPlanWithOpts_RemoteHTTPHeadersPopulatedOnClientUpdate(t *testing.T) {
+	m := &config.ServerManifest{
+		Name:      "ctx7",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportRemoteHTTP,
+		URL:       "https://mcp.context7.com/mcp",
+		Headers: map[string]string{
+			"Authorization": "Bearer literal-token", // no ${secret:} → no vault hit
+			"X-Tenant":      "acme",
+		},
+		ClientBindings: []config.ClientBinding{
+			{Client: "claude-code"},
+		},
+	}
+	plan, err := BuildPlanWithOpts(m, BuildPlanOpts{IncludeAllClients: true})
+	if err != nil {
+		t.Fatalf("BuildPlanWithOpts: %v", err)
+	}
+	if len(plan.ClientUpdates) != 1 {
+		t.Fatalf("expected 1 client update; got %d", len(plan.ClientUpdates))
+	}
+	u := plan.ClientUpdates[0]
+	if got := u.Headers["Authorization"]; got != "Bearer literal-token" {
+		t.Errorf("Authorization header dropped from plan: got %q", got)
+	}
+	if got := u.Headers["X-Tenant"]; got != "acme" {
+		t.Errorf("X-Tenant header dropped from plan: got %q", got)
+	}
+	if u.URL != "https://mcp.context7.com/mcp" {
+		t.Errorf("URL = %q; want manifest URL verbatim", u.URL)
+	}
+}
+
 // TestBuildPlanWithOpts_RemoteHTTPRejectsAntigravityBinding pins
 // the defense-in-depth check at the plan-build layer (in case
 // callers bypass Preflight).
