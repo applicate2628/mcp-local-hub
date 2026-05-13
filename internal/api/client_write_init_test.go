@@ -107,6 +107,81 @@ func TestOperatorAllowedUnhardenedClientWrite_AcceptsOneAndTrue(t *testing.T) {
 	}
 }
 
+// TestFallbackWriteRefusingSymlink_RefusesPreexistingSymlink pins
+// codex bot r1 P1 closure (PR #165): the opt-in lane MUST refuse
+// to write through a pre-existing symlink/junction. Otherwise an
+// attacker on a shared host could pre-create a symlink at the
+// destination and harvest the token-bearing content into a target
+// of their choosing.
+//
+// Symlink creation on Windows requires SeCreateSymbolicLinkPrivilege
+// (typically only Administrators have it). Skip on Windows unless
+// MkdirAll succeeds — but the broader contract still holds: every
+// fallback write Lstat's first.
+func TestFallbackWriteRefusingSymlink_RefusesPreexistingSymlink(t *testing.T) {
+	root := t.TempDir()
+	realTarget := filepath.Join(root, "real-target")
+	if err := os.WriteFile(realTarget, []byte("attacker-controlled"), 0o600); err != nil {
+		t.Fatalf("write real-target: %v", err)
+	}
+	link := filepath.Join(root, "client.json")
+	if err := os.Symlink(realTarget, link); err != nil {
+		// Windows non-admin: SeCreateSymbolicLinkPrivilege missing.
+		// Symlink creation fails outright; skip the test on this host.
+		t.Skipf("symlink unsupported (likely Windows non-admin): %v", err)
+	}
+
+	err := fallbackWriteRefusingSymlink(link, []byte(`{"victim":"data"}`))
+	if err == nil {
+		t.Fatal("expected refusal for pre-existing symlink; got nil")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Errorf("error must mention symlink; got %v", err)
+	}
+	// The real-target file MUST be unmodified — the symlink was not
+	// followed.
+	got, _ := os.ReadFile(realTarget)
+	if string(got) != "attacker-controlled" {
+		t.Errorf("symlink target was modified (write followed the link); got %q", got)
+	}
+}
+
+// TestFallbackWriteRefusingSymlink_WritesWhenAbsent pins the happy
+// path: when the destination does not exist, the fallback writes
+// and the file lands at the destination.
+func TestFallbackWriteRefusingSymlink_WritesWhenAbsent(t *testing.T) {
+	dst := filepath.Join(t.TempDir(), "client.json")
+	want := []byte(`{"hello":"world"}`)
+	if err := fallbackWriteRefusingSymlink(dst, want); err != nil {
+		t.Fatalf("fallback write to absent path: %v", err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("written contents = %q, want %q", got, want)
+	}
+}
+
+// TestFallbackWriteRefusingSymlink_OverwritesRegularFile pins that
+// pre-existing REGULAR files at the destination are still
+// overwritten (the refusal is narrow — only symlinks).
+func TestFallbackWriteRefusingSymlink_OverwritesRegularFile(t *testing.T) {
+	dst := filepath.Join(t.TempDir(), "client.json")
+	if err := os.WriteFile(dst, []byte("old"), 0o600); err != nil {
+		t.Fatalf("seed regular file: %v", err)
+	}
+	want := []byte(`{"new":"value"}`)
+	if err := fallbackWriteRefusingSymlink(dst, want); err != nil {
+		t.Fatalf("fallback overwrite of regular file: %v", err)
+	}
+	got, _ := os.ReadFile(dst)
+	if string(got) != string(want) {
+		t.Errorf("written contents = %q, want %q", got, want)
+	}
+}
+
 // TestSecureWriteWithOperatorOpt_NonGateErrorPropagatesUnchanged
 // pins that the opt-in only narrows the parent-dir gate failure
 // class. Other secure-write errors (e.g. empty base name) propagate

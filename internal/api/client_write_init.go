@@ -62,13 +62,24 @@ const AllowUnhardenedClientWriteEnv = "MCPHUB_ALLOW_UNHARDENED_CLIENT_WRITE"
 // ErrSecureWriteParentInsecure (Windows DACL or POSIX mode/owner
 // rejection at the parent dir gate) it either surfaces a clearer
 // error pointing operators at the opt-in env var, or — when the
-// opt-in is set — falls back to plain os.WriteFile with mode 0600
-// and logs a warn event.
+// opt-in is set — falls back to a symlink-refusing os.WriteFile
+// with mode 0600 and logs a warn event.
 //
-// All other secure-write failures (open temp, write, rename,
-// post-rename verify, symlink refusal, etc.) propagate unchanged —
-// the opt-in is scoped narrowly to the parent-dir gate and does
-// NOT downgrade other TOCTOU / symlink protections.
+// Failure classes that propagate unchanged (the opt-in is scoped
+// narrowly to the parent-dir gate):
+//
+//   - open temp, write, rename, post-rename verify
+//   - pre-existing symlink/reparse-point at destination
+//   - all non-gate hardened-write errors
+//
+// codex bot r1 P1 closure (PR #165): the original opt-in path used
+// raw os.WriteFile, which silently follows symlinks. Even on the
+// opt-in lane we MUST refuse to write through a pre-existing
+// symlink/junction, otherwise an attacker on a shared host could
+// pre-create a symlink at the destination and harvest the token-
+// bearing content into a target of their choosing. The
+// fallbackWriteRefusingSymlink helper Lstats first and rejects
+// before opening.
 func secureWriteWithOperatorOpt(path string, contents []byte) error {
 	err := SecureWriteClientConfig(path, contents)
 	if err == nil {
@@ -89,6 +100,38 @@ func secureWriteWithOperatorOpt(path string, contents []byte) error {
 		// Best-effort: never swallow the original failure path; the
 		// fallback write still proceeds.
 		_ = logErr
+	}
+	return fallbackWriteRefusingSymlink(path, contents)
+}
+
+// fallbackWriteRefusingSymlink writes contents to path with mode
+// 0600, but refuses to write through a pre-existing symlink /
+// reparse point. This is the unhardened-opt-in lane's residual
+// protection — the parent-dir DACL/mode gate is softened (by
+// operator choice), but the symlink-refusal contract that the
+// hardened pipeline enforces inline MUST survive even here.
+//
+// Implementation: Lstat first (does NOT follow symlinks) to detect
+// a pre-existing symlink. If absent, proceed to os.WriteFile. There
+// is a small TOCTOU window between Lstat and Write — an attacker
+// who can swap the destination atomically between these two calls
+// could still redirect the write. The hardened path uses handle-
+// relative ops to close that window; the opt-in path documents the
+// residual risk as an accepted trade-off (operator must trust the
+// host for symlink-swap races; corp-policy DACLs cannot be the
+// only protection).
+//
+// codex bot r1 P1 closure (PR #165): the original implementation
+// used raw os.WriteFile, which silently followed symlinks and
+// violated the docstring guarantee that only the parent-dir gate
+// is softened.
+func fallbackWriteRefusingSymlink(path string, contents []byte) error {
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to write to %s: destination is a symlink (the unhardened-client-write opt-in does NOT downgrade symlink refusal — remove or replace the symlink and retry)", path)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("lstat %s before unhardened write: %w", path, err)
 	}
 	return os.WriteFile(path, contents, 0o600)
 }

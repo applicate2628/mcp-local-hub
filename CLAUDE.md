@@ -644,13 +644,20 @@ under your sole control and corp-policy DACLs cannot be tightened)
 ```
 
 Setting `MCPHUB_ALLOW_UNHARDENED_CLIENT_WRITE=1` falls back to a
-plain `os.WriteFile` with mode 0600 ONLY for the parent-dir gate
-failure. Every fallback write logs a structured warn event
-(`client-write-unhardened-fallback`) via the hub-mcp event log so
-audit trails record the opt-in. All other secure-write failures
-(open temp, write, rename, post-rename verify, symlink refusal)
-propagate unchanged regardless of the env var — TOCTOU/symlink
-protections stay intact.
+symlink-refusing `os.WriteFile` with mode 0600 ONLY for the
+parent-dir gate failure. The opt-in lane Lstats the destination
+first and refuses to follow a pre-existing symlink (otherwise an
+attacker on a shared host could pre-create a symlink at the
+client-config path and harvest the token-bearing content into a
+target of their choosing). Every fallback write logs a structured
+warn event (`client-write-unhardened-fallback`) via the hub-mcp
+event log so audit trails record the opt-in. All other secure-write
+failures (open temp, write, rename, post-rename verify, pre-existing
+symlink at destination) propagate unchanged regardless of the env
+var. The opt-in has one residual difference vs. the hardened path:
+a small TOCTOU window between Lstat and Write (the hardened path
+closes that window via handle-relative ops). Operators who set the
+opt-in accept that risk for the corp-policy DACL relaxation.
 
 ## Stuck-instance recovery
 
