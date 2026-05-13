@@ -120,12 +120,12 @@ func (a *API) ImportVSCodeWorkspace(workspacePath string, opts VSCodeImportOpts)
 		return result, nil
 	}
 
-	exp := vscodeExpander{
-		workspace:  workspacePath,
-		home:       home,
-		pathSep:    pathSep,
-		getenv:     getenv,
-		undefinedW: map[string]struct{}{},
+	exp := PlaceholderExpander{
+		Workspace:     workspacePath,
+		UserHome:      home,
+		PathSeparator: pathSep,
+		Getenv:        getenv,
+		UndefinedEnv:  map[string]struct{}{},
 	}
 
 	var entries []vscodeProjected
@@ -139,7 +139,7 @@ func (a *API) ImportVSCodeWorkspace(workspacePath string, opts VSCodeImportOpts)
 		}
 	}
 
-	for _, name := range sortedKeys(exp.undefinedW) {
+	for _, name := range sortedKeys(exp.UndefinedEnv) {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("placeholder ${env:%s} expanded to empty string (variable not set)", name))
 	}
 
@@ -203,7 +203,7 @@ func mergeVSCodeServerSchemas(root map[string]any) (map[string]map[string]any, [
 // missing both stdio and url fields). Non-fatal issues are surfaced as
 // warnings; the entry is still projected as best-effort so the
 // operator sees the draft.
-func projectVSCodeServer(name string, entry map[string]any, exp *vscodeExpander) (*vscodeProjected, []string) {
+func projectVSCodeServer(name string, entry map[string]any, exp *PlaceholderExpander) (*vscodeProjected, []string) {
 	var warnings []string
 	serverType, _ := entry["type"].(string)
 	cmd, _ := entry["command"].(string)
@@ -231,7 +231,7 @@ func projectVSCodeServer(name string, entry map[string]any, exp *vscodeExpander)
 		projected := &vscodeProjected{
 			Name:      name,
 			Transport: "stdio-bridge",
-			Command:   exp.expand(cmd),
+			Command:   exp.Expand(cmd),
 			Args:      expandStringSlice(args, exp),
 			Env:       expandStringMap(env, exp),
 		}
@@ -322,47 +322,138 @@ func renderVSCodeProjectedYAML(entries []vscodeProjected) string {
 	return sb.String()
 }
 
-// vscodeExpander holds resolved environment so per-string expansion
-// can be quick and warning collection lives in one place.
-type vscodeExpander struct {
-	workspace  string
-	home       string
-	pathSep    string
-	getenv     func(string) string
-	undefinedW map[string]struct{}
+// PlaceholderExpander holds resolved environment + workspace path.
+// Shared between G7 (VS Code import) and G5 (marketplace generate).
+//
+// G7 callers leave SkipSensitiveEnv at its default (false): the
+// local-trusted VS Code file is expanded as before, and undefined
+// env vars are collected via UndefinedEnv for the existing
+// "placeholder ${env:%s} expanded to empty string" warning surface.
+//
+// G5 callers set SkipSensitiveEnv: true. Sensitive env names stay
+// verbatim in the projected draft, and SensitiveSkipped accumulates
+// the names for `WarningsForSensitive()`.
+type PlaceholderExpander struct {
+	Workspace     string              // ${workspaceFolder}
+	UserHome      string              // ${userHome}
+	PathSeparator string              // ${pathSeparator}
+	Getenv        func(string) string // injection point for tests
+
+	// UndefinedEnv is the existing G7 surface (was vscodeExpander.undefinedW).
+	// Empty-resolution env names are collected here. G7 reads this
+	// AFTER expansion to emit "placeholder ${env:%s} expanded to
+	// empty string" warnings. Caller initializes to non-nil; the
+	// expander writes via map-set semantics (no replacement of the
+	// map reference, so caller can keep a reference to read later).
+	UndefinedEnv map[string]struct{}
+
+	// SkipSensitiveEnv, when true, leaves ${env:NAME} tokens
+	// VERBATIM in the output whenever IsSensitiveEnvName(NAME) is
+	// true. G5 (catalog generate) opts in; G7 (local VS Code import)
+	// keeps the default false.
+	SkipSensitiveEnv bool
+
+	// SensitiveSkipped collects env-var names left verbatim under
+	// SkipSensitiveEnv. G5 reads this AFTER all Expand calls to
+	// emit one stderr warning per name. Same expander is reused
+	// across many Expand calls; the slice accumulates with dedup.
+	SensitiveSkipped []string
 }
 
-// vscodePlaceholderRE matches ${name} or ${env:VAR}. The capture
-// groups are: 1=full placeholder body, 2=env var name (only set for
-// the env: form).
-var vscodePlaceholderRE = regexp.MustCompile(`\$\{(env:([^}]+)|workspaceFolder|userHome|pathSeparator)\}`)
+// PlaceholderRE matches ${name} or ${env:VAR}. The capture groups are:
+// 1=full placeholder body, 2=env var name (only set for the env: form).
+var PlaceholderRE = regexp.MustCompile(`\$\{(env:([^}]+)|workspaceFolder|userHome|pathSeparator)\}`)
 
-func (e *vscodeExpander) expand(s string) string {
-	return vscodePlaceholderRE.ReplaceAllStringFunc(s, func(match string) string {
-		sub := vscodePlaceholderRE.FindStringSubmatch(match)
+// sensitiveEnvNameSuffixes / sensitiveEnvNamePrefixes enumerate env-var
+// name shapes that commonly carry secrets. The policy is intentionally
+// name-level: G5 leaves any catalog-controlled ${env:NAME} matching
+// these patterns VERBATIM in the generated draft so an operator must
+// edit before `mcphub manifest create`. G7 (VS Code import) reads
+// from a trusted local file, so it expands them as before — the
+// IsSensitiveEnvName check is opt-in at the caller via SkipSensitiveEnv.
+var sensitiveEnvNameSuffixes = []string{"_TOKEN", "_SECRET", "_PASSWORD", "_KEY", "_API_KEY"}
+var sensitiveEnvNamePrefixes = []string{"AWS_", "AZURE_", "GCP_", "GITHUB_"}
+
+// IsSensitiveEnvName returns true if the env-var name matches the
+// sensitive-name allowlist used by G5's catalog placeholder policy.
+// Match is case-insensitive against ASCII suffixes / prefixes.
+func IsSensitiveEnvName(name string) bool {
+	upper := strings.ToUpper(name)
+	for _, suf := range sensitiveEnvNameSuffixes {
+		if strings.HasSuffix(upper, suf) {
+			return true
+		}
+	}
+	for _, pre := range sensitiveEnvNamePrefixes {
+		if strings.HasPrefix(upper, pre) {
+			return true
+		}
+	}
+	return false
+}
+
+// Expand replaces every ${...} placeholder in s and returns the
+// expanded string. Mutates UndefinedEnv (when an env: form resolves
+// empty) and SensitiveSkipped (when SkipSensitiveEnv && the env name
+// is sensitive). Byte-equivalent to G7's previous vscodeExpander.expand
+// for the default (SkipSensitiveEnv=false) case.
+func (e *PlaceholderExpander) Expand(s string) string {
+	return PlaceholderRE.ReplaceAllStringFunc(s, func(match string) string {
+		sub := PlaceholderRE.FindStringSubmatch(match)
 		// sub[1] is the body, sub[2] is the env var name when "env:VAR" form.
 		body := sub[1]
 		envName := sub[2]
 		switch {
 		case envName != "":
-			val := e.getenv(envName)
+			if e.SkipSensitiveEnv && IsSensitiveEnvName(envName) {
+				// G5 catalog policy: leave the placeholder VERBATIM so
+				// the value is never written into the draft YAML.
+				// Dedup the name into SensitiveSkipped for a single
+				// stderr warning at the caller.
+				already := false
+				for _, n := range e.SensitiveSkipped {
+					if n == envName {
+						already = true
+						break
+					}
+				}
+				if !already {
+					e.SensitiveSkipped = append(e.SensitiveSkipped, envName)
+				}
+				return match
+			}
+			val := e.Getenv(envName)
 			if val == "" {
-				e.undefinedW[envName] = struct{}{}
+				e.UndefinedEnv[envName] = struct{}{}
 			}
 			return val
 		case body == "workspaceFolder":
-			return e.workspace
+			return e.Workspace
 		case body == "userHome":
-			return e.home
+			return e.UserHome
 		case body == "pathSeparator":
-			return e.pathSep
+			return e.PathSeparator
 		default:
 			return match
 		}
 	})
 }
 
-func expandStringSlice(raw []any, exp *vscodeExpander) []string {
+// WarningsForSensitive returns one stderr-friendly warning per
+// distinct sensitive-env name seen during Expand calls. Empty when
+// SkipSensitiveEnv was false or no sensitive names matched.
+func (e *PlaceholderExpander) WarningsForSensitive() []string {
+	if len(e.SensitiveSkipped) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(e.SensitiveSkipped))
+	for _, name := range e.SensitiveSkipped {
+		out = append(out, fmt.Sprintf("catalog references ${env:%s} — left verbatim in the draft so the value is never written to the YAML you'll commit; edit before saving", name))
+	}
+	return out
+}
+
+func expandStringSlice(raw []any, exp *PlaceholderExpander) []string {
 	if len(raw) == 0 {
 		return nil
 	}
@@ -372,12 +463,12 @@ func expandStringSlice(raw []any, exp *vscodeExpander) []string {
 		if !ok {
 			continue
 		}
-		out = append(out, exp.expand(s))
+		out = append(out, exp.Expand(s))
 	}
 	return out
 }
 
-func expandStringMap(raw map[string]any, exp *vscodeExpander) map[string]string {
+func expandStringMap(raw map[string]any, exp *PlaceholderExpander) map[string]string {
 	if len(raw) == 0 {
 		return nil
 	}
@@ -387,7 +478,7 @@ func expandStringMap(raw map[string]any, exp *vscodeExpander) map[string]string 
 		if !ok {
 			continue
 		}
-		out[k] = exp.expand(s)
+		out[k] = exp.Expand(s)
 	}
 	return out
 }

@@ -336,3 +336,32 @@ func TestImportVSCodeWorkspace_EmptyWorkspace_RejectsEarly(t *testing.T) {
 		t.Fatal("expected error for empty workspace path")
 	}
 }
+
+// TestIsSensitiveEnvName covers the sensitive-name policy used by G5's
+// catalog placeholder expansion (Phase 0: shared PlaceholderExpander).
+// G7 imports are NOT affected because they leave SkipSensitiveEnv at
+// its default (false); this test exercises the predicate directly.
+func TestIsSensitiveEnvName(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		want bool
+	}{
+		{"PATH", false},
+		{"HOME", false},
+		{"WORKSPACE_FOLDER", false},
+		{"AWS_SECRET_ACCESS_KEY", true},
+		{"GITHUB_TOKEN", true},
+		{"OPENAI_API_KEY", true},
+		{"FOO_SECRET", true},
+		{"FOO_PASSWORD", true},
+		{"FOO_KEY", true}, // matches *_KEY
+		{"AZURE_TENANT_ID", true},
+		{"GCP_PROJECT", true},
+		{"DATABASE_URL", false}, // not in the sensitive name family
+	} {
+		got := IsSensitiveEnvName(c.name)
+		if got != c.want {
+			t.Errorf("IsSensitiveEnvName(%q) = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
