@@ -170,20 +170,91 @@ func TestManifestTestRemote_MissingSecret(t *testing.T) {
 	}
 }
 
-func TestExtractSingleSSEMessage_MultilineData(t *testing.T) {
+func TestParseSSEEvents_MultilineData(t *testing.T) {
 	in := []byte(": comment\ndata: {\"jsonrpc\":\"2.0\",\ndata: \"id\":1}\n\n")
-	got, err := extractSingleSSEMessage(in)
-	if err != nil {
-		t.Fatalf("extractSingleSSEMessage: %v", err)
+	got := parseSSEEvents(in)
+	if len(got) != 1 {
+		t.Fatalf("got %d events, want 1: %q", len(got), got)
 	}
-	if !strings.Contains(string(got), `"jsonrpc":"2.0"`) || !strings.Contains(string(got), `"id":1`) {
-		t.Errorf("got %q, want both jsonrpc and id pieces", got)
+	joined := string(got[0])
+	if !strings.Contains(joined, `"jsonrpc":"2.0"`) || !strings.Contains(joined, `"id":1`) {
+		t.Errorf("got %q, want both jsonrpc and id pieces", joined)
 	}
 }
 
-func TestExtractSingleSSEMessage_NoData(t *testing.T) {
-	_, err := extractSingleSSEMessage([]byte(": comment only\n\n"))
-	if err == nil {
-		t.Fatal("expected error for SSE response with no data: lines")
+func TestParseSSEEvents_NoData(t *testing.T) {
+	got := parseSSEEvents([]byte(": comment only\n\n"))
+	if len(got) != 0 {
+		t.Errorf("got %d events, want 0", len(got))
+	}
+}
+
+// TestParseSSEEvents_MultipleEvents pins the bot r1 P1 closure: a
+// streaming server can emit progress/notification events before the
+// initialize reply. The parser must split them, and findMatchingRPCReply
+// must pick the envelope whose id matches the one we sent.
+func TestParseSSEEvents_MultipleEvents(t *testing.T) {
+	in := []byte("event: progress\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"progress\",\"params\":{\"step\":1}}\n\nevent: response\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-11-25\"}}\n\n")
+	events := parseSSEEvents(in)
+	if len(events) != 2 {
+		t.Fatalf("got %d events, want 2: %v", len(events), events)
+	}
+	rpc, err := findMatchingRPCReply(events, 1)
+	if err != nil {
+		t.Fatalf("findMatchingRPCReply: %v", err)
+	}
+	if rpc.Result["protocolVersion"] != "2025-11-25" {
+		t.Errorf("picked wrong envelope: %+v", rpc)
+	}
+}
+
+// TestFindMatchingRPCReply_RejectsNonJSONRPCBody pins bot r1 P2
+// closure: a non-MCP endpoint returning `{"result":{...}}` without
+// the JSON-RPC envelope must fail the smoke. Likewise an envelope
+// with a wrong id (or no id) must not satisfy the smoke against the
+// id we sent.
+func TestFindMatchingRPCReply_RejectsNonJSONRPCBody(t *testing.T) {
+	cases := map[string][]byte{
+		"missing jsonrpc field":       []byte(`{"result":{"protocolVersion":"x"}}`),
+		"wrong jsonrpc version":       []byte(`{"jsonrpc":"1.0","id":1,"result":{}}`),
+		"id mismatch":                 []byte(`{"jsonrpc":"2.0","id":42,"result":{}}`),
+		"string id when number sent":  []byte(`{"jsonrpc":"2.0","id":"1","result":{}}`),
+		"no id":                       []byte(`{"jsonrpc":"2.0","result":{}}`),
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := findMatchingRPCReply([][]byte{body}, 1)
+			if err == nil {
+				t.Fatalf("%s: expected mismatch error, got nil", name)
+			}
+		})
+	}
+}
+
+// TestFindMatchingRPCReply_SurfacesDecodeError pins the parse-error
+// path: when the only event has invalid JSON, the operator should
+// see the decode error so they can debug rather than a generic
+// "no envelope matched".
+func TestFindMatchingRPCReply_SurfacesDecodeError(t *testing.T) {
+	_, err := findMatchingRPCReply([][]byte{[]byte("not json {{")}, 1)
+	if err == nil || !strings.Contains(err.Error(), "decode response") {
+		t.Errorf("expected decode-response diagnostic, got %v", err)
+	}
+}
+
+// TestRPCIDEquals pins the id-comparison contract: only numeric ids
+// equal to the int we sent are accepted.
+func TestRPCIDEquals(t *testing.T) {
+	if !rpcIDEquals(float64(1), 1) {
+		t.Error("float64(1) should match int 1 (JSON numbers decode to float64)")
+	}
+	if rpcIDEquals(float64(1.5), 1) {
+		t.Error("float64(1.5) should not match int 1")
+	}
+	if rpcIDEquals("1", 1) {
+		t.Error("string ids should not match numeric id we sent")
+	}
+	if rpcIDEquals(nil, 1) {
+		t.Error("nil id should not match")
 	}
 }

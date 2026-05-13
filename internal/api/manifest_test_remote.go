@@ -32,6 +32,7 @@ const (
 	testRemoteHTTPTimeout      = 15 * time.Second
 	testRemoteResponseMaxBytes = 1 * 1024 * 1024 // 1 MB ceiling on the initialize response
 	testRemoteProtocolVersion  = "2025-11-25"    // pinned MCP Streamable HTTP version
+	testRemoteRPCRequestID     = 1               // JSON-RPC id we send and expect echoed back
 )
 
 // RemoteInitializeResult is the upstream server's response to a
@@ -122,7 +123,7 @@ func sendRemoteInitialize(ctx context.Context, client *http.Client, rawURL strin
 	version, _, _ := buildinfo.Get()
 	body := map[string]any{
 		"jsonrpc": "2.0",
-		"id":      1,
+		"id":      testRemoteRPCRequestID,
 		"method":  "initialize",
 		"params": map[string]any{
 			"protocolVersion": testRemoteProtocolVersion,
@@ -165,27 +166,22 @@ func sendRemoteInitialize(ctx context.Context, client *http.Client, rawURL strin
 		return nil, fmt.Errorf("upstream returned HTTP %d: %s", resp.StatusCode, truncateForError(string(rawResp), 500))
 	}
 	// Streamable HTTP lets the server reply either with
-	// application/json or with a one-event text/event-stream. Handle
-	// both so we don't fail against compliant servers that prefer SSE
-	// for streaming flows but emit a single message for initialize.
-	rawJSON := rawResp
+	// application/json or with text/event-stream. SSE may carry
+	// multiple events (progress notifications, log frames) before
+	// the JSON-RPC reply; iterate all events and pick the envelope
+	// whose JSON-RPC id matches the one we sent.
+	var events [][]byte
 	if strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
-		rawJSON, err = extractSingleSSEMessage(rawResp)
-		if err != nil {
-			return nil, err
+		events = parseSSEEvents(rawResp)
+		if len(events) == 0 {
+			return nil, errors.New("text/event-stream response had no data: lines")
 		}
+	} else {
+		events = [][]byte{rawResp}
 	}
-	var rpc struct {
-		JSONRPC string         `json:"jsonrpc"`
-		ID      any            `json:"id"`
-		Result  map[string]any `json:"result"`
-		Error   *struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(rawJSON, &rpc); err != nil {
-		return nil, fmt.Errorf("decode response: %w (body=%q)", err, truncateForError(string(rawJSON), 300))
+	rpc, err := findMatchingRPCReply(events, testRemoteRPCRequestID)
+	if err != nil {
+		return nil, err
 	}
 	if rpc.Error != nil {
 		return nil, fmt.Errorf("upstream rpc error %d: %s", rpc.Error.Code, rpc.Error.Message)
@@ -211,27 +207,103 @@ func sendRemoteInitialize(ctx context.Context, client *http.Client, rawURL strin
 	return out, nil
 }
 
-// extractSingleSSEMessage pulls a single JSON-RPC message out of an
-// SSE response body. Spec-compliant initialize responses use a single
-// `data:` line, but RFC allows multi-line data so we concatenate
-// every `data:` we see with newlines. Lines starting with `:` are
-// SSE comments and ignored; other field labels are skipped.
-func extractSingleSSEMessage(buf []byte) ([]byte, error) {
-	lines := strings.Split(string(buf), "\n")
-	var dataParts []string
-	for _, ln := range lines {
-		ln = strings.TrimRight(ln, "\r")
-		if ln == "" || strings.HasPrefix(ln, ":") {
+// rpcReply is the JSON-RPC 2.0 envelope shape we accept from the
+// upstream server's initialize response.
+type rpcReply struct {
+	JSONRPC string         `json:"jsonrpc"`
+	ID      any            `json:"id"`
+	Result  map[string]any `json:"result"`
+	Error   *struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// parseSSEEvents splits an SSE response body into per-event data
+// payloads. Events are separated by a blank line (CRLF or LF
+// terminated); within an event, `data:` lines are joined with newlines
+// per the SSE spec. Comment lines (prefix `:`) and non-data fields are
+// ignored. Returns one []byte per event that carried at least one
+// `data:` line — empty slice if the body had none.
+//
+// Bot r1 P1 closure (PR #171): the prior implementation concatenated
+// every `data:` line across the whole stream into one buffer. A valid
+// streaming server that sends a progress/notification event BEFORE
+// the initialize reply would have its events welded into a single
+// invalid JSON blob, causing false-negative smoke failures against
+// fully compliant servers.
+func parseSSEEvents(buf []byte) [][]byte {
+	body := strings.ReplaceAll(string(buf), "\r\n", "\n")
+	var events [][]byte
+	for block := range strings.SplitSeq(body, "\n\n") {
+		var parts []string
+		for ln := range strings.SplitSeq(block, "\n") {
+			if ln == "" || strings.HasPrefix(ln, ":") {
+				continue
+			}
+			if rest, ok := strings.CutPrefix(ln, "data:"); ok {
+				parts = append(parts, strings.TrimSpace(rest))
+			}
+		}
+		if len(parts) > 0 {
+			events = append(events, []byte(strings.Join(parts, "\n")))
+		}
+	}
+	return events
+}
+
+// findMatchingRPCReply scans events and returns the first valid
+// JSON-RPC 2.0 envelope whose id equals wantID. Returns a clear
+// diagnostic if no event qualifies — distinguishes "received N events
+// but none had matching id" from "couldn't decode any event".
+//
+// Bot r1 P2 closure (PR #171): success was previously inferred from
+// `result != nil` without verifying the response is a JSON-RPC 2.0
+// envelope with the id we sent. A non-MCP endpoint returning any 2xx
+// JSON shaped like `{"result":{...}}` would be reported as reachable,
+// undermining this command's purpose as an MCP handshake smoke test.
+func findMatchingRPCReply(events [][]byte, wantID int) (*rpcReply, error) {
+	var lastDecodeErr error
+	envelopes := 0
+	for _, raw := range events {
+		var probe rpcReply
+		if err := json.Unmarshal(raw, &probe); err != nil {
+			lastDecodeErr = fmt.Errorf("decode response: %w (body=%q)", err, truncateForError(string(raw), 300))
 			continue
 		}
-		if rest, ok := strings.CutPrefix(ln, "data:"); ok {
-			dataParts = append(dataParts, strings.TrimSpace(rest))
+		if probe.JSONRPC != "2.0" {
+			continue
+		}
+		envelopes++
+		if rpcIDEquals(probe.ID, wantID) {
+			return &probe, nil
 		}
 	}
-	if len(dataParts) == 0 {
-		return nil, errors.New("text/event-stream response had no data: lines")
+	if lastDecodeErr != nil && envelopes == 0 {
+		// No valid envelope decoded — surface the parse error so
+		// operators see what the upstream sent.
+		return nil, lastDecodeErr
 	}
-	return []byte(strings.Join(dataParts, "\n")), nil
+	return nil, fmt.Errorf("no JSON-RPC 2.0 reply with id=%d among %d event(s); the upstream may not be an MCP endpoint", wantID, len(events))
+}
+
+// rpcIDEquals compares a JSON-decoded id (any) to an int. The MCP
+// spec allows numeric or string ids; we always send a number, so any
+// non-number type is a mismatch regardless of value.
+func rpcIDEquals(got any, want int) bool {
+	switch v := got.(type) {
+	case float64:
+		return v == float64(want)
+	case json.Number:
+		if n, err := v.Int64(); err == nil {
+			return n == int64(want)
+		}
+	case int:
+		return v == want
+	case int64:
+		return v == int64(want)
+	}
+	return false
 }
 
 func truncateForError(s string, n int) string {
