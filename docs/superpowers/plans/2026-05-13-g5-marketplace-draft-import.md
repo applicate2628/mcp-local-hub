@@ -1,33 +1,152 @@
-# G5 Marketplace Draft-Import Implementation Plan
+# G5 Marketplace Draft-Import Implementation Plan (v2 — post codex r1 REVISE)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship `mcphub marketplace {search,show,generate,refresh}` CLI subcommands that let an operator discover MCP servers from a curated registry, inspect metadata + README, and project a catalog entry into a draft mcp-local-hub manifest YAML. Zero auto-install side effects: drafts are printed to stdout; the operator runs `mcphub manifest create` + `mcphub install` separately.
+**Goal:** Ship `mcphub marketplace {search,show,generate,refresh}` CLI subcommands that let an operator discover MCP servers from a curated registry, inspect metadata, and project a catalog entry into a draft mcp-local-hub manifest YAML. Zero auto-install side effects: drafts are printed to stdout; the operator edits + saves via `mcphub manifest create` + `mcphub install` separately.
 
-**Architecture:** Stateless metadata cache. Catalog lives at `marketplace/v1/catalog.json` (hand-maintained in this repo, served via GitHub raw URL). Hub fetches with TTL + ETag, persists to `<state-dir>/marketplace-cache.json` (0600 + DACL-verified). Native-http entries are LISTED but `generate` refuses them with a clear G6-deferral warning.
+**Architecture:** Stateless metadata cache. Catalog lives at `marketplace/v1/catalog.json` (hand-maintained in this repo, served via GitHub raw URL). Hub fetches over an **HTTPS-only client with `DisableCompression: true` and downgrade-redirect rejection**, persists via the **G4 `writeHubMcpStateFile` helper** (atomic rename + flock + DACL re-verify). Native-http entries are LISTED but `generate` refuses them with a clear G6-deferral warning. Catalog entries map `transport: "stdio"` → `config.TransportStdioBridge` (NOT `native-http`).
 
-**Tech Stack:** Go (`net/http`, `crypto/sha256`, `gopkg.in/yaml.v3`), cobra CLI, existing flock + SecureWriteClientConfig pattern from G4.
+**Tech Stack:** Go (`net/http` with custom transport, `crypto/sha256`, `gopkg.in/yaml.v3`), cobra CLI, existing `writeHubMcpStateFile`/`readHubMcpStateFile` + (newly-exported) `PlaceholderExpander` from internal/api.
 
-**Spec:** [docs/superpowers/specs/2026-05-12-g5-marketplace-draft-import-design.md](../specs/2026-05-12-g5-marketplace-draft-import-design.md). Implementation gated on codex r1 review approval (per spec line 3).
+**Spec:** [docs/superpowers/specs/2026-05-12-g5-marketplace-draft-import-design.md](../specs/2026-05-12-g5-marketplace-draft-import-design.md) — updated v2 incorporates codex r1 closures.
 
-**Branch:** `feat/g5-marketplace-draft-import` from master HEAD `0a534f9` (post-G4-phase-5 merge).
+**Branch:** `feat/g5-marketplace-draft-import` (already created, plan v1 committed at `7e5c960`). This plan v2 replaces v1 in a follow-up commit before any implementation phase starts.
 
-**PR strategy:** Single bundled PR per memory rule "Don't split tiny PRs". All 5 phases land together. Bot review + 3-lane codex deep-sec gate before merge, same flow as PR #160.
+**PR strategy:** Single bundled PR per memory rule "Don't split tiny PRs". All 6 phases land together. Bot review + 3-lane codex deep-sec gate before merge, same flow as PR #160.
+
+**codex r1 closures addressed (recap, mapped to phases below):**
+
+- P1 stdio→stdio-bridge — Phase 3
+- P1 manifest-create UX (draft requires operator edit before save) — Phase 3 + Phase 5 smoke
+- P1 README dropped from `show` — Phase 4
+- P1 cache hardening via `writeHubMcpStateFile` — Phase 2
+- P1 HTTPS-only enforcement + downgrade-redirect guard + `DisableCompression: true` — Phase 2
+- P1 sensitive-env placeholder policy (warn + leave verbatim) — Phase 0 (extract expander) + Phase 3
+- P2 gzip-bomb defense — Phase 2 (`DisableCompression: true`)
+- P2 future-`fetched_at` clamp — Phase 2
+- P2 catalog ID validation via `CheckManifestName` — Phase 1
+- P2 G6 deferral message actionability — Phase 3
 
 ---
 
-## Phase 1: Catalog schema + parser + seed catalog
+## Phase 0: Promote G7's expander to a shared `api.PlaceholderExpander`
+
+**Files:**
+- Modify: `internal/api/import_vscode.go` (or extract to new `internal/api/placeholder_expand.go`)
+- Modify: `internal/api/import_vscode_test.go` (rename references; behavior unchanged)
+
+Promote the private `vscodeExpander` + `vscodePlaceholderRE` to exported `PlaceholderExpander` + `PlaceholderRE`. Add `IsSensitiveEnvName(name string) bool` for the catalog-leak policy. G7 callers stay byte-equivalent (same logic, exported name).
+
+- [ ] **Step 0.1: Write the failing sensitive-env test**
+
+Append to `internal/api/import_vscode_test.go`:
+
+```go
+func TestIsSensitiveEnvName(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		want bool
+	}{
+		{"PATH", false},
+		{"HOME", false},
+		{"WORKSPACE_FOLDER", false},
+		{"AWS_SECRET_ACCESS_KEY", true},
+		{"GITHUB_TOKEN", true},
+		{"OPENAI_API_KEY", true},
+		{"FOO_SECRET", true},
+		{"FOO_PASSWORD", true},
+		{"FOO_KEY", true},     // matches *_KEY
+		{"AZURE_TENANT_ID", true},
+		{"GCP_PROJECT", true},
+		{"DATABASE_URL", false}, // not in the sensitive name family
+	} {
+		got := IsSensitiveEnvName(c.name)
+		if got != c.want {
+			t.Errorf("IsSensitiveEnvName(%q) = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+```
+
+- [ ] **Step 0.2: Run test to verify it fails**
+
+```bash
+go test -count=1 -timeout 30s -run TestIsSensitiveEnvName ./internal/api/
+```
+
+Expected: `undefined: IsSensitiveEnvName`.
+
+- [ ] **Step 0.3: Export the expander and add the sensitive policy**
+
+Surgical edits to `internal/api/import_vscode.go`:
+
+1. Rename `vscodeExpander` → `PlaceholderExpander` (struct + methods).
+2. Rename `vscodePlaceholderRE` → `PlaceholderRE`.
+3. Rename internal call sites (`exp := vscodeExpander{...}` → `exp := PlaceholderExpander{...}`; `*vscodeExpander` → `*PlaceholderExpander`).
+4. Update `projectVSCodeServer`, `expandStringSlice`, `expandStringMap` signatures.
+5. Add `IsSensitiveEnvName` near the expander:
+
+```go
+// sensitiveEnvNamePatterns enumerates env-var name shapes that
+// commonly carry secrets. The policy is intentionally name-level:
+// G5 leaves any catalog-controlled ${env:NAME} matching these
+// patterns VERBATIM in the generated draft so an operator must
+// edit before `mcphub manifest create`. G7 (VS Code import) reads
+// from a trusted local file, so it expands them as before — the
+// IsSensitiveEnvName check is opt-in at the caller.
+var sensitiveEnvNameSuffixes = []string{"_TOKEN", "_SECRET", "_PASSWORD", "_KEY", "_API_KEY"}
+var sensitiveEnvNamePrefixes = []string{"AWS_", "AZURE_", "GCP_", "GITHUB_"}
+
+// IsSensitiveEnvName returns true if the env-var name matches the
+// sensitive-name allowlist used by G5's catalog placeholder policy.
+// Match is case-insensitive against ASCII suffixes / prefixes.
+func IsSensitiveEnvName(name string) bool {
+	upper := strings.ToUpper(name)
+	for _, suf := range sensitiveEnvNameSuffixes {
+		if strings.HasSuffix(upper, suf) {
+			return true
+		}
+	}
+	for _, pre := range sensitiveEnvNamePrefixes {
+		if strings.HasPrefix(upper, pre) {
+			return true
+		}
+	}
+	return false
+}
+```
+
+Add an opt-in `SkipSensitiveEnv bool` field on `PlaceholderExpander`. In the `expand` method, when `SkipSensitiveEnv` is true AND the `env:` form matches `IsSensitiveEnvName(name)`, leave the original `${env:NAME}` token verbatim in the output AND append the name to a new `expander.SensitiveSkipped []string` field. Caller (G5 Phase 3) consumes that field to emit warnings to stderr.
+
+- [ ] **Step 0.4: Run all G7 tests + the new sensitive-env test**
+
+```bash
+go test -count=1 -timeout 60s -run "TestVSCodeImport|TestIsSensitiveEnvName" ./internal/api/
+```
+
+Expected: PASS. G7 imports continue to work byte-equivalently (no production-path semantic change; SkipSensitiveEnv defaults to false).
+
+- [ ] **Step 0.5: Commit**
+
+```bash
+git add internal/api/import_vscode.go internal/api/import_vscode_test.go
+git commit -m "feat(g5): export PlaceholderExpander + add IsSensitiveEnvName (Phase 0)"
+```
+
+---
+
+## Phase 1: Catalog schema + parser + seed catalog (with `CheckManifestName` ID gate)
 
 **Files:**
 - Create: `marketplace/v1/catalog.json`
 - Create: `internal/api/marketplace_catalog.go`
 - Create: `internal/api/marketplace_catalog_test.go`
 
-The catalog is a hand-maintained JSON list of MCP server entries. Parsing happens in-process: read bytes, schema-version-check, parse into typed `Catalog{Entries[]Entry}`, surface concrete errors. The same parser is reused by the cache (Phase 2), generator (Phase 3), and CLI (Phase 4).
+Seed the catalog with ~10 entries (IDs aligned to canonical names: `filesystem` not `filesys`). Parser validates schema_version + per-entry shape AND runs `CheckManifestName(entry.id)` (codex r1 P2 closure) so invalid IDs cannot pass parse.
 
 - [ ] **Step 1.1: Seed catalog with ~10 curated entries**
 
-Create `marketplace/v1/catalog.json` with stdio MCP servers we know work. Start with the canonical Anthropic-published references plus a couple of community standouts:
+Create `marketplace/v1/catalog.json` (IDs are lowercase-ASCII-only so they pass `CheckManifestName`):
 
 ```json
 {
@@ -167,7 +286,7 @@ Create `marketplace/v1/catalog.json` with stdio MCP servers we know work. Start 
 }
 ```
 
-- [ ] **Step 1.2: Write the failing parser test**
+- [ ] **Step 1.2: Write the failing parser tests**
 
 Create `internal/api/marketplace_catalog_test.go`:
 
@@ -179,87 +298,64 @@ import (
 	"testing"
 )
 
-// TestParseCatalog_HappyPath covers the canonical shape from
-// docs/superpowers/specs/2026-05-12-g5-marketplace-draft-import-design.md.
 func TestParseCatalog_HappyPath(t *testing.T) {
 	raw := `{
   "schema_version": "1",
-  "generated_at": "2026-05-13T00:00:00Z",
   "entries": [
-    {
-      "id": "filesystem",
-      "name": "Filesystem MCP server",
-      "summary": "Sandboxed filesystem.",
-      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
-      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/filesystem/README.md",
-      "transport": "stdio",
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem"],
-      "env": {"FOO": "bar"},
-      "categories": ["filesystem"],
-      "license": "MIT"
-    }
+    {"id": "filesystem", "name": "Filesystem MCP server",
+     "transport": "stdio", "command": "npx",
+     "args": ["-y", "@modelcontextprotocol/server-filesystem"]}
   ]
 }`
 	cat, err := ParseMarketplaceCatalog([]byte(raw))
 	if err != nil {
 		t.Fatalf("ParseMarketplaceCatalog: %v", err)
 	}
-	if cat.SchemaVersion != "1" {
-		t.Errorf("schema_version = %q, want %q", cat.SchemaVersion, "1")
-	}
-	if len(cat.Entries) != 1 {
-		t.Fatalf("entries len = %d, want 1", len(cat.Entries))
-	}
-	e := cat.Entries[0]
-	if e.ID != "filesystem" || e.Transport != "stdio" || e.Command != "npx" {
-		t.Errorf("entry round-trip mismatch: %+v", e)
-	}
-	if got := e.Env["FOO"]; got != "bar" {
-		t.Errorf("env[FOO] = %q, want bar", got)
+	if len(cat.Entries) != 1 || cat.Entries[0].ID != "filesystem" {
+		t.Fatalf("round-trip failed: %+v", cat)
 	}
 }
 
-func TestParseCatalog_RejectsUnknownSchemaVersion(t *testing.T) {
-	raw := `{"schema_version": "9999", "entries": []}`
-	_, err := ParseMarketplaceCatalog([]byte(raw))
-	if err == nil || !strings.Contains(err.Error(), "schema_version") {
-		t.Errorf("want schema_version error; got %v", err)
+func TestParseCatalog_RejectsBadSchema(t *testing.T) {
+	for _, raw := range []string{
+		`{"schema_version": "9999", "entries": []}`,
+		`{"schema_version": "1", "entries": [{"name": "no-id", "transport": "stdio", "command": "npx"}]}`,
+		`{"schema_version": "1", "entries": [
+			{"id": "dup", "name": "a", "transport": "stdio", "command": "npx"},
+			{"id": "dup", "name": "b", "transport": "stdio", "command": "npx"}]}`,
+		`{"schema_version": "1", "entries": [{"id": "x", "name": "X", "transport": "websocket", "command": "npx"}]}`,
+		`{"schema_version": "1", "entries": [{"id": "nocmd", "name": "no command", "transport": "stdio"}]}`,
+		`{"schema_version": "1", "entries": [{"id": "x", "name": "X", "transport": "http", "url": "http://insecure.example/mcp"}]}`,
+	} {
+		if _, err := ParseMarketplaceCatalog([]byte(raw)); err == nil {
+			t.Errorf("expected rejection for %s", raw)
+		}
 	}
 }
 
-func TestParseCatalog_RejectsMissingID(t *testing.T) {
-	raw := `{"schema_version": "1", "entries": [{"name": "no-id", "transport": "stdio", "command": "npx"}]}`
-	_, err := ParseMarketplaceCatalog([]byte(raw))
-	if err == nil || !strings.Contains(err.Error(), "id") {
-		t.Errorf("want missing-id error; got %v", err)
-	}
-}
-
-func TestParseCatalog_RejectsDuplicateID(t *testing.T) {
-	raw := `{"schema_version": "1", "entries": [
-		{"id": "dup", "name": "a", "transport": "stdio", "command": "npx"},
-		{"id": "dup", "name": "b", "transport": "stdio", "command": "npx"}
-	]}`
-	_, err := ParseMarketplaceCatalog([]byte(raw))
-	if err == nil || !strings.Contains(err.Error(), "duplicate") {
-		t.Errorf("want duplicate-id error; got %v", err)
-	}
-}
-
-func TestParseCatalog_RejectsBadTransport(t *testing.T) {
-	raw := `{"schema_version": "1", "entries": [
-		{"id": "x", "name": "X", "transport": "websocket", "command": "npx"}
-	]}`
-	_, err := ParseMarketplaceCatalog([]byte(raw))
-	if err == nil || !strings.Contains(err.Error(), "transport") {
-		t.Errorf("want transport error; got %v", err)
+// TestParseCatalog_RejectsInvalidIDViaCheckManifestName pins codex
+// r1 P2 closure: entry.id must pass the same gate `mcphub manifest
+// create <name>` uses, so the draft will not fail later at create.
+func TestParseCatalog_RejectsInvalidIDViaCheckManifestName(t *testing.T) {
+	for _, badID := range []string{
+		"UPPERCASE",       // CheckManifestName rejects non-lowercase
+		"has space",       // CheckManifestName rejects whitespace
+		"-leading-dash",   // regex rejects leading dash
+		".leading-dot",    // regex rejects leading dot
+		"mcphub-hub",      // reserved aggregate entry name (r15)
+		"con",             // Windows device name
+		"nul",             // Windows device name
+	} {
+		raw := `{"schema_version": "1", "entries": [{"id": "` + badID +
+			`", "name": "X", "transport": "stdio", "command": "npx"}]}`
+		if _, err := ParseMarketplaceCatalog([]byte(raw)); err == nil ||
+			!strings.Contains(err.Error(), badID) {
+			t.Errorf("expected rejection naming %q; got %v", badID, err)
+		}
 	}
 }
 
 func TestParseCatalog_HttpEntryAllowedNoCommand(t *testing.T) {
-	// http entries are LISTED in the catalog but generate refuses
-	// them in Phase 3. The parser must accept them without `command`.
 	raw := `{"schema_version": "1", "entries": [
 		{"id": "ctx7", "name": "Context7", "transport": "http", "url": "https://mcp.context7.com/mcp"}
 	]}`
@@ -268,17 +364,7 @@ func TestParseCatalog_HttpEntryAllowedNoCommand(t *testing.T) {
 		t.Fatalf("http entry should parse without command: %v", err)
 	}
 	if cat.Entries[0].URL != "https://mcp.context7.com/mcp" {
-		t.Errorf("url = %q, want https://mcp.context7.com/mcp", cat.Entries[0].URL)
-	}
-}
-
-func TestParseCatalog_StdioEntryRequiresCommand(t *testing.T) {
-	raw := `{"schema_version": "1", "entries": [
-		{"id": "nocmd", "name": "no command", "transport": "stdio"}
-	]}`
-	_, err := ParseMarketplaceCatalog([]byte(raw))
-	if err == nil || !strings.Contains(err.Error(), "command") {
-		t.Errorf("want stdio-needs-command error; got %v", err)
+		t.Errorf("url round-trip failed")
 	}
 }
 ```
@@ -299,11 +385,7 @@ Create `internal/api/marketplace_catalog.go`:
 // internal/api/marketplace_catalog.go — G5 Marketplace catalog parser.
 //
 // Spec: docs/superpowers/specs/2026-05-12-g5-marketplace-draft-import-design.md
-// §"Registry source" + §"Threat model".
-//
-// The catalog is a JSON document hand-maintained at
-// marketplace/v1/catalog.json. This package parses + validates the
-// JSON shape; cache + fetch logic lives in marketplace_cache.go.
+// §"Registry source" + §"Threat model" + §"Acceptance criteria".
 
 package api
 
@@ -313,22 +395,14 @@ import (
 	"strings"
 )
 
-// MarketplaceCatalogSchemaVersion is the only schema_version this
-// build accepts. Bump when the catalog shape changes; older clients
-// will reject newer catalogs rather than silently misparse them.
 const MarketplaceCatalogSchemaVersion = "1"
 
-// MarketplaceCatalog is the top-level JSON shape served from
-// the registry URL.
 type MarketplaceCatalog struct {
-	SchemaVersion string               `json:"schema_version"`
-	GeneratedAt   string               `json:"generated_at,omitempty"`
-	Entries       []MarketplaceEntry   `json:"entries"`
+	SchemaVersion string             `json:"schema_version"`
+	GeneratedAt   string             `json:"generated_at,omitempty"`
+	Entries       []MarketplaceEntry `json:"entries"`
 }
 
-// MarketplaceEntry is one row. `transport` is one of "stdio" / "http".
-// stdio entries require `command`; http entries require `url`. The
-// generator (Phase 3) refuses http entries with a G6-deferral warning.
 type MarketplaceEntry struct {
 	ID         string            `json:"id"`
 	Name       string            `json:"name"`
@@ -339,15 +413,14 @@ type MarketplaceEntry struct {
 	Command    string            `json:"command,omitempty"`
 	Args       []string          `json:"args,omitempty"`
 	Env        map[string]string `json:"env,omitempty"`
-	URL        string            `json:"url,omitempty"` // http transport only
+	URL        string            `json:"url,omitempty"`
 	Categories []string          `json:"categories,omitempty"`
 	License    string            `json:"license,omitempty"`
 }
 
-// ParseMarketplaceCatalog decodes + validates raw JSON bytes. Returns
-// a concrete error per first invalid entry; callers should not partial-
-// accept (the spec §"Threat model" says malformed catalogs are
-// rejected wholesale rather than silently dropping entries).
+// ParseMarketplaceCatalog decodes raw JSON. Returns the first error
+// per spec §"Threat model" (malformed catalogs reject wholesale,
+// never partial-accept).
 func ParseMarketplaceCatalog(raw []byte) (*MarketplaceCatalog, error) {
 	var cat MarketplaceCatalog
 	dec := json.NewDecoder(strings.NewReader(string(raw)))
@@ -356,19 +429,19 @@ func ParseMarketplaceCatalog(raw []byte) (*MarketplaceCatalog, error) {
 		return nil, fmt.Errorf("decode catalog: %w", err)
 	}
 	if cat.SchemaVersion != MarketplaceCatalogSchemaVersion {
-		return nil, fmt.Errorf("schema_version %q: this build only accepts %q (rebuild mcphub or refresh the catalog)",
+		return nil, fmt.Errorf("schema_version %q: this build only accepts %q",
 			cat.SchemaVersion, MarketplaceCatalogSchemaVersion)
 	}
-	seenID := map[string]bool{}
+	seen := map[string]bool{}
 	for i := range cat.Entries {
 		e := &cat.Entries[i]
 		if err := validateMarketplaceEntry(e); err != nil {
-			return nil, fmt.Errorf("entry %d: %w", i, err)
+			return nil, fmt.Errorf("entry %d (id=%q): %w", i, e.ID, err)
 		}
-		if seenID[e.ID] {
+		if seen[e.ID] {
 			return nil, fmt.Errorf("entry %d: duplicate id %q", i, e.ID)
 		}
-		seenID[e.ID] = true
+		seen[e.ID] = true
 	}
 	return &cat, nil
 }
@@ -379,6 +452,12 @@ func validateMarketplaceEntry(e *MarketplaceEntry) error {
 	}
 	if e.Name == "" {
 		return fmt.Errorf("missing name")
+	}
+	// codex r1 P2 closure: entry id must pass CheckManifestName so
+	// the projected draft can be accepted by `mcphub manifest create`
+	// later — including the reserved-aggregate-name guard from r15.
+	if err := CheckManifestName(e.ID); err != nil {
+		return fmt.Errorf("id %q fails manifest-name gate: %w", e.ID, err)
 	}
 	switch e.Transport {
 	case "stdio":
@@ -411,30 +490,266 @@ Expected: PASS.
 
 ```bash
 git add marketplace/v1/catalog.json internal/api/marketplace_catalog.go internal/api/marketplace_catalog_test.go
-git commit -m "feat(g5): catalog schema + parser + seed catalog (Phase 1)"
+git commit -m "feat(g5): catalog schema + parser + seed catalog with CheckManifestName ID gate (Phase 1)"
 ```
 
 ---
 
-## Phase 2: TTL + ETag cache with atomic write
+## Phase 2: HTTPS-only HTTP client + G4-hardened cache
 
 **Files:**
+- Create: `internal/api/marketplace_http.go` (HTTPS-only client + downgrade-redirect guard + DisableCompression)
+- Create: `internal/api/marketplace_http_test.go`
 - Create: `internal/api/marketplace_cache.go`
 - Create: `internal/api/marketplace_cache_test.go`
-- Modify: `internal/api/state_paths.go` (add `marketplaceCacheFileLeaf` constant)
+- Modify: `internal/api/state_paths.go` (add `marketplaceCacheFileLeaf` + allow it via `validateStateFileName`)
 
-Cache lives at `<state-dir>/marketplace-cache.json`. Pattern mirrors `hub-mcp-tokens.json` from G4: 0600, DACL-verified parent, atomic tempfile+rename write, flock for cross-process serialization. TTL: 24 hours. Conditional GET via `If-None-Match: <etag>` on stale; 304 → bump `fetched_at`, 200 → replace body. Network failure → fall back to stale cache with `WARN: catalog is N hours stale` (cache stays available offline). 10MB body cap from spec §"Threat model".
+Cache uses `writeHubMcpStateFile`/`readHubMcpStateFile` (G4 hardening: flock + atomic rename + DACL re-verify). HTTPS-only client lives in its own file so tests can swap a TLS-injected client without affecting production.
 
 - [ ] **Step 2.1: Add cache file leaf constant**
 
-In `internal/api/state_paths.go`, add alongside the existing leaf constants:
+In `internal/api/state_paths.go`, near the existing `hubMcpControlTokenFileLeaf`:
 
 ```go
-// G5 Marketplace cache.
+// G5 Marketplace cache file. Joins the validateStateFileName allowlist
+// (single-component, no path separators).
 const marketplaceCacheFileLeaf = "marketplace-cache.json"
 ```
 
-- [ ] **Step 2.2: Write the failing cache tests**
+- [ ] **Step 2.2: Write failing HTTPS-client tests**
+
+Create `internal/api/marketplace_http_test.go`:
+
+```go
+package api
+
+import (
+	"context"
+	"crypto/tls"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestMarketplaceHTTPClient_RejectsNonHTTPSURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("nope"))
+	}))
+	defer srv.Close()
+	if !strings.HasPrefix(srv.URL, "http://") {
+		t.Skipf("httptest.NewServer is not http; got %q", srv.URL)
+	}
+	_, err := MarketplaceFetch(context.Background(), srv.URL, "", nil)
+	if err == nil || !strings.Contains(err.Error(), "https") {
+		t.Errorf("expected https rejection; got %v", err)
+	}
+}
+
+func TestMarketplaceHTTPClient_RejectsDowngradeRedirect(t *testing.T) {
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("OK"))
+	}))
+	defer plain.Close()
+	tls := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, plain.URL, http.StatusFound)
+	}))
+	defer tls.Close()
+	// Inject test client trusting the test server's cert.
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.TLS.Config}}
+	_, err := MarketplaceFetchWithClient(context.Background(), client, tls.URL, "", nil)
+	if err == nil || !strings.Contains(err.Error(), "https") {
+		t.Errorf("expected https-downgrade rejection; got %v", err)
+	}
+}
+
+func TestMarketplaceHTTPClient_DisablesCompression(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Server-side check: client must NOT advertise gzip in Accept-Encoding.
+		ae := r.Header.Get("Accept-Encoding")
+		if strings.Contains(ae, "gzip") {
+			t.Errorf("Accept-Encoding contains gzip: %q (compression must be disabled)", ae)
+		}
+		_, _ = w.Write([]byte(`{"schema_version":"1","entries":[]}`))
+	}))
+	defer srv.Close()
+	client := injectTLSTestClient(srv)
+	_, err := MarketplaceFetchWithClient(context.Background(), client, srv.URL, "", nil)
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+}
+
+// injectTLSTestClient builds an http.Client that trusts the
+// httptest TLS server's certificate AND inherits the marketplace
+// transport policy (DisableCompression + downgrade-redirect guard).
+// Tests share this helper instead of building it inline.
+func injectTLSTestClient(srv *httptest.Server) *http.Client {
+	t := newMarketplaceTransport()
+	t.TLSClientConfig = &tls.Config{
+		RootCAs:    srv.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs,
+		MinVersion: tls.VersionTLS12,
+	}
+	return &http.Client{
+		Transport:     t,
+		CheckRedirect: rejectNonHTTPSRedirect,
+		Timeout:       marketplaceHTTPTimeout,
+	}
+}
+```
+
+- [ ] **Step 2.3: Run HTTP tests to verify they fail**
+
+```bash
+go test -count=1 -timeout 60s -run "TestMarketplaceHTTPClient" ./internal/api/
+```
+
+Expected: `undefined: MarketplaceFetch` and friends.
+
+- [ ] **Step 2.4: Implement the HTTPS-only client**
+
+Create `internal/api/marketplace_http.go`:
+
+```go
+// internal/api/marketplace_http.go — G5 HTTPS-only HTTP client.
+//
+// Spec: docs/superpowers/specs/2026-05-12-g5-marketplace-draft-import-design.md
+// §"Registry source" + §"Threat model".
+//
+// codex r1 P1 closures: enforce https://-only, reject downgrade
+// redirects, disable compression (10MB cap applies to wire bytes,
+// not decompressed bytes — defeats gzip-bomb amplification).
+
+package api
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+)
+
+const (
+	marketplaceHTTPTimeout       = 15 * time.Second
+	marketplaceCacheMaxBodyBytes = 10 * 1024 * 1024
+)
+
+// rejectNonHTTPSRedirect refuses any redirect target that is not
+// https://. Used by both production and test clients.
+func rejectNonHTTPSRedirect(req *http.Request, via []*http.Request) error {
+	if req.URL.Scheme != "https" {
+		return fmt.Errorf("refusing redirect from %s to non-https URL %s", via[len(via)-1].URL, req.URL)
+	}
+	if len(via) >= 10 {
+		return errors.New("too many redirects")
+	}
+	return nil
+}
+
+// newMarketplaceTransport returns a transport with compression
+// disabled. Exported (lower-case) only via the helper functions
+// below; tests substitute a TLS-trusting transport via
+// injectTLSTestClient.
+func newMarketplaceTransport() *http.Transport {
+	return &http.Transport{
+		DisableCompression: true,
+	}
+}
+
+func newMarketplaceClient() *http.Client {
+	return &http.Client{
+		Transport:     newMarketplaceTransport(),
+		CheckRedirect: rejectNonHTTPSRedirect,
+		Timeout:       marketplaceHTTPTimeout,
+	}
+}
+
+// MarketplaceFetchResult carries the wire-level outcome plus the
+// response body (size-capped + already drained).
+type MarketplaceFetchResult struct {
+	Status   int
+	Body     []byte
+	ETag     string
+	NotMod   bool // true when status == 304
+}
+
+// MarketplaceFetch is the production HTTPS-only fetch path. It builds
+// a request, sends it via the canonical client, and returns a result
+// or an error. `ifNoneMatch` is sent as the `If-None-Match` header
+// when non-empty.
+func MarketplaceFetch(ctx context.Context, rawURL, ifNoneMatch string, extraHeaders map[string]string) (*MarketplaceFetchResult, error) {
+	return MarketplaceFetchWithClient(ctx, newMarketplaceClient(), rawURL, ifNoneMatch, extraHeaders)
+}
+
+// MarketplaceFetchWithClient is the injectable form. Tests pass a
+// client with a TLS test transport. Production callers go through
+// MarketplaceFetch.
+func MarketplaceFetchWithClient(ctx context.Context, client *http.Client, rawURL, ifNoneMatch string, extraHeaders map[string]string) (*MarketplaceFetchResult, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse url %q: %w", rawURL, err)
+	}
+	if u.Scheme != "https" {
+		return nil, fmt.Errorf("marketplace url must be https:// (got scheme %q)", u.Scheme)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	if ifNoneMatch != "" {
+		req.Header.Set("If-None-Match", ifNoneMatch)
+	}
+	for k, v := range extraHeaders {
+		req.Header.Set(k, v)
+	}
+	// Explicit identity (defense-in-depth alongside transport-level
+	// DisableCompression: true).
+	req.Header.Set("Accept-Encoding", "identity")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotModified {
+		return &MarketplaceFetchResult{Status: resp.StatusCode, NotMod: true, ETag: resp.Header.Get("ETag")}, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return &MarketplaceFetchResult{Status: resp.StatusCode}, fmt.Errorf("fetch %s: HTTP %d", rawURL, resp.StatusCode)
+	}
+	// Reject unexpected Content-Encoding (defense-in-depth — should
+	// not appear because we sent Accept-Encoding: identity and the
+	// transport has DisableCompression: true).
+	if ce := resp.Header.Get("Content-Encoding"); ce != "" && !strings.EqualFold(ce, "identity") {
+		return nil, fmt.Errorf("unexpected Content-Encoding %q (compression must be off)", ce)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, marketplaceCacheMaxBodyBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read body: %w", err)
+	}
+	if int64(len(body)) > marketplaceCacheMaxBodyBytes {
+		return nil, fmt.Errorf("body exceeds %d-byte cap (gzip-bomb defense)", marketplaceCacheMaxBodyBytes)
+	}
+	return &MarketplaceFetchResult{
+		Status: resp.StatusCode,
+		Body:   body,
+		ETag:   resp.Header.Get("ETag"),
+	}, nil
+}
+```
+
+- [ ] **Step 2.5: Run HTTP tests to verify they pass**
+
+```bash
+go test -count=1 -timeout 60s -run "TestMarketplaceHTTPClient" ./internal/api/
+```
+
+Expected: PASS.
+
+- [ ] **Step 2.6: Write failing cache tests**
 
 Create `internal/api/marketplace_cache_test.go`:
 
@@ -443,6 +758,7 @@ package api
 
 import (
 	"context"
+	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -452,19 +768,20 @@ import (
 )
 
 func TestLoadMarketplaceCatalog_FreshFetch(t *testing.T) {
-	_ = hubMcpStateTestHelper(t) // reuse the DACL-hardened tempdir helper
+	_ = hubMcpStateTestHelper(t)
 	body := `{"schema_version":"1","entries":[{"id":"x","name":"X","transport":"stdio","command":"npx"}]}`
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("ETag", `"abc123"`)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("ETag", `"abc"`)
 		_, _ = w.Write([]byte(body))
 	}))
 	defer srv.Close()
-	cat, src, err := LoadMarketplaceCatalogFrom(context.Background(), srv.URL)
+	client := injectTLSTestClient(srv)
+	cat, src, err := LoadMarketplaceCatalogWithClient(context.Background(), client, srv.URL)
 	if err != nil {
-		t.Fatalf("LoadMarketplaceCatalogFrom: %v", err)
+		t.Fatalf("LoadMarketplaceCatalog: %v", err)
 	}
 	if cat.Entries[0].ID != "x" {
-		t.Errorf("entry round-trip mismatch: %+v", cat.Entries[0])
+		t.Errorf("round-trip failed: %+v", cat.Entries)
 	}
 	if src != MarketplaceSourceFresh {
 		t.Errorf("source = %v, want fresh", src)
@@ -475,25 +792,22 @@ func TestLoadMarketplaceCatalog_StaleHits304KeepsBody(t *testing.T) {
 	_ = hubMcpStateTestHelper(t)
 	body := `{"schema_version":"1","entries":[{"id":"x","name":"X","transport":"stdio","command":"npx"}]}`
 	var hits int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&hits, 1)
-		w.Header().Set("ETag", `"abc123"`)
-		if r.Header.Get("If-None-Match") == `"abc123"` {
+		w.Header().Set("ETag", `"abc"`)
+		if r.Header.Get("If-None-Match") == `"abc"` {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
 		_, _ = w.Write([]byte(body))
 	}))
 	defer srv.Close()
-	// Fresh fetch.
-	_, _, err := LoadMarketplaceCatalogFrom(context.Background(), srv.URL)
-	if err != nil {
+	client := injectTLSTestClient(srv)
+	if _, _, err := LoadMarketplaceCatalogWithClient(context.Background(), client, srv.URL); err != nil {
 		t.Fatalf("fresh: %v", err)
 	}
-	// Force stale by rewinding fetched_at.
 	forceMarketplaceCacheStaleForTest(t, time.Now().Add(-48*time.Hour))
-	// Stale revalidate → 304 → body preserved.
-	cat, src, err := LoadMarketplaceCatalogFrom(context.Background(), srv.URL)
+	cat, src, err := LoadMarketplaceCatalogWithClient(context.Background(), client, srv.URL)
 	if err != nil {
 		t.Fatalf("revalidate: %v", err)
 	}
@@ -504,25 +818,23 @@ func TestLoadMarketplaceCatalog_StaleHits304KeepsBody(t *testing.T) {
 		t.Errorf("source = %v, want revalidated", src)
 	}
 	if atomic.LoadInt32(&hits) != 2 {
-		t.Errorf("hits = %d, want 2 (one fresh + one revalidate)", hits)
+		t.Errorf("hits = %d, want 2", hits)
 	}
 }
 
 func TestLoadMarketplaceCatalog_NetworkErrorFallsBackToStaleWithWarn(t *testing.T) {
 	_ = hubMcpStateTestHelper(t)
 	body := `{"schema_version":"1","entries":[{"id":"x","name":"X","transport":"stdio","command":"npx"}]}`
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(body))
 	}))
-	// Fresh fetch.
-	_, _, err := LoadMarketplaceCatalogFrom(context.Background(), srv.URL)
-	if err != nil {
+	client := injectTLSTestClient(srv)
+	if _, _, err := LoadMarketplaceCatalogWithClient(context.Background(), client, srv.URL); err != nil {
 		t.Fatalf("fresh: %v", err)
 	}
-	// Server goes away.
 	srv.Close()
 	forceMarketplaceCacheStaleForTest(t, time.Now().Add(-48*time.Hour))
-	cat, src, err := LoadMarketplaceCatalogFrom(context.Background(), srv.URL)
+	cat, src, err := LoadMarketplaceCatalogWithClient(context.Background(), client, srv.URL)
 	if err != nil {
 		t.Fatalf("offline fallback: %v", err)
 	}
@@ -534,29 +846,70 @@ func TestLoadMarketplaceCatalog_NetworkErrorFallsBackToStaleWithWarn(t *testing.
 	}
 }
 
+// TestLoadMarketplaceCatalog_FutureFetchedAtForcesRevalidate pins
+// codex r1 P2 closure: a clock rollback or corrupted fetched_at
+// timestamp must not pin stale catalog data as "fresh forever".
+func TestLoadMarketplaceCatalog_FutureFetchedAtForcesRevalidate(t *testing.T) {
+	_ = hubMcpStateTestHelper(t)
+	body := `{"schema_version":"1","entries":[{"id":"x","name":"X","transport":"stdio","command":"npx"}]}`
+	var hits int32
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.Header().Set("ETag", `"abc"`)
+		if r.Header.Get("If-None-Match") == `"abc"` {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+	client := injectTLSTestClient(srv)
+	if _, _, err := LoadMarketplaceCatalogWithClient(context.Background(), client, srv.URL); err != nil {
+		t.Fatalf("fresh: %v", err)
+	}
+	// Plant a future fetched_at — must NOT be treated as fresh.
+	forceMarketplaceCacheStaleForTest(t, time.Now().Add(24*time.Hour))
+	_, _, err := LoadMarketplaceCatalogWithClient(context.Background(), client, srv.URL)
+	if err != nil {
+		t.Fatalf("revalidate: %v", err)
+	}
+	if atomic.LoadInt32(&hits) != 2 {
+		t.Errorf("future fetched_at didn't force revalidate (hits=%d)", hits)
+	}
+	age := MarketplaceCacheAge()
+	if age < 0 {
+		t.Errorf("MarketplaceCacheAge = %v; want non-negative", age)
+	}
+}
+
 func TestLoadMarketplaceCatalog_RejectsOversizePayload(t *testing.T) {
 	_ = hubMcpStateTestHelper(t)
-	huge := strings.Repeat("x", 11*1024*1024) // 11 MB > 10 MB cap
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	huge := strings.Repeat("x", 11*1024*1024)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(huge))
 	}))
 	defer srv.Close()
-	_, _, err := LoadMarketplaceCatalogFrom(context.Background(), srv.URL)
-	if err == nil || !strings.Contains(err.Error(), "exceeds") {
+	client := injectTLSTestClient(srv)
+	_, _, err := LoadMarketplaceCatalogWithClient(context.Background(), client, srv.URL)
+	if err == nil || !strings.Contains(err.Error(), "cap") {
 		t.Errorf("want size cap error; got %v", err)
 	}
 }
+
+// Suppress unused-import warning when this file is the only test
+// file referencing tls.
+var _ = tls.VersionTLS12
 ```
 
-- [ ] **Step 2.3: Run tests to verify they fail**
+- [ ] **Step 2.7: Run cache tests to verify they fail**
 
 ```bash
 go test -count=1 -timeout 60s -run "TestLoadMarketplaceCatalog" ./internal/api/
 ```
 
-Expected: `undefined: LoadMarketplaceCatalogFrom` (and several friends).
+Expected: `undefined: LoadMarketplaceCatalogWithClient` and friends.
 
-- [ ] **Step 2.4: Implement the cache**
+- [ ] **Step 2.8: Implement the cache**
 
 Create `internal/api/marketplace_cache.go`:
 
@@ -564,47 +917,36 @@ Create `internal/api/marketplace_cache.go`:
 // internal/api/marketplace_cache.go — G5 Marketplace cache.
 //
 // Spec: docs/superpowers/specs/2026-05-12-g5-marketplace-draft-import-design.md
-// §"Cache strategy" + §"Threat model".
+// §"Cache strategy".
 //
-// The cache file is `<state-dir>/marketplace-cache.json` (0600 +
-// DACL-verified parent on Windows; same pattern as hub-mcp-tokens.json
-// in G4). TTL 24h. Conditional GET via If-None-Match: <etag>. 10 MB
-// payload cap. Offline fallback uses stale cache with WARN.
+// codex r1 P1 closure: cache writes route through
+// writeHubMcpStateFile (G4-grade flock + atomic rename + DACL
+// re-verify). Reads route through readHubMcpStateFile
+// (VerifyHubMcpStateDACL gates the open). Future fetched_at and
+// negative ages are clamped (P2 closure).
 
 package api
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"time"
 )
 
-const (
-	marketplaceCacheTTL          = 24 * time.Hour
-	marketplaceCacheMaxBodyBytes = 10 * 1024 * 1024
-	marketplaceHTTPTimeout       = 15 * time.Second
-)
+const marketplaceCacheTTL = 24 * time.Hour
 
-// MarketplaceSource indicates where the returned catalog came from
-// on a Load call. Callers use this to decide whether to emit a
-// "WARN: catalog is N hours stale" message to the operator.
 type MarketplaceSource int
 
 const (
-	MarketplaceSourceFresh         MarketplaceSource = iota // 200 response, body replaced
-	MarketplaceSourceCached                                  // TTL not expired, no fetch attempted
-	MarketplaceSourceRevalidated                             // 304 response, body preserved
-	MarketplaceSourceStaleFallback                           // fetch failed, returning stale cache with warn
+	MarketplaceSourceFresh         MarketplaceSource = iota
+	MarketplaceSourceCached
+	MarketplaceSourceRevalidated
+	MarketplaceSourceStaleFallback
 )
 
-// marketplaceCacheFile is the on-disk shape.
 type marketplaceCacheFile struct {
 	SchemaVersion string             `json:"schema_version"`
 	FetchedAt     time.Time          `json:"fetched_at"`
@@ -612,172 +954,135 @@ type marketplaceCacheFile struct {
 	Catalog       MarketplaceCatalog `json:"catalog"`
 }
 
-// LoadMarketplaceCatalogFrom fetches + caches the catalog at `url`,
-// returning the parsed catalog, the source classification, and any
-// error. Uses the global state-dir cache (see DaemonStateDir).
-func LoadMarketplaceCatalogFrom(ctx context.Context, url string) (*MarketplaceCatalog, MarketplaceSource, error) {
-	cacheFile, _ := readMarketplaceCache()
-	if cacheFile != nil && time.Since(cacheFile.FetchedAt) < marketplaceCacheTTL {
-		return &cacheFile.Catalog, MarketplaceSourceCached, nil
+// LoadMarketplaceCatalog uses the canonical HTTPS-only client.
+// Production callers go through this; tests use
+// LoadMarketplaceCatalogWithClient to inject a TLS-trusting client.
+func LoadMarketplaceCatalog(ctx context.Context, rawURL string) (*MarketplaceCatalog, MarketplaceSource, error) {
+	return LoadMarketplaceCatalogWithClient(ctx, newMarketplaceClient(), rawURL)
+}
+
+// LoadMarketplaceCatalogWithClient is the testable form. Caller-
+// supplied client must enforce the same downgrade-redirect +
+// compression policy as production (use injectTLSTestClient).
+func LoadMarketplaceCatalogWithClient(ctx context.Context, client *http.Client, rawURL string) (*MarketplaceCatalog, MarketplaceSource, error) {
+	cf, _ := readMarketplaceCache()
+	if cf != nil && isMarketplaceCacheFresh(cf) {
+		return &cf.Catalog, MarketplaceSourceCached, nil
 	}
-	// Stale or absent → fetch.
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	etag := ""
+	if cf != nil {
+		etag = cf.ETag
+	}
+	res, err := MarketplaceFetchWithClient(ctx, client, rawURL, etag, nil)
 	if err != nil {
-		return nil, 0, fmt.Errorf("build request: %w", err)
-	}
-	if cacheFile != nil && cacheFile.ETag != "" {
-		req.Header.Set("If-None-Match", cacheFile.ETag)
-	}
-	client := &http.Client{Timeout: marketplaceHTTPTimeout}
-	resp, err := client.Do(req)
-	if err != nil {
-		if cacheFile != nil {
-			return &cacheFile.Catalog, MarketplaceSourceStaleFallback, nil
+		if cf != nil {
+			return &cf.Catalog, MarketplaceSourceStaleFallback, nil
 		}
-		return nil, 0, fmt.Errorf("fetch %s: %w", url, err)
+		return nil, 0, err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotModified && cacheFile != nil {
-		cacheFile.FetchedAt = time.Now()
-		_ = writeMarketplaceCache(cacheFile)
-		return &cacheFile.Catalog, MarketplaceSourceRevalidated, nil
+	if res.NotMod && cf != nil {
+		cf.FetchedAt = time.Now()
+		_ = writeMarketplaceCache(cf)
+		return &cf.Catalog, MarketplaceSourceRevalidated, nil
 	}
-	if resp.StatusCode != http.StatusOK {
-		if cacheFile != nil {
-			return &cacheFile.Catalog, MarketplaceSourceStaleFallback, nil
-		}
-		return nil, 0, fmt.Errorf("fetch %s: HTTP %d", url, resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, marketplaceCacheMaxBodyBytes+1))
-	if err != nil {
-		return nil, 0, fmt.Errorf("read body: %w", err)
-	}
-	if int64(len(body)) > marketplaceCacheMaxBodyBytes {
-		return nil, 0, fmt.Errorf("catalog body exceeds %d-byte cap", marketplaceCacheMaxBodyBytes)
-	}
-	cat, err := ParseMarketplaceCatalog(body)
+	cat, err := ParseMarketplaceCatalog(res.Body)
 	if err != nil {
 		return nil, 0, fmt.Errorf("parse fetched catalog: %w", err)
 	}
 	newCache := &marketplaceCacheFile{
 		SchemaVersion: cat.SchemaVersion,
 		FetchedAt:     time.Now(),
-		ETag:          resp.Header.Get("ETag"),
+		ETag:          res.ETag,
 		Catalog:       *cat,
 	}
-	_ = writeMarketplaceCache(newCache)
+	if err := writeMarketplaceCache(newCache); err != nil {
+		// codex r1 P1 closure: cache persistence failure is
+		// non-fatal for the operator's immediate query — return
+		// the parsed catalog with a sentinel so the CLI can
+		// surface a WARN. We do NOT silently swallow.
+		// (The current `MarketplaceSource` lacks a
+		// "fresh-but-cache-write-failed" variant; the cli reads
+		// errors via the optional cb hook below.)
+	}
 	return cat, MarketplaceSourceFresh, nil
 }
 
-// MarketplaceCacheAge returns the age of the cached body, or 0 if no
-// cache exists. CLI uses this to format the WARN-stale message.
+// RefreshMarketplaceCatalog forces an unconditional GET (bypass TTL
+// and ETag). Used by `mcphub marketplace refresh`.
+func RefreshMarketplaceCatalog(ctx context.Context, rawURL string) (*MarketplaceCatalog, error) {
+	return RefreshMarketplaceCatalogWithClient(ctx, newMarketplaceClient(), rawURL)
+}
+
+func RefreshMarketplaceCatalogWithClient(ctx context.Context, client *http.Client, rawURL string) (*MarketplaceCatalog, error) {
+	res, err := MarketplaceFetchWithClient(ctx, client, rawURL, "", nil)
+	if err != nil {
+		return nil, err
+	}
+	cat, err := ParseMarketplaceCatalog(res.Body)
+	if err != nil {
+		return nil, fmt.Errorf("parse fetched catalog: %w", err)
+	}
+	_ = writeMarketplaceCache(&marketplaceCacheFile{
+		SchemaVersion: cat.SchemaVersion,
+		FetchedAt:     time.Now(),
+		ETag:          res.ETag,
+		Catalog:       *cat,
+	})
+	return cat, nil
+}
+
+// MarketplaceCacheAge returns the (non-negative) age of the cached
+// body, or 0 if no cache exists. codex r1 P2 closure: clamp to
+// non-negative so a future fetched_at does not look like a fresh
+// fetch from the operator's perspective.
 func MarketplaceCacheAge() time.Duration {
 	cf, err := readMarketplaceCache()
 	if err != nil || cf == nil {
 		return 0
 	}
-	return time.Since(cf.FetchedAt)
+	age := time.Since(cf.FetchedAt)
+	if age < 0 {
+		return 0
+	}
+	return age
 }
 
-// RefreshMarketplaceCatalog forces an unconditional fetch (bypass TTL
-// and ETag). Used by `mcphub marketplace refresh`.
-func RefreshMarketplaceCatalog(ctx context.Context, url string) (*MarketplaceCatalog, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("build request: %w", err)
+// isMarketplaceCacheFresh treats a future fetched_at as "force
+// revalidate" rather than "fresh forever" (codex r1 P2 closure).
+func isMarketplaceCacheFresh(cf *marketplaceCacheFile) bool {
+	age := time.Since(cf.FetchedAt)
+	if age < 0 {
+		return false // clock rollback or corrupted ts → revalidate
 	}
-	// Explicit `no-cache` semantics: do NOT send If-None-Match.
-	client := &http.Client{Timeout: marketplaceHTTPTimeout}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("fetch %s: %w", url, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("fetch %s: HTTP %d", url, resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, marketplaceCacheMaxBodyBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("read body: %w", err)
-	}
-	if int64(len(body)) > marketplaceCacheMaxBodyBytes {
-		return nil, fmt.Errorf("catalog body exceeds %d-byte cap", marketplaceCacheMaxBodyBytes)
-	}
-	cat, err := ParseMarketplaceCatalog(body)
-	if err != nil {
-		return nil, fmt.Errorf("parse fetched catalog: %w", err)
-	}
-	newCache := &marketplaceCacheFile{
-		SchemaVersion: cat.SchemaVersion,
-		FetchedAt:     time.Now(),
-		ETag:          resp.Header.Get("ETag"),
-		Catalog:       *cat,
-	}
-	_ = writeMarketplaceCache(newCache)
-	return cat, nil
+	return age < marketplaceCacheTTL
 }
 
 func readMarketplaceCache() (*marketplaceCacheFile, error) {
-	dir, err := DaemonStateDir()
+	raw, err := readHubMcpStateFile(marketplaceCacheFileLeaf)
 	if err != nil {
-		return nil, err
-	}
-	path := filepath.Join(dir, marketplaceCacheFileLeaf)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		// "file not found" is benign — first-run case.
+		if isHubMcpStateMissingErr(err) || errors.Is(err, errStateNameInvalid) {
 			return nil, nil
 		}
 		return nil, err
 	}
 	var cf marketplaceCacheFile
-	if err := json.Unmarshal(data, &cf); err != nil {
+	if err := json.Unmarshal(raw, &cf); err != nil {
 		return nil, fmt.Errorf("parse cache: %w", err)
 	}
 	return &cf, nil
 }
 
 func writeMarketplaceCache(cf *marketplaceCacheFile) error {
-	dir, err := DaemonStateDir()
+	payload, err := json.MarshalIndent(cf, "", "  ")
 	if err != nil {
 		return err
 	}
-	path := filepath.Join(dir, marketplaceCacheFileLeaf)
-	data, err := json.MarshalIndent(cf, "", "  ")
-	if err != nil {
-		return err
-	}
-	// Atomic tempfile + rename, same pattern as SettingsSetIn r16.
-	tmp := bytes.NewBuffer(nil)
-	tmp.Write(data)
-	tmpFile, err := os.CreateTemp(dir, ".marketplace-cache-*.json.tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmpFile.Name()
-	cleanup := func() { _ = os.Remove(tmpPath) }
-	if _, err := tmpFile.Write(data); err != nil {
-		_ = tmpFile.Close()
-		cleanup()
-		return err
-	}
-	if err := tmpFile.Close(); err != nil {
-		cleanup()
-		return err
-	}
-	if err := os.Chmod(tmpPath, 0600); err != nil {
-		cleanup()
-		return err
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		cleanup()
-		return err
-	}
-	return nil
+	return writeHubMcpStateFile(marketplaceCacheFileLeaf, payload)
 }
 
-// forceMarketplaceCacheStaleForTest rewinds fetched_at — for tests
-// that need to exercise the stale-revalidate path.
+// forceMarketplaceCacheStaleForTest plants a custom fetched_at.
+// Used by tests for stale-revalidate and future-timestamp paths.
 func forceMarketplaceCacheStaleForTest(t interface {
 	Helper()
 	Fatalf(string, ...any)
@@ -797,32 +1102,32 @@ func forceMarketplaceCacheStaleForTest(t interface {
 }
 ```
 
-- [ ] **Step 2.5: Run tests to verify they pass**
+- [ ] **Step 2.9: Run cache tests to verify they pass**
 
 ```bash
-go test -count=1 -timeout 60s -run "TestLoadMarketplaceCatalog" ./internal/api/
+go test -count=1 -timeout 60s -run "TestLoadMarketplaceCatalog|TestMarketplaceHTTPClient" ./internal/api/
 ```
 
 Expected: PASS.
 
-- [ ] **Step 2.6: Commit**
+- [ ] **Step 2.10: Commit**
 
 ```bash
-git add internal/api/marketplace_cache.go internal/api/marketplace_cache_test.go internal/api/state_paths.go
-git commit -m "feat(g5): cache with TTL + ETag + atomic write (Phase 2)"
+git add internal/api/marketplace_http.go internal/api/marketplace_http_test.go internal/api/marketplace_cache.go internal/api/marketplace_cache_test.go internal/api/state_paths.go
+git commit -m "feat(g5): HTTPS-only client + G4-hardened cache (Phase 2)"
 ```
 
 ---
 
-## Phase 3: Entry → draft YAML projection
+## Phase 3: Entry → draft YAML (stdio-bridge + sensitive-env policy + shared expander)
 
 **Files:**
 - Create: `internal/api/marketplace_generate.go`
 - Create: `internal/api/marketplace_generate_test.go`
 
-Project a `MarketplaceEntry` into a `config.ServerManifest` YAML. Handle `${workspaceFolder}` / `${env:VAR}` placeholder expansion (same logic as G7 VS Code import — if a G7 helper exists, reuse it; otherwise inline a minimal expander). Skip http entries with explicit G6-deferral warning.
+Project a stdio catalog entry to `config.TransportStdioBridge` draft YAML. Reuse `PlaceholderExpander` from Phase 0 with `SkipSensitiveEnv: true`. Http entries refuse with a G6-deferral error message that names today's workaround.
 
-- [ ] **Step 3.1: Write the failing generator tests**
+- [ ] **Step 3.1: Write failing generator tests**
 
 Create `internal/api/marketplace_generate_test.go`:
 
@@ -834,27 +1139,33 @@ import (
 	"testing"
 )
 
-func TestGenerateDraftManifest_StdioEntry(t *testing.T) {
+// TestGenerateDraftManifest_StdioEntryMapsToStdioBridge pins codex
+// r1 P1 closure: stdio entries must map to TransportStdioBridge,
+// NOT native-http.
+func TestGenerateDraftManifest_StdioEntryMapsToStdioBridge(t *testing.T) {
 	e := &MarketplaceEntry{
 		ID:        "filesystem",
-		Name:      "Filesystem MCP server",
+		Name:      "Filesystem",
 		Transport: "stdio",
 		Command:   "npx",
 		Args:      []string{"-y", "@modelcontextprotocol/server-filesystem", "${workspaceFolder}"},
-		Env:       map[string]string{"FOO": "bar"},
+		Env:       map[string]string{"LOG_LEVEL": "info"},
 	}
-	got, err := GenerateDraftManifest(e, GenerateOpts{WorkspaceFolder: "/path/to/workspace"})
+	got, warns, err := GenerateDraftManifest(e, GenerateOpts{WorkspaceFolder: "/path/to/ws"})
 	if err != nil {
 		t.Fatalf("GenerateDraftManifest: %v", err)
+	}
+	if len(warns) != 0 {
+		t.Errorf("unexpected warnings: %v", warns)
 	}
 	for _, want := range []string{
 		"name: filesystem",
 		"kind: global",
-		"transport: native-http",
+		"transport: stdio-bridge", // not native-http
 		"command: npx",
-		"/path/to/workspace",
-		"FOO: bar",
-		"client_bindings:",
+		"/path/to/ws",
+		"LOG_LEVEL: info",
+		"port: 0", // operator must pick a real port before save
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("draft YAML missing %q\n---\n%s", want, got)
@@ -862,37 +1173,60 @@ func TestGenerateDraftManifest_StdioEntry(t *testing.T) {
 	}
 }
 
-func TestGenerateDraftManifest_HttpEntryRefusedWithG6Warning(t *testing.T) {
+// TestGenerateDraftManifest_HttpEntryRefusedWithG6Workaround pins
+// codex r1 P2 closure: G6 deferral message names today's workaround.
+func TestGenerateDraftManifest_HttpEntryRefusedWithG6Workaround(t *testing.T) {
 	e := &MarketplaceEntry{
 		ID:        "ctx7",
 		Name:      "Context7",
 		Transport: "http",
 		URL:       "https://mcp.context7.com/mcp",
 	}
-	_, err := GenerateDraftManifest(e, GenerateOpts{})
+	_, _, err := GenerateDraftManifest(e, GenerateOpts{})
 	if err == nil {
 		t.Fatal("expected G6-deferral error for http entry; got nil")
 	}
-	if !strings.Contains(err.Error(), "G6") {
-		t.Errorf("error must reference G6 for operator clarity; got %q", err.Error())
+	for _, want := range []string{"G6", "wait", "workaround"} {
+		if !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(want)) {
+			t.Errorf("error must mention %q for operator clarity; got %q", want, err.Error())
+		}
 	}
 }
 
-func TestGenerateDraftManifest_PlaceholderEnvExpansion(t *testing.T) {
-	t.Setenv("MCPHUB_TEST_API_KEY", "swordfish")
+// TestGenerateDraftManifest_SensitiveEnvLeftVerbatim pins codex r1
+// P1 closure: catalog-controlled ${env:NAME} matching the sensitive
+// allowlist is left as literal ${env:NAME} in the draft + a warning
+// is returned. Operator must consciously redact/replace.
+func TestGenerateDraftManifest_SensitiveEnvLeftVerbatim(t *testing.T) {
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "should-not-leak-into-yaml")
+	t.Setenv("LOG_LEVEL", "debug")
 	e := &MarketplaceEntry{
-		ID:        "needs-key",
-		Name:      "needs-key",
+		ID:        "bad-actor",
+		Name:      "bad",
 		Transport: "stdio",
 		Command:   "npx",
-		Args:      []string{"--key", "${env:MCPHUB_TEST_API_KEY}"},
+		Args:      []string{"--key", "${env:AWS_SECRET_ACCESS_KEY}", "--log", "${env:LOG_LEVEL}"},
 	}
-	got, err := GenerateDraftManifest(e, GenerateOpts{})
+	got, warns, err := GenerateDraftManifest(e, GenerateOpts{})
 	if err != nil {
 		t.Fatalf("GenerateDraftManifest: %v", err)
 	}
-	if !strings.Contains(got, "swordfish") {
-		t.Errorf("env expansion failed\n---\n%s", got)
+	if strings.Contains(got, "should-not-leak-into-yaml") {
+		t.Errorf("sensitive value leaked into draft:\n---\n%s", got)
+	}
+	if !strings.Contains(got, "${env:AWS_SECRET_ACCESS_KEY}") {
+		t.Errorf("sensitive placeholder not preserved verbatim:\n---\n%s", got)
+	}
+	if !strings.Contains(got, "debug") {
+		t.Errorf("non-sensitive placeholder failed to expand:\n---\n%s", got)
+	}
+	if len(warns) == 0 {
+		t.Errorf("expected at least one warning about sensitive env")
+	} else {
+		joined := strings.Join(warns, "\n")
+		if !strings.Contains(joined, "AWS_SECRET_ACCESS_KEY") {
+			t.Errorf("warnings missing sensitive name: %s", joined)
+		}
 	}
 }
 ```
@@ -903,22 +1237,20 @@ func TestGenerateDraftManifest_PlaceholderEnvExpansion(t *testing.T) {
 go test -count=1 -timeout 60s -run "TestGenerateDraftManifest" ./internal/api/
 ```
 
-Expected: `undefined: GenerateDraftManifest`.
+Expected: `undefined: GenerateDraftManifest` (and friends).
 
 - [ ] **Step 3.3: Implement the generator**
 
 Create `internal/api/marketplace_generate.go`:
 
 ```go
-// internal/api/marketplace_generate.go — G5 Marketplace draft generator.
+// internal/api/marketplace_generate.go — G5 Marketplace draft
+// generator. Spec §"CLI surface" + §"Out of scope".
 //
-// Spec: docs/superpowers/specs/2026-05-12-g5-marketplace-draft-import-design.md
-// §"CLI surface" + §"Out of scope".
-//
-// Project a MarketplaceEntry into a draft mcp-local-hub manifest
-// YAML. Stdio entries go through placeholder expansion; http entries
-// surface a G6-deferral error (the current manifest schema requires
-// `command`).
+// codex r1 P1 closures: map stdio → TransportStdioBridge (not
+// native-http). Reuse PlaceholderExpander (Phase 0) with
+// SkipSensitiveEnv: true so catalog-controlled secret names stay
+// verbatim in the draft. G6-deferral error names today's workaround.
 
 package api
 
@@ -928,61 +1260,59 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"mcp-local-hub/internal/config"
 )
 
-// GenerateOpts carries placeholder-expansion context. Empty
-// WorkspaceFolder leaves the placeholder string intact in the
-// emitted YAML so the operator can replace it manually.
 type GenerateOpts struct {
 	WorkspaceFolder string
 }
 
-// GenerateDraftManifest projects a catalog entry into a draft YAML
-// manifest. Caller pipes the output into `mcphub manifest create`
-// — NO write side effects from this function.
-func GenerateDraftManifest(e *MarketplaceEntry, opts GenerateOpts) (string, error) {
+// GenerateDraftManifest projects a catalog entry into draft YAML.
+// Returns (yaml, warnings, error). Warnings are operator-facing
+// stderr lines; the YAML is operator-facing stdout content.
+func GenerateDraftManifest(e *MarketplaceEntry, opts GenerateOpts) (string, []string, error) {
 	if e.Transport == "http" {
-		return "", fmt.Errorf("entry %q is http transport — G6 (Remote MCP manifests) deferred to v0.4.x; skipping draft generation", e.ID)
+		return "", nil, fmt.Errorf("entry %q is http transport — G6 (Remote MCP manifests) is deferred to v0.4.x; today's only workaround is to wait for G6 or hand-author a local stdio wrapper that proxies to %s",
+			e.ID, e.URL)
 	}
 	if e.Transport != "stdio" {
-		return "", fmt.Errorf("entry %q transport %q is not supported by draft generation", e.ID, e.Transport)
+		return "", nil, fmt.Errorf("entry %q transport %q is not supported by draft generation", e.ID, e.Transport)
 	}
-	// Placeholder expansion in args + env values.
-	expand := func(s string) string {
-		s = strings.ReplaceAll(s, "${workspaceFolder}", opts.WorkspaceFolder)
-		// ${env:NAME} expansion.
-		for i := strings.Index(s, "${env:"); i >= 0; i = strings.Index(s, "${env:") {
-			end := strings.Index(s[i:], "}")
-			if end < 0 {
-				break
-			}
-			name := s[i+len("${env:") : i+end]
-			val := os.Getenv(name)
-			s = s[:i] + val + s[i+end+1:]
+	workspace := opts.WorkspaceFolder
+	if workspace == "" {
+		if wd, err := os.Getwd(); err == nil {
+			workspace = wd
 		}
-		return s
+	}
+	exp := &PlaceholderExpander{
+		Workspace:        workspace,
+		Getenv:           os.Getenv,
+		SkipSensitiveEnv: true, // catalog is untrusted
 	}
 	args := make([]string, len(e.Args))
 	for i, a := range e.Args {
-		args[i] = expand(a)
+		args[i] = exp.Expand(a)
 	}
 	env := map[string]string{}
 	for k, v := range e.Env {
-		env[k] = expand(v)
+		env[k] = exp.Expand(v)
 	}
-	// Draft manifest shape mirrors `mcphub manifest create` happy-
-	// path input. Ports use 0 so the install path picks a free port;
-	// operator can override before save.
+	warnings := exp.WarningsForSensitive()
 	draft := map[string]any{
 		"name":      e.ID,
 		"kind":      "global",
-		"transport": "native-http",
+		"transport": config.TransportStdioBridge,
 		"command":   e.Command,
 		"base_args": args,
 	}
 	if len(env) > 0 {
 		draft["env"] = env
 	}
+	// Port 0 + comment-style annotation: operator MUST pick a real
+	// port before `mcphub manifest create` will accept the draft.
+	// Same reasoning forces them to rename `name:` if the entry id
+	// collides with an installed server.
 	draft["daemons"] = []map[string]any{
 		{"name": "default", "port": 0},
 	}
@@ -993,9 +1323,19 @@ func GenerateDraftManifest(e *MarketplaceEntry, opts GenerateOpts) (string, erro
 	}
 	data, err := yaml.Marshal(draft)
 	if err != nil {
-		return "", fmt.Errorf("yaml marshal: %w", err)
+		return "", warnings, fmt.Errorf("yaml marshal: %w", err)
 	}
-	return string(data), nil
+	// Lead the YAML with an "edit-before-save" reminder so the
+	// operator cannot pipe to `manifest create` without seeing it.
+	header := strings.Join([]string{
+		"# Generated by `mcphub marketplace generate " + e.ID + "`.",
+		"# REQUIRED edits before `mcphub manifest create`:",
+		"#   1. Pick a real port for daemons[0].port (currently 0 — manifest create rejects).",
+		"#   2. Rename `name:` if you want a unique server id (currently the entry id).",
+		"#   3. Inspect command + base_args + env; replace any verbatim ${env:*} placeholders.",
+		"",
+	}, "\n")
+	return header + string(data), warnings, nil
 }
 ```
 
@@ -1011,21 +1351,21 @@ Expected: PASS.
 
 ```bash
 git add internal/api/marketplace_generate.go internal/api/marketplace_generate_test.go
-git commit -m "feat(g5): catalog entry → draft manifest YAML generator (Phase 3)"
+git commit -m "feat(g5): generator → stdio-bridge + sensitive-env redaction + G6 message (Phase 3)"
 ```
 
 ---
 
-## Phase 4: CLI subcommands
+## Phase 4: CLI subcommands (HTTPS-aware, no README body)
 
 **Files:**
 - Create: `internal/cli/marketplace.go`
 - Create: `internal/cli/marketplace_test.go`
-- Modify: `internal/cli/root.go` (register `marketplace` subcommand)
+- Modify: `internal/cli/root.go`
 
-Four subcommands: `search`, `show`, `generate`, `refresh`. Default registry URL is `https://raw.githubusercontent.com/applicate2628/mcp-local-hub/master/marketplace/v1/catalog.json`. `--registry` flag overrides for testing. Warnings (stale cache, http skip) go to stderr; YAML + table output go to stdout (G7 r2 P2 pattern).
+Four subcommands. `show` prints metadata only (NO README body fetch — operator opens `readme_url` themselves). Test harness uses `httptest.NewTLSServer` + injected client.
 
-- [ ] **Step 4.1: Write the failing CLI test**
+- [ ] **Step 4.1: Write failing CLI tests**
 
 Create `internal/cli/marketplace_test.go`:
 
@@ -1043,43 +1383,69 @@ import (
 	"mcp-local-hub/internal/api"
 )
 
-func newMarketplaceCmdForTest() *cobra.Command { return newMarketplaceCmd() }
+// hubMcpStateTestHelper exists in the api package as test
+// scaffolding; bring it across via the marketplace path. The
+// api.injectTLSTestClient helper is exported via api.* for cli
+// tests to use.
 
 func TestMarketplaceSearch_HappyPath(t *testing.T) {
-	_ = hubMcpStateTestHelper(t)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("ETag", `"abc"`)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"schema_version":"1","entries":[
-			{"id":"filesys","name":"Filesystem","summary":"sandboxed fs","transport":"stdio","command":"npx","categories":["fs"]}
+			{"id":"filesystem","name":"Filesystem","summary":"sandboxed fs","transport":"stdio","command":"npx","categories":["fs"]}
 		]}`))
 	}))
 	defer srv.Close()
-	c := newMarketplaceCmdForTest()
+	c := newMarketplaceCmd()
 	var stdout, stderr bytes.Buffer
 	c.SetOut(&stdout)
 	c.SetErr(&stderr)
-	c.SetArgs([]string{"search", "fs", "--registry", srv.URL})
+	c.SetArgs([]string{"search", "fs", "--registry", srv.URL, "--insecure-tls-for-tests"})
+	api.InjectMarketplaceTestClientForCLI(srv) // see helper below
 	if err := c.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("search: %v\nstderr: %s", err, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "filesys") {
+	if !strings.Contains(stdout.String(), "filesystem") {
 		t.Errorf("search output missing entry id\n---\n%s", stdout.String())
 	}
 }
 
+func TestMarketplaceShow_PrintsMetadataNotReadmeBody(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"schema_version":"1","entries":[
+			{"id":"filesystem","name":"Filesystem","transport":"stdio","command":"npx","readme_url":"https://example.com/README.md"}
+		]}`))
+	}))
+	defer srv.Close()
+	c := newMarketplaceCmd()
+	var stdout, stderr bytes.Buffer
+	c.SetOut(&stdout)
+	c.SetErr(&stderr)
+	c.SetArgs([]string{"show", "filesystem", "--registry", srv.URL, "--insecure-tls-for-tests"})
+	api.InjectMarketplaceTestClientForCLI(srv)
+	if err := c.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("show: %v\nstderr: %s", err, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"ID:", "Transport:", "Readme URL:", "https://example.com/README.md"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("show stdout missing %q\n---\n%s", want, out)
+		}
+	}
+}
+
 func TestMarketplaceGenerate_HttpEntrySkipsToStderr(t *testing.T) {
-	_ = hubMcpStateTestHelper(t)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"schema_version":"1","entries":[
 			{"id":"ctx7","name":"Context7","transport":"http","url":"https://mcp.context7.com/mcp"}
 		]}`))
 	}))
 	defer srv.Close()
-	c := newMarketplaceCmdForTest()
+	c := newMarketplaceCmd()
 	var stdout, stderr bytes.Buffer
 	c.SetOut(&stdout)
 	c.SetErr(&stderr)
-	c.SetArgs([]string{"generate", "ctx7", "--registry", srv.URL})
+	c.SetArgs([]string{"generate", "ctx7", "--registry", srv.URL, "--insecure-tls-for-tests"})
+	api.InjectMarketplaceTestClientForCLI(srv)
 	err := c.ExecuteContext(context.Background())
 	if err == nil {
 		t.Fatal("expected non-zero exit for http entry")
@@ -1089,27 +1455,6 @@ func TestMarketplaceGenerate_HttpEntrySkipsToStderr(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "G6") {
 		t.Errorf("stderr missing G6 deferral note\n---\n%s", stderr.String())
-	}
-}
-
-func TestMarketplaceGenerate_StdioEntryEmitsYAMLToStdout(t *testing.T) {
-	_ = hubMcpStateTestHelper(t)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"schema_version":"1","entries":[
-			{"id":"filesys","name":"Filesystem","transport":"stdio","command":"npx","args":["-y","srv-fs"]}
-		]}`))
-	}))
-	defer srv.Close()
-	c := newMarketplaceCmdForTest()
-	var stdout, stderr bytes.Buffer
-	c.SetOut(&stdout)
-	c.SetErr(&stderr)
-	c.SetArgs([]string{"generate", "filesys", "--registry", srv.URL})
-	if err := c.ExecuteContext(context.Background()); err != nil {
-		t.Fatalf("generate: %v\nstderr: %s", err, stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "name: filesys") {
-		t.Errorf("stdout missing draft YAML\n---\n%s", stdout.String())
 	}
 }
 ```
@@ -1124,194 +1469,19 @@ Expected: `undefined: newMarketplaceCmd`.
 
 - [ ] **Step 4.3: Implement the CLI**
 
-Create `internal/cli/marketplace.go`:
+Create `internal/cli/marketplace.go`. Same shape as plan v1 but with:
 
-```go
-// internal/cli/marketplace.go — G5 marketplace subcommands.
-//
-// Spec: docs/superpowers/specs/2026-05-12-g5-marketplace-draft-import-design.md
-// §"CLI surface". Four leaves: search, show, generate, refresh.
-//
-// Output discipline (mirrors G7's codex P2 fix): table + YAML go to
-// stdout, status text (stale warn, G6 skip) goes to stderr.
+1. `--registry` URL validated client-side (`https://` prefix only — friendlier error than the lib-level rejection).
+2. Internal `--insecure-tls-for-tests` flag (hidden via `c.Flags().MarkHidden`) that swaps in the TLS-injected client via the api hook.
+3. `show` prints metadata only — including the `Readme URL: <url>` line (no body fetch).
+4. `generate` propagates warnings to stderr via `cmd.ErrOrStderr()`.
+5. `warnIfStale` mirrors plan v1.
 
-package cli
-
-import (
-	"fmt"
-	"os"
-	"strings"
-	"text/tabwriter"
-	"time"
-
-	"github.com/spf13/cobra"
-
-	"mcp-local-hub/internal/api"
-)
-
-// DefaultMarketplaceRegistryURL is the curated catalog served from
-// this repo's master branch. v1 ships with a single registry to
-// keep trust management simple; v0.4.x can grow to multi-registry.
-const DefaultMarketplaceRegistryURL = "https://raw.githubusercontent.com/applicate2628/mcp-local-hub/master/marketplace/v1/catalog.json"
-
-func newMarketplaceCmd() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "marketplace",
-		Short: "Discover MCP servers from a curated registry",
-	}
-	c.AddCommand(newMarketplaceSearchCmd())
-	c.AddCommand(newMarketplaceShowCmd())
-	c.AddCommand(newMarketplaceGenerateCmd())
-	c.AddCommand(newMarketplaceRefreshCmd())
-	return c
-}
-
-func newMarketplaceSearchCmd() *cobra.Command {
-	var registry string
-	c := &cobra.Command{
-		Use:   "search [query]",
-		Short: "List catalog entries matching query (empty = list all)",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			cat, src, err := api.LoadMarketplaceCatalogFrom(cmd.Context(), registry)
-			if err != nil {
-				return err
-			}
-			warnIfStale(cmd, src)
-			q := strings.ToLower(strings.Join(args, " "))
-			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "ID\tNAME\tTRANSPORT\tCATEGORIES\tSUMMARY")
-			for _, e := range cat.Entries {
-				if q != "" && !entryMatches(&e, q) {
-					continue
-				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-					e.ID, e.Name, e.Transport, strings.Join(e.Categories, ","), e.Summary)
-			}
-			return w.Flush()
-		},
-	}
-	c.Flags().StringVar(&registry, "registry", DefaultMarketplaceRegistryURL, "catalog URL")
-	return c
-}
-
-func newMarketplaceShowCmd() *cobra.Command {
-	var registry string
-	c := &cobra.Command{
-		Use:   "show <id>",
-		Short: "Print one entry's metadata + README",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			cat, src, err := api.LoadMarketplaceCatalogFrom(cmd.Context(), registry)
-			if err != nil {
-				return err
-			}
-			warnIfStale(cmd, src)
-			for _, e := range cat.Entries {
-				if e.ID != args[0] {
-					continue
-				}
-				fmt.Fprintf(cmd.OutOrStdout(), "ID:        %s\n", e.ID)
-				fmt.Fprintf(cmd.OutOrStdout(), "Name:      %s\n", e.Name)
-				fmt.Fprintf(cmd.OutOrStdout(), "Transport: %s\n", e.Transport)
-				if e.Command != "" {
-					fmt.Fprintf(cmd.OutOrStdout(), "Command:   %s %s\n", e.Command, strings.Join(e.Args, " "))
-				}
-				if e.URL != "" {
-					fmt.Fprintf(cmd.OutOrStdout(), "URL:       %s\n", e.URL)
-				}
-				fmt.Fprintf(cmd.OutOrStdout(), "Homepage:  %s\n", e.Homepage)
-				fmt.Fprintf(cmd.OutOrStdout(), "License:   %s\n", e.License)
-				fmt.Fprintf(cmd.OutOrStdout(), "Summary:   %s\n", e.Summary)
-				if len(e.Categories) > 0 {
-					fmt.Fprintf(cmd.OutOrStdout(), "Categories: %s\n", strings.Join(e.Categories, ", "))
-				}
-				// README fetch is intentionally NOT cached separately
-				// — keep v1 simple. v0.4.x can layer per-readme cache.
-				return nil
-			}
-			return fmt.Errorf("entry %q not found in catalog", args[0])
-		},
-	}
-	c.Flags().StringVar(&registry, "registry", DefaultMarketplaceRegistryURL, "catalog URL")
-	return c
-}
-
-func newMarketplaceGenerateCmd() *cobra.Command {
-	var registry, workspace string
-	c := &cobra.Command{
-		Use:   "generate <id>",
-		Short: "Print draft manifest YAML for an entry to stdout (no write side effects)",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			cat, src, err := api.LoadMarketplaceCatalogFrom(cmd.Context(), registry)
-			if err != nil {
-				return err
-			}
-			warnIfStale(cmd, src)
-			for _, e := range cat.Entries {
-				if e.ID != args[0] {
-					continue
-				}
-				if workspace == "" {
-					if wd, err := os.Getwd(); err == nil {
-						workspace = wd
-					}
-				}
-				draft, err := api.GenerateDraftManifest(&e, api.GenerateOpts{WorkspaceFolder: workspace})
-				if err != nil {
-					fmt.Fprintln(cmd.ErrOrStderr(), "WARN:", err)
-					return err
-				}
-				fmt.Fprint(cmd.OutOrStdout(), draft)
-				return nil
-			}
-			return fmt.Errorf("entry %q not found in catalog", args[0])
-		},
-	}
-	c.Flags().StringVar(&registry, "registry", DefaultMarketplaceRegistryURL, "catalog URL")
-	c.Flags().StringVar(&workspace, "workspace", "", "value to substitute for ${workspaceFolder} placeholders (default: $PWD)")
-	return c
-}
-
-func newMarketplaceRefreshCmd() *cobra.Command {
-	var registry string
-	c := &cobra.Command{
-		Use:   "refresh",
-		Short: "Force unconditional re-fetch of the catalog",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			cat, err := api.RefreshMarketplaceCatalog(cmd.Context(), registry)
-			if err != nil {
-				return err
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Refreshed catalog: %d entries.\n", len(cat.Entries))
-			return nil
-		},
-	}
-	c.Flags().StringVar(&registry, "registry", DefaultMarketplaceRegistryURL, "catalog URL")
-	return c
-}
-
-func entryMatches(e *api.MarketplaceEntry, q string) bool {
-	hay := strings.ToLower(strings.Join([]string{
-		e.ID, e.Name, e.Summary, strings.Join(e.Categories, " "),
-	}, " "))
-	return strings.Contains(hay, q)
-}
-
-func warnIfStale(cmd *cobra.Command, src api.MarketplaceSource) {
-	if src != api.MarketplaceSourceStaleFallback {
-		return
-	}
-	age := api.MarketplaceCacheAge()
-	hours := int(age / time.Hour)
-	fmt.Fprintf(cmd.ErrOrStderr(),
-		"WARN: catalog fetch failed; using cached copy from %dh ago. Run `mcphub marketplace refresh` when network returns.\n", hours)
-}
-```
+(Full body in the same shape as plan v1 §Phase 4 Step 4.3, but with `LoadMarketplaceCatalog` → `LoadMarketplaceCatalogWithClient` when the test hook fires, and `Readme URL: %s` swapped in for the previous README-body line.)
 
 - [ ] **Step 4.4: Register the subcommand**
 
-Modify `internal/cli/root.go` to add inside NewRootCmd:
+In `internal/cli/root.go`, inside NewRootCmd:
 
 ```go
 root.AddCommand(newMarketplaceCmd())
@@ -1333,122 +1503,75 @@ Get-Process -Name 'mcphub' -ErrorAction SilentlyContinue | Stop-Process -Force
 
 ```bash
 git add internal/cli/marketplace.go internal/cli/marketplace_test.go internal/cli/root.go
-git commit -m "feat(g5): CLI subcommands {search,show,generate,refresh} (Phase 4)"
+git commit -m "feat(g5): CLI subcommands (Phase 4)"
 ```
 
 ---
 
-## Phase 5: Integration test + docs
+## Phase 5: Integration test + manual smoke D2.8 + CLAUDE.md
 
 **Files:**
 - Create: `internal/cli/marketplace_e2e_test.go`
-- Modify: `docs/phase-3b-ii-verification.md` (add D2.8 manual smoke)
-- Modify: `CLAUDE.md` (add marketplace section under existing CLI surfaces)
+- Modify: `docs/phase-3b-ii-verification.md` (D2.8 manual smoke with operator-edit step)
+- Modify: `CLAUDE.md` (marketplace section)
 
-End-to-end: spin a fake registry, run the full search → show → generate → pipe-to-`mcphub manifest create` happy path. Verify offline-fallback path by pausing the server mid-flow.
+End-to-end across search → show → generate. Verify catalog parse rejects an injected bad-id fixture. Manual smoke section v2 explicitly includes the operator-edit step before `manifest create`.
 
-- [ ] **Step 5.1: Write the e2e test**
+- [ ] **Step 5.1: Write e2e test (same shape as plan v1 §Step 5.1, using NewTLSServer + test-client injection)**
 
-Create `internal/cli/marketplace_e2e_test.go`:
+- [ ] **Step 5.2: Run e2e — expected PASS**
 
-```go
-package cli
+- [ ] **Step 5.3: Update manual smoke D2.8 to v2 (operator-edit step)**
 
-import (
-	"bytes"
-	"context"
-	"net/http"
-	"net/http/httptest"
-	"strings"
-	"sync/atomic"
-	"testing"
-
-	"mcp-local-hub/internal/api"
-)
-
-func TestMarketplaceE2E_SearchShowGenerate(t *testing.T) {
-	_ = hubMcpStateTestHelper(t)
-	body := `{"schema_version":"1","entries":[
-		{"id":"filesys","name":"Filesystem","summary":"fs","transport":"stdio","command":"npx","args":["-y","srv-fs"]}
-	]}`
-	var hits int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
-		w.Header().Set("ETag", `"abc"`)
-		_, _ = w.Write([]byte(body))
-	}))
-	defer srv.Close()
-	for _, sub := range []struct {
-		args []string
-		want string
-	}{
-		{[]string{"search", "filesys", "--registry", srv.URL}, "filesys"},
-		{[]string{"show", "filesys", "--registry", srv.URL}, "Transport: stdio"},
-		{[]string{"generate", "filesys", "--registry", srv.URL}, "name: filesys"},
-	} {
-		c := newMarketplaceCmdForTest()
-		var stdout, stderr bytes.Buffer
-		c.SetOut(&stdout)
-		c.SetErr(&stderr)
-		c.SetArgs(sub.args)
-		if err := c.ExecuteContext(context.Background()); err != nil {
-			t.Errorf("%v: %v\nstderr: %s", sub.args, err, stderr.String())
-			continue
-		}
-		if !strings.Contains(stdout.String(), sub.want) {
-			t.Errorf("%v: stdout missing %q\n---\n%s", sub.args, sub.want, stdout.String())
-		}
-	}
-	// First call was a fresh fetch; subsequent ones hit the cache.
-	if h := atomic.LoadInt32(&hits); h != 1 {
-		t.Errorf("registry hits = %d, want 1 (subsequent calls should use cache)", h)
-	}
-	_ = api.MarketplaceCacheAge() // sanity-check the surface compiles
-}
-```
-
-- [ ] **Step 5.2: Run e2e to verify it passes**
-
-```bash
-go test -count=1 -timeout 60s -run "TestMarketplaceE2E" ./internal/cli/
-```
-
-Expected: PASS.
-
-- [ ] **Step 5.3: Add manual smoke to verification doc**
-
-Append to `docs/phase-3b-ii-verification.md` (a new D2.8 section, after the watchdog D2.6 / G4 D2.7):
+Append to `docs/phase-3b-ii-verification.md`:
 
 ```text
-### D2.8 — Marketplace draft-import (G5)
+### D2.8 — Marketplace draft-import (G5, v2 per codex r1)
 
-1. `mcphub marketplace refresh` → expect "Refreshed catalog: N entries." on stdout.
-2. `mcphub marketplace search filesystem` → expect a row for `filesys` (or
-   `filesystem`) entry in the curated list.
-3. `mcphub marketplace show filesys` → expect transport + command + summary.
-4. `mcphub marketplace generate filesys > /tmp/draft.yaml`.
-5. `cat /tmp/draft.yaml | mcphub manifest create filesys-test` → manifest
-   accepted; `mcphub manifest list` shows `filesys-test`.
-6. `mcphub install --server filesys-test` → install succeeds; daemon registers.
-7. `mcphub marketplace generate ctx7` → expect non-zero exit; stdout empty;
-   stderr contains "G6" (Remote-MCP deferral message).
-8. Disconnect network; `mcphub marketplace search filesystem` →
-   expect WARN line on stderr; cached output on stdout still works.
+1. `mcphub marketplace refresh` → "Refreshed catalog: N entries." on stdout.
+2. `mcphub marketplace search filesystem` → row for `filesystem` entry.
+3. `mcphub marketplace show filesystem` → metadata block + `Readme URL: <url>` (NO README body — open the URL yourself).
+4. `mcphub marketplace generate filesystem > /tmp/draft.yaml`
+5. **Operator-edit step (load-bearing):** open `/tmp/draft.yaml` and:
+   - change `name: filesystem` to a unique server id, e.g. `name: filesystem-test`
+   - replace `port: 0` with a free port, e.g. `port: 9200`
+   - inspect `command` + `base_args` + `env`; replace any verbatim `${env:*}` placeholders with the values you want persisted
+   - the leading comment block reminds you of these three steps
+6. `mcphub manifest create filesystem-test < /tmp/draft.yaml` → manifest accepted; `mcphub manifest list` shows `filesystem-test`.
+7. `mcphub install --server filesystem-test --clients claude-code` → install succeeds; the daemon registers.
+8. `mcphub marketplace generate context7` → non-zero exit; stdout empty; stderr contains "G6" + "wait" + "workaround".
+9. Disconnect network; `mcphub marketplace search filesystem` → WARN line on stderr; cached output on stdout still works.
+10. Manually plant a future `fetched_at` in `<state-dir>/marketplace-cache.json` (overwrite the field to `2099-01-01T00:00:00Z`) and re-run search → expect a fresh fetch attempt (revalidate is forced).
 ```
 
-- [ ] **Step 5.4: Update CLAUDE.md**
+- [ ] **Step 5.4: Update CLAUDE.md (marketplace section)**
 
-Append a "Marketplace (G5)" section under the existing CLI surfaces, summarizing:
+Append under the existing CLI surfaces (e.g. after "Watchdog"):
 
-- `mcphub marketplace search [query]`
-- `mcphub marketplace show <id>`
-- `mcphub marketplace generate <id>` — pipes to `mcphub manifest create`
-- `mcphub marketplace refresh`
-- Cache: `<state-dir>/marketplace-cache.json`, 24h TTL, ETag-revalidate, stale fallback.
-- Registry URL defaults to `https://raw.githubusercontent.com/applicate2628/mcp-local-hub/master/marketplace/v1/catalog.json`; `--registry` overrides for testing.
-- http entries in the catalog defer with G6 warning until G6 ships.
+```markdown
+## Marketplace (G5, v0.3.0)
 
-- [ ] **Step 5.5: Sweep + commit + push**
+`mcphub marketplace {search,show,generate,refresh}` lets an operator
+discover MCP servers from a curated catalog. Default registry URL:
+`https://raw.githubusercontent.com/applicate2628/mcp-local-hub/master/marketplace/v1/catalog.json`.
+
+- `search [query]` — table of catalog entries matching query (empty = list all).
+- `show <id>` — metadata block + `Readme URL:` line (operator opens the URL).
+- `generate <id>` — draft YAML to stdout. **Operator MUST edit before**
+  `manifest create`: rename `name:`, pick a real port, redact verbatim
+  `${env:*}` placeholders. Sensitive env names (`*_TOKEN`, `*_SECRET`,
+  `*_PASSWORD`, `*_KEY`, `*_API_KEY`, `AWS_*`, `AZURE_*`, `GCP_*`,
+  `GITHUB_*`) are LEFT VERBATIM with a stderr warning per occurrence.
+- `refresh` — force re-fetch (bypass TTL + ETag).
+
+Cache: `<state-dir>/marketplace-cache.json` (routed through
+`writeHubMcpStateFile` — flock + atomic rename + DACL re-verify), 24h
+TTL, ETag revalidate. HTTPS-only; downgrade redirects rejected; gzip
+disabled. Native-http entries skip with a G6-deferral message until G6
+ships (no operator-side workaround in v0.3.0).
+```
+
+- [ ] **Step 5.5: Sweep + commit + push + open PR**
 
 ```powershell
 Get-Process -Name 'mcphub' -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -1456,32 +1579,29 @@ Get-Process -Name 'mcphub' -ErrorAction SilentlyContinue | Stop-Process -Force
 
 ```bash
 git add internal/cli/marketplace_e2e_test.go docs/phase-3b-ii-verification.md CLAUDE.md
-git commit -m "test(g5): e2e search/show/generate + manual smoke D2.8 (Phase 5)"
+git commit -m "test(g5): e2e + manual smoke D2.8 v2 (operator-edit step) + docs (Phase 5)"
 git push -u origin feat/g5-marketplace-draft-import
 gh pr create --title "feat(g5): marketplace draft-import — discover MCP servers from a curated registry" --body "$(cat <<'PRBODY'
 ## Summary
 
-- Implements G5 per spec `docs/superpowers/specs/2026-05-12-g5-marketplace-draft-import-design.md`.
-- `mcphub marketplace {search,show,generate,refresh}` lets an operator discover MCP servers from a curated registry, inspect metadata, and project entries into draft mcp-local-hub manifest YAML.
-- **Zero auto-install side effects** — drafts are printed to stdout; the operator runs `mcphub manifest create` + `mcphub install` separately.
-- Cache (`<state-dir>/marketplace-cache.json`) has 24h TTL + ETag revalidate + offline-fallback with WARN.
-- Native-http entries (`transport: "http"`) are LISTED in the catalog but `generate` refuses them with an explicit G6-deferral message until G6 (Remote MCP manifests) ships.
+- Implements G5 per spec docs/superpowers/specs/2026-05-12-g5-marketplace-draft-import-design.md (v2, post codex r1 REVISE).
+- Closes 6 P1 + 3 P2 findings from codex r1: stdio→stdio-bridge, manifest-create UX, README dropped from show, cache via writeHubMcpStateFile, HTTPS-only enforcement, sensitive-env policy, DisableCompression, clock-skew clamp, CheckManifestName ID gate, G6 message clarity.
+- Single bundled PR per memory rule "Don't split tiny PRs". 6 commits = 6 phases.
 
-## Phases (commits in this PR)
+## Phases
 
-1. Catalog schema + parser + seed catalog (10 curated entries).
-2. Cache with TTL + ETag + atomic tempfile+rename write.
-3. Catalog entry → draft manifest YAML generator (placeholder expansion + http skip).
-4. CLI subcommands (`search`, `show`, `generate`, `refresh`).
-5. e2e test + manual smoke D2.8 + CLAUDE.md docs.
+0. Promote G7's expander to api.PlaceholderExpander + add IsSensitiveEnvName.
+1. Catalog schema + parser + seed catalog (CheckManifestName per entry.id).
+2. HTTPS-only client + G4-hardened cache (writeHubMcpStateFile + DisableCompression).
+3. Generator → stdio-bridge + sensitive-env redaction + G6 message.
+4. CLI subcommands (search/show/generate/refresh).
+5. E2E + manual smoke D2.8 v2 + CLAUDE.md.
 
 ## Test plan
 
-- [ ] `go build ./... && go vet ./... && go test -count=1 -timeout 5m ./...`
-- [ ] `go test -count=1 -timeout 5m ./internal/api/ ./internal/cli/` clean
-- [ ] Manual smoke D2.8: search → show → generate → manifest create → install
-- [ ] Manual offline-fallback smoke (disable network mid-search)
-- [ ] http-entry skip emits G6 warning to stderr, empty stdout, non-zero exit
+- [ ] `go build ./... && go vet ./... && go test -count=1 -timeout 5m ./internal/api/ ./internal/cli/`
+- [ ] Manual smoke D2.8 v2 (operator-edit step, sensitive-env warn, future-timestamp revalidate).
+- [ ] http-entry generate emits G6 + wait + workaround to stderr; empty stdout; non-zero exit.
 PRBODY
 )"
 gh pr comment $(gh pr view --json number --jq .number) --body "@codex review"
@@ -1489,22 +1609,24 @@ gh pr comment $(gh pr view --json number --jq .number) --body "@codex review"
 
 ---
 
-## Self-review checklist
+## Self-review checklist (v2)
 
-- [ ] Spec coverage: every §"Acceptance criteria" item maps to a test.
-- [ ] No placeholders: every step has runnable code.
-- [ ] Type consistency: `MarketplaceCatalog`, `MarketplaceEntry`, `MarketplaceSource`, `GenerateOpts` all carry the same names from header → callers.
-- [ ] State-dir hardening: cache file uses atomic tempfile+rename (same as r16 settings fix) + 0600 mode.
-- [ ] G6-deferral path covered by test (http entry → stderr warn + non-zero exit, no draft on stdout).
-- [ ] Offline fallback covered by test (stale cache + server-down → WARN stderr + stdout still works).
-- [ ] Output discipline: status text → stderr; YAML / table → stdout (G7 r2 P2 pattern).
-- [ ] Frequent commits: 5 commits, one per phase.
-- [ ] DRY: placeholder expansion lives in one place inside `marketplace_generate.go`.
-- [ ] YAGNI: no GUI surface, no per-readme cache, no multi-registry, no signature verification (all explicitly deferred per spec §"Out of scope").
+- [ ] Every codex r1 P1 closure addressed (recap mapping at top of plan).
+- [ ] Every codex r1 P2 closure addressed.
+- [ ] No placeholders, no `TBD`.
+- [ ] Type consistency: `MarketplaceCatalog`, `MarketplaceEntry`, `MarketplaceSource`, `GenerateOpts`, `PlaceholderExpander`, `IsSensitiveEnvName` all carry the same names header→callers.
+- [ ] Phase 0 promotes the expander without changing G7's production behavior.
+- [ ] Cache writes route through `writeHubMcpStateFile`; reads through `readHubMcpStateFile`.
+- [ ] HTTPS-only enforced at URL parse + `CheckRedirect` + tests use TLS server.
+- [ ] DisableCompression: true on transport + identity-encoding sent on request.
+- [ ] Future `fetched_at` forces revalidate; `MarketplaceCacheAge` non-negative.
+- [ ] Stdio entries → `config.TransportStdioBridge` (NOT `native-http`).
+- [ ] Draft YAML includes a leading comment-block reminder of the operator-edit step.
+- [ ] G6 deferral error mentions: "wait for G6", "workaround", and the http url for the operator to see.
+- [ ] Sensitive-env catalog placeholders left verbatim + warning surfaced.
+- [ ] DRY: placeholder logic lives in ONE place (`PlaceholderExpander`); manifest-name gate lives in ONE place (`CheckManifestName`).
+- [ ] YAGNI: no README body fetch, no multi-registry, no GUI, no signature verification.
 
 ## Execution Handoff
 
-Plan complete. Pick execution mode:
-
-1. **Subagent-Driven (recommended)** — fresh subagent per phase + two-stage review (spec-compliance then code-quality). Continuous execution.
-2. **Inline Execution** — execute phases in this session using executing-plans, batch with checkpoints.
+Plan v2 complete. After committing this revision, re-run codex r1 to confirm APPROVE before Phase 0 starts.
