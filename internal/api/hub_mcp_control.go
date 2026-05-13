@@ -204,10 +204,20 @@ func (h *InternalReloadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		http.Error(w, "forbidden loopback request", http.StatusForbidden)
 		return
 	}
-	if r.Method != http.MethodPost {
+	// codex bot phase5 r9 P2 closure on PR #160: HEAD is the
+	// non-mutating liveness-probe variant. Goes through the same
+	// loopback + auth gate, returns 204 on auth pass without
+	// touching reloadMutex / lastReload / ReloadHubTokens. POST
+	// keeps its existing mutate-and-204 semantics. The probe
+	// caller (hubProbeAlive in internal/cli/hubmcp.go) uses HEAD
+	// so that running `mcphub hub-mcp regenerate-instance-id` —
+	// which probes liveness BEFORE refusing on a live hub — does
+	// not consume the 5s reload cooldown that a subsequent
+	// `regenerate-token` immediately needs.
+	if r.Method != http.MethodPost && r.Method != http.MethodHead {
 		// RFC 9110 §15.5.6 — Allow header on 405 enumerates supported
 		// methods. Body empty.
-		w.Header().Set("Allow", "POST")
+		w.Header().Set("Allow", "HEAD, POST")
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		_ = LogHubMcpEvent("warn", "internal-reload-rejected", map[string]any{
 			"reason": "method",
@@ -235,7 +245,19 @@ func (h *InternalReloadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Auth passed. Serialize the cooldown check + reload under
+	// HEAD = non-mutating liveness probe. Auth passed → return 204
+	// immediately. No reloadMutex acquisition, no cooldown bump, no
+	// ReloadHubTokens call. The successful HEAD response is the
+	// hub-specific signal the probe needs (a stranger HTTP service
+	// holding the port would either 405 the unknown route or 401
+	// against an arbitrary control token).
+	if r.Method == http.MethodHead {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// POST → proceed with cooldown check + reload (existing path).
+	// Serialize the cooldown check + reload under
 	// reloadMutex so two concurrent valid requests cannot both swap
 	// the token table (spec §"Control endpoint contract" — codex r5
 	// MED: minimum 5s between consecutive successful reloads enforced

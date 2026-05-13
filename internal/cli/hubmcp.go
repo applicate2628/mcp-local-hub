@@ -236,21 +236,29 @@ client config snapshot). For routine per-client token compromise, use
 }
 
 // hubProbeAlive returns true if the hub at <port> answers a
-// reload-tokens probe in the hub-specific shape: POST to
+// reload-tokens probe in the hub-specific shape: HEAD to
 // /internal/reload-tokens with a VALID control token must yield
-// either 204 (reload succeeded) or 429 (cooldown — only a live
-// hub-mcp control handler emits that status with Retry-After:5).
-// Any other status, connect-refused, or unreadable control token
-// is treated as "hub not running" so a stale endpoint.Port reused
-// by an unrelated local HTTP service does NOT false-positive.
+// 204 — only the live hub-mcp control handler emits that status
+// for HEAD after the loopback + auth gates pass. Any other status,
+// connect-refused, or unreadable control token is treated as "hub
+// not running" so a stale endpoint.Port reused by an unrelated
+// local HTTP service does NOT false-positive.
 //
-// codex bot phase5 r2 P2 closure on PR #160: the pre-r2 probe
-// accepted 401/403/405/204 from ANY HTTP responder — fail-loud
-// branch would fire on a port that was inherited by another local
-// service. Now the probe sends the actual control token and
-// requires a hub-specific success-or-cooldown status. The reload
-// itself is idempotent (the live hub re-reads tokens.json from
-// disk), so the side effect on a true-positive is acceptable.
+// codex bot phase5 r2 P2 closure on PR #160: pre-r2 probe accepted
+// 401/403/405/204 from ANY HTTP responder — fail-loud branch would
+// fire on a port inherited by another local service. r2 fix sent
+// POST + control token + accepted 204|429.
+//
+// codex bot phase5 r9 P2 closure on PR #160: the r2 POST probe
+// performs a real token reload as a side effect and bumps the
+// 5s cooldown timer. That breaks chained rotation flows — e.g.,
+// `mcphub hub-mcp regenerate-instance-id` (which probes liveness
+// to refuse on a live hub) followed by `mcphub hub-mcp
+// regenerate-token` (which POSTs /internal/reload-tokens to push
+// the new table) would get 429 on the second call because the
+// probe consumed the cooldown window. Switch to HEAD — handler
+// short-circuits to 204 after auth without touching reloadMutex
+// or lastReload. POST stays the mutating live-apply path.
 //
 // If the control token file is missing (e.g., hub crashed mid-
 // startup before writing it), we cannot prove the hub is alive →
@@ -262,7 +270,7 @@ func hubProbeAlive(cmd *cobra.Command, port int) bool {
 		return false // no control token = no way to prove hub-specific
 	}
 	url := fmt.Sprintf("http://127.0.0.1:%d/internal/reload-tokens", port)
-	req, err := http.NewRequestWithContext(cmd.Context(), http.MethodPost, url, nil)
+	req, err := http.NewRequestWithContext(cmd.Context(), http.MethodHead, url, nil)
 	if err != nil {
 		return false
 	}
@@ -273,13 +281,10 @@ func hubProbeAlive(cmd *cobra.Command, port int) bool {
 		return false
 	}
 	defer resp.Body.Close()
-	// 204 — reload succeeded; this IS the hub. 429 — cooldown (5s
-	// rate-limit per Phase 4 §"Control endpoint contract"). Both
-	// require an in-process state that only the hub-mcp handler
-	// owns. Any other status (200/401/403/404/500 from a stranger
-	// service) is rejected as inconclusive.
-	return resp.StatusCode == http.StatusNoContent ||
-		resp.StatusCode == http.StatusTooManyRequests
+	// 204 on HEAD after auth → confirmed hub. A stranger service
+	// holding the port would either 405 the unknown route or 401
+	// against an arbitrary 64-hex token (no in-memory match).
+	return resp.StatusCode == http.StatusNoContent
 }
 
 // postReloadTokens fires the live-reload POST against the running hub.
