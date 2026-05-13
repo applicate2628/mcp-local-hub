@@ -15,11 +15,13 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/clients"
 )
 
 // newHubMcpCmd returns the cobra parent command tree. Wired into
@@ -120,6 +122,26 @@ token).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if client == "" {
 				return fmt.Errorf("--client is required")
+			}
+			// codex bot phase5 r12 P1 closure on PR #160: validate
+			// --client against the supported-adapter allowlist BEFORE
+			// rotating. RotateHubToken creates a fresh entry when the
+			// key is absent (used by EnsureHubTokens), so a typo like
+			// `--client claud-code` would create a new token entry for
+			// the typo and exit "successfully" while the actual
+			// compromised client's token stays untouched. Operator
+			// reads "Rotated token for client claud-code" as success
+			// even though no real rotation happened — defeats the
+			// security intent of rotation.
+			supported := false
+			for _, name := range clients.SupportedClientNames() {
+				if name == client {
+					supported = true
+					break
+				}
+			}
+			if !supported {
+				return fmt.Errorf("unknown client %q (expected %s)", client, strings.Join(clients.SupportedClientNames(), " | "))
 			}
 			if !yes && !inputIsTerminal(cmd.InOrStdin()) {
 				fmt.Fprintln(cmd.ErrOrStderr(), "non-TTY input requires --yes to confirm rotation")
