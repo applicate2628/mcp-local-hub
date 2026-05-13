@@ -11,7 +11,6 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/config"
-	"mcp-local-hub/internal/scheduler"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -271,16 +270,50 @@ func runReconcileHubMode(cmd *cobra.Command, dryRun bool) error {
 	if tErr != nil {
 		return fmt.Errorf("list managed tasks: %w", tErr)
 	}
-	installedServers := perServerInstalledSet(tasks)
+	// codex bot phase5 r16 P1 closure on PR #160: do NOT derive the
+	// installed-server set from `ParseManagedTaskName(task.Name)`.
+	// ParseManagedTaskName splits on the LAST hyphen, so a daemon
+	// name that contains '-' (e.g. `mcp-language-server` with
+	// daemon `vscode-css`) parses as server=`mcp-language-server-vscode`
+	// + daemon=`css` — the wrong attribution drops the real server
+	// from the installed set, and reconcile skips that manifest
+	// entirely.
+	//
+	// Build a normalized scheduler-task set, then walk every
+	// manifest and check whether ANY of its expected task names
+	// (`mcp-local-hub-<server>-<daemon>` for each daemon) is
+	// registered. This is manifest-aware so hyphenated daemon
+	// names work end-to-end.
+	//
+	// Pre-filter the task set to exclude known non-per-server
+	// task families up-front. The most important one is
+	// `mcp-local-hub-workspace-weekly-refresh`
+	// (api.WeeklyRefreshTaskName): a manifest named "workspace"
+	// with any daemon would falsely match against the per-server
+	// `<server>-weekly-refresh` lookup in
+	// manifestHasScheduledDaemon. Excluding it here keeps the
+	// helper purely structural (byte-exact map lookup) without
+	// requiring it to know about hub-wide task names.
+	scheduledTasks := map[string]bool{}
+	for _, t := range tasks {
+		normalized := strings.TrimPrefix(t.Name, "\\")
+		if normalized == strings.TrimPrefix(api.WatchdogTaskName, "\\") {
+			continue
+		}
+		if normalized == api.WeeklyRefreshTaskName {
+			continue
+		}
+		if api.IsLazyProxyTaskName(normalized) {
+			continue
+		}
+		scheduledTasks[normalized] = true
+	}
 	names, mlErr := a.ManifestList()
 	if mlErr != nil {
 		return fmt.Errorf("list manifests: %w", mlErr)
 	}
 	var manifests []config.ServerManifest
 	for _, name := range names {
-		if !installedServers[name] {
-			continue
-		}
 		yaml, gErr := a.ManifestGet(name)
 		if gErr != nil {
 			if errors.Is(gErr, os.ErrNotExist) {
@@ -291,6 +324,9 @@ func runReconcileHubMode(cmd *cobra.Command, dryRun bool) error {
 		m, pErr := config.ParseManifest(strings.NewReader(yaml))
 		if pErr != nil {
 			return fmt.Errorf("parse manifest %q: %w", name, pErr)
+		}
+		if !manifestHasScheduledDaemon(m, scheduledTasks) {
+			continue // not installed on this machine
 		}
 		manifests = append(manifests, *m)
 	}
@@ -340,51 +376,33 @@ func runReconcileHubMode(cmd *cobra.Command, dryRun bool) error {
 	return nil
 }
 
-// perServerInstalledSet returns the set of server names whose
-// per-server daemons appear in the scheduler row list. codex bot
-// phase5 r10 P2 closure on PR #160: `ListManagedTasks` returns
-// every `mcp-local-hub-*` task, including non-per-server families
-// that the reconcile path must NOT treat as "this server is
-// installed":
+// manifestHasScheduledDaemon returns true iff at least one daemon
+// declared in the manifest has a corresponding scheduler task in the
+// supplied set. The expected task-name shape for a daemon is
+// `mcp-local-hub-<server>-<daemon>` and (for per-server weekly
+// refresh) `mcp-local-hub-<server>-weekly-refresh`. codex bot phase5
+// r16 P1 closure on PR #160: use manifest-aware membership instead
+// of ParseManagedTaskName, which splits on the last hyphen and
+// mis-attributes daemons whose names contain '-' (e.g. `vscode-css`).
 //
-//   - `\mcp-local-hub-watchdog` — singleton watchdog task installed
-//     by `mcphub watchdog install` (and by `mcphub setup`).
-//   - `mcp-local-hub-weekly-refresh` — hub-wide weekly refresh job
-//     that restarts every daemon; parseTaskName returns
-//     ("", "weekly-refresh").
-//   - `mcp-local-hub-workspace-weekly-refresh`
-//     (api.WeeklyRefreshTaskName) — hub-wide workspace-scoped
-//     weekly refresh; parseTaskName returns
-//     ("workspace", "weekly-refresh") which is the dangerous
-//     case the bot flagged (could pull a "workspace" manifest
-//     into reconciliation).
-//   - `mcp-local-hub-lsp-<wsKey>-<language>`
-//     (api.IsLazyProxyTaskName) — workspace-scoped LSP lazy-proxy
-//     task; not a per-server daemon.
-//
-// Filter using the same predicates the scheduler-upgrade flow uses
-// (internal/api/scheduler_mgmt.go) so the two surfaces stay in sync
-// when a new non-server family is added in the future.
-func perServerInstalledSet(tasks []scheduler.TaskStatus) map[string]bool {
-	out := map[string]bool{}
-	for _, t := range tasks {
-		normalized := strings.TrimPrefix(t.Name, "\\")
-		if normalized == strings.TrimPrefix(api.WatchdogTaskName, "\\") {
-			continue
+// `scheduledTasks` keys are the normalized form (leading `\` already
+// trimmed by the caller in runReconcileHubMode). The check is byte-
+// exact, no parsing, so hyphenated server AND hyphenated daemon
+// names compose cleanly.
+func manifestHasScheduledDaemon(m *config.ServerManifest, scheduledTasks map[string]bool) bool {
+	const prefix = "mcp-local-hub-"
+	for _, d := range m.Daemons {
+		if scheduledTasks[prefix+m.Name+"-"+d.Name] {
+			return true
 		}
-		if normalized == api.WeeklyRefreshTaskName {
-			continue
+		// Per-server weekly-refresh task is also a valid signal
+		// of installation. The CLI install path creates one
+		// `mcp-local-hub-<server>-weekly-refresh` per server.
+		if scheduledTasks[prefix+m.Name+"-weekly-refresh"] {
+			return true
 		}
-		if api.IsLazyProxyTaskName(normalized) {
-			continue
-		}
-		srv, dmn := api.ParseManagedTaskName(t.Name)
-		if srv == "" || dmn == "" {
-			continue // hub-wide weekly-refresh, malformed, or non-daemon shape
-		}
-		out[srv] = true
 	}
-	return out
+	return false
 }
 
 // readHubEndpointGateForReconcile returns the persisted gate state

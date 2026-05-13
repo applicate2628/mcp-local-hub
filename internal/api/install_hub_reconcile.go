@@ -194,6 +194,19 @@ func BuildHubReconcilePlan(
 		// caller's responsibility; we read it as-is) + the
 		// clientNames sort above.
 
+		// codex bot phase5 r16 P2 closure on PR #160: skip the
+		// entire client in BOTH gate-ON and gate-OFF branches when
+		// it's in hubReconcileSkipClients. The applier
+		// (ApplyHubReconcileInOrder) already drops these clients
+		// into HubReconcileReport.Skipped, so the gate-ON token
+		// check below would abort the entire plan over a missing
+		// token entry for a client that would never be applied
+		// anyway. Filter here so unsupported adapters cannot
+		// block global reconciliation.
+		if hubReconcileSkipClients[client] {
+			continue
+		}
+
 		path, err := clients.ConfigPathForName(client)
 		if err != nil {
 			// Unknown client id — skip rather than fail the whole
