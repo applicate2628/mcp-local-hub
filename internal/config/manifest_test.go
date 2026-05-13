@@ -389,6 +389,59 @@ func TestValidateRemoteHTTP_RejectsConflictingFields(t *testing.T) {
 	}
 }
 
+// TestParseManifest_RejectsURLKeyOnNonRemoteHTTP pins codex bot r5
+// P2 closure (PR #169): mentioning `url:` (with any value — null,
+// empty string, or absent value) on a stdio-bridge/native-http
+// manifest must be rejected at PARSE time. After decode-into-struct,
+// `url: ""`/`url: null`/bare `url:` are indistinguishable from
+// absent; ParseManifest does a second pass into map[string]any to
+// detect key presence.
+func TestParseManifest_RejectsURLKeyOnNonRemoteHTTP(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+	}{
+		{"url: empty string", "name: x\nkind: global\ntransport: stdio-bridge\ncommand: echo\nurl: \"\"\n"},
+		{"url: null", "name: x\nkind: global\ntransport: stdio-bridge\ncommand: echo\nurl: null\n"},
+		{"url: bare key", "name: x\nkind: global\ntransport: stdio-bridge\ncommand: echo\nurl:\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseManifest(strings.NewReader(tc.yaml))
+			if err == nil {
+				t.Fatal("expected url-key rejection at parse time; got nil")
+			}
+			if !strings.Contains(err.Error(), "url") {
+				t.Errorf("error must mention url for operator forensics; got %v", err)
+			}
+		})
+	}
+}
+
+// TestParseManifest_RejectsHeadersKeyOnNonRemoteHTTP — same as
+// above for headers:.
+func TestParseManifest_RejectsHeadersKeyOnNonRemoteHTTP(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+	}{
+		{"headers: empty map", "name: x\nkind: global\ntransport: stdio-bridge\ncommand: echo\nheaders: {}\n"},
+		{"headers: null", "name: x\nkind: global\ntransport: stdio-bridge\ncommand: echo\nheaders: null\n"},
+		{"headers: bare key", "name: x\nkind: global\ntransport: stdio-bridge\ncommand: echo\nheaders:\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseManifest(strings.NewReader(tc.yaml))
+			if err == nil {
+				t.Fatal("expected headers-key rejection at parse time; got nil")
+			}
+			if !strings.Contains(err.Error(), "headers") {
+				t.Errorf("error must mention headers for operator forensics; got %v", err)
+			}
+		})
+	}
+}
+
 // TestValidate_RejectsExplicitEmptyHeadersOnNonRemoteHTTP pins
 // codex bot r4 P2 closure (PR #169): YAML `headers: {}` decodes
 // as a non-nil empty map; the pre-fix `len(Headers) != 0` check

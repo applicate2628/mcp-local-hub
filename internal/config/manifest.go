@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -108,12 +109,49 @@ type ClientBinding struct {
 // in BaseArgs and Env values are expanded against the host environment
 // at parse time (via os.ExpandEnv). This keeps shipped manifests portable
 // — the user's home path doesn't need to be hard-coded in the YAML.
+//
+// codex bot r5 P2 closure (PR #169): we cannot distinguish "key
+// absent" from "key explicit-empty/null" after decoding into a Go
+// struct, but we CAN distinguish them by also decoding into a
+// `map[string]any` and checking key presence. ParseManifest enforces
+// the transport-scoped field gates (url/headers are remote-http
+// only) BEFORE returning so an explicit `url:` or `headers: null`
+// on a non-remote-http transport gets rejected even though Go's
+// decoded value is the zero form.
 func ParseManifest(r io.Reader) (*ServerManifest, error) {
+	raw, readErr := io.ReadAll(r)
+	if readErr != nil {
+		return nil, fmt.Errorf("read manifest: %w", readErr)
+	}
 	var m ServerManifest
-	dec := yaml.NewDecoder(r)
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
 	dec.KnownFields(true)
 	if err := dec.Decode(&m); err != nil {
 		return nil, fmt.Errorf("yaml decode: %w", err)
+	}
+	// Second pass to detect key presence (yaml.v3 collapses
+	// `headers:` / `headers: null` / `headers: {}` into the same
+	// Go value when decoded into a struct field).
+	var keyed map[string]any
+	if err := yaml.Unmarshal(raw, &keyed); err != nil {
+		return nil, fmt.Errorf("yaml decode (keyed pass): %w", err)
+	}
+	_, urlMentioned := keyed["url"]
+	_, headersMentioned := keyed["headers"]
+	// Reject remote-http-only keys mentioned under non-remote
+	// transports. Done HERE (parse time) rather than in Validate()
+	// because Validate's input is a Go struct that has already
+	// lost the key-presence info. The transport-scoped field-gate
+	// errors from Validate() still cover programmatic callers that
+	// construct a ServerManifest directly (with non-zero URL or
+	// non-nil Headers); this guard adds the YAML-level signal.
+	if m.Transport != TransportRemoteHTTP {
+		if urlMentioned {
+			return nil, fmt.Errorf("manifest %s: url is only valid with transport=remote-http (got transport=%q; remove the url: key)", m.Name, m.Transport)
+		}
+		if headersMentioned {
+			return nil, fmt.Errorf("manifest %s: headers is only valid with transport=remote-http (got transport=%q; remove the headers: key)", m.Name, m.Transport)
+		}
 	}
 	var missing []string
 	for i, a := range m.BaseArgs {
