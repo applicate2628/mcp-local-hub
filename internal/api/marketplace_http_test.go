@@ -97,6 +97,39 @@ func TestMarketplaceHTTPClient_RejectsCredentialHeaders(t *testing.T) {
 	}
 }
 
+// TestMarketplaceHTTPClient_RejectsEmbeddedCredentials pins codex
+// r6 P1 closure (PR #163): a registry URL like
+// `https://user:pass@host/catalog.json` must be rejected at the lib
+// layer. Go's net/http auto-emits an Authorization header from
+// url.URL.User on the outbound request, which would bypass the
+// forbiddenMarketplaceHeaders denylist exercised by
+// TestMarketplaceHTTPClient_RejectsCredentialHeaders.
+func TestMarketplaceHTTPClient_RejectsEmbeddedCredentials(t *testing.T) {
+	// Server must never receive the request — if the rejection
+	// regressed, the test fails loudly via the seenAuth check.
+	var seenAuth string
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenAuth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"schema_version":"1","entries":[]}`))
+	}))
+	defer srv.Close()
+	// Splice the userinfo into the httptest URL (https://<host>:<port>).
+	// httptest URLs are always scheme://host[:port]/path, so the
+	// "https://user:pass@<rest>" rewrite is safe.
+	rewritten := strings.Replace(srv.URL, "https://", "https://attacker:hunter2@", 1)
+	client := injectTLSTestClient(srv)
+	_, err := MarketplaceFetchWithClient(context.Background(), client, rewritten, "", nil)
+	if err == nil {
+		t.Fatalf("expected rejection of url with embedded credentials; got nil (url=%q)", rewritten)
+	}
+	if !strings.Contains(err.Error(), "must not embed credentials") {
+		t.Errorf("error missing 'must not embed credentials' text: %v", err)
+	}
+	if seenAuth != "" {
+		t.Errorf("server received Authorization header despite rejection: %q (rejection bypassed)", seenAuth)
+	}
+}
+
 // injectTLSTestClient builds an http.Client that trusts the
 // httptest TLS server's certificate AND inherits the marketplace
 // transport policy (DisableCompression + downgrade-redirect guard).

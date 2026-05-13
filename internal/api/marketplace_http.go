@@ -123,6 +123,17 @@ func MarketplaceFetchWithClient(ctx context.Context, client *http.Client, rawURL
 	if u.Scheme != "https" {
 		return nil, fmt.Errorf("marketplace url must be https:// (got scheme %q)", u.Scheme)
 	}
+	// codex r6 P1 closure (PR #163): reject URLs that embed
+	// credentials (https://user:pass@host/...). Go's net/http
+	// auto-emits a Basic Authorization header from url.URL.User on
+	// the outbound request, which would bypass the
+	// forbiddenMarketplaceHeaders denylist below. The marketplace
+	// threat model is an unauthenticated GET against a public
+	// registry; allowing URL-embedded credentials would silently
+	// leak them to whatever host the operator passed.
+	if u.User != nil {
+		return nil, fmt.Errorf("marketplace url must not embed credentials (got userinfo before host); registry fetches are unauthenticated")
+	}
 	// Reject credential-bearing headers BEFORE building the request
 	// (defense-in-depth: if a future caller passes Authorization,
 	// fail loud, do not silently strip — the caller's intent is

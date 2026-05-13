@@ -143,6 +143,63 @@ func TestMarketplaceSearch_SanitizesHostileCatalogFields(t *testing.T) {
 	}
 }
 
+// TestMarketplaceShow_RendersEnvSection pins codex r6 P2 closure
+// (PR #163): `show` must surface entry.Env so operators inspect
+// required/suspicious vars before deciding to trust the entry.
+// Keys must be deterministically ordered.
+func TestMarketplaceShow_RendersEnvSection(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"schema_version":"1","entries":[
+			{"id":"envful","name":"WithEnv","transport":"stdio","command":"npx",
+			 "env":{"ZULU":"third","ALPHA":"first","MIKE":"second"}}
+		]}`))
+	}))
+	defer srv.Close()
+	t.Cleanup(api.InstallMarketplaceTestClientForCLI(srv))
+	c := newMarketplaceCmd()
+	var stdout, stderr bytes.Buffer
+	c.SetOut(&stdout)
+	c.SetErr(&stderr)
+	c.SetArgs([]string{"show", "envful", "--registry", srv.URL})
+	if err := c.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("show: %v\nstderr: %s", err, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Env:") {
+		t.Errorf("show stdout missing Env: section\n---\n%s", out)
+	}
+	for _, want := range []string{"ALPHA=first", "MIKE=second", "ZULU=third"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("show stdout missing %q\n---\n%s", want, out)
+		}
+	}
+	a := strings.Index(out, "ALPHA")
+	m := strings.Index(out, "MIKE")
+	z := strings.Index(out, "ZULU")
+	if !(a < m && m < z) {
+		t.Errorf("env keys not sorted alphabetically: ALPHA@%d MIKE@%d ZULU@%d\n---\n%s", a, m, z, out)
+	}
+}
+
+// TestMarketplaceCmd_RejectsEmbeddedCredentialURL pins the CLI-level
+// mirror of the lib-level URL.User rejection (codex r6 P1 closure).
+// CLI validation runs before the lib path so the operator gets a
+// tidier early error and the URL is never logged downstream.
+func TestMarketplaceCmd_RejectsEmbeddedCredentialURL(t *testing.T) {
+	c := newMarketplaceCmd()
+	var stdout, stderr bytes.Buffer
+	c.SetOut(&stdout)
+	c.SetErr(&stderr)
+	c.SetArgs([]string{"search", "anything", "--registry", "https://user:pass@example.com/catalog.json"})
+	err := c.ExecuteContext(context.Background())
+	if err == nil {
+		t.Fatal("expected rejection for URL with embedded credentials; got nil")
+	}
+	if !strings.Contains(err.Error(), "must not embed credentials") {
+		t.Errorf("error missing 'must not embed credentials' text: %v", err)
+	}
+}
+
 func TestMarketplaceGenerate_HttpEntrySkipsToStderr(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"schema_version":"1","entries":[

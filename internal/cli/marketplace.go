@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -167,6 +168,28 @@ func newMarketplaceShowCmd() *cobra.Command {
 						sanCats[i] = sanitizeCatalogField(c)
 					}
 					fmt.Fprintf(out, "Categories: %s\n", strings.Join(sanCats, ", "))
+				}
+				// codex r6 P2 closure (PR #163): surface entry.Env so
+				// operators can inspect required / suspicious env vars
+				// (especially ${env:*} placeholders that `generate`
+				// will leave verbatim under the sensitive-env policy)
+				// at metadata-inspection time rather than discovering
+				// them only when running `generate`. Key ordering is
+				// deterministic so the output is reproducible across
+				// invocations and parseable by scripts.
+				if len(e.Env) > 0 {
+					envKeys := make([]string, 0, len(e.Env))
+					for k := range e.Env {
+						envKeys = append(envKeys, k)
+					}
+					sort.Strings(envKeys)
+					fmt.Fprintln(out, "Env:")
+					for _, k := range envKeys {
+						fmt.Fprintf(out, "  %s=%s\n",
+							sanitizeCatalogField(k),
+							sanitizeCatalogField(e.Env[k]),
+						)
+					}
 				}
 				// codex r1 P1 closure: print readme_url STRING ONLY.
 				// We do NOT fetch the README body — the operator can
@@ -354,6 +377,11 @@ func warnIfStale(cmd *cobra.Command, src api.MarketplaceSource) {
 // url must be https:// (got scheme \"...\")" — informative but the
 // operator gets it before the lib path runs, which is friendlier
 // than waiting for an HTTP layer to refuse).
+//
+// codex r6 P1 closure (PR #163): mirrors the URL.User rejection
+// done at the lib level. Even though the lib rejects, doing it
+// here too gives the operator the tidier early error and prevents
+// a credential-bearing URL from being logged anywhere downstream.
 func validateRegistryURL(raw string) error {
 	if raw == "" {
 		return fmt.Errorf("--registry must not be empty")
@@ -364,6 +392,9 @@ func validateRegistryURL(raw string) error {
 	}
 	if u.Scheme != "https" {
 		return fmt.Errorf("--registry must use https:// (got scheme %q)", u.Scheme)
+	}
+	if u.User != nil {
+		return fmt.Errorf("--registry must not embed credentials (https://user:pass@host/...); marketplace fetches are unauthenticated GETs")
 	}
 	return nil
 }
