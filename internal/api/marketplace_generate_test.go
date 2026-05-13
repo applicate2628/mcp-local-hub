@@ -51,23 +51,110 @@ func TestGenerateDraftManifest_StdioEntryMapsToStdioBridge(t *testing.T) {
 	}
 }
 
-// TestGenerateDraftManifest_HttpEntryRefusedWithG6Workaround pins
-// codex r1 P2 closure: G6 deferral message names today's workaround.
-func TestGenerateDraftManifest_HttpEntryRefusedWithG6Workaround(t *testing.T) {
+// TestGenerateDraftManifest_HttpEntryEmitsRemoteHTTPDraft pins G6
+// sub-PR 4: http catalog entries now project onto a
+// transport=remote-http manifest with the entry URL preserved. The
+// draft must NOT include daemons: (schema rejects daemons on
+// remote-http) and SHOULD include client_bindings prefilled with the
+// adapters that support remote-http per the compatibility matrix.
+func TestGenerateDraftManifest_HttpEntryEmitsRemoteHTTPDraft(t *testing.T) {
 	e := &MarketplaceEntry{
 		ID:        "ctx7",
 		Name:      "Context7",
 		Transport: "http",
 		URL:       "https://mcp.context7.com/mcp",
 	}
-	_, _, err := GenerateDraftManifest(e, GenerateOpts{})
-	if err == nil {
-		t.Fatal("expected G6-deferral error for http entry; got nil")
+	yaml, warnings, err := GenerateDraftManifest(e, GenerateOpts{})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
 	}
-	for _, want := range []string{"G6", "wait", "workaround"} {
-		if !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(want)) {
-			t.Errorf("error must mention %q for operator clarity; got %q", want, err.Error())
+	if len(warnings) > 0 {
+		t.Errorf("no warnings expected for clean http entry; got %v", warnings)
+	}
+	for _, want := range []string{
+		"transport: remote-http",
+		"url: https://mcp.context7.com/mcp",
+		"name: ctx7",
+	} {
+		if !strings.Contains(yaml, want) {
+			t.Errorf("yaml missing %q\n---\n%s", want, yaml)
 		}
+	}
+	if strings.Contains(yaml, "daemons:") {
+		t.Errorf("yaml must not include daemons: for remote-http\n---\n%s", yaml)
+	}
+	if !strings.Contains(yaml, "client_bindings:") {
+		t.Errorf("yaml missing client_bindings:\n---\n%s", yaml)
+	}
+	for _, c := range []string{"claude-code", "codex-cli", "cursor", "gemini-cli", "vscode"} {
+		if !strings.Contains(yaml, "client: "+c) {
+			t.Errorf("yaml missing prefilled binding for %s\n---\n%s", c, yaml)
+		}
+	}
+	// Header reminder so operators see the secret-handling rule.
+	if !strings.Contains(yaml, "${secret:KEY}") {
+		t.Errorf("yaml header missing secret-placeholder reminder\n---\n%s", yaml)
+	}
+	// Smoke-check guidance in header.
+	if !strings.Contains(yaml, "manifest test-remote") {
+		t.Errorf("yaml header missing test-remote smoke-check pointer\n---\n%s", yaml)
+	}
+}
+
+func TestGenerateDraftManifest_HttpEntryEmptyURLRejected(t *testing.T) {
+	e := &MarketplaceEntry{
+		ID:        "bad",
+		Transport: "http",
+	}
+	_, _, err := GenerateDraftManifest(e, GenerateOpts{})
+	if err == nil || !strings.Contains(err.Error(), "url is empty") {
+		t.Errorf("expected url-empty rejection, got %v", err)
+	}
+}
+
+// TestGenerateDraftManifest_HttpEntryControlBytesRejected pins bot
+// r2 P1 closure (PR #172): a hostile registry can embed CR/LF/NUL
+// in catalog url or id. Interpolating that into the YAML header
+// comment would break out of `#` and inject real keys into the
+// draft. Reject the entry instead of producing a tainted file.
+func TestGenerateDraftManifest_HttpEntryControlBytesRejected(t *testing.T) {
+	cases := map[string]*MarketplaceEntry{
+		"url with LF": {
+			ID:        "ctx7",
+			Transport: "http",
+			URL:       "https://example.com/mcp\ntransport: stdio-bridge",
+		},
+		"url with CR": {
+			ID:        "ctx7",
+			Transport: "http",
+			URL:       "https://example.com/mcp\r\nname: pwned",
+		},
+		"url with NUL": {
+			ID:        "ctx7",
+			Transport: "http",
+			URL:       "https://example.com/\x00",
+		},
+		"id with LF": {
+			ID:        "ctx7\ntransport: stdio-bridge",
+			Transport: "http",
+			URL:       "https://example.com/mcp",
+		},
+		"id with ESC": {
+			ID:        "ctx7\x1b[31mred",
+			Transport: "http",
+			URL:       "https://example.com/mcp",
+		},
+	}
+	for name, e := range cases {
+		t.Run(name, func(t *testing.T) {
+			yaml, _, err := GenerateDraftManifest(e, GenerateOpts{})
+			if err == nil {
+				t.Fatalf("expected rejection for %s; got yaml:\n%s", name, yaml)
+			}
+			if !strings.Contains(err.Error(), "control byte") {
+				t.Errorf("error should name control-byte rejection: %v", err)
+			}
+		})
 	}
 }
 
