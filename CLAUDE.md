@@ -620,6 +620,38 @@ supported path. Operators who cannot wait may hand-author a local
 stdio wrapper that proxies to the remote URL; both options are surfaced
 in the CLI error message.
 
+## Hardened client-config writes + corp-policy escape hatch
+
+Every adapter write goes through `api.SecureWriteClientConfig`
+(`internal/api/secure_write_client_config.go`), which enforces a
+single-user DACL/mode gate on the destination's immediate parent
+directory before the write. On Windows the gate rejects non-
+allowlisted DACL ACEs (Domain Users, Authenticated Users); on
+POSIX it rejects any group/world permission bits or non-owner uid.
+
+Operators on managed corporate machines (e.g. Domain Users
+inheriting read access on `%USERPROFILE%`) can hit the gate during
+ordinary install/migrate. The wrapper at
+`internal/api/client_write_init.go::secureWriteWithOperatorOpt`
+surfaces the rejection with an explicit hint pointing at the
+opt-in env var:
+
+```text
+secure write: parent directory not single-user safe (path C:\Users\...): <details>;
+this path can be unblocked by setting MCPHUB_ALLOW_UNHARDENED_CLIENT_WRITE=1
+(loses parent-dir DACL/mode protection — only set this if the host is
+under your sole control and corp-policy DACLs cannot be tightened)
+```
+
+Setting `MCPHUB_ALLOW_UNHARDENED_CLIENT_WRITE=1` falls back to a
+plain `os.WriteFile` with mode 0600 ONLY for the parent-dir gate
+failure. Every fallback write logs a structured warn event
+(`client-write-unhardened-fallback`) via the hub-mcp event log so
+audit trails record the opt-in. All other secure-write failures
+(open temp, write, rename, post-rename verify, symlink refusal)
+propagate unchanged regardless of the env var — TOCTOU/symlink
+protections stay intact.
+
 ## Stuck-instance recovery
 
 If `mcphub gui` exits with the structured "Cannot acquire mcphub gui

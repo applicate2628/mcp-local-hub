@@ -33,6 +33,30 @@
 // on error; that would defeat the entire guarantee.
 package api
 
+import "errors"
+
+// ErrSecureWriteParentInsecure is the typed error returned by
+// SecureWriteClientConfig when the destination's IMMEDIATE parent
+// directory cannot pass the single-user hardening gate (Windows:
+// non-allowlist DACL ACEs; POSIX: any group/world permission bits
+// or non-owner uid).
+//
+// Cross-package callers (the clients.WriteConfigFile hook in
+// client_write_init.go) match on this sentinel via errors.Is to
+// decide whether to:
+//   - surface the operator-opt-in hint, or
+//   - fall back to a plain os.WriteFile when the operator has
+//     explicitly enabled the unhardened path via the
+//     MCPHUB_ALLOW_UNHARDENED_CLIENT_WRITE env var.
+//
+// Issue #161 P1 closure: the global SecureWriteClientConfig wiring
+// in client_write_init.go could break ordinary install/migrate on
+// corp-policy Windows machines (Domain Users inheriting read access
+// on %USERPROFILE%) and on POSIX users whose $HOME has any group/
+// world bits. The hardening is the spec'd outcome; the softening
+// is operator-explicit, observable, and always logged.
+var ErrSecureWriteParentInsecure = errors.New("secure write: parent directory not single-user safe")
+
 // SecureWriteClientConfig writes contents to path atomically via a
 // handle-relative pipeline. See the package doc for the sequence and
 // the spec / plan references. Returns the first error from any step.
