@@ -30,26 +30,17 @@ export function SectionGuiServer({ snapshot, onDirtyChange }: SectionGuiServerPr
   // Codex r3 P2.1 + r4 P2.1: badge anchored to PERSISTED port, NOT local draft.
   const showPortBadge = !Number.isNaN(persistedPort) && actualPort !== persistedPort;
 
-  // Phase 5 Task 5.4: pending-restart indicator for the hub-endpoint
-  // toggle. Per codex bot phase5 r2 P3 closure on PR #160, the
-  // restart badge MUST reflect persisted-vs-runtime divergence
-  // (matching the port badge convention), NOT draft-vs-persisted.
-  // The snapshot DTO does not currently expose the live hub gate
-  // state (no actual_hub_endpoint_enabled field), so we cannot
-  // emit a true persisted-vs-runtime badge in this Phase 5 commit.
-  //
-  // Decision: drop the badge for this PR. The Deferred:true
-  // registry flag already surfaces "Restart required" in the field
-  // help text via FieldRenderer, which is the minimum operator
-  // signal. The runtime-state surface will be added in a follow-up
-  // (see follow-up issue #159 / Phase 5 deferrals).
-  //
-  // hubDef lookup retained for the EDITABLE_KEYS render path below;
-  // the badge JSX is intentionally absent.
+  // Issue #161 P2 closure: persisted-vs-runtime hub gate badge.
+  // The snapshot DTO now emits `actual_hub_endpoint_enabled` (added
+  // in internal/gui/settings.go), so we can render the same
+  // restart-required convention as the port badge — when the
+  // persisted value differs from the runtime state.
   const hubDef = snapshot.data.settings.find((s) => s.key === "gui_server.hub_endpoint_enabled") as
     | ConfigSettingDTO
     | undefined;
-  void hubDef;
+  const persistedHubEnabled = hubDef?.value === "true";
+  const actualHubEnabled = snapshot.data.actual_hub_endpoint_enabled === true;
+  const showHubBadge = hubDef !== undefined && persistedHubEnabled !== actualHubEnabled;
 
   return (
     <section data-section="gui_server" class="settings-section">
@@ -73,12 +64,15 @@ export function SectionGuiServer({ snapshot, onDirtyChange }: SectionGuiServerPr
                 ⚠ Restart required — port {persistedPort} will take effect after restart
               </span>
             ) : null}
-            {/* Hub-endpoint restart badge intentionally absent — see
-                hubDef lookup above for the rationale (codex bot
-                phase5 r2 P3 closure on PR #160). Deferred:true in
-                the registry already surfaces "Restart required" via
-                FieldRenderer; runtime-state badge needs a snapshot
-                DTO extension tracked as follow-up. */}
+            {k === "gui_server.hub_endpoint_enabled" && showHubBadge ? (
+              <span
+                class="settings-restart-badge"
+                data-test-id="hub-endpoint-restart-badge"
+                role="status"
+              >
+                ⚠ Restart required — hub endpoint {persistedHubEnabled ? "ON" : "OFF"} will take effect after restart
+              </span>
+            ) : null}
           </div>
         );
       })}

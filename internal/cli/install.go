@@ -187,6 +187,42 @@ func runReconcileHubMode(cmd *cobra.Command, dryRun bool) error {
 		return fmt.Errorf("reconcile: gate state unreadable; refusing to default to OFF (would tear down mcphub-hub entries): %w", gErr)
 	}
 
+	// Issue #161 P2 closure (concurrency lane + endpoint/tokens
+	// TOCTOU): acquire hub-mcp.lock for the WHOLE snapshot-to-apply
+	// transaction. Two effects:
+	//
+	//   1. Concurrent reconciles serialize. One reconcile in gate-ON
+	//      mode applies AddReplace, the next one waits, then applies
+	//      its plan against the now-consistent snapshot. Pre-lock,
+	//      AddReplace + Remove phases could interleave producing
+	//      half-converged client configs that only re-run fixes.
+	//   2. Endpoint / tokens cannot be mutated by a sibling
+	//      regenerate-token / regenerate-instance-id during the
+	//      reconcile transaction. Pre-lock, the snapshot loaded at
+	//      step 2 could be stale by step 5 (apply) — clients would
+	//      get 401s after a "successful" reconcile.
+	//
+	// Bot r1 P2 closure (PR #168): acquire the lock ONLY when
+	// needed. AcquireHubMcpLock calls DaemonStateDir which creates
+	// the state-dir on first run; pre-acquiring on every reconcile
+	// invocation regresses the gate-OFF dry-run "no state side
+	// effects" property that PR #160 r11 P3 carefully protected.
+	//
+	// Lock matrix:
+	//   - gate-ON (any path): needs lock — endpoint/tokens snapshot
+	//     must be consistent with the apply.
+	//   - gate-OFF apply: needs lock — apply writes client configs
+	//     that must serialize against concurrent reconciles.
+	//   - gate-OFF dry-run: NO lock — reads nothing, applies nothing,
+	//     so a state-dir creation here would be a behavior regression.
+	if gateOn || !dryRun {
+		lk, lockErr := api.AcquireHubMcpLock()
+		if lockErr != nil {
+			return fmt.Errorf("reconcile: acquire hub-mcp.lock: %w", lockErr)
+		}
+		defer func() { _ = lk.Unlock() }()
+	}
+
 	// 2. Load endpoint + tokens for plan header inputs (URL +
 	//    Headers in the gate-ON branch). Read tokens from disk via
 	//    ReloadHubTokens so a cold CLI process sees the table.

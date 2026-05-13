@@ -533,6 +533,31 @@ func (s *Server) OnActivateWindow(fn func() error) { s.onActivateWindow = fn }
 // Start has signaled ready.
 func (s *Server) Port() int { return int(s.port.Load()) }
 
+// HubMcpEndpointActive returns true when the hub-mcp listener is
+// CURRENTLY running — published in this process AND its serve
+// goroutine has not exited.
+//
+// Issue #161 P2 closure (persisted-vs-runtime hub gate badge): the
+// settings DTO emits this as `actual_hub_endpoint_enabled` so the
+// frontend can render the same "restart required" badge convention
+// established for `actual_port` (when persisted != runtime).
+//
+// Codex bot r2 P2 closure on PR #168: the prior implementation
+// returned `s.hubMcpComp.Load() != nil` alone, which reported
+// "ever-published" rather than "currently live". A post-startup
+// listener death (accept-loop fatal, etc.) would leave the
+// hub-mcp.log "hub-listener-down" event behind but the badge
+// would stay hidden because hubMcpComp was still non-nil. Now we
+// also consult the bundle's Alive() flag, which the serve
+// goroutine clears on any exit path.
+func (s *Server) HubMcpEndpointActive() bool {
+	comp := s.hubMcpComp.Load()
+	if comp == nil {
+		return false
+	}
+	return comp.Alive()
+}
+
 // Start binds 127.0.0.1:<cfg.Port>, signals `ready` once the listener
 // is accepting, then blocks in ListenAndServe. Returns when ctx is
 // canceled (graceful shutdown, 5s deadline) or the listener errors.
