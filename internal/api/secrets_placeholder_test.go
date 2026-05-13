@@ -99,6 +99,49 @@ func TestExpandSecrets_CRLFRejected(t *testing.T) {
 	}
 }
 
+// TestExpandSecrets_LiteralCRLFRejectedWithoutPlaceholder pins bot
+// r1 P1 closure (PR #169): a hostile manifest can embed literal
+// newlines in headers/URLs WITHOUT any ${secret:KEY} placeholder.
+// The pre-fix no-placeholder fast path returned the string
+// unchanged, allowing CRLF injection.
+func TestExpandSecrets_LiteralCRLFRejectedWithoutPlaceholder(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+	}{
+		{"LF only", "Bearer abc\nX-Evil: 1"},
+		{"CR only", "Bearer abc\rX-Evil: 1"},
+		{"CRLF", "Bearer abc\r\nX-Evil: 1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// No placeholders — exercises the no-placeholder fast path.
+			_, err := ExpandSecrets(tc.raw, fakeSecretLookup(nil))
+			if err == nil {
+				t.Fatalf("expected CRLF rejection on no-placeholder string %q; got nil", tc.raw)
+			}
+			if !strings.Contains(err.Error(), "CR or LF") {
+				t.Errorf("error must mention CR/LF guard for operator forensics; got %v", err)
+			}
+		})
+	}
+}
+
+// TestExpandSecrets_LiteralCRLFAroundPlaceholderRejected pins the
+// same guard when the literal newline is OUTSIDE the placeholder
+// (so secret value is clean but the surrounding template carries
+// the newline). Pre-fix only the expanded value was checked.
+func TestExpandSecrets_LiteralCRLFAroundPlaceholderRejected(t *testing.T) {
+	_, err := ExpandSecrets("Bearer ${secret:CLEAN}\nX-Evil: 1",
+		fakeSecretLookup(map[string]string{"CLEAN": "single-line-ok"}),
+	)
+	if err == nil {
+		t.Fatal("expected CRLF rejection (newline outside placeholder); got nil")
+	}
+	if !strings.Contains(err.Error(), "CR or LF") {
+		t.Errorf("error must mention CR/LF; got %v", err)
+	}
+}
+
 func TestExpandSecretsMap_HappyPath(t *testing.T) {
 	got, err := ExpandSecretsMap(
 		map[string]string{

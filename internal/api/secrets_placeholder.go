@@ -71,44 +71,61 @@ func DefaultSecretLookup(key string) (string, error) {
 //   - Expanded value contains \r or \n: return CRLF-injection error
 //     naming the key. The check happens AFTER lookup so the operator
 //     sees the offending key without exposing the cleartext value.
+//   - FINAL string contains \r or \n (even if no placeholder was
+//     expanded): rejected as a literal-newline header. This catches
+//     the no-placeholder bypass — a hostile manifest writing
+//     `Authorization: "Bearer abc\nX-Evil: 1"` directly with no
+//     placeholder still gets refused.
 //
-// If lookup is nil, DefaultSecretLookup is used. Strings without any
-// placeholder pass through unchanged (cheap allocation-free path).
+// If lookup is nil, DefaultSecretLookup is used.
+//
+// codex bot r1 P1 closure (PR #169): the no-placeholder fast path
+// previously returned `s` unchanged, bypassing the CRLF guard. Now
+// every return goes through the final-string check.
 func ExpandSecrets(s string, lookup SecretLookup) (string, error) {
-	if !strings.Contains(s, "${secret:") {
-		return s, nil
-	}
-	if lookup == nil {
-		lookup = DefaultSecretLookup
-	}
-	var firstErr error
-	expanded := SecretPlaceholderRE.ReplaceAllStringFunc(s, func(match string) string {
+	final := s
+	if strings.Contains(s, "${secret:") {
+		if lookup == nil {
+			lookup = DefaultSecretLookup
+		}
+		var firstErr error
+		final = SecretPlaceholderRE.ReplaceAllStringFunc(s, func(match string) string {
+			if firstErr != nil {
+				return match
+			}
+			sub := SecretPlaceholderRE.FindStringSubmatch(match)
+			if len(sub) < 2 {
+				firstErr = fmt.Errorf("secret placeholder malformed: %q", match)
+				return match
+			}
+			key := sub[1]
+			val, err := lookup(key)
+			if err != nil {
+				firstErr = fmt.Errorf("expand ${secret:%s}: %w", key, err)
+				return match
+			}
+			if strings.ContainsAny(val, "\r\n") {
+				// Reject CRLF injection at the SECRET level so the
+				// operator gets a key-named error. The final-string
+				// check below is the broader guard; this gives
+				// better diagnostics when the offender is a secret.
+				firstErr = fmt.Errorf("expand ${secret:%s}: value contains CR or LF — refusing to write (header / URL injection guard); rotate the secret to a single-line value", key)
+				return match
+			}
+			return val
+		})
 		if firstErr != nil {
-			return match
+			return "", firstErr
 		}
-		sub := SecretPlaceholderRE.FindStringSubmatch(match)
-		if len(sub) < 2 {
-			firstErr = fmt.Errorf("secret placeholder malformed: %q", match)
-			return match
-		}
-		key := sub[1]
-		val, err := lookup(key)
-		if err != nil {
-			firstErr = fmt.Errorf("expand ${secret:%s}: %w", key, err)
-			return match
-		}
-		if strings.ContainsAny(val, "\r\n") {
-			// Reject CRLF injection. Do NOT include the value in the
-			// error — that would leak cleartext into logs.
-			firstErr = fmt.Errorf("expand ${secret:%s}: value contains CR or LF — refusing to write (header / URL injection guard); rotate the secret to a single-line value", key)
-			return match
-		}
-		return val
-	})
-	if firstErr != nil {
-		return "", firstErr
 	}
-	return expanded, nil
+	// Defense-in-depth: even on the no-placeholder fast path, refuse
+	// to return a string with literal CR/LF. A hostile manifest could
+	// embed newlines directly in headers/URLs WITHOUT any
+	// ${secret:KEY} placeholder; bot r1 P1 closure (PR #169).
+	if strings.ContainsAny(final, "\r\n") {
+		return "", fmt.Errorf("expand secrets: result contains CR or LF — refusing to write (header / URL injection guard); inspect the manifest for literal newline characters")
+	}
+	return final, nil
 }
 
 // ExpandSecretsMap walks every value in m, expands ${secret:KEY}
