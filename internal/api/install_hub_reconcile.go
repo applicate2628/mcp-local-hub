@@ -214,10 +214,24 @@ func BuildHubReconcilePlan(
 			// semantics make the LAST AddReplace the one that
 			// persists. The Remove for the aggregate runs after, so
 			// "adds before removes" ordering is unchanged.
+			//
+			// codex bot phase5 r4 P2 closure on PR #160: validate
+			// url_path before emitting the URL. The per-server
+			// install path (BuildPlanWithOpts → install.go:1093)
+			// rejects malformed paths via validateClientURLPath;
+			// without the same check here, gate-OFF reconcile would
+			// silently write malformed client URLs like
+			// "http://localhost:9128bad-path" if a manifest landed
+			// with a missing leading "/" or a scheme/host smuggled
+			// into url_path. Fail fast with manifest+client context.
 			for _, ref := range refs {
 				p := ref.URLPath
 				if p == "" {
 					p = "/mcp"
+				}
+				if err := validateClientURLPath(p); err != nil {
+					return nil, fmt.Errorf("server %q binding for client %q: invalid url_path %q: %w",
+						ref.Server, client, p, err)
 				}
 				plan = append(plan, ClientUpdatePlan{
 					Client:     client,

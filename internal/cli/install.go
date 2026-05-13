@@ -253,6 +253,18 @@ func runReconcileHubMode(cmd *cobra.Command, dryRun bool) error {
 	for _, ok := range report.Succeeded {
 		fmt.Fprintf(cmd.OutOrStdout(), "✓ %s\n", ok)
 	}
+	// codex bot phase5 r4 P2 closure on PR #160: surface Skipped
+	// clients to the operator. The reconciler skips clients whose
+	// adapter requires fields the hub planner does not provide
+	// (currently antigravity needs Relay{Server,Daemon,ExePath}).
+	// Without this loop the operator gets a silent "success" verdict
+	// while those clients remain on stale config. Stderr + a "manual
+	// reinstall" hint keeps the operator-facing signal honest.
+	for _, sk := range report.Skipped {
+		fmt.Fprintf(cmd.OutOrStderr(),
+			"⚠ %s: skipped (adapter not supported by hub reconciler — run `mcphub install --server <name> --clients %s` manually)\n",
+			sk, sk)
+	}
 	for _, f := range report.Failed {
 		fmt.Fprintf(cmd.OutOrStderr(), "✗ %s (%s): %s\n", f.Client, f.Phase, f.Err)
 	}

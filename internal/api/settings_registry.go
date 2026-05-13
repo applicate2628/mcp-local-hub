@@ -90,9 +90,19 @@ var SettingsRegistry = []SettingDef{
 	{Key: "gui_server.tray", Section: "gui_server", Type: TypeBool,
 		Default: "true", Deferred: true,
 		Help: "Show tray icon (Windows). Edit coming in A4-b."},
+	// codex bot phase5 r4 P1 closure on PR #160: NOT marked Deferred:true.
+	// Deferred:true in this codebase renders the field disabled with a
+	// "(coming in A4-b)" badge (FieldRenderer.tsx), which is the wrong
+	// semantic — the toggle IS implemented in this PR; it just requires
+	// a restart for the runtime listener to pick up the new gate state.
+	// We follow the same "label, not disable" choice settings_test.go
+	// §TestSettingsRegistry_RetryPolicySavedOnlyLabel locks in: keep
+	// the field editable and convey the restart contract via Help text
+	// + the persisted-vs-runtime restart badge convention (deferred to
+	// a follow-up — needs actual_hub_endpoint_enabled in snapshot DTO).
 	{Key: "gui_server.hub_endpoint_enabled", Section: "gui_server", Type: TypeBool,
-		Default: "false", Deferred: true,
-		Help: "Expose a single aggregated hub URL per client instead of per-daemon URLs. Restart required. Hub instance ID is generated once on first start and persists across restarts; clients re-install only on explicit operator-rotation events (mcphub hub-mcp regenerate-instance-id or regenerate-token)."},
+		Default: "false",
+		Help:    "Expose a single aggregated hub URL per client instead of per-daemon URLs. Restart required. Hub instance ID is generated once on first start and persists across restarts; clients re-install only on explicit operator-rotation events (mcphub hub-mcp regenerate-instance-id or regenerate-token)."},
 
 	// ----- daemons -----
 	{Key: "daemons.weekly_refresh_default", Section: "daemons", Type: TypeBool,
