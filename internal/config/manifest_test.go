@@ -327,6 +327,31 @@ func TestValidateRemoteHTTP_RejectsPlaintextURL(t *testing.T) {
 	}
 }
 
+// TestValidateRemoteHTTP_RejectsWorkspaceScoped pins codex bot r8
+// P2 closure (PR #169): the workspace-scoped kind is per-(workspace,
+// language) lazy-proxy with required local LSP backends +
+// port_pool. None of that maps onto a remote-only transport, so
+// the combination must be rejected with a clear error instead of
+// silently passing as accepted-but-nonfunctional.
+func TestValidateRemoteHTTP_RejectsWorkspaceScoped(t *testing.T) {
+	m := &ServerManifest{
+		Name:      "ws-remote",
+		Kind:      KindWorkspaceScoped,
+		Transport: TransportRemoteHTTP,
+		URL:       "https://mcp.context7.com/mcp",
+	}
+	err := m.Validate()
+	if err == nil {
+		t.Fatal("expected workspace-scoped + remote-http rejection; got nil")
+	}
+	if !strings.Contains(err.Error(), "workspace-scoped") {
+		t.Errorf("error must name the offending kind for operator guidance; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "remote-http") {
+		t.Errorf("error must name the offending transport for operator guidance; got %v", err)
+	}
+}
+
 // TestValidateRemoteHTTP_RequiresURL pins that transport=remote-http
 // without url: is rejected.
 func TestValidateRemoteHTTP_RequiresURL(t *testing.T) {

@@ -240,6 +240,15 @@ func (m *ServerManifest) Validate() error {
 	//     §"Validation rules" — accepted-but-no-op semantic for the
 	//     YAML-bool-can't-distinguish-absent-vs-false edge).
 	if m.Transport == TransportRemoteHTTP {
+		// codex bot r8 P2 closure (PR #169): workspace-scoped is
+		// per-(workspace, language) lazy-proxy. That model
+		// requires local LSP backends + port_pool — none of which
+		// remote-http can express. Reject the combination
+		// explicitly so the manifest doesn't pass Validate as an
+		// accepted-but-nonfunctional shape.
+		if m.Kind == KindWorkspaceScoped {
+			return fmt.Errorf("manifest %s: transport=remote-http is incompatible with kind=workspace-scoped (no local LSP per-language proxy; use kind=global)", m.Name)
+		}
 		if m.URL == "" {
 			return fmt.Errorf("manifest %s: transport=remote-http requires url:", m.Name)
 		}
