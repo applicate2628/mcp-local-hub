@@ -640,22 +640,142 @@ func TestWaitForPortFree_PortReleasedDuringWait(t *testing.T) {
 // operators don't hit a confusing exec.LookPath failure further
 // down. Sub-PR 2 of G6 wires the install branch and removes the
 // gate.
-func TestPreflight_RemoteHTTPGatedPending(t *testing.T) {
+// TestPreflight_RemoteHTTPAcceptsCanonicalMcphub pins G6 sub-PR 2:
+// the Preflight gate for remote-http SHORT-CIRCUITS past command/
+// port/scheduler checks but still requires the canonical mcphub
+// binary (client configs reference its rotated-token reload path).
+// No daemon allocation, no port checks, no command resolution.
+func TestPreflight_RemoteHTTPAcceptsCanonicalMcphub(t *testing.T) {
 	preparePreflightBinaryChecks(t)
 	m := &config.ServerManifest{
 		Name:      "ctx7",
 		Kind:      config.KindGlobal,
 		Transport: config.TransportRemoteHTTP,
 		URL:       "https://mcp.context7.com/mcp",
+		ClientBindings: []config.ClientBinding{
+			{Client: "claude-code"},
+		},
+	}
+	if err := Preflight(m, ""); err != nil {
+		t.Fatalf("remote-http Preflight should succeed: %v", err)
+	}
+}
+
+// TestPreflight_RemoteHTTPRejectsAntigravity pins the G6 adapter
+// matrix: antigravity is stdio-relay only and cannot accept a
+// remote URL directly. Install refuses with a clear error.
+func TestPreflight_RemoteHTTPRejectsAntigravity(t *testing.T) {
+	preparePreflightBinaryChecks(t)
+	m := &config.ServerManifest{
+		Name:      "ctx7",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportRemoteHTTP,
+		URL:       "https://mcp.context7.com/mcp",
+		ClientBindings: []config.ClientBinding{
+			{Client: "claude-code"},
+			{Client: "antigravity"},
+		},
 	}
 	err := Preflight(m, "")
 	if err == nil {
-		t.Fatal("expected remote-http preflight rejection while install pipeline is pending; got nil")
+		t.Fatal("expected antigravity rejection on remote-http manifest; got nil")
+	}
+	if !strings.Contains(err.Error(), "antigravity") {
+		t.Errorf("error must name antigravity; got %v", err)
 	}
 	if !strings.Contains(err.Error(), "remote-http") {
-		t.Errorf("error must name the transport for operator guidance; got %v", err)
+		t.Errorf("error must name remote-http; got %v", err)
 	}
-	if !strings.Contains(err.Error(), "G6") {
-		t.Errorf("error should reference the G6 follow-up for operator forensics; got %v", err)
+}
+
+// TestBuildPlanWithOpts_RemoteHTTPNoDaemonsNoSchedulerTasks pins
+// the G6 sub-PR 2 install plan shape: zero scheduler tasks, one
+// ClientUpdate per binding (excluding antigravity), URL +
+// expanded Headers populated, no DaemonName.
+func TestBuildPlanWithOpts_RemoteHTTPNoDaemonsNoSchedulerTasks(t *testing.T) {
+	preparePreflightBinaryChecks(t)
+	m := &config.ServerManifest{
+		Name:      "ctx7",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportRemoteHTTP,
+		URL:       "https://mcp.context7.com/mcp",
+		Headers:   map[string]string{"X-Tenant": "acme"},
+		ClientBindings: []config.ClientBinding{
+			{Client: "claude-code"},
+			{Client: "codex-cli"},
+		},
+	}
+	plan, err := BuildPlanWithOpts(m, BuildPlanOpts{IncludeAllClients: true})
+	if err != nil {
+		t.Fatalf("BuildPlanWithOpts: %v", err)
+	}
+	if len(plan.SchedulerTasks) != 0 {
+		t.Errorf("remote-http plan must have NO scheduler tasks; got %d", len(plan.SchedulerTasks))
+	}
+	if len(plan.ClientUpdates) != 2 {
+		t.Fatalf("expected 2 client updates (claude-code + codex-cli); got %d", len(plan.ClientUpdates))
+	}
+	for _, u := range plan.ClientUpdates {
+		if u.URL != "https://mcp.context7.com/mcp" {
+			t.Errorf("client %q URL = %q; want manifest URL verbatim", u.Client, u.URL)
+		}
+		if u.Headers["X-Tenant"] != "acme" {
+			t.Errorf("client %q X-Tenant header = %q; want acme", u.Client, u.Headers["X-Tenant"])
+		}
+		if u.DaemonName != "" {
+			t.Errorf("client %q has DaemonName=%q on remote-http plan; want empty", u.Client, u.DaemonName)
+		}
+		if u.EntryName != "ctx7" {
+			t.Errorf("client %q EntryName=%q; want manifest name 'ctx7'", u.Client, u.EntryName)
+		}
+	}
+}
+
+// TestBuildPlanWithOpts_RemoteHTTPMissingSecretFailsFast pins G6
+// §"Install path" step 2: ${secret:KEY} expansion at install time
+// fails BEFORE any client config is touched if a secret is missing.
+func TestBuildPlanWithOpts_RemoteHTTPMissingSecretFailsFast(t *testing.T) {
+	m := &config.ServerManifest{
+		Name:      "ctx7",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportRemoteHTTP,
+		URL:       "https://mcp.context7.com/mcp",
+		Headers:   map[string]string{"Authorization": "Bearer ${secret:MISSING_KEY}"},
+		ClientBindings: []config.ClientBinding{
+			{Client: "claude-code"},
+		},
+	}
+	// Route the lookup through DefaultSecretLookup which will hit
+	// the (empty) production vault — MISSING_KEY won't be there.
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	_, err := BuildPlanWithOpts(m, BuildPlanOpts{IncludeAllClients: true})
+	if err == nil {
+		t.Fatal("expected missing-secret rejection at plan-build time; got nil")
+	}
+	if !strings.Contains(err.Error(), "MISSING_KEY") {
+		t.Errorf("error must name the missing key; got %v", err)
+	}
+}
+
+// TestBuildPlanWithOpts_RemoteHTTPRejectsAntigravityBinding pins
+// the defense-in-depth check at the plan-build layer (in case
+// callers bypass Preflight).
+func TestBuildPlanWithOpts_RemoteHTTPRejectsAntigravityBinding(t *testing.T) {
+	m := &config.ServerManifest{
+		Name:      "ctx7",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportRemoteHTTP,
+		URL:       "https://mcp.context7.com/mcp",
+		ClientBindings: []config.ClientBinding{
+			{Client: "antigravity"},
+		},
+	}
+	_, err := BuildPlanWithOpts(m, BuildPlanOpts{IncludeAllClients: true})
+	if err == nil {
+		t.Fatal("expected antigravity rejection; got nil")
+	}
+	if !strings.Contains(err.Error(), "antigravity") {
+		t.Errorf("error must name antigravity; got %v", err)
 	}
 }
