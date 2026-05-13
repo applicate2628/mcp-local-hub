@@ -106,6 +106,18 @@ func BuildHubReconcilePlan(
 	tokens HubTokenTable,
 	opts HubReconcileOpts,
 ) ([]ClientUpdatePlan, error) {
+	// codex bot phase5 r14 P2 closure on PR #160 (defense in depth):
+	// reject upfront if any manifest's name collides with the reserved
+	// aggregate entry name. checkManifestName now rejects this at
+	// validation time, but on-disk manifests that pre-date that check
+	// (or a future caller that hand-builds ServerManifest in code)
+	// could still slip through. Fail loud here rather than emit a plan
+	// where the per-server Remove deletes the just-written aggregate.
+	for i := range manifests {
+		if manifests[i].Name == hubReconcileAggregateEntryName {
+			return nil, fmt.Errorf("manifest name %q collides with the reserved hub-aggregate entry name; rename the manifest before reconciling", hubReconcileAggregateEntryName)
+		}
+	}
 	// 1. Compute per-client union of (server, daemon, port, url_path)
 	//    bindings across ALL manifests. The map key is the canonical
 	//    client id (per `clients.SupportedClientNames()`), but we
@@ -162,7 +174,7 @@ func BuildHubReconcilePlan(
 				Client:    client,
 				Path:      path,
 				Action:    ClientUpdateRemove,
-				EntryName: "mcphub-hub",
+				EntryName: hubReconcileAggregateEntryName,
 			})
 		}
 	}
@@ -214,7 +226,7 @@ func BuildHubReconcilePlan(
 				Client:    client,
 				Path:      path,
 				Action:    ClientUpdateAddReplace,
-				EntryName: "mcphub-hub",
+				EntryName: hubReconcileAggregateEntryName,
 				URL:       fmt.Sprintf("http://127.0.0.1:%d/clients/%s/mcp", endpoint.Port, client),
 				Headers: map[string]string{
 					"X-Mcphub-Hub-Token":   tok,

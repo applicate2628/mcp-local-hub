@@ -137,6 +137,50 @@ func TestBuildHubReconcilePlanGateOnAddsMcphubHubAndRemovesPerDaemon(t *testing.
 	}
 }
 
+// TestBuildHubReconcilePlanRejectsReservedAggregateName pins the codex
+// bot phase5 r14 P2 closure on PR #160: a manifest server named
+// "mcphub-hub" (the reserved aggregate entry name) would cause the
+// gate-ON plan to emit AddReplace + Remove with the same EntryName,
+// and the "adds before removes" applier would delete the just-written
+// aggregate. Reject the entire plan upfront. checkManifestName also
+// rejects this at validation time, but defensive belt-and-braces:
+// on-disk manifests that pre-date the validation check are still
+// loadable, and a caller hand-constructing ServerManifest in Go code
+// would never go through validation. The planner must refuse rather
+// than emit a self-destroying plan.
+func TestBuildHubReconcilePlanRejectsReservedAggregateName(t *testing.T) {
+	manifests := []config.ServerManifest{{
+		Name:      "mcphub-hub", // collides with the gate-ON aggregate entry name
+		Kind:      config.KindGlobal,
+		Transport: config.TransportNativeHTTP,
+		Command:   "uvx",
+		Daemons:   []config.DaemonSpec{{Name: "default", Port: 9100}},
+		ClientBindings: []config.ClientBinding{
+			{Client: "claude-code", Daemon: "default", URLPath: "/mcp"},
+		},
+	}}
+	for _, gate := range []bool{true, false} {
+		_, err := BuildHubReconcilePlan(
+			manifests,
+			HubEndpoint{Port: 9180, InstanceID: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"},
+			HubTokenTable{Tokens: map[string]string{
+				"claude-code": "11111111111111111111111111111111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			}},
+			HubReconcileOpts{GateOn: gate},
+		)
+		if err == nil {
+			t.Errorf("gate=%v: expected reserved-name rejection; got nil error", gate)
+			continue
+		}
+		if !strings.Contains(err.Error(), "mcphub-hub") {
+			t.Errorf("gate=%v: error must reference the reserved name; got %q", gate, err.Error())
+		}
+		if !strings.Contains(err.Error(), "reserved") {
+			t.Errorf("gate=%v: error must say 'reserved' for operator clarity; got %q", gate, err.Error())
+		}
+	}
+}
+
 // TestBuildHubReconcilePlanGateOffRemovesAggregateForAllSupportedClients
 // pins the codex deep-sec phase5 r11 P2 closure on PR #160 (protocol
 // lane): gate-OFF reconcile MUST emit a `Remove mcphub-hub` op for
