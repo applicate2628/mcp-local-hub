@@ -118,7 +118,10 @@ func secureWriteClientConfigImpl(path string, contents []byte) error {
 	//    install a token under a directory listable by every domain
 	//    user. Mirror of secure_write_posix.go's verifyPosixParentDirFromFd.
 	if err := verifyWindowsDACLFromHandle(dirHandle); err != nil {
-		return fmt.Errorf("secure write: parent %s not single-user safe: %w", parentDir, err)
+		// Wrap with ErrSecureWriteParentInsecure so the cross-package
+		// wrapper in client_write_init.go can match via errors.Is
+		// (issue #161 P1).
+		return fmt.Errorf("%w (path %s): %v", ErrSecureWriteParentInsecure, parentDir, err)
 	}
 
 	// 2a. Refuse to overwrite a pre-existing symlink/junction at base.

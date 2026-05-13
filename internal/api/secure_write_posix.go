@@ -54,8 +54,11 @@ func secureWriteClientConfigImpl(path string, contents []byte) error {
 
 	// 2. Parent DACL verify reduces to owner-uid + non-loose mode
 	// on POSIX. The per-user trust boundary covers ancestor chain.
+	// Wrap with ErrSecureWriteParentInsecure so the cross-package
+	// wrapper in client_write_init.go can match via errors.Is and
+	// surface the operator opt-in hint (issue #161 P1).
 	if err := verifyPosixParentDirFromFd(dirFd); err != nil {
-		return fmt.Errorf("secure write: parent %s not single-user safe: %w", parentDir, err)
+		return fmt.Errorf("%w (path %s): %v", ErrSecureWriteParentInsecure, parentDir, err)
 	}
 
 	// 2a. Refuse to overwrite a pre-existing symlink/junction at `base`.
