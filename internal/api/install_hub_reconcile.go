@@ -50,6 +50,10 @@ type HubReconcileOpts struct {
 type HubReconcileReport struct {
 	Succeeded []string
 	Failed    []HubReconcileFailure
+	// Skipped lists clients whose adapter requires fields the
+	// reconcile planner does not provide (antigravity needs the
+	// relay-spawner trio). Operators reinstall those manually.
+	Skipped []string
 }
 
 // HubReconcileFailure is one row in HubReconcileReport.Failed. Phase
@@ -258,6 +262,14 @@ func ApplyHubReconcileInOrder(plan []ClientUpdatePlan) HubReconcileReport {
 	sort.Strings(clientNames)
 
 	for _, client := range clientNames {
+		// codex bot phase5 r4 P2 closure on PR #160: surface
+		// antigravity (and any other skip-list client) in the
+		// report so operators see explicit "manual reinstall
+		// required" rather than silent omission.
+		if hubReconcileSkipClients[client] {
+			report.Skipped = append(report.Skipped, client)
+			continue
+		}
 		ops := byClient[client]
 		adds, removes := partitionByAction(ops)
 		// AddReplace first.
@@ -343,7 +355,26 @@ func callApplyOpsForClient(client string, ops []ClientUpdatePlan) error {
 // Idempotent: re-running with the same plan against a converged config
 // is a no-op (AddEntry replaces in place; RemoveEntry no-ops on a
 // missing entry).
+// codex bot phase5 r4 P2 closure on PR #160: the antigravity
+// adapter's AddEntry path requires RelayServer + RelayDaemon +
+// RelayExePath to be present in the MCPEntry (it composes a
+// stdio-relay command line that bridges Cascade to the shared
+// HTTP daemon). The hub reconcile planner has no relay context —
+// the aggregate "mcphub-hub" entry is a pure HTTP URL with auth
+// headers, which the antigravity adapter would reject. Per
+// Antigravity's "opt-in via --client antigravity" status
+// (DefaultInstallClientNames excludes it), skip antigravity in
+// the hub reconcile entirely. Operators who installed antigravity
+// manually need to rerun `mcphub install --server X --client
+// antigravity` after toggling the gate.
+var hubReconcileSkipClients = map[string]bool{
+	"antigravity": true,
+}
+
 func applyOpsForClient(client string, ops []ClientUpdatePlan) error {
+	if hubReconcileSkipClients[client] {
+		return nil // surfaced as a "skipped" success in the report layer
+	}
 	if len(ops) == 0 {
 		return nil
 	}

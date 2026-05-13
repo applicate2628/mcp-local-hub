@@ -171,8 +171,37 @@ func runReconcileHubMode(cmd *cobra.Command, dryRun bool) error {
 	// 2. Load endpoint + tokens for plan header inputs (URL +
 	//    Headers in the gate-ON branch). Read tokens from disk via
 	//    ReloadHubTokens so a cold CLI process sees the table.
-	endpoint, _ := api.LoadHubEndpoint()
-	tokens, _ := api.ReloadHubTokens()
+	//
+	// codex bot phase5 r4 P1 closure on PR #160: in gate-ON mode,
+	// endpoint and tokens are LOAD-BEARING inputs — Port and
+	// InstanceID build the URL + X-Mcphub-Instance-Id header,
+	// Tokens[client] builds the X-Mcphub-Hub-Token header. If any
+	// of these are missing/corrupt, the planner would silently
+	// produce `http://127.0.0.1:0/...` URLs and empty auth headers,
+	// writing broken configs across every client. Fail fast and
+	// tell the operator to start the hub at least once (which
+	// generates endpoint.json + tokens.json) before re-running
+	// the gate-ON reconcile.
+	//
+	// Gate-OFF mode does NOT use endpoint or tokens (URLs come
+	// from manifest bindings; no auth headers), so the same
+	// errors are tolerable there.
+	endpoint, epErr := api.LoadHubEndpoint()
+	tokens, tokErr := api.ReloadHubTokens()
+	if gateOn {
+		if epErr != nil {
+			return fmt.Errorf("gate-ON reconcile requires hub-mcp.endpoint.json (start the hub at least once to generate it): %w", epErr)
+		}
+		if endpoint.Port == 0 {
+			return fmt.Errorf("gate-ON reconcile requires the hub to have bound at least once (endpoint.Port=0); start the hub then rerun")
+		}
+		if endpoint.InstanceID == "" {
+			return fmt.Errorf("gate-ON reconcile requires a populated endpoint.InstanceID (corrupt endpoint state?); restart the hub or run `mcphub hub-mcp regenerate-instance-id`")
+		}
+		if tokErr != nil {
+			return fmt.Errorf("gate-ON reconcile requires hub-mcp-tokens.json: %w", tokErr)
+		}
+	}
 
 	// 3. Collect manifests for every supported server. The Scan
 	//    surface lists every server with a manifest; ManifestGet

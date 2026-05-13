@@ -11,6 +11,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -129,8 +130,20 @@ refresh the live config with the new token.`,
 
 			// 2. Read control token + POST /internal/reload-tokens
 			//    so the live hub picks up the new table.
+			//
+			// codex bot phase5 r4 P2 closure on PR #160: a missing
+			// endpoint.json (first-run, after `mcphub gui --reset-port`,
+			// or after a clean state-dir wipe) is the same operational
+			// case as ep.Port==0 — there is no live hub to reload.
+			// Persistence is already complete, so exit 0 with the
+			// "next start picks it up" message instead of failing
+			// with exit 1 / the rotate-but-not-applied warning.
 			ep, epErr := api.LoadHubEndpoint()
 			if epErr != nil {
+				if os.IsNotExist(epErr) || errors.Is(epErr, os.ErrNotExist) {
+					printRotationOK(cmd, client, "(hub not running, endpoint state absent — next start picks up the new token)")
+					return nil
+				}
 				return fallbackReloadWarning(cmd, fmt.Errorf("load endpoint: %w", epErr))
 			}
 			if ep.Port == 0 {
