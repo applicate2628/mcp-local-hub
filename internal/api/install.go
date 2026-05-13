@@ -909,7 +909,24 @@ func (a *API) Uninstall(server string) (*UninstallReport, error) {
 // metadata because their adapters persist only Name + URL. Returns ""
 // if the binding's daemon is unresolvable; callers must treat empty as
 // "no URL match available".
+//
+// G6 remote-http branch (bot r1 P1 closure on PR #170): for
+// transport=remote-http the entry URL came from the manifest's URL
+// field (after ${secret:KEY} expansion). To recognize the entry on
+// uninstall, re-expand the manifest URL and return it. Limitation:
+// if a secret was rotated BETWEEN install and uninstall, the entry's
+// URL embeds the OLD expansion while this function returns the NEW
+// one — uninstall would skip the stale entry. Acceptable trade-off
+// vs adding new state-file machinery; URL-as-secret-bearer is rare
+// (headers are the dominant credential surface).
 func expectedHubURL(m *config.ServerManifest, b config.ClientBinding) string {
+	if m.Transport == config.TransportRemoteHTTP {
+		expanded, err := ExpandSecrets(m.URL, nil)
+		if err != nil {
+			return "" // missing secrets at uninstall — caller treats as no-match
+		}
+		return expanded
+	}
 	daemon, ok := findDaemon(m, b.Daemon)
 	if !ok {
 		return ""
@@ -1033,6 +1050,14 @@ func BuildPlan(m *config.ServerManifest, daemonFilter string) (*Plan, error) {
 // does not imply a full-server restart. An unknown DaemonFilter or client
 // selector is an error surfaced before any side effects.
 func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, error) {
+	// G6 remote-http branch (sub-PR 2): no daemons, no scheduler
+	// tasks, no per-daemon ports. Bind URL + expanded Headers
+	// directly into each client's config; the client connects
+	// straight to the remote endpoint without going through the
+	// local hub.
+	if m.Transport == config.TransportRemoteHTTP {
+		return buildRemoteHTTPPlan(m, opts)
+	}
 	if opts.DaemonFilter != "" {
 		if _, ok := findDaemon(m, opts.DaemonFilter); !ok {
 			return nil, fmt.Errorf("no daemon %q in manifest %s", opts.DaemonFilter, m.Name)
@@ -1168,6 +1193,84 @@ func findDaemon(m *config.ServerManifest, name string) (config.DaemonSpec, bool)
 	return config.DaemonSpec{}, false
 }
 
+// buildRemoteHTTPPlan builds the install plan for a G6
+// transport=remote-http manifest. No local daemon → no scheduler
+// tasks; no per-daemon port → URL comes from manifest.URL directly.
+// ${secret:KEY} placeholders in URL + Headers expand at this stage
+// against the encrypted vault; missing secrets fail BEFORE any
+// client config is touched (G6 spec §"Install path" step 2).
+//
+// Adapter capability matrix (G6 spec §"Adapter compatibility"):
+//   - claude-code, codex-cli, cursor, vscode, gemini-cli: header
+//     support confirmed; bind directly.
+//   - antigravity: stdio-relay only → install refuses with WARN
+//     (handled earlier in Preflight; defense-in-depth check here too).
+//
+// codex bot r2 P1 closure on PR #169 (the implementation-pending
+// gate from sub-PR 1 lands its real handler here).
+func buildRemoteHTTPPlan(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, error) {
+	// Bot r1 P2 closure on PR #170: remote-http has no daemons,
+	// so `--daemon X` makes no sense. Reject explicitly instead
+	// of silently treating it as a partial install (which would
+	// leave the FullInstall=false flag and skip the full-server
+	// reconciliation later).
+	if opts.DaemonFilter != "" {
+		return nil, fmt.Errorf("manifest %s: transport=remote-http has no daemons; --daemon flag is not applicable (got --daemon=%q)", m.Name, opts.DaemonFilter)
+	}
+	includeClient, err := installClientPredicate(opts)
+	if err != nil {
+		return nil, err
+	}
+	// Resolve ${secret:KEY} placeholders. Missing secrets fail
+	// BEFORE any client config write so the operator sees a clear
+	// error rather than half-installed entries with placeholder
+	// strings.
+	expandedURL, err := ExpandSecrets(m.URL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("install remote-http manifest %s: expand url: %w", m.Name, err)
+	}
+	expandedHeaders, err := ExpandSecretsMap(m.Headers, nil)
+	if err != nil {
+		return nil, fmt.Errorf("install remote-http manifest %s: expand headers: %w", m.Name, err)
+	}
+	p := &Plan{
+		Server:      m.Name,
+		FullInstall: opts.DaemonFilter == "",
+	}
+	for _, b := range m.ClientBindings {
+		if b.Daemon != "" && b.Daemon != "default" {
+			// remote-http manifests have no daemons; a binding
+			// that names a non-empty / non-default daemon is a
+			// manifest authoring mistake.
+			return nil, fmt.Errorf("manifest %s: remote-http binding for client %q names daemon=%q but no daemons are declared (remove the daemon: line or use daemon: default)", m.Name, b.Client, b.Daemon)
+		}
+		if !includeClient(b.Client) {
+			continue
+		}
+		// Defense-in-depth: Preflight already rejected
+		// antigravity for remote-http; this guard ensures direct
+		// BuildPlanWithOpts callers (tests, future API consumers)
+		// also see the rejection.
+		if b.Client == "antigravity" {
+			return nil, fmt.Errorf("manifest %s: client=antigravity is incompatible with transport=remote-http (Cascade adapter accepts stdio relay entries only)", m.Name)
+		}
+		path, err := clientConfigPath(b.Client)
+		if err != nil {
+			return nil, err
+		}
+		p.ClientUpdates = append(p.ClientUpdates, ClientUpdatePlan{
+			Client:    b.Client,
+			Path:      path,
+			Action:    ClientUpdateAddReplace,
+			EntryName: m.Name,
+			URL:       expandedURL,
+			Headers:   expandedHeaders,
+			// DaemonName intentionally empty — remote-http has none.
+		})
+	}
+	return p, nil
+}
+
 // Preflight verifies install preconditions. Returns first error found.
 // Called by Install before any side effects.
 //
@@ -1177,16 +1280,30 @@ func findDaemon(m *config.ServerManifest, name string) (config.DaemonSpec, bool)
 // daemons (already running from a prior install) occupy their assigned ports,
 // even though those ports are not being touched by the current invocation.
 func Preflight(m *config.ServerManifest, daemonFilter string) error {
-	// G6 gate (bot r2 P1 closure on PR #169): transport=remote-http
-	// schema is admissible (sub-PR 1 landed validation), but the
-	// install pipeline (Preflight + BuildPlanWithOpts) is not yet
-	// wired to handle daemonless / command-less manifests. Reject
-	// with a clear "implementation pending" message so operators
-	// who create a remote-http manifest don't hit a confusing
-	// exec.LookPath failure further down the chain. Sub-PR 2 of
-	// G6 wires the install branch and removes this gate.
+	// G6 remote-http branch (sub-PR 2): remote endpoints have no
+	// local subprocess to LookPath, no ports to check, no scheduler
+	// task to plan. Preflight short-circuits with the adapter
+	// capability matrix check — antigravity is stdio-relay only
+	// and cannot accept a remote URL as a direct entry. Other
+	// adapter-specific gates (header schema) run later in
+	// BuildPlanWithOpts where the binding set is built.
 	if m.Transport == config.TransportRemoteHTTP {
-		return fmt.Errorf("manifest %s: transport=remote-http install pipeline is pending (G6 sub-PR 2); schema validates but install/uninstall + adapter matrix wiring lands in a follow-up. Use `mcphub manifest test-remote` to verify connectivity in the meantime once that subcommand ships", m.Name)
+		// canonical mcphub still needs to exist because client
+		// configs reference the rotated-token reload-trigger path
+		// through it. Keep that gate.
+		if _, err := ensureCanonicalMcphubPresent(); err != nil {
+			return err
+		}
+		// Bot r3 P2 closure on PR #170: the antigravity adapter
+		// matrix check used to fire here unconditionally, blocking
+		// filtered installs (`--clients claude-code`) of mixed-
+		// binding manifests even when the operator explicitly
+		// excluded antigravity. The check now lives in
+		// buildRemoteHTTPPlan where the includeClient predicate is
+		// known and the gate fires only against bindings actually
+		// in scope for THIS install. Preflight stays narrow on
+		// remote-http.
+		return nil
 	}
 	// 1. Command available.
 	if _, err := exec.LookPath(m.Command); err != nil {
@@ -1425,6 +1542,7 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int)
 		entry := clients.MCPEntry{
 			Name:         m.Name,
 			URL:          u.URL,
+			Headers:      u.Headers,
 			RelayServer:  m.Name,
 			RelayDaemon:  u.DaemonName,
 			RelayExePath: canonical,
