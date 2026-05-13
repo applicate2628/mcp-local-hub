@@ -66,12 +66,23 @@ func newHubMcpStatusCmd() *cobra.Command {
 			tbl, tblErr := api.ReloadHubTokens()
 			events, _ := api.RecentHubMcpEvents(8)
 
+			// codex bot phase5 r13 P2 closure on PR #160: iterate
+			// over `clients.SupportedClientNames()`, not the on-disk
+			// token table keys. A corrupted token table that silently
+			// drops a supported client key (e.g. operator hand-edits
+			// hub-mcp-tokens.json, partial write, future schema bump)
+			// would be invisible if we only walk what's in the table.
+			// By iterating the supported-adapter allowlist and looking
+			// up each one in `tbl.Tokens`, every supported client is
+			// always represented as PRESENT or ABSENT — exactly the
+			// signal an operator needs to detect "the table is missing
+			// the entry for client X".
 			perClient := map[string]string{}
-			for client, tok := range tbl.Tokens {
-				if tok == "" {
-					perClient[client] = "ABSENT"
-				} else {
+			for _, client := range clients.SupportedClientNames() {
+				if tbl.Tokens[client] != "" {
 					perClient[client] = "PRESENT"
+				} else {
+					perClient[client] = "ABSENT"
 				}
 			}
 
