@@ -168,11 +168,11 @@ func BuildHubReconcilePlan(
 				},
 			})
 			// Remove every previously-installed per-(server, client)
-			// entry. We emit one Remove per (server, client) binding
-			// found in `manifests`; if the same server has multiple
-			// bindings to the same client (rare but legal — different
-			// URLPaths), de-dupe by server name so a client gets at
-			// most one Remove per server.
+			// entry. codex bot phase5 r2 P2 closure on PR #160:
+			// dedupe by server (one Remove per server per client is
+			// enough; the on-disk entry name IS the server name, so
+			// multiple bindings produce one entry on disk that
+			// requires one Remove).
 			seenServer := map[string]bool{}
 			for _, ref := range refs {
 				if seenServer[ref.Server] {
@@ -191,23 +191,24 @@ func BuildHubReconcilePlan(
 			// Gate OFF: AddReplace each per-(server, client) entry,
 			// then Remove the aggregate.
 			//
-			// codex bot phase5 r1 P2 closure on PR #160: reuse the
-			// binding's url_path (b.URLPath in the source manifest)
-			// when reconstructing the per-daemon URL. The pre-r1
-			// implementation hardcoded "/mcp" which broke routing
-			// for any manifest that ships a non-default url_path —
-			// gate-OFF restore would write the wrong URL and the
-			// client would see 404 on every call until manual
-			// `mcphub install --server X` rewrites it correctly.
+			// codex bot phase5 r1 P2 closure on PR #160: reuse
+			// binding url_path (defaults to /mcp).
 			//
-			// Empty URLPath defaults to "/mcp" — matches the
-			// validateClientURLPath rule applied at manifest load.
-			seenServer := map[string]bool{}
+			// codex bot phase5 r2 P2 closure on PR #160: preserve
+			// last-wins manifest precedence. The pre-r2 dedup kept
+			// the FIRST binding per server (after sort-by-daemon),
+			// which diverged from the per-server install path where
+			// AddEntry is replace-by-name and the LAST binding wins.
+			// For manifests with multiple bindings under one
+			// (server, client) — e.g. different daemon or url_path —
+			// the gate-OFF restore would have emitted a different URL
+			// than the canonical install would, causing routing
+			// mismatch after toggling off. Now: emit every binding
+			// in manifest order; the applier's replace-by-name
+			// semantics make the LAST AddReplace the one that
+			// persists. The Remove for the aggregate runs after, so
+			// "adds before removes" ordering is unchanged.
 			for _, ref := range refs {
-				if seenServer[ref.Server] {
-					continue
-				}
-				seenServer[ref.Server] = true
 				p := ref.URLPath
 				if p == "" {
 					p = "/mcp"

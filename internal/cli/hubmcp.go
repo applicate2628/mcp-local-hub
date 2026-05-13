@@ -207,33 +207,50 @@ client config snapshot). For routine per-client token compromise, use
 }
 
 // hubProbeAlive returns true if the hub at <port> answers a
-// reload-tokens probe with auth-style 401 (i.e. the listener accepts
-// connections but rejects without the control token). Used by
-// regenerate-instance-id to decide whether to fail-loud or
-// succeed-quiet. A connect refused → false (hub not running).
-// Returns false on any unexpected status to keep the error path
-// narrowly scoped.
+// reload-tokens probe in the hub-specific shape: POST to
+// /internal/reload-tokens with a VALID control token must yield
+// either 204 (reload succeeded) or 429 (cooldown — only a live
+// hub-mcp control handler emits that status with Retry-After:5).
+// Any other status, connect-refused, or unreadable control token
+// is treated as "hub not running" so a stale endpoint.Port reused
+// by an unrelated local HTTP service does NOT false-positive.
+//
+// codex bot phase5 r2 P2 closure on PR #160: the pre-r2 probe
+// accepted 401/403/405/204 from ANY HTTP responder — fail-loud
+// branch would fire on a port that was inherited by another local
+// service. Now the probe sends the actual control token and
+// requires a hub-specific success-or-cooldown status. The reload
+// itself is idempotent (the live hub re-reads tokens.json from
+// disk), so the side effect on a true-positive is acceptable.
+//
+// If the control token file is missing (e.g., hub crashed mid-
+// startup before writing it), we cannot prove the hub is alive →
+// return false. The CLI will exit clean, and any actual live hub
+// will surface the staleness via 401 on the next client call.
 func hubProbeAlive(cmd *cobra.Command, port int) bool {
+	controlTok, err := api.ReadHubMcpControlToken()
+	if err != nil {
+		return false // no control token = no way to prove hub-specific
+	}
 	url := fmt.Sprintf("http://127.0.0.1:%d/internal/reload-tokens", port)
 	req, err := http.NewRequestWithContext(cmd.Context(), http.MethodPost, url, nil)
 	if err != nil {
 		return false
 	}
-	// Don't send a valid control token — we WANT 401 from the live
-	// handler. A connect-refused or timeout means the hub is dead.
+	req.Header.Set("X-Mcphub-Control-Token", controlTok)
 	client := &http.Client{Timeout: 2 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return false
 	}
 	defer resp.Body.Close()
-	// 401 (unauthorized — handler answered, just no token) or 405
-	// (handler answered but with wrong method) both prove the hub
-	// is alive. 204 here would be surprising (we sent no token).
-	return resp.StatusCode == http.StatusUnauthorized ||
-		resp.StatusCode == http.StatusMethodNotAllowed ||
-		resp.StatusCode == http.StatusNoContent ||
-		resp.StatusCode == http.StatusForbidden // loopback-guard rejection still proves hub alive
+	// 204 — reload succeeded; this IS the hub. 429 — cooldown (5s
+	// rate-limit per Phase 4 §"Control endpoint contract"). Both
+	// require an in-process state that only the hub-mcp handler
+	// owns. Any other status (200/401/403/404/500 from a stranger
+	// service) is rejected as inconclusive.
+	return resp.StatusCode == http.StatusNoContent ||
+		resp.StatusCode == http.StatusTooManyRequests
 }
 
 // postReloadTokens fires the live-reload POST against the running hub.
