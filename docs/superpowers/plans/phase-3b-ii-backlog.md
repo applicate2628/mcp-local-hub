@@ -194,7 +194,7 @@ After the 2026-05-04 stabilization wave (35+ bug-fix PRs merged, security audit 
 
 - **A4-b PR #2 `gui_server.port` live-rebind** — DROPPED. Fragile, rare, not central to a local hub. Keep restart-required badge and stop spending roadmap budget unless a real user report appears.
 - **A4-b PR #2 tray show/hide runtime mutator** — DEFERRED indefinitely. One-time setting; restart works.
-- **A4-b PR #2 retry-policy runtime applier** — DEFERRED to v0.4.x (originally was "after G4"; now both are in v0.4.x). Pre-tag fix above is the only correctness requirement.
+- **A4-b PR #2 retry-policy runtime applier** — SHIPPED. The watchdog `--once` driver now reads `daemons.retry_policy` at tick start and applies `policy.MaxAttempts()` as the per-15-min-window restart-attempt cap (`none`→1, `linear`→3, `exponential`→5). `RetryPolicy.Backoff()` is irrelevant under the fixed 5-min scheduler-tick cadence so only `MaxAttempts` is honored.
 - **G4 unified hub MCP endpoint** — DEFERRED to v0.4.x. See sequence step 8 above.
 - **G8 config watch / dev reload (fsnotify)** — DROPPED from current scope. v0.4.x G4 will start with explicit refresh/polling. Re-evaluate later if user reports demand it.
 - **F1/F2/F3/F4/F5/F6/F7 Linux-server readiness** — separate strategic lane; not pulled into this release. G1 matrix must explicitly state "Linux scheduler install is not ready".
@@ -261,7 +261,7 @@ These remain rejected and should NOT be reconsidered without a separate threat m
 **Phase 3B-II hardening:** G10 ✅ → G1 ✅ → G2 ✅ all shipped on `master`.
 **Phase 3B-II tail:** G3 ✅ shipped (PR #144). G4 originally deferred but ALSO ✅ shipped (PRs #155–#160 land the unified hub MCP endpoint).
 **Phase 3C/3D, separately threat-modeled:** G5 ✅ marketplace draft-import (PR #163) → G7 ✅ VS Code/JSON5 import (PR #151) → G9 ✅ structured event envelopes (PR #150) → G6 remote MCP manifests (spec at `docs/superpowers/specs/2026-05-12-g6-remote-mcp-manifests-design.md`; implementation deferred to v0.4.x).
-**v0.4.x:** G6 implementation → A4-b PR #2 retry-policy runtime applier.
+**v0.4.x:** G6 implementation (A4-b PR #2 retry-policy runtime applier already shipped).
 **Dropped from current roadmap:** G8 config watch / fsnotify dev reload.
 
 Phase 3B-II is **closed** on `master`. Tagging happens at Global Phase 4

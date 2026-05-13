@@ -559,6 +559,17 @@ func runWatchdogOnceInner(ctx context.Context, a *api.API, now time.Time, diagno
 	intentR := a.ReadDaemonIntent()
 	coolR := a.ReadWatchdogState()
 
+	// 5b. A4-b PR #2 runtime applier — wire daemons.retry_policy
+	// into the cooldown engine BEFORE any Due() consultation. The
+	// policy's MaxAttempts() becomes the per-15-min-window attempt
+	// cap; "none" → 1, "linear" → 3, "exponential" → 5. Backoff()
+	// is irrelevant under the fixed 5-min scheduler cadence so
+	// only MaxAttempts is honored. SettingsGet errors fall through
+	// to the registry default ("exponential") via PolicyFromString.
+	policyVal, _ := a.SettingsGet("daemons.retry_policy")
+	resolved, maxAttempts := api.ApplyRetryPolicy(&coolR, policyVal)
+	fmt.Fprintf(diagnostic, "watchdog: retry policy = %s (maxAttempts=%d)\n", resolved, maxAttempts)
+
 	// 6. Wall-clock jump check (§29).
 	if code, suppressed := wallClockJumpCheck(a, &coolR, intentR, now, diagnostic); suppressed {
 		return code
