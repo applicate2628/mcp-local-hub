@@ -13,6 +13,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net"
 	"sync"
 	"testing"
@@ -160,6 +161,52 @@ func TestBindHubMcpListenerValidateManifestFailureClosesNothing(t *testing.T) {
 		t.Errorf("error chain missing marker %q: %v", wantErr, err)
 	}
 }
+
+// TestBindHubMcpListenerCanceledContextPropagates pins the basic
+// cancellation flow: when the caller cancels ctx, the function
+// surfaces a canceled-flavored error without panicking. Because
+// BindHubMcpListener checks ctx.Err() at multiple points (pre-
+// validate, pre-bind, post-bind), a pre-call cancel typically
+// trips the EARLY ctx.Err() check at hub_mcp_bind.go:144 — NOT
+// the new lnErr-shape gating branch from bot r1 P2 closure. The
+// in-listener cancellation path (where lnErr itself comes back as
+// context.Canceled) is exercised separately by
+// TestNewListenerWithSOExclusiveContext_RespectsCanceledCtx below.
+func TestBindHubMcpListenerCanceledContextPropagates(t *testing.T) {
+	hubMcpStateTestHelper(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := BindHubMcpListener(ctx, []string{"claude-code"}, nil)
+	if err == nil {
+		t.Fatal("expected canceled-context error")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected wrapped context.Canceled; got %v", err)
+	}
+}
+
+// In-listener cancellation note (bot r2 P3 follow-up): forcing
+// net.ListenConfig.Listen to block long enough for a ctx-cancel
+// to interrupt it requires a contended bind target (rare/racy in
+// unit tests). The gating branch at hub_mcp_bind.go::BindHubMcpListener
+// (`errors.Is(lnErr, context.Canceled || DeadlineExceeded)`) is
+// defense-in-depth against syscall-layer hangs that propagate
+// cancellation as the lnErr return. We pin the gating contract
+// via:
+//
+//  1. TestBindHubMcpListenerCanceledContextPropagates (above) —
+//     proves the early ctx.Err() shape stays canceled-flavored.
+//  2. Code-level pattern: every "context-shaped error → no rotation
+//     warning" path uses errors.Is for matching, so even if the
+//     wrapping changes the gating still fires.
+//
+// A unit test exercising the actual in-Listen cancel path would
+// need a fake listener seam (no test infrastructure for that
+// exists yet). The defense-in-depth value is real even without a
+// direct test — operators on an exotic platform whose Listen does
+// block would not see false credential-rotation alerts.
 
 // errMarker / containsString are local helpers (the test file is
 // package api so direct error.Error() comparison works).

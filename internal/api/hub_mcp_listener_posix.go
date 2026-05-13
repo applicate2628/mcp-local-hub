@@ -35,8 +35,27 @@ import (
 // a same-user local process may have pre-bound the port to harvest
 // the token a future client would have sent.
 //
+// Backwards-compat shim: delegates to NewListenerWithSOExclusiveContext
+// with context.Background(). New code in the hub-mcp bind path uses
+// the context-aware form so a hostile syscall hang at Listen no longer
+// blocks holders of the hub-mcp.lock for the entire process lifetime
+// (issue #159 concurrency lane #3).
+//
 // Spec §"Bind ordering" — POSIX branch.
 func NewListenerWithSOExclusive(addr string) (net.Listener, error) {
+	return NewListenerWithSOExclusiveContext(context.Background(), addr)
+}
+
+// NewListenerWithSOExclusiveContext is the cancellable form. ctx is
+// passed to net.ListenConfig.Listen so callers that hold a flock can
+// abort the bind on context cancellation instead of waiting for the
+// kernel.
+//
+// Issue #159 concurrency lane #3 closure: the prior implementation
+// used context.Background() unconditionally and was called while the
+// hub-mcp.lock was held. A non-cancellable Listen hang would block
+// every sibling flock waiter until process exit.
+func NewListenerWithSOExclusiveContext(ctx context.Context, addr string) (net.Listener, error) {
 	lc := net.ListenConfig{}
-	return lc.Listen(context.Background(), "tcp", addr)
+	return lc.Listen(ctx, "tcp", addr)
 }

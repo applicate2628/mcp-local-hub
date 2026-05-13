@@ -60,6 +60,19 @@ const soExclusiveAddrUse = ^windows.SO_REUSEADDR
 // returned listener; the bind-failure log line is the caller's
 // responsibility (this layer only surfaces the error).
 func NewListenerWithSOExclusive(addr string) (net.Listener, error) {
+	return NewListenerWithSOExclusiveContext(context.Background(), addr)
+}
+
+// NewListenerWithSOExclusiveContext is the cancellable form. ctx is
+// passed to net.ListenConfig.Listen so callers that hold a flock can
+// abort the bind on context cancellation instead of blocking the
+// kernel-level Listen.
+//
+// Issue #159 concurrency lane #3 closure: the prior implementation
+// used context.Background() unconditionally and was called while the
+// hub-mcp.lock was held. A non-cancellable Listen hang would block
+// every sibling flock waiter until process exit.
+func NewListenerWithSOExclusiveContext(ctx context.Context, addr string) (net.Listener, error) {
 	lc := net.ListenConfig{
 		Control: func(_, _ string, c syscall.RawConn) error {
 			var setErr error
@@ -77,5 +90,5 @@ func NewListenerWithSOExclusive(addr string) (net.Listener, error) {
 			return setErr // F4: surface SetsockoptInt error to caller.
 		},
 	}
-	return lc.Listen(context.Background(), "tcp", addr)
+	return lc.Listen(ctx, "tcp", addr)
 }

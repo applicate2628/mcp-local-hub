@@ -11,6 +11,7 @@ package api
 import (
 	"os"
 	"path/filepath"
+	"testing"
 	"time"
 
 	"mcp-local-hub/internal/clients"
@@ -117,12 +118,22 @@ func MCPHubBinaryName() string {
 // watchdog.log, --once.lock) into a temp directory without env vars.
 //
 // Returns a restore function that resets the override to "" (meaning
-// the platform resolver runs normally). Production callers must never
-// invoke this; the helper exists exclusively for test hygiene.
+// the platform resolver runs normally).
+//
+// Production safety (issue #159 leaks lane #6 closure): the helper
+// PANICS when called outside a test binary. Detection uses
+// testing.Testing() (Go 1.21+) which returns true iff the running
+// process was built via `go test`. A production `mcphub` binary
+// linking the api package CANNOT smuggle a state-dir override at
+// runtime via this exported surface — calling it crashes the
+// process loudly instead of silently redirecting state writes.
 //
 // Plan v13 §16: production binary refuses env-fallback resolution; this
-// override is the sanctioned cross-package equivalent.
+// override is the sanctioned cross-package test-only equivalent.
 func SetDaemonStateRootForTest(root string) (restore func()) {
+	if !testing.Testing() {
+		panic("api.SetDaemonStateRootForTest called outside a test binary — this is a programming error or attack vector; the helper exists exclusively for test hygiene")
+	}
 	orig := daemonStateRootOverride
 	daemonStateRootOverride = root
 	return func() {
