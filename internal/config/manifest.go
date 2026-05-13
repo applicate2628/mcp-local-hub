@@ -237,11 +237,19 @@ func (m *ServerManifest) Validate() error {
 
 	// Non-remote-http branches reject URL and Headers — those fields
 	// are exclusive to remote-http.
+	//
+	// codex bot r4 P2 closure (PR #169): use Headers != nil rather
+	// than len(Headers) != 0 so an explicit `headers: {}` (decoded
+	// as a non-nil empty map) is also rejected. YAML doesn't
+	// distinguish `headers:` (absent) from `headers: {}` for slices
+	// — both decode to non-nil zero-length — so the only signal we
+	// have is the nil-vs-non-nil bit set by the decoder when the
+	// key is mentioned in the YAML at all.
 	if m.URL != "" {
 		return fmt.Errorf("manifest %s: url is only valid with transport=remote-http (got transport=%q)", m.Name, m.Transport)
 	}
-	if len(m.Headers) != 0 {
-		return fmt.Errorf("manifest %s: headers is only valid with transport=remote-http (got transport=%q)", m.Name, m.Transport)
+	if m.Headers != nil {
+		return fmt.Errorf("manifest %s: headers is only valid with transport=remote-http (got transport=%q; remove the headers: key entirely if you meant to declare none)", m.Name, m.Transport)
 	}
 
 	if m.Command == "" {

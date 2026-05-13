@@ -389,6 +389,34 @@ func TestValidateRemoteHTTP_RejectsConflictingFields(t *testing.T) {
 	}
 }
 
+// TestValidate_RejectsExplicitEmptyHeadersOnNonRemoteHTTP pins
+// codex bot r4 P2 closure (PR #169): YAML `headers: {}` decodes
+// as a non-nil empty map; the pre-fix `len(Headers) != 0` check
+// silently accepted that explicit-empty case. Switch to
+// `Headers != nil` so the field assertion fires whenever the YAML
+// MENTIONS headers (with or without entries) under a non-
+// remote-http transport.
+func TestValidate_RejectsExplicitEmptyHeadersOnNonRemoteHTTP(t *testing.T) {
+	for _, tp := range []string{TransportStdioBridge, TransportNativeHTTP} {
+		t.Run(tp, func(t *testing.T) {
+			m := &ServerManifest{
+				Name:      "x",
+				Kind:      KindGlobal,
+				Transport: tp,
+				Command:   "npx",
+				Headers:   map[string]string{}, // explicit non-nil empty
+			}
+			err := m.Validate()
+			if err == nil {
+				t.Fatal("expected rejection of explicit empty headers map; got nil")
+			}
+			if !strings.Contains(err.Error(), "headers") {
+				t.Errorf("error must mention headers; got %v", err)
+			}
+		})
+	}
+}
+
 // TestValidate_RejectsURLOnNonRemoteHTTP pins the symmetric guard:
 // the new URL field is REJECTED on stdio-bridge / native-http
 // transports. Silent acceptance would let a malformed manifest carry
