@@ -160,6 +160,39 @@ func TestImportVSCodeWorkspace_HTTPServer_PlaintextHTTPSkips(t *testing.T) {
 	}
 }
 
+// TestImportVSCodeWorkspace_HTTPServer_UppercaseHTTPSSkips pins bot
+// r4 P2 closure (PR #172): manifest validator's https:// check is
+// case-sensitive (literal lowercase HasPrefix). The projector must
+// match exactly — otherwise URLs like "HTTPS://example.com/mcp"
+// project here and then fail manifest validation, the same wrong-
+// diagnostic flow bot r3 fixed for plaintext http://.
+func TestImportVSCodeWorkspace_HTTPServer_UppercaseHTTPSSkips(t *testing.T) {
+	ws := t.TempDir()
+	writeMCPJSON(t, ws, `{
+  "servers": {
+    "yelling": {"type": "http", "url": "HTTPS://example.com/mcp"}
+  }
+}`)
+	a := NewAPI()
+	result, err := a.ImportVSCodeWorkspace(ws, VSCodeImportOpts{})
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if !result.EmptyResult {
+		t.Errorf("EmptyResult should be true for uppercase HTTPS; got %+v", result)
+	}
+	foundSkip := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "not https") && strings.Contains(w, "yelling") {
+			foundSkip = true
+			break
+		}
+	}
+	if !foundSkip {
+		t.Errorf("expected not-https skip warning; got: %v", result.Warnings)
+	}
+}
+
 func TestImportVSCodeWorkspace_HTTPServer_NoURLSkips(t *testing.T) {
 	ws := t.TempDir()
 	writeMCPJSON(t, ws, `{

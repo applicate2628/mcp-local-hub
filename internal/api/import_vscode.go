@@ -262,14 +262,21 @@ func projectVSCodeServer(name string, entry map[string]any, exp *PlaceholderExpa
 			}
 			return nil, warnings
 		}
-		// Bot r3 P2 closure (PR #172): schema requires https:// for
-		// remote-http. A plaintext http://localhost workspace entry
-		// would project here and then fail manifest validation with
-		// the wrong diagnostic ("remote-http requires https://"). Skip
-		// upfront with a clear cause so the operator knows the
-		// workspace url itself is the issue, not the projection.
-		if !strings.HasPrefix(strings.ToLower(expandedURL), "https://") {
-			warnings = append(warnings, fmt.Sprintf("server %q: url %q is not https:// — remote-http manifests require TLS; skipped", name, expandedURL))
+		// Schema requires https:// for remote-http. A plaintext
+		// http://localhost workspace entry would project here and
+		// then fail manifest validation with the wrong diagnostic
+		// ("remote-http requires https://"). Skip upfront with a
+		// clear cause so the operator knows the workspace url
+		// itself is the issue, not the projection.
+		//
+		// Case-sensitive lowercase check to match
+		// config.ServerManifest.Validate's literal HasPrefix(url,
+		// "https://"). Bot r4 P2 closure (PR #172): a previous fix
+		// lowercased for comparison, which let `HTTPS://example.com`
+		// pass here and then fail at manifest creation — the same
+		// "generated but uninstallable draft" path bot r3 closed.
+		if !strings.HasPrefix(expandedURL, "https://") {
+			warnings = append(warnings, fmt.Sprintf("server %q: url %q is not https:// — remote-http manifests require TLS (case-sensitive prefix); skipped", name, expandedURL))
 			return nil, warnings
 		}
 		hdrs, _ := entry["headers"].(map[string]any)
