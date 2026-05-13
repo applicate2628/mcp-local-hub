@@ -37,11 +37,19 @@ func TestRemoteClientForCmd() *http.Client {
 // the given httptest.NewTLSServer and installs it as the hook for
 // the duration of the test. Returns a cleanup closure that restores
 // the previous hook. Tests should pass it to t.Cleanup.
+//
+// The borrowed marketplace builder applies a hard 15s http.Client
+// Timeout that would mask the operator-visible --timeout flag (bot
+// r2 P2 closure, PR #171). Drop it here so the test hook matches the
+// production no-Timeout policy where ctx-deadline is the single
+// source of truth.
 func InstallTestRemoteTestClientForCLI(srv *httptest.Server) func() {
 	testRemoteTestClientMu.Lock()
 	defer testRemoteTestClientMu.Unlock()
 	prev := testRemoteTestClient
-	testRemoteTestClient = buildTLSTrustingClient(srv)
+	c := buildTLSTrustingClient(srv)
+	c.Timeout = 0
+	testRemoteTestClient = c
 	return func() {
 		testRemoteTestClientMu.Lock()
 		defer testRemoteTestClientMu.Unlock()

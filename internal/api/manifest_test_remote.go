@@ -22,14 +22,12 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"mcp-local-hub/internal/buildinfo"
 	"mcp-local-hub/internal/config"
 )
 
 const (
-	testRemoteHTTPTimeout      = 15 * time.Second
 	testRemoteResponseMaxBytes = 1 * 1024 * 1024 // 1 MB ceiling on the initialize response
 	testRemoteProtocolVersion  = "2025-11-25"    // pinned MCP Streamable HTTP version
 	testRemoteRPCRequestID     = 1               // JSON-RPC id we send and expect echoed back
@@ -103,12 +101,19 @@ func (a *API) manifestTestRemoteFromYAML(ctx context.Context, name, yamlStr stri
 // newTestRemoteClient builds the production HTTPS-only client used
 // for test-remote. Shares transport defaults (proxy, keep-alive,
 // disable-compression) + redirect policy with the marketplace
-// fetcher; only the timeout name differs for readability.
+// fetcher.
+//
+// Timeout is intentionally zero: the operator-supplied --timeout on
+// the CLI wraps the request in a context.WithTimeout, and that
+// deadline is the single source of truth for cancellation. Setting a
+// hard http.Client.Timeout would silently cap user-supplied values
+// above the constant — bot r2 P2 closure (PR #171): slow but healthy
+// remote endpoints were reported as failed at the 15s cap even when
+// operators explicitly requested a longer window.
 func newTestRemoteClient() *http.Client {
 	return &http.Client{
 		Transport:     newMarketplaceTransport(),
 		CheckRedirect: rejectNonHTTPSRedirect,
-		Timeout:       testRemoteHTTPTimeout,
 	}
 }
 

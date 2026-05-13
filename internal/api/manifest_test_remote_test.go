@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestManifestTestRemote_HappyPath(t *testing.T) {
@@ -239,6 +240,40 @@ func TestFindMatchingRPCReply_SurfacesDecodeError(t *testing.T) {
 	_, err := findMatchingRPCReply([][]byte{[]byte("not json {{")}, 1)
 	if err == nil || !strings.Contains(err.Error(), "decode response") {
 		t.Errorf("expected decode-response diagnostic, got %v", err)
+	}
+}
+
+// TestNewTestRemoteClient_NoHardcodedTimeout pins bot r2 P2 closure
+// (PR #171): the production client must not carry a Timeout that
+// would silently override the operator's --timeout flag. Cancellation
+// goes through ctx only.
+func TestNewTestRemoteClient_NoHardcodedTimeout(t *testing.T) {
+	c := newTestRemoteClient()
+	if c.Timeout != 0 {
+		t.Errorf("newTestRemoteClient Timeout=%v, want 0 (ctx-only cancellation)", c.Timeout)
+	}
+}
+
+// TestSendRemoteInitialize_RespectsContextDeadline pins that a
+// caller-supplied ctx deadline cancels a slow upstream, regardless
+// of any client-level timeout (which we don't set). A 200 ms ctx
+// against a server that sleeps 2 s must fail fast.
+func TestSendRemoteInitialize_RespectsContextDeadline(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(2 * time.Second)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
+	}))
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := sendRemoteInitialize(ctx, buildTLSTrustingClient(srv), srv.URL, nil)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected ctx deadline error")
+	}
+	if elapsed > 1*time.Second {
+		t.Errorf("elapsed=%v — ctx should have cancelled well before server sleep finished", elapsed)
 	}
 }
 
