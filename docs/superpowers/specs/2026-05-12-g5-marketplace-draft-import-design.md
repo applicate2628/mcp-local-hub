@@ -146,7 +146,7 @@ Warnings go to stderr (`cmd.ErrOrStderr()` per G7's Codex P2 fix). YAML on stdou
 - `marketplace show <id>` prints metadata (id, name, summary, transport, command/url, args, env, homepage, license, categories, readme_url). README body is intentionally NOT fetched in v0.3.0 (deferred per Out-of-scope).
 - `marketplace generate <id>` prints valid draft YAML to stdout. Stdio entries map to `transport: stdio-bridge` (codex r1 P1 closure — NOT `native-http`); http entries refuse with G6-deferral warning. The draft requires operator edit (`name:` rename + port pick + sensitive-env redaction) before `manifest create` accepts it.
 - Stale cache (>24h) triggers conditional GET; network failure falls back to stale data with WARN.
-- Cache file routed through `writeHubMcpStateFile` (codex r1 P1 closure): 0600 + DACL-verified parent + atomic rename + flock + post-rename DACL verify. Read path goes through `VerifyHubMcpStateDACL` + `readHubMcpStateFile`.
+- Cache file routed through `writeHubMcpStateFile` (codex r1 P1 closure): 0600 + DACL-verified parent + atomic tempfile + rename + post-rename DACL re-verify (best-effort cache, no cross-process flock — codex r3 P2 closure). Read path goes through `VerifyHubMcpStateDACL` + `readHubMcpStateFile`.
 - HTTPS-only enforced: `--registry` URLs not matching `https://` are rejected; redirects to non-HTTPS targets are rejected via `CheckRedirect`.
 - Compression disabled on the HTTP client: 10MB cap applies to wire bytes (no gzip-bomb amplification).
 - Future `fetched_at` (clock rollback / corrupted cache) forces revalidation; `MarketplaceCacheAge` is non-negative.
