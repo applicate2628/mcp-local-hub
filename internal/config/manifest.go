@@ -153,6 +153,22 @@ func ParseManifest(r io.Reader) (*ServerManifest, error) {
 			return nil, fmt.Errorf("manifest %s: headers is only valid with transport=remote-http (got transport=%q; remove the headers: key)", m.Name, m.Transport)
 		}
 	}
+	// Symmetric guard (codex bot r9 P2 closure on PR #169): reject
+	// local-subprocess keys mentioned under transport=remote-http.
+	// The Go-struct Validate() can only spot non-zero values, so
+	// `command:` (bare) / `command: null` / `command: ""` would
+	// otherwise pass; same for `base_args:` / `env:` / `daemons:`.
+	// Key-presence detection requires the YAML-level second pass.
+	if m.Transport == TransportRemoteHTTP {
+		for _, k := range []string{
+			"command", "base_args", "base_args_template", "env",
+			"daemons", "languages", "port_pool", "idle_timeout_min",
+		} {
+			if _, mentioned := keyed[k]; mentioned {
+				return nil, fmt.Errorf("manifest %s: transport=remote-http rejects %s: (no local subprocess / no per-daemon port; remove the %s key)", m.Name, k, k)
+			}
+		}
+	}
 	var missing []string
 	for i, a := range m.BaseArgs {
 		expanded, miss := expandEnvCrossPlatform(a)

@@ -467,6 +467,45 @@ func TestParseManifest_RejectsHeadersKeyOnNonRemoteHTTP(t *testing.T) {
 	}
 }
 
+// TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP pins
+// codex bot r9 P2 closure (PR #169): the symmetric guard. The
+// remote-http branch in Validate only rejects NON-ZERO values
+// (e.g. m.Command != ""), so YAML mentioning `command:`,
+// `command: null`, `base_args:`, `env:`, `daemons:` with explicit-
+// empty values would bypass the gate. ParseManifest's second-pass
+// keyed scan catches the mentioning regardless of value.
+func TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP(t *testing.T) {
+	cases := []struct {
+		name string
+		key  string
+		yaml string
+	}{
+		{"command empty", "command", "name: ctx7\nkind: global\ntransport: remote-http\nurl: https://x.example\ncommand: \"\"\n"},
+		{"command null", "command", "name: ctx7\nkind: global\ntransport: remote-http\nurl: https://x.example\ncommand: null\n"},
+		{"command bare key", "command", "name: ctx7\nkind: global\ntransport: remote-http\nurl: https://x.example\ncommand:\n"},
+		{"base_args empty list", "base_args", "name: ctx7\nkind: global\ntransport: remote-http\nurl: https://x.example\nbase_args: []\n"},
+		{"base_args bare", "base_args", "name: ctx7\nkind: global\ntransport: remote-http\nurl: https://x.example\nbase_args:\n"},
+		{"env empty map", "env", "name: ctx7\nkind: global\ntransport: remote-http\nurl: https://x.example\nenv: {}\n"},
+		{"env bare", "env", "name: ctx7\nkind: global\ntransport: remote-http\nurl: https://x.example\nenv:\n"},
+		{"daemons empty list", "daemons", "name: ctx7\nkind: global\ntransport: remote-http\nurl: https://x.example\ndaemons: []\n"},
+		{"daemons bare", "daemons", "name: ctx7\nkind: global\ntransport: remote-http\nurl: https://x.example\ndaemons:\n"},
+		{"languages bare", "languages", "name: ctx7\nkind: global\ntransport: remote-http\nurl: https://x.example\nlanguages:\n"},
+		{"port_pool bare", "port_pool", "name: ctx7\nkind: global\ntransport: remote-http\nurl: https://x.example\nport_pool:\n"},
+		{"idle_timeout_min zero", "idle_timeout_min", "name: ctx7\nkind: global\ntransport: remote-http\nurl: https://x.example\nidle_timeout_min: 0\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseManifest(strings.NewReader(tc.yaml))
+			if err == nil {
+				t.Fatalf("expected %s-key rejection at parse time; got nil", tc.key)
+			}
+			if !strings.Contains(err.Error(), tc.key) {
+				t.Errorf("error must name %q for operator forensics; got %v", tc.key, err)
+			}
+		})
+	}
+}
+
 // TestValidate_RejectsExplicitEmptyHeadersOnNonRemoteHTTP pins
 // codex bot r4 P2 closure (PR #169): YAML `headers: {}` decodes
 // as a non-nil empty map; the pre-fix `len(Headers) != 0` check
