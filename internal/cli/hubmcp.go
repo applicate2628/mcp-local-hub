@@ -112,7 +112,7 @@ to hub-mcp-tokens.json. The live hub picks up the new tokens via the
 internal /reload-tokens endpoint within ms.
 
 After a successful rotation, the existing client config is stale —
-rerun ` + "`mcphub install --server <each> --client <client>`" + ` to
+rerun ` + "`mcphub install --server <each> --clients <client>`" + ` to
 refresh the live config with the new token.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if client == "" {
@@ -311,8 +311,14 @@ func fallbackReloadWarning(cmd *cobra.Command, cause error) error {
 }
 
 func printRotationOK(cmd *cobra.Command, client, suffix string) {
+	// codex bot phase5 r5 P2 closure on PR #160: `mcphub install`
+	// uses `--clients` (plural) — `--client` does not exist and
+	// fails with "unknown flag". Operators following this guidance
+	// would think rotation completed while traffic continued to 401
+	// against the stale token until they discovered the correct
+	// flag form.
 	msg := fmt.Sprintf(
-		"Rotated token for client %s. Run `mcphub install --client %s` to refresh the live config with the new token.",
+		"Rotated token for client %s. Run `mcphub install --clients %s` to refresh the live config with the new token.",
 		client, client,
 	)
 	if suffix != "" {
