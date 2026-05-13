@@ -237,30 +237,27 @@ func projectVSCodeServer(name string, entry map[string]any, exp *PlaceholderExpa
 		}
 		return projected, warnings
 	case "http", "sse":
-		// VS Code's `type: http` and `type: sse` describe a REMOTE MCP
-		// server addressed by URL — the client opens an HTTP connection
-		// directly. mcp-local-hub's `transport: native-http` is
-		// different: it means a LOCALLY-spawned daemon that exposes an
-		// HTTP endpoint (see servers/serena/manifest.yaml: command: uvx
-		// ... --transport streamable-http). The current ServerManifest
-		// schema requires a `command` field for every manifest
-		// (internal/config/manifest.go Validate enforces this); no
-		// shape proxies to a remote URL.
-		//
-		// Remote URL imports belong to the G6 backlog ("Remote MCP
-		// manifests"), deferred to v0.4.x. Skip with a clear warning
-		// rather than emit YAML that ParseManifest would reject.
-		//
-		// Codex bot P1 on PR #151 line 289 caught the original
-		// invalid emission.
-		_ = url
-		warnings = append(warnings, fmt.Sprintf(
-			"server %q: type=%s describes a remote MCP server — current manifest "+
-				"schema requires a locally-spawned command (transport: stdio-bridge or "+
-				"native-http with command:). Remote URL imports land in backlog G6 "+
-				"(Remote MCP manifests), deferred to v0.4.x. Skipped.",
-			name, serverType))
-		return nil, warnings
+		// VS Code's `type: http` and `type: sse` describe a REMOTE
+		// MCP server addressed by URL — the client opens an HTTP
+		// connection directly. Project onto manifest
+		// transport=remote-http (G6 sub-PR 4) so the operator gets a
+		// valid draft instead of the prior skip-with-warning. Note:
+		// `native-http` is reserved for LOCALLY-spawned daemons that
+		// expose an HTTP endpoint (servers/serena/manifest.yaml); the
+		// two transports look similar but native-http requires a
+		// `command:` and remote-http forbids it.
+		if url == "" {
+			warnings = append(warnings, fmt.Sprintf("server %q: type=%s but no url — skipped", name, serverType))
+			return nil, warnings
+		}
+		hdrs, _ := entry["headers"].(map[string]any)
+		projected := &vscodeProjected{
+			Name:      name,
+			Transport: "remote-http",
+			URL:       exp.Expand(url),
+			Headers:   expandStringMap(hdrs, exp),
+		}
+		return projected, warnings
 	default:
 		warnings = append(warnings, fmt.Sprintf("server %q: unknown type %q (expected stdio/http/sse) — skipped", name, serverType))
 		return nil, warnings
@@ -311,13 +308,34 @@ func renderVSCodeProjectedYAML(entries []vscodeProjected) string {
 					sb.WriteString(fmt.Sprintf("  %s: %s\n", yamlEscape(k), yamlEscape(e.Headers[k])))
 				}
 			}
+		case "remote-http":
+			sb.WriteString(fmt.Sprintf("url: %s\n", yamlEscape(e.URL)))
+			if len(e.Headers) > 0 {
+				sb.WriteString("headers:\n")
+				for _, k := range sortedStringKeys(e.Headers) {
+					sb.WriteString(fmt.Sprintf("  %s: %s\n", yamlEscape(k), yamlEscape(e.Headers[k])))
+				}
+			}
 		}
-		// Daemons block left as a placeholder. Manifest validation
-		// will require the operator to add at least one daemon
-		// before install — the draft does not pretend to be
-		// install-ready.
-		sb.WriteString("daemons:\n  - name: default\n    port: 0  # TODO: assign\n")
-		sb.WriteString("client_bindings: []\n")
+		switch e.Transport {
+		case "remote-http":
+			// Remote-http manifests have no local daemons (schema
+			// rejects daemons: with this transport). Prefill bindings
+			// for the adapters that support remote-http per the
+			// adapter compatibility matrix; operator removes the ones
+			// they don't want. Antigravity is excluded — stdio-relay
+			// only — and uninstall handles it at install time.
+			sb.WriteString("client_bindings:\n")
+			for _, c := range []string{"claude-code", "codex-cli", "cursor", "gemini-cli", "vscode"} {
+				sb.WriteString(fmt.Sprintf("  - client: %s\n", c))
+			}
+		default:
+			// Local-daemon transports: leave the daemons block as a
+			// placeholder so manifest validation surfaces the
+			// port-assignment gate before install.
+			sb.WriteString("daemons:\n  - name: default\n    port: 0  # TODO: assign\n")
+			sb.WriteString("client_bindings: []\n")
+		}
 	}
 	return sb.String()
 }

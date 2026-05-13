@@ -200,7 +200,11 @@ func TestMarketplaceCmd_RejectsEmbeddedCredentialURL(t *testing.T) {
 	}
 }
 
-func TestMarketplaceGenerate_HttpEntrySkipsToStderr(t *testing.T) {
+// TestMarketplaceGenerate_HttpEntryEmitsRemoteHTTPDraft pins G6
+// sub-PR 4 closure: http catalog entries now project onto a
+// transport=remote-http manifest written to stdout. No stderr noise
+// (no G6 deferral). Operator pipes the draft into manifest create.
+func TestMarketplaceGenerate_HttpEntryEmitsRemoteHTTPDraft(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"schema_version":"1","entries":[
 			{"id":"ctx7","name":"Context7","transport":"http","url":"https://mcp.context7.com/mcp"}
@@ -213,14 +217,25 @@ func TestMarketplaceGenerate_HttpEntrySkipsToStderr(t *testing.T) {
 	c.SetOut(&stdout)
 	c.SetErr(&stderr)
 	c.SetArgs([]string{"generate", "ctx7", "--registry", srv.URL})
-	err := c.ExecuteContext(context.Background())
-	if err == nil {
-		t.Fatal("expected non-zero exit for http entry")
+	if err := c.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("generate: %v\nstderr: %s", err, stderr.String())
 	}
-	if stdout.Len() != 0 {
-		t.Errorf("stdout must be empty on G6-deferral; got: %s", stdout.String())
+	out := stdout.String()
+	for _, want := range []string{
+		"transport: remote-http",
+		"url: https://mcp.context7.com/mcp",
+		"name: ctx7",
+		"manifest test-remote",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stdout missing %q\n---\n%s", want, out)
+		}
 	}
-	if !strings.Contains(stderr.String(), "G6") {
-		t.Errorf("stderr missing G6 deferral note\n---\n%s", stderr.String())
+	if strings.Contains(out, "daemons:") {
+		t.Errorf("stdout must not include daemons: for remote-http\n---\n%s", out)
+	}
+	// No stderr noise: G6 sub-PR 4 closes the deferral surface.
+	if strings.Contains(stderr.String(), "G6") {
+		t.Errorf("stderr should no longer mention G6 deferral; got: %s", stderr.String())
 	}
 }

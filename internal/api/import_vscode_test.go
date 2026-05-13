@@ -70,25 +70,54 @@ func TestImportVSCodeWorkspace_HTTPServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
-	// G7 skips http/sse types — they describe remote URLs that require
-	// the G6 backlog item (Remote MCP manifests, v0.4.x) before they
-	// can produce valid mcp-local-hub manifests. Codex bot P1 on PR
-	// #151 line 289 caught the original invalid emission.
-	if !result.EmptyResult {
-		t.Errorf("EmptyResult should be true when only http/sse entries exist: %+v", result)
+	// G6 sub-PR 4: http/sse entries now project onto transport=
+	// remote-http drafts. The YAML must carry url + headers and
+	// must NOT include a daemons: block (schema rejects daemons on
+	// remote-http).
+	if result.EmptyResult {
+		t.Errorf("EmptyResult should be false now that http entries project: %+v", result)
 	}
-	if result.YAML != "" {
-		t.Errorf("YAML should be empty (http skipped); got:\n%s", result.YAML)
+	if !strings.Contains(result.YAML, "transport: remote-http") {
+		t.Errorf("YAML missing transport: remote-http; got:\n%s", result.YAML)
+	}
+	if !strings.Contains(result.YAML, "https://example.com/mcp") {
+		t.Errorf("YAML missing url; got:\n%s", result.YAML)
+	}
+	if !strings.Contains(result.YAML, "Authorization: Bearer abc") {
+		t.Errorf("YAML missing Authorization header; got:\n%s", result.YAML)
+	}
+	if strings.Contains(result.YAML, "daemons:") {
+		t.Errorf("YAML must NOT include daemons: for remote-http; got:\n%s", result.YAML)
+	}
+	if !strings.Contains(result.YAML, "client_bindings:") {
+		t.Errorf("YAML missing client_bindings:; got:\n%s", result.YAML)
+	}
+}
+
+func TestImportVSCodeWorkspace_HTTPServer_NoURLSkips(t *testing.T) {
+	ws := t.TempDir()
+	writeMCPJSON(t, ws, `{
+  "servers": {
+    "bad": {"type": "http"}
+  }
+}`)
+	a := NewAPI()
+	result, err := a.ImportVSCodeWorkspace(ws, VSCodeImportOpts{})
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if !result.EmptyResult {
+		t.Errorf("EmptyResult should be true (http without url is skipped); got %+v", result)
 	}
 	foundSkip := false
 	for _, w := range result.Warnings {
-		if strings.Contains(w, "remote MCP server") && strings.Contains(w, "G6") {
+		if strings.Contains(w, "no url") && strings.Contains(w, "bad") {
 			foundSkip = true
 			break
 		}
 	}
 	if !foundSkip {
-		t.Errorf("expected warning referencing G6 backlog deferral; got: %v", result.Warnings)
+		t.Errorf("expected no-url skip warning; got: %v", result.Warnings)
 	}
 }
 
@@ -301,14 +330,17 @@ func TestImportVSCodeWorkspace_TypeInferenceFromCommandOrURL(t *testing.T) {
 	if !strings.Contains(result.YAML, "stdio-bridge") {
 		t.Errorf("YAML missing stdio-bridge transport (implicit from command): %s", result.YAML)
 	}
-	// implicit-http inferred to type=http → skipped per G7 contract
-	// (remote URLs land in G6, v0.4.x). YAML must NOT contain a
-	// native-http projection for the url-only entry.
-	if strings.Contains(result.YAML, "native-http") {
-		t.Errorf("YAML must not project http to native-http (G6 territory): %s", result.YAML)
+	// G6 sub-PR 4: implicit type=http (inferred from url-only entry)
+	// now projects onto transport=remote-http. The legacy "skip
+	// with G6 warning" contract is replaced by an actual draft.
+	if !strings.Contains(result.YAML, "transport: remote-http") {
+		t.Errorf("YAML missing remote-http projection for url-only entry: %s", result.YAML)
 	}
-	if len(result.Servers) != 1 || result.Servers[0] != "implicit-stdio" {
-		t.Errorf("only implicit-stdio should project; got servers = %v", result.Servers)
+	if strings.Contains(result.YAML, "native-http") {
+		t.Errorf("YAML must not confuse http with native-http (different transports): %s", result.YAML)
+	}
+	if len(result.Servers) != 2 {
+		t.Errorf("expected both servers to project; got %v", result.Servers)
 	}
 }
 
