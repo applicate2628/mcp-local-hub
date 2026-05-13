@@ -73,6 +73,55 @@ client_bindings:
 	}
 }
 
+// TestManifestValidateRemoteHTTPWeeklyRefreshTrueWarns pins codex
+// bot r6 P2 closure (PR #169) + G6 spec §"Validation rules":
+// remote-http has no local daemon to refresh, so weekly_refresh:
+// true is a no-op. Emit a non-fatal warning so operators don't
+// believe weekly refresh is active when it's ignored. The YAML
+// bool collapses absent / false into the same Go value (false),
+// so we can only flag the explicit-true case.
+func TestManifestValidateRemoteHTTPWeeklyRefreshTrueWarns(t *testing.T) {
+	a := NewAPI()
+	yaml := `name: ctx7
+kind: global
+transport: remote-http
+url: https://mcp.context7.com/mcp
+weekly_refresh: true
+client_bindings:
+  - client: claude-code
+`
+	warnings := a.ManifestValidate(yaml)
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "weekly_refresh") && strings.Contains(w, "remote-http") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected weekly_refresh-on-remote-http warning; got %v", warnings)
+	}
+}
+
+// TestManifestValidateRemoteHTTPWeeklyRefreshFalseSilent pins that
+// the warning ONLY fires for explicit true. Default (absent) maps
+// to false → no warning.
+func TestManifestValidateRemoteHTTPWeeklyRefreshFalseSilent(t *testing.T) {
+	a := NewAPI()
+	yaml := `name: ctx7
+kind: global
+transport: remote-http
+url: https://mcp.context7.com/mcp
+client_bindings:
+  - client: claude-code
+`
+	warnings := a.ManifestValidate(yaml)
+	for _, w := range warnings {
+		if strings.Contains(w, "weekly_refresh") {
+			t.Errorf("unexpected weekly_refresh warning when key absent: %v", warnings)
+		}
+	}
+}
+
 // TestManifestValidateGlobalStdioBridgeStillWarnsOnNoDaemons pins
 // the negative case: ordinary global stdio-bridge / native-http
 // manifests with no daemons SHOULD still emit the warning. The

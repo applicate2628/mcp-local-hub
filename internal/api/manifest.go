@@ -418,6 +418,16 @@ func manifestValidationWarnings(m *config.ServerManifest) []string {
 			warnings = append(warnings, fmt.Sprintf("daemon %q has port=0", d.Name))
 		}
 	}
+	// G6 spec §"Validation rules" + codex bot r6 P2 closure
+	// (PR #169): remote-http has no local daemon to refresh, so
+	// weekly_refresh:true is a no-op. The YAML decoder collapses
+	// absent / explicit-false / explicit-true into a single bool
+	// (false for the first two), so we can only flag the explicit-
+	// true case here. Operator sees the warning + the spec hint
+	// to remove the line.
+	if m.Transport == config.TransportRemoteHTTP && m.WeeklyRefresh {
+		warnings = append(warnings, "weekly_refresh has no effect on remote-http manifests (no local daemon to refresh) — remove the line")
+	}
 	return warnings
 }
 
