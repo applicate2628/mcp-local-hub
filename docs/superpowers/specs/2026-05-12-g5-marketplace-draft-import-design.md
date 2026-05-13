@@ -19,6 +19,8 @@ This mirrors the G7 VS Code workspace import pattern: external config is untrust
 
 **MVP source:** GitHub raw URL of a curated marketplace JSON catalog. v1 ships with a SINGLE registry: `https://raw.githubusercontent.com/applicate2628/mcp-local-hub/master/marketplace/v1/catalog.json`. The catalog file is hand-maintained in this repo. v0.4.x can grow to multi-registry support; for v0.3.0, one source eliminates trust-management complexity.
 
+**HTTPS enforcement (codex r1 P1 closure):** the `--registry` URL MUST be `https://` (parse and reject otherwise). The HTTP client uses Go's default transport with normal TLS verification (no `InsecureSkipVerify`). HTTPS-to-HTTP downgrade redirects are rejected: a `CheckRedirect` callback verifies every redirect target is `https://`. Tests use `httptest.NewTLSServer` with the server's certificate injected into the test client's `RootCAs`. Compression is explicitly disabled (`DisableCompression: true`) so the 10MB body cap applies to wire bytes (defeats gzip-bomb amplification — codex r1 P2).
+
 Catalog JSON shape (v1):
 
 ```json
@@ -71,8 +73,13 @@ mcphub marketplace search [query]
     transport, categories.
 
 mcphub marketplace show <id>
-    Print one entry's full metadata + fetched README (separately
-    fetched from entry.readme_url with the same cache discipline).
+    Print one entry's full metadata: id, name, summary, transport,
+    command/url, args, env, homepage, license, categories, AND the
+    entry.readme_url string (not the README body — operator opens
+    that URL themselves). codex r1 P1 closure: README body fetch
+    is deferred from v0.3.0 — separate fetch + cache discipline
+    + UI line-wrap is non-trivial and the URL alone is enough for
+    a single-click external open.
 
 mcphub marketplace generate <id>
     Print draft mcp-local-hub manifest YAML to stdout. Same shape
@@ -94,8 +101,10 @@ Warnings go to stderr (`cmd.ErrOrStderr()` per G7's Codex P2 fix). YAML on stdou
 | Multi-registry support | Single curated registry simplifies trust. v0.4.x adds `marketplace add-registry <url>`. |
 | Per-entry signatures / provenance verification | Out of scope for v0.3.0; relies on operator trust in the curated catalog. v0.4.x can add SHA-256 pins or sigstore verification. |
 | Auto-install / one-click install | Explicitly rejected per ravitemer-mcp-hub-adoption-proposals "Do Not Copy" list. Operator runs `mcphub manifest create` + `mcphub install` as separate explicit steps. |
-| Native-http (remote URL) entries | G6 Remote MCP manifests territory; G5 skips with warning. |
+| Native-http (remote URL) entries | G6 Remote MCP manifests territory; G5 skips with warning. The current manifest schema requires `command` so even hand-authored remote manifests fail until G6 lands. |
 | Search by tool name / capability | Catalog entries don't carry capability metadata in v1. Future v0.4.x can add it. |
+| README body fetch inside `marketplace show` | codex r1 P1 closure: print `readme_url` only; deferred to v0.4.x. |
+| Automatic expansion of sensitive env placeholders | codex r1 P1 closure: catalog-controlled `${env:VAR}` values matching the sensitive-name policy below are LEFT VERBATIM in the draft (operator must consciously edit the draft before `manifest create`). |
 
 ## Threat model
 
@@ -105,9 +114,13 @@ Warnings go to stderr (`cmd.ErrOrStderr()` per G7's Codex P2 fix). YAML on stdou
 | MITM on catalog fetch | HTTPS-only (registry URL must be `https://`). Cache validates schema_version + JSON shape; rejects malformed payloads. |
 | Stale catalog with revoked entries | TTL + ETag + explicit refresh. Stale cache surfaces `WARN: catalog is N hours stale` so operator can refresh. |
 | Catalog file replaced by attacker on the registry host | Out-of-scope for v0.3.0 — registry trust is operator responsibility. v0.4.x signature verification closes this. |
-| `${workspaceFolder}` / `${env:VAR}` placeholders in catalog `args` | Identical handling to G7 — expand at `marketplace generate` time using current shell env + workspace argument; surface empty-env warnings. |
-| Disk fill via abusive catalog size | 10MB hard cap on the fetched catalog body (mirrors watchdog log size); reject + log on overflow. |
-| Race on cache write | Atomic write via `O_EXCL` temp + rename, mirroring `hub-mcp-tokens.json` pattern (see G4 v3 spec §"Token + endpoint state hardening"). |
+| `${workspaceFolder}` / `${env:VAR}` placeholders in catalog `args` | Reuse G7's existing `vscodeExpander` logic (export as `api.PlaceholderExpander`) — keep ONE expander across G5+G7 so semantics cannot diverge. Surface empty-env warnings to stderr. |
+| Catalog injects `${env:VAR}` for a sensitive env name | codex r1 P1 closure: define a sensitive-name policy — names matching `*_TOKEN`, `*_SECRET`, `*_PASSWORD`, `*_KEY`, `*_API_KEY`, `AWS_*`, `AZURE_*`, `GCP_*`, `GITHUB_*` are LEFT VERBATIM in the draft (not expanded). Generator returns a warning surfaced to stderr: `WARN: catalog references ${env:AWS_SECRET_ACCESS_KEY} — left verbatim in draft so the value is never written to the YAML you'll commit; edit before saving`. |
+| Disk fill via abusive catalog size | 10MB hard cap on the fetched catalog body (mirrors watchdog log size); reject + log on overflow. `DisableCompression: true` so the cap applies to wire bytes (defeats gzip-bomb amplification — codex r1 P2). |
+| Race on cache write | Reuse G4's `writeHubMcpStateFile` helper (codex r1 P1 closure) — atomic tempfile + rename + post-rename DACL re-verify on the parent dir handle (codex r3 P2 closure: this helper does NOT acquire `hub-mcp.lock`; cross-process flock is the caller's responsibility for multi-step transactions. The cache is best-effort metadata so atomic-rename alone is enough — a torn read fails JSON parse and triggers refresh on next load). Read path goes through `VerifyHubMcpStateDACL` + `readHubMcpStateFile`. Cache file leaf joins the existing state-name allowlist via `validateStateFileName`. |
+| HTTPS-to-HTTP downgrade via redirect | `CheckRedirect` callback rejects any redirect target whose scheme is not `https://`. |
+| Clock rollback making stale cache look fresh | codex r1 P2 closure: on read, if `fetched_at > now` (skew or corrupted timestamp), force revalidation. `MarketplaceCacheAge` is clamped non-negative. |
+| Catalog ID collision with reserved manifest name | codex r1 P2 closure: parser validates each `entry.id` via `CheckManifestName` (same gate as `mcphub manifest create <name>`), so an entry named `mcphub-hub`, an entry with whitespace, or an entry colliding with reserved Windows device names is rejected at parse time rather than failing at `manifest create` later. |
 
 ## Test surface
 
@@ -123,16 +136,23 @@ Warnings go to stderr (`cmd.ErrOrStderr()` per G7's Codex P2 fix). YAML on stdou
 
 **Playwright E2E:** none for v0.3.0 (CLI-only surface).
 
-**Manual smoke** (`docs/phase-3b-ii-verification.md` D2.8): run `marketplace search filesystem` → see filesys entry. Run `generate filesys > /tmp/draft.yaml`. Run `mcphub manifest create filesys < /tmp/draft.yaml`. Verify the manifest works end-to-end.
+**Manual smoke** (`docs/phase-3b-ii-verification.md` D2.8): run `marketplace search filesystem` → see `filesystem` entry. Run `marketplace generate filesystem > /tmp/draft.yaml`. **Operator edits `/tmp/draft.yaml`:** change `name: filesystem` to `name: filesystem-test` (so it doesn't collide with the canonical name once we add the registry), pick a real port for `daemons[0].port` (e.g. `9200`), inspect `command` and `base_args` to confirm no surprises, redact any sensitive env values the generator left verbatim. Then `mcphub manifest create filesystem-test < /tmp/draft.yaml` and `mcphub install --server filesystem-test`. Verify the daemon registers + the configured client surface picks it up.
+
+**Why the operator-edit step is load-bearing (codex r1 P1):** the catalog is external + untrusted. `marketplace generate` is a projection, not a save: it emits a `name:` matching the entry id and `port: 0` precisely so `manifest create` refuses it without an explicit operator-side rename + port pick. This forces inspection-before-save, in line with the spec's "no auto-install side effects" stance.
 
 ## Acceptance criteria
 
 - `marketplace search` returns matching entries from the curated catalog.
-- `marketplace show <id>` prints metadata + README (with same 24h cache + ETag).
-- `marketplace generate <id>` prints valid draft YAML to stdout that `mcphub manifest create` accepts.
+- `marketplace show <id>` prints metadata (id, name, summary, transport, command/url, args, env, homepage, license, categories, readme_url). README body is intentionally NOT fetched in v0.3.0 (deferred per Out-of-scope).
+- `marketplace generate <id>` prints valid draft YAML to stdout. Stdio entries map to `transport: stdio-bridge` (codex r1 P1 closure — NOT `native-http`); http entries refuse with G6-deferral warning. The draft requires operator edit (`name:` rename + port pick + sensitive-env redaction) before `manifest create` accepts it.
 - Stale cache (>24h) triggers conditional GET; network failure falls back to stale data with WARN.
-- Cache file 0600 + DACL-verified on Windows (handle-bound, parent dir check) — same hardening as G4 state files.
-- Native-http / SSE entries skipped with G6-deferral warning.
+- Cache file routed through `writeHubMcpStateFile` (codex r1 P1 closure): 0600 + DACL-verified parent + atomic tempfile + rename + post-rename DACL re-verify (best-effort cache, no cross-process flock — codex r3 P2 closure). Read path goes through `VerifyHubMcpStateDACL` + `readHubMcpStateFile`.
+- HTTPS-only enforced: `--registry` URLs not matching `https://` are rejected; redirects to non-HTTPS targets are rejected via `CheckRedirect`.
+- Compression disabled on the HTTP client: 10MB cap applies to wire bytes (no gzip-bomb amplification).
+- Future `fetched_at` (clock rollback / corrupted cache) forces revalidation; `MarketplaceCacheAge` is non-negative.
+- Catalog parser validates each `entry.id` via `CheckManifestName`; rejects entries that wouldn't pass `manifest create`'s gate.
+- Sensitive-env placeholders (`*_TOKEN`, `*_SECRET`, `*_PASSWORD`, `*_KEY`, `*_API_KEY`, `AWS_*`, `AZURE_*`, `GCP_*`, `GITHUB_*`) are left verbatim in the draft; generator emits a stderr WARN line per such placeholder.
+- Native-http (`transport: "http"`) entries are accepted at parse time but refused by `generate` with a G6-deferral warning that names today's workaround (none — wait for G6 or write a local stdio wrapper). SSE entries are out of scope for v1 — the parser rejects any transport other than `stdio` or `http`, so an SSE entry never reaches the generator.
 - 10MB payload cap rejects oversized catalogs.
 - `marketplace refresh` forces unconditional fetch.
 
@@ -140,13 +160,15 @@ Warnings go to stderr (`cmd.ErrOrStderr()` per G7's Codex P2 fix). YAML on stdou
 
 | File | Kind | Purpose |
 |---|---|---|
-| `marketplace/v1/catalog.json` | new | hand-maintained curated catalog (~10-20 entries to start) |
-| `internal/api/marketplace_catalog.go` | new | catalog parser + validator |
-| `internal/api/marketplace_cache.go` | new | TTL + ETag cache + atomic write |
-| `internal/api/marketplace_generate.go` | new | catalog entry → draft YAML projection (mirrors G7 placeholder expansion + skip http with G6 warning) |
-| `internal/api/marketplace_test.go` | new | unit tests |
+| `marketplace/v1/catalog.json` | new | hand-maintained curated catalog (~10 entries to start) |
+| `internal/api/marketplace_catalog.go` | new | catalog parser + validator (per-entry `CheckManifestName(id)` + transport allowlist) |
+| `internal/api/marketplace_cache.go` | new | TTL + ETag cache routed through `writeHubMcpStateFile` / `readHubMcpStateFile` (G4 hardening reuse) |
+| `internal/api/marketplace_http.go` | new | HTTPS-only client (parse + reject non-`https://`, `CheckRedirect` downgrade guard, `DisableCompression: true`) + injectable test client |
+| `internal/api/marketplace_generate.go` | new | catalog entry → draft YAML projection. Uses `config.TransportStdioBridge`; reuses G7's expander via newly-exported `api.PlaceholderExpander` so sensitive-env policy lives in one place |
+| `internal/api/import_vscode.go` | modify | promote private `vscodeExpander` to exported `PlaceholderExpander` (or extract to `internal/api/placeholder_expand.go`) so both G5 and G7 share one expander + sensitive-name allowlist |
+| `internal/api/marketplace_test.go` | new | unit tests covering schema, HTTPS enforcement, gzip-bomb rejection, sensitive-env redaction, clock-skew clamp |
 | `internal/cli/marketplace.go` | new | `mcphub marketplace {search,show,generate,refresh}` subcommands |
-| `internal/cli/marketplace_test.go` | new | CLI test covering cmd.ErrOrStderr routing + happy path |
+| `internal/cli/marketplace_test.go` | new | CLI test covering cmd.ErrOrStderr routing + happy path + httptest.NewTLSServer + test-client injection |
 | `internal/cli/root.go` | modify | register `marketplace` subcommand |
 
 ## Terms and Abbreviations

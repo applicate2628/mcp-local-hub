@@ -1,0 +1,34 @@
+//go:build !windows
+
+// POSIX leg of apitest.HardenedTempDir. Creates a 0700 subdir of
+// t.TempDir() so the secure-write parent-dir gate (which inspects
+// the IMMEDIATE parent's mode against the 0o077 mask) accepts it.
+// Linux/macOS test temp paths inherit 0755 from $TMPDIR.
+
+package apitest
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+// HardenedTempDir creates a subdir of t.TempDir(), chmod's it to
+// 0700, and returns the subdir path. The intermediate t.TempDir()
+// ancestors are still 0755 — the parent-dir gate only inspects the
+// IMMEDIATE parent of the file being written, which is this 0700
+// subdir.
+func HardenedTempDir(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	hardened := filepath.Join(root, "hardened-parent")
+	if err := os.Mkdir(hardened, 0o700); err != nil {
+		t.Fatalf("apitest.HardenedTempDir mkdir: %v", err)
+	}
+	// Defensive: explicit chmod after creation in case umask
+	// stripped bits from the mode arg to os.Mkdir.
+	if err := os.Chmod(hardened, 0o700); err != nil {
+		t.Fatalf("apitest.HardenedTempDir chmod: %v", err)
+	}
+	return hardened
+}

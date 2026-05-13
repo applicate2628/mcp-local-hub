@@ -1,0 +1,195 @@
+// internal/api/marketplace_generate.go — G5 Marketplace draft
+// generator. Spec §"CLI surface" + §"Out of scope".
+//
+// codex r1 P1 closures: map stdio → TransportStdioBridge (not
+// native-http). Reuse PlaceholderExpander (Phase 0) with
+// SkipSensitiveEnv: true so catalog-controlled secret names stay
+// verbatim in the draft. G6-deferral error names today's workaround.
+
+package api
+
+import (
+	"fmt"
+	"os"
+	"sort"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+
+	"mcp-local-hub/internal/config"
+)
+
+type GenerateOpts struct {
+	WorkspaceFolder string
+}
+
+// GenerateDraftManifest projects a catalog entry into draft YAML.
+// Returns (yaml, warnings, error). Warnings are operator-facing
+// stderr lines; the YAML is operator-facing stdout content.
+func GenerateDraftManifest(e *MarketplaceEntry, opts GenerateOpts) (string, []string, error) {
+	if e.Transport == "http" {
+		return "", nil, fmt.Errorf("entry %q is http transport — G6 (Remote MCP manifests) is deferred to v0.4.x; today's only workaround is to wait for G6 or hand-author a local stdio wrapper that proxies to %s",
+			e.ID, e.URL)
+	}
+	if e.Transport != "stdio" {
+		return "", nil, fmt.Errorf("entry %q transport %q is not supported by draft generation", e.ID, e.Transport)
+	}
+	workspace := opts.WorkspaceFolder
+	if workspace == "" {
+		// codex deep-sec PR #163 lane 3 P3 closure: surface
+		// os.Getwd failures instead of silently producing a draft
+		// with an empty workspace placeholder. The CLI layer
+		// already pre-resolves this, so this path is mostly the
+		// API-direct-call fallback.
+		wd, err := os.Getwd()
+		if err != nil {
+			return "", nil, fmt.Errorf("resolve workspace folder via os.Getwd: %w (set GenerateOpts.WorkspaceFolder explicitly)", err)
+		}
+		workspace = wd
+	}
+	// codex r6 P1 closure (PR #163): PlaceholderExpander.Expand
+	// writes to UndefinedEnv for any non-sensitive ${env:VAR} that
+	// resolves to empty. The map MUST be initialized to non-nil per
+	// the expander's documented contract (import_vscode.go) —
+	// otherwise a catalog entry with an unset non-sensitive env
+	// placeholder panics with "assignment to entry in nil map".
+	exp := &PlaceholderExpander{
+		Workspace:        workspace,
+		Getenv:           os.Getenv,
+		SkipSensitiveEnv: true, // catalog is untrusted
+		UndefinedEnv:     map[string]struct{}{},
+	}
+	args := make([]string, len(e.Args))
+	for i, a := range e.Args {
+		args[i] = exp.Expand(a)
+	}
+	env := map[string]string{}
+	for k, v := range e.Env {
+		env[k] = exp.Expand(v)
+	}
+	warnings := exp.WarningsForSensitive()
+	// Surface non-sensitive empty-resolution placeholders too: the
+	// operator should see exactly which ${env:*} substituted to empty
+	// before they pipe the draft to manifest create. Keep order
+	// deterministic so the warning stream is reproducible across
+	// runs.
+	if len(exp.UndefinedEnv) > 0 {
+		names := make([]string, 0, len(exp.UndefinedEnv))
+		for name := range exp.UndefinedEnv {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			warnings = append(warnings, fmt.Sprintf("catalog references ${env:%s} which expanded to empty (variable unset in the current environment); the draft will contain an empty value at that position — edit before saving", name))
+		}
+	}
+	// codex deep-sec PR #163 lane 2 P2 closure: workspace traversal
+	// warning. A catalog entry can put `${workspaceFolder}/../foo`
+	// in args or env values to break out of the workspace sandbox
+	// after expansion. The operator-edit gate is the last line of
+	// defense; surface the suspect placeholders explicitly so the
+	// operator notices them before piping to manifest create.
+	for _, raw := range collectTraversalCandidates(e.Args, e.Env) {
+		if traversalSuffixContainsParentRef(raw) {
+			warnings = append(warnings, fmt.Sprintf("catalog string %q uses ${workspaceFolder} followed by a parent-directory reference (..); the expanded path escapes the workspace — review before saving", raw))
+		}
+	}
+	draft := map[string]any{
+		"name":      e.ID,
+		"kind":      "global",
+		"transport": config.TransportStdioBridge,
+		"command":   e.Command,
+		"base_args": args,
+	}
+	if len(env) > 0 {
+		draft["env"] = env
+	}
+	// Port 0 + comment-style annotation: operator MUST pick a real
+	// port before `mcphub manifest create` will accept the draft.
+	// Same reasoning forces them to rename `name:` if the entry id
+	// collides with an installed server.
+	draft["daemons"] = []map[string]any{
+		{"name": "default", "port": 0},
+	}
+	draft["client_bindings"] = []map[string]any{
+		{"client": "claude-code", "daemon": "default", "url_path": "/mcp"},
+		{"client": "codex-cli", "daemon": "default", "url_path": "/mcp"},
+		{"client": "cursor", "daemon": "default", "url_path": "/mcp"},
+	}
+	data, err := yaml.Marshal(draft)
+	if err != nil {
+		return "", warnings, fmt.Errorf("yaml marshal: %w", err)
+	}
+	// Lead the YAML with an "edit-before-save" reminder so the
+	// operator cannot pipe to `manifest create` without seeing it.
+	header := strings.Join([]string{
+		"# Generated by `mcphub marketplace generate " + e.ID + "`.",
+		"# REQUIRED edits before `mcphub manifest create`:",
+		"#   1. Pick a real port for daemons[0].port (currently 0 — manifest create rejects).",
+		"#   2. Rename `name:` if you want a unique server id (currently the entry id).",
+		"#   3. Inspect command + base_args + env; replace any verbatim ${env:*} placeholders.",
+		"",
+	}, "\n")
+	return header + string(data), warnings, nil
+}
+
+// collectTraversalCandidates returns every string from args + env
+// values that mentions `${workspaceFolder}` literally. Order is
+// stable: args first (in order), then env values sorted by key, so
+// the warning stream is reproducible across runs.
+func collectTraversalCandidates(args []string, env map[string]string) []string {
+	out := make([]string, 0, len(args)+len(env))
+	for _, a := range args {
+		if strings.Contains(a, "${workspaceFolder}") {
+			out = append(out, a)
+		}
+	}
+	keys := make([]string, 0, len(env))
+	for k, v := range env {
+		if strings.Contains(v, "${workspaceFolder}") {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		out = append(out, env[k])
+	}
+	return out
+}
+
+// traversalSuffixContainsParentRef returns true when the part of `s`
+// following `${workspaceFolder}` references a parent directory via
+// a `..` path segment. A `..` segment after the placeholder is the
+// load-bearing signal: a catalog entry like
+// `${workspaceFolder}/../../etc/passwd` resolves outside the
+// workspace once expanded, while a legitimate
+// `${workspaceFolder}/db.sqlite` does not.
+//
+// Match rules (case-insensitive on the path separator, but the
+// `..` segment itself is byte-literal):
+//   - any of `/../`, `\..\`, `/..\`, `\../` after the placeholder
+//   - a trailing `/..` or `\..` after the placeholder
+//
+// codex deep-sec PR #163 lane 2 P2 closure.
+func traversalSuffixContainsParentRef(s string) bool {
+	const ph = "${workspaceFolder}"
+	idx := strings.Index(s, ph)
+	if idx < 0 {
+		return false
+	}
+	tail := s[idx+len(ph):]
+	if tail == "" {
+		return false
+	}
+	for _, pat := range []string{"/../", `\..\`, `/..\`, `\../`} {
+		if strings.Contains(tail, pat) {
+			return true
+		}
+	}
+	for _, suf := range []string{"/..", `\..`} {
+		if strings.HasSuffix(tail, suf) {
+			return true
+		}
+	}
+	return false
+}

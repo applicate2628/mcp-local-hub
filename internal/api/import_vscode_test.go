@@ -336,3 +336,63 @@ func TestImportVSCodeWorkspace_EmptyWorkspace_RejectsEarly(t *testing.T) {
 		t.Fatal("expected error for empty workspace path")
 	}
 }
+
+// TestIsSensitiveEnvName covers the sensitive-name policy used by G5's
+// catalog placeholder expansion (Phase 0: shared PlaceholderExpander).
+// G7 imports are NOT affected because they leave SkipSensitiveEnv at
+// its default (false); this test exercises the predicate directly.
+//
+// codex deep-sec PR #163 lane 2: predicate expanded from suffix-only
+// to suffix + prefix + substring + exact-name shapes. The cases below
+// cover all four match families and a sample of intentional
+// non-matches.
+func TestIsSensitiveEnvName(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		want bool
+	}{
+		// Non-sensitive: ordinary config / shell vars.
+		{"PATH", false},
+		{"HOME", false},
+		{"WORKSPACE_FOLDER", false},
+		{"LOG_LEVEL", false},
+		{"USER", false},
+		// Suffix matches (classic name shapes).
+		{"AWS_SECRET_ACCESS_KEY", true},
+		{"GITHUB_TOKEN", true},
+		{"OPENAI_API_KEY", true},
+		{"FOO_SECRET", true},
+		{"FOO_PASSWORD", true},
+		{"FOO_PASSWD", true},
+		{"FOO_KEY", true},
+		{"FOO_AUTH", true},
+		{"FOO_DSN", true},
+		// Prefix matches (cloud provider namespaces).
+		{"AZURE_TENANT_ID", true},
+		{"GCP_PROJECT", true},
+		{"GOOGLE_API_KEY", true},
+		{"OAUTH_REDIRECT", true},
+		// Substring matches (codex r5 P1 broadening: infix detection).
+		{"MY_TOKEN_VALUE", true},     // infix TOKEN — was false pre-broaden
+		{"SECRET_HOLDER", true},      // infix SECRET
+		{"BEARER_HEADER", true},      // infix BEARER
+		{"MY_CREDENTIAL_PATH", true}, // infix CREDENTIAL
+		{"USE_PRIVATE_KEY_FILE", true}, // infix PRIVATE_KEY
+		{"SLACK_PASSWD_HASH", true},  // infix PASSWD
+		// Exact-name matches (specific names without a name-shape tell).
+		{"DATABASE_URL", true},                    // was false pre-broaden
+		{"CONNECTION_STRING", true},               // was missing pre-broaden
+		{"DSN", true},                              // was missing pre-broaden
+		{"AUTHORIZATION", true},                    // was missing pre-broaden
+		{"OAUTH", true},                            // was missing pre-broaden
+		{"GOOGLE_APPLICATION_CREDENTIALS", true},   // was missing pre-broaden
+		// Case-insensitivity sanity.
+		{"github_token", true},
+		{"database_url", true},
+	} {
+		got := IsSensitiveEnvName(c.name)
+		if got != c.want {
+			t.Errorf("IsSensitiveEnvName(%q) = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
