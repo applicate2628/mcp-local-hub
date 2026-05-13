@@ -1294,16 +1294,15 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 		if _, err := ensureCanonicalMcphubPresent(); err != nil {
 			return err
 		}
-		// Iterate bindings to surface the antigravity rejection
-		// before any install side effect.
-		for _, b := range m.ClientBindings {
-			if daemonFilter != "" && b.Daemon != "" && b.Daemon != daemonFilter {
-				continue
-			}
-			if b.Client == "antigravity" {
-				return fmt.Errorf("manifest %s: transport=remote-http is incompatible with client=antigravity (Cascade adapter accepts stdio relay entries only; remove the antigravity binding or use a stdio-bridge manifest with `mcphub relay`)", m.Name)
-			}
-		}
+		// Bot r3 P2 closure on PR #170: the antigravity adapter
+		// matrix check used to fire here unconditionally, blocking
+		// filtered installs (`--clients claude-code`) of mixed-
+		// binding manifests even when the operator explicitly
+		// excluded antigravity. The check now lives in
+		// buildRemoteHTTPPlan where the includeClient predicate is
+		// known and the gate fires only against bindings actually
+		// in scope for THIS install. Preflight stays narrow on
+		// remote-http.
 		return nil
 	}
 	// 1. Command available.

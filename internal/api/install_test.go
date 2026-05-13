@@ -661,10 +661,14 @@ func TestPreflight_RemoteHTTPAcceptsCanonicalMcphub(t *testing.T) {
 	}
 }
 
-// TestPreflight_RemoteHTTPRejectsAntigravity pins the G6 adapter
-// matrix: antigravity is stdio-relay only and cannot accept a
-// remote URL directly. Install refuses with a clear error.
-func TestPreflight_RemoteHTTPRejectsAntigravity(t *testing.T) {
+// TestPreflight_RemoteHTTPDoesNotRejectAntigravityAtPreflight pins
+// bot r3 P2 closure on PR #170: the antigravity adapter rejection
+// has moved from Preflight to buildRemoteHTTPPlan so the gate fires
+// only against bindings ACTUALLY in scope for the install (after
+// the includeClient predicate runs). This lets filtered installs
+// of mixed-binding manifests (`--clients claude-code`) succeed even
+// when the manifest also declares an antigravity binding.
+func TestPreflight_RemoteHTTPDoesNotRejectAntigravityAtPreflight(t *testing.T) {
 	preparePreflightBinaryChecks(t)
 	m := &config.ServerManifest{
 		Name:      "ctx7",
@@ -676,15 +680,37 @@ func TestPreflight_RemoteHTTPRejectsAntigravity(t *testing.T) {
 			{Client: "antigravity"},
 		},
 	}
-	err := Preflight(m, "")
-	if err == nil {
-		t.Fatal("expected antigravity rejection on remote-http manifest; got nil")
+	if err := Preflight(m, ""); err != nil {
+		t.Errorf("Preflight must not reject mixed-binding manifest; antigravity gate belongs in BuildPlan: %v", err)
 	}
-	if !strings.Contains(err.Error(), "antigravity") {
-		t.Errorf("error must name antigravity; got %v", err)
+}
+
+// TestBuildPlanWithOpts_RemoteHTTPFilteredInstallSkipsAntigravity
+// pins the filtered-install path: when `--clients claude-code`
+// excludes antigravity from the install scope, BuildPlan succeeds
+// and produces a plan for the supported clients only.
+func TestBuildPlanWithOpts_RemoteHTTPFilteredInstallSkipsAntigravity(t *testing.T) {
+	m := &config.ServerManifest{
+		Name:      "ctx7",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportRemoteHTTP,
+		URL:       "https://mcp.context7.com/mcp",
+		ClientBindings: []config.ClientBinding{
+			{Client: "claude-code"},
+			{Client: "antigravity"},
+		},
 	}
-	if !strings.Contains(err.Error(), "remote-http") {
-		t.Errorf("error must name remote-http; got %v", err)
+	plan, err := BuildPlanWithOpts(m, BuildPlanOpts{
+		ClientsInclude: []string{"claude-code"},
+	})
+	if err != nil {
+		t.Fatalf("filtered remote-http install excluding antigravity should succeed: %v", err)
+	}
+	if len(plan.ClientUpdates) != 1 {
+		t.Fatalf("expected 1 client update (claude-code only); got %d", len(plan.ClientUpdates))
+	}
+	if plan.ClientUpdates[0].Client != "claude-code" {
+		t.Errorf("client update = %q; want claude-code", plan.ClientUpdates[0].Client)
 	}
 }
 
