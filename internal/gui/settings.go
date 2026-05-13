@@ -120,8 +120,9 @@ func (s *Server) settingsListHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"settings":    settings,
-		"actual_port": s.Port(),
+		"settings":                     settings,
+		"actual_port":                  s.Port(),
+		"actual_hub_endpoint_enabled":  s.HubMcpEndpointActive(),
 	})
 }
 

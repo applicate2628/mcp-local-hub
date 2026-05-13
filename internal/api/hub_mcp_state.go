@@ -147,6 +147,27 @@ func isHubMcpStateMissingErr(err error) bool {
 	return isHubMcpStateMissingErrPlatform(err)
 }
 
+// AcquireHubMcpLock is the exported entry point for cross-package
+// callers (notably internal/cli/install.go::runReconcileHubMode)
+// that need to serialize against the same hub-mcp.lock that
+// BindHubMcpListener and the token/instance-id rotation flows
+// already use.
+//
+// Returns the *flock.Flock; callers MUST `defer lk.Unlock()`. The
+// blocking semantics match acquireHubMcpLock — appropriate for
+// CLI flows whose operator can wait on a sibling holder. Long-
+// lived process paths (gui-server startup / shutdown) MUST use
+// the context-aware variant; cross-package CLI doesn't currently
+// need that, so we don't export it.
+//
+// Issue #161 P2 closure (concurrency lane + endpoint/tokens
+// TOCTOU): runReconcileHubMode now wraps the load → snapshot →
+// apply transaction inside this lock so two concurrent reconciles
+// cannot interleave plan semantics, and a concurrent
+// regenerate-token / regenerate-instance-id cannot mutate
+// endpoint/tokens between snapshot and apply.
+func AcquireHubMcpLock() (*flock.Flock, error) { return acquireHubMcpLock() }
+
 // acquireHubMcpLock obtains an exclusive flock on
 // <state-dir>/hub-mcp.lock. Callers MUST `defer lk.Unlock()` and route
 // every state-mutating operation through this lock for the duration

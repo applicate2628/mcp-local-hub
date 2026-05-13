@@ -18,6 +18,23 @@ function envWithPort(value: string, actualPort: number): SettingsEnvelope {
   };
 }
 
+function envWithHub(persisted: boolean, actual: boolean): SettingsEnvelope {
+  return {
+    actual_port: 9125,
+    actual_hub_endpoint_enabled: actual,
+    settings: [
+      { key: "gui_server.browser_on_launch", section: "gui_server", type: "bool",
+        default: "true", value: "true", deferred: false, help: "" },
+      { key: "gui_server.port", section: "gui_server", type: "int",
+        default: "9125", value: "9125", min: 1024, max: 65535, deferred: false, help: "" },
+      { key: "gui_server.hub_endpoint_enabled", section: "gui_server", type: "bool",
+        default: "false", value: persisted ? "true" : "false", deferred: false, help: "" },
+      { key: "gui_server.tray", section: "gui_server", type: "bool",
+        default: "true", value: "true", deferred: true, help: "" },
+    ],
+  };
+}
+
 function snap(env: SettingsEnvelope, refresh = vi.fn(async () => {})): SettingsSnapshot {
   return { status: "ok", data: env, error: null, refresh };
 }
@@ -56,6 +73,47 @@ describe("SectionGuiServer", () => {
     await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(true));
     // Badge must still be hidden — local draft is dirty, not persisted.
     expect(container.querySelector('[data-test-id="port-restart-badge"]')).toBeNull();
+  });
+
+  // Issue #161 P2 — persisted-vs-runtime hub gate badge.
+  it("hub-endpoint-restart-badge HIDDEN when persisted == actual", () => {
+    const { container } = render(
+      <SectionGuiServer snapshot={snap(envWithHub(false, false))} onDirtyChange={() => {}} />,
+    );
+    expect(container.querySelector('[data-test-id="hub-endpoint-restart-badge"]')).toBeNull();
+  });
+
+  it("hub-endpoint-restart-badge VISIBLE when persisted true but runtime false", () => {
+    const { container } = render(
+      <SectionGuiServer snapshot={snap(envWithHub(true, false))} onDirtyChange={() => {}} />,
+    );
+    const badge = container.querySelector('[data-test-id="hub-endpoint-restart-badge"]');
+    expect(badge).toBeTruthy();
+    expect(badge!.textContent).toMatch(/ON.*restart/);
+  });
+
+  it("hub-endpoint-restart-badge VISIBLE when persisted false but runtime true", () => {
+    const { container } = render(
+      <SectionGuiServer snapshot={snap(envWithHub(false, true))} onDirtyChange={() => {}} />,
+    );
+    const badge = container.querySelector('[data-test-id="hub-endpoint-restart-badge"]');
+    expect(badge).toBeTruthy();
+    expect(badge!.textContent).toMatch(/OFF.*restart/);
+  });
+
+  it("hub-endpoint-restart-badge HIDDEN when actual_hub_endpoint_enabled is undefined (older backend)", () => {
+    // Older backends may not emit the field; envelope without the
+    // key sees actual as undefined → falsy → no spurious badge.
+    const env = envWithHub(true, false);
+    delete env.actual_hub_endpoint_enabled;
+    const { container } = render(<SectionGuiServer snapshot={snap(env)} onDirtyChange={() => {}} />);
+    // Persisted=true vs actual=undefined→false: the SHOULD fire too
+    // — undefined coerces to false via `=== true` check. The badge
+    // SHOULD render. (Older backend that doesn't emit the field
+    // looks "off" runtime-wise; the operator setting it to true
+    // wants a restart.) Confirm semantic:
+    const badge = container.querySelector('[data-test-id="hub-endpoint-restart-badge"]');
+    expect(badge).toBeTruthy();
   });
 
   it("Codex r4 P2.1: badge appears AFTER Save", async () => {

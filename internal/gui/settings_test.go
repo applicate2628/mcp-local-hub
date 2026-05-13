@@ -90,14 +90,26 @@ func TestSettings_GET_Snapshot(t *testing.T) {
 		t.Fatalf("got %d: %s", rr.Code, rr.Body.String())
 	}
 	var resp struct {
-		Settings   []map[string]any `json:"settings"`
-		ActualPort int              `json:"actual_port"`
+		Settings                 []map[string]any `json:"settings"`
+		ActualPort               int              `json:"actual_port"`
+		ActualHubEndpointEnabled bool             `json:"actual_hub_endpoint_enabled"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}
 	if resp.ActualPort == 0 {
 		t.Error("actual_port must be set (memo §6.1, Codex r1 P2.4)")
+	}
+	// Issue #161 P2 closure: actual_hub_endpoint_enabled must be
+	// present in the envelope. The test server doesn't bind a hub
+	// listener so the value is false; the load-bearing assertion is
+	// that the field exists in the JSON output so the frontend's
+	// persisted-vs-runtime badge can read it.
+	if !strings.Contains(rr.Body.String(), "actual_hub_endpoint_enabled") {
+		t.Error("actual_hub_endpoint_enabled must be present in the snapshot DTO (issue #161 P2 closure: persisted-vs-runtime badge)")
+	}
+	if resp.ActualHubEndpointEnabled != false {
+		t.Errorf("test server has no hub listener bound; actual_hub_endpoint_enabled = %v, want false", resp.ActualHubEndpointEnabled)
 	}
 	if len(resp.Settings) != len(api.SettingsRegistry) {
 		t.Errorf("expected %d entries, got %d", len(api.SettingsRegistry), len(resp.Settings))

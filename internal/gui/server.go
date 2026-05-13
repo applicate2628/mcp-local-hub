@@ -533,6 +533,20 @@ func (s *Server) OnActivateWindow(fn func() error) { s.onActivateWindow = fn }
 // Start has signaled ready.
 func (s *Server) Port() int { return int(s.port.Load()) }
 
+// HubMcpEndpointActive returns true when the hub-mcp listener has
+// been successfully bound + published in this process. The
+// gui_server.hub_endpoint_enabled setting is restart-required; this
+// runtime read tells operators whether their persisted setting has
+// taken effect yet.
+//
+// Issue #161 P2 closure (persisted-vs-runtime hub gate badge): the
+// settings DTO emits this as `actual_hub_endpoint_enabled` so the
+// frontend can render the same "restart required" badge convention
+// established for `actual_port` (when persisted != runtime).
+func (s *Server) HubMcpEndpointActive() bool {
+	return s.hubMcpComp.Load() != nil
+}
+
 // Start binds 127.0.0.1:<cfg.Port>, signals `ready` once the listener
 // is accepting, then blocks in ListenAndServe. Returns when ctx is
 // canceled (graceful shutdown, 5s deadline) or the listener errors.

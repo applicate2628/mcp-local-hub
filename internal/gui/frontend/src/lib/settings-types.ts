@@ -32,6 +32,10 @@ export type SettingDTO = ConfigSettingDTO | ActionSettingDTO;
 export type SettingsEnvelope = {
   settings: SettingDTO[];
   actual_port: number;
+  // Issue #161 P2: live hub-endpoint listener state for the
+  // persisted-vs-runtime restart badge convention (mirrors
+  // actual_port). May be undefined on older backend builds.
+  actual_hub_endpoint_enabled?: boolean;
 };
 
 export type APIError = { code?: string; message: string };
