@@ -45,6 +45,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -164,6 +165,29 @@ func removeHubMcpControlTokenLockedContext(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+// ReadHubMcpControlToken loads the persisted control token from
+// <state-dir>/hub-mcp-control.token. Used by the rotation CLI
+// (mcphub hub-mcp regenerate-token / regenerate-instance-id) to POST
+// /internal/reload-tokens so the live hub picks up the new tokens
+// without restart.
+//
+// Returns the trimmed token (no trailing newline) on success.
+// Returns os.ErrNotExist if the hub has not run yet (or
+// SecureWriteClientConfig pre-write verify failed at constructor
+// time — r24 P2 closure: the file is cleaned up on persist failure).
+//
+// The read goes through readHubMcpStateFile which gates on
+// VerifyHubMcpStateDACL first — refuses symlinks, foreign owners,
+// non-allowlist DACL ACEs. Same secure-read pipeline the listener
+// uses on startup.
+func ReadHubMcpControlToken() (string, error) {
+	raw, err := readHubMcpStateFile(hubMcpControlTokenFileLeaf)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(raw)), nil
 }
 
 // ServeHTTP implements the POST-only contract with loopback-guard,
