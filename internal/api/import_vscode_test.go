@@ -128,6 +128,38 @@ func TestImportVSCodeWorkspace_HTTPServer_URLPlaceholderUnsetSkips(t *testing.T)
 	}
 }
 
+// TestImportVSCodeWorkspace_HTTPServer_PlaintextHTTPSkips pins bot
+// r3 P2 closure (PR #172): a workspace url using plaintext http://
+// must skip with a clear "not https://" warning, not project to a
+// remote-http draft that manifest validation rejects later with the
+// wrong diagnostic.
+func TestImportVSCodeWorkspace_HTTPServer_PlaintextHTTPSkips(t *testing.T) {
+	ws := t.TempDir()
+	writeMCPJSON(t, ws, `{
+  "servers": {
+    "insecure": {"type": "http", "url": "http://localhost:9000/mcp"}
+  }
+}`)
+	a := NewAPI()
+	result, err := a.ImportVSCodeWorkspace(ws, VSCodeImportOpts{})
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if !result.EmptyResult {
+		t.Errorf("EmptyResult should be true for plaintext http; got %+v", result)
+	}
+	foundSkip := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "not https") && strings.Contains(w, "insecure") {
+			foundSkip = true
+			break
+		}
+	}
+	if !foundSkip {
+		t.Errorf("expected not-https skip warning; got: %v", result.Warnings)
+	}
+}
+
 func TestImportVSCodeWorkspace_HTTPServer_NoURLSkips(t *testing.T) {
 	ws := t.TempDir()
 	writeMCPJSON(t, ws, `{
