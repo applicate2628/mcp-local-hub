@@ -13,6 +13,7 @@
 package api
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -170,33 +171,38 @@ func sendRemoteInitialize(ctx context.Context, client *http.Client, rawURL strin
 		return nil, fmt.Errorf("post initialize: %w", err)
 	}
 	defer resp.Body.Close()
-	rawResp, err := io.ReadAll(io.LimitReader(resp.Body, testRemoteResponseMaxBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
-	}
-	if int64(len(rawResp)) > testRemoteResponseMaxBytes {
-		return nil, fmt.Errorf("response body exceeds %d-byte cap", testRemoteResponseMaxBytes)
-	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("upstream returned HTTP %d: %s", resp.StatusCode, truncateForError(string(rawResp), 500))
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4*1024))
+		return nil, fmt.Errorf("upstream returned HTTP %d: %s", resp.StatusCode, truncateForError(string(errBody), 500))
 	}
 	// Streamable HTTP lets the server reply either with
-	// application/json or with text/event-stream. SSE may carry
-	// multiple events (progress notifications, log frames) before
-	// the JSON-RPC reply; iterate all events and pick the envelope
-	// whose JSON-RPC id matches the one we sent.
-	var events [][]byte
+	// application/json (one-shot) or with text/event-stream. For SSE
+	// the upstream may keep the connection open after the initialize
+	// reply (queueing notifications), so we must scan incrementally
+	// and return as soon as the matching JSON-RPC id arrives —
+	// io.ReadAll would block until the upstream closes the stream.
+	//
+	// Bot r4 P1 closure (PR #171): the prior path used ReadAll on the
+	// whole body before deciding format, hanging healthy SSE
+	// endpoints to ctx deadline.
+	var rpc *rpcReply
 	if strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
-		events = parseSSEEvents(rawResp)
-		if len(events) == 0 {
-			return nil, errors.New("text/event-stream response had no data: lines")
+		rpc, err = consumeSSE(ctx, resp.Body, testRemoteRPCRequestID)
+		if err != nil {
+			return nil, err
 		}
 	} else {
-		events = [][]byte{rawResp}
-	}
-	rpc, err := findMatchingRPCReply(events, testRemoteRPCRequestID)
-	if err != nil {
-		return nil, err
+		rawResp, err := io.ReadAll(io.LimitReader(resp.Body, testRemoteResponseMaxBytes+1))
+		if err != nil {
+			return nil, fmt.Errorf("read response: %w", err)
+		}
+		if int64(len(rawResp)) > testRemoteResponseMaxBytes {
+			return nil, fmt.Errorf("response body exceeds %d-byte cap", testRemoteResponseMaxBytes)
+		}
+		rpc, err = findMatchingRPCReply([][]byte{rawResp}, testRemoteRPCRequestID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if rpc.Error != nil {
 		return nil, fmt.Errorf("upstream rpc error %d: %s", rpc.Error.Code, rpc.Error.Message)
@@ -222,6 +228,93 @@ func sendRemoteInitialize(ctx context.Context, client *http.Client, rawURL strin
 	return out, nil
 }
 
+// consumeSSE incrementally scans a text/event-stream body and
+// returns the first JSON-RPC 2.0 reply whose id equals wantID.
+// Returns as soon as that reply arrives — the SSE stream may stay
+// open afterwards for unrelated notifications, and we don't wait
+// for the upstream to close it.
+//
+// Reads at most testRemoteResponseMaxBytes total bytes across the
+// whole stream (defense against unbounded SSE streams that never
+// produce a matching reply). Honors ctx cancellation between lines
+// and through the underlying http request body, which closes on
+// ctx.Done.
+//
+// Bot r4 P1 closure (PR #171): the prior path called io.ReadAll on
+// the SSE body before parsing, which blocks until the server closes
+// the connection. Spec-compliant Streamable HTTP servers may hold
+// SSE connections open after sending the initialize reply, so smoke
+// checks hung to ctx deadline against otherwise healthy endpoints.
+func consumeSSE(ctx context.Context, body io.Reader, wantID int) (*rpcReply, error) {
+	sc := bufio.NewScanner(body)
+	sc.Buffer(make([]byte, 0, 4096), testRemoteResponseMaxBytes)
+	var lines []string
+	var bytesRead int
+
+	tryFlush := func() *rpcReply {
+		defer func() { lines = nil }()
+		var parts []string
+		for _, ln := range lines {
+			if ln == "" || strings.HasPrefix(ln, ":") {
+				continue
+			}
+			if rest, ok := strings.CutPrefix(ln, "data:"); ok {
+				parts = append(parts, strings.TrimSpace(rest))
+			}
+		}
+		if len(parts) == 0 {
+			return nil
+		}
+		raw := []byte(strings.Join(parts, "\n"))
+		var probe rpcReply
+		if err := json.Unmarshal(raw, &probe); err != nil {
+			// Don't tear down the whole stream on one bad event —
+			// stay friendly to servers that interleave unrelated
+			// non-JSON frames (e.g. heartbeat text).
+			return nil
+		}
+		if probe.JSONRPC != "2.0" {
+			return nil
+		}
+		if rpcIDEquals(probe.ID, wantID) {
+			return &probe
+		}
+		return nil
+	}
+
+	for sc.Scan() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		ln := strings.TrimRight(sc.Text(), "\r")
+		bytesRead += len(ln) + 1
+		if bytesRead > testRemoteResponseMaxBytes {
+			return nil, fmt.Errorf("response stream exceeds %d-byte cap before a JSON-RPC 2.0 reply with id=%d arrived", testRemoteResponseMaxBytes, wantID)
+		}
+		if ln == "" {
+			if r := tryFlush(); r != nil {
+				return r, nil
+			}
+			continue
+		}
+		lines = append(lines, ln)
+	}
+	if err := sc.Err(); err != nil {
+		// Surface ctx-driven cancellation (the http body Read returns
+		// ctx.Err() wrapped) so the operator sees the deadline rather
+		// than a generic scan error.
+		if cerr := ctx.Err(); cerr != nil {
+			return nil, cerr
+		}
+		return nil, fmt.Errorf("scan SSE stream: %w", err)
+	}
+	// Last event without a trailing blank line.
+	if r := tryFlush(); r != nil {
+		return r, nil
+	}
+	return nil, fmt.Errorf("SSE stream ended without a JSON-RPC 2.0 reply with id=%d", wantID)
+}
+
 // rpcReply is the JSON-RPC 2.0 envelope shape we accept from the
 // upstream server's initialize response.
 type rpcReply struct {
@@ -232,39 +325,6 @@ type rpcReply struct {
 		Code    int    `json:"code"`
 		Message string `json:"message"`
 	} `json:"error"`
-}
-
-// parseSSEEvents splits an SSE response body into per-event data
-// payloads. Events are separated by a blank line (CRLF or LF
-// terminated); within an event, `data:` lines are joined with newlines
-// per the SSE spec. Comment lines (prefix `:`) and non-data fields are
-// ignored. Returns one []byte per event that carried at least one
-// `data:` line — empty slice if the body had none.
-//
-// Bot r1 P1 closure (PR #171): the prior implementation concatenated
-// every `data:` line across the whole stream into one buffer. A valid
-// streaming server that sends a progress/notification event BEFORE
-// the initialize reply would have its events welded into a single
-// invalid JSON blob, causing false-negative smoke failures against
-// fully compliant servers.
-func parseSSEEvents(buf []byte) [][]byte {
-	body := strings.ReplaceAll(string(buf), "\r\n", "\n")
-	var events [][]byte
-	for block := range strings.SplitSeq(body, "\n\n") {
-		var parts []string
-		for ln := range strings.SplitSeq(block, "\n") {
-			if ln == "" || strings.HasPrefix(ln, ":") {
-				continue
-			}
-			if rest, ok := strings.CutPrefix(ln, "data:"); ok {
-				parts = append(parts, strings.TrimSpace(rest))
-			}
-		}
-		if len(parts) > 0 {
-			events = append(events, []byte(strings.Join(parts, "\n")))
-		}
-	}
-	return events
 }
 
 // findMatchingRPCReply scans events and returns the first valid

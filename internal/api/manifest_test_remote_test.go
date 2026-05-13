@@ -208,38 +208,34 @@ func TestManifestTestRemote_MissingSecret(t *testing.T) {
 	}
 }
 
-func TestParseSSEEvents_MultilineData(t *testing.T) {
-	in := []byte(": comment\ndata: {\"jsonrpc\":\"2.0\",\ndata: \"id\":1}\n\n")
-	got := parseSSEEvents(in)
-	if len(got) != 1 {
-		t.Fatalf("got %d events, want 1: %q", len(got), got)
-	}
-	joined := string(got[0])
-	if !strings.Contains(joined, `"jsonrpc":"2.0"`) || !strings.Contains(joined, `"id":1`) {
-		t.Errorf("got %q, want both jsonrpc and id pieces", joined)
-	}
-}
-
-func TestParseSSEEvents_NoData(t *testing.T) {
-	got := parseSSEEvents([]byte(": comment only\n\n"))
-	if len(got) != 0 {
-		t.Errorf("got %d events, want 0", len(got))
-	}
-}
-
-// TestParseSSEEvents_MultipleEvents pins the bot r1 P1 closure: a
-// streaming server can emit progress/notification events before the
-// initialize reply. The parser must split them, and findMatchingRPCReply
-// must pick the envelope whose id matches the one we sent.
-func TestParseSSEEvents_MultipleEvents(t *testing.T) {
-	in := []byte("event: progress\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"progress\",\"params\":{\"step\":1}}\n\nevent: response\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-11-25\"}}\n\n")
-	events := parseSSEEvents(in)
-	if len(events) != 2 {
-		t.Fatalf("got %d events, want 2: %v", len(events), events)
-	}
-	rpc, err := findMatchingRPCReply(events, 1)
+func TestConsumeSSE_MultilineData(t *testing.T) {
+	in := strings.NewReader(": comment\ndata: {\"jsonrpc\":\"2.0\",\ndata: \"id\":1,\"result\":{\"ok\":true}}\n\n")
+	rpc, err := consumeSSE(context.Background(), in, 1)
 	if err != nil {
-		t.Fatalf("findMatchingRPCReply: %v", err)
+		t.Fatalf("consumeSSE: %v", err)
+	}
+	if rpc.Result["ok"] != true {
+		t.Errorf("multi-line data: should join into one JSON envelope, got %+v", rpc)
+	}
+}
+
+func TestConsumeSSE_NoMatchingReply(t *testing.T) {
+	in := strings.NewReader(": comment only\n\n")
+	_, err := consumeSSE(context.Background(), in, 1)
+	if err == nil || !strings.Contains(err.Error(), "id=1") {
+		t.Errorf("expected no-matching-reply error, got %v", err)
+	}
+}
+
+// TestConsumeSSE_PicksMatchingEventAcrossStream pins bot r1 P1 closure:
+// a streaming server can emit progress/notification events before
+// the initialize reply. consumeSSE must walk events sequentially
+// and pick the envelope whose id matches the one we sent.
+func TestConsumeSSE_PicksMatchingEventAcrossStream(t *testing.T) {
+	in := strings.NewReader("event: progress\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"progress\",\"params\":{\"step\":1}}\n\nevent: response\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-11-25\"}}\n\n")
+	rpc, err := consumeSSE(context.Background(), in, 1)
+	if err != nil {
+		t.Fatalf("consumeSSE: %v", err)
 	}
 	if rpc.Result["protocolVersion"] != "2025-11-25" {
 		t.Errorf("picked wrong envelope: %+v", rpc)
@@ -295,6 +291,70 @@ func TestNewTestRemoteClient_NoHardcodedTimeout(t *testing.T) {
 // caller-supplied ctx deadline cancels a slow upstream, regardless
 // of any client-level timeout (which we don't set). A 200 ms ctx
 // against a server that sleeps 2 s must fail fast.
+// TestSendRemoteInitialize_SSE_ReturnsBeforeStreamClose pins bot r4
+// P1 closure (PR #171): for text/event-stream replies the function
+// must return as soon as a JSON-RPC envelope with matching id is
+// received, NOT wait for the upstream to close the stream. A valid
+// MCP server may flush initialize, then queue notifications and keep
+// the SSE conn open — the prior io.ReadAll would hang to ctx
+// deadline against such a server.
+func TestSendRemoteInitialize_SSE_ReturnsBeforeStreamClose(t *testing.T) {
+	hold := make(chan struct{})
+	defer close(hold)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatalf("response writer does not support Flush")
+		}
+		_, _ = w.Write([]byte("data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-11-25\",\"serverInfo\":{\"name\":\"x\",\"version\":\"y\"}}}\n\n"))
+		flusher.Flush()
+		// Hold the stream open until the test signals it should
+		// release. If sendRemoteInitialize is correct it returns
+		// before we reach this select; if it regresses it blocks
+		// here until ctx deadline.
+		select {
+		case <-hold:
+		case <-r.Context().Done():
+		case <-time.After(5 * time.Second):
+		}
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	start := time.Now()
+	res, err := sendRemoteInitialize(ctx, buildTLSTrustingClient(srv), srv.URL, nil)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("sendRemoteInitialize: %v (elapsed=%v)", err, elapsed)
+	}
+	if res.ServerName != "x" {
+		t.Errorf("ServerName=%q, want x", res.ServerName)
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("elapsed=%v — should return promptly after seeing matching id reply, not wait for stream close", elapsed)
+	}
+}
+
+// TestConsumeSSE_StopsAtMaxBytes pins the unbounded-stream guard:
+// even when the upstream never produces a matching reply, we cap
+// total bytes read to testRemoteResponseMaxBytes so a hostile or
+// looping server cannot exhaust memory.
+func TestConsumeSSE_StopsAtMaxBytes(t *testing.T) {
+	// Build a body that contains data: events but no matching id.
+	// Repeat enough to blow past 1 MB.
+	var b strings.Builder
+	chunk := "event: progress\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"progress\",\"params\":{\"step\":1}}\n\n"
+	for b.Len() < testRemoteResponseMaxBytes+4096 {
+		b.WriteString(chunk)
+	}
+	_, err := consumeSSE(context.Background(), strings.NewReader(b.String()), testRemoteRPCRequestID)
+	if err == nil || !strings.Contains(err.Error(), "cap") {
+		t.Errorf("expected cap-exceeded error, got %v", err)
+	}
+}
+
 func TestSendRemoteInitialize_RespectsContextDeadline(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(2 * time.Second)
