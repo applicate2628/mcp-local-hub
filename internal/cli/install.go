@@ -176,6 +176,17 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 // the Phase 5 Settings toggle would be a no-op.
 func runReconcileHubMode(cmd *cobra.Command, dryRun bool) error {
 	a := api.NewAPI()
+	// 1. Read current gate state. False = OFF (default) → restore
+	//    per-daemon entries + remove the aggregate. codex bot phase5
+	//    r7 P2 closure on PR #160: a corrupt settings.yaml must NOT
+	//    silently degrade to gate-OFF (which would tear down every
+	//    mcphub-hub entry). Read errors are fatal here; only a
+	//    genuinely missing file is treated as "first-run gate OFF".
+	gateOn, gErr := readHubEndpointGateForReconcile()
+	if gErr != nil {
+		return fmt.Errorf("reconcile: gate state unreadable; refusing to default to OFF (would tear down mcphub-hub entries): %w", gErr)
+	}
+
 	// Issue #161 P2 closure (concurrency lane + endpoint/tokens
 	// TOCTOU): acquire hub-mcp.lock for the WHOLE snapshot-to-apply
 	// transaction. Two effects:
@@ -191,24 +202,25 @@ func runReconcileHubMode(cmd *cobra.Command, dryRun bool) error {
 	//      step 2 could be stale by step 5 (apply) — clients would
 	//      get 401s after a "successful" reconcile.
 	//
-	// Dry-run also acquires the lock so the preview reflects a
-	// consistent snapshot. CLI flow; blocking semantics are
-	// acceptable (operator can wait on a sibling holder).
-	lk, lockErr := api.AcquireHubMcpLock()
-	if lockErr != nil {
-		return fmt.Errorf("reconcile: acquire hub-mcp.lock: %w", lockErr)
-	}
-	defer func() { _ = lk.Unlock() }()
-
-	// 1. Read current gate state. False = OFF (default) → restore
-	//    per-daemon entries + remove the aggregate. codex bot phase5
-	//    r7 P2 closure on PR #160: a corrupt settings.yaml must NOT
-	//    silently degrade to gate-OFF (which would tear down every
-	//    mcphub-hub entry). Read errors are fatal here; only a
-	//    genuinely missing file is treated as "first-run gate OFF".
-	gateOn, gErr := readHubEndpointGateForReconcile()
-	if gErr != nil {
-		return fmt.Errorf("reconcile: gate state unreadable; refusing to default to OFF (would tear down mcphub-hub entries): %w", gErr)
+	// Bot r1 P2 closure (PR #168): acquire the lock ONLY when
+	// needed. AcquireHubMcpLock calls DaemonStateDir which creates
+	// the state-dir on first run; pre-acquiring on every reconcile
+	// invocation regresses the gate-OFF dry-run "no state side
+	// effects" property that PR #160 r11 P3 carefully protected.
+	//
+	// Lock matrix:
+	//   - gate-ON (any path): needs lock — endpoint/tokens snapshot
+	//     must be consistent with the apply.
+	//   - gate-OFF apply: needs lock — apply writes client configs
+	//     that must serialize against concurrent reconciles.
+	//   - gate-OFF dry-run: NO lock — reads nothing, applies nothing,
+	//     so a state-dir creation here would be a behavior regression.
+	if gateOn || !dryRun {
+		lk, lockErr := api.AcquireHubMcpLock()
+		if lockErr != nil {
+			return fmt.Errorf("reconcile: acquire hub-mcp.lock: %w", lockErr)
+		}
+		defer func() { _ = lk.Unlock() }()
 	}
 
 	// 2. Load endpoint + tokens for plan header inputs (URL +
