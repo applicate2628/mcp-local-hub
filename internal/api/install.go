@@ -909,7 +909,24 @@ func (a *API) Uninstall(server string) (*UninstallReport, error) {
 // metadata because their adapters persist only Name + URL. Returns ""
 // if the binding's daemon is unresolvable; callers must treat empty as
 // "no URL match available".
+//
+// G6 remote-http branch (bot r1 P1 closure on PR #170): for
+// transport=remote-http the entry URL came from the manifest's URL
+// field (after ${secret:KEY} expansion). To recognize the entry on
+// uninstall, re-expand the manifest URL and return it. Limitation:
+// if a secret was rotated BETWEEN install and uninstall, the entry's
+// URL embeds the OLD expansion while this function returns the NEW
+// one — uninstall would skip the stale entry. Acceptable trade-off
+// vs adding new state-file machinery; URL-as-secret-bearer is rare
+// (headers are the dominant credential surface).
 func expectedHubURL(m *config.ServerManifest, b config.ClientBinding) string {
+	if m.Transport == config.TransportRemoteHTTP {
+		expanded, err := ExpandSecrets(m.URL, nil)
+		if err != nil {
+			return "" // missing secrets at uninstall — caller treats as no-match
+		}
+		return expanded
+	}
 	daemon, ok := findDaemon(m, b.Daemon)
 	if !ok {
 		return ""
@@ -1192,6 +1209,14 @@ func findDaemon(m *config.ServerManifest, name string) (config.DaemonSpec, bool)
 // codex bot r2 P1 closure on PR #169 (the implementation-pending
 // gate from sub-PR 1 lands its real handler here).
 func buildRemoteHTTPPlan(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, error) {
+	// Bot r1 P2 closure on PR #170: remote-http has no daemons,
+	// so `--daemon X` makes no sense. Reject explicitly instead
+	// of silently treating it as a partial install (which would
+	// leave the FullInstall=false flag and skip the full-server
+	// reconciliation later).
+	if opts.DaemonFilter != "" {
+		return nil, fmt.Errorf("manifest %s: transport=remote-http has no daemons; --daemon flag is not applicable (got --daemon=%q)", m.Name, opts.DaemonFilter)
+	}
 	includeClient, err := installClientPredicate(opts)
 	if err != nil {
 		return nil, err

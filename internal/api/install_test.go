@@ -758,6 +758,72 @@ func TestBuildPlanWithOpts_RemoteHTTPMissingSecretFailsFast(t *testing.T) {
 	}
 }
 
+// TestBuildPlanWithOpts_RemoteHTTPRejectsDaemonFilter pins bot
+// r1 P2 closure on PR #170: --daemon X is invalid on a remote-http
+// manifest (no daemons exist). The plan-builder rejects so the
+// flag never silently flips the install to "partial" semantics.
+func TestBuildPlanWithOpts_RemoteHTTPRejectsDaemonFilter(t *testing.T) {
+	m := &config.ServerManifest{
+		Name:      "ctx7",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportRemoteHTTP,
+		URL:       "https://mcp.context7.com/mcp",
+		ClientBindings: []config.ClientBinding{
+			{Client: "claude-code"},
+		},
+	}
+	_, err := BuildPlanWithOpts(m, BuildPlanOpts{
+		DaemonFilter:      "default",
+		IncludeAllClients: true,
+	})
+	if err == nil {
+		t.Fatal("expected daemon-filter rejection on remote-http manifest; got nil")
+	}
+	if !strings.Contains(err.Error(), "remote-http") {
+		t.Errorf("error must name remote-http; got %v", err)
+	}
+}
+
+// TestExpectedHubURL_RemoteHTTPMatchesInstalledEntry pins bot r1
+// P1 closure on PR #170: uninstall ownership detection must
+// recognize remote-http entries that the install path wrote. We
+// expand the manifest URL the same way install did so the result
+// matches the entry's URL field.
+func TestExpectedHubURL_RemoteHTTPMatchesInstalledEntry(t *testing.T) {
+	m := &config.ServerManifest{
+		Name:      "ctx7",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportRemoteHTTP,
+		URL:       "https://mcp.context7.com/mcp", // no secrets — clean expansion
+	}
+	got := expectedHubURL(m, config.ClientBinding{Client: "claude-code"})
+	if got != "https://mcp.context7.com/mcp" {
+		t.Errorf("expectedHubURL for remote-http = %q; want manifest URL verbatim", got)
+	}
+}
+
+// TestExpectedHubURL_RemoteHTTPHandlesMissingSecretsGracefully pins
+// the residual case from bot r1 P1: if the manifest URL contains
+// a ${secret:KEY} whose value isn't in the vault (e.g. at uninstall
+// time after a secret rotation), expectedHubURL returns "" so
+// uninstall callers treat ownership as unknown and preserve the
+// entry. This is the documented acceptable trade-off vs adding
+// state-file machinery.
+func TestExpectedHubURL_RemoteHTTPHandlesMissingSecretsGracefully(t *testing.T) {
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	m := &config.ServerManifest{
+		Name:      "ctx7",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportRemoteHTTP,
+		URL:       "https://api.example.com/${secret:NEVER_SET}/mcp",
+	}
+	got := expectedHubURL(m, config.ClientBinding{Client: "claude-code"})
+	if got != "" {
+		t.Errorf("expectedHubURL on missing-secret remote-http = %q; want empty (uninstall treats as no-match)", got)
+	}
+}
+
 // TestBuildPlanWithOpts_RemoteHTTPRejectsAntigravityBinding pins
 // the defense-in-depth check at the plan-build layer (in case
 // callers bypass Preflight).
