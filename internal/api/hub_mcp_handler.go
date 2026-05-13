@@ -148,8 +148,24 @@ func (h *HubMcpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// + instance id) but is EXEMPT from gates 6-7 (no Mcp-Session-Id
 	// or MCP-Protocol-Version requirement). MCP Streamable HTTP 2025-
 	// 11-25 mandates 405 + `Allow: POST, DELETE` for GET on the endpoint.
+	//
+	// Issue #159 protocol lane #4 closure: an EXPLICIT invalid
+	// MCP-Protocol-Version header MUST return 400 even on GET — the
+	// spec says version validation precedes method-not-allowed. An
+	// empty/absent header still returns 405 (no implied version).
 	if r.Method == http.MethodGet {
 		if !h.checkTokenAndInstanceID(w, r, clientID) {
+			return
+		}
+		if pv := r.Header.Get("MCP-Protocol-Version"); pv != "" && !hubSupportedVersions[pv] {
+			body, _ := json.Marshal(map[string]any{
+				"error":     "unsupported MCP-Protocol-Version",
+				"requested": pv,
+				"supported": hubSupportedVersionsList(),
+			})
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write(body)
 			return
 		}
 		w.Header().Set("Allow", "POST, DELETE")
@@ -530,18 +546,40 @@ func (h *HubMcpHandler) handleInitialize(w http.ResponseWriter, r *http.Request,
 		})
 		return
 	}
-	// codex deep-sec phase4 r24 P2 closure on PR #158 (lane #2):
-	// MCP §1.6: if the server doesn't support the offered version,
-	// it MUST respond with another supported version (i.e.
-	// negotiate). The pre-r24 path rejected with -32600 instead of
-	// negotiating. Now the server picks its preferred supported
-	// version and creates the session with that version. The
-	// client decides whether to continue or disconnect based on
-	// the InitializeResult.protocolVersion echo.
-	negotiatedVersion := initParams.ProtocolVersion
-	if !hubSupportedVersions[negotiatedVersion] {
-		negotiatedVersion = "2025-11-25"
+	// MCP §1.6 Lifecycle says servers SHOULD respond with another
+	// supported version when the offered one is unknown. SHOULD,
+	// not MUST. For a HUB that aggregates tools from many daemons,
+	// silently downgrading to "2025-11-25" when the client offered
+	// e.g. "1900-01-01" hides a real client/server mismatch — the
+	// client expected its requested version's features and now gets
+	// a different protocol, leading to tool-discovery failures
+	// further down the line.
+	//
+	// Issue #159 closure (handler-initialize-unsupported-version):
+	// reject unsupported versions outright with -32600 +
+	// error.data.supported enumerating what the hub speaks. The
+	// client sees the rejection synchronously and can re-issue
+	// `initialize` with a supported version. The r7-bot-r2 P2
+	// closure (test pinned by
+	// TestHandlerInitializeUnsupportedVersionReturnsSyncJSONRPCError)
+	// already required this; the r24 "negotiate" path broke the
+	// test contract. Reverting to strict rejection — also documented
+	// in CLAUDE.md as the load-bearing hub semantic.
+	//
+	// Negotiation-by-server is more appropriate for single-server
+	// MCP endpoints; the hub's per-daemon aggregation can't safely
+	// pick a version on the client's behalf because different
+	// aggregated daemons may not agree.
+	if !hubSupportedVersions[initParams.ProtocolVersion] {
+		writeJSONRPCErrorStatus(w, reqID, http.StatusOK, -32600,
+			"unsupported protocolVersion",
+			map[string]any{
+				"supported": hubSupportedVersionsList(),
+				"requested": initParams.ProtocolVersion,
+			})
+		return
 	}
+	negotiatedVersion := initParams.ProtocolVersion
 
 	// Capture the current resolver snapshot for the new session.
 	snap := LoadResolverSnapshot()

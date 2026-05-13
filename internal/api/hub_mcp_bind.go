@@ -147,8 +147,14 @@ func BindHubMcpListener(ctx context.Context, clients []string, validateManifests
 
 	// Step 6 — bind. Pass port=0 if the persisted record had none
 	// (first-start path).
+	//
+	// Issue #159 concurrency lane #3 closure: thread ctx into the
+	// listener so a non-responsive syscall does not block sibling
+	// flock waiters for the whole process lifetime. Caller's ctx
+	// usually carries the gui-server's startup deadline; cancel
+	// propagates here.
 	bindAddr := fmt.Sprintf("127.0.0.1:%d", ep.Port)
-	ln, lnErr := NewListenerWithSOExclusive(bindAddr)
+	ln, lnErr := NewListenerWithSOExclusiveContext(ctx, bindAddr)
 	if lnErr != nil {
 		_ = LogHubMcpEvent("error", "hub-bind-failed", map[string]any{
 			"port": ep.Port,
@@ -202,15 +208,25 @@ func BindHubMcpListener(ctx context.Context, clients []string, validateManifests
 
 	// Step 8 — release the lock BEFORE starting to serve so
 	// concurrent /internal/reload-tokens (which acquires this same
-	// lock to fsync the new tokens) doesn't block on us. The
-	// deferred Unlock above is short-circuited by `locked = false`.
-	locked = false
+	// lock to fsync the new tokens) doesn't block on us.
+	//
+	// Issue #159 (deep-sec leaks lane #5) closure: flip `locked =
+	// false` AFTER Unlock succeeds. Previous order set `locked =
+	// false` first, so if Unlock returned an error the deferred
+	// Unlock (above) was short-circuited and the lock-file handle
+	// persisted until GC. Now: try Unlock first; on success, clear
+	// the flag; on failure, leave the defer armed so the lock is
+	// released on function return regardless.
 	if uerr := lk.Unlock(); uerr != nil {
 		// Failed to release the lock cleanly: close the listener
-		// so we don't serve in an undefined locking state.
+		// so we don't serve in an undefined locking state. The
+		// deferred Unlock stays armed (locked is still true) so
+		// the function-return cleanup releases it on the second
+		// attempt.
 		_ = ln.Close()
 		return nil, fmt.Errorf("release hub-mcp.lock: %w", uerr)
 	}
+	locked = false
 
 	return &HubMcpBindResult{Listener: ln, Endpoint: persistedEp}, nil
 }

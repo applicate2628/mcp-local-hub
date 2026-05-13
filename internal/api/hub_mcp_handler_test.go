@@ -363,6 +363,40 @@ func TestHandlerGETReturns405WithAllowHeader(t *testing.T) {
 	}
 }
 
+// TestHandlerGETUnsupportedProtocolVersionReturns400 — issue #159
+// protocol lane #4 closure: an EXPLICIT invalid MCP-Protocol-Version
+// on a GET request must return 400 with the supported list, not 405.
+// The MCP Streamable HTTP spec orders version validation BEFORE
+// method-not-allowed. An empty/absent header still returns 405
+// (no implied version) — covered by TestHandlerGETReturns405WithAllowHeader.
+func TestHandlerGETUnsupportedProtocolVersionReturns400(t *testing.T) {
+	h := newTestHandler(t)
+	req := authedRequest(t, http.MethodGet, "/clients/claude-code/mcp", nil)
+	req.Header.Set("MCP-Protocol-Version", "1900-01-01")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("GET with unsupported version: got %d, want 400 (version validation precedes 405)", w.Code)
+	}
+	var body struct {
+		Error     string   `json:"error"`
+		Requested string   `json:"requested"`
+		Supported []string `json:"supported"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body parse: %v / body=%q", err, w.Body.String())
+	}
+	if !strings.Contains(body.Error, "unsupported") {
+		t.Errorf("error message = %q, want substring 'unsupported'", body.Error)
+	}
+	if body.Requested != "1900-01-01" {
+		t.Errorf("requested = %q, want 1900-01-01", body.Requested)
+	}
+	if len(body.Supported) == 0 {
+		t.Errorf("supported list must enumerate hub-supported versions; got empty")
+	}
+}
+
 // TestHandlerGETWithoutAuthReturns401 — codex r7-bot-r5 P2: gates
 // 1-5 still run for GET. An unauthed GET gets 401, not 405.
 func TestHandlerGETWithoutAuthReturns401(t *testing.T) {
