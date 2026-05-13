@@ -35,6 +35,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"mcp-local-hub/internal/clients"
@@ -105,26 +106,31 @@ func secureWriteWithOperatorOpt(path string, contents []byte) error {
 }
 
 // fallbackWriteRefusingSymlink writes contents to path with mode
-// 0600, but refuses to write through a pre-existing symlink /
-// reparse point. This is the unhardened-opt-in lane's residual
-// protection — the parent-dir DACL/mode gate is softened (by
-// operator choice), but the symlink-refusal contract that the
-// hardened pipeline enforces inline MUST survive even here.
+// 0600 via a temp file + atomic rename. The opt-in lane's residual
+// protections beyond the parent-dir gate:
 //
-// Implementation: Lstat first (does NOT follow symlinks) to detect
-// a pre-existing symlink. If absent, proceed to os.WriteFile. There
-// is a small TOCTOU window between Lstat and Write — an attacker
-// who can swap the destination atomically between these two calls
-// could still redirect the write. The hardened path uses handle-
-// relative ops to close that window; the opt-in path documents the
-// residual risk as an accepted trade-off (operator must trust the
-// host for symlink-swap races; corp-policy DACLs cannot be the
-// only protection).
+//  1. Lstat the destination first (does NOT follow symlinks). If
+//     a symlink is present at `path`, refuse outright. Otherwise
+//     a hostile pre-existing symlink would redirect the write
+//     after the rename.
+//  2. Write to a fresh temp file in the same dir, Chmod it to
+//     0600, then atomically rename over `path`. This avoids
+//     inheriting permissions / explicit ACEs from a pre-existing
+//     file at `path` — raw os.WriteFile would have kept the prior
+//     mode bits intact on POSIX and the prior explicit ACEs on
+//     Windows (the inheritance-from-parent ACEs remain regardless;
+//     the operator accepted those by opting in).
 //
 // codex bot r1 P1 closure (PR #165): the original implementation
-// used raw os.WriteFile, which silently followed symlinks and
-// violated the docstring guarantee that only the parent-dir gate
-// is softened.
+// used raw os.WriteFile, which silently followed symlinks.
+// codex bot r2 P1 closure (PR #165): subsequent fix using
+// os.WriteFile(path, ..., 0o600) preserved the pre-existing file's
+// mode bits — temp+rename closes that channel.
+//
+// Residual gap vs the hardened path: a small TOCTOU window between
+// Lstat and the temp+rename. Handle-relative ops would close it;
+// the opt-in path documents the trade-off (operator must trust the
+// host for symlink-swap races).
 func fallbackWriteRefusingSymlink(path string, contents []byte) error {
 	if info, err := os.Lstat(path); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
@@ -133,7 +139,37 @@ func fallbackWriteRefusingSymlink(path string, contents []byte) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("lstat %s before unhardened write: %w", path, err)
 	}
-	return os.WriteFile(path, contents, 0o600)
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".mcphub-unhardened-write.*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp in %s: %w", dir, err)
+	}
+	tmpPath := tmp.Name()
+	cleanup := func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+	}
+	if _, err := tmp.Write(contents); err != nil {
+		cleanup()
+		return fmt.Errorf("write temp %s: %w", tmpPath, err)
+	}
+	// Defensive Chmod: CreateTemp may apply default umask on POSIX,
+	// giving 0600 → 0600 already, but if a hostile umask widened
+	// the bits the defensive call tightens them. No-op on Windows
+	// (Chmod only toggles the read-only attribute there).
+	if err := tmp.Chmod(0o600); err != nil {
+		cleanup()
+		return fmt.Errorf("chmod temp %s to 0600: %w", tmpPath, err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("close temp %s: %w", tmpPath, err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("rename temp to %s: %w", path, err)
+	}
+	return nil
 }
 
 // operatorAllowedUnhardenedClientWrite reports whether the operator

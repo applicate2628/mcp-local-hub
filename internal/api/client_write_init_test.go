@@ -182,6 +182,40 @@ func TestFallbackWriteRefusingSymlink_OverwritesRegularFile(t *testing.T) {
 	}
 }
 
+// TestFallbackWriteRefusingSymlink_TightensModeOnExistingFile pins
+// codex bot r2 P1 closure (PR #165): when the destination already
+// exists with loose permissions (e.g. 0644 from a prior tool), the
+// fallback MUST tighten to 0600. Raw os.WriteFile preserves the
+// existing mode on POSIX (open() returns the existing file when
+// O_CREAT|O_TRUNC is set without O_EXCL, and the mode arg is
+// ignored). The temp+rename path lands a fresh file with 0600.
+//
+// POSIX-only assertion (Windows mode bits are an ACL translation
+// and don't reflect ACL inheritance the operator accepted).
+func TestFallbackWriteRefusingSymlink_TightensModeOnExistingFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX-only: Windows uses ACL inheritance, mode bits are translated")
+	}
+	dst := filepath.Join(t.TempDir(), "client.json")
+	if err := os.WriteFile(dst, []byte("pre-existing"), 0o644); err != nil {
+		t.Fatalf("seed loose file: %v", err)
+	}
+	// Force the mode in case the FS or umask flipped a bit.
+	if err := os.Chmod(dst, 0o644); err != nil {
+		t.Fatalf("chmod seed: %v", err)
+	}
+	if err := fallbackWriteRefusingSymlink(dst, []byte("fresh-content")); err != nil {
+		t.Fatalf("fallback write: %v", err)
+	}
+	info, err := os.Stat(dst)
+	if err != nil {
+		t.Fatalf("stat after write: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("after fallback write, mode = %v; want 0600 (the fallback must tighten loose pre-existing perms via temp+rename)", info.Mode().Perm())
+	}
+}
+
 // TestSecureWriteWithOperatorOpt_NonGateErrorPropagatesUnchanged
 // pins that the opt-in only narrows the parent-dir gate failure
 // class. Other secure-write errors (e.g. empty base name) propagate
