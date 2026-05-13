@@ -136,6 +136,36 @@ func TestBuildHubReconcilePlanGateOnAddsMcphubHubAndRemovesPerDaemon(t *testing.
 	}
 }
 
+// TestBuildHubReconcilePlanGateOnFailsFastOnMissingToken pins the
+// codex bot phase5 r7 P1 closure on PR #160: gate-ON reconcile MUST
+// reject the plan upfront when any participating client lacks a
+// token entry. Empty `tokens.Tokens[client]` would otherwise produce
+// an aggregate `mcphub-hub` entry with a blank X-Mcphub-Hub-Token
+// header that the 7-check auth gate rejects as 401 on every request,
+// silently bricking the client until the operator finds the empty
+// header in disk config.
+func TestBuildHubReconcilePlanGateOnFailsFastOnMissingToken(t *testing.T) {
+	manifests := reconcileTwoServerManifests()
+	endpoint := HubEndpoint{Port: 9180, InstanceID: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"}
+	// claude-code and codex-cli have tokens; cursor is missing. The
+	// planner must reject the entire plan rather than emit a partial
+	// one that bricks cursor.
+	tokens := HubTokenTable{Tokens: map[string]string{
+		"claude-code": "11111111111111111111111111111111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"codex-cli":   "22222222222222222222222222222222bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+	}}
+	_, err := BuildHubReconcilePlan(manifests, endpoint, tokens, HubReconcileOpts{GateOn: true})
+	if err == nil {
+		t.Fatal("BuildHubReconcilePlan: expected fail-fast on missing per-client token; got nil error")
+	}
+	if !strings.Contains(err.Error(), "cursor") {
+		t.Errorf("error message must name the missing client; got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "hub-mcp-tokens.json") {
+		t.Errorf("error message must reference hub-mcp-tokens.json for operator guidance; got %q", err.Error())
+	}
+}
+
 // TestBuildHubReconcilePlanGateOffRemovesMcphubHubAndRestoresPerDaemon
 // is the symmetric OFF-transition: AddReplace each per-(server,
 // client) entry pointing at the per-daemon HTTP URL + Remove the

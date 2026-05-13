@@ -177,8 +177,15 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 func runReconcileHubMode(cmd *cobra.Command, dryRun bool) error {
 	a := api.NewAPI()
 	// 1. Read current gate state. False = OFF (default) → restore
-	//    per-daemon entries + remove the aggregate.
-	gateOn := readHubEndpointGateForReconcile()
+	//    per-daemon entries + remove the aggregate. codex bot phase5
+	//    r7 P2 closure on PR #160: a corrupt settings.yaml must NOT
+	//    silently degrade to gate-OFF (which would tear down every
+	//    mcphub-hub entry). Read errors are fatal here; only a
+	//    genuinely missing file is treated as "first-run gate OFF".
+	gateOn, gErr := readHubEndpointGateForReconcile()
+	if gErr != nil {
+		return fmt.Errorf("reconcile: gate state unreadable; refusing to default to OFF (would tear down mcphub-hub entries): %w", gErr)
+	}
 
 	// 2. Load endpoint + tokens for plan header inputs (URL +
 	//    Headers in the gate-ON branch). Read tokens from disk via
@@ -293,22 +300,38 @@ func runReconcileHubMode(cmd *cobra.Command, dryRun bool) error {
 	return nil
 }
 
-// readHubEndpointGateForReconcile mirrors the gui-package private
-// helper readHubEndpointGateFromSettings (internal/gui/hub_listener.go)
-// — fail-closed when settings file is missing / malformed. Inlined
-// here so the cli package doesn't depend on gui or need an
-// api-package export for a 4-line yaml lookup.
-func readHubEndpointGateForReconcile() bool {
+// readHubEndpointGateForReconcile returns the persisted gate state
+// for the reconcile path. Distinct semantics from the gui-package
+// helper readHubEndpointGateFromSettings (internal/gui/hub_listener.go),
+// which silently defaults to false on every read/parse error so the
+// hub-listener stays OFF when settings are unhealthy:
+//
+// codex bot phase5 r7 P2 closure on PR #160: --reconcile-hub-mode
+// performs broad destructive rewrites (gate-OFF removes the
+// `mcphub-hub` aggregate from every client). Silently defaulting
+// to OFF when the settings file is corrupt could trigger that
+// tear-down without operator intent. Distinguish:
+//
+//   - File missing: treat as gate OFF (default for a first-run
+//     system that hasn't written settings.yaml yet — the reconcile
+//     is a no-op because there's nothing to tear down).
+//   - File present but unreadable / unparseable: fail with error.
+//     Operator must repair or delete settings.yaml.
+//   - File present and parseable: use the persisted value.
+func readHubEndpointGateForReconcile() (bool, error) {
 	path := api.SettingsPath()
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return false
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("read settings %s: %w", path, err)
 	}
 	raw := map[string]string{}
 	if uerr := yaml.Unmarshal(data, &raw); uerr != nil {
-		return false
+		return false, fmt.Errorf("parse settings %s (delete or repair before retrying reconcile): %w", path, uerr)
 	}
-	return raw["gui_server.hub_endpoint_enabled"] == "true"
+	return raw["gui_server.hub_endpoint_enabled"] == "true", nil
 }
 
 func parseInstallClientsFlag(clientsFlag string, allClients bool) ([]string, error) {

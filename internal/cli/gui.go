@@ -90,19 +90,50 @@ activates the first window and exits 0.`,
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
-			// Phase 5 Task 5.3: --reset-port runs BEFORE the
-			// single-instance lock acquisition. It's a state-dir
-			// operation (clears the persisted Port in
-			// hub-mcp.endpoint.json) that intentionally does NOT
-			// start a server. The credential-rotation warning is
-			// load-bearing — a previous bind to the persisted port
-			// could have leaked tokens to a pre-binding process per
-			// spec §"Pre-bind handling".
+			// Phase 5 Task 5.3: --reset-port is a state-dir operation
+			// (clears the persisted Port in hub-mcp.endpoint.json)
+			// that intentionally does NOT start a server. The
+			// credential-rotation warning is load-bearing — a previous
+			// bind to the persisted port could have leaked tokens to a
+			// pre-binding process per spec §"Pre-bind handling".
+			//
+			// codex bot phase5 r7 P2 closure on PR #160: gate the
+			// reset on hub-not-running. If the GUI is currently
+			// running, its hub-mcp listener is still bound on the
+			// old port while we clear the persisted port to 0 —
+			// downstream commands (regenerate-token, install
+			// --reconcile-hub-mode) key off endpoint.Port and would
+			// treat the hub as "not running", silently dropping the
+			// reload call to the live listener. Use the same
+			// single-instance flock the GUI server takes to detect
+			// liveness: if it can be acquired, no GUI is running;
+			// if it returns ErrSingleInstanceBusy, refuse the reset
+			// with operator guidance to stop the hub first. The
+			// lock is released immediately so this command doesn't
+			// hold pidport across the credential-rotation messages.
 			if resetPort {
 				if !yes && !inputIsTerminal(cmd.InOrStdin()) {
 					fmt.Fprintln(cmd.ErrOrStderr(), "non-TTY input requires --yes to confirm --reset-port (credential-rotation guidance below requires explicit acknowledgement)")
 					return &forceExitError{code: 6}
 				}
+				pidportPath, ppErr := gui.PidportPath()
+				if ppErr != nil {
+					return fmt.Errorf("resolve pidport path: %w", ppErr)
+				}
+				if d := os.Getenv("MCPHUB_GUI_TEST_PIDPORT_DIR"); d != "" {
+					pidportPath = filepath.Join(d, "gui.pidport")
+				}
+				lock, lockErr := gui.AcquireSingleInstanceAt(pidportPath, 0)
+				if lockErr != nil {
+					if errors.Is(lockErr, gui.ErrSingleInstanceBusy) {
+						fmt.Fprintln(cmd.ErrOrStderr(),
+							"--reset-port refused: another `mcphub gui` is running and its hub-mcp listener still holds the old port. "+
+								"Stop the GUI first (close the tray/window, or `mcphub gui --force --kill --yes`), then rerun `mcphub gui --reset-port`.")
+						return &forceExitError{code: 3}
+					}
+					return fmt.Errorf("acquire single-instance lock: %w", lockErr)
+				}
+				defer lock.Release()
 				if err := api.ResetHubPort(); err != nil {
 					return fmt.Errorf("reset hub port: %w", err)
 				}
