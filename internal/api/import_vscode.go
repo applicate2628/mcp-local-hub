@@ -279,12 +279,31 @@ func projectVSCodeServer(name string, entry map[string]any, exp *PlaceholderExpa
 			warnings = append(warnings, fmt.Sprintf("server %q: url %q is not https:// — remote-http manifests require TLS (case-sensitive prefix); skipped", name, expandedURL))
 			return nil, warnings
 		}
+		// Codex cumulative G6 review closure: ${secret:KEY}-style
+		// expansion paths (install + test-remote) reject post-
+		// expansion CR/LF via ExpandSecrets to defeat header
+		// injection. The VS Code projection runs on a separate
+		// PlaceholderExpander (env + workspaceFolder) and has no
+		// such guard; a hostile workspace using `${env:EVIL}` where
+		// EVIL holds `\r\n` could project a draft with CR/LF in url
+		// or header values. Reject upfront with a clear cause.
+		if containsControlBytes(expandedURL) {
+			warnings = append(warnings, fmt.Sprintf("server %q: url contains C0 control bytes after expansion (header / URL injection guard) — skipped", name))
+			return nil, warnings
+		}
 		hdrs, _ := entry["headers"].(map[string]any)
+		expandedHeaders := expandStringMap(hdrs, exp)
+		for hk, hv := range expandedHeaders {
+			if containsControlBytes(hk) || containsControlBytes(hv) {
+				warnings = append(warnings, fmt.Sprintf("server %q: header %q contains C0 control bytes after expansion (header injection guard) — skipped", name, hk))
+				return nil, warnings
+			}
+		}
 		projected := &vscodeProjected{
 			Name:      name,
 			Transport: "remote-http",
 			URL:       expandedURL,
-			Headers:   expandStringMap(hdrs, exp),
+			Headers:   expandedHeaders,
 		}
 		return projected, warnings
 	default:
@@ -349,13 +368,14 @@ func renderVSCodeProjectedYAML(entries []vscodeProjected) string {
 		switch e.Transport {
 		case "remote-http":
 			// Remote-http manifests have no local daemons (schema
-			// rejects daemons: with this transport). Prefill bindings
-			// for the adapters that support remote-http per the
-			// adapter compatibility matrix; operator removes the ones
-			// they don't want. Antigravity is excluded — stdio-relay
-			// only — and uninstall handles it at install time.
+			// rejects daemons: with this transport). Prefill
+			// bindings from the canonical adapter capability matrix
+			// (see remote_http_matrix.go); operator removes the
+			// ones they don't want. Reads from the same list as
+			// marketplace_generate and the install-plan gate so the
+			// three surfaces cannot drift.
 			sb.WriteString("client_bindings:\n")
-			for _, c := range []string{"claude-code", "codex-cli", "cursor", "gemini-cli", "vscode"} {
+			for _, c := range remoteHTTPCapableClients {
 				sb.WriteString(fmt.Sprintf("  - client: %s\n", c))
 			}
 		default:

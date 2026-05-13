@@ -69,8 +69,13 @@ func generateRemoteHTTPDraft(e *MarketplaceEntry) (string, []string, error) {
 	// List the adapters with confirmed remote-http header support so
 	// the operator removes the ones they don't want. Antigravity is
 	// excluded — stdio-relay only.
-	bindings := make([]map[string]any, 0, 5)
-	for _, c := range []string{"claude-code", "codex-cli", "cursor", "gemini-cli", "vscode"} {
+	// Adapter capability matrix: every adapter that round-trips
+	// Headers in clients/*.go is eligible for remote-http. Codex
+	// cumulative G6 review flagged the prior 5-client list missing
+	// qwen-cli, which is install-eligible and exercised by the
+	// header round-trip test — the draft side must stay in sync.
+	bindings := make([]map[string]any, 0, len(remoteHTTPCapableClients))
+	for _, c := range remoteHTTPCapableClients {
 		bindings = append(bindings, map[string]any{"client": c})
 	}
 	draft["client_bindings"] = bindings

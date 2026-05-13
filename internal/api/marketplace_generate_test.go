@@ -86,7 +86,10 @@ func TestGenerateDraftManifest_HttpEntryEmitsRemoteHTTPDraft(t *testing.T) {
 	if !strings.Contains(yaml, "client_bindings:") {
 		t.Errorf("yaml missing client_bindings:\n---\n%s", yaml)
 	}
-	for _, c := range []string{"claude-code", "codex-cli", "cursor", "gemini-cli", "vscode"} {
+	// Codex cumulative G6 review closure: draft must list every
+	// remote-http-capable adapter (incl. qwen-cli) so the prefilled
+	// list matches the install/test surface.
+	for _, c := range remoteHTTPCapableClients {
 		if !strings.Contains(yaml, "client: "+c) {
 			t.Errorf("yaml missing prefilled binding for %s\n---\n%s", c, yaml)
 		}

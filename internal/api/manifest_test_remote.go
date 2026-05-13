@@ -96,7 +96,11 @@ func (a *API) manifestTestRemoteFromYAML(ctx context.Context, name, yamlStr stri
 	if err != nil {
 		return nil, fmt.Errorf("expand headers: %w", err)
 	}
-	return sendRemoteInitialize(ctx, client, expandedURL, expandedHeaders)
+	// Pass the manifest's literal URL (placeholders intact) as the
+	// display form for error messages. Even when the expanded URL
+	// embeds path/query tokens, operator-visible diagnostics quote
+	// only the manifest text.
+	return sendRemoteInitialize(ctx, client, expandedURL, m.URL, expandedHeaders)
 }
 
 // newTestRemoteClient builds the production HTTPS-only client used
@@ -137,10 +141,13 @@ func rejectAllRedirects(req *http.Request, via []*http.Request) error {
 	return fmt.Errorf("refusing to follow redirect to %s — manifest test-remote does not follow redirects so credential-bearing headers can never reach an unintended host; update the manifest url to the final endpoint instead", req.URL.Redacted())
 }
 
-func sendRemoteInitialize(ctx context.Context, client *http.Client, rawURL string, headers map[string]string) (*RemoteInitializeResult, error) {
+func sendRemoteInitialize(ctx context.Context, client *http.Client, rawURL, displayURL string, headers map[string]string) (*RemoteInitializeResult, error) {
+	if displayURL == "" {
+		displayURL = rawURL
+	}
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return nil, fmt.Errorf("parse url %q: %w", rawURL, err)
+		return nil, scrubbedURLErrorf(err, rawURL, displayURL, "parse url %q", displayURL)
 	}
 	if u.Scheme != "https" {
 		return nil, fmt.Errorf("remote url must be https:// (got scheme %q)", u.Scheme)
@@ -165,7 +172,7 @@ func sendRemoteInitialize(ctx context.Context, client *http.Client, rawURL strin
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, bytes.NewReader(raw))
 	if err != nil {
-		return nil, fmt.Errorf("build request: %w", err)
+		return nil, scrubbedURLErrorf(err, rawURL, displayURL, "build request for %s", displayURL)
 	}
 	// Apply manifest-supplied headers FIRST (typically Authorization,
 	// custom auth tokens, X-* metadata), then force the protocol
@@ -187,7 +194,13 @@ func sendRemoteInitialize(ctx context.Context, client *http.Client, rawURL strin
 	req.Header.Set("MCP-Protocol-Version", testRemoteProtocolVersion)
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("post initialize: %w", err)
+		// net/http wraps client.Do errors in *url.Error whose String
+		// embeds the expanded URL, which may carry a path/query token
+		// after ${secret:KEY} expansion. Use scrubbedURLErrorf so the
+		// message bytes are sanitized but the original chain stays
+		// reachable via errors.Is/As — callers can still distinguish
+		// context.DeadlineExceeded / net.Error.Timeout for retries.
+		return nil, scrubbedURLErrorf(err, rawURL, displayURL, "post initialize to %s", displayURL)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -405,4 +418,44 @@ func truncateForError(s string, n int) string {
 		return s[:n] + "..."
 	}
 	return s
+}
+
+// scrubURL replaces every occurrence of the expanded (wire) URL with
+// the operator-visible display form. Used at every error site that
+// might receive a wrapped *url.Error from net/http — the wrapper
+// embeds the full URL, which can leak path/query secrets that came
+// from `${secret:KEY}` expansion. The expanded form never reaches
+// stdout/stderr; only the manifest's literal pre-expansion text does
+// (codex cumulative G6 review P2 closure).
+//
+// No-op when rawURL == displayURL (the common case: no placeholder)
+// so non-secret URLs surface unchanged in diagnostics.
+func scrubURL(s, rawURL, displayURL string) string {
+	if rawURL == "" || rawURL == displayURL {
+		return s
+	}
+	return strings.ReplaceAll(s, rawURL, displayURL)
+}
+
+// scrubbedURLError redacts the expanded URL out of Error() while
+// preserving the original error chain via Unwrap(). Callers can
+// still use `errors.Is(err, context.DeadlineExceeded)` and friends
+// to drive retry/UX decisions — only the message bytes shown to
+// operators are sanitized (bot r1 P2 closure, PR #174).
+type scrubbedURLError struct {
+	msg string
+	err error
+}
+
+func (e *scrubbedURLError) Error() string { return e.msg }
+func (e *scrubbedURLError) Unwrap() error { return e.err }
+
+// scrubbedURLErrorf constructs a scrubbedURLError with a formatted
+// message and the cause attached for errors.Is/As traversal.
+func scrubbedURLErrorf(cause error, rawURL, displayURL, format string, args ...any) error {
+	msg := fmt.Sprintf(format, args...)
+	if cause != nil {
+		msg += ": " + scrubURL(cause.Error(), rawURL, displayURL)
+	}
+	return &scrubbedURLError{msg: msg, err: cause}
 }

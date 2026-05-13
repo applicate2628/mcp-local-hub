@@ -130,12 +130,20 @@ const (
 // carries the per-client X-Mcphub-Hub-Token plus the X-Mcphub-Instance-Id
 // header the Phase 4 auth gate validates. Per-daemon entries leave
 // Headers empty — they hit the daemon directly with no auth header.
+//
+// DisplayURL carries a redacted form of URL suitable for plan + install
+// stdout. For local manifests it equals URL. For transport=remote-http
+// it is the manifest's literal pre-expansion URL (with ${secret:KEY}
+// placeholders intact) so a path/query token never reaches the
+// operator's terminal even when URL embeds it (codex cumulative G6
+// review P2 closure — URL-as-secret-bearer is rare but real).
 type ClientUpdatePlan struct {
 	Client     string
 	Path       string
 	Action     ClientUpdateAction
 	EntryName  string            // "mcphub-hub" for aggregate; "<server>" for per-daemon
 	URL        string            // empty for Remove
+	DisplayURL string            // safe-to-print form of URL; falls back to URL when not set
 	Headers    map[string]string // F-G5: token + instance id; empty for per-daemon
 	DaemonName string            // legacy; only meaningful for per-daemon entries
 }
@@ -1247,12 +1255,17 @@ func buildRemoteHTTPPlan(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, e
 		if !includeClient(b.Client) {
 			continue
 		}
-		// Defense-in-depth: Preflight already rejected
-		// antigravity for remote-http; this guard ensures direct
-		// BuildPlanWithOpts callers (tests, future API consumers)
-		// also see the rejection.
-		if b.Client == "antigravity" {
-			return nil, fmt.Errorf("manifest %s: client=antigravity is incompatible with transport=remote-http (Cascade adapter accepts stdio relay entries only)", m.Name)
+		// Defense-in-depth: enforce the canonical remote-http adapter
+		// capability matrix (see remote_http_matrix.go). Antigravity
+		// is the obvious stdio-relay case; this guard also catches
+		// any future binding that names a client not on the matrix.
+		// Preflight already rejected antigravity earlier — this
+		// ensures direct BuildPlanWithOpts callers (tests, future
+		// API consumers) and other off-matrix names see the same
+		// rejection at plan build, before any client config is
+		// touched.
+		if !isRemoteHTTPCapableClient(b.Client) {
+			return nil, fmt.Errorf("manifest %s: client=%q is not on the remote-http adapter capability matrix (supported: %v)", m.Name, b.Client, remoteHTTPCapableClients)
 		}
 		path, err := clientConfigPath(b.Client)
 		if err != nil {
@@ -1264,7 +1277,12 @@ func buildRemoteHTTPPlan(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, e
 			Action:    ClientUpdateAddReplace,
 			EntryName: m.Name,
 			URL:       expandedURL,
-			Headers:   expandedHeaders,
+			// DisplayURL keeps the manifest's literal pre-expansion
+			// URL so plan + install stdout never echo path/query
+			// tokens that may have come from ${secret:KEY}
+			// placeholders. The wire URL above is still expanded.
+			DisplayURL: m.URL,
+			Headers:    expandedHeaders,
 			// DaemonName intentionally empty — remote-http has none.
 		})
 	}
@@ -1399,7 +1417,7 @@ func printPlanTo(w io.Writer, p *Plan) error {
 	}
 	fmt.Fprintf(w, "\n  Client configs to update (%d):\n", len(p.ClientUpdates))
 	for _, u := range p.ClientUpdates {
-		fmt.Fprintf(w, "    \u2022 %s (%s)\n        %s  \u2192  %s\n", u.Client, u.Path, u.Action, u.URL)
+		fmt.Fprintf(w, "    \u2022 %s (%s)\n        %s  \u2192  %s\n", u.Client, u.Path, u.Action, displayURLOf(u))
 	}
 	fmt.Fprintln(w, "\nNo changes made.")
 	_ = clients.Client(nil) // keep import live for later tasks
@@ -1570,7 +1588,7 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int)
 			_ = clientRef.RemoveEntry(entryName)
 			fmt.Fprintf(w, "  rollback: removed %s entry from %s\n", entryName, u.Client)
 		})
-		fmt.Fprintf(w, "\u2713 %s \u2192 %s\n", u.Client, u.URL)
+		fmt.Fprintf(w, "\u2713 %s \u2192 %s\n", u.Client, displayURLOf(u))
 	}
 	// 3. Start daemons immediately (without waiting for next logon).
 	for _, t := range p.SchedulerTasks {
