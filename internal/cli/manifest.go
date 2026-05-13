@@ -25,10 +25,11 @@ resolve manifests without needing a sibling servers/ directory on disk —
 at the cost of requiring a rebuild to pick up manifest edits.
 
 Subcommands:
-  manifest list             # names of all embedded manifests
-  manifest show <name>      # print a manifest's YAML content
-  manifest create <name>    # scaffold a new manifest interactively
-  manifest edit <name>      # open in $EDITOR (source file, not embed)
+  manifest list                 # names of all embedded manifests
+  manifest show <name>          # print a manifest's YAML content
+  manifest create <name>        # scaffold a new manifest interactively
+  manifest edit <name>          # open in $EDITOR (source file, not embed)
+  manifest test-remote <name>   # smoke-check a remote-http manifest's URL+headers
 
 After editing / creating a manifest, rebuild + 'mcphub install --server <n>'.
 
@@ -41,6 +42,7 @@ See also: install, scan (flags un-manifested clients as "unknown").`,
 	root.AddCommand(newManifestValidateCmd())
 	root.AddCommand(newManifestDeleteCmd())
 	root.AddCommand(newManifestExtractCmd())
+	root.AddCommand(newManifestTestRemoteCmd())
 	return root
 }
 
