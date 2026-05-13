@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/term"
+
 	"mcp-local-hub/internal/process"
 )
 
@@ -302,9 +304,19 @@ func (h *HTTPHost) stopLocked() error {
 
 // openLogWriters returns the stdout and stderr writers to attach to
 // the subprocess, plus an io.Closer for the log file (or nil). When
-// LogPath is unset both writers are os.Stderr. When set, both are a
-// MultiWriter that tees the log file + os.Stderr, using daemon.Launch's
-// rotation convention (10 MB, 5 rotations).
+// LogPath is unset both writers are os.Stderr. When LogPath is set:
+//
+//   - if mcphub's own os.Stderr is a real terminal (operator ran
+//     `mcphub daemon …` interactively for debug), tee log file +
+//     os.Stderr so the operator sees realtime output;
+//   - if os.Stderr is a pipe or file (scheduler-spawned daemon, OR
+//     mcphub daemon spawned by an MCP client as a stdio child),
+//     write to the log file ONLY. Tee-to-stderr would leak upstream
+//     subprocess output (npx/uvx/python "SUCCESS: …" chatter from
+//     OS tools they invoke) into the parent's inherited stdio,
+//     which on Codex/Claude Code subagents lands in the operator's
+//     terminal mid-MCP-init. The log file is the durable record;
+//     operators tail it explicitly when they want live output.
 func (h *HTTPHost) openLogWriters() (stdout, stderr io.Writer, closer io.Closer) {
 	if h.cfg.LogPath == "" {
 		return os.Stderr, os.Stderr, nil
@@ -321,8 +333,11 @@ func (h *HTTPHost) openLogWriters() (stdout, stderr io.Writer, closer io.Closer)
 		fmt.Fprintf(os.Stderr, "warn: open log %q: %v\n", h.cfg.LogPath, err)
 		return os.Stderr, os.Stderr, nil
 	}
-	multi := io.MultiWriter(logFile, os.Stderr)
-	return multi, multi, logFile
+	if term.IsTerminal(int(os.Stderr.Fd())) {
+		multi := io.MultiWriter(logFile, os.Stderr)
+		return multi, multi, logFile
+	}
+	return logFile, logFile, logFile
 }
 
 // HTTPHandler returns the http.Handler for /mcp.

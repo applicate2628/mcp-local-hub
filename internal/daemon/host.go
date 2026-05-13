@@ -18,6 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/term"
+
 	"mcp-local-hub/internal/process"
 )
 
@@ -550,17 +552,23 @@ func (h *StdioHost) Stop() error {
 }
 
 // openStderrSink returns a writer for child stderr. When LogPath is set
-// the writer tees to both a runtime-rotating log file (so `mcphub logs`
-// works for long-lived stdio-bridge daemons without unbounded growth)
-// and os.Stderr (so the operator's terminal keeps showing live
-// diagnostics). When LogPath is empty, falls back to os.Stderr only —
-// matches the pre-LogPath behavior.
+// the writer always tees to a runtime-rotating log file (so `mcphub
+// logs` works for long-lived stdio-bridge daemons without unbounded
+// growth). It ALSO tees to os.Stderr only when mcphub's own os.Stderr
+// is a real terminal — i.e., the operator ran `mcphub daemon …`
+// interactively for debug. When os.Stderr is a pipe/file (scheduler-
+// spawned daemon, OR mcphub daemon spawned by an MCP client as a
+// stdio child), the file is the sole sink: tee'd output would leak
+// upstream "SUCCESS: …" chatter into the MCP client's inherited stdio,
+// which on Codex/Claude Code subagents lands in the operator's
+// terminal mid-MCP-init.
+//
+// When LogPath is empty, falls back to os.Stderr only — matches the
+// pre-LogPath behavior; debug-only path so terminal noise is expected.
 //
 // The file leg is wrapped in a best-effort writer that rotates inline
 // when the on-disk size grows past the cap and absorbs all rotation /
-// write / open errors. Stderr forwarding must never stop because the
-// log file became unwritable: that would suppress operator diagnostics
-// for the rest of the daemon's life.
+// write / open errors.
 func (h *StdioHost) openStderrSink() io.Writer {
 	if h.cfg.LogPath == "" {
 		return os.Stderr
@@ -579,7 +587,10 @@ func (h *StdioHost) openStderrSink() io.Writer {
 	}
 	rfw := &rotatingFileWriter{path: h.cfg.LogPath, file: f, maxBytes: 10 * 1024 * 1024, keep: 5}
 	h.logFile = rfw
-	return io.MultiWriter(rfw, os.Stderr)
+	if term.IsTerminal(int(os.Stderr.Fd())) {
+		return io.MultiWriter(rfw, os.Stderr)
+	}
+	return rfw
 }
 
 // rotatingFileWriter writes to a log file, rotating it inline when its
