@@ -585,12 +585,20 @@ func parseAndValidateIntent(raw []byte) (DaemonIntentFile, error) {
 
 	// Reject non-UTC timestamps. json.Time decodes RFC3339 with zone
 	// info preserved; we require Z (UTC) on disk.
+	//
+	// isUTCInstant scans every `"updated_at":"...":` occurrence in the
+	// raw bytes — its result is identical regardless of which task
+	// name is passed (the parameter is unused), so call it ONCE up
+	// front. The prior per-task call was O(N*M) on the raw buffer
+	// (N tasks × M-byte file) and tripped the api-suite hang on
+	// Windows once the intent file grew under multi-task tests
+	// (work-items/bugs/2026-05-12-internal-api-suite-hangs-on-windows.md).
+	if !isUTCInstant(raw, "") {
+		return DaemonIntentFile{}, fmt.Errorf("%w (updated_at must be UTC Z)", errIntentSchemaInvalid)
+	}
 	for name, intent := range file.Tasks {
 		if err := validateIntentFields(intent); err != nil {
 			return DaemonIntentFile{}, fmt.Errorf("entry %q: %w", name, err)
-		}
-		if !isUTCInstant(raw, name) {
-			return DaemonIntentFile{}, fmt.Errorf("entry %q: %w (updated_at must be UTC Z)", name, errIntentSchemaInvalid)
 		}
 	}
 
