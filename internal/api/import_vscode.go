@@ -246,15 +246,27 @@ func projectVSCodeServer(name string, entry map[string]any, exp *PlaceholderExpa
 		// expose an HTTP endpoint (servers/serena/manifest.yaml); the
 		// two transports look similar but native-http requires a
 		// `command:` and remote-http forbids it.
-		if url == "" {
-			warnings = append(warnings, fmt.Sprintf("server %q: type=%s but no url — skipped", name, serverType))
+		//
+		// Bot r1 P2 closure (PR #172): check emptiness AFTER expansion.
+		// A workspace file using `url: "${env:MCP_URL}"` with the env
+		// var unset would otherwise project a draft with an empty url
+		// (since the raw value `${env:MCP_URL}` is non-empty), which
+		// manifest validation later rejects. Skip with a clear
+		// post-expansion warning instead.
+		expandedURL := exp.Expand(url)
+		if expandedURL == "" {
+			if url == "" {
+				warnings = append(warnings, fmt.Sprintf("server %q: type=%s but no url — skipped", name, serverType))
+			} else {
+				warnings = append(warnings, fmt.Sprintf("server %q: url %q expanded to empty (placeholder unset?) — skipped", name, url))
+			}
 			return nil, warnings
 		}
 		hdrs, _ := entry["headers"].(map[string]any)
 		projected := &vscodeProjected{
 			Name:      name,
 			Transport: "remote-http",
-			URL:       exp.Expand(url),
+			URL:       expandedURL,
 			Headers:   expandStringMap(hdrs, exp),
 		}
 		return projected, warnings

@@ -94,6 +94,40 @@ func TestImportVSCodeWorkspace_HTTPServer(t *testing.T) {
 	}
 }
 
+// TestImportVSCodeWorkspace_HTTPServer_URLPlaceholderUnsetSkips pins
+// bot r1 P2 closure (PR #172): a workspace using ${env:VAR} in url
+// where the env var is unset must skip with a clear warning instead
+// of emitting a draft with an empty url (which manifest validation
+// would reject later anyway). Check is post-expansion.
+func TestImportVSCodeWorkspace_HTTPServer_URLPlaceholderUnsetSkips(t *testing.T) {
+	ws := t.TempDir()
+	writeMCPJSON(t, ws, `{
+  "servers": {
+    "placeholder": {"type": "http", "url": "${env:NEVER_SET_VAR_FOR_G6_TEST}"}
+  }
+}`)
+	// Ensure the env var is genuinely unset.
+	t.Setenv("NEVER_SET_VAR_FOR_G6_TEST", "")
+	a := NewAPI()
+	result, err := a.ImportVSCodeWorkspace(ws, VSCodeImportOpts{})
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if !result.EmptyResult {
+		t.Errorf("EmptyResult should be true when url placeholder expands to empty; got %+v", result)
+	}
+	foundSkip := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "expanded to empty") && strings.Contains(w, "placeholder") {
+			foundSkip = true
+			break
+		}
+	}
+	if !foundSkip {
+		t.Errorf("expected expanded-to-empty skip warning; got: %v", result.Warnings)
+	}
+}
+
 func TestImportVSCodeWorkspace_HTTPServer_NoURLSkips(t *testing.T) {
 	ws := t.TempDir()
 	writeMCPJSON(t, ws, `{
