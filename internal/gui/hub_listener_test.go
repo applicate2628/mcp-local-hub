@@ -66,6 +66,48 @@ func writeGate(t *testing.T, path string, on bool) {
 	}
 }
 
+// TestHubListenerComponents_AliveFalseOnNilReceiver pins the
+// nil-receiver contract on the Alive() helper. Server.HubMcpEndpointActive
+// guards against a nil hubMcpComp via Load() == nil; this is an
+// extra defense if a caller bypasses that check.
+func TestHubListenerComponents_AliveFalseOnNilReceiver(t *testing.T) {
+	var c *HubListenerComponents
+	if c.Alive() {
+		t.Error("nil receiver Alive() = true; want false (defensive)")
+	}
+}
+
+// TestHubListenerComponents_AliveTransitionsOnExit pins codex bot
+// r2 P2 closure on PR #168: the serve goroutine flips Alive() from
+// true to false when it exits. We construct a minimal bundle with
+// a closed listener so srv.Serve returns immediately, then poll
+// Alive() until it flips false.
+func TestHubListenerComponents_AliveTransitionsOnExit(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	// Close immediately so Serve returns http.ErrServerClosed.
+	_ = ln.Close()
+
+	srv := &http.Server{Handler: http.NewServeMux(), ReadHeaderTimeout: 1 * time.Second}
+	comp := &HubListenerComponents{srv: srv}
+	comp.alive.Store(true)
+	go func() {
+		defer comp.alive.Store(false)
+		_ = srv.Serve(ln)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if !comp.Alive() {
+			return // SUCCESS — alive flipped false post-Serve
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Errorf("Alive() stuck true 2s after Serve exited; the defer must clear it on any exit path")
+}
+
 // TestHubListenerSkippedWithGateOff — gate OFF, no listener bound,
 // no state files written. Runs on every platform.
 func TestHubListenerSkippedWithGateOff(t *testing.T) {

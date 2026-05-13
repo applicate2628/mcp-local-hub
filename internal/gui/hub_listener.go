@@ -45,6 +45,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -62,6 +63,29 @@ type HubListenerComponents struct {
 	handler *api.HubMcpHandler
 	reload  *api.InternalReloadHandler
 	port    int
+
+	// alive is true between the serve goroutine's start and exit.
+	// Server.HubMcpEndpointActive consults this AND the
+	// hubMcpComp.Load() result so the `actual_hub_endpoint_enabled`
+	// settings DTO field reflects CURRENT liveness, not "ever-
+	// published". codex bot r2 P2 closure on PR #168: pre-fix, a
+	// post-startup listener death (accept-loop fatal, etc.) was
+	// only logged via LogHubMcpEvent; hubMcpComp stayed non-nil so
+	// the badge stayed hidden even though the runtime endpoint
+	// was actually down.
+	alive atomic.Bool
+}
+
+// Alive reports whether the serve goroutine is currently running.
+// Set to true at construction; cleared by a defer in the serve
+// goroutine when Serve returns (any path: clean shutdown or
+// fatal accept-loop error). Exported for cross-package access by
+// Server.HubMcpEndpointActive.
+func (c *HubListenerComponents) Alive() bool {
+	if c == nil {
+		return false
+	}
+	return c.alive.Load()
 }
 
 // readHubEndpointGateFromSettings reads gui_server.hub_endpoint_enabled
@@ -243,7 +267,28 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 		Handler:           muxedHandler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+
+	// Allocate the components bundle BEFORE starting the serve
+	// goroutine so the goroutine can mark `alive=false` on exit
+	// (codex bot r2 P2 closure on PR #168 — accurate live-state
+	// for the persisted-vs-runtime hub-endpoint badge).
+	comp := &HubListenerComponents{
+		srv:     srv,
+		store:   store,
+		handler: handler,
+		reload:  reload,
+		port:    port,
+	}
+	comp.alive.Store(true)
+
 	go func() {
+		// Mark the listener dead on any exit path (clean shutdown via
+		// ErrServerClosed AND fatal accept-loop errors). The badge
+		// consumer (Server.HubMcpEndpointActive) re-reads this on
+		// each /api/settings request, so a post-startup death is
+		// reflected within one snapshot tick.
+		defer comp.alive.Store(false)
+
 		// codex bot phase4 r2 P2 closure on PR #158: surface non-
 		// shutdown serve errors so operators can diagnose a hub
 		// listener that died after startup reported `hub-listener-up`.
@@ -264,13 +309,7 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 		"port": port,
 	})
 
-	return &HubListenerComponents{
-		srv:     srv,
-		store:   store,
-		handler: handler,
-		reload:  reload,
-		port:    port,
-	}, nil
+	return comp, nil
 }
 
 // ShutdownHubListener drains the hub listener under a 5s timeout +
