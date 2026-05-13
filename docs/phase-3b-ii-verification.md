@@ -300,6 +300,23 @@ After completing D2.6, run `mcphub watchdog status` once more and
 attach a copy of the recent-events tail to the audit-trail entry at
 the bottom of this doc.
 
+### D2.8 — Marketplace draft-import (G5, v2 per codex r1)
+
+1. `mcphub marketplace refresh` → "Refreshed catalog: N entries." on stdout.
+2. `mcphub marketplace search filesystem` → row for `filesystem` entry.
+3. `mcphub marketplace show filesystem` → metadata block + `Readme URL: <url>` (NO README body — open the URL yourself).
+4. `mcphub marketplace generate filesystem > /tmp/draft.yaml`
+5. **Operator-edit step (load-bearing):** open `/tmp/draft.yaml` and:
+   - change `name: filesystem` to a unique server id, e.g. `name: filesystem-test`
+   - replace `port: 0` with a free port, e.g. `port: 9200`
+   - inspect `command` + `base_args` + `env`; replace any verbatim `${env:*}` placeholders with the values you want persisted
+   - the leading comment block reminds you of these three steps
+6. `mcphub manifest create filesystem-test < /tmp/draft.yaml` → manifest accepted; `mcphub manifest list` shows `filesystem-test`.
+7. `mcphub install --server filesystem-test --clients claude-code` → install succeeds; the daemon registers.
+8. `mcphub marketplace generate context7` → non-zero exit; stdout empty; stderr contains "G6" + "wait" + "workaround".
+9. Disconnect network; `mcphub marketplace search filesystem` → WARN line on stderr; cached output on stdout still works.
+10. Manually plant a future `fetched_at` in `<state-dir>/marketplace-cache.json` (overwrite the field to `2099-01-01T00:00:00Z`) and re-run search → expect a fresh fetch attempt (revalidate is forced).
+
 ---
 
 ## D3 — Multi-language workspace smoke

@@ -578,6 +578,27 @@ If a stale lock blocks a manual run:
 POSIX `flock` is advisory; only honored by callers that use the same
 convention. The watchdog binary always honors it.
 
+## Marketplace (G5, v0.3.0)
+
+`mcphub marketplace {search,show,generate,refresh}` lets an operator
+discover MCP servers from a curated catalog. Default registry URL:
+`https://raw.githubusercontent.com/applicate2628/mcp-local-hub/master/marketplace/v1/catalog.json`.
+
+- `search [query]` — table of catalog entries matching query (empty = list all).
+- `show <id>` — metadata block + `Readme URL:` line (operator opens the URL).
+- `generate <id>` — draft YAML to stdout. **Operator MUST edit before**
+  `manifest create`: rename `name:`, pick a real port, redact verbatim
+  `${env:*}` placeholders. Sensitive env names (`*_TOKEN`, `*_SECRET`,
+  `*_PASSWORD`, `*_KEY`, `*_API_KEY`, `AWS_*`, `AZURE_*`, `GCP_*`,
+  `GITHUB_*`) are LEFT VERBATIM with a stderr warning per occurrence.
+- `refresh` — force re-fetch (bypass TTL + ETag).
+
+Cache: `<state-dir>/marketplace-cache.json` (routed through
+`writeHubMcpStateFile` — atomic tempfile + rename + post-rename DACL re-verify (best-effort cache, no cross-process flock — see Architecture intro)), 24h
+TTL, ETag revalidate. HTTPS-only; downgrade redirects rejected; gzip
+disabled. Native-http entries skip with a G6-deferral message until G6
+ships (no operator-side workaround in v0.3.0).
+
 ## Stuck-instance recovery
 
 If `mcphub gui` exits with the structured "Cannot acquire mcphub gui
