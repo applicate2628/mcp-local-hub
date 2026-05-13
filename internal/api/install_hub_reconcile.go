@@ -137,14 +137,16 @@ func BuildHubReconcilePlan(
 		if len(refs) == 0 {
 			continue
 		}
-		// Sort refs by (Server, Daemon) so the produced plan order is
-		// stable across runs. Same rationale as the client sort.
-		sort.Slice(refs, func(i, j int) bool {
-			if refs[i].Server != refs[j].Server {
-				return refs[i].Server < refs[j].Server
-			}
-			return refs[i].Daemon < refs[j].Daemon
-		})
+		// codex bot phase5 r3 P2 closure on PR #160: do NOT sort refs.
+		// Manifest order is the canonical replace-by-name precedence
+		// the per-server install path uses. Sorting here would make
+		// the persisted-on-disk winner be sort-order instead of
+		// manifest-order, diverging from BuildPlanWithOpts semantics
+		// when a manifest legitimately has multiple bindings under
+		// one (server, client). Determinism across runs is preserved
+		// by the manifest order itself (manifests slice is the
+		// caller's responsibility; we read it as-is) + the
+		// clientNames sort above.
 
 		path, err := clients.ConfigPathForName(client)
 		if err != nil {

@@ -50,7 +50,17 @@ func newHubMcpStatusCmd() *cobra.Command {
 		Short: "Show hub-mcp endpoint state (presence-only, no token bytes)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ep, epErr := api.LoadHubEndpoint()
-			tbl := api.CurrentTokenTable()
+			// codex bot phase5 r3 P2 closure on PR #160: read tokens
+			// from DISK, not the in-memory cache. A fresh CLI process
+			// has a nil cache until Ensure/Rotate/Reload runs, so
+			// CurrentTokenTable would report empty tokens even when
+			// hub-mcp-tokens.json exists on disk. ReloadHubTokens
+			// reads + parses + publishes — exactly what status needs
+			// for an accurate snapshot, even on cold CLI invocations.
+			// The side-effect of publishing the cache is harmless:
+			// the next process that calls CurrentTokenTable just sees
+			// the same table that's already on disk.
+			tbl, tblErr := api.ReloadHubTokens()
 			events, _ := api.RecentHubMcpEvents(8)
 
 			perClient := map[string]string{}
@@ -72,6 +82,9 @@ func newHubMcpStatusCmd() *cobra.Command {
 			}
 			if epErr != nil {
 				out["endpoint_error"] = epErr.Error()
+			}
+			if tblErr != nil {
+				out["token_table_error"] = tblErr.Error()
 			}
 			raw, err := json.MarshalIndent(out, "", "  ")
 			if err != nil {

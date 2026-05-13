@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -9,9 +10,11 @@ import (
 	"strings"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/config"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+	"gopkg.in/yaml.v3"
 )
 
 // newInstallCmdReal is the concrete cobra.Command wired by root.go's stub
@@ -24,6 +27,7 @@ func newInstallCmdReal() *cobra.Command {
 	var dryRun bool
 	var all bool
 	var allClients bool
+	var reconcileHubMode bool
 	c := &cobra.Command{
 		Use:   "install",
 		Short: "Install an MCP server as shared daemon(s)",
@@ -55,6 +59,20 @@ Prerequisites:
 
 See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// codex bot phase5 r3 P1 closure on PR #160:
+			// --reconcile-hub-mode runs the bidirectional install
+			// reconciler (BuildHubReconcilePlan +
+			// ApplyHubReconcileInOrder) for the current gate state.
+			// Operator-explicit entry point per spec §"Bidirectional
+			// install reconciler" — flip the gate in Settings,
+			// restart the hub, then run this command to migrate
+			// every client config to the chosen mode.
+			if reconcileHubMode {
+				if server != "" || daemonFilter != "" || all {
+					return fmt.Errorf("--reconcile-hub-mode is mutually exclusive with --server/--daemon/--all")
+				}
+				return runReconcileHubMode(cmd, dryRun)
+			}
 			// If mcphub is not on PATH, try to bootstrap before we hit
 			// the API's preflight check. Three-tier fallback:
 			//   1. ~/.local/bin already on PATH — silently copy there
@@ -128,7 +146,110 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 	c.Flags().BoolVar(&allClients, "all-clients", false, "install into every client binding declared by the manifest")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print planned actions without making changes")
 	c.Flags().BoolVar(&all, "all", false, "install every manifest under servers/")
+	c.Flags().BoolVar(&reconcileHubMode, "reconcile-hub-mode", false,
+		"run the bidirectional hub-endpoint reconciler against the current gui_server.hub_endpoint_enabled setting; "+
+			"rewrites every client config to/from the mcphub-hub aggregate entry. "+
+			"Run AFTER flipping the Settings toggle and restarting the hub.")
 	return c
+}
+
+// runReconcileHubMode reads the current gate state from
+// gui-preferences.yaml, builds the full-reconcile plan via
+// BuildHubReconcilePlan, and applies it via
+// ApplyHubReconcileInOrder. On DryRun, prints the plan without
+// touching any client config.
+//
+// codex bot phase5 r3 P1 closure on PR #160 — the install flow
+// must invoke the reconciler explicitly; without this entry point
+// the Phase 5 Settings toggle would be a no-op.
+func runReconcileHubMode(cmd *cobra.Command, dryRun bool) error {
+	a := api.NewAPI()
+	// 1. Read current gate state. False = OFF (default) → restore
+	//    per-daemon entries + remove the aggregate.
+	gateOn := readHubEndpointGateForReconcile()
+
+	// 2. Load endpoint + tokens for plan header inputs (URL +
+	//    Headers in the gate-ON branch). Read tokens from disk via
+	//    ReloadHubTokens so a cold CLI process sees the table.
+	endpoint, _ := api.LoadHubEndpoint()
+	tokens, _ := api.ReloadHubTokens()
+
+	// 3. Collect manifests for every supported server. The Scan
+	//    surface lists every server with a manifest; ManifestGet
+	//    returns the YAML; config.ParseManifest decodes into the
+	//    typed struct the reconcile planner expects.
+	scan, sErr := a.Scan()
+	if sErr != nil {
+		return fmt.Errorf("scan manifests: %w", sErr)
+	}
+	var manifests []config.ServerManifest
+	for _, entry := range scan.Entries {
+		if !entry.ManifestExists {
+			continue
+		}
+		yaml, gErr := a.ManifestGet(entry.Name)
+		if gErr != nil {
+			if errors.Is(gErr, os.ErrNotExist) {
+				continue // benign scan-window race
+			}
+			return fmt.Errorf("read manifest %q: %w", entry.Name, gErr)
+		}
+		m, pErr := config.ParseManifest(strings.NewReader(yaml))
+		if pErr != nil {
+			return fmt.Errorf("parse manifest %q: %w", entry.Name, pErr)
+		}
+		manifests = append(manifests, *m)
+	}
+
+	plan, pErr := api.BuildHubReconcilePlan(manifests, endpoint, tokens, api.HubReconcileOpts{GateOn: gateOn})
+	if pErr != nil {
+		return fmt.Errorf("build reconcile plan: %w", pErr)
+	}
+
+	mode := "OFF (restore per-daemon URLs)"
+	if gateOn {
+		mode = "ON (route every client via http://127.0.0.1:<hub-port>/clients/<id>/mcp)"
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Reconcile mode: gate %s\nPlan: %d op(s)\n", mode, len(plan))
+	for _, op := range plan {
+		fmt.Fprintf(cmd.OutOrStdout(), "  %s  client=%s  entry=%s  url=%s\n",
+			op.Action, op.Client, op.EntryName, op.URL)
+	}
+	if dryRun {
+		fmt.Fprintln(cmd.OutOrStdout(), "(--dry-run: no client config touched)")
+		return nil
+	}
+
+	report := api.ApplyHubReconcileInOrder(plan)
+	for _, ok := range report.Succeeded {
+		fmt.Fprintf(cmd.OutOrStdout(), "✓ %s\n", ok)
+	}
+	for _, f := range report.Failed {
+		fmt.Fprintf(cmd.OutOrStderr(), "✗ %s (%s): %s\n", f.Client, f.Phase, f.Err)
+	}
+	if len(report.Failed) > 0 {
+		return fmt.Errorf("%d client reconcile failure(s) — see stderr; rerun to converge",
+			len(report.Failed))
+	}
+	return nil
+}
+
+// readHubEndpointGateForReconcile mirrors the gui-package private
+// helper readHubEndpointGateFromSettings (internal/gui/hub_listener.go)
+// — fail-closed when settings file is missing / malformed. Inlined
+// here so the cli package doesn't depend on gui or need an
+// api-package export for a 4-line yaml lookup.
+func readHubEndpointGateForReconcile() bool {
+	path := api.SettingsPath()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	raw := map[string]string{}
+	if uerr := yaml.Unmarshal(data, &raw); uerr != nil {
+		return false
+	}
+	return raw["gui_server.hub_endpoint_enabled"] == "true"
 }
 
 func parseInstallClientsFlag(clientsFlag string, allClients bool) ([]string, error) {
