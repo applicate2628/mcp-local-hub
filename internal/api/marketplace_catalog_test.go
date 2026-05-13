@@ -62,6 +62,41 @@ func TestParseCatalog_RejectsInvalidIDViaCheckManifestName(t *testing.T) {
 	}
 }
 
+// TestParseCatalog_RejectsTrailingBytes pins codex r5 P2 closure: a
+// payload of "<valid catalog> <trailing junk>" must be rejected so
+// truncated/tampered responses cannot be silently accepted.
+func TestParseCatalog_RejectsTrailingBytes(t *testing.T) {
+	for _, raw := range []string{
+		// trailing JSON value (would pass a single Decode)
+		`{"schema_version":"1","entries":[]}{"hostile":true}`,
+		// trailing whitespace + non-JSON garbage
+		`{"schema_version":"1","entries":[]}   garbage`,
+		// trailing comma + extra object (common tampering shape)
+		`{"schema_version":"1","entries":[]},{"x":1}`,
+	} {
+		_, err := ParseMarketplaceCatalog([]byte(raw))
+		if err == nil || !strings.Contains(err.Error(), "trailing bytes") {
+			t.Errorf("payload %q: want trailing-bytes error; got %v", raw, err)
+		}
+	}
+}
+
+// TestParseCatalog_AcceptsTrailingWhitespace verifies the EOF check
+// from r5 P2 does not regress legitimate payloads that end with
+// optional whitespace (a `\n` newline at EOF is common from
+// raw.githubusercontent.com responses).
+func TestParseCatalog_AcceptsTrailingWhitespace(t *testing.T) {
+	for _, raw := range []string{
+		`{"schema_version":"1","entries":[]}`,
+		`{"schema_version":"1","entries":[]}` + "\n",
+		`{"schema_version":"1","entries":[]}` + "\n\t  \n",
+	} {
+		if _, err := ParseMarketplaceCatalog([]byte(raw)); err != nil {
+			t.Errorf("legitimate payload %q rejected: %v", raw, err)
+		}
+	}
+}
+
 func TestParseCatalog_HttpEntryAllowedNoCommand(t *testing.T) {
 	raw := `{"schema_version": "1", "entries": [
 		{"id": "ctx7", "name": "Context7", "transport": "http", "url": "https://mcp.context7.com/mcp"}

@@ -126,6 +126,61 @@ func TestLoadMarketplaceCatalog_FutureFetchedAtForcesRevalidate(t *testing.T) {
 	}
 }
 
+// TestLoadMarketplaceCatalog_RegistryURLSwitchForcesFresh pins codex
+// r5 P1 closure: a cache hit from registry A must not be served when
+// the operator queries registry B via `--registry`. Both registries
+// are fully fresh (under TTL), so the only way "miss" can fire for
+// the second request is the SourceURL gate.
+func TestLoadMarketplaceCatalog_RegistryURLSwitchForcesFresh(t *testing.T) {
+	_ = hubMcpStateTestHelper(t)
+	bodyA := `{"schema_version":"1","entries":[{"id":"alpha","name":"Alpha","transport":"stdio","command":"npx"}]}`
+	bodyB := `{"schema_version":"1","entries":[{"id":"beta","name":"Beta","transport":"stdio","command":"npx"}]}`
+	var hitsA, hitsB int32
+	srvA := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hitsA, 1)
+		_, _ = w.Write([]byte(bodyA))
+	}))
+	defer srvA.Close()
+	srvB := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hitsB, 1)
+		_, _ = w.Write([]byte(bodyB))
+	}))
+	defer srvB.Close()
+	clientA := injectTLSTestClient(srvA)
+	clientB := injectTLSTestClient(srvB)
+	// Prime with registry A.
+	catA, srcA, err := LoadMarketplaceCatalogWithClient(context.Background(), clientA, srvA.URL)
+	if err != nil {
+		t.Fatalf("primeA: %v", err)
+	}
+	if catA.Entries[0].ID != "alpha" || srcA != MarketplaceSourceFresh {
+		t.Fatalf("primeA result wrong: id=%s src=%v", catA.Entries[0].ID, srcA)
+	}
+	// Switch to registry B WITHOUT TTL expiry. The cache is fresh
+	// by age, so without the SourceURL gate the prior alpha entry
+	// would be returned for the beta query.
+	catB, srcB, err := LoadMarketplaceCatalogWithClient(context.Background(), clientB, srvB.URL)
+	if err != nil {
+		t.Fatalf("switchB: %v", err)
+	}
+	if catB.Entries[0].ID != "beta" {
+		t.Fatalf("registry switch served wrong cache: got id=%s, want beta", catB.Entries[0].ID)
+	}
+	if srcB != MarketplaceSourceFresh {
+		t.Errorf("registry switch source = %v; want fresh", srcB)
+	}
+	if atomic.LoadInt32(&hitsB) != 1 {
+		t.Errorf("registry B not contacted: hitsB=%d, want 1", hitsB)
+	}
+	// Second read against registry A should still serve fresh cache
+	// from B's write — but because B overwrote the cache file, the
+	// A read will SEE a B-URL entry and treat it as miss. This is
+	// the documented "single-file cache, last-write-wins" shape; the
+	// regression we care about is that the wrong-URL entry is never
+	// served, which is what the catB.Entries[0].ID assertion above
+	// proves.
+}
+
 func TestLoadMarketplaceCatalog_RejectsOversizePayload(t *testing.T) {
 	_ = hubMcpStateTestHelper(t)
 	huge := strings.Repeat("x", 11*1024*1024)

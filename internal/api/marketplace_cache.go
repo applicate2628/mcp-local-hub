@@ -9,6 +9,14 @@
 // flock). Reads route through readHubMcpStateFile
 // (VerifyHubMcpStateDACL gates the open). Future fetched_at and
 // negative ages are clamped (P2 closure).
+//
+// codex r5 P1 closure: cache entries carry the source URL they were
+// fetched from. A read with a different rawURL (e.g. operator
+// switched `--registry`) is treated as a miss, forcing a fresh GET
+// against the requested registry instead of returning a previous
+// registry's body. Legacy cache files written before this change
+// have an empty SourceURL and therefore always force a refetch on
+// first read — graceful migration without an explicit schema bump.
 
 package api
 
@@ -36,6 +44,7 @@ type marketplaceCacheFile struct {
 	SchemaVersion string             `json:"schema_version"`
 	FetchedAt     time.Time          `json:"fetched_at"`
 	ETag          string             `json:"etag,omitempty"`
+	SourceURL     string             `json:"source_url,omitempty"`
 	Catalog       MarketplaceCatalog `json:"catalog"`
 }
 
@@ -51,6 +60,15 @@ func LoadMarketplaceCatalog(ctx context.Context, rawURL string) (*MarketplaceCat
 // compression policy as production (use injectTLSTestClient).
 func LoadMarketplaceCatalogWithClient(ctx context.Context, client *http.Client, rawURL string) (*MarketplaceCatalog, MarketplaceSource, error) {
 	cf, _ := readMarketplaceCache()
+	// codex r5 P1 closure: a cache entry from a different registry
+	// URL must not be served for the current rawURL. Drop the
+	// reference so the rest of the function treats it as a miss
+	// (no ETag, no stale-fallback against the wrong source) and
+	// the next successful fetch overwrites the file with the
+	// correct SourceURL.
+	if cf != nil && cf.SourceURL != rawURL {
+		cf = nil
+	}
 	if cf != nil && isMarketplaceCacheFresh(cf) {
 		return &cf.Catalog, MarketplaceSourceCached, nil
 	}
@@ -91,6 +109,7 @@ func LoadMarketplaceCatalogWithClient(ctx context.Context, client *http.Client, 
 		SchemaVersion: cat.SchemaVersion,
 		FetchedAt:     time.Now(),
 		ETag:          res.ETag,
+		SourceURL:     rawURL,
 		Catalog:       *cat,
 	}
 	if werr := writeMarketplaceCache(newCache); werr != nil {
@@ -130,6 +149,7 @@ func RefreshMarketplaceCatalogWithClient(ctx context.Context, client *http.Clien
 		SchemaVersion: cat.SchemaVersion,
 		FetchedAt:     time.Now(),
 		ETag:          res.ETag,
+		SourceURL:     rawURL,
 		Catalog:       *cat,
 	}); werr != nil {
 		// codex r2 P1 closure (Refresh path): same best-effort

@@ -7,7 +7,9 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 )
 
@@ -37,12 +39,24 @@ type MarketplaceEntry struct {
 // ParseMarketplaceCatalog decodes raw JSON. Returns the first error
 // per spec §"Threat model" (malformed catalogs reject wholesale,
 // never partial-accept).
+//
+// codex r5 P2 closure: rejects trailing bytes after the top-level
+// JSON object so a valid catalog appended with garbage (or a second
+// object) cannot be silently accepted. Mirrors the registry-source
+// "single canonical document" contract from §"Threat model".
 func ParseMarketplaceCatalog(raw []byte) (*MarketplaceCatalog, error) {
 	var cat MarketplaceCatalog
 	dec := json.NewDecoder(strings.NewReader(string(raw)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&cat); err != nil {
 		return nil, fmt.Errorf("decode catalog: %w", err)
+	}
+	var trailing json.RawMessage
+	if err := dec.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return nil, fmt.Errorf("decode catalog: trailing bytes after top-level JSON object")
+		}
+		return nil, fmt.Errorf("decode catalog: trailing bytes after top-level JSON object: %w", err)
 	}
 	if cat.SchemaVersion != MarketplaceCatalogSchemaVersion {
 		return nil, fmt.Errorf("schema_version %q: this build only accepts %q",
