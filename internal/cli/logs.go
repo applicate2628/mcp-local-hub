@@ -31,8 +31,9 @@ Examples:
   mcphub logs serena --tail 500         # more history
   mcphub logs serena --tail 0           # full log
 
-Log rotation: daemon.Launch tees to these files with 10MB rotation,
-5 rotations kept. Old logs appear as <name>.log.1 / .log.2 / etc.
+Log rotation: the daemon (StdioHost / HTTPHost) writes to these files
+with 10MB rotation, 5 rotations kept. Old logs appear as
+<name>.log.1 / .log.2 / etc.
 'logs' only tails the current .log — inspect rotated copies manually.
 
 See also: status, restart.`,

@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -178,7 +177,7 @@ func (p *LazyProxy) Stop(ctx context.Context) error {
 	p.mu.Unlock()
 	stopErr := p.cfg.Lifecycle.Stop()
 	if stopErr != nil {
-		fmt.Fprintf(os.Stderr, "warn: lazy_proxy: lifecycle stop: %v\n", stopErr)
+		fmt.Fprintf(daemonDiagWriter(), "warn: lazy_proxy: lifecycle stop: %v\n", stopErr)
 	}
 	p.gate.Forget(p.inflightKey())
 	if p.server != nil {
@@ -499,7 +498,7 @@ func (p *LazyProxy) onSendFailure(err error) {
 	// stderr might not — the LifecycleFailed registry write is the
 	// canonical durable surface for lazy-proxy failure attribution.
 	if stopErr := p.cfg.Lifecycle.Stop(); stopErr != nil {
-		fmt.Fprintf(os.Stderr, "warn: lazy_proxy: lifecycle stop after failure: %v\n", stopErr)
+		fmt.Fprintf(daemonDiagWriter(), "warn: lazy_proxy: lifecycle stop after failure: %v\n", stopErr)
 		err = fmt.Errorf("%w; lifecycle stop: %v", err, stopErr)
 	}
 	p.gate.Forget(p.inflightKey())

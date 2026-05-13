@@ -15,8 +15,6 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/term"
-
 	"mcp-local-hub/internal/process"
 )
 
@@ -78,9 +76,12 @@ type HTTPHostConfig struct {
 	// server to begin accepting connections. Default 30 s.
 	HealthTimeout time.Duration
 	// LogPath, when set, receives subprocess stdout+stderr tee'd into
-	// a rotated log file (same convention as daemon.Launch). When empty,
-	// subprocess output goes only to os.Stderr (the daemon process's own
-	// stderr, typically captured by the scheduler task).
+	// a rotated log file (10 MB, 5 rotations via rotatingFileWriter).
+	// When empty AND mcphub's own stderr is a real terminal,
+	// subprocess output goes to os.Stderr. When empty + non-TTY
+	// (scheduler-spawned daemon, stdio-child), output is dropped to
+	// io.Discard to avoid leaking upstream chatter into the parent's
+	// inherited stdio (issue #162).
 	LogPath string
 }
 
@@ -151,9 +152,9 @@ func (h *HTTPHost) Start(ctx context.Context) error {
 	// channel on stdout for native-http servers (JSON-RPC is carried by
 	// the HTTP endpoint), so both streams are diagnostic-only.
 	//
-	// When LogPath is set, tee both into the rotated log file AND
-	// os.Stderr — matches daemon.Launch's logging contract for the
-	// pre-HTTPHost native-http path so we don't regress observability.
+	// openLogWriters routes them per LogPath × TTY (see its matrix):
+	// rotated log file when LogPath is set; os.Stderr only when TTY;
+	// io.Discard when both LogPath is empty AND non-TTY (issue #162).
 	stdoutWriter, stderrWriter, logCloser := h.openLogWriters()
 	cmd.Stdout = stdoutWriter
 	cmd.Stderr = stderrWriter
@@ -174,12 +175,12 @@ func (h *HTTPHost) Start(ctx context.Context) error {
 	if job, jobErr := process.NewKillOnCloseJob(); jobErr == nil {
 		if err := job.Assign(cmd); err != nil {
 			_ = job.Close()
-			fmt.Fprintf(os.Stderr, "warn: assign upstream to Job Object: %v (orphan protection disabled for this child)\n", err)
+			fmt.Fprintf(daemonDiagWriter(), "warn: assign upstream to Job Object: %v (orphan protection disabled for this child)\n", err)
 		} else {
 			h.job = job
 		}
 	} else {
-		fmt.Fprintf(os.Stderr, "warn: create Job Object: %v (orphan protection disabled)\n", jobErr)
+		fmt.Fprintf(daemonDiagWriter(), "warn: create Job Object: %v (orphan protection disabled)\n", jobErr)
 	}
 
 	// Watcher goroutine owns Wait() so Stop() never double-waits.
@@ -303,37 +304,43 @@ func (h *HTTPHost) stopLocked() error {
 }
 
 // openLogWriters returns the stdout and stderr writers to attach to
-// the subprocess, plus an io.Closer for the log file (or nil). When
-// LogPath is unset both writers are os.Stderr. When LogPath is set:
+// the subprocess, plus an io.Closer for the log file (or nil).
 //
-//   - if mcphub's own os.Stderr is a real terminal (operator ran
-//     `mcphub daemon …` interactively for debug), tee log file +
-//     os.Stderr so the operator sees realtime output;
-//   - if os.Stderr is a pipe or file (scheduler-spawned daemon, OR
-//     mcphub daemon spawned by an MCP client as a stdio child),
-//     write to the log file ONLY. Tee-to-stderr would leak upstream
-//     subprocess output (npx/uvx/python "SUCCESS: …" chatter from
-//     OS tools they invoke) into the parent's inherited stdio,
-//     which on Codex/Claude Code subagents lands in the operator's
-//     terminal mid-MCP-init. The log file is the durable record;
-//     operators tail it explicitly when they want live output.
+// Path matrix (issue #162 closure — every branch is non-TTY safe):
+//
+//	LogPath set    + TTY     → tee(logFile, os.Stderr) on both, closer=logFile
+//	LogPath set    + non-TTY → logFile only on both, closer=logFile
+//	LogPath empty  + TTY     → os.Stderr on both, no closer
+//	LogPath empty  + non-TTY → io.Discard on both, no closer
+//	mkdir/rotate/open error  → daemonDiagWriter() warn + io.Discard for child output
+//	                            (LogPath is broken; there is no durable channel)
+//
+// The "non-TTY + LogPath empty" path was the residual leak after
+// commit 401885b gated only the happy path; the fallback paths in
+// this function (mkdir fail, file-open fail) returned raw os.Stderr
+// before this fix.
 func (h *HTTPHost) openLogWriters() (stdout, stderr io.Writer, closer io.Closer) {
 	if h.cfg.LogPath == "" {
-		return os.Stderr, os.Stderr, nil
+		w := daemonDiagWriter()
+		return w, w, nil
 	}
 	if err := os.MkdirAll(filepath_Dir(h.cfg.LogPath), 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "warn: mkdir log dir: %v\n", err)
-		return os.Stderr, os.Stderr, nil
+		fmt.Fprintf(daemonDiagWriter(), "warn: mkdir log dir: %v\n", err)
+		w := daemonDiagWriter()
+		return w, w, nil
 	}
 	if err := RotateIfLarge(h.cfg.LogPath, 10*1024*1024, 5); err != nil {
-		fmt.Fprintf(os.Stderr, "warn: rotate log: %v\n", err)
+		fmt.Fprintf(daemonDiagWriter(), "warn: rotate log: %v\n", err)
 	}
 	logFile, err := os.OpenFile(h.cfg.LogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "warn: open log %q: %v\n", h.cfg.LogPath, err)
-		return os.Stderr, os.Stderr, nil
+		fmt.Fprintf(daemonDiagWriter(), "warn: open log %q: %v\n", h.cfg.LogPath, err)
+		w := daemonDiagWriter()
+		return w, w, nil
 	}
-	if term.IsTerminal(int(os.Stderr.Fd())) {
+	// codex deep-sec PR #164 r2 P2: same mutex-honoring helper as
+	// StdioHost.openStderrSink.
+	if isStderrTerminal() {
 		multi := io.MultiWriter(logFile, os.Stderr)
 		return multi, multi, logFile
 	}

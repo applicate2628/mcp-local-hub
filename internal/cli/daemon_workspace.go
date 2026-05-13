@@ -257,7 +257,13 @@ construct the backend lifecycle. Human invocation is not supported.`,
 				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 				if err := proxy.Stop(shutdownCtx); err != nil {
-					fmt.Fprintf(os.Stderr, "warn: proxy stop: %v\n", err)
+					// codex deep-sec PR #164 P2 closure: the warn line
+					// goes through daemon.DaemonDiagWriter (os.Stderr
+					// only on TTY) and ALSO appends to the lazy-proxy
+					// logPath so scheduler-spawned daemons (which
+					// suppress stderr) still record the stop error.
+					fmt.Fprintf(daemon.DaemonDiagWriter(), "warn: proxy stop: %v\n", err)
+					writeLaunchFailure(logPath, "lazy-proxy", daemonLabel, fmt.Errorf("proxy stop: %w", err))
 				}
 				return nil
 			case err := <-errCh:
