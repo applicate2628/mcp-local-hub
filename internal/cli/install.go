@@ -11,6 +11,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/scheduler"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -246,12 +247,7 @@ func runReconcileHubMode(cmd *cobra.Command, dryRun bool) error {
 	if tErr != nil {
 		return fmt.Errorf("list managed tasks: %w", tErr)
 	}
-	installedServers := map[string]bool{}
-	for _, t := range tasks {
-		if srv, _ := api.ParseManagedTaskName(t.Name); srv != "" {
-			installedServers[srv] = true
-		}
-	}
+	installedServers := perServerInstalledSet(tasks)
 	names, mlErr := a.ManifestList()
 	if mlErr != nil {
 		return fmt.Errorf("list manifests: %w", mlErr)
@@ -318,6 +314,53 @@ func runReconcileHubMode(cmd *cobra.Command, dryRun bool) error {
 			len(report.Failed))
 	}
 	return nil
+}
+
+// perServerInstalledSet returns the set of server names whose
+// per-server daemons appear in the scheduler row list. codex bot
+// phase5 r10 P2 closure on PR #160: `ListManagedTasks` returns
+// every `mcp-local-hub-*` task, including non-per-server families
+// that the reconcile path must NOT treat as "this server is
+// installed":
+//
+//   - `\mcp-local-hub-watchdog` — singleton watchdog task installed
+//     by `mcphub watchdog install` (and by `mcphub setup`).
+//   - `mcp-local-hub-weekly-refresh` — hub-wide weekly refresh job
+//     that restarts every daemon; parseTaskName returns
+//     ("", "weekly-refresh").
+//   - `mcp-local-hub-workspace-weekly-refresh`
+//     (api.WeeklyRefreshTaskName) — hub-wide workspace-scoped
+//     weekly refresh; parseTaskName returns
+//     ("workspace", "weekly-refresh") which is the dangerous
+//     case the bot flagged (could pull a "workspace" manifest
+//     into reconciliation).
+//   - `mcp-local-hub-lsp-<wsKey>-<language>`
+//     (api.IsLazyProxyTaskName) — workspace-scoped LSP lazy-proxy
+//     task; not a per-server daemon.
+//
+// Filter using the same predicates the scheduler-upgrade flow uses
+// (internal/api/scheduler_mgmt.go) so the two surfaces stay in sync
+// when a new non-server family is added in the future.
+func perServerInstalledSet(tasks []scheduler.TaskStatus) map[string]bool {
+	out := map[string]bool{}
+	for _, t := range tasks {
+		normalized := strings.TrimPrefix(t.Name, "\\")
+		if normalized == strings.TrimPrefix(api.WatchdogTaskName, "\\") {
+			continue
+		}
+		if normalized == api.WeeklyRefreshTaskName {
+			continue
+		}
+		if api.IsLazyProxyTaskName(normalized) {
+			continue
+		}
+		srv, dmn := api.ParseManagedTaskName(t.Name)
+		if srv == "" || dmn == "" {
+			continue // hub-wide weekly-refresh, malformed, or non-daemon shape
+		}
+		out[srv] = true
+	}
+	return out
 }
 
 // readHubEndpointGateForReconcile returns the persisted gate state
