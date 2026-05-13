@@ -3,9 +3,7 @@ package clients
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
-	"path/filepath"
 )
 
 // jsonMCPClient is a reusable struct that handles JSON-format MCP configs
@@ -35,18 +33,13 @@ func (j *jsonMCPClient) BackupKeep(keepN int) (string, error) {
 }
 
 func (j *jsonMCPClient) Restore(backupPath string) error {
-	in, err := os.Open(backupPath)
+	// Route the live-config rewrite through WriteConfigFile so
+	// production restores inherit the SecureWriteClientConfig pipeline.
+	data, err := os.ReadFile(backupPath)
 	if err != nil {
 		return err
 	}
-	defer in.Close()
-	out, err := os.OpenFile(j.path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-	_, err = io.Copy(out, in)
-	return err
+	return WriteConfigFile(j.path, data)
 }
 
 func (j *jsonMCPClient) readJSON() (map[string]any, error) {
@@ -75,10 +68,12 @@ func (j *jsonMCPClient) writeJSON(m map[string]any) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(j.path), 0755); err != nil {
-		return err
-	}
-	return os.WriteFile(j.path, append(out, '\n'), 0600)
+	// WriteConfigFile creates parent dirs as needed (the test fallback
+	// does its own MkdirAll; production's SecureWriteClientConfig
+	// requires the parent dir to exist + pass the DACL allowlist gate,
+	// which install paths arrange via `clients.ConfigPathForName` +
+	// per-adapter directory bootstrap before calling AddEntry).
+	return WriteConfigFile(j.path, append(out, '\n'))
 }
 
 func (j *jsonMCPClient) AddEntry(entry MCPEntry) error {

@@ -16,6 +16,16 @@ import (
 // .claude.json with the given body. Returns the claude config path.
 func setupTmpHomeAndClaude(t *testing.T, body string) string {
 	t.Helper()
+	// Phase 5 Task 5.1: adapter writes now route through
+	// SecureWriteClientConfig (handle-relative + parent-dir DACL gate).
+	// %TEMP%-backed t.TempDir() on Windows fails the parent-dir
+	// allowlist gate (Authenticated Users inherited from \Users). These
+	// pre-Phase-5 tests exercise the legacy loose-writer flow; install
+	// the test fallback so they keep working without a hardenedTempDir
+	// migration. New tests that want to validate the secure-write
+	// pipeline use hardenedTempDir directly (see
+	// client_adapter_dacl_test.go).
+	t.Cleanup(SetClientWriteFallbackForTest())
 	tmp := t.TempDir()
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("HOME", tmp)
@@ -162,6 +172,7 @@ client_bindings:
 }
 
 func TestDemigrate_ClientsIncludeFilter(t *testing.T) {
+	t.Cleanup(SetClientWriteFallbackForTest())
 	tmp := t.TempDir()
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("HOME", tmp)
@@ -207,6 +218,7 @@ client_bindings:
 }
 
 func TestDemigrate_MultiServerNewestFirstSucceeds(t *testing.T) {
+	t.Cleanup(SetClientWriteFallbackForTest())
 	tmp := t.TempDir()
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("HOME", tmp)
@@ -262,6 +274,7 @@ func TestDemigrate_MultiServerFallsBackToSentinel(t *testing.T) {
 	// in hub-managed form. Demigrate must fall back to the -original
 	// sentinel (which captures true pre-hub state) rather than report
 	// a clear but unhelpful failure.
+	t.Cleanup(SetClientWriteFallbackForTest())
 	tmp := t.TempDir()
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("HOME", tmp)
@@ -529,6 +542,7 @@ func TestDemigrate_SingleServerMigratedTwiceRestoresViaSentinel(t *testing.T) {
 	// The second migrate's backup captures post-first-migrate state,
 	// so the entry is already hub-managed in the latest backup.
 	// Demigrate must fall back to the sentinel.
+	t.Cleanup(SetClientWriteFallbackForTest())
 	tmp := t.TempDir()
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("HOME", tmp)

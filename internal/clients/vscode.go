@@ -3,7 +3,6 @@ package clients
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 )
@@ -41,7 +40,9 @@ func (v *vscodeClient) BackupKeep(keepN int) (string, error) {
 		if err := os.MkdirAll(filepath.Dir(v.path), 0755); err != nil {
 			return "", err
 		}
-		if err := os.WriteFile(v.path, []byte("{\n  \"servers\": {}\n}\n"), 0600); err != nil {
+		// Route the placeholder stub write through WriteConfigFile so
+		// production gets the SecureWriteClientConfig pipeline.
+		if err := WriteConfigFile(v.path, []byte("{\n  \"servers\": {}\n}\n")); err != nil {
 			return "", err
 		}
 	}
@@ -49,18 +50,13 @@ func (v *vscodeClient) BackupKeep(keepN int) (string, error) {
 }
 
 func (v *vscodeClient) Restore(backupPath string) error {
-	in, err := os.Open(backupPath)
+	// Route the live-config rewrite through WriteConfigFile so
+	// production restores inherit the SecureWriteClientConfig pipeline.
+	data, err := os.ReadFile(backupPath)
 	if err != nil {
 		return err
 	}
-	defer in.Close()
-	out, err := os.OpenFile(v.path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-	_, err = io.Copy(out, in)
-	return err
+	return WriteConfigFile(v.path, data)
 }
 
 func (v *vscodeClient) readJSON() (map[string]any, error) {
@@ -89,10 +85,10 @@ func (v *vscodeClient) writeJSON(m map[string]any) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(v.path), 0755); err != nil {
-		return err
-	}
-	return os.WriteFile(v.path, append(out, '\n'), 0600)
+	// Route through WriteConfigFile so production gets the
+	// SecureWriteClientConfig pipeline (handle-relative + DACL-bound)
+	// for token-bearing rewrites; tests get the os.WriteFile fallback.
+	return WriteConfigFile(v.path, append(out, '\n'))
 }
 
 func (v *vscodeClient) AddEntry(entry MCPEntry) error {

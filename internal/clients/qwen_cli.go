@@ -42,7 +42,9 @@ func (q *qwenCLI) BackupKeep(keepN int) (string, error) {
 		if err := os.MkdirAll(filepath.Dir(q.path), 0755); err != nil {
 			return "", err
 		}
-		if err := os.WriteFile(q.path, []byte("{\n  \"mcpServers\": {}\n}\n"), 0600); err != nil {
+		// Route the placeholder stub write through WriteConfigFile so
+		// production gets the SecureWriteClientConfig pipeline.
+		if err := WriteConfigFile(q.path, []byte("{\n  \"mcpServers\": {}\n}\n")); err != nil {
 			return "", err
 		}
 	}
