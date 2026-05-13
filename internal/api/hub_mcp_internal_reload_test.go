@@ -54,9 +54,11 @@ func controlTokenForTest(h *InternalReloadHandler) string {
 	return *p
 }
 
-// TestInternalReloadRequiresPOST asserts every method other than POST
-// returns 405 with `Allow: POST` per RFC 9110 §15.5.6.
-func TestInternalReloadRequiresPOST(t *testing.T) {
+// TestInternalReloadRequiresPOSTOrHEAD asserts methods other than
+// POST / HEAD return 405 with `Allow: HEAD, POST`. HEAD is the
+// non-mutating liveness-probe variant added per codex bot phase5
+// r9 P2 closure on PR #160; POST is the mutating live-apply path.
+func TestInternalReloadRequiresPOSTOrHEAD(t *testing.T) {
 	_, h := setupReloadTestEnv(t)
 	tok := controlTokenForTest(h)
 	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete, http.MethodOptions, http.MethodPatch} {
@@ -69,13 +71,71 @@ func TestInternalReloadRequiresPOST(t *testing.T) {
 			if w.Code != http.StatusMethodNotAllowed {
 				t.Errorf("%s: got %d, want 405", method, w.Code)
 			}
-			if allow := w.Header().Get("Allow"); allow != "POST" {
-				t.Errorf("%s: Allow header = %q, want %q", method, allow, "POST")
+			if allow := w.Header().Get("Allow"); allow != "HEAD, POST" {
+				t.Errorf("%s: Allow header = %q, want %q", method, allow, "HEAD, POST")
 			}
 			if w.Body.Len() != 0 {
 				t.Errorf("%s: body must be empty; got %q", method, w.Body.String())
 			}
 		})
+	}
+}
+
+// TestInternalReloadHEADIsNonMutating asserts that HEAD with a
+// valid control token returns 204 WITHOUT updating the cooldown
+// timestamp. A subsequent POST within the cooldown window must
+// still succeed (not 429), proving the HEAD probe did not consume
+// the lastReload guard. Pins codex bot phase5 r9 P2 closure on
+// PR #160.
+func TestInternalReloadHEADIsNonMutating(t *testing.T) {
+	_, h := setupReloadTestEnv(t)
+	tok := controlTokenForTest(h)
+
+	// 1. HEAD with valid token → 204, no mutation.
+	headReq := httptest.NewRequest(http.MethodHead, "/internal/reload-tokens", nil)
+	headReq.Host = "127.0.0.1:9120"
+	headReq.Header.Set("X-Mcphub-Control-Token", tok)
+	headW := httptest.NewRecorder()
+	h.ServeHTTP(headW, headReq)
+	if headW.Code != http.StatusNoContent {
+		t.Fatalf("HEAD: got %d, want 204", headW.Code)
+	}
+	if !h.lastReload.IsZero() {
+		t.Errorf("HEAD must not bump lastReload (got %v)", h.lastReload)
+	}
+
+	// 2. POST immediately after MUST succeed (cooldown is fresh).
+	postReq := httptest.NewRequest(http.MethodPost, "/internal/reload-tokens", nil)
+	postReq.Host = "127.0.0.1:9120"
+	postReq.Header.Set("X-Mcphub-Control-Token", tok)
+	postW := httptest.NewRecorder()
+	h.ServeHTTP(postW, postReq)
+	if postW.Code != http.StatusNoContent {
+		t.Errorf("POST after HEAD: got %d, want 204 (HEAD bumped cooldown?)", postW.Code)
+	}
+}
+
+// TestInternalReloadHEADRequiresAuth asserts HEAD goes through
+// the same control-token gate as POST. Without a valid token a
+// stranger HTTP service holding the port cannot succeed.
+func TestInternalReloadHEADRequiresAuth(t *testing.T) {
+	_, h := setupReloadTestEnv(t)
+	// No control token header.
+	req := httptest.NewRequest(http.MethodHead, "/internal/reload-tokens", nil)
+	req.Host = "127.0.0.1:9120"
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("HEAD without control token: got %d, want 401", w.Code)
+	}
+	// Wrong-shape control token.
+	req2 := httptest.NewRequest(http.MethodHead, "/internal/reload-tokens", nil)
+	req2.Host = "127.0.0.1:9120"
+	req2.Header.Set("X-Mcphub-Control-Token", "deadbeef")
+	w2 := httptest.NewRecorder()
+	h.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusUnauthorized {
+		t.Errorf("HEAD with wrong-shape control token: got %d, want 401", w2.Code)
 	}
 }
 

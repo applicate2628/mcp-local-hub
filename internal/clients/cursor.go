@@ -37,10 +37,14 @@ func (c *cursorClient) Backup() (string, error) {
 
 func (c *cursorClient) BackupKeep(keepN int) (string, error) {
 	if _, err := os.Stat(c.path); os.IsNotExist(err) {
+		// MkdirAll first (production's SecureWriteClientConfig
+		// requires the parent dir to exist); then route the placeholder
+		// write through WriteConfigFile so the empty stub inherits the
+		// production secure-write pipeline.
 		if err := os.MkdirAll(filepath.Dir(c.path), 0755); err != nil {
 			return "", err
 		}
-		if err := os.WriteFile(c.path, []byte("{\n  \"mcpServers\": {}\n}\n"), 0600); err != nil {
+		if err := WriteConfigFile(c.path, []byte("{\n  \"mcpServers\": {}\n}\n")); err != nil {
 			return "", err
 		}
 	}

@@ -131,7 +131,40 @@ func (a *API) SettingsSetIn(path, key, value string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0600)
+	// codex bot phase5 r15 P2 closure on PR #160: write atomically
+	// via tempfile + rename so cross-process readers never observe a
+	// partially-truncated settings.yaml. The pre-r15 path used
+	// os.WriteFile (truncate-then-write), which left a window where
+	// a concurrent reader could see fewer keys than persisted —
+	// the reconcile path's "missing hub_endpoint_enabled key" lookup
+	// could then misread an actually-ON gate as OFF and run the
+	// destructive teardown plan. The temp file lives in the same
+	// directory so the final rename is on the same filesystem
+	// (os.Rename is atomic only when source and dest share a volume).
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".settings-*.yaml.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp settings file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	cleanup := func() { _ = os.Remove(tmpPath) }
+	if _, werr := tmp.Write(data); werr != nil {
+		_ = tmp.Close()
+		cleanup()
+		return fmt.Errorf("write temp settings file: %w", werr)
+	}
+	if cerr := tmp.Close(); cerr != nil {
+		cleanup()
+		return fmt.Errorf("close temp settings file: %w", cerr)
+	}
+	if err := os.Chmod(tmpPath, 0600); err != nil {
+		cleanup()
+		return fmt.Errorf("chmod temp settings file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		cleanup()
+		return fmt.Errorf("atomic rename settings file: %w", err)
+	}
+	return nil
 }
 
 // legacyKeyMap maps pre-A4 unqualified keys to their canonical

@@ -136,6 +136,33 @@ test("Port pending-restart badge appears after Save (Codex r3 P2.1 + r4 P2.1)", 
   expect(await badge.textContent()).toContain("9200");
 });
 
+test("Phase 5: hub_endpoint_enabled toggle is rendered in GUI server section (default OFF, editable)", async ({ page, hub }) => {
+  // Task 5.4: registry entry adds gui_server.hub_endpoint_enabled
+  // (default "false"). SectionGuiServer.tsx renders the toggle
+  // alongside browser_on_launch + port + tray. The operator-facing
+  // surface lives here so flipping it requires the explicit restart
+  // contract (Help text says "Restart required"). codex bot phase5
+  // r4 P1 closure on PR #160: NOT marked Deferred:true — Deferred
+  // in this codebase renders the field disabled with a "(coming in
+  // A4-b)" badge, which is the wrong semantic for an implemented-
+  // but-restart-required setting (see TestSettingsRegistry_*
+  // "label, not disable" pattern). The persisted-vs-runtime restart
+  // badge is deferred to a follow-up (needs actual_hub_endpoint_enabled
+  // in snapshot DTO).
+  await page.goto(hub.url + "#/settings?section=gui_server");
+  // The FieldRenderer label uses the registry Help text as the
+  // accessible name (preact-binding default). Match against a
+  // distinctive substring rather than the full help paragraph.
+  const toggle = page.locator("#gui_server\\.hub_endpoint_enabled");
+  await expect(toggle).toBeVisible();
+  await expect(toggle).toBeEnabled();
+  // Default is OFF.
+  await expect(toggle).not.toBeChecked();
+  // Pending-restart badge (hub-endpoint-restart-badge data-test-id)
+  // is NOT visible at load — persisted=false == effective=false.
+  await expect(page.locator('[data-test-id="hub-endpoint-restart-badge"]')).toBeHidden();
+});
+
 // "Daemons read-only with Configured ... (effective in A4-b)" test removed —
 // A4-b PR #1 Task 1 flipped Deferred:false on weekly_schedule + retry_policy
 // and Task 11 rewrote SectionDaemons to be editable. The new editable surface

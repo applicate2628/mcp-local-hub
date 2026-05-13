@@ -103,6 +103,17 @@ func rejectWindowsReservedManifestName(name string) error {
 	return nil
 }
 
+// hubReconcileAggregateEntryName is the reserved client-config entry
+// name the gate-ON reconciler emits per spec §"Hub MCP endpoint
+// contract". A user-created manifest with this exact server name
+// would deterministically collide with the gate-ON AddReplace +
+// per-server Remove pair (codex bot phase5 r14 P2 closure on PR #160):
+// the apply order ("adds before removes") would write the aggregate
+// then delete it via the per-server Remove with the same EntryName.
+// Reserve the name at validation time so the broken state can't be
+// created.
+const hubReconcileAggregateEntryName = "mcphub-hub"
+
 // checkManifestName rejects names that could escape the manifest
 // directory via path traversal, contain absolute-path semantics, or
 // land on reserved Windows filenames. Returns a descriptive error so
@@ -125,6 +136,11 @@ func checkManifestName(name string) error {
 	// has to handle the device-name semantics, not casing.
 	if err := rejectWindowsReservedManifestName(name); err != nil {
 		return err
+	}
+	// codex bot phase5 r14 P2 closure on PR #160: reserve the
+	// aggregate entry name used by the gate-ON reconciler.
+	if name == hubReconcileAggregateEntryName {
+		return fmt.Errorf("manifest name %q: reserved (clashes with the gate-ON hub aggregate entry name; pick a different server name)", name)
 	}
 	return nil
 }

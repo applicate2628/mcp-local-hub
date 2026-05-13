@@ -19,6 +19,11 @@ import (
 // (production adapters still resolve via UserHomeDir) while giving the
 // test a hermetic filesystem layout.
 func TestMigrateReplacesStdioWithHTTPForOneClient(t *testing.T) {
+	// Phase 5 Task 5.1: adapter writes route through
+	// SecureWriteClientConfig in production. %TEMP%-backed t.TempDir()
+	// fails the parent-dir DACL gate on Windows; install the test
+	// fallback so this legacy-flow test keeps working.
+	t.Cleanup(SetClientWriteFallbackForTest())
 	tmp := t.TempDir()
 
 	// Redirect UserHomeDir() to tmp for Claude/Codex/Gemini/Antigravity
@@ -121,6 +126,10 @@ weekly_refresh: false
 // install or migrate write paths — so the setting was decorative and
 // backup files accumulated unbounded across migrate cycles.
 func TestMigrateRotatesBackupsToKeepN(t *testing.T) {
+	// Phase 5 Task 5.1: route adapter writes through the fallback so
+	// the t.TempDir() parent dir's wide DACL doesn't trip the secure-
+	// write gate on Windows.
+	t.Cleanup(SetClientWriteFallbackForTest())
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)

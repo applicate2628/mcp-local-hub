@@ -95,12 +95,49 @@ type ScheduledTaskPlan struct {
 	Trigger string // human-readable
 }
 
+// ClientUpdateAction is the typed enum for ClientUpdatePlan.Action. The
+// raw string values are kept stable (`add/replace` / `remove`) so logs,
+// dry-run output, and JSON debug dumps remain wire-compatible with the
+// pre-Phase 5 plan shape. Spec §"Bidirectional install reconciler".
+type ClientUpdateAction string
+
+const (
+	// ClientUpdateAddReplace adds the entry (or replaces it in place if
+	// already present). Used both by the per-server install planner
+	// (per-daemon entries) and the full-reconcile gate-ON planner
+	// (mcphub-hub aggregate entry).
+	ClientUpdateAddReplace ClientUpdateAction = "add/replace"
+
+	// ClientUpdateRemove removes the named entry. ONLY the full-
+	// reconcile planner (BuildHubReconcilePlan) emits this; per-server
+	// install paths must leave existing entries alone — including the
+	// mcphub-hub aggregate (codex r3 general F2 closure).
+	ClientUpdateRemove ClientUpdateAction = "remove"
+)
+
+// ClientUpdatePlan describes one client-config side effect produced by
+// either the per-server install planner (BuildPlan / BuildPlanWithOpts)
+// or the full-reconcile planner (BuildHubReconcilePlan). The applier
+// (ApplyHubReconcileInOrder for the reconcile path; executeInstallTo
+// for the per-server path) consumes the same shape.
+//
+// EntryName carries the server-name (per-daemon entries) or the
+// constant "mcphub-hub" (aggregate entry created on gate ON). The
+// applier routes the write to the right adapter method using
+// (Action, EntryName).
+//
+// Headers is populated only for the aggregate entry on gate ON; it
+// carries the per-client X-Mcphub-Hub-Token plus the X-Mcphub-Instance-Id
+// header the Phase 4 auth gate validates. Per-daemon entries leave
+// Headers empty — they hit the daemon directly with no auth header.
 type ClientUpdatePlan struct {
 	Client     string
 	Path       string
-	Action     string // "add" | "replace"
-	URL        string
-	DaemonName string // manifest daemon this binding points at (for relay-aware adapters)
+	Action     ClientUpdateAction
+	EntryName  string            // "mcphub-hub" for aggregate; "<server>" for per-daemon
+	URL        string            // empty for Remove
+	Headers    map[string]string // F-G5: token + instance id; empty for per-daemon
+	DaemonName string            // legacy; only meaningful for per-daemon entries
 }
 
 // InstallOpts controls an install invocation.
@@ -1057,10 +1094,16 @@ func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, err
 			return nil, fmt.Errorf("invalid url_path for client %q: %w", b.Client, err)
 		}
 		url := fmt.Sprintf("http://localhost:%d%s", daemon.Port, urlPath)
+		// Per-server install path NEVER emits Remove (including a Remove
+		// of the mcphub-hub aggregate). The full-reconcile pipeline
+		// (BuildHubReconcilePlan / ApplyHubReconcileInOrder) owns gate
+		// transitions; per-server installs only refresh their own
+		// per-(server, client) bindings.
 		p.ClientUpdates = append(p.ClientUpdates, ClientUpdatePlan{
 			Client:     b.Client,
 			Path:       path,
-			Action:     "add/replace",
+			Action:     ClientUpdateAddReplace,
+			EntryName:  m.Name,
 			URL:        url,
 			DaemonName: b.Daemon,
 		})

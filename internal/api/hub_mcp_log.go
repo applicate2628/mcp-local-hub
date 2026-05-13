@@ -33,6 +33,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -178,6 +179,55 @@ func redactArgvForLog(argv []string) []string {
 // reach the log even if a future caller forgets to pre-redact.
 func formatInstallStatusForLog(status, client, url string) string {
 	return RedactToken(fmt.Sprintf("install %s client=%s url=%s", status, client, url))
+}
+
+// RecentHubMcpEvents returns the last n JSON-line records from
+// hub-mcp.log as map[string]any (one per line). Used by the
+// `mcphub hub-mcp status` CLI to show recent activity without
+// exposing raw token bytes — log writes already pass through
+// RedactToken at emit time, so the returned values are safe to
+// print as-is.
+//
+// Errors during read (missing file, invalid JSON line) degrade
+// silently: the line is skipped. A missing log file returns ([], nil)
+// so the status command shows "no recent events" cleanly.
+//
+// Note: this reader scans the current hub-mcp.log only — it does NOT
+// merge with hub-mcp.log.1. The status surface is intentionally
+// "what happened recently"; full audit trails use the file directly.
+func RecentHubMcpEvents(n int) ([]map[string]any, error) {
+	if n <= 0 {
+		return nil, nil
+	}
+	dir, err := DaemonStateDir()
+	if err != nil {
+		return nil, err
+	}
+	path := filepath.Join(dir, hubMcpLogFileLeaf)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	lines := bytes.Split(data, []byte{'\n'})
+	// Trim trailing empty (file ends with \n).
+	if len(lines) > 0 && len(lines[len(lines)-1]) == 0 {
+		lines = lines[:len(lines)-1]
+	}
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	out := make([]map[string]any, 0, len(lines))
+	for _, ln := range lines {
+		var rec map[string]any
+		if err := json.Unmarshal(ln, &rec); err != nil {
+			continue // skip malformed line
+		}
+		out = append(out, rec)
+	}
+	return out, nil
 }
 
 // appendHubMcpLogLine writes line + "\n" to hub-mcp.log under flock.

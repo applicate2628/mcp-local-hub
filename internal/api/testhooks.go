@@ -9,6 +9,8 @@
 package api
 
 import (
+	"os"
+	"path/filepath"
 	"time"
 
 	"mcp-local-hub/internal/clients"
@@ -218,6 +220,36 @@ func SetTestCurrentWindowsUserFn(fn func() (string, error)) (restore func()) {
 	orig := currentWindowsUserFn
 	currentWindowsUserFn = fn
 	return func() { currentWindowsUserFn = orig }
+}
+
+// SetClientWriteFallbackForTest reverts the client-adapter writer hook
+// (clients.WriteConfigFile) to a plain os.WriteFile-style fallback for
+// the duration of a test that exercises adapter writes through
+// t.TempDir() / t.Setenv("HOME"/"USERPROFILE", tmp) without
+// hardenedTempDir.
+//
+// Production wires clients.WriteConfigFile to SecureWriteClientConfig
+// in init() (see client_write_init.go); the parent-dir DACL gate that
+// hook enforces rejects %TEMP%-backed paths on Windows. Tests that
+// want to validate the secure-write pipeline use hardenedTempDir
+// directly. Tests that pre-date Phase 5 and just want to exercise
+// migrate/demigrate/scan flows can call this helper to fall back to
+// the looser test-friendly writer.
+//
+// Returns a restore function that re-installs SecureWriteClientConfig.
+// Always invoke via `t.Cleanup(restore)` or `defer restore()` so
+// subsequent tests inherit the production hook.
+func SetClientWriteFallbackForTest() (restore func()) {
+	orig := clients.WriteConfigFile
+	clients.WriteConfigFile = func(path string, contents []byte) error {
+		if dir := filepath.Dir(path); dir != "" {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return err
+			}
+		}
+		return os.WriteFile(path, contents, 0o600)
+	}
+	return func() { clients.WriteConfigFile = orig }
 }
 
 // testSchedulerShim adapts a caller-supplied TestSchedulerIface to the

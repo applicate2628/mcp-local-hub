@@ -2,7 +2,6 @@ package clients
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 
@@ -39,18 +38,13 @@ func (c *codexCLI) BackupKeep(keepN int) (string, error) {
 }
 
 func (c *codexCLI) Restore(backupPath string) error {
-	in, err := os.Open(backupPath)
+	// Route the live-config rewrite through WriteConfigFile so
+	// production restores inherit the SecureWriteClientConfig pipeline.
+	data, err := os.ReadFile(backupPath)
 	if err != nil {
 		return err
 	}
-	defer in.Close()
-	out, err := os.OpenFile(c.path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-	_, err = io.Copy(out, in)
-	return err
+	return WriteConfigFile(c.path, data)
 }
 
 // readTOML / writeTOML round-trip through map[string]any so unknown sections survive.
@@ -77,7 +71,10 @@ func (c *codexCLI) writeTOML(m map[string]any) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(c.path, out, 0600)
+	// Route through WriteConfigFile so production gets the
+	// SecureWriteClientConfig pipeline (handle-relative + DACL-bound)
+	// for token-bearing rewrites; tests get the os.WriteFile fallback.
+	return WriteConfigFile(c.path, out)
 }
 
 func (c *codexCLI) AddEntry(entry MCPEntry) error {

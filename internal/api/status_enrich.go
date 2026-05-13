@@ -300,6 +300,16 @@ func parseLazyProxyTaskName(task string) (workspaceKey, language string, ok bool
 	return key, lang, true
 }
 
+// ParseManagedTaskName is the exported form of parseTaskName: splits
+// `\mcp-local-hub-<server>-<daemon>` into (server, daemon). Returns
+// ("", "") on unparseable names. Used by the CLI to derive the set
+// of "user-installed" servers from the scheduler row list — manifests
+// that have at least one scheduled daemon are the ones the reconcile
+// path should touch (codex bot phase5 r8 P1 closure on PR #160).
+func ParseManagedTaskName(task string) (string, string) {
+	return parseTaskName(task)
+}
+
 // parseTaskName splits `\mcp-local-hub-<server>-<daemon>` into (server, daemon).
 // Returns ("", "") on unparseable names.
 func parseTaskName(task string) (string, string) {
