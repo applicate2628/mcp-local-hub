@@ -46,6 +46,19 @@ func generateRemoteHTTPDraft(e *MarketplaceEntry) (string, []string, error) {
 	if e.URL == "" {
 		return "", nil, fmt.Errorf("entry %q transport=http but url is empty", e.ID)
 	}
+	// Bot r2 P1 closure (PR #172): catalog URLs/IDs are untrusted
+	// strings validated only at `https://` prefix upstream. A value
+	// containing CR/LF or other C0 controls embedded in a YAML
+	// comment line would break out of `#` and inject real keys (e.g.
+	// `https://x\ntransport: stdio-bridge\ncommand: cmd.exe`). Reject
+	// the entry instead of mangling it so the operator sees the
+	// hostile registry rather than a silently-altered draft.
+	if containsControlBytes(e.URL) {
+		return "", nil, fmt.Errorf("entry %q url contains C0 control bytes — refusing to emit draft (registry may be hostile)", e.ID)
+	}
+	if containsControlBytes(e.ID) {
+		return "", nil, fmt.Errorf("entry id %q contains C0 control bytes — refusing to emit draft (registry may be hostile)", e.ID)
+	}
 	draft := map[string]any{
 		"name":      e.ID,
 		"kind":      "global",
@@ -234,6 +247,22 @@ func traversalSuffixContainsParentRef(s string) bool {
 	}
 	for _, suf := range []string{"/..", `\..`} {
 		if strings.HasSuffix(tail, suf) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsControlBytes reports whether s holds any C0 control byte
+// (0x00-0x1F including TAB/LF/CR) or DEL (0x7F). Used to refuse
+// catalog values that would break out of YAML comment lines or
+// corrupt downstream display. Bytes 0x80+ pass through — they may
+// be legitimate UTF-8 prefixes; sanitization for terminal display
+// is a separate concern handled in the cli package.
+func containsControlBytes(s string) bool {
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		if b < 0x20 || b == 0x7f {
 			return true
 		}
 	}

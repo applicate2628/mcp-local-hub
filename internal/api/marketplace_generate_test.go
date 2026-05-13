@@ -112,6 +112,52 @@ func TestGenerateDraftManifest_HttpEntryEmptyURLRejected(t *testing.T) {
 	}
 }
 
+// TestGenerateDraftManifest_HttpEntryControlBytesRejected pins bot
+// r2 P1 closure (PR #172): a hostile registry can embed CR/LF/NUL
+// in catalog url or id. Interpolating that into the YAML header
+// comment would break out of `#` and inject real keys into the
+// draft. Reject the entry instead of producing a tainted file.
+func TestGenerateDraftManifest_HttpEntryControlBytesRejected(t *testing.T) {
+	cases := map[string]*MarketplaceEntry{
+		"url with LF": {
+			ID:        "ctx7",
+			Transport: "http",
+			URL:       "https://example.com/mcp\ntransport: stdio-bridge",
+		},
+		"url with CR": {
+			ID:        "ctx7",
+			Transport: "http",
+			URL:       "https://example.com/mcp\r\nname: pwned",
+		},
+		"url with NUL": {
+			ID:        "ctx7",
+			Transport: "http",
+			URL:       "https://example.com/\x00",
+		},
+		"id with LF": {
+			ID:        "ctx7\ntransport: stdio-bridge",
+			Transport: "http",
+			URL:       "https://example.com/mcp",
+		},
+		"id with ESC": {
+			ID:        "ctx7\x1b[31mred",
+			Transport: "http",
+			URL:       "https://example.com/mcp",
+		},
+	}
+	for name, e := range cases {
+		t.Run(name, func(t *testing.T) {
+			yaml, _, err := GenerateDraftManifest(e, GenerateOpts{})
+			if err == nil {
+				t.Fatalf("expected rejection for %s; got yaml:\n%s", name, yaml)
+			}
+			if !strings.Contains(err.Error(), "control byte") {
+				t.Errorf("error should name control-byte rejection: %v", err)
+			}
+		})
+	}
+}
+
 // TestGenerateDraftManifest_NonSensitiveUnsetEnvDoesNotPanic pins
 // codex r6 P1 closure (PR #163): a non-sensitive ${env:VAR} that
 // resolves to empty must NOT panic with "assignment to entry in nil
