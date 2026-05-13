@@ -912,3 +912,61 @@ func TestBuildPlanWithOpts_RemoteHTTPRejectsAntigravityBinding(t *testing.T) {
 		t.Errorf("error must name antigravity; got %v", err)
 	}
 }
+
+// TestBuildPlanWithOpts_RemoteHTTPRejectsOffMatrixClient pins codex
+// cumulative G6 review P1 closure: the rejection now triggers for
+// ANY adapter not on remoteHTTPCapableClients, not just antigravity.
+// This prevents a future binding to an unsupported client (or a typo
+// like "claude_code") from slipping through to install.
+func TestBuildPlanWithOpts_RemoteHTTPRejectsOffMatrixClient(t *testing.T) {
+	m := &config.ServerManifest{
+		Name:      "ctx7",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportRemoteHTTP,
+		URL:       "https://mcp.context7.com/mcp",
+		ClientBindings: []config.ClientBinding{
+			{Client: "claude_code"}, // underscore typo — off-matrix
+		},
+	}
+	_, err := BuildPlanWithOpts(m, BuildPlanOpts{IncludeAllClients: true})
+	if err == nil {
+		t.Fatal("expected off-matrix client rejection; got nil")
+	}
+	if !strings.Contains(err.Error(), "capability matrix") {
+		t.Errorf("error must reference capability matrix; got %v", err)
+	}
+}
+
+// TestBuildPlanWithOpts_RemoteHTTPDisplayURLPreservesPlaceholder
+// pins codex cumulative G6 review P2 closure: when a manifest URL
+// embeds a `${secret:KEY}` placeholder, ClientUpdatePlan.DisplayURL
+// must carry the literal pre-expansion text so plan + install
+// stdout never echoes the expanded path/query.
+func TestBuildPlanWithOpts_RemoteHTTPDisplayURLPreservesPlaceholder(t *testing.T) {
+	t.Setenv("MCPHUB_TEST_TOKEN_FOR_G6_DISPLAY", "")
+	m := &config.ServerManifest{
+		Name:      "ctx7",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportRemoteHTTP,
+		URL:       "https://api.example.com/v1?token=literal-not-a-secret",
+		ClientBindings: []config.ClientBinding{
+			{Client: "claude-code"},
+		},
+	}
+	p, err := BuildPlanWithOpts(m, BuildPlanOpts{IncludeAllClients: true})
+	if err != nil {
+		t.Fatalf("BuildPlanWithOpts: %v", err)
+	}
+	if len(p.ClientUpdates) != 1 {
+		t.Fatalf("expected 1 client update, got %d", len(p.ClientUpdates))
+	}
+	u := p.ClientUpdates[0]
+	if u.DisplayURL != m.URL {
+		t.Errorf("DisplayURL = %q, want manifest literal %q (no expansion in display)", u.DisplayURL, m.URL)
+	}
+	// URL field (wire form) is the expanded version — for a
+	// no-placeholder manifest, expanded == literal, so URL matches.
+	if u.URL != m.URL {
+		t.Errorf("URL = %q, want expanded %q", u.URL, m.URL)
+	}
+}

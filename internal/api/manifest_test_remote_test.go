@@ -191,7 +191,7 @@ func TestManifestTestRemote_HTTPSOnly(t *testing.T) {
 	if !strings.HasPrefix(plain.URL, "http://") {
 		t.Skipf("httptest.NewServer is not plain http; got %q", plain.URL)
 	}
-	_, err := sendRemoteInitialize(context.Background(), &http.Client{}, plain.URL, nil)
+	_, err := sendRemoteInitialize(context.Background(), &http.Client{}, plain.URL, plain.URL, nil)
 	if err == nil || !strings.Contains(err.Error(), "https") {
 		t.Errorf("expected https-only rejection, got %v", err)
 	}
@@ -373,7 +373,7 @@ func TestSendRemoteInitialize_SSE_ReturnsBeforeStreamClose(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	start := time.Now()
-	res, err := sendRemoteInitialize(ctx, buildTLSTrustingClient(srv), srv.URL, nil)
+	res, err := sendRemoteInitialize(ctx, buildTLSTrustingClient(srv), srv.URL, srv.URL, nil)
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("sendRemoteInitialize: %v (elapsed=%v)", err, elapsed)
@@ -404,6 +404,30 @@ func TestConsumeSSE_StopsAtMaxBytes(t *testing.T) {
 	}
 }
 
+// TestSendRemoteInitialize_DisplayURLScrubsExpandedFromError pins
+// codex cumulative G6 review P2 closure: error messages from
+// sendRemoteInitialize must quote the manifest's literal URL, not
+// the expanded wire form. Even if the underlying net/http error
+// embeds the expanded URL (path/query may carry a token from
+// ${secret:KEY} expansion), scrubURL replaces it with the display
+// form before the operator sees it.
+func TestSendRemoteInitialize_DisplayURLScrubsExpandedFromError(t *testing.T) {
+	// Use an unreachable port (dial fails) so we trigger net/http
+	// error wrapping that embeds the URL.
+	expanded := "https://127.0.0.1:1/secret-token-path/mcp"
+	display := "https://example.com/${secret:TOKEN}/mcp"
+	_, err := sendRemoteInitialize(context.Background(), &http.Client{Transport: &http.Transport{}}, expanded, display, nil)
+	if err == nil {
+		t.Fatal("expected dial failure")
+	}
+	if strings.Contains(err.Error(), "secret-token-path") {
+		t.Errorf("expanded URL leaked into error: %v", err)
+	}
+	if !strings.Contains(err.Error(), display) {
+		t.Errorf("error should reference display URL %q; got %v", display, err)
+	}
+}
+
 func TestSendRemoteInitialize_RespectsContextDeadline(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(2 * time.Second)
@@ -413,7 +437,7 @@ func TestSendRemoteInitialize_RespectsContextDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	_, err := sendRemoteInitialize(ctx, buildTLSTrustingClient(srv), srv.URL, nil)
+	_, err := sendRemoteInitialize(ctx, buildTLSTrustingClient(srv), srv.URL, srv.URL, nil)
 	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatal("expected ctx deadline error")

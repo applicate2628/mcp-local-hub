@@ -92,6 +92,14 @@ func TestImportVSCodeWorkspace_HTTPServer(t *testing.T) {
 	if !strings.Contains(result.YAML, "client_bindings:") {
 		t.Errorf("YAML missing client_bindings:; got:\n%s", result.YAML)
 	}
+	// Codex cumulative G6 review closure: prefilled bindings must
+	// include every remote-http-capable adapter so the draft matches
+	// the install-plan capability gate.
+	for _, c := range remoteHTTPCapableClients {
+		if !strings.Contains(result.YAML, "client: "+c) {
+			t.Errorf("YAML missing prefilled binding for %s\n---\n%s", c, result.YAML)
+		}
+	}
 }
 
 // TestImportVSCodeWorkspace_HTTPServer_URLPlaceholderUnsetSkips pins
@@ -157,6 +165,75 @@ func TestImportVSCodeWorkspace_HTTPServer_PlaintextHTTPSkips(t *testing.T) {
 	}
 	if !foundSkip {
 		t.Errorf("expected not-https skip warning; got: %v", result.Warnings)
+	}
+}
+
+// TestImportVSCodeWorkspace_HTTPServer_HeaderCRLFRejected pins codex
+// cumulative G6 review P1 closure: PlaceholderExpander resolves
+// ${env:VAR} but does not guard against CR/LF in expanded values,
+// unlike ExpandSecrets. A hostile workspace using `${env:EVIL}`
+// where EVIL holds `\r\nX-Injected: 1` would project a draft with
+// CRLF in a header — install-time clients (or HTTP libraries) might
+// splice it into the wire. Skip with a clear warning instead.
+func TestImportVSCodeWorkspace_HTTPServer_HeaderCRLFRejected(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("CRLF_EVIL_FOR_G6_TEST", "good\r\nX-Injected: 1")
+	writeMCPJSON(t, ws, `{
+  "servers": {
+    "evil": {
+      "type": "http",
+      "url": "https://example.com/mcp",
+      "headers": {"Authorization": "Bearer ${env:CRLF_EVIL_FOR_G6_TEST}"}
+    }
+  }
+}`)
+	a := NewAPI()
+	result, err := a.ImportVSCodeWorkspace(ws, VSCodeImportOpts{})
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if !result.EmptyResult {
+		t.Errorf("EmptyResult should be true on CRLF header; got %+v", result)
+	}
+	foundSkip := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "control bytes") && strings.Contains(w, "evil") {
+			foundSkip = true
+			break
+		}
+	}
+	if !foundSkip {
+		t.Errorf("expected control-bytes skip warning; got: %v", result.Warnings)
+	}
+}
+
+// TestImportVSCodeWorkspace_HTTPServer_URLCRLFRejected pins the
+// same guard for URL placeholders that expand to CR/LF.
+func TestImportVSCodeWorkspace_HTTPServer_URLCRLFRejected(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("CRLF_URL_FOR_G6_TEST", "https://example.com/mcp\r\ntransport: stdio-bridge")
+	writeMCPJSON(t, ws, `{
+  "servers": {
+    "evil-url": {"type": "http", "url": "${env:CRLF_URL_FOR_G6_TEST}"}
+  }
+}`)
+	a := NewAPI()
+	result, err := a.ImportVSCodeWorkspace(ws, VSCodeImportOpts{})
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if !result.EmptyResult {
+		t.Errorf("EmptyResult should be true on CRLF url; got %+v", result)
+	}
+	foundSkip := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "control bytes") && strings.Contains(w, "evil-url") {
+			foundSkip = true
+			break
+		}
+	}
+	if !foundSkip {
+		t.Errorf("expected url control-bytes skip warning; got: %v", result.Warnings)
 	}
 }
 
