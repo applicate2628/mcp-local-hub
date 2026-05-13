@@ -93,6 +93,104 @@ func TestOpenLogWriters_LogPathEmptyNonTTY(t *testing.T) {
 	}
 }
 
+// TestOpenStderrSink_FileOpenFailureFallsBackToDiscard pins codex
+// deep-sec PR #164 P3 closure: when LogPath is set but the file
+// cannot be opened (parent dir is a regular file, not a directory,
+// so MkdirAll fails), openStderrSink must NOT fall back to raw
+// os.Stderr. The non-TTY branch returns io.Discard so the warn
+// line about the failed open + any subsequent subprocess output
+// stays out of the parent's stdio.
+func TestOpenStderrSink_FileOpenFailureFallsBackToDiscard(t *testing.T) {
+	restore := SetStderrIsTerminalForTest(false)
+	defer restore()
+	// Create a regular file where the helper would expect a directory.
+	// MkdirAll on the LogPath parent will fail because that parent is
+	// not a directory.
+	root := t.TempDir()
+	notADir := filepath.Join(root, "blocker")
+	if err := os.WriteFile(notADir, []byte("file-not-dir"), 0o600); err != nil {
+		t.Fatalf("write blocker: %v", err)
+	}
+	// LogPath that needs a child of `blocker` — mkdir will fail because
+	// blocker is a regular file.
+	logPath := filepath.Join(notADir, "child", "stdio-host.log")
+	h := &StdioHost{cfg: HostConfig{LogPath: logPath}}
+	got := h.openStderrSink()
+	if got != io.Discard {
+		t.Errorf("mkdir failure path → openStderrSink() = %T, want io.Discard", got)
+	}
+	if h.logFile != nil {
+		t.Errorf("h.logFile was set despite mkdir failure; want nil")
+	}
+}
+
+// TestOpenLogWriters_FileOpenFailureFallsBackToDiscard pins the
+// HTTPHost variant of the same fallback: mkdir failure on a non-TTY
+// stderr returns (io.Discard, io.Discard, nil).
+func TestOpenLogWriters_FileOpenFailureFallsBackToDiscard(t *testing.T) {
+	restore := SetStderrIsTerminalForTest(false)
+	defer restore()
+	root := t.TempDir()
+	notADir := filepath.Join(root, "blocker")
+	if err := os.WriteFile(notADir, []byte("file-not-dir"), 0o600); err != nil {
+		t.Fatalf("write blocker: %v", err)
+	}
+	logPath := filepath.Join(notADir, "child", "http-host.log")
+	h := &HTTPHost{cfg: HTTPHostConfig{LogPath: logPath}}
+	stdout, stderr, closer := h.openLogWriters()
+	if stdout != io.Discard {
+		t.Errorf("mkdir failure → stdout writer = %T, want io.Discard", stdout)
+	}
+	if stderr != io.Discard {
+		t.Errorf("mkdir failure → stderr writer = %T, want io.Discard", stderr)
+	}
+	if closer != nil {
+		t.Errorf("mkdir failure → closer != nil; want nil")
+	}
+}
+
+// TestLogSupervisorEvent_NonTTYDiscardsStderrButAppendsToLogPath pins
+// codex deep-sec PR #164 P3 closure: the durable file-side write
+// continues even when stderr is non-TTY. The stderr leg is discarded;
+// the LogPath append happens.
+func TestLogSupervisorEvent_NonTTYDiscardsStderrButAppendsToLogPath(t *testing.T) {
+	restore := SetStderrIsTerminalForTest(false)
+	defer restore()
+	logPath := filepath.Join(t.TempDir(), "supervisor.log")
+	h := &StdioHost{cfg: HostConfig{LogPath: logPath}}
+	h.LogSupervisorEvent("non-tty event payload")
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+	if want := "supervisor: non-tty event payload"; !contains(string(data), want) {
+		t.Errorf("LogPath missing %q after LogSupervisorEvent (non-TTY); content=%q", want, string(data))
+	}
+}
+
+// TestLogSupervisorEvent_NoLogPathNonTTYIsBenign pins the no-op
+// branch: when LogPath is empty + non-TTY, the call must not panic
+// and must not leave any persistent state (the event is genuinely
+// dropped — nothing the operator can read, by design).
+func TestLogSupervisorEvent_NoLogPathNonTTYIsBenign(t *testing.T) {
+	restore := SetStderrIsTerminalForTest(false)
+	defer restore()
+	h := &StdioHost{cfg: HostConfig{LogPath: ""}}
+	// Should not panic.
+	h.LogSupervisorEvent("dropped event")
+}
+
+// contains is a tiny helper for the LogPath assertion. Kept local
+// to avoid pulling strings into this file.
+func contains(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}
+
 // TestOpenLogWriters_LogPathSetNonTTY pins: HTTPHost LogPath set +
 // non-TTY → both writers are the log file directly (no io.MultiWriter
 // wrapping os.Stderr).

@@ -21,13 +21,24 @@ package daemon
 import (
 	"io"
 	"os"
+	"sync"
 
 	"golang.org/x/term"
 )
 
+// stderrIsTerminalMu guards the stderrIsTerminal package var so
+// SetStderrIsTerminalForTest is safe to call while concurrent tests
+// (or background daemon goroutines that touch daemonDiagWriter)
+// are running. Required because the helper is read on hot paths
+// (every fmt.Fprintf(daemonDiagWriter(), ...) call site).
+//
+// codex deep-sec PR #164 P3 closure.
+var stderrIsTerminalMu sync.RWMutex
+
 // stderrIsTerminal reports whether mcphub's own os.Stderr is connected
 // to a real terminal. Pipe / file / dev/null all return false; only an
 // actual TTY returns true. Injectable for tests via SetStderrIsTerminalForTest.
+// Read under stderrIsTerminalMu.RLock.
 var stderrIsTerminal = func() bool {
 	return term.IsTerminal(int(os.Stderr.Fd()))
 }
@@ -42,18 +53,39 @@ var stderrIsTerminal = func() bool {
 // 10MB cap, 5 keep). Anything that needs durability MUST also write to
 // LogPath; daemonDiagWriter is the BEST-EFFORT mirror.
 func daemonDiagWriter() io.Writer {
-	if stderrIsTerminal() {
+	stderrIsTerminalMu.RLock()
+	probe := stderrIsTerminal
+	stderrIsTerminalMu.RUnlock()
+	if probe() {
 		return os.Stderr
 	}
 	return io.Discard
 }
 
+// DaemonDiagWriter is the exported equivalent of daemonDiagWriter for
+// cross-package callers (CLI lazy-proxy supervisor, workspace daemon
+// SIGINT/SIGTERM path). Behavior is identical.
+//
+// codex deep-sec PR #164 P2 closure: the CLI workspace-daemon path was
+// still writing `warn: proxy stop: %v` directly to os.Stderr, which
+// bypassed the contract for scheduler-spawned daemons whose stderr
+// is a pipe.
+func DaemonDiagWriter() io.Writer { return daemonDiagWriter() }
+
 // SetStderrIsTerminalForTest replaces the terminal probe for the
-// duration of a test. Returns a restore closure. Used by tests that
-// pin the non-TTY silence contract — see TestOpenStderrSink_NonTTYReturnsDiscard
-// and TestOpenLogWriters_NonTTYReturnsLogFileOnly.
+// duration of a test. Returns a restore closure. Mutex-guarded so
+// t.Parallel() callers stay race-free.
+//
+// codex deep-sec PR #164 P3 closure: prior version mutated the
+// package var without synchronization.
 func SetStderrIsTerminalForTest(b bool) func() {
+	stderrIsTerminalMu.Lock()
 	prev := stderrIsTerminal
 	stderrIsTerminal = func() bool { return b }
-	return func() { stderrIsTerminal = prev }
+	stderrIsTerminalMu.Unlock()
+	return func() {
+		stderrIsTerminalMu.Lock()
+		stderrIsTerminal = prev
+		stderrIsTerminalMu.Unlock()
+	}
 }
