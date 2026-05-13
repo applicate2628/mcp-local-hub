@@ -178,16 +178,17 @@ These remain documented as "Cross-platform tray (Linux/macOS) — explicit non-g
 
 ### Updated 2026-05-05 (Codex xhigh plan review, "Scenario D" PASS)
 
-After the 2026-05-04 stabilization wave (35+ bug-fix PRs merged, security audit `#51`, REVISE bundle `#128`), the original PR #24 "A4-b PR #2 last" plan has been reshaped. New sequence prioritizes a publishable preview tag over runtime mutation:
+After the 2026-05-04 stabilization wave (35+ bug-fix PRs merged, security audit `#51`, REVISE bundle `#128`), the original PR #24 "A4-b PR #2 last" plan has been reshaped. Tagging is reserved for **Global Phase 4** (the production release cut); intermediate Phase 3B-II milestones land on `master` without their own tag:
 
-1. **G10** — public governance docs (½d). Done before tag.
-2. **G1** — README feature/readiness matrix (½d). Done before tag.
+1. **G10** — public governance docs (½d).
+2. **G1** — README feature/readiness matrix (½d).
 3. **G2** — unified `/api/health` endpoint (~1d). Owns canonical health/capability snapshot backend that G3+G4 will consume.
-4. **Pre-tag fix** — `daemons.retry_policy` Settings UI must label "saved only; runtime applier deferred" OR be disabled. Do not tag while implying it is active.
+4. **Pre-tag-fix-equivalent honesty pass** — `daemons.retry_policy` Settings UI must label "saved only; runtime applier deferred" OR be disabled. Operator-visible claims must match shipped behavior even though no tag cut happens yet.
 5. **Manual smoke `D2/D3`** per `docs/phase-3b-ii-verification.md`.
-6. **Tag Phase 3B-II preview**.
-7. **G3** — capability status display, read-only (~1-2d). Reuses G2 backend. ✅ Shipped in PR #144 (commit `0a32264`).
-8. **G4** — opt-in unified `Hub` MCP endpoint — **DEFERRED to v0.4.x**. v2 design spec at `docs/superpowers/specs/2026-05-08-g4-unified-hub-mcp-design.md` after two codex review rounds (24 findings between r1+r2; 11/12 round-1 PARTIAL after v2). Realistic implementation effort grew to ~12-15d carefully + bot/codex deep-sec review. v0.4.x picks up the spec as round-3 intake.
+6. **G3** — capability status display, read-only (~1-2d). Reuses G2 backend. ✅ Shipped in PR #144 (commit `0a32264`).
+7. **G4** — opt-in unified `Hub` MCP endpoint — **DEFERRED to v0.4.x**. v2 design spec at `docs/superpowers/specs/2026-05-08-g4-unified-hub-mcp-design.md` after two codex review rounds (24 findings between r1+r2; 11/12 round-1 PARTIAL after v2). Realistic implementation effort grew to ~12-15d carefully + bot/codex deep-sec review. v0.4.x picks up the spec as round-3 intake.
+
+**Tagging policy:** version tags (`v0.x.0`) are cut at **Global Phase 4** of the project, not at the end of intermediate Phase 3B-II milestones. Earlier drafts of this plan had a "Tag Phase 3B-II preview" step at position 6; that step is removed — Phase 3B-II hardening lands on `master` and is consumed by downstream phases without a tag cut.
 
 ### Dropped / deferred from the prior sequence
 
@@ -255,13 +256,16 @@ These remain rejected and should NOT be reconsidered without a separate threat m
 - **Automatic marketplace install** — violates inspect→validate→dry-run→backup→apply contract.
 - **Remote access as default** — current GUI binds loopback only; no auth/TLS layer exists. Section S security work specifically tightens loopback assumptions.
 
-#### Sequencing within G (updated 2026-05-05)
+#### Sequencing within G (updated 2026-05-13)
 
-**Pre-tag (Phase 3B-II hardening):** G10 → G1 → G2 ✅ all shipped.
-**Phase 3B-II tail:** G3 ✅ shipped (PR #144). G4 → DEFERRED to v0.4.x (see entry above).
-**v0.4.x:** G4 round-3 intake (resume from v2 spec + r2 findings) → A4-b PR #2 retry-policy runtime applier.
-**Phase 3C/3D, separately threat-modeled:** G5 marketplace draft-import → G7 VS Code/JSON5 import → G6 remote MCP manifests → G9 structured event envelopes.
+**Phase 3B-II hardening:** G10 ✅ → G1 ✅ → G2 ✅ all shipped on `master`.
+**Phase 3B-II tail:** G3 ✅ shipped (PR #144). G4 originally deferred but ALSO ✅ shipped (PRs #155–#160 land the unified hub MCP endpoint).
+**Phase 3C/3D, separately threat-modeled:** G5 ✅ marketplace draft-import (PR #163) → G7 ✅ VS Code/JSON5 import (PR #151) → G9 ✅ structured event envelopes (PR #150) → G6 remote MCP manifests (spec at `docs/superpowers/specs/2026-05-12-g6-remote-mcp-manifests-design.md`; implementation deferred to v0.4.x).
+**v0.4.x:** G6 implementation → A4-b PR #2 retry-policy runtime applier.
 **Dropped from current roadmap:** G8 config watch / fsnotify dev reload.
+
+Phase 3B-II is **closed** on `master`. Tagging happens at Global Phase 4
+(see "Tagging policy" note in §Suggested sequencing).
 
 #### Client expansion (already shipped 2026-05-04, commit `59dcf12`)
 
