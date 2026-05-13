@@ -5,7 +5,9 @@ found-by: g4-phase4 pre-push verification
 found-on: 2026-05-12
 project: mcp-local-hub
 context: pre-existing master flake (reproduces on `2943f00` BEFORE Phase 4)
-status: open
+status: fixed
+fixed-on: 2026-05-13
+fixed-by: pre-tag-hygiene branch (post-G6 sub-PR 4 merge)
 related-pr: pending Phase 4 (feat/g4-phase4-handler-listener-control)
 ---
 
@@ -87,3 +89,25 @@ go test -count=1 -timeout 5m -skip 'TestRegister_DefaultAllLanguages|TestMigrate
 
 The Phase 4 implementation is verified independently via `go test
 -race ./internal/api/ -run 'TestNewListener|TestHubMcpHandler|TestInternalReload|TestHubMcp|TestHubEndpoint|TestHubListener|TestStartHubMcp'` which completes cleanly in <4 seconds.
+
+## Resolution (2026-05-13)
+
+Both Option 1 and Option 2 from "Suggested fix" were applied:
+
+1. **HubSessionStore.Close synchronously waits for sweepLoop exit.**
+   Added `sweepDone chan struct{}` to the struct, `defer close(s.sweepDone)`
+   inside sweepLoop, and `<-s.sweepDone` in Close after sweepStop.
+   Wrapped in `sync.Once` so Close stays idempotent and only the first
+   call blocks. Tests that forget Close still leak goroutines, but
+   tests that DO call Close (the vast majority) now release them
+   synchronously, eliminating accumulation across the suite.
+
+2. **parseAndValidateIntent: O(N²) → O(N+M).** `isUTCInstant` ignored
+   its `taskName` parameter and scanned the entire raw buffer for
+   every `"updated_at":"..."` occurrence. Calling it once per task in
+   a loop made the parse cost grow with both task count and file
+   size. Hoisted the call out of the loop — same defense-in-depth
+   against decoder normalization, one scan instead of N.
+
+Full `go test -count=1 -timeout 5m ./internal/api/` now passes in
+~35s on Windows (was: timed out at 300s).

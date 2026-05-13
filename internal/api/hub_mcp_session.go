@@ -239,6 +239,14 @@ type HubSessionStore struct {
 	now       func() time.Time
 	sweepCtx  context.Context
 	sweepStop context.CancelFunc
+	// sweepDone is closed by sweepLoop on exit. Close() blocks on it
+	// so callers can guarantee the goroutine has actually finished
+	// before the test binary terminates. Without this, parallel
+	// tests on Windows accumulated parked sweepLoop goroutines whose
+	// teardown latency tripped the 4-minute go-test timeout (see
+	// work-items/bugs/2026-05-12-internal-api-suite-hangs-on-windows.md).
+	sweepDone chan struct{}
+	closeOnce sync.Once
 }
 
 // NewHubSessionStore returns a store with the supplied bounds. Zero
@@ -267,19 +275,32 @@ func NewHubSessionStore(opts SessionStoreOpts) *HubSessionStore {
 		now:       time.Now,
 		sweepCtx:  ctx,
 		sweepStop: cancel,
+		sweepDone: make(chan struct{}),
 	}
 	go s.sweepLoop()
 	return s
 }
 
-// Close cancels the sweep goroutine. Idempotent — multiple Close
-// calls are safe. Does NOT drain in-flight sessions; the operator
-// is responsible for finishing outstanding tools/call work before
-// shutdown.
+// Close cancels the sweep goroutine and waits for it to exit before
+// returning. Idempotent via closeOnce — multiple Close calls are
+// safe and only the first one blocks. Does NOT drain in-flight
+// sessions; the operator is responsible for finishing outstanding
+// tools/call work before shutdown.
+//
+// The wait used to be fire-and-forget, which let parked sweepLoop
+// goroutines accumulate across tests on Windows; eventually the
+// scheduler couldn't tear them all down within the test binary's
+// go-test deadline and the suite hung
+// (work-items/bugs/2026-05-12-internal-api-suite-hangs-on-windows.md).
 func (s *HubSessionStore) Close() {
-	if s.sweepStop != nil {
-		s.sweepStop()
-	}
+	s.closeOnce.Do(func() {
+		if s.sweepStop != nil {
+			s.sweepStop()
+		}
+		if s.sweepDone != nil {
+			<-s.sweepDone
+		}
+	})
 }
 
 // Create allocates a new hubSession for the given client. Returns
@@ -469,8 +490,14 @@ func (s *HubSessionStore) evictIdleLRULocked() bool {
 }
 
 // sweepLoop runs forever (until sweepCtx is cancelled). Ticks every
-// SweepInterval; sweepOnce does the actual scan.
+// SweepInterval; sweepOnce does the actual scan. Closing sweepDone
+// on return is the synchronization point Close() blocks on so
+// callers can prove the goroutine has actually finished — without
+// this, parked sweepLoop goroutines accumulated across tests and
+// the test binary timed out on Windows
+// (work-items/bugs/2026-05-12-internal-api-suite-hangs-on-windows.md).
 func (s *HubSessionStore) sweepLoop() {
+	defer close(s.sweepDone)
 	ticker := time.NewTicker(s.opts.SweepInterval)
 	defer ticker.Stop()
 	for {
