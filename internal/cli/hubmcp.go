@@ -153,6 +153,16 @@ func newHubMcpRegenInstanceIDCmd() *cobra.Command {
 becomes stale — every client must rerun ` + "`mcphub install`" + ` to
 refresh their X-Mcphub-Instance-Id header against the new value.
 
+The running hub server caches the instance_id in memory at startup
+and has no live-reload protocol for this field (tokens have one via
+/internal/reload-tokens; the endpoint state does not). So:
+
+  - If the hub is running when you rotate, the command will print
+    a CRITICAL warning + exit non-zero. Stop the hub, rerun the
+    rotation if needed, then start the hub fresh.
+  - If the hub is not running, the rotation succeeds cleanly and
+    the next start picks up the new id.
+
 Use this when the instance_id may have been compromised (e.g. leaked
 client config snapshot). For routine per-client token compromise, use
 ` + "`mcphub hub-mcp regenerate-token --client X`" + ` instead.`,
@@ -164,6 +174,28 @@ client config snapshot). For routine per-client token compromise, use
 			if _, err := api.RotateHubInstanceID(); err != nil {
 				return fmt.Errorf("rotate instance id: %w", err)
 			}
+
+			// codex bot phase5 r1 P1 closure on PR #160: the running hub
+			// caches instance_id from SetEndpoint at startup. Without a
+			// dedicated reload protocol for endpoint state, the live
+			// hub continues to accept the OLD id until restart — and
+			// newly-reinstalled clients carrying the NEW id get 401.
+			// Detect a live hub via /internal/reload-tokens probe and
+			// fail with a stern restart-required message; the on-disk
+			// id is already rotated so a hub restart picks it up.
+			ep, epErr := api.LoadHubEndpoint()
+			if epErr == nil && ep.Port > 0 && hubProbeAlive(cmd, ep.Port) {
+				fmt.Fprintln(cmd.ErrOrStderr(),
+					"CRITICAL: instance_id rotated on disk but the live hub is still running with the OLD id.")
+				fmt.Fprintln(cmd.ErrOrStderr(),
+					"  The live hub caches instance_id in-memory at startup and has no live-reload for the endpoint state.")
+				fmt.Fprintln(cmd.ErrOrStderr(),
+					"  Stop the hub (close the GUI / kill the daemon), then start it again. Only after that, rerun `mcphub install` for every client.")
+				fmt.Fprintln(cmd.ErrOrStderr(),
+					"  Newly-reinstalled clients with the new id will get 401 until the hub restart happens.")
+				return &forceExitError{code: 1}
+			}
+
 			fmt.Fprintln(cmd.OutOrStdout(),
 				"Rotated hub-mcp instance_id. Every client config is now stale.\n"+
 					"Rerun `mcphub install` for every client to refresh the live config.")
@@ -172,6 +204,36 @@ client config snapshot). For routine per-client token compromise, use
 	}
 	c.Flags().BoolVar(&yes, "yes", false, "confirm in non-TTY contexts (required when stdin is not a terminal)")
 	return c
+}
+
+// hubProbeAlive returns true if the hub at <port> answers a
+// reload-tokens probe with auth-style 401 (i.e. the listener accepts
+// connections but rejects without the control token). Used by
+// regenerate-instance-id to decide whether to fail-loud or
+// succeed-quiet. A connect refused → false (hub not running).
+// Returns false on any unexpected status to keep the error path
+// narrowly scoped.
+func hubProbeAlive(cmd *cobra.Command, port int) bool {
+	url := fmt.Sprintf("http://127.0.0.1:%d/internal/reload-tokens", port)
+	req, err := http.NewRequestWithContext(cmd.Context(), http.MethodPost, url, nil)
+	if err != nil {
+		return false
+	}
+	// Don't send a valid control token — we WANT 401 from the live
+	// handler. A connect-refused or timeout means the hub is dead.
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	// 401 (unauthorized — handler answered, just no token) or 405
+	// (handler answered but with wrong method) both prove the hub
+	// is alive. 204 here would be surprising (we sent no token).
+	return resp.StatusCode == http.StatusUnauthorized ||
+		resp.StatusCode == http.StatusMethodNotAllowed ||
+		resp.StatusCode == http.StatusNoContent ||
+		resp.StatusCode == http.StatusForbidden // loopback-guard rejection still proves hub alive
 }
 
 // postReloadTokens fires the live-reload POST against the running hub.

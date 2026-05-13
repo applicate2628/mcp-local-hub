@@ -83,18 +83,31 @@ type HubReconcileFailure struct {
 // Clients with no resolvable config path (e.g. an unknown id) are
 // skipped silently — the same forgiving behavior as the per-server
 // planner.
+// reconcileBindingRef is the planning-internal record for one
+// (client, server, daemon) tuple that the gate-off path needs. It
+// extends canonicalDaemonRef with the binding's URLPath so the
+// gate-off URL rebuild matches the URL the canonical per-server
+// install path would have written (codex bot phase5 r1 P2 closure
+// on PR #160 — gate-OFF reconcile MUST honor non-default url_path).
+type reconcileBindingRef struct {
+	Server   string
+	Daemon   string
+	Port     int
+	URLPath  string // binding's url_path; empty defaults to "/mcp" per validateClientURLPath
+}
+
 func BuildHubReconcilePlan(
 	manifests []config.ServerManifest,
 	endpoint HubEndpoint,
 	tokens HubTokenTable,
 	opts HubReconcileOpts,
 ) ([]ClientUpdatePlan, error) {
-	// 1. Compute per-client union of (server, daemon, port) bindings
-	//    across ALL manifests. The map key is the canonical client id
-	//    (per `clients.SupportedClientNames()`), but we don't require
-	//    every shipped client to appear — only clients with at least
-	//    one binding produce ops.
-	perClient := map[string][]canonicalDaemonRef{}
+	// 1. Compute per-client union of (server, daemon, port, url_path)
+	//    bindings across ALL manifests. The map key is the canonical
+	//    client id (per `clients.SupportedClientNames()`), but we
+	//    don't require every shipped client to appear — only clients
+	//    with at least one binding produce ops.
+	perClient := map[string][]reconcileBindingRef{}
 	for i := range manifests {
 		m := &manifests[i]
 		for _, b := range m.ClientBindings {
@@ -102,8 +115,8 @@ func BuildHubReconcilePlan(
 			if !ok {
 				return nil, fmt.Errorf("manifest %q: binding references unknown daemon %q", m.Name, b.Daemon)
 			}
-			perClient[b.Client] = append(perClient[b.Client], canonicalDaemonRef{
-				Server: m.Name, Daemon: b.Daemon, Port: d.Port,
+			perClient[b.Client] = append(perClient[b.Client], reconcileBindingRef{
+				Server: m.Name, Daemon: b.Daemon, Port: d.Port, URLPath: b.URLPath,
 			})
 		}
 	}
@@ -177,18 +190,34 @@ func BuildHubReconcilePlan(
 		} else {
 			// Gate OFF: AddReplace each per-(server, client) entry,
 			// then Remove the aggregate.
+			//
+			// codex bot phase5 r1 P2 closure on PR #160: reuse the
+			// binding's url_path (b.URLPath in the source manifest)
+			// when reconstructing the per-daemon URL. The pre-r1
+			// implementation hardcoded "/mcp" which broke routing
+			// for any manifest that ships a non-default url_path —
+			// gate-OFF restore would write the wrong URL and the
+			// client would see 404 on every call until manual
+			// `mcphub install --server X` rewrites it correctly.
+			//
+			// Empty URLPath defaults to "/mcp" — matches the
+			// validateClientURLPath rule applied at manifest load.
 			seenServer := map[string]bool{}
 			for _, ref := range refs {
 				if seenServer[ref.Server] {
 					continue
 				}
 				seenServer[ref.Server] = true
+				p := ref.URLPath
+				if p == "" {
+					p = "/mcp"
+				}
 				plan = append(plan, ClientUpdatePlan{
 					Client:     client,
 					Path:       path,
 					Action:     ClientUpdateAddReplace,
 					EntryName:  ref.Server,
-					URL:        fmt.Sprintf("http://localhost:%d/mcp", ref.Port),
+					URL:        fmt.Sprintf("http://localhost:%d%s", ref.Port, p),
 					DaemonName: ref.Daemon,
 				})
 			}
