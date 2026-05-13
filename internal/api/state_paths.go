@@ -45,6 +45,13 @@ import (
 // later tasks (2, 3, 7, 9) reference one canonical literal.
 const stateDirName = "mcp-local-hub"
 
+// marketplaceCacheFileLeaf is the G5 Marketplace cache file. Joins
+// the validateStateFileName allowlist (single-component, no path
+// separators). Reads/writes route through readHubMcpStateFile /
+// writeHubMcpStateFile so the G4 hardening pipeline (atomic tempfile
+// + rename + post-rename DACL re-verify) applies unchanged.
+const marketplaceCacheFileLeaf = "marketplace-cache.json"
+
 // ---------------------------------------------------------------------
 // Error sentinels.
 // ---------------------------------------------------------------------
