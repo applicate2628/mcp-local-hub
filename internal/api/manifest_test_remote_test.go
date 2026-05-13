@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -425,6 +426,33 @@ func TestSendRemoteInitialize_DisplayURLScrubsExpandedFromError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), display) {
 		t.Errorf("error should reference display URL %q; got %v", display, err)
+	}
+}
+
+// TestSendRemoteInitialize_ScrubbedErrorPreservesChain pins bot r1
+// P2 closure (PR #174): redacting the expanded URL out of an error
+// message must NOT flatten the chain — callers should still be able
+// to distinguish context.DeadlineExceeded / net.Error.Timeout for
+// retry/UX decisions.
+func TestSendRemoteInitialize_ScrubbedErrorPreservesChain(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(2 * time.Second)
+	}))
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	display := "https://example.com/${secret:TOKEN}/mcp"
+	_, err := sendRemoteInitialize(ctx, buildTLSTrustingClient(srv), srv.URL, display, nil)
+	if err == nil {
+		t.Fatal("expected ctx deadline error")
+	}
+	// Display-side: expanded URL is redacted.
+	if strings.Contains(err.Error(), srv.URL) {
+		t.Errorf("expanded URL leaked into error: %v", err)
+	}
+	// Machine-readable side: chain still reaches the ctx error.
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("errors.Is(err, context.DeadlineExceeded) == false (chain dropped); err=%v", err)
 	}
 }
 
