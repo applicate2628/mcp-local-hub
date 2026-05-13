@@ -11,6 +11,7 @@ package api
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -39,10 +40,17 @@ func GenerateDraftManifest(e *MarketplaceEntry, opts GenerateOpts) (string, []st
 			workspace = wd
 		}
 	}
+	// codex r6 P1 closure (PR #163): PlaceholderExpander.Expand
+	// writes to UndefinedEnv for any non-sensitive ${env:VAR} that
+	// resolves to empty. The map MUST be initialized to non-nil per
+	// the expander's documented contract (import_vscode.go) —
+	// otherwise a catalog entry with an unset non-sensitive env
+	// placeholder panics with "assignment to entry in nil map".
 	exp := &PlaceholderExpander{
 		Workspace:        workspace,
 		Getenv:           os.Getenv,
 		SkipSensitiveEnv: true, // catalog is untrusted
+		UndefinedEnv:     map[string]struct{}{},
 	}
 	args := make([]string, len(e.Args))
 	for i, a := range e.Args {
@@ -53,6 +61,21 @@ func GenerateDraftManifest(e *MarketplaceEntry, opts GenerateOpts) (string, []st
 		env[k] = exp.Expand(v)
 	}
 	warnings := exp.WarningsForSensitive()
+	// Surface non-sensitive empty-resolution placeholders too: the
+	// operator should see exactly which ${env:*} substituted to empty
+	// before they pipe the draft to manifest create. Keep order
+	// deterministic so the warning stream is reproducible across
+	// runs.
+	if len(exp.UndefinedEnv) > 0 {
+		names := make([]string, 0, len(exp.UndefinedEnv))
+		for name := range exp.UndefinedEnv {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			warnings = append(warnings, fmt.Sprintf("catalog references ${env:%s} which expanded to empty (variable unset in the current environment); the draft will contain an empty value at that position — edit before saving", name))
+		}
+	}
 	draft := map[string]any{
 		"name":      e.ID,
 		"kind":      "global",

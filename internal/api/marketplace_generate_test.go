@@ -59,6 +59,50 @@ func TestGenerateDraftManifest_HttpEntryRefusedWithG6Workaround(t *testing.T) {
 	}
 }
 
+// TestGenerateDraftManifest_NonSensitiveUnsetEnvDoesNotPanic pins
+// codex r6 P1 closure (PR #163): a non-sensitive ${env:VAR} that
+// resolves to empty must NOT panic with "assignment to entry in nil
+// map". PlaceholderExpander.UndefinedEnv must be non-nil before the
+// expander is used.
+func TestGenerateDraftManifest_NonSensitiveUnsetEnvDoesNotPanic(t *testing.T) {
+	// VAR is non-sensitive (no _TOKEN/_SECRET/etc suffix) and unset
+	// in the test process. Pre-fix this would crash; post-fix it
+	// returns a draft with an empty value plus an "expanded to
+	// empty" warning.
+	const unsetVar = "MCPHUB_TEST_UNSET_NON_SENSITIVE_VAR_PR163"
+	t.Setenv(unsetVar, "") // explicit empty for determinism
+	e := &MarketplaceEntry{
+		ID:        "with-unset-env",
+		Name:      "Unset",
+		Transport: "stdio",
+		Command:   "npx",
+		Args:      []string{"--something", "${env:" + unsetVar + "}"},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("GenerateDraftManifest panicked on unset non-sensitive env: %v", r)
+		}
+	}()
+	got, warns, err := GenerateDraftManifest(e, GenerateOpts{})
+	if err != nil {
+		t.Fatalf("GenerateDraftManifest: %v", err)
+	}
+	if !strings.Contains(got, "with-unset-env") {
+		t.Errorf("draft missing entry id name")
+	}
+	if len(warns) == 0 {
+		t.Errorf("expected an empty-resolution warning for unset non-sensitive env; got none")
+	} else {
+		joined := strings.Join(warns, "\n")
+		if !strings.Contains(joined, unsetVar) {
+			t.Errorf("warnings missing unset var name: %s", joined)
+		}
+		if !strings.Contains(joined, "empty") {
+			t.Errorf("warnings should describe empty-resolution: %s", joined)
+		}
+	}
+}
+
 // TestGenerateDraftManifest_SensitiveEnvLeftVerbatim pins codex r1
 // P1 closure: catalog-controlled ${env:NAME} matching the sensitive
 // allowlist is left as literal ${env:NAME} in the draft + a warning

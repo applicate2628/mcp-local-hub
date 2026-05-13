@@ -37,11 +37,27 @@ func rejectNonHTTPSRedirect(req *http.Request, via []*http.Request) error {
 	return nil
 }
 
-// newMarketplaceTransport returns a transport with compression
-// disabled. Exported (lower-case) only via the helper functions
-// below; tests substitute a TLS-trusting transport via
-// injectTLSTestClient.
+// newMarketplaceTransport clones http.DefaultTransport and only
+// overrides DisableCompression so we keep stdlib defaults that
+// matter in real environments: ProxyFromEnvironment (so HTTP_PROXY /
+// HTTPS_PROXY / NO_PROXY work), the default DialContext (keep-alive,
+// dual-stack), idle connection pooling, TLS handshake and
+// expect-continue timeouts. Tests substitute a TLS-trusting
+// transport via injectTLSTestClient.
+//
+// codex r6 P2 closure (PR #163): the previous &http.Transport{
+// DisableCompression: true} dropped all stdlib defaults, so
+// marketplace fetches bypassed proxy resolution and could fail in
+// proxied environments where the rest of the binary already works.
 func newMarketplaceTransport() *http.Transport {
+	if base, ok := http.DefaultTransport.(*http.Transport); ok {
+		t := base.Clone()
+		t.DisableCompression = true
+		return t
+	}
+	// Fallback path: http.DefaultTransport is documented as
+	// *http.Transport; the type assertion is here for forward-
+	// compatibility, not because the assertion is expected to fail.
 	return &http.Transport{
 		DisableCompression: true,
 	}
