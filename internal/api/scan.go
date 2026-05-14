@@ -28,6 +28,49 @@ type ScanOpts struct {
 	WithProcessCount      bool // populate ScanEntry.ProcessCount via wmic
 }
 
+// probeClientConfigPresence reports whether each known MCP client's
+// config file exists on disk and is stat-able. Used by the Servers
+// matrix UI to distinguish "client installed but has no entries for
+// this server yet" (operator can migrate to it) from "client not
+// installed on this host" (cell disabled).
+//
+// Bug-bash A2 (#13) closure: pre-fix, the UI inferred client presence
+// from per-entry `client_presence` keys, which collapsed when a
+// wholesale demigrate emptied `mcpServers`. After fix, the UI reads
+// this top-level map and renders an "available" cell whenever the
+// client is "ok" even with no server entries.
+//
+// Only paths the caller actually passed via ScanOpts are probed —
+// keeps tempdir-based tests deterministic.
+func probeClientConfigPresence(opts ScanOpts) map[string]string {
+	out := map[string]string{}
+	pairs := []struct {
+		name string
+		path string
+	}{
+		{"claude-code", opts.ClaudeConfigPath},
+		{"codex-cli", opts.CodexConfigPath},
+		{"cursor", opts.CursorConfigPath},
+		{"vscode", opts.VSCodeConfigPath},
+		{"gemini-cli", opts.GeminiConfigPath},
+		{"qwen-cli", opts.QwenConfigPath},
+		{"antigravity", opts.AntigravityConfigPath},
+	}
+	for _, p := range pairs {
+		if p.path == "" {
+			continue
+		}
+		if _, err := os.Stat(p.path); err == nil {
+			out[p.name] = "ok"
+		} else if os.IsNotExist(err) {
+			out[p.name] = "missing"
+		} else {
+			out[p.name] = "error"
+		}
+	}
+	return out
+}
+
 // perSessionServers are MCP servers whose sessions must remain isolated
 // per local client/process. Even when an upstream tool supports a session_id
 // parameter, we conservatively keep them per-session unless the hub
@@ -96,7 +139,10 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 		e.Status = classify(e, name, manifestNames)
 	}
 
-	out := &ScanResult{At: time.Now()}
+	out := &ScanResult{
+		At:                   time.Now(),
+		ClientConfigPresence: probeClientConfigPresence(opts),
+	}
 	for _, e := range entries {
 		out.Entries = append(out.Entries, *e)
 	}

@@ -89,3 +89,83 @@ describe("collectServers", () => {
     expect(out[0].routing["claude-code"]).toBe("via-hub");
   });
 });
+
+// Bug-bash A2 (#13) closure: client_config_presence drives "available"
+// vs "not-installed" for clients absent from per-entry client_presence.
+// Without this, a client with `mcpServers: {}` was indistinguishable
+// from "client not on this host" and the whole column was disabled.
+describe("perClientRouting with client_config_presence", () => {
+  it("tags missing-from-presence + config 'ok' as available", () => {
+    const r = perClientRouting({}, { "claude-code": "ok" });
+    expect(r["claude-code"]).toBe("available");
+  });
+
+  it("tags missing-from-presence + config 'missing' as not-installed", () => {
+    const r = perClientRouting({}, { "claude-code": "missing" });
+    expect(r["claude-code"]).toBe("not-installed");
+  });
+
+  it("tags missing-from-presence + config 'error' as not-installed", () => {
+    const r = perClientRouting({}, { "claude-code": "error" });
+    expect(r["claude-code"]).toBe("not-installed");
+  });
+
+  it("does NOT override an existing per-entry signal with config presence", () => {
+    const r = perClientRouting(
+      { "claude-code": { transport: "http", endpoint: "http://127.0.0.1:9100/mcp" } },
+      { "claude-code": "ok" },
+    );
+    expect(r["claude-code"]).toBe("via-hub");
+  });
+
+  it("fills every known client column even with empty client_presence", () => {
+    const r = perClientRouting({}, {});
+    for (const c of [
+      "claude-code",
+      "codex-cli",
+      "cursor",
+      "vscode",
+      "gemini-cli",
+      "qwen-cli",
+      "antigravity",
+    ]) {
+      expect(r[c]).toBe("not-installed");
+    }
+  });
+
+  it("collectServers threads client_config_presence to perClientRouting", () => {
+    const scan: ScanResult = {
+      at: "",
+      entries: [{ name: "godbolt", client_presence: {}, can_migrate: true }],
+      client_config_presence: { "claude-code": "ok", vscode: "missing" },
+    };
+    const out = collectServers(scan);
+    expect(out[0].routing["claude-code"]).toBe("available");
+    expect(out[0].routing["vscode"]).toBe("not-installed");
+  });
+
+  // Bot r1 P2 closure: non-migratable servers (no manifest,
+  // per-session, unknown) must NOT get "available" cells. Pre-fix the
+  // fallback enabled checkboxes for them which Apply could not honor.
+  it("does NOT mark cells 'available' when server is not migratable", () => {
+    const r = perClientRouting({}, { "claude-code": "ok" }, false);
+    expect(r["claude-code"]).toBe("not-installed");
+  });
+
+  it("collectServers honors can_migrate=false (gates 'available' fallback)", () => {
+    const scan: ScanResult = {
+      at: "",
+      entries: [
+        { name: "manifested", client_presence: {}, can_migrate: true },
+        { name: "time-server", client_presence: {}, can_migrate: false },
+        { name: "unknown-default", client_presence: {} }, // undefined can_migrate → treat as non-migratable
+      ],
+      client_config_presence: { "claude-code": "ok" },
+    };
+    const out = collectServers(scan);
+    const byName = Object.fromEntries(out.map((s) => [s.name, s]));
+    expect(byName["manifested"].routing["claude-code"]).toBe("available");
+    expect(byName["time-server"].routing["claude-code"]).toBe("not-installed");
+    expect(byName["unknown-default"].routing["claude-code"]).toBe("not-installed");
+  });
+});

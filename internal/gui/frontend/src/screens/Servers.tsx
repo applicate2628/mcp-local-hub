@@ -437,15 +437,28 @@ function CellView(props: {
   }, [initialChecked]);
   // Disable when cell is meaningless:
   //  - "unsupported"   : this client cannot route this server via the hub
-  //  - "not-installed" : this client is not installed on this machine
-  // "via-hub" is now INTERACTIVE (B1): uncheck + Apply posts
-  // /api/demigrate for this (server, client) pair. See B1 memo §4 D5.
+  //  - "not-installed" : this client's config file does not exist on disk
+  // "via-hub", "direct", and "available" are all INTERACTIVE.
+  // "via-hub" → uncheck + Apply posts /api/demigrate (B1 memo §4 D5).
+  // "direct" / "available" → check + Apply posts /api/migrate.
+  //
+  // Bug-bash A2 (#13) closure: "available" is the cell state for "this
+  // client's config file exists but currently has no entry for this
+  // server". Pre-fix, that state was missing — clients with empty
+  // mcpServers were indistinguishable from "client absent" and the UI
+  // disabled the whole column, locking the operator out of re-adding
+  // servers via Apply. The new state-machine includes "available" as
+  // an enabled-but-unchecked cell.
   const disabled = routing === "unsupported" || routing === "not-installed";
   let title: string | undefined;
   if (routing === "via-hub") {
     title = `Currently routed through the hub. Uncheck and Apply to roll this binding back to the original ${client} config.`;
+  } else if (routing === "direct") {
+    title = `${client} has a direct (non-hub) entry for this server. Check and Apply to route it through the hub.`;
+  } else if (routing === "available") {
+    title = `${client} has no entry for this server yet. Check and Apply to install it.`;
   } else if (routing === "not-installed") {
-    title = `${client} is not installed on this machine.`;
+    title = `${client}'s MCP config file is not present on this host — nothing to install.`;
   } else if (routing === "unsupported") {
     title = `${client} cannot route this server through the hub (e.g., per-session servers).`;
   }

@@ -17,12 +17,26 @@ export interface DaemonStatus {
 export interface ScanResult {
   at: string;
   entries: ScanEntry[] | null;
+  // Bug-bash A2 (#13): per-client config file state, independent of
+  // per-entry client_presence. Keys are client names; values are
+  // "ok" | "missing" | "error". Frontend uses this to render a cell
+  // as "available" (enabled, unchecked) when the cell's client config
+  // file exists but has no entry for this particular server.
+  client_config_presence?: Record<string, ClientConfigState>;
 }
+
+export type ClientConfigState = "ok" | "missing" | "error";
 
 export interface ScanEntry {
   name: string;
   status?: string;
   client_presence?: Record<string, ClientPresence>;
+  // Bug-bash A2 bot r1 P2 closure: non-migratable rows (no manifest,
+  // per-session, unknown) must NOT get "available" cells from
+  // client_config_presence — clicking them would hit deterministic
+  // /api/migrate errors. Mirror backend ScanEntry.CanMigrate so
+  // collectServers can gate the fallback to migratable rows only.
+  can_migrate?: boolean;
 }
 
 export interface ClientPresence {
@@ -32,7 +46,16 @@ export interface ClientPresence {
 }
 
 // Per-cell routing tag consumed by the Servers matrix.
-export type Routing = "via-hub" | "direct" | "not-installed" | "unsupported";
+//   "via-hub"       — entry exists and points at our loopback hub URL.
+//   "direct"        — entry exists with non-hub endpoint (legacy / pre-mcphub).
+//   "available"     — client config file exists, no entry for this
+//                     server yet (operator can migrate). Bug-bash A2
+//                     closure — without this, an empty-mcpServers config
+//                     was indistinguishable from "client not installed"
+//                     and disabled the whole column.
+//   "not-installed" — client config file absent on this host.
+//   "unsupported"   — client cannot route this server via the hub.
+export type Routing = "via-hub" | "direct" | "available" | "not-installed" | "unsupported";
 
 export interface ServerRow {
   name: string;
