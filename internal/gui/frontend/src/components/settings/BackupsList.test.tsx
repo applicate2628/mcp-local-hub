@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, waitFor, cleanup } from "@testing-library/preact";
+import { fireEvent, render, waitFor, cleanup } from "@testing-library/preact";
 import { BackupsList } from "./BackupsList";
 import * as api from "../../lib/settings-api";
 import { BACKUPS_COPY } from "./backups-copy";
@@ -81,5 +81,58 @@ describe("BackupsList", () => {
     await findByTestId("preview-unavailable");
     // No stale eligible badges should remain alongside "Preview unavailable".
     expect(queryByTestId("eligible-badge")).toBeNull();
+  });
+
+  // Bug-bash B2 closure (#21): per-client Clean buttons.
+  describe("per-client Clean now (#21)", () => {
+    it("renders a Clean button per client group with the eligible count", async () => {
+      vi.spyOn(api, "getBackupsCleanPreview").mockResolvedValue(["/cc/2026-04-24.bak"]);
+      const { findByTestId } = render(<BackupsList keepN={1} />);
+      // Wait for the debounced preview to populate wouldRemove (250ms);
+      // observable via the eligible-badge rendering on the matching row.
+      await findByTestId("eligible-badge");
+      const btn = (await findByTestId("clean-now-claude-code")) as HTMLButtonElement;
+      expect(btn.textContent).toContain("Clean claude-code only (1)");
+      expect(btn.disabled).toBe(false);
+      const btnEmpty = (await findByTestId("clean-now-cursor")) as HTMLButtonElement;
+      // cursor has zero backups in this fixture; button must be disabled.
+      expect(btnEmpty.disabled).toBe(true);
+      expect(btnEmpty.textContent).toContain("Clean cursor only (0)");
+    });
+
+    it("clicking Clean for one client calls cleanBackupsForClient + invokes onClientCleaned", async () => {
+      vi.spyOn(api, "getBackupsCleanPreview").mockResolvedValue(["/cc/2026-04-24.bak"]);
+      const cleanSpy = vi
+        .spyOn(api, "cleanBackupsForClient")
+        .mockResolvedValue({ cleaned: 1, client: "claude-code" });
+      const cleaned: string[] = [];
+      const { findByTestId } = render(
+        <BackupsList keepN={1} onClientCleaned={(c) => cleaned.push(c)} />,
+      );
+      // Wait for the debounced preview to populate so the button is enabled.
+      await findByTestId("eligible-badge");
+      const btn = (await findByTestId("clean-now-claude-code")) as HTMLButtonElement;
+      await waitFor(() => expect(btn.disabled).toBe(false));
+      fireEvent.click(btn);
+      await waitFor(() => expect(cleanSpy).toHaveBeenCalledWith("claude-code"));
+      await waitFor(() => expect(cleaned).toEqual(["claude-code"]));
+    });
+
+    it("backend error per-client renders inline error AND does NOT call onClientCleaned", async () => {
+      vi.spyOn(api, "getBackupsCleanPreview").mockResolvedValue(["/cc/2026-04-24.bak"]);
+      vi.spyOn(api, "cleanBackupsForClient").mockRejectedValue(new Error("disk full"));
+      const cleaned: string[] = [];
+      const { findByTestId, container } = render(
+        <BackupsList keepN={1} onClientCleaned={(c) => cleaned.push(c)} />,
+      );
+      await findByTestId("eligible-badge");
+      const btn = (await findByTestId("clean-now-claude-code")) as HTMLButtonElement;
+      await waitFor(() => expect(btn.disabled).toBe(false));
+      fireEvent.click(btn);
+      await waitFor(() =>
+        expect(container.textContent ?? "").toContain("disk full"),
+      );
+      expect(cleaned).toEqual([]);
+    });
   });
 });

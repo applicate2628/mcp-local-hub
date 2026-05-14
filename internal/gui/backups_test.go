@@ -21,6 +21,17 @@ type fakeBackups struct {
 	cleaned    []string
 	cleanErr   error
 	cleanN     int
+
+	// Per-client (bug-bash B2 closure #21) — captures the client arg
+	// + retention so tests can assert the handler forwards them.
+	cleanInClient    string
+	cleanInN         int
+	cleanInResult    []string
+	cleanInErr       error
+	previewInClient  string
+	previewInN       int
+	previewInResult  []string
+	previewInErr     error
 }
 
 func (f *fakeBackups) List() ([]api.BackupInfo, error) { return f.list, f.listErr }
@@ -31,6 +42,16 @@ func (f *fakeBackups) CleanPreview(n int) ([]string, error) {
 func (f *fakeBackups) Clean(n int) ([]string, error) {
 	f.cleanN = n
 	return f.cleaned, f.cleanErr
+}
+func (f *fakeBackups) CleanInClient(client string, n int) ([]string, error) {
+	f.cleanInClient = client
+	f.cleanInN = n
+	return f.cleanInResult, f.cleanInErr
+}
+func (f *fakeBackups) CleanPreviewInClient(client string, n int) ([]string, error) {
+	f.previewInClient = client
+	f.previewInN = n
+	return f.previewInResult, f.previewInErr
 }
 
 func newBackupsTestServer(t *testing.T) (*Server, *fakeBackups) {
@@ -224,4 +245,252 @@ func TestBackupsClean_StorageError_500(t *testing.T) {
 	if !strings.Contains(rr.Body.String(), "BACKUPS_CLEAN_FAILED") {
 		t.Errorf("body missing error code: %s", rr.Body.String())
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Bug-bash B2 closure (#21): per-client backup cleanup.
+//
+// Pre-fix, the GUI Settings.Backups screen exposed one global "Clean now"
+// button that pruned every managed client's backups. Operators who wanted
+// to clean only one client (e.g., "I rebuilt cursor's config; just prune
+// cursor's stale backups, leave claude-code alone") had no way to scope.
+//
+// /api/backups/clean and /api/backups/clean-preview now accept an
+// optional ?client=X query param that narrows the prune set. Empty
+// param preserves the legacy "every client" semantic.
+// ---------------------------------------------------------------------------
+
+func TestBackupsClean_POST_PerClientHappyPath(t *testing.T) {
+	s, fb := newBackupsTestServer(t)
+	fb.cleanInResult = []string{
+		"/home/u/.cursor/mcp.json.bak-mcp-local-hub-2026-04-30T12-00-00",
+	}
+	req := httptest.NewRequest("POST", "/api/backups/clean?client=cursor", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Cleaned int      `json:"cleaned"`
+		Client  string   `json:"client"`
+		Errors  []string `json:"errors"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Cleaned != 1 {
+		t.Errorf("cleaned = %d, want 1", resp.Cleaned)
+	}
+	if resp.Client != "cursor" {
+		t.Errorf("client = %q, want cursor", resp.Client)
+	}
+	if fb.cleanInClient != "cursor" {
+		t.Errorf("CleanInClient client = %q, want cursor", fb.cleanInClient)
+	}
+	// keepN is read from settings (registry default 5 when unset).
+	if fb.cleanInN != 5 {
+		t.Errorf("CleanInClient keepN = %d, want 5 (registry default)", fb.cleanInN)
+	}
+	// Bulk Clean must NOT have been called (mutual-exclusivity).
+	if fb.cleanN != 0 {
+		t.Errorf("bulk Clean leaked through with keepN=%d", fb.cleanN)
+	}
+}
+
+func TestBackupsClean_POST_PerClientUnknownClient_400(t *testing.T) {
+	s, _ := newBackupsTestServer(t)
+	// Bot r1 P2 closure (PR #183): unknown-client validation happens
+	// up-front via clients.ConfigPathForName BEFORE the cleaner runs,
+	// so the handler doesn't need the fake to return an error — the
+	// validation gate produces the 400. (fakeBackups.cleanInErr is
+	// reserved for the I/O-failure case verified below.)
+	req := httptest.NewRequest("POST", "/api/backups/clean?client=not-a-real-client", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "BACKUPS_CLEAN_UNKNOWN_CLIENT") {
+		t.Errorf("body missing error code BACKUPS_CLEAN_UNKNOWN_CLIENT: %s", rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "unknown client") {
+		t.Errorf("body missing wrapped error message: %s", rr.Body.String())
+	}
+}
+
+// TestBackupsClean_POST_PerClientIOFailure_500 pins bot r1 P2 closure
+// on PR #183: a valid client id that hits a runtime/filesystem failure
+// (e.g., backup directory unreadable, permission denied, disk error)
+// must return 500 BACKUPS_CLEAN_FAILED, NOT 400 BACKUPS_CLEAN_UNKNOWN_
+// CLIENT. Pre-fix, the handler mapped EVERY CleanInClient error to
+// 400, which would have given operators a misleading "unknown client"
+// diagnosis for an infrastructure failure.
+func TestBackupsClean_POST_PerClientIOFailure_500(t *testing.T) {
+	s, fb := newBackupsTestServer(t)
+	fb.cleanInErr = errors.New("read .cursor/: permission denied")
+	// Use a real client id so the up-front validation passes — the
+	// 500 only fires when validation passes AND the fake reports an
+	// I/O failure.
+	req := httptest.NewRequest("POST", "/api/backups/clean?client=cursor", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "BACKUPS_CLEAN_FAILED") {
+		t.Errorf("body missing error code BACKUPS_CLEAN_FAILED: %s", rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "permission denied") {
+		t.Errorf("body should preserve underlying I/O message: %s", rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "UNKNOWN_CLIENT") {
+		t.Errorf("body must NOT misclassify I/O failure as unknown-client: %s", rr.Body.String())
+	}
+}
+
+func TestBackupsCleanPreview_GET_PerClientHappyPath(t *testing.T) {
+	s, fb := newBackupsTestServer(t)
+	fb.previewInResult = []string{
+		"/home/u/.cursor/mcp.json.bak-mcp-local-hub-2026-04-29T12-00-00",
+	}
+	req := httptest.NewRequest("GET", "/api/backups/clean-preview?keep_n=3&client=cursor", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		WouldRemove []string `json:"would_remove"`
+		Client      string   `json:"client"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.WouldRemove) != 1 {
+		t.Errorf("would_remove = %v, want 1 row", resp.WouldRemove)
+	}
+	if resp.Client != "cursor" {
+		t.Errorf("client = %q, want cursor", resp.Client)
+	}
+	if fb.previewInClient != "cursor" || fb.previewInN != 3 {
+		t.Errorf("CleanPreviewInClient called with (%q, %d), want (cursor, 3)", fb.previewInClient, fb.previewInN)
+	}
+	if fb.previewN != 0 {
+		t.Errorf("bulk CleanPreview leaked through with keepN=%d", fb.previewN)
+	}
+}
+
+func TestBackupsCleanPreview_GET_PerClientUnknownClient_400(t *testing.T) {
+	s, _ := newBackupsTestServer(t)
+	// Up-front validation gate produces the 400 BEFORE the fake's
+	// preview is called.
+	req := httptest.NewRequest("GET", "/api/backups/clean-preview?keep_n=3&client=not-a-real-client", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "BACKUPS_PREVIEW_UNKNOWN_CLIENT") {
+		t.Errorf("body missing error code BACKUPS_PREVIEW_UNKNOWN_CLIENT: %s", rr.Body.String())
+	}
+}
+
+// TestBackupsCleanPreview_GET_PerClientIOFailure_500 pins bot r1 P2
+// closure on PR #183 symmetry with the clean handler: a valid client
+// id that hits a runtime/filesystem failure during preview (e.g.,
+// BackupsListIn's os.ReadDir errors out) must return 500
+// BACKUPS_PREVIEW_FAILED, NOT 400 BACKUPS_PREVIEW_UNKNOWN_CLIENT.
+func TestBackupsCleanPreview_GET_PerClientIOFailure_500(t *testing.T) {
+	s, fb := newBackupsTestServer(t)
+	fb.previewInErr = errors.New("read .cursor/: permission denied")
+	req := httptest.NewRequest("GET", "/api/backups/clean-preview?keep_n=3&client=cursor", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "BACKUPS_PREVIEW_FAILED") {
+		t.Errorf("body missing error code BACKUPS_PREVIEW_FAILED: %s", rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "UNKNOWN_CLIENT") {
+		t.Errorf("body must NOT misclassify I/O failure as unknown-client: %s", rr.Body.String())
+	}
+}
+
+// TestPreviewTimestampedRetention pins the pure retention helper that
+// powers CleanPreviewInClient on the production adapter. Sentinels never
+// appear in the result; timestamped rows are sorted newest-first, the
+// first keepN are kept, the rest are returned.
+func TestPreviewTimestampedRetention(t *testing.T) {
+	mkTime := func(s string) time.Time {
+		t.Helper()
+		v, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			t.Fatalf("parse %q: %v", s, err)
+		}
+		return v
+	}
+	rows := []api.BackupInfo{
+		{Path: "/a.bak-mcp-local-hub-2026-04-30T12-00-00", Kind: "timestamped", ModTime: mkTime("2026-04-30T12:00:00Z")},
+		{Path: "/a.bak-mcp-local-hub-original", Kind: "original", ModTime: mkTime("2026-01-01T00:00:00Z")},
+		{Path: "/a.bak-mcp-local-hub-2026-05-01T12-00-00", Kind: "timestamped", ModTime: mkTime("2026-05-01T12:00:00Z")},
+		{Path: "/a.bak-mcp-local-hub-2026-04-29T12-00-00", Kind: "timestamped", ModTime: mkTime("2026-04-29T12:00:00Z")},
+	}
+
+	t.Run("keep 1 keeps newest only", func(t *testing.T) {
+		got := previewTimestampedRetention(rows, 1)
+		want := []string{
+			"/a.bak-mcp-local-hub-2026-04-30T12-00-00",
+			"/a.bak-mcp-local-hub-2026-04-29T12-00-00",
+		}
+		if !equalStringSlices(got, want) {
+			t.Errorf("got %v, want %v", got, want)
+		}
+	})
+
+	t.Run("keep 5 (more than count) prunes nothing", func(t *testing.T) {
+		got := previewTimestampedRetention(rows, 5)
+		if len(got) != 0 {
+			t.Errorf("got %v, want empty (count <= keepN)", got)
+		}
+	})
+
+	t.Run("keep 0 prunes every timestamped", func(t *testing.T) {
+		got := previewTimestampedRetention(rows, 0)
+		if len(got) != 3 {
+			t.Errorf("got %d rows, want 3 timestamped (sentinel excluded)", len(got))
+		}
+		// Sentinel must not appear.
+		for _, p := range got {
+			if strings.HasSuffix(p, "-original") {
+				t.Errorf("sentinel leaked into prune set: %s", p)
+			}
+		}
+	})
+
+	t.Run("empty input returns empty", func(t *testing.T) {
+		got := previewTimestampedRetention(nil, 0)
+		if len(got) != 0 {
+			t.Errorf("got %v, want empty", got)
+		}
+	})
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
