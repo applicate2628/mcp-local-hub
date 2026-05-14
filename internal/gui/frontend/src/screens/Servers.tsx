@@ -333,6 +333,13 @@ export function ServersScreen() {
     }
   }
 
+  // Bug-bash A3 (#11/#12): split rows into mcphub-managed (manifested)
+  // and legacy non-mcphub (no manifest). The main matrix only renders
+  // manifested servers — checkboxes for non-manifested rows would mean
+  // nothing (Apply migrate/demigrate both require a manifest). Legacy
+  // entries surface in a read-only "Other MCP entries" expander so the
+  // operator can see what's in client configs without confusing them
+  // for mcphub-managed.
   // Bot r1 P2 closure: keep any row with a pending dirty edit visible
   // in the main matrix, even if a scan race flipped manifest_exists to
   // false (e.g., manifest deletion between fetch + render). Pre-fix,
