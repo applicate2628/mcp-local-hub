@@ -158,13 +158,24 @@ func (s *Server) backupsCleanHandler(w http.ResponseWriter, r *http.Request) {
 	// to one client. Empty client preserves the legacy "clean every
 	// managed client" semantic so existing operator workflows keep
 	// working unchanged.
+	//
+	// Bot r1 P2 closure (PR #183): split client-validation (400) from
+	// runtime/filesystem failure (500). Validate the client id BEFORE
+	// invoking the per-client cleaner so any subsequent error must be
+	// an I/O failure on a known client (e.g. directory disappeared,
+	// permission denied) — those return 500 BACKUPS_CLEAN_FAILED, not
+	// 400 BACKUPS_CLEAN_UNKNOWN_CLIENT.
 	client := r.URL.Query().Get("client")
 	var removed []string
 	var err error
 	if client != "" {
+		if _, vErr := clients.ConfigPathForName(client); vErr != nil {
+			writeAPIError(w, vErr, http.StatusBadRequest, "BACKUPS_CLEAN_UNKNOWN_CLIENT")
+			return
+		}
 		removed, err = s.backups.CleanInClient(client, keepN)
 		if err != nil {
-			writeAPIError(w, err, http.StatusBadRequest, "BACKUPS_CLEAN_UNKNOWN_CLIENT")
+			writeAPIError(w, err, http.StatusInternalServerError, "BACKUPS_CLEAN_FAILED")
 			return
 		}
 	} else {
@@ -203,12 +214,21 @@ func (s *Server) backupsCleanPreviewHandler(w http.ResponseWriter, r *http.Reque
 	// Bug-bash B2 closure (#21) symmetry: optional ?client=X narrows
 	// the preview to one client so per-client "would-prune" counts
 	// can render alongside each client's backups group.
+	//
+	// Bot r1 P2 closure (PR #183) symmetry with the clean handler:
+	// validate the client id FIRST so unknown-client returns 400
+	// while filesystem failures (BackupsListIn read-dir errors, etc.)
+	// return 500 BACKUPS_PREVIEW_FAILED.
 	client := r.URL.Query().Get("client")
 	var paths []string
 	if client != "" {
+		if _, vErr := clients.ConfigPathForName(client); vErr != nil {
+			writeAPIError(w, vErr, http.StatusBadRequest, "BACKUPS_PREVIEW_UNKNOWN_CLIENT")
+			return
+		}
 		paths, err = s.backups.CleanPreviewInClient(client, n)
 		if err != nil {
-			writeAPIError(w, err, http.StatusBadRequest, "BACKUPS_PREVIEW_UNKNOWN_CLIENT")
+			writeAPIError(w, err, http.StatusInternalServerError, "BACKUPS_PREVIEW_FAILED")
 			return
 		}
 	} else {

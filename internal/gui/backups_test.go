@@ -300,8 +300,12 @@ func TestBackupsClean_POST_PerClientHappyPath(t *testing.T) {
 }
 
 func TestBackupsClean_POST_PerClientUnknownClient_400(t *testing.T) {
-	s, fb := newBackupsTestServer(t)
-	fb.cleanInErr = errors.New(`unknown client "not-a-real-client" (expected claude-code | codex-cli | cursor | ...)`)
+	s, _ := newBackupsTestServer(t)
+	// Bot r1 P2 closure (PR #183): unknown-client validation happens
+	// up-front via clients.ConfigPathForName BEFORE the cleaner runs,
+	// so the handler doesn't need the fake to return an error — the
+	// validation gate produces the 400. (fakeBackups.cleanInErr is
+	// reserved for the I/O-failure case verified below.)
 	req := httptest.NewRequest("POST", "/api/backups/clean?client=not-a-real-client", nil)
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
 	rr := httptest.NewRecorder()
@@ -314,6 +318,37 @@ func TestBackupsClean_POST_PerClientUnknownClient_400(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "unknown client") {
 		t.Errorf("body missing wrapped error message: %s", rr.Body.String())
+	}
+}
+
+// TestBackupsClean_POST_PerClientIOFailure_500 pins bot r1 P2 closure
+// on PR #183: a valid client id that hits a runtime/filesystem failure
+// (e.g., backup directory unreadable, permission denied, disk error)
+// must return 500 BACKUPS_CLEAN_FAILED, NOT 400 BACKUPS_CLEAN_UNKNOWN_
+// CLIENT. Pre-fix, the handler mapped EVERY CleanInClient error to
+// 400, which would have given operators a misleading "unknown client"
+// diagnosis for an infrastructure failure.
+func TestBackupsClean_POST_PerClientIOFailure_500(t *testing.T) {
+	s, fb := newBackupsTestServer(t)
+	fb.cleanInErr = errors.New("read .cursor/: permission denied")
+	// Use a real client id so the up-front validation passes — the
+	// 500 only fires when validation passes AND the fake reports an
+	// I/O failure.
+	req := httptest.NewRequest("POST", "/api/backups/clean?client=cursor", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "BACKUPS_CLEAN_FAILED") {
+		t.Errorf("body missing error code BACKUPS_CLEAN_FAILED: %s", rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "permission denied") {
+		t.Errorf("body should preserve underlying I/O message: %s", rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "UNKNOWN_CLIENT") {
+		t.Errorf("body must NOT misclassify I/O failure as unknown-client: %s", rr.Body.String())
 	}
 }
 
@@ -351,8 +386,9 @@ func TestBackupsCleanPreview_GET_PerClientHappyPath(t *testing.T) {
 }
 
 func TestBackupsCleanPreview_GET_PerClientUnknownClient_400(t *testing.T) {
-	s, fb := newBackupsTestServer(t)
-	fb.previewInErr = errors.New(`unknown client "not-a-real-client"`)
+	s, _ := newBackupsTestServer(t)
+	// Up-front validation gate produces the 400 BEFORE the fake's
+	// preview is called.
 	req := httptest.NewRequest("GET", "/api/backups/clean-preview?keep_n=3&client=not-a-real-client", nil)
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
 	rr := httptest.NewRecorder()
@@ -362,6 +398,29 @@ func TestBackupsCleanPreview_GET_PerClientUnknownClient_400(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "BACKUPS_PREVIEW_UNKNOWN_CLIENT") {
 		t.Errorf("body missing error code BACKUPS_PREVIEW_UNKNOWN_CLIENT: %s", rr.Body.String())
+	}
+}
+
+// TestBackupsCleanPreview_GET_PerClientIOFailure_500 pins bot r1 P2
+// closure on PR #183 symmetry with the clean handler: a valid client
+// id that hits a runtime/filesystem failure during preview (e.g.,
+// BackupsListIn's os.ReadDir errors out) must return 500
+// BACKUPS_PREVIEW_FAILED, NOT 400 BACKUPS_PREVIEW_UNKNOWN_CLIENT.
+func TestBackupsCleanPreview_GET_PerClientIOFailure_500(t *testing.T) {
+	s, fb := newBackupsTestServer(t)
+	fb.previewInErr = errors.New("read .cursor/: permission denied")
+	req := httptest.NewRequest("GET", "/api/backups/clean-preview?keep_n=3&client=cursor", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "BACKUPS_PREVIEW_FAILED") {
+		t.Errorf("body missing error code BACKUPS_PREVIEW_FAILED: %s", rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "UNKNOWN_CLIENT") {
+		t.Errorf("body must NOT misclassify I/O failure as unknown-client: %s", rr.Body.String())
 	}
 }
 
