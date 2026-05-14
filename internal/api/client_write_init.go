@@ -157,36 +157,49 @@ func secureWriteWithOperatorOpt(path string, contents []byte) error {
 	return fallbackWriteRefusingSymlink(path, contents)
 }
 
-// fallbackWriteRefusingSymlink writes contents to path with mode
-// 0600 via a temp file + atomic rename. The opt-in lane's residual
-// protections beyond the parent-dir gate:
+// fallbackWriteRefusingSymlink writes contents to path with hardened
+// per-file permissions via a temp file + atomic rename. The relax
+// lane's residual protections beyond the parent-dir gate:
 //
 //  1. Lstat the destination first (does NOT follow symlinks). If
 //     a symlink is present at `path`, refuse outright. Otherwise
 //     a hostile pre-existing symlink would redirect the write
 //     after the rename.
-//  2. Write to a fresh temp file in the same dir, Chmod it to
-//     0600, then atomically rename over `path`. This avoids
-//     inheriting permissions / explicit ACEs from a pre-existing
-//     file at `path` — raw os.WriteFile would have kept the prior
-//     mode bits intact on POSIX and the prior explicit ACEs on
-//     Windows (the inheritance-from-parent ACEs remain regardless;
-//     the operator accepted those by opting in).
+//  2. Create a fresh temp file in the same dir.
+//  3. Harden the temp file's permissions PLATFORM-CORRECTLY before
+//     writing contents:
+//       - POSIX: Chmod(0o600) — owner Read+Write only.
+//       - Windows: setRestrictiveDACL on the handle — DACL granting
+//         GENERIC_ALL to {current-user, LocalSystem, Builtin
+//         Administrators} only, with PROTECTED_DACL_SECURITY_INFORMATION
+//         to block inheritance of parent ACEs. Bot r1 P1 closure on
+//         PR #185: Go's os.Chmod on Windows only toggles the
+//         FILE_ATTRIBUTE_READONLY bit and does NOT touch the ACL,
+//         so without explicit DACL hardening the new file would
+//         inherit parent's permissive ACEs (CodexSandboxUsers,
+//         AppContainer SIDs, orphan AD SIDs) — exactly the
+//         principals the parent-dir gate was trying to keep out.
+//  4. Write contents to the now-hardened temp file.
+//  5. Close + atomically rename over `path`.
 //
 // codex bot r1 P1 closure (PR #165): the original implementation
 // used raw os.WriteFile, which silently followed symlinks.
 // codex bot r2 P1 closure (PR #165): subsequent fix using
 // os.WriteFile(path, ..., 0o600) preserved the pre-existing file's
 // mode bits — temp+rename closes that channel.
+// codex bot r1 P1 closure (PR #185): the previous Chmod-only step
+// was a no-op for Windows ACL hardening; replaced with the
+// hardenTempFileForUnhardenedFallback helper that wires
+// setRestrictiveDACL on Windows and stays Chmod on POSIX.
 //
-// Residual gap vs the hardened path: a small TOCTOU window between
-// Lstat and the temp+rename. Handle-relative ops would close it;
-// the opt-in path documents the trade-off (operator must trust the
-// host for symlink-swap races).
+// Residual gap vs the hardened SecureWriteClientConfig path: a
+// small TOCTOU window between Lstat and the temp+rename. Handle-
+// relative ops would close it; the relax lane documents the
+// trade-off (operator must trust the host for symlink-swap races).
 func fallbackWriteRefusingSymlink(path string, contents []byte) error {
 	if info, err := os.Lstat(path); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("refusing to write to %s: destination is a symlink (the unhardened-client-write opt-in does NOT downgrade symlink refusal — remove or replace the symlink and retry)", path)
+			return fmt.Errorf("refusing to write to %s: destination is a symlink (the unhardened-client-write fallback does NOT downgrade symlink refusal — remove or replace the symlink and retry)", path)
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("lstat %s before unhardened write: %w", path, err)
@@ -201,17 +214,17 @@ func fallbackWriteRefusingSymlink(path string, contents []byte) error {
 		_ = tmp.Close()
 		_ = os.Remove(tmpPath)
 	}
+	// Step 3 — platform-correct hardening BEFORE writing token
+	// content. On Windows this is the load-bearing call that gives
+	// the new file owner-only ACL; without it Go's Chmod is a no-op
+	// for ACLs and the file inherits parent's permissive ACEs.
+	if err := hardenTempFileForUnhardenedFallback(tmp); err != nil {
+		cleanup()
+		return fmt.Errorf("harden temp %s permissions: %w", tmpPath, err)
+	}
 	if _, err := tmp.Write(contents); err != nil {
 		cleanup()
 		return fmt.Errorf("write temp %s: %w", tmpPath, err)
-	}
-	// Defensive Chmod: CreateTemp may apply default umask on POSIX,
-	// giving 0600 → 0600 already, but if a hostile umask widened
-	// the bits the defensive call tightens them. No-op on Windows
-	// (Chmod only toggles the read-only attribute there).
-	if err := tmp.Chmod(0o600); err != nil {
-		cleanup()
-		return fmt.Errorf("chmod temp %s to 0600: %w", tmpPath, err)
 	}
 	if err := tmp.Close(); err != nil {
 		_ = os.Remove(tmpPath)

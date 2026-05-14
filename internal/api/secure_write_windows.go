@@ -393,26 +393,9 @@ func ntRenameRelative(
 // On any error the file is in an inconsistent state — the caller MUST
 // unlink it via cleanup().
 func setRestrictiveDACL(fileHandle windows.Handle) error {
-	currentSID, err := currentUserSID()
+	dacl, err := buildRestrictiveDACL()
 	if err != nil {
-		return fmt.Errorf("current user sid: %w", err)
-	}
-	systemSID, err := windows.StringToSid("S-1-5-18")
-	if err != nil {
-		return fmt.Errorf("system sid: %w", err)
-	}
-	adminSID, err := windows.StringToSid("S-1-5-32-544")
-	if err != nil {
-		return fmt.Errorf("admin sid: %w", err)
-	}
-	entries := []windows.EXPLICIT_ACCESS{
-		explicitAccessAllow(currentSID, windows.TRUSTEE_IS_USER, windows.GENERIC_ALL),
-		explicitAccessAllow(systemSID, windows.TRUSTEE_IS_WELL_KNOWN_GROUP, windows.GENERIC_ALL),
-		explicitAccessAllow(adminSID, windows.TRUSTEE_IS_GROUP, windows.GENERIC_ALL),
-	}
-	dacl, err := windows.ACLFromEntries(entries, nil)
-	if err != nil {
-		return fmt.Errorf("acl from entries: %w", err)
+		return err
 	}
 	return windows.SetSecurityInfo(
 		fileHandle,
@@ -423,6 +406,65 @@ func setRestrictiveDACL(fileHandle windows.Handle) error {
 		dacl,
 		nil,
 	)
+}
+
+// setRestrictiveDACLByPath is the path-based variant of
+// setRestrictiveDACL. Same DACL ({current-user, LocalSystem,
+// BuiltinAdministrators} only + PROTECTED_DACL) but routed via
+// SetNamedSecurityInfo so callers don't need a handle opened with
+// WRITE_DAC access. Used by the unhardened-fallback writer
+// (client_write_fallback_windows.go) where the file was created via
+// os.CreateTemp — that path doesn't request WRITE_DAC, and reopening
+// with the right access flags is more code than the path-based call.
+//
+// DACL persists across rename (it's per-file NTFS metadata, not a
+// directory entry), so the caller can SetNamedSecurityInfo on the
+// temp path before renaming to the final destination.
+func setRestrictiveDACLByPath(path string) error {
+	dacl, err := buildRestrictiveDACL()
+	if err != nil {
+		return err
+	}
+	return windows.SetNamedSecurityInfo(
+		path,
+		windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+		nil,
+		nil,
+		dacl,
+		nil,
+	)
+}
+
+// buildRestrictiveDACL constructs the {current-user, LocalSystem,
+// BuiltinAdministrators}-only DACL used by both setRestrictiveDACL
+// (handle-based) and setRestrictiveDACLByPath (path-based). Kept as
+// a single source of truth so the unhardened-fallback path can't
+// accidentally drift to a more permissive ACL than the hardened
+// pipeline.
+func buildRestrictiveDACL() (*windows.ACL, error) {
+	currentSID, err := currentUserSID()
+	if err != nil {
+		return nil, fmt.Errorf("current user sid: %w", err)
+	}
+	systemSID, err := windows.StringToSid("S-1-5-18")
+	if err != nil {
+		return nil, fmt.Errorf("system sid: %w", err)
+	}
+	adminSID, err := windows.StringToSid("S-1-5-32-544")
+	if err != nil {
+		return nil, fmt.Errorf("admin sid: %w", err)
+	}
+	entries := []windows.EXPLICIT_ACCESS{
+		explicitAccessAllow(currentSID, windows.TRUSTEE_IS_USER, windows.GENERIC_ALL),
+		explicitAccessAllow(systemSID, windows.TRUSTEE_IS_WELL_KNOWN_GROUP, windows.GENERIC_ALL),
+		explicitAccessAllow(adminSID, windows.TRUSTEE_IS_GROUP, windows.GENERIC_ALL),
+	}
+	dacl, err := windows.ACLFromEntries(entries, nil)
+	if err != nil {
+		return nil, fmt.Errorf("acl from entries: %w", err)
+	}
+	return dacl, nil
 }
 
 // explicitAccessAllow builds an EXPLICIT_ACCESS entry that ALLOWs the
