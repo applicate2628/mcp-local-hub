@@ -9,43 +9,99 @@ import (
 	"testing"
 )
 
-// TestSecureWriteWithOperatorOpt_GateRejectionSurfacesEnvHint pins
-// issue #161 P1 closure: when SecureWriteClientConfig hits the
-// parent-dir gate AND the operator has NOT opted in, the wrapper
-// must surface a clear error explicitly naming the env var. No
-// silent fallback.
-func TestSecureWriteWithOperatorOpt_GateRejectionSurfacesEnvHint(t *testing.T) {
-	// Use t.TempDir() — on Windows it inherits %TEMP%'s
-	// Authenticated Users DACL; on POSIX it's 0755 with $TMPDIR
-	// inheritance. Either way the parent-dir gate rejects.
-	t.Setenv(AllowUnhardenedClientWriteEnv, "") // explicit opt-out
+// TestSecureWriteWithOperatorOpt_DefaultRelaxOnGateFailure pins the
+// v0.4.0 flip: when SecureWriteClientConfig hits the parent-dir gate
+// AND neither env var is set, the wrapper FALLS BACK to the
+// symlink-refusing temp+rename writer by default. Solo-developer
+// Windows hosts (the common case) no longer need to opt in.
+//
+// Pre-v0.4.0 behavior (strict by default, opt-in to relax) is now
+// reversed; the pre-v0.4.0 test that pinned the strict-by-default
+// path moved to TestSecureWriteWithOperatorOpt_StrictModeRequired
+// below.
+func TestSecureWriteWithOperatorOpt_DefaultRelaxOnGateFailure(t *testing.T) {
+	t.Setenv(AllowUnhardenedClientWriteEnv, "")    // no legacy opt-in
+	t.Setenv(RequireSingleUserHomeEnv, "")         // no strict opt-in
+
+	dst := filepath.Join(t.TempDir(), "client.json")
+	want := []byte(`{"servers":{"x":1}}`)
+	err := secureWriteWithOperatorOpt(dst, want)
+	if err != nil {
+		// On a host where t.TempDir() happens to satisfy the strict
+		// gate (clean 0700 tmpdir owned by test user), the underlying
+		// SecureWriteClientConfig succeeded and there was no gate
+		// rejection to relax — the wrapper still returns nil and the
+		// write still landed. So failure here is real.
+		t.Fatalf("default-relax should fall back on gate failure (or succeed strict-path); got err: %v", err)
+	}
+	got, readErr := os.ReadFile(dst)
+	if readErr != nil {
+		t.Fatalf("read written file: %v", readErr)
+	}
+	if string(got) != string(want) {
+		t.Errorf("written contents = %q, want %q", got, want)
+	}
+	if runtime.GOOS != "windows" {
+		if info, _ := os.Stat(dst); info != nil && (info.Mode().Perm()&0o077) != 0 {
+			t.Errorf("written file mode %v has group/world bits; fallback should write 0600", info.Mode())
+		}
+	}
+}
+
+// TestSecureWriteWithOperatorOpt_StrictModeRequired pins the
+// opt-IN-to-strict branch: when MCPHUB_REQUIRE_SINGLE_USER_HOME=1
+// is set, a parent-dir gate failure surfaces an error and does NOT
+// fall back to the unhardened write. This is the corp-managed /
+// multi-tenant posture explicitly chosen by the operator.
+func TestSecureWriteWithOperatorOpt_StrictModeRequired(t *testing.T) {
+	t.Setenv(RequireSingleUserHomeEnv, "1") // explicit strict
+	t.Setenv(AllowUnhardenedClientWriteEnv, "") // legacy opt-in inert
 
 	dst := filepath.Join(t.TempDir(), "client.json")
 	err := secureWriteWithOperatorOpt(dst, []byte(`{"servers":{}}`))
 	if err == nil {
-		// On a host where t.TempDir() happens to satisfy the gate
-		// (a clean 0700 tmpdir owned by the test user), the test
-		// is not meaningful — skip it instead of false-passing.
-		t.Skip("t.TempDir() unexpectedly satisfied the parent-dir gate; cannot pin opt-out behavior on this host")
+		t.Skip("t.TempDir() unexpectedly satisfied the parent-dir gate; cannot pin strict-mode rejection on this host")
 	}
 	if !errors.Is(err, ErrSecureWriteParentInsecure) {
 		t.Fatalf("error not wrapped with ErrSecureWriteParentInsecure: %v", err)
 	}
-	if !strings.Contains(err.Error(), AllowUnhardenedClientWriteEnv) {
-		t.Errorf("error must mention %q so operator sees the opt-in escape hatch; got %v",
-			AllowUnhardenedClientWriteEnv, err)
+	if !strings.Contains(err.Error(), RequireSingleUserHomeEnv) {
+		t.Errorf("error must mention %q so operator knows which env var enforces this; got %v",
+			RequireSingleUserHomeEnv, err)
 	}
-	// File MUST NOT exist — the wrapper refused to write.
 	if _, statErr := os.Stat(dst); !os.IsNotExist(statErr) {
-		t.Errorf("file at %s exists despite opt-out; stat err = %v", dst, statErr)
+		t.Errorf("file at %s exists despite strict-mode rejection; stat err = %v", dst, statErr)
+	}
+}
+
+// TestSecureWriteWithOperatorOpt_StrictBeatsLegacyAllow pins the
+// precedence: when BOTH env vars are set, strict wins (defensive —
+// operators who want corp-managed posture should not be silently
+// downgraded by a stale legacy opt-in in their shell profile).
+func TestSecureWriteWithOperatorOpt_StrictBeatsLegacyAllow(t *testing.T) {
+	t.Setenv(RequireSingleUserHomeEnv, "1")     // strict
+	t.Setenv(AllowUnhardenedClientWriteEnv, "1") // legacy relax
+	dst := filepath.Join(t.TempDir(), "client.json")
+	err := secureWriteWithOperatorOpt(dst, []byte(`{"servers":{}}`))
+	if err == nil {
+		t.Skip("t.TempDir() unexpectedly satisfied the parent-dir gate; cannot pin precedence on this host")
+	}
+	if !errors.Is(err, ErrSecureWriteParentInsecure) {
+		t.Fatalf("strict-mode should reject even with legacy opt-in present; got %v", err)
+	}
+	if !strings.Contains(err.Error(), RequireSingleUserHomeEnv) {
+		t.Errorf("error must mention %q (strict wins); got %v", RequireSingleUserHomeEnv, err)
 	}
 }
 
 // TestSecureWriteWithOperatorOpt_GateRejectionFallsBackWhenOpted
-// pins the opt-in branch: same path that rejected above now
-// succeeds via os.WriteFile when the env var is set.
+// pins the legacy opt-in branch: same path that rejects under
+// strict mode now succeeds via fallback when MCPHUB_ALLOW_
+// UNHARDENED_CLIENT_WRITE=1 is set. Backward compat for operators
+// who already had the env var set pre-v0.4.0.
 func TestSecureWriteWithOperatorOpt_GateRejectionFallsBackWhenOpted(t *testing.T) {
 	t.Setenv(AllowUnhardenedClientWriteEnv, "1")
+	t.Setenv(RequireSingleUserHomeEnv, "") // legacy opt-in path
 
 	dst := filepath.Join(t.TempDir(), "client.json")
 	want := []byte(`{"servers":{"x":1}}`)
@@ -102,6 +158,39 @@ func TestOperatorAllowedUnhardenedClientWrite_AcceptsOneAndTrue(t *testing.T) {
 		got := operatorAllowedUnhardenedClientWrite()
 		if got != c.want {
 			t.Errorf("env=%q: operatorAllowedUnhardenedClientWrite() = %v, want %v",
+				c.val, got, c.want)
+		}
+	}
+}
+
+// TestOperatorRequiresSingleUserHome_AcceptsOneAndTrue mirrors the
+// AllowUnhardenedClientWrite env-var parsing contract for the
+// strict-mode opt-in introduced in v0.4.0. Anything other than
+// "1"/"true" (case-insensitive, trimmed) is false.
+func TestOperatorRequiresSingleUserHome_AcceptsOneAndTrue(t *testing.T) {
+	cases := []struct {
+		val  string
+		want bool
+	}{
+		{"1", true},
+		{"true", true},
+		{"True", true},
+		{"TRUE", true},
+		{"  1  ", true},
+		{"  true ", true},
+		{"", false},
+		{"0", false},
+		{"false", false},
+		{"no", false},
+		{"yes", false},
+		{"on", false},
+		{"garbage", false},
+	}
+	for _, c := range cases {
+		t.Setenv(RequireSingleUserHomeEnv, c.val)
+		got := operatorRequiresSingleUserHome()
+		if got != c.want {
+			t.Errorf("env=%q: operatorRequiresSingleUserHome() = %v, want %v",
 				c.val, got, c.want)
 		}
 	}

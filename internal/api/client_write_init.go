@@ -45,28 +45,69 @@ func init() {
 	clients.WriteConfigFile = secureWriteWithOperatorOpt
 }
 
-// AllowUnhardenedClientWriteEnv is the operator-explicit opt-in
-// for the unhardened client-config write path. When set to "1" or
-// "true" (case-insensitive) in the process environment,
-// SecureWriteClientConfig failures that originate from the
-// parent-dir DACL/mode gate fall back to a plain os.WriteFile with
-// mode 0600. The fallback is logged via the hub-mcp event log so
-// audit trails record the opt-in.
-//
-// The env var is intentionally verbose so operators can grep their
-// shell profile / scheduler scripts for it before opting in.
+// AllowUnhardenedClientWriteEnv is a legacy operator-explicit opt-in
+// for the unhardened client-config write path. Pre-v0.4.0 the
+// parent-dir DACL gate was STRICT by default, and this env var was
+// the only way to bypass it. v0.4.0 flips the default to RELAX (see
+// secureWriteWithOperatorOpt below), so this env var is now
+// effectively a no-op vs the default — kept for backward
+// compatibility with operators who already have it set in their
+// shell profile or scheduler scripts.
 const AllowUnhardenedClientWriteEnv = "MCPHUB_ALLOW_UNHARDENED_CLIENT_WRITE"
+
+// RequireSingleUserHomeEnv is the v0.4.0+ operator opt-in for the
+// STRICT parent-dir DACL/mode gate. Set to "1" or "true" (case-
+// insensitive) on corp-managed machines, shared hosts, or other
+// multi-tenant contexts where the parent-dir DACL check is the
+// authoritative security boundary. When unset, mcphub treats the
+// solo-developer Windows case as the common path and proceeds with
+// the symlink-refusing fallback when parent-dir is not single-user-
+// safe — see secureWriteWithOperatorOpt for rationale.
+const RequireSingleUserHomeEnv = "MCPHUB_REQUIRE_SINGLE_USER_HOME"
 
 // secureWriteWithOperatorOpt is the cross-package writer that
 // `clients.WriteConfigFile` resolves to in production. It first
 // attempts the hardened secure-write; on
 // ErrSecureWriteParentInsecure (Windows DACL or POSIX mode/owner
-// rejection at the parent dir gate) it either surfaces a clearer
-// error pointing operators at the opt-in env var, or — when the
-// opt-in is set — falls back to a symlink-refusing os.WriteFile
-// with mode 0600 and logs a warn event.
+// rejection at the parent dir gate) it either:
 //
-// Failure classes that propagate unchanged (the opt-in is scoped
+//   - returns the strict error when MCPHUB_REQUIRE_SINGLE_USER_HOME is
+//     set (multi-tenant / corp-managed posture), or
+//   - falls back to the symlink-refusing temp+atomic-rename writer
+//     and logs an info event (default v0.4.0+ posture for solo-dev
+//     Windows hosts).
+//
+// Default-relax rationale (v0.4.0):
+//
+// On solo-developer Windows hosts, the parent-dir DACL of
+// %USERPROFILE% routinely contains ACEs the operator did not place
+// there deliberately: Codex Sandbox local groups (CodexSandboxUsers),
+// AppContainer SIDs for UWP apps, orphan SIDs from old AD accounts
+// or prior hostnames, dev sandbox IDE installers, etc. The user
+// already has full write access via their own account, and ordinary
+// notepad/IDE writes to ~/.claude.json succeed — having mcphub
+// refuse on the same parent makes the tool look broken in real-world
+// conditions. The security guarantee for token-bearing client config
+// files comes from THREE layers, in priority order:
+//
+//  1. New file mode 0600 (Chmod after temp create, before rename).
+//     On Windows this translates to a DACL granting only the owner
+//     Read+Write — no inheritance from parent. Other principals on
+//     the parent's ACL do NOT propagate to the new file's ACL.
+//  2. Symlink refusal at the destination (Lstat before open, reject
+//     pre-existing symlink/reparse-point).
+//  3. Temp+atomic-rename (no TOCTOU window between create and
+//     publish).
+//
+// Layers 1+2+3 deliver "the file we just wrote is not readable by
+// other principals on this host" regardless of the parent dir's
+// historical ACE list. The parent-dir DACL gate is belt-and-
+// suspenders that only matters when the operator does NOT trust
+// their own admin of the parent dir's ACL — which is the
+// multi-tenant / corp-managed posture explicitly gated by
+// MCPHUB_REQUIRE_SINGLE_USER_HOME.
+//
+// Failure classes that propagate unchanged (the relax is scoped
 // narrowly to the parent-dir gate):
 //
 //   - open temp, write, rename, post-rename verify
@@ -75,12 +116,15 @@ const AllowUnhardenedClientWriteEnv = "MCPHUB_ALLOW_UNHARDENED_CLIENT_WRITE"
 //
 // codex bot r1 P1 closure (PR #165): the original opt-in path used
 // raw os.WriteFile, which silently follows symlinks. Even on the
-// opt-in lane we MUST refuse to write through a pre-existing
-// symlink/junction, otherwise an attacker on a shared host could
-// pre-create a symlink at the destination and harvest the token-
-// bearing content into a target of their choosing. The
-// fallbackWriteRefusingSymlink helper Lstats first and rejects
-// before opening.
+// relax lane we MUST refuse to write through a pre-existing
+// symlink/junction. The fallbackWriteRefusingSymlink helper Lstats
+// first and rejects before opening.
+//
+// Backward compatibility: operators who already had
+// MCPHUB_ALLOW_UNHARDENED_CLIENT_WRITE=1 set get identical behavior
+// (the relax fires either way — old-style explicit opt-in OR new-
+// style default). Operators on corp-managed hosts who want the
+// strict gate must now opt IN via MCPHUB_REQUIRE_SINGLE_USER_HOME=1.
 func secureWriteWithOperatorOpt(path string, contents []byte) error {
 	err := SecureWriteClientConfig(path, contents)
 	if err == nil {
@@ -89,13 +133,21 @@ func secureWriteWithOperatorOpt(path string, contents []byte) error {
 	if !errors.Is(err, ErrSecureWriteParentInsecure) {
 		return err
 	}
-	if !operatorAllowedUnhardenedClientWrite() {
-		return fmt.Errorf("%w; this path can be unblocked by setting %s=1 (loses parent-dir DACL/mode protection — only set this if the host is under your sole control and corp-policy DACLs cannot be tightened)",
-			err, AllowUnhardenedClientWriteEnv)
+	if operatorRequiresSingleUserHome() {
+		return fmt.Errorf("%w; %s=1 is set, so the strict parent-dir gate is enforced (unset that env var, or tighten the parent's DACL to remove the offending principal, to proceed)",
+			err, RequireSingleUserHomeEnv)
 	}
-	if logErr := LogHubMcpEvent("warn", "client-write-unhardened-fallback", map[string]any{
+	reason := "default-relax-on-solo-host"
+	if operatorAllowedUnhardenedClientWrite() {
+		// Legacy explicit opt-in produces the same fallback as
+		// default; distinguish in the audit log so operators can
+		// grep their shell profile after upgrade and remove the
+		// now-redundant env var.
+		reason = "legacy opt-in via " + AllowUnhardenedClientWriteEnv + " (now redundant — same as default)"
+	}
+	if logErr := LogHubMcpEvent("info", "client-write-unhardened-fallback", map[string]any{
 		"path":   path,
-		"reason": "operator opt-in via " + AllowUnhardenedClientWriteEnv,
+		"reason": reason,
 		"err":    err.Error(),
 	}); logErr != nil {
 		// Best-effort: never swallow the original failure path; the
@@ -177,8 +229,32 @@ func fallbackWriteRefusingSymlink(path string, contents []byte) error {
 // AllowUnhardenedClientWriteEnv env var. Accepts "1" and "true"
 // case-insensitively; everything else (including unset, "0",
 // "false", "no", garbage) returns false.
+//
+// Post-v0.4.0 the default is already "fall back to unhardened on
+// parent-dir gate failure", so this helper exists only to log the
+// "legacy opt-in" reason in audit events — operators who had the
+// env var set pre-v0.4.0 get the same behavior, distinguished in the
+// log so they can clean up their shell profile.
 func operatorAllowedUnhardenedClientWrite() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(AllowUnhardenedClientWriteEnv))) {
+	case "1", "true":
+		return true
+	}
+	return false
+}
+
+// operatorRequiresSingleUserHome reports whether the operator has
+// explicitly opted INTO the strict parent-dir DACL/mode gate via the
+// RequireSingleUserHomeEnv env var. Accepts "1" and "true" case-
+// insensitively; everything else (including unset) returns false,
+// which means v0.4.0+ default (relax-on-gate-failure) applies.
+//
+// Operators set this on corp-managed machines, shared hosts, build
+// servers, CI runners, or anywhere multi-tenant trust boundaries
+// require the strict gate. Solo-developer Windows hosts should leave
+// it unset — see secureWriteWithOperatorOpt above for rationale.
+func operatorRequiresSingleUserHome() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(RequireSingleUserHomeEnv))) {
 	case "1", "true":
 		return true
 	}
