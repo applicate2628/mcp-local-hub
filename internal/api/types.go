@@ -117,6 +117,25 @@ type ClientEntry struct {
 type ScanResult struct {
 	At      time.Time   `json:"at"`
 	Entries []ScanEntry `json:"entries"`
+
+	// ClientConfigPresence reports per-client config file state,
+	// INDEPENDENT of any server's per-entry presence. Bug-bash A2 (#13)
+	// closure: before this field, the UI inferred "client installed"
+	// from "client appears in at least one entry's client_presence",
+	// which treated an existing config file with empty mcpServers (e.g.,
+	// after wholesale demigrate) as "not installed" and disabled the
+	// entire client column — a state-machine deadlock.
+	//
+	// Keys are client names (claude-code, codex-cli, cursor, vscode,
+	// gemini-cli, qwen-cli, antigravity). Values:
+	//   "ok"      config file exists, stat succeeded.
+	//   "missing" config file does not exist on disk.
+	//   "error"   config file exists but stat failed (permissions, etc.).
+	//
+	// Frontend uses this to render an "available (enabled, unchecked)"
+	// matrix cell for a manifested server when the cell's client is "ok"
+	// but absent from that entry's per-server client_presence.
+	ClientConfigPresence map[string]string `json:"client_config_presence,omitempty"`
 }
 
 // BackupInfo describes one file in the backup area.

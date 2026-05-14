@@ -1,4 +1,10 @@
-import type { ClientPresence, Routing, ScanResult, ServerRow } from "../types";
+import type {
+  ClientConfigState,
+  ClientPresence,
+  Routing,
+  ScanResult,
+  ServerRow,
+} from "../types";
 
 // isHubLoopback reports whether an http endpoint URL targets the local hub.
 // MUST parse the URL and compare hostname — a substring test like
@@ -17,15 +23,44 @@ export function isHubLoopback(endpoint: string): boolean {
   }
 }
 
-// perClientRouting maps ClientPresence into the per-cell routing tag that
-// the Servers matrix expects. Keeps the plan's contract:
-//   "via-hub"       → checked cell
-//   "not-installed" → disabled cell
-//   everything else → unchecked, enabled cell (can be migrated).
+// KNOWN_CLIENTS enumerates every client column the Servers matrix
+// renders. Must stay in sync with Servers.tsx::CLIENTS so a manifested
+// server with no per-entry presence for, say, claude-code still emits a
+// cell with the right "available" / "not-installed" / "unsupported"
+// classification driven by `client_config_presence`.
+const KNOWN_CLIENTS = [
+  "claude-code",
+  "codex-cli",
+  "cursor",
+  "vscode",
+  "gemini-cli",
+  "qwen-cli",
+  "antigravity",
+] as const;
+
+// perClientRouting maps a server's per-entry client_presence onto per-cell
+// routing tags. The cell's tag drives the checkbox visual (checked/
+// unchecked) AND interactivity (enabled/disabled).
+//
+//   "via-hub"       → checked, enabled (uncheck + Apply = demigrate).
+//   "direct"        → unchecked, enabled (check + Apply = migrate).
+//   "available"     → unchecked, enabled — client config file exists,
+//                     no entry for this server yet (operator can
+//                     migrate). Bug-bash A2 (#13) closure.
+//   "not-installed" → unchecked, disabled — client config absent.
+//   "unsupported"   → unchecked, disabled — client cannot host this
+//                     server via the hub (e.g., per-session servers).
+//
+// clientConfigPresence supplies the per-client targetability info that
+// per-entry client_presence cannot — an empty `mcpServers: {}` in
+// .claude.json gives no per-entry signal that claude-code is targetable,
+// only the file's existence does.
 export function perClientRouting(
   clientPresence: Record<string, ClientPresence>,
+  clientConfigPresence: Record<string, ClientConfigState> = {},
 ): Record<string, Routing> {
   const routing: Record<string, Routing> = {};
+  // First pass: signals from per-entry client_presence (existing entries).
   for (const [client, entry] of Object.entries(clientPresence)) {
     const transport = entry?.transport;
     const endpoint = entry?.endpoint ?? "";
@@ -39,6 +74,16 @@ export function perClientRouting(
       routing[client] = "direct";
     }
   }
+  // Second pass: fill cells for known clients NOT in client_presence,
+  // using client_config_presence as the source of truth. If the client
+  // config file exists ("ok"), the cell is "available" — operator can
+  // migrate this server into that client. Otherwise the cell is
+  // "not-installed" (preserves the pre-fix disabled-checkbox visual).
+  for (const client of KNOWN_CLIENTS) {
+    if (client in routing) continue;
+    const state = clientConfigPresence[client];
+    routing[client] = state === "ok" ? "available" : "not-installed";
+  }
   return routing;
 }
 
@@ -46,9 +91,10 @@ export function perClientRouting(
 // Sorting by name matches the legacy vanilla-JS render order.
 export function collectServers(scan: ScanResult | null | undefined): ServerRow[] {
   const entries = scan?.entries ?? [];
+  const ccp = scan?.client_config_presence ?? {};
   const out: ServerRow[] = entries.map((e) => ({
     name: e.name,
-    routing: perClientRouting(e.client_presence ?? {}),
+    routing: perClientRouting(e.client_presence ?? {}, ccp),
   }));
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }

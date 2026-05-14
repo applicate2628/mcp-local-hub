@@ -89,3 +89,58 @@ describe("collectServers", () => {
     expect(out[0].routing["claude-code"]).toBe("via-hub");
   });
 });
+
+// Bug-bash A2 (#13) closure: client_config_presence drives "available"
+// vs "not-installed" for clients absent from per-entry client_presence.
+// Without this, a client with `mcpServers: {}` was indistinguishable
+// from "client not on this host" and the whole column was disabled.
+describe("perClientRouting with client_config_presence", () => {
+  it("tags missing-from-presence + config 'ok' as available", () => {
+    const r = perClientRouting({}, { "claude-code": "ok" });
+    expect(r["claude-code"]).toBe("available");
+  });
+
+  it("tags missing-from-presence + config 'missing' as not-installed", () => {
+    const r = perClientRouting({}, { "claude-code": "missing" });
+    expect(r["claude-code"]).toBe("not-installed");
+  });
+
+  it("tags missing-from-presence + config 'error' as not-installed", () => {
+    const r = perClientRouting({}, { "claude-code": "error" });
+    expect(r["claude-code"]).toBe("not-installed");
+  });
+
+  it("does NOT override an existing per-entry signal with config presence", () => {
+    const r = perClientRouting(
+      { "claude-code": { transport: "http", endpoint: "http://127.0.0.1:9100/mcp" } },
+      { "claude-code": "ok" },
+    );
+    expect(r["claude-code"]).toBe("via-hub");
+  });
+
+  it("fills every known client column even with empty client_presence", () => {
+    const r = perClientRouting({}, {});
+    for (const c of [
+      "claude-code",
+      "codex-cli",
+      "cursor",
+      "vscode",
+      "gemini-cli",
+      "qwen-cli",
+      "antigravity",
+    ]) {
+      expect(r[c]).toBe("not-installed");
+    }
+  });
+
+  it("collectServers threads client_config_presence to perClientRouting", () => {
+    const scan: ScanResult = {
+      at: "",
+      entries: [{ name: "godbolt", client_presence: {} }],
+      client_config_presence: { "claude-code": "ok", vscode: "missing" },
+    };
+    const out = collectServers(scan);
+    expect(out[0].routing["claude-code"]).toBe("available");
+    expect(out[0].routing["vscode"]).toBe("not-installed");
+  });
+});
