@@ -284,6 +284,47 @@ func init() {
 		return pid, ram, uptime, true
 	}
 
+	// processImageByPID returns the image basename (e.g. "mcphub.exe")
+	// for a given PID via `wmic process where ProcessId=N get Name`.
+	// Used by portHeldByOurDaemon (install.go) for the three-part
+	// identity gate that distinguishes "our running daemon owns this
+	// port" from "a foreign PID stole the port while a same-named
+	// scheduler task happens to be Running" (bot r1 P1 closure on
+	// PR #180 / bug-bash A6 #6).
+	processImageByPID = func(pid int) (string, bool) {
+		if pid <= 0 {
+			return "", false
+		}
+		cmd := exec.Command("wmic", "process", "where",
+			fmt.Sprintf("ProcessId=%d", pid),
+			"get", "Name", "/format:csv")
+		process.NoConsole(cmd)
+		out, err := cmd.Output()
+		if err != nil {
+			return "", false
+		}
+		// wmic CSV format: header line + blank + data line:
+		//   Node,Name
+		//   \r
+		//   HOSTNAME,mcphub.exe\r
+		for _, line := range strings.Split(string(out), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "Node,") {
+				continue
+			}
+			fields := strings.Split(line, ",")
+			if len(fields) < 2 {
+				continue
+			}
+			name := strings.TrimSpace(fields[len(fields)-1])
+			if name == "" {
+				continue
+			}
+			return name, true
+		}
+		return "", false
+	}
+
 	// Batch variant: one netstat + one wmic for N ports.
 	lookupProcessBatch = func(ports []int) map[int]struct {
 		PID       int
