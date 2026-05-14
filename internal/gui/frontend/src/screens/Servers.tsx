@@ -315,14 +315,21 @@ export function ServersScreen() {
   const applyDisabled = applying || dirty.size === 0;
 
   // Bug-bash A4 (#9) closure: count cells whose last Apply failed or
-  // was gated. These cells are still in `dirty` (kept for retry) AND
-  // present in `outcomes`. The dedicated counter drives a separate
-  // "Retry N failed" affordance so the operator doesn't have to
-  // toggle-back-and-forth to know a retry is queued.
+  // was gated AND that are still in the dirty queue. Bot r1 P2 fix:
+  // counting from `outcomes` alone reads stale entries when the user
+  // toggles a failed cell back to its initial state — toggleCell
+  // prunes from `dirty` but leaves the entry in `outcomes`, so the
+  // button would falsely advertise "Apply changes (incl. retry N)"
+  // while Apply is disabled because dirty.size === 0. Intersect both
+  // maps so the label reflects actionable state only.
   let retryPendingCount = 0;
-  for (const [, clientOutcomes] of outcomes) {
-    for (const [, o] of clientOutcomes) {
-      if (o === "failed" || o === "gated") retryPendingCount++;
+  for (const [server, clientOutcomes] of outcomes) {
+    const stillDirty = dirty.get(server);
+    if (!stillDirty) continue;
+    for (const [client, o] of clientOutcomes) {
+      if ((o === "failed" || o === "gated") && stillDirty.has(client)) {
+        retryPendingCount++;
+      }
     }
   }
 
