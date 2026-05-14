@@ -7,7 +7,36 @@ base_args:
   - "--directory"
   - "${HOME}/.local/mcp-servers/GDB-MCP"
   - "python"
-  - "server.py"
+  - "-c"
+  # Inline launcher: installs a logging filter that drops GDB-MCP's
+  # cosmetic "LLDB Python module not available" warning before
+  # exec'ing server.py. GDB-MCP unconditionally `import lldb`s in
+  # modules/lldb/sessionManager.py; when bindings aren't available
+  # on the uv-managed Python venv (typical on Windows where lldb
+  # ships only inside MSYS2's python3.14 site-packages), the warning
+  # spams `[subproc stderr]` on every daemon start. Aggregation only:
+  # the filter is OUR code under mcphub MPL, GDB-MCP source is
+  # untouched (it stays GPL-3.0 in the user's clone). The matching
+  # LLDB capability is already served by mcphub's own native lldb
+  # daemon (servers/lldb + internal/lldb/bridge.go), so GDB-MCP's
+  # lldb-mode is redundant on this host regardless. v0.4.1 #B-lldb-noise.
+  #
+  # Filter mechanics: basicConfig FIRST so we own the root handler,
+  # then attach the filter to every handler. When GDB-MCP's
+  # server.py:14 calls basicConfig again it no-ops (per stdlib
+  # docs: "subsequent calls are a no-op once handlers exist"), so
+  # our filter is the only one in the chain when child loggers
+  # propagate their records upward.
+  - |
+    import logging
+    class _F(logging.Filter):
+        def filter(self, r):
+            return "LLDB Python module not available" not in r.getMessage()
+    logging.basicConfig(level=logging.INFO)
+    for _h in logging.getLogger().handlers:
+        _h.addFilter(_F())
+    import runpy
+    runpy.run_path("server.py", run_name="__main__")
 
 # GDB-MCP is a multi-debugger MCP server (gdb + lldb submodules) with built-in
 # session management (modules/gdb/sessionManager.py + modules/lldb/sessionManager.py).
