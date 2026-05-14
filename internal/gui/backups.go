@@ -5,12 +5,24 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/clients"
 )
+
+// isKnownClient reports whether name is a member of the supported-
+// clients registry. Pure membership check — does NOT invoke
+// ConfigPathForName so it can't return a runtime error. Used by the
+// per-client backups handlers to split "input bug" (400 unknown-client)
+// from "server fault" (500 runtime failure). Bot r2 P2 closure on
+// PR #183.
+func isKnownClient(name string) bool {
+	return slices.Contains(clients.SupportedClientNames(), name)
+}
 
 // backupsAPI is the narrow surface used by /api/backups handlers.
 // CleanInClient + CleanPreviewInClient narrow the prune set to a single
@@ -159,18 +171,23 @@ func (s *Server) backupsCleanHandler(w http.ResponseWriter, r *http.Request) {
 	// managed client" semantic so existing operator workflows keep
 	// working unchanged.
 	//
-	// Bot r1 P2 closure (PR #183): split client-validation (400) from
-	// runtime/filesystem failure (500). Validate the client id BEFORE
-	// invoking the per-client cleaner so any subsequent error must be
-	// an I/O failure on a known client (e.g. directory disappeared,
-	// permission denied) — those return 500 BACKUPS_CLEAN_FAILED, not
-	// 400 BACKUPS_CLEAN_UNKNOWN_CLIENT.
+	// Bot r1 P2 + r2 P2 closure (PR #183): split client-validation
+	// (400) from runtime/filesystem failure (500). Use a pure
+	// registry-membership check via clients.SupportedClientNames so
+	// we don't conflate "client name not in registry" (input bug,
+	// 400) with "ConfigPathForName had a runtime failure such as
+	// os.UserHomeDir() returning ENOENT" (server-side fault, 500).
+	// Any subsequent error from CleanInClient (including its own
+	// ConfigPathForName call hitting that same runtime failure) lands
+	// in the 500 BACKUPS_CLEAN_FAILED branch below.
 	client := r.URL.Query().Get("client")
 	var removed []string
 	var err error
 	if client != "" {
-		if _, vErr := clients.ConfigPathForName(client); vErr != nil {
-			writeAPIError(w, vErr, http.StatusBadRequest, "BACKUPS_CLEAN_UNKNOWN_CLIENT")
+		if !isKnownClient(client) {
+			writeAPIError(w,
+				fmt.Errorf("unknown client %q (expected %s)", client, strings.Join(clients.SupportedClientNames(), " | ")),
+				http.StatusBadRequest, "BACKUPS_CLEAN_UNKNOWN_CLIENT")
 			return
 		}
 		removed, err = s.backups.CleanInClient(client, keepN)
@@ -215,15 +232,17 @@ func (s *Server) backupsCleanPreviewHandler(w http.ResponseWriter, r *http.Reque
 	// the preview to one client so per-client "would-prune" counts
 	// can render alongside each client's backups group.
 	//
-	// Bot r1 P2 closure (PR #183) symmetry with the clean handler:
-	// validate the client id FIRST so unknown-client returns 400
-	// while filesystem failures (BackupsListIn read-dir errors, etc.)
-	// return 500 BACKUPS_PREVIEW_FAILED.
+	// Bot r1 P2 + r2 P2 closure (PR #183) symmetry: pure registry-
+	// membership check via isKnownClient (no ConfigPathForName runtime
+	// surface) splits "unknown-client" 400 from "I/O failure on a
+	// known client" 500.
 	client := r.URL.Query().Get("client")
 	var paths []string
 	if client != "" {
-		if _, vErr := clients.ConfigPathForName(client); vErr != nil {
-			writeAPIError(w, vErr, http.StatusBadRequest, "BACKUPS_PREVIEW_UNKNOWN_CLIENT")
+		if !isKnownClient(client) {
+			writeAPIError(w,
+				fmt.Errorf("unknown client %q (expected %s)", client, strings.Join(clients.SupportedClientNames(), " | ")),
+				http.StatusBadRequest, "BACKUPS_PREVIEW_UNKNOWN_CLIENT")
 			return
 		}
 		paths, err = s.backups.CleanPreviewInClient(client, n)
