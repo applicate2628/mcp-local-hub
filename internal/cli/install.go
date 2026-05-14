@@ -599,9 +599,14 @@ var (
 //     NOT abort the upgrade; rare cases (Stuck Force-killed daemon
 //     etc.) still need the binary copy to succeed.
 //
-//  3. Bootstrap. Copies the currently-running binary (os.Executable())
-//     to ~/.local/bin/mcphub.exe via tempfile + atomic rename. Already
-//     existed for `mcphub setup`; reused verbatim here.
+//  3. Copy-only bootstrap. Copies the currently-running binary
+//     (os.Executable()) to ~/.local/bin/mcphub.exe via tempfile +
+//     atomic rename. Reuses the existing `mcphub setup` copy helper
+//     but SKIPS PATH registration (bot r2 P1 closure on PR #181):
+//     `Bootstrap` does both copy AND `ensureOnPath`, and a HKCU PATH
+//     write hiccup during upgrade would propagate up, skip RestartAll,
+//     and leave the daemon fleet down. PATH is a one-time setup
+//     concern handled by `mcphub setup`, not upgrade.
 //
 //  4. RestartAll. /Run every paused task. The new tasks read XML that
 //     references ~/.local/bin/mcphub.exe by absolute path, so they
@@ -726,12 +731,14 @@ func upgradeStopAll(a *api.API) ([]api.RestartResult, error) {
 }
 
 // upgradeBootstrap routes through upgradeBootstrapFn if set, otherwise
-// the real Bootstrap (which copies os.Executable() → canonical path).
+// the copy-only helper (bot r2 P1 closure on PR #181: skip ensureOnPath
+// so a HKCU PATH write hiccup doesn't take down the daemon fleet during
+// upgrade). PATH registration stays in `mcphub setup`'s purview.
 func upgradeBootstrap(w io.Writer) error {
 	if upgradeBootstrapFn != nil {
 		return upgradeBootstrapFn(w)
 	}
-	return Bootstrap(w)
+	return bootstrapCopyOnly(w)
 }
 
 // upgradeRestartAll routes through the upgradeRestartAllFn seam if

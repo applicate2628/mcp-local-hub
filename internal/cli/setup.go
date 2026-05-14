@@ -198,28 +198,46 @@ func dirOnPath(dir, pathEnv string) bool {
 // Exported so `mcphub install` can invoke the same flow when it detects that
 // mcphub is not yet on PATH and stdin is a terminal.
 func Bootstrap(w io.Writer) error {
+	if err := bootstrapCopyOnly(w); err != nil {
+		return err
+	}
 	target, err := setupTargetPath()
 	if err != nil {
 		return fmt.Errorf("resolve target path: %w", err)
 	}
-	targetDir := filepath.Dir(target)
+	// Platform-specific PATH registration; prints its own success line.
+	return ensureOnPath(w, filepath.Dir(target))
+}
 
+// bootstrapCopyOnly does the binary-copy half of Bootstrap WITHOUT
+// touching PATH. Used by `mcphub install --upgrade` (bot r2 P1 closure
+// on PR #181): an upgrade-time PATH registration failure (HKCU write
+// contention, registry ACL issue, transient WM_SETTINGCHANGE broadcast
+// hiccup) would otherwise leave daemons stopped and the fleet down,
+// since `runInstallUpgrade` propagates the bootstrap error and skips
+// RestartAll. PATH registration is a one-time setup concern, not an
+// upgrade concern \u2014 the canonical path has already been on PATH since
+// the operator's first `mcphub setup`, and re-registering on every
+// upgrade adds zero value while introducing a new fail-stop. If PATH
+// ever falls out, the operator runs `mcphub setup` to reconcile it.
+func bootstrapCopyOnly(w io.Writer) error {
+	target, err := setupTargetPath()
+	if err != nil {
+		return fmt.Errorf("resolve target path: %w", err)
+	}
 	curExe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve current executable: %w", err)
 	}
-
 	if samePath(curExe, target) {
 		fmt.Fprintf(w, "\u2713 mcphub already at %s (no copy needed)\n", target)
-	} else {
-		if err := copyExe(curExe, target); err != nil {
-			return err
-		}
-		fmt.Fprintf(w, "\u2713 mcphub installed at %s\n", target)
+		return nil
 	}
-
-	// Platform-specific PATH registration; prints its own success line.
-	return ensureOnPath(w, targetDir)
+	if err := copyExe(curExe, target); err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "\u2713 mcphub installed at %s\n", target)
+	return nil
 }
 
 // newSetupCmdReal returns the `mcphub setup` command.
