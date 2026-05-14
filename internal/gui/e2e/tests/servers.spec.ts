@@ -50,6 +50,7 @@ test.describe("servers", () => {
       entries: [
         {
           name: "demo",
+          manifest_exists: true,
           client_presence: {
             "claude-code": { transport: "relay", endpoint: "" },
             "codex-cli":   { transport: "absent", endpoint: "" },
@@ -61,6 +62,7 @@ test.describe("servers", () => {
       entries: [
         {
           name: "demo",
+          manifest_exists: true,
           client_presence: {
             "claude-code": { transport: "stdio", endpoint: "" },
             "codex-cli":   { transport: "absent", endpoint: "" },
@@ -131,12 +133,14 @@ test.describe("servers", () => {
       entries: [
         {
           name: "a",
+          manifest_exists: true,
           client_presence: {
             "claude-code": { transport: "stdio", endpoint: "" }, // direct stdio → queued migrate
           },
         },
         {
           name: "b",
+          manifest_exists: true,
           client_presence: {
             "claude-code": { transport: "relay", endpoint: "" }, // via-hub → queued demigrate
           },
@@ -170,6 +174,7 @@ test.describe("servers", () => {
       entries: [
         {
           name: "demo",
+          manifest_exists: true,
           client_presence: {
             "claude-code": { transport: "relay", endpoint: "" },
           },
@@ -218,6 +223,7 @@ test.describe("servers", () => {
       entries: [
         {
           name: "demo",
+          manifest_exists: true,
           client_presence: { "claude-code": { transport: "relay", endpoint: "" } },
         },
       ],
@@ -245,12 +251,14 @@ test.describe("servers", () => {
       entries: [
         {
           name: "A",
+          manifest_exists: true,
           client_presence: {
             "claude-code": { transport: "relay", endpoint: "" }, // via-hub → queued demigrate (WILL FAIL)
           },
         },
         {
           name: "B",
+          manifest_exists: true,
           client_presence: {
             "claude-code": { transport: "stdio", endpoint: "" }, // direct stdio → queued migrate (GATED)
             "codex-cli":   { transport: "stdio", endpoint: "" }, // direct stdio → queued migrate (SUCCESS)
