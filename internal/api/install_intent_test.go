@@ -25,6 +25,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/config"
 )
@@ -64,18 +65,24 @@ func installRecordingAudit(t *testing.T, r *recordingAuditWriter) {
 	t.Cleanup(func() { appendIntentAuditFn = orig })
 }
 
-// stopFakeKillCounter installs a no-op replacement for lookupProcess so
-// the kill path becomes a counted no-op. Returns a pointer to the
-// counter so tests can assert on it. Restoration is automatic.
+// stopFakeKillCounter installs a no-op replacement for the kill-by-port
+// path so the kill operation becomes a counted no-op. Returns a pointer
+// to the counter so tests can assert on it. Restoration is automatic.
+//
+// Counts killByPortFn invocations specifically — NOT lookupProcess, which
+// is shared between the kill path and other read-only ownership checks
+// (portHeldByOurDaemon, etc.). Counting lookupProcess would conflate the
+// two and inflate the counter on hosts where portInUse trips during
+// Preflight's own-port detection (bug-bash A6 #6 r2 P1 closure).
 func stopFakeKillCounter(t *testing.T) *int32 {
 	t.Helper()
 	var counter int32
-	orig := lookupProcess
-	lookupProcess = func(port int) (int, uint64, int64, bool) {
+	orig := killByPortFn
+	killByPortFn = func(port int, timeout time.Duration) error {
 		atomic.AddInt32(&counter, 1)
-		return 0, 0, 0, false // ok=false → killDaemonByPort returns nil
+		return nil // no-op
 	}
-	t.Cleanup(func() { lookupProcess = orig })
+	t.Cleanup(func() { killByPortFn = orig })
 	return &counter
 }
 

@@ -1415,22 +1415,27 @@ func checkSecretRefs(env map[string]string) error {
 // saw `port 9129 already in use` for every server during `install
 // --all` even when those daemons were our own running tasks.
 //
-// Three-part identity gate (bot r1 P1 closure on PR #180): scheduler
-// task name alone is not enough — a stale orphan / foreign PID can
-// hold the port while a task with the matching name is also in
-// "Running" state (recovery race, watchdog restart in flight, etc.).
-// We require ALL of:
-//   1. port-to-PID lookup succeeds with a non-zero PID
-//   2. that PID's process image basename is `mcphub.exe` — only our
-//      binary should be bound to `\mcp-local-hub-*` task ports; any
-//      foreign image holding the port is a real collision
-//   3. scheduler task `\mcp-local-hub-<server>-<daemon>` exists and
-//      is in State == "Running"
+// Three-part identity gate (bot r1 P1 + r2 P1 closure on PR #180):
+// scheduler task name alone is not enough — a stale orphan / foreign
+// PID can hold the port while a task with the matching name is also
+// in "Running" state (recovery race, watchdog restart in flight,
+// etc.). We require ALL of:
 //
-// Test seam: lookupProcess, processImageByPID, and
+//  1. port-to-PID lookup succeeds with a non-zero PID
+//  2. process identity matches our binary, by EITHER:
+//     - image basename == "mcphub.exe" (stdio-bridge listener;
+//     native-http external port held by our in-process http.Server)
+//     - parent image basename == "mcphub.exe" (native-http internal
+//     port held by the upstream child spawned by our daemon)
+//     If neither matches, a foreign process owns the port → collision.
+//  3. scheduler task `\mcp-local-hub-<server>-<daemon>` exists and
+//     is in State == "Running"
+//
+// Test seam: lookupProcess, processIdentityByPID, and
 // schedulerStatusForOwnPort are package vars in production wired to
-// the processes.go init helper, the wmic Name query, and
-// scheduler.New().Status respectively. Tests assign fakes for each.
+// the processes.go init helper, the wmic-or-PowerShell identity
+// lookup, and scheduler.New().Status respectively. Tests assign
+// fakes for each.
 func portHeldByOurDaemon(port int, server, daemon string) bool {
 	if lookupProcess == nil {
 		return false
@@ -1439,18 +1444,19 @@ func portHeldByOurDaemon(port int, server, daemon string) bool {
 	if !ok || pid == 0 {
 		return false
 	}
-	// Image-identity gate: only our binary may hold a port we treat
-	// as managed. Any other image (a foreign Python server, a
-	// developer's local relay, an attacker process) is a real
-	// collision even if a same-named scheduler task is Running.
-	if processImageByPID == nil {
+	// Image-identity gate. Accept ownership when EITHER the port-
+	// holder's image is mcphub.exe (stdio-bridge / native-http
+	// external) OR its parent image is mcphub.exe (native-http
+	// internal port held by upstream child spawned by our daemon).
+	if processIdentityByPID == nil {
 		return false
 	}
-	image, ok := processImageByPID(pid)
+	image, parentImage, ok := processIdentityByPID(pid)
 	if !ok {
 		return false
 	}
-	if !strings.EqualFold(image, "mcphub.exe") {
+	const me = "mcphub.exe"
+	if !strings.EqualFold(image, me) && !strings.EqualFold(parentImage, me) {
 		return false
 	}
 	if schedulerStatusForOwnPort == nil {
@@ -1464,13 +1470,19 @@ func portHeldByOurDaemon(port int, server, daemon string) bool {
 	return st.State == "Running"
 }
 
-// processImageByPID is a function-pointer seam returning the image
-// basename for a process PID (e.g., "mcphub.exe", "notepad.exe").
-// Production init in processes.go wires it via wmic Name query; tests
-// supply fakes. Stays nil on non-Windows hosts (matching the
-// lookupProcess pattern) — portHeldByOurDaemon then returns false and
-// the Preflight collision check fails as before.
-var processImageByPID func(pid int) (string, bool)
+// processIdentityByPID is a function-pointer seam returning the image
+// basename and parent-process image basename for a PID (e.g.,
+// ("mcphub.exe", "svchost.exe") for our own daemon spawned by
+// scheduler; ("python.exe", "mcphub.exe") for a native-http upstream
+// child spawned by our daemon).
+//
+// Production init in processes.go wires it via wmic Name+ParentProcessId
+// (with PowerShell Get-CimInstance fallback for Windows 11 24H2+ where
+// wmic is removed — bot r2 P2 closure). Tests supply fakes. Stays nil
+// on non-Windows hosts (matching the lookupProcess pattern) —
+// portHeldByOurDaemon then returns false and the Preflight collision
+// check fails as before.
+var processIdentityByPID func(pid int) (image, parentImage string, ok bool)
 
 // schedulerStatusForOwnPort is a function-pointer seam for the
 // own-port detection helper above. Production init wires it to
