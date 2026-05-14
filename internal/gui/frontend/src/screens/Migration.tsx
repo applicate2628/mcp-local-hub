@@ -106,11 +106,32 @@ export function MigrationScreen() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ servers: [serverName] }),
       });
-      if (!resp.ok && resp.status !== 204) {
-        const body = await resp.json().catch(() => ({ error: resp.statusText }));
-        throw new Error(body?.error ?? `HTTP ${resp.status}`);
+      // Bug-bash B1 closure (#7): the handler now distinguishes
+      // 200 (full success), 207 (partial — Failed[] has rows), and
+      // 4xx/5xx (setup error). 204 is kept for forward compat with
+      // test fakes that may still return it.
+      if (resp.status === 200 || resp.status === 204) {
+        setScanReloadToken((n) => n + 1);
+        return;
       }
-      setScanReloadToken((n) => n + 1);
+      if (resp.status === 207) {
+        // Partial-failure body: {restored: [...], failed: [{server, client, err}]}.
+        const body = (await resp.json().catch(() => ({}))) as {
+          failed?: { server: string; client: string; err: string }[];
+        };
+        const rows = body.failed ?? [];
+        // Demigrate at the Migration screen targets one server, so
+        // every failed row is the same server — render the client
+        // names + error messages on separate lines.
+        const detail = rows.map((r) => `${r.client}: ${r.err}`).join("\n");
+        throw new Error(
+          rows.length === 0
+            ? "demigrate partial failure (no row details returned)"
+            : detail,
+        );
+      }
+      const body = await resp.json().catch(() => ({ error: resp.statusText }));
+      throw new Error(body?.error ?? `HTTP ${resp.status}`);
     } catch (err) {
       setActionError(`Demigrate ${serverName}: ${(err as Error).message}`);
     } finally {
@@ -128,11 +149,27 @@ export function MigrationScreen() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ servers: [...selected] }),
       });
-      if (!resp.ok && resp.status !== 204) {
-        const body = await resp.json().catch(() => ({ error: resp.statusText }));
-        throw new Error(body?.error ?? `HTTP ${resp.status}`);
+      // B1 #7 symmetry: same 200/207/4xx-5xx triad as /api/demigrate.
+      if (resp.status === 200 || resp.status === 204) {
+        setScanReloadToken((n) => n + 1);
+        return;
       }
-      setScanReloadToken((n) => n + 1);
+      if (resp.status === 207) {
+        const body = (await resp.json().catch(() => ({}))) as {
+          failed?: { server: string; client: string; err: string }[];
+        };
+        const rows = body.failed ?? [];
+        const detail = rows
+          .map((r) => `${r.server}/${r.client}: ${r.err}`)
+          .join("\n");
+        throw new Error(
+          rows.length === 0
+            ? "migrate partial failure (no row details returned)"
+            : detail,
+        );
+      }
+      const body = await resp.json().catch(() => ({ error: resp.statusText }));
+      throw new Error(body?.error ?? `HTTP ${resp.status}`);
     } catch (err) {
       setActionError(`Migrate selected: ${(err as Error).message}`);
     } finally {

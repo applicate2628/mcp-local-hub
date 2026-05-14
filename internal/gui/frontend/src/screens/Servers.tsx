@@ -59,6 +59,11 @@ export function ServersScreen() {
   const [outcomes, setOutcomes] = useState<OutcomeMap>(new Map());
   const [applyMsg, setApplyMsg] = useState<string>("");
   const [applying, setApplying] = useState<boolean>(false);
+  // Bug-bash B1 closure (#7): structured per-row failure list instead
+  // of the legacy "; "-joined wall-of-text. Each entry is a short
+  // "server/client: err" string that renders as one <li> in the toolbar
+  // failure list. Empty array = no failures to render.
+  const [failedRows, setFailedRows] = useState<string[]>([]);
   const [reloadToken, setReloadToken] = useState<number>(0);
   // applyGen forces a per-cell remount after every applyChanges run so
   // each CellView re-initializes its local `checked` state from
@@ -161,6 +166,10 @@ export function ServersScreen() {
     if (dirty.size === 0) return;
     setApplying(true);
     setApplyMsg(`Applying…`);
+    // Clear any stale failures from a prior Apply — new attempt resets
+    // the list so retried-cells don't display under both old and new
+    // error rows.
+    setFailedRows([]);
 
     // Per-cell POST granularity (memo §4 D2). Each (server, client, direction)
     // cell fires its OWN /api/migrate or /api/demigrate POST with a single-
@@ -198,6 +207,12 @@ export function ServersScreen() {
     const failedDemigrateClients = new Set<string>();
 
     // PHASE 1 — demigrate (one POST per cell).
+    //
+    // Response shapes (bug-bash B1 closure #7):
+    //   200 → success (Restored[] populated, Failed[] empty)
+    //   207 → partial failure (Failed[] has exactly 1 row for this cell)
+    //   500 → setup error (`{error, code: DEMIGRATE_FAILED}`)
+    //   204 (legacy) → treat as success for forward compat (test fakes)
     for (const cell of demigrateCells) {
       try {
         const resp = await fetch("/api/demigrate", {
@@ -205,9 +220,22 @@ export function ServersScreen() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ servers: [cell.server], clients: [cell.client] }),
         });
-        if (resp.ok || resp.status === 204) {
+        if (resp.status === 200 || resp.status === 204) {
           outcomes.get(cell.server)!.set(cell.client, "succeeded");
+        } else if (resp.status === 207) {
+          // Partial-failure body shape: { restored: [...], failed: [{server, client, err}] }.
+          // Per-cell POST means failed[] has at most 1 entry; surface its
+          // clean err message without the legacy aggregation prefix.
+          const body = (await resp.json().catch(() => ({}))) as {
+            failed?: { server: string; client: string; err: string }[];
+          };
+          const row = body.failed?.[0];
+          const errMsg = row?.err ?? `HTTP ${resp.status}`;
+          failed.push(`${cell.server}/demigrate/${cell.client}: ${errMsg}`);
+          outcomes.get(cell.server)!.set(cell.client, "failed");
+          failedDemigrateClients.add(cell.client);
         } else {
+          // 4xx/5xx error body: { error, code }
           const body = (await resp.json().catch(() => ({}))) as { error?: string };
           failed.push(`${cell.server}/demigrate/${cell.client}: ${body.error ?? resp.status}`);
           outcomes.get(cell.server)!.set(cell.client, "failed");
@@ -235,8 +263,17 @@ export function ServersScreen() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ servers: [cell.server], clients: [cell.client] }),
         });
-        if (resp.ok || resp.status === 204) {
+        // Same shape as /api/demigrate above (B1 #7 symmetry).
+        if (resp.status === 200 || resp.status === 204) {
           outcomes.get(cell.server)!.set(cell.client, "succeeded");
+        } else if (resp.status === 207) {
+          const body = (await resp.json().catch(() => ({}))) as {
+            failed?: { server: string; client: string; err: string }[];
+          };
+          const row = body.failed?.[0];
+          const errMsg = row?.err ?? `HTTP ${resp.status}`;
+          failed.push(`${cell.server}/migrate/${cell.client}: ${errMsg}`);
+          outcomes.get(cell.server)!.set(cell.client, "failed");
         } else {
           const body = (await resp.json().catch(() => ({}))) as { error?: string };
           failed.push(`${cell.server}/migrate/${cell.client}: ${body.error ?? resp.status}`);
@@ -288,8 +325,14 @@ export function ServersScreen() {
 
     if (failed.length === 0) {
       setApplyMsg("Applied. Refreshing…");
+      setFailedRows([]);
     } else {
-      setApplyMsg(`Failed: ${failed.join("; ")}`);
+      // Bug-bash B1 closure (#7): each failed entry becomes its own
+      // <li> row in the toolbar list (see render below). applyMsg
+      // just shows the count + reminder; the wall-of-text in a
+      // single string is gone.
+      setApplyMsg(`Failed: ${failed.length} row(s); re-toggle and retry below.`);
+      setFailedRows(failed);
     }
     setApplying(false);
   }
@@ -362,6 +405,15 @@ export function ServersScreen() {
           {applyMsg}
         </span>
       </div>
+      {failedRows.length > 0 && (
+        <ul class="apply-failed-rows" data-testid="apply-failed-rows">
+          {failedRows.map((row) => (
+            <li key={row} class="error">
+              {row}
+            </li>
+          ))}
+        </ul>
+      )}
       <table class="servers-matrix">
         <thead>
           <tr>

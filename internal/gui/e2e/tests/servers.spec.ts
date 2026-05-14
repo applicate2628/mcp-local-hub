@@ -196,9 +196,13 @@ test.describe("servers", () => {
     await page.locator('table.servers-matrix input[type="checkbox"]').first().uncheck();
     await page.locator('#servers-toolbar button', { hasText: "Apply" }).click();
 
+    // Bug-bash B1 closure (#7): toolbar shows a count + retry hint;
+    // per-row error text lives in the new <ul data-testid=apply-failed-rows>
+    // beneath the toolbar so multi-row failures don't render as a wall
+    // of text concatenated with `; `.
     await expect(page.locator('#servers-toolbar .error')).toContainText("Failed:");
-    await expect(page.locator('#servers-toolbar .error')).toContainText("demo/demigrate/claude-code");
-    await expect(page.locator('#servers-toolbar .error')).toContainText("disk full");
+    await expect(page.locator('[data-testid="apply-failed-rows"]')).toContainText("demo/demigrate/claude-code");
+    await expect(page.locator('[data-testid="apply-failed-rows"]')).toContainText("disk full");
 
     // Reload MUST have run (scan called again since Apply click).
     await expect.poll(() => scanCallCount).toBeGreaterThan(initialScanCount);

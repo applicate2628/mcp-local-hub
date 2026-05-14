@@ -18,8 +18,8 @@ func TestRequireSameOrigin_AllowsSecFetchSiteSameOrigin(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	s.httpHandler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusNoContent {
-		t.Errorf("status = %d, want 204 (allowed)", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 (allowed)", rec.Code)
 	}
 }
 
@@ -32,8 +32,8 @@ func TestRequireSameOrigin_AllowsSecFetchSiteNone(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	s.httpHandler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusNoContent {
-		t.Errorf("status = %d, want 204", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rec.Code)
 	}
 }
 
@@ -86,8 +86,8 @@ func TestRequireSameOrigin_AllowsEmptyOrigin(t *testing.T) {
 	// No Sec-Fetch-Site, no Origin
 	rec := httptest.NewRecorder()
 	s.httpHandler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusNoContent {
-		t.Errorf("status = %d, want 204 (curl allowed)", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 (curl allowed)", rec.Code)
 	}
 }
 
@@ -151,8 +151,8 @@ func TestRequireSameOrigin_AcceptsViteOriginRewrittenByConfigureHook(t *testing.
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	s.httpHandler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204 (configure-hook-rewritten Origin must be accepted)", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (configure-hook-rewritten Origin must be accepted)", rec.Code)
 	}
 }
 
