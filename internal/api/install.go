@@ -1347,13 +1347,21 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 			continue
 		}
 		if portInUse(d.Port) {
-			return fmt.Errorf("port %d already in use (needed for daemon %s/%s)", d.Port, m.Name, d.Name)
+			// Bug-bash A6 (#6) closure: distinguish "our own running
+			// daemon already holds this port" (idempotent reinstall;
+			// tolerate and continue) from "a foreign process stole
+			// the port we need" (real collision; fail loud).
+			if !portHeldByOurDaemon(d.Port, m.Name, d.Name) {
+				return fmt.Errorf("port %d already in use (needed for daemon %s/%s)", d.Port, m.Name, d.Name)
+			}
 		}
 		if m.Transport == config.TransportNativeHTTP {
 			internal := d.Port + config.NativeHTTPInternalPortOffset
 			if portInUse(internal) {
-				return fmt.Errorf("internal port %d already in use (needed for native-http upstream of %s/%s; external=%d, internal=external+%d)",
-					internal, m.Name, d.Name, d.Port, config.NativeHTTPInternalPortOffset)
+				if !portHeldByOurDaemon(internal, m.Name, d.Name) {
+					return fmt.Errorf("internal port %d already in use (needed for native-http upstream of %s/%s; external=%d, internal=external+%d)",
+						internal, m.Name, d.Name, d.Port, config.NativeHTTPInternalPortOffset)
+				}
 			}
 		}
 	}
@@ -1397,6 +1405,97 @@ func checkSecretRefs(env map[string]string) error {
 		}
 	}
 	return nil
+}
+
+// portHeldByOurDaemon reports whether `port` is held by THIS server's
+// own scheduler-managed daemon, distinguishing "idempotent reinstall
+// while my daemon is already running" from "foreign process stole the
+// port we need". Bug-bash A6 (#6) closure: pre-fix, the Preflight
+// port-in-use check raised the SAME error in both cases — operator
+// saw `port 9129 already in use` for every server during `install
+// --all` even when those daemons were our own running tasks.
+//
+// Three-part identity gate (bot r1 P1 + r2 P1 closure on PR #180):
+// scheduler task name alone is not enough — a stale orphan / foreign
+// PID can hold the port while a task with the matching name is also
+// in "Running" state (recovery race, watchdog restart in flight,
+// etc.). We require ALL of:
+//
+//  1. port-to-PID lookup succeeds with a non-zero PID
+//  2. process identity matches our binary, by EITHER:
+//     - image basename == "mcphub.exe" (stdio-bridge listener;
+//     native-http external port held by our in-process http.Server)
+//     - parent image basename == "mcphub.exe" (native-http internal
+//     port held by the upstream child spawned by our daemon)
+//     If neither matches, a foreign process owns the port → collision.
+//  3. scheduler task `\mcp-local-hub-<server>-<daemon>` exists and
+//     is in State == "Running"
+//
+// Test seam: lookupProcess, processIdentityByPID, and
+// schedulerStatusForOwnPort are package vars in production wired to
+// the processes.go init helper, the wmic-or-PowerShell identity
+// lookup, and scheduler.New().Status respectively. Tests assign
+// fakes for each.
+func portHeldByOurDaemon(port int, server, daemon string) bool {
+	if lookupProcess == nil {
+		return false
+	}
+	pid, _, _, ok := lookupProcess(port)
+	if !ok || pid == 0 {
+		return false
+	}
+	// Image-identity gate. Accept ownership when EITHER the port-
+	// holder's image is mcphub.exe (stdio-bridge / native-http
+	// external) OR its parent image is mcphub.exe (native-http
+	// internal port held by upstream child spawned by our daemon).
+	if processIdentityByPID == nil {
+		return false
+	}
+	image, parentImage, ok := processIdentityByPID(pid)
+	if !ok {
+		return false
+	}
+	const me = "mcphub.exe"
+	if !strings.EqualFold(image, me) && !strings.EqualFold(parentImage, me) {
+		return false
+	}
+	if schedulerStatusForOwnPort == nil {
+		return false
+	}
+	taskName := fmt.Sprintf("\\mcp-local-hub-%s-%s", server, daemon)
+	st, err := schedulerStatusForOwnPort(taskName)
+	if err != nil {
+		return false
+	}
+	return st.State == "Running"
+}
+
+// processIdentityByPID is a function-pointer seam returning the image
+// basename and parent-process image basename for a PID (e.g.,
+// ("mcphub.exe", "svchost.exe") for our own daemon spawned by
+// scheduler; ("python.exe", "mcphub.exe") for a native-http upstream
+// child spawned by our daemon).
+//
+// Production init in processes.go wires it via wmic Name+ParentProcessId
+// (with PowerShell Get-CimInstance fallback for Windows 11 24H2+ where
+// wmic is removed — bot r2 P2 closure). Tests supply fakes. Stays nil
+// on non-Windows hosts (matching the lookupProcess pattern) —
+// portHeldByOurDaemon then returns false and the Preflight collision
+// check fails as before.
+var processIdentityByPID func(pid int) (image, parentImage string, ok bool)
+
+// schedulerStatusForOwnPort is a function-pointer seam for the
+// own-port detection helper above. Production init wires it to
+// scheduler.New().Status; tests replace it with a fake that returns
+// canned TaskStatus values.
+var schedulerStatusForOwnPort = defaultSchedulerStatusForOwnPort
+
+func defaultSchedulerStatusForOwnPort(taskName string) (scheduler.TaskStatus, error) {
+	sch, err := scheduler.New()
+	if err != nil {
+		return scheduler.TaskStatus{}, err
+	}
+	return sch.Status(taskName)
 }
 
 // portInUse returns true if a listener on the given port accepts connections.

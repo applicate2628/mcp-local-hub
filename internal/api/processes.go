@@ -284,6 +284,44 @@ func init() {
 		return pid, ram, uptime, true
 	}
 
+	// processIdentityByPID returns (image, parentImage) for a PID,
+	// used by portHeldByOurDaemon (install.go) for the ownership
+	// gate that distinguishes "our running daemon owns this port"
+	// from "a foreign PID stole the port while a same-named scheduler
+	// task happens to be Running" (bot r1 P1 + r2 P1 closure on
+	// PR #180 / bug-bash A6 #6).
+	//
+	// Both layers are needed because:
+	//   - stdio-bridge: image == "mcphub.exe" (our binary holds the listener)
+	//   - native-http external port: image == "mcphub.exe" (in-proc http.Server)
+	//   - native-http internal port: image is the upstream child (python.exe,
+	//     node.exe, ...); parentImage == "mcphub.exe" because mcphub spawned it
+	//
+	// portHeldByOurDaemon treats EITHER image OR parentImage matching
+	// mcphub.exe as ownership signal (combined with scheduler.Running
+	// check for full three-part gate).
+	//
+	// Internally uses wmic first, falls back to PowerShell Get-CimInstance
+	// on hosts where wmic is removed (Windows 11 24H2+) — same fallback
+	// pattern as runProcessSnapshot above (r2 P2 closure).
+	processIdentityByPID = func(pid int) (image, parentImage string, ok bool) {
+		image, parentPID, ok := procNameAndParent(pid)
+		if !ok {
+			return "", "", false
+		}
+		if parentPID <= 0 {
+			// No parent (System / PID-reuse with parent gone). Return
+			// image only; caller still gets a valid ownership signal
+			// when image itself matches mcphub.exe.
+			return image, "", true
+		}
+		// Best-effort parent lookup: if parent has exited or wmic/PS
+		// fails for it, return the empty parentImage (caller can still
+		// match by image alone).
+		parentImage, _, _ = procNameAndParent(parentPID)
+		return image, parentImage, true
+	}
+
 	// Batch variant: one netstat + one wmic for N ports.
 	lookupProcessBatch = func(ports []int) map[int]struct {
 		PID       int
@@ -427,4 +465,100 @@ func parseWmicDate(s string) time.Time {
 		return time.Time{}
 	}
 	return t
+}
+
+// procNameAndParent returns the image basename and parent-PID for one
+// process. Used by processIdentityByPID (the install.go ownership gate
+// seam). Tries wmic first; falls back to PowerShell Get-CimInstance on
+// hosts where wmic is removed (Windows 11 24H2+). Both paths return
+// equivalent CSV-shaped data so the parser is shared.
+//
+// Returns ("", 0, false) on any failure (wmic missing AND PowerShell
+// missing, both queries failing, parse error, PID not found). The
+// caller (portHeldByOurDaemon) treats this as fail-closed.
+func procNameAndParent(pid int) (image string, parentPID int, ok bool) {
+	if pid <= 0 {
+		return "", 0, false
+	}
+	// Try wmic first.
+	if out, err := runWmicNameParent(pid); err == nil {
+		if name, pp, parsed := parseNameParent(out); parsed {
+			return name, pp, true
+		}
+	}
+	// PowerShell fallback (Get-CimInstance). Emits a single CSV-shaped
+	// line: `Node,Name,ParentProcessId` (matching wmic's column order
+	// after the leading Node column).
+	if out, err := runPSNameParent(pid); err == nil {
+		if name, pp, parsed := parseNameParent(out); parsed {
+			return name, pp, true
+		}
+	}
+	return "", 0, false
+}
+
+// runWmicNameParent runs `wmic process where ProcessId=N get Name,ParentProcessId /format:csv`.
+// Returns raw CSV output and the wmic process error (if any).
+func runWmicNameParent(pid int) (string, error) {
+	cmd := exec.Command("wmic", "process", "where",
+		fmt.Sprintf("ProcessId=%d", pid),
+		"get", "Name,ParentProcessId", "/format:csv")
+	process.NoConsole(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+// runPSNameParent runs the PowerShell equivalent of runWmicNameParent.
+// Emits one row in wmic CSV shape so parseNameParent can be shared:
+//
+//	Node,Name,ParentProcessId
+//	HOST,mcphub.exe,4200
+//
+// The leading Node column is hard-coded to a placeholder ("HOST") to
+// match wmic's output structure exactly — the parser ignores it.
+func runPSNameParent(pid int) (string, error) {
+	psScript := fmt.Sprintf(
+		`$p = Get-CimInstance Win32_Process -Filter 'ProcessId=%d'; if ($p) { '{0},{1},{2}' -f 'HOST', $p.Name, $p.ParentProcessId }`,
+		pid,
+	)
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
+	process.NoConsole(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	// Prepend header line so the shared parser sees the expected shape.
+	return "Node,Name,ParentProcessId\n" + string(out), nil
+}
+
+// parseNameParent parses wmic-shaped CSV output:
+//
+//	Node,Name,ParentProcessId
+//	(blank)
+//	HOST,mcphub.exe,4200
+//
+// Returns the first non-header, non-blank row's Name + ParentProcessId.
+// Empty Name → parsed=false. Non-numeric parent PID → name parsed, PID=0.
+func parseNameParent(out string) (name string, parentPID int, parsed bool) {
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "Node,") {
+			continue
+		}
+		fields := strings.Split(line, ",")
+		if len(fields) < 3 {
+			continue
+		}
+		nm := strings.TrimSpace(fields[len(fields)-2])
+		ppStr := strings.TrimSpace(fields[len(fields)-1])
+		if nm == "" {
+			continue
+		}
+		pp, _ := strconv.Atoi(ppStr)
+		return nm, pp, true
+	}
+	return "", 0, false
 }
