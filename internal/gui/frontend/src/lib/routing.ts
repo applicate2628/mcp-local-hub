@@ -58,6 +58,7 @@ const KNOWN_CLIENTS = [
 export function perClientRouting(
   clientPresence: Record<string, ClientPresence>,
   clientConfigPresence: Record<string, ClientConfigState> = {},
+  canMigrate: boolean = true,
 ): Record<string, Routing> {
   const routing: Record<string, Routing> = {};
   // First pass: signals from per-entry client_presence (existing entries).
@@ -76,13 +77,23 @@ export function perClientRouting(
   }
   // Second pass: fill cells for known clients NOT in client_presence,
   // using client_config_presence as the source of truth. If the client
-  // config file exists ("ok"), the cell is "available" — operator can
-  // migrate this server into that client. Otherwise the cell is
-  // "not-installed" (preserves the pre-fix disabled-checkbox visual).
+  // config file exists ("ok") AND the server is migratable, the cell
+  // is "available" — operator can migrate this server into that client.
+  // Otherwise the cell is "not-installed".
+  //
+  // Bot r1 P2 fix: gate "available" to migratable rows only. Pre-fix,
+  // /api/scan flags non-manifested entries (clangd, time-server,
+  // playwright-as-per-session) with can_migrate=false; without the
+  // gate, those rows got enabled checkboxes that hit deterministic
+  // /api/migrate errors when clicked.
   for (const client of KNOWN_CLIENTS) {
     if (client in routing) continue;
     const state = clientConfigPresence[client];
-    routing[client] = state === "ok" ? "available" : "not-installed";
+    if (state === "ok" && canMigrate) {
+      routing[client] = "available";
+    } else {
+      routing[client] = "not-installed";
+    }
   }
   return routing;
 }
@@ -94,7 +105,7 @@ export function collectServers(scan: ScanResult | null | undefined): ServerRow[]
   const ccp = scan?.client_config_presence ?? {};
   const out: ServerRow[] = entries.map((e) => ({
     name: e.name,
-    routing: perClientRouting(e.client_presence ?? {}, ccp),
+    routing: perClientRouting(e.client_presence ?? {}, ccp, e.can_migrate === true),
   }));
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }

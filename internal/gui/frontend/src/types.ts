@@ -31,6 +31,12 @@ export interface ScanEntry {
   name: string;
   status?: string;
   client_presence?: Record<string, ClientPresence>;
+  // Bug-bash A2 bot r1 P2 closure: non-migratable rows (no manifest,
+  // per-session, unknown) must NOT get "available" cells from
+  // client_config_presence — clicking them would hit deterministic
+  // /api/migrate errors. Mirror backend ScanEntry.CanMigrate so
+  // collectServers can gate the fallback to migratable rows only.
+  can_migrate?: boolean;
 }
 
 export interface ClientPresence {
