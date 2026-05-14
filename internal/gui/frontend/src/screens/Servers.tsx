@@ -60,6 +60,18 @@ export function ServersScreen() {
   const [applyMsg, setApplyMsg] = useState<string>("");
   const [applying, setApplying] = useState<boolean>(false);
   const [reloadToken, setReloadToken] = useState<number>(0);
+  // applyGen forces a per-cell remount after every applyChanges run so
+  // each CellView re-initializes its local `checked` state from
+  // initialChecked (authoritative scan). Bug-bash A4 (#17) closure:
+  // pre-fix, a failed demigrate left CellView showing the user's last
+  // toggle (☐) while the disk still held the entry (☑) — visual lied
+  // about state. CellView's useEffect [initialChecked] only fires when
+  // initialChecked CHANGES; on a failed Apply the scan is unchanged,
+  // so the effect doesn't re-sync and user's local toggle persists.
+  // Remounting via key fixes that: the new instance starts with
+  // useState(initialChecked) honestly. Retry context survives via the
+  // separate red-border outcome map.
+  const [applyGen, setApplyGen] = useState<number>(0);
 
   // Tray "Rescan client configs" — backend publishes clients-rescan,
   // every open Servers tab re-fetches. Bumping reloadToken composes
@@ -264,10 +276,15 @@ export function ServersScreen() {
     // derived from server.routing; without a reload, successful demigrate
     // cells stay with stale "via-hub" initialChecked and the next toggle
     // fires the wrong direction. Reloading unconditionally keeps every
-    // cell's baseline honest. Failed cells retain their local-flipped
-    // state via a no-op useEffect sync (their initialChecked is unchanged
-    // because backend rejected the POST).
+    // cell's baseline honest.
     setReloadToken((x) => x + 1);
+    // Bug-bash A4 (#17): bump applyGen so EVERY CellView remounts and
+    // re-initializes from initialChecked. Pre-fix, failed cells kept
+    // user's local toggle as the visible state while disk unchanged.
+    // Now: after Apply, every cell visually matches authoritative scan
+    // (initialChecked); retry context survives via outcomes/red border,
+    // not via the checkbox visual.
+    setApplyGen((g) => g + 1);
 
     if (failed.length === 0) {
       setApplyMsg("Applied. Refreshing…");
@@ -297,12 +314,26 @@ export function ServersScreen() {
 
   const applyDisabled = applying || dirty.size === 0;
 
+  // Bug-bash A4 (#9) closure: count cells whose last Apply failed or
+  // was gated. These cells are still in `dirty` (kept for retry) AND
+  // present in `outcomes`. The dedicated counter drives a separate
+  // "Retry N failed" affordance so the operator doesn't have to
+  // toggle-back-and-forth to know a retry is queued.
+  let retryPendingCount = 0;
+  for (const [, clientOutcomes] of outcomes) {
+    for (const [, o] of clientOutcomes) {
+      if (o === "failed" || o === "gated") retryPendingCount++;
+    }
+  }
+
   return (
     <div>
       <h1>Servers</h1>
       <div id="servers-toolbar">
         <button onClick={applyChanges} disabled={applyDisabled}>
-          Apply changes
+          {retryPendingCount > 0
+            ? `Apply changes (incl. retry ${retryPendingCount})`
+            : "Apply changes"}
         </button>
         <span style="margin-left:12px" class={applyMsg.startsWith("Failed") ? "error" : ""}>
           {applyMsg}
@@ -326,6 +357,7 @@ export function ServersScreen() {
               server={server}
               status={statusByServer[server.name]}
               outcomes={outcomes.get(server.name)}
+              applyGen={applyGen}
               onToggle={toggleCell}
             />
           ))}
@@ -339,6 +371,7 @@ function ServerRowView(props: {
   server: ServerRow;
   status?: { state: string; port: number | null };
   outcomes?: Map<string, Outcome>;
+  applyGen: number;
   onToggle: (server: string, client: string, nextChecked: boolean, initialChecked: boolean) => void;
 }) {
   const { server, status, outcomes, onToggle } = props;
@@ -354,7 +387,7 @@ function ServerRowView(props: {
       </td>
       {CLIENTS.map((client) => (
         <CellView
-          key={client}
+          key={`${client}-${props.applyGen}`}
           server={server}
           client={client}
           lastOutcome={outcomes?.get(client)}
