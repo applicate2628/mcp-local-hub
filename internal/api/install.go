@@ -1347,13 +1347,21 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 			continue
 		}
 		if portInUse(d.Port) {
-			return fmt.Errorf("port %d already in use (needed for daemon %s/%s)", d.Port, m.Name, d.Name)
+			// Bug-bash A6 (#6) closure: distinguish "our own running
+			// daemon already holds this port" (idempotent reinstall;
+			// tolerate and continue) from "a foreign process stole
+			// the port we need" (real collision; fail loud).
+			if !portHeldByOurDaemon(d.Port, m.Name, d.Name) {
+				return fmt.Errorf("port %d already in use (needed for daemon %s/%s)", d.Port, m.Name, d.Name)
+			}
 		}
 		if m.Transport == config.TransportNativeHTTP {
 			internal := d.Port + config.NativeHTTPInternalPortOffset
 			if portInUse(internal) {
-				return fmt.Errorf("internal port %d already in use (needed for native-http upstream of %s/%s; external=%d, internal=external+%d)",
-					internal, m.Name, d.Name, d.Port, config.NativeHTTPInternalPortOffset)
+				if !portHeldByOurDaemon(internal, m.Name, d.Name) {
+					return fmt.Errorf("internal port %d already in use (needed for native-http upstream of %s/%s; external=%d, internal=external+%d)",
+						internal, m.Name, d.Name, d.Port, config.NativeHTTPInternalPortOffset)
+				}
 			}
 		}
 	}
@@ -1397,6 +1405,58 @@ func checkSecretRefs(env map[string]string) error {
 		}
 	}
 	return nil
+}
+
+// portHeldByOurDaemon reports whether `port` is held by THIS server's
+// own scheduler-managed daemon, distinguishing "idempotent reinstall
+// while my daemon is already running" from "foreign process stole the
+// port we need". Bug-bash A6 (#6) closure: pre-fix, the Preflight
+// port-in-use check raised the SAME error in both cases — operator
+// saw `port 9129 already in use` for every server during `install
+// --all` even when those daemons were our own running tasks.
+//
+// Test seam: schedulerStatusForOwnPort and lookupProcess are package
+// vars in production wired to scheduler.New().Status and the
+// processes.go init helper respectively. Tests assign fakes to verify
+// both branches: matching scheduler task running on the port → ours;
+// foreign PID (or task absent / not running) → real collision.
+//
+// Returns false when:
+//   - lookupProcess unavailable (init race, non-Windows)
+//   - port-to-PID lookup fails or returns 0
+//   - scheduler unavailable or task not found
+//   - task exists but state != "Running"
+func portHeldByOurDaemon(port int, server, daemon string) bool {
+	if lookupProcess == nil {
+		return false
+	}
+	pid, _, _, ok := lookupProcess(port)
+	if !ok || pid == 0 {
+		return false
+	}
+	if schedulerStatusForOwnPort == nil {
+		return false
+	}
+	taskName := fmt.Sprintf("\\mcp-local-hub-%s-%s", server, daemon)
+	st, err := schedulerStatusForOwnPort(taskName)
+	if err != nil {
+		return false
+	}
+	return st.State == "Running"
+}
+
+// schedulerStatusForOwnPort is a function-pointer seam for the
+// own-port detection helper above. Production init wires it to
+// scheduler.New().Status; tests replace it with a fake that returns
+// canned TaskStatus values.
+var schedulerStatusForOwnPort = defaultSchedulerStatusForOwnPort
+
+func defaultSchedulerStatusForOwnPort(taskName string) (scheduler.TaskStatus, error) {
+	sch, err := scheduler.New()
+	if err != nil {
+		return scheduler.TaskStatus{}, err
+	}
+	return sch.Status(taskName)
 }
 
 // portInUse returns true if a listener on the given port accepts connections.
