@@ -292,6 +292,56 @@ func TestVerifyHubMcpStateDACLRejectsPermissiveParentDACL(t *testing.T) {
 	}
 }
 
+// TestOwnerSIDAllowed pins the owner allowlist contract: the bug-bash
+// A1 fix relaxed the strict owner==current-user check so default
+// Windows home directories (C:\Users\<user> owned by SYSTEM with the
+// user as DACL grantee) pass. The allowlist must accept exactly
+// current-user, SYSTEM, and BuiltinAdministrators — anything else
+// (Authenticated Users, Domain Users, a random Group Policy SID) is
+// rejected. The DACL gate (covered by the existing
+// TestVerifyHubMcpStateDACLRejectsAuthenticatedUsersAllow test) is the
+// confidentiality boundary; owner is the integrity boundary, and a
+// pure unit test is cheaper to maintain than provisioning admin in CI.
+func TestOwnerSIDAllowed(t *testing.T) {
+	current, err := currentUserSID()
+	if err != nil {
+		t.Fatalf("currentUserSID: %v", err)
+	}
+	system, err := windows.StringToSid("S-1-5-18")
+	if err != nil {
+		t.Fatal(err)
+	}
+	admins, err := windows.StringToSid("S-1-5-32-544")
+	if err != nil {
+		t.Fatal(err)
+	}
+	authUsers, err := windows.StringToSid("S-1-5-11")
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowlist := []*windows.SID{current, system, admins}
+
+	cases := []struct {
+		name  string
+		owner *windows.SID
+		want  bool
+	}{
+		{"current user owns", current, true},
+		{"SYSTEM owns (default Windows home dir)", system, true},
+		{"BuiltinAdministrators owns", admins, true},
+		{"Authenticated Users owns (rejected — corp-policy)", authUsers, false},
+		{"nil owner", nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ownerSIDAllowed(tc.owner, allowlist)
+			if got != tc.want {
+				t.Errorf("ownerSIDAllowed(%v) = %v, want %v", sidString(tc.owner), got, tc.want)
+			}
+		})
+	}
+}
+
 // TestVerifyHubMcpStateDACLRejectsDirectoryTarget asserts that the
 // verifier refuses a directory at the state-file path — a defense
 // against attacker-controlled directory substitutions on a path that

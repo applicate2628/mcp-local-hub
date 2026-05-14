@@ -12,7 +12,11 @@
 //     required so the open works on directories too.
 //  2. GetSecurityInfo(handle, SE_FILE_OBJECT,
 //     OWNER | DACL_SECURITY_INFORMATION) — fetches owner SID + DACL.
-//  3. Owner SID == current user (else ErrWrongOwner).
+//  3. Owner SID is in the allowlist {current-user, SYSTEM,
+//     BuiltinAdministrators} (else ErrWrongOwner). Default Windows
+//     home directories (C:\Users\<name>) are owned by SYSTEM with
+//     the user as a DACL grantee — those must pass; the DACL gate
+//     below still rejects any third-party ALLOW ACE.
 //  4. Iterate DACL ACEs via GetAce. For each ALLOW ACE whose mask,
 //     after MapGenericMask, contains FILE_GENERIC_READ or
 //     GENERIC_READ, resolve the SID and check it against the allowlist
@@ -215,7 +219,19 @@ func verifyWindowsDACLFromHandle(h windows.Handle) error {
 	if err != nil {
 		return fmt.Errorf("get owner: %w", err)
 	}
-	if !ownerSID.Equals(currentSID) {
+	// Owner allowlist: current user, SYSTEM, BuiltinAdministrators.
+	//
+	// Default Windows config: C:\Users\<user> is created by
+	// CreateUserProfile API with owner=NT AUTHORITY\SYSTEM and an
+	// inherited ACE granting the user Full Access — the user is a
+	// DACL grantee, not the owner. Requiring strict owner==currentUser
+	// rejected the dominant Windows install scenario. The DACL
+	// iterator below still enforces that no SID outside this same
+	// allowlist holds a confidentiality- or integrity-significant ACE,
+	// so granting "owner may be SYSTEM/Admin" doesn't let a third
+	// party gain access — only allowlist SIDs may hold an ALLOW ACE
+	// with significant bits.
+	if !ownerSIDAllowed(ownerSID, allowlist) {
 		return ErrWrongOwner
 	}
 
@@ -476,4 +492,20 @@ func sidString(sid *windows.SID) string {
 		return "<unresolved-sid>"
 	}
 	return s
+}
+
+// ownerSIDAllowed reports whether ownerSID is in the allowlist. Pure
+// function so the seam is unit-testable without Windows file-handle
+// fixtures (which require Administrator to set owner=SYSTEM on a temp
+// directory).
+func ownerSIDAllowed(ownerSID *windows.SID, allowlist []*windows.SID) bool {
+	if ownerSID == nil {
+		return false
+	}
+	for _, allowed := range allowlist {
+		if allowed != nil && ownerSID.Equals(allowed) {
+			return true
+		}
+	}
+	return false
 }
