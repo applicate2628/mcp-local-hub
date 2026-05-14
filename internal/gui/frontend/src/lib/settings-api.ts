@@ -55,8 +55,41 @@ export async function getBackupsCleanPreview(keepN: number): Promise<string[]> {
   return (body.would_remove ?? []) as string[];
 }
 
+// Bug-bash B2 closure (#21): per-client preview. Empty client falls
+// back to the bulk preview above. The handler validates the client
+// name and returns 400 BACKUPS_PREVIEW_UNKNOWN_CLIENT for unknown
+// values; jsonOrThrow surfaces that as a typed error.
+export async function getBackupsCleanPreviewForClient(
+  client: string,
+  keepN: number,
+): Promise<string[]> {
+  const qs = new URLSearchParams({ keep_n: String(keepN), client });
+  const res = await fetch(`/api/backups/clean-preview?${qs.toString()}`, {
+    credentials: "same-origin",
+  });
+  const body = await jsonOrThrow(res);
+  return (body.would_remove ?? []) as string[];
+}
+
 export async function cleanBackups(): Promise<{ cleaned: number }> {
   const res = await fetch("/api/backups/clean", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  return await jsonOrThrow(res);
+}
+
+// Bug-bash B2 closure (#21): per-client clean. Same handler as
+// cleanBackups but narrows the prune to one client via the ?client=X
+// query param. The handler returns 400 BACKUPS_CLEAN_UNKNOWN_CLIENT
+// for unknown client ids; jsonOrThrow surfaces that as a typed error.
+export async function cleanBackupsForClient(
+  client: string,
+): Promise<{ cleaned: number; client: string }> {
+  const qs = new URLSearchParams({ client });
+  const res = await fetch(`/api/backups/clean?${qs.toString()}`, {
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },

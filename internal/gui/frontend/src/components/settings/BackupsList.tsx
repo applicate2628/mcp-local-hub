@@ -1,11 +1,21 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
-import { getBackups, getBackupsCleanPreview } from "../../lib/settings-api";
+import {
+  cleanBackupsForClient,
+  getBackups,
+  getBackupsCleanPreview,
+} from "../../lib/settings-api";
 import type { BackupInfo } from "../../lib/settings-types";
 import { BACKUPS_COPY } from "./backups-copy";
 
 export type BackupsListProps = {
   // The keep_n value to preview against. -1 means "no preview yet".
   keepN: number;
+  // Bug-bash B2 closure (#21): notify parent (SectionBackups) that a
+  // per-client Clean fired so it can re-trigger the settings snapshot
+  // refresh (which re-fetches /api/backups via this component). Optional;
+  // defaults to no-op so consumers that don't care about the refresh
+  // can omit it.
+  onClientCleaned?: (client: string) => void;
 };
 
 const CLIENT_ORDER = [
@@ -18,11 +28,23 @@ const CLIENT_ORDER = [
   "antigravity",
 ];
 
-export function BackupsList({ keepN }: BackupsListProps): preact.JSX.Element {
+export function BackupsList({
+  keepN,
+  onClientCleaned = () => {},
+}: BackupsListProps): preact.JSX.Element {
   const [backups, setBackups] = useState<BackupInfo[] | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [wouldRemove, setWouldRemove] = useState<Set<string>>(new Set());
   const [previewFailed, setPreviewFailed] = useState(false);
+  // Bug-bash B2 closure (#21): per-client clean state. `cleaningClient`
+  // disables ALL clean buttons (avoid concurrent prunes); `cleanErr`
+  // holds the last per-client error keyed by client id.
+  const [cleaningClient, setCleaningClient] = useState<string | null>(null);
+  const [perClientErr, setPerClientErr] = useState<Record<string, string>>({});
+  // refreshTick bumps when a per-client clean succeeds, so the
+  // backups list re-fetches without depending on the parent's
+  // snapshot.refresh cycle (which is gated on the keepN dirty state).
+  const [refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -30,7 +52,31 @@ export function BackupsList({ keepN }: BackupsListProps): preact.JSX.Element {
       .then((rows) => { if (!cancelled) setBackups(rows); })
       .catch((e) => { if (!cancelled) setLoadErr(String(e?.message ?? e)); });
     return () => { cancelled = true; };
-  }, []);
+  }, [refreshTick]);
+
+  async function cleanThisClient(client: string) {
+    setCleaningClient(client);
+    setPerClientErr((prev) => {
+      const next = { ...prev };
+      delete next[client];
+      return next;
+    });
+    try {
+      await cleanBackupsForClient(client);
+      setRefreshTick((n) => n + 1);
+      onClientCleaned(client);
+    } catch (e: unknown) {
+      const msg =
+        e instanceof Error
+          ? e.message
+          : typeof e === "string"
+          ? e
+          : "clean failed";
+      setPerClientErr((prev) => ({ ...prev, [client]: msg }));
+    } finally {
+      setCleaningClient(null);
+    }
+  }
 
   // Debounced preview refetch on keepN change.
   // Codex pre-push P2: clear `wouldRemove` synchronously when keepN changes
@@ -93,33 +139,77 @@ export function BackupsList({ keepN }: BackupsListProps): preact.JSX.Element {
       {previewFailed ? (
         <p class="backups-preview-unavailable" data-testid="preview-unavailable">{BACKUPS_COPY.previewFailureInline}</p>
       ) : null}
-      {Array.from(groups.entries()).map(([client, rows]) => (
-        <details key={client} class="backups-client-group" open>
-          <summary>{client} ({rows.length} backup{rows.length === 1 ? "" : "s"})</summary>
-          <ul>
-            {rows.map((b) => {
-              const eligible = b.kind === "timestamped" && wouldRemove.has(b.path);
-              return (
-                <li
-                  key={b.path}
-                  class={`backups-row ${b.kind} ${eligible ? "eligible" : ""}`}
-                  data-eligible={eligible ? "true" : "false"}
-                >
-                  <span class="backups-row-when">{relTime(b.mod_time)}</span>
-                  <span class={`backups-row-kind kind-${b.kind}`}>{b.kind}</span>
-                  <span class="backups-row-size">{formatBytes(b.size_byte)}</span>
-                  {eligible ? (
-                    <span class="backups-eligible-badge" data-testid="eligible-badge">
-                      {BACKUPS_COPY.rowBadge}
-                    </span>
-                  ) : null}
+      {Array.from(groups.entries()).map(([client, rows]) => {
+        // Bug-bash B2 closure (#21): count this client's eligible rows
+        // for the per-client Clean button label. Disable when there's
+        // nothing to prune, when ANOTHER client is currently cleaning,
+        // or when the preview hasn't loaded yet.
+        const clientEligibleCount = rows.filter(
+          (b) => b.kind === "timestamped" && wouldRemove.has(b.path),
+        ).length;
+        const cleanDisabled =
+          cleaningClient !== null ||
+          clientEligibleCount === 0 ||
+          previewFailed;
+        const clientErr = perClientErr[client];
+        return (
+          <details key={client} class="backups-client-group" open>
+            <summary>
+              {client} ({rows.length} backup{rows.length === 1 ? "" : "s"})
+            </summary>
+            <ul>
+              {rows.map((b) => {
+                const eligible = b.kind === "timestamped" && wouldRemove.has(b.path);
+                return (
+                  <li
+                    key={b.path}
+                    class={`backups-row ${b.kind} ${eligible ? "eligible" : ""}`}
+                    data-eligible={eligible ? "true" : "false"}
+                  >
+                    <span class="backups-row-when">{relTime(b.mod_time)}</span>
+                    <span class={`backups-row-kind kind-${b.kind}`}>{b.kind}</span>
+                    <span class="backups-row-size">{formatBytes(b.size_byte)}</span>
+                    {eligible ? (
+                      <span class="backups-eligible-badge" data-testid="eligible-badge">
+                        {BACKUPS_COPY.rowBadge}
+                      </span>
+                    ) : null}
+                  </li>
+                );
+              })}
+              {rows.length === 0 ? (
+                <li class="backups-row empty">
+                  <span>No backups for this client.</span>
                 </li>
-              );
-            })}
-            {rows.length === 0 ? <li class="backups-row empty"><span>No backups for this client.</span></li> : null}
-          </ul>
-        </details>
-      ))}
+              ) : null}
+            </ul>
+            <div class="backups-client-actions">
+              <button
+                type="button"
+                disabled={cleanDisabled}
+                data-testid={`clean-now-${client}`}
+                onClick={() => void cleanThisClient(client)}
+                title={
+                  clientEligibleCount === 0
+                    ? "Nothing to prune at the current keep_n setting."
+                    : cleaningClient === client
+                    ? "Cleaning…"
+                    : `Prune ${clientEligibleCount} eligible backup(s) for ${client} only.`
+                }
+              >
+                {cleaningClient === client
+                  ? "Cleaning…"
+                  : `Clean ${client} only (${clientEligibleCount})`}
+              </button>
+              {clientErr ? (
+                <span class="error-banner" role="alert">
+                  {clientErr}
+                </span>
+              ) : null}
+            </div>
+          </details>
+        );
+      })}
     </div>
   );
 }

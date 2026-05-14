@@ -123,7 +123,14 @@ export function SectionBackups({ snapshot, onDirtyChange = () => {} }: SectionBa
         {err ? <small class="settings-field-error" role="alert">{err}</small> : null}
       </div>
 
-      <BackupsList keepN={draft} />
+      <BackupsList
+        keepN={draft}
+        // Bug-bash B2 closure (#21): per-client clean fires its own
+        // refresh internally; this callback lets the parent (Settings)
+        // also re-fetch the global snapshot so the global eligible
+        // count + bulk preview stay consistent.
+        onClientCleaned={() => void snapshot.refresh()}
+      />
 
       <div class="backups-clean-row">
         <button

@@ -4,17 +4,25 @@ package gui
 import (
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/clients"
 )
 
 // backupsAPI is the narrow surface used by /api/backups handlers.
+// CleanInClient + CleanPreviewInClient narrow the prune set to a single
+// client (bug-bash B2 closure #21: pre-fix, the GUI had one global
+// "Clean now" button that pruned every client's backups — operators
+// who only wanted to clean cursor's backups had no way to scope it).
 type backupsAPI interface {
 	List() ([]api.BackupInfo, error)
 	CleanPreview(keepN int) ([]string, error)
 	Clean(keepN int) ([]string, error)
+	CleanPreviewInClient(client string, keepN int) ([]string, error)
+	CleanInClient(client string, keepN int) ([]string, error)
 }
 
 type realBackupsAPI struct{}
@@ -22,6 +30,74 @@ type realBackupsAPI struct{}
 func (realBackupsAPI) List() ([]api.BackupInfo, error)      { return api.NewAPI().BackupsList() }
 func (realBackupsAPI) CleanPreview(n int) ([]string, error) { return api.NewAPI().BackupsCleanPreview(n) }
 func (realBackupsAPI) Clean(n int) ([]string, error)        { return api.NewAPI().BackupsClean(n) }
+
+// CleanPreviewInClient resolves the client's config path and previews
+// what BackupsCleanIn(dir, basename, keepN) would prune (dryRun=true
+// inside BackupsCleanIn would require a flag the API doesn't expose;
+// the api.BackupsCleanPreview helper iterates ALL clients, so for the
+// per-client preview we use BackupsListIn + the same retention math
+// the bulk path uses).
+func (realBackupsAPI) CleanPreviewInClient(client string, keepN int) ([]string, error) {
+	if keepN < 0 {
+		return nil, fmt.Errorf("keepN must be >= 0")
+	}
+	cfgPath, err := clients.ConfigPathForName(client)
+	if err != nil {
+		return nil, err
+	}
+	dir := filepath.Dir(cfgPath)
+	live := filepath.Base(cfgPath)
+	rows, err := api.NewAPI().BackupsListIn(dir, live)
+	if err != nil {
+		return nil, err
+	}
+	return previewTimestampedRetention(rows, keepN), nil
+}
+
+// CleanInClient delegates to api.BackupsCleanIn after resolving the
+// client's canonical config path. Returns the slice of deleted paths.
+func (realBackupsAPI) CleanInClient(client string, keepN int) ([]string, error) {
+	cfgPath, err := clients.ConfigPathForName(client)
+	if err != nil {
+		return nil, err
+	}
+	dir := filepath.Dir(cfgPath)
+	live := filepath.Base(cfgPath)
+	return api.NewAPI().BackupsCleanIn(dir, live, keepN)
+}
+
+// previewTimestampedRetention computes the would-be-pruned paths from
+// a per-client BackupInfo list. Mirrors the retention math in
+// api.backupsCleanInImpl: sort timestamped backups newest-first, keep
+// the first keepN, return the rest. Sentinels never appear in the
+// result. Pure helper for testability — no filesystem side effects.
+func previewTimestampedRetention(rows []api.BackupInfo, keepN int) []string {
+	type ts struct {
+		path    string
+		modTime time.Time
+	}
+	var stamped []ts
+	for _, r := range rows {
+		if r.Kind != "timestamped" {
+			continue
+		}
+		stamped = append(stamped, ts{path: r.Path, modTime: r.ModTime})
+	}
+	if len(stamped) <= keepN {
+		return []string{}
+	}
+	// Newest first (same as api.backupsCleanInImpl).
+	for i := 1; i < len(stamped); i++ {
+		for j := i; j > 0 && stamped[j].modTime.After(stamped[j-1].modTime); j-- {
+			stamped[j], stamped[j-1] = stamped[j-1], stamped[j]
+		}
+	}
+	out := make([]string, 0, len(stamped)-keepN)
+	for _, b := range stamped[keepN:] {
+		out = append(out, b.path)
+	}
+	return out
+}
 
 // backupDTO is the JSON shape of one entry in GET /api/backups.
 // ModTime is serialized as RFC3339 for predictable wire format.
@@ -78,16 +154,32 @@ func (s *Server) backupsCleanHandler(w http.ResponseWriter, r *http.Request) {
 			keepN = n
 		}
 	}
-	removed, err := s.backups.Clean(keepN)
-	if err != nil {
-		writeAPIError(w, err, http.StatusInternalServerError, "BACKUPS_CLEAN_FAILED")
-		return
+	// Bug-bash B2 closure (#21): optional ?client=X narrows the prune
+	// to one client. Empty client preserves the legacy "clean every
+	// managed client" semantic so existing operator workflows keep
+	// working unchanged.
+	client := r.URL.Query().Get("client")
+	var removed []string
+	var err error
+	if client != "" {
+		removed, err = s.backups.CleanInClient(client, keepN)
+		if err != nil {
+			writeAPIError(w, err, http.StatusBadRequest, "BACKUPS_CLEAN_UNKNOWN_CLIENT")
+			return
+		}
+	} else {
+		removed, err = s.backups.Clean(keepN)
+		if err != nil {
+			writeAPIError(w, err, http.StatusInternalServerError, "BACKUPS_CLEAN_FAILED")
+			return
+		}
 	}
 	if removed == nil {
 		removed = []string{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"cleaned": len(removed),
+		"client":  client,
 		"errors":  []string{},
 	})
 }
@@ -108,13 +200,26 @@ func (s *Server) backupsCleanPreviewHandler(w http.ResponseWriter, r *http.Reque
 		writeAPIError(w, fmt.Errorf("keep_n must be a non-negative integer"), http.StatusBadRequest, "BACKUPS_PREVIEW_BAD_PARAM")
 		return
 	}
-	paths, err := s.backups.CleanPreview(n)
-	if err != nil {
-		writeAPIError(w, err, http.StatusInternalServerError, "BACKUPS_PREVIEW_FAILED")
-		return
+	// Bug-bash B2 closure (#21) symmetry: optional ?client=X narrows
+	// the preview to one client so per-client "would-prune" counts
+	// can render alongside each client's backups group.
+	client := r.URL.Query().Get("client")
+	var paths []string
+	if client != "" {
+		paths, err = s.backups.CleanPreviewInClient(client, n)
+		if err != nil {
+			writeAPIError(w, err, http.StatusBadRequest, "BACKUPS_PREVIEW_UNKNOWN_CLIENT")
+			return
+		}
+	} else {
+		paths, err = s.backups.CleanPreview(n)
+		if err != nil {
+			writeAPIError(w, err, http.StatusInternalServerError, "BACKUPS_PREVIEW_FAILED")
+			return
+		}
 	}
 	if paths == nil {
 		paths = []string{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"would_remove": paths})
+	writeJSON(w, http.StatusOK, map[string]any{"would_remove": paths, "client": client})
 }
