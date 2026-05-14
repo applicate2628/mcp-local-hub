@@ -50,6 +50,7 @@ test.describe("servers", () => {
       entries: [
         {
           name: "demo",
+          manifest_exists: true,
           client_presence: {
             "claude-code": { transport: "relay", endpoint: "" },
             "codex-cli":   { transport: "absent", endpoint: "" },
@@ -61,6 +62,7 @@ test.describe("servers", () => {
       entries: [
         {
           name: "demo",
+          manifest_exists: true,
           client_presence: {
             "claude-code": { transport: "stdio", endpoint: "" },
             "codex-cli":   { transport: "absent", endpoint: "" },
@@ -131,12 +133,14 @@ test.describe("servers", () => {
       entries: [
         {
           name: "a",
+          manifest_exists: true,
           client_presence: {
             "claude-code": { transport: "stdio", endpoint: "" }, // direct stdio → queued migrate
           },
         },
         {
           name: "b",
+          manifest_exists: true,
           client_presence: {
             "claude-code": { transport: "relay", endpoint: "" }, // via-hub → queued demigrate
           },
@@ -170,6 +174,7 @@ test.describe("servers", () => {
       entries: [
         {
           name: "demo",
+          manifest_exists: true,
           client_presence: {
             "claude-code": { transport: "relay", endpoint: "" },
           },
@@ -196,9 +201,13 @@ test.describe("servers", () => {
     await page.locator('table.servers-matrix input[type="checkbox"]').first().uncheck();
     await page.locator('#servers-toolbar button', { hasText: "Apply" }).click();
 
+    // Bug-bash B1 closure (#7): toolbar shows a count + retry hint;
+    // per-row error text lives in the new <ul data-testid=apply-failed-rows>
+    // beneath the toolbar so multi-row failures don't render as a wall
+    // of text concatenated with `; `.
     await expect(page.locator('#servers-toolbar .error')).toContainText("Failed:");
-    await expect(page.locator('#servers-toolbar .error')).toContainText("demo/demigrate/claude-code");
-    await expect(page.locator('#servers-toolbar .error')).toContainText("disk full");
+    await expect(page.locator('[data-testid="apply-failed-rows"]')).toContainText("demo/demigrate/claude-code");
+    await expect(page.locator('[data-testid="apply-failed-rows"]')).toContainText("disk full");
 
     // Reload MUST have run (scan called again since Apply click).
     await expect.poll(() => scanCallCount).toBeGreaterThan(initialScanCount);
@@ -214,6 +223,7 @@ test.describe("servers", () => {
       entries: [
         {
           name: "demo",
+          manifest_exists: true,
           client_presence: { "claude-code": { transport: "relay", endpoint: "" } },
         },
       ],
@@ -241,12 +251,14 @@ test.describe("servers", () => {
       entries: [
         {
           name: "A",
+          manifest_exists: true,
           client_presence: {
             "claude-code": { transport: "relay", endpoint: "" }, // via-hub → queued demigrate (WILL FAIL)
           },
         },
         {
           name: "B",
+          manifest_exists: true,
           client_presence: {
             "claude-code": { transport: "stdio", endpoint: "" }, // direct stdio → queued migrate (GATED)
             "codex-cli":   { transport: "stdio", endpoint: "" }, // direct stdio → queued migrate (SUCCESS)

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"mcp-local-hub/internal/api"
 )
 
 // migrateRequest is the /api/migrate POST body.
@@ -34,10 +36,28 @@ func registerMigrateRoutes(s *Server) {
 			writeAPIError(w, fmt.Errorf("invalid JSON: %w", err), http.StatusBadRequest, "BAD_REQUEST")
 			return
 		}
-		if err := s.migrator.Migrate(req.Servers, req.Clients); err != nil {
+		report, err := s.migrator.Migrate(req.Servers, req.Clients)
+		if err != nil {
+			// Setup-level failure (e.g., manifest load failed for every
+			// requested server). No per-row data to surface; 500.
 			writeAPIError(w, err, http.StatusInternalServerError, "MIGRATE_FAILED")
 			return
 		}
-		w.WriteHeader(http.StatusNoContent)
+		// Defensive: a nil report on nil error is treated as an empty
+		// success (no rows touched). Encode an empty payload so the
+		// frontend always parses the same shape.
+		if report == nil {
+			report = &api.MigrateReport{}
+		}
+		// Bug-bash B1 closure (#7) symmetry with /api/demigrate: per-
+		// row failures surface via 207 Multi-Status with the structured
+		// body, NOT a flattened 500 error blob. Full success → 200.
+		status := http.StatusOK
+		if len(report.Failed) > 0 {
+			status = http.StatusMultiStatus
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(report)
 	}))
 }

@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"runtime"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -84,16 +83,19 @@ func (r realHealthBackend) DaemonStatusSnapshot() ([]api.DaemonStatus, error) {
 }
 
 // migrator is the narrow interface the /api/migrate handler needs.
-// The handler treats the operation as a bulk "apply changes" — any failed
-// (server, client) row inside the MigrateReport is surfaced as an error.
-// clients narrows the set of client bindings that get rewritten (empty means
-// "every binding configured for these servers"); it maps directly onto
-// api.MigrateOpts.ClientsInclude. The GUI matrix is per-cell (server × client),
-// so the handler must be able to address a single cell without touching the
-// server's other client bindings — hence clients rides alongside servers.
+// Returns the structured MigrateReport so the handler can surface per-
+// row failures via 207 Multi-Status instead of flattening them into a
+// single 500 error blob (bug-bash B1 closure #7 symmetry with demigrater
+// — pre-fix, multi-cell Apply produced a wall-of-text error chain that
+// operators couldn't tell which row was which or retry individually).
+//
+// Error is reserved for SETUP failures (e.g., manifest load failures
+// that prevent any (server, client) iteration). Per-row failures live
+// inside report.Failed and never propagate as Go errors.
+//
 // realMigrator is the production adapter; tests inject their own.
 type migrator interface {
-	Migrate(servers, clients []string) error
+	Migrate(servers, clients []string) (*api.MigrateReport, error)
 }
 
 type realMigrator struct{}
@@ -106,37 +108,32 @@ type realMigrator struct{}
 // clients is forwarded into MigrateOpts.ClientsInclude; an empty slice
 // preserves the original "all clients bound in the manifest" behavior.
 //
-// Per-row failures are aggregated into a single error that mirrors the CLI's
-// behavior in internal/cli/migrate.go: api.MigrateFrom returns nil error when
-// only per-row writes fail (the outer run is considered complete), recording
-// each failure in MigrateReport.Failed. Dropping that slice would let
-// /api/migrate return 204 after partial failures, so the GUI would clear its
-// pending changes even though some client config rewrites were not applied.
-func (realMigrator) Migrate(servers, clients []string) error {
-	report, err := api.NewAPI().MigrateFrom(api.MigrateOpts{
+// Returns the api.MigrateReport verbatim so the handler can surface per-
+// row failures structurally. Aggregation into a single error is no longer
+// performed here — that was the source of the bug-bash B1 wall-of-text UX.
+func (realMigrator) Migrate(servers, clients []string) (*api.MigrateReport, error) {
+	return api.NewAPI().MigrateFrom(api.MigrateOpts{
 		Servers:        servers,
 		ClientsInclude: clients,
 	})
-	if err != nil {
-		return err
-	}
-	if report != nil && len(report.Failed) > 0 {
-		msgs := make([]string, 0, len(report.Failed))
-		for _, f := range report.Failed {
-			msgs = append(msgs, f.Server+"/"+f.Client+": "+f.Err)
-		}
-		return fmt.Errorf("%d migration row(s) failed: %s", len(report.Failed), strings.Join(msgs, "; "))
-	}
-	return nil
 }
 
 // demigrater is the narrow interface the /api/demigrate handler needs.
-// Semantics mirror migrator: per-row failures inside the DemigrateReport
-// are aggregated into a single error so partial failures cannot silently
-// 204 and mislead the GUI into thinking the rollback succeeded.
+// Returns the structured DemigrateReport so the handler can surface
+// per-row failures via 207 Multi-Status instead of flattening them into
+// a single 500 error blob (bug-bash B1 closure #7: pre-fix, multi-cell
+// Apply produced a wall-of-text error like `1 demigrate row(s) failed:
+// server/client: sentinel ... unreadable: ...` chained together with
+// `; ` separators — operators couldn't tell which row was which or
+// retry individual rows).
+//
+// Error is reserved for SETUP failures (e.g., manifest load failures
+// that prevent any (server, client) iteration). Per-row failures live
+// inside report.Failed and never propagate as Go errors.
+//
 // realDemigrater is the production adapter; tests inject their own.
 type demigrater interface {
-	Demigrate(servers, clients []string) error
+	Demigrate(servers, clients []string) (*api.DemigrateReport, error)
 }
 
 type realDemigrater struct{}
@@ -146,26 +143,16 @@ type realDemigrater struct{}
 // DemigrateOpts.ClientsInclude; empty slice preserves the "all bindings
 // configured in the manifest" shape.
 //
-// Per-row failures are aggregated into a single error for the same
-// reason realMigrator aggregates: api.Demigrate returns nil error when
-// only per-row writes fail, and dropping that slice would let the GUI
-// clear its pending state after partial success.
-func (realDemigrater) Demigrate(servers, clients []string) error {
-	report, err := api.NewAPI().Demigrate(api.DemigrateOpts{
+// Returns the api.DemigrateReport verbatim so the handler can surface
+// per-row failures structurally. Aggregation into a single error is no
+// longer performed here — that was the source of the bug-bash B1 wall-
+// of-text UX. Callers (the handler + tests) decide how to render
+// partial failures.
+func (realDemigrater) Demigrate(servers, clients []string) (*api.DemigrateReport, error) {
+	return api.NewAPI().Demigrate(api.DemigrateOpts{
 		Servers:        servers,
 		ClientsInclude: clients,
 	})
-	if err != nil {
-		return err
-	}
-	if report != nil && len(report.Failed) > 0 {
-		msgs := make([]string, 0, len(report.Failed))
-		for _, f := range report.Failed {
-			msgs = append(msgs, f.Server+"/"+f.Client+": "+f.Err)
-		}
-		return fmt.Errorf("%d demigrate row(s) failed: %s", len(report.Failed), strings.Join(msgs, "; "))
-	}
-	return nil
 }
 
 // dismisser is the narrow interface both /api/dismiss (POST) and
