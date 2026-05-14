@@ -31,6 +31,13 @@ export interface ScanEntry {
   name: string;
   status?: string;
   client_presence?: Record<string, ClientPresence>;
+  // True iff servers/<name>/manifest.yaml exists. Bug-bash A3 (#11/#12):
+  // legacy MCP entries discovered in client configs (e.g., `time-server`
+  // in .cursor/mcp.json) appear in scan output with manifest_exists=false
+  // and can_migrate=false. The main Servers matrix hides those rows;
+  // they surface in a read-only "Other MCP entries" expander so the
+  // operator can see them without confusing them for mcphub-managed.
+  manifest_exists?: boolean;
   // Bug-bash A2 bot r1 P2 closure: non-migratable rows (no manifest,
   // per-session, unknown) must NOT get "available" cells from
   // client_config_presence — clicking them would hit deterministic
@@ -60,6 +67,10 @@ export type Routing = "via-hub" | "direct" | "available" | "not-installed" | "un
 export interface ServerRow {
   name: string;
   routing: Record<string, Routing>;
+  // Bug-bash A3 (#11/#12): true when servers/<name>/manifest.yaml
+  // exists. Main Servers matrix filters to manifested rows; legacy
+  // non-mcphub entries surface in a separate expander.
+  manifested: boolean;
 }
 
 // Aggregate-per-server shape produced by aggregateStatus.

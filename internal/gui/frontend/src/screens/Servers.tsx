@@ -333,6 +333,22 @@ export function ServersScreen() {
     }
   }
 
+  // Bug-bash A3 (#11/#12): split rows into mcphub-managed (manifested)
+  // and legacy non-mcphub (no manifest). The main matrix only renders
+  // manifested servers — checkboxes for non-manifested rows would mean
+  // nothing (Apply migrate/demigrate both require a manifest). Legacy
+  // entries surface in a read-only "Other MCP entries" expander so the
+  // operator can see what's in client configs without confusing them
+  // for mcphub-managed.
+  // Bot r1 P2 closure: keep any row with a pending dirty edit visible
+  // in the main matrix, even if a scan race flipped manifest_exists to
+  // false (e.g., manifest deletion between fetch + render). Pre-fix,
+  // filtering by `s.manifested` alone could hide a row that still has
+  // queued migrate/demigrate work — Apply would fire on an invisible
+  // row and the operator couldn't inspect or undo from the UI.
+  const manifestedServers = servers.filter((s) => s.manifested || dirty.has(s.name));
+  const otherServers = servers.filter((s) => !s.manifested && !dirty.has(s.name));
+
   return (
     <div>
       <h1>Servers</h1>
@@ -358,7 +374,7 @@ export function ServersScreen() {
           </tr>
         </thead>
         <tbody>
-          {servers.map((server) => (
+          {manifestedServers.map((server) => (
             <ServerRowView
               key={server.name}
               server={server}
@@ -370,7 +386,48 @@ export function ServersScreen() {
           ))}
         </tbody>
       </table>
+      {otherServers.length > 0 && (
+        <OtherMCPEntriesSection servers={otherServers} />
+      )}
     </div>
+  );
+}
+
+// OtherMCPEntriesSection renders MCP server entries discovered in
+// client configs that have no corresponding manifest under
+// servers/<name>/manifest.yaml — e.g. operator's own legacy stdio
+// entries like `time-server` in `.cursor/mcp.json`. These rows are
+// read-only: migrate/demigrate are no-ops without a manifest.
+//
+// Bug-bash A3 (#11/#12) closure: pre-fix, these rows mixed into the
+// main matrix and rendered live checkboxes that did nothing on Apply,
+// confusing operators.
+function OtherMCPEntriesSection(props: { servers: ServerRow[] }) {
+  const { servers } = props;
+  return (
+    <details class="other-mcp-entries" style="margin-top:24px">
+      <summary>
+        <strong>Other MCP entries ({servers.length})</strong>
+        {" — "}
+        legacy or third-party MCP servers detected in client configs;
+        no mcphub manifest, so they can't be migrated through this matrix
+      </summary>
+      <ul style="font-family:monospace; font-size:0.9em; margin-top:8px">
+        {servers.map((s) => {
+          const clientsWithEntry = Object.entries(s.routing)
+            .filter(([, r]) => r === "via-hub" || r === "direct")
+            .map(([c]) => c);
+          return (
+            <li key={s.name}>
+              <code>{s.name}</code>
+              {clientsWithEntry.length > 0 && (
+                <span style="color:#666"> — in: {clientsWithEntry.join(", ")}</span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </details>
   );
 }
 

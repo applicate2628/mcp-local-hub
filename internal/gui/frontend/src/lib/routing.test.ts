@@ -88,6 +88,29 @@ describe("collectServers", () => {
     const out = collectServers(scan);
     expect(out[0].routing["claude-code"]).toBe("via-hub");
   });
+
+  // Bug-bash A3 (#11/#12): each ServerRow carries a `manifested` flag
+  // so Servers.tsx can split mcphub-managed rows from legacy non-mcphub
+  // entries discovered via /api/scan. Pre-fix, both groups rendered in
+  // the same matrix and the legacy rows had live but no-op checkboxes.
+  it("threads manifest_exists onto ServerRow.manifested", () => {
+    const scan: ScanResult = {
+      at: "",
+      entries: [
+        { name: "serena", client_presence: {}, manifest_exists: true },
+        { name: "time-server", client_presence: {}, manifest_exists: false },
+        { name: "ambiguous", client_presence: {} }, // omitted
+      ],
+    };
+    const out = collectServers(scan);
+    const byName = Object.fromEntries(out.map((s) => [s.name, s]));
+    expect(byName["serena"].manifested).toBe(true);
+    expect(byName["time-server"].manifested).toBe(false);
+    // Default for omitted: not manifested (safer than treating unknown
+    // as managed, since that lets the matrix render an Apply for
+    // something that has no plan).
+    expect(byName["ambiguous"].manifested).toBe(false);
+  });
 });
 
 // Bug-bash A2 (#13) closure: client_config_presence drives "available"

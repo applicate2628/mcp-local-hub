@@ -99,13 +99,18 @@ export function perClientRouting(
 }
 
 // collectServers adapts api.ScanResult into a sorted list of ServerRow.
-// Sorting by name matches the legacy vanilla-JS render order.
+// Sorting by name matches the legacy vanilla-JS render order. The
+// `manifested` flag passes through from scan entries so the Servers
+// screen can split the main matrix (mcphub-managed manifests) from a
+// read-only "Other MCP entries" view of legacy client config entries
+// without a corresponding manifest (bug-bash A3 #11/#12).
 export function collectServers(scan: ScanResult | null | undefined): ServerRow[] {
   const entries = scan?.entries ?? [];
   const ccp = scan?.client_config_presence ?? {};
   const out: ServerRow[] = entries.map((e) => ({
     name: e.name,
     routing: perClientRouting(e.client_presence ?? {}, ccp, e.can_migrate === true),
+    manifested: e.manifest_exists === true,
   }));
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
