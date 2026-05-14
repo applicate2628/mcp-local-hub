@@ -124,6 +124,12 @@ export function MigrationScreen() {
         // every failed row is the same server — render the client
         // names + error messages on separate lines.
         const detail = rows.map((r) => `${r.client}: ${r.err}`).join("\n");
+        // Bot r1 P2 closure on PR #182: even on partial failure, the
+        // backend MAY have restored some rows (report.restored). Reload
+        // scan state so the Migration screen reflects that — leaving
+        // successful rows in stale "can-migrate" view encourages a
+        // double-action against already-restored clients.
+        setScanReloadToken((n) => n + 1);
         throw new Error(
           rows.length === 0
             ? "demigrate partial failure (no row details returned)"
@@ -162,6 +168,12 @@ export function MigrationScreen() {
         const detail = rows
           .map((r) => `${r.server}/${r.client}: ${r.err}`)
           .join("\n");
+        // Bot r1 P2 closure on PR #182 (symmetric with /api/demigrate):
+        // partial-failure 207 may still report successful rows in
+        // report.applied[]. Reload scan state so the UI removes them
+        // from the "can-migrate" view; otherwise the operator might
+        // unnecessarily retry already-migrated servers.
+        setScanReloadToken((n) => n + 1);
         throw new Error(
           rows.length === 0
             ? "migrate partial failure (no row details returned)"
