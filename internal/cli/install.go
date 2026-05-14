@@ -69,8 +69,16 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 			// `mcphub setup` failed loudly with "target is in use"
 			// when daemons were still up.
 			if upgrade {
-				if server != "" || daemonFilter != "" || all || strings.TrimSpace(clientsFlag) != "" || allClients || reconcileHubMode {
-					return fmt.Errorf("--upgrade is mutually exclusive with --server/--daemon/--all/--clients/--all-clients/--reconcile-hub-mode")
+				// Bot r1 P2 closure on PR #181: --dry-run with --upgrade
+				// would silently violate the dry-run contract ("print
+				// planned actions without making changes") because
+				// runInstallUpgrade ignores the flag and goes through
+				// real Stop/Bootstrap/Restart. Reject the combo rather
+				// than implementing a half-baked preview; the upgrade
+				// flow is short enough that the operator can run
+				// `mcphub stop --all && mcphub status` for a preview.
+				if server != "" || daemonFilter != "" || all || strings.TrimSpace(clientsFlag) != "" || allClients || reconcileHubMode || dryRun {
+					return fmt.Errorf("--upgrade is mutually exclusive with --server/--daemon/--all/--clients/--all-clients/--reconcile-hub-mode/--dry-run")
 				}
 				return runInstallUpgrade(cmd)
 			}

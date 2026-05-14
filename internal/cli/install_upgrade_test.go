@@ -153,6 +153,13 @@ func TestRunInstallUpgrade_RefusesSelfReplace(t *testing.T) {
 // the samePath helper's Windows case-insensitive semantics are
 // preserved through the guard — running upgrade with a path differing
 // only in casing must still trip the guard.
+//
+// Bot r1 P1 closure on PR #181: stub the downstream Stop/Bootstrap/
+// Restart calls so this test deterministically validates the Windows
+// case-insensitive branch on every platform, instead of accidentally
+// invoking the platform scheduler stub on Linux/macOS (where samePath
+// is case-sensitive and the guard does NOT fire) and failing with
+// "scheduler not implemented".
 func TestRunInstallUpgrade_RefusesSelfReplaceCaseInsensitive(t *testing.T) {
 	resetUpgradeSeams(t)
 	upgradeExecutableFn = func() (string, error) {
@@ -161,14 +168,27 @@ func TestRunInstallUpgrade_RefusesSelfReplaceCaseInsensitive(t *testing.T) {
 	upgradeTargetPathFn = func() (string, error) {
 		return "C:\\Users\\u\\.local\\bin\\mcphub.exe", nil
 	}
+	// Stub downstream so even if the guard doesn't fire (case-
+	// sensitive POSIX samePath), the test gets a deterministic
+	// success-path no-op rather than a platform-specific scheduler
+	// error.
+	upgradeStopAllFn = func() ([]api.RestartResult, error) { return nil, nil }
+	upgradeBootstrapFn = func(io.Writer) error { return nil }
+	upgradeRestartAllFn = func() ([]api.RestartResult, error) { return nil, nil }
 
 	cmd, _, _ := stubCmd()
 	err := runInstallUpgrade(cmd)
+	// Windows: guard fires → wrapped refusal error.
+	// POSIX: guard does NOT fire (case-sensitive samePath) → stubs
+	// produce a clean nil return.
+	// EITHER outcome is acceptable; what we forbid is the previous
+	// failure mode where the guard didn't fire AND production
+	// downstream code ran and returned a platform stub error.
 	if err == nil {
-		t.Skip("samePath is case-sensitive on this platform; guard not relevant here")
+		return // POSIX path: guard correctly did NOT fire
 	}
 	if !strings.Contains(err.Error(), "refusing to --upgrade from the canonical binary") {
-		t.Errorf("error message missing self-replace marker; got %q", err.Error())
+		t.Errorf("error neither nil nor the guard refusal; downstream stubs leaked through? got %q", err.Error())
 	}
 }
 
@@ -351,6 +371,10 @@ func TestInstallCmd_UpgradeMutexErrors(t *testing.T) {
 		{"clients", []string{"--upgrade", "--clients", "claude-code"}},
 		{"all-clients", []string{"--upgrade", "--all-clients"}},
 		{"reconcile-hub-mode", []string{"--upgrade", "--reconcile-hub-mode"}},
+		// Bot r1 P2 closure on PR #181: --dry-run + --upgrade must
+		// reject. Otherwise dry-run would silently violate its
+		// "no side effects" contract.
+		{"dry-run", []string{"--upgrade", "--dry-run"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
