@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -21,6 +22,34 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
+
+// resolveGuiPort decides which port mcphub gui will bind. Bug-bash A5
+// (#18/#19/#20) closure: pre-fix, the --port flag defaulted to 0
+// (auto-pick) and the persisted `gui_server.port` setting was never
+// consulted at startup. Users who set 9125 in Settings + restarted
+// were still bound to an OS-assigned ephemeral port; Settings showed
+// 9125 as "configured" with "Restart required to take effect" but
+// restart didn't help.
+//
+// Resolution order:
+//  1. --port flag explicitly passed (any value, including 0 for
+//     explicit ephemeral): operator override wins.
+//  2. `gui_server.port` setting parses to an int in [1024, 65535]:
+//     use that.
+//  3. Fallback to 0 (auto-pick).
+//
+// Pure function so it can be unit-tested without spinning a server.
+// Tests cover all three branches + invalid setting values + boundary
+// ports.
+func resolveGuiPort(flagChanged bool, flagValue int, settingValue string) int {
+	if flagChanged {
+		return flagValue
+	}
+	if n, err := strconv.Atoi(strings.TrimSpace(settingValue)); err == nil && n >= 1024 && n <= 65535 {
+		return n
+	}
+	return 0
+}
 
 // inputIsTerminal reports whether r is a terminal-backed *os.File. The
 // non-TTY guard for --force --kill must check the SAME stream the
@@ -154,6 +183,18 @@ activates the first window and exits 0.`,
 			}
 			if d := os.Getenv("MCPHUB_GUI_TEST_PIDPORT_DIR"); d != "" {
 				pidportPath = filepath.Join(d, "gui.pidport")
+			}
+
+			// Bug-bash A5 (#18/#19/#20): resolve the effective port using
+			// the explicit flag → persisted setting → 0 (auto-pick) order.
+			// Pre-fix, the persisted `gui_server.port` setting was purely
+			// cosmetic — startup always bound `port` as passed by the flag
+			// (default 0). Operators who changed Settings + restarted were
+			// still bound to an OS-assigned ephemeral port; the
+			// "Restart required to take effect" warning was misleading.
+			if !cmd.Flags().Changed("port") {
+				settingVal, _ := api.NewAPI().SettingsGet("gui_server.port")
+				port = resolveGuiPort(false, port, settingVal)
 			}
 
 			// Phase A: acquire the single-instance lock BEFORE binding any
