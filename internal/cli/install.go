@@ -28,6 +28,7 @@ func newInstallCmdReal() *cobra.Command {
 	var all bool
 	var allClients bool
 	var reconcileHubMode bool
+	var upgrade bool
 	c := &cobra.Command{
 		Use:   "install",
 		Short: "Install an MCP server as shared daemon(s)",
@@ -50,6 +51,7 @@ Examples:
   mcphub install --server serena --daemon codex # install only one daemon
   mcphub install --server serena --dry-run     # preview actions, change nothing
   mcphub install --all                         # install every shipped manifest
+  mcphub install --upgrade                     # stop daemons, copy this binary, restart
 
 Prerequisites:
   - First-time users: run 'mcphub setup' once to canonicalize the binary
@@ -59,6 +61,27 @@ Prerequisites:
 
 See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Bug-bash A7 minimal closure (#4): --upgrade is the
+			// one-shot binary replacement entry point. Pre-A7 the
+			// operator had to stop daemons, run `mcphub setup` to
+			// recopy the binary, then restart daemons by hand —
+			// three steps, easy to skip the middle one, and
+			// `mcphub setup` failed loudly with "target is in use"
+			// when daemons were still up.
+			if upgrade {
+				// Bot r1 P2 closure on PR #181: --dry-run with --upgrade
+				// would silently violate the dry-run contract ("print
+				// planned actions without making changes") because
+				// runInstallUpgrade ignores the flag and goes through
+				// real Stop/Bootstrap/Restart. Reject the combo rather
+				// than implementing a half-baked preview; the upgrade
+				// flow is short enough that the operator can run
+				// `mcphub stop --all && mcphub status` for a preview.
+				if server != "" || daemonFilter != "" || all || strings.TrimSpace(clientsFlag) != "" || allClients || reconcileHubMode || dryRun {
+					return fmt.Errorf("--upgrade is mutually exclusive with --server/--daemon/--all/--clients/--all-clients/--reconcile-hub-mode/--dry-run")
+				}
+				return runInstallUpgrade(cmd)
+			}
 			// codex bot phase5 r3 P1 closure on PR #160:
 			// --reconcile-hub-mode runs the bidirectional install
 			// reconciler (BuildHubReconcilePlan +
@@ -162,6 +185,11 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 		"run the bidirectional hub-endpoint reconciler against the current gui_server.hub_endpoint_enabled setting; "+
 			"rewrites every client config to/from the mcphub-hub aggregate entry. "+
 			"Run AFTER flipping the Settings toggle and restarting the hub.")
+	c.Flags().BoolVar(&upgrade, "upgrade", false,
+		"upgrade the canonical mcphub binary at ~/.local/bin/mcphub.exe to the currently-running build: "+
+			"stop every mcp-local-hub-* daemon, copy this binary over the canonical path, "+
+			"then restart every daemon from the new binary. Refuses when run from the canonical "+
+			"path (run from your build directory, e.g. './mcphub install --upgrade' after 'go build').")
 	return c
 }
 
@@ -530,4 +558,249 @@ func maybeBootstrapInteractively(w io.Writer, in *os.File) error {
 		return Bootstrap(w)
 	}
 	return fmt.Errorf("%s not found on PATH — run `mcphub setup` once to install to ~/.local/bin and register in PATH", mcphubShortName)
+}
+
+// ---------------------------------------------------------------------------
+// `mcphub install --upgrade` — bug-bash A7 minimal closure (#4).
+// ---------------------------------------------------------------------------
+
+// upgradeStopAllFn, upgradeBootstrapFn, and upgradeRestartAllFn are
+// test seams that let install_upgrade_test.go drive the orchestration
+// without spawning real daemons or touching the filesystem. Production
+// nil → fall through to the real implementations (a.StopAll, Bootstrap,
+// a.RestartAll). Tests assign fakes inside the test setup.
+var (
+	upgradeStopAllFn    func() ([]api.RestartResult, error)
+	upgradeBootstrapFn  func(io.Writer) error
+	upgradeRestartAllFn func() ([]api.RestartResult, error)
+	// upgradeExecutableFn / upgradeTargetPathFn carry the canonical-
+	// path comparison for the self-replace guard. Tests inject any
+	// path pair to drive the refusal branch without filesystem state.
+	upgradeExecutableFn func() (string, error)
+	upgradeTargetPathFn func() (string, error)
+)
+
+// runInstallUpgrade is the entry point behind `mcphub install --upgrade`.
+//
+// Flow:
+//
+//  1. Self-replace guard. Refuse if os.Executable() == canonical target
+//     path (~/.local/bin/mcphub.exe). Running --upgrade FROM the
+//     canonical binary would be a no-op at best (samePath in Bootstrap
+//     skips the copy) and a confusing rename-failure at worst on Windows
+//     (the running image cannot replace itself). The dual-binary
+//     trampoline that lifts this restriction is bug #1, deferred.
+//
+//  2. StopAll. Kill every running mcp-local-hub-* daemon by port and
+//     /End its scheduler task. This is what releases the Windows file
+//     lock on ~/.local/bin/mcphub.exe so step 3 can replace it.
+//     Scheduler task XML stays put — `sch.Stop` does not delete; the
+//     task is just paused. Per-task stop failures are logged but do
+//     NOT abort the upgrade; rare cases (Stuck Force-killed daemon
+//     etc.) still need the binary copy to succeed.
+//
+//  3. Copy-only bootstrap. Copies the currently-running binary
+//     (os.Executable()) to ~/.local/bin/mcphub.exe via tempfile +
+//     atomic rename. Reuses the existing `mcphub setup` copy helper
+//     but SKIPS PATH registration (bot r2 P1 closure on PR #181):
+//     `Bootstrap` does both copy AND `ensureOnPath`, and a HKCU PATH
+//     write hiccup during upgrade would propagate up, skip RestartAll,
+//     and leave the daemon fleet down. PATH is a one-time setup
+//     concern handled by `mcphub setup`, not upgrade.
+//
+//  4. RestartAll. /Run every paused task. The new tasks read XML that
+//     references ~/.local/bin/mcphub.exe by absolute path, so they
+//     pick up the NEW binary automatically.
+//
+// Watchdog interleaving. The watchdog scheduled task runs every 5 min.
+// The upgrade window (Stop → Bootstrap → Restart) is sub-second in
+// the steady state, so a watchdog tick landing inside it is rare. If
+// one DOES land, the watchdog spawns `mcphub watchdog --once` from
+// the OLD binary, restarts a daemon, re-locks the canonical path,
+// and Bootstrap fails with `target in use`. The operator's recovery
+// is identical to step 2 failure: stop the daemon manually, rerun
+// --upgrade. A "disable watchdog during upgrade" dance would add
+// two new failure modes (re-enable might fail) for a tiny edge case;
+// not worth it for the minimal fix.
+//
+// Partial restart failure. If Bootstrap succeeds but RestartAll
+// reports per-task failures, the operator is in a state where the
+// binary is fresh but some daemons are down. RunE returns the
+// aggregate error so the caller sees the failure; recovery is
+// `mcphub restart --all` (idempotent). No rollback to the old
+// binary — keeping a backup and reverting would add complexity
+// and a new persistence surface; the operator explicitly opted into
+// --upgrade, so they accept manual convergence in this rare case.
+func runInstallUpgrade(cmd *cobra.Command) error {
+	a := api.NewAPI()
+	out := cmd.OutOrStdout()
+	errOut := cmd.ErrOrStderr()
+
+	// 1. Self-replace guard. Compare by filesystem identity (inode /
+	// Windows FileID via os.SameFile) rather than cleaned path string:
+	// aliases (symlinks, NTFS junctions, 8.3 short-names) can make
+	// curExe and target differ as strings while pointing at the same
+	// underlying file. Bot r3 P2 closure on PR #181: pre-fix, the
+	// guard would let an aliased self-replace through, StopAll would
+	// stop every daemon, and copyExe would then fail with "target in
+	// use" (the running image still holds the file lock) — fleet down
+	// for an avoidable reason.
+	curExe, target, err := resolveUpgradeSelfPaths()
+	if err != nil {
+		return fmt.Errorf("resolve self-replace guard paths: %w", err)
+	}
+	if upgradeIsSelfReplace(curExe, target) {
+		return fmt.Errorf(
+			"refusing to --upgrade from the canonical binary at %s "+
+				"(current executable %s resolves to the same file via path or symlink/junction/short-name alias): "+
+				"the running image cannot replace itself on Windows. "+
+				"Build a new binary (e.g. `go build ./cmd/mcphub`) and run "+
+				"`./mcphub install --upgrade` (or `.\\mcphub.exe install --upgrade`) "+
+				"from the build directory instead.",
+			target, curExe)
+	}
+
+	// 2. Stop all daemons (release the binary lock).
+	fmt.Fprintln(out, "Stopping running daemons...")
+	stopResults, err := upgradeStopAll(a)
+	if err != nil {
+		return fmt.Errorf("stop all: %w", err)
+	}
+	for _, r := range stopResults {
+		if r.Err != "" {
+			fmt.Fprintf(errOut, "⚠ stop %s: %s\n", r.TaskName, r.Err)
+		} else {
+			fmt.Fprintf(out, "✓ stopped %s\n", r.TaskName)
+		}
+	}
+
+	// 3. Copy the new binary into the canonical path.
+	//
+	// Bot r3 P2 closure on PR #181: on copyExe failure (e.g., a
+	// stuck daemon still holding the file lock after StopAll
+	// reported success), the underlying error message hints at
+	// `mcphub setup` for recovery. That's wrong in --upgrade
+	// context: daemons are already stopped here, and `mcphub setup`
+	// does NOT restart them. Wrap with upgrade-specific recovery:
+	// re-run --upgrade (idempotent on the copy step, no harm if the
+	// binary is already current) OR run `mcphub restart --all` to
+	// converge if the binary is OK but daemons are still down.
+	fmt.Fprintln(out, "Copying new binary...")
+	if err := upgradeBootstrap(out); err != nil {
+		return fmt.Errorf(
+			"bootstrap (binary copy) failed after daemons were stopped: %w; "+
+				"recovery: re-run `mcphub install --upgrade` (idempotent), "+
+				"or `mcphub restart --all` to restart daemons without copying",
+			err)
+	}
+
+	// 4. Restart every paused task from the new binary.
+	fmt.Fprintln(out, "Restarting daemons...")
+	restartResults, err := upgradeRestartAll(a)
+	if err != nil {
+		return fmt.Errorf("restart all: %w", err)
+	}
+	failed := 0
+	for _, r := range restartResults {
+		if r.Err != "" {
+			failed++
+			fmt.Fprintf(errOut, "✗ restart %s: %s\n", r.TaskName, r.Err)
+		} else {
+			fmt.Fprintf(out, "✓ restarted %s\n", r.TaskName)
+		}
+	}
+	if failed > 0 {
+		return fmt.Errorf(
+			"%d daemon(s) failed to restart after upgrade; binary is updated, "+
+				"run `mcphub restart --all` to converge",
+			failed)
+	}
+	return nil
+}
+
+// resolveUpgradeSelfPaths returns (current executable, canonical
+// target) for the self-replace guard, routing through the test seams
+// when set. Errors propagate so the caller can surface a wrapped
+// diagnostic; production paths only return error when os.Executable
+// or os.UserHomeDir fail (extremely rare).
+func resolveUpgradeSelfPaths() (curExe, target string, err error) {
+	if upgradeExecutableFn != nil {
+		curExe, err = upgradeExecutableFn()
+	} else {
+		curExe, err = os.Executable()
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("resolve current executable: %w", err)
+	}
+	if upgradeTargetPathFn != nil {
+		target, err = upgradeTargetPathFn()
+	} else {
+		target, err = setupTargetPath()
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("resolve canonical target: %w", err)
+	}
+	return curExe, target, nil
+}
+
+// upgradeStopAll routes through the upgradeStopAllFn seam if set,
+// otherwise a.StopAll. Kept as a thin wrapper so tests can replace
+// either side independently.
+func upgradeStopAll(a *api.API) ([]api.RestartResult, error) {
+	if upgradeStopAllFn != nil {
+		return upgradeStopAllFn()
+	}
+	return a.StopAll()
+}
+
+// upgradeBootstrap routes through upgradeBootstrapFn if set, otherwise
+// the copy-only helper (bot r2 P1 closure on PR #181: skip ensureOnPath
+// so a HKCU PATH write hiccup doesn't take down the daemon fleet during
+// upgrade). PATH registration stays in `mcphub setup`'s purview.
+func upgradeBootstrap(w io.Writer) error {
+	if upgradeBootstrapFn != nil {
+		return upgradeBootstrapFn(w)
+	}
+	return bootstrapCopyOnly(w)
+}
+
+// upgradeIsSelfReplace reports whether curExe and target reference the
+// same underlying file by either:
+//
+//   - filesystem identity (os.SameFile on inode/FileID, which catches
+//     symlinks, NTFS junctions, and 8.3 short-name aliases — bot r3 P2
+//     closure on PR #181), OR
+//   - cleaned absolute path string match (samePath; the legacy
+//     comparison, kept as a fallback for the first-install case where
+//     the target file does not exist yet and SameFile can't compare).
+//
+// The two-layer check is fail-closed: if SameFile is unavailable (e.g.,
+// either path Stat fails because the target hasn't been created), the
+// string-based check still catches the obvious "user typed the
+// canonical path directly" case. The string-only legacy was the path
+// the bot's r3 P2 finding flagged as bypassable.
+func upgradeIsSelfReplace(curExe, target string) bool {
+	if samePath(curExe, target) {
+		return true
+	}
+	curInfo, err := os.Stat(curExe)
+	if err != nil {
+		return false
+	}
+	targetInfo, err := os.Stat(target)
+	if err != nil {
+		// Target doesn't exist yet (first install) — no self-replace
+		// risk; string comparison already returned false above.
+		return false
+	}
+	return os.SameFile(curInfo, targetInfo)
+}
+
+// upgradeRestartAll routes through the upgradeRestartAllFn seam if
+// set, otherwise a.RestartAll.
+func upgradeRestartAll(a *api.API) ([]api.RestartResult, error) {
+	if upgradeRestartAllFn != nil {
+		return upgradeRestartAllFn()
+	}
+	return a.RestartAll()
 }
