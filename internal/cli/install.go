@@ -636,19 +636,28 @@ func runInstallUpgrade(cmd *cobra.Command) error {
 	out := cmd.OutOrStdout()
 	errOut := cmd.ErrOrStderr()
 
-	// 1. Self-replace guard.
+	// 1. Self-replace guard. Compare by filesystem identity (inode /
+	// Windows FileID via os.SameFile) rather than cleaned path string:
+	// aliases (symlinks, NTFS junctions, 8.3 short-names) can make
+	// curExe and target differ as strings while pointing at the same
+	// underlying file. Bot r3 P2 closure on PR #181: pre-fix, the
+	// guard would let an aliased self-replace through, StopAll would
+	// stop every daemon, and copyExe would then fail with "target in
+	// use" (the running image still holds the file lock) — fleet down
+	// for an avoidable reason.
 	curExe, target, err := resolveUpgradeSelfPaths()
 	if err != nil {
 		return fmt.Errorf("resolve self-replace guard paths: %w", err)
 	}
-	if samePath(curExe, target) {
+	if upgradeIsSelfReplace(curExe, target) {
 		return fmt.Errorf(
-			"refusing to --upgrade from the canonical binary at %s: "+
+			"refusing to --upgrade from the canonical binary at %s "+
+				"(current executable %s resolves to the same file via path or symlink/junction/short-name alias): "+
 				"the running image cannot replace itself on Windows. "+
 				"Build a new binary (e.g. `go build ./cmd/mcphub`) and run "+
 				"`./mcphub install --upgrade` (or `.\\mcphub.exe install --upgrade`) "+
 				"from the build directory instead.",
-			target)
+			target, curExe)
 	}
 
 	// 2. Stop all daemons (release the binary lock).
@@ -666,9 +675,23 @@ func runInstallUpgrade(cmd *cobra.Command) error {
 	}
 
 	// 3. Copy the new binary into the canonical path.
+	//
+	// Bot r3 P2 closure on PR #181: on copyExe failure (e.g., a
+	// stuck daemon still holding the file lock after StopAll
+	// reported success), the underlying error message hints at
+	// `mcphub setup` for recovery. That's wrong in --upgrade
+	// context: daemons are already stopped here, and `mcphub setup`
+	// does NOT restart them. Wrap with upgrade-specific recovery:
+	// re-run --upgrade (idempotent on the copy step, no harm if the
+	// binary is already current) OR run `mcphub restart --all` to
+	// converge if the binary is OK but daemons are still down.
 	fmt.Fprintln(out, "Copying new binary...")
 	if err := upgradeBootstrap(out); err != nil {
-		return fmt.Errorf("bootstrap: %w", err)
+		return fmt.Errorf(
+			"bootstrap (binary copy) failed after daemons were stopped: %w; "+
+				"recovery: re-run `mcphub install --upgrade` (idempotent), "+
+				"or `mcphub restart --all` to restart daemons without copying",
+			err)
 	}
 
 	// 4. Restart every paused task from the new binary.
@@ -739,6 +762,38 @@ func upgradeBootstrap(w io.Writer) error {
 		return upgradeBootstrapFn(w)
 	}
 	return bootstrapCopyOnly(w)
+}
+
+// upgradeIsSelfReplace reports whether curExe and target reference the
+// same underlying file by either:
+//
+//   - filesystem identity (os.SameFile on inode/FileID, which catches
+//     symlinks, NTFS junctions, and 8.3 short-name aliases — bot r3 P2
+//     closure on PR #181), OR
+//   - cleaned absolute path string match (samePath; the legacy
+//     comparison, kept as a fallback for the first-install case where
+//     the target file does not exist yet and SameFile can't compare).
+//
+// The two-layer check is fail-closed: if SameFile is unavailable (e.g.,
+// either path Stat fails because the target hasn't been created), the
+// string-based check still catches the obvious "user typed the
+// canonical path directly" case. The string-only legacy was the path
+// the bot's r3 P2 finding flagged as bypassable.
+func upgradeIsSelfReplace(curExe, target string) bool {
+	if samePath(curExe, target) {
+		return true
+	}
+	curInfo, err := os.Stat(curExe)
+	if err != nil {
+		return false
+	}
+	targetInfo, err := os.Stat(target)
+	if err != nil {
+		// Target doesn't exist yet (first install) — no self-replace
+		// risk; string comparison already returned false above.
+		return false
+	}
+	return os.SameFile(curInfo, targetInfo)
 }
 
 // upgradeRestartAll routes through the upgradeRestartAllFn seam if
