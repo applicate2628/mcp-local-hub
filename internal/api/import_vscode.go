@@ -126,6 +126,10 @@ func (a *API) ImportVSCodeWorkspace(workspacePath string, opts VSCodeImportOpts)
 		PathSeparator: pathSep,
 		Getenv:        getenv,
 		UndefinedEnv:  map[string]struct{}{},
+		// Import reads workspace-controlled input. Keep sensitive
+		// ${env:VAR} placeholders verbatim so local secrets are not
+		// materialized into stdout / draft YAML.
+		SkipSensitiveEnv: true,
 	}
 
 	var entries []vscodeProjected
@@ -141,6 +145,9 @@ func (a *API) ImportVSCodeWorkspace(workspacePath string, opts VSCodeImportOpts)
 
 	for _, name := range sortedKeys(exp.UndefinedEnv) {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("placeholder ${env:%s} expanded to empty string (variable not set)", name))
+	}
+	for _, name := range exp.SensitiveSkipped {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("placeholder ${env:%s} looks sensitive — left verbatim so local secret values are not written into the generated YAML", name))
 	}
 
 	// EmptyResult fires when NO entries projected, even if the source
