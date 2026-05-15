@@ -444,18 +444,7 @@ func patternsFromClientStdio() []string {
 				add(base)
 			}
 			for _, arg := range e.Args {
-				if len(arg) < 4 {
-					continue
-				}
-				if strings.HasPrefix(arg, "-") {
-					continue
-				}
-				if isAllDigits(arg) {
-					// Numeric-only args (ports, PIDs) are
-					// non-discriminating and would
-					// substring-match unrelated processes
-					// that happen to mention the same
-					// number. Skip them.
+				if !argIsDiscriminatingPattern(arg) {
 					continue
 				}
 				if patternIsTooBroad(arg) {
@@ -517,6 +506,51 @@ func isMcphubBinaryBasename(bare string) bool {
 		return true
 	}
 	return false
+}
+
+// argIsDiscriminatingPattern reports whether an arg token is
+// specific enough to be safely emitted as a kill-match substring
+// pattern by CleanupOrphans (--scan-clients mode).
+//
+// Manual smoke on PR #190 surfaced that lax filtering let
+// generic-word args poison the pattern set with substrings that
+// false-matched unrelated workstation processes:
+//
+//   - "localhost" (9 chars, no separator) — would match any
+//     loopback URL in any process's cmdline
+//   - "false" (5 chars) — matches anything containing the literal
+//     word "false" (Dropbox crashpad-handler cmdlines have it)
+//   - "3.13" (4 chars) — matches Python 3.13 install paths
+//
+// Rules (must satisfy ALL):
+//
+//   - length ≥ 8 chars — drops short common words
+//   - does NOT start with `-` — flags are shared across many entries
+//   - is NOT purely numeric — port numbers, PIDs, timeouts are
+//     non-discriminating
+//   - contains at least one of `-`, `@`, `/`, `\`, `.` — npm scoped
+//     packages, dashed binary names, paths, and Python-module dotted
+//     names all match; bare English words don't.
+//
+// Trade-off: some legitimate short discriminators (e.g. "serena",
+// "memory" as a server-name arg) are no longer emitted. Operators
+// who need cleanup for those orphans must use the manifest-pattern
+// path (without --scan-clients) or kill manually. Safer to miss
+// than to false-positive Dropbox.
+func argIsDiscriminatingPattern(arg string) bool {
+	if len(arg) < 8 {
+		return false
+	}
+	if strings.HasPrefix(arg, "-") {
+		return false
+	}
+	if isAllDigits(arg) {
+		return false
+	}
+	if !strings.ContainsAny(arg, `-@/\.`) {
+		return false
+	}
+	return true
 }
 
 // isAllDigits reports whether s is non-empty and contains only
@@ -774,11 +808,43 @@ func parseOrphans(r io.Reader, patterns []string) []OrphanProcess {
 		if len(fields) < 6 {
 			continue
 		}
-		cmdline := fields[1]
-		created := parseWmicDate(strings.TrimSpace(fields[2]))
-		ppid, _ := strconv.Atoi(strings.TrimSpace(fields[3]))
-		pid, _ := strconv.Atoi(strings.TrimSpace(fields[4]))
-		ram, _ := strconv.ParseUint(strings.TrimSpace(fields[5]), 10, 64)
+		// WMIC's `/format:csv` output does NOT quote the cmdline
+		// field. When cmdline contains commas (very common:
+		// `--setting-sources=user,project,local`,
+		// `--allow-list=a,b,c`, anything with CSV-shaped values),
+		// splitCSVLine produces MORE than 6 fields and naive
+		// fields[3]/fields[4] indexing returns pieces of the
+		// cmdline instead of ppid/pid. Garbage PIDs then poison
+		// byPID, and the ancestor-walk in the orphan detector
+		// can't find live client launchers — silently flagging
+		// LIVE stdio MCP children for killing on
+		// `cleanup --scan-clients --confirm`.
+		//
+		// Manual smoke on PR #190 caught this with claude.exe
+		// whose cmdline included
+		// `--setting-sources=user,project,local`: PID 173992 was
+		// stored under a garbage integer parsed from `local
+		// --permission-mode bypassPermissions ...` and the gopls
+		// child of that claude session was flagged as orphan.
+		//
+		// Fix: anchor from the RIGHT. The trailing 4 fields
+		// (created date, ppid, pid, ram) are well-shaped
+		// integers/dates with no embedded commas, so they
+		// align reliably regardless of how many commas the
+		// cmdline contributed. The cmdline is reassembled by
+		// rejoining the middle slice with commas.
+		n := len(fields)
+		cmdline := strings.Join(fields[1:n-4], ",")
+		created := parseWmicDate(strings.TrimSpace(fields[n-4]))
+		ppid, err1 := strconv.Atoi(strings.TrimSpace(fields[n-3]))
+		pid, err2 := strconv.Atoi(strings.TrimSpace(fields[n-2]))
+		ram, err3 := strconv.ParseUint(strings.TrimSpace(fields[n-1]), 10, 64)
+		if err1 != nil || err2 != nil || err3 != nil || pid == 0 {
+			// Malformed row — skip rather than poison byPID with
+			// garbage that would corrupt downstream parent-chain
+			// lookups for other rows.
+			continue
+		}
 		rows = append(rows, row{pid: pid, ppid: ppid, created: created, cmdline: cmdline, ram: ram})
 	}
 
