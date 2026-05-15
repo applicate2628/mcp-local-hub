@@ -1,0 +1,275 @@
+//go:build windows
+
+// client_write_init_windows_test.go — Windows-only DACL assertion
+// tests for secureWriteWithOperatorOpt's relax lane (PR #185 r3,
+// codex deep-sec P1 closure on r2).
+//
+// PR #185 r2 codex deep-sec found that the previous relax lane
+// (os.CreateTemp + path-based SetNamedSecurityInfo) left a race
+// window: temp file created with parent-inherited DACL → bytes
+// written before DACL hardened → co-resident principal could
+// race-open the temp file before the path-based DACL setter ran,
+// retain handle past the DACL tighten, and read tokens.
+//
+// PR #185 r3 routes the relax lane through the SAME handle-relative
+// hardened pipeline as the strict path (parent-dir gate disabled
+// only). The handle-based SetSecurityInfo at step 5 of the pipeline
+// installs the restrictive DACL BEFORE any bytes hit disk, closing
+// the race window.
+//
+// These tests pin the security boundary by synthesizing a parent
+// dir with a non-allowlisted ACE (Authenticated Users:GenericRead),
+// running the relax lane, then opening the resulting file and
+// asserting its DACL has NO non-allowlisted principals.
+//
+// Codex deep-sec PR #185 r2 P1 test-gap closure:
+//   "TestSecureWriteWithOperatorOpt_DefaultRelaxOnGateFailure on
+//    Windows asserts no error + content only ... would still pass if
+//    hardenTempFileForUnhardenedFallback became no-op and the file
+//    inherited Authenticated Users or Everyone."
+
+package api
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"golang.org/x/sys/windows"
+)
+
+// TestSecureWriteWithOperatorOpt_RelaxOnGateFailure_WindowsDACLHardened
+// is the Windows-only security-boundary test for the relax lane.
+//
+// Setup: a parent dir with a synthesized Authenticated Users
+// (S-1-5-11) GENERIC_READ ACE — this is the exact failure mode the
+// parent-dir gate is designed to reject, and the relax lane is
+// designed to write through anyway.
+//
+// Assertion: after secureWriteWithOperatorOpt runs (default-relax,
+// no env vars set), the resulting file at the destination MUST have
+// a restrictive DACL — only {current-user, LocalSystem,
+// BuiltinAdministrators} get access. Authenticated Users and Everyone
+// must NOT appear in the file's DACL.
+//
+// Why this matters: the previous r2 implementation passed this same
+// test by relying on a path-based SetNamedSecurityInfo call AFTER
+// the temp file was already created with parent-inherited DACL —
+// the test ran in a single-threaded context so the race window
+// didn't actually manifest, but the security boundary was nominally
+// the same. The r3 fix moves the DACL apply to the file HANDLE at
+// create time (via the hardened pipeline's step 5), which is what
+// closes the race against a co-resident principal that watches the
+// directory for new files. This test verifies the FINAL state of
+// the file matches expectations; race-window observation tests
+// would need real co-resident threads and are out of scope for the
+// unit-test layer.
+func TestSecureWriteWithOperatorOpt_RelaxOnGateFailure_WindowsDACLHardened(t *testing.T) {
+	t.Setenv(AllowUnhardenedClientWriteEnv, "") // no legacy opt-in
+	t.Setenv(RequireSingleUserHomeEnv, "")      // no strict opt-in
+
+	parent := filepath.Join(t.TempDir(), "leaky-parent")
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatalf("mkdir parent: %v", err)
+	}
+	synthesizeDirWithAuthUsersReadACE(t, parent)
+
+	dst := filepath.Join(parent, "client-config.json")
+	want := []byte(`{"token":"secret"}`)
+	if err := secureWriteWithOperatorOpt(dst, want); err != nil {
+		t.Fatalf("relax write under permissive parent: %v", err)
+	}
+
+	// Assert content first — write succeeded.
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("read written file: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("written contents = %q, want %q", got, want)
+	}
+
+	// Open the file with READ_CONTROL to read its DACL.
+	pathW, err := windows.UTF16PtrFromString(dst)
+	if err != nil {
+		t.Fatalf("UTF16PtrFromString: %v", err)
+	}
+	h, err := windows.CreateFile(
+		pathW,
+		windows.READ_CONTROL,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_ATTRIBUTE_NORMAL,
+		0,
+	)
+	if err != nil {
+		t.Fatalf("CreateFile on written file: %v", err)
+	}
+	defer windows.CloseHandle(h)
+
+	// Reuse the hardened pipeline's own verifier on the written
+	// file. verifyWindowsDACLFromHandle enforces the same allowlist
+	// the hardened path's post-rename re-verify uses: current user,
+	// LocalSystem, BuiltinAdministrators. Anything else (Authenticated
+	// Users, Everyone, Domain Users, CodexSandboxUsers, AppContainer
+	// SIDs) makes it return an error naming the disallowed principal.
+	if err := verifyWindowsDACLFromHandle(h); err != nil {
+		t.Errorf("relax lane left file with non-allowlisted DACL: %v", err)
+	}
+}
+
+// TestSecureWriteWithOperatorOpt_RelaxOnGateFailure_NoTempLeak
+// verifies the relax lane does not leave a temp file behind under
+// the parent dir after success. The handle-relative pipeline uses
+// an unpredictable temp name + atomic rename across the held
+// handle, so the only file in the parent should be the destination
+// itself.
+//
+// Codex deep-sec PR #185 r2 P3 (orthogonal): regression coverage
+// against a "rename moved part of the file, temp stays" scenario.
+func TestSecureWriteWithOperatorOpt_RelaxOnGateFailure_NoTempLeak(t *testing.T) {
+	t.Setenv(AllowUnhardenedClientWriteEnv, "")
+	t.Setenv(RequireSingleUserHomeEnv, "")
+
+	parent := filepath.Join(t.TempDir(), "leaky-parent")
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatalf("mkdir parent: %v", err)
+	}
+	synthesizeDirWithAuthUsersReadACE(t, parent)
+
+	dst := filepath.Join(parent, "client-config.json")
+	if err := secureWriteWithOperatorOpt(dst, []byte(`{"v":1}`)); err != nil {
+		t.Fatalf("relax write: %v", err)
+	}
+
+	// Enumerate parent. Only entry should be the destination basename.
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		t.Fatalf("readdir parent: %v", err)
+	}
+	if len(entries) != 1 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("expected exactly 1 file in parent (the destination); got %d: %v", len(entries), names)
+	}
+	if len(entries) == 1 && entries[0].Name() != "client-config.json" {
+		t.Errorf("unexpected file in parent: %s (want client-config.json)", entries[0].Name())
+	}
+}
+
+// TestSecureWriteWithOperatorOpt_RelaxLaneEmitsWarnAuditLog pins
+// codex deep-sec PR #185 r2 P3 closure: when the relax lane fires
+// (gate failure + neither strict opt-in nor unset suppression), a
+// structured event MUST be emitted to hub-mcp.log with:
+//
+//   - event = "client-write-unhardened-fallback"
+//   - level = "warn" (not "info" — security-boundary downgrade is
+//     dashboard-visible)
+//   - reason = "default-relax-on-solo-host" or the legacy-opt-in
+//     wording (this test exercises the default path)
+//   - path = destination
+//
+// Without this assertion, a future refactor could silently change
+// the level back to "info" (the original r2 implementation), and
+// log-monitoring dashboards filtering "warn+" would miss the
+// downgrade.
+func TestSecureWriteWithOperatorOpt_RelaxLaneEmitsWarnAuditLog(t *testing.T) {
+	// Redirect the state dir so RecentHubMcpEvents reads from a
+	// clean per-test path (no leftover events from production
+	// hub-mcp.log).
+	statePathsHelper(t)
+	stateDir := t.TempDir()
+	daemonStateRootOverride = stateDir
+
+	t.Setenv(AllowUnhardenedClientWriteEnv, "") // no legacy opt-in
+	t.Setenv(RequireSingleUserHomeEnv, "")      // no strict opt-in
+
+	parent := filepath.Join(t.TempDir(), "leaky-parent")
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatalf("mkdir parent: %v", err)
+	}
+	synthesizeDirWithAuthUsersReadACE(t, parent)
+
+	dst := filepath.Join(parent, "client-config.json")
+	if err := secureWriteWithOperatorOpt(dst, []byte(`{"token":"x"}`)); err != nil {
+		t.Fatalf("relax write: %v", err)
+	}
+
+	events, err := RecentHubMcpEvents(20)
+	if err != nil {
+		t.Fatalf("read recent events: %v", err)
+	}
+	var found map[string]any
+	for _, ev := range events {
+		if ev["event"] == "client-write-unhardened-fallback" {
+			found = ev
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("no client-write-unhardened-fallback event in last %d entries (got %d events)", 20, len(events))
+	}
+	if found["level"] != "warn" {
+		t.Errorf("event level = %v, want \"warn\" (security-boundary downgrade must be dashboard-visible, not info)", found["level"])
+	}
+	if reason, _ := found["reason"].(string); !strings.Contains(reason, "default-relax-on-solo-host") {
+		t.Errorf("event reason = %v, want substring \"default-relax-on-solo-host\" (no legacy opt-in env var was set)", found["reason"])
+	}
+	if path, _ := found["path"].(string); path != dst {
+		t.Errorf("event path = %v, want %q", found["path"], dst)
+	}
+}
+
+// TestSecureWriteWithOperatorOpt_LegacyOptInEmitsWarnAuditLogWithDistinctReason
+// pins that the legacy MCPHUB_ALLOW_UNHARDENED_CLIENT_WRITE=1
+// branch emits the SAME warn event but with a "legacy opt-in"
+// reason so operators can grep their shell profile post-upgrade
+// and remove the now-redundant env var.
+func TestSecureWriteWithOperatorOpt_LegacyOptInEmitsWarnAuditLogWithDistinctReason(t *testing.T) {
+	statePathsHelper(t)
+	stateDir := t.TempDir()
+	daemonStateRootOverride = stateDir
+
+	t.Setenv(AllowUnhardenedClientWriteEnv, "1") // legacy opt-in
+	t.Setenv(RequireSingleUserHomeEnv, "")
+
+	parent := filepath.Join(t.TempDir(), "leaky-parent")
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatalf("mkdir parent: %v", err)
+	}
+	synthesizeDirWithAuthUsersReadACE(t, parent)
+
+	dst := filepath.Join(parent, "client-config.json")
+	if err := secureWriteWithOperatorOpt(dst, []byte(`{"token":"x"}`)); err != nil {
+		t.Fatalf("relax write: %v", err)
+	}
+
+	events, err := RecentHubMcpEvents(20)
+	if err != nil {
+		t.Fatalf("read recent events: %v", err)
+	}
+	var found map[string]any
+	for _, ev := range events {
+		if ev["event"] == "client-write-unhardened-fallback" {
+			found = ev
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("no client-write-unhardened-fallback event")
+	}
+	if found["level"] != "warn" {
+		t.Errorf("event level = %v, want \"warn\"", found["level"])
+	}
+	reason, _ := found["reason"].(string)
+	if !strings.Contains(reason, "legacy opt-in") {
+		t.Errorf("event reason = %q, want substring \"legacy opt-in\" so operators can grep their shell profile", reason)
+	}
+	if !strings.Contains(reason, AllowUnhardenedClientWriteEnv) {
+		t.Errorf("event reason = %q, want substring %q so operators see which env var to remove", reason, AllowUnhardenedClientWriteEnv)
+	}
+}

@@ -11,17 +11,22 @@ import (
 
 // TestSecureWriteWithOperatorOpt_DefaultRelaxOnGateFailure pins the
 // v0.4.0 flip: when SecureWriteClientConfig hits the parent-dir gate
-// AND neither env var is set, the wrapper FALLS BACK to the
-// symlink-refusing temp+rename writer by default. Solo-developer
-// Windows hosts (the common case) no longer need to opt in.
+// AND neither env var is set, the wrapper RUNS the hardened pipeline
+// AGAIN with the parent-dir gate bypassed. Solo-developer Windows
+// hosts (the common case) no longer need to opt in.
 //
 // Pre-v0.4.0 behavior (strict by default, opt-in to relax) is now
 // reversed; the pre-v0.4.0 test that pinned the strict-by-default
 // path moved to TestSecureWriteWithOperatorOpt_StrictModeRequired
 // below.
+//
+// PR #185 r3 (codex deep-sec P1 closure): the relax lane no longer
+// uses os.CreateTemp + path-based DACL — it re-runs the SAME
+// handle-relative hardened pipeline with parent-dir gate disabled,
+// closing the temp-create-to-DACL-apply race window.
 func TestSecureWriteWithOperatorOpt_DefaultRelaxOnGateFailure(t *testing.T) {
-	t.Setenv(AllowUnhardenedClientWriteEnv, "")    // no legacy opt-in
-	t.Setenv(RequireSingleUserHomeEnv, "")         // no strict opt-in
+	t.Setenv(AllowUnhardenedClientWriteEnv, "") // no legacy opt-in
+	t.Setenv(RequireSingleUserHomeEnv, "")      // no strict opt-in
 
 	dst := filepath.Join(t.TempDir(), "client.json")
 	want := []byte(`{"servers":{"x":1}}`)
@@ -32,7 +37,7 @@ func TestSecureWriteWithOperatorOpt_DefaultRelaxOnGateFailure(t *testing.T) {
 		// SecureWriteClientConfig succeeded and there was no gate
 		// rejection to relax — the wrapper still returns nil and the
 		// write still landed. So failure here is real.
-		t.Fatalf("default-relax should fall back on gate failure (or succeed strict-path); got err: %v", err)
+		t.Fatalf("default-relax should succeed (strict path or skip-gate path); got err: %v", err)
 	}
 	got, readErr := os.ReadFile(dst)
 	if readErr != nil {
@@ -43,7 +48,7 @@ func TestSecureWriteWithOperatorOpt_DefaultRelaxOnGateFailure(t *testing.T) {
 	}
 	if runtime.GOOS != "windows" {
 		if info, _ := os.Stat(dst); info != nil && (info.Mode().Perm()&0o077) != 0 {
-			t.Errorf("written file mode %v has group/world bits; fallback should write 0600", info.Mode())
+			t.Errorf("written file mode %v has group/world bits; hardened pipeline (gate-disabled lane) must still write 0600", info.Mode())
 		}
 	}
 }
@@ -54,7 +59,7 @@ func TestSecureWriteWithOperatorOpt_DefaultRelaxOnGateFailure(t *testing.T) {
 // fall back to the unhardened write. This is the corp-managed /
 // multi-tenant posture explicitly chosen by the operator.
 func TestSecureWriteWithOperatorOpt_StrictModeRequired(t *testing.T) {
-	t.Setenv(RequireSingleUserHomeEnv, "1") // explicit strict
+	t.Setenv(RequireSingleUserHomeEnv, "1")     // explicit strict
 	t.Setenv(AllowUnhardenedClientWriteEnv, "") // legacy opt-in inert
 
 	dst := filepath.Join(t.TempDir(), "client.json")
@@ -78,8 +83,14 @@ func TestSecureWriteWithOperatorOpt_StrictModeRequired(t *testing.T) {
 // precedence: when BOTH env vars are set, strict wins (defensive —
 // operators who want corp-managed posture should not be silently
 // downgraded by a stale legacy opt-in in their shell profile).
+//
+// Codex deep-sec PR #185 r2 P2 closure: asserts the destination
+// file is ABSENT after strict rejection. Earlier version only
+// checked the error class, which would have passed a future
+// refactor that ran the fallback write first and then returned a
+// strict-looking error.
 func TestSecureWriteWithOperatorOpt_StrictBeatsLegacyAllow(t *testing.T) {
-	t.Setenv(RequireSingleUserHomeEnv, "1")     // strict
+	t.Setenv(RequireSingleUserHomeEnv, "1")      // strict
 	t.Setenv(AllowUnhardenedClientWriteEnv, "1") // legacy relax
 	dst := filepath.Join(t.TempDir(), "client.json")
 	err := secureWriteWithOperatorOpt(dst, []byte(`{"servers":{}}`))
@@ -92,13 +103,17 @@ func TestSecureWriteWithOperatorOpt_StrictBeatsLegacyAllow(t *testing.T) {
 	if !strings.Contains(err.Error(), RequireSingleUserHomeEnv) {
 		t.Errorf("error must mention %q (strict wins); got %v", RequireSingleUserHomeEnv, err)
 	}
+	// P2 closure: no fallback write must have happened.
+	if _, statErr := os.Stat(dst); !os.IsNotExist(statErr) {
+		t.Errorf("file at %s exists despite strict-mode rejection; strict path must NOT leak a write on its way out (stat err = %v)", dst, statErr)
+	}
 }
 
 // TestSecureWriteWithOperatorOpt_GateRejectionFallsBackWhenOpted
 // pins the legacy opt-in branch: same path that rejects under
-// strict mode now succeeds via fallback when MCPHUB_ALLOW_
-// UNHARDENED_CLIENT_WRITE=1 is set. Backward compat for operators
-// who already had the env var set pre-v0.4.0.
+// strict mode now succeeds via the gate-disabled hardened pipeline
+// when MCPHUB_ALLOW_UNHARDENED_CLIENT_WRITE=1 is set. Backward
+// compat for operators who already had the env var set pre-v0.4.0.
 func TestSecureWriteWithOperatorOpt_GateRejectionFallsBackWhenOpted(t *testing.T) {
 	t.Setenv(AllowUnhardenedClientWriteEnv, "1")
 	t.Setenv(RequireSingleUserHomeEnv, "") // legacy opt-in path
@@ -126,7 +141,7 @@ func TestSecureWriteWithOperatorOpt_GateRejectionFallsBackWhenOpted(t *testing.T
 	// so we only pin the mode bits on POSIX.
 	if runtime.GOOS != "windows" {
 		if info, _ := os.Stat(dst); info != nil && (info.Mode().Perm()&0o077) != 0 {
-			t.Errorf("written file mode %v has group/world bits; fallback should write 0600", info.Mode())
+			t.Errorf("written file mode %v has group/world bits; relax-lane (hardened pipeline, gate disabled) must still write 0600", info.Mode())
 		}
 	}
 }
@@ -196,18 +211,24 @@ func TestOperatorRequiresSingleUserHome_AcceptsOneAndTrue(t *testing.T) {
 	}
 }
 
-// TestFallbackWriteRefusingSymlink_RefusesPreexistingSymlink pins
-// codex bot r1 P1 closure (PR #165): the opt-in lane MUST refuse
-// to write through a pre-existing symlink/junction. Otherwise an
-// attacker on a shared host could pre-create a symlink at the
-// destination and harvest the token-bearing content into a target
-// of their choosing.
+// TestSecureWriteWithOperatorOpt_RelaxRefusesPreexistingSymlink pins
+// that the relax lane (gate disabled) still refuses a pre-existing
+// symlink/junction at the destination. Even though we trust the host
+// for the parent-dir gate, an attacker with write access to the parent
+// could plant a symlink at the destination to redirect the write.
+//
+// The hardened pipeline's refusePreexistingReparsePoint (Windows) /
+// refusePreexistingSymlink (POSIX) at step 2a is unconditional — it
+// runs regardless of the parent-dir gate. PR #185 r3 preserves this:
+// relax lane = same hardened pipeline minus step 2 only.
 //
 // Symlink creation on Windows requires SeCreateSymbolicLinkPrivilege
 // (typically only Administrators have it). Skip on Windows unless
-// MkdirAll succeeds — but the broader contract still holds: every
-// fallback write Lstat's first.
-func TestFallbackWriteRefusingSymlink_RefusesPreexistingSymlink(t *testing.T) {
+// MkdirAll succeeds.
+func TestSecureWriteWithOperatorOpt_RelaxRefusesPreexistingSymlink(t *testing.T) {
+	t.Setenv(AllowUnhardenedClientWriteEnv, "1") // legacy opt-in (path tested below)
+	t.Setenv(RequireSingleUserHomeEnv, "")
+
 	root := t.TempDir()
 	realTarget := filepath.Join(root, "real-target")
 	if err := os.WriteFile(realTarget, []byte("attacker-controlled"), 0o600); err != nil {
@@ -216,16 +237,19 @@ func TestFallbackWriteRefusingSymlink_RefusesPreexistingSymlink(t *testing.T) {
 	link := filepath.Join(root, "client.json")
 	if err := os.Symlink(realTarget, link); err != nil {
 		// Windows non-admin: SeCreateSymbolicLinkPrivilege missing.
-		// Symlink creation fails outright; skip the test on this host.
 		t.Skipf("symlink unsupported (likely Windows non-admin): %v", err)
 	}
 
-	err := fallbackWriteRefusingSymlink(link, []byte(`{"victim":"data"}`))
+	err := secureWriteWithOperatorOpt(link, []byte(`{"victim":"data"}`))
 	if err == nil {
 		t.Fatal("expected refusal for pre-existing symlink; got nil")
 	}
-	if !strings.Contains(err.Error(), "symlink") {
-		t.Errorf("error must mention symlink; got %v", err)
+	// Error wording differs between Windows (reparse point refused)
+	// and POSIX (pre-existing symlink refused), but both should
+	// mention either "symlink" or "reparse".
+	lowered := strings.ToLower(err.Error())
+	if !strings.Contains(lowered, "symlink") && !strings.Contains(lowered, "reparse") {
+		t.Errorf("error must mention symlink/reparse-point; got %v", err)
 	}
 	// The real-target file MUST be unmodified — the symlink was not
 	// followed.
@@ -235,14 +259,19 @@ func TestFallbackWriteRefusingSymlink_RefusesPreexistingSymlink(t *testing.T) {
 	}
 }
 
-// TestFallbackWriteRefusingSymlink_WritesWhenAbsent pins the happy
-// path: when the destination does not exist, the fallback writes
-// and the file lands at the destination.
-func TestFallbackWriteRefusingSymlink_WritesWhenAbsent(t *testing.T) {
+// TestSecureWriteWithOperatorOpt_RelaxWritesWhenAbsent pins the
+// happy path of the relax lane: when the destination does not exist,
+// the write succeeds and the file lands. Equivalent to the prior
+// TestFallbackWriteRefusingSymlink_WritesWhenAbsent but routed
+// through secureWriteWithOperatorOpt (which now uses the hardened
+// pipeline with gate disabled instead of a separate fallback path).
+func TestSecureWriteWithOperatorOpt_RelaxWritesWhenAbsent(t *testing.T) {
+	t.Setenv(AllowUnhardenedClientWriteEnv, "1")
+	t.Setenv(RequireSingleUserHomeEnv, "")
 	dst := filepath.Join(t.TempDir(), "client.json")
 	want := []byte(`{"hello":"world"}`)
-	if err := fallbackWriteRefusingSymlink(dst, want); err != nil {
-		t.Fatalf("fallback write to absent path: %v", err)
+	if err := secureWriteWithOperatorOpt(dst, want); err != nil {
+		t.Fatalf("relax-lane write to absent path: %v", err)
 	}
 	got, err := os.ReadFile(dst)
 	if err != nil {
@@ -253,17 +282,20 @@ func TestFallbackWriteRefusingSymlink_WritesWhenAbsent(t *testing.T) {
 	}
 }
 
-// TestFallbackWriteRefusingSymlink_OverwritesRegularFile pins that
-// pre-existing REGULAR files at the destination are still
-// overwritten (the refusal is narrow — only symlinks).
-func TestFallbackWriteRefusingSymlink_OverwritesRegularFile(t *testing.T) {
+// TestSecureWriteWithOperatorOpt_RelaxOverwritesRegularFile pins
+// that pre-existing REGULAR files at the destination are still
+// overwritten by the relax lane (the refusal is narrow — only
+// symlinks/reparse-points).
+func TestSecureWriteWithOperatorOpt_RelaxOverwritesRegularFile(t *testing.T) {
+	t.Setenv(AllowUnhardenedClientWriteEnv, "1")
+	t.Setenv(RequireSingleUserHomeEnv, "")
 	dst := filepath.Join(t.TempDir(), "client.json")
 	if err := os.WriteFile(dst, []byte("old"), 0o600); err != nil {
 		t.Fatalf("seed regular file: %v", err)
 	}
 	want := []byte(`{"new":"value"}`)
-	if err := fallbackWriteRefusingSymlink(dst, want); err != nil {
-		t.Fatalf("fallback overwrite of regular file: %v", err)
+	if err := secureWriteWithOperatorOpt(dst, want); err != nil {
+		t.Fatalf("relax overwrite of regular file: %v", err)
 	}
 	got, _ := os.ReadFile(dst)
 	if string(got) != string(want) {
@@ -271,20 +303,22 @@ func TestFallbackWriteRefusingSymlink_OverwritesRegularFile(t *testing.T) {
 	}
 }
 
-// TestFallbackWriteRefusingSymlink_TightensModeOnExistingFile pins
-// codex bot r2 P1 closure (PR #165): when the destination already
-// exists with loose permissions (e.g. 0644 from a prior tool), the
-// fallback MUST tighten to 0600. Raw os.WriteFile preserves the
-// existing mode on POSIX (open() returns the existing file when
-// O_CREAT|O_TRUNC is set without O_EXCL, and the mode arg is
-// ignored). The temp+rename path lands a fresh file with 0600.
+// TestSecureWriteWithOperatorOpt_RelaxTightensModeOnExistingFile
+// pins that when a pre-existing file has loose permissions (e.g.
+// 0644 from a prior tool), the relax lane (hardened pipeline with
+// gate disabled) MUST tighten to 0600. The handle-relative
+// O_CREAT|O_EXCL|0600 + Fchmod(0600) gives a fresh 0600 inode; the
+// atomic renameat replaces the loose file with the tight one.
 //
 // POSIX-only assertion (Windows mode bits are an ACL translation
-// and don't reflect ACL inheritance the operator accepted).
-func TestFallbackWriteRefusingSymlink_TightensModeOnExistingFile(t *testing.T) {
+// and don't reflect ACL inheritance the operator accepted; Windows
+// DACL coverage is in TestSecureWriteWithOperatorOpt_RelaxOnGateFailure_WindowsDACLHardened).
+func TestSecureWriteWithOperatorOpt_RelaxTightensModeOnExistingFile(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX-only: Windows uses ACL inheritance, mode bits are translated")
 	}
+	t.Setenv(AllowUnhardenedClientWriteEnv, "1")
+	t.Setenv(RequireSingleUserHomeEnv, "")
 	dst := filepath.Join(t.TempDir(), "client.json")
 	if err := os.WriteFile(dst, []byte("pre-existing"), 0o644); err != nil {
 		t.Fatalf("seed loose file: %v", err)
@@ -293,15 +327,15 @@ func TestFallbackWriteRefusingSymlink_TightensModeOnExistingFile(t *testing.T) {
 	if err := os.Chmod(dst, 0o644); err != nil {
 		t.Fatalf("chmod seed: %v", err)
 	}
-	if err := fallbackWriteRefusingSymlink(dst, []byte("fresh-content")); err != nil {
-		t.Fatalf("fallback write: %v", err)
+	if err := secureWriteWithOperatorOpt(dst, []byte("fresh-content")); err != nil {
+		t.Fatalf("relax write: %v", err)
 	}
 	info, err := os.Stat(dst)
 	if err != nil {
 		t.Fatalf("stat after write: %v", err)
 	}
 	if info.Mode().Perm() != 0o600 {
-		t.Errorf("after fallback write, mode = %v; want 0600 (the fallback must tighten loose pre-existing perms via temp+rename)", info.Mode().Perm())
+		t.Errorf("after relax write, mode = %v; want 0600 (the relax lane must tighten loose pre-existing perms via the hardened pipeline)", info.Mode().Perm())
 	}
 }
 

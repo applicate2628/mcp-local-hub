@@ -35,7 +35,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"mcp-local-hub/internal/clients"
@@ -67,15 +66,30 @@ const RequireSingleUserHomeEnv = "MCPHUB_REQUIRE_SINGLE_USER_HOME"
 
 // secureWriteWithOperatorOpt is the cross-package writer that
 // `clients.WriteConfigFile` resolves to in production. It first
-// attempts the hardened secure-write; on
+// attempts the hardened secure-write WITH the parent-dir gate; on
 // ErrSecureWriteParentInsecure (Windows DACL or POSIX mode/owner
 // rejection at the parent dir gate) it either:
 //
 //   - returns the strict error when MCPHUB_REQUIRE_SINGLE_USER_HOME is
 //     set (multi-tenant / corp-managed posture), or
-//   - falls back to the symlink-refusing temp+atomic-rename writer
-//     and logs an info event (default v0.4.0+ posture for solo-dev
-//     Windows hosts).
+//   - re-runs the SAME hardened pipeline with the parent-dir gate
+//     bypassed and logs a warn event (default v0.4.0+ posture for
+//     solo-dev Windows hosts).
+//
+// PR #185 r3 (codex deep-sec P1 closure): the relax lane used to be
+// a separate code path (fallbackWriteRefusingSymlink) using
+// os.CreateTemp + path-based SetNamedSecurityInfo. That left a
+// pre-hardening window between temp create and DACL apply during
+// which a co-resident SID allowed by the parent dir's permissive
+// DACL could race-open the temp file (Go's Windows runtime opens
+// with FILE_SHARE_READ|FILE_SHARE_WRITE), retain the handle past
+// the DACL tighten (ACL changes do not revoke existing handles),
+// and read token bytes once the write committed. The fix routes
+// the relax lane through the SAME handle-relative hardened pipeline
+// as the strict path — the only difference is whether step 2
+// (parent-dir DACL verify) runs. Per-file restrictive DACL is
+// installed on the file HANDLE at step 5, before any bytes hit
+// disk, closing the race window.
 //
 // Default-relax rationale (v0.4.0):
 //
@@ -87,17 +101,22 @@ const RequireSingleUserHomeEnv = "MCPHUB_REQUIRE_SINGLE_USER_HOME"
 // already has full write access via their own account, and ordinary
 // notepad/IDE writes to ~/.claude.json succeed — having mcphub
 // refuse on the same parent makes the tool look broken in real-world
-// conditions. The security guarantee for token-bearing client config
-// files comes from THREE layers, in priority order:
+// conditions.
 //
-//  1. New file mode 0600 (Chmod after temp create, before rename).
-//     On Windows this translates to a DACL granting only the owner
-//     Read+Write — no inheritance from parent. Other principals on
-//     the parent's ACL do NOT propagate to the new file's ACL.
-//  2. Symlink refusal at the destination (Lstat before open, reject
-//     pre-existing symlink/reparse-point).
-//  3. Temp+atomic-rename (no TOCTOU window between create and
-//     publish).
+// The security guarantee for token-bearing client config files
+// comes from THREE layers, in priority order:
+//
+//  1. New file DACL set on the file HANDLE at temp-create time, BEFORE
+//     any bytes write. {current-user, LocalSystem,
+//     BuiltinAdministrators} get GENERIC_ALL; PROTECTED_DACL prevents
+//     inherited ACEs from re-broadening between rename and re-verify.
+//     On POSIX: O_CREAT mode 0600 + defensive Fchmod(0600).
+//  2. Symlink/reparse-point refusal at the destination
+//     (refusePreexistingReparsePoint on Windows,
+//     refusePreexistingSymlink on POSIX).
+//  3. Handle-relative atomic rename (no TOCTOU window between create
+//     and publish — the rename is anchored to the parent dirHandle,
+//     not a path re-walk).
 //
 // Layers 1+2+3 deliver "the file we just wrote is not readable by
 // other principals on this host" regardless of the parent dir's
@@ -110,21 +129,15 @@ const RequireSingleUserHomeEnv = "MCPHUB_REQUIRE_SINGLE_USER_HOME"
 // Failure classes that propagate unchanged (the relax is scoped
 // narrowly to the parent-dir gate):
 //
-//   - open temp, write, rename, post-rename verify
+//   - open temp, write, rename, post-rename DACL verify
 //   - pre-existing symlink/reparse-point at destination
 //   - all non-gate hardened-write errors
-//
-// codex bot r1 P1 closure (PR #165): the original opt-in path used
-// raw os.WriteFile, which silently follows symlinks. Even on the
-// relax lane we MUST refuse to write through a pre-existing
-// symlink/junction. The fallbackWriteRefusingSymlink helper Lstats
-// first and rejects before opening.
 //
 // Backward compatibility: operators who already had
 // MCPHUB_ALLOW_UNHARDENED_CLIENT_WRITE=1 set get identical behavior
 // (the relax fires either way — old-style explicit opt-in OR new-
 // style default). Operators on corp-managed hosts who want the
-// strict gate must now opt IN via MCPHUB_REQUIRE_SINGLE_USER_HOME=1.
+// strict gate must opt IN via MCPHUB_REQUIRE_SINGLE_USER_HOME=1.
 func secureWriteWithOperatorOpt(path string, contents []byte) error {
 	err := SecureWriteClientConfig(path, contents)
 	if err == nil {
@@ -145,7 +158,12 @@ func secureWriteWithOperatorOpt(path string, contents []byte) error {
 		// now-redundant env var.
 		reason = "legacy opt-in via " + AllowUnhardenedClientWriteEnv + " (now redundant — same as default)"
 	}
-	if logErr := LogHubMcpEvent("info", "client-write-unhardened-fallback", map[string]any{
+	// Codex deep-sec PR #185 r2 P2: emit at WARN, not INFO. The
+	// fallback is a security-boundary downgrade (operator-policy:
+	// parent-dir gate skipped); warn-level keeps it visible to
+	// log-monitoring conventions that filter info out of audit
+	// dashboards.
+	if logErr := LogHubMcpEvent("warn", "client-write-unhardened-fallback", map[string]any{
 		"path":   path,
 		"reason": reason,
 		"err":    err.Error(),
@@ -154,87 +172,12 @@ func secureWriteWithOperatorOpt(path string, contents []byte) error {
 		// fallback write still proceeds.
 		_ = logErr
 	}
-	return fallbackWriteRefusingSymlink(path, contents)
-}
-
-// fallbackWriteRefusingSymlink writes contents to path with hardened
-// per-file permissions via a temp file + atomic rename. The relax
-// lane's residual protections beyond the parent-dir gate:
-//
-//  1. Lstat the destination first (does NOT follow symlinks). If
-//     a symlink is present at `path`, refuse outright. Otherwise
-//     a hostile pre-existing symlink would redirect the write
-//     after the rename.
-//  2. Create a fresh temp file in the same dir.
-//  3. Harden the temp file's permissions PLATFORM-CORRECTLY before
-//     writing contents:
-//       - POSIX: Chmod(0o600) — owner Read+Write only.
-//       - Windows: setRestrictiveDACL on the handle — DACL granting
-//         GENERIC_ALL to {current-user, LocalSystem, Builtin
-//         Administrators} only, with PROTECTED_DACL_SECURITY_INFORMATION
-//         to block inheritance of parent ACEs. Bot r1 P1 closure on
-//         PR #185: Go's os.Chmod on Windows only toggles the
-//         FILE_ATTRIBUTE_READONLY bit and does NOT touch the ACL,
-//         so without explicit DACL hardening the new file would
-//         inherit parent's permissive ACEs (CodexSandboxUsers,
-//         AppContainer SIDs, orphan AD SIDs) — exactly the
-//         principals the parent-dir gate was trying to keep out.
-//  4. Write contents to the now-hardened temp file.
-//  5. Close + atomically rename over `path`.
-//
-// codex bot r1 P1 closure (PR #165): the original implementation
-// used raw os.WriteFile, which silently followed symlinks.
-// codex bot r2 P1 closure (PR #165): subsequent fix using
-// os.WriteFile(path, ..., 0o600) preserved the pre-existing file's
-// mode bits — temp+rename closes that channel.
-// codex bot r1 P1 closure (PR #185): the previous Chmod-only step
-// was a no-op for Windows ACL hardening; replaced with the
-// hardenTempFileForUnhardenedFallback helper that wires
-// setRestrictiveDACL on Windows and stays Chmod on POSIX.
-//
-// Residual gap vs the hardened SecureWriteClientConfig path: a
-// small TOCTOU window between Lstat and the temp+rename. Handle-
-// relative ops would close it; the relax lane documents the
-// trade-off (operator must trust the host for symlink-swap races).
-func fallbackWriteRefusingSymlink(path string, contents []byte) error {
-	if info, err := os.Lstat(path); err == nil {
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("refusing to write to %s: destination is a symlink (the unhardened-client-write fallback does NOT downgrade symlink refusal — remove or replace the symlink and retry)", path)
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("lstat %s before unhardened write: %w", path, err)
-	}
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".mcphub-unhardened-write.*.tmp")
-	if err != nil {
-		return fmt.Errorf("create temp in %s: %w", dir, err)
-	}
-	tmpPath := tmp.Name()
-	cleanup := func() {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-	}
-	// Step 3 — platform-correct hardening BEFORE writing token
-	// content. On Windows this is the load-bearing call that gives
-	// the new file owner-only ACL; without it Go's Chmod is a no-op
-	// for ACLs and the file inherits parent's permissive ACEs.
-	if err := hardenTempFileForUnhardenedFallback(tmp); err != nil {
-		cleanup()
-		return fmt.Errorf("harden temp %s permissions: %w", tmpPath, err)
-	}
-	if _, err := tmp.Write(contents); err != nil {
-		cleanup()
-		return fmt.Errorf("write temp %s: %w", tmpPath, err)
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("close temp %s: %w", tmpPath, err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("rename temp to %s: %w", path, err)
-	}
-	return nil
+	// PR #185 r3: re-run the SAME hardened pipeline with parent-dir
+	// gate bypassed. Per-file DACL/mode hardening still applies at
+	// temp-create time, closing the race window that the previous
+	// os.CreateTemp + path-based SetNamedSecurityInfo path left
+	// open.
+	return secureWriteClientConfigSkipParentGate(path, contents)
 }
 
 // operatorAllowedUnhardenedClientWrite reports whether the operator

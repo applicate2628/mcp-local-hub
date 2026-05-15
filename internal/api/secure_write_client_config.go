@@ -74,5 +74,25 @@ var ErrSecureWriteParentInsecure = errors.New("secure write: parent directory no
 //
 // Spec: §"SecureWriteClientConfig sequence". Plan: Task 1.3 + 1.4.
 func SecureWriteClientConfig(path string, contents []byte) error {
-	return secureWriteClientConfigImpl(path, contents)
+	return secureWriteClientConfigImpl(path, contents, false)
+}
+
+// secureWriteClientConfigSkipParentGate is the relax lane — runs the
+// SAME hardened pipeline as SecureWriteClientConfig but with the
+// parent-dir DACL/mode gate BYPASSED. Used by the
+// secureWriteWithOperatorOpt fallback when the operator (implicitly
+// or explicitly) opted into the unhardened-parent path. The per-file
+// DACL/mode hardening still applies at temp-create time (no race
+// window), so the new file is owner-only regardless of what
+// principals are on the parent's ACL.
+//
+// PR #185 r3: replaces the previous fallbackWriteRefusingSymlink +
+// os.CreateTemp + path-based SetNamedSecurityInfo path, which left a
+// pre-hardening window during which co-resident principals could
+// race-open the temp file. The handle-relative pipeline closes that
+// window by installing the restrictive DACL on the file HANDLE
+// before any bytes hit disk (Windows) or by creating with mode 0600
+// via O_CREAT (POSIX).
+func secureWriteClientConfigSkipParentGate(path string, contents []byte) error {
+	return secureWriteClientConfigImpl(path, contents, true)
 }

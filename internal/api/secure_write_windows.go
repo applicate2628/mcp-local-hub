@@ -88,7 +88,24 @@ const fileInformationClassRenameEx uint32 = 65
 
 // secureWriteClientConfigImpl is the Windows handle-relative writer.
 // Symmetric with the POSIX impl in secure_write_posix.go.
-func secureWriteClientConfigImpl(path string, contents []byte) error {
+//
+// When skipParentGate=true the parent-dir DACL verify (step 2) is
+// SKIPPED — relax lane for corp-policy hosts where the parent dir's
+// inherited ACEs (CodexSandboxUsers, AppContainer SIDs, Domain Users,
+// orphan AD SIDs) trip the strict gate. Everything else — symlink
+// refusal, handle-relative NtCreateFile with restrictive DACL
+// installed on the handle BEFORE any bytes write, atomic rename
+// across the held handle, post-rename DACL verify — still applies,
+// so there is NO race window between temp create and DACL apply.
+// PR #185 r3 (codex deep-sec P1 closure on r2): the previous relax
+// lane used os.CreateTemp + path-based SetNamedSecurityInfo, which
+// left a window during which the temp file inherited parent ACEs
+// before the restrictive DACL was applied. A co-resident SID allowed
+// by the parent could race-open the temp file (Go's Windows runtime
+// opens with FILE_SHARE_READ|FILE_SHARE_WRITE) and retain the handle
+// across the DACL tighten (ACL changes do not revoke existing
+// handles). Reusing the hardened pipeline closes that window.
+func secureWriteClientConfigImpl(path string, contents []byte, skipParentGate bool) error {
 	parentDir, base := filepath.Split(path)
 	if parentDir == "" {
 		parentDir = "."
@@ -117,11 +134,20 @@ func secureWriteClientConfigImpl(path string, contents []byte) error {
 	//    inherited ACE) would silently pass and the writer would
 	//    install a token under a directory listable by every domain
 	//    user. Mirror of secure_write_posix.go's verifyPosixParentDirFromFd.
-	if err := verifyWindowsDACLFromHandle(dirHandle); err != nil {
-		// Wrap with ErrSecureWriteParentInsecure so the cross-package
-		// wrapper in client_write_init.go can match via errors.Is
-		// (issue #161 P1).
-		return fmt.Errorf("%w (path %s): %v", ErrSecureWriteParentInsecure, parentDir, err)
+	//
+	// skipParentGate=true bypasses ONLY this step (relax lane). The
+	// per-file DACL applied on the handle at step 5 still grants
+	// access exclusively to {current-user, LocalSystem, Builtin
+	// Administrators} — so the new file is NOT readable by the
+	// parent's inherited principals regardless of whether the parent
+	// itself is broadened.
+	if !skipParentGate {
+		if err := verifyWindowsDACLFromHandle(dirHandle); err != nil {
+			// Wrap with ErrSecureWriteParentInsecure so the cross-package
+			// wrapper in client_write_init.go can match via errors.Is
+			// (issue #161 P1).
+			return fmt.Errorf("%w (path %s): %v", ErrSecureWriteParentInsecure, parentDir, err)
+		}
 	}
 
 	// 2a. Refuse to overwrite a pre-existing symlink/junction at base.
@@ -408,40 +434,16 @@ func setRestrictiveDACL(fileHandle windows.Handle) error {
 	)
 }
 
-// setRestrictiveDACLByPath is the path-based variant of
-// setRestrictiveDACL. Same DACL ({current-user, LocalSystem,
-// BuiltinAdministrators} only + PROTECTED_DACL) but routed via
-// SetNamedSecurityInfo so callers don't need a handle opened with
-// WRITE_DAC access. Used by the unhardened-fallback writer
-// (client_write_fallback_windows.go) where the file was created via
-// os.CreateTemp — that path doesn't request WRITE_DAC, and reopening
-// with the right access flags is more code than the path-based call.
-//
-// DACL persists across rename (it's per-file NTFS metadata, not a
-// directory entry), so the caller can SetNamedSecurityInfo on the
-// temp path before renaming to the final destination.
-func setRestrictiveDACLByPath(path string) error {
-	dacl, err := buildRestrictiveDACL()
-	if err != nil {
-		return err
-	}
-	return windows.SetNamedSecurityInfo(
-		path,
-		windows.SE_FILE_OBJECT,
-		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
-		nil,
-		nil,
-		dacl,
-		nil,
-	)
-}
-
 // buildRestrictiveDACL constructs the {current-user, LocalSystem,
-// BuiltinAdministrators}-only DACL used by both setRestrictiveDACL
-// (handle-based) and setRestrictiveDACLByPath (path-based). Kept as
-// a single source of truth so the unhardened-fallback path can't
-// accidentally drift to a more permissive ACL than the hardened
-// pipeline.
+// BuiltinAdministrators}-only DACL used by setRestrictiveDACL.
+//
+// PR #185 r3 (codex deep-sec P1 closure): the previous path-based
+// variant setRestrictiveDACLByPath has been removed. The relax lane
+// no longer needs a path-based DACL setter because it now re-runs
+// the SAME handle-relative hardened pipeline (with parent-dir gate
+// bypassed) — the file handle is opened with WRITE_DAC at create
+// time and the DACL is set on the handle BEFORE any bytes hit disk,
+// closing the race window the path-based setter left open.
 func buildRestrictiveDACL() (*windows.ACL, error) {
 	currentSID, err := currentUserSID()
 	if err != nil {

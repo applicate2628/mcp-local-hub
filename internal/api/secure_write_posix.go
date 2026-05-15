@@ -35,7 +35,19 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func secureWriteClientConfigImpl(path string, contents []byte) error {
+// secureWriteClientConfigImpl is the POSIX dirfd-relative writer.
+// Symmetric with the Windows impl in secure_write_windows.go.
+//
+// When skipParentGate=true the parent-dir mode/uid verify (step 2)
+// is SKIPPED — relax lane for hosts whose $HOME has group/world
+// permission bits the operator does not want to tighten. The per-
+// file mode 0600 applied via O_CREAT + Fchmod at steps 4-5 is still
+// the load-bearing security boundary on POSIX (mode bits on the
+// inode are the boundary, not the parent dir bits); only operator-
+// uid alignment of the parent is relaxed. The dirfd-relative create
+// + atomic renameat + post-rename verify (steps 4-11) all still
+// apply, so the dirfd-anchored TOCTOU guarantees are preserved.
+func secureWriteClientConfigImpl(path string, contents []byte, skipParentGate bool) error {
 	parentDir, base := filepath.Split(path)
 	if parentDir == "" {
 		parentDir = "."
@@ -57,8 +69,14 @@ func secureWriteClientConfigImpl(path string, contents []byte) error {
 	// Wrap with ErrSecureWriteParentInsecure so the cross-package
 	// wrapper in client_write_init.go can match via errors.Is and
 	// surface the operator opt-in hint (issue #161 P1).
-	if err := verifyPosixParentDirFromFd(dirFd); err != nil {
-		return fmt.Errorf("%w (path %s): %v", ErrSecureWriteParentInsecure, parentDir, err)
+	//
+	// skipParentGate=true bypasses ONLY this step. The per-file mode
+	// 0600 (O_CREAT mode + Fchmod) still gives owner-only access to
+	// the new file regardless of how loose the parent dir mode is.
+	if !skipParentGate {
+		if err := verifyPosixParentDirFromFd(dirFd); err != nil {
+			return fmt.Errorf("%w (path %s): %v", ErrSecureWriteParentInsecure, parentDir, err)
+		}
 	}
 
 	// 2a. Refuse to overwrite a pre-existing symlink/junction at `base`.
