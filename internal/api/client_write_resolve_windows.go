@@ -67,11 +67,22 @@ func resolveSymlinkFinalPath(path string) (string, error) {
 	}
 	resolved := windows.UTF16ToString(buf[:n])
 	// GetFinalPathNameByHandle returns paths prefixed with the
-	// `\\?\` long-path namespace. The rest of the secure-write
-	// pipeline (CreateFile with regular drive letters, atomic
-	// rename, etc.) handles those fine on modern Windows but
-	// stripping the prefix keeps audit-log paths and error
-	// messages readable.
+	// `\\?\` long-path namespace. Two shapes need separate
+	// handling (codex bot r1 P2 on PR #192):
+	//
+	//   1. Drive-letter form: `\\?\C:\Users\u\foo.toml`
+	//      → strip `\\?\` to get `C:\Users\u\foo.toml`
+	//   2. UNC form (network share): `\\?\UNC\server\share\path`
+	//      → strip `\\?\UNC\` AND re-add `\\` to get the
+	//      canonical UNC form `\\server\share\path`. Without
+	//      this branch the path becomes the relative-looking
+	//      `UNC\server\share\path` and the downstream
+	//      CreateFile would interpret it as a current-dir
+	//      relative path — breaking symlinked configs stored
+	//      on network shares.
+	if rest, ok := strings.CutPrefix(resolved, `\\?\UNC\`); ok {
+		return `\\` + rest, nil
+	}
 	resolved = strings.TrimPrefix(resolved, `\\?\`)
 	return resolved, nil
 }
