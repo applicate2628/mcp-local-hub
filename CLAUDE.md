@@ -681,11 +681,26 @@ beyond the file owner. The relax lane writes through anyway because
 on solo-developer Windows hosts the broadening principals
 (CodexSandboxUsers, AppContainer SIDs, orphan AD SIDs) are
 typically not under operator control and pose no realistic threat.
-The new file's DACL still denies access to those principals (the
-file is owner-only with PROTECTED_DACL blocking inherited ACEs).
-On a genuinely multi-tenant host, set
-`MCPHUB_REQUIRE_SINGLE_USER_HOME=1` to enforce the strict gate; the
-relax lane is not designed for that posture.
+The new file's DACL still denies content/object access to those
+principals (the file is owner-only with PROTECTED_DACL blocking
+inherited ACEs), and on Windows the restrictive DACL is installed
+at NtCreateFile time via `OBJECT_ATTRIBUTES.SecurityDescriptor` so
+there is no pre-DACL window during which the file could be opened.
+
+**What the relax lane does NOT protect against:** parent-directory
+namespace rights. If a co-resident principal has been granted
+`FILE_DELETE_CHILD` on the parent directory (one of the more
+permissive ACEs Group Policy / SCCM can apply to shared profile
+paths), they can still delete the entry from the directory or
+replace it with an attacker-controlled file. They cannot read or
+modify the original file's contents through its own DACL — that is
+denied by the file's allowlist — but the directory entry itself
+sits outside the file's security boundary. Operators on genuinely
+multi-tenant or admin-managed hosts with broad parent-directory
+write permissions should set `MCPHUB_REQUIRE_SINGLE_USER_HOME=1` to
+enforce the strict gate or tighten the parent's DACL to remove
+namespace rights for non-allowlisted principals; the relax lane is
+not designed for that posture.
 
 ## Stuck-instance recovery
 

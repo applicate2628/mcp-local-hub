@@ -320,6 +320,159 @@ func TestSecureWriteClientConfigSkipParentGate_WritesThroughRejectedParent(t *te
 	if err := verifyWindowsDACLFromHandle(h); err != nil {
 		t.Errorf("skip-gate write left file with non-allowlisted DACL: %v", err)
 	}
+
+	// Codex deep-sec r4 P3 closure: assert no temp-file leak in
+	// parent directory. The skip-gate writer uses crypto-random
+	// temp name + atomic rename across the held handle, so post-
+	// success the only entry in the parent should be the
+	// destination basename. A regression that drops the rename
+	// or leaves the temp open would show up here.
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		t.Fatalf("readdir parent: %v", err)
+	}
+	if len(entries) != 1 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("expected exactly 1 file in parent (destination); got %d: %v", len(entries), names)
+	}
+	if len(entries) == 1 && entries[0].Name() != "client-config.json" {
+		t.Errorf("unexpected file in parent: %s (want client-config.json)", entries[0].Name())
+	}
+}
+
+// synthesizeDirWithInheritableAuthUsersReadACE applies a PROTECTED
+// DACL to dir that grants the current user GENERIC_ALL (no
+// inheritance) AND Authenticated Users (S-1-5-11) GENERIC_READ WITH
+// OBJECT_INHERIT_ACE — meaning the Auth Users ACE is propagated to
+// FILES created inside dir under normal new-object DACL inheritance
+// rules. Codex deep-sec r4 P2 closure fixture: this is the parent
+// shape that probes the SE_DACL_PROTECTED contract on the new
+// file's SECURITY_DESCRIPTOR. Without the protected flag, the new
+// file would inherit Authenticated Users read; with it, the
+// inheritance is blocked.
+//
+// Distinct from synthesizeDirWithAuthUsersReadACE (NO_INHERITANCE
+// variant) which is used to probe the parent-dir gate failure path
+// — the gate check looks at the parent's own DACL, not at what its
+// ACEs say about children. The inheritable variant tests the
+// SE_DACL_PROTECTED contract on the child file.
+func synthesizeDirWithInheritableAuthUsersReadACE(t *testing.T, dir string) {
+	t.Helper()
+	currentSID, err := currentUserSID()
+	if err != nil {
+		t.Fatalf("currentUserSID: %v", err)
+	}
+	authUsersSID, err := windows.StringToSid("S-1-5-11")
+	if err != nil {
+		t.Fatalf("Authenticated Users sid: %v", err)
+	}
+	entries := []windows.EXPLICIT_ACCESS{
+		{
+			AccessPermissions: windows.GENERIC_ALL,
+			AccessMode:        windows.GRANT_ACCESS,
+			Inheritance:       windows.NO_INHERITANCE,
+			Trustee: windows.TRUSTEE{
+				TrusteeForm:  windows.TRUSTEE_IS_SID,
+				TrusteeType:  windows.TRUSTEE_IS_USER,
+				TrusteeValue: windows.TrusteeValueFromSID(currentSID),
+			},
+		},
+		{
+			AccessPermissions: windows.GENERIC_READ,
+			AccessMode:        windows.GRANT_ACCESS,
+			Inheritance:       windows.OBJECT_INHERIT_ACE, // files created in dir inherit this
+			Trustee: windows.TRUSTEE{
+				TrusteeForm:  windows.TRUSTEE_IS_SID,
+				TrusteeType:  windows.TRUSTEE_IS_WELL_KNOWN_GROUP,
+				TrusteeValue: windows.TrusteeValueFromSID(authUsersSID),
+			},
+		},
+	}
+	dacl, err := windows.ACLFromEntries(entries, nil)
+	if err != nil {
+		t.Fatalf("ACLFromEntries: %v", err)
+	}
+	if err := windows.SetNamedSecurityInfo(
+		dir,
+		windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+		nil,
+		nil,
+		dacl,
+		nil,
+	); err != nil {
+		t.Fatalf("SetNamedSecurityInfo on parent dir: %v", err)
+	}
+}
+
+// TestNtCreateRelative_CreateTimeSDOverridesParentInheritance pins
+// the r4 codex deep-sec P2 regression guard: verify that
+// OBJECT_ATTRIBUTES.SecurityDescriptor passed to ntCreateRelative
+// ACTUALLY applies at create time, so the file is born with the
+// restrictive DACL even when the parent has an inheritable
+// non-allowlisted ACE.
+//
+// Without the r4 fix (SD parameter dropped, post-create
+// SetSecurityInfo only), the file would briefly inherit
+// Authenticated Users:GENERIC_READ from the parent's
+// OBJECT_INHERIT_ACE before setRestrictiveDACL ran. The test
+// verifies the DACL BEFORE any setRestrictiveDACL call — so a
+// regression dropping the SD parameter would show up here as a
+// non-allowlisted ACE on the temp handle.
+//
+// This is the strongest unit-test-level regression coverage for the
+// race window closure short of an actual concurrent observer
+// (out-of-scope per spec).
+func TestNtCreateRelative_CreateTimeSDOverridesParentInheritance(t *testing.T) {
+	parent := filepath.Join(t.TempDir(), "inheriting-parent")
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatalf("mkdir parent: %v", err)
+	}
+	synthesizeDirWithInheritableAuthUsersReadACE(t, parent)
+
+	dirHandle, err := openDirHandleNoReparse(parent)
+	if err != nil {
+		t.Fatalf("openDirHandleNoReparse: %v", err)
+	}
+	defer windows.CloseHandle(dirHandle)
+
+	sd, err := buildRestrictiveSecurityDescriptor()
+	if err != nil {
+		t.Fatalf("buildRestrictiveSecurityDescriptor: %v", err)
+	}
+
+	// Request READ_CONTROL so we can call GetSecurityInfo on the
+	// returned handle for the assertion. The hardened pipeline
+	// uses WRITE_DAC + GENERIC_WRITE; for this probe we add
+	// READ_CONTROL because we read the SD back without writing.
+	fileHandle, err := ntCreateRelative(
+		dirHandle,
+		".create-time-sd-probe.tmp",
+		windows.DELETE|windows.GENERIC_WRITE|windows.SYNCHRONIZE|windows.WRITE_DAC|windows.READ_CONTROL,
+		windows.FILE_CREATE,
+		windows.FILE_NON_DIRECTORY_FILE|windows.FILE_SYNCHRONOUS_IO_NONALERT,
+		sd,
+	)
+	if err != nil {
+		t.Fatalf("ntCreateRelative with create-time SD: %v", err)
+	}
+	defer windows.CloseHandle(fileHandle)
+	// Mark the probe file for delete-on-close so it disappears
+	// when fileHandle closes — no leftover artifact in the test
+	// tmpdir.
+	defer func() { _ = setFileDeleteOnClose(fileHandle) }()
+
+	// CRITICAL ASSERTION: verify the file's DACL BEFORE any
+	// setRestrictiveDACL call runs. If the r4 fix is ever
+	// regressed (SD parameter dropped, falling back to post-create
+	// hardening only), this assertion fails because the file
+	// inherited Authenticated Users:GENERIC_READ from the parent.
+	if err := verifyWindowsDACLFromHandle(fileHandle); err != nil {
+		t.Errorf("ntCreateRelative with SD did NOT apply restrictive DACL at create time — file inherits parent ACEs before any post-create hardening: %v", err)
+	}
 }
 
 // TestSecureWriteWithOperatorOpt_LegacyOptInEmitsWarnAuditLogWithDistinctReason
