@@ -176,7 +176,13 @@ func runMatchingProcessesSnapshot() ([]byte, error) {
 
 // ListMatchingProcesses returns full process info for every process whose
 // CommandLine contains at least one of the given substring patterns.
-// Windows-only (wmic); returns nil on other platforms.
+// Pattern matching is CASE-INSENSITIVE (codex bot r3 P2 closure on
+// PR #188: Windows preserves user-typed casing in cmdline strings,
+// so an explorer launch like `MCPHUB.EXE gui` would be missed by a
+// case-sensitive `"mcphub.exe"` prefilter — that miss would let
+// install --upgrade proceed to StopAll, then Bootstrap fails with
+// "target in use" leaving daemons down).
+// Windows-only; returns nil on other platforms.
 func (a *API) ListMatchingProcesses(patterns []string) ([]ProcessInfo, error) {
 	if runtime.GOOS != "windows" {
 		return nil, nil
@@ -185,14 +191,20 @@ func (a *API) ListMatchingProcesses(patterns []string) ([]ProcessInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Pre-lowercase patterns once so the per-line match is cheap.
+	lowerPatterns := make([]string, 0, len(patterns))
+	for _, p := range patterns {
+		lowerPatterns = append(lowerPatterns, strings.ToLower(p))
+	}
 	var results []ProcessInfo
 	s := bufio.NewScanner(strings.NewReader(string(out)))
 	s.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for s.Scan() {
 		line := s.Text()
+		lineLower := strings.ToLower(line)
 		matched := false
-		for _, p := range patterns {
-			if strings.Contains(line, p) {
+		for _, p := range lowerPatterns {
+			if strings.Contains(lineLower, p) {
 				matched = true
 				break
 			}
