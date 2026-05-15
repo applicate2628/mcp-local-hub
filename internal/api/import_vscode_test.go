@@ -407,6 +407,42 @@ func TestImportVSCodeWorkspace_EnvUndefinedWarning(t *testing.T) {
 	}
 }
 
+func TestImportVSCodeWorkspace_SensitiveEnvPlaceholderLeftVerbatim(t *testing.T) {
+	ws := t.TempDir()
+	writeMCPJSON(t, ws, `{
+  "servers": {
+    "test": {
+      "type": "stdio",
+      "command": "tool",
+      "args": ["${env:GITHUB_TOKEN}"]
+    }
+  }
+}`)
+	a := NewAPI()
+	result, err := a.ImportVSCodeWorkspace(ws, VSCodeImportOpts{
+		Getenv: func(string) string { return "should-not-appear" },
+	})
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if strings.Contains(result.YAML, "should-not-appear") {
+		t.Fatalf("sensitive env value leaked into YAML: %s", result.YAML)
+	}
+	if !strings.Contains(result.YAML, "${env:GITHUB_TOKEN}") {
+		t.Fatalf("sensitive placeholder should remain verbatim in YAML: %s", result.YAML)
+	}
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "GITHUB_TOKEN") && strings.Contains(w, "left verbatim") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected warning about sensitive placeholder redaction; got: %v", result.Warnings)
+	}
+}
+
 func TestImportVSCodeWorkspace_JSON5_CommentsAndTrailingCommas(t *testing.T) {
 	ws := t.TempDir()
 	writeMCPJSON(t, ws, `{
