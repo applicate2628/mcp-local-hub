@@ -444,6 +444,7 @@ export function ServersScreen() {
               outcomes={outcomes.get(server.name)}
               applyGen={applyGen}
               onToggle={toggleCell}
+              applying={applying}
             />
           ))}
         </tbody>
@@ -499,8 +500,9 @@ function ServerRowView(props: {
   outcomes?: Map<string, Outcome>;
   applyGen: number;
   onToggle: (server: string, client: string, nextChecked: boolean, initialChecked: boolean) => void;
+  applying: boolean;
 }) {
-  const { server, status, outcomes, onToggle } = props;
+  const { server, status, outcomes, onToggle, applying } = props;
   return (
     <tr>
       <td>
@@ -518,6 +520,7 @@ function ServerRowView(props: {
           client={client}
           lastOutcome={outcomes?.get(client)}
           onToggle={onToggle}
+          applying={applying}
         />
       ))}
       <td>{status?.port ?? "—"}</td>
@@ -540,8 +543,9 @@ function CellView(props: {
   client: string;
   lastOutcome?: Outcome;
   onToggle: (server: string, client: string, nextChecked: boolean, initialChecked: boolean) => void;
+  applying: boolean;
 }) {
-  const { server, client, lastOutcome, onToggle } = props;
+  const { server, client, lastOutcome, onToggle, applying } = props;
   // Treat undefined routing as "not-installed" — perClientRouting only
   // populates keys present in /api/scan's client_presence map.
   const routing: Routing = server.routing[client] ?? "not-installed";
@@ -568,7 +572,7 @@ function CellView(props: {
   // disabled the whole column, locking the operator out of re-adding
   // servers via Apply. The new state-machine includes "available" as
   // an enabled-but-unchecked cell.
-  const disabled = routing === "unsupported" || routing === "not-installed";
+  const disabled = applying || routing === "unsupported" || routing === "not-installed";
   let title: string | undefined;
   if (routing === "via-hub") {
     title = `Currently routed through the hub. Uncheck and Apply to roll this binding back to the original ${client} config.`;
