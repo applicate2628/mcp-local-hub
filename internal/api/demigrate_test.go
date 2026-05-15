@@ -421,7 +421,7 @@ func TestDemigrate_SucceedsWhenBothLatestAndSentinelRefuseAndMarkerConfirms(t *t
 	managedEntriesTestHelper(t)
 
 	// Seed the marker with the (client, server) tuple.
-	if err := RecordManagedEntry("claude-code", "memory"); err != nil {
+	if err := RecordManagedEntry("claude-code", "memory", true); err != nil {
 		t.Fatalf("seed marker: %v", err)
 	}
 

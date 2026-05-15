@@ -179,7 +179,7 @@ func (a *API) Demigrate(opts DemigrateOpts) (*DemigrateReport, error) {
 					// re-migrate (uncheck + Apply, then check +
 					// Apply) populates the marker, then demigrate
 					// works on the next attempt.
-					managed, mErr := IsManagedEntry(binding.Client, server)
+					managed, removeEligible, mErr := ManagedEntryStatus(binding.Client, server)
 					switch {
 					case mErr != nil:
 						err = fmt.Errorf(
@@ -189,6 +189,11 @@ func (a *API) Demigrate(opts DemigrateOpts) (*DemigrateReport, error) {
 						err = fmt.Errorf(
 							"latest backup %s and -original sentinel both hold %q in hub-managed form, but managed-entries marker has no record that mcphub installed this entry — refusing to RemoveEntry (entry may be user-owned); to roll back this entry, edit %s manually, or re-run migrate first to populate the marker",
 							backupPath, server, adapter.ConfigPath())
+					case !removeEligible:
+						err = fmt.Errorf(
+							"latest backup %s and -original sentinel both hold %q in hub-managed form, but managed-entries marker says the entry pre-existed migrate — refusing to RemoveEntry to avoid deleting user-owned config; to roll back this entry, edit %s manually",
+							backupPath, server, adapter.ConfigPath())
+
 					default:
 						// (client, server) is in the marker —
 						// mcphub installed this entry. Safe to

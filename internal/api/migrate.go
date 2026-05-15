@@ -155,6 +155,12 @@ func (a *API) MigrateFrom(opts MigrateOpts) (*MigrateReport, error) {
 					entry.RelayExePath = canonical
 				}
 			}
+			preExisting := false
+			if latestBackupPath, ok, bErr := adapter.LatestBackupPath(); bErr == nil && ok {
+				if has, cErr := adapter.BackupContainsEntry(latestBackupPath, server); cErr == nil {
+					preExisting = has
+				}
+			}
 			if err := adapter.AddEntry(entry); err != nil {
 				report.Failed = append(report.Failed, FailedMigration{
 					Server: server, Client: binding.Client, Err: err.Error(),
@@ -172,7 +178,7 @@ func (a *API) MigrateFrom(opts MigrateOpts) (*MigrateReport, error) {
 			// stays empty for this row — we still report Applied —
 			// but the marker error is surfaced as a soft warning
 			// via the standard hub-mcp event log.
-			if recErr := RecordManagedEntry(binding.Client, server); recErr != nil {
+			if recErr := RecordManagedEntry(binding.Client, server, !preExisting); recErr != nil {
 				_ = LogHubMcpEvent("warn", "managed-entries-record-failed", map[string]any{
 					"server": server,
 					"client": binding.Client,

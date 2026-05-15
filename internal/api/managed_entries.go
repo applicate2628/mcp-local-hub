@@ -114,9 +114,10 @@ func withManagedEntriesLock(fn func() error) error {
 // has installed into a client's config. installed_at is the UTC
 // timestamp of the most recent migrate that produced this entry.
 type ManagedEntry struct {
-	Client      string    `json:"client"`
-	Server      string    `json:"server"`
-	InstalledAt time.Time `json:"installed_at"`
+	Client         string    `json:"client"`
+	Server         string    `json:"server"`
+	InstalledAt    time.Time `json:"installed_at"`
+	RemoveEligible bool      `json:"remove_eligible"`
 }
 
 // ManagedEntries is the file root.
@@ -174,7 +175,7 @@ func writeManagedEntries(m *ManagedEntries) error {
 // earlier update, silently dropping one tuple).
 //
 // Called from migrate.go after a successful adapter.AddEntry.
-func RecordManagedEntry(client, server string) error {
+func RecordManagedEntry(client, server string, removeEligible bool) error {
 	if client == "" || server == "" {
 		return errors.New("RecordManagedEntry: client and server must be non-empty")
 	}
@@ -187,13 +188,15 @@ func RecordManagedEntry(client, server string) error {
 		for i, e := range m.Entries {
 			if e.Client == client && e.Server == server {
 				m.Entries[i].InstalledAt = now
+				m.Entries[i].RemoveEligible = removeEligible
 				return writeManagedEntries(m)
 			}
 		}
 		m.Entries = append(m.Entries, ManagedEntry{
-			Client:      client,
-			Server:      server,
-			InstalledAt: now,
+			Client:         client,
+			Server:         server,
+			InstalledAt:    now,
+			RemoveEligible: removeEligible,
 		})
 		return writeManagedEntries(m)
 	})
@@ -276,4 +279,25 @@ func managedEntriesPath() string {
 // tests can stub the path without importing filepath.
 func joinStateFilePath(dir, name string) string {
 	return dir + string(os.PathSeparator) + name
+}
+
+// ManagedEntryStatus returns whether (client, server) is recorded and whether
+// demigrate may safely use RemoveEntry fallback for it.
+func ManagedEntryStatus(client, server string) (bool, bool, error) {
+	if client == "" || server == "" {
+		return false, false, errors.New("ManagedEntryStatus: client and server must be non-empty")
+	}
+	managedEntriesMu.Lock()
+	defer managedEntriesMu.Unlock()
+
+	m, err := readManagedEntries()
+	if err != nil {
+		return false, false, err
+	}
+	for _, e := range m.Entries {
+		if e.Client == client && e.Server == server {
+			return true, e.RemoveEligible, nil
+		}
+	}
+	return false, false, nil
 }

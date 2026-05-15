@@ -50,7 +50,7 @@ func TestIsManagedEntry_FalseWhenMarkerMissing(t *testing.T) {
 func TestRecordManagedEntry_RoundTrip(t *testing.T) {
 	managedEntriesTestHelper(t)
 
-	if err := RecordManagedEntry("claude-code", "memory"); err != nil {
+	if err := RecordManagedEntry("claude-code", "memory", true); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
 	got, err := IsManagedEntry("claude-code", "memory")
@@ -64,7 +64,7 @@ func TestRecordManagedEntry_RoundTrip(t *testing.T) {
 	// Re-record — must NOT duplicate the row.
 	beforeAt := time.Now().UTC()
 	time.Sleep(2 * time.Millisecond) // ensure timestamp can advance on coarse clocks
-	if err := RecordManagedEntry("claude-code", "memory"); err != nil {
+	if err := RecordManagedEntry("claude-code", "memory", true); err != nil {
 		t.Fatalf("Re-Record: %v", err)
 	}
 	m, err := readManagedEntries()
@@ -109,7 +109,7 @@ func TestRecordManagedEntry_DistinctTuples(t *testing.T) {
 		{"codex-cli", "wolfram"},
 	}
 	for _, tu := range tuples {
-		if err := RecordManagedEntry(tu.client, tu.server); err != nil {
+		if err := RecordManagedEntry(tu.client, tu.server, true); err != nil {
 			t.Fatalf("Record %s/%s: %v", tu.client, tu.server, err)
 		}
 	}
@@ -138,10 +138,10 @@ func TestRecordManagedEntry_DistinctTuples(t *testing.T) {
 func TestRecordManagedEntry_RejectsEmptyArgs(t *testing.T) {
 	managedEntriesTestHelper(t)
 
-	if err := RecordManagedEntry("", "memory"); err == nil {
+	if err := RecordManagedEntry("", "memory", true); err == nil {
 		t.Errorf("Record with empty client: want error, got nil")
 	}
-	if err := RecordManagedEntry("claude-code", ""); err == nil {
+	if err := RecordManagedEntry("claude-code", "", true); err == nil {
 		t.Errorf("Record with empty server: want error, got nil")
 	}
 	// IsManagedEntry rejects same.
@@ -170,7 +170,7 @@ func TestForgetManagedEntry_AbsentIsNoOp(t *testing.T) {
 	}
 	// Record a different tuple, then Forget the original — must not
 	// disturb the other row.
-	if err := RecordManagedEntry("gemini-cli", "wolfram"); err != nil {
+	if err := RecordManagedEntry("gemini-cli", "wolfram", true); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
 	if err := ForgetManagedEntry("claude-code", "memory"); err != nil {
@@ -204,7 +204,7 @@ func TestRecordManagedEntry_ConcurrentNoLostUpdate(t *testing.T) {
 	errs := make(chan error, N)
 	for i := 0; i < N; i++ {
 		go func(i int) {
-			errs <- RecordManagedEntry("claude-code", fmt.Sprintf("server-%02d", i))
+			errs <- RecordManagedEntry("claude-code", fmt.Sprintf("server-%02d", i), true)
 		}(i)
 	}
 	for i := 0; i < N; i++ {
