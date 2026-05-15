@@ -199,6 +199,15 @@ func collectStdioEntries(servers map[string]any) []StdioEntry {
 		if disabled, _ := entryMap["disabled"].(bool); disabled {
 			continue
 		}
+		// Codex CLI uses `enabled: false` (default true) instead
+		// of `disabled`. An entry with enabled=false is configured
+		// but not active — treat as disabled so its (command, args)
+		// don't contribute to A6 kill-pattern derivation.
+		if enabled, present := entryMap["enabled"]; present {
+			if b, ok := enabled.(bool); ok && !b {
+				continue
+			}
+		}
 		args := extractStringSlice(entryMap["args"])
 		out = append(out, StdioEntry{
 			Name:    name,

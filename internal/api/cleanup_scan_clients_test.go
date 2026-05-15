@@ -83,19 +83,24 @@ url = "http://localhost:9129/mcp"
 	for _, p := range got {
 		have[p] = true
 	}
-	// Expected entries:
-	want := []string{"mcp-language-server", "clangd", "pylsp", "server.js"}
+	// Args go through the stricter argIsDiscriminatingPattern
+	// filter (length ≥ 8, contains `-@/\.`, not numeric, not a
+	// flag). Short generic words like "clangd"/"pylsp" no longer
+	// reach the pattern set on their own.
+	want := []string{"mcp-language-server", "server.js"}
 	for _, w := range want {
 		if !have[w] {
 			t.Errorf("expected pattern %q in %v", w, got)
 		}
 	}
-	// node should be filtered out by isBroadLauncherToken
+	// node should be filtered out by isBroadLauncherToken (broad
+	// interpreter token; also fails argIsDiscriminatingPattern's
+	// length floor).
 	if have["node"] {
 		t.Errorf("'node' should be filtered as broad launcher token; got %v", got)
 	}
-	// short args/flags must not appear
-	for _, bad := range []string{"--lsp", "-p", "8080"} {
+	// Short / flag-shaped / numeric / bare-word args must not appear.
+	for _, bad := range []string{"--lsp", "-p", "8080", "clangd", "pylsp"} {
 		if have[bad] {
 			t.Errorf("disallowed pattern %q present in %v", bad, got)
 		}
@@ -145,11 +150,11 @@ func TestPatternsFromClientStdio_SkipsDisabledEntry(t *testing.T) {
   "mcpServers": {
     "active-mcp": {
       "command": "my-mcp-server",
-      "args": ["--config", "production"]
+      "args": ["--config", "production-config.yaml"]
     },
     "disabled-mcp": {
       "command": "should-be-skipped",
-      "args": ["--config", "old-name"],
+      "args": ["--config", "old-config-name.yaml"],
       "disabled": true
     }
   }
@@ -162,14 +167,83 @@ func TestPatternsFromClientStdio_SkipsDisabledEntry(t *testing.T) {
 	if !have["my-mcp-server"] {
 		t.Errorf("active entry's command 'my-mcp-server' missing; got %v", got)
 	}
-	if !have["production"] {
-		t.Errorf("active entry's discriminating arg 'production' missing; got %v", got)
+	if !have["production-config.yaml"] {
+		t.Errorf("active entry's discriminating arg 'production-config.yaml' missing; got %v", got)
 	}
 	if have["should-be-skipped"] {
 		t.Errorf("disabled entry's command leaked into pattern set; got %v", got)
 	}
-	if have["old-name"] {
+	if have["old-config-name.yaml"] {
 		t.Errorf("disabled entry's arg leaked into pattern set; got %v", got)
+	}
+}
+
+// TestPatternsFromClientStdio_SkipsEnabledFalseEntry covers the
+// codex-CLI convention: codex uses `enabled: false` (default true)
+// instead of the `disabled` flag. Manual smoke on PR #190 found
+// that a codex entry like `[mcp_servers.go]` with
+// `command='gopls' enabled=false` was contributing the "gopls"
+// pattern to the kill set. collectStdioEntries must skip
+// enabled=false the same way it skips disabled=true.
+func TestPatternsFromClientStdio_SkipsEnabledFalseEntry(t *testing.T) {
+	home := withHermeticHomeForCleanup(t)
+	writeCleanupFile(t, filepath.Join(home, ".codex", "config.toml"), `
+[mcp_servers.go]
+command = "gopls"
+args = ["mcp"]
+enabled = false
+
+[mcp_servers.active]
+command = "active-mcp-server"
+args = ["--config", "active-config.yaml"]
+`)
+	got := patternsFromClientStdio()
+	have := map[string]bool{}
+	for _, p := range got {
+		have[p] = true
+	}
+	if have["gopls"] {
+		t.Errorf("enabled=false entry's command 'gopls' leaked into pattern set; got %v", got)
+	}
+	if !have["active-mcp-server"] {
+		t.Errorf("active entry's command missing; got %v", got)
+	}
+}
+
+func TestArgIsDiscriminatingPattern(t *testing.T) {
+	cases := map[string]bool{
+		// Pass: length ≥ 8 AND contains `-@/\.`
+		"@playwright/mcp@latest":       true,  // @scoped pkg
+		"mcp-server-fetch":             true,  // dashed name
+		"my-mcp-server":                true,  // dashed name
+		"server.js":                    true,  // 9 chars, has .
+		"production-config.yaml":       true,  // multi-word with .
+		"C:/Users/x/server.py":         true,  // path with / and .
+		`C:\Users\x\server.py`:         true,  // path with \ and .
+		"start-mcp-server":             true,  // dashed
+		// Fail: length < 8
+		"":      false,
+		"x":     false,
+		"clangd": false, // 6 chars
+		"pylsp":  false, // 5 chars
+		"memory": false, // 6 chars
+		"false":  false, // 5 chars
+		"3.13":   false, // 4 chars (also numeric+dot but length filter wins)
+		// Fail: flag (starts with -)
+		"--lsp":                false,
+		"--some-very-long-flag": false,
+		// Fail: all-digits
+		"12345678": false,
+		// Fail: ≥ 8 chars but no separator (bare word, generic risk)
+		"localhost":   false,
+		"production":  false,
+		"executing":   false,
+		"absolutevalues": false,
+	}
+	for in, want := range cases {
+		if got := argIsDiscriminatingPattern(in); got != want {
+			t.Errorf("argIsDiscriminatingPattern(%q) = %v, want %v", in, got, want)
+		}
 	}
 }
 
@@ -380,10 +454,17 @@ func TestPatternsFromClientStdio_AntigravityMcphubCommandFiltered(t *testing.T) 
 	if have["mcp"] {
 		t.Errorf("'mcp' (legacy binary name) must NOT be in pattern set; got %v", got)
 	}
-	// "memory" (the server name arg) is still a valid discriminating
-	// pattern and SHOULD survive.
-	if !have["memory"] {
-		t.Errorf("discriminating server-name arg 'memory' missing; got %v", got)
+	// Antigravity entries write `command = mcphub.exe` (filtered)
+	// and args = ["relay","--server","<s>","--daemon","<client>"].
+	// All args are either short (<8: "memory", "claude") or
+	// flag-shaped (--server, --daemon) so the new
+	// argIsDiscriminatingPattern filter rejects them all. With
+	// every arg dropped AND the command filtered, the entry
+	// contributes ZERO patterns — which is the safe outcome:
+	// Antigravity relay entries have no discriminating signal we
+	// can reliably extract without risking false positives.
+	if len(got) > 0 {
+		t.Errorf("Antigravity-only fixture should contribute zero patterns; got %v", got)
 	}
 }
 
@@ -416,13 +497,13 @@ func TestPatternIsTooBroad(t *testing.T) {
 	}
 }
 
-// TestPatternsFromClientStdio_AntigravityDaemonArgFiltered covers
-// codex bot r2 P1 on PR #190: Antigravity stdio entries are
-// written as `["relay","--server","<s>","--daemon","<client>"]`,
-// so the args branch would emit "claude" / "codex" / etc. as
-// kill-match patterns. parseOrphans would then match the actual
-// launcher process and kill it. The filter must drop arg tokens
-// that are themselves known-client basenames.
+// TestPatternsFromClientStdio_AntigravityDaemonArgFiltered: the
+// codex bot r2 P1 fix (filter known-client basenames out of args)
+// is now superseded by the tighter argIsDiscriminatingPattern
+// filter. Antigravity --daemon args like "claude" are 6 chars and
+// fail the length floor. Belt-and-suspenders: the known-client
+// filter in patternIsTooBroad ALSO drops them if a future loosening
+// of the length floor would otherwise re-admit them.
 func TestPatternsFromClientStdio_AntigravityDaemonArgFiltered(t *testing.T) {
 	home := withHermeticHomeForCleanup(t)
 	writeCleanupFile(t, filepath.Join(home, ".gemini", "antigravity", "mcp_config.json"), `{
@@ -443,11 +524,6 @@ func TestPatternsFromClientStdio_AntigravityDaemonArgFiltered(t *testing.T) {
 		if have[banned] {
 			t.Errorf("known launcher token %q must NOT be in pattern set (Antigravity relay --daemon arg); got %v", banned, got)
 		}
-	}
-	// "memory" (the server name) is 6 chars, no leading -, not all
-	// digits, not a launcher → SHOULD survive.
-	if !have["memory"] {
-		t.Errorf("discriminating server-name arg 'memory' missing; got %v", got)
 	}
 }
 
