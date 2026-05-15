@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/buildinfo"
@@ -904,17 +906,47 @@ func cmdlineIsGUIOnTarget(cmdline, target string) bool {
 }
 
 // matchTargetPrefix returns (rest, true) when cmdline starts
-// with target (case-insensitive), and (rest, false) otherwise.
-// rest is the cmdline content after the prefix, leading
-// close-quote and whitespace stripped.
+// with target (case-insensitive, rune-aware), and (rest, false)
+// otherwise. rest is the cmdline content after the prefix,
+// leading close-quote and whitespace stripped.
+//
+// Codex bot r6 P2 closure on PR #188: must NOT slice on
+// len(target) after a strings.ToLower roundtrip — Unicode
+// case-folding can change byte length (Turkish dotless `ı` ↔
+// `İ`, Greek `ς` ↔ `σ`, etc.), so the lowered prefix may not
+// align with target's UTF-8 byte positions in the original
+// cmdline. A Windows profile path containing such a character
+// would mis-slice and `firstArgIsGUI` evaluate the wrong tail.
+// Walk the strings rune-by-rune via unicode.ToLower instead,
+// counting bytes from the ORIGINAL cmdline so the slice
+// boundary is correct.
 func matchTargetPrefix(cmdline, target string) (string, bool) {
-	if !strings.HasPrefix(strings.ToLower(cmdline), strings.ToLower(target)) {
-		return "", false
+	sLen := 0
+	pLen := 0
+	for {
+		if pLen == len(target) {
+			return cmdlineTailAfterImage(cmdline[sLen:]), true
+		}
+		if sLen == len(cmdline) {
+			return "", false
+		}
+		sr, sw := utf8.DecodeRuneInString(cmdline[sLen:])
+		pr, pw := utf8.DecodeRuneInString(target[pLen:])
+		if unicode.ToLower(sr) != unicode.ToLower(pr) {
+			return "", false
+		}
+		sLen += sw
+		pLen += pw
 	}
-	after := cmdline[len(target):]
+}
+
+// cmdlineTailAfterImage strips a single optional close-quote and
+// leading whitespace from the cmdline content after the image
+// boundary, returning the args portion (which firstArgIsGUI
+// consumes).
+func cmdlineTailAfterImage(after string) string {
 	after = strings.TrimPrefix(after, `"`)
-	after = strings.TrimLeft(after, " \t")
-	return after, true
+	return strings.TrimLeft(after, " \t")
 }
 
 // splitImageAndRest extracts the image path and the rest from a

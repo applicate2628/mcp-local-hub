@@ -771,6 +771,49 @@ func TestCmdlineIsGUIOnTarget_PathWithSpaces(t *testing.T) {
 	}
 }
 
+// TestCmdlineIsGUIOnTarget_UnicodePath pins codex bot r6 P2: the
+// matchTargetPrefix helper must walk strings rune-by-rune (not
+// slice on len(target) after a strings.ToLower roundtrip) because
+// Unicode case-folding can change byte length. Cyrillic / CJK /
+// Turkish profile names appear in real Windows user paths.
+func TestCmdlineIsGUIOnTarget_UnicodePath(t *testing.T) {
+	target := `C:\Users\Дмитрий\.local\bin\mcphub.exe`
+	cases := []struct {
+		name    string
+		cmdline string
+		want    bool
+	}{
+		{
+			"exact-case Cyrillic + gui",
+			`C:\Users\Дмитрий\.local\bin\mcphub.exe gui`,
+			true,
+		},
+		{
+			"case-folded Cyrillic + gui — accept (rune fold)",
+			`C:\users\ДМИТРИЙ\.LOCAL\BIN\MCPHUB.EXE gui --no-browser`,
+			true,
+		},
+		{
+			"Cyrillic + daemon arg — reject",
+			`C:\Users\Дмитрий\.local\bin\mcphub.exe daemon --server time`,
+			false,
+		},
+		{
+			"different Unicode dir — reject",
+			`C:\Users\Иван\.local\bin\mcphub.exe gui`,
+			false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := cmdlineIsGUIOnTarget(tc.cmdline, target)
+			if got != tc.want {
+				t.Errorf("cmdlineIsGUIOnTarget(%q, %q) = %v; want %v", tc.cmdline, target, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestInstallCmd_UpgradeMutexErrors pins that every manifest-install
 // flag combo with --upgrade returns a single coherent error message.
 // One-shot mutex check at the top of RunE — if --upgrade is set and
