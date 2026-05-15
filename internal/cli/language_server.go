@@ -29,6 +29,7 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"sort"
@@ -254,21 +255,21 @@ func printScanResults(out io.Writer, results []scanResult, totalEntries int) {
 
 // confirmCleanupPrompt asks the operator to confirm. Empty/no/N
 // answers abort; only "y" or "yes" (case-insensitive) proceeds.
-// A read error from stdin (e.g. closed pipe) is surfaced rather than
-// silently treated as "no" — the caller decides whether to retry.
+// EOF, a bare newline, or any non-affirmative input is treated as
+// "no" so the safe outcome (no writes) is the default. A genuine
+// I/O error on the scanner is surfaced so callers can distinguish
+// "user declined" from "stdin broken".
 func confirmCleanupPrompt(in io.Reader, out io.Writer) (bool, error) {
 	fmt.Fprint(out, "\nRemove these entries? [y/N]: ")
-	var answer string
-	if _, err := fmt.Fscanln(in, &answer); err != nil {
-		// Fscanln returns "unexpected newline" on bare Enter —
-		// treat that as "no" so the operator can decline by
-		// pressing Return. Any other I/O error propagates.
-		if err.Error() == "unexpected newline" {
-			return false, nil
+	sc := bufio.NewScanner(in)
+	if !sc.Scan() {
+		if err := sc.Err(); err != nil {
+			return false, fmt.Errorf("read confirmation: %w", err)
 		}
-		return false, fmt.Errorf("read confirmation: %w", err)
+		// EOF / no input — treat as decline.
+		return false, nil
 	}
-	answer = strings.ToLower(strings.TrimSpace(answer))
+	answer := strings.ToLower(strings.TrimSpace(sc.Text()))
 	return answer == "y" || answer == "yes", nil
 }
 
