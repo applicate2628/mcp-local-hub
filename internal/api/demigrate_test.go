@@ -424,6 +424,81 @@ client_bindings:
 	}
 }
 
+// TestDemigrate_RefusesRemoveEntryWhenLiveURLDoesNotMatchManifest pins
+// codex bot r1 P1 closure on PR #186: the RemoveEntry fallback must
+// NOT delete a live entry whose URL does not match the URL mcphub
+// would have written (built from manifest's daemon port +
+// binding.url_path). This guards against the data-loss case where a
+// user configured a legitimate localhost HTTP MCP server BEFORE
+// installing mcphub — both backup and sentinel would hold THAT
+// user-owned entry (matching the loopback-URL heuristic in
+// IsHubHTTPURL), and a blind RemoveEntry would delete it.
+func TestDemigrate_RefusesRemoveEntryWhenLiveURLDoesNotMatchManifest(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("HOME", tmp)
+	claudePath := filepath.Join(tmp, ".claude.json")
+	// Live entry points at port 7777 — a user's own MCP server,
+	// NOT the manifest's daemon port (9200 below).
+	_ = os.WriteFile(claudePath, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:7777/mcp"}}}`), 0600)
+	// Both backup and sentinel hold the same user-owned entry —
+	// they predate any mcphub touch. IsHubHTTPURL matches them
+	// (it accepts any loopback HTTP URL), but they are not
+	// mcphub-managed.
+	latest := claudePath + ".bak-mcp-local-hub-20260101-000000"
+	_ = os.WriteFile(latest, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:7777/mcp"}}}`), 0600)
+	sentinel := claudePath + ".bak-mcp-local-hub-original"
+	_ = os.WriteFile(sentinel, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:7777/mcp"}}}`), 0600)
+
+	manifestDir := t.TempDir()
+	memDir := filepath.Join(manifestDir, "memory")
+	_ = os.MkdirAll(memDir, 0700)
+	_ = os.WriteFile(filepath.Join(memDir, "manifest.yaml"), []byte(
+		`name: memory
+kind: global
+transport: stdio-bridge
+command: npx
+daemons:
+  - name: default
+    port: 9200
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+`), 0600)
+
+	a := NewAPI()
+	report, err := a.Demigrate(DemigrateOpts{
+		Servers:  []string{"memory"},
+		ScanOpts: ScanOpts{ManifestDir: manifestDir},
+		Writer:   io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("Demigrate: %v", err)
+	}
+	if len(report.Restored) != 0 {
+		t.Errorf("expected 0 Restored — guard must refuse RemoveEntry on user-owned URL; got %+v", report.Restored)
+	}
+	if len(report.Failed) != 1 {
+		t.Fatalf("expected 1 Failed row when guard refuses; got %d: %+v", len(report.Failed), report.Failed)
+	}
+	failMsg := report.Failed[0].Err
+	if !strings.Contains(failMsg, "user-owned") || !strings.Contains(failMsg, "does not match") {
+		t.Errorf("failure message must explain the URL-mismatch guard; got %q", failMsg)
+	}
+	// Live entry MUST be preserved.
+	data, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatalf("read live config: %v", err)
+	}
+	if !strings.Contains(string(data), `http://localhost:7777/mcp`) {
+		t.Errorf("live user-owned entry was deleted (data-loss regression); file = %s", data)
+	}
+}
+
 func TestDemigrate_FailsWhenOnlySentinelExistsAndLacksEntry(t *testing.T) {
 	// Bot R4 P1 reproducer: all timestamped backups have been pruned
 	// (e.g. via `backups clean --keep 0`) so LatestBackupPath returns

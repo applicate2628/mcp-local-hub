@@ -6,7 +6,35 @@ import (
 	"io"
 
 	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/config"
 )
+
+// buildExpectedHubURL constructs the hub-routed URL mcphub WOULD
+// write for the given (manifest, binding) pair. Used by Demigrate
+// to verify that a live client-config entry actually IS the
+// mcphub-managed one before falling back to RemoveEntry (codex bot
+// r1 P1 closure on PR #186: blind RemoveEntry would delete legit
+// user-owned localhost HTTP MCP entries that happen to match the
+// loopback-URL heuristic in `IsHubHTTPURL`).
+//
+// Returns "" when the binding references an unknown daemon — in
+// that case the caller must refuse to RemoveEntry because we
+// cannot prove the live entry is ours.
+//
+// Mirror of migrate.go:108-120 / install.go:946 URL construction
+// — must stay byte-identical or the guard breaks (live entries
+// that DO match would falsely fail the equality check).
+func buildExpectedHubURL(m *config.ServerManifest, binding config.ClientBinding) string {
+	port, ok := findDaemonPort(m, binding.Daemon)
+	if !ok {
+		return ""
+	}
+	urlPath := binding.URLPath
+	if urlPath == "" {
+		urlPath = "/mcp"
+	}
+	return fmt.Sprintf("http://localhost:%d%s", port, urlPath)
+}
 
 // DemigrateOpts controls a reverse-migration invocation. Semantics mirror
 // MigrateOpts: the manifest drives the client-binding set, ClientsInclude
@@ -155,40 +183,72 @@ func (a *API) Demigrate(opts DemigrateOpts) (*DemigrateReport, error) {
 				} else if errors.Is(sentErr, clients.ErrBackupEntryAlreadyMigrated) {
 					// PR #186 (B4 fix): both the latest timestamped
 					// backup AND the pristine sentinel hold the entry
-					// in hub-managed form. This is the
-					// "no-pre-hub-form-ever-existed" case — the user
-					// never had a stdio/non-hub version of this
-					// server to roll back to. The April 2026 codename
-					// rename `mcp-sync → mcp-local-hub` made it more
-					// common (mcphub's "original" sentinel was first
-					// written AFTER an earlier mcp-sync-era migrate
-					// had already converted the entry to hub form),
-					// but it also covers servers added via mcphub
-					// from scratch (claude-code MCP entries are
-					// hub-routed by design — Claude Code uses HTTP
-					// transport for MCP, so no stdio "original" ever
-					// existed). Demigrate's correct semantic here is
-					// `RemoveEntry`: roll back to "no entry" in the
-					// client config rather than fail because there is
-					// no pre-hub form to restore.
+					// in hub-managed form. Common case: claude-code /
+					// gemini-cli use HTTP transport natively, and
+					// the April 2026 `mcp-sync → mcp-local-hub`
+					// codename rename sealed sentinels post-migrate.
 					//
-					// Why this is safe:
-					//   - Sentinel holds hub-managed entry → mcphub
-					//     wrote it. Removing it puts the client
-					//     config back to "no entry for this server"
-					//     state.
-					//   - Backup chain still preserves the pre-r5
-					//     content for forensic inspection if needed.
-					//   - Operator pressed "uncheck + Apply" through
-					//     the GUI matrix, which is explicit consent
-					//     to roll back mcphub routing.
-					if rmErr := adapter.RemoveEntry(server); rmErr != nil {
+					// Codex bot r1 P1 closure on PR #186: the
+					// `ErrBackupEntryAlreadyMigrated` predicate is
+					// based on a loopback-URL heuristic (IsHubHTTPURL)
+					// — it matches ANY localhost HTTP URL, not just
+					// mcphub-managed ones. A user who configured a
+					// legitimate localhost HTTP MCP server BEFORE
+					// installing mcphub would have both backup and
+					// sentinel holding that user-owned entry, and a
+					// blind RemoveEntry would delete it. That is a
+					// data-loss regression.
+					//
+					// Guard: only RemoveEntry when the LIVE entry's
+					// URL matches the URL mcphub WOULD have written
+					// for this binding (manifest's daemon port +
+					// binding.url_path; exact shape from migrate.go
+					// :120 / install.go:946). If live entry matches
+					// → it IS our managed entry → safe to remove.
+					// If it doesn't match (different localhost URL)
+					// → user-owned entry → refuse to delete; surface
+					// the original sentinel-fallback failure so the
+					// operator inspects manually.
+					expectedURL := buildExpectedHubURL(m, binding)
+					liveEntry, getErr := adapter.GetEntry(server)
+					switch {
+					case getErr != nil:
 						err = fmt.Errorf(
-							"latest backup %s and -original sentinel both hold %q in hub-managed form, AND RemoveEntry fallback failed: %w",
-							backupPath, server, rmErr)
-					} else {
-						restoredFrom = "(no pre-hub form found — removed entry from client config)"
+							"latest backup %s and -original sentinel both hold %q in hub-managed form, but reading live entry failed: %w",
+							backupPath, server, getErr)
+					case liveEntry == nil:
+						// No live entry — nothing to remove. Treat as
+						// already-rolled-back (idempotent).
+						restoredFrom = "(no pre-hub form found; live entry already absent)"
 						err = nil
+					case expectedURL == "":
+						// Manifest doesn't yield an expected URL
+						// (missing daemon port). Cannot safely
+						// distinguish our entry from user's → fail.
+						err = fmt.Errorf(
+							"latest backup %s and -original sentinel both hold %q in hub-managed form, but cannot derive expected hub URL from manifest binding (daemon %q url_path %q) to guard RemoveEntry — inspect manually",
+							backupPath, server, binding.Daemon, binding.URLPath)
+					case liveEntry.URL != expectedURL:
+						// Live entry exists but its URL does not
+						// match what mcphub would have written. This
+						// is the codex-bot-P1 protected case: a
+						// user-owned localhost HTTP entry. Refuse to
+						// delete it; the operator must inspect.
+						err = fmt.Errorf(
+							"latest backup %s and -original sentinel both hold %q in hub-managed form, but live entry URL %q does not match this manifest's expected hub URL %q — refusing to RemoveEntry (entry appears user-owned, not mcphub-managed); inspect manually",
+							backupPath, server, liveEntry.URL, expectedURL)
+					default:
+						// Live entry URL exactly matches manifest's
+						// expected hub URL → this IS our managed
+						// entry → safe to RemoveEntry.
+						if rmErr := adapter.RemoveEntry(server); rmErr != nil {
+							err = fmt.Errorf(
+								"latest backup %s and -original sentinel both hold %q in hub-managed form, AND RemoveEntry fallback failed: %w",
+								backupPath, server, rmErr)
+						} else {
+							restoredFrom = "(no pre-hub form found — removed mcphub-managed entry from client config)"
+							err = nil
+						}
 					}
 				} else {
 					err = fmt.Errorf(
