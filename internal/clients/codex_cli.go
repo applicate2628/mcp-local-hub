@@ -189,6 +189,17 @@ func (c *codexCLI) RestoreEntryFromBackup(backupPath, name string) error {
 	return c.writeTOML(liveMap)
 }
 
+// FindStdioLanguageServerEntries scans [mcp_servers.*] for stdio
+// entries matching the mcp-language-server invocation pattern.
+func (c *codexCLI) FindStdioLanguageServerEntries() ([]LanguageServerStdioEntry, error) {
+	m, err := c.readTOML()
+	if err != nil {
+		return nil, err
+	}
+	servers, _ := m["mcp_servers"].(map[string]any)
+	return findLanguageServerStdioInMap(servers), nil
+}
+
 // BackupContainsEntry reports whether the backup file at backupPath
 // has an [mcp_servers.<name>] table.
 func (c *codexCLI) BackupContainsEntry(backupPath, name string) (bool, error) {

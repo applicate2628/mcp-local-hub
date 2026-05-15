@@ -111,6 +111,158 @@ type Client interface {
 	// (false, nil) on present-but-malformed and on absent; returns
 	// (_, err) only for I/O or parse errors.
 	BackupContainsEntry(backupPath, name string) (bool, error)
+
+	// FindStdioLanguageServerEntries scans the client's config for
+	// stdio entries that look like mcp-language-server invocations and
+	// returns them. Used by `mcphub language-server cleanup` to
+	// surface legacy stdio entries that should be removed AFTER the
+	// user has run `mcphub register` to install the HTTP-backed
+	// language-server daemons. With both stdio and HTTP entries live
+	// in the same client config, the agent spawns two parallel LSP
+	// processes per language — defeating mcphub's process-tail
+	// compression value prop.
+	//
+	// An entry qualifies if:
+	//   1. its `command` basename equals "mcp-language-server" (case-
+	//      insensitive, .exe suffix stripped), AND
+	//   2. its `args` contain either "--lsp <language>" (two tokens)
+	//      or "--lsp=<language>" (single token).
+	//
+	// HTTP-shaped entries (no `command`, has `url`) are silently
+	// skipped, so the mcphub-written `mcp-language-server-<lang>`
+	// entries are NEVER returned. Returns nil with nil error when no
+	// such entries exist; returns an error only on read/parse
+	// failure. Idempotent: re-running after cleanup returns nil.
+	FindStdioLanguageServerEntries() ([]LanguageServerStdioEntry, error)
+}
+
+// LanguageServerStdioEntry describes one stdio mcp-language-server
+// entry surfaced by FindStdioLanguageServerEntries. Name is the
+// adapter-format-specific entry key (e.g. TOML table name for codex,
+// JSON object key for claude/gemini/cursor/vscode/qwen); Command is the
+// raw `command` value from the entry (for diagnostic display);
+// Language is the value extracted from "--lsp <X>" or "--lsp=<X>" in
+// the args list, or "" when the args list does not declare one.
+type LanguageServerStdioEntry struct {
+	Name     string
+	Command  string
+	Language string
+}
+
+// matchLanguageServerStdio classifies one parsed entry map as a stdio
+// mcp-language-server invocation. Returns the raw command string, the
+// extracted language (always non-empty when ok=true), and ok=true
+// only when BOTH:
+//   - the command basename matches the LSP binary (case-insensitive,
+//     .exe stripped, separator-agnostic), AND
+//   - the args list declares "--lsp <X>" or "--lsp=X".
+//
+// Refusing matches without an explicit --lsp arg keeps cleanup from
+// deleting standalone or experimental `mcp-language-server` entries
+// that operators may have configured for purposes other than
+// language-routed LSP (codex bot r1 P1.2).
+func matchLanguageServerStdio(raw map[string]any) (cmd, language string, ok bool) {
+	cmd, _ = raw["command"].(string)
+	if !isLanguageServerBinary(cmd) {
+		return "", "", false
+	}
+	language = extractLspLanguageArg(raw["args"])
+	if language == "" {
+		return "", "", false
+	}
+	return cmd, language, true
+}
+
+// isLanguageServerBinary reports whether cmd's basename (case-
+// insensitive, .exe suffix stripped) equals "mcp-language-server".
+// Empty string never matches. Used to keep the matcher specific to
+// the well-known LSP binary and avoid catching unrelated stdio MCP
+// servers the user may have named "clangd" / "fortran" / etc.
+//
+// Path separators are normalized via basenameAcrossSeparators so a
+// Windows-style absolute path like `C:\Users\u\.local\bin\mcp-
+// language-server.exe` matches on POSIX hosts too. Cross-environment
+// configs (e.g. WSL pointing at a shared Windows dotfile) and
+// regression tests on Linux CI both depend on that normalization
+// (codex bot r1 P1.1).
+func isLanguageServerBinary(cmd string) bool {
+	if cmd == "" {
+		return false
+	}
+	base := strings.ToLower(basenameAcrossSeparators(cmd))
+	base = strings.TrimSuffix(base, ".exe")
+	return base == "mcp-language-server"
+}
+
+// basenameAcrossSeparators returns the trailing path component of p
+// regardless of separator. filepath.Base recognizes only the host
+// OS's separator, so a Windows path on POSIX (or vice versa) is
+// returned verbatim as one segment. This helper folds backslashes to
+// forward slashes first, then takes the substring after the last
+// slash. Empty string returns empty; trailing separators collapse to
+// "".
+func basenameAcrossSeparators(p string) string {
+	p = strings.ReplaceAll(p, "\\", "/")
+	if i := strings.LastIndex(p, "/"); i >= 0 {
+		return p[i+1:]
+	}
+	return p
+}
+
+// extractLspLanguageArg scans the args slice for "--lsp <X>" (two-
+// token form) or "--lsp=<X>" (single-token form) and returns X.
+// Returns "" when args is not a slice, the flag is absent, or the
+// value following the two-token "--lsp" is not a string. Non-string
+// elements between/around the flag are ignored gracefully.
+func extractLspLanguageArg(args any) string {
+	list, ok := args.([]any)
+	if !ok {
+		return ""
+	}
+	for i, a := range list {
+		s, ok := a.(string)
+		if !ok {
+			continue
+		}
+		if s == "--lsp" && i+1 < len(list) {
+			if next, ok := list[i+1].(string); ok {
+				return next
+			}
+		}
+		if rest, ok := strings.CutPrefix(s, "--lsp="); ok {
+			return rest
+		}
+	}
+	return ""
+}
+
+// findLanguageServerStdioInMap iterates servers (a map of
+// entry-name -> entry-data parsed from any adapter's config format)
+// and returns every entry that classifies as stdio mcp-language-
+// server per matchLanguageServerStdio. Results are sorted by Name for
+// stable CLI output. nil/empty servers yields a nil slice.
+func findLanguageServerStdioInMap(servers map[string]any) []LanguageServerStdioEntry {
+	if len(servers) == 0 {
+		return nil
+	}
+	var out []LanguageServerStdioEntry
+	for name, raw := range servers {
+		entryMap, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		cmd, lang, ok := matchLanguageServerStdio(entryMap)
+		if !ok {
+			continue
+		}
+		out = append(out, LanguageServerStdioEntry{
+			Name:     name,
+			Command:  cmd,
+			Language: lang,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
 }
 
 // ErrClientNotInstalled signals the client's config file does not exist on this machine.
