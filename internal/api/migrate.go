@@ -161,6 +161,25 @@ func (a *API) MigrateFrom(opts MigrateOpts) (*MigrateReport, error) {
 				})
 				continue
 			}
+			// PR #187 (B4 ownership marker): record this (client,
+			// server) tuple in the managed-entries marker file so
+			// Demigrate can later distinguish entries mcphub
+			// installed from entries the user owned pre-mcphub.
+			// Best-effort: a marker-write failure must NOT roll back
+			// the successful AddEntry (operator's config is the
+			// load-bearing artifact; the marker is observability
+			// for the future demigrate path). The Failed slice
+			// stays empty for this row — we still report Applied —
+			// but the marker error is surfaced as a soft warning
+			// via the standard hub-mcp event log.
+			if recErr := RecordManagedEntry(binding.Client, server); recErr != nil {
+				_ = LogHubMcpEvent("warn", "managed-entries-record-failed", map[string]any{
+					"server": server,
+					"client": binding.Client,
+					"err":    recErr.Error(),
+					"note":   "demigrate fallback for this entry will fail-closed until the marker is repopulated by a subsequent migrate",
+				})
+			}
 			report.Applied = append(report.Applied, AppliedMigration{
 				Server: server, Client: binding.Client, URL: url,
 			})
