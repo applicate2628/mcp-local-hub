@@ -841,60 +841,62 @@ func findRunningGUIsOnTarget(a *api.API, target string) ([]api.ProcessInfo, erro
 	return matched, nil
 }
 
-// cmdlineIsGUIOnTarget reports whether a wmic CommandLine string
-// represents a `mcphub.exe gui` invocation whose image path equals
-// target. Windows quotes paths with spaces; an Explorer-double-
-// click invocation has no argv past the image path.
+// cmdlineIsGUIOnTarget reports whether a wmic/PowerShell
+// CommandLine string represents a `mcphub.exe gui` invocation
+// whose image path equals target.
 //
-// Accepts BOTH absolute-path forms:
+// Codex bot r2 P1 closure on PR #188: splitCSVLine strips ALL
+// quote characters from the CSV cmdline cell. The string passed
+// in here is therefore unquoted regardless of whether the OS
+// originally quoted the executable path. A target whose path
+// contains spaces (`C:\Users\John Doe\.local\bin\mcphub.exe`)
+// would be split on the first whitespace under a naive
+// "first whitespace = image/args boundary" heuristic, missing
+// the running GUI.
 //
-//	"C:\Users\...\mcphub.exe" gui --no-browser
-//	C:\Users\...\mcphub.exe gui --no-browser
-//	"C:\Users\...\mcphub.exe"               (Explorer-launched)
-//	C:\Users\...\mcphub.exe                 (Explorer-launched)
+// Robust strategy: match `target` as a case-insensitive prefix
+// of the trimmed cmdline (handles both quoted and unquoted
+// forms — once quotes are stripped, the target path is the
+// literal prefix). After the prefix, the next non-space token
+// must be "gui" (or end-of-string for Explorer-double-click
+// launch per cmd/mcphub/main.go shouldAutoLaunchGUI).
 //
-// Rejects daemon invocations (`mcphub.exe daemon --server ...`)
-// and same-binary-different-path matches (e.g., a build-dir
-// mcphub.exe running through a script).
+// Rejects daemon invocations (`mcphub.exe daemon --server ...`),
+// same-binary-different-path matches (a build-dir mcphub.exe
+// running through a script), and the tray child process
+// (`mcphub.exe tray`).
 //
-// Path comparison is case-insensitive on Windows (NTFS default).
+// Path comparison is case-insensitive (NTFS default).
 func cmdlineIsGUIOnTarget(cmdline, target string) bool {
 	cmdline = strings.TrimSpace(cmdline)
-	if cmdline == "" {
+	if cmdline == "" || target == "" {
 		return false
 	}
-	var imagePath, rest string
-	if strings.HasPrefix(cmdline, `"`) {
-		// Quoted path form: "<image>" <rest>
-		closeIdx := strings.Index(cmdline[1:], `"`)
-		if closeIdx < 0 {
-			return false
-		}
-		imagePath = cmdline[1 : 1+closeIdx]
-		rest = strings.TrimSpace(cmdline[1+closeIdx+1:])
-	} else {
-		// Unquoted: first whitespace separates image from args.
-		spaceIdx := strings.IndexAny(cmdline, " \t")
-		if spaceIdx < 0 {
-			imagePath = cmdline
-		} else {
-			imagePath = cmdline[:spaceIdx]
-			rest = strings.TrimSpace(cmdline[spaceIdx:])
-		}
-	}
-	if !strings.EqualFold(imagePath, target) {
+	// splitCSVLine strips quotes, but on the off chance the
+	// caller passes a still-quoted form (direct CLI usage or
+	// PowerShell output preserving quotes) strip a leading
+	// double quote before the prefix match.
+	cmdline = strings.TrimPrefix(cmdline, `"`)
+
+	if !strings.HasPrefix(strings.ToLower(cmdline), strings.ToLower(target)) {
 		return false
 	}
-	// Explorer-double-click → no args. Per cmd/mcphub/main.go
-	// shouldAutoLaunchGUI, that path also lands in gui mode.
-	if rest == "" {
+	after := cmdline[len(target):]
+	// Optional close-quote then whitespace before the first arg.
+	after = strings.TrimPrefix(after, `"`)
+	after = strings.TrimLeft(after, " \t")
+	if after == "" {
+		// Explorer-double-click landing: no args. Per
+		// cmd/mcphub/main.go shouldAutoLaunchGUI, this also lands
+		// in gui mode.
 		return true
 	}
-	// Otherwise first token must be `gui` (exact). Reject daemon /
-	// watchdog / tray / etc.
-	firstArg := rest
-	if spaceIdx := strings.IndexAny(rest, " \t"); spaceIdx >= 0 {
-		firstArg = rest[:spaceIdx]
+	// First arg must be "gui" (exact, case-sensitive — Windows
+	// subcommand-routing for mcphub uses Cobra which IS
+	// case-sensitive on the verb).
+	firstArg := after
+	if spaceIdx := strings.IndexAny(after, " \t"); spaceIdx >= 0 {
+		firstArg = after[:spaceIdx]
 	}
 	return firstArg == "gui"
 }

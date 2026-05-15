@@ -615,8 +615,74 @@ func TestCmdlineIsGUIOnTarget(t *testing.T) {
 			false,
 		},
 		{
-			"malformed unterminated quote — reject",
+			// Edge case: leading quote with no closing quote. PR #188
+			// r2 parser is permissive — strips leading quote, then
+			// matches target as case-insensitive prefix. Matching is
+			// the correct behavior because the cmdline IS targeting
+			// our binary with `gui`. WMIC/PowerShell don't emit
+			// unterminated quotes in practice, so this is a defensive
+			// case rather than a real-world input.
+			"unterminated-quote variant — accept (still targets binary)",
 			`"C:\Users\u\.local\bin\mcphub.exe gui`,
+			true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := cmdlineIsGUIOnTarget(tc.cmdline, target)
+			if got != tc.want {
+				t.Errorf("cmdlineIsGUIOnTarget(%q, %q) = %v; want %v", tc.cmdline, target, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCmdlineIsGUIOnTarget_PathWithSpaces pins codex bot r2 P1
+// closure: splitCSVLine strips quotes from the WMIC/PowerShell
+// CSV cmdline cell. A target path containing spaces — common on
+// Windows profile dirs like `C:\Users\John Doe\.local\bin\` —
+// arrives at cmdlineIsGUIOnTarget WITHOUT quotes, so a naive
+// "first whitespace = image boundary" heuristic would split the
+// image-path mid-string and miss the running GUI.
+//
+// The fixed parser uses case-insensitive prefix match against
+// target instead of a whitespace split, so spaces inside the
+// target path don't confuse it.
+func TestCmdlineIsGUIOnTarget_PathWithSpaces(t *testing.T) {
+	target := `C:\Users\John Doe\.local\bin\mcphub.exe`
+	cases := []struct {
+		name    string
+		cmdline string
+		want    bool
+	}{
+		{
+			"unquoted target with space + gui arg",
+			`C:\Users\John Doe\.local\bin\mcphub.exe gui --no-browser`,
+			true,
+		},
+		{
+			"unquoted target with space + Explorer launch",
+			`C:\Users\John Doe\.local\bin\mcphub.exe`,
+			true,
+		},
+		{
+			"unquoted target with space + daemon arg — reject",
+			`C:\Users\John Doe\.local\bin\mcphub.exe daemon --server time --daemon default`,
+			false,
+		},
+		{
+			"quoted target with space + gui arg",
+			`"C:\Users\John Doe\.local\bin\mcphub.exe" gui --no-browser`,
+			true,
+		},
+		{
+			"case-insensitive target with space",
+			`C:\users\JOHN doe\.LOCAL\bin\MCPHUB.EXE gui`,
+			true,
+		},
+		{
+			"different path with same suffix — reject",
+			`D:\Other Users\John Doe\.local\bin\mcphub.exe gui`,
 			false,
 		},
 	}
