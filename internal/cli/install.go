@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	"mcp-local-hub/internal/api"
@@ -661,34 +662,40 @@ func runInstallUpgrade(cmd *cobra.Command) error {
 			target, curExe)
 	}
 
-	// 1b. Dev-build guard (PR #188 / A8 closure): refuse to copy a
-	// source binary that was built without the build scripts'
-	// ldflags (`-X main.version=...` + `-H windowsgui` on Windows).
+	// 1b. Dev-build guard (PR #188 / A8 closure): on WINDOWS, refuse
+	// to copy a source binary that was built without the build
+	// scripts' ldflags (`-X main.version=...` + `-H windowsgui`).
 	// Such a binary shows `version=dev / commit=unknown` from
-	// `mcphub version` and on Windows is a CONSOLE-subsystem
-	// executable that spawns visible terminals for every Scheduler-
-	// invoked daemon. The 2026-05-15 user session caught exactly
-	// this: a plain `go build ./cmd/mcphub` had replaced the
-	// canonical .local/bin/mcphub.exe, terminals flashed on every
-	// daemon spawn, and tray failed to render. The repair was
+	// `mcphub version` and is a CONSOLE-subsystem executable that
+	// spawns visible terminals for every Scheduler-invoked daemon.
+	// The 2026-05-15 user session caught exactly this: a plain
+	// `go build ./cmd/mcphub` had replaced the canonical
+	// .local/bin/mcphub.exe, terminals flashed on every daemon
+	// spawn, and tray failed to render. The repair was
 	// `bash build.sh && ./bin/mcphub.exe install --upgrade` —
-	// which this guard now enforces preemptively. Operators who
-	// need to test an in-progress build path use `mcphub gui`
-	// directly from `./bin/mcphub.exe` (running it in place); the
-	// `install --upgrade` flow is for promoting a BUILT binary to
-	// the canonical install location, so it should be picky.
-	version := upgradeBuildVersion()
-	if version == "dev" || version == "" {
-		return fmt.Errorf(
-			"refusing to --upgrade from a dev-build binary at %s: "+
-				"current executable was built without the build scripts' ldflags "+
-				"(version=%q, expected a semver like \"0.4.0\"). "+
-				"On Windows this binary is also CONSOLE-subsystem (no `-H windowsgui` "+
-				"linker flag), which would cause terminal flashes on every "+
-				"Scheduler-invoked daemon and prevent the tray icon from rendering. "+
-				"Recovery: rebuild via `bash build.sh` (or `pwsh build.ps1`), then "+
-				"run `./bin/mcphub.exe install --upgrade` from the build directory.",
-			curExe, version)
+	// which this guard now enforces preemptively.
+	//
+	// Codex bot r5 P2 closure: SCOPED to Windows only. On POSIX
+	// the `-H windowsgui` linker flag doesn't exist (no CONSOLE-
+	// subsystem analog), and POSIX devs commonly run untagged
+	// `go build ./cmd/mcphub` binaries for local testing. The
+	// guard's safety property (no CONSOLE-subsystem regression)
+	// is Windows-specific, so refusing dev-builds on POSIX would
+	// block the existing developer path without benefit.
+	if runtime.GOOS == "windows" {
+		version := upgradeBuildVersion()
+		if version == "dev" || version == "" {
+			return fmt.Errorf(
+				"refusing to --upgrade from a dev-build binary at %s: "+
+					"current executable was built without the build scripts' ldflags "+
+					"(version=%q, expected a semver like \"0.4.0\"). "+
+					"On Windows this binary is also CONSOLE-subsystem (no `-H windowsgui` "+
+					"linker flag), which would cause terminal flashes on every "+
+					"Scheduler-invoked daemon and prevent the tray icon from rendering. "+
+					"Recovery: rebuild via `bash build.sh` (or `pwsh build.ps1`), then "+
+					"run `./bin/mcphub.exe install --upgrade` from the build directory.",
+				curExe, version)
+		}
 	}
 
 	// 1c. Running-GUI guard (PR #188 / A8 closure): detect a

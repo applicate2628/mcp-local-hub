@@ -451,7 +451,17 @@ func TestRunInstallUpgrade_ExecutableLookupError(t *testing.T) {
 // regression caught in the 2026-05-15 smoke session. The guard runs
 // AFTER self-replace check (so a self-replace error wins) but
 // BEFORE StopAll (so daemons aren't stopped uselessly).
+//
+// Codex bot r5 P2 closure: scoped to Windows only. The CONSOLE-
+// subsystem regression is Windows-specific, and POSIX devs commonly
+// run untagged `go build` binaries. Test is gated on
+// runtime.GOOS == "windows"; on POSIX the same setup proceeds to
+// happy-path execution (TestRunInstallUpgrade_AllowsDevBuildOnPOSIX
+// pins that path).
 func TestRunInstallUpgrade_RefusesDevBuild(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("dev-build refusal is Windows-only; see TestRunInstallUpgrade_AllowsDevBuildOnPOSIX for the POSIX path")
+	}
 	resetUpgradeSeams(t)
 
 	upgradeExecutableFn = func() (string, error) { return "C:\\dev\\mcphub.exe", nil }
@@ -480,6 +490,33 @@ func TestRunInstallUpgrade_RefusesDevBuild(t *testing.T) {
 	}
 	if stopCalled {
 		t.Errorf("StopAll must NOT be called when dev-build guard fires; would stop daemons for no reason")
+	}
+}
+
+// TestRunInstallUpgrade_AllowsDevBuildOnPOSIX pins codex bot r5 P2:
+// the dev-build guard is Windows-only because the CONSOLE-subsystem
+// regression doesn't exist on POSIX. A POSIX dev-build (version=="dev")
+// must proceed through the normal flow.
+func TestRunInstallUpgrade_AllowsDevBuildOnPOSIX(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX-only: Windows path is exercised by TestRunInstallUpgrade_RefusesDevBuild")
+	}
+	resetUpgradeSeams(t)
+
+	upgradeExecutableFn = func() (string, error) { return "/home/u/dev/mcphub", nil }
+	upgradeTargetPathFn = func() (string, error) { return "/home/u/.local/bin/mcphub", nil }
+	upgradeBuildVersionFn = func() string { return "dev" }
+	bootstrapCalled := false
+	upgradeStopAllFn = func() ([]api.RestartResult, error) { return nil, nil }
+	upgradeBootstrapFn = func(w io.Writer) error { bootstrapCalled = true; return nil }
+	upgradeRestartAllFn = func() ([]api.RestartResult, error) { return nil, nil }
+
+	cmd, _, _ := stubCmd()
+	if err := runInstallUpgrade(cmd); err != nil {
+		t.Fatalf("POSIX dev-build should proceed: %v", err)
+	}
+	if !bootstrapCalled {
+		t.Errorf("Bootstrap should run on POSIX dev-build path")
 	}
 }
 
