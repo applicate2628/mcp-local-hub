@@ -289,6 +289,64 @@ func TestBasenameAcrossSeparators_Cleanup(t *testing.T) {
 	}
 }
 
+// TestPatternsFromClientStdio_AntigravityDaemonArgFiltered covers
+// codex bot r2 P1 on PR #190: Antigravity stdio entries are
+// written as `["relay","--server","<s>","--daemon","<client>"]`,
+// so the args branch would emit "claude" / "codex" / etc. as
+// kill-match patterns. parseOrphans would then match the actual
+// launcher process and kill it. The filter must drop arg tokens
+// that are themselves known-client basenames.
+func TestPatternsFromClientStdio_AntigravityDaemonArgFiltered(t *testing.T) {
+	home := withHermeticHomeForCleanup(t)
+	writeCleanupFile(t, filepath.Join(home, ".gemini", "antigravity", "mcp_config.json"), `{
+  "mcpServers": {
+    "memory": {
+      "command": "C:\\Users\\u\\AppData\\Roaming\\mcphub\\mcphub.exe",
+      "args": ["relay", "--server", "memory", "--daemon", "claude"],
+      "disabled": false
+    }
+  }
+}`)
+	got := patternsFromClientStdio()
+	have := map[string]bool{}
+	for _, p := range got {
+		have[p] = true
+	}
+	for _, banned := range []string{"claude", "codex", "gemini", "cursor", "code", "qwen", "antigravity", "cascade"} {
+		if have[banned] {
+			t.Errorf("known launcher token %q must NOT be in pattern set (Antigravity relay --daemon arg); got %v", banned, got)
+		}
+	}
+	// "memory" (the server name) is 6 chars, no leading -, not all
+	// digits, not a launcher → SHOULD survive.
+	if !have["memory"] {
+		t.Errorf("discriminating server-name arg 'memory' missing; got %v", got)
+	}
+}
+
+// TestParseOrphans_SkipsRowThatIsClientLauncher covers the row-level
+// guard added in r2: even when patternsFromClientStdio is somehow
+// fooled into emitting a launcher basename (Antigravity --daemon
+// arg before the r2 fix, or any future bug introducing one), the
+// parseOrphans loop must NOT flag a launcher process for killing.
+// The ancestor walk only inspects parents, not the row itself.
+func TestParseOrphans_SkipsRowThatIsClientLauncher(t *testing.T) {
+	// claude.exe directly — parent is explorer.exe (no client in
+	// ancestor chain). Pattern "claude" matches the row's cmdline.
+	// Without the row-level guard, claude.exe would be flagged.
+	csv := `Node,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize
+host,"C:\Windows\explorer.exe",20260515090000.000000+000,1000,4000,200000000
+host,"C:\Users\u\AppData\Local\Programs\claude\claude.exe --foo",20260515100000.000000+000,4000,5000,300000000
+`
+	patterns := []string{"claude"}
+	out := parseOrphans(strings.NewReader(csv), patterns)
+	for _, o := range out {
+		if o.PID == 5000 {
+			t.Errorf("PID 5000 (claude.exe itself) was flagged as orphan despite being a known launcher; row-level guard is failing. cmdline=%q", o.Cmdline)
+		}
+	}
+}
+
 // TestParseOrphans_SkipsClientLauncherDescendant verifies that a
 // process whose ancestor chain contains a known client launcher
 // (claude.exe in this fixture) is NOT flagged as orphan, even when

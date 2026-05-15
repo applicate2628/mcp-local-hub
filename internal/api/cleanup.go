@@ -458,6 +458,20 @@ func patternsFromClientStdio() []string {
 				if isBroadLauncherToken(arg) {
 					continue
 				}
+				// Codex bot r2 P1 on PR #190: Antigravity stdio
+				// entries are written as `["relay", "--server",
+				// "<s>", "--daemon", "<client>"]` where <client>
+				// can be a known launcher basename (claude,
+				// codex, gemini, …). Without this guard, that
+				// bare launcher name lands in allPatterns and
+				// parseOrphans matches the actual client process
+				// (claude.exe), whose own ancestor chain
+				// contains no mcphub daemon and no other client
+				// — leading to the launcher itself being killed
+				// in `cleanup --scan-clients --confirm`.
+				if slices.Contains(knownClientLauncherBasenames, strings.ToLower(stripExtension(arg))) {
+					continue
+				}
 				add(arg)
 			}
 		}
@@ -721,6 +735,21 @@ func parseOrphans(r io.Reader, patterns []string) []OrphanProcess {
 		// gdb` as an orphan gdb-server just because "gdb" appears in its
 		// cmdline.
 		if isOurOwnProcess(r.cmdline) {
+			continue
+		}
+		// Codex bot r2 P1 on PR #190 (defense in depth): also
+		// skip rows whose own cmdline IS a known client launcher.
+		// The ancestor-walk below only inspects parents from
+		// r.ppid upward, not the row itself, so a candidate that
+		// is e.g. claude.exe whose cmdline happens to contain a
+		// pattern from allPatterns (such as `--daemon claude` —
+		// see Antigravity adapter) would fall through to the
+		// orphan path and be killed in confirm mode.
+		// patternsFromClientStdio now filters launcher names out
+		// of the arg branch, but this row-level guard remains as
+		// belt-and-suspenders against any future pattern source
+		// that could introduce a launcher basename.
+		if isKnownClientLauncher(r.cmdline) {
 			continue
 		}
 		matched := false
