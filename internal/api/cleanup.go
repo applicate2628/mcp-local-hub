@@ -2,14 +2,27 @@ package api
 
 import (
 	"bufio"
+	"errors"
 	"io"
 	"os/exec"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/process"
+)
+
+// errOrphanOptsServerScanClientsConflict is returned by CleanupOrphans
+// when both opts.Server and opts.ScanClientConfigs are set. Codex bot
+// r3 P1 on PR #190: the two modes have no overlap — client stdio
+// entries carry no manifest-server key — so mixing them would expand
+// the kill-pattern set with cmdlines unrelated to the requested
+// server. Operator must pick one mode.
+var errOrphanOptsServerScanClientsConflict = errors.New(
+	"cleanup: --scan-clients is incompatible with --server (client stdio entries carry no server-name key; pick one mode)",
 )
 
 // isOurOwnProcess returns true when the cmdline's executable token is one
@@ -301,12 +314,275 @@ type CleanupOpts struct {
 	MinAgeSec   int64  // don't kill processes younger than this (default 60)
 	DryRun      bool   // if true, just report
 	Server      string // empty = all servers; otherwise only that one
+
+	// ScanClientConfigs (A6): when true, CleanupOrphans extracts
+	// additional cmdline patterns from every installed MCP client's
+	// stdio entries (codex / claude / cursor / vscode / gemini / qwen /
+	// antigravity) via Client.AllStdioEntries. Used to detect orphan
+	// stdio MCP servers whose spawning client has died (typical after
+	// `mcphub language-server cleanup` or `mcphub migrate` followed by
+	// a client crash) — the child node.exe / python.exe / etc. lives
+	// on, re-parented to explorer.exe or svchost.
+	//
+	// Pair this with the known-client-launcher allowlist (built-in)
+	// so LIVE stdio children of currently-running clients are NOT
+	// killed by mistake.
+	ScanClientConfigs bool
+}
+
+// knownClientLauncherBasenames is the allowlist of "this process
+// looks like an MCP client we recognize" exe basenames. A running
+// stdio MCP child whose ancestor chain contains ANY of these is
+// considered LIVE-managed (the spawning client is still running)
+// and is excluded from cleanup. Cross-platform basename match
+// (forward + back slashes), case-insensitive, ".exe" stripped.
+//
+// Entries are deliberately exe basenames (not paths) so portable
+// launchers (Squirrel.Update-style relocations, user-renamed
+// installs to non-default dirs, code-name vs. ship-name binaries)
+// still match. Each entry is documented with the user-facing
+// product it represents.
+var knownClientLauncherBasenames = []string{
+	// Anthropic Claude — Claude Code CLI and Claude desktop app.
+	"claude",
+	// OpenAI / Codex CLI.
+	"codex",
+	// Google Gemini CLI.
+	"gemini",
+	// Alibaba Qwen CLI.
+	"qwen",
+	// Cursor IDE.
+	"cursor",
+	// VS Code (Code.exe is the shipped binary name) and forks.
+	"code",
+	// Google Antigravity (Gemini-CLI fork inside the Cascade IDE).
+	"cascade",
+	"antigravity",
+}
+
+// isKnownClientLauncher reports whether cmdline's first-token
+// basename matches one of the recognized MCP-client launcher exes.
+// Used by parseOrphans to skip processes whose ancestor chain
+// contains a live client process — those are LIVE-managed stdio
+// children, NOT orphans, and killing them would disrupt the user's
+// current agent session.
+//
+// Returns false for empty / unrecognized cmdlines. Case-insensitive
+// basename match across both Windows and POSIX separators, ".exe"
+// stripped. Shares firstTokenBasename with isOurOwnProcess so a
+// path with embedded spaces like
+// `C:\Program Files\Cursor\Cursor.exe` correctly resolves to
+// "cursor".
+func isKnownClientLauncher(cmdline string) bool {
+	// Strip ALL recognized launcher suffixes (.exe, .cmd, .bat,
+	// .ps1) — not just .exe — so Windows wrapper-based installs
+	// (claude.cmd / codex.cmd / gemini.bat shims around the real
+	// binary) still match the allowlist. Codex bot r1 P1.2 on
+	// PR #190: an `.exe`-only normalization let `cleanup
+	// --scan-clients --confirm` kill stdio children of a live
+	// claude.cmd-launched session because the .cmd ancestor was
+	// classified as unknown.
+	base := stripExtension(strings.ToLower(firstTokenBasename(cmdline)))
+	return slices.Contains(knownClientLauncherBasenames, base)
+}
+
+// patternsFromClientStdio extracts cmdline patterns from every
+// installed MCP client's live stdio entries. Returned patterns
+// feed CleanupOrphans's reverse-lookup mode when
+// CleanupOpts.ScanClientConfigs is true.
+//
+// Per stdio entry, the helper emits up to two patterns:
+//
+//  1. command basename (case-insensitive, .exe stripped, both
+//     separators normalized) — IF that basename is not a broad
+//     launcher token (node, python, npx, ...). The basename is the
+//     most discriminating signal because most MCP server packages
+//     ship a unique binary like `mcp-server-time` /
+//     `mcp-language-server`.
+//
+//  2. each positional arg of length ≥ 4 that does NOT start with
+//     `-`. The length floor drops short flag aliases like `-v`,
+//     `-p`; the leading-dash skip drops long flags like `--lsp`
+//     (the FLAG itself is shared across many entries; only the
+//     VALUE following it is discriminating, but we emit values as
+//     separate args in their own right when they meet the length
+//     floor).
+//
+// Patterns are deduplicated so a multi-language setup with N
+// `mcp-language-server --lsp <X>` entries contributes one
+// `mcp-language-server` pattern, not N.
+//
+// Adapter read failures are best-effort: one broken client config
+// does not block cleanup. The adapter pipeline already returns
+// (nil, nil) when the config file does not exist (host without
+// that client installed), so no per-client gating is required
+// here.
+func patternsFromClientStdio() []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(p string) {
+		if p == "" {
+			return
+		}
+		if seen[p] {
+			return
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	for _, c := range clients.AllClients() {
+		if !c.Exists() {
+			continue
+		}
+		entries, err := c.AllStdioEntries()
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			base := stripExtension(basenameAcrossSeparators(e.Command))
+			if !patternIsTooBroad(base) {
+				add(base)
+			}
+			for _, arg := range e.Args {
+				if len(arg) < 4 {
+					continue
+				}
+				if strings.HasPrefix(arg, "-") {
+					continue
+				}
+				if isAllDigits(arg) {
+					// Numeric-only args (ports, PIDs) are
+					// non-discriminating and would
+					// substring-match unrelated processes
+					// that happen to mention the same
+					// number. Skip them.
+					continue
+				}
+				if patternIsTooBroad(arg) {
+					continue
+				}
+				add(arg)
+			}
+		}
+	}
+	return out
+}
+
+// patternIsTooBroad reports whether tok would substring-match too
+// many unrelated processes if it ended up in CleanupOrphans's
+// pattern set. The check folds four prior bot findings on PR #190
+// into ONE consistent gate applied to both the command-basename
+// and args branches:
+//
+//   - empty string (nothing to match)
+//   - broad interpreters (node / python / npx / uv / uvx / py /
+//     python3) — isBroadLauncherToken
+//   - known MCP-client launcher basenames (claude / codex / gemini
+//     / qwen / cursor / code / cascade / antigravity) — r2 P1
+//   - mcphub's own binary basenames (mcphub / mcp / mcphub.exe /
+//     mcp.exe) — r5 P1: Antigravity stdio entries are written as
+//     `command = "...\mcphub.exe"` so the command-basename branch
+//     would emit "mcphub" without this guard, and any unrelated
+//     shell whose cmdline mentions `mcphub install` (operator
+//     command-line history, scripts, status displays) would be
+//     classified as an orphan in `--scan-clients --confirm`.
+//
+// stripExtension is applied so .exe/.cmd/.bat/.ps1 wrappers normalize
+// to the bare basename before comparison.
+func patternIsTooBroad(tok string) bool {
+	if tok == "" {
+		return true
+	}
+	if isBroadLauncherToken(tok) {
+		return true
+	}
+	bare := strings.ToLower(stripExtension(tok))
+	if slices.Contains(knownClientLauncherBasenames, bare) {
+		return true
+	}
+	if isMcphubBinaryBasename(bare) {
+		return true
+	}
+	return false
+}
+
+// isMcphubBinaryBasename reports whether bare (the lowercase
+// extension-stripped token) is one of mcphub's own CLI binary
+// names. Mirrors clients.IsMcphubBinary's allowlist but works on
+// pre-normalized basenames so it pairs cleanly with the rest of
+// patternIsTooBroad.
+func isMcphubBinaryBasename(bare string) bool {
+	switch bare {
+	case "mcphub", "mcp":
+		return true
+	}
+	return false
+}
+
+// isAllDigits reports whether s is non-empty and contains only
+// ASCII digits 0-9. Used to drop numeric-only args (ports, PIDs,
+// timeouts) from the pattern set — they pass the length floor but
+// would substring-match unrelated processes that mention the same
+// number.
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// basenameAcrossSeparators returns the trailing path component of p
+// folding both `\` and `/` separators. Mirrors the helper in
+// internal/clients/clients.go; duplicated here to keep
+// internal/api/cleanup.go from importing internal/clients just for
+// one trivial string helper (and to keep the dependency cycle
+// shallow: clients does not import api).
+func basenameAcrossSeparators(p string) string {
+	p = strings.ReplaceAll(p, "\\", "/")
+	if i := strings.LastIndex(p, "/"); i >= 0 {
+		return p[i+1:]
+	}
+	return p
+}
+
+// stripExtension drops a recognized Windows exe extension from the
+// tail of name, case-insensitively. Returns name unchanged when no
+// match.
+func stripExtension(name string) string {
+	low := strings.ToLower(name)
+	for _, ext := range []string{".exe", ".cmd", ".bat", ".ps1"} {
+		if rest, ok := strings.CutSuffix(low, ext); ok {
+			return name[:len(rest)]
+		}
+	}
+	return name
 }
 
 // CleanupOrphans finds MCP server processes that match a manifest's command
 // pattern but whose parent is NOT our `mcp.exe daemon` wrapper. Reports them
 // (dry-run) or kills them (non-dry-run).
 func (a *API) CleanupOrphans(opts CleanupOpts) ([]OrphanProcess, error) {
+	// Codex bot r3 P1 / r4 P2 on PR #190: --scan-clients and
+	// --server are incompatible. Client stdio entries are identified
+	// by entry name + (command, args); they carry NO manifest-server
+	// key, so no useful narrowing exists. Mixing the two would expand
+	// allPatterns with cmdlines unrelated to the requested server,
+	// and a process matching one of those client-derived patterns
+	// would be killed in --confirm mode despite being out of scope.
+	//
+	// This check runs BEFORE the runtime.GOOS Windows-only short-
+	// circuit so the flag-semantics contract holds on every platform
+	// (r4 P2: validating cross-platform keeps Linux/macOS CI tests
+	// honest and prevents a silent acceptance on POSIX hosts that
+	// would diverge from the CLI help text).
+	if opts.ScanClientConfigs && opts.Server != "" {
+		return nil, errOrphanOptsServerScanClientsConflict
+	}
 	if runtime.GOOS != "windows" {
 		// Process introspection below uses Windows-specific tooling.
 		// Return an empty result on other platforms so the CLI stays usable
@@ -350,6 +626,24 @@ func (a *API) CleanupOrphans(opts CleanupOpts) ([]OrphanProcess, error) {
 			}
 			allPatterns = append(allPatterns, p)
 		}
+	}
+	// A6: when --scan-clients is set, fold in patterns derived from
+	// every installed client's live stdio entries. Reverse-lookup
+	// catches MCP-server children whose spawning client has died and
+	// whose process tree has been re-parented to explorer.exe /
+	// svchost.exe — the manifest-pattern path alone would miss those
+	// because user-added stdio entries are not represented in the
+	// shipped manifests.
+	//
+	// Codex bot r3 P1 on PR #190: --scan-clients is INCOMPATIBLE with
+	// --server. Client-config stdio entries have no server-name key —
+	// they're identified by entry name + (command, args). Mixing the
+	// two would expand allPatterns with cmdlines unrelated to the
+	// requested server, so a process matching one of those would be
+	// killed in --confirm mode despite being out of scope. Skip the
+	// client-derived patterns when --server narrows the run.
+	if opts.ScanClientConfigs && opts.Server == "" {
+		allPatterns = append(allPatterns, patternsFromClientStdio()...)
 	}
 	orphans := parseOrphans(strings.NewReader(string(out)), allPatterns)
 
@@ -507,6 +801,21 @@ func parseOrphans(r io.Reader, patterns []string) []OrphanProcess {
 		if isOurOwnProcess(r.cmdline) {
 			continue
 		}
+		// Codex bot r2 P1 on PR #190 (defense in depth): also
+		// skip rows whose own cmdline IS a known client launcher.
+		// The ancestor-walk below only inspects parents from
+		// r.ppid upward, not the row itself, so a candidate that
+		// is e.g. claude.exe whose cmdline happens to contain a
+		// pattern from allPatterns (such as `--daemon claude` —
+		// see Antigravity adapter) would fall through to the
+		// orphan path and be killed in confirm mode.
+		// patternsFromClientStdio now filters launcher names out
+		// of the arg branch, but this row-level guard remains as
+		// belt-and-suspenders against any future pattern source
+		// that could introduce a launcher basename.
+		if isKnownClientLauncher(r.cmdline) {
+			continue
+		}
 		matched := false
 		for _, p := range patterns {
 			if strings.Contains(r.cmdline, p) {
@@ -517,13 +826,26 @@ func parseOrphans(r io.Reader, patterns []string) []OrphanProcess {
 		if !matched {
 			continue
 		}
-		// Is any ANCESTOR one of our own daemons? Walk the parent chain
-		// up to a bounded depth (16 levels is well beyond anything real).
-		// Single-level check misses uvx/npx/node sub-processes that wrap
-		// the actual server — e.g. mcphub.exe daemon → uv → python →
-		// server.py forms a 4-deep chain where python's direct parent is
-		// uv, not our daemon. Walking the chain means every descendant
-		// of a live `mcphub.exe daemon` is correctly excluded.
+		// Is any ANCESTOR one of our own daemons OR a known MCP client
+		// launcher? Walk the parent chain up to a bounded depth (16
+		// levels is well beyond anything real). Single-level check
+		// misses uvx/npx/node sub-processes that wrap the actual
+		// server — e.g. mcphub.exe daemon → uv → python → server.py
+		// forms a 4-deep chain where python's direct parent is uv,
+		// not our daemon. Walking the chain means every descendant of
+		// either a live `mcphub.exe daemon` OR a live client process
+		// (claude / codex / gemini / cursor / vscode / antigravity /
+		// qwen) is correctly excluded from cleanup.
+		//
+		// Why the client-launcher check: --scan-clients mode (A6)
+		// expands the pattern set with cmdline shapes derived from
+		// every installed client's stdio entries. Without the
+		// client-launcher allowlist, a node.exe spawned by a
+		// currently-running claude.exe (with a still-active stdio
+		// config entry) would be matched by a pattern and killed,
+		// breaking the user's live agent session. The walk treats
+		// any ancestor at a recognized client basename as proof the
+		// stdio child is LIVE-managed, not an orphan.
 		ourDescendant := false
 		for cur, depth := r.ppid, 0; depth < 16; depth++ {
 			parent, ok := byPID[cur]
@@ -536,13 +858,17 @@ func parseOrphans(r io.Reader, patterns []string) []OrphanProcess {
 				ourDescendant = true
 				break
 			}
+			if isKnownClientLauncher(pcmd) {
+				ourDescendant = true
+				break
+			}
 			if parent.ppid == 0 || parent.ppid == cur {
 				break // reached the root or a self-loop
 			}
 			cur = parent.ppid
 		}
 		if ourDescendant {
-			continue // NOT orphan — descendant of our daemon
+			continue // NOT orphan — descendant of our daemon or a live client
 		}
 		age := int64(0)
 		if !r.created.IsZero() {

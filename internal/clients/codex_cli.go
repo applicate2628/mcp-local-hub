@@ -189,6 +189,16 @@ func (c *codexCLI) RestoreEntryFromBackup(backupPath, name string) error {
 	return c.writeTOML(liveMap)
 }
 
+// AllStdioEntries returns every stdio entry from [mcp_servers.*].
+func (c *codexCLI) AllStdioEntries() ([]StdioEntry, error) {
+	m, err := c.readTOML()
+	if err != nil {
+		return nil, err
+	}
+	servers, _ := m["mcp_servers"].(map[string]any)
+	return collectStdioEntries(servers), nil
+}
+
 // FindStdioLanguageServerEntries scans [mcp_servers.*] for stdio
 // entries matching the mcp-language-server invocation pattern.
 func (c *codexCLI) FindStdioLanguageServerEntries() ([]LanguageServerStdioEntry, error) {

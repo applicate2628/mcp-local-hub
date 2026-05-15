@@ -201,6 +201,20 @@ func (j *jsonMCPClient) RestoreEntryFromBackup(backupPath, name string) error {
 	return j.writeJSON(liveMap)
 }
 
+// AllStdioEntries returns every stdio entry from mcpServers.
+// Inherited by geminiCLI, qwenCLI, cursorClient, and antigravityClient
+// via struct embedding. Antigravity entries DO surface here because
+// they have `command='mcphub'`; the cleanup pipeline filters them
+// out via isOurOwnProcess, so the inheritance is safe.
+func (j *jsonMCPClient) AllStdioEntries() ([]StdioEntry, error) {
+	m, err := j.readJSON()
+	if err != nil {
+		return nil, err
+	}
+	servers, _ := m["mcpServers"].(map[string]any)
+	return collectStdioEntries(servers), nil
+}
+
 // FindStdioLanguageServerEntries scans mcpServers for stdio entries
 // matching the mcp-language-server invocation pattern. Inherited by
 // geminiCLI, qwenCLI, cursorClient, and antigravityClient via struct
