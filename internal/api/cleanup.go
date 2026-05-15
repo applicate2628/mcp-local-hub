@@ -440,7 +440,7 @@ func patternsFromClientStdio() []string {
 		}
 		for _, e := range entries {
 			base := stripExtension(basenameAcrossSeparators(e.Command))
-			if base != "" && !isBroadLauncherToken(base) {
+			if !patternIsTooBroad(base) {
 				add(base)
 			}
 			for _, arg := range e.Args {
@@ -458,29 +458,7 @@ func patternsFromClientStdio() []string {
 					// number. Skip them.
 					continue
 				}
-				// Codex bot r1 P1.1 on PR #190: a wrapper
-				// stdio entry like `uv run python my-mcp` adds
-				// `python` as an arg. Without isBroadLauncherToken
-				// here, that bare interpreter name lands in the
-				// pattern set and parseOrphans flags every random
-				// python process on the workstation. Apply the
-				// same broad-token guard the command-basename
-				// branch uses.
-				if isBroadLauncherToken(arg) {
-					continue
-				}
-				// Codex bot r2 P1 on PR #190: Antigravity stdio
-				// entries are written as `["relay", "--server",
-				// "<s>", "--daemon", "<client>"]` where <client>
-				// can be a known launcher basename (claude,
-				// codex, gemini, …). Without this guard, that
-				// bare launcher name lands in allPatterns and
-				// parseOrphans matches the actual client process
-				// (claude.exe), whose own ancestor chain
-				// contains no mcphub daemon and no other client
-				// — leading to the launcher itself being killed
-				// in `cleanup --scan-clients --confirm`.
-				if slices.Contains(knownClientLauncherBasenames, strings.ToLower(stripExtension(arg))) {
+				if patternIsTooBroad(arg) {
 					continue
 				}
 				add(arg)
@@ -488,6 +466,57 @@ func patternsFromClientStdio() []string {
 		}
 	}
 	return out
+}
+
+// patternIsTooBroad reports whether tok would substring-match too
+// many unrelated processes if it ended up in CleanupOrphans's
+// pattern set. The check folds four prior bot findings on PR #190
+// into ONE consistent gate applied to both the command-basename
+// and args branches:
+//
+//   - empty string (nothing to match)
+//   - broad interpreters (node / python / npx / uv / uvx / py /
+//     python3) — isBroadLauncherToken
+//   - known MCP-client launcher basenames (claude / codex / gemini
+//     / qwen / cursor / code / cascade / antigravity) — r2 P1
+//   - mcphub's own binary basenames (mcphub / mcp / mcphub.exe /
+//     mcp.exe) — r5 P1: Antigravity stdio entries are written as
+//     `command = "...\mcphub.exe"` so the command-basename branch
+//     would emit "mcphub" without this guard, and any unrelated
+//     shell whose cmdline mentions `mcphub install` (operator
+//     command-line history, scripts, status displays) would be
+//     classified as an orphan in `--scan-clients --confirm`.
+//
+// stripExtension is applied so .exe/.cmd/.bat/.ps1 wrappers normalize
+// to the bare basename before comparison.
+func patternIsTooBroad(tok string) bool {
+	if tok == "" {
+		return true
+	}
+	if isBroadLauncherToken(tok) {
+		return true
+	}
+	bare := strings.ToLower(stripExtension(tok))
+	if slices.Contains(knownClientLauncherBasenames, bare) {
+		return true
+	}
+	if isMcphubBinaryBasename(bare) {
+		return true
+	}
+	return false
+}
+
+// isMcphubBinaryBasename reports whether bare (the lowercase
+// extension-stripped token) is one of mcphub's own CLI binary
+// names. Mirrors clients.IsMcphubBinary's allowlist but works on
+// pre-normalized basenames so it pairs cleanly with the rest of
+// patternIsTooBroad.
+func isMcphubBinaryBasename(bare string) bool {
+	switch bare {
+	case "mcphub", "mcp":
+		return true
+	}
+	return false
 }
 
 // isAllDigits reports whether s is non-empty and contains only

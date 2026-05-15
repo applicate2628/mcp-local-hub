@@ -349,6 +349,73 @@ func TestBasenameAcrossSeparators_Cleanup(t *testing.T) {
 	}
 }
 
+// TestPatternsFromClientStdio_AntigravityMcphubCommandFiltered
+// covers codex bot r5 P1 on PR #190: Antigravity stdio entries are
+// written with `command = "...\mcphub.exe"` (a relay invocation,
+// not the actual MCP server). The command-basename branch was
+// emitting "mcphub" as a pattern, which then substring-matched any
+// unrelated process whose cmdline mentioned `mcphub` (operator
+// shell history, scripts, status displays). patternIsTooBroad
+// must reject the mcphub binary basename in addition to client
+// launchers and broad interpreters.
+func TestPatternsFromClientStdio_AntigravityMcphubCommandFiltered(t *testing.T) {
+	home := withHermeticHomeForCleanup(t)
+	writeCleanupFile(t, filepath.Join(home, ".gemini", "antigravity", "mcp_config.json"), `{
+  "mcpServers": {
+    "memory": {
+      "command": "C:\\Users\\u\\AppData\\Roaming\\mcphub\\mcphub.exe",
+      "args": ["relay", "--server", "memory", "--daemon", "claude"],
+      "disabled": false
+    }
+  }
+}`)
+	got := patternsFromClientStdio()
+	have := map[string]bool{}
+	for _, p := range got {
+		have[p] = true
+	}
+	if have["mcphub"] {
+		t.Errorf("'mcphub' must NOT be in pattern set (Antigravity relay command basename); got %v", got)
+	}
+	if have["mcp"] {
+		t.Errorf("'mcp' (legacy binary name) must NOT be in pattern set; got %v", got)
+	}
+	// "memory" (the server name arg) is still a valid discriminating
+	// pattern and SHOULD survive.
+	if !have["memory"] {
+		t.Errorf("discriminating server-name arg 'memory' missing; got %v", got)
+	}
+}
+
+func TestPatternIsTooBroad(t *testing.T) {
+	cases := map[string]bool{
+		"":                    true,
+		"mcphub":              true,
+		"mcphub.exe":          true,
+		"MCPHUB":              true,
+		"mcp":                 true,
+		"mcp.exe":             true,
+		"node":                true,
+		"python":              true,
+		"npx":                 true,
+		"uv":                  true,
+		"uvx":                 true,
+		"claude":              true,
+		"codex":               true,
+		"claude.cmd":          true,
+		"GEMINI":              true,
+		"mcp-language-server": false,
+		"memory":              false,
+		"server.js":           false,
+		"my-mcp-server":       false,
+	}
+	for in, want := range cases {
+		if got := patternIsTooBroad(in); got != want {
+			t.Errorf("patternIsTooBroad(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
+
 // TestPatternsFromClientStdio_AntigravityDaemonArgFiltered covers
 // codex bot r2 P1 on PR #190: Antigravity stdio entries are
 // written as `["relay","--server","<s>","--daemon","<client>"]`,
