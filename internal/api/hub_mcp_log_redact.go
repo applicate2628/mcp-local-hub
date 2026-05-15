@@ -26,7 +26,7 @@ import "regexp"
 // same `crypto/rand` 32-byte → lower-hex pipeline (see hub_mcp_tokens.go
 // + hub_mcp_instance.go), so a single regex covers both surfaces.
 //
-// Pattern is case-insensitive: `[0-9A-Fa-f]{64}` (codex bot r3 P1
+// Pattern is case-insensitive: `[0-9A-Fa-f]{64,}` (codex bot r3 P1
 // closure). Defense in depth — even though our writers always emit
 // lowercase, user input normalization, shell tooling, or an upstream
 // formatter could uppercase the token before it reaches this
@@ -39,9 +39,9 @@ import "regexp"
 // is treated as a credential and redacted. The golden test in
 // hub_mcp_log_redaction_test.go (Task 2.5) exercises every documented
 // emit surface and would catch a false negative.
-var hexTokenRE = regexp.MustCompile(`[0-9A-Fa-f]{64}`)
+var hexTokenRE = regexp.MustCompile(`[0-9A-Fa-f]{64,}`)
 
-// RedactToken replaces every 64-lower-hex substring with `<token>`.
+// RedactToken replaces every contiguous hex run of length 64 or greater with `<token>`.
 // Apply at every emit site that may carry a token or instance_id:
 //
 //   - hub-mcp.log writes (handled by LogHubMcpEvent in Task 2.5).
