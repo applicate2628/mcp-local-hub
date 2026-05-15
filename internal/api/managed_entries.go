@@ -314,20 +314,8 @@ func backfillMarkerIfEntryMatchesManifest(adapter clients.Client, server string,
 	if err != nil || live == nil {
 		return false
 	}
-	daemonPort, ok := findDaemonPort(m, binding.Daemon)
-	if !ok {
-		return false
-	}
-	urlPath := binding.URLPath
-	if urlPath == "" {
-		urlPath = "/mcp"
-	}
-	expectedURLs := []string{
-		fmt.Sprintf("http://localhost:%d%s", daemonPort, urlPath),
-		fmt.Sprintf("http://127.0.0.1:%d%s", daemonPort, urlPath),
-		fmt.Sprintf("http://[::1]:%d%s", daemonPort, urlPath),
-	}
-	if !slices.Contains(expectedURLs, live.URL) {
+	matched, reason := liveEntryMatchesManifestBinding(live, server, binding, m)
+	if !matched {
 		return false
 	}
 	if recErr := RecordManagedEntry(binding.Client, server); recErr != nil {
@@ -339,12 +327,58 @@ func backfillMarkerIfEntryMatchesManifest(adapter clients.Client, server string,
 		return false
 	}
 	_ = LogHubMcpEvent("info", "managed-entries-backfill", map[string]any{
-		"server":   server,
-		"client":   binding.Client,
-		"live_url": live.URL,
-		"reason":   "v0.4.x upgrade backfill — entry URL exactly matches manifest expectation",
+		"server": server,
+		"client": binding.Client,
+		"shape":  reason,
 	})
 	return true
+}
+
+// liveEntryMatchesManifestBinding returns (true, "<shape>") iff the
+// live client-config entry's shape exactly matches what mcphub
+// would have written for (server, binding):
+//
+//  1. HTTP shape (most clients): live.URL exactly equals
+//     `http://<loopback-host>:<daemon.port><binding.url_path>` for
+//     the daemon this binding references.
+//
+//  2. Antigravity relay shape: live.RelayServer == server AND
+//     live.RelayDaemon == binding.Daemon AND
+//     IsMcphubBinary(live.RelayExePath). Antigravity entries have
+//     no URL field — they spawn `mcphub.exe relay --server <s>
+//     --daemon <d>` as the stdio child. Codex bot r6 P2 on PR #192:
+//     the v0.4.2 backfill helper originally only matched HTTP URLs
+//     and silently fell through for Antigravity, leaving demigrate
+//     fail-closed on Antigravity rows.
+//
+// Returns (false, "") if neither shape matches.
+func liveEntryMatchesManifestBinding(live *clients.MCPEntry, server string, binding config.ClientBinding, m *config.ServerManifest) (bool, string) {
+	daemonPort, ok := findDaemonPort(m, binding.Daemon)
+	if !ok {
+		return false, ""
+	}
+	urlPath := binding.URLPath
+	if urlPath == "" {
+		urlPath = "/mcp"
+	}
+	// HTTP shape check.
+	expectedURLs := []string{
+		fmt.Sprintf("http://localhost:%d%s", daemonPort, urlPath),
+		fmt.Sprintf("http://127.0.0.1:%d%s", daemonPort, urlPath),
+		fmt.Sprintf("http://[::1]:%d%s", daemonPort, urlPath),
+	}
+	if live.URL != "" && slices.Contains(expectedURLs, live.URL) {
+		return true, "v0.4.x upgrade backfill — HTTP URL exactly matches manifest expectation (url=" + live.URL + ")"
+	}
+	// Antigravity relay shape check (URL is empty, command/args
+	// reconstructed via antigravityClient.GetEntry).
+	if live.URL == "" &&
+		live.RelayServer == server &&
+		live.RelayDaemon == binding.Daemon &&
+		clients.IsMcphubBinary(live.RelayExePath) {
+		return true, "v0.4.x upgrade backfill — Antigravity relay shape exactly matches manifest binding (command=mcphub args=[relay,--server,server," + server + ",--daemon," + binding.Daemon + "])"
+	}
+	return false, ""
 }
 
 // managedEntriesPath returns the absolute path to the marker file
