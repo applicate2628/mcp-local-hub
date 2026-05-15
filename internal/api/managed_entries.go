@@ -54,11 +54,17 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/gofrs/flock"
 )
 
-const managedEntriesFileLeaf = "managed-entries.json"
+const (
+	managedEntriesFileLeaf     = "managed-entries.json"
+	managedEntriesLockFileLeaf = "managed-entries.lock"
+)
 
 // managedEntriesSchemaVersion is the on-disk format version. Bumping
 // requires a migration step in readManagedEntries.
@@ -66,9 +72,43 @@ const managedEntriesSchemaVersion = 1
 
 // managedEntriesMu serializes in-process read-modify-write cycles on
 // the marker file. Cross-process serialization is handled by the
-// underlying SecureWriteClientConfig pipeline's atomic rename
-// (writers never see partial state).
+// flock acquired in withManagedEntriesLock (codex bot r1 P2 closure
+// on PR #187: a process-local mutex alone would let two concurrent
+// `mcphub migrate` invocations both read the same old snapshot and
+// the later writer would overwrite the earlier update, silently
+// dropping one tuple).
 var managedEntriesMu sync.Mutex
+
+// withManagedEntriesLock holds BOTH the in-process mutex AND a
+// cross-process flock on <state-dir>/managed-entries.lock for the
+// duration of fn. Used by every read-modify-write path (Record,
+// Forget). Pure-read paths (IsManagedEntry) need only the in-process
+// mutex plus reliance on the atomic-rename guarantee of the state-
+// file pipeline — readers never see partial state.
+//
+// Lock ordering: in-process mutex FIRST so we never sleep on the
+// process-shared flock with another goroutine holding the in-process
+// mutex (which would prevent the in-process holder from making
+// progress and acquiring the flock itself). The flock is acquired
+// AFTER the in-process mutex, and the lock-file path is resolved
+// while the in-process mutex is held.
+func withManagedEntriesLock(fn func() error) error {
+	managedEntriesMu.Lock()
+	defer managedEntriesMu.Unlock()
+
+	dir, err := DaemonStateDir()
+	if err != nil {
+		return fmt.Errorf("managed-entries lock: resolve state dir: %w", err)
+	}
+	lockPath := filepath.Join(dir, managedEntriesLockFileLeaf)
+	lk := flock.New(lockPath)
+	if err := lk.Lock(); err != nil {
+		return fmt.Errorf("managed-entries flock %s: %w", lockPath, err)
+	}
+	defer func() { _ = lk.Unlock() }()
+
+	return fn()
+}
 
 // ManagedEntry records a single (client, server) tuple that mcphub
 // has installed into a client's config. installed_at is the UTC
@@ -127,31 +167,36 @@ func writeManagedEntries(m *ManagedEntries) error {
 // updates installed_at to time.Now().UTC() instead of duplicating
 // the row.
 //
+// Holds both the in-process mutex AND the cross-process flock for
+// the read-modify-write cycle (codex bot r1 P2 closure on PR #187:
+// concurrent `mcphub migrate` calls across processes would otherwise
+// race on the snapshot and the later writer could overwrite the
+// earlier update, silently dropping one tuple).
+//
 // Called from migrate.go after a successful adapter.AddEntry.
 func RecordManagedEntry(client, server string) error {
 	if client == "" || server == "" {
 		return errors.New("RecordManagedEntry: client and server must be non-empty")
 	}
-	managedEntriesMu.Lock()
-	defer managedEntriesMu.Unlock()
-
-	m, err := readManagedEntries()
-	if err != nil {
-		return err
-	}
-	now := time.Now().UTC()
-	for i, e := range m.Entries {
-		if e.Client == client && e.Server == server {
-			m.Entries[i].InstalledAt = now
-			return writeManagedEntries(m)
+	return withManagedEntriesLock(func() error {
+		m, err := readManagedEntries()
+		if err != nil {
+			return err
 		}
-	}
-	m.Entries = append(m.Entries, ManagedEntry{
-		Client:      client,
-		Server:      server,
-		InstalledAt: now,
+		now := time.Now().UTC()
+		for i, e := range m.Entries {
+			if e.Client == client && e.Server == server {
+				m.Entries[i].InstalledAt = now
+				return writeManagedEntries(m)
+			}
+		}
+		m.Entries = append(m.Entries, ManagedEntry{
+			Client:      client,
+			Server:      server,
+			InstalledAt: now,
+		})
+		return writeManagedEntries(m)
 	})
-	return writeManagedEntries(m)
 }
 
 // ForgetManagedEntry removes a (client, server) tuple from the marker
@@ -159,26 +204,27 @@ func RecordManagedEntry(client, server string) error {
 // so the demigrated entry no longer claims mcphub ownership.
 //
 // Idempotent — removing a tuple that does not exist is a no-op.
+// Holds both the in-process mutex AND the cross-process flock per
+// withManagedEntriesLock's contract.
 func ForgetManagedEntry(client, server string) error {
 	if client == "" || server == "" {
 		return errors.New("ForgetManagedEntry: client and server must be non-empty")
 	}
-	managedEntriesMu.Lock()
-	defer managedEntriesMu.Unlock()
-
-	m, err := readManagedEntries()
-	if err != nil {
-		return err
-	}
-	filtered := m.Entries[:0]
-	for _, e := range m.Entries {
-		if e.Client == client && e.Server == server {
-			continue
+	return withManagedEntriesLock(func() error {
+		m, err := readManagedEntries()
+		if err != nil {
+			return err
 		}
-		filtered = append(filtered, e)
-	}
-	m.Entries = filtered
-	return writeManagedEntries(m)
+		filtered := m.Entries[:0]
+		for _, e := range m.Entries {
+			if e.Client == client && e.Server == server {
+				continue
+			}
+			filtered = append(filtered, e)
+		}
+		m.Entries = filtered
+		return writeManagedEntries(m)
+	})
 }
 
 // IsManagedEntry reports whether the marker file lists the (client,
@@ -189,6 +235,13 @@ func ForgetManagedEntry(client, server string) error {
 // Read errors (corrupt file, DACL violation) propagate to the caller
 // so demigrate fails closed rather than silently treating them as
 // "not managed".
+//
+// Pure-read path: takes only the in-process mutex. Cross-process
+// reads rely on the atomic-rename guarantee of the state-file
+// pipeline — writers publish a complete file via tempfile+rename, so
+// concurrent readers never see partial state. A stale read between
+// writer's snapshot and rename returns "not managed", which falls
+// through to fail-closed demigrate (safe; operator retries).
 func IsManagedEntry(client, server string) (bool, error) {
 	if client == "" || server == "" {
 		return false, errors.New("IsManagedEntry: client and server must be non-empty")

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -178,6 +179,50 @@ func TestForgetManagedEntry_AbsentIsNoOp(t *testing.T) {
 	got, _ := IsManagedEntry("gemini-cli", "wolfram")
 	if !got {
 		t.Errorf("Forget removed the wrong row; gemini-cli/wolfram is missing")
+	}
+}
+
+// TestRecordManagedEntry_ConcurrentNoLostUpdate pins codex bot r1
+// P2 closure on PR #187: concurrent RecordManagedEntry calls (from
+// goroutines simulating cross-process migrate races) must not lose
+// any tuples. Without flock, the read-modify-write cycles would
+// interleave and the later writer would overwrite the earlier
+// update, dropping tuples.
+//
+// Test fires N concurrent goroutines each recording a distinct
+// (client, server) tuple, then asserts the final marker contains
+// ALL N tuples. Goroutines in the same process exercise the in-
+// process mutex; the test does NOT exercise cross-process flock
+// directly (that would need a separate test binary), but the
+// in-process mutex + flock are acquired together in
+// withManagedEntriesLock so the same critical section is protected
+// in both cases.
+func TestRecordManagedEntry_ConcurrentNoLostUpdate(t *testing.T) {
+	managedEntriesTestHelper(t)
+
+	const N = 20
+	errs := make(chan error, N)
+	for i := 0; i < N; i++ {
+		go func(i int) {
+			errs <- RecordManagedEntry("claude-code", fmt.Sprintf("server-%02d", i))
+		}(i)
+	}
+	for i := 0; i < N; i++ {
+		if err := <-errs; err != nil {
+			t.Errorf("concurrent Record: %v", err)
+		}
+	}
+
+	m, err := readManagedEntries()
+	if err != nil {
+		t.Fatalf("readManagedEntries: %v", err)
+	}
+	if len(m.Entries) != N {
+		names := make([]string, 0, len(m.Entries))
+		for _, e := range m.Entries {
+			names = append(names, e.Server)
+		}
+		t.Errorf("expected %d tuples after concurrent Record, got %d: %v", N, len(m.Entries), names)
 	}
 }
 
