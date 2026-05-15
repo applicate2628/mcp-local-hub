@@ -346,11 +346,17 @@ client_bindings:
 	}
 }
 
-func TestDemigrate_FailsWhenBothLatestAndSentinelRefuse(t *testing.T) {
-	// Pathological: both latest backup AND sentinel hold the entry in
-	// hub-managed form (e.g. user-edited sentinel or some unusual
-	// install history). Demigrate must fail with a clear message
-	// naming both paths.
+func TestDemigrate_FailsWhenBothLatestAndSentinelRefuseAndMarkerAbsent(t *testing.T) {
+	// PR #187 (B4 ownership marker): both backups hold the entry in
+	// hub-managed form, AND the managed-entries marker file has NO
+	// record of this (client, server) tuple. Demigrate fails closed
+	// — refuses to RemoveEntry because there's no positive proof
+	// that mcphub installed this entry. This is the safe behavior
+	// for pre-PR-187 entries (existing users post-upgrade have no
+	// marker) and for user-owned entries that coincidentally match
+	// the hub-URL heuristic.
+	managedEntriesTestHelper(t) // redirects state-dir; marker file absent
+
 	tmp := t.TempDir()
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("HOME", tmp)
@@ -391,14 +397,89 @@ client_bindings:
 		t.Fatalf("Demigrate: %v", err)
 	}
 	if len(report.Restored) != 0 {
-		t.Fatalf("expected 0 restored (both backups hold hub-managed entry), got %+v", report.Restored)
+		t.Fatalf("expected 0 restored (marker absent → fail-closed); got %+v", report.Restored)
 	}
 	if len(report.Failed) != 1 {
 		t.Fatalf("expected 1 failure, got %d: %+v", len(report.Failed), report.Failed)
 	}
 	lowerErr := strings.ToLower(report.Failed[0].Err)
-	if !strings.Contains(lowerErr, "sentinel") || !strings.Contains(lowerErr, "fallback") || !strings.Contains(lowerErr, "failed") {
-		t.Errorf("failure message should mention sentinel fallback failed: got %q", report.Failed[0].Err)
+	if !strings.Contains(lowerErr, "marker") || !strings.Contains(lowerErr, "refusing") {
+		t.Errorf("failure message should mention marker + refusing; got %q", report.Failed[0].Err)
+	}
+	// Live entry must be preserved.
+	data, _ := os.ReadFile(claudePath)
+	if !strings.Contains(string(data), `"memory"`) {
+		t.Errorf("live entry was deleted despite marker-absent (data-loss regression); file = %s", data)
+	}
+}
+
+func TestDemigrate_SucceedsWhenBothLatestAndSentinelRefuseAndMarkerConfirms(t *testing.T) {
+	// PR #187 positive-marker path: both backups hub-managed AND the
+	// managed-entries marker file has (claude-code, memory) recorded.
+	// Demigrate calls RemoveEntry on the live config, then Forgets
+	// the marker row. Reports Restored.
+	managedEntriesTestHelper(t)
+
+	// Seed the marker with the (client, server) tuple.
+	if err := RecordManagedEntry("claude-code", "memory"); err != nil {
+		t.Fatalf("seed marker: %v", err)
+	}
+
+	tmp := t.TempDir()
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("HOME", tmp)
+	claudePath := filepath.Join(tmp, ".claude.json")
+	_ = os.WriteFile(claudePath, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0600)
+	latest := claudePath + ".bak-mcp-local-hub-20260101-000000"
+	_ = os.WriteFile(latest, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0600)
+	sentinel := claudePath + ".bak-mcp-local-hub-original"
+	_ = os.WriteFile(sentinel, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0600)
+
+	manifestDir := t.TempDir()
+	memDir := filepath.Join(manifestDir, "memory")
+	_ = os.MkdirAll(memDir, 0700)
+	_ = os.WriteFile(filepath.Join(memDir, "manifest.yaml"), []byte(
+		`name: memory
+kind: global
+transport: stdio-bridge
+command: npx
+daemons:
+  - name: default
+    port: 9200
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+`), 0600)
+
+	a := NewAPI()
+	report, err := a.Demigrate(DemigrateOpts{
+		Servers:  []string{"memory"},
+		ScanOpts: ScanOpts{ManifestDir: manifestDir},
+		Writer:   io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("Demigrate: %v", err)
+	}
+	if len(report.Failed) != 0 {
+		t.Fatalf("expected 0 failures (marker confirms ownership → RemoveEntry safe); got %+v", report.Failed)
+	}
+	if len(report.Restored) != 1 {
+		t.Fatalf("expected 1 Restored; got %+v", report.Restored)
+	}
+	// Live entry must be removed.
+	data, _ := os.ReadFile(claudePath)
+	if strings.Contains(string(data), `"memory"`) {
+		t.Errorf("RemoveEntry did not remove memory entry from live config; file = %s", data)
+	}
+	// Marker row must be forgotten (so a subsequent re-migrate
+	// starts fresh).
+	managed, _ := IsManagedEntry("claude-code", "memory")
+	if managed {
+		t.Errorf("marker row was not forgotten after successful RemoveEntry; IsManaged still true")
 	}
 }
 

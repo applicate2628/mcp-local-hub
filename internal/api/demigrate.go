@@ -152,6 +152,73 @@ func (a *API) Demigrate(opts DemigrateOpts) (*DemigrateReport, error) {
 				if sentErr := safeRestore(sentinelPath); sentErr == nil {
 					restoredFrom = sentinelPath
 					err = nil
+				} else if errors.Is(sentErr, clients.ErrBackupEntryAlreadyMigrated) {
+					// PR #187 (B4 ownership marker): both the
+					// latest timestamped backup AND the pristine
+					// sentinel hold the entry in hub-managed form.
+					// No pre-hub state to restore. Consult the
+					// positive-ownership marker file before
+					// considering RemoveEntry — this is the
+					// codex-bot P1 closure on PR #186 r1 (a blind
+					// URL-equality fallback would delete legitimate
+					// user-owned localhost HTTP entries).
+					//
+					// The marker is populated by migrate.go AFTER
+					// every successful adapter.AddEntry — see
+					// RecordManagedEntry in managed_entries.go. If
+					// (client, server) is listed, mcphub
+					// demonstrably installed this entry and
+					// RemoveEntry is the correct rollback target.
+					// If NOT listed, fail-closed: refuse to delete
+					// because we have no positive proof of
+					// ownership.
+					//
+					// Pre-PR-187 entries (existing users post-
+					// upgrade) are NOT in the marker. Their
+					// demigrate stays fail-closed. Recovery path:
+					// re-migrate (uncheck + Apply, then check +
+					// Apply) populates the marker, then demigrate
+					// works on the next attempt.
+					managed, mErr := IsManagedEntry(binding.Client, server)
+					switch {
+					case mErr != nil:
+						err = fmt.Errorf(
+							"latest backup %s and -original sentinel both hold %q in hub-managed form, AND consulting managed-entries marker failed: %w",
+							backupPath, server, mErr)
+					case !managed:
+						err = fmt.Errorf(
+							"latest backup %s and -original sentinel both hold %q in hub-managed form, but managed-entries marker has no record that mcphub installed this entry — refusing to RemoveEntry (entry may be user-owned); to roll back this entry, edit %s manually, or re-run migrate first to populate the marker",
+							backupPath, server, adapter.ConfigPath())
+					default:
+						// (client, server) is in the marker —
+						// mcphub installed this entry. Safe to
+						// RemoveEntry, then forget the marker
+						// row so a subsequent re-migrate starts
+						// fresh.
+						if rmErr := adapter.RemoveEntry(server); rmErr != nil {
+							err = fmt.Errorf(
+								"latest backup %s and -original sentinel both hold %q in hub-managed form, marker confirmed mcphub-managed, AND RemoveEntry failed: %w",
+								backupPath, server, rmErr)
+						} else {
+							// Best-effort forget — a leftover
+							// marker row for a removed entry is a
+							// minor stale-state concern, not a
+							// correctness bug. The next migrate
+							// would refresh installed_at and the
+							// next demigrate would consult the
+							// updated row, so any stale info
+							// self-heals.
+							if fErr := ForgetManagedEntry(binding.Client, server); fErr != nil {
+								_ = LogHubMcpEvent("warn", "managed-entries-forget-failed", map[string]any{
+									"server": server,
+									"client": binding.Client,
+									"err":    fErr.Error(),
+								})
+							}
+							restoredFrom = "(marker confirmed mcphub-managed; removed entry from client config)"
+							err = nil
+						}
+					}
 				} else {
 					err = fmt.Errorf(
 						"latest backup %s holds %q already in hub-managed form, and -original sentinel fallback failed: %w",
