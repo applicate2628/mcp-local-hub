@@ -637,6 +637,44 @@ func TestCmdlineIsGUIOnTarget(t *testing.T) {
 	}
 }
 
+// TestCmdlineIsGUIOnTarget_FileIdentityFallback pins codex bot r4
+// P1 closure: the case-insensitive prefix match misses path
+// aliases (8.3 short names, junctions, symlinks) whose strings
+// differ from the canonical target but resolve to the same
+// file. The fallback uses os.SameFile (via the sameFileOrFalseFn
+// test seam here) to catch these cases.
+func TestCmdlineIsGUIOnTarget_FileIdentityFallback(t *testing.T) {
+	target := `C:\Users\u\.local\bin\mcphub.exe`
+	origSF := sameFileOrFalseFn
+	t.Cleanup(func() { sameFileOrFalseFn = origSF })
+
+	// 1. 8.3 short path → prefix match fails, sameFileOrFalse
+	//    returns true → accept (gui arg).
+	sameFileOrFalseFn = func(path1, path2 string) bool { return true }
+	cmdline := `C:\PROGRA~1\PROFIL~1\u\.local\bin\mcphub.exe gui`
+	if !cmdlineIsGUIOnTarget(cmdline, target) {
+		t.Errorf("8.3 short-path alias should match via SameFile fallback; got false")
+	}
+	// 2. Junction path → same SameFile fallback path.
+	cmdline = `C:\junction-link\mcphub.exe gui --no-browser`
+	if !cmdlineIsGUIOnTarget(cmdline, target) {
+		t.Errorf("junction-aliased path should match via SameFile fallback; got false")
+	}
+	// 3. 8.3 short path + daemon arg → reject (not gui subcommand).
+	cmdline = `C:\PROGRA~1\PROFIL~1\u\.local\bin\mcphub.exe daemon --server time`
+	if cmdlineIsGUIOnTarget(cmdline, target) {
+		t.Errorf("8.3 alias + daemon subcommand must reject; got true")
+	}
+	// 4. SameFile returns false → reject. Catches the case where
+	//    an alias resolves to a DIFFERENT binary (e.g., build-dir
+	//    image vs. canonical install).
+	sameFileOrFalseFn = func(path1, path2 string) bool { return false }
+	cmdline = `D:\dev\mcp-local-hub\bin\mcphub.exe gui`
+	if cmdlineIsGUIOnTarget(cmdline, target) {
+		t.Errorf("different image file (SameFile=false) must reject; got true")
+	}
+}
+
 // TestCmdlineIsGUIOnTarget_PathWithSpaces pins codex bot r2 P1
 // closure: splitCSVLine strips quotes from the WMIC/PowerShell
 // CSV cmdline cell. A target path containing spaces — common on

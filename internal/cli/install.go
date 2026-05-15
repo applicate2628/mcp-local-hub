@@ -843,60 +843,137 @@ func findRunningGUIsOnTarget(a *api.API, target string) ([]api.ProcessInfo, erro
 
 // cmdlineIsGUIOnTarget reports whether a wmic/PowerShell
 // CommandLine string represents a `mcphub.exe gui` invocation
-// whose image path equals target.
+// whose image is the same file as target.
 //
-// Codex bot r2 P1 closure on PR #188: splitCSVLine strips ALL
-// quote characters from the CSV cmdline cell. The string passed
-// in here is therefore unquoted regardless of whether the OS
-// originally quoted the executable path. A target whose path
-// contains spaces (`C:\Users\John Doe\.local\bin\mcphub.exe`)
-// would be split on the first whitespace under a naive
-// "first whitespace = image/args boundary" heuristic, missing
-// the running GUI.
+// Match strategy (codex bot r2-r4 closures on PR #188):
 //
-// Robust strategy: match `target` as a case-insensitive prefix
-// of the trimmed cmdline (handles both quoted and unquoted
-// forms — once quotes are stripped, the target path is the
-// literal prefix). After the prefix, the next non-space token
-// must be "gui" (or end-of-string for Explorer-double-click
-// launch per cmd/mcphub/main.go shouldAutoLaunchGUI).
+//	1. Try case-insensitive prefix match: cmdline starts with
+//	   `target` (literal path). Handles the common case and
+//	   target paths containing spaces (r2/r3 closures).
+//	2. If prefix match fails, extract the image path from
+//	   cmdline (everything up to the first whitespace not
+//	   inside quotes) and compare via os.SameFile (r4 closure).
+//	   Catches 8.3 short paths, junctions/symlinks, and other
+//	   canonicalization aliases that the prefix match misses
+//	   because the cmdline holds the alias, not the canonical
+//	   target string.
+//
+// After the image-path match (either path), the next non-space
+// token must be "gui" (or end-of-string for Explorer-double-
+// click launch per cmd/mcphub/main.go shouldAutoLaunchGUI).
 //
 // Rejects daemon invocations (`mcphub.exe daemon --server ...`),
-// same-binary-different-path matches (a build-dir mcphub.exe
-// running through a script), and the tray child process
-// (`mcphub.exe tray`).
-//
-// Path comparison is case-insensitive (NTFS default).
+// the tray child (`mcphub.exe tray`), watchdog ticks, and
+// same-binary-different-path matches.
 func cmdlineIsGUIOnTarget(cmdline, target string) bool {
 	cmdline = strings.TrimSpace(cmdline)
 	if cmdline == "" || target == "" {
 		return false
 	}
-	// splitCSVLine strips quotes, but on the off chance the
-	// caller passes a still-quoted form (direct CLI usage or
-	// PowerShell output preserving quotes) strip a leading
-	// double quote before the prefix match.
+	// splitCSVLine strips quotes, but defensively handle a
+	// still-quoted form from non-wmic input paths.
 	cmdline = strings.TrimPrefix(cmdline, `"`)
 
-	if !strings.HasPrefix(strings.ToLower(cmdline), strings.ToLower(target)) {
+	// Path 1: case-insensitive prefix match.
+	if rest, ok := matchTargetPrefix(cmdline, target); ok {
+		return firstArgIsGUI(rest)
+	}
+
+	// Path 2: file-identity match via os.SameFile. Handles
+	// 8.3 short paths, junctions, symlinks, and any other path
+	// alias whose string differs from `target` but resolves
+	// to the same file. Requires both paths to be readable —
+	// best-effort: a stat failure means "cannot prove file
+	// identity, fall through to false" (the prefix match
+	// already covered the literal path case).
+	imagePath, rest := splitImageAndRest(cmdline)
+	if imagePath == "" {
 		return false
 	}
+	if !sameFileOrFalse(imagePath, target) {
+		return false
+	}
+	return firstArgIsGUI(rest)
+}
+
+// matchTargetPrefix returns (rest, true) when cmdline starts
+// with target (case-insensitive), and (rest, false) otherwise.
+// rest is the cmdline content after the prefix, leading
+// close-quote and whitespace stripped.
+func matchTargetPrefix(cmdline, target string) (string, bool) {
+	if !strings.HasPrefix(strings.ToLower(cmdline), strings.ToLower(target)) {
+		return "", false
+	}
 	after := cmdline[len(target):]
-	// Optional close-quote then whitespace before the first arg.
 	after = strings.TrimPrefix(after, `"`)
 	after = strings.TrimLeft(after, " \t")
-	if after == "" {
-		// Explorer-double-click landing: no args. Per
-		// cmd/mcphub/main.go shouldAutoLaunchGUI, this also lands
-		// in gui mode.
+	return after, true
+}
+
+// splitImageAndRest extracts the image path and the rest from a
+// cmdline. The image path is everything up to the first
+// whitespace outside quotes; the rest is everything after,
+// leading whitespace stripped. Handles a leading `"` (closing
+// quote stripped if found before whitespace) but does NOT
+// handle embedded-space paths whose quotes were stripped by
+// splitCSVLine — that case is covered by matchTargetPrefix.
+func splitImageAndRest(cmdline string) (image, rest string) {
+	cmdline = strings.TrimPrefix(cmdline, `"`)
+	// If a closing quote appears before the first whitespace,
+	// use it as the image-boundary marker (preserves embedded
+	// spaces in a quoted image path).
+	if quoteIdx := strings.Index(cmdline, `"`); quoteIdx >= 0 {
+		if spaceIdx := strings.IndexAny(cmdline, " \t"); spaceIdx < 0 || quoteIdx < spaceIdx {
+			image = cmdline[:quoteIdx]
+			rest = strings.TrimLeft(cmdline[quoteIdx+1:], " \t")
+			return image, rest
+		}
+	}
+	if spaceIdx := strings.IndexAny(cmdline, " \t"); spaceIdx >= 0 {
+		image = cmdline[:spaceIdx]
+		rest = strings.TrimLeft(cmdline[spaceIdx:], " \t")
+		return image, rest
+	}
+	return cmdline, ""
+}
+
+// sameFileOrFalse stats both paths and returns true iff they
+// resolve to the same file via os.SameFile. Stat failures (file
+// missing, permission denied, etc.) yield false — best-effort
+// behavior; the caller has already exhausted the prefix-match
+// path so a failure here means "cannot prove same identity".
+//
+// sameFileOrFalseFn is the test seam; tests stub it to return
+// a fixed bool without touching the filesystem.
+var sameFileOrFalseFn func(path1, path2 string) bool
+
+func sameFileOrFalse(path1, path2 string) bool {
+	if sameFileOrFalseFn != nil {
+		return sameFileOrFalseFn(path1, path2)
+	}
+	fi1, err := os.Stat(path1)
+	if err != nil {
+		return false
+	}
+	fi2, err := os.Stat(path2)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(fi1, fi2)
+}
+
+// firstArgIsGUI reports whether the first whitespace-delimited
+// token of rest is exactly "gui" (case-sensitive — Cobra
+// subcommand routing is case-sensitive). Empty rest counts as
+// "gui" (Explorer-double-click landing per cmd/mcphub/main.go
+// shouldAutoLaunchGUI).
+func firstArgIsGUI(rest string) bool {
+	if rest == "" {
 		return true
 	}
-	// First arg must be "gui" (exact, case-sensitive — Windows
-	// subcommand-routing for mcphub uses Cobra which IS
-	// case-sensitive on the verb).
-	firstArg := after
-	if spaceIdx := strings.IndexAny(after, " \t"); spaceIdx >= 0 {
-		firstArg = after[:spaceIdx]
+	firstArg := rest
+	if spaceIdx := strings.IndexAny(rest, " \t"); spaceIdx >= 0 {
+		firstArg = rest[:spaceIdx]
 	}
 	return firstArg == "gui"
 }
