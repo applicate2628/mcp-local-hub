@@ -400,6 +400,29 @@ func TestApplyHubReconcileAddsBeforeRemoves(t *testing.T) {
 	}
 }
 
+
+func TestApplyHubReconcileReportsSkipListedClient(t *testing.T) {
+	plan := []ClientUpdatePlan{
+		{Client: "antigravity", Path: "fake", Action: ClientUpdateAddReplace, EntryName: "mcphub-hub", URL: "http://127.0.0.1:9180/clients/antigravity/mcp"},
+		{Client: "claude-code", Path: "fake", Action: ClientUpdateAddReplace, EntryName: "mcphub-hub", URL: "http://127.0.0.1:9180/clients/claude-code/mcp"},
+	}
+
+	prev := applyOpsForClientForTest
+	applyOpsForClientForTest = func(client string, ops []ClientUpdatePlan) error { return nil }
+	t.Cleanup(func() { applyOpsForClientForTest = prev })
+
+	report := ApplyHubReconcileInOrder(plan)
+	if len(report.Failed) != 0 {
+		t.Fatalf("Failed = %+v, want empty", report.Failed)
+	}
+	if len(report.Skipped) != 1 || report.Skipped[0] != "antigravity" {
+		t.Fatalf("Skipped = %+v, want [antigravity]", report.Skipped)
+	}
+	if len(report.Succeeded) != 1 || report.Succeeded[0] != "claude-code" {
+		t.Fatalf("Succeeded = %+v, want [claude-code]", report.Succeeded)
+	}
+}
+
 // TestPerServerInstallSkipsHubEntryRemoval pins codex r3 general F2
 // closure: `mcphub install --server X` MUST NOT emit a Remove on
 // EntryName="mcphub-hub". That entry is owned by the full-reconcile
