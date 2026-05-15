@@ -363,8 +363,15 @@ var knownClientLauncherBasenames = []string{
 // `C:\Program Files\Cursor\Cursor.exe` correctly resolves to
 // "cursor".
 func isKnownClientLauncher(cmdline string) bool {
-	base := strings.ToLower(firstTokenBasename(cmdline))
-	base = strings.TrimSuffix(base, ".exe")
+	// Strip ALL recognized launcher suffixes (.exe, .cmd, .bat,
+	// .ps1) — not just .exe — so Windows wrapper-based installs
+	// (claude.cmd / codex.cmd / gemini.bat shims around the real
+	// binary) still match the allowlist. Codex bot r1 P1.2 on
+	// PR #190: an `.exe`-only normalization let `cleanup
+	// --scan-clients --confirm` kill stdio children of a live
+	// claude.cmd-launched session because the .cmd ancestor was
+	// classified as unknown.
+	base := stripExtension(strings.ToLower(firstTokenBasename(cmdline)))
 	return slices.Contains(knownClientLauncherBasenames, base)
 }
 
@@ -438,6 +445,17 @@ func patternsFromClientStdio() []string {
 					// substring-match unrelated processes
 					// that happen to mention the same
 					// number. Skip them.
+					continue
+				}
+				// Codex bot r1 P1.1 on PR #190: a wrapper
+				// stdio entry like `uv run python my-mcp` adds
+				// `python` as an arg. Without isBroadLauncherToken
+				// here, that bare interpreter name lands in the
+				// pattern set and parseOrphans flags every random
+				// python process on the workstation. Apply the
+				// same broad-token guard the command-basename
+				// branch uses.
+				if isBroadLauncherToken(arg) {
 					continue
 				}
 				add(arg)

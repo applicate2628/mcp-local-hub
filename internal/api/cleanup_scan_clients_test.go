@@ -122,6 +122,50 @@ func TestPatternsFromClientStdio_NoInstalledClients(t *testing.T) {
 	}
 }
 
+// TestPatternsFromClientStdio_WrapperArgInterpretersFiltered covers
+// codex bot r1 P1.1 on PR #190: a wrapper stdio entry like
+// `{command:"uv", args:["run","python","my-mcp.py"]}` previously
+// emitted "python" / "node" / "npx" through the args branch
+// because isBroadLauncherToken was applied only to the command
+// basename. Without this guard, parseOrphans would flag every
+// random python.exe on the workstation as orphan.
+func TestPatternsFromClientStdio_WrapperArgInterpretersFiltered(t *testing.T) {
+	home := withHermeticHomeForCleanup(t)
+	writeCleanupFile(t, filepath.Join(home, ".claude.json"), `{
+  "mcpServers": {
+    "wrap1": {
+      "command": "uv",
+      "args": ["run", "python", "my-mcp.py"]
+    },
+    "wrap2": {
+      "command": "uvx",
+      "args": ["--from", "git+...", "node", "server.js"]
+    },
+    "wrap3": {
+      "command": "/usr/local/bin/uvx",
+      "args": ["npx", "my-server"]
+    }
+  }
+}`)
+	got := patternsFromClientStdio()
+	have := map[string]bool{}
+	for _, p := range got {
+		have[p] = true
+	}
+	// All bare-interpreter args must be filtered.
+	for _, banned := range []string{"python", "node", "npx", "uv", "uvx", "python3"} {
+		if have[banned] {
+			t.Errorf("broad-launcher token %q must NOT be in pattern set; got %v", banned, got)
+		}
+	}
+	// Discriminating args (the actual server names) survive.
+	for _, want := range []string{"my-mcp.py", "server.js", "my-server"} {
+		if !have[want] {
+			t.Errorf("expected discriminating arg %q in %v", want, got)
+		}
+	}
+}
+
 func TestPatternsFromClientStdio_NumericOnlyArgsDropped(t *testing.T) {
 	// "8080" passes the length floor (4 chars) and does not start
 	// with '-', but it is purely numeric so isAllDigits drops it.
@@ -185,6 +229,15 @@ func TestIsKnownClientLauncher(t *testing.T) {
 		{"cascade.exe", true, "Antigravity Cascade IDE"},
 		{"antigravity.exe", true, "Antigravity ship-name"},
 		{"qwen.exe", true, "Qwen CLI"},
+		// Codex bot r1 P1.2 on PR #190: wrapper-based installs use
+		// .cmd/.bat/.ps1 shims around the real binary. Without
+		// suffix normalization beyond .exe, the ancestor guard
+		// failed and stdio children of live wrapper-launched
+		// clients were eligible for killing.
+		{"claude.cmd", true, "Windows .cmd wrapper install"},
+		{"codex.bat", true, "Windows .bat wrapper install"},
+		{"gemini.ps1", true, "PowerShell .ps1 wrapper install"},
+		{"GEMINI.CMD --foo", true, "case-insensitive .cmd wrapper"},
 		{"node.exe --inspect server.js", false, "node is not a launcher"},
 		{"python.exe -m foo", false, "python is not a launcher"},
 		{"explorer.exe", false, "explorer is the re-parenting target, not a launcher"},
