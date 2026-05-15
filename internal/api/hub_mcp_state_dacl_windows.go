@@ -242,31 +242,55 @@ func verifyWindowsParentDACL(parentDir string) error {
 
 // windowsDACLSignificantBits is the full set the strict allowlist
 // check refuses on a non-allowlisted SID. Includes BOTH read
-// (confidentiality) and write/admin (integrity) bits.
+// (confidentiality) and write/admin (integrity) bits, plus the
+// directory-only FILE_DELETE_CHILD tamper right (codex bot r5 P1
+// follow-through: include it in strict too so a future caller
+// using verifyWindowsDACLFromHandle on a directory still refuses
+// child-delete grants).
 var windowsDACLSignificantBits = uint32(
 	windows.FILE_READ_DATA | windows.FILE_READ_EA |
 		windows.FILE_WRITE_DATA | windows.FILE_APPEND_DATA |
 		windows.FILE_WRITE_EA | windows.FILE_WRITE_ATTRIBUTES |
 		windows.FILE_EXECUTE |
 		windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER,
-)
+) | windowsFileDeleteChild
+
+// windowsFileDeleteChild is the directory-specific access right
+// FILE_DELETE_CHILD (0x40 per Microsoft AccessMask documentation,
+// "ACE Mask Values" table in ntifs.h). Not exported by
+// golang.org/x/sys/windows so we declare it locally. A principal
+// holding this right on a DIRECTORY can delete child entries
+// regardless of the children's own DACLs — making it a TOCTOU
+// swap vector when present on the state-dir's PARENT.
+const windowsFileDeleteChild uint32 = 0x40
 
 // windowsDACLWriteOrAdminBits names the access bits whose presence
 // in an ALLOW ACE for a non-allowlisted SID lets that principal
 // TAMPER with the file (write data, delete, replace DACL, take
-// ownership). The v0.4.2 read-side relax lane refuses any parent
-// granting these bits to a non-allowlisted SID — write access on
-// the PARENT means the principal can replace the file's directory
-// entry between verify (fd-bound) and read (path-based os.ReadFile),
-// breaking the TOCTOU guarantee that the verified bytes are the
-// bytes consumed. Read-only ALLOW ACEs (granting only
-// FILE_READ_DATA etc.) do NOT enable swap and are tolerable under
+// ownership) — or, on a directory, delete child entries via
+// FILE_DELETE_CHILD. The v0.4.2 read-side relax lane refuses any
+// parent granting these bits to a non-allowlisted SID — those
+// rights on the PARENT mean the principal can replace the state
+// file's directory entry between verify (fd-bound) and read
+// (path-based os.ReadFile), breaking the TOCTOU guarantee that the
+// verified bytes are the bytes consumed.
+//
+// codex bot r5 P1 on PR #192: FILE_DELETE_CHILD (directory-only,
+// 0x40) was missing from this mask. A parent ACE granting
+// read+FILE_DELETE_CHILD passed the strict gate (because read is
+// significant) then passed the relax recheck (because
+// FILE_DELETE_CHILD wasn't in the mask) → swap window opened.
+// Including FILE_DELETE_CHILD closes the hole. Other "write"
+// bits in the same family (FILE_WRITE_DATA etc.) remain present.
+//
+// Read-only ALLOW ACEs (FILE_READ_DATA / FILE_READ_EA /
+// FILE_EXECUTE only) do NOT enable swap and are tolerable under
 // default-relax mode.
 var windowsDACLWriteOrAdminBits = uint32(
 	windows.FILE_WRITE_DATA | windows.FILE_APPEND_DATA |
 		windows.FILE_WRITE_EA | windows.FILE_WRITE_ATTRIBUTES |
 		windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER,
-)
+) | windowsFileDeleteChild
 
 // verifyWindowsDACLFromHandle reads the owner SID + DACL from `h` via
 // GetSecurityInfo, then enforces the allowlist. Exported within the
