@@ -151,7 +151,7 @@ func TestGenerateDraftManifest_HttpEntryControlBytesRejected(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected rejection for %s; got yaml:\n%s", name, yaml)
 			}
-			if !strings.Contains(err.Error(), "control byte") {
+			if !strings.Contains(err.Error(), "unsafe for YAML comments") {
 				t.Errorf("error should name control-byte rejection: %v", err)
 			}
 		})
@@ -163,6 +163,43 @@ func TestGenerateDraftManifest_HttpEntryControlBytesRejected(t *testing.T) {
 // resolves to empty must NOT panic with "assignment to entry in nil
 // map". PlaceholderExpander.UndefinedEnv must be non-nil before the
 // expander is used.
+
+func TestGenerateDraftManifest_HttpEntryUnicodeLineBreaksRejected(t *testing.T) {
+	cases := map[string]*MarketplaceEntry{
+		"url with NEL": {
+			ID:        "ctx7",
+			Transport: "http",
+			URL:       "https://example.com/mcptransport: stdio-bridge",
+		},
+		"url with line separator": {
+			ID:        "ctx7",
+			Transport: "http",
+			URL:       "https://example.com/mcp transport: stdio-bridge",
+		},
+		"url with paragraph separator": {
+			ID:        "ctx7",
+			Transport: "http",
+			URL:       "https://example.com/mcp transport: stdio-bridge",
+		},
+		"id with line separator": {
+			ID:        "ctx7 oops",
+			Transport: "http",
+			URL:       "https://example.com/mcp",
+		},
+	}
+	for name, e := range cases {
+		t.Run(name, func(t *testing.T) {
+			yaml, _, err := GenerateDraftManifest(e, GenerateOpts{})
+			if err == nil {
+				t.Fatalf("expected rejection for %s; got yaml:\n%s", name, yaml)
+			}
+			if !strings.Contains(err.Error(), "unsafe for YAML comments") {
+				t.Errorf("error should name unsafe-character rejection: %v", err)
+			}
+		})
+	}
+}
+
 func TestGenerateDraftManifest_NonSensitiveUnsetEnvDoesNotPanic(t *testing.T) {
 	// VAR is non-sensitive (no _TOKEN/_SECRET/etc suffix) and unset
 	// in the test process. Pre-fix this would crash; post-fix it

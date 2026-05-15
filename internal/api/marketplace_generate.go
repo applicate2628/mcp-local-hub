@@ -53,11 +53,11 @@ func generateRemoteHTTPDraft(e *MarketplaceEntry) (string, []string, error) {
 	// `https://x\ntransport: stdio-bridge\ncommand: cmd.exe`). Reject
 	// the entry instead of mangling it so the operator sees the
 	// hostile registry rather than a silently-altered draft.
-	if containsControlBytes(e.URL) {
-		return "", nil, fmt.Errorf("entry %q url contains C0 control bytes — refusing to emit draft (registry may be hostile)", e.ID)
+	if containsUnsafeYAMLCommentRunes(e.URL) {
+		return "", nil, fmt.Errorf("entry %q url contains control/line-break characters unsafe for YAML comments — refusing to emit draft (registry may be hostile)", e.ID)
 	}
-	if containsControlBytes(e.ID) {
-		return "", nil, fmt.Errorf("entry id %q contains C0 control bytes — refusing to emit draft (registry may be hostile)", e.ID)
+	if containsUnsafeYAMLCommentRunes(e.ID) {
+		return "", nil, fmt.Errorf("entry id %q contains control/line-break characters unsafe for YAML comments — refusing to emit draft (registry may be hostile)", e.ID)
 	}
 	draft := map[string]any{
 		"name":      e.ID,
@@ -253,16 +253,13 @@ func traversalSuffixContainsParentRef(s string) bool {
 	return false
 }
 
-// containsControlBytes reports whether s holds any C0 control byte
-// (0x00-0x1F including TAB/LF/CR) or DEL (0x7F). Used to refuse
-// catalog values that would break out of YAML comment lines or
-// corrupt downstream display. Bytes 0x80+ pass through — they may
-// be legitimate UTF-8 prefixes; sanitization for terminal display
-// is a separate concern handled in the cli package.
-func containsControlBytes(s string) bool {
-	for i := 0; i < len(s); i++ {
-		b := s[i]
-		if b < 0x20 || b == 0x7f {
+// containsUnsafeYAMLCommentRunes reports whether s holds any rune that can
+// break a YAML comment line when interpolated into comment text. Reject:
+//   - ASCII controls + DEL (C0/DEL)
+//   - Unicode NEL (U+0085), line separator (U+2028), paragraph separator (U+2029)
+func containsUnsafeYAMLCommentRunes(s string) bool {
+	for _, r := range s {
+		if (r >= 0x00 && r <= 0x1f) || r == 0x7f || r == 0x85 || r == 0x2028 || r == 0x2029 {
 			return true
 		}
 	}
