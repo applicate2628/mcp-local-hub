@@ -138,6 +138,42 @@ type ProcessInfo struct {
 	Cmdline  string
 }
 
+// runMatchingProcessesSnapshot returns the wmic-shape CSV that
+// ListMatchingProcesses parses (Node,CommandLine,ProcessId,
+// WorkingSetSize). On Windows 11 24H2+ wmic.exe may be absent
+// entirely (Microsoft is removing the legacy WMIC tool); fall
+// back to a PowerShell Get-CimInstance probe that emits the same
+// 4-column CSV shape so the downstream parser does not need a
+// second path. Bot r1 P1 closure on PR #188: pre-fix, the
+// install-upgrade GUI preflight relied on ListMatchingProcesses
+// which only used wmic — on wmic-removed hosts, detection silently
+// returned an error, the preflight degraded to "no GUI found",
+// StopAll then succeeded, and Bootstrap finally failed with
+// "target in use" leaving daemons down (exactly the regression A8
+// was added to prevent).
+func runMatchingProcessesSnapshot() ([]byte, error) {
+	wmicCmd := exec.Command("wmic", "process", "get",
+		"CommandLine,ProcessId,WorkingSetSize", "/format:csv")
+	process.NoConsole(wmicCmd)
+	if out, err := wmicCmd.Output(); err == nil {
+		return out, nil
+	} else {
+		// PS fallback below. Hold wmic error in case PS also fails.
+		const psScript = `Get-CimInstance Win32_Process | ForEach-Object {
+			$cmdline = if ($_.CommandLine) { ($_.CommandLine -replace '"', '""') } else { '' }
+			[string]::Format('HOST,"{0}",{1},{2}', $cmdline, $_.ProcessId, $_.WorkingSetSize)
+		}`
+		psCmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
+		process.NoConsole(psCmd)
+		psOut, psErr := psCmd.Output()
+		if psErr != nil {
+			return nil, fmt.Errorf("both wmic and PowerShell process listing failed: wmic=%v; powershell=%v", err, psErr)
+		}
+		header := "Node,CommandLine,ProcessId,WorkingSetSize\n"
+		return append([]byte(header), psOut...), nil
+	}
+}
+
 // ListMatchingProcesses returns full process info for every process whose
 // CommandLine contains at least one of the given substring patterns.
 // Windows-only (wmic); returns nil on other platforms.
@@ -145,11 +181,9 @@ func (a *API) ListMatchingProcesses(patterns []string) ([]ProcessInfo, error) {
 	if runtime.GOOS != "windows" {
 		return nil, nil
 	}
-	cmd := exec.Command("wmic", "process", "get", "CommandLine,ProcessId,WorkingSetSize", "/format:csv")
-	process.NoConsole(cmd)
-	out, err := cmd.Output()
+	out, err := runMatchingProcessesSnapshot()
 	if err != nil {
-		return nil, fmt.Errorf("wmic: %w", err)
+		return nil, err
 	}
 	var results []ProcessInfo
 	s := bufio.NewScanner(strings.NewReader(string(out)))
