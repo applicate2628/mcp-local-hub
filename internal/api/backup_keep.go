@@ -48,6 +48,16 @@ func (a *API) effectiveBackupKeepN() int {
 	return n
 }
 
+// EffectiveBackupKeepN is the exported facade of effectiveBackupKeepN
+// used by callers outside the api package (e.g. internal/cli for the
+// `language-server cleanup` command). The exported method keeps the
+// retention-policy lookup in one place — adding a second copy in the
+// CLI would let the two paths drift if backups.keep_n semantics ever
+// change.
+func (a *API) EffectiveBackupKeepN() int {
+	return a.effectiveBackupKeepN()
+}
+
 // registryDefaultKeepN returns the integer interpretation of the
 // registry default for `backups.keep_n`. Sourced from the registry so
 // the schema stays the single source of truth — if a future spec rev

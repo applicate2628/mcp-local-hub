@@ -186,6 +186,19 @@ func (v *vscodeClient) RestoreEntryFromBackup(backupPath, name string) error {
 	return v.writeJSON(liveMap)
 }
 
+// FindStdioLanguageServerEntries scans `servers` for stdio entries
+// matching the mcp-language-server invocation pattern. VS Code uses
+// the top-level `servers` key (NOT `mcpServers`) and supports stdio
+// entries with `command`/`args`.
+func (v *vscodeClient) FindStdioLanguageServerEntries() ([]LanguageServerStdioEntry, error) {
+	m, err := v.readJSON()
+	if err != nil {
+		return nil, err
+	}
+	servers, _ := m["servers"].(map[string]any)
+	return findLanguageServerStdioInMap(servers), nil
+}
+
 func (v *vscodeClient) BackupContainsEntry(backupPath, name string) (bool, error) {
 	data, err := os.ReadFile(backupPath)
 	if err != nil {

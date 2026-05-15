@@ -201,6 +201,20 @@ func (j *jsonMCPClient) RestoreEntryFromBackup(backupPath, name string) error {
 	return j.writeJSON(liveMap)
 }
 
+// FindStdioLanguageServerEntries scans mcpServers for stdio entries
+// matching the mcp-language-server invocation pattern. Inherited by
+// geminiCLI, qwenCLI, cursorClient, and antigravityClient via struct
+// embedding. Antigravity entries never match because their `command`
+// resolves to mcphub, not mcp-language-server.
+func (j *jsonMCPClient) FindStdioLanguageServerEntries() ([]LanguageServerStdioEntry, error) {
+	m, err := j.readJSON()
+	if err != nil {
+		return nil, err
+	}
+	servers, _ := m["mcpServers"].(map[string]any)
+	return findLanguageServerStdioInMap(servers), nil
+}
+
 // BackupContainsEntry reports whether the backup file at backupPath
 // has an mcpServers[name] entry. Inherited by both geminiCLI and
 // antigravityClient via struct embedding.

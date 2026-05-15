@@ -43,6 +43,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newRegisterCmd())
 	root.AddCommand(newUnregisterCmd())
 	root.AddCommand(newWorkspacesCmd())
+	root.AddCommand(newLanguageServerCmd())
 	root.AddCommand(newMigrateLegacyCmd())
 	root.AddCommand(newImportCmd())
 	root.AddCommand(newWeeklyRefreshCmd())
@@ -92,6 +93,9 @@ func newSettingsCmd() *cobra.Command      { return newSettingsCmdReal() }
 func newRegisterCmd() *cobra.Command      { return newRegisterCmdReal() }
 func newUnregisterCmd() *cobra.Command    { return newUnregisterCmdReal() }
 func newWorkspacesCmd() *cobra.Command    { return newWorkspacesCmdReal() }
+func newLanguageServerCmd() *cobra.Command {
+	return newLanguageServerCmdReal()
+}
 func newMigrateLegacyCmd() *cobra.Command { return newMigrateLegacyCmdReal() }
 func newImportCmd() *cobra.Command        { return newImportCmdReal() }
 func newWeeklyRefreshCmd() *cobra.Command { return newWeeklyRefreshCmdReal() }
