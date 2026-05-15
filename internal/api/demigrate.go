@@ -152,6 +152,44 @@ func (a *API) Demigrate(opts DemigrateOpts) (*DemigrateReport, error) {
 				if sentErr := safeRestore(sentinelPath); sentErr == nil {
 					restoredFrom = sentinelPath
 					err = nil
+				} else if errors.Is(sentErr, clients.ErrBackupEntryAlreadyMigrated) {
+					// PR #186 (B4 fix): both the latest timestamped
+					// backup AND the pristine sentinel hold the entry
+					// in hub-managed form. This is the
+					// "no-pre-hub-form-ever-existed" case — the user
+					// never had a stdio/non-hub version of this
+					// server to roll back to. The April 2026 codename
+					// rename `mcp-sync → mcp-local-hub` made it more
+					// common (mcphub's "original" sentinel was first
+					// written AFTER an earlier mcp-sync-era migrate
+					// had already converted the entry to hub form),
+					// but it also covers servers added via mcphub
+					// from scratch (claude-code MCP entries are
+					// hub-routed by design — Claude Code uses HTTP
+					// transport for MCP, so no stdio "original" ever
+					// existed). Demigrate's correct semantic here is
+					// `RemoveEntry`: roll back to "no entry" in the
+					// client config rather than fail because there is
+					// no pre-hub form to restore.
+					//
+					// Why this is safe:
+					//   - Sentinel holds hub-managed entry → mcphub
+					//     wrote it. Removing it puts the client
+					//     config back to "no entry for this server"
+					//     state.
+					//   - Backup chain still preserves the pre-r5
+					//     content for forensic inspection if needed.
+					//   - Operator pressed "uncheck + Apply" through
+					//     the GUI matrix, which is explicit consent
+					//     to roll back mcphub routing.
+					if rmErr := adapter.RemoveEntry(server); rmErr != nil {
+						err = fmt.Errorf(
+							"latest backup %s and -original sentinel both hold %q in hub-managed form, AND RemoveEntry fallback failed: %w",
+							backupPath, server, rmErr)
+					} else {
+						restoredFrom = "(no pre-hub form found — removed entry from client config)"
+						err = nil
+					}
 				} else {
 					err = fmt.Errorf(
 						"latest backup %s holds %q already in hub-managed form, and -original sentinel fallback failed: %w",

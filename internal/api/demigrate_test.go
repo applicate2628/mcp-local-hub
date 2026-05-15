@@ -346,11 +346,25 @@ client_bindings:
 	}
 }
 
-func TestDemigrate_FailsWhenBothLatestAndSentinelRefuse(t *testing.T) {
-	// Pathological: both latest backup AND sentinel hold the entry in
-	// hub-managed form (e.g. user-edited sentinel or some unusual
-	// install history). Demigrate must fail with a clear message
-	// naming both paths.
+func TestDemigrate_FallsBackToRemoveEntryWhenBothBackupsHoldHubForm(t *testing.T) {
+	// PR #186 (B4 fix) flips the prior semantic. Previously this
+	// case (both latest backup AND sentinel hold the entry in
+	// hub-managed form) returned a Failed row because demigrate
+	// couldn't find a pre-hub form to restore. After B4: demigrate
+	// falls back to RemoveEntry on the live config — the user is
+	// rolling back hub-routing, and if no pre-hub form was ever
+	// captured (mcphub installed entry from scratch, OR the April
+	// 2026 codename rename `mcp-sync → mcp-local-hub` sealed the
+	// sentinel AFTER the entry was already hub-managed) the correct
+	// rollback target IS "no entry". The live config gets the entry
+	// removed, the report shows Restored, and the GUI uncheck-and-
+	// Apply flow completes successfully without B4's prior
+	// fail-row.
+	//
+	// Empirical reproducer from session 2026-05-15 smoke: claude /
+	// codex / gemini all hit this case because Claude Code uses
+	// HTTP transport (no stdio "original") and mcp-sync→mcp-local-
+	// hub rename sealed sentinels post-migrate.
 	tmp := t.TempDir()
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("HOME", tmp)
@@ -390,15 +404,23 @@ client_bindings:
 	if err != nil {
 		t.Fatalf("Demigrate: %v", err)
 	}
-	if len(report.Restored) != 0 {
-		t.Fatalf("expected 0 restored (both backups hold hub-managed entry), got %+v", report.Restored)
+	if len(report.Failed) != 0 {
+		t.Fatalf("expected 0 failures (RemoveEntry fallback should succeed), got %d: %+v", len(report.Failed), report.Failed)
 	}
-	if len(report.Failed) != 1 {
-		t.Fatalf("expected 1 failure, got %d: %+v", len(report.Failed), report.Failed)
+	if len(report.Restored) != 1 {
+		t.Fatalf("expected 1 Restored row (via RemoveEntry fallback), got %+v", report.Restored)
 	}
-	lowerErr := strings.ToLower(report.Failed[0].Err)
-	if !strings.Contains(lowerErr, "sentinel") || !strings.Contains(lowerErr, "fallback") || !strings.Contains(lowerErr, "failed") {
-		t.Errorf("failure message should mention sentinel fallback failed: got %q", report.Failed[0].Err)
+	if report.Restored[0].Server != "memory" || report.Restored[0].Client != "claude-code" {
+		t.Errorf("Restored row wrong: %+v", report.Restored[0])
+	}
+	// Live config MUST no longer contain the memory entry — that is
+	// the whole point of the RemoveEntry fallback.
+	data, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatalf("read live config: %v", err)
+	}
+	if strings.Contains(string(data), `"memory"`) {
+		t.Errorf("RemoveEntry fallback did not remove memory entry from live config; file = %s", data)
 	}
 }
 
