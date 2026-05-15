@@ -538,23 +538,27 @@ func stripExtension(name string) string {
 // pattern but whose parent is NOT our `mcp.exe daemon` wrapper. Reports them
 // (dry-run) or kills them (non-dry-run).
 func (a *API) CleanupOrphans(opts CleanupOpts) ([]OrphanProcess, error) {
+	// Codex bot r3 P1 / r4 P2 on PR #190: --scan-clients and
+	// --server are incompatible. Client stdio entries are identified
+	// by entry name + (command, args); they carry NO manifest-server
+	// key, so no useful narrowing exists. Mixing the two would expand
+	// allPatterns with cmdlines unrelated to the requested server,
+	// and a process matching one of those client-derived patterns
+	// would be killed in --confirm mode despite being out of scope.
+	//
+	// This check runs BEFORE the runtime.GOOS Windows-only short-
+	// circuit so the flag-semantics contract holds on every platform
+	// (r4 P2: validating cross-platform keeps Linux/macOS CI tests
+	// honest and prevents a silent acceptance on POSIX hosts that
+	// would diverge from the CLI help text).
+	if opts.ScanClientConfigs && opts.Server != "" {
+		return nil, errOrphanOptsServerScanClientsConflict
+	}
 	if runtime.GOOS != "windows" {
 		// Process introspection below uses Windows-specific tooling.
 		// Return an empty result on other platforms so the CLI stays usable
 		// (`mcp cleanup` just prints "No orphan processes found.").
 		return nil, nil
-	}
-	// Codex bot r3 P1 on PR #190: --scan-clients and --server are
-	// incompatible. Client stdio entries are identified by entry
-	// name + (command, args); they carry NO manifest-server key, so
-	// no useful narrowing exists. Mixing the two would expand
-	// allPatterns with cmdlines unrelated to the requested server,
-	// and a process matching one of those client-derived patterns
-	// would be killed in --confirm mode despite being out of scope.
-	// Refuse the combination with a clear error so the operator
-	// picks one mode.
-	if opts.ScanClientConfigs && opts.Server != "" {
-		return nil, errOrphanOptsServerScanClientsConflict
 	}
 	if opts.MinAgeSec == 0 {
 		opts.MinAgeSec = 60
