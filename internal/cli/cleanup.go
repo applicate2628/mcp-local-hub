@@ -45,6 +45,14 @@ Safety guards (to avoid false-positives like killing Dropbox):
   python.exe / mcp-language-server.exe lives on, re-parented to
   explorer.exe or svchost, until manually killed.
 
+  Entries marked '"disabled": true' in a client config are skipped: a
+  disabled entry is not running, so deriving a kill-pattern from it
+  could match unrelated processes.
+
+  --scan-clients is INCOMPATIBLE with --server: client stdio entries
+  carry no manifest-server-name key, so there is no useful narrowing.
+  Pick one mode.
+
 Examples:
   mcphub cleanup --dry-run              # safe preview (default)
   mcphub cleanup --confirm              # actually kill

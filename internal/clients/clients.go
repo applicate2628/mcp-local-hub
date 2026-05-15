@@ -169,10 +169,19 @@ type StdioEntry struct {
 }
 
 // collectStdioEntries iterates servers (a parsed client-config map
-// from any adapter's format) and returns every entry with a
-// non-empty `command` field as a StdioEntry. HTTP entries (no
-// `command`, has `url`) are skipped. Stable sort by Name keeps CLI
+// from any adapter's format) and returns every ACTIVE stdio entry
+// with a non-empty `command` field as a StdioEntry. Entries that are
+// either HTTP (no `command`, has `url`) or explicitly marked
+// `"disabled": true` are skipped. Stable sort by Name keeps CLI
 // output and test fixtures deterministic.
+//
+// The `disabled` flag is supported by several client schemas
+// (Antigravity, Cursor, VS Code, jsonMCPClient-based adapters).
+// Codex bot r3 P2 on PR #190: a user who turns off an entry
+// without removing it is signaling "this is not running" — the
+// reverse-lookup orphan detector must not derive kill-patterns from
+// those entries, or it could match unrelated workstation processes
+// that happen to share the same signature.
 func collectStdioEntries(servers map[string]any) []StdioEntry {
 	if len(servers) == 0 {
 		return nil
@@ -185,6 +194,9 @@ func collectStdioEntries(servers map[string]any) []StdioEntry {
 		}
 		cmd, _ := entryMap["command"].(string)
 		if cmd == "" {
+			continue
+		}
+		if disabled, _ := entryMap["disabled"].(bool); disabled {
 			continue
 		}
 		args := extractStringSlice(entryMap["args"])

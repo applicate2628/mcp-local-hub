@@ -2,6 +2,7 @@ package api
 
 import (
 	"bufio"
+	"errors"
 	"io"
 	"os/exec"
 	"runtime"
@@ -12,6 +13,16 @@ import (
 
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/process"
+)
+
+// errOrphanOptsServerScanClientsConflict is returned by CleanupOrphans
+// when both opts.Server and opts.ScanClientConfigs are set. Codex bot
+// r3 P1 on PR #190: the two modes have no overlap — client stdio
+// entries carry no manifest-server key — so mixing them would expand
+// the kill-pattern set with cmdlines unrelated to the requested
+// server. Operator must pick one mode.
+var errOrphanOptsServerScanClientsConflict = errors.New(
+	"cleanup: --scan-clients is incompatible with --server (client stdio entries carry no server-name key; pick one mode)",
 )
 
 // isOurOwnProcess returns true when the cmdline's executable token is one
@@ -533,6 +544,18 @@ func (a *API) CleanupOrphans(opts CleanupOpts) ([]OrphanProcess, error) {
 		// (`mcp cleanup` just prints "No orphan processes found.").
 		return nil, nil
 	}
+	// Codex bot r3 P1 on PR #190: --scan-clients and --server are
+	// incompatible. Client stdio entries are identified by entry
+	// name + (command, args); they carry NO manifest-server key, so
+	// no useful narrowing exists. Mixing the two would expand
+	// allPatterns with cmdlines unrelated to the requested server,
+	// and a process matching one of those client-derived patterns
+	// would be killed in --confirm mode despite being out of scope.
+	// Refuse the combination with a clear error so the operator
+	// picks one mode.
+	if opts.ScanClientConfigs && opts.Server != "" {
+		return nil, errOrphanOptsServerScanClientsConflict
+	}
 	if opts.MinAgeSec == 0 {
 		opts.MinAgeSec = 60
 	}
@@ -578,7 +601,15 @@ func (a *API) CleanupOrphans(opts CleanupOpts) ([]OrphanProcess, error) {
 	// svchost.exe — the manifest-pattern path alone would miss those
 	// because user-added stdio entries are not represented in the
 	// shipped manifests.
-	if opts.ScanClientConfigs {
+	//
+	// Codex bot r3 P1 on PR #190: --scan-clients is INCOMPATIBLE with
+	// --server. Client-config stdio entries have no server-name key —
+	// they're identified by entry name + (command, args). Mixing the
+	// two would expand allPatterns with cmdlines unrelated to the
+	// requested server, so a process matching one of those would be
+	// killed in --confirm mode despite being out of scope. Skip the
+	// client-derived patterns when --server narrows the run.
+	if opts.ScanClientConfigs && opts.Server == "" {
 		allPatterns = append(allPatterns, patternsFromClientStdio()...)
 	}
 	orphans := parseOrphans(strings.NewReader(string(out)), allPatterns)

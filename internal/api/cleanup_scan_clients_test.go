@@ -113,6 +113,66 @@ url = "http://localhost:9129/mcp"
 	}
 }
 
+// TestCleanupOrphans_RefusesServerWithScanClients covers codex bot
+// r3 P1: --scan-clients + --server is an out-of-scope kill risk
+// because client stdio entries have no server-name key. The two
+// flags must be mutually exclusive — opting in to both yields an
+// error, not a silent expansion of allPatterns.
+func TestCleanupOrphans_RefusesServerWithScanClients(t *testing.T) {
+	a := NewAPI()
+	_, err := a.CleanupOrphans(CleanupOpts{
+		Server:            "some-server",
+		ScanClientConfigs: true,
+		DryRun:            true,
+	})
+	if err == nil {
+		t.Fatal("expected error for --scan-clients + --server combination")
+	}
+	if !strings.Contains(err.Error(), "incompatible") {
+		t.Errorf("error = %v, want phrase 'incompatible'", err)
+	}
+}
+
+// TestPatternsFromClientStdio_SkipsDisabledEntry covers codex bot
+// r3 P2: an entry marked `"disabled": true` (Antigravity / Cursor /
+// VS Code / jsonMCPClient adapters all support the flag) is not
+// running and must not contribute kill-patterns. Deriving a pattern
+// from a disabled entry would risk matching an unrelated process
+// that happens to share the same signature.
+func TestPatternsFromClientStdio_SkipsDisabledEntry(t *testing.T) {
+	home := withHermeticHomeForCleanup(t)
+	writeCleanupFile(t, filepath.Join(home, ".claude.json"), `{
+  "mcpServers": {
+    "active-mcp": {
+      "command": "my-mcp-server",
+      "args": ["--config", "production"]
+    },
+    "disabled-mcp": {
+      "command": "should-be-skipped",
+      "args": ["--config", "old-name"],
+      "disabled": true
+    }
+  }
+}`)
+	got := patternsFromClientStdio()
+	have := map[string]bool{}
+	for _, p := range got {
+		have[p] = true
+	}
+	if !have["my-mcp-server"] {
+		t.Errorf("active entry's command 'my-mcp-server' missing; got %v", got)
+	}
+	if !have["production"] {
+		t.Errorf("active entry's discriminating arg 'production' missing; got %v", got)
+	}
+	if have["should-be-skipped"] {
+		t.Errorf("disabled entry's command leaked into pattern set; got %v", got)
+	}
+	if have["old-name"] {
+		t.Errorf("disabled entry's arg leaked into pattern set; got %v", got)
+	}
+}
+
 func TestPatternsFromClientStdio_NoInstalledClients(t *testing.T) {
 	withHermeticHomeForCleanup(t)
 	// Fresh empty home — no clients installed anywhere.
