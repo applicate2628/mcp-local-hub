@@ -107,6 +107,16 @@ export function ServersScreen() {
         }
         setStatusByServer(flat);
         setError(null);
+        // PR #186 fix: clear the "Applied. Refreshing…" indicator
+        // once the authoritative reload completes. Pre-fix the
+        // string sat in applyMsg forever (set by applyChanges
+        // on success, never cleared) — user saw the spinner-like
+        // wording after every successful Apply with no way to
+        // know when the refresh was actually done. Failed-message
+        // strings ("Failed: N row(s); re-toggle and retry below.")
+        // must NOT be cleared here — they remain visible until
+        // the user starts a new Apply cycle.
+        setApplyMsg((msg) => (msg === "Applied. Refreshing…" ? "" : msg));
       } catch (err) {
         if (!cancelled) setError((err as Error).message);
       }
