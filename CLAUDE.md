@@ -620,55 +620,87 @@ supported path. Operators who cannot wait may hand-author a local
 stdio wrapper that proxies to the remote URL; both options are surfaced
 in the CLI error message.
 
-## Hardened client-config writes + corp-policy escape hatch
+## Hardened client-config writes + corp-policy posture
 
 Every adapter write goes through `api.SecureWriteClientConfig`
-(`internal/api/secure_write_client_config.go`), which enforces a
-single-user DACL/mode gate on the destination's immediate parent
-directory before the write. On Windows the gate rejects non-
-allowlisted DACL ACEs (Domain Users, Authenticated Users); on
-POSIX it rejects any group/world permission bits or non-owner uid.
+(`internal/api/secure_write_client_config.go`), which uses a
+handle-relative pipeline (Windows: `NtCreateFile` relative to a
+parent `dirHandle` with `WRITE_DAC` access; POSIX: `openat` relative
+to a parent `dirFd` with `O_CREAT|O_EXCL|O_NOFOLLOW|0600`). The
+restrictive DACL/mode is installed on the file HANDLE/FD BEFORE any
+bytes hit disk, then the atomic rename happens across the held
+handle. This pattern closes all classic temp-file races.
 
-Operators on managed corporate machines (e.g. Domain Users
-inheriting read access on `%USERPROFILE%`) can hit the gate during
-ordinary install/migrate. The wrapper at
-`internal/api/client_write_init.go::secureWriteWithOperatorOpt`
-surfaces the rejection with an explicit hint pointing at the
-opt-in env var:
+The pipeline includes a parent-dir DACL/mode gate (Windows: reject
+non-allowlisted ACEs like Domain Users, Authenticated Users,
+CodexSandboxUsers, AppContainer SIDs, orphan AD SIDs; POSIX: reject
+group/world permission bits or non-owner uid). The gate is
+controlled by two env vars:
+
+- **Default (v0.4.0+, no env vars set):** if the parent-dir gate
+  rejects, the pipeline RE-RUNS with the parent-dir gate disabled.
+  Everything else — symlink refusal, handle-bound DACL/mode at
+  temp-create, atomic rename, post-rename re-verify — still applies.
+  The new file is owner-only regardless of how broad the parent's
+  ACL is.
+- **`MCPHUB_REQUIRE_SINGLE_USER_HOME=1`:** strict gate. Parent-dir
+  rejection becomes a hard error; no relax fallback. Use on
+  corp-managed/shared hosts where the parent-dir ACL is the
+  authoritative boundary.
+- **`MCPHUB_ALLOW_UNHARDENED_CLIENT_WRITE=1`:** legacy explicit
+  opt-in to the relax path. Pre-v0.4.0 this was required to bypass
+  the strict-by-default gate; v0.4.0+ it is a no-op vs the default
+  (relax fires either way), kept for backward compatibility so
+  operators with the env var already set in their shell profile see
+  identical behavior. Distinguished in the audit log so operators
+  can grep their profile and remove the now-redundant setting.
+
+When the relax lane fires (default OR legacy opt-in), a structured
+**warn** event `client-write-unhardened-fallback` is emitted through
+the hub-mcp event log with the destination path, the reason
+(`default-relax-on-solo-host` or `legacy opt-in via MCPHUB_ALLOW_UNHARDENED_CLIENT_WRITE`),
+and the original gate error.
+
+Strict-mode error wording (when `MCPHUB_REQUIRE_SINGLE_USER_HOME=1`
+is set):
 
 ```text
 secure write: parent directory not single-user safe (path C:\Users\...): <details>;
-this path can be unblocked by setting MCPHUB_ALLOW_UNHARDENED_CLIENT_WRITE=1
-(loses parent-dir DACL/mode protection — only set this if the host is
-under your sole control and corp-policy DACLs cannot be tightened)
+MCPHUB_REQUIRE_SINGLE_USER_HOME=1 is set, so the strict parent-dir
+gate is enforced (unset that env var, or tighten the parent's DACL
+to remove the offending principal, to proceed)
 ```
 
-Setting `MCPHUB_ALLOW_UNHARDENED_CLIENT_WRITE=1` falls back to a
-symlink-refusing temp+rename write with mode 0600 ONLY for the
-parent-dir gate failure. The opt-in lane:
-
-- Lstats the destination first and refuses to follow a pre-existing
-  symlink (otherwise an attacker on a shared host could pre-create
-  a symlink at the client-config path and harvest the token-bearing
-  content into a target of their choosing).
-- Writes to a fresh temp file in the same dir, Chmods to 0600, then
-  atomically renames over the destination. This avoids inheriting
-  permissions / explicit ACEs from a pre-existing file at the
-  destination — a naive `os.WriteFile` would have kept the prior
-  mode bits intact on POSIX and the prior explicit ACEs on Windows.
-- Logs a structured warn event (`client-write-unhardened-fallback`)
-  via the hub-mcp event log so audit trails record the opt-in.
-
 All other secure-write failures (open temp, write, rename,
-post-rename verify, pre-existing symlink at destination) propagate
-unchanged regardless of the env var.
+post-rename DACL/mode re-verify, pre-existing symlink/reparse-point
+at destination) propagate unchanged regardless of either env var.
 
-The opt-in has one residual difference vs. the hardened path: a
-small TOCTOU window between Lstat and the temp+rename (the hardened
-path closes that window via handle-relative ops). Operators who set
-the opt-in accept that risk for the corp-policy DACL relaxation.
-On Windows, ACL inheritance from the parent dir still applies to
-the new file (the operator accepted that by opting in).
+**Residual co-resident risk (relax lane only):** the parent-dir gate
+exists to detect when the parent is broadened to other principals
+beyond the file owner. The relax lane writes through anyway because
+on solo-developer Windows hosts the broadening principals
+(CodexSandboxUsers, AppContainer SIDs, orphan AD SIDs) are
+typically not under operator control and pose no realistic threat.
+The new file's DACL still denies content/object access to those
+principals (the file is owner-only with PROTECTED_DACL blocking
+inherited ACEs), and on Windows the restrictive DACL is installed
+at NtCreateFile time via `OBJECT_ATTRIBUTES.SecurityDescriptor` so
+there is no pre-DACL window during which the file could be opened.
+
+**What the relax lane does NOT protect against:** parent-directory
+namespace rights. If a co-resident principal has been granted
+`FILE_DELETE_CHILD` on the parent directory (one of the more
+permissive ACEs Group Policy / SCCM can apply to shared profile
+paths), they can still delete the entry from the directory or
+replace it with an attacker-controlled file. They cannot read or
+modify the original file's contents through its own DACL — that is
+denied by the file's allowlist — but the directory entry itself
+sits outside the file's security boundary. Operators on genuinely
+multi-tenant or admin-managed hosts with broad parent-directory
+write permissions should set `MCPHUB_REQUIRE_SINGLE_USER_HOME=1` to
+enforce the strict gate or tighten the parent's DACL to remove
+namespace rights for non-allowlisted principals; the relax lane is
+not designed for that posture.
 
 ## Stuck-instance recovery
 
