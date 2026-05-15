@@ -674,6 +674,49 @@ func TestCmdlineIsGUIOnTarget(t *testing.T) {
 	}
 }
 
+// TestCmdlineIsGUIOnTarget_AliasedPathWithSpaces pins codex bot
+// r7 P1 closure: the SameFile fallback was using a fixed
+// "first whitespace = image boundary" extraction, which mis-cut
+// an aliased path containing spaces (e.g., a junction at
+// `C:\Alias dir\mcphub.exe`). The progressive boundary scan now
+// tries every whitespace position as a candidate image/args
+// split, stopping at the first one where sameFileOrFalse(image,
+// target) returns true.
+func TestCmdlineIsGUIOnTarget_AliasedPathWithSpaces(t *testing.T) {
+	target := `C:\Users\u\.local\bin\mcphub.exe`
+	origSF := sameFileOrFalseFn
+	t.Cleanup(func() { sameFileOrFalseFn = origSF })
+
+	// SameFile returns true only when called with the exact
+	// junction path containing spaces (simulates a junction
+	// alias whose source dir name has a space).
+	const aliasPath = `C:\Alias dir\mcphub.exe`
+	sameFileOrFalseFn = func(path1, _ string) bool {
+		return path1 == aliasPath
+	}
+
+	cmdline := `C:\Alias dir\mcphub.exe gui --no-browser`
+	if !cmdlineIsGUIOnTarget(cmdline, target) {
+		t.Errorf("aliased-path-with-spaces + gui must accept via progressive boundary scan; got false")
+	}
+	// daemon subcommand on same path → reject
+	cmdline = `C:\Alias dir\mcphub.exe daemon --server time`
+	if cmdlineIsGUIOnTarget(cmdline, target) {
+		t.Errorf("aliased-path-with-spaces + daemon must reject; got true")
+	}
+	// Explorer-launch on same alias (no args, alias has spaces)
+	cmdline = `C:\Alias dir\mcphub.exe`
+	if !cmdlineIsGUIOnTarget(cmdline, target) {
+		t.Errorf("aliased-path-with-spaces Explorer-launch must accept; got false")
+	}
+	// alias with 10+ wrong boundaries (cap reached) → reject
+	sameFileOrFalseFn = func(_, _ string) bool { return false }
+	cmdline = `a b c d e f g h i j k l m n o p`
+	if cmdlineIsGUIOnTarget(cmdline, target) {
+		t.Errorf("cmdline with 10+ wrong boundaries + no match must reject; got true")
+	}
+}
+
 // TestCmdlineIsGUIOnTarget_FileIdentityFallback pins codex bot r4
 // P1 closure: the case-insensitive prefix match misses path
 // aliases (8.3 short names, junctions, symlinks) whose strings

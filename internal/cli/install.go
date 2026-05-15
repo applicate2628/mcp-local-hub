@@ -891,18 +891,72 @@ func cmdlineIsGUIOnTarget(cmdline, target string) bool {
 	// Path 2: file-identity match via os.SameFile. Handles
 	// 8.3 short paths, junctions, symlinks, and any other path
 	// alias whose string differs from `target` but resolves
-	// to the same file. Requires both paths to be readable —
-	// best-effort: a stat failure means "cannot prove file
-	// identity, fall through to false" (the prefix match
-	// already covered the literal path case).
-	imagePath, rest := splitImageAndRest(cmdline)
-	if imagePath == "" {
-		return false
+	// to the same file.
+	//
+	// Codex bot r7 P1 closure on PR #188: a fixed "first
+	// whitespace = image boundary" extraction fails when the
+	// ALIAS path itself contains spaces (Windows profile dirs
+	// with spaces, ALIASed through a junction whose source path
+	// is unquoted in the wmic-stripped cmdline). The image
+	// extraction must try progressively longer prefixes,
+	// calling sameFileOrFalse at each whitespace boundary,
+	// stopping at the first match.
+	//
+	// Quoted-image case (rare — splitCSVLine usually strips
+	// quotes, but defensive for PS or direct-CLI input where
+	// quotes survive): if a closing `"` appears before the
+	// first whitespace, treat that as the image boundary
+	// explicitly (preserves embedded spaces in a quoted path).
+	cmdline = strings.TrimPrefix(cmdline, `"`)
+	if quoteIdx := strings.Index(cmdline, `"`); quoteIdx >= 0 {
+		if spaceIdx := strings.IndexAny(cmdline, " \t"); spaceIdx < 0 || quoteIdx < spaceIdx {
+			image := cmdline[:quoteIdx]
+			rest := strings.TrimLeft(cmdline[quoteIdx+1:], " \t")
+			if !sameFileOrFalse(image, target) {
+				return false
+			}
+			return firstArgIsGUI(rest)
+		}
 	}
-	if !sameFileOrFalse(imagePath, target) {
-		return false
+	return matchByProgressiveImageBoundary(cmdline, target)
+}
+
+// matchByProgressiveImageBoundary tries every whitespace
+// position in cmdline as a candidate image/args boundary,
+// stopping at the first one where sameFileOrFalse(candidate,
+// target) returns true. Handles the codex bot r7 P1 case:
+// cmdline holds an alias path containing spaces and no quotes
+// (wmic strips quotes before passing to ListMatchingProcesses).
+//
+// Capped at maxImageBoundaryAttempts whitespace positions to
+// bound the os.Stat fan-out — real cmdlines almost never have
+// 10+ whitespace boundaries even with path-with-spaces, and
+// past that horizon the chance of a true match has practically
+// dropped to zero.
+const maxImageBoundaryAttempts = 10
+
+func matchByProgressiveImageBoundary(cmdline, target string) bool {
+	pos := 0
+	for attempt := 0; attempt < maxImageBoundaryAttempts; attempt++ {
+		spaceIdx := strings.IndexAny(cmdline[pos:], " \t")
+		if spaceIdx < 0 {
+			// No more whitespace — try whole remaining string
+			// (Explorer-launch + alias path with embedded spaces
+			// and no args).
+			if sameFileOrFalse(cmdline, target) {
+				return firstArgIsGUI("")
+			}
+			return false
+		}
+		end := pos + spaceIdx
+		candidate := cmdline[:end]
+		if sameFileOrFalse(candidate, target) {
+			rest := strings.TrimLeft(cmdline[end:], " \t")
+			return firstArgIsGUI(rest)
+		}
+		pos = end + 1
 	}
-	return firstArgIsGUI(rest)
+	return false
 }
 
 // matchTargetPrefix returns (rest, true) when cmdline starts
@@ -947,33 +1001,6 @@ func matchTargetPrefix(cmdline, target string) (string, bool) {
 func cmdlineTailAfterImage(after string) string {
 	after = strings.TrimPrefix(after, `"`)
 	return strings.TrimLeft(after, " \t")
-}
-
-// splitImageAndRest extracts the image path and the rest from a
-// cmdline. The image path is everything up to the first
-// whitespace outside quotes; the rest is everything after,
-// leading whitespace stripped. Handles a leading `"` (closing
-// quote stripped if found before whitespace) but does NOT
-// handle embedded-space paths whose quotes were stripped by
-// splitCSVLine — that case is covered by matchTargetPrefix.
-func splitImageAndRest(cmdline string) (image, rest string) {
-	cmdline = strings.TrimPrefix(cmdline, `"`)
-	// If a closing quote appears before the first whitespace,
-	// use it as the image-boundary marker (preserves embedded
-	// spaces in a quoted image path).
-	if quoteIdx := strings.Index(cmdline, `"`); quoteIdx >= 0 {
-		if spaceIdx := strings.IndexAny(cmdline, " \t"); spaceIdx < 0 || quoteIdx < spaceIdx {
-			image = cmdline[:quoteIdx]
-			rest = strings.TrimLeft(cmdline[quoteIdx+1:], " \t")
-			return image, rest
-		}
-	}
-	if spaceIdx := strings.IndexAny(cmdline, " \t"); spaceIdx >= 0 {
-		image = cmdline[:spaceIdx]
-		rest = strings.TrimLeft(cmdline[spaceIdx:], " \t")
-		return image, rest
-	}
-	return cmdline, ""
 }
 
 // sameFileOrFalse stats both paths and returns true iff they
