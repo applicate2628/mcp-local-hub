@@ -9,47 +9,27 @@ import (
 	"testing"
 )
 
-// TestSecureWriteWithOperatorOpt_DefaultRelaxOnGateFailure pins the
-// v0.4.0 flip: when SecureWriteClientConfig hits the parent-dir gate
-// AND neither env var is set, the wrapper RUNS the hardened pipeline
-// AGAIN with the parent-dir gate bypassed. Solo-developer Windows
-// hosts (the common case) no longer need to opt in.
-//
-// Pre-v0.4.0 behavior (strict by default, opt-in to relax) is now
-// reversed; the pre-v0.4.0 test that pinned the strict-by-default
-// path moved to TestSecureWriteWithOperatorOpt_StrictModeRequired
-// below.
+// TestSecureWriteWithOperatorOpt_DefaultStrictOnGateFailure pins the
+// strict-by-default posture: when SecureWriteClientConfig hits the
+// parent-dir gate AND no explicit opt-in is set, the wrapper returns
+// the gate error and does not write.
 //
 // PR #185 r3 (codex deep-sec P1 closure): the relax lane no longer
 // uses os.CreateTemp + path-based DACL — it re-runs the SAME
 // handle-relative hardened pipeline with parent-dir gate disabled,
 // closing the temp-create-to-DACL-apply race window.
-func TestSecureWriteWithOperatorOpt_DefaultRelaxOnGateFailure(t *testing.T) {
+func TestSecureWriteWithOperatorOpt_DefaultStrictOnGateFailure(t *testing.T) {
 	t.Setenv(AllowUnhardenedClientWriteEnv, "") // no legacy opt-in
 	t.Setenv(RequireSingleUserHomeEnv, "")      // no strict opt-in
 
 	dst := filepath.Join(t.TempDir(), "client.json")
 	want := []byte(`{"servers":{"x":1}}`)
 	err := secureWriteWithOperatorOpt(dst, want)
-	if err != nil {
-		// On a host where t.TempDir() happens to satisfy the strict
-		// gate (clean 0700 tmpdir owned by test user), the underlying
-		// SecureWriteClientConfig succeeded and there was no gate
-		// rejection to relax — the wrapper still returns nil and the
-		// write still landed. So failure here is real.
-		t.Fatalf("default-relax should succeed (strict path or skip-gate path); got err: %v", err)
+	if err == nil {
+		t.Skip("t.TempDir() unexpectedly satisfied the parent-dir gate; cannot pin strict-mode rejection on this host")
 	}
-	got, readErr := os.ReadFile(dst)
-	if readErr != nil {
-		t.Fatalf("read written file: %v", readErr)
-	}
-	if string(got) != string(want) {
-		t.Errorf("written contents = %q, want %q", got, want)
-	}
-	if runtime.GOOS != "windows" {
-		if info, _ := os.Stat(dst); info != nil && (info.Mode().Perm()&0o077) != 0 {
-			t.Errorf("written file mode %v has group/world bits; hardened pipeline (gate-disabled lane) must still write 0600", info.Mode())
-		}
+	if !errors.Is(err, ErrSecureWriteParentInsecure) {
+		t.Fatalf("default strict mode must return ErrSecureWriteParentInsecure; got %v", err)
 	}
 }
 
@@ -69,10 +49,6 @@ func TestSecureWriteWithOperatorOpt_StrictModeRequired(t *testing.T) {
 	}
 	if !errors.Is(err, ErrSecureWriteParentInsecure) {
 		t.Fatalf("error not wrapped with ErrSecureWriteParentInsecure: %v", err)
-	}
-	if !strings.Contains(err.Error(), RequireSingleUserHomeEnv) {
-		t.Errorf("error must mention %q so operator knows which env var enforces this; got %v",
-			RequireSingleUserHomeEnv, err)
 	}
 	if _, statErr := os.Stat(dst); !os.IsNotExist(statErr) {
 		t.Errorf("file at %s exists despite strict-mode rejection; stat err = %v", dst, statErr)
@@ -99,9 +75,6 @@ func TestSecureWriteWithOperatorOpt_StrictBeatsLegacyAllow(t *testing.T) {
 	}
 	if !errors.Is(err, ErrSecureWriteParentInsecure) {
 		t.Fatalf("strict-mode should reject even with legacy opt-in present; got %v", err)
-	}
-	if !strings.Contains(err.Error(), RequireSingleUserHomeEnv) {
-		t.Errorf("error must mention %q (strict wins); got %v", RequireSingleUserHomeEnv, err)
 	}
 	// P2 closure: no fallback write must have happened.
 	if _, statErr := os.Stat(dst); !os.IsNotExist(statErr) {

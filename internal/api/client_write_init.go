@@ -33,7 +33,6 @@ package api
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"strings"
 
@@ -47,21 +46,14 @@ func init() {
 // AllowUnhardenedClientWriteEnv is a legacy operator-explicit opt-in
 // for the unhardened client-config write path. Pre-v0.4.0 the
 // parent-dir DACL gate was STRICT by default, and this env var was
-// the only way to bypass it. v0.4.0 flips the default to RELAX (see
-// secureWriteWithOperatorOpt below), so this env var is now
-// effectively a no-op vs the default — kept for backward
-// compatibility with operators who already have it set in their
-// shell profile or scheduler scripts.
+// the only way to bypass it. This env var remains the explicit operator opt-in for
+// bypassing the strict parent-dir gate when writing client configs.
 const AllowUnhardenedClientWriteEnv = "MCPHUB_ALLOW_UNHARDENED_CLIENT_WRITE"
 
-// RequireSingleUserHomeEnv is the v0.4.0+ operator opt-in for the
-// STRICT parent-dir DACL/mode gate. Set to "1" or "true" (case-
-// insensitive) on corp-managed machines, shared hosts, or other
-// multi-tenant contexts where the parent-dir DACL check is the
-// authoritative security boundary. When unset, mcphub treats the
-// solo-developer Windows case as the common path and proceeds with
-// the symlink-refusing fallback when parent-dir is not single-user-
-// safe — see secureWriteWithOperatorOpt for rationale.
+// RequireSingleUserHomeEnv is retained for backward compatibility.
+// Strict parent-dir gating is now the default behavior again, so
+// setting this env var explicitly has no effect beyond self-documenting
+// operator intent in deployment environments.
 const RequireSingleUserHomeEnv = "MCPHUB_REQUIRE_SINGLE_USER_HOME"
 
 // secureWriteWithOperatorOpt is the cross-package writer that
@@ -146,19 +138,12 @@ func secureWriteWithOperatorOpt(path string, contents []byte) error {
 	if !errors.Is(err, ErrSecureWriteParentInsecure) {
 		return err
 	}
-	if operatorRequiresSingleUserHome() {
-		return fmt.Errorf("%w; %s=1 is set, so the strict parent-dir gate is enforced (unset that env var, or tighten the parent's DACL to remove the offending principal, to proceed)",
-			err, RequireSingleUserHomeEnv)
+	if !operatorAllowedUnhardenedClientWrite() {
+		return err
 	}
-	reason := "default-relax-on-solo-host"
-	if operatorAllowedUnhardenedClientWrite() {
-		// Legacy explicit opt-in produces the same fallback as
-		// default; distinguish in the audit log so operators can
-		// grep their shell profile after upgrade and remove the
-		// now-redundant env var.
-		reason = "legacy opt-in via " + AllowUnhardenedClientWriteEnv + " (now redundant — same as default)"
-	}
-	// Codex deep-sec PR #185 r2 P2: emit at WARN, not INFO. The
+	reason := "legacy opt-in via " + AllowUnhardenedClientWriteEnv
+	reason += " (explicit bypass)"
+	// Emit at WARN. The
 	// fallback is a security-boundary downgrade (operator-policy:
 	// parent-dir gate skipped); warn-level keeps it visible to
 	// log-monitoring conventions that filter info out of audit
@@ -186,11 +171,9 @@ func secureWriteWithOperatorOpt(path string, contents []byte) error {
 // case-insensitively; everything else (including unset, "0",
 // "false", "no", garbage) returns false.
 //
-// Post-v0.4.0 the default is already "fall back to unhardened on
-// parent-dir gate failure", so this helper exists only to log the
-// "legacy opt-in" reason in audit events — operators who had the
-// env var set pre-v0.4.0 get the same behavior, distinguished in the
-// log so they can clean up their shell profile.
+// This helper controls whether parent-dir gate failures are allowed
+// to bypass the strict default and proceed via the hardened
+// gate-disabled write pipeline.
 func operatorAllowedUnhardenedClientWrite() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(AllowUnhardenedClientWriteEnv))) {
 	case "1", "true":
@@ -202,8 +185,7 @@ func operatorAllowedUnhardenedClientWrite() bool {
 // operatorRequiresSingleUserHome reports whether the operator has
 // explicitly opted INTO the strict parent-dir DACL/mode gate via the
 // RequireSingleUserHomeEnv env var. Accepts "1" and "true" case-
-// insensitively; everything else (including unset) returns false,
-// which means v0.4.0+ default (relax-on-gate-failure) applies.
+// insensitively; everything else (including unset) returns false.
 //
 // Operators set this on corp-managed machines, shared hosts, build
 // servers, CI runners, or anywhere multi-tenant trust boundaries
