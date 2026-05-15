@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"os/user"
 	"testing"
 
 	"mcp-local-hub/internal/scheduler"
@@ -16,6 +17,10 @@ import (
 // closure on PR #180): port-to-PID lookup × image OR parent-image
 // matches mcphub.exe × scheduler task state.
 func TestPortHeldByOurDaemon(t *testing.T) {
+	current := "root"
+	if u, err := user.Current(); err == nil && u != nil && u.Username != "" {
+		current = u.Username
+	}
 	origLookup := lookupProcess
 	origIdent := processIdentityByPID
 	origSched := schedulerStatusForOwnPort
@@ -33,40 +38,42 @@ func TestPortHeldByOurDaemon(t *testing.T) {
 		image       string
 		parentImage string
 		schState    string
+		schOwner    string
 		schErr      error
 		want        bool
 	}{
 		// Happy paths: image matches.
-		{"mcphub.exe + task Running → ours (stdio-bridge / native-http external)", true, 12345, true, "mcphub.exe", "svchost.exe", "Running", nil, true},
-		{"MCPHUB.EXE (uppercase) + task Running → ours", true, 12345, true, "MCPHUB.EXE", "svchost.exe", "Running", nil, true},
-		{"MCPHub.exe (mixed) + task Running → ours", true, 12345, true, "MCPHub.exe", "svchost.exe", "Running", nil, true},
+		{"mcphub.exe + task Running → ours (stdio-bridge / native-http external)", true, 12345, true, "mcphub.exe", "svchost.exe", "Running", current, nil, true},
+		{"MCPHUB.EXE (uppercase) + task Running → ours", true, 12345, true, "MCPHUB.EXE", "svchost.exe", "Running", current, nil, true},
+		{"MCPHub.exe (mixed) + task Running → ours", true, 12345, true, "MCPHub.exe", "svchost.exe", "Running", current, nil, true},
 
 		// Happy paths: parent image matches (native-http internal port,
 		// upstream child spawned by mcphub.exe).
-		{"python.exe child of mcphub.exe + task Running → ours (native-http internal)", true, 12345, true, "python.exe", "mcphub.exe", "Running", nil, true},
-		{"node.exe child of MCPHUB.EXE (case insensitive parent) → ours", true, 12345, true, "node.exe", "MCPHUB.EXE", "Running", nil, true},
-		{"empty image + parent mcphub.exe → ours (parent saves it)", true, 12345, true, "", "mcphub.exe", "Running", nil, true},
+		{"python.exe child of mcphub.exe + task Running → ours (native-http internal)", true, 12345, true, "python.exe", "mcphub.exe", "Running", current, nil, true},
+		{"node.exe child of MCPHUB.EXE (case insensitive parent) → ours", true, 12345, true, "node.exe", "MCPHUB.EXE", "Running", current, nil, true},
+		{"empty image + parent mcphub.exe → ours (parent saves it)", true, 12345, true, "", "mcphub.exe", "Running", current, nil, true},
 
 		// Foreign image AND foreign parent → real collision. This is
 		// the bot r1 P1 scenario: a stale orphan or attacker process
 		// holds the port while our same-named task is also Running.
-		{"foreign python.exe (no mcphub parent) + task Running → NOT ours", true, 12345, true, "python.exe", "explorer.exe", "Running", nil, false},
-		{"foreign notepad.exe (no mcphub parent) + task Running → NOT ours", true, 12345, true, "notepad.exe", "cmd.exe", "Running", nil, false},
-		{"foreign python.exe + empty parent → NOT ours", true, 12345, true, "python.exe", "", "Running", nil, false},
+		{"foreign python.exe (no mcphub parent) + task Running → NOT ours", true, 12345, true, "python.exe", "explorer.exe", "Running", current, nil, false},
+		{"foreign notepad.exe (no mcphub parent) + task Running → NOT ours", true, 12345, true, "notepad.exe", "cmd.exe", "Running", current, nil, false},
+		{"foreign python.exe + empty parent → NOT ours", true, 12345, true, "python.exe", "", "Running", current, nil, false},
 
 		// Identity lookup itself fails → fail-closed.
-		{"identity lookup fails → fail-closed (not ours)", true, 12345, false, "", "", "Running", nil, false},
-		{"empty image AND empty parent → fail-closed (not ours)", true, 12345, true, "", "", "Running", nil, false},
+		{"identity lookup fails → fail-closed (not ours)", true, 12345, false, "", "", "Running", current, nil, false},
+		{"empty image AND empty parent → fail-closed (not ours)", true, 12345, true, "", "", "Running", current, nil, false},
 
 		// Scheduler-state gate (image + parent both match, but task
 		// not running → still not ours, e.g. orphan after task disabled).
-		{"mcphub.exe + task Ready (not Running) → not ours", true, 12345, true, "mcphub.exe", "svchost.exe", "Ready", nil, false},
-		{"mcphub.exe + task Disabled → not ours", true, 12345, true, "mcphub.exe", "svchost.exe", "Disabled", nil, false},
-		{"mcphub.exe + task-not-found → not ours (foreign owner)", true, 12345, true, "mcphub.exe", "svchost.exe", "", scheduler.ErrTaskNotFound, false},
+		{"mcphub.exe + task Ready (not Running) → not ours", true, 12345, true, "mcphub.exe", "svchost.exe", "Ready", current, nil, false},
+		{"mcphub.exe + task Disabled → not ours", true, 12345, true, "mcphub.exe", "svchost.exe", "Disabled", current, nil, false},
+		{"mcphub.exe + task-not-found → not ours (foreign owner)", true, 12345, true, "mcphub.exe", "svchost.exe", "", current, scheduler.ErrTaskNotFound, false},
+		{"mcphub.exe + task Running owned by other user → not ours", true, 12345, true, "mcphub.exe", "svchost.exe", "Running", "ATTACKER\\mallory", nil, false},
 
 		// Port lookup gate.
-		{"port-to-PID lookup fails → not ours", false, 0, true, "mcphub.exe", "svchost.exe", "Running", nil, false},
-		{"port-to-PID returns 0 → not ours", true, 0, true, "mcphub.exe", "svchost.exe", "Running", nil, false},
+		{"port-to-PID lookup fails → not ours", false, 0, true, "mcphub.exe", "svchost.exe", "Running", current, nil, false},
+		{"port-to-PID returns 0 → not ours", true, 0, true, "mcphub.exe", "svchost.exe", "Running", current, nil, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -77,7 +84,7 @@ func TestPortHeldByOurDaemon(t *testing.T) {
 				return tc.image, tc.parentImage, tc.identOK
 			}
 			schedulerStatusForOwnPort = func(taskName string) (scheduler.TaskStatus, error) {
-				return scheduler.TaskStatus{Name: taskName, State: tc.schState}, tc.schErr
+				return scheduler.TaskStatus{Name: taskName, State: tc.schState, Owner: tc.schOwner}, tc.schErr
 			}
 			got := portHeldByOurDaemon(9129, "gdb", "default")
 			if got != tc.want {
