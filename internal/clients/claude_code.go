@@ -202,6 +202,16 @@ func (c *claudeCode) RestoreEntryFromBackup(backupPath, name string) error {
 	return c.writeJSON(liveMap)
 }
 
+// AllStdioEntries returns every stdio entry from mcpServers.
+func (c *claudeCode) AllStdioEntries() ([]StdioEntry, error) {
+	m, err := c.readJSON()
+	if err != nil {
+		return nil, err
+	}
+	servers, _ := m["mcpServers"].(map[string]any)
+	return collectStdioEntries(servers), nil
+}
+
 // FindStdioLanguageServerEntries scans mcpServers for stdio entries
 // matching the mcp-language-server invocation pattern.
 func (c *claudeCode) FindStdioLanguageServerEntries() ([]LanguageServerStdioEntry, error) {

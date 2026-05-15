@@ -5,10 +5,12 @@ import (
 	"io"
 	"os/exec"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/process"
 )
 
@@ -301,6 +303,192 @@ type CleanupOpts struct {
 	MinAgeSec   int64  // don't kill processes younger than this (default 60)
 	DryRun      bool   // if true, just report
 	Server      string // empty = all servers; otherwise only that one
+
+	// ScanClientConfigs (A6): when true, CleanupOrphans extracts
+	// additional cmdline patterns from every installed MCP client's
+	// stdio entries (codex / claude / cursor / vscode / gemini / qwen /
+	// antigravity) via Client.AllStdioEntries. Used to detect orphan
+	// stdio MCP servers whose spawning client has died (typical after
+	// `mcphub language-server cleanup` or `mcphub migrate` followed by
+	// a client crash) — the child node.exe / python.exe / etc. lives
+	// on, re-parented to explorer.exe or svchost.
+	//
+	// Pair this with the known-client-launcher allowlist (built-in)
+	// so LIVE stdio children of currently-running clients are NOT
+	// killed by mistake.
+	ScanClientConfigs bool
+}
+
+// knownClientLauncherBasenames is the allowlist of "this process
+// looks like an MCP client we recognize" exe basenames. A running
+// stdio MCP child whose ancestor chain contains ANY of these is
+// considered LIVE-managed (the spawning client is still running)
+// and is excluded from cleanup. Cross-platform basename match
+// (forward + back slashes), case-insensitive, ".exe" stripped.
+//
+// Entries are deliberately exe basenames (not paths) so portable
+// launchers (Squirrel.Update-style relocations, user-renamed
+// installs to non-default dirs, code-name vs. ship-name binaries)
+// still match. Each entry is documented with the user-facing
+// product it represents.
+var knownClientLauncherBasenames = []string{
+	// Anthropic Claude — Claude Code CLI and Claude desktop app.
+	"claude",
+	// OpenAI / Codex CLI.
+	"codex",
+	// Google Gemini CLI.
+	"gemini",
+	// Alibaba Qwen CLI.
+	"qwen",
+	// Cursor IDE.
+	"cursor",
+	// VS Code (Code.exe is the shipped binary name) and forks.
+	"code",
+	// Google Antigravity (Gemini-CLI fork inside the Cascade IDE).
+	"cascade",
+	"antigravity",
+}
+
+// isKnownClientLauncher reports whether cmdline's first-token
+// basename matches one of the recognized MCP-client launcher exes.
+// Used by parseOrphans to skip processes whose ancestor chain
+// contains a live client process — those are LIVE-managed stdio
+// children, NOT orphans, and killing them would disrupt the user's
+// current agent session.
+//
+// Returns false for empty / unrecognized cmdlines. Case-insensitive
+// basename match across both Windows and POSIX separators, ".exe"
+// stripped. Shares firstTokenBasename with isOurOwnProcess so a
+// path with embedded spaces like
+// `C:\Program Files\Cursor\Cursor.exe` correctly resolves to
+// "cursor".
+func isKnownClientLauncher(cmdline string) bool {
+	base := strings.ToLower(firstTokenBasename(cmdline))
+	base = strings.TrimSuffix(base, ".exe")
+	return slices.Contains(knownClientLauncherBasenames, base)
+}
+
+// patternsFromClientStdio extracts cmdline patterns from every
+// installed MCP client's live stdio entries. Returned patterns
+// feed CleanupOrphans's reverse-lookup mode when
+// CleanupOpts.ScanClientConfigs is true.
+//
+// Per stdio entry, the helper emits up to two patterns:
+//
+//  1. command basename (case-insensitive, .exe stripped, both
+//     separators normalized) — IF that basename is not a broad
+//     launcher token (node, python, npx, ...). The basename is the
+//     most discriminating signal because most MCP server packages
+//     ship a unique binary like `mcp-server-time` /
+//     `mcp-language-server`.
+//
+//  2. each positional arg of length ≥ 4 that does NOT start with
+//     `-`. The length floor drops short flag aliases like `-v`,
+//     `-p`; the leading-dash skip drops long flags like `--lsp`
+//     (the FLAG itself is shared across many entries; only the
+//     VALUE following it is discriminating, but we emit values as
+//     separate args in their own right when they meet the length
+//     floor).
+//
+// Patterns are deduplicated so a multi-language setup with N
+// `mcp-language-server --lsp <X>` entries contributes one
+// `mcp-language-server` pattern, not N.
+//
+// Adapter read failures are best-effort: one broken client config
+// does not block cleanup. The adapter pipeline already returns
+// (nil, nil) when the config file does not exist (host without
+// that client installed), so no per-client gating is required
+// here.
+func patternsFromClientStdio() []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(p string) {
+		if p == "" {
+			return
+		}
+		if seen[p] {
+			return
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	for _, c := range clients.AllClients() {
+		if !c.Exists() {
+			continue
+		}
+		entries, err := c.AllStdioEntries()
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			base := stripExtension(basenameAcrossSeparators(e.Command))
+			if base != "" && !isBroadLauncherToken(base) {
+				add(base)
+			}
+			for _, arg := range e.Args {
+				if len(arg) < 4 {
+					continue
+				}
+				if strings.HasPrefix(arg, "-") {
+					continue
+				}
+				if isAllDigits(arg) {
+					// Numeric-only args (ports, PIDs) are
+					// non-discriminating and would
+					// substring-match unrelated processes
+					// that happen to mention the same
+					// number. Skip them.
+					continue
+				}
+				add(arg)
+			}
+		}
+	}
+	return out
+}
+
+// isAllDigits reports whether s is non-empty and contains only
+// ASCII digits 0-9. Used to drop numeric-only args (ports, PIDs,
+// timeouts) from the pattern set — they pass the length floor but
+// would substring-match unrelated processes that mention the same
+// number.
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// basenameAcrossSeparators returns the trailing path component of p
+// folding both `\` and `/` separators. Mirrors the helper in
+// internal/clients/clients.go; duplicated here to keep
+// internal/api/cleanup.go from importing internal/clients just for
+// one trivial string helper (and to keep the dependency cycle
+// shallow: clients does not import api).
+func basenameAcrossSeparators(p string) string {
+	p = strings.ReplaceAll(p, "\\", "/")
+	if i := strings.LastIndex(p, "/"); i >= 0 {
+		return p[i+1:]
+	}
+	return p
+}
+
+// stripExtension drops a recognized Windows exe extension from the
+// tail of name, case-insensitively. Returns name unchanged when no
+// match.
+func stripExtension(name string) string {
+	low := strings.ToLower(name)
+	for _, ext := range []string{".exe", ".cmd", ".bat", ".ps1"} {
+		if rest, ok := strings.CutSuffix(low, ext); ok {
+			return name[:len(rest)]
+		}
+	}
+	return name
 }
 
 // CleanupOrphans finds MCP server processes that match a manifest's command
@@ -350,6 +538,16 @@ func (a *API) CleanupOrphans(opts CleanupOpts) ([]OrphanProcess, error) {
 			}
 			allPatterns = append(allPatterns, p)
 		}
+	}
+	// A6: when --scan-clients is set, fold in patterns derived from
+	// every installed client's live stdio entries. Reverse-lookup
+	// catches MCP-server children whose spawning client has died and
+	// whose process tree has been re-parented to explorer.exe /
+	// svchost.exe — the manifest-pattern path alone would miss those
+	// because user-added stdio entries are not represented in the
+	// shipped manifests.
+	if opts.ScanClientConfigs {
+		allPatterns = append(allPatterns, patternsFromClientStdio()...)
 	}
 	orphans := parseOrphans(strings.NewReader(string(out)), allPatterns)
 
@@ -517,13 +715,26 @@ func parseOrphans(r io.Reader, patterns []string) []OrphanProcess {
 		if !matched {
 			continue
 		}
-		// Is any ANCESTOR one of our own daemons? Walk the parent chain
-		// up to a bounded depth (16 levels is well beyond anything real).
-		// Single-level check misses uvx/npx/node sub-processes that wrap
-		// the actual server — e.g. mcphub.exe daemon → uv → python →
-		// server.py forms a 4-deep chain where python's direct parent is
-		// uv, not our daemon. Walking the chain means every descendant
-		// of a live `mcphub.exe daemon` is correctly excluded.
+		// Is any ANCESTOR one of our own daemons OR a known MCP client
+		// launcher? Walk the parent chain up to a bounded depth (16
+		// levels is well beyond anything real). Single-level check
+		// misses uvx/npx/node sub-processes that wrap the actual
+		// server — e.g. mcphub.exe daemon → uv → python → server.py
+		// forms a 4-deep chain where python's direct parent is uv,
+		// not our daemon. Walking the chain means every descendant of
+		// either a live `mcphub.exe daemon` OR a live client process
+		// (claude / codex / gemini / cursor / vscode / antigravity /
+		// qwen) is correctly excluded from cleanup.
+		//
+		// Why the client-launcher check: --scan-clients mode (A6)
+		// expands the pattern set with cmdline shapes derived from
+		// every installed client's stdio entries. Without the
+		// client-launcher allowlist, a node.exe spawned by a
+		// currently-running claude.exe (with a still-active stdio
+		// config entry) would be matched by a pattern and killed,
+		// breaking the user's live agent session. The walk treats
+		// any ancestor at a recognized client basename as proof the
+		// stdio child is LIVE-managed, not an orphan.
 		ourDescendant := false
 		for cur, depth := r.ppid, 0; depth < 16; depth++ {
 			parent, ok := byPID[cur]
@@ -536,13 +747,17 @@ func parseOrphans(r io.Reader, patterns []string) []OrphanProcess {
 				ourDescendant = true
 				break
 			}
+			if isKnownClientLauncher(pcmd) {
+				ourDescendant = true
+				break
+			}
 			if parent.ppid == 0 || parent.ppid == cur {
 				break // reached the root or a self-loop
 			}
 			cur = parent.ppid
 		}
 		if ourDescendant {
-			continue // NOT orphan — descendant of our daemon
+			continue // NOT orphan — descendant of our daemon or a live client
 		}
 		age := int64(0)
 		if !r.created.IsZero() {

@@ -10,7 +10,7 @@ import (
 )
 
 func newCleanupCmdReal() *cobra.Command {
-	var dryRun, confirm bool
+	var dryRun, confirm, scanClients bool
 	var server string
 	var minAge int64
 	c := &cobra.Command{
@@ -27,21 +27,36 @@ Safety guards (to avoid false-positives like killing Dropbox):
   - Our own binaries (mcphub/godbolt/lldb-bridge/perftools) are always excluded
   - Processes whose ancestor chain contains 'mcphub.exe daemon' are excluded
     (walks up to 16 levels, catches uv/npx/python sub-processes)
+  - With --scan-clients (A6): processes whose ancestor chain contains a known
+    MCP client launcher (claude / codex / gemini / cursor / code /
+    antigravity / cascade / qwen) are ALSO excluded — those are LIVE-managed
+    stdio children of currently-running clients, not orphans.
   - Generic interpreter substrings (python, node, npx) are NOT used as match
     patterns — they'd false-match Dropbox/VS Code/MSYS2 shell processes
   - Min-age filter skips processes younger than 60s (they may be legitimate
     in-flight installs)
+
+--scan-clients (A6):
+  Extracts additional cmdline patterns from every installed MCP client's
+  live stdio entries (codex / claude / cursor / vscode / gemini / qwen /
+  antigravity). Reverse-lookup detects orphan stdio MCP servers whose
+  spawning client has died — typical after 'mcphub language-server cleanup'
+  or 'mcphub migrate' followed by an IDE restart. The child node.exe /
+  python.exe / mcp-language-server.exe lives on, re-parented to
+  explorer.exe or svchost, until manually killed.
 
 Examples:
   mcphub cleanup --dry-run              # safe preview (default)
   mcphub cleanup --confirm              # actually kill
   mcphub cleanup --server serena        # limit to one server's patterns
   mcphub cleanup --min-age-sec 300      # stricter: ignore <5min processes
+  mcphub cleanup --scan-clients         # include client-config-derived patterns
+  mcphub cleanup --scan-clients --confirm   # actually kill A6 orphans
 
 Pair with 'stop --all' for a nuclear reset:
   mcphub stop --all && mcphub cleanup --confirm
 
-See also: stop, restart, status.`,
+See also: stop, restart, status, language-server cleanup.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !confirm && !dryRun {
 				return errors.New("refusing to kill without --confirm (remove --dry-run=false or pass --confirm)")
@@ -51,10 +66,11 @@ See also: stop, restart, status.`,
 			}
 			a := api.NewAPI()
 			orphans, err := a.CleanupOrphans(api.CleanupOpts{
-				ManifestDir: scanManifestDir(),
-				Server:      server,
-				DryRun:      dryRun,
-				MinAgeSec:   minAge,
+				ManifestDir:       scanManifestDir(),
+				Server:            server,
+				DryRun:            dryRun,
+				MinAgeSec:         minAge,
+				ScanClientConfigs: scanClients,
 			})
 			if err != nil {
 				return err
@@ -98,6 +114,8 @@ See also: stop, restart, status.`,
 	c.Flags().BoolVar(&confirm, "confirm", false, "actually kill the orphans (required for kill mode)")
 	c.Flags().StringVar(&server, "server", "", "limit scan to this server's pattern (default: all manifests)")
 	c.Flags().Int64Var(&minAge, "min-age-sec", 60, "ignore processes younger than this (seconds)")
+	c.Flags().BoolVar(&scanClients, "scan-clients", false,
+		"A6: extract additional cmdline patterns from every installed client's stdio entries (reverse-lookup orphan detection)")
 	return c
 }
 

@@ -112,6 +112,26 @@ type Client interface {
 	// (_, err) only for I/O or parse errors.
 	BackupContainsEntry(backupPath, name string) (bool, error)
 
+	// AllStdioEntries returns every stdio MCP server entry currently
+	// present in this client's config — that is, every entry where the
+	// adapter's format-specific shape contains a non-empty `command`
+	// field (and therefore corresponds to a stdio-spawned subprocess).
+	// HTTP-only entries (no `command`, just `url`) are skipped.
+	//
+	// Used by `mcphub cleanup --scan-clients` (A6) to extract cmdline
+	// patterns for reverse-lookup orphan detection: a running process
+	// whose cmdline matches one of these (command, args) signatures
+	// but whose ancestor chain contains neither a live mcphub daemon
+	// nor a known client launcher process is treated as a leaked
+	// stdio child (typically: the spawning client exited or the entry
+	// was migrated to HTTP and the user has not restarted the client
+	// yet).
+	//
+	// Returns nil with nil error when the config does not exist or has
+	// no stdio entries. Read/parse failures propagate so callers can
+	// distinguish "no entries" from "config broken".
+	AllStdioEntries() ([]StdioEntry, error)
+
 	// FindStdioLanguageServerEntries scans the client's config for
 	// stdio entries that look like mcp-language-server invocations and
 	// returns them. Used by `mcphub language-server cleanup` to
@@ -134,6 +154,66 @@ type Client interface {
 	// such entries exist; returns an error only on read/parse
 	// failure. Idempotent: re-running after cleanup returns nil.
 	FindStdioLanguageServerEntries() ([]LanguageServerStdioEntry, error)
+}
+
+// StdioEntry is the format-agnostic shape of one stdio MCP server
+// entry surfaced by AllStdioEntries. Name is the entry key in the
+// client config; Command is the raw `command` value; Args is the
+// raw `args` slice (string elements only — non-string members of
+// the parsed JSON/TOML array are dropped because they cannot
+// participate in cmdline-substring matching).
+type StdioEntry struct {
+	Name    string
+	Command string
+	Args    []string
+}
+
+// collectStdioEntries iterates servers (a parsed client-config map
+// from any adapter's format) and returns every entry with a
+// non-empty `command` field as a StdioEntry. HTTP entries (no
+// `command`, has `url`) are skipped. Stable sort by Name keeps CLI
+// output and test fixtures deterministic.
+func collectStdioEntries(servers map[string]any) []StdioEntry {
+	if len(servers) == 0 {
+		return nil
+	}
+	var out []StdioEntry
+	for name, raw := range servers {
+		entryMap, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		cmd, _ := entryMap["command"].(string)
+		if cmd == "" {
+			continue
+		}
+		args := extractStringSlice(entryMap["args"])
+		out = append(out, StdioEntry{
+			Name:    name,
+			Command: cmd,
+			Args:    args,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// extractStringSlice returns the string members of a parsed JSON
+// or TOML array, in original order. Non-string elements are
+// dropped (e.g. numbers, booleans, nested objects). nil/non-list
+// input returns nil.
+func extractStringSlice(raw any) []string {
+	list, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(list))
+	for _, a := range list {
+		if s, ok := a.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // LanguageServerStdioEntry describes one stdio mcp-language-server

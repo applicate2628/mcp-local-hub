@@ -186,6 +186,18 @@ func (v *vscodeClient) RestoreEntryFromBackup(backupPath, name string) error {
 	return v.writeJSON(liveMap)
 }
 
+// AllStdioEntries returns every stdio entry from VS Code's
+// top-level `servers` key (different from the JSON family's
+// `mcpServers`).
+func (v *vscodeClient) AllStdioEntries() ([]StdioEntry, error) {
+	m, err := v.readJSON()
+	if err != nil {
+		return nil, err
+	}
+	servers, _ := m["servers"].(map[string]any)
+	return collectStdioEntries(servers), nil
+}
+
 // FindStdioLanguageServerEntries scans `servers` for stdio entries
 // matching the mcp-language-server invocation pattern. VS Code uses
 // the top-level `servers` key (NOT `mcpServers`) and supports stdio
