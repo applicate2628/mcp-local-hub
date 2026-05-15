@@ -224,6 +224,104 @@ func TestSecureWriteWithOperatorOpt_RelaxLaneEmitsWarnAuditLog(t *testing.T) {
 	}
 }
 
+// TestSecureWriteWithOperatorOpt_StrictBeatsLegacyAllow_DeterministicGateFailure
+// pins codex deep-sec r3 P2: the existing StrictBeatsLegacyAllow
+// test in client_write_init_test.go relies on the ambient
+// `t.TempDir()` failing the parent-dir gate. If a hardened CI
+// runner uses a 0700 / non-Authenticated-Users temp dir, the
+// existing test silently t.Skip()s before the no-write assertion.
+//
+// This Windows-only variant synthesizes a known-rejected parent
+// via synthesizeDirWithAuthUsersReadACE, so the strict-mode no-
+// write assertion ALWAYS runs.
+func TestSecureWriteWithOperatorOpt_StrictBeatsLegacyAllow_DeterministicGateFailure(t *testing.T) {
+	t.Setenv(RequireSingleUserHomeEnv, "1")      // strict
+	t.Setenv(AllowUnhardenedClientWriteEnv, "1") // legacy opt-in
+
+	parent := filepath.Join(t.TempDir(), "leaky-parent")
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatalf("mkdir parent: %v", err)
+	}
+	synthesizeDirWithAuthUsersReadACE(t, parent)
+
+	dst := filepath.Join(parent, "client-config.json")
+	err := secureWriteWithOperatorOpt(dst, []byte(`{"servers":{}}`))
+	if err == nil {
+		t.Fatalf("strict-mode must reject permissive synthesized parent; got nil")
+	}
+	if !strings.Contains(err.Error(), RequireSingleUserHomeEnv) {
+		t.Errorf("error must mention %q (strict wins); got %v", RequireSingleUserHomeEnv, err)
+	}
+	// Codex deep-sec r3 P2 contract: strict path MUST NOT leak a
+	// fallback write on its way out.
+	if _, statErr := os.Stat(dst); !os.IsNotExist(statErr) {
+		t.Errorf("strict-mode rejection leaked a write at %s (stat err = %v)", dst, statErr)
+	}
+}
+
+// TestSecureWriteClientConfigSkipParentGate_WritesThroughRejectedParent
+// pins codex deep-sec r3 P3: the skip-parent-gate impl is covered
+// indirectly through secureWriteWithOperatorOpt only. A direct test
+// against secureWriteClientConfigSkipParentGate verifies its own
+// contract — writes through a parent that the strict path rejects,
+// produces a file with the restrictive DACL.
+//
+// This locks the contract: someone refactoring
+// secureWriteWithOperatorOpt cannot accidentally bypass the
+// skip-gate writer without breaking THIS test.
+func TestSecureWriteClientConfigSkipParentGate_WritesThroughRejectedParent(t *testing.T) {
+	parent := filepath.Join(t.TempDir(), "leaky-parent")
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatalf("mkdir parent: %v", err)
+	}
+	synthesizeDirWithAuthUsersReadACE(t, parent)
+
+	// Confirm the strict path rejects this parent (sanity check on
+	// the fixture — if synthesize ever drifts to a gate-passing DACL
+	// this assertion catches it).
+	strictDst := filepath.Join(parent, "strict-target.json")
+	if err := SecureWriteClientConfig(strictDst, []byte(`{}`)); err == nil {
+		t.Fatalf("test fixture invalid: SecureWriteClientConfig accepted parent %s", parent)
+	}
+
+	// Skip-gate path writes through.
+	dst := filepath.Join(parent, "client-config.json")
+	want := []byte(`{"token":"secret"}`)
+	if err := secureWriteClientConfigSkipParentGate(dst, want); err != nil {
+		t.Fatalf("skip-gate write through synthesized parent: %v", err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("read written file: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("written contents = %q, want %q", got, want)
+	}
+
+	// Open the file and assert its DACL — same security boundary as
+	// the strict pipeline produces.
+	pathW, err := windows.UTF16PtrFromString(dst)
+	if err != nil {
+		t.Fatalf("UTF16PtrFromString: %v", err)
+	}
+	h, err := windows.CreateFile(
+		pathW,
+		windows.READ_CONTROL,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_ATTRIBUTE_NORMAL,
+		0,
+	)
+	if err != nil {
+		t.Fatalf("CreateFile on written file: %v", err)
+	}
+	defer windows.CloseHandle(h)
+	if err := verifyWindowsDACLFromHandle(h); err != nil {
+		t.Errorf("skip-gate write left file with non-allowlisted DACL: %v", err)
+	}
+}
+
 // TestSecureWriteWithOperatorOpt_LegacyOptInEmitsWarnAuditLogWithDistinctReason
 // pins that the legacy MCPHUB_ALLOW_UNHARDENED_CLIENT_WRITE=1
 // branch emits the SAME warn event but with a "legacy opt-in"

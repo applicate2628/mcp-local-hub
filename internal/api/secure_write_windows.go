@@ -19,17 +19,33 @@
 //     parent-dir DACL check is THE confidentiality boundary"). Without
 //     this gate, an enterprise GPO that broadens %USERPROFILE% to
 //     Domain Users would silently leak tokens to every domain user.
+//     SKIPPED when skipParentGate=true (relax lane — see step 3a/4).
 //  3. crypto/rand 8-byte hex tempName = ".<base>.tmp.<pid>.<hex>".
+//  3a. Build restrictive PROTECTED SECURITY_DESCRIPTOR (current-user,
+//     LocalSystem, BuiltinAdministrators all granted GENERIC_ALL;
+//     SE_DACL_PROTECTED set so inherited parent ACEs do not apply).
+//     PR #185 r4 codex-deep-sec P1 closure: this SD is passed to
+//     step 4 via OBJECT_ATTRIBUTES.SecurityDescriptor so the file
+//     is BORN with the restrictive DACL. Pre-r4 the DACL was
+//     installed via SetSecurityInfo AFTER NtCreateFile returned,
+//     leaving a small window during which the temp file briefly
+//     carried the parent's inherited DACL — a co-resident principal
+//     allowed by the parent could open the file in that window and
+//     keep the handle past the DACL tighten. ACL changes do not
+//     revoke existing handles on Windows. Creation-time SD closes
+//     that window.
 //  4. NtCreateFile relative to dirHandle (RootDirectory=dirHandle,
 //     ObjectName=tempName, FILE_CREATE disposition, FILE_GENERIC_WRITE
-//     | DELETE | SYNCHRONIZE | WRITE_DAC desired access). DELETE is
+//     | DELETE | SYNCHRONIZE | WRITE_DAC desired access,
+//     OBJECT_ATTRIBUTES.SecurityDescriptor=step-3a SD). DELETE is
 //     mandatory because the rename in step 7 requires it; WRITE_DAC
-//     enables step 5's SetSecurityInfo.
+//     enables step 5's defense-in-depth SetSecurityInfo.
 //  5. SetSecurityInfo(fileHandle, DACL_SECURITY_INFORMATION |
 //     PROTECTED_DACL_SECURITY_INFORMATION, ..., restrictiveDACL) —
-//     restrictive DACL = ALLOW current-user | LocalSystem |
-//     BuiltinAdministrators with GENERIC_ALL. Done on the HANDLE
-//     before any bytes hit disk.
+//     defense-in-depth re-apply of the restrictive DACL on the open
+//     handle. Primary protection is step 3a's create-time SD; this
+//     step re-asserts the PROTECTED flag and would catch a future
+//     regression that drops the create-time SD parameter.
 //  6. WriteFile + FlushFileBuffers.
 //  7. NtSetInformationFile(fileHandle, FileRenameInformationEx,
 //     { Flags: REPLACE_IF_EXISTS|POSIX_SEMANTICS,
@@ -165,15 +181,36 @@ func secureWriteClientConfigImpl(path string, contents []byte, skipParentGate bo
 	}
 	tempName := fmt.Sprintf(".%s.tmp.%d.%s", base, os.Getpid(), hex.EncodeToString(randBytes))
 
+	// 3a. Build restrictive PROTECTED security descriptor BEFORE temp
+	//     creation so step 4 can pass it via OBJECT_ATTRIBUTES.
+	//     SecurityDescriptor. This is the codex-deep-sec r3 P1 closure
+	//     (PR #185 r4): the previous r2/r3 path created the temp file
+	//     first and applied the DACL afterward via SetSecurityInfo —
+	//     leaving a race window during which a parent-allowed
+	//     principal could open the file (it briefly carried the
+	//     parent's inherited DACL) and retain the handle past the
+	//     DACL tighten. ACL changes do not revoke existing handles
+	//     on Windows. Passing the SD at create time means the file
+	//     is BORN with the restrictive DACL — zero window.
+	sd, err := buildRestrictiveSecurityDescriptor()
+	if err != nil {
+		return fmt.Errorf("secure write: build SD: %w", err)
+	}
+
 	// 4. NtCreateFile relative to dirHandle (FILE_CREATE disposition;
 	//    fails if the temp slot already exists). DELETE | WRITE_DAC |
-	//    FILE_GENERIC_WRITE | SYNCHRONIZE desired access.
+	//    FILE_GENERIC_WRITE | SYNCHRONIZE desired access. The SD
+	//    passed via OBJECT_ATTRIBUTES.SecurityDescriptor takes effect
+	//    at the moment the kernel creates the object — restrictive
+	//    DACL is present in the file's security descriptor before any
+	//    other process can open it.
 	fileHandle, err := ntCreateRelative(
 		dirHandle,
 		tempName,
 		windows.DELETE|windows.GENERIC_WRITE|windows.SYNCHRONIZE|windows.WRITE_DAC,
 		windows.FILE_CREATE,
 		windows.FILE_NON_DIRECTORY_FILE|windows.FILE_SYNCHRONOUS_IO_NONALERT,
+		sd,
 	)
 	if err != nil {
 		return fmt.Errorf("secure write: ntcreate temp %s: %w", tempName, err)
@@ -192,9 +229,18 @@ func secureWriteClientConfigImpl(path string, contents []byte, skipParentGate bo
 		_ = setFileDeleteOnClose(fileHandle)
 	}
 
-	// 5. SetSecurityInfo handle-bound — restrictive DACL applied
-	//    BEFORE any bytes hit disk. PROTECTED_DACL prevents inherited
-	//    ACEs from re-broadening access between rename and re-verify.
+	// 5. SetSecurityInfo handle-bound — defense-in-depth re-apply of
+	//    the restrictive DACL. Step 3a's create-time SD already covers
+	//    the primary security boundary (file born with restrictive
+	//    DACL, no pre-write open window). This step exists to:
+	//    (a) re-assert PROTECTED_DACL_SECURITY_INFORMATION via the
+	//        handle in case the create-time path took a different
+	//        kernel route for the protected flag,
+	//    (b) keep behavior symmetric with the old strict-only sequence
+	//        so downstream tests asserting DACL state-on-handle keep
+	//        passing,
+	//    (c) catch a hypothetical future regression that drops the
+	//        create-time SD parameter without removing this step.
 	if err := setRestrictiveDACL(fileHandle); err != nil {
 		cleanup()
 		return fmt.Errorf("secure write: set DACL: %w", err)
@@ -287,21 +333,33 @@ func openDirHandleNoReparse(path string) (windows.Handle, error) {
 // ObjectName is the relative path; ShareAccess is full r/w/d so the
 // post-rename re-open at step 8 succeeds even if AV scanners hold
 // transient handles.
+//
+// securityDescriptor is optional. When non-nil it is attached via
+// OBJECT_ATTRIBUTES.SecurityDescriptor so the file is BORN with that
+// security descriptor (no pre-DACL race window). Callers opening
+// existing files (FILE_OPEN disposition via ntOpenRelative) pass
+// nil — the existing file's SD is preserved. Callers creating new
+// files for token-bearing writes pass a restrictive SD (see
+// buildRestrictiveSecurityDescriptor) so the temp file's DACL is
+// in place at byte zero rather than installed afterward via
+// SetSecurityInfo. PR #185 r4 codex-deep-sec P1 closure.
 func ntCreateRelative(
 	dirHandle windows.Handle,
 	name string,
 	desiredAccess uint32,
 	disposition uint32,
 	createOptions uint32,
+	securityDescriptor *windows.SECURITY_DESCRIPTOR,
 ) (windows.Handle, error) {
 	objectName, err := windows.NewNTUnicodeString(name)
 	if err != nil {
 		return windows.InvalidHandle, fmt.Errorf("nt unicode %q: %w", name, err)
 	}
 	oa := &windows.OBJECT_ATTRIBUTES{
-		ObjectName:    objectName,
-		RootDirectory: dirHandle,
-		Attributes:    windows.OBJ_CASE_INSENSITIVE,
+		ObjectName:         objectName,
+		RootDirectory:      dirHandle,
+		Attributes:         windows.OBJ_CASE_INSENSITIVE,
+		SecurityDescriptor: securityDescriptor,
 	}
 	oa.Length = uint32(unsafe.Sizeof(*oa))
 	var iosb windows.IO_STATUS_BLOCK
@@ -348,12 +406,15 @@ func ntOpenRelative(
 	name string,
 	desiredAccess uint32,
 ) (windows.Handle, error) {
+	// Opening an existing file — pass nil SD so the existing security
+	// descriptor on disk is preserved.
 	return ntCreateRelative(
 		dirHandle,
 		name,
 		desiredAccess|windows.SYNCHRONIZE,
 		windows.FILE_OPEN,
 		windows.FILE_NON_DIRECTORY_FILE|windows.FILE_SYNCHRONOUS_IO_NONALERT|windows.FILE_OPEN_REPARSE_POINT,
+		nil,
 	)
 }
 
@@ -434,16 +495,48 @@ func setRestrictiveDACL(fileHandle windows.Handle) error {
 	)
 }
 
-// buildRestrictiveDACL constructs the {current-user, LocalSystem,
-// BuiltinAdministrators}-only DACL used by setRestrictiveDACL.
+// buildRestrictiveSecurityDescriptor wraps the restrictive DACL into
+// a SECURITY_DESCRIPTOR with PROTECTED_DACL set, suitable for passing
+// via OBJECT_ATTRIBUTES.SecurityDescriptor at file-create time. PR
+// #185 r4 codex-deep-sec P1 closure: the previous r3 path installed
+// the DACL after NtCreateFile returned, leaving a window during
+// which a parent-allowed principal could open the file and retain
+// the handle past the DACL tighten. Building the SD here and passing
+// it at create time means the file is born with the restrictive
+// DACL — no window.
 //
-// PR #185 r3 (codex deep-sec P1 closure): the previous path-based
-// variant setRestrictiveDACLByPath has been removed. The relax lane
-// no longer needs a path-based DACL setter because it now re-runs
-// the SAME handle-relative hardened pipeline (with parent-dir gate
-// bypassed) — the file handle is opened with WRITE_DAC at create
-// time and the DACL is set on the handle BEFORE any bytes hit disk,
-// closing the race window the path-based setter left open.
+// The PROTECTED bit (SE_DACL_PROTECTED) blocks inheritance from the
+// parent dir's ACEs, so even if the parent has Authenticated Users
+// or similar inheritable read ACEs, they do NOT propagate to this
+// file.
+func buildRestrictiveSecurityDescriptor() (*windows.SECURITY_DESCRIPTOR, error) {
+	dacl, err := buildRestrictiveDACL()
+	if err != nil {
+		return nil, err
+	}
+	sd, err := windows.NewSecurityDescriptor()
+	if err != nil {
+		return nil, fmt.Errorf("new security descriptor: %w", err)
+	}
+	// present=true, defaulted=false — explicit DACL, not the system
+	// default. NewSecurityDescriptor returns an absolute SD by
+	// default; SetDACL operates on that form.
+	if err := sd.SetDACL(dacl, true, false); err != nil {
+		return nil, fmt.Errorf("set DACL on security descriptor: %w", err)
+	}
+	// SE_DACL_PROTECTED prevents inherited ACEs from the parent dir
+	// from re-broadening access on the new file. Matches the
+	// PROTECTED_DACL_SECURITY_INFORMATION flag in step 5's
+	// SetSecurityInfo defense-in-depth re-apply.
+	if err := sd.SetControl(windows.SE_DACL_PROTECTED, windows.SE_DACL_PROTECTED); err != nil {
+		return nil, fmt.Errorf("set PROTECTED control: %w", err)
+	}
+	return sd, nil
+}
+
+// buildRestrictiveDACL constructs the {current-user, LocalSystem,
+// BuiltinAdministrators}-only DACL used by setRestrictiveDACL and
+// buildRestrictiveSecurityDescriptor.
 func buildRestrictiveDACL() (*windows.ACL, error) {
 	currentSID, err := currentUserSID()
 	if err != nil {
