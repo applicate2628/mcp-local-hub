@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/buildinfo"
 	"mcp-local-hub/internal/config"
 
 	"github.com/spf13/cobra"
@@ -660,6 +661,77 @@ func runInstallUpgrade(cmd *cobra.Command) error {
 			target, curExe)
 	}
 
+	// 1b. Dev-build guard (PR #188 / A8 closure): refuse to copy a
+	// source binary that was built without the build scripts'
+	// ldflags (`-X main.version=...` + `-H windowsgui` on Windows).
+	// Such a binary shows `version=dev / commit=unknown` from
+	// `mcphub version` and on Windows is a CONSOLE-subsystem
+	// executable that spawns visible terminals for every Scheduler-
+	// invoked daemon. The 2026-05-15 user session caught exactly
+	// this: a plain `go build ./cmd/mcphub` had replaced the
+	// canonical .local/bin/mcphub.exe, terminals flashed on every
+	// daemon spawn, and tray failed to render. The repair was
+	// `bash build.sh && ./bin/mcphub.exe install --upgrade` —
+	// which this guard now enforces preemptively. Operators who
+	// need to test an in-progress build path use `mcphub gui`
+	// directly from `./bin/mcphub.exe` (running it in place); the
+	// `install --upgrade` flow is for promoting a BUILT binary to
+	// the canonical install location, so it should be picky.
+	version := upgradeBuildVersion()
+	if version == "dev" || version == "" {
+		return fmt.Errorf(
+			"refusing to --upgrade from a dev-build binary at %s: "+
+				"current executable was built without the build scripts' ldflags "+
+				"(version=%q, expected a semver like \"0.4.0\"). "+
+				"On Windows this binary is also CONSOLE-subsystem (no `-H windowsgui` "+
+				"linker flag), which would cause terminal flashes on every "+
+				"Scheduler-invoked daemon and prevent the tray icon from rendering. "+
+				"Recovery: rebuild via `bash build.sh` (or `pwsh build.ps1`), then "+
+				"run `./bin/mcphub.exe install --upgrade` from the build directory.",
+			curExe, version)
+	}
+
+	// 1c. Running-GUI guard (PR #188 / A8 closure): detect a
+	// running `mcphub.exe gui` process whose image path equals
+	// `target` and refuse with a clear stop-the-GUI hint. The
+	// previous flow stopped daemons via StopAll but did NOT
+	// touch the GUI — if a GUI was running on the canonical
+	// install path, Bootstrap (step 3) would then fail with
+	// "target in use" because the GUI holds an open handle on
+	// the file. The 2026-05-15 smoke session walked into this
+	// exactly: upgrade had to be re-run after manually killing
+	// the GUI. Surface it as a refusal BEFORE StopAll runs so
+	// the operator's daemon fleet stays up — pre-fix, daemons
+	// were stopped and then Bootstrap failed, leaving the
+	// fleet down until a manual recovery.
+	//
+	// Identity match: cmdline starts with the target path (so
+	// daemons spawned from the same binary but from a build
+	// dir don't false-trigger) AND argv[1] equals "gui" (or
+	// argv has length 1 — the Explorer-double-click entry path
+	// per cmd/mcphub/main.go shouldAutoLaunchGUI).
+	guiProcs, guiErr := findRunningGUIsOnTarget(a, target)
+	if guiErr != nil {
+		// Best-effort: a wmic failure must not block the
+		// upgrade — fall through and let Bootstrap surface the
+		// "target in use" error if a GUI was actually running.
+		fmt.Fprintf(errOut, "⚠ GUI detection failed (best-effort): %v\n", guiErr)
+	} else if len(guiProcs) > 0 {
+		pids := make([]string, 0, len(guiProcs))
+		for _, p := range guiProcs {
+			pids = append(pids, fmt.Sprintf("%d", p.PID))
+		}
+		return fmt.Errorf(
+			"refusing to --upgrade with a running mcphub GUI on the target path %s "+
+				"(PIDs: %s). The GUI process holds the binary file lock; "+
+				"Bootstrap would fail with `target in use` and leave the "+
+				"daemon fleet down (StopAll runs before Bootstrap). "+
+				"Recovery: stop the GUI (tray menu → Quit, or "+
+				"`Stop-Process -Id <PID> -Force` in PowerShell), then "+
+				"rerun `./mcphub install --upgrade`",
+			target, strings.Join(pids, ", "))
+	}
+
 	// 2. Stop all daemons (release the binary lock).
 	fmt.Fprintln(out, "Stopping running daemons...")
 	stopResults, err := upgradeStopAll(a)
@@ -716,6 +788,115 @@ func runInstallUpgrade(cmd *cobra.Command) error {
 			failed)
 	}
 	return nil
+}
+
+// findRunningGUIsOnTargetFn is the production seam for
+// findRunningGUIsOnTarget; tests stub it to return a fixed slice
+// instead of probing the live OS. nil = use real wmic-backed
+// enumeration via api.ListMatchingProcesses.
+var findRunningGUIsOnTargetFn func(target string) ([]api.ProcessInfo, error)
+
+// upgradeBuildVersionFn is the production seam for the dev-build
+// guard. Tests stub it to return a valid semver so the guard does
+// NOT fire from `go test` (which inherits version="dev" from the
+// non-ldflag'd test build). nil = consult buildinfo.Get().
+var upgradeBuildVersionFn func() string
+
+// upgradeBuildVersion routes through the test seam if set, else
+// returns the buildinfo-store version. Centralized here so the guard
+// in runInstallUpgrade has a single call site to mock.
+func upgradeBuildVersion() string {
+	if upgradeBuildVersionFn != nil {
+		return upgradeBuildVersionFn()
+	}
+	v, _, _ := buildinfo.Get()
+	return v
+}
+
+// findRunningGUIsOnTarget enumerates running mcphub.exe processes
+// whose image path equals `target` AND whose first non-image argv
+// element is "gui" (or no args at all — Explorer-double-click
+// entry path per cmd/mcphub/main.go shouldAutoLaunchGUI).
+//
+// Returns ([], nil) on POSIX (the GUI lives only on Windows
+// builds; the install --upgrade flow on POSIX is mostly a
+// developer path).
+//
+// Tests can stub findRunningGUIsOnTargetFn to bypass wmic.
+func findRunningGUIsOnTarget(a *api.API, target string) ([]api.ProcessInfo, error) {
+	if findRunningGUIsOnTargetFn != nil {
+		return findRunningGUIsOnTargetFn(target)
+	}
+	procs, err := a.ListMatchingProcesses([]string{"mcphub.exe"})
+	if err != nil {
+		return nil, err
+	}
+	var matched []api.ProcessInfo
+	for _, p := range procs {
+		if !cmdlineIsGUIOnTarget(p.Cmdline, target) {
+			continue
+		}
+		matched = append(matched, p)
+	}
+	return matched, nil
+}
+
+// cmdlineIsGUIOnTarget reports whether a wmic CommandLine string
+// represents a `mcphub.exe gui` invocation whose image path equals
+// target. Windows quotes paths with spaces; an Explorer-double-
+// click invocation has no argv past the image path.
+//
+// Accepts BOTH absolute-path forms:
+//
+//	"C:\Users\...\mcphub.exe" gui --no-browser
+//	C:\Users\...\mcphub.exe gui --no-browser
+//	"C:\Users\...\mcphub.exe"               (Explorer-launched)
+//	C:\Users\...\mcphub.exe                 (Explorer-launched)
+//
+// Rejects daemon invocations (`mcphub.exe daemon --server ...`)
+// and same-binary-different-path matches (e.g., a build-dir
+// mcphub.exe running through a script).
+//
+// Path comparison is case-insensitive on Windows (NTFS default).
+func cmdlineIsGUIOnTarget(cmdline, target string) bool {
+	cmdline = strings.TrimSpace(cmdline)
+	if cmdline == "" {
+		return false
+	}
+	var imagePath, rest string
+	if strings.HasPrefix(cmdline, `"`) {
+		// Quoted path form: "<image>" <rest>
+		closeIdx := strings.Index(cmdline[1:], `"`)
+		if closeIdx < 0 {
+			return false
+		}
+		imagePath = cmdline[1 : 1+closeIdx]
+		rest = strings.TrimSpace(cmdline[1+closeIdx+1:])
+	} else {
+		// Unquoted: first whitespace separates image from args.
+		spaceIdx := strings.IndexAny(cmdline, " \t")
+		if spaceIdx < 0 {
+			imagePath = cmdline
+		} else {
+			imagePath = cmdline[:spaceIdx]
+			rest = strings.TrimSpace(cmdline[spaceIdx:])
+		}
+	}
+	if !strings.EqualFold(imagePath, target) {
+		return false
+	}
+	// Explorer-double-click → no args. Per cmd/mcphub/main.go
+	// shouldAutoLaunchGUI, that path also lands in gui mode.
+	if rest == "" {
+		return true
+	}
+	// Otherwise first token must be `gui` (exact). Reject daemon /
+	// watchdog / tray / etc.
+	firstArg := rest
+	if spaceIdx := strings.IndexAny(rest, " \t"); spaceIdx >= 0 {
+		firstArg = rest[:spaceIdx]
+	}
+	return firstArg == "gui"
 }
 
 // resolveUpgradeSelfPaths returns (current executable, canonical

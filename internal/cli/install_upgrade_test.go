@@ -27,18 +27,30 @@ func resetUpgradeSeams(t *testing.T) {
 	origRestart := upgradeRestartAllFn
 	origExec := upgradeExecutableFn
 	origTarget := upgradeTargetPathFn
+	origFindGUI := findRunningGUIsOnTargetFn
+	origVersion := upgradeBuildVersionFn
 	t.Cleanup(func() {
 		upgradeStopAllFn = origStop
 		upgradeBootstrapFn = origBoot
 		upgradeRestartAllFn = origRestart
 		upgradeExecutableFn = origExec
 		upgradeTargetPathFn = origTarget
+		findRunningGUIsOnTargetFn = origFindGUI
+		upgradeBuildVersionFn = origVersion
 	})
 	upgradeStopAllFn = nil
 	upgradeBootstrapFn = nil
 	upgradeRestartAllFn = nil
 	upgradeExecutableFn = nil
 	upgradeTargetPathFn = nil
+	// Default the dev-build guard seam to a valid semver so existing
+	// tests don't trip the PR #188 A8 closure (which refuses
+	// version=="dev"). Tests that want to exercise the guard
+	// override this seam explicitly.
+	upgradeBuildVersionFn = func() string { return "0.4.1-test" }
+	// Default GUI detection to "no running GUIs" — tests that want
+	// to exercise the running-GUI guard override this seam.
+	findRunningGUIsOnTargetFn = func(target string) ([]api.ProcessInfo, error) { return nil, nil }
 }
 
 // stubCmd makes a cobra.Command with captured stdout+stderr so tests
@@ -429,6 +441,192 @@ func TestRunInstallUpgrade_ExecutableLookupError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "/proc/self/exe") {
 		t.Errorf("error should preserve underlying message; got %v", err)
+	}
+}
+
+// TestRunInstallUpgrade_RefusesDevBuild pins the PR #188 A8 closure
+// (dev-build guard). A binary built without the build scripts'
+// ldflags shows version=="dev" and on Windows is CONSOLE-subsystem —
+// installing it would re-introduce the terminal-flash + tray-broken
+// regression caught in the 2026-05-15 smoke session. The guard runs
+// AFTER self-replace check (so a self-replace error wins) but
+// BEFORE StopAll (so daemons aren't stopped uselessly).
+func TestRunInstallUpgrade_RefusesDevBuild(t *testing.T) {
+	resetUpgradeSeams(t)
+
+	upgradeExecutableFn = func() (string, error) { return "C:\\dev\\mcphub.exe", nil }
+	upgradeTargetPathFn = func() (string, error) { return "C:\\Users\\u\\.local\\bin\\mcphub.exe", nil }
+	upgradeBuildVersionFn = func() string { return "dev" }
+	stopCalled := false
+	upgradeStopAllFn = func() ([]api.RestartResult, error) {
+		stopCalled = true
+		return nil, nil
+	}
+
+	cmd, _, _ := stubCmd()
+	err := runInstallUpgrade(cmd)
+	if err == nil {
+		t.Fatal("want dev-build refusal, got nil")
+	}
+	for _, want := range []string{
+		"refusing to --upgrade from a dev-build binary",
+		`version="dev"`,
+		"build.sh",
+		"CONSOLE-subsystem",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error must contain %q for operator clarity; got %q", want, err.Error())
+		}
+	}
+	if stopCalled {
+		t.Errorf("StopAll must NOT be called when dev-build guard fires; would stop daemons for no reason")
+	}
+}
+
+// TestRunInstallUpgrade_RefusesIfGUIRunning pins the running-GUI
+// guard: if a `mcphub.exe gui` process is found whose image path
+// equals the install target, --upgrade refuses BEFORE StopAll runs.
+// This prevents the 2026-05-15 footgun where StopAll succeeded but
+// Bootstrap then failed with "target in use", leaving the daemon
+// fleet down.
+func TestRunInstallUpgrade_RefusesIfGUIRunning(t *testing.T) {
+	resetUpgradeSeams(t)
+
+	upgradeExecutableFn = func() (string, error) { return "C:\\dev\\mcphub.exe", nil }
+	upgradeTargetPathFn = func() (string, error) { return "C:\\Users\\u\\.local\\bin\\mcphub.exe", nil }
+	findRunningGUIsOnTargetFn = func(target string) ([]api.ProcessInfo, error) {
+		return []api.ProcessInfo{
+			{PID: 12345, Cmdline: `"C:\Users\u\.local\bin\mcphub.exe" gui --no-browser`},
+		}, nil
+	}
+	stopCalled := false
+	upgradeStopAllFn = func() ([]api.RestartResult, error) {
+		stopCalled = true
+		return nil, nil
+	}
+
+	cmd, _, _ := stubCmd()
+	err := runInstallUpgrade(cmd)
+	if err == nil {
+		t.Fatal("want running-GUI refusal, got nil")
+	}
+	for _, want := range []string{
+		"refusing to --upgrade with a running mcphub GUI",
+		"12345",
+		"Stop-Process",
+		"tray menu",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error must contain %q; got %q", want, err.Error())
+		}
+	}
+	if stopCalled {
+		t.Errorf("StopAll must NOT be called when GUI is running; would leave daemons down on Bootstrap failure")
+	}
+}
+
+// TestRunInstallUpgrade_GUIDetectionErrorIsBestEffort pins that a
+// wmic failure during GUI detection does NOT abort the upgrade —
+// the detection is informational, and Bootstrap itself will still
+// catch a real "target in use" if the GUI is actually running. A
+// wmic outage on a hardened CI/locked-down host should not block
+// the upgrade flow.
+func TestRunInstallUpgrade_GUIDetectionErrorIsBestEffort(t *testing.T) {
+	resetUpgradeSeams(t)
+
+	upgradeExecutableFn = func() (string, error) { return "C:\\dev\\mcphub.exe", nil }
+	upgradeTargetPathFn = func() (string, error) { return "C:\\Users\\u\\.local\\bin\\mcphub.exe", nil }
+	findRunningGUIsOnTargetFn = func(target string) ([]api.ProcessInfo, error) {
+		return nil, errors.New("wmic: process not found")
+	}
+	stopCalled := false
+	upgradeStopAllFn = func() ([]api.RestartResult, error) {
+		stopCalled = true
+		return nil, nil
+	}
+	upgradeBootstrapFn = func(w io.Writer) error { return nil }
+	upgradeRestartAllFn = func() ([]api.RestartResult, error) { return nil, nil }
+
+	cmd, _, stderr := stubCmd()
+	if err := runInstallUpgrade(cmd); err != nil {
+		t.Fatalf("upgrade should proceed despite GUI detection error: %v", err)
+	}
+	if !stopCalled {
+		t.Errorf("StopAll should still run when GUI detection fails (best-effort)")
+	}
+	if !strings.Contains(stderr.String(), "GUI detection failed") {
+		t.Errorf("stderr should warn about GUI detection failure; got %q", stderr.String())
+	}
+}
+
+// TestCmdlineIsGUIOnTarget pins the helper that parses wmic
+// CommandLine strings into (image, args) and matches against the
+// install target.
+func TestCmdlineIsGUIOnTarget(t *testing.T) {
+	target := `C:\Users\u\.local\bin\mcphub.exe`
+	cases := []struct {
+		name    string
+		cmdline string
+		want    bool
+	}{
+		{
+			"quoted path with gui arg",
+			`"C:\Users\u\.local\bin\mcphub.exe" gui --no-browser`,
+			true,
+		},
+		{
+			"unquoted path with gui arg",
+			`C:\Users\u\.local\bin\mcphub.exe gui`,
+			true,
+		},
+		{
+			"Explorer launch — no args",
+			`"C:\Users\u\.local\bin\mcphub.exe"`,
+			true,
+		},
+		{
+			"case-insensitive path match",
+			`"C:\users\U\.local\bin\MCPHUB.EXE" gui`,
+			true,
+		},
+		{
+			"daemon process — reject",
+			`"C:\Users\u\.local\bin\mcphub.exe" daemon --server time --daemon default`,
+			false,
+		},
+		{
+			"watchdog process — reject",
+			`"C:\Users\u\.local\bin\mcphub.exe" watchdog --once`,
+			false,
+		},
+		{
+			"tray child process — reject",
+			`C:\Users\u\.local\bin\mcphub.exe tray`,
+			false,
+		},
+		{
+			"different path — reject",
+			`"D:\dev\mcp-local-hub\bin\mcphub.exe" gui`,
+			false,
+		},
+		{
+			"empty cmdline — reject",
+			``,
+			false,
+		},
+		{
+			"malformed unterminated quote — reject",
+			`"C:\Users\u\.local\bin\mcphub.exe gui`,
+			false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := cmdlineIsGUIOnTarget(tc.cmdline, target)
+			if got != tc.want {
+				t.Errorf("cmdlineIsGUIOnTarget(%q, %q) = %v; want %v", tc.cmdline, target, got, tc.want)
+			}
+		})
 	}
 }
 
