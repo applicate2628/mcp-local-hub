@@ -26,9 +26,11 @@ func TestIsLanguageServerBinary(t *testing.T) {
 		{"mcp-language-server", true, "bare basename"},
 		{"mcp-language-server.exe", true, ".exe stripped"},
 		{"MCP-Language-Server.EXE", true, "case-insensitive"},
-		{`C:\Users\u\.local\bin\mcp-language-server.exe`, true, "Windows absolute path"},
+		{`C:\Users\u\.local\bin\mcp-language-server.exe`, true, "Windows absolute path (matches on every OS via basenameAcrossSeparators)"},
+		{`D:\Tools\mcp-language-server`, true, "Windows path no extension"},
 		{"/usr/local/bin/mcp-language-server", true, "POSIX absolute path"},
 		{"./mcp-language-server", true, "relative path"},
+		{`.\bin\mcp-language-server.exe`, true, "Windows relative path"},
 		{"clangd", false, "different binary"},
 		{"mcp-language-server-clangd", false, "hub-managed name not the binary"},
 		{"mcp-language-server-helper", false, "suffix not bare match"},
@@ -96,13 +98,30 @@ func TestMatchLanguageServerStdio(t *testing.T) {
 			wantLang: "pylsp",
 		},
 		{
-			name: "no --lsp arg still matches command-only",
+			name: "no --lsp arg rejected (codex bot r1 P1.2: command-only must NOT match)",
 			entry: map[string]any{
 				"command": "mcp-language-server",
 				"args":    []any{"--help"},
 			},
+			wantOk: false,
+		},
+		{
+			name: "command match + --lsp= form matches",
+			entry: map[string]any{
+				"command": "mcp-language-server",
+				"args":    []any{"--lsp=rust"},
+			},
 			wantOk:   true,
-			wantLang: "",
+			wantLang: "rust",
+		},
+		{
+			name: "Windows-style command path matches on every OS",
+			entry: map[string]any{
+				"command": `C:\Users\u\.local\bin\mcp-language-server.exe`,
+				"args":    []any{"--lsp", "clangd"},
+			},
+			wantOk:   true,
+			wantLang: "clangd",
 		},
 		{
 			name: "different binary name rejected",
@@ -159,6 +178,13 @@ func TestFindLanguageServerStdioInMap_SortedStable(t *testing.T) {
 		"hub-managed": map[string]any{
 			"url":  "http://localhost:9200/mcp",
 			"type": "http",
+		},
+		"experimental-no-lsp": map[string]any{
+			// Codex bot r1 P1.2: command matches the LSP binary
+			// but there is no --lsp arg, so cleanup must NOT
+			// touch this entry (operator-experimental config).
+			"command": "mcp-language-server",
+			"args":    []any{"--debug"},
 		},
 	}
 	got := findLanguageServerStdioInMap(servers)

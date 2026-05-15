@@ -151,16 +151,25 @@ type LanguageServerStdioEntry struct {
 
 // matchLanguageServerStdio classifies one parsed entry map as a stdio
 // mcp-language-server invocation. Returns the raw command string, the
-// extracted language (if --lsp <X> or --lsp=X is present), and ok=true
-// when the entry matches; ("", "", false) otherwise. The matcher does
-// not look at the entry's name (callers may have chosen any key); only
-// the command/args content is load-bearing.
+// extracted language (always non-empty when ok=true), and ok=true
+// only when BOTH:
+//   - the command basename matches the LSP binary (case-insensitive,
+//     .exe stripped, separator-agnostic), AND
+//   - the args list declares "--lsp <X>" or "--lsp=X".
+//
+// Refusing matches without an explicit --lsp arg keeps cleanup from
+// deleting standalone or experimental `mcp-language-server` entries
+// that operators may have configured for purposes other than
+// language-routed LSP (codex bot r1 P1.2).
 func matchLanguageServerStdio(raw map[string]any) (cmd, language string, ok bool) {
 	cmd, _ = raw["command"].(string)
 	if !isLanguageServerBinary(cmd) {
 		return "", "", false
 	}
 	language = extractLspLanguageArg(raw["args"])
+	if language == "" {
+		return "", "", false
+	}
 	return cmd, language, true
 }
 
@@ -169,13 +178,35 @@ func matchLanguageServerStdio(raw map[string]any) (cmd, language string, ok bool
 // Empty string never matches. Used to keep the matcher specific to
 // the well-known LSP binary and avoid catching unrelated stdio MCP
 // servers the user may have named "clangd" / "fortran" / etc.
+//
+// Path separators are normalized via basenameAcrossSeparators so a
+// Windows-style absolute path like `C:\Users\u\.local\bin\mcp-
+// language-server.exe` matches on POSIX hosts too. Cross-environment
+// configs (e.g. WSL pointing at a shared Windows dotfile) and
+// regression tests on Linux CI both depend on that normalization
+// (codex bot r1 P1.1).
 func isLanguageServerBinary(cmd string) bool {
 	if cmd == "" {
 		return false
 	}
-	base := strings.ToLower(filepath.Base(cmd))
+	base := strings.ToLower(basenameAcrossSeparators(cmd))
 	base = strings.TrimSuffix(base, ".exe")
 	return base == "mcp-language-server"
+}
+
+// basenameAcrossSeparators returns the trailing path component of p
+// regardless of separator. filepath.Base recognizes only the host
+// OS's separator, so a Windows path on POSIX (or vice versa) is
+// returned verbatim as one segment. This helper folds backslashes to
+// forward slashes first, then takes the substring after the last
+// slash. Empty string returns empty; trailing separators collapse to
+// "".
+func basenameAcrossSeparators(p string) string {
+	p = strings.ReplaceAll(p, "\\", "/")
+	if i := strings.LastIndex(p, "/"); i >= 0 {
+		return p[i+1:]
+	}
+	return p
 }
 
 // extractLspLanguageArg scans the args slice for "--lsp <X>" (two-
