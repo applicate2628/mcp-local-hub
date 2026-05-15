@@ -138,27 +138,73 @@ type ProcessInfo struct {
 	Cmdline  string
 }
 
+// runMatchingProcessesSnapshot returns the wmic-shape CSV that
+// ListMatchingProcesses parses (Node,CommandLine,ProcessId,
+// WorkingSetSize). On Windows 11 24H2+ wmic.exe may be absent
+// entirely (Microsoft is removing the legacy WMIC tool); fall
+// back to a PowerShell Get-CimInstance probe that emits the same
+// 4-column CSV shape so the downstream parser does not need a
+// second path. Bot r1 P1 closure on PR #188: pre-fix, the
+// install-upgrade GUI preflight relied on ListMatchingProcesses
+// which only used wmic — on wmic-removed hosts, detection silently
+// returned an error, the preflight degraded to "no GUI found",
+// StopAll then succeeded, and Bootstrap finally failed with
+// "target in use" leaving daemons down (exactly the regression A8
+// was added to prevent).
+func runMatchingProcessesSnapshot() ([]byte, error) {
+	wmicCmd := exec.Command("wmic", "process", "get",
+		"CommandLine,ProcessId,WorkingSetSize", "/format:csv")
+	process.NoConsole(wmicCmd)
+	if out, err := wmicCmd.Output(); err == nil {
+		return out, nil
+	} else {
+		// PS fallback below. Hold wmic error in case PS also fails.
+		const psScript = `Get-CimInstance Win32_Process | ForEach-Object {
+			$cmdline = if ($_.CommandLine) { ($_.CommandLine -replace '"', '""') } else { '' }
+			[string]::Format('HOST,"{0}",{1},{2}', $cmdline, $_.ProcessId, $_.WorkingSetSize)
+		}`
+		psCmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
+		process.NoConsole(psCmd)
+		psOut, psErr := psCmd.Output()
+		if psErr != nil {
+			return nil, fmt.Errorf("both wmic and PowerShell process listing failed: wmic=%v; powershell=%v", err, psErr)
+		}
+		header := "Node,CommandLine,ProcessId,WorkingSetSize\n"
+		return append([]byte(header), psOut...), nil
+	}
+}
+
 // ListMatchingProcesses returns full process info for every process whose
 // CommandLine contains at least one of the given substring patterns.
-// Windows-only (wmic); returns nil on other platforms.
+// Pattern matching is CASE-INSENSITIVE (codex bot r3 P2 closure on
+// PR #188: Windows preserves user-typed casing in cmdline strings,
+// so an explorer launch like `MCPHUB.EXE gui` would be missed by a
+// case-sensitive `"mcphub.exe"` prefilter — that miss would let
+// install --upgrade proceed to StopAll, then Bootstrap fails with
+// "target in use" leaving daemons down).
+// Windows-only; returns nil on other platforms.
 func (a *API) ListMatchingProcesses(patterns []string) ([]ProcessInfo, error) {
 	if runtime.GOOS != "windows" {
 		return nil, nil
 	}
-	cmd := exec.Command("wmic", "process", "get", "CommandLine,ProcessId,WorkingSetSize", "/format:csv")
-	process.NoConsole(cmd)
-	out, err := cmd.Output()
+	out, err := runMatchingProcessesSnapshot()
 	if err != nil {
-		return nil, fmt.Errorf("wmic: %w", err)
+		return nil, err
+	}
+	// Pre-lowercase patterns once so the per-line match is cheap.
+	lowerPatterns := make([]string, 0, len(patterns))
+	for _, p := range patterns {
+		lowerPatterns = append(lowerPatterns, strings.ToLower(p))
 	}
 	var results []ProcessInfo
 	s := bufio.NewScanner(strings.NewReader(string(out)))
 	s.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for s.Scan() {
 		line := s.Text()
+		lineLower := strings.ToLower(line)
 		matched := false
-		for _, p := range patterns {
-			if strings.Contains(line, p) {
+		for _, p := range lowerPatterns {
+			if strings.Contains(lineLower, p) {
 				matched = true
 				break
 			}

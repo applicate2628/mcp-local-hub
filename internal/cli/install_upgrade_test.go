@@ -27,18 +27,30 @@ func resetUpgradeSeams(t *testing.T) {
 	origRestart := upgradeRestartAllFn
 	origExec := upgradeExecutableFn
 	origTarget := upgradeTargetPathFn
+	origFindGUI := findRunningGUIsOnTargetFn
+	origVersion := upgradeBuildVersionFn
 	t.Cleanup(func() {
 		upgradeStopAllFn = origStop
 		upgradeBootstrapFn = origBoot
 		upgradeRestartAllFn = origRestart
 		upgradeExecutableFn = origExec
 		upgradeTargetPathFn = origTarget
+		findRunningGUIsOnTargetFn = origFindGUI
+		upgradeBuildVersionFn = origVersion
 	})
 	upgradeStopAllFn = nil
 	upgradeBootstrapFn = nil
 	upgradeRestartAllFn = nil
 	upgradeExecutableFn = nil
 	upgradeTargetPathFn = nil
+	// Default the dev-build guard seam to a valid semver so existing
+	// tests don't trip the PR #188 A8 closure (which refuses
+	// version=="dev"). Tests that want to exercise the guard
+	// override this seam explicitly.
+	upgradeBuildVersionFn = func() string { return "0.4.1-test" }
+	// Default GUI detection to "no running GUIs" — tests that want
+	// to exercise the running-GUI guard override this seam.
+	findRunningGUIsOnTargetFn = func(target string) ([]api.ProcessInfo, error) { return nil, nil }
 }
 
 // stubCmd makes a cobra.Command with captured stdout+stderr so tests
@@ -429,6 +441,419 @@ func TestRunInstallUpgrade_ExecutableLookupError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "/proc/self/exe") {
 		t.Errorf("error should preserve underlying message; got %v", err)
+	}
+}
+
+// TestRunInstallUpgrade_RefusesDevBuild pins the PR #188 A8 closure
+// (dev-build guard). A binary built without the build scripts'
+// ldflags shows version=="dev" and on Windows is CONSOLE-subsystem —
+// installing it would re-introduce the terminal-flash + tray-broken
+// regression caught in the 2026-05-15 smoke session. The guard runs
+// AFTER self-replace check (so a self-replace error wins) but
+// BEFORE StopAll (so daemons aren't stopped uselessly).
+//
+// Codex bot r5 P2 closure: scoped to Windows only. The CONSOLE-
+// subsystem regression is Windows-specific, and POSIX devs commonly
+// run untagged `go build` binaries. Test is gated on
+// runtime.GOOS == "windows"; on POSIX the same setup proceeds to
+// happy-path execution (TestRunInstallUpgrade_AllowsDevBuildOnPOSIX
+// pins that path).
+func TestRunInstallUpgrade_RefusesDevBuild(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("dev-build refusal is Windows-only; see TestRunInstallUpgrade_AllowsDevBuildOnPOSIX for the POSIX path")
+	}
+	resetUpgradeSeams(t)
+
+	upgradeExecutableFn = func() (string, error) { return "C:\\dev\\mcphub.exe", nil }
+	upgradeTargetPathFn = func() (string, error) { return "C:\\Users\\u\\.local\\bin\\mcphub.exe", nil }
+	upgradeBuildVersionFn = func() string { return "dev" }
+	stopCalled := false
+	upgradeStopAllFn = func() ([]api.RestartResult, error) {
+		stopCalled = true
+		return nil, nil
+	}
+
+	cmd, _, _ := stubCmd()
+	err := runInstallUpgrade(cmd)
+	if err == nil {
+		t.Fatal("want dev-build refusal, got nil")
+	}
+	for _, want := range []string{
+		"refusing to --upgrade from a dev-build binary",
+		`version="dev"`,
+		"build.sh",
+		"CONSOLE-subsystem",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error must contain %q for operator clarity; got %q", want, err.Error())
+		}
+	}
+	if stopCalled {
+		t.Errorf("StopAll must NOT be called when dev-build guard fires; would stop daemons for no reason")
+	}
+}
+
+// TestRunInstallUpgrade_AllowsDevBuildOnPOSIX pins codex bot r5 P2:
+// the dev-build guard is Windows-only because the CONSOLE-subsystem
+// regression doesn't exist on POSIX. A POSIX dev-build (version=="dev")
+// must proceed through the normal flow.
+func TestRunInstallUpgrade_AllowsDevBuildOnPOSIX(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX-only: Windows path is exercised by TestRunInstallUpgrade_RefusesDevBuild")
+	}
+	resetUpgradeSeams(t)
+
+	upgradeExecutableFn = func() (string, error) { return "/home/u/dev/mcphub", nil }
+	upgradeTargetPathFn = func() (string, error) { return "/home/u/.local/bin/mcphub", nil }
+	upgradeBuildVersionFn = func() string { return "dev" }
+	bootstrapCalled := false
+	upgradeStopAllFn = func() ([]api.RestartResult, error) { return nil, nil }
+	upgradeBootstrapFn = func(w io.Writer) error { bootstrapCalled = true; return nil }
+	upgradeRestartAllFn = func() ([]api.RestartResult, error) { return nil, nil }
+
+	cmd, _, _ := stubCmd()
+	if err := runInstallUpgrade(cmd); err != nil {
+		t.Fatalf("POSIX dev-build should proceed: %v", err)
+	}
+	if !bootstrapCalled {
+		t.Errorf("Bootstrap should run on POSIX dev-build path")
+	}
+}
+
+// TestRunInstallUpgrade_RefusesIfGUIRunning pins the running-GUI
+// guard: if a `mcphub.exe gui` process is found whose image path
+// equals the install target, --upgrade refuses BEFORE StopAll runs.
+// This prevents the 2026-05-15 footgun where StopAll succeeded but
+// Bootstrap then failed with "target in use", leaving the daemon
+// fleet down.
+func TestRunInstallUpgrade_RefusesIfGUIRunning(t *testing.T) {
+	resetUpgradeSeams(t)
+
+	upgradeExecutableFn = func() (string, error) { return "C:\\dev\\mcphub.exe", nil }
+	upgradeTargetPathFn = func() (string, error) { return "C:\\Users\\u\\.local\\bin\\mcphub.exe", nil }
+	findRunningGUIsOnTargetFn = func(target string) ([]api.ProcessInfo, error) {
+		return []api.ProcessInfo{
+			{PID: 12345, Cmdline: `"C:\Users\u\.local\bin\mcphub.exe" gui --no-browser`},
+		}, nil
+	}
+	stopCalled := false
+	upgradeStopAllFn = func() ([]api.RestartResult, error) {
+		stopCalled = true
+		return nil, nil
+	}
+
+	cmd, _, _ := stubCmd()
+	err := runInstallUpgrade(cmd)
+	if err == nil {
+		t.Fatal("want running-GUI refusal, got nil")
+	}
+	for _, want := range []string{
+		"refusing to --upgrade with a running mcphub GUI",
+		"12345",
+		"Stop-Process",
+		"tray menu",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error must contain %q; got %q", want, err.Error())
+		}
+	}
+	if stopCalled {
+		t.Errorf("StopAll must NOT be called when GUI is running; would leave daemons down on Bootstrap failure")
+	}
+}
+
+// TestRunInstallUpgrade_GUIDetectionErrorIsBestEffort pins that a
+// wmic failure during GUI detection does NOT abort the upgrade —
+// the detection is informational, and Bootstrap itself will still
+// catch a real "target in use" if the GUI is actually running. A
+// wmic outage on a hardened CI/locked-down host should not block
+// the upgrade flow.
+func TestRunInstallUpgrade_GUIDetectionErrorIsBestEffort(t *testing.T) {
+	resetUpgradeSeams(t)
+
+	upgradeExecutableFn = func() (string, error) { return "C:\\dev\\mcphub.exe", nil }
+	upgradeTargetPathFn = func() (string, error) { return "C:\\Users\\u\\.local\\bin\\mcphub.exe", nil }
+	findRunningGUIsOnTargetFn = func(target string) ([]api.ProcessInfo, error) {
+		return nil, errors.New("wmic: process not found")
+	}
+	stopCalled := false
+	upgradeStopAllFn = func() ([]api.RestartResult, error) {
+		stopCalled = true
+		return nil, nil
+	}
+	upgradeBootstrapFn = func(w io.Writer) error { return nil }
+	upgradeRestartAllFn = func() ([]api.RestartResult, error) { return nil, nil }
+
+	cmd, _, stderr := stubCmd()
+	if err := runInstallUpgrade(cmd); err != nil {
+		t.Fatalf("upgrade should proceed despite GUI detection error: %v", err)
+	}
+	if !stopCalled {
+		t.Errorf("StopAll should still run when GUI detection fails (best-effort)")
+	}
+	if !strings.Contains(stderr.String(), "GUI detection failed") {
+		t.Errorf("stderr should warn about GUI detection failure; got %q", stderr.String())
+	}
+}
+
+// TestCmdlineIsGUIOnTarget pins the helper that parses wmic
+// CommandLine strings into (image, args) and matches against the
+// install target.
+func TestCmdlineIsGUIOnTarget(t *testing.T) {
+	target := `C:\Users\u\.local\bin\mcphub.exe`
+	cases := []struct {
+		name    string
+		cmdline string
+		want    bool
+	}{
+		{
+			"quoted path with gui arg",
+			`"C:\Users\u\.local\bin\mcphub.exe" gui --no-browser`,
+			true,
+		},
+		{
+			"unquoted path with gui arg",
+			`C:\Users\u\.local\bin\mcphub.exe gui`,
+			true,
+		},
+		{
+			"Explorer launch — no args",
+			`"C:\Users\u\.local\bin\mcphub.exe"`,
+			true,
+		},
+		{
+			"case-insensitive path match",
+			`"C:\users\U\.local\bin\MCPHUB.EXE" gui`,
+			true,
+		},
+		{
+			"daemon process — reject",
+			`"C:\Users\u\.local\bin\mcphub.exe" daemon --server time --daemon default`,
+			false,
+		},
+		{
+			"watchdog process — reject",
+			`"C:\Users\u\.local\bin\mcphub.exe" watchdog --once`,
+			false,
+		},
+		{
+			"tray child process — reject",
+			`C:\Users\u\.local\bin\mcphub.exe tray`,
+			false,
+		},
+		{
+			"different path — reject",
+			`"D:\dev\mcp-local-hub\bin\mcphub.exe" gui`,
+			false,
+		},
+		{
+			"empty cmdline — reject",
+			``,
+			false,
+		},
+		{
+			// Edge case: leading quote with no closing quote. PR #188
+			// r2 parser is permissive — strips leading quote, then
+			// matches target as case-insensitive prefix. Matching is
+			// the correct behavior because the cmdline IS targeting
+			// our binary with `gui`. WMIC/PowerShell don't emit
+			// unterminated quotes in practice, so this is a defensive
+			// case rather than a real-world input.
+			"unterminated-quote variant — accept (still targets binary)",
+			`"C:\Users\u\.local\bin\mcphub.exe gui`,
+			true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := cmdlineIsGUIOnTarget(tc.cmdline, target)
+			if got != tc.want {
+				t.Errorf("cmdlineIsGUIOnTarget(%q, %q) = %v; want %v", tc.cmdline, target, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCmdlineIsGUIOnTarget_AliasedPathWithSpaces pins codex bot
+// r7 P1 closure: the SameFile fallback was using a fixed
+// "first whitespace = image boundary" extraction, which mis-cut
+// an aliased path containing spaces (e.g., a junction at
+// `C:\Alias dir\mcphub.exe`). The progressive boundary scan now
+// tries every whitespace position as a candidate image/args
+// split, stopping at the first one where sameFileOrFalse(image,
+// target) returns true.
+func TestCmdlineIsGUIOnTarget_AliasedPathWithSpaces(t *testing.T) {
+	target := `C:\Users\u\.local\bin\mcphub.exe`
+	origSF := sameFileOrFalseFn
+	t.Cleanup(func() { sameFileOrFalseFn = origSF })
+
+	// SameFile returns true only when called with the exact
+	// junction path containing spaces (simulates a junction
+	// alias whose source dir name has a space).
+	const aliasPath = `C:\Alias dir\mcphub.exe`
+	sameFileOrFalseFn = func(path1, _ string) bool {
+		return path1 == aliasPath
+	}
+
+	cmdline := `C:\Alias dir\mcphub.exe gui --no-browser`
+	if !cmdlineIsGUIOnTarget(cmdline, target) {
+		t.Errorf("aliased-path-with-spaces + gui must accept via progressive boundary scan; got false")
+	}
+	// daemon subcommand on same path → reject
+	cmdline = `C:\Alias dir\mcphub.exe daemon --server time`
+	if cmdlineIsGUIOnTarget(cmdline, target) {
+		t.Errorf("aliased-path-with-spaces + daemon must reject; got true")
+	}
+	// Explorer-launch on same alias (no args, alias has spaces)
+	cmdline = `C:\Alias dir\mcphub.exe`
+	if !cmdlineIsGUIOnTarget(cmdline, target) {
+		t.Errorf("aliased-path-with-spaces Explorer-launch must accept; got false")
+	}
+	// alias with 10+ wrong boundaries (cap reached) → reject
+	sameFileOrFalseFn = func(_, _ string) bool { return false }
+	cmdline = `a b c d e f g h i j k l m n o p`
+	if cmdlineIsGUIOnTarget(cmdline, target) {
+		t.Errorf("cmdline with 10+ wrong boundaries + no match must reject; got true")
+	}
+}
+
+// TestCmdlineIsGUIOnTarget_FileIdentityFallback pins codex bot r4
+// P1 closure: the case-insensitive prefix match misses path
+// aliases (8.3 short names, junctions, symlinks) whose strings
+// differ from the canonical target but resolve to the same
+// file. The fallback uses os.SameFile (via the sameFileOrFalseFn
+// test seam here) to catch these cases.
+func TestCmdlineIsGUIOnTarget_FileIdentityFallback(t *testing.T) {
+	target := `C:\Users\u\.local\bin\mcphub.exe`
+	origSF := sameFileOrFalseFn
+	t.Cleanup(func() { sameFileOrFalseFn = origSF })
+
+	// 1. 8.3 short path → prefix match fails, sameFileOrFalse
+	//    returns true → accept (gui arg).
+	sameFileOrFalseFn = func(path1, path2 string) bool { return true }
+	cmdline := `C:\PROGRA~1\PROFIL~1\u\.local\bin\mcphub.exe gui`
+	if !cmdlineIsGUIOnTarget(cmdline, target) {
+		t.Errorf("8.3 short-path alias should match via SameFile fallback; got false")
+	}
+	// 2. Junction path → same SameFile fallback path.
+	cmdline = `C:\junction-link\mcphub.exe gui --no-browser`
+	if !cmdlineIsGUIOnTarget(cmdline, target) {
+		t.Errorf("junction-aliased path should match via SameFile fallback; got false")
+	}
+	// 3. 8.3 short path + daemon arg → reject (not gui subcommand).
+	cmdline = `C:\PROGRA~1\PROFIL~1\u\.local\bin\mcphub.exe daemon --server time`
+	if cmdlineIsGUIOnTarget(cmdline, target) {
+		t.Errorf("8.3 alias + daemon subcommand must reject; got true")
+	}
+	// 4. SameFile returns false → reject. Catches the case where
+	//    an alias resolves to a DIFFERENT binary (e.g., build-dir
+	//    image vs. canonical install).
+	sameFileOrFalseFn = func(path1, path2 string) bool { return false }
+	cmdline = `D:\dev\mcp-local-hub\bin\mcphub.exe gui`
+	if cmdlineIsGUIOnTarget(cmdline, target) {
+		t.Errorf("different image file (SameFile=false) must reject; got true")
+	}
+}
+
+// TestCmdlineIsGUIOnTarget_PathWithSpaces pins codex bot r2 P1
+// closure: splitCSVLine strips quotes from the WMIC/PowerShell
+// CSV cmdline cell. A target path containing spaces — common on
+// Windows profile dirs like `C:\Users\John Doe\.local\bin\` —
+// arrives at cmdlineIsGUIOnTarget WITHOUT quotes, so a naive
+// "first whitespace = image boundary" heuristic would split the
+// image-path mid-string and miss the running GUI.
+//
+// The fixed parser uses case-insensitive prefix match against
+// target instead of a whitespace split, so spaces inside the
+// target path don't confuse it.
+func TestCmdlineIsGUIOnTarget_PathWithSpaces(t *testing.T) {
+	target := `C:\Users\John Doe\.local\bin\mcphub.exe`
+	cases := []struct {
+		name    string
+		cmdline string
+		want    bool
+	}{
+		{
+			"unquoted target with space + gui arg",
+			`C:\Users\John Doe\.local\bin\mcphub.exe gui --no-browser`,
+			true,
+		},
+		{
+			"unquoted target with space + Explorer launch",
+			`C:\Users\John Doe\.local\bin\mcphub.exe`,
+			true,
+		},
+		{
+			"unquoted target with space + daemon arg — reject",
+			`C:\Users\John Doe\.local\bin\mcphub.exe daemon --server time --daemon default`,
+			false,
+		},
+		{
+			"quoted target with space + gui arg",
+			`"C:\Users\John Doe\.local\bin\mcphub.exe" gui --no-browser`,
+			true,
+		},
+		{
+			"case-insensitive target with space",
+			`C:\users\JOHN doe\.LOCAL\bin\MCPHUB.EXE gui`,
+			true,
+		},
+		{
+			"different path with same suffix — reject",
+			`D:\Other Users\John Doe\.local\bin\mcphub.exe gui`,
+			false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := cmdlineIsGUIOnTarget(tc.cmdline, target)
+			if got != tc.want {
+				t.Errorf("cmdlineIsGUIOnTarget(%q, %q) = %v; want %v", tc.cmdline, target, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCmdlineIsGUIOnTarget_UnicodePath pins codex bot r6 P2: the
+// matchTargetPrefix helper must walk strings rune-by-rune (not
+// slice on len(target) after a strings.ToLower roundtrip) because
+// Unicode case-folding can change byte length. Cyrillic / CJK /
+// Turkish profile names appear in real Windows user paths.
+func TestCmdlineIsGUIOnTarget_UnicodePath(t *testing.T) {
+	target := `C:\Users\Дмитрий\.local\bin\mcphub.exe`
+	cases := []struct {
+		name    string
+		cmdline string
+		want    bool
+	}{
+		{
+			"exact-case Cyrillic + gui",
+			`C:\Users\Дмитрий\.local\bin\mcphub.exe gui`,
+			true,
+		},
+		{
+			"case-folded Cyrillic + gui — accept (rune fold)",
+			`C:\users\ДМИТРИЙ\.LOCAL\BIN\MCPHUB.EXE gui --no-browser`,
+			true,
+		},
+		{
+			"Cyrillic + daemon arg — reject",
+			`C:\Users\Дмитрий\.local\bin\mcphub.exe daemon --server time`,
+			false,
+		},
+		{
+			"different Unicode dir — reject",
+			`C:\Users\Иван\.local\bin\mcphub.exe gui`,
+			false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := cmdlineIsGUIOnTarget(tc.cmdline, target)
+			if got != tc.want {
+				t.Errorf("cmdlineIsGUIOnTarget(%q, %q) = %v; want %v", tc.cmdline, target, got, tc.want)
+			}
+		})
 	}
 }
 

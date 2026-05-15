@@ -7,9 +7,13 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/buildinfo"
 	"mcp-local-hub/internal/config"
 
 	"github.com/spf13/cobra"
@@ -660,6 +664,83 @@ func runInstallUpgrade(cmd *cobra.Command) error {
 			target, curExe)
 	}
 
+	// 1b. Dev-build guard (PR #188 / A8 closure): on WINDOWS, refuse
+	// to copy a source binary that was built without the build
+	// scripts' ldflags (`-X main.version=...` + `-H windowsgui`).
+	// Such a binary shows `version=dev / commit=unknown` from
+	// `mcphub version` and is a CONSOLE-subsystem executable that
+	// spawns visible terminals for every Scheduler-invoked daemon.
+	// The 2026-05-15 user session caught exactly this: a plain
+	// `go build ./cmd/mcphub` had replaced the canonical
+	// .local/bin/mcphub.exe, terminals flashed on every daemon
+	// spawn, and tray failed to render. The repair was
+	// `bash build.sh && ./bin/mcphub.exe install --upgrade` —
+	// which this guard now enforces preemptively.
+	//
+	// Codex bot r5 P2 closure: SCOPED to Windows only. On POSIX
+	// the `-H windowsgui` linker flag doesn't exist (no CONSOLE-
+	// subsystem analog), and POSIX devs commonly run untagged
+	// `go build ./cmd/mcphub` binaries for local testing. The
+	// guard's safety property (no CONSOLE-subsystem regression)
+	// is Windows-specific, so refusing dev-builds on POSIX would
+	// block the existing developer path without benefit.
+	if runtime.GOOS == "windows" {
+		version := upgradeBuildVersion()
+		if version == "dev" || version == "" {
+			return fmt.Errorf(
+				"refusing to --upgrade from a dev-build binary at %s: "+
+					"current executable was built without the build scripts' ldflags "+
+					"(version=%q, expected a semver like \"0.4.0\"). "+
+					"On Windows this binary is also CONSOLE-subsystem (no `-H windowsgui` "+
+					"linker flag), which would cause terminal flashes on every "+
+					"Scheduler-invoked daemon and prevent the tray icon from rendering. "+
+					"Recovery: rebuild via `bash build.sh` (or `pwsh build.ps1`), then "+
+					"run `./bin/mcphub.exe install --upgrade` from the build directory.",
+				curExe, version)
+		}
+	}
+
+	// 1c. Running-GUI guard (PR #188 / A8 closure): detect a
+	// running `mcphub.exe gui` process whose image path equals
+	// `target` and refuse with a clear stop-the-GUI hint. The
+	// previous flow stopped daemons via StopAll but did NOT
+	// touch the GUI — if a GUI was running on the canonical
+	// install path, Bootstrap (step 3) would then fail with
+	// "target in use" because the GUI holds an open handle on
+	// the file. The 2026-05-15 smoke session walked into this
+	// exactly: upgrade had to be re-run after manually killing
+	// the GUI. Surface it as a refusal BEFORE StopAll runs so
+	// the operator's daemon fleet stays up — pre-fix, daemons
+	// were stopped and then Bootstrap failed, leaving the
+	// fleet down until a manual recovery.
+	//
+	// Identity match: cmdline starts with the target path (so
+	// daemons spawned from the same binary but from a build
+	// dir don't false-trigger) AND argv[1] equals "gui" (or
+	// argv has length 1 — the Explorer-double-click entry path
+	// per cmd/mcphub/main.go shouldAutoLaunchGUI).
+	guiProcs, guiErr := findRunningGUIsOnTarget(a, target)
+	if guiErr != nil {
+		// Best-effort: a wmic failure must not block the
+		// upgrade — fall through and let Bootstrap surface the
+		// "target in use" error if a GUI was actually running.
+		fmt.Fprintf(errOut, "⚠ GUI detection failed (best-effort): %v\n", guiErr)
+	} else if len(guiProcs) > 0 {
+		pids := make([]string, 0, len(guiProcs))
+		for _, p := range guiProcs {
+			pids = append(pids, fmt.Sprintf("%d", p.PID))
+		}
+		return fmt.Errorf(
+			"refusing to --upgrade with a running mcphub GUI on the target path %s "+
+				"(PIDs: %s). The GUI process holds the binary file lock; "+
+				"Bootstrap would fail with `target in use` and leave the "+
+				"daemon fleet down (StopAll runs before Bootstrap). "+
+				"Recovery: stop the GUI (tray menu → Quit, or "+
+				"`Stop-Process -Id <PID> -Force` in PowerShell), then "+
+				"rerun `./mcphub install --upgrade`",
+			target, strings.Join(pids, ", "))
+	}
+
 	// 2. Stop all daemons (release the binary lock).
 	fmt.Fprintln(out, "Stopping running daemons...")
 	stopResults, err := upgradeStopAll(a)
@@ -716,6 +797,251 @@ func runInstallUpgrade(cmd *cobra.Command) error {
 			failed)
 	}
 	return nil
+}
+
+// findRunningGUIsOnTargetFn is the production seam for
+// findRunningGUIsOnTarget; tests stub it to return a fixed slice
+// instead of probing the live OS. nil = use real wmic-backed
+// enumeration via api.ListMatchingProcesses.
+var findRunningGUIsOnTargetFn func(target string) ([]api.ProcessInfo, error)
+
+// upgradeBuildVersionFn is the production seam for the dev-build
+// guard. Tests stub it to return a valid semver so the guard does
+// NOT fire from `go test` (which inherits version="dev" from the
+// non-ldflag'd test build). nil = consult buildinfo.Get().
+var upgradeBuildVersionFn func() string
+
+// upgradeBuildVersion routes through the test seam if set, else
+// returns the buildinfo-store version. Centralized here so the guard
+// in runInstallUpgrade has a single call site to mock.
+func upgradeBuildVersion() string {
+	if upgradeBuildVersionFn != nil {
+		return upgradeBuildVersionFn()
+	}
+	v, _, _ := buildinfo.Get()
+	return v
+}
+
+// findRunningGUIsOnTarget enumerates running mcphub.exe processes
+// whose image path equals `target` AND whose first non-image argv
+// element is "gui" (or no args at all — Explorer-double-click
+// entry path per cmd/mcphub/main.go shouldAutoLaunchGUI).
+//
+// Returns ([], nil) on POSIX (the GUI lives only on Windows
+// builds; the install --upgrade flow on POSIX is mostly a
+// developer path).
+//
+// Tests can stub findRunningGUIsOnTargetFn to bypass wmic.
+func findRunningGUIsOnTarget(a *api.API, target string) ([]api.ProcessInfo, error) {
+	if findRunningGUIsOnTargetFn != nil {
+		return findRunningGUIsOnTargetFn(target)
+	}
+	procs, err := a.ListMatchingProcesses([]string{"mcphub.exe"})
+	if err != nil {
+		return nil, err
+	}
+	var matched []api.ProcessInfo
+	for _, p := range procs {
+		if !cmdlineIsGUIOnTarget(p.Cmdline, target) {
+			continue
+		}
+		matched = append(matched, p)
+	}
+	return matched, nil
+}
+
+// cmdlineIsGUIOnTarget reports whether a wmic/PowerShell
+// CommandLine string represents a `mcphub.exe gui` invocation
+// whose image is the same file as target.
+//
+// Match strategy (codex bot r2-r4 closures on PR #188):
+//
+//	1. Try case-insensitive prefix match: cmdline starts with
+//	   `target` (literal path). Handles the common case and
+//	   target paths containing spaces (r2/r3 closures).
+//	2. If prefix match fails, extract the image path from
+//	   cmdline (everything up to the first whitespace not
+//	   inside quotes) and compare via os.SameFile (r4 closure).
+//	   Catches 8.3 short paths, junctions/symlinks, and other
+//	   canonicalization aliases that the prefix match misses
+//	   because the cmdline holds the alias, not the canonical
+//	   target string.
+//
+// After the image-path match (either path), the next non-space
+// token must be "gui" (or end-of-string for Explorer-double-
+// click launch per cmd/mcphub/main.go shouldAutoLaunchGUI).
+//
+// Rejects daemon invocations (`mcphub.exe daemon --server ...`),
+// the tray child (`mcphub.exe tray`), watchdog ticks, and
+// same-binary-different-path matches.
+func cmdlineIsGUIOnTarget(cmdline, target string) bool {
+	cmdline = strings.TrimSpace(cmdline)
+	if cmdline == "" || target == "" {
+		return false
+	}
+	// splitCSVLine strips quotes, but defensively handle a
+	// still-quoted form from non-wmic input paths.
+	cmdline = strings.TrimPrefix(cmdline, `"`)
+
+	// Path 1: case-insensitive prefix match.
+	if rest, ok := matchTargetPrefix(cmdline, target); ok {
+		return firstArgIsGUI(rest)
+	}
+
+	// Path 2: file-identity match via os.SameFile. Handles
+	// 8.3 short paths, junctions, symlinks, and any other path
+	// alias whose string differs from `target` but resolves
+	// to the same file.
+	//
+	// Codex bot r7 P1 closure on PR #188: a fixed "first
+	// whitespace = image boundary" extraction fails when the
+	// ALIAS path itself contains spaces (Windows profile dirs
+	// with spaces, ALIASed through a junction whose source path
+	// is unquoted in the wmic-stripped cmdline). The image
+	// extraction must try progressively longer prefixes,
+	// calling sameFileOrFalse at each whitespace boundary,
+	// stopping at the first match.
+	//
+	// Quoted-image case (rare — splitCSVLine usually strips
+	// quotes, but defensive for PS or direct-CLI input where
+	// quotes survive): if a closing `"` appears before the
+	// first whitespace, treat that as the image boundary
+	// explicitly (preserves embedded spaces in a quoted path).
+	cmdline = strings.TrimPrefix(cmdline, `"`)
+	if quoteIdx := strings.Index(cmdline, `"`); quoteIdx >= 0 {
+		if spaceIdx := strings.IndexAny(cmdline, " \t"); spaceIdx < 0 || quoteIdx < spaceIdx {
+			image := cmdline[:quoteIdx]
+			rest := strings.TrimLeft(cmdline[quoteIdx+1:], " \t")
+			if !sameFileOrFalse(image, target) {
+				return false
+			}
+			return firstArgIsGUI(rest)
+		}
+	}
+	return matchByProgressiveImageBoundary(cmdline, target)
+}
+
+// matchByProgressiveImageBoundary tries every whitespace
+// position in cmdline as a candidate image/args boundary,
+// stopping at the first one where sameFileOrFalse(candidate,
+// target) returns true. Handles the codex bot r7 P1 case:
+// cmdline holds an alias path containing spaces and no quotes
+// (wmic strips quotes before passing to ListMatchingProcesses).
+//
+// Capped at maxImageBoundaryAttempts whitespace positions to
+// bound the os.Stat fan-out — real cmdlines almost never have
+// 10+ whitespace boundaries even with path-with-spaces, and
+// past that horizon the chance of a true match has practically
+// dropped to zero.
+const maxImageBoundaryAttempts = 10
+
+func matchByProgressiveImageBoundary(cmdline, target string) bool {
+	pos := 0
+	for attempt := 0; attempt < maxImageBoundaryAttempts; attempt++ {
+		spaceIdx := strings.IndexAny(cmdline[pos:], " \t")
+		if spaceIdx < 0 {
+			// No more whitespace — try whole remaining string
+			// (Explorer-launch + alias path with embedded spaces
+			// and no args).
+			if sameFileOrFalse(cmdline, target) {
+				return firstArgIsGUI("")
+			}
+			return false
+		}
+		end := pos + spaceIdx
+		candidate := cmdline[:end]
+		if sameFileOrFalse(candidate, target) {
+			rest := strings.TrimLeft(cmdline[end:], " \t")
+			return firstArgIsGUI(rest)
+		}
+		pos = end + 1
+	}
+	return false
+}
+
+// matchTargetPrefix returns (rest, true) when cmdline starts
+// with target (case-insensitive, rune-aware), and (rest, false)
+// otherwise. rest is the cmdline content after the prefix,
+// leading close-quote and whitespace stripped.
+//
+// Codex bot r6 P2 closure on PR #188: must NOT slice on
+// len(target) after a strings.ToLower roundtrip — Unicode
+// case-folding can change byte length (Turkish dotless `ı` ↔
+// `İ`, Greek `ς` ↔ `σ`, etc.), so the lowered prefix may not
+// align with target's UTF-8 byte positions in the original
+// cmdline. A Windows profile path containing such a character
+// would mis-slice and `firstArgIsGUI` evaluate the wrong tail.
+// Walk the strings rune-by-rune via unicode.ToLower instead,
+// counting bytes from the ORIGINAL cmdline so the slice
+// boundary is correct.
+func matchTargetPrefix(cmdline, target string) (string, bool) {
+	sLen := 0
+	pLen := 0
+	for {
+		if pLen == len(target) {
+			return cmdlineTailAfterImage(cmdline[sLen:]), true
+		}
+		if sLen == len(cmdline) {
+			return "", false
+		}
+		sr, sw := utf8.DecodeRuneInString(cmdline[sLen:])
+		pr, pw := utf8.DecodeRuneInString(target[pLen:])
+		if unicode.ToLower(sr) != unicode.ToLower(pr) {
+			return "", false
+		}
+		sLen += sw
+		pLen += pw
+	}
+}
+
+// cmdlineTailAfterImage strips a single optional close-quote and
+// leading whitespace from the cmdline content after the image
+// boundary, returning the args portion (which firstArgIsGUI
+// consumes).
+func cmdlineTailAfterImage(after string) string {
+	after = strings.TrimPrefix(after, `"`)
+	return strings.TrimLeft(after, " \t")
+}
+
+// sameFileOrFalse stats both paths and returns true iff they
+// resolve to the same file via os.SameFile. Stat failures (file
+// missing, permission denied, etc.) yield false — best-effort
+// behavior; the caller has already exhausted the prefix-match
+// path so a failure here means "cannot prove same identity".
+//
+// sameFileOrFalseFn is the test seam; tests stub it to return
+// a fixed bool without touching the filesystem.
+var sameFileOrFalseFn func(path1, path2 string) bool
+
+func sameFileOrFalse(path1, path2 string) bool {
+	if sameFileOrFalseFn != nil {
+		return sameFileOrFalseFn(path1, path2)
+	}
+	fi1, err := os.Stat(path1)
+	if err != nil {
+		return false
+	}
+	fi2, err := os.Stat(path2)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(fi1, fi2)
+}
+
+// firstArgIsGUI reports whether the first whitespace-delimited
+// token of rest is exactly "gui" (case-sensitive — Cobra
+// subcommand routing is case-sensitive). Empty rest counts as
+// "gui" (Explorer-double-click landing per cmd/mcphub/main.go
+// shouldAutoLaunchGUI).
+func firstArgIsGUI(rest string) bool {
+	if rest == "" {
+		return true
+	}
+	firstArg := rest
+	if spaceIdx := strings.IndexAny(rest, " \t"); spaceIdx >= 0 {
+		firstArg = rest[:spaceIdx]
+	}
+	return firstArg == "gui"
 }
 
 // resolveUpgradeSelfPaths returns (current executable, canonical
