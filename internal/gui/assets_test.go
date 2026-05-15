@@ -24,6 +24,14 @@ func TestIndexHTML_ServedAtRoot(t *testing.T) {
 	if !strings.HasPrefix(ct, "text/html") {
 		t.Errorf("content-type = %q", ct)
 	}
+	csp := rec.Header().Get("Content-Security-Policy")
+	if csp != "frame-ancestors 'none'" {
+		t.Errorf("content-security-policy = %q", csp)
+	}
+	xfo := rec.Header().Get("X-Frame-Options")
+	if xfo != "DENY" {
+		t.Errorf("x-frame-options = %q", xfo)
+	}
 	body := strings.ToLower(rec.Body.String())
 	for _, want := range []string{
 		"<!doctype html>",

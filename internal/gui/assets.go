@@ -23,6 +23,8 @@ func registerAssetRoutes(s *Server) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
+		w.Header().Set("X-Frame-Options", "DENY")
 		b, _ := fs.ReadFile(sub, "index.html")
 		_, _ = w.Write(b)
 	})
