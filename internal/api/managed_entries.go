@@ -55,8 +55,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
+
+	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/config"
 
 	"github.com/gofrs/flock"
 )
@@ -259,6 +263,88 @@ func IsManagedEntry(client, server string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// backfillMarkerIfEntryMatchesManifest is the v0.4.2 unblock for
+// existing v0.4.x users whose hub-form entries were never marked.
+// PR #187 introduced the marker as a "positive proof" gate to
+// replace the URL heuristic codex bot rejected on PR #186. Users
+// who installed before #187 have hub-form entries in their client
+// configs but no marker rows, so demigrate fails closed for those
+// entries — making the matrix UI unusable for rollback on this
+// state.
+//
+// The recovery path documented in #187 ("re-migrate to populate
+// the marker") doesn't work from the matrix: the cell already
+// shows checked (hub-routed), there's no UI affordance to force a
+// re-migrate. Inline backfill plugs that gap.
+//
+// Backfill criterion (strict, NOT the loose URL heuristic codex
+// bot rejected):
+//
+//   1. Live entry's URL EXACTLY matches what mcphub would write
+//      for this (server, daemon, binding): scheme/host/port/path
+//      derived from the manifest daemon + binding url_path.
+//   2. Both loopback host variants (localhost / 127.0.0.1 / [::1])
+//      are accepted because IsHubHTTPURL accepts all three on the
+//      classification side.
+//   3. The entry's name matches the manifest server name (this
+//      is the loop variable, so already aligned at call site).
+//
+// On exact match, RecordManagedEntry is called with the (client,
+// server) pair. The marker now contains a row, IsManagedEntry
+// returns true on the next call, demigrate proceeds to
+// RemoveEntry.
+//
+// Returns true iff backfill succeeded. Read/write errors on the
+// marker file are best-effort logged and return false — caller
+// keeps the fail-closed default in that case.
+//
+// Safety: if a user happened to configure their own MCP server
+// on the exact port + path mcphub uses for this binding AND
+// gave it the manifest's exact name, the backfill triggers and
+// RemoveEntry runs. That deletes the user's structurally-
+// identical entry; since the live shape IS what mcphub would
+// have written, restoring from sentinel (when available) yields
+// the same shape — the user's "own" entry was effectively
+// already a mcphub-equivalent binding. No data loss beyond what
+// the operator's manual config choice implied.
+func backfillMarkerIfEntryMatchesManifest(adapter clients.Client, server string, binding config.ClientBinding, m *config.ServerManifest) bool {
+	live, err := adapter.GetEntry(server)
+	if err != nil || live == nil {
+		return false
+	}
+	daemonPort, ok := findDaemonPort(m, binding.Daemon)
+	if !ok {
+		return false
+	}
+	urlPath := binding.URLPath
+	if urlPath == "" {
+		urlPath = "/mcp"
+	}
+	expectedURLs := []string{
+		fmt.Sprintf("http://localhost:%d%s", daemonPort, urlPath),
+		fmt.Sprintf("http://127.0.0.1:%d%s", daemonPort, urlPath),
+		fmt.Sprintf("http://[::1]:%d%s", daemonPort, urlPath),
+	}
+	if !slices.Contains(expectedURLs, live.URL) {
+		return false
+	}
+	if recErr := RecordManagedEntry(binding.Client, server); recErr != nil {
+		_ = LogHubMcpEvent("warn", "managed-entries-backfill-failed", map[string]any{
+			"server": server,
+			"client": binding.Client,
+			"err":    recErr.Error(),
+		})
+		return false
+	}
+	_ = LogHubMcpEvent("info", "managed-entries-backfill", map[string]any{
+		"server":   server,
+		"client":   binding.Client,
+		"live_url": live.URL,
+		"reason":   "v0.4.x upgrade backfill — entry URL exactly matches manifest expectation",
+	})
+	return true
 }
 
 // managedEntriesPath returns the absolute path to the marker file

@@ -139,6 +139,34 @@ const RequireSingleUserHomeEnv = "MCPHUB_REQUIRE_SINGLE_USER_HOME"
 // style default). Operators on corp-managed hosts who want the
 // strict gate must opt IN via MCPHUB_REQUIRE_SINGLE_USER_HOME=1.
 func secureWriteWithOperatorOpt(path string, contents []byte) error {
+	// v0.4.2: when relax mode is allowed (default), resolve
+	// symlinks at the destination before calling secure-write. The
+	// hardened pipeline refuses pre-existing reparse points
+	// outright (symlink-attack defense), but a real-world solo-dev
+	// pattern is to symlink dotfiles to a separate repo
+	// (~/.codex/config.toml -> E:\env\Agents\.codex\config.toml).
+	// Without resolution, every matrix Apply on such hosts fails
+	// with "pre-existing reparse point refused" — making the GUI
+	// unusable on standard dotfile-symlink setups.
+	//
+	// Strict mode (MCPHUB_REQUIRE_SINGLE_USER_HOME=1) keeps the
+	// outright refusal so multi-tenant / corp-managed hosts get
+	// the symlink-attack protection without compromise.
+	//
+	// Resolution writes through to the symlink's TARGET path.
+	// The original symlink is left intact (mcphub does not
+	// rewrite it as a regular file). The target's DACL after the
+	// write is owner-only via the secure-write pipeline.
+	if !operatorRequiresSingleUserHome() {
+		if resolved, isSymlink := resolveSymlinkForSecureWrite(path); isSymlink && resolved != path {
+			_ = LogHubMcpEvent("info", "client-write-symlink-followed", map[string]any{
+				"symlink": path,
+				"target":  resolved,
+				"reason":  "default-relax-on-solo-host (dotfile pattern)",
+			})
+			path = resolved
+		}
+	}
 	err := SecureWriteClientConfig(path, contents)
 	if err == nil {
 		return nil
@@ -178,6 +206,44 @@ func secureWriteWithOperatorOpt(path string, contents []byte) error {
 	// os.CreateTemp + path-based SetNamedSecurityInfo path left
 	// open.
 	return secureWriteClientConfigSkipParentGate(path, contents)
+}
+
+// resolveSymlinkForSecureWrite inspects path. If path is a symlink
+// (Windows / POSIX symbolic link), returns (resolvedTargetPath,
+// true). If path is a regular file or does not exist, returns
+// (path, false).
+//
+// Best-effort: any error returns (path, false) and lets the
+// standard secure-write path proceed (which will refuse the
+// reparse point via refusePreexistingReparsePoint — that's the
+// fail-safe default).
+//
+// Used by secureWriteWithOperatorOpt in relax mode to follow
+// dotfile symlinks (e.g. ~/.codex/config.toml ->
+// E:\env\Agents\.codex\config.toml). The hardened pipeline runs
+// on the resolved target; the original symlink at `path` is
+// untouched.
+//
+// Platform split: Windows uses GetFinalPathNameByHandle so the
+// resolver walks through junction-mounted subst drives correctly
+// (filepath.EvalSymlinks on Go 1.x fails on substed targets like
+// E: -> %USERPROFILE%\OneDrive\... that the user routinely
+// configures). POSIX uses filepath.EvalSymlinks which works
+// uniformly there. Implementations live in
+// client_write_resolve_{windows,posix}.go.
+func resolveSymlinkForSecureWrite(path string) (string, bool) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return path, false
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return path, false
+	}
+	resolved, err := resolveSymlinkFinalPath(path)
+	if err != nil || resolved == "" || resolved == path {
+		return path, false
+	}
+	return resolved, true
 }
 
 // operatorAllowedUnhardenedClientWrite reports whether the operator

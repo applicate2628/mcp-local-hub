@@ -97,8 +97,42 @@ func verifyHubMcpStateDACLImpl(path string) error {
 	defer windows.CloseHandle(parentHandle)
 
 	// Verify parent DACL via handle (allowlist gate).
+	//
+	// Default-relax (v0.4.2): mirror the secure-write relax-lane from
+	// PR #185 (v0.4.0). If the parent DACL fails the allowlist (e.g.
+	// %LOCALAPPDATA%\mcp-local-hub broadened by GPO / MDM / a third-
+	// party installer to grant read access to a non-{user,
+	// LocalSystem, BuiltinAdmins} SID), the file's OWN DACL — verified
+	// at step (5) below — is the load-bearing safety layer. The file
+	// is owner-only because the state-file write pipeline installed a
+	// restrictive DACL on the file handle at create time, BEFORE any
+	// bytes hit disk. The parent handle still binds the file open via
+	// ntOpenRelative, so the TOCTOU-safe inode anchoring is preserved
+	// even when the parent-DACL check is skipped.
+	//
+	// Operators on multi-tenant / corp-managed hosts who require the
+	// strict parent gate must opt IN via
+	// MCPHUB_REQUIRE_SINGLE_USER_HOME=1; the env var semantic matches
+	// the write path so a single setting controls both directions.
+	//
+	// Concrete failure that motivated this change: manual smoke on
+	// workstation with %LOCALAPPDATA%\mcp-local-hub grant to SID
+	// S-1-5-21-...-1010 (Win11 user group surfaced via a third-party
+	// installer) — Apply/demigrate from the GUI matrix failed because
+	// managed-entries.json read fell through to strict parent gate.
 	if err := verifyWindowsDACLFromHandle(parentHandle); err != nil {
-		return fmt.Errorf("parent %s not single-user safe: %w", parentDir, err)
+		if operatorRequiresSingleUserHome() {
+			return fmt.Errorf("parent %s not single-user safe: %w; %s=1 is set, so the strict parent-dir gate is enforced (unset that env var, or tighten the parent's DACL to remove the offending principal, to proceed)",
+				parentDir, err, RequireSingleUserHomeEnv)
+		}
+		// Best-effort audit log; never block the read on log failure.
+		_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-parent-fallback", map[string]any{
+			"path":     path,
+			"parent":   parentDir,
+			"reason":   "default-relax-on-solo-host",
+			"err":      err.Error(),
+			"note":     "file's own DACL verified below; parent-handle binds open via ntOpenRelative so TOCTOU safety preserved",
+		})
 	}
 
 	// Open the file RELATIVE to the parent handle via NT API so the

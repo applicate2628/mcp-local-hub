@@ -244,41 +244,33 @@ func applyAllowlistOnlyDACL(t *testing.T, target string) {
 	}
 }
 
-// TestVerifyHubMcpStateDACLRejectsPermissiveParentDACL builds a
-// parent dir with an Authenticated Users:GenericRead ACE, then
-// creates a state file inside whose OWN DACL is allowlist-conforming.
-// VerifyHubMcpStateDACL must reject because the parent-dir DACL is
-// not single-user-safe (spec lines 277-281 + 422-432).
+// TestVerifyHubMcpStateDACLRejectsPermissiveParentDACL pins the
+// STRICT-mode behavior (MCPHUB_REQUIRE_SINGLE_USER_HOME=1): a
+// parent dir with an Authenticated Users:GenericRead ACE is
+// rejected even when the file's own DACL is allowlist-conforming.
 //
-// Why this test matters: spec line 281 explicitly requires the
-// verifier to walk BOTH the file and its parent dir. Without the
-// parent-dir gate, a state-dir whose parent (%LOCALAPPDATA%) had
-// its DACL broadened externally (Group Policy, MDM, etc.) would
-// pass the check even though every domain user could list / read
-// the directory contents.
+// v0.4.2 inverts the default — see
+// TestVerifyHubMcpStateDACLAcceptsPermissiveParentDACL_DefaultRelax
+// below. Strict mode preserves the v0.4.0-v0.4.1 refuse-on-broadened-
+// parent posture for corp-managed / multi-tenant hosts.
 func TestVerifyHubMcpStateDACLRejectsPermissiveParentDACL(t *testing.T) {
-	// Build an intermediate parent so the leaky DACL is on a dir we
-	// own outright (t.TempDir() itself sits under %TEMP% with inherited
-	// ACEs we shouldn't be reshaping).
+	t.Setenv(RequireSingleUserHomeEnv, "1") // STRICT mode
+
 	parent := filepath.Join(t.TempDir(), "leaky-parent")
 	if err := os.Mkdir(parent, 0o700); err != nil {
 		t.Fatalf("mkdir parent: %v", err)
 	}
-	// Re-use the helper from secure_write_windows_test.go (same
-	// package, _windows.go build tag — both files compile together).
 	synthesizeDirWithAuthUsersReadACE(t, parent)
 
 	target := filepath.Join(parent, "hub-mcp-tokens.json")
 	if err := os.WriteFile(target, []byte("{}"), 0600); err != nil {
 		t.Fatalf("write target: %v", err)
 	}
-	// Lock down the FILE's own DACL to allowlist-only so the file
-	// check passes — the only failure path under test is the parent.
 	applyAllowlistOnlyDACL(t, target)
 
 	err := VerifyHubMcpStateDACL(target)
 	if err == nil {
-		t.Fatalf("VerifyHubMcpStateDACL must reject permissive parent dir; got nil")
+		t.Fatalf("VerifyHubMcpStateDACL must reject permissive parent dir under strict mode; got nil")
 	}
 	if !errors.Is(err, ErrDaclOutsideAllowlist) {
 		t.Errorf("expected ErrDaclOutsideAllowlist (wrapped), got %v", err)
@@ -289,6 +281,37 @@ func TestVerifyHubMcpStateDACLRejectsPermissiveParentDACL(t *testing.T) {
 	}
 	if !strings.Contains(msg, "parent") {
 		t.Errorf("error %q must use the word 'parent' to signal the dir-DACL gate", msg)
+	}
+}
+
+// TestVerifyHubMcpStateDACLAcceptsPermissiveParentDACL_DefaultRelax
+// covers v0.4.2's new default: when MCPHUB_REQUIRE_SINGLE_USER_HOME
+// is NOT set, a permissive parent dir is tolerated. The file's own
+// DACL is the load-bearing safety layer (verified post-parent
+// inside verifyHubMcpStateDACLImpl); the parent handle still binds
+// the file open via ntOpenRelative so TOCTOU safety is preserved.
+//
+// Manual-smoke motivation: workstation %LOCALAPPDATA%\mcp-local-hub
+// broadened to a third-party installer SID. Without this relax, B4
+// marker reads (PR #187) and other state-file operations failed
+// closed, breaking every matrix Apply on the GUI.
+func TestVerifyHubMcpStateDACLAcceptsPermissiveParentDACL_DefaultRelax(t *testing.T) {
+	t.Setenv(RequireSingleUserHomeEnv, "") // DEFAULT mode
+
+	parent := filepath.Join(t.TempDir(), "leaky-parent")
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatalf("mkdir parent: %v", err)
+	}
+	synthesizeDirWithAuthUsersReadACE(t, parent)
+
+	target := filepath.Join(parent, "hub-mcp-tokens.json")
+	if err := os.WriteFile(target, []byte("{}"), 0600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	applyAllowlistOnlyDACL(t, target)
+
+	if err := VerifyHubMcpStateDACL(target); err != nil {
+		t.Errorf("default-relax: expected nil (file DACL is allowlist-clean); got %v", err)
 	}
 }
 
