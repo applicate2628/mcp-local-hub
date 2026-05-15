@@ -21,9 +21,11 @@ func TestParseGdbManifestWithInlinePythonWrapper(t *testing.T) {
 		t.Errorf("BaseArgs[4] = %q, want -c", m.BaseArgs[4])
 	}
 	inline := m.BaseArgs[5]
+	if strings.Contains(inline, "\n") {
+		t.Errorf("BaseArgs[5] contains newline; want single-line -c payload for process snapshot safety: %q", inline)
+	}
 	for _, want := range []string{
-		"class _F(logging.Filter)",
-		"LLDB Python module not available",
+				"LLDB Python module not available",
 		"logging.basicConfig",
 		"runpy.run_path",
 	} {
