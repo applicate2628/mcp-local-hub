@@ -17,6 +17,7 @@ require (
 
 require (
 	filippo.io/hpke v0.4.0 // indirect
+	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kr/text v0.2.0 // indirect
