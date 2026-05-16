@@ -294,14 +294,14 @@ func projectVSCodeServer(name string, entry map[string]any, exp *PlaceholderExpa
 		// such guard; a hostile workspace using `${env:EVIL}` where
 		// EVIL holds `\r\n` could project a draft with CR/LF in url
 		// or header values. Reject upfront with a clear cause.
-		if containsControlBytes(expandedURL) {
+		if containsUnsafeYAMLCommentRunes(expandedURL) {
 			warnings = append(warnings, fmt.Sprintf("server %q: url contains C0 control bytes after expansion (header / URL injection guard) — skipped", name))
 			return nil, warnings
 		}
 		hdrs, _ := entry["headers"].(map[string]any)
 		expandedHeaders := expandStringMap(hdrs, exp)
 		for hk, hv := range expandedHeaders {
-			if containsControlBytes(hk) || containsControlBytes(hv) {
+			if containsUnsafeYAMLCommentRunes(hk) || containsUnsafeYAMLCommentRunes(hv) {
 				warnings = append(warnings, fmt.Sprintf("server %q: header %q contains C0 control bytes after expansion (header injection guard) — skipped", name, hk))
 				return nil, warnings
 			}
