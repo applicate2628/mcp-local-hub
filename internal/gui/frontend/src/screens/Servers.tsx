@@ -21,6 +21,17 @@ const CLIENTS = [
   "antigravity",
 ] as const;
 
+// EMPTY_CLIENT_CONFIG_PRESENCE is a stable reference used when a scan
+// response omits client_config_presence (e.g. /api/scan mocks in
+// Playwright tests). Without a stable reference, every scan refetch
+// would call setClientConfigPresence with a fresh `{}`, triggering a
+// re-render even when no presence info changed — that in turn
+// compresses the "Applied. Refreshing…" visible window enough to
+// destabilize the B1 §5 e2e timing assertions. React/Preact bail out
+// when Object.is(prev, next) is true, so reusing this constant
+// short-circuits the redundant render.
+const EMPTY_CLIENT_CONFIG_PRESENCE: Record<string, ClientConfigState> = {};
+
 // Per-cell dirty tracking with direction preserved. Outer key: server name.
 // Inner map: client → Direction.
 //
@@ -124,7 +135,7 @@ export function ServersScreen() {
           return;
         }
         setServers(collectServers(scan));
-        setClientConfigPresence(scan.client_config_presence ?? {});
+        setClientConfigPresence(scan.client_config_presence ?? EMPTY_CLIENT_CONFIG_PRESENCE);
         // Clear any success banner once the authoritative refresh lands
         // (the matrix has already redrawn with the new "ok" state).
         // Error banners stay sticky so the operator sees the failure

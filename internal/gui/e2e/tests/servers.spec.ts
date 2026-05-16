@@ -9,13 +9,19 @@ test.describe("servers", () => {
     const headerCells = matrix.locator("thead th");
     await expect(headerCells).toHaveCount(10);
     await expect(headerCells.nth(0)).toHaveText("Server");
-    await expect(headerCells.nth(1)).toHaveText("claude-code");
-    await expect(headerCells.nth(2)).toHaveText("codex-cli");
-    await expect(headerCells.nth(3)).toHaveText("cursor");
-    await expect(headerCells.nth(4)).toHaveText("vscode");
-    await expect(headerCells.nth(5)).toHaveText("gemini-cli");
-    await expect(headerCells.nth(6)).toHaveText("qwen-cli");
-    await expect(headerCells.nth(7)).toHaveText("antigravity");
+    // v0.4.5 init-button: client header text content can contain the
+    // optional "Initialize" affordance for clients whose parent dir
+    // exists but config file does not (e.g. claude-code's parent is
+    // HOME=tmpHome which always exists). Match on the inner span
+    // specifically so the test stays robust to that environmental
+    // detail.
+    await expect(headerCells.nth(1).locator(".matrix-col-header > span")).toHaveText("claude-code");
+    await expect(headerCells.nth(2).locator(".matrix-col-header > span")).toHaveText("codex-cli");
+    await expect(headerCells.nth(3).locator(".matrix-col-header > span")).toHaveText("cursor");
+    await expect(headerCells.nth(4).locator(".matrix-col-header > span")).toHaveText("vscode");
+    await expect(headerCells.nth(5).locator(".matrix-col-header > span")).toHaveText("gemini-cli");
+    await expect(headerCells.nth(6).locator(".matrix-col-header > span")).toHaveText("qwen-cli");
+    await expect(headerCells.nth(7).locator(".matrix-col-header > span")).toHaveText("antigravity");
     await expect(headerCells.nth(8)).toHaveText("Port");
     await expect(headerCells.nth(9)).toHaveText("State");
   });
