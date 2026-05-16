@@ -47,7 +47,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -714,26 +713,44 @@ func (h *HubMcpHandler) handleDelete(w http.ResponseWriter, r *http.Request, cli
 	// deadline: total latency stays at ~5 s regardless of N, and a
 	// single slow daemon doesn't serialize the others.
 	if len(daemonSessions) > 0 {
-		var wg sync.WaitGroup
+		// Issue #159 concurrency lane #2 closure: replace
+		// sync.WaitGroup + closer goroutine with a buffered
+		// completion channel sized to the worker count. The
+		// closer goroutine in the previous design leaked when
+		// one worker wedged in a non-cancellable syscall —
+		// wg.Wait() blocked forever inside it. With a buffered
+		// chan sized exactly to len(daemonSessions), every
+		// worker can ALWAYS write its completion sentinel and
+		// exit cleanly without the supervising goroutine.
+		// Workers that wedge inside http.Client.Do are still
+		// long-lived, but the fan-out coordinator itself has no
+		// extra goroutine that depends on every worker
+		// finishing.
+		done := make(chan struct{}, len(daemonSessions))
 		for ref, dsid := range daemonSessions {
-			wg.Add(1)
 			go func(ref canonicalDaemonRef, dsid string) {
-				defer wg.Done()
+				// defer signals completion to the buffered
+				// chan; never blocks because cap == worker
+				// count.
+				defer func() { done <- struct{}{} }()
 				fanCtx, fanCancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer fanCancel()
 				_ = bestEffortDeleteDaemonSession(fanCtx, ref, dsid)
 			}(ref, dsid)
 		}
-		// Bound the total wait at 5 s + small slack so the HTTP
-		// response cannot block indefinitely even if a daemon DELETE
-		// goroutine is wedged in a non-cancellable syscall. The
-		// individual goroutines outlive the wait if needed —
-		// best-effort fan-out is fire-and-forget on the slow path.
-		waitDone := make(chan struct{})
-		go func() { wg.Wait(); close(waitDone) }()
-		select {
-		case <-waitDone:
-		case <-time.After(5500 * time.Millisecond):
+		// Bound the total wait at 5 s + small slack. Workers
+		// that finish in time tick the chan; the deadline path
+		// stops waiting once 5500ms elapses.
+		total := len(daemonSessions)
+		deadline := time.After(5500 * time.Millisecond)
+		got := 0
+		for got < total {
+			select {
+			case <-done:
+				got++
+			case <-deadline:
+				got = total // exit loop without closing/draining
+			}
 		}
 	}
 	w.WriteHeader(http.StatusNoContent)
