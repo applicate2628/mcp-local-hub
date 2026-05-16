@@ -126,6 +126,10 @@ func (a *API) ImportVSCodeWorkspace(workspacePath string, opts VSCodeImportOpts)
 		PathSeparator: pathSep,
 		Getenv:        getenv,
 		UndefinedEnv:  map[string]struct{}{},
+		// Import reads workspace-controlled input. Keep sensitive
+		// ${env:VAR} placeholders verbatim so local secrets are not
+		// materialized into stdout / draft YAML.
+		SkipSensitiveEnv: true,
 	}
 
 	var entries []vscodeProjected
@@ -141,6 +145,9 @@ func (a *API) ImportVSCodeWorkspace(workspacePath string, opts VSCodeImportOpts)
 
 	for _, name := range sortedKeys(exp.UndefinedEnv) {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("placeholder ${env:%s} expanded to empty string (variable not set)", name))
+	}
+	for _, name := range exp.SensitiveSkipped {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("placeholder ${env:%s} looks sensitive — left verbatim so local secret values are not written into the generated YAML", name))
 	}
 
 	// EmptyResult fires when NO entries projected, even if the source
@@ -287,14 +294,14 @@ func projectVSCodeServer(name string, entry map[string]any, exp *PlaceholderExpa
 		// such guard; a hostile workspace using `${env:EVIL}` where
 		// EVIL holds `\r\n` could project a draft with CR/LF in url
 		// or header values. Reject upfront with a clear cause.
-		if containsControlBytes(expandedURL) {
+		if containsUnsafeYAMLCommentRunes(expandedURL) {
 			warnings = append(warnings, fmt.Sprintf("server %q: url contains C0 control bytes after expansion (header / URL injection guard) — skipped", name))
 			return nil, warnings
 		}
 		hdrs, _ := entry["headers"].(map[string]any)
 		expandedHeaders := expandStringMap(hdrs, exp)
 		for hk, hv := range expandedHeaders {
-			if containsControlBytes(hk) || containsControlBytes(hv) {
+			if containsUnsafeYAMLCommentRunes(hk) || containsUnsafeYAMLCommentRunes(hv) {
 				warnings = append(warnings, fmt.Sprintf("server %q: header %q contains C0 control bytes after expansion (header injection guard) — skipped", name, hk))
 				return nil, warnings
 			}

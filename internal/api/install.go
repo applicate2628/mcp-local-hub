@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -1467,7 +1468,35 @@ func portHeldByOurDaemon(port int, server, daemon string) bool {
 	if err != nil {
 		return false
 	}
-	return st.State == "Running"
+	if st.State != "Running" {
+		return false
+	}
+	return statusOwnedByCurrentUser(st.Owner)
+}
+
+func statusOwnedByCurrentUser(owner string) bool {
+	owner = strings.TrimSpace(owner)
+	if owner == "" {
+		return false
+	}
+	cur, err := user.Current()
+	if err != nil || cur == nil {
+		return false
+	}
+	// Task Scheduler often reports owner as DOMAIN\user, while Go may
+	// return either `user` or `DOMAIN\user` depending on environment.
+	u := strings.ToLower(strings.TrimSpace(cur.Username))
+	o := strings.ToLower(owner)
+	if u == o {
+		return true
+	}
+	if i := strings.LastIndex(u, `\`); i >= 0 && i+1 < len(u) {
+		u = u[i+1:]
+	}
+	if i := strings.LastIndex(o, `\`); i >= 0 && i+1 < len(o) {
+		o = o[i+1:]
+	}
+	return u != "" && u == o
 }
 
 // processIdentityByPID is a function-pointer seam returning the image

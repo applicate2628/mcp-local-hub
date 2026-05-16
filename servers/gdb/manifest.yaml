@@ -27,16 +27,7 @@ base_args:
   # docs: "subsequent calls are a no-op once handlers exist"), so
   # our filter is the only one in the chain when child loggers
   # propagate their records upward.
-  - |
-    import logging
-    class _F(logging.Filter):
-        def filter(self, r):
-            return "LLDB Python module not available" not in r.getMessage()
-    logging.basicConfig(level=logging.INFO)
-    for _h in logging.getLogger().handlers:
-        _h.addFilter(_F())
-    import runpy
-    runpy.run_path("server.py", run_name="__main__")
+  - 'import logging;_F=type("_F",(logging.Filter,),{"filter":lambda self,r:"LLDB Python module not available" not in r.getMessage()});logging.basicConfig(level=logging.INFO);[_h.addFilter(_F()) for _h in logging.getLogger().handlers];import runpy;runpy.run_path("server.py", run_name="__main__")'
 
 # GDB-MCP is a multi-debugger MCP server (gdb + lldb submodules) with built-in
 # session management (modules/gdb/sessionManager.py + modules/lldb/sessionManager.py).

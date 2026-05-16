@@ -194,19 +194,6 @@ func BuildHubReconcilePlan(
 		// caller's responsibility; we read it as-is) + the
 		// clientNames sort above.
 
-		// codex bot phase5 r16 P2 closure on PR #160: skip the
-		// entire client in BOTH gate-ON and gate-OFF branches when
-		// it's in hubReconcileSkipClients. The applier
-		// (ApplyHubReconcileInOrder) already drops these clients
-		// into HubReconcileReport.Skipped, so the gate-ON token
-		// check below would abort the entire plan over a missing
-		// token entry for a client that would never be applied
-		// anyway. Filter here so unsupported adapters cannot
-		// block global reconciliation.
-		if hubReconcileSkipClients[client] {
-			continue
-		}
-
 		path, err := clients.ConfigPathForName(client)
 		if err != nil {
 			// Unknown client id — skip rather than fail the whole
@@ -230,7 +217,7 @@ func BuildHubReconcilePlan(
 			// supported client at hub startup), so missing keys
 			// indicate genuine corruption or a stale token table.
 			tok := tokens.Tokens[client]
-			if tok == "" {
+			if tok == "" && !hubReconcileSkipClients[client] {
 				return nil, fmt.Errorf("gate-ON reconcile: missing per-client token for %q in hub-mcp-tokens.json — restart the hub (or rotate via `mcphub hub-mcp regenerate-token --client %s`) so EnsureHubTokens repopulates the table", client, client)
 			}
 			// AddReplace the aggregate FIRST so applier ordering

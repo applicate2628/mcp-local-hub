@@ -311,3 +311,17 @@ func TestRedactTokenHandlesUppercaseAndMixedCase(t *testing.T) {
 		})
 	}
 }
+
+// TestRedactTokenRedactsLongHexRuns ensures token-shaped values are not
+// partially leaked when embedded in uninterrupted hex runs longer than 64.
+func TestRedactTokenRedactsLongHexRuns(t *testing.T) {
+	prefix := strings.Repeat("a", 63)
+	token := strings.Repeat("b", 64)
+	out := RedactToken(prefix + token)
+	if strings.Contains(out, token) || strings.Contains(out, strings.Repeat("b", 63)) {
+		t.Fatalf("RedactToken leaked token bytes from long hex run: %q", out)
+	}
+	if out != "<token>" {
+		t.Fatalf("expected full long-run redaction, got %q", out)
+	}
+}
