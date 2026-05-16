@@ -482,3 +482,68 @@ func TestClassifyMissingClientConfig(t *testing.T) {
 		t.Errorf("parent-is-file: got %q, want missing", got)
 	}
 }
+
+// TestClassifyMissingClientConfig_SymlinkedParent pins the v0.4.5
+// PR #208 codex r1 F2 closure: when the config file's parent is a
+// symlink (dotfile-management pattern: ~/.config/Claude/ symlinked to
+// a real dotfile repo), classify must return
+// "missing-init-blocked-symlink" so the GUI suppresses the Initialize
+// affordance. The hardened init pipeline refuses to follow parent
+// symlinks (POSIX O_NOFOLLOW; Windows FILE_FLAG_OPEN_REPARSE_POINT
+// without resolution), so a button click would deterministically
+// fail with INIT_FAILED — broken UX.
+//
+// Pre-fix: os.Stat(parent) followed the symlink, returned IsDir=true
+// for the resolved target, classify reported "missing-init-possible",
+// GUI offered Initialize, click failed.
+//
+// Post-fix: os.Lstat(parent) detects the symlink directly,
+// classify reports the blocked-symlink state.
+func TestClassifyMissingClientConfig_SymlinkedParent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevation on Windows; the cross-platform Lstat probe is exercised by the POSIX path")
+	}
+	tmp := t.TempDir()
+	// Real target dir (where dotfiles actually live).
+	target := filepath.Join(tmp, "real-dotfiles", "Claude")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+	// Symlinked parent (where the client expects its config dir).
+	link := filepath.Join(tmp, "Claude")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+	got := classifyMissingClientConfig(filepath.Join(link, "claude_desktop_config.json"))
+	if got != "missing-init-blocked-symlink" {
+		t.Errorf("symlinked parent: got %q, want missing-init-blocked-symlink", got)
+	}
+}
+
+// TestProbeClientConfigPresence_SymlinkedParent verifies the new
+// state surfaces end-to-end through probeClientConfigPresence (the
+// production caller of classifyMissingClientConfig). Companion test
+// to TestClassifyMissingClientConfig_SymlinkedParent that exercises
+// the same case through the full presence map.
+func TestProbeClientConfigPresence_SymlinkedParent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevation on Windows")
+	}
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "real-dotfiles", "Code", "User")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+	link := filepath.Join(tmp, "Code", "User")
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatalf("mkdir link parent: %v", err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+	vscodePath := filepath.Join(link, "mcp.json")
+	out := probeClientConfigPresence(ScanOpts{VSCodeConfigPath: vscodePath})
+	if got := out["vscode"]; got != "missing-init-blocked-symlink" {
+		t.Errorf("vscode with symlinked parent: got %q, want missing-init-blocked-symlink", got)
+	}
+}

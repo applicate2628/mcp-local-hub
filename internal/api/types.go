@@ -128,15 +128,30 @@ type ScanResult struct {
 	//
 	// Keys are client names (claude-code, codex-cli, cursor, vscode,
 	// gemini-cli, qwen-cli, antigravity). Values:
-	//   "ok"                    config file exists, stat succeeded.
-	//   "missing-init-possible" config file does not exist, but its
-	//                           parent directory does — operator can
-	//                           initialize via POST /api/init-client-config
-	//                           to seed an empty stub.
-	//   "missing"               neither file nor parent directory exists
-	//                           (client genuinely not installed).
-	//   "error"                 stat returned an unexpected error
-	//                           (permissions, etc.).
+	//   "ok"                              config file exists, stat
+	//                                     succeeded.
+	//   "missing-init-possible"           config file does not exist,
+	//                                     but its parent directory does
+	//                                     and is a regular directory —
+	//                                     operator can initialize via
+	//                                     POST /api/init-client-config
+	//                                     to seed an empty stub.
+	//   "missing-init-blocked-symlink"    config file does not exist
+	//                                     and the parent path is a
+	//                                     symlink. The hardened init
+	//                                     pipeline refuses to follow
+	//                                     parent symlinks (POSIX
+	//                                     O_NOFOLLOW, Windows
+	//                                     FILE_FLAG_OPEN_REPARSE_POINT),
+	//                                     so the GUI suppresses the
+	//                                     Initialize affordance for
+	//                                     this state. v0.4.5 PR #208
+	//                                     codex r1 F2 closure.
+	//   "missing"                         neither file nor parent
+	//                                     directory exists (client
+	//                                     genuinely not installed).
+	//   "error"                           stat returned an unexpected
+	//                                     error (permissions, etc.).
 	//
 	// Frontend uses "ok" to render an "available (enabled, unchecked)"
 	// matrix cell for a manifested server when the cell's client is "ok"

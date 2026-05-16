@@ -27,12 +27,22 @@ export interface ScanResult {
   // surfaces a per-column "Initialize <client>" affordance in the
   // matrix header so the operator can seed the empty stub from the
   // GUI without dropping to the shell.
+  //
+  // v0.4.5 PR #208 codex r1 F2: "missing-init-blocked-symlink" is
+  // emitted when the client's config parent path resolves through a
+  // symlink. The hardened init pipeline refuses to follow parent
+  // symlinks (POSIX O_NOFOLLOW, Windows FILE_FLAG_OPEN_REPARSE_POINT),
+  // so the Initialize affordance is suppressed for this state; without
+  // the new value, a dotfile-symlink setup (e.g. ~/.config/Claude/
+  // -> ~/dotfiles/Claude) would render the button only for the click
+  // to deterministically fail with INIT_FAILED.
   client_config_presence?: Record<string, ClientConfigState>;
 }
 
 export type ClientConfigState =
   | "ok"
   | "missing-init-possible"
+  | "missing-init-blocked-symlink"
   | "missing"
   | "error";
 

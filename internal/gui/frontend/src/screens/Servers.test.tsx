@@ -128,6 +128,28 @@ describe("ServersScreen — Initialize button (v0.4.5)", () => {
     expect(screen.queryByTestId("init-client-vscode")).toBeNull();
   });
 
+  // v0.4.5 PR #208 codex r1 F2: the hardened init pipeline refuses
+  // to follow parent symlinks (POSIX O_NOFOLLOW, Windows
+  // FILE_FLAG_OPEN_REPARSE_POINT). Scan emits the new
+  // "missing-init-blocked-symlink" state for that case; the matrix
+  // header must suppress the Initialize affordance so the operator
+  // doesn't click a button that would deterministically fail.
+  it("does NOT render Initialize button when presence is missing-init-blocked-symlink", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () =>
+          jsonResponse(200, scanWith({ vscode: "missing-init-blocked-symlink" })),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ServersScreen />);
+    await waitFor(() => {
+      expect(screen.queryAllByRole("columnheader").length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByTestId("init-client-vscode")).toBeNull();
+  });
+
   it("on click POSTs to /api/init-client-config, shows success banner, and refreshes scan", async () => {
     let scanCallCount = 0;
     const initBodies: string[] = [];

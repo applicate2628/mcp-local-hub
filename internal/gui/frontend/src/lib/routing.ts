@@ -109,6 +109,12 @@ export function perClientRouting(
       // keeps the cell state machine identical for "client absent"
       // vs "client present but unconfigured"; only the header
       // affordance distinguishes them.
+      //
+      // v0.4.5 PR #208 codex r1 F2: "missing-init-blocked-symlink"
+      // also falls through here so the cell is a disabled checkbox;
+      // the matrix header further suppresses the Initialize button
+      // for this state because the hardened init pipeline would
+      // refuse the symlinked parent.
       routing[client] = "not-installed";
     }
   }

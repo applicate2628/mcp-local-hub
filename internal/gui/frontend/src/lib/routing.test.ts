@@ -207,4 +207,24 @@ describe("perClientRouting with client_config_presence", () => {
     const r = perClientRouting({}, { "claude-code": "missing-init-possible" }, true);
     expect(r["claude-code"]).toBe("not-installed");
   });
+
+  // v0.4.5 PR #208 codex r1 F2: "missing-init-blocked-symlink" also
+  // maps to "not-installed" at the cell level. The matrix header
+  // suppresses the Initialize button for this state (Servers.tsx
+  // gates the button on === "missing-init-possible" strictly), so
+  // a symlinked-parent client renders as a disabled column with no
+  // Initialize affordance.
+  it("tags missing-init-blocked-symlink as not-installed at the cell level", () => {
+    const r = perClientRouting({}, { "claude-code": "missing-init-blocked-symlink" });
+    expect(r["claude-code"]).toBe("not-installed");
+  });
+
+  it("does not classify missing-init-blocked-symlink as config-error", () => {
+    // config-error is reserved for non-IsNotExist stat failures on the
+    // config file itself (permissions, ACL anomaly). A symlinked parent
+    // is a different category — the operator's setup is valid, the
+    // pipeline just won't follow it.
+    const r = perClientRouting({}, { "claude-code": "missing-init-blocked-symlink" });
+    expect(r["claude-code"]).not.toBe("config-error");
+  });
 });
