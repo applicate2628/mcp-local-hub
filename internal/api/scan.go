@@ -70,19 +70,30 @@ func probeClientConfigPresence(opts ScanOpts) map[string]string {
 		if p.path == "" {
 			continue
 		}
-		// PR #208 deep-sec Lane B round 4 P2 closure: `os.Stat` follows
-		// symlinks, so a dangling symlink at the destination (target
-		// missing) surfaces as IsNotExist and the old logic routed it
-		// to "missing-init-possible" — letting the GUI render an
-		// Initialize button that the secure-create pipeline would then
-		// refuse with 500 INIT_FAILED. Lstat the path first: if it IS
-		// a symlink (dangling or otherwise), classify as "error" so
-		// the matrix renders the config-error diagnostic instead of an
-		// Init affordance the operator can't action without first
-		// removing the symlink.
-		if lst, lerr := os.Lstat(p.path); lerr == nil && lst.Mode()&os.ModeSymlink != 0 {
-			out[p.name] = "error"
-			continue
+		// PR #208 deep-sec Lane B round 4+5 P2 closure: `os.Stat`
+		// follows symlinks AND treats every existing entry uniformly,
+		// so several wrong-shape situations at the config path would
+		// otherwise route to "ok" or "missing-init-possible":
+		//
+		//   - dangling symlink (target missing) → IsNotExist →
+		//     "missing-init-possible" → button → secure-create refuses
+		//     (round 4)
+		//   - directory at the config path → Stat succeeds → "ok" →
+		//     matrix shows migratable cells; migrate/backup fails
+		//     later when readJSON tries to read a dir (round 5)
+		//   - named pipe / device / junction not classified as
+		//     symlink → similar story
+		//
+		// Lstat the path first: if it's a symlink OR any non-regular
+		// entry, classify as "error" so the matrix renders the
+		// config-error diagnostic instead of an Init/migrate
+		// affordance the operator can't action without removing the
+		// wrong-shape entry first.
+		if lst, lerr := os.Lstat(p.path); lerr == nil {
+			if lst.Mode()&os.ModeSymlink != 0 || !lst.Mode().IsRegular() {
+				out[p.name] = "error"
+				continue
+			}
 		}
 		if _, err := os.Stat(p.path); err == nil {
 			out[p.name] = "ok"

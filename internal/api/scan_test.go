@@ -337,6 +337,26 @@ func TestProbeClientConfigPresence_DanglingSymlink(t *testing.T) {
 	}
 }
 
+// TestProbeClientConfigPresence_DirectoryAtConfigPath pins the v0.4.5
+// deep-sec PR #208 Lane B round 5 P2 closure: a directory at the
+// config path must surface as "error", not "ok". Previously the
+// Lstat probe only rejected symlinks; a directory passed through to
+// os.Stat which succeeded and the cell was classified as "ok" —
+// migrate/backup would then fail later when adapter.readJSON tried
+// to read a directory.
+func TestProbeClientConfigPresence_DirectoryAtConfigPath(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "mcp.json")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("seed directory at config path: %v", err)
+	}
+
+	out := probeClientConfigPresence(ScanOpts{VSCodeConfigPath: path})
+	if got := out["vscode"]; got != "error" {
+		t.Errorf("directory at config path classified as %q, want \"error\"", got)
+	}
+}
+
 // TestClassifyMissingClientConfig pins the helper in isolation. It is
 // the canonical place to extend if v0.5.x adds further classification
 // (e.g., "parent-is-symlink" or "parent-not-writable").
