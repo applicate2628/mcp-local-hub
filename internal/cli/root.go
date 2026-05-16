@@ -50,6 +50,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newGuiCmd())
 	root.AddCommand(newTrayCmd())
 	root.AddCommand(newWatchdogCmd())
+	root.AddCommand(newSuperviseCmd())
 	root.AddCommand(newHubMcpCmd())
 	root.AddCommand(newMarketplaceCmd())
 	root.AddCommand(lldb.NewCommand())
