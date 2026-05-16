@@ -80,6 +80,32 @@ func TestStartWithJob_NilCmd(t *testing.T) {
 	}
 }
 
+// TestStartWithJob_NormalizesEmptyArgs verifies the nil-Args path:
+// callers may construct a Cmd directly with only Path set (per os/exec
+// docs), in which case StartWithJob must normalize Args before slicing
+// rather than panic on nil[1:].
+func TestStartWithJob_NormalizesEmptyArgs(t *testing.T) {
+	job, err := NewKillOnCloseJob()
+	if err != nil {
+		t.Fatalf("NewKillOnCloseJob: %v", err)
+	}
+	defer job.Close()
+
+	// Construct cmd without exec.Command() — empty Args.
+	cmd := &exec.Cmd{Path: `C:\Windows\System32\ping.exe`, Args: nil}
+	pid, err := StartWithJob(job, cmd)
+	if err != nil {
+		t.Fatalf("StartWithJob with nil Args should not panic: %v", err)
+	}
+	if pid <= 0 {
+		t.Fatalf("expected valid pid, got %d", pid)
+	}
+	// Cleanup: kill the spawned ping.
+	if cmd.Process != nil {
+		_ = cmd.Process.Kill()
+	}
+}
+
 // TestJob_HandleReturnsUnderlyingHandle exercises Job.Handle() — used
 // by StartWithJob to thread the job handle through the attribute list.
 func TestJob_HandleReturnsUnderlyingHandle(t *testing.T) {

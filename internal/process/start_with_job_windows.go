@@ -61,6 +61,14 @@ func StartWithJob(job *Job, cmd *exec.Cmd) (int, error) {
 	if cmd.Path == "" {
 		return 0, errors.New("StartWithJob: cmd.Path is empty (use exec.Command or set Path explicitly)")
 	}
+	// Normalize empty cmd.Args — os/exec.Cmd lets callers construct a
+	// Cmd directly with only Path set (Args left nil), in which case the
+	// argv[0]-derivation below (`cmd.Args[1:]`) would panic on nil-slice
+	// indexing. exec.Command() itself initializes Args to []string{name}
+	// internally for the same reason; we match that contract here.
+	if len(cmd.Args) == 0 {
+		cmd.Args = []string{cmd.Path}
+	}
 	jobHandle := job.Handle()
 	if jobHandle == 0 {
 		return 0, errors.New("StartWithJob: job handle is 0 (closed?)")
@@ -138,17 +146,23 @@ func StartWithJob(job *Job, cmd *exec.Cmd) (int, error) {
 		uint32(windows.CREATE_UNICODE_ENVIRONMENT)
 
 	var pi windows.ProcessInformation
+	// lpStartupInfo: take &si.StartupInfo (the embedded first field of StartupInfoEx).
+	// Windows reads this as a STARTUPINFOEX because (a) si.Cb == sizeof(StartupInfoEx),
+	// (b) creationFlags has EXTENDED_STARTUPINFO_PRESENT, and (c) the embedded layout
+	// places ProcThreadAttributeList immediately after the StartupInfo bytes with no
+	// padding. Verified against windows.StartupInfoEx struct definition in
+	// golang.org/x/sys/windows.
 	if err := windows.CreateProcess(
-		nil,                // lpApplicationName (NULL → use cmd line argv[0])
-		commandLine,        // lpCommandLine
-		nil,                // lpProcessAttributes
-		nil,                // lpThreadAttributes
-		false,              // bInheritHandles
-		creationFlags,      // dwCreationFlags
-		envPtr,             // lpEnvironment
-		cwdPtr,             // lpCurrentDirectory
-		&si.StartupInfo,    // lpStartupInfo (cast — Cb tells kernel it's StartupInfoEx)
-		&pi,                // lpProcessInformation
+		nil,             // lpApplicationName (NULL → use cmd line argv[0])
+		commandLine,     // lpCommandLine
+		nil,             // lpProcessAttributes
+		nil,             // lpThreadAttributes
+		false,           // bInheritHandles
+		creationFlags,   // dwCreationFlags
+		envPtr,          // lpEnvironment
+		cwdPtr,          // lpCurrentDirectory
+		&si.StartupInfo, // lpStartupInfo (see comment above)
+		&pi,             // lpProcessInformation
 	); err != nil {
 		return 0, fmt.Errorf("CreateProcess: %w", err)
 	}
