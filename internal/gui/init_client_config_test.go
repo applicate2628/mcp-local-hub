@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/clients"
@@ -275,15 +276,33 @@ func TestRealClientInitializer_ParentMissingError(t *testing.T) {
 	}
 }
 
-// TestRealClientInitializer_RefusesStrictMode pins the v0.4.5
-// deep-sec Lane C #1 closure: when MCPHUB_REQUIRE_SINGLE_USER_HOME=1
-// is set, the Init endpoint refuses to seed an empty stub because
-// the atomic create-new-only path bypasses the SecureWriteClientConfig
-// pipeline that strict-mode operators explicitly opted into. The
-// refusal maps to 412 STRICT_MODE_REFUSED at the HTTP layer; the
-// underlying Init returns errStrictModeRefused so the handler
-// switch statement can route it.
-func TestRealClientInitializer_RefusesStrictMode(t *testing.T) {
+// TestRealClientInitializer_StrictModeProceedsToHardenedPipeline
+// pins the v0.4.5 PR #208 codex r1 F1 closure (replacing the prior
+// TestRealClientInitializer_RefusesStrictMode contract):
+//
+// When MCPHUB_REQUIRE_SINGLE_USER_HOME=1 is set, the Init endpoint
+// no longer short-circuits with an unconditional STRICT_MODE_REFUSED.
+// Instead, it proceeds to adapter.InitEmpty() which routes through
+// the hardened SecureCreateClientConfigIfMissing pipeline (wired via
+// internal/api/client_write_init.go::secureCreateClientConfigIfMissingWithOperatorOpt).
+// That pipeline ALREADY enforces the parent-DACL gate in strict mode,
+// so strict-mode operators with owner-only parents get the empty
+// stub seeded correctly; broadened parents are rejected by the
+// underlying pipeline with `ErrSecureWriteParentInsecure`.
+//
+// Verification on most CI / dev workstations: t.TempDir is under
+// %TEMP% with Authenticated Users in its DACL, so the strict gate
+// rejects with a "parent directory not single-user safe" error AND
+// the canonical "MCPHUB_REQUIRE_SINGLE_USER_HOME is set" suffix from
+// secureCreateClientConfigIfMissingWithOperatorOpt. That outcome
+// (a) proves the strict gate is now reachable from Init (the prior
+// unconditional refusal hid it), and (b) confirms the error message
+// is the actionable one operators need.
+//
+// If a future tmpfs ACL ever happens to be owner-only, the success
+// branch instead verifies that the stub gets written through the
+// hardened pipeline under strict mode.
+func TestRealClientInitializer_StrictModeProceedsToHardenedPipeline(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
@@ -296,31 +315,55 @@ func TestRealClientInitializer_RefusesStrictMode(t *testing.T) {
 	if !ok {
 		t.Skipf("vscode adapter not constructible in test env")
 	}
-	// Pre-create the parent so the parent-stat check passes; the
-	// strict-mode refusal should fire BEFORE the parent stat to make
-	// the gap diagnostic clearer.
-	if err := os.MkdirAll(filepath.Dir(vscode.ConfigPath()), 0o755); err != nil {
+	// Pre-create the parent so the parent-stat check passes.
+	if err := os.MkdirAll(filepath.Dir(vscode.ConfigPath()), 0o700); err != nil {
 		t.Fatalf("mkdir parent: %v", err)
 	}
 
 	init := realClientInitializer{}
-	_, err := init.Init("vscode")
-	if !errors.Is(err, errStrictModeRefused) {
-		t.Errorf("err=%v, want wraps errStrictModeRefused", err)
+	res, err := init.Init("vscode")
+	if err == nil {
+		// Owner-only-parent path: stub must be written.
+		if !res.Created {
+			t.Errorf("Init under strict mode Created=false on owner-only parent, want true")
+		}
+		if _, statErr := os.Stat(vscode.ConfigPath()); statErr != nil {
+			t.Errorf("strict-mode Init did not create %s: %v", vscode.ConfigPath(), statErr)
+		}
+		return
 	}
-
-	// Verify NO stub was created — refusal must be honored before
-	// any disk write.
+	// Broadened-parent path: the strict gate must reject with the
+	// canonical message. F1 pre-fix this branch was unreachable
+	// because the GUI handler short-circuited every strict-mode
+	// call. The presence of this error proves strict mode is now
+	// enforced by the hardened pipeline, not by an early endpoint
+	// refusal.
+	if !strings.Contains(err.Error(), "MCPHUB_REQUIRE_SINGLE_USER_HOME") {
+		t.Fatalf("strict-mode error missing canonical message; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "parent") {
+		t.Fatalf("strict-mode error not about parent dir; got %v", err)
+	}
+	// Verify NO stub leaked into the broadened parent.
 	if _, statErr := os.Stat(vscode.ConfigPath()); statErr == nil {
-		t.Errorf("strict-mode refusal still created %s; init must refuse before write", vscode.ConfigPath())
+		t.Errorf("strict-mode rejection still created %s; pipeline must refuse before write", vscode.ConfigPath())
 	}
 }
 
-// TestInitClientConfig_StrictModeMapsTo412 verifies the handler-level
-// status-code routing for the strict-mode refusal.
-func TestInitClientConfig_StrictModeMapsTo412(t *testing.T) {
+// TestInitClientConfig_StrictModeErrorMapsTo500 verifies that the
+// strict-mode error (now surfaced from the hardened pipeline, not
+// the prior endpoint short-circuit) maps to 500 INIT_FAILED through
+// the default branch of the handler switch. The frontend reads the
+// error body (which includes the canonical strict-mode message) to
+// surface an actionable diagnostic.
+//
+// v0.4.5 PR #208 codex r1 F1 closure: pre-fix this mapped to 412
+// STRICT_MODE_REFUSED at the handler layer; post-fix the handler is
+// free of strict-mode-specific routing because the strict refusal
+// is now an INIT_FAILED with the underlying pipeline's error body.
+func TestInitClientConfig_StrictModeErrorMapsTo500(t *testing.T) {
 	fi := &fakeClientInitializer{
-		err: fmt.Errorf("%w: strict mode active", errStrictModeRefused),
+		err: fmt.Errorf("init vscode: secure write: parent directory not single-user safe: SID S-1-5-11 grants access; MCPHUB_REQUIRE_SINGLE_USER_HOME is set, so the strict parent-dir gate is enforced for init-stub creation"),
 	}
 	s := NewServer(Config{})
 	s.clientInit = fi
@@ -331,15 +374,20 @@ func TestInitClientConfig_StrictModeMapsTo412(t *testing.T) {
 	rec := httptest.NewRecorder()
 	s.mux.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusPreconditionFailed {
-		t.Fatalf("status = %d, want 412; body=%q", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body=%q", rec.Code, rec.Body.String())
 	}
 	var resp map[string]string
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	if resp["code"] != "STRICT_MODE_REFUSED" {
-		t.Errorf("code=%q, want STRICT_MODE_REFUSED", resp["code"])
+	if resp["code"] != "INIT_FAILED" {
+		t.Errorf("code=%q, want INIT_FAILED", resp["code"])
+	}
+	// Error message must propagate so the GUI can render actionable
+	// guidance (mentions strict-mode env var + parent-dir gate).
+	if !strings.Contains(resp["error"], "MCPHUB_REQUIRE_SINGLE_USER_HOME") {
+		t.Errorf("error body missing strict-mode hint: %q", resp["error"])
 	}
 }
 

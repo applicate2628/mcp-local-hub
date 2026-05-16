@@ -36,7 +36,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/clients"
 )
 
@@ -68,16 +67,6 @@ var errUnknownClient = errors.New("unknown client")
 // PARENT_MISSING — the GUI is expected to refresh its scan.
 var errParentMissing = errors.New("client config parent directory missing")
 
-// errStrictModeRefused is returned when MCPHUB_REQUIRE_SINGLE_USER_HOME=1
-// is set. The Init endpoint refuses to seed an empty stub through the
-// non-hardened temp+hardlink path because strict-mode operators
-// explicitly opted into the SecureWriteClientConfig pipeline's
-// parent-DACL gate + allowlist-only file DACL. Mapped to HTTP 412 /
-// STRICT_MODE_REFUSED so the frontend surfaces the operational code.
-// See CLAUDE.md "Init-time stubs" subsection for the v0.4.6+
-// follow-up plan.
-var errStrictModeRefused = errors.New("strict-mode refused")
-
 // clientInitializer is the narrow interface that the
 // /api/init-client-config handler consumes. realClientInitializer
 // is the production adapter; tests inject their own.
@@ -87,47 +76,35 @@ type clientInitializer interface {
 
 type realClientInitializer struct{}
 
-// Init looks up the adapter for `client`, refuses if strict-mode
-// hardening is enabled (v0.4.5 deep-sec Lane C #1 — see CLAUDE.md
-// "Hardened client-config writes" section for the gap rationale),
-// verifies the immediate parent directory exists, and dispatches to
-// `adapter.InitEmpty()` which returns an honest "created" flag (true
-// iff this call wrote the stub bytes; false iff a regular file was
-// already present — covers second-click and publish-race-lost cases
-// without the pre-stat race window of the previous implementation).
+// Init looks up the adapter for `client`, verifies the immediate
+// parent directory exists, and dispatches to `adapter.InitEmpty()`
+// which returns an honest "created" flag (true iff this call wrote
+// the stub bytes; false iff a regular file was already present —
+// covers second-click and publish-race-lost cases without the
+// pre-stat race window of the previous implementation).
+//
+// v0.4.5 PR #208 codex r1 F1 closure: the prior implementation
+// short-circuited in strict mode (MCPHUB_REQUIRE_SINGLE_USER_HOME=1)
+// with a STRICT_MODE_REFUSED error. That refusal was load-bearing
+// when the Init pipeline used a non-hardened temp+hardlink path,
+// but the Lane C #1 closure (commit 4be7b9d / `SecureCreateClientConfigIfMissing`)
+// now routes adapter `InitEmpty()` through a fully hardened
+// handle-relative pipeline that enforces the SAME parent-DACL gate
+// as `SecureWriteClientConfig` — see internal/api/secure_create_client_config.go
+// and its Windows/POSIX impl. In strict mode the hardened pipeline
+// returns `ErrSecureWriteParentInsecure` on broadened parents, which
+// the `secureCreateClientConfigIfMissingWithOperatorOpt` wrapper in
+// internal/api/client_write_init.go propagates to the GUI as
+// INIT_FAILED with the strict-mode message. Strict-mode operators
+// with owner-only parent DACLs now see the Initialize affordance
+// work as expected, instead of an unconditional "use the CLI"
+// fallback that made the matrix UX inconsistent with the actual
+// write contract.
 func (realClientInitializer) Init(client string) (*InitClientConfigResult, error) {
 	all := clients.AllClients()
 	adapter, ok := all[client]
 	if !ok {
 		return nil, fmt.Errorf("%w: %q", errUnknownClient, client)
-	}
-	// v0.4.5 deep-sec Lane C #1 closure: in strict mode the operator
-	// has explicitly opted into the SecureWriteClientConfig pipeline's
-	// parent-DACL gate + allowlist-DACL on every write. The Init
-	// helper bypasses that pipeline because it has to (atomic
-	// create-new is mutually exclusive with the pipeline's replacing
-	// rename), so in strict mode the Init affordance silently
-	// degrades to a non-hardened path — non-allowlisted principals
-	// inheriting write rights from the parent could then modify the
-	// newly seeded config and inject client-consumed MCP entries.
-	// Refuse explicitly until v0.4.6+ ships a strict-mode-compatible
-	// SecureCreateClientConfigIfMissing helper. The operator still
-	// has `mcphub register` / `mcphub install` which route through
-	// the hardened pipeline.
-	// Use the canonical strict-mode predicate from internal/api so the
-	// endpoint accepts the same env-var values the secure-write
-	// pipeline does ("1" or "true", case-insensitive, trimmed). A
-	// narrow `== "1"` check would fail-open on values the canonical
-	// reader treats as enabled. Deep-sec PR #208 Lane C #2 closure.
-	if api.OperatorRequiresSingleUserHome() {
-		return nil, fmt.Errorf(
-			"%w: strict mode (MCPHUB_REQUIRE_SINGLE_USER_HOME enabled) is active; "+
-				"Initialize affordance routes through a strict-mode-compatible "+
-				"SecureCreateClientConfigIfMissing helper that ALSO enforces "+
-				"the parent-DACL gate. Use `mcphub register` or `mcphub install` "+
-				"to seed %s through the hardened SecureWriteClientConfig pipeline.",
-			errStrictModeRefused, client,
-		)
 	}
 	path := adapter.ConfigPath()
 	parent := filepath.Dir(path)
@@ -195,9 +172,12 @@ func registerInitClientConfigRoutes(s *Server) {
 				writeAPIError(w, err, http.StatusNotFound, "UNKNOWN_CLIENT")
 			case errors.Is(err, errParentMissing):
 				writeAPIError(w, err, http.StatusPreconditionFailed, "PARENT_MISSING")
-			case errors.Is(err, errStrictModeRefused):
-				writeAPIError(w, err, http.StatusPreconditionFailed, "STRICT_MODE_REFUSED")
 			default:
+				// v0.4.5 PR #208 codex r1 F1: strict-mode broadened-parent
+				// rejections from SecureCreateClientConfigIfMissing surface
+				// here (wrapped through secureCreateClientConfigIfMissingWithOperatorOpt's
+				// strict-error path) as INIT_FAILED with the canonical
+				// strict-mode message describing the parent-DACL gate.
 				writeAPIError(w, err, http.StatusInternalServerError, "INIT_FAILED")
 			}
 			return
