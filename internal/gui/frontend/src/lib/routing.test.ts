@@ -191,4 +191,20 @@ describe("perClientRouting with client_config_presence", () => {
     expect(byName["time-server"].routing["claude-code"]).toBe("not-installed");
     expect(byName["unknown-default"].routing["claude-code"]).toBe("not-installed");
   });
+
+  // v0.4.5 init-button: "missing-init-possible" maps to "not-installed"
+  // at the per-cell routing level (cells stay disabled), but the
+  // separate per-column header affordance picks up the same state to
+  // render the Initialize button. The routing test below pins the
+  // first half of that contract — the header behavior is tested
+  // separately through the ServersScreen test.
+  it("tags missing-init-possible as not-installed at the cell level", () => {
+    const r = perClientRouting({}, { "claude-code": "missing-init-possible" });
+    expect(r["claude-code"]).toBe("not-installed");
+  });
+
+  it("tags missing-init-possible as not-installed even when can_migrate=true", () => {
+    const r = perClientRouting({}, { "claude-code": "missing-init-possible" }, true);
+    expect(r["claude-code"]).toBe("not-installed");
+  });
 });

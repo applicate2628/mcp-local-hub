@@ -408,6 +408,7 @@ type Server struct {
 	settings          settingsAPI
 	backups           backupsAPI
 	cleanup           cleanupAPI
+	clientInit        clientInitializer
 
 	// Weekly-schedule swap test seams (memo D8). Production: nil — the
 	// handler falls back to api.SwapWeeklyTrigger and a real
@@ -475,6 +476,7 @@ func NewServer(cfg Config) *Server {
 	s.settings = realSettingsAPI{}
 	s.backups = realBackupsAPI{}
 	s.cleanup = realCleanupAPI{}
+	s.clientInit = realClientInitializer{}
 	registerPingRoutes(s)
 	registerAssetRoutes(s)
 	registerScanRoutes(s)
@@ -497,6 +499,7 @@ func NewServer(cfg Config) *Server {
 	registerExportBundleRoutes(s)
 	registerCleanupRoutes(s)
 	registerForceKillRoutes(s)
+	registerInitClientConfigRoutes(s)
 	return s
 }
 

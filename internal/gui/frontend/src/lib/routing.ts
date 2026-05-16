@@ -92,6 +92,15 @@ export function perClientRouting(
     if (state === "ok" && canMigrate) {
       routing[client] = "available";
     } else {
+      // v0.4.5 init-button: "missing-init-possible" still maps to
+      // "not-installed" at the per-cell routing level — the matrix
+      // cell stays a disabled checkbox until the operator clicks
+      // the per-column Initialize button in the header (which writes
+      // the empty stub and triggers a scan refresh, after which the
+      // state flips to "ok" and the cells become "available"). This
+      // keeps the cell state machine identical for "client absent"
+      // vs "client present but unconfigured"; only the header
+      // affordance distinguishes them.
       routing[client] = "not-installed";
     }
   }

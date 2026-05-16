@@ -1,9 +1,15 @@
 import { useEffect, useState } from "preact/hooks";
-import { fetchOrThrow } from "../api";
+import { fetchOrThrow, postInitClientConfig } from "../api";
 import { useEventSource } from "../hooks/useEventSource";
 import { collectServers } from "../lib/routing";
 import { aggregateStatus, stateShape } from "../lib/status";
-import type { DaemonStatus, ScanResult, ServerRow, Routing } from "../types";
+import type {
+  ClientConfigState,
+  DaemonStatus,
+  ScanResult,
+  ServerRow,
+  Routing,
+} from "../types";
 
 const CLIENTS = [
   "claude-code",
@@ -48,6 +54,24 @@ export function ServersScreen() {
   const [servers, setServers] = useState<ServerRow[] | null>(null);
   const [statusByServer, setStatusByServer] = useState<Record<string, { state: string; port: number | null }>>({});
   const [error, setError] = useState<string | null>(null);
+  // v0.4.5 init-button: client_config_presence drives the per-column
+  // "Initialize <client>" header affordance. Stored alongside servers
+  // so applyChanges → refresh re-resolves into the new "ok" state and
+  // the button disappears once the empty stub lands on disk.
+  const [clientConfigPresence, setClientConfigPresence] = useState<
+    Record<string, ClientConfigState>
+  >({});
+  // Per-client "initializing" flag: the operator clicked the
+  // Initialize button and the POST is in flight. Used to disable the
+  // button + render a spinner-like dim state so double-clicks during
+  // the brief network roundtrip do not enqueue redundant inits.
+  const [initBusy, setInitBusy] = useState<Record<string, boolean>>({});
+  // Banner that surfaces the most recent init result (success or
+  // failure). Cleared automatically on the next /api/scan refresh so
+  // a successful init doesn't linger across screen interactions; an
+  // error message persists until the operator clicks Initialize again
+  // or navigates away.
+  const [initMsg, setInitMsg] = useState<{ text: string; kind: "ok" | "error" } | null>(null);
   const [dirty, setDirty] = useState<DirtyMap>(new Map());
   // PR #22 retry-queue UX fix: persist last-Apply outcomes so toggleCell
   // can detect cells with a pending failed/gated retry and preserve
@@ -100,6 +124,13 @@ export function ServersScreen() {
           return;
         }
         setServers(collectServers(scan));
+        setClientConfigPresence(scan.client_config_presence ?? {});
+        // Clear any success banner once the authoritative refresh lands
+        // (the matrix has already redrawn with the new "ok" state).
+        // Error banners stay sticky so the operator sees the failure
+        // until they retry — refreshing should NOT mask a recent
+        // PARENT_MISSING / INIT_FAILED report.
+        setInitMsg((msg) => (msg && msg.kind === "ok" ? null : msg));
         const agg = aggregateStatus(status);
         const flat: Record<string, { state: string; port: number | null }> = {};
         for (const [name, a] of Object.entries(agg)) {
@@ -125,6 +156,33 @@ export function ServersScreen() {
       cancelled = true;
     };
   }, [reloadToken]);
+
+  async function initializeClient(client: string) {
+    if (initBusy[client]) return;
+    setInitBusy((prev) => ({ ...prev, [client]: true }));
+    setInitMsg(null);
+    try {
+      const res = await postInitClientConfig(client);
+      setInitMsg({
+        text: res.created
+          ? `Initialized ${client} config at ${res.path}.`
+          : `${client} config already existed at ${res.path}; refreshed.`,
+        kind: "ok",
+      });
+      // Trigger /api/scan refresh — collectServers reruns with the new
+      // "ok" presence and the column's cells flip to "available"
+      // (assuming the affected rows are migratable).
+      setReloadToken((n) => n + 1);
+    } catch (err) {
+      setInitMsg({ text: (err as Error).message, kind: "error" });
+    } finally {
+      setInitBusy((prev) => {
+        const next = { ...prev };
+        delete next[client];
+        return next;
+      });
+    }
+  }
 
   function toggleCell(server: string, client: string, nextChecked: boolean, initialChecked: boolean) {
     setDirty((prev) => {
@@ -424,13 +482,43 @@ export function ServersScreen() {
           ))}
         </ul>
       )}
+      {initMsg && (
+        <div
+          class={initMsg.kind === "error" ? "error" : ""}
+          data-testid="init-client-msg"
+          style="margin:8px 0"
+        >
+          {initMsg.text}
+        </div>
+      )}
       <table class="servers-matrix">
         <thead>
           <tr>
             <th>Server</th>
-            {CLIENTS.map((c) => (
-              <th key={c}>{c}</th>
-            ))}
+            {CLIENTS.map((c) => {
+              const presence = clientConfigPresence[c];
+              const canInit = presence === "missing-init-possible";
+              const busy = initBusy[c] === true;
+              return (
+                <th key={c}>
+                  <div class="matrix-col-header">
+                    <span>{c}</span>
+                    {canInit && (
+                      <button
+                        type="button"
+                        class="matrix-col-init-btn"
+                        data-testid={`init-client-${c}`}
+                        disabled={busy}
+                        title={`${c}'s MCP config file is not present on this host, but its parent directory exists. Click to seed an empty stub so this column becomes active.`}
+                        onClick={() => initializeClient(c)}
+                      >
+                        {busy ? "Init…" : "Initialize"}
+                      </button>
+                    )}
+                  </div>
+                </th>
+              );
+            })}
             <th>Port</th>
             <th>State</th>
           </tr>

@@ -255,3 +255,83 @@ func firstPerSessionServer(t *testing.T) string {
 	t.Fatalf("perSessionServers is empty; TestClassify expected at least one entry")
 	return ""
 }
+
+// TestProbeClientConfigPresence_StateMachine pins the three-way
+// classification probeClientConfigPresence emits in v0.4.5+:
+//   - "ok"                     : file present on disk
+//   - "missing-init-possible"  : file absent but parent directory
+//                                exists (operator has the client
+//                                installed; GUI Initialize button is
+//                                offered)
+//   - "missing"                : neither file nor parent dir exists
+//                                (client genuinely not installed)
+//
+// The frontend gates the per-column "Initialize" affordance on
+// state == "missing-init-possible", so this contract is part of the
+// UI's behavior.
+func TestProbeClientConfigPresence_StateMachine(t *testing.T) {
+	tmp := t.TempDir()
+
+	// vscode: parent dir exists, file absent → missing-init-possible.
+	vscodeParent := filepath.Join(tmp, "Code", "User")
+	if err := os.MkdirAll(vscodeParent, 0o755); err != nil {
+		t.Fatalf("mkdir vscode parent: %v", err)
+	}
+	vscodePath := filepath.Join(vscodeParent, "mcp.json")
+
+	// cursor: parent dir DOES NOT exist → missing (genuine "not installed").
+	cursorPath := filepath.Join(tmp, "no-such-dir", "mcp.json")
+
+	// claude-code: file present → ok.
+	claudePath := filepath.Join(tmp, ".claude.json")
+	if err := os.WriteFile(claudePath, []byte(`{"mcpServers":{}}`), 0o600); err != nil {
+		t.Fatalf("write claude.json: %v", err)
+	}
+
+	// codex-cli: empty (not passed) — must be omitted from the result map.
+	out := probeClientConfigPresence(ScanOpts{
+		VSCodeConfigPath:  vscodePath,
+		CursorConfigPath:  cursorPath,
+		ClaudeConfigPath:  claudePath,
+		// CodexConfigPath intentionally omitted.
+	})
+
+	if got := out["vscode"]; got != "missing-init-possible" {
+		t.Errorf("vscode (parent dir present, file absent) = %q, want missing-init-possible", got)
+	}
+	if got := out["cursor"]; got != "missing" {
+		t.Errorf("cursor (parent dir absent) = %q, want missing", got)
+	}
+	if got := out["claude-code"]; got != "ok" {
+		t.Errorf("claude-code (file present) = %q, want ok", got)
+	}
+	if _, ok := out["codex-cli"]; ok {
+		t.Errorf("codex-cli should not appear in result when path is empty; got %v", out["codex-cli"])
+	}
+}
+
+// TestClassifyMissingClientConfig pins the helper in isolation. It is
+// the canonical place to extend if v0.5.x adds further classification
+// (e.g., "parent-is-symlink" or "parent-not-writable").
+func TestClassifyMissingClientConfig(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Case: parent dir is a directory.
+	if got := classifyMissingClientConfig(filepath.Join(tmp, "mcp.json")); got != "missing-init-possible" {
+		t.Errorf("file in existing dir: got %q, want missing-init-possible", got)
+	}
+
+	// Case: parent does not exist.
+	if got := classifyMissingClientConfig(filepath.Join(tmp, "nope", "mcp.json")); got != "missing" {
+		t.Errorf("file in non-existent parent: got %q, want missing", got)
+	}
+
+	// Case: parent path points at a file (not a directory).
+	regularFile := filepath.Join(tmp, "regular")
+	if err := os.WriteFile(regularFile, []byte("not a dir"), 0o600); err != nil {
+		t.Fatalf("seed regular file: %v", err)
+	}
+	if got := classifyMissingClientConfig(filepath.Join(regularFile, "mcp.json")); got != "missing" {
+		t.Errorf("parent-is-file: got %q, want missing", got)
+	}
+}

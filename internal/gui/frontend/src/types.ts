@@ -18,14 +18,23 @@ export interface ScanResult {
   at: string;
   entries: ScanEntry[] | null;
   // Bug-bash A2 (#13): per-client config file state, independent of
-  // per-entry client_presence. Keys are client names; values are
-  // "ok" | "missing" | "error". Frontend uses this to render a cell
-  // as "available" (enabled, unchecked) when the cell's client config
-  // file exists but has no entry for this particular server.
+  // per-entry client_presence. Keys are client names; values from
+  // the ClientConfigState union below. Frontend uses this to render a
+  // cell as "available" (enabled, unchecked) when the cell's client
+  // config file exists but has no entry for this particular server.
+  //
+  // v0.4.5 init-button: the additional "missing-init-possible" state
+  // surfaces a per-column "Initialize <client>" affordance in the
+  // matrix header so the operator can seed the empty stub from the
+  // GUI without dropping to the shell.
   client_config_presence?: Record<string, ClientConfigState>;
 }
 
-export type ClientConfigState = "ok" | "missing" | "error";
+export type ClientConfigState =
+  | "ok"
+  | "missing-init-possible"
+  | "missing"
+  | "error";
 
 export interface ScanEntry {
   name: string;

@@ -63,3 +63,34 @@ func fallbackWriteConfigFile(path string, contents []byte) error {
 	}
 	return os.WriteFile(path, contents, 0o600)
 }
+
+// EnsureClientConfigStub is the canonical helper for adapter
+// InitEmpty() implementations (v0.4.5 init-button feature). It creates
+// `path` populated with `stub` if and only if the file does not
+// already exist. Parent directories are auto-created (0755), and the
+// final write routes through WriteConfigFile so production inherits
+// the SecureWriteClientConfig handle-relative + DACL-bound pipeline.
+//
+// Idempotent: if the file is already present, returns nil without
+// touching its bytes.
+//
+// Callers that want to gate on "parent must already exist" (e.g. the
+// /api/init-client-config endpoint, which refuses to create a fresh
+// `~/.cursor/` or `%APPDATA%\Code\User\` tree on a host where the
+// client is not actually installed) MUST verify parent presence
+// before calling — this helper is intentionally permissive so it can
+// also serve adapter BackupKeep paths where seeding an empty stub
+// from scratch is the documented behavior.
+func EnsureClientConfigStub(path string, stub []byte) error {
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if dir := filepath.Dir(path); dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	return WriteConfigFile(path, stub)
+}

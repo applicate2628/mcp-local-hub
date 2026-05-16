@@ -89,6 +89,14 @@ main { padding: var(--screen-padding); overflow: auto; }
 .servers-matrix th, .servers-matrix td { border: 1px solid var(--border); padding: var(--cell-padding-y) var(--cell-padding-x); text-align: left; }
 .servers-matrix thead th { background: var(--sidebar-bg); font-weight: 500; }
 .servers-matrix input[type="checkbox"] { margin: 0; }
+/* v0.4.5 init-button: header cells with a "missing-init-possible"
+   client config render a compact Initialize affordance below the
+   client name. The flex column layout keeps the existing header text
+   horizontally aligned with neighbouring th cells regardless of
+   whether the button is present. */
+.matrix-col-header { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.matrix-col-init-btn { font-size: 0.8em; padding: 2px 6px; cursor: pointer; }
+.matrix-col-init-btn:disabled { cursor: progress; opacity: 0.6; }
 .error { color: var(--danger); }
 
 /* --- Dashboard cards --- */

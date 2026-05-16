@@ -128,13 +128,22 @@ type ScanResult struct {
 	//
 	// Keys are client names (claude-code, codex-cli, cursor, vscode,
 	// gemini-cli, qwen-cli, antigravity). Values:
-	//   "ok"      config file exists, stat succeeded.
-	//   "missing" config file does not exist on disk.
-	//   "error"   config file exists but stat failed (permissions, etc.).
+	//   "ok"                    config file exists, stat succeeded.
+	//   "missing-init-possible" config file does not exist, but its
+	//                           parent directory does — operator can
+	//                           initialize via POST /api/init-client-config
+	//                           to seed an empty stub.
+	//   "missing"               neither file nor parent directory exists
+	//                           (client genuinely not installed).
+	//   "error"                 stat returned an unexpected error
+	//                           (permissions, etc.).
 	//
-	// Frontend uses this to render an "available (enabled, unchecked)"
+	// Frontend uses "ok" to render an "available (enabled, unchecked)"
 	// matrix cell for a manifested server when the cell's client is "ok"
-	// but absent from that entry's per-server client_presence.
+	// but absent from that entry's per-server client_presence. The
+	// "missing-init-possible" state additionally surfaces a per-column
+	// "Initialize <client>" affordance in the matrix header so the
+	// operator can create the empty stub without leaving the GUI.
 	ClientConfigPresence map[string]string `json:"client_config_presence,omitempty"`
 }
 

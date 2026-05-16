@@ -49,6 +49,25 @@ type Client interface {
 	// are no-ops and Backup returns ErrClientNotInstalled.
 	Exists() bool
 
+	// InitEmpty creates the config file with an empty client-shaped stub
+	// (e.g. `{"mcpServers": {}}` for JSON-based clients, `[mcp_servers]\n`
+	// for codex-cli's TOML) if and only if the file does not already
+	// exist. Used by the Servers matrix "Initialize" affordance (v0.4.5)
+	// so an operator who has the client installed but has never created
+	// an MCP config can prepare it from the GUI without leaving the app.
+	//
+	// Idempotent: if the file is already present, InitEmpty returns nil
+	// without touching it. The write goes through WriteConfigFile so
+	// production inherits the SecureWriteClientConfig handle-relative +
+	// DACL-bound pipeline.
+	//
+	// Callers (the /api/init-client-config handler) are responsible for
+	// gating on parent-directory presence so InitEmpty does not have
+	// the surprising side effect of creating a `~/.cursor/` or
+	// `%APPDATA%\Code\User\` tree on a host where the client is not
+	// actually installed.
+	InitEmpty() error
+
 	// Backup copies the current config to a sibling file ending in ".bak-mcp-local-hub-<timestamp>"
 	// and returns the path. Overwrites any previous backup with the same timestamp-second.
 	//

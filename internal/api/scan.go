@@ -40,6 +40,16 @@ type ScanOpts struct {
 // this top-level map and renders an "available" cell whenever the
 // client is "ok" even with no server entries.
 //
+// v0.4.5 init-button: distinguish "config file absent but the client's
+// root directory exists" (the user has the client installed, just
+// never created an MCP config — `missing-init-possible`, GUI shows
+// an Initialize affordance) from "neither the file nor its parent
+// directory exists" (`missing`, GUI keeps the column disabled because
+// creating the parent tree would be a surprising side effect of
+// a refresh / one-click action). The distinction is parent-dir
+// granular: the immediate dirname must stat successfully and be a
+// directory.
+//
 // Only paths the caller actually passed via ScanOpts are probed —
 // keeps tempdir-based tests deterministic.
 func probeClientConfigPresence(opts ScanOpts) map[string]string {
@@ -63,12 +73,27 @@ func probeClientConfigPresence(opts ScanOpts) map[string]string {
 		if _, err := os.Stat(p.path); err == nil {
 			out[p.name] = "ok"
 		} else if os.IsNotExist(err) {
-			out[p.name] = "missing"
+			out[p.name] = classifyMissingClientConfig(p.path)
 		} else {
 			out[p.name] = "error"
 		}
 	}
 	return out
+}
+
+// classifyMissingClientConfig returns "missing-init-possible" when the
+// config file's immediate parent directory exists, "missing" otherwise.
+// Split out for testability and to keep probeClientConfigPresence flat.
+func classifyMissingClientConfig(path string) string {
+	parent := filepath.Dir(path)
+	if parent == "" || parent == "." {
+		return "missing"
+	}
+	st, err := os.Stat(parent)
+	if err == nil && st.IsDir() {
+		return "missing-init-possible"
+	}
+	return "missing"
 }
 
 // perSessionServers are MCP servers whose sessions must remain isolated
