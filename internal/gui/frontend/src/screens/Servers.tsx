@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { fetchOrThrow, postInitClientConfig, InitClientConfigError } from "../api";
 import { useEventSource } from "../hooks/useEventSource";
 import { collectServers } from "../lib/routing";
@@ -113,6 +113,19 @@ export function ServersScreen() {
   // separate red-border outcome map.
   const [applyGen, setApplyGen] = useState<number>(0);
 
+  // PR #208 deep-sec Lane A round 7 P2 closure: mountedRef guards
+  // post-await setState calls inside initializeClient against the
+  // "user navigated away mid-POST" race. The scan useEffect already
+  // has its own local `cancelled` flag; the click-handler promise
+  // needs its own signal because it does not own the effect scope.
+  const mountedRef = useRef<boolean>(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   // Tray "Rescan client configs" — backend publishes clients-rescan,
   // every open Servers tab re-fetches. Bumping reloadToken composes
   // with the existing useEffect dep so the same path serves both
@@ -174,6 +187,14 @@ export function ServersScreen() {
     setInitMsg(null);
     try {
       const res = await postInitClientConfig(client);
+      // PR #208 deep-sec Lane A round 7 P2 closure: skip every
+      // post-await setState if the component has unmounted (user
+      // navigated away from the Servers screen between click and
+      // POST settle). React/Preact does not raise on unmounted
+      // setState in production but the leftover state update is
+      // wasted work and the unmount-then-remount flow could pick
+      // up the stale banner if React re-uses the fiber slot.
+      if (!mountedRef.current) return;
       setInitMsg({
         text: res.created
           ? `Initialized ${client} config at ${res.path}.`
@@ -185,6 +206,7 @@ export function ServersScreen() {
       // (assuming the affected rows are migratable).
       setReloadToken((n) => n + 1);
     } catch (err) {
+      if (!mountedRef.current) return;
       setInitMsg({ text: (err as Error).message, kind: "error" });
       // PR #208 deep-sec Lane B round 4 P2 closure: when the
       // backend says PARENT_MISSING (412), the cached
@@ -199,11 +221,15 @@ export function ServersScreen() {
         setReloadToken((n) => n + 1);
       }
     } finally {
-      setInitBusy((prev) => {
-        const next = { ...prev };
-        delete next[client];
-        return next;
-      });
+      // Only clear busy if still mounted; otherwise the next mount
+      // starts with a clean state via useState default anyway.
+      if (mountedRef.current) {
+        setInitBusy((prev) => {
+          const next = { ...prev };
+          delete next[client];
+          return next;
+        });
+      }
     }
   }
 
