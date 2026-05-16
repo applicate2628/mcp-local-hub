@@ -70,27 +70,44 @@ func probeClientConfigPresence(opts ScanOpts) map[string]string {
 		if p.path == "" {
 			continue
 		}
-		// PR #208 deep-sec Lane B round 4+5 P2 closure: `os.Stat`
-		// follows symlinks AND treats every existing entry uniformly,
-		// so several wrong-shape situations at the config path would
-		// otherwise route to "ok" or "missing-init-possible":
+		// PR #208 deep-sec Lane B rounds 4-6 P2 closure: Lstat-first
+		// probe + symlink resolution that matches the write pipeline's
+		// default-relax contract.
 		//
-		//   - dangling symlink (target missing) → IsNotExist →
-		//     "missing-init-possible" → button → secure-create refuses
-		//     (round 4)
-		//   - directory at the config path → Stat succeeds → "ok" →
-		//     matrix shows migratable cells; migrate/backup fails
-		//     later when readJSON tries to read a dir (round 5)
-		//   - named pipe / device / junction not classified as
-		//     symlink → similar story
+		// Wrong-shape entries to refuse:
+		//   - directory / named pipe / device / junction at config path
+		//     → "error" (round 5; matrix shows config-error diagnostic
+		//     instead of an "ok" cell that migrate/backup will choke on
+		//     when readJSON sees a non-regular target)
+		//   - dangling symlink (default mode) → "error" (round 4; init
+		//     button + secure-create refusal lose otherwise)
+		//   - any symlink (strict mode) → "error" (the secure-write
+		//     pipeline refuses symlinks in strict mode; presence must
+		//     match)
 		//
-		// Lstat the path first: if it's a symlink OR any non-regular
-		// entry, classify as "error" so the matrix renders the
-		// config-error diagnostic instead of an Init/migrate
-		// affordance the operator can't action without removing the
-		// wrong-shape entry first.
+		// Wrong-shape entries to PRESERVE as "ok" (round 6):
+		//   - symlink-to-existing-regular-file in default mode → "ok".
+		//     Default-relax explicitly supports the dotfile-symlink
+		//     pattern (e.g., `~/.codex/config.toml -> E:\dotfiles\...`)
+		//     via `resolveSymlinkForSecureWrite` in
+		//     internal/api/client_write_init.go. Marking such configs
+		//     as "error" would break real-world setups where the
+		//     write contract DOES support the symlink.
 		if lst, lerr := os.Lstat(p.path); lerr == nil {
-			if lst.Mode()&os.ModeSymlink != 0 || !lst.Mode().IsRegular() {
+			isSymlink := lst.Mode()&os.ModeSymlink != 0
+			if !lst.Mode().IsRegular() && !isSymlink {
+				out[p.name] = "error"
+				continue
+			}
+			if isSymlink {
+				if OperatorRequiresSingleUserHome() {
+					out[p.name] = "error"
+					continue
+				}
+				if st, err := os.Stat(p.path); err == nil && st.Mode().IsRegular() {
+					out[p.name] = "ok"
+					continue
+				}
 				out[p.name] = "error"
 				continue
 			}
@@ -139,40 +156,61 @@ var perSessionServers = map[string]bool{
 
 // ScanFrom builds a unified cross-client view. Exposed (rather than Scan) so
 // tests can pass arbitrary paths.
+//
+// PR #208 deep-sec Lane B round 6 P2 closure: presence is computed
+// FIRST so adapter reads can be skipped for clients whose config
+// path is not a readable regular file (directory, FIFO, dangling
+// symlink, etc.). Previously the per-adapter `scan*` calls hit
+// `os.ReadFile` before presence was known, and any non-IsNotExist
+// read error propagated as a whole-response 500 SCAN_FAILED —
+// hiding the per-client diagnostic the frontend needs to render the
+// `config-error` cell. With the reorder, a wrong-shape entry at one
+// client's config path leaves the rest of the scan intact and the
+// per-client diagnostic surfaces in `client_config_presence`.
 func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 	entries := map[string]*ScanEntry{}
+	presence := probeClientConfigPresence(opts)
+	scanIfReadable := func(name string) bool {
+		// "ok" is the only state for which an adapter read is
+		// guaranteed to find a regular file. "missing" /
+		// "missing-init-possible" / "error" all imply that the
+		// adapter's `os.ReadFile` would either return IsNotExist
+		// (which adapters already absorb to "no entries") or
+		// hit the wrong-shape failure we want to avoid.
+		return presence[name] == "ok"
+	}
 
-	if opts.ClaudeConfigPath != "" {
+	if opts.ClaudeConfigPath != "" && scanIfReadable("claude-code") {
 		if err := scanClaude(entries, opts.ClaudeConfigPath); err != nil {
 			return nil, fmt.Errorf("claude: %w", err)
 		}
 	}
-	if opts.CodexConfigPath != "" {
+	if opts.CodexConfigPath != "" && scanIfReadable("codex-cli") {
 		if err := scanCodex(entries, opts.CodexConfigPath); err != nil {
 			return nil, fmt.Errorf("codex: %w", err)
 		}
 	}
-	if opts.CursorConfigPath != "" {
+	if opts.CursorConfigPath != "" && scanIfReadable("cursor") {
 		if err := scanCursor(entries, opts.CursorConfigPath); err != nil {
 			return nil, fmt.Errorf("cursor: %w", err)
 		}
 	}
-	if opts.VSCodeConfigPath != "" {
+	if opts.VSCodeConfigPath != "" && scanIfReadable("vscode") {
 		if err := scanVSCode(entries, opts.VSCodeConfigPath); err != nil {
 			return nil, fmt.Errorf("vscode: %w", err)
 		}
 	}
-	if opts.GeminiConfigPath != "" {
+	if opts.GeminiConfigPath != "" && scanIfReadable("gemini-cli") {
 		if err := scanGemini(entries, opts.GeminiConfigPath); err != nil {
 			return nil, fmt.Errorf("gemini: %w", err)
 		}
 	}
-	if opts.QwenConfigPath != "" {
+	if opts.QwenConfigPath != "" && scanIfReadable("qwen-cli") {
 		if err := scanQwen(entries, opts.QwenConfigPath); err != nil {
 			return nil, fmt.Errorf("qwen: %w", err)
 		}
 	}
-	if opts.AntigravityConfigPath != "" {
+	if opts.AntigravityConfigPath != "" && scanIfReadable("antigravity") {
 		if err := scanAntigravity(entries, opts.AntigravityConfigPath); err != nil {
 			return nil, fmt.Errorf("antigravity: %w", err)
 		}
@@ -191,7 +229,7 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 
 	out := &ScanResult{
 		At:                   time.Now(),
-		ClientConfigPresence: probeClientConfigPresence(opts),
+		ClientConfigPresence: presence,
 	}
 	for _, e := range entries {
 		out.Entries = append(out.Entries, *e)

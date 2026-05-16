@@ -357,6 +357,106 @@ func TestProbeClientConfigPresence_DirectoryAtConfigPath(t *testing.T) {
 	}
 }
 
+// TestProbeClientConfigPresence_SymlinkToRegularDefaultMode pins
+// the v0.4.5 deep-sec PR #208 Lane B round 6 P2 closure (regression
+// fix): symlink-to-existing-regular-file in DEFAULT mode must
+// classify as "ok" because the production write pipeline explicitly
+// supports the dotfile-symlink pattern (e.g., `~/.codex/config.toml
+// -> E:\dotfiles\.codex\config.toml`) via resolveSymlinkForSecureWrite.
+// Round 5's all-symlinks-are-error rule was too strict; this test
+// pins the relaxed contract.
+func TestProbeClientConfigPresence_SymlinkToRegularDefaultMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevation on Windows; the cross-platform Lstat probe is exercised by the POSIX path")
+	}
+	// Ensure strict mode is OFF for this test.
+	t.Setenv(RequireSingleUserHomeEnv, "")
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "real-config.json")
+	if err := os.WriteFile(target, []byte(`{"servers": {}}`), 0o600); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	link := filepath.Join(tmp, "mcp.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	out := probeClientConfigPresence(ScanOpts{VSCodeConfigPath: link})
+	if got := out["vscode"]; got != "ok" {
+		t.Errorf("symlink-to-regular in default mode classified as %q, want \"ok\" (dotfile pattern must work)", got)
+	}
+}
+
+// TestProbeClientConfigPresence_SymlinkToRegularStrictMode pins the
+// strict-mode contract: even if the symlink target is a regular
+// file, strict mode refuses any symlink because the secure-write
+// pipeline refuses to follow symlinks under
+// MCPHUB_REQUIRE_SINGLE_USER_HOME=1.
+func TestProbeClientConfigPresence_SymlinkToRegularStrictMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevation on Windows")
+	}
+	t.Setenv(RequireSingleUserHomeEnv, "1")
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "real-config.json")
+	if err := os.WriteFile(target, []byte(`{"servers": {}}`), 0o600); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	link := filepath.Join(tmp, "mcp.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	out := probeClientConfigPresence(ScanOpts{VSCodeConfigPath: link})
+	if got := out["vscode"]; got != "error" {
+		t.Errorf("symlink-to-regular in strict mode classified as %q, want \"error\"", got)
+	}
+}
+
+// TestScanFrom_DirectoryAtConfigPathDoesNotFailWholeScan pins the
+// v0.4.5 deep-sec PR #208 Lane B round 6 P2 #2 closure: a directory
+// at one client's config path must NOT propagate as a whole-scan
+// 500 SCAN_FAILED. The presence-first ordering in ScanFrom skips
+// adapter reads for non-"ok" clients so the per-client diagnostic
+// (client_config_presence["vscode"] == "error") reaches the frontend.
+func TestScanFrom_DirectoryAtConfigPathDoesNotFailWholeScan(t *testing.T) {
+	tmp := t.TempDir()
+	// Seed a directory at vscode's config path.
+	vscodeBogus := filepath.Join(tmp, "vscode-mcp-as-dir")
+	if err := os.MkdirAll(vscodeBogus, 0o755); err != nil {
+		t.Fatalf("seed dir: %v", err)
+	}
+	// And a valid claude config alongside, to verify the rest of
+	// the scan continues.
+	claudePath := filepath.Join(tmp, ".claude.json")
+	if err := os.WriteFile(claudePath, []byte(`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9123/mcp"}}}`), 0o600); err != nil {
+		t.Fatalf("seed claude: %v", err)
+	}
+
+	a := NewAPI()
+	result, err := a.ScanFrom(ScanOpts{
+		VSCodeConfigPath: vscodeBogus,
+		ClaudeConfigPath: claudePath,
+		ManifestDir:      t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("ScanFrom returned error on directory-at-config-path: %v (expected partial success)", err)
+	}
+	if got := result.ClientConfigPresence["vscode"]; got != "error" {
+		t.Errorf("client_config_presence[vscode]=%q, want \"error\"", got)
+	}
+	// Claude scan still ran and produced an entry for memory.
+	foundMemory := false
+	for _, e := range result.Entries {
+		if e.Name == "memory" {
+			foundMemory = true
+		}
+	}
+	if !foundMemory {
+		t.Errorf("memory entry from claude scan missing; partial scan should still surface valid clients")
+	}
+}
+
 // TestClassifyMissingClientConfig pins the helper in isolation. It is
 // the canonical place to extend if v0.5.x adds further classification
 // (e.g., "parent-is-symlink" or "parent-not-writable").
