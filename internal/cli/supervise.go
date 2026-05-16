@@ -19,11 +19,15 @@
 package cli
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"syscall"
 
@@ -218,10 +222,33 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 
 	go loop.Run(loopCtx)
 
+	// reconcileReady mirrors the spec §"Migration step 14:
+	// reconcile-ready not all-daemons-healthy" flag. Migration / upgrade
+	// callers wait for `status.result.reconcile_ready == true` (NOT
+	// all-daemons-healthy) before rolling forward. The flag transitions
+	// false → true exactly once, after BOTH:
+	//   (a) the supervisor has attempted to read its two intent files,
+	//   (b) the first reconcile pass has been scheduled.
+	// Task 6.2 stubs (b) — the real reconcile loop body lands in
+	// Task 7.1; here we mark ready immediately after (a) so the
+	// IPC `status` contract is testable end-to-end at this phase.
+	//
+	// intentFilesLoaded is the inner observability flag (spec §"Wire
+	// format" status result), useful when a migrate-side watcher wants
+	// to distinguish "intent read attempted, file may be empty" from
+	// "still starting up". It flips true after the attempted reads
+	// even when the underlying files are missing — `os.ErrNotExist` is
+	// a valid "loaded" outcome.
+	var reconcileReady atomic.Bool
+	var intentFilesLoaded atomic.Bool
+
 	// IPC listener. `--no-ipc` keeps tests fast (lock+events+loop only).
 	// Production callers always pass --no-ipc=false; the listener owns
 	// the per-OS pipe/socket and the hello-frame handshake from Task
-	// 5.1 / 5.2. Dispatch (IPC -> event-loop) lands in Task 6.2.
+	// 5.1 / 5.2. Task 6.2 wires the per-connection request-loop that
+	// dispatches `status` against the reconcileReady / intentFilesLoaded
+	// flags; later tasks (6.3+, 7.x) extend the cmd-switch with reload /
+	// restart / quiesce-timers / exit.
 	if !noIPC {
 		pipePath := defaultPipePath(stateDir)
 		listener, lerr := NewSupervisorIPCListener(pipePath)
@@ -237,7 +264,39 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 				"path": pipePath,
 			},
 		})
+
+		// Spawn the accept goroutine. It runs until listener.Close()
+		// causes Accept to return an error (the deferred Close above
+		// is the exit signal during the graceful-exit flow). Each
+		// accepted connection gets its own handler goroutine so a slow
+		// client never blocks the next Accept.
+		go acceptIPCConnections(listener, events, &reconcileReady, &intentFilesLoaded)
 	}
+
+	// Read the two intent files (Task 7.1 will turn these into the
+	// authoritative reconcile inputs). For Task 6.2 scope, the read
+	// result is intentionally discarded — the goal is only to flip
+	// `intentFilesLoaded` true after the attempt so the IPC `status`
+	// contract is observable. Missing files (os.ErrNotExist) are a
+	// valid "loaded" outcome — the supervisor must come up cleanly
+	// on a fresh host before any intent file exists.
+	loadIntentFiles(stateDir, events, &intentFilesLoaded)
+
+	// Mark reconcile-ready. Phase-6 scope stops at the first-pass
+	// scheduled flag; Task 7.1 replaces this with a real reconcile
+	// loop tick that drives reconcileReady after the diff-and-apply
+	// pass completes. Emit a dedicated lifecycle event so migration
+	// watchers polling the audit log have a positive ready-marker in
+	// addition to the IPC status flag.
+	reconcileReady.Store(true)
+	_ = events.Emit(api.SupervisorEvent{
+		Severity: "info",
+		Source:   "lifecycle",
+		Event:    "reconcile-ready",
+		Body: map[string]any{
+			"intent_files_loaded": intentFilesLoaded.Load(),
+		},
+	})
 
 	// Signal handler. SIGINT and SIGTERM both trigger the graceful-exit
 	// flow. On Windows `os.Interrupt` IS the canonical Ctrl+C / SIGTERM
@@ -332,4 +391,224 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 // matching listener variant.
 func defaultPipePath(stateDir string) string {
 	return defaultPipePathOS(stateDir)
+}
+
+// acceptIPCConnections is the listener accept loop. Runs in its own
+// goroutine spawned from runSupervise; exits when listener.Close()
+// (deferred in runSupervise) causes Accept to return an error.
+//
+// Per spec §"Wire format": each accepted connection is a long-lived
+// newline-delimited-JSON channel. Multiple connections from the same
+// client (`mcphub status`, `mcphub stop`, `mcphub migrate`) are
+// supported concurrently — each gets its own per-connection handler
+// goroutine. The handlers share access to the supervisor-wide
+// reconcileReady / intentFilesLoaded flags through atomic.Bool
+// pointers; no per-connection state is mutated by handleIPCRequest.
+func acceptIPCConnections(
+	listener *SupervisorIPCListener,
+	events *api.SupervisorEventLog,
+	reconcileReady, intentFilesLoaded *atomic.Bool,
+) {
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			// listener.Close() returns net.ErrClosed via Accept on
+			// graceful exit. Logging this would noise up the audit
+			// channel; emit an info row only so operators can
+			// distinguish "listener closed normally" from a bug.
+			_ = events.Emit(api.SupervisorEvent{
+				Severity: "info",
+				Source:   "ipc",
+				Event:    "ipc-accept-exit",
+				Body: map[string]any{
+					"err": err.Error(),
+				},
+			})
+			return
+		}
+		go handleIPCConn(conn, events, reconcileReady, intentFilesLoaded)
+	}
+}
+
+// handleIPCConn is the per-connection request loop. Reads
+// newline-delimited JSON IPCRequest frames, dispatches via
+// handleIPCRequest, writes the response back. Exits on first
+// read error (client closed, deadline exceeded, malformed framing).
+//
+// Malformed JSON lines are skipped silently rather than closing the
+// connection — a future client version sending an unknown field
+// shouldn't tear down the long-lived channel. Errors at the dispatch
+// layer (unknown cmd) are surfaced via the IPCResponse.Error envelope,
+// not via connection close.
+//
+// Audit: each request gets one `ipc-command` audit row capturing the
+// cmd + id. The response body is NOT logged (may contain operator-
+// visible state that doesn't belong in the long-lived audit channel);
+// just the verb + correlation id is.
+func handleIPCConn(
+	conn net.Conn,
+	events *api.SupervisorEventLog,
+	reconcileReady, intentFilesLoaded *atomic.Bool,
+) {
+	defer func() { _ = conn.Close() }()
+	reader := bufio.NewReader(conn)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return
+		}
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		var req api.IPCRequest
+		if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
+			// Malformed frame — skip, do NOT close. A noisy client
+			// would otherwise tear down the long-lived channel on
+			// every transient JSON glitch.
+			_ = events.Emit(api.SupervisorEvent{
+				Severity: "warn",
+				Source:   "ipc",
+				Event:    "ipc-malformed-request",
+				Body: map[string]any{
+					"err": err.Error(),
+				},
+			})
+			continue
+		}
+		resp := handleIPCRequest(req, reconcileReady, intentFilesLoaded)
+		respBody, err := json.Marshal(resp)
+		if err != nil {
+			_ = events.Emit(api.SupervisorEvent{
+				Severity: "error",
+				Source:   "ipc",
+				Event:    "ipc-marshal-failed",
+				Body: map[string]any{
+					"cmd": req.Cmd,
+					"id":  req.ID,
+					"err": err.Error(),
+				},
+			})
+			return
+		}
+		respBody = append(respBody, '\n')
+		if _, err := conn.Write(respBody); err != nil {
+			return
+		}
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "info",
+			Source:   "ipc",
+			Event:    "ipc-command",
+			Body: map[string]any{
+				"cmd": req.Cmd,
+				"id":  req.ID,
+			},
+		})
+	}
+}
+
+// handleIPCRequest dispatches one IPC request to the matching command
+// handler and returns the response envelope. Pure function — no I/O,
+// no state mutation; the supervisor-wide flags are read via the
+// passed atomic.Bool pointers.
+//
+// Phase-6 scope: only `status` is implemented. The other verbs from
+// spec §"Wire format" (exit, restart, reload, quiesce-timers) land
+// in later tasks; an unknown cmd produces an UNKNOWN_COMMAND error so
+// client-side dispatch can fail-fast instead of hanging on a missing
+// response.
+//
+// The `daemons` array is intentionally empty for Task 6.2 — Task 7.1
+// populates it with the actual reconcile-derived daemon snapshot. The
+// empty `[]any{}` (NOT nil) ensures JSON marshals as `"daemons":[]`
+// not `"daemons":null`, so client-side parsers can `result.daemons[0]`
+// without nil-pointer checks.
+func handleIPCRequest(
+	req api.IPCRequest,
+	reconcileReady, intentFilesLoaded *atomic.Bool,
+) api.IPCResponse {
+	switch req.Cmd {
+	case "status":
+		return api.IPCResponse{
+			ID: req.ID,
+			OK: true,
+			Result: map[string]any{
+				"state":               "running",
+				"daemons":             []any{},
+				"reconcile_ready":     reconcileReady.Load(),
+				"intent_files_loaded": intentFilesLoaded.Load(),
+			},
+		}
+	default:
+		return api.IPCResponse{
+			ID: req.ID,
+			Error: &api.IPCErr{
+				Code:    "UNKNOWN_COMMAND",
+				Message: "unknown IPC command: " + req.Cmd,
+			},
+		}
+	}
+}
+
+// loadIntentFiles attempts to read the supervisor-intent.json and
+// daemon-intent.json files under stateDir. Both reads are best-
+// effort — Task 7.1 will surface the parsed contents to the
+// reconcile loop; here the side effect is flipping intentFilesLoaded
+// to true so the IPC `status` flag transitions out of startup state.
+//
+// File-not-exist is a valid "loaded" outcome: a freshly installed
+// supervisor on a clean host has no intent files, and the empty
+// reconcile pass that follows will detect zero daemons / zero
+// timers in that state.
+//
+// Errors (parse failure, I/O denied) are logged via the event log
+// but do NOT prevent the ready transition — a corrupt intent file
+// must not block the supervisor from coming up; the audit row is
+// enough for an operator to diagnose. Task 7.1 wires the actual
+// fail-closed reconcile policy for genuinely-unreadable intent.
+func loadIntentFiles(
+	stateDir string,
+	events *api.SupervisorEventLog,
+	intentFilesLoaded *atomic.Bool,
+) {
+	supervisorIntentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	if _, err := api.ReadSupervisorIntent(supervisorIntentPath); err != nil {
+		// Only log non-NotExist errors — a missing file on a fresh
+		// host is the expected first-boot shape.
+		if !os.IsNotExist(err) {
+			_ = events.Emit(api.SupervisorEvent{
+				Severity: "warn",
+				Source:   "lifecycle",
+				Event:    "supervisor-intent-read-failed",
+				Body: map[string]any{
+					"path": supervisorIntentPath,
+					"err":  err.Error(),
+				},
+			})
+		}
+	}
+
+	// daemon-intent.json: best-effort os.ReadFile probe under the
+	// override-aware stateDir. The full ReadDaemonIntent flow lives
+	// on *api.API and resolves DaemonStateDir() internally — that
+	// path doesn't honor the supervise CLI's MCPHUB_STATE_DIR_OVERRIDE
+	// seam, so we read directly here for the Task 6.2 stub. Task 7.1
+	// will replace this with the canonical flock+quarantine flow once
+	// the production path-injection variant lands.
+	daemonIntentPath := filepath.Join(stateDir, "daemon-intent.json")
+	if _, err := os.ReadFile(daemonIntentPath); err != nil {
+		if !os.IsNotExist(err) {
+			_ = events.Emit(api.SupervisorEvent{
+				Severity: "warn",
+				Source:   "lifecycle",
+				Event:    "daemon-intent-read-failed",
+				Body: map[string]any{
+					"path": daemonIntentPath,
+					"err":  err.Error(),
+				},
+			})
+		}
+	}
+
+	intentFilesLoaded.Store(true)
 }
