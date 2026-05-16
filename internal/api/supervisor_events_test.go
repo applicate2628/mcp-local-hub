@@ -6,9 +6,11 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -188,5 +190,81 @@ func TestSupervisorEvent_SchemaVersionAutoFilled(t *testing.T) {
 	}
 	if got["ts"] == "" || got["ts"] == nil {
 		t.Fatalf("ts not auto-filled: %v", got["ts"])
+	}
+}
+
+// TestSupervisorEvent_ConcurrentEmit fans 10 goroutines × 100 emits
+// against a single logger to verify that the in-process mutex +
+// gofrs/flock pairing serializes writes cleanly: exactly 1000 lines
+// land, every line is valid JSON, and no line is interleaved with
+// another (which would corrupt the JSONL stream). Mirrors the
+// concurrency-safety discipline the in-process mutex is meant to
+// guarantee (see SupervisorEventLog godoc).
+func TestSupervisorEvent_ConcurrentEmit(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "supervisor-events.log")
+	logger, err := OpenSupervisorEventLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = logger.Close() }()
+
+	const goroutines = 10
+	const perGoroutine = 100
+	var wg sync.WaitGroup
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for i := 0; i < perGoroutine; i++ {
+				_ = logger.Emit(SupervisorEvent{
+					Severity: "info",
+					Source:   "ipc",
+					Event:    "concurrent-test",
+					Body:     map[string]any{"goroutine": id, "iter": i},
+				})
+			}
+		}(g)
+	}
+	wg.Wait()
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	if len(lines) != goroutines*perGoroutine {
+		t.Fatalf("expected %d lines, got %d", goroutines*perGoroutine, len(lines))
+	}
+	for i, line := range lines {
+		var evt SupervisorEvent
+		if err := json.Unmarshal([]byte(line), &evt); err != nil {
+			t.Fatalf("line %d invalid JSON: %v: %q", i, err, line)
+		}
+	}
+}
+
+// TestSupervisorEvent_IdentityOversize verifies the identity-oversize
+// gate fires when TaskName exceeds the 1024-byte cap. Identity fields
+// (Event/Source/TaskName) are never truncated per §35; Emit must fail
+// closed with ErrSupervisorEventIdentityOversize rather than letting
+// the post-truncation re-marshal silently land a malformed entry.
+// Mirrors the watchdog_log.go discipline (plan §51).
+func TestSupervisorEvent_IdentityOversize(t *testing.T) {
+	dir := t.TempDir()
+	logger, err := OpenSupervisorEventLog(filepath.Join(dir, "events.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = logger.Close() }()
+	err = logger.Emit(SupervisorEvent{
+		Severity: "info",
+		Source:   "ipc",
+		Event:    "ipc-command",
+		TaskName: strings.Repeat("A", 2048), // exceeds 1024 cap
+		Body:     map[string]any{},
+	})
+	if !errors.Is(err, ErrSupervisorEventIdentityOversize) {
+		t.Fatalf("expected ErrSupervisorEventIdentityOversize, got %v", err)
 	}
 }

@@ -89,6 +89,15 @@ const supervisorEventLogRotateSize int64 = 10 * 1024 * 1024
 // ceiling are truncated with identity-field protection.
 const supervisorEventMaxBytes = 16 * 1024
 
+// supervisorEventIdentityCap is the per-identity-field byte ceiling
+// per plan §51. Identity fields (Event, Source, TaskName) are NEVER
+// truncated; if any exceeds the cap, Emit fails closed with
+// ErrSupervisorEventIdentityOversize. Mirrors
+// AuditIdentityFieldByteCap (intent_audit.go:98) so the supervisor
+// envelope shares one identity-oversize discipline with the other
+// JSONL log families.
+const supervisorEventIdentityCap = 1024
+
 // SupervisorEventSchemaVersion is the current envelope schema
 // version. Bumped when any field is added/removed or semantics
 // change. Tools reading the log should branch on this value.
@@ -154,6 +163,15 @@ var ErrSupervisorEventMissingEvent = errors.New("supervisor event log: missing e
 // entry has no Source. Callers must supply a non-empty Source so log
 // consumers can categorize the emit-site.
 var ErrSupervisorEventMissingSource = errors.New("supervisor event log: missing source")
+
+// ErrSupervisorEventIdentityOversize is returned by Emit when any
+// identity field (Event, Source, TaskName) exceeds
+// supervisorEventIdentityCap (1024 bytes). Identity fields are never
+// truncated per §35; Emit fails closed so a malicious or
+// programmer-error oversize identity cannot land in the log under
+// the truncation rules used for Body. Mirrors ErrIdentityOversize
+// (intent_audit.go:118 / watchdog_log.go §51).
+var ErrSupervisorEventIdentityOversize = errors.New("supervisor event log: identity field (event/source/task_name) exceeds 1024-byte cap")
 
 // ---------------------------------------------------------------------------
 // SupervisorEventLog — constructor + Emit.
@@ -225,6 +243,17 @@ func (l *SupervisorEventLog) Emit(evt SupervisorEvent) error {
 		return ErrSupervisorEventMissingSource
 	}
 
+	// Identity-oversize gate. Identity fields (Event/Source/TaskName)
+	// are never truncated per §35; if any exceeds the 1024-byte cap,
+	// fail closed so the post-truncation re-marshal cannot produce a
+	// silent oversize entry. Mirrors AuditIdentityFieldByteCap
+	// discipline in intent_audit.go (§51).
+	if len(evt.Event) > supervisorEventIdentityCap ||
+		len(evt.Source) > supervisorEventIdentityCap ||
+		len(evt.TaskName) > supervisorEventIdentityCap {
+		return ErrSupervisorEventIdentityOversize
+	}
+
 	// Auto-fill envelope defaults.
 	if evt.SchemaVersion == "" {
 		evt.SchemaVersion = SupervisorEventSchemaVersion
@@ -250,6 +279,24 @@ func (l *SupervisorEventLog) Emit(evt SupervisorEvent) error {
 		raw, err = json.Marshal(evt)
 		if err != nil {
 			return fmt.Errorf("supervisor event log re-marshal after truncation: %w", err)
+		}
+		// Post-truncation re-check. With the identity gate above the
+		// envelope (sans Body) is bounded well below 16 KB so this
+		// branch should be unreachable; we keep it as a defense in
+		// depth so a future schema growth (new envelope fields)
+		// cannot silently leak an oversize line into the log. Drop
+		// the entry with a sentinel placeholder.
+		if len(raw) > supervisorEventMaxBytes {
+			placeholder := SupervisorEvent{
+				SchemaVersion: SupervisorEventSchemaVersion,
+				TS:            evt.TS,
+				Severity:      SupervisorEventSeverityWarn,
+				Source:        evt.Source,
+				Event:         "log-entry-dropped-oversize",
+				TaskName:      evt.TaskName,
+				Truncated:     true,
+			}
+			raw, _ = json.Marshal(placeholder)
 		}
 	}
 
