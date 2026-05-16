@@ -4,6 +4,7 @@ go 1.26.2
 
 require (
 	filippo.io/age v1.3.1
+	github.com/Microsoft/go-winio v0.6.2
 	github.com/atotto/clipboard v0.1.4
 	github.com/gofrs/flock v0.13.0
 	github.com/modelcontextprotocol/go-sdk v1.5.0
@@ -17,7 +18,6 @@ require (
 
 require (
 	filippo.io/hpke v0.4.0 // indirect
-	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kr/text v0.2.0 // indirect
