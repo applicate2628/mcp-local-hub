@@ -40,6 +40,15 @@ func (s *testStateStore) SetMaintenanceFiredAt(kind, rfc3339nanoUTC string) {
 	s.fired[kind] = rfc3339nanoUTC
 }
 
+// Task 9.2 interface methods — no-ops here. The Task 9.1 tests never
+// wire a Spawner, so the transient pipeline never engages and these
+// methods are never invoked. They exist only to satisfy the extended
+// StateStore interface at compile time. The Task 9.2 transient tests
+// use a separate state store (transientTestState) that exercises
+// these methods.
+func (s *testStateStore) AddTransientPID(_ api.TransientPID)  {}
+func (s *testStateStore) RemoveTransientPID(_ int)            {}
+
 // TestMaintenance_FiresOnSunday03Local — verbatim from plan §2324-2341.
 // Sunday 03:05 local with last_fired one week prior → fires once.
 func TestMaintenance_FiresOnSunday03Local(t *testing.T) {
