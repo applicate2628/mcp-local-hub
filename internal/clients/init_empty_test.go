@@ -11,6 +11,9 @@ package clients
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
+	"sync"
 	"testing"
 )
 
@@ -161,5 +164,113 @@ func TestInitEmpty_CreatesMissingParentDirs(t *testing.T) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("stub not created at nested path: %v", err)
+	}
+}
+
+// TestEnsureClientConfigStub_RefusesPreExistingSymlink pins the PR
+// #208 deep-sec Lane C defense: an attacker-planted symlink at the
+// init destination must NOT be followed. The function returns an
+// explicit error containing "symlink" so the operator can take
+// action; the symlink target is never touched.
+//
+// The test is POSIX-only because creating a symlink on Windows
+// requires either Developer Mode or admin rights (CreateSymbolicLinkW
+// rejects unprivileged callers by default), and a t.Skip() under
+// that condition would silently let the regression slip through.
+// The Lstat-based defense in EnsureClientConfigStub is platform-
+// agnostic; the POSIX test exercises it through the symlink path
+// while the Windows test below exercises the same path via the
+// non-regular-entry branch (a junction or directory at destination).
+func TestEnsureClientConfigStub_RefusesPreExistingSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevation on Windows; see RefusesPreExistingDirectory for the equivalent Windows-side defense")
+	}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "attacker-controlled-target.dat")
+	if err := os.WriteFile(target, []byte("pre-existing target content"), 0o600); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	link := filepath.Join(dir, "mcp.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	err := EnsureClientConfigStub(link, []byte(`{"servers": {}}`))
+	if err == nil {
+		t.Fatal("EnsureClientConfigStub through symlink: got nil, want refusal error")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Errorf("error message %q does not mention symlink", err)
+	}
+
+	body, readErr := os.ReadFile(target)
+	if readErr != nil {
+		t.Fatalf("read target after refused init: %v", readErr)
+	}
+	if string(body) != "pre-existing target content" {
+		t.Errorf("symlink target was modified despite refusal: got %q", body)
+	}
+}
+
+// TestEnsureClientConfigStub_RefusesPreExistingDirectory pins the
+// cross-platform defense against non-regular entries at the
+// destination. A directory (or junction on Windows) at the path must
+// NOT be silently treated as success.
+func TestEnsureClientConfigStub_RefusesPreExistingDirectory(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mcp.json")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("seed directory: %v", err)
+	}
+
+	err := EnsureClientConfigStub(path, []byte(`{"servers": {}}`))
+	if err == nil {
+		t.Fatal("EnsureClientConfigStub on a directory: got nil, want refusal error")
+	}
+	if !strings.Contains(err.Error(), "non-regular") {
+		t.Errorf("error message %q does not mention non-regular entry", err)
+	}
+}
+
+// TestEnsureClientConfigStub_AtomicConcurrentCreate pins the PR #208
+// deep-sec Lane A defense: two concurrent EnsureClientConfigStub
+// calls on the same missing path converge to a single write (the
+// loser observes EEXIST from the O_EXCL race and treats it as
+// idempotent success). No corruption, no half-written content.
+//
+// A more interesting concurrent-writer test (Init racing with a
+// real AddEntry) is hard to write deterministically without
+// injecting an explicit synchronization seam — that scenario is
+// covered structurally by the new O_CREAT|O_EXCL contract: any
+// concurrent writer that wins the create observes EEXIST in the
+// loser branch.
+func TestEnsureClientConfigStub_AtomicConcurrentCreate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mcp.json")
+	stub := []byte(`{"servers": {}}`)
+
+	const goroutines = 16
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	errs := make([]error, goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func(i int) {
+			defer wg.Done()
+			errs[i] = EnsureClientConfigStub(path, stub)
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("goroutine %d: %v", i, err)
+		}
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read result: %v", err)
+	}
+	if string(body) != string(stub) {
+		t.Errorf("body=%q, want %q (concurrent writers corrupted content)", body, stub)
 	}
 }

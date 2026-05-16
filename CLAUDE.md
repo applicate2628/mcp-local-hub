@@ -702,6 +702,36 @@ enforce the strict gate or tighten the parent's DACL to remove
 namespace rights for non-allowlisted principals; the relax lane is
 not designed for that posture.
 
+### Init-time stubs (v0.4.5+ Initialize button)
+
+The Servers matrix "Initialize" affordance writes an empty per-client
+stub (`{"servers":{}}`, `{"mcpServers":{}}`, or `[mcp_servers]`) when
+the operator clicks the per-column button. That write goes through
+`clients.EnsureClientConfigStub`
+([internal/clients/write.go](internal/clients/write.go)) which uses
+an atomic `O_CREAT|O_EXCL` open with `O_NOFOLLOW` (POSIX) plus an
+explicit `os.Lstat` symlink/non-regular pre-check. It does NOT
+route through the production `SecureWriteClientConfig` pipeline
+because that pipeline uses `FILE_RENAME_REPLACE_IF_EXISTS` semantics
+which would be vulnerable to the deep-sec Lane A race (Init clobbers
+a concurrent migrate write) and the Lane C symlink TOCTOU
+(default-relax symlink resolution follows attacker-planted symlink).
+
+**Residual Windows symlink window.** On POSIX the create is fully
+atomic — `O_NOFOLLOW` refuses symlinks at kernel level. On Windows
+the Go runtime's `os.OpenFile` cannot map to `NtCreateFile +
+FILE_FLAG_OPEN_REPARSE_POINT`, so the Lstat pre-check is the
+defense and there is a microsecond window between Lstat and
+`CreateFileW` during which an attacker who has write rights on the
+parent directory could plant a fresh symlink and redirect the
+empty-stub write to an attacker-chosen target. Impact is bounded
+(arbitrary-path file create/clobber with predictable empty-stub
+content). The proper fix — a `SecureCreateClientConfigIfMissing`
+helper using NtCreateFile with reparse-point refusal — is tracked
+for v0.4.6+. On a single-user solo-dev host with `MCPHUB_REQUIRE_SINGLE_USER_HOME=1`,
+the parent-dir DACL gate already prevents any co-resident principal
+from having parent-dir write rights, so the race is unreachable.
+
 ## Stuck-instance recovery
 
 If `mcphub gui` exits with the structured "Cannot acquire mcphub gui

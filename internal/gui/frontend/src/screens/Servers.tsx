@@ -671,7 +671,11 @@ function CellView(props: {
   // disabled the whole column, locking the operator out of re-adding
   // servers via Apply. The new state-machine includes "available" as
   // an enabled-but-unchecked cell.
-  const disabled = applying || routing === "unsupported" || routing === "not-installed";
+  const disabled =
+    applying ||
+    routing === "unsupported" ||
+    routing === "not-installed" ||
+    routing === "config-error";
   let title: string | undefined;
   if (routing === "via-hub") {
     title = `Currently routed through the hub. Uncheck and Apply to roll this binding back to the original ${client} config.`;
@@ -683,6 +687,13 @@ function CellView(props: {
     title = `${client}'s MCP config file is not present on this host — nothing to install.`;
   } else if (routing === "unsupported") {
     title = `${client} cannot route this server through the hub (e.g., per-session servers).`;
+  } else if (routing === "config-error") {
+    // v0.4.5 PR #208 deep-sec Lane B follow-up: distinguish "stat
+    // returned an error" from "file absent" so the operator sees an
+    // actionable diagnostic instead of the misleading "not present"
+    // tooltip. Typical causes: parent-directory permissions blocked,
+    // antivirus quarantine, or I/O fault on the underlying volume.
+    title = `${client}'s MCP config file could not be read (stat error). Check file permissions and disk health, then refresh.`;
   }
   // PR #22 retry-queue fix: cell with a retained failure from the
   // last applyChanges renders a red outline so the user sees the

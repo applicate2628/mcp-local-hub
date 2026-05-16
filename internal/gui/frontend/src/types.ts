@@ -71,7 +71,19 @@ export interface ClientPresence {
 //                     and disabled the whole column.
 //   "not-installed" — client config file absent on this host.
 //   "unsupported"   — client cannot route this server via the hub.
-export type Routing = "via-hub" | "direct" | "available" | "not-installed" | "unsupported";
+//   "config-error"  — `os.Stat` on the client config returned an error
+//                     OTHER than IsNotExist (typically a permissions /
+//                     ACL / I/O anomaly). Distinct from "not-installed"
+//                     so the matrix can render an actionable diagnostic
+//                     instead of silently dropping the cell. Surfaced
+//                     by the v0.4.5 PR #208 deep-sec Lane B follow-up.
+export type Routing =
+  | "via-hub"
+  | "direct"
+  | "available"
+  | "not-installed"
+  | "unsupported"
+  | "config-error";
 
 export interface ServerRow {
   name: string;

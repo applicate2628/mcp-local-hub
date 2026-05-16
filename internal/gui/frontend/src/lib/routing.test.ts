@@ -128,9 +128,9 @@ describe("perClientRouting with client_config_presence", () => {
     expect(r["claude-code"]).toBe("not-installed");
   });
 
-  it("tags missing-from-presence + config 'error' as not-installed", () => {
+  it("tags missing-from-presence + config 'error' as config-error (deep-sec Lane B)", () => {
     const r = perClientRouting({}, { "claude-code": "error" });
-    expect(r["claude-code"]).toBe("not-installed");
+    expect(r["claude-code"]).toBe("config-error");
   });
 
   it("does NOT override an existing per-entry signal with config presence", () => {

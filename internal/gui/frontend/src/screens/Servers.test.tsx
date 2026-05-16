@@ -188,7 +188,7 @@ describe("ServersScreen — Initialize button (v0.4.5)", () => {
     });
   });
 
-  it("shows error banner on PARENT_MISSING and persists across refresh", async () => {
+  it("shows error banner on PARENT_MISSING and preserves the operational code (deep-sec Lane B)", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
         "/api/scan": () =>
@@ -215,6 +215,10 @@ describe("ServersScreen — Initialize button (v0.4.5)", () => {
     });
     const banner = screen.getByTestId("init-client-msg");
     expect(banner.className).toContain("error");
+    // Lane B P2 fix: the operational code MUST appear in the banner
+    // so operators reading docs that reference `PARENT_MISSING` /
+    // `INIT_FAILED` can map the banner text back to those codes.
+    expect(banner.textContent).toContain("PARENT_MISSING");
   });
 
   it("renders Initialize buttons for every missing-init-possible client independently", async () => {

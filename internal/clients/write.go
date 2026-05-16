@@ -30,6 +30,7 @@
 package clients
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -65,25 +66,69 @@ func fallbackWriteConfigFile(path string, contents []byte) error {
 }
 
 // EnsureClientConfigStub is the canonical helper for adapter
-// InitEmpty() implementations (v0.4.5 init-button feature). It creates
-// `path` populated with `stub` if and only if the file does not
-// already exist. Parent directories are auto-created (0755), and the
-// final write routes through WriteConfigFile so production inherits
-// the SecureWriteClientConfig handle-relative + DACL-bound pipeline.
+// InitEmpty() implementations (v0.4.5 init-button feature). It
+// atomically creates `path` populated with `stub` if and only if no
+// regular file exists at `path`. Idempotent across legitimate
+// concurrent writers and resistant to attacker-planted symlinks.
 //
-// Idempotent: if the file is already present, returns nil without
-// touching its bytes.
+// Contract:
 //
-// Callers that want to gate on "parent must already exist" (e.g. the
-// /api/init-client-config endpoint, which refuses to create a fresh
-// `~/.cursor/` or `%APPDATA%\Code\User\` tree on a host where the
-// client is not actually installed) MUST verify parent presence
-// before calling — this helper is intentionally permissive so it can
-// also serve adapter BackupKeep paths where seeding an empty stub
-// from scratch is the documented behavior.
+//   - If a regular file already exists at `path`, returns nil and
+//     does NOT touch the bytes. This covers the "second-click" case
+//     where another tab or another `mcphub` invocation already wrote
+//     the file between the GUI's scan refresh and the Initialize POST.
+//   - If a symlink, junction, named pipe, or any non-regular entry
+//     exists at `path`, returns a refusal error. This is the
+//     defense against PR #208 deep-sec Lane C: in default-relax mode,
+//     the production WriteConfigFile pipeline would otherwise follow
+//     a pre-planted symlink and write the stub bytes through it to
+//     an attacker-chosen location. Init must never follow symlinks.
+//   - Otherwise, atomically creates `path` with `O_CREAT|O_EXCL` —
+//     on POSIX with `O_NOFOLLOW` so the create is symlink-safe at
+//     the kernel level; on Windows the L-stat pre-check above is the
+//     defense (the residual window between Lstat and CreateFileW is
+//     small and not directly addressable without NtCreateFile +
+//     FILE_FLAG_OPEN_REPARSE_POINT — tracked for v0.4.6+). If a
+//     concurrent writer wins the create race, the function returns
+//     nil (treats EEXIST as idempotent success).
+//
+// Parent directories are auto-created (0755) before the create
+// attempt; callers that want to gate on "parent must already exist"
+// (the /api/init-client-config endpoint) MUST verify parent presence
+// separately — this helper is intentionally permissive on the parent
+// so it can also serve adapter BackupKeep paths where seeding an
+// empty stub from scratch is the documented behavior.
+//
+// The atomic O_EXCL create bypasses the WriteConfigFile / production
+// SecureWriteClientConfig pipeline because that pipeline uses
+// FILE_RENAME_REPLACE_IF_EXISTS (Windows) / replacing renameat
+// (POSIX) which has stat-then-replace semantics inherently — exactly
+// the race surface this helper exists to close. The trade-off is
+// that the freshly-created stub file inherits the parent's default
+// DACL rather than the allowlist-only DACL that SecureWriteClientConfig
+// installs. For an empty config file this is acceptable: every
+// subsequent AddEntry / install / migrate write goes through
+// SecureWriteClientConfig which atomic-replaces the file with proper
+// DACL via temp-file rename, so the weak DACL window only exists for
+// non-sensitive empty stub content.
 func EnsureClientConfigStub(path string, stub []byte) error {
-	if _, err := os.Stat(path); err == nil {
-		return nil
+	if st, err := os.Lstat(path); err == nil {
+		if st.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf(
+				"refuse to initialize through pre-existing symlink at %s "+
+					"(remove the symlink and retry; init must not follow symlinks "+
+					"because the production write pipeline could be redirected to "+
+					"an attacker-chosen target)",
+				path,
+			)
+		}
+		if st.Mode().IsRegular() {
+			return nil
+		}
+		return fmt.Errorf(
+			"refuse to initialize over non-regular existing entry at %s (mode %s)",
+			path, st.Mode(),
+		)
 	} else if !os.IsNotExist(err) {
 		return err
 	}
@@ -92,5 +137,18 @@ func EnsureClientConfigStub(path string, stub []byte) error {
 			return err
 		}
 	}
-	return WriteConfigFile(path, stub)
+	flags := os.O_CREATE | os.O_EXCL | os.O_WRONLY
+	flags |= createNoFollowFlag()
+	f, err := os.OpenFile(path, flags, 0o600)
+	if err != nil {
+		if os.IsExist(err) {
+			return nil
+		}
+		return err
+	}
+	if _, writeErr := f.Write(stub); writeErr != nil {
+		_ = f.Close()
+		return writeErr
+	}
+	return f.Close()
 }

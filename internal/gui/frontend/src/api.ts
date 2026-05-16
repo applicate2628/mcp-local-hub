@@ -123,8 +123,11 @@ export async function getExtractManifest(client: string, server: string): Promis
 // postInitClientConfig drives the Servers matrix "Initialize <client>"
 // affordance (v0.4.5). Posts a JSON body naming the client adapter
 // whose empty stub should be seeded. Resolves to the structured
-// {client, path, created} record on success; rejects with an Error
-// carrying the backend's {error, code} envelope text on failure.
+// {client, path, created} record on success; rejects with an
+// `InitClientConfigError` carrying the backend's structured
+// {error, code, status} envelope on failure so the matrix banner
+// can render the operational code (PARENT_MISSING / UNKNOWN_CLIENT
+// / INIT_FAILED) alongside the human-readable message.
 //
 // The caller (ServersScreen) should refresh /api/scan after a
 // successful resolve so the now-present file flips
@@ -135,6 +138,25 @@ export interface InitClientConfigResult {
   path: string;
   created: boolean;
 }
+
+// InitClientConfigError preserves the backend's `code` field and the
+// HTTP status so the operator-visible banner can surface the
+// operational error code. Deep-sec Lane B (PR #208) follow-up: a
+// plain Error swallowed `code`, leaving the banner with only the
+// free-form `error` string — operators reading docs that reference
+// `PARENT_MISSING` / `INIT_FAILED` had no way to map a banner back
+// to those codes.
+export class InitClientConfigError extends Error {
+  readonly code: string;
+  readonly status: number;
+  constructor(message: string, code: string, status: number) {
+    super(message);
+    this.name = "InitClientConfigError";
+    this.code = code;
+    this.status = status;
+  }
+}
+
 export async function postInitClientConfig(client: string): Promise<InitClientConfigResult> {
   const resp = await fetch("/api/init-client-config", {
     method: "POST",
@@ -150,7 +172,13 @@ export async function postInitClientConfig(client: string): Promise<InitClientCo
   } catch {
     // Non-JSON error body; fall through.
   }
-  throw new Error(`/api/init-client-config: ${body?.error ?? resp.statusText}`);
+  const message = body?.error ?? resp.statusText ?? "unknown";
+  const code = body?.code ?? `HTTP_${resp.status}`;
+  throw new InitClientConfigError(
+    `/api/init-client-config [${code}]: ${message}`,
+    code,
+    resp.status,
+  );
 }
 
 // ManifestHashMismatchError marks the stale-file-detection branch so

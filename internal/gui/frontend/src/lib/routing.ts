@@ -91,6 +91,14 @@ export function perClientRouting(
     const state = clientConfigPresence[client];
     if (state === "ok" && canMigrate) {
       routing[client] = "available";
+    } else if (state === "error") {
+      // v0.4.5 PR #208 deep-sec Lane B follow-up: a non-IsNotExist
+      // stat failure (permissions, ACL anomaly, I/O error) was
+      // previously collapsed into "not-installed" and rendered with
+      // the misleading "config file is not present" tooltip. Surface
+      // the error state distinctly so the matrix can render a
+      // diagnostic tooltip and the operator can take action.
+      routing[client] = "config-error";
     } else {
       // v0.4.5 init-button: "missing-init-possible" still maps to
       // "not-installed" at the per-cell routing level — the matrix
