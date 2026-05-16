@@ -6,47 +6,16 @@ import (
 	"testing"
 )
 
-// State + Event values mirror spec §"Restart policy state machine" Q4 v13.
-type SMState string
+// SMState, SMEvent, SMContext and the St*/Ev* constants live in
+// supervisor_state_machine.go (production file). The test file only
+// holds the property-test scaffolding plus this thin delegator so the
+// tests stay agnostic of whether the implementation is exported or
+// not.
 
-const (
-	StIdle           SMState = "idle"
-	StSpawning       SMState = "spawning"
-	StRunning        SMState = "running"
-	StExiting        SMState = "exiting"
-	StBackoffWaiting SMState = "backoff-waiting"
-	StQuarantined    SMState = "quarantined"
-)
-
-type SMEvent string
-
-const (
-	EvStart             SMEvent = "start"
-	EvHealthOK          SMEvent = "health-ok"
-	EvChildExit         SMEvent = "child-exit"
-	EvTimerDue          SMEvent = "timer-due"
-	EvIntentUpdate      SMEvent = "intent-update"
-	EvManualRestart     SMEvent = "manual-restart"
-	EvRequestGraceful   SMEvent = "request-graceful-exit"
-	EvQuiesceComplete   SMEvent = "quiesce-complete"
-	EvSupervisorRestart SMEvent = "supervisor-restart"
-)
-
-// SMContext is the per-daemon context the transition function reads.
-type SMContext struct {
-	IntentDesired      string // "running" | "stopped"
-	IntentIsActiveStop bool   // IsActiveStop(now)
-	Failures           int    // count in 30-min sliding window
-	QueuedAction       string // "" | "respawn" | "none"
-	GracefulInProgress bool   // supervisor-wide flag
-}
-
-// transition is the pure function the engine will implement. Returns
-// (newState, sideEffect, persistBefore). For the property test, we
-// drive transition against the spec table directly.
-// Stub returns ok=false until Task 4.1 implements Transition().
-func transition(state SMState, ev SMEvent, ctx SMContext) (newState SMState, side string, persistBefore bool, ok bool) {
-	return state, "", false, false
+// transition is the package-local helper used by the property tests.
+// Delegates to the exported Transition function (Task 4.1 impl).
+func transition(state SMState, ev SMEvent, ctx SMContext) (SMState, string, bool, bool) {
+	return Transition(state, ev, ctx)
 }
 
 // TestStateMachineInvariants_GracefulExitTerminates verifies that once
