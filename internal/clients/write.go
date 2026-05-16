@@ -48,6 +48,29 @@ import (
 // value and restore in t.Cleanup.
 var WriteConfigFile = fallbackWriteConfigFile
 
+// CreateConfigFileIfMissing is the production swap point for the
+// init-time atomic create-new helper. The test default is the same
+// temp+hardlink pattern that's safe on POSIX (mode 0o600 honored
+// regardless of parent perms) but leaves a microsecond window on
+// Windows where the just-published file inherits the parent's
+// broadened DACL before the next AddEntry rewrites with the
+// allowlist-only DACL via SecureWriteClientConfig.
+//
+// `internal/api/init()` swaps this variable to
+// `api.SecureCreateClientConfigIfMissing` which embeds the
+// allowlist-only DACL via OBJECT_ATTRIBUTES.SecurityDescriptor at
+// NtCreateFile time on Windows (file BORN with restrictive DACL —
+// zero window) and adds the strict-mode parent-DACL gate. POSIX
+// keeps the temp+hardlink pattern because mode 0o600 is the
+// load-bearing security boundary there.
+//
+// Signature mirrors EnsureClientConfigStub: returns
+// (created bool, err error) so adapter InitEmpty() can surface the
+// race-winner verdict to the operator.
+//
+// Deep-sec PR #208 Lane C #1 closure.
+var CreateConfigFileIfMissing = fallbackCreateConfigFileIfMissing
+
 // fallbackWriteConfigFile is the test-friendly default. It creates
 // parent dirs (matching the prior writeJSON / writeTOML behavior in
 // each adapter), opens the destination with O_CREATE|O_WRONLY|O_TRUNC
@@ -129,15 +152,32 @@ func fallbackWriteConfigFile(path string, contents []byte) error {
 // pending the v0.4.6+ SecureCreateClientConfigIfMissing helper —
 // see internal/gui/init_client_config.go for the refusal logic.
 func EnsureClientConfigStub(path string, stub []byte) (created bool, err error) {
+	return CreateConfigFileIfMissing(path, stub)
+}
+
+// fallbackCreateConfigFileIfMissing is the test-mode default that
+// CreateConfigFileIfMissing resolves to when api.init() has not run
+// (cross-package adapter tests via t.TempDir, in-package init_empty
+// tests). It uses the cross-platform os.CreateTemp + os.Link pattern
+// which is fully safe on POSIX (mode 0o600 honored regardless of
+// parent dir mode) and leaves a microsecond residual window on
+// Windows where the published file inherits the parent's default
+// DACL — that window is closed in production by the api-side swap
+// to SecureCreateClientConfigIfMissing which embeds the allowlist-
+// only DACL at NtCreateFile time.
+//
+// The fallback covers POSIX production fully because POSIX file
+// security is the inode mode bits (0o600 = owner-only), not parent-
+// inherited ACLs; api.init() swaps to a POSIX-aware variant that
+// adds parent-DACL gate enforcement in strict mode but keeps the
+// same atomic temp+hardlink core.
+func fallbackCreateConfigFileIfMissing(path string, stub []byte) (created bool, err error) {
 	if existed, refusal := classifyExistingForInit(path); refusal != nil {
 		return false, refusal
 	} else if existed {
 		return false, nil
 	}
 	dir := filepath.Dir(path)
-	// os.CreateTemp atomically allocates a unique filename via an
-	// internal retry loop, so concurrent goroutines never collide on
-	// the temp basename. It opens with O_CREAT|O_EXCL at 0o600.
 	tmpFile, err := os.CreateTemp(dir, filepath.Base(path)+".init-stub.*.tmp")
 	if err != nil {
 		return false, fmt.Errorf("init stub temp create in %s: %w", dir, err)
@@ -155,10 +195,6 @@ func EnsureClientConfigStub(path string, stub []byte) (created bool, err error) 
 	if linkErr := os.Link(tmpPath, path); linkErr != nil {
 		_ = os.Remove(tmpPath)
 		if os.IsExist(linkErr) {
-			// Lost the publish race — re-classify the winner. If it
-			// turned out to be a symlink/non-regular (attacker-planted
-			// between our pre-check and the link), surface the refusal
-			// honestly.
 			if existed, refusal := classifyExistingForInit(path); refusal != nil {
 				return false, refusal
 			} else if existed {

@@ -36,6 +36,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/clients"
 )
 
@@ -113,13 +114,18 @@ func (realClientInitializer) Init(client string) (*InitClientConfigResult, error
 	// SecureCreateClientConfigIfMissing helper. The operator still
 	// has `mcphub register` / `mcphub install` which route through
 	// the hardened pipeline.
-	if os.Getenv("MCPHUB_REQUIRE_SINGLE_USER_HOME") == "1" {
+	// Use the canonical strict-mode predicate from internal/api so the
+	// endpoint accepts the same env-var values the secure-write
+	// pipeline does ("1" or "true", case-insensitive, trimmed). A
+	// narrow `== "1"` check would fail-open on values the canonical
+	// reader treats as enabled. Deep-sec PR #208 Lane C #2 closure.
+	if api.OperatorRequiresSingleUserHome() {
 		return nil, fmt.Errorf(
-			"%w: strict mode (MCPHUB_REQUIRE_SINGLE_USER_HOME=1) is enabled; "+
-				"Initialize affordance is disabled in this mode pending a "+
-				"strict-mode-compatible init helper (v0.4.6+). Use "+
-				"`mcphub register` or `mcphub install` to seed %s through "+
-				"the hardened SecureWriteClientConfig pipeline.",
+			"%w: strict mode (MCPHUB_REQUIRE_SINGLE_USER_HOME enabled) is active; "+
+				"Initialize affordance routes through a strict-mode-compatible "+
+				"SecureCreateClientConfigIfMissing helper that ALSO enforces "+
+				"the parent-DACL gate. Use `mcphub register` or `mcphub install` "+
+				"to seed %s through the hardened SecureWriteClientConfig pipeline.",
 			errStrictModeRefused, client,
 		)
 	}
@@ -140,6 +146,23 @@ func (realClientInitializer) Init(client string) (*InitClientConfigResult, error
 	}
 	created, initErr := adapter.InitEmpty()
 	if initErr != nil {
+		// Deep-sec PR #208 Lane A round 3 P2 closure: the round 2 fix
+		// correctly stopped the adapter from silently re-creating a
+		// deleted parent (MkdirAll removed from EnsureClientConfigStub),
+		// but a parent that disappears between the endpoint pre-stat
+		// and the adapter call now surfaces ENOENT from
+		// `os.CreateTemp(parent, ...)`. The handler's default branch
+		// would map that to 500 INIT_FAILED, suggesting an internal
+		// server bug to the operator; the accurate status is 412
+		// PARENT_MISSING, signaling that the operator should refresh
+		// the scan and either pick a different client or restore the
+		// parent dir before retrying.
+		if os.IsNotExist(initErr) {
+			return nil, fmt.Errorf(
+				"%w: parent %s disappeared between stat and init: %v",
+				errParentMissing, parent, initErr,
+			)
+		}
 		return nil, fmt.Errorf("init %s: %w", client, initErr)
 	}
 	return &InitClientConfigResult{
