@@ -468,6 +468,46 @@ func TestPatternsFromClientStdio_AntigravityMcphubCommandFiltered(t *testing.T) 
 	}
 }
 
+// TestPatternsFromClientStdio_AntigravityRelaySecurityFindingPoC
+// pins the codex security finding e8745334 regression: when an
+// Antigravity relay entry references a long server name (>= 8 chars,
+// with a separator — passes argIsDiscriminatingPattern), the args
+// would emit those server names as global kill patterns. The new
+// per-entry skip (any entry whose command is the mcphub binary)
+// stops the leak at the source — no patterns whatsoever from
+// any Antigravity relay entry, regardless of arg length.
+//
+// Original PoC server name "time" was already blocked by the
+// 8-char-minimum argIsDiscriminatingPattern, but a longer server
+// name like "paper-search-mcp" would have survived. This test uses
+// the LONG-name shape to confirm the skip-by-command path.
+func TestPatternsFromClientStdio_AntigravityRelaySecurityFindingPoC(t *testing.T) {
+	home := withHermeticHomeForCleanup(t)
+	writeCleanupFile(t, filepath.Join(home, ".gemini", "antigravity", "mcp_config.json"), `{
+  "mcpServers": {
+    "paper-search-mcp": {
+      "command": "C:\\Users\\u\\AppData\\Roaming\\mcphub\\mcphub.exe",
+      "args": ["relay", "--server", "paper-search-mcp", "--daemon", "claude"],
+      "disabled": false
+    },
+    "long-named-server": {
+      "command": "C:\\path\\to\\mcphub.exe",
+      "args": ["relay", "--server", "long-named-server", "--daemon", "codex"],
+      "disabled": false
+    }
+  }
+}`)
+	got := patternsFromClientStdio()
+	// EVERY Antigravity entry is skipped wholesale because command is
+	// the mcphub binary. The fact that "paper-search-mcp" and
+	// "long-named-server" would PASS argIsDiscriminatingPattern (≥8
+	// chars, has separator) is irrelevant — the per-entry skip
+	// happens BEFORE the per-arg filter.
+	if len(got) > 0 {
+		t.Errorf("Antigravity-only fixture must contribute ZERO patterns regardless of server-name length; got %v", got)
+	}
+}
+
 func TestPatternIsTooBroad(t *testing.T) {
 	cases := map[string]bool{
 		"":                    true,

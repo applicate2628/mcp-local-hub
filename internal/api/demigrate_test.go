@@ -352,23 +352,33 @@ func TestDemigrate_FailsWhenBothLatestAndSentinelRefuseAndMarkerAbsent(t *testin
 	// record of this (client, server) tuple. Demigrate fails closed
 	// — refuses to RemoveEntry because there's no positive proof
 	// that mcphub installed this entry. This is the safe behavior
-	// for pre-PR-187 entries (existing users post-upgrade have no
-	// marker) and for user-owned entries that coincidentally match
-	// the hub-URL heuristic.
+	// for user-owned entries that coincidentally match the hub-URL
+	// heuristic but NOT the strict manifest-URL match.
+	//
+	// v0.4.2: when the live URL EXACTLY matches what mcphub would
+	// have written (manifest daemon port + binding url_path), the
+	// backfillMarkerIfEntryMatchesManifest helper kicks in and
+	// allows demigrate to proceed. To preserve this test's
+	// fail-closed scenario, the fixture uses port 9201 (NOT 9200,
+	// which IS the manifest's expected port). The URL is therefore
+	// loopback hub-shaped but does NOT strictly match manifest
+	// expectations → backfill does NOT fire → fail-closed
+	// behavior preserved.
 	managedEntriesTestHelper(t) // redirects state-dir; marker file absent
 
 	tmp := t.TempDir()
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("HOME", tmp)
 	claudePath := filepath.Join(tmp, ".claude.json")
+	// Note: port 9201 (NOT 9200 — see test docstring).
 	_ = os.WriteFile(claudePath, []byte(
-		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0600)
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9201/mcp"}}}`), 0600)
 	latest := claudePath + ".bak-mcp-local-hub-20260101-000000"
 	_ = os.WriteFile(latest, []byte(
-		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0600)
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9201/mcp"}}}`), 0600)
 	sentinel := claudePath + ".bak-mcp-local-hub-original"
 	_ = os.WriteFile(sentinel, []byte(
-		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0600)
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9201/mcp"}}}`), 0600)
 
 	manifestDir := t.TempDir()
 	memDir := filepath.Join(manifestDir, "memory")

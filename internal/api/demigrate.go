@@ -180,6 +180,36 @@ func (a *API) Demigrate(opts DemigrateOpts) (*DemigrateReport, error) {
 					// Apply) populates the marker, then demigrate
 					// works on the next attempt.
 					managed, mErr := IsManagedEntry(binding.Client, server)
+					if !managed && mErr == nil {
+						// v0.4.2 fix: existing v0.4.x users have
+						// hub-form entries that were never marked
+						// (B4 marker introduced in #187 only marks
+						// fresh migrates). When demigrate finds the
+						// entry in hub-managed form AND the live
+						// URL strictly matches what mcphub WOULD
+						// have written (manifest daemon port +
+						// binding url_path), backfill the marker
+						// inline so the existing user can roll
+						// back from the matrix without manual
+						// edits.
+						//
+						// "Strict" means: live URL exactly equals
+						// `http://localhost:<daemon.Port><url_path>`
+						// for the daemon this binding references
+						// (or 127.0.0.1 / [::1] variants). Codex
+						// bot r1 P1 on PR #186 rejected loose
+						// URL-equality fallback; the manifest-
+						// bound EXACT URL+name match is strictly
+						// narrower — a user-owned MCP server
+						// would have to use mcphub's exact port +
+						// path + name, in which case it's
+						// indistinguishable from a mcphub binding
+						// and RemoveEntry is the expected
+						// behavior anyway.
+						if backfilled := backfillMarkerIfEntryMatchesManifest(adapter, server, binding, m); backfilled {
+							managed = true
+						}
+					}
 					switch {
 					case mErr != nil:
 						err = fmt.Errorf(

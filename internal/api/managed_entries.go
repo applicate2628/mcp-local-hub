@@ -55,8 +55,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
+
+	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/config"
 
 	"github.com/gofrs/flock"
 )
@@ -259,6 +263,122 @@ func IsManagedEntry(client, server string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// backfillMarkerIfEntryMatchesManifest is the v0.4.2 unblock for
+// existing v0.4.x users whose hub-form entries were never marked.
+// PR #187 introduced the marker as a "positive proof" gate to
+// replace the URL heuristic codex bot rejected on PR #186. Users
+// who installed before #187 have hub-form entries in their client
+// configs but no marker rows, so demigrate fails closed for those
+// entries — making the matrix UI unusable for rollback on this
+// state.
+//
+// The recovery path documented in #187 ("re-migrate to populate
+// the marker") doesn't work from the matrix: the cell already
+// shows checked (hub-routed), there's no UI affordance to force a
+// re-migrate. Inline backfill plugs that gap.
+//
+// Backfill criterion (strict, NOT the loose URL heuristic codex
+// bot rejected):
+//
+//   1. Live entry's URL EXACTLY matches what mcphub would write
+//      for this (server, daemon, binding): scheme/host/port/path
+//      derived from the manifest daemon + binding url_path.
+//   2. Both loopback host variants (localhost / 127.0.0.1 / [::1])
+//      are accepted because IsHubHTTPURL accepts all three on the
+//      classification side.
+//   3. The entry's name matches the manifest server name (this
+//      is the loop variable, so already aligned at call site).
+//
+// On exact match, RecordManagedEntry is called with the (client,
+// server) pair. The marker now contains a row, IsManagedEntry
+// returns true on the next call, demigrate proceeds to
+// RemoveEntry.
+//
+// Returns true iff backfill succeeded. Read/write errors on the
+// marker file are best-effort logged and return false — caller
+// keeps the fail-closed default in that case.
+//
+// Safety: if a user happened to configure their own MCP server
+// on the exact port + path mcphub uses for this binding AND
+// gave it the manifest's exact name, the backfill triggers and
+// RemoveEntry runs. That deletes the user's structurally-
+// identical entry; since the live shape IS what mcphub would
+// have written, restoring from sentinel (when available) yields
+// the same shape — the user's "own" entry was effectively
+// already a mcphub-equivalent binding. No data loss beyond what
+// the operator's manual config choice implied.
+func backfillMarkerIfEntryMatchesManifest(adapter clients.Client, server string, binding config.ClientBinding, m *config.ServerManifest) bool {
+	live, err := adapter.GetEntry(server)
+	if err != nil || live == nil {
+		return false
+	}
+	matched, reason := liveEntryMatchesManifestBinding(live, server, binding, m)
+	if !matched {
+		return false
+	}
+	if recErr := RecordManagedEntry(binding.Client, server); recErr != nil {
+		_ = LogHubMcpEvent("warn", "managed-entries-backfill-failed", map[string]any{
+			"server": server,
+			"client": binding.Client,
+			"err":    recErr.Error(),
+		})
+		return false
+	}
+	_ = LogHubMcpEvent("info", "managed-entries-backfill", map[string]any{
+		"server": server,
+		"client": binding.Client,
+		"shape":  reason,
+	})
+	return true
+}
+
+// liveEntryMatchesManifestBinding returns (true, "<shape>") iff the
+// live client-config entry's shape exactly matches what mcphub
+// would have written for (server, binding):
+//
+//  1. HTTP shape (most clients): live.URL exactly equals
+//     `http://<loopback-host>:<daemon.port><binding.url_path>` for
+//     the daemon this binding references.
+//
+//  2. Antigravity relay shape: live.RelayServer == server AND
+//     live.RelayDaemon == binding.Daemon AND
+//     IsMcphubBinary(live.RelayExePath). Antigravity entries have
+//     no URL field — they spawn `mcphub.exe relay --server <s>
+//     --daemon <d>` as the stdio child. Codex bot r6 P2 on PR #192:
+//     the v0.4.2 backfill helper originally only matched HTTP URLs
+//     and silently fell through for Antigravity, leaving demigrate
+//     fail-closed on Antigravity rows.
+//
+// Returns (false, "") if neither shape matches.
+func liveEntryMatchesManifestBinding(live *clients.MCPEntry, server string, binding config.ClientBinding, m *config.ServerManifest) (bool, string) {
+	daemonPort, ok := findDaemonPort(m, binding.Daemon)
+	if !ok {
+		return false, ""
+	}
+	urlPath := binding.URLPath
+	if urlPath == "" {
+		urlPath = "/mcp"
+	}
+	// HTTP shape check.
+	expectedURLs := []string{
+		fmt.Sprintf("http://localhost:%d%s", daemonPort, urlPath),
+		fmt.Sprintf("http://127.0.0.1:%d%s", daemonPort, urlPath),
+		fmt.Sprintf("http://[::1]:%d%s", daemonPort, urlPath),
+	}
+	if live.URL != "" && slices.Contains(expectedURLs, live.URL) {
+		return true, "v0.4.x upgrade backfill — HTTP URL exactly matches manifest expectation (url=" + live.URL + ")"
+	}
+	// Antigravity relay shape check (URL is empty, command/args
+	// reconstructed via antigravityClient.GetEntry).
+	if live.URL == "" &&
+		live.RelayServer == server &&
+		live.RelayDaemon == binding.Daemon &&
+		clients.IsMcphubBinary(live.RelayExePath) {
+		return true, "v0.4.x upgrade backfill — Antigravity relay shape exactly matches manifest binding (command=mcphub args=[relay,--server,server," + server + ",--daemon," + binding.Daemon + "])"
+	}
+	return false, ""
 }
 
 // managedEntriesPath returns the absolute path to the marker file

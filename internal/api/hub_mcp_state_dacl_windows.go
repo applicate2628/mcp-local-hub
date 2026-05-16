@@ -97,8 +97,61 @@ func verifyHubMcpStateDACLImpl(path string) error {
 	defer windows.CloseHandle(parentHandle)
 
 	// Verify parent DACL via handle (allowlist gate).
+	//
+	// Default-relax (v0.4.2): mirror the secure-write relax-lane from
+	// PR #185 (v0.4.0). If the parent DACL fails the allowlist (e.g.
+	// %LOCALAPPDATA%\mcp-local-hub broadened by GPO / MDM / a third-
+	// party installer to grant read access to a non-{user,
+	// LocalSystem, BuiltinAdmins} SID), the file's OWN DACL — verified
+	// at step (5) below — is the load-bearing safety layer. The file
+	// is owner-only because the state-file write pipeline installed a
+	// restrictive DACL on the file handle at create time, BEFORE any
+	// bytes hit disk. The parent handle still binds the file open via
+	// ntOpenRelative, so the TOCTOU-safe inode anchoring is preserved
+	// even when the parent-DACL check is skipped.
+	//
+	// Operators on multi-tenant / corp-managed hosts who require the
+	// strict parent gate must opt IN via
+	// MCPHUB_REQUIRE_SINGLE_USER_HOME=1; the env var semantic matches
+	// the write path so a single setting controls both directions.
+	//
+	// Concrete failure that motivated this change: manual smoke on
+	// workstation with %LOCALAPPDATA%\mcp-local-hub grant to SID
+	// S-1-5-21-...-1010 (Win11 user group surfaced via a third-party
+	// installer) — Apply/demigrate from the GUI matrix failed because
+	// managed-entries.json read fell through to strict parent gate.
 	if err := verifyWindowsDACLFromHandle(parentHandle); err != nil {
-		return fmt.Errorf("parent %s not single-user safe: %w", parentDir, err)
+		if operatorRequiresSingleUserHome() {
+			return fmt.Errorf("parent %s not single-user safe: %w; %s=1 is set, so the strict parent-dir gate is enforced (unset that env var, or tighten the parent's DACL to remove the offending principal, to proceed)",
+				parentDir, err, RequireSingleUserHomeEnv)
+		}
+		// Default-relax mode: the strict gate failed because some
+		// ACE grants access (read OR write/admin) to a non-
+		// allowlisted SID. The relax is ONLY safe for read-broadened
+		// parents — codex bot r4 P1 on PR #192: write/delete/DAC-edit
+		// access on the PARENT lets a co-resident principal replace
+		// the target file's directory entry between the fd-bound
+		// verify above and the path-based os.ReadFile that
+		// readHubMcpStateFile performs next. That's a TOCTOU swap —
+		// the hub then reads attacker bytes that the verify never
+		// saw.
+		//
+		// Re-check with the narrower write/admin mask. If THAT
+		// also fails, the broadening is write-bearing and we must
+		// reject regardless of mode. Otherwise the broadening is
+		// read-only and tolerable on solo-dev hosts.
+		if wrErr := verifyWindowsDACLFromHandleWriteOrAdmin(parentHandle); wrErr != nil {
+			return fmt.Errorf("parent %s grants write/delete/DAC-edit access to non-allowlisted SID (TOCTOU swap risk during fd-verify → path-read window): %w", parentDir, wrErr)
+		}
+		// Read-only broadening + default mode → log warn + proceed.
+		// Best-effort audit log; never block the read on log failure.
+		_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-parent-fallback", map[string]any{
+			"path":   path,
+			"parent": parentDir,
+			"reason": "default-relax-on-solo-host (parent grants read-only access to non-allowlisted SID; write/delete/DAC bits cleared)",
+			"err":    err.Error(),
+			"note":   "file's own DACL verified below; parent-handle binds open via ntOpenRelative so TOCTOU safety preserved",
+		})
 	}
 
 	// Open the file RELATIVE to the parent handle via NT API so the
@@ -187,11 +240,82 @@ func verifyWindowsParentDACL(parentDir string) error {
 	return nil
 }
 
+// windowsDACLSignificantBits is the full set the strict allowlist
+// check refuses on a non-allowlisted SID. Includes BOTH read
+// (confidentiality) and write/admin (integrity) bits, plus the
+// directory-only FILE_DELETE_CHILD tamper right (codex bot r5 P1
+// follow-through: include it in strict too so a future caller
+// using verifyWindowsDACLFromHandle on a directory still refuses
+// child-delete grants).
+var windowsDACLSignificantBits = uint32(
+	windows.FILE_READ_DATA | windows.FILE_READ_EA |
+		windows.FILE_WRITE_DATA | windows.FILE_APPEND_DATA |
+		windows.FILE_WRITE_EA | windows.FILE_WRITE_ATTRIBUTES |
+		windows.FILE_EXECUTE |
+		windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER,
+) | windowsFileDeleteChild
+
+// windowsFileDeleteChild is the directory-specific access right
+// FILE_DELETE_CHILD (0x40 per Microsoft AccessMask documentation,
+// "ACE Mask Values" table in ntifs.h). Not exported by
+// golang.org/x/sys/windows so we declare it locally. A principal
+// holding this right on a DIRECTORY can delete child entries
+// regardless of the children's own DACLs — making it a TOCTOU
+// swap vector when present on the state-dir's PARENT.
+const windowsFileDeleteChild uint32 = 0x40
+
+// windowsDACLWriteOrAdminBits names the access bits whose presence
+// in an ALLOW ACE for a non-allowlisted SID lets that principal
+// TAMPER with the file (write data, delete, replace DACL, take
+// ownership) — or, on a directory, delete child entries via
+// FILE_DELETE_CHILD. The v0.4.2 read-side relax lane refuses any
+// parent granting these bits to a non-allowlisted SID — those
+// rights on the PARENT mean the principal can replace the state
+// file's directory entry between verify (fd-bound) and read
+// (path-based os.ReadFile), breaking the TOCTOU guarantee that the
+// verified bytes are the bytes consumed.
+//
+// codex bot r5 P1 on PR #192: FILE_DELETE_CHILD (directory-only,
+// 0x40) was missing from this mask. A parent ACE granting
+// read+FILE_DELETE_CHILD passed the strict gate (because read is
+// significant) then passed the relax recheck (because
+// FILE_DELETE_CHILD wasn't in the mask) → swap window opened.
+// Including FILE_DELETE_CHILD closes the hole. Other "write"
+// bits in the same family (FILE_WRITE_DATA etc.) remain present.
+//
+// Read-only ALLOW ACEs (FILE_READ_DATA / FILE_READ_EA /
+// FILE_EXECUTE only) do NOT enable swap and are tolerable under
+// default-relax mode.
+var windowsDACLWriteOrAdminBits = uint32(
+	windows.FILE_WRITE_DATA | windows.FILE_APPEND_DATA |
+		windows.FILE_WRITE_EA | windows.FILE_WRITE_ATTRIBUTES |
+		windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER,
+) | windowsFileDeleteChild
+
 // verifyWindowsDACLFromHandle reads the owner SID + DACL from `h` via
 // GetSecurityInfo, then enforces the allowlist. Exported within the
 // api package only — secure_write_windows.go uses it for the
 // post-rename re-verify step.
 func verifyWindowsDACLFromHandle(h windows.Handle) error {
+	return verifyWindowsDACLFromHandleMasked(h, windowsDACLSignificantBits)
+}
+
+// verifyWindowsDACLFromHandleWriteOrAdmin is the narrower variant
+// used by the v0.4.2 read-relax lane: it refuses ONLY when an ALLOW
+// ACE grants write / delete / DAC-edit / ownership-takeover bits to
+// a non-allowlisted SID. Used to gate the read-relax: tolerate
+// broadened-read parents (codex bot r1 P1 closure on PR #190 r1 +
+// v0.4.2 fixes), refuse broadened-write parents (codex bot r4 P1
+// on PR #192 — TOCTOU swap risk between fd-bound verify and path-
+// based os.ReadFile).
+func verifyWindowsDACLFromHandleWriteOrAdmin(h windows.Handle) error {
+	return verifyWindowsDACLFromHandleMasked(h, windowsDACLWriteOrAdminBits)
+}
+
+// verifyWindowsDACLFromHandleMasked is the shared implementation;
+// the public verifiers above pin which access-bit mask flags an
+// ALLOW ACE as a violation.
+func verifyWindowsDACLFromHandleMasked(h windows.Handle, significantBits uint32) error {
 	currentSID, err := currentUserSID()
 	if err != nil {
 		return fmt.Errorf("current user sid: %w", err)
@@ -248,38 +372,21 @@ func verifyWindowsDACLFromHandle(h windows.Handle) error {
 	// followed by AceCount ACE entries; AceCount is exposed via the
 	// x/sys ACL accessor.
 	count := windowsACLAceCount(dacl)
-	// significantBits names the access bits whose presence in an ALLOW
-	// ACE for a non-allowlisted SID we treat as a guarantee violation.
-	// This is BOTH the confidentiality boundary (reads) AND the
-	// integrity boundary (writes/delete/dacl-edit/ownership-takeover) —
-	// state files holding tokens must allow ONLY allowlist SIDs ANY
-	// access at all (codex bot r8 P1 closure — earlier mask was
-	// read-only, which fail-OPEN'd against write-only ACEs that grant
-	// FILE_WRITE_DATA/GENERIC_WRITE to non-allowlist SIDs. A SID with
-	// only write rights can tamper with token contents — the
-	// confidentiality post-rename verify would pass even though the
-	// integrity guarantee is broken).
+	// significantBits is the caller-supplied set of access bits whose
+	// presence in an ALLOW ACE for a non-allowlisted SID counts as a
+	// violation. The strict caller (verifyWindowsDACLFromHandle) uses
+	// windowsDACLSignificantBits (full read+write+admin); the relax
+	// caller (verifyWindowsDACLFromHandleWriteOrAdmin) uses
+	// windowsDACLWriteOrAdminBits so only TOCTOU-relevant
+	// write/delete/admin broadening fails.
 	//
-	// Bits included:
-	//   - Read: FILE_READ_DATA | FILE_READ_EA (data + extended attrs)
-	//   - Write: FILE_WRITE_DATA | FILE_APPEND_DATA | FILE_WRITE_EA |
-	//            FILE_WRITE_ATTRIBUTES (data + EA + metadata)
-	//   - Execute: FILE_EXECUTE (typically equivalent to read for data files)
-	//   - Delete: DELETE (tamper via replace)
-	//   - Admin: WRITE_DAC (change the DACL itself → bootstrap to read)
-	//   - Admin: WRITE_OWNER (take ownership → change DACL → read)
-	//
-	// Bits excluded:
-	//   - FILE_READ_ATTRIBUTES (metadata-only; size/timestamps leak is acceptable)
-	//   - READ_CONTROL (read the DACL only; doesn't expose contents)
-	//   - SYNCHRONIZE (enables blocking I/O; not access-granting on its own)
-	significantBits := uint32(
-		windows.FILE_READ_DATA | windows.FILE_READ_EA |
-			windows.FILE_WRITE_DATA | windows.FILE_APPEND_DATA |
-			windows.FILE_WRITE_EA | windows.FILE_WRITE_ATTRIBUTES |
-			windows.FILE_EXECUTE |
-			windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER,
-	)
+	// Background on the strict mask (preserved here for context;
+	// codex bot r8 P1 closure on the original PR): the mask spans
+	// both the confidentiality boundary (reads) AND the integrity
+	// boundary (writes/delete/dacl-edit/ownership-takeover). State
+	// files holding tokens must allow ONLY allowlist SIDs ANY
+	// access at all. Earlier (pre-r8) mask was read-only and
+	// fail-OPEN'd against write-only ACEs.
 	for i := uint32(0); i < count; i++ {
 		var ace *windows.ACCESS_ALLOWED_ACE
 		if err := windows.GetAce(dacl, i, &ace); err != nil {

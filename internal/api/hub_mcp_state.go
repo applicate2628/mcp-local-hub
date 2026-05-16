@@ -87,8 +87,54 @@ func writeHubMcpStateFile(name string, payload []byte) error {
 		return err
 	}
 	target := filepath.Join(dir, name)
+	// v0.4.2 fix: state-file writes inherit the v0.4.0
+	// secure-write relax lane (PR #185). The parent-dir DACL of
+	// %LOCALAPPDATA%\mcp-local-hub can be broadened on real
+	// solo-developer workstations (Group Policy, MDM, third-party
+	// installers granting access to non-allowlisted SIDs). The
+	// strict gate would fail-closed on those hosts and break B4
+	// marker writes (PR #187) and other state-file mutations
+	// (tokens, hub-mcp control). Symmetric to the relax in
+	// verifyHubMcpStateDACLImpl (read path) and
+	// secureWriteWithOperatorOpt (client config write path).
+	//
+	// codex bot r6 P1 on PR #192: the relax must REFUSE write-
+	// capable parents — symmetric with the read-side gate added
+	// in r3 (POSIX) + r4 (Windows). Without this gate, a write-
+	// capable parent would accept the WRITE here but the
+	// subsequent READ would reject (TOCTOU swap defense). That
+	// asymmetry would silently publish state files that the hub
+	// can never read back. checkStateDirParentWriteSafe runs the
+	// narrower write-only check; on failure we surface the same
+	// "TOCTOU swap risk" error as the read side instead of
+	// falling through.
 	if err := SecureWriteClientConfig(target, payload); err != nil {
-		return fmt.Errorf("hub-mcp state write %s: %w", name, err)
+		if !errors.Is(err, ErrSecureWriteParentInsecure) {
+			return fmt.Errorf("hub-mcp state write %s: %w", name, err)
+		}
+		if operatorRequiresSingleUserHome() {
+			return fmt.Errorf("hub-mcp state write %s: %w; %s=1 is set, so the strict parent-dir gate is enforced (unset that env var, or tighten the parent's DACL to remove the offending principal, to proceed)",
+				name, err, RequireSingleUserHomeEnv)
+		}
+		// Narrow re-check: the read side rejects write-capable
+		// parents (TOCTOU swap risk). The write side must do the
+		// same so the asymmetry between write and read can't strand
+		// state files in unreadable directories.
+		if wsErr := checkStateDirParentWriteSafe(dir); wsErr != nil {
+			return fmt.Errorf("hub-mcp state write %s: parent %s grants write/delete access to non-allowlisted principal (TOCTOU swap risk; the read side would refuse this parent regardless of mode): %w",
+				name, dir, wsErr)
+		}
+		// Best-effort audit log; never block the write on log failure.
+		_ = LogHubMcpEvent("warn", "hub-mcp-state-write-unhardened-parent-fallback", map[string]any{
+			"path":   target,
+			"parent": dir,
+			"reason": "default-relax-on-solo-host (parent grants only read/exec to non-allowlisted principal; write/delete bits cleared)",
+			"err":    err.Error(),
+			"note":   "per-file DACL/mode still applied at temp-create time (handle-bound), so the published file is owner-only regardless of parent DACL",
+		})
+		if err := secureWriteClientConfigSkipParentGate(target, payload); err != nil {
+			return fmt.Errorf("hub-mcp state write %s (relax lane): %w", name, err)
+		}
 	}
 	return nil
 }

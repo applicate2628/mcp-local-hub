@@ -440,6 +440,27 @@ func patternsFromClientStdio() []string {
 		}
 		for _, e := range entries {
 			base := stripExtension(basenameAcrossSeparators(e.Command))
+			// Codex security finding e8745334 (Antigravity relay
+			// args → kill patterns): when an adapter writes
+			// mcphub-relay-form entries (command=mcphub.exe
+			// args=[relay,--server,X,--daemon,Y]) — Antigravity
+			// is the only such adapter today — the args are
+			// CONTROL-PLANE tokens (server name, daemon name),
+			// not external-process signatures. Emitting them as
+			// kill-match patterns causes strings.Contains to
+			// match unrelated processes whose cmdline mentions
+			// the same generic word (e.g. a `time-tracker.exe
+			// --relay-mode` user app vs. the manifest's "time"
+			// server). Skip the ENTIRE entry when command is
+			// mcphub — no basename pattern, no arg patterns,
+			// nothing. patternIsTooBroad already rejects
+			// "mcphub" as the basename pattern, but the
+			// security finding pointed out that args still
+			// leaked through. This per-entry skip closes the
+			// hole at the source.
+			if isMcphubBinaryBasename(strings.ToLower(base)) {
+				continue
+			}
 			if !patternIsTooBroad(base) {
 				add(base)
 			}

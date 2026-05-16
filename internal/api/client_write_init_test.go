@@ -211,23 +211,27 @@ func TestOperatorRequiresSingleUserHome_AcceptsOneAndTrue(t *testing.T) {
 	}
 }
 
-// TestSecureWriteWithOperatorOpt_RelaxRefusesPreexistingSymlink pins
-// that the relax lane (gate disabled) still refuses a pre-existing
-// symlink/junction at the destination. Even though we trust the host
-// for the parent-dir gate, an attacker with write access to the parent
-// could plant a symlink at the destination to redirect the write.
+// TestSecureWriteWithOperatorOpt_StrictRefusesPreexistingSymlink pins
+// that STRICT mode (MCPHUB_REQUIRE_SINGLE_USER_HOME=1) still refuses
+// a pre-existing symlink/junction at the destination. This was the
+// default in v0.4.0-v0.4.1; v0.4.2 inverts it to follow symlinks by
+// default for the solo-dev dotfile pattern (manual smoke on workstation
+// with ~/.codex/config.toml -> E:\env\Agents\.codex\config.toml).
+// Strict mode preserves the v0.4.0-v0.4.1 refuse-by-default behavior
+// for corp-managed / multi-tenant hosts.
 //
-// The hardened pipeline's refusePreexistingReparsePoint (Windows) /
-// refusePreexistingSymlink (POSIX) at step 2a is unconditional — it
-// runs regardless of the parent-dir gate. PR #185 r3 preserves this:
-// relax lane = same hardened pipeline minus step 2 only.
+// Threat the strict refusal addresses: an attacker with write access
+// to the parent dir could plant a symlink at the destination to
+// redirect the write. With strict mode, the parent-DACL gate ALSO
+// fires (because broadened parent → write access by non-allowlisted
+// SIDs), so this test is the second layer of defense.
 //
 // Symlink creation on Windows requires SeCreateSymbolicLinkPrivilege
 // (typically only Administrators have it). Skip on Windows unless
 // MkdirAll succeeds.
-func TestSecureWriteWithOperatorOpt_RelaxRefusesPreexistingSymlink(t *testing.T) {
+func TestSecureWriteWithOperatorOpt_StrictRefusesPreexistingSymlink(t *testing.T) {
 	t.Setenv(AllowUnhardenedClientWriteEnv, "1") // legacy opt-in (path tested below)
-	t.Setenv(RequireSingleUserHomeEnv, "")
+	t.Setenv(RequireSingleUserHomeEnv, "1")       // STRICT mode — preserve v0.4.0-v0.4.1 refuse behavior
 
 	root := t.TempDir()
 	realTarget := filepath.Join(root, "real-target")
@@ -242,7 +246,7 @@ func TestSecureWriteWithOperatorOpt_RelaxRefusesPreexistingSymlink(t *testing.T)
 
 	err := secureWriteWithOperatorOpt(link, []byte(`{"victim":"data"}`))
 	if err == nil {
-		t.Fatal("expected refusal for pre-existing symlink; got nil")
+		t.Fatal("expected refusal for pre-existing symlink under strict mode; got nil")
 	}
 	// Error wording differs between Windows (reparse point refused)
 	// and POSIX (pre-existing symlink refused), but both should
@@ -251,11 +255,59 @@ func TestSecureWriteWithOperatorOpt_RelaxRefusesPreexistingSymlink(t *testing.T)
 	if !strings.Contains(lowered, "symlink") && !strings.Contains(lowered, "reparse") {
 		t.Errorf("error must mention symlink/reparse-point; got %v", err)
 	}
-	// The real-target file MUST be unmodified — the symlink was not
-	// followed.
+	// The real-target file MUST be unmodified under strict mode.
 	got, _ := os.ReadFile(realTarget)
 	if string(got) != "attacker-controlled" {
-		t.Errorf("symlink target was modified (write followed the link); got %q", got)
+		t.Errorf("symlink target was modified despite strict mode; got %q", got)
+	}
+}
+
+// TestSecureWriteWithOperatorOpt_DefaultFollowsSymlinkToTarget covers
+// the v0.4.2 default behavior: when MCPHUB_REQUIRE_SINGLE_USER_HOME is
+// NOT set (default solo-dev posture), a pre-existing symlink at the
+// destination is FOLLOWED to its target and the hardened write lands
+// on the target file. The original symlink is left intact.
+//
+// Why: manual smoke on a real workstation found that codex config
+// (~/.codex/config.toml) was a symlink to a dotfile-managed location.
+// Matrix Apply failed with "pre-existing reparse point refused"
+// because v0.4.0-v0.4.1 secure-write refused symlinks unconditionally.
+// v0.4.2 follows them under default-relax; strict mode (see strict
+// test above) preserves the refuse semantic for hosts that need it.
+func TestSecureWriteWithOperatorOpt_DefaultFollowsSymlinkToTarget(t *testing.T) {
+	t.Setenv(AllowUnhardenedClientWriteEnv, "1")
+	t.Setenv(RequireSingleUserHomeEnv, "") // DEFAULT mode — symlinks followed
+
+	root := t.TempDir()
+	realTarget := filepath.Join(root, "real-target")
+	if err := os.WriteFile(realTarget, []byte("original-content"), 0o600); err != nil {
+		t.Fatalf("write real-target: %v", err)
+	}
+	link := filepath.Join(root, "client.json")
+	if err := os.Symlink(realTarget, link); err != nil {
+		t.Skipf("symlink unsupported (likely Windows non-admin): %v", err)
+	}
+
+	want := []byte(`{"hello":"target"}`)
+	if err := secureWriteWithOperatorOpt(link, want); err != nil {
+		t.Fatalf("expected symlink-follow under default mode; got error: %v", err)
+	}
+	// Target file MUST contain the new bytes (write followed the link).
+	got, err := os.ReadFile(realTarget)
+	if err != nil {
+		t.Fatalf("read real-target: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("target did not receive write; got %q, want %q", got, want)
+	}
+	// Original symlink at `link` must STILL be a symlink (not replaced
+	// by a regular file). os.Lstat returns ModeSymlink for symlinks.
+	li, err := os.Lstat(link)
+	if err != nil {
+		t.Fatalf("lstat link: %v", err)
+	}
+	if li.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("original symlink at %s was replaced (no longer a symlink); mode=%v", link, li.Mode())
 	}
 }
 
