@@ -67,6 +67,16 @@ var errUnknownClient = errors.New("unknown client")
 // PARENT_MISSING — the GUI is expected to refresh its scan.
 var errParentMissing = errors.New("client config parent directory missing")
 
+// errStrictModeRefused is returned when MCPHUB_REQUIRE_SINGLE_USER_HOME=1
+// is set. The Init endpoint refuses to seed an empty stub through the
+// non-hardened temp+hardlink path because strict-mode operators
+// explicitly opted into the SecureWriteClientConfig pipeline's
+// parent-DACL gate + allowlist-only file DACL. Mapped to HTTP 412 /
+// STRICT_MODE_REFUSED so the frontend surfaces the operational code.
+// See CLAUDE.md "Init-time stubs" subsection for the v0.4.6+
+// follow-up plan.
+var errStrictModeRefused = errors.New("strict-mode refused")
+
 // clientInitializer is the narrow interface that the
 // /api/init-client-config handler consumes. realClientInitializer
 // is the production adapter; tests inject their own.
@@ -76,16 +86,42 @@ type clientInitializer interface {
 
 type realClientInitializer struct{}
 
-// Init looks up the adapter for `client`, verifies the immediate
-// parent directory exists, and dispatches to `InitEmpty()`. The
-// `Created` flag distinguishes "wrote a new empty stub" from
-// "already existed (idempotent retry)" by stat'ing the path before
-// the InitEmpty call.
+// Init looks up the adapter for `client`, refuses if strict-mode
+// hardening is enabled (v0.4.5 deep-sec Lane C #1 — see CLAUDE.md
+// "Hardened client-config writes" section for the gap rationale),
+// verifies the immediate parent directory exists, and dispatches to
+// `adapter.InitEmpty()` which returns an honest "created" flag (true
+// iff this call wrote the stub bytes; false iff a regular file was
+// already present — covers second-click and publish-race-lost cases
+// without the pre-stat race window of the previous implementation).
 func (realClientInitializer) Init(client string) (*InitClientConfigResult, error) {
 	all := clients.AllClients()
 	adapter, ok := all[client]
 	if !ok {
 		return nil, fmt.Errorf("%w: %q", errUnknownClient, client)
+	}
+	// v0.4.5 deep-sec Lane C #1 closure: in strict mode the operator
+	// has explicitly opted into the SecureWriteClientConfig pipeline's
+	// parent-DACL gate + allowlist-DACL on every write. The Init
+	// helper bypasses that pipeline because it has to (atomic
+	// create-new is mutually exclusive with the pipeline's replacing
+	// rename), so in strict mode the Init affordance silently
+	// degrades to a non-hardened path — non-allowlisted principals
+	// inheriting write rights from the parent could then modify the
+	// newly seeded config and inject client-consumed MCP entries.
+	// Refuse explicitly until v0.4.6+ ships a strict-mode-compatible
+	// SecureCreateClientConfigIfMissing helper. The operator still
+	// has `mcphub register` / `mcphub install` which route through
+	// the hardened pipeline.
+	if os.Getenv("MCPHUB_REQUIRE_SINGLE_USER_HOME") == "1" {
+		return nil, fmt.Errorf(
+			"%w: strict mode (MCPHUB_REQUIRE_SINGLE_USER_HOME=1) is enabled; "+
+				"Initialize affordance is disabled in this mode pending a "+
+				"strict-mode-compatible init helper (v0.4.6+). Use "+
+				"`mcphub register` or `mcphub install` to seed %s through "+
+				"the hardened SecureWriteClientConfig pipeline.",
+			errStrictModeRefused, client,
+		)
 	}
 	path := adapter.ConfigPath()
 	parent := filepath.Dir(path)
@@ -102,23 +138,14 @@ func (realClientInitializer) Init(client string) (*InitClientConfigResult, error
 	if !st.IsDir() {
 		return nil, fmt.Errorf("%w: %s exists but is not a directory", errParentMissing, parent)
 	}
-	// Stat the file BEFORE InitEmpty so we can distinguish a true
-	// creation from an idempotent no-op. A race with concurrent
-	// adapter writes can swap the outcome (we observe "missing" then
-	// InitEmpty observes "present"), but the Created field is
-	// advisory UI state — never a security or correctness signal —
-	// so the race is acceptable.
-	preexisting := false
-	if _, statErr := os.Stat(path); statErr == nil {
-		preexisting = true
-	}
-	if err := adapter.InitEmpty(); err != nil {
-		return nil, fmt.Errorf("init %s: %w", client, err)
+	created, initErr := adapter.InitEmpty()
+	if initErr != nil {
+		return nil, fmt.Errorf("init %s: %w", client, initErr)
 	}
 	return &InitClientConfigResult{
 		Client:  client,
 		Path:    path,
-		Created: !preexisting,
+		Created: created,
 	}, nil
 }
 
@@ -145,6 +172,8 @@ func registerInitClientConfigRoutes(s *Server) {
 				writeAPIError(w, err, http.StatusNotFound, "UNKNOWN_CLIENT")
 			case errors.Is(err, errParentMissing):
 				writeAPIError(w, err, http.StatusPreconditionFailed, "PARENT_MISSING")
+			case errors.Is(err, errStrictModeRefused):
+				writeAPIError(w, err, http.StatusPreconditionFailed, "STRICT_MODE_REFUSED")
 			default:
 				writeAPIError(w, err, http.StatusInternalServerError, "INIT_FAILED")
 			}

@@ -37,7 +37,7 @@ func (j *jsonMCPClient) BackupKeep(keepN int) (string, error) {
 // and the Antigravity adapter (~/.gemini/antigravity/mcp_config.json).
 // Both write subsequent entries into the same top-level `mcpServers`
 // map that AddEntry merges into.
-func (j *jsonMCPClient) InitEmpty() error {
+func (j *jsonMCPClient) InitEmpty() (created bool, err error) {
 	return EnsureClientConfigStub(j.path, []byte("{\n  \"mcpServers\": {}\n}\n"))
 }
 

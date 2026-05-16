@@ -44,7 +44,7 @@ func (c *codexCLI) BackupKeep(keepN int) (string, error) {
 // codex-cli reads many other settings from the same config.toml, but
 // because InitEmpty fires only when the file is missing, no
 // user-authored configuration can be clobbered.
-func (c *codexCLI) InitEmpty() error {
+func (c *codexCLI) InitEmpty() (created bool, err error) {
 	return EnsureClientConfigStub(c.path, []byte("[mcp_servers]\n"))
 }
 

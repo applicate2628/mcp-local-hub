@@ -38,7 +38,12 @@ func (q *qwenCLI) Backup() (string, error) {
 }
 
 func (q *qwenCLI) BackupKeep(keepN int) (string, error) {
-	if err := q.InitEmpty(); err != nil {
+	if dir := filepath.Dir(q.path); dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return "", err
+		}
+	}
+	if _, err := q.InitEmpty(); err != nil {
 		return "", err
 	}
 	return writeBackup(q.path, q.Name(), keepN)
@@ -48,7 +53,7 @@ func (q *qwenCLI) BackupKeep(keepN int) (string, error) {
 // the file is absent. Qwen CLI shares the canonical JSON family
 // schema; AddEntry's later merge writes into the same `mcpServers`
 // map.
-func (q *qwenCLI) InitEmpty() error {
+func (q *qwenCLI) InitEmpty() (created bool, err error) {
 	return EnsureClientConfigStub(q.path, []byte("{\n  \"mcpServers\": {}\n}\n"))
 }
 

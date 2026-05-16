@@ -36,7 +36,16 @@ func (v *vscodeClient) Backup() (string, error) {
 }
 
 func (v *vscodeClient) BackupKeep(keepN int) (string, error) {
-	if err := v.InitEmpty(); err != nil {
+	// Explicit MkdirAll before InitEmpty: EnsureClientConfigStub no
+	// longer creates parents (v0.4.5 deep-sec Lane A #1) so the
+	// adapter's seed-then-backup contract must ensure the parent
+	// exists for fresh hosts.
+	if dir := filepath.Dir(v.path); dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return "", err
+		}
+	}
+	if _, err := v.InitEmpty(); err != nil {
 		return "", err
 	}
 	return writeBackup(v.path, v.Name(), keepN)
@@ -47,7 +56,7 @@ func (v *vscodeClient) BackupKeep(keepN int) (string, error) {
 // 1.103+ migrated MCP entries to a top-level `servers` key (NOT
 // `mcpServers`); the stub matches that schema so AddEntry's later
 // merge writes into the right map.
-func (v *vscodeClient) InitEmpty() error {
+func (v *vscodeClient) InitEmpty() (created bool, err error) {
 	return EnsureClientConfigStub(v.path, []byte("{\n  \"servers\": {}\n}\n"))
 }
 

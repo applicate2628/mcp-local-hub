@@ -81,10 +81,20 @@ func TestInitEmpty_PerAdapter_StubBytes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			path := filepath.Join(dir, tc.rel)
+			// New v0.4.5 deep-sec contract: callers MkdirAll explicitly.
+			if pdir := filepath.Dir(path); pdir != "" {
+				if err := os.MkdirAll(pdir, 0o755); err != nil {
+					t.Fatalf("mkdir parent: %v", err)
+				}
+			}
 			c := tc.make(path)
 
-			if err := c.InitEmpty(); err != nil {
+			created, err := c.InitEmpty()
+			if err != nil {
 				t.Fatalf("InitEmpty: %v", err)
+			}
+			if !created {
+				t.Errorf("InitEmpty created=false on fresh empty dir, want true")
 			}
 			body, err := os.ReadFile(path)
 			if err != nil {
@@ -133,8 +143,12 @@ func TestInitEmpty_Idempotent(t *testing.T) {
 			}
 
 			c := tc.make(path)
-			if err := c.InitEmpty(); err != nil {
+			created, err := c.InitEmpty()
+			if err != nil {
 				t.Fatalf("InitEmpty: %v", err)
+			}
+			if created {
+				t.Errorf("InitEmpty created=true on pre-existing file, want false (idempotent)")
 			}
 			body, err := os.ReadFile(path)
 			if err != nil {
@@ -147,23 +161,31 @@ func TestInitEmpty_Idempotent(t *testing.T) {
 	}
 }
 
-// TestInitEmpty_CreatesMissingParentDirs guards the adapter-level
-// contract: WriteConfigFile mkdir-p's the immediate parent so a
-// fresh `~/.cursor/`, `%APPDATA%\Code\User\`, etc. tree is created
-// alongside the stub. The /api/init-client-config endpoint adds a
-// separate parent-presence gate to prevent surprising tree creation
-// on hosts where the client is not installed — but at the adapter
-// level the helper is permissive so BackupKeep's seed-then-backup
-// path keeps working on a never-installed host.
-func TestInitEmpty_CreatesMissingParentDirs(t *testing.T) {
+// TestInitEmpty_RefusesMissingParentDir pins the v0.4.5 deep-sec
+// Lane A #1 contract: InitEmpty does NOT mkdir-p the parent. If the
+// parent disappears between the endpoint's pre-stat and the
+// adapter's InitEmpty call, the operation MUST fail loudly so the
+// frontend returns 412 PARENT_MISSING instead of silently
+// re-creating the directory tree on a host where the client was
+// uninstalled mid-flight.
+//
+// The pre-fix behavior was: EnsureClientConfigStub did `MkdirAll`,
+// which let the parent disappear-and-respawn TOCTOU silent. The
+// fix removes the MkdirAll from EnsureClientConfigStub; callers
+// (BackupKeep adapters) now MkdirAll themselves.
+func TestInitEmpty_RefusesMissingParentDir(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nested", "tree", "config.json")
 	c := &claudeCode{path: path}
-	if err := c.InitEmpty(); err != nil {
-		t.Fatalf("InitEmpty: %v", err)
+	created, err := c.InitEmpty()
+	if err == nil {
+		t.Fatalf("InitEmpty on missing parent: got nil err, want failure (created=%v)", created)
 	}
-	if _, err := os.Stat(path); err != nil {
-		t.Errorf("stub not created at nested path: %v", err)
+	if created {
+		t.Errorf("InitEmpty created=true on missing parent, want false")
+	}
+	if _, statErr := os.Stat(path); statErr == nil {
+		t.Errorf("stub was created at nested path despite missing parent: parent must NOT be auto-created")
 	}
 }
 
@@ -195,9 +217,12 @@ func TestEnsureClientConfigStub_RefusesPreExistingSymlink(t *testing.T) {
 		t.Fatalf("create symlink: %v", err)
 	}
 
-	err := EnsureClientConfigStub(link, []byte(`{"servers": {}}`))
+	created, err := EnsureClientConfigStub(link, []byte(`{"servers": {}}`))
 	if err == nil {
 		t.Fatal("EnsureClientConfigStub through symlink: got nil, want refusal error")
+	}
+	if created {
+		t.Errorf("created=true on symlink refusal, want false")
 	}
 	if !strings.Contains(err.Error(), "symlink") {
 		t.Errorf("error message %q does not mention symlink", err)
@@ -223,9 +248,12 @@ func TestEnsureClientConfigStub_RefusesPreExistingDirectory(t *testing.T) {
 		t.Fatalf("seed directory: %v", err)
 	}
 
-	err := EnsureClientConfigStub(path, []byte(`{"servers": {}}`))
+	created, err := EnsureClientConfigStub(path, []byte(`{"servers": {}}`))
 	if err == nil {
 		t.Fatal("EnsureClientConfigStub on a directory: got nil, want refusal error")
+	}
+	if created {
+		t.Errorf("created=true on directory-refusal, want false")
 	}
 	if !strings.Contains(err.Error(), "non-regular") {
 		t.Errorf("error message %q does not mention non-regular entry", err)
@@ -252,20 +280,32 @@ func TestEnsureClientConfigStub_AtomicConcurrentCreate(t *testing.T) {
 	const goroutines = 16
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
+	createdFlags := make([]bool, goroutines)
 	errs := make([]error, goroutines)
 	for i := 0; i < goroutines; i++ {
 		go func(i int) {
 			defer wg.Done()
-			errs[i] = EnsureClientConfigStub(path, stub)
+			createdFlags[i], errs[i] = EnsureClientConfigStub(path, stub)
 		}(i)
 	}
 	wg.Wait()
 
+	winners := 0
 	for i, err := range errs {
 		if err != nil {
 			t.Errorf("goroutine %d: %v", i, err)
 		}
+		if createdFlags[i] {
+			winners++
+		}
 	}
+	// Exactly one goroutine wins the publish race; the rest return
+	// created=false (idempotent loser branch). v0.4.5 deep-sec Lane
+	// A #3 closure — Created flag must be honest.
+	if winners != 1 {
+		t.Errorf("created=true goroutines: %d, want exactly 1 (publish-race winner)", winners)
+	}
+
 	body, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read result: %v", err)

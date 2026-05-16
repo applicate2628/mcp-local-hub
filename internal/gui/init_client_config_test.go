@@ -275,6 +275,74 @@ func TestRealClientInitializer_ParentMissingError(t *testing.T) {
 	}
 }
 
+// TestRealClientInitializer_RefusesStrictMode pins the v0.4.5
+// deep-sec Lane C #1 closure: when MCPHUB_REQUIRE_SINGLE_USER_HOME=1
+// is set, the Init endpoint refuses to seed an empty stub because
+// the atomic create-new-only path bypasses the SecureWriteClientConfig
+// pipeline that strict-mode operators explicitly opted into. The
+// refusal maps to 412 STRICT_MODE_REFUSED at the HTTP layer; the
+// underlying Init returns errStrictModeRefused so the handler
+// switch statement can route it.
+func TestRealClientInitializer_RefusesStrictMode(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("APPDATA", filepath.Join(tmp, "AppData", "Roaming"))
+	t.Setenv("LOCALAPPDATA", filepath.Join(tmp, "AppData", "Local"))
+	t.Setenv("MCPHUB_REQUIRE_SINGLE_USER_HOME", "1")
+
+	all := clients.AllClients()
+	vscode, ok := all["vscode"]
+	if !ok {
+		t.Skipf("vscode adapter not constructible in test env")
+	}
+	// Pre-create the parent so the parent-stat check passes; the
+	// strict-mode refusal should fire BEFORE the parent stat to make
+	// the gap diagnostic clearer.
+	if err := os.MkdirAll(filepath.Dir(vscode.ConfigPath()), 0o755); err != nil {
+		t.Fatalf("mkdir parent: %v", err)
+	}
+
+	init := realClientInitializer{}
+	_, err := init.Init("vscode")
+	if !errors.Is(err, errStrictModeRefused) {
+		t.Errorf("err=%v, want wraps errStrictModeRefused", err)
+	}
+
+	// Verify NO stub was created — refusal must be honored before
+	// any disk write.
+	if _, statErr := os.Stat(vscode.ConfigPath()); statErr == nil {
+		t.Errorf("strict-mode refusal still created %s; init must refuse before write", vscode.ConfigPath())
+	}
+}
+
+// TestInitClientConfig_StrictModeMapsTo412 verifies the handler-level
+// status-code routing for the strict-mode refusal.
+func TestInitClientConfig_StrictModeMapsTo412(t *testing.T) {
+	fi := &fakeClientInitializer{
+		err: fmt.Errorf("%w: strict mode active", errStrictModeRefused),
+	}
+	s := NewServer(Config{})
+	s.clientInit = fi
+
+	req := httptest.NewRequest(http.MethodPost, "/api/init-client-config",
+		bytes.NewReader([]byte(`{"client":"vscode"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusPreconditionFailed {
+		t.Fatalf("status = %d, want 412; body=%q", rec.Code, rec.Body.String())
+	}
+	var resp map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if resp["code"] != "STRICT_MODE_REFUSED" {
+		t.Errorf("code=%q, want STRICT_MODE_REFUSED", resp["code"])
+	}
+}
+
 // TestRealClientInitializer_HappyPath drives the real initializer
 // end-to-end: with a hand-prepared parent directory, Init creates
 // the empty stub and reports Created=true. A second call returns

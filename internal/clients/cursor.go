@@ -36,7 +36,12 @@ func (c *cursorClient) Backup() (string, error) {
 }
 
 func (c *cursorClient) BackupKeep(keepN int) (string, error) {
-	if err := c.InitEmpty(); err != nil {
+	if dir := filepath.Dir(c.path); dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return "", err
+		}
+	}
+	if _, err := c.InitEmpty(); err != nil {
 		return "", err
 	}
 	return writeBackup(c.path, c.Name(), keepN)
@@ -45,7 +50,7 @@ func (c *cursorClient) BackupKeep(keepN int) (string, error) {
 // InitEmpty seeds ~/.cursor/mcp.json with `{"mcpServers": {}}` if the
 // file is absent. Cursor shares the canonical JSON family schema;
 // AddEntry's later merge writes into the same `mcpServers` map.
-func (c *cursorClient) InitEmpty() error {
+func (c *cursorClient) InitEmpty() (created bool, err error) {
 	return EnsureClientConfigStub(c.path, []byte("{\n  \"mcpServers\": {}\n}\n"))
 }
 

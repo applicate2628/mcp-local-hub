@@ -43,7 +43,7 @@ func (c *claudeCode) BackupKeep(keepN int) (string, error) {
 // file is absent. claude-code's single-file user config uses the
 // canonical JSON family `mcpServers` key; AddEntry's later merge
 // writes into the same map.
-func (c *claudeCode) InitEmpty() error {
+func (c *claudeCode) InitEmpty() (created bool, err error) {
 	return EnsureClientConfigStub(c.path, []byte("{\n  \"mcpServers\": {}\n}\n"))
 }
 

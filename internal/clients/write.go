@@ -68,87 +68,149 @@ func fallbackWriteConfigFile(path string, contents []byte) error {
 // EnsureClientConfigStub is the canonical helper for adapter
 // InitEmpty() implementations (v0.4.5 init-button feature). It
 // atomically creates `path` populated with `stub` if and only if no
-// regular file exists at `path`. Idempotent across legitimate
-// concurrent writers and resistant to attacker-planted symlinks.
+// regular file exists at `path`.
 //
-// Contract:
+// Returns (created, err):
 //
-//   - If a regular file already exists at `path`, returns nil and
-//     does NOT touch the bytes. This covers the "second-click" case
-//     where another tab or another `mcphub` invocation already wrote
-//     the file between the GUI's scan refresh and the Initialize POST.
-//   - If a symlink, junction, named pipe, or any non-regular entry
-//     exists at `path`, returns a refusal error. This is the
-//     defense against PR #208 deep-sec Lane C: in default-relax mode,
-//     the production WriteConfigFile pipeline would otherwise follow
-//     a pre-planted symlink and write the stub bytes through it to
-//     an attacker-chosen location. Init must never follow symlinks.
-//   - Otherwise, atomically creates `path` with `O_CREAT|O_EXCL` —
-//     on POSIX with `O_NOFOLLOW` so the create is symlink-safe at
-//     the kernel level; on Windows the L-stat pre-check above is the
-//     defense (the residual window between Lstat and CreateFileW is
-//     small and not directly addressable without NtCreateFile +
-//     FILE_FLAG_OPEN_REPARSE_POINT — tracked for v0.4.6+). If a
-//     concurrent writer wins the create race, the function returns
-//     nil (treats EEXIST as idempotent success).
+//   - created=true, err=nil: this call wrote the stub bytes.
+//   - created=false, err=nil: a regular file already existed at the
+//     destination (either before this call, or as the winner of a
+//     publish race) — idempotent success.
+//   - created=false, err!=nil: refusal (symlink, junction, non-
+//     regular entry) or I/O failure. The caller MUST surface this
+//     to the operator; the production endpoint maps it to a 500
+//     INIT_FAILED response.
 //
-// Parent directories are auto-created (0755) before the create
-// attempt; callers that want to gate on "parent must already exist"
-// (the /api/init-client-config endpoint) MUST verify parent presence
-// separately — this helper is intentionally permissive on the parent
-// so it can also serve adapter BackupKeep paths where seeding an
-// empty stub from scratch is the documented behavior.
+// Contract beyond the return shape:
 //
-// The atomic O_EXCL create bypasses the WriteConfigFile / production
-// SecureWriteClientConfig pipeline because that pipeline uses
-// FILE_RENAME_REPLACE_IF_EXISTS (Windows) / replacing renameat
-// (POSIX) which has stat-then-replace semantics inherently — exactly
-// the race surface this helper exists to close. The trade-off is
-// that the freshly-created stub file inherits the parent's default
-// DACL rather than the allowlist-only DACL that SecureWriteClientConfig
-// installs. For an empty config file this is acceptable: every
-// subsequent AddEntry / install / migrate write goes through
-// SecureWriteClientConfig which atomic-replaces the file with proper
-// DACL via temp-file rename, so the weak DACL window only exists for
-// non-sensitive empty stub content.
-func EnsureClientConfigStub(path string, stub []byte) error {
-	if st, err := os.Lstat(path); err == nil {
-		if st.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf(
-				"refuse to initialize through pre-existing symlink at %s "+
-					"(remove the symlink and retry; init must not follow symlinks "+
-					"because the production write pipeline could be redirected to "+
-					"an attacker-chosen target)",
-				path,
+//   - The function does NOT create the parent directory. Callers
+//     must MkdirAll explicitly before calling if they need
+//     directory creation. This is the v0.4.5 deep-sec Lane A #1
+//     follow-up: the endpoint stats the parent for gating; an
+//     implicit MkdirAll here would re-create a parent that was
+//     deleted in the TOCTOU window and produce a silent 200 success
+//     where the operator expects 412 PARENT_MISSING.
+//
+//   - Two-phase atomic publish: stub bytes are written to a temp
+//     file in the same directory, then the temp file is published
+//     to `path` via `os.Link` (hardlink). Hardlink semantics are
+//     no-replace on both POSIX and Windows, so the publish step
+//     atomically commits the file with content present. This
+//     closes the v0.4.5 deep-sec Lane A #2 "concurrent reader sees
+//     an empty file" window: between the temp's `O_CREAT|O_EXCL`
+//     open and the hardlink commit, only the temp path is visible,
+//     not `path`. After the hardlink commits, both paths point at
+//     the same inode; the temp is unlinked, leaving `path` with
+//     fully-written content. Hardlink requires same-volume
+//     filesystem — every realistic client-config parent (HOME-
+//     relative, %APPDATA%-relative) satisfies this.
+//
+//   - Symlink and non-regular-entry refusal happens BOTH before
+//     the temp write (cheap pre-check) AND after a publish-race
+//     EEXIST (re-Lstat to verify the winner is a regular file).
+//     Closes the v0.4.5 deep-sec Lane B + Lane C #2 "loser doesn't
+//     re-check" finding: previously an attacker who planted a
+//     symlink in the race window between the initial Lstat and the
+//     create publish could cause the loser branch to silently
+//     return nil with a non-regular winner.
+//
+// Production trade-off: this helper deliberately bypasses the
+// WriteConfigFile / SecureWriteClientConfig pipeline because that
+// pipeline uses FILE_RENAME_REPLACE_IF_EXISTS (Windows) / replacing
+// renameat (POSIX) — exactly the stat-then-replace surface this
+// helper exists to close. The freshly-created stub file therefore
+// inherits the parent's default DACL rather than the allowlist-only
+// DACL that SecureWriteClientConfig installs. For default-mode
+// operators this is fine: stub content is non-sensitive, and the
+// next AddEntry / install / migrate write goes through
+// SecureWriteClientConfig and atomic-renames the file with proper
+// DACL. For strict-mode operators (MCPHUB_REQUIRE_SINGLE_USER_HOME=1)
+// this is a known gap: the Init endpoint refuses in strict mode
+// pending the v0.4.6+ SecureCreateClientConfigIfMissing helper —
+// see internal/gui/init_client_config.go for the refusal logic.
+func EnsureClientConfigStub(path string, stub []byte) (created bool, err error) {
+	if existed, refusal := classifyExistingForInit(path); refusal != nil {
+		return false, refusal
+	} else if existed {
+		return false, nil
+	}
+	dir := filepath.Dir(path)
+	// os.CreateTemp atomically allocates a unique filename via an
+	// internal retry loop, so concurrent goroutines never collide on
+	// the temp basename. It opens with O_CREAT|O_EXCL at 0o600.
+	tmpFile, err := os.CreateTemp(dir, filepath.Base(path)+".init-stub.*.tmp")
+	if err != nil {
+		return false, fmt.Errorf("init stub temp create in %s: %w", dir, err)
+	}
+	tmpPath := tmpFile.Name()
+	if _, writeErr := tmpFile.Write(stub); writeErr != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
+		return false, writeErr
+	}
+	if closeErr := tmpFile.Close(); closeErr != nil {
+		_ = os.Remove(tmpPath)
+		return false, closeErr
+	}
+	if linkErr := os.Link(tmpPath, path); linkErr != nil {
+		_ = os.Remove(tmpPath)
+		if os.IsExist(linkErr) {
+			// Lost the publish race — re-classify the winner. If it
+			// turned out to be a symlink/non-regular (attacker-planted
+			// between our pre-check and the link), surface the refusal
+			// honestly.
+			if existed, refusal := classifyExistingForInit(path); refusal != nil {
+				return false, refusal
+			} else if existed {
+				return false, nil
+			}
+			return false, fmt.Errorf(
+				"init stub publish lost race but destination is now absent: %w",
+				linkErr,
 			)
 		}
-		if st.Mode().IsRegular() {
-			return nil
+		return false, linkErr
+	}
+	_ = os.Remove(tmpPath)
+	return true, nil
+}
+
+// classifyExistingForInit inspects what's at `path` without
+// following symlinks and returns:
+//
+//   - existed=true,  err=nil: regular file present (idempotent
+//     success for the caller).
+//   - existed=false, err=nil: path does not exist.
+//   - existed=false, err!=nil: refusal (symlink, junction, or any
+//     non-regular entry), or an unexpected stat failure (permissions,
+//     I/O fault).
+//
+// Used twice by EnsureClientConfigStub: once before the temp write
+// (cheap pre-check) and once after a publish-race EEXIST (to
+// re-verify the winner). Both call sites must apply identical
+// refusal rules so an attacker cannot exploit asymmetric handling.
+func classifyExistingForInit(path string) (existed bool, err error) {
+	st, statErr := os.Lstat(path)
+	if statErr != nil {
+		if os.IsNotExist(statErr) {
+			return false, nil
 		}
-		return fmt.Errorf(
+		return false, statErr
+	}
+	if st.Mode()&os.ModeSymlink != 0 {
+		return false, fmt.Errorf(
+			"refuse to initialize through symlink at %s "+
+				"(remove the symlink and retry; init must not follow symlinks "+
+				"because the production write pipeline could be redirected to "+
+				"an attacker-chosen target)",
+			path,
+		)
+	}
+	if !st.Mode().IsRegular() {
+		return false, fmt.Errorf(
 			"refuse to initialize over non-regular existing entry at %s (mode %s)",
 			path, st.Mode(),
 		)
-	} else if !os.IsNotExist(err) {
-		return err
 	}
-	if dir := filepath.Dir(path); dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
-		}
-	}
-	flags := os.O_CREATE | os.O_EXCL | os.O_WRONLY
-	flags |= createNoFollowFlag()
-	f, err := os.OpenFile(path, flags, 0o600)
-	if err != nil {
-		if os.IsExist(err) {
-			return nil
-		}
-		return err
-	}
-	if _, writeErr := f.Write(stub); writeErr != nil {
-		_ = f.Close()
-		return writeErr
-	}
-	return f.Close()
+	return true, nil
 }
