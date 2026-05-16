@@ -70,6 +70,20 @@ func probeClientConfigPresence(opts ScanOpts) map[string]string {
 		if p.path == "" {
 			continue
 		}
+		// PR #208 deep-sec Lane B round 4 P2 closure: `os.Stat` follows
+		// symlinks, so a dangling symlink at the destination (target
+		// missing) surfaces as IsNotExist and the old logic routed it
+		// to "missing-init-possible" — letting the GUI render an
+		// Initialize button that the secure-create pipeline would then
+		// refuse with 500 INIT_FAILED. Lstat the path first: if it IS
+		// a symlink (dangling or otherwise), classify as "error" so
+		// the matrix renders the config-error diagnostic instead of an
+		// Init affordance the operator can't action without first
+		// removing the symlink.
+		if lst, lerr := os.Lstat(p.path); lerr == nil && lst.Mode()&os.ModeSymlink != 0 {
+			out[p.name] = "error"
+			continue
+		}
 		if _, err := os.Stat(p.path); err == nil {
 			out[p.name] = "ok"
 		} else if os.IsNotExist(err) {

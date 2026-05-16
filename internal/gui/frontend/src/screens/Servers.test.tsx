@@ -188,11 +188,21 @@ describe("ServersScreen — Initialize button (v0.4.5)", () => {
     });
   });
 
-  it("shows error banner on PARENT_MISSING and preserves the operational code (deep-sec Lane B)", async () => {
+  it("shows error banner on PARENT_MISSING, preserves operational code, and refreshes scan (deep-sec Lane B round 3+4)", async () => {
+    let scanCallCount = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
-        "/api/scan": () =>
-          jsonResponse(200, scanWith({ vscode: "missing-init-possible" })),
+        "/api/scan": () => {
+          scanCallCount += 1;
+          // First scan: vscode missing-init-possible. Subsequent
+          // scans (after PARENT_MISSING-triggered refresh): vscode
+          // genuinely missing so the Initialize button disappears.
+          const presence =
+            scanCallCount === 1
+              ? { vscode: "missing-init-possible" }
+              : { vscode: "missing" };
+          return jsonResponse(200, scanWith(presence));
+        },
         "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
         "/api/init-client-config": () =>
           jsonResponse(412, {
@@ -215,10 +225,26 @@ describe("ServersScreen — Initialize button (v0.4.5)", () => {
     });
     const banner = screen.getByTestId("init-client-msg");
     expect(banner.className).toContain("error");
-    // Lane B P2 fix: the operational code MUST appear in the banner
-    // so operators reading docs that reference `PARENT_MISSING` /
-    // `INIT_FAILED` can map the banner text back to those codes.
+    // Lane B round 3 P2 fix: the operational code MUST appear in
+    // the banner so operators reading docs that reference
+    // PARENT_MISSING / INIT_FAILED can map the banner back to them.
     expect(banner.textContent).toContain("PARENT_MISSING");
+
+    // Lane B round 4 P2 fix: PARENT_MISSING triggers a scan refresh
+    // so the stale Initialize button disappears (presence flips
+    // from "missing-init-possible" to "missing"). Without this,
+    // the operator would keep clicking the same failing button.
+    await waitFor(() => {
+      expect(scanCallCount).toBeGreaterThanOrEqual(2);
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("init-client-vscode")).toBeNull();
+    });
+    // Error banner persists across the scan refresh (sticky-on-error
+    // semantic) — the operator must still see the failure context.
+    const persistedBanner = screen.queryByTestId("init-client-msg");
+    expect(persistedBanner).toBeTruthy();
+    expect(persistedBanner!.textContent).toContain("PARENT_MISSING");
   });
 
   it("renders Initialize buttons for every missing-init-possible client independently", async () => {

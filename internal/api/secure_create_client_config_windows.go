@@ -274,33 +274,59 @@ func ntRenameRelativeNoReplace(
 
 // isAlreadyExistsErr matches Windows error codes that indicate
 // "destination already exists" from NtSetInformationFile's rename
-// path. STATUS_OBJECT_NAME_COLLISION is the kernel-level code;
-// Windows.GetLastError-ified variants are ERROR_ALREADY_EXISTS and
-// ERROR_FILE_EXISTS depending on the call layer that surfaced it.
+// path. NtSetInformationFile's golang.org/x/sys/windows wrapper
+// returns the NTSTATUS DIRECTLY (typed as `windows.NTStatus`,
+// implements error) — NOT the Win32 errno. So the loser of a
+// publish race surfaces as `STATUS_OBJECT_NAME_COLLISION`, not
+// `ERROR_ALREADY_EXISTS`. The helper must therefore inspect both
+// the NTStatus and Errno representations along the error chain.
+//
+// PR #208 deep-sec Lane A round 4 P2 closure: prior version only
+// checked `windows.Errno` + `os.IsExist`. NTStatus did not match
+// either path, so the loser branch fell through to 500 INIT_FAILED
+// when the correct response is `(false, nil)` idempotent success.
 func isAlreadyExistsErr(err error) bool {
 	if err == nil {
 		return false
 	}
-	// errors.Is reaches through fmt.Errorf wrapping.
+	if ntStatusIs(err, windows.STATUS_OBJECT_NAME_COLLISION) {
+		return true
+	}
+	if ntStatusIs(err, windows.STATUS_OBJECT_NAME_EXISTS) {
+		return true
+	}
 	if errnoIs(err, windows.ERROR_ALREADY_EXISTS) {
 		return true
 	}
 	if errnoIs(err, windows.ERROR_FILE_EXISTS) {
 		return true
 	}
-	// NtSetInformationFile returns an NTSTATUS that maps to
-	// ERROR_ALREADY_EXISTS for STATUS_OBJECT_NAME_COLLISION. The
-	// shim in golang.org/x/sys/windows surfaces it as the
-	// corresponding errno; the above checks cover it. Fallback: os
-	// already gives IsExist for both errors via the wrapping helper.
 	return os.IsExist(err)
 }
 
-// errnoIs unwraps to syscall.Errno and compares against `want`.
+// errnoIs unwraps to windows.Errno and compares against `want`.
 func errnoIs(err error, want windows.Errno) bool {
 	for cur := err; cur != nil; {
 		if e, ok := cur.(windows.Errno); ok {
 			return e == want
+		}
+		type unwrapper interface{ Unwrap() error }
+		if u, ok := cur.(unwrapper); ok {
+			cur = u.Unwrap()
+			continue
+		}
+		return false
+	}
+	return false
+}
+
+// ntStatusIs unwraps to windows.NTStatus and compares against
+// `want`. Sibling of errnoIs for the NTSTATUS error family
+// returned by Nt-prefixed syscalls.
+func ntStatusIs(err error, want windows.NTStatus) bool {
+	for cur := err; cur != nil; {
+		if s, ok := cur.(windows.NTStatus); ok {
+			return s == want
 		}
 		type unwrapper interface{ Unwrap() error }
 		if u, ok := cur.(unwrapper); ok {

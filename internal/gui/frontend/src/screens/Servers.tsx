@@ -1,5 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
-import { fetchOrThrow, postInitClientConfig } from "../api";
+import { fetchOrThrow, postInitClientConfig, InitClientConfigError } from "../api";
 import { useEventSource } from "../hooks/useEventSource";
 import { collectServers } from "../lib/routing";
 import { aggregateStatus, stateShape } from "../lib/status";
@@ -186,6 +186,18 @@ export function ServersScreen() {
       setReloadToken((n) => n + 1);
     } catch (err) {
       setInitMsg({ text: (err as Error).message, kind: "error" });
+      // PR #208 deep-sec Lane B round 4 P2 closure: when the
+      // backend says PARENT_MISSING (412), the cached
+      // client_config_presence is stale — the parent directory
+      // disappeared between scan refresh and click. Trigger a scan
+      // refresh so the matrix re-renders without the Initialize
+      // affordance (presence flips from "missing-init-possible" to
+      // "missing"). Error banners are sticky across scan refresh
+      // (see the scan onload setInitMsg passthrough for kind ===
+      // "error"), so the operator still sees the failure context.
+      if (err instanceof InitClientConfigError && err.code === "PARENT_MISSING") {
+        setReloadToken((n) => n + 1);
+      }
     } finally {
       setInitBusy((prev) => {
         const next = { ...prev };

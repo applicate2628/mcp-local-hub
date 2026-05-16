@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -307,6 +308,32 @@ func TestProbeClientConfigPresence_StateMachine(t *testing.T) {
 	}
 	if _, ok := out["codex-cli"]; ok {
 		t.Errorf("codex-cli should not appear in result when path is empty; got %v", out["codex-cli"])
+	}
+}
+
+// TestProbeClientConfigPresence_DanglingSymlink pins the v0.4.5
+// deep-sec PR #208 Lane B round 4 P2 closure: a dangling symlink at
+// the config path must surface as "error", not "missing-init-possible".
+// Previously os.Stat followed the symlink, returned IsNotExist
+// (target absent), and classifyMissingClientConfig saw the parent
+// dir exists → "missing-init-possible" → GUI offered Initialize →
+// secure-create refused → 500 INIT_FAILED. The Lstat-first probe
+// now classifies symlinks (dangling or not) as "error" so the
+// matrix renders the config-error diagnostic instead.
+func TestProbeClientConfigPresence_DanglingSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevation on Windows; the cross-platform Lstat probe is exercised by the POSIX path")
+	}
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "no-such-target.dat")
+	link := filepath.Join(tmp, "mcp.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("create dangling symlink: %v", err)
+	}
+
+	out := probeClientConfigPresence(ScanOpts{VSCodeConfigPath: link})
+	if got := out["vscode"]; got != "error" {
+		t.Errorf("dangling symlink at config path classified as %q, want \"error\"", got)
 	}
 }
 
