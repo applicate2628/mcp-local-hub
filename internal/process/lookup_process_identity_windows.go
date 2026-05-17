@@ -100,35 +100,80 @@ func LookupProcessIdentity(pid int) (ProcessIdentity, error) {
 	return ProcessIdentity{}, fmt.Errorf("process: lookup PID %d failed after %d attempts: %w", pid, lookupRetries, lastErr)
 }
 
-// realLookupBackend is the production resolver. It tries PowerShell
-// first (the primary path per spec §"Pre-unregister daemon stop"
-// line 258), and falls back to wmic.exe only if the PowerShell CLM
-// probe rejects PowerShell as available AND wmic.exe is on PATH.
+// probePowerShellCLMFn is the injectable CLM probe the production
+// dispatcher consults. Tests swap it via swapProbePowerShellCLM to
+// drive the (psOK, err) decision matrix without shelling out to
+// powershell.exe. Defaults to the real ProbePowerShellCLM exported
+// function.
+var probePowerShellCLMFn = ProbePowerShellCLM
+
+// lookupViaPowerShellFn and lookupViaWmicFn are the injectable
+// terminal-path backends the production dispatcher fans out to once
+// the probe verdict is known. Tests swap them via
+// swapLookupViaPowerShell / swapLookupViaWmic to assert which path
+// the dispatcher chose without shelling out.
+var (
+	lookupViaPowerShellFn = lookupViaPowerShell
+	lookupViaWmicFn       = lookupViaWmic
+)
+
+// wmicPathLookupFn is the injectable PATH probe for wmic.exe. Tests
+// swap it to simulate "wmic present" vs "wmic absent" hosts without
+// touching the real filesystem. Production defaults to exec.LookPath.
+var wmicPathLookupFn = func() error {
+	_, err := exec.LookPath("wmic.exe")
+	return err
+}
+
+// realLookupBackend is the production resolver. Dispatch policy
+// (codex-r2-b-p1, round-1 remains):
+//
+//  1. Probe PowerShell CLM availability FIRST. If the probe itself
+//     errors (transport failure, powershell.exe absent), surface the
+//     error — do NOT silently fall through to wmic. A failed probe
+//     is an environmental defect the operator must see, not a
+//     trigger for a weaker fallback.
+//
+//  2. If CLM is available (probe returns (true, nil)), PowerShell is
+//     the canonical path. Any PS call error (transient AV stall,
+//     transport hang, weird JSON) is returned to the caller; the
+//     outer retry loop handles transient cases. Do NOT fall through
+//     to wmic — wmic is strictly for CLM-locked hosts, not a
+//     general-purpose "PS failed, try something else" alternative.
+//
+//  3. If CLM is locked (probe returns (false, nil)), try wmic.exe
+//     when it is on PATH. If wmic is absent, return a clear error
+//     naming both conditions so operators can either relax the
+//     security policy or install wmic.
 //
 // The probe runs at most once per LookupProcessIdentity call;
 // production callers typically resolve many PIDs per migration tick,
 // so an in-memory cache could be added if profiling shows the probe
 // dominating wall-time. For now correctness > micro-optimization.
 func realLookupBackend(pid int) (ProcessIdentity, error) {
-	psOK, _ := ProbePowerShellCLM()
-	if psOK {
-		id, err := lookupViaPowerShell(pid)
-		if err == nil || errors.Is(err, ErrProcessNotFound) {
-			return id, err
-		}
-		// PS gave a non-CLM error (e.g., transport hang, weird JSON);
-		// only consider wmic fallback when wmic.exe is actually on PATH.
-		if _, lookErr := exec.LookPath("wmic.exe"); lookErr == nil {
-			return lookupViaWmic(pid)
-		}
-		return ProcessIdentity{}, err
+	clmAvailable, probeErr := probePowerShellCLMFn()
+	if probeErr != nil {
+		// Probe transport failed (powershell.exe missing, language-mode
+		// shell-out hung, etc.). Do NOT silently fall through to wmic;
+		// the operator needs to see the probe defect, not a downgraded
+		// answer from a fallback they did not opt into.
+		return ProcessIdentity{}, fmt.Errorf("process: PowerShell CLM probe failed: %w", probeErr)
 	}
-	// PS unavailable (CLM-locked or probe transport failure).
-	// Try wmic.exe if present.
-	if _, err := exec.LookPath("wmic.exe"); err == nil {
-		return lookupViaWmic(pid)
+	if clmAvailable {
+		// FullLanguage mode confirmed — PowerShell is canonical.
+		// Any error here is returned as-is; the outer retry loop
+		// covers transient stalls. wmic is intentionally NOT
+		// consulted: it is a CLM-locked-host fallback, not an
+		// alternative path on healthy hosts.
+		return lookupViaPowerShellFn(pid)
 	}
-	return ProcessIdentity{}, errors.New("process: PowerShell CLM-locked AND wmic.exe absent")
+	// CLM-locked (probe returned (false, nil)). Use wmic.exe if
+	// present; otherwise emit a clear error naming both conditions
+	// so operators know what to change.
+	if err := wmicPathLookupFn(); err == nil {
+		return lookupViaWmicFn(pid)
+	}
+	return ProcessIdentity{}, fmt.Errorf("process: PowerShell CLM-locked AND wmic.exe absent: cannot resolve PID %d", pid)
 }
 
 // psCimRecord mirrors the JSON shape produced by ConvertTo-Json
