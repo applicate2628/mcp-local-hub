@@ -77,10 +77,23 @@ func ensureCanonicalMcphubPresent() (string, error) {
 
 // Plan describes the side effects that `mcp install --server X` would produce.
 // Returned by BuildPlan and rendered by `install --dry-run`.
+//
+// v0.5.0 Phase 12: SupervisorIntent is the new authoritative seam that
+// downstream consumers (migration journal, install reconciler, the
+// status-seam IPC backing in health.go) read for "what daemons should
+// the supervisor own?". SchedulerTasks is preserved for backward compat
+// during the v0.5.x transition — existing call sites (executeInstallTo
+// Step 1 at install.go:1589-1632, the prune-set construction at
+// install.go:1638-1652, printPlanTo at install.go:1540-1553) continue
+// using SchedulerTasks unchanged. A later release removes the legacy
+// field once all consumers migrate.
+//
+// Spec §"Q12 CLI/GUI status seam" + plan §2611-2644.
 type Plan struct {
-	Server         string
-	SchedulerTasks []ScheduledTaskPlan
-	ClientUpdates  []ClientUpdatePlan
+	Server           string
+	SchedulerTasks   []ScheduledTaskPlan     // DEPRECATED: kept for v0.5.x backward compat; replaced by SupervisorIntent in v0.6+.
+	SupervisorIntent []SupervisorIntentEntry // v0.5.0 Phase 12 — authoritative for new supervisor-intent.json consumers.
+	ClientUpdates    []ClientUpdatePlan
 	// FullInstall is true when BuildPlan was called with an empty daemonFilter
 	// — i.e. the plan covers the whole manifest. Only a full install can
 	// safely reconcile (prune) obsolete sibling scheduler tasks from prior
@@ -1084,23 +1097,42 @@ func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, err
 	}
 	p := &Plan{Server: m.Name, FullInstall: opts.DaemonFilter == ""}
 	// Scheduler tasks — one per daemon (global) or lazy (workspace-scoped).
+	// SupervisorIntent mirrors SchedulerTasks during the v0.5.x transition
+	// (plan §2611-2644). Both fields stay in sync until the supervisor pivot
+	// completes and the legacy field is removed in v0.6+.
 	for _, d := range m.Daemons {
 		if opts.DaemonFilter != "" && d.Name != opts.DaemonFilter {
 			continue
 		}
+		name := "mcp-local-hub-" + m.Name + "-" + d.Name
+		args := []string{"daemon", "--server", m.Name, "--daemon", d.Name}
 		p.SchedulerTasks = append(p.SchedulerTasks, ScheduledTaskPlan{
-			Name:    "mcp-local-hub-" + m.Name + "-" + d.Name,
+			Name:    name,
 			Command: canonicalPath,
-			Args:    []string{"daemon", "--server", m.Name, "--daemon", d.Name},
+			Args:    args,
+			Trigger: "At logon",
+		})
+		p.SupervisorIntent = append(p.SupervisorIntent, SupervisorIntentEntry{
+			Name:    name,
+			Command: canonicalPath,
+			Args:    args,
 			Trigger: "At logon",
 		})
 	}
 	// Weekly refresh restarts the whole server, so it only makes sense for full installs.
 	if m.WeeklyRefresh && opts.DaemonFilter == "" {
+		name := "mcp-local-hub-" + m.Name + "-weekly-refresh"
+		args := []string{"restart", "--server", m.Name}
 		p.SchedulerTasks = append(p.SchedulerTasks, ScheduledTaskPlan{
-			Name:    "mcp-local-hub-" + m.Name + "-weekly-refresh",
+			Name:    name,
 			Command: canonicalPath,
-			Args:    []string{"restart", "--server", m.Name},
+			Args:    args,
+			Trigger: "Weekly Sun 03:00",
+		})
+		p.SupervisorIntent = append(p.SupervisorIntent, SupervisorIntentEntry{
+			Name:    name,
+			Command: canonicalPath,
+			Args:    args,
 			Trigger: "Weekly Sun 03:00",
 		})
 	}
@@ -1743,6 +1775,44 @@ type schedulerLister interface {
 	Delete(name string) error
 	ExportXML(name string) ([]byte, error)
 	ImportXML(name string, xml []byte) error
+}
+
+// buildPruneSetForReconcile derives the set of "planned" task names from a
+// supervisor-intent.json snapshot in the same BARE-key shape that
+// pruneObsoleteServerTasks expects (see install.go:1773 — `strings.TrimPrefix(
+// task.Name, "\\")` strips the canonical leading backslash before the
+// prefix/equality check).
+//
+// supervisor-intent.json stores `task_name` in canonical leading-backslash
+// form (e.g. `\mcp-local-hub-memory-default`); the install reconciler and
+// the prune-set comparator both work in BARE form (without the backslash).
+// This helper bridges the two shapes so reconcile-prune stays identical
+// to the established install.go:1639-1642 planned-map invariant.
+//
+// Nil intent returns an empty (non-nil) map so callers never need a nil-deref
+// guard before lookup.
+//
+// Spec §"Q12 CLI/GUI status seam" + plan §2611-2644.
+func buildPruneSetForReconcile(intent *SupervisorIntentFile) map[string]struct{} {
+	planned := make(map[string]struct{})
+	if intent == nil {
+		return planned
+	}
+	for _, d := range intent.Daemons {
+		bare := strings.TrimPrefix(d.TaskName, "\\")
+		if bare == "" {
+			continue
+		}
+		planned[bare] = struct{}{}
+	}
+	for _, t := range intent.MaintenanceTimers {
+		bare := strings.TrimPrefix(t.Name, "\\")
+		if bare == "" {
+			continue
+		}
+		planned[bare] = struct{}{}
+	}
+	return planned
 }
 
 // pruneObsoleteServerTasks deletes scheduler tasks whose Name starts with

@@ -170,3 +170,24 @@ type BackupInfo struct {
 	ModTime  time.Time `json:"mod_time"`
 	SizeByte int64     `json:"size_byte"`
 }
+
+// SupervisorIntentEntry is the v0.5.0 plan-side entry that describes one
+// daemon (or weekly-refresh maintenance row) the supervisor should keep
+// running. The shape is parallel to ScheduledTaskPlan during the
+// transition so existing callers (buildPlan -> executeInstallTo,
+// printPlanTo, prune set construction) can switch over without a wire
+// format break.
+//
+// One entry per Plan.SupervisorIntent slot maps to one SupervisorDaemon
+// row in supervisor-intent.json at install time; Name is the BARE form
+// (no leading backslash) — supervisor-intent.json stores the canonical
+// leading-backslash form and the prune-set comparator strips the prefix
+// at compare time (see buildPruneSetForReconcile + install.go:1773).
+//
+// Spec §"Q12 CLI/GUI status seam" + plan §2611-2644.
+type SupervisorIntentEntry struct {
+	Name    string
+	Command string
+	Args    []string
+	Trigger string // human-readable; "At logon" or "Weekly Sun 03:00"
+}
