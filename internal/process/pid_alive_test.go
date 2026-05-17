@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"runtime"
 	"testing"
+	"time"
 )
 
 func TestIsPidAlive(t *testing.T) {
@@ -32,4 +33,40 @@ func TestIsPidAlive(t *testing.T) {
 	if IsPidAlive(pid) {
 		t.Fatalf("exited child pid %d must be reported dead", pid)
 	}
+}
+
+func TestTerminatePID(t *testing.T) {
+	cmd := exec.Command(os.Args[0], "-test.run=TestTerminatePID_HelperSleep")
+	cmd.Env = append(os.Environ(), "MCPHUB_TERMINATE_PID_HELPER=1")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start helper child: %v", err)
+	}
+	if cmd.Process == nil {
+		t.Fatal("helper child started without Process")
+	}
+	pid := cmd.Process.Pid
+	waitCh := make(chan error, 1)
+	go func() { waitCh <- cmd.Wait() }()
+
+	if err := TerminatePID(pid); err != nil {
+		_ = cmd.Process.Kill()
+		t.Fatalf("TerminatePID(%d): %v", pid, err)
+	}
+
+	select {
+	case <-waitCh:
+	case <-time.After(5 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatalf("helper child pid %d did not exit after TerminatePID", pid)
+	}
+	if IsPidAlive(pid) {
+		t.Fatalf("helper child pid %d still reported alive after TerminatePID", pid)
+	}
+}
+
+func TestTerminatePID_HelperSleep(t *testing.T) {
+	if os.Getenv("MCPHUB_TERMINATE_PID_HELPER") != "1" {
+		return
+	}
+	time.Sleep(60 * time.Second)
 }

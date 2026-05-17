@@ -511,7 +511,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	// Order: reconcile runs BEFORE reconcileReady.Store(true) so any
 	// migration watcher polling the audit log sees daemon-spawned
 	// events emitted ahead of the reconcile-ready marker.
-	currentRunning := loadSupervisorCurrentRunning(stateDir)
+	currentRunning, runningPIDs := loadSupervisorCurrentRunning(stateDir)
 	job, jobErr := process.NewKillOnCloseJob()
 	if jobErr != nil {
 		// Best-effort: a job-create failure means the supervisor's
@@ -538,13 +538,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	}
 	terminateFn := reconcileTerminateFn
 	if terminateFn == nil {
-		terminateFn = func(d api.SupervisorDaemon) error {
-			// Startup-only scope: no daemon has been spawned yet so
-			// nothing to terminate. Watcher / reload (follow-up) will
-			// wire a real terminate path that walks supervisor-state's
-			// Daemons map and sends the OS-appropriate stop signal.
-			return nil
-		}
+		terminateFn = makeProductionTerminateFn(events, runningPIDs)
 	}
 
 	if intent != nil {
@@ -1205,9 +1199,8 @@ func loadIntentFiles(
 }
 
 // loadSupervisorCurrentRunning builds the currentRunning map the
-// Reconciler needs from <state-dir>/supervisor-state.json. The map's
-// shape is map[task_name]bool — Reconcile diffs intent.Daemons
-// against this set to decide spawn vs no-op.
+// Reconciler needs from <state-dir>/supervisor-state.json and the
+// sibling taskName->PID map the production terminate path needs.
 //
 // Cold-start case: a missing supervisor-state.json (fresh install,
 // post-quarantine restart, or operator-deleted state) returns the
@@ -1216,8 +1209,9 @@ func loadIntentFiles(
 //
 // Warm-restart case: a parsed supervisor-state.json may list daemons
 // in state="running" with CurrentPID > 0. Those names go into the
-// map only when the PID is still alive, so a stale state file cannot
-// suppress a required startup spawn for the supervisor lifetime.
+// map only when the PID is still alive and matches the expected
+// mcphub image identity, so a stale state file cannot suppress a
+// required startup spawn for the supervisor lifetime.
 //
 // Errors (read failure, parse failure) are swallowed silently —
 // supervisor-events.log already captures the audit row in the
@@ -1226,19 +1220,81 @@ func loadIntentFiles(
 // daemon (idempotent against an already-running peer because the
 // production SpawnFn checks the file system port via daemon manifest
 // before binding).
-func loadSupervisorCurrentRunning(stateDir string) map[string]bool {
+func loadSupervisorCurrentRunning(stateDir string) (map[string]bool, map[string]int) {
 	result := map[string]bool{}
+	pids := map[string]int{}
 	statePath := filepath.Join(stateDir, "supervisor-state.json")
 	state, err := api.ReadSupervisorState(statePath)
 	if err != nil || state == nil {
-		return result
+		return result, pids
 	}
 	for taskName, ds := range state.Daemons {
-		if ds.State == "running" && ds.CurrentPID > 0 && process.IsPidAlive(ds.CurrentPID) {
+		if ds.State == "running" && ds.CurrentPID > 0 && process.IsPidAlive(ds.CurrentPID) && pidMatchesMcphub(ds.CurrentPID) {
 			result[taskName] = true
+			pids[taskName] = ds.CurrentPID
 		}
 	}
-	return result
+	return result, pids
+}
+
+// makeProductionTerminateFn returns the TerminateFunc the Reconciler
+// invokes for each daemon that is running but currently stopped by
+// daemon-intent.json. The Reconciler carries only the daemon descriptor,
+// so startup reconcile threads in the PID snapshot captured from
+// supervisor-state.json.
+func makeProductionTerminateFn(events *api.SupervisorEventLog, runningPIDs map[string]int) TerminateFunc {
+	return func(d api.SupervisorDaemon) error {
+		pid := runningPIDs[d.TaskName]
+		if pid <= 0 {
+			err := fmt.Errorf("no running PID recorded for task %q", d.TaskName)
+			emitDaemonTerminateFailed(events, d, pid, err)
+			return err
+		}
+
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: api.SupervisorEventSeverityInfo,
+			Source:   "lifecycle",
+			Event:    "daemon-terminate-requested",
+			TaskName: d.TaskName,
+			Body: map[string]any{
+				"pid": pid,
+			},
+		})
+
+		if err := process.TerminatePID(pid); err != nil {
+			emitDaemonTerminateFailed(events, d, pid, err)
+			return err
+		}
+		if err := finishProductionTerminate(pid, d, events); err != nil {
+			emitDaemonTerminateFailed(events, d, pid, err)
+			return err
+		}
+
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: api.SupervisorEventSeverityInfo,
+			Source:   "lifecycle",
+			Event:    "daemon-terminated",
+			TaskName: d.TaskName,
+			Body: map[string]any{
+				"pid": pid,
+			},
+		})
+		return nil
+	}
+}
+
+func emitDaemonTerminateFailed(events *api.SupervisorEventLog, d api.SupervisorDaemon, pid int, err error) {
+	body := map[string]any{"err": err.Error()}
+	if pid > 0 {
+		body["pid"] = pid
+	}
+	_ = events.Emit(api.SupervisorEvent{
+		Severity: api.SupervisorEventSeverityError,
+		Source:   "lifecycle",
+		Event:    "daemon-terminate-failed",
+		TaskName: d.TaskName,
+		Body:     body,
+	})
 }
 
 // makeProductionSpawnFn returns the SpawnFunc the Reconciler invokes

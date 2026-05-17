@@ -310,12 +310,15 @@ func TestLoadSupervisorCurrentRunning_SkipsDeadPID(t *testing.T) {
 		t.Fatalf("seed supervisor-state.json: %v", err)
 	}
 
-	got := loadSupervisorCurrentRunning(tmpHome)
+	got, gotPIDs := loadSupervisorCurrentRunning(tmpHome)
 	if got[reconcileWiringTestTaskName] {
 		t.Fatalf("dead pid %d must not suppress startup spawn; currentRunning=%v", pid, got)
 	}
 	if len(got) != 0 {
 		t.Fatalf("expected no current-running entries for stale state, got %v", got)
+	}
+	if len(gotPIDs) != 0 {
+		t.Fatalf("expected no running PID entries for stale state, got %v", gotPIDs)
 	}
 }
 
@@ -454,6 +457,74 @@ func TestProductionSpawnFn_ReapsExitedChildProcess(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("spawned child pid %d was not reaped before deadline; last ps state %q", pid, lastState)
+}
+
+func TestProductionTerminateFn_TerminatesRunningPID(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestProductionTerminateFn_HelperSleep")
+	cmd.Env = append(os.Environ(), "MCPHUB_PRODUCTION_TERMINATE_HELPER=1")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start helper child: %v", err)
+	}
+	if cmd.Process == nil {
+		t.Fatal("helper child started without Process")
+	}
+	pid := cmd.Process.Pid
+	waitCh := make(chan error, 1)
+	go func() { waitCh <- cmd.Wait() }()
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		select {
+		case <-waitCh:
+		default:
+		}
+	})
+
+	terminateFn := makeProductionTerminateFn(events, map[string]int{
+		reconcileWiringTestTaskName: pid,
+	})
+	if err := terminateFn(api.SupervisorDaemon{TaskName: reconcileWiringTestTaskName}); err != nil {
+		t.Fatalf("terminate fn: %v", err)
+	}
+
+	select {
+	case <-waitCh:
+	case <-time.After(5 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatalf("helper child pid %d did not exit after terminate", pid)
+	}
+	if process.IsPidAlive(pid) {
+		t.Fatalf("helper child pid %d still reported alive after terminate", pid)
+	}
+
+	logRaw, err := os.ReadFile(eventsPath)
+	if err != nil {
+		t.Fatalf("read events log: %v", err)
+	}
+	logStr := string(logRaw)
+	for _, event := range []string{`"event":"daemon-terminate-requested"`, `"event":"daemon-terminated"`} {
+		if !strings.Contains(logStr, event) {
+			t.Fatalf("%s missing from audit log:\n%s", event, logStr)
+		}
+	}
+	if strings.Contains(logStr, `"event":"daemon-terminate-failed"`) {
+		t.Fatalf("unexpected daemon-terminate-failed event:\n%s", logStr)
+	}
+}
+
+func TestProductionTerminateFn_HelperSleep(t *testing.T) {
+	if os.Getenv("MCPHUB_PRODUCTION_TERMINATE_HELPER") != "1" {
+		return
+	}
+	time.Sleep(60 * time.Second)
 }
 
 func exitedProcessPID(t *testing.T) int {
