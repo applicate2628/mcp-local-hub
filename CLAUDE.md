@@ -578,6 +578,398 @@ If a stale lock blocks a manual run:
 POSIX `flock` is advisory; only honored by callers that use the same
 convention. The watchdog binary always honors it.
 
+## Supervisor (v0.5.0)
+
+v0.5.0 introduces a long-lived `mcphub supervise` parent process per user
+that replaces v0.4.x's N-per-daemon Task Scheduler model. The supervisor
+owns every MCP daemon as a child process under an OS-appropriate lifecycle
+primitive (Windows Job Object with `KILL_ON_JOB_CLOSE`, Linux
+`PR_SET_PDEATHSIG`, macOS process group + kqueue), observes child exits
+in real time, applies a persisted restart-policy state machine, and
+exposes a local-only owner-bound IPC for control commands. The full
+design lives in
+[`docs/superpowers/specs/2026-05-16-v0.5.0-supervisor-architecture.md`](docs/superpowers/specs/2026-05-16-v0.5.0-supervisor-architecture.md).
+Release scope is **Windows GA / Linux beta / macOS preview** per spec Q9;
+the v0.4.x watchdog command is preserved as read-only diagnostics for
+legacy installs.
+
+### State files
+
+All under `<state-dir>` (resolved at runtime — see "State path" below;
+shared with the v0.4.x watchdog state dir for byte-symmetric rollback):
+
+```text
+<state-dir>/
+  supervisor-intent.json              # NEW: {version, updated_at, daemons[], maintenance_timers[], strict_mode}
+                                      # canonical truth for `strict_mode`; mutated only via `mcphub strict-mode {enable, disable}`
+                                      # task_name keys are canonical leading-backslash form
+  supervisor-state.json               # NEW: {version, daemons{state, current_pid, pid_generation, started_at,
+                                      #        restart_history[30-min sliding window], backoff_until, quarantine_since, queued_action},
+                                      #        transient_pids[], maintenance_fired_at{}}
+  supervisor-events.log               # NEW: JSONL audit trail; 16 KB per-entry cap; 10 MB rotation → .log.1 (schema below)
+  supervisor.lock                     # NEW: supervisor singleton flock; sidecar JSON carries {pid, start_time}
+                                      # IPC clients read this BEFORE opening the named pipe / unix socket for handshake
+  migration-journal-<UTC-ts>/         # NEW: per-install journal; retention 5 newest after `committed`
+  daemon-intent.json                  # preserved exactly (byte-symmetric for v0.4.x rollback)
+  managed-entries.json                # preserved exactly
+  watchdog-state.json                 # preserved unchanged; v0.5.0 supervisor does NOT extend or write
+```
+
+The shared state-file helper inherits the v0.4.0+ relax-on-rejection
+parent-dir DACL posture unless the operator sets
+`MCPHUB_REQUIRE_SINGLE_USER_HOME=1` — see "Hardened state-file writes"
+below.
+
+### State path
+
+- **Windows (GA):** `SHGetKnownFolderPath(FOLDERID_LocalAppData)` →
+  `%LOCALAPPDATA%\mcp-local-hub\`. Production builds exclude the env-var
+  fallback path via the `test_state_path_env` build tag (same gate the
+  v0.4.x watchdog uses; the release-pipeline `go tool nm` assertion at
+  watchdog plan §50 covers both).
+- **Linux (beta):** `$XDG_STATE_HOME/mcp-local-hub` or
+  `~/.local/state/mcp-local-hub`; dir mode 0700, files 0600. Sanity check
+  rejects world-writable parent or non-owner uid (same exit 8 as
+  watchdog).
+- **macOS (preview):** same POSIX layout. Build-only Go cross-compile, no
+  automated tests in v0.5.0; v0.6 reevaluates.
+
+`mcphub supervise --help` and the IPC `status` reply both print absolute
+paths to every state file so operators can inspect / quarantine / restore
+them directly.
+
+### Subcommands
+
+```bash
+mcphub supervise                       # long-lived supervisor; idempotent via supervisor.lock
+                                       # Hosts FIFO event loop, reconcile driver, IPC listener, child-exit reaper
+                                       # Reads supervisor-intent.json + daemon-intent.json as canonical; --strict-mode CLI
+                                       # arg is a SEED applied only when intent.updated_at predates the supervisor binary mtime
+
+mcphub strict-mode enable              # Canonical mutation. Universal lock order: migration.lock → --once.lock
+mcphub strict-mode disable             # Two-resource atomic write (supervisor-intent.json + autostart shim args)
+mcphub strict-mode --recover           # Recovers from STRICT_MODE_REVERT_FAILED (exit 10) breadcrumb.
+                                       # Acquires migration.lock; reads <state-dir>/strict-mode-mutation-incomplete.json;
+                                       # prompts operator with two and only two branches: (A) drive both to `intended`,
+                                       # (B) drive both to `actual_intent_state`. No third "manual override" branch.
+
+mcphub autostart enable                # Per-OS shim install (Windows: Task Scheduler LogonTrigger; Linux managed:
+mcphub autostart disable               # systemd user service; macOS managed: LaunchAgent; unmanaged Linux/macOS: none)
+mcphub autostart status                # Per-backend probe semantics
+
+mcphub install --upgrade               # Cold-restart upgrade flow (see "Cold-restart upgrade flow" below)
+mcphub install --rollback-to-legacy    # Reverses migration; re-registers v0.4.x XML; exits 0 with warnings
+                                       # via rollback-warnings.json on partial port-binding failures
+mcphub install --upgrade --reset-failure-windows
+                                       # Clears restart_history + backoff_until + quarantine_since per daemon
+                                       # AND resets state to `idle`. Default is RETAIN restart_history across upgrade.
+```
+
+`mcphub restart` and `mcphub status` are **IPC-only commands** — they do
+NOT acquire `migration.lock`, only mutate supervisor in-memory + IPC
+state. This exempts them from the universal lock-acquire order and
+prevents them from deadlocking against rollback's `quiesce-timers` drain.
+
+### Exit codes
+
+Exit codes are command-scoped. The v0.5.0 supervisor surfaces extend the
+v0.4.x watchdog codes already documented above (0, 1, 2, 6, 8, 9, 10,
+11) — codes 9 / 10 / 13 / 14 below are **specific to supervisor /
+migration / strict-mode surfaces** and do not collide because no
+command uses both watchdog and supervisor exit semantics in one
+invocation:
+
+```text
+0   — success (rollback exits 0 even with rollback-warnings.json present)
+1   — generic backend error
+8   — INSTALL_BUSY (`migration.lock` held by another `mcphub install`)
+9   — STRICT_MODE_BUSY (`migration.lock` held when `mcphub strict-mode
+      {enable,disable,--recover}` tried to acquire). Universal lock order:
+      migration.lock BEFORE --once.lock; refuse-if-held with explicit
+      exit code beats silent blocking.
+10  — STRICT_MODE_REVERT_FAILED. Set when the two-resource atomic write
+      (supervisor-intent.json + autostart shim args) failed AND the revert
+      of the first-step write also failed. Supervisor writes
+      <state-dir>/strict-mode-mutation-incomplete.json carrying
+      {intended, actual_intent_state, actual_shim_state, step1_error,
+      step2_error, revert_error, ts}; emits body to stderr; exits 10.
+      Subsequent `strict-mode` invocations refuse-if-held on the breadcrumb
+      until `mcphub strict-mode --recover` runs or operator deletes manually.
+13  — ROLLBACK_TOKEN_MISMATCH. Rollback caller token is less privileged
+      than the supervisor process — typical scenario: supervisor started
+      under `runas /user:Administrator` and rollback invoked from a
+      non-elevated shell. Pre-flight `OpenProcess(PROCESS_TERMINATE)`
+      (Windows) or `kill(pid, 0)` (POSIX) catches this BEFORE the IPC
+      `exit{graceful}` issue so the operator sees the diagnostic
+      immediately rather than 5 s later after force-kill ACCESS_DENIED.
+14  — MIGRATION_POWERSHELL_LOCKED. PowerShell Constrained Language Mode
+      probe at migration entry detected both `wmic.exe` deprecated AND
+      PowerShell `Get-CimInstance` locked (AppLocker / WDAC publisher
+      allowlist with CIM-provider DLL blocked, or LanguageMode ≠
+      FullLanguage). Operator guidance: run migration from an admin
+      PowerShell session exempt from the AppLocker policy, or wait for
+      v0.5.x native WMI COM via `golang.org/x/sys/windows`.
+```
+
+Additional supervisor-surfaced abort codes (non-numeric, named in
+spec): `MIGRATION_PORT_LOOKUP_INCONSISTENT`,
+`ROLLBACK_ORPHAN_DAEMONS_REMAIN`,
+`SUPERVISOR_REFUSING_ROLLBACK_IN_PROGRESS`.
+
+### Migration journal layout + retention
+
+`mcphub install --upgrade` writes a per-install journal under
+`<state-dir>/migration-journal-<UTC-timestamp>/` with forward-progress
+markers:
+
+```text
+<state-dir>/migration-journal-<UTC-ts>/
+  prepared                              # touched AFTER intent derived + classification done; before any OS mutation
+  pre-os-mutating                       # touched AFTER the FIRST successful kill (so resume distinguishes "no kills yet" from "some kills committed")
+  os-mutating-complete                  # touched AFTER all legacy schtasks /Delete + shim install
+  committed                             # touched AFTER supervisor reconcile-ready confirmed within 30s via IPC `status`
+  rollback-in-progress                  # ONLY present during rollback execution; deleted at rollback step 12
+  legacy-tasks/<task>.xml ...           # raw XML snapshots — re-registered verbatim on rollback
+  legacy-tasks-classification.json      # deviation-only classification verdict per task
+  canonical-template-snapshot.xml       # rendered by v0.4.x-pinned renderer (NOT v0.5.0 install code)
+                                        # Cross-version resume always uses this verbatim; never re-renders
+  pre-migration-strict-mode             # marker file recording pre-migration strict_mode value (for autostart shim seed)
+  derived-supervisor-intent.json        # the intent file the migration will write — preserves operator edits on resume
+  killed-daemons.json                   # per-daemon kill verdicts (PID, port, basename, CommandLine, createdUnix, gate result)
+  netstat-cache.json                    # snapshot used by lookupProcessIdentity; refreshed after every kill attempt
+```
+
+**Retention:** after `committed` AND step 14 supervisor reconcile-ready
+confirmed, the migration driver under the held `migration.lock` keeps
+the **5 newest** `migration-journal-*/` directories and deletes the
+rest using two-phase crash-atomic pruning (rename to
+`.pruning-<original-basename>/` first; then `os.RemoveAll`). On crash
+mid-prune, any `.pruning-*` prefix is unambiguously failed-prune debris
+and is finished by the next migration driver invocation BEFORE resume
+classification scans for journals. Per-dir delete failures are
+non-fatal (logged warn). Operator visibility: `mcphub install status`
+prints the retained-journal count + oldest-retained timestamp.
+
+**Resume classification** (markers `prepared` → `pre-os-mutating` →
+`os-mutating-complete` → `committed`; rollback marker
+`rollback-in-progress`):
+
+- `prepared` only → safe to abort; delete journal.
+- `pre-os-mutating` no `os-mutating-complete` → forward-resume re-uses
+  `derived-supervisor-intent.json` (preserves operator edits).
+- `os-mutating-complete` no `committed` → operator picks forward retry
+  or rollback.
+- `rollback-in-progress` present at supervisor cold start → supervisor
+  refuses to reconcile, exits
+  `SUPERVISOR_REFUSING_ROLLBACK_IN_PROGRESS` with operator guidance
+  ("complete `mcphub install --rollback-to-legacy` or `mcphub install
+  --upgrade` first").
+
+### `supervisor-events.log` schema
+
+JSONL envelope follows the same 16 KB per-entry cap, 10 MB rotation,
+and flock discipline as `internal/api/gui_event_log.go:19-25`. Field
+set differs — supervisor envelope uses `event` discriminator + adds
+`task_name`; `gui_event_log` uses `type` and has no `task_name`:
+
+```json
+{
+  "schema_version": "1",
+  "ts": "RFC3339Nano",
+  "severity": "debug|info|warn|error",
+  "source": "ipc|lifecycle|restart-policy|migration|autostart|reconcile",
+  "event": "ipc-command|child-exit-observed|reconcile-tick|...",
+  "task_name": "\\mcp-local-hub-memory-default",
+  "body": { "...arbitrary structured payload..." },
+  "_truncated": false
+}
+```
+
+Per-entry size cap matches `internal/api/watchdog_log.go:25-36`: 16 KB
+hard cap; identity fields (`event`, `task_name`, `source`) NEVER
+truncated; oversize identity → entry rejected with
+`ErrIdentityOversize` and caller fails closed (same posture as the
+watchdog 1 KB task-name cap). 10 MB rotation with single `.log.1`
+backfile. After rotation, an `audit-rotated` self-event is written to
+the new active file. Flock-protected appends.
+
+Cross-channel routing: structured `warn`-severity events like
+`severity: warn, event: supervisor-state-relax-lane-active` and
+`severity: warn, event: unknown-maintenance-kind` go to this log; the
+operator-visible stderr line is the human-readable shadow of the same
+event.
+
+### Hardened state-file writes — corp-policy posture
+
+Every supervisor state file (`supervisor-intent.json`,
+`supervisor-state.json`, `supervisor-events.log`, `supervisor.lock`,
+plus migration journal files) goes through the same shared state-file
+helper that consumes the relax-on-rejection parent-dir DACL gate
+documented in the "Hardened client-config writes + corp-policy
+posture" section above. The supervisor state files inherit the same
+default posture: parent-dir gate rejects → pipeline re-runs with the
+parent-dir gate disabled; the new file is owner-only regardless of
+how broad the parent ACL is.
+
+**Residual co-resident attacker risk on multi-tenant Windows hosts.**
+On corp-managed environments where `%LOCALAPPDATA%` parent grants
+`FILE_DELETE_CHILD` to `Domain Users` (a common corporate Group
+Policy ACE), a co-resident user cannot read or modify supervisor
+state file **content** (file-level DACL still denies that), but they
+CAN delete the directory entry and replace it with an
+attacker-crafted file. Combined with v0.5.0's new attack surface
+(IPC commands + strict-mode mutation + maintenance timer scheduler),
+this gives a co-resident user the ability to:
+
+- flip `strict_mode` posture via swapped `supervisor-intent.json`,
+- inject attacker-controlled daemon descriptors,
+- prime `restart_history` to force quarantine on legitimate daemons.
+
+**Operators on such hosts MUST set
+`MCPHUB_REQUIRE_SINGLE_USER_HOME=1` to extend the strict parent-dir
+gate to supervisor state files.** The strict gate is the only
+mitigation; supervisor itself cannot detect or refuse a parent-dir
+replacement attack because it would have already trusted the swapped
+file on read. `mcphub install` emits an explicit `severity: warn,
+event: supervisor-state-relax-lane-active` entry to
+`supervisor-events.log` (and a one-line stderr message) on every
+install when strict mode is NOT set on a Windows host, naming the
+residual risk and the env var that mitigates it. No silent downgrade.
+
+For IPC trust boundary specifics, the per-resource SDDL allowlists
+diverge intentionally: file SDDL is
+`D:P(A;;GA;;;<currentUserSID>)(A;;GA;;;SY)(A;;GA;;;BA)` (matches
+v0.4.x precedent, BA retained for installer/admin-managed write
+paths); pipe SDDL is `D:P(A;;GRGW;;;<currentUserSID>)(A;;GRGW;;;SY)`
+(BA **dropped** — defense-in-depth: any admin token on the box would
+otherwise be able to issue `exit`/`restart`/`quiesce-timers` commands
+without owner consent; LocalSystem retained for legitimate
+service-host scenarios). A post-`ListenPipe` smoke test asserts the
+effective pipe DACL via `GetSecurityInfo` on the listener handle and
+is a required merge gate.
+
+### Cold-restart upgrade flow
+
+**Windows binary replacement (rename-aside).** The atomic-rename
+trick used elsewhere on POSIX is not available for a live `.exe` on
+Windows because the kernel holds the executable image:
+
+1. Write new binary to `<install-dir>/mcphub.exe.new`.
+2. `MoveFileExW(target, target + ".old-<ts>", REPLACE_EXISTING)`.
+3. `MoveFileExW(target + ".new", target, 0)`.
+
+**`.old-<ts>` cleanup.** On every `mcphub install --upgrade` AND
+every `mcphub supervise` startup, glob
+`<install-dir>/mcphub.exe.old-*` and `os.Remove` each whose name
+parses as `.old-<RFC3339>` form AND whose mtime is older than 7 days.
+`os.Remove` failures (file still mapped, AV scan, ACL flip) logged
+warn + retried on next pass. Bounded accumulation; no admin rights
+required because supervisor runs as same user that wrote the file.
+
+POSIX uses atomic `rename(2)`.
+
+**IPC quiesce + exit sequence.**
+
+1. Replace binary atomically (per above).
+2. Connect to supervisor IPC; client reads `supervisor.lock` for
+   expected `{pid, start_time}` FIRST.
+3. Issue IPC `quiesce-timers{timeout_ms: 30000}` — drains
+   maintenance-timer transients on a **separate goroutine** (does
+   not block the FIFO event loop). Two-frame response: immediate
+   `{accepted: true}`, then `{drained, still_running, final: true}`.
+4. Issue IPC `exit{graceful: true, timeout_ms: 5000}`. Supervisor
+   posts `request-graceful-exit` events into FIFO for each running
+   daemon, waits for all to reach `idle`, then exits 0.
+5. **Force-kill fallback on IPC timeout:** `taskkill /F /T /PID
+   <supervisor>` (the `/T` ensures any non-Job-Object transients in
+   `transient_pids` die alongside the supervisor); POSIX `kill -KILL
+   -<pgid>` (process-group kill, not single-PID). After force-kill,
+   verify each expected daemon port is unbound via
+   `lookupProcessIdentity`; if any port still bound after a bounded
+   retry (10 s), abort with `ROLLBACK_ORPHAN_DAEMONS_REMAIN` plus
+   manual cleanup guidance.
+6. `mcphub install` explicitly starts the new supervisor (Windows:
+   `schtasks /Run /TN \mcp-local-hub-supervisor` if shim installed,
+   else detached `windows.CreateProcess` with `DETACHED_PROCESS |
+   CREATE_NEW_PROCESS_GROUP`; Linux managed: `systemctl --user
+   restart mcphub-supervisor.service`; etc.).
+7. New supervisor reads intent + daemon-intent → reconcile →
+   respawns daemons.
+
+Note: the `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP` flag combo
+makes the new Windows supervisor unable to receive `CTRL_C_EVENT`
+from any other process per Microsoft docs; graceful shutdown is
+**exclusively via IPC `exit`**. Task Manager → End Task →
+ungraceful Job Object close; `KILL_ON_JOB_CLOSE` reaps every child.
+
+### Post-migration / post-rollback recovery
+
+After `mcphub install --upgrade` returns success, the journal at
+`<state-dir>/migration-journal-<UTC-ts>/` carries `committed` and the
+classification + kill-verdict artifacts. Operators investigating
+incidents should preserve the directory (retention keeps the 5
+newest; older are pruned at the next migration).
+
+After `mcphub install --rollback-to-legacy`, operators should read
+`<state-dir>/migration-journal-<UTC-ts>/rollback-warnings.json` if
+present (schema v1):
+
+```json
+{"version": 1, "warnings": [
+  {"task": "\\mcp-local-hub-memory-default",
+   "port": 9128,
+   "reason": "port-not-bound-after-60s",
+   "observed_at": "RFC3339Nano"}
+]}
+```
+
+Rollback **exits 0** even with warnings present (success-with-warnings
+semantic). Non-zero exit is reserved for "rollback itself failed".
+Recovery steps:
+
+1. For each warning, manually inspect why the legacy daemon didn't
+   bind the port (port collision with a new process started during
+   the rollback window, missing executable, manifest mismatch, etc.).
+2. Re-run `schtasks /Run /TN <task>` for each unbound task once the
+   blocker is cleared.
+3. After all legacy daemons are healthy, optionally re-attempt
+   `mcphub install --upgrade` on the supervisor model.
+
+**`STRICT_MODE_REVERT_FAILED` (exit 10) recovery.** If the breadcrumb
+`<state-dir>/strict-mode-mutation-incomplete.json` is present, run
+`mcphub strict-mode --recover`. It acquires `migration.lock` (refuses
+if held → `STRICT_MODE_BUSY` exit 9), reads the breadcrumb, prompts
+operator with two and only two branches: drive both `intent` + shim
+to the original `intended` value, or drive both to
+`actual_intent_state` (what's on disk now). No third "manual
+override" branch — those two are exhaustive. Once both writes succeed
+under the held lock, breadcrumb is deleted. If either write fails
+during recovery, breadcrumb is re-asserted with updated
+`step1_error` / `step2_error` / `revert_error` and exit 10 fires
+again.
+
+**Resume classification cheat-sheet** (markers under
+`migration-journal-<UTC-ts>/`):
+
+| Markers present | Operator action |
+|---|---|
+| `prepared` only | Safe to abort; delete journal. |
+| `pre-os-mutating` no `os-mutating-complete` | `mcphub install --upgrade` resumes from `derived-supervisor-intent.json`. |
+| `os-mutating-complete` no `committed` | Operator picks forward retry or rollback. |
+| `committed` | Migration succeeded. Older journals beyond the 5 newest are pruned automatically. |
+| `rollback-in-progress` | Re-run `mcphub install --rollback-to-legacy` to finish; supervisor cold start refuses to reconcile until cleared. |
+
+### `mcphub watchdog status` note
+
+`mcphub watchdog status` remains read-only for legacy v0.4.x
+diagnostics. For new installs, the canonical management surface is
+`mcphub supervise --help` plus the IPC `status` command issued via
+`mcphub status`. The status output includes a one-paragraph NOTE
+pointing operators at the v0.5.0 supervisor; the watchdog subcommands
+(`--once`, `enable`, `disable`, `install`, `uninstall`, `status`)
+remain functional for the legacy v0.4.x state files but do not
+extend or write supervisor state.
+
 ## Marketplace (G5, v0.3.0)
 
 `mcphub marketplace {search,show,generate,refresh}` lets an operator
