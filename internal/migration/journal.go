@@ -1293,30 +1293,63 @@ func preUnregisterDaemonStop(journalDir string, tasks []scheduler.TaskStatus, xm
 
 		// Gate passed — kill the PID.
 		killTs := state.nowOrDefault().Unix()
+		// Codex round-3 Lane C P1 #4: pre-touch the in-flight sentinel
+		// BEFORE the kill syscall. On panic between the syscall
+		// returning and the canonical-marker write below, the deferred
+		// recover at the top of preUnregisterDaemonStop promotes this
+		// sentinel to MarkerPreOsMutating so resume sees mutation
+		// happened. Pre-flight write failure aborts (we cannot prove
+		// post-kill durability without the sentinel). On only the
+		// FIRST kill we need the durability dance; subsequent kills
+		// see markerWritten==true and skip the sentinel entirely
+		// because the canonical marker is already on disk.
+		inFlightPath := filepath.Join(journalDir, MarkerPreOsMutatingInFlight)
+		if !markerWritten {
+			if err := touchMarker(journalDir, MarkerPreOsMutatingInFlight); err != nil {
+				return killed, fmt.Errorf("pre-os-mutating sentinel write failed before kill PID %d (task %s): %w", pid, t.Name, err)
+			}
+		}
 		if err := opts.KillPID(pid); err != nil {
+			// Kill failed — sentinel is misleading (no mutation
+			// happened). Remove it best-effort so resume keeps the
+			// safe-abort classification. A failed cleanup leaves a
+			// stale sentinel on disk but the canonical marker still
+			// gates resume classification, so this is benign.
+			if !markerWritten {
+				_ = os.Remove(inFlightPath)
+			}
 			return killed, fmt.Errorf("kill PID %d (task %s): %w", pid, t.Name, err)
 		}
-		// Lane C P0 #1: touch pre-os-mutating IMMEDIATELY after the
-		// first successful kill — before any port-bind-wait or
-		// subsequent loop iteration that might fail. A later failure
-		// MUST leave this marker on disk so resume classifies the
-		// journal as operator-choice-forward-or-rollback.
+		// Lane C P0 #1 + codex r3 Lane C P1 #4: promote sentinel to
+		// canonical marker IMMEDIATELY after the first successful kill
+		// — before any port-bind-wait or subsequent loop iteration
+		// that might fail. A later failure MUST leave the canonical
+		// marker on disk so resume classifies the journal as
+		// operator-choice-forward-or-rollback. Use os.Rename so the
+		// promotion is atomic on POSIX and best-effort-atomic on
+		// Windows; if the rename fails fall back to a fresh touch +
+		// remove so the canonical marker is still on disk.
 		if !markerWritten {
-			if err := touchMarker(journalDir, MarkerPreOsMutating); err != nil {
-				// Mid-flight marker write failure is fatal — without
-				// the marker on disk a crash here would safe-abort
-				// and leave a killed daemon. Append the audit row
-				// first so the operator sees the kill happened.
-				killed = append(killed, killedDaemonRecord{
-					Task:         t.Name,
-					Server:       server,
-					Daemon:       daemon,
-					PID:          pid,
-					Port:         port,
-					KilledAtUnix: killTs,
-					OwnershipOK:  true,
-				})
-				return killed, fmt.Errorf("pre-os-mutating marker write failed after first kill: %w", err)
+			canonicalPath := filepath.Join(journalDir, MarkerPreOsMutating)
+			if err := os.Rename(inFlightPath, canonicalPath); err != nil {
+				// Rename failed — try the original write-then-cleanup
+				// pattern. Failure here is fatal: without the marker
+				// on disk a crash would safe-abort and leave a killed
+				// daemon.
+				if tErr := touchMarker(journalDir, MarkerPreOsMutating); tErr != nil {
+					killed = append(killed, killedDaemonRecord{
+						Task:         t.Name,
+						Server:       server,
+						Daemon:       daemon,
+						PID:          pid,
+						Port:         port,
+						KilledAtUnix: killTs,
+						OwnershipOK:  true,
+					})
+					return killed, fmt.Errorf("pre-os-mutating marker write failed after first kill (rename: %v, touch: %w)", err, tErr)
+				}
+				// Touch succeeded — remove the leftover sentinel.
+				_ = os.Remove(inFlightPath)
 			}
 			markerWritten = true
 		}

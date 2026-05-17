@@ -3,6 +3,7 @@ package migration
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1099,4 +1100,105 @@ func mustFindJournalDir(t *testing.T, stateDir string) string {
 		t.Fatalf("expected 1 journal dir, got %d: %v", len(matches), matches)
 	}
 	return filepath.Join(stateDir, matches[0])
+}
+
+// ---------------------------------------------------------------------------
+// codex round-3 Lane C P1 #4: pre-os-mutating panic durability.
+// ---------------------------------------------------------------------------
+
+// TestForwardMigration_PreOsMutatingDurableAcrossPanic pins the
+// codex round-3 Lane C P1 #4 contract: a panic between the kill
+// syscall returning and the canonical pre-os-mutating marker write
+// MUST leave the canonical marker on disk so resume classifies the
+// journal as operator-choice-forward-or-rollback.
+//
+// Without this, an OS mutation (daemon killed) would happen but the
+// journal would still be classified as `prepared`-only → safe-abort
+// → operator is unaware a daemon was killed.
+//
+// The test seeds a running daemon, then injects a KillPID stub that
+// panics right after returning nil. The deferred-recover in
+// preUnregisterDaemonStop must promote the in-flight sentinel to
+// the canonical MarkerPreOsMutating before re-raising. The test
+// re-recovers at its own boundary so it can inspect the journal.
+func TestForwardMigration_PreOsMutatingDurableAcrossPanic(t *testing.T) {
+	tx := setupV04xFixture(t)
+	const memPID = 5454
+	tx.pidByServerDaemon["memory/default"] = memPID
+	tx.portByPID[memPID] = 9128
+	// Seed a process-identity row that the 4-gate ownership check
+	// will pass on — use the installDir as the executable path
+	// anchor so Gate 4 (ExecutablePath under InstallDir) succeeds.
+	exePath := filepath.Join(tx.State.InstallDir, "mcphub.exe")
+	tx.identityByPID[memPID] = ProcessIdentity{
+		PID:              memPID,
+		Basename:         "mcphub.exe",
+		CommandLine:      exePath + " daemon --server memory --daemon default",
+		ExecutablePath:   exePath,
+		CreationDateUnix: tx.State.Now().Add(-time.Hour).Unix(), // older than lockAcquired
+	}
+
+	opts := fakeForwardOptions(t, tx)
+	// LookupProcessIdentity returns the seeded identity (so gate
+	// passes), so the kill loop reaches KillPID.
+	opts.LookupProcessIdentity = func(pid int) (ProcessIdentity, error) {
+		if id, ok := tx.identityByPID[pid]; ok {
+			return id, nil
+		}
+		return ProcessIdentity{}, ErrProcessNotFound
+	}
+	// Killing PID: record the kill (it really happened from the
+	// operator's perspective), then PANIC to simulate a fatal
+	// runtime fault between the syscall returning and the marker
+	// write. The recover in preUnregisterDaemonStop must promote
+	// the in-flight sentinel to MarkerPreOsMutating.
+	opts.KillPID = func(pid int) error {
+		tx.killedPIDs = append(tx.killedPIDs, pid)
+		panic(fmt.Sprintf("simulated runtime fault after kill PID %d", pid))
+		// Unreachable: panic terminates control flow. Required to
+		// satisfy Go's missing-return analysis for non-builtin
+		// non-os.Exit panics inside a function-literal body.
+	}
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic to propagate up to the test; got nil — recover swallowed the panic")
+		}
+		// Locate the journal directory the failed run created.
+		journalDir := mustFindJournalDir(t, tx.State.StateDir)
+
+		// Canonical pre-os-mutating marker MUST be on disk so resume
+		// classifies as operator-choice-forward-or-rollback.
+		if _, err := os.Stat(filepath.Join(journalDir, MarkerPreOsMutating)); err != nil {
+			t.Errorf("pre-os-mutating marker missing after panic — resume would safe-abort despite a killed daemon: %v", err)
+		}
+
+		// Resume classifier must agree: a marker file alone is not
+		// enough — the classifier's verdict is what gates real-world
+		// recovery.
+		verdict := ClassifyResume(journalDir)
+		if verdict.Action != "operator-choice-forward-or-rollback" {
+			t.Errorf("ClassifyResume action want operator-choice-forward-or-rollback, got %q (markers=%v)",
+				verdict.Action, verdict.Markers)
+		}
+
+		// The in-flight sentinel should not persist alongside the
+		// canonical marker after a successful promotion path. A
+		// stray sentinel is benign for resume but indicates the
+		// rename didn't fire; surface as a warning rather than a
+		// hard fail so the test stays useful on platforms where
+		// rename semantics differ.
+		if _, err := os.Stat(filepath.Join(journalDir, MarkerPreOsMutatingInFlight)); err == nil {
+			t.Logf("note: in-flight sentinel persisted alongside canonical marker (rename may have fallen back to touch + remove)")
+		}
+
+		// The kill DID happen — record this so the assertion stays
+		// honest about why the durability test matters.
+		if len(tx.killedPIDs) == 0 {
+			t.Fatalf("KillPID stub was never invoked — the test fixture did not reach the kill site")
+		}
+	}()
+
+	_ = RunForward(tx.State, opts)
 }

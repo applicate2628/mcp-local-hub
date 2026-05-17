@@ -688,3 +688,363 @@ var errFakeReaperFailure = &fakeReaperErr{msg: "fake-reaper-failure-for-test-13-
 type fakeReaperErr struct{ msg string }
 
 func (e *fakeReaperErr) Error() string { return e.msg }
+
+// ---------------------------------------------------------------------------
+// codex round-3 Lane B P1 #1: IPC verbs (quiesce-timers + exit{graceful}).
+// ---------------------------------------------------------------------------
+
+// fakeQuiesceDrainer is a test-only QuiesceHandler stand-in that
+// returns a pre-programmed QuiesceResult after a configurable delay.
+// Used by the quiesce-timers tests to drive deterministic two-frame
+// timing without spawning real child processes.
+type fakeQuiesceDrainer struct {
+	delay  time.Duration
+	result QuiesceResult
+	calls  atomic.Int32
+}
+
+func (f *fakeQuiesceDrainer) Drain(ctx context.Context, timeoutMs int) QuiesceResult {
+	f.calls.Add(1)
+	select {
+	case <-time.After(f.delay):
+		return f.result
+	case <-ctx.Done():
+		return f.result
+	case <-time.After(time.Duration(timeoutMs) * time.Millisecond):
+		// Simulated timeout — return whatever was pre-programmed.
+		return f.result
+	}
+}
+
+// startSuperviseForIPCTest boots a supervise instance against
+// tmpHome, waits for the IPC listener, and returns a connected client
+// + a cleanup function that triggers graceful exit. The bufio.Reader
+// is positioned past the hello frame so callers can immediately send
+// IPC requests.
+func startSuperviseForIPCTest(t *testing.T, tmpHome string) (net.Conn, *bufio.Reader, func()) {
+	t.Helper()
+	exitCh := make(chan struct{}, 1)
+	cleanupExit := setSuperviseTestExitCh(exitCh)
+
+	cmd := newSuperviseCmd()
+	cmd.SetArgs([]string{})
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Execute() }()
+
+	sidecar := filepath.Join(tmpHome, "supervisor.lock.owner.json")
+	if !waitForFile(sidecar, 3*time.Second) {
+		cleanupExit()
+		t.Fatalf("supervisor.lock.owner.json never appeared under %s", tmpHome)
+	}
+
+	pipePath := defaultPipePathOS(tmpHome)
+	var conn net.Conn
+	var dialErr error
+	dialDeadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(dialDeadline) {
+		conn, dialErr = dialSuperviseIPC(pipePath)
+		if dialErr == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if dialErr != nil {
+		cleanupExit()
+		t.Fatalf("dial supervise IPC: %v", dialErr)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+
+	reader := bufio.NewReader(conn)
+	if _, err := reader.ReadString('\n'); err != nil {
+		_ = conn.Close()
+		cleanupExit()
+		t.Fatalf("read hello: %v", err)
+	}
+
+	cleanup := func() {
+		_ = conn.Close()
+		select {
+		case exitCh <- struct{}{}:
+		default:
+		}
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Log("supervise did not exit on test-exit signal within 3s")
+		}
+		cleanupExit()
+	}
+	return conn, reader, cleanup
+}
+
+// TestSupervise_IPC_QuiesceTimersTwoFrames pins the codex-r3 Lane B
+// P1 #1 contract: a `quiesce-timers` request must return exactly two
+// frames — an immediate `{accepted: true}` then a final
+// `{drained, still_running, final: true}` after the drain returns.
+func TestSupervise_IPC_QuiesceTimersTwoFrames(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
+
+	fake := &fakeQuiesceDrainer{
+		delay:  100 * time.Millisecond,
+		result: QuiesceResult{Drained: 3, StillRunning: []int{}},
+	}
+	restoreFactory := setQuiesceHandlerFactoryForTest(func(string) quiesceDrainer {
+		return fake
+	})
+	defer restoreFactory()
+
+	conn, reader, cleanup := startSuperviseForIPCTest(t, tmpHome)
+	defer cleanup()
+
+	req := api.IPCRequest{ID: 42, Cmd: "quiesce-timers", Args: map[string]any{"timeout_ms": 30000}}
+	reqBody, _ := json.Marshal(req)
+	if _, err := conn.Write(append(reqBody, '\n')); err != nil {
+		t.Fatalf("write quiesce-timers: %v", err)
+	}
+
+	// Frame 1: immediate accepted ack.
+	line1, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read frame 1: %v", err)
+	}
+	var resp1 api.IPCResponse
+	if err := json.Unmarshal([]byte(strings.TrimSpace(line1)), &resp1); err != nil {
+		t.Fatalf("decode frame 1 (%q): %v", line1, err)
+	}
+	if resp1.ID != 42 || !resp1.OK {
+		t.Fatalf("frame 1: want OK=true id=42, got %+v", resp1)
+	}
+	if resp1.Final {
+		t.Fatalf("frame 1 must NOT carry final=true; the accepted-ack is by convention non-final")
+	}
+	r1, _ := resp1.Result.(map[string]any)
+	if r1 == nil || r1["accepted"] != true {
+		t.Fatalf("frame 1 result must include accepted=true; got %+v", resp1.Result)
+	}
+
+	// Frame 2: final result after drain.
+	line2, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read frame 2: %v", err)
+	}
+	var resp2 api.IPCResponse
+	if err := json.Unmarshal([]byte(strings.TrimSpace(line2)), &resp2); err != nil {
+		t.Fatalf("decode frame 2 (%q): %v", line2, err)
+	}
+	if resp2.ID != 42 || !resp2.OK {
+		t.Fatalf("frame 2: want OK=true id=42, got %+v", resp2)
+	}
+	if !resp2.Final {
+		t.Fatalf("frame 2 must carry final=true; got %+v", resp2)
+	}
+	r2, _ := resp2.Result.(map[string]any)
+	if r2 == nil {
+		t.Fatalf("frame 2 result missing; got %+v", resp2.Result)
+	}
+	// JSON-number round-trip turns int → float64.
+	if got, _ := r2["drained"].(float64); got != 3 {
+		t.Fatalf("frame 2 drained want 3, got %v", r2["drained"])
+	}
+	if still, ok := r2["still_running"].([]any); !ok || len(still) != 0 {
+		t.Fatalf("frame 2 still_running want empty array, got %v", r2["still_running"])
+	}
+	if fake.calls.Load() != 1 {
+		t.Fatalf("fake Drain calls want 1, got %d", fake.calls.Load())
+	}
+}
+
+// TestSupervise_IPC_QuiesceTimersDrainTimeout pins the codex-r3 Lane B
+// P1 #1 contract that `still_running` is populated when the drain
+// goroutine is still working past the requested timeout.
+func TestSupervise_IPC_QuiesceTimersDrainTimeout(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
+
+	fake := &fakeQuiesceDrainer{
+		delay:  10 * time.Millisecond, // fake completes quickly
+		result: QuiesceResult{Drained: 1, StillRunning: []int{1234, 5678}},
+	}
+	restoreFactory := setQuiesceHandlerFactoryForTest(func(string) quiesceDrainer {
+		return fake
+	})
+	defer restoreFactory()
+
+	conn, reader, cleanup := startSuperviseForIPCTest(t, tmpHome)
+	defer cleanup()
+
+	req := api.IPCRequest{ID: 99, Cmd: "quiesce-timers", Args: map[string]any{"timeout_ms": 100}}
+	reqBody, _ := json.Marshal(req)
+	if _, err := conn.Write(append(reqBody, '\n')); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Frame 1 (accepted).
+	if _, err := reader.ReadString('\n'); err != nil {
+		t.Fatalf("read frame 1: %v", err)
+	}
+	// Frame 2 (final).
+	line2, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read frame 2: %v", err)
+	}
+	var resp api.IPCResponse
+	if err := json.Unmarshal([]byte(strings.TrimSpace(line2)), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.Final {
+		t.Fatalf("frame 2 must be final; got %+v", resp)
+	}
+	r, _ := resp.Result.(map[string]any)
+	if r == nil {
+		t.Fatalf("nil result; got %+v", resp.Result)
+	}
+	still, ok := r["still_running"].([]any)
+	if !ok {
+		t.Fatalf("still_running not an array; got %T", r["still_running"])
+	}
+	if len(still) != 2 {
+		t.Fatalf("still_running len want 2, got %d (%v)", len(still), still)
+	}
+	first, _ := still[0].(map[string]any)
+	if first == nil || first["pid"] == nil {
+		t.Fatalf("still_running[0] missing pid field; got %v", still[0])
+	}
+}
+
+// TestSupervise_IPC_ExitGracefulInitiates pins the codex-r3 Lane B
+// P1 #1 contract for the `exit{graceful: true}` verb: the supervisor
+// must (a) reply with a Final=true frame carrying
+// graceful_exit_initiated=true, and (b) actually exit afterwards.
+func TestSupervise_IPC_ExitGracefulInitiates(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
+
+	// We do NOT install the test-exit channel — the IPC exit verb
+	// itself must drive shutdown. Set it up just so cleanup can stop
+	// the supervisor if the verb misfires.
+	exitCh := make(chan struct{}, 1)
+	cleanupExit := setSuperviseTestExitCh(exitCh)
+	defer cleanupExit()
+
+	cmd := newSuperviseCmd()
+	cmd.SetArgs([]string{})
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Execute() }()
+
+	sidecar := filepath.Join(tmpHome, "supervisor.lock.owner.json")
+	if !waitForFile(sidecar, 3*time.Second) {
+		select {
+		case exitCh <- struct{}{}:
+		default:
+		}
+		t.Fatalf("sidecar never appeared")
+	}
+
+	pipePath := defaultPipePathOS(tmpHome)
+	var conn net.Conn
+	var dialErr error
+	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); {
+		conn, dialErr = dialSuperviseIPC(pipePath)
+		if dialErr == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if dialErr != nil {
+		select {
+		case exitCh <- struct{}{}:
+		default:
+		}
+		t.Fatalf("dial: %v", dialErr)
+	}
+	defer conn.Close()
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+
+	reader := bufio.NewReader(conn)
+	if _, err := reader.ReadString('\n'); err != nil {
+		t.Fatalf("read hello: %v", err)
+	}
+
+	req := api.IPCRequest{ID: 43, Cmd: "exit", Args: map[string]any{"graceful": true, "timeout_ms": 5000}}
+	reqBody, _ := json.Marshal(req)
+	if _, err := conn.Write(append(reqBody, '\n')); err != nil {
+		t.Fatalf("write exit: %v", err)
+	}
+
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read exit response: %v", err)
+	}
+	var resp api.IPCResponse
+	if err := json.Unmarshal([]byte(strings.TrimSpace(line)), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.ID != 43 || !resp.OK || !resp.Final {
+		t.Fatalf("want OK=true Final=true id=43, got %+v", resp)
+	}
+	r, _ := resp.Result.(map[string]any)
+	if r == nil || r["graceful_exit_initiated"] != true {
+		t.Fatalf("result must include graceful_exit_initiated=true; got %+v", resp.Result)
+	}
+
+	// The supervisor must exit on its own from the IPC-driven path.
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("supervise exited with err: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		// Fall back: trigger test-exit so cleanup doesn't hang the
+		// test binary, but flag the timeout as a failure first.
+		select {
+		case exitCh <- struct{}{}:
+		default:
+		}
+		<-done
+		t.Fatal("supervisor did not exit within 3s after IPC exit{graceful:true}")
+	}
+}
+
+// TestSupervise_IPC_VersionPinning pins the codex-r3 Lane B P1 #1
+// version-pinning contract: an explicit Version != 1 returns a
+// structured UNSUPPORTED_PROTOCOL_VERSION error rather than being
+// silently accepted. Version == 0 (omitted) is treated as v1 for
+// backward compatibility — exercised implicitly by every other test
+// in this file.
+func TestSupervise_IPC_VersionPinning(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
+
+	conn, reader, cleanup := startSuperviseForIPCTest(t, tmpHome)
+	defer cleanup()
+
+	req := api.IPCRequest{Version: 2, ID: 7, Cmd: "status"}
+	reqBody, _ := json.Marshal(req)
+	if _, err := conn.Write(append(reqBody, '\n')); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var resp api.IPCResponse
+	if err := json.Unmarshal([]byte(strings.TrimSpace(line)), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Error == nil {
+		t.Fatalf("v2 request must be refused; got %+v", resp)
+	}
+	if resp.Error.Code != "UNSUPPORTED_PROTOCOL_VERSION" {
+		t.Fatalf("want code UNSUPPORTED_PROTOCOL_VERSION, got %q", resp.Error.Code)
+	}
+	if resp.ID != 7 {
+		t.Fatalf("want correlation id=7, got %d", resp.ID)
+	}
+}

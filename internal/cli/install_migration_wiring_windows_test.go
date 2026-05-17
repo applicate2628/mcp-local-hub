@@ -26,10 +26,14 @@ package cli
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/spf13/cobra"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/apitest"
@@ -268,5 +272,121 @@ func TestRunForwardMigrationWindows_SuccessPathCopiesIdentityFields(t *testing.T
 		got.CommandLine != want.CommandLine || got.ExecutablePath != want.ExecutablePath ||
 		got.CreationDateUnix != want.CreationDateUnix {
 		t.Errorf("identity field mismatch:\n got %+v\nwant %+v", got, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// codex round-3 Lane B P1 #2: PIDForServerDaemon error return contract.
+// ---------------------------------------------------------------------------
+
+// TestPIDForServerDaemon_NoMatchReturnsErrProcessNotFound pins the
+// confirmed-no-match contract: an empty server/daemon pair must return
+// migration.ErrProcessNotFound so the journal's no-running-daemon
+// audit branch fires rather than the phantom-abort branch.
+func TestPIDForServerDaemon_NoMatchReturnsErrProcessNotFound(t *testing.T) {
+	// Empty inputs are the deterministic no-match shortcut — they
+	// don't shell out, so the test runs regardless of whether
+	// powershell.exe / wmic.exe are available on the CI runner.
+	pid, err := pidForServerDaemonViaTasklist("", "")
+	if pid != 0 {
+		t.Errorf("pid for empty inputs: want 0, got %d", pid)
+	}
+	if !errors.Is(err, migration.ErrProcessNotFound) {
+		t.Fatalf("empty inputs must return migration.ErrProcessNotFound so the journal's no-running-daemon branch fires; got %v", err)
+	}
+}
+
+// TestPIDForServerDaemon_ProbeFailureReturnsError pins the
+// codex round-3 Lane B P1 #2 contract: when the CLM probe transport
+// fails, the helper MUST return a non-nil error that is NOT
+// ErrProcessNotFound — the journal will then map it to
+// MIGRATION_PORT_LOOKUP_INCONSISTENT and abort rather than silently
+// classifying as "genuine unbound".
+//
+// Uses the probePowerShellCLMFn seam to drive the exact decision
+// matrix without shelling out to powershell.exe.
+func TestPIDForServerDaemon_ProbeFailureReturnsError(t *testing.T) {
+	// Case 1: CLM probe transport failure → wrapped error.
+	origProbe := probePowerShellCLMFn
+	t.Cleanup(func() { probePowerShellCLMFn = origProbe })
+	probeErr := errors.New("simulated powershell transport hang")
+	probePowerShellCLMFn = func() (bool, error) { return false, probeErr }
+
+	pid, err := pidForServerDaemonViaTasklist("memory", "default")
+	if pid != 0 {
+		t.Errorf("probe failure: want pid=0, got %d", pid)
+	}
+	if err == nil {
+		t.Fatal("CLM probe transport failure must return non-nil error so journal aborts; got nil")
+	}
+	if errors.Is(err, migration.ErrProcessNotFound) {
+		t.Fatalf("probe failure must NOT collapse onto ErrProcessNotFound (would let journal classify as genuine unbound); got %v", err)
+	}
+	if !errors.Is(err, probeErr) {
+		t.Fatalf("err must wrap the underlying probe cause; got %v", err)
+	}
+
+	// Case 2: CLM-locked AND wmic absent → wrapped error.
+	probePowerShellCLMFn = func() (bool, error) { return false, nil } // CLM locked but probe itself OK
+	origWmic := wmicPresentFn
+	t.Cleanup(func() { wmicPresentFn = origWmic })
+	wmicPresentFn = func() bool { return false }
+
+	pid, err = pidForServerDaemonViaTasklist("memory", "default")
+	if pid != 0 {
+		t.Errorf("CLM-locked + wmic absent: want pid=0, got %d", pid)
+	}
+	if err == nil {
+		t.Fatal("CLM-locked + wmic absent must return non-nil error; got nil")
+	}
+	if errors.Is(err, migration.ErrProcessNotFound) {
+		t.Fatalf("CLM-locked + wmic absent must NOT collapse onto ErrProcessNotFound; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "CLM-locked") {
+		t.Fatalf("error wording should name CLM-locked condition; got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// codex round-3 Lane C P1 #3: runV5UpgradeWindows fails closed on
+// unreadable intent.
+// ---------------------------------------------------------------------------
+
+// TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade pins the
+// fail-closed contract: routing chose this path because
+// supervisor-intent.json existed; if ReadSupervisorIntent fails the
+// upgrade MUST abort rather than fall through to a no-verify upgrade
+// (which would let the new supervisor start without proving the old
+// daemon ports unbound — exactly the regression codex-r2-c-p1-8
+// already paid for).
+//
+// We exercise the contract by seeding a corrupt intent file (invalid
+// JSON) under the test state-dir, then calling runV5UpgradeWindows
+// directly. The expected behavior is a non-nil error wrapping
+// "supervisor-intent.json present but unreadable".
+//
+// We do NOT install a fake UpgradeDeps because the error must fire
+// BEFORE RunInstallUpgrade is reached; a fake there would be
+// uncovered.
+func TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade(t *testing.T) {
+	withNoopSchedulerEnv(t)
+	stateDir := withTempStateDir(t)
+
+	// Seed a corrupt supervisor-intent.json (not valid JSON).
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	if err := os.WriteFile(intentPath, []byte("not-valid-json{{{"), 0600); err != nil {
+		t.Fatalf("seed corrupt intent: %v", err)
+	}
+
+	cmd := &cobra.Command{}
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	err := runV5UpgradeWindows(cmd)
+	if err == nil {
+		t.Fatal("runV5UpgradeWindows must return non-nil error when supervisor-intent.json is unreadable; got nil")
+	}
+	if !strings.Contains(err.Error(), "supervisor-intent.json present but unreadable") {
+		t.Fatalf("error must name the unreadable-intent cause so operators can diagnose; got %v", err)
 	}
 }

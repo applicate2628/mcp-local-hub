@@ -22,6 +22,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -30,6 +31,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -149,6 +151,27 @@ force-termination land in Task 9.2.
 	cmd.Flags().BoolVar(&noIPC, "no-ipc", false, "skip IPC listener (test flag)")
 	cmd.Flags().BoolVar(&strictMode, "strict-mode", false, "enforce strict parent-dir DACL gate")
 	return cmd
+}
+
+// ipcDispatchDeps bundles the per-supervisor context the IPC handlers
+// need beyond the per-request envelope. It is constructed once in
+// runSupervise and passed into the accept-loop goroutine so each
+// accepted connection's handler can drive the broader supervisor state
+// (loop cancellation, graceful-exit flag, state-dir lookup for the
+// quiesce handler).
+//
+// The struct exists because the v0.5.0 IPC dispatcher must service
+// commands (quiesce-timers, exit{graceful}) that depend on more than
+// a pair of atomic.Bool flags. Passing six bare pointers to
+// handleIPCConn would obscure the contract; the bundle keeps the
+// dependency surface visible.
+type ipcDispatchDeps struct {
+	stateDir           string
+	events             *api.SupervisorEventLog
+	reconcileReady     *atomic.Bool
+	intentFilesLoaded  *atomic.Bool
+	gracefulInProgress *atomic.Bool
+	triggerGracefulExit func() // closes loop, signals exit
 }
 
 // runSupervise is the body shared between the cobra command and any
@@ -311,13 +334,21 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	var reconcileReady atomic.Bool
 	var intentFilesLoaded atomic.Bool
 
+	// ipcExitCh is an internal channel the IPC dispatcher uses to drive
+	// graceful exit when the supervisor receives `exit{graceful: true}`.
+	// Distinct from superviseTestExitCh (test seam) and the OS signal
+	// channel; the select-block at the bottom of runSupervise observes
+	// all three uniformly.
+	ipcExitCh := make(chan struct{}, 1)
+
 	// IPC listener. `--no-ipc` keeps tests fast (lock+events+loop only).
 	// Production callers always pass --no-ipc=false; the listener owns
 	// the per-OS pipe/socket and the hello-frame handshake from Task
-	// 5.1 / 5.2. Task 6.2 wires the per-connection request-loop that
-	// dispatches `status` against the reconcileReady / intentFilesLoaded
-	// flags; later tasks (6.3+, 7.x) extend the cmd-switch with reload /
-	// restart / quiesce-timers / exit.
+	// 5.1 / 5.2. Phase-6 / Task 6.2 dispatched only `status`; codex
+	// round-3 Lane B P1 #1 extends the cmd-switch with `quiesce-timers`
+	// (multi-frame) and `exit{graceful: true}` so the migration
+	// rollback path + v0.5 upgrade flow no longer fall through to the
+	// force-kill fallback on every invocation.
 	if !noIPC {
 		pipePath := defaultPipePath(stateDir)
 		listener, lerr := NewSupervisorIPCListener(pipePath)
@@ -334,12 +365,27 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 			},
 		})
 
+		deps := ipcDispatchDeps{
+			stateDir:           stateDir,
+			events:             events,
+			reconcileReady:     &reconcileReady,
+			intentFilesLoaded:  &intentFilesLoaded,
+			gracefulInProgress: &gracefulInProgress,
+			triggerGracefulExit: func() {
+				// Non-blocking: idempotent against repeated exit verbs.
+				select {
+				case ipcExitCh <- struct{}{}:
+				default:
+				}
+			},
+		}
+
 		// Spawn the accept goroutine. It runs until listener.Close()
 		// causes Accept to return an error (the deferred Close above
 		// is the exit signal during the graceful-exit flow). Each
 		// accepted connection gets its own handler goroutine so a slow
 		// client never blocks the next Accept.
-		go acceptIPCConnections(listener, events, &reconcileReady, &intentFilesLoaded)
+		go acceptIPCConnections(listener, deps)
 	}
 
 	// Read the two intent files (Task 7.1 will turn these into the
@@ -432,6 +478,32 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 			},
 		})
 		return nil
+	case <-ipcExitCh:
+		// IPC-driven graceful exit: a client issued `exit{graceful:
+		// true}` and the dispatcher has already sent its response
+		// frame. Mirror the signal-driven exit path: emit the
+		// signal+exit lifecycle pair so the audit log is uniform
+		// regardless of trigger, set the graceful flag, cancel the
+		// loop, return nil.
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "info",
+			Source:   "lifecycle",
+			Event:    "supervisor-exit-signal",
+			Body: map[string]any{
+				"signal": "ipc-exit-graceful",
+			},
+		})
+		gracefulInProgress.Store(true)
+		loopCancel()
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "info",
+			Source:   "lifecycle",
+			Event:    "supervisor-exit",
+			Body: map[string]any{
+				"exit_code": 0,
+			},
+		})
+		return nil
 	case <-ctx.Done():
 		// Parent ctx cancellation (e.g. cmd.Context() cancelled by
 		// the root cobra harness during a wider shutdown). Treat as
@@ -470,13 +542,12 @@ func defaultPipePath(stateDir string) string {
 // newline-delimited-JSON channel. Multiple connections from the same
 // client (`mcphub status`, `mcphub stop`, `mcphub migrate`) are
 // supported concurrently — each gets its own per-connection handler
-// goroutine. The handlers share access to the supervisor-wide
-// reconcileReady / intentFilesLoaded flags through atomic.Bool
-// pointers; no per-connection state is mutated by handleIPCRequest.
+// goroutine. The handlers share access to the supervisor-wide deps
+// via ipcDispatchDeps; no per-connection state is mutated by
+// handleIPCRequest.
 func acceptIPCConnections(
 	listener *SupervisorIPCListener,
-	events *api.SupervisorEventLog,
-	reconcileReady, intentFilesLoaded *atomic.Bool,
+	deps ipcDispatchDeps,
 ) {
 	for {
 		conn, err := listener.Accept()
@@ -485,7 +556,7 @@ func acceptIPCConnections(
 			// graceful exit. Logging this would noise up the audit
 			// channel; emit an info row only so operators can
 			// distinguish "listener closed normally" from a bug.
-			_ = events.Emit(api.SupervisorEvent{
+			_ = deps.events.Emit(api.SupervisorEvent{
 				Severity: "info",
 				Source:   "ipc",
 				Event:    "ipc-accept-exit",
@@ -495,30 +566,26 @@ func acceptIPCConnections(
 			})
 			return
 		}
-		go handleIPCConn(conn, events, reconcileReady, intentFilesLoaded)
+		go handleIPCConn(conn, deps)
 	}
 }
 
 // handleIPCConn is the per-connection request loop. Reads
 // newline-delimited JSON IPCRequest frames, dispatches via
-// handleIPCRequest, writes the response back. Exits on first
+// dispatchIPCRequest, writes the response frames back. Exits on first
 // read error (client closed, deadline exceeded, malformed framing).
 //
 // Malformed JSON lines are skipped silently rather than closing the
 // connection — a future client version sending an unknown field
 // shouldn't tear down the long-lived channel. Errors at the dispatch
-// layer (unknown cmd) are surfaced via the IPCResponse.Error envelope,
-// not via connection close.
+// layer (unknown cmd, unsupported version) are surfaced via the
+// IPCResponse.Error envelope, not via connection close.
 //
 // Audit: each request gets one `ipc-command` audit row capturing the
 // cmd + id. The response body is NOT logged (may contain operator-
 // visible state that doesn't belong in the long-lived audit channel);
 // just the verb + correlation id is.
-func handleIPCConn(
-	conn net.Conn,
-	events *api.SupervisorEventLog,
-	reconcileReady, intentFilesLoaded *atomic.Bool,
-) {
+func handleIPCConn(conn net.Conn, deps ipcDispatchDeps) {
 	defer func() { _ = conn.Close() }()
 	reader := bufio.NewReader(conn)
 	for {
@@ -535,7 +602,7 @@ func handleIPCConn(
 			// Malformed frame — skip, do NOT close. A noisy client
 			// would otherwise tear down the long-lived channel on
 			// every transient JSON glitch.
-			_ = events.Emit(api.SupervisorEvent{
+			_ = deps.events.Emit(api.SupervisorEvent{
 				Severity: "warn",
 				Source:   "ipc",
 				Event:    "ipc-malformed-request",
@@ -545,26 +612,7 @@ func handleIPCConn(
 			})
 			continue
 		}
-		resp := handleIPCRequest(req, reconcileReady, intentFilesLoaded)
-		respBody, err := json.Marshal(resp)
-		if err != nil {
-			_ = events.Emit(api.SupervisorEvent{
-				Severity: "error",
-				Source:   "ipc",
-				Event:    "ipc-marshal-failed",
-				Body: map[string]any{
-					"cmd": req.Cmd,
-					"id":  req.ID,
-					"err": err.Error(),
-				},
-			})
-			return
-		}
-		respBody = append(respBody, '\n')
-		if _, err := conn.Write(respBody); err != nil {
-			return
-		}
-		_ = events.Emit(api.SupervisorEvent{
+		_ = deps.events.Emit(api.SupervisorEvent{
 			Severity: "info",
 			Source:   "ipc",
 			Event:    "ipc-command",
@@ -573,50 +621,319 @@ func handleIPCConn(
 				"id":  req.ID,
 			},
 		})
+		if err := dispatchIPCRequest(conn, req, deps); err != nil {
+			// Write failure on the response side — tear down the
+			// connection. Other dispatch errors are surfaced inside
+			// the response envelope and don't reach here.
+			return
+		}
 	}
 }
 
-// handleIPCRequest dispatches one IPC request to the matching command
-// handler and returns the response envelope. Pure function — no I/O,
-// no state mutation; the supervisor-wide flags are read via the
-// passed atomic.Bool pointers.
+// dispatchIPCRequest dispatches one IPC request to the matching command
+// handler and writes its response frame(s) to conn. Returns a non-nil
+// error only on connection-write failure, in which case the caller
+// closes the connection. Per-command errors (unknown verb, unsupported
+// version) are surfaced via the IPCResponse.Error envelope written to
+// the connection, NOT returned here.
 //
-// Phase-6 scope: only `status` is implemented. The other verbs from
-// spec §"Wire format" (exit, restart, reload, quiesce-timers) land
-// in later tasks; an unknown cmd produces an UNKNOWN_COMMAND error so
-// client-side dispatch can fail-fast instead of hanging on a missing
-// response.
-//
-// The `daemons` array is intentionally empty for Task 6.2 — Task 7.1
-// populates it with the actual reconcile-derived daemon snapshot. The
-// empty `[]any{}` (NOT nil) ensures JSON marshals as `"daemons":[]`
-// not `"daemons":null`, so client-side parsers can `result.daemons[0]`
-// without nil-pointer checks.
-func handleIPCRequest(
-	req api.IPCRequest,
-	reconcileReady, intentFilesLoaded *atomic.Bool,
-) api.IPCResponse {
+// codex round-3 Lane B P1 #1: extends the dispatcher beyond the
+// Phase-6 `status`-only stub with `quiesce-timers` (multi-frame
+// response per spec §"Wire format" lines 498-501) and `exit{graceful:
+// true}` (single response frame, supervisor exits after sending).
+// `restart` and `reload` remain deferred to follow-up — they're
+// per-daemon operations and the spec defers them past this round.
+func dispatchIPCRequest(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) error {
+	// Version pinning: refuse requests carrying an explicit non-1
+	// envelope version. Zero (the JSON-omitted default) is treated as
+	// v1 for backward compatibility with clients that predate the
+	// explicit-version requirement.
+	if err := api.ValidateRequestEnvelope(req); err != nil {
+		var ipcErr *api.IPCErr
+		if errors.As(err, &ipcErr) {
+			return writeIPCFrame(conn, api.IPCResponse{
+				ID:    req.ID,
+				Error: ipcErr,
+				Final: true,
+			})
+		}
+		// Defensive: unknown error shape — still surface a structured
+		// response so the client doesn't hang.
+		return writeIPCFrame(conn, api.IPCResponse{
+			ID: req.ID,
+			Error: &api.IPCErr{
+				Code:    "UNSUPPORTED_PROTOCOL_VERSION",
+				Message: err.Error(),
+			},
+			Final: true,
+		})
+	}
 	switch req.Cmd {
 	case "status":
-		return api.IPCResponse{
+		return writeIPCFrame(conn, api.IPCResponse{
 			ID: req.ID,
 			OK: true,
 			Result: map[string]any{
 				"state":               "running",
 				"daemons":             []any{},
-				"reconcile_ready":     reconcileReady.Load(),
-				"intent_files_loaded": intentFilesLoaded.Load(),
+				"reconcile_ready":     deps.reconcileReady.Load(),
+				"intent_files_loaded": deps.intentFilesLoaded.Load(),
 			},
-		}
+		})
+	case "quiesce-timers":
+		return handleQuiesceTimers(conn, req, deps)
+	case "exit":
+		return handleExit(conn, req, deps)
+	case "restart", "reload":
+		// Deferred to follow-up: per-daemon operations whose semantics
+		// (which daemon, with which intent diff, against which
+		// reconcile pass) depend on the Task 7.1 reconcile loop. Until
+		// that lands, return UNKNOWN_COMMAND so callers fail fast
+		// instead of hanging on a missing response.
+		return writeIPCFrame(conn, api.IPCResponse{
+			ID: req.ID,
+			Error: &api.IPCErr{
+				Code:    "UNKNOWN_COMMAND",
+				Message: "IPC command deferred to follow-up: " + req.Cmd,
+			},
+			Final: true,
+		})
 	default:
-		return api.IPCResponse{
+		return writeIPCFrame(conn, api.IPCResponse{
 			ID: req.ID,
 			Error: &api.IPCErr{
 				Code:    "UNKNOWN_COMMAND",
 				Message: "unknown IPC command: " + req.Cmd,
 			},
+			Final: true,
+		})
+	}
+}
+
+// quiesceDrainer is the minimal interface handleQuiesceTimers needs
+// from a QuiesceHandler. Defined as an interface so tests can inject
+// a fake without spawning real child processes. Production wires
+// the real *QuiesceHandler (which satisfies this interface) via
+// quiesceHandlerFactory.
+type quiesceDrainer interface {
+	Drain(ctx context.Context, timeoutMs int) QuiesceResult
+}
+
+// quiesceHandlerFactory builds a quiesceDrainer from the on-disk
+// supervisor-state.json under the supervisor's state-dir. Package-level
+// indirection so tests can inject a fake without driving the real
+// state-file load path; production wires it to the real
+// NewQuiesceHandler against `<state-dir>/supervisor-state.json`.
+//
+// A missing state file or unreadable JSON is NOT a hard error — the
+// handler is built against an empty SupervisorStateFile so Drain
+// immediately reports (drained=0, still_running=[]). This matches
+// the spec contract that a freshly-installed supervisor with no
+// running transients should still answer quiesce-timers successfully.
+var quiesceHandlerFactory = func(stateDir string) quiesceDrainer {
+	statePath := filepath.Join(stateDir, "supervisor-state.json")
+	state, err := api.ReadSupervisorState(statePath)
+	if err != nil || state == nil {
+		// Missing / unreadable state → empty handler. NewQuiesceHandler
+		// already handles nil state via its defensive guards
+		// (Drain returns drained=0).
+		return NewQuiesceHandler(nil, statePath)
+	}
+	return NewQuiesceHandler(state, statePath)
+}
+
+// setQuiesceHandlerFactoryForTest installs a test factory. Returns an
+// uninstall function tests defer to restore the production wiring.
+// Production code paths never invoke this.
+func setQuiesceHandlerFactoryForTest(fn func(stateDir string) quiesceDrainer) func() {
+	prev := quiesceHandlerFactory
+	quiesceHandlerFactory = fn
+	return func() { quiesceHandlerFactory = prev }
+}
+
+// handleQuiesceTimers implements the multi-frame response shape for
+// the `quiesce-timers` IPC verb (spec §"Wire format" lines 498-501).
+//
+// Wire contract:
+//
+//	Request:  {"id": N, "cmd": "quiesce-timers", "args": {"timeout_ms": 30000}}
+//	Frame 1 (immediate): {"id": N, "ok": true, "result": {"accepted": true}}
+//	Frame 2 (final):     {"id": N, "ok": true, "result": {"drained": K,
+//	                       "still_running": [...]}, "final": true}
+//
+// The drain runs on a separate goroutine per spec line 472 so the
+// supervisor's FIFO event loop can continue processing while drain is
+// in progress. The `graceful_exit_in_progress` flag is set for the
+// duration of the drain so the loop's per-timer fire path suppresses
+// new transient-timer fires (spec §"Graceful exit + quiesce drain"
+// step 1).
+//
+// timeout_ms parsing: accepts JSON-number `float64` (the default
+// shape for `map[string]any` unmarshal) AND `int` (defensive against
+// custom marshalers). Missing/zero/negative timeout_ms defaults to
+// 30000 ms.
+func handleQuiesceTimers(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) error {
+	timeoutMs := parseTimeoutMs(req.Args, "timeout_ms", 30000)
+
+	// Frame 1: immediate acceptance ack.
+	if err := writeIPCFrame(conn, api.IPCResponse{
+		ID: req.ID,
+		OK: true,
+		Result: map[string]any{
+			"accepted": true,
+		},
+	}); err != nil {
+		return err
+	}
+
+	// Run drain on a separate goroutine so the loop continues
+	// processing. We block this connection handler waiting for the
+	// drain result; that is intentional — the client expects the
+	// final frame on the SAME connection.
+	deps.gracefulInProgress.Store(true)
+	handler := quiesceHandlerFactory(deps.stateDir)
+	resultCh := make(chan QuiesceResult, 1)
+	go func() {
+		defer deps.gracefulInProgress.Store(false)
+		// 5s grace window beyond the requested deadline so the drain
+		// goroutine's ctx is honored even when the caller is sloppy.
+		ctx, cancel := context.WithTimeout(context.Background(),
+			time.Duration(timeoutMs+5000)*time.Millisecond)
+		defer cancel()
+		resultCh <- handler.Drain(ctx, timeoutMs)
+	}()
+	result := <-resultCh
+
+	_ = deps.events.Emit(api.SupervisorEvent{
+		Severity: "info",
+		Source:   "ipc",
+		Event:    "quiesce-timers-complete",
+		Body: map[string]any{
+			"id":            req.ID,
+			"timeout_ms":    timeoutMs,
+			"drained":       result.Drained,
+			"still_running": len(result.StillRunning),
+		},
+	})
+
+	// Frame 2: final result with drained + still_running.
+	stillRunning := make([]any, 0, len(result.StillRunning))
+	for _, pid := range result.StillRunning {
+		stillRunning = append(stillRunning, map[string]any{"pid": pid})
+	}
+	return writeIPCFrame(conn, api.IPCResponse{
+		ID: req.ID,
+		OK: true,
+		Result: map[string]any{
+			"drained":       result.Drained,
+			"still_running": stillRunning,
+		},
+		Final: true,
+	})
+}
+
+// handleExit implements the `exit` IPC verb (single-frame response).
+// When args.graceful is true, the dispatcher posts a graceful-exit
+// trigger AFTER writing the response so the client observes the
+// acknowledgement before the supervisor tears down. The state-machine
+// transition itself (spec §"Restart policy state machine"
+// request-graceful-exit) is driven by the loop's existing exit path
+// — see the ipcExitCh case in runSupervise.
+//
+// Wire contract:
+//
+//	Request:  {"id": N, "cmd": "exit", "args": {"graceful": true, "timeout_ms": 5000}}
+//	Response: {"id": N, "ok": true, "result": {"graceful_exit_initiated": true}, "final": true}
+//
+// graceful=false is currently unsupported (would be an ungraceful
+// immediate exit, equivalent to a kill). Returning UNKNOWN_COMMAND
+// here defers that semantic to a follow-up: the rollback path always
+// requests graceful=true, and there is no current caller for
+// graceful=false.
+func handleExit(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) error {
+	graceful, _ := req.Args["graceful"].(bool)
+	if !graceful {
+		return writeIPCFrame(conn, api.IPCResponse{
+			ID: req.ID,
+			Error: &api.IPCErr{
+				Code:    "UNKNOWN_COMMAND",
+				Message: "exit{graceful:false} not supported; pass graceful:true",
+			},
+			Final: true,
+		})
+	}
+
+	_ = deps.events.Emit(api.SupervisorEvent{
+		Severity: "info",
+		Source:   "ipc",
+		Event:    "exit-graceful-requested",
+		Body: map[string]any{
+			"id": req.ID,
+		},
+	})
+
+	// Write the response BEFORE triggering exit. If we triggered first,
+	// the supervisor's deferred listener.Close() could race the response
+	// write and the client would observe a connection drop instead of
+	// the acknowledgement frame.
+	if err := writeIPCFrame(conn, api.IPCResponse{
+		ID: req.ID,
+		OK: true,
+		Result: map[string]any{
+			"graceful_exit_initiated": true,
+		},
+		Final: true,
+	}); err != nil {
+		return err
+	}
+
+	// Trigger the graceful-exit path. Idempotent: repeated exit verbs
+	// just push to a buffered channel; the select in runSupervise
+	// observes the first delivery and starts tearing down.
+	if deps.triggerGracefulExit != nil {
+		deps.triggerGracefulExit()
+	}
+	return nil
+}
+
+// parseTimeoutMs reads a "*_ms" int field from req.Args, accepting
+// both JSON-number (float64) and int shapes. Returns def when the key
+// is missing, of the wrong type, or non-positive.
+func parseTimeoutMs(args map[string]any, key string, def int) int {
+	if args == nil {
+		return def
+	}
+	switch v := args[key].(type) {
+	case float64:
+		if v > 0 {
+			return int(v)
+		}
+	case int:
+		if v > 0 {
+			return v
+		}
+	case int64:
+		if v > 0 {
+			return int(v)
 		}
 	}
+	return def
+}
+
+// writeIPCFrame marshals resp + appends the trailing newline and
+// writes it to conn. Returns the connection-write error so the caller
+// can decide whether to tear down the connection (write failures
+// typically indicate the client closed prematurely).
+func writeIPCFrame(conn net.Conn, resp api.IPCResponse) error {
+	body, err := json.Marshal(resp)
+	if err != nil {
+		return fmt.Errorf("marshal response: %w", err)
+	}
+	body = append(body, '\n')
+	if _, err := conn.Write(body); err != nil {
+		return err
+	}
+	return nil
 }
 
 // loadIntentFiles attempts to read the supervisor-intent.json and

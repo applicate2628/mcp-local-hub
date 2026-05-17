@@ -398,6 +398,14 @@ var wmicPresentFn = func() bool {
 	return err == nil
 }
 
+// probePowerShellCLMFn is a test seam over process.ProbePowerShellCLM
+// for pidForServerDaemonViaTasklist. Production wires it to the real
+// CLM probe; tests inject a fake that returns either (true, nil) /
+// (false, nil) / (false, err) so each branch of the probe-ordering
+// decision matrix is exercisable without shelling out to
+// powershell.exe.
+var probePowerShellCLMFn = process.ProbePowerShellCLM
+
 // processLookupIdentityFn is a test seam over process.LookupProcessIdentity.
 // Production wires it to the real Windows implementation; tests inject
 // a fake that returns process.ErrProcessNotFound (or an arbitrary
@@ -526,7 +534,7 @@ func pidForServerDaemonViaTasklist(server, daemon string) (int, error) {
 	}
 	wantArgv := fmt.Sprintf("daemon --server %s --daemon %s", server, daemon)
 
-	clmOK, probeErr := process.ProbePowerShellCLM()
+	clmOK, probeErr := probePowerShellCLMFn()
 	if probeErr != nil {
 		// Probe transport failure (powershell.exe missing, language-
 		// mode shell-out hung). Do NOT silently fall through to wmic;
