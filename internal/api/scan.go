@@ -87,20 +87,21 @@ func probeClientConfigPresence(opts ScanOpts) map[string]string {
 		//     → "error" (round 5; matrix shows config-error diagnostic
 		//     instead of an "ok" cell that migrate/backup will choke on
 		//     when readJSON sees a non-regular target)
-		//   - dangling symlink (default mode) → "error" (round 4; init
-		//     button + secure-create refusal lose otherwise)
-		//   - any symlink (strict mode) → "error" (the secure-write
-		//     pipeline refuses symlinks in strict mode; presence must
-		//     match)
-		//
-		// Wrong-shape entries to PRESERVE as "ok" (round 6):
-		//   - symlink-to-existing-regular-file in default mode → "ok".
-		//     Default-relax explicitly supports the dotfile-symlink
-		//     pattern (e.g., `~/.codex/config.toml -> E:\dotfiles\...`)
-		//     via `resolveSymlinkForSecureWrite` in
-		//     internal/api/client_write_init.go. Marking such configs
-		//     as "error" would break real-world setups where the
-		//     write contract DOES support the symlink.
+		//   - dangling symlink → "error" (round 4; init button +
+		//     secure-create refusal lose otherwise)
+		//   - any symlink, default OR strict mode → "error" (post-PR
+		//     #209: the secure-write pipeline now refuses pre-existing
+		//     symlinks in ALL modes — `resolveSymlinkForSecureWrite`
+		//     was removed from `secureWriteWithOperatorOpt`. Reporting
+		//     "ok" while writes deterministically fail with symlink-
+		//     refuse errors is the exact UX trap bot codex-r7 flagged:
+		//     user sees a green matrix column, clicks Apply, every
+		//     write fails. Aligning presence with the active write
+		//     contract restores invariant "ok = write will succeed".
+		//     Dotfile-symlink setups that used to rely on default-mode
+		//     resolve-to-target are now unsupported by design — the
+		//     security boundary closure in PR #209 traded that path
+		//     for confused-deputy integrity protection).
 		if lst, lerr := os.Lstat(p.path); lerr == nil {
 			isSymlink := lst.Mode()&os.ModeSymlink != 0
 			if !lst.Mode().IsRegular() && !isSymlink {
@@ -108,14 +109,6 @@ func probeClientConfigPresence(opts ScanOpts) map[string]string {
 				continue
 			}
 			if isSymlink {
-				if OperatorRequiresSingleUserHome() {
-					out[p.name] = "error"
-					continue
-				}
-				if st, err := os.Stat(p.path); err == nil && st.Mode().IsRegular() {
-					out[p.name] = "ok"
-					continue
-				}
 				out[p.name] = "error"
 				continue
 			}

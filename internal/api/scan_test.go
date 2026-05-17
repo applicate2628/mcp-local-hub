@@ -358,13 +358,23 @@ func TestProbeClientConfigPresence_DirectoryAtConfigPath(t *testing.T) {
 }
 
 // TestProbeClientConfigPresence_SymlinkToRegularDefaultMode pins
-// the v0.4.5 deep-sec PR #208 Lane B round 6 P2 closure (regression
-// fix): symlink-to-existing-regular-file in DEFAULT mode must
-// classify as "ok" because the production write pipeline explicitly
-// supports the dotfile-symlink pattern (e.g., `~/.codex/config.toml
-// -> E:\dotfiles\.codex\config.toml`) via resolveSymlinkForSecureWrite.
-// Round 5's all-symlinks-are-error rule was too strict; this test
-// pins the relaxed contract.
+// the post-PR-#209 contract: symlink-to-existing-regular-file in
+// DEFAULT mode classifies as "error" because PR #209 removed
+// `resolveSymlinkForSecureWrite` from `secureWriteWithOperatorOpt` —
+// writes through `SecureWriteClientConfig` now refuse pre-existing
+// symlinks in ALL modes. Reporting "ok" while writes deterministically
+// fail with symlink-refuse errors is the exact UX trap codex bot r7
+// flagged (PR #208 review on commit de3ba74): user sees a green
+// matrix column, clicks Apply, every write fails. Aligning presence
+// with the active write contract restores invariant "ok = write will
+// succeed".
+//
+// Trade-off: dotfile-symlink setups (e.g., `~/.codex/config.toml
+// -> E:\dotfiles\.codex\config.toml`) that used to rely on default-
+// mode resolve-to-target are now unsupported by design. The security
+// boundary closure in PR #209 (confused-deputy integrity protection)
+// took precedence over the dotfile UX. Operators with this pattern
+// can either remove the symlink or manage the target file directly.
 func TestProbeClientConfigPresence_SymlinkToRegularDefaultMode(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation requires elevation on Windows; the cross-platform Lstat probe is exercised by the POSIX path")
@@ -382,8 +392,8 @@ func TestProbeClientConfigPresence_SymlinkToRegularDefaultMode(t *testing.T) {
 	}
 
 	out := probeClientConfigPresence(ScanOpts{VSCodeConfigPath: link})
-	if got := out["vscode"]; got != "ok" {
-		t.Errorf("symlink-to-regular in default mode classified as %q, want \"ok\" (dotfile pattern must work)", got)
+	if got := out["vscode"]; got != "error" {
+		t.Errorf("symlink-to-regular in default mode classified as %q, want \"error\" (write pipeline refuses symlinks post-PR-#209)", got)
 	}
 }
 
