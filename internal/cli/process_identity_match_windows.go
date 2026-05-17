@@ -3,7 +3,7 @@
 package cli
 
 import (
-	"strings"
+	"path/filepath"
 
 	"mcp-local-hub/internal/process"
 )
@@ -13,5 +13,15 @@ func pidMatchesMcphub(pid int) bool {
 	if err != nil {
 		return false
 	}
-	return strings.EqualFold(ident.Basename, "mcphub.exe")
+	if ident.ExecutablePath == "" {
+		return false
+	}
+	target := ident.ExecutablePath
+	if abs, err := filepath.Abs(target); err == nil {
+		target = abs
+	}
+	if resolved, err := filepath.EvalSymlinks(target); err == nil {
+		target = resolved
+	}
+	return pathsEqual(target, canonicalMcphubPath())
 }

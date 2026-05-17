@@ -23,7 +23,7 @@ func TestFinishProductionTerminate_EscalationAbortReturnsError(t *testing.T) {
 	}
 	defer events.Close()
 
-	cmd := exec.Command(os.Args[0], "-test.run=TestProductionTerminateFn_HelperSleep")
+	cmd := exec.Command(copyCurrentTestBinaryAsReconcileMcphub(t), "-test.run=TestProductionTerminateFn_HelperSleep")
 	cmd.Env = append(os.Environ(), "MCPHUB_PRODUCTION_TERMINATE_HELPER=1")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start helper child: %v", err)

@@ -473,7 +473,7 @@ func TestProductionTerminateFn_TerminatesRunningPID(t *testing.T) {
 	}
 	defer events.Close()
 
-	cmd := exec.Command(copyCurrentTestBinaryAsReconcileMcphub(t), "-test.run=TestProductionTerminateFn_HelperSleep")
+	cmd := exec.Command(os.Args[0], "-test.run=TestProductionTerminateFn_HelperSleep")
 	cmd.Env = append(os.Environ(), "MCPHUB_PRODUCTION_TERMINATE_HELPER=1")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start helper child: %v", err)
@@ -534,12 +534,25 @@ func TestProductionTerminateFn_IdentityMismatchAtEntry(t *testing.T) {
 	}
 	defer events.Close()
 
-	pid := os.Getpid()
+	cmd := exec.Command(copyCurrentTestBinaryAsReconcileMcphub(t), "-test.run=TestProductionTerminateFn_HelperSleep")
+	cmd.Env = append(os.Environ(), "MCPHUB_PRODUCTION_TERMINATE_HELPER=1")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start foreign helper child: %v", err)
+	}
+	if cmd.Process == nil {
+		t.Fatal("foreign helper child started without Process")
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+
+	pid := cmd.Process.Pid
 	if !process.IsPidAlive(pid) {
-		t.Fatalf("test precondition failed: current pid %d must be alive", pid)
+		t.Fatalf("test precondition failed: foreign helper pid %d must be alive", pid)
 	}
 	if pidMatchesMcphub(pid) {
-		t.Skipf("current test binary pid %d unexpectedly matches mcphub identity", pid)
+		t.Skipf("foreign helper pid %d unexpectedly matches mcphub identity", pid)
 	}
 
 	terminateFn := makeProductionTerminateFn(events, map[string]int{

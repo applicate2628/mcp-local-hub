@@ -14,11 +14,13 @@ import (
 	"mcp-local-hub/internal/api/apitest"
 )
 
-func TestPidMatchesMcphub_LinuxBasename(t *testing.T) {
-	if pidMatchesMcphub(os.Getpid()) {
-		t.Fatalf("current test binary pid %d must not match mcphub basename", os.Getpid())
+func TestPidMatchesMcphub_CurrentProcess(t *testing.T) {
+	if !pidMatchesMcphub(os.Getpid()) {
+		t.Fatalf("current test binary pid %d must match canonical executable path", os.Getpid())
 	}
+}
 
+func TestPidMatchesMcphub_RejectsForeignPathSameBasename(t *testing.T) {
 	helperPath := copyCurrentTestBinaryAsLinux(t, "mcphub")
 	cmd := exec.Command(helperPath, "-test.run=TestPidMatchesMcphub_HelperSleep")
 	cmd.Env = append(os.Environ(), "MCPHUB_PID_MATCH_HELPER=1")
@@ -36,20 +38,29 @@ func TestPidMatchesMcphub_LinuxBasename(t *testing.T) {
 	pid := cmd.Process.Pid
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if pidMatchesMcphub(pid) {
+		if !pidMatchesMcphub(pid) {
 			return
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	t.Fatalf("pid %d for mcphub-named helper did not match mcphub basename", pid)
+	t.Fatalf("pid %d for foreign mcphub-named helper matched canonical executable path", pid)
+}
+
+func TestPidMatchesMcphub_DeletedSuffix(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "mcphub")
+	got := normalizeProcExeTarget(target + linuxDeletedSuffix)
+	if got != target {
+		t.Fatalf("normalizeProcExeTarget deleted suffix = %q, want %q", got, target)
+	}
 }
 
 func TestLoadSupervisorCurrentRunning_LinuxSkipsLiveNonMcphubPID(t *testing.T) {
 	tmpHome := apitest.HardenedTempDir(t)
-	cmd := exec.Command(os.Args[0], "-test.run=TestPidMatchesMcphub_HelperSleep")
+	helperPath := copyCurrentTestBinaryAsLinux(t, "mcphub")
+	cmd := exec.Command(helperPath, "-test.run=TestPidMatchesMcphub_HelperSleep")
 	cmd.Env = append(os.Environ(), "MCPHUB_PID_MATCH_HELPER=1")
 	if err := cmd.Start(); err != nil {
-		t.Fatalf("start non-mcphub helper: %v", err)
+		t.Fatalf("start foreign mcphub-named helper: %v", err)
 	}
 	if cmd.Process == nil {
 		t.Fatal("helper started without Process")
