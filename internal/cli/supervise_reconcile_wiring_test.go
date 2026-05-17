@@ -379,6 +379,31 @@ func TestProductionSpawnFn_FailureEmitsAuditEvent(t *testing.T) {
 	}
 }
 
+func TestProductionSpawnFn_EnvOverrideAppliedDeterministically(t *testing.T) {
+	parent := []string{"BASE=parent"}
+	overrides := map[string]string{
+		"PATH": "first",
+		"Path": "second",
+		"FOO":  "foo",
+		"BAR":  "bar",
+	}
+	want := []string{
+		"BASE=parent",
+		"BAR=bar",
+		"FOO=foo",
+		"PATH=first",
+		"Path=second",
+	}
+	wantJoined := strings.Join(want, "\x00")
+
+	for i := 0; i < 20; i++ {
+		got := mergeDaemonEnv(parent, overrides)
+		if gotJoined := strings.Join(got, "\x00"); gotJoined != wantJoined {
+			t.Fatalf("iteration %d mergeDaemonEnv order = %#v, want %#v", i, got, want)
+		}
+	}
+}
+
 // TestProductionSpawnFn_SuccessEmitsAuditEvent verifies the
 // production spawn fn emits a daemon-spawned event on successful
 // cmd.Start. Uses a platform-portable no-op shell built-in

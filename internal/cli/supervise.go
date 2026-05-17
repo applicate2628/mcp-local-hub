@@ -29,6 +29,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -1330,6 +1331,23 @@ func emitDaemonTerminateFailed(events *api.SupervisorEventLog, d api.SupervisorD
 	})
 }
 
+// mergeDaemonEnv appends descriptor env overrides in deterministic key order.
+func mergeDaemonEnv(parent []string, overrides map[string]string) []string {
+	env := append([]string{}, parent...)
+	if len(overrides) == 0 {
+		return env
+	}
+	keys := make([]string, 0, len(overrides))
+	for k := range overrides {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		env = append(env, k+"="+overrides[k])
+	}
+	return env
+}
+
 // makeProductionSpawnFn returns the SpawnFunc the Reconciler invokes
 // for each daemon that needs to be (re)started. Each call:
 //
@@ -1349,9 +1367,8 @@ func emitDaemonTerminateFailed(events *api.SupervisorEventLog, d api.SupervisorD
 // Env handling: cmd.Env defaults to nil ("inherit parent's") when the
 // descriptor's Env map is empty. A non-empty Env map produces a
 // full os.Environ()-derived block with the descriptor's keys appended
-// — matching the v0.4.x daemon-host spawn convention so the v0.5.0
-// supervisor's environment is a strict superset of what the prior
-// daemons used to see.
+// in sorted order, matching the v0.4.x daemon-host spawn convention
+// while keeping duplicate-case Windows keys deterministic.
 func makeProductionSpawnFn(job *process.Job, events *api.SupervisorEventLog) SpawnFunc {
 	return func(d api.SupervisorDaemon) error {
 		cmd := exec.Command(d.Command, d.Args...)
@@ -1359,11 +1376,7 @@ func makeProductionSpawnFn(job *process.Job, events *api.SupervisorEventLog) Spa
 			cmd.Dir = d.Workspace
 		}
 		if len(d.Env) > 0 {
-			env := os.Environ()
-			for k, v := range d.Env {
-				env = append(env, k+"="+v)
-			}
-			cmd.Env = env
+			cmd.Env = mergeDaemonEnv(os.Environ(), d.Env)
 		}
 		process.NoConsole(cmd)
 

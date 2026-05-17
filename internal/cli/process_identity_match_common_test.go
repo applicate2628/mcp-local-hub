@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -32,7 +33,7 @@ func TestPathsEqual(t *testing.T) {
 		b    string
 		want bool
 	}{
-		{name: "case-insensitive", a: strings.ToUpper(clean), b: strings.ToLower(clean), want: true},
+		{name: "case-handling", a: strings.ToUpper(clean), b: strings.ToLower(clean), want: runtime.GOOS == "windows"},
 		{name: "dot-dot-cleaned", a: withDotDot, b: clean, want: true},
 		{name: "trailing-separator-cleaned", a: trailing, b: clean, want: true},
 		{name: "different-path", a: filepath.Join(base, "bin", "mcphub"), b: filepath.Join(base, "other", "mcphub"), want: false},

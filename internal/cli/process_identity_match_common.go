@@ -3,7 +3,6 @@ package cli
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 )
 
@@ -32,16 +31,4 @@ func canonicalMcphubPath() string {
 		canonicalPathStr = exe
 	})
 	return canonicalPathStr
-}
-
-// pathsEqual compares two absolute paths case-insensitively (Windows
-// preserves case but file system is case-insensitive; Linux is
-// case-sensitive but supervisor and daemons share the same launcher
-// path verbatim, so EqualFold is safe across platforms). Returns
-// false on any empty input.
-func pathsEqual(a, b string) bool {
-	if a == "" || b == "" {
-		return false
-	}
-	return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
 }
