@@ -379,7 +379,22 @@ func (a *API) computeDaemonsSection(nowMs int64, refresh bool) (DaemonsSection, 
 		case a.HealthStatusFn != nil:
 			rows, fetchErr = a.HealthStatusFn(StatusOpts{})
 		case supervisorIPCStatusFn != nil:
-			rows, fetchErr = supervisorIPCStatusFn(context.Background())
+			// Bounded-deadline context (codex r5 P2 fix): the caller's
+			// HTTP request context doesn't currently reach this layer
+			// because `HealthSnapshot` / `DaemonStatusSnapshot` /
+			// `computeDaemonsSection` don't take ctx in their signatures
+			// (cascading change across 20+ test files — follow-up). The
+			// worst-case finding the bot flagged was "If the pipe
+			// connect/read stalls, handlers can hang until transport-
+			// level timeouts instead of failing promptly". A 5-second
+			// deadline bounds the IPC call so the daemons-section
+			// refresh cannot tie up the HTTP handler beyond the next
+			// status-cache TTL window even under supervisor outage.
+			// The IPC stub on its side returns within this budget;
+			// production wiring should respect ctx.Done() for cancel.
+			ipcCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			rows, fetchErr = supervisorIPCStatusFn(ipcCtx)
+			cancel()
 		default:
 			rows, fetchErr = a.StatusWithOpts(StatusOpts{}) // ProbeHealth=false; probes come in Phase 3
 		}

@@ -132,10 +132,17 @@ func (f *reaperFakes) deps() ReaperDeps {
 			if !ok {
 				return time.Time{}, false
 			}
-			// Default: match the recorded StartedAt exactly (gate passes).
-			// Tests that want a mismatch override startTime + startOK
-			// explicitly via the fake.
-			if !p.startOK && p.startTime.IsZero() {
+			// Default-true branch (codex r5 P3 fix): only fire the
+			// "match f.now" default when the fake was registered with
+			// startOK=true AND no explicit startTime — i.e., the test
+			// did not opt out of the StartedAt gate at all. A fake
+			// configured with startOK=false MUST return (zero, false)
+			// so the StartedAt gate fails closed (Darwin/probe-failure
+			// safety semantic). The previous default unconditionally
+			// reported (f.now, true) when startTime was zero, masking
+			// the fail-closed path in tests that explicitly set
+			// startOK=false to model probe failure.
+			if p.startOK && p.startTime.IsZero() {
 				return f.now, true
 			}
 			return p.startTime, p.startOK
