@@ -200,16 +200,6 @@ func secureWriteWithOperatorOpt(path string, contents []byte) error {
 	// The original symlink is left intact (mcphub does not
 	// rewrite it as a regular file). The target's DACL after the
 	// write is owner-only via the secure-write pipeline.
-	if !operatorRequiresSingleUserHome() {
-		if resolved, isSymlink := resolveSymlinkForSecureWrite(path); isSymlink && resolved != path {
-			_ = LogHubMcpEvent("info", "client-write-symlink-followed", map[string]any{
-				"symlink": path,
-				"target":  resolved,
-				"reason":  "default-relax-on-solo-host (dotfile pattern)",
-			})
-			path = resolved
-		}
-	}
 	err := SecureWriteClientConfig(path, contents)
 	if err == nil {
 		return nil
