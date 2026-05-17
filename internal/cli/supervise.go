@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -36,6 +37,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/process"
 )
 
 // reaperFn is a package-private test seam pointing at the Task 13.1
@@ -59,6 +61,48 @@ func setReaperFnForTest(fn func(context.Context, ReaperDeps) (ReaperResult, erro
 	prev := reaperFn
 	reaperFn = fn
 	return func() { reaperFn = prev }
+}
+
+// reconcileSpawnFn / reconcileTerminateFn are package-private test
+// seams pointing at the production reconcile fan-out closures
+// installed by runSupervise. They are nil at package load; runSupervise
+// assigns the production closures during startup unless a test has
+// already swapped a fake in via setReconcileSpawnFnForTest /
+// setReconcileTerminateFnForTest. Production callers MUST NOT reassign
+// these vars directly; the accessors below are the only allowed write
+// path.
+//
+// The seams exist because the v0.5.0 reconcile pass (Task 7.1) needs
+// to actually spawn daemon children via os/exec + Job-Object assign-
+// at-create, and the wiring tests in this package must capture those
+// fan-out calls without launching real child processes. The same
+// pattern reaperFn / setReaperFnForTest uses (supervise.go:52-62) is
+// repeated here for parity.
+var (
+	reconcileSpawnFn     SpawnFunc
+	reconcileTerminateFn TerminateFunc
+)
+
+// setReconcileSpawnFnForTest installs a test spawn closure. Returns
+// an "uninstall" function tests defer to restore the production
+// wiring (nil — runSupervise re-installs its own closure on next
+// startup) before the next test runs. Production code paths never
+// invoke this accessor.
+func setReconcileSpawnFnForTest(fn SpawnFunc) func() {
+	prev := reconcileSpawnFn
+	reconcileSpawnFn = fn
+	return func() { reconcileSpawnFn = prev }
+}
+
+// setReconcileTerminateFnForTest is the terminate-side companion of
+// setReconcileSpawnFnForTest. Currently unused by tests because the
+// startup-only reconcile scope never terminates daemons (no daemon
+// has been spawned yet), but the seam is in place so the watcher /
+// reload follow-up can swap a fake without further refactoring.
+func setReconcileTerminateFnForTest(fn TerminateFunc) func() {
+	prev := reconcileTerminateFn
+	reconcileTerminateFn = fn
+	return func() { reconcileTerminateFn = prev }
 }
 
 // stateDirFunc returns the supervisor state directory.
@@ -437,21 +481,72 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		go acceptIPCConnections(listener, deps)
 	}
 
-	// Read the two intent files (Task 7.1 will turn these into the
-	// authoritative reconcile inputs). For Task 6.2 scope, the read
-	// result is intentionally discarded — the goal is only to flip
-	// `intentFilesLoaded` true after the attempt so the IPC `status`
-	// contract is observable. Missing files (os.ErrNotExist) are a
-	// valid "loaded" outcome — the supervisor must come up cleanly
-	// on a fresh host before any intent file exists.
-	loadIntentFiles(stateDir, events, &intentFilesLoaded)
+	// Read the two intent files. Production wiring (this commit)
+	// threads supervisor-intent.json into the reconcile pass below;
+	// daemon-intent.json feeds the IsActiveStop decision in the
+	// reconciler. Missing files (os.ErrNotExist) are a valid "loaded"
+	// outcome — the supervisor must come up cleanly on a fresh host
+	// before any intent file exists.
+	intent, daemonIntent := loadIntentFiles(stateDir, events, &intentFilesLoaded)
 
-	// Mark reconcile-ready. Phase-6 scope stops at the first-pass
-	// scheduled flag; Task 7.1 replaces this with a real reconcile
-	// loop tick that drives reconcileReady after the diff-and-apply
-	// pass completes. Emit a dedicated lifecycle event so migration
-	// watchers polling the audit log have a positive ready-marker in
-	// addition to the IPC status flag.
+	// Startup reconcile pass. Wires the parsed supervisor-intent.json
+	// through NewReconciler with production spawn/terminate closures.
+	// This replaces the Task 6.2 stub that flipped reconcileReady
+	// immediately after intent reads, leaving every daemon un-spawned.
+	//
+	// Test seam: if reconcileSpawnFn / reconcileTerminateFn were
+	// installed via setReconcileSpawnFnForTest, the test fakes win
+	// over the production closures so wiring tests can capture spawn
+	// fan-out without launching real child processes.
+	//
+	// Order: reconcile runs BEFORE reconcileReady.Store(true) so any
+	// migration watcher polling the audit log sees daemon-spawned
+	// events emitted ahead of the reconcile-ready marker.
+	currentRunning := loadSupervisorCurrentRunning(stateDir)
+	job, jobErr := process.NewKillOnCloseJob()
+	if jobErr != nil {
+		// Best-effort: a job-create failure means the supervisor's
+		// children survive its exit, but the supervisor itself stays
+		// up. Audit row preserves root cause for operators.
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "warn",
+			Source:   "lifecycle",
+			Event:    "reconcile-job-create-failed",
+			Body:     map[string]any{"err": jobErr.Error()},
+		})
+		job = nil
+	}
+	// Hold the Job handle for the lifetime of the supervisor so the
+	// kernel kill-on-close action fires on supervisor exit. defer
+	// Close() balances NewKillOnCloseJob's open handle.
+	if job != nil {
+		defer func() { _ = job.Close() }()
+	}
+
+	spawnFn := reconcileSpawnFn
+	if spawnFn == nil {
+		spawnFn = makeProductionSpawnFn(job, events)
+	}
+	terminateFn := reconcileTerminateFn
+	if terminateFn == nil {
+		terminateFn = func(d api.SupervisorDaemon) error {
+			// Startup-only scope: no daemon has been spawned yet so
+			// nothing to terminate. Watcher / reload (follow-up) will
+			// wire a real terminate path that walks supervisor-state's
+			// Daemons map and sends the OS-appropriate stop signal.
+			return nil
+		}
+	}
+
+	if intent != nil {
+		reconciler := NewReconciler(spawnFn, terminateFn)
+		reconciler.Reconcile(intent, daemonIntent, currentRunning, time.Now().UTC())
+	}
+
+	// Mark reconcile-ready. The flag transitions false → true exactly
+	// once, AFTER the startup reconcile pass has fanned out spawn
+	// decisions. Migration / upgrade callers wait on this flag (not
+	// all-daemons-healthy) per spec §"Migration step 14".
 	reconcileReady.Store(true)
 	_ = events.Emit(api.SupervisorEvent{
 		Severity: "info",
@@ -1011,31 +1106,47 @@ func writeIPCFrame(conn net.Conn, resp api.IPCResponse) error {
 }
 
 // loadIntentFiles attempts to read the supervisor-intent.json and
-// daemon-intent.json files under stateDir. Both reads are best-
-// effort — Task 7.1 will surface the parsed contents to the
-// reconcile loop; here the side effect is flipping intentFilesLoaded
-// to true so the IPC `status` flag transitions out of startup state.
+// daemon-intent.json files under stateDir and returns the parsed
+// values to the caller. Production wiring threads the supervisor
+// intent into the reconcile pass; the daemon intent feeds the
+// IsActiveStop decision tree inside Reconciler.Reconcile.
 //
 // File-not-exist is a valid "loaded" outcome: a freshly installed
 // supervisor on a clean host has no intent files, and the empty
 // reconcile pass that follows will detect zero daemons / zero
-// timers in that state.
+// timers in that state. Both return values may be nil — callers
+// MUST nil-check before deref.
 //
 // Errors (parse failure, I/O denied) are logged via the event log
 // but do NOT prevent the ready transition — a corrupt intent file
 // must not block the supervisor from coming up; the audit row is
-// enough for an operator to diagnose. Task 7.1 wires the actual
-// fail-closed reconcile policy for genuinely-unreadable intent.
+// enough for an operator to diagnose. The function still sets
+// intentFilesLoaded=true once both reads attempted, so the IPC
+// `status` flag transitions out of startup state even when intent
+// files are missing or corrupt.
+//
+// daemon-intent.json read path: the canonical *API.ReadDaemonIntent
+// flow lives on *api.API and resolves DaemonStateDir() internally —
+// that path does NOT honor the supervise CLI's
+// MCPHUB_STATE_DIR_OVERRIDE seam, so the startup reconcile reads the
+// file directly here via os.ReadFile + json.Unmarshal. Watcher/
+// reload paths (follow-up) will switch to the full flock+quarantine
+// flow once the production path-injection variant lands.
 func loadIntentFiles(
 	stateDir string,
 	events *api.SupervisorEventLog,
 	intentFilesLoaded *atomic.Bool,
-) {
+) (*api.SupervisorIntentFile, *api.DaemonIntentFile) {
+	var (
+		supervisorIntent *api.SupervisorIntentFile
+		daemonIntent     *api.DaemonIntentFile
+	)
+
 	supervisorIntentPath := filepath.Join(stateDir, "supervisor-intent.json")
-	if _, err := api.ReadSupervisorIntent(supervisorIntentPath); err != nil {
+	if got, err := api.ReadSupervisorIntent(supervisorIntentPath); err != nil {
 		// Only log non-NotExist errors — a missing file on a fresh
 		// host is the expected first-boot shape.
-		if !os.IsNotExist(err) {
+		if !errors.Is(err, os.ErrNotExist) {
 			_ = events.Emit(api.SupervisorEvent{
 				Severity: "warn",
 				Source:   "lifecycle",
@@ -1046,17 +1157,12 @@ func loadIntentFiles(
 				},
 			})
 		}
+	} else {
+		supervisorIntent = got
 	}
 
-	// daemon-intent.json: best-effort os.ReadFile probe under the
-	// override-aware stateDir. The full ReadDaemonIntent flow lives
-	// on *api.API and resolves DaemonStateDir() internally — that
-	// path doesn't honor the supervise CLI's MCPHUB_STATE_DIR_OVERRIDE
-	// seam, so we read directly here for the Task 6.2 stub. Task 7.1
-	// will replace this with the canonical flock+quarantine flow once
-	// the production path-injection variant lands.
 	daemonIntentPath := filepath.Join(stateDir, "daemon-intent.json")
-	if _, err := os.ReadFile(daemonIntentPath); err != nil {
+	if raw, err := os.ReadFile(daemonIntentPath); err != nil {
 		if !os.IsNotExist(err) {
 			_ = events.Emit(api.SupervisorEvent{
 				Severity: "warn",
@@ -1068,7 +1174,145 @@ func loadIntentFiles(
 				},
 			})
 		}
+	} else {
+		var parsed api.DaemonIntentFile
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			// Best-effort parse — same audit-only policy as the
+			// supervisor-intent read above. Reconcile will see
+			// daemonIntent==nil and treat every task as "no
+			// override" (the safe default).
+			_ = events.Emit(api.SupervisorEvent{
+				Severity: "warn",
+				Source:   "lifecycle",
+				Event:    "daemon-intent-parse-failed",
+				Body: map[string]any{
+					"path": daemonIntentPath,
+					"err":  err.Error(),
+				},
+			})
+		} else {
+			daemonIntent = &parsed
+		}
 	}
 
 	intentFilesLoaded.Store(true)
+	return supervisorIntent, daemonIntent
+}
+
+// loadSupervisorCurrentRunning builds the currentRunning map the
+// Reconciler needs from <state-dir>/supervisor-state.json. The map's
+// shape is map[task_name]bool — Reconcile diffs intent.Daemons
+// against this set to decide spawn vs no-op.
+//
+// Cold-start case: a missing supervisor-state.json (fresh install,
+// post-quarantine restart, or operator-deleted state) returns the
+// empty map. Reconcile then treats every intent daemon as
+// "not running" and fans out spawn for each.
+//
+// Warm-restart case: a parsed supervisor-state.json may list daemons
+// in state="running" with CurrentPID > 0. Those names go into the
+// map so the second invocation of the supervisor does NOT respawn
+// every daemon (the Job Object's kill-on-close would have already
+// reaped them on the prior exit, but the safe contract is to trust
+// what supervisor-state.json says and let the watcher / reload path
+// reconcile any drift).
+//
+// Errors (read failure, parse failure) are swallowed silently —
+// supervisor-events.log already captures the audit row in the
+// watcher / reload path; on startup the safer default is to assume
+// "nothing was running" and let the reconcile fan-out attempt every
+// daemon (idempotent against an already-running peer because the
+// production SpawnFn checks the file system port via daemon manifest
+// before binding).
+func loadSupervisorCurrentRunning(stateDir string) map[string]bool {
+	result := map[string]bool{}
+	statePath := filepath.Join(stateDir, "supervisor-state.json")
+	state, err := api.ReadSupervisorState(statePath)
+	if err != nil || state == nil {
+		return result
+	}
+	for taskName, ds := range state.Daemons {
+		if ds.State == "running" && ds.CurrentPID > 0 {
+			result[taskName] = true
+		}
+	}
+	return result
+}
+
+// makeProductionSpawnFn returns the SpawnFunc the Reconciler invokes
+// for each daemon that needs to be (re)started. Each call:
+//
+//   - builds an exec.Cmd from the SupervisorDaemon descriptor
+//     (command, args, env, workspace)
+//   - applies process.NoConsole so no console window pops on Windows
+//   - routes through process.StartWithJob when a Job Object is held
+//     (Windows: PROC_THREAD_ATTRIBUTE_JOB_LIST assign-at-create;
+//     POSIX: thin cmd.Start() shim per start_with_job_other.go)
+//   - emits daemon-spawned (success) / daemon-spawn-failed (error)
+//     audit events with the child PID + command + workspace
+//
+// Errors from cmd.Start propagate up via the SpawnFunc return value;
+// Reconciler swallows that error (per supervise_reconcile.go:118)
+// because the audit row is the canonical operator-visible signal.
+//
+// Env handling: cmd.Env defaults to nil ("inherit parent's") when the
+// descriptor's Env map is empty. A non-empty Env map produces a
+// full os.Environ()-derived block with the descriptor's keys appended
+// — matching the v0.4.x daemon-host spawn convention so the v0.5.0
+// supervisor's environment is a strict superset of what the prior
+// daemons used to see.
+func makeProductionSpawnFn(job *process.Job, events *api.SupervisorEventLog) SpawnFunc {
+	return func(d api.SupervisorDaemon) error {
+		cmd := exec.Command(d.Command, d.Args...)
+		if d.Workspace != "" {
+			cmd.Dir = d.Workspace
+		}
+		if len(d.Env) > 0 {
+			env := os.Environ()
+			for k, v := range d.Env {
+				env = append(env, k+"="+v)
+			}
+			cmd.Env = env
+		}
+		process.NoConsole(cmd)
+
+		var (
+			pid      int
+			startErr error
+		)
+		if job != nil {
+			pid, startErr = process.StartWithJob(job, cmd)
+		} else {
+			startErr = cmd.Start()
+			if startErr == nil && cmd.Process != nil {
+				pid = cmd.Process.Pid
+			}
+		}
+		if startErr != nil {
+			_ = events.Emit(api.SupervisorEvent{
+				Severity: "error",
+				Source:   "lifecycle",
+				Event:    "daemon-spawn-failed",
+				TaskName: d.TaskName,
+				Body: map[string]any{
+					"err":     startErr.Error(),
+					"command": d.Command,
+				},
+			})
+			return startErr
+		}
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "info",
+			Source:   "lifecycle",
+			Event:    "daemon-spawned",
+			TaskName: d.TaskName,
+			Body: map[string]any{
+				"pid":       pid,
+				"command":   d.Command,
+				"workspace": d.Workspace,
+				"port":      d.Port,
+			},
+		})
+		return nil
+	}
 }
