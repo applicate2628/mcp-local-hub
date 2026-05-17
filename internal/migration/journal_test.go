@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/scheduler"
 )
 
@@ -156,7 +157,14 @@ func (f *fakeIPCClient) Send(cmd string, args map[string]any, timeout time.Durat
 // abort), and wires injected callbacks for the OS-mutating step path.
 func setupV04xFixture(t *testing.T) *testFixture {
 	t.Helper()
-	stateDir := t.TempDir()
+	// v0.5.0 Fix Group 5: migration.lock owner sidecar +
+	// supervisor-intent.json + supervisor-state.json writes flow
+	// through the hardened secure-write pipeline. The state-dir
+	// must pass the parent-dir gate; apitest.HardenedTempDir
+	// installs the allowlist-conforming DACL/mode. installDir does
+	// not currently host secure-write targets, so plain t.TempDir
+	// remains acceptable there.
+	stateDir := apitest.HardenedTempDir(t)
 	installDir := t.TempDir()
 
 	tx := &testFixture{
@@ -484,10 +492,14 @@ func TestForwardMigration_KillsRunningDaemon(t *testing.T) {
 	}
 }
 
-// TestForwardMigration_4GateOwnershipMismatchSkips seeds a running
-// daemon BUT a wrong ExecutablePath (gate 4 fails). Migration logs +
-// skips; the PID is NOT killed; pre-os-mutating is NOT touched.
-func TestForwardMigration_4GateOwnershipMismatchSkips(t *testing.T) {
+// TestForwardMigration_4GateOwnershipMismatchAborts seeds a running
+// daemon BUT a wrong ExecutablePath (gate 4 fails). Per Lane F P0 #1,
+// gate-4 failure aborts with MIGRATION_PORT_LOOKUP_INCONSISTENT rather
+// than log+skip; otherwise the legacy task gets deleted while a
+// foreign process keeps the port → supervisor restart collision.
+// The audit row is still appended with the gate_failed reason so
+// operators can diagnose what went wrong.
+func TestForwardMigration_4GateOwnershipMismatchAborts(t *testing.T) {
 	tx := setupV04xFixture(t)
 	const otherPID = 9999
 	tx.pidByServerDaemon["memory/default"] = otherPID
@@ -501,28 +513,32 @@ func TestForwardMigration_4GateOwnershipMismatchSkips(t *testing.T) {
 	}
 
 	opts := fakeForwardOptions(t, tx)
-	if err := RunForward(tx.State, opts); err != nil {
-		t.Fatalf("forward: %v", err)
+	err := RunForward(tx.State, opts)
+	if err == nil {
+		t.Fatal("expected gate-4 abort, got nil")
+	}
+	if !errors.Is(err, ErrMigrationPortLookupInconsistent) {
+		t.Fatalf("expected ErrMigrationPortLookupInconsistent, got: %v", err)
 	}
 	if len(tx.killedPIDs) != 0 {
-		t.Fatalf("4-gate mismatch should skip kill, got: %v", tx.killedPIDs)
+		t.Fatalf("gate-4 fail must abort BEFORE kill, got: %v", tx.killedPIDs)
 	}
 	journalDir := mustFindJournalDir(t, tx.State.StateDir)
 	if _, err := os.Stat(filepath.Join(journalDir, MarkerPreOsMutating)); err == nil {
 		t.Fatal("pre-os-mutating should NOT exist when no kill succeeded")
 	}
-	// killed-daemons.json should still record the skip-reason.
+	// killed-daemons.json must record the gate_failed reason.
 	raw, _ := os.ReadFile(filepath.Join(journalDir, "killed-daemons.json"))
 	var kd killedDaemonsFile
 	_ = json.Unmarshal(raw, &kd)
-	skipReason := ""
+	gateFailed := ""
 	for _, k := range kd.Killed {
 		if k.PID == otherPID {
-			skipReason = k.GateSkipped
+			gateFailed = k.GateFailed
 		}
 	}
-	if !strings.Contains(skipReason, "ExecutablePath") {
-		t.Fatalf("expected ExecutablePath gate-skip reason, got: %q", skipReason)
+	if !strings.Contains(gateFailed, "ExecutablePath") {
+		t.Fatalf("expected ExecutablePath in gate_failed reason, got: %q", gateFailed)
 	}
 }
 
@@ -648,6 +664,411 @@ func TestFindLatestJournal_EmptyDir(t *testing.T) {
 	}
 	if got != "" {
 		t.Fatalf("expected empty result, got %s", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Group 3 fixes — Lane C + Lane F P0/P1 regressions.
+// ---------------------------------------------------------------------------
+
+// TestForwardMigration_PreOsMutatingTouchedOnFirstKill verifies the
+// per-task marker timing fix (Lane C P0 #1). Two tasks running; the
+// FIRST kills successfully, the SECOND fails its port-bind wait. The
+// pre-os-mutating marker MUST be present on disk because the first
+// kill already mutated host state — a crash mid-second-task must
+// resume into operator-choice-forward-or-rollback, not safe-abort.
+func TestForwardMigration_PreOsMutatingTouchedOnFirstKill(t *testing.T) {
+	tx := setupV04xFixture(t)
+	const memPID, memPort = 4321, 9128
+	const timePID, timePort = 4322, 9129
+	tx.pidByServerDaemon["memory/default"] = memPID
+	tx.portByPID[memPID] = memPort
+	tx.identityByPID[memPID] = ProcessIdentity{
+		PID:              memPID,
+		Basename:         "mcphub.exe",
+		CommandLine:      `mcphub.exe daemon --server memory --daemon default`,
+		ExecutablePath:   filepath.Join(tx.State.InstallDir, "mcphub.exe"),
+		CreationDateUnix: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC).Unix(),
+	}
+	tx.pidByServerDaemon["time/default"] = timePID
+	tx.portByPID[timePID] = timePort
+	tx.identityByPID[timePID] = ProcessIdentity{
+		PID:              timePID,
+		Basename:         "mcphub.exe",
+		CommandLine:      `mcphub.exe daemon --server time --daemon default`,
+		ExecutablePath:   filepath.Join(tx.State.InstallDir, "mcphub.exe"),
+		CreationDateUnix: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC).Unix(),
+	}
+
+	opts := fakeForwardOptions(t, tx)
+	// First task's port-bind wait succeeds (nil); second fails. The
+	// marker is touched RIGHT AFTER the first KillPID returns nil and
+	// BEFORE any port-bind wait, so the second-task failure must NOT
+	// unwind it.
+	tx.portWaitReturns = []error{nil, errors.New("port 9129 still bound")}
+	err := RunForward(tx.State, opts)
+	if err == nil {
+		t.Fatal("expected port-release-wait failure on second task, got nil")
+	}
+	journalDir := mustFindJournalDir(t, tx.State.StateDir)
+	if _, statErr := os.Stat(filepath.Join(journalDir, MarkerPreOsMutating)); statErr != nil {
+		t.Fatalf("pre-os-mutating marker MUST exist after first successful kill: %v", statErr)
+	}
+}
+
+// TestForwardMigration_ReconcileReadyTimeoutAutoRollbacks verifies
+// Lane C P0 #2: a reconcile-ready timeout triggers RunRollback when
+// ForwardOptions.RollbackOnFailure is wired. The fake reconcile
+// returns a timeout error; the rollback callback must fire exactly
+// once, and the committed marker must NOT be present.
+func TestForwardMigration_ReconcileReadyTimeoutAutoRollbacks(t *testing.T) {
+	tx := setupV04xFixture(t)
+	opts := fakeForwardOptions(t, tx)
+	opts.ReconcileReady = func(timeout time.Duration) error {
+		tx.reconcileWaited++
+		return errors.New("supervisor never reported ready within 30s")
+	}
+	rollbackInvocations := 0
+	opts.RollbackOnFailure = func() *RollbackOptions {
+		rollbackInvocations++
+		return &RollbackOptions{
+			Scheduler: tx.Scheduler,
+			SupervisorIPC: func(cmd string, args map[string]any, timeout time.Duration) error {
+				return tx.IPC.Send(cmd, args, timeout)
+			},
+			ProbeSupervisorTokenMismatch: func() error { return nil },
+			ForceKillSupervisor: func() error {
+				tx.forceKillCalled++
+				return nil
+			},
+			PortBindWait: func(port int, timeout time.Duration) error { return nil },
+			LookupProcessIdentity: func(pid int) (ProcessIdentity, error) {
+				if id, ok := tx.identityByPID[pid]; ok {
+					return id, nil
+				}
+				return ProcessIdentity{}, errors.New("not found")
+			},
+			QuarantineTranslator: func(_ State) error {
+				tx.quarantineCalled++
+				return nil
+			},
+			ShimUninstaller: func() error {
+				tx.shimUninstalled++
+				return nil
+			},
+			TimeWaitSettle:  10 * time.Millisecond,
+			PortBindTimeout: 50 * time.Millisecond,
+		}
+	}
+
+	err := RunForward(tx.State, opts)
+	if err == nil {
+		t.Fatal("expected error after auto-rollback completes, got nil")
+	}
+	if rollbackInvocations != 1 {
+		t.Fatalf("RollbackOnFailure: want 1 invocation, got %d", rollbackInvocations)
+	}
+	journalDir := mustFindJournalDir(t, tx.State.StateDir)
+	if _, statErr := os.Stat(filepath.Join(journalDir, MarkerCommitted)); statErr == nil {
+		t.Fatal("committed marker must NOT be present after auto-rollback")
+	}
+	if tx.shimUninstalled != 1 {
+		t.Fatalf("shimUninstaller should have fired during auto-rollback, got %d", tx.shimUninstalled)
+	}
+}
+
+// TestForwardMigration_ReconcileReadyTimeoutNoCallbackFallsBack
+// verifies the fall-back path: when RollbackOnFailure is nil, the
+// existing "consider --rollback-to-legacy" error fires unchanged.
+func TestForwardMigration_ReconcileReadyTimeoutNoCallbackFallsBack(t *testing.T) {
+	tx := setupV04xFixture(t)
+	opts := fakeForwardOptions(t, tx)
+	opts.ReconcileReady = func(timeout time.Duration) error {
+		return errors.New("reconcile timeout")
+	}
+	// Intentionally NOT setting opts.RollbackOnFailure.
+
+	err := RunForward(tx.State, opts)
+	if err == nil {
+		t.Fatal("expected manual-rollback error, got nil")
+	}
+	if !strings.Contains(err.Error(), "--rollback-to-legacy") {
+		t.Fatalf("expected manual-rollback fallback message, got: %v", err)
+	}
+}
+
+// TestForwardMigration_CrossVersionResumeUsesSnapshotVerbatim verifies
+// Lane C P1 #6: when a journal already contains a
+// canonical-template-snapshot.xml from a prior version's render, the
+// resume code path must read it verbatim and NOT re-render.
+func TestForwardMigration_CrossVersionResumeUsesSnapshotVerbatim(t *testing.T) {
+	tx := setupV04xFixture(t)
+	journalDir := tx.State.journalDirForTime(tx.State.Now())
+	if err := os.MkdirAll(journalDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	const oldRenderedMarker = "<!-- LEGACY-RENDERER-MARKER-DO-NOT-OVERWRITE -->"
+	oldXML := oldRenderedMarker + "\n<Task>old-renderer-output</Task>"
+	if err := os.WriteFile(filepath.Join(journalDir, "canonical-template-snapshot.xml"), []byte(oldXML), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Touch prepared + pre-os-mutating so initOrResumeJournalDir
+	// classifies this as operator-choice-forward-or-rollback and
+	// resumes into the existing journal.
+	for _, m := range []string{MarkerPrepared, MarkerPreOsMutating} {
+		if err := touchMarker(journalDir, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	opts := fakeForwardOptions(t, tx)
+	if err := RunForward(tx.State, opts); err != nil {
+		t.Fatalf("forward (resume): %v", err)
+	}
+	gotXML, readErr := os.ReadFile(filepath.Join(journalDir, "canonical-template-snapshot.xml"))
+	if readErr != nil {
+		t.Fatalf("snapshot file disappeared: %v", readErr)
+	}
+	if !strings.Contains(string(gotXML), oldRenderedMarker) {
+		t.Fatalf("canonical-template-snapshot.xml was re-rendered (marker lost). got=%q", string(gotXML))
+	}
+}
+
+// TestForwardMigration_RequiresNonEmptyInstallDir verifies Lane C P1 #7:
+// RunForward fails closed when State.InstallDir is empty, BEFORE any
+// OS-mutating step runs.
+func TestForwardMigration_RequiresNonEmptyInstallDir(t *testing.T) {
+	tx := setupV04xFixture(t)
+	tx.State.InstallDir = ""
+	opts := fakeForwardOptions(t, tx)
+	err := RunForward(tx.State, opts)
+	if err == nil {
+		t.Fatal("expected install-dir validation error, got nil")
+	}
+	if !strings.Contains(err.Error(), "InstallDir") {
+		t.Fatalf("expected error mentioning InstallDir, got: %v", err)
+	}
+	if len(tx.Scheduler.DeletedTasks) != 0 {
+		t.Fatalf("InstallDir validation must run before OS mutation: %v", tx.Scheduler.DeletedTasks)
+	}
+}
+
+// TestForwardMigration_RequiresReachableInstallDir verifies the
+// stat-check sub-case of Lane C P1 #7: InstallDir set to a path that
+// doesn't exist must fail closed.
+func TestForwardMigration_RequiresReachableInstallDir(t *testing.T) {
+	tx := setupV04xFixture(t)
+	tx.State.InstallDir = filepath.Join(t.TempDir(), "does-not-exist-anywhere")
+	opts := fakeForwardOptions(t, tx)
+	err := RunForward(tx.State, opts)
+	if err == nil {
+		t.Fatal("expected install-dir reachability error, got nil")
+	}
+	if !strings.Contains(err.Error(), "InstallDir") {
+		t.Fatalf("expected error mentioning InstallDir, got: %v", err)
+	}
+}
+
+// TestForwardMigration_Gate4FailureAborts is the explicit Lane F P0 #1
+// abort assertion: port-bound PID failing Gate 4 → abort with
+// MIGRATION_PORT_LOOKUP_INCONSISTENT (also covered by the renamed
+// _4GateOwnershipMismatchAborts above; this variant uses a different
+// gate to demonstrate the policy holds for any of the four gates).
+func TestForwardMigration_Gate4FailureAborts(t *testing.T) {
+	tx := setupV04xFixture(t)
+	const otherPID = 9999
+	tx.pidByServerDaemon["memory/default"] = otherPID
+	tx.portByPID[otherPID] = 9128
+	// Identity has a wrong basename (Gate 1 fails too, but the test
+	// asserts the abort policy applies — the kill must NOT happen).
+	tx.identityByPID[otherPID] = ProcessIdentity{
+		PID:              otherPID,
+		Basename:         "impostor.exe",
+		CommandLine:      `mcphub.exe daemon --server memory --daemon default`,
+		ExecutablePath:   filepath.Join(tx.State.InstallDir, "mcphub.exe"),
+		CreationDateUnix: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC).Unix(),
+	}
+
+	opts := fakeForwardOptions(t, tx)
+	err := RunForward(tx.State, opts)
+	if err == nil {
+		t.Fatal("expected gate abort, got nil")
+	}
+	if !errors.Is(err, ErrMigrationPortLookupInconsistent) {
+		t.Fatalf("expected ErrMigrationPortLookupInconsistent, got: %v", err)
+	}
+	if len(tx.killedPIDs) != 0 {
+		t.Fatalf("gate fail must abort before kill, got: %v", tx.killedPIDs)
+	}
+}
+
+// TestForwardMigration_RetryExhaustionAbortsIfDaemonStillExists
+// verifies Lane F P0 #2: when LookupProcessIdentity returns a
+// non-ErrProcessNotFound failure (retry exhausted on transient
+// transport error), migration must abort with
+// MIGRATION_PORT_LOOKUP_INCONSISTENT — NOT continue with an
+// "identity-lookup-failed" skip that hides a still-running daemon.
+func TestForwardMigration_RetryExhaustionAbortsIfDaemonStillExists(t *testing.T) {
+	tx := setupV04xFixture(t)
+	const memPID = 4321
+	tx.pidByServerDaemon["memory/default"] = memPID
+	tx.portByPID[memPID] = 9128
+	// Generic transport error (NOT ErrProcessNotFound).
+	opts := fakeForwardOptions(t, tx)
+	opts.LookupProcessIdentity = func(pid int) (ProcessIdentity, error) {
+		return ProcessIdentity{}, errors.New("powershell transport hang after 3 retries")
+	}
+	err := RunForward(tx.State, opts)
+	if err == nil {
+		t.Fatal("expected retry-exhaustion abort, got nil")
+	}
+	if !errors.Is(err, ErrMigrationPortLookupInconsistent) {
+		t.Fatalf("expected ErrMigrationPortLookupInconsistent, got: %v", err)
+	}
+}
+
+// TestForwardMigration_ProcessNotFoundProceedsWhenCrossCheckSilent
+// verifies the genuine-unbound path: LookupProcessIdentity returns
+// ErrProcessNotFound AND a fresh PIDForServerDaemon scan finds no
+// matching process → migration proceeds, treating the daemon as
+// unbound.
+func TestForwardMigration_ProcessNotFoundProceedsWhenCrossCheckSilent(t *testing.T) {
+	tx := setupV04xFixture(t)
+	const memPID = 4321
+	tx.pidByServerDaemon["memory/default"] = memPID
+	tx.portByPID[memPID] = 9128
+
+	opts := fakeForwardOptions(t, tx)
+	opts.LookupProcessIdentity = func(pid int) (ProcessIdentity, error) {
+		return ProcessIdentity{}, ErrProcessNotFound
+	}
+	// The FIRST PIDForServerDaemon call resolves the seeded PID
+	// (initial port-resolve). The SECOND call (cross-check after
+	// ErrProcessNotFound) reports "no matching process" → daemon
+	// genuinely gone.
+	pidLookups := 0
+	opts.PIDForServerDaemon = func(server, daemon string) (int, bool) {
+		pidLookups++
+		if pidLookups == 1 {
+			if p, ok := tx.pidByServerDaemon[server+"/"+daemon]; ok {
+				return p, true
+			}
+			return 0, false
+		}
+		return 0, false
+	}
+
+	if err := RunForward(tx.State, opts); err != nil {
+		t.Fatalf("expected proceed (genuine-unbound), got: %v", err)
+	}
+}
+
+// TestForwardMigration_ProcessNotFoundButCrossCheckPositiveAborts:
+// LookupProcessIdentity says ErrProcessNotFound but the process-list
+// cross-check still finds a matching mcphub daemon argv → abort with
+// MIGRATION_PORT_LOOKUP_INCONSISTENT.
+func TestForwardMigration_ProcessNotFoundButCrossCheckPositiveAborts(t *testing.T) {
+	tx := setupV04xFixture(t)
+	const memPID = 4321
+	tx.pidByServerDaemon["memory/default"] = memPID
+	tx.portByPID[memPID] = 9128
+
+	opts := fakeForwardOptions(t, tx)
+	opts.LookupProcessIdentity = func(pid int) (ProcessIdentity, error) {
+		return ProcessIdentity{}, ErrProcessNotFound
+	}
+	// Cross-check always returns a positive (daemon respawned or
+	// the lookup was racy).
+	opts.PIDForServerDaemon = func(server, daemon string) (int, bool) {
+		return memPID + 1, true
+	}
+
+	err := RunForward(tx.State, opts)
+	if err == nil {
+		t.Fatal("expected cross-check abort, got nil")
+	}
+	if !errors.Is(err, ErrMigrationPortLookupInconsistent) {
+		t.Fatalf("expected ErrMigrationPortLookupInconsistent, got: %v", err)
+	}
+}
+
+// TestRollback_LegacyDirMissingFatal verifies Lane C P0 #3: rollback
+// with absent legacy-tasks/ AND no committed marker must return an
+// error rather than swallow the missing directory and exit nil.
+func TestRollback_LegacyDirMissingFatal(t *testing.T) {
+	tx := setupV04xFixture(t)
+	// Hand-craft a journal that simulates a partially-progressed
+	// forward migration: os-mutating-complete reached, but NO
+	// legacy-tasks/ subdirectory and NO committed marker.
+	journalDir := tx.State.journalDirForTime(tx.State.Now())
+	if err := os.MkdirAll(journalDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range []string{MarkerPrepared, MarkerPreOsMutating, MarkerOsMutatingComplete} {
+		if err := touchMarker(journalDir, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Deliberately do NOT create legacy-tasks/.
+
+	opts := RollbackOptions{
+		Scheduler:                    tx.Scheduler,
+		ProbeSupervisorTokenMismatch: func() error { return nil },
+		ShimUninstaller:              func() error { return nil },
+		QuarantineTranslator:         func(_ State) error { return nil },
+		TimeWaitSettle:               10 * time.Millisecond,
+	}
+	err := RunRollback(tx.State, opts)
+	if err == nil {
+		t.Fatal("expected fatal error for missing legacy-tasks/ without committed marker")
+	}
+	if !strings.Contains(err.Error(), "legacy-tasks") {
+		t.Fatalf("expected error mentioning legacy-tasks, got: %v", err)
+	}
+}
+
+// TestRollback_LegacyDirEmptyCommittedZeroDaemonsAllowed verifies the
+// genuine-zero-daemon migration variant: legacy-tasks/ is empty AND
+// the journal carries a `committed` marker. Rollback must succeed
+// with a warning logged to rollback-warnings.json.
+func TestRollback_LegacyDirEmptyCommittedZeroDaemonsAllowed(t *testing.T) {
+	tx := setupV04xFixture(t)
+	journalDir := tx.State.journalDirForTime(tx.State.Now())
+	if err := os.MkdirAll(filepath.Join(journalDir, "legacy-tasks"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range []string{MarkerPrepared, MarkerPreOsMutating, MarkerOsMutatingComplete, MarkerCommitted} {
+		if err := touchMarker(journalDir, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	opts := RollbackOptions{
+		Scheduler:                    tx.Scheduler,
+		ProbeSupervisorTokenMismatch: func() error { return nil },
+		ShimUninstaller:              func() error { return nil },
+		QuarantineTranslator:         func(_ State) error { return nil },
+		TimeWaitSettle:               10 * time.Millisecond,
+	}
+	if err := RunRollback(tx.State, opts); err != nil {
+		t.Fatalf("expected success with warning for zero-daemon committed migration, got: %v", err)
+	}
+	raw, readErr := os.ReadFile(filepath.Join(journalDir, "rollback-warnings.json"))
+	if readErr != nil {
+		t.Fatalf("rollback-warnings.json missing: %v", readErr)
+	}
+	var w rollbackWarningsFile
+	if err := json.Unmarshal(raw, &w); err != nil {
+		t.Fatalf("parse warnings: %v", err)
+	}
+	foundZero := false
+	for _, entry := range w.Warnings {
+		if strings.Contains(entry.Reason, "zero") || strings.Contains(entry.Reason, "empty") {
+			foundZero = true
+		}
+	}
+	if !foundZero {
+		t.Fatalf("expected zero-daemon warning, got: %+v", w.Warnings)
 	}
 }
 

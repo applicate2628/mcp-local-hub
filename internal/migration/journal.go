@@ -109,6 +109,16 @@ var (
 	// invoked on POSIX without injected Windows-only callbacks. Forward
 	// migration from v0.4.x has no POSIX path per Q9.
 	ErrPosixNotSupported = errors.New("migration: forward/rollback is Windows-only (POSIX has no v0.4.x to migrate from)")
+	// ErrProcessNotFound is the cross-platform sentinel the injected
+	// LookupProcessIdentity callback returns when the queried PID has
+	// no matching system process row (the daemon already exited). The
+	// production adapter wraps process.ErrProcessNotFound into this
+	// migration-side sentinel so tests can drive the same behavior on
+	// POSIX without depending on the Windows-only process package. Spec
+	// Lane F P0 #2: this is the ONLY lookup-error class that may be
+	// treated as "genuine unbound" after a fresh process-list cross-
+	// check confirms no matching daemon argv is still running.
+	ErrProcessNotFound = errors.New("migration: PID not found in system process list")
 )
 
 // ---------------------------------------------------------------------------
@@ -516,11 +526,30 @@ type ForwardOptions struct {
 	// does NOT use this — it is here for symmetric type wiring; the
 	// rollback path is where translation actually fires.
 	QuarantineTranslator func(state State) error
+	// RollbackOnFailure is the auto-rollback callback for Lane C P0 #2.
+	// When forward step 14 (ReconcileReady) times out, the migration
+	// must NOT exit with a "consider --rollback-to-legacy" error and
+	// leave the host in a half-migrated state (legacy tasks deleted,
+	// supervisor not converged). Instead the caller wires this hook to
+	// produce a fully-populated RollbackOptions so RunForward can drive
+	// RunRollback inline. If RollbackOnFailure is nil or returns nil,
+	// RunForward falls back to the manual-rollback error message — the
+	// operator must invoke `mcphub rollback-to-legacy` by hand. The
+	// auto-rollback fires AFTER the forward migration's locks are
+	// released so RunRollback can acquire them itself; the committed
+	// marker is never touched.
+	RollbackOnFailure func() *RollbackOptions
 }
 
 // killedDaemonRecord is one row appended to killed-daemons.json during
 // step 9 of forward migration. Used by operator forensics + future
 // rollback restoration.
+//
+// GateSkipped vs GateFailed: GateSkipped is the legacy "log + continue"
+// signal (no-running-daemon, genuine-unbound). GateFailed (Lane F P0 #1
+// + #2) is the abort signal naming WHICH of the four ownership gates
+// rejected the foreign process; the migration returned
+// ErrMigrationPortLookupInconsistent and the kill did NOT happen.
 type killedDaemonRecord struct {
 	Task         string `json:"task"`
 	Server       string `json:"server"`
@@ -530,6 +559,7 @@ type killedDaemonRecord struct {
 	KilledAtUnix int64  `json:"killed_at_unix"`
 	OwnershipOK  bool   `json:"ownership_gate_ok"`
 	GateSkipped  string `json:"gate_skipped_reason,omitempty"`
+	GateFailed   string `json:"gate_failed,omitempty"`
 }
 
 // killedDaemonsFile is the on-disk shape for killed-daemons.json.
@@ -557,6 +587,17 @@ func RunForward(state State, opts ForwardOptions) error {
 	}
 	if opts.Scheduler == nil {
 		return fmt.Errorf("RunForward: nil scheduler backend")
+	}
+	// Lane C P1 #7: InstallDir is the authoritative anchor for the
+	// 4-gate ownership check (Gate 4 — ExecutablePath under InstallDir).
+	// If it is empty or unreachable, the gate is silently bypassed and
+	// any same-user impostor mcphub.exe daemon would pass. Fail closed
+	// BEFORE any OS-mutating step runs.
+	if state.InstallDir == "" {
+		return fmt.Errorf("RunForward: InstallDir is required for 4-gate ownership check; resolve via os.Executable() + filepath.Dir")
+	}
+	if _, err := os.Stat(state.InstallDir); err != nil {
+		return fmt.Errorf("RunForward: InstallDir is required for 4-gate ownership check; resolve via os.Executable() + filepath.Dir: stat %q: %w", state.InstallDir, err)
 	}
 
 	// Step 0: PowerShell CLM probe.
@@ -594,8 +635,19 @@ func RunForward(state State, opts ForwardOptions) error {
 	// the rendering for the FIRST task as the snapshot artifact; the
 	// classifier compares each task's observed XML against the
 	// pinned-defaults map directly, not against the snapshot file.
-	if err := writeCanonicalTemplateSnapshot(journalDir, tasks, opts.CurrentUser); err != nil {
-		return fmt.Errorf("step 4 snapshot: %w", err)
+	//
+	// Lane C P1 #6 (cross-version resume): if the journal already
+	// carries a canonical-template-snapshot.xml from an earlier
+	// (possibly older-versioned) RunForward attempt, we MUST read it
+	// verbatim rather than re-render. The deviation classifier needs
+	// the SAME baseline across resume cycles — re-rendering against
+	// current V04xTemplateXML would silently flip classifications when
+	// the pinned-defaults map changes between versions.
+	snapshotPath := filepath.Join(journalDir, "canonical-template-snapshot.xml")
+	if _, statErr := os.Stat(snapshotPath); errors.Is(statErr, os.ErrNotExist) {
+		if err := writeCanonicalTemplateSnapshot(journalDir, tasks, opts.CurrentUser); err != nil {
+			return fmt.Errorf("step 4 snapshot: %w", err)
+		}
 	}
 
 	// Step 5: export each task's raw XML.
@@ -656,17 +708,28 @@ func RunForward(state State, opts ForwardOptions) error {
 
 	// Step 9: pre-unregister daemon stop. Per-task: parse argv → resolve
 	// PID → 4-gate ownership check → kill → 10s port-release wait.
-	killed, firstKill, err := preUnregisterDaemonStop(journalDir, tasks, xmlByTask, opts, state, lockAcquiredUnix)
-	if err != nil {
-		return fmt.Errorf("step 9 pre-unregister: %w", err)
-	}
-	if firstKill {
-		if err := touchMarker(journalDir, MarkerPreOsMutating); err != nil {
-			return fmt.Errorf("step 9 pre-os-mutating marker: %w", err)
+	//
+	// Lane C P0 #1: the pre-os-mutating marker is written INSIDE the
+	// per-task loop immediately after the first successful KillPID —
+	// NOT after the whole function completes. Otherwise a later
+	// port-bind-wait failure on the same task or a kill failure on a
+	// subsequent task would leave host state mutated (a daemon dead)
+	// while the journal still classifies as `prepared`-only and resume
+	// would safe-abort.
+	//
+	// Lane F P0 #1/#2: gate-4 failure and non-ErrProcessNotFound
+	// lookup failures abort with ErrMigrationPortLookupInconsistent
+	// rather than log+skip. The partially-built audit row slice is
+	// persisted regardless of return so the operator can diagnose.
+	killed, stepErr := preUnregisterDaemonStop(journalDir, tasks, xmlByTask, opts, state, lockAcquiredUnix)
+	if writeErr := writeKilledDaemons(journalDir, killed); writeErr != nil {
+		if stepErr != nil {
+			return fmt.Errorf("step 9 pre-unregister: %w (also failed to persist killed-daemons.json: %v)", stepErr, writeErr)
 		}
+		return fmt.Errorf("step 9 killed-daemons.json: %w", writeErr)
 	}
-	if err := writeKilledDaemons(journalDir, killed); err != nil {
-		return fmt.Errorf("step 9 killed-daemons.json: %w", err)
+	if stepErr != nil {
+		return fmt.Errorf("step 9 pre-unregister: %w", stepErr)
 	}
 
 	// Step 10: schtasks /Delete each legacy task.
@@ -696,9 +759,41 @@ func RunForward(state State, opts ForwardOptions) error {
 	}
 
 	// Step 14: wait reconcile-ready within 30s.
+	//
+	// Lane C P0 #2: on timeout the migration MUST drive auto-rollback
+	// when opts.RollbackOnFailure is wired — leaving the host in a
+	// half-migrated state (legacy tasks deleted, supervisor not
+	// converged) is a hard regression. The auto-rollback path:
+	//
+	//   1. Build the RollbackOptions via the caller-supplied factory.
+	//   2. Release this RunForward call's locks so RunRollback can
+	//      acquire migration.lock + --once.lock itself (deferred
+	//      ls.Release stays in place — it is idempotent).
+	//   3. Invoke RunRollback. Bubble its result back to the caller
+	//      regardless of outcome.
+	//   4. The committed marker is never touched. Operators inspect
+	//      the journal to see what happened.
+	//
+	// If RollbackOnFailure is nil OR returns nil, fall back to the
+	// historical manual-rollback error message so existing callers
+	// keep working unchanged.
 	if opts.ReconcileReady != nil {
-		if err := opts.ReconcileReady(30 * time.Second); err != nil {
-			return fmt.Errorf("step 14 reconcile-ready: %w (consider --rollback-to-legacy)", err)
+		if rcErr := opts.ReconcileReady(30 * time.Second); rcErr != nil {
+			if opts.RollbackOnFailure != nil {
+				rbOpts := opts.RollbackOnFailure()
+				if rbOpts != nil {
+					// Release the forward locks BEFORE invoking
+					// RunRollback so the rollback path can acquire
+					// them. ls.Release is idempotent so the deferred
+					// Release at the top of RunForward is a no-op.
+					ls.Release()
+					if rbErr := RunRollback(state, *rbOpts); rbErr != nil {
+						return fmt.Errorf("step 14 reconcile-ready timed out and auto-rollback failed: reconcile=%v rollback=%w", rcErr, rbErr)
+					}
+					return fmt.Errorf("step 14 reconcile-ready: %w (auto-rollback completed)", rcErr)
+				}
+			}
+			return fmt.Errorf("step 14 reconcile-ready: %w (consider --rollback-to-legacy)", rcErr)
 		}
 	}
 
@@ -977,14 +1072,36 @@ func parseDaemonArgv(args []string) (server, daemon string) {
 }
 
 // preUnregisterDaemonStop implements forward step 9. Returns the list
-// of kill records and a flag indicating whether at least one successful
-// kill occurred (so the caller can touch pre-os-mutating). Errors are
-// returned for the abort conditions (port-lookup inconsistent); ownership
-// gate failures log + skip rather than abort.
-func preUnregisterDaemonStop(journalDir string, tasks []scheduler.TaskStatus, xmlByTask map[string]string, opts ForwardOptions, state State, lockAcquiredUnix int64) ([]killedDaemonRecord, bool, error) {
-	_ = journalDir // reserved for future per-task audit; currently records bundled into killed-daemons.json by caller
+// of kill records (always — partial list on error too, so the caller
+// can still persist killed-daemons.json for operator diagnosis) and an
+// error for any abort condition.
+//
+// Marker timing (Lane C P0 #1): the pre-os-mutating marker is written
+// IMMEDIATELY after the first successful KillPID returns nil. A later
+// port-bind-wait timeout (or kill error on a subsequent task) leaves
+// the marker on disk so resume classifies the journal as
+// operator-choice-forward-or-rollback (host state already mutated)
+// rather than safe-abort.
+//
+// Abort policy (Lane F P0 #1 + #2):
+//
+//   - Gate-4 failure (and any other 4-gate ownership rejection on a
+//     port-bound PID) aborts with ErrMigrationPortLookupInconsistent.
+//     The legacy task would otherwise be deleted while a foreign
+//     process keeps the port → supervisor restart collision.
+//   - LookupProcessIdentity returning ErrProcessNotFound triggers a
+//     fresh PIDForServerDaemon cross-check. If still positive → abort.
+//     If no match → genuine unbound, proceed with audit row.
+//   - LookupProcessIdentity returning any OTHER error (retry
+//     exhaustion, transport hang, malformed JSON) aborts immediately
+//     with ErrMigrationPortLookupInconsistent — never silently
+//     classify as unbound.
+func preUnregisterDaemonStop(journalDir string, tasks []scheduler.TaskStatus, xmlByTask map[string]string, opts ForwardOptions, state State, lockAcquiredUnix int64) ([]killedDaemonRecord, error) {
 	var killed []killedDaemonRecord
-	firstKill := false
+	// markerWritten tracks whether we already touched pre-os-mutating
+	// in THIS invocation. touchMarker uses O_TRUNC|O_CREATE so it is
+	// idempotent on resume.
+	markerWritten := false
 	for _, t := range tasks {
 		raw := xmlByTask[t.Name]
 		_, args := extractExecFromXML(raw)
@@ -999,7 +1116,7 @@ func preUnregisterDaemonStop(journalDir string, tasks []scheduler.TaskStatus, xm
 
 		pid, port, lookupOK, err := resolvePIDPortForTask(server, daemon, opts)
 		if err != nil {
-			return killed, firstKill, err
+			return killed, err
 		}
 		if !lookupOK {
 			// No daemon currently running for this task — nothing to
@@ -1019,41 +1136,101 @@ func preUnregisterDaemonStop(journalDir string, tasks []scheduler.TaskStatus, xm
 		// 4-gate ownership check (spec line 259-263).
 		ident, idErr := opts.LookupProcessIdentity(pid)
 		if idErr != nil {
-			// PID disappeared between port-lookup and identity lookup.
-			// Treat as unbound (the daemon already exited).
+			// Lane F P0 #2: separate genuine-unbound from a real
+			// transient failure that would otherwise hide a surviving
+			// daemon.
+			if errors.Is(idErr, ErrProcessNotFound) {
+				// Cross-check: re-scan the system process list for
+				// the matching daemon argv. If still present, the
+				// PID was recycled or the daemon respawned — abort.
+				if opts.PIDForServerDaemon != nil {
+					if _, stillRunning := opts.PIDForServerDaemon(server, daemon); stillRunning {
+						killed = append(killed, killedDaemonRecord{
+							Task:       t.Name,
+							Server:     server,
+							Daemon:     daemon,
+							PID:        pid,
+							Port:       port,
+							GateFailed: "process-not-found-but-cross-check-positive",
+						})
+						return killed, fmt.Errorf("%w: PID %d server=%s daemon=%s (cross-check still finds matching daemon argv)",
+							ErrMigrationPortLookupInconsistent, pid, server, daemon)
+					}
+				}
+				// Cross-check silent → genuine unbound. Record + skip.
+				killed = append(killed, killedDaemonRecord{
+					Task:        t.Name,
+					Server:      server,
+					Daemon:      daemon,
+					PID:         pid,
+					Port:        port,
+					OwnershipOK: false,
+					GateSkipped: "process-not-found-cross-check-silent",
+				})
+				continue
+			}
+			// Non-ErrProcessNotFound failure (retry exhaustion,
+			// transport hang, malformed JSON): we cannot prove the
+			// daemon is gone. Abort rather than silently delete the
+			// task and let a survivor steal the port.
 			killed = append(killed, killedDaemonRecord{
-				Task:        t.Name,
-				Server:      server,
-				Daemon:      daemon,
-				PID:         pid,
-				Port:        port,
-				OwnershipOK: false,
-				GateSkipped: "identity-lookup-failed: " + idErr.Error(),
+				Task:       t.Name,
+				Server:     server,
+				Daemon:     daemon,
+				PID:        pid,
+				Port:       port,
+				GateFailed: "identity-lookup-failed: " + idErr.Error(),
 			})
-			continue
+			return killed, fmt.Errorf("%w: PID %d server=%s daemon=%s: identity lookup failed: %v",
+				ErrMigrationPortLookupInconsistent, pid, server, daemon, idErr)
 		}
-		gateOK, gateSkipped := fourGateOwnershipCheck(ident, server, daemon, lockAcquiredUnix, state.InstallDir)
+		gateOK, gateReason := fourGateOwnershipCheck(ident, server, daemon, lockAcquiredUnix, state.InstallDir)
 		if !gateOK {
-			// Different user's mcphub.exe (or co-resident impostor).
-			// Log + skip; do NOT touch pre-os-mutating.
+			// Lane F P0 #1: a port-bound PID whose 4-gate ownership
+			// check fails must abort, NOT skip. Deleting the legacy
+			// task while a foreign process keeps the port produces a
+			// supervisor restart collision.
 			killed = append(killed, killedDaemonRecord{
-				Task:        t.Name,
-				Server:      server,
-				Daemon:      daemon,
-				PID:         pid,
-				Port:        port,
-				OwnershipOK: false,
-				GateSkipped: gateSkipped,
+				Task:       t.Name,
+				Server:     server,
+				Daemon:     daemon,
+				PID:        pid,
+				Port:       port,
+				GateFailed: gateReason,
 			})
-			continue
+			return killed, fmt.Errorf("%w: PID %d server=%s daemon=%s: gate failed: %s",
+				ErrMigrationPortLookupInconsistent, pid, server, daemon, gateReason)
 		}
 
 		// Gate passed — kill the PID.
 		killTs := state.nowOrDefault().Unix()
 		if err := opts.KillPID(pid); err != nil {
-			return killed, firstKill, fmt.Errorf("kill PID %d (task %s): %w", pid, t.Name, err)
+			return killed, fmt.Errorf("kill PID %d (task %s): %w", pid, t.Name, err)
 		}
-		firstKill = true
+		// Lane C P0 #1: touch pre-os-mutating IMMEDIATELY after the
+		// first successful kill — before any port-bind-wait or
+		// subsequent loop iteration that might fail. A later failure
+		// MUST leave this marker on disk so resume classifies the
+		// journal as operator-choice-forward-or-rollback.
+		if !markerWritten {
+			if err := touchMarker(journalDir, MarkerPreOsMutating); err != nil {
+				// Mid-flight marker write failure is fatal — without
+				// the marker on disk a crash here would safe-abort
+				// and leave a killed daemon. Append the audit row
+				// first so the operator sees the kill happened.
+				killed = append(killed, killedDaemonRecord{
+					Task:         t.Name,
+					Server:       server,
+					Daemon:       daemon,
+					PID:          pid,
+					Port:         port,
+					KilledAtUnix: killTs,
+					OwnershipOK:  true,
+				})
+				return killed, fmt.Errorf("pre-os-mutating marker write failed after first kill: %w", err)
+			}
+			markerWritten = true
+		}
 		killed = append(killed, killedDaemonRecord{
 			Task:         t.Name,
 			Server:       server,
@@ -1067,11 +1244,11 @@ func preUnregisterDaemonStop(journalDir string, tasks []scheduler.TaskStatus, xm
 		// Up to 10s port-release wait.
 		if opts.PortBindWait != nil && port > 0 {
 			if err := opts.PortBindWait(port, 10*time.Second); err != nil {
-				return killed, firstKill, fmt.Errorf("port %d release wait: %w", port, err)
+				return killed, fmt.Errorf("port %d release wait: %w", port, err)
 			}
 		}
 	}
-	return killed, firstKill, nil
+	return killed, nil
 }
 
 // resolvePIDPortForTask returns (pid, port, ok, err). When lookup is
@@ -1381,7 +1558,48 @@ func RunRollback(state State, opts RollbackOptions) error {
 	time.Sleep(settle)
 
 	legacyDir := filepath.Join(journalDir, "legacy-tasks")
-	legacyEntries, _ := os.ReadDir(legacyDir)
+	// Lane C P0 #3: do NOT swallow os.ReadDir errors. If the
+	// legacy-tasks/ directory is missing or unreadable AND the journal
+	// has no `committed` marker, the journal is corrupt — proceeding
+	// would delete supervisor state without re-registering any daemons.
+	// If the journal HAS `committed` AND legacy-tasks/ has no XML files
+	// (genuine zero-daemon migration), proceed with a warning logged
+	// to rollback-warnings.json.
+	legacyEntries, readDirErr := os.ReadDir(legacyDir)
+	hasCommittedMarker := markerExists(journalDir, MarkerCommitted)
+	if readDirErr != nil {
+		if !hasCommittedMarker {
+			return fmt.Errorf("rollback: legacy-tasks/ missing or unreadable — journal is corrupt (no committed marker): %w", readDirErr)
+		}
+		// committed migration with absent legacy-tasks/: treat as
+		// zero-daemon edge case. Clear entries so the loop below is a
+		// no-op; warnings accumulator below records the warning.
+		legacyEntries = nil
+	}
+	// Pre-scan to detect the genuine-zero-daemon committed case
+	// BEFORE the loop strips non-xml entries silently. If committed
+	// is present AND there are zero XML files, it's the edge case.
+	zeroDaemonAtCommitted := hasCommittedMarker
+	if zeroDaemonAtCommitted {
+		for _, e := range legacyEntries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".xml") {
+				continue
+			}
+			zeroDaemonAtCommitted = false
+			break
+		}
+	}
+	// Accumulate rollback-warnings.json entries here so the
+	// zero-daemon edge case (Lane C P0 #3) can record its own warning
+	// alongside step 10's port-bind-wait warnings.
+	var warnings []rollbackWarning
+	if zeroDaemonAtCommitted {
+		warnings = append(warnings, rollbackWarning{
+			Task:       "(none)",
+			Reason:     "legacy-tasks/ empty on committed journal — zero-daemon migration; nothing to restore",
+			ObservedAt: state.nowOrDefault().UTC().Format(time.RFC3339Nano),
+		})
+	}
 	type restoredTask struct {
 		name string
 		port int
@@ -1426,7 +1644,8 @@ func RunRollback(state State, opts RollbackOptions) error {
 	}
 
 	// Step 10: up to 60s port-bind wait per task. Failures → warnings.
-	var warnings []rollbackWarning
+	// (`warnings` was declared earlier so the zero-daemon committed
+	// edge case from step 8 can record its own warning too.)
 	for _, r := range restored {
 		if r.port <= 0 {
 			continue

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/scheduler"
 )
 
@@ -401,7 +402,7 @@ func TestResume_EmptyDirNoMarkers(t *testing.T) {
 // TestLockSet_LIFORelease verifies Release() unwinds both locks in
 // LIFO order without panicking.
 func TestLockSet_LIFORelease(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	ls, err := AcquireMigrationLocks(dir)
 	if err != nil {
 		t.Fatalf("acquire: %v", err)
@@ -414,7 +415,7 @@ func TestLockSet_LIFORelease(t *testing.T) {
 // TestLockSet_DoubleAcquireRejected verifies the second acquire fails
 // with ErrMigrationLockHeld.
 func TestLockSet_DoubleAcquireRejected(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	ls1, err := AcquireMigrationLocks(dir)
 	if err != nil {
 		t.Fatalf("first acquire: %v", err)
@@ -433,7 +434,7 @@ func TestLockSet_DoubleAcquireRejected(t *testing.T) {
 // TestLockSet_OnceLockHeldUnwinds verifies migration.lock is released
 // when --once.lock acquisition fails.
 func TestLockSet_OnceLockHeldUnwinds(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	// Pre-acquire --once.lock to force the second-step failure.
 	preOnce, err := api.AcquireSupervisorLock(filepath.Join(dir, "--once"))
 	if err != nil {
