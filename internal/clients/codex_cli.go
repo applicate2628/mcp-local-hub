@@ -37,6 +37,17 @@ func (c *codexCLI) BackupKeep(keepN int) (string, error) {
 	return writeBackup(c.path, c.Name(), keepN)
 }
 
+// InitEmpty seeds ~/.codex/config.toml with an empty `[mcp_servers]`
+// TOML table if the file is absent. The table header is intentionally
+// declared (rather than dropping an empty file) so a user inspecting
+// the stub sees exactly where AddEntry will append new servers.
+// codex-cli reads many other settings from the same config.toml, but
+// because InitEmpty fires only when the file is missing, no
+// user-authored configuration can be clobbered.
+func (c *codexCLI) InitEmpty() (created bool, err error) {
+	return EnsureClientConfigStub(c.path, []byte("[mcp_servers]\n"))
+}
+
 func (c *codexCLI) Restore(backupPath string) error {
 	// Route the live-config rewrite through WriteConfigFile so
 	// production restores inherit the SecureWriteClientConfig pipeline.

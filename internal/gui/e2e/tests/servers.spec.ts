@@ -9,13 +9,19 @@ test.describe("servers", () => {
     const headerCells = matrix.locator("thead th");
     await expect(headerCells).toHaveCount(10);
     await expect(headerCells.nth(0)).toHaveText("Server");
-    await expect(headerCells.nth(1)).toHaveText("claude-code");
-    await expect(headerCells.nth(2)).toHaveText("codex-cli");
-    await expect(headerCells.nth(3)).toHaveText("cursor");
-    await expect(headerCells.nth(4)).toHaveText("vscode");
-    await expect(headerCells.nth(5)).toHaveText("gemini-cli");
-    await expect(headerCells.nth(6)).toHaveText("qwen-cli");
-    await expect(headerCells.nth(7)).toHaveText("antigravity");
+    // v0.4.5 init-button: client header text content can contain the
+    // optional "Initialize" affordance for clients whose parent dir
+    // exists but config file does not (e.g. claude-code's parent is
+    // HOME=tmpHome which always exists). Match on the inner span
+    // specifically so the test stays robust to that environmental
+    // detail.
+    await expect(headerCells.nth(1).locator(".matrix-col-header > span")).toHaveText("claude-code");
+    await expect(headerCells.nth(2).locator(".matrix-col-header > span")).toHaveText("codex-cli");
+    await expect(headerCells.nth(3).locator(".matrix-col-header > span")).toHaveText("cursor");
+    await expect(headerCells.nth(4).locator(".matrix-col-header > span")).toHaveText("vscode");
+    await expect(headerCells.nth(5).locator(".matrix-col-header > span")).toHaveText("gemini-cli");
+    await expect(headerCells.nth(6).locator(".matrix-col-header > span")).toHaveText("qwen-cli");
+    await expect(headerCells.nth(7).locator(".matrix-col-header > span")).toHaveText("antigravity");
     await expect(headerCells.nth(8)).toHaveText("Port");
     await expect(headerCells.nth(9)).toHaveText("State");
   });
@@ -323,13 +329,27 @@ test.describe("servers", () => {
     // the failed demigrate(A) and the gated migrate(B, claude-code)).
     await page.locator('#servers-toolbar button', { hasText: "Apply" }).click();
 
-    // Wait for the success banner text (indicates setApplying(false) ran
-    // AND success-pruning emptied dirty). Then assert Apply button is
-    // DISABLED — because both retained entries ran successfully on this
-    // retry and were pruned, dirty.size is now 0. (Asserting "enabled"
-    // here would either race or time out on a correct implementation —
-    // Codex plan-R3 P1.)
-    await expect(page.locator('#servers-toolbar span')).toContainText("Applied.");
+    // Wait for the success path to durably complete: both retained
+    // dirty entries fire their /api/demigrate + /api/migrate POSTs.
+    // Poll on the captured log length — it ticks from 0 to 2 as the
+    // applyChanges loop fires each cell sequentially. After both
+    // arrive, applying becomes false and dirty.size becomes 0
+    // (success-prune), so the Apply button is durably disabled.
+    //
+    // Full-suite flake fix: the prior version of this test asserted
+    // `toContainText("Applied.")` on the toolbar span. That span's
+    // "Applied. Refreshing…" text is transient — the scan onload in
+    // Servers.tsx clears it via the setApplyMsg passthrough as soon
+    // as the post-Apply scan refetch lands; Playwright's 100ms
+    // polling often misses the visible window under full-suite
+    // timing pressure. Asserting `toBeDisabled()` alone also races:
+    // the button is disabled DURING the Apply flight (applying=true)
+    // and again AFTER success (dirty.size === 0), so Playwright can
+    // pass the assertion mid-flight before all POSTs are observed.
+    // Polling on log.length is the durable backend-observed signal —
+    // exactly one demigrate + one migrate must arrive before the
+    // exact-count assertion below.
+    await expect.poll(() => log.length, { timeout: 5000 }).toBeGreaterThanOrEqual(2);
     await expect(page.locator('#servers-toolbar button', { hasText: "Apply" })).toBeDisabled();
 
     // Exact-count assertion: one demigrate(A, claude-code) that now succeeds,

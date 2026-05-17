@@ -39,6 +39,14 @@ func (c *claudeCode) BackupKeep(keepN int) (string, error) {
 	return writeBackup(c.path, c.Name(), keepN)
 }
 
+// InitEmpty seeds ~/.claude.json with `{"mcpServers": {}}` if the
+// file is absent. claude-code's single-file user config uses the
+// canonical JSON family `mcpServers` key; AddEntry's later merge
+// writes into the same map.
+func (c *claudeCode) InitEmpty() (created bool, err error) {
+	return EnsureClientConfigStub(c.path, []byte("{\n  \"mcpServers\": {}\n}\n"))
+}
+
 func (c *claudeCode) Restore(backupPath string) error {
 	// Route the live-config rewrite through WriteConfigFile so
 	// production restores inherit the SecureWriteClientConfig

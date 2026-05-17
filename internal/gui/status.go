@@ -25,7 +25,7 @@ func registerStatusRoutes(s *Server) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		rows, err := s.health.DaemonStatusSnapshot()
+		rows, err := s.health.DaemonStatusSnapshot(r.Context())
 		if err != nil {
 			writeAPIError(w, err, http.StatusInternalServerError, "STATUS_FAILED")
 			return

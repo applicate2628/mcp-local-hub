@@ -12,6 +12,29 @@ import (
 	"mcp-local-hub/internal/buildinfo"
 )
 
+// supervisorIPCStatusFn is the v0.5.0 Phase 12 status-seam pivot. When
+// non-nil, computeDaemonsSection prefers this IPC-backed fetcher over the
+// legacy scheduler scan (a.HealthStatusFn / a.StatusWithOpts). The
+// supervisor owns the daemon state truth in v0.5+ and the scheduler-side
+// scan stays only as a fallback path for hosts running without the
+// supervisor (e.g. during the rollout transition).
+//
+// The seam is a package-level var so tests can swap it (and restore via
+// t.Cleanup) without needing an *API instance. Production wiring is
+// deferred to a later task that links the supervisor IPC client into
+// cmd/mcphub's startup; until then the default nil value keeps the
+// scheduler-scan backing on for backward compatibility.
+//
+// Contract: on any error from the IPC backing (timeout, pipe unavailable,
+// connect refused, handshake mismatch) the fetcher MUST return a non-nil
+// error so computeDaemonsSection surfaces the failure to the HTTP layer
+// as 500 + HEALTH_BACKEND_FAILED / STATUS_FAILED. Silent fallback to the
+// scheduler scan would mask supervisor outages and break the fail-loud
+// contract codified in PR #132 (Cloud bot P1).
+//
+// Spec §"Q12 CLI/GUI status seam" + plan §2611-2644.
+var supervisorIPCStatusFn func(ctx context.Context) ([]DaemonStatus, error)
+
 // HealthSnapshot is the canonical snapshot returned by GET /api/health.
 // Owns the contract G3 (capability display) and G4 (Hub MCP routing)
 // consume. Per spec docs/superpowers/specs/2026-05-07-g2-unified-health-endpoint-design.md.
@@ -175,11 +198,11 @@ const (
 // separately with its own TTL; concurrent expired-cache callers collapse
 // onto one underlying fn via singleflight. Phase 2 wires hub + daemons.
 // Phases 3 + 4 add probes + capabilities.
-func (a *API) HealthSnapshot(opts HealthOpts) (HealthSnapshot, error) {
+func (a *API) HealthSnapshot(ctx context.Context, opts HealthOpts) (HealthSnapshot, error) {
 	now := a.healthNow()
 
 	hub := a.computeHubSection(now)
-	daemons, err := a.computeDaemonsSection(now, opts.Refresh)
+	daemons, err := a.computeDaemonsSection(ctx, now, opts.Refresh)
 	if err != nil {
 		return HealthSnapshot{}, err
 	}
@@ -238,12 +261,12 @@ func (a *API) HealthSnapshot(opts HealthOpts) (HealthSnapshot, error) {
 // Cloud bot P1 escalation: prior implementation swallowed fetchErr
 // into section.Errors and returned nil, so operators saw 200 [] on
 // total backend failure instead of 500 STATUS_FAILED.
-func (a *API) DaemonStatusSnapshot() ([]DaemonStatus, error) {
+func (a *API) DaemonStatusSnapshot(ctx context.Context) ([]DaemonStatus, error) {
 	nowMs := a.healthNow()
 	// Reuse computeDaemonsSection's TTL+singleflight logic. We discard
 	// the returned DaemonsSection — what we want is the side-effect of
 	// having `daemonStatuses` populated in the same critical section.
-	if _, err := a.computeDaemonsSection(nowMs, false); err != nil {
+	if _, err := a.computeDaemonsSection(ctx, nowMs, false); err != nil {
 		return nil, err
 	}
 	a.healthCache.mu.RLock()
@@ -294,7 +317,7 @@ func (a *API) computeHubSection(nowMs int64) HubSection {
 // while the backend is still down. Slow-path success clears the cached
 // error; slow-path fetchErr writes it. Cloud bot P1×2 fix on PR #132
 // commit 2062818 (kosyak: incomplete-fix-only-slow-path-cache-hit-still-masks-errors).
-func (a *API) computeDaemonsSection(nowMs int64, refresh bool) (DaemonsSection, error) {
+func (a *API) computeDaemonsSection(ctx context.Context, nowMs int64, refresh bool) (DaemonsSection, error) {
 	a.healthCache.mu.RLock()
 	cached := a.healthCache.daemons
 	cachedAt := a.healthCache.daemonsAt
@@ -334,11 +357,47 @@ func (a *API) computeDaemonsSection(nowMs int64, refresh bool) (DaemonsSection, 
 			return recheckSection, recheckErr
 		}
 
-		statusFn := a.HealthStatusFn
-		if statusFn == nil {
-			statusFn = a.StatusWithOpts
+		// v0.5.0 Phase 12 status-seam pivot: when the supervisor IPC client
+		// is configured (production: link-time wiring; tests: t.Cleanup
+		// swap), it owns the daemon-state truth. The legacy scheduler
+		// scan (HealthStatusFn / StatusWithOpts) stays as a fallback so
+		// hosts without a running supervisor keep observing /api/status
+		// during the v0.5.x rollout transition.
+		//
+		// Fail-loud: an IPC error is NOT masked by the scheduler-scan
+		// fallback. Silent fallback would hide supervisor outages
+		// behind a scheduler view that no longer represents the
+		// authoritative daemon set; the HTTP layer needs to see the
+		// IPC error so it maps to 500 + HEALTH_BACKEND_FAILED. The
+		// test seam HealthStatusFn is honored even when the IPC seam
+		// is set so existing tests that drive deterministic fixtures
+		// via HealthStatusFn keep working until they explicitly pivot
+		// to the IPC seam.
+		var rows []DaemonStatus
+		var fetchErr error
+		switch {
+		case a.HealthStatusFn != nil:
+			rows, fetchErr = a.HealthStatusFn(StatusOpts{})
+		case supervisorIPCStatusFn != nil:
+			// Caller-context-derived bounded deadline (codex r6 P2 fix
+			// follow-up to r5 P2): the IPC call now derives its 5-second
+			// timeout from the caller's ctx so an HTTP request cancel /
+			// server shutdown propagates immediately instead of letting
+			// the daemons-section refresh keep running for the full 5s
+			// under outage conditions. Defensive: if ctx is nil (some
+			// internal callers may not have one — see capabilities-
+			// section in this file), fall back to background so a nil
+			// deref doesn't crash the refresh path.
+			parentCtx := ctx
+			if parentCtx == nil {
+				parentCtx = context.Background()
+			}
+			ipcCtx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
+			rows, fetchErr = supervisorIPCStatusFn(ipcCtx)
+			cancel()
+		default:
+			rows, fetchErr = a.StatusWithOpts(StatusOpts{}) // ProbeHealth=false; probes come in Phase 3
 		}
-		rows, fetchErr := statusFn(StatusOpts{}) // ProbeHealth=false; probes come in Phase 3
 		section := DaemonsSection{
 			Items:       make([]DaemonRow, 0, len(rows)),
 			GeneratedAt: nowMs / 1000,
@@ -582,7 +641,7 @@ func (a *API) computeCapabilitiesSection(nowMs int64, refresh bool, probes Probe
 		// realCapabilityRow → syntheticToolsSubSection: dropping it makes
 		// ToolCatalogForBackend("") return (zero, false) and reports
 		// state="empty" for every lazy-proxy daemon.
-		daemons, _ := a.computeDaemonsSection(nowMs, false)
+		daemons, _ := a.computeDaemonsSection(context.Background(), nowMs, false)
 		portByServerDaemon := make(map[string]int, len(daemons.Items))
 		backendByServerDaemon := make(map[string]string, len(daemons.Items))
 		for _, d := range daemons.Items {

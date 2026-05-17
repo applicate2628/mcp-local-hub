@@ -128,13 +128,37 @@ type ScanResult struct {
 	//
 	// Keys are client names (claude-code, codex-cli, cursor, vscode,
 	// gemini-cli, qwen-cli, antigravity). Values:
-	//   "ok"      config file exists, stat succeeded.
-	//   "missing" config file does not exist on disk.
-	//   "error"   config file exists but stat failed (permissions, etc.).
+	//   "ok"                              config file exists, stat
+	//                                     succeeded.
+	//   "missing-init-possible"           config file does not exist,
+	//                                     but its parent directory does
+	//                                     and is a regular directory —
+	//                                     operator can initialize via
+	//                                     POST /api/init-client-config
+	//                                     to seed an empty stub.
+	//   "missing-init-blocked-symlink"    config file does not exist
+	//                                     and the parent path is a
+	//                                     symlink. The hardened init
+	//                                     pipeline refuses to follow
+	//                                     parent symlinks (POSIX
+	//                                     O_NOFOLLOW, Windows
+	//                                     FILE_FLAG_OPEN_REPARSE_POINT),
+	//                                     so the GUI suppresses the
+	//                                     Initialize affordance for
+	//                                     this state. v0.4.5 PR #208
+	//                                     codex r1 F2 closure.
+	//   "missing"                         neither file nor parent
+	//                                     directory exists (client
+	//                                     genuinely not installed).
+	//   "error"                           stat returned an unexpected
+	//                                     error (permissions, etc.).
 	//
-	// Frontend uses this to render an "available (enabled, unchecked)"
+	// Frontend uses "ok" to render an "available (enabled, unchecked)"
 	// matrix cell for a manifested server when the cell's client is "ok"
-	// but absent from that entry's per-server client_presence.
+	// but absent from that entry's per-server client_presence. The
+	// "missing-init-possible" state additionally surfaces a per-column
+	// "Initialize <client>" affordance in the matrix header so the
+	// operator can create the empty stub without leaving the GUI.
 	ClientConfigPresence map[string]string `json:"client_config_presence,omitempty"`
 }
 
@@ -145,4 +169,25 @@ type BackupInfo struct {
 	Kind     string    `json:"kind"` // "original" | "timestamped"
 	ModTime  time.Time `json:"mod_time"`
 	SizeByte int64     `json:"size_byte"`
+}
+
+// SupervisorIntentEntry is the v0.5.0 plan-side entry that describes one
+// daemon (or weekly-refresh maintenance row) the supervisor should keep
+// running. The shape is parallel to ScheduledTaskPlan during the
+// transition so existing callers (buildPlan -> executeInstallTo,
+// printPlanTo, prune set construction) can switch over without a wire
+// format break.
+//
+// One entry per Plan.SupervisorIntent slot maps to one SupervisorDaemon
+// row in supervisor-intent.json at install time; Name is the BARE form
+// (no leading backslash) — supervisor-intent.json stores the canonical
+// leading-backslash form and the prune-set comparator strips the prefix
+// at compare time (see buildPruneSetForReconcile + install.go:1773).
+//
+// Spec §"Q12 CLI/GUI status seam" + plan §2611-2644.
+type SupervisorIntentEntry struct {
+	Name    string
+	Command string
+	Args    []string
+	Trigger string // human-readable; "At logon" or "Weekly Sun 03:00"
 }

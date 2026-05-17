@@ -18,14 +18,33 @@ export interface ScanResult {
   at: string;
   entries: ScanEntry[] | null;
   // Bug-bash A2 (#13): per-client config file state, independent of
-  // per-entry client_presence. Keys are client names; values are
-  // "ok" | "missing" | "error". Frontend uses this to render a cell
-  // as "available" (enabled, unchecked) when the cell's client config
-  // file exists but has no entry for this particular server.
+  // per-entry client_presence. Keys are client names; values from
+  // the ClientConfigState union below. Frontend uses this to render a
+  // cell as "available" (enabled, unchecked) when the cell's client
+  // config file exists but has no entry for this particular server.
+  //
+  // v0.4.5 init-button: the additional "missing-init-possible" state
+  // surfaces a per-column "Initialize <client>" affordance in the
+  // matrix header so the operator can seed the empty stub from the
+  // GUI without dropping to the shell.
+  //
+  // v0.4.5 PR #208 codex r1 F2: "missing-init-blocked-symlink" is
+  // emitted when the client's config parent path resolves through a
+  // symlink. The hardened init pipeline refuses to follow parent
+  // symlinks (POSIX O_NOFOLLOW, Windows FILE_FLAG_OPEN_REPARSE_POINT),
+  // so the Initialize affordance is suppressed for this state; without
+  // the new value, a dotfile-symlink setup (e.g. ~/.config/Claude/
+  // -> ~/dotfiles/Claude) would render the button only for the click
+  // to deterministically fail with INIT_FAILED.
   client_config_presence?: Record<string, ClientConfigState>;
 }
 
-export type ClientConfigState = "ok" | "missing" | "error";
+export type ClientConfigState =
+  | "ok"
+  | "missing-init-possible"
+  | "missing-init-blocked-symlink"
+  | "missing"
+  | "error";
 
 export interface ScanEntry {
   name: string;
@@ -62,7 +81,19 @@ export interface ClientPresence {
 //                     and disabled the whole column.
 //   "not-installed" — client config file absent on this host.
 //   "unsupported"   — client cannot route this server via the hub.
-export type Routing = "via-hub" | "direct" | "available" | "not-installed" | "unsupported";
+//   "config-error"  — `os.Stat` on the client config returned an error
+//                     OTHER than IsNotExist (typically a permissions /
+//                     ACL / I/O anomaly). Distinct from "not-installed"
+//                     so the matrix can render an actionable diagnostic
+//                     instead of silently dropping the cell. Surfaced
+//                     by the v0.4.5 PR #208 deep-sec Lane B follow-up.
+export type Routing =
+  | "via-hub"
+  | "direct"
+  | "available"
+  | "not-installed"
+  | "unsupported"
+  | "config-error";
 
 export interface ServerRow {
   name: string;

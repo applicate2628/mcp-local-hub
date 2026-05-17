@@ -40,6 +40,24 @@ type ScanOpts struct {
 // this top-level map and renders an "available" cell whenever the
 // client is "ok" even with no server entries.
 //
+// v0.4.5 init-button: distinguish "config file absent but the client's
+// root directory exists" (the user has the client installed, just
+// never created an MCP config — `missing-init-possible`, GUI shows
+// an Initialize affordance) from "neither the file nor its parent
+// directory exists" (`missing`, GUI keeps the column disabled because
+// creating the parent tree would be a surprising side effect of
+// a refresh / one-click action). The distinction is parent-dir
+// granular: the immediate dirname must Lstat successfully as a
+// directory.
+//
+// v0.4.5 PR #208 codex r1 F2: a third "missing-init-blocked-symlink"
+// state covers parents that are symlinks (e.g. dotfile-management
+// setups). The hardened init pipeline refuses to follow parent
+// symlinks (O_NOFOLLOW on POSIX, FILE_FLAG_OPEN_REPARSE_POINT on
+// Windows), so the GUI suppresses the Initialize button for such
+// rows rather than offering a click that would deterministically
+// fail with INIT_FAILED.
+//
 // Only paths the caller actually passed via ScanOpts are probed —
 // keeps tempdir-based tests deterministic.
 func probeClientConfigPresence(opts ScanOpts) map[string]string {
@@ -60,15 +78,103 @@ func probeClientConfigPresence(opts ScanOpts) map[string]string {
 		if p.path == "" {
 			continue
 		}
+		// PR #208 deep-sec Lane B rounds 4-6 P2 closure: Lstat-first
+		// probe + symlink resolution that matches the write pipeline's
+		// default-relax contract.
+		//
+		// Wrong-shape entries to refuse:
+		//   - directory / named pipe / device / junction at config path
+		//     → "error" (round 5; matrix shows config-error diagnostic
+		//     instead of an "ok" cell that migrate/backup will choke on
+		//     when readJSON sees a non-regular target)
+		//   - dangling symlink → "error" (round 4; init button +
+		//     secure-create refusal lose otherwise)
+		//   - any symlink, default OR strict mode → "error" (post-PR
+		//     #209: the secure-write pipeline now refuses pre-existing
+		//     symlinks in ALL modes — `resolveSymlinkForSecureWrite`
+		//     was removed from `secureWriteWithOperatorOpt`. Reporting
+		//     "ok" while writes deterministically fail with symlink-
+		//     refuse errors is the exact UX trap bot codex-r7 flagged:
+		//     user sees a green matrix column, clicks Apply, every
+		//     write fails. Aligning presence with the active write
+		//     contract restores invariant "ok = write will succeed".
+		//     Dotfile-symlink setups that used to rely on default-mode
+		//     resolve-to-target are now unsupported by design — the
+		//     security boundary closure in PR #209 traded that path
+		//     for confused-deputy integrity protection).
+		if lst, lerr := os.Lstat(p.path); lerr == nil {
+			isSymlink := lst.Mode()&os.ModeSymlink != 0
+			if !lst.Mode().IsRegular() && !isSymlink {
+				out[p.name] = "error"
+				continue
+			}
+			if isSymlink {
+				out[p.name] = "error"
+				continue
+			}
+		}
 		if _, err := os.Stat(p.path); err == nil {
 			out[p.name] = "ok"
 		} else if os.IsNotExist(err) {
-			out[p.name] = "missing"
+			out[p.name] = classifyMissingClientConfig(p.path)
 		} else {
 			out[p.name] = "error"
 		}
 	}
 	return out
+}
+
+// classifyMissingClientConfig returns one of:
+//
+//   - "missing-init-possible"        : the config file's immediate
+//     parent directory exists and is a regular directory (operator can
+//     click Initialize; the hardened init pipeline will accept it).
+//   - "missing-init-blocked-symlink" : the parent path resolves through
+//     a symlink (Init pipeline opens the parent with O_NOFOLLOW on POSIX
+//     / FILE_FLAG_OPEN_REPARSE_POINT on Windows, both of which refuse
+//     to follow the link — so an Initialize click would deterministically
+//     fail with INIT_FAILED, broken UX). Common with dotfile-management
+//     setups where the operator symlinks ~/.config/Claude/ to a real
+//     dotfile repo location. The GUI suppresses the Initialize button
+//     for this state; operators who want the stub seeded should either
+//     remove the symlink (and let mcphub create the config in the real
+//     parent), or seed the file manually inside the symlinked target.
+//   - "missing"                       : neither file nor parent dir
+//     exists (client genuinely not installed on this host).
+//
+// Split out for testability and to keep probeClientConfigPresence flat.
+//
+// v0.4.5 PR #208 codex r1 F2 closure: prior version used os.Stat which
+// follows symlinks; a symlinked parent passed the IsDir check, scan
+// classified as missing-init-possible, GUI showed Initialize button,
+// click failed with INIT_FAILED. The Lstat-first probe now distinguishes
+// the symlinked-parent case so the UI matches the actual write contract.
+func classifyMissingClientConfig(path string) string {
+	parent := filepath.Dir(path)
+	if parent == "" || parent == "." {
+		return "missing"
+	}
+	lst, lerr := os.Lstat(parent)
+	if lerr != nil {
+		// Parent path itself is absent OR stat failed; either way,
+		// initializing through this path is not a clean operation.
+		return "missing"
+	}
+	if lst.Mode()&os.ModeSymlink != 0 {
+		// Symlinked parent. The hardened init pipeline refuses to open
+		// the parent through a symlink (POSIX O_NOFOLLOW, Windows
+		// FILE_FLAG_OPEN_REPARSE_POINT — the latter opens the reparse
+		// point itself without auto-resolving for relative child ops,
+		// which similarly breaks the init create flow). Classify so
+		// the GUI suppresses the Initialize affordance.
+		return "missing-init-blocked-symlink"
+	}
+	if !lst.IsDir() {
+		// Parent path exists but is not a directory (regular file,
+		// device, pipe). Not initializable.
+		return "missing"
+	}
+	return "missing-init-possible"
 }
 
 // perSessionServers are MCP servers whose sessions must remain isolated
@@ -89,40 +195,61 @@ var perSessionServers = map[string]bool{
 
 // ScanFrom builds a unified cross-client view. Exposed (rather than Scan) so
 // tests can pass arbitrary paths.
+//
+// PR #208 deep-sec Lane B round 6 P2 closure: presence is computed
+// FIRST so adapter reads can be skipped for clients whose config
+// path is not a readable regular file (directory, FIFO, dangling
+// symlink, etc.). Previously the per-adapter `scan*` calls hit
+// `os.ReadFile` before presence was known, and any non-IsNotExist
+// read error propagated as a whole-response 500 SCAN_FAILED —
+// hiding the per-client diagnostic the frontend needs to render the
+// `config-error` cell. With the reorder, a wrong-shape entry at one
+// client's config path leaves the rest of the scan intact and the
+// per-client diagnostic surfaces in `client_config_presence`.
 func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 	entries := map[string]*ScanEntry{}
+	presence := probeClientConfigPresence(opts)
+	scanIfReadable := func(name string) bool {
+		// "ok" is the only state for which an adapter read is
+		// guaranteed to find a regular file. "missing" /
+		// "missing-init-possible" / "error" all imply that the
+		// adapter's `os.ReadFile` would either return IsNotExist
+		// (which adapters already absorb to "no entries") or
+		// hit the wrong-shape failure we want to avoid.
+		return presence[name] == "ok"
+	}
 
-	if opts.ClaudeConfigPath != "" {
+	if opts.ClaudeConfigPath != "" && scanIfReadable("claude-code") {
 		if err := scanClaude(entries, opts.ClaudeConfigPath); err != nil {
 			return nil, fmt.Errorf("claude: %w", err)
 		}
 	}
-	if opts.CodexConfigPath != "" {
+	if opts.CodexConfigPath != "" && scanIfReadable("codex-cli") {
 		if err := scanCodex(entries, opts.CodexConfigPath); err != nil {
 			return nil, fmt.Errorf("codex: %w", err)
 		}
 	}
-	if opts.CursorConfigPath != "" {
+	if opts.CursorConfigPath != "" && scanIfReadable("cursor") {
 		if err := scanCursor(entries, opts.CursorConfigPath); err != nil {
 			return nil, fmt.Errorf("cursor: %w", err)
 		}
 	}
-	if opts.VSCodeConfigPath != "" {
+	if opts.VSCodeConfigPath != "" && scanIfReadable("vscode") {
 		if err := scanVSCode(entries, opts.VSCodeConfigPath); err != nil {
 			return nil, fmt.Errorf("vscode: %w", err)
 		}
 	}
-	if opts.GeminiConfigPath != "" {
+	if opts.GeminiConfigPath != "" && scanIfReadable("gemini-cli") {
 		if err := scanGemini(entries, opts.GeminiConfigPath); err != nil {
 			return nil, fmt.Errorf("gemini: %w", err)
 		}
 	}
-	if opts.QwenConfigPath != "" {
+	if opts.QwenConfigPath != "" && scanIfReadable("qwen-cli") {
 		if err := scanQwen(entries, opts.QwenConfigPath); err != nil {
 			return nil, fmt.Errorf("qwen: %w", err)
 		}
 	}
-	if opts.AntigravityConfigPath != "" {
+	if opts.AntigravityConfigPath != "" && scanIfReadable("antigravity") {
 		if err := scanAntigravity(entries, opts.AntigravityConfigPath); err != nil {
 			return nil, fmt.Errorf("antigravity: %w", err)
 		}
@@ -141,7 +268,7 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 
 	out := &ScanResult{
 		At:                   time.Now(),
-		ClientConfigPresence: probeClientConfigPresence(opts),
+		ClientConfigPresence: presence,
 	}
 	for _, e := range entries {
 		out.Entries = append(out.Entries, *e)

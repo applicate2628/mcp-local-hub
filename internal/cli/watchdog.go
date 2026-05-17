@@ -1202,6 +1202,11 @@ func runWatchdogStatus(out io.Writer, asJSON bool) error {
 
 // renderWatchdogStatusText emits the human-readable form (plan §57).
 func renderWatchdogStatusText(out io.Writer, s watchdogStatusJSON, now time.Time) error {
+	fmt.Fprintln(out, "NOTE: v0.5.0 introduces a supervisor architecture that replaces the")
+	fmt.Fprintln(out, "      per-daemon watchdog model for new installs. See `mcphub supervise")
+	fmt.Fprintln(out, "      --help` for the canonical management surface; this watchdog command")
+	fmt.Fprintln(out, "      remains read-only for legacy v0.4.x diagnostics.")
+	fmt.Fprintln(out)
 	fmt.Fprintf(out, "State dir: %s\n", s.StateDir)
 	fmt.Fprintln(out, "Files:")
 	fmt.Fprintf(out, "  %s    (intent)\n", s.Files.DaemonIntent)

@@ -2,6 +2,7 @@
 package gui
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -29,13 +30,13 @@ type fakeHealth struct {
 	returnDaemonErr      error
 }
 
-func (f *fakeHealth) HealthSnapshot(opts api.HealthOpts) (api.HealthSnapshot, error) {
+func (f *fakeHealth) HealthSnapshot(_ context.Context, opts api.HealthOpts) (api.HealthSnapshot, error) {
 	f.calls++
 	f.lastOpts = opts
 	return f.returnSnap, f.returnErr
 }
 
-func (f *fakeHealth) DaemonStatusSnapshot() ([]api.DaemonStatus, error) {
+func (f *fakeHealth) DaemonStatusSnapshot(_ context.Context) ([]api.DaemonStatus, error) {
 	f.daemonStatusCalls++
 	return f.returnDaemonStatuses, f.returnDaemonErr
 }

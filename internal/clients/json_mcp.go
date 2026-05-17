@@ -32,6 +32,15 @@ func (j *jsonMCPClient) BackupKeep(keepN int) (string, error) {
 	return writeBackup(j.path, j.clientName, keepN)
 }
 
+// InitEmpty seeds the JSON family config file with `{"mcpServers": {}}`
+// if it is absent. Inherited by gemini-cli (~/.gemini/settings.json)
+// and the Antigravity adapter (~/.gemini/antigravity/mcp_config.json).
+// Both write subsequent entries into the same top-level `mcpServers`
+// map that AddEntry merges into.
+func (j *jsonMCPClient) InitEmpty() (created bool, err error) {
+	return EnsureClientConfigStub(j.path, []byte("{\n  \"mcpServers\": {}\n}\n"))
+}
+
 func (j *jsonMCPClient) Restore(backupPath string) error {
 	// Route the live-config rewrite through WriteConfigFile so
 	// production restores inherit the SecureWriteClientConfig pipeline.

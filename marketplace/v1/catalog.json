@@ -1,6 +1,6 @@
 {
   "schema_version": "1",
-  "generated_at": "2026-05-13T00:00:00Z",
+  "generated_at": "2026-05-16T00:00:00Z",
   "entries": [
     {
       "id": "filesystem",
@@ -77,6 +77,19 @@
       "url": "https://mcp.context7.com/mcp",
       "env": {},
       "categories": ["docs", "remote"],
+      "license": "MIT"
+    },
+    {
+      "id": "excalidraw",
+      "name": "Excalidraw MCP server",
+      "summary": "Create and manipulate Excalidraw diagrams programmatically — 26 tools for element CRUD, layout, scene awareness, export to PNG/SVG, and Mermaid conversion. Community implementation (yctimlin); the Excalidraw team's official excalidraw/excalidraw-mcp is not npm-published.",
+      "homepage": "https://github.com/yctimlin/mcp_excalidraw",
+      "readme_url": "https://raw.githubusercontent.com/yctimlin/mcp_excalidraw/main/README.md",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "mcp-excalidraw-server"],
+      "env": {},
+      "categories": ["diagrams", "drawing", "visualization"],
       "license": "MIT"
     },
     {

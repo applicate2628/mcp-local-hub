@@ -36,17 +36,28 @@ func (v *vscodeClient) Backup() (string, error) {
 }
 
 func (v *vscodeClient) BackupKeep(keepN int) (string, error) {
-	if _, err := os.Stat(v.path); os.IsNotExist(err) {
-		if err := os.MkdirAll(filepath.Dir(v.path), 0755); err != nil {
-			return "", err
-		}
-		// Route the placeholder stub write through WriteConfigFile so
-		// production gets the SecureWriteClientConfig pipeline.
-		if err := WriteConfigFile(v.path, []byte("{\n  \"servers\": {}\n}\n")); err != nil {
+	// Explicit MkdirAll before InitEmpty: EnsureClientConfigStub no
+	// longer creates parents (v0.4.5 deep-sec Lane A #1) so the
+	// adapter's seed-then-backup contract must ensure the parent
+	// exists for fresh hosts.
+	if dir := filepath.Dir(v.path); dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return "", err
 		}
 	}
+	if _, err := v.InitEmpty(); err != nil {
+		return "", err
+	}
 	return writeBackup(v.path, v.Name(), keepN)
+}
+
+// InitEmpty seeds %APPDATA%\Code\User\mcp.json with VS Code's
+// `{"servers": {}}` top-level shape if the file is absent. VS Code
+// 1.103+ migrated MCP entries to a top-level `servers` key (NOT
+// `mcpServers`); the stub matches that schema so AddEntry's later
+// merge writes into the right map.
+func (v *vscodeClient) InitEmpty() (created bool, err error) {
+	return EnsureClientConfigStub(v.path, []byte("{\n  \"servers\": {}\n}\n"))
 }
 
 func (v *vscodeClient) Restore(backupPath string) error {

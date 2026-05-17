@@ -116,3 +116,28 @@ jobs:
 
       - name: Build darwin/arm64
         run: GOOS=darwin GOARCH=arm64 go build ./...
+
+  # Linux integration depth — exercises //go:build linux paths beyond
+  # the unit-test matrix's basic build/vet/test. Covers Task 13.1
+  # cold-start reaper, pdeathsig direct-child supervision, and (when
+  # systemd-user is available in the runner image) the --linux-managed
+  # systemd-user-service smoke. Linux remains beta in v0.5.0 (Q9).
+  linux-integration:
+    name: Linux integration tests
+    runs-on: ubuntu-latest
+    needs: build-and-test  # Don't run integration on top of broken unit tests.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Linux-tagged go test
+        run: go test -count=1 -timeout 5m -tags=linux_integration ./internal/cli/ ./internal/process/
+      - name: systemd-user smoke (skipped if not present)
+        run: |
+          if command -v systemctl >/dev/null 2>&1 && systemctl --user status >/dev/null 2>&1; then
+            echo "systemd-user available — running smoke"
+            go test -count=1 -timeout 2m -tags=linux_systemd_smoke ./internal/autostart/
+          else
+            echo "systemd-user unavailable in this runner image — skipping per Linux-beta policy"
+          fi

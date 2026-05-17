@@ -120,6 +120,67 @@ export async function getExtractManifest(client: string, server: string): Promis
   return payload.yaml ?? "";
 }
 
+// postInitClientConfig drives the Servers matrix "Initialize <client>"
+// affordance (v0.4.5). Posts a JSON body naming the client adapter
+// whose empty stub should be seeded. Resolves to the structured
+// {client, path, created} record on success; rejects with an
+// `InitClientConfigError` carrying the backend's structured
+// {error, code, status} envelope on failure so the matrix banner
+// can render the operational code (PARENT_MISSING / UNKNOWN_CLIENT
+// / INIT_FAILED) alongside the human-readable message.
+//
+// The caller (ServersScreen) should refresh /api/scan after a
+// successful resolve so the now-present file flips
+// client_config_presence to "ok" and the matrix column becomes
+// active without a manual reload.
+export interface InitClientConfigResult {
+  client: string;
+  path: string;
+  created: boolean;
+}
+
+// InitClientConfigError preserves the backend's `code` field and the
+// HTTP status so the operator-visible banner can surface the
+// operational error code. Deep-sec Lane B (PR #208) follow-up: a
+// plain Error swallowed `code`, leaving the banner with only the
+// free-form `error` string — operators reading docs that reference
+// `PARENT_MISSING` / `INIT_FAILED` had no way to map a banner back
+// to those codes.
+export class InitClientConfigError extends Error {
+  readonly code: string;
+  readonly status: number;
+  constructor(message: string, code: string, status: number) {
+    super(message);
+    this.name = "InitClientConfigError";
+    this.code = code;
+    this.status = status;
+  }
+}
+
+export async function postInitClientConfig(client: string): Promise<InitClientConfigResult> {
+  const resp = await fetch("/api/init-client-config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ client }),
+  });
+  if (resp.ok) {
+    return (await resp.json()) as InitClientConfigResult;
+  }
+  let body: { error?: string; code?: string } | null = null;
+  try {
+    body = (await resp.json()) as { error?: string; code?: string };
+  } catch {
+    // Non-JSON error body; fall through.
+  }
+  const message = body?.error ?? resp.statusText ?? "unknown";
+  const code = body?.code ?? `HTTP_${resp.status}`;
+  throw new InitClientConfigError(
+    `/api/init-client-config [${code}]: ${message}`,
+    code,
+    resp.status,
+  );
+}
+
 // ManifestHashMismatchError marks the stale-file-detection branch so
 // the AddServer edit flow can show the [Reload]/[Force Save] banner
 // instead of a generic error toast.

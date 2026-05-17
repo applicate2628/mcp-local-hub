@@ -1,0 +1,258 @@
+// Tests for the maintenance-timer scheduler (Task 9.1).
+//
+// Spec §"Maintenance timer scheduler (detail)"
+// (docs/superpowers/specs/2026-05-16-v0.5.0-supervisor-architecture.md
+// lines 452-483); plan Task 9.1
+// (docs/superpowers/plans/2026-05-16-v0.5.0-supervisor.md lines 2310-2362).
+//
+// TDD discipline: these tests were written and run BEFORE the
+// implementation (supervise_maintenance.go) so the failure mode is
+// observed first.
+package cli
+
+import (
+	"testing"
+	"time"
+
+	"mcp-local-hub/internal/api"
+)
+
+// testStateStore is the test-only in-memory StateStore used by the
+// scheduler tests. Production wiring (a later task) will pass an
+// adapter over the on-disk SupervisorStateFile.
+//
+// The name `newTestState` matches the plan-§2314 test snippet
+// verbatim — see plan line 2326 (`state := newTestState(t)`).
+type testStateStore struct {
+	fired map[string]string
+}
+
+func newTestState(_ *testing.T) *testStateStore {
+	return &testStateStore{fired: map[string]string{}}
+}
+
+func (s *testStateStore) GetMaintenanceFiredAt(kind string) (string, bool) {
+	v, ok := s.fired[kind]
+	return v, ok
+}
+
+func (s *testStateStore) SetMaintenanceFiredAt(kind, rfc3339nanoUTC string) {
+	s.fired[kind] = rfc3339nanoUTC
+}
+
+// Task 9.2 interface methods — no-ops here. The Task 9.1 tests never
+// wire a Spawner, so the transient pipeline never engages and these
+// methods are never invoked. They exist only to satisfy the extended
+// StateStore interface at compile time. The Task 9.2 transient tests
+// use a separate state store (transientTestState) that exercises
+// these methods.
+func (s *testStateStore) AddTransientPID(_ api.TransientPID)  {}
+func (s *testStateStore) RemoveTransientPID(_ int)            {}
+
+// TestMaintenance_FiresOnSunday03Local — verbatim from plan §2324-2341.
+// Sunday 03:05 local with last_fired one week prior → fires once.
+func TestMaintenance_FiresOnSunday03Local(t *testing.T) {
+	timer := api.MaintenanceTimer{Name: `\mcp-local-hub-workspace-weekly-refresh`, Kind: "workspace-weekly-refresh", Command: "echo", Args: []string{"fired"}}
+	state := newTestState(t)
+
+	// Set last-fired to last Sunday.
+	loc := time.Local
+	now := time.Date(2026, 5, 17, 3, 5, 0, 0, loc) // Sunday 03:05 local
+	state.SetMaintenanceFiredAt("workspace-weekly-refresh", now.AddDate(0, 0, -7).Format(time.RFC3339Nano))
+
+	sched := NewMaintenanceScheduler(state)
+	fired := []string{}
+	sched.SetFireHook(func(t api.MaintenanceTimer) { fired = append(fired, t.Kind) })
+	sched.Tick(now, []api.MaintenanceTimer{timer})
+
+	if len(fired) != 1 {
+		t.Fatalf("expected one fire, got %d", len(fired))
+	}
+}
+
+// TestMaintenance_CatchUpAfterMultiWeekSleep — verbatim from plan §2343-2359.
+// last_fired 22 days ago, now monday-after → fires ONCE (catch-up), not
+// once-per-missed-Sunday.
+func TestMaintenance_CatchUpAfterMultiWeekSleep(t *testing.T) {
+	timer := api.MaintenanceTimer{Kind: "workspace-weekly-refresh"}
+	state := newTestState(t)
+
+	// last_fired 3 weeks ago.
+	state.SetMaintenanceFiredAt("workspace-weekly-refresh", "2026-04-26T03:00:00Z")
+	now := time.Date(2026, 5, 18, 14, 0, 0, 0, time.UTC) // Mon, 22 days later
+
+	sched := NewMaintenanceScheduler(state)
+	fired := 0
+	sched.SetFireHook(func(t api.MaintenanceTimer) { fired++ })
+	sched.Tick(now, []api.MaintenanceTimer{timer})
+
+	if fired != 1 {
+		t.Fatalf("catch-up should fire ONCE for missed window, got %d", fired)
+	}
+}
+
+// TestMaintenance_NoFireBeforeSundayDue — Saturday 23:59 local must not
+// trip the evaluator; next_due is still in the future.
+func TestMaintenance_NoFireBeforeSundayDue(t *testing.T) {
+	timer := api.MaintenanceTimer{Kind: "workspace-weekly-refresh"}
+	state := newTestState(t)
+
+	loc := time.Local
+	// Saturday 23:59 local — one minute short of Sunday.
+	now := time.Date(2026, 5, 16, 23, 59, 0, 0, loc)
+	// last_fired was the prior Sunday 03:05 (just past 03:00, so next_due
+	// is the NEXT Sunday 03:00).
+	lastFired := time.Date(2026, 5, 10, 3, 5, 0, 0, loc)
+	state.SetMaintenanceFiredAt("workspace-weekly-refresh", lastFired.UTC().Format(time.RFC3339Nano))
+
+	sched := NewMaintenanceScheduler(state)
+	fired := 0
+	sched.SetFireHook(func(t api.MaintenanceTimer) { fired++ })
+	sched.Tick(now, []api.MaintenanceTimer{timer})
+
+	if fired != 0 {
+		t.Fatalf("must not fire before Sun 03:00, got %d fires", fired)
+	}
+}
+
+// TestMaintenance_NoFireWithin6hOfLastFire — last_fired one hour ago at
+// Sun 04:00 local: next_due is the following Sun 03:00, six days out.
+// `now` is one hour later (Sun 05:00) → no fire.
+func TestMaintenance_NoFireWithin6hOfLastFire(t *testing.T) {
+	timer := api.MaintenanceTimer{Kind: "workspace-weekly-refresh"}
+	state := newTestState(t)
+
+	loc := time.Local
+	// `now` is Sunday 05:00 local; last_fired one hour earlier at 04:00.
+	now := time.Date(2026, 5, 17, 5, 0, 0, 0, loc)
+	lastFired := now.Add(-1 * time.Hour) // Sun 04:00 local
+	state.SetMaintenanceFiredAt("workspace-weekly-refresh", lastFired.UTC().Format(time.RFC3339Nano))
+
+	sched := NewMaintenanceScheduler(state)
+	fired := 0
+	sched.SetFireHook(func(t api.MaintenanceTimer) { fired++ })
+	sched.Tick(now, []api.MaintenanceTimer{timer})
+
+	if fired != 0 {
+		t.Fatalf("must not re-fire within 6h of last fire (last=Sun04:00, now=Sun05:00); got %d fires", fired)
+	}
+}
+
+// TestMaintenance_UnknownKindSkipped — unknown kind is logged at warn
+// and skipped; state map remains unchanged.
+func TestMaintenance_UnknownKindSkipped(t *testing.T) {
+	timer := api.MaintenanceTimer{Kind: "future-monthly-thing"}
+	state := newTestState(t)
+
+	// Pre-populate something we can re-check stays exactly as written.
+	const sentinel = "2020-01-01T00:00:00Z"
+	state.SetMaintenanceFiredAt("future-monthly-thing", sentinel)
+
+	loc := time.Local
+	now := time.Date(2026, 5, 17, 4, 0, 0, 0, loc) // Sunday 04:00 local
+
+	sched := NewMaintenanceScheduler(state)
+	fired := 0
+	sched.SetFireHook(func(t api.MaintenanceTimer) { fired++ })
+	sched.Tick(now, []api.MaintenanceTimer{timer})
+
+	if fired != 0 {
+		t.Fatalf("unknown kind must not fire; got %d fires", fired)
+	}
+	got, ok := state.GetMaintenanceFiredAt("future-monthly-thing")
+	if !ok || got != sentinel {
+		t.Fatalf("unknown kind must not mutate state; got (%q,%v) want (%q,true)", got, ok, sentinel)
+	}
+}
+
+// TestMaintenance_FirstFireWithoutPriorTimestamp — empty state, `now` is
+// Sun 04:00 local → fires once, state populated.
+func TestMaintenance_FirstFireWithoutPriorTimestamp(t *testing.T) {
+	timer := api.MaintenanceTimer{Kind: "server-weekly-refresh"}
+	state := newTestState(t)
+	// No SetMaintenanceFiredAt call — state is empty.
+
+	loc := time.Local
+	now := time.Date(2026, 5, 17, 4, 0, 0, 0, loc) // Sunday 04:00 local
+
+	sched := NewMaintenanceScheduler(state)
+	fired := 0
+	sched.SetFireHook(func(t api.MaintenanceTimer) { fired++ })
+	sched.Tick(now, []api.MaintenanceTimer{timer})
+
+	if fired != 1 {
+		t.Fatalf("first fire without prior timestamp must fire once on Sun 03:00+; got %d", fired)
+	}
+	if _, ok := state.GetMaintenanceFiredAt("server-weekly-refresh"); !ok {
+		t.Fatalf("first fire must populate state map for kind")
+	}
+}
+
+// TestMaintenance_FirstFireSkippedBeforeFirstDue — empty state but `now`
+// is mid-week (Wednesday) → no fire yet because the synthetic baseline
+// is most-recent past Sun 03:00 local and next_due is the NEXT Sun
+// 03:00. Without this, a fresh install on Wednesday would fire
+// immediately on the first tick. The spec language "due immediately if
+// now is on/past most recent Sun 03:00 local" must be reconciled with
+// the same algorithm used for the populated path; the canonical reading
+// is: synthesise baseline = most-recent-past Sun 03:00, then compute
+// next_due relative to that baseline. The next_due is therefore
+// most-recent-past Sun 03:00 itself, which is in the past, so fire
+// fires on the first tick after install — but the test below pins down
+// the boundary: on Wednesday the most-recent-past Sun 03:00 was three
+// days ago, which exceeds the 6h window — that's still a single fire
+// per spec "fire ONCE for the missed window". So Wednesday DOES fire.
+//
+// To cover the genuine "no fire" pre-install case we instead pin Sat
+// morning: most-recent-past Sun 03:00 is six days ago; that still
+// fires (catch-up). The only way to NOT fire from empty state is for
+// `now` to be before the very first Sun 03:00 the algorithm can
+// synthesise — which Go's time.Time can always synthesise (year 1).
+// Therefore: from empty state the scheduler ALWAYS fires on the first
+// tick. This test pins that invariant so future refactors don't
+// silently re-introduce a "wait 7 days from cold install" behavior
+// that operators would experience as no maintenance running for a week.
+func TestMaintenance_FirstFireOnAnyDay(t *testing.T) {
+	timer := api.MaintenanceTimer{Kind: "workspace-weekly-refresh"}
+	state := newTestState(t)
+
+	loc := time.Local
+	// Wednesday 14:00 local — empty state.
+	now := time.Date(2026, 5, 13, 14, 0, 0, 0, loc)
+
+	sched := NewMaintenanceScheduler(state)
+	fired := 0
+	sched.SetFireHook(func(t api.MaintenanceTimer) { fired++ })
+	sched.Tick(now, []api.MaintenanceTimer{timer})
+
+	if fired != 1 {
+		t.Fatalf("empty state must catch-up fire once on first tick; got %d", fired)
+	}
+}
+
+// TestMaintenance_PersistedTimestampSerializedAsRFC3339NanoUTC — after
+// fire, the value written into state ends with `Z` and parses cleanly
+// back via time.RFC3339Nano (spec §"Serialized as RFC3339Nano UTC").
+func TestMaintenance_PersistedTimestampSerializedAsRFC3339NanoUTC(t *testing.T) {
+	timer := api.MaintenanceTimer{Kind: "workspace-weekly-refresh"}
+	state := newTestState(t)
+
+	loc := time.Local
+	now := time.Date(2026, 5, 17, 3, 5, 0, 0, loc) // Sunday 03:05 local
+	state.SetMaintenanceFiredAt("workspace-weekly-refresh", now.AddDate(0, 0, -7).Format(time.RFC3339Nano))
+
+	sched := NewMaintenanceScheduler(state)
+	sched.SetFireHook(func(api.MaintenanceTimer) {})
+	sched.Tick(now, []api.MaintenanceTimer{timer})
+
+	got, ok := state.GetMaintenanceFiredAt("workspace-weekly-refresh")
+	if !ok {
+		t.Fatalf("state missing kind entry after fire")
+	}
+	if len(got) == 0 || got[len(got)-1] != 'Z' {
+		t.Fatalf("persisted timestamp must be UTC (Z-suffix); got %q", got)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, got); err != nil {
+		t.Fatalf("persisted timestamp must parse as RFC3339Nano; got %q err=%v", got, err)
+	}
+}

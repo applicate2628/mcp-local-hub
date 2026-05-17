@@ -38,17 +38,23 @@ func (q *qwenCLI) Backup() (string, error) {
 }
 
 func (q *qwenCLI) BackupKeep(keepN int) (string, error) {
-	if _, err := os.Stat(q.path); os.IsNotExist(err) {
-		if err := os.MkdirAll(filepath.Dir(q.path), 0755); err != nil {
-			return "", err
-		}
-		// Route the placeholder stub write through WriteConfigFile so
-		// production gets the SecureWriteClientConfig pipeline.
-		if err := WriteConfigFile(q.path, []byte("{\n  \"mcpServers\": {}\n}\n")); err != nil {
+	if dir := filepath.Dir(q.path); dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return "", err
 		}
 	}
+	if _, err := q.InitEmpty(); err != nil {
+		return "", err
+	}
 	return writeBackup(q.path, q.Name(), keepN)
+}
+
+// InitEmpty seeds ~/.qwen/settings.json with `{"mcpServers": {}}` if
+// the file is absent. Qwen CLI shares the canonical JSON family
+// schema; AddEntry's later merge writes into the same `mcpServers`
+// map.
+func (q *qwenCLI) InitEmpty() (created bool, err error) {
+	return EnsureClientConfigStub(q.path, []byte("{\n  \"mcpServers\": {}\n}\n"))
 }
 
 func (q *qwenCLI) AddEntry(entry MCPEntry) error {

@@ -378,8 +378,23 @@ test.describe("A4-b PR #1: Settings lifecycle", () => {
     // the re-anchor useEffect fires causes the persisted default to overwrite
     // the typed value, leaving schedDirty=false and the Save button disabled.
     await expect(schedInput).not.toHaveValue("");
-    // Change the schedule input
-    await schedInput.fill("weekly Tue 14:30");
+    // Full-suite flake fix: select-all + delete + type via real
+    // keystrokes. SectionDaemons.tsx:94 has a `useEffect(()
+    // => setSchedValue(persistedSched), [persistedSched])` re-anchor
+    // that occasionally re-fires after the value has already settled
+    // (most likely an extra render under full-suite memory/timing
+    // pressure where the snapshot loader re-resolves with an equal-
+    // but-not-Object.is-stable value). A single `fill()` writes the
+    // value then yields control; the re-anchor effect can then
+    // overwrite. Keystroke-by-keystroke typing fires individual
+    // onInput events that the re-anchor cannot undo as a group
+    // (each setSchedValue() commits between keystrokes), so the
+    // final state matches the typed value.
+    await schedInput.focus();
+    await schedInput.press("ControlOrMeta+A");
+    await schedInput.press("Delete");
+    await schedInput.pressSequentially("weekly Tue 14:30", { delay: 20 });
+    await expect(schedInput).toHaveValue("weekly Tue 14:30");
     const saveBtn = page.locator('[data-testid="daemons-save"]');
     // Wait for Preact to re-render with dirty=true before clicking.
     await expect(saveBtn).toBeEnabled();
@@ -405,8 +420,17 @@ test.describe("A4-b PR #1: Settings lifecycle", () => {
     // the Save button disabled. Waiting for a non-empty value ensures the anchor
     // is stable before we modify it.
     await expect(schedInput).not.toHaveValue("");
-    // Now fill with an invalid schedule
-    await schedInput.fill("daily 03:00");
+    // Full-suite flake fix: select-all + delete + keystroke typing.
+    // SectionDaemons.tsx:94's `useEffect(setSchedValue(persistedSched),
+    // [persistedSched])` occasionally re-fires under full-suite
+    // timing pressure and overwrites a single fill() call as a no-op.
+    // Real keystrokes fire individual onInput events between renders
+    // so the re-anchor cannot bulk-revert the typed value.
+    await schedInput.focus();
+    await schedInput.press("ControlOrMeta+A");
+    await schedInput.press("Delete");
+    await schedInput.pressSequentially("daily 03:00", { delay: 20 });
+    await expect(schedInput).toHaveValue("daily 03:00");
     const saveBtn = page.locator('[data-testid="daemons-save"]');
     // Wait for Preact to re-render with dirty=true before clicking.
     await expect(saveBtn).toBeEnabled();

@@ -36,19 +36,22 @@ func (c *cursorClient) Backup() (string, error) {
 }
 
 func (c *cursorClient) BackupKeep(keepN int) (string, error) {
-	if _, err := os.Stat(c.path); os.IsNotExist(err) {
-		// MkdirAll first (production's SecureWriteClientConfig
-		// requires the parent dir to exist); then route the placeholder
-		// write through WriteConfigFile so the empty stub inherits the
-		// production secure-write pipeline.
-		if err := os.MkdirAll(filepath.Dir(c.path), 0755); err != nil {
-			return "", err
-		}
-		if err := WriteConfigFile(c.path, []byte("{\n  \"mcpServers\": {}\n}\n")); err != nil {
+	if dir := filepath.Dir(c.path); dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return "", err
 		}
 	}
+	if _, err := c.InitEmpty(); err != nil {
+		return "", err
+	}
 	return writeBackup(c.path, c.Name(), keepN)
+}
+
+// InitEmpty seeds ~/.cursor/mcp.json with `{"mcpServers": {}}` if the
+// file is absent. Cursor shares the canonical JSON family schema;
+// AddEntry's later merge writes into the same `mcpServers` map.
+func (c *cursorClient) InitEmpty() (created bool, err error) {
+	return EnsureClientConfigStub(c.path, []byte("{\n  \"mcpServers\": {}\n}\n"))
 }
 
 func (c *cursorClient) AddEntry(entry MCPEntry) error {

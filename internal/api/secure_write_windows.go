@@ -509,29 +509,20 @@ func setRestrictiveDACL(fileHandle windows.Handle) error {
 // parent dir's ACEs, so even if the parent has Authenticated Users
 // or similar inheritable read ACEs, they do NOT propagate to this
 // file.
+//
+// v0.5.0 phase 1 task 1.2: body now delegates to BuildAllowlistSD
+// (dacl_shared_windows.go) which renders the same allowlist
+// ({current-user, LocalSystem, BuiltinAdministrators} with GENERIC_ALL)
+// as a PROTECTED DACL via SecurityDescriptorFromString. The two paths
+// produce SDs with identical on-disk ACE binary form (same control
+// bits, same ACE type, same SID set, same masks); the EXPLICIT_ACCESS
+// trustee-type hints from the prior ACLFromEntries path do not survive
+// into the persisted ACE format, and verifyWindowsDACLFromHandleMasked
+// matches by SID equality. The shared primitive will be reused by the
+// v0.5.0 supervisor named-pipe SDDL form (AllowlistMaskPipe), which is
+// why the helper supports both output shapes.
 func buildRestrictiveSecurityDescriptor() (*windows.SECURITY_DESCRIPTOR, error) {
-	dacl, err := buildRestrictiveDACL()
-	if err != nil {
-		return nil, err
-	}
-	sd, err := windows.NewSecurityDescriptor()
-	if err != nil {
-		return nil, fmt.Errorf("new security descriptor: %w", err)
-	}
-	// present=true, defaulted=false — explicit DACL, not the system
-	// default. NewSecurityDescriptor returns an absolute SD by
-	// default; SetDACL operates on that form.
-	if err := sd.SetDACL(dacl, true, false); err != nil {
-		return nil, fmt.Errorf("set DACL on security descriptor: %w", err)
-	}
-	// SE_DACL_PROTECTED prevents inherited ACEs from the parent dir
-	// from re-broadening access on the new file. Matches the
-	// PROTECTED_DACL_SECURITY_INFORMATION flag in step 5's
-	// SetSecurityInfo defense-in-depth re-apply.
-	if err := sd.SetControl(windows.SE_DACL_PROTECTED, windows.SE_DACL_PROTECTED); err != nil {
-		return nil, fmt.Errorf("set PROTECTED control: %w", err)
-	}
-	return sd, nil
+	return BuildAllowlistSD()
 }
 
 // buildRestrictiveDACL constructs the {current-user, LocalSystem,

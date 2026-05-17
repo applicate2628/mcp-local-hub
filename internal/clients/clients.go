@@ -49,6 +49,38 @@ type Client interface {
 	// are no-ops and Backup returns ErrClientNotInstalled.
 	Exists() bool
 
+	// InitEmpty creates the config file with an empty client-shaped stub
+	// (e.g. `{"mcpServers": {}}` for JSON-based clients, `[mcp_servers]\n`
+	// for codex-cli's TOML) if and only if no regular file exists at
+	// the destination. Used by the Servers matrix "Initialize"
+	// affordance (v0.4.5) so an operator who has the client installed
+	// but has never created an MCP config can prepare it from the GUI
+	// without leaving the app.
+	//
+	// Returns (created, err):
+	//
+	//   - created=true, err=nil: this call wrote the stub bytes.
+	//   - created=false, err=nil: a regular file already existed
+	//     (idempotent success — covers the second-click and
+	//     concurrent-writer race-lost cases).
+	//   - created=false, err!=nil: destination is a symlink or
+	//     other non-regular entry (refused), or an I/O failure
+	//     surfaced from the underlying create.
+	//
+	// The call routes through clients.EnsureClientConfigStub which
+	// uses an atomic temp-then-hardlink publish pattern and refuses
+	// to follow symlinks/reparse points at the destination — see
+	// that helper for the security rationale.
+	//
+	// Adapters do NOT mkdir-p the parent directory. Callers must
+	// ensure the parent exists before invoking. The
+	// /api/init-client-config endpoint enforces this with its own
+	// pre-write stat. BackupKeep adapter wrappers (vscode, cursor,
+	// qwen-cli) MkdirAll explicitly before calling InitEmpty since
+	// their seed-then-backup path is the documented "create from
+	// scratch on a fresh host" surface.
+	InitEmpty() (created bool, err error)
+
 	// Backup copies the current config to a sibling file ending in ".bak-mcp-local-hub-<timestamp>"
 	// and returns the path. Overwrites any previous backup with the same timestamp-second.
 	//

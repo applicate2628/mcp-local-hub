@@ -6,9 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+)
+
+// IsProcessInJob is not exported by golang.org/x/sys/windows v0.43.0,
+// so resolve it lazily from kernel32.dll. Used by Job.HasMember below
+// and by the StartWithJob assign-at-create test.
+var (
+	procIsProcessInJob = syscall.NewLazyDLL("kernel32.dll").NewProc("IsProcessInJob")
 )
 
 // Job wraps a Windows Job Object configured with
@@ -89,6 +97,55 @@ func (j *Job) Assign(cmd *exec.Cmd) error {
 		return fmt.Errorf("AssignProcessToJobObject pid=%d: %w", cmd.Process.Pid, err)
 	}
 	return nil
+}
+
+// Handle returns the underlying Job Object handle. Used by
+// StartWithJob to thread the handle through STARTUPINFOEX's attribute
+// list (PROC_THREAD_ATTRIBUTE_JOB_LIST) so the child is associated at
+// create time, closing the Start-then-Assign race documented above.
+//
+// Returns 0 if the receiver is nil or already closed; callers that
+// pass this through unsafe.Pointer must check for zero first.
+func (j *Job) Handle() windows.Handle {
+	if j == nil {
+		return 0
+	}
+	return j.handle
+}
+
+// HasMember returns true if pid is currently a member of this Job
+// Object. Used by StartWithJob tests and (in v0.5.0) by the cold-start
+// reaper to verify assignment after re-adopting an orphan daemon.
+//
+// Returns false on any syscall failure — OpenProcess can fail because
+// the PID has already been reaped, because the calling process lacks
+// PROCESS_QUERY_LIMITED_INFORMATION rights, or because IsProcessInJob
+// itself fails. The helper is safe to call defensively; callers that
+// need to distinguish "not a member" from "could not determine" must
+// use the kernel32 API directly.
+func (j *Job) HasMember(pid int) bool {
+	if j == nil || j.handle == 0 {
+		return false
+	}
+	if pid <= 0 {
+		return false
+	}
+	hProc, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	if err != nil {
+		return false
+	}
+	defer windows.CloseHandle(hProc)
+	var isMember int32
+	r1, _, _ := procIsProcessInJob.Call(
+		uintptr(hProc),
+		uintptr(j.handle),
+		uintptr(unsafe.Pointer(&isMember)),
+	)
+	if r1 == 0 {
+		// IsProcessInJob returned FALSE — syscall failed.
+		return false
+	}
+	return isMember != 0
 }
 
 // Close releases the job handle. When this is the last handle, the

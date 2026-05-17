@@ -2,11 +2,13 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"unicode"
@@ -15,6 +17,7 @@ import (
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/buildinfo"
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/migration"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -33,6 +36,13 @@ func newInstallCmdReal() *cobra.Command {
 	var allClients bool
 	var reconcileHubMode bool
 	var upgrade bool
+	// v0.5.0 phase 16 (Fix Group 1 / codex-c-p0-4) flags. They tune
+	// the migration.RunForward / migration.RunRollback behavior the
+	// --upgrade routing branch dispatches to. Each is independently
+	// optional; combinations are validated inside the routing branch.
+	var rollbackToLegacy bool
+	var discardSchedulerCustomizations bool
+	var migrationStrictTemplate bool
 	c := &cobra.Command{
 		Use:   "install",
 		Short: "Install an MCP server as shared daemon(s)",
@@ -65,6 +75,19 @@ Prerequisites:
 
 See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// v0.5.0 phase 16 (Fix Group 1 / codex-c-p0-4):
+			// --rollback-to-legacy routes through migration.RunRollback
+			// to demote a v0.5.0 supervisor install back to the
+			// v0.4.x Scheduler-backed layout. Mutually exclusive with
+			// the manifest-install and --upgrade flag families — like
+			// --upgrade, this is a single-machine-state migration
+			// command that must not be combined with per-server work.
+			if rollbackToLegacy {
+				if server != "" || daemonFilter != "" || all || strings.TrimSpace(clientsFlag) != "" || allClients || reconcileHubMode || dryRun || upgrade {
+					return fmt.Errorf("--rollback-to-legacy is mutually exclusive with --server/--daemon/--all/--clients/--all-clients/--reconcile-hub-mode/--dry-run/--upgrade")
+				}
+				return runMigrationRollback(cmd)
+			}
 			// Bug-bash A7 minimal closure (#4): --upgrade is the
 			// one-shot binary replacement entry point. Pre-A7 the
 			// operator had to stop daemons, run `mcphub setup` to
@@ -84,7 +107,28 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				if server != "" || daemonFilter != "" || all || strings.TrimSpace(clientsFlag) != "" || allClients || reconcileHubMode || dryRun {
 					return fmt.Errorf("--upgrade is mutually exclusive with --server/--daemon/--all/--clients/--all-clients/--reconcile-hub-mode/--dry-run")
 				}
-				return runInstallUpgrade(cmd)
+				// v0.5.0 phase 16 (Fix Group 1 / codex-c-p0-4): route
+				// --upgrade based on machine state. The legacy
+				// runInstallUpgrade only handles the v0.4.x → v0.4.y
+				// Scheduler-orchestrated binary swap; the v0.5.0
+				// supervisor architecture needs a different code
+				// path for both the "first time crossing the v0.5.0
+				// boundary" case (forward migration) and the
+				// "already on v0.5.0, replacing the binary in place"
+				// case (cold-restart upgrade per spec §"Upgrade
+				// sequence"). Decision tree below.
+				return dispatchUpgrade(cmd, dispatchUpgradeOpts{
+					DiscardSchedulerCustomizations: discardSchedulerCustomizations,
+					StrictTemplate:                 migrationStrictTemplate,
+				})
+			}
+			// --discard-scheduler-customizations and
+			// --migration-strict-template are migration-only flags;
+			// they have no meaning outside the --upgrade/--rollback-to-legacy
+			// routing. Reject loudly so operators get an actionable
+			// error rather than a silent no-op.
+			if discardSchedulerCustomizations || migrationStrictTemplate {
+				return fmt.Errorf("--discard-scheduler-customizations / --migration-strict-template require --upgrade or --rollback-to-legacy")
 			}
 			// codex bot phase5 r3 P1 closure on PR #160:
 			// --reconcile-hub-mode runs the bidirectional install
@@ -194,6 +238,22 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 			"stop every mcp-local-hub-* daemon, copy this binary over the canonical path, "+
 			"then restart every daemon from the new binary. Refuses when run from the canonical "+
 			"path (run from your build directory, e.g. './mcphub install --upgrade' after 'go build').")
+	// v0.5.0 phase 16 (Fix Group 1 / codex-c-p0-4) migration flags.
+	c.Flags().BoolVar(&rollbackToLegacy, "rollback-to-legacy", false,
+		"demote a v0.5.0 supervisor install back to the v0.4.x Scheduler-backed layout via migration.RunRollback. "+
+			"Tears down supervisor-intent.json + supervisor-state.json + supervisor-events.log, "+
+			"re-registers the legacy mcp-local-hub-* Scheduler tasks from the latest migration journal, "+
+			"and waits for each daemon to re-bind its port. Requires a prior forward migration journal "+
+			"(<state-dir>/migration-journal-*); see `mcphub watchdog status` for path resolution.")
+	c.Flags().BoolVar(&discardSchedulerCustomizations, "discard-scheduler-customizations", false,
+		"during forward migration (--upgrade routing from v0.4.x), accept hard XML deviations "+
+			"(HasUnsupportedAbort) and proceed; without this flag the migration refuses to overwrite "+
+			"operator-customized Scheduler XML (Run As account changes, custom triggers, etc.). "+
+			"No effect outside --upgrade migration routing.")
+	c.Flags().BoolVar(&migrationStrictTemplate, "migration-strict-template", false,
+		"during forward migration, treat any KindUnknownDrift deviation as an abort condition. "+
+			"By default unknown drift produces a journal warning but the migration proceeds. "+
+			"No effect outside --upgrade migration routing.")
 	return c
 }
 
@@ -856,16 +916,16 @@ func findRunningGUIsOnTarget(a *api.API, target string) ([]api.ProcessInfo, erro
 //
 // Match strategy (codex bot r2-r4 closures on PR #188):
 //
-//	1. Try case-insensitive prefix match: cmdline starts with
-//	   `target` (literal path). Handles the common case and
-//	   target paths containing spaces (r2/r3 closures).
-//	2. If prefix match fails, extract the image path from
-//	   cmdline (everything up to the first whitespace not
-//	   inside quotes) and compare via os.SameFile (r4 closure).
-//	   Catches 8.3 short paths, junctions/symlinks, and other
-//	   canonicalization aliases that the prefix match misses
-//	   because the cmdline holds the alias, not the canonical
-//	   target string.
+//  1. Try case-insensitive prefix match: cmdline starts with
+//     `target` (literal path). Handles the common case and
+//     target paths containing spaces (r2/r3 closures).
+//  2. If prefix match fails, extract the image path from
+//     cmdline (everything up to the first whitespace not
+//     inside quotes) and compare via os.SameFile (r4 closure).
+//     Catches 8.3 short paths, junctions/symlinks, and other
+//     canonicalization aliases that the prefix match misses
+//     because the cmdline holds the alias, not the canonical
+//     target string.
 //
 // After the image-path match (either path), the next non-space
 // token must be "gui" (or end-of-string for Explorer-double-
@@ -1130,3 +1190,235 @@ func upgradeRestartAll(a *api.API) ([]api.RestartResult, error) {
 	}
 	return a.RestartAll()
 }
+
+// ---------------------------------------------------------------------------
+// v0.5.0 phase 16 (Fix Group 1 / codex-c-p0-4): migration routing.
+//
+// The --upgrade flag's behavior depends on machine state:
+//
+//   1. Fresh install (no v0.4.x scheduler tasks, no v0.5.0 supervisor-
+//      intent.json) → fall through to legacy runInstallUpgrade so the
+//      binary-copy + Scheduler restart path still works for first
+//      installs from a build directory.
+//   2. v0.4.x present (legacy scheduler tasks but no supervisor-intent)
+//      → migration.RunForward to migrate to the v0.5.0 supervisor
+//      architecture.
+//   3. v0.5.0 present (supervisor-intent.json on disk) → cli.RunInstallUpgrade
+//      to drive the rename-aside + IPC handoff per spec §"Upgrade sequence".
+//
+// The --rollback-to-legacy flag is a separate entry point that
+// unconditionally invokes migration.RunRollback (it would be a no-op
+// or error on a machine with no migration journal, which the migration
+// driver itself reports).
+//
+// Production deps wiring lives in install_migration_wiring_windows.go
+// (Windows-only) — the supervisor-spawn / IPC / netstat surfaces are
+// all Windows-specific. POSIX builds compile a stub that returns
+// ErrPosixNotSupported when invoked (forward migration from v0.4.x has
+// no POSIX path per spec Q9).
+// ---------------------------------------------------------------------------
+
+// dispatchUpgradeOpts carries the migration-tuning flags from the
+// install command's RunE down to the routing helper. Kept as a small
+// struct so the routing layer can grow new toggles without forcing
+// every test fixture to update its signature.
+type dispatchUpgradeOpts struct {
+	DiscardSchedulerCustomizations bool
+	StrictTemplate                 bool
+}
+
+// migrationDispatcher is the function-pointer seam tests inject to
+// override the production routing. nil → use the real
+// dispatchUpgradeReal helper. Tests set this in setup and clear in
+// teardown to keep production logic out of their assertion path.
+var migrationDispatcher func(cmd *cobra.Command, opts dispatchUpgradeOpts) error
+
+// migrationRollbackDispatcher is the analogous seam for
+// --rollback-to-legacy. nil → use the real runMigrationRollbackReal
+// helper.
+var migrationRollbackDispatcher func(cmd *cobra.Command) error
+
+// dispatchUpgrade routes the --upgrade command per the machine-state
+// decision tree above. Public seam (`migrationDispatcher`) lets tests
+// stub it without driving the real Windows-only wiring.
+func dispatchUpgrade(cmd *cobra.Command, opts dispatchUpgradeOpts) error {
+	if migrationDispatcher != nil {
+		return migrationDispatcher(cmd, opts)
+	}
+	return dispatchUpgradeReal(cmd, opts)
+}
+
+// runMigrationRollback routes the --rollback-to-legacy command through
+// the test seam (`migrationRollbackDispatcher`) or the real
+// runMigrationRollbackReal helper.
+func runMigrationRollback(cmd *cobra.Command) error {
+	if migrationRollbackDispatcher != nil {
+		return migrationRollbackDispatcher(cmd)
+	}
+	return runMigrationRollbackReal(cmd)
+}
+
+// hasSupervisorIntent reports whether the v0.5.0 supervisor-intent.json
+// is present in the state-dir. Absent = either v0.4.x or fresh install;
+// present = v0.5.x machine (same-version upgrade path).
+//
+// Returns (false, nil) on os.ErrNotExist for both the file and its
+// parent directory — both mean "no v0.5.0 intent on disk" and the
+// caller treats them identically.
+func hasSupervisorIntent() (bool, error) {
+	stateDir, err := api.DaemonStateDir()
+	if err != nil {
+		// Treat "cannot resolve state-dir" as "no v0.5.0 intent" rather
+		// than aborting upgrade routing. The error itself will resurface
+		// during the migration driver's lock-acquisition step if it is
+		// actually load-bearing, with a more actionable diagnostic; for
+		// the routing decision a missing state-dir means "fresh install".
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("resolve state-dir: %w", err)
+	}
+	path := filepath.Join(stateDir, "supervisor-intent.json")
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("stat %s: %w", path, err)
+	}
+	if info.IsDir() {
+		// Corrupt state-dir: a directory named supervisor-intent.json.
+		// Round-4 fix (codex-r4-a/c-p1): the prior silent (false, nil)
+		// branch let the dispatcher fall through to legacy
+		// runInstallUpgrade even though os.Stat reports the path
+		// exists — the round-3 unreadable-intent guard inside
+		// runV5UpgradeWindows then never fires. Surface a non-nil
+		// error so the routing dispatcher fails closed and the
+		// operator sees the corruption shape.
+		return false, fmt.Errorf("hasSupervisorIntent: %s is a directory (corrupt state-dir; rename/delete and re-run)", path)
+	}
+	if !info.Mode().IsRegular() {
+		// Defense-in-depth for symlink / named pipe / socket / device
+		// entries that resolved through os.Stat to a non-regular kind.
+		// Same fail-closed rationale as the IsDir branch above.
+		return false, fmt.Errorf("hasSupervisorIntent: %s is not a regular file (mode %v)", path, info.Mode())
+	}
+	return true, nil
+}
+
+// hasLegacySchedulerTasks reports whether the host has any v0.4.x
+// `mcp-local-hub-*` Scheduler tasks installed. Used as the
+// "fresh install vs v0.4.x" discriminator in the upgrade routing
+// decision. Test seam `schedulerEnumeratorFn` lets unit tests inject a
+// canned task list without hitting the real Scheduler.
+var schedulerEnumeratorFn func() (int, error)
+
+func hasLegacySchedulerTasks() (bool, error) {
+	if schedulerEnumeratorFn != nil {
+		n, err := schedulerEnumeratorFn()
+		return n > 0, err
+	}
+	// Production path is Windows-only; POSIX returns false (forward
+	// migration from v0.4.x has no POSIX path per spec Q9). The
+	// concrete enumerator lives in install_migration_wiring_windows.go
+	// behind enumeratorAdapter; if it is nil at runtime we treat the
+	// host as having no legacy tasks (the legacy runInstallUpgrade
+	// fallback path).
+	if enumerateAllMcphubTasksFn == nil {
+		return false, nil
+	}
+	n, err := enumerateAllMcphubTasksFn()
+	if err != nil {
+		return false, fmt.Errorf("enumerate scheduler: %w", err)
+	}
+	return n > 0, nil
+}
+
+// dispatchUpgradeReal implements the production routing branch. It
+// asks api.DaemonStateDir + os.Stat about supervisor-intent.json, the
+// Windows scheduler enumerator about legacy task presence, then
+// dispatches to one of three sinks:
+//
+//   - migration.RunForward (v0.4.x → v0.5.0)
+//   - cli.RunInstallUpgrade (v0.5.0 → v0.5.x same-version upgrade)
+//   - runInstallUpgrade legacy body (fresh install / Scheduler-only)
+//
+// Any state-probe failure short-circuits with the wrapped error so the
+// operator sees the real cause instead of a confused fallback.
+func dispatchUpgradeReal(cmd *cobra.Command, opts dispatchUpgradeOpts) error {
+	supervisorPresent, err := hasSupervisorIntent()
+	if err != nil {
+		return fmt.Errorf("upgrade routing: probe supervisor-intent.json: %w", err)
+	}
+	if supervisorPresent {
+		return runV5UpgradeReal(cmd)
+	}
+	legacyPresent, err := hasLegacySchedulerTasks()
+	if err != nil {
+		return fmt.Errorf("upgrade routing: enumerate scheduler tasks: %w", err)
+	}
+	if legacyPresent {
+		return runForwardMigrationReal(cmd, opts)
+	}
+	// Fresh install: no v0.4.x state, no v0.5.0 state. Fall through to
+	// the legacy runInstallUpgrade body so first-time copy + Scheduler
+	// restart still works.
+	return runInstallUpgrade(cmd)
+}
+
+// runForwardMigrationReal wires migration.RunForward with the
+// production Windows-only callbacks. The wiring helpers live in
+// install_migration_wiring_windows.go so the POSIX stub can return
+// migration.ErrPosixNotSupported without dragging Windows imports.
+func runForwardMigrationReal(cmd *cobra.Command, opts dispatchUpgradeOpts) error {
+	if forwardMigrationFn == nil {
+		// POSIX or unwired production path. Surface the migration
+		// package's own sentinel so the caller's error message names
+		// the correct constraint.
+		return migration.ErrPosixNotSupported
+	}
+	return forwardMigrationFn(cmd, opts)
+}
+
+// runV5UpgradeReal wires the rename-aside + IPC handoff path through
+// cli.RunInstallUpgrade. Production wiring lives in
+// install_migration_wiring_windows.go.
+func runV5UpgradeReal(cmd *cobra.Command) error {
+	if v5UpgradeFn == nil {
+		// POSIX or unwired production path. The v0.5.0 cold-restart
+		// upgrade flow targets a Windows supervisor; POSIX builds
+		// reach this branch only via misuse and the legacy
+		// runInstallUpgrade is the closest safe fallback.
+		return runInstallUpgrade(cmd)
+	}
+	return v5UpgradeFn(cmd)
+}
+
+// runMigrationRollbackReal wires migration.RunRollback with the
+// production Windows-only callbacks. POSIX returns
+// migration.ErrPosixNotSupported because rollback's pre-flight token
+// probe + supervisor IPC have no POSIX implementation in v0.5.0.
+func runMigrationRollbackReal(cmd *cobra.Command) error {
+	if rollbackMigrationFn == nil {
+		return migration.ErrPosixNotSupported
+	}
+	return rollbackMigrationFn(cmd)
+}
+
+// Production-wiring seams. These are set by init functions in
+// install_migration_wiring_windows.go (Windows) or remain nil on
+// POSIX. Tests can override them too via the migrationDispatcher /
+// migrationRollbackDispatcher higher-level seam (preferred — keeps
+// test fakes routed through a single chokepoint).
+var (
+	enumerateAllMcphubTasksFn func() (int, error)
+	forwardMigrationFn        func(cmd *cobra.Command, opts dispatchUpgradeOpts) error
+	v5UpgradeFn               func(cmd *cobra.Command) error
+	rollbackMigrationFn       func(cmd *cobra.Command) error
+)
+
+// _ contextSink keeps the context import in scope on POSIX builds
+// where the migration package's RunForward/RunRollback signatures are
+// the only consumers (Windows wires them via the helper file). The
+// unused-import error otherwise breaks GOOS=linux/darwin builds.
+var _ = context.Background

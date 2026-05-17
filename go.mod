@@ -4,6 +4,7 @@ go 1.26.2
 
 require (
 	filippo.io/age v1.3.1
+	github.com/Microsoft/go-winio v0.6.2
 	github.com/atotto/clipboard v0.1.4
 	github.com/gofrs/flock v0.13.0
 	github.com/modelcontextprotocol/go-sdk v1.5.0

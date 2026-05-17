@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -254,4 +255,305 @@ func firstPerSessionServer(t *testing.T) string {
 	}
 	t.Fatalf("perSessionServers is empty; TestClassify expected at least one entry")
 	return ""
+}
+
+// TestProbeClientConfigPresence_StateMachine pins the three-way
+// classification probeClientConfigPresence emits in v0.4.5+:
+//   - "ok"                     : file present on disk
+//   - "missing-init-possible"  : file absent but parent directory
+//                                exists (operator has the client
+//                                installed; GUI Initialize button is
+//                                offered)
+//   - "missing"                : neither file nor parent dir exists
+//                                (client genuinely not installed)
+//
+// The frontend gates the per-column "Initialize" affordance on
+// state == "missing-init-possible", so this contract is part of the
+// UI's behavior.
+func TestProbeClientConfigPresence_StateMachine(t *testing.T) {
+	tmp := t.TempDir()
+
+	// vscode: parent dir exists, file absent → missing-init-possible.
+	vscodeParent := filepath.Join(tmp, "Code", "User")
+	if err := os.MkdirAll(vscodeParent, 0o755); err != nil {
+		t.Fatalf("mkdir vscode parent: %v", err)
+	}
+	vscodePath := filepath.Join(vscodeParent, "mcp.json")
+
+	// cursor: parent dir DOES NOT exist → missing (genuine "not installed").
+	cursorPath := filepath.Join(tmp, "no-such-dir", "mcp.json")
+
+	// claude-code: file present → ok.
+	claudePath := filepath.Join(tmp, ".claude.json")
+	if err := os.WriteFile(claudePath, []byte(`{"mcpServers":{}}`), 0o600); err != nil {
+		t.Fatalf("write claude.json: %v", err)
+	}
+
+	// codex-cli: empty (not passed) — must be omitted from the result map.
+	out := probeClientConfigPresence(ScanOpts{
+		VSCodeConfigPath:  vscodePath,
+		CursorConfigPath:  cursorPath,
+		ClaudeConfigPath:  claudePath,
+		// CodexConfigPath intentionally omitted.
+	})
+
+	if got := out["vscode"]; got != "missing-init-possible" {
+		t.Errorf("vscode (parent dir present, file absent) = %q, want missing-init-possible", got)
+	}
+	if got := out["cursor"]; got != "missing" {
+		t.Errorf("cursor (parent dir absent) = %q, want missing", got)
+	}
+	if got := out["claude-code"]; got != "ok" {
+		t.Errorf("claude-code (file present) = %q, want ok", got)
+	}
+	if _, ok := out["codex-cli"]; ok {
+		t.Errorf("codex-cli should not appear in result when path is empty; got %v", out["codex-cli"])
+	}
+}
+
+// TestProbeClientConfigPresence_DanglingSymlink pins the v0.4.5
+// deep-sec PR #208 Lane B round 4 P2 closure: a dangling symlink at
+// the config path must surface as "error", not "missing-init-possible".
+// Previously os.Stat followed the symlink, returned IsNotExist
+// (target absent), and classifyMissingClientConfig saw the parent
+// dir exists → "missing-init-possible" → GUI offered Initialize →
+// secure-create refused → 500 INIT_FAILED. The Lstat-first probe
+// now classifies symlinks (dangling or not) as "error" so the
+// matrix renders the config-error diagnostic instead.
+func TestProbeClientConfigPresence_DanglingSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevation on Windows; the cross-platform Lstat probe is exercised by the POSIX path")
+	}
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "no-such-target.dat")
+	link := filepath.Join(tmp, "mcp.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("create dangling symlink: %v", err)
+	}
+
+	out := probeClientConfigPresence(ScanOpts{VSCodeConfigPath: link})
+	if got := out["vscode"]; got != "error" {
+		t.Errorf("dangling symlink at config path classified as %q, want \"error\"", got)
+	}
+}
+
+// TestProbeClientConfigPresence_DirectoryAtConfigPath pins the v0.4.5
+// deep-sec PR #208 Lane B round 5 P2 closure: a directory at the
+// config path must surface as "error", not "ok". Previously the
+// Lstat probe only rejected symlinks; a directory passed through to
+// os.Stat which succeeded and the cell was classified as "ok" —
+// migrate/backup would then fail later when adapter.readJSON tried
+// to read a directory.
+func TestProbeClientConfigPresence_DirectoryAtConfigPath(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "mcp.json")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("seed directory at config path: %v", err)
+	}
+
+	out := probeClientConfigPresence(ScanOpts{VSCodeConfigPath: path})
+	if got := out["vscode"]; got != "error" {
+		t.Errorf("directory at config path classified as %q, want \"error\"", got)
+	}
+}
+
+// TestProbeClientConfigPresence_SymlinkToRegularDefaultMode pins
+// the post-PR-#209 contract: symlink-to-existing-regular-file in
+// DEFAULT mode classifies as "error" because PR #209 removed
+// `resolveSymlinkForSecureWrite` from `secureWriteWithOperatorOpt` —
+// writes through `SecureWriteClientConfig` now refuse pre-existing
+// symlinks in ALL modes. Reporting "ok" while writes deterministically
+// fail with symlink-refuse errors is the exact UX trap codex bot r7
+// flagged (PR #208 review on commit de3ba74): user sees a green
+// matrix column, clicks Apply, every write fails. Aligning presence
+// with the active write contract restores invariant "ok = write will
+// succeed".
+//
+// Trade-off: dotfile-symlink setups (e.g., `~/.codex/config.toml
+// -> E:\dotfiles\.codex\config.toml`) that used to rely on default-
+// mode resolve-to-target are now unsupported by design. The security
+// boundary closure in PR #209 (confused-deputy integrity protection)
+// took precedence over the dotfile UX. Operators with this pattern
+// can either remove the symlink or manage the target file directly.
+func TestProbeClientConfigPresence_SymlinkToRegularDefaultMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevation on Windows; the cross-platform Lstat probe is exercised by the POSIX path")
+	}
+	// Ensure strict mode is OFF for this test.
+	t.Setenv(RequireSingleUserHomeEnv, "")
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "real-config.json")
+	if err := os.WriteFile(target, []byte(`{"servers": {}}`), 0o600); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	link := filepath.Join(tmp, "mcp.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	out := probeClientConfigPresence(ScanOpts{VSCodeConfigPath: link})
+	if got := out["vscode"]; got != "error" {
+		t.Errorf("symlink-to-regular in default mode classified as %q, want \"error\" (write pipeline refuses symlinks post-PR-#209)", got)
+	}
+}
+
+// TestProbeClientConfigPresence_SymlinkToRegularStrictMode pins the
+// strict-mode contract: even if the symlink target is a regular
+// file, strict mode refuses any symlink because the secure-write
+// pipeline refuses to follow symlinks under
+// MCPHUB_REQUIRE_SINGLE_USER_HOME=1.
+func TestProbeClientConfigPresence_SymlinkToRegularStrictMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevation on Windows")
+	}
+	t.Setenv(RequireSingleUserHomeEnv, "1")
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "real-config.json")
+	if err := os.WriteFile(target, []byte(`{"servers": {}}`), 0o600); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	link := filepath.Join(tmp, "mcp.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	out := probeClientConfigPresence(ScanOpts{VSCodeConfigPath: link})
+	if got := out["vscode"]; got != "error" {
+		t.Errorf("symlink-to-regular in strict mode classified as %q, want \"error\"", got)
+	}
+}
+
+// TestScanFrom_DirectoryAtConfigPathDoesNotFailWholeScan pins the
+// v0.4.5 deep-sec PR #208 Lane B round 6 P2 #2 closure: a directory
+// at one client's config path must NOT propagate as a whole-scan
+// 500 SCAN_FAILED. The presence-first ordering in ScanFrom skips
+// adapter reads for non-"ok" clients so the per-client diagnostic
+// (client_config_presence["vscode"] == "error") reaches the frontend.
+func TestScanFrom_DirectoryAtConfigPathDoesNotFailWholeScan(t *testing.T) {
+	tmp := t.TempDir()
+	// Seed a directory at vscode's config path.
+	vscodeBogus := filepath.Join(tmp, "vscode-mcp-as-dir")
+	if err := os.MkdirAll(vscodeBogus, 0o755); err != nil {
+		t.Fatalf("seed dir: %v", err)
+	}
+	// And a valid claude config alongside, to verify the rest of
+	// the scan continues.
+	claudePath := filepath.Join(tmp, ".claude.json")
+	if err := os.WriteFile(claudePath, []byte(`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9123/mcp"}}}`), 0o600); err != nil {
+		t.Fatalf("seed claude: %v", err)
+	}
+
+	a := NewAPI()
+	result, err := a.ScanFrom(ScanOpts{
+		VSCodeConfigPath: vscodeBogus,
+		ClaudeConfigPath: claudePath,
+		ManifestDir:      t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("ScanFrom returned error on directory-at-config-path: %v (expected partial success)", err)
+	}
+	if got := result.ClientConfigPresence["vscode"]; got != "error" {
+		t.Errorf("client_config_presence[vscode]=%q, want \"error\"", got)
+	}
+	// Claude scan still ran and produced an entry for memory.
+	foundMemory := false
+	for _, e := range result.Entries {
+		if e.Name == "memory" {
+			foundMemory = true
+		}
+	}
+	if !foundMemory {
+		t.Errorf("memory entry from claude scan missing; partial scan should still surface valid clients")
+	}
+}
+
+// TestClassifyMissingClientConfig pins the helper in isolation. It is
+// the canonical place to extend if v0.5.x adds further classification
+// (e.g., "parent-is-symlink" or "parent-not-writable").
+func TestClassifyMissingClientConfig(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Case: parent dir is a directory.
+	if got := classifyMissingClientConfig(filepath.Join(tmp, "mcp.json")); got != "missing-init-possible" {
+		t.Errorf("file in existing dir: got %q, want missing-init-possible", got)
+	}
+
+	// Case: parent does not exist.
+	if got := classifyMissingClientConfig(filepath.Join(tmp, "nope", "mcp.json")); got != "missing" {
+		t.Errorf("file in non-existent parent: got %q, want missing", got)
+	}
+
+	// Case: parent path points at a file (not a directory).
+	regularFile := filepath.Join(tmp, "regular")
+	if err := os.WriteFile(regularFile, []byte("not a dir"), 0o600); err != nil {
+		t.Fatalf("seed regular file: %v", err)
+	}
+	if got := classifyMissingClientConfig(filepath.Join(regularFile, "mcp.json")); got != "missing" {
+		t.Errorf("parent-is-file: got %q, want missing", got)
+	}
+}
+
+// TestClassifyMissingClientConfig_SymlinkedParent pins the v0.4.5
+// PR #208 codex r1 F2 closure: when the config file's parent is a
+// symlink (dotfile-management pattern: ~/.config/Claude/ symlinked to
+// a real dotfile repo), classify must return
+// "missing-init-blocked-symlink" so the GUI suppresses the Initialize
+// affordance. The hardened init pipeline refuses to follow parent
+// symlinks (POSIX O_NOFOLLOW; Windows FILE_FLAG_OPEN_REPARSE_POINT
+// without resolution), so a button click would deterministically
+// fail with INIT_FAILED — broken UX.
+//
+// Pre-fix: os.Stat(parent) followed the symlink, returned IsDir=true
+// for the resolved target, classify reported "missing-init-possible",
+// GUI offered Initialize, click failed.
+//
+// Post-fix: os.Lstat(parent) detects the symlink directly,
+// classify reports the blocked-symlink state.
+func TestClassifyMissingClientConfig_SymlinkedParent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevation on Windows; the cross-platform Lstat probe is exercised by the POSIX path")
+	}
+	tmp := t.TempDir()
+	// Real target dir (where dotfiles actually live).
+	target := filepath.Join(tmp, "real-dotfiles", "Claude")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+	// Symlinked parent (where the client expects its config dir).
+	link := filepath.Join(tmp, "Claude")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+	got := classifyMissingClientConfig(filepath.Join(link, "claude_desktop_config.json"))
+	if got != "missing-init-blocked-symlink" {
+		t.Errorf("symlinked parent: got %q, want missing-init-blocked-symlink", got)
+	}
+}
+
+// TestProbeClientConfigPresence_SymlinkedParent verifies the new
+// state surfaces end-to-end through probeClientConfigPresence (the
+// production caller of classifyMissingClientConfig). Companion test
+// to TestClassifyMissingClientConfig_SymlinkedParent that exercises
+// the same case through the full presence map.
+func TestProbeClientConfigPresence_SymlinkedParent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevation on Windows")
+	}
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "real-dotfiles", "Code", "User")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+	link := filepath.Join(tmp, "Code", "User")
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatalf("mkdir link parent: %v", err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+	vscodePath := filepath.Join(link, "mcp.json")
+	out := probeClientConfigPresence(ScanOpts{VSCodeConfigPath: vscodePath})
+	if got := out["vscode"]; got != "missing-init-blocked-symlink" {
+		t.Errorf("vscode with symlinked parent: got %q, want missing-init-blocked-symlink", got)
+	}
 }

@@ -91,7 +91,30 @@ export function perClientRouting(
     const state = clientConfigPresence[client];
     if (state === "ok" && canMigrate) {
       routing[client] = "available";
+    } else if (state === "error") {
+      // v0.4.5 PR #208 deep-sec Lane B follow-up: a non-IsNotExist
+      // stat failure (permissions, ACL anomaly, I/O error) was
+      // previously collapsed into "not-installed" and rendered with
+      // the misleading "config file is not present" tooltip. Surface
+      // the error state distinctly so the matrix can render a
+      // diagnostic tooltip and the operator can take action.
+      routing[client] = "config-error";
     } else {
+      // v0.4.5 init-button: "missing-init-possible" still maps to
+      // "not-installed" at the per-cell routing level — the matrix
+      // cell stays a disabled checkbox until the operator clicks
+      // the per-column Initialize button in the header (which writes
+      // the empty stub and triggers a scan refresh, after which the
+      // state flips to "ok" and the cells become "available"). This
+      // keeps the cell state machine identical for "client absent"
+      // vs "client present but unconfigured"; only the header
+      // affordance distinguishes them.
+      //
+      // v0.4.5 PR #208 codex r1 F2: "missing-init-blocked-symlink"
+      // also falls through here so the cell is a disabled checkbox;
+      // the matrix header further suppresses the Initialize button
+      // for this state because the hardened init pipeline would
+      // refuse the symlinked parent.
       routing[client] = "not-installed";
     }
   }

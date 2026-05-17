@@ -1,9 +1,15 @@
-import { useEffect, useState } from "preact/hooks";
-import { fetchOrThrow } from "../api";
+import { useEffect, useRef, useState } from "preact/hooks";
+import { fetchOrThrow, postInitClientConfig, InitClientConfigError } from "../api";
 import { useEventSource } from "../hooks/useEventSource";
 import { collectServers } from "../lib/routing";
 import { aggregateStatus, stateShape } from "../lib/status";
-import type { DaemonStatus, ScanResult, ServerRow, Routing } from "../types";
+import type {
+  ClientConfigState,
+  DaemonStatus,
+  ScanResult,
+  ServerRow,
+  Routing,
+} from "../types";
 
 const CLIENTS = [
   "claude-code",
@@ -14,6 +20,17 @@ const CLIENTS = [
   "qwen-cli",
   "antigravity",
 ] as const;
+
+// EMPTY_CLIENT_CONFIG_PRESENCE is a stable reference used when a scan
+// response omits client_config_presence (e.g. /api/scan mocks in
+// Playwright tests). Without a stable reference, every scan refetch
+// would call setClientConfigPresence with a fresh `{}`, triggering a
+// re-render even when no presence info changed — that in turn
+// compresses the "Applied. Refreshing…" visible window enough to
+// destabilize the B1 §5 e2e timing assertions. React/Preact bail out
+// when Object.is(prev, next) is true, so reusing this constant
+// short-circuits the redundant render.
+const EMPTY_CLIENT_CONFIG_PRESENCE: Record<string, ClientConfigState> = {};
 
 // Per-cell dirty tracking with direction preserved. Outer key: server name.
 // Inner map: client → Direction.
@@ -48,6 +65,24 @@ export function ServersScreen() {
   const [servers, setServers] = useState<ServerRow[] | null>(null);
   const [statusByServer, setStatusByServer] = useState<Record<string, { state: string; port: number | null }>>({});
   const [error, setError] = useState<string | null>(null);
+  // v0.4.5 init-button: client_config_presence drives the per-column
+  // "Initialize <client>" header affordance. Stored alongside servers
+  // so applyChanges → refresh re-resolves into the new "ok" state and
+  // the button disappears once the empty stub lands on disk.
+  const [clientConfigPresence, setClientConfigPresence] = useState<
+    Record<string, ClientConfigState>
+  >({});
+  // Per-client "initializing" flag: the operator clicked the
+  // Initialize button and the POST is in flight. Used to disable the
+  // button + render a spinner-like dim state so double-clicks during
+  // the brief network roundtrip do not enqueue redundant inits.
+  const [initBusy, setInitBusy] = useState<Record<string, boolean>>({});
+  // Banner that surfaces the most recent init result (success or
+  // failure). Cleared automatically on the next /api/scan refresh so
+  // a successful init doesn't linger across screen interactions; an
+  // error message persists until the operator clicks Initialize again
+  // or navigates away.
+  const [initMsg, setInitMsg] = useState<{ text: string; kind: "ok" | "error" } | null>(null);
   const [dirty, setDirty] = useState<DirtyMap>(new Map());
   // PR #22 retry-queue UX fix: persist last-Apply outcomes so toggleCell
   // can detect cells with a pending failed/gated retry and preserve
@@ -78,6 +113,19 @@ export function ServersScreen() {
   // separate red-border outcome map.
   const [applyGen, setApplyGen] = useState<number>(0);
 
+  // PR #208 deep-sec Lane A round 7 P2 closure: mountedRef guards
+  // post-await setState calls inside initializeClient against the
+  // "user navigated away mid-POST" race. The scan useEffect already
+  // has its own local `cancelled` flag; the click-handler promise
+  // needs its own signal because it does not own the effect scope.
+  const mountedRef = useRef<boolean>(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   // Tray "Rescan client configs" — backend publishes clients-rescan,
   // every open Servers tab re-fetches. Bumping reloadToken composes
   // with the existing useEffect dep so the same path serves both
@@ -100,6 +148,13 @@ export function ServersScreen() {
           return;
         }
         setServers(collectServers(scan));
+        setClientConfigPresence(scan.client_config_presence ?? EMPTY_CLIENT_CONFIG_PRESENCE);
+        // Clear any success banner once the authoritative refresh lands
+        // (the matrix has already redrawn with the new "ok" state).
+        // Error banners stay sticky so the operator sees the failure
+        // until they retry — refreshing should NOT mask a recent
+        // PARENT_MISSING / INIT_FAILED report.
+        setInitMsg((msg) => (msg && msg.kind === "ok" ? null : msg));
         const agg = aggregateStatus(status);
         const flat: Record<string, { state: string; port: number | null }> = {};
         for (const [name, a] of Object.entries(agg)) {
@@ -125,6 +180,58 @@ export function ServersScreen() {
       cancelled = true;
     };
   }, [reloadToken]);
+
+  async function initializeClient(client: string) {
+    if (initBusy[client]) return;
+    setInitBusy((prev) => ({ ...prev, [client]: true }));
+    setInitMsg(null);
+    try {
+      const res = await postInitClientConfig(client);
+      // PR #208 deep-sec Lane A round 7 P2 closure: skip every
+      // post-await setState if the component has unmounted (user
+      // navigated away from the Servers screen between click and
+      // POST settle). React/Preact does not raise on unmounted
+      // setState in production but the leftover state update is
+      // wasted work and the unmount-then-remount flow could pick
+      // up the stale banner if React re-uses the fiber slot.
+      if (!mountedRef.current) return;
+      setInitMsg({
+        text: res.created
+          ? `Initialized ${client} config at ${res.path}.`
+          : `${client} config already existed at ${res.path}; refreshed.`,
+        kind: "ok",
+      });
+      // Trigger /api/scan refresh — collectServers reruns with the new
+      // "ok" presence and the column's cells flip to "available"
+      // (assuming the affected rows are migratable).
+      setReloadToken((n) => n + 1);
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setInitMsg({ text: (err as Error).message, kind: "error" });
+      // PR #208 deep-sec Lane B round 4 P2 closure: when the
+      // backend says PARENT_MISSING (412), the cached
+      // client_config_presence is stale — the parent directory
+      // disappeared between scan refresh and click. Trigger a scan
+      // refresh so the matrix re-renders without the Initialize
+      // affordance (presence flips from "missing-init-possible" to
+      // "missing"). Error banners are sticky across scan refresh
+      // (see the scan onload setInitMsg passthrough for kind ===
+      // "error"), so the operator still sees the failure context.
+      if (err instanceof InitClientConfigError && err.code === "PARENT_MISSING") {
+        setReloadToken((n) => n + 1);
+      }
+    } finally {
+      // Only clear busy if still mounted; otherwise the next mount
+      // starts with a clean state via useState default anyway.
+      if (mountedRef.current) {
+        setInitBusy((prev) => {
+          const next = { ...prev };
+          delete next[client];
+          return next;
+        });
+      }
+    }
+  }
 
   function toggleCell(server: string, client: string, nextChecked: boolean, initialChecked: boolean) {
     setDirty((prev) => {
@@ -424,13 +531,43 @@ export function ServersScreen() {
           ))}
         </ul>
       )}
+      {initMsg && (
+        <div
+          class={initMsg.kind === "error" ? "error" : ""}
+          data-testid="init-client-msg"
+          style="margin:8px 0"
+        >
+          {initMsg.text}
+        </div>
+      )}
       <table class="servers-matrix">
         <thead>
           <tr>
             <th>Server</th>
-            {CLIENTS.map((c) => (
-              <th key={c}>{c}</th>
-            ))}
+            {CLIENTS.map((c) => {
+              const presence = clientConfigPresence[c];
+              const canInit = presence === "missing-init-possible";
+              const busy = initBusy[c] === true;
+              return (
+                <th key={c}>
+                  <div class="matrix-col-header">
+                    <span>{c}</span>
+                    {canInit && (
+                      <button
+                        type="button"
+                        class="matrix-col-init-btn"
+                        data-testid={`init-client-${c}`}
+                        disabled={busy}
+                        title={`${c}'s MCP config file is not present on this host, but its parent directory exists. Click to seed an empty stub so this column becomes active.`}
+                        onClick={() => initializeClient(c)}
+                      >
+                        {busy ? "Init…" : "Initialize"}
+                      </button>
+                    )}
+                  </div>
+                </th>
+              );
+            })}
             <th>Port</th>
             <th>State</th>
           </tr>
@@ -572,7 +709,11 @@ function CellView(props: {
   // disabled the whole column, locking the operator out of re-adding
   // servers via Apply. The new state-machine includes "available" as
   // an enabled-but-unchecked cell.
-  const disabled = applying || routing === "unsupported" || routing === "not-installed";
+  const disabled =
+    applying ||
+    routing === "unsupported" ||
+    routing === "not-installed" ||
+    routing === "config-error";
   let title: string | undefined;
   if (routing === "via-hub") {
     title = `Currently routed through the hub. Uncheck and Apply to roll this binding back to the original ${client} config.`;
@@ -584,6 +725,13 @@ function CellView(props: {
     title = `${client}'s MCP config file is not present on this host — nothing to install.`;
   } else if (routing === "unsupported") {
     title = `${client} cannot route this server through the hub (e.g., per-session servers).`;
+  } else if (routing === "config-error") {
+    // v0.4.5 PR #208 deep-sec Lane B follow-up: distinguish "stat
+    // returned an error" from "file absent" so the operator sees an
+    // actionable diagnostic instead of the misleading "not present"
+    // tooltip. Typical causes: parent-directory permissions blocked,
+    // antivirus quarantine, or I/O fault on the underlying volume.
+    title = `${client}'s MCP config file could not be read (stat error). Check file permissions and disk health, then refresh.`;
   }
   // PR #22 retry-queue fix: cell with a retained failure from the
   // last applyChanges renders a red outline so the user sees the

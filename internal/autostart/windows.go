@@ -1,0 +1,245 @@
+//go:build windows
+
+// Windows autostart backend: installs `\mcp-local-hub-supervisor` Task
+// Scheduler entry with a LogonTrigger that fires
+// `mcphub.exe supervise [--strict-mode]` at each user logon.
+//
+// Reuses the existing `internal/scheduler.Scheduler` primitives so the
+// XML-generation, schtasks shell-out, and per-user identity gating all
+// stay in one place. Test-only callers swap the scheduler factory via
+// the package-level `schedulerFactoryFn` seam.
+package autostart
+
+import (
+	"bytes"
+	"encoding/xml"
+	"errors"
+	"fmt"
+	"io"
+	"strings"
+
+	"mcp-local-hub/internal/scheduler"
+)
+
+// WindowsTaskName is the Task Scheduler entry the autostart shim
+// installs. Exported (capital) so tests can pin the contract without
+// re-stringifying the literal across files. The leading backslash is
+// intentional — Task Scheduler uses `\` as the root-folder prefix and
+// schtasks accepts both forms, but storing it with the prefix keeps
+// log output unambiguous when listing tasks via `schtasks /Query`.
+const WindowsTaskName = `\mcp-local-hub-supervisor`
+
+// schedulerFactoryFn is the test seam — production paths leave it
+// pointing at scheduler.New, but autostart tests inject a recording
+// fake here so the real Task Scheduler is never touched. The
+// `t.Cleanup` pattern restores the prior factory between tests.
+var schedulerFactoryFn = scheduler.New
+
+// windowsBackend is the per-OS Backend implementation. Stateless;
+// every call re-derives the scheduler handle through the seam so
+// tests can swap fakes without re-constructing the Backend.
+type windowsBackend struct{}
+
+// newPlatformBackend is the dispatcher entry point called from
+// autostart.New(). Lives in this file (windows.go) under the
+// `//go:build windows` tag; the Linux and macOS files supply their
+// own implementations.
+func newPlatformBackend() (Backend, error) {
+	return &windowsBackend{}, nil
+}
+
+// superviseArgs returns the argv slice the LogonTrigger passes to the
+// mcphub binary. `--strict-mode` is appended only when opts.StrictMode
+// is true so the recorded XML differs by exactly one element between
+// the two modes — drift detection relies on that exact-element check.
+func superviseArgs(opts Options) []string {
+	if opts.StrictMode {
+		return []string{"supervise", "--strict-mode"}
+	}
+	return []string{"supervise"}
+}
+
+// Enable installs (or replaces) the autostart Task Scheduler entry.
+//
+// Replacement strategy: scheduler.Create rejects "task already exists"
+// with an error, so we Delete first (idempotent) and then Create. This
+// keeps the operation atomic-from-the-user-perspective even when the
+// shim was previously installed with different args.
+func (w *windowsBackend) Enable(opts Options) error {
+	sched, err := schedulerFactoryFn()
+	if err != nil {
+		return fmt.Errorf("scheduler factory: %w", err)
+	}
+	cmd, err := resolveMCPHubPath(opts)
+	if err != nil {
+		return err
+	}
+	// Always Delete first — idempotent at the scheduler layer and
+	// guarantees Create won't trip on a stale entry.
+	if err := sched.Delete(WindowsTaskName); err != nil {
+		return fmt.Errorf("delete prior task: %w", err)
+	}
+	spec := scheduler.TaskSpec{
+		Name:         WindowsTaskName,
+		Description:  "mcp-local-hub supervisor (autostart shim, plan §2531-2541)",
+		Command:      cmd,
+		Args:         superviseArgs(opts),
+		LogonTrigger: true,
+		// RestartOnFailure intentionally false: the supervisor's own
+		// crash policy is handled by the supervise runtime (Job
+		// Object child reaping + watchdog tick). Task Scheduler's
+		// RestartOnFailure historically races with our recovery
+		// state machine (see CLAUDE.md "Watchdog (Phase 3B-II)"
+		// section on RestartOnFailure / IgnoreNew); we keep that
+		// decision narrow to the watchdog task and out of autostart.
+		RestartOnFailure: false,
+	}
+	if err := sched.Create(spec); err != nil {
+		return fmt.Errorf("create task: %w", err)
+	}
+	return nil
+}
+
+// Disable removes the autostart Task Scheduler entry. Idempotent —
+// scheduler.Delete is documented to return nil when the task is
+// already absent, so callers can re-run Disable without checking
+// state first.
+func (w *windowsBackend) Disable() error {
+	sched, err := schedulerFactoryFn()
+	if err != nil {
+		return fmt.Errorf("scheduler factory: %w", err)
+	}
+	if err := sched.Delete(WindowsTaskName); err != nil {
+		return fmt.Errorf("delete task: %w", err)
+	}
+	return nil
+}
+
+// Status reports the current State of the autostart shim.
+//
+// Decision tree:
+//
+//   - Status(name) returns ErrTaskNotFound → StateAbsent.
+//   - Status(name) returns State == "Running" + XML matches opts →
+//     StateEnabledRunning.
+//   - Status(name) returns State == "Running" + XML disagrees with
+//     opts → StateDrifted.
+//   - Status(name) returns any other state (Ready, Disabled, …) +
+//     XML matches → StateEnabledStopped.
+//   - Status(name) returns any other state + XML disagrees → StateDrifted.
+//
+// ExportXML failures other than ErrTaskNotFound are non-fatal:
+// drift detection skips silently and Status falls back to the basic
+// running/stopped classification. ErrTaskNotFound from ExportXML in
+// the middle of a Status call (a transient race vs concurrent
+// Delete) is treated the same way — keep the running/stopped verdict
+// rather than flipping to StateDrifted on best-effort failure.
+func (w *windowsBackend) Status(opts Options) (State, error) {
+	sched, err := schedulerFactoryFn()
+	if err != nil {
+		return StateAbsent, fmt.Errorf("scheduler factory: %w", err)
+	}
+	st, err := sched.Status(WindowsTaskName)
+	if err != nil {
+		if errors.Is(err, scheduler.ErrTaskNotFound) {
+			return StateAbsent, nil
+		}
+		// Windows schtasks /Query reports "cannot find the file
+		// specified" via exit-non-zero rather than mapping to
+		// ErrTaskNotFound (only ExportXML does that mapping). So
+		// fall back to the string-match the scheduler package
+		// already uses for Delete idempotence — any error whose
+		// message contains "cannot find" or "does not exist" is
+		// the absent-task signal in disguise.
+		if isAbsentErrorMsg(err) {
+			return StateAbsent, nil
+		}
+		return StateAbsent, fmt.Errorf("scheduler status: %w", err)
+	}
+
+	// Drift detection — best-effort. If ExportXML fails for any
+	// reason, we keep the running/stopped verdict from above.
+	drift := false
+	xmlBlob, xmlErr := sched.ExportXML(WindowsTaskName)
+	if xmlErr == nil {
+		drift = detectDrift(xmlBlob, opts)
+	}
+
+	if drift {
+		return StateDrifted, nil
+	}
+	if strings.EqualFold(st.State, "Running") {
+		return StateEnabledRunning, nil
+	}
+	return StateEnabledStopped, nil
+}
+
+// isAbsentErrorMsg matches the schtasks "task not found" failure mode
+// for callers that didn't go through ExportXML (which maps to the
+// typed ErrTaskNotFound sentinel). Keeps Status absent-detection
+// resilient to the Status call path which doesn't pre-translate.
+func isAbsentErrorMsg(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "cannot find") || strings.Contains(msg, "does not exist")
+}
+
+// detectDrift parses the on-disk Task Scheduler XML and returns true
+// when the recorded <Command> or <Arguments> disagrees with what
+// Enable(opts) would write today.
+//
+// Drift conditions:
+//   - <Command> path differs from resolved opts.MCPHubPath (case-
+//     insensitive — Windows paths are case-insensitive at the FS
+//     layer).
+//   - <Arguments> contains "--strict-mode" while opts.StrictMode is
+//     false (we'd remove it).
+//   - <Arguments> lacks "--strict-mode" while opts.StrictMode is true
+//     (we'd add it).
+//
+// XML parse failure short-circuits to "no drift" — best-effort, the
+// running/stopped fallback takes over.
+//
+// The decoder is wired with a passthrough CharsetReader because the
+// real schtasks /Query /XML output declares `encoding="UTF-16"` in
+// its prolog (the actual byte stream we receive from CombinedOutput
+// is already converted to a Go string in this process), and Go's
+// encoding/xml refuses to decode any non-UTF-8 declaration without
+// an explicit reader override.
+func detectDrift(xmlBlob []byte, opts Options) bool {
+	type execNode struct {
+		Command   string `xml:"Command"`
+		Arguments string `xml:"Arguments"`
+	}
+	type actionsNode struct {
+		Exec execNode `xml:"Exec"`
+	}
+	type taskRoot struct {
+		Actions actionsNode `xml:"Actions"`
+	}
+	dec := xml.NewDecoder(bytes.NewReader(xmlBlob))
+	dec.CharsetReader = func(_ string, r io.Reader) (io.Reader, error) {
+		// Pass through the bytes verbatim. Go has already decoded
+		// the schtasks output into a UTF-8 byte slice; the XML
+		// prolog's `encoding="UTF-16"` is leftover Windows
+		// metadata, not a description of the bytes in `xmlBlob`.
+		return r, nil
+	}
+	var t taskRoot
+	if err := dec.Decode(&t); err != nil {
+		// Drift detection unavailable — fall back to non-drift so
+		// the running/stopped verdict still surfaces to the caller.
+		return false
+	}
+	want, err := resolveMCPHubPath(opts)
+	if err != nil {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(t.Actions.Exec.Command), strings.TrimSpace(want)) {
+		return true
+	}
+	hasStrictFlag := strings.Contains(t.Actions.Exec.Arguments, "--strict-mode")
+	return hasStrictFlag != opts.StrictMode
+}

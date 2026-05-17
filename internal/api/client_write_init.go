@@ -42,6 +42,49 @@ import (
 
 func init() {
 	clients.WriteConfigFile = secureWriteWithOperatorOpt
+	clients.CreateConfigFileIfMissing = secureCreateClientConfigIfMissingWithOperatorOpt
+}
+
+// secureCreateClientConfigIfMissingWithOperatorOpt is the
+// cross-package init-only writer that clients.CreateConfigFileIfMissing
+// resolves to in production. Walks the same operator-opt-in policy
+// as secureWriteWithOperatorOpt: try the hardened pipeline first;
+// fall back to a parent-gate-skipped variant if strict mode is OFF
+// and the gate rejected on a single-user-but-broadened parent dir.
+//
+// Strict mode (MCPHUB_REQUIRE_SINGLE_USER_HOME enabled) keeps the
+// parent-dir gate enforced — the /api/init-client-config endpoint
+// short-circuits strict-mode operators BEFORE this function runs,
+// so the strict refusal here is defense-in-depth for any future
+// non-GUI caller of clients.CreateConfigFileIfMissing.
+//
+// Deep-sec PR #208 Lane C #1 closure.
+func secureCreateClientConfigIfMissingWithOperatorOpt(path string, stub []byte) (created bool, err error) {
+	created, err = SecureCreateClientConfigIfMissing(path, stub)
+	if err == nil {
+		return created, nil
+	}
+	if !errors.Is(err, ErrSecureWriteParentInsecure) {
+		return false, err
+	}
+	if operatorRequiresSingleUserHome() {
+		return false, fmt.Errorf("%w; %s is set, so the strict parent-dir gate is enforced for init-stub creation (unset that env var, or tighten the parent's DACL to remove the offending principal, to proceed)",
+			err, RequireSingleUserHomeEnv)
+	}
+	// Default-relax lane: parent-dir gate rejected but operator did
+	// not opt into strict mode. Re-run with the parent gate skipped;
+	// the per-file allowlist DACL at create time still ensures the
+	// new stub is owner-only regardless of parent broadening. Mirror
+	// of secureWriteWithOperatorOpt's relax path.
+	if logErr := LogHubMcpEvent("warn", "client-write-unhardened-fallback", map[string]any{
+		"path":   path,
+		"reason": "default-relax-on-solo-host (init-stub)",
+		"origin": "SecureCreateClientConfigIfMissing",
+		"err":    err.Error(),
+	}); logErr != nil {
+		_ = logErr
+	}
+	return secureCreateClientConfigIfMissingSkipParentGate(path, stub)
 }
 
 // AllowUnhardenedClientWriteEnv is a legacy operator-explicit opt-in
@@ -157,16 +200,6 @@ func secureWriteWithOperatorOpt(path string, contents []byte) error {
 	// The original symlink is left intact (mcphub does not
 	// rewrite it as a regular file). The target's DACL after the
 	// write is owner-only via the secure-write pipeline.
-	if !operatorRequiresSingleUserHome() {
-		if resolved, isSymlink := resolveSymlinkForSecureWrite(path); isSymlink && resolved != path {
-			_ = LogHubMcpEvent("info", "client-write-symlink-followed", map[string]any{
-				"symlink": path,
-				"target":  resolved,
-				"reason":  "default-relax-on-solo-host (dotfile pattern)",
-			})
-			path = resolved
-		}
-	}
 	err := SecureWriteClientConfig(path, contents)
 	if err == nil {
 		return nil
@@ -276,6 +309,18 @@ func operatorAllowedUnhardenedClientWrite() bool {
 // require the strict gate. Solo-developer Windows hosts should leave
 // it unset — see secureWriteWithOperatorOpt above for rationale.
 func operatorRequiresSingleUserHome() bool {
+	return OperatorRequiresSingleUserHome()
+}
+
+// OperatorRequiresSingleUserHome is the exported canonical strict-mode
+// predicate. The /api/init-client-config endpoint
+// (internal/gui/init_client_config.go) uses it to refuse the Init
+// affordance when strict mode is enabled — sharing the parser
+// guarantees the endpoint accepts the same case-insensitive
+// "1"/"true" forms as the secure-write pipeline rather than
+// fail-opening on values the canonical reader treats as enabled.
+// Deep-sec PR #208 Lane C #2 closure.
+func OperatorRequiresSingleUserHome() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(RequireSingleUserHomeEnv))) {
 	case "1", "true":
 		return true
