@@ -6,7 +6,10 @@ import (
 )
 
 func TestSupervisorState_RoundTrip(t *testing.T) {
-	dir := t.TempDir()
+	// v0.5.0 Fix Group 5: WriteSupervisorState now flows through
+	// the hardened secure-write pipeline. See the matching note in
+	// supervisor_intent_test.go for why hardenedTempDir is required.
+	dir := hardenedTempDir(t)
 	path := filepath.Join(dir, "supervisor-state.json")
 
 	want := SupervisorStateFile{
@@ -45,7 +48,7 @@ func TestSupervisorState_RoundTrip(t *testing.T) {
 }
 
 func TestSupervisorState_QueuedActionRoundTrip(t *testing.T) {
-	dir := t.TempDir()
+	dir := hardenedTempDir(t)
 	path := filepath.Join(dir, "supervisor-state.json")
 	respawn := QueuedAction{Kind: "respawn", Reason: "manual_restart"}
 	want := SupervisorStateFile{

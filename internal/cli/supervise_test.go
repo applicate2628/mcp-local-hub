@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 )
 
 // TestSuperviseCommand_AcquiresLockAndExitsOnSignal verifies the
@@ -46,7 +47,12 @@ import (
 // have produced: the owner sidecar is removed (Release ran),
 // supervisor-events.log exists (the audit channel opened).
 func TestSuperviseCommand_AcquiresLockAndExitsOnSignal(t *testing.T) {
-	tmpHome := t.TempDir()
+	// v0.5.0 Fix Group 5: supervisor.lock owner sidecar +
+	// supervisor-state.json writes flow through the hardened
+	// secure-write pipeline. The state-dir override target must
+	// pass the parent-dir gate; apitest.HardenedTempDir installs
+	// the allowlist-conforming DACL/mode.
+	tmpHome := apitest.HardenedTempDir(t)
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
 
 	exitCh := make(chan struct{}, 1)
@@ -113,7 +119,12 @@ func TestSuperviseCommand_AcquiresLockAndExitsOnSignal(t *testing.T) {
 // non-nil error from runSupervise; the exact message diverges but
 // the singleton invariant holds.
 func TestSuperviseCommand_RefusesSecondInstance(t *testing.T) {
-	tmpHome := t.TempDir()
+	// v0.5.0 Fix Group 5: supervisor.lock owner sidecar +
+	// supervisor-state.json writes flow through the hardened
+	// secure-write pipeline. The state-dir override target must
+	// pass the parent-dir gate; apitest.HardenedTempDir installs
+	// the allowlist-conforming DACL/mode.
+	tmpHome := apitest.HardenedTempDir(t)
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
 
 	exitCh := make(chan struct{}, 1)
@@ -182,7 +193,12 @@ func TestSuperviseCommand_RefusesSecondInstance(t *testing.T) {
 // and intent_files_loaded is the observability companion (operators
 // debugging a stuck startup can see which sub-step is incomplete).
 func TestSuperviseCommand_StatusIPC_ReconcileReady(t *testing.T) {
-	tmpHome := t.TempDir()
+	// v0.5.0 Fix Group 5: supervisor.lock owner sidecar +
+	// supervisor-state.json writes flow through the hardened
+	// secure-write pipeline. The state-dir override target must
+	// pass the parent-dir gate; apitest.HardenedTempDir installs
+	// the allowlist-conforming DACL/mode.
+	tmpHome := apitest.HardenedTempDir(t)
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
 
 	exitCh := make(chan struct{}, 1)
@@ -329,7 +345,12 @@ func TestSuperviseCommand_StatusIPC_ReconcileReady(t *testing.T) {
 // IPCResponse with an IPCErr envelope, not a closed connection — so
 // clients can fail-fast on missing verbs without re-dialing.
 func TestSuperviseCommand_StatusIPC_UnknownCommand(t *testing.T) {
-	tmpHome := t.TempDir()
+	// v0.5.0 Fix Group 5: supervisor.lock owner sidecar +
+	// supervisor-state.json writes flow through the hardened
+	// secure-write pipeline. The state-dir override target must
+	// pass the parent-dir gate; apitest.HardenedTempDir installs
+	// the allowlist-conforming DACL/mode.
+	tmpHome := apitest.HardenedTempDir(t)
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
 
 	exitCh := make(chan struct{}, 1)
@@ -447,7 +468,12 @@ func waitForFile(path string, timeout time.Duration) bool {
 // (api.SupervisorEventLog), so byte-offset order in the on-disk log
 // is a faithful witness of emission order.
 func TestSuperviseCommand_CallsReaperBeforeReconcileReady(t *testing.T) {
-	tmpHome := t.TempDir()
+	// v0.5.0 Fix Group 5: supervisor.lock owner sidecar +
+	// supervisor-state.json writes flow through the hardened
+	// secure-write pipeline. The state-dir override target must
+	// pass the parent-dir gate; apitest.HardenedTempDir installs
+	// the allowlist-conforming DACL/mode.
+	tmpHome := apitest.HardenedTempDir(t)
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
 
 	// Seed a supervisor-state.json with one transient_pid entry so
@@ -590,7 +616,12 @@ func TestSuperviseCommand_CallsReaperBeforeReconcileReady(t *testing.T) {
 // will retry the reap, and the orphan PIDs will either die naturally
 // or be reaped on a subsequent restart).
 func TestSuperviseCommand_ReaperFailureDoesNotBlockStartup(t *testing.T) {
-	tmpHome := t.TempDir()
+	// v0.5.0 Fix Group 5: supervisor.lock owner sidecar +
+	// supervisor-state.json writes flow through the hardened
+	// secure-write pipeline. The state-dir override target must
+	// pass the parent-dir gate; apitest.HardenedTempDir installs
+	// the allowlist-conforming DACL/mode.
+	tmpHome := apitest.HardenedTempDir(t)
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
 
 	reaperErr := errFakeReaperFailure

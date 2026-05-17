@@ -8,7 +8,11 @@ import (
 )
 
 func TestSupervisorLock_AcquireRelease(t *testing.T) {
-	dir := t.TempDir()
+	// v0.5.0 Fix Group 5: AcquireSupervisorLock writes the owner
+	// sidecar via WriteStateFileAtomic, which now flows through
+	// the hardened secure-write pipeline. See the matching note in
+	// supervisor_intent_test.go for why hardenedTempDir is required.
+	dir := hardenedTempDir(t)
 	path := filepath.Join(dir, "supervisor.lock")
 	lk, err := AcquireSupervisorLock(path)
 	if err != nil {
@@ -26,7 +30,7 @@ func TestSupervisorLock_AcquireRelease(t *testing.T) {
 }
 
 func TestSupervisorLock_StaleReclaim(t *testing.T) {
-	dir := t.TempDir()
+	dir := hardenedTempDir(t)
 	path := filepath.Join(dir, "supervisor.lock")
 
 	// Plant stale owner sidecar with bogus PID.

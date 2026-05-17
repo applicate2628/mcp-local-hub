@@ -7,7 +7,14 @@ import (
 )
 
 func TestSupervisorIntent_RoundTrip(t *testing.T) {
-	dir := t.TempDir()
+	// v0.5.0 Fix Group 5: WriteSupervisorIntent now flows through
+	// the hardened secure-write pipeline (handle-bound DACL,
+	// parent-dir gate, post-rename re-verify). Test temp dirs must
+	// pass the parent-dir gate, which t.TempDir() alone may not on
+	// machines whose %TEMP%/TMPDIR carries Authenticated Users (or
+	// equivalent) write rights. hardenedTempDir installs the
+	// allowlist-conforming DACL/mode the gate expects.
+	dir := hardenedTempDir(t)
 	path := filepath.Join(dir, "supervisor-intent.json")
 
 	want := SupervisorIntentFile{
@@ -43,7 +50,7 @@ func TestSupervisorIntent_RoundTrip(t *testing.T) {
 }
 
 func TestSupervisorIntent_RejectsUnknownFields(t *testing.T) {
-	dir := t.TempDir()
+	dir := hardenedTempDir(t)
 	path := filepath.Join(dir, "supervisor-intent.json")
 	body := `{"version":1,"updated_at":"2026-05-16T18:00:00.000000000Z","daemons":[],"strict_mode":false,"unknown_field":"x"}`
 	if err := WriteStateFileAtomic(path, json.RawMessage(body)); err != nil {

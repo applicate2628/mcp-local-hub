@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/autostart"
 )
 
@@ -75,7 +76,14 @@ type strictModeFixture struct {
 
 func setupSupervisorFixture(t *testing.T) *strictModeFixture {
 	t.Helper()
-	dir := t.TempDir()
+	// v0.5.0 Fix Group 5: WriteSupervisorIntent flows through the
+	// hardened secure-write pipeline (handle-bound DACL, parent-dir
+	// gate, post-rename re-verify). Test temp dirs must pass the
+	// parent-dir gate, which t.TempDir() alone does not on machines
+	// whose %TEMP%/TMPDIR has Authenticated Users (or equivalent)
+	// write rights. apitest.HardenedTempDir installs the allowlist-
+	// conforming DACL/mode the gate expects.
+	dir := apitest.HardenedTempDir(t)
 	intentPath := filepath.Join(dir, "supervisor-intent.json")
 	// Seed initial intent with StrictMode=false so revert has a value
 	// to drive back to.
