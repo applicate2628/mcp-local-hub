@@ -12,6 +12,7 @@ import (
 	"os"
 
 	"mcp-local-hub/internal/cli"
+	"mcp-local-hub/internal/migration"
 )
 
 // These are populated at build time via `-ldflags "-X ..."` (see build
@@ -55,6 +56,22 @@ func main() {
 		}
 		if errors.As(err, &fe) {
 			os.Exit(fe.ExitCode())
+		}
+		// v0.5.0 phase 16 (Fix Group 1 / codex-c-p0-4): map
+		// *migration.ExitCodeError to its declared exit code so the
+		// migration package's sentinel exit codes (8 INSTALL_BUSY,
+		// 9 STRICT_MODE_BUSY, 13 ROLLBACK_TOKEN_MISMATCH,
+		// 14 MIGRATION_POWERSHELL_LOCKED) propagate out of `mcphub`
+		// instead of collapsing to generic exit 1. This is in addition
+		// to the forceExitError branch above; ExitCodeError lives in a
+		// separate package and does NOT carry the
+		// IsMcphubForceExit() marker by design (the marker is reserved
+		// for cli.forceExitError and would risk colliding with
+		// *exec.ExitError if exported widely — see iter-5 P2 note).
+		var mErr *migration.ExitCodeError
+		if errors.As(err, &mErr) {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(mErr.Code)
 		}
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
