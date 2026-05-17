@@ -73,23 +73,58 @@ func enumerateMcphubTaskCount() (int, error) {
 // callback is sourced from an existing primitive in this codebase
 // (see file-level docstring).
 func runForwardMigrationWindows(cmd *cobra.Command, opts dispatchUpgradeOpts) error {
+	state, mopts, err := buildForwardMigrationOptions(opts)
+	if err != nil {
+		return err
+	}
+
+	if err := migration.RunForward(state, mopts); err != nil {
+		// Propagate migration.ExitCodeError unchanged so cmd/mcphub/main.go's
+		// errors.As mapping picks up the declared exit code (8/9/13/14).
+		// Wrap other errors with operator-facing context.
+		var ec *migration.ExitCodeError
+		if errors.As(err, &ec) {
+			return err
+		}
+		return fmt.Errorf("forward migration: %w", err)
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), "Forward migration to v0.5.0 supervisor architecture complete.")
+	return nil
+}
+
+// buildForwardMigrationOptions resolves every dependency the forward
+// migration needs (state-dir, executable path, scheduler, current
+// user, pre-migration strict-mode) and assembles a fully-wired
+// migration.ForwardOptions. Extracted from runForwardMigrationWindows
+// so unit tests can inspect the wired callbacks (notably
+// RollbackOnFailure for Lane C P0 #2 + LookupProcessIdentity for
+// Lane F P0 #2) without driving a real migration run.
+//
+// The RollbackOnFailure closure captures the same resolved dependencies
+// (stateDir, sch, currentUser) so the auto-rollback at step 14 reuses
+// them instead of re-running every resolver — keeping behavior identical
+// to invoking `mcphub install --rollback-to-legacy` by hand. On builder
+// failure inside the closure the helper logs to stderr and returns nil
+// so the journal falls back to its manual-rollback error path (the
+// operator still sees "consider --rollback-to-legacy" guidance).
+func buildForwardMigrationOptions(opts dispatchUpgradeOpts) (migration.State, migration.ForwardOptions, error) {
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
-		return fmt.Errorf("forward migration: resolve state-dir: %w", err)
+		return migration.State{}, migration.ForwardOptions{}, fmt.Errorf("forward migration: resolve state-dir: %w", err)
 	}
 	exe, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("forward migration: resolve executable: %w", err)
+		return migration.State{}, migration.ForwardOptions{}, fmt.Errorf("forward migration: resolve executable: %w", err)
 	}
 	installDir := filepath.Dir(exe)
 
 	sch, err := scheduler.New()
 	if err != nil {
-		return fmt.Errorf("forward migration: scheduler.New: %w", err)
+		return migration.State{}, migration.ForwardOptions{}, fmt.Errorf("forward migration: scheduler.New: %w", err)
 	}
 	currentUser, err := currentWindowsUsername()
 	if err != nil {
-		return fmt.Errorf("forward migration: resolve current user: %w", err)
+		return migration.State{}, migration.ForwardOptions{}, fmt.Errorf("forward migration: resolve current user: %w", err)
 	}
 
 	preStrict, err := readPreMigrationStrictMode(stateDir)
@@ -97,7 +132,7 @@ func runForwardMigrationWindows(cmd *cobra.Command, opts dispatchUpgradeOpts) er
 		// A corrupt strict-mode file would silently default to false
 		// and the migration would propagate the wrong intent. Fail
 		// fast — operator repair is the right next step.
-		return fmt.Errorf("forward migration: read pre-migration strict-mode: %w", err)
+		return migration.State{}, migration.ForwardOptions{}, fmt.Errorf("forward migration: read pre-migration strict-mode: %w", err)
 	}
 
 	state := migration.State{
@@ -124,20 +159,33 @@ func runForwardMigrationWindows(cmd *cobra.Command, opts dispatchUpgradeOpts) er
 		SupervisorSpawner:              spawnSupervisorDetached(exe, preStrict),
 		ReconcileReady:                 waitReconcileReadyViaIPC(pipePath),
 		CurrentUser:                    currentUser,
+		// RollbackOnFailure (Lane C P0 #2 + codex-r2-a/b/c-p0): wire
+		// the auto-rollback callback so a step-14 reconcile-ready
+		// timeout drives RunRollback in-process instead of leaving
+		// the host half-migrated (legacy tasks already deleted by
+		// step 11, supervisor never reached reconcile-ready). The
+		// closure captures the already-resolved (stateDir, sch,
+		// currentUser) so the rollback reuses them rather than
+		// re-running every resolver; the journal releases the
+		// migration locks BEFORE invoking us (journal.go:789), so
+		// RunRollback can acquire them itself with no deadlock.
+		RollbackOnFailure: func() *migration.RollbackOptions {
+			_, rbOpts, rbErr := buildRollbackMigrationOptions(stateDir, sch, currentUser)
+			if rbErr != nil {
+				// Diagnostics-only: let the journal fall back to its
+				// manual-rollback error message so the operator sees
+				// the "consider --rollback-to-legacy" guidance plus
+				// the underlying cause here. We do NOT bubble up via
+				// the migration error chain because the closure
+				// signature returns *RollbackOptions, not error.
+				fmt.Fprintf(os.Stderr, "auto-rollback: build options failed: %v (falling back to manual rollback)\n", rbErr)
+				return nil
+			}
+			return &rbOpts
+		},
 	}
 
-	if err := migration.RunForward(state, mopts); err != nil {
-		// Propagate migration.ExitCodeError unchanged so cmd/mcphub/main.go's
-		// errors.As mapping picks up the declared exit code (8/9/13/14).
-		// Wrap other errors with operator-facing context.
-		var ec *migration.ExitCodeError
-		if errors.As(err, &ec) {
-			return err
-		}
-		return fmt.Errorf("forward migration: %w", err)
-	}
-	fmt.Fprintln(cmd.OutOrStdout(), "Forward migration to v0.5.0 supervisor architecture complete.")
-	return nil
+	return state, mopts, nil
 }
 
 // runRollbackMigrationWindows assembles the production
@@ -158,6 +206,37 @@ func runRollbackMigrationWindows(cmd *cobra.Command) error {
 	if err != nil {
 		return fmt.Errorf("rollback: resolve current user: %w", err)
 	}
+
+	state, mopts, err := buildRollbackMigrationOptions(stateDir, sch, currentUser)
+	if err != nil {
+		return err
+	}
+
+	if err := migration.RunRollback(state, mopts); err != nil {
+		var ec *migration.ExitCodeError
+		if errors.As(err, &ec) {
+			return err
+		}
+		return fmt.Errorf("rollback: %w", err)
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), "Rollback to v0.4.x Scheduler-backed layout complete.")
+	return nil
+}
+
+// buildRollbackMigrationOptions assembles a fully-wired
+// migration.RollbackOptions from already-resolved dependencies. Used by
+// both runRollbackMigrationWindows (operator-invoked
+// `mcphub install --rollback-to-legacy`) and the ForwardOptions
+// RollbackOnFailure closure (auto-rollback after step-14 reconcile-
+// ready timeout).
+//
+// Reads supervisor-intent.json from disk so ExpectedDaemons reflects
+// the exact daemon set the forward migration committed at step 7
+// (journal.go:1027 writes it to <stateDir>/supervisor-intent.json
+// BEFORE step 14's reconcile-ready check, so the file is on disk
+// regardless of which caller invokes us). A missing intent means
+// there's nothing to roll back from — surface a clear error.
+func buildRollbackMigrationOptions(stateDir string, sch scheduler.Scheduler, currentUser string) (migration.State, migration.RollbackOptions, error) {
 	pipePath := superviseIPCPipePath(currentUser)
 
 	// Load the supervisor-intent.json so the rollback driver knows
@@ -167,7 +246,7 @@ func runRollbackMigrationWindows(cmd *cobra.Command) error {
 	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
 	intent, intentErr := api.ReadSupervisorIntent(intentPath)
 	if intentErr != nil {
-		return fmt.Errorf("rollback: no supervisor-intent.json at %s (forward migration never ran, or already rolled back): %w", intentPath, intentErr)
+		return migration.State{}, migration.RollbackOptions{}, fmt.Errorf("rollback: no supervisor-intent.json at %s (forward migration never ran, or already rolled back): %w", intentPath, intentErr)
 	}
 
 	state := migration.State{
@@ -188,15 +267,7 @@ func runRollbackMigrationWindows(cmd *cobra.Command) error {
 		ExpectedDaemons:              intent.Daemons,
 	}
 
-	if err := migration.RunRollback(state, mopts); err != nil {
-		var ec *migration.ExitCodeError
-		if errors.As(err, &ec) {
-			return err
-		}
-		return fmt.Errorf("rollback: %w", err)
-	}
-	fmt.Fprintln(cmd.OutOrStdout(), "Rollback to v0.4.x Scheduler-backed layout complete.")
-	return nil
+	return state, mopts, nil
 }
 
 // runV5UpgradeWindows wires cli.RunInstallUpgrade with the
@@ -295,13 +366,31 @@ var wmicPresentFn = func() bool {
 	return err == nil
 }
 
+// processLookupIdentityFn is a test seam over process.LookupProcessIdentity.
+// Production wires it to the real Windows implementation; tests inject
+// a fake that returns process.ErrProcessNotFound (or an arbitrary
+// other error) to drive lookupMigrationProcessIdentity's sentinel
+// mapping path.
+var processLookupIdentityFn = process.LookupProcessIdentity
+
 // lookupMigrationProcessIdentity adapts process.LookupProcessIdentity
-// into the migration.ProcessIdentity shape. The two types are
-// field-for-field parallel by design (see migration/journal.go's
-// ProcessIdentity docstring); the adapter is a struct copy.
+// into the migration.ProcessIdentity shape AND maps the package-local
+// process.ErrProcessNotFound sentinel onto migration.ErrProcessNotFound
+// so the journal's `errors.Is(err, migration.ErrProcessNotFound)`
+// genuine-unbound cross-check at journal.go:1142 fires correctly.
+// Without this mapping the two sentinels live in different packages
+// and the cross-check would treat every "PID gone" as a transient-
+// retry-exhaustion abort, breaking the Lane F P0 #2 contract.
+//
+// The two ProcessIdentity types are field-for-field parallel by design
+// (see migration/journal.go's ProcessIdentity docstring); the adapter
+// is a struct copy on the success path.
 func lookupMigrationProcessIdentity(pid int) (migration.ProcessIdentity, error) {
-	id, err := process.LookupProcessIdentity(pid)
+	id, err := processLookupIdentityFn(pid)
 	if err != nil {
+		if errors.Is(err, process.ErrProcessNotFound) {
+			return migration.ProcessIdentity{}, migration.ErrProcessNotFound
+		}
 		return migration.ProcessIdentity{}, err
 	}
 	return migration.ProcessIdentity{
