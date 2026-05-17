@@ -36,6 +36,29 @@ import (
 	"mcp-local-hub/internal/api"
 )
 
+// reaperFn is a package-private test seam pointing at the Task 13.1
+// cold-start stale-child reaper. Production wiring routes to
+// ReapStaleTransients in supervise_reaper_posix.go (POSIX) or the
+// no-op stub in supervise_reaper_windows.go (Windows). Tests in this
+// package swap the function via newReaperFnOverride() to assert the
+// reaper is invoked during startup without needing real /proc / kill
+// scaffolding.
+//
+// The seam is package-private and exported only via the test-only
+// setReaperFnForTest accessor below. Production callers MUST NOT
+// reassign this var.
+var reaperFn = ReapStaleTransients
+
+// setReaperFnForTest installs a test reaper function. Returns an
+// "uninstall" function tests defer to restore the production wiring
+// before the next test runs. Production code paths never invoke this
+// — only the supervise_test.go file in this package does.
+func setReaperFnForTest(fn func(context.Context, ReaperDeps) (ReaperResult, error)) func() {
+	prev := reaperFn
+	reaperFn = fn
+	return func() { reaperFn = prev }
+}
+
 // stateDirFunc returns the supervisor state directory.
 //
 // Production lookup: `api.DaemonStateDir()` — the same Known-Folder /
@@ -189,6 +212,52 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 			"state_dir":   stateDir,
 		},
 	})
+
+	// Task 13.1 cold-start stale-child reap. POSIX-only in practice:
+	// the Windows variant is a no-op stub because the Job Object's
+	// KILL_ON_JOB_CLOSE handler already terminates the prior
+	// supervisor's children before this function runs. On POSIX a
+	// prior crash leaves transient_pids[] entries pointing at orphans
+	// reparented to PID 1; the reaper walks the list, applies the
+	// 3-gate ownership check (image basename + cmdline tokens + UID),
+	// kill(-pgid, SIGKILL)'s the survivors, settles 2s for the kernel
+	// to release listening ports, and clears transient_pids[].
+	//
+	// Best-effort: a failed read/classify/write never blocks supervisor
+	// startup — a missing reap is far better than a stuck supervisor.
+	// The skip event captures the wrapped error so operators can
+	// diagnose post-mortem; reconcileReady proceeds regardless.
+	//
+	// Order: this runs BEFORE the IPC listener binds and BEFORE the
+	// loop is started so the kill burst + settle complete before any
+	// client sees `reconcile_ready=true` and before the first
+	// reconcile pass would race the kernel's port-release on the
+	// just-killed orphan listeners (spec §"Fallback if step 4 IPC
+	// fails" + plan §2660).
+	reaperRes, reaperErr := reaperFn(ctx, ReaperDeps{StateDir: stateDir})
+	if reaperErr != nil {
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "warn",
+			Source:   "lifecycle",
+			Event:    "cold-start-reap-failed",
+			Body: map[string]any{
+				"err": reaperErr.Error(),
+			},
+		})
+	} else {
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "info",
+			Source:   "lifecycle",
+			Event:    "cold-start-reap-complete",
+			Body: map[string]any{
+				"killed_count":       len(reaperRes.KilledPIDs),
+				"skipped_count":      len(reaperRes.SkippedPIDs),
+				"dead_count":         len(reaperRes.DeadPIDs),
+				"cleared_transients": reaperRes.ClearedTransients,
+				"settle_ms":          reaperRes.SettleDuration.Milliseconds(),
+			},
+		})
+	}
 
 	// FIFO event loop. Capacity 64 absorbs quiesce-complete posts from
 	// the side-goroutine drain handler without rendezvous deadlock
