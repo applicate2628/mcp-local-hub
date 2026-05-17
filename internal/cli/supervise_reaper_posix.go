@@ -63,10 +63,19 @@ import (
 // start. Caller (newSuperviseCmd) logs each slice's contents to the
 // supervisor event log so operators have provenance for each PID
 // the reaper touched.
+//
+// KillErrors (Lane F P0 #5 / Lane B P0) records non-ESRCH errors
+// returned by the kill syscall (EPERM, no-such-process-group fallback
+// failures, etc.). Entries that appear in KillErrors are RETAINED in
+// supervisor-state.transient_pids[] for retry on the next supervisor
+// cold start; everything else (Killed/Dead/Skipped) is cleared.
+// ESRCH whose follow-up identity re-check confirms the process is
+// gone classifies as Dead, not as a kill error.
 type ReaperResult struct {
-	KilledPIDs        []int         // PIDs killed (after ownership gate)
-	SkippedPIDs       []int         // PIDs alive but failed ownership gate
+	KilledPIDs        []int         // PIDs killed (after ownership + StartedAt gate)
+	SkippedPIDs       []int         // PIDs alive but failed an ownership or StartedAt gate
 	DeadPIDs          []int         // PIDs already gone (no kill needed)
+	KillErrors        map[int]error // PIDs where kill returned a non-ESRCH error; entries retained in state
 	ClearedTransients int           // size of supervisor-state.transient_pids[] before clear
 	SettleDuration    time.Duration // actual settle wait
 }
@@ -75,16 +84,33 @@ type ReaperResult struct {
 // ReaperDepsForProduction(stateDir); tests pass synthetic functions
 // to exercise the classification and state-write paths without
 // touching /proc or invoking real syscall.Kill.
+//
+// ProcessStartTime (Lane F P0 #4) returns the kernel-recorded wall
+// clock start time of a PID. The reaper compares this against
+// state.transient_pids[].started_at; PIDs whose recorded vs computed
+// start time differ by more than the StartedAtTolerance window are
+// skipped (treated as PID recycling). On Darwin the production
+// implementation returns (zero, false) — every PID then fails the
+// gate and is skipped, the safe failure mode for a platform with no
+// /proc.
+//
+// KillProcess (Lane F P0 #5) is the per-PID kill fallback used when
+// KillProcessGroup returns ESRCH while the process is still alive
+// (no process-group leader because POSIX spawn paths do not currently
+// call Setpgid — see comment near KillProcessGroup invocation).
 type ReaperDeps struct {
-	StateDir         string
-	ReadState        func(path string) (*api.SupervisorStateFile, error)
-	WriteState       func(path string, s *api.SupervisorStateFile) error
-	PIDAlive         func(pid int) bool
-	ProcessIdentity  func(pid int) (basename, cmdline string, uid int, ok bool)
-	CurrentUID       func() int
-	KillProcessGroup func(pid int) error
-	SettleDuration   time.Duration
-	Now              func() time.Time
+	StateDir            string
+	ReadState           func(path string) (*api.SupervisorStateFile, error)
+	WriteState          func(path string, s *api.SupervisorStateFile) error
+	PIDAlive            func(pid int) bool
+	ProcessIdentity     func(pid int) (basename, cmdline string, uid int, ok bool)
+	CurrentUID          func() int
+	KillProcessGroup    func(pid int) error
+	KillProcess         func(pid int) error
+	ProcessStartTime    func(pid int) (time.Time, bool)
+	StartedAtTolerance  time.Duration
+	SettleDuration      time.Duration
+	Now                 func() time.Time
 }
 
 // withDefaults returns deps with any unset fields filled from the
@@ -108,6 +134,15 @@ func (d ReaperDeps) withDefaults() ReaperDeps {
 	}
 	if d.KillProcessGroup == nil {
 		d.KillProcessGroup = killProcessGroupSIGKILL
+	}
+	if d.KillProcess == nil {
+		d.KillProcess = killProcessSIGKILL
+	}
+	if d.ProcessStartTime == nil {
+		d.ProcessStartTime = processStartTime
+	}
+	if d.StartedAtTolerance == 0 {
+		d.StartedAtTolerance = 2 * time.Second
 	}
 	if d.SettleDuration == 0 {
 		d.SettleDuration = 2 * time.Second
@@ -153,6 +188,11 @@ func ReapStaleTransients(ctx context.Context, deps ReaperDeps) (ReaperResult, er
 
 	uid := deps.CurrentUID()
 	killAttempted := false
+	// retained collects TransientPID entries that must SURVIVE the
+	// reaper pass — currently only entries whose kill returned a
+	// non-ESRCH error (Lane F P0 #5 / Lane B P0). They are re-attempted
+	// on the next supervisor cold start.
+	var retained []api.TransientPID
 
 	for _, t := range state.TransientPIDs {
 		if err := ctx.Err(); err != nil {
@@ -174,13 +214,73 @@ func ReapStaleTransients(ctx context.Context, deps ReaperDeps) (ReaperResult, er
 			res.SkippedPIDs = append(res.SkippedPIDs, pid)
 			continue
 		}
-		// 3-gate passed — kill the process group. Recording the
-		// kill in KilledPIDs even on syscall failure documents the
-		// attempt for the supervisor event log; the state-clear
-		// below still proceeds so the next start sees a clean slate.
-		_ = deps.KillProcessGroup(pid)
-		res.KilledPIDs = append(res.KilledPIDs, pid)
-		killAttempted = true
+		// Lane F P0 #4 — StartedAt gate. Compare recorded vs computed
+		// start time; reject if outside tolerance (treat as PID
+		// recycling). On Darwin processStartTime returns ok=false,
+		// causing every PID to fail this gate and be skipped — the
+		// safe failure mode (no kills > wrong kills on a platform
+		// where we can't probe identity reliably).
+		if !startedAtGate(t.StartedAt, pid, deps) {
+			res.SkippedPIDs = append(res.SkippedPIDs, pid)
+			continue
+		}
+		// All gates passed — kill the process group, then handle the
+		// outcome per Lane F P0 #5 / Lane B P0:
+		//
+		//   nil err     → KilledPIDs, entry cleared from state.
+		//   ESRCH       → identity re-check: PIDAlive==false confirms
+		//                 the process is gone (kernel reaped it
+		//                 between alive-check and kill — common
+		//                 benign race) → DeadPIDs, cleared.
+		//                 Otherwise it's the "no such process group"
+		//                 case — POSIX spawn paths in this codebase
+		//                 do NOT currently call Setpgid (audited as
+		//                 of v0.5.0 phase 16; see also
+		//                 internal/process/pdeathsig_linux.go which
+		//                 only sets Pdeathsig). Fall back to per-PID
+		//                 kill via KillProcess. If that succeeds the
+		//                 PID is killed; if it ALSO returns ESRCH
+		//                 the process is gone; on any other error,
+		//                 KillErrors + retain in state.
+		//   other err   → KillErrors[pid]=err; retain entry for the
+		//                 next cold-start to re-try.
+		err := deps.KillProcessGroup(pid)
+		if err == nil {
+			res.KilledPIDs = append(res.KilledPIDs, pid)
+			killAttempted = true
+			continue
+		}
+		if errors.Is(err, syscall.ESRCH) {
+			// Differentiate "process gone" from "no pgroup leader".
+			if !deps.PIDAlive(pid) {
+				res.DeadPIDs = append(res.DeadPIDs, pid)
+				continue
+			}
+			// Process is alive — pgroup kill failed because the daemon
+			// never became a process-group leader. Fall back.
+			fallbackErr := deps.KillProcess(pid)
+			if fallbackErr == nil {
+				res.KilledPIDs = append(res.KilledPIDs, pid)
+				killAttempted = true
+				continue
+			}
+			if errors.Is(fallbackErr, syscall.ESRCH) {
+				// Race won by kernel between pgroup-ESRCH and per-PID.
+				res.DeadPIDs = append(res.DeadPIDs, pid)
+				continue
+			}
+			if res.KillErrors == nil {
+				res.KillErrors = map[int]error{}
+			}
+			res.KillErrors[pid] = fallbackErr
+			retained = append(retained, t)
+			continue
+		}
+		if res.KillErrors == nil {
+			res.KillErrors = map[int]error{}
+		}
+		res.KillErrors[pid] = err
+		retained = append(retained, t)
 	}
 
 	if killAttempted {
@@ -194,16 +294,38 @@ func ReapStaleTransients(ctx context.Context, deps ReaperDeps) (ReaperResult, er
 		return res, err
 	}
 
-	// Clear transient_pids[] and write back. We rewrite even when all
-	// entries classified as Dead or Skipped: stale entries in the
-	// transient list serve no purpose past the cold-start reap, and
-	// leaving them would only confuse the next start. Skipped PIDs
-	// are surfaced via res.SkippedPIDs for the caller's event log.
-	state.TransientPIDs = nil
+	// Rewrite transient_pids[] preserving only entries whose kill
+	// returned an unrecoverable error (so the next cold-start can
+	// retry). Everything else — killed / dead / skipped — is cleared.
+	// Skipped PIDs surface via res.SkippedPIDs for the caller's event
+	// log; the operator must intervene manually for those.
+	state.TransientPIDs = retained
 	if err := deps.WriteState(statePath, state); err != nil {
 		return res, fmt.Errorf("write supervisor state: %w", err)
 	}
 	return res, nil
+}
+
+// startedAtGate returns true when the kernel-computed process start
+// time agrees with the supervisor-state.transient_pids[].started_at
+// timestamp within deps.StartedAtTolerance. A mismatch (or an
+// unparseable recorded timestamp, or a probe that returned ok=false)
+// fails the gate — the caller treats this as PID recycling and skips
+// the kill (Lane F P0 #4).
+func startedAtGate(recordedRFC3339 string, pid int, deps ReaperDeps) bool {
+	recorded, err := time.Parse(time.RFC3339Nano, recordedRFC3339)
+	if err != nil {
+		return false
+	}
+	computed, ok := deps.ProcessStartTime(pid)
+	if !ok {
+		return false
+	}
+	delta := recorded.Sub(computed)
+	if delta < 0 {
+		delta = -delta
+	}
+	return delta <= deps.StartedAtTolerance
 }
 
 // ownershipGate returns true when all 3 gates pass: image basename
@@ -289,14 +411,53 @@ func procIdentityFromProc(pid int) (string, string, int, bool) {
 
 // killProcessGroupSIGKILL invokes kill(-pid, SIGKILL) — terminates
 // every member of the daemon's process group. The negated PID form
-// reaches the group leader's PGID; the daemon's own process group is
-// established at spawn time in supervise_maintenance.go via
-// setsid()-equivalent behavior on Linux/macOS.
+// reaches the group leader's PGID and cascades to child shells / npx
+// wrappers / MCP server subprocesses spawned underneath.
+//
+// SPAWN-SIDE GAP (Lane F P0 #4): POSIX daemon spawn paths in this
+// codebase do NOT currently call SysProcAttr.Setpgid = true. Audited
+// surfaces as of v0.5.0 phase 16:
+//
+//   - internal/cli/* — no Setpgid use anywhere; daemon.go's
+//     exec.CommandContext call inherits the supervisor's pgroup.
+//   - internal/process/pdeathsig_linux.go — only sets Pdeathsig, not
+//     SysProcAttr.Setpgid.
+//   - internal/process/start_with_job_windows.go — Windows-only.
+//
+// Consequence: a daemon's PID is typically not a process-group
+// leader, so kill(-pid, SIGKILL) returns ESRCH ("no such process
+// group" rather than "no such process"). The reaper handles this by
+// re-checking PIDAlive: if the PID is gone the kernel already reaped
+// it (DeadPIDs); if it's still alive the reaper falls back to per-
+// PID kill via deps.KillProcess.
+//
+// The wider fix — calling SysProcAttr.Setpgid = true at every POSIX
+// spawn site so kill(-pid) reliably reaches the daemon's children —
+// is tracked separately. The reaper's per-PID fallback is the
+// orphan-recovery mechanism in the interim.
 func killProcessGroupSIGKILL(pid int) error {
 	if pid <= 0 {
 		return fmt.Errorf("refusing to kill non-positive pid %d", pid)
 	}
 	return syscall.Kill(-pid, syscall.SIGKILL)
+}
+
+// killProcessSIGKILL invokes kill(pid, SIGKILL) — terminates only the
+// daemon process itself, not its children. Used as the fallback when
+// kill(-pid) returns ESRCH because the daemon never became a process-
+// group leader (see SPAWN-SIDE GAP comment on killProcessGroupSIGKILL).
+//
+// This narrower kill leaves any grandchildren orphaned. That is
+// strictly worse than the cascading process-group kill the reaper
+// prefers, but the orphan-grandchild problem already exists in the
+// current spawn path (without Setpgid the supervisor cannot kill its
+// daemon's children through any single syscall anyway), so the per-
+// PID fallback does not regress beyond the existing surface.
+func killProcessSIGKILL(pid int) error {
+	if pid <= 0 {
+		return fmt.Errorf("refusing to kill non-positive pid %d", pid)
+	}
+	return syscall.Kill(pid, syscall.SIGKILL)
 }
 
 // sleepWithCtx blocks for d, returning early with ctx.Err() if the

@@ -34,10 +34,14 @@ import (
 // start. On Windows every field is zero-valued because the Job Object
 // already reaped any prior-generation children before this function
 // runs.
+//
+// Fields mirror the POSIX surface so cross-platform tests compile
+// against the same API. See POSIX impl for field semantics.
 type ReaperResult struct {
-	KilledPIDs        []int         // PIDs killed (after ownership gate)
-	SkippedPIDs       []int         // PIDs alive but failed ownership gate
+	KilledPIDs        []int         // PIDs killed (after ownership + StartedAt gate)
+	SkippedPIDs       []int         // PIDs alive but failed an ownership or StartedAt gate
 	DeadPIDs          []int         // PIDs already gone (no kill needed)
+	KillErrors        map[int]error // PIDs where kill returned a non-ESRCH error; retained in state
 	ClearedTransients int           // size of supervisor-state.transient_pids[] before clear
 	SettleDuration    time.Duration // actual settle wait
 }
@@ -46,15 +50,18 @@ type ReaperResult struct {
 // (the function is a no-op stub); the struct is kept identical to the
 // POSIX surface so cross-platform tests compile against the same API.
 type ReaperDeps struct {
-	StateDir         string
-	ReadState        func(path string) (*api.SupervisorStateFile, error)
-	WriteState       func(path string, s *api.SupervisorStateFile) error
-	PIDAlive         func(pid int) bool
-	ProcessIdentity  func(pid int) (basename, cmdline string, uid int, ok bool)
-	CurrentUID       func() int
-	KillProcessGroup func(pid int) error
-	SettleDuration   time.Duration
-	Now              func() time.Time
+	StateDir            string
+	ReadState           func(path string) (*api.SupervisorStateFile, error)
+	WriteState          func(path string, s *api.SupervisorStateFile) error
+	PIDAlive            func(pid int) bool
+	ProcessIdentity     func(pid int) (basename, cmdline string, uid int, ok bool)
+	CurrentUID          func() int
+	KillProcessGroup    func(pid int) error
+	KillProcess         func(pid int) error
+	ProcessStartTime    func(pid int) (time.Time, bool)
+	StartedAtTolerance  time.Duration
+	SettleDuration      time.Duration
+	Now                 func() time.Time
 }
 
 // ReapStaleTransients is a no-op on Windows. The Job Object holding

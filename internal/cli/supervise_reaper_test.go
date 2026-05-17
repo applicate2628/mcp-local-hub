@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"syscall"
 	"testing"
 	"time"
 
@@ -27,12 +28,14 @@ import (
 
 // fakeProc is one synthetic process the test surface knows about.
 type fakeProc struct {
-	pid      int
-	alive    bool
-	basename string
-	cmdline  string
-	uid      int
-	idOK     bool // ProcessIdentity returns ok=this
+	pid       int
+	alive     bool
+	basename  string
+	cmdline   string
+	uid       int
+	idOK      bool // ProcessIdentity returns ok=this
+	startTime time.Time
+	startOK   bool // ProcessStartTime returns ok=this
 }
 
 // reaperFakes is a test seam that bundles all injectable deps into
@@ -46,8 +49,13 @@ type reaperFakes struct {
 	writeErr    error
 	procs       map[int]fakeProc
 	currentUID  int
-	killed      []int    // PIDs the fake KillProcessGroup recorded
+	killed      []int // PIDs the fake KillProcessGroup recorded
 	killErrs    map[int]error
+	// killed1 records per-PID (non-pgroup) kill fallback invocations and
+	// killErrs1 maps a per-PID kill error. Used by ESRCH+alive+fallback
+	// tests (Lane F P0 #5).
+	killed1     []int
+	killErrs1   map[int]error
 	now         time.Time
 	nowCalls    int
 	sleepCalled time.Duration // accumulated settle duration observed via Now() diffs
@@ -63,6 +71,7 @@ func newReaperFakes(t *testing.T) *reaperFakes {
 		procs:       map[int]fakeProc{},
 		currentUID:  1000,
 		killErrs:    map[int]error{},
+		killErrs1:   map[int]error{},
 		now:         time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC),
 	}
 }
@@ -111,7 +120,28 @@ func (f *reaperFakes) deps() ReaperDeps {
 			}
 			return nil
 		},
-		SettleDuration: 50 * time.Millisecond, // small for tests
+		KillProcess: func(pid int) error {
+			f.killed1 = append(f.killed1, pid)
+			if err, ok := f.killErrs1[pid]; ok {
+				return err
+			}
+			return nil
+		},
+		ProcessStartTime: func(pid int) (time.Time, bool) {
+			p, ok := f.procs[pid]
+			if !ok {
+				return time.Time{}, false
+			}
+			// Default: match the recorded StartedAt exactly (gate passes).
+			// Tests that want a mismatch override startTime + startOK
+			// explicitly via the fake.
+			if !p.startOK && p.startTime.IsZero() {
+				return f.now, true
+			}
+			return p.startTime, p.startOK
+		},
+		StartedAtTolerance: 2 * time.Second,
+		SettleDuration:     50 * time.Millisecond, // small for tests
 		Now: func() time.Time {
 			f.nowCalls++
 			return f.now
@@ -119,8 +149,33 @@ func (f *reaperFakes) deps() ReaperDeps {
 	}
 }
 
-// addOwnedAlivePID adds a fake "alive + 3-gate-passes" process at pid.
+// addOwnedAlivePID adds a fake "alive + all-gates-pass" process at pid.
+// Records StartedAt and ProcessStartTime both equal to f.now so the
+// Lane F P0 #4 StartedAt gate passes by default; tests that want a
+// mismatch use addOwnedAliveStaleStartPID instead.
 func (f *reaperFakes) addOwnedAlivePID(pid int) {
+	f.procs[pid] = fakeProc{
+		pid:       pid,
+		alive:     true,
+		basename:  "mcphub",
+		cmdline:   "mcphub daemon --server memory --daemon default",
+		uid:       f.currentUID,
+		idOK:      true,
+		startTime: f.now,
+		startOK:   true,
+	}
+	f.stateBefore.TransientPIDs = append(f.stateBefore.TransientPIDs, api.TransientPID{
+		PID:       pid,
+		Kind:      "test-fixture",
+		StartedAt: f.now.Format(time.RFC3339Nano),
+	})
+}
+
+// addOwnedAliveStaleStartPID adds a fake "all ownership gates pass,
+// but computed start time is OUTSIDE the StartedAt tolerance window"
+// process. Used by TestReaper_StartedAtMismatchSkipsRecycledPID to
+// drive the Lane F P0 #4 PID-recycle skip path.
+func (f *reaperFakes) addOwnedAliveStaleStartPID(pid int) {
 	f.procs[pid] = fakeProc{
 		pid:      pid,
 		alive:    true,
@@ -128,23 +183,31 @@ func (f *reaperFakes) addOwnedAlivePID(pid int) {
 		cmdline:  "mcphub daemon --server memory --daemon default",
 		uid:      f.currentUID,
 		idOK:     true,
+		// 1 hour drift = far outside the default 2s tolerance.
+		startTime: f.now.Add(-1 * time.Hour),
+		startOK:   true,
 	}
 	f.stateBefore.TransientPIDs = append(f.stateBefore.TransientPIDs, api.TransientPID{
 		PID:       pid,
 		Kind:      "test-fixture",
-		StartedAt: f.now.Add(-1 * time.Minute).Format(time.RFC3339Nano),
+		StartedAt: f.now.Format(time.RFC3339Nano),
 	})
 }
 
 // addAliveWrongUIDPID adds a fake "alive but UID mismatch" process.
+// StartedAt/start time match by default so the gate that fails is the
+// ownership UID gate, not the StartedAt gate (avoids ambiguity in the
+// test's failing-gate signal).
 func (f *reaperFakes) addAliveWrongUIDPID(pid int) {
 	f.procs[pid] = fakeProc{
-		pid:      pid,
-		alive:    true,
-		basename: "mcphub",
-		cmdline:  "mcphub daemon --server memory --daemon default",
-		uid:      f.currentUID + 1, // mismatch
-		idOK:     true,
+		pid:       pid,
+		alive:     true,
+		basename:  "mcphub",
+		cmdline:   "mcphub daemon --server memory --daemon default",
+		uid:       f.currentUID + 1, // mismatch
+		idOK:      true,
+		startTime: f.now,
+		startOK:   true,
 	}
 	f.stateBefore.TransientPIDs = append(f.stateBefore.TransientPIDs, api.TransientPID{
 		PID:       pid,
@@ -399,36 +462,48 @@ func TestReaper_SettleDurationRespected(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------
-// TestReaper_KillFailureNonFatal
+// TestReaper_KillErrorsRetained (Lane F P0 #5 / Lane B P0)
 //
-// KillProcessGroup returns an error → the reaper still records the
-// attempted kill, still settles, and still clears state. Reaping is
-// best-effort: a failed kill should NOT preserve the stale PID in
-// state (where it would only confuse the next supervisor start that
-// reads the same stale entry).
+// KillProcessGroup returns a non-ESRCH error (EPERM, synthetic
+// generic failure, etc.) → the reaper records a KillErrors entry AND
+// retains the TransientPID in state so the next supervisor cold start
+// can retry. KilledPIDs MUST NOT list the PID (no successful kill
+// occurred); SettleDuration MUST be zero (nothing to settle for).
+//
+// Replaces the prior TestReaper_KillFailureNonFatal which asserted
+// "still clear state on kill failure" — that semantic was a defect
+// per Lane F P0 #5 (failed kills must survive so they retry).
 // ---------------------------------------------------------------------
-func TestReaper_KillFailureNonFatal(t *testing.T) {
+func TestReaper_KillErrorsRetained(t *testing.T) {
 	if expectWindowsNoOp() {
 		t.Skip("Windows reaper is a no-op; kill failure path is not applicable")
 	}
 	f := newReaperFakes(t)
 	f.addOwnedAlivePID(3333)
-	f.killErrs[3333] = errors.New("synthetic kill failure")
+	f.killErrs[3333] = syscall.EPERM // non-ESRCH error class
 
 	res, err := ReapStaleTransients(context.Background(), f.deps())
 	if err != nil {
 		t.Fatalf("ReapStaleTransients must not return kill errors as fatal; got %v", err)
 	}
-	// KilledPIDs records ATTEMPTED kills regardless of error so logs
-	// surface "we tried to kill 3333" even on failure.
-	if len(res.KilledPIDs) != 1 || res.KilledPIDs[0] != 3333 {
-		t.Errorf("KilledPIDs = %v; want [3333] (attempt recorded even on failure)", res.KilledPIDs)
+	if len(res.KilledPIDs) != 0 {
+		t.Errorf("KilledPIDs = %v; want empty (kill failed, no success to record)", res.KilledPIDs)
+	}
+	if len(res.KillErrors) != 1 {
+		t.Fatalf("KillErrors = %v; want one entry for pid 3333", res.KillErrors)
+	}
+	gotErr, ok := res.KillErrors[3333]
+	if !ok {
+		t.Fatalf("KillErrors missing pid 3333 entry: %v", res.KillErrors)
+	}
+	if !errors.Is(gotErr, syscall.EPERM) {
+		t.Errorf("KillErrors[3333] = %v; want syscall.EPERM", gotErr)
 	}
 	if f.stateAfter == nil {
 		t.Fatalf("WriteState was not called even after kill failure")
 	}
-	if len(f.stateAfter.TransientPIDs) != 0 {
-		t.Errorf("TransientPIDs after reap = %v; want empty even on kill failure", f.stateAfter.TransientPIDs)
+	if len(f.stateAfter.TransientPIDs) != 1 || f.stateAfter.TransientPIDs[0].PID != 3333 {
+		t.Errorf("TransientPIDs after reap = %v; want [{PID:3333}] retained for retry", f.stateAfter.TransientPIDs)
 	}
 }
 
@@ -460,5 +535,237 @@ func TestReaper_ContextCancellation(t *testing.T) {
 	}
 	if f.writeCalls != 0 {
 		t.Errorf("WriteState called %d times after ctx cancel; want 0 (state preserved)", f.writeCalls)
+	}
+}
+
+// ---------------------------------------------------------------------
+// TestReaper_StartedAtMismatchSkipsRecycledPID (Lane F P0 #4)
+//
+// All ownership gates pass (basename, cmdline tokens, UID), but the
+// fake ProcessStartTime returns a wall-clock 1 hour before the
+// recorded StartedAt. The reaper must classify this as PID recycling,
+// add the PID to SkippedPIDs, and NOT invoke KillProcessGroup.
+// State is cleared (no recourse — operator must intervene).
+// ---------------------------------------------------------------------
+func TestReaper_StartedAtMismatchSkipsRecycledPID(t *testing.T) {
+	if expectWindowsNoOp() {
+		t.Skip("Windows reaper is a no-op; StartedAt gate has no effect")
+	}
+	f := newReaperFakes(t)
+	f.addOwnedAliveStaleStartPID(6060)
+
+	res, err := ReapStaleTransients(context.Background(), f.deps())
+	if err != nil {
+		t.Fatalf("ReapStaleTransients: %v", err)
+	}
+	if len(res.KilledPIDs) != 0 {
+		t.Errorf("KilledPIDs = %v; want empty (StartedAt mismatch must skip kill)", res.KilledPIDs)
+	}
+	if len(res.SkippedPIDs) != 1 || res.SkippedPIDs[0] != 6060 {
+		t.Errorf("SkippedPIDs = %v; want [6060]", res.SkippedPIDs)
+	}
+	if len(f.killed) != 0 {
+		t.Errorf("KillProcessGroup invoked %v; want no calls when StartedAt gate fails", f.killed)
+	}
+	if len(f.killed1) != 0 {
+		t.Errorf("KillProcess fallback invoked %v; want no calls when StartedAt gate fails", f.killed1)
+	}
+	if len(res.KillErrors) != 0 {
+		t.Errorf("KillErrors = %v; want empty (no kill was attempted)", res.KillErrors)
+	}
+}
+
+// ---------------------------------------------------------------------
+// TestReaper_StartedAtGateRejectsProbeFailure (Lane F P0 #4 — Darwin
+// safety mode)
+//
+// On Darwin (and any host without /proc) processStartTime returns
+// ok=false. The reaper must fail closed: gate fails, PID skipped, no
+// kill. This test simulates the Darwin failure mode via a fakeProc
+// with startOK=false.
+// ---------------------------------------------------------------------
+func TestReaper_StartedAtGateRejectsProbeFailure(t *testing.T) {
+	if expectWindowsNoOp() {
+		t.Skip("Windows reaper is a no-op; ProcessStartTime gate has no effect")
+	}
+	f := newReaperFakes(t)
+	// Construct a manual fakeProc with startOK=false (simulates Darwin
+	// fallback). Use addOwnedAlivePID then override the proc map.
+	f.addOwnedAlivePID(7070)
+	p := f.procs[7070]
+	p.startOK = false
+	p.startTime = time.Time{}
+	f.procs[7070] = p
+
+	res, err := ReapStaleTransients(context.Background(), f.deps())
+	if err != nil {
+		t.Fatalf("ReapStaleTransients: %v", err)
+	}
+	if len(res.KilledPIDs) != 0 {
+		t.Errorf("KilledPIDs = %v; want empty (StartedAt probe failure must skip kill)", res.KilledPIDs)
+	}
+	if len(res.SkippedPIDs) != 1 || res.SkippedPIDs[0] != 7070 {
+		t.Errorf("SkippedPIDs = %v; want [7070]", res.SkippedPIDs)
+	}
+	if len(f.killed) != 0 {
+		t.Errorf("KillProcessGroup invoked %v; want no calls", f.killed)
+	}
+}
+
+// ---------------------------------------------------------------------
+// TestReaper_ESRCHFromMissingPgroupPreservesState (Lane F P0 #5 /
+// Lane B P0)
+//
+// KillProcessGroup returns ESRCH (no such process group leader —
+// happens when spawn never called Setpgid). PIDAlive still reports
+// the process is alive on the post-kill re-check, so the reaper
+// falls back to per-PID kill (deps.KillProcess). The fake makes the
+// per-PID kill fail too (EPERM). Expected result:
+//
+//   - KilledPIDs empty
+//   - KillErrors[pid] = EPERM
+//   - TransientPIDs retained in state for retry
+//   - KillProcessGroup AND KillProcess both invoked
+// ---------------------------------------------------------------------
+func TestReaper_ESRCHFromMissingPgroupPreservesState(t *testing.T) {
+	if expectWindowsNoOp() {
+		t.Skip("Windows reaper is a no-op; ESRCH path is not applicable")
+	}
+	f := newReaperFakes(t)
+	f.addOwnedAlivePID(4040)
+	f.killErrs[4040] = syscall.ESRCH
+	// PIDAlive remains true (the alive flag is still set on procs[4040])
+	// so the post-ESRCH re-check classifies as "no pgroup leader" and
+	// the per-PID fallback fires. Make the per-PID kill ALSO fail so
+	// the entry retains in state.
+	f.killErrs1[4040] = syscall.EPERM
+
+	res, err := ReapStaleTransients(context.Background(), f.deps())
+	if err != nil {
+		t.Fatalf("ReapStaleTransients: %v", err)
+	}
+	if len(res.KilledPIDs) != 0 {
+		t.Errorf("KilledPIDs = %v; want empty (both kill attempts failed)", res.KilledPIDs)
+	}
+	if len(f.killed) != 1 || f.killed[0] != 4040 {
+		t.Errorf("KillProcessGroup invocations = %v; want [4040] (one pgroup attempt)", f.killed)
+	}
+	if len(f.killed1) != 1 || f.killed1[0] != 4040 {
+		t.Errorf("KillProcess invocations = %v; want [4040] (one per-PID fallback)", f.killed1)
+	}
+	if len(res.KillErrors) != 1 {
+		t.Fatalf("KillErrors = %v; want one entry for pid 4040", res.KillErrors)
+	}
+	if !errors.Is(res.KillErrors[4040], syscall.EPERM) {
+		t.Errorf("KillErrors[4040] = %v; want syscall.EPERM (fallback error)", res.KillErrors[4040])
+	}
+	if f.stateAfter == nil {
+		t.Fatalf("WriteState was not called")
+	}
+	if len(f.stateAfter.TransientPIDs) != 1 || f.stateAfter.TransientPIDs[0].PID != 4040 {
+		t.Errorf("TransientPIDs after reap = %v; want [{PID:4040}] retained", f.stateAfter.TransientPIDs)
+	}
+}
+
+// ---------------------------------------------------------------------
+// TestReaper_ESRCHFromProcessAlreadyGoneClearsState (Lane F P0 #5)
+//
+// KillProcessGroup returns ESRCH AND the post-kill PIDAlive re-check
+// reports the process is gone. The reaper must classify this as the
+// benign race (kernel reaped the process between alive-check and
+// kill), record it in DeadPIDs, NOT fall back to per-PID kill, and
+// clear state.
+// ---------------------------------------------------------------------
+func TestReaper_ESRCHFromProcessAlreadyGoneClearsState(t *testing.T) {
+	if expectWindowsNoOp() {
+		t.Skip("Windows reaper is a no-op; ESRCH path is not applicable")
+	}
+	f := newReaperFakes(t)
+	f.addOwnedAlivePID(5050)
+	// Make KillProcessGroup return ESRCH; the SAME act of "kill returned
+	// ESRCH" implies the kernel decided the process group is gone. We
+	// simulate the post-kill re-check by flipping PIDAlive false via a
+	// custom override on the proc table after the seam captures the
+	// initial alive state.
+	f.killErrs[5050] = syscall.ESRCH
+	// Override PIDAlive to flip on the SECOND call: first call (pre-gate)
+	// returns true; subsequent call (post-ESRCH) returns false. Easiest
+	// approach: rebuild deps with a closure that counts calls.
+	deps := f.deps()
+	calls := 0
+	deps.PIDAlive = func(pid int) bool {
+		calls++
+		if pid == 5050 && calls > 1 {
+			return false
+		}
+		p, ok := f.procs[pid]
+		if !ok {
+			return false
+		}
+		return p.alive
+	}
+
+	res, err := ReapStaleTransients(context.Background(), deps)
+	if err != nil {
+		t.Fatalf("ReapStaleTransients: %v", err)
+	}
+	if len(res.KilledPIDs) != 0 {
+		t.Errorf("KilledPIDs = %v; want empty (kernel already reaped)", res.KilledPIDs)
+	}
+	if len(res.DeadPIDs) != 1 || res.DeadPIDs[0] != 5050 {
+		t.Errorf("DeadPIDs = %v; want [5050] (ESRCH + post-kill dead = benign race)", res.DeadPIDs)
+	}
+	if len(f.killed1) != 0 {
+		t.Errorf("KillProcess fallback invoked %v; want no calls (process gone, no fallback needed)", f.killed1)
+	}
+	if len(res.KillErrors) != 0 {
+		t.Errorf("KillErrors = %v; want empty (ESRCH on gone process is not an error)", res.KillErrors)
+	}
+	if f.stateAfter == nil {
+		t.Fatalf("WriteState was not called")
+	}
+	if len(f.stateAfter.TransientPIDs) != 0 {
+		t.Errorf("TransientPIDs after reap = %v; want empty (state cleared on gone process)", f.stateAfter.TransientPIDs)
+	}
+}
+
+// ---------------------------------------------------------------------
+// TestReaper_ESRCHFromMissingPgroupFallbackSucceeds (Lane F P0 #5)
+//
+// KillProcessGroup returns ESRCH (no pgroup leader), PIDAlive on the
+// re-check reports the process is still alive, deps.KillProcess
+// succeeds. The reaper must record the PID in KilledPIDs and clear
+// state — the per-PID fallback closed the orphan.
+// ---------------------------------------------------------------------
+func TestReaper_ESRCHFromMissingPgroupFallbackSucceeds(t *testing.T) {
+	if expectWindowsNoOp() {
+		t.Skip("Windows reaper is a no-op; ESRCH fallback path is not applicable")
+	}
+	f := newReaperFakes(t)
+	f.addOwnedAlivePID(2020)
+	f.killErrs[2020] = syscall.ESRCH
+	// KillProcess fallback returns nil (success) — no entry in killErrs1.
+
+	res, err := ReapStaleTransients(context.Background(), f.deps())
+	if err != nil {
+		t.Fatalf("ReapStaleTransients: %v", err)
+	}
+	if len(res.KilledPIDs) != 1 || res.KilledPIDs[0] != 2020 {
+		t.Errorf("KilledPIDs = %v; want [2020] (per-PID fallback succeeded)", res.KilledPIDs)
+	}
+	if len(f.killed) != 1 || f.killed[0] != 2020 {
+		t.Errorf("KillProcessGroup invocations = %v; want [2020] (one initial attempt)", f.killed)
+	}
+	if len(f.killed1) != 1 || f.killed1[0] != 2020 {
+		t.Errorf("KillProcess invocations = %v; want [2020] (one fallback)", f.killed1)
+	}
+	if len(res.KillErrors) != 0 {
+		t.Errorf("KillErrors = %v; want empty (fallback succeeded)", res.KillErrors)
+	}
+	if f.stateAfter == nil {
+		t.Fatalf("WriteState was not called")
+	}
+	if len(f.stateAfter.TransientPIDs) != 0 {
+		t.Errorf("TransientPIDs after reap = %v; want empty (state cleared on successful kill)", f.stateAfter.TransientPIDs)
 	}
 }
