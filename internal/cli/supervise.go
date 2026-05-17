@@ -260,6 +260,16 @@ type ipcDispatchDeps struct {
 	triggerGracefulExit func() // closes loop, signals exit
 }
 
+const ipcErrorSupervisorStarting = "SUPERVISOR_STARTING"
+
+var daemonIntentReadLockTimeout = 5 * time.Second
+
+type runningProcessIdentity struct {
+	PID           int
+	PIDGeneration int
+	StartedAt     string
+}
+
 // runSupervise is the body shared between the cobra command and any
 // future programmatic supervisor entry-point (e.g. when the GUI hosts
 // a supervisor in-process for the dev-mode `mcphub gui --supervise`
@@ -415,9 +425,10 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	// false → true exactly once, after BOTH:
 	//   (a) the supervisor has attempted to read its two intent files,
 	//   (b) the first reconcile pass has been scheduled.
-	// Task 6.2 stubs (b) — the real reconcile loop body lands in
-	// Task 7.1; here we mark ready immediately after (a) so the
-	// IPC `status` contract is testable end-to-end at this phase.
+	// reconcileReady intentionally does not wait for child spawn or
+	// terminate fan-out. Those outcomes are audit events; readiness
+	// means clients may now issue mutating IPC verbs against a supervisor
+	// whose first reconcile pass is scheduled.
 	//
 	// intentFilesLoaded is the inner observability flag (spec §"Wire
 	// format" status result), useful when a migrate-side watcher wants
@@ -462,7 +473,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	// force-kill fallback on every invocation.
 	if !noIPC {
 		pipePath := defaultPipePath(stateDir)
-		listener, lerr := NewSupervisorIPCListener(pipePath)
+		listener, lerr := NewSupervisorIPCListener(pipePath, lk.Owner())
 		if lerr != nil {
 			return fmt.Errorf("ipc listener: %w", lerr)
 		}
@@ -501,18 +512,26 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 
 	// Startup reconcile pass. Wires the parsed supervisor-intent.json
 	// through NewReconciler with production spawn/terminate closures.
-	// This replaces the Task 6.2 stub that flipped reconcileReady
-	// immediately after intent reads, leaving every daemon un-spawned.
+	// Reconcile runs asynchronously; reconcileReady below means "scheduled",
+	// not "completed".
 	//
 	// Test seam: if reconcileSpawnFn / reconcileTerminateFn were
 	// installed via setReconcileSpawnFnForTest, the test fakes win
 	// over the production closures so wiring tests can capture spawn
 	// fan-out without launching real child processes.
 	//
-	// Order: reconcile runs BEFORE reconcileReady.Store(true) so any
-	// migration watcher polling the audit log sees daemon-spawned
-	// events emitted ahead of the reconcile-ready marker.
-	currentRunning, runningPIDs := loadSupervisorCurrentRunning(stateDir)
+	currentRunning, runningPIDs, stateErr := loadSupervisorCurrentRunning(stateDir)
+	if stateErr != nil {
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "error",
+			Source:   "lifecycle",
+			Event:    "supervise-startup-failed",
+			Body: map[string]any{
+				"err": stateErr.Error(),
+			},
+		})
+		return fmt.Errorf("load supervisor-state.json: %w", stateErr)
+	}
 	job, jobErr := process.NewKillOnCloseJob()
 	if jobErr != nil {
 		// Best-effort: a job-create failure means the supervisor's
@@ -544,13 +563,13 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 
 	if intent != nil {
 		reconciler := NewReconciler(spawnFn, terminateFn)
-		reconciler.Reconcile(intent, daemonIntent, currentRunning, time.Now().UTC())
+		go reconciler.Reconcile(intent, daemonIntent, currentRunning, time.Now().UTC())
 	}
 
-	// Mark reconcile-ready. The flag transitions false → true exactly
-	// once, AFTER the startup reconcile pass has fanned out spawn
-	// decisions. Migration / upgrade callers wait on this flag (not
-	// all-daemons-healthy) per spec §"Migration step 14".
+	// Mark reconcile-ready. The flag transitions false → true once the
+	// startup reconcile pass has been scheduled, not when child spawn or
+	// terminate fan-out completes. Migration / upgrade callers wait on this
+	// flag (not all-daemons-healthy) per spec §"Migration step 14".
 	reconcileReady.Store(true)
 	_ = events.Emit(api.SupervisorEvent{
 		Severity: "info",
@@ -848,6 +867,19 @@ func dispatchIPCRequest(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps)
 				"intent_files_loaded": deps.intentFilesLoaded.Load(),
 			},
 		})
+	}
+	if !deps.reconcileReady.Load() {
+		return writeIPCFrame(conn, api.IPCResponse{
+			ID: req.ID,
+			Error: &api.IPCErr{
+				Code:      ipcErrorSupervisorStarting,
+				Message:   "supervisor is still starting; retry status until reconcile_ready=true",
+				Retryable: true,
+			},
+			Final: true,
+		})
+	}
+	switch req.Cmd {
 	case "quiesce-timers":
 		return handleQuiesceTimers(conn, req, deps)
 	case "exit":
@@ -1121,19 +1153,11 @@ func writeIPCFrame(conn net.Conn, resp api.IPCResponse) error {
 // timers in that state. Both return values may be nil — callers
 // MUST nil-check before deref.
 //
-// supervisor-intent.json errors remain audit-only because absence or
-// corruption simply means there is no spawn plan to execute. daemon-intent.json
-// is stricter: a present but unreadable or invalid file is fail-closed and
-// returns an error after the audit row is emitted, because nil daemon intent
-// means "no stop overrides" to the reconciler.
-//
-// daemon-intent.json read path: the canonical *API.ReadDaemonIntent
-// flow lives on *api.API and resolves DaemonStateDir() internally —
-// that path does NOT honor the supervise CLI's
-// MCPHUB_STATE_DIR_OVERRIDE seam, so the startup reconcile reads the
-// file directly here and sends the bytes through api.ParseDaemonIntentFile.
-// Watcher/reload paths (follow-up) will switch to the full flock+quarantine
-// flow once the production path-injection variant lands.
+// supervisor-intent.json and daemon-intent.json are both fail-closed when a
+// present file cannot be read or parsed. Missing files remain valid first-boot
+// input. daemon-intent.json goes through api.ReadDaemonIntentFile so startup
+// honors the same sibling-flock/quarantine owner as other daemon-intent readers
+// while still using the supervise CLI's already-resolved state-dir override.
 func loadIntentFiles(
 	stateDir string,
 	events *api.SupervisorEventLog,
@@ -1150,7 +1174,7 @@ func loadIntentFiles(
 		// host is the expected first-boot shape.
 		if !errors.Is(err, os.ErrNotExist) {
 			_ = events.Emit(api.SupervisorEvent{
-				Severity: "warn",
+				Severity: "error",
 				Source:   "lifecycle",
 				Event:    "supervisor-intent-read-failed",
 				Body: map[string]any{
@@ -1158,41 +1182,37 @@ func loadIntentFiles(
 					"err":  err.Error(),
 				},
 			})
+			return nil, nil, fmt.Errorf("read supervisor-intent.json: %w", err)
 		}
 	} else {
 		supervisorIntent = got
 	}
 
 	daemonIntentPath := filepath.Join(stateDir, "daemon-intent.json")
-	if raw, err := os.ReadFile(daemonIntentPath); err != nil {
-		if !os.IsNotExist(err) {
-			_ = events.Emit(api.SupervisorEvent{
-				Severity: "error",
-				Source:   "lifecycle",
-				Event:    "daemon-intent-read-failed",
-				Body: map[string]any{
-					"path": daemonIntentPath,
-					"err":  err.Error(),
-				},
-			})
-			return supervisorIntent, nil, fmt.Errorf("read daemon-intent.json: %w", err)
+	daemonRead := api.ReadDaemonIntentFile(daemonIntentPath, daemonIntentReadLockTimeout)
+	if daemonRead.Err != nil {
+		eventName := "daemon-intent-read-failed"
+		if daemonRead.State == api.IntentStateCorrupt {
+			eventName = "daemon-intent-parse-failed"
 		}
-	} else {
-		parsed, err := api.ParseDaemonIntentFile(raw)
-		if err != nil {
-			_ = events.Emit(api.SupervisorEvent{
-				Severity: "error",
-				Source:   "lifecycle",
-				Event:    "daemon-intent-parse-failed",
-				Body: map[string]any{
-					"path": daemonIntentPath,
-					"err":  err.Error(),
-				},
-			})
-			return supervisorIntent, nil, fmt.Errorf("parse daemon-intent.json: %w", err)
-		} else {
-			daemonIntent = &parsed
+		body := map[string]any{
+			"path": daemonIntentPath,
+			"err":  daemonRead.Err.Error(),
 		}
+		if daemonRead.QuarantinePath != "" {
+			body["quarantine_path"] = daemonRead.QuarantinePath
+		}
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "error",
+			Source:   "lifecycle",
+			Event:    eventName,
+			Body:     body,
+		})
+		return supervisorIntent, nil, fmt.Errorf("read daemon-intent.json: %w", daemonRead.Err)
+	}
+	if daemonRead.State == api.IntentStateValid {
+		parsed := daemonRead.File
+		daemonIntent = &parsed
 	}
 
 	intentFilesLoaded.Store(true)
@@ -1209,33 +1229,52 @@ func loadIntentFiles(
 // "not running" and fans out spawn for each.
 //
 // Warm-restart case: a parsed supervisor-state.json may list daemons
-// in state="running" with CurrentPID > 0. Those names go into the
-// map only when the PID is still alive and matches the expected
-// mcphub image identity, so a stale state file cannot suppress a
-// required startup spawn for the supervisor lifetime.
+// in state="running" with CurrentPID > 0. Those names go into the map
+// only when the PID is still alive and matches the expected mcphub image
+// identity plus the recorded pid_generation/started_at generation proof, so
+// a stale state file cannot suppress a required startup spawn.
 //
-// Errors (read failure, parse failure) are swallowed silently —
-// supervisor-events.log already captures the audit row in the
-// watcher / reload path; on startup the safer default is to assume
-// "nothing was running" and let the reconcile fan-out attempt every
-// daemon (idempotent against an already-running peer because the
-// production SpawnFn checks the file system port via daemon manifest
-// before binding).
-func loadSupervisorCurrentRunning(stateDir string) (map[string]bool, map[string]int) {
+// A missing file is valid first boot. Any other read/parse error is fatal:
+// corrupt supervisor-state.json is an untrusted warm-start input and must not
+// silently collapse to "no daemons running".
+func loadSupervisorCurrentRunning(stateDir string) (map[string]bool, map[string]runningProcessIdentity, error) {
 	result := map[string]bool{}
-	pids := map[string]int{}
+	pids := map[string]runningProcessIdentity{}
 	statePath := filepath.Join(stateDir, "supervisor-state.json")
 	state, err := api.ReadSupervisorState(statePath)
-	if err != nil || state == nil {
-		return result, pids
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return result, pids, nil
+		}
+		return result, pids, fmt.Errorf("read supervisor-state.json: %w", err)
 	}
+	if state == nil {
+		return result, pids, nil
+	}
+	expectedExe := canonicalMcphubPath()
 	for taskName, ds := range state.Daemons {
-		if ds.State == "running" && ds.CurrentPID > 0 && process.IsPidAlive(ds.CurrentPID) && pidMatchesMcphub(ds.CurrentPID) {
-			result[taskName] = true
-			pids[taskName] = ds.CurrentPID
+		if ds.State != "running" || ds.CurrentPID <= 0 {
+			continue
+		}
+		if ds.PIDGeneration <= 0 || ds.StartedAt == "" || expectedExe == "" {
+			continue
+		}
+		proof := process.PIDIdentityProof{
+			PID:            ds.CurrentPID,
+			ExecutablePath: expectedExe,
+			StartedAt:      ds.StartedAt,
+		}
+		if err := process.VerifyPIDIdentity(proof); err != nil {
+			continue
+		}
+		result[taskName] = true
+		pids[taskName] = runningProcessIdentity{
+			PID:           ds.CurrentPID,
+			PIDGeneration: ds.PIDGeneration,
+			StartedAt:     ds.StartedAt,
 		}
 	}
-	return result, pids
+	return result, pids, nil
 }
 
 // makeProductionTerminateFn returns the TerminateFunc the Reconciler
@@ -1243,19 +1282,39 @@ func loadSupervisorCurrentRunning(stateDir string) (map[string]bool, map[string]
 // daemon-intent.json. The Reconciler carries only the daemon descriptor,
 // so startup reconcile threads in the PID snapshot captured from
 // supervisor-state.json.
-func makeProductionTerminateFn(events *api.SupervisorEventLog, runningPIDs map[string]int) TerminateFunc {
+func makeProductionTerminateFn(events *api.SupervisorEventLog, runningPIDs map[string]runningProcessIdentity) TerminateFunc {
 	return func(d api.SupervisorDaemon) error {
-		pid := runningPIDs[d.TaskName]
+		target := runningPIDs[d.TaskName]
+		pid := target.PID
 		if pid <= 0 {
 			err := fmt.Errorf("no running PID recorded for task %q", d.TaskName)
 			emitDaemonTerminateFailed(events, d, pid, err)
 			return err
 		}
-		if !process.IsPidAlive(pid) {
+		state, stateErr := process.QueryPIDState(pid)
+		if stateErr != nil {
+			err := fmt.Errorf("query PID %d state: %w", pid, stateErr)
+			emitDaemonTerminateFailed(events, d, pid, err)
+			return err
+		}
+		if state == process.PIDStateDead {
 			emitDaemonTerminateAlreadyExited(events, d, pid)
 			return nil
 		}
-		if !pidMatchesMcphub(pid) {
+		proof := process.PIDIdentityProof{
+			PID:            pid,
+			ExecutablePath: canonicalMcphubPath(),
+			StartedAt:      target.StartedAt,
+		}
+		if err := process.VerifyPIDIdentity(proof); err != nil {
+			if errors.Is(err, process.ErrProcessAlreadyExited) {
+				emitDaemonTerminateAlreadyExited(events, d, pid)
+				return nil
+			}
+			if !errors.Is(err, process.ErrProcessIdentityMismatch) {
+				emitDaemonTerminateFailed(events, d, pid, err)
+				return err
+			}
 			_ = events.Emit(api.SupervisorEvent{
 				Severity: api.SupervisorEventSeverityWarn,
 				Source:   "lifecycle",
@@ -1263,7 +1322,7 @@ func makeProductionTerminateFn(events *api.SupervisorEventLog, runningPIDs map[s
 				TaskName: d.TaskName,
 				Body: map[string]any{
 					"pid":    pid,
-					"reason": "PID does not match mcphub identity at terminate entry - possible OS PID reuse",
+					"reason": err.Error(),
 				},
 			})
 			return nil
@@ -1279,15 +1338,28 @@ func makeProductionTerminateFn(events *api.SupervisorEventLog, runningPIDs map[s
 			},
 		})
 
-		if err := process.TerminatePID(pid); err != nil {
+		if err := process.TerminatePIDWithIdentity(proof); err != nil {
 			if errors.Is(err, process.ErrProcessAlreadyExited) {
 				emitDaemonTerminateAlreadyExited(events, d, pid)
+				return nil
+			}
+			if errors.Is(err, process.ErrProcessIdentityMismatch) {
+				_ = events.Emit(api.SupervisorEvent{
+					Severity: api.SupervisorEventSeverityWarn,
+					Source:   "lifecycle",
+					Event:    "daemon-terminate-aborted-pid-reuse",
+					TaskName: d.TaskName,
+					Body: map[string]any{
+						"pid":    pid,
+						"reason": err.Error(),
+					},
+				})
 				return nil
 			}
 			emitDaemonTerminateFailed(events, d, pid, err)
 			return err
 		}
-		if err := finishProductionTerminate(pid, d, events); err != nil {
+		if err := finishProductionTerminate(proof, d, events); err != nil {
 			emitDaemonTerminateFailed(events, d, pid, err)
 			return err
 		}

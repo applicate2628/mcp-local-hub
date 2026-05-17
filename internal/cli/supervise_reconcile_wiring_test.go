@@ -5,8 +5,8 @@
 // These tests pin the runSupervise → NewReconciler wiring contract:
 // when supervisor-intent.json contains daemon descriptors, runSupervise
 // MUST construct a Reconciler with production spawn/terminate closures
-// and invoke Reconcile against the parsed intent BEFORE flipping
-// reconcileReady.Store(true).
+// and schedule Reconcile against the parsed intent before the supervisor
+// reports reconcile-ready.
 //
 // Why the wiring needs a test: the v0.5.0 Phase 6 / Task 6.2 stub
 // loaded supervisor-intent.json and discarded the parsed result (only
@@ -39,6 +39,8 @@ import (
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/process"
+
+	"github.com/gofrs/flock"
 )
 
 const reconcileWiringTestTaskName = `\mcp-local-hub-memory-default`
@@ -104,9 +106,8 @@ func TestRunSupervise_SpawnsDaemonsFromIntent(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- cmd.Execute() }()
 
-	// Wait for spawn fan-out. Production wiring runs Reconcile BEFORE
-	// reconcileReady.Store(true), so observing a spawn call is the
-	// definitive "wiring fired" signal.
+	// Wait for spawn fan-out. Reconcile is scheduled asynchronously, so
+	// the fake spawn call is the definitive "wiring fired" signal.
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if spawnCalled.Load() > 0 {
@@ -132,8 +133,7 @@ func TestRunSupervise_SpawnsDaemonsFromIntent(t *testing.T) {
 		t.Fatalf("expected spawn task_name=%q, got %q", reconcileWiringTestTaskName, name)
 	}
 
-	// reconcile-ready must fire AFTER the spawn pass — the audit log
-	// preserves emission order across both events.
+	// reconcile-ready must fire once startup schedules the reconcile pass.
 	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
 	logRaw, err := os.ReadFile(eventsPath)
 	if err != nil {
@@ -260,6 +260,48 @@ func TestRunSupervise_MalformedDaemonIntentFatalBeforeReady(t *testing.T) {
 	}
 }
 
+func TestRunSupervise_MalformedSupervisorIntentFatalBeforeReady(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
+
+	if err := os.WriteFile(filepath.Join(tmpHome, "supervisor-intent.json"), []byte(`{"version":1,"daemons":[`), 0o600); err != nil {
+		t.Fatalf("seed malformed supervisor-intent.json: %v", err)
+	}
+
+	var spawnCalled atomic.Int32
+	cleanupSpawn := setReconcileSpawnFnForTest(func(d api.SupervisorDaemon) error {
+		spawnCalled.Add(1)
+		return nil
+	})
+	defer cleanupSpawn()
+
+	cmd := newSuperviseCmd()
+	cmd.SetArgs([]string{"--no-ipc"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected malformed supervisor-intent.json to abort supervise startup, got nil")
+	}
+	if spawnCalled.Load() != 0 {
+		t.Fatalf("spawn must not fire after malformed supervisor-intent.json; got %d call(s)", spawnCalled.Load())
+	}
+
+	logRaw, readErr := os.ReadFile(filepath.Join(tmpHome, "supervisor-events.log"))
+	if readErr != nil {
+		t.Fatalf("read events log: %v", readErr)
+	}
+	logStr := string(logRaw)
+	if !strings.Contains(logStr, `"event":"supervisor-intent-read-failed"`) {
+		t.Fatalf("supervisor-intent-read-failed event missing from audit log:\n%s", logStr)
+	}
+	if !strings.Contains(logStr, `"event":"supervise-startup-failed"`) {
+		t.Fatalf("supervise-startup-failed event missing from audit log:\n%s", logStr)
+	}
+	if strings.Contains(logStr, `"event":"reconcile-ready"`) {
+		t.Fatalf("reconcile-ready must not be emitted on fatal supervisor-intent parse error:\n%s", logStr)
+	}
+}
+
 func TestLoadIntentFiles_MalformedDaemonIntentReturnsError(t *testing.T) {
 	tmpHome := apitest.HardenedTempDir(t)
 	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
@@ -291,6 +333,125 @@ func TestLoadIntentFiles_MalformedDaemonIntentReturnsError(t *testing.T) {
 	}
 }
 
+func TestLoadIntentFiles_RespectsDaemonIntentFlock(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	intentPath := filepath.Join(tmpHome, "daemon-intent.json")
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := os.WriteFile(intentPath, []byte(`{"tasks":{"x":{"desired":"stopped","reason":"user-disabled","updated_at":"`+now+`"}}}`), 0o600); err != nil {
+		t.Fatalf("seed daemon-intent.json: %v", err)
+	}
+
+	holder := flock.New(intentPath + ".lock")
+	if err := holder.Lock(); err != nil {
+		t.Fatalf("hold daemon-intent lock: %v", err)
+	}
+	defer holder.Unlock()
+
+	prevTimeout := daemonIntentReadLockTimeout
+	daemonIntentReadLockTimeout = 50 * time.Millisecond
+	defer func() { daemonIntentReadLockTimeout = prevTimeout }()
+
+	var loaded atomic.Bool
+	_, _, err = loadIntentFiles(tmpHome, events, &loaded)
+	if err == nil {
+		t.Fatal("expected loadIntentFiles to fail closed when daemon-intent flock is held")
+	}
+	if loaded.Load() {
+		t.Fatal("intentFilesLoaded must remain false when daemon-intent lock cannot be acquired")
+	}
+
+	raw, readErr := os.ReadFile(eventsPath)
+	if readErr != nil {
+		t.Fatalf("read events log: %v", readErr)
+	}
+	if !strings.Contains(string(raw), `"event":"daemon-intent-read-failed"`) {
+		t.Fatalf("daemon-intent-read-failed event missing from audit log:\n%s", string(raw))
+	}
+}
+
+func TestRunSupervise_ReconcileReadyBeforeSpawnCompletes(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
+
+	intent := &api.SupervisorIntentFile{
+		Version:   1,
+		UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Daemons: []api.SupervisorDaemon{
+			{
+				TaskName: reconcileWiringTestTaskName,
+				Server:   "memory",
+				Daemon:   "default",
+				Command:  "fake-noop-for-test",
+				Args:     []string{"--noop"},
+				Port:     9121,
+			},
+		},
+	}
+	if err := api.WriteSupervisorIntent(filepath.Join(tmpHome, "supervisor-intent.json"), intent); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+
+	spawnEntered := make(chan struct{})
+	releaseSpawn := make(chan struct{})
+	var spawnDone atomic.Bool
+	cleanupSpawn := setReconcileSpawnFnForTest(func(d api.SupervisorDaemon) error {
+		close(spawnEntered)
+		<-releaseSpawn
+		spawnDone.Store(true)
+		return nil
+	})
+	defer cleanupSpawn()
+
+	exitCh := make(chan struct{}, 1)
+	cleanupExit := setSuperviseTestExitCh(exitCh)
+	defer cleanupExit()
+
+	cmd := newSuperviseCmd()
+	cmd.SetArgs([]string{"--no-ipc"})
+	done := make(chan error, 1)
+	go func() { done <- cmd.Execute() }()
+	defer func() {
+		select {
+		case exitCh <- struct{}{}:
+		default:
+		}
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Log("supervise did not exit during cleanup")
+		}
+	}()
+
+	select {
+	case <-spawnEntered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("spawn did not enter before timeout")
+	}
+
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		raw, _ := os.ReadFile(eventsPath)
+		if strings.Contains(string(raw), `"event":"reconcile-ready"`) {
+			if spawnDone.Load() {
+				t.Fatal("test lost async window: spawn completed before reconcile-ready assertion")
+			}
+			close(releaseSpawn)
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	close(releaseSpawn)
+	t.Fatal("reconcile-ready was not emitted while startup spawn was blocked")
+}
+
 func TestLoadSupervisorCurrentRunning_SkipsDeadPID(t *testing.T) {
 	tmpHome := apitest.HardenedTempDir(t)
 	pid := exitedProcessPID(t)
@@ -311,7 +472,10 @@ func TestLoadSupervisorCurrentRunning_SkipsDeadPID(t *testing.T) {
 		t.Fatalf("seed supervisor-state.json: %v", err)
 	}
 
-	got, gotPIDs := loadSupervisorCurrentRunning(tmpHome)
+	got, gotPIDs, err := loadSupervisorCurrentRunning(tmpHome)
+	if err != nil {
+		t.Fatalf("loadSupervisorCurrentRunning: %v", err)
+	}
 	if got[reconcileWiringTestTaskName] {
 		t.Fatalf("dead pid %d must not suppress startup spawn; currentRunning=%v", pid, got)
 	}
@@ -320,6 +484,49 @@ func TestLoadSupervisorCurrentRunning_SkipsDeadPID(t *testing.T) {
 	}
 	if len(gotPIDs) != 0 {
 		t.Fatalf("expected no running PID entries for stale state, got %v", gotPIDs)
+	}
+}
+
+func TestLoadSupervisorCurrentRunning_FatalOnReadError(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	if err := os.WriteFile(filepath.Join(tmpHome, "supervisor-state.json"), []byte(`{"version":1,"daemons":`), 0o600); err != nil {
+		t.Fatalf("seed corrupt supervisor-state.json: %v", err)
+	}
+	got, gotPIDs, err := loadSupervisorCurrentRunning(tmpHome)
+	if err == nil {
+		t.Fatal("expected corrupt supervisor-state.json to return fatal startup error")
+	}
+	if len(got) != 0 || len(gotPIDs) != 0 {
+		t.Fatalf("corrupt state must not produce running entries: currentRunning=%v pids=%v", got, gotPIDs)
+	}
+}
+
+func TestLoadSupervisorCurrentRunning_RequiresStartTimeProof(t *testing.T) {
+	if runtime.GOOS != "windows" && runtime.GOOS != "linux" {
+		t.Skip("native PID start-time proof exists only on Windows/Linux")
+	}
+	tmpHome := apitest.HardenedTempDir(t)
+	state := &api.SupervisorStateFile{
+		Version: 1,
+		Daemons: map[string]api.SupervisorDaemonState{
+			reconcileWiringTestTaskName: {
+				State:         "running",
+				CurrentPID:    os.Getpid(),
+				PIDGeneration: 1,
+				StartedAt:     "2000-01-01T00:00:00Z",
+			},
+		},
+	}
+	if err := api.WriteSupervisorState(filepath.Join(tmpHome, "supervisor-state.json"), state); err != nil {
+		t.Fatalf("seed supervisor-state.json: %v", err)
+	}
+
+	got, gotPIDs, err := loadSupervisorCurrentRunning(tmpHome)
+	if err != nil {
+		t.Fatalf("loadSupervisorCurrentRunning: %v", err)
+	}
+	if got[reconcileWiringTestTaskName] || len(gotPIDs) != 0 {
+		t.Fatalf("mismatched started_at must fail closed: currentRunning=%v pids=%v", got, gotPIDs)
 	}
 }
 
@@ -517,8 +724,12 @@ func TestProductionTerminateFn_TerminatesRunningPID(t *testing.T) {
 		}
 	})
 
-	terminateFn := makeProductionTerminateFn(events, map[string]int{
-		reconcileWiringTestTaskName: pid,
+	terminateFn := makeProductionTerminateFn(events, map[string]runningProcessIdentity{
+		reconcileWiringTestTaskName: {
+			PID:           pid,
+			PIDGeneration: 1,
+			StartedAt:     startedAtForPID(t, pid),
+		},
 	})
 	if err := terminateFn(api.SupervisorDaemon{TaskName: reconcileWiringTestTaskName}); err != nil {
 		t.Fatalf("terminate fn: %v", err)
@@ -580,8 +791,12 @@ func TestProductionTerminateFn_IdentityMismatchAtEntry(t *testing.T) {
 		t.Skipf("foreign helper pid %d unexpectedly matches mcphub identity", pid)
 	}
 
-	terminateFn := makeProductionTerminateFn(events, map[string]int{
-		reconcileWiringTestTaskName: pid,
+	terminateFn := makeProductionTerminateFn(events, map[string]runningProcessIdentity{
+		reconcileWiringTestTaskName: {
+			PID:           pid,
+			PIDGeneration: 1,
+			StartedAt:     startedAtForPID(t, pid),
+		},
 	})
 	if err := terminateFn(api.SupervisorDaemon{TaskName: reconcileWiringTestTaskName}); err != nil {
 		t.Fatalf("terminate fn: %v", err)
@@ -602,6 +817,65 @@ func TestProductionTerminateFn_IdentityMismatchAtEntry(t *testing.T) {
 	}
 }
 
+func TestProductionTerminateFn_PidIdentityBoundToHandle(t *testing.T) {
+	if runtime.GOOS != "windows" && runtime.GOOS != "linux" {
+		t.Skip("production terminate identity gate fails closed without a native PID identity probe")
+	}
+	tmpHome := apitest.HardenedTempDir(t)
+
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestProductionTerminateFn_HelperSleep")
+	cmd.Env = append(os.Environ(), "MCPHUB_PRODUCTION_TERMINATE_HELPER=1")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start helper child: %v", err)
+	}
+	if cmd.Process == nil {
+		t.Fatal("helper child started without Process")
+	}
+	pid := cmd.Process.Pid
+	waitCh := make(chan error, 1)
+	go func() { waitCh <- cmd.Wait() }()
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		select {
+		case <-waitCh:
+		default:
+		}
+	})
+
+	terminateFn := makeProductionTerminateFn(events, map[string]runningProcessIdentity{
+		reconcileWiringTestTaskName: {
+			PID:           pid,
+			PIDGeneration: 1,
+			StartedAt:     "2000-01-01T00:00:00Z",
+		},
+	})
+	if err := terminateFn(api.SupervisorDaemon{TaskName: reconcileWiringTestTaskName}); err != nil {
+		t.Fatalf("identity mismatch should abort as non-fatal PID-reuse guard, got err: %v", err)
+	}
+	if !process.IsPidAlive(pid) {
+		t.Fatalf("pid %d was terminated despite started_at identity mismatch", pid)
+	}
+
+	logRaw, err := os.ReadFile(eventsPath)
+	if err != nil {
+		t.Fatalf("read events log: %v", err)
+	}
+	logStr := string(logRaw)
+	if !strings.Contains(logStr, `"event":"daemon-terminate-aborted-pid-reuse"`) {
+		t.Fatalf("daemon-terminate-aborted-pid-reuse event missing from audit log:\n%s", logStr)
+	}
+	if strings.Contains(logStr, `"event":"daemon-terminated"`) {
+		t.Fatalf("daemon-terminated must not be emitted on identity mismatch:\n%s", logStr)
+	}
+}
+
 func TestProductionTerminateFn_AlreadyExitedReturnsSuccess(t *testing.T) {
 	tmpHome := apitest.HardenedTempDir(t)
 
@@ -617,8 +891,8 @@ func TestProductionTerminateFn_AlreadyExitedReturnsSuccess(t *testing.T) {
 		t.Fatalf("test precondition failed: pid %d is still alive after Wait", pid)
 	}
 
-	terminateFn := makeProductionTerminateFn(events, map[string]int{
-		reconcileWiringTestTaskName: pid,
+	terminateFn := makeProductionTerminateFn(events, map[string]runningProcessIdentity{
+		reconcileWiringTestTaskName: {PID: pid},
 	})
 	if err := terminateFn(api.SupervisorDaemon{TaskName: reconcileWiringTestTaskName}); err != nil {
 		t.Fatalf("terminate fn: %v", err)
@@ -637,6 +911,16 @@ func TestProductionTerminateFn_AlreadyExitedReturnsSuccess(t *testing.T) {
 			t.Fatalf("unexpected %s event after already-exited PID:\n%s", event, logStr)
 		}
 	}
+}
+
+func startedAtForPID(t *testing.T, pid int) string {
+	t.Helper()
+	ts, ok := process.ProcessStartTime(pid)
+	if !ok {
+		t.Skipf("started_at proof unavailable on %s", runtime.GOOS)
+		return ""
+	}
+	return ts.UTC().Format(time.RFC3339Nano)
 }
 
 func TestProductionTerminateFn_HelperSleep(t *testing.T) {

@@ -1,0 +1,116 @@
+//go:build linux
+
+package process
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+
+	"golang.org/x/sys/unix"
+)
+
+const linuxDeletedSuffix = " (deleted)"
+
+// PIDExecutableMatches compares /proc/<pid>/exe against expectedPath.
+func PIDExecutableMatches(pid int, expectedPath string) bool {
+	got, err := pidExecutablePath(pid)
+	if err != nil {
+		return false
+	}
+	expected, err := normalizeExpectedExecutablePath(expectedPath)
+	if err != nil {
+		return false
+	}
+	return got == expected
+}
+
+func VerifyPIDIdentity(proof PIDIdentityProof) error {
+	if proof.PID <= 0 {
+		return fmt.Errorf("process: invalid PID %d", proof.PID)
+	}
+	if !PIDExecutableMatches(proof.PID, proof.ExecutablePath) {
+		return fmt.Errorf("%w: PID %d executable path mismatch", ErrProcessIdentityMismatch, proof.PID)
+	}
+	recorded, err := parseExpectedStartedAt(proof.StartedAt)
+	if err != nil {
+		return err
+	}
+	observed, ok := ProcessStartTime(proof.PID)
+	if !ok {
+		state, stateErr := QueryPIDState(proof.PID)
+		if stateErr == nil && state == PIDStateDead {
+			return fmt.Errorf("process: PID %d exited before start-time proof: %w", proof.PID, ErrProcessAlreadyExited)
+		}
+		return fmt.Errorf("%w: PID %d start-time proof unavailable", ErrProcessIdentityMismatch, proof.PID)
+	}
+	if !startTimesMatch(recorded, observed) {
+		return fmt.Errorf("%w: PID %d started_at mismatch recorded=%s observed=%s", ErrProcessIdentityMismatch, proof.PID, recorded.Format(timeFormatRFC3339Nano()), observed.Format(timeFormatRFC3339Nano()))
+	}
+	return nil
+}
+
+func TerminatePIDWithIdentity(proof PIDIdentityProof) error {
+	return signalPIDWithIdentity(proof, syscall.SIGTERM)
+}
+
+func KillPIDWithIdentity(proof PIDIdentityProof, sig syscall.Signal) error {
+	return signalPIDWithIdentity(proof, sig)
+}
+
+func signalPIDWithIdentity(proof PIDIdentityProof, sig syscall.Signal) error {
+	if proof.PID <= 0 {
+		return fmt.Errorf("process: invalid PID %d", proof.PID)
+	}
+	fd, err := unix.PidfdOpen(proof.PID, 0)
+	if err == nil {
+		defer unix.Close(fd)
+		if verifyErr := VerifyPIDIdentity(proof); verifyErr != nil {
+			return verifyErr
+		}
+		if sendErr := unix.PidfdSendSignal(fd, unix.Signal(sig), nil, 0); sendErr != nil {
+			if errors.Is(sendErr, syscall.ESRCH) {
+				return fmt.Errorf("process: PID %d already exited before pidfd signal: %w", proof.PID, ErrProcessAlreadyExited)
+			}
+			return fmt.Errorf("process: pidfd signal %s to PID %d: %w", sig.String(), proof.PID, sendErr)
+		}
+		return nil
+	}
+	if !errors.Is(err, syscall.ENOSYS) && !errors.Is(err, syscall.EINVAL) && !errors.Is(err, syscall.EPERM) {
+		return fmt.Errorf("process: pidfd_open PID %d: %w", proof.PID, err)
+	}
+	if verifyErr := VerifyPIDIdentity(proof); verifyErr != nil {
+		return verifyErr
+	}
+	if killErr := syscall.Kill(proof.PID, sig); killErr != nil {
+		if errors.Is(killErr, syscall.ESRCH) {
+			return fmt.Errorf("process: PID %d already exited before %s: %w", proof.PID, sig.String(), ErrProcessAlreadyExited)
+		}
+		return fmt.Errorf("process: send %s to PID %d: %w", sig.String(), proof.PID, killErr)
+	}
+	return nil
+}
+
+func pidExecutablePath(pid int) (string, error) {
+	target, err := os.Readlink(filepath.Join("/proc", strconv.Itoa(pid), "exe"))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("process: PID %d exited before executable proof: %w", pid, ErrProcessAlreadyExited)
+		}
+		return "", err
+	}
+	target = strings.TrimSuffix(target, linuxDeletedSuffix)
+	if resolved, err := filepath.EvalSymlinks(target); err == nil {
+		target = resolved
+	}
+	if abs, err := filepath.Abs(target); err == nil {
+		target = abs
+	}
+	return filepath.Clean(target), nil
+}
+
+func timeFormatRFC3339Nano() string { return "2006-01-02T15:04:05.999999999Z07:00" }

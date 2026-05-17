@@ -14,25 +14,58 @@ func TestIsPidAlive(t *testing.T) {
 		t.Fatalf("current process pid %d must be reported alive", os.Getpid())
 	}
 
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.Command("cmd.exe", "/c", "exit", "0")
-	} else {
-		cmd = exec.Command("sh", "-c", "exit 0")
-	}
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start short-lived child: %v", err)
-	}
-	if cmd.Process == nil {
-		t.Fatal("short-lived child started without Process")
-	}
-	pid := cmd.Process.Pid
-	if err := cmd.Wait(); err != nil {
-		t.Fatalf("wait short-lived child: %v", err)
-	}
-
+	pid := exitedProcessPID(t)
 	if IsPidAlive(pid) {
 		t.Fatalf("exited child pid %d must be reported dead", pid)
+	}
+}
+
+func TestProcessQueryPidState_TristateClassification(t *testing.T) {
+	if state, err := QueryPIDState(-1); err != nil || state != PIDStateDead {
+		t.Fatalf("QueryPIDState(-1) = %s, %v; want dead, nil", state, err)
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestProcessQueryPidState_HelperSleep")
+	cmd.Env = append(os.Environ(), "MCPHUB_QUERY_PID_STATE_HELPER=1")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start helper child: %v", err)
+	}
+	if cmd.Process == nil {
+		t.Fatal("helper child started without Process")
+	}
+	pid := cmd.Process.Pid
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		state, err := QueryPIDState(pid)
+		if err == nil && state == PIDStateAlive {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("QueryPIDState(%d) did not report alive before timeout; last=%s err=%v", pid, state, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatalf("kill helper child: %v", err)
+	}
+	if err := cmd.Wait(); err != nil {
+		// Windows and POSIX both normally return an exit error for a killed
+		// helper; the important part is that Wait reaped the PID before the
+		// final liveness probe.
+		t.Logf("helper wait returned expected process-exit error: %v", err)
+	}
+	state, err := QueryPIDState(pid)
+	if err != nil {
+		t.Fatalf("QueryPIDState(%d) after wait returned error: %v", pid, err)
+	}
+	if state != PIDStateDead {
+		t.Fatalf("QueryPIDState(%d) after wait = %s, want dead", pid, state)
 	}
 }
 
@@ -75,6 +108,13 @@ func TestTerminatePID_AlreadyExited(t *testing.T) {
 	if !errors.Is(err, ErrProcessAlreadyExited) {
 		t.Fatalf("TerminatePID(%d) error = %v, want ErrProcessAlreadyExited", pid, err)
 	}
+}
+
+func TestProcessQueryPidState_HelperSleep(t *testing.T) {
+	if os.Getenv("MCPHUB_QUERY_PID_STATE_HELPER") != "1" {
+		return
+	}
+	time.Sleep(60 * time.Second)
 }
 
 func TestTerminatePID_HelperSleep(t *testing.T) {

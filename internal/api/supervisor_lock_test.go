@@ -46,6 +46,35 @@ func TestSupervisorLock_StaleReclaim(t *testing.T) {
 	lk.Release()
 }
 
+func TestSupervisorLockOwnerSidecarNotDeletedOnContention(t *testing.T) {
+	dir := hardenedTempDir(t)
+	path := filepath.Join(dir, "supervisor.lock")
+
+	lk, err := AcquireSupervisorLock(path)
+	if err != nil {
+		t.Fatalf("first acquire: %v", err)
+	}
+	defer lk.Release()
+
+	corrupt := []byte(`{"pid":`)
+	if err := os.WriteFile(path+".owner.json", corrupt, 0600); err != nil {
+		t.Fatalf("corrupt owner sidecar: %v", err)
+	}
+
+	second, err := AcquireSupervisorLock(path)
+	if err == nil {
+		second.Release()
+		t.Fatal("second acquire unexpectedly succeeded while first lock is held")
+	}
+	raw, readErr := os.ReadFile(path + ".owner.json")
+	if readErr != nil {
+		t.Fatalf("owner sidecar was deleted while lock was still held: %v", readErr)
+	}
+	if string(raw) != string(corrupt) {
+		t.Fatalf("owner sidecar changed under contention: got %q want %q", string(raw), string(corrupt))
+	}
+}
+
 func writeStaleOwner(path string, pid int, started string) error {
 	raw, _ := json.Marshal(SupervisorLockOwner{PID: pid, StartedAt: started})
 	return os.WriteFile(path+".owner.json", raw, 0600)

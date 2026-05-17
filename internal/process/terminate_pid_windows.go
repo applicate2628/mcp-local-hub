@@ -29,5 +29,15 @@ func TerminatePID(pid int) error {
 		}
 		return fmt.Errorf("process: terminate PID %d: %w", pid, err)
 	}
+	ev, waitErr := windows.WaitForSingleObject(handle, terminateWaitMilliseconds)
+	if waitErr != nil {
+		return fmt.Errorf("process: wait for PID %d after terminate: %w", pid, waitErr)
+	}
+	if ev == uint32(windows.WAIT_TIMEOUT) {
+		return fmt.Errorf("process: timeout waiting for PID %d to exit after terminate", pid)
+	}
+	if ev != windows.WAIT_OBJECT_0 {
+		return fmt.Errorf("process: wait for PID %d after terminate returned unexpected code %d", pid, ev)
+	}
 	return nil
 }

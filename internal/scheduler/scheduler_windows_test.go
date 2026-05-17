@@ -321,12 +321,30 @@ func TestBuildWatchdogXML_BothTriggers(t *testing.T) {
 	// denied" when LogonTrigger has no <UserId> (any-user logon requires
 	// elevation). Daemon tasks scope LogonTrigger to UserId; watchdog
 	// must do the same.
-	if !strings.Contains(xml, "<Enabled>true</Enabled>") || !strings.Contains(xml, "</LogonTrigger>") {
+	logonTrigger := extractXMLBlock(xml, "LogonTrigger")
+	if logonTrigger == "" {
+		t.Fatalf("LogonTrigger block missing; got:\n%s", xml)
+	}
+	if !strings.Contains(logonTrigger, "<Enabled>true</Enabled>") {
 		t.Errorf("LogonTrigger should be enabled; got:\n%s", xml)
 	}
-	if !strings.Contains(xml, "<UserId>"+testWatchdogUser+"</UserId>") {
+	if !strings.Contains(logonTrigger, "<UserId>"+testWatchdogUser+"</UserId>") {
 		t.Errorf("LogonTrigger must scope to userName (testWatchdogUser=%q); got:\n%s", testWatchdogUser, xml)
 	}
+}
+
+func extractXMLBlock(body, tag string) string {
+	open := "<" + tag + ">"
+	close := "</" + tag + ">"
+	i := strings.Index(body, open)
+	if i < 0 {
+		return ""
+	}
+	j := strings.Index(body[i+len(open):], close)
+	if j < 0 {
+		return ""
+	}
+	return body[i : i+len(open)+j+len(close)]
 }
 
 // TestBuildWatchdogXML_IgnoreNew asserts the watchdog itself uses

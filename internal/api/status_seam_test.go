@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -128,6 +129,9 @@ func TestPlan_SupervisorIntentFieldPopulated(t *testing.T) {
 		}
 		if entry.Command != `C:\fake\mcphub.exe` {
 			t.Errorf("entry %q Command = %q, want canonical override", entry.Name, entry.Command)
+		}
+		if wantWorkingDir := filepath.Dir(`C:\fake\mcphub.exe`); entry.WorkingDir != wantWorkingDir {
+			t.Errorf("entry %q WorkingDir = %q, want canonical executable dir", entry.Name, entry.WorkingDir)
 		}
 	}
 }

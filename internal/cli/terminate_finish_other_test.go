@@ -11,6 +11,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/apitest"
+	"mcp-local-hub/internal/process"
 )
 
 func TestFinishProductionTerminate_EscalationAbortReturnsError(t *testing.T) {
@@ -37,7 +38,11 @@ func TestFinishProductionTerminate_EscalationAbortReturnsError(t *testing.T) {
 	})
 
 	pid := cmd.Process.Pid
-	err = finishProductionTerminate(pid, api.SupervisorDaemon{TaskName: reconcileWiringTestTaskName}, events)
+	err = finishProductionTerminate(process.PIDIdentityProof{
+		PID:            pid,
+		ExecutablePath: canonicalMcphubPath(),
+		StartedAt:      "2000-01-01T00:00:00Z",
+	}, api.SupervisorDaemon{TaskName: reconcileWiringTestTaskName}, events)
 	if err == nil {
 		t.Fatal("finishProductionTerminate returned nil after PID identity mismatch at escalation")
 	}

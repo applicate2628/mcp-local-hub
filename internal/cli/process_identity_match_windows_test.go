@@ -12,6 +12,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/apitest"
+	"mcp-local-hub/internal/process"
 )
 
 func TestPidMatchesMcphub_CurrentProcess(t *testing.T) {
@@ -63,12 +64,18 @@ func TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID(t *testing.T) {
 	}()
 
 	pid := cmd.Process.Pid
+	startedAt, ok := process.ProcessStartTime(pid)
+	if !ok {
+		t.Fatalf("ProcessStartTime(%d) unavailable", pid)
+	}
 	state := &api.SupervisorStateFile{
 		Version: 1,
 		Daemons: map[string]api.SupervisorDaemonState{
 			reconcileWiringTestTaskName: {
-				State:      "running",
-				CurrentPID: pid,
+				State:         "running",
+				CurrentPID:    pid,
+				PIDGeneration: 1,
+				StartedAt:     startedAt.UTC().Format(time.RFC3339Nano),
 			},
 		},
 	}
@@ -76,7 +83,10 @@ func TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID(t *testing.T) {
 		t.Fatalf("seed supervisor-state.json: %v", err)
 	}
 
-	got, gotPIDs := loadSupervisorCurrentRunning(tmpHome)
+	got, gotPIDs, err := loadSupervisorCurrentRunning(tmpHome)
+	if err != nil {
+		t.Fatalf("loadSupervisorCurrentRunning: %v", err)
+	}
 	if got[reconcileWiringTestTaskName] {
 		t.Fatalf("live non-mcphub pid %d must not suppress startup spawn; currentRunning=%v", pid, got)
 	}

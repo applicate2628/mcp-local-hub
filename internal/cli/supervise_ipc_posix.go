@@ -39,7 +39,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"time"
 
 	"mcp-local-hub/internal/api"
 )
@@ -66,7 +65,7 @@ type SupervisorIPCListener struct {
 //
 // On any failure after net.Listen, the listener is closed before
 // the error returns so a partially-bound socket is never leaked.
-func NewSupervisorIPCListener(socketPath string) (*SupervisorIPCListener, error) {
+func NewSupervisorIPCListener(socketPath string, ownerOpt ...api.SupervisorLockOwner) (*SupervisorIPCListener, error) {
 	// Best-effort remove stale socket — Linux refuses bind on EADDRINUSE
 	// if the inode already exists, so this is required even on the
 	// happy path of a normal restart.
@@ -83,11 +82,12 @@ func NewSupervisorIPCListener(socketPath string) (*SupervisorIPCListener, error)
 		_ = listener.Close()
 		return nil, fmt.Errorf("chmod 0600(%q): %w", socketPath, err)
 	}
+	owner := supervisorIPCOwnerForHello(ownerOpt...)
 	return &SupervisorIPCListener{
 		listener:   listener,
 		socketPath: socketPath,
-		pid:        os.Getpid(),
-		startedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+		pid:        owner.PID,
+		startedAt:  owner.StartedAt,
 	}, nil
 }
 

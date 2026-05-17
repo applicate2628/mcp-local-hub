@@ -17,7 +17,8 @@ const (
 	productionTerminatePollPeriod  = 100 * time.Millisecond
 )
 
-func finishProductionTerminate(pid int, d api.SupervisorDaemon, events *api.SupervisorEventLog) error {
+func finishProductionTerminate(proof process.PIDIdentityProof, d api.SupervisorDaemon, events *api.SupervisorEventLog) error {
+	pid := proof.PID
 	deadline := time.Now().Add(productionTerminateGracePeriod)
 	for time.Now().Before(deadline) {
 		if !process.IsPidAlive(pid) {
@@ -26,7 +27,7 @@ func finishProductionTerminate(pid int, d api.SupervisorDaemon, events *api.Supe
 		time.Sleep(productionTerminatePollPeriod)
 	}
 
-	if !pidMatchesMcphub(pid) {
+	if err := process.VerifyPIDIdentity(proof); err != nil {
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: api.SupervisorEventSeverityWarn,
 			Source:   "lifecycle",
@@ -34,10 +35,10 @@ func finishProductionTerminate(pid int, d api.SupervisorDaemon, events *api.Supe
 			TaskName: d.TaskName,
 			Body: map[string]any{
 				"pid":    pid,
-				"reason": "PID does not match mcphub identity after grace window - possible OS PID reuse, refusing SIGKILL",
+				"reason": err.Error(),
 			},
 		})
-		return fmt.Errorf("terminate escalation aborted for pid %d: PID no longer matches mcphub identity (possible reuse)", pid)
+		return fmt.Errorf("terminate escalation aborted for pid %d: %w", pid, err)
 	}
 
 	_ = events.Emit(api.SupervisorEvent{
@@ -51,8 +52,8 @@ func finishProductionTerminate(pid int, d api.SupervisorDaemon, events *api.Supe
 			"timeout": productionTerminateGracePeriod.String(),
 		},
 	})
-	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
-		if errors.Is(err, syscall.ESRCH) {
+	if err := process.KillPIDWithIdentity(proof, syscall.SIGKILL); err != nil {
+		if errors.Is(err, process.ErrProcessAlreadyExited) {
 			emitDaemonTerminateAlreadyExited(events, d, pid)
 			return nil
 		}

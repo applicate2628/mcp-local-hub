@@ -37,7 +37,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"os"
 	"time"
 
 	"github.com/Microsoft/go-winio"
@@ -65,7 +64,7 @@ type SupervisorIPCListener struct {
 // Buffer sizing: 4 KiB input + 4 KiB output is the spec-baseline
 // (IPC frames are short JSON lines well under 1 KiB; the cap exists
 // only to bound kernel-pool consumption per connection).
-func NewSupervisorIPCListener(pipePath string) (*SupervisorIPCListener, error) {
+func NewSupervisorIPCListener(pipePath string, ownerOpt ...api.SupervisorLockOwner) (*SupervisorIPCListener, error) {
 	sddl, err := api.BuildAllowlistSDDL(api.AllowlistMaskPipe)
 	if err != nil {
 		return nil, fmt.Errorf("build SDDL: %w", err)
@@ -80,12 +79,13 @@ func NewSupervisorIPCListener(pipePath string) (*SupervisorIPCListener, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ListenPipe(%q): %w", pipePath, err)
 	}
+	owner := supervisorIPCOwnerForHello(ownerOpt...)
 	return &SupervisorIPCListener{
 		listener:  listener,
 		pipePath:  pipePath,
 		sddl:      sddl,
-		pid:       os.Getpid(),
-		startedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		pid:       owner.PID,
+		startedAt: owner.StartedAt,
 	}, nil
 }
 

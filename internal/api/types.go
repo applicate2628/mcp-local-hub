@@ -186,8 +186,9 @@ type BackupInfo struct {
 //
 // Spec §"Q12 CLI/GUI status seam" + plan §2611-2644.
 type SupervisorIntentEntry struct {
-	Name    string
-	Command string
-	Args    []string
-	Trigger string // human-readable; "At logon" or "Weekly Sun 03:00"
+	Name       string
+	Command    string
+	Args       []string
+	WorkingDir string
+	Trigger    string // human-readable; "At logon" or "Weekly Sun 03:00"
 }

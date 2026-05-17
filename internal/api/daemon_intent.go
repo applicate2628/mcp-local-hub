@@ -379,6 +379,21 @@ func (a *API) ReadDaemonIntent() IntentReadResult {
 	return readIntentParseAndQuarantine(statePath)
 }
 
+// ReadDaemonIntentFile loads a caller-specified daemon-intent.json path
+// using the same sibling-lock and parse/quarantine owner as ReadDaemonIntent.
+// This is for supervisor startup, where the CLI has already resolved the
+// state directory through its MCPHUB_STATE_DIR_OVERRIDE seam.
+func ReadDaemonIntentFile(statePath string, timeout time.Duration) IntentReadResult {
+	if statePath == "" {
+		return IntentReadResult{
+			State: IntentStateMissing,
+			File:  DaemonIntentFile{Tasks: map[string]DaemonIntent{}},
+			Err:   fmt.Errorf("daemon-intent path is empty"),
+		}
+	}
+	return readDaemonIntentPathWithTimeout(statePath, statePath+".lock", timeout)
+}
+
 // TryReadDaemonIntent loads the on-disk intent file with a bounded
 // lock-acquisition timeout. Same three-state semantic as
 // ReadDaemonIntent (missing | corrupt | valid) but the underlying
@@ -449,6 +464,10 @@ func (a *API) TryReadDaemonIntent(timeout time.Duration) IntentReadResult {
 	statePath := filepath.Join(dir, intentFileLeaf)
 	lockPath := filepath.Join(dir, intentLockLeaf)
 
+	return readDaemonIntentPathWithTimeout(statePath, lockPath, timeout)
+}
+
+func readDaemonIntentPathWithTimeout(statePath, lockPath string, timeout time.Duration) IntentReadResult {
 	lock := flock.New(lockPath)
 
 	// Round 3 codex finding R2: zero/negative timeout is a single

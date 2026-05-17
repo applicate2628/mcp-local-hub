@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/api"
 )
 
 // TestSuperviseIPC_ListenerDACL verifies that NewSupervisorIPCListener
@@ -130,6 +132,59 @@ func TestSuperviseIPC_HandshakeSent(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatalf("server goroutine timed out")
+	}
+}
+
+func TestSupervisorLockOwnerHelloConsistency(t *testing.T) {
+	pipePath := `\\.\pipe\mcphub-supervisor-test-owner-` + sanitizeForPipe(t.Name())
+	owner := api.SupervisorLockOwner{PID: 4242, StartedAt: "2026-05-16T18:00:00.000000000Z"}
+	listener, err := NewSupervisorIPCListener(pipePath, owner)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	acceptErrCh := make(chan error, 1)
+	go func() {
+		serverConn, err := listener.Accept()
+		if err != nil {
+			acceptErrCh <- err
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+		_ = serverConn.Close()
+		acceptErrCh <- nil
+	}()
+
+	clientConn, err := winioDialPipe(pipePath, 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer clientConn.Close()
+	_ = clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+
+	helloLine, err := bufio.NewReader(clientConn).ReadString('\n')
+	if err != nil {
+		t.Fatalf("read hello: %v", err)
+	}
+	var frame struct {
+		Hello api.IPCHello `json:"hello"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(helloLine)), &frame); err != nil {
+		t.Fatalf("parse hello (%q): %v", helloLine, err)
+	}
+	if frame.Hello.PID != owner.PID || frame.Hello.StartedAt != owner.StartedAt {
+		t.Fatalf("hello owner mismatch: got pid=%d started_at=%q want pid=%d started_at=%q",
+			frame.Hello.PID, frame.Hello.StartedAt, owner.PID, owner.StartedAt)
+	}
+
+	select {
+	case err := <-acceptErrCh:
+		if err != nil {
+			t.Fatalf("server accept: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("server goroutine timed out")
 	}
 }
 

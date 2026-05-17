@@ -23,16 +23,15 @@ import (
 //     metadata for liveness probes; the next acquirer overwrites it
 //     atomically via WriteStateFileAtomic.
 //
-// Stale-PID detection: when flock TryLock fails (existing holder), the
-// caller reads .owner.json and probes the recorded PID. If the PID is
-// not running (signal 0 fails), the lock is considered stale; the
-// sidecar is removed and TryLock retried. This handles the case where
-// the previous holder crashed without releasing the flock (Windows: the
-// kernel releases the flock on process exit, so this branch primarily
-// covers degraded/unobservable cases).
+// Contention diagnostics: when flock TryLock fails (existing holder), the
+// caller reads .owner.json and probes the recorded PID only to produce a
+// precise error. The sidecar is never repaired by a losing contender; flock is
+// the ownership source of truth, and deleting metadata before owning the lock
+// corrupts the live holder's IPC handshake surface.
 type SupervisorLock struct {
-	path string
-	fl   *flock.Flock
+	path  string
+	fl    *flock.Flock
+	owner SupervisorLockOwner
 }
 
 // SupervisorLockOwner is the pidport sidecar describing the current holder.
@@ -43,8 +42,9 @@ type SupervisorLockOwner struct {
 
 // AcquireSupervisorLock takes <path>.lock via flock and writes
 // <path>.owner.json with current PID + start_time (RFC3339Nano UTC).
-// On stale-holder detection (flock held but recorded PID is not
-// running), the owner sidecar is removed and the flock is retried.
+// If the flock is already held, owner metadata is diagnostic only. A missing,
+// corrupt, or stale sidecar while the lock is held fails closed; the next real
+// acquirer overwrites the sidecar only after TryLock succeeds.
 func AcquireSupervisorLock(path string) (*SupervisorLock, error) {
 	lk := flock.New(path + ".lock")
 	got, err := lk.TryLock()
@@ -52,18 +52,14 @@ func AcquireSupervisorLock(path string) (*SupervisorLock, error) {
 		return nil, fmt.Errorf("flock: %w", err)
 	}
 	if !got {
-		// Lock held — check if stale.
-		owner, _ := ReadSupervisorLockOwner(path)
-		if !isOwnerLive(owner) {
-			// Stale — force reclaim by deleting owner sidecar and retrying.
-			os.Remove(path + ".owner.json")
-			got, err = lk.TryLock()
-			if err != nil || !got {
-				return nil, fmt.Errorf("flock reclaim: %v / got=%v", err, got)
-			}
-		} else {
-			return nil, fmt.Errorf("supervisor.lock held by live PID %d", owner.PID)
+		owner, ownerErr := ReadSupervisorLockOwner(path)
+		if ownerErr != nil {
+			return nil, fmt.Errorf("supervisor.lock held but owner metadata invalid: %w", ownerErr)
 		}
+		if !isOwnerLive(owner) {
+			return nil, fmt.Errorf("supervisor.lock held but owner metadata stale or unobservable: pid=%d", owner.PID)
+		}
+		return nil, fmt.Errorf("supervisor.lock held by live PID %d", owner.PID)
 	}
 
 	// Write owner sidecar.
@@ -75,7 +71,16 @@ func AcquireSupervisorLock(path string) (*SupervisorLock, error) {
 		_ = lk.Unlock()
 		return nil, fmt.Errorf("owner sidecar: %w", err)
 	}
-	return &SupervisorLock{path: path, fl: lk}, nil
+	return &SupervisorLock{path: path, fl: lk, owner: owner}, nil
+}
+
+// Owner returns the exact sidecar identity written when the lock was acquired.
+// IPC listeners use this as the single source of truth for hello frames.
+func (l *SupervisorLock) Owner() SupervisorLockOwner {
+	if l == nil {
+		return SupervisorLockOwner{}
+	}
+	return l.owner
 }
 
 // ReadSupervisorLockOwner reads <path>.owner.json and returns the
