@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -12,7 +13,7 @@ import (
 
 func TestHealthSnapshot_DefaultExcludesProbesAndCapabilities(t *testing.T) {
 	a := NewAPI()
-	snap, err := a.HealthSnapshot(HealthOpts{})
+	snap, err := a.HealthSnapshot(context.Background(), HealthOpts{})
 	if err != nil {
 		t.Fatalf("HealthSnapshot: %v", err)
 	}
@@ -29,7 +30,7 @@ func TestHealthSnapshot_DefaultExcludesProbesAndCapabilities(t *testing.T) {
 
 func TestHealthSnapshot_JSONOmitsNilSections(t *testing.T) {
 	a := NewAPI()
-	snap, _ := a.HealthSnapshot(HealthOpts{})
+	snap, _ := a.HealthSnapshot(context.Background(), HealthOpts{})
 	b, err := json.Marshal(snap)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
@@ -56,7 +57,7 @@ func TestCapabilityID_CanonicalForm(t *testing.T) {
 
 func TestHealthSnapshot_HubSectionShape(t *testing.T) {
 	a := NewAPI()
-	snap, _ := a.HealthSnapshot(HealthOpts{})
+	snap, _ := a.HealthSnapshot(context.Background(), HealthOpts{})
 	// Hub section is present (not optional) and carries schema-required fields,
 	// even when zero-valued, so consumers can rely on the structure.
 	if snap.Hub.Version == "" && snap.Hub.Commit == "" && snap.Hub.BuildDate == "" {
@@ -86,7 +87,7 @@ func TestHealthSnapshot_DaemonsSectionPopulated(t *testing.T) {
 		}, nil
 	}
 
-	snap, err := a.HealthSnapshot(HealthOpts{})
+	snap, err := a.HealthSnapshot(context.Background(), HealthOpts{})
 	if err != nil {
 		t.Fatalf("HealthSnapshot: %v", err)
 	}
@@ -113,8 +114,8 @@ func TestHealthSnapshot_CacheServesWithinTTL(t *testing.T) {
 		return []DaemonStatus{{Server: "x", Daemon: "x"}}, nil
 	}
 
-	snap1, _ := a.HealthSnapshot(HealthOpts{})
-	snap2, _ := a.HealthSnapshot(HealthOpts{})
+	snap1, _ := a.HealthSnapshot(context.Background(), HealthOpts{})
+	snap2, _ := a.HealthSnapshot(context.Background(), HealthOpts{})
 
 	if calls != 1 {
 		t.Errorf("underlying fn called %d times, want 1 (second call must hit cache)", calls)
@@ -145,9 +146,9 @@ func TestHealthSnapshot_CacheExpiresAfterTTL(t *testing.T) {
 		return []DaemonStatus{}, nil
 	}
 
-	_, _ = a.HealthSnapshot(HealthOpts{})
+	_, _ = a.HealthSnapshot(context.Background(), HealthOpts{})
 	now += 2001 // > daemons TTL of 2000ms
-	_, _ = a.HealthSnapshot(HealthOpts{})
+	_, _ = a.HealthSnapshot(context.Background(), HealthOpts{})
 
 	if calls != 2 {
 		t.Errorf("underlying fn called %d times, want 2 (TTL expired)", calls)
@@ -180,9 +181,9 @@ func TestHealthSnapshot_RefreshBustsCache(t *testing.T) {
 		return []DaemonStatus{}, nil
 	}
 
-	_, _ = a.HealthSnapshot(HealthOpts{})
+	_, _ = a.HealthSnapshot(context.Background(), HealthOpts{})
 	now += 1100 // past 1s rate-limit window, still within 2s TTL
-	_, _ = a.HealthSnapshot(HealthOpts{Refresh: true})
+	_, _ = a.HealthSnapshot(context.Background(), HealthOpts{Refresh: true})
 
 	if calls != 2 {
 		t.Errorf("underlying fn called %d times, want 2 (Refresh must bust within TTL)", calls)
@@ -210,7 +211,7 @@ func TestHealthSnapshot_RefreshRateLimited(t *testing.T) {
 	}
 
 	// First Refresh: warms the cache.
-	_, _ = a.HealthSnapshot(HealthOpts{Refresh: true})
+	_, _ = a.HealthSnapshot(context.Background(), HealthOpts{Refresh: true})
 	if calls != 1 {
 		t.Fatalf("first refresh: calls = %d, want 1", calls)
 	}
@@ -218,14 +219,14 @@ func TestHealthSnapshot_RefreshRateLimited(t *testing.T) {
 	// Second Refresh within rate-limit window (1s for daemons): should
 	// be downgraded to cached value, no new call.
 	now += 100 // 100ms — well under 1000ms rate limit
-	_, _ = a.HealthSnapshot(HealthOpts{Refresh: true})
+	_, _ = a.HealthSnapshot(context.Background(), HealthOpts{Refresh: true})
 	if calls != 1 {
 		t.Errorf("second refresh within rate limit: calls = %d, want 1 (rate-limit downgrade); now=%d", calls, now)
 	}
 
 	// Third Refresh after rate-limit window: triggers a real fetch.
 	now += 1100 // total +1200ms from first call, > 1000ms rate limit
-	_, _ = a.HealthSnapshot(HealthOpts{Refresh: true})
+	_, _ = a.HealthSnapshot(context.Background(), HealthOpts{Refresh: true})
 	if calls != 2 {
 		t.Errorf("third refresh after window: calls = %d, want 2", calls)
 	}
@@ -251,7 +252,7 @@ func TestHealthSnapshot_SingleflightCollapsesConcurrent(t *testing.T) {
 	for i := 0; i < N; i++ {
 		go func() {
 			defer wg.Done()
-			_, _ = a.HealthSnapshot(HealthOpts{})
+			_, _ = a.HealthSnapshot(context.Background(), HealthOpts{})
 		}()
 	}
 	time.Sleep(50 * time.Millisecond) // let goroutines reach the singleflight wait
@@ -282,7 +283,7 @@ func TestHealthSnapshot_IncludeProbes_AddsProbesSection(t *testing.T) {
 		}, nil
 	}
 
-	snap, err := a.HealthSnapshot(HealthOpts{IncludeProbes: true})
+	snap, err := a.HealthSnapshot(context.Background(), HealthOpts{IncludeProbes: true})
 	if err != nil {
 		t.Fatalf("HealthSnapshot: %v", err)
 	}
@@ -317,7 +318,7 @@ func TestHealthSnapshot_PartialFailureDoesNotPoisonProbes(t *testing.T) {
 		}, nil
 	}
 
-	snap, _ := a.HealthSnapshot(HealthOpts{IncludeProbes: true})
+	snap, _ := a.HealthSnapshot(context.Background(), HealthOpts{IncludeProbes: true})
 	if snap.Probes == nil || len(snap.Probes.Items) != 3 {
 		t.Fatalf("expected three rows, got: %+v", snap.Probes)
 	}
@@ -351,7 +352,7 @@ func TestHealthSnapshot_LazyProxyDoesNotMaterialize(t *testing.T) {
 		}, nil
 	}
 
-	snap, _ := a.HealthSnapshot(HealthOpts{IncludeProbes: true})
+	snap, _ := a.HealthSnapshot(context.Background(), HealthOpts{IncludeProbes: true})
 	if snap.Probes == nil || len(snap.Probes.Items) != 1 {
 		t.Fatalf("want 1 probe row: %+v", snap.Probes)
 	}
@@ -386,7 +387,7 @@ func TestHealthSnapshot_IncludeCapabilities_AddsBothProbesAndCapabilities(t *tes
 		}, nil
 	}
 
-	snap, err := a.HealthSnapshot(HealthOpts{IncludeCapabilities: true})
+	snap, err := a.HealthSnapshot(context.Background(), HealthOpts{IncludeCapabilities: true})
 	if err != nil {
 		t.Fatalf("HealthSnapshot: %v", err)
 	}
@@ -432,7 +433,7 @@ func TestHealthSnapshot_PartialFailureDoesNotPoisonCapabilities(t *testing.T) {
 				Items: []CapabilityItem{{Name: "x", ID: "ok/ok/tool/x", Kind: "tool"}}}}, nil
 	}
 
-	snap, _ := a.HealthSnapshot(HealthOpts{IncludeCapabilities: true})
+	snap, _ := a.HealthSnapshot(context.Background(), HealthOpts{IncludeCapabilities: true})
 	if snap.Capabilities == nil || len(snap.Capabilities.Items) != 2 {
 		t.Fatalf("want 2 rows: %+v", snap.Capabilities)
 	}
@@ -457,7 +458,7 @@ func TestHealthSnapshot_CapabilitySkipsFailedProbe(t *testing.T) {
 		calls++
 		return CapabilityRow{}, nil
 	}
-	_, _ = a.HealthSnapshot(HealthOpts{IncludeCapabilities: true})
+	_, _ = a.HealthSnapshot(context.Background(), HealthOpts{IncludeCapabilities: true})
 	if calls != 0 {
 		t.Errorf("capability fn called %d times for failed-probe daemon, want 0", calls)
 	}
@@ -503,7 +504,7 @@ func TestHealthSnapshot_SyntheticCapability_PopulatedFromCatalog(t *testing.T) {
 	// Critical: leave HealthCapabilityFn nil so the production
 	// realCapabilityRow path runs end-to-end.
 
-	snap, err := a.HealthSnapshot(HealthOpts{IncludeCapabilities: true})
+	snap, err := a.HealthSnapshot(context.Background(), HealthOpts{IncludeCapabilities: true})
 	if err != nil {
 		t.Fatalf("HealthSnapshot: %v", err)
 	}
@@ -553,7 +554,7 @@ func TestDaemonStatusSnapshot_SharesCacheWithHealthSnapshot(t *testing.T) {
 	}
 
 	// First call: /api/health → warms the cache via computeDaemonsSection.
-	snap, err := a.HealthSnapshot(HealthOpts{})
+	snap, err := a.HealthSnapshot(context.Background(), HealthOpts{})
 	if err != nil {
 		t.Fatalf("HealthSnapshot: %v", err)
 	}
@@ -565,7 +566,7 @@ func TestDaemonStatusSnapshot_SharesCacheWithHealthSnapshot(t *testing.T) {
 	}
 
 	// Second call: /api/status → must hit the same cache.
-	rows, err := a.DaemonStatusSnapshot()
+	rows, err := a.DaemonStatusSnapshot(context.Background())
 	if err != nil {
 		t.Fatalf("DaemonStatusSnapshot: %v", err)
 	}
@@ -590,7 +591,7 @@ func TestDaemonStatusSnapshot_SharesCacheWithHealthSnapshot(t *testing.T) {
 
 	// Mutating the returned slice must not poison the cache (defensive copy).
 	rows[0].State = "MUTATED"
-	rows2, _ := a.DaemonStatusSnapshot()
+	rows2, _ := a.DaemonStatusSnapshot(context.Background())
 	if rows2[0].State != "Running" {
 		t.Errorf("cache leak: caller mutation affected next call: %q (defensive copy missing)", rows2[0].State)
 	}
@@ -613,7 +614,7 @@ func TestDaemonStatusSnapshot_StatusFirstAlsoServesHealth(t *testing.T) {
 	}
 
 	// First call: /api/status → warms cache.
-	rows, err := a.DaemonStatusSnapshot()
+	rows, err := a.DaemonStatusSnapshot(context.Background())
 	if err != nil {
 		t.Fatalf("DaemonStatusSnapshot: %v", err)
 	}
@@ -625,7 +626,7 @@ func TestDaemonStatusSnapshot_StatusFirstAlsoServesHealth(t *testing.T) {
 	}
 
 	// Second call: /api/health → must hit the cache primed by /api/status.
-	snap, err := a.HealthSnapshot(HealthOpts{})
+	snap, err := a.HealthSnapshot(context.Background(), HealthOpts{})
 	if err != nil {
 		t.Fatalf("HealthSnapshot: %v", err)
 	}
@@ -659,7 +660,7 @@ func TestDaemonStatusSnapshot_SurfacesFetchError(t *testing.T) {
 		return nil, sentinelErr
 	}
 
-	rows, err := a.DaemonStatusSnapshot()
+	rows, err := a.DaemonStatusSnapshot(context.Background())
 	if err == nil {
 		t.Fatalf("DaemonStatusSnapshot returned nil error on backend failure; want propagated err. rows=%+v", rows)
 	}
@@ -680,7 +681,7 @@ func TestHealthSnapshot_PropagatesDaemonFetchError(t *testing.T) {
 	a.HealthStatusFn = func(opts StatusOpts) ([]DaemonStatus, error) {
 		return nil, errors.New("scheduler down")
 	}
-	_, err := a.HealthSnapshot(HealthOpts{})
+	_, err := a.HealthSnapshot(context.Background(), HealthOpts{})
 	if err == nil {
 		t.Fatalf("HealthSnapshot returned nil err on total backend failure; want propagated")
 	}
@@ -703,7 +704,7 @@ func TestHealthSnapshot_PropagatesProbeFetchError(t *testing.T) {
 		}
 		return nil, errors.New("probe backend down")
 	}
-	_, err := a.HealthSnapshot(HealthOpts{IncludeProbes: true})
+	_, err := a.HealthSnapshot(context.Background(), HealthOpts{IncludeProbes: true})
 	if err == nil {
 		t.Fatalf("HealthSnapshot(IncludeProbes) returned nil err on probe fetch failure")
 	}
@@ -734,7 +735,7 @@ func TestDaemonStatusSnapshot_PropagatesErrorOnCacheHit(t *testing.T) {
 	}
 
 	// First call: backend fails → err propagated.
-	_, err1 := a.DaemonStatusSnapshot()
+	_, err1 := a.DaemonStatusSnapshot(context.Background())
 	if err1 == nil {
 		t.Fatalf("first call: expected err, got nil")
 	}
@@ -743,7 +744,7 @@ func TestDaemonStatusSnapshot_PropagatesErrorOnCacheHit(t *testing.T) {
 	// that the cache-hit fast-path returned (cached, nil) and the
 	// 500 flipped to 200 even though the backend was still broken.
 	now += 100 // well within 2s daemons TTL
-	_, err2 := a.DaemonStatusSnapshot()
+	_, err2 := a.DaemonStatusSnapshot(context.Background())
 	if err2 == nil {
 		t.Fatalf("second call (cache hit) returned nil err — error masking regression on /api/status")
 	}
@@ -754,7 +755,7 @@ func TestDaemonStatusSnapshot_PropagatesErrorOnCacheHit(t *testing.T) {
 	// Third call after TTL expires: backend re-attempted (still failing,
 	// call counter increments).
 	now += 2000 // total 2100ms — past 2s TTL
-	_, err3 := a.DaemonStatusSnapshot()
+	_, err3 := a.DaemonStatusSnapshot(context.Background())
 	if err3 == nil {
 		t.Fatalf("third call (TTL expired): expected err, got nil")
 	}
@@ -785,14 +786,14 @@ func TestHealthSnapshot_PropagatesProbeErrorOnCacheHit(t *testing.T) {
 	}
 
 	// First call: probes fetch fails.
-	_, err1 := a.HealthSnapshot(HealthOpts{IncludeProbes: true})
+	_, err1 := a.HealthSnapshot(context.Background(), HealthOpts{IncludeProbes: true})
 	if err1 == nil {
 		t.Fatalf("first call: expected err on probe failure, got nil")
 	}
 
 	// Second call within probes TTL (10s): err must still propagate.
 	now += 500 // well within 10s probes TTL
-	_, err2 := a.HealthSnapshot(HealthOpts{IncludeProbes: true})
+	_, err2 := a.HealthSnapshot(context.Background(), HealthOpts{IncludeProbes: true})
 	if err2 == nil {
 		t.Fatalf("second call (cache hit) returned nil err — probe error masking on /api/health")
 	}
@@ -823,7 +824,7 @@ func TestDaemonStatusSnapshot_RecoversAfterBackendComesBack(t *testing.T) {
 	}
 
 	// Fail.
-	_, err1 := a.DaemonStatusSnapshot()
+	_, err1 := a.DaemonStatusSnapshot(context.Background())
 	if err1 == nil {
 		t.Fatalf("expected initial error")
 	}
@@ -832,7 +833,7 @@ func TestDaemonStatusSnapshot_RecoversAfterBackendComesBack(t *testing.T) {
 	failing = false
 	now += 2100 // past 2s daemons TTL
 
-	rows, err2 := a.DaemonStatusSnapshot()
+	rows, err2 := a.DaemonStatusSnapshot(context.Background())
 	if err2 != nil {
 		t.Fatalf("after recovery + TTL expiry: expected nil err, got %v", err2)
 	}
@@ -842,7 +843,7 @@ func TestDaemonStatusSnapshot_RecoversAfterBackendComesBack(t *testing.T) {
 
 	// Subsequent calls within TTL should also succeed (cached err cleared).
 	now += 100
-	rows3, err3 := a.DaemonStatusSnapshot()
+	rows3, err3 := a.DaemonStatusSnapshot(context.Background())
 	if err3 != nil {
 		t.Errorf("post-recovery cache hit: expected nil err, got %v", err3)
 	}

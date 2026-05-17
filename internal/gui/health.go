@@ -46,7 +46,7 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := parseHealthOpts(r.URL.Query())
-	snap, err := s.health.HealthSnapshot(opts)
+	snap, err := s.health.HealthSnapshot(r.Context(), opts)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
 			"error": err.Error(),

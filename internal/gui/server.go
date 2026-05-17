@@ -63,23 +63,23 @@ func (realStatusProvider) Status() ([]api.DaemonStatus, error) {
 // method here MUST be matched by both realHealthBackend (production)
 // and fakeHealth (test seam in health_test.go).
 type healthBackend interface {
-	HealthSnapshot(opts api.HealthOpts) (api.HealthSnapshot, error)
+	HealthSnapshot(ctx context.Context, opts api.HealthOpts) (api.HealthSnapshot, error)
 	// DaemonStatusSnapshot returns the canonical []DaemonStatus that
 	// /api/status emits. Shares the daemons-section cache with
 	// HealthSnapshot — one StatusWithOpts call serves both surfaces.
-	DaemonStatusSnapshot() ([]api.DaemonStatus, error)
+	DaemonStatusSnapshot(ctx context.Context) ([]api.DaemonStatus, error)
 }
 
 type realHealthBackend struct {
 	api *api.API // long-lived; populated from Server.api during NewServer.
 }
 
-func (r realHealthBackend) HealthSnapshot(opts api.HealthOpts) (api.HealthSnapshot, error) {
-	return r.api.HealthSnapshot(opts)
+func (r realHealthBackend) HealthSnapshot(ctx context.Context, opts api.HealthOpts) (api.HealthSnapshot, error) {
+	return r.api.HealthSnapshot(ctx, opts)
 }
 
-func (r realHealthBackend) DaemonStatusSnapshot() ([]api.DaemonStatus, error) {
-	return r.api.DaemonStatusSnapshot()
+func (r realHealthBackend) DaemonStatusSnapshot(ctx context.Context) ([]api.DaemonStatus, error) {
+	return r.api.DaemonStatusSnapshot(ctx)
 }
 
 // migrator is the narrow interface the /api/migrate handler needs.

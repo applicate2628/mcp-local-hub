@@ -187,7 +187,7 @@ func TestHealthSnapshot_IPCTimeoutReturnsFailLoud(t *testing.T) {
 	}
 	t.Cleanup(func() { supervisorIPCStatusFn = prev })
 
-	_, err := a.HealthSnapshot(HealthOpts{})
+	_, err := a.HealthSnapshot(context.Background(), HealthOpts{})
 	if err == nil {
 		t.Fatal("HealthSnapshot returned nil err on IPC timeout; want fail-loud")
 	}
@@ -210,7 +210,7 @@ func TestDaemonStatusSnapshot_IPCErrorReturnsFailLoud(t *testing.T) {
 	}
 	t.Cleanup(func() { supervisorIPCStatusFn = prev })
 
-	rows, err := a.DaemonStatusSnapshot()
+	rows, err := a.DaemonStatusSnapshot(context.Background())
 	if err == nil {
 		t.Fatalf("DaemonStatusSnapshot returned nil err on IPC failure; rows=%+v", rows)
 	}
@@ -234,7 +234,7 @@ func TestHealthSnapshot_IPCBackingDeliversDaemons(t *testing.T) {
 	}
 	t.Cleanup(func() { supervisorIPCStatusFn = prev })
 
-	snap, err := a.HealthSnapshot(HealthOpts{})
+	snap, err := a.HealthSnapshot(context.Background(), HealthOpts{})
 	if err != nil {
 		t.Fatalf("HealthSnapshot: %v", err)
 	}

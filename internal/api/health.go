@@ -198,11 +198,11 @@ const (
 // separately with its own TTL; concurrent expired-cache callers collapse
 // onto one underlying fn via singleflight. Phase 2 wires hub + daemons.
 // Phases 3 + 4 add probes + capabilities.
-func (a *API) HealthSnapshot(opts HealthOpts) (HealthSnapshot, error) {
+func (a *API) HealthSnapshot(ctx context.Context, opts HealthOpts) (HealthSnapshot, error) {
 	now := a.healthNow()
 
 	hub := a.computeHubSection(now)
-	daemons, err := a.computeDaemonsSection(now, opts.Refresh)
+	daemons, err := a.computeDaemonsSection(ctx, now, opts.Refresh)
 	if err != nil {
 		return HealthSnapshot{}, err
 	}
@@ -261,12 +261,12 @@ func (a *API) HealthSnapshot(opts HealthOpts) (HealthSnapshot, error) {
 // Cloud bot P1 escalation: prior implementation swallowed fetchErr
 // into section.Errors and returned nil, so operators saw 200 [] on
 // total backend failure instead of 500 STATUS_FAILED.
-func (a *API) DaemonStatusSnapshot() ([]DaemonStatus, error) {
+func (a *API) DaemonStatusSnapshot(ctx context.Context) ([]DaemonStatus, error) {
 	nowMs := a.healthNow()
 	// Reuse computeDaemonsSection's TTL+singleflight logic. We discard
 	// the returned DaemonsSection — what we want is the side-effect of
 	// having `daemonStatuses` populated in the same critical section.
-	if _, err := a.computeDaemonsSection(nowMs, false); err != nil {
+	if _, err := a.computeDaemonsSection(ctx, nowMs, false); err != nil {
 		return nil, err
 	}
 	a.healthCache.mu.RLock()
@@ -317,7 +317,7 @@ func (a *API) computeHubSection(nowMs int64) HubSection {
 // while the backend is still down. Slow-path success clears the cached
 // error; slow-path fetchErr writes it. Cloud bot P1×2 fix on PR #132
 // commit 2062818 (kosyak: incomplete-fix-only-slow-path-cache-hit-still-masks-errors).
-func (a *API) computeDaemonsSection(nowMs int64, refresh bool) (DaemonsSection, error) {
+func (a *API) computeDaemonsSection(ctx context.Context, nowMs int64, refresh bool) (DaemonsSection, error) {
 	a.healthCache.mu.RLock()
 	cached := a.healthCache.daemons
 	cachedAt := a.healthCache.daemonsAt
@@ -379,20 +379,20 @@ func (a *API) computeDaemonsSection(nowMs int64, refresh bool) (DaemonsSection, 
 		case a.HealthStatusFn != nil:
 			rows, fetchErr = a.HealthStatusFn(StatusOpts{})
 		case supervisorIPCStatusFn != nil:
-			// Bounded-deadline context (codex r5 P2 fix): the caller's
-			// HTTP request context doesn't currently reach this layer
-			// because `HealthSnapshot` / `DaemonStatusSnapshot` /
-			// `computeDaemonsSection` don't take ctx in their signatures
-			// (cascading change across 20+ test files — follow-up). The
-			// worst-case finding the bot flagged was "If the pipe
-			// connect/read stalls, handlers can hang until transport-
-			// level timeouts instead of failing promptly". A 5-second
-			// deadline bounds the IPC call so the daemons-section
-			// refresh cannot tie up the HTTP handler beyond the next
-			// status-cache TTL window even under supervisor outage.
-			// The IPC stub on its side returns within this budget;
-			// production wiring should respect ctx.Done() for cancel.
-			ipcCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			// Caller-context-derived bounded deadline (codex r6 P2 fix
+			// follow-up to r5 P2): the IPC call now derives its 5-second
+			// timeout from the caller's ctx so an HTTP request cancel /
+			// server shutdown propagates immediately instead of letting
+			// the daemons-section refresh keep running for the full 5s
+			// under outage conditions. Defensive: if ctx is nil (some
+			// internal callers may not have one — see capabilities-
+			// section in this file), fall back to background so a nil
+			// deref doesn't crash the refresh path.
+			parentCtx := ctx
+			if parentCtx == nil {
+				parentCtx = context.Background()
+			}
+			ipcCtx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
 			rows, fetchErr = supervisorIPCStatusFn(ipcCtx)
 			cancel()
 		default:
@@ -641,7 +641,7 @@ func (a *API) computeCapabilitiesSection(nowMs int64, refresh bool, probes Probe
 		// realCapabilityRow → syntheticToolsSubSection: dropping it makes
 		// ToolCatalogForBackend("") return (zero, false) and reports
 		// state="empty" for every lazy-proxy daemon.
-		daemons, _ := a.computeDaemonsSection(nowMs, false)
+		daemons, _ := a.computeDaemonsSection(context.Background(), nowMs, false)
 		portByServerDaemon := make(map[string]int, len(daemons.Items))
 		backendByServerDaemon := make(map[string]string, len(daemons.Items))
 		for _, d := range daemons.Items {

@@ -184,7 +184,14 @@ func (q *QuiesceHandler) transientCount() int {
 // file. Keeping the zero-guard in the cross-platform shim lets a
 // single test on either platform exercise the boundary.)
 func isPIDAlive(pid int) bool {
-	if pid == 0 {
+	// Codex r6 P3 fix: reject negative PIDs up front. On POSIX,
+	// kill(2)/Signal(0) treats a negative argument as a process-GROUP
+	// probe (PGID = |pid|), so a malformed transient_pids entry like
+	// -123 would be reported alive whenever PGID 123 exists — quiesce
+	// then stalls until timeout and misclassifies the entry as
+	// still_running. The supervisor only manages per-PID transients,
+	// so anything <= 0 is invalid input from a corrupt state file.
+	if pid <= 0 {
 		return false
 	}
 	return pidAliveImpl(pid)
