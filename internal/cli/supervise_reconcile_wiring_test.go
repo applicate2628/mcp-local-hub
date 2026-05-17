@@ -24,6 +24,7 @@
 package cli
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -460,6 +461,9 @@ func TestProductionSpawnFn_ReapsExitedChildProcess(t *testing.T) {
 }
 
 func TestProductionTerminateFn_TerminatesRunningPID(t *testing.T) {
+	if runtime.GOOS != "windows" && runtime.GOOS != "linux" {
+		t.Skip("production terminate identity gate fails closed without a native PID identity probe")
+	}
 	tmpHome := apitest.HardenedTempDir(t)
 
 	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
@@ -469,7 +473,7 @@ func TestProductionTerminateFn_TerminatesRunningPID(t *testing.T) {
 	}
 	defer events.Close()
 
-	cmd := exec.Command(os.Args[0], "-test.run=TestProductionTerminateFn_HelperSleep")
+	cmd := exec.Command(copyCurrentTestBinaryAsReconcileMcphub(t), "-test.run=TestProductionTerminateFn_HelperSleep")
 	cmd.Env = append(os.Environ(), "MCPHUB_PRODUCTION_TERMINATE_HELPER=1")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start helper child: %v", err)
@@ -517,6 +521,83 @@ func TestProductionTerminateFn_TerminatesRunningPID(t *testing.T) {
 	}
 	if strings.Contains(logStr, `"event":"daemon-terminate-failed"`) {
 		t.Fatalf("unexpected daemon-terminate-failed event:\n%s", logStr)
+	}
+}
+
+func TestProductionTerminateFn_IdentityMismatchAtEntry(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	pid := os.Getpid()
+	if !process.IsPidAlive(pid) {
+		t.Fatalf("test precondition failed: current pid %d must be alive", pid)
+	}
+	if pidMatchesMcphub(pid) {
+		t.Skipf("current test binary pid %d unexpectedly matches mcphub identity", pid)
+	}
+
+	terminateFn := makeProductionTerminateFn(events, map[string]int{
+		reconcileWiringTestTaskName: pid,
+	})
+	if err := terminateFn(api.SupervisorDaemon{TaskName: reconcileWiringTestTaskName}); err != nil {
+		t.Fatalf("terminate fn: %v", err)
+	}
+
+	logRaw, err := os.ReadFile(eventsPath)
+	if err != nil {
+		t.Fatalf("read events log: %v", err)
+	}
+	logStr := string(logRaw)
+	if !strings.Contains(logStr, `"event":"daemon-terminate-aborted-pid-reuse"`) {
+		t.Fatalf("daemon-terminate-aborted-pid-reuse event missing from audit log:\n%s", logStr)
+	}
+	for _, event := range []string{`"event":"daemon-terminate-requested"`, `"event":"daemon-terminated"`, `"event":"daemon-terminate-failed"`} {
+		if strings.Contains(logStr, event) {
+			t.Fatalf("unexpected %s event after entry identity mismatch:\n%s", event, logStr)
+		}
+	}
+}
+
+func TestProductionTerminateFn_AlreadyExitedReturnsSuccess(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	pid := exitedProcessPID(t)
+	if process.IsPidAlive(pid) {
+		t.Fatalf("test precondition failed: pid %d is still alive after Wait", pid)
+	}
+
+	terminateFn := makeProductionTerminateFn(events, map[string]int{
+		reconcileWiringTestTaskName: pid,
+	})
+	if err := terminateFn(api.SupervisorDaemon{TaskName: reconcileWiringTestTaskName}); err != nil {
+		t.Fatalf("terminate fn: %v", err)
+	}
+
+	logRaw, err := os.ReadFile(eventsPath)
+	if err != nil {
+		t.Fatalf("read events log: %v", err)
+	}
+	logStr := string(logRaw)
+	if !strings.Contains(logStr, `"event":"daemon-terminate-already-exited"`) {
+		t.Fatalf("daemon-terminate-already-exited event missing from audit log:\n%s", logStr)
+	}
+	for _, event := range []string{`"event":"daemon-terminate-requested"`, `"event":"daemon-terminated"`, `"event":"daemon-terminate-failed"`} {
+		if strings.Contains(logStr, event) {
+			t.Fatalf("unexpected %s event after already-exited PID:\n%s", event, logStr)
+		}
 	}
 }
 
@@ -578,4 +659,35 @@ func psStateForPID(pid int) (string, bool) {
 		return "", false
 	}
 	return state, true
+}
+
+func copyCurrentTestBinaryAsReconcileMcphub(t *testing.T) string {
+	t.Helper()
+
+	srcPath, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	name := "mcphub"
+	if runtime.GOOS == "windows" {
+		name = "mcphub.exe"
+	}
+	dstPath := filepath.Join(t.TempDir(), name)
+	src, err := os.Open(srcPath)
+	if err != nil {
+		t.Fatalf("open test binary: %v", err)
+	}
+	defer src.Close()
+	dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
+	if err != nil {
+		t.Fatalf("create helper binary: %v", err)
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		_ = dst.Close()
+		t.Fatalf("copy helper binary: %v", err)
+	}
+	if err := dst.Close(); err != nil {
+		t.Fatalf("close helper binary: %v", err)
+	}
+	return dstPath
 }

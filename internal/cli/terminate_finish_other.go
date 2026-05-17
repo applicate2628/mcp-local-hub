@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"syscall"
 	"time"
@@ -36,7 +37,7 @@ func finishProductionTerminate(pid int, d api.SupervisorDaemon, events *api.Supe
 				"reason": "PID does not match mcphub identity after grace window - possible OS PID reuse, refusing SIGKILL",
 			},
 		})
-		return nil
+		return fmt.Errorf("terminate escalation aborted for pid %d: PID no longer matches mcphub identity (possible reuse)", pid)
 	}
 
 	_ = events.Emit(api.SupervisorEvent{
@@ -51,6 +52,10 @@ func finishProductionTerminate(pid int, d api.SupervisorDaemon, events *api.Supe
 		},
 	})
 	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+		if errors.Is(err, syscall.ESRCH) {
+			emitDaemonTerminateAlreadyExited(events, d, pid)
+			return nil
+		}
 		return fmt.Errorf("send SIGKILL to pid %d after SIGTERM timeout: %w", pid, err)
 	}
 	return nil

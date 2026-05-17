@@ -1,6 +1,7 @@
 package process
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"runtime"
@@ -64,9 +65,43 @@ func TestTerminatePID(t *testing.T) {
 	}
 }
 
+func TestTerminatePID_AlreadyExited(t *testing.T) {
+	pid := exitedProcessPID(t)
+	if IsPidAlive(pid) {
+		t.Fatalf("test precondition failed: pid %d is still alive after Wait", pid)
+	}
+
+	err := TerminatePID(pid)
+	if !errors.Is(err, ErrProcessAlreadyExited) {
+		t.Fatalf("TerminatePID(%d) error = %v, want ErrProcessAlreadyExited", pid, err)
+	}
+}
+
 func TestTerminatePID_HelperSleep(t *testing.T) {
 	if os.Getenv("MCPHUB_TERMINATE_PID_HELPER") != "1" {
 		return
 	}
 	time.Sleep(60 * time.Second)
+}
+
+func exitedProcessPID(t *testing.T) int {
+	t.Helper()
+
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd.exe", "/c", "exit", "0")
+	} else {
+		cmd = exec.Command("sh", "-c", "exit 0")
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start short-lived child: %v", err)
+	}
+	if cmd.Process == nil {
+		t.Fatal("short-lived child started without Process")
+	}
+	pid := cmd.Process.Pid
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("wait short-lived child: %v", err)
+	}
+	return pid
 }

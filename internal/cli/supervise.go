@@ -1250,6 +1250,23 @@ func makeProductionTerminateFn(events *api.SupervisorEventLog, runningPIDs map[s
 			emitDaemonTerminateFailed(events, d, pid, err)
 			return err
 		}
+		if !process.IsPidAlive(pid) {
+			emitDaemonTerminateAlreadyExited(events, d, pid)
+			return nil
+		}
+		if !pidMatchesMcphub(pid) {
+			_ = events.Emit(api.SupervisorEvent{
+				Severity: api.SupervisorEventSeverityWarn,
+				Source:   "lifecycle",
+				Event:    "daemon-terminate-aborted-pid-reuse",
+				TaskName: d.TaskName,
+				Body: map[string]any{
+					"pid":    pid,
+					"reason": "PID does not match mcphub identity at terminate entry - possible OS PID reuse",
+				},
+			})
+			return nil
+		}
 
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: api.SupervisorEventSeverityInfo,
@@ -1262,6 +1279,10 @@ func makeProductionTerminateFn(events *api.SupervisorEventLog, runningPIDs map[s
 		})
 
 		if err := process.TerminatePID(pid); err != nil {
+			if errors.Is(err, process.ErrProcessAlreadyExited) {
+				emitDaemonTerminateAlreadyExited(events, d, pid)
+				return nil
+			}
 			emitDaemonTerminateFailed(events, d, pid, err)
 			return err
 		}
@@ -1281,6 +1302,18 @@ func makeProductionTerminateFn(events *api.SupervisorEventLog, runningPIDs map[s
 		})
 		return nil
 	}
+}
+
+func emitDaemonTerminateAlreadyExited(events *api.SupervisorEventLog, d api.SupervisorDaemon, pid int) {
+	_ = events.Emit(api.SupervisorEvent{
+		Severity: api.SupervisorEventSeverityInfo,
+		Source:   "lifecycle",
+		Event:    "daemon-terminate-already-exited",
+		TaskName: d.TaskName,
+		Body: map[string]any{
+			"pid": pid,
+		},
+	})
 }
 
 func emitDaemonTerminateFailed(events *api.SupervisorEventLog, d api.SupervisorDaemon, pid int, err error) {

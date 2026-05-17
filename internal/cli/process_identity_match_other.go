@@ -2,12 +2,12 @@
 
 package cli
 
-// pidMatchesMcphub is intentionally weaker on macOS/BSD for v0.5.0:
-// Windows is GA and verifies image identity through CIM; Linux beta
-// uses /proc/<pid>/exe in process_identity_match_linux.go. macOS/BSD
-// do not expose Linux-style /proc, so sysctl-based identity is a
-// separate macOS-preview hardening task. Until then these platforms
-// keep the r2 IsPidAlive-only contract.
+// pidMatchesMcphub returns false on macOS/BSD: v0.5.0 has no native
+// identity probe for these platforms (no /proc), so fail-closed is
+// the only safe behavior. A stale PID from supervisor-state.json
+// is treated as not-running on startup, and the terminate path
+// refuses to signal it. Follow-up task should add sysctl-based
+// identity for darwin; tracked under v0.6 macOS GA.
 func pidMatchesMcphub(_ int) bool {
-	return true
+	return false
 }
