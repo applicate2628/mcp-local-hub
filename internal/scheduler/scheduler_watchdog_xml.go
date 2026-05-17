@@ -67,7 +67,18 @@ func BuildWatchdogXML(canonicalExe, workingDir, userName string) string {
 	buf.WriteString("        <StopAtDurationEnd>false</StopAtDurationEnd>\n")
 	buf.WriteString("      </Repetition>\n")
 	buf.WriteString("    </CalendarTrigger>\n")
-	buf.WriteString("    <LogonTrigger><Enabled>true</Enabled></LogonTrigger>\n")
+	// LogonTrigger MUST scope to the specific user. Without <UserId>,
+	// the trigger means "any user logon" which requires elevation —
+	// schtasks /Create rejects the install with ERROR: Access is denied
+	// when the current shell is non-elevated. Daemon tasks
+	// (scheduler_windows.go buildCreateXML:84) correctly scope their
+	// LogonTrigger to the configured userName; this missing-UserId
+	// was a v0.4.x bug that surfaced post-v0.5.0 cherry-pick chain
+	// when the user re-ran `mcphub setup` on a non-elevated shell.
+	buf.WriteString("    <LogonTrigger>\n")
+	buf.WriteString(fmt.Sprintf("      <UserId>%s</UserId>\n", watchdogXMLEscape(userName)))
+	buf.WriteString("      <Enabled>true</Enabled>\n")
+	buf.WriteString("    </LogonTrigger>\n")
 	buf.WriteString("  </Triggers>\n")
 
 	// Principal — same per-user model as daemon tasks. The XML validator

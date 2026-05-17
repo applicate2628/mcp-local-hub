@@ -316,10 +316,16 @@ func TestBuildWatchdogXML_BothTriggers(t *testing.T) {
 	if !strings.Contains(xml, "<LogonTrigger>") {
 		t.Errorf("expected <LogonTrigger> in watchdog XML; got:\n%s", xml)
 	}
-	// Per the plan snippet the LogonTrigger is enabled.
-	if !strings.Contains(xml, "<LogonTrigger><Enabled>true</Enabled></LogonTrigger>") &&
-		!strings.Contains(xml, "<LogonTrigger>\n      <Enabled>true</Enabled>\n    </LogonTrigger>") {
+	// LogonTrigger must be enabled AND scoped to the configured user.
+	// Per smoke-test 2026-05-17: schtasks /Create returns "Access is
+	// denied" when LogonTrigger has no <UserId> (any-user logon requires
+	// elevation). Daemon tasks scope LogonTrigger to UserId; watchdog
+	// must do the same.
+	if !strings.Contains(xml, "<Enabled>true</Enabled>") || !strings.Contains(xml, "</LogonTrigger>") {
 		t.Errorf("LogonTrigger should be enabled; got:\n%s", xml)
+	}
+	if !strings.Contains(xml, "<UserId>"+testWatchdogUser+"</UserId>") {
+		t.Errorf("LogonTrigger must scope to userName (testWatchdogUser=%q); got:\n%s", testWatchdogUser, xml)
 	}
 }
 
