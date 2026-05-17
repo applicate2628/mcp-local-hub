@@ -434,6 +434,23 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	// all three uniformly.
 	ipcExitCh := make(chan struct{}, 1)
 
+	// Read the two intent files before exposing IPC. daemon-intent.json
+	// parse/schema failures are fail-closed: a corrupt stop/quarantine
+	// file must not collapse to daemonIntent==nil, because Reconcile
+	// treats nil as "no stops" and would restart suppressed daemons.
+	intent, daemonIntent, intentErr := loadIntentFiles(stateDir, events, &intentFilesLoaded)
+	if intentErr != nil {
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "error",
+			Source:   "lifecycle",
+			Event:    "supervise-startup-failed",
+			Body: map[string]any{
+				"err": intentErr.Error(),
+			},
+		})
+		return fmt.Errorf("load intent files: %w", intentErr)
+	}
+
 	// IPC listener. `--no-ipc` keeps tests fast (lock+events+loop only).
 	// Production callers always pass --no-ipc=false; the listener owns
 	// the per-OS pipe/socket and the hello-frame handshake from Task
@@ -480,14 +497,6 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		// client never blocks the next Accept.
 		go acceptIPCConnections(listener, deps)
 	}
-
-	// Read the two intent files. Production wiring (this commit)
-	// threads supervisor-intent.json into the reconcile pass below;
-	// daemon-intent.json feeds the IsActiveStop decision in the
-	// reconciler. Missing files (os.ErrNotExist) are a valid "loaded"
-	// outcome — the supervisor must come up cleanly on a fresh host
-	// before any intent file exists.
-	intent, daemonIntent := loadIntentFiles(stateDir, events, &intentFilesLoaded)
 
 	// Startup reconcile pass. Wires the parsed supervisor-intent.json
 	// through NewReconciler with production spawn/terminate closures.
@@ -1117,26 +1126,24 @@ func writeIPCFrame(conn net.Conn, resp api.IPCResponse) error {
 // timers in that state. Both return values may be nil — callers
 // MUST nil-check before deref.
 //
-// Errors (parse failure, I/O denied) are logged via the event log
-// but do NOT prevent the ready transition — a corrupt intent file
-// must not block the supervisor from coming up; the audit row is
-// enough for an operator to diagnose. The function still sets
-// intentFilesLoaded=true once both reads attempted, so the IPC
-// `status` flag transitions out of startup state even when intent
-// files are missing or corrupt.
+// supervisor-intent.json errors remain audit-only because absence or
+// corruption simply means there is no spawn plan to execute. daemon-intent.json
+// is stricter: a present but unreadable or invalid file is fail-closed and
+// returns an error after the audit row is emitted, because nil daemon intent
+// means "no stop overrides" to the reconciler.
 //
 // daemon-intent.json read path: the canonical *API.ReadDaemonIntent
 // flow lives on *api.API and resolves DaemonStateDir() internally —
 // that path does NOT honor the supervise CLI's
 // MCPHUB_STATE_DIR_OVERRIDE seam, so the startup reconcile reads the
-// file directly here via os.ReadFile + json.Unmarshal. Watcher/
-// reload paths (follow-up) will switch to the full flock+quarantine
+// file directly here and sends the bytes through api.ParseDaemonIntentFile.
+// Watcher/reload paths (follow-up) will switch to the full flock+quarantine
 // flow once the production path-injection variant lands.
 func loadIntentFiles(
 	stateDir string,
 	events *api.SupervisorEventLog,
 	intentFilesLoaded *atomic.Bool,
-) (*api.SupervisorIntentFile, *api.DaemonIntentFile) {
+) (*api.SupervisorIntentFile, *api.DaemonIntentFile, error) {
 	var (
 		supervisorIntent *api.SupervisorIntentFile
 		daemonIntent     *api.DaemonIntentFile
@@ -1165,7 +1172,7 @@ func loadIntentFiles(
 	if raw, err := os.ReadFile(daemonIntentPath); err != nil {
 		if !os.IsNotExist(err) {
 			_ = events.Emit(api.SupervisorEvent{
-				Severity: "warn",
+				Severity: "error",
 				Source:   "lifecycle",
 				Event:    "daemon-intent-read-failed",
 				Body: map[string]any{
@@ -1173,16 +1180,13 @@ func loadIntentFiles(
 					"err":  err.Error(),
 				},
 			})
+			return supervisorIntent, nil, fmt.Errorf("read daemon-intent.json: %w", err)
 		}
 	} else {
-		var parsed api.DaemonIntentFile
-		if err := json.Unmarshal(raw, &parsed); err != nil {
-			// Best-effort parse — same audit-only policy as the
-			// supervisor-intent read above. Reconcile will see
-			// daemonIntent==nil and treat every task as "no
-			// override" (the safe default).
+		parsed, err := api.ParseDaemonIntentFile(raw)
+		if err != nil {
 			_ = events.Emit(api.SupervisorEvent{
-				Severity: "warn",
+				Severity: "error",
 				Source:   "lifecycle",
 				Event:    "daemon-intent-parse-failed",
 				Body: map[string]any{
@@ -1190,13 +1194,14 @@ func loadIntentFiles(
 					"err":  err.Error(),
 				},
 			})
+			return supervisorIntent, nil, fmt.Errorf("parse daemon-intent.json: %w", err)
 		} else {
 			daemonIntent = &parsed
 		}
 	}
 
 	intentFilesLoaded.Store(true)
-	return supervisorIntent, daemonIntent
+	return supervisorIntent, daemonIntent, nil
 }
 
 // loadSupervisorCurrentRunning builds the currentRunning map the
@@ -1211,11 +1216,8 @@ func loadIntentFiles(
 //
 // Warm-restart case: a parsed supervisor-state.json may list daemons
 // in state="running" with CurrentPID > 0. Those names go into the
-// map so the second invocation of the supervisor does NOT respawn
-// every daemon (the Job Object's kill-on-close would have already
-// reaped them on the prior exit, but the safe contract is to trust
-// what supervisor-state.json says and let the watcher / reload path
-// reconcile any drift).
+// map only when the PID is still alive, so a stale state file cannot
+// suppress a required startup spawn for the supervisor lifetime.
 //
 // Errors (read failure, parse failure) are swallowed silently —
 // supervisor-events.log already captures the audit row in the
@@ -1232,7 +1234,7 @@ func loadSupervisorCurrentRunning(stateDir string) map[string]bool {
 		return result
 	}
 	for taskName, ds := range state.Daemons {
-		if ds.State == "running" && ds.CurrentPID > 0 {
+		if ds.State == "running" && ds.CurrentPID > 0 && process.IsPidAlive(ds.CurrentPID) {
 			result[taskName] = true
 		}
 	}
@@ -1313,6 +1315,11 @@ func makeProductionSpawnFn(job *process.Job, events *api.SupervisorEventLog) Spa
 				"port":      d.Port,
 			},
 		})
+		// Resource reclamation only; the FIFO exit observer owns
+		// post-exit notification and follow-up reconcile signaling.
+		go func() {
+			_ = cmd.Wait()
+		}()
 		return nil
 	}
 }

@@ -25,7 +25,11 @@ package cli
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -33,6 +37,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/apitest"
+	"mcp-local-hub/internal/process"
 )
 
 const reconcileWiringTestTaskName = `\mcp-local-hub-memory-default`
@@ -191,6 +196,129 @@ func TestRunSupervise_NoIntentNoSpawn(t *testing.T) {
 	}
 }
 
+func TestRunSupervise_MalformedDaemonIntentFatalBeforeReady(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
+
+	intentPath := filepath.Join(tmpHome, "supervisor-intent.json")
+	intent := &api.SupervisorIntentFile{
+		Version:   1,
+		UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Daemons: []api.SupervisorDaemon{
+			{
+				TaskName: reconcileWiringTestTaskName,
+				Server:   "memory",
+				Daemon:   "default",
+				Command:  "fake-noop-for-test",
+				Args:     []string{"--noop"},
+				Port:     9121,
+			},
+		},
+	}
+	if err := api.WriteSupervisorIntent(intentPath, intent); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpHome, "daemon-intent.json"), []byte(`{"tasks":{"x":{"desired":"stopped","reason":"user-disabled","updated_at":"not-a-time"}}}`), 0o600); err != nil {
+		t.Fatalf("seed malformed daemon-intent.json: %v", err)
+	}
+
+	var spawnCalled atomic.Int32
+	cleanupSpawn := setReconcileSpawnFnForTest(func(d api.SupervisorDaemon) error {
+		spawnCalled.Add(1)
+		return nil
+	})
+	defer cleanupSpawn()
+
+	cmd := newSuperviseCmd()
+	cmd.SetArgs([]string{"--no-ipc"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected malformed daemon-intent.json to abort supervise startup, got nil")
+	}
+	if spawnCalled.Load() != 0 {
+		t.Fatalf("spawn must not fire after malformed daemon-intent.json; got %d call(s)", spawnCalled.Load())
+	}
+
+	logRaw, readErr := os.ReadFile(filepath.Join(tmpHome, "supervisor-events.log"))
+	if readErr != nil {
+		t.Fatalf("read events log: %v", readErr)
+	}
+	logStr := string(logRaw)
+	if !strings.Contains(logStr, `"event":"daemon-intent-parse-failed"`) {
+		t.Fatalf("daemon-intent-parse-failed event missing from audit log:\n%s", logStr)
+	}
+	if !strings.Contains(logStr, `"event":"supervise-startup-failed"`) {
+		t.Fatalf("supervise-startup-failed event missing from audit log:\n%s", logStr)
+	}
+	if strings.Contains(logStr, `"event":"ipc-listener-bound"`) {
+		t.Fatalf("IPC listener must not bind on fatal daemon-intent parse error:\n%s", logStr)
+	}
+	if strings.Contains(logStr, `"event":"reconcile-ready"`) {
+		t.Fatalf("reconcile-ready must not be emitted on fatal daemon-intent parse error:\n%s", logStr)
+	}
+}
+
+func TestLoadIntentFiles_MalformedDaemonIntentReturnsError(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	if err := os.WriteFile(filepath.Join(tmpHome, "daemon-intent.json"), []byte(`{"tasks":{"x":{"desired":"bogus","reason":"user-disabled","updated_at":"2026-05-17T00:00:00Z"}}}`), 0o600); err != nil {
+		t.Fatalf("seed malformed daemon-intent.json: %v", err)
+	}
+
+	var loaded atomic.Bool
+	_, _, err = loadIntentFiles(tmpHome, events, &loaded)
+	if err == nil {
+		t.Fatal("expected loadIntentFiles to return an error for malformed daemon-intent.json")
+	}
+	if loaded.Load() {
+		t.Fatal("intentFilesLoaded must remain false when daemon-intent.json fails strict parse")
+	}
+
+	logRaw, readErr := os.ReadFile(eventsPath)
+	if readErr != nil {
+		t.Fatalf("read events log: %v", readErr)
+	}
+	if !strings.Contains(string(logRaw), `"event":"daemon-intent-parse-failed"`) {
+		t.Fatalf("daemon-intent-parse-failed event missing from audit log:\n%s", string(logRaw))
+	}
+}
+
+func TestLoadSupervisorCurrentRunning_SkipsDeadPID(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	pid := exitedProcessPID(t)
+	if process.IsPidAlive(pid) {
+		t.Fatalf("test precondition failed: pid %d is still alive after Wait", pid)
+	}
+
+	state := &api.SupervisorStateFile{
+		Version: 1,
+		Daemons: map[string]api.SupervisorDaemonState{
+			reconcileWiringTestTaskName: {
+				State:      "running",
+				CurrentPID: pid,
+			},
+		},
+	}
+	if err := api.WriteSupervisorState(filepath.Join(tmpHome, "supervisor-state.json"), state); err != nil {
+		t.Fatalf("seed supervisor-state.json: %v", err)
+	}
+
+	got := loadSupervisorCurrentRunning(tmpHome)
+	if got[reconcileWiringTestTaskName] {
+		t.Fatalf("dead pid %d must not suppress startup spawn; currentRunning=%v", pid, got)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected no current-running entries for stale state, got %v", got)
+	}
+}
+
 // TestProductionSpawnFn_FailureEmitsAuditEvent verifies the
 // production spawn fn (makeProductionSpawnFn) emits a
 // daemon-spawn-failed event on cmd.Start failure. This test does NOT
@@ -285,4 +413,98 @@ func TestProductionSpawnFn_SuccessEmitsAuditEvent(t *testing.T) {
 	if !strings.Contains(logStr, `"event":"daemon-spawned"`) {
 		t.Fatalf("daemon-spawned event missing from audit log:\n%s", logStr)
 	}
+}
+
+func TestProductionSpawnFn_ReapsExitedChildProcess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX zombie reaping assertion uses ps state output")
+	}
+	tmpHome := apitest.HardenedTempDir(t)
+
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	spawnFn := makeProductionSpawnFn(nil, events)
+	command, args := portableNoopCommand()
+	descriptor := api.SupervisorDaemon{
+		TaskName: reconcileWiringTestTaskName,
+		Server:   "memory",
+		Daemon:   "default",
+		Command:  command,
+		Args:     args,
+	}
+
+	if err := spawnFn(descriptor); err != nil {
+		t.Fatalf("spawn fn failed on noop command: %v", err)
+	}
+
+	pid := spawnedPIDFromEventLog(t, eventsPath)
+	deadline := time.Now().Add(3 * time.Second)
+	var lastState string
+	for time.Now().Before(deadline) {
+		state, exists := psStateForPID(pid)
+		if !exists {
+			return
+		}
+		lastState = state
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("spawned child pid %d was not reaped before deadline; last ps state %q", pid, lastState)
+}
+
+func exitedProcessPID(t *testing.T) int {
+	t.Helper()
+
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd.exe", "/c", "exit", "0")
+	} else {
+		cmd = exec.Command("sh", "-c", "exit 0")
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start short-lived child: %v", err)
+	}
+	if cmd.Process == nil {
+		t.Fatal("short-lived child started without Process")
+	}
+	pid := cmd.Process.Pid
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("wait short-lived child: %v", err)
+	}
+	return pid
+}
+
+func spawnedPIDFromEventLog(t *testing.T, path string) int {
+	t.Helper()
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read events log: %v", err)
+	}
+	re := regexp.MustCompile(`"pid":([0-9]+)`)
+	match := re.FindSubmatch(raw)
+	if match == nil {
+		t.Fatalf("daemon-spawned pid missing from audit log:\n%s", string(raw))
+	}
+	pid, err := strconv.Atoi(string(match[1]))
+	if err != nil {
+		t.Fatalf("parse pid %q: %v", string(match[1]), err)
+	}
+	return pid
+}
+
+func psStateForPID(pid int) (string, bool) {
+	out, err := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return "", false
+	}
+	state := strings.TrimSpace(string(out))
+	if state == "" {
+		return "", false
+	}
+	return state, true
 }

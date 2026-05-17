@@ -324,6 +324,14 @@ func (i DaemonIntent) IsActiveStop(now time.Time) (bool, string) {
 	return true, i.Reason
 }
 
+// ParseDaemonIntentFile applies the daemon-intent.json strict decode and
+// schema validation rules to already-read bytes. It intentionally does not
+// quarantine or prune corrupt files; callers that own a path-specific read
+// seam can use this without duplicating the validation owner.
+func ParseDaemonIntentFile(raw []byte) (DaemonIntentFile, error) {
+	return parseAndValidateIntent(raw)
+}
+
 // ---------------------------------------------------------------------------
 // ReadDaemonIntent — three-state file read with quarantine-on-corrupt.
 // ---------------------------------------------------------------------------
@@ -388,12 +396,14 @@ func (a *API) ReadDaemonIntent() IntentReadResult {
 // flock(2) call. This method gives the caller a real budget.
 //
 // Behaviour on the lock-acquisition timeout path: returns
-//   IntentReadResult{
-//     State: IntentStateMissing,
-//     File:  DaemonIntentFile{Tasks: map[string]DaemonIntent{}},
-//     Err:   <error wrapping context.DeadlineExceeded — caller can
-//            test with errors.Is(res.Err, context.DeadlineExceeded)>,
-//   }
+//
+//	IntentReadResult{
+//	  State: IntentStateMissing,
+//	  File:  DaemonIntentFile{Tasks: map[string]DaemonIntent{}},
+//	  Err:   <error wrapping context.DeadlineExceeded — caller can
+//	         test with errors.Is(res.Err, context.DeadlineExceeded)>,
+//	}
+//
 // The empty-Tasks fallback matches the existing graceful-degrade
 // contract `defaultIntentReader` already handles — a momentary lack
 // of intent data degrades to "no preference", which is the same
