@@ -141,10 +141,21 @@ func secureWriteStateFileWithOperatorOpt(path string, payload []byte) error {
 	// bits check — a parent that grants write/delete to a non-
 	// allowlisted principal is a TOCTOU swap risk regardless of
 	// strict mode. Symmetric with writeHubMcpStateFile's defense.
+	//
+	// MCPHUB_ALLOW_UNHARDENED_STATE_WRITE=1 bypasses this TOCTOU
+	// check for operators whose %LOCALAPPDATA% inherits non-removable
+	// orphan SIDs or AD-pushed groups (e.g. Codex CLI's
+	// CodexSandboxUsers sandbox install) and who cannot run an
+	// elevated shell to tighten the parent ACL. The per-file DACL
+	// still applies at temp-create time (handle-bound) so the
+	// published file remains owner-only regardless of parent DACL.
+	// Mirrors AllowUnhardenedClientWriteEnv pattern.
 	parentDir := filepath.Dir(path)
-	if wsErr := checkStateDirParentWriteSafe(parentDir); wsErr != nil {
-		return fmt.Errorf("state-file secure write %s: parent %s grants write/delete access to non-allowlisted principal (TOCTOU swap risk; the read side would refuse this parent regardless of mode): %w",
-			path, parentDir, wsErr)
+	if !operatorAllowsUnhardenedStateWrite() {
+		if wsErr := checkStateDirParentWriteSafe(parentDir); wsErr != nil {
+			return fmt.Errorf("state-file secure write %s: parent %s grants write/delete access to non-allowlisted principal (TOCTOU swap risk; the read side would refuse this parent regardless of mode; set %s=1 to opt into the relax lane explicitly, or tighten the parent's DACL): %w",
+				path, parentDir, AllowUnhardenedStateWriteEnv, wsErr)
+		}
 	}
 
 	// Read-only broadening: emit the distinct state-file audit event
