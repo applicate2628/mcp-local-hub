@@ -178,12 +178,24 @@ func (s State) nowOrDefault() time.Time {
 // ---------------------------------------------------------------------------
 
 // Journal markers per spec §"Journal layout" line 209-223.
+//
+// Codex round-3 Lane C P1 #4: MarkerPreOsMutatingInFlight is a
+// transient sentinel written IMMEDIATELY before the first KillPID
+// syscall returns. On a panic between the syscall and the canonical
+// MarkerPreOsMutating write, a deferred-recover in
+// preUnregisterDaemonStop promotes the in-flight marker to the real
+// one so resume classifies the journal as
+// operator-choice-forward-or-rollback rather than safe-abort. The
+// in-flight marker is never the canonical resume signal — it must be
+// removed (on kill failure) or promoted (on kill success) before
+// preUnregisterDaemonStop returns.
 const (
-	MarkerPrepared           = "prepared"
-	MarkerPreOsMutating      = "pre-os-mutating"
-	MarkerOsMutatingComplete = "os-mutating-complete"
-	MarkerCommitted          = "committed"
-	MarkerRollbackInProgress = "rollback-in-progress"
+	MarkerPrepared              = "prepared"
+	MarkerPreOsMutating         = "pre-os-mutating"
+	MarkerPreOsMutatingInFlight = "pre-os-mutating.in-flight"
+	MarkerOsMutatingComplete    = "os-mutating-complete"
+	MarkerCommitted             = "committed"
+	MarkerRollbackInProgress    = "rollback-in-progress"
 )
 
 // allForwardMarkers in order — used by ClassifyResume to detect which
@@ -500,7 +512,28 @@ type ForwardOptions struct {
 	// PIDForServerDaemon resolves the in-system PID for a given
 	// server/daemon argv pair via the process list. Used in the
 	// MIGRATION_PORT_LOOKUP_INCONSISTENT abort guard at spec line 258.
-	PIDForServerDaemon func(server, daemon string) (int, bool)
+	//
+	// Return contract (codex round-3 Lane B P1 #2):
+	//   - (pid, nil)                  → match found, pid > 0.
+	//   - (0, ErrProcessNotFound)     → confirmed no match (the
+	//                                   resolver successfully scanned
+	//                                   the process list and observed
+	//                                   zero matching daemon argv).
+	//   - (0, <wrapped error>)        → probe failure (wmic + PS both
+	//                                   errored / unavailable). Callers
+	//                                   MUST treat this as abort, NOT
+	//                                   as "genuine unbound" — the
+	//                                   difference is the load-bearing
+	//                                   discriminator for the Lane B
+	//                                   P1 #2 fix. The journal maps
+	//                                   any non-ErrProcessNotFound
+	//                                   error to
+	//                                   ErrMigrationPortLookupInconsistent.
+	//
+	// The old `(int, bool)` shape collapsed probe-failure onto "not
+	// found", which let a transient wmic/PS stall silently delete the
+	// legacy task while a real daemon survived.
+	PIDForServerDaemon func(server, daemon string) (int, error)
 	// KillPID kills a process by PID (taskkill /F /T /PID on Windows).
 	KillPID func(pid int) error
 	// PortBindWait blocks until the port is unbound or the timeout
@@ -571,8 +604,8 @@ type killedDaemonsFile struct {
 // classificationReportFile is the on-disk shape for
 // legacy-tasks-classification.json (spec line 217).
 type classificationReportFile struct {
-	Version int                          `json:"version"`
-	Tasks   map[string]DeviationReport   `json:"tasks"`
+	Version int                        `json:"version"`
+	Tasks   map[string]DeviationReport `json:"tasks"`
 }
 
 // RunForward executes the v0.4.x → v0.5.0 forward migration. Returns
@@ -1096,12 +1129,45 @@ func parseDaemonArgv(args []string) (server, daemon string) {
 //     exhaustion, transport hang, malformed JSON) aborts immediately
 //     with ErrMigrationPortLookupInconsistent — never silently
 //     classify as unbound.
-func preUnregisterDaemonStop(journalDir string, tasks []scheduler.TaskStatus, xmlByTask map[string]string, opts ForwardOptions, state State, lockAcquiredUnix int64) ([]killedDaemonRecord, error) {
-	var killed []killedDaemonRecord
+func preUnregisterDaemonStop(journalDir string, tasks []scheduler.TaskStatus, xmlByTask map[string]string, opts ForwardOptions, state State, lockAcquiredUnix int64) (killed []killedDaemonRecord, retErr error) {
 	// markerWritten tracks whether we already touched pre-os-mutating
 	// in THIS invocation. touchMarker uses O_TRUNC|O_CREATE so it is
 	// idempotent on resume.
 	markerWritten := false
+	// Codex round-3 Lane C P1 #4: durable marker against panic between
+	// the kill syscall and the canonical marker write. The in-flight
+	// sentinel is pre-touched BEFORE each KillPID call; on panic the
+	// deferred recover promotes it to the real MarkerPreOsMutating so
+	// resume sees mutation happened. On kill failure the sentinel is
+	// removed (kill never landed). On kill success the canonical marker
+	// is written and the sentinel is removed (or never created on
+	// subsequent loop iterations once markerWritten is true).
+	//
+	// Named return values (killed, retErr) make the recover branch
+	// observable to the caller — without them the panic flow could not
+	// surface its own audit fragment.
+	defer func() {
+		if r := recover(); r != nil {
+			// Promote in-flight → committed marker so resume sees
+			// mutation happened. Best-effort: the rename failure path
+			// is logged via the error wrap but cannot itself prevent
+			// the re-raise (the panic is the higher-priority signal).
+			if markerExists(journalDir, MarkerPreOsMutatingInFlight) {
+				_ = os.Rename(
+					filepath.Join(journalDir, MarkerPreOsMutatingInFlight),
+					filepath.Join(journalDir, MarkerPreOsMutating),
+				)
+			}
+			// Preserve the panic — wrapped re-raise would lose the
+			// runtime/debug stack the recover saw. The caller's audit
+			// layer captures retErr; production never expects to hit
+			// this branch but the defense-in-depth is cheap.
+			retErr = fmt.Errorf("preUnregisterDaemonStop panic: %v (in-flight marker promoted to %s for resume classification)", r, MarkerPreOsMutating)
+			// Re-raise so cmd/mcphub/main.go's signal-aware top-level
+			// still gets the original panic for crash logging.
+			panic(r)
+		}
+	}()
 	for _, t := range tasks {
 		raw := xmlByTask[t.Name]
 		_, args := extractExecFromXML(raw)
@@ -1143,18 +1209,41 @@ func preUnregisterDaemonStop(journalDir string, tasks []scheduler.TaskStatus, xm
 				// Cross-check: re-scan the system process list for
 				// the matching daemon argv. If still present, the
 				// PID was recycled or the daemon respawned — abort.
+				// Codex round-3 Lane B P1 #2: probe-failure here
+				// (wmic/PS errored, NOT ErrProcessNotFound) is
+				// abort, not "genuine unbound" — a transient stall
+				// must not let a surviving daemon ride through.
 				if opts.PIDForServerDaemon != nil {
-					if _, stillRunning := opts.PIDForServerDaemon(server, daemon); stillRunning {
+					crossPID, crossErr := opts.PIDForServerDaemon(server, daemon)
+					switch {
+					case crossErr == nil:
+						// Match found → daemon still running. Abort.
+						killed = append(killed, killedDaemonRecord{
+							Task:       t.Name,
+							Server:     server,
+							Daemon:     daemon,
+							PID:        crossPID,
+							Port:       port,
+							GateFailed: "process-not-found-but-cross-check-positive",
+						})
+						return killed, fmt.Errorf("%w: PID %d server=%s daemon=%s (cross-check still finds matching daemon argv as PID %d)",
+							ErrMigrationPortLookupInconsistent, pid, server, daemon, crossPID)
+					case errors.Is(crossErr, ErrProcessNotFound):
+						// Confirmed no-match. Fall through to the
+						// genuine-unbound audit row below.
+					default:
+						// Probe failure. Cannot prove daemon is
+						// gone — abort.
 						killed = append(killed, killedDaemonRecord{
 							Task:       t.Name,
 							Server:     server,
 							Daemon:     daemon,
 							PID:        pid,
 							Port:       port,
-							GateFailed: "process-not-found-but-cross-check-positive",
+							GateFailed: "cross-check-probe-failed: " + crossErr.Error(),
 						})
-						return killed, fmt.Errorf("%w: PID %d server=%s daemon=%s (cross-check still finds matching daemon argv)",
-							ErrMigrationPortLookupInconsistent, pid, server, daemon)
+						return killed, fmt.Errorf("%w: PID %d server=%s daemon=%s: cross-check probe failed: %v",
+							ErrMigrationPortLookupInconsistent, pid, server, daemon, crossErr)
 					}
 				}
 				// Cross-check silent → genuine unbound. Record + skip.
@@ -1254,6 +1343,12 @@ func preUnregisterDaemonStop(journalDir string, tasks []scheduler.TaskStatus, xm
 // resolvePIDPortForTask returns (pid, port, ok, err). When lookup is
 // "ok=false" AND a matching mcphub.exe daemon IS in the process list,
 // returns ErrMigrationPortLookupInconsistent per spec line 258.
+//
+// Codex round-3 Lane B P1 #2: PIDForServerDaemon now returns an error
+// rather than a bool. ErrProcessNotFound is the confirmed-no-match
+// signal that maps to ok=false here; any OTHER error is a probe
+// failure and aborts with ErrMigrationPortLookupInconsistent so a
+// transient wmic/PS stall cannot let a surviving daemon ride through.
 func resolvePIDPortForTask(server, daemon string, opts ForwardOptions) (int, int, bool, error) {
 	// We don't have a port-by-task resolver as a separate injection;
 	// callers wire PortForPID + PIDForServerDaemon (the latter so the
@@ -1261,10 +1356,15 @@ func resolvePIDPortForTask(server, daemon string, opts ForwardOptions) (int, int
 	if opts.PIDForServerDaemon == nil {
 		return 0, 0, false, nil
 	}
-	pid, ok := opts.PIDForServerDaemon(server, daemon)
-	if !ok {
-		// No running daemon → safe to declare unbound.
-		return 0, 0, false, nil
+	pid, err := opts.PIDForServerDaemon(server, daemon)
+	if err != nil {
+		if errors.Is(err, ErrProcessNotFound) {
+			// No running daemon → safe to declare unbound.
+			return 0, 0, false, nil
+		}
+		// Probe failure — cannot prove daemon is gone.
+		return 0, 0, false, fmt.Errorf("%w: server=%s daemon=%s: PID lookup probe failed: %v",
+			ErrMigrationPortLookupInconsistent, server, daemon, err)
 	}
 	port, portOK := 0, false
 	if opts.PortForPID != nil {
@@ -1397,8 +1497,28 @@ type RollbackOptions struct {
 	// nil this step is skipped and no warnings are recorded.
 	PortBindWaitBound func(port int, timeout time.Duration) error
 	// LookupProcessIdentity is the same hook as forward path's
-	// counterpart. Used to verify ports unbound post-kill.
+	// counterpart. Step 3's post-force-kill sanity check pairs this
+	// with PIDForServerDaemon to prove no daemon process matching
+	// the expected daemon argv is still alive AFTER PortBindWait
+	// reported the listening port released. PortBindWait alone only
+	// observes the TCP socket; a daemon that crashed mid-bind (or
+	// detached the socket but is still resident in memory) would
+	// slip past a port-only verification. Spec §"Rollback steps"
+	// line 296 ("verify each expected daemon port is unbound via
+	// lookupProcessIdentity") maps to this dual check, not to a
+	// port-only proof. When nil the sanity check is skipped.
 	LookupProcessIdentity func(pid int) (ProcessIdentity, error)
+	// PIDForServerDaemon resolves the in-system PID for a given
+	// server/daemon argv pair via the process list. Production wires
+	// pidForServerDaemonViaTasklist; tests inject a fake. Used by the
+	// step-3 sanity check alongside LookupProcessIdentity to confirm
+	// no daemon process is still alive matching the expected daemon
+	// argv after force-kill returned. Identical contract to the
+	// forward-side ForwardOptions.PIDForServerDaemon field — see that
+	// field's docstring for the (int, error) return semantics. When
+	// nil the sanity check is skipped (port-bind-wait remains the
+	// only proof of unbound state).
+	PIDForServerDaemon func(server, daemon string) (int, error)
 	// QuarantineTranslator translates supervisor-state.quarantined
 	// rows into daemon-intent.json chronic-failure entries. Spec
 	// line 299.
@@ -1510,17 +1630,80 @@ func RunRollback(state State, opts RollbackOptions) error {
 			}
 		}
 	}
-	// Verify ports unbound (10s budget total).
-	if opts.PortBindWait != nil {
-		for _, d := range opts.ExpectedDaemons {
-			if d.Port <= 0 {
-				continue
-			}
+	// Verify ports unbound (10s budget total). Two-stage check per
+	// spec §"Rollback steps" line 296 ("verify each expected daemon
+	// port is unbound via lookupProcessIdentity"):
+	//
+	//   Stage A — PortBindWait proves the listening TCP socket is
+	//   released. Fast and reliable for the common case of
+	//   force-kill propagating cleanly.
+	//
+	//   Stage B — when PIDForServerDaemon + LookupProcessIdentity
+	//   are wired, do a sanity check that no daemon process matching
+	//   the expected daemon argv is still alive. Catches the corner
+	//   case where a daemon crashed mid-bind or detached its socket
+	//   but is still resident — in either case PortBindWait reports
+	//   success while the rogue process can still steal the port the
+	//   restored legacy task is about to bind. Forward-path
+	//   resolvePIDPortForTask uses the same primitives; mirroring
+	//   them here keeps the ownership-and-cleanup discipline
+	//   symmetric across forward and rollback.
+	for _, d := range opts.ExpectedDaemons {
+		if d.Port <= 0 {
+			continue
+		}
+		if opts.PortBindWait != nil {
 			if err := opts.PortBindWait(d.Port, 10*time.Second); err != nil {
 				return fmt.Errorf("%w: port %d still bound: %v",
 					ErrRollbackOrphanDaemonsRemain, d.Port, err)
 			}
 		}
+		// Stage B: PID-identity sanity check. Skipped when either
+		// callback is nil (preserves the pre-enhancement behavior
+		// for fixtures that wire only the port hook).
+		if opts.PIDForServerDaemon == nil || opts.LookupProcessIdentity == nil {
+			continue
+		}
+		pid, pidErr := opts.PIDForServerDaemon(d.Server, d.Daemon)
+		if pidErr != nil {
+			// Codex round-3 Lane B P1 #2: confirmed no-match
+			// (ErrProcessNotFound) is genuine unbound and proceeds;
+			// any other error is a probe failure and aborts —
+			// rollback must not silently classify a transient
+			// wmic/PS stall as "daemon gone".
+			if errors.Is(pidErr, ErrProcessNotFound) {
+				continue // no process matching the daemon argv — genuine unbound
+			}
+			return fmt.Errorf("%w: server=%s daemon=%s PID lookup probe failed: %v",
+				ErrRollbackOrphanDaemonsRemain, d.Server, d.Daemon, pidErr)
+		}
+		ident, idErr := opts.LookupProcessIdentity(pid)
+		if idErr != nil {
+			// LookupProcessIdentity returning ErrProcessNotFound
+			// means PIDForServerDaemon's snapshot raced with the
+			// daemon's actual exit. Treat that as genuine unbound
+			// (the daemon is gone by the time we look it up).
+			// Any other error (retry exhaustion, transport hang,
+			// malformed JSON) cannot prove the daemon exited;
+			// abort rather than silently let a survivor steal the
+			// port the restored legacy task is about to bind.
+			if errors.Is(idErr, ErrProcessNotFound) {
+				continue
+			}
+			return fmt.Errorf("%w: server=%s daemon=%s PID %d identity lookup failed: %v",
+				ErrRollbackOrphanDaemonsRemain, d.Server, d.Daemon, pid, idErr)
+		}
+		// Confirm the resolved process actually carries the
+		// expected daemon argv. A bare PID match without argv
+		// confirmation is a stale-PID race (the OS recycled the
+		// PID before we got to look it up). Use the same argv
+		// substring the forward-path 4-gate uses at gate 2.
+		wantArgv := fmt.Sprintf("daemon --server %s --daemon %s", d.Server, d.Daemon)
+		if !strings.Contains(ident.CommandLine, wantArgv) {
+			continue // PID recycled to a different process — genuine unbound
+		}
+		return fmt.Errorf("%w: server=%s daemon=%s PID %d still alive after force-kill (cmdline=%q)",
+			ErrRollbackOrphanDaemonsRemain, d.Server, d.Daemon, pid, ident.CommandLine)
 	}
 
 	// Step 4: acquire --once.lock.

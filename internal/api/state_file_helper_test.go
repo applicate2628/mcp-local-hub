@@ -163,14 +163,24 @@ func TestWriteStateFileAtomic_HonorsStrictModeWhenParentInsecure(t *testing.T) {
 
 // TestWriteStateFileAtomic_DefaultRelaxLaneSucceeds pins
 // falsifiable claim #5: when the env vars are unset and the parent
-// gate rejects, the relax lane fires, the write succeeds, and a
-// warn event "state-file-write-unhardened-fallback" lands in
-// hub-mcp.log so log-monitoring dashboards keep visibility on the
-// security-boundary downgrade.
+// gate rejects, the relax lane fires, the write succeeds, and the
+// audit row lands in the canonical channel.
+//
+// Audit channel (codex r3 Lane D/E P2): supervisor-events.log
+// (NOT hub-mcp.log). State-file fallbacks are supervisor-domain
+// events under spec §Q13 and must be emitted via
+// OpenSupervisorEventLog so operators monitoring
+// supervisor-events.log for audit-posture downgrades see the
+// relax-lane fire. Client-config fallbacks remain in hub-mcp.log
+// ("client-write-unhardened-fallback") so the two policy domains
+// stay separable. See
+// TestSecureWriteStateFileWithOperatorOpt_FallbackEventGoesToSupervisorEventsLog
+// for the assertion that the event lands in supervisor-events.log
+// (not hub-mcp.log).
 func TestWriteStateFileAtomic_DefaultRelaxLaneSucceeds(t *testing.T) {
-	// Redirect the state dir so RecentHubMcpEvents reads from a
-	// clean per-test path (no leftover events from production
-	// hub-mcp.log).
+	// Redirect the state dir so the audit channel under test
+	// (supervisor-events.log) lands in a clean per-test path with
+	// no leftover events from a previous run.
 	statePathsHelper(t)
 	stateDir := hardenedTempDir(t)
 	daemonStateRootOverride = stateDir
@@ -202,30 +212,142 @@ func TestWriteStateFileAtomic_DefaultRelaxLaneSucceeds(t *testing.T) {
 		t.Fatalf("payload mismatch: %v", got)
 	}
 
-	// Warn event landed in hub-mcp.log with the new distinct event
-	// name (separate from "client-write-unhardened-fallback" so
-	// audit-log filters can distinguish state-file from
-	// client-config write fallbacks).
-	events, err := RecentHubMcpEvents(20)
-	if err != nil {
-		t.Fatalf("read recent events: %v", err)
+	// Audit row landed in supervisor-events.log with the canonical
+	// supervisor-domain envelope. Hub-mcp.log must NOT carry the
+	// event under the canonical path; the
+	// FallbackEventGoesToSupervisorEventsLog test below asserts the
+	// channel separation explicitly.
+	found, line := findSupervisorEventByName(t, filepath.Join(stateDir, SupervisorEventLogFileLeaf), "state-file-write-unhardened-fallback")
+	if found == nil {
+		t.Fatalf("no state-file-write-unhardened-fallback event in supervisor-events.log (raw=%q)", line)
 	}
-	var found map[string]any
-	for _, ev := range events {
+	if got := found["severity"]; got != SupervisorEventSeverityWarn {
+		t.Errorf("event severity = %v, want %q (security-boundary downgrade must be dashboard-visible)", got, SupervisorEventSeverityWarn)
+	}
+	body, _ := found["body"].(map[string]any)
+	if body == nil {
+		t.Fatalf("event body not an object: %v", found["body"])
+	}
+	if path, _ := body["path"].(string); path != dst {
+		t.Errorf("event body.path = %v, want %q", body["path"], dst)
+	}
+}
+
+// TestSecureWriteStateFileWithOperatorOpt_FallbackEventGoesToSupervisorEventsLog
+// pins codex r3 Lane D/E P2: the default-relax audit event MUST
+// land in supervisor-events.log, NOT hub-mcp.log. Before this
+// change the helper called LogHubMcpEvent which wrote to
+// hub-mcp.log under a different envelope ({level, event, caller}
+// instead of the supervisor {schema_version, ts, severity, source,
+// event, task_name, body}). Operators monitoring
+// supervisor-events.log for audit-posture downgrades would not
+// have seen the relax-lane fire under the prior wiring.
+//
+// Assertions:
+//
+//  1. After a relax-lane fire, supervisor-events.log contains an
+//     entry with event == "state-file-write-unhardened-fallback",
+//     source == "state-file-helper", severity == "warn", and the
+//     supervisor envelope keys.
+//  2. hub-mcp.log does NOT contain any
+//     state-file-write-unhardened-fallback entry on the canonical
+//     path (it stays the audit channel for
+//     client-write-unhardened-fallback only).
+func TestSecureWriteStateFileWithOperatorOpt_FallbackEventGoesToSupervisorEventsLog(t *testing.T) {
+	statePathsHelper(t)
+	stateDir := hardenedTempDir(t)
+	daemonStateRootOverride = stateDir
+
+	t.Setenv(RequireSingleUserHomeEnv, "")
+	t.Setenv(AllowUnhardenedClientWriteEnv, "")
+
+	parent := filepath.Join(t.TempDir(), "leaky-parent")
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatalf("mkdir parent: %v", err)
+	}
+	broadenParentForStateFileTest(t, parent)
+
+	dst := filepath.Join(parent, "supervisor-intent.json")
+	if err := WriteStateFileAtomic(dst, map[string]string{"v": "1"}); err != nil {
+		t.Fatalf("relax write: %v", err)
+	}
+
+	// Assertion 1: supervisor-events.log carries the event.
+	eventsPath := filepath.Join(stateDir, SupervisorEventLogFileLeaf)
+	found, line := findSupervisorEventByName(t, eventsPath, "state-file-write-unhardened-fallback")
+	if found == nil {
+		t.Fatalf("supervisor-events.log missing state-file-write-unhardened-fallback (raw=%q)", line)
+	}
+	if got := found["source"]; got != "state-file-helper" {
+		t.Errorf("event source = %v, want \"state-file-helper\" (per supervisor envelope)", got)
+	}
+	if got := found["severity"]; got != SupervisorEventSeverityWarn {
+		t.Errorf("event severity = %v, want %q", got, SupervisorEventSeverityWarn)
+	}
+	if got := found["schema_version"]; got != SupervisorEventSchemaVersion {
+		t.Errorf("event schema_version = %v, want %q (canonical envelope)", got, SupervisorEventSchemaVersion)
+	}
+	body, _ := found["body"].(map[string]any)
+	if body == nil {
+		t.Fatalf("event body not an object: %v", found["body"])
+	}
+	if got := body["path"]; got != dst {
+		t.Errorf("event body.path = %v, want %q", got, dst)
+	}
+	// audit_channel_degraded is set ONLY on the fallback branches
+	// (state-dir resolve / open / emit failure). The canonical path
+	// must NOT set it.
+	if _, degraded := body["audit_channel_degraded"]; degraded {
+		t.Errorf("canonical supervisor-events.log path must not set audit_channel_degraded; got body=%v", body)
+	}
+
+	// Assertion 2: hub-mcp.log MUST NOT carry the state-file
+	// fallback event under the canonical path. The channel
+	// separation prevents collision with
+	// client-write-unhardened-fallback dashboards.
+	hubEvents, err := RecentHubMcpEvents(50)
+	if err != nil {
+		// hub-mcp.log may not exist yet on a fresh stateDir; that
+		// itself proves the canonical path didn't write there.
+		// Only fail the test on a real read error (not a missing-
+		// file error which RecentHubMcpEvents already maps to a
+		// nil-events return).
+		t.Logf("RecentHubMcpEvents: %v (treated as empty)", err)
+	}
+	for _, ev := range hubEvents {
 		if ev["event"] == "state-file-write-unhardened-fallback" {
-			found = ev
-			break
+			t.Errorf("hub-mcp.log must not carry state-file-write-unhardened-fallback under the canonical path; got %v", ev)
 		}
 	}
-	if found == nil {
-		t.Fatalf("no state-file-write-unhardened-fallback event in last %d entries (got %d events)", 20, len(events))
+}
+
+// findSupervisorEventByName scans supervisor-events.log at path
+// for the first JSONL entry whose `event` field matches name.
+// Returns (parsed-map, raw-line) on hit; (nil, "") when absent.
+// Reused by the relax-lane tests so they assert against a single
+// canonical decoder rather than re-implementing the JSONL parse.
+func findSupervisorEventByName(t *testing.T, path, name string) (map[string]any, string) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, ""
+		}
+		t.Fatalf("read %s: %v", path, err)
 	}
-	if found["level"] != "warn" {
-		t.Errorf("event level = %v, want \"warn\" (security-boundary downgrade must be dashboard-visible)", found["level"])
+	for _, line := range strings.Split(strings.TrimRight(string(raw), "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		var got map[string]any
+		if err := json.Unmarshal([]byte(line), &got); err != nil {
+			t.Fatalf("supervisor-events.log line invalid JSON: %v: %q", err, line)
+		}
+		if got["event"] == name {
+			return got, line
+		}
 	}
-	if path, _ := found["path"].(string); path != dst {
-		t.Errorf("event path = %v, want %q", found["path"], dst)
-	}
+	return nil, ""
 }
 
 // TestWriteStateFileAtomic_StrictModeWithWriteCapableParent pins

@@ -264,6 +264,7 @@ func buildRollbackMigrationOptions(stateDir string, sch scheduler.Scheduler, cur
 		PortBindWait:                 portBindWaitForRelease,
 		PortBindWaitBound:            portBindWaitForBound,
 		LookupProcessIdentity:        lookupMigrationProcessIdentity,
+		PIDForServerDaemon:           pidForServerDaemonViaTasklist,
 		ShimUninstaller:              uninstallAutostartShim,
 		ExpectedDaemons:              intent.Daemons,
 	}
@@ -303,14 +304,29 @@ func runV5UpgradeWindows(cmd *cobra.Command) error {
 
 	// Resolve expected daemon ports from supervisor-intent.json so the
 	// post-force-kill verification (codex-r2-c-p1-8 fix) can prove no
-	// zombie children survived. Best-effort: an unreadable intent file
-	// falls through to a no-verify upgrade (preserves prior behavior).
+	// zombie children survived.
+	//
+	// Codex round-3 Lane C P1 #3: the routing layer chose this path
+	// because supervisor-intent.json existed (`os.Stat` returned
+	// success). A subsequent ReadSupervisorIntent failure here is NOT
+	// best-effort — it means the file the routing discriminator
+	// relied on is now unreadable (corrupt JSON, EBUSY race, permission
+	// drift). Returning a no-verify upgrade in that case would let the
+	// new supervisor start without proving the old daemon ports
+	// unbound, which is exactly the zombie-children regression the
+	// codex-r2-c-p1-8 fix exists to prevent. Fail closed.
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	intent, err := api.ReadSupervisorIntent(intentPath)
+	if err != nil {
+		return fmt.Errorf("v0.5 upgrade: supervisor-intent.json present but unreadable at %s: %w (routing chose v5 upgrade because the file existed; refusing to skip post-force-kill port verification)", intentPath, err)
+	}
+	if intent == nil {
+		return fmt.Errorf("v0.5 upgrade: supervisor-intent.json at %s decoded to nil (corrupt envelope); refusing to skip post-force-kill port verification", intentPath)
+	}
 	var expectedPorts []int
-	if intent, err := api.ReadSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json")); err == nil && intent != nil {
-		for _, d := range intent.Daemons {
-			if d.Port > 0 {
-				expectedPorts = append(expectedPorts, d.Port)
-			}
+	for _, d := range intent.Daemons {
+		if d.Port > 0 {
+			expectedPorts = append(expectedPorts, d.Port)
 		}
 	}
 
@@ -469,49 +485,104 @@ func portForPIDViaNetstat(pid int) (int, bool) {
 
 // pidForServerDaemonViaTasklist scans the running process list for a
 // mcphub.exe instance whose command-line contains `daemon --server X
-// --daemon Y`. Returns (pid, true) on first match; (0, false) when no
-// matching process is found.
+// --daemon Y`.
 //
-// Used by migration.RunForward step 9 to resolve the PID of the
-// running daemon for a given (server, daemon) pair before killing it.
+// Return contract (codex round-3 Lane B P1 #2):
+//   - (pid, nil)                        → match found, pid > 0.
+//   - (0, migration.ErrProcessNotFound) → confirmed no match (probe
+//     executed successfully and
+//     observed zero matching daemon
+//     argv in the process list).
+//   - (0, <wrapped error>)              → probe failure (PowerShell
+//     AND wmic both failed, or the
+//     CLM probe itself errored).
+//     The journal MUST treat this
+//     as abort, NOT as "genuine
+//     unbound" — that distinction
+//     is the load-bearing fix.
 //
-// Implementation: uses the same wmic + PowerShell fallback as the rest
-// of the codebase via api.API.ListMatchingProcesses, but inline here
-// to avoid pulling the api.API dependency into the migration wiring.
-func pidForServerDaemonViaTasklist(server, daemon string) (int, bool) {
+// Probe ordering (matches the LookupProcessIdentity pattern at
+// internal/process/lookup_process_identity_windows.go: probe CLM
+// first, prefer PowerShell when CLM is FullLanguage, fall back to
+// wmic only when CLM is locked AND wmic is present):
+//
+//  1. Probe PowerShell CLM. Failure here surfaces as a probe-failure
+//     error (matches LookupProcessIdentity's policy that a probe
+//     transport defect is operator-visible, not a silent downgrade).
+//  2. If CLM is FullLanguage, PowerShell is canonical. Any error
+//     returns as probe-failure.
+//  3. If CLM is locked, try wmic.exe when present. Otherwise return a
+//     clear error naming both conditions.
+//
+// Used by migration.RunForward step 9 (resolve the PID of the running
+// daemon for a given (server, daemon) pair before killing it) and the
+// rollback step-3 sanity check.
+func pidForServerDaemonViaTasklist(server, daemon string) (int, error) {
 	if server == "" || daemon == "" {
-		return 0, false
+		// Defensive: empty inputs cannot match any real argv. Treat as
+		// confirmed no-match so the journal's no-running-daemon audit
+		// branch fires rather than a phantom abort.
+		return 0, migration.ErrProcessNotFound
 	}
 	wantArgv := fmt.Sprintf("daemon --server %s --daemon %s", server, daemon)
+
+	clmOK, probeErr := process.ProbePowerShellCLM()
+	if probeErr != nil {
+		// Probe transport failure (powershell.exe missing, language-
+		// mode shell-out hung). Do NOT silently fall through to wmic;
+		// surface the defect so callers can abort.
+		return 0, fmt.Errorf("PowerShell CLM probe failed: %w", probeErr)
+	}
+	if clmOK {
+		return pidForServerDaemonViaPowerShell(wantArgv)
+	}
+	// CLM-locked → wmic.exe fallback when present.
+	if wmicPresentFn() {
+		return pidForServerDaemonViaWmic(wantArgv)
+	}
+	return 0, fmt.Errorf("PowerShell CLM-locked AND wmic.exe absent: cannot resolve server=%s daemon=%s", server, daemon)
+}
+
+// pidForServerDaemonViaPowerShell is the PowerShell-canonical
+// implementation. Returns (pid, nil) on first match, (0,
+// migration.ErrProcessNotFound) on confirmed no-match, and (0, error)
+// when the PowerShell shell-out itself failed (transport hang, weird
+// JSON, etc.).
+func pidForServerDaemonViaPowerShell(wantArgv string) (int, error) {
+	psScript := `Get-CimInstance Win32_Process -Filter 'Name="mcphub.exe"' | ` +
+		`ForEach-Object { "$($_.ProcessId)|$($_.CommandLine)" }`
+	psCmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", psScript)
+	process.NoConsole(psCmd)
+	out, err := psCmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("PowerShell Get-CimInstance failed: %w", err)
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		parts := strings.SplitN(strings.TrimSpace(line), "|", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		pid, perr := strconv.Atoi(strings.TrimSpace(parts[0]))
+		if perr != nil || pid <= 0 {
+			continue
+		}
+		if strings.Contains(parts[1], wantArgv) {
+			return pid, nil
+		}
+	}
+	return 0, migration.ErrProcessNotFound
+}
+
+// pidForServerDaemonViaWmic is the wmic fallback for CLM-locked hosts.
+// Same return contract as pidForServerDaemonViaPowerShell.
+func pidForServerDaemonViaWmic(wantArgv string) (int, error) {
 	cmd := exec.Command("wmic", "process", "where",
 		"name='mcphub.exe'",
 		"get", "ProcessId,CommandLine", "/format:csv")
 	process.NoConsole(cmd)
 	out, err := cmd.Output()
 	if err != nil {
-		// Try PowerShell fallback for hosts where wmic is removed.
-		psScript := `Get-CimInstance Win32_Process -Filter 'Name="mcphub.exe"' | ` +
-			`ForEach-Object { "$($_.ProcessId)|$($_.CommandLine)" }`
-		psCmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", psScript)
-		process.NoConsole(psCmd)
-		out, err = psCmd.Output()
-		if err != nil {
-			return 0, false
-		}
-		for _, line := range strings.Split(string(out), "\n") {
-			parts := strings.SplitN(strings.TrimSpace(line), "|", 2)
-			if len(parts) != 2 {
-				continue
-			}
-			pid, perr := strconv.Atoi(strings.TrimSpace(parts[0]))
-			if perr != nil || pid <= 0 {
-				continue
-			}
-			if strings.Contains(parts[1], wantArgv) {
-				return pid, true
-			}
-		}
-		return 0, false
+		return 0, fmt.Errorf("wmic process get failed: %w", err)
 	}
 	// wmic CSV format: header line "Node,CommandLine,ProcessId" then
 	// data rows. The CommandLine column may contain commas, so we
@@ -533,9 +604,9 @@ func pidForServerDaemonViaTasklist(server, daemon string) (int, bool) {
 		if perr != nil || pid <= 0 {
 			continue
 		}
-		return pid, true
+		return pid, nil
 	}
-	return 0, false
+	return 0, migration.ErrProcessNotFound
 }
 
 // killPIDViaTaskkill kills a process by PID via `taskkill /F /T /PID`.

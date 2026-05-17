@@ -71,9 +71,9 @@ type fakeScheduler struct {
 	ExportErr        error
 
 	// Recorded calls.
-	DeletedTasks  []string
-	CreatedTasks  []string // task names passed to CreateXML
-	RunTasks      []string
+	DeletedTasks []string
+	CreatedTasks []string // task names passed to CreateXML
+	RunTasks     []string
 
 	// CreateXML payloads (taskName → raw xml) so tests can verify the
 	// rollback path re-registered the exact XML the journal stored.
@@ -230,10 +230,10 @@ func cleanV04xXML(t *testing.T, server, daemon, currentUser, installDir string) 
 func fakeForwardOptions(t *testing.T, tx *testFixture) ForwardOptions {
 	t.Helper()
 	return ForwardOptions{
-		Scheduler:        tx.Scheduler,
-		CurrentUser:      tx.CurrentUser,
-		PowerShellProbe:  func() (bool, error) { return true, nil },
-		WmicPresent:      func() bool { return true },
+		Scheduler:       tx.Scheduler,
+		CurrentUser:     tx.CurrentUser,
+		PowerShellProbe: func() (bool, error) { return true, nil },
+		WmicPresent:     func() bool { return true },
 		LookupProcessIdentity: func(pid int) (ProcessIdentity, error) {
 			if id, ok := tx.identityByPID[pid]; ok {
 				return id, nil
@@ -246,11 +246,11 @@ func fakeForwardOptions(t *testing.T, tx *testFixture) ForwardOptions {
 			}
 			return 0, false
 		},
-		PIDForServerDaemon: func(server, daemon string) (int, bool) {
+		PIDForServerDaemon: func(server, daemon string) (int, error) {
 			if p, ok := tx.pidByServerDaemon[server+"/"+daemon]; ok {
-				return p, true
+				return p, nil
 			}
-			return 0, false
+			return 0, ErrProcessNotFound
 		},
 		KillPID: func(pid int) error {
 			tx.killedPIDs = append(tx.killedPIDs, pid)
@@ -955,15 +955,15 @@ func TestForwardMigration_ProcessNotFoundProceedsWhenCrossCheckSilent(t *testing
 	// ErrProcessNotFound) reports "no matching process" → daemon
 	// genuinely gone.
 	pidLookups := 0
-	opts.PIDForServerDaemon = func(server, daemon string) (int, bool) {
+	opts.PIDForServerDaemon = func(server, daemon string) (int, error) {
 		pidLookups++
 		if pidLookups == 1 {
 			if p, ok := tx.pidByServerDaemon[server+"/"+daemon]; ok {
-				return p, true
+				return p, nil
 			}
-			return 0, false
+			return 0, ErrProcessNotFound
 		}
-		return 0, false
+		return 0, ErrProcessNotFound
 	}
 
 	if err := RunForward(tx.State, opts); err != nil {
@@ -987,8 +987,8 @@ func TestForwardMigration_ProcessNotFoundButCrossCheckPositiveAborts(t *testing.
 	}
 	// Cross-check always returns a positive (daemon respawned or
 	// the lookup was racy).
-	opts.PIDForServerDaemon = func(server, daemon string) (int, bool) {
-		return memPID + 1, true
+	opts.PIDForServerDaemon = func(server, daemon string) (int, error) {
+		return memPID + 1, nil
 	}
 
 	err := RunForward(tx.State, opts)

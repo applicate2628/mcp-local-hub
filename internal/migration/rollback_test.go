@@ -233,6 +233,161 @@ func TestRollback_WarningsExitZero(t *testing.T) {
 	}
 }
 
+// TestRunRollback_PostForceKillSanityChecksWithLookupProcessIdentity
+// pins codex r3 Lane F P1 (partial): after PortBindWait reports a
+// port released, step 3 MUST do an additional PIDForServerDaemon +
+// LookupProcessIdentity sanity check so a daemon that crashed mid-
+// bind (or detached its socket but is still resident) cannot slip
+// past a port-only verification and steal the port a restored
+// legacy task is about to bind.
+//
+// Test surface:
+//   - PortBindWait returns nil for every expected daemon (TCP-level
+//     proof of release).
+//   - PIDForServerDaemon returns a positive PID for ONE expected
+//     daemon — simulating the survivor that PortBindWait missed.
+//   - LookupProcessIdentity returns a ProcessIdentity whose
+//     CommandLine carries the expected daemon argv substring.
+//   - RunRollback must abort with ErrRollbackOrphanDaemonsRemain
+//     and the supervisor-intent.json file must NOT be deleted
+//     (rollback aborted before step 11 cleanup).
+func TestRunRollback_PostForceKillSanityChecksWithLookupProcessIdentity(t *testing.T) {
+	tx := setupCommittedJournalFixture(t)
+	intent, _ := api.ReadSupervisorIntent(filepath.Join(tx.State.StateDir, "supervisor-intent.json"))
+	if len(intent.Daemons) == 0 {
+		t.Fatal("setup invariant: at least one daemon in supervisor-intent.json")
+	}
+	// Pin non-zero ports so step 3 actually iterates each daemon.
+	for i := range intent.Daemons {
+		intent.Daemons[i].Port = 9400 + i
+	}
+
+	survivorServer := intent.Daemons[0].Server
+	survivorDaemon := intent.Daemons[0].Daemon
+	const survivorPID = 4242
+
+	opts := fakeRollbackOptions(t, tx)
+	opts.ExpectedDaemons = intent.Daemons
+	// PortBindWait reports success for every daemon (default fake
+	// returns nil when portWaitReturns slice is empty).
+	// PIDForServerDaemon: positive for the survivor, none for others.
+	opts.PIDForServerDaemon = func(server, daemon string) (int, error) {
+		if server == survivorServer && daemon == survivorDaemon {
+			return survivorPID, nil
+		}
+		return 0, ErrProcessNotFound
+	}
+	// LookupProcessIdentity: the survivor PID resolves to an alive
+	// mcphub.exe process whose cmdline carries the expected daemon
+	// argv. Mirrors the 4-gate argv substring used by forward-path
+	// fourGateOwnershipCheck so the sanity check shares one
+	// argv-match convention with the rest of the migration
+	// pipeline.
+	opts.LookupProcessIdentity = func(pid int) (ProcessIdentity, error) {
+		if pid == survivorPID {
+			return ProcessIdentity{
+				PID:              pid,
+				Basename:         "mcphub.exe",
+				CommandLine:      "C:\\mcphub\\mcphub.exe daemon --server " + survivorServer + " --daemon " + survivorDaemon,
+				ExecutablePath:   "C:\\mcphub\\mcphub.exe",
+				CreationDateUnix: 1700000000,
+			}, nil
+		}
+		return ProcessIdentity{}, ErrProcessNotFound
+	}
+
+	err := RunRollback(tx.State, opts)
+	if err == nil {
+		t.Fatal("expected orphan-daemons error from PID sanity check, got nil")
+	}
+	if !errors.Is(err, ErrRollbackOrphanDaemonsRemain) {
+		t.Fatalf("expected ErrRollbackOrphanDaemonsRemain wrapping the PID survivor case; got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "still alive after force-kill") {
+		t.Errorf("error should describe the daemon-survivor cause; got %v", err)
+	}
+	// Step 11 cleanup must NOT have fired: rollback aborted at step 3.
+	if _, statErr := os.Stat(filepath.Join(tx.State.StateDir, "supervisor-intent.json")); statErr != nil {
+		t.Errorf("supervisor-intent.json should not be deleted when rollback aborts at step 3; stat err = %v", statErr)
+	}
+}
+
+// TestRunRollback_PostForceKillSanityChecksAcceptStaleSnapshot pins
+// the genuine-unbound side of the same sanity check: when
+// PIDForServerDaemon's snapshot races with a daemon's actual exit,
+// LookupProcessIdentity returns ErrProcessNotFound. That pair must
+// be treated as "no daemon survived" — rollback proceeds.
+//
+// Without this branch, a transient process-list race would abort
+// every rollback on a busy host.
+func TestRunRollback_PostForceKillSanityChecksAcceptStaleSnapshot(t *testing.T) {
+	tx := setupCommittedJournalFixture(t)
+	intent, _ := api.ReadSupervisorIntent(filepath.Join(tx.State.StateDir, "supervisor-intent.json"))
+	for i := range intent.Daemons {
+		intent.Daemons[i].Port = 9500 + i
+	}
+
+	opts := fakeRollbackOptions(t, tx)
+	opts.ExpectedDaemons = intent.Daemons
+	// PIDForServerDaemon returns a positive PID — simulating the
+	// race window where the daemon was in the process list at scan
+	// time but exited before LookupProcessIdentity ran.
+	opts.PIDForServerDaemon = func(server, daemon string) (int, error) {
+		return 5151, nil
+	}
+	// LookupProcessIdentity returns ErrProcessNotFound for the
+	// resolved PID — proof that the daemon exited between the two
+	// calls.
+	opts.LookupProcessIdentity = func(pid int) (ProcessIdentity, error) {
+		return ProcessIdentity{}, ErrProcessNotFound
+	}
+
+	if err := RunRollback(tx.State, opts); err != nil {
+		t.Fatalf("ErrProcessNotFound from LookupProcessIdentity is the genuine-unbound path; rollback must succeed; got: %v", err)
+	}
+	// Step 11 cleanup did fire (rollback completed end-to-end).
+	if _, err := os.Stat(filepath.Join(tx.State.StateDir, "supervisor-intent.json")); !os.IsNotExist(err) {
+		t.Errorf("supervisor-intent.json should be deleted on successful rollback; stat err = %v", err)
+	}
+}
+
+// TestRunRollback_PostForceKillSanityChecksRecycledPIDAcceptedAsUnbound
+// pins the second genuine-unbound branch: PIDForServerDaemon
+// returns a PID but LookupProcessIdentity resolves to a process
+// whose argv does NOT carry the expected daemon substring. That
+// means the OS recycled the PID to an unrelated process between
+// the two calls; the daemon itself is gone.
+func TestRunRollback_PostForceKillSanityChecksRecycledPIDAcceptedAsUnbound(t *testing.T) {
+	tx := setupCommittedJournalFixture(t)
+	intent, _ := api.ReadSupervisorIntent(filepath.Join(tx.State.StateDir, "supervisor-intent.json"))
+	for i := range intent.Daemons {
+		intent.Daemons[i].Port = 9600 + i
+	}
+
+	opts := fakeRollbackOptions(t, tx)
+	opts.ExpectedDaemons = intent.Daemons
+	opts.PIDForServerDaemon = func(server, daemon string) (int, error) {
+		return 6262, nil
+	}
+	// LookupProcessIdentity resolves to a totally unrelated process
+	// (notepad.exe with no daemon argv). The sanity check must
+	// accept this as genuine-unbound (PID recycled), not flag it as
+	// an orphan daemon.
+	opts.LookupProcessIdentity = func(pid int) (ProcessIdentity, error) {
+		return ProcessIdentity{
+			PID:              pid,
+			Basename:         "notepad.exe",
+			CommandLine:      "C:\\Windows\\notepad.exe",
+			ExecutablePath:   "C:\\Windows\\notepad.exe",
+			CreationDateUnix: 1700000000,
+		}, nil
+	}
+
+	if err := RunRollback(tx.State, opts); err != nil {
+		t.Fatalf("recycled PID with unrelated argv is genuine unbound; rollback must succeed; got: %v", err)
+	}
+}
+
 // TestRollback_OrphanDaemonsRemain: step-3 port verification times out
 // → ErrRollbackOrphanDaemonsRemain.
 func TestRollback_OrphanDaemonsRemain(t *testing.T) {

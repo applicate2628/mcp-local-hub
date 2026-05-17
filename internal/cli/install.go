@@ -916,16 +916,16 @@ func findRunningGUIsOnTarget(a *api.API, target string) ([]api.ProcessInfo, erro
 //
 // Match strategy (codex bot r2-r4 closures on PR #188):
 //
-//	1. Try case-insensitive prefix match: cmdline starts with
-//	   `target` (literal path). Handles the common case and
-//	   target paths containing spaces (r2/r3 closures).
-//	2. If prefix match fails, extract the image path from
-//	   cmdline (everything up to the first whitespace not
-//	   inside quotes) and compare via os.SameFile (r4 closure).
-//	   Catches 8.3 short paths, junctions/symlinks, and other
-//	   canonicalization aliases that the prefix match misses
-//	   because the cmdline holds the alias, not the canonical
-//	   target string.
+//  1. Try case-insensitive prefix match: cmdline starts with
+//     `target` (literal path). Handles the common case and
+//     target paths containing spaces (r2/r3 closures).
+//  2. If prefix match fails, extract the image path from
+//     cmdline (everything up to the first whitespace not
+//     inside quotes) and compare via os.SameFile (r4 closure).
+//     Catches 8.3 short paths, junctions/symlinks, and other
+//     canonicalization aliases that the prefix match misses
+//     because the cmdline holds the alias, not the canonical
+//     target string.
 //
 // After the image-path match (either path), the next non-space
 // token must be "gui" (or end-of-string for Explorer-double-
