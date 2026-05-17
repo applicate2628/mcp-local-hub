@@ -25,6 +25,20 @@ func finishProductionTerminate(pid int, d api.SupervisorDaemon, events *api.Supe
 		time.Sleep(productionTerminatePollPeriod)
 	}
 
+	if !pidMatchesMcphub(pid) {
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: api.SupervisorEventSeverityWarn,
+			Source:   "lifecycle",
+			Event:    "daemon-terminate-escalation-aborted-pid-reuse",
+			TaskName: d.TaskName,
+			Body: map[string]any{
+				"pid":    pid,
+				"reason": "PID does not match mcphub identity after grace window - possible OS PID reuse, refusing SIGKILL",
+			},
+		})
+		return nil
+	}
+
 	_ = events.Emit(api.SupervisorEvent{
 		Severity: api.SupervisorEventSeverityWarn,
 		Source:   "lifecycle",

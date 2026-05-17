@@ -8,11 +8,14 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
 	"mcp-local-hub/internal/process"
 )
+
+var tasksWrapperRe = regexp.MustCompile(`(?m)<Tasks[\s>]`)
 
 // EnumerateAllMcphubTasks returns every Windows Scheduled Task whose
 // URI begins with `\mcp-local-hub-`, REGARDLESS of which user account
@@ -87,7 +90,7 @@ func parseEnumerateXML(stream string) ([]TaskStatus, error) {
 	// if it produces a single chunk wrapped in <Tasks>, fall back to a
 	// streaming token decoder.
 	docs := splitConcatenatedTaskXML(stream)
-	if len(docs) == 1 && strings.Contains(docs[0], "<Tasks>") {
+	if len(docs) == 1 && tasksWrapperRe.MatchString(docs[0]) {
 		return parseTasksWrapperStream(docs[0])
 	}
 	results := make([]TaskStatus, 0, len(docs))
