@@ -262,6 +262,7 @@ func buildRollbackMigrationOptions(stateDir string, sch scheduler.Scheduler, cur
 		ProbeSupervisorTokenMismatch: probeSupervisorTokenMismatch(supervisorLockPath),
 		ForceKillSupervisor:          forceKillSupervisor(supervisorLockPath),
 		PortBindWait:                 portBindWaitForRelease,
+		PortBindWaitBound:            portBindWaitForBound,
 		LookupProcessIdentity:        lookupMigrationProcessIdentity,
 		ShimUninstaller:              uninstallAutostartShim,
 		ExpectedDaemons:              intent.Daemons,
@@ -300,11 +301,26 @@ func runV5UpgradeWindows(cmd *cobra.Command) error {
 	}
 	deps.supervisorLockDir = filepath.Join(stateDir, "supervisor.lock")
 
+	// Resolve expected daemon ports from supervisor-intent.json so the
+	// post-force-kill verification (codex-r2-c-p1-8 fix) can prove no
+	// zombie children survived. Best-effort: an unreadable intent file
+	// falls through to a no-verify upgrade (preserves prior behavior).
+	var expectedPorts []int
+	if intent, err := api.ReadSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json")); err == nil && intent != nil {
+		for _, d := range intent.Daemons {
+			if d.Port > 0 {
+				expectedPorts = append(expectedPorts, d.Port)
+			}
+		}
+	}
+
 	if err := RunInstallUpgrade(context.Background(), UpgradeOpts{
-		BinaryPath: target,
-		NewBinary:  exe,
-		PipePath:   deps.pipePath,
-		Deps:       deps,
+		BinaryPath:         target,
+		NewBinary:          exe,
+		PipePath:           deps.pipePath,
+		Deps:               deps,
+		ExpectedPorts:      expectedPorts,
+		VerifyPortsUnbound: verifyPortsUnboundForUpgrade,
 	}); err != nil {
 		return fmt.Errorf("v0.5 upgrade: %w", err)
 	}
@@ -535,6 +551,45 @@ func killPIDViaTaskkill(pid int) error {
 		return fmt.Errorf("taskkill PID %d: %w: %s", pid, err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// verifyPortsUnboundForUpgrade is the production wiring for
+// cli.UpgradeOpts.VerifyPortsUnbound. After a force-kill fallback in
+// the upgrade flow, every prior-daemon listening port must release
+// before the new supervisor spawns (otherwise zombie children would
+// collide with the supervisor's reconcile loop). Polls each port with
+// portBindWaitForRelease; returns the first per-port timeout error.
+func verifyPortsUnboundForUpgrade(ports []int, perPortTimeout time.Duration) error {
+	for _, p := range ports {
+		if err := portBindWaitForRelease(p, perPortTimeout); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// portBindWaitForBound blocks until 127.0.0.1:port is BOUND (a daemon
+// is listening — net.Dial succeeds) OR timeout elapses. Counterpart of
+// portBindWaitForRelease; used by RunRollback step 10 after `schtasks
+// /Run` to confirm the restored legacy daemon actually bound its port.
+// Polling cadence: 100 ms; total budget bounded by timeout. Returns nil
+// on bound, non-nil error on timeout.
+func portBindWaitForBound(port int, timeout time.Duration) error {
+	if port <= 0 {
+		return nil
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 250*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("port %d not bound within %s: %w", port, timeout, err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // portBindWaitForRelease blocks until 127.0.0.1:port is unbound OR
