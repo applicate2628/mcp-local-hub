@@ -1084,3 +1084,238 @@ func TestInstallUpgrade_DefaultExitTimeoutMs(t *testing.T) {
 	}
 	_ = time.Now()
 }
+
+// TestInstallUpgrade_ForceKillErrorPropagated pins codex r2 Lane C P1
+// #8 closure: when ExitGraceful times out AND the subsequent
+// ForceKillSupervisor returns a non-"already-exited" error
+// (permission denied, malformed PID, missing binary), the orchestrator
+// MUST surface that error rather than silently continuing. Continuing
+// would race the new supervisor against a still-running old supervisor
+// for the IPC pipe + listening ports.
+func TestInstallUpgrade_ForceKillErrorPropagated(t *testing.T) {
+	mock := &fakeUpgradeDeps{
+		exitErr:      errors.New("timeout"),
+		forceKillErr: errors.New("ACCESS_DENIED: insufficient privileges to terminate the supervisor PID"),
+	}
+	err := RunInstallUpgrade(context.Background(), UpgradeOpts{
+		BinaryPath:    "/fake/mcphub",
+		NewBinary:     "/fake/mcphub.new",
+		PipePath:      "fake-pipe",
+		ExitTimeoutMs: 5000,
+		Deps:          mock,
+	})
+	if err == nil {
+		t.Fatal("expected error when force-kill fails with a non-already-exited cause")
+	}
+	if !strings.Contains(err.Error(), "force-kill supervisor failed") {
+		t.Errorf("error should name the force-kill failure; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "ACCESS_DENIED") {
+		t.Errorf("error should preserve the underlying message; got %v", err)
+	}
+	if !mock.forceKillCalled {
+		t.Error("force-kill must have been invoked before the error")
+	}
+	if mock.startCalled {
+		t.Error("StartSupervisor must NOT run when force-kill failed unsafely")
+	}
+}
+
+// TestInstallUpgrade_ForceKillAlreadyExitedContinues pins the benign
+// branch of codex r2 Lane C P1 #8: when ForceKillSupervisor returns a
+// "process not found" / exit-code-128 error (the supervisor was
+// already dead before we issued the kill), the orchestrator must
+// continue through port verification + StartSupervisor. The same
+// behavior covers ExitGraceful failure on "connection refused after
+// crash" — taskkill subsequently reports the PID is gone, and that is
+// not a real error.
+func TestInstallUpgrade_ForceKillAlreadyExitedContinues(t *testing.T) {
+	mock := &fakeUpgradeDeps{
+		exitErr:      errors.New("connection refused"),
+		forceKillErr: errors.New("ERROR: The process \"12345\" not found."),
+	}
+	err := RunInstallUpgrade(context.Background(), UpgradeOpts{
+		BinaryPath: "/fake/mcphub",
+		NewBinary:  "/fake/mcphub.new",
+		PipePath:   "fake-pipe",
+		Deps:       mock,
+	})
+	if err != nil {
+		t.Fatalf("already-exited force-kill must not abort: %v", err)
+	}
+	if !mock.forceKillCalled {
+		t.Error("force-kill must have been invoked")
+	}
+	if !mock.startCalled {
+		t.Error("StartSupervisor must still run after a benign already-exited force-kill")
+	}
+}
+
+// TestInstallUpgrade_PostForceKillVerifiesPortUnbound pins the
+// post-force-kill port verification branch of codex r2 Lane C P1 #8:
+// after a successful force-kill, the orchestrator MUST call
+// VerifyPortsUnbound for every expected port. If a port is still
+// bound, the upgrade aborts BEFORE StartSupervisor would otherwise
+// race a zombie listener.
+func TestInstallUpgrade_PostForceKillVerifiesPortUnbound(t *testing.T) {
+	mock := &fakeUpgradeDeps{
+		exitErr:      errors.New("timeout"),
+		forceKillErr: nil,
+	}
+	var verifyCalls []struct {
+		ports   []int
+		timeout time.Duration
+	}
+	err := RunInstallUpgrade(context.Background(), UpgradeOpts{
+		BinaryPath:    "/fake/mcphub",
+		NewBinary:     "/fake/mcphub.new",
+		PipePath:      "fake-pipe",
+		ExpectedPorts: []int{9128, 9129},
+		VerifyPortsUnbound: func(ports []int, perPortTimeout time.Duration) error {
+			verifyCalls = append(verifyCalls, struct {
+				ports   []int
+				timeout time.Duration
+			}{ports, perPortTimeout})
+			return errors.New("127.0.0.1:9128: still bound after 10s")
+		},
+		Deps: mock,
+	})
+	if err == nil {
+		t.Fatal("expected error when VerifyPortsUnbound reports a stuck port")
+	}
+	if !strings.Contains(err.Error(), "port-unbound verification failed") {
+		t.Errorf("error should name the port-verification failure; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "9128") {
+		t.Errorf("error should preserve the offending port; got %v", err)
+	}
+	if len(verifyCalls) != 1 {
+		t.Fatalf("VerifyPortsUnbound call count = %d; want 1", len(verifyCalls))
+	}
+	if len(verifyCalls[0].ports) != 2 || verifyCalls[0].ports[0] != 9128 || verifyCalls[0].ports[1] != 9129 {
+		t.Errorf("VerifyPortsUnbound got ports = %v; want [9128 9129]", verifyCalls[0].ports)
+	}
+	if verifyCalls[0].timeout < 5*time.Second {
+		t.Errorf("VerifyPortsUnbound timeout = %s; want >=5s (default 10s)", verifyCalls[0].timeout)
+	}
+	if mock.startCalled {
+		t.Error("StartSupervisor must NOT run after a port-verification failure")
+	}
+}
+
+// TestInstallUpgrade_PostForceKillVerifyPortsUnboundSuccess pins the
+// happy path of codex r2 Lane C P1 #8: when VerifyPortsUnbound returns
+// nil for every expected port, the orchestrator proceeds to
+// StartSupervisor and returns nil.
+func TestInstallUpgrade_PostForceKillVerifyPortsUnboundSuccess(t *testing.T) {
+	mock := &fakeUpgradeDeps{
+		exitErr: errors.New("timeout"),
+	}
+	verifyCalled := false
+	err := RunInstallUpgrade(context.Background(), UpgradeOpts{
+		BinaryPath:    "/fake/mcphub",
+		NewBinary:     "/fake/mcphub.new",
+		PipePath:      "fake-pipe",
+		ExpectedPorts: []int{9128},
+		VerifyPortsUnbound: func(ports []int, perPortTimeout time.Duration) error {
+			verifyCalled = true
+			return nil
+		},
+		Deps: mock,
+	})
+	if err != nil {
+		t.Fatalf("happy path with port-verify success: %v", err)
+	}
+	if !verifyCalled {
+		t.Error("VerifyPortsUnbound must be called after a force-kill fallback when ExpectedPorts is set")
+	}
+	if !mock.startCalled {
+		t.Error("StartSupervisor must run after a clean port-verify")
+	}
+}
+
+// TestInstallUpgrade_PortVerifySkippedWhenNoExpectedPorts pins that
+// the port-verify step is silently skipped when ExpectedPorts is
+// empty (zero-daemon installs). VerifyPortsUnbound must not be called
+// — calling it with an empty slice would either error vacuously or
+// pollute the call log with empty checks.
+func TestInstallUpgrade_PortVerifySkippedWhenNoExpectedPorts(t *testing.T) {
+	mock := &fakeUpgradeDeps{
+		exitErr: errors.New("timeout"),
+	}
+	verifyCalled := false
+	err := RunInstallUpgrade(context.Background(), UpgradeOpts{
+		BinaryPath:    "/fake/mcphub",
+		NewBinary:     "/fake/mcphub.new",
+		PipePath:      "fake-pipe",
+		ExpectedPorts: nil, // explicit zero-daemon case
+		VerifyPortsUnbound: func(ports []int, perPortTimeout time.Duration) error {
+			verifyCalled = true
+			return errors.New("should not be called")
+		},
+		Deps: mock,
+	})
+	if err != nil {
+		t.Fatalf("zero-daemon force-kill path: %v", err)
+	}
+	if verifyCalled {
+		t.Error("VerifyPortsUnbound must NOT be called when ExpectedPorts is empty")
+	}
+	if !mock.startCalled {
+		t.Error("StartSupervisor must still run on the zero-daemon force-kill path")
+	}
+}
+
+// TestInstallUpgrade_PortVerifySkippedWhenCallbackNil pins backward
+// compatibility: when the caller supplies ExpectedPorts but has not
+// wired VerifyPortsUnbound (production adapter adoption is staged),
+// the orchestrator must silently skip verification. Strict-mode
+// enforcement is the production wiring's responsibility, not the
+// orchestrator's.
+func TestInstallUpgrade_PortVerifySkippedWhenCallbackNil(t *testing.T) {
+	mock := &fakeUpgradeDeps{
+		exitErr: errors.New("timeout"),
+	}
+	err := RunInstallUpgrade(context.Background(), UpgradeOpts{
+		BinaryPath:         "/fake/mcphub",
+		NewBinary:          "/fake/mcphub.new",
+		PipePath:           "fake-pipe",
+		ExpectedPorts:      []int{9128},
+		VerifyPortsUnbound: nil,
+		Deps:               mock,
+	})
+	if err != nil {
+		t.Fatalf("nil VerifyPortsUnbound should be tolerated for backcompat: %v", err)
+	}
+	if !mock.startCalled {
+		t.Error("StartSupervisor must run when port-verify is nil-skipped")
+	}
+}
+
+// TestIsAlreadyExitedError exercises the helper's classification rules
+// (codex r2 Lane C P1 #8). Each case names the failure shape the
+// production force-kill helper might emit; the helper must accept
+// already-exited shapes and reject everything else.
+func TestIsAlreadyExitedError(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"taskkill not found (English)", errors.New("taskkill PID 1234: exit status 128: ERROR: The process \"1234\" not found."), true},
+		{"posix no such process", errors.New("kill: 12345: no such process"), true},
+		{"could not find process", errors.New("ERROR: Could not find the process"), true},
+		{"unrelated permission denied", errors.New("taskkill PID 1234: exit status 1: ERROR: Access is denied."), false},
+		{"unrelated binary missing", errors.New(`exec: "taskkill": executable file not found in %PATH%`), false},
+		{"empty message", errors.New(""), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := isAlreadyExitedError(tc.err)
+			if got != tc.want {
+				t.Errorf("isAlreadyExitedError(%v) = %v; want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}

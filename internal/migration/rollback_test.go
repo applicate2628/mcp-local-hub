@@ -99,6 +99,16 @@ func fakeRollbackOptions(t *testing.T, tx *testFixture) RollbackOptions {
 			}
 			return nil
 		},
+		PortBindWaitBound: func(port int, timeout time.Duration) error {
+			tx.portWaitBoundMu.Lock()
+			defer tx.portWaitBoundMu.Unlock()
+			if tx.portWaitBoundIdx < len(tx.portWaitBoundReturns) {
+				err := tx.portWaitBoundReturns[tx.portWaitBoundIdx]
+				tx.portWaitBoundIdx++
+				return err
+			}
+			return nil
+		},
 		LookupProcessIdentity: func(pid int) (ProcessIdentity, error) {
 			if id, ok := tx.identityByPID[pid]; ok {
 				return id, nil
@@ -192,23 +202,11 @@ func TestRollback_WarningsExitZero(t *testing.T) {
 	opts.ExpectedDaemons = intent.Daemons
 	opts.PortBindTimeout = 50 * time.Millisecond
 
-	// Step 3's post-force-kill verification AND step 10's bind wait
-	// both call PortBindWait. The fixture's queue exhausts to nil
-	// after our injected error fires.
-	// Step 3 invokes PortBindWait once per ExpectedDaemon (returning
-	// nil → ports unbound OK). Step 10 then invokes again per restored
-	// task: we want the FIRST step-10 call to fail.
-	step3Calls := 0
-	for range intent.Daemons {
-		if intent.Daemons[step3Calls].Port > 0 {
-			step3Calls++
-		}
-	}
-	// Build the return queue: [step3 OKs..., first-step10 fail, others OK].
-	for i := 0; i < step3Calls; i++ {
-		tx.portWaitReturns = append(tx.portWaitReturns, nil)
-	}
-	tx.portWaitReturns = append(tx.portWaitReturns, errors.New("bind timeout"))
+	// Step 3 (wait-until-unbound) and step 10 (wait-until-BOUND) now
+	// have separate hooks (PortBindWait vs. PortBindWaitBound). Step 3
+	// should pass — leave portWaitReturns empty so the fake defaults
+	// to nil. Step 10's FIRST call returns "bind timeout" → warning.
+	tx.portWaitBoundReturns = append(tx.portWaitBoundReturns, errors.New("bind timeout"))
 
 	if err := RunRollback(tx.State, opts); err != nil {
 		t.Fatalf("rollback: want nil with warnings, got: %v", err)
@@ -296,6 +294,222 @@ func TestRollback_RemovesRollbackInProgressMarker(t *testing.T) {
 	journalDir, _ := FindLatestJournal(tx.State.StateDir)
 	if _, err := os.Stat(filepath.Join(journalDir, MarkerRollbackInProgress)); !os.IsNotExist(err) {
 		t.Fatal("rollback-in-progress marker should be deleted")
+	}
+}
+
+// TestRollback_LegacyDirUnreadableAborts pins codex r2 Lane C P0 (fix
+// 1): when os.ReadDir(legacyDir) returns a non-IsNotExist error
+// (permission denied, ENOTDIR, corrupt entry), rollback MUST abort
+// with a corrupt-journal error. The previous behavior treated ANY
+// ReadDir error as "zero-daemon migration" when the committed marker
+// was present, which would have silently deleted supervisor state
+// without proving the legacy scheduler tasks could be replayed.
+//
+// Implementation note: the test injects the unreadable-dir error via
+// the rollbackReadLegacyDirFn package-level seam because
+// reproducing a portable non-IsNotExist ReadDir error across POSIX
+// (where chmod 0 + ENOTDIR are easy) and Windows (where the analogous
+// constructs map back to IsNotExist) requires either elevated ACL
+// manipulation or platform-conditional skips. Injecting at the seam
+// keeps the test deterministic on every supported OS.
+func TestRollback_LegacyDirUnreadableAborts(t *testing.T) {
+	tx := setupCommittedJournalFixture(t)
+	intent, _ := api.ReadSupervisorIntent(filepath.Join(tx.State.StateDir, "supervisor-intent.json"))
+	opts := fakeRollbackOptions(t, tx)
+	opts.ExpectedDaemons = intent.Daemons
+
+	// Sanity: committed marker IS present (the prior failure mode
+	// silently accepted any-error purely because committed was set).
+	journalDir, err := FindLatestJournal(tx.State.StateDir)
+	if err != nil {
+		t.Fatalf("find journal: %v", err)
+	}
+	if !markerExists(journalDir, MarkerCommitted) {
+		t.Fatal("setup invariant: committed marker should exist")
+	}
+
+	// Inject a permission-denied ReadDir result via the seam. The
+	// production code MUST reject this (only IsNotExist is accepted
+	// alongside committed).
+	origReader := rollbackReadLegacyDirFn
+	t.Cleanup(func() { rollbackReadLegacyDirFn = origReader })
+	injectedErr := &os.PathError{Op: "open", Path: filepath.Join(journalDir, "legacy-tasks"), Err: os.ErrPermission}
+	rollbackReadLegacyDirFn = func(path string) ([]os.DirEntry, error) {
+		return nil, injectedErr
+	}
+
+	err = RunRollback(tx.State, opts)
+	if err == nil {
+		t.Fatal("expected error from unreadable legacy-tasks/, got nil")
+	}
+	if !strings.Contains(err.Error(), "legacy-tasks dir unreadable") {
+		t.Errorf("error should name the corrupt-journal cause; got %v", err)
+	}
+	if !errors.Is(err, os.ErrPermission) {
+		t.Errorf("error should wrap the underlying permission failure; got %v", err)
+	}
+	// Verify the rollback aborted BEFORE deleting supervisor state.
+	for _, fname := range []string{"supervisor-intent.json"} {
+		if _, statErr := os.Stat(filepath.Join(tx.State.StateDir, fname)); statErr != nil {
+			t.Errorf("%s deleted on abort — rollback should not have reached step 11; got err %v", fname, statErr)
+		}
+	}
+}
+
+// TestRollback_LegacyDirMissingAfterCommittedAcceptedAsZeroDaemon pins
+// codex r2 Lane C P0 (fix 1): the ONLY accepted ReadDir error is
+// os.IsNotExist + committed marker present. That pair means a clean
+// zero-daemon migration committed without ever creating
+// legacy-tasks/. RunRollback must succeed, record a warning, and
+// proceed through state-file cleanup.
+func TestRollback_LegacyDirMissingAfterCommittedAcceptedAsZeroDaemon(t *testing.T) {
+	tx := setupCommittedJournalFixture(t)
+	intent, _ := api.ReadSupervisorIntent(filepath.Join(tx.State.StateDir, "supervisor-intent.json"))
+	opts := fakeRollbackOptions(t, tx)
+	opts.ExpectedDaemons = nil // zero-daemon path: no ports to verify at step 3
+	_ = intent
+
+	// Delete the legacy-tasks directory entirely so os.ReadDir
+	// returns os.IsNotExist. The committed marker stays in place.
+	journalDir, err := FindLatestJournal(tx.State.StateDir)
+	if err != nil {
+		t.Fatalf("find journal: %v", err)
+	}
+	legacyDir := filepath.Join(journalDir, "legacy-tasks")
+	if err := os.RemoveAll(legacyDir); err != nil {
+		t.Fatalf("remove legacy dir: %v", err)
+	}
+	if !markerExists(journalDir, MarkerCommitted) {
+		t.Fatal("setup invariant: committed marker should exist")
+	}
+
+	if err := RunRollback(tx.State, opts); err != nil {
+		t.Fatalf("rollback: zero-daemon committed migration should succeed; got %v", err)
+	}
+	// Warning recorded for the zero-daemon edge case.
+	raw, err := os.ReadFile(filepath.Join(journalDir, "rollback-warnings.json"))
+	if err != nil {
+		t.Fatalf("rollback-warnings.json missing: %v", err)
+	}
+	var w rollbackWarningsFile
+	if err := json.Unmarshal(raw, &w); err != nil {
+		t.Fatalf("parse warnings: %v", err)
+	}
+	if len(w.Warnings) == 0 {
+		t.Fatal("expected at least one warning entry for zero-daemon committed migration")
+	}
+	foundZeroDaemonReason := false
+	for _, entry := range w.Warnings {
+		if strings.Contains(entry.Reason, "zero-daemon migration") {
+			foundZeroDaemonReason = true
+			break
+		}
+	}
+	if !foundZeroDaemonReason {
+		t.Errorf("expected a zero-daemon warning entry; got %+v", w.Warnings)
+	}
+	// supervisor-intent.json was cleaned up at step 11.
+	if _, err := os.Stat(filepath.Join(tx.State.StateDir, "supervisor-intent.json")); !os.IsNotExist(err) {
+		t.Errorf("supervisor-intent.json should be deleted on zero-daemon committed rollback")
+	}
+}
+
+// TestRunRollback_PortBindWaitBoundSemantic pins codex r2 Lanes C+F P1
+// (fix 2): step 10 must wire through RollbackOptions.PortBindWaitBound
+// (NEW field — wait-until-BOUND), NOT RollbackOptions.PortBindWait
+// (which is wait-until-UNBOUND for step 3). The two have opposite
+// semantics and the previous wiring sent the step-10 wait through the
+// step-3 helper, which would have returned "success" the moment the
+// post-kill window closed — i.e., before any restored daemon could
+// possibly have bound.
+//
+// Assertions: PortBindWaitBound IS called at step 10 for every
+// restored task with a non-zero port; PortBindWait is NOT called at
+// step 10 (only at step 3); a bound-wait error lands in
+// rollback-warnings.json under the wait-not-bound reason.
+func TestRunRollback_PortBindWaitBoundSemantic(t *testing.T) {
+	tx := setupCommittedJournalFixture(t)
+	intent, _ := api.ReadSupervisorIntent(filepath.Join(tx.State.StateDir, "supervisor-intent.json"))
+	// Assign non-zero ports so both step-3 and step-10 wait loops
+	// have something to iterate over.
+	for i := range intent.Daemons {
+		intent.Daemons[i].Port = 9300 + i
+	}
+
+	opts := fakeRollbackOptions(t, tx)
+	opts.ExpectedDaemons = intent.Daemons
+	opts.PortBindTimeout = 50 * time.Millisecond
+
+	// Track which hook was called with which port + timeout.
+	var unboundCalls []struct {
+		port    int
+		timeout time.Duration
+	}
+	var boundCalls []struct {
+		port    int
+		timeout time.Duration
+	}
+	opts.PortBindWait = func(port int, timeout time.Duration) error {
+		unboundCalls = append(unboundCalls, struct {
+			port    int
+			timeout time.Duration
+		}{port, timeout})
+		return nil // step 3 ports are unbound
+	}
+	opts.PortBindWaitBound = func(port int, timeout time.Duration) error {
+		boundCalls = append(boundCalls, struct {
+			port    int
+			timeout time.Duration
+		}{port, timeout})
+		// First step-10 call fails — exercises the warning path
+		// AND confirms the new hook is in use (the old hook would
+		// have received this error).
+		if len(boundCalls) == 1 {
+			return errors.New("daemon did not bind")
+		}
+		return nil
+	}
+
+	if err := RunRollback(tx.State, opts); err != nil {
+		t.Fatalf("rollback: want nil with warnings, got: %v", err)
+	}
+	// Step 3 (wait-until-unbound) called for every expected daemon.
+	if len(unboundCalls) != len(intent.Daemons) {
+		t.Errorf("PortBindWait (step 3) call count = %d; want %d", len(unboundCalls), len(intent.Daemons))
+	}
+	for _, c := range unboundCalls {
+		if c.timeout != 10*time.Second {
+			t.Errorf("PortBindWait step-3 timeout = %s; want 10s (rollback hard budget)", c.timeout)
+		}
+	}
+	// Step 10 (wait-until-BOUND) called for every restored task.
+	if len(boundCalls) == 0 {
+		t.Fatal("PortBindWaitBound was never called — production must be wired to the new hook for step 10")
+	}
+	for _, c := range boundCalls {
+		if c.timeout != opts.PortBindTimeout {
+			t.Errorf("PortBindWaitBound step-10 timeout = %s; want %s", c.timeout, opts.PortBindTimeout)
+		}
+	}
+	// Warning for the first failing bound-wait.
+	journalDir, _ := FindLatestJournal(tx.State.StateDir)
+	raw, err := os.ReadFile(filepath.Join(journalDir, "rollback-warnings.json"))
+	if err != nil {
+		t.Fatalf("rollback-warnings.json missing: %v", err)
+	}
+	var w rollbackWarningsFile
+	if err := json.Unmarshal(raw, &w); err != nil {
+		t.Fatalf("parse warnings: %v", err)
+	}
+	foundPortWarning := false
+	for _, entry := range w.Warnings {
+		if strings.HasPrefix(entry.Reason, "port-not-bound-after-") {
+			foundPortWarning = true
+			break
+		}
+	}
+	if !foundPortWarning {
+		t.Errorf("expected port-not-bound warning; got %+v", w.Warnings)
 	}
 }
 

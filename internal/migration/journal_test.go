@@ -40,6 +40,14 @@ type testFixture struct {
 	portWaitMu      sync.Mutex
 	portWaitIdx     int
 
+	// PortBindWaitBound fake (rollback step 10 — wait-until-bound).
+	// Distinct from portWaitReturns above (step 3 — wait-until-unbound)
+	// because the two have opposite semantics and tests need to control
+	// each independently. When the slice is exhausted, returns nil.
+	portWaitBoundReturns []error
+	portWaitBoundMu      sync.Mutex
+	portWaitBoundIdx     int
+
 	// Telemetry counters.
 	shimInstalledStrict *bool
 	supervisorSpawned   int

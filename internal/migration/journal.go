@@ -1379,9 +1379,23 @@ type RollbackOptions struct {
 	// times out. taskkill /F /T /PID on Windows; kill -KILL -<pgid>
 	// on POSIX.
 	ForceKillSupervisor func() error
-	// PortBindWait blocks until the port is unbound or timeout
-	// elapses; used for the post-force-kill verification at step 3.
+	// PortBindWait blocks until the port is UNBOUND or timeout
+	// elapses; used for the post-force-kill verification at step 3
+	// (we want to prove the old supervisor and its daemon children
+	// released their listening sockets before we re-register the
+	// legacy scheduler tasks).
 	PortBindWait func(port int, timeout time.Duration) error
+	// PortBindWaitBound blocks until the port is BOUND (a daemon is
+	// answering on 127.0.0.1:<port>) or timeout elapses. Used for
+	// step 10 — after `schtasks /Run`, we wait for each restored
+	// legacy daemon to come back up. Semantic INVERSE of PortBindWait
+	// (which waits until UNBOUND); the inversion was a Lane-C/F P1
+	// fix because production previously wired both step 3 and step 10
+	// to the wait-until-unbound helper, which would have returned
+	// "success" at step 10 the instant the post-kill window closed —
+	// i.e. BEFORE any restored daemon could possibly have bound. When
+	// nil this step is skipped and no warnings are recorded.
+	PortBindWaitBound func(port int, timeout time.Duration) error
 	// LookupProcessIdentity is the same hook as forward path's
 	// counterpart. Used to verify ports unbound post-kill.
 	LookupProcessIdentity func(pid int) (ProcessIdentity, error)
@@ -1558,18 +1572,20 @@ func RunRollback(state State, opts RollbackOptions) error {
 	time.Sleep(settle)
 
 	legacyDir := filepath.Join(journalDir, "legacy-tasks")
-	// Lane C P0 #3: do NOT swallow os.ReadDir errors. If the
-	// legacy-tasks/ directory is missing or unreadable AND the journal
-	// has no `committed` marker, the journal is corrupt — proceeding
-	// would delete supervisor state without re-registering any daemons.
-	// If the journal HAS `committed` AND legacy-tasks/ has no XML files
-	// (genuine zero-daemon migration), proceed with a warning logged
-	// to rollback-warnings.json.
-	legacyEntries, readDirErr := os.ReadDir(legacyDir)
+	// Lane C P0 #3 (round 2): do NOT swallow os.ReadDir errors. The ONLY
+	// accepted error is `os.IsNotExist(err) && hasCommittedMarker` —
+	// that pair means a clean zero-daemon migration committed without
+	// ever creating the directory, which is a legitimate edge case.
+	// Any other error (missing-no-marker, permission denied, corrupt
+	// dir, ENOTDIR, etc.) must abort rollback: continuing would delete
+	// supervisor state without proving the legacy XML can be replayed,
+	// leaving the operator with no working scheduler tasks AND no
+	// supervisor.
+	legacyEntries, readDirErr := rollbackReadLegacyDirFn(legacyDir)
 	hasCommittedMarker := markerExists(journalDir, MarkerCommitted)
 	if readDirErr != nil {
-		if !hasCommittedMarker {
-			return fmt.Errorf("rollback: legacy-tasks/ missing or unreadable — journal is corrupt (no committed marker): %w", readDirErr)
+		if !(os.IsNotExist(readDirErr) && hasCommittedMarker) {
+			return fmt.Errorf("rollback: legacy-tasks dir unreadable (corrupt journal): %w", readDirErr)
 		}
 		// committed migration with absent legacy-tasks/: treat as
 		// zero-daemon edge case. Clear entries so the loop below is a
@@ -1643,23 +1659,22 @@ func RunRollback(state State, opts RollbackOptions) error {
 		}
 	}
 
-	// Step 10: up to 60s port-bind wait per task. Failures → warnings.
+	// Step 10: up to 60s wait-until-BOUND per restored task. Failures
+	// → warnings. Wires through PortBindWaitBound (NOT PortBindWait —
+	// those have opposite semantics; see RollbackOptions docstring).
 	// (`warnings` was declared earlier so the zero-daemon committed
 	// edge case from step 8 can record its own warning too.)
 	for _, r := range restored {
 		if r.port <= 0 {
 			continue
 		}
-		if opts.PortBindWait == nil {
+		if opts.PortBindWaitBound == nil {
 			continue
 		}
-		// PortBindWait's contract for rollback is "wait until BOUND" —
-		// the opposite of forward's "wait until UNBOUND". Production
-		// wires both forms via the same hook with semantically
-		// distinct timeouts; tests inject the same fake. To keep the
-		// interface uniform here, we invert semantics at the call site:
-		// pass the timeout, treat a non-nil error as "did not bind".
-		err := opts.PortBindWait(r.port, portTimeout)
+		// PortBindWaitBound returns nil when the daemon has bound the
+		// port (net.Dial succeeded); any non-nil result is "did not
+		// bind within timeout" and lands in rollback-warnings.json.
+		err := opts.PortBindWaitBound(r.port, portTimeout)
 		if err != nil {
 			warnings = append(warnings, rollbackWarning{
 				Task:       r.name,
@@ -1687,6 +1702,18 @@ func RunRollback(state State, opts RollbackOptions) error {
 	// Step 13-14: LIFO release via deferred ls.Release().
 	// Rollback exits 0 even with warnings (spec line 325).
 	return nil
+}
+
+// rollbackReadLegacyDirFn is the seam for step 8's legacy-tasks/
+// directory enumeration. Production binds it to os.ReadDir; tests
+// override the package-level variable to inject specific error
+// shapes (permission denied, ENOTDIR, corrupt index) that are
+// otherwise hard to reproduce portably across OS file systems.
+// The seam exists ONLY to keep TestRollback_LegacyDirUnreadableAborts
+// portable between POSIX (where chmod + ENOTDIR work) and Windows
+// (where os.ReadDir on a non-dir returns IsNotExist).
+var rollbackReadLegacyDirFn = func(path string) ([]os.DirEntry, error) {
+	return os.ReadDir(path)
 }
 
 // writeRollbackWarnings persists rollback-warnings.json under the journal.

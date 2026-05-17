@@ -36,7 +36,12 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os/exec"
+	"runtime"
+	"strings"
+	"time"
 
 	"mcp-local-hub/internal/api"
 )
@@ -142,7 +147,39 @@ type UpgradeOpts struct {
 	PipePath         string
 	QuiesceTimeoutMs int
 	ExitTimeoutMs    int
-	Deps             UpgradeDeps
+	// ExpectedPorts is the list of listening ports the prior
+	// supervisor's daemon children were bound to (read from
+	// supervisor-intent.json before invoking RunInstallUpgrade).
+	// After a force-kill fallback, the orchestrator iterates this
+	// list through VerifyPortsUnbound (below) to prove no zombie
+	// listeners survived the kill. Empty list → verification skipped
+	// (e.g., zero-daemon installs).
+	ExpectedPorts []int
+	// VerifyPortsUnbound blocks until every port in ports is observed
+	// unbound, or until perPortTimeout elapses for any single port.
+	// Returns nil when all ports are confirmed unbound. Returns a
+	// non-nil error if any port is still bound after the timeout
+	// (the implementation is expected to wrap the offending port and
+	// the underlying listen error for diagnostics).
+	//
+	// Modeled as an UpgradeOpts callback rather than a UpgradeDeps
+	// interface method so that production wiring in
+	// install_migration_wiring_windows.go (the v5UpgradeDeps adapter)
+	// is unaffected by the codex-r2-c-p1-8 closure — Group A wires
+	// the closure to portBindWaitForRelease in the same change set.
+	// When nil AND ExpectedPorts is non-empty, the orchestrator
+	// skips verification silently (same semantic as old behavior),
+	// preserving backward compatibility for callers that have not
+	// yet adopted the closure.
+	//
+	// Used after the ForceKillSupervisor fallback: taskkill /F /T
+	// closes the supervisor PID + its child daemons, but the kernel
+	// may still report the listening sockets as bound for a brief
+	// window. The verification step proves the next supervisor
+	// (started in step 6) will be able to re-bind without fighting
+	// a zombie listener.
+	VerifyPortsUnbound func(ports []int, perPortTimeout time.Duration) error
+	Deps               UpgradeDeps
 }
 
 // Default IPC timeouts per spec §"Upgrade sequence". Exported as
@@ -161,6 +198,14 @@ const (
 	// bound for the supervisor's signal-driven loop-cancel + audit-
 	// emit + lock-release sequence (sub-second in practice).
 	defaultExitTimeoutMs = 5000
+
+	// defaultPostForceKillPortVerifyTimeout is the per-port deadline
+	// for VerifyPortsUnbound after a force-kill fallback (codex-r2-c-
+	// p1-8). 10s matches the rollback path's step-3 budget at
+	// migration/journal.go:1505 — the operator should not wait longer
+	// than that for taskkill /F /T to release the supervisor's
+	// child daemon listeners.
+	defaultPostForceKillPortVerifyTimeout = 10 * time.Second
 )
 
 // RunInstallUpgrade orchestrates the v0.5.0 cold-restart upgrade
@@ -289,15 +334,48 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 		// the supervisor process group). Either way, the running
 		// transients + daemon children die with the supervisor.
 		//
-		// Best-effort: a force-kill failure (already exited,
-		// missing PID, permission denied) does NOT abort the
-		// orchestrator. The supervisor may already be gone (the
-		// IPC error could have been "connection refused after
-		// supervisor crash"), in which case taskkill returns a
-		// "process not found" code that's benign here. Step 6
-		// will detect any actually-surviving port contention via
-		// its own bind attempt.
-		_ = opts.Deps.ForceKillSupervisor(opts.PipePath)
+		// Codex r2 Lane C P1 #8 closure: capture the error and
+		// classify. "Already exited" is benign — the supervisor was
+		// already gone before we issued the kill (often the case
+		// when ExitGraceful failed with "connection refused after
+		// supervisor crash"), so taskkill / kill returns a
+		// process-not-found exit code that does NOT block the
+		// orchestrator. Any OTHER error (permission denied, missing
+		// taskkill binary, malformed PID) propagates up because the
+		// supervisor may still be running and the new supervisor
+		// will fight it for the IPC pipe + the daemon ports.
+		if killErr := opts.Deps.ForceKillSupervisor(opts.PipePath); killErr != nil {
+			if !isAlreadyExitedError(killErr) {
+				return fmt.Errorf("force-kill supervisor failed after graceful-exit timeout: %w; "+
+					"the prior supervisor may still be running and will fight the new one for the IPC pipe and daemon ports; "+
+					"resolve the underlying error (often permission denied) and re-run `mcphub install --upgrade`",
+					killErr)
+			}
+			// already-exited path: continue to the port verification
+			// step below — taskkill thinks the PID is gone, but a
+			// lingering child listener is still possible if the prior
+			// supervisor died without its Job Object reaping children.
+		}
+
+		// Codex r2 Lane C P1 #8 closure: verify daemon ports are
+		// actually unbound after the force-kill. Without this check
+		// the rest of the upgrade flow would race a zombie listener:
+		// step 6 starts the new supervisor, the new supervisor tries
+		// to launch a daemon, the daemon's net.Listen fails with
+		// EADDRINUSE because the prior daemon's child socket is still
+		// in the kernel's TIME_WAIT/CLOSE_WAIT cleanup window. A 10s
+		// deadline matches the rollback step-3 budget. When the
+		// caller has not wired VerifyPortsUnbound (production adapter
+		// adoption is staged separately), the verification is silently
+		// skipped — same semantic as pre-fix behavior.
+		if len(opts.ExpectedPorts) > 0 && opts.VerifyPortsUnbound != nil {
+			if err := opts.VerifyPortsUnbound(opts.ExpectedPorts, defaultPostForceKillPortVerifyTimeout); err != nil {
+				return fmt.Errorf("port-unbound verification failed after force-kill supervisor: %w; "+
+					"one or more daemon ports are still bound; "+
+					"identify the offending listener via `netstat -ano | findstr :<port>` and stop it manually before re-running `mcphub install --upgrade`",
+					err)
+			}
+		}
 	}
 
 	// Step 6: Explicit per-OS supervisor start.
@@ -334,4 +412,73 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 	// `mcphub status` (which talks to the new supervisor through
 	// the same IPC pipe).
 	return nil
+}
+
+// isAlreadyExitedError reports whether err originated from a kill
+// invocation against a process that was already gone. taskkill on
+// Windows exits with code 128 ("ERROR_WAIT_NO_CHILDREN") for that
+// case and embeds the literal phrase "process not found" or similar
+// in its stdout; kill on POSIX exits with code 1 and prints
+// "no such process". Production force-kill helpers
+// (killPIDViaTaskkill in install_migration_wiring_windows.go) wrap
+// the underlying exec.ExitError with the combined output via fmt.Errorf,
+// so both the exit-code path and the textual-substring path are checked
+// for robustness against future helper refactors.
+//
+// The function MUST stay narrow: any non-already-exited failure
+// (permission denied, missing binary, malformed PID) must propagate so
+// the orchestrator can refuse to continue when the prior supervisor
+// might still be alive.
+func isAlreadyExitedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Exit-code path: taskkill / kill wrapped via os/exec.
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		switch runtime.GOOS {
+		case "windows":
+			// taskkill /F /T /PID returns 128 when the target PID
+			// has already exited (no child processes to wait on).
+			if exitErr.ExitCode() == 128 {
+				return true
+			}
+		default:
+			// POSIX `kill -KILL` against a vanished PID exits 1
+			// with stderr "No such process". We can't rely on
+			// exit-code alone (1 is overloaded) — fall through to
+			// the textual check.
+		}
+	}
+	// Textual fallback for callers that wrap the exec output into
+	// fmt.Errorf (the production killPIDViaTaskkill helper does this).
+	// Substrings here MUST be tight enough to avoid catching unrelated
+	// "not found" failure modes — most importantly
+	//   `exec: "taskkill": executable file not found in %PATH%`
+	// which is a missing-binary error, NOT a vanished-process error,
+	// and must propagate so the operator fixes their install.
+	//
+	// taskkill on Windows (English locale) emits:
+	//   "ERROR: The process \"<pid>\" not found."
+	//   "ERROR: The process with PID <pid> could not be terminated."
+	// POSIX `kill -KILL` emits:
+	//   "kill: <pid>: no such process"
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "process") && strings.Contains(msg, "not found"):
+		// taskkill's "The process \"<pid>\" not found." path —
+		// requires BOTH "process" and "not found" to filter out the
+		// "executable file not found" missing-binary case.
+		return true
+	case strings.Contains(msg, "no such process"):
+		// POSIX kill against a vanished PID.
+		return true
+	case strings.Contains(msg, "no running instance"):
+		// PowerShell Stop-Process variant when invoked by name.
+		return true
+	case strings.Contains(msg, "could not find") && strings.Contains(msg, "process"):
+		// taskkill localized variant: "ERROR: Could not find the process".
+		return true
+	}
+	return false
 }
