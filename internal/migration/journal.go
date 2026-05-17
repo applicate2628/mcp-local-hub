@@ -815,6 +815,17 @@ func RunForward(state State, opts ForwardOptions) error {
 			if opts.RollbackOnFailure != nil {
 				rbOpts := opts.RollbackOnFailure()
 				if rbOpts != nil {
+					// Codex round-4 Lane C P1 (codex-r4-c-p1): pin
+					// the failed-forward journal dir BEFORE releasing
+					// migration.lock. RunRollback re-acquires the
+					// lock and would otherwise call FindLatestJournal
+					// to discover the target — but a newer journal
+					// could land in the release-to-reacquire window
+					// and FindLatestJournal would pick it up
+					// instead. Set JournalDir to the journal RunForward
+					// itself was operating on so RunRollback aborts the
+					// correct run.
+					rbOpts.JournalDir = journalDir
 					// Release the forward locks BEFORE invoking
 					// RunRollback so the rollback path can acquire
 					// them. ls.Release is idempotent so the deferred
@@ -1570,6 +1581,23 @@ type RollbackOptions struct {
 	// list. Production reads supervisor-intent.json before invoking
 	// rollback; tests pass a synthetic list.
 	ExpectedDaemons []api.SupervisorDaemon
+
+	// JournalDir, when non-empty, pins RunRollback to the supplied
+	// migration-journal-* directory. Codex round-4 Lane C P1
+	// (codex-r4-c-p1): the forward path's auto-rollback callback
+	// MUST set this to the failed-forward journal before invoking
+	// RunRollback — otherwise the call to FindLatestJournal inside
+	// RunRollback (after re-acquiring migration.lock) would race
+	// against a newer journal being created between lock release
+	// and re-acquire, and roll back the wrong run.
+	//
+	// Empty value preserves the manual `mcphub install
+	// --rollback-to-legacy` semantic where the operator has no
+	// specific journal in context and RunRollback falls back to
+	// FindLatestJournal. When set, RunRollback verifies the
+	// directory still exists after re-acquiring migration.lock and
+	// aborts with a clear error if it disappeared.
+	JournalDir string
 }
 
 // rollbackWarning is one entry in rollback-warnings.json per spec
@@ -1627,15 +1655,38 @@ func RunRollback(state State, opts RollbackOptions) error {
 		}
 	}
 
-	// Find the latest journal to rollback against. We need it for the
-	// rollback-in-progress marker (lives inside the journal) AND for
-	// the legacy-tasks-xml replay.
-	journalDir, err := FindLatestJournal(state.StateDir)
-	if err != nil {
-		return fmt.Errorf("rollback find journal: %w", err)
-	}
-	if journalDir == "" {
-		return fmt.Errorf("rollback: no migration journal found")
+	// Resolve the journal dir to roll back against. Two paths:
+	//
+	//   - opts.JournalDir set (codex-r4-c-p1 auto-rollback path):
+	//     RunForward pins the failed-forward journal before releasing
+	//     migration.lock and invoking RunRollback. We MUST operate on
+	//     that exact dir — FindLatestJournal here would race against a
+	//     newer journal landing between lock release and re-acquire.
+	//     Verify the pinned dir still exists; if a concurrent process
+	//     removed it during the lock-release window, abort loudly.
+	//
+	//   - opts.JournalDir empty (manual `mcphub install
+	//     --rollback-to-legacy` path): no specific journal context;
+	//     fall back to FindLatestJournal.
+	var journalDir string
+	if opts.JournalDir != "" {
+		info, statErr := os.Stat(opts.JournalDir)
+		if statErr != nil {
+			return fmt.Errorf("rollback: pinned JournalDir %q stat failed: %w", opts.JournalDir, statErr)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("rollback: pinned JournalDir %q is not a directory (mode %v)", opts.JournalDir, info.Mode())
+		}
+		journalDir = opts.JournalDir
+	} else {
+		var findErr error
+		journalDir, findErr = FindLatestJournal(state.StateDir)
+		if findErr != nil {
+			return fmt.Errorf("rollback find journal: %w", findErr)
+		}
+		if journalDir == "" {
+			return fmt.Errorf("rollback: no migration journal found")
+		}
 	}
 
 	// Atomicity: if marker write fails, release lock + exit non-zero.

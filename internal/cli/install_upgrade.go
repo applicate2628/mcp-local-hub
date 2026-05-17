@@ -23,15 +23,15 @@
 //
 //   - RenameAsideBinary → api.RenameAsideReplace (Task 8.1, shipped)
 //   - QuiesceTimers     → IPC client `quiesce-timers` (Task 5.2 pipe +
-//                         future client-side helper)
+//     future client-side helper)
 //   - ExitGraceful      → IPC client `exit{graceful: true, ...}`
 //   - ForceKillSupervisor → `taskkill /F /T /PID` (Windows) /
-//                          `kill -KILL -<pgid>` (POSIX)
+//     `kill -KILL -<pgid>` (POSIX)
 //   - StartSupervisor   → `schtasks /Run \mcp-local-hub-supervisor`
-//                         (Windows shim) or detached CreateProcess
-//                         with DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP
-//                         (POSIX: launchctl kickstart / systemctl
-//                         --user restart / mcphub supervise &)
+//     (Windows shim) or detached CreateProcess
+//     with DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP
+//     (POSIX: launchctl kickstart / systemctl
+//     --user restart / mcphub supervise &)
 package cli
 
 import (
@@ -233,19 +233,21 @@ const (
 //     even if the prior supervisor exited un-gracefully.
 //
 //   - Returns non-nil on:
-//       * Step 1 failure (rename-aside): the binary is in an
-//         indeterminate state; no IPC traffic and no force-kill
-//         should follow because the IPC peer is the still-running
-//         OLD supervisor and our intent was to replace it. The
-//         caller's recovery is to re-run --upgrade after diagnosing
-//         the rename failure (locked file, missing permissions, etc.)
-//         OR to manually restore the .old-<ts> aside file.
-//       * Step 6 failure (start supervisor): the binary HAS been
-//         replaced and the prior supervisor has exited (gracefully
-//         or via force-kill), but the new supervisor failed to
-//         start. The caller's recovery is `mcphub supervise` from a
-//         shell — the same surface StartSupervisor drives, just
-//         in foreground mode for diagnostics.
+//
+//   - Step 1 failure (rename-aside): the binary is in an
+//     indeterminate state; no IPC traffic and no force-kill
+//     should follow because the IPC peer is the still-running
+//     OLD supervisor and our intent was to replace it. The
+//     caller's recovery is to re-run --upgrade after diagnosing
+//     the rename failure (locked file, missing permissions, etc.)
+//     OR to manually restore the .old-<ts> aside file.
+//
+//   - Step 6 failure (start supervisor): the binary HAS been
+//     replaced and the prior supervisor has exited (gracefully
+//     or via force-kill), but the new supervisor failed to
+//     start. The caller's recovery is `mcphub supervise` from a
+//     shell — the same surface StartSupervisor drives, just
+//     in foreground mode for diagnostics.
 //
 // Non-fatal failures: QuiesceTimers errors are intentionally swallowed
 // because the supervisor's own exit path will force-kill any
@@ -302,16 +304,28 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 	// QuiesceTimers blocks until the FINAL frame arrives (or the
 	// orchestrator's own ctx fires).
 	//
-	// Failure here is non-fatal: the supervisor's exit path in
-	// step 5 will force-kill any surviving transients during its
-	// own graceful-exit transition. Pre-spec discussion considered
-	// short-circuiting the upgrade on QuiesceTimers failure but
-	// concluded the binary has ALREADY been replaced at this point
-	// (step 1 committed it), so aborting would leave the operator
-	// without a running supervisor at all — worse than proceeding
-	// without a clean drain. The intentionally-discarded error here
-	// reflects that policy.
-	_, _ = opts.Deps.QuiesceTimers(ctx, opts.PipePath, opts.QuiesceTimeoutMs)
+	// Codex round-4 Lane B P1 (codex-r4-b-p1): the QuiesceTimers
+	// result envelope MUST be consumed. If `still_running` is non-empty
+	// OR if QuiesceTimers itself returned an error, transients did not
+	// drain — the supervisor's exit{graceful} merely SCHEDULES exit and
+	// does not guarantee the un-drained children get reaped. Route the
+	// orchestrator through the force-kill + verifyPortsUnbound path EVEN
+	// IF the subsequent ExitGraceful ACKs. The historical bug let a
+	// successful ExitGraceful short-circuit force-kill, turning every
+	// un-drained transient into an orphan that held daemon ports.
+	quiesceResp, qErr := opts.Deps.QuiesceTimers(ctx, opts.PipePath, opts.QuiesceTimeoutMs)
+	quiesceUnclean := false
+	if qErr != nil {
+		// Quiesce error → provenance of drain is unproven; force-kill.
+		quiesceUnclean = true
+	} else if body, ok := quiesceResp.Result.(map[string]any); ok {
+		if stillRun, ok := body["still_running"].([]any); ok && len(stillRun) > 0 {
+			// Transients did not drain within the supervisor's
+			// internal timeout. ExitGraceful cannot reliably reap
+			// them; route through force-kill.
+			quiesceUnclean = true
+		}
+	}
 
 	// Step 4: IPC exit{graceful: true, timeout_ms: N}.
 	//
@@ -326,7 +340,8 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 	// have hung in a non-responsive state — a stuck child, a
 	// stale file handle, or a goroutine deadlock — that prevents
 	// it from honoring the IPC verb. Force-kill closes the gap.
-	if _, err := opts.Deps.ExitGraceful(ctx, opts.PipePath, opts.ExitTimeoutMs); err != nil {
+	_, exitErr := opts.Deps.ExitGraceful(ctx, opts.PipePath, opts.ExitTimeoutMs)
+	if exitErr != nil || quiesceUnclean {
 		// Step 4a: force-kill fallback.
 		//
 		// taskkill /F /T /PID on Windows (kills the supervisor PID

@@ -827,6 +827,123 @@ func TestLockSet_OnceLockHeldUnwinds(t *testing.T) {
 	mig.Release()
 }
 
+// TestRunRollback_PinsJournalDirFromOptions pins codex round-4 Lane C
+// P1: when RollbackOptions.JournalDir is supplied (i.e., the auto-
+// rollback callback path), RunRollback MUST operate on that exact
+// journal — NOT on whatever FindLatestJournal returns. Otherwise a
+// newer migration-journal-* directory created between RunForward
+// releasing migration.lock and RunRollback re-acquiring it would be
+// rolled back instead of the failed-forward journal.
+//
+// The test simulates this by:
+//   - seeding a committed journal via the fixture (the "target" journal),
+//   - injecting a NEWER (lexicographically-later) migration-journal-*
+//     directory under the same state-dir so FindLatestJournal would
+//     return it,
+//   - calling RunRollback with opts.JournalDir set to the older target,
+//   - asserting the rollback markers + warnings land in the TARGET
+//     journal, not the newer injected one.
+func TestRunRollback_PinsJournalDirFromOptions(t *testing.T) {
+	tx := setupCommittedJournalFixture(t)
+	intent, _ := api.ReadSupervisorIntent(filepath.Join(tx.State.StateDir, "supervisor-intent.json"))
+
+	// Capture the target journal (the one the forward-fixture seeded).
+	targetJournal, err := FindLatestJournal(tx.State.StateDir)
+	if err != nil {
+		t.Fatalf("find target journal: %v", err)
+	}
+	if targetJournal == "" {
+		t.Fatal("setup invariant: target journal must exist")
+	}
+
+	// Inject a NEWER journal directory whose name sorts after the
+	// target's. FindLatestJournal sorts lexicographically, so any name
+	// strictly greater than the target's basename will outrank it.
+	targetName := filepath.Base(targetJournal)
+	newerName := targetName + "-injected-newer"
+	newerJournal := filepath.Join(tx.State.StateDir, newerName)
+	if err := os.MkdirAll(newerJournal, 0o700); err != nil {
+		t.Fatalf("mkdir newer journal: %v", err)
+	}
+	// Defense: prove FindLatestJournal really would return the newer
+	// one — otherwise the test doesn't actually exercise the pin logic.
+	latest, err := FindLatestJournal(tx.State.StateDir)
+	if err != nil {
+		t.Fatalf("find latest after inject: %v", err)
+	}
+	if latest != newerJournal {
+		t.Fatalf("test premise failed: FindLatestJournal returned %s, expected the newer injected dir %s", latest, newerJournal)
+	}
+
+	opts := fakeRollbackOptions(t, tx)
+	opts.ExpectedDaemons = intent.Daemons
+	// Pin to the failed-forward (target) journal — the codex-r4-c-p1
+	// new field consumed by RunRollback.
+	opts.JournalDir = targetJournal
+
+	if err := RunRollback(tx.State, opts); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+
+	// The rollback-in-progress marker must have been removed from the
+	// TARGET journal (step 12 cleanup), proving rollback operated on
+	// the pinned dir.
+	if _, err := os.Stat(filepath.Join(targetJournal, MarkerRollbackInProgress)); !os.IsNotExist(err) {
+		t.Fatalf("rollback-in-progress marker should have been removed from the pinned target journal; stat err = %v", err)
+	}
+	// The injected newer journal must NOT have any rollback markers —
+	// rollback never touched it.
+	for _, m := range []string{MarkerRollbackInProgress} {
+		if _, err := os.Stat(filepath.Join(newerJournal, m)); err == nil {
+			t.Fatalf("rollback wrote %s into the WRONG journal (the newer injected dir); pin logic is broken", m)
+		}
+	}
+}
+
+// TestRunRollback_FallsBackToFindLatestWhenJournalDirEmpty pins that
+// the manual `mcphub install --rollback-to-legacy` path (where the
+// operator has no specific failed-forward journal in context) still
+// works via FindLatestJournal when opts.JournalDir is left empty.
+func TestRunRollback_FallsBackToFindLatestWhenJournalDirEmpty(t *testing.T) {
+	tx := setupCommittedJournalFixture(t)
+	intent, _ := api.ReadSupervisorIntent(filepath.Join(tx.State.StateDir, "supervisor-intent.json"))
+
+	opts := fakeRollbackOptions(t, tx)
+	opts.ExpectedDaemons = intent.Daemons
+	// opts.JournalDir intentionally left empty — manual rollback path.
+
+	if err := RunRollback(tx.State, opts); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	// Rollback completed; supervisor-intent.json removed at step 11.
+	if _, err := os.Stat(filepath.Join(tx.State.StateDir, "supervisor-intent.json")); !os.IsNotExist(err) {
+		t.Fatalf("supervisor-intent.json should be deleted on rollback; got %v", err)
+	}
+}
+
+// TestRunRollback_JournalDirNonExistentAborts pins that if opts.JournalDir
+// is set but the directory has disappeared by the time RunRollback
+// re-acquires migration.lock, rollback aborts with a clear error rather
+// than falling back silently to FindLatestJournal (which might point at
+// the wrong journal).
+func TestRunRollback_JournalDirNonExistentAborts(t *testing.T) {
+	tx := setupCommittedJournalFixture(t)
+	intent, _ := api.ReadSupervisorIntent(filepath.Join(tx.State.StateDir, "supervisor-intent.json"))
+
+	opts := fakeRollbackOptions(t, tx)
+	opts.ExpectedDaemons = intent.Daemons
+	// Path inside the state-dir but not corresponding to any journal.
+	opts.JournalDir = filepath.Join(tx.State.StateDir, "migration-journal-NONEXISTENT")
+
+	err := RunRollback(tx.State, opts)
+	if err == nil {
+		t.Fatal("expected error when pinned JournalDir no longer exists")
+	}
+	if !strings.Contains(err.Error(), "JournalDir") && !strings.Contains(err.Error(), "journal") {
+		t.Errorf("error should mention the missing journal; got %v", err)
+	}
+}
+
 // silence unused-import warnings when the scheduler package is only
 // referenced via SchedulerBackend interface satisfaction.
 var _ = scheduler.ErrTaskNotFound

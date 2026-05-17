@@ -786,6 +786,95 @@ func TestForwardMigration_ReconcileReadyTimeoutAutoRollbacks(t *testing.T) {
 	}
 }
 
+// TestRunForward_AutoRollback_PinsFailedJournalDir pins codex round-4
+// Lane C P1: when RunForward triggers an auto-rollback after step 14
+// reconcile-ready timeout, the RollbackOptions handed to RunRollback
+// MUST carry the failed-forward journal dir in `.JournalDir`. Without
+// this, RunRollback would call FindLatestJournal after re-acquiring
+// migration.lock — and a NEWER journal created between the lock
+// release and re-acquire would be rolled back instead of the failed
+// forward.
+//
+// Test surface: a reconcile-ready timeout fires; the callback wraps
+// the supplied RollbackOptions so the test can intercept the
+// JournalDir field that RunForward populated; the test asserts the
+// JournalDir matches the actual forward-run's journal dir.
+func TestRunForward_AutoRollback_PinsFailedJournalDir(t *testing.T) {
+	tx := setupV04xFixture(t)
+	opts := fakeForwardOptions(t, tx)
+	opts.ReconcileReady = func(timeout time.Duration) error {
+		tx.reconcileWaited++
+		return errors.New("supervisor never reported ready within 30s")
+	}
+
+	var capturedJournalDir string
+	opts.RollbackOnFailure = func() *RollbackOptions {
+		// Return a minimal RollbackOptions whose SupervisorIPC
+		// captures the JournalDir RunForward set on the struct, then
+		// no-ops the rest. The forward path is expected to OVERWRITE
+		// or NOT-overwrite JournalDir; either way the test captures
+		// whatever lands.
+		rb := &RollbackOptions{
+			Scheduler: tx.Scheduler,
+			SupervisorIPC: func(cmd string, args map[string]any, timeout time.Duration) error {
+				return nil
+			},
+			ProbeSupervisorTokenMismatch: func() error { return nil },
+			ForceKillSupervisor:          func() error { return nil },
+			PortBindWait:                 func(port int, timeout time.Duration) error { return nil },
+			LookupProcessIdentity: func(pid int) (ProcessIdentity, error) {
+				return ProcessIdentity{}, errors.New("not found")
+			},
+			QuarantineTranslator: func(_ State) error { return nil },
+			ShimUninstaller:      func() error { return nil },
+			TimeWaitSettle:       10 * time.Millisecond,
+			PortBindTimeout:      50 * time.Millisecond,
+		}
+		// The captured value is set BEFORE RunForward returns the
+		// callback's result. Defer-style read won't work because
+		// RunForward dereferences the returned pointer at call time;
+		// we want the JournalDir as RunForward sees it. So expose
+		// via a thunk that asserts a field RunForward writes.
+		// Convention: RunForward sets JournalDir on the returned
+		// struct AFTER calling the factory. The fix wires this by
+		// having RunForward mutate rb.JournalDir between the factory
+		// call and the RunRollback dispatch.
+		return rb
+	}
+
+	// We need to read JournalDir AFTER RunForward populates it. The
+	// production wiring writes rb.JournalDir = <forward journal dir>
+	// between the factory call and RunRollback. The test captures it
+	// via a wrapper around the callback.
+	origCallback := opts.RollbackOnFailure
+	opts.RollbackOnFailure = func() *RollbackOptions {
+		rb := origCallback()
+		// Wrap SupervisorIPC so it captures the (now-populated)
+		// JournalDir on first IPC call (which is the quiesce-timers
+		// frame at rollback step 2, AFTER RunForward set JournalDir).
+		origIPC := rb.SupervisorIPC
+		rb.SupervisorIPC = func(cmd string, args map[string]any, timeout time.Duration) error {
+			if capturedJournalDir == "" {
+				capturedJournalDir = rb.JournalDir
+			}
+			return origIPC(cmd, args, timeout)
+		}
+		return rb
+	}
+
+	err := RunForward(tx.State, opts)
+	if err == nil {
+		t.Fatal("expected error after auto-rollback completes, got nil")
+	}
+	if capturedJournalDir == "" {
+		t.Fatal("expected RunForward to populate RollbackOptions.JournalDir before invoking RunRollback")
+	}
+	wantDir := mustFindJournalDir(t, tx.State.StateDir)
+	if capturedJournalDir != wantDir {
+		t.Fatalf("captured RollbackOptions.JournalDir = %s, want %s (the failed-forward journal)", capturedJournalDir, wantDir)
+	}
+}
+
 // TestForwardMigration_ReconcileReadyTimeoutNoCallbackFallsBack
 // verifies the fall-back path: when RollbackOnFailure is nil, the
 // existing "consider --rollback-to-legacy" error fires unchanged.

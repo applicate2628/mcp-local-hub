@@ -1287,11 +1287,21 @@ func hasSupervisorIntent() (bool, error) {
 		return false, fmt.Errorf("stat %s: %w", path, err)
 	}
 	if info.IsDir() {
-		// Hostile case: a directory named supervisor-intent.json. Treat
-		// as not-a-valid-intent so the routing logic decides on the
-		// scheduler state; the migration driver will surface the
-		// directory-vs-file mismatch separately if it gets that far.
-		return false, nil
+		// Corrupt state-dir: a directory named supervisor-intent.json.
+		// Round-4 fix (codex-r4-a/c-p1): the prior silent (false, nil)
+		// branch let the dispatcher fall through to legacy
+		// runInstallUpgrade even though os.Stat reports the path
+		// exists — the round-3 unreadable-intent guard inside
+		// runV5UpgradeWindows then never fires. Surface a non-nil
+		// error so the routing dispatcher fails closed and the
+		// operator sees the corruption shape.
+		return false, fmt.Errorf("hasSupervisorIntent: %s is a directory (corrupt state-dir; rename/delete and re-run)", path)
+	}
+	if !info.Mode().IsRegular() {
+		// Defense-in-depth for symlink / named pipe / socket / device
+		// entries that resolved through os.Stat to a non-regular kind.
+		// Same fail-closed rationale as the IsDir branch above.
+		return false, fmt.Errorf("hasSupervisorIntent: %s is not a regular file (mode %v)", path, info.Mode())
 	}
 	return true, nil
 }

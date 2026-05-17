@@ -956,9 +956,25 @@ func (d *v5UpgradeDeps) ExitGraceful(ctx context.Context, pipePath string, timeo
 }
 
 func (d *v5UpgradeDeps) ForceKillSupervisor(pipePath string) error {
+	// Codex round-4 Lane C P1 (codex-r4-c-p1): the historical
+	// implementation collapsed every ReadSupervisorLockOwner error
+	// onto benign nil — including permission denied, corrupt JSON,
+	// and non-positive PID values. Under the now-strict
+	// RunInstallUpgrade path that swallow hides real failures from
+	// the orchestrator (which relies on a non-nil return to escalate
+	// to verifyPortsUnbound / abort). Only the os.IsNotExist branch
+	// represents a proven "no supervisor running" condition; every
+	// other read failure or corrupt-sidecar shape must propagate.
 	owner, err := api.ReadSupervisorLockOwner(d.supervisorLockDir)
-	if err != nil || owner.PID <= 0 {
-		return nil
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Genuine "no supervisor running" — benign.
+			return nil
+		}
+		return fmt.Errorf("force-kill: read supervisor lock owner: %w", err)
+	}
+	if owner.PID <= 0 {
+		return fmt.Errorf("force-kill: supervisor.lock.owner.json has invalid PID %d (corrupt sidecar)", owner.PID)
 	}
 	return killPIDViaTaskkill(owner.PID)
 }

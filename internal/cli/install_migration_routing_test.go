@@ -3,11 +3,14 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
 
+	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/migration"
 )
 
@@ -247,8 +250,8 @@ func TestMigrationFlags_RequireUpgradeOrRollback(t *testing.T) {
 // sentinels (8/9/13/14) must propagate through wrap layers.
 func TestMigrationExitCodeError_ImplementsErrorsAs(t *testing.T) {
 	cases := []struct {
-		name    string
-		err     error
+		name     string
+		err      error
 		wantCode int
 	}{
 		{
@@ -308,4 +311,122 @@ func TestHasSupervisorIntent_AbsentReturnsFalse(t *testing.T) {
 		t.Skip("host has a supervisor-intent.json on disk; cannot assert absent-state behavior")
 	}
 	// got == false here; the t.Skip above handled the true case.
+}
+
+// TestHasSupervisorIntent_AbsentReturnsFalseNoError pins the absent-file
+// contract under the deterministic state-dir override seam. Distinct
+// from TestHasSupervisorIntent_AbsentReturnsFalse above which probes the
+// real platform path and may skip; this variant uses a temp dir so it
+// always exercises the absent-file branch.
+func TestHasSupervisorIntent_AbsentReturnsFalseNoError(t *testing.T) {
+	root := t.TempDir()
+	t.Cleanup(api.SetDaemonStateRootForTest(root))
+
+	got, err := hasSupervisorIntent()
+	if err != nil {
+		t.Fatalf("hasSupervisorIntent err = %v, want nil", err)
+	}
+	if got {
+		t.Fatalf("hasSupervisorIntent = true, want false (no file on disk)")
+	}
+}
+
+// TestHasSupervisorIntent_RegularFileReturnsTrue pins the happy-path
+// contract: a regular file named supervisor-intent.json under the
+// state-dir → (true, nil), regardless of file contents (routing decision
+// is presence-based; intent validity is checked downstream).
+func TestHasSupervisorIntent_RegularFileReturnsTrue(t *testing.T) {
+	root := t.TempDir()
+	t.Cleanup(api.SetDaemonStateRootForTest(root))
+
+	stateDir, err := api.DaemonStateDir()
+	if err != nil {
+		t.Fatalf("DaemonStateDir: %v", err)
+	}
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	// Write an arbitrary body; hasSupervisorIntent only inspects file
+	// type (regular vs dir vs other), not contents.
+	if err := os.WriteFile(intentPath, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("write intent: %v", err)
+	}
+
+	got, err := hasSupervisorIntent()
+	if err != nil {
+		t.Fatalf("hasSupervisorIntent err = %v, want nil", err)
+	}
+	if !got {
+		t.Fatalf("hasSupervisorIntent = false, want true (regular file present)")
+	}
+}
+
+// TestHasSupervisorIntent_NonRegularReturnsError pins that any
+// non-regular, non-directory file kind (symlink, named pipe, socket)
+// at supervisor-intent.json also surfaces a non-nil error. Uses
+// os.Symlink with a target that does not need to exist; on Windows
+// this requires SeCreateSymbolicLinkPrivilege or developer mode and
+// is therefore skipped when symlink creation fails (the dir-case test
+// above still covers the canonical corruption shape on Windows).
+func TestHasSupervisorIntent_NonRegularReturnsError(t *testing.T) {
+	root := t.TempDir()
+	t.Cleanup(api.SetDaemonStateRootForTest(root))
+
+	stateDir, err := api.DaemonStateDir()
+	if err != nil {
+		t.Fatalf("DaemonStateDir: %v", err)
+	}
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	// Symlink target need not exist for Lstat-based testing, but
+	// os.Stat (which hasSupervisorIntent uses) follows symlinks, so the
+	// target MUST exist and be non-regular for the test to be
+	// meaningful. Point it at the state-dir itself which is a real
+	// directory; the resolved mode will then be a directory mode.
+	if err := os.Symlink(stateDir, intentPath); err != nil {
+		t.Skipf("symlink creation not permitted on this platform: %v", err)
+	}
+
+	// Symlink → dir resolves to a directory via os.Stat; the existing
+	// IsDir() guard covers this. The test still adds defense-in-depth
+	// against future refactors that might switch to Lstat.
+	got, err := hasSupervisorIntent()
+	if err == nil {
+		t.Fatalf("hasSupervisorIntent err = nil, want non-nil (intent is non-regular via symlink)")
+	}
+	if got {
+		t.Fatalf("hasSupervisorIntent = true on non-regular file, want false")
+	}
+}
+
+// TestHasSupervisorIntent_DirectoryReturnsError pins the round-4 fix:
+// a directory named supervisor-intent.json under the state-dir is a
+// corrupt-state-dir condition. hasSupervisorIntent must surface a
+// non-nil error so the routing dispatcher fails closed instead of
+// silently falling through to the legacy runInstallUpgrade path
+// (round-3 added an unreadable-intent guard inside runV5UpgradeWindows
+// that the prior silent-false branch never reached).
+func TestHasSupervisorIntent_DirectoryReturnsError(t *testing.T) {
+	root := t.TempDir()
+	t.Cleanup(api.SetDaemonStateRootForTest(root))
+
+	stateDir, err := api.DaemonStateDir()
+	if err != nil {
+		t.Fatalf("DaemonStateDir: %v", err)
+	}
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	if err := os.Mkdir(intentPath, 0o700); err != nil {
+		t.Fatalf("mkdir intent-as-dir: %v", err)
+	}
+
+	got, err := hasSupervisorIntent()
+	if err == nil {
+		t.Fatalf("hasSupervisorIntent err = nil, want non-nil (intent is a directory)")
+	}
+	if got {
+		t.Fatalf("hasSupervisorIntent = true on directory, want false")
+	}
+	if !strings.Contains(err.Error(), "supervisor-intent.json") {
+		t.Errorf("error must mention the offending path; got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "directory") {
+		t.Errorf("error must say 'directory' so operators see the corruption shape; got: %v", err)
+	}
 }

@@ -111,7 +111,7 @@ func setSuperviseTestExitCh(ch chan struct{}) func() {
 //   - api.OpenSupervisorEventLog (Task 2.3)  — durable audit channel.
 //   - api.NewEventLoop           (Task 4.2)  — FIFO event loop.
 //   - cli.NewSupervisorIPCListener (Task 5.1 Windows / 5.2 POSIX)
-//                                            — control IPC plane.
+//     — control IPC plane.
 //   - signal handler             (this task) — SIGINT/SIGTERM →
 //     graceful_exit_in_progress=true → loop cancel → unlock → exit 0.
 //
@@ -153,6 +153,42 @@ force-termination land in Task 9.2.
 	return cmd
 }
 
+// gracefulCounter replaces the historical gracefulInProgress
+// atomic.Bool to fix codex-r4-b-p2: two concurrent quiesce-timers
+// requests sharing one boolean would have the first goroutine's
+// `defer Store(false)` clear the flag while the second drain was
+// still running. Lifecycle handlers + transient-timer suppression
+// then observed `InProgress() == false` even though a drain was
+// still active.
+//
+// The counter holds an atomic.Int32 incremented by Enter and
+// decremented by Exit. InProgress returns true iff the counter is
+// strictly positive — i.e. at least one quiesce-drain or supervisor-
+// exit handler is still inside its protected region.
+//
+// Supervisor-exit handlers call Enter without a matching Exit
+// (process is about to terminate); the resulting positive counter is
+// the "permanent" graceful-exit-in-progress signal and is the
+// expected end state for the lifetime of the supervisor process.
+type gracefulCounter struct {
+	n atomic.Int32
+}
+
+// Enter records a graceful-exit-protected region start.
+func (g *gracefulCounter) Enter() { g.n.Add(1) }
+
+// Exit records a graceful-exit-protected region end. Must be paired
+// 1:1 with Enter; balanced Enter/Exit returns the counter to zero.
+// Decrementing below zero is a programming error — go's atomic.Int32
+// does not panic on negative values, but a negative counter means
+// InProgress() would mis-report false too early.
+func (g *gracefulCounter) Exit() { g.n.Add(-1) }
+
+// InProgress reports whether any graceful-exit-protected region is
+// active (counter > 0). Concurrent with Enter/Exit; readers see a
+// snapshot under release semantics from the underlying atomic.
+func (g *gracefulCounter) InProgress() bool { return g.n.Load() > 0 }
+
 // ipcDispatchDeps bundles the per-supervisor context the IPC handlers
 // need beyond the per-request envelope. It is constructed once in
 // runSupervise and passed into the accept-loop goroutine so each
@@ -166,11 +202,16 @@ force-termination land in Task 9.2.
 // handleIPCConn would obscure the contract; the bundle keeps the
 // dependency surface visible.
 type ipcDispatchDeps struct {
-	stateDir           string
-	events             *api.SupervisorEventLog
-	reconcileReady     *atomic.Bool
-	intentFilesLoaded  *atomic.Bool
-	gracefulInProgress *atomic.Bool
+	stateDir          string
+	events            *api.SupervisorEventLog
+	reconcileReady    *atomic.Bool
+	intentFilesLoaded *atomic.Bool
+	// gracefulInProgress is a refcount-style counter (codex-r4-b-p2)
+	// — see gracefulCounter docstring. The field name retains its
+	// historical spelling so call sites elsewhere in supervise.go
+	// stay one rename away from churn-free; the type change is
+	// load-bearing for the concurrent-drain correctness contract.
+	gracefulInProgress  *gracefulCounter
 	triggerGracefulExit func() // closes loop, signals exit
 }
 
@@ -297,7 +338,15 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	// new transient-timer fires while drain is active. Phase-6 sets
 	// it once on signal receipt; later tasks will check it from
 	// the FIFO event-loop handlers.
-	var gracefulInProgress atomic.Bool
+	//
+	// Codex round-4 Lane B P2 (codex-r4-b-p2): the historical
+	// atomic.Bool implementation let two concurrent quiesce-timers
+	// requests share one flag — the first goroutine's `defer
+	// Store(false)` would clear the in-progress signal while the
+	// second drain was still running. Replaced with a refcount-style
+	// gracefulCounter so InProgress() remains true until the LAST
+	// active region exits.
+	var gracefulInProgress gracefulCounter
 
 	loop.RegisterHandler(func(e api.LoopEvent) {
 		_ = events.Emit(api.SupervisorEvent{
@@ -306,8 +355,8 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 			Event:    "loop-event",
 			TaskName: e.TaskName,
 			Body: map[string]any{
-				"kind":                       string(e.Kind),
-				"graceful_exit_in_progress":  gracefulInProgress.Load(),
+				"kind":                      string(e.Kind),
+				"graceful_exit_in_progress": gracefulInProgress.InProgress(),
 			},
 		})
 	})
@@ -443,7 +492,12 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		// final-tick handler still in flight observes the active
 		// graceful-exit state and can suppress new transient-timer
 		// fires per spec §"Graceful exit + quiesce drain" step 1.
-		gracefulInProgress.Store(true)
+		// Codex round-4 Lane B P2: lifecycle-exit handlers use Enter
+		// without a matching Exit — the supervisor process is about
+		// to terminate, so the resulting positive counter is the
+		// permanent graceful-exit-in-progress signal for whatever
+		// short window remains before the process actually exits.
+		gracefulInProgress.Enter()
 		loopCancel()
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "info",
@@ -467,7 +521,12 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 				"signal": "test-exit",
 			},
 		})
-		gracefulInProgress.Store(true)
+		// Codex round-4 Lane B P2: lifecycle-exit handlers use Enter
+		// without a matching Exit — the supervisor process is about
+		// to terminate, so the resulting positive counter is the
+		// permanent graceful-exit-in-progress signal for whatever
+		// short window remains before the process actually exits.
+		gracefulInProgress.Enter()
 		loopCancel()
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "info",
@@ -493,7 +552,12 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 				"signal": "ipc-exit-graceful",
 			},
 		})
-		gracefulInProgress.Store(true)
+		// Codex round-4 Lane B P2: lifecycle-exit handlers use Enter
+		// without a matching Exit — the supervisor process is about
+		// to terminate, so the resulting positive counter is the
+		// permanent graceful-exit-in-progress signal for whatever
+		// short window remains before the process actually exits.
+		gracefulInProgress.Enter()
 		loopCancel()
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "info",
@@ -516,7 +580,12 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 				"err": ctx.Err().Error(),
 			},
 		})
-		gracefulInProgress.Store(true)
+		// Codex round-4 Lane B P2: lifecycle-exit handlers use Enter
+		// without a matching Exit — the supervisor process is about
+		// to terminate, so the resulting positive counter is the
+		// permanent graceful-exit-in-progress signal for whatever
+		// short window remains before the process actually exits.
+		gracefulInProgress.Enter()
 		loopCancel()
 		return ctx.Err()
 	}
@@ -790,11 +859,16 @@ func handleQuiesceTimers(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps
 	// processing. We block this connection handler waiting for the
 	// drain result; that is intentional — the client expects the
 	// final frame on the SAME connection.
-	deps.gracefulInProgress.Store(true)
+	//
+	// Codex round-4 Lane B P2: Enter/Exit (refcount) pair replaces
+	// the historical Store(true)/Store(false) so two concurrent
+	// quiesce-timers requests can't have the first's Exit clear the
+	// in-progress flag while the second drain is still running.
+	deps.gracefulInProgress.Enter()
 	handler := quiesceHandlerFactory(deps.stateDir)
 	resultCh := make(chan QuiesceResult, 1)
 	go func() {
-		defer deps.gracefulInProgress.Store(false)
+		defer deps.gracefulInProgress.Exit()
 		// 5s grace window beyond the requested deadline so the drain
 		// goroutine's ctx is honored even when the caller is sloppy.
 		ctx, cancel := context.WithTimeout(context.Background(),

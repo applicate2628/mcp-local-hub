@@ -390,3 +390,101 @@ func TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade(t *testing.T) {
 		t.Fatalf("error must name the unreadable-intent cause so operators can diagnose; got %v", err)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// codex round-4 Lane C P1: v5UpgradeDeps.ForceKillSupervisor error
+// propagation. The historical implementation swallowed every
+// ReadSupervisorLockOwner error including permission denied / corrupt
+// sidecar / invalid PID and returned nil — hiding the failure from
+// the now-strict RunInstallUpgrade path which relies on a non-nil
+// return to escalate to verifyPortsUnbound / abort. Only a proven
+// "already exited / no owner" condition (file not present) should
+// map to benign.
+// ---------------------------------------------------------------------------
+
+// TestV5UpgradeDeps_ForceKillSupervisor_NotExistIsBenign pins the
+// genuine-no-supervisor-running path: ReadSupervisorLockOwner returns
+// os.IsNotExist (the sidecar is absent because no supervisor is
+// running). ForceKillSupervisor MUST return nil so the upgrade
+// proceeds without trying to kill nothing.
+func TestV5UpgradeDeps_ForceKillSupervisor_NotExistIsBenign(t *testing.T) {
+	// supervisorLockDir points at a path whose .owner.json does NOT
+	// exist. ReadSupervisorLockOwner will return an os.IsNotExist
+	// error and the helper must treat that as benign.
+	tmpDir := t.TempDir()
+	lockDir := filepath.Join(tmpDir, "supervisor.lock")
+	// Do NOT create supervisor.lock.owner.json — absence is the test.
+
+	d := &v5UpgradeDeps{supervisorLockDir: lockDir}
+	if err := d.ForceKillSupervisor(""); err != nil {
+		t.Fatalf("absent .owner.json must map to benign nil (no supervisor running); got %v", err)
+	}
+}
+
+// TestV5UpgradeDeps_ForceKillSupervisor_PermissionDeniedPropagates pins
+// the round-4 fix: a ReadSupervisorLockOwner error that is NOT
+// os.IsNotExist must propagate as a non-nil error from
+// ForceKillSupervisor. The historical implementation collapsed every
+// read failure (permission denied, ENOENT for parent, corrupt JSON)
+// onto benign nil, which hid the failure from the upgrade orchestrator.
+//
+// We simulate the non-IsNotExist failure by pointing the lock dir at
+// a path whose .owner.json IS present but contains invalid JSON
+// (unmarshal failure). On POSIX a chmod 0 would suffice for
+// permission denied; on Windows the symmetric path is harder to set
+// up portably, so the corrupt-JSON variant covers the same control
+// flow (non-IsNotExist error from ReadSupervisorLockOwner) and is
+// the load-bearing test for the propagation contract.
+func TestV5UpgradeDeps_ForceKillSupervisor_PermissionDeniedPropagates(t *testing.T) {
+	tmpDir := t.TempDir()
+	lockDir := filepath.Join(tmpDir, "supervisor.lock")
+	ownerPath := lockDir + ".owner.json"
+
+	// Write a corrupt sidecar — json.Unmarshal will fail, which is a
+	// non-IsNotExist error path through ReadSupervisorLockOwner.
+	if err := os.WriteFile(ownerPath, []byte("not-valid-json{{{"), 0o600); err != nil {
+		t.Fatalf("seed corrupt sidecar: %v", err)
+	}
+
+	d := &v5UpgradeDeps{supervisorLockDir: lockDir}
+	err := d.ForceKillSupervisor("")
+	if err == nil {
+		t.Fatal("non-IsNotExist ReadSupervisorLockOwner failure must propagate from ForceKillSupervisor; got nil")
+	}
+	// IsNotExist must NOT be true — we wrote the file deliberately,
+	// so the failure must be on the unmarshal path, not the read path.
+	if os.IsNotExist(err) {
+		t.Fatalf("error should NOT be IsNotExist (file was written); got %v", err)
+	}
+	if !strings.Contains(err.Error(), "force-kill") && !strings.Contains(err.Error(), "owner") {
+		t.Errorf("error should describe the force-kill / lock-owner read failure; got %v", err)
+	}
+}
+
+// TestV5UpgradeDeps_ForceKillSupervisor_InvalidPIDPropagates pins the
+// round-4 fix: a valid sidecar JSON whose PID is non-positive
+// (0, negative) is a corrupt-sidecar condition. ForceKillSupervisor
+// must propagate a non-nil error so the upgrade aborts rather than
+// silently no-op (which would let a stale supervisor process keep
+// holding the listening ports).
+func TestV5UpgradeDeps_ForceKillSupervisor_InvalidPIDPropagates(t *testing.T) {
+	tmpDir := t.TempDir()
+	lockDir := filepath.Join(tmpDir, "supervisor.lock")
+	ownerPath := lockDir + ".owner.json"
+
+	// Valid JSON, PID=0 (the canonical "unset" sentinel that
+	// SupervisorLockOwner uses).
+	body := `{"pid":0,"started_at":"2026-05-17T00:00:00Z"}`
+	if err := os.WriteFile(ownerPath, []byte(body), 0o600); err != nil {
+		t.Fatalf("seed PID-0 sidecar: %v", err)
+	}
+
+	d := &v5UpgradeDeps{supervisorLockDir: lockDir}
+	err := d.ForceKillSupervisor("")
+	if err == nil {
+		t.Fatal("invalid PID (<=0) in .owner.json must propagate from ForceKillSupervisor; got nil")
+	}
+	if !strings.Contains(err.Error(), "PID") {
+		t.Errorf("error should name the invalid-PID cause; got %v", err)
+	}
+}

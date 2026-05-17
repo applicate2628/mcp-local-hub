@@ -1012,6 +1012,103 @@ func TestSupervise_IPC_ExitGracefulInitiates(t *testing.T) {
 	}
 }
 
+// TestSupervise_GracefulCounter_BasicEnterExit pins the unit-level
+// contract of the gracefulCounter type that replaces the
+// gracefulInProgress atomic.Bool to fix the codex-r4-b-p2 race.
+// Enter increments; Exit decrements; InProgress returns true iff
+// the counter is positive.
+func TestSupervise_GracefulCounter_BasicEnterExit(t *testing.T) {
+	var g gracefulCounter
+	if g.InProgress() {
+		t.Fatal("fresh counter must report InProgress=false")
+	}
+	g.Enter()
+	if !g.InProgress() {
+		t.Fatal("after Enter, InProgress must be true")
+	}
+	g.Exit()
+	if g.InProgress() {
+		t.Fatal("after balanced Enter+Exit, InProgress must be false")
+	}
+}
+
+// TestSupervise_GracefulCounter_NestedEnterExitOnlyClearsWhenZero pins
+// the load-bearing fix: with multiple concurrent Enters, InProgress
+// must remain true until the LAST Exit, not the first.
+//
+// The historical bool let the first defer Store(false) clear the flag
+// while another drain was still running — the rest of the supervisor
+// (lifecycle handlers, transient-timer suppression) then observed
+// `InProgress() == false` and could proceed as if drain had
+// finished, even though one drain goroutine was still active.
+func TestSupervise_GracefulCounter_NestedEnterExitOnlyClearsWhenZero(t *testing.T) {
+	var g gracefulCounter
+	g.Enter()
+	g.Enter()
+	if !g.InProgress() {
+		t.Fatal("after two Enters, InProgress must be true")
+	}
+	g.Exit()
+	// One drain done; the OTHER is still running.
+	if !g.InProgress() {
+		t.Fatal("after one Exit while a second Enter is still open, InProgress MUST remain true (codex-r4-b-p2 fix); the historical bool collapsed both states onto false on the first Exit")
+	}
+	g.Exit()
+	if g.InProgress() {
+		t.Fatal("after balanced Enter+Exit pairs, InProgress must be false")
+	}
+}
+
+// TestSupervise_GracefulCounter_ConcurrentEntersExits stress-tests the
+// counter against concurrent goroutines. The final state after every
+// goroutine returns must be `InProgress() == false`. Run with -race to
+// catch torn reads/writes on the underlying atomic.
+func TestSupervise_GracefulCounter_ConcurrentEntersExits(t *testing.T) {
+	var g gracefulCounter
+	const N = 50
+	done := make(chan struct{}, N)
+	for i := 0; i < N; i++ {
+		go func() {
+			g.Enter()
+			// At this point InProgress MUST be true regardless of how
+			// many other goroutines have already exited; if a peer's
+			// Exit raced our Enter to zero, that would be a regression.
+			if !g.InProgress() {
+				t.Errorf("InProgress=false while goroutine is between Enter and Exit; counter race")
+			}
+			g.Exit()
+			done <- struct{}{}
+		}()
+	}
+	for i := 0; i < N; i++ {
+		<-done
+	}
+	if g.InProgress() {
+		t.Fatal("after all goroutines completed, counter must be back to zero")
+	}
+}
+
+// TestSupervise_GracefulCounter_QuiesceWiringClearsOnExit pins the
+// dispatcher-level wiring: handleQuiesceTimers must call Enter on
+// entry and Exit on completion of the drain. The deferred Exit must
+// run after Drain returns. This is the same control-flow guarantee
+// the historical bool needed; the test pins it under the new
+// counter so a future refactor can't regress.
+func TestSupervise_GracefulCounter_QuiesceWiringClearsOnExit(t *testing.T) {
+	var g gracefulCounter
+	// Simulate the wiring: Enter on entry, defer Exit on exit.
+	func() {
+		g.Enter()
+		defer g.Exit()
+		if !g.InProgress() {
+			t.Fatal("InProgress=false inside Enter/Exit pair")
+		}
+	}()
+	if g.InProgress() {
+		t.Fatal("InProgress=true after deferred Exit; counter never cleared")
+	}
+}
+
 // TestSupervise_IPC_VersionPinning pins the codex-r3 Lane B P1 #1
 // version-pinning contract: an explicit Version != 1 returns a
 // structured UNSUPPORTED_PROTOCOL_VERSION error rather than being
