@@ -9,6 +9,7 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"unicode/utf8"
 
 	"mcp-local-hub/internal/process"
 )
@@ -26,7 +27,7 @@ import (
 //     stubs (scheduler_linux.go, scheduler_darwin.go) do not grow a
 //     no-op method. Per spec §"Package ownership", POSIX has no
 //     schtasks; a function-shaped helper keeps the interface lean.
-//   - uses `schtasks /Query /XML ONE /FO LIST` instead of the
+//   - uses `schtasks /Query /XML ONE` instead of the
 //     human-readable LIST form. XML gives clean access to
 //     Principal.UserId (the foreign-owner field migration cares about)
 //     and is robust against locale variations in the schtasks LIST
@@ -52,7 +53,12 @@ func EnumerateAllMcphubTasks() ([]TaskStatus, error) {
 	if err != nil {
 		return nil, fmt.Errorf("enumerate mcphub tasks: %w", err)
 	}
-	cmd := exec.Command(schtasksPath, "/Query", "/XML", "ONE", "/FO", "LIST")
+	// schtasks /Query /XML ONE returns a concatenated XML stream wrapped
+	// in a <Tasks> root. The /XML flag is mutually exclusive with /FO
+	// and /V — earlier `/XML ONE /FO LIST` rejected with "ERROR: /XML
+	// option cannot be combined with /FO, /V or /NH" on Windows 11 24H2
+	// (smoke-tested 2026-05-17).
+	cmd := exec.Command(schtasksPath, "/Query", "/XML", "ONE")
 	process.NoConsole(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -71,7 +77,19 @@ func EnumerateAllMcphubTasks() ([]TaskStatus, error) {
 // safety boundary that prevents the test suite from polluting the
 // developer's installed Task Scheduler state.
 func parseEnumerateXML(stream string) ([]TaskStatus, error) {
+	if strings.TrimSpace(stream) == "" {
+		return nil, nil
+	}
+	// schtasks /Query /XML ONE on Windows 11 24H2 emits a <Tasks>
+	// wrapper with sibling <Task> children separated by XML comments,
+	// NO per-task <?xml> PI. Earlier builds may emit one fully-formed
+	// document per task back-to-back. Tolerate both: try the splitter;
+	// if it produces a single chunk wrapped in <Tasks>, fall back to a
+	// streaming token decoder.
 	docs := splitConcatenatedTaskXML(stream)
+	if len(docs) == 1 && strings.Contains(docs[0], "<Tasks>") {
+		return parseTasksWrapperStream(docs[0])
+	}
 	results := make([]TaskStatus, 0, len(docs))
 	for _, doc := range docs {
 		ts, ok, err := decodeOneTask(doc)
@@ -87,6 +105,78 @@ func parseEnumerateXML(stream string) ([]TaskStatus, error) {
 		results = append(results, ts)
 	}
 	return results, nil
+}
+
+// parseTasksWrapperStream handles the modern schtasks /Query /XML ONE
+// output: single <Tasks> root with sibling <Task> children. Streams
+// xml.Decoder.Token() to advance to each <Task> start. cp866 / cp437
+// localized comments + descriptions in unrelated tasks are stripped
+// of invalid UTF-8 (replaced with U+FFFD) before decoding — the
+// fields we read (URI, UserId) are ASCII for our mcphub-prefix
+// filter, so lossy replacement is safe.
+func parseTasksWrapperStream(stream string) ([]TaskStatus, error) {
+	body := stripEnumerateXMLDeclaration(stream)
+	body = sanitizeUTF8(body)
+	dec := xml.NewDecoder(bytes.NewReader([]byte(body)))
+	dec.Strict = true
+	dec.Entity = nil
+	dec.CharsetReader = nil
+
+	var results []TaskStatus
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("parse tasks wrapper: %w", err)
+		}
+		se, ok := tok.(xml.StartElement)
+		if !ok || se.Name.Local != "Task" {
+			continue
+		}
+		var t enumXMLTask
+		if err := dec.DecodeElement(&t, &se); err != nil {
+			return nil, fmt.Errorf("decode task in wrapper: %w", err)
+		}
+		uri := strings.TrimSpace(t.RegistrationInfo.URI)
+		if uri == "" || !strings.HasPrefix(uri, mcphubURIPrefix) {
+			continue
+		}
+		status := TaskStatus{Name: uri, LastResult: -1}
+		if len(t.Principals.Principal) > 0 {
+			status.Owner = strings.TrimSpace(t.Principals.Principal[0].UserId)
+		}
+		switch strings.ToLower(strings.TrimSpace(t.Settings.Enabled)) {
+		case "true":
+			status.State = "Ready"
+		case "false":
+			status.State = "Disabled"
+		}
+		results = append(results, status)
+	}
+	return results, nil
+}
+
+// sanitizeUTF8 replaces every invalid UTF-8 byte sequence with U+FFFD.
+// Used to make the XML decoder tolerant of Windows console OEM-codepage
+// bytes (cp866 / cp437) in localized non-mcphub task descriptions.
+func sanitizeUTF8(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	b := make([]byte, 0, len(s))
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && size == 1 {
+			b = append(b, '\xef', '\xbf', '\xbd') // U+FFFD UTF-8 bytes
+			i++
+			continue
+		}
+		b = append(b, s[i:i+size]...)
+		i += size
+	}
+	return string(b)
 }
 
 // mcphubURIPrefix is the leading byte sequence every legitimate
