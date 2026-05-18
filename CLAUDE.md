@@ -584,7 +584,8 @@ v0.5.0 introduces a long-lived `mcphub supervise` parent process per user
 that replaces v0.4.x's N-per-daemon Task Scheduler model. The supervisor
 owns every MCP daemon as a child process under an OS-appropriate lifecycle
 primitive (Windows Job Object with `KILL_ON_JOB_CLOSE`, Linux
-`PR_SET_PDEATHSIG`, macOS process group + kqueue), observes child exits
+`PR_SET_PDEATHSIG`, macOS preview process-group spawn; kqueue observation is
+a v0.6 follow-up), observes child exits
 in real time, applies a persisted restart-policy state machine, and
 exposes a local-only owner-bound IPC for control commands. The full
 design lives in
@@ -631,12 +632,24 @@ below.
   `~/.local/state/mcp-local-hub`; dir mode 0700, files 0600. Sanity check
   rejects world-writable parent or non-owner uid (same exit 8 as
   watchdog).
-- **macOS (preview):** same POSIX layout. Build-only Go cross-compile, no
-  automated tests in v0.5.0; v0.6 reevaluates.
+- **macOS (preview):** same POSIX layout. Build-only Go cross-compile plus
+  process-group spawn only; no kqueue lifecycle watcher or automated
+  lifecycle tests in v0.5.0; v0.6 reevaluates.
 
 `mcphub supervise --help` and the IPC `status` reply both print absolute
 paths to every state file so operators can inspect / quarantine / restore
 them directly.
+
+GUI Dashboard status is now sourced through the supervisor IPC status seam:
+`internal/cli/gui.go` wires `api.SupervisorIPCStatusFn =
+api.DialSupervisorIPCStatus` before `gui.NewServer`, and `/api/status`
+continues through `internal/api/health.go`'s `DaemonStatusSnapshot` cache.
+The IPC handler reads `<state-dir>/supervisor-intent.json` for daemon
+descriptors and `<state-dir>/supervisor-state.json` for runtime PID/state.
+The legacy scheduler scan remains only the nil-seam fallback for hosts running
+without this wiring; once wired, an unreachable or mismatched supervisor fails
+loud as `STATUS_FAILED` instead of silently returning the deleted v0.4.x task
+view.
 
 ### Subcommands
 

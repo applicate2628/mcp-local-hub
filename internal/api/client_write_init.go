@@ -97,6 +97,13 @@ func secureCreateClientConfigIfMissingWithOperatorOpt(path string, stub []byte) 
 // shell profile or scheduler scripts.
 const AllowUnhardenedClientWriteEnv = "MCPHUB_ALLOW_UNHARDENED_CLIENT_WRITE"
 
+// AllowUnhardenedStateWriteEnv is an operator-explicit opt-in for
+// bypassing the state-file parent-dir write/delete TOCTOU check.
+// The hardened per-file DACL/mode write path still applies; this
+// only lets operators accept the state-file parent relax lane when
+// parent ACL cleanup is not practical.
+const AllowUnhardenedStateWriteEnv = "MCPHUB_ALLOW_UNHARDENED_STATE_WRITE"
+
 // RequireSingleUserHomeEnv is the v0.4.0+ operator opt-in for the
 // STRICT parent-dir DACL/mode gate. Set to "1" or "true" (case-
 // insensitive) on corp-managed machines, shared hosts, or other
@@ -296,6 +303,15 @@ func operatorAllowedUnhardenedClientWrite() bool {
 		return true
 	}
 	return false
+}
+
+// operatorAllowsUnhardenedStateWrite reports whether the operator
+// explicitly accepts the state-file parent TOCTOU relax lane via
+// AllowUnhardenedStateWriteEnv. Accepts "1" and "true"
+// case-insensitively; everything else returns false.
+func operatorAllowsUnhardenedStateWrite() bool {
+	v := strings.TrimSpace(os.Getenv(AllowUnhardenedStateWriteEnv))
+	return v == "1" || strings.EqualFold(v, "true")
 }
 
 // operatorRequiresSingleUserHome reports whether the operator has

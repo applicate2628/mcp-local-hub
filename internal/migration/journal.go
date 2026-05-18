@@ -207,21 +207,49 @@ var allForwardMarkers = []string{
 	MarkerCommitted,
 }
 
-// touchMarker creates an empty marker file. Idempotent (existing marker
-// is left untouched). Used at every forward-step transition.
-//
-// Note: this is intentionally a separate write from any JSON payload —
-// marker presence/absence is the resume signal, never the content.
+// touchMarker durably creates an empty marker file. Idempotent when the final
+// marker already exists. The primitive writes and fsyncs a temp marker, renames
+// it into place, then best-effort fsyncs the parent directory where supported.
+// Marker presence/absence is the resume signal, never the content.
 func touchMarker(journalDir, name string) error {
 	if err := os.MkdirAll(journalDir, 0700); err != nil {
 		return fmt.Errorf("touch %s: mkdir: %w", name, err)
 	}
 	path := filepath.Join(journalDir, name)
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	} else if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("touch %s: stat: %w", name, err)
+	}
+	tmp := filepath.Join(journalDir, fmt.Sprintf(".%s.tmp.%d.%d", name, os.Getpid(), time.Now().UnixNano()))
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
 		return fmt.Errorf("touch %s: %w", name, err)
 	}
-	return f.Close()
+	removeTmp := true
+	defer func() {
+		if removeTmp {
+			_ = os.Remove(tmp)
+		}
+	}()
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("touch %s: sync temp: %w", name, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("touch %s: close temp: %w", name, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		if os.IsExist(err) {
+			return nil
+		}
+		return fmt.Errorf("touch %s: rename: %w", name, err)
+	}
+	removeTmp = false
+	if err := syncDirectory(journalDir); err != nil {
+		return fmt.Errorf("touch %s: sync dir: %w", name, err)
+	}
+	return nil
 }
 
 // markerExists is the boolean form of os.Stat for resume classification.
@@ -1047,13 +1075,15 @@ func deriveOrLoadIntent(journalDir string, tasks []scheduler.TaskStatus, xmlByTa
 	for _, t := range tasks {
 		raw := xmlByTask[t.Name]
 		command, args := extractExecFromXML(raw)
+		workingDir := strings.TrimSpace(extractTag(raw, "WorkingDirectory"))
 		server, daemon := parseDaemonArgv(args)
 		intent.Daemons = append(intent.Daemons, api.SupervisorDaemon{
-			TaskName: t.Name,
-			Server:   server,
-			Daemon:   daemon,
-			Command:  command,
-			Args:     args,
+			TaskName:  t.Name,
+			Server:    server,
+			Daemon:    daemon,
+			Command:   command,
+			Args:      args,
+			Workspace: workingDir,
 		})
 	}
 	return intent, nil

@@ -63,7 +63,6 @@ func canonicalMcphubPath() (string, error) {
 	return filepath.Join(home, ".local", "bin", mcphubShortName), nil
 }
 
-
 func ensureCanonicalMcphubPresent() (string, error) {
 	canonicalPath, err := canonicalMcphubPath()
 	if err != nil {
@@ -1095,6 +1094,7 @@ func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, err
 	if err != nil {
 		return nil, err
 	}
+	workDir := filepath.Dir(canonicalPath)
 	p := &Plan{Server: m.Name, FullInstall: opts.DaemonFilter == ""}
 	// Scheduler tasks — one per daemon (global) or lazy (workspace-scoped).
 	// SupervisorIntent mirrors SchedulerTasks during the v0.5.x transition
@@ -1113,10 +1113,11 @@ func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, err
 			Trigger: "At logon",
 		})
 		p.SupervisorIntent = append(p.SupervisorIntent, SupervisorIntentEntry{
-			Name:    name,
-			Command: canonicalPath,
-			Args:    args,
-			Trigger: "At logon",
+			Name:       name,
+			Command:    canonicalPath,
+			Args:       args,
+			WorkingDir: workDir,
+			Trigger:    "At logon",
 		})
 	}
 	// Weekly refresh restarts the whole server, so it only makes sense for full installs.
@@ -1130,10 +1131,11 @@ func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, err
 			Trigger: "Weekly Sun 03:00",
 		})
 		p.SupervisorIntent = append(p.SupervisorIntent, SupervisorIntentEntry{
-			Name:    name,
-			Command: canonicalPath,
-			Args:    args,
-			Trigger: "Weekly Sun 03:00",
+			Name:       name,
+			Command:    canonicalPath,
+			Args:       args,
+			WorkingDir: workDir,
+			Trigger:    "Weekly Sun 03:00",
 		})
 	}
 	// Client updates — one per binding; with a filter, only bindings pointing at the chosen daemon.

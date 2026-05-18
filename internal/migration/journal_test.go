@@ -225,6 +225,60 @@ func cleanV04xXML(t *testing.T, server, daemon, currentUser, installDir string) 
 	}, currentUser)
 }
 
+func TestMigrationCarriesWorkingDir(t *testing.T) {
+	tx := setupV04xFixture(t)
+	journalDir := filepath.Join(tx.State.StateDir, "migration-journal-working-dir")
+	tasks := []scheduler.TaskStatus{
+		{Name: "\\mcp-local-hub-memory-default", Owner: tx.CurrentUser, State: "Ready"},
+	}
+	xmlByTask := map[string]string{
+		"\\mcp-local-hub-memory-default": cleanV04xXML(t, "memory", "default", tx.CurrentUser, tx.State.InstallDir),
+	}
+
+	intent, err := deriveOrLoadIntent(journalDir, tasks, xmlByTask, false, tx.State.Now())
+	if err != nil {
+		t.Fatalf("deriveOrLoadIntent: %v", err)
+	}
+	if len(intent.Daemons) != 1 {
+		t.Fatalf("Daemons len = %d, want 1", len(intent.Daemons))
+	}
+	if got := intent.Daemons[0].Workspace; got != tx.State.InstallDir {
+		t.Fatalf("Workspace = %q, want migrated WorkingDirectory %q", got, tx.State.InstallDir)
+	}
+}
+
+func TestMigrationJournalMarkerSurvivesProcessCrash(t *testing.T) {
+	journalDir := filepath.Join(t.TempDir(), "journal")
+	for _, marker := range []string{
+		MarkerPrepared,
+		MarkerPreOsMutating,
+		MarkerOsMutatingComplete,
+		MarkerCommitted,
+		MarkerRollbackInProgress,
+	} {
+		if err := touchMarker(journalDir, marker); err != nil {
+			t.Fatalf("touchMarker(%s): %v", marker, err)
+		}
+		path := filepath.Join(journalDir, marker)
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("marker %s missing after durable touch: %v", marker, err)
+		}
+		if !info.Mode().IsRegular() {
+			t.Fatalf("marker %s mode = %v, want regular file", marker, info.Mode())
+		}
+	}
+	entries, err := os.ReadDir(journalDir)
+	if err != nil {
+		t.Fatalf("ReadDir journal: %v", err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".") && strings.Contains(entry.Name(), ".tmp.") {
+			t.Fatalf("temporary marker file survived durable rename: %s", entry.Name())
+		}
+	}
+}
+
 // fakeForwardOptions returns a ForwardOptions wired to the fixture's
 // fakes. The PowerShellProbe returns (true, nil) — clean Win11 host.
 // The kill loop is a no-op because tx.pidByServerDaemon is empty.
@@ -279,6 +333,13 @@ func fakeForwardOptions(t *testing.T, tx *testFixture) ForwardOptions {
 			tx.reconcileWaited++
 			return nil
 		},
+	}
+}
+
+func TestSyncDirectoryPropagatesOpenFailure(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	if err := syncDirectory(missing); err == nil {
+		t.Fatal("syncDirectory returned nil for missing directory; want open error")
 	}
 }
 

@@ -270,6 +270,24 @@ func TestSplitConcatenatedTaskXML(t *testing.T) {
 	}
 }
 
+func TestParseTasksAtomicAcceptsAttributedWrapper(t *testing.T) {
+	stream := `<?xml version="1.0" encoding="UTF-16"?>
+<Tasks xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+` + strings.TrimPrefix(fixtureTask(`\mcp-local-hub-memory-claude`, `dima_`), `<?xml version="1.0" encoding="UTF-16"?>
+`) + `</Tasks>`
+
+	tasks, err := parseEnumerateXML(stream)
+	if err != nil {
+		t.Fatalf("parseEnumerateXML returned error: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task from attributed <Tasks> wrapper, got %d: %+v", len(tasks), tasks)
+	}
+	if tasks[0].Name != `\mcp-local-hub-memory-claude` {
+		t.Fatalf("expected wrapper task name, got %q", tasks[0].Name)
+	}
+}
+
 // TestEnumerateAllMcphubTasks_BypassesSameUserFilter is a regression
 // guard: the entire point of this helper vs List() is that the
 // sameWindowsUser filter is bypassed. We can't test that the

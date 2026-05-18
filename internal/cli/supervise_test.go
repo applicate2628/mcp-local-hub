@@ -403,6 +403,7 @@ func TestSuperviseCommand_StatusIPC_UnknownCommand(t *testing.T) {
 	if _, err := reader.ReadString('\n'); err != nil {
 		t.Fatalf("read hello: %v", err)
 	}
+	waitForSupervisorReadyIPC(t, conn, reader)
 
 	req := api.IPCRequest{ID: 99, Cmd: "no-such-cmd-12345"}
 	reqBody, _ := json.Marshal(req)
@@ -763,6 +764,7 @@ func startSuperviseForIPCTest(t *testing.T, tmpHome string) (net.Conn, *bufio.Re
 		cleanupExit()
 		t.Fatalf("read hello: %v", err)
 	}
+	waitForSupervisorReadyIPC(t, conn, reader)
 
 	cleanup := func() {
 		_ = conn.Close()
@@ -778,6 +780,106 @@ func startSuperviseForIPCTest(t *testing.T, tmpHome string) (net.Conn, *bufio.Re
 		cleanupExit()
 	}
 	return conn, reader, cleanup
+}
+
+func waitForSupervisorReadyIPC(t *testing.T, conn net.Conn, reader *bufio.Reader) {
+	t.Helper()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		req := api.IPCRequest{ID: 9001, Cmd: "status"}
+		reqBody, _ := json.Marshal(req)
+		if _, err := conn.Write(append(reqBody, '\n')); err != nil {
+			t.Fatalf("write readiness status request: %v", err)
+		}
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read readiness status response: %v", err)
+		}
+		var resp api.IPCResponse
+		if err := json.Unmarshal([]byte(strings.TrimSpace(line)), &resp); err != nil {
+			t.Fatalf("decode readiness response (%q): %v", line, err)
+		}
+		if !resp.OK {
+			t.Fatalf("readiness status returned error: %+v", resp.Error)
+		}
+		result, _ := resp.Result.(map[string]any)
+		if result != nil && result["reconcile_ready"] == true {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("supervisor did not report reconcile_ready=true before timeout")
+}
+
+func TestSupervisorIPCRefusesMutatingCommandsBeforeReady(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	events, err := api.OpenSupervisorEventLog(filepath.Join(tmpHome, "supervisor-events.log"))
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+
+	var ready atomic.Bool
+	var loaded atomic.Bool
+	loaded.Store(true)
+	var graceful gracefulCounter
+	deps := ipcDispatchDeps{
+		stateDir:           tmpHome,
+		events:             events,
+		reconcileReady:     &ready,
+		intentFilesLoaded:  &loaded,
+		gracefulInProgress: &graceful,
+		triggerGracefulExit: func() {
+			t.Error("pre-ready mutating request must not trigger supervisor exit")
+		},
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		defer serverConn.Close()
+		done <- dispatchIPCRequest(serverConn, api.IPCRequest{
+			ID:   77,
+			Cmd:  "exit",
+			Args: map[string]any{"graceful": true},
+		}, deps)
+	}()
+
+	_ = clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	line, err := bufio.NewReader(clientConn).ReadString('\n')
+	if err != nil {
+		t.Fatalf("read pre-ready response: %v", err)
+	}
+	var resp api.IPCResponse
+	if err := json.Unmarshal([]byte(strings.TrimSpace(line)), &resp); err != nil {
+		t.Fatalf("decode response (%q): %v", line, err)
+	}
+	if resp.OK {
+		t.Fatalf("pre-ready mutating command must fail, got %+v", resp)
+	}
+	if resp.ID != 77 || !resp.Final {
+		t.Fatalf("response metadata mismatch: %+v", resp)
+	}
+	if resp.Error == nil {
+		t.Fatalf("expected structured error, got nil")
+	}
+	if resp.Error.Code != ipcErrorSupervisorStarting {
+		t.Fatalf("error code = %q, want %q", resp.Error.Code, ipcErrorSupervisorStarting)
+	}
+	if !resp.Error.Retryable {
+		t.Fatalf("starting error must be retryable: %+v", resp.Error)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("dispatch returned write error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("dispatch did not return after writing pre-ready error")
+	}
 }
 
 // TestSupervise_IPC_QuiesceTimersTwoFrames pins the codex-r3 Lane B
@@ -971,6 +1073,7 @@ func TestSupervise_IPC_ExitGracefulInitiates(t *testing.T) {
 	if _, err := reader.ReadString('\n'); err != nil {
 		t.Fatalf("read hello: %v", err)
 	}
+	waitForSupervisorReadyIPC(t, conn, reader)
 
 	req := api.IPCRequest{ID: 43, Cmd: "exit", Args: map[string]any{"graceful": true, "timeout_ms": 5000}}
 	reqBody, _ := json.Marshal(req)

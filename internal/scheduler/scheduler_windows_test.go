@@ -316,11 +316,35 @@ func TestBuildWatchdogXML_BothTriggers(t *testing.T) {
 	if !strings.Contains(xml, "<LogonTrigger>") {
 		t.Errorf("expected <LogonTrigger> in watchdog XML; got:\n%s", xml)
 	}
-	// Per the plan snippet the LogonTrigger is enabled.
-	if !strings.Contains(xml, "<LogonTrigger><Enabled>true</Enabled></LogonTrigger>") &&
-		!strings.Contains(xml, "<LogonTrigger>\n      <Enabled>true</Enabled>\n    </LogonTrigger>") {
+	// LogonTrigger must be enabled AND scoped to the configured user.
+	// Per smoke-test 2026-05-17: schtasks /Create returns "Access is
+	// denied" when LogonTrigger has no <UserId> (any-user logon requires
+	// elevation). Daemon tasks scope LogonTrigger to UserId; watchdog
+	// must do the same.
+	logonTrigger := extractXMLBlock(xml, "LogonTrigger")
+	if logonTrigger == "" {
+		t.Fatalf("LogonTrigger block missing; got:\n%s", xml)
+	}
+	if !strings.Contains(logonTrigger, "<Enabled>true</Enabled>") {
 		t.Errorf("LogonTrigger should be enabled; got:\n%s", xml)
 	}
+	if !strings.Contains(logonTrigger, "<UserId>"+testWatchdogUser+"</UserId>") {
+		t.Errorf("LogonTrigger must scope to userName (testWatchdogUser=%q); got:\n%s", testWatchdogUser, xml)
+	}
+}
+
+func extractXMLBlock(body, tag string) string {
+	open := "<" + tag + ">"
+	close := "</" + tag + ">"
+	i := strings.Index(body, open)
+	if i < 0 {
+		return ""
+	}
+	j := strings.Index(body[i+len(open):], close)
+	if j < 0 {
+		return ""
+	}
+	return body[i : i+len(open)+j+len(close)]
 }
 
 // TestBuildWatchdogXML_IgnoreNew asserts the watchdog itself uses

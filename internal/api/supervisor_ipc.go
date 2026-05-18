@@ -55,8 +55,9 @@ type IPCResponse struct {
 }
 
 type IPCErr struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	Retryable bool   `json:"retryable,omitempty"`
 }
 
 // IPCHello is the connection-handshake frame supervisor sends first.

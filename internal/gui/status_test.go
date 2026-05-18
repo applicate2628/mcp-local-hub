@@ -2,6 +2,7 @@
 package gui
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -133,5 +134,40 @@ func TestStatusEndpoint_500OnHealthBackendError(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, "STATUS_FAILED") {
 		t.Errorf("body = %s, want STATUS_FAILED code", body)
+	}
+}
+
+func TestGUIStatusUsesIPCSeamWhenWired(t *testing.T) {
+	prev := api.SupervisorIPCStatusFn
+	api.SupervisorIPCStatusFn = func(_ context.Context) ([]api.DaemonStatus, error) {
+		return []api.DaemonStatus{
+			{
+				Server:   "memory",
+				Daemon:   "default",
+				TaskName: `\mcp-local-hub-memory-default`,
+				State:    "Running",
+				Port:     9101,
+				PID:      4321,
+			},
+		}, nil
+	}
+	t.Cleanup(func() { api.SupervisorIPCStatusFn = prev })
+
+	s := NewServer(Config{})
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var rows []api.DaemonStatus
+	if err := json.Unmarshal(rec.Body.Bytes(), &rows); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows len = %d, want 1: %+v", len(rows), rows)
+	}
+	if rows[0].TaskName != `\mcp-local-hub-memory-default` || rows[0].PID != 4321 {
+		t.Fatalf("/api/status did not use wired supervisor IPC seam: %+v", rows[0])
 	}
 }
