@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -61,20 +62,12 @@ func ensureSupervisorRunning(ctx context.Context, mcphubBin string, strictMode b
 	if err != nil {
 		return nil, fmt.Errorf("supervisor owner: resolve state dir: %w", err)
 	}
-	if isSupervisorReachable(ctx, 2*time.Second) {
+	if ok, probeErr := probeSupervisor(ctx, 2*time.Second); ok {
 		return &supervisorOwner{spawned: false, stateDir: stateDir}, nil
+	} else if probeErr != nil {
+		return nil, fmt.Errorf("supervisor owner: existing supervisor IPC broken (refusing to spawn duplicate): %w", probeErr)
 	}
 
-	// Spawn a fresh supervisor. context.Background here is intentional:
-	// CommandContext would kill the supervisor when ctx is canceled,
-	// but our ownership contract is that Stop() drives shutdown via
-	// IPC, not parent context. The caller-side ctx is only used to
-	// bound the readiness wait below.
-	//
-	// strictMode threads through verbatim — the GUI's autostart entry
-	// may have been installed with --strict-mode (corp-managed Windows
-	// hosts), and the spawned supervisor MUST inherit it so the
-	// hardened state-file write posture is preserved end-to-end.
 	args := []string{"supervise"}
 	if strictMode {
 		args = append(args, "--strict-mode")
@@ -82,7 +75,15 @@ func ensureSupervisorRunning(ctx context.Context, mcphubBin string, strictMode b
 	cmd := exec.Command(mcphubBin, args...)
 	cmd.Stdin = nil
 	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	// Capture stderr to a bounded buffer so a startup crash (corrupt
+	// supervisor-intent.json, state-path sanity rejection, internal
+	// panic before any audit log row lands) is visible in the
+	// readiness-timeout error rather than dropped silently. 4 KiB is
+	// generous enough for any Go-style fatal message plus stack-
+	// trace prefix, while bounding worst-case memory pressure if the
+	// supervisor floods stderr in a panic loop. PR #212 r5 finding 2.
+	stderrBuf := newBoundedBuffer(4096)
+	cmd.Stderr = stderrBuf
 	configureSupervisorDetach(cmd)
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("supervisor owner: spawn %q: %w", mcphubBin, err)
@@ -91,20 +92,23 @@ func ensureSupervisorRunning(ctx context.Context, mcphubBin string, strictMode b
 
 	deadline := time.Now().Add(waitFor)
 	for {
-		// Probe IPC reachability. A bare "no supervisor IPC" error
-		// (ErrSupervisorIPCUnavailable) is the expected pre-bind state —
-		// keep polling. Any other error (handshake mismatch, decode
-		// failure) is propagated immediately because it means the
-		// supervisor IS running but in a broken state.
-		if isSupervisorReachable(ctx, 500*time.Millisecond) {
+		ok, probeErr := probeSupervisor(ctx, 500*time.Millisecond)
+		if ok {
 			return &supervisorOwner{spawned: true, proc: proc, stateDir: stateDir}, nil
 		}
-		if time.Now().After(deadline) {
-			// Timeout: kill the spawned process so we don't leak
-			// a half-started supervisor.
+		if probeErr != nil {
 			_ = proc.Kill()
 			_, _ = proc.Wait()
-			return nil, fmt.Errorf("supervisor owner: spawned PID %d but IPC not reachable within %s", proc.Pid, waitFor)
+			return nil, fmt.Errorf("supervisor owner: spawned PID %d but IPC handshake broken: %w", proc.Pid, probeErr)
+		}
+		if time.Now().After(deadline) {
+			_ = proc.Kill()
+			_, _ = proc.Wait()
+			stderrTail := strings.TrimSpace(stderrBuf.String())
+			if stderrTail != "" {
+				return nil, fmt.Errorf("supervisor owner: spawned PID %d but IPC not reachable within %s; check supervisor-events.log; supervisor stderr tail: %s", proc.Pid, waitFor, stderrTail)
+			}
+			return nil, fmt.Errorf("supervisor owner: spawned PID %d but IPC not reachable within %s; check supervisor-events.log", proc.Pid, waitFor)
 		}
 		select {
 		case <-ctx.Done():
@@ -115,6 +119,33 @@ func ensureSupervisorRunning(ctx context.Context, mcphubBin string, strictMode b
 		}
 	}
 }
+
+// boundedBuffer is a bytes.Buffer-like sink that drops writes after
+// a fixed byte cap. Used to capture supervisor stderr during the
+// readiness window without unbounded memory growth. Preserves the
+// FIRST `cap` bytes (what an operator actually needs for diagnosis
+// — Go-style fatal messages put the actionable content at the
+// start; later panic-loop output is redundant).
+type boundedBuffer struct {
+	cap int
+	buf []byte
+}
+
+func newBoundedBuffer(cap int) *boundedBuffer { return &boundedBuffer{cap: cap} }
+
+func (b *boundedBuffer) Write(p []byte) (int, error) {
+	if len(b.buf) >= b.cap {
+		return len(p), nil
+	}
+	room := b.cap - len(b.buf)
+	if room > len(p) {
+		room = len(p)
+	}
+	b.buf = append(b.buf, p[:room]...)
+	return len(p), nil
+}
+
+func (b *boundedBuffer) String() string { return string(b.buf) }
 
 // Stop sends graceful exit IPC to a spawned supervisor and waits for
 // it to terminate. For adopted supervisors (spawned=false) this is a
@@ -195,18 +226,30 @@ func (s *supervisorOwner) stop(ctx context.Context, graceTimeoutMs int) error {
 		return nil
 	case <-time.After(total):
 		// Force-kill — supervisor didn't exit in time.
-		_ = s.proc.Kill()
-		<-exited
-		// Best-effort drain of the IPC result. Even if it never
-		// completes (e.g. dial hang), the goroutine's ipcCtx times
-		// out at graceTimeoutMs so it doesn't leak past Stop.
+		killErr := s.proc.Kill()
+		// Wait for the process exit with a backstop timer. If Kill
+		// failed (Windows ACCESS_DENIED on protected process, POSIX
+		// EPERM, kernel-level immortal-process bug), the supervisor
+		// is still alive and proc.Wait blocks forever. The 2s
+		// backstop unblocks Stop() so shutdown stays responsive and
+		// the operator sees an actionable error rather than a hung
+		// tray-close. PR #212 r5 silent-failure-hunt finding 3.
+		select {
+		case <-exited:
+		case <-time.After(2 * time.Second):
+			if killErr != nil {
+				return fmt.Errorf("supervisor owner: graceful exit timeout after %s; force-kill failed for PID %d: %v (process may still be running)",
+					total, s.proc.Pid, killErr)
+			}
+			return fmt.Errorf("supervisor owner: graceful exit timeout after %s; force-kill issued for PID %d but process did not exit within 2s (may be unkillable)",
+				total, s.proc.Pid)
+		}
+		// Best-effort drain of the IPC result. The IPC goroutine's
+		// ipcCtx times out at graceTimeoutMs so it doesn't leak.
 		var ipcErr error
 		select {
 		case ipcErr = <-ipcDone:
 		case <-time.After(100 * time.Millisecond):
-			// IPC goroutine still alive — let it exit on its own
-			// sub-deadline. Stop() returns now to keep shutdown
-			// responsive.
 		}
 		if ipcErr != nil {
 			return fmt.Errorf("supervisor owner: graceful exit timeout after %s (IPC error: %v), force-killed PID %d",
@@ -237,15 +280,32 @@ func (s *supervisorOwner) Pid() int {
 	return s.proc.Pid
 }
 
-// isSupervisorReachable performs a single IPC handshake + status query
-// against the running supervisor. Returns true iff the supervisor is
-// alive AND responds. False on any failure — including the expected
-// pre-bind "supervisor IPC unavailable" state.
-func isSupervisorReachable(ctx context.Context, probeTimeout time.Duration) bool {
+// probeSupervisor performs a single IPC handshake + status query
+// against the running supervisor. Returns (true, nil) when reachable.
+// Returns (false, nil) ONLY for the expected pre-bind state
+// (ErrSupervisorIPCUnavailable — no lock owner sidecar, no pipe, or
+// connect-refused). Any other failure (hello-version mismatch, JSON
+// decode error, ID mismatch) returns (false, error) so the caller
+// can distinguish "supervisor not yet up" from "supervisor up but
+// broken" and surface the actionable error to the operator.
+//
+// PR #212 r5 silent-failure-hunt finding 1: the previous bool-only
+// signature collapsed handshake failures into "not reachable", which
+// made the readiness-wait loop spin for the full 15s timeout and then
+// emit a generic "IPC not reachable" message instead of the actual
+// hello-mismatch text. Worse, the pre-spawn probe at the top of
+// ensureSupervisorRunning collapsed the same way, causing the GUI to
+// spawn a SECOND supervisor on top of a hello-broken first one.
+func probeSupervisor(ctx context.Context, probeTimeout time.Duration) (bool, error) {
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
-	_, err := api.DialSupervisorIPCStatus(probeCtx)
-	return err == nil
+	if _, err := api.DialSupervisorIPCStatus(probeCtx); err != nil {
+		if errors.Is(err, api.ErrSupervisorIPCUnavailable) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // resolveMCPHubBinary returns the absolute, symlink-resolved path to

@@ -60,13 +60,17 @@ type MaintenanceTimer struct {
 func ReadSupervisorIntent(path string) (*SupervisorIntentFile, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read: %w", err)
+		// Include the path in the error so callers (and Sentry-style
+		// log aggregators) can correlate failures to a specific
+		// installation's file location without having to prepend a
+		// prefix themselves. PR #212 r5 finding 5A.
+		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	var f SupervisorIntentFile
 	if err := dec.Decode(&f); err != nil {
-		return nil, fmt.Errorf("decode: %w", err)
+		return nil, fmt.Errorf("decode %s: %w", path, err)
 	}
 	filterSupervisorIntentOneshotDaemons(&f)
 	return &f, nil

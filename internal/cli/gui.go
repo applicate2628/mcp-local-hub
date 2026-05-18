@@ -414,7 +414,15 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 	// waiting for IPC bind that will never happen — they have no
 	// supervisor-intent.json in the temp dir. Mirror of the existing
 	// MCPHUB_E2E_SCHEDULER=none pattern at status_enrich.go.
+	//
+	// PR #212 r5 silent-failure-hunt finding 4: emit a visible
+	// warning when the seam fires so a production operator who
+	// accidentally inherits the env var from a CI shell can spot
+	// the suppression instead of seeing a permanently-empty
+	// Dashboard with no diagnostic.
 	if os.Getenv("MCPHUB_E2E_SUPERVISOR") == "none" {
+		fmt.Fprintln(cmd.OutOrStderr(),
+			"warning: MCPHUB_E2E_SUPERVISOR=none is set — supervisor spawn suppressed (test seam; not for production use)")
 		return <-errCh
 	}
 	supervisorBin, binErr := resolveMCPHubBinary()
