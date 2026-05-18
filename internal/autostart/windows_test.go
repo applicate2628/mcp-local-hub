@@ -322,6 +322,38 @@ func TestWindowsBackend_StatusDrifted_StrictModeUnwanted(t *testing.T) {
 	}
 }
 
+// TestWindowsBackend_StatusDrifted_LegacySupervisorSubcommand asserts
+// that a pre-PR #212 autostart entry installed with
+// `<Arguments>supervise</Arguments>` is reported as drifted under
+// the post-PR #212 default (Args=["gui"]). Without the subcommand
+// drift check in detectDrift, the legacy install would silently
+// satisfy `enabled-running` and the operator would miss the cue to
+// re-run `mcphub autostart enable`. PR #212 r4 finding 2.
+func TestWindowsBackend_StatusDrifted_LegacySupervisorSubcommand(t *testing.T) {
+	const legacySuperviseXML = "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\n" +
+		"<Task><Actions><Exec>\n" +
+		"  <Command>C:\\mcp\\mcphub.exe</Command>\n" +
+		"  <Arguments>supervise</Arguments>\n" +
+		"</Exec></Actions></Task>\n"
+	f := &fakeScheduler{
+		statusReturn: scheduler.TaskStatus{Name: WindowsTaskName, State: "Running"},
+		xmlReturn:    []byte(legacySuperviseXML),
+	}
+	withFakeScheduler(t, f)
+
+	b, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	got, err := b.Status(Options{MCPHubPath: `C:\mcp\mcphub.exe`})
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if got != StateDrifted {
+		t.Errorf("Status = %s, want %s (Args=[supervise] should be drifted under Args=[gui] default)", got, StateDrifted)
+	}
+}
+
 func TestWindowsBackend_StatusDrifted_CommandPath(t *testing.T) {
 	// Recorded XML points at an older binary path; caller's MCPHubPath
 	// disagrees → drift.
@@ -396,10 +428,16 @@ func TestWindowsBackend_StatusSchedulerFactoryError(t *testing.T) {
 // our drift detector parses — just <Command> and <Arguments>. The
 // real schtasks /Query /XML output is larger, but the detector only
 // inspects these two fields.
+//
+// Emits `gui` / `gui --strict-mode` to match the current autostart
+// contract (PR #212: GUI owns supervisor lifecycle). Tests that
+// deliberately need a pre-PR #212 `supervise` baseline (e.g. to
+// exercise the subcommand-drift detection path) construct the XML
+// inline rather than threading a third parameter through this helper.
 func buildMatchingXML(command string, strictMode bool) []byte {
-	args := "supervise"
+	args := "gui"
 	if strictMode {
-		args = "supervise --strict-mode"
+		args = "gui --strict-mode"
 	}
 	return []byte(fmt.Sprintf(
 		"<?xml version=\"1.0\" encoding=\"UTF-16\"?>\n"+

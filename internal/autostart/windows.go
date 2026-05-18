@@ -277,6 +277,23 @@ func detectDrift(xmlBlob []byte, opts Options) bool {
 	if !strings.EqualFold(strings.TrimSpace(t.Actions.Exec.Command), strings.TrimSpace(want)) {
 		return true
 	}
+	// Subcommand drift check: the PR that switched the autostart
+	// entry from `mcphub supervise` to `mcphub gui` (PR #212) made
+	// the first arg the load-bearing token for which command actually
+	// launches at logon. Compare against what superviseArgs(opts) would
+	// emit today. Without this check, an operator who installed via
+	// pre-PR #212 code (autostart Arguments="supervise") would see
+	// `mcphub autostart status` report `enabled-running` instead of
+	// `drifted`, masking the need to re-run `mcphub autostart enable`
+	// to get the new GUI-owns-supervisor lifecycle. PR #212 r4
+	// architecture-review finding 2.
+	wantArgs := superviseArgs(opts)
+	if len(wantArgs) > 0 {
+		argTokens := strings.Fields(t.Actions.Exec.Arguments)
+		if len(argTokens) == 0 || !strings.EqualFold(argTokens[0], wantArgs[0]) {
+			return true
+		}
+	}
 	hasStrictFlag := strings.Contains(t.Actions.Exec.Arguments, "--strict-mode")
 	return hasStrictFlag != opts.StrictMode
 }
