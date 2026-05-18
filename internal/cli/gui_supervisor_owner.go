@@ -248,15 +248,29 @@ func isSupervisorReachable(ctx context.Context, probeTimeout time.Duration) bool
 	return err == nil
 }
 
-// resolveMCPHubBinary returns the absolute path to the currently-
-// running mcphub binary. Used by the GUI to spawn its supervisor
-// child with the same code as the running process — critical for dev
-// builds where the binary path is not on PATH and for guaranteeing
-// version consistency between GUI and supervisor.
+// resolveMCPHubBinary returns the absolute, symlink-resolved path to
+// the currently-running mcphub binary. Used by the GUI to spawn its
+// supervisor child with the same code as the running process —
+// critical for dev builds where the binary path is not on PATH and
+// for guaranteeing version consistency between GUI and supervisor.
+//
+// EvalSymlinks closes a TOCTOU window on macOS (preview tier) where
+// os.Executable can return a symlink path; an attacker with write
+// access to the symlink's parent directory could swap the target
+// between resolve and cmd.Start, redirecting the supervisor spawn to
+// an attacker-controlled binary. EvalSymlinks resolves to the inode
+// path so subsequent spawn cannot be redirected via symlink swap.
+// On Linux, /proc/self/exe already returns the resolved path so
+// EvalSymlinks is a no-op there; on Windows, the path is canonicalized
+// at kernel-load time and symlinks aren't part of the exe-resolution
+// chain. PR #212 r3 security finding 2.
 func resolveMCPHubBinary() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return "", fmt.Errorf("resolve mcphub binary: %w", err)
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
 	}
 	abs, err := filepath.Abs(exe)
 	if err != nil {
