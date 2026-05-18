@@ -5,6 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/gofrs/flock"
 )
 
 func TestSupervisorLock_AcquireRelease(t *testing.T) {
@@ -72,6 +75,47 @@ func TestSupervisorLockOwnerSidecarNotDeletedOnContention(t *testing.T) {
 	}
 	if string(raw) != string(corrupt) {
 		t.Fatalf("owner sidecar changed under contention: got %q want %q", string(raw), string(corrupt))
+	}
+}
+
+func TestSupervisorLock_RetriesMissingOwnerDuringReleaseWindow(t *testing.T) {
+	dir := hardenedTempDir(t)
+	path := filepath.Join(dir, "supervisor.lock")
+
+	raw := flock.New(path + ".lock")
+	got, err := raw.TryLock()
+	if err != nil {
+		t.Fatalf("raw TryLock: %v", err)
+	}
+	if !got {
+		t.Fatal("raw TryLock did not acquire test lock")
+	}
+	defer raw.Unlock()
+
+	prevWindow := supervisorLockOwnerMissingRetryWindow
+	prevDelay := supervisorLockOwnerMissingRetryDelay
+	supervisorLockOwnerMissingRetryWindow = 500 * time.Millisecond
+	supervisorLockOwnerMissingRetryDelay = 10 * time.Millisecond
+	t.Cleanup(func() {
+		supervisorLockOwnerMissingRetryWindow = prevWindow
+		supervisorLockOwnerMissingRetryDelay = prevDelay
+	})
+
+	released := make(chan struct{})
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		_ = raw.Unlock()
+		close(released)
+	}()
+
+	lk, err := AcquireSupervisorLock(path)
+	if err != nil {
+		t.Fatalf("AcquireSupervisorLock should retry missing owner sidecar until flock releases: %v", err)
+	}
+	defer lk.Release()
+	<-released
+	if _, err := ReadSupervisorLockOwner(path); err != nil {
+		t.Fatalf("owner sidecar was not written after retry acquire: %v", err)
 	}
 }
 

@@ -88,6 +88,8 @@ var (
 	productionQueryPIDStateFn            = process.QueryPIDState
 	productionVerifyPIDIdentityFn        = process.VerifyPIDIdentity
 	productionTerminatePIDWithIdentityFn = process.TerminatePIDWithIdentity
+	currentRunningVerifyPIDIdentityFn    = process.VerifyPIDIdentity
+	currentRunningIsPIDAliveFn           = process.IsPidAlive
 )
 
 // setReconcileSpawnFnForTest installs a test spawn closure. Returns
@@ -1296,8 +1298,10 @@ func loadSupervisorCurrentRunning(stateDir string) (map[string]bool, map[string]
 			ExecutablePath: expectedExe,
 			StartedAt:      ds.StartedAt,
 		}
-		if err := process.VerifyPIDIdentity(proof); err != nil {
-			continue
+		if err := currentRunningVerifyPIDIdentityFn(proof); err != nil {
+			if !errors.Is(err, process.ErrProcessIdentityUnsupported) || !currentRunningIsPIDAliveFn(ds.CurrentPID) {
+				continue
+			}
 		}
 		result[taskName] = true
 		pids[taskName] = runningProcessIdentity{

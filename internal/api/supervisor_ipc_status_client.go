@@ -202,10 +202,6 @@ func decodeSupervisorIPCStatusResult(raw json.RawMessage) ([]DaemonStatus, error
 	}
 	rows := make([]DaemonStatus, 0, len(result.Daemons))
 	for _, d := range result.Daemons {
-		workspace := d.Workspace
-		if workspace == "" {
-			workspace = d.Daemon
-		}
 		rows = append(rows, DaemonStatus{
 			Server:        d.Server,
 			Daemon:        d.Daemon,
@@ -213,7 +209,7 @@ func decodeSupervisorIPCStatusResult(raw json.RawMessage) ([]DaemonStatus, error
 			State:         normalizeSupervisorIPCStatusState(d.State),
 			Port:          d.Port,
 			PID:           d.CurrentPID,
-			Workspace:     workspace,
+			Workspace:     d.Workspace,
 			IsMaintenance: d.IsMaintenance,
 		})
 	}

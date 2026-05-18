@@ -10,6 +10,10 @@ var ErrProcessAlreadyExited = errors.New("process already exited")
 // executable/start-time identity recorded by supervisor-state.json.
 var ErrProcessIdentityMismatch = errors.New("process identity mismatch")
 
+// ErrProcessIdentityUnsupported marks platforms where this package cannot yet
+// verify executable/start-time identity for a PID generation.
+var ErrProcessIdentityUnsupported = errors.New("process identity proof unsupported")
+
 // PIDState is a tri-state liveness probe. Unknown means the OS refused or
 // failed the probe, so callers must not collapse it to "already exited".
 type PIDState string

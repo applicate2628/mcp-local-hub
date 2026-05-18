@@ -252,16 +252,6 @@ func touchMarker(journalDir, name string) error {
 	return nil
 }
 
-func syncDirectory(dir string) error {
-	f, err := os.Open(dir)
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-	_ = f.Sync()
-	return nil
-}
-
 // markerExists is the boolean form of os.Stat for resume classification.
 func markerExists(journalDir, name string) bool {
 	_, err := os.Stat(filepath.Join(journalDir, name))

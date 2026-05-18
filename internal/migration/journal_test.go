@@ -336,6 +336,13 @@ func fakeForwardOptions(t *testing.T, tx *testFixture) ForwardOptions {
 	}
 }
 
+func TestSyncDirectoryPropagatesOpenFailure(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	if err := syncDirectory(missing); err == nil {
+		t.Fatal("syncDirectory returned nil for missing directory; want open error")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Forward-migration tests.
 // ---------------------------------------------------------------------------

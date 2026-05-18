@@ -530,6 +530,132 @@ func TestLoadSupervisorCurrentRunning_RequiresStartTimeProof(t *testing.T) {
 	}
 }
 
+func TestLoadSupervisorCurrentRunning_UnsupportedIdentityFallsBackToAlivePID(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	const pid = 4242
+	state := &api.SupervisorStateFile{
+		Version: 1,
+		Daemons: map[string]api.SupervisorDaemonState{
+			reconcileWiringTestTaskName: {
+				State:         "running",
+				CurrentPID:    pid,
+				PIDGeneration: 1,
+				StartedAt:     "2026-05-18T02:42:47Z",
+			},
+		},
+	}
+	if err := api.WriteSupervisorState(filepath.Join(tmpHome, "supervisor-state.json"), state); err != nil {
+		t.Fatalf("seed supervisor-state.json: %v", err)
+	}
+
+	prevVerify := currentRunningVerifyPIDIdentityFn
+	prevAlive := currentRunningIsPIDAliveFn
+	currentRunningVerifyPIDIdentityFn = func(proof process.PIDIdentityProof) error {
+		if proof.PID != pid {
+			t.Fatalf("VerifyPIDIdentity pid = %d, want %d", proof.PID, pid)
+		}
+		return process.ErrProcessIdentityUnsupported
+	}
+	currentRunningIsPIDAliveFn = func(gotPID int) bool {
+		return gotPID == pid
+	}
+	t.Cleanup(func() {
+		currentRunningVerifyPIDIdentityFn = prevVerify
+		currentRunningIsPIDAliveFn = prevAlive
+	})
+
+	got, gotPIDs, err := loadSupervisorCurrentRunning(tmpHome)
+	if err != nil {
+		t.Fatalf("loadSupervisorCurrentRunning: %v", err)
+	}
+	if !got[reconcileWiringTestTaskName] {
+		t.Fatalf("unsupported identity with live pid must preserve current-running entry: %v", got)
+	}
+	if gotPIDs[reconcileWiringTestTaskName].PID != pid {
+		t.Fatalf("running PID snapshot = %+v, want pid %d", gotPIDs[reconcileWiringTestTaskName], pid)
+	}
+}
+
+func TestLoadSupervisorCurrentRunning_UnsupportedIdentitySkipsDeadPID(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	const pid = 4242
+	state := &api.SupervisorStateFile{
+		Version: 1,
+		Daemons: map[string]api.SupervisorDaemonState{
+			reconcileWiringTestTaskName: {
+				State:         "running",
+				CurrentPID:    pid,
+				PIDGeneration: 1,
+				StartedAt:     "2026-05-18T02:42:47Z",
+			},
+		},
+	}
+	if err := api.WriteSupervisorState(filepath.Join(tmpHome, "supervisor-state.json"), state); err != nil {
+		t.Fatalf("seed supervisor-state.json: %v", err)
+	}
+
+	prevVerify := currentRunningVerifyPIDIdentityFn
+	prevAlive := currentRunningIsPIDAliveFn
+	currentRunningVerifyPIDIdentityFn = func(process.PIDIdentityProof) error {
+		return process.ErrProcessIdentityUnsupported
+	}
+	currentRunningIsPIDAliveFn = func(int) bool {
+		return false
+	}
+	t.Cleanup(func() {
+		currentRunningVerifyPIDIdentityFn = prevVerify
+		currentRunningIsPIDAliveFn = prevAlive
+	})
+
+	got, gotPIDs, err := loadSupervisorCurrentRunning(tmpHome)
+	if err != nil {
+		t.Fatalf("loadSupervisorCurrentRunning: %v", err)
+	}
+	if len(got) != 0 || len(gotPIDs) != 0 {
+		t.Fatalf("unsupported identity with dead pid must not produce running entries: currentRunning=%v pids=%v", got, gotPIDs)
+	}
+}
+
+func TestLoadSupervisorCurrentRunning_IdentityMismatchStillFailsClosed(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	state := &api.SupervisorStateFile{
+		Version: 1,
+		Daemons: map[string]api.SupervisorDaemonState{
+			reconcileWiringTestTaskName: {
+				State:         "running",
+				CurrentPID:    4242,
+				PIDGeneration: 1,
+				StartedAt:     "2026-05-18T02:42:47Z",
+			},
+		},
+	}
+	if err := api.WriteSupervisorState(filepath.Join(tmpHome, "supervisor-state.json"), state); err != nil {
+		t.Fatalf("seed supervisor-state.json: %v", err)
+	}
+
+	prevVerify := currentRunningVerifyPIDIdentityFn
+	prevAlive := currentRunningIsPIDAliveFn
+	currentRunningVerifyPIDIdentityFn = func(process.PIDIdentityProof) error {
+		return process.ErrProcessIdentityMismatch
+	}
+	currentRunningIsPIDAliveFn = func(int) bool {
+		t.Fatal("liveness fallback must not run for supported identity mismatch")
+		return true
+	}
+	t.Cleanup(func() {
+		currentRunningVerifyPIDIdentityFn = prevVerify
+		currentRunningIsPIDAliveFn = prevAlive
+	})
+
+	got, gotPIDs, err := loadSupervisorCurrentRunning(tmpHome)
+	if err != nil {
+		t.Fatalf("loadSupervisorCurrentRunning: %v", err)
+	}
+	if len(got) != 0 || len(gotPIDs) != 0 {
+		t.Fatalf("identity mismatch must stay fail-closed: currentRunning=%v pids=%v", got, gotPIDs)
+	}
+}
+
 // TestProductionSpawnFn_FailureEmitsAuditEvent verifies the
 // production spawn fn (makeProductionSpawnFn) emits a
 // daemon-spawn-failed event on cmd.Start failure. This test does NOT

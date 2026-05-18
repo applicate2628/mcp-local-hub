@@ -17,7 +17,7 @@ func VerifyPIDIdentity(proof PIDIdentityProof) error {
 	if proof.PID <= 0 {
 		return fmt.Errorf("process: invalid PID %d", proof.PID)
 	}
-	return fmt.Errorf("%w: PID %d start-time proof unavailable on this platform", ErrProcessIdentityMismatch, proof.PID)
+	return fmt.Errorf("%w: PID %d start-time proof unavailable on this platform", ErrProcessIdentityUnsupported, proof.PID)
 }
 
 func TerminatePIDWithIdentity(proof PIDIdentityProof) error {

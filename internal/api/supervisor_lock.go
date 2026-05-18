@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"syscall"
@@ -34,6 +35,11 @@ type SupervisorLock struct {
 	owner SupervisorLockOwner
 }
 
+var (
+	supervisorLockOwnerMissingRetryWindow = 2 * time.Second
+	supervisorLockOwnerMissingRetryDelay  = 25 * time.Millisecond
+)
+
 // SupervisorLockOwner is the pidport sidecar describing the current holder.
 type SupervisorLockOwner struct {
 	PID       int    `json:"pid"`
@@ -47,13 +53,21 @@ type SupervisorLockOwner struct {
 // acquirer overwrites the sidecar only after TryLock succeeds.
 func AcquireSupervisorLock(path string) (*SupervisorLock, error) {
 	lk := flock.New(path + ".lock")
-	got, err := lk.TryLock()
-	if err != nil {
-		return nil, fmt.Errorf("flock: %w", err)
-	}
-	if !got {
+	deadline := time.Now().Add(supervisorLockOwnerMissingRetryWindow)
+	for {
+		got, err := lk.TryLock()
+		if err != nil {
+			return nil, fmt.Errorf("flock: %w", err)
+		}
+		if got {
+			break
+		}
 		owner, ownerErr := ReadSupervisorLockOwner(path)
 		if ownerErr != nil {
+			if errors.Is(ownerErr, os.ErrNotExist) && time.Now().Before(deadline) {
+				time.Sleep(supervisorLockOwnerMissingRetryDelay)
+				continue
+			}
 			return nil, fmt.Errorf("supervisor.lock held but owner metadata invalid: %w", ownerErr)
 		}
 		if !isOwnerLive(owner) {

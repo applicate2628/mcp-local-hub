@@ -145,6 +145,21 @@ func TestReadSupervisorIPCResponse_AllowsLargeStatusFrame(t *testing.T) {
 	}
 }
 
+func TestDecodeSupervisorIPCStatusResult_PreservesEmptyWorkspace(t *testing.T) {
+	raw := json.RawMessage(`{"state":"running","daemons":[{"task_name":"\\mcp-local-hub-memory-default","server":"memory","daemon":"default","workspace":"","state":"running","current_pid":4321}]}`)
+
+	rows, err := decodeSupervisorIPCStatusResult(raw)
+	if err != nil {
+		t.Fatalf("decodeSupervisorIPCStatusResult: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows len = %d, want 1", len(rows))
+	}
+	if rows[0].Workspace != "" {
+		t.Fatalf("Workspace = %q, want empty string preserved", rows[0].Workspace)
+	}
+}
+
 func withDaemonStateRootOverride(t *testing.T, stateDir string) {
 	t.Helper()
 	prev := daemonStateRootOverride
