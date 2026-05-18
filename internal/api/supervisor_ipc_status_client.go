@@ -3,13 +3,25 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 )
+
+const (
+	supervisorIPCHelloMaxBytes  = 4096
+	supervisorIPCStatusMaxBytes = 1 << 20
+)
+
+// ErrSupervisorIPCUnavailable marks the rollout-transition case where the
+// supervisor IPC endpoint is not present, so callers may use the legacy
+// scheduler-backed status path instead of treating this as a supervisor fault.
+var ErrSupervisorIPCUnavailable = errors.New("supervisor IPC unavailable")
 
 // DialSupervisorIPCStatus is the production IPC client used by the GUI via
 // SupervisorIPCStatusFn. It reads supervisor.lock.owner.json, validates the
@@ -38,13 +50,17 @@ func dialSupervisorIPCStatusFromStateDir(ctx context.Context, stateDir string) (
 	owner, err := ReadSupervisorLockOwner(lockPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("supervisor IPC status: supervisor.lock.owner.json not found at %s.owner.json: %w", lockPath, err)
+			return nil, fmt.Errorf("supervisor IPC status: supervisor.lock.owner.json not found at %s.owner.json: %w: %w",
+				lockPath, ErrSupervisorIPCUnavailable, err)
 		}
 		return nil, fmt.Errorf("supervisor IPC status: read %s.owner.json: %w", lockPath, err)
 	}
 	address := SupervisorIPCAddress(stateDir)
 	conn, err := dialSupervisorIPC(ctx, address)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("supervisor IPC status: dial %s: %w: %w", address, ErrSupervisorIPCUnavailable, err)
+		}
 		return nil, fmt.Errorf("supervisor IPC status: dial %s: %w", address, err)
 	}
 	defer conn.Close()
@@ -111,7 +127,7 @@ type supervisorIPCStatusDaemon struct {
 }
 
 func validateSupervisorIPCHello(conn net.Conn, expected SupervisorLockOwner) error {
-	line, err := readSupervisorIPCLine(conn, 4096)
+	line, err := readSupervisorIPCLine(conn, supervisorIPCHelloMaxBytes)
 	if err != nil {
 		return fmt.Errorf("read hello: %w", err)
 	}
@@ -141,7 +157,7 @@ func writeSupervisorIPCRequest(conn net.Conn, req IPCRequest) error {
 }
 
 func readSupervisorIPCResponse(conn net.Conn) (supervisorIPCRawResponse, error) {
-	line, err := readSupervisorIPCLine(conn, 16384)
+	line, err := readSupervisorIPCLine(conn, supervisorIPCStatusMaxBytes)
 	if err != nil {
 		return supervisorIPCRawResponse{}, err
 	}
@@ -157,16 +173,21 @@ func readSupervisorIPCLine(conn net.Conn, max int) ([]byte, error) {
 	tmp := make([]byte, 1)
 	for len(buf) < max {
 		n, err := conn.Read(tmp)
+		if n > 0 {
+			if tmp[0] == '\n' {
+				return buf, nil
+			}
+			buf = append(buf, tmp[0])
+		}
 		if err != nil {
+			if errors.Is(err, io.EOF) && n > 0 {
+				return nil, err
+			}
 			return nil, err
 		}
 		if n == 0 {
 			continue
 		}
-		if tmp[0] == '\n' {
-			return buf, nil
-		}
-		buf = append(buf, tmp[0])
 	}
 	return nil, fmt.Errorf("frame exceeded %d bytes", max)
 }

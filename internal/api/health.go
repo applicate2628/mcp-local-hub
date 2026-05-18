@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -25,12 +26,12 @@ import (
 // the scheduler-scan backing on for backward compatibility when the GUI is
 // run without the supervisor seam.
 //
-// Contract: on any error from the IPC backing (timeout, pipe unavailable,
-// connect refused, handshake mismatch) the fetcher MUST return a non-nil
-// error so computeDaemonsSection surfaces the failure to the HTTP layer
-// as 500 + HEALTH_BACKEND_FAILED / STATUS_FAILED. Silent fallback to the
-// scheduler scan would mask supervisor outages and break the fail-loud
-// contract codified in PR #132 (Cloud bot P1).
+// Contract: ErrSupervisorIPCUnavailable means no supervisor endpoint is
+// currently present and computeDaemonsSection may use the scheduler fallback.
+// Any other IPC backing error (timeout, handshake mismatch, malformed frame)
+// MUST surface to the HTTP layer as 500 + HEALTH_BACKEND_FAILED /
+// STATUS_FAILED. Silent fallback for real IPC faults would mask supervisor
+// outages and break the fail-loud contract codified in PR #132 (Cloud bot P1).
 //
 // Spec §"Q12 CLI/GUI status seam" + plan §2611-2644.
 var SupervisorIPCStatusFn func(ctx context.Context) ([]DaemonStatus, error)
@@ -395,6 +396,9 @@ func (a *API) computeDaemonsSection(ctx context.Context, nowMs int64, refresh bo
 			ipcCtx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
 			rows, fetchErr = SupervisorIPCStatusFn(ipcCtx)
 			cancel()
+			if errors.Is(fetchErr, ErrSupervisorIPCUnavailable) {
+				rows, fetchErr = a.StatusContext(parentCtx)
+			}
 		default:
 			rows, fetchErr = a.StatusWithOpts(StatusOpts{}) // ProbeHealth=false; probes come in Phase 3
 		}

@@ -223,6 +223,30 @@ func TestDaemonStatusSnapshot_IPCErrorReturnsFailLoud(t *testing.T) {
 	}
 }
 
+func TestDaemonStatusSnapshot_IPCUnavailableFallsBackToScheduler(t *testing.T) {
+	a := NewAPI()
+
+	prev := SupervisorIPCStatusFn
+	SupervisorIPCStatusFn = func(_ context.Context) ([]DaemonStatus, error) {
+		return nil, ErrSupervisorIPCUnavailable
+	}
+	t.Cleanup(func() { SupervisorIPCStatusFn = prev })
+	restoreStatus := SetTestStatusFn(func() ([]DaemonStatus, error) {
+		return []DaemonStatus{
+			{Server: "scheduler", Daemon: "default", TaskName: `\mcp-local-hub-scheduler-default`, State: "Running"},
+		}, nil
+	})
+	t.Cleanup(restoreStatus)
+
+	rows, err := a.DaemonStatusSnapshot(context.Background())
+	if err != nil {
+		t.Fatalf("DaemonStatusSnapshot: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Server != "scheduler" {
+		t.Fatalf("rows = %+v, want scheduler fallback row", rows)
+	}
+}
+
 // TestHealthSnapshot_IPCBackingDeliversDaemons verifies the happy
 // path: the IPC backing returns rows, those rows propagate through
 // to HealthSnapshot.Daemons.Items projection. Confirms the seam is

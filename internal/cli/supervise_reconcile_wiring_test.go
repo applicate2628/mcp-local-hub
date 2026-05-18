@@ -1000,6 +1000,89 @@ func TestProductionTerminateFn_AlreadyExitedReturnsSuccess(t *testing.T) {
 	}
 }
 
+func TestProductionTerminateFn_TerminateRaceMarksExitedAndPersists(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	statePath := filepath.Join(tmpHome, "supervisor-state.json")
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(reconcileWiringTestTaskName, 4242, time.Unix(1700000000, 0).UTC())
+
+	prevQuery := productionQueryPIDStateFn
+	prevVerify := productionVerifyPIDIdentityFn
+	prevTerminate := productionTerminatePIDWithIdentityFn
+	productionQueryPIDStateFn = func(pid int) (process.PIDState, error) {
+		if pid != 4242 {
+			t.Fatalf("QueryPIDState pid = %d, want 4242", pid)
+		}
+		return process.PIDStateAlive, nil
+	}
+	productionVerifyPIDIdentityFn = func(proof process.PIDIdentityProof) error {
+		if proof.PID != 4242 {
+			t.Fatalf("VerifyPIDIdentity pid = %d, want 4242", proof.PID)
+		}
+		return nil
+	}
+	productionTerminatePIDWithIdentityFn = func(proof process.PIDIdentityProof) error {
+		if proof.PID != 4242 {
+			t.Fatalf("TerminatePIDWithIdentity pid = %d, want 4242", proof.PID)
+		}
+		return process.ErrProcessAlreadyExited
+	}
+	t.Cleanup(func() {
+		productionQueryPIDStateFn = prevQuery
+		productionVerifyPIDIdentityFn = prevVerify
+		productionTerminatePIDWithIdentityFn = prevTerminate
+	})
+
+	terminateFn := makeProductionTerminateFnWithStatePath(events, map[string]runningProcessIdentity{
+		reconcileWiringTestTaskName: {
+			PID:           4242,
+			PIDGeneration: 1,
+			StartedAt:     time.Unix(1700000000, 0).UTC().Format(time.RFC3339Nano),
+		},
+	}, tracker, statePath)
+	if err := terminateFn(api.SupervisorDaemon{TaskName: reconcileWiringTestTaskName}); err != nil {
+		t.Fatalf("terminate fn: %v", err)
+	}
+
+	entry, ok := tracker.Get(reconcileWiringTestTaskName)
+	if !ok {
+		t.Fatal("tracker entry missing")
+	}
+	if entry.State != daemonRuntimeStateIdle || entry.CurrentPID != 0 || !entry.StartedAt.IsZero() {
+		t.Fatalf("tracker entry after already-exited race = %+v, want idle pid=0 zero started_at", entry)
+	}
+	state, err := api.ReadSupervisorState(statePath)
+	if err != nil {
+		t.Fatalf("read persisted supervisor state: %v", err)
+	}
+	got := state.Daemons[reconcileWiringTestTaskName]
+	if got.State != daemonRuntimeStateIdle || got.CurrentPID != 0 || got.StartedAt != "" {
+		t.Fatalf("persisted daemon state = %+v, want idle pid=0 empty started_at", got)
+	}
+
+	logRaw, err := os.ReadFile(eventsPath)
+	if err != nil {
+		t.Fatalf("read events log: %v", err)
+	}
+	logStr := string(logRaw)
+	if !strings.Contains(logStr, `"event":"daemon-terminate-already-exited"`) {
+		t.Fatalf("daemon-terminate-already-exited event missing from audit log:\n%s", logStr)
+	}
+	for _, event := range []string{`"event":"daemon-terminated"`, `"event":"daemon-terminate-failed"`} {
+		if strings.Contains(logStr, event) {
+			t.Fatalf("unexpected %s event after already-exited race:\n%s", event, logStr)
+		}
+	}
+}
+
 func startedAtForPID(t *testing.T, pid int) string {
 	t.Helper()
 	ts, ok := process.ProcessStartTime(pid)

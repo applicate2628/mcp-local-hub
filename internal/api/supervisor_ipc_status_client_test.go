@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -101,6 +102,49 @@ func TestDialSupervisorIPCStatus_NoSupervisor(t *testing.T) {
 	}
 }
 
+func TestReadSupervisorIPCLine_ProcessesBytesReturnedWithEOF(t *testing.T) {
+	conn := &singleReadEOFConn{data: []byte(`{"id":7}` + "\n")}
+
+	line, err := readSupervisorIPCLine(conn, 4096)
+	if err != nil {
+		t.Fatalf("readSupervisorIPCLine: %v", err)
+	}
+	if string(line) != `{"id":7}` {
+		t.Fatalf("line = %q, want JSON payload without newline", string(line))
+	}
+}
+
+func TestReadSupervisorIPCResponse_AllowsLargeStatusFrame(t *testing.T) {
+	largeArg := strings.Repeat("x", 20*1024)
+	raw, err := json.Marshal(map[string]any{
+		"id": int64(7),
+		"ok": true,
+		"result": map[string]any{
+			"state": "running",
+			"daemons": []map[string]any{
+				{
+					"task_name": `\mcp-local-hub-memory-default`,
+					"server":    "memory",
+					"daemon":    "default",
+					"args":      []string{largeArg},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal large response: %v", err)
+	}
+	conn := &singleReadEOFConn{data: append(raw, '\n')}
+
+	resp, err := readSupervisorIPCResponse(conn)
+	if err != nil {
+		t.Fatalf("readSupervisorIPCResponse: %v", err)
+	}
+	if resp.ID != 7 || !resp.OK {
+		t.Fatalf("response = %+v, want id=7 ok=true", resp)
+	}
+}
+
 func withDaemonStateRootOverride(t *testing.T, stateDir string) {
 	t.Helper()
 	prev := daemonStateRootOverride
@@ -169,4 +213,23 @@ func readTestIPCLine(conn net.Conn, max int) ([]byte, error) {
 		buf = append(buf, tmp[0])
 	}
 	return nil, errors.New("line too long")
+}
+
+type singleReadEOFConn struct {
+	net.Conn
+	data []byte
+	done bool
+}
+
+func (c *singleReadEOFConn) Read(p []byte) (int, error) {
+	if c.done {
+		return 0, io.EOF
+	}
+	n := copy(p, c.data)
+	c.data = c.data[n:]
+	if len(c.data) == 0 {
+		c.done = true
+		return n, io.EOF
+	}
+	return n, nil
 }

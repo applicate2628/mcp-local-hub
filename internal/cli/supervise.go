@@ -84,6 +84,12 @@ var (
 	reconcileTerminateFn TerminateFunc
 )
 
+var (
+	productionQueryPIDStateFn            = process.QueryPIDState
+	productionVerifyPIDIdentityFn        = process.VerifyPIDIdentity
+	productionTerminatePIDWithIdentityFn = process.TerminatePIDWithIdentity
+)
+
 // setReconcileSpawnFnForTest installs a test spawn closure. Returns
 // an "uninstall" function tests defer to restore the production
 // wiring (nil — runSupervise re-installs its own closure on next
@@ -1321,7 +1327,7 @@ func makeProductionTerminateFnWithStatePath(events *api.SupervisorEventLog, runn
 			emitDaemonTerminateFailed(events, d, pid, err)
 			return err
 		}
-		state, stateErr := process.QueryPIDState(pid)
+		state, stateErr := productionQueryPIDStateFn(pid)
 		if stateErr != nil {
 			err := fmt.Errorf("query PID %d state: %w", pid, stateErr)
 			emitDaemonTerminateFailed(events, d, pid, err)
@@ -1338,7 +1344,7 @@ func makeProductionTerminateFnWithStatePath(events *api.SupervisorEventLog, runn
 			ExecutablePath: canonicalMcphubPath(),
 			StartedAt:      target.StartedAt,
 		}
-		if err := process.VerifyPIDIdentity(proof); err != nil {
+		if err := productionVerifyPIDIdentityFn(proof); err != nil {
 			if errors.Is(err, process.ErrProcessAlreadyExited) {
 				emitDaemonTerminateAlreadyExited(events, d, pid)
 				tracker.MarkExited(d.TaskName)
@@ -1372,9 +1378,11 @@ func makeProductionTerminateFnWithStatePath(events *api.SupervisorEventLog, runn
 			},
 		})
 
-		if err := process.TerminatePIDWithIdentity(proof); err != nil {
+		if err := productionTerminatePIDWithIdentityFn(proof); err != nil {
 			if errors.Is(err, process.ErrProcessAlreadyExited) {
 				emitDaemonTerminateAlreadyExited(events, d, pid)
+				tracker.MarkExited(d.TaskName)
+				_ = persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName)
 				return nil
 			}
 			if errors.Is(err, process.ErrProcessIdentityMismatch) {
