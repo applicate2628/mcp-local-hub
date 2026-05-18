@@ -28,6 +28,10 @@ func finishProductionTerminate(proof process.PIDIdentityProof, d api.SupervisorD
 	}
 
 	if err := process.VerifyPIDIdentity(proof); err != nil {
+		if errors.Is(err, process.ErrProcessAlreadyExited) {
+			emitDaemonTerminateAlreadyExited(events, d, pid)
+			return nil
+		}
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: api.SupervisorEventSeverityWarn,
 			Source:   "lifecycle",

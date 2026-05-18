@@ -18,23 +18,33 @@ const linuxDeletedSuffix = " (deleted)"
 
 // PIDExecutableMatches compares /proc/<pid>/exe against expectedPath.
 func PIDExecutableMatches(pid int, expectedPath string) bool {
+	return verifyPIDExecutablePath(pid, expectedPath) == nil
+}
+
+func verifyPIDExecutablePath(pid int, expectedPath string) error {
 	got, err := pidExecutablePath(pid)
 	if err != nil {
-		return false
+		if errors.Is(err, ErrProcessAlreadyExited) {
+			return err
+		}
+		return fmt.Errorf("%w: PID %d executable proof unavailable: %v", ErrProcessIdentityMismatch, pid, err)
 	}
 	expected, err := normalizeExpectedExecutablePath(expectedPath)
 	if err != nil {
-		return false
+		return err
 	}
-	return got == expected
+	if got != expected {
+		return fmt.Errorf("%w: PID %d executable path mismatch", ErrProcessIdentityMismatch, pid)
+	}
+	return nil
 }
 
 func VerifyPIDIdentity(proof PIDIdentityProof) error {
 	if proof.PID <= 0 {
 		return fmt.Errorf("process: invalid PID %d", proof.PID)
 	}
-	if !PIDExecutableMatches(proof.PID, proof.ExecutablePath) {
-		return fmt.Errorf("%w: PID %d executable path mismatch", ErrProcessIdentityMismatch, proof.PID)
+	if err := verifyPIDExecutablePath(proof.PID, proof.ExecutablePath); err != nil {
+		return err
 	}
 	recorded, err := parseExpectedStartedAt(proof.StartedAt)
 	if err != nil {
