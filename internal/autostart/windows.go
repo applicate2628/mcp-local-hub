@@ -49,14 +49,29 @@ func newPlatformBackend() (Backend, error) {
 }
 
 // superviseArgs returns the argv slice the LogonTrigger passes to the
-// mcphub binary. `--strict-mode` is appended only when opts.StrictMode
-// is true so the recorded XML differs by exactly one element between
-// the two modes — drift detection relies on that exact-element check.
+// mcphub binary.
+//
+// As of 2026-05-18 the autostart entry launches `mcphub gui` instead
+// of `mcphub supervise` — see the "GUI owns supervisor lifecycle"
+// design note in internal/cli/gui_supervisor_owner.go. The GUI process
+// adopts (or spawns) the supervisor on startup and shuts it down on
+// exit. One process tree, one tray indicator: tray visible = mcphub
+// running.
+//
+// `--strict-mode` (when set) still threads through so the GUI's
+// supervisor spawn inherits the right intent flag. Drift detection
+// relies on the exact-element diff between the two modes.
+//
+// The legacy `mcphub supervise` autostart entry from PR #211 is
+// rewritten in place — Enable() always Delete's first, so on the
+// next `mcphub autostart enable` invocation the operator transitions
+// from the supervise-only shim to the gui-owns-supervisor shim with
+// no extra step.
 func superviseArgs(opts Options) []string {
 	if opts.StrictMode {
-		return []string{"supervise", "--strict-mode"}
+		return []string{"gui", "--strict-mode"}
 	}
-	return []string{"supervise"}
+	return []string{"gui"}
 }
 
 // Enable installs (or replaces) the autostart Task Scheduler entry.
@@ -97,6 +112,20 @@ func (w *windowsBackend) Enable(opts Options) error {
 	if err := sched.Create(spec); err != nil {
 		return fmt.Errorf("create task: %w", err)
 	}
+	// Best-effort: remove the legacy v0.4.x watchdog Task Scheduler
+	// entry. In v0.5.0 the supervisor owns daemon revival via Job
+	// Object + reconcile loop, so the 5-min-cadence watchdog task is
+	// a no-op vestige that writes "suspicious-xml" warnings to
+	// watchdog.log every cycle (its v0.4.x validator doesn't
+	// understand the v0.5.0 supervisor task XML format and rejects it).
+	// Deleting it here makes `mcphub autostart enable` the canonical
+	// transition point — operators don't have to remember to delete
+	// the watchdog task manually after migration.
+	//
+	// scheduler.Delete is idempotent (returns nil for absent tasks),
+	// so this is safe to call unconditionally.
+	const legacyWatchdogTaskName = `\mcp-local-hub-watchdog`
+	_ = sched.Delete(legacyWatchdogTaskName) // legacy v0.4.x cleanup
 	return nil
 }
 

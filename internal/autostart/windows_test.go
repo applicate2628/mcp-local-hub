@@ -110,8 +110,11 @@ func TestWindowsBackend_EnableCreatesTask(t *testing.T) {
 	if spec.Command != `C:\mcp\mcphub.exe` {
 		t.Errorf("Create.Command = %q, want %q", spec.Command, `C:\mcp\mcphub.exe`)
 	}
-	if len(spec.Args) != 1 || spec.Args[0] != "supervise" {
-		t.Errorf("Create.Args = %v, want [supervise]", spec.Args)
+	// As of 2026-05-18, the autostart entry launches `mcphub gui`
+	// instead of `mcphub supervise` — GUI process owns supervisor
+	// lifecycle (see internal/cli/gui_supervisor_owner.go).
+	if len(spec.Args) != 1 || spec.Args[0] != "gui" {
+		t.Errorf("Create.Args = %v, want [gui]", spec.Args)
 	}
 }
 
@@ -130,7 +133,9 @@ func TestWindowsBackend_EnableStrictModeAddsFlag(t *testing.T) {
 		t.Fatalf("Create called %d times, want 1", len(f.createCalls))
 	}
 	got := f.createCalls[0].Args
-	want := []string{"supervise", "--strict-mode"}
+	// As of 2026-05-18, autostart launches `mcphub gui --strict-mode`
+	// (GUI owns supervisor lifecycle; --strict-mode threads through).
+	want := []string{"gui", "--strict-mode"}
 	if len(got) != len(want) {
 		t.Fatalf("Create.Args = %v, want %v", got, want)
 	}
@@ -156,8 +161,19 @@ func TestWindowsBackend_EnableReplacesExistingTask(t *testing.T) {
 	if err := b.Enable(Options{MCPHubPath: `C:\mcp\mcphub.exe`}); err != nil {
 		t.Fatalf("Enable: %v", err)
 	}
-	if len(f.deleteCalls) != 1 || f.deleteCalls[0] != WindowsTaskName {
-		t.Errorf("Delete calls = %v, want [%q]", f.deleteCalls, WindowsTaskName)
+	// As of 2026-05-18, Enable also deletes the legacy v0.4.x watchdog
+	// task as part of the v0.5.0 cleanup. Expect both Delete calls in
+	// the recorded order: supervisor first (pre-Create idempotence),
+	// watchdog second (post-Create cleanup).
+	const legacyWatchdogTaskName = `\mcp-local-hub-watchdog`
+	wantDeletes := []string{WindowsTaskName, legacyWatchdogTaskName}
+	if len(f.deleteCalls) != len(wantDeletes) {
+		t.Fatalf("Delete calls = %v, want %v", f.deleteCalls, wantDeletes)
+	}
+	for i, want := range wantDeletes {
+		if f.deleteCalls[i] != want {
+			t.Errorf("Delete[%d] = %q, want %q", i, f.deleteCalls[i], want)
+		}
 	}
 	if len(f.createCalls) != 1 {
 		t.Errorf("Create calls = %d, want 1", len(f.createCalls))
