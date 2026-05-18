@@ -19,20 +19,12 @@
 // the pipe itself enforces owner-only access regardless of the name.
 package cli
 
-import (
-	"os"
-	"strings"
-)
+import "mcp-local-hub/internal/api"
 
 // defaultPipePathOS returns the Windows named-pipe path for the
 // supervisor IPC channel. The stateDir argument is ignored on Windows
 // (pipes live in the kernel namespace, not on disk); it is accepted
 // here to keep the cross-platform call site signature uniform.
 func defaultPipePathOS(_ string) string {
-	user := os.Getenv("USERNAME")
-	user = strings.ReplaceAll(user, " ", "-")
-	if user == "" {
-		user = "default"
-	}
-	return `\\.\pipe\mcphub-supervisor-` + user
+	return api.SupervisorIPCAddress("")
 }

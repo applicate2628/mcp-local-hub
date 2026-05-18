@@ -294,6 +294,7 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 	// Phase B: start the HTTP server. Server.Start binds 127.0.0.1
 	// on the configured port (0 = OS-assigned) and signals ready
 	// once the listener is live.
+	api.SupervisorIPCStatusFn = api.DialSupervisorIPCStatus
 	s := gui.NewServer(gui.Config{Port: port, Version: versionString()})
 	s.OnActivateWindow(func() error {
 		// Phase 3B-II C2: focus the existing Chrome app-mode dashboard

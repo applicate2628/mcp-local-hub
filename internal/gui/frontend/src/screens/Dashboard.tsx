@@ -37,10 +37,12 @@ export function DashboardScreen() {
     [],
   );
 
-  // Initial bootstrap. Non-ok status OR non-array body → error state.
+  // Status bootstrap + polling. The 30s poll backs the supervisor IPC
+  // status path while live daemon-state SSE deltas are still on the
+  // legacy scheduler stream.
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    async function loadStatus() {
       try {
         const rows = await fetchOrThrow<DaemonStatus[]>("/api/status", "array");
         if (cancelled) return;
@@ -53,12 +55,18 @@ export function DashboardScreen() {
           next[keyFor(row)] = row;
         }
         setState(next);
+        setError(null);
       } catch (err) {
         if (!cancelled) setError((err as Error).message);
       }
-    })();
+    }
+    void loadStatus();
+    const poll = setInterval(() => {
+      void loadStatus();
+    }, 30_000);
     return () => {
       cancelled = true;
+      clearInterval(poll);
     };
   }, []);
 

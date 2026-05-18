@@ -12,12 +12,12 @@
 // together form the Q11 POSIX equivalent of the Windows SDDL DACL.
 package cli
 
-import "path/filepath"
+import "mcp-local-hub/internal/api"
 
 // defaultPipePathOS returns the POSIX unix-domain-socket path for the
 // supervisor IPC channel. stateDir MUST be a writable per-user state
 // directory; the helper does NOT create it (api.DaemonStateDir() is
 // the owning creator).
 func defaultPipePathOS(stateDir string) string {
-	return filepath.Join(stateDir, "supervisor.sock")
+	return api.SupervisorIPCAddress(stateDir)
 }

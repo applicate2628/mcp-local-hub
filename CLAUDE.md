@@ -640,6 +640,17 @@ below.
 paths to every state file so operators can inspect / quarantine / restore
 them directly.
 
+GUI Dashboard status is now sourced through the supervisor IPC status seam:
+`internal/cli/gui.go` wires `api.SupervisorIPCStatusFn =
+api.DialSupervisorIPCStatus` before `gui.NewServer`, and `/api/status`
+continues through `internal/api/health.go`'s `DaemonStatusSnapshot` cache.
+The IPC handler reads `<state-dir>/supervisor-intent.json` for daemon
+descriptors and `<state-dir>/supervisor-state.json` for runtime PID/state.
+The legacy scheduler scan remains only the nil-seam fallback for hosts running
+without this wiring; once wired, an unreachable or mismatched supervisor fails
+loud as `STATUS_FAILED` instead of silently returning the deleted v0.4.x task
+view.
+
 ### Subcommands
 
 ```bash

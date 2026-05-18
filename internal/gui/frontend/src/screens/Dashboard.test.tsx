@@ -352,6 +352,31 @@ describe("DashboardScreen — Stop button", () => {
     expect((buttons[1] as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("polls /api/status every 30 seconds so supervisor-backed rows refresh without SSE deltas", async () => {
+    let statusCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") {
+        statusCalls++;
+        return Promise.resolve(statusResponse(statusCalls === 1 ? [runningRow] : [runningRow, stoppedRow]));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+    const { findAllByRole } = render(<DashboardScreen />);
+    await waitFor(async () => {
+      const buttons = await findAllByRole("button");
+      expect(buttons.length).toBe(4);
+    });
+
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(statusCalls).toBe(2);
+    await waitFor(async () => {
+      const buttons = await findAllByRole("button");
+      expect(buttons.length).toBe(6);
+    });
+  });
+
   // Codex bot PR #36 P2: bulk actions are global; clicking Stop all
   // while Run all is in flight (or vice versa) would race
   // /api/restart-all with /api/stop-all against every daemon and the

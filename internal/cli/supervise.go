@@ -857,12 +857,23 @@ func dispatchIPCRequest(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps)
 	}
 	switch req.Cmd {
 	case "status":
+		daemons, err := supervisorStatusDaemons(deps.stateDir)
+		if err != nil {
+			return writeIPCFrame(conn, api.IPCResponse{
+				ID: req.ID,
+				Error: &api.IPCErr{
+					Code:    "STATUS_FAILED",
+					Message: err.Error(),
+				},
+				Final: true,
+			})
+		}
 		return writeIPCFrame(conn, api.IPCResponse{
 			ID: req.ID,
 			OK: true,
 			Result: map[string]any{
 				"state":               "running",
-				"daemons":             []any{},
+				"daemons":             daemons,
 				"reconcile_ready":     deps.reconcileReady.Load(),
 				"intent_files_loaded": deps.intentFilesLoaded.Load(),
 			},

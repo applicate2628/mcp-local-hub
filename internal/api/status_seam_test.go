@@ -173,7 +173,7 @@ func TestPlan_SchedulerTasksFieldStillPresent(t *testing.T) {
 }
 
 // TestHealthSnapshot_IPCTimeoutReturnsFailLoud verifies the new IPC
-// backing: when supervisorIPCStatusFn is configured and returns a
+// backing: when SupervisorIPCStatusFn is configured and returns a
 // timeout (or any error), the daemons-section fetch surfaces the
 // error so the HTTP handler maps it to 500 +
 // HEALTH_BACKEND_FAILED / STATUS_FAILED envelope. Silently falling
@@ -183,13 +183,13 @@ func TestHealthSnapshot_IPCTimeoutReturnsFailLoud(t *testing.T) {
 	a := NewAPI()
 
 	// Install a fake IPC client that always times out. The seam
-	// (supervisorIPCStatusFn package var) is swapped via a t.Cleanup
+	// (SupervisorIPCStatusFn package var) is swapped via a t.Cleanup
 	// so a parallel test cannot leak fake state.
-	prev := supervisorIPCStatusFn
-	supervisorIPCStatusFn = func(_ context.Context) ([]DaemonStatus, error) {
+	prev := SupervisorIPCStatusFn
+	SupervisorIPCStatusFn = func(_ context.Context) ([]DaemonStatus, error) {
 		return nil, errors.New("supervisor IPC dial: context deadline exceeded")
 	}
-	t.Cleanup(func() { supervisorIPCStatusFn = prev })
+	t.Cleanup(func() { SupervisorIPCStatusFn = prev })
 
 	_, err := a.HealthSnapshot(context.Background(), HealthOpts{})
 	if err == nil {
@@ -208,11 +208,11 @@ func TestHealthSnapshot_IPCTimeoutReturnsFailLoud(t *testing.T) {
 func TestDaemonStatusSnapshot_IPCErrorReturnsFailLoud(t *testing.T) {
 	a := NewAPI()
 
-	prev := supervisorIPCStatusFn
-	supervisorIPCStatusFn = func(_ context.Context) ([]DaemonStatus, error) {
+	prev := SupervisorIPCStatusFn
+	SupervisorIPCStatusFn = func(_ context.Context) ([]DaemonStatus, error) {
 		return nil, errors.New("supervisor IPC: pipe unavailable")
 	}
-	t.Cleanup(func() { supervisorIPCStatusFn = prev })
+	t.Cleanup(func() { SupervisorIPCStatusFn = prev })
 
 	rows, err := a.DaemonStatusSnapshot(context.Background())
 	if err == nil {
@@ -230,13 +230,13 @@ func TestDaemonStatusSnapshot_IPCErrorReturnsFailLoud(t *testing.T) {
 func TestHealthSnapshot_IPCBackingDeliversDaemons(t *testing.T) {
 	a := NewAPI()
 
-	prev := supervisorIPCStatusFn
-	supervisorIPCStatusFn = func(_ context.Context) ([]DaemonStatus, error) {
+	prev := SupervisorIPCStatusFn
+	SupervisorIPCStatusFn = func(_ context.Context) ([]DaemonStatus, error) {
 		return []DaemonStatus{
 			{Server: "memory", Daemon: "default", State: "Running", Port: 9301, PID: 1234},
 		}, nil
 	}
-	t.Cleanup(func() { supervisorIPCStatusFn = prev })
+	t.Cleanup(func() { SupervisorIPCStatusFn = prev })
 
 	snap, err := a.HealthSnapshot(context.Background(), HealthOpts{})
 	if err != nil {
