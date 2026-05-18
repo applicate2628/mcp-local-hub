@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"mcp-local-hub/internal/scheduler"
@@ -123,9 +124,16 @@ func (w *windowsBackend) Enable(opts Options) error {
 	// the watchdog task manually after migration.
 	//
 	// scheduler.Delete is idempotent (returns nil for absent tasks),
-	// so this is safe to call unconditionally.
+	// so this is safe to call unconditionally. Non-Absent errors
+	// (e.g. permissions, scheduler-access transient) are surfaced to
+	// stderr — best-effort but visible, so an operator running into
+	// the failure doesn't silently retain the legacy watchdog task
+	// spamming "suspicious-xml" warnings every 5 min.
 	const legacyWatchdogTaskName = `\mcp-local-hub-watchdog`
-	_ = sched.Delete(legacyWatchdogTaskName) // legacy v0.4.x cleanup
+	if err := sched.Delete(legacyWatchdogTaskName); err != nil && !isAbsentErrorMsg(err) {
+		fmt.Fprintf(os.Stderr, "autostart: legacy watchdog task cleanup failed: %v (manual: schtasks /Delete /TN %q /F)\n",
+			err, legacyWatchdogTaskName)
+	}
 	return nil
 }
 

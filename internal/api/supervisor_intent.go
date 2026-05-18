@@ -107,14 +107,16 @@ func filterSupervisorIntentOneshotDaemons(f *SupervisorIntentFile) {
 // isLegacyOneshotDaemon reports whether the descriptor is for a known
 // one-shot subcommand that must NOT be treated as a long-lived daemon.
 //
-// Currently matches: `mcphub watchdog --once` (any args list whose
-// first element is "watchdog"). Add new patterns here as future
+// Currently matches: `mcphub watchdog --once` exactly. The strict
+// two-arg match avoids accidentally stripping a future long-lived
+// daemon whose first arg happens to be `watchdog` (e.g. an `mcphub
+// watchdog serve` daemon variant). Add new patterns here as future
 // migrations surface them.
 func isLegacyOneshotDaemon(d SupervisorDaemon) bool {
-	if len(d.Args) == 0 {
+	if len(d.Args) < 2 {
 		return false
 	}
-	return d.Args[0] == "watchdog"
+	return d.Args[0] == "watchdog" && d.Args[1] == "--once"
 }
 
 // WriteSupervisorIntent goes through WriteStateFileAtomic (Task 1.1).

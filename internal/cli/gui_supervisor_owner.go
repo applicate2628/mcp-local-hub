@@ -153,26 +153,42 @@ func (s *supervisorOwner) stop(ctx context.Context, graceTimeoutMs int) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	// Send the graceful exit. If the supervisor doesn't acknowledge
-	// (process already dead, IPC unreachable, etc), proceed to the
-	// force-kill fallback rather than blocking on a dead pipe.
-	ipcErr := api.DialSupervisorIPCExit(ctx, graceTimeoutMs)
 
-	// Wait for the process to exit. Wait() in a goroutine so we can
-	// time out independently and force-kill if needed.
+	// Start the process-exit waiter FIRST so the total wall-time budget
+	// begins ticking from the same instant the IPC request starts. The
+	// previous serial pattern (IPC first, then time.After) let the IPC
+	// call eat up to the parent ctx deadline (typically 30s) BEFORE the
+	// graceful-exit timer began — pushing total Stop wall-time from the
+	// documented graceTimeoutMs+supervisorForceKillFallbackWindow (~12s
+	// at default settings) to ~42s on a hung supervisor.
 	exited := make(chan error, 1)
 	go func() {
 		_, err := s.proc.Wait()
 		exited <- err
 	}()
 
+	// Issue the IPC exit concurrently under a sub-deadline derived
+	// from graceTimeoutMs only — never the full parent ctx deadline.
+	// This bounds total Stop wall-time to graceTimeoutMs + fallback
+	// even when the supervisor's IPC pipe is hung or the supervisor
+	// process is unresponsive.
+	ipcDone := make(chan error, 1)
+	go func() {
+		ipcCtx, cancel := context.WithTimeout(ctx, time.Duration(graceTimeoutMs)*time.Millisecond)
+		defer cancel()
+		ipcDone <- api.DialSupervisorIPCExit(ipcCtx, graceTimeoutMs)
+	}()
+
 	total := time.Duration(graceTimeoutMs)*time.Millisecond + supervisorForceKillFallbackWindow
 	select {
 	case <-exited:
-		// Process exited within the grace window. If the IPC layer
-		// itself failed (e.g. handshake mismatch) but the process is
-		// gone anyway, surface the IPC failure for diagnosability;
-		// otherwise return nil.
+		// Process exited within the grace window. Drain the IPC
+		// result for diagnosability: if the IPC layer failed (e.g.
+		// handshake mismatch) but the process is gone anyway, surface
+		// the IPC failure. A pending IPC call against an already-dead
+		// supervisor returns within the sub-deadline established
+		// above, so this drain is bounded.
+		ipcErr := <-ipcDone
 		if ipcErr != nil && !errors.Is(ipcErr, api.ErrSupervisorIPCUnavailable) {
 			return fmt.Errorf("supervisor owner: graceful exit IPC failed but process exited: %w", ipcErr)
 		}
@@ -181,6 +197,17 @@ func (s *supervisorOwner) stop(ctx context.Context, graceTimeoutMs int) error {
 		// Force-kill — supervisor didn't exit in time.
 		_ = s.proc.Kill()
 		<-exited
+		// Best-effort drain of the IPC result. Even if it never
+		// completes (e.g. dial hang), the goroutine's ipcCtx times
+		// out at graceTimeoutMs so it doesn't leak past Stop.
+		var ipcErr error
+		select {
+		case ipcErr = <-ipcDone:
+		case <-time.After(100 * time.Millisecond):
+			// IPC goroutine still alive — let it exit on its own
+			// sub-deadline. Stop() returns now to keep shutdown
+			// responsive.
+		}
 		if ipcErr != nil {
 			return fmt.Errorf("supervisor owner: graceful exit timeout after %s (IPC error: %v), force-killed PID %d",
 				total, ipcErr, s.proc.Pid)

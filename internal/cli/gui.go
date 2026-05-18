@@ -407,6 +407,16 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 	// fails, GUI keeps running so the operator can investigate via Logs
 	// screen and Dashboard banner; we don't want a transient IPC hiccup
 	// to lock the operator out of the recovery surface.
+	//
+	// E2E test seam: MCPHUB_E2E_SUPERVISOR=none suppresses the entire
+	// spawn block so Playwright fixtures (which spawn `mcphub gui`
+	// per-test under a temp HOME) don't time out 15s on every test
+	// waiting for IPC bind that will never happen — they have no
+	// supervisor-intent.json in the temp dir. Mirror of the existing
+	// MCPHUB_E2E_SCHEDULER=none pattern at status_enrich.go.
+	if os.Getenv("MCPHUB_E2E_SUPERVISOR") == "none" {
+		return <-errCh
+	}
 	supervisorBin, binErr := resolveMCPHubBinary()
 	if binErr != nil {
 		fmt.Fprintf(cmd.OutOrStderr(), "warning: resolve mcphub binary for supervisor spawn: %v\n", binErr)
@@ -423,10 +433,12 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 			fmt.Fprintln(cmd.OutOrStdout(), "supervisor: adopted (running externally)")
 		}
 	}
-	// Defer registered AFTER lock.Release defer (line 292) runs FIRST
-	// per LIFO defer stack — supervisor stops, then we drop the
-	// single-instance lock so the next gui invocation cannot race a
-	// still-shutting-down supervisor.
+	// This defer is registered after the lock.Release defer at the
+	// top of startGuiServer. Under Go's LIFO defer stack, this
+	// supervisor-shutdown defer therefore runs FIRST on function
+	// return — supervisor stops before the single-instance lock is
+	// released, so the next gui invocation cannot race a still-
+	// shutting-down supervisor.
 	defer func() {
 		if supervisor == nil {
 			return

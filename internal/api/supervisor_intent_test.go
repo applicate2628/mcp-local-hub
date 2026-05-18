@@ -114,6 +114,47 @@ func TestSupervisorIntent_FiltersLegacyWatchdogOneshot(t *testing.T) {
 	}
 }
 
+// TestSupervisorIntent_FilterStrictWatchdogOnceOnly verifies the
+// tightened filter predicate at supervisor_intent.go:isLegacyOneshotDaemon —
+// only `["watchdog", "--once"]` (the exact migration artifact) is
+// stripped. Defensive: a future long-lived `mcphub watchdog serve`
+// daemon variant must NOT be filtered away by a too-broad match. PR
+// #212 r2 code-review finding 5.
+func TestSupervisorIntent_FilterStrictWatchdogOnceOnly(t *testing.T) {
+	dir := hardenedTempDir(t)
+	path := filepath.Join(dir, "supervisor-intent.json")
+
+	on := SupervisorIntentFile{
+		Version:   1,
+		UpdatedAt: "2026-05-18T00:00:00.000000000Z",
+		Daemons: []SupervisorDaemon{
+			{TaskName: `\mcp-local-hub-watchdog`, Command: "mcphub", Args: []string{"watchdog", "--once"}},        // FILTERED
+			{TaskName: `\mcp-local-hub-watchdog-bare`, Command: "mcphub", Args: []string{"watchdog"}},             // KEPT — not --once
+			{TaskName: `\mcp-local-hub-watchdog-serve`, Command: "mcphub", Args: []string{"watchdog", "serve"}},   // KEPT — future variant
+			{TaskName: `\mcp-local-hub-watchdog-empty`, Command: "mcphub", Args: []string{}},                       // KEPT — no args
+		},
+	}
+	if err := WriteSupervisorIntent(path, &on); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err := ReadSupervisorIntent(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if len(got.Daemons) != 3 {
+		names := make([]string, 0, len(got.Daemons))
+		for _, d := range got.Daemons {
+			names = append(names, d.TaskName)
+		}
+		t.Fatalf("expected 3 daemons (only `watchdog --once` filtered), got %d: %v", len(got.Daemons), names)
+	}
+	for _, d := range got.Daemons {
+		if d.TaskName == `\mcp-local-hub-watchdog` {
+			t.Errorf("watchdog --once entry should be filtered, got %+v", d)
+		}
+	}
+}
+
 func TestSupervisorIntent_RejectsUnknownFields(t *testing.T) {
 	dir := hardenedTempDir(t)
 	path := filepath.Join(dir, "supervisor-intent.json")
