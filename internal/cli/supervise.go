@@ -249,6 +249,7 @@ func (g *gracefulCounter) InProgress() bool { return g.n.Load() > 0 }
 type ipcDispatchDeps struct {
 	stateDir          string
 	events            *api.SupervisorEventLog
+	runtimeTracker    *DaemonRuntimeTracker
 	reconcileReady    *atomic.Bool
 	intentFilesLoaded *atomic.Bool
 	// gracefulInProgress is a refcount-style counter (codex-r4-b-p2)
@@ -462,6 +463,19 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		})
 		return fmt.Errorf("load intent files: %w", intentErr)
 	}
+	statePath := filepath.Join(stateDir, "supervisor-state.json")
+	runtimeTracker, trackerErr := loadDaemonRuntimeTrackerFromStatePath(statePath)
+	if trackerErr != nil {
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "error",
+			Source:   "lifecycle",
+			Event:    "supervise-startup-failed",
+			Body: map[string]any{
+				"err": trackerErr.Error(),
+			},
+		})
+		return fmt.Errorf("load supervisor-state.json: %w", trackerErr)
+	}
 
 	// IPC listener. `--no-ipc` keeps tests fast (lock+events+loop only).
 	// Production callers always pass --no-ipc=false; the listener owns
@@ -490,6 +504,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		deps := ipcDispatchDeps{
 			stateDir:           stateDir,
 			events:             events,
+			runtimeTracker:     runtimeTracker,
 			reconcileReady:     &reconcileReady,
 			intentFilesLoaded:  &intentFilesLoaded,
 			gracefulInProgress: &gracefulInProgress,
@@ -554,11 +569,11 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 
 	spawnFn := reconcileSpawnFn
 	if spawnFn == nil {
-		spawnFn = makeProductionSpawnFn(job, events)
+		spawnFn = makeProductionSpawnFnWithStatePath(job, events, runtimeTracker, statePath)
 	}
 	terminateFn := reconcileTerminateFn
 	if terminateFn == nil {
-		terminateFn = makeProductionTerminateFn(events, runningPIDs)
+		terminateFn = makeProductionTerminateFnWithStatePath(events, runningPIDs, runtimeTracker, statePath)
 	}
 
 	if intent != nil {
@@ -857,7 +872,7 @@ func dispatchIPCRequest(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps)
 	}
 	switch req.Cmd {
 	case "status":
-		daemons, err := supervisorStatusDaemons(deps.stateDir)
+		daemons, err := supervisorStatusDaemons(deps.stateDir, deps.runtimeTracker)
 		if err != nil {
 			return writeIPCFrame(conn, api.IPCResponse{
 				ID: req.ID,
@@ -1293,7 +1308,11 @@ func loadSupervisorCurrentRunning(stateDir string) (map[string]bool, map[string]
 // daemon-intent.json. The Reconciler carries only the daemon descriptor,
 // so startup reconcile threads in the PID snapshot captured from
 // supervisor-state.json.
-func makeProductionTerminateFn(events *api.SupervisorEventLog, runningPIDs map[string]runningProcessIdentity) TerminateFunc {
+func makeProductionTerminateFn(events *api.SupervisorEventLog, runningPIDs map[string]runningProcessIdentity, tracker *DaemonRuntimeTracker) TerminateFunc {
+	return makeProductionTerminateFnWithStatePath(events, runningPIDs, tracker, "")
+}
+
+func makeProductionTerminateFnWithStatePath(events *api.SupervisorEventLog, runningPIDs map[string]runningProcessIdentity, tracker *DaemonRuntimeTracker, statePath string) TerminateFunc {
 	return func(d api.SupervisorDaemon) error {
 		target := runningPIDs[d.TaskName]
 		pid := target.PID
@@ -1310,6 +1329,8 @@ func makeProductionTerminateFn(events *api.SupervisorEventLog, runningPIDs map[s
 		}
 		if state == process.PIDStateDead {
 			emitDaemonTerminateAlreadyExited(events, d, pid)
+			tracker.MarkExited(d.TaskName)
+			_ = persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName)
 			return nil
 		}
 		proof := process.PIDIdentityProof{
@@ -1320,6 +1341,8 @@ func makeProductionTerminateFn(events *api.SupervisorEventLog, runningPIDs map[s
 		if err := process.VerifyPIDIdentity(proof); err != nil {
 			if errors.Is(err, process.ErrProcessAlreadyExited) {
 				emitDaemonTerminateAlreadyExited(events, d, pid)
+				tracker.MarkExited(d.TaskName)
+				_ = persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName)
 				return nil
 			}
 			if !errors.Is(err, process.ErrProcessIdentityMismatch) {
@@ -1375,6 +1398,7 @@ func makeProductionTerminateFn(events *api.SupervisorEventLog, runningPIDs map[s
 			return err
 		}
 
+		tracker.MarkTerminated(d.TaskName)
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: api.SupervisorEventSeverityInfo,
 			Source:   "lifecycle",
@@ -1384,6 +1408,9 @@ func makeProductionTerminateFn(events *api.SupervisorEventLog, runningPIDs map[s
 				"pid": pid,
 			},
 		})
+		if err := persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName); err != nil {
+			return err
+		}
 		return nil
 	}
 }
@@ -1452,7 +1479,11 @@ func mergeDaemonEnv(parent []string, overrides map[string]string) []string {
 // full os.Environ()-derived block with the descriptor's keys appended
 // in sorted order, matching the v0.4.x daemon-host spawn convention
 // while keeping duplicate-case Windows keys deterministic.
-func makeProductionSpawnFn(job *process.Job, events *api.SupervisorEventLog) SpawnFunc {
+func makeProductionSpawnFn(job *process.Job, events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker) SpawnFunc {
+	return makeProductionSpawnFnWithStatePath(job, events, tracker, "")
+}
+
+func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, statePath string) SpawnFunc {
 	return func(d api.SupervisorDaemon) error {
 		cmd := exec.Command(d.Command, d.Args...)
 		if d.Workspace != "" {
@@ -1476,6 +1507,7 @@ func makeProductionSpawnFn(job *process.Job, events *api.SupervisorEventLog) Spa
 			}
 		}
 		if startErr != nil {
+			tracker.MarkSpawnFailed(d.TaskName, startErr)
 			_ = events.Emit(api.SupervisorEvent{
 				Severity: "error",
 				Source:   "lifecycle",
@@ -1486,8 +1518,17 @@ func makeProductionSpawnFn(job *process.Job, events *api.SupervisorEventLog) Spa
 					"command": d.Command,
 				},
 			})
+			_ = persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName)
 			return startErr
 		}
+		startedAt := time.Now().UTC()
+		tracker.MarkSpawned(d.TaskName, pid, startedAt)
+		taskName := d.TaskName
+		go func() {
+			_ = cmd.Wait()
+			tracker.MarkExited(taskName)
+			_ = persistDaemonRuntimeTracker(events, tracker, statePath, taskName)
+		}()
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "info",
 			Source:   "lifecycle",
@@ -1500,11 +1541,9 @@ func makeProductionSpawnFn(job *process.Job, events *api.SupervisorEventLog) Spa
 				"port":      d.Port,
 			},
 		})
-		// Resource reclamation only; the FIFO exit observer owns
-		// post-exit notification and follow-up reconcile signaling.
-		go func() {
-			_ = cmd.Wait()
-		}()
+		if err := persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName); err != nil {
+			return err
+		}
 		return nil
 	}
 }

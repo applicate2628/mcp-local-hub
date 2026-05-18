@@ -6,11 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"mcp-local-hub/internal/api"
 )
 
-func supervisorStatusDaemons(stateDir string) ([]map[string]any, error) {
+func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]map[string]any, error) {
 	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
 	intent, err := api.ReadSupervisorIntent(intentPath)
 	if err != nil {
@@ -23,16 +24,7 @@ func supervisorStatusDaemons(stateDir string) ([]map[string]any, error) {
 		return []map[string]any{}, nil
 	}
 
-	statePath := filepath.Join(stateDir, "supervisor-state.json")
-	state, stateErr := api.ReadSupervisorState(statePath)
-	if stateErr != nil && !errors.Is(stateErr, os.ErrNotExist) {
-		return nil, fmt.Errorf("read supervisor-state.json: %w", stateErr)
-	}
-	var daemonStates map[string]api.SupervisorDaemonState
-	if stateErr == nil && state != nil {
-		daemonStates = state.Daemons
-	}
-
+	daemonStates := tracker.Snapshot()
 	rows := make([]map[string]any, 0, len(intent.Daemons))
 	for _, d := range intent.Daemons {
 		taskName := canonicalSupervisorTaskName(d.TaskName)
@@ -51,7 +43,7 @@ func supervisorStatusDaemons(stateDir string) ([]map[string]any, error) {
 		if !ok {
 			runtimeState, ok = daemonStates[strings.TrimPrefix(taskName, `\`)]
 		}
-		stateText := "Unknown"
+		stateText := "Idle"
 		if ok {
 			stateText = supervisorStatusGUIState(runtimeState.State)
 		}
@@ -69,10 +61,10 @@ func supervisorStatusDaemons(stateDir string) ([]map[string]any, error) {
 			"port":             d.Port,
 			"state":            stateText,
 			"current_pid":      runtimeState.CurrentPID,
-			"started_at":       runtimeState.StartedAt,
-			"restart_history":  runtimeState.RestartHistory,
-			"backoff_until":    runtimeState.BackoffUntil,
-			"quarantine_since": runtimeState.QuarantineSince,
+			"started_at":       daemonRuntimeStartedAt(runtimeState.StartedAt),
+			"restart_history":  []api.RestartEvent{},
+			"backoff_until":    "",
+			"quarantine_since": "",
 			"is_maintenance":   isSupervisorMaintenanceTask(taskName),
 		})
 	}
@@ -92,11 +84,22 @@ func supervisorStatusGUIState(raw string) string {
 		return "Running"
 	case "idle":
 		return "Stopped"
-	case "backoff", "backoff-waiting":
+	case "backoff", "backoff-waiting", "spawning":
 		return "Restarting"
+	case "quarantine", "quarantined":
+		return "Quarantined"
+	case "":
+		return "Idle"
 	default:
 		return raw
 	}
+}
+
+func daemonRuntimeStartedAt(startedAt time.Time) string {
+	if startedAt.IsZero() {
+		return ""
+	}
+	return startedAt.UTC().Format(time.RFC3339Nano)
 }
 
 func isSupervisorMaintenanceTask(taskName string) bool {

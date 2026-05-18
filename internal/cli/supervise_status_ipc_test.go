@@ -13,7 +13,7 @@ import (
 	"mcp-local-hub/internal/api/apitest"
 )
 
-func TestSupervisorIPCStatus_PopulatesDaemons(t *testing.T) {
+func TestIPCStatusReadsRuntimeTracker(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 
 	intent := &api.SupervisorIntentFile{
@@ -33,29 +33,21 @@ func TestSupervisorIPCStatus_PopulatesDaemons(t *testing.T) {
 				Workspace: `D:\work\codex`,
 				Port:      9122,
 			},
+			{
+				TaskName:  `\mcp-local-hub-filesystem-default`,
+				Command:   `C:\tools\mcphub.exe`,
+				Args:      []string{"daemon", "filesystem"},
+				Workspace: `D:\work\fs`,
+				Port:      9123,
+			},
 		},
 	}
 	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
 		t.Fatalf("seed supervisor-intent.json: %v", err)
 	}
-	state := &api.SupervisorStateFile{
-		Version: 1,
-		Daemons: map[string]api.SupervisorDaemonState{
-			`\mcp-local-hub-memory-default`: {
-				State:      "running",
-				CurrentPID: 4321,
-				StartedAt:  "2026-05-18T10:00:00Z",
-			},
-			`\mcp-local-hub-serena-codex`: {
-				State:      "idle",
-				CurrentPID: 0,
-				StartedAt:  "",
-			},
-		},
-	}
-	if err := api.WriteSupervisorState(filepath.Join(stateDir, "supervisor-state.json"), state); err != nil {
-		t.Fatalf("seed supervisor-state.json: %v", err)
-	}
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(`\mcp-local-hub-memory-default`, 4321, time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC))
+	tracker.MarkTerminated(`\mcp-local-hub-serena-codex`)
 
 	serverConn, clientConn := net.Pipe()
 	defer clientConn.Close()
@@ -67,6 +59,7 @@ func TestSupervisorIPCStatus_PopulatesDaemons(t *testing.T) {
 	var graceful gracefulCounter
 	deps := ipcDispatchDeps{
 		stateDir:            stateDir,
+		runtimeTracker:      tracker,
 		reconcileReady:      &ready,
 		intentFilesLoaded:   &loaded,
 		gracefulInProgress:  &graceful,
@@ -99,8 +92,8 @@ func TestSupervisorIPCStatus_PopulatesDaemons(t *testing.T) {
 	if !ok {
 		t.Fatalf("daemons type = %T, want array in result %+v", result["daemons"], result)
 	}
-	if len(rawDaemons) != 2 {
-		t.Fatalf("daemons len = %d, want 2: %+v", len(rawDaemons), rawDaemons)
+	if len(rawDaemons) != 3 {
+		t.Fatalf("daemons len = %d, want 3: %+v", len(rawDaemons), rawDaemons)
 	}
 
 	byTask := map[string]map[string]any{}
@@ -135,6 +128,13 @@ func TestSupervisorIPCStatus_PopulatesDaemons(t *testing.T) {
 	}
 	if codex["state"] != "Stopped" || codex["current_pid"] != float64(0) {
 		t.Fatalf("codex state/pid = %v/%v, want Stopped/0", codex["state"], codex["current_pid"])
+	}
+	fs := byTask[`\mcp-local-hub-filesystem-default`]
+	if fs == nil {
+		t.Fatalf("filesystem daemon missing from response: %+v", byTask)
+	}
+	if fs["state"] != "Idle" || fs["current_pid"] != float64(0) {
+		t.Fatalf("filesystem state/pid = %v/%v, want Idle/0 for absent tracker row", fs["state"], fs["current_pid"])
 	}
 
 	select {

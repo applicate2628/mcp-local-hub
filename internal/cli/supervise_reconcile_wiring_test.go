@@ -555,7 +555,7 @@ func TestProductionSpawnFn_FailureEmitsAuditEvent(t *testing.T) {
 	// nil job → spawn fn falls back to plain cmd.Start (Windows: the
 	// Job Object is best-effort; nil job is the audit-row codepath
 	// when NewKillOnCloseJob itself failed).
-	spawnFn := makeProductionSpawnFn(nil, events)
+	spawnFn := makeProductionSpawnFn(nil, events, NewDaemonRuntimeTracker())
 
 	descriptor := api.SupervisorDaemon{
 		TaskName: reconcileWiringTestTaskName,
@@ -583,6 +583,39 @@ func TestProductionSpawnFn_FailureEmitsAuditEvent(t *testing.T) {
 	}
 	if !strings.Contains(logStr, `"task_name":"\\mcp-local-hub-memory-default"`) {
 		t.Fatalf("daemon task_name missing from audit log:\n%s", logStr)
+	}
+}
+
+func TestProductionSpawnFn_TrackerFailureOnSpawnErr(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	tracker := NewDaemonRuntimeTracker()
+	spawnFn := makeProductionSpawnFn(nil, events, tracker)
+	descriptor := api.SupervisorDaemon{
+		TaskName: reconcileWiringTestTaskName,
+		Server:   "memory",
+		Daemon:   "default",
+		Command:  filepath.Join(tmpHome, "this-binary-definitely-does-not-exist-on-disk"),
+		Args:     []string{},
+	}
+
+	err = spawnFn(descriptor)
+	if err == nil {
+		t.Fatal("expected spawn fn to return error for nonexistent command, got nil")
+	}
+	entry, ok := tracker.Get(reconcileWiringTestTaskName)
+	if !ok {
+		t.Fatal("tracker entry missing after spawn failure")
+	}
+	if entry.State != daemonRuntimeStateBackoff || entry.CurrentPID != 0 || entry.LastError == "" {
+		t.Fatalf("tracker entry after spawn failure = %+v, want backoff pid=0 last_error", entry)
 	}
 }
 
@@ -626,7 +659,7 @@ func TestProductionSpawnFn_SuccessEmitsAuditEvent(t *testing.T) {
 	}
 	defer events.Close()
 
-	spawnFn := makeProductionSpawnFn(nil, events)
+	spawnFn := makeProductionSpawnFn(nil, events, NewDaemonRuntimeTracker())
 
 	command, args := portableNoopCommand()
 	descriptor := api.SupervisorDaemon{
@@ -651,6 +684,51 @@ func TestProductionSpawnFn_SuccessEmitsAuditEvent(t *testing.T) {
 	}
 }
 
+func TestProductionSpawnFn_UpdatesTracker(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	tracker := NewDaemonRuntimeTracker()
+	spawnFn := makeProductionSpawnFn(nil, events, tracker)
+	descriptor := api.SupervisorDaemon{
+		TaskName: reconcileWiringTestTaskName,
+		Server:   "memory",
+		Daemon:   "default",
+		Command:  os.Args[0],
+		Args:     []string{"-test.run=TestProductionTerminateFn_HelperSleep"},
+		Env:      map[string]string{"MCPHUB_PRODUCTION_TERMINATE_HELPER": "1"},
+	}
+
+	if err := spawnFn(descriptor); err != nil {
+		t.Fatalf("spawn fn failed on helper command: %v", err)
+	}
+	entry, ok := tracker.Get(reconcileWiringTestTaskName)
+	if !ok {
+		t.Fatal("tracker entry missing after spawn success")
+	}
+	if entry.State != daemonRuntimeStateRunning || entry.CurrentPID <= 0 || entry.PIDGeneration != 1 || entry.StartedAt.IsZero() {
+		t.Fatalf("tracker entry after spawn success = %+v, want running pid>0 generation=1 started_at", entry)
+	}
+	pid := entry.CurrentPID
+	t.Cleanup(func() {
+		_ = process.TerminatePID(pid)
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			if !process.IsPidAlive(pid) {
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Errorf("helper child pid %d still alive after cleanup terminate", pid)
+	})
+}
+
 func TestProductionSpawnFn_ReapsExitedChildProcess(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX zombie reaping assertion uses ps state output")
@@ -664,7 +742,7 @@ func TestProductionSpawnFn_ReapsExitedChildProcess(t *testing.T) {
 	}
 	defer events.Close()
 
-	spawnFn := makeProductionSpawnFn(nil, events)
+	spawnFn := makeProductionSpawnFn(nil, events, NewDaemonRuntimeTracker())
 	command, args := portableNoopCommand()
 	descriptor := api.SupervisorDaemon{
 		TaskName: reconcileWiringTestTaskName,
@@ -692,7 +770,7 @@ func TestProductionSpawnFn_ReapsExitedChildProcess(t *testing.T) {
 	t.Fatalf("spawned child pid %d was not reaped before deadline; last ps state %q", pid, lastState)
 }
 
-func TestProductionTerminateFn_TerminatesRunningPID(t *testing.T) {
+func TestProductionTerminateFn_UpdatesTracker(t *testing.T) {
 	if runtime.GOOS != "windows" && runtime.GOOS != "linux" {
 		t.Skip("production terminate identity gate fails closed without a native PID identity probe")
 	}
@@ -724,13 +802,15 @@ func TestProductionTerminateFn_TerminatesRunningPID(t *testing.T) {
 		}
 	})
 
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(reconcileWiringTestTaskName, pid, time.Now().UTC())
 	terminateFn := makeProductionTerminateFn(events, map[string]runningProcessIdentity{
 		reconcileWiringTestTaskName: {
 			PID:           pid,
 			PIDGeneration: 1,
 			StartedAt:     startedAtForPID(t, pid),
 		},
-	})
+	}, tracker)
 	if err := terminateFn(api.SupervisorDaemon{TaskName: reconcileWiringTestTaskName}); err != nil {
 		t.Fatalf("terminate fn: %v", err)
 	}
@@ -743,6 +823,13 @@ func TestProductionTerminateFn_TerminatesRunningPID(t *testing.T) {
 	}
 	if process.IsPidAlive(pid) {
 		t.Fatalf("helper child pid %d still reported alive after terminate", pid)
+	}
+	entry, ok := tracker.Get(reconcileWiringTestTaskName)
+	if !ok {
+		t.Fatal("tracker entry missing after terminate")
+	}
+	if entry.State != daemonRuntimeStateIdle || entry.CurrentPID != 0 || !entry.StartedAt.IsZero() {
+		t.Fatalf("tracker entry after terminate = %+v, want idle pid=0 zero started_at", entry)
 	}
 
 	logRaw, err := os.ReadFile(eventsPath)
@@ -797,7 +884,7 @@ func TestProductionTerminateFn_IdentityMismatchAtEntry(t *testing.T) {
 			PIDGeneration: 1,
 			StartedAt:     startedAtForPID(t, pid),
 		},
-	})
+	}, NewDaemonRuntimeTracker())
 	if err := terminateFn(api.SupervisorDaemon{TaskName: reconcileWiringTestTaskName}); err != nil {
 		t.Fatalf("terminate fn: %v", err)
 	}
@@ -855,7 +942,7 @@ func TestProductionTerminateFn_PidIdentityBoundToHandle(t *testing.T) {
 			PIDGeneration: 1,
 			StartedAt:     "2000-01-01T00:00:00Z",
 		},
-	})
+	}, NewDaemonRuntimeTracker())
 	if err := terminateFn(api.SupervisorDaemon{TaskName: reconcileWiringTestTaskName}); err != nil {
 		t.Fatalf("identity mismatch should abort as non-fatal PID-reuse guard, got err: %v", err)
 	}
@@ -893,7 +980,7 @@ func TestProductionTerminateFn_AlreadyExitedReturnsSuccess(t *testing.T) {
 
 	terminateFn := makeProductionTerminateFn(events, map[string]runningProcessIdentity{
 		reconcileWiringTestTaskName: {PID: pid},
-	})
+	}, NewDaemonRuntimeTracker())
 	if err := terminateFn(api.SupervisorDaemon{TaskName: reconcileWiringTestTaskName}); err != nil {
 		t.Fatalf("terminate fn: %v", err)
 	}
