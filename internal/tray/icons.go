@@ -3,12 +3,12 @@ package tray
 import (
 	"bytes"
 	"encoding/binary"
-	"image"
 	"image/color"
-	"image/draw"
 	"image/png"
 	"runtime"
 	"sync"
+
+	"mcp-local-hub/internal/branding"
 )
 
 // IconBytes returns the bytes for a 16×16 state indicator in the
@@ -61,8 +61,16 @@ var iconCache struct {
 // green, warning amber, danger red, info blue. Choices are
 // AAA-contrast against both light and dark Windows tray
 // backgrounds.
+//
+// StateHealthy reads branding.BrandColor (the project's canonical
+// green) so a future brand-color tweak propagates to the tray
+// healthy icon AND the .exe / favicon icons in one place. The
+// amber/gray/red entries are tray-specific state indicators with
+// no brand equivalent — they are tray-owned and correctly inlined.
+// Per D:\dev\rules\architectural-cleanliness.md: one canonical
+// owner per value.
 var stateColors = map[TrayState]color.RGBA{
-	StateHealthy: {R: 0x1a, G: 0x7f, B: 0x37, A: 0xff}, // green (success)
+	StateHealthy: branding.BrandColor,                  // canonical brand green
 	StatePartial: {R: 0xbf, G: 0x87, B: 0x00, A: 0xff}, // amber (warning)
 	StateDown:    {R: 0x57, G: 0x60, B: 0x6a, A: 0xff}, // gray (idle)
 	StateError:   {R: 0xcf, G: 0x22, B: 0x2e, A: 0xff}, // red (danger)
@@ -128,39 +136,26 @@ func wrapPngInIco(pngBytes []byte, w, h int) []byte {
 	return out
 }
 
-// renderStateIcon paints a 12×12 filled circle in the given color
-// onto a 16×16 transparent canvas, leaving 2px margin around the
-// circle so the tray's bevel padding doesn't clip it. The
-// distance-squared check inside the inner loop is the standard
-// rasterization predicate for a filled disc; no anti-aliasing
-// because Windows itself rescales the icon for per-monitor DPI
-// and AA at 12px diameter would be invisible after that.
+// renderStateIcon paints the mcphub hub-mark in the given color onto
+// a 16×16 transparent canvas. The mark is a "hub-and-clients" motif:
+// a central 4×4 filled square (the hub) plus four 2×2 satellite dots
+// at the corners (the connected clients) plus diagonal connection
+// pixels. The shape encodes the project's identity at the smallest
+// tray size while staying readable at any DPI scale Windows rescales
+// to.
+//
+// Replaced the placeholder filled-disc per user request "и для
+// mcphub нужен лого/значок". The same shape is rasterized at
+// 16/32/48/256 px for the .exe icon (cmd/mcphub/mcphub.ico, see
+// tools/genicon/main.go) so tray, taskbar, Alt+Tab, and Explorer
+// all show one consistent visual identity.
+//
+// No anti-aliasing: the shape is intentionally hard-edged so it
+// stays crisp after Windows DPI rescale, which produces visible
+// blur on thin AA pixels at small tray sizes.
 func renderStateIcon(col color.RGBA) []byte {
-	const (
-		size   = 16
-		radius = 6 // → 12×12 filled disc, 2px margin on each side
-	)
-	img := image.NewRGBA(image.Rect(0, 0, size, size))
-	// Transparent background — image.NewRGBA zeroes by default, but
-	// be explicit so a future stdlib change doesn't break us.
-	draw.Draw(img, img.Bounds(), image.Transparent, image.Point{}, draw.Src)
-
-	cx, cy := size/2, size/2
-	r2 := radius * radius
-	for y := 0; y < size; y++ {
-		dy := y - cy
-		for x := 0; x < size; x++ {
-			dx := x - cx
-			if dx*dx+dy*dy <= r2 {
-				img.SetRGBA(x, y, col)
-			}
-		}
-	}
+	img := branding.NewHubMarkImage(16, col)
 	var buf bytes.Buffer
-	// png.Encode of a 16x16 RGBA never fails in practice; an error
-	// here would mean the OS is out of memory, in which case the
-	// tray run will fail anyway. Drop the error rather than
-	// propagate — the tray loop has no actionable recovery.
 	_ = png.Encode(&buf, img)
 	return buf.Bytes()
 }
