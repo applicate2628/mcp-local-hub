@@ -5,7 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+
+	toml "github.com/pelletier/go-toml/v2"
 )
 
 // TestScanClassifiesEntries verifies the three key classifications:
@@ -736,4 +739,177 @@ func TestProbeClientConfigPresence_SymlinkedParent(t *testing.T) {
 	if got := out["vscode"]; got != "missing-init-blocked-symlink" {
 		t.Errorf("vscode with symlinked parent: got %q, want missing-init-blocked-symlink", got)
 	}
+}
+
+// seedLSPRegistry writes a workspaces.yaml at tmpHome/workspaces.yaml carrying
+// the supplied entries and points the package-level defaultRegistryPathFn test
+// seam at it so classifyLSPEntries can find it under hermetic test conditions.
+func seedLSPRegistry(t *testing.T, tmpHome string, entries []WorkspaceEntry) string {
+	t.Helper()
+	path := filepath.Join(tmpHome, "workspaces.yaml")
+	reg := NewRegistry(path)
+	reg.Workspaces = entries
+	if err := reg.Save(); err != nil {
+		t.Fatalf("seedLSPRegistry: Save: %v", err)
+	}
+	prev := defaultRegistryPathFn
+	defaultRegistryPathFn = func() (string, error) { return path, nil }
+	t.Cleanup(func() { defaultRegistryPathFn = prev })
+	return path
+}
+
+// seedCodexConfigTOML writes a ~/.codex/config.toml whose [mcp_servers.*]
+// blocks come from `servers`. Each entry value must be a map[string]any
+// suitable for marshalling via toml.Marshal — http: { "url": "..." }; stdio:
+// { "command": "...", "args": [...] }.
+func seedCodexConfigTOML(t *testing.T, tmpHome string, servers map[string]map[string]any) string {
+	t.Helper()
+	path := filepath.Join(tmpHome, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatalf("seedCodexConfigTOML: mkdir: %v", err)
+	}
+	root := map[string]any{"mcp_servers": map[string]any{}}
+	mcp := root["mcp_servers"].(map[string]any)
+	for name, body := range servers {
+		mcp[name] = body
+	}
+	data, err := toml.Marshal(root)
+	if err != nil {
+		t.Fatalf("seedCodexConfigTOML: marshal: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatalf("seedCodexConfigTOML: write: %v", err)
+	}
+	return path
+}
+
+// TestScanRecognizesHubManagedLSP pins Rule 1 of classifyLSPEntries: a
+// hub-managed LSP entry under the canonical `mcp-language-server-<lang>`
+// name with transport=http is recognised as via-hub. Without a legacy
+// stdio coexistence row, LegacyConflict stays nil.
+func TestScanRecognizesHubManagedLSP(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Workspace registry knows about one clangd registration for codex-cli.
+	seedLSPRegistry(t, tmp, []WorkspaceEntry{{
+		WorkspaceKey:  "abcd1234",
+		WorkspacePath: filepath.Join(tmp, "proj"),
+		Language:      "clangd",
+		Backend:       "mcp-language-server",
+		Port:          9201,
+		TaskName:      "mcp-local-hub-lsp-abcd1234-clangd",
+		ClientEntries: map[string]string{"codex-cli": "mcp-language-server-clangd"},
+	}})
+
+	// Codex config carries one hub HTTP entry under the canonical name.
+	codexPath := seedCodexConfigTOML(t, tmp, map[string]map[string]any{
+		"mcp-language-server-clangd": {"url": "http://localhost:9201/mcp"},
+	})
+
+	a := NewAPI()
+	result, err := a.ScanFrom(ScanOpts{
+		CodexConfigPath: codexPath,
+		ManifestDir:     t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("ScanFrom: %v", err)
+	}
+
+	var entry *ScanEntry
+	for i := range result.Entries {
+		if result.Entries[i].Name == "mcp-language-server-clangd" {
+			entry = &result.Entries[i]
+			break
+		}
+	}
+	if entry == nil {
+		t.Fatalf("expected entry mcp-language-server-clangd in scan; got %d entries", len(result.Entries))
+	}
+	if got := entry.Status; got != "via-hub" {
+		t.Errorf("Status: got %q, want via-hub", got)
+	}
+	if got := entry.ClientPresence["codex-cli"].Transport; got != "http" {
+		t.Errorf("ClientPresence[codex-cli].Transport: got %q, want http", got)
+	}
+	if entry.LegacyConflict != nil {
+		t.Errorf("LegacyConflict: got %v, want nil (no stdio coexistence)", entry.LegacyConflict)
+	}
+}
+
+// TestScanRecognizesCoexistenceAnomaly pins Rule 2 (direct-stdio
+// mcp-language-server) plus the coexistence-collapse step: when a hub
+// row AND a separate stdio row both exist for the same (client, lang)
+// pair, the stdio row is moved into the hub row's LegacyConflict map
+// keyed by clientName and its dangling row disappears.
+func TestScanRecognizesCoexistenceAnomaly(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Registry maps both names to codex-cli (the hub-managed one and the
+	// direct-stdio one). The hub registration is canonical; the
+	// direct-stdio is the legacy coexistence row.
+	seedLSPRegistry(t, tmp, []WorkspaceEntry{{
+		WorkspaceKey:  "f3a07e91",
+		WorkspacePath: filepath.Join(tmp, "proj", "main"),
+		Language:      "rust",
+		Backend:       "mcp-language-server",
+		Port:          9202,
+		TaskName:      "mcp-local-hub-lsp-f3a07e91-rust",
+		ClientEntries: map[string]string{"codex-cli": "mcp-language-server-rust"},
+	}})
+
+	codexPath := seedCodexConfigTOML(t, tmp, map[string]map[string]any{
+		"mcp-language-server-rust": {"url": "http://localhost:9202/mcp"},
+		"rust-langserver-direct": {
+			"command": "mcp-language-server",
+			"args":    []any{"--lsp", "rust-analyzer", "--workspace", "/proj/main"},
+		},
+	})
+
+	a := NewAPI()
+	result, err := a.ScanFrom(ScanOpts{
+		CodexConfigPath: codexPath,
+		ManifestDir:     t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("ScanFrom: %v", err)
+	}
+
+	// Inventory: dangling rust-langserver-direct row must be gone; the hub
+	// row must carry the moved stdio entry under LegacyConflict[codex-cli].
+	var hub *ScanEntry
+	for i := range result.Entries {
+		if result.Entries[i].Name == "mcp-language-server-rust" {
+			hub = &result.Entries[i]
+		}
+		if result.Entries[i].Name == "rust-langserver-direct" {
+			t.Errorf("rust-langserver-direct should have been pruned after coexistence-collapse; still present with ClientPresence=%v", result.Entries[i].ClientPresence)
+		}
+	}
+	if hub == nil {
+		t.Fatalf("expected hub entry mcp-language-server-rust in scan; got %d entries", len(result.Entries))
+	}
+	if got := hub.ClientPresence["codex-cli"].Transport; got != "http" {
+		t.Errorf("hub ClientPresence[codex-cli].Transport: got %q, want http", got)
+	}
+	if hub.LegacyConflict == nil {
+		t.Fatalf("hub LegacyConflict: got nil, want a stdio coexistence entry under codex-cli")
+	}
+	leg, ok := hub.LegacyConflict["codex-cli"]
+	if !ok {
+		t.Fatalf("hub LegacyConflict[codex-cli]: missing; keys=%v", keysOfLegacyConflict(hub.LegacyConflict))
+	}
+	if leg.Transport != "stdio" {
+		t.Errorf("LegacyConflict[codex-cli].Transport: got %q, want stdio", leg.Transport)
+	}
+	if base := filepath.Base(strings.TrimSuffix(leg.Endpoint, ".exe")); base != "mcp-language-server" {
+		t.Errorf("LegacyConflict[codex-cli].Endpoint basename: got %q, want mcp-language-server", base)
+	}
+}
+
+func keysOfLegacyConflict(m map[string]ClientEntry) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }

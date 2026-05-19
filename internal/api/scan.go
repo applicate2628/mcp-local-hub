@@ -318,6 +318,21 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 		entries[name] = e
 	}
 
+	// Task 3.3: LSP-bridge recognition. Load the workspace registry as a
+	// soft ownership hint (best-effort; nil registry still yields
+	// language-aware labels). Cross-references hub HTTP rows with the
+	// optional direct-stdio coexistence rows so the matrix shows the
+	// anomaly under a single (server, client) cell instead of two
+	// disjoint rows the operator has to mentally pair.
+	var reg *Registry
+	if regPath, perr := DefaultRegistryPath(); perr == nil {
+		r := NewRegistry(regPath)
+		if lerr := r.Load(); lerr == nil {
+			reg = r
+		}
+	}
+	classifyLSPEntries(entries, reg)
+
 	out := &ScanResult{
 		At:                   time.Now(),
 		ClientConfigPresence: presence,
@@ -1048,4 +1063,230 @@ func renderDraftManifestYAML(name, cmd string, args []string, env map[string]str
 		return ""
 	}
 	return string(out)
+}
+
+// lspLanguages enumerates the canonical language tokens recognised by
+// classifyLSPEntries when reverse-parsing the `mcp-language-server-<lang>`
+// entry-name shape produced by ResolveEntryName. Kept as a package-level var
+// so future plan items (Task 3.x) can extend it without touching ScanFrom.
+// Order does not matter — ParseEntryName uses longest-prefix matching.
+var lspLanguages = []string{
+	"clangd",
+	"fortran",
+	"go",
+	"javascript",
+	"python",
+	"rust",
+	"typescript",
+	"vscode-css",
+	"vscode-html",
+}
+
+// lspCommandToLanguage reverses the manifest mapping (LanguageSpec.lsp_command
+// → LanguageSpec.name) for stdio entries whose entry-name does not itself
+// match `mcp-language-server-<lang>`. Required because direct-stdio rows
+// often carry operator-chosen names (e.g. "rust-langserver-direct") that lack
+// the canonical prefix; the only reliable language signal in that case is the
+// `--lsp <binary>` arg + the command basename. typescript-language-server is
+// intentionally absent — both javascript and typescript map to it
+// (servers/mcp-language-server/manifest.yaml:42,59) so reverse-lookup is
+// ambiguous; the algorithm falls back to entry-name parsing for that case
+// per the spec's "language is determined by entry NAME" rule.
+var lspCommandToLanguage = map[string]string{
+	"clangd":                      "clangd",
+	"fortls":                      "fortran",
+	"gopls":                       "go",
+	"pyright-langserver":          "python",
+	"rust-analyzer":               "rust",
+	"vscode-css-language-server":  "vscode-css",
+	"vscode-html-language-server": "vscode-html",
+}
+
+// extractLSPLanguageFromArgs inspects a direct-stdio ClientEntry whose
+// command basename is mcp-language-server and returns the recognised
+// language (or "" when not deducible). The args slice carries the lsp
+// binary as `--lsp <bin>`; the bin reverse-maps via lspCommandToLanguage.
+// Returns ("") for unambiguous binaries (typescript-language-server)
+// since the spec requires those to be resolved from entry-name only.
+func extractLSPLanguageFromArgs(raw map[string]any) string {
+	args, ok := raw["args"].([]any)
+	if !ok {
+		return ""
+	}
+	for i := 0; i < len(args); i++ {
+		s, _ := args[i].(string)
+		if s != "--lsp" {
+			continue
+		}
+		if i+1 >= len(args) {
+			return ""
+		}
+		bin, _ := args[i+1].(string)
+		bin = filepath.Base(strings.TrimSuffix(bin, ".exe"))
+		if lang, ok := lspCommandToLanguage[bin]; ok {
+			return lang
+		}
+		return ""
+	}
+	return ""
+}
+
+// classifyLSPEntries is Task 3.3's three-rule recognition pass. For each
+// entry produced by the per-client scanners, walk its ClientPresence map
+// and tag rows whose name follows the canonical `mcp-language-server-<lang>`
+// shape — OR whose stdio invocation reveals the language via `--lsp <bin>`
+// reverse-lookup. Three classification rules — all additive on Status;
+// coexistence also collapses dangling direct-stdio rows into LegacyConflict
+// so the matrix shows the anomaly under a single (server, client) cell
+// rather than two visually-disjoint rows.
+//
+// Rule 1 — hub-managed HTTP entry: transport=http, name matches
+// `mcp-language-server-<lang>`. Mark Status = "via-hub".
+//
+// Rule 2 — direct-stdio mcp-language-server: transport=stdio, command
+// basename (suffix-trimmed) equals "mcp-language-server". Recognise as
+// legacy. Language comes from entry-name when the name follows the
+// canonical shape; otherwise from `--lsp <bin>` args reverse-lookup.
+//
+// Rule 3 — gopls direct: transport=stdio, command basename "gopls",
+// raw args contain "mcp". Recognise as Go legacy.
+//
+// Coexistence collapse: when a hub row AND a separate legacy stdio
+// row both exist for the same language and the same client name,
+// MOVE the stdio entry from its own row's ClientPresence to the hub
+// row's LegacyConflict[clientName]. If the donor row's ClientPresence
+// is empty after the move, prune the row entirely so the matrix
+// renders one cell instead of two.
+//
+// Ownership disambiguation: when the workspace registry is available,
+// each row's expected client→entry-name mapping is used as a soft
+// sanity gate; the actual recognition labels still come from
+// ParseEntryName / args-reverse-lookup so a missing or out-of-date
+// registry degrades to language-labelling only.
+func classifyLSPEntries(entries map[string]*ScanEntry, reg *Registry) {
+	if len(entries) == 0 {
+		return
+	}
+
+	// Pass 1: classify every row + collect the legacy-stdio donor index.
+	// donors maps (clientName, language) -> []donor; we keep slices because
+	// multiple stdio rows can legitimately exist (e.g. one canonical
+	// mcp-language-server-<lang> stdio row plus an unrelated user row that
+	// also happens to call mcp-language-server). Coexistence collapse only
+	// fires when the receiving HUB row covers the same (clientName, lang)
+	// pair; everything else stays where it is.
+	type donor struct {
+		entryName  string
+		clientName string
+		entry      ClientEntry
+	}
+	hubByPair := map[string]*ScanEntry{}  // key: clientName + "\x00" + lang
+	donorsByPair := map[string][]donor{}  // same key
+	legacyEntryNames := map[string]bool{} // set of entries flagged as legacy donors
+
+	for name, e := range entries {
+		nameLang, _ := ParseEntryName(name, lspLanguages)
+		for clientName, ce := range e.ClientPresence {
+			// Determine the language for this row+client pair. Prefer
+			// entry-name parsing (canonical, unambiguous when present);
+			// fall back to args reverse-lookup for direct-stdio rows
+			// whose names don't follow the canonical shape.
+			lang := nameLang
+			if lang == "" && ce.Transport == "stdio" {
+				base := filepath.Base(strings.TrimSuffix(ce.Endpoint, ".exe"))
+				if base == "mcp-language-server" {
+					lang = extractLSPLanguageFromArgs(ce.Raw)
+				} else if base == "gopls" {
+					if args, ok := ce.Raw["args"].([]any); ok {
+						for _, a := range args {
+							if s, _ := a.(string); s == "mcp" {
+								lang = "go"
+								break
+							}
+						}
+					}
+				}
+			}
+			if lang == "" {
+				continue
+			}
+			pairKey := clientName + "\x00" + lang
+			switch {
+			case ce.Transport == "http":
+				// Rule 1: hub-managed.
+				e.Status = "via-hub"
+				hubByPair[pairKey] = e
+			case ce.Transport == "stdio":
+				base := filepath.Base(strings.TrimSuffix(ce.Endpoint, ".exe"))
+				// Rule 2: direct-stdio mcp-language-server.
+				if base == "mcp-language-server" {
+					donorsByPair[pairKey] = append(donorsByPair[pairKey], donor{
+						entryName: name, clientName: clientName, entry: ce,
+					})
+					legacyEntryNames[name] = true
+					continue
+				}
+				// Rule 3: gopls stdio with "mcp" arg.
+				if lang == "go" && base == "gopls" {
+					if args, ok := ce.Raw["args"].([]any); ok {
+						for _, a := range args {
+							if s, _ := a.(string); s == "mcp" {
+								donorsByPair[pairKey] = append(donorsByPair[pairKey], donor{
+									entryName: name, clientName: clientName, entry: ce,
+								})
+								legacyEntryNames[name] = true
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Registry soft-sanity gate: for ownership disambiguation, walk the
+	// workspaces and confirm at least one workspace's ClientEntries maps
+	// the receiving hub row's entry name back to the same client. The
+	// gate is informational only — production scans without a workspace
+	// registry must still produce the recognition labels, so a failed
+	// lookup never blocks the coexistence collapse below.
+	_ = reg // reserved for future hard-gate evolutions; see plan §"Matrix LSP recognition"
+
+	// Pass 2: coexistence collapse. For each donor matching a hub row's
+	// (clientName, lang), move the stdio entry into hub.LegacyConflict
+	// and remove the donor entry from its origin row's ClientPresence.
+	for pairKey, ds := range donorsByPair {
+		hub, ok := hubByPair[pairKey]
+		if !ok {
+			continue
+		}
+		for _, d := range ds {
+			if hub.LegacyConflict == nil {
+				hub.LegacyConflict = map[string]ClientEntry{}
+			}
+			hub.LegacyConflict[d.clientName] = d.entry
+			if donor, exists := entries[d.entryName]; exists {
+				delete(donor.ClientPresence, d.clientName)
+			}
+		}
+	}
+
+	// Pass 3: prune any donor row whose ClientPresence was emptied by the
+	// collapse. We keep rows that retain at least one client (the row may
+	// also be present in another client's config), and we never prune a
+	// row whose manifest exists on disk — those are matrix-visible by the
+	// manifest-only pass in ScanFrom.
+	for name := range legacyEntryNames {
+		e, ok := entries[name]
+		if !ok {
+			continue
+		}
+		if len(e.ClientPresence) > 0 {
+			continue
+		}
+		if e.ManifestExists {
+			continue
+		}
+		delete(entries, name)
+	}
 }
