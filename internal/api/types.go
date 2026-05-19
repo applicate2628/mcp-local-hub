@@ -100,6 +100,7 @@ type ScanEntry struct {
 	Name           string                 `json:"name"`
 	Status         string                 `json:"status"` // "via-hub" | "can-migrate" | "unknown" | "per-session" | "not-installed"
 	ClientPresence map[string]ClientEntry `json:"client_presence"`
+	LegacyConflict map[string]ClientEntry `json:"legacy_conflict,omitempty"`
 	ManifestExists bool                   `json:"manifest_exists"`
 	CanMigrate     bool                   `json:"can_migrate"`
 	ProcessCount   int                    `json:"process_count,omitempty"`
