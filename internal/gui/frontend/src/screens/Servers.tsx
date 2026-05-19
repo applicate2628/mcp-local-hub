@@ -1,10 +1,22 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import { fetchOrThrow, postInitClientConfig, InitClientConfigError } from "../api";
+import {
+  fetchOrThrow,
+  postInitClientConfig,
+  InitClientConfigError,
+  listWorkspaces,
+  type WorkspaceEntryDTO,
+  type WorkspacePair,
+} from "../api";
 import { useEventSource } from "../hooks/useEventSource";
 import { collectServers } from "../lib/routing";
+import { collectLspRows, type LspRow, LSP_KNOWN_CLIENTS } from "../lib/lsp-rows";
 import { aggregateStatus, stateShape } from "../lib/status";
+import { WorkspaceSelector, ALL_WORKSPACES_KEY } from "../components/WorkspaceSelector";
+import { EnvDrawer } from "../components/EnvDrawer";
 import type {
   ClientConfigState,
+  ClientEntry,
+  ClientPresence,
   DaemonStatus,
   ScanResult,
   ServerRow,
@@ -113,6 +125,32 @@ export function ServersScreen() {
   // separate red-border outcome map.
   const [applyGen, setApplyGen] = useState<number>(0);
 
+  // v0.5.x Task 4.3 — Workspace registry + LSP matrix state.
+  //
+  // `workspaces` is the deduplicated (key, path) list rendered by the
+  // selector at the top of the screen; `workspaceEntries` is the full
+  // (key, language) tuple list the LSP-row helper consumes to map a
+  // language → its registered task_name. Both come from
+  // /api/workspaces and are refreshed alongside /api/scan + /api/status.
+  //
+  // `selectedWorkspaceKey` defaults to ALL_WORKSPACES_KEY ("") so the
+  // matrix starts with every workspace's rows visible — operators with
+  // a single workspace then never need to interact with the selector.
+  //
+  // `openDrawerFor` carries the LspRow whose drawer is currently open
+  // (null = closed). Holding the full row keeps the drawer's initial
+  // PATH + label coherent even if scan refreshes mid-edit.
+  const [workspaces, setWorkspaces] = useState<WorkspacePair[]>([]);
+  const [workspaceEntries, setWorkspaceEntries] = useState<WorkspaceEntryDTO[]>([]);
+  const [selectedWorkspaceKey, setSelectedWorkspaceKey] = useState<string>(ALL_WORKSPACES_KEY);
+  const [openDrawerFor, setOpenDrawerFor] = useState<LspRow | null>(null);
+  // Keeps the latest /api/scan result around so the LSP-row helper has
+  // a fresh source after a respawn or apply. Independent of `servers`
+  // because the legacy main-matrix flow already mutates `servers` via
+  // collectServers — keeping `scanForLsp` separate avoids re-deriving
+  // collectServers on every minor refresh.
+  const [scanForLsp, setScanForLsp] = useState<ScanResult | null>(null);
+
   // PR #208 deep-sec Lane A round 7 P2 closure: mountedRef guards
   // post-await setState calls inside initializeClient against the
   // "user navigated away mid-POST" race. The scan useEffect already
@@ -138,9 +176,16 @@ export function ServersScreen() {
     let cancelled = false;
     (async () => {
       try {
-        const [scan, status] = await Promise.all([
+        // /api/workspaces returns {workspaces, entries}. A registry
+        // load failure must NOT block the matrix render — the
+        // selector falls back to its empty-state placeholder and the
+        // LSP matrix surfaces the 9 placeholder rows. Catch isolation
+        // is bounded to the workspaces fetch only; /api/scan and
+        // /api/status errors continue to fail the whole effect.
+        const [scan, status, workspacesResp] = await Promise.all([
           fetchOrThrow<ScanResult>("/api/scan", "object"),
           fetchOrThrow<DaemonStatus[]>("/api/status", "array"),
+          listWorkspaces().catch(() => ({ workspaces: [], entries: [] })),
         ]);
         if (cancelled) return;
         if (scan.entries != null && !Array.isArray(scan.entries)) {
@@ -148,6 +193,9 @@ export function ServersScreen() {
           return;
         }
         setServers(collectServers(scan));
+        setScanForLsp(scan);
+        setWorkspaces(workspacesResp.workspaces);
+        setWorkspaceEntries(workspacesResp.entries);
         setClientConfigPresence(scan.client_config_presence ?? EMPTY_CLIENT_CONFIG_PRESENCE);
         // Clear any success banner once the authoritative refresh lands
         // (the matrix has already redrawn with the new "ok" state).
@@ -509,9 +557,26 @@ export function ServersScreen() {
   const manifestedServers = servers.filter((s) => s.manifested || dirty.has(s.name));
   const otherServers = servers.filter((s) => !s.manifested && !dirty.has(s.name));
 
+  // v0.5.x Task 4.3 — LSP rows are always 9 (one per language). When
+  // a workspace is selected, the helper scopes each row's task_name +
+  // presence to that workspace's entries; otherwise every workspace's
+  // entries fold into the same row and the matrix surfaces the union
+  // (with coexistence rendering as dual badges per cell).
+  const lspRows = collectLspRows(scanForLsp, workspaceEntries, selectedWorkspaceKey);
+
   return (
     <div>
       <h1>Servers</h1>
+      <WorkspaceSelector
+        workspaces={workspaces}
+        selectedKey={selectedWorkspaceKey}
+        onChange={(key) => {
+          // Close any open drawer when the workspace filter changes —
+          // the drawer's taskName may no longer match a visible row.
+          setOpenDrawerFor(null);
+          setSelectedWorkspaceKey(key);
+        }}
+      />
       <div id="servers-toolbar">
         <button onClick={applyChanges} disabled={applyDisabled}>
           {retryPendingCount > 0
@@ -586,6 +651,18 @@ export function ServersScreen() {
           ))}
         </tbody>
       </table>
+      <LspMatrix
+        rows={lspRows}
+        openDrawerFor={openDrawerFor}
+        onOpenDrawer={(row) => setOpenDrawerFor(row)}
+      />
+      {openDrawerFor && openDrawerFor.taskName && (
+        <EnvDrawer
+          taskName={openDrawerFor.taskName}
+          rowLabel={`${openDrawerFor.language} (${openDrawerFor.workspaceKey || "—"})`}
+          onClose={() => setOpenDrawerFor(null)}
+        />
+      )}
       {otherServers.length > 0 && (
         <OtherMCPEntriesSection servers={otherServers} />
       )}
@@ -742,6 +819,12 @@ function CellView(props: {
   const cellTitle = retryPending
     ? `${title ?? ""}\n\nLast Apply for this cell ${lastOutcome === "gated" ? "was gated by another failure on this client" : "failed"}; click Apply changes to retry.`.trim()
     : title;
+  // v0.5.x Task 4.3 — dual-badge chip when this cell ALSO has a
+  // legacy_conflict entry for the same client (coexistence anomaly:
+  // hub URL + direct-stdio both target this client). The checkbox
+  // visual stays so the existing migrate/demigrate UX is preserved;
+  // the chip is a non-interactive marker that surfaces the anomaly.
+  const hasLegacyConflict = Boolean(server.legacyConflict?.[client]);
   return (
     <td class={retryPending ? "matrix-cell-retry-pending" : ""} data-retry-pending={retryPending ? "true" : undefined}>
       <input
@@ -755,6 +838,144 @@ function CellView(props: {
           onToggle(server.name, client, next, initialChecked);
         }}
       />
+      {hasLegacyConflict && (
+        <span
+          class="matrix-cell-legacy-chip"
+          data-testid={`legacy-chip-${server.name}-${client}`}
+          title={`A legacy non-hub entry for ${server.name} also exists in ${client}'s config alongside the hub binding. Resolve in ${client}'s mcp config directly.`}
+        >
+          legacy
+        </span>
+      )}
+    </td>
+  );
+}
+
+// LspMatrix renders the 9-row LSP daemons table below the main matrix.
+// Unlike the main matrix, LSP rows have NO checkbox interactivity
+// (migrate/demigrate isn't supported for workspace-scoped LSP daemons
+// in v0.5.x — the operator manages them through `mcphub register`).
+// Cells surface presence as badges: `[via-hub]`, `[direct]`, `[legacy]`,
+// or `—` for absent.
+//
+// Row-level affordances: clicking the "Edit env" button opens the
+// EnvDrawer for that row's taskName (when registered). Placeholder
+// rows (no workspace entry) render a "(register first)" hint instead.
+function LspMatrix(props: {
+  rows: LspRow[];
+  openDrawerFor: LspRow | null;
+  onOpenDrawer: (row: LspRow) => void;
+}) {
+  const { rows, openDrawerFor, onOpenDrawer } = props;
+  return (
+    <section class="lsp-matrix-section" data-testid="lsp-matrix-section" style="margin-top:24px">
+      <h2>LSP daemons</h2>
+      <p class="lsp-matrix-intro" style="color:#555; margin-bottom:8px">
+        Workspace-scoped language servers spawned by{" "}
+        <code>mcphub register</code>. Click a registered row to edit its
+        env overlay (e.g. PATH) and respawn the daemon.
+      </p>
+      <table class="servers-matrix lsp-matrix" data-testid="lsp-matrix">
+        <thead>
+          <tr>
+            <th>Language</th>
+            {LSP_KNOWN_CLIENTS.map((c) => (
+              <th key={c}>{c}</th>
+            ))}
+            <th>Env</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => {
+            const isOpen = openDrawerFor?.language === row.language && openDrawerFor?.taskName === row.taskName;
+            const registered = row.taskName !== null;
+            return (
+              <tr
+                key={`${row.language}-${row.workspaceKey}`}
+                class={isOpen ? "lsp-row-open" : ""}
+                data-testid={`lsp-row-${row.language}`}
+                data-registered={registered ? "true" : "false"}
+                data-workspace={row.workspaceKey || undefined}
+              >
+                <td>
+                  <strong>{row.language}</strong>
+                  {row.workspaceKey && (
+                    <span class="lsp-row-workspace" style="color:#555; font-size:0.9em; margin-left:6px">
+                      ({row.workspaceKey})
+                    </span>
+                  )}
+                </td>
+                {LSP_KNOWN_CLIENTS.map((client) => (
+                  <LspCellView
+                    key={client}
+                    language={row.language}
+                    client={client}
+                    presence={row.clientPresence[client]}
+                    legacy={row.legacyConflict[client]}
+                  />
+                ))}
+                <td>
+                  {registered ? (
+                    <button
+                      type="button"
+                      onClick={() => onOpenDrawer(row)}
+                      data-testid={`lsp-edit-env-${row.language}`}
+                    >
+                      {isOpen ? "Editing…" : "Edit env"}
+                    </button>
+                  ) : (
+                    <span class="lsp-row-unregistered" style="color:#888; font-size:0.9em">
+                      (run <code>mcphub register</code> to register)
+                    </span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+// LspCellView renders one LSP row's per-client cell. Badge semantics:
+//   - presence.transport === "http"  -> [via-hub]
+//   - presence.transport === "stdio" -> [direct]
+//   - legacy populated               -> [legacy] (stacks under [via-hub] or [direct])
+//   - none                           -> "-"
+function LspCellView(props: {
+  language: string;
+  client: string;
+  presence: ClientPresence | undefined;
+  legacy: ClientEntry | undefined;
+}) {
+  const { language, client, presence, legacy } = props;
+  const t = presence?.transport;
+  const hasPrimary = t === "http" || t === "relay" || t === "stdio";
+  const dualBadge = hasPrimary && Boolean(legacy);
+  return (
+    <td
+      class="lsp-cell"
+      data-testid={`lsp-cell-${language}-${client}`}
+      data-dual-badge={dualBadge ? "true" : undefined}
+    >
+      {hasPrimary && (
+        <span
+          class={`lsp-chip lsp-chip-${t === "stdio" ? "direct" : "via-hub"}`}
+          data-testid={`lsp-chip-primary-${language}-${client}`}
+        >
+          {t === "stdio" ? "direct" : "via-hub"}
+        </span>
+      )}
+      {legacy && (
+        <span
+          class="lsp-chip lsp-chip-legacy"
+          data-testid={`lsp-chip-legacy-${language}-${client}`}
+        >
+          legacy
+        </span>
+      )}
+      {!hasPrimary && !legacy && <span class="lsp-cell-empty">—</span>}
     </td>
   );
 }

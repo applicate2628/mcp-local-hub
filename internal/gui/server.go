@@ -501,6 +501,7 @@ func NewServer(cfg Config) *Server {
 	registerForceKillRoutes(s)
 	registerInitClientConfigRoutes(s)
 	registerDaemonEnvRoutes(s)
+	registerWorkspacesRoutes(s)
 	return s
 }
 
