@@ -107,6 +107,9 @@ func readStateFileInodeAnchored(path string) ([]byte, error) {
 			return nil, fmt.Errorf("parent %s not single-user safe: %w; %s=1 is set, so the strict parent-dir gate is enforced (unset that env var, or tighten the parent's DACL to remove the offending principal, to proceed)",
 				parentDir, err, RequireSingleUserHomeEnv)
 		}
+		if errors.Is(err, ErrWrongOwner) {
+			return nil, fmt.Errorf("parent %s not single-user safe: %w", parentDir, err)
+		}
 		// Default-relax. Distinguish write-broadening from
 		// read-only-broadening in the audit log so operators can
 		// review the more-permissive case.
