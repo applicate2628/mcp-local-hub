@@ -109,6 +109,37 @@ func probeClientConfigPresence(opts ScanOpts) map[string]string {
 				continue
 			}
 			if isSymlink {
+				// MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK opt-in (post-PR
+				// #209 reintroduction under explicit operator
+				// consent): when set, treat a symlink whose target
+				// is a regular file as "ok" so the matrix renders
+				// the column enabled. Solo-developer dotfile setups
+				// (chezmoi / yadm / GNU stow / plain ln -s from
+				// ~/.codex/config.toml → /e/env/Agents/...) work
+				// again. Strict mode short-circuits to refusal
+				// inside OperatorAllowsClientConfigSymlink so
+				// corp-managed hosts keep unconditional refusal.
+				//
+				// Uses os.Stat (kernel-level symlink follow) rather
+				// than filepath.EvalSymlinks. EvalSymlinks is Go's
+				// string-based resolver and chokes on the
+				// POSIX-style target paths Git Bash's `ln -s` can
+				// store inside Windows reparse points — the
+				// resolver tries to walk the literal path string
+				// and fails with ERROR_PATH_NOT_FOUND on segments
+				// the kernel would have happily resolved through
+				// drive-letter or junction layers. os.Stat goes
+				// through the kernel which honors reparse-point
+				// semantics regardless of how the stored target
+				// string is formatted. A non-regular result
+				// (dangling target, points to a directory or
+				// special file) still classifies as "error".
+				if OperatorAllowsClientConfigSymlink() {
+					if rst, rstErr := os.Stat(p.path); rstErr == nil && rst.Mode().IsRegular() {
+						out[p.name] = "ok"
+						continue
+					}
+				}
 				out[p.name] = "error"
 				continue
 			}

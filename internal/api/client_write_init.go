@@ -114,6 +114,43 @@ const AllowUnhardenedStateWriteEnv = "MCPHUB_ALLOW_UNHARDENED_STATE_WRITE"
 // safe — see secureWriteWithOperatorOpt for rationale.
 const RequireSingleUserHomeEnv = "MCPHUB_REQUIRE_SINGLE_USER_HOME"
 
+// AllowClientConfigSymlinkEnv is the operator opt-in for resolving
+// pre-existing symlinks at client-config destination paths instead
+// of refusing them. Set to "1" or "true" on solo-developer hosts
+// where dotfile-management (chezmoi, yadm, GNU stow, plain
+// `ln -s`) symlinks the canonical client config out to a separate
+// repo (e.g. `~/.codex/config.toml -> /e/env/Agents/.codex/config.toml`).
+//
+// Background: PR #209 removed default-mode symlink resolution from
+// the secure-write pipeline to close a confused-deputy regression
+// where default-mode writes followed an attacker-planted symlink
+// and overwrote attacker-chosen targets. That refusal is the right
+// default for multi-tenant / corp-managed hosts but breaks
+// dotfile-symlinked client configs on solo-developer machines
+// (see work-items/bugs/2026-05-19-codex-config-symlink-blocked-by-pr209.md).
+//
+// When this env var is set, the WRITE pipeline resolves the symlink
+// to its target BEFORE calling the hardened secure-write. The
+// hardened pipeline then operates on the resolved target as if
+// no symlink existed — `refusePreexistingReparsePoint` does not
+// see a symlink (the path passed in is already the real target),
+// the file's own DACL is installed at handle-create time on the
+// target, and the original symlink is left intact. The SCAN
+// pipeline similarly treats a symlink-to-regular-file as "ok"
+// (writable) instead of "config-error".
+//
+// Security tradeoff under this opt-in: an attacker with write
+// access to the operator's home directory could plant a symlink
+// at a known client-config path BEFORE the operator sets this env
+// var; once set, the next mcphub write would follow the attacker
+// symlink to an attacker-chosen target. The opt-in is therefore
+// scoped narrowly to operators who manage their own dotfile
+// symlinks and trust the symlink target. Strict mode
+// (MCPHUB_REQUIRE_SINGLE_USER_HOME=1) overrides this opt-in and
+// refuses symlinks regardless — corp-managed hosts get the
+// hardening unconditionally.
+const AllowClientConfigSymlinkEnv = "MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK"
+
 // secureWriteWithOperatorOpt is the cross-package writer that
 // `clients.WriteConfigFile` resolves to in production. It first
 // attempts the hardened secure-write WITH the parent-dir gate; on
@@ -189,24 +226,41 @@ const RequireSingleUserHomeEnv = "MCPHUB_REQUIRE_SINGLE_USER_HOME"
 // style default). Operators on corp-managed hosts who want the
 // strict gate must opt IN via MCPHUB_REQUIRE_SINGLE_USER_HOME=1.
 func secureWriteWithOperatorOpt(path string, contents []byte) error {
-	// v0.4.2: when relax mode is allowed (default), resolve
-	// symlinks at the destination before calling secure-write. The
-	// hardened pipeline refuses pre-existing reparse points
-	// outright (symlink-attack defense), but a real-world solo-dev
-	// pattern is to symlink dotfiles to a separate repo
-	// (~/.codex/config.toml -> E:\env\Agents\.codex\config.toml).
-	// Without resolution, every matrix Apply on such hosts fails
-	// with "pre-existing reparse point refused" — making the GUI
-	// unusable on standard dotfile-symlink setups.
+	// MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK opt-in (post-PR #209
+	// reintroduction under explicit operator consent): when set,
+	// resolve symlinks at the destination before calling secure-
+	// write. The hardened pipeline refuses pre-existing reparse
+	// points outright (symlink-attack defense), but a real-world
+	// solo-dev pattern is to symlink dotfiles to a separate repo
+	// (~/.codex/config.toml -> /e/env/Agents/.codex/config.toml).
+	// Without the opt-in, every matrix Apply on such hosts fails
+	// with "pre-existing reparse point refused".
 	//
-	// Strict mode (MCPHUB_REQUIRE_SINGLE_USER_HOME=1) keeps the
-	// outright refusal so multi-tenant / corp-managed hosts get
-	// the symlink-attack protection without compromise.
+	// Strict mode (MCPHUB_REQUIRE_SINGLE_USER_HOME=1) overrides
+	// the opt-in inside OperatorAllowsClientConfigSymlink, so
+	// multi-tenant / corp-managed hosts get the symlink-attack
+	// protection without compromise.
 	//
 	// Resolution writes through to the symlink's TARGET path.
 	// The original symlink is left intact (mcphub does not
 	// rewrite it as a regular file). The target's DACL after the
 	// write is owner-only via the secure-write pipeline.
+	//
+	// Audit log: emit a warn event on each opt-in resolve so the
+	// security-boundary downgrade is visible to log monitoring
+	// (mirrors the unhardened-fallback warn at line 271+).
+	if OperatorAllowsClientConfigSymlink() {
+		if resolved, was := resolveSymlinkForSecureWrite(path); was {
+			if logErr := LogHubMcpEvent("warn", "client-write-symlink-resolved-via-optin", map[string]any{
+				"path":     path,
+				"resolved": resolved,
+				"reason":   "MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK=1 (operator opt-in; write follows symlink target)",
+			}); logErr != nil {
+				_ = logErr
+			}
+			path = resolved
+		}
+	}
 	err := SecureWriteClientConfig(path, contents)
 	if err == nil {
 		return nil
@@ -311,6 +365,30 @@ func operatorAllowedUnhardenedClientWrite() bool {
 // case-insensitively; everything else returns false.
 func operatorAllowsUnhardenedStateWrite() bool {
 	v := strings.TrimSpace(os.Getenv(AllowUnhardenedStateWriteEnv))
+	return v == "1" || strings.EqualFold(v, "true")
+}
+
+// OperatorAllowsClientConfigSymlink reports whether the operator
+// has explicitly opted IN to symlink resolution at client-config
+// destination paths via AllowClientConfigSymlinkEnv. Accepts "1"
+// and "true" case-insensitively; everything else returns false.
+//
+// Strict-mode overrides: when MCPHUB_REQUIRE_SINGLE_USER_HOME=1 is
+// also set, the strict gate takes precedence — the opt-in is
+// ignored and symlinks are refused unconditionally. This keeps the
+// strict posture's invariant (multi-tenant / corp-managed hosts
+// get hardening regardless of any per-operator env vars). Callers
+// MUST check this predicate AFTER strict-mode checks, not before.
+//
+// Exported so the scan path (internal/api/scan.go) and any GUI
+// affordances that surface client-config status can honor the same
+// opt-in as the write path. Mirrors the OperatorRequiresSingleUserHome
+// export convention.
+func OperatorAllowsClientConfigSymlink() bool {
+	if operatorRequiresSingleUserHome() {
+		return false
+	}
+	v := strings.TrimSpace(os.Getenv(AllowClientConfigSymlinkEnv))
 	return v == "1" || strings.EqualFold(v, "true")
 }
 

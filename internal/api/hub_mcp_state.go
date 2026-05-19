@@ -139,15 +139,36 @@ func writeHubMcpStateFile(name string, payload []byte) error {
 	return nil
 }
 
-// readHubMcpStateFile gates the read on VerifyHubMcpStateDACL first
-// (handle-bound uid/mode/DACL check that refuses symlinks, foreign
-// owners, and non-allowlist read ACEs) and then loads bytes. The
-// extra os.ReadFile call after the verify keeps the existing function
-// surface flat — VerifyHubMcpStateDACL closes its handle on return,
-// so a tiny race window exists between verify and read on hostile
-// hosts. The per-user state-dir DACL/mode is the broader trust
-// boundary that protects that window; see spec §"Why every step uses
-// dirHandle-relative ops" for the wider analysis.
+// maxStateFileBytes caps a single state-file read at 1 MiB. The
+// hub-mcp state files (tokens.json, control.token, endpoint.json,
+// the various supervisor-*.json files, managed-entries.json) all
+// fit comfortably under a few KiB in practice — managed-entries
+// scales with the daemon count and was sized to <100 KiB even on
+// pathological setups. 1 MiB is the OOM-protection ceiling: an
+// attacker who replaces the file with a multi-GiB payload cannot
+// exhaust process memory before the read errors out.
+const maxStateFileBytes = 1 << 20
+
+// readHubMcpStateFile reads a hub-mcp state file via the inode-
+// anchored verify+read pipeline (hub_mcp_state_read_inode_{windows,posix}.go).
+// The verify and read steps share the same parent-directory handle
+// / fd so a co-resident principal cannot replace the file between
+// our check and our read — the read is bound to the verified inode
+// regardless of subsequent directory-entry changes.
+//
+// Pre-v0.4.6 this function called VerifyHubMcpStateDACL (which
+// closed its handle on return) and then performed a path-based
+// os.ReadFile, leaving a small TOCTOU swap window on hosts whose
+// parent directory granted write/delete/DAC-edit access to a
+// non-allowlisted SID. The Windows leg's verifyHubMcpStateDACLImpl
+// compensated by refusing such parent DACLs even in default-relax
+// mode (hub_mcp_state_dacl_windows.go:143-145), which blocked
+// demigrate on solo-developer hosts with CodexSandboxUsers or
+// orphan AD SID ACEs on %LOCALAPPDATA% — see
+// work-items/bugs/2026-05-19-state-file-verify-rejects-write-broadened-parent-dacl.md.
+// The inode-anchored read closes the swap window at the kernel
+// level, so the parent-DACL gate can safely relax under
+// default-relax (strict mode is unchanged).
 func readHubMcpStateFile(name string) ([]byte, error) {
 	if err := validateStateFileName(name); err != nil {
 		return nil, err
@@ -157,10 +178,7 @@ func readHubMcpStateFile(name string) ([]byte, error) {
 		return nil, err
 	}
 	target := filepath.Join(dir, name)
-	if err := VerifyHubMcpStateDACL(target); err != nil {
-		return nil, fmt.Errorf("hub-mcp state verify %s: %w", name, err)
-	}
-	raw, err := os.ReadFile(target)
+	raw, err := readStateFileInodeAnchored(target)
 	if err != nil {
 		return nil, fmt.Errorf("hub-mcp state read %s: %w", name, err)
 	}
