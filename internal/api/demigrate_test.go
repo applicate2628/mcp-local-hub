@@ -558,33 +558,42 @@ client_bindings:
 	}
 }
 
-func TestDemigrate_FailsWhenServerAddedAfterSentinelThenMigratedTwice(t *testing.T) {
-	// Bot R2 P1 reproducer: operator installed mcphub (sentinel captured
-	// as pristine pre-hub state), then LATER added serverX manually, then
-	// migrated serverX twice. Latest backup holds X in hub-managed form.
-	// Sentinel lacks X entirely (it was added after sentinel was written).
-	// Naïve sentinel fallback would silently DELETE X from live and
-	// count it as a successful rollback — destructive. Demigrate must
-	// detect this via BackupContainsEntry pre-check and surface a clear
-	// Failed row.
+func TestDemigrate_ServerAddedAfterSentinelThenMigratedTwice_OnlyHubBackups_BackfillSucceeds(t *testing.T) {
+	// Originally TestDemigrate_FailsWhenServerAddedAfterSentinelThenMigratedTwice
+	// (Bot R2 P1 reproducer). Assertions flipped under the
+	// 2026-05-19 newest-first iteration fix:
+	//
+	// Scenario: only ONE timestamped backup exists (memory hub-managed)
+	// AND sentinel lacks the entry. Iteration through every backup
+	// finds no pre-hub form → falls through to
+	// tryMarkerOrBackfillRemove. The live URL exactly matches the
+	// manifest's expected `http://localhost:9200/mcp`, so the
+	// backfill helper records the marker inline and RemoveEntry runs.
+	//
+	// Safety guarantee preserved: this branch fires ONLY when every
+	// available backup either lacks the entry or has it in
+	// hub-managed form. If the operator wants to preserve a
+	// user-direct pre-hub form, they must keep at least one backup
+	// from before the first migrate — which is the default behavior
+	// of `mcphub backups clean` (keep N=5). The complementary test
+	// TestDemigrate_PreservesUserDirectFormViaOlderBackup covers
+	// the case where such a backup exists.
 	tmp := t.TempDir()
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("HOME", tmp)
+	managedEntriesTestHelper(t)
 	claudePath := filepath.Join(tmp, ".claude.json")
 	_ = os.WriteFile(claudePath, []byte(
-		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0600)
-	// Latest backup = after first migrate (memory already hub-managed).
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0o600)
 	latest := claudePath + ".bak-mcp-local-hub-20260301-120000"
 	_ = os.WriteFile(latest, []byte(
-		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0600)
-	// Sentinel = pristine pre-hub, BEFORE memory was manually added.
-	// memory is ABSENT from sentinel.
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0o600)
 	sentinel := claudePath + ".bak-mcp-local-hub-original"
-	_ = os.WriteFile(sentinel, []byte(`{"mcpServers":{}}`), 0600)
+	_ = os.WriteFile(sentinel, []byte(`{"mcpServers":{}}`), 0o600)
 
 	manifestDir := t.TempDir()
 	memDir := filepath.Join(manifestDir, "memory")
-	_ = os.MkdirAll(memDir, 0700)
+	_ = os.MkdirAll(memDir, 0o700)
 	_ = os.WriteFile(filepath.Join(memDir, "manifest.yaml"), []byte(
 		`name: memory
 kind: global
@@ -597,7 +606,67 @@ client_bindings:
   - client: claude-code
     daemon: default
     url_path: /mcp
-`), 0600)
+`), 0o600)
+
+	a := NewAPI()
+	report, err := a.Demigrate(DemigrateOpts{
+		Servers:  []string{"memory"},
+		ScanOpts: ScanOpts{ManifestDir: manifestDir},
+		Writer:   io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("Demigrate: %v", err)
+	}
+	if len(report.Failed) != 0 {
+		t.Fatalf("expected 0 failures (backfill matches manifest port + URL); got %+v", report.Failed)
+	}
+	if len(report.Restored) != 1 {
+		t.Fatalf("expected 1 Restored (marker-backfill path succeeded); got %+v", report.Restored)
+	}
+	// Live entry is removed (backfill confirmed mcphub-managed; no
+	// pre-hub form anywhere in the backup chain).
+	live, _ := os.ReadFile(claudePath)
+	if strings.Contains(string(live), `"memory"`) {
+		t.Errorf("RemoveEntry did not remove memory; file = %s", live)
+	}
+}
+
+func TestDemigrate_ServerAddedAfterSentinel_AllBackupsHubManaged_BackfillRejects_FailsClosed(t *testing.T) {
+	// Complementary fail-closed coverage: same backup setup as above
+	// (only hub-managed timestamped + empty sentinel), but the live
+	// URL does NOT match manifest expectation (port 9999 vs manifest
+	// 9200). Backfill rejects, marker has no record, demigrate
+	// fails-closed with the "marker has no record" reason. Live
+	// config untouched.
+	tmp := t.TempDir()
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("HOME", tmp)
+	managedEntriesTestHelper(t)
+	claudePath := filepath.Join(tmp, ".claude.json")
+	_ = os.WriteFile(claudePath, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9999/mcp"}}}`), 0o600)
+	latest := claudePath + ".bak-mcp-local-hub-20260301-120000"
+	_ = os.WriteFile(latest, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9999/mcp"}}}`), 0o600)
+	sentinel := claudePath + ".bak-mcp-local-hub-original"
+	_ = os.WriteFile(sentinel, []byte(`{"mcpServers":{}}`), 0o600)
+
+	manifestDir := t.TempDir()
+	memDir := filepath.Join(manifestDir, "memory")
+	_ = os.MkdirAll(memDir, 0o700)
+	_ = os.WriteFile(filepath.Join(memDir, "manifest.yaml"), []byte(
+		`name: memory
+kind: global
+transport: stdio-bridge
+command: npx
+daemons:
+  - name: default
+    port: 9200
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+`), 0o600)
 
 	a := NewAPI()
 	report, err := a.Demigrate(DemigrateOpts{
@@ -609,22 +678,21 @@ client_bindings:
 		t.Fatalf("Demigrate: %v", err)
 	}
 	if len(report.Restored) != 0 {
-		t.Fatalf("expected 0 restored (sentinel lacks entry, silent-delete must be refused), got %+v", report.Restored)
+		t.Fatalf("expected 0 restored (URL mismatch; backfill rejects), got %+v", report.Restored)
 	}
 	if len(report.Failed) != 1 {
 		t.Fatalf("expected 1 failure, got %d: %+v", len(report.Failed), report.Failed)
 	}
 	lowerErr := strings.ToLower(report.Failed[0].Err)
-	if !strings.Contains(lowerErr, "sentinel") || !strings.Contains(lowerErr, "does not contain") {
-		t.Errorf("failure message should indicate sentinel does not contain the entry: got %q", report.Failed[0].Err)
+	if !strings.Contains(lowerErr, "managed-entries marker has no record") {
+		t.Errorf("failure should cite the marker-has-no-record reason; got %q", report.Failed[0].Err)
 	}
-	// Live config must not have been touched — memory still present.
 	live, _ := os.ReadFile(claudePath)
 	var liveMap map[string]any
 	_ = json.Unmarshal(live, &liveMap)
 	servers := liveMap["mcpServers"].(map[string]any)
 	if _, present := servers["memory"]; !present {
-		t.Error("live config lost memory entry — auto-rollback path must not silently delete user-added servers")
+		t.Error("live config lost memory entry — backfill-rejected path must not delete")
 	}
 }
 
@@ -680,6 +748,136 @@ client_bindings:
 	}
 	if len(report.Restored) != 1 {
 		t.Fatalf("expected 1 restored via sentinel fallback, got %+v", report.Restored)
+	}
+}
+
+func TestDemigrate_PreservesUserDirectFormViaOlderBackup(t *testing.T) {
+	// Failing test FIRST per TDD discipline. After this test, the proper
+	// fix per work-items/bugs/2026-05-15-demigrate-fallback-when-no-pre-hub-form.md
+	// §"Quality: Iterate timestamped backups newest-first" should make
+	// this test pass.
+	//
+	// Scenario (PR #218 destructive case + restore-target proof):
+	//
+	// 1. Operator installed mcphub. Sentinel captured a snapshot
+	//    that does NOT contain memory (memory was added later by the
+	//    operator).
+	// 2. Operator manually added memory as a direct/stdio entry
+	//    (user-installed MCP server). This was captured in a
+	//    timestamped backup as STDIO form.
+	// 3. Operator ran `mcphub migrate memory`. The migrate created
+	//    a NEWER timestamped backup just before the rewrite (newer
+	//    backup ALSO contains memory in stdio form pre-rewrite OR
+	//    in hub-managed form post-rewrite — depending on backup
+	//    ordering vs the AddEntry call).
+	// 4. After the migrate the live config has memory as
+	//    hub-managed (http://localhost:<port>/mcp). The marker is
+	//    populated (PR #187 contract).
+	//
+	// Now operator unchecks memory/<client> from the matrix and
+	// clicks Apply. The demigrate flow:
+	//
+	//   - latest timestamped backup: memory hub-managed →
+	//     ErrBackupEntryAlreadyMigrated
+	//   - older timestamped backup: memory STDIO →
+	//     RestoreEntryFromBackup writes stdio to live → SUCCESS
+	//
+	// Expected: 1 Restored, 0 Failed. Live config has memory as
+	// stdio (the original user-installed form). NOT deleted.
+	//
+	// Pre-fix (current post-revert code): only consults the
+	// LEXICOGRAPHICALLY-LATEST timestamped backup + the sentinel.
+	// Both produce errors (latest=hub-managed, sentinel=missing-entry).
+	// The marker fallback was already documented destructive (PR #218
+	// reverted). So current code FAILS this test with "fail-closed,
+	// edit manually" — protecting data but blocking the UI flow.
+	//
+	// Post-fix: iterate ALL backups newest-first, find the older
+	// stdio backup, restore from THAT. Both preserves data AND
+	// unblocks the UI.
+	t.Cleanup(SetClientWriteFallbackForTest())
+	tmp := t.TempDir()
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("HOME", tmp)
+	managedEntriesTestHelper(t)
+
+	claudePath := filepath.Join(tmp, ".claude.json")
+	// Live config: memory is hub-managed (post-migrate).
+	if err := os.WriteFile(claudePath, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// NEWEST timestamped backup: post-migrate, memory hub-managed.
+	newer := claudePath + ".bak-mcp-local-hub-20260519-130000"
+	if err := os.WriteFile(newer, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// OLDER timestamped backup: pre-migrate, memory as STDIO
+	// (user-installed direct entry).
+	older := claudePath + ".bak-mcp-local-hub-20260518-080000"
+	if err := os.WriteFile(older, []byte(
+		`{"mcpServers":{"memory":{"type":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-memory"]}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Sentinel: pre-install snapshot, memory absent.
+	sentinel := claudePath + ".bak-mcp-local-hub-original"
+	if err := os.WriteFile(sentinel, []byte(`{"mcpServers":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Seed marker (post-migrate state).
+	if err := RecordManagedEntry("claude-code", "memory"); err != nil {
+		t.Fatalf("seed marker: %v", err)
+	}
+
+	manifestDir := t.TempDir()
+	memDir := filepath.Join(manifestDir, "memory")
+	_ = os.MkdirAll(memDir, 0o700)
+	_ = os.WriteFile(filepath.Join(memDir, "manifest.yaml"), []byte(
+		`name: memory
+kind: global
+transport: stdio-bridge
+command: npx
+daemons:
+  - name: default
+    port: 9200
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+`), 0o600)
+
+	a := NewAPI()
+	report, err := a.Demigrate(DemigrateOpts{
+		Servers:  []string{"memory"},
+		ScanOpts: ScanOpts{ManifestDir: manifestDir},
+		Writer:   io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("Demigrate: %v", err)
+	}
+	if len(report.Failed) != 0 {
+		t.Fatalf("expected 0 failures (older backup has pre-hub form; restore must use it); got %+v", report.Failed)
+	}
+	if len(report.Restored) != 1 {
+		t.Fatalf("expected 1 Restored (memory restored to stdio form); got %+v", report.Restored)
+	}
+	// CRITICAL: live config must NOT have deleted memory. It MUST
+	// have memory as stdio (the pre-hub user-installed form).
+	live, _ := os.ReadFile(claudePath)
+	var liveMap map[string]any
+	_ = json.Unmarshal(live, &liveMap)
+	servers, _ := liveMap["mcpServers"].(map[string]any)
+	mem, present := servers["memory"]
+	if !present {
+		t.Fatalf("DESTRUCTIVE: memory entry was DELETED from live config (should have been restored to stdio form). Live = %s", live)
+	}
+	memMap, _ := mem.(map[string]any)
+	if memMap["type"] != "stdio" {
+		t.Errorf("memory entry was not restored to STDIO form. Got %+v", memMap)
+	}
+	if memMap["command"] != "npx" {
+		t.Errorf("memory command not preserved as npx. Got %+v", memMap)
 	}
 }
 
