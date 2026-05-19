@@ -162,7 +162,27 @@ func (a *API) Demigrate(opts DemigrateOpts) (*DemigrateReport, error) {
 			}
 			restoredFrom := backupPath
 			err = safeRestore(backupPath)
-			if errors.Is(err, clients.ErrBackupEntryAlreadyMigrated) {
+			// Path C (sentinel-only, sentinel lacks entry):
+			// LatestBackupPath returned the sentinel directly (e.g.
+			// `mcphub backups clean --keep 0` pruned every timestamped
+			// backup), the sentinel exists but does not contain the
+			// entry. Symmetric coverage with Path B (security-reviewer
+			// F1 on this PR): the threat model is identical to Path B
+			// — live entry exists in hub-managed form, sentinel cannot
+			// help, marker + backfill provide the positive-ownership
+			// evidence. Without this branch the operator sees a
+			// fail-closed outcome on pruned-backup hosts but a success
+			// on retained-backup hosts for the same logical state,
+			// which would be a coherence gap (not exploitable, but
+			// surprising). Route through the same helper.
+			if errors.Is(err, errSentinelMissingEntry) && backupPath == sentinelPath {
+				err = tryMarkerOrBackfillRemove(
+					adapter, binding, m, server,
+					fmt.Sprintf("-original sentinel at %s is the only available backup and does not contain %q (server installed after sentinel was written; timestamped backups pruned)",
+						backupPath, server),
+					&restoredFrom,
+				)
+			} else if errors.Is(err, clients.ErrBackupEntryAlreadyMigrated) {
 				// Latest timestamped backup already holds this entry in
 				// hub-managed form (multi-server or repeat-migrate case).
 				// Fall back to the pristine sentinel — safeRestore's
