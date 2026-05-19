@@ -145,15 +145,17 @@ func TestOverlayQuarantineFiveNewestRetention(t *testing.T) {
 		t.Fatalf("expected exactly 5 .corrupt-* survivors, got %d: %v", len(got), names)
 	}
 
-	// The two oldest seeded files (index 0 and 1) MUST be gone.
-	for _, gone := range []string{seeded[0], seeded[1]} {
+	// 8 .corrupt-* files exist after rename (7 seeded + 1 fresh). 5-newest
+	// retention deletes 3 oldest. The three oldest seeded files (indices 0,
+	// 1, 2) MUST be gone.
+	for _, gone := range []string{seeded[0], seeded[1], seeded[2]} {
 		if _, err := os.Stat(filepath.Join(stateDir, gone)); !os.IsNotExist(err) {
 			t.Fatalf("oldest %s should be deleted, stat err=%v", gone, err)
 		}
 	}
-	// The five newer (4 seeded indices 2..6 + 1 freshly produced by run)
+	// The five newer (4 seeded indices 3..6 + 1 freshly produced by run)
 	// MUST all be present. We check the 4 seeded explicitly.
-	for _, keep := range seeded[2:] {
+	for _, keep := range seeded[3:] {
 		if _, err := os.Stat(filepath.Join(stateDir, keep)); err != nil {
 			t.Fatalf("seeded %s should survive, stat err=%v", keep, err)
 		}
