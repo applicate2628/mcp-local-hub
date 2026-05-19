@@ -1257,13 +1257,40 @@ func loadOverlayAtStartup(stateDir string, events *api.SupervisorEventLog, inten
 	overlayPath := filepath.Join(stateDir, "daemon-env-overrides.yaml")
 	ov, err := daemon_env_overlay.Load(overlayPath)
 	if err != nil {
+		// Classify the error: rejections from the read-side hardening
+		// pipeline (symlink/reparse-point refusal, non-regular file,
+		// size cap, parent-DACL gate) are operationally distinct from
+		// generic YAML parse errors. The spec assigns separate event
+		// names so the operator audit log distinguishes "the file is
+		// suspicious" from "the file is malformed". Both still trip
+		// the supervise-startup-failed fail-LOUD path; the operator's
+		// remedy is the same (`mcphub config overlay-quarantine`).
+		errMsg := err.Error()
+		isHardeningRejection := strings.Contains(errMsg, "reparse") ||
+			strings.Contains(errMsg, "symlink") ||
+			strings.Contains(errMsg, "not a regular file") ||
+			strings.Contains(errMsg, "exceeds") ||
+			strings.Contains(errMsg, "non-UTF-8") ||
+			strings.Contains(errMsg, "parent gate") ||
+			strings.Contains(errMsg, "not single-user safe")
+		if isHardeningRejection {
+			_ = events.Emit(api.SupervisorEvent{
+				Severity: "error",
+				Source:   "lifecycle",
+				Event:    "daemon-env-overlay-read-rejected",
+				Body: map[string]any{
+					"path": overlayPath,
+					"err":  errMsg,
+				},
+			})
+		}
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "warn",
 			Source:   "lifecycle",
 			Event:    "daemon-env-overlay-load-failed",
 			Body: map[string]any{
 				"path": overlayPath,
-				"err":  err.Error(),
+				"err":  errMsg,
 			},
 		})
 		_ = events.Emit(api.SupervisorEvent{
@@ -1271,7 +1298,7 @@ func loadOverlayAtStartup(stateDir string, events *api.SupervisorEventLog, inten
 			Source:   "lifecycle",
 			Event:    "supervise-startup-failed",
 			Body: map[string]any{
-				"err":    err.Error(),
+				"err":    errMsg,
 				"remedy": "mcphub config overlay-quarantine",
 			},
 		})
@@ -1758,6 +1785,16 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 		if len(overlayEnv) > 0 {
 			if expanded, err := daemon_env_overlay.ExpandParentPath(overlayEnv, os.Environ()); err == nil {
 				overlayEnv = expanded
+			} else {
+				// Audit: ${parent_path} expansion failed (unknown token
+				// or some other resolution failure). The daemon still
+				// spawns with the literal env block; the operator sees
+				// the failure mode reflected in the child's PATH so
+				// the audit row + the broken behaviour are correlated.
+				_ = api.LogHubMcpEvent("warn", "daemon-env-overlay-parent-path-resolve-failed", map[string]any{
+					"task_name": d.TaskName,
+					"err":       err.Error(),
+				})
 			}
 		}
 		// Phase 2.7 spawn-gate removal: previously this site was

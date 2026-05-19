@@ -67,6 +67,19 @@ func checkStateDirParentReadSafe(dir string) error {
 		return nil
 	}
 	if operatorAllowsUnhardenedStateRead() {
+		// Audit: operator explicitly accepted the broadened parent
+		// DACL via MCPHUB_ALLOW_UNHARDENED_STATE_READ=1. Emit the
+		// spec-mandated `daemon-env-overlay-read-unhardened-fallback`
+		// event so the audit log records the bypass decision even
+		// though the function returns nil. Only emit when there was
+		// an actual gate failure — a passing gate doesn't need the
+		// "fallback" framing.
+		if gateErr != nil {
+			_ = api.LogHubMcpEvent("warn", "daemon-env-overlay-read-unhardened-fallback", map[string]any{
+				"parent_dir": dir,
+				"gate_err":   gateErr.Error(),
+			})
+		}
 		return nil
 	}
 	if gateErr != nil {
