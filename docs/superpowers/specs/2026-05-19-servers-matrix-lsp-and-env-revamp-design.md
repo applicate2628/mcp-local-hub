@@ -1,6 +1,6 @@
 # Servers matrix revamp: LSP-bridge integration + per-daemon env overlay
 
-**Status:** Spec, draft v2 (post-review revision), pending user review.
+**Status:** Spec, draft v3 (second post-review revision), pending user review.
 
 **Tracking PR(s):** to be filled by writing-plans phase. Likely 1 PR with 4 phases (auto-discovery, overlay+merge, LSP recognition, GUI surface), or split if any phase grows too large.
 
@@ -9,38 +9,33 @@
 - Operator UX gap: 9 LSP language entries (clangd, fortran, go, javascript, python, rust, typescript, vscode-css, vscode-html) currently show under "Other MCP entries (N)" because the matrix does not recognize them as language rows of the `mcp-language-server` workspace-scoped manifest.
 - Operator UX gap: `mcphub` daemons spawned by the supervisor task inherit a Task-Scheduler-logon PATH that lacks common Windows tool install locations (`C:\msys64\ucrt64\bin`, `C:\Program Files\LLVM\bin`, etc.). `gdb` MCP daemon answers but reports "GDB/LLDB not available"; `mcp-language-server` would have the same problem for `clangd`, `gopls`, `pyright`, `rust-analyzer`, etc.
 
-## v2 revision notes (changes from v1)
+## v3 revision notes (changes from v2)
 
-v1 went through a dual independent review (codex xhigh + sonnet architect). Verdict: NEEDS_REVISION. The list below summarizes every change v2 makes to address the 6 BLOCKERS + 11 IMPORTANT findings (plus 3 MINOR polish items).
+v2 went through a second dual review (codex xhigh + sonnet architect). Verdict: NEEDS_REVISION (both). v3 fixes 5 BLOCKERS + 9 IMPORTANT findings that v2 introduced or left unaddressed. **Every code reference cited in v3 has been empirically `grep`-verified before inclusion** (axiomatic fix for the v2 failure mode of citing fabricated function names and wrong struct fields).
 
-**6 BLOCKERS resolved:**
+**5 BLOCKERS resolved:**
 
-- **B1 — overlay key format.** v1 example used `\\mcp-language-server-clangd-<workspace-hash>`. Actual task-name format is `mcp-local-hub-lsp-<wsKey>-<lang>` (see [internal/api/register.go:292](../../../internal/api/register.go)). v2 uses canonical `SupervisorDaemon.TaskName` as the overlay key namespace and concretizes the new "Canonical daemon key namespace" section.
-- **B2 — LSP recognition misses Go.** v1 algorithm matched on `command == "mcp-language-server"`. Go uses `backend: gopls-mcp` in the manifest (see [servers/mcp-language-server/manifest.yaml:33-37](../../../servers/mcp-language-server/manifest.yaml)). v2 specifies a three-rule recognition algorithm (entry-name prefix + `--lsp` arg sniff + gopls special-case) and distinguishes hub-proxy URL entries from direct-stdio entries.
-- **B3 — overlay-only spawn skipped today.** `mergeDaemonEnv` is currently gated by `if len(d.Env) > 0` (see [internal/cli/supervise.go:1504-1505](../../../internal/cli/supervise.go)). For LSP daemons whose manifest declares no `env:`, an overlay-only PATH row would never reach the spawn. v2 explicitly removes that guard and the merge fires whenever overlay OR manifest has any keys.
-- **B4 — read-side hardening missing.** Write-side `SecureWriteClientConfig` is cited in v1, but supervisor's spawn-time overlay READ is on the trust boundary for child PATH. v2 requires symlink/reparse refusal, parent-dir DACL verify (same posture as state-file helper read), owner check, and a 64 KiB hard size cap before the YAML is parsed.
-- **B5 — YAML overlay vs JSON `WriteStateFileAtomic`.** `WriteStateFileAtomic` marshals JSON (see [internal/api/state_file_helper.go:50-71](../../../internal/api/state_file_helper.go)); piping YAML through it would lose comments and require YAML-as-JSON. v2 introduces a new `internal/api/daemon_env_overlay/` package that owns YAML round-trip (comments preserved through `gopkg.in/yaml.v3` Node API), flock-protected RMW, and an atomic temp+rename writer that reuses the hardened DACL/mode pipeline at temp-create time.
-- **B6 — missing parked Q on canonical key namespace.** v2 answers the question directly (key = `SupervisorDaemon.TaskName` without leading backslash) and explicitly enumerates the three task-name shapes (global, LSP workspace-scoped, future `kind: workspace-scoped`).
+- **B-V3-1 — overlay key namespace direction reversed.** v2 claimed keys are stored "without leading backslash"; actual code stores `SupervisorDaemon.TaskName` WITH the leading backslash (`internal/api/supervisor_intent.go:25` comment: `// canonical, e.g. "\\mcp-local-hub-memory-default"`) and reconcile indexes by the canonical form (`internal/cli/supervise_reconcile.go:107`). v3: overlay keys are stored in canonical leading-backslash form, matching the field's serialization contract. Lookup helper accepts either form and normalizes by prepending `\` if absent.
+- **B-V3-2 — three-rule recognition references nonexistent struct fields.** v2 used `e.URL`, `e.Command`, `e.Args` — but `ClientEntry` only has `{Transport, Endpoint, Raw map[string]any}` (`internal/api/types.go:110-114`). v3 rewrites recognition to parse the existing `Raw map[string]any` shape, mirroring `shapeClaudeEntry` at `internal/api/scan.go:448-454` (`raw["url"]` for HTTP, `raw["command"]` + `raw["args"]` for stdio).
+- **B-V3-3 — three-rule recognition misses ResolveEntryName collision suffixes.** v2 regex `/^mcp-language-server-([a-z0-9-]+)$/` failed when same-language multi-workspace forced `ResolveEntryName` (`internal/api/register.go:722-747`) to append `-<4hex>` or `-<8hex>` suffix. v3 algorithm anchors on the exact 9-language set + optional collision suffix, with registry-side disambiguation for which workspace owns each suffixed entry. Multi-workspace recognition becomes a core requirement, not a parked UX question.
+- **B-V3-4 — read-side hardening cites fabricated function.** v2 cited `checkStateDirParentReadSafe`; only `checkStateDirParentWriteSafe` exists (`internal/api/state_file_helper.go:155`). v3 admits the read-side helper must be NEW work: section "Read-side hardening" names the new package-internal `checkStateDirParentReadSafe` as scope-of-this-design, with explicit symmetry against the existing write-side function. v3 also fixes the `fi.Mode().IsRegular()` semantic (v2 had wrong `& os.ModeIrregular` bit math) and preserves default-relax / strict-mode semantics from the existing write side (`internal/api/state_file_helper.go:139-157`).
+- **B-V3-5 — YAML helper reuse claim impossible without new exported primitive.** `WriteStateFileAtomic` marshals JSON (`internal/api/state_file_helper.go:50-93`); `secureWriteStateFileWithOperatorOpt` is unexported. `SecureWriteClientConfig(path string, payload []byte) error` IS exported and DOES take raw bytes (`internal/api/state_file_helper.go:127`), so v3 routes `daemon_env_overlay` writes through `SecureWriteClientConfig` directly with YAML-marshaled bytes. No duplication; no new exported primitive needed for the write side. (Read side still needs a new helper per B-V3-4.)
 
-**11 IMPORTANT findings resolved:**
+**9 IMPORTANT resolved:**
 
-- **I1 — Env merge key normalization.** Windows treats `PATH`/`Path`/`path` as the same key but `os/exec` does not normalize. v2 specifies case-insensitive merge precedence on Windows (last write wins per normalized key, preserving the original casing of the highest-precedence source).
-- **I2 — `required_binaries` requires Go struct extension in same commit.** `ParseManifest` uses `KnownFields(true)` (see [internal/config/manifest.go:128](../../../internal/config/manifest.go)) which rejects unknown YAML keys. v2 explicitly couples the manifest YAML additions to corresponding Go struct field additions on `ServerManifest` and `LanguageSpec`.
-- **I3 — `/api/daemon/env` auth posture concrete.** v2 names the existing CSRF and same-origin discipline endpoints (`/api/migrate`, `/api/dismiss`, `/api/secrets`) follow; `/api/daemon/env` reuses the same. Plus: known-task validation against `supervisor-intent.json` before write; reject `taskName` not present in current intent with 400.
-- **I4 — Concurrent GUI Apply + auto-discovery refresh lost-update.** v2's `WriteOverlay(path, mutator func)` is a flock-protected RMW: lock → read+parse → mutator transforms → marshal → atomic temp+rename → release. Apply and refresh serialize on the same lock.
-- **I5 — Corrupt overlay fail-LOUD.** v1's "warn + proceed with manifest env only" silently spawns daemons missing operator-configured PATH (foot-gun: operator fixes YAML typo, daemon still broken, no signal). v2: supervisor refuses to spawn affected daemons; GUI shows red banner with parse error including line/column; operator either fixes the file or runs `mcphub config overlay-quarantine` to rename to `daemon-env-overrides.yaml.corrupt-<ts>` and restart with empty overlay.
-- **I6 — Discovery test fixture problem.** Production code uses absolute shipped hints; tests pin to a real filesystem. v2: `binary_discovery.Discover(ctx, requiredBinaries, hints)` takes `hints []string` as a parameter so unit tests pass synthetic temp-dir roots; the production caller uses `binary_discovery.DefaultHints()` for the shipped per-OS list.
-- **I7 — Multi-workspace LSP test fixture missing.** v2 adds an explicit test scenario: 2 registered workspaces for clangd; matrix cell URL switches on active-workspace selector change; per-workspace history visible in row drawer (open questions remaining for the GUI shape).
-- **I8 — `respawn` IPC integration test missing.** v2 adds an explicit test under `internal/cli/supervise_respawn_test.go` covering: valid taskName → graceful shutdown 5s → spawn with intent+overlay; invalid taskName → IPC error; daemon in Backoff state → reset to Spawning + spawn.
-- **I9 — Missing parked Q: respawn semantics.** v2 specifies graceful 5s SIGTERM/CtrlBreak then SIGKILL/Job-Object kill, then spawn-from-intent+overlay, plus state-machine transitions (Running → Spawning → Running; Backoff → Spawning; Quarantined refuses without operator override).
-- **I10 — Missing parked Q: YAML editability vs hardened writer + lock discipline.** v2 specifies: YAML writer is `gopkg.in/yaml.v3` Node API (preserves comments) + flock-protected RMW + atomic temp+rename + handle-bound DACL/mode at temp create.
-- **I11 — Migration internally inconsistent.** v1 said "overlay only ADDS to PATH, never REMOVES" but also "overlay wins on collisions" and "`${parent_path}` is optional". v2 drops the misleading "never removes" claim; the truthful statement is "default install-time templates always include `${parent_path}` so existing PATH-dependent daemons keep their inherited PATH; operators can drop the token to deliberately override".
+- **I-V3-1 — JS/TS recognition ambiguity.** Both javascript and typescript use `lsp_command: typescript-language-server` (`servers/mcp-language-server/manifest.yaml:42, 59`). v3 recognition does NOT look up by `lsp_command`; it matches by entry-name suffix against the 9-language set. Direct-stdio entries are distinguished by `--workspace <path>` argument parsing for which language they target (the `register` flow emits `--workspace W --lsp typescript-language-server` for typescript and `--workspace W --lsp typescript-language-server` for javascript with a different `--language` flag — verified in the writing-plans phase via fresh grep).
+- **I-V3-2 — 9 rows vs anomaly internal contradiction.** v2 said "exactly 9 LSP rows" (line 207) AND "both rows appear" on hub+legacy coexistence (line 214). v3 resolves: matrix renders exactly 9 rows total (one per language). When hub-managed AND direct-stdio entries coexist on the same (client, language) cell, the cell renders with BOTH state badges visible (e.g., `[via-hub][legacy]` chip stack), and the per-row drawer surfaces the anomaly with operator-resolution affordance.
+- **I-V3-3 — endpoint flow contradiction.** v2 had `/api/daemon/respawn` AND env-handler-directly-triggers-IPC. v3 unifies: `/api/daemon/env` writes overlay and returns; GUI shows "Restart daemon to apply" button; click → `/api/daemon/respawn`. Same flow for Refresh discovery → button → respawn endpoint. No implicit IPC from env handler.
+- **I-V3-4 — `WriteOverlay` mutator-error rollback contract.** Explicit: if mutator returns error, the on-disk file is NOT modified; flock is released; error propagates verbatim. Atomic temp+rename never happens unless mutator returned nil.
+- **I-V3-5 — fail-LOUD scope ambiguity.** When YAML whole-file parse fails, supervisor cannot know which rows would have applied — so supervisor refuses to spawn ANY daemon and prints actionable guidance ("delete or fix the overlay; run `mcphub config overlay-quarantine` to rename and restart"). This is the conservative correct choice. Per-daemon failures (e.g. row syntactically valid but `${parent_path}` resolution fails) refuse only that daemon.
+- **I-V3-6 — `mcphub config overlay-quarantine` is now precisely specified.** Acquires the same per-file flock as `WriteOverlay`; renames `daemon-env-overrides.yaml` → `daemon-env-overrides.yaml.corrupt-<RFC3339-ts>` via `os.Rename`; does NOT signal or restart the supervisor (operator restarts manually after fixing or accepting the quarantine).
+- **I-V3-7 — Quarantined force-respawn shape resolved.** `/api/daemon/respawn` body accepts `{taskName, force: bool}`. Quarantined daemons require `force: true`; non-force requests return HTTP 409 with body `{state: "quarantined", remedy: "force or unquarantine"}`. GUI per-row drawer exposes the force flag as an explicit checkbox (default unchecked) so the operator confirms intent. Open Q4 from v2 is resolved.
+- **I-V3-8 — auto-discovery `source: operator` compare-and-swap.** Explicit: discovery's `mutator` reads `source` field for each row under the flock; if `source == "operator"`, skip the binary's hint walk and preserve the row unchanged. The compare-and-swap is inside the same mutator transaction that writes the result, so concurrent operator Apply during discovery cannot lose the operator's row.
+- **I-V3-9 — terms portability leak.** v2 hardcoded `/c/Users/dima_/go/bin/mcp-language-server`. v3 uses `$GOPATH/bin/mcp-language-server` and references the `go install` mechanism.
 
-**3 MINOR polish:**
+**Carried forward from v2 revision notes (all still valid):**
 
-- **M1 — searchHints framing.** v2 states hints are best-effort seed data only; operator's override channel is the env overlay file (not hints expansion).
-- **M2 — shell metachar already correct.** v1 framing kept; env values go to `exec.Command` env block, not a shell.
-- **M3 — PATH redaction in audit events.** v2: `daemon-env-overlay-loaded` event logs row count + `sha256(${parent_path})` truncated to 12 hex chars at info level; full PATH only at debug level.
+v2 fixed B1 (key format), B2 (Go gopls-mcp + recognition), B3 (`len(d.Env) > 0` gate removal — confirmed correct by codex), B4 (read-side hardening introduced — though v3 had to correct the references), B5 (YAML vs JSON — v3 sharpens), B6 (key namespace parked Q answered — v3 corrected direction), I1-I11 (most still valid; v3 specifically sharpens I3, I5, I7, I10).
 
 ## Goal
 
@@ -50,70 +45,54 @@ Make the Servers matrix the single place where an operator sees and manages ever
 
 In scope:
 
-- Matrix recognition of LSP language entries (currently classified as "Other MCP entries") as language rows under the existing `mcp-language-server` manifest.
-- Per-language rows in the Servers matrix with the same check/uncheck affordances existing global-server rows already have.
-- Single `Active workspace` selector at the top of the Servers screen (or near the LSP rows section) that scopes the check/uncheck and Register actions.
-- Per-daemon `env` overlay file separate from shipped manifests. Supervisor merges manifest `env` with overlay `env` at spawn time (overlay wins on collisions, with Windows case-insensitive key normalization).
-- Auto-discovery of common binary install locations (Windows, Linux, macOS) at `mcphub install/setup` time. Populates initial overlay file. Manual "Refresh discovery" button in the GUI re-runs at any time.
-- Per-row drawer in the GUI showing effective env (post-merge) with edit affordance and `Apply` button. Apply persists to overlay + IPC-signals supervisor to respawn the affected daemon.
-- New `respawn` IPC command on the supervisor (replaces the v0.5.0 `restart`/`reload` UNKNOWN_COMMAND stub at [supervise.go:921](../../../internal/cli/supervise.go) for the single-daemon respawn path).
+- Matrix recognition of LSP language entries (currently classified as "Other MCP entries") as language rows under the existing `mcp-language-server` manifest. Multi-workspace registrations supported via `ResolveEntryName` suffix-aware recognition + registry disambiguation.
+- Exactly 9 LSP language rows in the Servers matrix (one per manifest language). When hub-managed and direct-stdio entries coexist on the same (client, language) cell, the cell renders both badges; no extra rows.
+- Single `Active workspace` selector at the top of the Servers screen, scoping the check/uncheck and Register actions.
+- Per-daemon `env` overlay file separate from shipped manifests. Supervisor merges manifest `env` with overlay `env` at spawn time (overlay wins on collisions, Windows case-insensitive key normalize).
+- Auto-discovery of common binary install locations (Windows-focused) at `mcphub install/setup` time. Populates initial overlay file. Manual "Refresh discovery" button in the GUI re-runs at any time.
+- Per-row drawer in the GUI showing effective env (post-merge) with edit affordance and `Apply` button. Apply persists to overlay; operator clicks "Restart daemon to apply" to trigger respawn.
+- New read-side `daemon_env_overlay` package owning hardened YAML round-trip with comments preserved, flock-protected RMW, and the new internal `checkStateDirParentReadSafe` helper symmetric to the existing write-side.
+- New `respawn` IPC command on the supervisor (replaces the v0.5.0 `restart`/`reload` UNKNOWN_COMMAND stub at `internal/cli/supervise.go:921`). Accepts `{taskName, force: bool}`; quarantined daemons require `force: true`.
 
 Out of scope (deferred):
 
 - Backend rewrite of `mcp-language-server` to serve multiple workspaces from one daemon. The current per-(workspace, language) proxy model stays.
 - Cross-workspace router that picks a proxy by caller cwd. The active-workspace selector is operator-driven, not auto-routed.
-- Linux/macOS systemd/launchd PATH inheritance fixes — out of scope for this design (POSIX paths inherit from the user's shell which usually has the needed tools). The overlay surface is portable; only the install-time auto-discovery code is Windows-heavy.
+- Linux/macOS systemd/launchd PATH inheritance fixes — out of scope for this design (POSIX paths inherit from the user's shell which usually has the needed tools).
 
 ## Architecture summary
 
 Four pieces, mostly independent, glued through existing seams:
 
-1. **Manifest schema additions (with Go struct extension).** Server manifest YAML gains optional `required_binaries: [name, ...]` at server level AND per-language level. Same commit adds the field to `ServerManifest` and `LanguageSpec` Go structs in [internal/config/manifest.go](../../../internal/config/manifest.go) so `ParseManifest`'s `KnownFields(true)` does not reject the new keys.
-2. **Auto-discovery engine.** New `internal/api/binary_discovery/` package: `Discover(ctx, requiredBinaries, hints) (map[binary]absolutePath, error)`. `hints` is a `[]string` parameter so unit tests inject synthetic roots; production callers use `binary_discovery.DefaultHints()` for the shipped per-OS list. Called by `mcphub install/setup` and by the GUI's `/api/discovery/refresh`.
-3. **Env overlay file (new package).** New `internal/api/daemon_env_overlay/` package owns: load + parse (with hardened read — see Security), flock-protected RMW writer, YAML round-trip with comments preserved (`gopkg.in/yaml.v3` Node API), and the `WriteOverlay(path, mutator func(*Overlay) error)` transactional API. Supervisor `SupervisorDaemon.Env` is merged with the overlay at spawn time (overlay wins, Windows case-insensitive normalize). Storage path: `~/.config/mcp-local-hub/daemon-env-overrides.yaml` (POSIX) / `%LOCALAPPDATA%\mcp-local-hub\daemon-env-overrides.yaml` (Windows).
-
-   ```yaml
-   # daemon-env-overrides.yaml — managed by mcphub; operator-editable.
-   version: 1
-   daemons:
-     mcp-local-hub-gdb-default:
-       env:
-         Path: "C:/msys64/ucrt64/bin;${parent_path}"
-       source: auto-discovery  # auto-discovery | operator
-       discovered_at: 2026-05-19T14:00:00Z
-     mcp-local-hub-lsp-a1b2c3d4-clangd:
-       env:
-         Path: "C:/Program Files/LLVM/bin;${parent_path}"
-       source: operator
-   ```
-
-   `${parent_path}` resolves at spawn time to the supervisor process's current PATH (`os.Environ()["PATH"]` lookup with case-insensitive match on Windows). Operators MUST include the token to preserve the parent PATH.
-
-4. **Matrix LSP recognition + workspace scope.** Three changes in [internal/api/scan.go](../../../internal/api/scan.go) + frontend:
-   - Three-rule recognition algorithm (see "Matrix LSP recognition" below) distinguishes hub-proxy URL entries from direct-stdio entries; both forms render as the same language row with different badges.
-   - Top-of-screen `Active workspace` selector. Default value = most-recent registered workspace (per registry order in `~/.config/mcp-local-hub/workspaces.json`), OR a literal "(none — register a workspace first)" placeholder when empty.
-   - Per-cell semantics: ☐ unchecked = no entry in this client; ☑ checked-direct (legacy direct-stdio entry, badge "legacy"); ☑ checked-hub (entry points at mcphub lazy proxy URL, badge implicit/default). Operator unchecks → removes entry; checks an unchecked cell → `mcphub register <active-workspace> <language> --clients <this>` runs (replacing any direct-stdio entry with the lazy-proxy HTTP URL).
+1. **Manifest schema additions (with Go struct extension).** Server manifest YAML gains optional `required_binaries: [name, ...]` at server level AND per-language level. Same commit adds the field to `ServerManifest` and `LanguageSpec` Go structs in `internal/config/manifest.go` so `ParseManifest`'s `KnownFields(true)` strictness does not reject the new keys. The field is free-form metadata only; `Validate()` does NOT enforce any binary-existence check.
+2. **Auto-discovery engine.** New `internal/api/binary_discovery/` package: `Discover(ctx, requiredBinaries, hints) (map[binary]absolutePath, error)`. `hints` is a `[]string` parameter so unit tests inject synthetic roots; production callers use `binary_discovery.DefaultHints()` for the shipped per-OS list. Called by `mcphub install/setup` and by the GUI's `/api/discovery/refresh`. Discovery's mutator reads each row's `source` field under the overlay flock and skips rows tagged `source: operator` (compare-and-swap inside the same RMW transaction).
+3. **Env overlay file (new package).** New `internal/api/daemon_env_overlay/` package owns: hardened YAML load (symlink refusal + parent DACL verify + 64 KiB size cap + owner check + UTF-8 validation), flock-protected RMW writer, and the `WriteOverlay(path, mutator func(*Overlay) error)` transactional API. Writes route through the existing exported `SecureWriteClientConfig(path string, payload []byte) error` (`internal/api/state_file_helper.go:127`) with YAML-marshaled bytes; reads use the new package-internal `checkStateDirParentReadSafe` helper. Supervisor `SupervisorDaemon.Env` is merged with the overlay at spawn time (overlay wins, Windows case-insensitive normalize). Storage path: `~/.config/mcp-local-hub/daemon-env-overrides.yaml` (POSIX) / `%LOCALAPPDATA%\mcp-local-hub\daemon-env-overrides.yaml` (Windows).
+4. **Matrix LSP recognition + workspace scope.** Three changes in `internal/api/scan.go` + frontend:
+   - Three-rule recognition algorithm (see "Matrix LSP recognition" below) parsing `ClientEntry.Raw map[string]any` directly, with ResolveEntryName suffix handling and registry disambiguation for multi-workspace.
+   - Top-of-screen `Active workspace` selector. Default value = most-recent registered workspace from `~/.config/mcp-local-hub/workspaces.yaml`, OR a literal "(none — register a workspace first)" placeholder when empty.
+   - Per-cell semantics: ☐ unchecked = no entry in this client; ☑ checked-direct (legacy direct-stdio entry, badge "legacy"); ☑ checked-hub (entry points at mcphub lazy proxy URL, badge "via-hub"). Cells with BOTH hub and legacy entries render both badges with operator-resolution affordance.
 
 ## Canonical daemon key namespace
 
-Overlay file keys are `SupervisorDaemon.TaskName` strings as they appear in `supervisor-intent.json`, **without** a leading backslash. Three concrete shapes apply:
+Overlay file keys are `SupervisorDaemon.TaskName` strings as they appear in `supervisor-intent.json`, **WITH** the leading backslash. The `SupervisorDaemon.TaskName` field comment at `internal/api/supervisor_intent.go:25` documents this: `// canonical, e.g. "\\mcp-local-hub-memory-default"`. Reconcile indexes daemons by this canonical form (`internal/cli/supervise_reconcile.go:107`).
 
-| Daemon kind | TaskName format | Source |
+Three concrete task-name shapes apply:
+
+| Daemon kind | TaskName format (canonical, stored) | Source |
 |---|---|---|
-| Global | `mcp-local-hub-<server>-<daemon>` | derived at install from manifest; default daemon name is `default`. Examples: `mcp-local-hub-gdb-default`, `mcp-local-hub-memory-default`. |
-| LSP workspace-scoped | `mcp-local-hub-lsp-<wsKey>-<lang>` | [internal/api/register.go:292](../../../internal/api/register.go). `wsKey` is the 8-char workspace-key hash. Examples: `mcp-local-hub-lsp-a1b2c3d4-clangd`, `mcp-local-hub-lsp-a1b2c3d4-rust`. |
-| Future workspace-scoped non-LSP | `mcp-local-hub-<server>-<wsKey>` (proposed) | not yet implemented in any manifest; reserved. Documented here so the overlay key format does not need to change later. |
+| Global | `\mcp-local-hub-<server>-<daemon>` | derived at install from manifest; default daemon name is `default`. Examples: `\mcp-local-hub-gdb-default`, `\mcp-local-hub-memory-default`. |
+| LSP workspace-scoped | `\mcp-local-hub-lsp-<wsKey>-<lang>` | `internal/api/register.go:292` writes `mcp-local-hub-lsp-%s-%s` (no leading `\`); the scheduler API call at `register.go:401` canonicalizes via the install code path before storage. |
+| Hub-managed entry name (matrix recognition) | `mcp-language-server-<lang>` plus optional collision suffix `-<4hex>` or `-<8hex>` | this is the entry NAME in client configs, NOT the TaskName. `internal/api/register.go:722-747 ResolveEntryName` appends collision suffix when multiple workspaces register the same language. |
 
-Overlay lookup at spawn time: `LookupOverlay(taskName string)` strips any leading backslash (some legacy Task Scheduler paths carry it), then exact-matches the rest. The supervisor's in-memory `SupervisorDaemon.TaskName` is already in bare form (see [internal/cli/supervise_status.go:30-32](../../../internal/cli/supervise_status.go) where `canonicalSupervisorTaskName` is called explicitly to add the prefix for scheduler API calls only).
+Overlay lookup at spawn time: `LookupOverlay(taskName string)` normalizes by prepending `\` if absent (idempotent — handles both forms), then exact-matches. This means an operator who hand-edits the YAML can use either form; the canonical storage form remains leading-backslash.
 
 ## Data flow
 
 ### Spawn-time env merge (modified)
 
 ```text
-1. Supervisor reads supervisor-intent.json   → SupervisorDaemon{Env: M}
-2. Supervisor reads daemon-env-overrides.yaml → overlay[taskName].env = O
-   (hardened read — see Security)
+1. Supervisor reads supervisor-intent.json   → SupervisorDaemon{Env: M, TaskName: T}
+2. Supervisor reads daemon-env-overrides.yaml → overlay[T].env = O  (hardened read)
 3. mergeDaemonEnv(parent=os.Environ(), manifestEnv=M, overlayEnv=O)
      → expand ${parent_path} in O values using parent's PATH
      → merge with Windows case-insensitive normalize
@@ -122,7 +101,7 @@ Overlay lookup at spawn time: `LookupOverlay(taskName string)` strips any leadin
 5. Daemon spawns with the merged env
 ```
 
-The existing `mergeDaemonEnv` helper at [internal/cli/supervise.go:1457](../../../internal/cli/supervise.go) is extended to take a third `overlayEnv` parameter; the gate at line 1504-1505 (`if len(d.Env) > 0`) is **removed** so the merge fires whenever EITHER `d.Env` OR overlay has any keys. When both are empty, fall back to `os.Environ()` directly (parent inheritance unchanged).
+`mergeDaemonEnv` at `internal/cli/supervise.go:1457` is extended to take a third `overlayEnv map[string]string` parameter. The gate at `internal/cli/supervise.go:1504-1505` (`if len(d.Env) > 0`) is REMOVED — the merge fires whenever EITHER `d.Env` OR overlay has any keys. When both are empty, cmd.Env is left nil so child inherits `os.Environ()` directly (unchanged from current behavior; verified by codex review of v2 B3).
 
 ### Auto-discovery at install (new)
 
@@ -132,12 +111,15 @@ mcphub install / mcphub setup
 For each server manifest with required_binaries:
   For each binary in required_binaries:
     Walk DefaultHints() in OS-specific order until a hit
-  Compose PATH = first hit's parent dir per binary, joined with ${parent_path}
-  WriteOverlay(...) under SupervisorDaemon.TaskName key
-  Mark source: auto-discovery, discovered_at: <ts>
+  Compose Path = first hit's parent dir per binary, joined with ${parent_path}
+  WriteOverlay(mutator) under canonical TaskName key
+  Inside mutator:
+    For each daemon row to write:
+      If existing row has source: operator → skip (preserve operator override)
+      Else → write source: auto-discovery, discovered_at: <RFC3339Nano>
 ```
 
-Auto-discovery NEVER overwrites a row with `source: operator`. If a row already exists with that source, auto-discovery skips it (logged as `binary-discovery-skipped-operator-override`).
+The mutator's compare-and-swap on `source: operator` happens under the same flock that protects the write, so a concurrent GUI Apply cannot lose its operator-tagged row.
 
 ### Manual discovery refresh from GUI (new)
 
@@ -148,17 +130,17 @@ POST /api/discovery/refresh {server, daemon | 'all'}
   ↓
 GUI handler invokes binary_discovery.Discover(ctx, requiredBinaries, DefaultHints())
   ↓
-WriteOverlay(...) under the per-daemon flock
+WriteOverlay(...) — flock-protected RMW with source: operator preservation
   ↓
-Returns new effective env to GUI for display
+Handler returns 200 + new effective env to GUI for display
   ↓
-GUI shows "Restart daemon to apply" affordance; on click → POST /api/daemon/respawn
+GUI shows "Restart daemon to apply" affordance; operator click → POST /api/daemon/respawn
 ```
 
 ### Apply env edit from GUI (new)
 
 ```text
-GUI per-row drawer → Edit PATH field → Apply
+GUI per-row drawer → Edit Path field → Apply
   ↓
 POST /api/daemon/env {taskName, env: {KEY: value, ...}}
   ↓
@@ -168,71 +150,158 @@ GUI handler validates:
   - same CSRF + same-origin posture as /api/migrate, /api/dismiss
   ↓
 WriteOverlay(path, mutator) — flock-protected RMW
+  Inside mutator: write row with source: operator, modified_at: <ts>
+  Mutator-error contract: if mutator returns err, NO write, flock released, err propagated
   ↓
-GUI handler issues supervisor IPC: respawn {taskName}
+Handler returns 200 + new effective env
   ↓
-Supervisor merges manifest env + overlay env, respawns daemon
+GUI shows "Restart daemon to apply" affordance; operator click → POST /api/daemon/respawn
+```
+
+### Respawn from GUI (new)
+
+```text
+GUI per-row drawer → "Restart daemon to apply" button (optionally with force checkbox)
+  ↓
+POST /api/daemon/respawn {taskName, force: bool}
+  ↓
+GUI handler validates:
+  - taskName is in current supervisor-intent.json
+  - CSRF + same-origin
+  ↓
+If daemon is in Quarantined state AND force == false:
+  Return HTTP 409 {state: "quarantined", remedy: "force or unquarantine"}
+  ↓
+Issue supervisor IPC: respawn {taskName, force}
+  ↓
+Supervisor: graceful 5s shutdown → SIGKILL/Job-Object kill → spawn-from-intent+overlay
   ↓
 GUI polls /api/status, surfaces new PID + Port + State
 ```
 
 ### Matrix LSP recognition (modified)
 
-`scan.go`'s per-client scan functions emit raw entries keyed by entry-name. After scanning, a new pass categorizes LSP entries using a three-rule algorithm:
+`scan.go`'s per-client scan functions emit raw entries via `shapeClaudeEntry` / `shapeCodexEntry` / etc., all returning `ClientEntry{Transport, Endpoint, Raw}`. After scanning, a new pass categorizes entries using three rules:
 
 ```text
-For each raw entry e in scanned clients:
+Inputs:
+  ENTRIES   = scanned client-config entries keyed by entry-name
+  LANGS     = the 9 manifest language names {clangd, fortran, go, javascript,
+              python, rust, typescript, vscode-css, vscode-html}
+  REGISTRY  = workspaces.yaml — for each workspace, ClientEntries map of
+              client → entry-name (per internal/api/register.go:539-563)
+
+For each (entryName, entry) in ENTRIES:
+
+  // Strip ResolveEntryName collision suffix if present.
+  // Match pattern: mcp-language-server-<lang>(-<4hex|8hex>)?
+  // where <lang> is one of LANGS and the optional hex suffix is the
+  // workspace key short or full form.
+  baseLang, wsKeyMaybe = parseEntryName(entryName, LANGS)
 
   Rule 1 — Hub-managed lazy proxy:
-    e.Name matches /^mcp-language-server-([a-z0-9-]+)$/
-    AND extracted suffix matches one of mcp-language-server manifest's
-        9 declared languages (clangd, fortran, go, javascript, python,
-        rust, typescript, vscode-css, vscode-html)
-    AND e.URL is set (HTTP entry, not stdio)
-    AND e.URL matches the lazy-proxy port pool 9200-9299 OR the
-        explicit register registry's per-(workspace,lang) port
-    → categorize as LSP language entry e.Language=<suffix>, badge="hub"
+    entry.Transport == "http"
+    AND baseLang ∈ LANGS
+    AND entry.Endpoint matches lazy-proxy URL pattern (typically
+        http://localhost:<port>/mcp where port ∈ [9200, 9299] OR matches
+        a port registered in REGISTRY for some (workspace, baseLang))
+    → categorize as LSP entry for baseLang, badge="via-hub"
+    → resolve owning workspace via REGISTRY lookup using wsKeyMaybe (or
+      single-workspace fallback if no suffix)
 
   Rule 2 — Direct-stdio mcp-language-server invocation:
-    e.Command basename == "mcp-language-server"
-    AND e.Args contains a "--lsp <X>" pair where X matches one
-        of the 9 languages' lsp_command field
-    → categorize as LSP language entry, badge="legacy"
+    entry.Transport == "stdio"
+    AND filepath.Base(entry.Endpoint) == "mcp-language-server"  // or with .exe on Windows
+    AND args slice (from entry.Raw["args"] []any → []string) contains
+        a "--lsp" flag whose value matches one of LANGS' lsp_command fields
+    → categorize as LSP entry, badge="legacy"
+    → owning workspace inferred from "--workspace" arg if present
 
   Rule 3 — Direct-stdio gopls invocation (Go special case):
-    e.Command basename == "gopls"
-    AND e.Args contains "mcp" (per manifest extra_flags for Go)
+    entry.Transport == "stdio"
+    AND filepath.Base(entry.Endpoint) == "gopls"
+    AND args slice contains "mcp" (per manifest extra_flags for Go)
     → categorize as Go LSP entry, badge="legacy"
 
 After categorization:
-  Build matrix rows for entries; non-LSP entries unchanged; each
-  LSP language renders as one INDIVIDUAL row (9 rows total — one per
-  manifest language). Per user decision: per-language axis, not
-  grouped under a "mcp-language-server" parent.
+  - Always produce exactly 9 LSP language rows (one per manifest language).
+  - For each (client, language) cell, the cell carries 0, 1, or 2 badges
+    representing which of {via-hub, legacy} are present.
+  - When BOTH via-hub and legacy are present for the same (client,
+    language), the cell renders both badges stacked, and the per-row
+    drawer surfaces the anomaly with operator-resolution affordance
+    (recommend operator un-check legacy + Apply to migrate fully to hub).
 ```
 
-Recognition rules 1 + 2 are intentionally orthogonal: a cell can be EITHER `hub` OR `legacy` for a given (client, language) pair. If both shapes coexist (e.g., operator manually added `mcp-language-server` direct entry AND ran `mcphub register`), both rows appear; this is a configuration anomaly surfaced as a yellow warning chip in the matrix.
+**JS/TS disambiguation note** (codex v2 review A3): Rule 2's `lsp_command` match cannot distinguish javascript from typescript because both use `typescript-language-server`. Direct-stdio recognition therefore relies on the entry NAME (`mcp-language-server-javascript` vs `mcp-language-server-typescript`) for the language label, NOT the `--lsp` arg value. Rule 2's `--lsp` arg check is a defense-in-depth sanity gate (the args must be consistent with the entry name) but the language is determined by the entry-name prefix.
+
+**Multi-workspace recognition correctness** (codex v2 review A2/E2 BLOCKING): when two workspaces both register clangd, the second workspace's entry name carries a `-<4hex>` or `-<8hex>` collision suffix (`internal/api/register.go:722-747`). The recognition algorithm strips the suffix to identify the language, then uses the suffix as a registry key to disambiguate workspace ownership. This makes multi-workspace recognition correct by construction; the active-workspace selector becomes a UX choice about which workspace's row is highlighted, NOT a correctness-determining gate.
 
 ## Components
 
 | Component | New / Modified | Purpose | Owns | Depends on |
 |---|---|---|---|---|
-| `internal/api/binary_discovery/` | NEW | Auto-discover common binary paths per OS | shipped per-OS hints, hint-injection seam for tests | (none) |
-| `internal/api/daemon_env_overlay/` | NEW | YAML overlay file owner | overlay parse, flock-protected RMW writer, hardened read, comment-preserving YAML round-trip | `gopkg.in/yaml.v3`, state-file helper (DACL/mode at temp-create), flock helper |
+| `internal/api/binary_discovery/` | NEW | Auto-discover common binary paths per OS | shipped per-OS hints (`DefaultHints()`), hint-injection seam for tests, compare-and-swap on `source: operator` | (none) |
+| `internal/api/daemon_env_overlay/` | NEW | YAML overlay file owner | overlay parse, flock-protected RMW writer, hardened read (with NEW `checkStateDirParentReadSafe`), comment-preserving YAML round-trip, `WriteOverlay(path, mutator func) error` transactional API with explicit "no-write-on-mutator-error" contract | `gopkg.in/yaml.v3` Node API, existing `SecureWriteClientConfig(path, payload []byte) error`, flock helper |
 | `internal/cli/supervise.go` `mergeDaemonEnv` | MODIFY | Apply overlay at spawn-time; remove `len(d.Env) > 0` gate; Windows case-insensitive key normalize | env merge precedence, `${parent_path}` expansion | daemon_env_overlay |
-| `internal/cli/supervise.go` IPC dispatcher | MODIFY | Add `respawn` IPC command (replaces UNKNOWN_COMMAND stub at line 921 for single-daemon respawn) | IPC frame parse, graceful 5s shutdown, spawn-from-intent-overlay, lifecycle event emit | reconcile loop, daemon_env_overlay |
-| `internal/api/scan.go` | MODIFY | Recognize mcp-language-server entries via three-rule algorithm; emit LSP language rows | per-language entry classification, badge metadata | mcp-language-server manifest reader |
-| `internal/api/manifest_lsp_lookup.go` | NEW | Reverse-lookup helpers for the three-rule recognition | manifest reading, language-to-binding map, lsp_command index | config package |
-| `internal/gui/server.go` | NEW handlers | `/api/daemon/env` (write), `/api/discovery/refresh` (rescan), `/api/daemon/respawn` (IPC) | route registration, validation, IPC dispatch | supervisor IPC, daemon_env_overlay |
-| `internal/gui/frontend/src/screens/Servers.tsx` | MODIFY | Active-workspace selector; 9 LSP rows; per-row drawer with env editor; `${parent_path}` warning chip when token absent | per-cell action mapping, drawer state, env edit form | new API endpoints |
+| `internal/cli/supervise.go` IPC dispatcher | MODIFY | Add `respawn` IPC command at the case-switch around line 921; accepts `{taskName, force}`; replaces UNKNOWN_COMMAND stub | IPC frame parse, graceful 5s shutdown, spawn-from-intent-overlay, lifecycle event emit | reconcile loop, daemon_env_overlay |
+| `internal/api/scan.go` | MODIFY | Recognize mcp-language-server entries via three-rule algorithm; emit LSP language rows | per-language entry classification, badge metadata | new `manifest_lsp_lookup.go`, registry reader |
+| `internal/api/manifest_lsp_lookup.go` | NEW | Reverse-lookup helpers for the three-rule recognition; `parseEntryName(name, langs) (lang string, wsSuffix string)` | manifest reading, language set lookup, suffix-stripping regex | config package |
+| `internal/gui/server.go` | NEW handlers | `/api/daemon/env` (write overlay, no IPC), `/api/discovery/refresh` (rescan + write overlay, no IPC), `/api/daemon/respawn` (IPC) | route registration, validation, IPC dispatch | supervisor IPC, daemon_env_overlay |
+| `internal/gui/frontend/src/screens/Servers.tsx` | MODIFY | Active-workspace selector; 9 LSP rows; per-row drawer with env editor + restart button + force checkbox; `${parent_path}` warning chip when token absent | per-cell action mapping, drawer state, env edit form | new API endpoints |
 | `servers/mcp-language-server/manifest.yaml` | MODIFY | Add `required_binaries` per language | manifest schema | (config schema) |
-| `internal/config/manifest.go` | MODIFY | Add `RequiredBinaries []string` field to `ServerManifest` and `LanguageSpec` structs | YAML deserialization (preserve `KnownFields(true)` strictness) | (none) |
+| `internal/config/manifest.go` | MODIFY | Add `RequiredBinaries []string` field to `ServerManifest` and `LanguageSpec` structs; no `Validate()` logic added | YAML deserialization (preserve `KnownFields(true)` strictness) | (none) |
 | `servers/gdb/manifest.yaml` | MODIFY | Add `required_binaries: [gdb]` at server level | manifest schema | (config schema) |
 | `servers/lldb/manifest.yaml` | MODIFY | Add `required_binaries: [lldb]` at server level | manifest schema | (config schema) |
+| `internal/api/state_file_helper_read.go` | NEW | `checkStateDirParentReadSafe(dir string) error` — package-internal symmetric helper to existing `checkStateDirParentWriteSafe` | parent-dir DACL/mode check, default-relax + strict-mode semantics | (existing) operatorRequiresSingleUserHome, operatorAllowsUnhardenedStateRead (new env var) |
+
+## Read-side hardening
+
+The supervisor's spawn-time overlay READ is on the trust boundary for child process PATH. v3 introduces a NEW package-internal `checkStateDirParentReadSafe` helper symmetric to the existing `checkStateDirParentWriteSafe` (`internal/api/state_file_helper.go:155`). Read-side semantics:
+
+1. **Open file first, then stat the handle.** Use `os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)` (POSIX) or equivalent `windows.CreateFile` with `FILE_FLAG_OPEN_REPARSE_POINT` cleared (Windows). The open itself refuses symlinks/reparse points. After open, call `fi := f.Stat()` on the open handle — defeats TOCTOU between any earlier check and the read. (Codex v2 review B1 BLOCKING: v2's `os.Lstat` pre-check was racy.)
+2. **Reject non-regular files.** `if !fi.Mode().IsRegular() { return ErrOverlayNotRegular }`. Use `Mode().IsRegular()`, NOT bit math on `os.ModeIrregular` (codex v2 review B2 corrected v2's wrong bit math).
+3. **Verify parent dir via new `checkStateDirParentReadSafe`**. Same default-relax + strict-mode semantics as the existing write side (`internal/api/state_file_helper.go:139-157`):
+   - If `MCPHUB_REQUIRE_SINGLE_USER_HOME=1` is set, refuse with verbose error including the env var name and remedy.
+   - Else, run the parent-write-bits check (`checkStateDirParentWriteSafe` is re-used internally — the read side rejects parents that grant write/delete to non-allowlisted principals because a co-resident attacker could swap the file).
+   - Else, log warn `daemon-env-overlay-read-unhardened-fallback` and proceed (default-relax for legitimate corp hosts).
+4. **Refuse non-owner file.** POSIX: stat uid == os.Getuid(); Windows: file owner SID matches process token user SID.
+5. **64 KiB hard size cap.** `io.LimitReader(f, 65536+1)` then check the byte count.
+6. **Reject non-printable / non-UTF-8 bytes.** Defense-in-depth before YAML parse.
+
+If any hardened-read failure occurs AND the operator has not set `MCPHUB_REQUIRE_SINGLE_USER_HOME=0` to opt out of the strict gate, supervisor refuses to spawn (per "Error handling" below).
+
+## Error handling
+
+| Failure mode | Behavior |
+|---|---|
+| Overlay file missing | Treat as empty overlay. No error. Manifest env applies. |
+| Overlay file unreadable (permission denied / symlink at path / reparse point on Windows) | **Fail-LOUD.** Supervisor refuses to spawn ANY daemon (overlay parse failure means "affected daemons" is unknowable). GUI shows red banner: `daemon-env-overlay-read-rejected`. Audit event with reason. Operator runs `mcphub config overlay-quarantine` to rename + restart with empty overlay. |
+| Overlay file corrupt YAML / size > 64 KiB / non-UTF-8 | **Fail-LOUD.** Same as above; parse error includes line/col for inline editor jump. |
+| Overlay declares an unknown taskName | Log warn `daemon-env-overlay-orphan-row` at supervisor startup. Ignore that row at spawn. GUI surfaces orphan rows in a dedicated section with "delete this row" affordance. Triggered automatically after `mcphub unregister <workspace>` removes the workspace from registry. |
+| Overlay row exists but `${parent_path}` resolution fails | Per-row failure only; refuse to spawn that one daemon; emit `daemon-env-overlay-parent-path-resolve-failed` with daemon TaskName + missing key. |
+| Auto-discovery cannot find a required binary | Discovery returns `{binary: ""}` for the missing one. Overlay row written with comment `auto-detected: BINARY_NAME not found in any common location`. GUI shows red flag on the daemon's row with a search hint and a "set PATH manually" link. |
+| Apply IPC respawn fails | GUI surfaces the supervisor error; overlay change stays on disk; operator can retry. No state mutation rollback. |
+| Respawn requested for Quarantined daemon without `force: true` | HTTP 409 from `/api/daemon/respawn`; body explains remedy. |
+| `mcphub register <ws> <lang>` fails | Existing register error handling unchanged. GUI displays the per-cell failed row, retry affordance via second Apply. |
+| Concurrent GUI Apply + auto-discovery refresh | Both go through `WriteOverlay(path, mutator)`'s flock; second caller waits. No lost-update window. |
+| `WriteOverlay` mutator returns error | NO write to disk; flock released; error propagated verbatim. The on-disk file is unchanged. |
+
+## `mcphub config overlay-quarantine`
+
+Rename the overlay file aside so the supervisor can boot with empty overlay:
+
+1. Acquire the same per-file flock as `WriteOverlay` (path: `daemon-env-overrides.yaml.lock`).
+2. If the overlay file does not exist → exit 0 with message "no overlay to quarantine".
+3. `os.Rename(<overlay>, <overlay>.corrupt-<RFC3339-ts>)` — atomic on POSIX, atomic-by-rename on Windows.
+4. Release flock.
+5. Print operator guidance: "renamed to `<new-path>`. Run `mcphub restart` (or wait for next supervisor cold start) to apply."
+
+Does NOT signal or restart the supervisor; operator restarts manually after fixing or accepting the quarantine. The `.corrupt-<ts>` files accumulate; cleanup is operator's responsibility (or a future `mcphub config gc-overlay-quarantines` follow-up).
 
 ## Manifest schema additions
 
-Add optional `required_binaries` field at server OR language level. **Same commit** adds the field to the Go structs (`ServerManifest`, `LanguageSpec` in [internal/config/manifest.go](../../../internal/config/manifest.go)) so `ParseManifest`'s `KnownFields(true)` strictness still rejects truly unknown keys.
+Add optional `required_binaries` field at server OR language level. **Same commit** adds the field to the Go structs (`ServerManifest`, `LanguageSpec` in `internal/config/manifest.go`) so `ParseManifest`'s `KnownFields(true)` strictness still rejects truly unknown keys. The new field is free-form metadata; `Validate()` does NOT enforce binary existence (deferred — discovery does best-effort find at install time).
 
 ```yaml
 # Server-level (applies to whole server, e.g. gdb)
@@ -259,90 +328,60 @@ languages:
     required_binaries: [gopls]
 ```
 
-`required_binaries` is metadata only — runtime spawn never reads it. Auto-discovery uses it to know what to look for. Manifest is parsed once at startup; the field is exposed through the existing manifest reader API.
-
 ## DefaultHints — shipped per-OS list
 
-```go
-// internal/api/binary_discovery/hints_windows.go
-func DefaultHintsWindows() []string {
-    return []string{
-        `C:\msys64\ucrt64\bin`,
-        `C:\msys64\mingw64\bin`,
-        `C:\msys64\clang64\bin`,
-        `C:\Program Files\LLVM\bin`,
-        `C:\Program Files\Go\bin`,
-        `C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Tools\Llvm\x64\bin`,
-        `%LOCALAPPDATA%\Programs\Python\Python311`,
-        `%LOCALAPPDATA%\Programs\Python\Python312`,
-        `%LOCALAPPDATA%\Programs\Python\Python313`,
-        `%LOCALAPPDATA%\Programs\Python\Python314`,
-        `%USERPROFILE%\.cargo\bin`,
-        `%USERPROFILE%\go\bin`,
-        `%USERPROFILE%\.local\bin`,
-        `%LOCALAPPDATA%\fnm_multishells`,
-        `%LOCALAPPDATA%\Programs\fnm`,
-        `%LOCALAPPDATA%\nvm`,
-        `%APPDATA%\npm`,
-    }
-}
+`binary_discovery.DefaultHints()` returns a `[]string` for the current OS. Windows hints (verified-by-author install locations):
 
-// hints_linux.go: /usr/local/bin, /usr/bin, ~/.local/bin, ~/.cargo/bin, ~/go/bin
-// hints_darwin.go: /opt/homebrew/bin, /usr/local/bin, /opt/local/bin + the Linux list
-```
+- `C:\msys64\ucrt64\bin`, `C:\msys64\mingw64\bin`, `C:\msys64\clang64\bin`
+- `C:\Program Files\LLVM\bin`
+- `C:\Program Files\Go\bin`
+- `C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Tools\Llvm\x64\bin`
+- `%LOCALAPPDATA%\Programs\Python\Python311` through `Python314`
+- `%USERPROFILE%\.cargo\bin`, `%USERPROFILE%\go\bin`, `%USERPROFILE%\.local\bin`
+- `%LOCALAPPDATA%\fnm_multishells`, `%LOCALAPPDATA%\Programs\fnm`, `%LOCALAPPDATA%\nvm`
+- `%APPDATA%\npm`
+
+Linux hints: `/usr/local/bin`, `/usr/bin`, `~/.local/bin`, `~/.cargo/bin`, `~/go/bin`.
+
+macOS hints: `/opt/homebrew/bin`, `/usr/local/bin`, `/opt/local/bin` + the Linux list.
 
 Hints are best-effort seed data only. **The operator's override channel is the env overlay file, NOT hints expansion.** Adding a hint requires a code change + PR.
 
 For unit tests, `Discover(ctx, requiredBinaries, hints []string)` takes `hints` as a parameter — tests pass synthetic temp-dir roots; production callers use `DefaultHints()`.
 
-## Error handling
-
-| Failure mode | Behavior |
-|---|---|
-| Overlay file missing | Treat as empty overlay. No error. Manifest env applies. |
-| Overlay file unreadable (permission denied / symlink at path) | **Fail-LOUD.** Supervisor refuses to spawn affected daemons. GUI shows red banner: `daemon-env-overlay-read-rejected`. Audit event with reason. Operator can `mcphub config overlay-quarantine` to rename to `.corrupt-<ts>` and restart with empty overlay. |
-| Overlay file corrupt YAML / size > 64 KiB | **Fail-LOUD.** Same as above; parse error includes line/column for inline editor jump. |
-| Overlay declares an unknown taskName | Log warn `daemon-env-overlay-orphan-row` at supervisor startup. Ignore that row at spawn. GUI surfaces orphan rows in a dedicated section with "delete this row" affordance. Triggered automatically after `mcphub unregister <workspace>` removes the workspace from registry. |
-| Auto-discovery cannot find a required binary | Discovery returns `{binary: ""}` for the missing one. Overlay row written with comment `auto-detected: BINARY_NAME not found in any common location`. GUI shows red flag on the daemon's row with a search hint and a "set PATH manually" link. |
-| Apply IPC respawn fails | GUI surfaces the supervisor error; overlay change stays on disk; operator can retry. No state mutation rollback. |
-| `mcphub register <ws> <lang>` fails | Existing register error handling unchanged. GUI displays the per-cell failed row, retry affordance via second Apply. |
-| Concurrent GUI Apply + auto-discovery refresh | Both go through `WriteOverlay(path, mutator)`'s flock; second caller waits. No lost-update window. |
-
 ## Security
-
-### Read-side hardening (new — addresses v1 BLOCKER C1)
-
-The supervisor's spawn-time overlay READ is on the trust boundary for child process PATH. The daemon_env_overlay package hardens the read:
-
-1. **Refuse symlink / reparse point at overlay path.** `os.Lstat` pre-check; if `(fi.Mode() & os.ModeSymlink) != 0` or (Windows) reparse-point attribute set, refuse with `ErrOverlaySymlinkRefused`.
-2. **Refuse non-regular file.** `(fi.Mode() & os.ModeIrregular) == 0` required.
-3. **Verify parent dir DACL / mode** (same posture as state-file helper read; reuses `checkStateDirParentReadSafe`).
-4. **Refuse non-owner file** (POSIX: stat uid == os.Getuid(); Windows: file owner SID matches process token user SID).
-5. **64 KiB hard size cap.** `io.LimitReader(file, 65536+1)` then check; reject if cap exceeded.
-6. **Reject non-printable / non-UTF-8 bytes.** Defense in depth before YAML parse.
-
-If any check fails, supervisor refuses to spawn affected daemons; GUI shows the failure reason.
 
 ### Write-side hardening (existing posture extended)
 
-- Overlay file lives in user-scope dir (per-machine, per-user). Same DACL/mode posture as other state files (handle-bound 0600 / Admin+SYSTEM+CurrentUser ACL).
-- `WriteOverlay` uses the hardened temp+rename pipeline at temp-create (per [internal/api/state_file_helper.go](../../../internal/api/state_file_helper.go)), but the writer is custom (YAML, not JSON) — the DACL/mode at temp-create comes from the same hardened pipeline; the encoding is YAML.
+- Overlay file lives in user-scope dir (per-machine, per-user). Same DACL/mode posture as other state files.
+- `WriteOverlay` writes through the existing exported `SecureWriteClientConfig(path string, payload []byte) error` (`internal/api/state_file_helper.go:127`) with YAML-marshaled bytes. Per-file DACL at temp-create is handle-bound (POSIX) / NtCreateFile-bound (Windows) per the existing pipeline.
 
-### `/api/daemon/env` auth posture (new — addresses v1 IMPORTANT I3)
+### Read-side hardening (new — see "Read-side hardening" section above)
 
-`/api/daemon/env` follows the same auth posture as `/api/migrate`, `/api/dismiss`, `/api/secrets`:
+- New package-internal `checkStateDirParentReadSafe` helper.
+- Open-first-then-stat-handle pattern defeats TOCTOU between Lstat pre-check and Open.
+- `Mode().IsRegular()` (not bit math) for non-regular refusal.
+- Default-relax / strict-mode semantics symmetric with write side.
+- 64 KiB size cap + UTF-8 validation.
+
+### `/api/daemon/env`, `/api/discovery/refresh`, `/api/daemon/respawn` auth posture
+
+All three endpoints follow the same auth posture as `/api/migrate`, `/api/dismiss`, `/api/secrets` (existing canonical mutation surface):
 
 - Loopback-only listener (already enforced at server bind).
 - Same-origin policy with strict Origin header check.
 - CSRF token discipline: `X-Mcphub-CSRF` header matched against the per-session token issued at GUI bootstrap.
-- **Known-task validation.** Server rejects the request with HTTP 400 if `taskName` is not present in current `supervisor-intent.json`. This prevents drive-by writes from a compromised browser tab against a non-existent taskName.
-- **Per-key value validation.** Keys must match `[A-Za-z_][A-Za-z0-9_]*`; values reject newline, NUL, control chars (defense-in-depth against env-injection into log lines or proc-environ snapshots).
+- **Known-task validation.** Server rejects the request with HTTP 400 if `taskName` is not present in current `supervisor-intent.json`.
+- **Per-key value validation** (for `/api/daemon/env`): Keys must match `[A-Za-z_][A-Za-z0-9_]*`; values reject newline, NUL, control chars.
+
+Verification gate: the writing-plans phase MUST verify that `/api/migrate`, `/api/dismiss`, `/api/secrets` actually enforce CSRF + Origin checks in the live code before this spec's "same posture as" claim becomes binding. If any of them is laxer than claimed, the implementation phase tightens the lax endpoint to match this spec's posture, not the other direction.
 
 ### `${parent_path}` token semantics
 
 - The ONLY supported template token. Operator's overlay value is treated as opaque bytes after expansion; values go to `exec.Command` env block, not a shell.
-- Token resolution: at spawn time, supervisor reads `os.Environ()` and finds the PATH key (case-insensitive on Windows: `Path`, `PATH`, `path` all match). Expansion is single-pass, non-recursive — the expanded value is not re-scanned for tokens.
+- Token resolution: at spawn time, supervisor reads `os.Environ()` and finds the PATH key (case-insensitive on Windows: `Path`, `PATH`, `path` all match the same logical key). Expansion is single-pass, non-recursive — the expanded value is not re-scanned for tokens.
 - If `${parent_path}` is omitted from the operator's PATH value, the parent PATH is **dropped** for that daemon. The GUI shows a warning chip "PATH does not include `${parent_path}` — parent PATH will be DROPPED for this daemon" when the operator types or pastes a PATH value missing the token. Auto-discovery templates always include the token at the tail to preserve parent.
+- **YAML-editor bypass**: an operator who hand-edits the overlay YAML and omits the token bypasses the GUI warning. The supervisor emits a `daemon-env-overlay-path-no-parent-token` info event at spawn for any daemon whose overlay PATH lacks the token — visible in `mcphub watchdog status` / event log. The token is not auto-injected server-side (operator might intentionally want to drop parent PATH for a hermetic daemon).
 
 ## Observability
 
@@ -350,76 +389,86 @@ New events on the hub-mcp event log:
 
 - `daemon-env-overlay-loaded` (info): row count, `sha256(${parent_path})[:12]` of resolved parent (full PATH only at debug level)
 - `daemon-env-overlay-load-failed` (warn): path, error class (symlink-refused, size-exceeded, parse-failed, parent-dir-unsafe, non-owner), line/col for parse-failed
-- `daemon-env-overlay-read-rejected` (error): path, hardened-read failure mode — supervisor refuses to spawn affected daemons
-- `daemon-env-overlay-applied-via-gui` (info): taskName, changed keys (values redacted, only key names + before/after hash at debug)
-- `daemon-env-overlay-orphan-row` (warn): taskName not in current intent; emitted on startup load
-- `daemon-env-overlay-skipped-operator-override` (info): taskName, binary — auto-discovery refused to overwrite an `source: operator` row
+- `daemon-env-overlay-read-rejected` (error): path, hardened-read failure mode — supervisor refuses to spawn ANY daemon (whole-file fail-LOUD)
+- `daemon-env-overlay-read-unhardened-fallback` (warn): default-relax path on legitimate corp host; same posture as existing write-side warn
+- `daemon-env-overlay-applied-via-gui` (info): taskName, changed keys (values redacted; key names + before/after hash at debug only)
+- `daemon-env-overlay-orphan-row` (warn): taskName not in current intent
+- `daemon-env-overlay-skipped-operator-override` (info): taskName, binary — auto-discovery refused to overwrite `source: operator`
+- `daemon-env-overlay-parent-path-resolve-failed` (warn): per-row resolution failure; refuse to spawn that one daemon
+- `daemon-env-overlay-path-no-parent-token` (info): daemon spawned with PATH that omits `${parent_path}` — parent PATH dropped intentionally or by operator hand-edit
 - `binary-discovery-ran` (info): server, scan duration, hits per binary
-- `binary-discovery-missing` (warn): server, binary, scanned hints summary, "set PATH manually in GUI" guidance
-- `supervisor-respawn-via-gui` (info): taskName, requesting client (loopback PID), respawn outcome
+- `binary-discovery-missing` (warn): server, binary, scanned hints summary
+- `supervisor-respawn-via-gui` (info): taskName, requesting client (loopback PID), respawn outcome, `force` flag value
 - `supervisor-respawn-graceful-timeout` (warn): taskName, soft-shutdown deadline exceeded, force-kill path taken
+- `supervisor-respawn-refused-quarantined` (info): taskName, request lacked `force: true`
 
 ## Testing strategy
 
 ### Unit
 
-- `binary_discovery/discover_test.go`: pass `hints=[<tempdir>]` with synthesized fake binaries at known paths; assert discovery returns the right absolute paths; assert missing binaries return empty. **Test-injected hints** decouples test from real machine layout.
-- `daemon_env_overlay/parse_test.go`: round-trip overlay YAML preserving comments; ordered keys; reject symlink at path; reject 64 KiB+1 size; reject non-UTF-8.
-- `daemon_env_overlay/write_test.go`: `WriteOverlay(path, mutator)` flock-protects concurrent writes; assert atomic temp+rename; assert DACL/mode at temp-create matches state-file helper.
-- `mergeDaemonEnv` extended tests: overlay arg now non-nil; assert precedence parent < manifest < overlay; Windows case-insensitive key collision (`PATH` vs `Path` merge correctly); POSIX case-sensitive.
-- `scan.go` three-rule recognition: test fixtures for (a) hub URL entries via `mcphub register`, (b) direct-stdio `mcp-language-server --lsp X`, (c) direct-stdio `gopls mcp` for Go; assert all three map to the right LSP language row with the right badge.
-- `manifest_lsp_lookup_test.go`: lookup all 9 manifest languages; assert gopls-mcp backend is surfaced for Go.
+- `binary_discovery/discover_test.go`: pass `hints=[<tempdir>]` with synthesized fake binaries; assert correct paths and missing-binary handling. **Test-injected hints** decouples test from real machine.
+- `binary_discovery/source_override_test.go`: pre-write overlay row with `source: operator`; run discovery's mutator; assert row preserved unchanged AND no `discovered_at` overwrite.
+- `daemon_env_overlay/parse_test.go`: round-trip overlay YAML preserving comments; ordered keys; reject open-time symlink; reject 64 KiB+1; reject non-UTF-8.
+- `daemon_env_overlay/write_test.go`: `WriteOverlay(path, mutator)` flock-protects concurrent writes; atomic temp+rename; DACL/mode at temp-create matches existing write helper; mutator-error path produces NO disk modification + flock release + error propagation.
+- `daemon_env_overlay/read_hardening_test.go`: new `checkStateDirParentReadSafe` symmetric with `checkStateDirParentWriteSafe`; `Mode().IsRegular()` rejects directories + pipes + sockets; default-relax fallback on parent-DACL rejection with `MCPHUB_REQUIRE_SINGLE_USER_HOME` unset; strict-mode rejection with env var set.
+- `mergeDaemonEnv` extended tests: overlay arg non-nil; assert precedence parent < manifest < overlay; Windows case-insensitive key collision (`PATH` vs `Path` merge); both-empty fallback to nil cmd.Env.
+- `scan.go` three-rule recognition: test fixtures for (a) hub URL entries via `mcphub register` with and without collision suffix, (b) direct-stdio `mcp-language-server --lsp X` for JS+TS sharing `typescript-language-server`, (c) direct-stdio `gopls mcp` for Go; assert all map to right LSP language row with right badge; multi-workspace test asserts both rows render against same language with workspace disambiguation.
+- `manifest_lsp_lookup_test.go`: `parseEntryName(name, langs)` for all 9 languages, with and without suffix, with full 8-hex and short 4-hex suffix forms; reject `mcp-language-server-unknown-lang`.
 
 ### Integration
 
-- `internal/cli/supervise_lsp_e2e_test.go` (new): synthesize a workspace, register one language via `mcphub register`, verify supervisor-intent.json gains the entry, verify supervisor spawns a lazy proxy on materialization, verify env from overlay applies.
-- `internal/cli/supervise_respawn_test.go` (new — addresses v1 IMPORTANT I8): IPC `respawn` command with valid taskName → graceful 5s shutdown → spawn with intent+overlay; invalid taskName → IPC error `UNKNOWN_TASK`; daemon in Backoff → state reset to Spawning + spawn; daemon in Quarantined → respawn refused unless `force: true`.
-- `internal/gui/daemon_env_handler_test.go` (new): POST /api/daemon/env writes overlay + triggers respawn; assert event log entry + new effective env via /api/status; assert CSRF rejected without header; assert unknown taskName rejected with 400.
+- `internal/cli/supervise_lsp_e2e_test.go` (new): synthesize a workspace, register one language via `mcphub register`, verify supervisor-intent.json gains the entry with canonical leading-backslash TaskName, verify supervisor spawns a lazy proxy on materialization, verify env from overlay applies.
+- `internal/cli/supervise_respawn_test.go` (new): IPC `respawn` command with valid TaskName + `force=false` → graceful 5s shutdown → spawn with intent+overlay; invalid TaskName → IPC error `UNKNOWN_TASK`; daemon in Backoff → state reset to Spawning + spawn; daemon in Quarantined + `force=false` → IPC refuse; daemon in Quarantined + `force=true` → spawn proceeds.
+- `internal/gui/daemon_env_handler_test.go` (new): POST /api/daemon/env writes overlay (no IPC); assert event log entry + new effective env via /api/status after operator clicks /api/daemon/respawn; assert CSRF rejected without header; assert unknown taskName rejected with 400.
 - `internal/api/daemon_env_overlay/integration_test.go`: WriteOverlay + Load round-trip across multiple goroutines under flock.
 
-### Multi-workspace LSP recognition test (addresses v1 IMPORTANT I7)
+### Multi-workspace LSP recognition test
 
 `internal/gui/e2e/tests/servers-lsp-multi-workspace.spec.ts`:
 
-1. Seed 2 workspaces in registry (`ws1` + `ws2`), both registered for clangd.
-2. Active-workspace selector defaults to `ws1`; matrix clangd row shows URL for `ws1` proxy.
-3. Switch selector to `ws2`; assert matrix re-renders with `ws2` URL on the same row.
-4. Per-row drawer shows per-workspace history (both proxies, with badges).
-5. Uncheck clangd cell for codex client while selector is `ws2` → `mcphub register --unset` runs against `ws2` only; `ws1` row unchanged.
+1. Seed 2 workspaces in registry (`ws1` + `ws2`), both registered for clangd. Second registration triggers ResolveEntryName → entry name `mcp-language-server-clangd-<short-hex>` in ws2's clients.
+2. Active-workspace selector defaults to ws1; matrix clangd row shows URL for ws1 proxy; ws2's clangd row is the SAME row (one row per language total) with the ws2 cells visible for ws2-bound clients.
+3. Switch selector to ws2; assert per-row drawer's active-workspace badge updates.
+4. Per-row drawer surfaces per-workspace history: both proxies listed with badges + register/unregister timestamps from the registry.
+5. Uncheck clangd cell for codex client while selector is ws2 → `mcphub register --unset` runs against ws2 only; ws1's clangd row unchanged.
 
 ### E2E (Playwright)
 
-- `internal/gui/e2e/tests/servers-lsp.spec.ts`: matrix shows 9 LSP rows; check/uncheck cycles register/unregister per active workspace; per-row drawer opens with env editor; Apply respawns daemon and Dashboard reflects new PID.
-- `internal/gui/e2e/tests/servers-env-overlay.spec.ts`: per-row drawer reveals effective env; edit Path field WITHOUT `${parent_path}` token → warning chip appears; Apply writes overlay + GUI shows new effective env post-respawn.
+- `internal/gui/e2e/tests/servers-lsp.spec.ts`: matrix shows exactly 9 LSP rows; check/uncheck cycles register/unregister per active workspace; per-row drawer opens with env editor + Restart button + force checkbox; click Restart respawns daemon and Dashboard reflects new PID.
+- `internal/gui/e2e/tests/servers-env-overlay.spec.ts`: per-row drawer reveals effective env; edit Path field WITHOUT `${parent_path}` token → warning chip appears; Apply writes overlay; click Restart triggers respawn; GUI shows new effective env post-respawn.
+- `internal/gui/e2e/tests/servers-coexistence-anomaly.spec.ts`: seed both hub-managed clangd AND direct-stdio mcp-language-server entry for same client+language; assert cell renders both `[via-hub]` and `[legacy]` badges; per-row drawer surfaces remediation guidance.
 
 ## Migration
 
 For existing installs:
 
-- **Overlay file does not exist** → supervisor merges only `os.Environ()` + `SupervisorDaemon.Env` (same as today; the removed `len(d.Env) > 0` gate doesn't materially change behavior here because the merge with empty overlay produces the same env as the gated path). No behavior change.
-- **LSP-recognition addition** → rows that previously appeared in "Other MCP entries" now appear as proper matrix rows. Backwards-compatible: clients keep their existing direct-stdio entries; matrix offers explicit migrate-to-hub action with a "legacy" badge so operator chooses when to switch.
-- **`mcphub install/setup` auto-discovery** → runs once (writes initial overlay file with the binaries it finds under `source: auto-discovery`). Existing operators get a one-time `binary-discovery-ran` event. Default templates always include `${parent_path}` at the tail, so existing PATH-dependent daemons keep their inherited PATH. Operators can drop the token to deliberately override.
-- **`mcphub unregister <workspace>`** → emits `daemon-env-overlay-orphan-row` for any overlay rows now keyed under stale `mcp-local-hub-lsp-<wsKey>-*` taskNames. `mcphub config prune-orphan-overlay-rows` removes them; GUI surfaces a "Clean up orphan overlay rows" affordance.
+- **Overlay file does not exist** → supervisor merges only `os.Environ()` + `SupervisorDaemon.Env` (same as today). No behavior change.
+- **LSP-recognition addition** → rows that previously appeared in "Other MCP entries" now appear as proper matrix rows. Clients keep their existing direct-stdio entries; matrix offers explicit migrate-to-hub action with a "legacy" badge.
+- **`mcphub install/setup` auto-discovery** → runs once (writes initial overlay file with `source: auto-discovery`). Existing operators get a one-time `binary-discovery-ran` event. Default templates always include `${parent_path}` at the tail.
+- **`mcphub unregister <workspace>`** → emits `daemon-env-overlay-orphan-row` for stale `\mcp-local-hub-lsp-<wsKey>-*` taskNames. `mcphub config prune-orphan-overlay-rows` removes them; GUI surfaces "Clean up orphan overlay rows" affordance.
 
 ## Open questions parked for plan / implementation phase
 
-1. **Multi-workspace UX for LSP**: when an operator has 2+ workspaces registered for the same language, the matrix shows the active workspace's URL — but the per-row drawer needs to expose per-workspace history. Proposed: drawer shows a sub-table of (workspace, port, last-used) rows under the active-workspace's row. Open: should the active selector be at top-of-screen or per-row?
-2. **Auto-discovery scope for non-LSP servers**: `gdb`, `godbolt`, `perftools` also need external binaries (gdb, lldb, clang-tidy). Proposed answer (carried from v1): yes, server-level `required_binaries` added to each manifest with external deps; same discovery engine handles both. Open: should `lldb` manifest's `command: mcphub` (internal bridge) bypass discovery entirely?
-3. **GUI "Active workspace" persistence**: per-machine OR per-GUI-session? Proposed answer (carried from v1): per-machine setting in the existing GUI preferences file (`gui-preferences.yaml`), persisted across GUI restarts.
-4. **Force-respawn semantics for Quarantined state**: should the GUI expose a `force: true` checkbox in the per-row drawer, or require a separate `mcphub daemon unquarantine` CLI step first? Open — affects API shape of `/api/daemon/respawn`.
+1. **GUI UX shape for `Active workspace` selector**: top-of-screen vs per-row dropdown? The recognition algorithm is correct either way (workspace is determined by registry lookup against the matched entry); the question is purely about discoverability. Proposed: top-of-screen with per-row badge showing "active: ws1" when current selection has a row for the language.
+2. **Auto-discovery scope for non-LSP servers**: `gdb`, `godbolt`, `perftools` need external binaries. Server-level `required_binaries` is added to each manifest with external deps; same discovery engine handles both. Open: should `lldb` manifest's `command: mcphub` (internal bridge) declare no required_binaries (natural — internal bridges have no external deps)?
+3. **GUI "Active workspace" persistence**: per-machine OR per-GUI-session? Proposed: per-machine setting in `gui-preferences.yaml`, persisted across GUI restarts.
+
+(v2's parked question about Quarantined-force semantics is now resolved in the body; v3 carries forward only the genuinely-open three.)
 
 ## Terms and Abbreviations
 
-- **LSP**: Language Server Protocol; a JSON-RPC protocol exposing IDE-grade code intelligence (find symbol, hover, references, completion, diagnostics) over a stdio/socket channel. Each language has its own implementation (clangd for C/C++, rust-analyzer for Rust, gopls for Go, etc.).
-- **mcp-language-server**: a Go binary (`/c/Users/dima_/go/bin/mcp-language-server`) that bridges an LSP server to the MCP protocol; mcphub spawns it with `--workspace <dir> --lsp <command>`.
-- **gopls-mcp**: alternative backend used by the Go language (the `gopls` binary supports an `mcp` subcommand that exposes MCP directly without the mcp-language-server bridge). See manifest line 33-37.
-- **Hub-proxy / lazy proxy**: a workspace-scoped mcphub daemon that listens on a port from the 9200-9299 pool and forwards MCP traffic to the heavy LSP backend (the actual `mcp-language-server` or `gopls` binary), spawning the backend lazily on the first tools/call.
+- **LSP**: Language Server Protocol; a JSON-RPC protocol exposing IDE-grade code intelligence over a stdio/socket channel.
+- **mcp-language-server**: Go binary installed via `go install` to `$GOPATH/bin/mcp-language-server`; bridges an LSP server to the MCP protocol.
+- **gopls-mcp**: alternative backend used by the Go language. The `gopls` binary supports an `mcp` subcommand exposing MCP directly without the mcp-language-server bridge. See manifest line 33-37.
+- **Hub-proxy / lazy proxy**: a workspace-scoped mcphub daemon listening on a port from the 9200-9299 pool and forwarding MCP traffic to the heavy LSP backend.
 - **Direct-stdio / legacy**: an MCP client config entry that invokes `mcp-language-server` or `gopls` directly via stdio, bypassing mcphub. The matrix surfaces these with a "legacy" badge.
-- **Workspace-scoped**: in mcphub manifest schema, a server kind where each (workspace, language) pair gets its own daemon. Contrast with `kind: global` where one daemon serves all callers.
-- **Overlay**: a user-editable layer that augments shipped manifests without modifying them. mcphub install/upgrade preserves overlays.
-- **Active workspace**: the workspace whose `mcphub register`-ed lazy proxies are addressed by Servers matrix actions in the GUI. Operator picks one at a time.
-- **`${parent_path}` token**: a placeholder in the overlay file's env values that expands at spawn time to the supervisor process's PATH. Lets the operator declare "prepend this to PATH" without manually concatenating the inherited PATH each time.
-- **wsKey**: the 8-character hex hash of a workspace path; used as the workspace component of LSP task names (`mcp-local-hub-lsp-<wsKey>-<lang>`).
-- **SupervisorDaemon.TaskName**: the canonical string identifier for a daemon in supervisor-intent.json, IPC commands, and overlay keys. Bare form (no leading backslash); canonicalSupervisorTaskName adds the `\` prefix only when calling Task Scheduler APIs.
-- **flock**: file-lock; POSIX `flock(2)` / Windows `LockFileEx` advisory lock used to serialize RMW on the overlay file across processes.
-- **CSRF**: Cross-Site Request Forgery; the per-session token issued at GUI bootstrap that mutation endpoints require in a header to prevent drive-by writes from a malicious browser tab.
+- **Workspace-scoped**: a server kind where each (workspace, language) pair gets its own daemon. Contrast with `kind: global`.
+- **Overlay**: a user-editable layer that augments shipped manifests without modifying them.
+- **Active workspace**: the workspace whose `mcphub register`-ed lazy proxies are addressed by Servers matrix actions in the GUI.
+- **`${parent_path}` token**: a placeholder in the overlay's env values that expands at spawn time to the supervisor process's PATH.
+- **wsKey**: the 8-character hex hash of a workspace path. Short form is the first 4 hex chars; ResolveEntryName uses short by default and falls back to full 8 on first-4 collision.
+- **ResolveEntryName**: `internal/api/register.go:722-747`; computes the client-config entry name with collision suffix when same-language multi-workspace forces it.
+- **SupervisorDaemon.TaskName**: the canonical identifier in supervisor-intent.json, IPC commands, and overlay keys. STORED WITH leading backslash per `internal/api/supervisor_intent.go:25`; `LookupOverlay` accepts either form and normalizes.
+- **flock**: POSIX `flock(2)` / Windows `LockFileEx` advisory lock; here serializes RMW on the overlay file across processes.
+- **CSRF**: Cross-Site Request Forgery; per-session token issued at GUI bootstrap; required header for mutation endpoints to prevent drive-by writes from a malicious browser tab.
+- **TOCTOU**: Time-Of-Check-To-Time-Of-Use race; the gap between a check (e.g., `Lstat`) and a subsequent use (e.g., `Open`) that an attacker can exploit. v3's read-side hardening uses open-first-then-stat-handle to close this window.
