@@ -73,6 +73,15 @@ type ServerManifest struct {
 	// manifest stays cleartext-free on disk. REJECTED if set with any
 	// transport other than "remote-http".
 	Headers map[string]string `yaml:"headers"`
+
+	// RequiredBinaries is free-form metadata listing the external
+	// binaries this server expects to find on PATH (e.g. "gdb",
+	// "clangd"). Consumed by the Servers-matrix LSP-bridge recognition
+	// surface; no Validate() logic is applied here so manifests can
+	// declare unrecognized binaries without breaking startup.
+	//
+	// Spec: docs/superpowers/specs/2026-05-19-servers-matrix-lsp-and-env-revamp-design.md §"Manifest schema additions".
+	RequiredBinaries []string `yaml:"required_binaries,omitempty"`
 }
 
 type DaemonSpec struct {
@@ -88,6 +97,13 @@ type LanguageSpec struct {
 	Transport  string   `yaml:"transport"` // "stdio" (default) | "http_listen" | "native_http"
 	LspCommand string   `yaml:"lsp_command"`
 	ExtraFlags []string `yaml:"extra_flags"`
+
+	// RequiredBinaries is free-form metadata listing the external
+	// binaries this language backend expects to find on PATH (e.g.
+	// "clangd", "pyright-langserver"). Symmetric with the server-level
+	// field; consumed by the Servers-matrix LSP-bridge recognition
+	// surface.
+	RequiredBinaries []string `yaml:"required_binaries,omitempty"`
 }
 
 type PortPool struct {

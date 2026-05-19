@@ -558,3 +558,61 @@ func TestValidate_RejectsURLOnNonRemoteHTTP(t *testing.T) {
 		})
 	}
 }
+
+// TestParseManifestRequiredBinariesServerLevel pins the Task 1.1
+// schema addition: a server-level `required_binaries: [...]` slice
+// must round-trip through YAML parse without tripping
+// `KnownFields(true)` strictness. The field is free-form metadata
+// (no Validate() logic), so the only assertion here is that the
+// slice value survives decode.
+//
+// Spec ref: docs/superpowers/specs/2026-05-19-servers-matrix-lsp-and-env-revamp-design.md §"Manifest schema additions".
+func TestParseManifestRequiredBinariesServerLevel(t *testing.T) {
+	yaml := `
+name: gdb
+kind: global
+transport: stdio-bridge
+command: npx
+required_binaries: [gdb]
+daemons:
+  - name: default
+    port: 9999
+`
+	m, err := ParseManifest(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v", err)
+	}
+	if len(m.RequiredBinaries) != 1 || m.RequiredBinaries[0] != "gdb" {
+		t.Errorf("RequiredBinaries = %v, want [gdb]", m.RequiredBinaries)
+	}
+}
+
+// TestParseManifestRequiredBinariesLanguageLevel pins the same
+// Task 1.1 schema addition for the per-language slot. Each
+// LanguageSpec gains its own optional `required_binaries:` for
+// LSP-bridge recognition (e.g. clangd, pyright-langserver).
+func TestParseManifestRequiredBinariesLanguageLevel(t *testing.T) {
+	yaml := `
+name: mcp-language-server
+kind: workspace-scoped
+transport: stdio-bridge
+command: mcp-language-server
+port_pool: {start: 9200, end: 9299}
+languages:
+  - name: cpp
+    backend: mcp-language-server
+    transport: stdio
+    lsp_command: clangd
+    required_binaries: [clangd]
+`
+	m, err := ParseManifest(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v", err)
+	}
+	if len(m.Languages) != 1 {
+		t.Fatalf("len(Languages) = %d, want 1", len(m.Languages))
+	}
+	if len(m.Languages[0].RequiredBinaries) != 1 || m.Languages[0].RequiredBinaries[0] != "clangd" {
+		t.Errorf("Languages[0].RequiredBinaries = %v, want [clangd]", m.Languages[0].RequiredBinaries)
+	}
+}
