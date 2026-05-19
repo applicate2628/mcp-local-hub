@@ -397,6 +397,91 @@ func TestProbeClientConfigPresence_SymlinkToRegularDefaultMode(t *testing.T) {
 	}
 }
 
+// TestProbeClientConfigPresence_SymlinkToRegularOptInMode pins the
+// MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK opt-in (introduced as the
+// solo-developer dotfile-symlink unblock for the Codex CLI case
+// documented in work-items/bugs/2026-05-19-codex-config-symlink-blocked-by-pr209.md).
+// With the env var set to "1", a symlink whose target is a regular
+// file classifies as "ok" so the Servers matrix renders the column
+// enabled; the secure-write pipeline (secureWriteWithOperatorOpt)
+// resolves the symlink to its target before calling the hardened
+// writer, so writes succeed against the real file. Strict-mode
+// (MCPHUB_REQUIRE_SINGLE_USER_HOME=1) overrides the opt-in inside
+// OperatorAllowsClientConfigSymlink; the next test covers that.
+func TestProbeClientConfigPresence_SymlinkToRegularOptInMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevation on Windows; the cross-platform Lstat probe is exercised by the POSIX path")
+	}
+	t.Setenv(RequireSingleUserHomeEnv, "")
+	t.Setenv(AllowClientConfigSymlinkEnv, "1")
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "real-config.json")
+	if err := os.WriteFile(target, []byte(`{"servers": {}}`), 0o600); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	link := filepath.Join(tmp, "mcp.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	out := probeClientConfigPresence(ScanOpts{VSCodeConfigPath: link})
+	if got := out["vscode"]; got != "ok" {
+		t.Errorf("symlink-to-regular with opt-in env classified as %q, want \"ok\"", got)
+	}
+}
+
+// TestProbeClientConfigPresence_SymlinkOptInStrictModeOverride pins
+// the strict-mode invariant: even when
+// MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK=1 is set, if
+// MCPHUB_REQUIRE_SINGLE_USER_HOME=1 is ALSO set then symlinks are
+// refused. This keeps the multi-tenant / corp-managed posture's
+// no-symlink invariant regardless of per-operator opt-ins; matches
+// the design intent documented at AllowClientConfigSymlinkEnv.
+func TestProbeClientConfigPresence_SymlinkOptInStrictModeOverride(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevation on Windows; the cross-platform Lstat probe is exercised by the POSIX path")
+	}
+	t.Setenv(RequireSingleUserHomeEnv, "1")
+	t.Setenv(AllowClientConfigSymlinkEnv, "1")
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "real-config.json")
+	if err := os.WriteFile(target, []byte(`{"servers": {}}`), 0o600); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	link := filepath.Join(tmp, "mcp.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	out := probeClientConfigPresence(ScanOpts{VSCodeConfigPath: link})
+	if got := out["vscode"]; got != "error" {
+		t.Errorf("symlink with opt-in env BUT strict mode set classified as %q, want \"error\" (strict overrides opt-in)", got)
+	}
+}
+
+// TestProbeClientConfigPresence_DanglingSymlinkOptInStillError pins
+// that the opt-in does NOT classify a dangling symlink as "ok". The
+// resolve uses os.Stat on the EvalSymlinks result and requires the
+// target to be a regular file; a dangling target fails both checks
+// and falls through to "error" so the operator sees the breakage.
+func TestProbeClientConfigPresence_DanglingSymlinkOptInStillError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevation on Windows; the cross-platform Lstat probe is exercised by the POSIX path")
+	}
+	t.Setenv(RequireSingleUserHomeEnv, "")
+	t.Setenv(AllowClientConfigSymlinkEnv, "1")
+	tmp := t.TempDir()
+	link := filepath.Join(tmp, "mcp.json")
+	if err := os.Symlink(filepath.Join(tmp, "does-not-exist.json"), link); err != nil {
+		t.Fatalf("create dangling symlink: %v", err)
+	}
+
+	out := probeClientConfigPresence(ScanOpts{VSCodeConfigPath: link})
+	if got := out["vscode"]; got != "error" {
+		t.Errorf("dangling symlink with opt-in env classified as %q, want \"error\" (target must be regular file)", got)
+	}
+}
+
 // TestProbeClientConfigPresence_SymlinkToRegularStrictMode pins the
 // strict-mode contract: even if the symlink target is a regular
 // file, strict mode refuses any symlink because the secure-write

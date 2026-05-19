@@ -98,16 +98,36 @@ func writeHubMcpStateFile(name string, payload []byte) error {
 	// verifyHubMcpStateDACLImpl (read path) and
 	// secureWriteWithOperatorOpt (client config write path).
 	//
-	// codex bot r6 P1 on PR #192: the relax must REFUSE write-
-	// capable parents — symmetric with the read-side gate added
-	// in r3 (POSIX) + r4 (Windows). Without this gate, a write-
-	// capable parent would accept the WRITE here but the
-	// subsequent READ would reject (TOCTOU swap defense). That
-	// asymmetry would silently publish state files that the hub
-	// can never read back. checkStateDirParentWriteSafe runs the
-	// narrower write-only check; on failure we surface the same
-	// "TOCTOU swap risk" error as the read side instead of
-	// falling through.
+	// Post-inode-anchored-read symmetry (security-reviewer F1 on
+	// the read-side fix in this commit; see
+	// work-items/bugs/2026-05-19-state-file-verify-rejects-write-broadened-parent-dacl.md
+	// for background): the read side now tolerates write-broadened
+	// parents under default-relax because the read is bound to the
+	// parent-handle inode (windows.ReadFile / unix.Read on the
+	// handle/fd returned by ntOpenRelative / openat, not a fresh
+	// path resolution). The write side gets the symmetric treatment
+	// here for two reasons:
+	//
+	//   1. The hardened write pipeline
+	//      (secureWriteClientConfigSkipParentGate) installs the
+	//      per-file restrictive DACL on the file HANDLE at
+	//      temp-create time, BEFORE any bytes hit disk. A
+	//      parent-FILE_DELETE_CHILD attacker can delete the temp
+	//      entry but cannot read or modify the in-progress write.
+	//   2. The publish step is a dirHandle-relative atomic rename
+	//      (FILE_RENAME_REPLACE_IF_EXISTS | FILE_RENAME_POSIX_SEMANTICS
+	//      anchored to the verified parent handle on Windows;
+	//      handle-bound rename on POSIX), so an attacker swapping
+	//      the parent between handle-open and rename cannot
+	//      redirect the publish.
+	//
+	// The previous code re-rejected write-capable parents here to
+	// avoid the asymmetry of "publish a file the hub can't read
+	// back" — that asymmetry no longer exists post-inode-anchored
+	// read, and keeping the rejection here would strand operators
+	// in a half-functional state (reads succeed, writes fail) on
+	// the very hosts the read-side relaxation was meant to
+	// unblock.
 	if err := SecureWriteClientConfig(target, payload); err != nil {
 		if !errors.Is(err, ErrSecureWriteParentInsecure) {
 			return fmt.Errorf("hub-mcp state write %s: %w", name, err)
@@ -116,21 +136,20 @@ func writeHubMcpStateFile(name string, payload []byte) error {
 			return fmt.Errorf("hub-mcp state write %s: %w; %s=1 is set, so the strict parent-dir gate is enforced (unset that env var, or tighten the parent's DACL to remove the offending principal, to proceed)",
 				name, err, RequireSingleUserHomeEnv)
 		}
-		// Narrow re-check: the read side rejects write-capable
-		// parents (TOCTOU swap risk). The write side must do the
-		// same so the asymmetry between write and read can't strand
-		// state files in unreadable directories.
+		// Best-effort audit log; never block the write on log
+		// failure. Distinguish read-only vs WRITE/DAC-edit
+		// broadening in the reason so operators can audit the
+		// more-permissive case.
+		reason := "default-relax-on-solo-host (parent grants read-only access to non-allowlisted principal)"
 		if wsErr := checkStateDirParentWriteSafe(dir); wsErr != nil {
-			return fmt.Errorf("hub-mcp state write %s: parent %s grants write/delete access to non-allowlisted principal (TOCTOU swap risk; the read side would refuse this parent regardless of mode): %w",
-				name, dir, wsErr)
+			reason = "default-relax-on-solo-host (parent grants WRITE/DAC-edit access; safe under inode-anchored read+publish because the per-file DACL is handle-bound at temp-create and the atomic rename is dirHandle-relative, so an attacker swapping the directory entry cannot redirect the publish or read the in-progress bytes)"
 		}
-		// Best-effort audit log; never block the write on log failure.
 		_ = LogHubMcpEvent("warn", "hub-mcp-state-write-unhardened-parent-fallback", map[string]any{
 			"path":   target,
 			"parent": dir,
-			"reason": "default-relax-on-solo-host (parent grants only read/exec to non-allowlisted principal; write/delete bits cleared)",
+			"reason": reason,
 			"err":    err.Error(),
-			"note":   "per-file DACL/mode still applied at temp-create time (handle-bound), so the published file is owner-only regardless of parent DACL",
+			"note":   "per-file DACL/mode applied at temp-create time (handle-bound); rename is dirHandle-relative; published file is owner-only regardless of parent DACL",
 		})
 		if err := secureWriteClientConfigSkipParentGate(target, payload); err != nil {
 			return fmt.Errorf("hub-mcp state write %s (relax lane): %w", name, err)
@@ -139,15 +158,36 @@ func writeHubMcpStateFile(name string, payload []byte) error {
 	return nil
 }
 
-// readHubMcpStateFile gates the read on VerifyHubMcpStateDACL first
-// (handle-bound uid/mode/DACL check that refuses symlinks, foreign
-// owners, and non-allowlist read ACEs) and then loads bytes. The
-// extra os.ReadFile call after the verify keeps the existing function
-// surface flat — VerifyHubMcpStateDACL closes its handle on return,
-// so a tiny race window exists between verify and read on hostile
-// hosts. The per-user state-dir DACL/mode is the broader trust
-// boundary that protects that window; see spec §"Why every step uses
-// dirHandle-relative ops" for the wider analysis.
+// maxStateFileBytes caps a single state-file read at 1 MiB. The
+// hub-mcp state files (tokens.json, control.token, endpoint.json,
+// the various supervisor-*.json files, managed-entries.json) all
+// fit comfortably under a few KiB in practice — managed-entries
+// scales with the daemon count and was sized to <100 KiB even on
+// pathological setups. 1 MiB is the OOM-protection ceiling: an
+// attacker who replaces the file with a multi-GiB payload cannot
+// exhaust process memory before the read errors out.
+const maxStateFileBytes = 1 << 20
+
+// readHubMcpStateFile reads a hub-mcp state file via the inode-
+// anchored verify+read pipeline (hub_mcp_state_read_inode_{windows,posix}.go).
+// The verify and read steps share the same parent-directory handle
+// / fd so a co-resident principal cannot replace the file between
+// our check and our read — the read is bound to the verified inode
+// regardless of subsequent directory-entry changes.
+//
+// Pre-v0.4.6 this function called VerifyHubMcpStateDACL (which
+// closed its handle on return) and then performed a path-based
+// os.ReadFile, leaving a small TOCTOU swap window on hosts whose
+// parent directory granted write/delete/DAC-edit access to a
+// non-allowlisted SID. The Windows leg's verifyHubMcpStateDACLImpl
+// compensated by refusing such parent DACLs even in default-relax
+// mode (hub_mcp_state_dacl_windows.go:143-145), which blocked
+// demigrate on solo-developer hosts with CodexSandboxUsers or
+// orphan AD SID ACEs on %LOCALAPPDATA% — see
+// work-items/bugs/2026-05-19-state-file-verify-rejects-write-broadened-parent-dacl.md.
+// The inode-anchored read closes the swap window at the kernel
+// level, so the parent-DACL gate can safely relax under
+// default-relax (strict mode is unchanged).
 func readHubMcpStateFile(name string) ([]byte, error) {
 	if err := validateStateFileName(name); err != nil {
 		return nil, err
@@ -157,10 +197,7 @@ func readHubMcpStateFile(name string) ([]byte, error) {
 		return nil, err
 	}
 	target := filepath.Join(dir, name)
-	if err := VerifyHubMcpStateDACL(target); err != nil {
-		return nil, fmt.Errorf("hub-mcp state verify %s: %w", name, err)
-	}
-	raw, err := os.ReadFile(target)
+	raw, err := readStateFileInodeAnchored(target)
 	if err != nil {
 		return nil, fmt.Errorf("hub-mcp state read %s: %w", name, err)
 	}
