@@ -13,14 +13,13 @@ package api
 
 import (
 	"fmt"
-	"os"
 
 	"golang.org/x/sys/unix"
 )
 
 // checkStateDirParentWriteSafe stat-fd's parent and refuses if the
-// parent owner is not the current uid OR if group/world write bits
-// (0o022) are set. Read+exec bits (0o055) are tolerated.
+// parent grants group/world write bits (0o022). Read+exec bits
+// (0o055) are tolerated.
 // Symmetric with the read-side gate in verifyHubMcpStateDACLImpl
 // (POSIX leg).
 func checkStateDirParentWriteSafe(parentDir string) error {
@@ -32,9 +31,6 @@ func checkStateDirParentWriteSafe(parentDir string) error {
 	var pst unix.Stat_t
 	if err := unix.Fstat(pfd, &pst); err != nil {
 		return fmt.Errorf("fstat parent %s: %w", parentDir, err)
-	}
-	if int(pst.Uid) != os.Getuid() {
-		return fmt.Errorf("parent uid %d != current uid %d (TOCTOU swap risk)", pst.Uid, os.Getuid())
 	}
 	pmode := uint32(pst.Mode) & 0o777
 	if pmode&0o022 != 0 {

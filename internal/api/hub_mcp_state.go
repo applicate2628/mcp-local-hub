@@ -136,14 +136,19 @@ func writeHubMcpStateFile(name string, payload []byte) error {
 			return fmt.Errorf("hub-mcp state write %s: %w; %s=1 is set, so the strict parent-dir gate is enforced (unset that env var, or tighten the parent's DACL to remove the offending principal, to proceed)",
 				name, err, RequireSingleUserHomeEnv)
 		}
+		// Default-relax only permits write-broadened parent
+		// directories. If the narrow write-safe check passes, the
+		// parent failure from SecureWriteClientConfig is attributable
+		// to a stricter invariant (for example owner/allowlist
+		// mismatch) and must remain fail-closed.
+		if wsErr := checkStateDirParentWriteSafe(dir); wsErr == nil {
+			return fmt.Errorf("hub-mcp state write %s: %w", name, err)
+		}
 		// Best-effort audit log; never block the write on log
 		// failure. Distinguish read-only vs WRITE/DAC-edit
 		// broadening in the reason so operators can audit the
 		// more-permissive case.
-		reason := "default-relax-on-solo-host (parent grants read-only access to non-allowlisted principal)"
-		if wsErr := checkStateDirParentWriteSafe(dir); wsErr != nil {
-			reason = "default-relax-on-solo-host (parent grants WRITE/DAC-edit access; safe under inode-anchored read+publish because the per-file DACL is handle-bound at temp-create and the atomic rename is dirHandle-relative, so an attacker swapping the directory entry cannot redirect the publish or read the in-progress bytes)"
-		}
+		reason := "default-relax-on-solo-host (parent grants WRITE/DAC-edit access; safe under inode-anchored read+publish because the per-file DACL is handle-bound at temp-create and the atomic rename is dirHandle-relative, so an attacker swapping the directory entry cannot redirect the publish or read the in-progress bytes)"
 		_ = LogHubMcpEvent("warn", "hub-mcp-state-write-unhardened-parent-fallback", map[string]any{
 			"path":   target,
 			"parent": dir,
