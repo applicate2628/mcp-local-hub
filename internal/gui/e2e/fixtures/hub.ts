@@ -54,6 +54,12 @@ export const test = base.extend<{ hub: HubHandle }>({
       // 13 installed daemons renders 13 Dashboard cards and empty-state
       // assertions fail locally even though CI passes.
       MCPHUB_E2E_SCHEDULER: "none",
+      // PR #212: GUI now spawns a supervisor child by default. Tests
+      // run under a temp HOME with no supervisor-intent.json, so the
+      // spawn would always time out 15s waiting for IPC bind that
+      // can't happen. Suppress the spawn block parallel to the
+      // scheduler seam above.
+      MCPHUB_E2E_SUPERVISOR: "none",
     };
     const child = spawn(
       binPath,

@@ -34,7 +34,7 @@ func newAutostartCmd() *cobra.Command {
 		Use:   "autostart {enable|disable|status}",
 		Short: "Manage supervisor autostart at logon",
 		Long: `mcphub autostart installs (or removes) an OS-native shim that
-re-runs ` + "`mcphub supervise [--strict-mode]`" + ` whenever the current user
+re-runs ` + "`mcphub gui [--strict-mode]`" + ` whenever the current user
 signs in.
 
   - Windows: Task Scheduler entry  \mcp-local-hub-supervisor
@@ -64,7 +64,7 @@ func newAutostartEnableCmd() *cobra.Command {
 		Use:   "enable",
 		Short: "Install or replace the autostart shim",
 		Long: `Installs (or replaces) the autostart shim for the current OS. The
-shim re-runs ` + "`mcphub supervise [--strict-mode]`" + ` at each user logon.
+shim re-runs ` + "`mcphub gui [--strict-mode]`" + ` at each user logon.
 
 Idempotent — re-running with the same flags is safe and re-writes the
 on-disk shim verbatim. Re-running with different flags overwrites the

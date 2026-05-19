@@ -49,6 +49,112 @@ func TestSupervisorIntent_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestSupervisorIntent_FiltersLegacyWatchdogOneshot(t *testing.T) {
+	// v0.4.x->v0.5.0 migration captured the `\mcp-local-hub-watchdog`
+	// scheduled task into supervisor-intent.json as a daemon
+	// descriptor. The watchdog's `--once` argv makes it exit
+	// immediately, which combined with the supervisor's reconcile
+	// respawn produces a wasteful watchdog spawn loop AND leaves a
+	// duplicate "watchdog" row in GUI Dashboard alongside the legacy
+	// Task Scheduler entry. ReadSupervisorIntent post-parses the
+	// loaded file to strip such one-shot entries so existing broken
+	// intent files self-heal on next read.
+	dir := hardenedTempDir(t)
+	path := filepath.Join(dir, "supervisor-intent.json")
+
+	on := SupervisorIntentFile{
+		Version:   1,
+		UpdatedAt: "2026-05-18T00:00:00.000000000Z",
+		Daemons: []SupervisorDaemon{
+			{
+				TaskName: `\mcp-local-hub-memory-default`,
+				Server:   "memory",
+				Daemon:   "default",
+				Command:  "mcphub",
+				Args:     []string{"daemon", "--server", "memory"},
+				Port:     9128,
+			},
+			{
+				TaskName: `\mcp-local-hub-watchdog`,
+				Command:  "mcphub",
+				Args:     []string{"watchdog", "--once"},
+			},
+			{
+				TaskName: `\mcp-local-hub-time-default`,
+				Server:   "time",
+				Daemon:   "default",
+				Command:  "mcphub",
+				Args:     []string{"daemon", "--server", "time"},
+				Port:     9129,
+			},
+		},
+	}
+	if err := WriteSupervisorIntent(path, &on); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err := ReadSupervisorIntent(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if len(got.Daemons) != 2 {
+		names := make([]string, 0, len(got.Daemons))
+		for _, d := range got.Daemons {
+			names = append(names, d.TaskName)
+		}
+		t.Fatalf("expected 2 daemons after watchdog filter, got %d: %v", len(got.Daemons), names)
+	}
+	for _, d := range got.Daemons {
+		if d.TaskName == `\mcp-local-hub-watchdog` {
+			t.Fatalf("watchdog entry leaked past filter: %+v", d)
+		}
+	}
+	if got.Daemons[0].TaskName != `\mcp-local-hub-memory-default` ||
+		got.Daemons[1].TaskName != `\mcp-local-hub-time-default` {
+		t.Fatalf("daemon order not preserved across filter: %+v", got.Daemons)
+	}
+}
+
+// TestSupervisorIntent_FilterStrictWatchdogOnceOnly verifies the
+// tightened filter predicate at supervisor_intent.go:isLegacyOneshotDaemon —
+// only `["watchdog", "--once"]` (the exact migration artifact) is
+// stripped. Defensive: a future long-lived `mcphub watchdog serve`
+// daemon variant must NOT be filtered away by a too-broad match. PR
+// #212 r2 code-review finding 5.
+func TestSupervisorIntent_FilterStrictWatchdogOnceOnly(t *testing.T) {
+	dir := hardenedTempDir(t)
+	path := filepath.Join(dir, "supervisor-intent.json")
+
+	on := SupervisorIntentFile{
+		Version:   1,
+		UpdatedAt: "2026-05-18T00:00:00.000000000Z",
+		Daemons: []SupervisorDaemon{
+			{TaskName: `\mcp-local-hub-watchdog`, Command: "mcphub", Args: []string{"watchdog", "--once"}},        // FILTERED
+			{TaskName: `\mcp-local-hub-watchdog-bare`, Command: "mcphub", Args: []string{"watchdog"}},             // KEPT — not --once
+			{TaskName: `\mcp-local-hub-watchdog-serve`, Command: "mcphub", Args: []string{"watchdog", "serve"}},   // KEPT — future variant
+			{TaskName: `\mcp-local-hub-watchdog-empty`, Command: "mcphub", Args: []string{}},                       // KEPT — no args
+		},
+	}
+	if err := WriteSupervisorIntent(path, &on); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err := ReadSupervisorIntent(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if len(got.Daemons) != 3 {
+		names := make([]string, 0, len(got.Daemons))
+		for _, d := range got.Daemons {
+			names = append(names, d.TaskName)
+		}
+		t.Fatalf("expected 3 daemons (only `watchdog --once` filtered), got %d: %v", len(got.Daemons), names)
+	}
+	for _, d := range got.Daemons {
+		if d.TaskName == `\mcp-local-hub-watchdog` {
+			t.Errorf("watchdog --once entry should be filtered, got %+v", d)
+		}
+	}
+}
+
 func TestSupervisorIntent_RejectsUnknownFields(t *testing.T) {
 	dir := hardenedTempDir(t)
 	path := filepath.Join(dir, "supervisor-intent.json")

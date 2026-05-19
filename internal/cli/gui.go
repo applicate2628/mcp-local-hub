@@ -69,13 +69,14 @@ func inputIsTerminal(r io.Reader) bool {
 
 func newGuiCmdReal() *cobra.Command {
 	var (
-		port      int
-		noBrowser bool
-		noTray    bool
-		force     bool
-		kill      bool
-		yes       bool
-		resetPort bool
+		port       int
+		noBrowser  bool
+		noTray     bool
+		force      bool
+		kill       bool
+		yes        bool
+		resetPort  bool
+		strictMode bool
 	)
 	c := &cobra.Command{
 		Use:   "gui",
@@ -233,7 +234,7 @@ activates the first window and exits 0.`,
 							// Take-over succeeded: continue into Phase B
 							// with the freshly-acquired lock. Helper
 							// extraction (no goto) keeps repo style intact.
-							return startGuiServer(cmd, ctx, stop, newLock, port, noBrowser, noTray, pidportPath)
+							return startGuiServer(cmd, ctx, stop, newLock, port, noBrowser, noTray, strictMode, pidportPath)
 						}
 						return forceExit(exitCode)
 					}
@@ -263,7 +264,7 @@ activates the first window and exits 0.`,
 				fmt.Fprintln(cmd.OutOrStdout(), "activated existing mcphub gui")
 				return nil
 			}
-			return startGuiServer(cmd, ctx, stop, lock, port, noBrowser, noTray, pidportPath)
+			return startGuiServer(cmd, ctx, stop, lock, port, noBrowser, noTray, strictMode, pidportPath)
 		},
 	}
 	c.Flags().IntVar(&port, "port", 0, "TCP port on 127.0.0.1 (0 = auto-pick from ephemeral)")
@@ -273,6 +274,7 @@ activates the first window and exits 0.`,
 	c.Flags().BoolVar(&kill, "kill", false, "with --force: kill the recorded PID (image/argv/start-time gate); SIGKILL/TerminateProcess. The kernel releases the flock as a side effect.")
 	c.Flags().BoolVar(&yes, "yes", false, "with --force --kill or --reset-port: skip the confirmation prompt (required in non-interactive shells).")
 	c.Flags().BoolVar(&resetPort, "reset-port", false, "discard the persistent hub-mcp port (instance_id preserved) and emit credential-rotation guidance — does NOT start the server")
+	c.Flags().BoolVar(&strictMode, "strict-mode", false, "pass --strict-mode through to the supervisor process the GUI spawns (corp-managed Windows hosts; see CLAUDE.md \"Hardened state-file writes\")")
 	_ = c.Flags().MarkHidden("force")
 	_ = c.Flags().MarkHidden("kill")
 	_ = c.Flags().MarkHidden("yes")
@@ -288,7 +290,7 @@ activates the first window and exits 0.`,
 // Helper-extraction approach (preferred over goto + label) keeps the
 // repo's existing control-flow style. See plan task 4 §"alternative".
 func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.CancelFunc,
-	lock *gui.SingleInstanceLock, port int, noBrowser, noTray bool, pidportPath string) error {
+	lock *gui.SingleInstanceLock, port int, noBrowser, noTray, strictMode bool, pidportPath string) error {
 	defer lock.Release()
 
 	// Phase B: start the HTTP server. Server.Start binds 127.0.0.1
@@ -393,6 +395,68 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+
+	// "GUI owns supervisor lifecycle" — the GUI process is the operator-
+	// visible mcphub. When GUI is running (tray icon present), the
+	// supervisor (and its 14 daemon children) must also be running.
+	// When GUI exits, the supervisor exits with it. This contract
+	// matches standard tray-app expectations (Steam, Discord, Docker
+	// Desktop): one process tree, one lifecycle, one tray indicator.
+	//
+	// ensureSupervisorRunning is fail-soft — if the spawn/adopt probe
+	// fails, GUI keeps running so the operator can investigate via Logs
+	// screen and Dashboard banner; we don't want a transient IPC hiccup
+	// to lock the operator out of the recovery surface.
+	//
+	// E2E test seam: MCPHUB_E2E_SUPERVISOR=none suppresses the entire
+	// spawn block so Playwright fixtures (which spawn `mcphub gui`
+	// per-test under a temp HOME) don't time out 15s on every test
+	// waiting for IPC bind that will never happen — they have no
+	// supervisor-intent.json in the temp dir. Mirror of the existing
+	// MCPHUB_E2E_SCHEDULER=none pattern at status_enrich.go.
+	//
+	// PR #212 r5 silent-failure-hunt finding 4: emit a visible
+	// warning when the seam fires so a production operator who
+	// accidentally inherits the env var from a CI shell can spot
+	// the suppression instead of seeing a permanently-empty
+	// Dashboard with no diagnostic.
+	if os.Getenv("MCPHUB_E2E_SUPERVISOR") == "none" {
+		fmt.Fprintln(cmd.OutOrStderr(),
+			"warning: MCPHUB_E2E_SUPERVISOR=none is set — supervisor spawn suppressed (test seam; not for production use)")
+		return <-errCh
+	}
+	supervisorBin, binErr := resolveMCPHubBinary()
+	if binErr != nil {
+		fmt.Fprintf(cmd.OutOrStderr(), "warning: resolve mcphub binary for supervisor spawn: %v\n", binErr)
+	}
+	var supervisor *supervisorOwner
+	if supervisorBin != "" {
+		var spawnErr error
+		supervisor, spawnErr = ensureSupervisorRunning(ctx, supervisorBin, strictMode, 15*time.Second)
+		if spawnErr != nil {
+			fmt.Fprintf(cmd.OutOrStderr(), "warning: supervisor: %v\n", spawnErr)
+		} else if supervisor.Spawned() {
+			fmt.Fprintf(cmd.OutOrStdout(), "supervisor: spawned PID %d (GUI owns lifecycle)\n", supervisor.Pid())
+		} else {
+			fmt.Fprintln(cmd.OutOrStdout(), "supervisor: adopted (running externally)")
+		}
+	}
+	// This defer is registered after the lock.Release defer at the
+	// top of startGuiServer. Under Go's LIFO defer stack, this
+	// supervisor-shutdown defer therefore runs FIRST on function
+	// return — supervisor stops before the single-instance lock is
+	// released, so the next gui invocation cannot race a still-
+	// shutting-down supervisor.
+	defer func() {
+		if supervisor == nil {
+			return
+		}
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := supervisor.Stop(shutdownCtx, 5000); err != nil {
+			fmt.Fprintf(cmd.OutOrStderr(), "supervisor shutdown: %v\n", err)
+		}
+	}()
 
 	if !noBrowser {
 		url := fmt.Sprintf("http://127.0.0.1:%d/", s.Port())

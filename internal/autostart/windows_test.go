@@ -110,8 +110,11 @@ func TestWindowsBackend_EnableCreatesTask(t *testing.T) {
 	if spec.Command != `C:\mcp\mcphub.exe` {
 		t.Errorf("Create.Command = %q, want %q", spec.Command, `C:\mcp\mcphub.exe`)
 	}
-	if len(spec.Args) != 1 || spec.Args[0] != "supervise" {
-		t.Errorf("Create.Args = %v, want [supervise]", spec.Args)
+	// As of 2026-05-18, the autostart entry launches `mcphub gui`
+	// instead of `mcphub supervise` — GUI process owns supervisor
+	// lifecycle (see internal/cli/gui_supervisor_owner.go).
+	if len(spec.Args) != 1 || spec.Args[0] != "gui" {
+		t.Errorf("Create.Args = %v, want [gui]", spec.Args)
 	}
 }
 
@@ -130,7 +133,9 @@ func TestWindowsBackend_EnableStrictModeAddsFlag(t *testing.T) {
 		t.Fatalf("Create called %d times, want 1", len(f.createCalls))
 	}
 	got := f.createCalls[0].Args
-	want := []string{"supervise", "--strict-mode"}
+	// As of 2026-05-18, autostart launches `mcphub gui --strict-mode`
+	// (GUI owns supervisor lifecycle; --strict-mode threads through).
+	want := []string{"gui", "--strict-mode"}
 	if len(got) != len(want) {
 		t.Fatalf("Create.Args = %v, want %v", got, want)
 	}
@@ -156,8 +161,19 @@ func TestWindowsBackend_EnableReplacesExistingTask(t *testing.T) {
 	if err := b.Enable(Options{MCPHubPath: `C:\mcp\mcphub.exe`}); err != nil {
 		t.Fatalf("Enable: %v", err)
 	}
-	if len(f.deleteCalls) != 1 || f.deleteCalls[0] != WindowsTaskName {
-		t.Errorf("Delete calls = %v, want [%q]", f.deleteCalls, WindowsTaskName)
+	// As of 2026-05-18, Enable also deletes the legacy v0.4.x watchdog
+	// task as part of the v0.5.0 cleanup. Expect both Delete calls in
+	// the recorded order: supervisor first (pre-Create idempotence),
+	// watchdog second (post-Create cleanup).
+	const legacyWatchdogTaskName = `\mcp-local-hub-watchdog`
+	wantDeletes := []string{WindowsTaskName, legacyWatchdogTaskName}
+	if len(f.deleteCalls) != len(wantDeletes) {
+		t.Fatalf("Delete calls = %v, want %v", f.deleteCalls, wantDeletes)
+	}
+	for i, want := range wantDeletes {
+		if f.deleteCalls[i] != want {
+			t.Errorf("Delete[%d] = %q, want %q", i, f.deleteCalls[i], want)
+		}
 	}
 	if len(f.createCalls) != 1 {
 		t.Errorf("Create calls = %d, want 1", len(f.createCalls))
@@ -306,6 +322,38 @@ func TestWindowsBackend_StatusDrifted_StrictModeUnwanted(t *testing.T) {
 	}
 }
 
+// TestWindowsBackend_StatusDrifted_LegacySupervisorSubcommand asserts
+// that a pre-PR #212 autostart entry installed with
+// `<Arguments>supervise</Arguments>` is reported as drifted under
+// the post-PR #212 default (Args=["gui"]). Without the subcommand
+// drift check in detectDrift, the legacy install would silently
+// satisfy `enabled-running` and the operator would miss the cue to
+// re-run `mcphub autostart enable`. PR #212 r4 finding 2.
+func TestWindowsBackend_StatusDrifted_LegacySupervisorSubcommand(t *testing.T) {
+	const legacySuperviseXML = "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\n" +
+		"<Task><Actions><Exec>\n" +
+		"  <Command>C:\\mcp\\mcphub.exe</Command>\n" +
+		"  <Arguments>supervise</Arguments>\n" +
+		"</Exec></Actions></Task>\n"
+	f := &fakeScheduler{
+		statusReturn: scheduler.TaskStatus{Name: WindowsTaskName, State: "Running"},
+		xmlReturn:    []byte(legacySuperviseXML),
+	}
+	withFakeScheduler(t, f)
+
+	b, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	got, err := b.Status(Options{MCPHubPath: `C:\mcp\mcphub.exe`})
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if got != StateDrifted {
+		t.Errorf("Status = %s, want %s (Args=[supervise] should be drifted under Args=[gui] default)", got, StateDrifted)
+	}
+}
+
 func TestWindowsBackend_StatusDrifted_CommandPath(t *testing.T) {
 	// Recorded XML points at an older binary path; caller's MCPHubPath
 	// disagrees → drift.
@@ -380,10 +428,16 @@ func TestWindowsBackend_StatusSchedulerFactoryError(t *testing.T) {
 // our drift detector parses — just <Command> and <Arguments>. The
 // real schtasks /Query /XML output is larger, but the detector only
 // inspects these two fields.
+//
+// Emits `gui` / `gui --strict-mode` to match the current autostart
+// contract (PR #212: GUI owns supervisor lifecycle). Tests that
+// deliberately need a pre-PR #212 `supervise` baseline (e.g. to
+// exercise the subcommand-drift detection path) construct the XML
+// inline rather than threading a third parameter through this helper.
 func buildMatchingXML(command string, strictMode bool) []byte {
-	args := "supervise"
+	args := "gui"
 	if strictMode {
-		args = "supervise --strict-mode"
+		args = "gui --strict-mode"
 	}
 	return []byte(fmt.Sprintf(
 		"<?xml version=\"1.0\" encoding=\"UTF-16\"?>\n"+

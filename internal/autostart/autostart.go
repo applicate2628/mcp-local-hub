@@ -1,9 +1,23 @@
-// Package autostart manages the OS-level "run mcphub supervise at user
-// logon" shim across Windows, Linux, and macOS (plan §2531-2541,
-// spec §Q8).
+// Package autostart manages the OS-level user-logon shim across
+// Windows, Linux, and macOS (plan §2531-2541, spec §Q8).
 //
-// The three backends each install a self-contained shim that re-runs
-// `mcphub supervise [--strict-mode]` whenever the user signs in:
+// Per-OS subcommand divergence (PR #212):
+//
+//   - Windows  → `mcphub gui [--strict-mode]`. The GUI process owns
+//     supervisor lifecycle ("tray icon = mcphub running" contract);
+//     GUI adopts an existing supervisor via IPC probe or spawns one
+//     as a detached child. Tray icon = mcphub running.
+//
+//   - Linux    → `mcphub supervise [--strict-mode]`. Linux is beta
+//     tier with no functional tray surface, so the GUI ownership
+//     pattern doesn't apply; the autostart entry launches the
+//     supervisor directly. Revisit when a Linux tray ships.
+//
+//   - macOS    → `mcphub supervise [--strict-mode]`. macOS is preview
+//     tier with build-only support (no kqueue child watcher); same
+//     reasoning as Linux until a macOS tray ships.
+//
+// Per-OS shim locations:
 //
 //   - Windows  → Task Scheduler entry `\mcp-local-hub-supervisor` with
 //     a LogonTrigger, owned by the current user.
