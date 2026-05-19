@@ -135,6 +135,58 @@ describe("collectLspRows", () => {
     expect(rustBeta.clientPresence["codex-cli"]?.endpoint).toBe("http://127.0.0.1:9202");
   });
 
+  it("in ALL-mode with multiple workspaces for one language, taskName is null + ambiguousOwners lists all candidates (bot P2.7)", () => {
+    const wsEntries: WorkspaceEntryDTO[] = [
+      {
+        workspace_key: "beta",
+        workspace_path: "/proj/beta",
+        language: "rust",
+        backend: "mcp-language-server",
+        port: 9202,
+        task_name: "\\mcp-local-hub-lsp-beta-rust",
+        client_entries: { "codex-cli": "mcp-language-server-rust-beta" },
+      },
+      {
+        workspace_key: "alpha",
+        workspace_path: "/proj/alpha",
+        language: "rust",
+        backend: "mcp-language-server",
+        port: 9201,
+        task_name: "\\mcp-local-hub-lsp-alpha-rust",
+        client_entries: { "codex-cli": "mcp-language-server-rust-alpha" },
+      },
+    ];
+    const rows = collectLspRows(null, wsEntries, "");
+    const rust = rows.find((r) => r.language === "rust")!;
+    // Pre-fix: rust.taskName would silently equal one of the two
+    // workspaces' task_name (whichever filteredWs[0] resolved to), and
+    // Edit env could send the wrong workspace's task to /api/daemon/env.
+    // Fix: taskName=null, ambiguousOwners enumerates the candidates so
+    // the UI can prompt the operator to narrow via WorkspaceSelector.
+    expect(rust.taskName).toBeNull();
+    expect(rust.workspaceKey).toBe("");
+    expect(rust.ambiguousOwners).toEqual(["alpha", "beta"]); // sorted
+  });
+
+  it("ALL-mode with EXACTLY ONE workspace for a language sets taskName and leaves ambiguousOwners undefined", () => {
+    const wsEntries: WorkspaceEntryDTO[] = [
+      {
+        workspace_key: "default",
+        workspace_path: "/proj",
+        language: "rust",
+        backend: "mcp-language-server",
+        port: 9201,
+        task_name: "\\mcp-local-hub-lsp-default-rust",
+        client_entries: {},
+      },
+    ];
+    const rows = collectLspRows(null, wsEntries, "");
+    const rust = rows.find((r) => r.language === "rust")!;
+    expect(rust.taskName).toBe("\\mcp-local-hub-lsp-default-rust");
+    expect(rust.workspaceKey).toBe("default");
+    expect(rust.ambiguousOwners).toBeUndefined();
+  });
+
   it("parses vscode-css and vscode-html correctly (longest-prefix beats 'vscode')", () => {
     const scan: ScanResult = {
       at: "2026-05-20T00:00:00Z",

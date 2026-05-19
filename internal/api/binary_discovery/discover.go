@@ -12,9 +12,12 @@
 //   - On Windows, each candidate name is probed as "<bin>.exe" first and
 //     then "<bin>" — many tools (python, node) ship as ".exe" on Windows,
 //     but the manifest writer uses the bare stem.
-//   - Environment-variable references (%USERPROFILE%, %LOCALAPPDATA%,
-//     $HOME, etc.) inside hint strings are expanded via os.ExpandEnv
-//     before each Stat — see DefaultHints() for the per-OS hint catalogue.
+//   - Environment-variable references inside hint strings are expanded
+//     via `os.ExpandEnv` before each Stat. `os.ExpandEnv` understands
+//     `$VAR` and `${VAR}` syntax ONLY — Windows-style `%VAR%`
+//     placeholders are left as literals (see hints_windows.go for the
+//     correct `${USERPROFILE}` / `${LOCALAPPDATA}` spelling). The
+//     per-OS hint catalogue lives in DefaultHints().
 //   - ctx.Err() is consulted between binaries so a cancelled context
 //     terminates discovery promptly.
 package binary_discovery

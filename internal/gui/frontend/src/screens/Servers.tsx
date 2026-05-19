@@ -889,6 +889,7 @@ function LspMatrix(props: {
           {rows.map((row) => {
             const isOpen = openDrawerFor?.language === row.language && openDrawerFor?.taskName === row.taskName;
             const registered = row.taskName !== null;
+            const ambiguous = (row.ambiguousOwners?.length ?? 0) > 1;
             return (
               <tr
                 key={`${row.language}-${row.workspaceKey}`}
@@ -896,12 +897,22 @@ function LspMatrix(props: {
                 data-testid={`lsp-row-${row.language}`}
                 data-registered={registered ? "true" : "false"}
                 data-workspace={row.workspaceKey || undefined}
+                data-ambiguous={ambiguous ? "true" : undefined}
               >
                 <td>
                   <strong>{row.language}</strong>
                   {row.workspaceKey && (
                     <span class="lsp-row-workspace" style="color:#555; font-size:0.9em; margin-left:6px">
                       ({row.workspaceKey})
+                    </span>
+                  )}
+                  {ambiguous && (
+                    <span
+                      class="lsp-row-ambiguous"
+                      data-testid={`lsp-row-ambiguous-${row.language}`}
+                      style="color:#bf8700; font-size:0.85em; margin-left:6px"
+                    >
+                      (multi: {row.ambiguousOwners!.join(", ")})
                     </span>
                   )}
                 </td>
@@ -923,6 +934,20 @@ function LspMatrix(props: {
                     >
                       {isOpen ? "Editing…" : "Edit env"}
                     </button>
+                  ) : ambiguous ? (
+                    // Ambiguity in ALL-workspaces mode: silently picking
+                    // one workspace's task_name (the pre-fix behavior)
+                    // could land an Apply in the wrong workspace. Block
+                    // Edit-env until the operator narrows the filter via
+                    // the WorkspaceSelector at the top of the screen.
+                    // Bot review PR #222 P2 (lsp-rows.ts:122).
+                    <span
+                      class="lsp-row-ambiguous-hint"
+                      data-testid={`lsp-row-ambiguous-hint-${row.language}`}
+                      style="color:#bf8700; font-size:0.9em"
+                    >
+                      pick a workspace above to edit env
+                    </span>
                   ) : (
                     <span class="lsp-row-unregistered" style="color:#888; font-size:0.9em">
                       (run <code>mcphub register</code> to register)

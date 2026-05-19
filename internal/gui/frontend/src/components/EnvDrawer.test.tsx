@@ -68,11 +68,11 @@ describe("EnvDrawer", () => {
     });
   });
 
-  it("Apply posts /api/daemon/env with task_name + env.Path", async () => {
+  it("Apply posts /api/daemon/env with task_name + env.PATH (uppercase)", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       jsonResponse(200, {
         task_name: TASK,
-        changed_keys: ["Path"],
+        changed_keys: ["PATH"],
       }),
     );
     render(
@@ -94,7 +94,7 @@ describe("EnvDrawer", () => {
     const body = JSON.parse(init.body as string);
     expect(body).toEqual({
       task_name: TASK,
-      env: { Path: "/usr/local/bin;${parent_path}" },
+      env: { PATH: "/usr/local/bin;${parent_path}" },
     });
   });
 

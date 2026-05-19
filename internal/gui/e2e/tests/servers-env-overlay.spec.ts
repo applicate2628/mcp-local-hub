@@ -86,7 +86,7 @@ test.describe("servers — env overlay drawer", () => {
         contentType: "application/json",
         body: JSON.stringify({
           task_name: "\\mcp-local-hub-lsp-default-rust",
-          changed_keys: ["Path"],
+          changed_keys: ["PATH"],
         }),
       });
     });
@@ -100,7 +100,7 @@ test.describe("servers — env overlay drawer", () => {
     await expect.poll(() => envBody).not.toBeNull();
     expect(JSON.parse(envBody!)).toEqual({
       task_name: "\\mcp-local-hub-lsp-default-rust",
-      env: { Path: "/opt/rust/bin;${parent_path}" },
+      env: { PATH: "/opt/rust/bin;${parent_path}" },
     });
     await expect(
       page.locator('[data-testid="env-drawer-apply-msg"]'),

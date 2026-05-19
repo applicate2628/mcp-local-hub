@@ -113,6 +113,34 @@ func TestExpandParentPath_UnknownTokenRejected(t *testing.T) {
 	}
 }
 
+// TestExpandParentPath_RejectsPunctuatedToken closes the bot-review
+// PR #222 P2 gap: the prior regex `\$\{[A-Za-z0-9_.\-]+\}` allowed
+// `${secret:API_KEY}` (the colon is outside the character class) to
+// slip past `rejectUnknownTokens`, then `strings.Replace` left it
+// as a literal in the env block. The broader regex `\$\{[^}]+\}`
+// catches any non-empty placeholder content.
+func TestExpandParentPath_RejectsPunctuatedToken(t *testing.T) {
+	installStateRoot(t)
+	cases := []struct {
+		name  string
+		value string
+	}{
+		{"secret-reference", "C:/foo;${secret:API_KEY}"},
+		{"path-style-placeholder", "C:/foo;${HOME/.cargo}"},
+		{"mixed-with-supported", "C:/foo;${parent_path};${secret:HOME}"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := map[string]string{"Path": tc.value}
+			parent := []string{"PATH=/sys/bin"}
+			_, err := daemon_env_overlay.ExpandParentPath(in, parent)
+			if err == nil {
+				t.Fatalf("ExpandParentPath: expected error for value %q, got nil", tc.value)
+			}
+		})
+	}
+}
+
 // TestExpandParentPath_EmptyParentPath verifies graceful degradation:
 // when the parent process has no PATH key, the token expands to an
 // empty string and the overlay value becomes the only PATH source.

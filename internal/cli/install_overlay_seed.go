@@ -196,7 +196,12 @@ func seedOverlayFromDiscovery(
 					env[k] = v
 				}
 			}
-			env["Path"] = a.binDir + string(os.PathListSeparator) + "${parent_path}"
+			// Key must be uppercase "PATH" — `mergeDaemonEnv` (supervise.go:1664)
+			// folds key case only on Windows, so on Linux/macOS a `Path` key in
+			// the overlay map would NOT collide with the parent process's `PATH`
+			// entry, and the discovered bin directory would be silently ignored
+			// at spawn time. Storing `PATH` makes the override land on every OS.
+			env["PATH"] = a.binDir + string(os.PathListSeparator) + "${parent_path}"
 			o.Daemons[key] = daemon_env_overlay.DaemonRow{
 				Env:          env,
 				Source:       "auto-discovery",

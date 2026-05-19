@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -1180,9 +1181,19 @@ func classifyLSPEntries(entries map[string]*ScanEntry, reg *Registry) {
 		clientName string
 		entry      ClientEntry
 	}
-	hubByPair := map[string]*ScanEntry{}  // key: clientName + "\x00" + lang
-	donorsByPair := map[string][]donor{}  // same key
-	legacyEntryNames := map[string]bool{} // set of entries flagged as legacy donors
+	// hubsByPair stores a SLICE of matching hub rows because one client
+	// can legitimately host multiple hub rows for the same language —
+	// e.g. when two workspaces register clangd in codex-cli, each gets
+	// its own `mcp-language-server-clangd-<wsKey4hex>` entry. Pre-fix
+	// (bot review PR #222 P2 scan.go:1218) the index was a single
+	// *ScanEntry, so later iterations overwrote earlier ones and a
+	// stdio donor was attached to whichever hub row survived map
+	// iteration — nondeterministic. We now attach the donor to EVERY
+	// matching hub row so the matrix surfaces the coexistence anomaly
+	// on every plausible parent, deterministically.
+	hubsByPair := map[string][]*ScanEntry{} // key: clientName + "\x00" + lang
+	donorsByPair := map[string][]donor{}    // same key
+	legacyEntryNames := map[string]bool{}   // set of entries flagged as legacy donors
 
 	for name, e := range entries {
 		nameLang, _ := ParseEntryName(name, lspLanguages)
@@ -1215,7 +1226,7 @@ func classifyLSPEntries(entries map[string]*ScanEntry, reg *Registry) {
 			case ce.Transport == "http":
 				// Rule 1: hub-managed.
 				e.Status = "via-hub"
-				hubByPair[pairKey] = e
+				hubsByPair[pairKey] = append(hubsByPair[pairKey], e)
 			case ce.Transport == "stdio":
 				base := filepath.Base(strings.TrimSuffix(ce.Endpoint, ".exe"))
 				// Rule 2: direct-stdio mcp-language-server.
@@ -1252,19 +1263,35 @@ func classifyLSPEntries(entries map[string]*ScanEntry, reg *Registry) {
 	// lookup never blocks the coexistence collapse below.
 	_ = reg // reserved for future hard-gate evolutions; see plan §"Matrix LSP recognition"
 
-	// Pass 2: coexistence collapse. For each donor matching a hub row's
-	// (clientName, lang), move the stdio entry into hub.LegacyConflict
-	// and remove the donor entry from its origin row's ClientPresence.
+	// Pass 2: coexistence collapse. For each donor matching ANY hub row's
+	// (clientName, lang) pair, attach the stdio entry to EVERY matching
+	// hub row's LegacyConflict[clientName] and remove the donor entry
+	// from its origin row's ClientPresence. Attaching to every matching
+	// hub is the deterministic fix for the bot-review PR #222 P2
+	// nondeterminism: the donor has no workspace context (its entry
+	// name is the bare `mcp-language-server-<lang>` form), so any of
+	// the multiple workspace-suffixed hub rows in the same (client, lang)
+	// pair could be its parent — surfacing the conflict on all of them
+	// keeps the matrix honest about the ambiguity rather than silently
+	// picking one based on map iteration order.
+	//
+	// Hubs within a pair are sorted by entry name so the LegacyConflict
+	// assignment order is stable across runs (the value is the same
+	// either way; sort only matters if a future refactor depends on
+	// iteration order).
 	for pairKey, ds := range donorsByPair {
-		hub, ok := hubByPair[pairKey]
-		if !ok {
+		hubs, ok := hubsByPair[pairKey]
+		if !ok || len(hubs) == 0 {
 			continue
 		}
+		sort.Slice(hubs, func(i, j int) bool { return hubs[i].Name < hubs[j].Name })
 		for _, d := range ds {
-			if hub.LegacyConflict == nil {
-				hub.LegacyConflict = map[string]ClientEntry{}
+			for _, hub := range hubs {
+				if hub.LegacyConflict == nil {
+					hub.LegacyConflict = map[string]ClientEntry{}
+				}
+				hub.LegacyConflict[d.clientName] = d.entry
 			}
-			hub.LegacyConflict[d.clientName] = d.entry
 			if donor, exists := entries[d.entryName]; exists {
 				delete(donor.ClientPresence, d.clientName)
 			}

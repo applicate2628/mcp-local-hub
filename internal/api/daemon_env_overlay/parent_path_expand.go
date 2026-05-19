@@ -48,12 +48,14 @@ import (
 // parentPathToken is the only template token expansion supports.
 const parentPathToken = "${parent_path}"
 
-// tokenRe matches any ${...} placeholder; used to detect unknown
-// tokens that must be rejected up-front. Allows letters, digits,
-// underscores, hyphens, and dots inside braces — the full envelope
-// of possible future tokens; we still reject anything but the one
-// supported name today.
-var tokenRe = regexp.MustCompile(`\$\{[A-Za-z0-9_.\-]+\}`)
+// tokenRe matches ANY `${...}` placeholder up to the first `}` — used
+// to detect unknown tokens that must be rejected up-front. The
+// character class is intentionally permissive (`[^}]+`) so values
+// like `${secret:API_KEY}` (note the colon) are still caught by the
+// allowlist check below. A narrower class would let unsupported
+// tokens slip through unexpanded into the daemon's env block —
+// caught by bot review PR #222 P2 (parent_path_expand.go:56).
+var tokenRe = regexp.MustCompile(`\$\{[^}]+\}`)
 
 // ExpandParentPath returns a new map identical to env except that
 // every value's ${parent_path} literal is replaced by the parent

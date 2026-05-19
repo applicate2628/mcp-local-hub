@@ -58,12 +58,25 @@ export interface LspRow {
   language: LspLanguage;
   // taskName is the canonical leading-backslash supervisor task name
   // (e.g. `\mcp-local-hub-lsp-default-clangd`). NULL when the LSP is
-  // not registered for the active workspace — the row renders as a
-  // placeholder with no Edit-env affordance.
+  // not registered for the active workspace OR when multiple
+  // workspaces register the same language in ALL-workspaces mode
+  // (ambiguousOwners non-empty in that case). The matrix UI renders
+  // a placeholder / disambiguation hint instead of an Edit-env button
+  // when taskName is null.
   taskName: string | null;
   // workspaceKey of the row source. Empty string for placeholder
-  // rows (not registered to any workspace).
+  // rows AND for ambiguous-owner rows in ALL-workspaces mode (since
+  // no single workspace owns the row).
   workspaceKey: string;
+  // ambiguousOwners lists every workspace_key that registers this
+  // language when the operator has NOT scoped the matrix to one
+  // workspace AND multiple matches exist. Empty (or undefined) when
+  // the row has a single owner OR is a placeholder. Closes bot review
+  // PR #222 P2 (lsp-rows.ts:122): pre-fix, ALL-mode with N workspaces
+  // for one language silently picked `filteredWs[0]` and wired Edit-
+  // env to that workspace's task_name — Apply could then land in the
+  // wrong workspace until the operator manually filtered first.
+  ambiguousOwners?: string[];
   // ClientPresence + LegacyConflict observed from /api/scan. Combined
   // across every scan entry whose ParseEntryName matches the row's
   // language AND (if a workspace is selected) belongs to that
@@ -115,11 +128,26 @@ export function collectLspRows(
         we.language === language &&
         (selectedWorkspaceKey === "" || we.workspace_key === selectedWorkspaceKey),
     );
-    // Pick the first matching workspace entry as the row's owner. When
-    // multiple workspaces share the same language and the operator has
-    // NOT filtered to one, we expose the first one's task_name; the
-    // dual-badge rendering still surfaces coexistence per-client.
-    const owner = filteredWs[0];
+    // Owner picking. The "Edit env" affordance needs an unambiguous
+    // task_name — when multiple workspaces register the same language
+    // in ALL-mode, that's the ambiguity case: we still aggregate
+    // per-client presence across them (so the badges remain honest),
+    // but `taskName` is left null and `ambiguousOwners` enumerates the
+    // candidates so the UI can prompt the operator to pick one via the
+    // WorkspaceSelector. Bot review PR #222 P2 (lsp-rows.ts:122).
+    let owner: WorkspaceEntryDTO | undefined;
+    let ambiguousOwners: string[] | undefined;
+    if (filteredWs.length === 1) {
+      owner = filteredWs[0];
+    } else if (filteredWs.length > 1) {
+      // selectedWorkspaceKey !== "" already narrowed `filteredWs` to a
+      // single workspace via the filter above, so multi-match here
+      // only happens in ALL-workspaces mode. Sort for deterministic
+      // ordering (operator sees the same list every refresh).
+      ambiguousOwners = filteredWs
+        .map((we) => we.workspace_key)
+        .sort((a, b) => a.localeCompare(b));
+    }
     // Build the set of scan-entry names this row should aggregate over.
     // The registry's ClientEntries map values name each scan-entry name
     // per client — that's the explicit, registry-blessed mapping. When
@@ -173,6 +201,7 @@ export function collectLspRows(
       language,
       taskName: owner?.task_name ?? null,
       workspaceKey: owner?.workspace_key ?? "",
+      ambiguousOwners,
       clientPresence,
       legacyConflict,
     };

@@ -117,6 +117,29 @@ func (s *Server) daemonEnvHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Empty-env no-op short-circuit: the EnvDrawer sends `env: {}` when
+	// the operator clicks Apply with a blank PATH textarea (per
+	// EnvDrawer.tsx). Without this guard, the handler would still
+	// promote a pre-existing `source: auto-discovery` row to
+	// `source: operator` and stamp ModifiedAt — that change blocks
+	// future discovery refreshes from updating the row (the seeder
+	// CAS-preserves operator rows). The net effect of an accidental
+	// blank-Apply was "auto-discovery silently stops working for this
+	// daemon". Caught by bot review PR #222 P2 (gui/daemon_env.go:133).
+	if len(req.Env) == 0 {
+		_ = api.LogHubMcpEvent("info", "daemon-env-overlay-applied-via-gui", map[string]any{
+			"task_name":    taskName,
+			"changed_keys": []string{},
+			"note":         "empty-env no-op; overlay row untouched",
+		})
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"task_name":    taskName,
+			"changed_keys": []string{},
+		})
+		return
+	}
+
 	overlayPath, err := resolveOverlayPath()
 	if err != nil {
 		writeAPIError(w, err, http.StatusInternalServerError, "STATE_DIR_FAILED")
@@ -416,7 +439,11 @@ func seedOverlayFromDiscoveryViaGUI(ctx context.Context, manifests []*config.Ser
 					env[k] = v
 				}
 			}
-			env["Path"] = a.binDir + string(os.PathListSeparator) + "${parent_path}"
+			// Uppercase "PATH" — see install_overlay_seed.go for the
+			// case-sensitivity rationale. POSIX merges by exact case;
+			// `Path` would not override the inherited `PATH` and the
+			// discovered bin directory would not reach the daemon's env.
+			env["PATH"] = a.binDir + string(os.PathListSeparator) + "${parent_path}"
 			o.Daemons[key] = daemon_env_overlay.DaemonRow{
 				Env:          env,
 				Source:       "auto-discovery",

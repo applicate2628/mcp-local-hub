@@ -80,7 +80,12 @@ export function EnvDrawer(props: EnvDrawerProps) {
       // spawn — almost certainly not what the operator wanted).
       const env: Record<string, string> = {};
       if (pathValue.trim() !== "") {
-        env.Path = pathValue;
+        // Uppercase "PATH" — the supervisor's mergeDaemonEnv
+        // (internal/cli/supervise.go:1664) folds key case only on
+        // Windows, so on Linux/macOS a `Path` key would NOT collide
+        // with the parent process's `PATH` entry and the operator-
+        // typed value would be silently dropped at spawn time.
+        env.PATH = pathValue;
       }
       const result = await applyDaemonEnv(taskName, env);
       if (!mountedRef.current) return;

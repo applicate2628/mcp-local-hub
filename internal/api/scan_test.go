@@ -913,3 +913,93 @@ func keysOfLegacyConflict(m map[string]ClientEntry) []string {
 	}
 	return out
 }
+
+// TestScanRecognizesCoexistenceAnomaly_MultiWorkspaceDeterministic
+// closes the bot-review PR #222 P2 gap (scan.go:1218): when one client
+// has TWO hub-managed workspaces for the same language AND a legacy
+// stdio donor for that language, the donor must attach to BOTH hub
+// rows. Pre-fix, `hubByPair[clientName+lang]` overwrote the first hub
+// with the second, then the donor landed on whichever one survived
+// map iteration order — nondeterministic. The fix tracks every
+// matching hub row in a slice and attaches the donor to all of them.
+func TestScanRecognizesCoexistenceAnomaly_MultiWorkspaceDeterministic(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Register clangd in TWO workspaces under codex-cli. Use full
+	// 8-hex suffixes to dodge the 4-hex prefix-collision fallback.
+	seedLSPRegistry(t, tmp, []WorkspaceEntry{
+		{
+			WorkspaceKey:  "abcdef01",
+			WorkspacePath: filepath.Join(tmp, "proj", "alpha"),
+			Language:      "clangd",
+			Backend:       "mcp-language-server",
+			Port:          9210,
+			TaskName:      "mcp-local-hub-lsp-abcdef01-clangd",
+			ClientEntries: map[string]string{"codex-cli": "mcp-language-server-clangd-abcdef01"},
+		},
+		{
+			WorkspaceKey:  "12345678",
+			WorkspacePath: filepath.Join(tmp, "proj", "beta"),
+			Language:      "clangd",
+			Backend:       "mcp-language-server",
+			Port:          9211,
+			TaskName:      "mcp-local-hub-lsp-12345678-clangd",
+			ClientEntries: map[string]string{"codex-cli": "mcp-language-server-clangd-12345678"},
+		},
+	})
+
+	codexPath := seedCodexConfigTOML(t, tmp, map[string]map[string]any{
+		"mcp-language-server-clangd-abcdef01": {"url": "http://localhost:9210/mcp"},
+		"mcp-language-server-clangd-12345678": {"url": "http://localhost:9211/mcp"},
+		// Legacy stdio donor with no workspace context — its workspace
+		// affinity is ambiguous, so it must surface on EVERY matching
+		// hub row.
+		"clangd-direct": {
+			"command": "mcp-language-server",
+			"args":    []any{"--lsp", "clangd", "--workspace", "/some/proj"},
+		},
+	})
+
+	a := NewAPI()
+	result, err := a.ScanFrom(ScanOpts{
+		CodexConfigPath: codexPath,
+		ManifestDir:     t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("ScanFrom: %v", err)
+	}
+
+	var hubAlpha, hubBeta *ScanEntry
+	for i := range result.Entries {
+		switch result.Entries[i].Name {
+		case "mcp-language-server-clangd-abcdef01":
+			hubAlpha = &result.Entries[i]
+		case "mcp-language-server-clangd-12345678":
+			hubBeta = &result.Entries[i]
+		case "clangd-direct":
+			t.Errorf("clangd-direct donor should have been pruned after coexistence-collapse; still present with ClientPresence=%v", result.Entries[i].ClientPresence)
+		}
+	}
+	if hubAlpha == nil || hubBeta == nil {
+		t.Fatalf("expected both hub entries; alpha=%v beta=%v", hubAlpha, hubBeta)
+	}
+
+	// BOTH hub rows must carry the legacy conflict — that's the
+	// deterministic-honest semantic. Pre-fix, only one would have it
+	// (whichever survived map iteration); the other would silently
+	// miss the anomaly.
+	for _, h := range []*ScanEntry{hubAlpha, hubBeta} {
+		if h.LegacyConflict == nil {
+			t.Errorf("%s: LegacyConflict nil; want stdio donor attached to every matching hub", h.Name)
+			continue
+		}
+		leg, ok := h.LegacyConflict["codex-cli"]
+		if !ok {
+			t.Errorf("%s: LegacyConflict[codex-cli] missing; keys=%v", h.Name, keysOfLegacyConflict(h.LegacyConflict))
+			continue
+		}
+		if leg.Transport != "stdio" {
+			t.Errorf("%s: LegacyConflict[codex-cli].Transport = %q, want stdio", h.Name, leg.Transport)
+		}
+	}
+}

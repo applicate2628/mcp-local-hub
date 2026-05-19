@@ -65,16 +65,27 @@ func TestSeedOverlayFromDiscoveryWritesAutoDiscoveryRow(t *testing.T) {
 	if row.Source != "auto-discovery" {
 		t.Fatalf("Source = %q, want auto-discovery", row.Source)
 	}
-	gotPath := row.Env["Path"]
+	// Auto-discovery rows MUST use the uppercase "PATH" key — POSIX
+	// merges by exact case in mergeDaemonEnv (supervise.go:1664), so a
+	// `Path` key would fail to override the parent's `PATH`. Bot review
+	// PR #222 P1 finding (install_overlay_seed.go:199).
+	gotPath, ok := row.Env["PATH"]
+	if !ok {
+		got := make([]string, 0, len(row.Env))
+		for k := range row.Env {
+			got = append(got, k)
+		}
+		t.Fatalf("env missing PATH key (got keys: %v)", got)
+	}
 	if !strings.Contains(gotPath, binDir) {
-		t.Fatalf("Path %q should contain binDir %q", gotPath, binDir)
+		t.Fatalf("PATH %q should contain binDir %q", gotPath, binDir)
 	}
 	if !strings.Contains(gotPath, "${parent_path}") {
-		t.Fatalf("Path %q should include ${parent_path} token", gotPath)
+		t.Fatalf("PATH %q should include ${parent_path} token", gotPath)
 	}
 	wantSep := string(os.PathListSeparator)
 	if !strings.Contains(gotPath, wantSep+"${parent_path}") {
-		t.Fatalf("Path %q should join binDir to ${parent_path} via OS separator %q", gotPath, wantSep)
+		t.Fatalf("PATH %q should join binDir to ${parent_path} via OS separator %q", gotPath, wantSep)
 	}
 }
 
