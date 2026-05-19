@@ -248,3 +248,23 @@ func emitStateFileFallbackEvent(path, parentDir string, gateErr error) {
 		_ = LogHubMcpEvent("warn", "state-file-write-unhardened-fallback", body)
 	}
 }
+
+// CheckStateDirParentWriteSafe is the exported shim over the
+// platform-specific unexported checkStateDirParentWriteSafe helper
+// (hub_mcp_state_parent_write_check_windows.go /
+// hub_mcp_state_parent_write_check_posix.go). External callers in
+// the daemon_env_overlay subpackage need to reach the same gate the
+// state-file write pipeline uses so the read-side parent-DACL gate
+// stays symmetric with the write side.
+//
+// The shim does NOT change behavior — it forwards to the package-
+// local helper. Keeping the original as the canonical
+// implementation minimizes the change blast radius (no rename, no
+// move).
+//
+// Spec: docs/superpowers/specs/2026-05-19-servers-matrix-lsp-and-env-revamp-design.md
+// §"Read-side hardening" (B-V4-1, B-V4-4) — references the same
+// parent-DACL gate as the write side.
+func CheckStateDirParentWriteSafe(parentDir string) error {
+	return checkStateDirParentWriteSafe(parentDir)
+}
