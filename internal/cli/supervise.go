@@ -29,6 +29,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -1453,21 +1454,106 @@ func emitDaemonTerminateFailed(events *api.SupervisorEventLog, d api.SupervisorD
 	})
 }
 
-// mergeDaemonEnv appends descriptor env overrides in deterministic key order.
-func mergeDaemonEnv(parent []string, overrides map[string]string) []string {
-	env := append([]string{}, parent...)
-	if len(overrides) == 0 {
-		return env
+// mergeDaemonEnv merges parent env with descriptor manifest and overlay
+// env in deterministic key order.
+//
+// Precedence (low → high): parent < manifest < overlay. The third arg
+// is the Task 2.8 overlay scaffold; Phase 2.7 callers pass nil until
+// the overlay loader wires in.
+//
+// Both-empty fast path: when manifest and overlay are both empty (nil
+// or zero-length), return nil so the caller can leave cmd.Env=nil and
+// let the child inherit os.Environ() directly. This preserves the
+// historical env-less-daemon behavior after the spawn gate was
+// removed (Task 2.7 acceptance criterion #5).
+//
+// Windows case-insensitive PATH-family normalize: on Windows the env
+// block is case-insensitive (a child seeing two of "PATH"/"Path"/"path"
+// reads only one, by undefined kernel selection). The merge folds
+// every key under its uppercase form for collision detection so the
+// highest-precedence source wins exactly once; the OUTPUT preserves
+// the original casing of that winning source. POSIX keeps the
+// historical case-sensitive behavior (different cases are different
+// keys).
+//
+// Determinism: keys are emitted sorted by their uppercase normalized
+// form. Spec ref:
+// docs/superpowers/specs/2026-05-19-servers-matrix-lsp-and-env-revamp-design.md
+// §"Spawn-time env merge" + plan Task 2.7 / I1.
+func mergeDaemonEnv(parent []string, manifest, overlay map[string]string) []string {
+	if len(manifest) == 0 && len(overlay) == 0 {
+		return nil
 	}
-	keys := make([]string, 0, len(overrides))
-	for k := range overrides {
+
+	winCaseFold := runtime.GOOS == "windows"
+
+	// normKey returns the lookup key used for collision detection.
+	// On Windows it folds to uppercase so PATH/Path/path collide.
+	// On POSIX it returns the key verbatim.
+	normKey := func(k string) string {
+		if winCaseFold {
+			return strings.ToUpper(k)
+		}
+		return k
+	}
+
+	// entries holds the winning "<key>=<value>" for each normalized
+	// key. Later writes (manifest after parent, overlay after
+	// manifest) overwrite earlier ones, so the highest-precedence
+	// source wins.
+	entries := make(map[string]string)
+
+	// Parent goes in first. Lines without '=' are skipped (defensive;
+	// os.Environ() never emits malformed entries but a test caller
+	// might supply hand-crafted input).
+	for _, kv := range parent {
+		eq := strings.IndexByte(kv, '=')
+		if eq < 0 {
+			continue
+		}
+		entries[normKey(kv[:eq])] = kv
+	}
+
+	// Manifest overrides parent for the same normalized key.
+	// Within a single layer, two source keys can collide under
+	// Windows case-fold (e.g. "PATH" and "Path" both in the manifest
+	// map). Sort the source keys before applying so the
+	// last-write-wins outcome is deterministic across map iteration
+	// orders. Sort is by original (non-normalized) key so on POSIX
+	// the two cases remain distinct buckets; on Windows the sort is
+	// still deterministic and the later case (e.g. "Path" > "PATH"
+	// in lexicographic order) wins.
+	mKeys := make([]string, 0, len(manifest))
+	for k := range manifest {
+		mKeys = append(mKeys, k)
+	}
+	sort.Strings(mKeys)
+	for _, k := range mKeys {
+		entries[normKey(k)] = k + "=" + manifest[k]
+	}
+
+	// Overlay overrides both for the same normalized key. Same
+	// within-layer sort discipline as above.
+	oKeys := make([]string, 0, len(overlay))
+	for k := range overlay {
+		oKeys = append(oKeys, k)
+	}
+	sort.Strings(oKeys)
+	for _, k := range oKeys {
+		entries[normKey(k)] = k + "=" + overlay[k]
+	}
+
+	keys := make([]string, 0, len(entries))
+	for k := range entries {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
+
+	out := make([]string, 0, len(entries))
 	for _, k := range keys {
-		env = append(env, k+"="+overrides[k])
+		out = append(out, entries[k])
 	}
-	return env
+	return out
 }
 
 // makeProductionSpawnFn returns the SpawnFunc the Reconciler invokes
@@ -1501,8 +1587,16 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 		if d.Workspace != "" {
 			cmd.Dir = d.Workspace
 		}
-		if len(d.Env) > 0 {
-			cmd.Env = mergeDaemonEnv(os.Environ(), d.Env)
+		// Phase 2.7 spawn-gate removal: previously this site was
+		// guarded by `if len(d.Env) > 0` so overlay-only spawns (no
+		// manifest env, but operator overlay supplies values) would
+		// silently fall through to inherited parent env. mergeDaemonEnv
+		// now returns nil when manifest+overlay are both empty, which
+		// is the only case where cmd.Env should stay nil (inherit
+		// os.Environ directly). Task 2.8 wires the real overlay load;
+		// the third arg is nil scaffold for that follow-up.
+		if merged := mergeDaemonEnv(os.Environ(), d.Env, nil); merged != nil {
+			cmd.Env = merged
 		}
 		process.NoConsole(cmd)
 

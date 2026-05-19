@@ -753,17 +753,49 @@ func TestProductionSpawnFn_EnvOverrideAppliedDeterministically(t *testing.T) {
 		"FOO":  "foo",
 		"BAR":  "bar",
 	}
-	want := []string{
-		"BASE=parent",
-		"BAR=bar",
-		"FOO=foo",
-		"PATH=first",
-		"Path=second",
+	// Phase 2.7 mergeDaemonEnv contract: keys are emitted sorted by
+	// uppercase-normalized form (so case-insensitive collisions yield
+	// one entry on Windows). The overall sort order is therefore
+	// platform-dependent for cases where two keys share a normalized
+	// form within the same layer.
+	//
+	// POSIX (case-sensitive env keys): all five keys survive. Sort by
+	// uppercase normalize is stable for non-colliding keys but here
+	// both "PATH" and "Path" normalize to "PATH" → adjacent in the
+	// output; the within-layer sort applied them in lexicographic
+	// order ("PATH" then "Path"), so the last-write-wins entry is
+	// "Path=second" and the slot ordering is preserved by the final
+	// sort. Two distinct map keys both stored at entries["PATH"] is
+	// impossible — Go maps can't hold two keys differing only by
+	// the helper's normalized form. On POSIX the helper does NOT
+	// normalize, so entries["PATH"] and entries["Path"] are separate
+	// buckets and both survive.
+	//
+	// Windows (case-insensitive env keys): "PATH" and "Path" share
+	// normalized key "PATH"; within-layer sort applies "PATH=first"
+	// first, then "Path=second" overwrites it, so the surviving
+	// entry is "Path=second".
+	var want []string
+	if runtime.GOOS == "windows" {
+		want = []string{
+			"BAR=bar",
+			"BASE=parent",
+			"FOO=foo",
+			"Path=second",
+		}
+	} else {
+		want = []string{
+			"BAR=bar",
+			"BASE=parent",
+			"FOO=foo",
+			"PATH=first",
+			"Path=second",
+		}
 	}
 	wantJoined := strings.Join(want, "\x00")
 
 	for i := 0; i < 20; i++ {
-		got := mergeDaemonEnv(parent, overrides)
+		got := mergeDaemonEnv(parent, overrides, nil)
 		if gotJoined := strings.Join(got, "\x00"); gotJoined != wantJoined {
 			t.Fatalf("iteration %d mergeDaemonEnv order = %#v, want %#v", i, got, want)
 		}
