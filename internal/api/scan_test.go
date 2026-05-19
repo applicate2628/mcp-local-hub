@@ -68,6 +68,101 @@ func TestScanClassifiesEntries(t *testing.T) {
 	}
 }
 
+// TestResolveManifestDaemonPort_EmbedFirst pins the port-lookup helper
+// the supervisor status seam uses to enrich Port=0 supervisor-intent
+// rows. PR #211 and earlier wrote supervisor-intent.json with Port=0
+// for every daemon (migration did not seed the field from the
+// manifest); the GUI matrix renders "—" for those daemons even though
+// the daemon is listening on the manifest-declared port.
+// ResolveManifestDaemonPort is the read-time enrichment that surfaces
+// the correct port without requiring an intent-file migration.
+//
+// The empty manifestDir parameter forces the embedded-first lookup
+// (production path). For one of the shipped mcphub manifests, port
+// must be returned verbatim. (Shipped manifests do not change ports
+// at runtime — this is a stable contract.)
+func TestResolveManifestDaemonPort_EmbedFirst(t *testing.T) {
+	// time is one of the global mcphub manifests with a stable port
+	// (9128) declared at servers/time/manifest.yaml. The embed loader
+	// returns the same yaml the supervisor reads, so the manifest is
+	// guaranteed to exist in the embedded FS.
+	port, ok := ResolveManifestDaemonPort("time", "default")
+	if !ok {
+		t.Fatalf("ResolveManifestDaemonPort(time, default) returned !ok; want a port")
+	}
+	if port != 9128 {
+		t.Errorf("port: got %d, want 9128 (shipped manifest)", port)
+	}
+}
+
+// TestResolveManifestDaemonPort_UnknownReturnsZeroFalse pins the
+// fail-safe contract — callers can treat (0, false) as "not
+// authoritative" without crashing. Used by the supervisor status seam
+// to fall back to the intent-stored Port=0 when no manifest exists
+// (e.g. a hand-edited supervisor-intent.json with an unknown server).
+func TestResolveManifestDaemonPort_UnknownReturnsZeroFalse(t *testing.T) {
+	port, ok := ResolveManifestDaemonPort("does-not-exist", "default")
+	if ok {
+		t.Errorf("expected !ok for unknown server; got port=%d", port)
+	}
+	if port != 0 {
+		t.Errorf("port: got %d, want 0", port)
+	}
+}
+
+// TestScanIncludesManifestOnlyServers pins the visibility fix on the
+// matrix-row-vanishes UX bug. Before the fix, ScanFrom assembled its
+// entries map purely from per-client scan output — so a server whose
+// manifest existed on disk but had been demigrated from every client
+// would disappear from the matrix entirely, leaving the operator with
+// no row to click to re-enable it. After the fix, every manifest-known
+// server appears as a row with empty ClientPresence so the matrix
+// renders an "available" cell per non-disabled client column.
+func TestScanIncludesManifestOnlyServers(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Empty Claude config — no mcpServers at all.
+	claudeCfg := map[string]any{"mcpServers": map[string]any{}}
+	claudePath := filepath.Join(tmp, ".claude.json")
+	b, _ := json.Marshal(claudeCfg)
+	_ = os.WriteFile(claudePath, b, 0600)
+
+	// Manifest dir with one server.
+	manifestDir := filepath.Join(tmp, "servers")
+	_ = os.MkdirAll(filepath.Join(manifestDir, "lonely-server"), 0755)
+	_ = os.WriteFile(filepath.Join(manifestDir, "lonely-server", "manifest.yaml"),
+		[]byte("name: lonely-server\nkind: global\ntransport: stdio-bridge\ncommand: npx\ndaemons:\n  - name: default\n    port: 9999\n"), 0644)
+
+	a := NewAPI()
+	result, err := a.ScanFrom(ScanOpts{
+		ClaudeConfigPath: claudePath,
+		ManifestDir:      manifestDir,
+	})
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+
+	var lonely *ScanEntry
+	for i := range result.Entries {
+		if result.Entries[i].Name == "lonely-server" {
+			lonely = &result.Entries[i]
+			break
+		}
+	}
+	if lonely == nil {
+		t.Fatalf("expected lonely-server in matrix entries even with empty client config; got %d entries", len(result.Entries))
+	}
+	if !lonely.ManifestExists {
+		t.Errorf("ManifestExists: got false, want true")
+	}
+	if !lonely.CanMigrate {
+		t.Errorf("CanMigrate: got false, want true (non-per-session manifest)")
+	}
+	if len(lonely.ClientPresence) != 0 {
+		t.Errorf("ClientPresence: got %d entries, want 0 (no client has the server configured yet)", len(lonely.ClientPresence))
+	}
+}
+
 // TestScanCoversManagedClients seeds Codex TOML plus JSON configs for Gemini,
 // Antigravity, Cursor, VS Code, and Qwen with "memory" entries and checks
 // each is represented in the ClientPresence map with the correct transport tag.
