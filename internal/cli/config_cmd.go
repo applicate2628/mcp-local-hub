@@ -23,5 +23,7 @@ Run 'mcphub config --help' to list available subcommands.`,
 	}
 	// Task 2.6: offline overlay-quarantine recovery command.
 	c.AddCommand(newOverlayQuarantineCmd())
+	// Task 5.1: offline orphan-row pruning after `mcphub unregister`.
+	c.AddCommand(newOverlayPruneOrphansCmd())
 	return c
 }
