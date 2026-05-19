@@ -800,7 +800,7 @@ func defaultPipePath(stateDir string) string {
 
 // acceptIPCConnections is the listener accept loop. Runs in its own
 // goroutine spawned from runSupervise; exits when listener.Close()
-// (deferred in runSupervise) causes Accept to return an error.
+// (deferred in runSupervise) causes Accept to return net.ErrClosed.
 //
 // Per spec §"Wire format": each accepted connection is a long-lived
 // newline-delimited-JSON channel. Multiple connections from the same
@@ -809,27 +809,100 @@ func defaultPipePath(stateDir string) string {
 // goroutine. The handlers share access to the supervisor-wide deps
 // via ipcDispatchDeps; no per-connection state is mutated by
 // handleIPCRequest.
+//
+// Error handling (post-mortem of 2026-05-19 22:52:17 IPC crash):
+// Pre-fix, ANY error from listener.Accept() (including transient
+// per-connection failures like the hello-write race where a client
+// disconnects mid-handshake) caused the accept loop to RETURN
+// permanently. The supervisor process stayed alive, daemons stayed
+// alive, but IPC went silent and `mcphub status` started timing
+// out. Dashboard appeared "broken" with no actionable diagnostic.
+//
+// The post-mortem error was specifically:
+//
+//	ipc-accept-exit body: "write hello: The pipe is being closed."
+//
+// which comes from the Accept-time hello write in
+// supervise_ipc_windows.go:115 (POSIX equivalent at
+// supervise_ipc_posix.go:122). The fix: continue the loop on
+// non-ErrClosed errors with a small backoff to avoid hot-loop when
+// a persistent transport fault is in play; only ErrClosed signals
+// "listener was Close()'d via Stop()" and is the right time to exit.
+//
+// Defense-in-depth: if we somehow accumulate maxConsecutiveAcceptErrs
+// (100) transient errors back-to-back, treat the listener as
+// genuinely broken and exit the loop. That keeps the supervisor
+// from spinning forever on a permanently-poisoned pipe.
+const maxConsecutiveAcceptErrs = 100
+
+// ipcAcceptor is the narrow interface acceptIPCConnections needs from
+// the listener. Concrete production type is *SupervisorIPCListener;
+// tests inject a fake to exercise the error-handling branches without
+// binding a real pipe/socket.
+type ipcAcceptor interface {
+	Accept() (net.Conn, error)
+}
+
 func acceptIPCConnections(
-	listener *SupervisorIPCListener,
+	listener ipcAcceptor,
 	deps ipcDispatchDeps,
 ) {
+	consecErrs := 0
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
 			// listener.Close() returns net.ErrClosed via Accept on
-			// graceful exit. Logging this would noise up the audit
-			// channel; emit an info row only so operators can
-			// distinguish "listener closed normally" from a bug.
+			// graceful exit. That is the ONE error that signals
+			// "the supervisor is shutting down" rather than a
+			// per-connection transient. Emit info + exit cleanly.
+			if errors.Is(err, net.ErrClosed) {
+				_ = deps.events.Emit(api.SupervisorEvent{
+					Severity: "info",
+					Source:   "ipc",
+					Event:    "ipc-accept-exit",
+					Body: map[string]any{
+						"err": err.Error(),
+					},
+				})
+				return
+			}
+			consecErrs++
+			// Per-connection transient (hello-write race, client
+			// disconnected mid-handshake, kernel pool pressure).
+			// Emit warn + continue so the loop survives. Pre-fix
+			// this was the regression that caused the 2026-05-19
+			// supervisor-IPC-silence Dashboard outage.
 			_ = deps.events.Emit(api.SupervisorEvent{
-				Severity: "info",
+				Severity: "warn",
 				Source:   "ipc",
-				Event:    "ipc-accept-exit",
+				Event:    "ipc-accept-transient-error",
 				Body: map[string]any{
-					"err": err.Error(),
+					"err":             err.Error(),
+					"consecutive_err": consecErrs,
 				},
 			})
-			return
+			if consecErrs >= maxConsecutiveAcceptErrs {
+				// Listener is genuinely broken — exit the loop so
+				// the supervisor's deferred Close + restart paths
+				// can take over rather than spinning forever.
+				_ = deps.events.Emit(api.SupervisorEvent{
+					Severity: "error",
+					Source:   "ipc",
+					Event:    "ipc-accept-exit",
+					Body: map[string]any{
+						"err":             err.Error(),
+						"reason":          "consecutive-transient-errors-exceeded-budget",
+						"consecutive_err": consecErrs,
+					},
+				})
+				return
+			}
+			// Short backoff so persistent failure modes don't
+			// hot-loop the audit log + CPU.
+			time.Sleep(50 * time.Millisecond)
+			continue
 		}
+		consecErrs = 0
 		go handleIPCConn(conn, deps)
 	}
 }
