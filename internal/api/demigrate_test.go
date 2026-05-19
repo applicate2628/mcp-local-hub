@@ -493,28 +493,45 @@ client_bindings:
 	}
 }
 
-func TestDemigrate_FailsWhenOnlySentinelExistsAndLacksEntry(t *testing.T) {
-	// Bot R4 P1 reproducer: all timestamped backups have been pruned
-	// (e.g. via `backups clean --keep 0`) so LatestBackupPath returns
-	// the pristine sentinel directly. If the server was added AFTER
-	// the sentinel was written, the main restore path must apply the
-	// same containment safety check as the fallback path — else
-	// RestoreEntryFromBackup would silently delete the live entry.
+func TestDemigrate_OnlySentinelExistsAndLacksEntry_BackfillMatch_Succeeds(t *testing.T) {
+	// Originally TestDemigrate_FailsWhenOnlySentinelExistsAndLacksEntry
+	// (Bot R4 P1 reproducer). Assertions FLIPPED under PR #220 r2
+	// security review per the explicit policy at
+	// work-items/bugs/2026-05-15-demigrate-fallback-when-no-pre-hub-form.md
+	// §"Explicit policy on sentinel-only + backfill":
+	//
+	//   Backfill match (live URL exactly equals
+	//   http://localhost:<daemon.port><url_path>) IS accepted as
+	//   ownership evidence in the iteration-exhausted fallback,
+	//   even when only the empty sentinel was available. The URL
+	//   coincidence is vanishingly unlikely for genuine
+	//   user-configured remote MCP servers, structurally
+	//   indistinguishable from a mcphub install otherwise, and
+	//   the user constraint "должно работать всегда" prioritizes
+	//   operator unblocking.
+	//
+	// Scenario: all timestamped backups pruned, sentinel is empty.
+	// Live URL exactly matches manifest expectation. New behavior:
+	// iteration exhausts → tryMarkerOrBackfillRemove → backfill
+	// records marker + RemoveEntry → 1 Restored.
+	//
+	// Strict mode and the complementary URL-mismatch fail-closed
+	// case are covered by
+	// TestDemigrate_OnlySentinelExistsAndLacksEntry_BackfillRejects_FailsClosed
+	// below.
 	tmp := t.TempDir()
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("HOME", tmp)
+	managedEntriesTestHelper(t)
 	claudePath := filepath.Join(tmp, ".claude.json")
 	_ = os.WriteFile(claudePath, []byte(
-		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0600)
-	// Only the sentinel exists — timestamped backups pruned. Sentinel
-	// is pristine pre-hub, so it does NOT contain memory (which was
-	// added later).
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0o600)
 	sentinel := claudePath + ".bak-mcp-local-hub-original"
-	_ = os.WriteFile(sentinel, []byte(`{"mcpServers":{}}`), 0600)
+	_ = os.WriteFile(sentinel, []byte(`{"mcpServers":{}}`), 0o600)
 
 	manifestDir := t.TempDir()
 	memDir := filepath.Join(manifestDir, "memory")
-	_ = os.MkdirAll(memDir, 0700)
+	_ = os.MkdirAll(memDir, 0o700)
 	_ = os.WriteFile(filepath.Join(memDir, "manifest.yaml"), []byte(
 		`name: memory
 kind: global
@@ -527,7 +544,62 @@ client_bindings:
   - client: claude-code
     daemon: default
     url_path: /mcp
-`), 0600)
+`), 0o600)
+
+	a := NewAPI()
+	report, err := a.Demigrate(DemigrateOpts{
+		Servers:  []string{"memory"},
+		ScanOpts: ScanOpts{ManifestDir: manifestDir},
+		Writer:   io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("Demigrate: %v", err)
+	}
+	if len(report.Failed) != 0 {
+		t.Fatalf("expected 0 failures (backfill matches manifest port + URL); got %+v", report.Failed)
+	}
+	if len(report.Restored) != 1 {
+		t.Fatalf("expected 1 Restored (marker-backfill path succeeded); got %+v", report.Restored)
+	}
+	// Live entry removed (backfill confirmed mcphub-managed; no
+	// pre-hub form anywhere in the backup chain).
+	live, _ := os.ReadFile(claudePath)
+	if strings.Contains(string(live), `"memory"`) {
+		t.Errorf("RemoveEntry did not remove memory entry; file = %s", live)
+	}
+}
+
+func TestDemigrate_OnlySentinelExistsAndLacksEntry_BackfillRejects_FailsClosed(t *testing.T) {
+	// Complementary fail-closed coverage to the test above. Sentinel-
+	// only + entry-missing-from-sentinel + URL does NOT match manifest
+	// (live URL points at port 9999 vs manifest port 9200). Backfill
+	// rejects, marker has no record, demigrate fails-closed.
+	tmp := t.TempDir()
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("HOME", tmp)
+	managedEntriesTestHelper(t)
+	claudePath := filepath.Join(tmp, ".claude.json")
+	_ = os.WriteFile(claudePath, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9999/mcp"}}}`), 0o600)
+	sentinel := claudePath + ".bak-mcp-local-hub-original"
+	_ = os.WriteFile(sentinel, []byte(`{"mcpServers":{}}`), 0o600)
+
+	manifestDir := t.TempDir()
+	memDir := filepath.Join(manifestDir, "memory")
+	_ = os.MkdirAll(memDir, 0o700)
+	_ = os.WriteFile(filepath.Join(memDir, "manifest.yaml"), []byte(
+		`name: memory
+kind: global
+transport: stdio-bridge
+command: npx
+daemons:
+  - name: default
+    port: 9200
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+`), 0o600)
 
 	a := NewAPI()
 	report, err := a.Demigrate(DemigrateOpts{
@@ -539,22 +611,21 @@ client_bindings:
 		t.Fatalf("Demigrate: %v", err)
 	}
 	if len(report.Restored) != 0 {
-		t.Fatalf("expected 0 restored (sentinel lacks entry; silent-delete must be refused), got %+v", report.Restored)
+		t.Fatalf("expected 0 restored (URL mismatch; backfill rejects), got %+v", report.Restored)
 	}
 	if len(report.Failed) != 1 {
 		t.Fatalf("expected 1 failure, got %d: %+v", len(report.Failed), report.Failed)
 	}
 	lowerErr := strings.ToLower(report.Failed[0].Err)
-	if !strings.Contains(lowerErr, "sentinel") || !strings.Contains(lowerErr, "does not contain") {
-		t.Errorf("failure message should indicate sentinel does not contain the entry: got %q", report.Failed[0].Err)
+	if !strings.Contains(lowerErr, "managed-entries marker has no record") {
+		t.Errorf("failure should cite the marker-has-no-record reason; got %q", report.Failed[0].Err)
 	}
-	// Live config untouched.
 	live, _ := os.ReadFile(claudePath)
 	var liveMap map[string]any
 	_ = json.Unmarshal(live, &liveMap)
 	servers := liveMap["mcpServers"].(map[string]any)
 	if _, present := servers["memory"]; !present {
-		t.Error("live config lost memory entry — sentinel-only path must not silently delete")
+		t.Error("live config lost memory entry — backfill-rejected sentinel-only path must not delete")
 	}
 }
 
