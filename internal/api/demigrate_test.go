@@ -558,27 +558,107 @@ client_bindings:
 	}
 }
 
-func TestDemigrate_FailsWhenServerAddedAfterSentinelThenMigratedTwice(t *testing.T) {
-	// Bot R2 P1 reproducer: operator installed mcphub (sentinel captured
-	// as pristine pre-hub state), then LATER added serverX manually, then
-	// migrated serverX twice. Latest backup holds X in hub-managed form.
-	// Sentinel lacks X entirely (it was added after sentinel was written).
-	// Naïve sentinel fallback would silently DELETE X from live and
-	// count it as a successful rollback — destructive. Demigrate must
-	// detect this via BackupContainsEntry pre-check and surface a clear
-	// Failed row.
+func TestDemigrate_ServerAddedAfterSentinelThenMigratedTwice_BackfillSucceeds(t *testing.T) {
+	// Originally TestDemigrate_FailsWhenServerAddedAfterSentinelThenMigratedTwice
+	// (Bot R2 P1 reproducer) asserted hard fail-closed behavior in this
+	// scenario. That posture was reverted under the 2026-05-15
+	// demigrate-fallback fix when the live entry's URL strictly matches
+	// the manifest's expected `http://localhost:<daemon.port><url_path>`.
+	//
+	// Scenario: operator installed mcphub (sentinel captured as pristine
+	// pre-hub state), then LATER ran `mcphub register memory` or
+	// `mcphub migrate memory`, then migrated it again. Latest backup
+	// holds memory in hub-managed form. Sentinel is empty (memory was
+	// added AFTER sentinel was written). Live URL exactly equals what
+	// mcphub WOULD have written for this manifest binding.
+	//
+	// Path B fix (2026-05-19): instead of failing closed, the new code
+	// routes this through the same marker+backfill+RemoveEntry helper
+	// the both-hub-managed branch already uses. The backfill helper
+	// confirms the live URL exactly matches manifest expectation (port +
+	// url_path + name), which is structurally indistinguishable from a
+	// mcphub install — records the marker inline and removes the entry.
+	// Safety: codex-bot P1 closure on PR #186 r1 already approved this
+	// reasoning for Path A (both backups hub-managed); Path B inherits
+	// the same logic because the threat model is identical.
 	tmp := t.TempDir()
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("HOME", tmp)
+	managedEntriesTestHelper(t)
 	claudePath := filepath.Join(tmp, ".claude.json")
 	_ = os.WriteFile(claudePath, []byte(
 		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0600)
-	// Latest backup = after first migrate (memory already hub-managed).
 	latest := claudePath + ".bak-mcp-local-hub-20260301-120000"
 	_ = os.WriteFile(latest, []byte(
 		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0600)
-	// Sentinel = pristine pre-hub, BEFORE memory was manually added.
-	// memory is ABSENT from sentinel.
+	sentinel := claudePath + ".bak-mcp-local-hub-original"
+	_ = os.WriteFile(sentinel, []byte(`{"mcpServers":{}}`), 0600)
+
+	manifestDir := t.TempDir()
+	memDir := filepath.Join(manifestDir, "memory")
+	_ = os.MkdirAll(memDir, 0700)
+	_ = os.WriteFile(filepath.Join(memDir, "manifest.yaml"), []byte(
+		`name: memory
+kind: global
+transport: stdio-bridge
+command: npx
+daemons:
+  - name: default
+    port: 9200
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+`), 0600)
+
+	a := NewAPI()
+	report, err := a.Demigrate(DemigrateOpts{
+		Servers:  []string{"memory"},
+		ScanOpts: ScanOpts{ManifestDir: manifestDir},
+		Writer:   io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("Demigrate: %v", err)
+	}
+	if len(report.Failed) != 0 {
+		t.Fatalf("expected 0 failures (backfill should match live URL to manifest), got %+v", report.Failed)
+	}
+	if len(report.Restored) != 1 {
+		t.Fatalf("expected 1 Restored row (marker-backfill path succeeded); got %+v", report.Restored)
+	}
+	// Live entry must be removed (backfill confirmed mcphub-managed).
+	data, _ := os.ReadFile(claudePath)
+	if strings.Contains(string(data), `"memory"`) {
+		t.Errorf("RemoveEntry did not remove memory entry from live config; file = %s", data)
+	}
+	// Marker row must be forgotten so a subsequent re-migrate
+	// starts fresh (matches the both-hub-managed branch's
+	// self-healing contract).
+	managed, _ := IsManagedEntry("claude-code", "memory")
+	if managed {
+		t.Errorf("marker row was not forgotten after successful RemoveEntry; IsManaged still true")
+	}
+}
+
+func TestDemigrate_ServerAddedAfterSentinel_LiveUrlDoesNotMatchManifest_FailsClosed(t *testing.T) {
+	// Complementary to the test above: when the sentinel lacks the
+	// entry AND the live URL does NOT match manifest expectation
+	// (different port, different url_path, or no marker record) AND
+	// the managed-entries marker has no record, demigrate must
+	// fail-closed. This preserves the safety property: never delete
+	// an entry that we cannot positively attribute to mcphub.
+	tmp := t.TempDir()
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("HOME", tmp)
+	managedEntriesTestHelper(t)
+	claudePath := filepath.Join(tmp, ".claude.json")
+	// Live URL points at port 9999 — DIFFERENT from the manifest's
+	// expected port 9200. Backfill helper will reject the match.
+	_ = os.WriteFile(claudePath, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9999/mcp"}}}`), 0600)
+	latest := claudePath + ".bak-mcp-local-hub-20260301-120000"
+	_ = os.WriteFile(latest, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9999/mcp"}}}`), 0600)
 	sentinel := claudePath + ".bak-mcp-local-hub-original"
 	_ = os.WriteFile(sentinel, []byte(`{"mcpServers":{}}`), 0600)
 
@@ -609,22 +689,22 @@ client_bindings:
 		t.Fatalf("Demigrate: %v", err)
 	}
 	if len(report.Restored) != 0 {
-		t.Fatalf("expected 0 restored (sentinel lacks entry, silent-delete must be refused), got %+v", report.Restored)
+		t.Fatalf("expected 0 restored (live URL diverges from manifest; backfill must reject), got %+v", report.Restored)
 	}
 	if len(report.Failed) != 1 {
 		t.Fatalf("expected 1 failure, got %d: %+v", len(report.Failed), report.Failed)
 	}
 	lowerErr := strings.ToLower(report.Failed[0].Err)
-	if !strings.Contains(lowerErr, "sentinel") || !strings.Contains(lowerErr, "does not contain") {
-		t.Errorf("failure message should indicate sentinel does not contain the entry: got %q", report.Failed[0].Err)
+	if !strings.Contains(lowerErr, "managed-entries marker has no record") {
+		t.Errorf("failure should cite the marker-has-no-record reason (refusing without positive ownership evidence); got %q", report.Failed[0].Err)
 	}
-	// Live config must not have been touched — memory still present.
+	// Live config untouched (the user-owned-shaped entry must survive).
 	live, _ := os.ReadFile(claudePath)
 	var liveMap map[string]any
 	_ = json.Unmarshal(live, &liveMap)
 	servers := liveMap["mcpServers"].(map[string]any)
 	if _, present := servers["memory"]; !present {
-		t.Error("live config lost memory entry — auto-rollback path must not silently delete user-added servers")
+		t.Error("live config lost memory entry — backfill-rejected path must not delete user-shaped entries")
 	}
 }
 
