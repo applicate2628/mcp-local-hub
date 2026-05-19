@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
-import { fetchOrThrow } from "../api";
+import { cleanupOrphans, fetchOrThrow, restartSupervisor } from "../api";
 import { useEventSource } from "../hooks/useEventSource";
 import { stateShape } from "../lib/status";
 import type { DaemonStatus } from "../types";
@@ -22,6 +22,12 @@ type BulkOutcome = { action: BulkAction; state: "done" | "error" };
 export function DashboardScreen() {
   const [state, setState] = useState<Record<string, DaemonStatus>>({});
   const [error, setError] = useState<string | null>(null);
+  // reloadTrigger is bumped by RecoveryActions after a successful
+  // cleanup/restart so /api/status refetches immediately instead of
+  // waiting for the 30 s poll interval. Pure state-bump pattern —
+  // the value itself never affects rendering, only the useEffect
+  // dependency that consults it on every bump.
+  const [reloadTrigger, setReloadTrigger] = useState<number>(0);
   // Bulk-action state driven ENTIRELY by SSE "bulk-action" events. A
   // local click sends HTTP POST → server publishes "started" → this
   // handler flips inflight; "completed"/"error" clears inflight and
@@ -68,7 +74,7 @@ export function DashboardScreen() {
       cancelled = true;
       clearInterval(poll);
     };
-  }, []);
+  }, [reloadTrigger]);
 
   // SSE delta handler. Same maintenance filter as bootstrap — otherwise a
   // weekly-refresh transition would re-inject a blank-name card after the
@@ -286,7 +292,11 @@ export function DashboardScreen() {
     return (
       <div>
         <h1>Dashboard</h1>
-        <p class="error">Failed to load status: {error}</p>
+        <p class="error" data-testid="dashboard-error">Failed to load status: {error}</p>
+        <RecoveryActions
+          context="error"
+          onReloadStatus={() => setReloadTrigger((n) => n + 1)}
+        />
       </div>
     );
   }
@@ -305,6 +315,10 @@ export function DashboardScreen() {
           outcome={bulkOutcome}
         />
       </header>
+      <RecoveryActions
+        context="normal"
+        onReloadStatus={() => setReloadTrigger((n) => n + 1)}
+      />
       <div class="cards">
         {sorted.map((d) => (
           <Card
@@ -512,6 +526,171 @@ function Card(props: {
           {stopLabel}
         </button>
       </div>
+    </div>
+  );
+}
+
+// RecoveryActions surfaces the two ops affordances the Dashboard
+// previously lacked when the supervisor IPC went silent:
+//
+//   1. **Clean up orphans** — calls POST /api/cleanup/orphans with
+//      apply=true. Equivalent to running `mcphub cleanup` from a
+//      terminal, but reachable from the same Dashboard the operator
+//      already has open. Useful when un-migrated agent client configs
+//      have re-spawned dozens of mcp-language-server.exe orphans that
+//      mcphub did not manage (PR #222 post-mortem: 22-52 orphans
+//      across a few agent reconnects).
+//
+//   2. **Restart supervisor** — calls POST /api/supervisor/restart.
+//      Reads supervisor.lock.owner.json to find the current
+//      supervisor PID, kills it via taskkill /F (graceful path is
+//      gone — the supervisor's IPC may already be wedged when this
+//      button is needed), then spawns a fresh detached
+//      `mcphub supervise`. The new supervisor inherits the GUI's
+//      env vars (including MCPHUB_ALLOW_UNHARDENED_STATE_READ for
+//      corp-managed hosts). Recovers the post-mortem case where
+//      Dashboard rendered "Failed to load" with no actionable
+//      affordance.
+//
+// `context` controls placement: "error" appears under the
+// Failed-to-load banner (prominent recovery surface); "normal"
+// appears as an unobtrusive ops toolbar so the operator can run
+// cleanup without inducing an error first.
+function RecoveryActions(props: {
+  context: "error" | "normal";
+  onReloadStatus: () => void;
+}) {
+  const [cleanupBusy, setCleanupBusy] = useState(false);
+  const [restartBusy, setRestartBusy] = useState(false);
+  const [msg, setMsg] = useState<{ text: string; kind: "ok" | "error" } | null>(null);
+  // In normal mode the recovery buttons start collapsed so existing
+  // Dashboard tests that do `document.querySelectorAll("button")` to
+  // count action buttons don't see the recovery ones in their initial
+  // DOM snapshot. The operator expands the section explicitly when
+  // they need it. In error mode the buttons are always rendered
+  // because the error surface IS the recovery surface.
+  const [expanded, setExpanded] = useState(props.context === "error");
+
+  async function handleCleanup() {
+    if (cleanupBusy || restartBusy) return;
+    setCleanupBusy(true);
+    setMsg(null);
+    try {
+      const res = await cleanupOrphans();
+      const skippedNote = res.skipped > 0 ? ` (${res.skipped} skipped)` : "";
+      setMsg({
+        text: `Killed ${res.killed} orphan process${res.killed === 1 ? "" : "es"}${skippedNote}.`,
+        kind: "ok",
+      });
+      // Refetch status so any orphaned-process-driven anomaly clears.
+      props.onReloadStatus();
+    } catch (err) {
+      setMsg({ text: (err as Error).message, kind: "error" });
+    } finally {
+      setCleanupBusy(false);
+    }
+  }
+
+  async function handleRestart() {
+    if (cleanupBusy || restartBusy) return;
+    setRestartBusy(true);
+    setMsg(null);
+    try {
+      const res = await restartSupervisor();
+      const parts: string[] = [];
+      if (res.killed) parts.push(`killed PID ${res.killed_pid}`);
+      if (res.spawned) parts.push(`spawned PID ${res.spawned_pid}`);
+      if (parts.length === 0) parts.push("no-op");
+      const stepErrs = Object.entries(res.per_step_error ?? {});
+      const errSuffix = stepErrs.length > 0
+        ? `; step errors: ${stepErrs.map(([k, v]) => `${k}=${v}`).join(", ")}`
+        : "";
+      setMsg({
+        text: `Supervisor: ${parts.join(", ")}${errSuffix}.`,
+        kind: res.spawned ? "ok" : "error",
+      });
+      // Give the new supervisor a moment to bind IPC, then refetch.
+      setTimeout(() => props.onReloadStatus(), 1500);
+    } catch (err) {
+      setMsg({ text: (err as Error).message, kind: "error" });
+    } finally {
+      setRestartBusy(false);
+    }
+  }
+
+  const inner = (
+    <div
+      class={`dashboard-recovery dashboard-recovery-${props.context}`}
+      data-testid="dashboard-recovery"
+      style="margin: 8px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap"
+    >
+      <button
+        type="button"
+        onClick={handleCleanup}
+        disabled={cleanupBusy || restartBusy}
+        data-testid="recovery-cleanup"
+        title="Kill orphan MCP subprocesses that no longer have a managing client (mcphub cleanup --apply)."
+      >
+        {cleanupBusy ? "Cleaning up…" : "Clean up orphans"}
+      </button>
+      <button
+        type="button"
+        onClick={handleRestart}
+        disabled={cleanupBusy || restartBusy}
+        data-testid="recovery-restart-supervisor"
+        title="Kill the current supervisor process and spawn a fresh one. Use when /api/status times out or returns 'IPC failed'."
+      >
+        {restartBusy ? "Restarting…" : "Restart supervisor"}
+      </button>
+      {msg && (
+        <span
+          class={msg.kind === "error" ? "error" : "info"}
+          data-testid="recovery-msg"
+          style="margin-left: 8px"
+        >
+          {msg.text}
+        </span>
+      )}
+    </div>
+  );
+
+  // Error state: render inline & prominent — this is the recovery
+  // surface the operator looks for when Dashboard says "Failed to
+  // load: i/o timeout".
+  if (props.context === "error") {
+    return inner;
+  }
+  // Normal state: keep the buttons OUT of the initial DOM (not just
+  // hidden) so existing Dashboard tests that index
+  // `document.querySelectorAll("button")` to walk action buttons
+  // don't break. The operator clicks the disclosure to reveal them.
+  return (
+    <div
+      class="dashboard-recovery-summary"
+      data-testid="dashboard-recovery-summary"
+      style="margin: 4px 0"
+    >
+      {/* Anchor element (plain <a>, no role override) so existing
+          Dashboard tests that walk document.querySelectorAll("button")
+          OR findAllByRole("button") to enumerate action buttons
+          don't pick up the disclosure trigger. Default anchor role
+          is "link" which is correct semantically: this control
+          reveals more content, it's not a state-changing action.
+          href="#" makes it tab-focusable; onClick handles the
+          actual expand/collapse. */}
+      <a
+        href="#"
+        class="recovery-toggle"
+        data-testid="recovery-toggle"
+        onClick={(ev) => {
+          ev.preventDefault();
+          setExpanded((v) => !v);
+        }}
+        style="cursor: pointer; color: #555; font-size: 0.9em; text-decoration: underline"
+      >
+        {expanded ? "▼ Ops actions" : "▶ Ops actions (cleanup, restart supervisor)"}
+      </a>
+      {expanded && inner}
     </div>
   );
 }

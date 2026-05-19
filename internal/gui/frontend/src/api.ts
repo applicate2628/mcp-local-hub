@@ -355,6 +355,85 @@ export async function listWorkspaces(): Promise<WorkspacesResponse> {
   return fetchOrThrow<WorkspacesResponse>("/api/workspaces", "object");
 }
 
+// ───────────────────────────────────────────────────────────────────
+// Dashboard recovery actions (PR #222 ops UX gap)
+// ───────────────────────────────────────────────────────────────────
+
+// CleanupOrphansResult mirrors gui.cleanupResponse — the wire shape of
+// POST /api/cleanup/orphans. The handler returns both dry-run and
+// apply outputs with the same envelope; `killed` / `skipped` stay
+// zero on dry-run.
+export interface CleanupOrphansResult {
+  orphans: Array<{
+    pid: number;
+    name?: string;
+    cmdline?: string;
+    matched_server?: string;
+    age_seconds?: number;
+    kill_err?: string;
+  }>;
+  killed: number;
+  skipped: number;
+}
+
+// cleanupOrphans posts to /api/cleanup/orphans with `apply: true`
+// (kill mode). Returns the per-process kill outcome list so the UI
+// can surface "killed N orphans" feedback.
+export async function cleanupOrphans(): Promise<CleanupOrphansResult> {
+  const resp = await fetch("/api/cleanup/orphans", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ apply: true }),
+  });
+  if (!resp.ok) {
+    let body: { error?: string; code?: string } | null = null;
+    try {
+      body = (await resp.json()) as { error?: string; code?: string };
+    } catch {
+      // non-JSON
+    }
+    const msg = body?.error ?? resp.statusText ?? "unknown";
+    const code = body?.code ?? `HTTP_${resp.status}`;
+    throw new Error(`/api/cleanup/orphans [${code}]: ${msg}`);
+  }
+  return (await resp.json()) as CleanupOrphansResult;
+}
+
+// SupervisorRestartResult mirrors gui.supervisorRestartResponse: the
+// per-step outcome of read-lock → kill → spawn. `per_step_error` is
+// keyed by step name ("read_lock", "kill", "spawn") with empty/absent
+// values meaning "step succeeded".
+export interface SupervisorRestartResult {
+  killed_pid: number;
+  killed: boolean;
+  spawned_pid: number;
+  spawned: boolean;
+  per_step_error?: Record<string, string>;
+}
+
+// restartSupervisor posts to /api/supervisor/restart. The handler
+// always returns 200 — partial-failure cases are signalled via
+// `spawned: false` + per_step_error keys so the UI can render a
+// "kill ok, spawn failed: …" status without parsing a non-2xx body.
+export async function restartSupervisor(): Promise<SupervisorRestartResult> {
+  const resp = await fetch("/api/supervisor/restart", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!resp.ok) {
+    let body: { error?: string; code?: string } | null = null;
+    try {
+      body = (await resp.json()) as { error?: string; code?: string };
+    } catch {
+      // non-JSON
+    }
+    const msg = body?.error ?? resp.statusText ?? "unknown";
+    const code = body?.code ?? `HTTP_${resp.status}`;
+    throw new Error(`/api/supervisor/restart [${code}]: ${msg}`);
+  }
+  return (await resp.json()) as SupervisorRestartResult;
+}
+
 // ManifestHashMismatchError marks the stale-file-detection branch so
 // the AddServer edit flow can show the [Reload]/[Force Save] banner
 // instead of a generic error toast.
