@@ -10,7 +10,7 @@ import (
 // are wired by their respective tasks. This task only creates the
 // empty parent so cobra prints help when invoked without a subcommand.
 func newConfigCmdReal() *cobra.Command {
-	return &cobra.Command{
+	c := &cobra.Command{
 		Use:   "config",
 		Short: "Configuration-management subcommands (overlay quarantine, orphan pruning, etc.)",
 		Long: `Groups configuration-management subcommands.
@@ -21,4 +21,7 @@ quarantine, orphan-row pruning, and similar maintenance operations
 
 Run 'mcphub config --help' to list available subcommands.`,
 	}
+	// Task 2.6: offline overlay-quarantine recovery command.
+	c.AddCommand(newOverlayQuarantineCmd())
+	return c
 }
