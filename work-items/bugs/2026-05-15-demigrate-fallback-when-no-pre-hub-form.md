@@ -194,3 +194,75 @@ settings on next CLI invocation).
 - v0.4.1 backlog item B4 (or D-prefix if reorganized)
 - Depends on: nothing (independent of PR #185 r2)
 - Blocks: full operator demigrate experience for early adopters
+
+## Failed attempt: PR #218 (reverted by PR #219)
+
+2026-05-19: extended the marker+backfill+RemoveEntry helper to
+Path B (latest hub-managed + sentinel missing entry) and Path C
+(sentinel-only + sentinel missing entry). The helper unconditionally
+called `adapter.RemoveEntry` once positive ownership evidence was
+found via the marker or strict-URL backfill.
+
+**Destructive on live host.** When the entry was originally in
+direct/stdio form (user-installed), the marker check would pass
+(because the entry IS mcphub-managed NOW, after migrate), but the
+rollback target SHOULD have been the pre-migrate direct form, not
+deletion. The user's gemini settings.json lost 7 entries
+(godbolt, memory, paper-search-mcp, sequential-thinking, serena,
+time, wolfram) when the smoke test's Phase 4 demigrate-rollback
+ran on cells that started life as direct.
+
+The marker check is necessary but not sufficient — it does not
+distinguish "mcphub installed this from scratch" from "mcphub
+migrated an existing entry."
+
+## Proper-fix design (deferred)
+
+§"Quality: Iterate timestamped backups newest-first" remains the
+correct path. Implementation requirements (consolidated from
+PR-218 lessons):
+
+1. New adapter method `BackupEntryIsHubManaged(path, name)
+   (bool, error)` for each of the 7 client adapters. Each adapter
+   knows its own hub-shape detection.
+2. Replace the single `LatestBackupPath()` lookup with an
+   iteration helper `IterateBackupsNewestFirst()` that visits
+   every timestamped backup in `name.bak-mcp-local-hub-*` order,
+   newest first.
+3. For each backup, check `BackupContainsEntry`. If contains
+   AND NOT `BackupEntryIsHubManaged`, that's the pre-hub form —
+   restore from THAT backup.
+4. Only if NO backup contains a pre-hub form, AND the marker
+   confirms mcphub-managed (or backfill matches strict
+   URL+port+path), fall back to `RemoveEntry`. This is the
+   "entry never existed pre-hub" case.
+
+   **Explicit policy on sentinel-only + backfill** (per PR #220
+   r2 security review): backfill match — live URL exactly equals
+   `http://localhost:<daemon.port><url_path>` — IS accepted as
+   ownership evidence in this fallback even when the only
+   available backup is the empty sentinel (i.e., timestamped
+   backups were pruned or never created). Rationale: the URL
+   coincidence is vanishingly unlikely for genuine
+   user-configured remote MCP servers (they almost always run
+   on a non-mcphub port + path), structurally indistinguishable
+   from a mcphub install otherwise, and the user constraint
+   "должно работать всегда" prioritizes operator unblocking
+   over hypothetical user-coincidence preservation. Strict
+   mode (MCPHUB_REQUIRE_SINGLE_USER_HOME=1) is unaffected.
+   The pre-PR-218 test that asserted fail-closed for this
+   sub-case (`TestDemigrate_FailsWhenOnlySentinelExistsAndLacksEntry`)
+   was over-conservative and is updated under PR #220 to
+   assert the new behavior, with a complementary fail-closed
+   test covering the URL-mismatch case.
+5. Test coverage: per-adapter unit tests for
+   `BackupEntryIsHubManaged` returning the right bool for each
+   shape (json url-shape, codex toml url-shape, antigravity
+   relay shape).
+
+Net effect: the 5 originally-failing cells (perftools/{claude,
+codex,gemini}, lldb/codex, time/cursor) would still demigrate
+successfully (no pre-hub form ever existed → RemoveEntry path
+fires under marker confirmation). User-direct entries would
+restore from the appropriate older backup instead of being
+deleted.

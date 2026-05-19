@@ -673,6 +673,60 @@ func pruneOldTimestamped(livePath string, keepN int) {
 	}
 }
 
+// BackupsNewestFirst returns every mcp-local-hub backup path for
+// livePath, sorted newest-first. Timestamped copies
+// (livePath + ".bak-mcp-local-hub-<ts>") come first in
+// lexicographic-reverse order (timestamps use the 20060102-150405
+// layout, which sorts correctly as a string), then the pristine
+// "-original" sentinel (semantically the oldest snapshot — taken
+// on first Backup() call before any timestamped backup).
+// Directories with matching names are ignored.
+//
+// Used by the demigrate flow to iterate through every backup
+// candidate when the latest backup is in hub-managed form but
+// older backups may contain the pre-hub form of the entry —
+// closing the gap documented in
+// work-items/bugs/2026-05-15-demigrate-fallback-when-no-pre-hub-form.md
+// §"Quality: Iterate timestamped backups newest-first".
+//
+// Returns an empty slice (not nil) when no backups exist. Returns
+// an error only on filesystem read errors.
+func BackupsNewestFirst(livePath, clientName string) ([]string, error) {
+	dir := filepath.Dir(livePath)
+	prefix := filepath.Base(livePath) + ".bak-mcp-local-hub-"
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []string{}, nil
+		}
+		return nil, err
+	}
+	var timestamped []string
+	var sentinel string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		suffix := strings.TrimPrefix(name, prefix)
+		if suffix == "original" {
+			sentinel = filepath.Join(dir, name)
+			continue
+		}
+		timestamped = append(timestamped, filepath.Join(dir, name))
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(timestamped)))
+	out := make([]string, 0, len(timestamped)+1)
+	out = append(out, timestamped...)
+	if sentinel != "" {
+		out = append(out, sentinel)
+	}
+	return out, nil
+}
+
 // latestBackup returns the most recent mcp-local-hub backup path for
 // livePath. Timestamped copies (livePath + ".bak-mcp-local-hub-<ts>")
 // take precedence over the pristine "-original" sentinel; within
@@ -682,6 +736,10 @@ func pruneOldTimestamped(livePath string, keepN int) {
 // when no backup files are present and (_, _, err) on filesystem error.
 // The second parameter (clientName) is currently unused but reserved for
 // future per-client log/diagnostic context.
+//
+// Kept for callers that only need the single newest path; new code
+// iterating through every candidate should use BackupsNewestFirst
+// instead (see demigrate.go).
 func latestBackup(livePath, _ string) (string, bool, error) {
 	dir := filepath.Dir(livePath)
 	prefix := filepath.Base(livePath) + ".bak-mcp-local-hub-"
