@@ -56,8 +56,11 @@ type TransientPID struct {
 // ReadSupervisorState reads + parses with DisallowUnknownFields per
 // the daemon-intent.json precedent at internal/api/daemon_intent.go:570-580.
 func ReadSupervisorState(path string) (*SupervisorStateFile, error) {
-	if err := checkStateDirParentWriteSafe(filepath.Dir(path)); err != nil {
-		return nil, fmt.Errorf("read %s: insecure parent directory: %w", path, err)
+	if !operatorAllowsUnhardenedStateRead() {
+		if err := checkStateDirParentWriteSafe(filepath.Dir(path)); err != nil {
+			return nil, fmt.Errorf("read %s: insecure parent directory (set %s=1 to opt into the relax lane on operator-managed Windows hosts whose %%LOCALAPPDATA%% inherits AD-pushed groups, or tighten the parent's DACL): %w",
+				path, AllowUnhardenedStateReadEnv, err)
+		}
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {

@@ -59,8 +59,11 @@ type MaintenanceTimer struct {
 //
 // See also: filterSupervisorIntentOneshotDaemons() for the criteria.
 func ReadSupervisorIntent(path string) (*SupervisorIntentFile, error) {
-	if err := checkStateDirParentWriteSafe(filepath.Dir(path)); err != nil {
-		return nil, fmt.Errorf("read %s: insecure parent directory: %w", path, err)
+	if !operatorAllowsUnhardenedStateRead() {
+		if err := checkStateDirParentWriteSafe(filepath.Dir(path)); err != nil {
+			return nil, fmt.Errorf("read %s: insecure parent directory (set %s=1 to opt into the relax lane on operator-managed Windows hosts whose %%LOCALAPPDATA%% inherits AD-pushed groups, or tighten the parent's DACL): %w",
+				path, AllowUnhardenedStateReadEnv, err)
+		}
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
