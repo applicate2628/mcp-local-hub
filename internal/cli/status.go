@@ -66,10 +66,27 @@ Troubleshooting:
 See also: restart, stop, logs, scheduler upgrade.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a := api.NewAPI()
-			rows, err := a.StatusWithOpts(api.StatusOpts{
-				ProbeHealth:      probeHealth,
-				ForceMaterialize: forceMaterialize,
-			})
+			// Default `mcphub status` (no --health / --force-materialize
+			// flags) routes through Status() which prefers the
+			// supervisor IPC seam (canonical v0.5.0 view: 13 daemons).
+			// The --health / --force-materialize paths need the legacy
+			// scheduler-scan enrichment (port-listen probe, manifest
+			// merge, MCP initialize round-trip) so they keep using
+			// StatusWithOpts. PR #215 fix: before this routing, even
+			// the bare `mcphub status` invocation returned only the
+			// supervisor scheduler row because StatusWithOpts queries
+			// scheduler.List which only has 1 mcp-local-hub-* task in
+			// v0.5.0 (the supervisor LogonTrigger entry).
+			var rows []api.DaemonStatus
+			var err error
+			if probeHealth || forceMaterialize {
+				rows, err = a.StatusWithOpts(api.StatusOpts{
+					ProbeHealth:      probeHealth,
+					ForceMaterialize: forceMaterialize,
+				})
+			} else {
+				rows, err = a.Status()
+			}
 			if err != nil {
 				return err
 			}

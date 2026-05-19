@@ -457,14 +457,35 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 	return nil
 }
 
-// Status returns the current scheduler view of all mcp-local-hub tasks,
-// enriched with Server/Daemon/Port parsed from manifest, plus PID/RAM/Uptime
-// for Running tasks when the OS introspection layer is available (Windows,
-// populated by internal/api/processes.go at init). NextRun is surfaced as a
-// raw backend-specific string (the locale-formatted time schtasks emits on
-// Windows, empty elsewhere); callers that need a parsed time.Time should
-// re-query the scheduler directly.
+// Status returns the slice of MCP daemons under supervisor management
+// (v0.5.0+) — same source DaemonStatusSnapshot uses for /api/status,
+// so CLI `mcphub status` and the GUI poller (which feeds the tray
+// icon) see the canonical 13-daemon view rather than scheduler.List's
+// single supervisor-task row.
+//
+// Fallback contract: when the supervisor IPC is unreachable
+// (ErrSupervisorIPCUnavailable — no lock owner sidecar, no pipe), the
+// legacy scheduler scan via StatusWithOpts is used. Hosts mid-
+// migration or running v0.4.x compat tooling still get a meaningful
+// response that way.
+//
+// PR #215 fix: before this routing, poller + CLI both saw only the
+// supervisor scheduler task, deriveState classified it as Failed
+// (no port → alive=false), tray went StateError while Dashboard
+// (via DaemonStatusSnapshot's IPC-first path) showed 11 Running
+// daemons. Two divergent code paths produced two views of reality;
+// unifying them through the IPC seam closes the divergence.
 func (a *API) Status() ([]DaemonStatus, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	rows, err := DialSupervisorIPCStatus(ctx)
+	if err == nil {
+		return rows, nil
+	}
+	if !errors.Is(err, ErrSupervisorIPCUnavailable) {
+		return nil, err
+	}
+	// Supervisor not reachable; fall back to legacy scheduler scan.
 	return a.StatusWithOpts(StatusOpts{})
 }
 

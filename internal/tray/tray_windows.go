@@ -121,6 +121,18 @@ type trayChild struct {
 	hIconMu sync.Mutex
 	hIcon   uintptr
 
+	// lastOpenDashboardEmit timestamps the most recent emitEvent
+	// "open-dashboard" send. Under NOTIFYICON_VERSION_4, Windows
+	// shell dispatches BOTH WM_LBUTTONUP and NIN_SELECT for a single
+	// user left-click, and the case at handleMessage line ~750
+	// treats both as the same primary action. Without debouncing,
+	// each click emits two "open-dashboard" events, and the parent
+	// GUI opens the browser twice (4 times for a double-click). PR
+	// #215 fix: drop the second emit if it lands within
+	// trayClickDebounce of the first.
+	openDashboardEmitMu sync.Mutex
+	lastOpenDashboardAt time.Time
+
 	// iconRegistered reflects whether NIM_ADD has succeeded and not
 	// yet been undone by NIM_DELETE. Both shutdown() and the WM_CLOSE
 	// path consult this flag so neither double-deletes (causing shell
@@ -680,6 +692,36 @@ func getActiveChild() *trayChild {
 	return activeChild
 }
 
+// trayClickDebounce is the dedup window between paired
+// WM_LBUTTONUP+NIN_SELECT messages emitted by Windows shell under
+// NOTIFYICON_VERSION_4 for a single user left-click. 200ms is
+// generous enough to absorb the worst-case message-pump delay on
+// loaded systems while staying short enough that a deliberate
+// double-click (two distinct user clicks 250-500ms apart) still
+// emits twice — preserving the existing convention that double-click
+// activates twice. PR #215 fix.
+const trayClickDebounce = 200 * time.Millisecond
+
+// shouldEmitOpenDashboard returns true when an open-dashboard event
+// should fire — i.e. the previous emit was more than trayClickDebounce
+// ago. Returns false (suppressing the emit) when called within the
+// debounce window of the prior emit, which catches the paired
+// WM_LBUTTONUP+NIN_SELECT messages a single user click produces under
+// NOTIFYICON_VERSION_4. Side effect: updates lastOpenDashboardAt to
+// `now` on every accepted call so a steady stream of rapid clicks
+// (auto-fire keyboard repeat, hardware glitch) is rate-limited to one
+// emit per debounce window. Thread-safe via openDashboardEmitMu.
+func (tc *trayChild) shouldEmitOpenDashboard() bool {
+	tc.openDashboardEmitMu.Lock()
+	defer tc.openDashboardEmitMu.Unlock()
+	now := time.Now()
+	if now.Sub(tc.lastOpenDashboardAt) < trayClickDebounce {
+		return false
+	}
+	tc.lastOpenDashboardAt = now
+	return true
+}
+
 // wndProcTrampoline is the WNDPROC fed to RegisterClassExW. It must
 // match the LRESULT (HWND, UINT, WPARAM, LPARAM) signature exactly.
 func wndProcTrampoline(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintptr {
@@ -755,6 +797,22 @@ func (tc *trayChild) handleMessage(hwnd uintptr, msg uint32, wparam, lparam uint
 			// WM_CONTEXTMENU branch below handles keyboard menu
 			// invocation (Shift+F10 / Apps key). Codex bot review
 			// on PR #24 P2.
+			//
+			// PR #215 debounce: under NOTIFYICON_VERSION_4, Windows
+			// shell fires BOTH WM_LBUTTONUP and NIN_SELECT for the
+			// SAME user left-click. Listening to both is correct for
+			// legacy-callback fallback compatibility (V4-init failures
+			// fall through to legacy mode which only sends
+			// WM_LBUTTONUP), but in V4 mode each click emits the event
+			// twice → parent GUI opens the browser twice (4 times for
+			// a double-click — user-observed regression). Debounce
+			// within trayClickDebounce of the prior emit drops the
+			// duplicate. NIN_KEYSELECT (keyboard) is intentionally
+			// included in the same debounce window in case a rapid
+			// repeated keyboard activation lands here too.
+			if !tc.shouldEmitOpenDashboard() {
+				return 0
+			}
 			tc.emitEvent("open-dashboard")
 		case WM_RBUTTONUP, WM_CONTEXTMENU:
 			// Win11 quirk: a single mouse right-click delivers BOTH
