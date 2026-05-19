@@ -276,6 +276,18 @@ type ipcDispatchDeps struct {
 	// Task 4.1 `respawn` IPC reads this same field to look up the
 	// affected daemon's overlay env before re-spawning.
 	overlay *daemon_env_overlay.Overlay
+	// intent is the parsed supervisor-intent.json file loaded once at
+	// supervisor startup. The `respawn` IPC handler resolves taskName
+	// against intent.Daemons — supervisor-intent.json is the canonical
+	// truth for which daemons the operator wants running.
+	intent *api.SupervisorIntentFile
+	// respawnLate carries the spawn/terminate closures the `respawn`
+	// IPC handler uses. These closures are constructed AFTER deps
+	// (per plan v5 option (b) — preserves IPC accept-loop startup
+	// ordering). The respawnLateBindings pointer is non-nil from deps
+	// construction; the closures inside it get Set() after spawnFn /
+	// terminateFn exist. Handlers must Get() and nil-check before use.
+	respawnLate *respawnLateBindings
 }
 
 const ipcErrorSupervisorStarting = "SUPERVISOR_STARTING"
@@ -510,6 +522,14 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		return overlayErr
 	}
 
+	// respawnLate holds the spawn/terminate closures the `respawn` IPC
+	// handler uses. Closures are constructed AFTER spawnFn/terminateFn
+	// exist (below); the holder is non-nil from here so the IPC accept
+	// loop (started inside the `if !noIPC` block below) can safely
+	// reference deps.respawnLate. Late-binding pattern preserves the
+	// existing accept-loop startup ordering per plan v5 option (b).
+	respawnLate := &respawnLateBindings{}
+
 	// IPC listener. `--no-ipc` keeps tests fast (lock+events+loop only).
 	// Production callers always pass --no-ipc=false; the listener owns
 	// the per-OS pipe/socket and the hello-frame handshake from Task
@@ -548,7 +568,9 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 				default:
 				}
 			},
-			overlay: overlay,
+			overlay:     overlay,
+			intent:      intent,
+			respawnLate: respawnLate,
 		}
 
 		// Spawn the accept goroutine. It runs until listener.Close()
@@ -609,6 +631,12 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	if terminateFn == nil {
 		terminateFn = makeProductionTerminateFnWithStatePath(events, runningPIDs, runtimeTracker, statePath)
 	}
+
+	// Wire the late-bound respawn closures now that spawnFn/terminateFn
+	// exist. The IPC accept loop above (in the !noIPC branch) already
+	// holds the respawnLate pointer via deps; the Set() makes Get()
+	// return non-nil for subsequent `respawn` IPC requests.
+	respawnLate.Set(spawnFn, terminateFn)
 
 	if intent != nil {
 		reconciler := NewReconciler(spawnFn, terminateFn)
@@ -944,12 +972,15 @@ func dispatchIPCRequest(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps)
 		return handleQuiesceTimers(conn, req, deps)
 	case "exit":
 		return handleExit(conn, req, deps)
+	case "respawn":
+		return handleRespawn(conn, req, deps)
 	case "restart", "reload":
-		// Deferred to follow-up: per-daemon operations whose semantics
-		// (which daemon, with which intent diff, against which
-		// reconcile pass) depend on the Task 7.1 reconcile loop. Until
-		// that lands, return UNKNOWN_COMMAND so callers fail fast
-		// instead of hanging on a missing response.
+		// Legacy alias surface preserved for v0.4.x clients. Task 4.1
+		// adds the canonical `respawn` verb above; restart/reload still
+		// return UNKNOWN_COMMAND because their semantics (which daemon,
+		// with which intent diff, against which reconcile pass) differ
+		// from a single-daemon respawn and would require a separate
+		// dispatch contract.
 		return writeIPCFrame(conn, api.IPCResponse{
 			ID: req.ID,
 			Error: &api.IPCErr{
