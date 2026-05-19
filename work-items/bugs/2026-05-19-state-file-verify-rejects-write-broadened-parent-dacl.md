@@ -11,7 +11,7 @@ env var set in the launching shell).
 
 ## Error surfaced in GUI matrix
 
-```
+```text
 memory/demigrate/gemini-cli: latest backup
   C:\Users\dima_\.gemini\settings.json.bak-mcp-local-hub-20260516-012732
   and -original sentinel both hold "memory" in hub-managed form,
@@ -34,7 +34,7 @@ so the third source is load-bearing. It fails on the parent-DACL gate.
 
 ## Affected parent DACL on user's machine
 
-```
+```text
 Wave\CodexSandboxUsers                            Allow Modify, DeleteSubdirectoriesAndFiles, Synchronize
 S-1-5-21-1236802581-478970963-2983620705-1857089675 Allow Modify, DeleteSubdirectoriesAndFiles, Synchronize  (orphan AD SID)
 NT AUTHORITY\SYSTEM                               Allow FullControl
@@ -66,9 +66,18 @@ The decision tree:
    - If only READ access on parent: log warn + proceed (file's own
      DACL is the safety layer).
    - If WRITE/DAC-edit access on parent: ✗ rejected for TOCTOU safety.
-3. `MCPHUB_ALLOW_UNHARDENED_STATE_WRITE=1`: documented as the
-   write-path bypass; per code review it does NOT bypass this
-   verify-read gate.
+3. `MCPHUB_ALLOW_UNHARDENED_STATE_WRITE=1`: bypasses the write-path
+   TOCTOU check at `internal/api/state_file_helper.go:154` (the
+   `operatorAllowsUnhardenedStateWrite()` gate around
+   `checkStateDirParentWriteSafe`). It does NOT bypass the
+   read-verify gate at `internal/api/hub_mcp_state_dacl_windows.go:143-145`
+   because the read path has no symmetric env var — codex bot r4 P1
+   on PR #192 reasoned that allowing the read relax-lane under
+   write-broadening would create a TOCTOU swap during the
+   fd-verify → path-read window, and the env var was intentionally
+   scoped to the write side only. In this demigrate failure the
+   blocking step is the `managed-entries.json` READ (line 143-145),
+   so the env var has no effect on the symptom.
 
 The user's DACL grants `Modify` (write + DAC-edit) to non-allowlisted
 SIDs, so the WRITE/DAC-edit check at step 2 also fires, and the read
@@ -131,10 +140,23 @@ Git Bash sessions started before the `setx` call. Operators who
 verified the env var via `[Environment]::GetEnvironmentVariable(...,'User')`
 in PowerShell may launch mcphub from a stale Git Bash where the env
 var is absent. Recommend documenting "open a fresh shell after `setx`"
-in install troubleshooting docs. (This wasn't the root cause here —
-even after relaunch with explicit env var, the verify gate still
-rejected because the env var doesn't bypass the read-verify path
-anyway.)
+in install troubleshooting docs.
+
+This env-var-visibility issue was NOT the root cause of the
+demigrate failure here. Two distinct facts:
+
+- The env var was missing from the running shell (visibility issue
+  above), AND
+- Even with the env var present, the demigrate would still fail at
+  this exact step because the env var bypasses the WRITE TOCTOU
+  check (`state_file_helper.go:154`) but does NOT bypass the READ
+  verify gate (`hub_mcp_state_dacl_windows.go:143-145`); the
+  managed-entries.json read is the blocking step.
+The env-var-visibility note is recorded here for ops-troubleshooting
+docs since both issues can co-occur on the same host. To fix THIS
+demigrate failure specifically, see the suggested fixes section
+above (inode-anchored re-read or new opt-in env var for the read
+gate) — env-var visibility hygiene alone won't unblock it.
 
 ## Workaround for today
 
