@@ -134,6 +134,11 @@ export function collectServers(scan: ScanResult | null | undefined): ServerRow[]
     name: e.name,
     routing: perClientRouting(e.client_presence ?? {}, ccp, e.can_migrate === true),
     manifested: e.manifest_exists === true,
+    // Task 3.5: propagate the side-channel legacy_conflict map to its
+    // camelCase mirror on ServerRow. Task 4.3 consumes this for dual-
+    // badge rendering; preserved as undefined when the source ScanEntry
+    // does not carry it (json `omitempty` on the Go side).
+    legacyConflict: e.legacy_conflict,
   }));
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }

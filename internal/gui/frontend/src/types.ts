@@ -63,6 +63,12 @@ export interface ScanEntry {
   // /api/migrate errors. Mirror backend ScanEntry.CanMigrate so
   // collectServers can gate the fallback to migratable rows only.
   can_migrate?: boolean;
+  // Servers-matrix revamp (Task 3.1 + 3.5): side-channel surfacing
+  // per-client legacy/stdio entries that co-exist with a hub binding
+  // for the same server. Mirrors api.ScanEntry.LegacyConflict
+  // (`json:"legacy_conflict,omitempty"`). Consumed by Task 4.3 for
+  // dual-badge rendering in the matrix; populated by routing helper.
+  legacy_conflict?: Record<string, ClientEntry>;
 }
 
 export interface ClientPresence {
@@ -70,6 +76,13 @@ export interface ClientPresence {
   endpoint?: string;
   raw?: unknown;
 }
+
+// ClientEntry mirrors api.ClientEntry (internal/api/types.go:111). On the
+// wire it is structurally identical to ClientPresence — kept as a separate
+// type alias so the legacy_conflict / LegacyConflict surface names align
+// with the Go side and so future divergence in either map stays additive
+// rather than retroactively splitting one shared TS interface.
+export type ClientEntry = ClientPresence;
 
 // Per-cell routing tag consumed by the Servers matrix.
 //   "via-hub"       — entry exists and points at our loopback hub URL.
@@ -102,6 +115,12 @@ export interface ServerRow {
   // exists. Main Servers matrix filters to manifested rows; legacy
   // non-mcphub entries surface in a separate expander.
   manifested: boolean;
+  // Servers-matrix revamp (Task 3.5): camelCase mirror of
+  // ScanEntry.legacy_conflict propagated by collectServers. Consumed
+  // by Task 4.3 (dual-badge rendering) — keys are client names; values
+  // carry the legacy/stdio ClientEntry shape that conflicts with the
+  // hub binding rendered through `routing`.
+  legacyConflict?: Record<string, ClientEntry>;
 }
 
 // Aggregate-per-server shape produced by aggregateStatus.
