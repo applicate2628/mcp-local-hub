@@ -68,3 +68,20 @@ coverage.out
 /.claude/
 /.scratch/
 /.superpowers/
+
+# Playwright MCP browser session captures (per-session ad-hoc)
+/.playwright-mcp/
+
+# tools/genicon leftover binary when invoked via plain `go build` instead
+# of `go run`. Canonical generation is `go run ./tools/genicon`; an .exe
+# in the repo root would otherwise sneak into commits.
+/genicon.exe
+/tools/genicon/genicon.exe
+
+# Ad-hoc smoke-test screenshots dropped in repo root by interactive
+# sessions. Real evidence belongs in .scratch/ per the canonical
+# convention; smoke-* / a3-* / b1-* are old patterns from pre-v0.5.0
+# sessions that should never be committed to master.
+/smoke-*.png
+/a3-*.png
+/b1-*.png
