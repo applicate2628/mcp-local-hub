@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"mcp-local-hub/internal/api"
@@ -37,6 +38,27 @@ type supervisorOwner struct {
 	stateDir    string
 	stoppedOnce sync.Once
 	stoppedErr  error
+
+	// PR #212 r6 reliability finding 1: monitor channel used by the
+	// background watcher to publish the supervisor's exit. Buffered
+	// 1 so Wait() never blocks. stop() drains this channel instead
+	// of launching its own Wait goroutine; if the watcher fires
+	// before stop() is called (supervisor crashed mid-runtime), the
+	// monitor logs the unexpected exit to stderr with the captured
+	// stderr tail so the operator sees the actionable diagnostic
+	// instead of an empty Dashboard.
+	exitedCh        chan exitInfo
+	stderrBuf       *boundedBuffer
+	stderrSink      io.Writer
+	stopRequested   atomic.Bool // set by Stop before signaling exit; read by monitor to classify expected vs unexpected
+}
+
+// exitInfo carries the result of cmd.Wait into stop() (or the early-
+// exit monitor). exitErr is nil for clean exit code 0, non-nil
+// otherwise — *exec.ExitError carries the platform-specific exit
+// code in its Sys() field.
+type exitInfo struct {
+	exitErr error
 }
 
 // supervisorReadyPollInterval bounds how often ensureSupervisorRunning
@@ -57,6 +79,12 @@ const supervisorReadyPollInterval = 200 * time.Millisecond
 // On error the spawned process (if any) is killed and reaped so this
 // function never leaks zombies. The caller is responsible for calling
 // Stop on the returned owner during shutdown.
+// stderrSinkFromContext returns the io.Writer the GUI uses to log
+// supervisor monitor warnings. Defaults to os.Stderr if the caller
+// did not inject one; tests inject a buffer to capture log output.
+// Package-level so the test seam is centralized.
+var supervisorMonitorStderr io.Writer = os.Stderr
+
 func ensureSupervisorRunning(ctx context.Context, mcphubBin string, strictMode bool, waitFor time.Duration) (*supervisorOwner, error) {
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
@@ -94,7 +122,16 @@ func ensureSupervisorRunning(ctx context.Context, mcphubBin string, strictMode b
 	for {
 		ok, probeErr := probeSupervisor(ctx, 500*time.Millisecond)
 		if ok {
-			return &supervisorOwner{spawned: true, proc: proc, stateDir: stateDir}, nil
+			owner := &supervisorOwner{
+				spawned:    true,
+				proc:       proc,
+				stateDir:   stateDir,
+				exitedCh:   make(chan exitInfo, 1),
+				stderrBuf:  stderrBuf,
+				stderrSink: supervisorMonitorStderr,
+			}
+			owner.startExitMonitor(proc)
+			return owner, nil
 		}
 		if probeErr != nil {
 			_ = proc.Kill()
@@ -147,6 +184,57 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 
 func (b *boundedBuffer) String() string { return string(b.buf) }
 
+// startExitMonitor launches the background goroutine that waits for
+// the spawned supervisor process to exit, captures the exit info on
+// exitedCh, and emits a stderr warning if the exit happens BEFORE
+// Stop() was called (early-exit / crash). PR #212 r6 reliability
+// finding 1: previously a crash mid-runtime was silently swallowed
+// because stop() collapsed ErrSupervisorIPCUnavailable to "expected"
+// at shutdown time.
+//
+// Lifecycle: the monitor runs concurrently with GUI runtime. It
+// publishes exit info to the buffered channel exactly once. stop()
+// drains the channel (or starts a fallback Wait if the channel is
+// already consumed). The "expected vs unexpected" classification is
+// done in the monitor via the stoppedOnce sentinel: if the supervisor
+// exits before Stop() runs, it's unexpected.
+func (s *supervisorOwner) startExitMonitor(proc *os.Process) {
+	go func() {
+		state, err := proc.Wait()
+		var exitErr error
+		if err != nil {
+			exitErr = err
+		} else if state != nil && !state.Success() {
+			exitErr = fmt.Errorf("supervisor exited with non-zero status: %s", state.String())
+		}
+		// Publish exit info to stop()'s receive channel. Non-blocking
+		// send via buffered chan(1); if stop() already drained, the
+		// next send would block — but stop() reads exactly once per
+		// owner so a second send here is a defect (handled via
+		// default branch).
+		select {
+		case s.exitedCh <- exitInfo{exitErr: exitErr}:
+		default:
+		}
+		// Classify: if Stop() set stopRequested before this monitor
+		// observed the exit, the exit is EXPECTED (graceful shutdown
+		// or force-kill on shutdown). Otherwise the supervisor died
+		// mid-runtime — log to stderr so the operator sees the
+		// captured stderr tail and a pointer to supervisor-events.log
+		// instead of inferring "MCPs gone" from an empty Dashboard.
+		if !s.stopRequested.Load() && exitErr != nil {
+			stderrTail := strings.TrimSpace(s.stderrBuf.String())
+			if stderrTail != "" {
+				fmt.Fprintf(s.stderrSink, "warning: supervisor exited unexpectedly (PID %d): %v; stderr tail: %s\n",
+					proc.Pid, exitErr, stderrTail)
+			} else {
+				fmt.Fprintf(s.stderrSink, "warning: supervisor exited unexpectedly (PID %d): %v; check supervisor-events.log\n",
+					proc.Pid, exitErr)
+			}
+		}
+	}()
+}
+
 // Stop sends graceful exit IPC to a spawned supervisor and waits for
 // it to terminate. For adopted supervisors (spawned=false) this is a
 // no-op.
@@ -184,19 +272,20 @@ func (s *supervisorOwner) stop(ctx context.Context, graceTimeoutMs int) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// Signal the exit monitor that shutdown is intentional — its
+	// post-Wait classification reads this to decide whether to emit
+	// the "unexpected exit" warning. Set BEFORE issuing the IPC exit
+	// to avoid a race where Wait returns between the IPC call
+	// landing and Stop() marking the shutdown as expected.
+	s.stopRequested.Store(true)
 
-	// Start the process-exit waiter FIRST so the total wall-time budget
-	// begins ticking from the same instant the IPC request starts. The
-	// previous serial pattern (IPC first, then time.After) let the IPC
-	// call eat up to the parent ctx deadline (typically 30s) BEFORE the
-	// graceful-exit timer began — pushing total Stop wall-time from the
-	// documented graceTimeoutMs+supervisorForceKillFallbackWindow (~12s
-	// at default settings) to ~42s on a hung supervisor.
-	exited := make(chan error, 1)
-	go func() {
-		_, err := s.proc.Wait()
-		exited <- err
-	}()
+	// The background exit monitor (startExitMonitor) is already
+	// running cmd.Wait() and will publish to s.exitedCh on exit. We
+	// just drain it here. If the supervisor crashed before Stop()
+	// was called, the monitor has already buffered the exit info
+	// AND emitted the early-exit warning — Stop() then just sees an
+	// already-dead process and returns cleanly.
+	exited := s.exitedCh
 
 	// Issue the IPC exit concurrently under a sub-deadline derived
 	// from graceTimeoutMs only — never the full parent ctx deadline.
