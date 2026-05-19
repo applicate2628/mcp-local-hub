@@ -14,7 +14,12 @@ func TestGuiCmd_HelpIncludesFlags(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	for _, want := range []string{"--port", "--no-browser", "--no-tray"} {
+	// PR #214 closes QA-r6-Gap-4 by asserting --strict-mode appears in
+	// the user-visible help. The flag was added by PR #212 r1
+	// (gui_supervisor_owner.go) but the help-text test never updated;
+	// a future regression that drops the cobra registration would
+	// have gone unnoticed without this assertion.
+	for _, want := range []string{"--port", "--no-browser", "--no-tray", "--strict-mode"} {
 		if !strings.Contains(buf.String(), want) {
 			t.Errorf("--help missing %q; got %q", want, buf.String())
 		}

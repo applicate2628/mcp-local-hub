@@ -354,6 +354,38 @@ func TestWindowsBackend_StatusDrifted_LegacySupervisorSubcommand(t *testing.T) {
 	}
 }
 
+// TestWindowsBackend_StatusDrifted_EmptyArguments locks down the
+// empty-Arguments edge case identified by QA-r6 Gap 3: a recorded
+// XML whose <Arguments> tag contains an empty string must be
+// classified as drifted (operator's prior call wrote zero args,
+// post-PR #212 expectation is ["gui"]). Without this assertion a
+// future change that loosens detectDrift to treat empty as "no
+// drift" would silently accept a broken autostart entry.
+func TestWindowsBackend_StatusDrifted_EmptyArguments(t *testing.T) {
+	const emptyArgsXML = "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\n" +
+		"<Task><Actions><Exec>\n" +
+		"  <Command>C:\\mcp\\mcphub.exe</Command>\n" +
+		"  <Arguments></Arguments>\n" +
+		"</Exec></Actions></Task>\n"
+	f := &fakeScheduler{
+		statusReturn: scheduler.TaskStatus{Name: WindowsTaskName, State: "Running"},
+		xmlReturn:    []byte(emptyArgsXML),
+	}
+	withFakeScheduler(t, f)
+
+	b, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	got, err := b.Status(Options{MCPHubPath: `C:\mcp\mcphub.exe`})
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if got != StateDrifted {
+		t.Errorf("Status = %s, want %s (empty Arguments must drift against Args=[gui] default)", got, StateDrifted)
+	}
+}
+
 func TestWindowsBackend_StatusDrifted_CommandPath(t *testing.T) {
 	// Recorded XML points at an older binary path; caller's MCPHubPath
 	// disagrees → drift.

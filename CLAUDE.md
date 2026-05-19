@@ -297,7 +297,14 @@ so tests never touch the developer's real config, and drive the
 Preact UI against the live Go backend. The backend scheduler is
 redirected to an empty-noop via `MCPHUB_E2E_SCHEDULER=none` so
 /api/status returns [] regardless of the host's installed
-mcp-local-hub-* tasks.
+mcp-local-hub-* tasks. The supervisor spawn block (added in PR #212
+"GUI owns supervisor lifecycle") is suppressed via
+`MCPHUB_E2E_SUPERVISOR=none` — fixtures run under temp HOME with no
+`supervisor-intent.json`, so without the seam every test would wait
+the full 15-second IPC-readiness timeout. Both env vars are set in
+`internal/gui/e2e/fixtures/hub.ts` and are NOT for production use;
+GUI emits a stderr warning when `MCPHUB_E2E_SUPERVISOR=none` is set
+so an accidental production set is operator-visible.
 
 ### One-time setup
 
