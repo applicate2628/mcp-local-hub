@@ -61,8 +61,16 @@ var iconCache struct {
 // green, warning amber, danger red, info blue. Choices are
 // AAA-contrast against both light and dark Windows tray
 // backgrounds.
+//
+// StateHealthy reads branding.BrandColor (the project's canonical
+// green) so a future brand-color tweak propagates to the tray
+// healthy icon AND the .exe / favicon icons in one place. The
+// amber/gray/red entries are tray-specific state indicators with
+// no brand equivalent — they are tray-owned and correctly inlined.
+// Per D:\dev\rules\architectural-cleanliness.md: one canonical
+// owner per value.
 var stateColors = map[TrayState]color.RGBA{
-	StateHealthy: {R: 0x1a, G: 0x7f, B: 0x37, A: 0xff}, // green (success)
+	StateHealthy: branding.BrandColor,                  // canonical brand green
 	StatePartial: {R: 0xbf, G: 0x87, B: 0x00, A: 0xff}, // amber (warning)
 	StateDown:    {R: 0x57, G: 0x60, B: 0x6a, A: 0xff}, // gray (idle)
 	StateError:   {R: 0xcf, G: 0x22, B: 0x2e, A: 0xff}, // red (danger)
