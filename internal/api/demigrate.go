@@ -4,16 +4,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
 )
 
 // errBackupMissingEntry signals "this backup file does not contain
-// the named entry" inside the demigrate iteration. Treated as a
-// "skip this candidate, try older" signal — silently writing the
-// "no entry" state to live would be destructive (would delete a
-// user-installed entry that exists in live but predates the backup).
+// the named entry" inside the demigrate iteration. This is only
+// skippable for the pristine "-original" sentinel (which may predate
+// later user installs). For timestamped backups, absence is the
+// immediate pre-migrate state and must be restored (remove live entry).
 var errBackupMissingEntry = errors.New("backup does not contain entry")
 
 // DemigrateOpts controls a reverse-migration invocation. Semantics mirror
@@ -140,9 +141,9 @@ func (a *API) Demigrate(opts DemigrateOpts) (*DemigrateReport, error) {
 			// three error classes the iteration treats as "skip this
 			// backup, try older":
 			//
-			//   1. errBackupMissingEntry — backup does not contain
-			//      the entry (predates the server install). Silent
-			//      delete would be destructive; skip.
+			//   1. errBackupMissingEntry — sentinel backup does not
+			//      contain the entry (predates the server install).
+			//      Skip and keep searching older candidates.
 			//   2. clients.ErrBackupEntryAlreadyMigrated — backup
 			//      contains the entry in hub-managed form. No
 			//      pre-hub state to restore; skip.
@@ -154,6 +155,9 @@ func (a *API) Demigrate(opts DemigrateOpts) (*DemigrateReport, error) {
 					return fmt.Errorf("backup %s unreadable: %w", path, err)
 				}
 				if !has {
+					if !strings.HasSuffix(path, ".bak-mcp-local-hub-original") {
+						return adapter.RestoreEntryFromBackup(path, server)
+					}
 					return errBackupMissingEntry
 				}
 				return adapter.RestoreEntryFromBackup(path, server)
