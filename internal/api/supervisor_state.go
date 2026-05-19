@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 // SupervisorStateFile is the on-disk schema for <state-dir>/supervisor-state.json.
@@ -55,15 +56,18 @@ type TransientPID struct {
 // ReadSupervisorState reads + parses with DisallowUnknownFields per
 // the daemon-intent.json precedent at internal/api/daemon_intent.go:570-580.
 func ReadSupervisorState(path string) (*SupervisorStateFile, error) {
+	if err := checkStateDirParentWriteSafe(filepath.Dir(path)); err != nil {
+		return nil, fmt.Errorf("read %s: insecure parent directory: %w", path, err)
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read: %w", err)
+		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	var f SupervisorStateFile
 	if err := dec.Decode(&f); err != nil {
-		return nil, fmt.Errorf("decode: %w", err)
+		return nil, fmt.Errorf("decode %s: %w", path, err)
 	}
 	return &f, nil
 }

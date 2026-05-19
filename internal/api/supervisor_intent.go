@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 // SupervisorIntentFile is the on-disk schema for <state-dir>/supervisor-intent.json.
@@ -58,6 +59,9 @@ type MaintenanceTimer struct {
 //
 // See also: filterSupervisorIntentOneshotDaemons() for the criteria.
 func ReadSupervisorIntent(path string) (*SupervisorIntentFile, error) {
+	if err := checkStateDirParentWriteSafe(filepath.Dir(path)); err != nil {
+		return nil, fmt.Errorf("read %s: insecure parent directory: %w", path, err)
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		// Include the path in the error so callers (and Sentry-style
