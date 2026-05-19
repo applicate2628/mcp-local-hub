@@ -278,6 +278,19 @@ func tryMarkerOrBackfillRemove(
 		return fmt.Errorf("%s, but managed-entries marker has no record that mcphub installed this entry — refusing to RemoveEntry (entry may be user-owned); to roll back this entry, edit %s manually, or re-run migrate first to populate the marker",
 			reasonPrefix, adapter.ConfigPath())
 	default:
+		live, gErr := adapter.GetEntry(server)
+		if gErr != nil {
+			return fmt.Errorf("%s, marker confirms mcphub-managed, but failed reading live entry before RemoveEntry: %w",
+				reasonPrefix, gErr)
+		}
+		if live == nil {
+			return fmt.Errorf("%s, marker confirms mcphub-managed, but live entry is missing — refusing to RemoveEntry",
+				reasonPrefix)
+		}
+		if matched, _ := liveEntryMatchesManifestBinding(live, server, binding, m); !matched {
+			return fmt.Errorf("%s, marker confirms mcphub-managed, but live entry no longer matches manifest-managed shape — refusing to RemoveEntry (entry may be user-modified); edit %s manually or re-run migrate",
+				reasonPrefix, adapter.ConfigPath())
+		}
 		if rmErr := adapter.RemoveEntry(server); rmErr != nil {
 			return fmt.Errorf("%s, marker confirmed mcphub-managed, AND RemoveEntry failed: %w",
 				reasonPrefix, rmErr)
