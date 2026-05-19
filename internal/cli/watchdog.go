@@ -152,11 +152,20 @@ var watchdogSchtasksQueryWatchdogFn func() (bool, int32, error)
 func newWatchdogCmdReal() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "watchdog",
-		Short: "Auto-recovery layer for daemons (plan v13)",
+		Short: "Auto-recovery layer for daemons (legacy v0.4.x; see `mcphub supervise`)",
 		Long: `Manage the mcp-local-hub watchdog: a separate scheduled task that
 runs every 5 minutes and revives daemons whose Task Scheduler
 RestartOnFailure cannot recover (force-killed via Task Manager,
 processes started via 'schtasks /Run' outside trigger context).
+
+NOTE: v0.5.0 introduces a supervisor architecture (a single long-lived
+'mcphub supervise' parent process per user) that replaces the per-daemon
+watchdog model for new installs. See 'mcphub supervise --help' for the
+canonical management surface. This 'mcphub watchdog' command remains
+functional for legacy v0.4.x state files but does NOT extend or write
+v0.5.0 supervisor state; new installs do not need it. 'mcphub watchdog
+status' continues to surface v0.4.x diagnostics for incident
+investigation on legacy installs.
 
 Subcommands:
   watchdog --once                 # one-shot recovery tick (singleton-locked)
@@ -215,7 +224,13 @@ func newWatchdogEnableCmd() *cobra.Command {
 		Short: "Clear stop intent (per daemon via --server NAME, or all)",
 		Long: `Clear any user-stop / user-disabled intent so the watchdog auto-
 revives the daemon on its next tick. Without --server, every recorded
-intent is cleared.`,
+intent is cleared.
+
+Legacy v0.4.x surface: this writes to daemon-intent.json which the
+v0.4.x watchdog scheduled task consumes. For v0.5.0+ installs, daemon
+desired-state lives in supervisor-intent.json and is mutated via the
+'mcphub supervise' control IPC; this enable command does not touch
+v0.5.0 supervisor state.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a := api.NewAPI()
 			if server != "" {
@@ -259,7 +274,13 @@ func newWatchdogDisableCmd() *cobra.Command {
 		Long: `Record a permanent stop directive. The watchdog will refuse to
 auto-revive the daemon until 'mcphub watchdog enable' clears the intent.
 Distinct from 'mcphub stop': stop is a 24-hour TTL'd directive, while
-disable persists until explicitly cleared.`,
+disable persists until explicitly cleared.
+
+Legacy v0.4.x surface: this writes to daemon-intent.json which the
+v0.4.x watchdog scheduled task consumes. For v0.5.0+ installs, daemon
+desired-state lives in supervisor-intent.json and is mutated via the
+'mcphub supervise' control IPC; this disable command does not touch
+v0.5.0 supervisor state.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a := api.NewAPI()
 			now := watchdogNow()
@@ -318,6 +339,13 @@ func newWatchdogInstallCmd() *cobra.Command {
 		Short: "Install the watchdog scheduled task (idempotent; plan §42 + §61)",
 		Long: `Create the \mcp-local-hub-watchdog scheduled task. Re-running this
 overwrites any existing task with the canonical XML body.
+
+Legacy v0.4.x surface: 'mcphub setup' auto-installs the watchdog task
+on v0.4.x. For v0.5.0+ installs, the canonical lifecycle is owned by
+the supervisor task ('mcphub supervise' under \mcp-local-hub-supervisor
+LogonTrigger). New installs should not need 'mcphub watchdog install';
+the watchdog scheduled task can coexist with the v0.5.0 supervisor for
+operators running mixed legacy state, but it is not required.
 
 Plan §42 elevation refusal: refuses to install when invoked from an
 elevated process (Administrator on Windows; root on POSIX) UNLESS
@@ -385,6 +413,13 @@ func newWatchdogUninstallCmd() *cobra.Command {
 state files (daemon-intent.json, watchdog-state.json, *.log) are NOT
 touched — re-running 'mcphub watchdog install' resumes from the same
 cooldown / strike-window state.
+
+Legacy v0.4.x surface: removing the watchdog task is safe on v0.5.0+
+installs where 'mcphub supervise' owns the daemon lifecycle. Operators
+migrating from v0.4.x can run this uninstall once the v0.5.0 supervisor
+is confirmed reconcile-ready (see 'mcphub install --upgrade' migration
+journal markers). State files are preserved so a future v0.4.x rollback
+keeps the same per-daemon cooldown / strike-window history.
 
 Decision tree:
   --yes set                       → proceed without prompt + audit (Priority=high)
