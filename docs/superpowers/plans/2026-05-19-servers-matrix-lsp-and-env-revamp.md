@@ -36,7 +36,7 @@ Every Go symbol below was grep-verified against the current codebase. Plan v1's 
 | ScanEntry shape | `{Name, Status, ClientPresence map[string]ClientEntry, ManifestExists, CanMigrate, ProcessCount}` | `internal/api/types.go:99-106` |
 | Codex client key | `"codex-cli"` (NOT `"codex"`) | `internal/api/scan.go:476` |
 | shapeClaudeEntry pattern | parses `raw["url"]` → http; `raw["command"]` → stdio (Endpoint=cmd). NOTE: args remain inside `Raw map[string]any` — callers needing args read `raw["args"]` themselves. Three-rule recognition (Task 3.3) needs both. | `internal/api/scan.go:448-454` |
-| Windows reparse-point pattern | Two layers in the existing repo: (1) PARENT-dir open via `windows.CreateFile(pathW, GENERIC_READ, FILE_SHARE_READ, nil, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT\|FILE_FLAG_BACKUP_SEMANTICS, 0)` at `hub_mcp_state_dacl_windows.go:85-99`; (2) child-file open relative to parent handle via `ntOpenRelative` at `:157-165`; (3) attribute refusal via `bhfi.FileAttributes & windows.FILE_ATTRIBUTE_REPARSE_POINT != 0` at `:187-193`. For the overlay-file read (Task 2.4), the simpler direct-CreateFile-on-file approach is acceptable as documented in the threat model (single-user solo-dev posture); the parent+ntOpenRelative pattern is the defense-in-depth upgrade if needed. Returns `windows.Handle`, NOT `*os.File` — the implementer writes a thin reader. | `internal/api/hub_mcp_state_dacl_windows.go:85-99,157-165,187-193` |
+| Windows reparse-point pattern | **Required minimum (Task 2.4):** direct `windows.CreateFile(pathW, GENERIC_READ, FILE_SHARE_READ, nil, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT\|FILE_FLAG_BACKUP_SEMANTICS, 0)` on the OVERLAY FILE — flag SET — then `GetFileInformationByHandle` then refuse if `bhfi.FileAttributes & windows.FILE_ATTRIBUTE_REPARSE_POINT != 0`. Pattern at `hub_mcp_state_dacl_windows.go:85-99` (parent dir uses this exact form) + attribute refusal idiom at `:187-193`. **Defense-in-depth upgrade (optional):** open parent dir with the same flags, then open the child file relative to the parent handle via `ntOpenRelative` (`:157-165`). Use the simpler form for v0.5.x; upgrade later if the threat model tightens. Returns `windows.Handle`, NOT `*os.File` — the implementer writes a thin reader. | `internal/api/hub_mcp_state_dacl_windows.go:85-99,157-165,187-193` |
 | Parent-DACL write check | `checkStateDirParentWriteSafe(dir) error` (unexported; either rename to exported or add exported shim per Task 2.4) | `internal/api/state_file_helper.go:155` |
 | State helper write byte API | `func SecureWriteClientConfig(path string, contents []byte) error` (exported, raw bytes — usable for YAML). NOTE: parameter is `contents`, not `payload`. Definition lives at `secure_write_client_config.go:76`; `state_file_helper.go:127` is just a call site. | `internal/api/secure_write_client_config.go:76` |
 | Existing env var names | `MCPHUB_ALLOW_UNHARDENED_CLIENT_WRITE`, `MCPHUB_ALLOW_UNHARDENED_STATE_WRITE`, `MCPHUB_REQUIRE_SINGLE_USER_HOME` | `internal/api/client_write_init.go:98,105` |
@@ -59,7 +59,13 @@ Every Go symbol below was grep-verified against the current codebase. Plan v1's 
 
 **Execution order (read this before dispatching tasks):** 1.1 → 1.2 → 1.3 → 2.1 → 2.2 → 2.3 → 1.4 (needs Task 2.3's WriteOverlay) → 2.4 → 2.5 → 2.6.0 → 2.6 → 2.7 → 2.8 → 3.1 → 3.2 → 3.3 → 3.4 (cross-cutting; no own commit) → 3.5 → 4.1 → 4.2 → 4.3 → 4.4 → 5.1 → 5.2. **Task 1.4 is filed under Phase 1 for thematic grouping but EXECUTES after Task 2.3 lands.**
 
-**Pre-commit checklist (every task):** before `git commit`, grep the diff for any new symbol you introduced or any external symbol you called. If grep finds it in the codebase OR it appears in this catalog, OK. If not, you fabricated it — stop and verify or design explicitly. Run: `git diff HEAD | grep -E '^\+.*\b(api|cli|gui)\.[A-Z][a-zA-Z]+\(' | sort -u` to enumerate exported-call sites you added, then grep each.
+**Pre-commit checklist (every task):** before `git commit`, grep the diff for any new symbol you introduced or any external symbol you called. If grep finds it in the codebase OR it appears in this catalog, OK. If not, you fabricated it — stop and verify or design explicitly. Run (heuristic — catches package-qualified exported calls but NOT same-package calls or new types/fields):
+
+```bash
+git diff HEAD -- '*.go' '*.ts' '*.tsx' | grep -E '^\+.*\b(api|cli|gui)\.[A-Z][a-zA-Z]+[(]' | sort -u
+```
+
+Notes: scope to source globs to avoid plan-doc false positives; use `[(]` (literal character class) instead of `\(` because BSD grep with `-E` rejects backslash-escaped parens. Then grep each match in the codebase to confirm it exists. The check is heuristic — it misses fabricated fields/types and same-package calls; manual review of new symbols is still required.
 
 ---
 
@@ -178,7 +184,7 @@ Expected: respectively at lines 1504, 921, 24, 110 (within a few lines of the pl
 
 ### Task 1.2: Populate `required_binaries` in shipped manifests
 
-**Files:** `servers/mcp-language-server/manifest.yaml`; `servers/gdb/manifest.yaml`. NOT `servers/lldb/manifest.yaml` (internal bridge — no external deps).
+**Files:** `servers/mcp-language-server/manifest.yaml`; `servers/gdb/manifest.yaml`. The `servers/lldb/manifest.yaml` decision is parked per spec v4 open question 2 ("should `lldb` manifest's `command: mcphub` internal bridge declare empty `required_binaries: []`?") — implementer adds an empty array if spec is updated to require it; otherwise leave the file untouched and surface the open question in the commit message.
 
 **Acceptance criteria:**
 1. Each of the 9 LSP languages declares `required_binaries: [<the lsp_command value>]` — clangd, fortls, gopls, typescript-language-server (twice — js+ts), pyright-langserver, rust-analyzer, vscode-css-language-server, vscode-html-language-server.
@@ -346,7 +352,7 @@ Expected: respectively at lines 1504, 921, 24, 110 (within a few lines of the pl
 - Directory at overlay path → `Load` returns error mentioning `not a regular file`.
 - POSIX-only test: symlink at overlay path → `Load` returns error mentioning symlink refusal (skipped on Windows).
 - `Mode().IsRegular()` rejects directories + named pipes + sockets (POSIX only).
-- Default-relax fallback: contrived parent-DACL rejection + no env vars set → succeeds + logs warn (assertable via test event sink).
+- Default-relax fallback: contrived parent-DACL rejection + no env vars set → succeeds + emits `daemon-env-overlay-read-unhardened-fallback` (assert via reading hub-mcp.log after the Load call per pattern at `internal/api/hub_mcp_log_redaction_test.go:97-103`).
 - Strict mode: `MCPHUB_REQUIRE_SINGLE_USER_HOME=1` + same contrived parent → rejects.
 
 **Done check:** `go test ./internal/api/daemon_env_overlay/ -count=1 -timeout 2m` PASS on Windows; `go build ./...` cross-platform clean.
@@ -372,7 +378,7 @@ Expected: respectively at lines 1504, 921, 24, 110 (within a few lines of the pl
 
 **Test contract:** Four unit tests:
 - Single substitution: `Path = "C:/foo;${parent_path}"` → `"C:/foo;<parent's PATH value>"`.
-- No-token case: `Path = "C:/foo"` → unchanged, AND event emitted via mock event sink.
+- No-token case: `Path = "C:/foo"` → unchanged, AND `daemon-env-overlay-path-no-parent-token` event present in hub-mcp.log after the call (read the log per pattern at `hub_mcp_log_redaction_test.go:97-103`).
 - Unknown token: `Path = "C:/foo;${unknown}"` → returns error.
 - Empty parent PATH: parent has no PATH → expansion returns the original value with the token replaced by empty string.
 
@@ -380,7 +386,7 @@ Expected: respectively at lines 1504, 921, 24, 110 (within a few lines of the pl
 
 **Spec reference:** v4 §"${parent_path} token semantics" + §"Observability".
 
-**Implementer notes:** This is the spec-mandated behavior plan v1 omitted entirely. Without this task, daemon spawns with literal `${parent_path}` in PATH — broken. Mock event sink: existing tests likely use `api.SetHubMcpEventSink` or similar pattern; grep for it.
+**Implementer notes:** This is the spec-mandated behavior plan v1 omitted entirely. Without this task, daemon spawns with literal `${parent_path}` in PATH — broken. **Event-emit assertion uses hub-mcp.log read pattern** at `internal/api/hub_mcp_log_redaction_test.go:97-103` (NOT a fabricated event-sink — see catalog discipline rule at top of plan).
 
 **Commit:** `feat(daemon_env_overlay): add ${parent_path} token expansion + no-token event`
 
@@ -450,7 +456,7 @@ Expected: respectively at lines 1504, 921, 24, 110 (within a few lines of the pl
 
 **Test contract:** Three unit tests:
 - Overlay wins over manifest: parent `PATH=/system`, manifest `Path=/manifest`, overlay `Path=/overlay` → result contains `Path=/overlay` (case from overlay).
-- Both empty: parent only → returns parent unchanged.
+- Both empty manifest+overlay (regardless of parent): `mergeDaemonEnv(parent, nil, nil)` returns nil — caller leaves cmd.Env nil so child inherits parent env via the standard `os/exec` default. **NOT** "returns parent unchanged".
 - Windows case-insensitive (skipped on POSIX): parent `PATH=/parent`, manifest `path=/manifest`, overlay `Path=/overlay` → exactly ONE Path-family entry in result with overlay's value.
 
 **Done check:** `go test ./internal/cli/ -count=1 -timeout 5m` PASS (no broken callers); `go build ./...` clean.
@@ -554,7 +560,7 @@ Expected: respectively at lines 1504, 921, 24, 110 (within a few lines of the pl
    - **Rule 3 (gopls):** stdio + `gopls` command + `Raw["args"]` contains `"mcp"` → recognize as Go legacy.
 3. When a legacy stdio entry exists AND a separate hub row exists for the SAME (clientName, language) pair, MOVE the stdio entry from its own row's ClientPresence to the hub row's `LegacyConflict[clientName]` and remove the dangling row.
 4. Ownership disambiguation via registry: when multiple workspaces register the same language, the suffix in the entry name (`-<4hex>` or `-<8hex>`) is **NOT a registry key** — instead, walk `reg.Workspaces` and match `ws.ClientEntries[clientName] == entryName` exactly (reverse lookup).
-5. Wired into `(*API).ScanFrom` — runs after existing entry assembly. Registry loaded as a TWO-STEP pattern: `regPath, err := api.DefaultRegistryPath()` (returns `(string, error)`); if err is nil, `reg, err := api.NewRegistry(regPath).Load()`. **Cannot inline as `api.NewRegistry(api.DefaultRegistryPath()).Load()` — that's a Go compile error because `DefaultRegistryPath` returns two values.** Nil-registry (any step errored or no registrations) → fallback degrades gracefully: recognition still labels language, just no ownership attribution.
+5. Wired into `(*API).ScanFrom` — runs after existing entry assembly. **Inside `internal/api/scan.go`, drop the `api.` package prefix** (same-package call), so the registry-load pattern is: `regPath, err := DefaultRegistryPath()` (returns `(string, error)`); if err is nil, `reg, err := NewRegistry(regPath).Load()`. **Cannot inline as `NewRegistry(DefaultRegistryPath()).Load()` — that's a Go compile error because `DefaultRegistryPath` returns two values.** Nil-registry (any step errored or no registrations) → fallback degrades gracefully: recognition still labels language, just no ownership attribution.
 6. Existing scan tests still PASS — recognition is additive (Status field is populated; ClientPresence is preserved unless coexistence collapses two rows into one).
 
 **Test contract:** Two new tests in `scan_test.go` (plus helpers as needed):
@@ -591,9 +597,9 @@ Emit the following events via `api.LogHubMcpEvent(level, event, fields)`:
 | `daemon-env-overlay-skipped-operator-override` | info | auto-discovery skipped due to source:operator | `{task_name, binary}` |
 | `daemon-env-overlay-parent-path-resolve-failed` | warn | per-row `${parent_path}` resolve error | `{task_name, key, error}` |
 | `daemon-env-overlay-path-no-parent-token` | info | spawn observed PATH lacks token | `{task_name}` |
-| `binary-discovery-ran` | info | install auto-discovery completion | `{scan_duration_ms, hits_per_binary}` |
+| `binary-discovery-ran` | info | install auto-discovery completion | `{server, scan_duration_ms, hits_per_binary}` |
 | `binary-discovery-missing` | warn | discovery returned empty for a binary | `{server, binary, scanned_hints}` |
-| `supervisor-respawn-via-gui` | info | respawn IPC success | `{task_name, force}` |
+| `supervisor-respawn-via-gui` | info | respawn IPC success | `{task_name, force, requesting_client, outcome}` (per spec §"Observability") |
 | `supervisor-respawn-graceful-timeout` | warn | soft-shutdown deadline exceeded | `{task_name}` |
 | `supervisor-respawn-refused-quarantined` | info | respawn refused without force | `{task_name}` |
 
@@ -613,7 +619,7 @@ Emit the following events via `api.LogHubMcpEvent(level, event, fields)`:
 
 ### Task 3.5: Frontend TS type + routing update for `LegacyConflict`
 
-**Files:** `internal/gui/frontend/src/types.ts` (add `legacy_conflict?: Record<string, ClientEntry>` to `ScanEntry`); `internal/gui/frontend/src/lib/routing.ts:130-137` (extend `ServerRow` AND propagate the field through `collectServers`).
+**Files:** `internal/gui/frontend/src/types.ts` — TWO changes here: (a) add `legacy_conflict?: Record<string, ClientEntry>` to the `ScanEntry` TS interface; (b) extend the `ServerRow` interface (lives at `types.ts:98-105`, NOT `routing.ts`) with `legacyConflict?: Record<string, ClientEntry>` camelCase. PLUS `internal/gui/frontend/src/lib/routing.ts:130-137` for the propagation in `collectServers` (NO type definition there — only the helper that fills the new field on rows).
 
 **Acceptance criteria:**
 1. `ScanEntry` TypeScript type matches the Go shape including the new optional field.
@@ -650,7 +656,7 @@ Emit the following events via `api.LogHubMcpEvent(level, event, fields)`:
    - `intent *api.SupervisorIntentFile` — current parsed intent (re-loaded on each respawn or held by reference; choose based on how mutation works in the existing reconcile loop).
    - `respawnDaemon func(taskName string, force bool) error` — closure that the supervisor startup wires to invoke the production spawn pipeline (graceful kill + spawn-with-overlay). Lives next to existing `triggerGracefulExit` closure pattern.
    - `daemonState func(taskName string) string` — reader-only helper returning the current state ("running"/"quarantine"/etc.) from `runtimeTracker`. Avoids exporting the tracker's internals.
-   Populate these in the supervisor startup at `supervise.go:512` where `ipcDispatchDeps` is constructed. `handleRespawn` then reads them; it does NOT reach into raw tracker / intent fields directly.
+   Wire location: `ipcDispatchDeps` is constructed at `supervise.go:512`; the production `spawnFn`/`terminateFn` closures are created later at `supervise.go:578-584`. The implementer's choices: (a) defer `ipcDispatchDeps` construction past line 584 so the closures can be captured by reference at deps-build time, OR (b) keep deps construction at :512 but use a late-binding sync.Once / closure-set-via-method pattern. (a) is simpler; (b) preserves the existing line ordering. Either works; pick (a) unless line-order preservation is required.
 
 **Test contract:** Three integration tests (use existing IPC dial pattern from `supervisor_ipc_status_client.go` as template):
 - Valid task: dial supervisor, send `respawn` with valid `task_name` and `force=false` → no error response.
@@ -808,11 +814,17 @@ Emit the following events via `api.LogHubMcpEvent(level, event, fields)`:
 
 Run: `go build ./... && go vet ./... && go test ./... -count=1 -timeout 5m`. Expected: clean.
 
-- [ ] **Step 5.2.1a: Fabrication grep (final scan)**
+- [ ] **Step 5.2.1a: Fabrication grep (final scan — heuristic)**
 
-Run: `git diff origin/master..HEAD | grep -E '^\+.*\b(api|cli|gui)\.[A-Z][a-zA-Z]+\(' | sort -u`. For each match, grep the symbol in the codebase. If absent, the implementer fabricated it — block the PR until cleared.
+Run, scoped to source globs only:
 
-Also: `git diff origin/master..HEAD | grep -E '^\+.*\b(TODO|FIXME|TBD|XXX)\b'`. Should be zero hits — these are plan failures.
+```bash
+git diff origin/master..HEAD -- '*.go' '*.ts' '*.tsx' | grep -E '^\+.*\b(api|cli|gui)\.[A-Z][a-zA-Z]+[(]' | sort -u
+```
+
+For each match, grep the symbol in the codebase. If absent, the implementer fabricated it — block the PR until cleared. **This check is heuristic** — it catches package-qualified exported calls but misses fabricated types, fields, and same-package calls. Manual review of every new identifier still required.
+
+Also: `git diff origin/master..HEAD -- '*.go' '*.ts' '*.tsx' | grep -E '^\+.*\b(TODO|FIXME|TBD|XXX)\b'`. Should be zero hits in source files — these are plan failures.
 
 - [ ] **Step 5.2.2: State-path env-tag test suite** (per CLAUDE.md MANDATORY workflow)
 
