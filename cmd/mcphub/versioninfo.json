@@ -1,4 +1,5 @@
 {
+    "IconPath": "mcphub.ico",
     "FixedFileInfo": {
         "FileVersion":    { "Major": 0, "Minor": 4, "Patch": 5, "Build": 0 },
         "ProductVersion": { "Major": 0, "Minor": 4, "Patch": 5, "Build": 0 },
