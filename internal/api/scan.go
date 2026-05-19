@@ -296,6 +296,27 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 		e.CanMigrate = e.ManifestExists && !perSessionServers[name]
 		e.Status = classify(e, name, manifestNames)
 	}
+	// Pass over manifest names to ensure servers with no client
+	// presence still appear in the matrix. Without this, a wholesale
+	// demigrate (uncheck-and-Apply on every client column for a
+	// server) would make the row vanish entirely — the operator
+	// could not re-enable the server from the matrix because the
+	// row to click was gone. Empty ClientPresence means every
+	// non-disabled column renders as "available" — operator checks
+	// the desired cells + Apply to re-install.
+	for name := range manifestNames {
+		if _, exists := entries[name]; exists {
+			continue
+		}
+		e := &ScanEntry{
+			Name:           name,
+			ManifestExists: true,
+			CanMigrate:     !perSessionServers[name],
+			ClientPresence: map[string]ClientEntry{},
+		}
+		e.Status = classify(e, name, manifestNames)
+		entries[name] = e
+	}
 
 	out := &ScanResult{
 		At:                   time.Now(),

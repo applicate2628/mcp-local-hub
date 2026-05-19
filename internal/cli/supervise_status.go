@@ -51,6 +51,21 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 		if args == nil {
 			args = []string{}
 		}
+		// Port enrichment fallback: supervisor-intent.json from PR
+		// #211 and earlier wrote Port=0 for every daemon (migration
+		// did not seed the field from the manifest). The GUI matrix
+		// then renders "—" even though the daemon is listening on the
+		// manifest-declared port. Look up the canonical port from the
+		// manifest when the intent value is 0 so existing installs
+		// see the right port without needing an intent-file
+		// migration. Future migrate code should populate Port at
+		// write time — when it does, this lookup becomes a no-op.
+		port := d.Port
+		if port == 0 && server != "" {
+			if p, ok := api.ResolveManifestDaemonPort(server, daemon); ok {
+				port = p
+			}
+		}
 		rows = append(rows, map[string]any{
 			"task_name":        taskName,
 			"server":           server,
@@ -58,7 +73,7 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 			"command":          d.Command,
 			"args":             args,
 			"workspace":        d.Workspace,
-			"port":             d.Port,
+			"port":             port,
 			"state":            stateText,
 			"current_pid":      runtimeState.CurrentPID,
 			"started_at":       daemonRuntimeStartedAt(runtimeState.StartedAt),
