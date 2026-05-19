@@ -457,14 +457,55 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 	return nil
 }
 
-// Status returns the current scheduler view of all mcp-local-hub tasks,
-// enriched with Server/Daemon/Port parsed from manifest, plus PID/RAM/Uptime
-// for Running tasks when the OS introspection layer is available (Windows,
-// populated by internal/api/processes.go at init). NextRun is surfaced as a
-// raw backend-specific string (the locale-formatted time schtasks emits on
-// Windows, empty elsewhere); callers that need a parsed time.Time should
-// re-query the scheduler directly.
+// Status returns the slice of MCP daemons under supervisor management
+// (v0.5.0+) — same source DaemonStatusSnapshot uses for /api/status,
+// so CLI `mcphub status` and the GUI poller (which feeds the tray
+// icon) see the canonical 13-daemon view rather than scheduler.List's
+// single supervisor-task row.
+//
+// Fallback contract: when the supervisor IPC is unreachable
+// (ErrSupervisorIPCUnavailable — no lock owner sidecar, no pipe), the
+// legacy scheduler scan via StatusWithOpts is used. Hosts mid-
+// migration or running v0.4.x compat tooling still get a meaningful
+// response that way.
+//
+// PR #215 fix: before this routing, poller + CLI both saw only the
+// supervisor scheduler task, deriveState classified it as Failed
+// (no port → alive=false), tray went StateError while Dashboard
+// (via DaemonStatusSnapshot's IPC-first path) showed 11 Running
+// daemons. Two divergent code paths produced two views of reality;
+// unifying them through the IPC seam closes the divergence.
 func (a *API) Status() ([]DaemonStatus, error) {
+	return a.statusInternal(context.Background())
+}
+
+// statusInternal is the IPC-first routing implementation shared by
+// Status() (with Background ctx) and StatusContext (with caller ctx).
+// The IPC dial deadline is derived from the supplied ctx so that
+// caller cancellation (HTTP request cancel, server shutdown, Ctrl+C
+// via cobra cmd.Context()) propagates immediately to the supervisor
+// pipe read instead of always waiting the full 5s under outage.
+// Mirrors the established pattern at health.go:392-401.
+//
+// PR #215 r2 fix (codex review Finding 2): pre-r2 the IPC ctx was
+// derived from context.Background() which severed the caller's
+// cancellation chain — a CLI Ctrl+C or HTTP request cancel could
+// not interrupt a stalled supervisor IPC dial mid-call.
+func (a *API) statusInternal(ctx context.Context) ([]DaemonStatus, error) {
+	ipcCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	rows, err := DialSupervisorIPCStatus(ipcCtx)
+	if err == nil {
+		return rows, nil
+	}
+	if !errors.Is(err, ErrSupervisorIPCUnavailable) {
+		return nil, err
+	}
+	// Supervisor not reachable; fall back to legacy scheduler scan.
+	// StatusWithOpts is schtasks-driven and ctx-blind; callers that
+	// need best-effort cancellation during the fallback path go
+	// through StatusContext (api_surfaces.go) which wraps in a
+	// goroutine per §32.
 	return a.StatusWithOpts(StatusOpts{})
 }
 

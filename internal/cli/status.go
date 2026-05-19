@@ -66,10 +66,41 @@ Troubleshooting:
 See also: restart, stop, logs, scheduler upgrade.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a := api.NewAPI()
-			rows, err := a.StatusWithOpts(api.StatusOpts{
-				ProbeHealth:      probeHealth,
-				ForceMaterialize: forceMaterialize,
-			})
+			// Default `mcphub status` (no --health / --force-materialize
+			// / --workspace-scoped flags) routes through StatusContext
+			// which prefers the supervisor IPC seam (canonical v0.5.0
+			// view: 13 daemons). The --health / --force-materialize /
+			// --workspace-scoped paths need the legacy scheduler-scan
+			// enrichment (port-listen probe, manifest merge, registry
+			// load for Lifecycle/LastToolsCallAt/LastError, MCP
+			// initialize round-trip) so they keep using StatusWithOpts.
+			// PR #215 fix: before this routing, even the bare
+			// `mcphub status` invocation returned only the supervisor
+			// scheduler row because StatusWithOpts queries
+			// scheduler.List which only has 1 mcp-local-hub-* task in
+			// v0.5.0 (the supervisor LogonTrigger entry).
+			//
+			// PR #215 r2 fix (codex review):
+			//   Finding 1: workspaceScoped added to the routing gate.
+			//     The IPC path does not populate Lifecycle /
+			//     LastToolsCallAt / LastError, so
+			//     `mcphub status --workspace-scoped` (without --health)
+			//     pre-r2 silently rendered empty LIFECYCLE / LAST_USED
+			//     / LAST_ERROR columns. Routing it through
+			//     StatusWithOpts restores enrichment.
+			//   Finding 2: a.Status() → a.StatusContext(cmd.Context())
+			//     so the cobra command's ctx (Ctrl+C / shutdown)
+			//     propagates into the supervisor IPC dial.
+			var rows []api.DaemonStatus
+			var err error
+			if probeHealth || forceMaterialize || workspaceScoped {
+				rows, err = a.StatusWithOpts(api.StatusOpts{
+					ProbeHealth:      probeHealth,
+					ForceMaterialize: forceMaterialize,
+				})
+			} else {
+				rows, err = a.StatusContext(cmd.Context())
+			}
 			if err != nil {
 				return err
 			}
