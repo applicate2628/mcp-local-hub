@@ -446,8 +446,17 @@ func (a *API) loadOwnershipSnapshotInternal() (OwnershipSnapshot, error) {
 
 // StatusContext wraps (*API).Status with a goroutine + ctx-select pattern.
 // On ctx.Done() the wrapper returns (nil, ctx.Err()) immediately; the
-// underlying Status call continues to completion in the goroutine and
-// its result is dropped (best-effort cancellation per §32).
+// underlying call continues to completion in the goroutine and its
+// result is dropped (best-effort cancellation per §32).
+//
+// PR #215 r2 (codex review Finding 2): the inner production path now
+// calls statusInternal(ctx) rather than Status(), so the IPC dial
+// deadline is derived from the caller's ctx. Result: caller cancel
+// propagates immediately to the supervisor pipe read instead of
+// always waiting up to 5s under outage. The outer goroutine pattern
+// is retained for the §32 best-effort contract on the legacy
+// schtasks fallback path inside statusInternal (StatusWithOpts is
+// ctx-blind and can block beyond ctx.Done()).
 //
 // Production callers that don't need cancellation should keep using
 // Status() directly — this wrapper costs one goroutine + one channel
@@ -464,7 +473,7 @@ func (a *API) StatusContext(ctx context.Context) ([]DaemonStatus, error) {
 		if statusContextSrcFn != nil {
 			rows, err = statusContextSrcFn()
 		} else {
-			rows, err = a.Status()
+			rows, err = a.statusInternal(ctx)
 		}
 		// Buffered channel of cap 1 + only-one-sender → never blocks.
 		ch <- result{rows: rows, err: err}

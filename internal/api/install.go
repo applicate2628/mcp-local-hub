@@ -476,9 +476,25 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 // daemons. Two divergent code paths produced two views of reality;
 // unifying them through the IPC seam closes the divergence.
 func (a *API) Status() ([]DaemonStatus, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	return a.statusInternal(context.Background())
+}
+
+// statusInternal is the IPC-first routing implementation shared by
+// Status() (with Background ctx) and StatusContext (with caller ctx).
+// The IPC dial deadline is derived from the supplied ctx so that
+// caller cancellation (HTTP request cancel, server shutdown, Ctrl+C
+// via cobra cmd.Context()) propagates immediately to the supervisor
+// pipe read instead of always waiting the full 5s under outage.
+// Mirrors the established pattern at health.go:392-401.
+//
+// PR #215 r2 fix (codex review Finding 2): pre-r2 the IPC ctx was
+// derived from context.Background() which severed the caller's
+// cancellation chain — a CLI Ctrl+C or HTTP request cancel could
+// not interrupt a stalled supervisor IPC dial mid-call.
+func (a *API) statusInternal(ctx context.Context) ([]DaemonStatus, error) {
+	ipcCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	rows, err := DialSupervisorIPCStatus(ctx)
+	rows, err := DialSupervisorIPCStatus(ipcCtx)
 	if err == nil {
 		return rows, nil
 	}
@@ -486,6 +502,10 @@ func (a *API) Status() ([]DaemonStatus, error) {
 		return nil, err
 	}
 	// Supervisor not reachable; fall back to legacy scheduler scan.
+	// StatusWithOpts is schtasks-driven and ctx-blind; callers that
+	// need best-effort cancellation during the fallback path go
+	// through StatusContext (api_surfaces.go) which wraps in a
+	// goroutine per §32.
 	return a.StatusWithOpts(StatusOpts{})
 }
 
