@@ -39,6 +39,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/daemon_env_overlay"
 	"mcp-local-hub/internal/process"
 )
 
@@ -268,6 +269,13 @@ type ipcDispatchDeps struct {
 	// load-bearing for the concurrent-drain correctness contract.
 	gracefulInProgress  *gracefulCounter
 	triggerGracefulExit func() // closes loop, signals exit
+	// overlay is the parsed daemon-env-overrides.yaml file loaded once
+	// at supervisor startup. nil means no overlay file or load failed
+	// in a non-fatal way (default-relax). Per-spawn lookups go through
+	// daemon_env_overlay.LookupOverlay so a nil overlay yields nil env.
+	// Task 4.1 `respawn` IPC reads this same field to look up the
+	// affected daemon's overlay env before re-spawning.
+	overlay *daemon_env_overlay.Overlay
 }
 
 const ipcErrorSupervisorStarting = "SUPERVISOR_STARTING"
@@ -486,6 +494,22 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		return fmt.Errorf("load supervisor-state.json: %w", trackerErr)
 	}
 
+	// Load daemon-env-overrides.yaml ONCE at startup. Per spec
+	// §"Error handling" + v4 I-V4-5: parse failure is fail-LOUD —
+	// supervisor refuses to spawn ANY daemon and prints actionable
+	// guidance (`mcphub config overlay-quarantine` renames the corrupt
+	// file aside under a `.corrupt-<ts>` suffix so the next cold start
+	// boots with empty overlay).
+	//
+	// Missing file is benign: daemon_env_overlay.Load returns an empty
+	// Overlay{Daemons: {}} + nil error on ErrNotExist, so a fresh
+	// install without operator overlay edits proceeds with manifest env
+	// only — exactly the pre-overlay behavior.
+	overlay, overlayErr := loadOverlayAtStartup(stateDir, events, intent)
+	if overlayErr != nil {
+		return overlayErr
+	}
+
 	// IPC listener. `--no-ipc` keeps tests fast (lock+events+loop only).
 	// Production callers always pass --no-ipc=false; the listener owns
 	// the per-OS pipe/socket and the hello-frame handshake from Task
@@ -524,6 +548,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 				default:
 				}
 			},
+			overlay: overlay,
 		}
 
 		// Spawn the accept goroutine. It runs until listener.Close()
@@ -578,7 +603,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 
 	spawnFn := reconcileSpawnFn
 	if spawnFn == nil {
-		spawnFn = makeProductionSpawnFnWithStatePath(job, events, runtimeTracker, statePath)
+		spawnFn = makeProductionSpawnFnWithStatePath(job, events, runtimeTracker, statePath, overlay)
 	}
 	terminateFn := reconcileTerminateFn
 	if terminateFn == nil {
@@ -1176,6 +1201,104 @@ func writeIPCFrame(conn net.Conn, resp api.IPCResponse) error {
 	return nil
 }
 
+// loadOverlayAtStartup reads `daemon-env-overrides.yaml` once at
+// supervisor startup, emits the spec-mandated observability events,
+// and returns the parsed overlay. Behaviour:
+//
+//   - Missing file → returns ({Daemons: {}}, nil) per the
+//     daemon_env_overlay.Load contract. No event fires.
+//   - Parse failure (hardened-read refusal, YAML decode, size-cap
+//     exceeded, non-regular file, etc.) → emits
+//     `daemon-env-overlay-load-failed` (warn) AND returns a wrapped
+//     error pointing the operator at `mcphub config overlay-quarantine`.
+//     Caller turns this into a startup-failed audit row + abort. Per
+//     spec v4 §"Error handling" + I-V4-5 (fail-LOUD whole-overlay).
+//   - Success → emits `daemon-env-overlay-loaded` (info) with the row
+//     count, then `daemon-env-overlay-orphan-row` (warn) once per
+//     overlay row whose taskName is NOT present in the supervisor
+//     intent. Both event names match the spec §"Observability" table.
+//
+// The orphan check normalizes both sides via NormalizeOverlayKey so a
+// hand-edited overlay using bare-form taskNames matches canonical-form
+// intent. Orphan rows are NOT removed here — operators run
+// `mcphub config prune-orphan-overlay-rows` (Task 5.1) for that.
+func loadOverlayAtStartup(stateDir string, events *api.SupervisorEventLog, intent *api.SupervisorIntentFile) (*daemon_env_overlay.Overlay, error) {
+	overlayPath := filepath.Join(stateDir, "daemon-env-overrides.yaml")
+	ov, err := daemon_env_overlay.Load(overlayPath)
+	if err != nil {
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "warn",
+			Source:   "lifecycle",
+			Event:    "daemon-env-overlay-load-failed",
+			Body: map[string]any{
+				"path": overlayPath,
+				"err":  err.Error(),
+			},
+		})
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "error",
+			Source:   "lifecycle",
+			Event:    "supervise-startup-failed",
+			Body: map[string]any{
+				"err":    err.Error(),
+				"remedy": "mcphub config overlay-quarantine",
+			},
+		})
+		return nil, fmt.Errorf("daemon-env-overlay-load failed (run `mcphub config overlay-quarantine` to rename the corrupt overlay aside): %w", err)
+	}
+
+	rowCount := 0
+	if ov != nil {
+		rowCount = len(ov.Daemons)
+	}
+	_ = events.Emit(api.SupervisorEvent{
+		Severity: "info",
+		Source:   "lifecycle",
+		Event:    "daemon-env-overlay-loaded",
+		Body: map[string]any{
+			"path":      overlayPath,
+			"row_count": rowCount,
+		},
+	})
+
+	// Orphan-row scan: emit one event per overlay row whose canonical
+	// taskName is NOT in the current intent. Empty intent (fresh
+	// install before any `mcphub install`) makes every row an orphan;
+	// the events surface as warn so the operator log records the drift
+	// without aborting.
+	if ov != nil && len(ov.Daemons) > 0 {
+		intentSet := map[string]struct{}{}
+		if intent != nil {
+			for _, d := range intent.Daemons {
+				intentSet[daemon_env_overlay.NormalizeOverlayKey(d.TaskName)] = struct{}{}
+			}
+		}
+		// Stable iteration order so the audit log entries are
+		// deterministic across supervisor restarts on the same overlay.
+		keys := make([]string, 0, len(ov.Daemons))
+		for k := range ov.Daemons {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			if _, present := intentSet[daemon_env_overlay.NormalizeOverlayKey(k)]; present {
+				continue
+			}
+			_ = events.Emit(api.SupervisorEvent{
+				Severity: "warn",
+				Source:   "lifecycle",
+				Event:    "daemon-env-overlay-orphan-row",
+				Body: map[string]any{
+					"task_name": k,
+					"remedy":    "mcphub config prune-orphan-overlay-rows",
+				},
+			})
+		}
+	}
+
+	return ov, nil
+}
+
 // loadIntentFiles attempts to read the supervisor-intent.json and
 // daemon-intent.json files under stateDir and returns the parsed
 // values to the caller. Production wiring threads the supervisor
@@ -1578,14 +1701,33 @@ func mergeDaemonEnv(parent []string, manifest, overlay map[string]string) []stri
 // in sorted order, matching the v0.4.x daemon-host spawn convention
 // while keeping duplicate-case Windows keys deterministic.
 func makeProductionSpawnFn(job *process.Job, events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker) SpawnFunc {
-	return makeProductionSpawnFnWithStatePath(job, events, tracker, "")
+	return makeProductionSpawnFnWithStatePath(job, events, tracker, "", nil)
 }
 
-func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, statePath string) SpawnFunc {
+func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, statePath string, overlay *daemon_env_overlay.Overlay) SpawnFunc {
 	return func(d api.SupervisorDaemon) error {
 		cmd := exec.Command(d.Command, d.Args...)
 		if d.Workspace != "" {
 			cmd.Dir = d.Workspace
+		}
+		// Per-task overlay lookup. Returns nil when no row matches the
+		// daemon's TaskName or when overlay itself is nil — both fold
+		// to "no overlay env for this daemon" so the merge degrades to
+		// the manifest-only path (which itself may be nil → cmd.Env
+		// stays nil → child inherits os.Environ).
+		overlayEnv := daemon_env_overlay.LookupOverlay(overlay, d.TaskName)
+		// ${parent_path} expansion runs BEFORE the merge so the
+		// substituted value participates in case-insensitive PATH
+		// collision resolution (Windows: PATH/Path/path all collide
+		// under mergeDaemonEnv's normalizer). Expansion errors are
+		// non-fatal: unknown tokens are logged via ExpandParentPath's
+		// own emit path; the daemon spawns with the literal token in
+		// its env so the operator sees the failure in the child's
+		// observed PATH rather than a silent skip.
+		if len(overlayEnv) > 0 {
+			if expanded, err := daemon_env_overlay.ExpandParentPath(overlayEnv, os.Environ()); err == nil {
+				overlayEnv = expanded
+			}
 		}
 		// Phase 2.7 spawn-gate removal: previously this site was
 		// guarded by `if len(d.Env) > 0` so overlay-only spawns (no
@@ -1593,9 +1735,8 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 		// silently fall through to inherited parent env. mergeDaemonEnv
 		// now returns nil when manifest+overlay are both empty, which
 		// is the only case where cmd.Env should stay nil (inherit
-		// os.Environ directly). Task 2.8 wires the real overlay load;
-		// the third arg is nil scaffold for that follow-up.
-		if merged := mergeDaemonEnv(os.Environ(), d.Env, nil); merged != nil {
+		// os.Environ directly).
+		if merged := mergeDaemonEnv(os.Environ(), d.Env, overlayEnv); merged != nil {
 			cmd.Env = merged
 		}
 		process.NoConsole(cmd)
