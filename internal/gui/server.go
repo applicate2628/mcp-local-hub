@@ -503,6 +503,7 @@ func NewServer(cfg Config) *Server {
 	registerDaemonEnvRoutes(s)
 	registerWorkspacesRoutes(s)
 	registerSupervisorRestartRoutes(s)
+	registerStateRelaxSettingRoutes(s)
 	return s
 }
 

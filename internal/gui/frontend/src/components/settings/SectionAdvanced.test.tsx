@@ -32,10 +32,21 @@ describe("SectionAdvanced", () => {
   });
 
   it("Export bundle button fetches /api/export-config-bundle and triggers download", async () => {
+    // Each fetch call needs its OWN Response — a Response body stream
+    // can only be consumed once. SectionAdvanced's mount-time fetch
+    // of /api/settings/state-read-relax would otherwise drain the
+    // single mocked Response and starve the export-click's read.
     const blob = new Blob(["PK"], { type: "application/zip" });
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(blob, { status: 200, headers: { "Content-Type": "application/zip" } })
-    );
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/api/settings/state-read-relax")) {
+        return new Response(JSON.stringify({ enabled: false }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(blob, { status: 200, headers: { "Content-Type": "application/zip" } });
+    });
     const createObjectURLSpy = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:fake");
     const revokeObjectURLSpy = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
 
