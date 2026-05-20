@@ -1,12 +1,22 @@
-# Unified Plan: Serena dynamic-pool + Supervisor state-machine wiring (v3)
+# Unified Plan: Serena dynamic-pool + Supervisor state-machine wiring (v4)
 
-> **Status**: v3 — addresses sonnet v2 REVISE (3 NEW BLOCKERS + 1 partial + 5I + 5M) and codex v2 REVISE (4 BLOCKERS + 6I + 3M). Sonnet and codex converged on D.1 validator + D.3 install chain + B.1 Registry; codex added B.4 LoopEvent design. v3 resolves all 4 converged BLOCKERS with concrete architecture. Pending v3 dual review.
+> **Status**: v4 — closes sonnet+codex v3 REVISE 4+4 BLOCKERS with code-verified resolutions. PR #229 + PR #230 (daemon-exited emit + auto-respawn dispatcher) MERGED to master 2026-05-20 (commits 526bea9 + c840664); operational evidence + Phase H absorbed (commit 2fd5f18). Pending v4 dual review.
 >
 > **Convergence history**:
 >
 > - v1 (commit 5aa683b): initial draft. Sonnet REVISE: 4 BLOCKERS + 5I + 5M.
-> - v2 (commit 02abc55): v1 BLOCKERS resolved; codex no-path consult closed Decision 5. Sonnet v2 REVISE: 3 NEW BLOCKERS (validator collision, false SecureWriteClientConfig claim, manifest→intent→watcher chain broken). Codex v2 REVISE: same + NEW B.4 (LoopEvent missing descriptor for A.2 dispatch).
-> - v3 (this commit): all 4 converged BLOCKERS resolved — Registry `@serena` sentinel language tuple (B.1), validator branch on `daemon_template` presence (D.1), explicit `mcphub install` migration step regenerating supervisor-intent.json from manifest × workspaces.yaml (D.3), event-loop handler descriptor lookup by TaskName via cached intent (A.2). MINORs addressed inline.
+> - v2 (commit 02abc55): v1 BLOCKERS resolved; codex no-path consult closed Decision 5. Sonnet v2 REVISE: 3 NEW BLOCKERS. Codex v2 REVISE: same + NEW B.4 LoopEvent.
+> - v3 (commit 112099a): 4 v2 BLOCKERS resolved. Sonnet v3 REVISE: 4 NEW BLOCKERS (LSP call-sites under-counted, validator types wrong, `executeInstallTo` unexported, `Supervisor`/`smState` missing). Codex v3 REVISE: same 4 + 4 IMPORTANT (D.3 chain incomplete, IntentWatcher not wired, sentinel collision unprevented, path traversal hole). Operational evidence + Phase H added (1fad546+338ae82+2fd5f18) — parallel trajectory.
+> - v4 (this commit): all 4 v3 BLOCKERS closed against ACTUAL code surfaces:
+>   - **B.1** Registry: explicit `(WorkspaceKey, Language)` key model preserved; `@serena` language sentinel REJECTED by manifest validator at LSP-row registration; 6 LSP-only call sites named (`register.go:245,285,650,727,754` + `install.go:657,2124`) with per-site filter recipe; new `RegisterSerena()` atomic API + `UnregisterSerena()`; CLI gains `--backend serena` filter.
+>   - **D.1** Validator: pseudocode rewritten against ACTUAL types (`ServerManifest`, `PortPool *PortPool` with `.Start`/`.End`, `Languages []LanguageSpec`); new helper `containsWorkspacePathTokenInArgs(args []string) bool` in manifest.go scope; both-present (`daemons[]`+`daemon_template`) rejected.
+>   - **D.3** Install chain: NEW exported seam `api.InstallParsedManifest(ctx, manifest, opts)` orchestrates `BuildPlanWithOpts` + scheduler-task creation + `WriteSupervisorIntent` (the missing piece codex v3 caught: `executeInstallTo` does NOT write intent — added as new step in exported wrapper). IntentWatcher.Run wired into `runSupervise` (currently dead code at supervise_watcher.go).
+>   - **A.2** Lightweight `supervisorController` struct (NOT a god-object Supervisor; owns only IntentCache + per-task SM state). Constructed in `runSupervise`; closures dispatch into it. `atomic.Value` snapshot for IntentCache, `sync.Map` for smStates.
+>   - Path-traversal hardening (codex v3 IMPORTANT): relative-path routing uses existing `workspace_path.go:13-28` pattern (abs+clean+EvalSymlinks+ancestor check).
+>   - JSON-RPC error classification (codex v3 IMPORTANT): F.2 classifies by JSON-RPC `result`/`error`, NOT HTTP status alone.
+>   - F.3 single-workspace shortcut requires health check.
+>   - F.4 fan-out releases atomic snapshot BEFORE parallel calls.
+>   - `hub.bind_workspace` moved from supervisor IPC to MCP/HTTP layer.
 >
 > **For agentic workers / future implementers**: this plan describes work that depends on PR #229 (supervisor `daemon-exited` emit) landing first. Until #229 merges + binary upgraded + serena crash root cause is identified via the new event, implementation of Phase A.2 (state-machine wiring) is **blocked on diagnostic data**. Phases B-F can start in parallel to A.2 once A.1 (catalog + plan ratification) is done.
 >
