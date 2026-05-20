@@ -446,8 +446,17 @@ func (r *Registry) PutSerena(e WorkspaceEntry) error // requires Language == Ser
 func (r *Registry) RemoveSerena(workspaceKey string)
 func (r *Registry) AllocateSerenaPort(pool PortPool) (int, error) // first free port from pool not in AllocatedPorts
 
-// Internal-only helper (existing Put becomes unexported or restricted):
-// Existing exported (r *Registry) Put(e WorkspaceEntry) callers in register.go switch to PutLSP.
+// Internal-only helper (existing Put stays exported for UPDATE writes):
+// CALL-SITE MIGRATION (verified via `grep 'reg\.Put('` on internal/, 2026-05-20):
+//   PROD writers (4 sites total):
+//     - register.go:285 (NEW row insert from `mcphub register`) → switch to PutLSP
+//     - register.go:450 (composed entry after registration success) → switch to PutLSP
+//     - register.go:482 (rollback restore of prior entry) → keep Put (preserves whatever
+//                       Language the prior row had, including @serena if a serena row
+//                       is being rolled back; @-prefix gate would corrupt rollback)
+//     - daemon_workspace.go:187 (UPDATE lifecycle on existing row from `mcphub daemon`)
+//                       → keep Put (entry came from registry; Language already validated)
+//   TEST writers (8+ sites): test fixtures pre-populate registry state; keep Put.
 // Save() is unchanged.
 ```
 
