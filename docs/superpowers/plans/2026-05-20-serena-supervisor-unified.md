@@ -39,6 +39,30 @@
 - **Mode 2 (sticky-session)**: tools without path-args (`list_memories`, `get_current_config`, `read_memory`, `write_memory`, `delete_memory`, etc.) → mcphub maintains per-MCP-session `client_id → workspace` map; bound at first path-aware call in session. **Pending codex consultation** for default-workspace fallback semantics when no prior path-call exists.
 - **Mode 3 (auto-register on miss)**: unknown path not matching any registered workspace → file-extension survey → create `.serena/project.yml` stub → spawn new daemon → register in workspaces.yaml → forward.
 
+### Operational evidence (2026-05-20 live audit)
+
+**Captured on the operator's machine** as load-bearing input to the v4+ review loop. Live `Get-CimInstance Win32_Process` ancestor-chain walk on 2026-05-20 immediately after migrating 8 codex-cli stdio MCP entries to hub HTTP via `mcphub migrate sequential-thinking memory wolfram godbolt lldb paper-search-mcp serena gdb --clients codex-cli`:
+
+- **18 `mcp-language-server.exe` processes** all share IDENTICAL ancestor chain:
+  `mcp-language-server.exe < codex.exe < Antigravity.exe < Antigravity.exe < explorer.exe`
+- ONE codex.exe alive (operator-confirmed: "там работает всего 1 codex через субагентов")
+- 13 codex stdio MCP entries remain UN-migratable per `mcphub scan` (no top-level manifest exists for them): `clangd`, `javascript`, `python`, `rust`, `fortran`, `time-server`, `vscode-css`, `go`, `typescript`, `vscode-html`, `stgen-dxf-viewer`, `raindrop`, `fetch`
+- `mcphub cleanup --scan-clients` reports **0 orphans** — correctly excluding `child of live codex` per the safety guard at `internal/cli/overlay_prune_orphans.go`
+- The 18 processes are NOT orphans; they're live-rooted under a live codex but accumulate because each codex internal subagent spawns its own stdio MCP children that do not get reaped on subagent finish
+
+**What this proves**:
+
+1. The 8-server migration to hub HTTP (done today) WILL drop ~38% of per-subagent MCP spawns the next time codex picks up the rewritten config. That's the lower-bound win.
+2. The remaining 13 LSP-language entries are the architectural ceiling: until a workspace-scoped hub-routable LSP-bridge exists (PR #222 in flight on `feat/v0.5.x-servers-matrix-revamp`), each codex subagent must spawn its own `mcp-language-server` per language → fleet-multiplier accumulation.
+3. **`mcphub cleanup` is not the right primitive** for this class of problem. The safety guard correctly refuses to kill child-of-live-codex processes. The fix is to **eliminate the spawn at config-write time**, not to reap after the fact.
+4. The `1 codex × N subagents × M LSP languages = N×M MCP processes` formula is exactly what the unified plan's dynamic-pool architecture and PR #222's LSP-bridge revamp jointly address. This audit is the empirical motivation.
+
+**Direct implications for v4+ scope**:
+
+- Phase D (per-workspace serena spawn) must inherit the same hub-routable pattern from PR #222's LSP-bridge: clients write one stable hub URL, hub fans out to workspace-keyed daemons.
+- Phase E (auto-register on miss) becomes more important because the 13 stdio entries above are mostly per-language workspace-scoped LSP servers — auto-register on first hit is the operational path for getting all 13 onto hub routing.
+- The plan's no-path-args sticky-session design (Decision 5) addresses the same class of failure: without sticky-session binding, an unbound codex subagent would either silently route writes to the wrong workspace or fail-closed; both are operationally worse than the live "spawn fresh stdio child" behavior we see today.
+
 ### Decision 3: Supervisor state-machine wired into production
 
 **Current bug** (diagnosed via codex deep-diagnostic 2026-05-20, file: `.scratch/codex-prompts/supervisor-serena-bug-20260520-044800.out`): production `supervise_reconcile.go:117` calls `r.spawn(d)` directly without posting `EvStart` to the state machine. `cmd.Wait()` goroutine in `supervise.go:1539-1543` calls `MarkExited` + persist without posting `EvChildExit`. Result: state machine's backoff / quarantine logic is **dead code** in production. PR #229 adds the diagnostic emit but does NOT wire the state machine — that wiring is **Phase A.2 of this plan**.
