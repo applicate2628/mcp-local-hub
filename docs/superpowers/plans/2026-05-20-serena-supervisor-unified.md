@@ -63,6 +63,30 @@
 - Phase E (auto-register on miss) becomes more important because the 13 stdio entries above are mostly per-language workspace-scoped LSP servers — auto-register on first hit is the operational path for getting all 13 onto hub routing.
 - The plan's no-path-args sticky-session design (Decision 5) addresses the same class of failure: without sticky-session binding, an unbound codex subagent would either silently route writes to the wrong workspace or fail-closed; both are operationally worse than the live "spawn fresh stdio child" behavior we see today.
 
+**Cleanup intervention 2026-05-20 07:50 (operator-requested broader sweep)**:
+
+After the 18-mcp-language-server snapshot above, total process count grew to 280+ as more codex subagents ran. A second ancestor-walk widened the scope to ALL descendants of `codex.exe` whose ancestor chain does NOT contain `mcphub.exe daemon` (operator's correct primitive: kill subagent-spawned, keep hub-managed):
+
+| Process name | Count under codex (mcphub-excluded) | Killed in safe subset | Surviving after kill |
+|---|---|---|---|
+| `node.exe` (MCP-stdio) | 153 | 94 (matched `mcp-server\.js`, `@playwright/mcp`, `@modelcontextprotocol`) | 98 (mixed: hub-routed + IDE-internal, some natural respawn) |
+| `cmd.exe` (shell wrappers) | 118 | 0 (skipped — too risky to blanket-kill) | 32 (lost 86 via parent-death cascade) |
+| `gopls.exe` (Go LSP) | 60 | 60 (all — clear LSP backend, mcphub-bridge will respawn on demand) | 4 |
+| `chrome.exe` (Playwright) | 17 | 0 (per-session, operator may be viewing) | 53 (grew — Playwright reopened) |
+| `mcp-language-server.exe` | 18 | 18 (all) | 0 |
+| `conhost.exe` / `pwsh.exe` | 6 | 0 (operator terminals) | unchanged |
+| **Total** | **372** | **172 direct + ~86 cascade = ~258 processes reaped** | net **~120** of original |
+
+**Why `mcphub cleanup --scan-clients` returned 0 orphans pre-intervention** (correctly): all 372 are LIVE-rooted under `codex.exe < Antigravity.exe < explorer.exe`. None are orphans by the spec's definition (ancestor process is alive). The accumulation pattern is a per-subagent stdio fan-out, not a leaked-after-parent-died one.
+
+**This implies a Phase F+ (operational hygiene) scope** the unified plan should add — not just hub-routing config rewrites (Phase B-E already cover that) but ALSO:
+
+1. **Aggressive-cleanup CLI mode** that takes the operator's "child of live codex subagent" intent explicitly: `mcphub cleanup --aggressive --client codex-cli --kill-live-rooted-mcp-stdio`. Default stays safe; explicit flag opts into the operator-confirmed sweep. Closes the operational gap where the safety guard correctly refuses but the operator wants to override.
+2. **Per-subagent lifecycle integration** with codex CLI (upstream feature request): codex subagents should EITHER reap their stdio MCP children on subagent finish OR (preferred) inherit a single parent stdio MCP set from the codex CLI parent. Until upstream codex adopts one of these, the per-subagent fan-out remains the architectural ceiling.
+3. **GUI Servers matrix cleanup action** for the operator's interactive flow — Dashboard already has the "Cleanup orphans" button (commit `5ce805a` on this branch); needs an "Aggressive sweep" sibling per #1.
+
+These three add **Phase G** to the unified plan (deferred but in-scope for v4 review): operational hygiene tooling that complements the hub-routing config changes in Phases B-E.
+
 ### Decision 3: Supervisor state-machine wired into production
 
 **Current bug** (diagnosed via codex deep-diagnostic 2026-05-20, file: `.scratch/codex-prompts/supervisor-serena-bug-20260520-044800.out`): production `supervise_reconcile.go:117` calls `r.spawn(d)` directly without posting `EvStart` to the state machine. `cmd.Wait()` goroutine in `supervise.go:1539-1543` calls `MarkExited` + persist without posting `EvChildExit`. Result: state machine's backoff / quarantine logic is **dead code** in production. PR #229 adds the diagnostic emit but does NOT wire the state machine — that wiring is **Phase A.2 of this plan**.
