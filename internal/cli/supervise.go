@@ -575,13 +575,33 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		defer func() { _ = job.Close() }()
 	}
 
+	// crashCh: buffered channel the spawn fn's wait goroutine posts to
+	// when a child exits non-cleanly. The respawn dispatcher reads these
+	// events and schedules backoff-gated respawns up to the per-task
+	// sliding-window quarantine limit. Capacity 64 absorbs short bursts
+	// (e.g., one wrapper crash per daemon at startup when an env var is
+	// misconfigured across the whole fleet). Tests that swap in
+	// reconcileSpawnFn skip this wiring entirely — they don't need the
+	// dispatcher because their fake spawn fn never posts to the channel.
+	crashCh := make(chan crashEvent, 64)
 	spawnFn := reconcileSpawnFn
 	if spawnFn == nil {
-		spawnFn = makeProductionSpawnFnWithStatePath(job, events, runtimeTracker, statePath)
+		spawnFn = makeProductionSpawnFnWithStatePath(job, events, runtimeTracker, statePath, crashCh)
 	}
 	terminateFn := reconcileTerminateFn
 	if terminateFn == nil {
 		terminateFn = makeProductionTerminateFnWithStatePath(events, runningPIDs, runtimeTracker, statePath)
+	}
+
+	// Respawn dispatcher: consumes crashCh and re-invokes spawnFn after
+	// an exponential backoff (1s/2s/4s/8s/16s/32s/60s cap) per task,
+	// tracked via a 30-min sliding window in the runtime tracker. At 10
+	// failures in the window, the daemon is quarantined (no further
+	// respawn attempts until supervisor cold-restart). Started only
+	// when reconcileSpawnFn was nil (production wiring); tests with a
+	// fake spawn fn don't need it.
+	if reconcileSpawnFn == nil {
+		go runRespawnDispatcher(loopCtx, crashCh, spawnFn, runtimeTracker, events)
 	}
 
 	if intent != nil {
@@ -1492,10 +1512,27 @@ func mergeDaemonEnv(parent []string, overrides map[string]string) []string {
 // in sorted order, matching the v0.4.x daemon-host spawn convention
 // while keeping duplicate-case Windows keys deterministic.
 func makeProductionSpawnFn(job *process.Job, events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker) SpawnFunc {
-	return makeProductionSpawnFnWithStatePath(job, events, tracker, "")
+	return makeProductionSpawnFnWithStatePath(job, events, tracker, "", nil)
 }
 
-func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, statePath string) SpawnFunc {
+// crashEvent is what the spawn fn posts to the respawn dispatcher
+// after observing a non-clean child exit. The dispatcher reads these
+// events, computes backoff via the per-task sliding window in the
+// DaemonRuntimeTracker, and schedules a respawn (or quarantines).
+type crashEvent struct {
+	Daemon   api.SupervisorDaemon
+	ExitCode int
+	WaitErr  error
+}
+
+// makeProductionSpawnFnWithStatePath constructs the production spawn
+// closure used by the reconciler. When crashCh is non-nil and the
+// spawned child exits non-cleanly (non-zero exit code OR a non-nil
+// Wait error), the wait goroutine posts a crashEvent to that channel
+// so an auto-respawn dispatcher can react. Production passes a real
+// channel; legacy callers (makeProductionSpawnFn, tests) pass nil to
+// preserve the existing "spawn once, no respawn" behavior.
+func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, statePath string, crashCh chan<- crashEvent) SpawnFunc {
 	return func(d api.SupervisorDaemon) error {
 		cmd := exec.Command(d.Command, d.Args...)
 		if d.Workspace != "" {
@@ -1595,6 +1632,29 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 			})
 			tracker.MarkExited(taskName)
 			_ = persistDaemonRuntimeTracker(events, tracker, statePath, taskName)
+			// Auto-respawn: only post to dispatcher on non-clean exit.
+			// A clean exit (exit_code=0, no waitErr) is a deliberate
+			// shutdown (mcphub stop, IPC exit, manual taskkill) and
+			// should NOT trigger respawn. The dispatcher channel may be
+			// nil for legacy / test callers — guard with nil-check.
+			if crashCh != nil && (waitErr != nil || exitCode != 0) {
+				select {
+				case crashCh <- crashEvent{Daemon: d, ExitCode: exitCode, WaitErr: waitErr}:
+				default:
+					// Dispatcher backlog full (>64 concurrent crashes
+					// pending). Drop this respawn signal and audit-log
+					// it. Operator must restart supervisor to recover.
+					_ = events.Emit(api.SupervisorEvent{
+						Severity: "warn",
+						Source:   "lifecycle",
+						Event:    "respawn-dispatcher-backlog-full",
+						TaskName: taskName,
+						Body: map[string]any{
+							"exit_code": exitCode,
+						},
+					})
+				}
+			}
 		}()
 		if err := persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName); err != nil {
 			return err

@@ -28,13 +28,84 @@ type DaemonRuntimeEntry struct {
 }
 
 type DaemonRuntimeTracker struct {
-	mu      sync.RWMutex
-	entries map[string]DaemonRuntimeEntry
+	mu       sync.RWMutex
+	entries  map[string]DaemonRuntimeEntry
+	failures map[string][]time.Time // per-task crash timestamps (sliding window, not persisted)
 }
 
 func NewDaemonRuntimeTracker() *DaemonRuntimeTracker {
 	return &DaemonRuntimeTracker{
-		entries: map[string]DaemonRuntimeEntry{},
+		entries:  map[string]DaemonRuntimeEntry{},
+		failures: map[string][]time.Time{},
+	}
+}
+
+// RecordCrashAndCountInWindow appends `now` to the per-task failures
+// slice, prunes entries older than (now - window), and returns the
+// current count within the window. Crash timestamps are in-memory
+// only — not persisted to supervisor-state.json. On supervisor cold
+// restart the window starts fresh, which matches the design intent:
+// pre-restart crashes are not relevant for runtime respawn decisions
+// (the operator deliberately reset state).
+func (t *DaemonRuntimeTracker) RecordCrashAndCountInWindow(taskName string, now time.Time, window time.Duration) int {
+	if t == nil {
+		return 0
+	}
+	taskName = canonicalSupervisorTaskName(taskName)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.failures == nil {
+		t.failures = map[string][]time.Time{}
+	}
+	cutoff := now.Add(-window)
+	prev := t.failures[taskName]
+	kept := make([]time.Time, 0, len(prev)+1)
+	for _, ts := range prev {
+		if ts.After(cutoff) {
+			kept = append(kept, ts)
+		}
+	}
+	kept = append(kept, now)
+	t.failures[taskName] = kept
+	return len(kept)
+}
+
+// CrashCountInWindow returns the current failures-in-window count
+// without recording a new failure. Used by tests + diagnostic
+// snapshots; production callers go through RecordCrashAndCountInWindow.
+func (t *DaemonRuntimeTracker) CrashCountInWindow(taskName string, now time.Time, window time.Duration) int {
+	if t == nil {
+		return 0
+	}
+	taskName = canonicalSupervisorTaskName(taskName)
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	if t.failures == nil {
+		return 0
+	}
+	cutoff := now.Add(-window)
+	n := 0
+	for _, ts := range t.failures[taskName] {
+		if ts.After(cutoff) {
+			n++
+		}
+	}
+	return n
+}
+
+// ClearCrashes drops the per-task failures slice. Called when a
+// daemon survives long enough to be considered healthy — resets the
+// sliding window so future crashes start the backoff sequence from
+// scratch.
+func (t *DaemonRuntimeTracker) ClearCrashes(taskName string) {
+	if t == nil {
+		return
+	}
+	taskName = canonicalSupervisorTaskName(taskName)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.failures != nil {
+		delete(t.failures, taskName)
 	}
 }
 
