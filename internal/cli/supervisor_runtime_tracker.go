@@ -165,6 +165,53 @@ func (t *DaemonRuntimeTracker) MarkTerminated(taskName string) {
 	t.MarkExited(taskName)
 }
 
+// MarkBackoff transitions a task into the backoff state — used by
+// the respawn dispatcher between a crash event and the next spawn
+// attempt. Without this, status snapshots (mcphub status, GUI
+// dashboard) report the daemon as Stopped during the backoff window
+// even though a respawn is pending. Per codex bot P2 PR #230 round 2:
+// "Set runtime state to backoff when respawn is scheduled".
+//
+// current_pid is cleared (no live child during backoff) and
+// PIDGeneration is preserved (the next MarkSpawned increments it).
+func (t *DaemonRuntimeTracker) MarkBackoff(taskName string) {
+	if t == nil {
+		return
+	}
+	taskName = canonicalSupervisorTaskName(taskName)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	entry := t.entries[taskName]
+	entry.State = daemonRuntimeStateBackoff
+	entry.CurrentPID = 0
+	entry.StartedAt = time.Time{}
+	t.entries[taskName] = entry
+}
+
+// MarkQuarantined transitions a task into the quarantine state —
+// reached when the per-task crash count crosses
+// respawnQuarantineThreshold (10 failures in 30 min). Quarantine
+// suspends further respawn attempts until supervisor cold-restart.
+// Per codex bot P2 PR #230 round 2: "Transition runtime state to
+// quarantine on threshold breach" + "Persist quarantined runtime
+// state before returning".
+//
+// Like MarkBackoff, current_pid is cleared and PIDGeneration is
+// preserved.
+func (t *DaemonRuntimeTracker) MarkQuarantined(taskName string) {
+	if t == nil {
+		return
+	}
+	taskName = canonicalSupervisorTaskName(taskName)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	entry := t.entries[taskName]
+	entry.State = daemonRuntimeStateQuarantine
+	entry.CurrentPID = 0
+	entry.StartedAt = time.Time{}
+	t.entries[taskName] = entry
+}
+
 func (t *DaemonRuntimeTracker) Get(taskName string) (DaemonRuntimeEntry, bool) {
 	if t == nil {
 		return DaemonRuntimeEntry{}, false

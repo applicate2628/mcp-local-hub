@@ -118,7 +118,7 @@ func TestRespawnDispatcher_SchedulesRespawnAfterCrash(t *testing.T) {
 	defer cancel()
 	crashCh := make(chan crashEvent, 8)
 	neverStopped := func(string) bool { return false }
-	go runRespawnDispatcher(ctx, crashCh, fakeSpawn, tracker, events, neverStopped)
+	go runRespawnDispatcher(ctx, crashCh, fakeSpawn, tracker, events, neverStopped, "")
 
 	descriptor := api.SupervisorDaemon{
 		TaskName: `\mcp-local-hub-test-default`,
@@ -170,7 +170,7 @@ func TestRespawnDispatcher_QuarantineAfterThreshold(t *testing.T) {
 	defer cancel()
 	crashCh := make(chan crashEvent, 32)
 	neverStopped := func(string) bool { return false }
-	go runRespawnDispatcher(ctx, crashCh, fakeSpawn, tracker, events, neverStopped)
+	go runRespawnDispatcher(ctx, crashCh, fakeSpawn, tracker, events, neverStopped, "")
 
 	descriptor := api.SupervisorDaemon{
 		TaskName: `\mcp-local-hub-test-default`,
@@ -242,7 +242,7 @@ func TestRespawnDispatcher_SuppressesOnStopIntent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	crashCh := make(chan crashEvent, 8)
-	go runRespawnDispatcher(ctx, crashCh, fakeSpawn, tracker, events, alwaysStopped)
+	go runRespawnDispatcher(ctx, crashCh, fakeSpawn, tracker, events, alwaysStopped, "")
 
 	descriptor := api.SupervisorDaemon{
 		TaskName: `\mcp-local-hub-test-default`,
@@ -314,7 +314,7 @@ func TestRespawnDispatcher_RetriesOnSpawnFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	crashCh := make(chan crashEvent, 8)
-	go runRespawnDispatcher(ctx, crashCh, fakeSpawn, tracker, events, neverStopped)
+	go runRespawnDispatcher(ctx, crashCh, fakeSpawn, tracker, events, neverStopped, "")
 
 	descriptor := api.SupervisorDaemon{
 		TaskName: `\mcp-local-hub-test-default`,
@@ -341,6 +341,80 @@ func TestRespawnDispatcher_RetriesOnSpawnFailure(t *testing.T) {
 	logStr := string(logRaw)
 	if !strings.Contains(logStr, `"event":"daemon-respawn-spawn-failed"`) {
 		t.Errorf("daemon-respawn-spawn-failed event missing from audit log:\n%s", logStr)
+	}
+}
+
+// TestRespawnDispatcher_TracksBackoffAndQuarantineState (bot v2 P2
+// regression guard for PR #230 round 2): the dispatcher must call
+// MarkBackoff when scheduling a respawn AND MarkQuarantined when
+// crossing the failure threshold. Otherwise status/GUI consumers
+// see the daemon as "Stopped" during backoff (misleading — restart
+// is pending) and as "Stopped" after quarantine (hides that auto-
+// respawn is intentionally suspended).
+func TestRespawnDispatcher_TracksBackoffAndQuarantineState(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	tracker := NewDaemonRuntimeTracker()
+	fakeSpawn := func(d api.SupervisorDaemon) error { return nil }
+	neverStopped := func(string) bool { return false }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	crashCh := make(chan crashEvent, 16)
+	go runRespawnDispatcher(ctx, crashCh, fakeSpawn, tracker, events, neverStopped, "")
+
+	descriptor := api.SupervisorDaemon{
+		TaskName: `\mcp-local-hub-test-default`,
+		Server:   "test",
+		Daemon:   "default",
+	}
+	// First crash → dispatcher schedules backoff respawn.
+	crashCh <- crashEvent{Daemon: descriptor, ExitCode: 1, WaitErr: nil}
+
+	// Tracker state should transition to "backoff" synchronously
+	// when the dispatcher processes the event. Poll briefly.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if entry, ok := tracker.Get(descriptor.TaskName); ok && entry.State == daemonRuntimeStateBackoff {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	entry, ok := tracker.Get(descriptor.TaskName)
+	if !ok {
+		t.Fatal("tracker entry missing after crash event")
+	}
+	if entry.State != daemonRuntimeStateBackoff {
+		t.Errorf("tracker state after first crash = %q, want %q (backoff)", entry.State, daemonRuntimeStateBackoff)
+	}
+	if entry.CurrentPID != 0 {
+		t.Errorf("tracker CurrentPID after MarkBackoff = %d, want 0", entry.CurrentPID)
+	}
+
+	// Pre-seed 9 more crashes to reach the quarantine threshold.
+	now := time.Now().UTC()
+	for i := 0; i < 9; i++ {
+		tracker.RecordCrashAndCountInWindow(descriptor.TaskName, now, respawnFailureWindow)
+	}
+	crashCh <- crashEvent{Daemon: descriptor, ExitCode: 1, WaitErr: nil}
+
+	// Tracker state should transition to "quarantine".
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if entry, ok := tracker.Get(descriptor.TaskName); ok && entry.State == daemonRuntimeStateQuarantine {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	entry, _ = tracker.Get(descriptor.TaskName)
+	if entry.State != daemonRuntimeStateQuarantine {
+		t.Errorf("tracker state after threshold breach = %q, want %q (quarantine)", entry.State, daemonRuntimeStateQuarantine)
 	}
 }
 

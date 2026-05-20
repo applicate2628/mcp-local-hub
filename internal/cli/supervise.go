@@ -620,7 +620,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		return stopped
 	}
 	if reconcileSpawnFn == nil {
-		go runRespawnDispatcher(loopCtx, crashCh, spawnFn, runtimeTracker, events, isStoppedFn)
+		go runRespawnDispatcher(loopCtx, crashCh, spawnFn, runtimeTracker, events, isStoppedFn, statePath)
 	}
 
 	if intent != nil {
@@ -1656,20 +1656,35 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 			// shutdown (mcphub stop, IPC exit, manual taskkill) and
 			// should NOT trigger respawn. The dispatcher channel may be
 			// nil for legacy / test callers — guard with nil-check.
+			//
+			// Bot v2 P2 (PR #230 round 2) fix: previous non-blocking
+			// `case ... default:` form dropped the crash event when the
+			// dispatcher buffer was saturated, permanently stranding the
+			// daemon (no child process → no future cmd.Wait to retry).
+			// The new form blocks with a 30s bound — generous enough
+			// that even a fleet-wide crash burst gets drained (the
+			// dispatcher main loop never blocks; only the backoff
+			// goroutine sleeps, per-task). Bounded so a pathological
+			// dispatcher (deadlocked, panicked) cannot hang this wait
+			// goroutine forever. On timeout we still audit and give up,
+			// but operator-visible failure is now "dispatcher
+			// pathological state" rather than "burst dropped one of
+			// many".
 			if crashCh != nil && (waitErr != nil || exitCode != 0) {
+				timer := time.NewTimer(30 * time.Second)
 				select {
 				case crashCh <- crashEvent{Daemon: d, ExitCode: exitCode, WaitErr: waitErr}:
-				default:
-					// Dispatcher backlog full (>64 concurrent crashes
-					// pending). Drop this respawn signal and audit-log
-					// it. Operator must restart supervisor to recover.
+					timer.Stop()
+				case <-timer.C:
 					_ = events.Emit(api.SupervisorEvent{
-						Severity: "warn",
+						Severity: "error",
 						Source:   "lifecycle",
-						Event:    "respawn-dispatcher-backlog-full",
+						Event:    "respawn-dispatcher-send-timeout",
 						TaskName: taskName,
 						Body: map[string]any{
-							"exit_code": exitCode,
+							"exit_code":  exitCode,
+							"timeout_ms": 30000,
+							"reason":     "dispatcher saturated for 30s; respawn signal lost",
 						},
 					})
 				}

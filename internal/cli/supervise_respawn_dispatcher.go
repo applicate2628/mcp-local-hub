@@ -110,6 +110,7 @@ func runRespawnDispatcher(
 	tracker *DaemonRuntimeTracker,
 	events *api.SupervisorEventLog,
 	isStopped isStoppedFn,
+	statePath string,
 ) {
 	for {
 		select {
@@ -119,7 +120,7 @@ func runRespawnDispatcher(
 			if !ok {
 				return
 			}
-			scheduleRespawnAttempt(ctx, ev.Daemon, ev.ExitCode, spawn, tracker, events, isStopped)
+			scheduleRespawnAttempt(ctx, ev.Daemon, ev.ExitCode, spawn, tracker, events, isStopped, statePath)
 		}
 	}
 }
@@ -140,6 +141,7 @@ func scheduleRespawnAttempt(
 	tracker *DaemonRuntimeTracker,
 	events *api.SupervisorEventLog,
 	isStopped isStoppedFn,
+	statePath string,
 ) {
 	// Stop-intent check BEFORE recording the crash. An operator-
 	// initiated stop (mcphub stop) sets Desired=stopped in
@@ -163,6 +165,13 @@ func scheduleRespawnAttempt(
 	now := time.Now().UTC()
 	failures := tracker.RecordCrashAndCountInWindow(d.TaskName, now, respawnFailureWindow)
 	if failures >= respawnQuarantineThreshold {
+		// Bot v2 P2 (PR #230 round 2): transition tracker state +
+		// persist so status/GUI consumers see "quarantined" instead
+		// of "Stopped". Without this, the quarantined daemon appears
+		// indistinguishable from a normally-stopped one until next
+		// supervisor restart.
+		tracker.MarkQuarantined(d.TaskName)
+		_ = persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName)
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "error",
 			Source:   "lifecycle",
@@ -176,6 +185,13 @@ func scheduleRespawnAttempt(
 		})
 		return
 	}
+	// Bot v2 P2 (PR #230 round 2): transition tracker state to
+	// backoff + persist so status/GUI consumers see "Restarting"
+	// during the backoff window. cmd.Wait goroutine already called
+	// MarkExited (state=idle), so without this the daemon appears
+	// "Stopped" between scheduling and actual respawn.
+	tracker.MarkBackoff(d.TaskName)
+	_ = persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName)
 	backoff := computeRespawnBackoff(failures)
 	_ = events.Emit(api.SupervisorEvent{
 		Severity: "info",
@@ -236,7 +252,7 @@ func scheduleRespawnAttempt(
 					"err": err.Error(),
 				},
 			})
-			scheduleRespawnAttempt(ctx, d, -1, spawn, tracker, events, isStopped)
+			scheduleRespawnAttempt(ctx, d, -1, spawn, tracker, events, isStopped, statePath)
 		}
 		// On success, the spawn's own cmd.Wait goroutine will post
 		// any future crash event back to the dispatcher via crashCh,
