@@ -1,22 +1,21 @@
-# Unified Plan: Serena dynamic-pool + Supervisor state-machine wiring (v4)
+# Unified Plan: Serena dynamic-pool + Supervisor state-machine wiring (v5)
 
-> **Status**: v4 — closes sonnet+codex v3 REVISE 4+4 BLOCKERS with code-verified resolutions. PR #229 + PR #230 (daemon-exited emit + auto-respawn dispatcher) MERGED to master 2026-05-20 (commits 526bea9 + c840664); operational evidence + Phase H absorbed (commit 2fd5f18). Pending v4 dual review.
+> **Status**: v5 — section bodies propagated to match the v4 header summary. v4 header captured the resolution intent for 4 v3+v4 BLOCKERS but section-level prose (B.1, D.1, D.3, A.2) still carried v3 text; v5 rewrites each section against verified code surfaces at HEAD `6f22944` so reviewers can validate the resolutions against actual file:line evidence. PR #229 + PR #230 (daemon-exited emit + auto-respawn dispatcher) MERGED to master 2026-05-20 (commits 526bea9 + c840664). Pending v5 dual review.
 >
 > **Convergence history**:
 >
 > - v1 (commit 5aa683b): initial draft. Sonnet REVISE: 4 BLOCKERS + 5I + 5M.
 > - v2 (commit 02abc55): v1 BLOCKERS resolved; codex no-path consult closed Decision 5. Sonnet v2 REVISE: 3 NEW BLOCKERS. Codex v2 REVISE: same + NEW B.4 LoopEvent.
 > - v3 (commit 112099a): 4 v2 BLOCKERS resolved. Sonnet v3 REVISE: 4 NEW BLOCKERS (LSP call-sites under-counted, validator types wrong, `executeInstallTo` unexported, `Supervisor`/`smState` missing). Codex v3 REVISE: same 4 + 4 IMPORTANT (D.3 chain incomplete, IntentWatcher not wired, sentinel collision unprevented, path traversal hole). Operational evidence + Phase H added (1fad546+338ae82+2fd5f18) — parallel trajectory.
-> - v4 (this commit): all 4 v3 BLOCKERS closed against ACTUAL code surfaces:
->   - **B.1** Registry: explicit `(WorkspaceKey, Language)` key model preserved; `@serena` language sentinel REJECTED by manifest validator at LSP-row registration; 6 LSP-only call sites named (`register.go:245,285,650,727,754` + `install.go:657,2124`) with per-site filter recipe; new `RegisterSerena()` atomic API + `UnregisterSerena()`; CLI gains `--backend serena` filter.
->   - **D.1** Validator: pseudocode rewritten against ACTUAL types (`ServerManifest`, `PortPool *PortPool` with `.Start`/`.End`, `Languages []LanguageSpec`); new helper `containsWorkspacePathTokenInArgs(args []string) bool` in manifest.go scope; both-present (`daemons[]`+`daemon_template`) rejected.
->   - **D.3** Install chain: NEW exported seam `api.InstallParsedManifest(ctx, manifest, opts)` orchestrates `BuildPlanWithOpts` + scheduler-task creation + `WriteSupervisorIntent` (the missing piece codex v3 caught: `executeInstallTo` does NOT write intent — added as new step in exported wrapper). IntentWatcher.Run wired into `runSupervise` (currently dead code at supervise_watcher.go).
->   - **A.2** Lightweight `supervisorController` struct (NOT a god-object Supervisor; owns only IntentCache + per-task SM state). Constructed in `runSupervise`; closures dispatch into it. `atomic.Value` snapshot for IntentCache, `sync.Map` for smStates.
->   - Path-traversal hardening (codex v3 IMPORTANT): relative-path routing uses existing `workspace_path.go:13-28` pattern (abs+clean+EvalSymlinks+ancestor check).
->   - JSON-RPC error classification (codex v3 IMPORTANT): F.2 classifies by JSON-RPC `result`/`error`, NOT HTTP status alone.
->   - F.3 single-workspace shortcut requires health check.
->   - F.4 fan-out releases atomic snapshot BEFORE parallel calls.
->   - `hub.bind_workspace` moved from supervisor IPC to MCP/HTTP layer.
+> - v4 (commit 6f22944): header bumped with resolution intent for all 4 v3 BLOCKERS + 4 IMPORTANTS, but section bodies still v3. Dual review returned REVISE with consensus that section-level prose must be rewritten before v5 can be reviewed against verified evidence. Both reviewers also surfaced specific corrections: (a) LSP call-site catalog was 4-undercounted at 13-actual sites (NOT 6, NOT 8 — see B.1 v5 table), (b) `@`-prefix is NOT currently rejected by the manifest validator, (c) the validator-level rejection alone does not defend the registry write path because `@serena` lives in `WorkspaceEntry.Language` (registry) not `LanguageSpec.Name` (manifest), (d) v3 pseudocode used `Manifest` (real type is `ServerManifest`) + `len(m.PortPool)` (real type is `*PortPool`), (e) v3's `executeInstallTo` reference is to an unexported function.
+> - v5 (this commit): section bodies rewritten to match the v4 header intent + close the additional reviewer-surfaced corrections:
+>   - **B.1** Registry: 13-site verified call-site catalog (4 LSP-only requiring sentinel filter; 9 backend-agnostic safe-include); dual-gate `@`-prefix defense at manifest validator (`config/manifest.go:347-365`) AND registry write path (`PutLSP` wrapper); backend/server ownership matrix; `mcphub unregister --backend {serena|all|<name>}` default-LSP-only semantics.
+>   - **D.1** Validator: compile-accurate pseudocode against verified types (`ServerManifest` at manifest.go:48, `*PortPool` with `.Start`/`.End` at manifest.go:58+109-112, `Languages []LanguageSpec`); `DaemonTemplate.PortPool *PortPool` (NOT `[]int`) for consistency; `containsWorkspacePathTokenInArgs` as private helper with substring-match (composite args like `--project=${workspace.path}/sub` accepted); B.1 dual-gate `@`-prefix rejection lives in the same per-language loop.
+>   - **D.3** Install chain: new exported `api.InstallParsedManifest(ctx, m, opts)` defined with full atomicity contract (pre-flight `WriteSupervisorIntent` dry-write gate + shared rollback stack across scheduler-tasks + per-client config + intent write); duplication-with-Install resolved via extracted `installPlan` helper; net code growth ~80 lines.
+>   - **A.2** SupervisorController: lightweight struct reconciles with existing PR #230 `runRespawnDispatcher` (DELETED) + `DaemonRuntimeTracker` (REUSED as sole consumer); `atomic.Value` for IntentCache (justified vs RWMutex+CoW); `runRespawnDispatcher` body absorbed into `executeSideEffect`; existing 8 dispatcher tests refactored to drive controller entry point; IntentWatcher.Run wiring made concrete in runSupervise.
+>   - **F.2** JSON-RPC `result`/`error` envelope classification (not HTTP status alone) with `classifyReadMemoryResponse` helper.
+>   - **F.3** Single-workspace shortcut gated on `RestartPolicyState == StRunning` health check; 412 with `daemon_state` field on unhealthy.
+>   - **F.4** Snapshot-then-release lock pattern documented; fan-out runs lock-free against value-copy slice; `hub.bind_workspace` moved from supervisor IPC to MCP/HTTP tool on hub-mcp endpoint.
 >
 > **For agentic workers / future implementers**: this plan describes work that depends on PR #229 (supervisor `daemon-exited` emit) landing first. Until #229 merges + binary upgraded + serena crash root cause is identified via the new event, implementation of Phase A.2 (state-machine wiring) is **blocked on diagnostic data**. Phases B-F can start in parallel to A.2 once A.1 (catalog + plan ratification) is done.
 >
@@ -168,18 +167,34 @@ Key facts surfaced by codex:
 
 **TBD for v2**: read `supervisor_event_loop.go` end-to-end to populate exact `Post` / `Run` / event-loop lifecycle API. (Codex's deep-diagnostic noted "FIFO event loop" exists but didn't fully trace the production caller — v2 implementer must verify.)
 
-### A.2: Wire state machine into production reconcile + spawn paths (v3 design)
+### A.2: Wire state machine into production reconcile + spawn paths (v5 design)
 
-**v2 BLOCKER (codex)**: v2 said "replace direct spawn with eventLoop.Post()" but `LoopEvent` (`supervisor_event_loop.go:6-10`) carries only `Kind`, `TaskName`, `Body map[string]any` — no `SupervisorDaemon` descriptor needed for spawn. Posting `EvStart{TaskName: "..."}` loses the descriptor (command, args, env, port, workspace) that `spawn()` needs to call exec.
+**v3/v4 status**: BLOCKER (sonnet + codex). v3 referenced `s.Supervisor` struct + `s.smState` field as if they existed in production — neither does. Production is `func runSupervise(ctx, noIPC, strictMode) error` at `supervise.go:315` with all state as locals (event log, job, IPC listener, intent watcher, runtime tracker — closures over function-local variables). PR #230 added `runRespawnDispatcher` (`supervise_respawn_dispatcher.go:77`) + `DaemonRuntimeTracker` (`supervisor_runtime_tracker.go:30`) as a lightweight auto-respawn path that does NOT use the formal `api.Transition()` state machine. A.2 must reconcile with these, not replace them blindly.
 
-**v3 design — descriptor lookup pattern**: production handler caches the parsed `SupervisorIntentFile` (loaded once per reconcile cycle, refreshed on `IntentWatcher.onChange`), and the SM dispatch handler looks up the descriptor by `TaskName` when processing `EvStart` / `EvChildExit` events. `LoopEvent` stays minimal; the descriptor cache is an implementation detail of the handler.
+**v5 design — lightweight `supervisorController` wrapping the existing runtime**:
+
+The PR #230 `runRespawnDispatcher` is a working subset of the formal state machine (StRunning + EvChildExit → StBackoffWaiting → StSpawning | StQuarantined). A.2 promotes the dispatcher's responsibilities into a small struct that also owns the `IntentCache` and routes ALL spawn/respawn through the formal `api.Transition()` SM. The existing `DaemonRuntimeTracker` is REUSED (sliding-window quarantine semantics are already correct); the lightweight dispatcher's body is folded into the controller's event handler.
 
 ```go
-// New production handler — registered via EventLoop.RegisterHandler in supervise.go.
+// supervisorController is the long-lived runtime owner replacing the
+// closure-over-locals pattern in runSupervise. It owns:
+//   - IntentCache (atomic.Value) for descriptor lookup on EvStart/EvChildExit
+//   - eventLoop for serialized side-effect dispatch (replaces the dispatcher goroutine's
+//     direct crashCh→spawn path)
+//   - DaemonRuntimeTracker (reused as-is from PR #230 — sliding-window quarantine)
+//   - persistent SM state map keyed by TaskName, mirrored to supervisor-state.json
 //
-// IntentCache holds the parsed intent + a TaskName→Daemon index, refreshed
-// when IntentWatcher.onChange fires. Concurrency: copy-on-write via atomic.Value
-// so the handler always reads a coherent snapshot.
+// Field count: 5. NOT a god-object — the heavy lifting (spawn, audit emit, IPC,
+// reconcile, watcher) stays as free functions or existing types; controller is
+// the orchestration glue.
+type supervisorController struct {
+    intentCache *IntentCache              // atomic.Value snapshot pointer; refreshed on IntentWatcher.onChange
+    eventLoop   *api.EventLoop            // serialized dispatch; existing primitive
+    tracker     *DaemonRuntimeTracker     // PR #230 sliding-window + backoff/quarantine state markers
+    smStates    sync.Map                  // taskName → api.RestartPolicyState (the formal SM state)
+    events      *api.SupervisorEventLog   // audit emitter
+}
+
 type IntentCache struct {
     snap atomic.Value // *intentSnapshot
 }
@@ -190,61 +205,141 @@ type intentSnapshot struct {
 }
 
 func (c *IntentCache) Lookup(taskName string) (*api.SupervisorDaemon, bool) {
-    s := c.snap.Load().(*intentSnapshot)
+    s, ok := c.snap.Load().(*intentSnapshot)
+    if !ok || s == nil {
+        return nil, false
+    }
     d, ok := s.daemonByTask[taskName]
     return d, ok
 }
 
-// Production SM dispatch handler. Called from EventLoop.RegisterHandler.
-// Owns: state machine transition + side-effect execution (spawn, arm timer, persist).
-func (s *Supervisor) handleLoopEvent(e api.LoopEvent) {
-    d, ok := s.intentCache.Lookup(e.TaskName)
-    if !ok {
-        // Daemon dropped from intent; ignore. Audit-log the orphan event for diagnosis.
-        return
+// Refresh atomically swaps the cached snapshot. Wired into IntentWatcher.onChange.
+func (c *IntentCache) Refresh(intent *api.SupervisorIntentFile) {
+    snap := &intentSnapshot{
+        intent:       intent,
+        daemonByTask: make(map[string]*api.SupervisorDaemon, len(intent.Daemons)),
     }
-    currentState := s.smState.Get(e.TaskName)
-    ctx := s.smContextFor(e.TaskName, d)
-    newState, side, persistBefore, matched := api.Transition(currentState, e.Kind, ctx)
+    for i := range intent.Daemons {
+        d := &intent.Daemons[i]
+        snap.daemonByTask[d.TaskName] = d
+    }
+    c.snap.Store(snap)
+}
+
+// handleLoopEvent is the single dispatch path for spawn/exit events.
+// Replaces both the direct r.spawn(d) call in supervise_reconcile.go:118 AND
+// the runRespawnDispatcher goroutine in supervise_respawn_dispatcher.go:77.
+func (c *supervisorController) handleLoopEvent(e api.LoopEvent) {
+    d, ok := c.intentCache.Lookup(e.TaskName)
+    if !ok {
+        return // daemon dropped from intent; audit-log orphan event if desired
+    }
+    current, _ := c.smStates.Load(e.TaskName)
+    currentState, _ := current.(api.RestartPolicyState)
+    smCtx := api.SMContext{
+        TaskName:        e.TaskName,
+        Now:             time.Now().UTC(),
+        FailuresInWindow: c.tracker.CrashCountInWindow(e.TaskName, time.Now().UTC(), respawnFailureWindow),
+    }
+    newState, side, persistBefore, matched := api.Transition(currentState, e.Kind, smCtx)
     if !matched {
-        return // log + drop
+        return // log + drop; transition is a no-op for this state+kind pair
     }
     if persistBefore {
-        s.smState.Set(e.TaskName, newState)
-        s.persistState()
+        c.smStates.Store(e.TaskName, newState)
+        // Persist to supervisor-state.json via existing tracker.Persist seam.
+        // Best-effort — audit-log on failure.
     }
-    s.executeSideEffect(side, d) // spawn / arm-backoff-timer / terminate / etc.
+    c.executeSideEffect(side, d)
 }
 ```
 
+**IntentCache concurrency primitive choice** (closes v4 codex Q1 finding):
+
+`atomic.Value` is correct for read-mostly snapshot pointer swap:
+
+- Writes (IntentWatcher.onChange) build a fresh `*intentSnapshot` (including a fresh `daemonByTask` map) and call `c.snap.Store(snap)` — one atomic pointer write.
+- Reads (every handleLoopEvent call) call `c.snap.Load().(*intentSnapshot)` once, then operate on a fully-immutable snapshot for the duration of the event.
+- The snapshot is NEVER mutated post-publish; readers cannot observe a partial map; writers cannot corrupt a concurrent reader's view.
+- RWMutex + CoW would add a per-read mutex acquire (write contention is rare but read contention is per-event); atomic.Value is strictly better for this pattern.
+
+The same primitive is already used in production by `internal/api/health.go`'s `DaemonStatusSnapshot` cache — A.2 reuses the established pattern.
+
 **Replacement points**:
 
-- `supervise_reconcile.go:118` direct `r.spawn(d)` → `eventLoop.Post(LoopEvent{Kind: api.EvStart, TaskName: d.TaskName})`. Descriptor `d` is reachable via cache; not duplicated in the event.
-- `supervise.go:1916-1917` `cmd.Wait()` goroutine: after the daemon-exited emit (now in PR #229 — landed pre-A.2), also `eventLoop.Post(LoopEvent{Kind: api.EvChildExit, TaskName: taskName})`. Handler then triggers backoff / quarantine / respawn state transitions.
+- `supervise_reconcile.go:118` direct `r.spawn(d)` → `eventLoop.Post(LoopEvent{Kind: api.EvStart, TaskName: d.TaskName})`. Descriptor `d` resolved via cache; not duplicated in the event.
+- `supervise.go:1916-1917` `cmd.Wait()` goroutine: after the existing `daemon-exited` emit (PR #229), also `eventLoop.Post(LoopEvent{Kind: api.EvChildExit, TaskName: taskName})`. Handler then triggers backoff / quarantine / respawn state transitions through the formal SM.
+- `runRespawnDispatcher` (`supervise_respawn_dispatcher.go:77`) — **REMOVED**. Its responsibilities (sliding-window check, backoff timer arm, spawn fire, quarantine audit) are absorbed into `executeSideEffect`. The `crashCh` channel and dispatcher goroutine in `runSupervise` are deleted. Loose ends:
+  - `crashEvent` struct moves into `executeSideEffect`'s internal model OR is deleted entirely (the SM's `EvChildExit` event carries exit_code via `LoopEvent.Body`).
+  - The existing dispatcher tests (`supervise_respawn_dispatcher_test.go` — 8 tests including `TestRespawnDispatcher_SchedulesRespawnAfterCrash`, `TestRespawnDispatcher_QuarantineAfterThreshold`, `TestRespawnDispatcher_SuppressesOnStopIntent`, `TestRespawnDispatcher_RetriesOnSpawnFailure`, `TestRespawnDispatcher_TracksBackoffAndQuarantineState`) are refactored to drive the controller's `handleLoopEvent` instead of `runRespawnDispatcher` directly; the test contract is preserved (same semantics, different entry point).
 
-**Gating** (unchanged from v2): A.2 starts only after PR #229 + its master-merge + binary upgrade + serena root-cause identification.
+**Single-consumer guarantee** (closes v4 codex Q4 finding "Does supervisorController cross with DaemonRuntimeTracker ownership?"):
 
-**Gating** (BLOCKER-3 fix from sonnet v1 review): the `daemon-exited` event does NOT currently exist on `feat/v0.5.x-servers-matrix-revamp` branch — it lives in PR #229 (`fix/supervisor-child-exit-emit` branch, HEAD `e9adb88` as of 2026-05-20T05:50Z). Explicit prerequisites for Phase A.2 work to begin:
+The controller becomes the SOLE consumer of `DaemonRuntimeTracker`'s crash-counting methods. Direct callers of `tracker.RecordCrashAndCountInWindow` outside the controller's `executeSideEffect` are forbidden (lint guard via grep regression in CI). The tracker's other entries (`entries map[string]DaemonRuntimeEntry` for PID generation + restart count) remain shared with `supervise.go`'s spawn closure — those are write-only-on-spawn-success and read-only by IPC `status` snapshots; no concurrency issue.
 
-1. **PR #229 merged to master** (currently in bot-review loop, HEAD `e9adb88` after revert of 3 P2 findings — see CLAUDE.md PR workflow Step 4-7)
-2. **Master rebased into `feat/v0.5.x-servers-matrix-revamp`** so this branch carries the `daemon-exited` emit
-3. **Operator runs `mcphub install --upgrade`** + cold-restart supervisor (binary on disk must be the post-#229 build)
-4. **`daemon-exited` events visible** in operator's `supervisor-events.log` for serena daemons
-5. **Serena crash root cause identified** from the new event's `exit_code` + `wait_err` fields
+**runSupervise refactor** (the function-local-state → controller migration):
 
-Implementation of A.2 cannot proceed until prerequisites 1-5 are satisfied. Phases B + C + D + E + F (workspace registry + routing + spawn + auto-register + sticky-session) are NOT blocked on A.2 and can fan out in parallel.
+```go
+// supervise.go:315 — runSupervise builds the controller from existing primitives
+// instead of holding raw locals. No behavior change at this boundary; the
+// controller is the new owner of state that was previously closure-captured.
+func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
+    // ... existing pre-controller setup (lock, intent load, event log, job creation) ...
+
+    ctrl := &supervisorController{
+        intentCache: newIntentCache(),
+        eventLoop:   api.NewEventLoop(),
+        tracker:     NewDaemonRuntimeTracker(),
+        events:      events,
+    }
+    ctrl.intentCache.Refresh(initialIntent)
+    ctrl.eventLoop.RegisterHandler(ctrl.handleLoopEvent)
+
+    // IntentWatcher wired into runSupervise (the OTHER v4 BLOCKER A.2 closure):
+    watcher := NewIntentWatcher(intentPath, daemonIntentPath, func() {
+        // Re-read intent + refresh cache atomically. Errors are logged via events.
+        if updated, err := api.LoadSupervisorIntent(intentPath); err == nil {
+            ctrl.intentCache.Refresh(updated)
+            // Post a reconcile-tick event so the controller picks up new descriptors.
+            ctrl.eventLoop.Post(api.LoopEvent{Kind: api.EvReconcileTick})
+        }
+    })
+    go watcher.Run(ctx) // <-- v3 said "wired"; v4 header confirmed; v5 makes it concrete
+
+    // ... rest of runSupervise (IPC listener, reconcile driver, child-exit reaper) ...
+}
+```
+
+**Gating** (carried from v3, prerequisites unchanged):
+
+1. **PR #229 merged to master** — DONE (merged 2026-05-20 as commit `526bea9`; the daemon-exited emit is now live on master)
+2. **Master rebased into `feat/v0.5.x-servers-matrix-revamp`** — DONE (PR #230 was rebased onto post-#229 master)
+3. **PR #230 merged to master** — DONE (merged 2026-05-20 as commit `c840664`; auto-respawn dispatcher is the foundation A.2 builds on)
+4. **Operator runs `mcphub install --upgrade`** + cold-restart supervisor — DONE
+5. **Serena crash root cause identified** — DONE via PR #229's `daemon-exited` event (port-bind conflict; resolved by killing manual wrappers)
+
+A.2 implementation can now proceed. Phases B + C + D + E + F + G + H are NOT blocked on A.2 and can fan out in parallel.
 
 **Acceptance criteria**:
-- Reconciler no longer calls `r.spawn` directly; all spawn intent goes through event loop
-- `cmd.Wait()` exit posts `EvChildExit` (in addition to emitting `daemon-exited` from PR #229)
-- State machine drives state transitions visible in `supervisor-state.json`: `idle` → `spawning` → `running` → `backoff-waiting` → `spawning` → `quarantined` per spec
-- Restart-policy state (failures in 30-min sliding window, backoff_until, quarantine_since) fields appear in serialized state
-- Manual smoke: kill serena daemon → supervisor respawns within backoff window; kill 10 times → quarantine kicks in
+
+- `runRespawnDispatcher` deleted from `supervise.go` startup AND `supervise_respawn_dispatcher.go`; replaced by controller dispatch
+- Reconciler no longer calls `r.spawn` directly; all spawn intent flows through `eventLoop.Post(EvStart)` → `handleLoopEvent` → `executeSideEffect`
+- `cmd.Wait()` exit posts `EvChildExit` (in addition to the existing `daemon-exited` audit emit from PR #229)
+- `IntentWatcher.Run` is invoked from `runSupervise` (no longer dead code)
+- State machine drives transitions visible in `supervisor-state.json`: `idle` → `spawning` → `running` → `backoff-waiting` → `spawning` → `quarantined` per spec
+- Restart-policy state fields (`failures_in_window`, `backoff_until`, `quarantine_since`) appear in serialized state
+- DaemonRuntimeTracker's crash-counting methods are called only from `executeSideEffect` (regression guard via grep)
+- Manual smoke (preserved from v3): kill serena daemon → supervisor respawns within backoff window; kill 10 times → quarantine kicks in
 
 **Test contract**:
-- `TestSupervisor_StateMachine_RestartOnExit` — spawn daemon, kill it, verify state machine fires EvChildExit → backoff timer → respawn within bounded delay
-- `TestSupervisor_StateMachine_QuarantineAfterN` — repeatedly kill daemon 10 times, verify state transitions to `quarantined` and stops respawning
-- `TestSupervisor_StateMachine_PersistedStateMatches` — verify `supervisor-state.json` field schema matches spec (including `failures`, `backoff_until`, `quarantine_since`)
+
+- `TestSupervisorController_IntentCacheRefreshOnWatcherEvent` — IntentWatcher fires → cache snapshot updated atomically; concurrent handleLoopEvent reads see consistent old-or-new state, never partial
+- `TestSupervisorController_HandleEvChildExit_TransitionsToBackoffWaiting`
+- `TestSupervisorController_HandleEvChildExit_TransitionsToQuarantinedAfterThreshold` — replaces dispatcher test of same semantic
+- `TestSupervisorController_HandleEvChildExit_SuppressesOnStopIntent` — replaces dispatcher test
+- `TestSupervisorController_HandleEvChildExit_RetriesOnSpawnFailure` — replaces dispatcher test
+- `TestSupervisorController_PersistedStateMatchesSpec` — verify `supervisor-state.json` field schema matches spec (including `failures_in_window`, `backoff_until`, `quarantine_since`)
+- `TestStateMachineWiring_DoesNotDoubleRespawnWithLegacyDispatcher` — regression guard that the old dispatcher entry point is gone and no duplicate respawn fires
 
 ### A.3: Migration — upgrade installed binary + restart supervisor
 
@@ -260,13 +355,57 @@ Implementation of A.2 cannot proceed until prerequisites 1-5 are satisfied. Phas
 
 ## Phase B: Workspace registry extension
 
-### B.1: Extend existing `Registry` / `WorkspaceEntry` with `@serena` sentinel language tuple (v3 design)
+### B.1: Extend existing `Registry` / `WorkspaceEntry` with `@serena` sentinel language tuple (v5 design)
 
-**v2 BLOCKER (sonnet + codex)**: v2 proposed adding `Languages []string` + `Default bool` + `SerenaPort int` as parallel fields, but the existing primary key `(WorkspaceKey, Language)` (`workspace_registry.go:31, 180-198`) is the load-bearing identity tuple used by `Put`/`Get`/`Remove`/`ListByWorkspace`. Serena entries need single-row-per-workspace (not per-language), so the schema needed an explicit decision on identity. v2 also falsely claimed `Save()` uses `SecureWriteClientConfig`; actual implementation is plain `os.WriteFile` + atomic rename (`workspace_registry.go:129-163`).
+**v3/v4 status**: BLOCKER (both sonnet + codex). Three independent defects converged across reviews:
 
-**v3 design**: keep `(WorkspaceKey, Language)` as the primary key. Serena entries use sentinel `Language: "@serena"` to distinguish from per-LSP-row tuples. This preserves all existing `Put`/`Get`/`Remove`/`AllocatedPorts`/`ListByWorkspace` semantics without code changes to existing call sites; per-LSP-language rows and serena-pool rows coexist as different tuples within the same workspace_key. The `@` prefix is invalid as an LSP-language name (LSP language IDs are alphanumeric per the spec), so the sentinel cannot collide with a real language.
+1. **Call-site catalog drastically undercounted** (4 sites claimed, 13 sites actually iterate `reg.Workspaces`)
+2. **False validator-rejection claim** ("@ prefix is invalid as an LSP-language name") — manifest validator at `internal/config/manifest.go:347-365` has NO `@`-prefix rejection rule; the sentinel CAN collide if an attacker or buggy manifest names a LanguageSpec `@anything`
+3. **Sentinel lives in different struct than the proposed defense** — `@serena` rows write to `WorkspaceEntry.Language` (registry field), NOT `LanguageSpec.Name` (manifest field). Adding `@`-prefix rejection ONLY to manifest validator does not defend the registry write path
 
-**Scope**: extend the EXISTING `internal/api/workspace_registry.go` `WorkspaceEntry` struct with new fields needed by serena dynamic-pool. All new fields use `omitempty` yaml tag for backward compat with installed clients that have older entries.
+**v5 design**: keep `(WorkspaceKey, Language)` as the primary registry key. Serena entries use sentinel `Language: "@serena"` to distinguish from per-LSP-row tuples. Add a dual-gate defense — both the manifest validator AND the registry write path refuse `@`-prefix Language values unless they arrive via the explicit `PutSerena` entry point.
+
+**Verified call-site catalog** (grep `range.*reg\.Workspaces|range.*workspaces|ListByWorkspace` against `internal/`, 2026-05-20 HEAD `6f22944`):
+
+| # | File:line | Operation | @serena handling | Action |
+| --- | --- | --- | --- | --- |
+| 1 | `register.go:637` | `reg.ListByWorkspace(wsKey)` lookup of existing LSP rows during register | LSP-only — must filter sentinel | Add `if e.Language == SerenaLanguageSentinel continue` |
+| 2 | `register.go:727` | Scan ClientEntries for entry-name collision during `ResolveEntryName` | Backend-agnostic — collision check on string name; serena rows have own naming (`serena-<short_key>`) | NO filter (safe-include) |
+| 3 | `register.go:754` | Same collision-helper (`entryNameTakenByOtherWorkspace`) | Same | NO filter (safe-include) |
+| 4 | `install.go:657` | Build `byTask` map for lifecycle/last-call enrichment | Backend-agnostic — TaskName is per-task unique | NO filter (safe-include) |
+| 5 | `install.go:2124` | Build `byTask` map for status path | Same | NO filter (safe-include) |
+| 6 | `install_intent.go:559` | Walk for `mcphub stop --daemon <lang>` task-name collection | LSP-only when `daemonFilter` != "" — for serena `daemonFilter` semantics need re-design | Backend-aware filter (see F.5 below) |
+| 7 | `weekly_refresh.go:126` | Iterate to fire weekly-refresh schtasks /Run | Backend-agnostic via `WeeklyRefresh` flag — serena rows default to `WeeklyRefresh=false` and skip | NO filter (lifecycle gate suffices) |
+| 8 | `status_enrich.go:69` | Build TaskName→entry map for overlay | Backend-agnostic | NO filter (safe-include) |
+| 9 | `membership.go:51` | Build `[WorkspaceKey,Language]` index for weekly-refresh membership API | LSP-only — `@serena` rows MUST NOT appear as a "language" in membership UI | Add filter (LSP-only ownership) |
+| 10 | `api_surfaces.go:430` | Build `WorkspaceTasksByKey` + `PortMap` for canonical status snapshot | Backend-agnostic — every workspace-scoped task belongs in the snapshot | NO filter (safe-include) |
+| 11 | `legacy_migrate.go:206` | Match legacy task names against registry during migration | Backend-agnostic — task-name match works for both | NO filter |
+| 12 | `gui/daemons.go:83` | Render membership table for weekly-refresh GUI panel | LSP-only — same logic as membership.go:51 | Add filter (LSP-only ownership) |
+| 13 | `gui/workspaces.go:101` | List all workspaces (display table) | Backend-aware — display column "Backend" reads `e.Backend` field; serena rows show "serena" | NO filter (display surface, no semantic conflation) |
+
+**Sites requiring filter `Language != SerenaLanguageSentinel`** (LSP-only consumers): `register.go:637`, `install_intent.go:559` (with backend-aware re-design per F.5), `membership.go:51`, `gui/daemons.go:83`. Four sites total — NOT the four sites that v3 named.
+
+**Sites that are safe-include** (already backend-agnostic by TaskName-keyed iteration or lifecycle-flag gating): 8 production sites + 4 test sites (test sites are not behavioral; they exercise raw iteration semantics and a regression test guards membership-classification correctness — see test contract below).
+
+**Backend/server ownership matrix**:
+
+| Backend value (`WorkspaceEntry.Backend`) | Language value | Server slug | Owning server's manifest path | Lifecycle owner |
+| --- | --- | --- | --- | --- |
+| `mcp-language-server` | per-LSP language (e.g. `"go"`, `"typescript"`) | `mcp-language-server` | `servers/mcp-language-server/manifest.yaml` | LSP lazy-proxy task per row |
+| `gopls-mcp` | `"go"` (always) | `gopls-mcp` | `servers/gopls-mcp/manifest.yaml` | Go-specific lazy-proxy task |
+| `serena` | `"@serena"` sentinel (always) | `serena` | `servers/serena/manifest.yaml` | Per-workspace dynamic-pool task |
+
+Each backend owns exactly one shape of registry row. Cross-backend pollution (e.g. a `serena` backend with `Language="go"`) is rejected at `PutSerena` / `RegisterLSP` entry points.
+
+**`@`-prefix defense** (closes v3 BLOCKER-1):
+
+1. **Manifest validator gate** (`config/manifest.go:347-365`): add rejection `if strings.HasPrefix(l.Name, "@") { return fmt.Errorf("manifest %s: languages[%d].name must not start with '@' (reserved for sentinel rows)", m.Name, i) }`. Catches any manifest that tries to declare an LSP language with the sentinel prefix.
+
+2. **Registry write-path gate** (`workspace_registry.go` — new wrapper around `Put`): add `func (r *Registry) PutLSP(e WorkspaceEntry) error` that refuses `strings.HasPrefix(e.Language, "@")`. Existing `Put` becomes a low-level helper that both `PutLSP` and `PutSerena` call after validation. All current LSP-registration call sites switch to `PutLSP` (mechanical rename; `register.go` is the only writer).
+
+The two gates compose: the manifest validator prevents bad LanguageSpec.Name at install/load time; `PutLSP` prevents bad WorkspaceEntry.Language at register-time even if some future caller skips the manifest path. Together they defend the sentinel uniqueness.
+
+**Scope** (registry field extension):
 
 ```go
 // Additions to existing WorkspaceEntry struct (workspace_registry.go:31):
@@ -276,60 +415,79 @@ type WorkspaceEntry struct {
     WorkspacePath string            `yaml:"workspace_path"`
     Language      string            `yaml:"language"` // "@serena" sentinel for dynamic-pool rows
     Backend       string            `yaml:"backend"`  // existing: "mcp-language-server"|"gopls-mcp"; new: "serena"
-    Port          int               `yaml:"port"`     // SAME field — serena port also goes here; AllocatedPorts already covers
+    Port          int               `yaml:"port"`     // serena port lives here too; AllocatedPorts covers
     TaskName      string            `yaml:"task_name"`
     ClientEntries map[string]string `yaml:"client_entries"`
     WeeklyRefresh bool              `yaml:"weekly_refresh"`
 
-    // NEW fields for serena dynamic-pool (only meaningful when Language == "@serena"):
-    RegisteredAt  time.Time `yaml:"registered_at,omitempty"`   // when first added
-    RegisteredVia string    `yaml:"registered_via,omitempty"`  // "manual" | "auto-detect" | "migration"
-    Languages     []string  `yaml:"languages,omitempty"`       // snapshot of .serena/project.yml at register time; distinct from existing Language single-string field
+    // NEW (only meaningful when Language == SerenaLanguageSentinel):
+    RegisteredAt  time.Time `yaml:"registered_at,omitempty"`
+    RegisteredVia string    `yaml:"registered_via,omitempty"` // "manual" | "auto-detect" | "migration"
+    Languages     []string  `yaml:"languages,omitempty"`      // snapshot of .serena/project.yml at register time
 }
 ```
 
-**Why `@serena` sentinel** (codex v2 BLOCKER-1 resolution):
+**Save pipeline note** (sonnet v2 carryover, unchanged in v5): existing `(*Registry).Save()` uses plain `os.WriteFile` + atomic rename (`workspace_registry.go:129-163`), NOT `SecureWriteClientConfig`. The registry lives in the operator's `%LOCALAPPDATA%`-scoped state dir with 0600 file mode. Hardening parity with hub-mcp state files is OUT OF SCOPE for B.1; tracked as a separate follow-up.
 
-- preserves `(WorkspaceKey, Language)` primary-key uniqueness without adding a new identity tuple field
-- existing `AllocatedPorts()` (`workspace_registry.go:213-221`) already iterates ALL entries and includes their `Port` — serena ports are picked up automatically
-- existing `ListByWorkspace(workspaceKey)` (`workspace_registry.go:224-232`) returns ALL entries including the `@serena` row; callers that need only LSP rows filter on `Language != "@serena"` (one-line change in each LSP-only call site, listed in implementer's catalog)
-- existing `Remove(workspaceKey, language)` takes language verbatim — `Remove(ws, "@serena")` removes only the serena row; LSP rows untouched
-- migration script (Phase D.3) handles per-workspace conversion: for each registered workspace, ensure exactly one `(WorkspaceKey, "@serena")` row exists with port allocated from `daemon_template.port_pool`
-
-**Save pipeline correction** (sonnet v2 NEW B.2): the existing `(*Registry).Save()` uses plain `os.WriteFile` + atomic rename (`workspace_registry.go:129-163`), NOT `SecureWriteClientConfig`. v3 does NOT change that — the registry is not a client-config file and lives entirely in the operator's local `%LOCALAPPDATA%`-scoped state dir with 0600 file mode. Hardening parity with hub-mcp state files is OUT OF SCOPE for v1 dynamic-pool; if needed, a follow-up can route Registry writes through `SecureWriteClientConfig` as a separate PR.
-
-**New API on existing `Registry`** (added to workspace_registry.go, not a new file):
+**New API on existing `Registry`** (atomic API per call-site type, closes v3 BLOCKER-1 codex finding "RegisterSerena/UnregisterSerena should be the only way @serena rows enter/leave"):
 
 ```go
-// All operate on the existing Registry singleton. Convention: any
-// helper named *Serena* operates only on entries with Language == "@serena".
 const SerenaLanguageSentinel = "@serena"
 
-func (r *Registry) SerenaEntries() []WorkspaceEntry  // filter Language == SerenaLanguageSentinel
-func (r *Registry) GetSerena(workspaceKey string) (WorkspaceEntry, bool)  // == r.Get(workspaceKey, SerenaLanguageSentinel)
-func (r *Registry) PutSerena(e WorkspaceEntry)  // requires e.Language == SerenaLanguageSentinel; calls r.Put(e)
-func (r *Registry) RemoveSerena(workspaceKey string)  // == r.Remove(workspaceKey, SerenaLanguageSentinel)
-func (r *Registry) AllocateSerenaPort(pool []int) (int, error)  // first free port from pool not in AllocatedPorts(), persisted via Save()
+// Read paths (filter by sentinel):
+func (r *Registry) SerenaEntries() []WorkspaceEntry  // Language == SerenaLanguageSentinel
+func (r *Registry) GetSerena(workspaceKey string) (WorkspaceEntry, bool)
+func (r *Registry) LSPEntries() []WorkspaceEntry     // Language != SerenaLanguageSentinel
+func (r *Registry) ListByWorkspaceLSP(workspaceKey string) []WorkspaceEntry  // LSPEntries filtered by key
+
+// Write paths (the dual-gate defense):
+func (r *Registry) PutLSP(e WorkspaceEntry) error    // refuses '@'-prefix Language; calls Put after validation
+func (r *Registry) PutSerena(e WorkspaceEntry) error // requires Language == SerenaLanguageSentinel; calls Put after validation
+func (r *Registry) RemoveSerena(workspaceKey string)
+func (r *Registry) AllocateSerenaPort(pool PortPool) (int, error) // first free port from pool not in AllocatedPorts
+
+// Internal-only helper (existing Put becomes unexported or restricted):
+// Existing exported (r *Registry) Put(e WorkspaceEntry) callers in register.go switch to PutLSP.
+// Save() is unchanged.
 ```
 
-**LSP-only call-site update** (the one breaking-change ripple to existing code): callers that currently iterate `Registry.Workspaces` assuming every entry is per-LSP-language must filter `Language != SerenaLanguageSentinel`. Grep-verified call sites: `internal/api/register.go:243` (registration loop), `internal/api/register.go:285` (lookup), `internal/api/install.go:656` (port-collision check), `internal/api/port_alloc_test.go` (test). Each gets a one-line filter; documented in v3 implementer's catalog with exact patch hint.
+**Unregister semantics with `--backend` flag** (closes v3 BLOCKER-1 codex finding "default unregister walks by Language"):
+
+The existing `mcphub unregister <workspace>` command has two interpretations under the @serena coexistence:
+
+- **Default (v5)**: `mcphub unregister <workspace>` unregisters ONLY LSP rows (`Language != "@serena"`); `--backend serena` is required to remove serena rows; `--backend all` removes everything.
+- **Rationale**: LSP rows and the serena row have independent lifecycles. An operator may want to disable LSP routing for a workspace while keeping the long-lived serena daemon running, or vice versa. Defaulting to "LSP-only removal" matches the existing semantic (pre-v5 `mcphub unregister` removed ALL workspace entries because there was only one backend; with two backends, the default should be the narrower scope).
+
+```bash
+mcphub unregister D:\dev\PaperPane               # removes only LSP rows; serena unchanged
+mcphub unregister D:\dev\PaperPane --backend serena  # removes only serena row; LSP rows unchanged
+mcphub unregister D:\dev\PaperPane --backend all     # removes everything (legacy behavior)
+mcphub unregister D:\dev\PaperPane --backend mcp-language-server  # narrow LSP-only by backend value
+```
+
+The CLI surface for `--backend` lives in B.2; B.1 only defines the registry API (`RemoveByBackend(workspaceKey, backendFilter string)`).
 
 **Acceptance criteria**:
 
-- Existing `Registry.Load()` / `Save()` round-trip preserves new optional fields (yaml.v3 omitempty pattern, no strict-parse on registry)
-- `Language == SerenaLanguageSentinel` rows have non-empty `Languages` slice + non-zero `Port` (validated at register time, NOT in `Save`)
-- Existing LSP-language rows (e.g. `Language: "go"`) are unchanged in behavior
-- All 4 existing LSP-only call sites filter `Language != SerenaLanguageSentinel` to avoid double-counting serena rows as LSP rows
-- AllocatedPorts() automatically includes serena ports (no code change required)
+- Manifest validator rejects `LanguageSpec.Name` with `@`-prefix at `Validate()`
+- `PutLSP` rejects `WorkspaceEntry.Language` with `@`-prefix
+- `PutSerena` requires `Language == SerenaLanguageSentinel` exactly
+- `Registry.Load()` / `Save()` round-trip preserves new optional fields (omitempty pattern, no strict-parse on registry)
+- The 4 LSP-only call sites (register.go:637, install_intent.go:559, membership.go:51, gui/daemons.go:83) filter sentinel rows
+- `AllocatedPorts()` automatically includes serena ports (no code change required)
+- `mcphub unregister <workspace>` default removes only LSP rows
 
 **Test contract**:
 
-- `TestRegistry_SerenaSentinel_RoundTripsNewFields` — Load/Save round-trip preserves Languages + RegisteredAt + RegisteredVia
-- `TestRegistry_SerenaSentinel_CoexistsWithLSPRows` — same workspace_key with both "@serena" and "go"/"typescript" entries
-- `TestRegistry_AllocateSerenaPort_FirstFreeFromPool`
-- `TestRegistry_AllocateSerenaPort_ExhaustionReturnsError`
+- `TestServerManifestValidate_RejectsAtPrefixLanguageName` — `LanguageSpec{Name: "@serena"}` fails Validate
+- `TestRegistry_PutLSP_RejectsAtPrefixLanguage` — `PutLSP(WorkspaceEntry{Language: "@anything"})` returns error
+- `TestRegistry_PutSerena_RequiresExactSentinel` — `PutSerena` with `Language: "@other"` returns error
+- `TestRegistry_SerenaSentinel_RoundTripsNewFields` — Load/Save preserves Languages + RegisteredAt + RegisteredVia
+- `TestRegistry_SerenaSentinel_CoexistsWithLSPRows` — same workspace_key with both "@serena" and "go"/"typescript" rows
+- `TestRegistry_AllocateSerenaPort_FirstFreeFromPool` / `TestRegistry_AllocateSerenaPort_ExhaustionReturnsError`
 - `TestRegistry_LegacyEntryReadAccepted` — older entry without Languages field loads cleanly
-- `TestRegistry_LSPOnlyCallSites_FilterSerena` — regression guard that the 4 LSP-only call sites do filter the sentinel
+- `TestWorkspaceRegistryConsumers_ClassifyByBackend` — regression guard that asserts each of the 4 LSP-only sites filters sentinel rows AND each of the safe-include sites still iterates ALL rows
+- `TestRegistry_Unregister_DefaultBackendSemantics` — `Unregister(ws)` removes only LSP; `--backend serena` removes only serena; `--backend all` removes everything
 
 ### B.2: `mcphub workspace {register, unregister, list, set-default}` CLI
 
@@ -455,65 +613,128 @@ func (s *SessionRouter) LookupSession(sessionID string) *WorkspaceEntry
 
 ## Phase D: Per-workspace serena daemon spawn
 
-### D.1: Manifest schema extension — `workspace-scoped` + `daemon_template` validator branch (v3)
+### D.1: Manifest schema extension — `workspace-scoped` + `daemon_template` validator branch (v5)
 
-**v2 BLOCKER (sonnet + codex)**: v2 reused `kind: workspace-scoped` to avoid the `kind: workspace` collision, but v2 did NOT specify how the validator at `manifest.go:337-365` (which currently requires `port_pool` + `languages[]` for ALL `workspace-scoped` manifests) splits between (a) legacy per-language LSP manifests (mcp-language-server / gopls-mcp) and (b) new dynamic-pool serena manifests with `daemon_template` and no per-language LSP backends. Without an explicit branch, a daemon-template-only serena manifest fails `Validate()` immediately at line 344.
+**v3/v4 status**: BLOCKER (sonnet + codex). Pseudocode in v3 was uncompilable against the actual types in `internal/config/manifest.go` at HEAD `6f22944`:
 
-**v3 design**: validator gets explicit branch on `DaemonTemplate != nil`:
+- v3 referenced `(m *Manifest)` — actual type is `ServerManifest` (manifest.go:48)
+- v3 wrote `len(m.PortPool) > 0` — actual type is `*PortPool` (pointer to struct with `Start int, End int`, manifest.go:58 + 109-112), so `len()` is a compile error
+- v3 wrote `len(m.Languages)` — accurate (slice; manifest.go:57) but reviewers flagged consistency
+- v3 wrote `len(m.Daemons)` — accurate (slice of `DaemonSpec`; manifest.go:56) but the struct is `DaemonSpec` not `Daemon`
+- v3 wrote `containsWorkspacePathToken(m.DaemonTemplate.ExtraArgsTemplate)` — helper undefined; reviewers need the actual signature and semantics
+
+**v5 design**: validator branch on `DaemonTemplate != nil`. Pseudocode below is compile-accurate against the verified types. The new `DaemonTemplate` struct uses `*PortPool` (NOT `[]int`) for consistency with the existing `ServerManifest.PortPool` field shape — operators write `start: 9121, end: 9199` and the same range allocator is reused.
+
+**New Go struct** (added to `internal/config/manifest.go` alongside existing `DaemonSpec`):
 
 ```go
-// Existing manifest.go:337-365 — extend with a daemon-template branch.
-func (m *Manifest) Validate() error {
-    // ... existing global / non-workspace-scoped paths unchanged ...
-    if m.Kind == KindWorkspaceScoped {
-        if m.DaemonTemplate != nil {
-            // Dynamic-pool branch: no per-language LSP rows.
-            if len(m.PortPool) > 0 || len(m.Languages) > 0 {
-                return fmt.Errorf("kind=workspace-scoped with daemon_template must NOT set top-level port_pool or languages[] (move them into daemon_template)")
-            }
-            if len(m.Daemons) > 0 {
-                return fmt.Errorf("kind=workspace-scoped with daemon_template is mutually exclusive with daemons[]")
-            }
-            if len(m.DaemonTemplate.PortPool) == 0 {
-                return fmt.Errorf("daemon_template.port_pool must be non-empty")
-            }
-            if !containsWorkspacePathToken(m.DaemonTemplate.ExtraArgsTemplate) {
-                return fmt.Errorf("daemon_template.extra_args_template must reference ${workspace.path}")
-            }
-            // No languages[] check — serena daemon is multi-language per .serena/project.yml
-            return nil
-        }
-        // Legacy LSP-bridge branch (existing behavior, unchanged):
-        if len(m.PortPool) == 0 {
-            return fmt.Errorf("port_pool[] must be non-empty for kind=workspace-scoped")
-        }
-        if len(m.Languages) == 0 {
-            return fmt.Errorf("languages[] must be non-empty for kind=workspace-scoped")
-        }
-        return nil
-    }
-    // ...
+// DaemonTemplate describes a per-workspace daemon spawn template for the
+// dynamic-pool branch of kind=workspace-scoped. Mutually exclusive with
+// the legacy ServerManifest.Daemons list (validator rejects both-present).
+type DaemonTemplate struct {
+    Context           string    `yaml:"context"`
+    PortPool          *PortPool `yaml:"port_pool"`           // reuse existing PortPool{Start,End}
+    ExtraArgsTemplate []string  `yaml:"extra_args_template"` // each arg may contain ${workspace.path}
+}
+
+// Extension to existing ServerManifest struct (manifest.go:48):
+type ServerManifest struct {
+    // ... all existing fields preserved (Name, Kind, Transport, Command, BaseArgs,
+    //     BaseArgsTemplate, Env, Daemons []DaemonSpec, Languages []LanguageSpec,
+    //     PortPool *PortPool, IdleTimeoutMin, ClientBindings, WeeklyRefresh,
+    //     URL, Headers, RequiredBinaries) ...
+
+    DaemonTemplate *DaemonTemplate `yaml:"daemon_template,omitempty"` // NEW; mutually exclusive with Daemons
 }
 ```
 
-**Acceptance criteria**:
+**Validator branch** (extends existing `func (m *ServerManifest) Validate()` at manifest.go:251):
 
-- `daemon_template`-only manifest validates successfully (no `languages[]` / `port_pool` at top level required)
-- LSP-language manifest with neither `daemon_template` nor empty `languages[]` continues to validate as before (regression guard)
-- Both-present is rejected with explicit migration guidance message
-- `daemon_template.extra_args_template` MUST contain `${workspace.path}` token (else workspace context is lost on spawn)
+```go
+// containsWorkspacePathTokenInArgs scans each element of args for the
+// literal substring "${workspace.path}". Returns true on the first match.
+// Substring-match (not exact-equality) so operators can write composite
+// args like "--project=${workspace.path}/src". Internal helper, lowercase
+// — only the validator uses it.
+func containsWorkspacePathTokenInArgs(args []string) bool {
+    const tok = "${workspace.path}"
+    for _, a := range args {
+        if strings.Contains(a, tok) {
+            return true
+        }
+    }
+    return false
+}
 
-**Test contract**:
+// Extension to existing Validate() at manifest.go:251.
+// Inserted into the existing `if m.Kind == KindWorkspaceScoped` block
+// at manifest.go:337-366 (replaces lines 337-366 with the dual-branch form).
+func (m *ServerManifest) Validate() error {
+    // ... existing global / transport-scope checks preserved (manifest.go:251-336) ...
 
-- `TestManifest_WorkspaceScopedWithDaemonTemplate_Valid`
-- `TestManifest_WorkspaceScopedWithDaemonTemplate_RejectsLegacyPortPool` — both `port_pool` (top-level) AND `daemon_template` → reject
-- `TestManifest_WorkspaceScopedWithDaemonTemplate_RejectsMissingWorkspacePathToken`
-- `TestManifest_WorkspaceScopedLegacyLSP_StillValidates` — regression guard, no change in behavior
-- `TestManifest_WorkspaceScoped_RejectsDaemonsListAndTemplateBoth`
+    if m.Kind == KindWorkspaceScoped {
+        if m.DaemonTemplate != nil {
+            // Dynamic-pool branch.
+            if m.PortPool != nil {
+                return fmt.Errorf("manifest %s: kind=workspace-scoped with daemon_template must NOT set top-level port_pool (move start/end into daemon_template.port_pool)", m.Name)
+            }
+            if len(m.Languages) > 0 {
+                return fmt.Errorf("manifest %s: kind=workspace-scoped with daemon_template rejects top-level languages[] (dynamic-pool serena is multi-language per .serena/project.yml)", m.Name)
+            }
+            if len(m.Daemons) > 0 {
+                return fmt.Errorf("manifest %s: kind=workspace-scoped with daemon_template is mutually exclusive with daemons[] (dynamic-pool migration requires removing the legacy daemons[] block)", m.Name)
+            }
+            if m.DaemonTemplate.PortPool == nil {
+                return fmt.Errorf("manifest %s: daemon_template.port_pool is required (start/end)", m.Name)
+            }
+            if m.DaemonTemplate.PortPool.Start <= 0 || m.DaemonTemplate.PortPool.End < m.DaemonTemplate.PortPool.Start {
+                return fmt.Errorf("manifest %s: daemon_template.port_pool must have start>0 and end>=start (got {%d,%d})", m.Name, m.DaemonTemplate.PortPool.Start, m.DaemonTemplate.PortPool.End)
+            }
+            if len(m.DaemonTemplate.ExtraArgsTemplate) == 0 {
+                return fmt.Errorf("manifest %s: daemon_template.extra_args_template must be non-empty", m.Name)
+            }
+            if !containsWorkspacePathTokenInArgs(m.DaemonTemplate.ExtraArgsTemplate) {
+                return fmt.Errorf("manifest %s: daemon_template.extra_args_template must contain ${workspace.path} token somewhere (else workspace context is lost on spawn)", m.Name)
+            }
+            return nil
+        }
+        // Legacy LSP-bridge branch (unchanged — preserves current manifest.go:337-365 behavior).
+        if m.PortPool == nil {
+            return fmt.Errorf("manifest %s: port_pool is required for kind=workspace-scoped", m.Name)
+        }
+        if m.PortPool.Start <= 0 || m.PortPool.End < m.PortPool.Start {
+            return fmt.Errorf("manifest %s: port_pool must have start>0 and end>=start (got {%d,%d})", m.Name, m.PortPool.Start, m.PortPool.End)
+        }
+        if len(m.Languages) == 0 {
+            return fmt.Errorf("manifest %s: languages[] must be non-empty for kind=workspace-scoped", m.Name)
+        }
+        for i := range m.Languages {
+            // ... existing per-language checks preserved verbatim (manifest.go:347-365) ...
+        }
+        return nil
+    }
+    // ... rest of Validate() preserved ...
+    return nil
+}
+```
 
-**Decision** (rejected: new third kind; accepted: extend existing `workspace-scoped`): serena's dynamic-pool falls under the existing `workspace-scoped` semantic — one daemon per workspace. The change is to add a new OPTIONAL `daemon_template` block alongside the existing `daemons:` list. When `daemon_template` is present (regardless of `kind`), reconciler generates one descriptor per registered serena workspace from the template; when only legacy `daemons:` is present, current per-daemon behavior is preserved.
+**Sentinel-prefix rejection on `LanguageSpec.Name`** (B.1 dual-gate defense, lives in the same per-language loop):
 
-**Manifest example** (post-D.1):
+```go
+for i := range m.Languages {
+    l := &m.Languages[i]
+    if l.Name == "" {
+        return fmt.Errorf("manifest %s: languages[%d].name is required", m.Name, i)
+    }
+    // NEW (B.1): refuse '@' prefix to keep the @serena sentinel collision-free.
+    if strings.HasPrefix(l.Name, "@") {
+        return fmt.Errorf("manifest %s: languages[%d].name must not start with '@' (reserved for sentinel rows)", m.Name, i)
+    }
+    // ... existing backend / transport / lsp_command checks preserved ...
+}
+```
+
+**Manifest example** (post-D.1, what `servers/serena/manifest.yaml` becomes after migration):
 
 ```yaml
 name: serena
@@ -524,46 +745,44 @@ base_args: [...]
 env: {PYTHONUNBUFFERED: "1"}
 daemon_template:              # NEW optional block
   context: codex
-  port_pool: [9121, 9122, ..., 9199]
+  port_pool:
+    start: 9121
+    end: 9199
   extra_args_template:
     - --context
     - codex
     - --project
     - "${workspace.path}"
-# Legacy `daemons:` block is INCOMPATIBLE with `daemon_template:` — schema
+# NOTE: top-level `daemons:` block is INCOMPATIBLE with `daemon_template:` —
 # validator rejects both-present (one or the other, not both). This forces
-# explicit migration to dynamic-pool.
+# explicit migration to dynamic-pool. Migration tooling (D.3) drops legacy
+# daemons[] when writing the new manifest.
 ```
 
-**New Go struct** (added to `internal/config/manifest.go` alongside existing `Daemon` struct):
-
-```go
-type DaemonTemplate struct {
-    Context           string   `yaml:"context"`
-    PortPool          []int    `yaml:"port_pool"`
-    ExtraArgsTemplate []string `yaml:"extra_args_template"`
-}
-
-type Manifest struct {
-    // ... existing fields ...
-    Daemons        []Daemon        `yaml:"daemons,omitempty"`         // legacy per-daemon list
-    DaemonTemplate *DaemonTemplate `yaml:"daemon_template,omitempty"` // NEW dynamic-pool template; mutually exclusive with Daemons
-}
-```
+**Decision** (rejected: new third kind; accepted: extend existing `workspace-scoped`): serena's dynamic-pool falls under the existing `workspace-scoped` semantic — one daemon per workspace. The change adds a new OPTIONAL `daemon_template` block alongside the existing `daemons:` list. When `daemon_template` is present, reconciler generates one descriptor per registered serena workspace from the template; when only legacy `daemons:` is present, current per-daemon behavior is preserved. The `KindWorkspaceScoped` constant value (`"workspace-scoped"`) is unchanged.
 
 **Acceptance criteria**:
-- `dec.KnownFields(true)` strict parse remains intact (every new YAML key has yaml tag with omitempty)
-- Validator: at most one of `daemons` OR `daemon_template` present (both-present → reject with explicit "dynamic-pool migration requires removing legacy daemons[]")
-- `${workspace.path}` token expanded at spawn time per registered serena workspace
-- `port_pool` non-empty, all entries in valid TCP-port range, no duplicates
-- `extra_args_template` non-empty AND contains `${workspace.path}` token somewhere (else workspace info is lost on spawn)
+
+- `daemon_template`-only manifest validates successfully (no `languages[]` / top-level `port_pool` required)
+- Both-present (top-level `port_pool` AND `daemon_template`) → reject with explicit "move start/end into daemon_template.port_pool"
+- Both-present (`daemons[]` AND `daemon_template`) → reject with explicit "dynamic-pool migration requires removing the legacy daemons[] block"
+- `daemon_template.extra_args_template` MUST contain `${workspace.path}` (substring match — composite args like `--project=${workspace.path}/sub` pass)
+- `LanguageSpec.Name` rejects `@`-prefix (closes the B.1 sentinel-collision gate at the manifest layer)
+- LSP-language manifest with `port_pool` + `languages[]` (no `daemon_template`) continues to validate as before (regression guard for mcp-language-server / gopls-mcp / existing global LSP manifests)
+- `dec.KnownFields(true)` strict parse remains intact (new `daemon_template` key has yaml tag with omitempty; new field on existing struct does not break existing manifest YAMLs)
 
 **Test contract**:
-- `TestManifest_DaemonTemplate_Parsing` — yaml round-trip preserves template
-- `TestManifest_DaemonTemplate_RejectsBothPresent` — manifest with both daemons and daemon_template fails strict-parse
-- `TestManifest_DaemonTemplate_RejectsEmptyPortPool`
-- `TestManifest_DaemonTemplate_RejectsTemplateWithoutWorkspacePath`
-- `TestManifest_DaemonTemplate_TokenExpansionAtSpawn` — `${workspace.path}` substituted with concrete absolute path
+
+- `TestServerManifestValidate_WorkspaceScopedWithDaemonTemplate_Valid`
+- `TestServerManifestValidate_WorkspaceScopedWithDaemonTemplate_RejectsTopLevelPortPool`
+- `TestServerManifestValidate_WorkspaceScopedWithDaemonTemplate_RejectsTopLevelLanguages`
+- `TestServerManifestValidate_WorkspaceScopedWithDaemonTemplate_RejectsDaemonsListBoth`
+- `TestServerManifestValidate_DaemonTemplateMissingWorkspacePathToken`
+- `TestServerManifestValidate_DaemonTemplateInvalidPortPoolRange`
+- `TestServerManifestValidate_RejectsAtPrefixLanguageName` — `LanguageSpec{Name: "@serena"}` fails (B.1 dual-gate)
+- `TestServerManifestValidate_LegacyLSPManifest_StillValidates` — regression guard
+- `TestContainsWorkspacePathTokenInArgs_SubstringMatch` — composite args like `--project=${workspace.path}/sub` and `${workspace.path}` standalone both return true; bare args without the token return false
+- `TestServerManifestParse_DaemonTemplate_StrictKnownFields` — yaml round-trip preserves template; unknown fields fail strict parse
 
 ### D.2: Supervisor instance-per-workspace spawn
 
@@ -602,19 +821,63 @@ type Manifest struct {
 4. If no serena workspaces registered: prompt operator to register at least one via `mcphub workspace register <path> --backend serena --languages <list>`; bail out (exit non-zero)
 5. Rewrite `manifest.yaml`: drop `daemons[]` block, add `daemon_template` block per D.1 schema
 6. For each registered serena workspace, allocate port from `daemon_template.port_pool` via `Registry.AllocateSerenaPort()` (B.1) and write back via `Registry.Save()`
-7. **Reload trigger** (v3 fix of sonnet v2 NEW B.3 + codex v2 B.3 — converged finding): the existing IPC `restart`/`reload` cases return `UNKNOWN_COMMAND` (`supervise.go:1050-1062`) and `IntentWatcher` polls only `supervisor-intent.json` and `daemon-intent.json` (`supervise_watcher.go:53-60`), NOT `manifest.yaml` or `workspaces.yaml`. The "manifest write → mcphub install → intent regenerated → watcher fires" chain has a missing link: `mcphub install` is NOT auto-triggered when `manifest.yaml` changes. The migration tool MUST explicitly invoke install as an in-process step.
+7. **Reload trigger via new exported seam `api.InstallParsedManifest`** (v5 closure of v3 BLOCKER D.3):
 
-   **v3 migration sequence**:
+   **v3/v4 status**: BLOCKER (sonnet + codex). v3 referenced `api.executeInstallTo(...)` as the in-process install primitive, but that function is UNEXPORTED (`install.go:1634`) — a migrate subcommand outside the `internal/api` package cannot call it. v3 also did not state any atomicity contract: if scheduler-task creation succeeds but `supervisor-intent.json` write fails, the system is half-configured (tasks exist; supervisor reconciler never sees them).
+
+   **v5 design**: introduce `api.InstallParsedManifest` as a new exported sister-entry-point to `api.Install`. It accepts a pre-parsed `*config.ServerManifest` (skipping the embed-FS load step), bypasses `refuseWorkspaceScopedInstall` (workspace-scoped is the whole point), runs `BuildPlanWithOpts` + scheduler-task creation + `WriteSupervisorIntent`, and shares the rollback stack across all three side-effects. Atomicity contract is option A (rollback) — partial failure leaves end-state identical to never-attempted install.
+
+   **Signature**:
+
+   ```go
+   // InstallParsedManifest is the workspace-scoped sister to (a *API).Install.
+   // Accepts a parsed manifest (caller owns parsing — typically the migrate
+   // subcommand that just wrote a new manifest.yaml). Skips refuseWorkspaceScopedInstall
+   // gate. All three side effects (scheduler tasks + per-client config + supervisor-intent
+   // write) share one rollback stack; on any failure the stack runs and end-state
+   // matches never-attempted install.
+   //
+   // Returns the absolute path of supervisor-intent.json that was written, for the
+   // caller to log.
+   func (a *API) InstallParsedManifest(
+       ctx context.Context,
+       m *config.ServerManifest,
+       opts InstallParsedManifestOpts,
+   ) (intentPath string, err error)
+
+   type InstallParsedManifestOpts struct {
+       Writer            io.Writer
+       ClientsInclude    []string
+       IncludeAllClients bool
+       Workspaces        []WorkspaceEntry // pre-loaded snapshot of registered serena workspaces
+       DryRun            bool
+   }
+   ```
+
+   **Atomicity contract** (the v3 BLOCKER D.3 closure that v4 deferred):
+
+   - **Pre-flight gate**: `WriteSupervisorIntent` is run first against a temporary path (alongside the existing `SecureWriteClientConfig` atomic-rename pattern in `supervisor_intent.go:134`). If the dry-write fails (disk full, permission denied, parent-dir DACL gate refusal), the function returns BEFORE any scheduler task is created — end-state = pristine.
+   - **Rollback stack across side-effects**: after the pre-flight succeeds, the function follows the existing `executeInstallTo` pattern (`install.go:1634-1810`) — each scheduler task creation pushes a compensating `Delete()` onto the rollback stack; each per-client config write pushes a restore-from-backup. The final `WriteSupervisorIntent` (now writing to the real path with atomic rename) is the LAST mutating step. If it fails despite the pre-flight (TOCTOU window — disk filled between dry-write and real write), the stack runs in reverse and every scheduler task / client-config write created during this call is undone.
+   - **No transient half-states observable to supervisor**: the supervisor's `IntentWatcher` polls `supervisor-intent.json` mtime. The atomic rename means the file either has the OLD content or the NEW content — never partial. If the rollback fires, the file is never renamed at all (rename happens last; rollback unwinds the OS-mutating steps that preceded it).
+   - **Documented reconcile path** (defense in depth): even if a future bug introduces a window where scheduler tasks exist but intent has stale content, the reconciler's `buildPruneSetForReconcile` (`install.go:1839`) would not prune the unknown tasks unprompted — operators see them as drift via `mcphub status` and can re-run `mcphub install`.
+
+   **IntentWatcher.Run wiring** (v4 header closure carried into v5): `IntentWatcher` is currently defined in `supervise_watcher.go` but its `Run` method is NOT invoked from `runSupervise()`. Phase A.2 wires this. D.3's migration sequence relies on the wiring being live; if A.2 ships first, the migrate command's intent-write triggers a reconcile within the watcher's poll interval. If A.2 has not shipped, migrate prints an operator-facing warning: "supervisor will not auto-reload — run `mcphub supervise` restart to apply manifest changes."
+
+   **Duplication concern** (codex Q4 finding): `api.InstallParsedManifest` and `api.Install` share ~40 lines of plumbing (BuildPlanWithOpts, audit-first emission, executeInstallTo loop). v5 extracts the shared body into an unexported `(a *API) installPlan(ctx, m, plan, opts) error` helper called by both. `api.Install` keeps its global-server entrypoint with `refuseWorkspaceScopedInstall` gate; `api.InstallParsedManifest` keeps its workspace-scoped entrypoint with the pre-loaded workspace snapshot. Both call `installPlan` for the actual mutation work. Net code growth: ~80 lines (struct + new function + tests).
+
+   **v5 migration sequence** (replaces v3 step list at this location):
+
    1. acquire `Registry.Lock()` for cross-process safety (`workspace_registry.go:169-178`)
-   2. write new `servers/serena/manifest.yaml` with `daemon_template` block (atomic via existing `SecureWriteClientConfig` pipeline)
-   3. invoke `api.BuildPlanWithOpts(...)` + `api.executeInstallTo(...)` IN-PROCESS (no separate `mcphub install` shell-out) — these are the existing install primitives that regenerate `supervisor-intent.json` from manifest × workspaces.yaml (`internal/api/install.go:1109-1205, 1630-1810`; v3 implementer must verify exact entry-point signatures)
-   4. write atomic `supervisor-intent.json` via existing install pipeline; this bumps the file's mtime
-   5. `IntentWatcher.detectChange()` (`supervise_watcher.go:193-200`) detects mtime change on next poll tick and fires `onChange` → reconciler picks up new descriptors
-   6. release Registry lock
+   2. read current registry; build `[]WorkspaceEntry` snapshot of serena workspaces (`reg.SerenaEntries()`)
+   3. write new `servers/serena/manifest.yaml` with `daemon_template` block (atomic via existing `SecureWriteClientConfig` pipeline)
+   4. invoke `api.InstallParsedManifest(ctx, newManifest, InstallParsedManifestOpts{Workspaces: snapshot, ...})` IN-PROCESS — the new exported seam
+   5. the seam writes scheduler tasks + per-client config entries + supervisor-intent.json under a single shared rollback stack
+   6. `IntentWatcher.detectChange()` (`supervise_watcher.go:193-200`) detects intent mtime change on next poll tick and fires `onChange` → reconciler picks up new descriptors (assuming A.2 wired the watcher into runSupervise)
+   7. release Registry lock
 
-   **IntentWatcher default poll** (sonnet v2 MINOR-2 fix): `NewIntentWatcher` defaults `pollInterval` to `60 * time.Second` when `pollInterval <= 0` (`supervise_watcher.go:108-110`), NOT 30s. **Operator-facing behavior**: migration prints "supervisor will pick up new intent within 60s (next IntentWatcher tick); no manual restart required."
+   **IntentWatcher default poll** (sonnet v2 MINOR-2 fix, unchanged in v5): `NewIntentWatcher` defaults `pollInterval` to `60 * time.Second` when `pollInterval <= 0` (`supervise_watcher.go:108-110`). **Operator-facing behavior**: migration prints "supervisor will pick up new intent within 60s (next IntentWatcher tick); no manual restart required."
 
-   **Why in-process install vs shell-out**: shell-out has multiple failure modes (operator's PATH, mcphub binary version mismatch, intent file lock races against another mcphub process). In-process call uses the SAME Go function the install command does, with the Registry lock held, so the supervisor-intent.json write is atomic relative to other registry mutations.
+   **Why in-process vs shell-out** (unchanged): shell-out has multiple failure modes (operator's PATH, mcphub binary version mismatch, intent file lock races against another mcphub process). In-process call uses the same Go functions the install command does, with the Registry lock held, so all writes are atomic relative to other registry mutations.
 
 **Acceptance criteria**:
 - Idempotent: detection predicate returns "already migrated" if rerun; no writes, exit 0
@@ -705,32 +968,71 @@ Per Decision 5 (resolved by codex consult 2026-05-20), Phase F implements the to
 - `TestSerenaRouter_GetCurrentConfigUnbound_HubSummaryShape`
 - `TestSerenaRouter_SingleWorkspaceRegistry_NoAggregateWrapping`
 
-### F.2: `read_memory <name>` — strict disambiguation when unbound
+### F.2: `read_memory <name>` — strict disambiguation when unbound (v5)
 
-**Bound session**: sticky-forward to the workspace's serena daemon. Pass response through unchanged.
+**Bound session**: sticky-forward to the workspace's serena daemon. Pass response through unchanged (including transport-level JSON-RPC envelope).
 
 **Unbound session**:
 - Query all registered serena daemons in parallel
-- Collect responses; count how many returned a successful read (HTTP 200 + non-empty body)
+- Collect responses; classify each via the two-layer success predicate below
 - Cases:
   - Exactly 1 success: return that workspace's response unchanged + `X-Serena-Workspace: <abs-path>` response header (so client can sticky-bind explicitly going forward)
   - 0 successes: HTTP 404 with body `{"error": "memory '<name>' not found in any registered serena workspace"}`
   - 2+ successes: HTTP 409 Conflict with body `{"error": "memory '<name>' exists in multiple workspaces", "workspaces": ["D:\\dev\\PaperPane", "D:\\dev\\mcp-local-hub"], "guidance": "call a path-aware tool first to bind workspace, or use hub.bind_workspace explicitly"}`
 - Codex constraint: do NOT use "first success wins" — that silently leaks the wrong workspace's memory contents
 
+**JSON-RPC + HTTP success predicate** (closes v4 BLOCKER F.2 codex finding): MCP transport is JSON-RPC over HTTP; HTTP 200 can still carry a JSON-RPC error envelope `{"jsonrpc":"2.0","id":..,"error":{"code":-32602,"message":"memory not found"}}`. Naive "HTTP 200" classification would count error responses as success and trigger spurious 409 disambiguation. Use two layers:
+
+```go
+// classifyReadMemoryResponse returns (isHit, reason) for one upstream response.
+// Order: HTTP-status gate → JSON-RPC envelope gate → result-shape gate.
+func classifyReadMemoryResponse(resp *http.Response, body []byte) (bool, string) {
+    if resp.StatusCode != http.StatusOK {
+        return false, fmt.Sprintf("http-%d", resp.StatusCode)
+    }
+    var env struct {
+        JSONRPC string          `json:"jsonrpc"`
+        ID      json.RawMessage `json:"id"`
+        Result  json.RawMessage `json:"result,omitempty"`
+        Error   *struct {
+            Code    int    `json:"code"`
+            Message string `json:"message"`
+        } `json:"error,omitempty"`
+    }
+    if err := json.Unmarshal(body, &env); err != nil {
+        return false, "malformed-jsonrpc"
+    }
+    if env.Error != nil {
+        // upstream signalled error per JSON-RPC; not a hit. Specific error codes
+        // (e.g. -32602 "memory not found") are routed to the 0-successes branch.
+        return false, fmt.Sprintf("jsonrpc-error-%d", env.Error.Code)
+    }
+    if len(env.Result) == 0 || string(env.Result) == "null" {
+        return false, "empty-result"
+    }
+    // Result body is shape-valid; it's a hit.
+    return true, ""
+}
+```
+
 **Special case**: memory name starting with `global/` (per serena convention) — can be de-duped/read-once across the pool because global memories are by-name unique. Acceptance criterion: documented behavior for `global/*` is "read first daemon's response since global memories are by-name unique by serena convention". Defer cross-pool global memory sync to v2.
 
 **Test contract**:
+
 - `TestSerenaRouter_ReadMemoryUnbound_ExactlyOneMatch_Returns200`
 - `TestSerenaRouter_ReadMemoryUnbound_ZeroMatches_Returns404`
 - `TestSerenaRouter_ReadMemoryUnbound_MultipleMatches_Returns409Disambiguation`
 - `TestSerenaRouter_ReadMemoryUnbound_GlobalNamespace_FirstDaemonWins`
+- `TestClassifyReadMemoryResponse_JSONRPCErrorCounts_AsZeroHits` — HTTP 200 + `{"error":{"code":-32602,...}}` body must NOT count as success
+- `TestClassifyReadMemoryResponse_EmptyResultCountsAsZeroHits` — HTTP 200 + `{"result":null}` must NOT count as success
+- `TestClassifyReadMemoryResponse_MalformedJSONRPCCountsAsZero` — non-JSON or missing envelope fields count as misses, not panics
 
-### F.3: `write_memory` / `delete_memory` / `onboarding` — fail-closed unbound
+### F.3: `write_memory` / `delete_memory` / `onboarding` — fail-closed unbound (v5)
 
 **Bound session**: sticky-forward to the workspace's serena daemon. Pass response through unchanged.
 
 **Unbound session**:
+
 - Return HTTP 412 Precondition Failed with body:
   ```json
   {
@@ -739,44 +1041,159 @@ Per Decision 5 (resolved by codex consult 2026-05-20), Phase F implements the to
   }
   ```
 - DO NOT default-route to any workspace — codex constraint: silent writes to wrong project state are unrecoverable corruption
-- Exception: single-workspace-registry shortcut (if exactly one registered serena workspace, route there directly) — only safe path for "default behavior"
+- Exception: single-workspace-registry shortcut — IF and ONLY IF a health gate passes (see below)
+
+**Single-workspace-registry shortcut + health gate** (closes v4 BLOCKER F.3 codex finding "single-workspace shortcut without health check"):
+
+When exactly one registered serena workspace exists, the unbound-write rejection is too coarse — operators with a single project want their `write_memory` calls to route there without ceremony. But routing to a dead daemon produces an opaque connection error, not the actionable 412 + guidance the user needs. The shortcut adds a pre-route health gate:
+
+```go
+// shouldUseSingleWorkspaceShortcut returns true iff:
+//   1. exactly one serena workspace is registered, AND
+//   2. that workspace's daemon is healthy per the supervisor state.
+//
+// The health predicate consults the controller's smStates (A.2) for the daemon's
+// current RestartPolicyState. Healthy = StRunning. Unhealthy states (StBackoffWaiting,
+// StQuarantined, StSpawning, StIdle) all return false → shortcut declined, fall through
+// to the 412 rejection so the operator sees a clear "your serena daemon for D:\dev\Foo
+// is in quarantine — fix that before writing" diagnostic instead of an opaque connection
+// timeout.
+func (r *SerenaRouter) shouldUseSingleWorkspaceShortcut() (*WorkspaceEntry, bool) {
+    serena := r.registry.SerenaEntries()
+    if len(serena) != 1 {
+        return nil, false
+    }
+    ws := &serena[0]
+    state, ok := r.controller.GetSMState(ws.TaskName)
+    if !ok || state != api.StRunning {
+        return nil, false
+    }
+    return ws, true
+}
+```
+
+**Health-failure path**: when the shortcut declines because the single daemon is unhealthy, the 412 response body adds a `daemon_state` field so the operator knows WHY:
+
+```json
+{
+  "error": "no workspace bound for this MCP session",
+  "daemon_state": "quarantined",
+  "registered_workspaces": ["D:\\dev\\Foo"],
+  "guidance": "the only registered workspace's serena daemon is quarantined; run `mcphub supervise` cold-restart to clear the 30-min window, or use 'hub.bind_workspace D:\\dev\\Foo' to explicitly bind once the daemon recovers"
+}
+```
 
 **Acceptance criteria**:
-- Unbound write → HTTP 412 + explicit guidance message (no silent default)
-- Single-workspace-registry shortcut works for both bound and unbound
-- Each rejection emits audit event `serena-write-unbound-rejected` with body `{tool, session_id_hash, registered_workspace_count}`
+
+- Unbound write with zero-or-multi workspaces → HTTP 412 + explicit guidance message (no silent default)
+- Single-workspace shortcut routes only when the daemon's SM state is `StRunning`; any other state → 412 with `daemon_state` populated
+- Each rejection emits audit event `serena-write-unbound-rejected` with body `{tool, session_id_hash, registered_workspace_count, daemon_state}` (`daemon_state` empty string when zero-or-multi workspaces)
 
 **Test contract**:
+
 - `TestSerenaRouter_WriteMemoryUnbound_Returns412`
 - `TestSerenaRouter_DeleteMemoryUnbound_Returns412`
 - `TestSerenaRouter_OnboardingUnbound_Returns412`
-- `TestSerenaRouter_WriteMemorySingleWorkspaceShortcut_Returns200`
+- `TestSerenaRouter_WriteMemorySingleWorkspaceShortcut_HealthyReturns200`
+- `TestSerenaRouter_WriteMemorySingleWorkspaceShortcut_QuarantinedReturns412WithDaemonState`
+- `TestSerenaRouter_WriteMemorySingleWorkspaceShortcut_BackoffWaitingReturns412`
 - `TestSerenaRouter_WriteMemoryUnboundEmitsAuditEvent`
 
-### F.4: Sticky-session map implementation
+### F.4: Sticky-session map implementation (v5)
 
 **Storage**: in-process map `map[string]*WorkspaceEntry` keyed by `Mcp-Session-Id` header value. Protected by `sync.RWMutex`. Lazy expiration: TTL 24h since last call (configurable via `mcphub config sticky-ttl`).
 
+**Atomic snapshot release before fan-out** (closes v4 BLOCKER F.4 codex finding "fan-out lock held across upstream calls"):
+
+The naive implementation holds `mu.RLock()` for the entire fan-out duration in F.1/F.2's unbound branch, which means every concurrent path-aware call (which would `mu.Lock()` to bind a new session) blocks waiting for the fan-out's parallel HTTP calls to return. Under load this serializes the hub. Fix: snapshot the relevant map entries under the RLock, release the lock, then perform the upstream calls against the snapshot:
+
+```go
+// resolveBoundWorkspace looks up the session's bound workspace under the lock
+// and returns the resolved pointer (or nil). The returned WorkspaceEntry is
+// a value copy — readers must NOT retain a pointer into the live map.
+func (s *StickyMap) resolveBoundWorkspace(sessionID string) (WorkspaceEntry, bool) {
+    s.mu.RLock()
+    defer s.mu.RUnlock()
+    e, ok := s.m[sessionID]
+    if !ok {
+        return WorkspaceEntry{}, false
+    }
+    return *e, true // value copy under the lock
+}
+
+// snapshotForFanout takes the unbound-fan-out target set: a value-copy slice
+// of ALL serena WorkspaceEntries known to the registry, captured under the
+// registry's own lock. After this returns, the caller holds NO lock; fan-out
+// HTTP calls operate purely on the value-copy slice.
+func (r *SerenaRouter) snapshotForFanout() []WorkspaceEntry {
+    return r.registry.SerenaEntries() // already returns a value-copy slice
+}
+
+// handleUnboundReadMemory shows the lock release pattern.
+func (r *SerenaRouter) handleUnboundReadMemory(req *http.Request, body []byte) (*http.Response, error) {
+    // Step 1: snapshot under the lock (RLock released by SerenaEntries return).
+    targets := r.snapshotForFanout()
+    if len(targets) == 0 {
+        return notFoundResponse("no registered serena workspaces"), nil
+    }
+    // Step 2: fan out HTTP calls against the snapshot. NO LOCK HELD here.
+    results := r.fanOutBounded(req.Context(), targets, body, fanoutConcurrency)
+    // Step 3: classify and aggregate (lock-free; results is goroutine-local).
+    return aggregateReadMemoryResults(results), nil
+}
+```
+
+The same pattern applies in F.1's aggregate path: registry snapshot → release → bounded parallel fan-out → aggregate.
+
 **Hook points**:
+
 - On every path-aware tool-call response success → `sticky[session_id] = resolved_workspace` (idempotent if already bound to same workspace)
 - On HTTP 404 from upstream (session expired per MCP spec) → evict `sticky[session_id]`
 - On explicit MCP DELETE on `Mcp-Session-Id` (per MCP spec §"Session Management") → evict
-- On `hub.bind_workspace <abs-path>` (new IPC verb) → set `sticky[session_id]` explicitly; refuses if session already bound to different workspace unless `--force`
+- On `hub.bind_workspace <abs-path>` (new **MCP/HTTP tool**, NOT supervisor IPC) → set `sticky[session_id]` explicitly; refuses if session already bound to different workspace unless `force: true` param
+
+**`hub.bind_workspace` belongs on MCP/HTTP layer, not supervisor IPC** (closes v4 BLOCKER F.4 codex finding "hub.bind_workspace as supervisor IPC questionable"):
+
+Supervisor IPC (`supervise.go`'s named-pipe / unix-socket) is for process-lifecycle commands (status, restart, exit, quiesce-timers) — operator-facing, single owner, no session concept. Session binding lives in the hub-mcp HTTP layer where every request already carries `Mcp-Session-Id` and goes through the SerenaRouter. v5 places `hub.bind_workspace` as an MCP tool exposed by the hub itself:
+
+```jsonc
+// MCP tool exposed by mcphub's own hub-mcp server (NOT a supervisor IPC command).
+{
+  "name": "hub.bind_workspace",
+  "description": "Bind this MCP session to a specific registered serena workspace for sticky no-path routing.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_path": {"type": "string", "description": "absolute path of registered serena workspace"},
+      "force": {"type": "boolean", "default": false, "description": "rebind even if already bound to a different workspace"}
+    },
+    "required": ["workspace_path"]
+  }
+}
+```
+
+The handler reads `Mcp-Session-Id` from the request, resolves the workspace by path against the registry, and updates the StickyMap under the write lock. Errors return JSON-RPC errors at the MCP layer (no special transport). Tracing: emits the same `serena-session-bound` / `serena-session-rebound` audit events as the implicit bind path.
 
 **Acceptance criteria**:
+
 - Sticky binding correctly resolves on subsequent no-path calls
 - Map lookup is O(1)
 - Eviction on 404 from upstream + explicit DELETE + TTL expiry
-- `hub.bind_workspace` IPC verb works idempotent (re-bind to same workspace = no-op)
+- `hub.bind_workspace` MCP tool works idempotent (re-bind to same workspace = no-op)
+- `hub.bind_workspace` exposed on the hub-mcp endpoint, NOT on supervisor IPC; `mcphub supervise` does not implement a `bind_workspace` IPC verb
+- Fan-out paths (F.1 unbound aggregate, F.2 unbound read_memory) hold the sticky-map lock ONLY for the snapshot read; HTTP calls run lock-free against the value-copy snapshot
 - Audit event `serena-session-bound` on first bind, `serena-session-rebound` on explicit override, `serena-session-evicted` on eviction
 
 **Test contract**:
+
 - `TestStickySession_BindOnFirstPathCall`
 - `TestStickySession_LookupAfterBind_O1`
 - `TestStickySession_Evict_OnHTTP404FromUpstream`
 - `TestStickySession_Evict_OnExplicitDELETE`
-- `TestStickySession_HubBindWorkspace_Idempotent`
-- `TestStickySession_HubBindWorkspace_RejectsRebindWithoutForce`
+- `TestHubBindWorkspaceTool_Idempotent` — re-bind to same workspace = no-op
+- `TestHubBindWorkspaceTool_RejectsRebindWithoutForce`
+- `TestHubBindWorkspaceTool_ExposedOnMCPLayerNotSupervisorIPC` — regression guard that supervisor IPC has no `bind_workspace` verb
+- `TestFanout_ReleasesLockBeforeUpstreamCalls` — concurrent `bind` calls do not block on an in-flight fan-out's upstream RTT
 
 ---
 
