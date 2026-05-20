@@ -1,6 +1,6 @@
-# Unified Plan: Serena dynamic-pool + Supervisor state-machine wiring (v7)
+# Unified Plan: Serena dynamic-pool + Supervisor state-machine wiring (v8)
 
-> **Status**: v7 — closes v6 codex review's 6 new BLOCKERs (api.IsActiveStop nonexistent, gracefulInProgress field mismatch, F.3 wiring path wrong, D.3 outer/inner rollback contradiction, --start-after-write doesn't compose, F.4 handler dependency gap) AND absorbs v6 sonnet's 6 IMPORTANTs (per-task event storm, line :228→:238, 8 missing test names, new-package declarations, helper declarations, mcphub reconcile gap) + 1 MINOR (reaper :2030→:2037). v7 also names structural changes that v6 implied but did not specify: `executeInstallTo` Pass A / Pass B split for `--start-after-write`, `HubLocalDeps` attached to `hubSession` (so `AggregateToolsCall` signature stays unchanged), `mcphub reconcile` operator command added to Phase A.3. Pending v7 dual review.
+> **Status**: v8 — final fix-the-fixes pass per v7 sonnet assessment ("v7 should be last iteration with structural novelty; v8 should be pure fix-the-fixes"). v8 closes v7 codex 5+1 BLOCKERs (SupervisorDaemon.Desired doesn't exist → DaemonIntentFile.Tasks lookup; IPC status doesn't return SMState → add sm_state field; --start-after-write regression on api.Install Run-failure semantic → preserve warning-only behavior + name 3 hidden callers; F.4 subpackage visibility → keep handler in `api`; import-cycle → SerenaHealthLookup in `api` package; api.LoadSupervisorIntent → real api.ReadSupervisorIntent) AND v7 sonnet 2 BLOCKERs + 4 IMPORTANTs (line :1080 wrong for reconcile case → new `case "reconcile":` before default; branch in resolveToolsCallRoute not AggregateToolsCall; HubMcpHandlerOpt functional-options spelled out; capacity 64 reuse not 256; Pass B At-logon trigger filter preserved; lookupDaemonIntent + diffIntentSnapshots signatures defined). All v8 pseudocode mentally compiles against HEAD `cc00364`. Pending v8 dual review.
 >
 > **Convergence history**:
 >
@@ -10,7 +10,8 @@
 > - v4 (commit 6f22944): header bumped with resolution intent for all 4 v3 BLOCKERS + 4 IMPORTANTS, but section bodies still v3. Dual review returned REVISE with consensus that section-level prose must be rewritten before v5 can be reviewed against verified evidence. Both reviewers also surfaced specific corrections: (a) LSP call-site catalog was 4-undercounted at 13-actual sites (NOT 6, NOT 8 — see B.1 v5 table), (b) `@`-prefix is NOT currently rejected by the manifest validator, (c) the validator-level rejection alone does not defend the registry write path because `@serena` lives in `WorkspaceEntry.Language` (registry) not `LanguageSpec.Name` (manifest), (d) v3 pseudocode used `Manifest` (real type is `ServerManifest`) + `len(m.PortPool)` (real type is `*PortPool`), (e) v3's `executeInstallTo` reference is to an unexported function.
 > - v5 (commits 7589961+56fb528+da75f5e): section bodies rewritten to match the v4 header intent + close the additional reviewer-surfaced corrections. v5 dual review returned REVISE with 7 converged BLOCKERs: A.2 pseudocode used non-existent api types (RestartPolicyState, EvReconcileTick, SMContext fields) and wrong NewIntentWatcher signature; A.1 catalog had 5 stale file:line refs (HEAD drifted from 6f22944 to 56fb528); D.3 atomicity covered only 3 of 6 migration steps; D.1 schema gate missing for non-workspace-scoped manifests; F.4 hub.bind_workspace integration unspecified; B.1 missed register.go:640 (14th call-site); F.3 forward-ref to undefined GetSMState accessor.
 > - v6 (commit bd552ee): all 7 v5 BLOCKERs closed against verified code at HEAD `56fb528`. v6 dual review returned divergent verdicts: codex REVISE with 6 new BLOCKERs (fake-API helpers — `api.IsActiveStop` doesn't exist as free function, `gracefulInProgress` field missing from controller; F.3 wiring referenced runSupervise but real hub construction is at `gui/hub_listener.go:182`; D.3 outer/inner rollback contradiction; `--start-after-write` flag doesn't compose with current `executeInstallTo` loop; F.4 `AggregateToolsCall` signature doesn't carry sticky/registry/events). Sonnet APPROVE_WITH_CHANGES with 6 IMPORTANTs (per-task event storm risk, line :228→:238 drift, 8 missing test names, new-package declarations missing, helper declarations missing, `mcphub reconcile` operator command gap) + 1 MINOR (reaper :2030→:2037 range).
-> - v7 (this commit): all 6 v6 codex BLOCKERs closed + all 6 v6 sonnet IMPORTANTs absorbed:
+> - v7 (commit cc00364): all 6 v6 codex BLOCKERs closed + all 6 v6 sonnet IMPORTANTs absorbed. v7 dual review divergent: codex REVISE with 5+1 BLOCKERs (api.SupervisorDaemon.Desired doesn't exist; IPC status doesn't return SMState; api.Install Run-failure regression; subpackage visibility; import-cycle; api.LoadSupervisorIntent wrong name; InstallParsedManifestOpts.StartAfterWrite inconsistent; mcphub reconcile IPC shape undefined; diffIntentSnapshots contract undefined) and sonnet APPROVE_WITH_CHANGES with 2 BLOCKERs + 4 IMPORTANTs (line :1080 wrong for reconcile case; branch in wrong function; HubMcpHandlerOpt undefined; capacity 64-vs-256 conflict; Pass B At-logon filter missing; lookupDaemonIntent undefined). Sonnet declared v7 = "last iteration with structural novelty".
+> - v8 (this commit): all v7 BLOCKERs closed against verified code at HEAD `cc00364`:
 >   - **B.1** Registry: 14-site verified call-site catalog (5 LSP-only requiring sentinel filter — incl. `register.go:640` legacy-key fallback added in v6; 9 backend-agnostic safe-include); dual-gate `@`-prefix defense at manifest validator AND registry write path; backend/server ownership matrix; `mcphub unregister --backend` default-LSP-only semantics; `mcphub stop` backend-aware `taskFilter`.
 >   - **D.1** Validator: compile-accurate pseudocode against verified types (`ServerManifest`, `*PortPool`, `Languages []LanguageSpec`); v6 adds CROSS-BRANCH gate that rejects `DaemonTemplate != nil` when `Kind != KindWorkspaceScoped` OR `Transport == TransportRemoteHTTP` (closes v5 codex finding of silent acceptance under global/remote-http).
 >   - **D.3** Install chain: new exported `api.InstallParsedManifest(ctx, m, opts)` AND v6-introduced **migration-driver rollback stack** wrapping all 6 migration steps (manifest write + registry alloc/save + scheduler tasks + client configs + intent write + daemon spawn); v6 acknowledges existing rollback closures are best-effort and surfaces failures via `rollback-incomplete` audit event + composite error; v6 introduces `--start-after-write` flag to defer daemon-spawn-before-intent-write race (closes v5 codex finding "daemons started before intent write").
@@ -207,7 +208,80 @@ type supervisorController struct {
     smStates    sync.Map                  // taskName → api.SMState
     events      *api.SupervisorEventLog   // audit emitter
     graceful    *gracefulCounter          // existing surface at supervise.go:206-245; shared with IPC exit{graceful} flow
-    daemonIntent *daemonIntentCache       // small wrapper around the parsed daemon-intent.json file; refreshed alongside intentCache on watcher.onChange
+    daemonIntent *daemonIntentCache       // wrapper around parsed daemon-intent.json; refreshed alongside intentCache on watcher.onChange
+}
+
+// daemonIntentCache (v8 spec) is the per-task DaemonIntent snapshot owned
+// by the controller. Same atomic.Value pattern as IntentCache; readers see
+// a coherent snapshot pointer regardless of concurrent writer refresh.
+//
+// Lookup semantic mirrors the mixed-bootstrap default at daemon_intent.go:230:
+// an absent task returns the zero DaemonIntent, which `handleLoopEvent`
+// reinterprets as "default-running" before passing to api.Transition.
+type daemonIntentCache struct {
+    snap atomic.Value // *daemonIntentSnapshot
+}
+
+type daemonIntentSnapshot struct {
+    file  *api.DaemonIntentFile
+    tasks map[string]api.DaemonIntent
+}
+
+func (c *daemonIntentCache) Lookup(taskName string) api.DaemonIntent {
+    s, ok := c.snap.Load().(*daemonIntentSnapshot)
+    if !ok || s == nil {
+        return api.DaemonIntent{} // zero → default-running
+    }
+    return s.tasks[taskName] // map zero-value also matches default-running
+}
+
+// Refresh atomically swaps the cached snapshot. Wired into watcher.onChange
+// alongside IntentCache.Refresh.
+func (c *daemonIntentCache) Refresh(file *api.DaemonIntentFile) {
+    snap := &daemonIntentSnapshot{file: file}
+    if file != nil {
+        snap.tasks = file.Tasks
+    }
+    c.snap.Store(snap)
+}
+
+// diffIntentSnapshots (v8 spec) returns the slice of task names whose intent
+// state CHANGED between previous and updated. "Changed" is defined as one of:
+//   - task is in updated but not in previous (added)
+//   - task is in previous but not in updated (removed; an EvIntentUpdate for
+//     a removed task drives the SM to recognize the absence — typically a
+//     transition through StExiting or StIdle)
+//   - task is in both AND any of (Desired, Reason, UpdatedAt) differs
+//
+// Pure function; no I/O. Used by the watcher onChange to avoid the v6 storm
+// (posting one EvIntentUpdate per known task on every mtime bump even if
+// nothing actually changed).
+func diffIntentSnapshots(previous, updated *api.DaemonIntentFile) []string {
+    prev := mapOrEmpty(previous)
+    next := mapOrEmpty(updated)
+    var delta []string
+    seen := make(map[string]struct{}, len(prev)+len(next))
+    for taskName, p := range prev {
+        seen[taskName] = struct{}{}
+        n, ok := next[taskName]
+        if !ok || p.Desired != n.Desired || p.Reason != n.Reason || !p.UpdatedAt.Equal(n.UpdatedAt) {
+            delta = append(delta, taskName)
+        }
+    }
+    for taskName := range next {
+        if _, already := seen[taskName]; already {
+            continue
+        }
+        delta = append(delta, taskName) // added
+    }
+    return delta
+}
+
+func mapOrEmpty(f *api.DaemonIntentFile) map[string]api.DaemonIntent {
+    if f == nil {
+        return nil
+    }
+    return f.Tasks
 }
 
 // GetSMState exposes the controller's per-task SM state so OTHER subsystems
@@ -284,13 +358,23 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
     // v7 closure of v6 codex finding: there is no `api.IsActiveStop(d, now)`
     // free function; the predicate is `func (i DaemonIntent) IsActiveStop(now
     // time.Time) (bool, string)` at internal/api/daemon_intent.go:308.
-    // The second return is the human-readable reason (clock-skew / TTL /
-    // user-stop) — only the boolean is fed into SMContext; the reason is
-    // available if v7 wants to surface it in audit events later.
-    daemonIntent := lookupDaemonIntent(d.TaskName) // resolved from daemon-intent.json snapshot
-    activeStop, _ := daemonIntent.IsActiveStop(now)
+    //
+    // v8 correction of v7 codex finding: `api.SupervisorDaemon` (at
+    // supervisor_intent.go:25) has NO `Desired` field — only TaskName/Server/
+    // Daemon/Command/Args/Env/Workspace/Port/ManifestHash. The intent state
+    // lives in a SEPARATE file: `DaemonIntentFile.Tasks map[string]DaemonIntent`
+    // (daemon_intent.go:231-233), where each `DaemonIntent{Desired, Reason,
+    // UpdatedAt}` carries the per-task stop/run desire. An ABSENT task in the
+    // map is "default-running" (the file may carry only a subset of tasks).
+    // The controller caches both intent files (see daemonIntentCache below).
+    di := c.daemonIntent.Lookup(ev.TaskName) // zero value when absent → IntentDesired==""
+    activeStop, _ := di.IsActiveStop(now)
+    intentDesired := di.Desired
+    if intentDesired == "" {
+        intentDesired = "running" // mixed-bootstrap default per daemon_intent.go:230
+    }
     smCtx := api.SMContext{
-        IntentDesired:      d.Desired,                        // string "running" | "stopped"
+        IntentDesired:      intentDesired,                    // "running" | "stopped"; default "running" when intent absent
         IntentIsActiveStop: activeStop,                        // from DaemonIntent.IsActiveStop(now)
         Failures:           c.tracker.CrashCountInWindow(ev.TaskName, now, respawnFailureWindow),
         QueuedAction:       "",                               // populated from supervisor-state.json on cold start; "" on first observation
@@ -347,51 +431,76 @@ The controller becomes the SOLE consumer of `DaemonRuntimeTracker`'s crash-count
 func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
     // ... existing pre-controller setup (lock, intent load, event log, job creation) ...
 
-    const eventLoopCapacity = 256 // generous for the per-daemon event mix; min is 16
+    // Event loop reuse (v8 closure of v7 sonnet IMPORTANT-2 "capacity 64 vs 256
+    // inconsistency"): production already constructs `api.NewEventLoop(64)`
+    // at supervise.go:416 with the comment "64 absorbs quiesce-complete posts
+    // from the side-goroutine drain handler without rendezvous deadlock". v8
+    // REUSES that existing loop — `runSupervise` creates the loop ONCE and
+    // passes it into both the existing per-task handlers AND the new
+    // controller. Capacity stays at 64; if future profiling shows backpressure
+    // on long migration sequences, a follow-up may bump the capacity.
     ctrl := &supervisorController{
-        intentCache: newIntentCache(),
-        eventLoop:   api.NewEventLoop(eventLoopCapacity),
-        tracker:     NewDaemonRuntimeTracker(),
-        events:      events,
+        intentCache:  newIntentCache(),
+        eventLoop:    existingLoop, // reuse the loop already constructed for quiesce-complete + per-task handlers
+        tracker:      NewDaemonRuntimeTracker(),
+        events:       events,
+        graceful:     &gracefulInProgress, // existing local at supervise.go:434
+        daemonIntent: newDaemonIntentCache(),
     }
     ctrl.intentCache.Refresh(initialIntent)
+    if initialDaemonIntent != nil {
+        ctrl.daemonIntent.Refresh(initialDaemonIntent)
+    }
     ctrl.eventLoop.RegisterHandler(ctrl.handleLoopEvent)
-    go ctrl.eventLoop.Run(ctx) // FIFO consumer; exits on ctx done
+    // ctrl.eventLoop.Run is ALREADY started by the existing supervise.go
+    // wiring (the loop is shared); do NOT call Run again here.
 
     // IntentWatcher wired into runSupervise. The watcher polls every file
     // under stateDir whose mtime it tracks (supervisor-intent.json +
     // daemon-intent.json by design); onChange fires when ANY of them changes.
+    var previousDaemonIntent *api.DaemonIntentFile = initialDaemonIntent
     watcher := NewIntentWatcher(stateDir, 60*time.Second, func() {
-        // Re-read intent + refresh cache atomically. Errors logged via events.
-        updated, err := api.LoadSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"))
-        if err != nil {
+        // Re-read intent + daemon-intent + refresh caches atomically. Errors
+        // logged via events. v8: real function is `api.ReadSupervisorIntent`
+        // at supervisor_intent.go:61 (NOT `LoadSupervisorIntent` which was v7
+        // pseudocode). Symmetric helper for daemon-intent.json is
+        // `api.ReadDaemonIntent` at daemon_intent.go.
+        updatedSupervisor, supErr := api.ReadSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"))
+        if supErr != nil {
             _ = events.Emit(api.SupervisorEvent{
                 Severity: "warn", Source: "intent-watcher", Event: "intent-reload-failed",
-                Body: map[string]any{"error": err.Error()},
+                Body: map[string]any{"file": "supervisor-intent.json", "error": supErr.Error()},
             })
-            return
+            // Don't return — daemon-intent.json reload is independent of supervisor-intent.json.
+        } else {
+            ctrl.intentCache.Refresh(updatedSupervisor)
         }
-        ctrl.intentCache.Refresh(updated)
-        // Post EvIntentUpdate per known task so the SM picks up intent flips
-        // (Desired stopped/running, ActiveStopUntil shifts). EvIntentUpdate is
-        // the real event constant per supervisor_state_machine.go:23; v5 used
-        // a non-existent `EvReconcileTick` value.
-        //
-        // Burst behavior (closes v6 sonnet IMPORTANT B.1 "per-task storm"):
-        // EventLoop.Post is blocking when the channel is full (no select/default
-        // at supervisor_event_loop.go:33-35). For 6-workspace deployment with
-        // ~3 daemons each = 18 events per watcher tick, against capacity 256
-        // this is safe (~7% of capacity). For larger deployments OR rapid
-        // back-to-back intent rewrites (e.g. `mcphub install` chain), v7 uses
-        // delta-only posting: compare the new intent against the cached snapshot
-        // taken under the same atomic.Value swap (intentSnapshot diff) and post
-        // ONLY for daemons whose intent fields actually changed.
-        delta := diffIntentSnapshots(previous, updated) // returns []string of task names
+        daemonIntentResult := api.ReadDaemonIntent(filepath.Join(stateDir, "daemon-intent.json"))
+        updatedDaemonIntent := daemonIntentResult.File
+        if daemonIntentResult.State == "error" {
+            _ = events.Emit(api.SupervisorEvent{
+                Severity: "warn", Source: "intent-watcher", Event: "intent-reload-failed",
+                Body: map[string]any{"file": "daemon-intent.json", "error": daemonIntentResult.Err.Error()},
+            })
+            // Continue with previous snapshot — partial reload is safer than skipping the cache refresh entirely.
+            updatedDaemonIntent = previousDaemonIntent
+        }
+        ctrl.daemonIntent.Refresh(updatedDaemonIntent)
+
+        // Delta-only EvIntentUpdate posting (closes v6 sonnet IMPORTANT B.1
+        // "per-task storm"): EventLoop.Post is blocking when the channel is
+        // full (no select/default at supervisor_event_loop.go:33-35). v8 posts
+        // ONE EvIntentUpdate per daemon whose intent ACTUALLY changed, computed
+        // via diffIntentSnapshots(previous, updated). On a typical mtime bump
+        // where only one daemon's Desired flips, delta == 1; the rest of the
+        // intent file stays unchanged and no events post.
+        delta := diffIntentSnapshots(previousDaemonIntent, updatedDaemonIntent)
         for _, taskName := range delta {
             ctrl.eventLoop.Post(api.LoopEvent{Kind: api.EvIntentUpdate, TaskName: taskName})
         }
+        previousDaemonIntent = updatedDaemonIntent
     })
-    go watcher.Run(ctx) // <-- v3 said "wired"; v4 header confirmed; v6 makes it concrete with real API
+    go watcher.Run(ctx) // <-- v3 said "wired"; v4 header confirmed; v6 makes it concrete with real API; v8 reads via real api.ReadSupervisorIntent + api.ReadDaemonIntent
 
     // ... rest of runSupervise (IPC listener, reconcile driver, child-exit reaper) ...
 }
@@ -445,11 +554,38 @@ mcphub reconcile --apply   # apply: trigger SM transitions to align scheduler st
 
 Acceptance criteria for the new command:
 
-- IPC `reconcile` verb implemented in `supervise.go` IPC dispatcher (replaces the existing `UNKNOWN_COMMAND` response at `:1080` for the `reconcile` case specifically; other UNKNOWN_COMMAND verbs remain rejected)
-- Dry-run prints structured drift report: per-daemon `{task_name, scheduler_state, intent_desired, action}`
+- IPC `reconcile` verb implemented as a NEW `case "reconcile":` in `supervise.go` IPC dispatcher (v8 closure of v7 sonnet BLOCKER-1 "wrong line :1080"): line `:1080` is INSIDE the body of the existing `case "restart", "reload":` block and emits `UNKNOWN_COMMAND` for those specific verbs (kept as-is). The new `reconcile` verb goes BEFORE `default:` — typically immediately after the existing per-task verbs — so it dispatches to a new `handleReconcile(conn, req, deps)` function instead of falling through to `default:`'s UNKNOWN_COMMAND at line `:1089`.
+- IPC request/result shape (v8 closure of v7 codex NEW-5 "IPC shape undefined"):
+
+  ```go
+  // IPC request: existing IPCRequest{Command: "reconcile", Args: map[string]any{...}}
+  // shape from internal/api/supervisor_ipc.go:12. v8 defines the args:
+  type ReconcileArgs struct {
+      Apply bool `json:"apply"` // dry-run when false; trigger SM transitions when true
+  }
+
+  // IPC response body shape:
+  type ReconcileResponse struct {
+      DryRun       bool           `json:"dry_run"`
+      DriftCount   int            `json:"drift_count"`
+      AppliedCount int            `json:"applied_count"` // 0 when dry-run
+      Drift        []DriftEntry   `json:"drift"`
+  }
+
+  type DriftEntry struct {
+      TaskName        string         `json:"task_name"`
+      SchedulerState  string         `json:"scheduler_state"`  // "running" | "stopped" | "missing"
+      IntentDesired   string         `json:"intent_desired"`   // "running" | "stopped"
+      SMState         api.SMState    `json:"sm_state"`
+      Action          string         `json:"action"`           // "post_ev_intent_update" | "no_op" | "needs_manual_review"
+  }
+  ```
+
+- Dry-run prints structured drift report: per-daemon entries from `ReconcileResponse.Drift` formatted as a human-readable table by the CLI
 - `--apply` posts `EvIntentUpdate` per drifted task; subsequent SM transitions drive Run/Stop/Delete
 - `mcphub reconcile` returns within 30s OR explicit timeout error
 - Audit event `mcphub-reconcile-invoked` recorded with body `{dry_run, drift_count, applied_count}`
+- Drift detection algorithm: for each scheduler-registered task name with prefix `mcp-local-hub-`, compare its `scheduler.Status(name)` (running/stopped) against the supervisor-intent.json descriptor + daemon-intent.json desired state; any discrepancy is a drift entry. Tasks in supervisor-intent.json with NO scheduler-registered counterpart are also drift entries (`SchedulerState="missing"`)
 
 **Steps**:
 1. `mcphub install --upgrade` — replaces binary
@@ -1125,28 +1261,73 @@ daemon_template:              # NEW optional block
      Pseudocode skeleton (replaces a portion of the current install.go:1666-1810 body):
 
      ```go
+     // v8 closure of v7 codex BLOCKER-5: parameter named startTasks bool with
+     // default true preserves existing api.Install behavior. AND v8 PRESERVES
+     // the existing Run-failure semantic (warning-only, install continues) per
+     // current install.go:1802 — Pass B does NOT rollback on Run failure; it
+     // emits a warning to writer and continues, matching the pre-v8 contract.
+     // This is the regression-free behavior path: callers expecting "task
+     // created but failed to start" still get the existing semantics.
      func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int, startTasks bool) error {
          // ... existing setup (scheduler, workDir, rollback stack) ...
-         var createdNames []string
-         // Pass A: create only
+         var createdNames []scheduler.TaskSpec
+         // Pass A: create only — task creation failure DOES roll back
          for _, t := range p.SchedulerTasks {
-             if err := sch.Create(spec); err != nil { /* rollback */ return err }
-             createdNames = append(createdNames, t.Name)
+             if err := sch.Create(spec); err != nil { runRollback(); return err }
+             createdNames = append(createdNames, t)
              rollback = append(rollback, func() { _ = sch.Delete(t.Name) })
          }
-         // ... per-client config writes (unchanged) ...
-         // ... WriteSupervisorIntent (new explicit step for InstallParsedManifest path) ...
+         // ... per-client config writes (existing install.go:1730-1790 block,
+         //     unchanged in placement — runs BETWEEN Pass A and Pass B,
+         //     preserving the current ordering scheduler-create → client-write
+         //     → run that callers depend on) ...
+         // ... WriteSupervisorIntent (new explicit step for InstallParsedManifest
+         //     callers; existing api.Install callers continue to use the
+         //     post-success intent recording via recordInstallIntentPostSuccess) ...
          if startTasks {
-             // Pass B: start
-             for _, name := range createdNames {
-                 if err := sch.Run(name); err != nil { /* rollback */ return err }
+             // Pass B: start — failure logs a warning and CONTINUES per
+             // existing install.go:1797-1807 semantic (do NOT add rollback
+             // here; v7 pseudocode that returned on Run failure was a
+             // regression).
+             for _, t := range createdNames {
+                 // "At logon" trigger filter (PRESERVED from current code):
+                 // weekly-refresh and other non-logon-triggered tasks are
+                 // SKIPPED by Pass B; they fire on their own schedule. This
+                 // matches the existing install.go behavior where Pass-B-
+                 // equivalent loop skips by trigger type.
+                 if !t.IsImmediateStartTrigger() {
+                     continue
+                 }
+                 if err := sch.Run(t.Name); err != nil {
+                     fmt.Fprintf(w, "warning: scheduler run %q failed: %v\n", t.Name, err)
+                     continue // existing behavior — no rollback on Run failure
+                 }
              }
          }
          return nil
      }
      ```
 
-     `api.Install` callers retain `startTasks=true` (no behavior change); `InstallParsedManifest` defaults `opts.StartAfterWrite=true` for direct callers (matching existing semantics) but the migrate driver passes `false` so daemons are started only by the reconciler after the intent flip.
+     **Backward-compat call-site migration** (v8 closure of v7 codex finding "hidden callers"): the existing `executeInstallTo` callers are:
+
+     - `api.Install` at `internal/api/install.go:279` (single-server install) — pass `startTasks=true`
+     - `api.installUsingEmbedFirst` at `internal/api/install.go:411` (catalog install dispatch) — pass `startTasks=true`
+     - `api.installFromManifestDir` at `internal/api/install.go:453` (disk-fallback install dispatch) — pass `startTasks=true`
+
+     All three preserve their current behavior (the `true` default reproduces pre-v8 startup semantics). `InstallParsedManifest` is the only caller that passes `startTasks=false`, and only when invoked from the migrate driver with `opts.StartAfterWrite=false`.
+
+     **`InstallParsedManifestOpts` struct** (v8 fix for v7 codex finding "field inconsistency"):
+
+     ```go
+     type InstallParsedManifestOpts struct {
+         Writer            io.Writer
+         ClientsInclude    []string
+         IncludeAllClients bool
+         Workspaces        []WorkspaceEntry // pre-loaded snapshot of registered serena workspaces
+         DryRun            bool
+         StartAfterWrite   bool             // v8: default true (matches api.Install); migrate driver overrides to false
+     }
+     ```
    - **No transient half-states observable to supervisor for the intent file itself**: the supervisor's `IntentWatcher` polls `supervisor-intent.json` mtime. The atomic rename via `WriteStateFileAtomic` means the file either has the OLD content or the NEW content — never partial. Reads racing the rename see one of the two committed states.
    - **Reconcile-on-startup defense** (defense layer 4): the supervisor's reconciler on cold restart re-reads the intent file and compares against scheduler-registered tasks. Tasks-without-intent are surfaced as drift; intent-entries-without-task are reconciled by spawning. This defends against the case where the migrate driver crashes mid-sequence (e.g., OS reboot during step 4) and leaves an inconsistent state that no rollback closure could undo because the process terminated abruptly.
 
@@ -1381,17 +1562,24 @@ When exactly one registered serena workspace exists, the unbound-write rejection
 // before writing" diagnostic instead of an opaque connection timeout.
 //
 // Cross-package dependency note (closes v5 sonnet finding "api router cannot
-// directly depend on cli controller" + v6 codex finding "F.3 wiring gap —
-// current hub construction is at internal/gui/hub_listener.go:182 via
-// api.NewHubMcpHandler(store), NOT runSupervise"):
+// directly depend on cli controller" + v6 codex finding "F.3 wiring gap" +
+// v7 codex finding "import-cycle risk between serena_routing and api.SMState"):
 //
-// The SerenaHealthLookup interface lives in a NEW sub-package
-// `internal/api/serena_routing/` (created by Phase C; declared explicitly as
-// NEW in the v7 acceptance criteria below). The api package never imports
-// internal/cli; cli already imports api packages, so cli→api remains the
-// established direction.
+// v8 design: the SerenaHealthLookup interface lives in `internal/api` itself
+// (NOT in a sub-package). Rationale: putting the interface in `api/serena_routing/`
+// would force that sub-package to import `api.SMState` (the return type),
+// while `api.NewHubMcpHandler` would need to import `api/serena_routing/` to
+// accept it as an option — that's a direct import cycle. Keeping
+// `SerenaHealthLookup` directly in `api` resolves the cycle: api owns both
+// the SMState enum and the interface; cli implements the interface via
+// `supervisorController.GetSMState`; the existing cli→api direction is preserved.
 //
-// Real wiring path (v7 closure of codex finding):
+// The `internal/api/serena_routing/` sub-package still exists for the path
+// router (`WorkspaceResolver`, F.1 path-aware ancestor walk) — it imports
+// `api` for `WorkspaceEntry` but does NOT define interface types. No cycle.
+//
+// Real wiring path (v7 closure of codex finding + v8 closure of v7 codex
+// finding "IPC `status` does not return api.SMState"):
 //   1. `runSupervise` in internal/cli/supervise.go:315 constructs the
 //      `supervisorController` (A.2). The controller is reachable from the
 //      cli package only.
@@ -1401,19 +1589,67 @@ When exactly one registered serena workspace exists, the unbound-write rejection
 //      (already wired in PR for supervisor IPC status — see CLAUDE.md "Supervisor
 //      (v0.5.0)" section "GUI Dashboard status is now sourced through the
 //      supervisor IPC status seam").
-//   3. v7 extends `api.NewHubMcpHandler` to accept an optional
-//      `SerenaHealthLookup` parameter:
-//        `func NewHubMcpHandler(store *Store, opts ...HubMcpHandlerOpt) *HubMcpHandler`
-//        `func WithSerenaHealthLookup(h SerenaHealthLookup) HubMcpHandlerOpt`
-//      gui/hub_listener.go passes `WithSerenaHealthLookup(supervisorIPCHealthLookup)`
-//      where `supervisorIPCHealthLookup` is a thin adapter that translates
-//      `GetSMState(taskName)` into a supervisor IPC `status` round-trip and
-//      reads the per-task SM state from the response.
-//   4. Inside `mcphub supervise` (the supervisor process itself), the
-//      controller's `GetSMState` is wired directly to the in-process hub
+//   3. v8 extends `api.NewHubMcpHandler` to accept functional options:
+//        ```go
+//        type HubMcpHandlerOpt func(*hubMcpHandlerConfig)
+//        type hubMcpHandlerConfig struct {
+//            healthLookup SerenaHealthLookup
+//            hubLocalDeps *HubLocalDeps
+//        }
+//        func NewHubMcpHandler(store *Store, opts ...HubMcpHandlerOpt) *HubMcpHandler {
+//            cfg := &hubMcpHandlerConfig{}
+//            for _, opt := range opts { opt(cfg) }
+//            // ... existing construction; pass cfg fields into hubSession factory ...
+//        }
+//        func WithSerenaHealthLookup(h SerenaHealthLookup) HubMcpHandlerOpt {
+//            return func(c *hubMcpHandlerConfig) { c.healthLookup = h }
+//        }
+//        func WithHubLocalDeps(d *HubLocalDeps) HubMcpHandlerOpt {
+//            return func(c *hubMcpHandlerConfig) { c.hubLocalDeps = d }
+//        }
+//        ```
+//   4. v8 extends the existing supervisor IPC `status` response payload with
+//      a per-task `sm_state` field (closes v7 codex BLOCKER-3 "IPC status
+//      doesn't return SMState, only GUI/runtime state at supervise_status.go:69"):
+//        ```go
+//        // existing supervisor IPC status payload — extended in v8:
+//        type SupervisorStatusEntry struct {
+//            // ... existing fields (TaskName, State (runtime "running"/"idle"/...),
+//            //     PID, StartedAt, RestartCount, ...) ...
+//            SMState api.SMState `json:"sm_state,omitempty"` // NEW v8: formal SM state from controller.GetSMState
+//        }
+//        ```
+//      The supervisor IPC handler (cli side) populates `SMState` by calling
+//      `controller.GetSMState(taskName)` for each entry in the response.
+//      Backward-compat: pre-v8 clients ignore the new field; v8+ clients use it.
+//   5. gui/hub_listener.go (the `mcphub gui` process) constructs an IPC
+//      adapter implementing SerenaHealthLookup by issuing a supervisor IPC
+//      `status` RPC and reading the `SMState` field from the matching entry:
+//        ```go
+//        // internal/gui/hub_listener.go — new adapter near line 182
+//        type supervisorIPCHealthLookup struct{ client supervisor.IPCClient }
+//        func (l *supervisorIPCHealthLookup) GetSMState(taskName string) (api.SMState, bool) {
+//            resp, err := l.client.Status(context.Background())
+//            if err != nil { return api.StIdle, false }
+//            for _, entry := range resp.Entries {
+//                if entry.TaskName == taskName { return entry.SMState, entry.SMState != "" }
+//            }
+//            return api.StIdle, false
+//        }
+//        ```
+//      Then: `handler := api.NewHubMcpHandler(store, api.WithSerenaHealthLookup(&supervisorIPCHealthLookup{client: ...}))`.
+//   6. Inside `mcphub supervise` (the supervisor process itself), the
+//      controller's `GetSMState` is wired DIRECTLY to the in-process hub
 //      router instance (also constructed via `NewHubMcpHandler`, this time
 //      with the direct controller as the SerenaHealthLookup impl — no IPC
 //      hop needed for the in-process case).
+//
+// Package placement (v8 closure of v7 codex finding "import-cycle"):
+// `SerenaHealthLookup` lives DIRECTLY in `internal/api` (alongside SMState),
+// NOT in `api/serena_routing/`. The sub-package would create a cycle:
+// `api` → imports `api/serena_routing` for the option type → `api/serena_routing`
+// → imports `api` for `api.SMState`. Keeping the interface co-located with
+// its return type breaks the cycle.
 type SerenaHealthLookup interface {
     GetSMState(taskName string) (api.SMState, bool)
 }
@@ -1532,12 +1768,22 @@ The existing `AggregateToolsList` (`hub_mcp_aggregator.go:228`) builds a merged 
    - emits `serena-session-bound` or `serena-session-rebound` audit event
 
 ```go
-// internal/api/hubmcp/bind_workspace.go — new file owned by the hub-mcp package.
+// Package placement (v8 closure of v7 codex BLOCKER "subpackage cannot see
+// unexported hubSession, namespacedTool, buildJSONRPCResult"): the hub-local
+// tool handler lives DIRECTLY in `internal/api` (alongside hub_mcp_aggregator.go),
+// NOT in a sub-package. Function name uses the `HubLocal` prefix to namespace
+// without requiring a separate package. The `internal/api/hubmcp/` sub-package
+// proposed in v7 is dropped — its types would have required exporting
+// hubSession + namespacedTool + buildJSONRPCResult, which leaks internals
+// beyond their intended boundary.
+
 const HubLocalToolBindWorkspace = "mcphub__bind_workspace"
 
-// ToolDescriptor returns the MCP tools/list descriptor for hub.bind_workspace.
-// Called by AggregateToolsList after the daemon fan-out merges.
-func ToolDescriptor() namespacedTool {
+// HubLocalToolDescriptor returns the MCP tools/list descriptor for the
+// hub-local bind_workspace tool. Called by AggregateToolsList after the
+// daemon fan-out merges. Returns a namespacedTool of the same shape as
+// daemon-contributed tools, so the tools/list merge logic doesn't fork.
+func HubLocalToolDescriptor() namespacedTool {
     return namespacedTool{
         Exposed: HubLocalToolBindWorkspace,
         Server:  "mcphub",
@@ -1554,15 +1800,31 @@ func ToolDescriptor() namespacedTool {
     }
 }
 
-// HandleCall is the hub-local dispatch entry-point, called by the tools/call
-// handler when params.name == HubLocalToolBindWorkspace. Bypasses RouteMap.
-func HandleCall(ctx context.Context, sessionID string, params map[string]any, sticky *StickyMap, registry *WorkspaceRegistry, events *api.SupervisorEventLog) (map[string]any, error) {
-    wsPath, _ := params["workspace_path"].(string)
-    force, _ := params["force"].(bool)
-    if wsPath == "" {
-        return nil, jsonRPCError(-32602, "workspace_path is required")
+// handleHubLocalBindWorkspaceCall is the hub-local dispatch entry-point,
+// called by the tools/call handler when params.name == HubLocalToolBindWorkspace.
+// Bypasses RouteMap entirely; uses sess.hubLocal dependencies for sticky/
+// registry/events references.
+//
+// v8 single signature (resolves v7 sonnet finding "two conflicting HandleCall
+// signatures"): uses *hubSession exactly like AggregateToolsCall + returns
+// the same `([]byte, error)` envelope so the call-site branch can return
+// directly without re-wrapping.
+func handleHubLocalBindWorkspaceCall(ctx context.Context, sess *hubSession, clientReqID, paramsRaw json.RawMessage) ([]byte, error) {
+    if sess.hubLocal == nil {
+        return buildJSONRPCError(clientReqID, -32601, "Method not found: "+HubLocalToolBindWorkspace, nil)
     }
-    serena := registry.SerenaEntries()
+    var p struct {
+        Arguments map[string]any `json:"arguments"`
+    }
+    if err := json.Unmarshal(paramsRaw, &p); err != nil {
+        return buildJSONRPCError(clientReqID, -32602, "Invalid params: "+err.Error(), nil)
+    }
+    wsPath, _ := p.Arguments["workspace_path"].(string)
+    force, _ := p.Arguments["force"].(bool)
+    if wsPath == "" {
+        return buildJSONRPCError(clientReqID, -32602, "workspace_path is required", nil)
+    }
+    serena := sess.hubLocal.Registry.SerenaEntries()
     var match *WorkspaceEntry
     for i := range serena {
         if serena[i].WorkspacePath == wsPath {
@@ -1571,22 +1833,25 @@ func HandleCall(ctx context.Context, sessionID string, params map[string]any, st
         }
     }
     if match == nil {
-        return nil, jsonRPCError(-32602, fmt.Sprintf("workspace_path %q is not registered as a serena workspace; available: %v", wsPath, serenaPaths(serena)))
+        return buildJSONRPCError(clientReqID, -32602, fmt.Sprintf("workspace_path %q is not registered as a serena workspace", wsPath), nil)
     }
-    prev, rebound, err := sticky.Bind(sessionID, match, force)
+    prev, rebound, err := sess.hubLocal.Sticky.Bind(sess.ID(), match, force)
     if err != nil {
-        // typically: bound to different workspace + force=false
-        return nil, jsonRPCError(-32603, err.Error())
+        return buildJSONRPCError(clientReqID, -32603, err.Error(), nil)
     }
     event := "serena-session-bound"
     if rebound {
         event = "serena-session-rebound"
     }
-    _ = events.Emit(api.SupervisorEvent{
+    _ = sess.hubLocal.Events.Emit(api.SupervisorEvent{
         Severity: "info", Source: "ipc", Event: event,
-        Body: map[string]any{"session_id_hash": hashSessionID(sessionID), "workspace_path": wsPath, "previously_bound": prev},
+        Body: map[string]any{"session_id_hash": hashSessionID(sess.ID()), "workspace_path": wsPath, "previously_bound": prev},
     })
-    return map[string]any{"workspace_path": wsPath, "previously_bound": prev, "rebound": rebound}, nil
+    return buildJSONRPCResult(clientReqID, map[string]any{
+        "workspace_path":   wsPath,
+        "previously_bound": prev,
+        "rebound":          rebound,
+    })
 }
 ```
 
@@ -1621,10 +1886,29 @@ Wire-up locations:
 
 - **`NewHubMcpHandler` constructor** (`internal/api/hub_mcp.go` or equivalent; wired from `internal/gui/hub_listener.go:182`): extended to accept optional functional options (`HubMcpHandlerOpt`) including `WithHubLocalDeps(*HubLocalDeps)`. The handler stores the deps and passes them to every `hubSession` it creates. For supervisor-process callers, `HubLocalDeps.Health` is the in-process `supervisorController.GetSMState`; for GUI-process callers (the `mcphub gui` command), `Health` is the IPC-adapter described in F.3.
 - **`AggregateToolsList`** (`hub_mcp_aggregator.go:238` — note: the function body STARTS at line 238 per fresh grep on HEAD `bd552ee`; the v6 reference to `:228` pointed at the docstring comment block above the function): after the daemon fan-out builds the merged tool list AND publishes the RouteMap, IF `sess.hubLocal != nil` append `hubmcp.ToolDescriptor()` to the result. The hub-local tool does NOT go into the RouteMap (no daemon to route to).
-- **`AggregateToolsCall`** (`hub_mcp_aggregator.go:504`): at function entry, before RouteMap lookup, check `if p.Name == HubLocalToolBindWorkspace && sess.hubLocal != nil { return hubmcp.HandleCall(ctx, sess, clientReqID, paramsRaw) }`. Place the branch AFTER params parsing (the existing `var p struct{Name string}` block at `:527-537`) AND BEFORE the RouteMap snapshot fetch at `:540`. This way:
+- **`resolveToolsCallRoute`** (`hub_mcp_aggregator.go:522` — v8 closure of v7 sonnet BLOCKER-2 "branch in wrong function"): `AggregateToolsCall` at `:504` is only 9 lines (delegates to `resolveToolsCallRoute`); params parsing + RouteMap lookup actually live in `resolveToolsCallRoute`. The hub-local branch goes HERE, after params parsing (`:527-537`) and BEFORE RouteMap fetch (`:540`):
+
+  ```go
+  func resolveToolsCallRoute(sess *hubSession, clientReqID, paramsRaw json.RawMessage) (resolvedCallTarget, error) {
+      var p struct{ Name string `json:"name"` }
+      // ... existing parse + missing-name check (:527-537) ...
+
+      // NEW v8 branch — hub-local dispatch bypasses RouteMap.
+      if p.Name == HubLocalToolBindWorkspace && sess.hubLocal != nil {
+          body, mErr := handleHubLocalBindWorkspaceCall(context.Background(), sess, clientReqID, paramsRaw)
+          // Wrap into resolvedCallTarget so the outer AggregateToolsCall returns the body verbatim.
+          return resolvedCallTarget{errBody: body}, mErr
+      }
+
+      // ... existing RouteMap fetch at :540 + lookup unchanged ...
+  }
+  ```
+
+  This way:
   - Missing `name` still returns the existing `-32602 Invalid params: missing name` at `:535`.
   - Hub-local dispatch bypasses RouteMap entirely (no `Method not found` race against an empty RouteMap).
   - Daemon-routed tools fall through to the existing `:540-549` lookup unchanged.
+  - Reusing `resolvedCallTarget{errBody: body}` mechanism — the outer `AggregateToolsCall` already passes `target.errBody` through verbatim at `:510`, so the hub-local body reaches the client unchanged.
 - **`HandleCall` signature**: re-grounded to use the existing `*hubSession` shape so it slots in cleanly:
 
   ```go
