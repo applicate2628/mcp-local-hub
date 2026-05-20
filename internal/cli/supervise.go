@@ -1536,11 +1536,16 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 		startedAt := time.Now().UTC()
 		tracker.MarkSpawned(d.TaskName, pid, startedAt)
 		taskName := d.TaskName
-		go func() {
-			_ = cmd.Wait()
-			tracker.MarkExited(taskName)
-			_ = persistDaemonRuntimeTracker(events, tracker, statePath, taskName)
-		}()
+		spawnedPID := pid
+		// Emit daemon-spawned BEFORE starting the wait goroutine. A
+		// fast-failing wrapper (e.g. uvx fetch error) can exit within
+		// microseconds of cmd.Start returning; if we started the wait
+		// goroutine first, it could emit daemon-exited BEFORE this
+		// daemon-spawned line landed in the audit log — inverting the
+		// timeline operators rely on to diagnose the exact class of
+		// failure this PR exists to surface. The spawnLogged channel
+		// then gates the goroutine so daemon-exited never precedes
+		// daemon-spawned in the log even if Emit itself is slow.
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "info",
 			Source:   "lifecycle",
@@ -1553,6 +1558,44 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 				"port":      d.Port,
 			},
 		})
+		spawnLogged := make(chan struct{})
+		close(spawnLogged) // Emit above completed before this point; goroutine starts unblocked.
+		go func() {
+			<-spawnLogged
+			waitErr := cmd.Wait()
+			// Diagnostic emit: without this, a wrapper that exits
+			// immediately (e.g. uvx fails to fetch package, port
+			// already bound, env vars missing) leaves no trace —
+			// supervisor-state.json shows state="idle" with bumped
+			// pid_generation and the operator has zero data on why.
+			// Emitting daemon-exited with pid + exit_code + wait_err
+			// closes that diagnostic gap.
+			exitCode := 0
+			var ee *exec.ExitError
+			if errors.As(waitErr, &ee) {
+				exitCode = ee.ExitCode()
+			}
+			severity := "info"
+			if waitErr != nil || exitCode != 0 {
+				severity = "warn"
+			}
+			body := map[string]any{
+				"pid":       spawnedPID,
+				"exit_code": exitCode,
+			}
+			if waitErr != nil {
+				body["wait_err"] = waitErr.Error()
+			}
+			_ = events.Emit(api.SupervisorEvent{
+				Severity: severity,
+				Source:   "lifecycle",
+				Event:    "daemon-exited",
+				TaskName: taskName,
+				Body:     body,
+			})
+			tracker.MarkExited(taskName)
+			_ = persistDaemonRuntimeTracker(events, tracker, statePath, taskName)
+		}()
 		if err := persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName); err != nil {
 			return err
 		}
