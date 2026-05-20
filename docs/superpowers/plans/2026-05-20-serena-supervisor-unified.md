@@ -1,10 +1,12 @@
-# Unified Plan: Serena dynamic-pool + Supervisor state-machine wiring (v2)
+# Unified Plan: Serena dynamic-pool + Supervisor state-machine wiring (v3)
 
-> **Status**: v2 — addresses sonnet's REVISE on v1 (4 BLOCKERS + 5 IMPORTANT + 5 MINOR) and integrates codex's no-path-args consultation (closes Decision 5). Pending v2 dual review.
+> **Status**: v3 — addresses sonnet v2 REVISE (3 NEW BLOCKERS + 1 partial + 5I + 5M) and codex v2 REVISE (4 BLOCKERS + 6I + 3M). Sonnet and codex converged on D.1 validator + D.3 install chain + B.1 Registry; codex added B.4 LoopEvent design. v3 resolves all 4 converged BLOCKERS with concrete architecture. Pending v3 dual review.
 >
 > **Convergence history**:
-> - v1 (commit 5aa683b): initial draft. Sonnet review = REVISE: 4 BLOCKERS (Registry name collision, `kind: workspace` collision, PR #229 cross-branch gating, IPC `reload` returns UNKNOWN_COMMAND) + 5 IMPORTANT (catalog line numbers wrong) + 5 MINOR.
-> - v2 (this commit): all 4 BLOCKERS resolved, 5 IMPORTANT line-number corrections applied, MINORs addressed inline. Codex no-path-args consult resolved Decision 5 with concrete tool-group strategy table.
+>
+> - v1 (commit 5aa683b): initial draft. Sonnet REVISE: 4 BLOCKERS + 5I + 5M.
+> - v2 (commit 02abc55): v1 BLOCKERS resolved; codex no-path consult closed Decision 5. Sonnet v2 REVISE: 3 NEW BLOCKERS (validator collision, false SecureWriteClientConfig claim, manifest→intent→watcher chain broken). Codex v2 REVISE: same + NEW B.4 (LoopEvent missing descriptor for A.2 dispatch).
+> - v3 (this commit): all 4 converged BLOCKERS resolved — Registry `@serena` sentinel language tuple (B.1), validator branch on `daemon_template` presence (D.1), explicit `mcphub install` migration step regenerating supervisor-intent.json from manifest × workspaces.yaml (D.3), event-loop handler descriptor lookup by TaskName via cached intent (A.2). MINORs addressed inline.
 >
 > **For agentic workers / future implementers**: this plan describes work that depends on PR #229 (supervisor `daemon-exited` emit) landing first. Until #229 merges + binary upgraded + serena crash root cause is identified via the new event, implementation of Phase A.2 (state-machine wiring) is **blocked on diagnostic data**. Phases B-F can start in parallel to A.2 once A.1 (catalog + plan ratification) is done.
 >
@@ -98,9 +100,61 @@ Key facts surfaced by codex:
 
 **TBD for v2**: read `supervisor_event_loop.go` end-to-end to populate exact `Post` / `Run` / event-loop lifecycle API. (Codex's deep-diagnostic noted "FIFO event loop" exists but didn't fully trace the production caller — v2 implementer must verify.)
 
-### A.2: Wire state machine into production reconcile + spawn paths
+### A.2: Wire state machine into production reconcile + spawn paths (v3 design)
 
-**Scope**: replace `r.spawn(d)` direct call in `supervise_reconcile.go:117` with `eventLoop.Post(LoopEvent{Kind: api.EvStart, TaskName: d.TaskName})`. Replace silent `MarkExited` in `supervise.go:1539-1572` (post-PR #229) with `eventLoop.Post(LoopEvent{Kind: api.EvChildExit, TaskName: taskName})`. Add production handler in supervise.go (currently absent per codex finding at `supervise.go:436-447`) that consumes loop events + calls `api.Transition` + executes side effects (spawn / arm-backoff-timer / persist).
+**v2 BLOCKER (codex)**: v2 said "replace direct spawn with eventLoop.Post()" but `LoopEvent` (`supervisor_event_loop.go:6-10`) carries only `Kind`, `TaskName`, `Body map[string]any` — no `SupervisorDaemon` descriptor needed for spawn. Posting `EvStart{TaskName: "..."}` loses the descriptor (command, args, env, port, workspace) that `spawn()` needs to call exec.
+
+**v3 design — descriptor lookup pattern**: production handler caches the parsed `SupervisorIntentFile` (loaded once per reconcile cycle, refreshed on `IntentWatcher.onChange`), and the SM dispatch handler looks up the descriptor by `TaskName` when processing `EvStart` / `EvChildExit` events. `LoopEvent` stays minimal; the descriptor cache is an implementation detail of the handler.
+
+```go
+// New production handler — registered via EventLoop.RegisterHandler in supervise.go.
+//
+// IntentCache holds the parsed intent + a TaskName→Daemon index, refreshed
+// when IntentWatcher.onChange fires. Concurrency: copy-on-write via atomic.Value
+// so the handler always reads a coherent snapshot.
+type IntentCache struct {
+    snap atomic.Value // *intentSnapshot
+}
+
+type intentSnapshot struct {
+    intent       *api.SupervisorIntentFile
+    daemonByTask map[string]*api.SupervisorDaemon
+}
+
+func (c *IntentCache) Lookup(taskName string) (*api.SupervisorDaemon, bool) {
+    s := c.snap.Load().(*intentSnapshot)
+    d, ok := s.daemonByTask[taskName]
+    return d, ok
+}
+
+// Production SM dispatch handler. Called from EventLoop.RegisterHandler.
+// Owns: state machine transition + side-effect execution (spawn, arm timer, persist).
+func (s *Supervisor) handleLoopEvent(e api.LoopEvent) {
+    d, ok := s.intentCache.Lookup(e.TaskName)
+    if !ok {
+        // Daemon dropped from intent; ignore. Audit-log the orphan event for diagnosis.
+        return
+    }
+    currentState := s.smState.Get(e.TaskName)
+    ctx := s.smContextFor(e.TaskName, d)
+    newState, side, persistBefore, matched := api.Transition(currentState, e.Kind, ctx)
+    if !matched {
+        return // log + drop
+    }
+    if persistBefore {
+        s.smState.Set(e.TaskName, newState)
+        s.persistState()
+    }
+    s.executeSideEffect(side, d) // spawn / arm-backoff-timer / terminate / etc.
+}
+```
+
+**Replacement points**:
+
+- `supervise_reconcile.go:118` direct `r.spawn(d)` → `eventLoop.Post(LoopEvent{Kind: api.EvStart, TaskName: d.TaskName})`. Descriptor `d` is reachable via cache; not duplicated in the event.
+- `supervise.go:1916-1917` `cmd.Wait()` goroutine: after the daemon-exited emit (now in PR #229 — landed pre-A.2), also `eventLoop.Post(LoopEvent{Kind: api.EvChildExit, TaskName: taskName})`. Handler then triggers backoff / quarantine / respawn state transitions.
+
+**Gating** (unchanged from v2): A.2 starts only after PR #229 + its master-merge + binary upgrade + serena root-cause identification.
 
 **Gating** (BLOCKER-3 fix from sonnet v1 review): the `daemon-exited` event does NOT currently exist on `feat/v0.5.x-servers-matrix-revamp` branch — it lives in PR #229 (`fix/supervisor-child-exit-emit` branch, HEAD `e9adb88` as of 2026-05-20T05:50Z). Explicit prerequisites for Phase A.2 work to begin:
 
@@ -138,9 +192,11 @@ Implementation of A.2 cannot proceed until prerequisites 1-5 are satisfied. Phas
 
 ## Phase B: Workspace registry extension
 
-### B.1: Extend existing `Registry` / `WorkspaceEntry` (NOT a new parallel type)
+### B.1: Extend existing `Registry` / `WorkspaceEntry` with `@serena` sentinel language tuple (v3 design)
 
-**BLOCKER-1 fix from sonnet v1 review**: `internal/api/workspace_registry.go:31` already defines `WorkspaceEntry` with fields `{WorkspaceKey, WorkspacePath, Language, Backend, Port, TaskName, ClientEntries, WeeklyRefresh, ...}`. The `Registry` type (line 53) already loads/saves `workspaces.yaml` and is used by `install.go:656`, `register.go:243+285`, `port_alloc_test.go`. A parallel `WorkspacesFile` would collide irreconcilably.
+**v2 BLOCKER (sonnet + codex)**: v2 proposed adding `Languages []string` + `Default bool` + `SerenaPort int` as parallel fields, but the existing primary key `(WorkspaceKey, Language)` (`workspace_registry.go:31, 180-198`) is the load-bearing identity tuple used by `Put`/`Get`/`Remove`/`ListByWorkspace`. Serena entries need single-row-per-workspace (not per-language), so the schema needed an explicit decision on identity. v2 also falsely claimed `Save()` uses `SecureWriteClientConfig`; actual implementation is plain `os.WriteFile` + atomic rename (`workspace_registry.go:129-163`).
+
+**v3 design**: keep `(WorkspaceKey, Language)` as the primary key. Serena entries use sentinel `Language: "@serena"` to distinguish from per-LSP-row tuples. This preserves all existing `Put`/`Get`/`Remove`/`AllocatedPorts`/`ListByWorkspace` semantics without code changes to existing call sites; per-LSP-language rows and serena-pool rows coexist as different tuples within the same workspace_key. The `@` prefix is invalid as an LSP-language name (LSP language IDs are alphanumeric per the spec), so the sentinel cannot collide with a real language.
 
 **Scope**: extend the EXISTING `internal/api/workspace_registry.go` `WorkspaceEntry` struct with new fields needed by serena dynamic-pool. All new fields use `omitempty` yaml tag for backward compat with installed clients that have older entries.
 
@@ -148,48 +204,64 @@ Implementation of A.2 cannot proceed until prerequisites 1-5 are satisfied. Phas
 // Additions to existing WorkspaceEntry struct (workspace_registry.go:31):
 type WorkspaceEntry struct {
     // ... existing fields preserved ...
-    WorkspaceKey   string            `yaml:"workspace_key"`
-    WorkspacePath  string            `yaml:"workspace_path"`
-    Language       string            `yaml:"language"`
-    Backend        string            `yaml:"backend"`
-    Port           int               `yaml:"port"`
-    TaskName       string            `yaml:"task_name"`
-    ClientEntries  map[string]string `yaml:"client_entries"`
-    WeeklyRefresh  bool              `yaml:"weekly_refresh"`
+    WorkspaceKey  string            `yaml:"workspace_key"`
+    WorkspacePath string            `yaml:"workspace_path"`
+    Language      string            `yaml:"language"` // "@serena" sentinel for dynamic-pool rows
+    Backend       string            `yaml:"backend"`  // existing: "mcp-language-server"|"gopls-mcp"; new: "serena"
+    Port          int               `yaml:"port"`     // SAME field — serena port also goes here; AllocatedPorts already covers
+    TaskName      string            `yaml:"task_name"`
+    ClientEntries map[string]string `yaml:"client_entries"`
+    WeeklyRefresh bool              `yaml:"weekly_refresh"`
 
-    // NEW fields for serena dynamic-pool:
-    SerenaPort     int       `yaml:"serena_port,omitempty"`     // mcphub-allocated; persisted; 0=not-allocated-yet
-    Default        bool      `yaml:"default,omitempty"`         // exactly one entry across all `Backend == "serena"` rows may be Default
-    RegisteredAt   time.Time `yaml:"registered_at,omitempty"`   // when first added
-    RegisteredVia  string    `yaml:"registered_via,omitempty"`  // "manual" | "auto-detect" | "migration"
-    Languages      []string  `yaml:"languages,omitempty"`       // snapshot of .serena/project.yml at register time; distinct from existing Language single-string field
+    // NEW fields for serena dynamic-pool (only meaningful when Language == "@serena"):
+    RegisteredAt  time.Time `yaml:"registered_at,omitempty"`   // when first added
+    RegisteredVia string    `yaml:"registered_via,omitempty"`  // "manual" | "auto-detect" | "migration"
+    Languages     []string  `yaml:"languages,omitempty"`       // snapshot of .serena/project.yml at register time; distinct from existing Language single-string field
 }
 ```
 
-**Why both `Language` (existing) and `Languages` (new)**: existing `Language` is per-LSP-row single-language; serena entries have multiple languages from `.serena/project.yml`. Validator: if `Backend == "serena"`, `Languages` non-empty required; existing per-LSP rows continue to use single `Language`.
+**Why `@serena` sentinel** (codex v2 BLOCKER-1 resolution):
+
+- preserves `(WorkspaceKey, Language)` primary-key uniqueness without adding a new identity tuple field
+- existing `AllocatedPorts()` (`workspace_registry.go:213-221`) already iterates ALL entries and includes their `Port` — serena ports are picked up automatically
+- existing `ListByWorkspace(workspaceKey)` (`workspace_registry.go:224-232`) returns ALL entries including the `@serena` row; callers that need only LSP rows filter on `Language != "@serena"` (one-line change in each LSP-only call site, listed in implementer's catalog)
+- existing `Remove(workspaceKey, language)` takes language verbatim — `Remove(ws, "@serena")` removes only the serena row; LSP rows untouched
+- migration script (Phase D.3) handles per-workspace conversion: for each registered workspace, ensure exactly one `(WorkspaceKey, "@serena")` row exists with port allocated from `daemon_template.port_pool`
+
+**Save pipeline correction** (sonnet v2 NEW B.2): the existing `(*Registry).Save()` uses plain `os.WriteFile` + atomic rename (`workspace_registry.go:129-163`), NOT `SecureWriteClientConfig`. v3 does NOT change that — the registry is not a client-config file and lives entirely in the operator's local `%LOCALAPPDATA%`-scoped state dir with 0600 file mode. Hardening parity with hub-mcp state files is OUT OF SCOPE for v1 dynamic-pool; if needed, a follow-up can route Registry writes through `SecureWriteClientConfig` as a separate PR.
 
 **New API on existing `Registry`** (added to workspace_registry.go, not a new file):
 
 ```go
-// All operate on the existing Registry singleton.
-func (r *Registry) SerenaEntries() []*WorkspaceEntry         // filter Backend=="serena"
-func (r *Registry) DefaultSerenaWorkspace() (*WorkspaceEntry, error)  // unique Default==true; errors if 0 or N>1
-func (r *Registry) AllocateSerenaPort(pool []int) (int, error)        // first free port from pool, persisted via Save()
+// All operate on the existing Registry singleton. Convention: any
+// helper named *Serena* operates only on entries with Language == "@serena".
+const SerenaLanguageSentinel = "@serena"
+
+func (r *Registry) SerenaEntries() []WorkspaceEntry  // filter Language == SerenaLanguageSentinel
+func (r *Registry) GetSerena(workspaceKey string) (WorkspaceEntry, bool)  // == r.Get(workspaceKey, SerenaLanguageSentinel)
+func (r *Registry) PutSerena(e WorkspaceEntry)  // requires e.Language == SerenaLanguageSentinel; calls r.Put(e)
+func (r *Registry) RemoveSerena(workspaceKey string)  // == r.Remove(workspaceKey, SerenaLanguageSentinel)
+func (r *Registry) AllocateSerenaPort(pool []int) (int, error)  // first free port from pool not in AllocatedPorts(), persisted via Save()
 ```
 
+**LSP-only call-site update** (the one breaking-change ripple to existing code): callers that currently iterate `Registry.Workspaces` assuming every entry is per-LSP-language must filter `Language != SerenaLanguageSentinel`. Grep-verified call sites: `internal/api/register.go:243` (registration loop), `internal/api/register.go:285` (lookup), `internal/api/install.go:656` (port-collision check), `internal/api/port_alloc_test.go` (test). Each gets a one-line filter; documented in v3 implementer's catalog with exact patch hint.
+
 **Acceptance criteria**:
-- Existing `Registry.Load()` / `Save()` round-trip preserves new fields
-- `dec.KnownFields(true)` (manifest schema strict-parse pattern) does NOT apply to registry — yaml.v3 default for new fields is "preserved on read, omitempty on write"; this matches existing field-additive pattern in the registry
-- Validator: when `Backend == "serena"`, require `Languages` non-empty AND `SerenaPort` in configured pool range (default 9121-9199)
-- Across all `Backend == "serena"` rows, `Default == true` count ∈ {0, 1}; 0 is valid (no fallback workspace, all unbound writes rejected per Decision 5)
-- Atomic write via existing pipeline (registry already uses `SecureWriteClientConfig` per `workspace_registry.go:Save`)
+
+- Existing `Registry.Load()` / `Save()` round-trip preserves new optional fields (yaml.v3 omitempty pattern, no strict-parse on registry)
+- `Language == SerenaLanguageSentinel` rows have non-empty `Languages` slice + non-zero `Port` (validated at register time, NOT in `Save`)
+- Existing LSP-language rows (e.g. `Language: "go"`) are unchanged in behavior
+- All 4 existing LSP-only call sites filter `Language != SerenaLanguageSentinel` to avoid double-counting serena rows as LSP rows
+- AllocatedPorts() automatically includes serena ports (no code change required)
 
 **Test contract**:
-- `TestWorkspaceRegistry_RoundTripsSerenaFields` — Load/Save round-trip preserves SerenaPort/Default/Languages
-- `TestWorkspaceRegistry_RejectsMultipleSerenaDefaults` — N>1 Default==true on serena entries fails validation
-- `TestWorkspaceRegistry_AllocateSerenaPort_ReturnsFirstFreeFromPool`
-- `TestWorkspaceRegistry_AllocateSerenaPort_ExhaustionReturnsError`
-- `TestWorkspaceRegistry_LegacyEntryReadAccepted` — older entry without new fields loads cleanly (omitempty back-compat)
+
+- `TestRegistry_SerenaSentinel_RoundTripsNewFields` — Load/Save round-trip preserves Languages + RegisteredAt + RegisteredVia
+- `TestRegistry_SerenaSentinel_CoexistsWithLSPRows` — same workspace_key with both "@serena" and "go"/"typescript" entries
+- `TestRegistry_AllocateSerenaPort_FirstFreeFromPool`
+- `TestRegistry_AllocateSerenaPort_ExhaustionReturnsError`
+- `TestRegistry_LegacyEntryReadAccepted` — older entry without Languages field loads cleanly
+- `TestRegistry_LSPOnlyCallSites_FilterSerena` — regression guard that the 4 LSP-only call sites do filter the sentinel
 
 ### B.2: `mcphub workspace {register, unregister, list, set-default}` CLI
 
@@ -315,9 +387,61 @@ func (s *SessionRouter) LookupSession(sessionID string) *WorkspaceEntry
 
 ## Phase D: Per-workspace serena daemon spawn
 
-### D.1: Manifest schema extension — reuse `kind: workspace-scoped` + new `daemon_template` block
+### D.1: Manifest schema extension — `workspace-scoped` + `daemon_template` validator branch (v3)
 
-**BLOCKER-2 fix from sonnet v1 review**: `internal/config/manifest.go:15-16` already defines `KindGlobal = "global"` and `KindWorkspaceScoped = "workspace-scoped"`. The validator at line 255 rejects any other kind value. Introducing a new `kind: workspace` would collide with this existing naming AND require validator rewrite.
+**v2 BLOCKER (sonnet + codex)**: v2 reused `kind: workspace-scoped` to avoid the `kind: workspace` collision, but v2 did NOT specify how the validator at `manifest.go:337-365` (which currently requires `port_pool` + `languages[]` for ALL `workspace-scoped` manifests) splits between (a) legacy per-language LSP manifests (mcp-language-server / gopls-mcp) and (b) new dynamic-pool serena manifests with `daemon_template` and no per-language LSP backends. Without an explicit branch, a daemon-template-only serena manifest fails `Validate()` immediately at line 344.
+
+**v3 design**: validator gets explicit branch on `DaemonTemplate != nil`:
+
+```go
+// Existing manifest.go:337-365 — extend with a daemon-template branch.
+func (m *Manifest) Validate() error {
+    // ... existing global / non-workspace-scoped paths unchanged ...
+    if m.Kind == KindWorkspaceScoped {
+        if m.DaemonTemplate != nil {
+            // Dynamic-pool branch: no per-language LSP rows.
+            if len(m.PortPool) > 0 || len(m.Languages) > 0 {
+                return fmt.Errorf("kind=workspace-scoped with daemon_template must NOT set top-level port_pool or languages[] (move them into daemon_template)")
+            }
+            if len(m.Daemons) > 0 {
+                return fmt.Errorf("kind=workspace-scoped with daemon_template is mutually exclusive with daemons[]")
+            }
+            if len(m.DaemonTemplate.PortPool) == 0 {
+                return fmt.Errorf("daemon_template.port_pool must be non-empty")
+            }
+            if !containsWorkspacePathToken(m.DaemonTemplate.ExtraArgsTemplate) {
+                return fmt.Errorf("daemon_template.extra_args_template must reference ${workspace.path}")
+            }
+            // No languages[] check — serena daemon is multi-language per .serena/project.yml
+            return nil
+        }
+        // Legacy LSP-bridge branch (existing behavior, unchanged):
+        if len(m.PortPool) == 0 {
+            return fmt.Errorf("port_pool[] must be non-empty for kind=workspace-scoped")
+        }
+        if len(m.Languages) == 0 {
+            return fmt.Errorf("languages[] must be non-empty for kind=workspace-scoped")
+        }
+        return nil
+    }
+    // ...
+}
+```
+
+**Acceptance criteria**:
+
+- `daemon_template`-only manifest validates successfully (no `languages[]` / `port_pool` at top level required)
+- LSP-language manifest with neither `daemon_template` nor empty `languages[]` continues to validate as before (regression guard)
+- Both-present is rejected with explicit migration guidance message
+- `daemon_template.extra_args_template` MUST contain `${workspace.path}` token (else workspace context is lost on spawn)
+
+**Test contract**:
+
+- `TestManifest_WorkspaceScopedWithDaemonTemplate_Valid`
+- `TestManifest_WorkspaceScopedWithDaemonTemplate_RejectsLegacyPortPool` — both `port_pool` (top-level) AND `daemon_template` → reject
+- `TestManifest_WorkspaceScopedWithDaemonTemplate_RejectsMissingWorkspacePathToken`
+- `TestManifest_WorkspaceScopedLegacyLSP_StillValidates` — regression guard, no change in behavior
+- `TestManifest_WorkspaceScoped_RejectsDaemonsListAndTemplateBoth`
 
 **Decision** (rejected: new third kind; accepted: extend existing `workspace-scoped`): serena's dynamic-pool falls under the existing `workspace-scoped` semantic — one daemon per workspace. The change is to add a new OPTIONAL `daemon_template` block alongside the existing `daemons:` list. When `daemon_template` is present (regardless of `kind`), reconciler generates one descriptor per registered serena workspace from the template; when only legacy `daemons:` is present, current per-daemon behavior is preserved.
 
@@ -410,7 +534,19 @@ type Manifest struct {
 4. If no serena workspaces registered: prompt operator to register at least one via `mcphub workspace register <path> --backend serena --languages <list>`; bail out (exit non-zero)
 5. Rewrite `manifest.yaml`: drop `daemons[]` block, add `daemon_template` block per D.1 schema
 6. For each registered serena workspace, allocate port from `daemon_template.port_pool` via `Registry.AllocateSerenaPort()` (B.1) and write back via `Registry.Save()`
-7. **Reload trigger** (BLOCKER-4 fix from sonnet v1 review): the existing IPC `restart`/`reload` cases return `UNKNOWN_COMMAND` (`supervise.go:1050-1062`); cannot drive a full reload via IPC. Instead, the migration tool relies on the `IntentWatcher` (`supervise_watcher.go`, polls `supervisor-intent.json` mtime). Migration step 5 writes the new manifest → mcphub install regenerates `supervisor-intent.json` → `IntentWatcher.onChange` fires → reconciler picks up new descriptors → spawns per-workspace daemons. **Operator-facing behavior**: migration prints "supervisor will pick up new intent within `<intent_watcher_poll_interval>` seconds (default: 30s); no manual restart required"
+7. **Reload trigger** (v3 fix of sonnet v2 NEW B.3 + codex v2 B.3 — converged finding): the existing IPC `restart`/`reload` cases return `UNKNOWN_COMMAND` (`supervise.go:1050-1062`) and `IntentWatcher` polls only `supervisor-intent.json` and `daemon-intent.json` (`supervise_watcher.go:53-60`), NOT `manifest.yaml` or `workspaces.yaml`. The "manifest write → mcphub install → intent regenerated → watcher fires" chain has a missing link: `mcphub install` is NOT auto-triggered when `manifest.yaml` changes. The migration tool MUST explicitly invoke install as an in-process step.
+
+   **v3 migration sequence**:
+   1. acquire `Registry.Lock()` for cross-process safety (`workspace_registry.go:169-178`)
+   2. write new `servers/serena/manifest.yaml` with `daemon_template` block (atomic via existing `SecureWriteClientConfig` pipeline)
+   3. invoke `api.BuildPlanWithOpts(...)` + `api.executeInstallTo(...)` IN-PROCESS (no separate `mcphub install` shell-out) — these are the existing install primitives that regenerate `supervisor-intent.json` from manifest × workspaces.yaml (`internal/api/install.go:1109-1205, 1630-1810`; v3 implementer must verify exact entry-point signatures)
+   4. write atomic `supervisor-intent.json` via existing install pipeline; this bumps the file's mtime
+   5. `IntentWatcher.detectChange()` (`supervise_watcher.go:193-200`) detects mtime change on next poll tick and fires `onChange` → reconciler picks up new descriptors
+   6. release Registry lock
+
+   **IntentWatcher default poll** (sonnet v2 MINOR-2 fix): `NewIntentWatcher` defaults `pollInterval` to `60 * time.Second` when `pollInterval <= 0` (`supervise_watcher.go:108-110`), NOT 30s. **Operator-facing behavior**: migration prints "supervisor will pick up new intent within 60s (next IntentWatcher tick); no manual restart required."
+
+   **Why in-process install vs shell-out**: shell-out has multiple failure modes (operator's PATH, mcphub binary version mismatch, intent file lock races against another mcphub process). In-process call uses the SAME Go function the install command does, with the Registry lock held, so the supervisor-intent.json write is atomic relative to other registry mutations.
 
 **Acceptance criteria**:
 - Idempotent: detection predicate returns "already migrated" if rerun; no writes, exit 0
@@ -640,8 +776,15 @@ v1: clients use serena's existing per-daemon endpoint via router. v2: clients us
 ## Review history
 
 - **v1** (commit 5aa683b): initial architectural posture + phase breakdown. Sonnet review = REVISE (4 BLOCKERS + 5 IMPORTANT + 5 MINOR). Codex deep-source consultation on no-path-args returned with concrete Q5 strategy table.
-- **v2** (this commit): all 4 sonnet BLOCKERS resolved (B.1 Registry extension instead of parallel type; D.1 reuse `kind: workspace-scoped` + add `daemon_template` block; A.2/A.3 explicit cross-branch gating; D.3 IntentWatcher mtime instead of broken IPC `reload`). All 5 IMPORTANT line-number / signature corrections applied to Phase A.1 catalog. Decision 5 closed with concrete codex-driven strategy table; Phase F changed from TBD placeholder to 4 concrete sub-phases (F.1-F.4) with full acceptance criteria and test contracts. MINORs addressed: F sub-phase acceptance criteria explicit, atomic-rollback test name updated (Phase E.2), missing `overlay` parameter added to A.1 catalog for `makeProductionSpawnFnWithStatePath`, B.2 first-run-empty test added. Open questions list refreshed (3 removed as resolved, 3 added from review). Pending v2 dual review (sonnet + codex).
-- **v3+ (TBD)**: convergence iterations until 0 BLOCKERS per established v1→v5 pattern from servers-matrix plan.
+- **v2** (commit 02abc55): all 4 sonnet v1 BLOCKERS resolved (B.1 Registry extension instead of parallel type; D.1 reuse `kind: workspace-scoped` + add `daemon_template` block; A.2/A.3 explicit cross-branch gating; D.3 IntentWatcher mtime instead of broken IPC `reload`). 5 IMPORTANT line-number / signature corrections applied to Phase A.1 catalog. Decision 5 closed with concrete codex-driven strategy table; Phase F changed from TBD placeholder to 4 concrete sub-phases (F.1-F.4) with full acceptance criteria and test contracts.
+- **v3** (this commit): all 4 sonnet+codex v2 BLOCKERS resolved with concrete architecture:
+  - **B.1 Registry identity**: `(WorkspaceKey, Language)` tuple preserved as primary key; serena entries use `Language: "@serena"` sentinel (invalid as LSP language → no collision possible). `AllocatedPorts()` automatically covers serena ports (no SerenaPort field needed). `Languages []string` added as optional field for the multi-language snapshot. 4 existing LSP-only call sites get one-line filter `Language != SerenaLanguageSentinel`. v2's false `SecureWriteClientConfig` claim corrected.
+  - **D.1 validator branch**: explicit `if m.DaemonTemplate != nil` branch in `Validate()` skips per-language `port_pool` + `languages[]` checks; requires `daemon_template.port_pool` non-empty + `extra_args_template` references `${workspace.path}`. Mutual-exclusion with legacy `daemons[]` documented with explicit migration guidance.
+  - **D.3 install chain**: migration tool invokes `api.BuildPlanWithOpts` + `executeInstallTo` IN-PROCESS (no shell-out) under Registry.Lock; intent regeneration is atomic relative to other registry mutations. IntentWatcher poll default corrected from claimed 30s to actual 60s.
+  - **A.2 LoopEvent descriptor lookup**: production SM dispatch handler caches parsed intent + TaskName→Daemon index; refreshed on IntentWatcher.onChange. Handler looks up descriptor by TaskName when processing EvStart/EvChildExit. `LoopEvent` itself stays minimal — descriptor lookup is implementation detail. Concurrency via copy-on-write `atomic.Value` for the snapshot.
+
+  v2 IMPORTANT addressed inline: supervise_reconcile.go spawn line `:117` → `:118` corrected; IntentWatcher default `30s` → `60s` corrected; stale "kind: workspace" in spec §72-94 to be patched in spec follow-up.
+- **v4+ (TBD)**: convergence iterations until 0 BLOCKERS per established v1→v5 pattern from servers-matrix plan.
 
 ---
 
