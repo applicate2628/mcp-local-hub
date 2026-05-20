@@ -46,8 +46,8 @@
 - **18 `mcp-language-server.exe` processes** all share IDENTICAL ancestor chain:
   `mcp-language-server.exe < codex.exe < Antigravity.exe < Antigravity.exe < explorer.exe`
 - ONE codex.exe alive (operator-confirmed: "там работает всего 1 codex через субагентов")
-- 13 codex stdio MCP entries remain UN-migratable per `mcphub scan` (no top-level manifest exists for them): `clangd`, `javascript`, `python`, `rust`, `fortran`, `time-server`, `vscode-css`, `go`, `typescript`, `vscode-html`, `stgen-dxf-viewer`, `raindrop`, `fetch`
-- `mcphub cleanup --scan-clients` reports **0 orphans** — correctly excluding `child of live codex` per the safety guard at `internal/cli/overlay_prune_orphans.go`
+- 13 codex stdio MCP entries remain UN-migratable per `mcphub scan` (no top-level hub-routable manifest binding): of these, 8 are `mcp-language-server` per-language wrappers (`clangd`, `javascript`, `python`, `rust`, `fortran`, `vscode-css`, `typescript`, `vscode-html`), 1 is `gopls-mcp` (Go, native gopls MCP per `servers/mcp-language-server/manifest.yaml:19-40` — NOT wrapped by `mcp-language-server.exe`), and 4 are unrelated stdio servers (`time-server`, `stgen-dxf-viewer`, `raindrop`, `fetch`)
+- `mcphub cleanup --scan-clients` reports **0 orphans** — correctly excluding `child of live codex` per the live-client safety guards at `internal/api/cleanup.go:333-361` (known client ancestor list) + `:916-958` (ancestor walk skip)
 - The 18 processes are NOT orphans; they're live-rooted under a live codex but accumulate because each codex internal subagent spawns its own stdio MCP children that do not get reaped on subagent finish
 
 **What this proves**:
@@ -85,7 +85,17 @@ After the 18-mcp-language-server snapshot above, total process count grew to 280
 2. **Per-subagent lifecycle integration** with codex CLI (upstream feature request): codex subagents should EITHER reap their stdio MCP children on subagent finish OR (preferred) inherit a single parent stdio MCP set from the codex CLI parent. Until upstream codex adopts one of these, the per-subagent fan-out remains the architectural ceiling.
 3. **GUI Servers matrix cleanup action** for the operator's interactive flow — Dashboard already has the "Cleanup orphans" button (commit `5ce805a` on this branch); needs an "Aggressive sweep" sibling per #1.
 
-These three add **Phase G** to the unified plan (deferred but in-scope for v4 review): operational hygiene tooling that complements the hub-routing config changes in Phases B-E.
+These three motivate a new **Phase H: Operational hygiene tooling** (deferred but in-scope for v4 review; named H NOT G because the existing Phase G already covers legacy 2-daemon cleanup per §"## Phase G: Cleanup of legacy 2-daemon" below): tooling that complements the hub-routing config changes in Phases B-E. Item 2 (upstream codex feature request) is **External / upstream follow-up; non-blocking for the mcphub PR** — it explains the architectural ceiling but does not gate Phase B-E.
+
+**Canonical cleanup counts** (single normalized block, replaces the inconsistent "154 killed" / "172 direct" / "258 total" framings in prior commit messages):
+
+- Initial snapshot (07:42 UTC, just after migrate): 18 `mcp-language-server.exe` total, all rooted under `codex.exe < Antigravity.exe`
+- Growth window (07:42 → 07:50): codex internal subagents respawned; total candidates under codex (mcphub-excluded) reached **372** by widened ancestor walk
+- Direct kills via `Stop-Process -Id`: **172** (18 `mcp-language-server.exe` + 60 `gopls.exe` + 94 `node.exe` matching MCP-server cmdline patterns)
+- Cascade exits observed post-kill: ~86 `cmd.exe` wrapper processes exited after their wrapped children were killed (NOT parent-death — Windows `Stop-Process` doesn't tree-kill; this is the `cmd.exe /c <child>` wrapper exiting once the wrapped child terminates, observed empirically). Per `internal/api/cleanup.go:730-745` the underlying mechanism is `taskkill /PID /F` without `/T`, confirming no tree-kill.
+- Net survivors immediately after: ~120 of original 372 — Playwright `chrome.exe` actually grew to 53 during the sweep (Playwright reopened sessions), `cmd.exe` dropped to 32, `gopls.exe` dropped to 4
+
+**Survivor `gopls.exe` classification** (live-probed via ancestor walk, NOT mcphub-bridge respawn): the 4 survivors are 2 top-level instances under Cursor and Claude IDE extensions + 2 telemetry children of those top-level instances. None root through `mcphub.exe daemon`. These are unrelated to the codex/Antigravity subagent fan-out and were correctly skipped by the kill predicate.
 
 ### Decision 3: Supervisor state-machine wired into production
 
@@ -778,6 +788,72 @@ Per Decision 5 (resolved by codex consult 2026-05-20), Phase F implements the to
 **Acceptance criteria**:
 - Migration script generates per-client config rewrites that point to mcphub-router endpoint instead of individual serena ports
 - Removed `client_bindings` field from struct OR allowed-but-ignored for backward compat (decide in v2)
+
+---
+
+## Phase H: Operational hygiene tooling (parallel to B-E)
+
+Motivated by the 2026-05-20 operational evidence + cleanup intervention above. Provides operator-visible recovery paths for the per-subagent stdio fan-out class of failure. **Parallel** to B-E, not blocking — the architectural fix (hub-routing config) is in Phases B-E; Phase H is the emergency override when those fail or are slow to roll out.
+
+### H.1: `mcphub cleanup --aggressive` CLI mode
+
+**Scope**: extend `internal/cli/cleanup.go` (current implementation at `cleanup.go:24-33, 121-126` already has `--dry-run`/`--confirm`) with an `--aggressive` flag that opts INTO killing live-rooted MCP-stdio processes that the default safety guard correctly refuses.
+
+**Contract** (per codex v3+audit review IMPORTANT-6 — tighter than initial draft):
+
+- `--aggressive` REQUIRES one of: `--client <name>` (e.g. `codex-cli`) OR `--root-pid <pid>` — no implicit "all live-rooted" mode
+- Dry-run preview is MANDATORY when `--aggressive` set: dispatches `--dry-run` automatically, prints candidate list (PID, name, parent chain, match source), THEN waits for explicit positive operator confirmation via second invocation OR `--confirm-aggressive-token <random-token-from-dry-run>`
+- DENY-list by default: `cmd.exe`, `chrome.exe`, `conhost.exe`, `pwsh.exe`, `powershell.exe` excluded from kill targets even under `--aggressive` (operator terminals + Playwright sessions). Override via separate `--include-class <name>` flag per excluded name, with stderr warning.
+- Existing `mcphub.exe daemon` ancestor exclusion remains (no aggressive mode bypasses hub-managed processes)
+- Per-PID match-source must appear in output: which manifest pattern matched, which ancestor walked the gate, why included
+
+**Acceptance criteria**:
+- `mcphub cleanup --aggressive` without `--client`/`--root-pid` → exits non-zero with explicit "scope required" message
+- `mcphub cleanup --aggressive --client codex-cli` (no token) → prints candidate list + per-PID match-source + a confirmation token; does NOT kill
+- `mcphub cleanup --aggressive --client codex-cli --confirm-aggressive-token <token>` → kills only the previewed candidates (token bound to that exact candidate snapshot; stale token → reject + re-run dry-run)
+- Killing `cmd.exe`/`chrome.exe`/`conhost.exe`/`pwsh.exe`/`powershell.exe` requires explicit per-class `--include-class`
+- Audit event `aggressive-cleanup-executed` with body `{client, root_pid, candidate_count, killed_count, skipped_classes, token_used}`
+
+**Test contract**:
+- `TestCleanupAggressive_RejectsWithoutScope`
+- `TestCleanupAggressive_DryRunPrintsTokenAndSkipsKills`
+- `TestCleanupAggressive_TokenMismatchRejects`
+- `TestCleanupAggressive_DenyListExcludesDangerousClassesByDefault`
+- `TestCleanupAggressive_IncludeClassFlagOverridesWithWarning`
+
+### H.2: GUI Servers matrix "Aggressive sweep" — advanced modal (NOT sibling button)
+
+**Scope**: extend existing GUI Dashboard cleanup path (`internal/gui/frontend/src/api.ts:379-387` for the safe path with `apply:true`) with a SEPARATE "Aggressive sweep" affordance behind an advanced modal.
+
+**Why modal, not sibling button** (per codex v3+audit review IMPORTANT-7): the existing Dashboard cleanup button calls `apply:true` directly because its safety guard guarantees zero live-rooted kills. Aggressive mode WILL kill live-rooted processes that may disrupt the operator's interactive sessions — same affordance shape is operationally unsafe.
+
+**Modal flow**:
+
+1. "Advanced cleanup" link in Dashboard expand reveals
+2. Scope picker: client dropdown (`codex-cli`, `claude-code`, ...) OR root PID input
+3. "Preview candidates" button → calls `/api/cleanup/aggressive-preview` (new endpoint, GET) → modal table lists per-PID name, parent chain, match source
+4. Class deny-list checkboxes (default-checked, explicit unticking required per dangerous class — `cmd.exe`/`chrome.exe`/`conhost.exe`/`pwsh.exe`)
+5. Typed confirmation: "type EXACTLY 'KILL N LIVE-ROOTED PROCESSES' to confirm" where N = candidate count
+6. Submit → `/api/cleanup/aggressive-execute` with token from step 3 → results table
+
+**Acceptance criteria**:
+- Modal cannot be submitted without typed confirmation matching candidate count exactly
+- Token from step-3 preview must match step-6 submit; otherwise reject + force re-preview
+- Dangerous-class checkboxes start checked (excluded); operator must explicitly opt-in to override
+- Operator-visible warning text: "Live Codex sessions may be disrupted. This action is irreversible."
+
+**Test contract**:
+- E2E Playwright: open modal, preview, attempt submit without confirmation → reject; submit with correct confirmation → execute
+- Unit: typed-confirmation regex match against candidate count
+
+### H.3 (External / upstream follow-up — non-blocking for mcphub PR)
+
+Upstream codex CLI feature request: per-subagent stdio MCP lifecycle integration. Two options the codex team could adopt:
+
+- (a) Reap per-subagent stdio MCP children on subagent finish (lifecycle ownership)
+- (b) Inherit a single parent stdio MCP set from the codex CLI parent (child-of-parent semantics)
+
+Neither is in scope for the mcphub PR — they're explanations of the architectural ceiling that Phase H tooling exists to mitigate. If upstream codex adopts either, Phase H becomes optional.
 
 ---
 
