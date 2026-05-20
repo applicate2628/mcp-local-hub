@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -116,7 +117,8 @@ func TestRespawnDispatcher_SchedulesRespawnAfterCrash(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	crashCh := make(chan crashEvent, 8)
-	go runRespawnDispatcher(ctx, crashCh, fakeSpawn, tracker, events)
+	neverStopped := func(string) bool { return false }
+	go runRespawnDispatcher(ctx, crashCh, fakeSpawn, tracker, events, neverStopped)
 
 	descriptor := api.SupervisorDaemon{
 		TaskName: `\mcp-local-hub-test-default`,
@@ -167,7 +169,8 @@ func TestRespawnDispatcher_QuarantineAfterThreshold(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	crashCh := make(chan crashEvent, 32)
-	go runRespawnDispatcher(ctx, crashCh, fakeSpawn, tracker, events)
+	neverStopped := func(string) bool { return false }
+	go runRespawnDispatcher(ctx, crashCh, fakeSpawn, tracker, events, neverStopped)
 
 	descriptor := api.SupervisorDaemon{
 		TaskName: `\mcp-local-hub-test-default`,
@@ -209,6 +212,135 @@ func TestRespawnDispatcher_QuarantineAfterThreshold(t *testing.T) {
 	time.Sleep(1500 * time.Millisecond)
 	if got := spawnCalls.Load(); got != 0 {
 		t.Errorf("spawn fn invoked %d times during quarantine, want 0", got)
+	}
+}
+
+// TestRespawnDispatcher_SuppressesOnStopIntent (bot v1 P1-1 fix
+// regression guard): when the isStopped callback returns true for a
+// task, the dispatcher must NOT respawn and must NOT bump the failure
+// counter. This protects `mcphub stop`: the operator's explicit stop
+// triggers cmd.Wait with a non-clean exit, which lands at the
+// dispatcher — without this suppression the daemon would be
+// auto-respawned within seconds, making stop ineffective.
+func TestRespawnDispatcher_SuppressesOnStopIntent(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	tracker := NewDaemonRuntimeTracker()
+	var spawnCalls atomic.Int32
+	fakeSpawn := func(d api.SupervisorDaemon) error {
+		spawnCalls.Add(1)
+		return nil
+	}
+	alwaysStopped := func(string) bool { return true }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	crashCh := make(chan crashEvent, 8)
+	go runRespawnDispatcher(ctx, crashCh, fakeSpawn, tracker, events, alwaysStopped)
+
+	descriptor := api.SupervisorDaemon{
+		TaskName: `\mcp-local-hub-test-default`,
+		Server:   "test",
+		Daemon:   "default",
+	}
+	crashCh <- crashEvent{Daemon: descriptor, ExitCode: 1, WaitErr: nil}
+
+	// Wait for the suppression event. The suppression check fires
+	// synchronously in scheduleRespawnAttempt before any backoff
+	// timer, so it should land in the audit log within tens of ms.
+	deadline := time.Now().Add(2 * time.Second)
+	var logStr string
+	for time.Now().Before(deadline) {
+		logRaw, _ := os.ReadFile(eventsPath)
+		logStr = string(logRaw)
+		if strings.Contains(logStr, `"event":"daemon-respawn-suppressed-stop-intent"`) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(logStr, `"event":"daemon-respawn-suppressed-stop-intent"`) {
+		t.Fatalf("daemon-respawn-suppressed-stop-intent event missing:\n%s", logStr)
+	}
+
+	// Spawn must NOT have been invoked.
+	time.Sleep(1500 * time.Millisecond)
+	if got := spawnCalls.Load(); got != 0 {
+		t.Errorf("spawn fn invoked %d times despite stop-intent suppression, want 0", got)
+	}
+
+	// Failure count must NOT have been bumped (since stop-intent
+	// check runs before RecordCrashAndCountInWindow).
+	now := time.Now().UTC()
+	if c := tracker.CrashCountInWindow(descriptor.TaskName, now, respawnFailureWindow); c != 0 {
+		t.Errorf("CrashCountInWindow after stop-intent suppression = %d, want 0 (suppression must skip counter)", c)
+	}
+}
+
+// TestRespawnDispatcher_RetriesOnSpawnFailure (bot v1 P1-2 fix
+// regression guard): when the post-backoff spawn returns a non-nil
+// error, the dispatcher must re-enter scheduleRespawnAttempt to
+// continue the backoff progression — otherwise one failed respawn
+// would strand the daemon until manual intervention.
+//
+// The test injects a spawn fn that returns an error on the FIRST
+// invocation and succeeds afterward, then asserts that the
+// dispatcher made at least 2 spawn attempts within a bounded window.
+func TestRespawnDispatcher_RetriesOnSpawnFailure(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	tracker := NewDaemonRuntimeTracker()
+	var spawnCalls atomic.Int32
+	fakeSpawn := func(d api.SupervisorDaemon) error {
+		n := spawnCalls.Add(1)
+		if n == 1 {
+			return errors.New("synthetic cmd.Start failure")
+		}
+		return nil
+	}
+	neverStopped := func(string) bool { return false }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	crashCh := make(chan crashEvent, 8)
+	go runRespawnDispatcher(ctx, crashCh, fakeSpawn, tracker, events, neverStopped)
+
+	descriptor := api.SupervisorDaemon{
+		TaskName: `\mcp-local-hub-test-default`,
+		Server:   "test",
+		Daemon:   "default",
+	}
+	crashCh <- crashEvent{Daemon: descriptor, ExitCode: 1, WaitErr: nil}
+
+	// First respawn fires after ~1s backoff → spawn returns error →
+	// scheduleRespawnAttempt recurses → second respawn fires after
+	// ~2s backoff → spawn succeeds. Allow 5s for both attempts.
+	deadline := time.Now().Add(6 * time.Second)
+	for time.Now().Before(deadline) {
+		if spawnCalls.Load() >= 2 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if got := spawnCalls.Load(); got < 2 {
+		t.Fatalf("spawn fn invoked %d times after failed first attempt, want >= 2", got)
+	}
+
+	logRaw, _ := os.ReadFile(eventsPath)
+	logStr := string(logRaw)
+	if !strings.Contains(logStr, `"event":"daemon-respawn-spawn-failed"`) {
+		t.Errorf("daemon-respawn-spawn-failed event missing from audit log:\n%s", logStr)
 	}
 }
 

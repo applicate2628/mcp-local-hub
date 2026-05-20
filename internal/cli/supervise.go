@@ -600,8 +600,27 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	// respawn attempts until supervisor cold-restart). Started only
 	// when reconcileSpawnFn was nil (production wiring); tests with a
 	// fake spawn fn don't need it.
+	//
+	// isStoppedFn closure re-reads daemon-intent.json on each call so
+	// a mid-session `mcphub stop` takes effect for the next respawn
+	// decision (bot v1 P1-1 fix on PR #230). Fail-open: any read
+	// error returns false (don't suppress) so a transient FS issue
+	// can't strand a healthy daemon.
+	isStoppedFn := func(taskName string) bool {
+		path := filepath.Join(stateDir, "daemon-intent.json")
+		di := api.ReadDaemonIntentFile(path, daemonIntentReadLockTimeout)
+		if di.Err != nil {
+			return false
+		}
+		entry, ok := di.File.Tasks[taskName]
+		if !ok {
+			return false
+		}
+		stopped, _ := entry.IsActiveStop(time.Now().UTC())
+		return stopped
+	}
 	if reconcileSpawnFn == nil {
-		go runRespawnDispatcher(loopCtx, crashCh, spawnFn, runtimeTracker, events)
+		go runRespawnDispatcher(loopCtx, crashCh, spawnFn, runtimeTracker, events, isStoppedFn)
 	}
 
 	if intent != nil {

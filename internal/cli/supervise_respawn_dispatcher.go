@@ -48,6 +48,17 @@ func computeRespawnBackoff(failures int) time.Duration {
 	return d
 }
 
+// isStoppedFn is the per-task "should respawn be suppressed because
+// the operator deliberately stopped this daemon?" probe. Production
+// re-reads daemon-intent.json on each call so a mid-session
+// `mcphub stop` takes effect for the next respawn decision. Tests
+// inject a fake function that returns a fixed verdict.
+//
+// Closes bot v1 P1-1 (PR #230 round 1): without this, the dispatcher
+// would auto-respawn daemons immediately after `mcphub stop` killed
+// them — making `stop` ineffective while supervisor is running.
+type isStoppedFn func(taskName string) bool
+
 // runRespawnDispatcher consumes crash events from crashCh and
 // schedules respawn attempts via spawn after an exponential backoff.
 // Per-task failure counts use a 30-min sliding window tracked in the
@@ -61,10 +72,28 @@ func computeRespawnBackoff(failures int) time.Duration {
 // goroutine to keep the dispatcher loop responsive — a slow spawn
 // must NOT block subsequent crash events from being processed.
 //
+// isStopped (bot v1 P1-1 fix) is consulted both BEFORE recording a
+// crash (don't bump the sliding window for operator-initiated stops)
+// AND after the backoff sleep elapses (operator may have stopped the
+// daemon during the wait — respect that). Production passes a closure
+// that re-reads daemon-intent.json each call so mid-session stops
+// take effect without supervisor restart.
+//
+// Spawn failure handling (bot v1 P1-2 fix): a spawn that returns
+// non-nil (e.g. cmd.Start failure — no child process exists, so the
+// cmd.Wait goroutine never fires and never re-enters the dispatcher
+// via crashCh) is treated as a synthetic crash event: the failure
+// is recorded against the sliding window via scheduleRespawnAttempt
+// called recursively, so backoff + quarantine progression continue
+// uninterrupted. Without this, one failed respawn attempt would
+// permanently strand the daemon until manual intervention.
+//
 // Emitted events:
 //   - daemon-respawn-scheduled (info): respawn pending in <backoff>s
-//   - daemon-quarantined (error): 10+ failures in 30-min window
 //   - daemon-respawn-fired (debug): respawn attempt started after backoff
+//   - daemon-respawn-spawn-failed (warn): spawn returned error after backoff
+//   - daemon-respawn-suppressed-stop-intent (info): operator-stopped daemon
+//   - daemon-quarantined (error): 10+ failures in 30-min window
 //
 // Spec reference: supervisor_state_machine.go transitions
 // StRunning + EvChildExit → StBackoffWaiting → StSpawning |
@@ -80,6 +109,7 @@ func runRespawnDispatcher(
 	spawn SpawnFunc,
 	tracker *DaemonRuntimeTracker,
 	events *api.SupervisorEventLog,
+	isStopped isStoppedFn,
 ) {
 	for {
 		select {
@@ -89,61 +119,127 @@ func runRespawnDispatcher(
 			if !ok {
 				return
 			}
-			now := time.Now().UTC()
-			failures := tracker.RecordCrashAndCountInWindow(ev.Daemon.TaskName, now, respawnFailureWindow)
-			if failures >= respawnQuarantineThreshold {
-				_ = events.Emit(api.SupervisorEvent{
-					Severity: "error",
-					Source:   "lifecycle",
-					Event:    "daemon-quarantined",
-					TaskName: ev.Daemon.TaskName,
-					Body: map[string]any{
-						"failures_in_30m": failures,
-						"reason":          "10+ failures in 30-min sliding window; respawn attempts suspended until supervisor restart",
-						"exit_code":       ev.ExitCode,
-					},
-				})
-				continue
-			}
-			backoff := computeRespawnBackoff(failures)
+			scheduleRespawnAttempt(ctx, ev.Daemon, ev.ExitCode, spawn, tracker, events, isStopped)
+		}
+	}
+}
+
+// scheduleRespawnAttempt handles one crash event: stop-intent
+// suppression check, failure-count accounting, backoff computation,
+// then a sleep+spawn goroutine that recursively re-enters this
+// function on spawn failure (bot v1 P1-2 fix).
+//
+// Recursion is bounded by respawnQuarantineThreshold — the sliding
+// window count keeps increasing on each failure, eventually crossing
+// the threshold and stopping further respawn attempts.
+func scheduleRespawnAttempt(
+	ctx context.Context,
+	d api.SupervisorDaemon,
+	exitCode int,
+	spawn SpawnFunc,
+	tracker *DaemonRuntimeTracker,
+	events *api.SupervisorEventLog,
+	isStopped isStoppedFn,
+) {
+	// Stop-intent check BEFORE recording the crash. An operator-
+	// initiated stop (mcphub stop) sets Desired=stopped in
+	// daemon-intent.json and then force-kills the process; cmd.Wait
+	// reports a non-clean exit which lands here. Suppress respawn
+	// AND skip the sliding-window increment so the failure count
+	// doesn't drift on operator-initiated stops.
+	if isStopped != nil && isStopped(d.TaskName) {
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "info",
+			Source:   "lifecycle",
+			Event:    "daemon-respawn-suppressed-stop-intent",
+			TaskName: d.TaskName,
+			Body: map[string]any{
+				"exit_code": exitCode,
+				"reason":    "daemon-intent.json Desired=stopped (operator-initiated)",
+			},
+		})
+		return
+	}
+	now := time.Now().UTC()
+	failures := tracker.RecordCrashAndCountInWindow(d.TaskName, now, respawnFailureWindow)
+	if failures >= respawnQuarantineThreshold {
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "error",
+			Source:   "lifecycle",
+			Event:    "daemon-quarantined",
+			TaskName: d.TaskName,
+			Body: map[string]any{
+				"failures_in_30m": failures,
+				"reason":          "10+ failures in 30-min sliding window; respawn attempts suspended until supervisor restart",
+				"exit_code":       exitCode,
+			},
+		})
+		return
+	}
+	backoff := computeRespawnBackoff(failures)
+	_ = events.Emit(api.SupervisorEvent{
+		Severity: "info",
+		Source:   "lifecycle",
+		Event:    "daemon-respawn-scheduled",
+		TaskName: d.TaskName,
+		Body: map[string]any{
+			"failures_in_30m": failures,
+			"backoff_seconds": int(backoff / time.Second),
+			"exit_code":       exitCode,
+		},
+	})
+	// Sleep + respawn in a separate goroutine so the dispatcher loop
+	// stays responsive to other crash events. Cancel-respecting
+	// timer ensures graceful shutdown doesn't block on a pending
+	// backoff.
+	go func(d api.SupervisorDaemon, sleep time.Duration) {
+		t := time.NewTimer(sleep)
+		defer t.Stop()
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		// Re-check stop intent after backoff: the operator may have
+		// run `mcphub stop` during the wait. Suppress in that case.
+		if isStopped != nil && isStopped(d.TaskName) {
 			_ = events.Emit(api.SupervisorEvent{
 				Severity: "info",
 				Source:   "lifecycle",
-				Event:    "daemon-respawn-scheduled",
-				TaskName: ev.Daemon.TaskName,
+				Event:    "daemon-respawn-suppressed-stop-intent",
+				TaskName: d.TaskName,
 				Body: map[string]any{
-					"failures_in_30m": failures,
-					"backoff_seconds": int(backoff / time.Second),
-					"exit_code":       ev.ExitCode,
+					"reason": "daemon-intent.json Desired=stopped during backoff sleep",
 				},
 			})
-			// Sleep + respawn in a separate goroutine so the
-			// dispatcher loop stays responsive to other crash events.
-			// Cancel-respecting timer ensures graceful shutdown
-			// doesn't block on a pending backoff.
-			go func(d api.SupervisorDaemon, sleep time.Duration) {
-				t := time.NewTimer(sleep)
-				defer t.Stop()
-				select {
-				case <-ctx.Done():
-					return
-				case <-t.C:
-				}
-				_ = events.Emit(api.SupervisorEvent{
-					Severity: "debug",
-					Source:   "lifecycle",
-					Event:    "daemon-respawn-fired",
-					TaskName: d.TaskName,
-				})
-				// spawn() handles its own audit events
-				// (daemon-spawned, daemon-spawn-failed); errors
-				// are swallowed here because the audit log already
-				// has them and the dispatcher cannot meaningfully
-				// recover from a spawn failure beyond the next
-				// crash event from the failed child (if it spawned
-				// at all).
-				_ = spawn(d)
-			}(ev.Daemon, backoff)
+			return
 		}
-	}
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "debug",
+			Source:   "lifecycle",
+			Event:    "daemon-respawn-fired",
+			TaskName: d.TaskName,
+		})
+		if err := spawn(d); err != nil {
+			// Bot v1 P1-2 fix: a failed spawn means no child process
+			// was ever created — cmd.Wait goroutine never fires and
+			// the dispatcher never re-enters the loop via crashCh.
+			// Treat the failure as a synthetic crash and re-enter
+			// scheduleRespawnAttempt so the backoff + quarantine
+			// progression continues.
+			_ = events.Emit(api.SupervisorEvent{
+				Severity: "warn",
+				Source:   "lifecycle",
+				Event:    "daemon-respawn-spawn-failed",
+				TaskName: d.TaskName,
+				Body: map[string]any{
+					"err": err.Error(),
+				},
+			})
+			scheduleRespawnAttempt(ctx, d, -1, spawn, tracker, events, isStopped)
+		}
+		// On success, the spawn's own cmd.Wait goroutine will post
+		// any future crash event back to the dispatcher via crashCh,
+		// so we don't need to track success separately here.
+	}(d, backoff)
 }
