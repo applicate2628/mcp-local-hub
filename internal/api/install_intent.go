@@ -561,6 +561,23 @@ func stopTaskNamesForServer(server, daemonFilter string) ([]string, error) {
 			if tn == "" {
 				continue
 			}
+			// B.1: this walk owns the LSP-server stop set
+			// (kind=workspace-scoped LSP servers: mcp-language-server,
+			// gopls-mcp). Serena (sentinel) rows belong to a different
+			// server slug and must not be swept by a daemon-filter that
+			// targets LSP languages. When daemonFilter == "" the legacy
+			// "stop ALL daemons for this server" semantic still means
+			// "stop ALL LSP rows" — sentinel rows are out of scope for
+			// the LSP server. When daemonFilter != "" the filter matches
+			// e.Language exactly; the sentinel "@serena" can never match a
+			// legitimate LSP daemon name, so the exclusion is a no-op for
+			// any real LSP call (defense in depth against a future caller
+			// passing "@serena" as the daemon filter to this LSP path).
+			if e.Language == SerenaLanguageSentinel {
+				if daemonFilter == "" || daemonFilter != SerenaLanguageSentinel {
+					continue
+				}
+			}
 			if daemonFilter != "" && e.Language != daemonFilter {
 				continue
 			}

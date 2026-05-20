@@ -647,19 +647,128 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	// return non-nil for subsequent `respawn` IPC requests.
 	respawnLate.Set(spawnFn, terminateFn)
 
-	// Respawn dispatcher: consumes crashCh and re-invokes spawnFn after
-	// an exponential backoff (1s/2s/4s/8s/16s/32s/60s cap) per task,
-	// tracked via a 30-min sliding window in the runtime tracker. At 10
-	// failures in the window, the daemon is quarantined (no further
-	// respawn attempts until supervisor cold-restart). Started only
-	// when reconcileSpawnFn was nil (production wiring); tests with a
-	// fake spawn fn don't need it.
-	if reconcileSpawnFn == nil {
-		go runRespawnDispatcher(loopCtx, crashCh, spawnFn, runtimeTracker, events)
+	// Phase A.2: build the supervisorController from existing
+	// primitives (event loop, tracker, graceful flag) plus fresh
+	// intent + daemon-intent caches. The controller absorbs the
+	// deleted runRespawnDispatcher's responsibilities (sliding-window
+	// quarantine, exponential backoff, spawn fire on EvTimerDue) and
+	// routes ALL spawn/respawn through the formal api.Transition
+	// state machine.
+	//
+	// The reconciler keeps spawning through spawnFn directly via
+	// EvStart (see supervise_reconcile.go:118): the reconciler posts
+	// EvStart onto the same loop the controller listens on, so the
+	// controller is the sole consumer of policy transitions while the
+	// reconciler stays the source of "this daemon should be running".
+	ctrl := &supervisorController{
+		intentCache:         newIntentCache(),
+		eventLoop:           loop,
+		tracker:             runtimeTracker,
+		events:              events,
+		graceful:            &gracefulInProgress,
+		daemonIntent:        newDaemonIntentCache(),
+		spawn:               spawnFn,
+		terminate:           terminateFn,
+		statePath:           statePath,
+		ctx:                 loopCtx,
+		failureWindow:       respawnFailureWindow,
+		quarantineThreshold: respawnQuarantineThreshold,
 	}
+	ctrl.intentCache.Refresh(intent)
+	ctrl.daemonIntent.Refresh(daemonIntent)
+	loop.RegisterHandler(ctrl.handleLoopEvent)
+
+	// Crash-event bridge: the production spawn fn posts crashEvent
+	// onto crashCh from its cmd.Wait goroutine. The Phase A.2
+	// controller wants EvChildExit on the formal event loop so the
+	// SM transition table drives backoff/quarantine/terminate
+	// decisions. Bridge crashCh -> eventLoop.Post(EvChildExit) with
+	// exit_code in the Body. Started only when reconcileSpawnFn was
+	// nil (production wiring); tests with a fake spawn fn don't
+	// receive crash events and don't need this goroutine.
+	if reconcileSpawnFn == nil {
+		go runCrashEventBridge(loopCtx, crashCh, loop, events)
+	}
+
+	// IntentWatcher: poll <state-dir>/{supervisor,daemon}-intent.json
+	// for mtime changes. On change, re-read both files, refresh the
+	// controller's caches, and post one EvIntentUpdate per task whose
+	// DaemonIntent actually changed (delta-only, NOT one-per-task on
+	// every mtime bump - closes the v6 sonnet "per-task storm"
+	// finding). The 60s poll interval is the spec-mandated upper
+	// bound on watch-miss latency; the IPC `reload` command (Task
+	// 6.3) drives faster propagation when clients call it.
+	previousDaemonIntent := daemonIntent
+	watcher := NewIntentWatcher(stateDir, 60*time.Second, func() {
+		// Re-read supervisor-intent.json. Errors are warn-only; a
+		// transient read failure should NOT clear the cached
+		// snapshot (clearing would make every subsequent
+		// handleLoopEvent see an empty intent and drop EvStart events
+		// as orphans).
+		supervisorIntentPath := filepath.Join(stateDir, "supervisor-intent.json")
+		if updatedSupervisor, supErr := api.ReadSupervisorIntent(supervisorIntentPath); supErr != nil {
+			_ = events.Emit(api.SupervisorEvent{
+				Severity: "warn",
+				Source:   "intent-watcher",
+				Event:    "intent-reload-failed",
+				Body: map[string]any{
+					"file":  "supervisor-intent.json",
+					"error": supErr.Error(),
+				},
+			})
+		} else {
+			ctrl.intentCache.Refresh(updatedSupervisor)
+		}
+
+		// Re-read daemon-intent.json via the free-function form
+		// (ReadDaemonIntentFile takes statePath + timeout, matching
+		// the loadIntentFiles boot path at supervise.go:1501).
+		daemonIntentPath := filepath.Join(stateDir, "daemon-intent.json")
+		daemonRead := api.ReadDaemonIntentFile(daemonIntentPath, daemonIntentReadLockTimeout)
+		var updatedDaemonIntent *api.DaemonIntentFile
+		if daemonRead.Err != nil {
+			_ = events.Emit(api.SupervisorEvent{
+				Severity: "warn",
+				Source:   "intent-watcher",
+				Event:    "intent-reload-failed",
+				Body: map[string]any{
+					"file":  "daemon-intent.json",
+					"error": daemonRead.Err.Error(),
+				},
+			})
+			updatedDaemonIntent = previousDaemonIntent
+		} else if daemonRead.State == api.IntentStateValid {
+			parsed := daemonRead.File
+			updatedDaemonIntent = &parsed
+		} else {
+			// IntentStateMissing - treat as nil (empty intent file).
+			updatedDaemonIntent = nil
+		}
+		ctrl.daemonIntent.Refresh(updatedDaemonIntent)
+
+		// Delta-only EvIntentUpdate posting. On a typical mtime
+		// bump where only one daemon's Desired flips, delta == 1;
+		// the rest of the intent file stays unchanged and no
+		// events post (closes the v6 sonnet "per-task storm"
+		// IMPORTANT finding).
+		delta := diffIntentSnapshots(previousDaemonIntent, updatedDaemonIntent)
+		for _, taskName := range delta {
+			loop.Post(api.LoopEvent{Kind: api.EvIntentUpdate, TaskName: taskName})
+		}
+		previousDaemonIntent = updatedDaemonIntent
+	})
+	go watcher.Run(loopCtx)
 
 	if intent != nil {
 		reconciler := NewReconciler(spawnFn, terminateFn)
+		// Phase A.2: pass the event loop so the reconciler posts
+		// EvStart instead of calling spawnFn directly. The
+		// controller's handleLoopEvent then routes the spawn
+		// through api.Transition for formal SM bookkeeping.
+		// Tests that don't wire an event loop still go through the
+		// legacy direct-spawn path (Reconciler.Reconcile
+		// nil-checks the field and falls back to r.spawn).
+		reconciler.EventLoop = loop
 		go reconciler.Reconcile(intent, daemonIntent, currentRunning, time.Now().UTC())
 	}
 

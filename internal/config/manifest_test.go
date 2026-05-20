@@ -616,3 +616,351 @@ languages:
 		t.Errorf("Languages[0].RequiredBinaries = %v, want [clangd]", m.Languages[0].RequiredBinaries)
 	}
 }
+
+// ===== Phase D.1 + B.1: DaemonTemplate validator tests =====
+
+// validDaemonTemplateManifest returns a minimal valid kind=workspace-scoped
+// + daemon_template manifest. Tests mutate the returned value to exercise
+// each rejection path.
+func validDaemonTemplateManifest() *ServerManifest {
+	return &ServerManifest{
+		Name:      "serena",
+		Kind:      KindWorkspaceScoped,
+		Transport: TransportNativeHTTP,
+		Command:   "uvx",
+		DaemonTemplate: &DaemonTemplate{
+			Context:           "codex",
+			PortPool:          &PortPool{Start: 9121, End: 9199},
+			ExtraArgsTemplate: []string{"--context", "codex", "--project", "${workspace.path}"},
+		},
+	}
+}
+
+// TestServerManifestValidate_WorkspaceScopedWithDaemonTemplate_Valid pins
+// the happy path: a kind=workspace-scoped manifest with daemon_template
+// and no legacy fields (no top-level port_pool / languages[] / daemons[])
+// validates successfully.
+func TestServerManifestValidate_WorkspaceScopedWithDaemonTemplate_Valid(t *testing.T) {
+	m := validDaemonTemplateManifest()
+	if err := m.Validate(); err != nil {
+		t.Fatalf("expected valid manifest; got %v", err)
+	}
+}
+
+// TestServerManifestValidate_WorkspaceScopedWithDaemonTemplate_RejectsTopLevelPortPool
+// pins the mutual-exclusion gate: dynamic-pool manifests must NOT carry
+// a top-level port_pool — the pool moves into daemon_template.port_pool.
+func TestServerManifestValidate_WorkspaceScopedWithDaemonTemplate_RejectsTopLevelPortPool(t *testing.T) {
+	m := validDaemonTemplateManifest()
+	m.PortPool = &PortPool{Start: 9200, End: 9299}
+	err := m.Validate()
+	if err == nil {
+		t.Fatal("expected rejection of top-level port_pool with daemon_template; got nil")
+	}
+	if !strings.Contains(err.Error(), "port_pool") {
+		t.Errorf("error must mention port_pool; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "daemon_template.port_pool") {
+		t.Errorf("error must guide operator to daemon_template.port_pool; got %v", err)
+	}
+}
+
+// TestServerManifestValidate_WorkspaceScopedWithDaemonTemplate_RejectsTopLevelLanguages
+// pins the mutual-exclusion gate: dynamic-pool serena is multi-language
+// per .serena/project.yml, so the manifest must NOT carry top-level
+// languages[].
+func TestServerManifestValidate_WorkspaceScopedWithDaemonTemplate_RejectsTopLevelLanguages(t *testing.T) {
+	m := validDaemonTemplateManifest()
+	m.Languages = []LanguageSpec{
+		{Name: "python", Backend: "mcp-language-server", Transport: "stdio", LspCommand: "pyright-langserver"},
+	}
+	err := m.Validate()
+	if err == nil {
+		t.Fatal("expected rejection of top-level languages[] with daemon_template; got nil")
+	}
+	if !strings.Contains(err.Error(), "languages") {
+		t.Errorf("error must mention languages; got %v", err)
+	}
+}
+
+// TestServerManifestValidate_WorkspaceScopedWithDaemonTemplate_RejectsDaemonsListBoth
+// pins the migration gate: dynamic-pool manifests drop legacy daemons[]
+// entirely; both-present is a migration-incomplete state.
+func TestServerManifestValidate_WorkspaceScopedWithDaemonTemplate_RejectsDaemonsListBoth(t *testing.T) {
+	m := validDaemonTemplateManifest()
+	m.Daemons = []DaemonSpec{{Name: "legacy", Port: 9121}}
+	err := m.Validate()
+	if err == nil {
+		t.Fatal("expected rejection of daemons[] with daemon_template; got nil")
+	}
+	if !strings.Contains(err.Error(), "daemons[]") {
+		t.Errorf("error must mention daemons[]; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("error must explain mutual-exclusion semantic; got %v", err)
+	}
+}
+
+// TestServerManifestValidate_DaemonTemplateMissingWorkspacePathToken pins
+// the workspace-context gate: the extra_args_template MUST mention
+// ${workspace.path} (substring match) so the spawned subprocess gets
+// the workspace context. Otherwise workspace identity is silently lost.
+func TestServerManifestValidate_DaemonTemplateMissingWorkspacePathToken(t *testing.T) {
+	m := validDaemonTemplateManifest()
+	m.DaemonTemplate.ExtraArgsTemplate = []string{"--context", "codex", "--no-workspace"}
+	err := m.Validate()
+	if err == nil {
+		t.Fatal("expected rejection of extra_args_template without ${workspace.path}; got nil")
+	}
+	if !strings.Contains(err.Error(), "${workspace.path}") {
+		t.Errorf("error must mention the missing token; got %v", err)
+	}
+}
+
+// TestServerManifestValidate_DaemonTemplateInvalidPortPoolRange pins
+// the daemon_template.port_pool sanity check (start>0, end>=start).
+func TestServerManifestValidate_DaemonTemplateInvalidPortPoolRange(t *testing.T) {
+	cases := []struct {
+		name string
+		pool *PortPool
+		want string
+	}{
+		{"missing pool", nil, "port_pool is required"},
+		{"zero start", &PortPool{Start: 0, End: 100}, "start>0"},
+		{"negative start", &PortPool{Start: -1, End: 100}, "start>0"},
+		{"end below start", &PortPool{Start: 9200, End: 9100}, "end>=start"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := validDaemonTemplateManifest()
+			m.DaemonTemplate.PortPool = tc.pool
+			err := m.Validate()
+			if err == nil {
+				t.Fatalf("expected rejection of %s; got nil", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error must contain %q; got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+// TestServerManifestValidate_DaemonTemplateEmptyExtraArgsTemplate pins
+// the non-empty check on the args template (separate from the
+// ${workspace.path} token requirement — a fully empty list trips the
+// non-empty gate first).
+func TestServerManifestValidate_DaemonTemplateEmptyExtraArgsTemplate(t *testing.T) {
+	m := validDaemonTemplateManifest()
+	m.DaemonTemplate.ExtraArgsTemplate = nil
+	err := m.Validate()
+	if err == nil {
+		t.Fatal("expected rejection of empty extra_args_template; got nil")
+	}
+	if !strings.Contains(err.Error(), "extra_args_template") {
+		t.Errorf("error must mention extra_args_template; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "non-empty") {
+		t.Errorf("error must state the non-empty requirement; got %v", err)
+	}
+}
+
+// TestServerManifestValidate_RejectsDaemonTemplateForKindGlobal pins the
+// v6 cross-branch gate (codex BLOCKER): daemon_template under kind=global
+// would silently pass through the kind=global branch and return nil. The
+// cross-branch gate intercepts before the kind=global branch.
+func TestServerManifestValidate_RejectsDaemonTemplateForKindGlobal(t *testing.T) {
+	m := validDaemonTemplateManifest()
+	m.Kind = KindGlobal
+	err := m.Validate()
+	if err == nil {
+		t.Fatal("expected rejection of daemon_template under kind=global; got nil")
+	}
+	if !strings.Contains(err.Error(), "daemon_template") {
+		t.Errorf("error must name daemon_template; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "workspace-scoped") {
+		t.Errorf("error must guide operator to workspace-scoped; got %v", err)
+	}
+}
+
+// TestServerManifestValidate_RejectsDaemonTemplateForRemoteHTTP pins the
+// v6 cross-branch gate: daemon_template under transport=remote-http is
+// nonsensical (no local subprocess to spawn from the template). The
+// cross-branch gate fires before the remote-http branch's kind check.
+func TestServerManifestValidate_RejectsDaemonTemplateForRemoteHTTP(t *testing.T) {
+	// remote-http requires kind=global per existing semantics; set both
+	// so we hit the cross-branch gate's transport check, not the
+	// transport=remote-http vs kind=workspace-scoped conflict.
+	m := validDaemonTemplateManifest()
+	m.Kind = KindGlobal
+	m.Transport = TransportRemoteHTTP
+	m.URL = "https://example.test/mcp"
+	m.Command = ""
+	err := m.Validate()
+	if err == nil {
+		t.Fatal("expected rejection of daemon_template under transport=remote-http; got nil")
+	}
+	if !strings.Contains(err.Error(), "daemon_template") {
+		t.Errorf("error must name daemon_template; got %v", err)
+	}
+	// The cross-branch gate's kind-check fires first when both kind and
+	// transport conflict; either error wording satisfies the contract so
+	// long as daemon_template is named. Verify the kind-check is what
+	// fires here by setting kind=workspace-scoped explicitly: that path
+	// reaches the transport-check.
+	m2 := validDaemonTemplateManifest()
+	m2.Transport = TransportRemoteHTTP
+	m2.URL = "https://example.test/mcp"
+	// Keep Kind=KindWorkspaceScoped so the kind-check passes; the
+	// transport-check is the surface under test.
+	err2 := m2.Validate()
+	if err2 == nil {
+		t.Fatal("expected rejection of daemon_template under transport=remote-http with kind=workspace-scoped; got nil")
+	}
+	if !strings.Contains(err2.Error(), "remote-http") {
+		t.Errorf("error must mention remote-http; got %v", err2)
+	}
+}
+
+// TestServerManifestValidate_RejectsAtPrefixLanguageName pins the B.1
+// dual-gate at the manifest layer: LanguageSpec.Name with '@' prefix is
+// rejected so the @serena sentinel cannot collide with a real
+// per-language LSP row in workspaces.yaml.
+func TestServerManifestValidate_RejectsAtPrefixLanguageName(t *testing.T) {
+	m := &ServerManifest{
+		Name:      "mcp-language-server",
+		Kind:      KindWorkspaceScoped,
+		Transport: TransportStdioBridge,
+		Command:   "mcp-language-server",
+		PortPool:  &PortPool{Start: 9200, End: 9299},
+		Languages: []LanguageSpec{
+			{Name: "@serena", Backend: "mcp-language-server", Transport: "stdio", LspCommand: "noop"},
+		},
+	}
+	err := m.Validate()
+	if err == nil {
+		t.Fatal("expected rejection of '@'-prefix language name; got nil")
+	}
+	if !strings.Contains(err.Error(), "@") {
+		t.Errorf("error must mention the '@' prefix; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "sentinel") {
+		t.Errorf("error must explain sentinel-row reservation; got %v", err)
+	}
+}
+
+// TestServerManifestValidate_LegacyLSPManifest_StillValidates is the
+// regression guard: existing mcp-language-server / gopls-mcp manifests
+// (with top-level port_pool + languages[], no daemon_template) must
+// continue to validate as before D.1.
+func TestServerManifestValidate_LegacyLSPManifest_StillValidates(t *testing.T) {
+	m := &ServerManifest{
+		Name:      "mcp-language-server",
+		Kind:      KindWorkspaceScoped,
+		Transport: TransportStdioBridge,
+		Command:   "mcp-language-server",
+		PortPool:  &PortPool{Start: 9200, End: 9299},
+		Languages: []LanguageSpec{
+			{Name: "python", Backend: "mcp-language-server", Transport: "stdio", LspCommand: "pyright-langserver"},
+			{Name: "go", Backend: "gopls-mcp", Transport: "stdio", LspCommand: "gopls"},
+		},
+	}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("legacy LSP manifest must still validate; got %v", err)
+	}
+}
+
+// TestContainsWorkspacePathTokenInArgs_SubstringMatch pins the helper
+// contract: substring match (not exact-equality) so operators can write
+// composite args like `--project=${workspace.path}/sub`.
+func TestContainsWorkspacePathTokenInArgs_SubstringMatch(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{"standalone token", []string{"--project", "${workspace.path}"}, true},
+		{"composite arg", []string{"--project=${workspace.path}/src"}, true},
+		{"prefix composite", []string{"prefix-${workspace.path}-suffix"}, true},
+		{"middle of long arg", []string{"--data=type=path,value=${workspace.path}"}, true},
+		{"no token", []string{"--context", "codex", "--no-workspace"}, false},
+		{"empty list", nil, false},
+		{"empty list explicit", []string{}, false},
+		{"empty strings", []string{"", "", ""}, false},
+		{"similar but not match", []string{"${workspace_path}", "${workspace.dir}"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := containsWorkspacePathTokenInArgs(tc.args)
+			if got != tc.want {
+				t.Errorf("containsWorkspacePathTokenInArgs(%v) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestServerManifestParse_DaemonTemplate_StrictKnownFields pins the YAML
+// round-trip semantic: a daemon_template block parses cleanly through
+// the strict (`KnownFields(true)`) decoder, and unknown fields under
+// daemon_template fail strict parse.
+func TestServerManifestParse_DaemonTemplate_StrictKnownFields(t *testing.T) {
+	t.Run("round-trip preserves template", func(t *testing.T) {
+		yaml := `
+name: serena
+kind: workspace-scoped
+transport: native-http
+command: uvx
+daemon_template:
+  context: codex
+  port_pool: {start: 9121, end: 9199}
+  extra_args_template:
+    - --context
+    - codex
+    - --project
+    - "${workspace.path}"
+`
+		m, err := ParseManifest(strings.NewReader(yaml))
+		if err != nil {
+			t.Fatalf("ParseManifest: %v", err)
+		}
+		if m.DaemonTemplate == nil {
+			t.Fatal("DaemonTemplate must round-trip non-nil")
+		}
+		if m.DaemonTemplate.Context != "codex" {
+			t.Errorf("DaemonTemplate.Context = %q, want codex", m.DaemonTemplate.Context)
+		}
+		if m.DaemonTemplate.PortPool == nil ||
+			m.DaemonTemplate.PortPool.Start != 9121 ||
+			m.DaemonTemplate.PortPool.End != 9199 {
+			t.Errorf("DaemonTemplate.PortPool = %+v, want {9121,9199}", m.DaemonTemplate.PortPool)
+		}
+		if len(m.DaemonTemplate.ExtraArgsTemplate) != 4 {
+			t.Fatalf("ExtraArgsTemplate len = %d, want 4 (args: %v)", len(m.DaemonTemplate.ExtraArgsTemplate), m.DaemonTemplate.ExtraArgsTemplate)
+		}
+		if m.DaemonTemplate.ExtraArgsTemplate[3] != "${workspace.path}" {
+			t.Errorf("ExtraArgsTemplate[3] = %q, want ${workspace.path}", m.DaemonTemplate.ExtraArgsTemplate[3])
+		}
+	})
+	t.Run("unknown field under daemon_template fails strict parse", func(t *testing.T) {
+		yaml := `
+name: serena
+kind: workspace-scoped
+transport: native-http
+command: uvx
+daemon_template:
+  context: codex
+  port_pool: {start: 9121, end: 9199}
+  extra_args_template: ["${workspace.path}"]
+  unknown_field: 42
+`
+		_, err := ParseManifest(strings.NewReader(yaml))
+		if err == nil {
+			t.Fatal("expected strict-parse rejection of unknown daemon_template field; got nil")
+		}
+		// yaml.v3 strict-decode wraps the missing-field error;
+		// "field unknown_field not found" is the canonical text.
+		if !strings.Contains(err.Error(), "unknown_field") {
+			t.Errorf("error must name the offending field; got %v", err)
+		}
+	})
+}

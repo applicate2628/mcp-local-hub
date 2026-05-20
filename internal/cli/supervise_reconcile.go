@@ -57,14 +57,32 @@ type TerminateFunc func(d api.SupervisorDaemon) error
 // out spawn/terminate actions. Construction is via NewReconciler; the
 // zero value is intentionally not usable because nil fan-out funcs
 // would silently swallow every reconcile decision.
+//
+// Phase A.2 wiring: when EventLoop is non-nil, the reconciler posts
+// EvStart onto the loop instead of calling spawn directly. The
+// controller's handleLoopEvent then routes through the formal
+// api.Transition state machine, builds an SMContext from the cached
+// daemon-intent + tracker state, and dispatches the spawn via
+// executeSideEffect. Tests that don't wire a controller pass a nil
+// EventLoop and fall back to the direct r.spawn call (no behavior
+// change for the existing reconciler tests).
 type Reconciler struct {
 	spawn     SpawnFunc
 	terminate TerminateFunc
+
+	// EventLoop is the supervisor's FIFO event loop. When non-nil,
+	// the reconciler posts EvStart events onto the loop for the
+	// "spawn" branch of the diff. nil falls back to direct r.spawn
+	// invocation (the pre-A.2 behavior preserved for tests).
+	EventLoop *api.EventLoop
 }
 
 // NewReconciler builds a Reconciler with the supplied fan-out
 // closures. Both must be non-nil; tests can supply no-op closures
-// to exercise just one side of the diff.
+// to exercise just one side of the diff. EventLoop is left nil; the
+// caller (runSupervise in Phase A.2 wiring) sets it after
+// construction so the reconciler routes through the controller's
+// state machine.
 func NewReconciler(spawn SpawnFunc, terminate TerminateFunc) *Reconciler {
 	return &Reconciler{spawn: spawn, terminate: terminate}
 }
@@ -115,7 +133,22 @@ func (r *Reconciler) Reconcile(
 
 		switch {
 		case !isStopped && !running:
-			_ = r.spawn(d)
+			// Phase A.2: post EvStart through the controller's
+			// event loop instead of calling spawn directly. The
+			// controller routes through api.Transition which
+			// honors the per-task SM state, sliding-window
+			// failure count, and graceful-exit flag the bare
+			// r.spawn call couldn't observe. EventLoop is nil
+			// for legacy tests that never wired a controller;
+			// fall back to direct r.spawn there.
+			if r.EventLoop != nil {
+				r.EventLoop.Post(api.LoopEvent{
+					Kind:     api.EvStart,
+					TaskName: d.TaskName,
+				})
+			} else {
+				_ = r.spawn(d)
+			}
 		case isStopped && running:
 			_ = r.terminate(d)
 		}

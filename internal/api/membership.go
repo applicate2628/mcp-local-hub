@@ -47,8 +47,15 @@ func UpdateWeeklyRefreshMembership(path string, deltas []MembershipDelta) (int, 
 		return 0, fmt.Errorf("load registry: %w", err)
 	}
 
+	// B.1: weekly-refresh membership is an LSP-only concept; sentinel
+	// (serena) rows must not be indexed here because the GUI would surface
+	// "@serena" as a language label in the membership table, which has no
+	// operator meaning.
 	idx := make(map[[2]string]int, len(reg.Workspaces))
 	for i, e := range reg.Workspaces {
+		if e.Language == SerenaLanguageSentinel {
+			continue
+		}
 		idx[[2]string{e.WorkspaceKey, e.Language}] = i
 	}
 

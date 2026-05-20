@@ -5,10 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/gofrs/flock"
 	"gopkg.in/yaml.v3"
+
+	"mcp-local-hub/internal/config"
 )
 
 // Lifecycle enumerates the 5 observable states of a workspace-scoped daemon.
@@ -26,13 +29,28 @@ const (
 // field is diagnostic-only.
 const MaxLastErrorBytes = 200
 
+// SerenaLanguageSentinel is the reserved Language value that marks a
+// WorkspaceEntry as a serena (per-workspace dynamic-pool) row instead of
+// a per-LSP-language row. The leading "@" prefix is invalid for LSP
+// language names (the manifest validator and PutLSP both refuse the
+// prefix per the B.1 dual-gate defense) which guarantees the sentinel
+// cannot collide with a real LSP language.
+const SerenaLanguageSentinel = "@serena"
+
 // WorkspaceEntry is one (workspace_key, language) tuple in the registry.
 // The tuple is unique; WorkspaceKey+Language is the primary key.
+//
+// A row with Language == SerenaLanguageSentinel is a per-workspace serena
+// daemon row (B.1). Such rows carry the same TaskName / Port / Backend
+// surface as LSP rows but use the optional Languages snapshot field to
+// describe which languages the serena project covers. LSP-only consumers
+// (membership UI, weekly-refresh index, `mcphub stop --daemon`, register's
+// ListByWorkspace lookup) must filter sentinel rows.
 type WorkspaceEntry struct {
 	WorkspaceKey  string            `yaml:"workspace_key"`
 	WorkspacePath string            `yaml:"workspace_path"`
 	Language      string            `yaml:"language"`
-	Backend       string            `yaml:"backend"` // "mcp-language-server" or "gopls-mcp"
+	Backend       string            `yaml:"backend"` // "mcp-language-server", "gopls-mcp", or "serena"
 	Port          int               `yaml:"port"`
 	TaskName      string            `yaml:"task_name"`
 	ClientEntries map[string]string `yaml:"client_entries"` // client-name -> entry-name-in-that-config
@@ -43,6 +61,13 @@ type WorkspaceEntry struct {
 	LastMaterializedAt time.Time `yaml:"last_materialized_at,omitempty"`
 	LastToolsCallAt    time.Time `yaml:"last_tools_call_at,omitempty"`
 	LastError          string    `yaml:"last_error,omitempty"`
+
+	// B.1 sentinel-row fields. Only meaningful when Language ==
+	// SerenaLanguageSentinel. All omitempty so LSP rows and pre-B.1
+	// schemas round-trip cleanly.
+	RegisteredAt  time.Time `yaml:"registered_at,omitempty"`
+	RegisteredVia string    `yaml:"registered_via,omitempty"` // "manual" | "auto-detect" | "migration"
+	Languages     []string  `yaml:"languages,omitempty"`      // snapshot of .serena/project.yml at register time
 }
 
 // Registry is the on-disk source of truth for workspace-scoped daemons.
@@ -230,6 +255,139 @@ func (r *Registry) ListByWorkspace(workspaceKey string) []WorkspaceEntry {
 		}
 	}
 	return out
+}
+
+// PutLSP upserts an LSP-row entry. It rejects any Language value that
+// begins with the reserved "@" prefix; @serena rows must use PutSerena
+// (the dual-gate defense per plan B.1). Existing Put remains callable
+// for low-level paths (rollback restoration of a prior row, lifecycle
+// updates that re-write an already-validated entry).
+func (r *Registry) PutLSP(e WorkspaceEntry) error {
+	if strings.HasPrefix(e.Language, "@") {
+		return fmt.Errorf("PutLSP: language %q is reserved (use PutSerena for sentinel rows)", e.Language)
+	}
+	r.Put(e)
+	return nil
+}
+
+// PutSerena upserts a serena (sentinel) row. It refuses any Language
+// value other than SerenaLanguageSentinel exactly — the explicit gate
+// ensures no caller can write a different "@<x>" prefix and slip past
+// PutLSP's check.
+func (r *Registry) PutSerena(e WorkspaceEntry) error {
+	if e.Language != SerenaLanguageSentinel {
+		return fmt.Errorf("PutSerena: language must be %q exactly, got %q", SerenaLanguageSentinel, e.Language)
+	}
+	r.Put(e)
+	return nil
+}
+
+// SerenaEntries returns every serena (sentinel) row.
+func (r *Registry) SerenaEntries() []WorkspaceEntry {
+	var out []WorkspaceEntry
+	for _, e := range r.Workspaces {
+		if e.Language == SerenaLanguageSentinel {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// LSPEntries returns every non-sentinel row (per-LSP-language rows).
+func (r *Registry) LSPEntries() []WorkspaceEntry {
+	var out []WorkspaceEntry
+	for _, e := range r.Workspaces {
+		if e.Language != SerenaLanguageSentinel {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// GetSerena returns the serena row for workspaceKey or (zero, false).
+func (r *Registry) GetSerena(workspaceKey string) (WorkspaceEntry, bool) {
+	return r.Get(workspaceKey, SerenaLanguageSentinel)
+}
+
+// ListByWorkspaceLSP returns every LSP-row entry for workspaceKey,
+// filtering out the serena sentinel row.
+func (r *Registry) ListByWorkspaceLSP(workspaceKey string) []WorkspaceEntry {
+	var out []WorkspaceEntry
+	for _, e := range r.Workspaces {
+		if e.WorkspaceKey != workspaceKey {
+			continue
+		}
+		if e.Language == SerenaLanguageSentinel {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// RemoveSerena drops the serena (sentinel) row for workspaceKey. No-op
+// if no serena row is present.
+func (r *Registry) RemoveSerena(workspaceKey string) {
+	r.Remove(workspaceKey, SerenaLanguageSentinel)
+}
+
+// AllocateSerenaPort returns the first free port in pool that is NOT in
+// the registry's AllocatedPorts set. Unlike AllocatePort, it does not
+// attempt an OS-level bind probe — the serena daemon will bind the port
+// itself at spawn time, and the in-flight CLI does not need the probe to
+// reserve a port slot in workspaces.yaml. Returns ErrPortPoolExhausted
+// when every port in pool is taken.
+func (r *Registry) AllocateSerenaPort(pool config.PortPool) (int, error) {
+	if pool.Start <= 0 || pool.End < pool.Start {
+		return 0, fmt.Errorf("AllocateSerenaPort: invalid port pool {start=%d,end=%d}", pool.Start, pool.End)
+	}
+	taken := r.AllocatedPorts()
+	for p := pool.Start; p <= pool.End; p++ {
+		if taken[p] {
+			continue
+		}
+		return p, nil
+	}
+	return 0, fmt.Errorf("%w: pool {%d..%d} fully allocated (%d registry entries)",
+		ErrPortPoolExhausted, pool.Start, pool.End, len(taken))
+}
+
+// RemoveByBackend drops rows for workspaceKey filtered by backendFilter.
+// Semantics align with `mcphub unregister <workspace> --backend <value>`:
+//
+//   - backendFilter == ""           → remove every LSP row (Language != SerenaLanguageSentinel); leaves serena row in place. This is the v5 default.
+//   - backendFilter == "all"        → remove every row for workspaceKey (legacy pre-v5 semantic).
+//   - backendFilter == "serena"     → remove only the serena (sentinel) row.
+//   - any other value (e.g. "mcp-language-server" / "gopls-mcp") → remove only rows whose Backend field equals backendFilter AND whose Language is NOT the sentinel.
+//
+// Returns the count of rows actually removed.
+func (r *Registry) RemoveByBackend(workspaceKey string, backendFilter string) int {
+	removed := 0
+	kept := r.Workspaces[:0]
+	for _, e := range r.Workspaces {
+		if e.WorkspaceKey != workspaceKey {
+			kept = append(kept, e)
+			continue
+		}
+		drop := false
+		switch backendFilter {
+		case "":
+			drop = e.Language != SerenaLanguageSentinel
+		case "all":
+			drop = true
+		case "serena":
+			drop = e.Language == SerenaLanguageSentinel
+		default:
+			drop = e.Backend == backendFilter && e.Language != SerenaLanguageSentinel
+		}
+		if drop {
+			removed++
+			continue
+		}
+		kept = append(kept, e)
+	}
+	r.Workspaces = kept
+	return removed
 }
 
 // PutLifecycle loads the registry under lock, updates the lifecycle state +
