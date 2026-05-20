@@ -513,11 +513,23 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 				}
 				return nil
 			}
+			// state-read-relax broadcast channel — buffered so a
+			// quick init-push doesn't block during tray.Run's
+			// goroutine startup window.
+			stateRelaxCh := make(chan bool, 4)
+			go pollStateReadRelaxForTray(ctx, port, stateRelaxCh)
+
 			if err := tray.Run(ctx, tray.Config{
 				ActivateWindow: func() {
 					_ = gui.TryActivateIncumbent(pidportPath, 500*time.Millisecond)
 				},
-				StateCh: trayStateCh,
+				StateCh:          trayStateCh,
+				StateReadRelaxCh: stateRelaxCh,
+				ToggleStateReadRelax: func() {
+					if err := postToggleStateRelax(ctx, port, stateRelaxCh); err != nil {
+						fmt.Fprintf(cmd.OutOrStderr(), "tray: toggle state-read-relax: %v\n", err)
+					}
+				},
 				Quit:    stop,
 				QuitAndStopAll: func() {
 					// Stop all via HTTP (so the Dashboard sees the SSE
