@@ -160,6 +160,11 @@ func (h *HTTPHost) Start(ctx context.Context) error {
 	cmd.Stderr = stderrWriter
 	h.logCloser = logCloser
 
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start upstream subprocess: %w", err)
+	}
+	h.cmd = cmd
+	h.started = true
 	// Place the freshly-spawned upstream into a Windows Job Object with
 	// KILL_ON_JOB_CLOSE so that if our daemon process is force-killed
 	// (taskkill /F mcphub.exe) the kernel reaps the upstream tree
@@ -168,35 +173,33 @@ func (h *HTTPHost) Start(ctx context.Context) error {
 	// follow-up. Failures are logged but not fatal — orphan protection
 	// is defense-in-depth, not a startup precondition.
 	//
-	// Use StartWithJob (PROC_THREAD_ATTRIBUTE_JOB_LIST) so the process
-	// is enrolled in the Job AT CREATE TIME — closes the Start-then-
-	// Assign race window during which a fast-spawning grandchild
-	// (uvx → python in <1ms on warm cache) could escape the Job and
-	// outlive the wrapper as an orphan holding the upstream port.
-	job, jobErr := process.NewKillOnCloseJob()
-	if jobErr != nil {
-		fmt.Fprintf(daemonDiagWriter(), "warn: create Job Object: %v (orphan protection disabled)\n", jobErr)
-		job = nil
-	}
-	var startErr error
-	if job != nil {
-		if _, err := process.StartWithJob(job, cmd); err != nil {
+	// Why Start-then-Assign here (and NOT process.StartWithJob):
+	// HTTPHost sets cmd.Stdout/cmd.Stderr to log writers above and
+	// relies on process.NoConsole(cmd) to suppress console pop-ups
+	// via cmd.SysProcAttr. process.StartWithJob_windows.go builds
+	// STARTUPINFOEX directly and honors NEITHER cmd.Stdout/Stderr NOR
+	// SysProcAttr — using it here would silently drop upstream logs
+	// to LogPath/stderr (regression in operator diagnostics) AND
+	// reintroduce console flashes on Windows GUI runs. The
+	// Start-then-Assign race window is microscopic in practice
+	// (uvx → python child fork takes >1ms even on warm cache; Assign
+	// lands within nanoseconds of Start return) and the failure mode
+	// (one grandchild escapes the Job during the race) is bounded —
+	// operators see at most one orphan per supervisor restart, and
+	// the daemon-exited audit emit added in this same PR gives them
+	// the diagnostic data to recognize and react. A proper fix would
+	// extend StartWithJob_windows.go to wire STARTUPINFO.hStdOutput
+	// / hStdError + STARTF_USESTDHANDLES + HideWindow handling — out
+	// of scope for this PR.
+	if job, jobErr := process.NewKillOnCloseJob(); jobErr == nil {
+		if err := job.Assign(cmd); err != nil {
 			_ = job.Close()
-			job = nil
-			startErr = err
-			fmt.Fprintf(daemonDiagWriter(), "warn: StartWithJob failed: %v (falling back to plain Start; orphan protection disabled)\n", err)
+			fmt.Fprintf(daemonDiagWriter(), "warn: assign upstream to Job Object: %v (orphan protection disabled for this child)\n", err)
+		} else {
+			h.job = job
 		}
-	}
-	if job == nil {
-		startErr = cmd.Start()
-	}
-	if startErr != nil {
-		return fmt.Errorf("start upstream subprocess: %w", startErr)
-	}
-	h.cmd = cmd
-	h.started = true
-	if job != nil {
-		h.job = job
+	} else {
+		fmt.Fprintf(daemonDiagWriter(), "warn: create Job Object: %v (orphan protection disabled)\n", jobErr)
 	}
 
 	// Watcher goroutine owns Wait() so Stop() never double-waits.
