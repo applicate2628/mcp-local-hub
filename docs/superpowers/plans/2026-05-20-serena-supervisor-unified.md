@@ -1,6 +1,6 @@
-# Unified Plan: Serena dynamic-pool + Supervisor state-machine wiring (v6)
+# Unified Plan: Serena dynamic-pool + Supervisor state-machine wiring (v7)
 
-> **Status**: v6 — closes v5 dual review's 7 converged BLOCKERs (5 compile-surface + 1 catalog completeness + 1 schema gate + 1 atomicity scope + 1 hub-tool integration). v5 pseudocode in A.2 referenced non-existent api types (`RestartPolicyState`, `EvReconcileTick`, no-arg `NewEventLoop()`, invented `SMContext` fields) and a wrong `NewIntentWatcher` signature; v6 rewrites against the actual `internal/api` surface at HEAD `56fb528`. v5 D.3 atomicity covered only steps 3-5 of the 6-step migration sequence; v6 extends rollback to the migrate driver scope AND acknowledges best-effort rollback limits. v5 D.1 schema validator silently accepted `daemon_template` under `kind:global` / `transport:remote-http`; v6 adds explicit cross-branch rejection. v5 F.4 named `hub.bind_workspace` as MCP tool but did not specify tools/list injection or RouteMap bypass; v6 provides concrete `hub_mcp_aggregator.go` integration points. Pending v6 dual review.
+> **Status**: v7 — closes v6 codex review's 6 new BLOCKERs (api.IsActiveStop nonexistent, gracefulInProgress field mismatch, F.3 wiring path wrong, D.3 outer/inner rollback contradiction, --start-after-write doesn't compose, F.4 handler dependency gap) AND absorbs v6 sonnet's 6 IMPORTANTs (per-task event storm, line :228→:238, 8 missing test names, new-package declarations, helper declarations, mcphub reconcile gap) + 1 MINOR (reaper :2030→:2037). v7 also names structural changes that v6 implied but did not specify: `executeInstallTo` Pass A / Pass B split for `--start-after-write`, `HubLocalDeps` attached to `hubSession` (so `AggregateToolsCall` signature stays unchanged), `mcphub reconcile` operator command added to Phase A.3. Pending v7 dual review.
 >
 > **Convergence history**:
 >
@@ -9,7 +9,8 @@
 > - v3 (commit 112099a): 4 v2 BLOCKERS resolved. Sonnet v3 REVISE: 4 NEW BLOCKERS (LSP call-sites under-counted, validator types wrong, `executeInstallTo` unexported, `Supervisor`/`smState` missing). Codex v3 REVISE: same 4 + 4 IMPORTANT (D.3 chain incomplete, IntentWatcher not wired, sentinel collision unprevented, path traversal hole). Operational evidence + Phase H added (1fad546+338ae82+2fd5f18) — parallel trajectory.
 > - v4 (commit 6f22944): header bumped with resolution intent for all 4 v3 BLOCKERS + 4 IMPORTANTS, but section bodies still v3. Dual review returned REVISE with consensus that section-level prose must be rewritten before v5 can be reviewed against verified evidence. Both reviewers also surfaced specific corrections: (a) LSP call-site catalog was 4-undercounted at 13-actual sites (NOT 6, NOT 8 — see B.1 v5 table), (b) `@`-prefix is NOT currently rejected by the manifest validator, (c) the validator-level rejection alone does not defend the registry write path because `@serena` lives in `WorkspaceEntry.Language` (registry) not `LanguageSpec.Name` (manifest), (d) v3 pseudocode used `Manifest` (real type is `ServerManifest`) + `len(m.PortPool)` (real type is `*PortPool`), (e) v3's `executeInstallTo` reference is to an unexported function.
 > - v5 (commits 7589961+56fb528+da75f5e): section bodies rewritten to match the v4 header intent + close the additional reviewer-surfaced corrections. v5 dual review returned REVISE with 7 converged BLOCKERs: A.2 pseudocode used non-existent api types (RestartPolicyState, EvReconcileTick, SMContext fields) and wrong NewIntentWatcher signature; A.1 catalog had 5 stale file:line refs (HEAD drifted from 6f22944 to 56fb528); D.3 atomicity covered only 3 of 6 migration steps; D.1 schema gate missing for non-workspace-scoped manifests; F.4 hub.bind_workspace integration unspecified; B.1 missed register.go:640 (14th call-site); F.3 forward-ref to undefined GetSMState accessor.
-> - v6 (this commit): all 7 v5 BLOCKERs closed against verified code at HEAD `56fb528`:
+> - v6 (commit bd552ee): all 7 v5 BLOCKERs closed against verified code at HEAD `56fb528`. v6 dual review returned divergent verdicts: codex REVISE with 6 new BLOCKERs (fake-API helpers — `api.IsActiveStop` doesn't exist as free function, `gracefulInProgress` field missing from controller; F.3 wiring referenced runSupervise but real hub construction is at `gui/hub_listener.go:182`; D.3 outer/inner rollback contradiction; `--start-after-write` flag doesn't compose with current `executeInstallTo` loop; F.4 `AggregateToolsCall` signature doesn't carry sticky/registry/events). Sonnet APPROVE_WITH_CHANGES with 6 IMPORTANTs (per-task event storm risk, line :228→:238 drift, 8 missing test names, new-package declarations missing, helper declarations missing, `mcphub reconcile` operator command gap) + 1 MINOR (reaper :2030→:2037 range).
+> - v7 (this commit): all 6 v6 codex BLOCKERs closed + all 6 v6 sonnet IMPORTANTs absorbed:
 >   - **B.1** Registry: 14-site verified call-site catalog (5 LSP-only requiring sentinel filter — incl. `register.go:640` legacy-key fallback added in v6; 9 backend-agnostic safe-include); dual-gate `@`-prefix defense at manifest validator AND registry write path; backend/server ownership matrix; `mcphub unregister --backend` default-LSP-only semantics; `mcphub stop` backend-aware `taskFilter`.
 >   - **D.1** Validator: compile-accurate pseudocode against verified types (`ServerManifest`, `*PortPool`, `Languages []LanguageSpec`); v6 adds CROSS-BRANCH gate that rejects `DaemonTemplate != nil` when `Kind != KindWorkspaceScoped` OR `Transport == TransportRemoteHTTP` (closes v5 codex finding of silent acceptance under global/remote-http).
 >   - **D.3** Install chain: new exported `api.InstallParsedManifest(ctx, m, opts)` AND v6-introduced **migration-driver rollback stack** wrapping all 6 migration steps (manifest write + registry alloc/save + scheduler tasks + client configs + intent write + daemon spawn); v6 acknowledges existing rollback closures are best-effort and surfaces failures via `rollback-incomplete` audit event + composite error; v6 introduces `--start-after-write` flag to defer daemon-spawn-before-intent-write race (closes v5 codex finding "daemons started before intent write").
@@ -17,7 +18,15 @@
 >   - **F.2** JSON-RPC `result`/`error` envelope classification with `classifyReadMemoryResponse` helper; v6 adds envelope-shape gate (`jsonrpc == "2.0"` AND `id` present) so a corrupted upstream returning `{"result":"x"}` cannot spuriously satisfy the 1-success branch.
 >   - **F.3** Single-workspace shortcut gated on `api.StRunning` health check via the new `SerenaHealthLookup` interface (api package owns; cli supervisorController implements via GetSMState) — closes v5 sonnet finding "api router cannot directly depend on cli controller" via dependency-inversion seam; 412 with `daemon_state` field on unhealthy.
 >   - **F.4** Snapshot-then-release lock pattern; fan-out runs lock-free against value-copy slice; `hub.bind_workspace` is MCP tool on hub-mcp endpoint with v6-specified integration into `AggregateToolsList` (`hub_mcp_aggregator.go:228`) and tools/call dispatch bypass (early-return branch before RouteMap lookup); reserved namespace `mcphub__*`.
->   - **A.1** catalog refreshed against HEAD `56fb528`: 6-param `makeProductionSpawnFnWithStatePath` (not 5-param) at `:1878`, `cmd.Wait()` reaper block at `:1979-2030`, `MarkSpawned`/`MarkExited` at `:112`/`:149`, `supervisorStateFromRuntimeState` at `:314`, `UNKNOWN_COMMAND` emits at `:1080,1089,1248`; new `SMContext` row added for v5 BLOCKER context.
+>   - **A.1** catalog refreshed against HEAD `56fb528`: 6-param `makeProductionSpawnFnWithStatePath` (not 5-param) at `:1878`, `cmd.Wait()` reaper block at `:1979-2037` (v7 corrected from v6's `:1979-2030`), `MarkSpawned`/`MarkExited` at `:112`/`:149`, `supervisorStateFromRuntimeState` at `:314`, `UNKNOWN_COMMAND` emits at `:1080,1089,1248`; new `SMContext` row added for v5 BLOCKER context.
+>   - **v7 closures** (new this iteration):
+>     - **A.2**: replaced non-existent `api.IsActiveStop(d, now)` with real `DaemonIntent.IsActiveStop(now) (bool, string)` method form at `internal/api/daemon_intent.go:308`; replaced `c.gracefulInProgress.Load()` with `c.graceful.InProgress()` (real surface at `supervise.go:245`) + added `graceful *gracefulCounter` + `daemonIntent *daemonIntentCache` fields to `supervisorController`; added delta-only `EvIntentUpdate` posting instead of per-task storm (sonnet IMPORTANT B.1).
+>     - **F.3**: rewired SerenaHealthLookup integration to real hub construction path at `internal/gui/hub_listener.go:182` (`api.NewHubMcpHandler(store)`); added `WithHubLocalDeps`/`WithSerenaHealthLookup` functional options pattern; named `internal/api/serena_routing/` as NEW package created by this phase.
+>     - **D.3**: explicit outer/inner rollback rule (inner runs first; outer pushes only step 2-3 undos — NOT scheduler/client/intent/daemon — to avoid double-undo); concrete structural change to `executeInstallTo` (Pass A creates tasks, Pass B starts them; gated by `startTasks bool` param); named all migration helpers in acceptance criteria (`snapshotManifest`, `restoreManifest`, `snapshotRegistry`, `restoreRegistry`, `allocateSerenaPorts`, `writeNewManifest`).
+>     - **F.4**: `HubLocalDeps` attached to `hubSession` (carries sticky+registry+events+health); `AggregateToolsCall` signature UNCHANGED; `HandleCall(ctx, sess *hubSession, clientReqID, paramsRaw)` matches existing dispatcher shape; corrected line ref `:228 → :238`; named `internal/api/hubmcp/` as NEW package.
+>     - **A.3**: NEW `mcphub reconcile` operator command for in-place drift cleanup (sonnet IMPORTANT B.6); IPC `reconcile` verb replaces UNKNOWN_COMMAND at `:1080` for this case; dry-run / `--apply` modes.
+>     - **F.2**: envelope-shape test additions (`TestClassifyReadMemoryResponse_RejectsMissingJSONRPCVersion` + `_RejectsMissingID`).
+>     - **Test contract additions**: 5 new D.1/D.3 negative tests (kind:global, remote-http, rollback failure, audit emit on undo failure, StartAfterWrite deferral, executeInstallTo Pass A/Pass B separation); 4 new A.2 controller/health-gate tests; 5 new F.4 hub-local tool tests.
 >
 > **For agentic workers / future implementers**: this plan describes work that depends on PR #229 (supervisor `daemon-exited` emit) landing first. Until #229 merges + binary upgraded + serena crash root cause is identified via the new event, implementation of Phase A.2 (state-machine wiring) is **blocked on diagnostic data**. Phases B-F can start in parallel to A.2 once A.1 (catalog + plan ratification) is done.
 >
@@ -160,7 +169,7 @@ Key facts surfaced by codex:
 | Per-daemon SM state cache | `DaemonRuntimeTracker` (existing) — separates runtime state (PIDs, restart_count) from formal SM state; v6 A.2 introduces `supervisorController.smStates sync.Map` keyed by TaskName for `api.SMState` values | `internal/cli/supervisor_runtime_tracker.go:30` |
 | Reconciler spawn fan-out | `func (r *Reconciler) Reconcile(intent *api.SupervisorIntentFile, daemonIntent *api.DaemonIntentFile, currentRunning map[string]bool, now time.Time)` — calls `r.spawn(d)` directly at `:118` (NOT via Transition; bypass documented in Decision 3) | `internal/cli/supervise_reconcile.go:91-129`; spawn call at `:118` |
 | Production spawn fn (post-PR #230 sig) | `func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, statePath string, overlay *daemon_env_overlay.Overlay, crashCh chan<- crashEvent) SpawnFunc` — 6 params after PR #230 added `crashCh` for auto-respawn dispatcher | `internal/cli/supervise.go:1878`; production call site at `:637` |
-| `cmd.Wait()` exit reaper | `daemon-exited` event emit + `MarkExited` + non-clean-exit `crashCh` send all live in the reaper goroutine; PR #229 emit at `:2005-2011`, MarkExited at `:2012`, crashCh send at `:2019-2026` | `internal/cli/supervise.go:1979-2030` block |
+| `cmd.Wait()` exit reaper | `daemon-exited` event emit + `MarkExited` + non-clean-exit `crashCh` send all live in the reaper goroutine; PR #229 emit at `:2005-2011`, MarkExited at `:2012`, crashCh send at `:2019-2026` | `internal/cli/supervise.go:1979-2037` block (goroutine `go func() { ... }()` opens at `:1979`, closes at `:2037`; v6 said `:2030` but the closing brace is at `:2037`) |
 | `MarkSpawned` / `MarkExited` | `DaemonRuntimeTracker.MarkSpawned(taskName, pid, startedAt)` / `MarkExited(taskName)` — MarkExited does NOT decrement pid_generation; that field accumulates | `internal/cli/supervisor_runtime_tracker.go:112` (MarkSpawned), `:149` (MarkExited) |
 | `supervisorStateFromRuntimeState` | maps runtime tracker state → persisted state field; missing case for `"spawning"` → falls into `default: "idle"` (root cause of state="idle" + pid_generation=35 silent crash loop) | `internal/cli/supervisor_runtime_tracker.go:314` |
 | IPC `respawn` handler | `handleRespawn(conn, req, deps)` — exposed via per-task `respawn` IPC verb; `restart`/`reload` verbs return UNKNOWN_COMMAND | `internal/cli/supervise_respawn.go:96-237`; UNKNOWN_COMMAND emits at `internal/cli/supervise.go:1080,1089,1248` |
@@ -197,6 +206,8 @@ type supervisorController struct {
     tracker     *DaemonRuntimeTracker     // PR #230; sliding-window + entries map; SOLE consumer of crash-counting methods
     smStates    sync.Map                  // taskName → api.SMState
     events      *api.SupervisorEventLog   // audit emitter
+    graceful    *gracefulCounter          // existing surface at supervise.go:206-245; shared with IPC exit{graceful} flow
+    daemonIntent *daemonIntentCache       // small wrapper around the parsed daemon-intent.json file; refreshed alongside intentCache on watcher.onChange
 }
 
 // GetSMState exposes the controller's per-task SM state so OTHER subsystems
@@ -269,12 +280,21 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
         }
     }
     now := time.Now().UTC()
+    // Resolve the intent's active-stop predicate via the REAL method form.
+    // v7 closure of v6 codex finding: there is no `api.IsActiveStop(d, now)`
+    // free function; the predicate is `func (i DaemonIntent) IsActiveStop(now
+    // time.Time) (bool, string)` at internal/api/daemon_intent.go:308.
+    // The second return is the human-readable reason (clock-skew / TTL /
+    // user-stop) — only the boolean is fed into SMContext; the reason is
+    // available if v7 wants to surface it in audit events later.
+    daemonIntent := lookupDaemonIntent(d.TaskName) // resolved from daemon-intent.json snapshot
+    activeStop, _ := daemonIntent.IsActiveStop(now)
     smCtx := api.SMContext{
         IntentDesired:      d.Desired,                        // string "running" | "stopped"
-        IntentIsActiveStop: api.IsActiveStop(d, now),         // existing predicate (api/supervisor_intent.go)
+        IntentIsActiveStop: activeStop,                        // from DaemonIntent.IsActiveStop(now)
         Failures:           c.tracker.CrashCountInWindow(ev.TaskName, now, respawnFailureWindow),
         QueuedAction:       "",                               // populated from supervisor-state.json on cold start; "" on first observation
-        GracefulInProgress: c.gracefulInProgress.Load(),      // supervisor-wide atomic.Bool set during exit{graceful}
+        GracefulInProgress: c.graceful.InProgress(),          // real surface: gracefulCounter.InProgress() at supervise.go:245
     }
     newState, side, persistBefore, matched := api.Transition(currentState, ev.Kind, smCtx)
     if !matched {
@@ -356,8 +376,19 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
         // (Desired stopped/running, ActiveStopUntil shifts). EvIntentUpdate is
         // the real event constant per supervisor_state_machine.go:23; v5 used
         // a non-existent `EvReconcileTick` value.
-        for _, d := range updated.Daemons {
-            ctrl.eventLoop.Post(api.LoopEvent{Kind: api.EvIntentUpdate, TaskName: d.TaskName})
+        //
+        // Burst behavior (closes v6 sonnet IMPORTANT B.1 "per-task storm"):
+        // EventLoop.Post is blocking when the channel is full (no select/default
+        // at supervisor_event_loop.go:33-35). For 6-workspace deployment with
+        // ~3 daemons each = 18 events per watcher tick, against capacity 256
+        // this is safe (~7% of capacity). For larger deployments OR rapid
+        // back-to-back intent rewrites (e.g. `mcphub install` chain), v7 uses
+        // delta-only posting: compare the new intent against the cached snapshot
+        // taken under the same atomic.Value swap (intentSnapshot diff) and post
+        // ONLY for daemons whose intent fields actually changed.
+        delta := diffIntentSnapshots(previous, updated) // returns []string of task names
+        for _, taskName := range delta {
+            ctrl.eventLoop.Post(api.LoopEvent{Kind: api.EvIntentUpdate, TaskName: taskName})
         }
     })
     go watcher.Run(ctx) // <-- v3 said "wired"; v4 header confirmed; v6 makes it concrete with real API
@@ -396,10 +427,29 @@ A.2 implementation can now proceed. Phases B + C + D + E + F + G + H are NOT blo
 - `TestSupervisorController_HandleEvChildExit_RetriesOnSpawnFailure` — replaces dispatcher test
 - `TestSupervisorController_PersistedStateMatchesSpec` — verify `supervisor-state.json` field schema matches spec (including `failures_in_window`, `backoff_until`, `quarantine_since`)
 - `TestStateMachineWiring_DoesNotDoubleRespawnWithLegacyDispatcher` — regression guard that the old dispatcher entry point is gone and no duplicate respawn fires
+- `TestSupervisorController_GetSMState_ReturnsTrackedState` — `GetSMState(taskName)` returns the value previously stored via `smStates.Store` (regression guard for the F.3 health-gate dependency)
+- `TestSupervisorController_GetSMState_DefaultsToIdleForUnknownTask` — unknown task returns `(StIdle, false)`; `false` distinguishes "no tracked state yet" from a literal `StIdle` value
+- `TestSerenaHealthLookup_InterfaceContract` — verifies that `cli.supervisorController` satisfies `api.serena_routing.SerenaHealthLookup` (compile-time assertion via `var _ api_serena_routing.SerenaHealthLookup = (*supervisorController)(nil)`)
+- `TestIntentWatcherOnChange_DeltaOnly_DoesNotEventStorm` — closes v6 sonnet IMPORTANT B.1: simulate intent reload where only 1 of 18 daemons changed; verify exactly 1 `EvIntentUpdate` posted (not 18)
 
-### A.3: Migration — upgrade installed binary + restart supervisor
+### A.3: Migration — upgrade installed binary + restart supervisor + `mcphub reconcile` (v7 addition)
 
-**Scope**: operator-side migration documentation + smoke checklist after Phase A.2 lands.
+**Scope**: operator-side migration documentation + smoke checklist after Phase A.2 lands, plus a new operator command `mcphub reconcile` (closes v6 sonnet IMPORTANT B.6) for interactive drift cleanup WITHOUT full supervisor cold-restart.
+
+**`mcphub reconcile` command** (v7 NEW): the supervisor's startup-time reconciler picks up drift (orphan tasks, intent-without-task pairs) automatically on cold restart, but operators on long-running supervisor processes who have surfaced drift via `mcphub status` need a way to trigger a reconcile in-place. `mcphub reconcile` sends an IPC `reconcile` verb to the running supervisor; the supervisor re-reads its intent file, walks the scheduler-registered tasks, computes the drift set, and (with `--apply`) posts `EvIntentUpdate` per drifted task so the SM drives the corrective transitions.
+
+```bash
+mcphub reconcile           # dry-run: print drift report, no mutations
+mcphub reconcile --apply   # apply: trigger SM transitions to align scheduler state with intent
+```
+
+Acceptance criteria for the new command:
+
+- IPC `reconcile` verb implemented in `supervise.go` IPC dispatcher (replaces the existing `UNKNOWN_COMMAND` response at `:1080` for the `reconcile` case specifically; other UNKNOWN_COMMAND verbs remain rejected)
+- Dry-run prints structured drift report: per-daemon `{task_name, scheduler_state, intent_desired, action}`
+- `--apply` posts `EvIntentUpdate` per drifted task; subsequent SM transitions drive Run/Stop/Delete
+- `mcphub reconcile` returns within 30s OR explicit timeout error
+- Audit event `mcphub-reconcile-invoked` recorded with body `{dry_run, drift_count, applied_count}`
 
 **Steps**:
 1. `mcphub install --upgrade` — replaces binary
@@ -890,6 +940,8 @@ daemon_template:              # NEW optional block
 - `TestServerManifestValidate_WorkspaceScopedWithDaemonTemplate_RejectsDaemonsListBoth`
 - `TestServerManifestValidate_DaemonTemplateMissingWorkspacePathToken`
 - `TestServerManifestValidate_DaemonTemplateInvalidPortPoolRange`
+- `TestServerManifestValidate_RejectsDaemonTemplateForKindGlobal` — v7 cross-branch gate: `Kind: KindGlobal` + `DaemonTemplate != nil` fails before workspace-scoped branch
+- `TestServerManifestValidate_RejectsDaemonTemplateForRemoteHTTP` — v7 cross-branch gate: `Transport: TransportRemoteHTTP` + `DaemonTemplate != nil` fails
 - `TestServerManifestValidate_RejectsAtPrefixLanguageName` — `LanguageSpec{Name: "@serena"}` fails (B.1 dual-gate)
 - `TestServerManifestValidate_LegacyLSPManifest_StillValidates` — regression guard
 - `TestContainsWorkspacePathTokenInArgs_SubstringMatch` — composite args like `--project=${workspace.path}/sub` and `${workspace.path}` standalone both return true; bare args without the token return false
@@ -1030,8 +1082,71 @@ daemon_template:              # NEW optional block
      }
      ```
 
-   - **Best-effort rollback acknowledged** (defense layer 3 — operator-visible inconsistency): codex v5 finding "existing rollback closures swallow errors at install.go:1696-1704, :1784-1792" is accepted as accurate. Operating-system mutations (scheduler `Delete`, file rename) can fail during undo for reasons orthogonal to the original failure (service stopped, disk re-filled, permission flip). v5's "end-state identical to never-attempted install" overclaim is dropped. v6 contract: **rollback is best-effort; ALL rollback errors are surfaced to the operator via audit event + composite return error**. If rollback is incomplete, the operator sees `rollback-incomplete` in `supervisor-events.log` with the list of failed undo steps and can manually reconcile.
-   - **Daemon-already-started reality** (codex v5 finding "executeInstallTo starts daemons at install.go:1796-1807"): `executeInstallTo` starts each created scheduler task immediately after creation. If `WriteSupervisorIntent` (the LAST step inside `executeInstallTo`) fails, the daemons are already running but `supervisor-intent.json` has the OLD content (atomic rename did not fire). The reconciler's `buildPruneSetForReconcile` (`install.go:1839`) sees the started daemons as "drift not present in intent" and surfaces them via `mcphub status`. v6 mitigation: `InstallParsedManifest` adds a `--start-after-write` flag (default `true` for `api.Install`, default `false` for `InstallParsedManifest`) — for migrate scenarios, scheduler tasks are CREATED but NOT STARTED until after the intent write succeeds. The first reconciler tick after the watcher fires `EvIntentUpdate` then starts them via the SM.
+   - **Best-effort rollback acknowledged** (defense layer 3 — operator-visible inconsistency): codex v5 finding "existing rollback closures swallow errors at install.go:1696-1704, :1784-1792" is accepted as accurate. Operating-system mutations (scheduler `Delete`, file rename) can fail during undo for reasons orthogonal to the original failure (service stopped, disk re-filled, permission flip). v5's "end-state identical to never-attempted install" overclaim is dropped. v7 contract: **rollback is best-effort; ALL rollback errors are surfaced to the operator via audit event + composite return error**. If rollback is incomplete, the operator sees `rollback-incomplete` in `supervisor-events.log` with the list of failed undo steps and can manually reconcile via `mcphub reconcile` (see Phase A.3 v7 addition below).
+
+   **Outer/inner rollback composition** (closes v6 codex BLOCKER "D.3 outer rollback wraps all 6 mutating steps but pseudocode delegates 4-6 to inner; double-undo risk"):
+
+   The two rollback scopes compose under one explicit rule: **inner stack runs first on sub-failure; if it completes, outer stack runs the remaining undos for steps that the inner stack did NOT own**. Concretely:
+
+   - `InstallParsedManifest` (inner) owns undos for steps 4 (scheduler tasks), 5 (per-client config), and 6 (intent write atomic-rename + daemon spawn). If ANY sub-step fails, the inner stack pops in reverse and runs the undos for steps the function ALREADY completed.
+   - `InstallParsedManifest` either RETURNS success (steps 4-6 all committed) OR RETURNS an error with the inner stack ALREADY EXECUTED (steps 4-6 either committed nothing or fully undone).
+   - The migrate driver (outer) sees the return:
+     - Success → no migrate-driver rollback needed; clear `rollback = nil`.
+     - Error → the inner has already handled steps 4-6; the migrate driver's outer stack only runs undos for steps 2 (manifest write) and 3 (registry alloc/save). The outer stack does NOT re-run scheduler/client/intent/daemon undos — those are the inner's responsibility, marked complete by virtue of the function having returned.
+   - Pseudocode reflection of this rule:
+
+     ```go
+     // Inner pop runs FIRST on InstallParsedManifest's own failure path
+     // (no migrate-driver involvement). Migrate driver's outer stack does
+     // NOT push scheduler/client/intent/daemon undos — those live inside
+     // InstallParsedManifest's own deferred rollback.
+     migrateRollback = append(migrateRollback, restoreManifestFn, restoreRegistryFn)
+     // NOTE: no scheduler/client/intent/daemon undos pushed to migrateRollback.
+     // InstallParsedManifest owns them internally.
+     if _, err := api.InstallParsedManifest(ctx, newManifest, opts); err != nil {
+         // Inner has already run its sub-stack; outer fires the deferred undo
+         // for steps 2+3 (manifest + registry). No risk of double-undo because
+         // outer never pushed inner's undos.
+         return err
+     }
+     ```
+
+   - **Daemon-already-started reality** (closes v6 codex BLOCKER "--start-after-write does not compose; current loop starts daemons at install.go:1796-1807"):
+
+     The v6 plan named a `--start-after-write` flag but did not describe the structural change required in `executeInstallTo`. The flag alone cannot defer spawn because the existing loop tightly couples task creation + immediate `sch.Run(...)` start in one iteration. v7 names the structural change concretely:
+
+     **Refactor `executeInstallTo` (`internal/api/install.go:1634`) into two passes**:
+
+     - **Pass A — task creation only**: iterate `p.SchedulerTasks` and call `sch.Create(spec)` for each; collect created task names into a slice; push compensating `sch.Delete(name)` onto rollback. DO NOT call `sch.Run` in this pass.
+     - **Intermediate**: per-client config writes (unchanged from current `:1730-1790`).
+     - **Intermediate**: `WriteSupervisorIntent` (NEW step explicitly between pass A and pass B for `InstallParsedManifest`; existing for `api.Install` which leaves intent writes to `recordInstallIntentPostSuccess`).
+     - **Pass B — task start**: iterate the created task names slice and call `sch.Run(name)`. Pass B is GATED by the `startTasks bool` parameter (NEW): `api.Install` passes `true` (current behavior preserved); `InstallParsedManifest` passes the value of `opts.StartAfterWrite` (default `true`; migrate scenarios pass `false` and the daemons are started later by the reconciler when it picks up the new intent).
+
+     Pseudocode skeleton (replaces a portion of the current install.go:1666-1810 body):
+
+     ```go
+     func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int, startTasks bool) error {
+         // ... existing setup (scheduler, workDir, rollback stack) ...
+         var createdNames []string
+         // Pass A: create only
+         for _, t := range p.SchedulerTasks {
+             if err := sch.Create(spec); err != nil { /* rollback */ return err }
+             createdNames = append(createdNames, t.Name)
+             rollback = append(rollback, func() { _ = sch.Delete(t.Name) })
+         }
+         // ... per-client config writes (unchanged) ...
+         // ... WriteSupervisorIntent (new explicit step for InstallParsedManifest path) ...
+         if startTasks {
+             // Pass B: start
+             for _, name := range createdNames {
+                 if err := sch.Run(name); err != nil { /* rollback */ return err }
+             }
+         }
+         return nil
+     }
+     ```
+
+     `api.Install` callers retain `startTasks=true` (no behavior change); `InstallParsedManifest` defaults `opts.StartAfterWrite=true` for direct callers (matching existing semantics) but the migrate driver passes `false` so daemons are started only by the reconciler after the intent flip.
    - **No transient half-states observable to supervisor for the intent file itself**: the supervisor's `IntentWatcher` polls `supervisor-intent.json` mtime. The atomic rename via `WriteStateFileAtomic` means the file either has the OLD content or the NEW content — never partial. Reads racing the rename see one of the two committed states.
    - **Reconcile-on-startup defense** (defense layer 4): the supervisor's reconciler on cold restart re-reads the intent file and compares against scheduler-registered tasks. Tasks-without-intent are surfaced as drift; intent-entries-without-task are reconciled by spawning. This defends against the case where the migrate driver crashes mid-sequence (e.g., OS reboot during step 4) and leaves an inconsistent state that no rollback closure could undo because the process terminated abruptly.
 
@@ -1054,13 +1169,19 @@ daemon_template:              # NEW optional block
    **Why in-process vs shell-out** (unchanged): shell-out has multiple failure modes (operator's PATH, mcphub binary version mismatch, intent file lock races against another mcphub process). In-process call uses the same Go functions the install command does, with the Registry lock held, so all writes are atomic relative to other registry mutations.
 
 **Acceptance criteria**:
+
 - Idempotent: detection predicate returns "already migrated" if rerun; no writes, exit 0
 - Refuses if no serena workspaces registered (clear error: "register at least one workspace before migration")
 - Preserves per-workspace `.serena/cache/` directories (no disk write inside workspace dirs)
 - Audit event `serena-dynamic-pool-migration` written with body `{source_state, target_workspaces, allocated_ports}`
 - Reconciler picks up new descriptors within `intent_watcher_poll_interval` (no IPC required)
+- v7-introduced helpers explicitly named (closes v6 sonnet IMPORTANT B.5): `snapshotManifest(path string) ([]byte, error)`, `restoreManifest(backup []byte) error`, `snapshotRegistry(reg *Registry) []WorkspaceEntry`, `restoreRegistry(reg *Registry, snapshot []WorkspaceEntry) error`, `allocateSerenaPorts(reg *Registry, workspaces []WorkspaceEntry) error`, `writeNewManifest(path string, body []byte) error` — all live in new file `internal/cli/migrate_serena.go`
+- v7-introduced new packages (closes v6 sonnet IMPORTANT B.4): `internal/api/serena_routing/` (owns `SerenaHealthLookup` interface + `WorkspaceResolver`); `internal/api/hubmcp/` (owns `ToolDescriptor` + `HandleCall` for hub-local tools) — both created as part of this phase
+- `--start-after-write` flag explicitly listed on `InstallParsedManifestOpts`: `StartAfterWrite bool` (default true; migrate driver passes false)
+- `mcphub reconcile` operator command (closes v6 sonnet IMPORTANT B.6) — see Phase A.3 v7 addition
 
 **Test contract**:
+
 - `TestMigrateSerena_DetectsLegacy2Daemon`
 - `TestMigrateSerena_DetectsUnifiedIntermediate`
 - `TestMigrateSerena_DetectsAlreadyMigrated_NoOp`
@@ -1068,6 +1189,11 @@ daemon_template:              # NEW optional block
 - `TestMigrateSerena_RejectsEmptyWorkspaceRegistry`
 - `TestMigrateSerena_AllocatesPortsForEachWorkspace`
 - `TestMigrateSerena_WritesAuditEvent`
+- `TestMigrationDriver_RollbackOnIntentWriteFailure_RestoresManifestAndRegistry` — inject failure at intent write step; verify manifest backup restored + registry ports rolled back
+- `TestMigrationDriver_RollbackIncompleteAuditEventOnUndoFailure` — inject failure in one undo closure; verify `rollback-incomplete` audit event emitted with the failed-step list AND composite return error includes the rollback error
+- `TestInstallParsedManifest_StartAfterWriteFalse_DefersDaemonSpawn` — Pass A creates tasks, intent write succeeds, but `sch.Run` is NOT called inside `executeInstallTo`; daemons start only on the next reconciler tick after watcher fires `EvIntentUpdate`
+- `TestInstallParsedManifest_StartAfterWriteTrue_PreservesLegacyBehavior` — when called from `api.Install` path, Pass B runs and daemons start immediately (regression guard for existing global-install semantics)
+- `TestExecuteInstallTo_PassAPassB_Separation` — verify the structural change to executeInstallTo: created-tasks slice captured between Pass A and Pass B; `startTasks=false` skips Pass B; rollback on Pass B failure undoes Pass A creates
 
 ---
 
@@ -1215,6 +1341,8 @@ func classifyReadMemoryResponse(resp *http.Response, body []byte) (bool, string)
 - `TestClassifyReadMemoryResponse_JSONRPCErrorCounts_AsZeroHits` — HTTP 200 + `{"error":{"code":-32602,...}}` body must NOT count as success
 - `TestClassifyReadMemoryResponse_EmptyResultCountsAsZeroHits` — HTTP 200 + `{"result":null}` must NOT count as success
 - `TestClassifyReadMemoryResponse_MalformedJSONRPCCountsAsZero` — non-JSON or missing envelope fields count as misses, not panics
+- `TestClassifyReadMemoryResponse_RejectsMissingJSONRPCVersion` — body `{"result":"x"}` (no `jsonrpc:"2.0"` field) is NOT a hit (v7 envelope-shape gate)
+- `TestClassifyReadMemoryResponse_RejectsMissingID` — body `{"jsonrpc":"2.0","result":"x"}` (no `id` field) is NOT a hit (v7 envelope-shape gate)
 
 ### F.3: `write_memory` / `delete_memory` / `onboarding` — fail-closed unbound (v5)
 
@@ -1253,10 +1381,39 @@ When exactly one registered serena workspace exists, the unbound-write rejection
 // before writing" diagnostic instead of an opaque connection timeout.
 //
 // Cross-package dependency note (closes v5 sonnet finding "api router cannot
-// directly depend on cli controller"): the SerenaHealthLookup interface lives in
-// api/serena_routing/health.go; cli wires the controller as the concrete impl at
-// supervise.go startup. The api package never imports internal/cli; cli already
-// imports api/serena_routing for routing, so cli→api is the established direction.
+// directly depend on cli controller" + v6 codex finding "F.3 wiring gap —
+// current hub construction is at internal/gui/hub_listener.go:182 via
+// api.NewHubMcpHandler(store), NOT runSupervise"):
+//
+// The SerenaHealthLookup interface lives in a NEW sub-package
+// `internal/api/serena_routing/` (created by Phase C; declared explicitly as
+// NEW in the v7 acceptance criteria below). The api package never imports
+// internal/cli; cli already imports api packages, so cli→api remains the
+// established direction.
+//
+// Real wiring path (v7 closure of codex finding):
+//   1. `runSupervise` in internal/cli/supervise.go:315 constructs the
+//      `supervisorController` (A.2). The controller is reachable from the
+//      cli package only.
+//   2. `mcphub gui` boots the hub-mcp HTTP server in internal/gui/hub_listener.go;
+//      at line 182 it calls `api.NewHubMcpHandler(store)`. The hub-mcp handler is
+//      shared with the supervisor process via the supervisor IPC `status` seam
+//      (already wired in PR for supervisor IPC status — see CLAUDE.md "Supervisor
+//      (v0.5.0)" section "GUI Dashboard status is now sourced through the
+//      supervisor IPC status seam").
+//   3. v7 extends `api.NewHubMcpHandler` to accept an optional
+//      `SerenaHealthLookup` parameter:
+//        `func NewHubMcpHandler(store *Store, opts ...HubMcpHandlerOpt) *HubMcpHandler`
+//        `func WithSerenaHealthLookup(h SerenaHealthLookup) HubMcpHandlerOpt`
+//      gui/hub_listener.go passes `WithSerenaHealthLookup(supervisorIPCHealthLookup)`
+//      where `supervisorIPCHealthLookup` is a thin adapter that translates
+//      `GetSMState(taskName)` into a supervisor IPC `status` round-trip and
+//      reads the per-task SM state from the response.
+//   4. Inside `mcphub supervise` (the supervisor process itself), the
+//      controller's `GetSMState` is wired directly to the in-process hub
+//      router instance (also constructed via `NewHubMcpHandler`, this time
+//      with the direct controller as the SerenaHealthLookup impl — no IPC
+//      hop needed for the in-process case).
 type SerenaHealthLookup interface {
     GetSMState(taskName string) (api.SMState, bool)
 }
@@ -1433,10 +1590,58 @@ func HandleCall(ctx context.Context, sessionID string, params map[string]any, st
 }
 ```
 
-Wire-up locations (the implementer-facing integration points):
+Wire-up locations (the implementer-facing integration points, v7 closure of v6 codex finding "handler dependency gap"):
 
-- **AggregateToolsList** (`hub_mcp_aggregator.go:228`): after the daemon fan-out builds the merged tool list AND publishes the RouteMap, append `hubmcp.ToolDescriptor()` to the result. The hub-local tool does NOT go into the RouteMap (no daemon to route to).
-- **tools/call handler** (`hub_mcp_aggregator.go:497-548` per codex spot-check): at function entry, before RouteMap lookup, check `if params.name == HubLocalToolBindWorkspace { return hubmcp.HandleCall(...) }`. This is one branch ABOVE the RouteMap dispatch, not a RouteMap entry.
+The existing `AggregateToolsCall(ctx, sess *hubSession, clientReqID, paramsRaw)` (`hub_mcp_aggregator.go:504`) carries only the session — it does NOT have access to the sticky map, the workspace registry, or the audit event log. v7 closes this gap by attaching hub-local-tool dependencies to the `hubSession` itself (the session is constructed once per MCP session and naturally outlives any single tools/call), so `AggregateToolsCall`'s signature is UNCHANGED:
+
+```go
+// hubSession (existing type at internal/api/hub_session.go or equivalent)
+// gets new fields wired at session construction time. None of the new fields
+// participate in concurrency-sensitive paths the existing session already
+// owns; they are read-only references to long-lived dependencies.
+type hubSession struct {
+    // ... existing fields (RouteMap atomic.Pointer, Mcp-Session-Id, etc.) ...
+
+    // NEW v7 hub-local-tool dependencies:
+    hubLocal *HubLocalDeps // nil for sessions where hub-local tools are disabled (legacy / test)
+}
+
+// HubLocalDeps carries the long-lived references that hub-local tool handlers
+// need. Constructed once by NewHubMcpHandler and attached to every session it
+// creates. The dispatcher uses an interface seam so tests can substitute fakes.
+type HubLocalDeps struct {
+    Sticky   *StickyMap
+    Registry *WorkspaceRegistry
+    Events   *api.SupervisorEventLog
+    Health   SerenaHealthLookup // F.3's interface; nil for non-supervisor processes
+}
+```
+
+Wire-up locations:
+
+- **`NewHubMcpHandler` constructor** (`internal/api/hub_mcp.go` or equivalent; wired from `internal/gui/hub_listener.go:182`): extended to accept optional functional options (`HubMcpHandlerOpt`) including `WithHubLocalDeps(*HubLocalDeps)`. The handler stores the deps and passes them to every `hubSession` it creates. For supervisor-process callers, `HubLocalDeps.Health` is the in-process `supervisorController.GetSMState`; for GUI-process callers (the `mcphub gui` command), `Health` is the IPC-adapter described in F.3.
+- **`AggregateToolsList`** (`hub_mcp_aggregator.go:238` — note: the function body STARTS at line 238 per fresh grep on HEAD `bd552ee`; the v6 reference to `:228` pointed at the docstring comment block above the function): after the daemon fan-out builds the merged tool list AND publishes the RouteMap, IF `sess.hubLocal != nil` append `hubmcp.ToolDescriptor()` to the result. The hub-local tool does NOT go into the RouteMap (no daemon to route to).
+- **`AggregateToolsCall`** (`hub_mcp_aggregator.go:504`): at function entry, before RouteMap lookup, check `if p.Name == HubLocalToolBindWorkspace && sess.hubLocal != nil { return hubmcp.HandleCall(ctx, sess, clientReqID, paramsRaw) }`. Place the branch AFTER params parsing (the existing `var p struct{Name string}` block at `:527-537`) AND BEFORE the RouteMap snapshot fetch at `:540`. This way:
+  - Missing `name` still returns the existing `-32602 Invalid params: missing name` at `:535`.
+  - Hub-local dispatch bypasses RouteMap entirely (no `Method not found` race against an empty RouteMap).
+  - Daemon-routed tools fall through to the existing `:540-549` lookup unchanged.
+- **`HandleCall` signature**: re-grounded to use the existing `*hubSession` shape so it slots in cleanly:
+
+  ```go
+  func HandleCall(ctx context.Context, sess *hubSession, clientReqID, paramsRaw json.RawMessage) ([]byte, error) {
+      var p map[string]any
+      if err := json.Unmarshal(paramsRaw, &p); err != nil {
+          return buildJSONRPCError(clientReqID, -32602, "Invalid params: "+err.Error(), nil)
+      }
+      args, _ := p["arguments"].(map[string]any)
+      wsPath, _ := args["workspace_path"].(string)
+      force, _ := args["force"].(bool)
+      // ... validation + sticky.Bind + audit emit ...
+      result := map[string]any{"workspace_path": wsPath, "previously_bound": prev, "rebound": rebound}
+      return buildJSONRPCResult(clientReqID, result)
+  }
+  ```
+
 - **Per-client tool filtering**: if a client uses tool-glob filters (existing `ClientBinding.URLPath` machinery), `mcphub__*` tools are NOT auto-filtered out — they appear in tools/list for every connected client. If an operator wants to hide them on a specific client, they add an explicit deny-glob to that client binding.
 
 **Acceptance criteria**:
@@ -1459,6 +1664,11 @@ Wire-up locations (the implementer-facing integration points):
 - `TestHubBindWorkspaceTool_RejectsRebindWithoutForce`
 - `TestHubBindWorkspaceTool_ExposedOnMCPLayerNotSupervisorIPC` — regression guard that supervisor IPC has no `bind_workspace` verb
 - `TestFanout_ReleasesLockBeforeUpstreamCalls` — concurrent `bind` calls do not block on an in-flight fan-out's upstream RTT
+- `TestAggregateToolsList_AppendsMcphubBindWorkspaceWhenHubLocalDepsPresent` — v7 wire-up: tools/list response includes `mcphub__bind_workspace` ONLY when `sess.hubLocal != nil`
+- `TestAggregateToolsList_OmitsHubLocalToolWhenDepsAbsent` — regression guard for legacy/test sessions without HubLocalDeps
+- `TestAggregateToolsCall_RoutesHubLocalToolBypassingRouteMap` — v7 dispatch: `params.name == "mcphub__bind_workspace"` returns from HandleCall WITHOUT calling resolveToolsCallRoute (no `-32601 Method not found` race against empty RouteMap)
+- `TestAggregateToolsCall_FallsThroughToRouteMapForDaemonTools` — regression guard that daemon-routed tools still go through the existing path
+- `TestHubLocalDeps_WiredFromGuiHubListener` — `NewHubMcpHandler(store, WithHubLocalDeps(deps))` actually propagates `deps` to every constructed session
 
 ---
 
