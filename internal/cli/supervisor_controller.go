@@ -395,8 +395,19 @@ func (c *supervisorController) executeSideEffect(
 		// daemon-spawn-failed and the next EvChildExit (or a later
 		// reconcile) will trigger another transition through
 		// StBackoffWaiting.
+		//
+		// On success, post EvHealthOK to drive StSpawning → StRunning
+		// (closes codex r1 BLOCKER-1: without this transition, daemons
+		// stuck in StSpawning never become eligible for EvIntentUpdate
+		// stop handling, which only StRunning processes — Desired=stopped
+		// would be silently dropped). The "health" here is process-start
+		// success; a proper health probe (port-bind / HTTP /health) is
+		// a follow-up. Mirrors the pre-A.2 dispatcher's "started =
+		// considered healthy" semantic.
 		if c.spawn != nil {
-			_ = c.spawn(*d)
+			if err := c.spawn(*d); err == nil && c.eventLoop != nil {
+				c.eventLoop.Post(api.LoopEvent{Kind: api.EvHealthOK, TaskName: d.TaskName})
+			}
 		}
 
 	case api.StBackoffWaiting:
@@ -466,6 +477,14 @@ func (c *supervisorController) handleBackoffWaiting(d *api.SupervisorDaemon, ev 
 		// quarantine row immediately rather than after the backoff
 		// timer would have fired.
 		c.smStates.Store(d.TaskName, api.StQuarantined)
+		// Mirror SM state into the tracker so IPC status snapshots
+		// + the respawn IPC guard see "quarantined", not stale "idle"
+		// (closes codex r1 BLOCKER-2: smStates and tracker were
+		// out-of-sync; supervise_respawn.go:132 reads tracker state
+		// for the respawn refusal guard).
+		if c.tracker != nil {
+			c.tracker.MarkQuarantined(d.TaskName)
+		}
 		if c.tracker != nil && c.statePath != "" {
 			_ = persistDaemonRuntimeTracker(c.events, c.tracker, c.statePath, d.TaskName)
 		}
@@ -483,6 +502,16 @@ func (c *supervisorController) handleBackoffWaiting(d *api.SupervisorDaemon, ev 
 			})
 		}
 		return
+	}
+
+	// Mirror SM state into the tracker so IPC status snapshots and the
+	// respawn IPC guard see "backoff", not stale "idle" (closes codex
+	// r1 BLOCKER-2 second half; symmetric with MarkQuarantined above).
+	if c.tracker != nil {
+		c.tracker.MarkBackoff(d.TaskName)
+	}
+	if c.tracker != nil && c.statePath != "" {
+		_ = persistDaemonRuntimeTracker(c.events, c.tracker, c.statePath, d.TaskName)
 	}
 
 	backoff := computeRespawnBackoff(failures)
