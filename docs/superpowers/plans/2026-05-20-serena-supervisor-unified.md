@@ -26,7 +26,7 @@
 >     - **A.2**: replaced non-existent `api.IsActiveStop(d, now)` with real `DaemonIntent.IsActiveStop(now) (bool, string)` method form at `internal/api/daemon_intent.go:308`; replaced `c.gracefulInProgress.Load()` with `c.graceful.InProgress()` (real surface at `supervise.go:245`) + added `graceful *gracefulCounter` + `daemonIntent *daemonIntentCache` fields to `supervisorController`; added delta-only `EvIntentUpdate` posting instead of per-task storm (sonnet IMPORTANT B.1).
 >     - **F.3**: rewired SerenaHealthLookup integration to real hub construction path at `internal/gui/hub_listener.go:182` (`api.NewHubMcpHandler(store)`); added `WithHubLocalDeps`/`WithSerenaHealthLookup` functional options pattern; named `internal/api/serena_routing/` as NEW package created by this phase.
 >     - **D.3**: explicit outer/inner rollback rule (inner runs first; outer pushes only step 2-3 undos — NOT scheduler/client/intent/daemon — to avoid double-undo); concrete structural change to `executeInstallTo` (Pass A creates tasks, Pass B starts them; gated by `startTasks bool` param); named all migration helpers in acceptance criteria (`snapshotManifest`, `restoreManifest`, `snapshotRegistry`, `restoreRegistry`, `allocateSerenaPorts`, `writeNewManifest`).
->     - **F.4**: `HubLocalDeps` attached to `hubSession` (carries sticky+registry+events+health); `AggregateToolsCall` signature UNCHANGED; `HandleCall(ctx, sess *hubSession, clientReqID, paramsRaw)` matches existing dispatcher shape; corrected line ref `:228 → :238`; named `internal/api/hubmcp/` as NEW package.
+>     - **F.4**: `HubLocalDeps` attached to `hubSession` (carries sticky+registry+events+health); `AggregateToolsCall` signature UNCHANGED; `HandleCall(ctx, sess *hubSession, clientReqID, paramsRaw)` matches existing dispatcher shape; corrected line ref `:228 → :238`; (v9 SUPERSEDED the v7 `internal/api/hubmcp/` sub-package proposal — handler stays in `internal/api` to keep unexported `hubSession`/`namespacedTool`/`buildJSONRPCResult` access).
 >     - **A.3**: NEW `mcphub reconcile` operator command for in-place drift cleanup (sonnet IMPORTANT B.6); IPC `reconcile` verb replaces UNKNOWN_COMMAND at `:1080` for this case; dry-run / `--apply` modes.
 >     - **F.2**: envelope-shape test additions (`TestClassifyReadMemoryResponse_RejectsMissingJSONRPCVersion` + `_RejectsMissingID`).
 >     - **Test contract additions**: 5 new D.1/D.3 negative tests (kind:global, remote-http, rollback failure, audit emit on undo failure, StartAfterWrite deferral, executeInstallTo Pass A/Pass B separation); 4 new A.2 controller/health-gate tests; 5 new F.4 hub-local tool tests.
@@ -496,7 +496,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
         const intentReadTimeout = 5 * time.Second
         daemonIntentResult := api.ReadDaemonIntentFile(filepath.Join(stateDir, "daemon-intent.json"), intentReadTimeout)
         updatedDaemonIntent := &daemonIntentResult.File
-        if daemonIntentResult.State == api.IntentStateError {
+        if daemonIntentResult.Err != nil { // v10: real IntentReadResult has no IntentStateError enum value; states are IntentStateMissing/IntentStateCorrupt/IntentStateValid at daemon_intent.go:148-160. Err != nil is the cross-cutting error check (covers corrupt + lock-timeout + parse-fail).
             _ = events.Emit(api.SupervisorEvent{
                 Severity: "warn", Source: "intent-watcher", Event: "intent-reload-failed",
                 Body: map[string]any{"file": "daemon-intent.json", "error": daemonIntentResult.Err.Error()},
@@ -519,7 +519,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
         }
         previousDaemonIntent = updatedDaemonIntent
     })
-    go watcher.Run(ctx) // <-- v3 said "wired"; v4 header confirmed; v6 makes it concrete with real API; v8 reads via real api.ReadSupervisorIntent + api.ReadDaemonIntent
+    go watcher.Run(ctx) // <-- v3 said "wired"; v4 header confirmed; v6 makes it concrete with real API; v9+ reads via real api.ReadSupervisorIntent + api.ReadDaemonIntentFile (NOT api.ReadDaemonIntent which is the receiver-method form)
 
     // ... rest of runSupervise (IPC listener, reconcile driver, child-exit reaper) ...
 }
@@ -1623,7 +1623,7 @@ When exactly one registered serena workspace exists, the unbound-write rejection
 //            healthLookup SerenaHealthLookup
 //            hubLocalDeps *HubLocalDeps
 //        }
-//        func NewHubMcpHandler(store *Store, opts ...HubMcpHandlerOpt) *HubMcpHandler {
+//        func NewHubMcpHandler(store *HubSessionStore, opts ...HubMcpHandlerOpt) *HubMcpHandler { // v10: real param type is *HubSessionStore per hub_mcp_handler.go:97
 //            cfg := &hubMcpHandlerConfig{}
 //            for _, opt := range opts { opt(cfg) }
 //            // ... existing construction; pass cfg fields into hubSession factory ...
