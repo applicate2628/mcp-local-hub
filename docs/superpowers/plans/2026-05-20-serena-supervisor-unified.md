@@ -374,7 +374,7 @@ A.2 implementation can now proceed. Phases B + C + D + E + F + G + H are NOT blo
 | 3 | `register.go:754` | Same collision-helper (`entryNameTakenByOtherWorkspace`) | Same | NO filter (safe-include) |
 | 4 | `install.go:657` | Build `byTask` map for lifecycle/last-call enrichment | Backend-agnostic — TaskName is per-task unique | NO filter (safe-include) |
 | 5 | `install.go:2124` | Build `byTask` map for status path | Same | NO filter (safe-include) |
-| 6 | `install_intent.go:559` | Walk for `mcphub stop --daemon <lang>` task-name collection | LSP-only when `daemonFilter` != "" — for serena `daemonFilter` semantics need re-design | Backend-aware filter (see F.5 below) |
+| 6 | `install_intent.go:559` | Walk for `mcphub stop --daemon <lang>` task-name collection | LSP-only when `daemonFilter` != "" — for serena `daemonFilter` semantics need re-design (see "stop semantic for serena" note below the table) | Backend-aware filter |
 | 7 | `weekly_refresh.go:126` | Iterate to fire weekly-refresh schtasks /Run | Backend-agnostic via `WeeklyRefresh` flag — serena rows default to `WeeklyRefresh=false` and skip | NO filter (lifecycle gate suffices) |
 | 8 | `status_enrich.go:69` | Build TaskName→entry map for overlay | Backend-agnostic | NO filter (safe-include) |
 | 9 | `membership.go:51` | Build `[WorkspaceKey,Language]` index for weekly-refresh membership API | LSP-only — `@serena` rows MUST NOT appear as a "language" in membership UI | Add filter (LSP-only ownership) |
@@ -466,6 +466,37 @@ mcphub unregister D:\dev\PaperPane --backend mcp-language-server  # narrow LSP-o
 ```
 
 The CLI surface for `--backend` lives in B.2; B.1 only defines the registry API (`RemoveByBackend(workspaceKey, backendFilter string)`).
+
+**Stop semantic for serena** (closes call-site #6 from the table above — `install_intent.go:559` backend-aware filter):
+
+The existing `mcphub stop <server> --daemon <name>` walks `reg.Workspaces` with `daemonFilter != "" && e.Language != daemonFilter`. For LSP servers this works because `e.Language` IS the daemon identifier (`"go"`, `"typescript"`, etc.). For serena, `e.Language == "@serena"` and the operator-meaningful daemon identifier is the workspace path, not the language sentinel. v5 introduces an explicit `--backend` filter on the stop path that mirrors the unregister CLI:
+
+```bash
+mcphub stop serena                               # stop ALL serena daemons (no daemon filter)
+mcphub stop serena --workspace D:\dev\PaperPane  # stop serena daemon for one workspace
+mcphub stop mcp-language-server --daemon go      # legacy LSP semantic; unchanged
+mcphub stop mcp-language-server                  # stop ALL LSP daemons for this server
+```
+
+Internally, the `install_intent.go:559` loop gets the backend-aware filter via a new `taskFilter` function that takes both the backend value AND the daemon/language identifier:
+
+```go
+// taskFilter returns true if the entry should be included in the stop set.
+// daemonFilter == ""    → include all entries for this server (no narrow)
+// backend == "serena"   → match by Workspace OR include all serena rows
+// backend == LSP value  → match by e.Language (existing semantic)
+func taskFilter(e WorkspaceEntry, backend, daemonFilter, workspace string) bool {
+    if e.Language == SerenaLanguageSentinel && backend == "serena" {
+        return workspace == "" || e.WorkspacePath == workspace
+    }
+    if e.Language != SerenaLanguageSentinel && backend != "serena" {
+        return daemonFilter == "" || e.Language == daemonFilter
+    }
+    return false // backend/sentinel mismatch
+}
+```
+
+The full CLI surface (flags + parser changes) lives in B.2; this clause defines only the registry-walk semantic that closes the install_intent.go:559 backend-aware-filter gap.
 
 **Acceptance criteria**:
 
