@@ -315,20 +315,21 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 				"activate-window: focus failed (no fallback for non-no-window error): %v\n", err)
 			return nil
 		}
-		// SECURITY: --no-browser MUST disable every launch path.
-		// Without this guard, ANY local actor POSTing
-		// /api/activate-window on a leftover --no-browser orphan
-		// could spawn a Chrome window the operator never asked for
-		// (real bug observed when test orphans piled up). The
-		// /api/activate-window handler maps ErrActivationNoTarget to
-		// 503; the second-instance handshake reads the typed
-		// sentinel and prints diagnostic instead of falsely claiming
-		// activation.
-		if noBrowser {
-			fmt.Fprintln(cmd.OutOrStderr(),
-				"activate-window: focus failed and --no-browser set — refusing to launch")
-			return gui.ErrActivationNoTarget
-		}
+		// Pre-2026-05-20 there was a `if noBrowser { return
+		// ErrActivationNoTarget }` guard here, originally added to
+		// stop an orphan `mcphub gui --no-browser` from spawning an
+		// uninvited Chrome window when a local actor POSTed
+		// /api/activate-window. But that conflated two intents: the
+		// `--no-browser` startup flag suppresses the AUTO-launch at
+		// GUI boot (line ~470 below), while /api/activate-window is
+		// only reachable via the CSRF + same-origin gate — i.e. only
+		// from a browser tab on the mcphub origin OR from a
+		// process the operator already trusts (the tray child it
+		// spawned). Honoring tray clicks even under `--no-browser`
+		// matches the user's expectation: clicking "Open dashboard"
+		// in the tray IS the explicit consent the original guard
+		// was protecting against. The CSRF middleware remains the
+		// authoritative defense against unauthorized callers.
 		// Headless Linux: no display server, browser launch would
 		// xdg-open-fail noisily. Surface ErrActivationNoTarget so
 		// the second instance prints SSH-tunnel guidance (PR #26 F4).

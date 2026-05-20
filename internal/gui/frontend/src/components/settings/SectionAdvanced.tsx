@@ -127,17 +127,19 @@ export function SectionAdvanced({ snapshot: _ }: SectionAdvancedProps): preact.J
       </div>
       {err ? <p class="error-banner" role="alert">Could not open folder: {err}</p> : null}
 
-      <h3 style="margin-top: 16px">Strict-DACL relax</h3>
+      <h3 style="margin-top: 16px">Autorun on corp-managed Windows</h3>
       <p class="settings-section-help">
-        Allow mcphub's supervisor to read its state files on
-        corp-managed Windows hosts whose <code>%LOCALAPPDATA%</code>
-        inherits a Domain Users / Authenticated Users ACE that you
-        cannot remove. When enabled, mcphub sets the user-scope
-        <code>MCPHUB_ALLOW_UNHARDENED_STATE_READ=1</code> env var in
-        the Windows registry; future-spawned mcphub processes
-        (including Task-Scheduler logon-trigger) inherit it
-        automatically. Leave off unless you actually hit a "supervisor
-        insecure parent directory" error at startup.
+        Required on corp-managed Windows hosts whose
+        <code>%LOCALAPPDATA%</code> inherits a Domain Users /
+        Authenticated Users ACE that you cannot remove. Without this,
+        mcphub's supervisor crashes at logon-trigger startup with
+        "insecure parent directory" and the Dashboard shows
+        "Failed to load" with no daemons. When enabled, mcphub writes
+        the user-scope <code>MCPHUB_ALLOW_UNHARDENED_STATE_READ=1</code>
+        env var to the Windows registry (HKCU\Environment);
+        Task-Scheduler-spawned mcphub processes inherit it at every
+        logon, so the autostart pipeline actually works. Leave off on
+        single-user dev machines where this isn't needed.
       </p>
       <label class="settings-toggle" style="display: inline-flex; align-items: center; gap: 6px">
         <input
@@ -147,7 +149,7 @@ export function SectionAdvanced({ snapshot: _ }: SectionAdvancedProps): preact.J
           checked={relaxEnabled === true}
           onChange={(ev) => void toggleRelax((ev.currentTarget as HTMLInputElement).checked)}
         />
-        <span>Allow strict-DACL relax for state-file reads</span>
+        <span>Autorun on corp-managed Windows (sets MCPHUB_ALLOW_UNHARDENED_STATE_READ)</span>
       </label>
       {!relaxSupported && (
         <p class="settings-section-help" style="margin-top: 4px; color: #666">

@@ -606,7 +606,7 @@ func (tc *trayChild) showPopupMenuAt(x, y int32) {
 	tc.currentStateMu.Lock()
 	relaxChecked := tc.stateReadRelax
 	tc.currentStateMu.Unlock()
-	if err := appendMenuStringChecked(hmenu, cmdToggleStateReadRelax, "Allow strict-DACL relax", relaxChecked); err != nil {
+	if err := appendMenuStringChecked(hmenu, cmdToggleStateReadRelax, "Autorun (corp-DACL relax)", relaxChecked); err != nil {
 		fmt.Fprintf(os.Stderr, "tray child: AppendMenu(toggle-relax): %v\n", err)
 		return
 	}
