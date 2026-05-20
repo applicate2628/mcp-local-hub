@@ -906,3 +906,23 @@ After PR opens, follow CLAUDE.md "PR review + merge workflow" Steps 4-7 to compl
 **Cross-task stub chain.** Task 2.2's `hardenedOpen` stub → Task 2.4 replaces. Task 2.7's nil-overlay passthrough → Task 2.8 wires real overlay. Both transitions are explicit.
 
 **Discipline rule for implementer-subagents (repeated for emphasis):** before writing any code, grep / Read the live source for the symbols you intend to call. Plan v1's failure was inventing symbol names from training-data patterns; v2 prevents this by giving you the verified catalog AND requiring you to verify anything outside it.
+
+---
+
+## Future scope (deferred, NOT in this plan's execution): Serena dynamic-pool
+
+This plan v5 scope is intentionally narrow (9 LSP rows + env overlay + binary discovery + respawn IPC). The **operator-mandated architectural direction** is **1:1 serena-daemon-per-active-workspace** (dynamic-pool), but the implementation of that is a separate effort that follows after the current plan ships.
+
+Reference spec: [2026-05-20-serena-dynamic-pool.md](../specs/2026-05-20-serena-dynamic-pool.md) — captures the full design:
+
+- **Аксиома**: N серен = N активных воркспейсов (1:1 биекция), не глобальные серены
+- **Итоговая таблица** Части А Б В Г Д: какой backend для какой задачи, манифестный переход с 2-daemon → dynamic-pool, формула процессов, операторские шаги, ограничения от codex deep-source review
+- **Routing middleware** (3 mode: path-aware, sticky-session, auto-register-on-miss)
+- **workspaces.yaml** schema + lifecycle (spawn / health / restart / shutdown)
+- **Memory budget** анализ (≈300-500 MB per warm serena)
+- **Handshake / dynamic-port** заметка про вписывание в G4 unified hub vision (v2 follow-up)
+- **Migration plan** в 4 фазы
+- **Failure modes** и graceful degradation
+- **Open question** по no-path-args sticky-session — под codex consultation перед началом реализации
+
+Существующая plan v5 (Phase 1-5) собирает foundation: workspace-registry, env overlay, observability events, respawn IPC — на эти примитивы dynamic-pool ляжет естественно. Реализация dynamic-pool — отдельный плановый цикл после approve этого PR.

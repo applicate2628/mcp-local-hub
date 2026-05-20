@@ -37,13 +37,16 @@ func TestResolveRelayURL_MutuallyExclusive(t *testing.T) {
 // the old implementation looked for manifests on disk relative to the
 // executable path.
 func TestResolveRelayURL_ResolvesFromEmbeddedManifest(t *testing.T) {
-	// serena ships in the embed FS with daemon "claude" → port 9121.
-	u, err := resolveRelayURL("serena", "claude", "")
+	// Post-2026-05-20 serena manifest consolidation: single daemon
+	// "unified" on port 9121 with --context codex (see
+	// servers/serena/manifest.yaml header for the architectural
+	// rationale). Resolves through the embed FS.
+	u, err := resolveRelayURL("serena", "unified", "")
 	if err != nil {
-		t.Fatalf("resolveRelayURL(serena, claude): %v", err)
+		t.Fatalf("resolveRelayURL(serena, unified): %v", err)
 	}
 	if !strings.Contains(u, ":9121/mcp") {
-		t.Errorf("url = %q, want ...:9121/mcp (serena.claude port)", u)
+		t.Errorf("url = %q, want ...:9121/mcp (serena.unified port)", u)
 	}
 }
 
