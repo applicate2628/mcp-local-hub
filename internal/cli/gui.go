@@ -599,6 +599,16 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 			}
 		}()
 	}
+
+	// Auto-cleanup ticker: every 5 min, POST to the GUI's own
+	// /api/cleanup/orphans with {apply:true} so orphan
+	// mcp-language-server processes left behind by un-migrated
+	// agent direct-stdio don't accumulate. Opt out by setting
+	// MCPHUB_DISABLE_AUTO_CLEANUP=1. Runs as a sibling goroutine
+	// to the tray loop (NOT inside it) so the ticker fires even
+	// when --no-tray suppresses the tray.
+	go runAutoCleanupTicker(ctx, int(s.Port()))
+
 	return <-errCh
 }
 

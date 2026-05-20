@@ -72,3 +72,103 @@ describe("SectionAdvanced", () => {
     );
   });
 });
+
+describe("SectionAdvanced - Autorun toggle", () => {
+  beforeEach(() => vi.restoreAllMocks());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("initial state reflects GET response (enabled=true)", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/api/settings/state-read-relax")) {
+        return new Response(JSON.stringify({ enabled: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    const { container } = render(<SectionAdvanced snapshot={snap} />);
+    const toggle = container.querySelector('[data-testid="state-relax-toggle"]') as HTMLInputElement;
+    expect(toggle).toBeTruthy();
+    await waitFor(() => expect(toggle.checked).toBe(true));
+    expect(toggle.disabled).toBe(false);
+  });
+
+  it("click POSTs {enabled:false} when currently enabled and surfaces restart hint", async () => {
+    const calls: Array<{ url: string; method?: string; body?: string }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/api/settings/state-read-relax")) {
+        const method = init?.method ?? "GET";
+        calls.push({ url, method, body: init?.body as string | undefined });
+        if (method === "POST") {
+          return new Response(JSON.stringify({ enabled: false, restart_required: true }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(JSON.stringify({ enabled: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+
+    const { container } = render(<SectionAdvanced snapshot={snap} />);
+    const toggle = container.querySelector('[data-testid="state-relax-toggle"]') as HTMLInputElement;
+    await waitFor(() => expect(toggle.checked).toBe(true));
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => {
+      const post = calls.find((c) => c.method === "POST");
+      expect(post).toBeTruthy();
+      expect(post!.body).toBe(JSON.stringify({ enabled: false }));
+    });
+
+    await waitFor(() => {
+      const msg = container.querySelector('[data-testid="state-relax-msg"]') as HTMLElement | null;
+      expect(msg).toBeTruthy();
+      expect(msg!.textContent ?? "").toMatch(/Disabled.*Restart mcphub/);
+    });
+  });
+
+  it("disabled state when backend returns 501 (POSIX path)", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/api/settings/state-read-relax")) {
+        return new Response("", { status: 501 });
+      }
+      return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    const { container } = render(<SectionAdvanced snapshot={snap} />);
+    const toggle = container.querySelector('[data-testid="state-relax-toggle"]') as HTMLInputElement;
+    expect(toggle).toBeTruthy();
+    await waitFor(() => expect(toggle.disabled).toBe(true));
+    await waitFor(() =>
+      expect(container.textContent ?? "").toMatch(/Not supported on this OS/)
+    );
+  });
+
+  it("GET network error surfaces in state-relax-msg and toggle remains unchecked/disabled", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/api/settings/state-read-relax")) {
+        throw new Error("connection refused");
+      }
+      return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    const { container } = render(<SectionAdvanced snapshot={snap} />);
+    const toggle = container.querySelector('[data-testid="state-relax-toggle"]') as HTMLInputElement;
+    expect(toggle).toBeTruthy();
+    await waitFor(() => {
+      const msg = container.querySelector('[data-testid="state-relax-msg"]') as HTMLElement | null;
+      expect(msg).toBeTruthy();
+      expect(msg!.textContent ?? "").toMatch(/GET error: connection refused/);
+    });
+    expect(toggle.checked).toBe(false);
+    expect(toggle.disabled).toBe(true);
+  });
+});
