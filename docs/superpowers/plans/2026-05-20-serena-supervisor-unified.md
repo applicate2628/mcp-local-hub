@@ -1,6 +1,10 @@
-# Unified Plan: Serena dynamic-pool + Supervisor state-machine wiring (v1 draft)
+# Unified Plan: Serena dynamic-pool + Supervisor state-machine wiring (v2)
 
-> **Status**: v1 DRAFT — pending dual review loop (sonnet + codex), per the established convergence pattern that brought servers-matrix plan from v1 (15+ BLOCKERS) → v5 (0 BLOCKERS sonnet APPROVE + codex APPROVE_WITH_CHANGES). This v1 captures the architectural posture and phase breakdown; v2+ will incorporate dual-review findings and tighten symbol catalog + acceptance criteria.
+> **Status**: v2 — addresses sonnet's REVISE on v1 (4 BLOCKERS + 5 IMPORTANT + 5 MINOR) and integrates codex's no-path-args consultation (closes Decision 5). Pending v2 dual review.
+>
+> **Convergence history**:
+> - v1 (commit 5aa683b): initial draft. Sonnet review = REVISE: 4 BLOCKERS (Registry name collision, `kind: workspace` collision, PR #229 cross-branch gating, IPC `reload` returns UNKNOWN_COMMAND) + 5 IMPORTANT (catalog line numbers wrong) + 5 MINOR.
+> - v2 (this commit): all 4 BLOCKERS resolved, 5 IMPORTANT line-number corrections applied, MINORs addressed inline. Codex no-path-args consult resolved Decision 5 with concrete tool-group strategy table.
 >
 > **For agentic workers / future implementers**: this plan describes work that depends on PR #229 (supervisor `daemon-exited` emit) landing first. Until #229 merges + binary upgraded + serena crash root cause is identified via the new event, implementation of Phase A.2 (state-machine wiring) is **blocked on diagnostic data**. Phases B-F can start in parallel to A.2 once A.1 (catalog + plan ratification) is done.
 >
@@ -47,15 +51,25 @@
 
 **Why deferred**: v1 must converge with the existing supervisor + workspace-registry primitives. Handshake adds a new IPC verb + discovery handshake protocol — meaningful complexity that benefits from v1 lessons. Not blocking dynamic-pool v1.
 
-### Decision 5: No-path-args sticky-session — under codex consultation
+### Decision 5: No-path-args routing — RESOLVED (codex consult 2026-05-20)
 
-**Open question**: what's the default routing for a no-path tool-call BEFORE any path-call in the session? Candidates from spec §4 Mode 2:
-- **(A) Sticky-session per MCP session ID** — works once first path-call binds workspace
-- **(B) Default workspace from workspaces.yaml** — exactly one workspace marked `default: true`
-- **(C) Reject — require client to call path-tool first**
-- **(D) Aggregate from all daemons** (read-only queries only: `list_memories`, etc.)
+**Verdict** (from codex deep-source review of serena pinned commit `f0a3a279...` at `tools_base.py:337-343` + `memory_tools.py:30-72` + `cli.py:338-368`; MCP Streamable HTTP spec; Python SDK `streamable_http_manager.py:225-240`):
 
-Combined design is likely a mix: read-ops → D for unbound sessions + A after binding; write-ops → C + A. Codex consultation in flight at `.scratch/codex-prompts/serena-nopath-sticky-20260520-055000.md` (background task). Plan v2 will integrate the consultation verdict.
+Key facts surfaced by codex:
+1. **No-path serena tools are NOT projectless**: per `tools_base.py:337-343`, any tool without `ToolMarkerDoesNotRequireActiveProject` checks `_active_project` before `apply()` and returns `"Error: No active project..."` if `None`. List of affected tools: `list_memories`, `read_memory`, `write_memory`, `delete_memory`, `check_onboarding_performed`, `onboarding`, `get_current_config`.
+2. **`--project <abs>` on serena CLI activates project at startup**, so in dynamic-pool every daemon ALREADY has `_active_project` set bootstrap-time. All no-path tools work immediately on the daemon's own project.
+3. **`Mcp-Session-Id` header is protocol-stable**: per MCP spec 2025-06-18 §"Session Management", server MAY issue on initialize, client MUST send on subsequent requests, 404 means new session must initialize. Python MCP SDK v1.26.0 FastMCP default `stateless_http=False`, generates `uuid4().hex`, stores `_server_instances[session_id]`, validates header. STABLE across TCP reconnect IF client preserves header; NOT stable across DELETE, session expiry, server restart, or new initialize. **Do NOT use TCP connection ID as anchor** — use `Mcp-Session-Id` header.
+4. **Default-workspace fallback for ANY unbound no-path call is unsafe** — silent r/w against the wrong project's state. Exception: if registry has exactly ONE workspace, route there (no ambiguity possible).
+
+**Decision: tool-group strategy table** (Phase F implements this):
+
+| Tool group | Bound session strategy | Unbound (pre-first-path-call) strategy | Notes |
+|---|---|---|---|
+| `list_memories`, `check_onboarding_performed`, `get_current_config` | sticky daemon | aggregate workspace-keyed results | Don't merge into "native serena shape" without `workspace` key. `get_current_config` returns hub-summary + per-daemon configs as separate fields |
+| `read_memory name` | sticky daemon | query all daemons; return only if EXACTLY ONE has the memory, else disambiguation error | `name` not unique per pool. Don't do "first success" — leaks wrong workspace |
+| `write_memory`, `delete_memory`, `onboarding` | sticky daemon | **reject** with explicit "no workspace bound; call a path-aware tool first OR use explicit `hub.bind_workspace`" message | Binding sources: first path-aware tool-call, explicit hub `bind_workspace` command (new), or single-workspace-registry shortcut. No default for writes |
+
+**Binding rule** (codex-confirmed): hub maintains `Mcp-Session-Id → workspace` sticky map; first path-aware call sets the mapping for that session. The mapping persists until: (a) session DELETE-d by client, (b) session 404-expired, (c) explicit `hub.bind_workspace` overrides. Optional new IPC verb `hub.bind_workspace <abs-path>` lets a client opt in to explicit binding before any path-call.
 
 ---
 
@@ -68,12 +82,17 @@ Combined design is likely a mix: read-ops → D for unbound sessions + A after b
 | Concept | Real symbol | Location |
 |---|---|---|
 | State machine entry point | `api.Transition(state SMState, ev SMEvent, ctx SMContext) (newState SMState, side string, persistBefore bool, matched bool)` | `internal/api/supervisor_state_machine.go:47-164` |
-| Event loop FIFO | `api.NewEventLoop` + `api.LoopEvent{Kind: EvX, TaskName: "..."}` + `loop.Post(...)` | `internal/api/supervisor_event_loop.go` (TBD: full file read in v2 to fill in exact API surface) |
-| Per-daemon SM state cache | `DaemonRuntimeTracker` (current) — TODO: separate SM-state field from runtime tracker | `internal/cli/supervisor_runtime_tracker.go` |
-| Reconciler spawn fan-out | `(*Reconciler).Reconcile(intent, daemonIntent, currentRunning, now)` calls `r.spawn(d)` | `internal/cli/supervise_reconcile.go:117` |
-| Production spawn fn | `makeProductionSpawnFnWithStatePath(job, events, tracker, statePath)` | `internal/cli/supervise.go:1498` |
-| `cmd.Wait()` goroutine | `internal/cli/supervise.go:1539-1543` (legacy silent) → `:1539-1572` after PR #229 (with `daemon-exited` emit) | (file:line) |
-| `MarkSpawned` / `MarkExited` | `DaemonRuntimeTracker.MarkSpawned(taskName, pid, startedAt)` / `MarkExited(taskName)` | `internal/cli/supervisor_runtime_tracker.go:41-90` |
+| State machine states | `api.SMState` (StIdle/StSpawning/StRunning/StExiting/StBackoffWaiting/StQuarantined) | `internal/api/supervisor_state_machine.go:7-14` |
+| State machine events | `api.SMEvent` (EvStart/EvHealthOK/EvChildExit/EvTimerDue/EvIntentUpdate/EvManualRestart/EvRequestGraceful/EvQuiesceComplete/EvSupervisorRestart) | `internal/api/supervisor_state_machine.go:16-28` |
+| Event loop FIFO | `api.NewEventLoop` + `api.LoopEvent{Kind: EvX, TaskName: "..."}` + `loop.Post(...)` | `internal/api/supervisor_event_loop.go` (TBD-v3: full file read to fill in exact API surface — v2 implementer must verify before using) |
+| Per-daemon SM state cache | `DaemonRuntimeTracker` (current) — separates runtime state from SM state; SM state currently NOT tracked in production (Decision 3) | `internal/cli/supervisor_runtime_tracker.go:41-180` |
+| Reconciler spawn fan-out | `func (r *Reconciler) Reconcile(intent *api.SupervisorIntentFile, daemonIntent *api.DaemonIntentFile, currentRunning map[string]bool, now time.Time)` — calls `r.spawn(d)` directly at `:118` (NOT via Transition; bypass documented in Decision 3) | `internal/cli/supervise_reconcile.go:91-129`; spawn call at `:118` |
+| Production spawn fn (v5 sig with overlay) | `func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, statePath string, overlay *daemon_env_overlay.Overlay) SpawnFunc` — IMPORTANT-3 sonnet fix: includes `overlay` 5th parameter from servers-matrix Phase 2 wiring | `internal/cli/supervise.go:1838`; production call site at `:628` |
+| `cmd.Wait()` goroutine | currently silent `MarkExited` at `internal/cli/supervise.go:1916-1917` — IMPORTANT-2 sonnet fix; after PR #229 (`fix/supervisor-child-exit-emit` branch) emits `daemon-exited` event with pid + exit_code + wait_err before MarkExited | `internal/cli/supervise.go:1910-1920` block |
+| `MarkSpawned` / `MarkExited` | `DaemonRuntimeTracker.MarkSpawned(taskName, pid, startedAt)` / `MarkExited(taskName)` — note: MarkExited does NOT decrement pid_generation; that field accumulates | `internal/cli/supervisor_runtime_tracker.go:41-90` |
+| `supervisorStateFromRuntimeState` | maps runtime tracker state → persisted state field; missing case for `"spawning"` → falls into `default: "idle"` (root cause of state="idle" + pid_generation=35 silent crash loop) | `internal/cli/supervisor_runtime_tracker.go:243-254` |
+| IPC `respawn` handler | `handleRespawn(conn, req, deps)` — exposed via per-task `respawn` IPC verb; `restart`/`reload` verbs return UNKNOWN_COMMAND (BLOCKER-4 context) | `internal/cli/supervise_respawn.go:96-237`; UNKNOWN_COMMAND at `internal/cli/supervise.go:1050-1062` |
+| IntentWatcher mtime poll | `(*IntentWatcher).Run(ctx)` polls `supervisor-intent.json` + `daemon-intent.json` mtimes, fires `onChange` callback when either changes; default poll interval set by NewIntentWatcher caller | `internal/cli/supervise_watcher.go:136-170`; constructor at `:107` |
 
 **Acceptance criteria**: every state-machine-related symbol the v2 implementer will call appears in this table with verified file:line. Pre-existing symbols from v5 plan's catalog remain valid; this table adds the SM-wiring symbols.
 
@@ -83,7 +102,15 @@ Combined design is likely a mix: read-ops → D for unbound sessions + A after b
 
 **Scope**: replace `r.spawn(d)` direct call in `supervise_reconcile.go:117` with `eventLoop.Post(LoopEvent{Kind: api.EvStart, TaskName: d.TaskName})`. Replace silent `MarkExited` in `supervise.go:1539-1572` (post-PR #229) with `eventLoop.Post(LoopEvent{Kind: api.EvChildExit, TaskName: taskName})`. Add production handler in supervise.go (currently absent per codex finding at `supervise.go:436-447`) that consumes loop events + calls `api.Transition` + executes side effects (spawn / arm-backoff-timer / persist).
 
-**Gating**: blocked on (1) PR #229 merged + bin upgrade, (2) `daemon-exited` events visible in operator's `supervisor-events.log`, (3) serena crash root-cause identified via those events. Implementation cannot proceed until validation data exists.
+**Gating** (BLOCKER-3 fix from sonnet v1 review): the `daemon-exited` event does NOT currently exist on `feat/v0.5.x-servers-matrix-revamp` branch — it lives in PR #229 (`fix/supervisor-child-exit-emit` branch, HEAD `e9adb88` as of 2026-05-20T05:50Z). Explicit prerequisites for Phase A.2 work to begin:
+
+1. **PR #229 merged to master** (currently in bot-review loop, HEAD `e9adb88` after revert of 3 P2 findings — see CLAUDE.md PR workflow Step 4-7)
+2. **Master rebased into `feat/v0.5.x-servers-matrix-revamp`** so this branch carries the `daemon-exited` emit
+3. **Operator runs `mcphub install --upgrade`** + cold-restart supervisor (binary on disk must be the post-#229 build)
+4. **`daemon-exited` events visible** in operator's `supervisor-events.log` for serena daemons
+5. **Serena crash root cause identified** from the new event's `exit_code` + `wait_err` fields
+
+Implementation of A.2 cannot proceed until prerequisites 1-5 are satisfied. Phases B + C + D + E + F (workspace registry + routing + spawn + auto-register + sticky-session) are NOT blocked on A.2 and can fan out in parallel.
 
 **Acceptance criteria**:
 - Reconciler no longer calls `r.spawn` directly; all spawn intent goes through event loop
@@ -111,43 +138,58 @@ Combined design is likely a mix: read-ops → D for unbound sessions + A after b
 
 ## Phase B: Workspace registry extension
 
-### B.1: workspaces.yaml schema + load/save API
+### B.1: Extend existing `Registry` / `WorkspaceEntry` (NOT a new parallel type)
 
-**Scope**: new file `internal/api/workspaces.go` with:
+**BLOCKER-1 fix from sonnet v1 review**: `internal/api/workspace_registry.go:31` already defines `WorkspaceEntry` with fields `{WorkspaceKey, WorkspacePath, Language, Backend, Port, TaskName, ClientEntries, WeeklyRefresh, ...}`. The `Registry` type (line 53) already loads/saves `workspaces.yaml` and is used by `install.go:656`, `register.go:243+285`, `port_alloc_test.go`. A parallel `WorkspacesFile` would collide irreconcilably.
+
+**Scope**: extend the EXISTING `internal/api/workspace_registry.go` `WorkspaceEntry` struct with new fields needed by serena dynamic-pool. All new fields use `omitempty` yaml tag for backward compat with installed clients that have older entries.
 
 ```go
-type WorkspacesFile struct {
-    Version    int
-    Workspaces []WorkspaceEntry
-}
-
+// Additions to existing WorkspaceEntry struct (workspace_registry.go:31):
 type WorkspaceEntry struct {
-    Path          string    // abs-path on disk
-    Languages     []string  // snapshot of .serena/project.yml at register time
-    Default       bool      // exactly one workspace can be default
-    RegisteredAt  time.Time
-    RegisteredVia string    // "manual" | "auto-detect" | "migration"
-    SerenaPort    int       // mcphub-allocated; persisted
-}
+    // ... existing fields preserved ...
+    WorkspaceKey   string            `yaml:"workspace_key"`
+    WorkspacePath  string            `yaml:"workspace_path"`
+    Language       string            `yaml:"language"`
+    Backend        string            `yaml:"backend"`
+    Port           int               `yaml:"port"`
+    TaskName       string            `yaml:"task_name"`
+    ClientEntries  map[string]string `yaml:"client_entries"`
+    WeeklyRefresh  bool              `yaml:"weekly_refresh"`
 
-func ReadWorkspaces(path string) (*WorkspacesFile, error)
-func WriteWorkspaces(path string, ws *WorkspacesFile) error  // flock RMW via api.SecureWriteClientConfig
-func ValidateWorkspaces(ws *WorkspacesFile) error
+    // NEW fields for serena dynamic-pool:
+    SerenaPort     int       `yaml:"serena_port,omitempty"`     // mcphub-allocated; persisted; 0=not-allocated-yet
+    Default        bool      `yaml:"default,omitempty"`         // exactly one entry across all `Backend == "serena"` rows may be Default
+    RegisteredAt   time.Time `yaml:"registered_at,omitempty"`   // when first added
+    RegisteredVia  string    `yaml:"registered_via,omitempty"`  // "manual" | "auto-detect" | "migration"
+    Languages      []string  `yaml:"languages,omitempty"`       // snapshot of .serena/project.yml at register time; distinct from existing Language single-string field
+}
+```
+
+**Why both `Language` (existing) and `Languages` (new)**: existing `Language` is per-LSP-row single-language; serena entries have multiple languages from `.serena/project.yml`. Validator: if `Backend == "serena"`, `Languages` non-empty required; existing per-LSP rows continue to use single `Language`.
+
+**New API on existing `Registry`** (added to workspace_registry.go, not a new file):
+
+```go
+// All operate on the existing Registry singleton.
+func (r *Registry) SerenaEntries() []*WorkspaceEntry         // filter Backend=="serena"
+func (r *Registry) DefaultSerenaWorkspace() (*WorkspaceEntry, error)  // unique Default==true; errors if 0 or N>1
+func (r *Registry) AllocateSerenaPort(pool []int) (int, error)        // first free port from pool, persisted via Save()
 ```
 
 **Acceptance criteria**:
-- YAML schema match spec §5
-- Exactly one workspace has `default: true` (validator rejects 0 or N>1)
-- Each `Path` exists on disk AND contains `.serena/project.yml`
-- `SerenaPort` unique within file AND within registered port_pool range (configurable, default 9121-9199)
-- `Languages` non-empty
-- Atomic write via existing `SecureWriteClientConfig` pipeline (parent-dir DACL + flock)
+- Existing `Registry.Load()` / `Save()` round-trip preserves new fields
+- `dec.KnownFields(true)` (manifest schema strict-parse pattern) does NOT apply to registry — yaml.v3 default for new fields is "preserved on read, omitempty on write"; this matches existing field-additive pattern in the registry
+- Validator: when `Backend == "serena"`, require `Languages` non-empty AND `SerenaPort` in configured pool range (default 9121-9199)
+- Across all `Backend == "serena"` rows, `Default == true` count ∈ {0, 1}; 0 is valid (no fallback workspace, all unbound writes rejected per Decision 5)
+- Atomic write via existing pipeline (registry already uses `SecureWriteClientConfig` per `workspace_registry.go:Save`)
 
 **Test contract**:
-- `TestWorkspacesFile_Load_Valid` — round-trip via WriteWorkspaces → ReadWorkspaces
-- `TestWorkspacesFile_Validate_RejectsMultipleDefaults`
-- `TestWorkspacesFile_Validate_RejectsMissingProjectYml`
-- `TestWorkspacesFile_Validate_RejectsPortOutsideRange`
+- `TestWorkspaceRegistry_RoundTripsSerenaFields` — Load/Save round-trip preserves SerenaPort/Default/Languages
+- `TestWorkspaceRegistry_RejectsMultipleSerenaDefaults` — N>1 Default==true on serena entries fails validation
+- `TestWorkspaceRegistry_AllocateSerenaPort_ReturnsFirstFreeFromPool`
+- `TestWorkspaceRegistry_AllocateSerenaPort_ExhaustionReturnsError`
+- `TestWorkspaceRegistry_LegacyEntryReadAccepted` — older entry without new fields loads cleanly (omitempty back-compat)
 
 ### B.2: `mcphub workspace {register, unregister, list, set-default}` CLI
 
@@ -232,7 +274,16 @@ func (r *WorkspaceResolver) AncestorWalk(absPath string) (string, error)
 - Response streamed as SSE or single-shot depending on upstream Content-Type
 - On `ErrWorkspaceNotFound` → trigger Mode 3 (Phase E) inline OR return HTTP 503 with explicit "register workspace first" message (TBD per Phase E decision)
 
-**Test contract**: integration test using two registered workspaces + a sample serena tool call → verify correct upstream daemon hit.
+**Test contract** (IMPORTANT-4 sonnet v1 fix — expanded error-path coverage):
+
+- `TestSerenaRouter_TwoWorkspaces_PathArgRoutesCorrectly` — happy path: two registered workspaces, path arg under workspace A → request hits daemon A only
+- `TestSerenaRouter_WorkspaceNotFound_TriggersMode3OrReturns503` — path doesn't match any registered workspace → either auto-register (Phase E) fires, OR (if E disabled) HTTP 503 with explicit "register workspace first" guidance
+- `TestSerenaRouter_UpstreamTimeout_Returns504` — upstream serena daemon not responding within configured timeout (default 60s for tool-call, matches HTTPHost httpClient timeout) → HTTP 504 Gateway Timeout with body `{"error": "upstream serena daemon at port X did not respond within Ys"}`
+- `TestSerenaRouter_UpstreamConnectionRefused_Returns502` — upstream port not listening (daemon crashed/not yet up) → HTTP 502 + audit event `serena-upstream-unreachable`
+- `TestSerenaRouter_MissingPathArg_RoutesToMode2` — tool body has no `relative_path`/`file_path`/`name_path` → falls through to Phase F (sticky-session or fallback)
+- `TestSerenaRouter_MalformedToolBody_Returns400` — body is not valid JSON OR missing `name` field → HTTP 400 with parse error
+- `TestSerenaRouter_PreservesMcpSessionIdHeader` — request's `Mcp-Session-Id` header forwarded verbatim to upstream + response header threaded back through
+- `TestSerenaRouter_PreservesContentTypeStreaming` — upstream `text/event-stream` response streams chunked back to client without buffering
 
 ### C.3: Sticky-session map for no-path tools
 
@@ -264,18 +315,22 @@ func (s *SessionRouter) LookupSession(sessionID string) *WorkspaceEntry
 
 ## Phase D: Per-workspace serena daemon spawn
 
-### D.1: Manifest schema extension — `kind: workspace` + `daemon_template`
+### D.1: Manifest schema extension — reuse `kind: workspace-scoped` + new `daemon_template` block
 
-**Scope**: extend `internal/config/manifest.go` to support new manifest kind:
+**BLOCKER-2 fix from sonnet v1 review**: `internal/config/manifest.go:15-16` already defines `KindGlobal = "global"` and `KindWorkspaceScoped = "workspace-scoped"`. The validator at line 255 rejects any other kind value. Introducing a new `kind: workspace` would collide with this existing naming AND require validator rewrite.
+
+**Decision** (rejected: new third kind; accepted: extend existing `workspace-scoped`): serena's dynamic-pool falls under the existing `workspace-scoped` semantic — one daemon per workspace. The change is to add a new OPTIONAL `daemon_template` block alongside the existing `daemons:` list. When `daemon_template` is present (regardless of `kind`), reconciler generates one descriptor per registered serena workspace from the template; when only legacy `daemons:` is present, current per-daemon behavior is preserved.
+
+**Manifest example** (post-D.1):
 
 ```yaml
 name: serena
-kind: workspace           # new: was 'global'
+kind: workspace-scoped        # existing kind value; no new constant needed
 transport: native-http
 command: uvx
 base_args: [...]
 env: {PYTHONUNBUFFERED: "1"}
-daemon_template:
+daemon_template:              # NEW optional block
   context: codex
   port_pool: [9121, 9122, ..., 9199]
   extra_args_template:
@@ -283,19 +338,40 @@ daemon_template:
     - codex
     - --project
     - "${workspace.path}"
+# Legacy `daemons:` block is INCOMPATIBLE with `daemon_template:` — schema
+# validator rejects both-present (one or the other, not both). This forces
+# explicit migration to dynamic-pool.
+```
+
+**New Go struct** (added to `internal/config/manifest.go` alongside existing `Daemon` struct):
+
+```go
+type DaemonTemplate struct {
+    Context           string   `yaml:"context"`
+    PortPool          []int    `yaml:"port_pool"`
+    ExtraArgsTemplate []string `yaml:"extra_args_template"`
+}
+
+type Manifest struct {
+    // ... existing fields ...
+    Daemons        []Daemon        `yaml:"daemons,omitempty"`         // legacy per-daemon list
+    DaemonTemplate *DaemonTemplate `yaml:"daemon_template,omitempty"` // NEW dynamic-pool template; mutually exclusive with Daemons
+}
 ```
 
 **Acceptance criteria**:
-- New `kind: workspace` value (in addition to existing `global` + `workspace` LSP-bridge-style)
-- `daemon_template` struct with `context`, `port_pool`, `extra_args_template`
-- `${workspace.path}` token expanded at spawn time per workspaces.yaml entry
-- Schema validation rejects malformed templates (e.g., no `${workspace.path}` in args when `kind: workspace`)
-- `dec.KnownFields(true)` strict parse — every new YAML key has a Go struct field with yaml tag
+- `dec.KnownFields(true)` strict parse remains intact (every new YAML key has yaml tag with omitempty)
+- Validator: at most one of `daemons` OR `daemon_template` present (both-present → reject with explicit "dynamic-pool migration requires removing legacy daemons[]")
+- `${workspace.path}` token expanded at spawn time per registered serena workspace
+- `port_pool` non-empty, all entries in valid TCP-port range, no duplicates
+- `extra_args_template` non-empty AND contains `${workspace.path}` token somewhere (else workspace info is lost on spawn)
 
 **Test contract**:
-- `TestManifest_KindWorkspace_DaemonTemplate_Parsing`
-- `TestManifest_KindWorkspace_RejectsMissingPortPool`
-- `TestManifest_KindWorkspace_TokenExpansionAtSpawn`
+- `TestManifest_DaemonTemplate_Parsing` — yaml round-trip preserves template
+- `TestManifest_DaemonTemplate_RejectsBothPresent` — manifest with both daemons and daemon_template fails strict-parse
+- `TestManifest_DaemonTemplate_RejectsEmptyPortPool`
+- `TestManifest_DaemonTemplate_RejectsTemplateWithoutWorkspacePath`
+- `TestManifest_DaemonTemplate_TokenExpansionAtSpawn` — `${workspace.path}` substituted with concrete absolute path
 
 ### D.2: Supervisor instance-per-workspace spawn
 
@@ -317,18 +393,40 @@ daemon_template:
 
 **Scope**: new `mcphub migrate serena legacy-to-dynamic-pool` subcommand.
 
+**Source-state detection** (IMPORTANT-5 fix from sonnet v1 review): the operator's current `servers/serena/manifest.yaml` has `kind: global` with single `unified` daemon (intermediate). Migration must detect THREE possible source states explicitly:
+
+| Source state | Detection predicate |
+|---|---|
+| Legacy 2-daemon | `manifest.daemons[]` contains exactly 2 entries named `claude` + `codex`, AND `manifest.daemon_template` is absent |
+| Intermediate unified | `manifest.daemons[]` contains exactly 1 entry named `unified`, AND `manifest.daemon_template` is absent |
+| Already migrated (target) | `manifest.daemons[]` is absent OR empty, AND `manifest.daemon_template` is present |
+| Malformed / partial | anything else (e.g., daemons[] has 3+ entries, OR both daemons[] and daemon_template present) → error with explicit "manual reconciliation required" |
+
 **Behavior**:
-1. Survey existing serena daemons in supervisor-intent.json: `claude` (legacy), `codex` (legacy), `unified` (intermediate)
-2. Read workspaces.yaml (if empty, prompt operator to register at least one workspace + bail out)
-3. For each registered workspace, generate new descriptor via D.2's template expansion
-4. Replace legacy descriptors with new per-workspace descriptors in supervisor-intent.json
-5. Trigger supervisor reload (IPC `reload` or restart)
+
+1. Detect source state via predicate above; refuse-with-error on malformed/partial
+2. If already-migrated: exit 0 (idempotency); no writes
+3. Read existing `Registry` (workspace_registry.go) for any pre-registered serena workspaces
+4. If no serena workspaces registered: prompt operator to register at least one via `mcphub workspace register <path> --backend serena --languages <list>`; bail out (exit non-zero)
+5. Rewrite `manifest.yaml`: drop `daemons[]` block, add `daemon_template` block per D.1 schema
+6. For each registered serena workspace, allocate port from `daemon_template.port_pool` via `Registry.AllocateSerenaPort()` (B.1) and write back via `Registry.Save()`
+7. **Reload trigger** (BLOCKER-4 fix from sonnet v1 review): the existing IPC `restart`/`reload` cases return `UNKNOWN_COMMAND` (`supervise.go:1050-1062`); cannot drive a full reload via IPC. Instead, the migration tool relies on the `IntentWatcher` (`supervise_watcher.go`, polls `supervisor-intent.json` mtime). Migration step 5 writes the new manifest → mcphub install regenerates `supervisor-intent.json` → `IntentWatcher.onChange` fires → reconciler picks up new descriptors → spawns per-workspace daemons. **Operator-facing behavior**: migration prints "supervisor will pick up new intent within `<intent_watcher_poll_interval>` seconds (default: 30s); no manual restart required"
 
 **Acceptance criteria**:
-- Idempotent (re-running on already-migrated state is no-op)
-- Refuses if workspaces.yaml is empty (clear error message)
-- Preserves per-workspace `.serena/cache/` directories (no data loss)
-- Audit event `serena-dynamic-pool-migration` written to events log
+- Idempotent: detection predicate returns "already migrated" if rerun; no writes, exit 0
+- Refuses if no serena workspaces registered (clear error: "register at least one workspace before migration")
+- Preserves per-workspace `.serena/cache/` directories (no disk write inside workspace dirs)
+- Audit event `serena-dynamic-pool-migration` written with body `{source_state, target_workspaces, allocated_ports}`
+- Reconciler picks up new descriptors within `intent_watcher_poll_interval` (no IPC required)
+
+**Test contract**:
+- `TestMigrateSerena_DetectsLegacy2Daemon`
+- `TestMigrateSerena_DetectsUnifiedIntermediate`
+- `TestMigrateSerena_DetectsAlreadyMigrated_NoOp`
+- `TestMigrateSerena_RejectsMalformedManifest`
+- `TestMigrateSerena_RejectsEmptyWorkspaceRegistry`
+- `TestMigrateSerena_AllocatesPortsForEachWorkspace`
+- `TestMigrateSerena_WritesAuditEvent`
 
 ---
 
@@ -370,23 +468,111 @@ func SurveyLanguages(absPath string, maxDepth int) ([]string, error)
 
 ---
 
-## Phase F: No-path-args sticky-session (pending codex consultation)
+## Phase F: No-path-args routing — concrete strategy per Decision 5
 
-**This phase finalized after codex consult result lands**. Current placeholder:
+Per Decision 5 (resolved by codex consult 2026-05-20), Phase F implements the tool-group strategy table inline. Three sub-phases F.1-F.3 implement the three rows of the Decision-5 table.
 
-### F.1: Read-only no-path aggregate (Mode D)
+### F.1: Read-only no-path tools — sticky-when-bound, aggregate-when-unbound
 
-For `list_memories`, `get_current_config`, `check_onboarding_performed`: when session not yet bound, aggregate response from all daemons.
+**Tools**: `list_memories`, `check_onboarding_performed`, `get_current_config`.
 
-### F.2: Write/delete no-path reject (Mode C)
+**Bound session** (sticky-session map populated by prior path-aware call):
+- Forward to the workspace's serena daemon
+- Pass response through unchanged
 
-For `write_memory`, `delete_memory`, `onboarding`: when session not yet bound, return HTTP 412 Precondition Failed with explicit "no workspace bound; call a path-aware tool first" message.
+**Unbound session** (no prior path-aware call in this `Mcp-Session-Id`):
+- For each registered serena workspace, issue the same tool-call to that workspace's daemon in parallel (bounded N, default max 8 parallel)
+- Build aggregate response with workspace-keyed result map:
+  ```json
+  {"results": {"D:\\dev\\PaperPane": [...], "D:\\dev\\mcp-local-hub": [...]}}
+  ```
+- Do NOT flatten into "native serena shape" without `workspace` key (codex constraint: client must see which workspace each result came from)
+- Special case: `get_current_config` returns hub-summary (number of workspaces, sticky-state, port allocation) PLUS per-daemon `config:` array
 
-### F.3: Sticky bind on first path-call (Mode A)
+**Acceptance criteria**:
+- Sticky path: HTTP 200, single-workspace native response shape
+- Unbound aggregate path: HTTP 200, workspace-keyed map with all registered serena workspaces present
+- Parallel fan-out respects N-bound concurrency limit
+- Single-workspace-registry shortcut: if exactly one registered serena workspace, route to it directly (no aggregate wrapping) — saves clients the need to drill into wrapper
 
-Subsequent no-path calls after a path-call → forward to bound workspace (Phase C.3).
+**Test contract**:
+- `TestSerenaRouter_ListMemoriesBound_SingleWorkspaceResponse`
+- `TestSerenaRouter_ListMemoriesUnbound_AggregateAllWorkspaces`
+- `TestSerenaRouter_GetCurrentConfigUnbound_HubSummaryShape`
+- `TestSerenaRouter_SingleWorkspaceRegistry_NoAggregateWrapping`
 
-**Acceptance criteria**: TBD post-consult. Tests TBD.
+### F.2: `read_memory <name>` — strict disambiguation when unbound
+
+**Bound session**: sticky-forward to the workspace's serena daemon. Pass response through unchanged.
+
+**Unbound session**:
+- Query all registered serena daemons in parallel
+- Collect responses; count how many returned a successful read (HTTP 200 + non-empty body)
+- Cases:
+  - Exactly 1 success: return that workspace's response unchanged + `X-Serena-Workspace: <abs-path>` response header (so client can sticky-bind explicitly going forward)
+  - 0 successes: HTTP 404 with body `{"error": "memory '<name>' not found in any registered serena workspace"}`
+  - 2+ successes: HTTP 409 Conflict with body `{"error": "memory '<name>' exists in multiple workspaces", "workspaces": ["D:\\dev\\PaperPane", "D:\\dev\\mcp-local-hub"], "guidance": "call a path-aware tool first to bind workspace, or use hub.bind_workspace explicitly"}`
+- Codex constraint: do NOT use "first success wins" — that silently leaks the wrong workspace's memory contents
+
+**Special case**: memory name starting with `global/` (per serena convention) — can be de-duped/read-once across the pool because global memories are by-name unique. Acceptance criterion: documented behavior for `global/*` is "read first daemon's response since global memories are by-name unique by serena convention". Defer cross-pool global memory sync to v2.
+
+**Test contract**:
+- `TestSerenaRouter_ReadMemoryUnbound_ExactlyOneMatch_Returns200`
+- `TestSerenaRouter_ReadMemoryUnbound_ZeroMatches_Returns404`
+- `TestSerenaRouter_ReadMemoryUnbound_MultipleMatches_Returns409Disambiguation`
+- `TestSerenaRouter_ReadMemoryUnbound_GlobalNamespace_FirstDaemonWins`
+
+### F.3: `write_memory` / `delete_memory` / `onboarding` — fail-closed unbound
+
+**Bound session**: sticky-forward to the workspace's serena daemon. Pass response through unchanged.
+
+**Unbound session**:
+- Return HTTP 412 Precondition Failed with body:
+  ```json
+  {
+    "error": "no workspace bound for this MCP session",
+    "guidance": "call a path-aware serena tool first (find_symbol, search_for_pattern, etc.) OR use 'hub.bind_workspace <abs-path>' to explicitly bind"
+  }
+  ```
+- DO NOT default-route to any workspace — codex constraint: silent writes to wrong project state are unrecoverable corruption
+- Exception: single-workspace-registry shortcut (if exactly one registered serena workspace, route there directly) — only safe path for "default behavior"
+
+**Acceptance criteria**:
+- Unbound write → HTTP 412 + explicit guidance message (no silent default)
+- Single-workspace-registry shortcut works for both bound and unbound
+- Each rejection emits audit event `serena-write-unbound-rejected` with body `{tool, session_id_hash, registered_workspace_count}`
+
+**Test contract**:
+- `TestSerenaRouter_WriteMemoryUnbound_Returns412`
+- `TestSerenaRouter_DeleteMemoryUnbound_Returns412`
+- `TestSerenaRouter_OnboardingUnbound_Returns412`
+- `TestSerenaRouter_WriteMemorySingleWorkspaceShortcut_Returns200`
+- `TestSerenaRouter_WriteMemoryUnboundEmitsAuditEvent`
+
+### F.4: Sticky-session map implementation
+
+**Storage**: in-process map `map[string]*WorkspaceEntry` keyed by `Mcp-Session-Id` header value. Protected by `sync.RWMutex`. Lazy expiration: TTL 24h since last call (configurable via `mcphub config sticky-ttl`).
+
+**Hook points**:
+- On every path-aware tool-call response success → `sticky[session_id] = resolved_workspace` (idempotent if already bound to same workspace)
+- On HTTP 404 from upstream (session expired per MCP spec) → evict `sticky[session_id]`
+- On explicit MCP DELETE on `Mcp-Session-Id` (per MCP spec §"Session Management") → evict
+- On `hub.bind_workspace <abs-path>` (new IPC verb) → set `sticky[session_id]` explicitly; refuses if session already bound to different workspace unless `--force`
+
+**Acceptance criteria**:
+- Sticky binding correctly resolves on subsequent no-path calls
+- Map lookup is O(1)
+- Eviction on 404 from upstream + explicit DELETE + TTL expiry
+- `hub.bind_workspace` IPC verb works idempotent (re-bind to same workspace = no-op)
+- Audit event `serena-session-bound` on first bind, `serena-session-rebound` on explicit override, `serena-session-evicted` on eviction
+
+**Test contract**:
+- `TestStickySession_BindOnFirstPathCall`
+- `TestStickySession_LookupAfterBind_O1`
+- `TestStickySession_Evict_OnHTTP404FromUpstream`
+- `TestStickySession_Evict_OnExplicitDELETE`
+- `TestStickySession_HubBindWorkspace_Idempotent`
+- `TestStickySession_HubBindWorkspace_RejectsRebindWithoutForce`
 
 ---
 
@@ -429,23 +615,32 @@ v1: clients use serena's existing per-daemon endpoint via router. v2: clients us
 
 ---
 
-## Open questions
+## Open questions (v2)
 
-1. **No-path-args fallback semantics** — pending codex consultation (Decision 5)
-2. **MCP session ID stability** across reconnects — does serena's Streamable HTTP transport surface `mcp-session-id` header that survives reconnect? If session_id changes per reconnect, sticky-session map needs different anchor (e.g., client TCP connection ID OR a `client-state.yaml` persisted across sessions)
-3. **`workspaces.yaml` hot-reload latency** — when operator adds workspace via CLI, how long until first request hits the new daemon? Acceptable: 5-10s. Below that → need explicit `mcphub workspace reload` IPC trigger
-4. **Auto-register `.serena/project.yml` defaults** — `read_only: false`, `excluded_dirs: [...]`, what `language_detector_threshold`?
-5. **Port allocation persistence on unregister** — keep port reserved for retention period or release immediately?
-6. **State-machine wiring (Phase A.2) blocked on** — PR #229 merge + binary upgrade + serena crash root cause from new `daemon-exited` event
-7. **Cross-workspace memory access** — `read_memory name` in session bound to workspace A, but operator wants to read memory from B → out-of-scope or special-case?
-8. **Migration from operator's current state** — operator currently has `unified` intermediate (committed in this branch); migration G.1 needs to handle BOTH legacy 2-daemon (claude+codex) AND unified intermediate cases
+**Resolved in v2** (removed from list):
+- ~~No-path-args fallback semantics~~ — RESOLVED by codex consult (Decision 5 + Phase F)
+- ~~MCP session ID stability~~ — RESOLVED: codex confirmed `Mcp-Session-Id` is protocol-stable across TCP reconnect when client preserves header; use it as sticky anchor (NOT TCP connection ID)
+- ~~Migration from operator's current state~~ — RESOLVED in D.3 with three-state detection predicate (legacy/unified/migrated)
+
+**Still open**:
+
+1. **`workspaces.yaml` (registry) hot-reload latency** — when operator adds workspace via `mcphub workspace register`, how long until reconciler picks up the change and spawns the new serena daemon? IntentWatcher polls every 30s by default. Acceptable: 30-60s. If operator wants instant, add explicit `mcphub workspace reload` command that bumps mtime + waits for next poll OR add a new IPC `intent-reload` verb (more scope)
+2. **Auto-register `.serena/project.yml` defaults** — `read_only: false`, `excluded_dirs: [...]`, `language_detector_threshold`? Need a single source-of-truth defaults file in `internal/api/language_detection.go`
+3. **Port allocation persistence on unregister** — keep port reserved for retention period (e.g., 24h, in case operator re-registers same path) or release immediately?
+4. **Cross-workspace memory access** — `read_memory name` in session bound to workspace A, but operator wants to read memory from B → out-of-scope for v1, F.2 disambiguates by error; v2 may add explicit `hub.read_memory_in_workspace <name> <abs-path>`
+5. **State-machine wiring (Phase A.2) prerequisites** — pinned to PR #229 merge + binary upgrade + serena crash root cause from new `daemon-exited` events (see Phase A.2 gating §)
+6. **Port-pool boundary tuning** — default 9121-9199 = 79 slots. Realistic operator ceiling per Decision 1 = ~6 workspaces. Should default pool be narrower (e.g., 9121-9139 = 19 slots, more conservative)?
+7. **`hub.bind_workspace` IPC verb scope** — Phase F.4 introduces this new verb. Should it be available BOTH via the GUI MCP-router endpoint AND via local mcphub IPC for CLI use (`mcphub session bind --session-id X --workspace Y`)? Latter adds CLI scope
+8. **`get_current_config` aggregation shape** — F.1 says "hub-summary + per-daemon configs as separate fields". Need exact JSON schema documented in F.1's acceptance criteria before implementation (current text is hand-wave)
+9. **Aggregate parallelism bound** — F.1 says "bounded N, default max 8 parallel". Is 8 the right number for typical operator's 3-6 workspace scenario? Tuning candidate
+10. **Single-workspace-registry shortcut affects F.3** — if exactly one workspace registered, F.3 routes writes there directly (no fail-closed). Is that the right trade-off vs. always-require-explicit-bind? Codex consult mentioned exception but didn't dive into edge cases
 
 ---
 
 ## Review history
 
-- **v1 (this draft)**: initial architectural posture + phase breakdown. Pending dual review.
-- **v2 (TBD)**: incorporate sonnet + codex review of v1.
+- **v1** (commit 5aa683b): initial architectural posture + phase breakdown. Sonnet review = REVISE (4 BLOCKERS + 5 IMPORTANT + 5 MINOR). Codex deep-source consultation on no-path-args returned with concrete Q5 strategy table.
+- **v2** (this commit): all 4 sonnet BLOCKERS resolved (B.1 Registry extension instead of parallel type; D.1 reuse `kind: workspace-scoped` + add `daemon_template` block; A.2/A.3 explicit cross-branch gating; D.3 IntentWatcher mtime instead of broken IPC `reload`). All 5 IMPORTANT line-number / signature corrections applied to Phase A.1 catalog. Decision 5 closed with concrete codex-driven strategy table; Phase F changed from TBD placeholder to 4 concrete sub-phases (F.1-F.4) with full acceptance criteria and test contracts. MINORs addressed: F sub-phase acceptance criteria explicit, atomic-rollback test name updated (Phase E.2), missing `overlay` parameter added to A.1 catalog for `makeProductionSpawnFnWithStatePath`, B.2 first-run-empty test added. Open questions list refreshed (3 removed as resolved, 3 added from review). Pending v2 dual review (sonnet + codex).
 - **v3+ (TBD)**: convergence iterations until 0 BLOCKERS per established v1→v5 pattern from servers-matrix plan.
 
 ---
