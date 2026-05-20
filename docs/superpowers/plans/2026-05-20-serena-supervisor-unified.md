@@ -1,6 +1,8 @@
-# Unified Plan: Serena dynamic-pool + Supervisor state-machine wiring (v8)
+# Unified Plan: Serena dynamic-pool + Supervisor state-machine wiring (v9)
 
-> **Status**: v8 — final fix-the-fixes pass per v7 sonnet assessment ("v7 should be last iteration with structural novelty; v8 should be pure fix-the-fixes"). v8 closes v7 codex 5+1 BLOCKERs (SupervisorDaemon.Desired doesn't exist → DaemonIntentFile.Tasks lookup; IPC status doesn't return SMState → add sm_state field; --start-after-write regression on api.Install Run-failure semantic → preserve warning-only behavior + name 3 hidden callers; F.4 subpackage visibility → keep handler in `api`; import-cycle → SerenaHealthLookup in `api` package; api.LoadSupervisorIntent → real api.ReadSupervisorIntent) AND v7 sonnet 2 BLOCKERs + 4 IMPORTANTs (line :1080 wrong for reconcile case → new `case "reconcile":` before default; branch in resolveToolsCallRoute not AggregateToolsCall; HubMcpHandlerOpt functional-options spelled out; capacity 64 reuse not 256; Pass B At-logon trigger filter preserved; lookupDaemonIntent + diffIntentSnapshots signatures defined). All v8 pseudocode mentally compiles against HEAD `cc00364`. Pending v8 dual review.
+> **Status**: v9 — final convergence pass. v8 dual review converged on "one narrow cleanup pass" (codex REVISE: "small v9 cleanup, not a redesign"; sonnet APPROVE_WITH_CHANGES after one `ReadDaemonIntent` fix). v9 closes the converged set: (a) `api.ReadDaemonIntent(path)` → real `api.ReadDaemonIntentFile(path, timeout)` (daemon_intent.go:386); (b) supervisor IPC health adapter grounded on real `api.DialSupervisorIPCStatus(ctx) → []api.DaemonStatus` with v9-added `SMState` field on `DaemonStatus`; (c) stale v7 subpackage wording corrected — `internal/api/hubmcp/` REJECTED (handler stays in `internal/api` to keep unexported `hubSession`/`namespacedTool`/`buildJSONRPCResult` access); `SerenaHealthLookup` lives directly in `internal/api` to avoid import cycle; (d) `IPCRequest.Cmd` (not `Command` per supervisor_ipc.go:15); `sess.ClientSessionID` (not `sess.ID()`); `*Registry` (not `*WorkspaceRegistry`); (e) reconcile IPC types `ReconcileArgs`/`ReconcileResponse`/`DriftEntry` explicitly declared as NEW types in `internal/api`; (f) `t.Trigger != "At logon"` literal (no `IsImmediateStartTrigger()` helper exists); (g) A.1 catalog explicit "verified at HEAD 43df327; implementer re-greps against then-current HEAD"; (h) `api.` qualifier convention note for same-package snippets. Plan is ready for implementation handoff after v9 dual review confirms cleanup landed cleanly.
+
+> **Previous v8 status (preserved for history)**: v8 — fix-the-fixes pass per v7 sonnet assessment. v8 closed v7 codex 5+1 BLOCKERs AND v7 sonnet 2 BLOCKERs + 4 IMPORTANTs; v8 dual review then surfaced the small implementation-contract drift v9 just closed.
 >
 > **Convergence history**:
 >
@@ -176,9 +178,16 @@ Key facts surfaced by codex:
 | IPC `respawn` handler | `handleRespawn(conn, req, deps)` — exposed via per-task `respawn` IPC verb; `restart`/`reload` verbs return UNKNOWN_COMMAND | `internal/cli/supervise_respawn.go:96-237`; UNKNOWN_COMMAND emits at `internal/cli/supervise.go:1080,1089,1248` |
 | IntentWatcher constructor + Run | `NewIntentWatcher(stateDir string, pollInterval time.Duration, onChange func()) *IntentWatcher` (note: ONE `stateDir`, NOT two paths); `(*IntentWatcher).Run(ctx)` polls `supervisor-intent.json` + `daemon-intent.json` mtimes under that dir, fires `onChange` callback when either changes; default poll interval = 60s when pollInterval <= 0 | `internal/cli/supervise_watcher.go:107` (NewIntentWatcher), `:120` (Run) |
 
-**Acceptance criteria**: every state-machine-related symbol the v2 implementer will call appears in this table with verified file:line. Pre-existing symbols from v5 plan's catalog remain valid; this table adds the SM-wiring symbols.
+**Acceptance criteria**: every state-machine-related symbol the v2 implementer will call appears in this table with verified file:line. All file:line references in this catalog are verified against HEAD `43df327` (the v8 commit; v9 = the current iteration on the same HEAD). When implementer commits, re-grep the production code one final time against the THEN-current HEAD before relying on a specific line number.
 
 **TBD for v2**: read `supervisor_event_loop.go` end-to-end to populate exact `Post` / `Run` / event-loop lifecycle API. (Codex's deep-diagnostic noted "FIFO event loop" exists but didn't fully trace the production caller — v2 implementer must verify.)
+
+**Pseudocode `api.` qualifier convention** (clarifies v8 codex finding about same-package qualifiers): pseudocode snippets in this plan use the `api.SMState` / `api.SupervisorEvent` / `*api.SupervisorEventLog` qualifiers throughout for documentation clarity — they make the package origin obvious to a reviewer reading the plan without IDE access. When the implementer writes the actual Go file:
+
+- code that lives IN package `internal/api/...` (alongside the type definitions) drops the `api.` prefix and uses the bare type name (e.g. `SMState` instead of `api.SMState`)
+- code that lives in another package (e.g. `internal/cli/...`) keeps the `api.` qualifier
+
+The plan does NOT enforce a per-snippet annotation of which file each block lives in; the implementer is expected to apply the standard Go qualifier rule based on the file location named in the surrounding prose.
 
 ### A.2: Wire state machine into production reconcile + spawn paths (v5 design)
 
@@ -475,9 +484,19 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
         } else {
             ctrl.intentCache.Refresh(updatedSupervisor)
         }
-        daemonIntentResult := api.ReadDaemonIntent(filepath.Join(stateDir, "daemon-intent.json"))
-        updatedDaemonIntent := daemonIntentResult.File
-        if daemonIntentResult.State == "error" {
+        // v9 closure of v8 codex BLOCKER + v8 sonnet IMPORTANT (converged finding):
+        // there is no `api.ReadDaemonIntent(path)` free function. Real surfaces
+        // are (a) method `(*API).ReadDaemonIntent()` at daemon_intent.go:356
+        // with NO arguments (uses DaemonStateDir() internally), and (b) free
+        // function `ReadDaemonIntentFile(statePath string, timeout time.Duration)
+        // IntentReadResult` at daemon_intent.go:386 designed for supervisor startup
+        // where the CLI has resolved the state dir via MCPHUB_STATE_DIR_OVERRIDE.
+        // The supervisor process uses the free-function form so it can target the
+        // already-resolved state dir without re-running DaemonStateDir() lookup.
+        const intentReadTimeout = 5 * time.Second
+        daemonIntentResult := api.ReadDaemonIntentFile(filepath.Join(stateDir, "daemon-intent.json"), intentReadTimeout)
+        updatedDaemonIntent := &daemonIntentResult.File
+        if daemonIntentResult.State == api.IntentStateError {
             _ = events.Emit(api.SupervisorEvent{
                 Severity: "warn", Source: "intent-watcher", Event: "intent-reload-failed",
                 Body: map[string]any{"file": "daemon-intent.json", "error": daemonIntentResult.Err.Error()},
@@ -538,7 +557,7 @@ A.2 implementation can now proceed. Phases B + C + D + E + F + G + H are NOT blo
 - `TestStateMachineWiring_DoesNotDoubleRespawnWithLegacyDispatcher` — regression guard that the old dispatcher entry point is gone and no duplicate respawn fires
 - `TestSupervisorController_GetSMState_ReturnsTrackedState` — `GetSMState(taskName)` returns the value previously stored via `smStates.Store` (regression guard for the F.3 health-gate dependency)
 - `TestSupervisorController_GetSMState_DefaultsToIdleForUnknownTask` — unknown task returns `(StIdle, false)`; `false` distinguishes "no tracked state yet" from a literal `StIdle` value
-- `TestSerenaHealthLookup_InterfaceContract` — verifies that `cli.supervisorController` satisfies `api.serena_routing.SerenaHealthLookup` (compile-time assertion via `var _ api_serena_routing.SerenaHealthLookup = (*supervisorController)(nil)`)
+- `TestSerenaHealthLookup_InterfaceContract` — verifies that `cli.supervisorController` satisfies `api.SerenaHealthLookup` (compile-time assertion via `var _ api.SerenaHealthLookup = (*supervisorController)(nil)`; v9 closure of v8 codex finding — interface lives in `internal/api` directly to avoid the import cycle with `api/serena_routing/`)
 - `TestIntentWatcherOnChange_DeltaOnly_DoesNotEventStorm` — closes v6 sonnet IMPORTANT B.1: simulate intent reload where only 1 of 18 daemons changed; verify exactly 1 `EvIntentUpdate` posted (not 18)
 
 ### A.3: Migration — upgrade installed binary + restart supervisor + `mcphub reconcile` (v7 addition)
@@ -555,16 +574,23 @@ mcphub reconcile --apply   # apply: trigger SM transitions to align scheduler st
 Acceptance criteria for the new command:
 
 - IPC `reconcile` verb implemented as a NEW `case "reconcile":` in `supervise.go` IPC dispatcher (v8 closure of v7 sonnet BLOCKER-1 "wrong line :1080"): line `:1080` is INSIDE the body of the existing `case "restart", "reload":` block and emits `UNKNOWN_COMMAND` for those specific verbs (kept as-is). The new `reconcile` verb goes BEFORE `default:` — typically immediately after the existing per-task verbs — so it dispatches to a new `handleReconcile(conn, req, deps)` function instead of falling through to `default:`'s UNKNOWN_COMMAND at line `:1089`.
-- IPC request/result shape (v8 closure of v7 codex NEW-5 "IPC shape undefined"):
+- IPC request/result shape (v8 closure of v7 codex NEW-5 "IPC shape undefined"; v9 grounds against real types):
 
   ```go
-  // IPC request: existing IPCRequest{Command: "reconcile", Args: map[string]any{...}}
-  // shape from internal/api/supervisor_ipc.go:12. v8 defines the args:
+  // IPC request: uses existing IPCRequest envelope at internal/api/supervisor_ipc.go:12
+  // (v9 correction of v8 codex finding: real field is `Cmd string`, NOT `Command`):
+  //   IPCRequest{Cmd: "reconcile", Args: map[string]any{"apply": true}}
+  //
+  // The args + response types below are NEW v9 types added to internal/api
+  // alongside the existing IPC types (near supervisor_ipc.go). They are NOT
+  // pre-existing — implementer creates these in this phase.
+
+  // NEW v9 type — added to internal/api near supervisor_ipc.go:
   type ReconcileArgs struct {
       Apply bool `json:"apply"` // dry-run when false; trigger SM transitions when true
   }
 
-  // IPC response body shape:
+  // NEW v9 type — IPC response body shape:
   type ReconcileResponse struct {
       DryRun       bool           `json:"dry_run"`
       DriftCount   int            `json:"drift_count"`
@@ -572,12 +598,13 @@ Acceptance criteria for the new command:
       Drift        []DriftEntry   `json:"drift"`
   }
 
+  // NEW v9 type — one drift entry per task:
   type DriftEntry struct {
-      TaskName        string         `json:"task_name"`
-      SchedulerState  string         `json:"scheduler_state"`  // "running" | "stopped" | "missing"
-      IntentDesired   string         `json:"intent_desired"`   // "running" | "stopped"
-      SMState         api.SMState    `json:"sm_state"`
-      Action          string         `json:"action"`           // "post_ev_intent_update" | "no_op" | "needs_manual_review"
+      TaskName        string  `json:"task_name"`
+      SchedulerState  string  `json:"scheduler_state"`  // "running" | "stopped" | "missing"
+      IntentDesired   string  `json:"intent_desired"`   // "running" | "stopped"
+      SMState         SMState `json:"sm_state"`         // same-package qualifier: api.SMState becomes bare SMState here
+      Action          string  `json:"action"`           // "post_ev_intent_update" | "no_op" | "needs_manual_review"
   }
   ```
 
@@ -1295,7 +1322,7 @@ daemon_template:              # NEW optional block
                  // SKIPPED by Pass B; they fire on their own schedule. This
                  // matches the existing install.go behavior where Pass-B-
                  // equivalent loop skips by trigger type.
-                 if !t.IsImmediateStartTrigger() {
+                 if t.Trigger != "At logon" { // v9 closure of v8 sonnet MINOR: real check is literal string compare at install.go:1797, no IsImmediateStartTrigger() helper exists
                      continue
                  }
                  if err := sch.Run(t.Name); err != nil {
@@ -1357,7 +1384,7 @@ daemon_template:              # NEW optional block
 - Audit event `serena-dynamic-pool-migration` written with body `{source_state, target_workspaces, allocated_ports}`
 - Reconciler picks up new descriptors within `intent_watcher_poll_interval` (no IPC required)
 - v7-introduced helpers explicitly named (closes v6 sonnet IMPORTANT B.5): `snapshotManifest(path string) ([]byte, error)`, `restoreManifest(backup []byte) error`, `snapshotRegistry(reg *Registry) []WorkspaceEntry`, `restoreRegistry(reg *Registry, snapshot []WorkspaceEntry) error`, `allocateSerenaPorts(reg *Registry, workspaces []WorkspaceEntry) error`, `writeNewManifest(path string, body []byte) error` — all live in new file `internal/cli/migrate_serena.go`
-- v7-introduced new packages (closes v6 sonnet IMPORTANT B.4): `internal/api/serena_routing/` (owns `SerenaHealthLookup` interface + `WorkspaceResolver`); `internal/api/hubmcp/` (owns `ToolDescriptor` + `HandleCall` for hub-local tools) — both created as part of this phase
+- v9-corrected package layout (closes v6 sonnet IMPORTANT B.4 + v8 codex import-cycle finding): `internal/api/serena_routing/` is NEW and owns ONLY `WorkspaceResolver` (path-router for serena's no-path-args fallback). `SerenaHealthLookup` interface lives DIRECTLY in `internal/api` (NOT in `serena_routing/`) because the interface returns `api.SMState`; placing it in a sub-package would force `api → api/serena_routing → api` import cycle. The hub-local tool handler (`HandleCall` + descriptor) stays IN `internal/api` (NOT in a new `hubmcp/` sub-package) because it needs unexported `hubSession`/`namespacedTool`/`buildJSONRPCResult` access; the v7 `internal/api/hubmcp/` proposal is REJECTED.
 - `--start-after-write` flag explicitly listed on `InstallParsedManifestOpts`: `StartAfterWrite bool` (default true; migrate driver passes false)
 - `mcphub reconcile` operator command (closes v6 sonnet IMPORTANT B.6) — see Phase A.3 v7 addition
 
@@ -1608,36 +1635,49 @@ When exactly one registered serena workspace exists, the unbound-write rejection
 //            return func(c *hubMcpHandlerConfig) { c.hubLocalDeps = d }
 //        }
 //        ```
-//   4. v8 extends the existing supervisor IPC `status` response payload with
-//      a per-task `sm_state` field (closes v7 codex BLOCKER-3 "IPC status
-//      doesn't return SMState, only GUI/runtime state at supervise_status.go:69"):
+//   4. v9 extends the existing supervisor IPC `status` response with a per-task
+//      `sm_state` field, grounded on REAL surfaces (closes v7 codex BLOCKER-3
+//      + v8 codex BLOCKER-2 "supervisor.IPCClient/resp.Entries/entry.SMState
+//      don't exist"):
+//
+//      The wire payload from `supervise_status.go:12` is built as
+//      `[]map[string]any` per daemon, so adding an `sm_state` key is
+//      backward-compatible at the wire level — older clients ignore unknown
+//      keys. The PUBLIC client-side decoder lives at
+//      `internal/api/supervisor_ipc_status_client.go:110`
+//      (`supervisorIPCStatusDaemon` is unexported); the public return type is
+//      `[]api.DaemonStatus` per `internal/api/types.go:17`. v9 adds:
 //        ```go
-//        // existing supervisor IPC status payload — extended in v8:
-//        type SupervisorStatusEntry struct {
-//            // ... existing fields (TaskName, State (runtime "running"/"idle"/...),
-//            //     PID, StartedAt, RestartCount, ...) ...
-//            SMState api.SMState `json:"sm_state,omitempty"` // NEW v8: formal SM state from controller.GetSMState
+//        // internal/api/types.go — extended in v9:
+//        type DaemonStatus struct {
+//            // ... existing fields ...
+//            SMState SMState `json:"sm_state,omitempty"` // NEW v9: formal SM state
 //        }
 //        ```
-//      The supervisor IPC handler (cli side) populates `SMState` by calling
-//      `controller.GetSMState(taskName)` for each entry in the response.
-//      Backward-compat: pre-v8 clients ignore the new field; v8+ clients use it.
+//      The supervisor IPC handler (cli side, `supervise_status.go`) populates
+//      the `sm_state` map key by calling `controller.GetSMState(taskName)` for
+//      each daemon entry. The unexported decoder copies the value to the
+//      public `DaemonStatus.SMState` field. Backward-compat: pre-v9 clients
+//      ignore the new field on wire; v9+ readers see it via DaemonStatus.
 //   5. gui/hub_listener.go (the `mcphub gui` process) constructs an IPC
-//      adapter implementing SerenaHealthLookup by issuing a supervisor IPC
-//      `status` RPC and reading the `SMState` field from the matching entry:
+//      adapter implementing SerenaHealthLookup by calling the REAL
+//      `api.DialSupervisorIPCStatus(ctx)` (returns `[]api.DaemonStatus`) and
+//      reading the `SMState` field from the matching entry:
 //        ```go
 //        // internal/gui/hub_listener.go — new adapter near line 182
-//        type supervisorIPCHealthLookup struct{ client supervisor.IPCClient }
+//        type supervisorIPCHealthLookup struct{}
 //        func (l *supervisorIPCHealthLookup) GetSMState(taskName string) (api.SMState, bool) {
-//            resp, err := l.client.Status(context.Background())
+//            ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+//            defer cancel()
+//            entries, err := api.DialSupervisorIPCStatus(ctx)
 //            if err != nil { return api.StIdle, false }
-//            for _, entry := range resp.Entries {
+//            for _, entry := range entries {
 //                if entry.TaskName == taskName { return entry.SMState, entry.SMState != "" }
 //            }
 //            return api.StIdle, false
 //        }
 //        ```
-//      Then: `handler := api.NewHubMcpHandler(store, api.WithSerenaHealthLookup(&supervisorIPCHealthLookup{client: ...}))`.
+//      Then: `handler := api.NewHubMcpHandler(store, api.WithSerenaHealthLookup(&supervisorIPCHealthLookup{}))`.
 //   6. Inside `mcphub supervise` (the supervisor process itself), the
 //      controller's `GetSMState` is wired DIRECTLY to the in-process hub
 //      router instance (also constructed via `NewHubMcpHandler`, this time
@@ -1835,7 +1875,7 @@ func handleHubLocalBindWorkspaceCall(ctx context.Context, sess *hubSession, clie
     if match == nil {
         return buildJSONRPCError(clientReqID, -32602, fmt.Sprintf("workspace_path %q is not registered as a serena workspace", wsPath), nil)
     }
-    prev, rebound, err := sess.hubLocal.Sticky.Bind(sess.ID(), match, force)
+    prev, rebound, err := sess.hubLocal.Sticky.Bind(sess.ClientSessionID, match, force)
     if err != nil {
         return buildJSONRPCError(clientReqID, -32603, err.Error(), nil)
     }
@@ -1845,7 +1885,7 @@ func handleHubLocalBindWorkspaceCall(ctx context.Context, sess *hubSession, clie
     }
     _ = sess.hubLocal.Events.Emit(api.SupervisorEvent{
         Severity: "info", Source: "ipc", Event: event,
-        Body: map[string]any{"session_id_hash": hashSessionID(sess.ID()), "workspace_path": wsPath, "previously_bound": prev},
+        Body: map[string]any{"session_id_hash": hashSessionID(sess.ClientSessionID), "workspace_path": wsPath, "previously_bound": prev},
     })
     return buildJSONRPCResult(clientReqID, map[string]any{
         "workspace_path":   wsPath,
@@ -1876,7 +1916,7 @@ type hubSession struct {
 // creates. The dispatcher uses an interface seam so tests can substitute fakes.
 type HubLocalDeps struct {
     Sticky   *StickyMap
-    Registry *WorkspaceRegistry
+    Registry *Registry // v9 correction: real type is `*Registry` from workspace_registry.go:14, not `*WorkspaceRegistry`
     Events   *api.SupervisorEventLog
     Health   SerenaHealthLookup // F.3's interface; nil for non-supervisor processes
 }
@@ -1885,7 +1925,7 @@ type HubLocalDeps struct {
 Wire-up locations:
 
 - **`NewHubMcpHandler` constructor** (`internal/api/hub_mcp.go` or equivalent; wired from `internal/gui/hub_listener.go:182`): extended to accept optional functional options (`HubMcpHandlerOpt`) including `WithHubLocalDeps(*HubLocalDeps)`. The handler stores the deps and passes them to every `hubSession` it creates. For supervisor-process callers, `HubLocalDeps.Health` is the in-process `supervisorController.GetSMState`; for GUI-process callers (the `mcphub gui` command), `Health` is the IPC-adapter described in F.3.
-- **`AggregateToolsList`** (`hub_mcp_aggregator.go:238` — note: the function body STARTS at line 238 per fresh grep on HEAD `bd552ee`; the v6 reference to `:228` pointed at the docstring comment block above the function): after the daemon fan-out builds the merged tool list AND publishes the RouteMap, IF `sess.hubLocal != nil` append `hubmcp.ToolDescriptor()` to the result. The hub-local tool does NOT go into the RouteMap (no daemon to route to).
+- **`AggregateToolsList`** (`hub_mcp_aggregator.go:238` — note: the function body STARTS at line 238 per fresh grep on HEAD `bd552ee`; the v6 reference to `:228` pointed at the docstring comment block above the function): after the daemon fan-out builds the merged tool list AND publishes the RouteMap, IF `sess.hubLocal != nil` append the hub-local tool descriptor (built in-package via `hubLocalBindWorkspaceDescriptor()`, not via a subpackage — v9 closure of v8 codex finding that handler placement stays in `internal/api` to avoid exporting `hubSession`/`namespacedTool`/`buildJSONRPCResult`). The hub-local tool does NOT go into the RouteMap (no daemon to route to).
 - **`resolveToolsCallRoute`** (`hub_mcp_aggregator.go:522` — v8 closure of v7 sonnet BLOCKER-2 "branch in wrong function"): `AggregateToolsCall` at `:504` is only 9 lines (delegates to `resolveToolsCallRoute`); params parsing + RouteMap lookup actually live in `resolveToolsCallRoute`. The hub-local branch goes HERE, after params parsing (`:527-537`) and BEFORE RouteMap fetch (`:540`):
 
   ```go
@@ -1950,7 +1990,7 @@ Wire-up locations:
 - `TestFanout_ReleasesLockBeforeUpstreamCalls` — concurrent `bind` calls do not block on an in-flight fan-out's upstream RTT
 - `TestAggregateToolsList_AppendsMcphubBindWorkspaceWhenHubLocalDepsPresent` — v7 wire-up: tools/list response includes `mcphub__bind_workspace` ONLY when `sess.hubLocal != nil`
 - `TestAggregateToolsList_OmitsHubLocalToolWhenDepsAbsent` — regression guard for legacy/test sessions without HubLocalDeps
-- `TestAggregateToolsCall_RoutesHubLocalToolBypassingRouteMap` — v7 dispatch: `params.name == "mcphub__bind_workspace"` returns from HandleCall WITHOUT calling resolveToolsCallRoute (no `-32601 Method not found` race against empty RouteMap)
+- `TestAggregateToolsCall_RoutesHubLocalToolBypassingRouteMap` — v9 dispatch: `params.name == "mcphub__bind_workspace"` enters `resolveToolsCallRoute` past the name-parse + missing-name check, then the hub-local branch returns BEFORE the RouteMap fetch at `:540` (no `-32601 Method not found` race against empty RouteMap)
 - `TestAggregateToolsCall_FallsThroughToRouteMapForDaemonTools` — regression guard that daemon-routed tools still go through the existing path
 - `TestHubLocalDeps_WiredFromGuiHubListener` — `NewHubMcpHandler(store, WithHubLocalDeps(deps))` actually propagates `deps` to every constructed session
 
