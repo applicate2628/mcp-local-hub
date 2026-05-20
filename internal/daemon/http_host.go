@@ -183,14 +183,17 @@ func (h *HTTPHost) Start(ctx context.Context) error {
 	// reintroduce console flashes on Windows GUI runs. The
 	// Start-then-Assign race window is microscopic in practice
 	// (uvx → python child fork takes >1ms even on warm cache; Assign
-	// lands within nanoseconds of Start return) and the failure mode
-	// (one grandchild escapes the Job during the race) is bounded —
-	// operators see at most one orphan per supervisor restart, and
-	// the daemon-exited audit emit added in this same PR gives them
-	// the diagnostic data to recognize and react. A proper fix would
-	// extend StartWithJob_windows.go to wire STARTUPINFO.hStdOutput
-	// / hStdError + STARTF_USESTDHANDLES + HideWindow handling — out
-	// of scope for this PR.
+	// lands within nanoseconds of Start return) and the failure-mode
+	// scope is bounded to descendants spawned BEFORE Assign lands for
+	// this specific upstream process. Multiple parallel native-http
+	// daemons each retain that same bounded window independently, and
+	// an outright Assign failure removes Job protection entirely for
+	// this child until next supervisor restart (logged via
+	// daemonDiagWriter below). The daemon-exited audit emit added in
+	// this same PR gives operators diagnostic data to recognize when
+	// this happens. A proper fix would extend StartWithJob_windows.go
+	// to wire STARTUPINFO.hStdOutput / hStdError + STARTF_USESTDHANDLES
+	// + HideWindow handling — out of scope for this PR.
 	if job, jobErr := process.NewKillOnCloseJob(); jobErr == nil {
 		if err := job.Assign(cmd); err != nil {
 			_ = job.Close()

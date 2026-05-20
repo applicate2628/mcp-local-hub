@@ -1537,7 +1537,31 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 		tracker.MarkSpawned(d.TaskName, pid, startedAt)
 		taskName := d.TaskName
 		spawnedPID := pid
+		// Emit daemon-spawned BEFORE starting the wait goroutine. A
+		// fast-failing wrapper (e.g. uvx fetch error) can exit within
+		// microseconds of cmd.Start returning; if we started the wait
+		// goroutine first, it could emit daemon-exited BEFORE this
+		// daemon-spawned line landed in the audit log — inverting the
+		// timeline operators rely on to diagnose the exact class of
+		// failure this PR exists to surface. The spawnLogged channel
+		// then gates the goroutine so daemon-exited never precedes
+		// daemon-spawned in the log even if Emit itself is slow.
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "info",
+			Source:   "lifecycle",
+			Event:    "daemon-spawned",
+			TaskName: d.TaskName,
+			Body: map[string]any{
+				"pid":       pid,
+				"command":   d.Command,
+				"workspace": d.Workspace,
+				"port":      d.Port,
+			},
+		})
+		spawnLogged := make(chan struct{})
+		close(spawnLogged) // Emit above completed before this point; goroutine starts unblocked.
 		go func() {
+			<-spawnLogged
 			waitErr := cmd.Wait()
 			// Diagnostic emit: without this, a wrapper that exits
 			// immediately (e.g. uvx fails to fetch package, port
@@ -1572,18 +1596,6 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 			tracker.MarkExited(taskName)
 			_ = persistDaemonRuntimeTracker(events, tracker, statePath, taskName)
 		}()
-		_ = events.Emit(api.SupervisorEvent{
-			Severity: "info",
-			Source:   "lifecycle",
-			Event:    "daemon-spawned",
-			TaskName: d.TaskName,
-			Body: map[string]any{
-				"pid":       pid,
-				"command":   d.Command,
-				"workspace": d.Workspace,
-				"port":      d.Port,
-			},
-		})
 		if err := persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName); err != nil {
 			return err
 		}
