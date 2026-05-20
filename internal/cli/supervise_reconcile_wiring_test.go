@@ -842,6 +842,70 @@ func TestProductionSpawnFn_SuccessEmitsAuditEvent(t *testing.T) {
 	}
 }
 
+// TestProductionSpawnFn_EmitsDaemonExitedOnChildExit verifies the
+// production spawn fn emits a daemon-exited event when the child
+// process terminates. The emit happens asynchronously inside the
+// cmd.Wait() goroutine, so the test polls the events log up to a
+// generous timeout.
+//
+// Regression guard: without this emit, fast-exiting wrappers (e.g.,
+// uvx fails to fetch a package, port already bound, env vars
+// missing) leave no trace — supervisor-state.json shows
+// state="idle" with bumped pid_generation and the operator has zero
+// data on why. This is the diagnostic gap that left serena-claude
+// / serena-codex in a 35-cycle silent crash loop on the operator's
+// machine until the daemon-exited emit was wired in.
+func TestProductionSpawnFn_EmitsDaemonExitedOnChildExit(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	spawnFn := makeProductionSpawnFn(nil, events, NewDaemonRuntimeTracker())
+
+	command, args := portableNoopCommand()
+	descriptor := api.SupervisorDaemon{
+		TaskName: reconcileWiringTestTaskName,
+		Server:   "memory",
+		Daemon:   "default",
+		Command:  command,
+		Args:     args,
+	}
+
+	if err := spawnFn(descriptor); err != nil {
+		t.Fatalf("spawn fn failed on noop command: %v", err)
+	}
+
+	// portableNoopCommand returns within ~10-50 ms on warm machines,
+	// but Windows CI stagger plus event-log flush latency can push
+	// the visible-event window to a few hundred ms. Generous 10 s
+	// timeout keeps the test reliable without slowing CI when the
+	// event lands quickly.
+	deadline := time.Now().Add(10 * time.Second)
+	var logStr string
+	for time.Now().Before(deadline) {
+		logRaw, _ := os.ReadFile(eventsPath)
+		logStr = string(logRaw)
+		if strings.Contains(logStr, `"event":"daemon-exited"`) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(logStr, `"event":"daemon-exited"`) {
+		t.Fatalf("daemon-exited event never appeared within 10s:\n%s", logStr)
+	}
+	if !strings.Contains(logStr, `"task_name":"\\mcp-local-hub-memory-default"`) {
+		t.Fatalf("daemon-exited event missing task_name:\n%s", logStr)
+	}
+	if !strings.Contains(logStr, `"exit_code":0`) {
+		t.Fatalf("daemon-exited event missing exit_code=0:\n%s", logStr)
+	}
+}
+
 func TestProductionSpawnFn_UpdatesTracker(t *testing.T) {
 	tmpHome := apitest.HardenedTempDir(t)
 
