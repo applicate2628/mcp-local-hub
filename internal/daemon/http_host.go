@@ -160,11 +160,6 @@ func (h *HTTPHost) Start(ctx context.Context) error {
 	cmd.Stderr = stderrWriter
 	h.logCloser = logCloser
 
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start upstream subprocess: %w", err)
-	}
-	h.cmd = cmd
-	h.started = true
 	// Place the freshly-spawned upstream into a Windows Job Object with
 	// KILL_ON_JOB_CLOSE so that if our daemon process is force-killed
 	// (taskkill /F mcphub.exe) the kernel reaps the upstream tree
@@ -172,15 +167,36 @@ func (h *HTTPHost) Start(ctx context.Context) error {
 	// POSIX implementation is a no-op pending PR_SET_PDEATHSIG / kqueue
 	// follow-up. Failures are logged but not fatal — orphan protection
 	// is defense-in-depth, not a startup precondition.
-	if job, jobErr := process.NewKillOnCloseJob(); jobErr == nil {
-		if err := job.Assign(cmd); err != nil {
-			_ = job.Close()
-			fmt.Fprintf(daemonDiagWriter(), "warn: assign upstream to Job Object: %v (orphan protection disabled for this child)\n", err)
-		} else {
-			h.job = job
-		}
-	} else {
+	//
+	// Use StartWithJob (PROC_THREAD_ATTRIBUTE_JOB_LIST) so the process
+	// is enrolled in the Job AT CREATE TIME — closes the Start-then-
+	// Assign race window during which a fast-spawning grandchild
+	// (uvx → python in <1ms on warm cache) could escape the Job and
+	// outlive the wrapper as an orphan holding the upstream port.
+	job, jobErr := process.NewKillOnCloseJob()
+	if jobErr != nil {
 		fmt.Fprintf(daemonDiagWriter(), "warn: create Job Object: %v (orphan protection disabled)\n", jobErr)
+		job = nil
+	}
+	var startErr error
+	if job != nil {
+		if _, err := process.StartWithJob(job, cmd); err != nil {
+			_ = job.Close()
+			job = nil
+			startErr = err
+			fmt.Fprintf(daemonDiagWriter(), "warn: StartWithJob failed: %v (falling back to plain Start; orphan protection disabled)\n", err)
+		}
+	}
+	if job == nil {
+		startErr = cmd.Start()
+	}
+	if startErr != nil {
+		return fmt.Errorf("start upstream subprocess: %w", startErr)
+	}
+	h.cmd = cmd
+	h.started = true
+	if job != nil {
+		h.job = job
 	}
 
 	// Watcher goroutine owns Wait() so Stop() never double-waits.

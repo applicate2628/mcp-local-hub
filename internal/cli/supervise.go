@@ -1536,8 +1536,39 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 		startedAt := time.Now().UTC()
 		tracker.MarkSpawned(d.TaskName, pid, startedAt)
 		taskName := d.TaskName
+		spawnedPID := pid
 		go func() {
-			_ = cmd.Wait()
+			waitErr := cmd.Wait()
+			// Diagnostic emit: without this, a wrapper that exits
+			// immediately (e.g. uvx fails to fetch package, port
+			// already bound, env vars missing) leaves no trace —
+			// supervisor-state.json shows state="idle" with bumped
+			// pid_generation and the operator has zero data on why.
+			// Emitting daemon-exited with pid + exit_code + wait_err
+			// closes that diagnostic gap.
+			exitCode := 0
+			var ee *exec.ExitError
+			if errors.As(waitErr, &ee) {
+				exitCode = ee.ExitCode()
+			}
+			severity := "info"
+			if waitErr != nil || exitCode != 0 {
+				severity = "warn"
+			}
+			body := map[string]any{
+				"pid":       spawnedPID,
+				"exit_code": exitCode,
+			}
+			if waitErr != nil {
+				body["wait_err"] = waitErr.Error()
+			}
+			_ = events.Emit(api.SupervisorEvent{
+				Severity: severity,
+				Source:   "lifecycle",
+				Event:    "daemon-exited",
+				TaskName: taskName,
+				Body:     body,
+			})
 			tracker.MarkExited(taskName)
 			_ = persistDaemonRuntimeTracker(events, tracker, statePath, taskName)
 		}()
