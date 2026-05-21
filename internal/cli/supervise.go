@@ -1203,6 +1203,15 @@ func dispatchIPCRequest(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps)
 		return handleExit(conn, req, deps)
 	case "respawn":
 		return handleRespawn(conn, req, deps)
+	case "reconcile":
+		// Phase A.3 (plan v10 §A.3, 2026-05-20): operator-triggered
+		// in-place drift cleanup. Reads supervisor-intent.json + the
+		// scheduler-registered task list + daemon-intent.json, computes
+		// a drift report, and (with args.apply=true) posts
+		// EvIntentUpdate per drift entry so the SM drives Run/Stop/Delete
+		// transitions WITHOUT a supervisor cold-restart. See
+		// supervise_reconcile_ipc.go for the handler body.
+		return handleReconcile(conn, req, deps)
 	case "restart", "reload":
 		// Legacy alias surface preserved for v0.4.x clients. Task 4.1
 		// adds the canonical `respawn` verb above; restart/reload still

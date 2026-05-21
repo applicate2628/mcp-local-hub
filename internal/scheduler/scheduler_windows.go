@@ -4,6 +4,7 @@ package scheduler
 
 import (
 	"bytes"
+	"context"
 	"encoding/xml"
 	"fmt"
 	"os"
@@ -339,10 +340,20 @@ func (w *windowsScheduler) Status(name string) (TaskStatus, error) {
 }
 
 func (w *windowsScheduler) List(prefix string) ([]TaskStatus, error) {
-	cmd := exec.Command(w.schtasksPath, "/Query", "/V", "/FO", "LIST")
+	return w.ListContext(context.Background(), prefix)
+}
+
+func (w *windowsScheduler) ListContext(ctx context.Context, prefix string) ([]TaskStatus, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cmd := exec.CommandContext(ctx, w.schtasksPath, "/Query", "/V", "/FO", "LIST")
 	process.NoConsole(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("schtasks /Query: %w", ctx.Err())
+		}
 		return nil, fmt.Errorf("schtasks /Query: %w: %s", err, string(out))
 	}
 	// Split into records separated by blank lines; each record has "TaskName:" line.

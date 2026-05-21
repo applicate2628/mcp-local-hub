@@ -44,6 +44,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newRegisterCmd())
 	root.AddCommand(newUnregisterCmd())
 	root.AddCommand(newWorkspacesCmd())
+	root.AddCommand(newWorkspaceCmd())
 	root.AddCommand(newLanguageServerCmd())
 	root.AddCommand(newMigrateLegacyCmd())
 	root.AddCommand(newImportCmd())
@@ -52,6 +53,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newTrayCmd())
 	root.AddCommand(newWatchdogCmd())
 	root.AddCommand(newSuperviseCmd())
+	root.AddCommand(newReconcileCmd())
 	root.AddCommand(newAutostartCmd())
 	root.AddCommand(newStrictModeCmd())
 	root.AddCommand(newHubMcpCmd())
@@ -107,3 +109,4 @@ func newWeeklyRefreshCmd() *cobra.Command { return newWeeklyRefreshCmdReal() }
 func newGuiCmd() *cobra.Command           { return newGuiCmdReal() }
 func newTrayCmd() *cobra.Command          { return newTrayCmdReal() }
 func newWatchdogCmd() *cobra.Command      { return newWatchdogCmdReal() }
+func newReconcileCmd() *cobra.Command     { return newReconcileCmdReal() }
