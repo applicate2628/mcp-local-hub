@@ -17,6 +17,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/scheduler"
@@ -37,26 +39,45 @@ import (
 // seam pattern at supervise.go:57 / :1253.
 var reconcileSchedulerListFn = reconcileSchedulerListFnDefault
 
+var reconcileHandlerTimeout = 25 * time.Second
+
 // reconcileSchedulerListFnDefault wraps scheduler.New() + sch.List("mcp-local-hub-").
 // Returns the slice + any underlying error verbatim. Kept as a free
 // function (not a method on a wrapper struct) so the test seam swap
 // is one variable assignment.
-func reconcileSchedulerListFnDefault() ([]scheduler.TaskStatus, error) {
+func reconcileSchedulerListFnDefault(ctx context.Context) ([]scheduler.TaskStatus, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	sch, err := scheduler.New()
 	if err != nil {
 		return nil, fmt.Errorf("scheduler.New: %w", err)
 	}
-	tasks, err := sch.List("mcp-local-hub-")
-	if err != nil {
-		return nil, fmt.Errorf("scheduler.List: %w", err)
+
+	type listResult struct {
+		tasks []scheduler.TaskStatus
+		err   error
 	}
-	return tasks, nil
+	done := make(chan listResult, 1)
+	go func() {
+		tasks, err := sch.List("mcp-local-hub-")
+		done <- listResult{tasks: tasks, err: err}
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("scheduler.List: %w", ctx.Err())
+	case res := <-done:
+		if res.err != nil {
+			return nil, fmt.Errorf("scheduler.List: %w", res.err)
+		}
+		return res.tasks, nil
+	}
 }
 
 // setReconcileSchedulerListFnForTest installs a test scheduler-list
 // closure. Returns an uninstall function tests defer to restore the
 // production wiring. Production code paths never invoke this.
-func setReconcileSchedulerListFnForTest(fn func() ([]scheduler.TaskStatus, error)) func() {
+func setReconcileSchedulerListFnForTest(fn func(context.Context) ([]scheduler.TaskStatus, error)) func() {
 	prev := reconcileSchedulerListFn
 	reconcileSchedulerListFn = fn
 	return func() { reconcileSchedulerListFn = prev }
@@ -88,13 +109,18 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 			Final: true,
 		})
 	}
+	ctx, cancel := context.WithTimeout(baseReconcileContext(deps), reconcileHandlerTimeout)
+	defer cancel()
 
 	// (1) Read supervisor-intent.json. Missing file is not a hard
 	// error — it just means the supervisor has no intent → no drift
 	// can be computed against intent. We still call out to scheduler
 	// to surface orphan tasks (scheduler has rows, intent is empty).
 	intentPath := filepath.Join(deps.stateDir, "supervisor-intent.json")
-	intent, err := api.ReadSupervisorIntent(intentPath)
+	intent, err := readSupervisorIntentForReconcile(ctx, intentPath)
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return writeReconcileTimeoutFrame(conn, req, err)
+	}
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return writeIPCFrame(conn, api.IPCResponse{
 			ID: req.ID,
@@ -111,6 +137,7 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 		// loop below still runs.
 		intent = &api.SupervisorIntentFile{}
 	}
+	updatedIntent := intent
 
 	// (2) Read daemon-intent.json. Missing OR corrupt → "no overrides"
 	// (the same fallback the startup reconciler uses; see
@@ -119,14 +146,28 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 	// corrupt intent file is a separate alarm surfaced through the
 	// usual quarantine path.
 	daemonIntentPath := filepath.Join(deps.stateDir, "daemon-intent.json")
-	daemonIntentRes := api.ReadDaemonIntentFile(daemonIntentPath, daemonIntentReadLockTimeout)
+	daemonIntentRes := api.ReadDaemonIntentFile(daemonIntentPath, daemonIntentReadTimeoutForReconcile(ctx))
+	if errors.Is(daemonIntentRes.Err, context.DeadlineExceeded) ||
+		errors.Is(daemonIntentRes.Err, context.Canceled) ||
+		errors.Is(ctx.Err(), context.DeadlineExceeded) ||
+		errors.Is(ctx.Err(), context.Canceled) {
+		err := daemonIntentRes.Err
+		if err == nil {
+			err = ctx.Err()
+		}
+		return writeReconcileTimeoutFrame(conn, req, err)
+	}
 	var daemonIntentTasks map[string]api.DaemonIntent
 	if daemonIntentRes.State == api.IntentStateValid {
 		daemonIntentTasks = daemonIntentRes.File.Tasks
 	}
+	updatedDaemonIntent := &daemonIntentRes.File
 
 	// (3) Scheduler snapshot.
-	schedTasks, schedErr := reconcileSchedulerListFn()
+	schedTasks, schedErr := reconcileSchedulerListFn(ctx)
+	if errors.Is(schedErr, context.DeadlineExceeded) || errors.Is(schedErr, context.Canceled) {
+		return writeReconcileTimeoutFrame(conn, req, schedErr)
+	}
 	if schedErr != nil {
 		return writeIPCFrame(conn, api.IPCResponse{
 			ID: req.ID,
@@ -186,7 +227,7 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 	// needs_manual_review) never trigger SM events.
 	appliedCount := 0
 	if args.Apply {
-		appliedCount = applyReconcileDrift(deps, drift)
+		appliedCount = applyReconcileDrift(deps, drift, updatedIntent, updatedDaemonIntent)
 	}
 
 	// (8) Audit emit. Failures are non-fatal (the response is still
@@ -225,6 +266,68 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 		OK:     true,
 		Result: json.RawMessage(body),
 		Final:  true,
+	})
+}
+
+func baseReconcileContext(deps ipcDispatchDeps) context.Context {
+	if deps.controllerProvider != nil {
+		if ctrl := deps.controllerProvider(); ctrl != nil && ctrl.ctx != nil {
+			return ctrl.ctx
+		}
+	}
+	return context.Background()
+}
+
+func readSupervisorIntentForReconcile(ctx context.Context, path string) (*api.SupervisorIntentFile, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	type readResult struct {
+		intent *api.SupervisorIntentFile
+		err    error
+	}
+	done := make(chan readResult, 1)
+	go func() {
+		intent, err := api.ReadSupervisorIntent(path)
+		done <- readResult{intent: intent, err: err}
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case res := <-done:
+		return res.intent, res.err
+	}
+}
+
+func daemonIntentReadTimeoutForReconcile(ctx context.Context) time.Duration {
+	timeout := daemonIntentReadLockTimeout
+	if ctx == nil {
+		return timeout
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return 0
+		}
+		if remaining < timeout {
+			timeout = remaining
+		}
+	}
+	return timeout
+}
+
+func writeReconcileTimeoutFrame(conn net.Conn, req api.IPCRequest, err error) error {
+	if err == nil {
+		err = context.DeadlineExceeded
+	}
+	return writeIPCFrame(conn, api.IPCResponse{
+		ID: req.ID,
+		Error: &api.IPCErr{
+			Code:      "RECONCILE_TIMEOUT",
+			Message:   err.Error(),
+			Retryable: true,
+		},
+		Final: true,
 	})
 }
 
@@ -385,12 +488,22 @@ func lookupControllerSMState(deps ipcDispatchDeps, taskName string) api.SMState 
 // that don't wire one) the function silently skips dispatch; the
 // drift entries are still reported in the response, but appliedCount
 // will be 0 because there's no event loop to post onto.
-func applyReconcileDrift(deps ipcDispatchDeps, drift []api.DriftEntry) int {
+func applyReconcileDrift(
+	deps ipcDispatchDeps,
+	drift []api.DriftEntry,
+	updatedIntent *api.SupervisorIntentFile,
+	updatedDaemonIntent *api.DaemonIntentFile,
+) int {
 	if deps.controllerProvider == nil {
 		return 0
 	}
 	ctrl := deps.controllerProvider()
-	if ctrl == nil || ctrl.eventLoop == nil {
+	if ctrl == nil {
+		return 0
+	}
+	ctrl.intentCache.Refresh(updatedIntent)
+	ctrl.daemonIntent.Refresh(updatedDaemonIntent)
+	if ctrl.eventLoop == nil {
 		return 0
 	}
 	applied := 0

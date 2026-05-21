@@ -131,7 +131,7 @@ func decodeReconcileResponse(t *testing.T, conn *fakeIPCConn) (api.IPCResponse, 
 // that returns the given slice. Returns the cleanup closure tests defer.
 func installSchedulerListFake(t *testing.T, tasks []scheduler.TaskStatus) {
 	t.Helper()
-	uninstall := setReconcileSchedulerListFnForTest(func() ([]scheduler.TaskStatus, error) {
+	uninstall := setReconcileSchedulerListFnForTest(func(context.Context) ([]scheduler.TaskStatus, error) {
 		return tasks, nil
 	})
 	t.Cleanup(uninstall)
@@ -245,6 +245,140 @@ func TestReconcileIPC_ApplyPostsEvIntentUpdate(t *testing.T) {
 	}
 	if observed[0].TaskName != tasks[0] {
 		t.Errorf("posted event task_name = %q, want %q", observed[0].TaskName, tasks[0])
+	}
+}
+
+// TestReconcileIPC_ApplyRefreshesCacheBeforePosting verifies that apply mode
+// refreshes the controller's cached supervisor intent and daemon intent from
+// the same files used for drift classification before EvIntentUpdate is
+// visible to the event loop.
+func TestReconcileIPC_ApplyRefreshesCacheBeforePosting(t *testing.T) {
+	taskName := `\mcp-local-hub-foo-default`
+	fx := newReconcileTestFixture(t, &api.SupervisorIntentFile{Version: 1})
+
+	freshIntent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{
+			{TaskName: taskName, Server: "foo", Daemon: "default"},
+		},
+	}
+	if err := api.WriteSupervisorIntent(filepath.Join(fx.deps.stateDir, "supervisor-intent.json"), freshIntent); err != nil {
+		t.Fatalf("overwrite supervisor-intent.json with fresh intent: %v", err)
+	}
+	now := time.Now().UTC()
+	freshDaemonIntent := api.DaemonIntentFile{
+		Tasks: map[string]api.DaemonIntent{
+			taskName: {
+				Desired:   api.IntentDesiredStopped,
+				Reason:    api.IntentReasonUserStop,
+				UpdatedAt: now,
+			},
+		},
+	}
+	diRaw, err := json.Marshal(freshDaemonIntent)
+	if err != nil {
+		t.Fatalf("marshal daemon-intent: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(fx.deps.stateDir, "daemon-intent.json"), diRaw, 0o600); err != nil {
+		t.Fatalf("seed daemon-intent.json: %v", err)
+	}
+	installSchedulerListFake(t, []scheduler.TaskStatus{
+		{Name: taskName, State: "Running"},
+	})
+
+	type cacheObservation struct {
+		hasIntent bool
+		desired   string
+	}
+	observedCache := make(chan cacheObservation, 1)
+	fx.loop.RegisterHandler(func(ev api.LoopEvent) {
+		if ev.Kind != api.EvIntentUpdate || ev.TaskName != taskName {
+			return
+		}
+		_, hasIntent := fx.ctrl.intentCache.Lookup(taskName)
+		daemonIntent := fx.ctrl.daemonIntent.Lookup(taskName)
+		observedCache <- cacheObservation{
+			hasIntent: hasIntent,
+			desired:   daemonIntent.Desired,
+		}
+	})
+
+	req := api.IPCRequest{
+		ID:   22,
+		Cmd:  "reconcile",
+		Args: map[string]any{"apply": true},
+	}
+	conn := newFakeIPCConn()
+	if err := handleReconcile(conn, req, fx.deps); err != nil {
+		t.Fatalf("handleReconcile: %v", err)
+	}
+	_, body := decodeReconcileResponse(t, conn)
+	if body.AppliedCount != 1 {
+		t.Fatalf("AppliedCount = %d, want 1; drift=%+v", body.AppliedCount, body.Drift)
+	}
+
+	select {
+	case got := <-observedCache:
+		if !got.hasIntent {
+			t.Fatalf("controller intent cache was stale when EvIntentUpdate was handled")
+		}
+		if got.desired != api.IntentDesiredStopped {
+			t.Fatalf("controller daemon-intent cache desired=%q, want %q before EvIntentUpdate handling",
+				got.desired, api.IntentDesiredStopped)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for EvIntentUpdate cache observation")
+	}
+}
+
+// TestReconcileIPC_HandlerTimeout verifies that handleReconcile creates the
+// handler-side 25-second deadline and propagates it to long-running scheduler
+// work through the reconcile scheduler seam.
+func TestReconcileIPC_HandlerTimeout(t *testing.T) {
+	if reconcileHandlerTimeout != 25*time.Second {
+		t.Fatalf("reconcileHandlerTimeout = %s, want 25s", reconcileHandlerTimeout)
+	}
+	taskName := `\mcp-local-hub-foo-default`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{
+			{TaskName: taskName, Server: "foo", Daemon: "default"},
+		},
+	}
+	fx := newReconcileTestFixture(t, intent)
+
+	deadlineDelta := make(chan time.Duration, 1)
+	uninstall := setReconcileSchedulerListFnForTest(func(ctx context.Context) ([]scheduler.TaskStatus, error) {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("scheduler list context had no deadline")
+		}
+		deadlineDelta <- time.Until(deadline)
+		return []scheduler.TaskStatus{{Name: taskName, State: "Ready"}}, nil
+	})
+	defer uninstall()
+
+	req := api.IPCRequest{
+		ID:   23,
+		Cmd:  "reconcile",
+		Args: map[string]any{"apply": false},
+	}
+	conn := newFakeIPCConn()
+	if err := handleReconcile(conn, req, fx.deps); err != nil {
+		t.Fatalf("handleReconcile: %v", err)
+	}
+	_, body := decodeReconcileResponse(t, conn)
+	if body.DriftCount != 1 {
+		t.Fatalf("DriftCount = %d, want 1; drift=%+v", body.DriftCount, body.Drift)
+	}
+
+	select {
+	case got := <-deadlineDelta:
+		if got <= 24*time.Second || got > 25*time.Second {
+			t.Fatalf("scheduler context deadline delta = %s, want within (24s, 25s]", got)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("scheduler fake did not observe reconcile context")
 	}
 }
 
@@ -441,7 +575,7 @@ func TestReconcileIPC_TimeoutErrors(t *testing.T) {
 	// the failure (this is the production-equivalent of a hung
 	// scheduler). The handler must return a structured IPC error code
 	// rather than blocking indefinitely.
-	uninstall := setReconcileSchedulerListFnForTest(func() ([]scheduler.TaskStatus, error) {
+	uninstall := setReconcileSchedulerListFnForTest(func(context.Context) ([]scheduler.TaskStatus, error) {
 		return nil, errors.New("scheduler list timed out")
 	})
 	defer uninstall()

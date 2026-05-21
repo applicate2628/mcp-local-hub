@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -353,6 +354,55 @@ func TestWorkspaceUnregister_RemovesEntryButLeavesDisk(t *testing.T) {
 	}
 }
 
+func TestWorkspaceUnregister_BackendByLanguageNameRemovesMatchingRows(t *testing.T) {
+	withSerenaManifest(t, 9121, 9123)
+	withStateDir(t)
+	tmp := t.TempDir()
+	ws := makeWorkspaceDir(t, tmp, []string{"go", "typescript"})
+	wsKey := api.WorkspaceKey(ws)
+
+	if _, err := runWorkspaceCmd(t, "register", ws); err != nil {
+		t.Fatalf("register serena: %v", err)
+	}
+	regPath, _ := api.DefaultRegistryPath()
+	reg := api.NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	for i, lang := range []string{"go", "typescript"} {
+		if err := reg.PutLSP(api.WorkspaceEntry{
+			WorkspaceKey:  wsKey,
+			WorkspacePath: ws,
+			Language:      lang,
+			Backend:       "mcp-language-server",
+			Port:          9200 + i,
+			TaskName:      "mcp-local-hub-lsp-" + wsKey + "-" + lang,
+		}); err != nil {
+			t.Fatalf("PutLSP %q: %v", lang, err)
+		}
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	if _, err := runWorkspaceCmd(t, "unregister", ws, "--backend", "go"); err != nil {
+		t.Fatalf("unregister --backend go: %v", err)
+	}
+	reg = api.NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if _, ok := reg.Get(wsKey, "go"); ok {
+		t.Error("go LSP row should be removed by --backend go")
+	}
+	if _, ok := reg.Get(wsKey, "typescript"); !ok {
+		t.Error("typescript LSP row should survive --backend go")
+	}
+	if _, ok := reg.GetSerena(wsKey); !ok {
+		t.Error("serena row should survive --backend go")
+	}
+}
+
 // ------------------------------------------------------------------
 // B.2: list
 // ------------------------------------------------------------------
@@ -523,6 +573,46 @@ func TestWorkspaceList_JSONOutput(t *testing.T) {
 	}
 }
 
+func TestWorkspaceList_LockedDuringRead(t *testing.T) {
+	seedSerenaListFixture(t)
+	regPath, _ := api.DefaultRegistryPath()
+	reg := api.NewRegistry(regPath)
+	unlock, err := reg.Lock()
+	if err != nil {
+		t.Fatalf("lock registry: %v", err)
+	}
+
+	type listResult struct {
+		out string
+		err error
+	}
+	done := make(chan listResult, 1)
+	go func() {
+		out, err := runWorkspaceCmd(t, "list")
+		done <- listResult{out: out, err: err}
+	}()
+
+	select {
+	case result := <-done:
+		unlock()
+		t.Fatalf("workspace list returned while registry lock was held: err=%v output=%s", result.err, result.out)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	unlock()
+	select {
+	case result := <-done:
+		if result.err != nil {
+			t.Fatalf("workspace list after unlock: %v\noutput: %s", result.err, result.out)
+		}
+		if !strings.Contains(result.out, "WORKSPACE") {
+			t.Fatalf("workspace list output missing table header after unlock:\n%s", result.out)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("workspace list did not finish after registry lock was released")
+	}
+}
+
 // ------------------------------------------------------------------
 // B.2: set-default
 // ------------------------------------------------------------------
@@ -653,6 +743,56 @@ func TestWorkspaceBootstrap_SkipsGitignored(t *testing.T) {
 	got := readBootstrappedLanguages(t, tmp)
 	if containsString(got, "rust") {
 		t.Errorf("rust should have been gitignored; got %v", got)
+	}
+	if !containsString(got, "go") {
+		t.Errorf("go should still be detected; got %v", got)
+	}
+}
+
+func TestWorkspaceBootstrap_GitignoreTrailingSlash(t *testing.T) {
+	tmp := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmp, ".gitignore"),
+		[]byte("generated/\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	touch(t, filepath.Join(tmp, "main.go"))
+	touch(t, filepath.Join(tmp, "generated", "deep.rs"))
+
+	if _, err := runWorkspaceCmd(t, "bootstrap", tmp); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	got := readBootstrappedLanguages(t, tmp)
+	if containsString(got, "rust") {
+		t.Errorf("rust under generated/ should have been gitignored; got %v", got)
+	}
+	if !containsString(got, "go") {
+		t.Errorf("go should still be detected; got %v", got)
+	}
+}
+
+func TestWorkspaceBootstrap_NestedGitignoreScopeLocal(t *testing.T) {
+	tmp := t.TempDir()
+	aDir := filepath.Join(tmp, "a")
+	if err := os.MkdirAll(aDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(aDir, ".gitignore"),
+		[]byte("generated\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	touch(t, filepath.Join(tmp, "a", "main.go"))
+	touch(t, filepath.Join(tmp, "a", "generated", "deep.rs"))
+	touch(t, filepath.Join(tmp, "b", "generated", "sibling.py"))
+
+	if _, err := runWorkspaceCmd(t, "bootstrap", tmp); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	got := readBootstrappedLanguages(t, tmp)
+	if containsString(got, "rust") {
+		t.Errorf("rust under a/generated should have been gitignored; got %v", got)
+	}
+	if !containsString(got, "python") {
+		t.Errorf("python under sibling b/generated should still be detected; got %v", got)
 	}
 	if !containsString(got, "go") {
 		t.Errorf("go should still be detected; got %v", got)

@@ -358,7 +358,7 @@ func (r *Registry) AllocateSerenaPort(pool config.PortPool) (int, error) {
 //   - backendFilter == ""           → remove every LSP row (Language != SerenaLanguageSentinel); leaves serena row in place. This is the v5 default.
 //   - backendFilter == "all"        → remove every row for workspaceKey (legacy pre-v5 semantic).
 //   - backendFilter == "serena"     → remove only the serena (sentinel) row.
-//   - any other value (e.g. "mcp-language-server" / "gopls-mcp") → remove only rows whose Backend field equals backendFilter AND whose Language is NOT the sentinel.
+//   - any other value (e.g. "mcp-language-server" / "go" / "gopls-mcp") → remove only LSP rows whose Backend or Language field equals backendFilter.
 //
 // Returns the count of rows actually removed.
 func (r *Registry) RemoveByBackend(workspaceKey string, backendFilter string) int {
@@ -378,7 +378,8 @@ func (r *Registry) RemoveByBackend(workspaceKey string, backendFilter string) in
 		case "serena":
 			drop = e.Language == SerenaLanguageSentinel
 		default:
-			drop = e.Backend == backendFilter && e.Language != SerenaLanguageSentinel
+			drop = e.Language != SerenaLanguageSentinel &&
+				(e.Backend == backendFilter || e.Language == backendFilter)
 		}
 		if drop {
 			removed++

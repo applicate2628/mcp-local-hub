@@ -277,9 +277,9 @@ func newWorkspaceUnregisterCmd() *cobra.Command {
                   serena daemon registered.
   --backend serena   remove only the serena (sentinel) row; LSP rows stay.
   --backend all      remove every row for <path>.
-  --backend NAME     remove only rows whose Backend field equals NAME
-                     (e.g. "mcp-language-server" / "gopls-mcp"). Sentinel
-                     rows are NOT included.
+  --backend NAME     remove only LSP rows whose Backend or Language field
+                     equals NAME (e.g. "mcp-language-server" / "go" /
+                     "gopls-mcp"). Sentinel rows are NOT included.
 
 The .serena/ directory on disk is never touched — disk state survives
 unregister so re-registering later replays the same languages snapshot.
@@ -295,7 +295,7 @@ Examples:
 		},
 	}
 	c.Flags().StringVar(&backend, "backend", "",
-		"backend filter: empty (LSP-only), serena, all, or a backend name")
+		"backend filter: empty (LSP-only), serena, all, backend name, or LSP language name")
 	return c
 }
 
@@ -381,6 +381,11 @@ func runWorkspaceList(cmd *cobra.Command, jsonOut bool) error {
 		return err
 	}
 	reg := api.NewRegistry(regPath)
+	unlock, err := reg.Lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	if err := reg.Load(); err != nil {
 		return err
 	}
@@ -472,6 +477,12 @@ func runWorkspaceSetDefault(cmd *cobra.Command, rawPath string) error {
 		return err
 	}
 	stateDir := filepath.Dir(regPath)
+	reg := api.NewRegistry(regPath)
+	unlock, err := reg.Lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 
 	// Empty string clears the marker.
 	if strings.TrimSpace(rawPath) == "" {
@@ -488,7 +499,6 @@ func runWorkspaceSetDefault(cmd *cobra.Command, rawPath string) error {
 	}
 	wsKey := api.WorkspaceKey(canonical)
 
-	reg := api.NewRegistry(regPath)
 	if err := reg.Load(); err != nil {
 		return err
 	}
@@ -515,8 +525,7 @@ func newWorkspaceBootstrapCmd() *cobra.Command {
 list for node_modules/target/dist/.git) and write a .serena/project.yml
 with a detected languages list, read_only=false, and excluded_dirs.
 
-Detection map (matches the languages declared in
-servers/mcp-language-server/manifest.yaml plus serena-native types):
+Detection map (matches language names accepted by upstream serena):
   .cpp .hpp .cc .cxx .h     -> cpp
   .go                       -> go
   .ts .tsx                  -> typescript
@@ -595,17 +604,16 @@ var alwaysSkipDirs = map[string]bool{
 }
 
 // extensionToLanguage maps file extensions (lower-case, with leading dot)
-// to the language identifier serena understands. Aligned with
-// servers/mcp-language-server/manifest.yaml plus markdown.
+// to the language identifier accepted by upstream serena.
 var extensionToLanguage = map[string]string{
 	".cpp": "cpp", ".hpp": "cpp", ".cc": "cpp", ".cxx": "cpp", ".h": "cpp",
-	".go":  "go",
-	".ts":  "typescript", ".tsx": "typescript",
-	".js":  "javascript", ".jsx": "javascript",
-	".py":  "python",
-	".rs":  "rust",
-	".md":  "markdown",
-	".css": "vscode-css",
+	".go": "go",
+	".ts": "typescript", ".tsx": "typescript",
+	".js": "javascript", ".jsx": "javascript",
+	".py":   "python",
+	".rs":   "rust",
+	".md":   "markdown",
+	".css":  "vscode-css",
 	".html": "vscode-html", ".htm": "vscode-html",
 	".f90": "fortran", ".f95": "fortran", ".f03": "fortran", ".f": "fortran",
 }
@@ -617,12 +625,10 @@ func surveyLanguages(root string, maxDepth int) ([]string, error) {
 	if maxDepth <= 0 {
 		maxDepth = 5
 	}
-	// Build the cumulative gitignore predicate by reading every
-	// .gitignore from root down (root's .gitignore + descendants' along
-	// the walk). For simplicity we honor only directory-name lines
-	// (matches "node_modules", ".venv", etc.) — adequate for the survey
-	// without pulling in a full gitignore parser.
 	rootIgnore := readGitignoreDirs(filepath.Join(root, ".gitignore"))
+	ignoreByDir := map[string]map[string]bool{
+		root: rootIgnore,
+	}
 
 	seen := map[string]bool{}
 	rootDepth := strings.Count(filepath.ToSlash(root), "/")
@@ -643,14 +649,21 @@ func surveyLanguages(root string, maxDepth int) ([]string, error) {
 				if alwaysSkipDirs[name] {
 					return filepath.SkipDir
 				}
-				if rootIgnore[name] {
+				parentIgnore := ignoreByDir[filepath.Dir(path)]
+				if parentIgnore[name] {
 					return filepath.SkipDir
 				}
-				// Honor per-subdir .gitignore additions (cheap merge).
-				subIgnore := readGitignoreDirs(filepath.Join(path, ".gitignore"))
-				for k := range subIgnore {
-					rootIgnore[k] = true
+				subIgnore := cloneGitignoreDirs(parentIgnore)
+				for k := range readGitignoreDirs(filepath.Join(path, ".gitignore")) {
+					subIgnore[k] = true
 				}
+				ignoreByDir[path] = subIgnore
+			}
+			if path == root {
+				// Root rules are seeded before the walk so they apply to
+				// immediate child directories without affecting siblings
+				// of nested .gitignore files.
+				ignoreByDir[path] = cloneGitignoreDirs(rootIgnore)
 			}
 			if curDepth >= maxDepth {
 				return filepath.SkipDir
@@ -674,11 +687,19 @@ func surveyLanguages(root string, maxDepth int) ([]string, error) {
 	return langs, nil
 }
 
+func cloneGitignoreDirs(in map[string]bool) map[string]bool {
+	out := make(map[string]bool, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
 // readGitignoreDirs reads a .gitignore file and returns the set of
-// directory-name patterns (lines containing no slash) it lists. Empty
-// lines, comments, and negation (`!`) entries are ignored. This is a
-// deliberate simplification — Phase B.3 only needs "skip this dir name"
-// behavior, not full gitignore globbing.
+// directory-name patterns it lists. Empty lines, comments, negation
+// (`!`) entries, root-anchored entries, path entries, and glob entries
+// are ignored. This is a deliberate simplification: Phase B.3 only needs
+// "skip this directory name" behavior, not full gitignore parsing.
 func readGitignoreDirs(path string) map[string]bool {
 	out := map[string]bool{}
 	f, err := os.Open(path)
@@ -692,16 +713,20 @@ func readGitignoreDirs(path string) map[string]bool {
 		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "!") {
 			continue
 		}
-		// Only directory-name lines: skip anything containing a slash
-		// (paths) or a glob meta (*, ?, [).
-		if strings.ContainsAny(line, "/\\*?[]") {
+		if strings.HasPrefix(line, "/") {
 			continue
 		}
-		// Trim trailing slash for "dirname/" style.
-		line = strings.TrimSuffix(line, "/")
-		if line != "" {
-			out[line] = true
+		line = strings.TrimRight(line, "/")
+		if line == "" {
+			continue
 		}
+		if strings.ContainsAny(line, "/\\") {
+			continue
+		}
+		if strings.ContainsAny(line, "*?[") {
+			continue
+		}
+		out[line] = true
 	}
 	return out
 }
