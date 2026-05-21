@@ -113,11 +113,8 @@ func TestSessionRouter_CleanupPreservesRecentSessions(t *testing.T) {
 }
 
 func TestSessionRouter_RebindRefreshesTTL(t *testing.T) {
-	// Per spec, LookupSession uses RLock and does NOT bump activity; the
-	// natural way to keep a binding alive is to re-issue BindSession on
-	// the next path-aware call. This test asserts that rebind updates
-	// lastSeen so the session survives a Cleanup that would otherwise
-	// expire the original binding.
+	// Rebinding still refreshes activity even though lookups now also
+	// extend the idle TTL.
 	t0 := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
 	now := t0
 	r := NewSessionRouterWithClock(func() time.Time { return now })
@@ -136,6 +133,43 @@ func TestSessionRouter_RebindRefreshesTTL(t *testing.T) {
 	}
 	if got := r.LookupSession("sess-rebind"); got == nil {
 		t.Error("rebind session dropped, want preserved")
+	}
+}
+
+func TestSessionRouter_LookupRefreshesLastSeen(t *testing.T) {
+	t0 := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
+	now := t0
+	r := NewSessionRouterWithClock(func() time.Time { return now })
+
+	r.BindSession("sess-lookup", newWorkspaceFixture(9301))
+
+	now = t0.Add(12 * time.Hour)
+	if got := r.LookupSession("sess-lookup"); got == nil {
+		t.Fatal("LookupSession returned nil, want bound workspace")
+	}
+
+	now = t0.Add(24 * time.Hour)
+	if expired := r.Cleanup(now); expired != 0 {
+		t.Fatalf("Cleanup expired = %d, want 0 after lookup refreshed lastSeen", expired)
+	}
+	if got := r.LookupSession("sess-lookup"); got == nil {
+		t.Fatal("LookupSession after Cleanup returned nil, want preserved binding")
+	}
+}
+
+func TestSessionRouter_NoLookupExpiresAtTTL(t *testing.T) {
+	t0 := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
+	now := t0
+	r := NewSessionRouterWithClock(func() time.Time { return now })
+
+	r.BindSession("sess-idle", newWorkspaceFixture(9301))
+
+	now = t0.Add(DefaultSessionTTL + time.Nanosecond)
+	if expired := r.Cleanup(now); expired != 1 {
+		t.Fatalf("Cleanup expired = %d, want 1 for idle binding", expired)
+	}
+	if got := r.LookupSession("sess-idle"); got != nil {
+		t.Fatalf("LookupSession(sess-idle) after Cleanup = %+v, want nil", got)
 	}
 }
 
@@ -173,10 +207,13 @@ func TestSessionRouter_BindOverwritesExistingBinding(t *testing.T) {
 }
 
 func TestSessionRouter_LookupReturnsValueCopy(t *testing.T) {
-	r := NewSessionRouter()
+	t0 := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
+	now := t0
+	r := NewSessionRouterWithClock(func() time.Time { return now })
 	ws := newWorkspaceFixture(9301)
 	r.BindSession("sess-1", ws)
 
+	now = t0.Add(12 * time.Hour)
 	got := r.LookupSession("sess-1")
 	if got == nil {
 		t.Fatal("LookupSession returned nil")
@@ -184,6 +221,10 @@ func TestSessionRouter_LookupReturnsValueCopy(t *testing.T) {
 
 	// Mutate the returned copy; subsequent Lookup must NOT see the mutation.
 	got.Port = 12345
+	now = t0.Add(24 * time.Hour)
+	if expired := r.Cleanup(now); expired != 0 {
+		t.Fatalf("Cleanup expired = %d, want 0 because Lookup refreshed lastSeen", expired)
+	}
 	got2 := r.LookupSession("sess-1")
 	if got2 == nil || got2.Port != 9301 {
 		t.Errorf("Lookup after mutation = %+v, want fresh copy with Port=9301", got2)
@@ -191,7 +232,7 @@ func TestSessionRouter_LookupReturnsValueCopy(t *testing.T) {
 }
 
 func TestSessionRouter_ConcurrentAccess(t *testing.T) {
-	// Stress the RWMutex split with N goroutines hammering Bind / Lookup
+	// Stress the lock discipline with N goroutines hammering Bind / Lookup
 	// / Unbind concurrently. Failures show up as a panic (concurrent map
 	// access) under -race; the assertion is "no panic, no race report".
 	r := NewSessionRouter()

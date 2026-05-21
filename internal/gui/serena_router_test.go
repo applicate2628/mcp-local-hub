@@ -289,6 +289,33 @@ func TestSerenaRouter_TwoWorkspaces_PathArgRoutesCorrectly(t *testing.T) {
 	}
 }
 
+func TestSerenaRouter_BindAfterSuccess(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
+	}))
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"})
+	rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": "sess-success"})
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if got := deps.Sessions.LookupSession("sess-success"); got == nil || got.WorkspaceKey != "alpha" {
+		t.Fatalf("LookupSession(sess-success) = %+v, want alpha binding", got)
+	}
+}
+
 // ---------------------------------------------------------------------
 // Test 2: TestSerenaRouter_WorkspaceNotFound_Returns503
 // ---------------------------------------------------------------------
@@ -489,6 +516,106 @@ func TestSerenaRouter_UpstreamConnectionRefused_Returns502(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("audit did not record serena-upstream-unreachable; got %v", auditCalls)
+	}
+}
+
+func TestSerenaRouter_NoBindOnUpstreamConnectionFailure(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve port: %v", err)
+	}
+	deadURL := fmt.Sprintf("http://%s", ln.Addr().String())
+	_ = ln.Close()
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	sessions := NewInMemorySessionRouter()
+	if got := sessions.LookupSession("sess-fail"); got != nil {
+		t.Fatalf("precondition LookupSession(sess-fail) = %+v, want nil", got)
+	}
+
+	deps := &serenaRouterDeps{
+		Resolver: &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions: sessions,
+		HTTPClient: &http.Client{
+			Transport: &http.Transport{
+				DialContext: (&net.Dialer{Timeout: 200 * time.Millisecond}).DialContext,
+			},
+		},
+		UpstreamURLFn:   func(ws *api.WorkspaceEntry) string { return deadURL },
+		UpstreamTimeout: 500 * time.Millisecond,
+		AuditFn:         func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"})
+	rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": "sess-fail"})
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502; body=%s", rr.Code, rr.Body.String())
+	}
+	if got := sessions.LookupSession("sess-fail"); got != nil {
+		t.Fatalf("LookupSession(sess-fail) after failed upstream = %+v, want nil", got)
+	}
+}
+
+func TestSerenaRouter_NoBindOnUpstreamHeaderTimeout(t *testing.T) {
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(slow.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	sessions := NewInMemorySessionRouter()
+	deps := &serenaRouterDeps{
+		Resolver: &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions: sessions,
+		HTTPClient: &http.Client{
+			Transport: &http.Transport{
+				DialContext:           (&net.Dialer{Timeout: 100 * time.Millisecond}).DialContext,
+				ResponseHeaderTimeout: 25 * time.Millisecond,
+			},
+		},
+		UpstreamURLFn:   func(ws *api.WorkspaceEntry) string { return slow.URL },
+		UpstreamTimeout: 50 * time.Millisecond,
+		AuditFn:         func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"})
+	rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": "sess-timeout"})
+
+	if rr.Code != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, want 504; body=%s", rr.Code, rr.Body.String())
+	}
+	if got := sessions.LookupSession("sess-timeout"); got != nil {
+		t.Fatalf("LookupSession(sess-timeout) after upstream timeout = %+v, want nil", got)
+	}
+}
+
+func TestSerenaRouter_BindOn5xxUpstreamResponse(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "upstream per-call failure", http.StatusInternalServerError)
+	}))
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	sessions := NewInMemorySessionRouter()
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:      sessions,
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"})
+	rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": "sess-5xx"})
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body=%s", rr.Code, rr.Body.String())
+	}
+	if got := sessions.LookupSession("sess-5xx"); got == nil || got.WorkspaceKey != "alpha" {
+		t.Fatalf("LookupSession(sess-5xx) = %+v, want alpha binding", got)
 	}
 }
 

@@ -1,7 +1,9 @@
 package serena_routing
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -36,6 +38,7 @@ type WorkspaceResolver struct {
 
 	mu        sync.RWMutex
 	lastMtime time.Time
+	loaded    bool                 // true after first successful Load, even with zero serena rows
 	cached    []api.WorkspaceEntry // snapshot of reg.SerenaEntries()
 }
 
@@ -95,16 +98,19 @@ func (r *WorkspaceResolver) refresh() {
 
 	r.mu.RLock()
 	lastMtime := r.lastMtime
-	cacheEmpty := r.cached == nil
+	cacheEmpty := !r.loaded
 	r.mu.RUnlock()
 
 	if statErr != nil {
-		if !cacheEmpty {
+		if errors.Is(statErr, fs.ErrNotExist) {
 			r.mu.Lock()
 			r.cached = nil
 			r.lastMtime = time.Time{}
+			r.loaded = false
 			r.mu.Unlock()
+			return
 		}
+		fmt.Fprintf(os.Stderr, "serena_routing: stat registry %s: %v; preserving cached snapshot\n", r.registryPath, statErr)
 		return
 	}
 
@@ -125,6 +131,7 @@ func (r *WorkspaceResolver) refresh() {
 
 	r.mu.Lock()
 	r.cached = entries
+	r.loaded = true
 	r.lastMtime = mtime
 	r.mu.Unlock()
 }

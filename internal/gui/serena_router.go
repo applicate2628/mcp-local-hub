@@ -282,6 +282,7 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	pathArg, hasPath := extractPathArg(tb.Params.Arguments)
 
 	var ws *api.WorkspaceEntry
+	bindSessionAfterUpstream := false
 	if hasPath {
 		resolved, resolveErr := deps.Resolver.ResolveByPath(pathArg)
 		if resolveErr != nil {
@@ -298,7 +299,7 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		ws = resolved
 		if sessionID != "" && deps.Sessions != nil {
-			deps.Sessions.BindSession(sessionID, ws)
+			bindSessionAfterUpstream = true
 		}
 	} else {
 		if sessionID == "" || deps.Sessions == nil {
@@ -362,6 +363,9 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	isSSE := strings.Contains(strings.ToLower(contentType), "text/event-stream")
 
 	w.WriteHeader(upstreamResp.StatusCode)
+	if bindSessionAfterUpstream {
+		deps.Sessions.BindSession(sessionID, ws)
+	}
 
 	if isSSE {
 		streamSSE(w, upstreamResp.Body)

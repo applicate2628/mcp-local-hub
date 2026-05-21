@@ -13,9 +13,9 @@ import (
 const DefaultSessionTTL = 24 * time.Hour
 
 // sessionBinding holds the per-session workspace handle plus the
-// timestamp at which the binding was established (or most recently
-// re-established via BindSession). lastSeen is only mutated by
-// BindSession; lookups are read-only.
+// timestamp at which the session was last active. BindSession and
+// successful LookupSession calls both refresh lastSeen so TTL is
+// idle-based.
 type sessionBinding struct {
 	workspace *api.WorkspaceEntry
 	lastSeen  time.Time
@@ -30,23 +30,21 @@ type sessionBinding struct {
 // Lifecycle:
 //
 //   - BindSession is invoked AFTER a successful WorkspaceResolver
-//     resolution on a path-aware call.
+//     resolution and upstream response on a path-aware call.
 //   - LookupSession is invoked at the start of a no-path call;
-//     callers handle the nil result per their fallback policy
+//     successful lookups refresh lastSeen, and callers handle the nil
+//     result per their fallback policy
 //     (Phase F may default to a single-workspace shortcut or ask
 //     the client to retry with a path argument).
 //   - UnbindSession is invoked on MCP session close events.
 //   - Cleanup is invoked periodically (by the host) to drop bindings
-//     whose lastSeen is older than ttl. Lookups do NOT refresh
-//     lastSeen (the RLock contract keeps the read path lock-free);
-//     callers that want to extend a binding must re-issue BindSession
-//     on the next path-aware call, which is the natural model since
-//     a path-aware call already resolved a workspace.
+//     whose lastSeen is older than ttl. Because LookupSession refreshes
+//     lastSeen, a session making only no-path calls remains bound until
+//     it is idle for ttl.
 //
 // Concurrency: all exported methods are safe for parallel use.
-// LookupSession uses RLock; mutating methods (Bind, Unbind, Cleanup)
-// use Lock. The RWMutex split keeps the read-heavy LookupSession path
-// cheap under fan-out load.
+// BindSession, LookupSession, UnbindSession, and Cleanup use Lock when
+// they mutate binding state; Len uses RLock for diagnostics.
 type SessionRouter struct {
 	mu       sync.RWMutex
 	sessions map[string]*sessionBinding
@@ -103,19 +101,20 @@ func (s *SessionRouter) BindSession(sessionID string, ws *api.WorkspaceEntry) {
 // value-copy of the stored entry so concurrent BindSession /
 // UnbindSession on the same session id cannot mutate it.
 //
-// Lookup is read-only (RLock); TTL is counted from bind time, not
-// last-lookup time. Callers that need to refresh a binding should
-// re-issue BindSession explicitly (e.g. on the next path-aware call).
+// A successful lookup refreshes lastSeen, making the TTL idle-based:
+// bindings expire after ttl with no BindSession or LookupSession
+// activity.
 func (s *SessionRouter) LookupSession(sessionID string) *api.WorkspaceEntry {
 	if sessionID == "" {
 		return nil
 	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	b, ok := s.sessions[sessionID]
 	if !ok || b == nil || b.workspace == nil {
 		return nil
 	}
+	b.lastSeen = s.clock()
 	wsCopy := *b.workspace
 	return &wsCopy
 }

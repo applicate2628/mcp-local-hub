@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/api"
 )
@@ -42,6 +43,18 @@ func makeRegistryWithSerena(t *testing.T, dir string, entries []api.WorkspaceEnt
 		t.Fatalf("Save: %v", err)
 	}
 	return regPath
+}
+
+func setFileModTime(t *testing.T, path string, mtime time.Time) time.Time {
+	t.Helper()
+	if err := os.Chtimes(path, mtime, mtime); err != nil {
+		t.Fatalf("Chtimes %s: %v", path, err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat %s after Chtimes: %v", path, err)
+	}
+	return fi.ModTime()
 }
 
 func TestResolveByPath_AbsoluteMatch(t *testing.T) {
@@ -295,6 +308,131 @@ func TestResolveByPath_EmptyRegistry_ReturnsErrWorkspaceNotFound(t *testing.T) {
 	_, err := resolver.ResolveByPath(filepath.Join(root, "anything"))
 	if !errors.Is(err, ErrWorkspaceNotFound) {
 		t.Errorf("err = %v, want ErrWorkspaceNotFound", err)
+	}
+}
+
+func TestResolveByPath_TransientStatErrorPreservesCache(t *testing.T) {
+	root := t.TempDir()
+	wsPath := makeWorkspace(t, root, "TransientStat")
+	nested := filepath.Join(wsPath, "src", "main.go")
+	if err := os.MkdirAll(filepath.Dir(nested), 0o755); err != nil {
+		t.Fatalf("mkdir nested: %v", err)
+	}
+	if err := os.WriteFile(nested, []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("write nested: %v", err)
+	}
+
+	regPath := makeRegistryWithSerena(t, root, []api.WorkspaceEntry{
+		{WorkspaceKey: api.WorkspaceKey(wsPath), WorkspacePath: wsPath, Backend: "serena", Port: 9301},
+	})
+	reg := api.NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	resolver := NewWorkspaceResolver(reg, regPath)
+
+	if _, err := resolver.ResolveByPath(nested); err != nil {
+		t.Fatalf("seed ResolveByPath: %v", err)
+	}
+
+	resolver.registryPath = regPath + "\x00"
+	entry, err := resolver.ResolveByPath(nested)
+	if err != nil {
+		t.Fatalf("ResolveByPath after transient stat error: %v", err)
+	}
+	if entry == nil {
+		t.Fatal("ResolveByPath returned nil entry without error")
+	}
+	if entry.Port != 9301 {
+		t.Errorf("Port = %d, want 9301 from cached snapshot", entry.Port)
+	}
+}
+
+func TestResolveByPath_FileDeletionClearsCache(t *testing.T) {
+	root := t.TempDir()
+	wsPath := makeWorkspace(t, root, "DeletedRegistry")
+	nested := filepath.Join(wsPath, "src", "main.go")
+	if err := os.MkdirAll(filepath.Dir(nested), 0o755); err != nil {
+		t.Fatalf("mkdir nested: %v", err)
+	}
+	if err := os.WriteFile(nested, []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("write nested: %v", err)
+	}
+
+	regPath := makeRegistryWithSerena(t, root, []api.WorkspaceEntry{
+		{WorkspaceKey: api.WorkspaceKey(wsPath), WorkspacePath: wsPath, Backend: "serena", Port: 9301},
+	})
+	reg := api.NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	resolver := NewWorkspaceResolver(reg, regPath)
+
+	if _, err := resolver.ResolveByPath(nested); err != nil {
+		t.Fatalf("seed ResolveByPath: %v", err)
+	}
+	if err := os.Remove(regPath); err != nil {
+		t.Fatalf("Remove registry: %v", err)
+	}
+
+	entry, err := resolver.ResolveByPath(nested)
+	if !errors.Is(err, ErrWorkspaceNotFound) {
+		t.Fatalf("err = %v, want ErrWorkspaceNotFound", err)
+	}
+	if entry != nil {
+		t.Fatalf("entry = %+v, want nil after registry deletion", entry)
+	}
+}
+
+func TestResolveByPath_EmptyRegistryCachedAcrossCalls(t *testing.T) {
+	root := t.TempDir()
+	wsPath := makeWorkspace(t, root, "EmptyCached")
+	nested := filepath.Join(wsPath, "src", "main.go")
+	if err := os.MkdirAll(filepath.Dir(nested), 0o755); err != nil {
+		t.Fatalf("mkdir nested: %v", err)
+	}
+	if err := os.WriteFile(nested, []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("write nested: %v", err)
+	}
+
+	regPath := filepath.Join(root, "workspaces.yaml")
+	reg := api.NewRegistry(regPath)
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save empty registry: %v", err)
+	}
+	fixedMtime := setFileModTime(t, regPath, time.Unix(1_700_000_000, 0))
+	if err := reg.Load(); err != nil {
+		t.Fatalf("Load empty registry: %v", err)
+	}
+	resolver := NewWorkspaceResolver(reg, regPath)
+
+	if _, err := resolver.ResolveByPath(nested); !errors.Is(err, ErrWorkspaceNotFound) {
+		t.Fatalf("seed ResolveByPath err = %v, want ErrWorkspaceNotFound", err)
+	}
+
+	updated := api.NewRegistry(regPath)
+	if err := updated.PutSerena(api.WorkspaceEntry{
+		WorkspaceKey:  api.WorkspaceKey(wsPath),
+		WorkspacePath: wsPath,
+		Language:      api.SerenaLanguageSentinel,
+		Backend:       "serena",
+		Port:          9301,
+	}); err != nil {
+		t.Fatalf("PutSerena: %v", err)
+	}
+	if err := updated.Save(); err != nil {
+		t.Fatalf("Save updated registry: %v", err)
+	}
+	setFileModTime(t, regPath, fixedMtime)
+
+	for i := 0; i < 100; i++ {
+		entry, err := resolver.ResolveByPath(nested)
+		if !errors.Is(err, ErrWorkspaceNotFound) {
+			t.Fatalf("iteration %d err = %v, entry = %+v; want cached empty snapshot", i, err, entry)
+		}
+		if entry != nil {
+			t.Fatalf("iteration %d entry = %+v, want nil", i, entry)
+		}
 	}
 }
 
