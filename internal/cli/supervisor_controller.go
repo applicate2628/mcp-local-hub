@@ -353,8 +353,21 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 		return
 	}
 
+	// Always update in-memory smStates when transition matches, regardless
+	// of persistBefore (closes sonnet impl-r2 BLOCKER: previous code wrapped
+	// the Store inside `if persistBefore`, so persistBefore=false transitions
+	// like StSpawning + EvHealthOK → StRunning would match the SM but never
+	// update smStates. The daemon then stayed in StSpawning in-memory and
+	// subsequent EvIntentUpdate(stopped) silently dropped since StSpawning
+	// has no EvIntentUpdate case in the SM table).
+	//
+	// persistBefore semantically controls DISK-FLUSH TIMING (whether the
+	// caller must persist the new state to supervisor-state.json BEFORE
+	// performing the side effect), NOT whether the in-memory transition
+	// took effect. The SM transition matched (matched=true), so smStates
+	// reflects the new state immediately; persistence is a separate axis.
+	c.smStates.Store(ev.TaskName, newState)
 	if persistBefore {
-		c.smStates.Store(ev.TaskName, newState)
 		// Best-effort persist - audit-log on failure but do NOT block
 		// the side effect. The tracker mirrors the SM state into
 		// supervisor-state.json via supervisorStateFromRuntimeState

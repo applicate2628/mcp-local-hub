@@ -412,6 +412,119 @@ func TestSupervisorController_HandleEvStart_TransitionsFromIdleToSpawning(t *tes
 	}
 }
 
+// TestSupervisorController_HappyPath_SpawnHealthRunningStopExiting drives
+// the controller through the FULL happy-path WITHOUT manually staging
+// smStates (which prior tests do to bypass the EvHealthOK gap):
+//
+//	StIdle + EvStart → StSpawning + spawn closure call
+//	(spawn returns nil) → executeSideEffect posts EvHealthOK
+//	StSpawning + EvHealthOK → StRunning
+//	(intent flips to Desired=stopped) → external Post EvIntentUpdate
+//	StRunning + EvIntentUpdate(stopped) → StExiting + terminate closure
+//
+// Regression guard for sonnet impl-r2 BLOCKER (the v(r2) fix posted
+// EvHealthOK but smStates.Store was wrapped in `if persistBefore` so
+// the StSpawning → StRunning transition matched but never updated the
+// in-memory state — the daemon stayed in StSpawning forever and the
+// subsequent EvIntentUpdate(stopped) silently dropped). This test
+// exercises the actual production path with a running event loop, not
+// hand-staged states.
+func TestSupervisorController_HappyPath_SpawnHealthRunningStopExiting(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	tracker := NewDaemonRuntimeTracker()
+	var spawnCalls atomic.Int32
+	var terminateCalls atomic.Int32
+	fakeSpawn := func(d api.SupervisorDaemon) error {
+		spawnCalls.Add(1)
+		return nil
+	}
+	fakeTerminate := func(d api.SupervisorDaemon) error {
+		terminateCalls.Add(1)
+		return nil
+	}
+
+	descriptor := api.SupervisorDaemon{
+		TaskName: `\mcp-local-hub-test-default`,
+		Server:   "test",
+		Daemon:   "default",
+	}
+	intent := &api.SupervisorIntentFile{Daemons: []api.SupervisorDaemon{descriptor}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	loop := api.NewEventLoop(16)
+	ctrl := &supervisorController{
+		intentCache:         newIntentCache(),
+		eventLoop:           loop,
+		tracker:             tracker,
+		events:              events,
+		daemonIntent:        newDaemonIntentCache(),
+		spawn:               fakeSpawn,
+		terminate:           fakeTerminate,
+		ctx:                 ctx,
+		failureWindow:       respawnFailureWindow,
+		quarantineThreshold: respawnQuarantineThreshold,
+	}
+	ctrl.intentCache.Refresh(intent)
+	ctrl.smStates.Store(descriptor.TaskName, api.StIdle)
+	loop.RegisterHandler(ctrl.handleLoopEvent)
+	go loop.Run(ctx)
+
+	// Step 1: EvStart → expect spawn + StSpawning → executeSideEffect
+	// posts EvHealthOK → loop processes → StRunning
+	loop.Post(api.LoopEvent{Kind: api.EvStart, TaskName: descriptor.TaskName})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		st, _ := ctrl.GetSMState(descriptor.TaskName)
+		if st == api.StRunning && spawnCalls.Load() == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	st, _ := ctrl.GetSMState(descriptor.TaskName)
+	if st != api.StRunning {
+		t.Fatalf("after EvStart+EvHealthOK chain, state = %s, want %s (smStates.Store-outside-persistBefore regression)", st, api.StRunning)
+	}
+	if spawnCalls.Load() != 1 {
+		t.Fatalf("spawn call count = %d, want 1", spawnCalls.Load())
+	}
+
+	// Step 2: flip intent to Desired=stopped, post EvIntentUpdate
+	// → expect StExiting + terminate closure call
+	stopFile := &api.DaemonIntentFile{
+		Tasks: map[string]api.DaemonIntent{
+			descriptor.TaskName: {Desired: "stopped", Reason: "user-stop", UpdatedAt: time.Now().UTC()},
+		},
+	}
+	ctrl.daemonIntent.Refresh(stopFile)
+	loop.Post(api.LoopEvent{Kind: api.EvIntentUpdate, TaskName: descriptor.TaskName})
+
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		st, _ := ctrl.GetSMState(descriptor.TaskName)
+		if st == api.StExiting && terminateCalls.Load() == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	st, _ = ctrl.GetSMState(descriptor.TaskName)
+	if st != api.StExiting {
+		t.Fatalf("after EvIntentUpdate(stopped), state = %s, want %s (StRunning+EvIntentUpdate stop branch regression)", st, api.StExiting)
+	}
+	if terminateCalls.Load() != 1 {
+		t.Fatalf("terminate call count = %d, want 1", terminateCalls.Load())
+	}
+}
+
 // TestSupervisorController_HandleEvStart_StopIntentSuppressesSpawn
 // closes the IntentDesired=stopped branch of StIdle+EvStart: SM
 // returns (StIdle, "intent suppresses spawn") and the spawn closure
