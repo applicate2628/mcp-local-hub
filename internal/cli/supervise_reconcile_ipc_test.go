@@ -543,24 +543,17 @@ func TestReconcileIPC_AuditEventEmitted(t *testing.T) {
 	}
 }
 
-// TestReconcileIPC_TimeoutErrors verifies that the IPC CLIENT returns
-// a timeout error when the operation exceeds its ctx deadline. The
-// handler itself is fast; we exercise the timeout by making the
-// scheduler-list call block past the ctx deadline of the client dial.
-//
-// This is the client-side timeout test (closes the spec acceptance:
-// "mcphub reconcile returns within 30s OR explicit timeout error").
-// Because the actual handler is synchronous + fast, we exercise the
-// timeout at the BLOCK BOUNDARY most likely to be slow in production
-// (scheduler.List) by making it sleep longer than the ctx deadline,
-// then driving the handler directly with a deadline-respecting ctx.
-//
-// Note: the IPC handler does not currently honor ctx because
-// writeIPCFrame writes synchronously; the operational timeout lives
-// in the DialSupervisorIPCReconcile client (verified separately in
-// internal/api). Here we assert the slow-scheduler-list case still
-// returns a populated response (no deadlock), and that the slow path
-// is observable in audit.
+// TestReconcileIPC_TimeoutErrors verifies that the handler-side 25s
+// ctx deadline propagates to the scheduler.List call. After r2,
+// handleReconcile creates its own context.WithTimeout(ctx,
+// reconcileHandlerTimeout) (supervise_reconcile_ipc.go:112) so a
+// pathological scheduler.List that hangs longer than 25s is unwound
+// inside the handler rather than relying solely on the client's 30s
+// dial timeout (DialSupervisorIPCReconcile). The test exercises the
+// scheduler-list block boundary by making it sleep longer than the
+// handler ctx deadline, then asserting the handler returns a
+// populated response without deadlocking and the slow path is
+// observable in audit.
 func TestReconcileIPC_TimeoutErrors(t *testing.T) {
 	taskName := `\mcp-local-hub-foo-default`
 	intent := &api.SupervisorIntentFile{
