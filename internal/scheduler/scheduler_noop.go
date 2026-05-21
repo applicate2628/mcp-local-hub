@@ -1,6 +1,9 @@
 package scheduler
 
-import "errors"
+import (
+	"context"
+	"errors"
+)
 
 // noopScheduler is a test-only Scheduler that returns empty results for
 // read operations (List/Status/ExportXML) and REJECTS every mutation
@@ -35,5 +38,8 @@ func (*noopScheduler) Run(string) error                  { return errNoopSchedul
 func (*noopScheduler) Stop(string) error                 { return errNoopSchedulerMutation }
 func (*noopScheduler) Status(string) (TaskStatus, error) { return TaskStatus{}, ErrTaskNotFound }
 func (*noopScheduler) List(string) ([]TaskStatus, error) { return nil, nil }
-func (*noopScheduler) ExportXML(string) ([]byte, error)  { return nil, ErrTaskNotFound }
-func (*noopScheduler) ImportXML(string, []byte) error    { return errNoopSchedulerMutation }
+func (*noopScheduler) ListContext(context.Context, string) ([]TaskStatus, error) {
+	return nil, nil
+}
+func (*noopScheduler) ExportXML(string) ([]byte, error) { return nil, ErrTaskNotFound }
+func (*noopScheduler) ImportXML(string, []byte) error   { return errNoopSchedulerMutation }

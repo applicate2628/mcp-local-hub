@@ -331,6 +331,130 @@ func TestReconcileIPC_ApplyRefreshesCacheBeforePosting(t *testing.T) {
 	}
 }
 
+// TestReconcileIPC_ApplyPreservesDaemonIntentCacheOnCorruptRead locks in the
+// reconcile apply-mode safety rule: a corrupt daemon-intent.json is usable as
+// an empty overlay for drift calculation, but it must not refresh the
+// controller cache with the empty fallback and erase previously loaded
+// operator stop/disable intents.
+func TestReconcileIPC_ApplyPreservesDaemonIntentCacheOnCorruptRead(t *testing.T) {
+	taskName := `\mcp-local-hub-foo-default`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{
+			{TaskName: taskName, Server: "foo", Daemon: "default"},
+		},
+	}
+	fx := newReconcileTestFixture(t, intent)
+
+	previousStop := api.DaemonIntentFile{
+		Tasks: map[string]api.DaemonIntent{
+			taskName: {
+				Desired:   api.IntentDesiredStopped,
+				Reason:    api.IntentReasonUserStop,
+				UpdatedAt: time.Now().UTC(),
+			},
+		},
+	}
+	fx.ctrl.daemonIntent.Refresh(&previousStop)
+
+	if err := os.WriteFile(filepath.Join(fx.deps.stateDir, "daemon-intent.json"), []byte(`{"tasks":`), 0o600); err != nil {
+		t.Fatalf("seed corrupt daemon-intent.json: %v", err)
+	}
+	installSchedulerListFake(t, []scheduler.TaskStatus{
+		{Name: taskName, State: "Running"},
+	})
+
+	req := api.IPCRequest{
+		ID:   24,
+		Cmd:  "reconcile",
+		Args: map[string]any{"apply": true},
+	}
+	conn := newFakeIPCConn()
+	if err := handleReconcile(conn, req, fx.deps); err != nil {
+		t.Fatalf("handleReconcile: %v", err)
+	}
+	_, body := decodeReconcileResponse(t, conn)
+	if body.AppliedCount != 0 {
+		t.Fatalf("AppliedCount = %d, want 0 for running scheduler + empty corrupt-read overlay; drift=%+v",
+			body.AppliedCount, body.Drift)
+	}
+
+	got := fx.ctrl.daemonIntent.Lookup(taskName)
+	if got.Desired != api.IntentDesiredStopped {
+		t.Fatalf("daemon-intent cache desired = %q, want preserved %q after corrupt read",
+			got.Desired, api.IntentDesiredStopped)
+	}
+
+	logRaw := readEventLogForTest(t, fx.deps.stateDir)
+	if !strings.Contains(logRaw, `"event":"daemon-intent-read-failed"`) {
+		t.Fatalf("expected daemon-intent-read-failed audit event; log:\n%s", logRaw)
+	}
+	if !strings.Contains(logRaw, `"state":"corrupt"`) {
+		t.Fatalf("expected corrupt state in daemon-intent audit event; log:\n%s", logRaw)
+	}
+}
+
+// TestReconcileIPC_HandlerTimeoutCancelsSchedulerList verifies the production
+// scheduler-list path hands the reconcile context to a context-aware scheduler
+// implementation instead of abandoning an uncancellable goroutine after the
+// handler deadline fires.
+func TestReconcileIPC_HandlerTimeoutCancelsSchedulerList(t *testing.T) {
+	taskName := `\mcp-local-hub-foo-default`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{
+			{TaskName: taskName, Server: "foo", Daemon: "default"},
+		},
+	}
+	fx := newReconcileTestFixture(t, intent)
+
+	origTimeout := reconcileHandlerTimeout
+	reconcileHandlerTimeout = 25 * time.Millisecond
+	t.Cleanup(func() { reconcileHandlerTimeout = origTimeout })
+
+	ctxCanceled := make(chan error, 1)
+	fakeScheduler := &reconcileContextSchedulerForTest{
+		listContext: func(ctx context.Context, prefix string) ([]scheduler.TaskStatus, error) {
+			if prefix != "mcp-local-hub-" {
+				t.Errorf("scheduler prefix = %q, want mcp-local-hub-", prefix)
+			}
+			<-ctx.Done()
+			ctxCanceled <- ctx.Err()
+			return nil, ctx.Err()
+		},
+	}
+	uninstall := setReconcileSchedulerNewFnForTest(func() (scheduler.Scheduler, error) {
+		return fakeScheduler, nil
+	})
+	defer uninstall()
+
+	req := api.IPCRequest{
+		ID:   25,
+		Cmd:  "reconcile",
+		Args: map[string]any{"apply": false},
+	}
+	conn := newFakeIPCConn()
+	if err := handleReconcile(conn, req, fx.deps); err != nil {
+		t.Fatalf("handleReconcile: %v", err)
+	}
+	resp := conn.lastResponse(t)
+	if resp.Error == nil {
+		t.Fatalf("expected timeout response, got %+v", resp)
+	}
+	if resp.Error.Code != "RECONCILE_TIMEOUT" {
+		t.Fatalf("response code = %q, want RECONCILE_TIMEOUT", resp.Error.Code)
+	}
+
+	select {
+	case err := <-ctxCanceled:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("scheduler ListContext saw ctx err %v, want DeadlineExceeded", err)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("scheduler ListContext did not observe reconcile context cancellation")
+	}
+}
+
 // TestReconcileIPC_HandlerTimeout verifies that handleReconcile creates the
 // handler-side 25-second deadline and propagates it to long-running scheduler
 // work through the reconcile scheduler seam.
@@ -663,3 +787,25 @@ func TestReconcileIPC_DaemonIntentStopOverridesDefault(t *testing.T) {
 			entry.Action, api.ReconcileActionPostEvIntentUpdate)
 	}
 }
+
+type reconcileContextSchedulerForTest struct {
+	listContext func(context.Context, string) ([]scheduler.TaskStatus, error)
+}
+
+func (s *reconcileContextSchedulerForTest) Create(scheduler.TaskSpec) error { return nil }
+func (s *reconcileContextSchedulerForTest) Delete(string) error             { return nil }
+func (s *reconcileContextSchedulerForTest) Run(string) error                { return nil }
+func (s *reconcileContextSchedulerForTest) Stop(string) error               { return nil }
+func (s *reconcileContextSchedulerForTest) Status(string) (scheduler.TaskStatus, error) {
+	return scheduler.TaskStatus{}, scheduler.ErrTaskNotFound
+}
+func (s *reconcileContextSchedulerForTest) List(string) ([]scheduler.TaskStatus, error) {
+	return nil, errors.New("legacy List path called; want ListContext")
+}
+func (s *reconcileContextSchedulerForTest) ListContext(ctx context.Context, prefix string) ([]scheduler.TaskStatus, error) {
+	return s.listContext(ctx, prefix)
+}
+func (s *reconcileContextSchedulerForTest) ExportXML(string) ([]byte, error) {
+	return nil, scheduler.ErrTaskNotFound
+}
+func (s *reconcileContextSchedulerForTest) ImportXML(string, []byte) error { return nil }

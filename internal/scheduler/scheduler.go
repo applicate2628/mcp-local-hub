@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -94,6 +95,12 @@ type Scheduler interface {
 	// ImportXML re-creates a task from raw Task Scheduler XML. Counterpart
 	// of ExportXML; used for rollback restoration.
 	ImportXML(name string, xml []byte) error
+}
+
+// ContextLister is implemented by scheduler backends that can cancel the
+// underlying list operation when the caller's context is done.
+type ContextLister interface {
+	ListContext(ctx context.Context, prefix string) ([]TaskStatus, error)
 }
 
 // e2eSchedulerEnv, when set to "none", swaps scheduler.New()'s return

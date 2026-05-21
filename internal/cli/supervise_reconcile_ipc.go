@@ -38,6 +38,7 @@ import (
 // touching the OS scheduler. Mirror of the reaperFn / quiesceHandlerFactory
 // seam pattern at supervise.go:57 / :1253.
 var reconcileSchedulerListFn = reconcileSchedulerListFnDefault
+var reconcileSchedulerNewFn = scheduler.New
 
 var reconcileHandlerTimeout = 25 * time.Second
 
@@ -49,9 +50,16 @@ func reconcileSchedulerListFnDefault(ctx context.Context) ([]scheduler.TaskStatu
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	sch, err := scheduler.New()
+	sch, err := reconcileSchedulerNewFn()
 	if err != nil {
 		return nil, fmt.Errorf("scheduler.New: %w", err)
+	}
+	if lister, ok := sch.(scheduler.ContextLister); ok {
+		tasks, err := lister.ListContext(ctx, "mcp-local-hub-")
+		if err != nil {
+			return nil, fmt.Errorf("scheduler.List: %w", err)
+		}
+		return tasks, nil
 	}
 
 	type listResult struct {
@@ -81,6 +89,12 @@ func setReconcileSchedulerListFnForTest(fn func(context.Context) ([]scheduler.Ta
 	prev := reconcileSchedulerListFn
 	reconcileSchedulerListFn = fn
 	return func() { reconcileSchedulerListFn = prev }
+}
+
+func setReconcileSchedulerNewFnForTest(fn func() (scheduler.Scheduler, error)) func() {
+	prev := reconcileSchedulerNewFn
+	reconcileSchedulerNewFn = fn
+	return func() { reconcileSchedulerNewFn = prev }
 }
 
 // handleReconcile implements the `reconcile` IPC verb. Single-frame
@@ -157,11 +171,14 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 		}
 		return writeReconcileTimeoutFrame(conn, req, err)
 	}
-	var daemonIntentTasks map[string]api.DaemonIntent
+	var updatedDaemonIntent *api.DaemonIntentFile
+	daemonIntentTasks := map[string]api.DaemonIntent{}
 	if daemonIntentRes.State == api.IntentStateValid {
+		updatedDaemonIntent = &daemonIntentRes.File
 		daemonIntentTasks = daemonIntentRes.File.Tasks
+	} else if daemonIntentRes.Err != nil {
+		emitReconcileDaemonIntentReadFailed(deps.events, daemonIntentPath, daemonIntentRes)
 	}
-	updatedDaemonIntent := &daemonIntentRes.File
 
 	// (3) Scheduler snapshot.
 	schedTasks, schedErr := reconcileSchedulerListFn(ctx)
@@ -502,7 +519,9 @@ func applyReconcileDrift(
 		return 0
 	}
 	ctrl.intentCache.Refresh(updatedIntent)
-	ctrl.daemonIntent.Refresh(updatedDaemonIntent)
+	if updatedDaemonIntent != nil {
+		ctrl.daemonIntent.Refresh(updatedDaemonIntent)
+	}
 	if ctrl.eventLoop == nil {
 		return 0
 	}
@@ -518,6 +537,26 @@ func applyReconcileDrift(
 		applied++
 	}
 	return applied
+}
+
+func emitReconcileDaemonIntentReadFailed(events *api.SupervisorEventLog, path string, res api.IntentReadResult) {
+	if events == nil || res.Err == nil {
+		return
+	}
+	body := map[string]any{
+		"path":  path,
+		"state": res.State,
+		"err":   res.Err.Error(),
+	}
+	if res.QuarantinePath != "" {
+		body["quarantine_path"] = res.QuarantinePath
+	}
+	_ = events.Emit(api.SupervisorEvent{
+		Severity: api.SupervisorEventSeverityWarn,
+		Source:   api.SupervisorEventSourceIPC,
+		Event:    "daemon-intent-read-failed",
+		Body:     body,
+	})
 }
 
 // canonicalTaskNameForReconcile coerces a task name to leading-backslash

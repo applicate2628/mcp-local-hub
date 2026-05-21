@@ -2,7 +2,10 @@
 
 package scheduler
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 // linuxScheduler is a stub that compiles but returns "not implemented" for all operations.
 // Full systemd-user-unit integration is out of scope for Phase 0-1 of this plan.
@@ -20,5 +23,8 @@ func (linuxScheduler) Status(string) (TaskStatus, error) {
 	return TaskStatus{}, fmt.Errorf("not implemented")
 }
 func (linuxScheduler) List(string) ([]TaskStatus, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (linuxScheduler) ListContext(context.Context, string) ([]TaskStatus, error) {
 	return nil, fmt.Errorf("not implemented")
 }
