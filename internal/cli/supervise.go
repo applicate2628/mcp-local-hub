@@ -288,6 +288,23 @@ type ipcDispatchDeps struct {
 	// construction; the closures inside it get Set() after spawnFn /
 	// terminateFn exist. Handlers must Get() and nil-check before use.
 	respawnLate *respawnLateBindings
+	// controllerProvider returns the live A.2 supervisorController when
+	// constructed. The respawn handler reads from
+	// controllerProvider().intentCache.Lookup(taskName) for the freshest
+	// daemon descriptor (closes bot PR#222 P2-2: deps.intent is a startup
+	// snapshot, never refreshed; controller.intentCache IS refreshed by
+	// IntentWatcher on intent-file mtime changes). nil-safe — handler
+	// falls back to deps.intent when provider returns nil (e.g. in unit
+	// tests that don't construct a full controller, or in the brief
+	// startup window before the controller is built).
+	//
+	// Closure-captured variable pattern (same as triggerGracefulExit
+	// above): deps captures a *supervisorController variable declared
+	// early; later code assigns the variable; subsequent provider calls
+	// observe the live value. This preserves IPC accept-loop startup
+	// ordering (deps + accept goroutine launch BEFORE controller exists)
+	// without changing the deps struct lifetime.
+	controllerProvider func() *supervisorController
 }
 
 const ipcErrorSupervisorStarting = "SUPERVISOR_STARTING"
@@ -530,6 +547,15 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	// existing accept-loop startup ordering per plan v5 option (b).
 	respawnLate := &respawnLateBindings{}
 
+	// ctrl is the A.2 supervisorController, constructed AFTER spawn/
+	// terminate factories exist (below, around line 680). The deps
+	// struct captures `&ctrl` via a closure provider so the respawn
+	// handler can look up live intent through ctrl.intentCache even
+	// though the accept goroutine starts before ctrl is built.
+	// Closure-capture pattern (same as triggerGracefulExit below):
+	// the closure reads the variable's CURRENT value each call.
+	var ctrl *supervisorController
+
 	// IPC listener. `--no-ipc` keeps tests fast (lock+events+loop only).
 	// Production callers always pass --no-ipc=false; the listener owns
 	// the per-OS pipe/socket and the hello-frame handshake from Task
@@ -568,9 +594,10 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 				default:
 				}
 			},
-			overlay:     overlay,
-			intent:      intent,
-			respawnLate: respawnLate,
+			overlay:            overlay,
+			intent:             intent,
+			respawnLate:        respawnLate,
+			controllerProvider: func() *supervisorController { return ctrl },
 		}
 
 		// Spawn the accept goroutine. It runs until listener.Close()
@@ -634,7 +661,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	crashCh := make(chan crashEvent, 64)
 	spawnFn := reconcileSpawnFn
 	if spawnFn == nil {
-		spawnFn = makeProductionSpawnFnWithStatePath(job, events, runtimeTracker, statePath, overlay, crashCh)
+		spawnFn = makeProductionSpawnFnWithStatePath(job, events, runtimeTracker, statePath, overlay, filepath.Join(stateDir, "daemon-env-overrides.yaml"), crashCh)
 	}
 	terminateFn := reconcileTerminateFn
 	if terminateFn == nil {
@@ -660,7 +687,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	// EvStart onto the same loop the controller listens on, so the
 	// controller is the sole consumer of policy transitions while the
 	// reconciler stays the source of "this daemon should be running".
-	ctrl := &supervisorController{
+	ctrl = &supervisorController{
 		intentCache:         newIntentCache(),
 		eventLoop:           loop,
 		tracker:             runtimeTracker,
@@ -1710,6 +1737,27 @@ func makeProductionTerminateFnWithStatePath(events *api.SupervisorEventLog, runn
 	return func(d api.SupervisorDaemon) error {
 		target := runningPIDs[d.TaskName]
 		pid := target.PID
+		// Live tracker lookup overrides the startup runningPIDs snapshot
+		// (closes bot PR#222 P1-5: daemons spawned AFTER supervisor cold
+		// restart never appear in runningPIDs — that map is loaded once
+		// from supervisor-state.json at startup. Only the tracker holds
+		// the live PID for these later spawns. Without this lookup, the
+		// new A.2 controller's terminate calls returned "no running PID
+		// recorded" and silently skipped killing the child, leaving SM
+		// transitions to proceed (StExiting → StIdle on phantom child-exit)
+		// while the process was still alive — duplicate-process / port
+		// collision risk).
+		//
+		// runningPIDs remains the fallback for cold-restart-recovery
+		// terminates: daemons that were running BEFORE the cold restart
+		// but never re-spawned after still have only the startup snapshot.
+		if entry, ok := tracker.Get(d.TaskName); ok && entry.CurrentPID > 0 {
+			pid = entry.CurrentPID
+			target.PID = entry.CurrentPID
+			if !entry.StartedAt.IsZero() {
+				target.StartedAt = entry.StartedAt.UTC().Format(time.RFC3339Nano)
+			}
+		}
 		if pid <= 0 {
 			err := fmt.Errorf("no running PID recorded for task %q", d.TaskName)
 			emitDaemonTerminateFailed(events, d, pid, err)
@@ -1961,7 +2009,7 @@ func mergeDaemonEnv(parent []string, manifest, overlay map[string]string) []stri
 // in sorted order, matching the v0.4.x daemon-host spawn convention
 // while keeping duplicate-case Windows keys deterministic.
 func makeProductionSpawnFn(job *process.Job, events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker) SpawnFunc {
-	return makeProductionSpawnFnWithStatePath(job, events, tracker, "", nil, nil)
+	return makeProductionSpawnFnWithStatePath(job, events, tracker, "", nil, "", nil)
 }
 
 // crashEvent is what the spawn fn posts to the respawn dispatcher
@@ -1984,18 +2032,47 @@ type crashEvent struct {
 // real values for both; legacy callers (makeProductionSpawnFn, tests)
 // pass nil to preserve the existing "no overlay, spawn once, no
 // respawn" behavior.
-func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, statePath string, overlay *daemon_env_overlay.Overlay, crashCh chan<- crashEvent) SpawnFunc {
+func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, statePath string, overlay *daemon_env_overlay.Overlay, overlayPath string, crashCh chan<- crashEvent) SpawnFunc {
 	return func(d api.SupervisorDaemon) error {
 		cmd := exec.Command(d.Command, d.Args...)
 		if d.Workspace != "" {
 			cmd.Dir = d.Workspace
+		}
+		// Live overlay reload per-spawn (closes bot PR#222 P1-1: spawn
+		// closure captured the startup overlay snapshot, so later
+		// /api/daemon/env edits written to daemon-env-overrides.yaml
+		// never reached respawned processes — the GUI Apply+Restart
+		// workflow silently ignored new config). Re-reading the
+		// overlay file on each spawn adds ~ms of disk I/O but spawns
+		// are infrequent (per-daemon, on backoff/quarantine/manual
+		// respawn paths) so the cost is dominated by process creation.
+		//
+		// Load errors fall back to the cached startup overlay so a
+		// transient permission flip or corrupt-mid-write doesn't break
+		// spawn entirely; warn audit emit makes the degradation visible.
+		current := overlay
+		if overlayPath != "" {
+			if fresh, ferr := daemon_env_overlay.Load(overlayPath); ferr == nil {
+				current = fresh
+			} else if events != nil {
+				_ = events.Emit(api.SupervisorEvent{
+					Severity: "warn", Source: "lifecycle",
+					Event: "daemon-env-overlay-spawn-reload-failed",
+					TaskName: d.TaskName,
+					Body: map[string]any{
+						"path":     overlayPath,
+						"err":      ferr.Error(),
+						"fallback": "using cached startup overlay snapshot",
+					},
+				})
+			}
 		}
 		// Per-task overlay lookup. Returns nil when no row matches the
 		// daemon's TaskName or when overlay itself is nil — both fold
 		// to "no overlay env for this daemon" so the merge degrades to
 		// the manifest-only path (which itself may be nil → cmd.Env
 		// stays nil → child inherits os.Environ).
-		overlayEnv := daemon_env_overlay.LookupOverlay(overlay, d.TaskName)
+		overlayEnv := daemon_env_overlay.LookupOverlay(current, d.TaskName)
 		// ${parent_path} expansion runs BEFORE the merge so the
 		// substituted value participates in case-insensitive PATH
 		// collision resolution (Windows: PATH/Path/path all collide

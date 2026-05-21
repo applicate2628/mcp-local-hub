@@ -59,10 +59,11 @@ func (r *respawnLateBindings) Set(s SpawnFunc, t TerminateFunc) {
 // GUI handler at /api/daemon/respawn can map them to HTTP status
 // codes (UNKNOWN_TASK → 400, QUARANTINED → 409, RESPAWN_FAILED → 500).
 const (
-	ipcErrorUnknownTask        = "UNKNOWN_TASK"
-	ipcErrorRespawnQuarantined = "QUARANTINED"
-	ipcErrorRespawnFailed      = "RESPAWN_FAILED"
-	ipcErrorRespawnNotReady    = "RESPAWN_NOT_READY"
+	ipcErrorUnknownTask             = "UNKNOWN_TASK"
+	ipcErrorRespawnQuarantined      = "QUARANTINED"
+	ipcErrorRespawnFailed           = "RESPAWN_FAILED"
+	ipcErrorRespawnNotReady         = "RESPAWN_NOT_READY"
+	ipcErrorRespawnTerminateFailed  = "RESPAWN_TERMINATE_FAILED"
 )
 
 // handleRespawn implements the `respawn` IPC verb. Body shape:
@@ -105,11 +106,33 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 	force, _ := req.Args["force"].(bool)
 	taskName := daemon_env_overlay.NormalizeOverlayKey(taskNameRaw)
 
-	// Resolve the daemon descriptor from the canonical supervisor intent.
-	// We accept BOTH bare and canonical forms in the intent file so a
-	// hand-edited supervisor-intent.json (rare but possible) still matches.
+	// Resolve the daemon descriptor. Prefer the controller's live intent
+	// cache (refreshed by IntentWatcher on supervisor-intent.json mtime
+	// changes) over deps.intent which is the startup snapshot and never
+	// refreshed (closes bot PR#222 P2-2: after intent reload — add /
+	// remove / replace daemon entries — the respawn handler would reject
+	// valid tasks as UNKNOWN_TASK or act on stale descriptors during
+	// long-lived supervisor sessions).
+	//
+	// We accept BOTH bare and canonical forms so a hand-edited
+	// supervisor-intent.json (rare but possible) still matches.
 	var desc *api.SupervisorDaemon
-	if deps.intent != nil {
+	if deps.controllerProvider != nil {
+		if ctrl := deps.controllerProvider(); ctrl != nil && ctrl.intentCache != nil {
+			if snap, ok := ctrl.intentCache.snap.Load().(*intentSnapshot); ok && snap != nil && snap.intent != nil {
+				for i := range snap.intent.Daemons {
+					d := &snap.intent.Daemons[i]
+					if daemon_env_overlay.NormalizeOverlayKey(d.TaskName) == taskName {
+						desc = d
+						break
+					}
+				}
+			}
+		}
+	}
+	if desc == nil && deps.intent != nil {
+		// Fallback: startup snapshot (legacy path; unit-test fixtures
+		// often construct deps WITHOUT a controllerProvider).
 		for i := range deps.intent.Daemons {
 			d := &deps.intent.Daemons[i]
 			if daemon_env_overlay.NormalizeOverlayKey(d.TaskName) == taskName {
@@ -175,19 +198,34 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 	termStart := time.Now()
 	const gracefulTimeoutMs = 5000
 	if err := terminateFn(*desc); err != nil {
-		// Terminate failure is recorded but does NOT block the spawn:
-		// the daemon might already be dead, the PID might be unknown,
-		// or the process might have crashed. The subsequent spawnFn
-		// will either succeed (creating a fresh child) or fail loudly
-		// with its own audit row.
+		// Terminate failure ABORTS the respawn (closes bot PR#222 P2-4:
+		// previously we logged warn + continued to spawn unconditionally,
+		// which could leave the old process alive while starting another
+		// instance — duplicate-process / port-collision risk under
+		// production wiring where terminate can fail for active daemons
+		// when no PID is available in the startup snapshot).
+		//
+		// The handler returns the terminate error to the IPC caller so
+		// the operator sees the precise failure mode instead of a
+		// silent "respawn succeeded" + a port-conflict crash on the
+		// next health check.
 		_ = deps.events.Emit(api.SupervisorEvent{
-			Severity: "warn",
+			Severity: "error",
 			Source:   "ipc",
 			Event:    "supervisor-respawn-terminate-failed",
 			Body: map[string]any{
 				"task_name": taskName,
 				"err":       err.Error(),
+				"action":    "respawn aborted",
 			},
+		})
+		return writeIPCFrame(conn, api.IPCResponse{
+			ID: req.ID,
+			Error: &api.IPCErr{
+				Code:    ipcErrorRespawnTerminateFailed,
+				Message: "terminate failed; respawn aborted to prevent duplicate process: " + err.Error(),
+			},
+			Final: true,
 		})
 	}
 	if time.Since(termStart) > gracefulTimeoutMs*time.Millisecond {

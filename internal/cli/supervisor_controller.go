@@ -31,6 +31,7 @@ package cli
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -44,6 +45,16 @@ type supervisorController struct {
 	eventLoop    *api.EventLoop
 	tracker      *DaemonRuntimeTracker
 	smStates     sync.Map // taskName -> api.SMState
+	// queuedActions tracks per-task queued action ("" | "respawn" | "none")
+	// preserved across StExiting transitions per SM spec §"queued_action
+	// preservation across supervisor exit" (api/supervisor_state_machine.go:99).
+	// Closes bot PR#222 P1-3: previously the controller hardcoded
+	// SMContext.QueuedAction="" so EvManualRestart → StExiting then
+	// EvChildExit always went to StIdle instead of bouncing back to
+	// StSpawning for the queued respawn. handleLoopEvent reads this map
+	// into SMContext.QueuedAction and writes it back based on the SM's
+	// side-effect string (which encodes set/clear queued_action directives).
+	queuedActions sync.Map // taskName -> string
 	events       *api.SupervisorEventLog
 	graceful     *gracefulCounter
 	daemonIntent *daemonIntentCache
@@ -328,11 +339,21 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 		gracefulInProgress = c.graceful.InProgress()
 	}
 
+	// Read the per-task queued action (preserved across StExiting per SM
+	// spec). Closes bot PR#222 P1-3: previously hardcoded "" — see
+	// supervisor_controller.go queuedActions field docstring.
+	queuedAction := ""
+	if v, ok := c.queuedActions.Load(ev.TaskName); ok {
+		if qa, ok := v.(string); ok {
+			queuedAction = qa
+		}
+	}
+
 	smCtx := api.SMContext{
 		IntentDesired:      intentDesired,
 		IntentIsActiveStop: activeStop,
 		Failures:           failures,
-		QueuedAction:       "", // cold-start default; supervisor-state.json hydration is a future task
+		QueuedAction:       queuedAction,
 		GracefulInProgress: gracefulInProgress,
 	}
 
@@ -367,6 +388,32 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 	// took effect. The SM transition matched (matched=true), so smStates
 	// reflects the new state immediately; persistence is a separate axis.
 	c.smStates.Store(ev.TaskName, newState)
+
+	// Apply queued_action updates encoded in the SM's `side` string per
+	// spec §"queued_action preservation". Closes bot PR#222 P1-3:
+	// without this write-back, the queuedAction field stays "" forever
+	// and the EvManualRestart → StExiting → EvChildExit → StSpawning
+	// path is unreachable.
+	//
+	// Substring matches mirror the side-string vocabulary defined in
+	// api/supervisor_state_machine.go (StRunning+EvManualRestart returns
+	// "issue terminate, queued_action=respawn"; StExiting+EvIntentUpdate
+	// returns "set queued_action=respawn" or "clear queued_action"; etc.).
+	// "queued_action=none" implies clearing; "queued_action=respawn"
+	// implies setting respawn.
+	switch {
+	case strings.Contains(side, "queued_action=respawn"):
+		c.queuedActions.Store(ev.TaskName, "respawn")
+	case strings.Contains(side, "queued_action=none"), strings.Contains(side, "clear queued_action"):
+		c.queuedActions.Store(ev.TaskName, "")
+	}
+	// Once a daemon transitions out of StExiting (back to StIdle or to
+	// StSpawning via queued respawn), the queued action has been
+	// consumed — clear it so a future EvManualRestart starts from a
+	// clean slate.
+	if newState == api.StIdle || newState == api.StSpawning {
+		c.queuedActions.Store(ev.TaskName, "")
+	}
 	if persistBefore {
 		// Best-effort persist - audit-log on failure but do NOT block
 		// the side effect. The tracker mirrors the SM state into

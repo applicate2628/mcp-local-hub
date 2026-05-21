@@ -1285,6 +1285,25 @@ func classifyLSPEntries(entries map[string]*ScanEntry, reg *Registry) {
 			continue
 		}
 		sort.Slice(hubs, func(i, j int) bool { return hubs[i].Name < hubs[j].Name })
+		// Sort donors deterministically (closes bot PR#222 P2-6: when
+		// multiple donors share the same clientName but different
+		// entries, the previous code overwrote hub.LegacyConflict[d.clientName]
+		// in donorsByPair-map iteration order, hiding all but the last
+		// non-deterministically. Sorting by (clientName, entryName)
+		// makes the surviving conflict entry reproducible — the
+		// alphabetically-last entry for that client always wins.
+		//
+		// LIMITATION: this preserves ONE conflict entry per client, not
+		// ALL of them. Preserving ALL would require changing
+		// LegacyConflict to `map[string][]ClientEntry` which is a
+		// public-API type change (types.go:103, JSON wire format,
+		// downstream consumers). Tracked as a follow-up.
+		sort.Slice(ds, func(i, j int) bool {
+			if ds[i].clientName != ds[j].clientName {
+				return ds[i].clientName < ds[j].clientName
+			}
+			return ds[i].entryName < ds[j].entryName
+		})
 		for _, d := range ds {
 			for _, hub := range hubs {
 				if hub.LegacyConflict == nil {
