@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/serena_routing"
 	"mcp-local-hub/internal/gui"
 	"mcp-local-hub/internal/tray"
 
@@ -298,6 +299,24 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 	// once the listener is live.
 	api.SupervisorIPCStatusFn = api.DialSupervisorIPCStatus
 	s := gui.NewServer(gui.Config{Port: port, Version: versionString()})
+
+	// Phase C.2 wiring (v0.5.x plan §C.2): construct the serena routing
+	// dependencies and hand them to the GUI server. The /serena/mcp
+	// handler is registered unconditionally by NewServer but emits HTTP
+	// 503 with `phase_e_status: deferred` until production deps land.
+	// Wiring failures (registry path resolution) degrade gracefully —
+	// the dashboard + every other route still works; only the
+	// path-aware serena routing is unavailable.
+	registryPath, regErr := api.DefaultRegistryPath()
+	if regErr == nil {
+		reg := api.NewRegistry(registryPath)
+		resolver := serena_routing.NewWorkspaceResolver(reg, registryPath)
+		sessions := serena_routing.NewSessionRouter()
+		s.SetSerenaRouterProduction(resolver, sessions)
+	} else {
+		fmt.Fprintf(cmd.OutOrStderr(),
+			"serena-router: registry path resolution failed; /serena/mcp will return 503 until next restart: %v\n", regErr)
+	}
 	s.OnActivateWindow(func() error {
 		// Phase 3B-II C2: focus the existing Chrome app-mode dashboard
 		// via Win32 SetForegroundWindow. Title-substring "Local
