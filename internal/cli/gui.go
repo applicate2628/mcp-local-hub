@@ -310,9 +310,14 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 	registryPath, regErr := api.DefaultRegistryPath()
 	if regErr == nil {
 		reg := api.NewRegistry(registryPath)
+		if err := reg.Load(); err != nil {
+			fmt.Fprintf(cmd.OutOrStderr(),
+				"serena-router: registry load warning (will retry lazily on first call): %v\n", err)
+		}
 		resolver := serena_routing.NewWorkspaceResolver(reg, registryPath)
 		sessions := serena_routing.NewSessionRouter()
 		s.SetSerenaRouterProduction(resolver, sessions)
+		go runSessionCleanupTicker(ctx, sessions, time.Hour, serena_routing.DefaultSessionTTL)
 	} else {
 		fmt.Fprintf(cmd.OutOrStderr(),
 			"serena-router: registry path resolution failed; /serena/mcp will return 503 until next restart: %v\n", regErr)
@@ -550,7 +555,7 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 						fmt.Fprintf(cmd.OutOrStderr(), "tray: toggle state-read-relax: %v\n", err)
 					}
 				},
-				Quit:    stop,
+				Quit: stop,
 				QuitAndStopAll: func() {
 					// Stop all via HTTP (so the Dashboard sees the SSE
 					// lifecycle), then trigger the GUI shutdown. Errors
@@ -629,6 +634,22 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 	go runAutoCleanupTicker(ctx, int(s.Port()))
 
 	return <-errCh
+}
+
+// runSessionCleanupTicker drops serena session bindings whose lastSeen
+// is older than ttl. It is owned by the GUI server lifecycle and exits
+// when ctx is cancelled.
+func runSessionCleanupTicker(ctx context.Context, sessions *serena_routing.SessionRouter, interval, ttl time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			_ = sessions.CleanupWithTTL(now, ttl)
+		}
+	}
 }
 
 // runForceDiagnostic implements the bare `--force` flow: Probe,

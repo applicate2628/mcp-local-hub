@@ -212,6 +212,14 @@ func (r *WorkspaceResolver) resolveRelative(rel string, entries []api.WorkspaceE
 			continue
 		}
 		candidate := filepath.Join(ws.WorkspacePath, rel)
+		cleanCandidate := filepath.Clean(candidate)
+		cleanWorkspace := filepath.Clean(ws.WorkspacePath)
+		relativeToWorkspace, err := filepath.Rel(cleanWorkspace, cleanCandidate)
+		if err != nil || filepath.IsAbs(relativeToWorkspace) ||
+			relativeToWorkspace == ".." ||
+			strings.HasPrefix(relativeToWorkspace, ".."+string(os.PathSeparator)) {
+			continue
+		}
 		if _, err := os.Lstat(candidate); err == nil {
 			e := sorted[i]
 			return &e, nil

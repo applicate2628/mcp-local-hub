@@ -132,6 +132,57 @@ func TestResolveByPath_RelativeMatchFirstWorkspace(t *testing.T) {
 	}
 }
 
+func TestResolveByPath_RelativePathDotDotEscapeRejected(t *testing.T) {
+	root := t.TempDir()
+	wsAlpha := makeWorkspace(t, root, "Alpha")
+	wsBeta := makeWorkspace(t, root, "Beta")
+
+	betaFile := filepath.Join(wsBeta, "file.cpp")
+	if err := os.WriteFile(betaFile, []byte(""), 0o644); err != nil {
+		t.Fatalf("write beta file: %v", err)
+	}
+	externalFile := filepath.Join(root, "external", "foo")
+	if err := os.MkdirAll(filepath.Dir(externalFile), 0o755); err != nil {
+		t.Fatalf("mkdir external: %v", err)
+	}
+	if err := os.WriteFile(externalFile, []byte(""), 0o644); err != nil {
+		t.Fatalf("write external file: %v", err)
+	}
+
+	regPath := makeRegistryWithSerena(t, root, []api.WorkspaceEntry{
+		{WorkspaceKey: api.WorkspaceKey(wsBeta), WorkspacePath: wsBeta, Backend: "serena", Port: 9302},
+		{WorkspaceKey: api.WorkspaceKey(wsAlpha), WorkspacePath: wsAlpha, Backend: "serena", Port: 9301},
+	})
+
+	reg := api.NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	resolver := NewWorkspaceResolver(reg, regPath)
+
+	entry, err := resolver.ResolveByPath(filepath.Join("..", "Beta", "file.cpp"))
+	if err != nil {
+		t.Fatalf("ResolveByPath beta escape: %v", err)
+	}
+	if entry == nil {
+		t.Fatal("nil entry without error")
+	}
+	if entry.WorkspacePath == wsAlpha {
+		t.Fatalf("ResolveByPath returned Alpha for escaped relative path; want Beta")
+	}
+	if entry.WorkspacePath != wsBeta {
+		t.Fatalf("WorkspacePath = %q, want %q", entry.WorkspacePath, wsBeta)
+	}
+
+	entry, err = resolver.ResolveByPath(filepath.Join("..", "external", "foo"))
+	if !errors.Is(err, ErrWorkspaceNotFound) {
+		t.Fatalf("ResolveByPath external escape err = %v, want ErrWorkspaceNotFound", err)
+	}
+	if entry != nil {
+		t.Fatalf("ResolveByPath external escape entry = %+v, want nil", entry)
+	}
+}
+
 func TestResolveByPath_NoMatch_ReturnsErrWorkspaceNotFound(t *testing.T) {
 	root := t.TempDir()
 	wsPath := makeWorkspace(t, root, "Project")

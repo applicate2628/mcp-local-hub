@@ -60,22 +60,45 @@ var serenaRouterTestSeam func() *serenaRouterDeps
 // tool-call traffic. Tests override via UpstreamTimeout.
 const serenaUpstreamTimeout = 60 * time.Second
 
-// defaultSerenaClient is the production http.Client. Client.Timeout
-// stays zero so a long-lived SSE stream is not killed mid-flight; the
-// per-request context bounds connect + response-header phase, and the
-// transport's ResponseHeaderTimeout enforces the per-stream first-byte
-// budget independently.
-var defaultSerenaClient = &http.Client{
-	Timeout: 0,
-	Transport: &http.Transport{
+func newSerenaTransport(upstreamTimeout time.Duration) *http.Transport {
+	if upstreamTimeout <= 0 {
+		upstreamTimeout = serenaUpstreamTimeout
+	}
+	dialTimeout := 5 * time.Second
+	if upstreamTimeout < dialTimeout {
+		dialTimeout = upstreamTimeout
+	}
+	return &http.Transport{
 		DialContext: (&net.Dialer{
-			Timeout: 5 * time.Second,
+			Timeout: dialTimeout,
 		}).DialContext,
 		MaxIdleConnsPerHost:   8,
 		IdleConnTimeout:       90 * time.Second,
-		ResponseHeaderTimeout: serenaUpstreamTimeout,
+		ResponseHeaderTimeout: upstreamTimeout,
 		DisableCompression:    true,
-	},
+	}
+}
+
+// defaultSerenaClient is the production http.Client. Client.Timeout
+// stays zero so a long-lived SSE stream is not killed mid-flight; the
+// transport's dial timeout + ResponseHeaderTimeout enforce the
+// connect + first-byte budget independently from body streaming.
+var defaultSerenaClient = &http.Client{
+	Timeout:   0,
+	Transport: newSerenaTransport(serenaUpstreamTimeout),
+}
+
+func serenaHTTPClient(httpClient *http.Client, upstreamTimeout time.Duration) *http.Client {
+	if httpClient != nil {
+		return httpClient
+	}
+	if upstreamTimeout == serenaUpstreamTimeout {
+		return defaultSerenaClient
+	}
+	return &http.Client{
+		Timeout:   0,
+		Transport: newSerenaTransport(upstreamTimeout),
+	}
 }
 
 // serenaRouterDepsProd returns the production deps bundle. When the
@@ -197,6 +220,12 @@ func writeWorkspaceNotFound(w http.ResponseWriter, resolvedPath string, missingS
 	_ = json.NewEncoder(w).Encode(body)
 }
 
+func writeRequiredFieldError(w http.ResponseWriter, field string) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusBadRequest)
+	_, _ = fmt.Fprintf(w, `{"error": "missing required field: %s"}`, field)
+}
+
 func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
@@ -213,10 +242,6 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	if auditFn == nil {
 		auditFn = api.LogHubMcpEvent
 	}
-	httpClient := deps.HTTPClient
-	if httpClient == nil {
-		httpClient = defaultSerenaClient
-	}
 	upstreamURLFn := deps.UpstreamURLFn
 	if upstreamURLFn == nil {
 		upstreamURLFn = defaultUpstreamURL
@@ -225,6 +250,7 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	if upstreamTimeout <= 0 {
 		upstreamTimeout = serenaUpstreamTimeout
 	}
+	httpClient := serenaHTTPClient(deps.HTTPClient, upstreamTimeout)
 
 	const maxBodyBytes = 4 << 20
 	body, rerr := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes+1))
@@ -244,6 +270,10 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if tb.Method == "" {
 		http.Error(w, "missing required field: method", http.StatusBadRequest)
+		return
+	}
+	if tb.Params.Name == "" {
+		writeRequiredFieldError(w, "params.name")
 		return
 	}
 
@@ -288,10 +318,7 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	connectCtx, connectCancel := context.WithTimeout(r.Context(), upstreamTimeout)
-	defer connectCancel()
-
-	upstreamReq, ureqErr := http.NewRequestWithContext(connectCtx, http.MethodPost, upstreamURL, bytes.NewReader(body))
+	upstreamReq, ureqErr := http.NewRequestWithContext(r.Context(), http.MethodPost, upstreamURL, bytes.NewReader(body))
 	if ureqErr != nil {
 		http.Error(w, "build upstream request: "+ureqErr.Error(), http.StatusInternalServerError)
 		return

@@ -2,8 +2,13 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
+	"time"
+
+	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/serena_routing"
 )
 
 func TestGuiCmd_HelpIncludesFlags(t *testing.T) {
@@ -79,5 +84,39 @@ func TestResolveGuiPort(t *testing.T) {
 					tc.flagChanged, tc.flagValue, tc.settingValue, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestRunSessionCleanupTicker_ExpiresOldSessions(t *testing.T) {
+	oldNow := time.Now().Add(-2 * time.Hour)
+	sessions := serena_routing.NewSessionRouterWithClock(func() time.Time { return oldNow })
+	sessions.BindSession("s1", &api.WorkspaceEntry{WorkspacePath: "alpha"})
+	sessions.BindSession("s2", &api.WorkspaceEntry{WorkspacePath: "beta"})
+	if got := sessions.Len(); got != 2 {
+		t.Fatalf("Len before cleanup = %d, want 2", got)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		runSessionCleanupTicker(ctx, sessions, 10*time.Millisecond, time.Hour)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("runSessionCleanupTicker did not exit after ctx cancel")
+		}
+	})
+
+	deadline := time.After(time.Second)
+	for sessions.Len() != 0 {
+		select {
+		case <-deadline:
+			t.Fatalf("Len after cleanup ticker = %d, want 0", sessions.Len())
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }

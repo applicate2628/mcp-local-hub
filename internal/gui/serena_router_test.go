@@ -3,14 +3,14 @@
 // Phase C.2 tests for the /serena/mcp path-aware router. The eight
 // canonical scenarios in plan v10 test contract are covered here:
 //
-//   1. TestSerenaRouter_TwoWorkspaces_PathArgRoutesCorrectly
-//   2. TestSerenaRouter_WorkspaceNotFound_Returns503
-//   3. TestSerenaRouter_UpstreamTimeout_Returns504
-//   4. TestSerenaRouter_UpstreamConnectionRefused_Returns502
-//   5. TestSerenaRouter_MissingPathArg_FallsThroughToSessionRouter
-//   6. TestSerenaRouter_MalformedToolBody_Returns400
-//   7. TestSerenaRouter_PreservesMcpSessionIdHeader
-//   8. TestSerenaRouter_PreservesContentTypeStreaming
+//  1. TestSerenaRouter_TwoWorkspaces_PathArgRoutesCorrectly
+//  2. TestSerenaRouter_WorkspaceNotFound_Returns503
+//  3. TestSerenaRouter_UpstreamTimeout_Returns504
+//  4. TestSerenaRouter_UpstreamConnectionRefused_Returns502
+//  5. TestSerenaRouter_MissingPathArg_FallsThroughToSessionRouter
+//  6. TestSerenaRouter_MalformedToolBody_Returns400
+//  7. TestSerenaRouter_PreservesMcpSessionIdHeader
+//  8. TestSerenaRouter_PreservesContentTypeStreaming
 //
 // Each test wires a stub workspaceResolver + sessionRouter + an
 // httptest upstream mock. The seam injection point is
@@ -26,6 +26,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -33,6 +35,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/serena_routing"
 )
 
 // resetSerenaRouterTestSeam restores the global seam after the test
@@ -132,6 +135,69 @@ func buildToolCallBody(t *testing.T, toolName string, arguments any) []byte {
 		t.Fatalf("marshal envelope: %v", err)
 	}
 	return body
+}
+
+func buildToolCallBodyWithoutName(t *testing.T, arguments any) []byte {
+	t.Helper()
+	argsRaw, err := json.Marshal(arguments)
+	if err != nil {
+		t.Fatalf("marshal arguments: %v", err)
+	}
+	env := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"arguments": json.RawMessage(argsRaw),
+		},
+	}
+	body, err := json.Marshal(env)
+	if err != nil {
+		t.Fatalf("marshal envelope: %v", err)
+	}
+	return body
+}
+
+func makeSerenaWorkspace(t *testing.T, root, name string) string {
+	t.Helper()
+	wsPath := filepath.Join(root, name)
+	if err := os.MkdirAll(filepath.Join(wsPath, ".serena"), 0o755); err != nil {
+		t.Fatalf("mkdir serena workspace: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wsPath, ".serena", "project.yml"), []byte("project_name: "+name+"\n"), 0o644); err != nil {
+		t.Fatalf("write serena marker: %v", err)
+	}
+	canon, err := api.CanonicalWorkspacePath(wsPath)
+	if err != nil {
+		t.Fatalf("canonicalize workspace: %v", err)
+	}
+	return canon
+}
+
+func writeWorkspaceFile(t *testing.T, wsPath string, elems ...string) string {
+	t.Helper()
+	path := filepath.Join(append([]string{wsPath}, elems...)...)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir workspace file dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("// fixture\n"), 0o644); err != nil {
+		t.Fatalf("write workspace file: %v", err)
+	}
+	return path
+}
+
+func testServerPort(t *testing.T, ts *httptest.Server) int {
+	t.Helper()
+	hostPort := strings.TrimPrefix(ts.URL, "http://")
+	_, portText, err := net.SplitHostPort(hostPort)
+	if err != nil {
+		t.Fatalf("parse test server URL %q: %v", ts.URL, err)
+	}
+	var port int
+	if _, err := fmt.Sscanf(portText, "%d", &port); err != nil {
+		t.Fatalf("parse test server port %q: %v", portText, err)
+	}
+	return port
 }
 
 // postSerena issues a same-origin POST /serena/mcp with body and the
@@ -319,6 +385,56 @@ func TestSerenaRouter_UpstreamTimeout_Returns504(t *testing.T) {
 	}
 }
 
+func TestSerenaRouter_SSEStreamSurvivesPastTimeoutBoundary(t *testing.T) {
+	const frameCount = 4
+	upstreamTimeout := 150 * time.Millisecond
+
+	frames := make([][]byte, 0, frameCount)
+	for i := 1; i <= frameCount; i++ {
+		frames = append(frames, []byte(fmt.Sprintf("event: tick\ndata: {\"frame\":%d}\n\n", i)))
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("upstream test server does not support Flusher")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		for _, frame := range frames {
+			_, _ = w.Write(frame)
+			flusher.Flush()
+			time.Sleep(100 * time.Millisecond)
+		}
+	}))
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	resolver := &stubResolver{entries: []*api.WorkspaceEntry{ws}}
+	deps := &serenaRouterDeps{
+		Resolver:        resolver,
+		Sessions:        NewInMemorySessionRouter(),
+		UpstreamURLFn:   func(ws *api.WorkspaceEntry) string { return ts.URL },
+		UpstreamTimeout: upstreamTimeout,
+	}
+	s := newSerenaTestServer(t, deps)
+
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"})
+	rr := postSerena(t, s, body, nil)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if ct := rr.Header().Get("Content-Type"); !strings.Contains(strings.ToLower(ct), "text/event-stream") {
+		t.Errorf("downstream Content-Type = %q, want text/event-stream", ct)
+	}
+	got := rr.Body.Bytes()
+	want := bytes.Join(frames, nil)
+	if !bytes.Equal(got, want) {
+		t.Fatalf("downstream SSE stream truncated or changed:\n got = %q\nwant = %q", got, want)
+	}
+}
+
 // ---------------------------------------------------------------------
 // Test 4: TestSerenaRouter_UpstreamConnectionRefused_Returns502
 // ---------------------------------------------------------------------
@@ -475,6 +591,37 @@ func TestSerenaRouter_MalformedToolBody_Returns400(t *testing.T) {
 	}
 }
 
+func TestSerenaRouter_MissingParamsName_Returns400(t *testing.T) {
+	hit := &upstreamHit{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit.record(r)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	resolver := &stubResolver{entries: []*api.WorkspaceEntry{ws}}
+	deps := &serenaRouterDeps{
+		Resolver:      resolver,
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	body := buildToolCallBodyWithoutName(t, map[string]any{"relative_path": "/proj/alpha/x"})
+	rr := postSerena(t, s, body, nil)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	if got, want := strings.TrimSpace(rr.Body.String()), `{"error": "missing required field: params.name"}`; got != want {
+		t.Fatalf("body = %q, want %q", got, want)
+	}
+	if hit.called {
+		t.Fatal("upstream was hit for malformed tool body")
+	}
+}
+
 // ---------------------------------------------------------------------
 // Test 7: TestSerenaRouter_PreservesMcpSessionIdHeader
 // ---------------------------------------------------------------------
@@ -581,6 +728,104 @@ func TestSerenaRouter_PreservesContentTypeStreaming(t *testing.T) {
 	want := append(append(append([]byte{}, frame1...), frame2...), frame3...)
 	if !bytes.Equal(got, want) {
 		t.Errorf("downstream body mismatch:\n got = %q\nwant = %q", got, want)
+	}
+}
+
+func TestSerenaRouter_RealResolverIntegration_RoutesPathArgToCorrectWorkspace(t *testing.T) {
+	resetSerenaRouterTestSeam(t)
+	serenaRouterTestSeam = nil
+
+	root := t.TempDir()
+	wsAlpha := makeSerenaWorkspace(t, root, "Alpha")
+	wsBeta := makeSerenaWorkspace(t, root, "Beta")
+	alphaFile := writeWorkspaceFile(t, wsAlpha, "src", "alpha.go")
+	betaFile := writeWorkspaceFile(t, wsBeta, "src", "beta.go")
+
+	var alphaHits atomic.Int32
+	tsAlpha := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		alphaHits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"workspace":"alpha"}}`))
+	}))
+	t.Cleanup(tsAlpha.Close)
+
+	var betaHits atomic.Int32
+	tsBeta := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		betaHits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"workspace":"beta"}}`))
+	}))
+	t.Cleanup(tsBeta.Close)
+
+	regPath := filepath.Join(root, "workspaces.yaml")
+	reg := api.NewRegistry(regPath)
+	if err := reg.PutSerena(api.WorkspaceEntry{
+		WorkspaceKey:  api.WorkspaceKey(wsAlpha),
+		WorkspacePath: wsAlpha,
+		Language:      api.SerenaLanguageSentinel,
+		Backend:       "serena",
+		Port:          testServerPort(t, tsAlpha),
+		TaskName:      "mcp-local-hub-serena-alpha",
+	}); err != nil {
+		t.Fatalf("PutSerena alpha: %v", err)
+	}
+	if err := reg.PutSerena(api.WorkspaceEntry{
+		WorkspaceKey:  api.WorkspaceKey(wsBeta),
+		WorkspacePath: wsBeta,
+		Language:      api.SerenaLanguageSentinel,
+		Backend:       "serena",
+		Port:          testServerPort(t, tsBeta),
+		TaskName:      "mcp-local-hub-serena-beta",
+	}); err != nil {
+		t.Fatalf("PutSerena beta: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save registry: %v", err)
+	}
+	if err := reg.Load(); err != nil {
+		t.Fatalf("Load registry: %v", err)
+	}
+
+	resolver := serena_routing.NewWorkspaceResolver(reg, regPath)
+	sessions := serena_routing.NewSessionRouter()
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s.SetSerenaRouterProduction(resolver, sessions)
+
+	bodyAlpha := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": alphaFile})
+	rrAlpha := postSerena(t, s, bodyAlpha, nil)
+	if rrAlpha.Code != http.StatusOK {
+		t.Fatalf("alpha status = %d, want 200; body=%s", rrAlpha.Code, rrAlpha.Body.String())
+	}
+	if got := alphaHits.Load(); got != 1 {
+		t.Fatalf("alpha hits = %d, want 1", got)
+	}
+	if got := betaHits.Load(); got != 0 {
+		t.Fatalf("beta hits after alpha request = %d, want 0", got)
+	}
+
+	bodyBeta := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": betaFile})
+	rrBeta := postSerena(t, s, bodyBeta, nil)
+	if rrBeta.Code != http.StatusOK {
+		t.Fatalf("beta status = %d, want 200; body=%s", rrBeta.Code, rrBeta.Body.String())
+	}
+	if got := alphaHits.Load(); got != 1 {
+		t.Fatalf("alpha hits after beta request = %d, want 1", got)
+	}
+	if got := betaHits.Load(); got != 1 {
+		t.Fatalf("beta hits = %d, want 1", got)
+	}
+
+	unknown := writeWorkspaceFile(t, filepath.Join(root, "Unregistered"), "src", "unknown.go")
+	bodyUnknown := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": unknown})
+	rrUnknown := postSerena(t, s, bodyUnknown, nil)
+	if rrUnknown.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unknown status = %d, want 503; body=%s", rrUnknown.Code, rrUnknown.Body.String())
+	}
+	if got := alphaHits.Load(); got != 1 {
+		t.Fatalf("alpha hits after unknown request = %d, want 1", got)
+	}
+	if got := betaHits.Load(); got != 1 {
+		t.Fatalf("beta hits after unknown request = %d, want 1", got)
 	}
 }
 
