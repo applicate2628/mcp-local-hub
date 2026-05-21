@@ -493,6 +493,70 @@ client_bindings:
 	}
 }
 
+
+func TestDemigrate_MarkerPreseededButLiveURLMismatch_FailsClosed(t *testing.T) {
+	// Regression guard: a stale marker must NOT be sufficient to
+	// delete an entry when the current live shape no longer matches
+	// the manifest-managed URL/relay expectation.
+	managedEntriesTestHelper(t)
+	if err := RecordManagedEntry("claude-code", "memory"); err != nil {
+		t.Fatalf("seed marker: %v", err)
+	}
+
+	tmp := t.TempDir()
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("HOME", tmp)
+	claudePath := filepath.Join(tmp, ".claude.json")
+	_ = os.WriteFile(claudePath, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9999/mcp"}}}`), 0o600)
+	latest := claudePath + ".bak-mcp-local-hub-20260101-000000"
+	_ = os.WriteFile(latest, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0o600)
+	sentinel := claudePath + ".bak-mcp-local-hub-original"
+	_ = os.WriteFile(sentinel, []byte(`{"mcpServers":{}}`), 0o600)
+
+	manifestDir := t.TempDir()
+	memDir := filepath.Join(manifestDir, "memory")
+	_ = os.MkdirAll(memDir, 0o700)
+	_ = os.WriteFile(filepath.Join(memDir, "manifest.yaml"), []byte(
+		`name: memory
+kind: global
+transport: stdio-bridge
+command: npx
+daemons:
+  - name: default
+    port: 9200
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+`), 0o600)
+
+	a := NewAPI()
+	report, err := a.Demigrate(DemigrateOpts{
+		Servers:  []string{"memory"},
+		ScanOpts: ScanOpts{ManifestDir: manifestDir},
+		Writer:   io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("Demigrate: %v", err)
+	}
+	if len(report.Restored) != 0 {
+		t.Fatalf("expected 0 restored with stale marker + live mismatch, got %+v", report.Restored)
+	}
+	if len(report.Failed) != 1 {
+		t.Fatalf("expected 1 failure, got %d: %+v", len(report.Failed), report.Failed)
+	}
+	lowerErr := strings.ToLower(report.Failed[0].Err)
+	if !strings.Contains(lowerErr, "no longer matches manifest-managed shape") {
+		t.Errorf("failure should mention manifest-shape mismatch; got %q", report.Failed[0].Err)
+	}
+	live, _ := os.ReadFile(claudePath)
+	if !strings.Contains(string(live), `"memory"`) {
+		t.Errorf("live entry was deleted despite stale marker mismatch; file=%s", live)
+	}
+}
+
 func TestDemigrate_OnlySentinelExistsAndLacksEntry_BackfillMatch_Succeeds(t *testing.T) {
 	// Originally TestDemigrate_FailsWhenOnlySentinelExistsAndLacksEntry
 	// (Bot R4 P1 reproducer). Assertions FLIPPED under PR #220 r2

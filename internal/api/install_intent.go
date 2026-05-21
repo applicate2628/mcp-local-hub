@@ -561,6 +561,22 @@ func stopTaskNamesForServer(server, daemonFilter string) ([]string, error) {
 			if tn == "" {
 				continue
 			}
+			// B.1: this walk owns the LSP-server stop set
+			// (kind=workspace-scoped LSP servers: mcp-language-server,
+			// gopls-mcp). Serena (sentinel) rows belong to a different
+			// server slug and must NEVER be swept by this LSP path,
+			// regardless of daemonFilter — serena lifecycle goes
+			// through its own stop path. v8 simplification of v6
+			// "backend-aware filter" wording: the only correct LSP
+			// filter is "skip sentinel rows unconditionally".
+			//
+			// Closes codex impl-r1 HIGH + sonnet impl-r1 MEDIUM B1:
+			// previous code allowed sentinel rows when daemonFilter ==
+			// "@serena", which would let an LSP stop call accidentally
+			// sweep serena tasks. Unconditional skip prevents that.
+			if e.Language == SerenaLanguageSentinel {
+				continue
+			}
 			if daemonFilter != "" && e.Language != daemonFilter {
 				continue
 			}

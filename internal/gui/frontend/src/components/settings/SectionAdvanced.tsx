@@ -1,4 +1,4 @@
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { postAction } from "../../lib/settings-api";
 import type { SettingsSnapshot } from "../../lib/settings-types";
 import { SectionAdvancedDiagnostics } from "./SectionAdvancedDiagnostics";
@@ -10,6 +10,71 @@ export type SectionAdvancedProps = {
 export function SectionAdvanced({ snapshot: _ }: SectionAdvancedProps): preact.JSX.Element {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // state-read-relax toggle — see internal/gui/state_relax_setting_windows.go
+  // for the underlying HKCU\Environment write + WM_SETTINGCHANGE
+  // broadcast. The toggle is platform-gated: on POSIX the backend
+  // returns 501, so we surface the disabled state + hint instead of
+  // pretending the switch is wired.
+  const [relaxEnabled, setRelaxEnabled] = useState<boolean | null>(null);
+  const [relaxSupported, setRelaxSupported] = useState<boolean>(true);
+  const [relaxBusy, setRelaxBusy] = useState<boolean>(false);
+  const [relaxMsg, setRelaxMsg] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await fetch("/api/settings/state-read-relax");
+        if (cancelled) return;
+        if (r.status === 501) {
+          setRelaxSupported(false);
+          setRelaxEnabled(false);
+          return;
+        }
+        if (!r.ok) {
+          setRelaxMsg(`GET failed: HTTP ${r.status}`);
+          return;
+        }
+        const body = (await r.json()) as { enabled?: boolean };
+        setRelaxEnabled(body.enabled === true);
+      } catch (e: any) {
+        if (!cancelled) setRelaxMsg(`GET error: ${e?.message ?? String(e)}`);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function toggleRelax(next: boolean) {
+    if (!relaxSupported || relaxBusy) return;
+    setRelaxBusy(true);
+    setRelaxMsg(null);
+    try {
+      const r = await fetch("/api/settings/state-read-relax", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: next }),
+      });
+      if (!r.ok) {
+        setRelaxMsg(`Toggle failed: HTTP ${r.status}`);
+        return;
+      }
+      const body = (await r.json()) as { enabled?: boolean; restart_required?: boolean };
+      setRelaxEnabled(body.enabled === true);
+      if (body.restart_required) {
+        setRelaxMsg(
+          `${next ? "Enabled" : "Disabled"}. Restart mcphub (Dashboard → Restart supervisor, or full mcphub restart) so the new env value reaches the running supervisor.`,
+        );
+      } else {
+        setRelaxMsg(`Already ${next ? "enabled" : "disabled"}; no change.`);
+      }
+    } catch (e: any) {
+      setRelaxMsg(`Toggle error: ${e?.message ?? String(e)}`);
+    } finally {
+      setRelaxBusy(false);
+    }
+  }
 
   async function openFolder() {
     setBusy(true);
@@ -61,6 +126,48 @@ export function SectionAdvanced({ snapshot: _ }: SectionAdvancedProps): preact.J
         </button>
       </div>
       {err ? <p class="error-banner" role="alert">Could not open folder: {err}</p> : null}
+
+      <h3 style="margin-top: 16px">Autorun on corp-managed Windows</h3>
+      <p class="settings-section-help">
+        Required on corp-managed Windows hosts whose
+        <code>%LOCALAPPDATA%</code> inherits a Domain Users /
+        Authenticated Users ACE that you cannot remove. Without this,
+        mcphub's supervisor crashes at logon-trigger startup with
+        "insecure parent directory" and the Dashboard shows
+        "Failed to load" with no daemons. When enabled, mcphub writes
+        the user-scope <code>MCPHUB_ALLOW_UNHARDENED_STATE_READ=1</code>
+        env var to the Windows registry (HKCU\Environment);
+        Task-Scheduler-spawned mcphub processes inherit it at every
+        logon, so the autostart pipeline actually works. Leave off on
+        single-user dev machines where this isn't needed.
+      </p>
+      <label class="settings-toggle" style="display: inline-flex; align-items: center; gap: 6px">
+        <input
+          type="checkbox"
+          data-testid="state-relax-toggle"
+          disabled={!relaxSupported || relaxBusy || relaxEnabled === null}
+          checked={relaxEnabled === true}
+          onChange={(ev) => void toggleRelax((ev.currentTarget as HTMLInputElement).checked)}
+        />
+        <span>Autorun on corp-managed Windows (sets MCPHUB_ALLOW_UNHARDENED_STATE_READ)</span>
+      </label>
+      {!relaxSupported && (
+        <p class="settings-section-help" style="margin-top: 4px; color: #666">
+          (Not supported on this OS — set <code>MCPHUB_ALLOW_UNHARDENED_STATE_READ=1</code> in
+          your shell profile if needed.)
+        </p>
+      )}
+      {relaxMsg && (
+        <p
+          class={relaxMsg.includes("failed") || relaxMsg.includes("error") ? "error-banner" : "settings-section-help"}
+          data-testid="state-relax-msg"
+          role={relaxMsg.includes("failed") || relaxMsg.includes("error") ? "alert" : undefined}
+          style="margin-top: 4px"
+        >
+          {relaxMsg}
+        </p>
+      )}
+
       <SectionAdvancedDiagnostics />
     </section>
   );

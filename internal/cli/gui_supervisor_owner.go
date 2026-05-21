@@ -222,9 +222,12 @@ func (s *supervisorOwner) startExitMonitor(proc *os.Process) {
 		// mid-runtime — log to stderr so the operator sees the
 		// captured stderr tail and a pointer to supervisor-events.log
 		// instead of inferring "MCPs gone" from an empty Dashboard.
-		if !s.stopRequested.Load() && exitErr != nil {
+		if !s.stopRequested.Load() {
 			stderrTail := strings.TrimSpace(s.stderrBuf.String())
-			if stderrTail != "" {
+			if exitErr == nil {
+				fmt.Fprintf(s.stderrSink, "warning: supervisor exited unexpectedly (PID %d): clean exit before GUI shutdown; check supervisor-events.log\n",
+					proc.Pid)
+			} else if stderrTail != "" {
 				fmt.Fprintf(s.stderrSink, "warning: supervisor exited unexpectedly (PID %d): %v; stderr tail: %s\n",
 					proc.Pid, exitErr, stderrTail)
 			} else {

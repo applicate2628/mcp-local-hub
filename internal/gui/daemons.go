@@ -79,8 +79,16 @@ func (s *Server) weeklyRefreshMembershipList(w http.ResponseWriter, _ *http.Requ
 		})
 		return
 	}
+	// B.1: the weekly-refresh membership table is LSP-only; serena
+	// (sentinel) rows must not appear in the GUI table because the
+	// "Language" column would render "@serena" which has no operator
+	// meaning. Workspace-level serena visibility lives in a different
+	// route (B.2+).
 	rows := make([]membershipRowDTO, 0, len(reg.Workspaces))
 	for _, e := range reg.Workspaces {
+		if e.Language == api.SerenaLanguageSentinel {
+			continue
+		}
 		rows = append(rows, membershipRowDTO{
 			WorkspaceKey:  e.WorkspaceKey,
 			WorkspacePath: e.WorkspacePath,

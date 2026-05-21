@@ -4,16 +4,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
 )
 
 // errBackupMissingEntry signals "this backup file does not contain
-// the named entry" inside the demigrate iteration. Treated as a
-// "skip this candidate, try older" signal — silently writing the
-// "no entry" state to live would be destructive (would delete a
-// user-installed entry that exists in live but predates the backup).
+// the named entry" inside the demigrate iteration. This is only
+// skippable for the pristine "-original" sentinel (which may predate
+// later user installs). For timestamped backups, absence is the
+// immediate pre-migrate state and must be restored (remove live entry).
 var errBackupMissingEntry = errors.New("backup does not contain entry")
 
 // DemigrateOpts controls a reverse-migration invocation. Semantics mirror
@@ -140,9 +141,9 @@ func (a *API) Demigrate(opts DemigrateOpts) (*DemigrateReport, error) {
 			// three error classes the iteration treats as "skip this
 			// backup, try older":
 			//
-			//   1. errBackupMissingEntry — backup does not contain
-			//      the entry (predates the server install). Silent
-			//      delete would be destructive; skip.
+			//   1. errBackupMissingEntry — sentinel backup does not
+			//      contain the entry (predates the server install).
+			//      Skip and keep searching older candidates.
 			//   2. clients.ErrBackupEntryAlreadyMigrated — backup
 			//      contains the entry in hub-managed form. No
 			//      pre-hub state to restore; skip.
@@ -154,6 +155,9 @@ func (a *API) Demigrate(opts DemigrateOpts) (*DemigrateReport, error) {
 					return fmt.Errorf("backup %s unreadable: %w", path, err)
 				}
 				if !has {
+					if !strings.HasSuffix(path, ".bak-mcp-local-hub-original") {
+						return adapter.RestoreEntryFromBackup(path, server)
+					}
 					return errBackupMissingEntry
 				}
 				return adapter.RestoreEntryFromBackup(path, server)
@@ -278,6 +282,19 @@ func tryMarkerOrBackfillRemove(
 		return fmt.Errorf("%s, but managed-entries marker has no record that mcphub installed this entry — refusing to RemoveEntry (entry may be user-owned); to roll back this entry, edit %s manually, or re-run migrate first to populate the marker",
 			reasonPrefix, adapter.ConfigPath())
 	default:
+		live, gErr := adapter.GetEntry(server)
+		if gErr != nil {
+			return fmt.Errorf("%s, marker confirms mcphub-managed, but failed reading live entry before RemoveEntry: %w",
+				reasonPrefix, gErr)
+		}
+		if live == nil {
+			return fmt.Errorf("%s, marker confirms mcphub-managed, but live entry is missing — refusing to RemoveEntry",
+				reasonPrefix)
+		}
+		if matched, _ := liveEntryMatchesManifestBinding(live, server, binding, m); !matched {
+			return fmt.Errorf("%s, marker confirms mcphub-managed, but live entry no longer matches manifest-managed shape — refusing to RemoveEntry (entry may be user-modified); edit %s manually or re-run migrate",
+				reasonPrefix, adapter.ConfigPath())
+		}
 		if rmErr := adapter.RemoveEntry(server); rmErr != nil {
 			return fmt.Errorf("%s, marker confirmed mcphub-managed, AND RemoveEntry failed: %w",
 				reasonPrefix, rmErr)

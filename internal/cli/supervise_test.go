@@ -30,6 +30,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1246,5 +1247,118 @@ func TestSupervise_IPC_VersionPinning(t *testing.T) {
 	}
 	if resp.ID != 7 {
 		t.Fatalf("want correlation id=7, got %d", resp.ID)
+	}
+}
+
+// TestMergeDaemonEnvOverlayWinsOverManifest pins the precedence rule
+// for the Task 2.7 three-arg mergeDaemonEnv: parent < manifest < overlay.
+// Both manifest and overlay use the same Path-family key (the manifest
+// uses "Path"; the overlay also uses "Path"). The overlay value must
+// win in the output, and only one Path-family entry must appear.
+//
+// Spec ref: docs/superpowers/specs/2026-05-19-servers-matrix-lsp-and-env-revamp-design.md
+// §"Spawn-time env merge"; Plan Task 2.7 acceptance criterion #3.
+func TestMergeDaemonEnvOverlayWinsOverManifest(t *testing.T) {
+	parent := []string{"PATH=/system", "OTHER=parent"}
+	manifest := map[string]string{"Path": "/manifest"}
+	overlay := map[string]string{"Path": "/overlay"}
+
+	got := mergeDaemonEnv(parent, manifest, overlay)
+
+	if got == nil {
+		t.Fatalf("mergeDaemonEnv returned nil with non-empty manifest+overlay")
+	}
+
+	// Collect every Path-family entry (case-insensitive lookup).
+	var pathEntries []string
+	for _, kv := range got {
+		// kv is "KEY=VALUE"; split once on '=' so VALUEs containing '='
+		// are not truncated.
+		eq := strings.IndexByte(kv, '=')
+		if eq < 0 {
+			continue
+		}
+		k := kv[:eq]
+		if strings.EqualFold(k, "PATH") {
+			pathEntries = append(pathEntries, kv)
+		}
+	}
+	if len(pathEntries) != 1 {
+		t.Fatalf("want exactly 1 Path-family entry, got %d: %v (full env = %v)",
+			len(pathEntries), pathEntries, got)
+	}
+	// The single survivor's value must be "/overlay" (overlay > manifest > parent).
+	eq := strings.IndexByte(pathEntries[0], '=')
+	if pathEntries[0][eq+1:] != "/overlay" {
+		t.Fatalf("Path-family entry value = %q, want %q (overlay must win)",
+			pathEntries[0][eq+1:], "/overlay")
+	}
+}
+
+// TestMergeDaemonEnvBothEmptyReturnsNil pins the both-empty fast-path
+// contract that lets the production spawn callsite skip setting
+// cmd.Env (child inherits os.Environ directly when no manifest+overlay
+// keys are present).
+//
+// Spec ref: Plan Task 2.7 acceptance criterion #2.
+func TestMergeDaemonEnvBothEmptyReturnsNil(t *testing.T) {
+	parent := []string{"BASE=parent"}
+	got := mergeDaemonEnv(parent, nil, nil)
+	if got != nil {
+		t.Fatalf("mergeDaemonEnv(parent, nil, nil) = %v, want nil so the caller can leave cmd.Env=nil and inherit os.Environ directly", got)
+	}
+	// Also exercise the explicit-empty-map variant — equivalent contract.
+	got2 := mergeDaemonEnv(parent, map[string]string{}, map[string]string{})
+	if got2 != nil {
+		t.Fatalf("mergeDaemonEnv(parent, {}, {}) = %v, want nil", got2)
+	}
+}
+
+// TestMergeDaemonEnvWindowsCaseInsensitive pins the Windows
+// case-insensitive collision contract: "PATH" (parent), "path"
+// (manifest), and "Path" (overlay) all share the same logical key
+// under Windows env semantics. The highest-precedence source
+// (overlay) must win, and its original casing must be preserved
+// in the output ("Path", not "PATH" or "path").
+//
+// Skipped on POSIX where env keys are case-sensitive (the existing
+// TestProductionSpawnFn_EnvOverrideAppliedDeterministically asserts
+// the POSIX side of that contract).
+//
+// Spec ref: Plan Task 2.7 acceptance criterion #4; design doc
+// §"${parent_path} token semantics" (case-insensitive PATH lookup).
+func TestMergeDaemonEnvWindowsCaseInsensitive(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-only: POSIX env keys are case-sensitive")
+	}
+	parent := []string{"PATH=/parent"}
+	manifest := map[string]string{"path": "/manifest"}
+	overlay := map[string]string{"Path": "/overlay"}
+
+	got := mergeDaemonEnv(parent, manifest, overlay)
+	if got == nil {
+		t.Fatalf("mergeDaemonEnv returned nil with non-empty manifest+overlay")
+	}
+
+	// Exactly one Path-family entry, value "/overlay", casing "Path".
+	var pathEntries []string
+	for _, kv := range got {
+		eq := strings.IndexByte(kv, '=')
+		if eq < 0 {
+			continue
+		}
+		k := kv[:eq]
+		if strings.EqualFold(k, "PATH") {
+			pathEntries = append(pathEntries, kv)
+		}
+	}
+	if len(pathEntries) != 1 {
+		t.Fatalf("want exactly 1 Path-family entry on Windows (case-insensitive merge), got %d: %v",
+			len(pathEntries), pathEntries)
+	}
+	want := "Path=/overlay"
+	if pathEntries[0] != want {
+		t.Fatalf("Path-family entry = %q, want %q (overlay wins; original casing preserved)",
+			pathEntries[0], want)
 	}
 }

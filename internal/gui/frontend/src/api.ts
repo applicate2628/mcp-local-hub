@@ -181,6 +181,259 @@ export async function postInitClientConfig(client: string): Promise<InitClientCo
   );
 }
 
+// ───────────────────────────────────────────────────────────────────
+// Servers-matrix revamp (Task 4.3) — daemon env overlay + discovery
+// refresh + respawn + workspace list. Thin wrappers around the v0.5.x
+// /api/daemon/env, /api/discovery/refresh, /api/daemon/respawn, and
+// /api/workspaces handlers landed in Task 4.2.
+//
+// Error-shape policy: every backend writes {error, code, status?} on
+// non-2xx via writeAPIError (internal/gui/server.go) — we surface the
+// `code` so callers can branch on QUARANTINED, UNKNOWN_TASK, etc.
+// without grepping the human-readable error string.
+// ───────────────────────────────────────────────────────────────────
+
+// DaemonRespawnError preserves the backend's `code` field and the HTTP
+// status so the EnvDrawer can distinguish QUARANTINED (409 — show
+// "force?" affordance) from UNKNOWN_TASK (400 — no retry path) from
+// SUPERVISOR_UNAVAILABLE (503 — transient, retry later) without
+// reading the error string.
+export class DaemonRespawnError extends Error {
+  readonly code: string;
+  readonly status: number;
+  constructor(message: string, code: string, status: number) {
+    super(message);
+    this.name = "DaemonRespawnError";
+    this.code = code;
+    this.status = status;
+  }
+}
+
+// applyDaemonEnv posts {task_name, env} to /api/daemon/env which writes
+// a `source: operator` row into daemon-env-overrides.yaml. Does NOT
+// trigger a respawn — the operator clicks Restart separately so they
+// can review the merged-effective env first (per spec §"Apply env edit
+// from GUI").
+//
+// Throws Error on non-2xx; the message embeds the backend's code so
+// the EnvDrawer can show INVALID_KEY / INVALID_VALUE / UNKNOWN_TASK
+// distinctly. Validation echoes the backend regex
+// `^[A-Za-z_][A-Za-z0-9_]*$` — keys with hyphens, leading digits, or
+// control chars must be rejected client-side before they hit the wire.
+export interface ApplyDaemonEnvResult {
+  task_name: string;
+  changed_keys: string[];
+}
+
+export async function applyDaemonEnv(
+  taskName: string,
+  env: Record<string, string>,
+): Promise<ApplyDaemonEnvResult> {
+  const resp = await fetch("/api/daemon/env", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ task_name: taskName, env }),
+  });
+  if (resp.ok) {
+    return (await resp.json()) as ApplyDaemonEnvResult;
+  }
+  let body: { error?: string; code?: string } | null = null;
+  try {
+    body = (await resp.json()) as { error?: string; code?: string };
+  } catch {
+    // Non-JSON error body; fall through.
+  }
+  const message = body?.error ?? resp.statusText ?? "unknown";
+  const code = body?.code ?? `HTTP_${resp.status}`;
+  throw new Error(`/api/daemon/env [${code}]: ${message}`);
+}
+
+// refreshDiscovery posts an empty body to /api/discovery/refresh which
+// re-runs binary_discovery against every installed manifest and
+// overwrites non-operator overlay rows (source:auto-discovery rows are
+// replaced; source:operator rows are preserved per the
+// daemon-env-overlay-skipped-operator-override event).
+export interface RefreshDiscoveryResult {
+  manifest_count: number;
+}
+
+export async function refreshDiscovery(): Promise<RefreshDiscoveryResult> {
+  const resp = await fetch("/api/discovery/refresh", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  if (resp.ok) {
+    return (await resp.json()) as RefreshDiscoveryResult;
+  }
+  let body: { error?: string; code?: string } | null = null;
+  try {
+    body = (await resp.json()) as { error?: string; code?: string };
+  } catch {
+    // Non-JSON error body; fall through.
+  }
+  const message = body?.error ?? resp.statusText ?? "unknown";
+  const code = body?.code ?? `HTTP_${resp.status}`;
+  throw new Error(`/api/discovery/refresh [${code}]: ${message}`);
+}
+
+// respawnDaemon posts {task_name, force} to /api/daemon/respawn which
+// dials the supervisor IPC `respawn` verb. The supervisor performs a
+// graceful 5 s shutdown → force-kill on timeout → spawn-with-overlay
+// pipeline. Returns the new spawn state on success.
+//
+// HTTP-status → DaemonRespawnError.code mapping (Task 4.2 daemon_env.go):
+//   400 UNKNOWN_TASK | INVALID_ARGS    — typo / stale UI state
+//   409 QUARANTINED                    — supervisor refused; user must
+//                                        send force=true to override
+//   503 RESPAWN_NOT_READY |            — supervisor not yet listening;
+//       SUPERVISOR_UNAVAILABLE           transient, retry after a few s
+//   500 RESPAWN_FAILED | IPC_FAILED    — supervisor saw the request but
+//                                        spawn returned an error
+export interface RespawnDaemonResult {
+  task_name: string;
+  force: boolean;
+  state: string;
+}
+
+export async function respawnDaemon(
+  taskName: string,
+  force: boolean = false,
+): Promise<RespawnDaemonResult> {
+  const resp = await fetch("/api/daemon/respawn", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ task_name: taskName, force }),
+  });
+  if (resp.ok) {
+    return (await resp.json()) as RespawnDaemonResult;
+  }
+  let body: { error?: string; code?: string } | null = null;
+  try {
+    body = (await resp.json()) as { error?: string; code?: string };
+  } catch {
+    // Non-JSON error body; fall through.
+  }
+  const message = body?.error ?? resp.statusText ?? "unknown";
+  const code = body?.code ?? `HTTP_${resp.status}`;
+  throw new DaemonRespawnError(
+    `/api/daemon/respawn [${code}]: ${message}`,
+    code,
+    resp.status,
+  );
+}
+
+// WorkspacePair mirrors the deduplicated (key, path) entries from the
+// /api/workspaces top-level `workspaces` array. The selector renders
+// these directly; the matrix uses them to scope LSP rows.
+export interface WorkspacePair {
+  workspace_key: string;
+  workspace_path: string;
+}
+
+// WorkspaceEntryDTO mirrors one (key, language) tuple from the registry.
+// Carries the LSP task_name so the Servers screen can match a registered
+// LSP to the row it should populate (vs the always-rendered placeholder).
+export interface WorkspaceEntryDTO {
+  workspace_key: string;
+  workspace_path: string;
+  language: string;
+  backend: string;
+  port: number;
+  task_name: string;
+  client_entries?: Record<string, string>;
+  lifecycle?: string;
+  last_error?: string;
+}
+
+export interface WorkspacesResponse {
+  workspaces: WorkspacePair[];
+  entries: WorkspaceEntryDTO[];
+}
+
+export async function listWorkspaces(): Promise<WorkspacesResponse> {
+  return fetchOrThrow<WorkspacesResponse>("/api/workspaces", "object");
+}
+
+// ───────────────────────────────────────────────────────────────────
+// Dashboard recovery actions (PR #222 ops UX gap)
+// ───────────────────────────────────────────────────────────────────
+
+// CleanupOrphansResult mirrors gui.cleanupResponse — the wire shape of
+// POST /api/cleanup/orphans. The handler returns both dry-run and
+// apply outputs with the same envelope; `killed` / `skipped` stay
+// zero on dry-run.
+export interface CleanupOrphansResult {
+  orphans: Array<{
+    pid: number;
+    name?: string;
+    cmdline?: string;
+    matched_server?: string;
+    age_seconds?: number;
+    kill_err?: string;
+  }>;
+  killed: number;
+  skipped: number;
+}
+
+// cleanupOrphans posts to /api/cleanup/orphans with `apply: true`
+// (kill mode). Returns the per-process kill outcome list so the UI
+// can surface "killed N orphans" feedback.
+export async function cleanupOrphans(): Promise<CleanupOrphansResult> {
+  const resp = await fetch("/api/cleanup/orphans", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ apply: true }),
+  });
+  if (!resp.ok) {
+    let body: { error?: string; code?: string } | null = null;
+    try {
+      body = (await resp.json()) as { error?: string; code?: string };
+    } catch {
+      // non-JSON
+    }
+    const msg = body?.error ?? resp.statusText ?? "unknown";
+    const code = body?.code ?? `HTTP_${resp.status}`;
+    throw new Error(`/api/cleanup/orphans [${code}]: ${msg}`);
+  }
+  return (await resp.json()) as CleanupOrphansResult;
+}
+
+// SupervisorRestartResult mirrors gui.supervisorRestartResponse: the
+// per-step outcome of read-lock → kill → spawn. `per_step_error` is
+// keyed by step name ("read_lock", "kill", "spawn") with empty/absent
+// values meaning "step succeeded".
+export interface SupervisorRestartResult {
+  killed_pid: number;
+  killed: boolean;
+  spawned_pid: number;
+  spawned: boolean;
+  per_step_error?: Record<string, string>;
+}
+
+// restartSupervisor posts to /api/supervisor/restart. The handler
+// always returns 200 — partial-failure cases are signalled via
+// `spawned: false` + per_step_error keys so the UI can render a
+// "kill ok, spawn failed: …" status without parsing a non-2xx body.
+export async function restartSupervisor(): Promise<SupervisorRestartResult> {
+  const resp = await fetch("/api/supervisor/restart", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!resp.ok) {
+    let body: { error?: string; code?: string } | null = null;
+    try {
+      body = (await resp.json()) as { error?: string; code?: string };
+    } catch {
+      // non-JSON
+    }
+    const msg = body?.error ?? resp.statusText ?? "unknown";
+    const code = body?.code ?? `HTTP_${resp.status}`;
+    throw new Error(`/api/supervisor/restart [${code}]: ${msg}`);
+  }
+  return (await resp.json()) as SupervisorRestartResult;
+}
+
 // ManifestHashMismatchError marks the stale-file-detection branch so
 // the AddServer edit flow can show the [Reload]/[Force Save] banner
 // instead of a generic error toast.

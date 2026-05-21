@@ -104,6 +104,34 @@ const AllowUnhardenedClientWriteEnv = "MCPHUB_ALLOW_UNHARDENED_CLIENT_WRITE"
 // parent ACL cleanup is not practical.
 const AllowUnhardenedStateWriteEnv = "MCPHUB_ALLOW_UNHARDENED_STATE_WRITE"
 
+// AllowUnhardenedStateReadEnv is the READ-side counterpart to
+// AllowUnhardenedStateWriteEnv. Set to "1" / "true" to opt out of
+// the parent-dir DACL/mode check on supervisor state-file reads
+// (supervisor-intent.json, supervisor-state.json).
+//
+// Why a separate env var (not piggy-backing on the WRITE one): the
+// READ-side gate was added in PR #223 specifically so that operators
+// who set the WRITE relax env var for their write-side ACL needs
+// cannot accidentally turn off READ-side TOCTOU defense too. Reads
+// stay strict-by-default; the READ env var is the explicit consent.
+//
+// Real-world trigger that required this opt-in: corp-managed Windows
+// hosts whose %LOCALAPPDATA% inherits a Domain Users / "Authenticated
+// Users" ACE that the user cannot remove. With STRICT reads, the
+// supervisor crashed at startup with "insecure parent directory"
+// before it could even load supervisor-intent.json — Dashboard then
+// showed Failed-to-load with no recovery path.
+const AllowUnhardenedStateReadEnv = "MCPHUB_ALLOW_UNHARDENED_STATE_READ"
+
+// operatorAllowsUnhardenedStateRead reports whether the operator has
+// explicitly opted into the relax lane for supervisor state-file
+// READS by setting MCPHUB_ALLOW_UNHARDENED_STATE_READ to "1" or
+// "true" (case-insensitive). Default false: reads remain strict.
+func operatorAllowsUnhardenedStateRead() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(AllowUnhardenedStateReadEnv)))
+	return v == "1" || v == "true"
+}
+
 // RequireSingleUserHomeEnv is the v0.4.0+ operator opt-in for the
 // STRICT parent-dir DACL/mode gate. Set to "1" or "true" (case-
 // insensitive) on corp-managed machines, shared hosts, or other

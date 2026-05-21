@@ -73,6 +73,24 @@ type ServerManifest struct {
 	// manifest stays cleartext-free on disk. REJECTED if set with any
 	// transport other than "remote-http".
 	Headers map[string]string `yaml:"headers"`
+
+	// RequiredBinaries is free-form metadata listing the external
+	// binaries this server expects to find on PATH (e.g. "gdb",
+	// "clangd"). Consumed by the Servers-matrix LSP-bridge recognition
+	// surface; no Validate() logic is applied here so manifests can
+	// declare unrecognized binaries without breaking startup.
+	//
+	// Spec: docs/superpowers/specs/2026-05-19-servers-matrix-lsp-and-env-revamp-design.md §"Manifest schema additions".
+	RequiredBinaries []string `yaml:"required_binaries,omitempty"`
+
+	// DaemonTemplate is the per-workspace dynamic-pool spawn template.
+	// REQUIRES kind=workspace-scoped AND transport != remote-http
+	// (cross-branch validator gate rejects other combinations). Mutually
+	// exclusive with the legacy top-level Daemons list — manifests that
+	// migrate to dynamic-pool drop daemons[] and add daemon_template.
+	//
+	// Plan ref: docs/superpowers/plans/2026-05-20-serena-supervisor-unified.md §D.1.
+	DaemonTemplate *DaemonTemplate `yaml:"daemon_template,omitempty"`
 }
 
 type DaemonSpec struct {
@@ -82,12 +100,30 @@ type DaemonSpec struct {
 	ExtraArgs []string `yaml:"extra_args"`
 }
 
+// DaemonTemplate describes a per-workspace daemon spawn template for the
+// dynamic-pool branch of kind=workspace-scoped. Mutually exclusive with
+// the legacy ServerManifest.Daemons list (validator rejects both-present).
+//
+// Plan ref: docs/superpowers/plans/2026-05-20-serena-supervisor-unified.md D.1.
+type DaemonTemplate struct {
+	Context           string    `yaml:"context"`
+	PortPool          *PortPool `yaml:"port_pool"`           // reuse existing PortPool{Start,End}
+	ExtraArgsTemplate []string  `yaml:"extra_args_template"` // each arg may contain ${workspace.path}
+}
+
 type LanguageSpec struct {
 	Name       string   `yaml:"name"`
 	Backend    string   `yaml:"backend"`   // "mcp-language-server" or "gopls-mcp"
 	Transport  string   `yaml:"transport"` // "stdio" (default) | "http_listen" | "native_http"
 	LspCommand string   `yaml:"lsp_command"`
 	ExtraFlags []string `yaml:"extra_flags"`
+
+	// RequiredBinaries is free-form metadata listing the external
+	// binaries this language backend expects to find on PATH (e.g.
+	// "clangd", "pyright-langserver"). Symmetric with the server-level
+	// field; consumed by the Servers-matrix LSP-bridge recognition
+	// surface.
+	RequiredBinaries []string `yaml:"required_binaries,omitempty"`
 }
 
 type PortPool struct {
@@ -223,6 +259,23 @@ func expandEnvCrossPlatform(s string) (string, []string) {
 	return expanded, missing
 }
 
+// containsWorkspacePathTokenInArgs scans each element of args for the
+// literal substring "${workspace.path}". Returns true on the first match.
+// Substring-match (not exact-equality) so operators can write composite
+// args like "--project=${workspace.path}/src". Internal helper, lowercase
+// — only the validator uses it.
+//
+// Plan ref: docs/superpowers/plans/2026-05-20-serena-supervisor-unified.md §D.1.
+func containsWorkspacePathTokenInArgs(args []string) bool {
+	const tok = "${workspace.path}"
+	for _, a := range args {
+		if strings.Contains(a, tok) {
+			return true
+		}
+	}
+	return false
+}
+
 // Validate checks required fields and enum values. Called automatically by ParseManifest.
 //
 // Validate is COMPAT mode for the '__'-in-name policy: structural fields
@@ -241,6 +294,21 @@ func (m *ServerManifest) Validate() error {
 	}
 	if m.Transport != TransportNativeHTTP && m.Transport != TransportStdioBridge && m.Transport != TransportRemoteHTTP {
 		return fmt.Errorf("manifest %s: transport must be %q, %q, or %q (got %q)", m.Name, TransportNativeHTTP, TransportStdioBridge, TransportRemoteHTTP, m.Transport)
+	}
+
+	// Cross-branch gate (closes v6 codex BLOCKER "daemon_template silently
+	// accepted under kind=global / transport=remote-http"). The legacy
+	// remote-http and kind=global branches each `return nil` before
+	// reaching the workspace-scoped block, so a manifest carrying
+	// daemon_template under those modes would otherwise pass Validate
+	// as accepted-but-nonfunctional. Reject here, before either branch.
+	//
+	// Plan ref: docs/superpowers/plans/2026-05-20-serena-supervisor-unified.md §D.1.
+	if m.DaemonTemplate != nil && m.Kind != KindWorkspaceScoped {
+		return fmt.Errorf("manifest %s: daemon_template requires kind=workspace-scoped (got kind=%q); dynamic-pool spawn is incompatible with kind=global", m.Name, m.Kind)
+	}
+	if m.DaemonTemplate != nil && m.Transport == TransportRemoteHTTP {
+		return fmt.Errorf("manifest %s: daemon_template is incompatible with transport=remote-http (no local subprocess to spawn from the template)", m.Name)
 	}
 
 	// G6 remote-http branch (spec §"Validation rules"):
@@ -319,6 +387,37 @@ func (m *ServerManifest) Validate() error {
 		return fmt.Errorf("manifest %s: command is required", m.Name)
 	}
 	if m.Kind == KindWorkspaceScoped {
+		// Dynamic-pool branch (Phase D.1): per-workspace daemon spawned
+		// from daemon_template. Mutually exclusive with the legacy
+		// LSP-bridge daemons[]+languages[]+top-level port_pool shape.
+		//
+		// Plan ref: docs/superpowers/plans/2026-05-20-serena-supervisor-unified.md §D.1.
+		if m.DaemonTemplate != nil {
+			if m.PortPool != nil {
+				return fmt.Errorf("manifest %s: kind=workspace-scoped with daemon_template must NOT set top-level port_pool (move start/end into daemon_template.port_pool)", m.Name)
+			}
+			if len(m.Languages) > 0 {
+				return fmt.Errorf("manifest %s: kind=workspace-scoped with daemon_template rejects top-level languages[] (dynamic-pool serena is multi-language per .serena/project.yml)", m.Name)
+			}
+			if len(m.Daemons) > 0 {
+				return fmt.Errorf("manifest %s: kind=workspace-scoped with daemon_template is mutually exclusive with daemons[] (dynamic-pool migration requires removing the legacy daemons[] block)", m.Name)
+			}
+			if m.DaemonTemplate.PortPool == nil {
+				return fmt.Errorf("manifest %s: daemon_template.port_pool is required (start/end)", m.Name)
+			}
+			if m.DaemonTemplate.PortPool.Start <= 0 || m.DaemonTemplate.PortPool.End < m.DaemonTemplate.PortPool.Start {
+				return fmt.Errorf("manifest %s: daemon_template.port_pool must have start>0 and end>=start (got {%d,%d})", m.Name, m.DaemonTemplate.PortPool.Start, m.DaemonTemplate.PortPool.End)
+			}
+			if len(m.DaemonTemplate.ExtraArgsTemplate) == 0 {
+				return fmt.Errorf("manifest %s: daemon_template.extra_args_template must be non-empty", m.Name)
+			}
+			if !containsWorkspacePathTokenInArgs(m.DaemonTemplate.ExtraArgsTemplate) {
+				return fmt.Errorf("manifest %s: daemon_template.extra_args_template must contain ${workspace.path} token somewhere (else workspace context is lost on spawn)", m.Name)
+			}
+			return nil
+		}
+		// Legacy LSP-bridge branch (unchanged: preserves current
+		// mcp-language-server / gopls-mcp manifest shape).
 		if m.PortPool == nil {
 			return fmt.Errorf("manifest %s: port_pool is required for kind=workspace-scoped", m.Name)
 		}
@@ -332,6 +431,17 @@ func (m *ServerManifest) Validate() error {
 			l := &m.Languages[i]
 			if l.Name == "" {
 				return fmt.Errorf("manifest %s: languages[%d].name is required", m.Name, i)
+			}
+			// B.1 dual-gate defense (plan §B.1): refuse '@' prefix on
+			// LanguageSpec.Name to keep the @serena sentinel
+			// collision-free. The registry write paths (PutLSP /
+			// PutSerena) carry the runtime gate; this manifest-time
+			// gate stops a malformed YAML from reaching the registry
+			// path at all.
+			//
+			// Plan ref: docs/superpowers/plans/2026-05-20-serena-supervisor-unified.md §B.1.
+			if strings.HasPrefix(l.Name, "@") {
+				return fmt.Errorf("manifest %s: languages[%d].name must not start with '@' (reserved for sentinel rows)", m.Name, i)
 			}
 			if l.Backend != "mcp-language-server" && l.Backend != "gopls-mcp" {
 				return fmt.Errorf("manifest %s: languages[%d].backend must be \"mcp-language-server\" or \"gopls-mcp\" (got %q)", m.Name, i, l.Backend)

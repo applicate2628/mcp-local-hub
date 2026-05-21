@@ -500,6 +500,10 @@ func NewServer(cfg Config) *Server {
 	registerCleanupRoutes(s)
 	registerForceKillRoutes(s)
 	registerInitClientConfigRoutes(s)
+	registerDaemonEnvRoutes(s)
+	registerWorkspacesRoutes(s)
+	registerSupervisorRestartRoutes(s)
+	registerStateRelaxSettingRoutes(s)
 	return s
 }
 

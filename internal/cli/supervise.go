@@ -29,6 +29,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -38,6 +39,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/daemon_env_overlay"
 	"mcp-local-hub/internal/process"
 )
 
@@ -267,6 +269,42 @@ type ipcDispatchDeps struct {
 	// load-bearing for the concurrent-drain correctness contract.
 	gracefulInProgress  *gracefulCounter
 	triggerGracefulExit func() // closes loop, signals exit
+	// overlay is the parsed daemon-env-overrides.yaml file loaded once
+	// at supervisor startup. nil means no overlay file or load failed
+	// in a non-fatal way (default-relax). Per-spawn lookups go through
+	// daemon_env_overlay.LookupOverlay so a nil overlay yields nil env.
+	// Task 4.1 `respawn` IPC reads this same field to look up the
+	// affected daemon's overlay env before re-spawning.
+	overlay *daemon_env_overlay.Overlay
+	// intent is the parsed supervisor-intent.json file loaded once at
+	// supervisor startup. The `respawn` IPC handler resolves taskName
+	// against intent.Daemons — supervisor-intent.json is the canonical
+	// truth for which daemons the operator wants running.
+	intent *api.SupervisorIntentFile
+	// respawnLate carries the spawn/terminate closures the `respawn`
+	// IPC handler uses. These closures are constructed AFTER deps
+	// (per plan v5 option (b) — preserves IPC accept-loop startup
+	// ordering). The respawnLateBindings pointer is non-nil from deps
+	// construction; the closures inside it get Set() after spawnFn /
+	// terminateFn exist. Handlers must Get() and nil-check before use.
+	respawnLate *respawnLateBindings
+	// controllerProvider returns the live A.2 supervisorController when
+	// constructed. The respawn handler reads from
+	// controllerProvider().intentCache.Lookup(taskName) for the freshest
+	// daemon descriptor (closes bot PR#222 P2-2: deps.intent is a startup
+	// snapshot, never refreshed; controller.intentCache IS refreshed by
+	// IntentWatcher on intent-file mtime changes). nil-safe — handler
+	// falls back to deps.intent when provider returns nil (e.g. in unit
+	// tests that don't construct a full controller, or in the brief
+	// startup window before the controller is built).
+	//
+	// Closure-captured variable pattern (same as triggerGracefulExit
+	// above): deps captures a *supervisorController variable declared
+	// early; later code assigns the variable; subsequent provider calls
+	// observe the live value. This preserves IPC accept-loop startup
+	// ordering (deps + accept goroutine launch BEFORE controller exists)
+	// without changing the deps struct lifetime.
+	controllerProvider func() *supervisorController
 }
 
 const ipcErrorSupervisorStarting = "SUPERVISOR_STARTING"
@@ -485,6 +523,39 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		return fmt.Errorf("load supervisor-state.json: %w", trackerErr)
 	}
 
+	// Load daemon-env-overrides.yaml ONCE at startup. Per spec
+	// §"Error handling" + v4 I-V4-5: parse failure is fail-LOUD —
+	// supervisor refuses to spawn ANY daemon and prints actionable
+	// guidance (`mcphub config overlay-quarantine` renames the corrupt
+	// file aside under a `.corrupt-<ts>` suffix so the next cold start
+	// boots with empty overlay).
+	//
+	// Missing file is benign: daemon_env_overlay.Load returns an empty
+	// Overlay{Daemons: {}} + nil error on ErrNotExist, so a fresh
+	// install without operator overlay edits proceeds with manifest env
+	// only — exactly the pre-overlay behavior.
+	overlay, overlayErr := loadOverlayAtStartup(stateDir, events, intent)
+	if overlayErr != nil {
+		return overlayErr
+	}
+
+	// respawnLate holds the spawn/terminate closures the `respawn` IPC
+	// handler uses. Closures are constructed AFTER spawnFn/terminateFn
+	// exist (below); the holder is non-nil from here so the IPC accept
+	// loop (started inside the `if !noIPC` block below) can safely
+	// reference deps.respawnLate. Late-binding pattern preserves the
+	// existing accept-loop startup ordering per plan v5 option (b).
+	respawnLate := &respawnLateBindings{}
+
+	// ctrl is the A.2 supervisorController, constructed AFTER spawn/
+	// terminate factories exist (below, around line 680). The deps
+	// struct captures `&ctrl` via a closure provider so the respawn
+	// handler can look up live intent through ctrl.intentCache even
+	// though the accept goroutine starts before ctrl is built.
+	// Closure-capture pattern (same as triggerGracefulExit below):
+	// the closure reads the variable's CURRENT value each call.
+	var ctrl *supervisorController
+
 	// IPC listener. `--no-ipc` keeps tests fast (lock+events+loop only).
 	// Production callers always pass --no-ipc=false; the listener owns
 	// the per-OS pipe/socket and the hello-frame handshake from Task
@@ -523,6 +594,10 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 				default:
 				}
 			},
+			overlay:            overlay,
+			intent:             intent,
+			respawnLate:        respawnLate,
+			controllerProvider: func() *supervisorController { return ctrl },
 		}
 
 		// Spawn the accept goroutine. It runs until listener.Close()
@@ -586,45 +661,141 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	crashCh := make(chan crashEvent, 64)
 	spawnFn := reconcileSpawnFn
 	if spawnFn == nil {
-		spawnFn = makeProductionSpawnFnWithStatePath(job, events, runtimeTracker, statePath, crashCh)
+		spawnFn = makeProductionSpawnFnWithStatePath(job, events, runtimeTracker, statePath, overlay, filepath.Join(stateDir, "daemon-env-overrides.yaml"), crashCh)
 	}
 	terminateFn := reconcileTerminateFn
 	if terminateFn == nil {
 		terminateFn = makeProductionTerminateFnWithStatePath(events, runningPIDs, runtimeTracker, statePath)
 	}
 
-	// Respawn dispatcher: consumes crashCh and re-invokes spawnFn after
-	// an exponential backoff (1s/2s/4s/8s/16s/32s/60s cap) per task,
-	// tracked via a 30-min sliding window in the runtime tracker. At 10
-	// failures in the window, the daemon is quarantined (no further
-	// respawn attempts until supervisor cold-restart). Started only
-	// when reconcileSpawnFn was nil (production wiring); tests with a
-	// fake spawn fn don't need it.
+	// Wire the late-bound respawn closures now that spawnFn/terminateFn
+	// exist. The IPC accept loop above (in the !noIPC branch) already
+	// holds the respawnLate pointer via deps; the Set() makes Get()
+	// return non-nil for subsequent `respawn` IPC requests.
+	respawnLate.Set(spawnFn, terminateFn)
+
+	// Phase A.2: build the supervisorController from existing
+	// primitives (event loop, tracker, graceful flag) plus fresh
+	// intent + daemon-intent caches. The controller absorbs the
+	// deleted runRespawnDispatcher's responsibilities (sliding-window
+	// quarantine, exponential backoff, spawn fire on EvTimerDue) and
+	// routes ALL spawn/respawn through the formal api.Transition
+	// state machine.
 	//
-	// isStoppedFn closure re-reads daemon-intent.json on each call so
-	// a mid-session `mcphub stop` takes effect for the next respawn
-	// decision (bot v1 P1-1 fix on PR #230). Fail-open: any read
-	// error returns false (don't suppress) so a transient FS issue
-	// can't strand a healthy daemon.
-	isStoppedFn := func(taskName string) bool {
-		path := filepath.Join(stateDir, "daemon-intent.json")
-		di := api.ReadDaemonIntentFile(path, daemonIntentReadLockTimeout)
-		if di.Err != nil {
-			return false
-		}
-		entry, ok := di.File.Tasks[taskName]
-		if !ok {
-			return false
-		}
-		stopped, _ := entry.IsActiveStop(time.Now().UTC())
-		return stopped
+	// The reconciler keeps spawning through spawnFn directly via
+	// EvStart (see supervise_reconcile.go:118): the reconciler posts
+	// EvStart onto the same loop the controller listens on, so the
+	// controller is the sole consumer of policy transitions while the
+	// reconciler stays the source of "this daemon should be running".
+	ctrl = &supervisorController{
+		intentCache:         newIntentCache(),
+		eventLoop:           loop,
+		tracker:             runtimeTracker,
+		events:              events,
+		graceful:            &gracefulInProgress,
+		daemonIntent:        newDaemonIntentCache(),
+		spawn:               spawnFn,
+		terminate:           terminateFn,
+		statePath:           statePath,
+		ctx:                 loopCtx,
+		failureWindow:       respawnFailureWindow,
+		quarantineThreshold: respawnQuarantineThreshold,
 	}
+	ctrl.intentCache.Refresh(intent)
+	ctrl.daemonIntent.Refresh(daemonIntent)
+	loop.RegisterHandler(ctrl.handleLoopEvent)
+
+	// Crash-event bridge: the production spawn fn posts crashEvent
+	// onto crashCh from its cmd.Wait goroutine. The Phase A.2
+	// controller wants EvChildExit on the formal event loop so the
+	// SM transition table drives backoff/quarantine/terminate
+	// decisions. Bridge crashCh -> eventLoop.Post(EvChildExit) with
+	// exit_code in the Body. Started only when reconcileSpawnFn was
+	// nil (production wiring); tests with a fake spawn fn don't
+	// receive crash events and don't need this goroutine.
 	if reconcileSpawnFn == nil {
-		go runRespawnDispatcher(loopCtx, crashCh, spawnFn, runtimeTracker, events, isStoppedFn, statePath)
+		go runCrashEventBridge(loopCtx, crashCh, loop, events)
 	}
+
+	// IntentWatcher: poll <state-dir>/{supervisor,daemon}-intent.json
+	// for mtime changes. On change, re-read both files, refresh the
+	// controller's caches, and post one EvIntentUpdate per task whose
+	// DaemonIntent actually changed (delta-only, NOT one-per-task on
+	// every mtime bump - closes the v6 sonnet "per-task storm"
+	// finding). The 60s poll interval is the spec-mandated upper
+	// bound on watch-miss latency; the IPC `reload` command (Task
+	// 6.3) drives faster propagation when clients call it.
+	previousDaemonIntent := daemonIntent
+	watcher := NewIntentWatcher(stateDir, 60*time.Second, func() {
+		// Re-read supervisor-intent.json. Errors are warn-only; a
+		// transient read failure should NOT clear the cached
+		// snapshot (clearing would make every subsequent
+		// handleLoopEvent see an empty intent and drop EvStart events
+		// as orphans).
+		supervisorIntentPath := filepath.Join(stateDir, "supervisor-intent.json")
+		if updatedSupervisor, supErr := api.ReadSupervisorIntent(supervisorIntentPath); supErr != nil {
+			_ = events.Emit(api.SupervisorEvent{
+				Severity: "warn",
+				Source:   "intent-watcher",
+				Event:    "intent-reload-failed",
+				Body: map[string]any{
+					"file":  "supervisor-intent.json",
+					"error": supErr.Error(),
+				},
+			})
+		} else {
+			ctrl.intentCache.Refresh(updatedSupervisor)
+		}
+
+		// Re-read daemon-intent.json via the free-function form
+		// (ReadDaemonIntentFile takes statePath + timeout, matching
+		// the loadIntentFiles boot path at supervise.go:1501).
+		daemonIntentPath := filepath.Join(stateDir, "daemon-intent.json")
+		daemonRead := api.ReadDaemonIntentFile(daemonIntentPath, daemonIntentReadLockTimeout)
+		var updatedDaemonIntent *api.DaemonIntentFile
+		if daemonRead.Err != nil {
+			_ = events.Emit(api.SupervisorEvent{
+				Severity: "warn",
+				Source:   "intent-watcher",
+				Event:    "intent-reload-failed",
+				Body: map[string]any{
+					"file":  "daemon-intent.json",
+					"error": daemonRead.Err.Error(),
+				},
+			})
+			updatedDaemonIntent = previousDaemonIntent
+		} else if daemonRead.State == api.IntentStateValid {
+			parsed := daemonRead.File
+			updatedDaemonIntent = &parsed
+		} else {
+			// IntentStateMissing - treat as nil (empty intent file).
+			updatedDaemonIntent = nil
+		}
+		ctrl.daemonIntent.Refresh(updatedDaemonIntent)
+
+		// Delta-only EvIntentUpdate posting. On a typical mtime
+		// bump where only one daemon's Desired flips, delta == 1;
+		// the rest of the intent file stays unchanged and no
+		// events post (closes the v6 sonnet "per-task storm"
+		// IMPORTANT finding).
+		delta := diffIntentSnapshots(previousDaemonIntent, updatedDaemonIntent)
+		for _, taskName := range delta {
+			loop.Post(api.LoopEvent{Kind: api.EvIntentUpdate, TaskName: taskName})
+		}
+		previousDaemonIntent = updatedDaemonIntent
+	})
+	go watcher.Run(loopCtx)
 
 	if intent != nil {
 		reconciler := NewReconciler(spawnFn, terminateFn)
+		// Phase A.2: pass the event loop so the reconciler posts
+		// EvStart instead of calling spawnFn directly. The
+		// controller's handleLoopEvent then routes the spawn
+		// through api.Transition for formal SM bookkeeping.
+		// Tests that don't wire an event loop still go through the
+		// legacy direct-spawn path (Reconciler.Reconcile
+		// nil-checks the field and falls back to r.spawn).
+		reconciler.EventLoop = loop
 		go reconciler.Reconcile(intent, daemonIntent, currentRunning, time.Now().UTC())
 	}
 
@@ -785,7 +956,7 @@ func defaultPipePath(stateDir string) string {
 
 // acceptIPCConnections is the listener accept loop. Runs in its own
 // goroutine spawned from runSupervise; exits when listener.Close()
-// (deferred in runSupervise) causes Accept to return an error.
+// (deferred in runSupervise) causes Accept to return net.ErrClosed.
 //
 // Per spec §"Wire format": each accepted connection is a long-lived
 // newline-delimited-JSON channel. Multiple connections from the same
@@ -794,27 +965,100 @@ func defaultPipePath(stateDir string) string {
 // goroutine. The handlers share access to the supervisor-wide deps
 // via ipcDispatchDeps; no per-connection state is mutated by
 // handleIPCRequest.
+//
+// Error handling (post-mortem of 2026-05-19 22:52:17 IPC crash):
+// Pre-fix, ANY error from listener.Accept() (including transient
+// per-connection failures like the hello-write race where a client
+// disconnects mid-handshake) caused the accept loop to RETURN
+// permanently. The supervisor process stayed alive, daemons stayed
+// alive, but IPC went silent and `mcphub status` started timing
+// out. Dashboard appeared "broken" with no actionable diagnostic.
+//
+// The post-mortem error was specifically:
+//
+//	ipc-accept-exit body: "write hello: The pipe is being closed."
+//
+// which comes from the Accept-time hello write in
+// supervise_ipc_windows.go:115 (POSIX equivalent at
+// supervise_ipc_posix.go:122). The fix: continue the loop on
+// non-ErrClosed errors with a small backoff to avoid hot-loop when
+// a persistent transport fault is in play; only ErrClosed signals
+// "listener was Close()'d via Stop()" and is the right time to exit.
+//
+// Defense-in-depth: if we somehow accumulate maxConsecutiveAcceptErrs
+// (100) transient errors back-to-back, treat the listener as
+// genuinely broken and exit the loop. That keeps the supervisor
+// from spinning forever on a permanently-poisoned pipe.
+const maxConsecutiveAcceptErrs = 100
+
+// ipcAcceptor is the narrow interface acceptIPCConnections needs from
+// the listener. Concrete production type is *SupervisorIPCListener;
+// tests inject a fake to exercise the error-handling branches without
+// binding a real pipe/socket.
+type ipcAcceptor interface {
+	Accept() (net.Conn, error)
+}
+
 func acceptIPCConnections(
-	listener *SupervisorIPCListener,
+	listener ipcAcceptor,
 	deps ipcDispatchDeps,
 ) {
+	consecErrs := 0
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
 			// listener.Close() returns net.ErrClosed via Accept on
-			// graceful exit. Logging this would noise up the audit
-			// channel; emit an info row only so operators can
-			// distinguish "listener closed normally" from a bug.
+			// graceful exit. That is the ONE error that signals
+			// "the supervisor is shutting down" rather than a
+			// per-connection transient. Emit info + exit cleanly.
+			if errors.Is(err, net.ErrClosed) {
+				_ = deps.events.Emit(api.SupervisorEvent{
+					Severity: "info",
+					Source:   "ipc",
+					Event:    "ipc-accept-exit",
+					Body: map[string]any{
+						"err": err.Error(),
+					},
+				})
+				return
+			}
+			consecErrs++
+			// Per-connection transient (hello-write race, client
+			// disconnected mid-handshake, kernel pool pressure).
+			// Emit warn + continue so the loop survives. Pre-fix
+			// this was the regression that caused the 2026-05-19
+			// supervisor-IPC-silence Dashboard outage.
 			_ = deps.events.Emit(api.SupervisorEvent{
-				Severity: "info",
+				Severity: "warn",
 				Source:   "ipc",
-				Event:    "ipc-accept-exit",
+				Event:    "ipc-accept-transient-error",
 				Body: map[string]any{
-					"err": err.Error(),
+					"err":             err.Error(),
+					"consecutive_err": consecErrs,
 				},
 			})
-			return
+			if consecErrs >= maxConsecutiveAcceptErrs {
+				// Listener is genuinely broken — exit the loop so
+				// the supervisor's deferred Close + restart paths
+				// can take over rather than spinning forever.
+				_ = deps.events.Emit(api.SupervisorEvent{
+					Severity: "error",
+					Source:   "ipc",
+					Event:    "ipc-accept-exit",
+					Body: map[string]any{
+						"err":             err.Error(),
+						"reason":          "consecutive-transient-errors-exceeded-budget",
+						"consecutive_err": consecErrs,
+					},
+				})
+				return
+			}
+			// Short backoff so persistent failure modes don't
+			// hot-loop the audit log + CPU.
+			time.Sleep(50 * time.Millisecond)
+			continue
 		}
+		consecErrs = 0
 		go handleIPCConn(conn, deps)
 	}
 }
@@ -957,12 +1201,15 @@ func dispatchIPCRequest(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps)
 		return handleQuiesceTimers(conn, req, deps)
 	case "exit":
 		return handleExit(conn, req, deps)
+	case "respawn":
+		return handleRespawn(conn, req, deps)
 	case "restart", "reload":
-		// Deferred to follow-up: per-daemon operations whose semantics
-		// (which daemon, with which intent diff, against which
-		// reconcile pass) depend on the Task 7.1 reconcile loop. Until
-		// that lands, return UNKNOWN_COMMAND so callers fail fast
-		// instead of hanging on a missing response.
+		// Legacy alias surface preserved for v0.4.x clients. Task 4.1
+		// adds the canonical `respawn` verb above; restart/reload still
+		// return UNKNOWN_COMMAND because their semantics (which daemon,
+		// with which intent diff, against which reconcile pass) differ
+		// from a single-daemon respawn and would require a separate
+		// dispatch contract.
 		return writeIPCFrame(conn, api.IPCResponse{
 			ID: req.ID,
 			Error: &api.IPCErr{
@@ -1214,6 +1461,131 @@ func writeIPCFrame(conn net.Conn, resp api.IPCResponse) error {
 	return nil
 }
 
+// loadOverlayAtStartup reads `daemon-env-overrides.yaml` once at
+// supervisor startup, emits the spec-mandated observability events,
+// and returns the parsed overlay. Behaviour:
+//
+//   - Missing file → returns ({Daemons: {}}, nil) per the
+//     daemon_env_overlay.Load contract. No event fires.
+//   - Parse failure (hardened-read refusal, YAML decode, size-cap
+//     exceeded, non-regular file, etc.) → emits
+//     `daemon-env-overlay-load-failed` (warn) AND returns a wrapped
+//     error pointing the operator at `mcphub config overlay-quarantine`.
+//     Caller turns this into a startup-failed audit row + abort. Per
+//     spec v4 §"Error handling" + I-V4-5 (fail-LOUD whole-overlay).
+//   - Success → emits `daemon-env-overlay-loaded` (info) with the row
+//     count, then `daemon-env-overlay-orphan-row` (warn) once per
+//     overlay row whose taskName is NOT present in the supervisor
+//     intent. Both event names match the spec §"Observability" table.
+//
+// The orphan check normalizes both sides via NormalizeOverlayKey so a
+// hand-edited overlay using bare-form taskNames matches canonical-form
+// intent. Orphan rows are NOT removed here — operators run
+// `mcphub config prune-orphan-overlay-rows` (Task 5.1) for that.
+func loadOverlayAtStartup(stateDir string, events *api.SupervisorEventLog, intent *api.SupervisorIntentFile) (*daemon_env_overlay.Overlay, error) {
+	overlayPath := filepath.Join(stateDir, "daemon-env-overrides.yaml")
+	ov, err := daemon_env_overlay.Load(overlayPath)
+	if err != nil {
+		// Classify the error: rejections from the read-side hardening
+		// pipeline (symlink/reparse-point refusal, non-regular file,
+		// size cap, parent-DACL gate) are operationally distinct from
+		// generic YAML parse errors. The spec assigns separate event
+		// names so the operator audit log distinguishes "the file is
+		// suspicious" from "the file is malformed". Both still trip
+		// the supervise-startup-failed fail-LOUD path; the operator's
+		// remedy is the same (`mcphub config overlay-quarantine`).
+		errMsg := err.Error()
+		isHardeningRejection := strings.Contains(errMsg, "reparse") ||
+			strings.Contains(errMsg, "symlink") ||
+			strings.Contains(errMsg, "not a regular file") ||
+			strings.Contains(errMsg, "exceeds") ||
+			strings.Contains(errMsg, "non-UTF-8") ||
+			strings.Contains(errMsg, "parent gate") ||
+			strings.Contains(errMsg, "not single-user safe")
+		if isHardeningRejection {
+			_ = events.Emit(api.SupervisorEvent{
+				Severity: "error",
+				Source:   "lifecycle",
+				Event:    "daemon-env-overlay-read-rejected",
+				Body: map[string]any{
+					"path": overlayPath,
+					"err":  errMsg,
+				},
+			})
+		}
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "warn",
+			Source:   "lifecycle",
+			Event:    "daemon-env-overlay-load-failed",
+			Body: map[string]any{
+				"path": overlayPath,
+				"err":  errMsg,
+			},
+		})
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "error",
+			Source:   "lifecycle",
+			Event:    "supervise-startup-failed",
+			Body: map[string]any{
+				"err":    errMsg,
+				"remedy": "mcphub config overlay-quarantine",
+			},
+		})
+		return nil, fmt.Errorf("daemon-env-overlay-load failed (run `mcphub config overlay-quarantine` to rename the corrupt overlay aside): %w", err)
+	}
+
+	rowCount := 0
+	if ov != nil {
+		rowCount = len(ov.Daemons)
+	}
+	_ = events.Emit(api.SupervisorEvent{
+		Severity: "info",
+		Source:   "lifecycle",
+		Event:    "daemon-env-overlay-loaded",
+		Body: map[string]any{
+			"path":      overlayPath,
+			"row_count": rowCount,
+		},
+	})
+
+	// Orphan-row scan: emit one event per overlay row whose canonical
+	// taskName is NOT in the current intent. Empty intent (fresh
+	// install before any `mcphub install`) makes every row an orphan;
+	// the events surface as warn so the operator log records the drift
+	// without aborting.
+	if ov != nil && len(ov.Daemons) > 0 {
+		intentSet := map[string]struct{}{}
+		if intent != nil {
+			for _, d := range intent.Daemons {
+				intentSet[daemon_env_overlay.NormalizeOverlayKey(d.TaskName)] = struct{}{}
+			}
+		}
+		// Stable iteration order so the audit log entries are
+		// deterministic across supervisor restarts on the same overlay.
+		keys := make([]string, 0, len(ov.Daemons))
+		for k := range ov.Daemons {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			if _, present := intentSet[daemon_env_overlay.NormalizeOverlayKey(k)]; present {
+				continue
+			}
+			_ = events.Emit(api.SupervisorEvent{
+				Severity: "warn",
+				Source:   "lifecycle",
+				Event:    "daemon-env-overlay-orphan-row",
+				Body: map[string]any{
+					"task_name": k,
+					"remedy":    "mcphub config prune-orphan-overlay-rows",
+				},
+			})
+		}
+	}
+
+	return ov, nil
+}
+
 // loadIntentFiles attempts to read the supervisor-intent.json and
 // daemon-intent.json files under stateDir and returns the parsed
 // values to the caller. Production wiring threads the supervisor
@@ -1365,6 +1737,27 @@ func makeProductionTerminateFnWithStatePath(events *api.SupervisorEventLog, runn
 	return func(d api.SupervisorDaemon) error {
 		target := runningPIDs[d.TaskName]
 		pid := target.PID
+		// Live tracker lookup overrides the startup runningPIDs snapshot
+		// (closes bot PR#222 P1-5: daemons spawned AFTER supervisor cold
+		// restart never appear in runningPIDs — that map is loaded once
+		// from supervisor-state.json at startup. Only the tracker holds
+		// the live PID for these later spawns. Without this lookup, the
+		// new A.2 controller's terminate calls returned "no running PID
+		// recorded" and silently skipped killing the child, leaving SM
+		// transitions to proceed (StExiting → StIdle on phantom child-exit)
+		// while the process was still alive — duplicate-process / port
+		// collision risk).
+		//
+		// runningPIDs remains the fallback for cold-restart-recovery
+		// terminates: daemons that were running BEFORE the cold restart
+		// but never re-spawned after still have only the startup snapshot.
+		if entry, ok := tracker.Get(d.TaskName); ok && entry.CurrentPID > 0 {
+			pid = entry.CurrentPID
+			target.PID = entry.CurrentPID
+			if !entry.StartedAt.IsZero() {
+				target.StartedAt = entry.StartedAt.UTC().Format(time.RFC3339Nano)
+			}
+		}
 		if pid <= 0 {
 			err := fmt.Errorf("no running PID recorded for task %q", d.TaskName)
 			emitDaemonTerminateFailed(events, d, pid, err)
@@ -1492,21 +1885,106 @@ func emitDaemonTerminateFailed(events *api.SupervisorEventLog, d api.SupervisorD
 	})
 }
 
-// mergeDaemonEnv appends descriptor env overrides in deterministic key order.
-func mergeDaemonEnv(parent []string, overrides map[string]string) []string {
-	env := append([]string{}, parent...)
-	if len(overrides) == 0 {
-		return env
+// mergeDaemonEnv merges parent env with descriptor manifest and overlay
+// env in deterministic key order.
+//
+// Precedence (low → high): parent < manifest < overlay. The third arg
+// is the Task 2.8 overlay scaffold; Phase 2.7 callers pass nil until
+// the overlay loader wires in.
+//
+// Both-empty fast path: when manifest and overlay are both empty (nil
+// or zero-length), return nil so the caller can leave cmd.Env=nil and
+// let the child inherit os.Environ() directly. This preserves the
+// historical env-less-daemon behavior after the spawn gate was
+// removed (Task 2.7 acceptance criterion #5).
+//
+// Windows case-insensitive PATH-family normalize: on Windows the env
+// block is case-insensitive (a child seeing two of "PATH"/"Path"/"path"
+// reads only one, by undefined kernel selection). The merge folds
+// every key under its uppercase form for collision detection so the
+// highest-precedence source wins exactly once; the OUTPUT preserves
+// the original casing of that winning source. POSIX keeps the
+// historical case-sensitive behavior (different cases are different
+// keys).
+//
+// Determinism: keys are emitted sorted by their uppercase normalized
+// form. Spec ref:
+// docs/superpowers/specs/2026-05-19-servers-matrix-lsp-and-env-revamp-design.md
+// §"Spawn-time env merge" + plan Task 2.7 / I1.
+func mergeDaemonEnv(parent []string, manifest, overlay map[string]string) []string {
+	if len(manifest) == 0 && len(overlay) == 0 {
+		return nil
 	}
-	keys := make([]string, 0, len(overrides))
-	for k := range overrides {
+
+	winCaseFold := runtime.GOOS == "windows"
+
+	// normKey returns the lookup key used for collision detection.
+	// On Windows it folds to uppercase so PATH/Path/path collide.
+	// On POSIX it returns the key verbatim.
+	normKey := func(k string) string {
+		if winCaseFold {
+			return strings.ToUpper(k)
+		}
+		return k
+	}
+
+	// entries holds the winning "<key>=<value>" for each normalized
+	// key. Later writes (manifest after parent, overlay after
+	// manifest) overwrite earlier ones, so the highest-precedence
+	// source wins.
+	entries := make(map[string]string)
+
+	// Parent goes in first. Lines without '=' are skipped (defensive;
+	// os.Environ() never emits malformed entries but a test caller
+	// might supply hand-crafted input).
+	for _, kv := range parent {
+		eq := strings.IndexByte(kv, '=')
+		if eq < 0 {
+			continue
+		}
+		entries[normKey(kv[:eq])] = kv
+	}
+
+	// Manifest overrides parent for the same normalized key.
+	// Within a single layer, two source keys can collide under
+	// Windows case-fold (e.g. "PATH" and "Path" both in the manifest
+	// map). Sort the source keys before applying so the
+	// last-write-wins outcome is deterministic across map iteration
+	// orders. Sort is by original (non-normalized) key so on POSIX
+	// the two cases remain distinct buckets; on Windows the sort is
+	// still deterministic and the later case (e.g. "Path" > "PATH"
+	// in lexicographic order) wins.
+	mKeys := make([]string, 0, len(manifest))
+	for k := range manifest {
+		mKeys = append(mKeys, k)
+	}
+	sort.Strings(mKeys)
+	for _, k := range mKeys {
+		entries[normKey(k)] = k + "=" + manifest[k]
+	}
+
+	// Overlay overrides both for the same normalized key. Same
+	// within-layer sort discipline as above.
+	oKeys := make([]string, 0, len(overlay))
+	for k := range overlay {
+		oKeys = append(oKeys, k)
+	}
+	sort.Strings(oKeys)
+	for _, k := range oKeys {
+		entries[normKey(k)] = k + "=" + overlay[k]
+	}
+
+	keys := make([]string, 0, len(entries))
+	for k := range entries {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
+
+	out := make([]string, 0, len(entries))
 	for _, k := range keys {
-		env = append(env, k+"="+overrides[k])
+		out = append(out, entries[k])
 	}
-	return env
+	return out
 }
 
 // makeProductionSpawnFn returns the SpawnFunc the Reconciler invokes
@@ -1531,7 +2009,7 @@ func mergeDaemonEnv(parent []string, overrides map[string]string) []string {
 // in sorted order, matching the v0.4.x daemon-host spawn convention
 // while keeping duplicate-case Windows keys deterministic.
 func makeProductionSpawnFn(job *process.Job, events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker) SpawnFunc {
-	return makeProductionSpawnFnWithStatePath(job, events, tracker, "", nil)
+	return makeProductionSpawnFnWithStatePath(job, events, tracker, "", nil, "", nil)
 }
 
 // crashEvent is what the spawn fn posts to the respawn dispatcher
@@ -1545,20 +2023,88 @@ type crashEvent struct {
 }
 
 // makeProductionSpawnFnWithStatePath constructs the production spawn
-// closure used by the reconciler. When crashCh is non-nil and the
-// spawned child exits non-cleanly (non-zero exit code OR a non-nil
-// Wait error), the wait goroutine posts a crashEvent to that channel
-// so an auto-respawn dispatcher can react. Production passes a real
-// channel; legacy callers (makeProductionSpawnFn, tests) pass nil to
-// preserve the existing "spawn once, no respawn" behavior.
-func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, statePath string, crashCh chan<- crashEvent) SpawnFunc {
+// closure used by the reconciler. The overlay parameter wires the
+// per-daemon env-overlay file into the spawn pipeline (per the
+// servers-matrix LSP + env-overlay revamp). When crashCh is non-nil
+// and the spawned child exits non-cleanly (non-zero exit code OR a
+// non-nil Wait error), the wait goroutine posts a crashEvent to that
+// channel so an auto-respawn dispatcher can react. Production passes
+// real values for both; legacy callers (makeProductionSpawnFn, tests)
+// pass nil to preserve the existing "no overlay, spawn once, no
+// respawn" behavior.
+func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, statePath string, overlay *daemon_env_overlay.Overlay, overlayPath string, crashCh chan<- crashEvent) SpawnFunc {
 	return func(d api.SupervisorDaemon) error {
 		cmd := exec.Command(d.Command, d.Args...)
 		if d.Workspace != "" {
 			cmd.Dir = d.Workspace
 		}
-		if len(d.Env) > 0 {
-			cmd.Env = mergeDaemonEnv(os.Environ(), d.Env)
+		// Live overlay reload per-spawn (closes bot PR#222 P1-1: spawn
+		// closure captured the startup overlay snapshot, so later
+		// /api/daemon/env edits written to daemon-env-overrides.yaml
+		// never reached respawned processes — the GUI Apply+Restart
+		// workflow silently ignored new config). Re-reading the
+		// overlay file on each spawn adds ~ms of disk I/O but spawns
+		// are infrequent (per-daemon, on backoff/quarantine/manual
+		// respawn paths) so the cost is dominated by process creation.
+		//
+		// Load errors fall back to the cached startup overlay so a
+		// transient permission flip or corrupt-mid-write doesn't break
+		// spawn entirely; warn audit emit makes the degradation visible.
+		current := overlay
+		if overlayPath != "" {
+			if fresh, ferr := daemon_env_overlay.Load(overlayPath); ferr == nil {
+				current = fresh
+			} else if events != nil {
+				_ = events.Emit(api.SupervisorEvent{
+					Severity: "warn", Source: "lifecycle",
+					Event: "daemon-env-overlay-spawn-reload-failed",
+					TaskName: d.TaskName,
+					Body: map[string]any{
+						"path":     overlayPath,
+						"err":      ferr.Error(),
+						"fallback": "using cached startup overlay snapshot",
+					},
+				})
+			}
+		}
+		// Per-task overlay lookup. Returns nil when no row matches the
+		// daemon's TaskName or when overlay itself is nil — both fold
+		// to "no overlay env for this daemon" so the merge degrades to
+		// the manifest-only path (which itself may be nil → cmd.Env
+		// stays nil → child inherits os.Environ).
+		overlayEnv := daemon_env_overlay.LookupOverlay(current, d.TaskName)
+		// ${parent_path} expansion runs BEFORE the merge so the
+		// substituted value participates in case-insensitive PATH
+		// collision resolution (Windows: PATH/Path/path all collide
+		// under mergeDaemonEnv's normalizer). Expansion errors are
+		// non-fatal: unknown tokens are logged via ExpandParentPath's
+		// own emit path; the daemon spawns with the literal token in
+		// its env so the operator sees the failure in the child's
+		// observed PATH rather than a silent skip.
+		if len(overlayEnv) > 0 {
+			if expanded, err := daemon_env_overlay.ExpandParentPath(overlayEnv, os.Environ()); err == nil {
+				overlayEnv = expanded
+			} else {
+				// Audit: ${parent_path} expansion failed (unknown token
+				// or some other resolution failure). The daemon still
+				// spawns with the literal env block; the operator sees
+				// the failure mode reflected in the child's PATH so
+				// the audit row + the broken behaviour are correlated.
+				_ = api.LogHubMcpEvent("warn", "daemon-env-overlay-parent-path-resolve-failed", map[string]any{
+					"task_name": d.TaskName,
+					"err":       err.Error(),
+				})
+			}
+		}
+		// Phase 2.7 spawn-gate removal: previously this site was
+		// guarded by `if len(d.Env) > 0` so overlay-only spawns (no
+		// manifest env, but operator overlay supplies values) would
+		// silently fall through to inherited parent env. mergeDaemonEnv
+		// now returns nil when manifest+overlay are both empty, which
+		// is the only case where cmd.Env should stay nil (inherit
+		// os.Environ directly).
+		if merged := mergeDaemonEnv(os.Environ(), d.Env, overlayEnv); merged != nil {
+			cmd.Env = merged
 		}
 		process.NoConsole(cmd)
 
@@ -1656,35 +2202,20 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 			// shutdown (mcphub stop, IPC exit, manual taskkill) and
 			// should NOT trigger respawn. The dispatcher channel may be
 			// nil for legacy / test callers — guard with nil-check.
-			//
-			// Bot v2 P2 (PR #230 round 2) fix: previous non-blocking
-			// `case ... default:` form dropped the crash event when the
-			// dispatcher buffer was saturated, permanently stranding the
-			// daemon (no child process → no future cmd.Wait to retry).
-			// The new form blocks with a 30s bound — generous enough
-			// that even a fleet-wide crash burst gets drained (the
-			// dispatcher main loop never blocks; only the backoff
-			// goroutine sleeps, per-task). Bounded so a pathological
-			// dispatcher (deadlocked, panicked) cannot hang this wait
-			// goroutine forever. On timeout we still audit and give up,
-			// but operator-visible failure is now "dispatcher
-			// pathological state" rather than "burst dropped one of
-			// many".
 			if crashCh != nil && (waitErr != nil || exitCode != 0) {
-				timer := time.NewTimer(30 * time.Second)
 				select {
 				case crashCh <- crashEvent{Daemon: d, ExitCode: exitCode, WaitErr: waitErr}:
-					timer.Stop()
-				case <-timer.C:
+				default:
+					// Dispatcher backlog full (>64 concurrent crashes
+					// pending). Drop this respawn signal and audit-log
+					// it. Operator must restart supervisor to recover.
 					_ = events.Emit(api.SupervisorEvent{
-						Severity: "error",
+						Severity: "warn",
 						Source:   "lifecycle",
-						Event:    "respawn-dispatcher-send-timeout",
+						Event:    "respawn-dispatcher-backlog-full",
 						TaskName: taskName,
 						Body: map[string]any{
-							"exit_code":  exitCode,
-							"timeout_ms": 30000,
-							"reason":     "dispatcher saturated for 30s; respawn signal lost",
+							"exit_code": exitCode,
 						},
 					})
 				}

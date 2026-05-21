@@ -113,6 +113,12 @@ type trayChild struct {
 	// for a fresh state line. Defaults to StateHealthy.
 	currentStateMu sync.Mutex
 	currentState   TrayState
+	// stateReadRelax mirrors HKCU\Environment\MCPHUB_ALLOW_UNHARDENED_STATE_READ
+	// reported by the parent GUI process via the state-line protocol.
+	// Drives the MF_CHECKED glyph next to the "Allow strict-DACL relax"
+	// menu item. Defaults to false; parent sends true on initial state
+	// push when the env var is set.
+	stateReadRelax bool
 
 	// Currently-installed icon handle. Replaced via NIM_MODIFY when
 	// the parent sends a new state. The previous handle is destroyed
@@ -456,6 +462,20 @@ func (tc *trayChild) readStdinLoop(r io.Reader) {
 			fmt.Fprintf(os.Stderr, "tray child: bad state line %q: %v\n", scanner.Bytes(), err)
 			continue
 		}
+		// StateReadRelax update — independent of daemon-state transitions.
+		// Just toggles the check glyph on the next menu render; no
+		// PostMessageW needed because the menu is rebuilt on every
+		// right-click and reads tc.stateReadRelax at build time.
+		if msg.StateReadRelax != nil {
+			tc.currentStateMu.Lock()
+			tc.stateReadRelax = *msg.StateReadRelax
+			tc.currentStateMu.Unlock()
+		}
+		// Daemon-state transition — only when State field is non-empty
+		// (the StateReadRelax-only state line carries omitempty State).
+		if msg.State == "" {
+			continue
+		}
 		state, ok := parseStateLabel(msg.State)
 		if !ok {
 			fmt.Fprintf(os.Stderr, "tray child: unknown state %q\n", msg.State)
@@ -572,6 +592,24 @@ func (tc *trayChild) showPopupMenuAt(x, y int32) {
 		fmt.Fprintf(os.Stderr, "tray child: AppendMenu(open-data): %v\n", err)
 		return
 	}
+	// "Allow strict-DACL relax" toggle — operator-visible from the
+	// tray without opening the web GUI. The check glyph reflects the
+	// current HKCU\Environment\MCPHUB_ALLOW_UNHARDENED_STATE_READ
+	// value reported by the parent GUI process via the state-line
+	// protocol. Click → emit "toggle-state-relax" event → parent
+	// POSTs to /api/settings/state-read-relax to flip the registry
+	// value + broadcast WM_SETTINGCHANGE.
+	if err := appendMenuSeparator(hmenu); err != nil {
+		fmt.Fprintf(os.Stderr, "tray child: AppendMenu(sep-relax): %v\n", err)
+		return
+	}
+	tc.currentStateMu.Lock()
+	relaxChecked := tc.stateReadRelax
+	tc.currentStateMu.Unlock()
+	if err := appendMenuStringChecked(hmenu, cmdToggleStateReadRelax, "Autorun (corp-DACL relax)", relaxChecked); err != nil {
+		fmt.Fprintf(os.Stderr, "tray child: AppendMenu(toggle-relax): %v\n", err)
+		return
+	}
 	if err := appendMenuSeparator(hmenu); err != nil {
 		fmt.Fprintf(os.Stderr, "tray child: AppendMenu(sep2): %v\n", err)
 		return
@@ -667,6 +705,13 @@ func (tc *trayChild) showPopupMenuAt(x, y int32) {
 		// Spawns the OS file manager at api.SettingsPath()'s parent
 		// (mcp-local-hub data dir holding manifests, secrets, settings).
 		tc.emitEvent("open-data-folder")
+	case cmdToggleStateReadRelax:
+		// Parent POSTs to /api/settings/state-read-relax with the
+		// inverse of the current value (which the parent already
+		// knows — it's the one that pushed the value to us). Tray
+		// child intentionally has no HTTP client of its own; the
+		// parent owns the GUI server interaction.
+		tc.emitEvent("toggle-state-relax")
 	}
 }
 

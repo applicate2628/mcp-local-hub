@@ -282,7 +282,11 @@ func (a *API) registerOneLanguage(
 		// Tentatively pin the port into the registry's in-memory set so
 		// subsequent AllocatePort calls within the same Register loop don't
 		// return the same port again.
-		reg.Put(WorkspaceEntry{WorkspaceKey: wsKey, WorkspacePath: canonical, Language: lang, Port: port})
+		//
+		// B.1: this is an LSP-row write; PutLSP enforces the @-prefix gate.
+		if err := reg.PutLSP(WorkspaceEntry{WorkspaceKey: wsKey, WorkspacePath: canonical, Language: lang, Port: port}); err != nil {
+			return WorkspaceEntry{}, fmt.Errorf("register: tentative LSP-row write rejected: %w", err)
+		}
 		capturedKey := wsKey
 		capturedLang := lang
 		*rollback = append(*rollback, func() {
@@ -447,7 +451,11 @@ func (a *API) registerOneLanguage(
 		WeeklyRefresh: weeklyRefresh,
 		Lifecycle:     LifecycleConfigured,
 	}
-	reg.Put(composedEntry)
+	// B.1: composedEntry is an LSP-row write; PutLSP enforces the @-prefix
+	// gate (Language is the per-LSP language string, never the sentinel).
+	if err := reg.PutLSP(composedEntry); err != nil {
+		return WorkspaceEntry{}, fmt.Errorf("register: composed LSP-row write rejected: %w", err)
+	}
 	if err := reg.Save(); err != nil {
 		return WorkspaceEntry{}, fmt.Errorf("persist registry: %w", err)
 	}
@@ -634,10 +642,15 @@ func (a *API) unregisterWithManifest(m *config.ServerManifest, workspacePath str
 	if err := reg.Load(); err != nil {
 		return nil, err
 	}
-	existing := reg.ListByWorkspace(wsKey)
+	// B.1: default unregister removes only LSP rows; serena rows live under
+	// SerenaLanguageSentinel and are removed via `--backend serena` /
+	// `--backend all` (mapped to RemoveByBackend in the CLI). Using
+	// ListByWorkspaceLSP centralises the sentinel filter at both the
+	// canonical-key lookup and the legacy-key fallback.
+	existing := reg.ListByWorkspaceLSP(wsKey)
 	activeWSKey := wsKey
 	if len(existing) == 0 && legacyWSKey != wsKey {
-		existing = reg.ListByWorkspace(legacyWSKey)
+		existing = reg.ListByWorkspaceLSP(legacyWSKey)
 		if len(existing) > 0 {
 			activeWSKey = legacyWSKey
 		}

@@ -18,21 +18,48 @@ base_args:
 env:
   PYTHONUNBUFFERED: "1"
 
-# Two daemons, two Serena contexts:
-#   - claude (9121, context=claude-code) is shared by Claude Code, Cursor,
-#     VS Code, Gemini CLI, Qwen CLI, and Antigravity relay. They accept the
-#     claude-code context's tool preset. Sharing reduces Serena instance count
-#     and lets the gopls LSP cache serve multiple client sessions.
-#   - codex (9122, context=codex) is separate because Codex CLI requires its
-#     own Serena context's tool preset.
+# ONE Serena daemon, codex context for ALL clients.
+#
+# Why unified on --context codex (post-2026-05-20 architectural review):
+#
+#   The pre-existing split (claude on 9121 with --context claude-code +
+#   codex on 9122 with --context codex) wasted resources for two reasons:
+#
+#   1. Memory + process footprint: 2× Python + 2× SolidLSP + 2× internal
+#      LSP children (clangd, tsserver, ...) at peak when both daemons had
+#      the same project activated. ~400-800 MB overhead on a typical
+#      multi-language project.
+#
+#   2. Functional asymmetry: claude-code preset (claude-code.yml at
+#      pinned serena commit f0a3a279b7c48d28b9e7e4aea1ed9caed846906b)
+#      has `single_project: true` AND EXCLUDES `search_for_pattern`.
+#      That means the 6 claude-family agents could not switch projects
+#      at all (activate_project tool not exposed) and lacked
+#      search_for_pattern — degraded relative to codex.
+#
+#   By unifying everyone on --context codex:
+#
+#   - 1 process instead of 2.
+#   - search_for_pattern available to ALL agents (Codex's stats: 201
+#     calls/month — actively used, not theoretical).
+#   - activate_project available to ALL agents — claude-family agents
+#     can now switch between projects on demand, instead of being
+#     locked to whatever project the daemon was bootstrapped on.
+#
+# Trade-off accepted: _active_project tug-of-war when multiple agents
+# work on different projects simultaneously. Per upstream serena
+# task-executor design (verified via Codex deep-source review):
+# activate_project is sequential within a single daemon, current
+# tool-call drains before switch, cache saved on shutdown
+# (`Project.shutdown(save_cache=True)`). So thrashing is ordered, not
+# racy, and warm-up on return to a prior project is cache-assisted.
+# Pragmatic for single-operator workflow even with 3+ projects in
+# rotation; consider per-project daemon split (--project flag in
+# extra_args) if thrashing latency becomes user-visible.
 daemons:
-  - name: claude
-    context: claude-code
-    port: 9121
-    extra_args: [--context, claude-code]
-  - name: codex
+  - name: unified
     context: codex
-    port: 9122
+    port: 9121
     extra_args: [--context, codex]
 
 ## Antigravity's Cascade agent (Antigravity IDE v0.x as of 2026-04-17)
@@ -47,25 +74,25 @@ daemons:
 # See internal/clients/antigravity.go + internal/daemon/relay.go.
 client_bindings:
   - client: claude-code
-    daemon: claude
+    daemon: unified
     url_path: /mcp
   - client: codex-cli
-    daemon: codex
+    daemon: unified
     url_path: /mcp
   - client: cursor
-    daemon: claude
+    daemon: unified
     url_path: /mcp
   - client: vscode
-    daemon: claude
+    daemon: unified
     url_path: /mcp
   - client: gemini-cli
-    daemon: claude
+    daemon: unified
     url_path: /mcp
   - client: qwen-cli
-    daemon: claude
+    daemon: unified
     url_path: /mcp
   - client: antigravity
-    daemon: claude
+    daemon: unified
     url_path: /mcp
 
 weekly_refresh: false

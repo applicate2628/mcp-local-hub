@@ -117,6 +117,7 @@ const (
 	MF_SEPARATOR = 0x00000800
 	MF_GRAYED    = 0x00000001
 	MF_DISABLED  = 0x00000002
+	MF_CHECKED   = 0x00000008
 
 	// TrackPopupMenu flags (alignment + return value)
 	TPM_LEFTALIGN   = 0x0000
@@ -166,6 +167,14 @@ const (
 	cmdRescanClients      = 6
 	cmdOpenLogsFolder     = 7
 	cmdOpenDataFolder     = 8
+	// cmdToggleStateReadRelax flips the on-disk
+	// HKCU\Environment\MCPHUB_ALLOW_UNHARDENED_STATE_READ value via
+	// the existing /api/settings/state-read-relax endpoint. The
+	// menu item label reflects the CURRENT state (checked = on)
+	// so the operator can see + toggle from the tray without
+	// opening the web GUI. Surfaces the same setting that lives
+	// in Settings → Advanced.
+	cmdToggleStateReadRelax = 9
 )
 
 // POINT matches Win32 POINT.
@@ -495,6 +504,31 @@ func appendMenuStringW(hmenu uintptr, id uintptr, text string) error {
 	r, _, e := procAppendMenuW.Call(
 		hmenu,
 		MF_STRING,
+		id,
+		uintptr(unsafe.Pointer(p)),
+	)
+	if r == 0 {
+		return e
+	}
+	return nil
+}
+
+// appendMenuStringChecked appends a menu item rendered with a check
+// glyph next to its label. Used for the on/off state indicator on the
+// "Allow strict-DACL relax" toggle so the operator can see current
+// state at a glance without clicking through to the web GUI.
+func appendMenuStringChecked(hmenu uintptr, id uintptr, text string, checked bool) error {
+	p, err := windows.UTF16PtrFromString(text)
+	if err != nil {
+		return err
+	}
+	flags := uintptr(MF_STRING)
+	if checked {
+		flags |= MF_CHECKED
+	}
+	r, _, e := procAppendMenuW.Call(
+		hmenu,
+		flags,
 		id,
 		uintptr(unsafe.Pointer(p)),
 	)

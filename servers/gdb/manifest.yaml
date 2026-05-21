@@ -1,6 +1,7 @@
 name: gdb
 kind: global
 transport: stdio-bridge
+required_binaries: [gdb]
 command: uv
 base_args:
   - "run"

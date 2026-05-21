@@ -40,6 +40,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newManifestCmd())
 	root.AddCommand(newSchedulerCmd())
 	root.AddCommand(newSettingsCmd())
+	root.AddCommand(newConfigCmd())
 	root.AddCommand(newRegisterCmd())
 	root.AddCommand(newUnregisterCmd())
 	root.AddCommand(newWorkspacesCmd())
@@ -93,6 +94,7 @@ func newBackupsCmd() *cobra.Command       { return newBackupsCmdReal() }
 func newManifestCmd() *cobra.Command      { return newManifestCmdReal() }
 func newSchedulerCmd() *cobra.Command     { return newSchedulerCmdReal() }
 func newSettingsCmd() *cobra.Command      { return newSettingsCmdReal() }
+func newConfigCmd() *cobra.Command        { return newConfigCmdReal() }
 func newRegisterCmd() *cobra.Command      { return newRegisterCmdReal() }
 func newUnregisterCmd() *cobra.Command    { return newUnregisterCmdReal() }
 func newWorkspacesCmd() *cobra.Command    { return newWorkspacesCmdReal() }

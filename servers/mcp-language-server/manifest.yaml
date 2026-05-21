@@ -24,49 +24,58 @@ languages:
     backend: mcp-language-server
     transport: stdio
     lsp_command: clangd
+    required_binaries: [clangd]
 
   - name: fortran
     backend: mcp-language-server
     transport: stdio
     lsp_command: fortls
+    required_binaries: [fortls]
 
   - name: go
     backend: gopls-mcp
     transport: stdio
     lsp_command: gopls
     extra_flags: [mcp]
+    required_binaries: [gopls]
 
   - name: javascript
     backend: mcp-language-server
     transport: stdio
     lsp_command: typescript-language-server
     extra_flags: ["--stdio"]
+    required_binaries: [typescript-language-server]
 
   - name: python
     backend: mcp-language-server
     transport: stdio
     lsp_command: pyright-langserver
     extra_flags: ["--stdio"]
+    required_binaries: [pyright-langserver]
 
   - name: rust
     backend: mcp-language-server
     transport: stdio
     lsp_command: rust-analyzer
+    required_binaries: [rust-analyzer]
 
   - name: typescript
     backend: mcp-language-server
     transport: stdio
     lsp_command: typescript-language-server
     extra_flags: ["--stdio"]
+    required_binaries: [typescript-language-server]
 
   - name: vscode-css
     backend: mcp-language-server
     transport: stdio
     lsp_command: vscode-css-language-server
     extra_flags: ["--stdio"]
+    required_binaries: [vscode-css-language-server]
 
   - name: vscode-html
     backend: mcp-language-server
     transport: stdio
     lsp_command: vscode-html-language-server
     extra_flags: ["--stdio"]
+    required_binaries: [vscode-html-language-server]

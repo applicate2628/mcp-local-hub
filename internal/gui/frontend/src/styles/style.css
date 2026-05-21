@@ -1175,3 +1175,73 @@ menu button[disabled] {
 .state-badge-unsupported { background: #fff9c4; color: #795548; }
 .state-badge-error       { background: #ffcdd2; color: #b71c1c; }
 .state-badge-stale       { background: #ffe0b2; color: #e65100; }
+
+/* v0.5.x Servers-matrix revamp — workspace selector, LSP matrix, env drawer */
+.workspace-selector {
+  display: flex; align-items: center; gap: 0.75rem;
+  margin: 0.5rem 0 0.75rem;
+  font-size: 0.95rem;
+}
+.workspace-selector-label { display: inline-flex; align-items: center; gap: 0.5rem; }
+.workspace-selector-label select { padding: 0.125rem 0.25rem; }
+.workspace-selector-path {
+  font-family: ui-monospace, monospace; color: #555; font-size: 0.875rem;
+  overflow: hidden; text-overflow: ellipsis; max-width: 50ch; white-space: nowrap;
+}
+.workspace-selector-empty-text { color: #888; font-style: italic; font-size: 0.875rem; }
+
+.lsp-matrix-section { border-top: 1px solid #ddd; padding-top: 1rem; }
+.lsp-matrix-section h2 { margin: 0 0 0.25rem; font-size: 1.05rem; }
+.lsp-matrix { table-layout: auto; }
+.lsp-matrix th, .lsp-matrix td { padding: 0.25rem 0.5rem; }
+.lsp-row-open { background: #f5fafe; }
+.lsp-row-workspace { color: #555; font-size: 0.875rem; }
+.lsp-row-unregistered { color: #888; font-size: 0.875rem; }
+.lsp-cell { vertical-align: middle; }
+.lsp-cell-empty { color: #aaa; }
+.lsp-chip {
+  display: inline-block; padding: 0 0.4rem; margin: 0 0.1rem;
+  border-radius: 4px; font-size: 0.75rem; font-weight: 500;
+  vertical-align: middle;
+}
+.lsp-chip-via-hub { background: #c8e6c9; color: #1b5e20; }
+.lsp-chip-direct  { background: #fff9c4; color: #795548; }
+.lsp-chip-legacy  { background: #ffcdd2; color: #b71c1c; }
+.matrix-cell-legacy-chip {
+  display: inline-block; margin-left: 0.25rem; padding: 0 0.4rem;
+  border-radius: 4px; font-size: 0.7rem; font-weight: 500;
+  background: #ffcdd2; color: #b71c1c; vertical-align: middle;
+}
+
+.env-drawer {
+  border: 1px solid #bbb; background: #fafafa; padding: 0.75rem;
+  margin: 1rem 0; border-radius: 4px; max-width: 720px;
+}
+.env-drawer-header {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 0.25rem;
+}
+.env-drawer-close {
+  background: none; border: none; font-size: 1.25rem; cursor: pointer;
+  color: #888; padding: 0 0.25rem;
+}
+.env-drawer-close:hover { color: #000; }
+.env-drawer-task { font-size: 0.875rem; color: #555; margin-bottom: 0.5rem; }
+.env-drawer-field { display: block; margin: 0.5rem 0; }
+.env-drawer-field > span { display: block; font-weight: 500; margin-bottom: 0.25rem; }
+.env-drawer-field textarea {
+  width: 100%; font-family: ui-monospace, monospace; font-size: 0.875rem;
+  padding: 0.25rem;
+}
+.env-drawer-warning {
+  background: #fff3cd; color: #664d03; padding: 0.5rem;
+  border: 1px solid #ffe69c; border-radius: 4px; margin: 0.5rem 0;
+  font-size: 0.875rem;
+}
+.env-drawer-actions {
+  display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+  margin: 0.5rem 0;
+}
+.env-drawer-force { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.875rem; }
+.env-drawer .info { color: #1b5e20; margin-top: 0.5rem; }
+.env-drawer .error { color: #b71c1c; margin-top: 0.5rem; }

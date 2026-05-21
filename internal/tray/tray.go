@@ -86,6 +86,19 @@ type Config struct {
 	// StateCh delivers TrayState transitions. The parent forwards
 	// each value to the child as a JSON state line.
 	StateCh <-chan TrayState
+	// StateReadRelaxCh delivers the current value of
+	// HKCU\Environment\MCPHUB_ALLOW_UNHARDENED_STATE_READ. Each value
+	// is forwarded to the child as a state-line carrying
+	// {state_read_relax: bool}; the child uses it to toggle the
+	// MF_CHECKED glyph next to the "Allow strict-DACL relax" menu
+	// item. Optional: nil channel disables the menu's check-state
+	// tracking (the item still appears, just always unchecked).
+	StateReadRelaxCh <-chan bool
+	// ToggleStateReadRelax is called when the user picks the
+	// "Allow strict-DACL relax" menu item. Implementer POSTs to
+	// /api/settings/state-read-relax with the inverse of the
+	// currently-known value. Optional: silently no-op if nil.
+	ToggleStateReadRelax func()
 }
 
 // Run spawns the tray subprocess and routes events between it and
@@ -179,6 +192,10 @@ func Run(ctx context.Context, cfg Config) error {
 		defer wg.Done()
 		enc := json.NewEncoder(stdin)
 		defer stdin.Close()
+		// stateReadRelaxCh is allowed to be nil; receive on a nil
+		// channel blocks forever, which is the desired behavior
+		// (just makes that select case inert).
+		stateReadRelaxCh := cfg.StateReadRelaxCh
 		for {
 			select {
 			case <-runCtx.Done():
@@ -188,6 +205,12 @@ func Run(ctx context.Context, cfg Config) error {
 					return
 				}
 				_ = enc.Encode(stateMessage{State: state.String()})
+			case relax, ok := <-stateReadRelaxCh:
+				if !ok {
+					stateReadRelaxCh = nil
+					continue
+				}
+				_ = enc.Encode(stateMessage{StateReadRelax: &relax})
 			}
 		}
 	}()
@@ -318,14 +341,26 @@ func dispatchEvent(name string, cfg Config) {
 		if cfg.OpenDataFolder != nil {
 			cfg.OpenDataFolder()
 		}
+	case "toggle-state-relax":
+		if cfg.ToggleStateReadRelax != nil {
+			cfg.ToggleStateReadRelax()
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "tray: unknown event %q\n", name)
 	}
 }
 
 // stateMessage is the wire-format payload parent sends to child on stdin.
+// Either State (daemon-tray-state transition) OR Misc payloads carry the
+// envelope; absent fields are zero-valued and skipped by the child.
 type stateMessage struct {
-	State string `json:"state"`
+	State string `json:"state,omitempty"`
+	// StateReadRelax is the current HKCU value of
+	// MCPHUB_ALLOW_UNHARDENED_STATE_READ. Sent independently of
+	// State transitions so the menu's check-glyph stays in sync.
+	// Use a pointer so a missing field doesn't flip the toggle to
+	// false on every state-line update.
+	StateReadRelax *bool `json:"state_read_relax,omitempty"`
 }
 
 // eventMessage is the wire-format payload child sends to parent on stdout.
