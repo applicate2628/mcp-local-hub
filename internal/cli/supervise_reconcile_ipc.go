@@ -244,7 +244,20 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 	// needs_manual_review) never trigger SM events.
 	appliedCount := 0
 	if args.Apply {
-		appliedCount = applyReconcileDrift(deps, drift, updatedIntent, updatedDaemonIntent)
+		appliedCount, err = applyReconcileDrift(ctx, deps, drift, updatedIntent, updatedDaemonIntent)
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return writeReconcileTimeoutFrame(conn, req, err)
+		}
+		if err != nil {
+			return writeIPCFrame(conn, api.IPCResponse{
+				ID: req.ID,
+				Error: &api.IPCErr{
+					Code:    "RECONCILE_APPLY_FAILED",
+					Message: err.Error(),
+				},
+				Final: true,
+			})
+		}
 	}
 
 	// (8) Audit emit. Failures are non-fatal (the response is still
@@ -506,37 +519,51 @@ func lookupControllerSMState(deps ipcDispatchDeps, taskName string) api.SMState 
 // drift entries are still reported in the response, but appliedCount
 // will be 0 because there's no event loop to post onto.
 func applyReconcileDrift(
+	ctx context.Context,
 	deps ipcDispatchDeps,
 	drift []api.DriftEntry,
 	updatedIntent *api.SupervisorIntentFile,
 	updatedDaemonIntent *api.DaemonIntentFile,
-) int {
+) (int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if deps.controllerProvider == nil {
-		return 0
+		return 0, nil
 	}
 	ctrl := deps.controllerProvider()
 	if ctrl == nil {
-		return 0
+		return 0, nil
 	}
 	ctrl.intentCache.Refresh(updatedIntent)
 	if updatedDaemonIntent != nil {
 		ctrl.daemonIntent.Refresh(updatedDaemonIntent)
 	}
 	if ctrl.eventLoop == nil {
-		return 0
+		return 0, nil
 	}
 	applied := 0
 	for _, entry := range drift {
 		if entry.Action != api.ReconcileActionPostEvIntentUpdate {
 			continue
 		}
-		ctrl.eventLoop.Post(api.LoopEvent{
+		event := api.LoopEvent{
 			Kind:     api.EvIntentUpdate,
 			TaskName: entry.TaskName,
-		})
+		}
+		for {
+			if ctrl.eventLoop.TryPost(event) {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return applied, ctx.Err()
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
 		applied++
 	}
-	return applied
+	return applied, nil
 }
 
 func emitReconcileDaemonIntentReadFailed(events *api.SupervisorEventLog, path string, res api.IntentReadResult) {
