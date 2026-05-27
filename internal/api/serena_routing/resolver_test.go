@@ -293,6 +293,79 @@ func TestResolveByPath_EmptyPath_ReturnsErrInvalidPath(t *testing.T) {
 	}
 }
 
+// TestResolveByPath_RejectsUNCPath_OnWindows verifies that the
+// resolver rejects every two-leading-separator permutation (UNC
+// share root) before any filesystem probe. The rejection is
+// Windows-specific because POSIX treats `//` as an absolute local
+// path; see TestResolveByPath_AcceptsLocalDoubleSlash_OnNonWindows
+// for the Unix counterpart.
+func TestResolveByPath_RejectsUNCPath_OnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skipf("UNC rejection is Windows-only; runtime.GOOS = %q", runtime.GOOS)
+	}
+	root := t.TempDir()
+	wsPath := makeWorkspace(t, root, "Alpha")
+	regPath := makeRegistryWithSerena(t, root, []api.WorkspaceEntry{
+		{WorkspaceKey: api.WorkspaceKey(wsPath), WorkspacePath: wsPath, Backend: "serena", Port: 9301},
+	})
+	reg := api.NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	resolver := NewWorkspaceResolver(reg, regPath)
+
+	// Both canonical and mixed-separator forms must reject. On Windows
+	// `/` and `\` are interchangeable as path separators, so a partial
+	// prefix check that only catches same-separator spellings would let
+	// the mixed forms fall through to os.Lstat on a network path.
+	cases := []string{
+		`\\attacker.example\share\file.go`,
+		`//attacker.example/share/file.go`,
+		`\/attacker.example/share\file.go`,
+		`/\attacker.example\share/file.go`,
+	}
+	for _, p := range cases {
+		_, err := resolver.ResolveByPath(p)
+		if !errors.Is(err, ErrInvalidPath) {
+			t.Errorf("ResolveByPath(%q) err = %v, want ErrInvalidPath", p, err)
+		}
+	}
+}
+
+// TestResolveByPath_AcceptsLocalDoubleSlash_OnNonWindows verifies the
+// Unix companion of the UNC rejection: a `//`-prefixed absolute path
+// on POSIX is a valid local path (Go's filepath.IsAbs returns true,
+// os.Lstat resolves it locally), so the resolver MUST NOT reject it
+// with ErrInvalidPath. Applying the Windows UNC gate unconditionally
+// would regress every Unix workspace whose canonical form carries a
+// double-slash prefix.
+func TestResolveByPath_AcceptsLocalDoubleSlash_OnNonWindows(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skipf("double-slash absolute is Unix-only path semantics; runtime.GOOS = %q", runtime.GOOS)
+	}
+	root := t.TempDir()
+	wsPath := makeWorkspace(t, root, "Alpha")
+	regPath := makeRegistryWithSerena(t, root, []api.WorkspaceEntry{
+		{WorkspaceKey: api.WorkspaceKey(wsPath), WorkspacePath: wsPath, Backend: "serena", Port: 9301},
+	})
+	reg := api.NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	resolver := NewWorkspaceResolver(reg, regPath)
+
+	// A path with a doubled leading slash that points inside the
+	// registered workspace must NOT be classified as a UNC share root
+	// on Unix. We don't care which resolution branch fires - only that
+	// the error (if any) is NOT ErrInvalidPath, which would mean the
+	// Windows-only UNC gate misfired.
+	doubled := "/" + wsPath // e.g. "//tmp/.../Alpha"
+	_, err := resolver.ResolveByPath(doubled)
+	if errors.Is(err, ErrInvalidPath) {
+		t.Fatalf("ResolveByPath(%q) = ErrInvalidPath; want anything else (UNC gate fired on a local POSIX path)", doubled)
+	}
+}
+
 func TestResolveByPath_EmptyRegistry_ReturnsErrWorkspaceNotFound(t *testing.T) {
 	root := t.TempDir()
 	regPath := filepath.Join(root, "workspaces.yaml")

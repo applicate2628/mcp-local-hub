@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -158,6 +159,9 @@ func (r *WorkspaceResolver) ResolveByPath(path string) (*api.WorkspaceEntry, err
 	if path == "" {
 		return nil, ErrInvalidPath
 	}
+	if isWindowsUNCPath(path) {
+		return nil, ErrInvalidPath
+	}
 	entries := r.snapshot()
 	if len(entries) == 0 {
 		return nil, ErrWorkspaceNotFound
@@ -166,6 +170,34 @@ func (r *WorkspaceResolver) ResolveByPath(path string) (*api.WorkspaceEntry, err
 		return r.resolveAbsolute(path, entries)
 	}
 	return r.resolveRelative(path, entries)
+}
+
+// isWindowsUNCPath returns true when path looks like a UNC/network
+// share root - any two-leading-separator permutation including
+// canonical `\\server\share\...` and `//server/share/...` plus the
+// mixed forms `\/server\share` and `/\server/share`.
+//
+// The rejection is Windows-specific. On Windows both `/` and `\` are
+// path separators, so any permutation of two leading separators is a
+// UNC root, and a missed spelling can fall through to `os.Lstat` on an
+// attacker-controlled network path - exactly the credential-leak
+// filesystem probe this helper is meant to prevent.
+//
+// On non-Windows hosts the helper returns false so paths like
+// `//tmp/project/file.go` (a valid POSIX absolute local path - Go's
+// filepath treats it as absolute and `os.Lstat` resolves locally)
+// continue to reach the normal resolution branches. Applying the
+// rejection unconditionally would regress every Unix workspace whose
+// canonical form happens to carry a double-slash prefix.
+func isWindowsUNCPath(path string) bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	if len(path) < 2 {
+		return false
+	}
+	isSep := func(c byte) bool { return c == '\\' || c == '/' }
+	return isSep(path[0]) && isSep(path[1])
 }
 
 // resolveAbsolute handles the absolute-path branch of ResolveByPath.
