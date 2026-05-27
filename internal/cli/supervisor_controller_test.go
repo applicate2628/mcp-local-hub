@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -638,10 +640,11 @@ func TestSupervisorController_HandleLoopEvent_OrphanTaskDropped(t *testing.T) {
 	}
 }
 
-// TestSupervisorController_SpawnErrorRoutesToBackoff is the regression
-// guard for the Codex Cloud finding on 2d67031: a daemon whose c.spawn
-// returns error (cmd.Start / StartWithJob failed before any child
-// existed) was previously stranded in StSpawning forever because:
+// TestSupervisorController_SpawnPreChildErrorRoutesToBackoff is the
+// regression guard for the Codex Cloud finding on 2d67031: a daemon
+// whose c.spawn returns errSpawnPreChild (cmd.Start / StartWithJob
+// failed BEFORE any child existed) was previously stranded in
+// StSpawning forever because:
 //
 //   - StIdle + EvStart -> StSpawning was stored in smStates BEFORE
 //     the spawn closure ran (supervisor_controller.go ~L390).
@@ -653,15 +656,17 @@ func TestSupervisorController_HandleLoopEvent_OrphanTaskDropped(t *testing.T) {
 //     unmatched and dropped as controller-event-unhandled.
 //
 // The fix: executeSideEffect now posts a SYNTHETIC EvChildExit when
-// c.spawn returns error, so the SM table's StSpawning + EvChildExit
-// transition routes to StBackoffWaiting (which arms the
-// failure-counter timer) and the standard backoff retry pipeline
-// drives the next spawn attempt via EvTimerDue.
+// c.spawn returns an errSpawnPreChild-wrapped error, so the SM
+// table's StSpawning + EvChildExit transition routes to
+// StBackoffWaiting (which arms the failure-counter timer) and the
+// standard backoff retry pipeline drives the next spawn attempt via
+// EvTimerDue.
 //
 // This test reproduces the PoC: register a fake spawn that returns
-// error, post EvStart, and assert the state lands on StBackoffWaiting
-// after a bounded wait (NOT stuck on StSpawning).
-func TestSupervisorController_SpawnErrorRoutesToBackoff(t *testing.T) {
+// fmt.Errorf("%w: ...", errSpawnPreChild, ...), post EvStart, and
+// assert the state lands on StBackoffWaiting after a bounded wait
+// (NOT stuck on StSpawning).
+func TestSupervisorController_SpawnPreChildErrorRoutesToBackoff(t *testing.T) {
 	tmpHome := apitest.HardenedTempDir(t)
 	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
 	events, err := api.OpenSupervisorEventLog(eventsPath)
@@ -672,12 +677,12 @@ func TestSupervisorController_SpawnErrorRoutesToBackoff(t *testing.T) {
 
 	tracker := NewDaemonRuntimeTracker()
 	var spawnCalls atomic.Int32
-	// Fake spawn ALWAYS returns error, mirroring a persistent
-	// cmd.Start failure (missing executable, invalid path,
-	// permission denied, etc.).
+	// Fake spawn ALWAYS returns an errSpawnPreChild-wrapped error,
+	// mirroring a persistent pre-child failure (missing executable,
+	// invalid path, permission denied at cmd.Start, etc.).
 	fakeSpawn := func(d api.SupervisorDaemon) error {
 		spawnCalls.Add(1)
-		return os.ErrNotExist
+		return fmt.Errorf("%w: simulated cmd.Start failure", errSpawnPreChild)
 	}
 
 	descriptor := api.SupervisorDaemon{
@@ -708,9 +713,10 @@ func TestSupervisorController_SpawnErrorRoutesToBackoff(t *testing.T) {
 	go loop.Run(ctx)
 
 	// Post EvStart. Expected chain:
-	//   StIdle + EvStart -> StSpawning + spawn() returns error
-	//   -> executeSideEffect posts synthetic EvChildExit
-	//   -> StSpawning + EvChildExit -> StBackoffWaiting
+	//   StIdle + EvStart -> StSpawning + spawn() returns
+	//   errSpawnPreChild -> executeSideEffect posts synthetic
+	//   EvChildExit (in a goroutine to avoid deadlocking the
+	//   handler) -> StSpawning + EvChildExit -> StBackoffWaiting
 	loop.Post(api.LoopEvent{Kind: api.EvStart, TaskName: descriptor.TaskName})
 
 	// Poll until state lands on StBackoffWaiting OR the deadline
@@ -730,6 +736,183 @@ func TestSupervisorController_SpawnErrorRoutesToBackoff(t *testing.T) {
 	}
 	st, _ := ctrl.GetSMState(descriptor.TaskName)
 	if st != api.StBackoffWaiting {
-		t.Fatalf("post-spawn-error state = %s, want %s (regression: daemon stuck in StSpawning - the synthetic EvChildExit on c.spawn error is missing from executeSideEffect)", st, api.StBackoffWaiting)
+		t.Fatalf("post-spawn-error state = %s, want %s (regression: daemon stuck in StSpawning - the synthetic EvChildExit on errSpawnPreChild is missing from executeSideEffect)", st, api.StBackoffWaiting)
+	}
+}
+
+// TestSupervisorController_SpawnPostChildErrorDoesNotSynthesizeExit is
+// the regression guard for Codex Cloud bot finding on PR #236 a54cc95
+// (P1): when c.spawn returns a NON-errSpawnPreChild error (e.g.
+// persistDaemonRuntimeTracker failed AFTER cmd.Start succeeded - the
+// child IS running, the wait goroutine is observing it), the
+// controller MUST NOT post a synthetic EvChildExit. Otherwise the
+// backoff timer would respawn while the original child is still
+// alive, creating a duplicate daemon.
+//
+// The real EvChildExit will arrive from the wait goroutine's
+// crashCh path when the child eventually exits naturally; the
+// controller routes through StBackoffWaiting at that point. No
+// synthesis is needed - and synthesizing it here would cause the
+// duplicate-daemon bug the bot caught.
+func TestSupervisorController_SpawnPostChildErrorDoesNotSynthesizeExit(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	tracker := NewDaemonRuntimeTracker()
+	var spawnCalls atomic.Int32
+	// Fake spawn returns a generic (NON-errSpawnPreChild) error,
+	// mirroring the production case where cmd.Start succeeded, the
+	// wait goroutine was launched, and a downstream step like
+	// persistDaemonRuntimeTracker failed. The child is alive at
+	// this point.
+	fakeSpawn := func(d api.SupervisorDaemon) error {
+		spawnCalls.Add(1)
+		return errors.New("persistDaemonRuntimeTracker: write supervisor-state.json: ...")
+	}
+
+	descriptor := api.SupervisorDaemon{
+		TaskName: `\mcp-local-hub-test-default`,
+		Server:   "test",
+		Daemon:   "default",
+	}
+	intent := &api.SupervisorIntentFile{Daemons: []api.SupervisorDaemon{descriptor}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	loop := api.NewEventLoop(16)
+	ctrl := &supervisorController{
+		intentCache:         newIntentCache(),
+		eventLoop:           loop,
+		tracker:             tracker,
+		events:              events,
+		daemonIntent:        newDaemonIntentCache(),
+		spawn:               fakeSpawn,
+		ctx:                 ctx,
+		failureWindow:       respawnFailureWindow,
+		quarantineThreshold: respawnQuarantineThreshold,
+	}
+	ctrl.intentCache.Refresh(intent)
+	ctrl.smStates.Store(descriptor.TaskName, api.StIdle)
+	loop.RegisterHandler(ctrl.handleLoopEvent)
+	go loop.Run(ctx)
+
+	// Post EvStart. Expected:
+	//   StIdle + EvStart -> StSpawning + spawn() returns generic
+	//   non-pre-child error -> executeSideEffect posts NOTHING
+	//   -> daemon stays in StSpawning until real EvChildExit
+	//   arrives later from wait goroutine.
+	loop.Post(api.LoopEvent{Kind: api.EvStart, TaskName: descriptor.TaskName})
+
+	// Wait a bit to ensure no synthetic event is posted. We can't
+	// "wait for nothing to happen", so we sleep a short bounded
+	// time then assert the state did NOT transition away from
+	// StSpawning.
+	time.Sleep(200 * time.Millisecond)
+
+	if got := spawnCalls.Load(); got != 1 {
+		t.Errorf("spawn call count = %d, want 1", got)
+	}
+	st, _ := ctrl.GetSMState(descriptor.TaskName)
+	if st != api.StSpawning {
+		t.Fatalf("post-generic-error state = %s, want %s (regression: synthetic EvChildExit on non-pre-child error would respawn while the original child is still alive - duplicate daemon)", st, api.StSpawning)
+	}
+}
+
+// TestSupervisorController_SpawnHealthOKPostIsAsync is the regression
+// guard for Codex Cloud bot finding on PR #236 a54cc95 (P2):
+// EventLoop.Post is a blocking send (supervisor_event_loop.go:46-47).
+// If executeSideEffect posts the success/failure event inline from
+// the handler goroutine, and the loop buffer is already full (e.g.
+// startup reconcile queued many EvStart events), the handler
+// deadlocks waiting for buffer space that only the handler itself
+// can free.
+//
+// The fix wraps the self-post in a goroutine so the handler returns
+// immediately. This test fills the loop buffer to capacity-1 BEFORE
+// posting EvStart, then verifies the EvStart handler completes (the
+// daemon state advances) instead of deadlocking.
+func TestSupervisorController_SpawnHealthOKPostIsAsync(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	tracker := NewDaemonRuntimeTracker()
+	var spawnCalls atomic.Int32
+	// Block inside spawn until released so the handler is "stuck"
+	// processing EvStart while we fill the loop buffer behind it.
+	release := make(chan struct{})
+	fakeSpawn := func(d api.SupervisorDaemon) error {
+		<-release // hold the handler goroutine
+		spawnCalls.Add(1)
+		return nil
+	}
+
+	descriptor := api.SupervisorDaemon{
+		TaskName: `\mcp-local-hub-test-default`,
+		Server:   "test",
+		Daemon:   "default",
+	}
+	intent := &api.SupervisorIntentFile{Daemons: []api.SupervisorDaemon{descriptor}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Small buffer so we can fill it: cap=2.
+	loop := api.NewEventLoop(2)
+	ctrl := &supervisorController{
+		intentCache:         newIntentCache(),
+		eventLoop:           loop,
+		tracker:             tracker,
+		events:              events,
+		daemonIntent:        newDaemonIntentCache(),
+		spawn:               fakeSpawn,
+		ctx:                 ctx,
+		failureWindow:       respawnFailureWindow,
+		quarantineThreshold: respawnQuarantineThreshold,
+	}
+	ctrl.intentCache.Refresh(intent)
+	ctrl.smStates.Store(descriptor.TaskName, api.StIdle)
+	loop.RegisterHandler(ctrl.handleLoopEvent)
+	go loop.Run(ctx)
+
+	// Step 1: post EvStart. Loop processes it: handler calls
+	// fakeSpawn which BLOCKS on <-release.
+	loop.Post(api.LoopEvent{Kind: api.EvStart, TaskName: descriptor.TaskName})
+	// Step 2: give the handler a moment to enter fakeSpawn.
+	time.Sleep(50 * time.Millisecond)
+	// Step 3: fill the loop buffer to capacity. Two non-matching
+	// orphan events will be queued and remain undrained while the
+	// handler is blocked on <-release.
+	loop.Post(api.LoopEvent{Kind: api.EvStart, TaskName: `\orphan-1`})
+	loop.Post(api.LoopEvent{Kind: api.EvStart, TaskName: `\orphan-2`})
+	// Step 4: release the handler. fakeSpawn returns nil ->
+	// executeSideEffect would normally Post(EvHealthOK), and since
+	// the buffer is full this would deadlock without the goroutine
+	// wrap. With the wrap, the handler returns, the loop drains
+	// the next event, and EvHealthOK lands eventually.
+	close(release)
+
+	// Wait for state == StRunning (handler did not deadlock).
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		st, _ := ctrl.GetSMState(descriptor.TaskName)
+		if st == api.StRunning {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	st, _ := ctrl.GetSMState(descriptor.TaskName)
+	if st != api.StRunning {
+		t.Fatalf("post-spawn-success state = %s, want %s (regression: handler deadlocked on blocking Post into a full buffer - the self-post must be wrapped in a goroutine)", st, api.StRunning)
 	}
 }

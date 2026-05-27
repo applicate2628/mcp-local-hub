@@ -31,6 +31,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -462,28 +463,44 @@ func (c *supervisorController) executeSideEffect(
 		// a follow-up. Mirrors the pre-A.2 dispatcher's "started =
 		// considered healthy" semantic.
 		//
-		// On failure (cmd.Start / StartWithJob error before any child
-		// exists), post a SYNTHETIC EvChildExit so the SM can route
-		// StSpawning → StBackoffWaiting and the backoff timer drives
-		// the retry through the standard failure-counter pipeline.
-		// Closes Codex Cloud finding on 2d67031 (StIdle + EvStart →
-		// StSpawning, c.spawn() returns error → previously no event
-		// posted → StSpawning + EvStart has no SM transition → later
-		// reconciles unmatched → daemon stuck in StSpawning forever).
-		// Synthetic EvChildExit is semantically equivalent because
-		// from the SM's perspective an immediate spawn failure and a
-		// process that exited immediately after start are both
-		// "process did not become healthy" - both should route
-		// through backoff. The spawn fn itself emits the structured
-		// daemon-spawn-failed event for forensic diagnosis; the
-		// synthetic EvChildExit is purely for state-machine routing.
+		// On failure, the response depends on whether a child process
+		// ever existed:
+		//
+		//   - PRE-child (cmd.Start / StartWithJob returned error;
+		//     no PID; no wait goroutine launched). errors.Is(err,
+		//     errSpawnPreChild) discriminates this case. We post a
+		//     SYNTHETIC EvChildExit so the SM routes StSpawning →
+		//     StBackoffWaiting and the backoff timer drives retry
+		//     through the standard failure-counter pipeline. Closes
+		//     Codex Cloud finding on 2d67031 (daemon stuck in
+		//     StSpawning forever after pre-child spawn error).
+		//
+		//   - POST-child (cmd.Start succeeded, wait goroutine
+		//     observing child, but a downstream step like
+		//     persistDaemonRuntimeTracker failed). Child IS alive
+		//     and will eventually produce a real EvChildExit via
+		//     the wait goroutine's crashCh path. We do NOTHING here:
+		//     posting a synthetic EvChildExit would race the real
+		//     one and the backoff timer could spawn a duplicate
+		//     daemon while the original child is still running.
+		//     Closes Codex Cloud bot finding on PR #236 a54cc95 (P1).
+		//
+		// EventLoop.Post is BLOCKING; posting it inline from the
+		// handler goroutine deadlocks if the loop buffer is full
+		// (startup reconcile may queue many EvStart events; the
+		// handler is the only drainer). Wrap the self-post in a
+		// goroutine so the handler returns immediately and the loop
+		// drains the next event; the goroutine waits for buffer
+		// space without holding back the handler. Closes Codex
+		// Cloud bot finding on PR #236 a54cc95 (P2).
 		if c.spawn != nil {
 			err := c.spawn(*d)
 			if c.eventLoop != nil {
-				if err == nil {
-					c.eventLoop.Post(api.LoopEvent{Kind: api.EvHealthOK, TaskName: d.TaskName})
-				} else {
-					c.eventLoop.Post(api.LoopEvent{Kind: api.EvChildExit, TaskName: d.TaskName})
+				switch {
+				case err == nil:
+					go c.eventLoop.Post(api.LoopEvent{Kind: api.EvHealthOK, TaskName: d.TaskName})
+				case errors.Is(err, errSpawnPreChild):
+					go c.eventLoop.Post(api.LoopEvent{Kind: api.EvChildExit, TaskName: d.TaskName})
 				}
 			}
 		}

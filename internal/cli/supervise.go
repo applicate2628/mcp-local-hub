@@ -56,6 +56,18 @@ import (
 // reassign this var.
 var reaperFn = ReapStaleTransients
 
+// errSpawnPreChild marks a SpawnFunc error that occurred BEFORE any
+// child process existed (cmd.Start / StartWithJob returned non-nil).
+// The supervisor controller uses errors.Is to distinguish this from
+// a post-child error (e.g. persistDaemonRuntimeTracker failing after
+// cmd.Start succeeded and the wait goroutine was launched). Only the
+// pre-child case is safe to synthesize an EvChildExit for; the
+// post-child case has a live child whose wait goroutine will emit
+// the real exit event when it actually exits.
+//
+// Closes Codex Cloud bot finding on PR #236 a54cc95 (P1).
+var errSpawnPreChild = errors.New("supervise: spawn failed before child created")
+
 // setReaperFnForTest installs a test reaper function. Returns an
 // "uninstall" function tests defer to restore the production wiring
 // before the next test runs. Production code paths never invoke this
@@ -2142,7 +2154,14 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 				},
 			})
 			_ = persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName)
-			return startErr
+			// Wrap with errSpawnPreChild so the supervisor controller
+			// can distinguish "spawn failed BEFORE any child existed"
+			// (synthetic EvChildExit is correct - SM routes through
+			// StBackoffWaiting and the backoff timer drives retry)
+			// from the post-child persist-error case below (child IS
+			// alive, the wait goroutine will emit the real EvChildExit
+			// when it eventually exits, no synthetic event needed).
+			return fmt.Errorf("%w: %v", errSpawnPreChild, startErr)
 		}
 		startedAt := time.Now().UTC()
 		tracker.MarkSpawned(d.TaskName, pid, startedAt)
