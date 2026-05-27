@@ -66,6 +66,25 @@ var reaperFn = ReapStaleTransients
 // the real exit event when it actually exits.
 //
 // Closes Codex Cloud bot finding on PR #236 a54cc95 (P1).
+//
+// ASSUMPTION (UNVERIFIED): on Windows, the assumption "cmd.Start /
+// StartWithJob non-nil error => no child created" holds for the
+// common failure modes (path-not-found, access-denied at
+// CreateProcess level). However, process.StartWithJob has a known
+// post-create error path at process/start_with_job_windows.go:181-186
+// where CreateProcess succeeds (child PID exists in OS) but
+// os.FindProcess(pid) then fails. In that rare path, the OS-level
+// child IS alive but the wrap below would still classify the error
+// as pre-child, so the supervisor controller would synthesize an
+// EvChildExit and the backoff timer would respawn while the original
+// child may still be running. Bot finding on PR #236 8f9bcb9 (P2 #5)
+// surfaces this. Mitigation strategy (deferred follow-up): add a
+// distinct errSpawnPostCreate sentinel in process.StartWithJob and
+// route it as a no-synth path. Practical risk is low because
+// os.FindProcess on an own-process freshly-spawned PID rarely fails
+// (basic OpenProcess permissions are granted by default for the
+// current user's children), but the edge case is not closed by this
+// PR.
 var errSpawnPreChild = errors.New("supervise: spawn failed before child created")
 
 // setReaperFnForTest installs a test reaper function. Returns an

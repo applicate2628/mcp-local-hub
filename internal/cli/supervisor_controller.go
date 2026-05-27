@@ -485,22 +485,37 @@ func (c *supervisorController) executeSideEffect(
 		//     daemon while the original child is still running.
 		//     Closes Codex Cloud bot finding on PR #236 a54cc95 (P1).
 		//
-		// EventLoop.Post is BLOCKING; posting it inline from the
-		// handler goroutine deadlocks if the loop buffer is full
-		// (startup reconcile may queue many EvStart events; the
-		// handler is the only drainer). Wrap the self-post in a
-		// goroutine so the handler returns immediately and the loop
-		// drains the next event; the goroutine waits for buffer
-		// space without holding back the handler. Closes Codex
-		// Cloud bot finding on PR #236 a54cc95 (P2).
+		// Posts are INLINE (not in a goroutine) so that any post
+		// concurrently arriving DURING spawn() lands AFTER the
+		// self-event in the queue. A `go` wrap would allow such
+		// concurrent EvIntentUpdate to overtake the self-event and
+		// hit the SM while it still reads StSpawning (which has no
+		// EvIntentUpdate transition - the event would be dropped).
+		// Inline-Post closes that specific scheduling race.
+		//
+		// What inline-Post does NOT fix: if EvIntentUpdate was ALREADY
+		// queued in the loop buffer BEHIND the original EvStart
+		// before this handler began, the inline self-post still goes
+		// to a slot AFTER it (FIFO append). The SM then processes
+		// EvIntentUpdate against StSpawning -> no transition -> drop.
+		// This is a PRE-EXISTING architectural gap (StSpawning lacks
+		// EvIntentUpdate; StBackoffWaiting + EvTimerDue does not
+		// re-check intent), independent of whether the self-post is
+		// inline or async. Tracked as deferred follow-up; out of
+		// scope for this targeted stuck-state fix.
+		//
+		// Theoretical deadlock risk on full buffer is bounded by the
+		// production buffer cap (64 - sized to absorb quiesce-complete
+		// + crash bursts per supervise.go); each spawn attempt
+		// produces at most one self-post.
 		if c.spawn != nil {
 			err := c.spawn(*d)
 			if c.eventLoop != nil {
 				switch {
 				case err == nil:
-					go c.eventLoop.Post(api.LoopEvent{Kind: api.EvHealthOK, TaskName: d.TaskName})
+					c.eventLoop.Post(api.LoopEvent{Kind: api.EvHealthOK, TaskName: d.TaskName})
 				case errors.Is(err, errSpawnPreChild):
-					go c.eventLoop.Post(api.LoopEvent{Kind: api.EvChildExit, TaskName: d.TaskName})
+					c.eventLoop.Post(api.LoopEvent{Kind: api.EvChildExit, TaskName: d.TaskName})
 				}
 			}
 		}

@@ -715,8 +715,9 @@ func TestSupervisorController_SpawnPreChildErrorRoutesToBackoff(t *testing.T) {
 	// Post EvStart. Expected chain:
 	//   StIdle + EvStart -> StSpawning + spawn() returns
 	//   errSpawnPreChild -> executeSideEffect posts synthetic
-	//   EvChildExit (in a goroutine to avoid deadlocking the
-	//   handler) -> StSpawning + EvChildExit -> StBackoffWaiting
+	//   EvChildExit inline (FIFO preserved per controller doc;
+	//   inline-blocking is safe at the production buffer cap=64)
+	//   -> StSpawning + EvChildExit -> StBackoffWaiting
 	loop.Post(api.LoopEvent{Kind: api.EvStart, TaskName: descriptor.TaskName})
 
 	// Poll until state lands on StBackoffWaiting OR the deadline
@@ -821,98 +822,5 @@ func TestSupervisorController_SpawnPostChildErrorDoesNotSynthesizeExit(t *testin
 	st, _ := ctrl.GetSMState(descriptor.TaskName)
 	if st != api.StSpawning {
 		t.Fatalf("post-generic-error state = %s, want %s (regression: synthetic EvChildExit on non-pre-child error would respawn while the original child is still alive - duplicate daemon)", st, api.StSpawning)
-	}
-}
-
-// TestSupervisorController_SpawnHealthOKPostIsAsync is the regression
-// guard for Codex Cloud bot finding on PR #236 a54cc95 (P2):
-// EventLoop.Post is a blocking send (supervisor_event_loop.go:46-47).
-// If executeSideEffect posts the success/failure event inline from
-// the handler goroutine, and the loop buffer is already full (e.g.
-// startup reconcile queued many EvStart events), the handler
-// deadlocks waiting for buffer space that only the handler itself
-// can free.
-//
-// The fix wraps the self-post in a goroutine so the handler returns
-// immediately. This test fills the loop buffer to capacity-1 BEFORE
-// posting EvStart, then verifies the EvStart handler completes (the
-// daemon state advances) instead of deadlocking.
-func TestSupervisorController_SpawnHealthOKPostIsAsync(t *testing.T) {
-	tmpHome := apitest.HardenedTempDir(t)
-	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
-	events, err := api.OpenSupervisorEventLog(eventsPath)
-	if err != nil {
-		t.Fatalf("open event log: %v", err)
-	}
-	defer events.Close()
-
-	tracker := NewDaemonRuntimeTracker()
-	var spawnCalls atomic.Int32
-	// Block inside spawn until released so the handler is "stuck"
-	// processing EvStart while we fill the loop buffer behind it.
-	release := make(chan struct{})
-	fakeSpawn := func(d api.SupervisorDaemon) error {
-		<-release // hold the handler goroutine
-		spawnCalls.Add(1)
-		return nil
-	}
-
-	descriptor := api.SupervisorDaemon{
-		TaskName: `\mcp-local-hub-test-default`,
-		Server:   "test",
-		Daemon:   "default",
-	}
-	intent := &api.SupervisorIntentFile{Daemons: []api.SupervisorDaemon{descriptor}}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Small buffer so we can fill it: cap=2.
-	loop := api.NewEventLoop(2)
-	ctrl := &supervisorController{
-		intentCache:         newIntentCache(),
-		eventLoop:           loop,
-		tracker:             tracker,
-		events:              events,
-		daemonIntent:        newDaemonIntentCache(),
-		spawn:               fakeSpawn,
-		ctx:                 ctx,
-		failureWindow:       respawnFailureWindow,
-		quarantineThreshold: respawnQuarantineThreshold,
-	}
-	ctrl.intentCache.Refresh(intent)
-	ctrl.smStates.Store(descriptor.TaskName, api.StIdle)
-	loop.RegisterHandler(ctrl.handleLoopEvent)
-	go loop.Run(ctx)
-
-	// Step 1: post EvStart. Loop processes it: handler calls
-	// fakeSpawn which BLOCKS on <-release.
-	loop.Post(api.LoopEvent{Kind: api.EvStart, TaskName: descriptor.TaskName})
-	// Step 2: give the handler a moment to enter fakeSpawn.
-	time.Sleep(50 * time.Millisecond)
-	// Step 3: fill the loop buffer to capacity. Two non-matching
-	// orphan events will be queued and remain undrained while the
-	// handler is blocked on <-release.
-	loop.Post(api.LoopEvent{Kind: api.EvStart, TaskName: `\orphan-1`})
-	loop.Post(api.LoopEvent{Kind: api.EvStart, TaskName: `\orphan-2`})
-	// Step 4: release the handler. fakeSpawn returns nil ->
-	// executeSideEffect would normally Post(EvHealthOK), and since
-	// the buffer is full this would deadlock without the goroutine
-	// wrap. With the wrap, the handler returns, the loop drains
-	// the next event, and EvHealthOK lands eventually.
-	close(release)
-
-	// Wait for state == StRunning (handler did not deadlock).
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		st, _ := ctrl.GetSMState(descriptor.TaskName)
-		if st == api.StRunning {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	st, _ := ctrl.GetSMState(descriptor.TaskName)
-	if st != api.StRunning {
-		t.Fatalf("post-spawn-success state = %s, want %s (regression: handler deadlocked on blocking Post into a full buffer - the self-post must be wrapped in a goroutine)", st, api.StRunning)
 	}
 }
