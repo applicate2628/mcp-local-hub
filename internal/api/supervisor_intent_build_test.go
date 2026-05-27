@@ -2,6 +2,7 @@ package api
 
 import (
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -272,9 +273,10 @@ func TestBuildSupervisorIntent_FansOutPerSerenaWorkspace(t *testing.T) {
 			t.Errorf("[%d] Command: got=%q want=%q (mcphub binary)", i, d.Command, testMcphubBinary)
 		}
 		wantArgs := []string{
-			"daemon",
+			"daemon", "serena-proxy",
 			"--server", "serena",
 			"--workspace", ws.WorkspacePath,
+			"--port", strconv.Itoa(ws.Port),
 		}
 		if !reflect.DeepEqual(d.Args, wantArgs) {
 			t.Errorf("[%d] Args:\n got=%#v\nwant=%#v", i, d.Args, wantArgs)
@@ -518,7 +520,7 @@ func TestBuildSupervisorIntent_WindowsBackslashPath(t *testing.T) {
 	// --workspace and the path must appear as adjacent argv tokens
 	// with the backslashes preserved verbatim (no separator
 	// normalization).
-	wantArgs := []string{"daemon", "--server", "serena", "--workspace", backslashPath}
+	wantArgs := []string{"daemon", "serena-proxy", "--server", "serena", "--workspace", backslashPath, "--port", "9121"}
 	if !reflect.DeepEqual(got[0].Args, wantArgs) {
 		t.Fatalf("backslash path mangled in Args:\n got=%#v\nwant=%#v", got[0].Args, wantArgs)
 	}
@@ -544,7 +546,7 @@ func TestBuildSupervisorIntent_UnicodePath(t *testing.T) {
 	if got[0].Workspace != unicodePath {
 		t.Fatalf("unicode workspace path mangled; got=%q want=%q", got[0].Workspace, unicodePath)
 	}
-	wantArgs := []string{"daemon", "--server", "serena", "--workspace", unicodePath}
+	wantArgs := []string{"daemon", "serena-proxy", "--server", "serena", "--workspace", unicodePath, "--port", "9121"}
 	if !reflect.DeepEqual(got[0].Args, wantArgs) {
 		t.Fatalf("unicode path mangled in Args:\n got=%#v\nwant=%#v", got[0].Args, wantArgs)
 	}

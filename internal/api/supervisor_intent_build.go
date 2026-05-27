@@ -11,6 +11,7 @@ package api
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"strconv"
 	"strings"
 
 	"mcp-local-hub/internal/config"
@@ -127,13 +128,16 @@ func IsSerenaTaskName(taskName string) bool {
 //     interpreter argv. Spec ref:
 //     docs/superpowers/specs/2026-05-20-serena-dynamic-pool.md §6.
 //   - Args is the canonical daemon-wrap argv:
-//     `daemon --server <m.Name> --workspace <ws.WorkspacePath>`.
-//     Note that m.BaseArgs and m.DaemonTemplate.ExtraArgsTemplate
-//     are intentionally NOT propagated into the supervisor descriptor
-//     - those describe what `mcphub daemon` exec's internally
-//     (uvx ... start-mcp-server ... --project <path>), which is
-//     `mcphub daemon`'s contract with the manifest, not the
-//     supervisor's contract with mcphub.
+//     `daemon serena-proxy --server <m.Name> --workspace
+//     <ws.WorkspacePath> --port <ws.Port>`. The `serena-proxy`
+//     subcommand (internal/cli/daemon_serena.go) reads the manifest,
+//     resolves env, applies workspace-path token expansion to
+//     m.BaseArgs ++ m.DaemonTemplate.ExtraArgsTemplate, and drives
+//     the native-http daemon.HTTPHost lifecycle. The supervisor
+//     itself does NOT see the manifest; the descriptor is
+//     intentionally self-sufficient so a stale supervisor (e.g.
+//     restored from a snapshot) can spawn the right child even if
+//     the manifest is later edited.
 //   - Env is a CLONE of m.Env (each descriptor owns its own map).
 //   - Env values are passed verbatim. Secret-placeholder expansion
 //     (`secret:KEY` references resolved against the vault) is the
@@ -146,6 +150,15 @@ func IsSerenaTaskName(taskName string) bool {
 //
 // Determinism: same inputs -> same outputs. Order matches the input
 // workspaces slice.
+//
+// Filesystem existence: this helper does NOT consult the filesystem.
+// Workspace paths from removed/moved directories are emitted as-is
+// (the supervisor would later fail to spawn them because cmd.Dir =
+// d.Workspace is set unconditionally before cmd.Start). The CALLER
+// (D.3 / install_intent) is responsible for filtering non-existent
+// workspace paths before writing the descriptor list to
+// supervisor-intent.json, or for accepting the stale-row audit
+// trail per the dynamic-pool spec's missing-workspace case.
 //
 // Plan ref: docs/superpowers/plans/2026-05-20-serena-supervisor-unified.md D.2.
 // Spec ref: docs/superpowers/specs/2026-05-20-serena-dynamic-pool.md §6
@@ -186,14 +199,21 @@ func BuildSupervisorDaemonsForSerena(
 		}
 
 		// Canonical supervisor argv per spec §6: the supervisor
-		// invokes `mcphub daemon --server <name> --workspace <path>`,
-		// and the internal `mcphub daemon` subcommand owns the
-		// uvx-fork details that the manifest's Command/BaseArgs/
-		// ExtraArgsTemplate describe.
+		// invokes `mcphub daemon serena-proxy --server <name>
+		// --workspace <path> --port <port>`. The internal
+		// `daemon serena-proxy` subcommand
+		// (internal/cli/daemon_serena.go) owns the uvx-fork
+		// details that the manifest's Command/BaseArgs/
+		// ExtraArgsTemplate describe, applies the
+		// ExpandWorkspacePathTokens template substitution, and
+		// drives the native-http daemon.HTTPHost lifecycle. The
+		// supervisor itself does NOT see the manifest - the
+		// descriptor is intentionally self-sufficient.
 		args := []string{
-			"daemon",
+			"daemon", "serena-proxy",
 			"--server", m.Name,
 			"--workspace", ws.WorkspacePath,
+			"--port", strconv.Itoa(ws.Port),
 		}
 
 		out = append(out, SupervisorDaemon{
