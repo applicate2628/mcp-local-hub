@@ -2179,35 +2179,38 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 			})
 			_ = persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName)
 			if isOrphan {
-				// Closes bot finding on PR #236 db988e0: do NOT wrap
-				// orphan startErr with errSpawnPreChild. Otherwise
-				// the controller synthesizes EvChildExit + the
-				// backoff timer respawns while the OS-level orphan
-				// is still alive at pi.ProcessId (duplicate-daemon).
+				// Best-effort kill of the Windows post-create orphan
+				// via process.BestEffortKillByPID (OpenProcess +
+				// TerminateProcess on a separate handle, since
+				// cmd.Process is unavailable). After the kill, the
+				// orphan is dead (or was already gone) so wrapping
+				// with errSpawnPreChild → synth EvChildExit → backoff
+				// retry is safe: fresh respawn won't duplicate the
+				// orphan.
 				//
-				// Instead: emit a structured warn-level audit event
-				// so operators can correlate, and return the raw
-				// (unwrapped) error. The controller's switch on
-				// errors.Is(err, errSpawnPreChild) does NOT match;
-				// no synthetic EvChildExit is posted; the daemon
-				// stays in StSpawning until the next external
-				// reconcile-driven EvStart re-evaluates. Job Object
-				// KILL_ON_JOB_CLOSE still reaps the orphan on
-				// supervisor exit, and a future reconcile EvStart
-				// will trigger a fresh spawn attempt which either
-				// succeeds (orphan died via normal cleanup) or
-				// fails with port-in-use (natural duplicate cap).
+				// Closes bot finding on PR #237 a646148: previously
+				// the orphan branch returned raw startErr (NOT
+				// wrapped) so no synthetic EvChildExit was posted
+				// and the daemon stayed in StSpawning forever
+				// (because the SM has no StSpawning + EvStart
+				// transition for reconcile-driven retries). With
+				// best-effort kill + wrap, the SM routes through
+				// StBackoffWaiting + backoff timer.
+				killErr := process.BestEffortKillByPID(pid)
+				orphanBody := map[string]any{
+					"pid":  pid,
+					"note": "Windows post-create orphan: best-effort TerminateProcess on the orphan PID, then route through backoff retry. Successful kill = orphan gone, fresh respawn will bind cleanly. Kill failure (rare) = orphan still alive, backoff respawn will hit port-in-use as natural duplicate cap.",
+				}
+				if killErr != nil {
+					orphanBody["kill_error"] = killErr.Error()
+				}
 				_ = events.Emit(api.SupervisorEvent{
 					Severity: "warn",
 					Source:   "lifecycle",
 					Event:    "daemon-spawn-orphan-detected",
 					TaskName: d.TaskName,
-					Body: map[string]any{
-						"pid":  pid,
-						"note": "OS child created but Go handle acquisition failed; supervisor will NOT enter backoff respawn (would duplicate the orphan). Daemon stays in StSpawning until next reconcile re-attempts via fresh EvStart. Job Object KILL_ON_JOB_CLOSE reaps orphan on supervisor exit.",
-					},
+					Body:     orphanBody,
 				})
-				return startErr
 			}
 			// Common pre-child case: wrap with errSpawnPreChild so
 			// the supervisor controller synthesizes EvChildExit and

@@ -1010,27 +1010,33 @@ func TestSupervisorController_B1_StopDuringSpawn_IntentUpdateSetsQueuedActionSto
 	t.Fatalf("queued_action after StSpawning + EvIntentUpdate(stopped): %v; want \"stop\" (regression: substring switch missing \"stop\" OR auto-clear at line 415-417 wiped it)", v)
 }
 
-// TestSupervisorController_R5_OrphanDoesNotEnterBackoff is the r5
-// follow-up regression guard for bot finding on PR #236 db988e0
-// (Windows post-create orphan). When supervise.go returns an
-// unwrapped process.ErrSpawnPostCreate (not wrapped with
-// errSpawnPreChild), the controller's switch on
+// TestSupervisorController_R5_NonPreChildErrorDoesNotSynthExit verifies
+// the controller's contract on receiving a SpawnFunc error that is
+// NOT wrapped with errSpawnPreChild. The switch on
 // errors.Is(err, errSpawnPreChild) MUST NOT match - no synthetic
-// EvChildExit is posted - the daemon stays in StSpawning (not in
-// StBackoffWaiting) until the next external reconcile-driven EvStart.
+// EvChildExit is posted - the daemon stays in StSpawning.
 //
-// This avoids the duplicate-daemon risk where backoff respawn would
-// fire a fresh spawn while the OS-level orphan is still alive.
-func TestSupervisorController_R5_OrphanDoesNotEnterBackoff(t *testing.T) {
+// This is the controller-level contract that supports both:
+//   - the post-child persist-error case (cmd.Start succeeded, wait
+//     goroutine launched, persistDaemonRuntimeTracker failed); the
+//     real EvChildExit will arrive from the wait goroutine
+//   - any future error path that explicitly chooses to not route
+//     through backoff
+//
+// The Windows post-create orphan case is now handled in
+// supervise.go via process.BestEffortKillByPID + wrap-with-
+// errSpawnPreChild (closes the stuck-StSpawning issue the bot
+// flagged on PR #237 a646148). Production no longer relies on this
+// "don't synth" path for orphans, but the controller contract is
+// still tested here as a defensive guard.
+func TestSupervisorController_R5_NonPreChildErrorDoesNotSynthExit(t *testing.T) {
 	var spawnCalls atomic.Int32
-	// Mock spawn returns ErrSpawnPostCreate UNWRAPPED (mirroring r5
-	// supervise.go orphan branch which returns raw startErr instead
-	// of wrapping with errSpawnPreChild).
 	fakeSpawn := func(d api.SupervisorDaemon) error {
 		spawnCalls.Add(1)
-		// Note: in production this would be returned by
-		// process.StartWithJob; we just simulate the wrap.
-		return fmt.Errorf("%w: simulated FindProcess failure", &orphanErrForTest{})
+		// Non-pre-child error - mirrors post-child persist-error
+		// case (or any other error that's NOT wrapped with
+		// errSpawnPreChild).
+		return errors.New("generic non-pre-child error")
 	}
 	descriptor := api.SupervisorDaemon{TaskName: `\mcp-local-hub-test-default`, Server: "test", Daemon: "default"}
 	ctrl, loop, cancel := setupControllerForB1Test(t, descriptor, "running", fakeSpawn)
@@ -1039,7 +1045,6 @@ func TestSupervisorController_R5_OrphanDoesNotEnterBackoff(t *testing.T) {
 
 	loop.Post(api.LoopEvent{Kind: api.EvStart, TaskName: descriptor.TaskName})
 
-	// Wait a bounded time then assert state stayed StSpawning.
 	time.Sleep(300 * time.Millisecond)
 
 	if spawnCalls.Load() != 1 {
@@ -1047,17 +1052,9 @@ func TestSupervisorController_R5_OrphanDoesNotEnterBackoff(t *testing.T) {
 	}
 	st, _ := ctrl.GetSMState(descriptor.TaskName)
 	if st != api.StSpawning {
-		t.Fatalf("after orphan spawn error: state=%s; want StSpawning (regression: orphan was routed to backoff which would respawn duplicate)", st)
+		t.Fatalf("after non-pre-child spawn error: state=%s; want StSpawning (regression: controller should NOT synth EvChildExit for non-errSpawnPreChild errors)", st)
 	}
 }
-
-// orphanErrForTest is a test-only sentinel that doesn't match
-// errSpawnPreChild via errors.Is. Used to simulate the production
-// path where supervise.go returns raw process.ErrSpawnPostCreate
-// without wrapping in errSpawnPreChild.
-type orphanErrForTest struct{}
-
-func (e *orphanErrForTest) Error() string { return "orphan-test" }
 
 // TestSupervisorController_R5_IntentFlipStopThenRun_ClearsQueuedAction is
 // the r5 follow-up regression guard for bot finding on PR #236 db988e0
