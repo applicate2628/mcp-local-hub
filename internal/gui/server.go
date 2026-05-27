@@ -441,6 +441,12 @@ type Server struct {
 	// happens BEFORE the hub init writes hubMcpComp, so a plain
 	// pointer read would race the assignment).
 	hubMcpComp atomic.Pointer[HubListenerComponents]
+
+	// Phase C.2 (v0.5.x serena routing) -- holds the resolver +
+	// session-router bundle wired by SetSerenaRouterDeps. Atomic so a
+	// future hot-reload of the workspace registry can swap the bundle
+	// without restarting the gui-server.
+	serenaRouterDeps atomic.Pointer[serenaRouterDeps]
 }
 
 // NewServer constructs the Server. It registers the ping handler
@@ -504,6 +510,7 @@ func NewServer(cfg Config) *Server {
 	registerWorkspacesRoutes(s)
 	registerSupervisorRestartRoutes(s)
 	registerStateRelaxSettingRoutes(s)
+	registerSerenaRouterRoutes(s)
 	return s
 }
 
