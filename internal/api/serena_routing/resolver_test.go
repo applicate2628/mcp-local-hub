@@ -293,6 +293,24 @@ func TestResolveByPath_EmptyPath_ReturnsErrInvalidPath(t *testing.T) {
 	}
 }
 
+func TestResolveByPath_RejectsUNCPath(t *testing.T) {
+	root := t.TempDir()
+	wsPath := makeWorkspace(t, root, "Alpha")
+	regPath := makeRegistryWithSerena(t, root, []api.WorkspaceEntry{
+		{WorkspaceKey: api.WorkspaceKey(wsPath), WorkspacePath: wsPath, Backend: "serena", Port: 9301},
+	})
+	reg := api.NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	resolver := NewWorkspaceResolver(reg, regPath)
+
+	_, err := resolver.ResolveByPath(`\\attacker.example\share\file.go`)
+	if !errors.Is(err, ErrInvalidPath) {
+		t.Fatalf("err = %v, want ErrInvalidPath", err)
+	}
+}
+
 func TestResolveByPath_EmptyRegistry_ReturnsErrWorkspaceNotFound(t *testing.T) {
 	root := t.TempDir()
 	regPath := filepath.Join(root, "workspaces.yaml")

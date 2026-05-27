@@ -158,6 +158,9 @@ func (r *WorkspaceResolver) ResolveByPath(path string) (*api.WorkspaceEntry, err
 	if path == "" {
 		return nil, ErrInvalidPath
 	}
+	if isWindowsUNCPath(path) {
+		return nil, ErrInvalidPath
+	}
 	entries := r.snapshot()
 	if len(entries) == 0 {
 		return nil, ErrWorkspaceNotFound
@@ -166,6 +169,13 @@ func (r *WorkspaceResolver) ResolveByPath(path string) (*api.WorkspaceEntry, err
 		return r.resolveAbsolute(path, entries)
 	}
 	return r.resolveRelative(path, entries)
+}
+
+// isWindowsUNCPath returns true for paths that look like UNC/network
+// paths (\\server\share\... or //server/share/...) so the resolver can
+// reject them before any filesystem probe.
+func isWindowsUNCPath(path string) bool {
+	return strings.HasPrefix(path, `\\`) || strings.HasPrefix(path, "//")
 }
 
 // resolveAbsolute handles the absolute-path branch of ResolveByPath.
