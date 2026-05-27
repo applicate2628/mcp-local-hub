@@ -31,6 +31,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -402,16 +403,29 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 	// "queued_action=none" implies clearing; "queued_action=respawn"
 	// implies setting respawn.
 	switch {
+	case strings.Contains(side, "set queued_action=stop"):
+		// Closes bot finding B on PR #236 1c0ea09: StSpawning +
+		// EvIntentUpdate(stopped) records stop-pending so the
+		// subsequent EvHealthOK / EvChildExit transition can honor it
+		// (see api/supervisor_state_machine.go StSpawning case).
+		c.queuedActions.Store(ev.TaskName, "stop")
 	case strings.Contains(side, "queued_action=respawn"):
 		c.queuedActions.Store(ev.TaskName, "respawn")
 	case strings.Contains(side, "queued_action=none"), strings.Contains(side, "clear queued_action"):
 		c.queuedActions.Store(ev.TaskName, "")
 	}
-	// Once a daemon transitions out of StExiting (back to StIdle or to
-	// StSpawning via queued respawn), the queued action has been
-	// consumed — clear it so a future EvManualRestart starts from a
-	// clean slate.
-	if newState == api.StIdle || newState == api.StSpawning {
+	// Bounded auto-clear of queued_action: ONLY clear when transitioning
+	// OUT of StExiting back to StIdle / StSpawning. The original intent
+	// of this clear (per spec §"queued_action preservation across
+	// supervisor exit") was "consumed by the StExiting handler". A
+	// self-loop StSpawning -> StSpawning from EvIntentUpdate(stopped)
+	// must preserve queued_action=stop so the next EvHealthOK /
+	// EvChildExit transition (which checks ctx.QueuedAction) sees it.
+	// Closes the queued_action self-clear bug that sonnet r3 caught in
+	// the original B1 fix-design (without the currentState check, the
+	// "set queued_action=stop" store at line above would be immediately
+	// wiped by the auto-clear when newState == StSpawning).
+	if currentState == api.StExiting && (newState == api.StIdle || newState == api.StSpawning) {
 		c.queuedActions.Store(ev.TaskName, "")
 	}
 	if persistBefore {
@@ -450,11 +464,26 @@ func (c *supervisorController) executeSideEffect(
 
 	switch newState {
 	case api.StSpawning:
+		// Gate spawn-fire on the side string carrying "create-process".
+		// The SM table can return newState=StSpawning on a self-loop
+		// (e.g. StSpawning + EvIntentUpdate(stopped) returns
+		// "set queued_action=stop" without re-spawning) - we must NOT
+		// re-fire spawn for those. Only fresh-entry transitions
+		// (StIdle/StBackoffWaiting/StQuarantined/StExiting -> StSpawning)
+		// include "create-process" in the side string.
+		//
+		// Closes B1 self-loop spawn duplication bug discovered during
+		// r4 implementation: without this gate, every
+		// EvIntentUpdate(stopped) arriving while spawning would
+		// re-fire spawn, and the subsequent EvHealthOK would clear
+		// queued_action=stop via the "issue terminate, queued_action=
+		// none" side string from the StExiting transition.
+		if !strings.Contains(side, "create-process") {
+			return
+		}
+
 		// "bump pid_generation, create-process" - fire the spawn
-		// closure. Errors are swallowed: the spawn fn itself emits
-		// daemon-spawn-failed and the next EvChildExit (or a later
-		// reconcile) will trigger another transition through
-		// StBackoffWaiting.
+		// closure.
 		//
 		// On success, post EvHealthOK to drive StSpawning → StRunning
 		// (closes codex r1 BLOCKER-1: without this transition, daemons
@@ -464,9 +493,72 @@ func (c *supervisorController) executeSideEffect(
 		// success; a proper health probe (port-bind / HTTP /health) is
 		// a follow-up. Mirrors the pre-A.2 dispatcher's "started =
 		// considered healthy" semantic.
+		//
+		// On failure, the response depends on whether a child process
+		// ever existed:
+		//
+		//   - PRE-child (cmd.Start / StartWithJob returned error;
+		//     no PID; no wait goroutine launched). errors.Is(err,
+		//     errSpawnPreChild) discriminates this case. We post a
+		//     SYNTHETIC EvChildExit so the SM routes StSpawning →
+		//     StBackoffWaiting and the backoff timer drives retry
+		//     through the standard failure-counter pipeline. Closes
+		//     Codex Cloud finding on 2d67031 (daemon stuck in
+		//     StSpawning forever after pre-child spawn error).
+		//
+		//   - POST-child (cmd.Start succeeded, wait goroutine
+		//     observing child, but a downstream step like
+		//     persistDaemonRuntimeTracker failed). Child IS alive
+		//     and will eventually produce a real EvChildExit via
+		//     the wait goroutine's crashCh path. We do NOTHING here:
+		//     posting a synthetic EvChildExit would race the real
+		//     one and the backoff timer could spawn a duplicate
+		//     daemon while the original child is still running.
+		//     Closes Codex Cloud bot finding on PR #236 a54cc95 (P1).
+		//
+		// Self-posts use PostSelf (priority channel) instead of inline
+		// Post on the main channel. This closes TWO bot findings on
+		// PR #236 1c0ea09:
+		//
+		//   - P2 deadlock: inline Post into the same channel the
+		//     handler drains can deadlock when external producers
+		//     have filled the buffer. PostSelf goes to a separate
+		//     selfCh whose only producer is the handler, so it
+		//     cannot collide with external producers.
+		//
+		//   - P2 FIFO race: a pre-queued EvIntentUpdate(stopped)
+		//     behind the original EvStart would land in the SM
+		//     against StSpawning -> no transition -> drop. PostSelf
+		//     goes to the priority channel; Run priority-drains
+		//     selfCh before reading from ch on the next iteration,
+		//     so the synthetic EvChildExit / EvHealthOK transitions
+		//     the daemon OUT of StSpawning BEFORE the pre-queued
+		//     EvIntentUpdate is processed.
+		//
+		// The B1 fix in supervisor_state_machine.go also adds
+		// StSpawning + EvIntentUpdate -> set queued_action=stop so
+		// even if the priority-drain order is wrong somewhere, the
+		// stop request is preserved across the StSpawning self-loop
+		// and consumed by the next EvHealthOK / EvChildExit.
+		//
+		// If PostSelf returns false (selfCh full - should never
+		// happen at production cap=1024), we emit an audit error
+		// and let the next reconcile-driven EvStart re-attempt;
+		// falling back to blocking Post would reintroduce the
+		// deadlock we are avoiding.
 		if c.spawn != nil {
-			if err := c.spawn(*d); err == nil && c.eventLoop != nil {
-				c.eventLoop.Post(api.LoopEvent{Kind: api.EvHealthOK, TaskName: d.TaskName})
+			err := c.spawn(*d)
+			if c.eventLoop != nil {
+				switch {
+				case err == nil:
+					if !c.eventLoop.PostSelf(api.LoopEvent{Kind: api.EvHealthOK, TaskName: d.TaskName}) {
+						c.emitSelfChannelSaturated(d.TaskName, "EvHealthOK")
+					}
+				case errors.Is(err, errSpawnPreChild):
+					if !c.eventLoop.PostSelf(api.LoopEvent{Kind: api.EvChildExit, TaskName: d.TaskName}) {
+						c.emitSelfChannelSaturated(d.TaskName, "EvChildExit")
+					}
+				}
 			}
 		}
 
@@ -506,6 +598,33 @@ func (c *supervisorController) executeSideEffect(
 		// graceful drain, or initial reconcile of a stopped intent.
 		return
 	}
+}
+
+// emitSelfChannelSaturated logs an audit row when PostSelf on the
+// priority channel returns false. This should never happen at
+// production cap=1024 (handler-self-posts are bounded at ~1-2 per
+// handler call); if it does, the daemon is left in StSpawning until
+// the next reconcile cycle re-attempts (the alternative of falling
+// back to blocking Post reintroduces the deadlock we are avoiding -
+// see PostSelf doc in supervisor_event_loop.go).
+//
+// Closes bot finding on PR #236 1c0ea09 (P2 self-post deadlock): the
+// audit-fallback is the explicit drop policy that PostSelf's contract
+// requires.
+func (c *supervisorController) emitSelfChannelSaturated(taskName, kind string) {
+	if c.events == nil {
+		return
+	}
+	_ = c.events.Emit(api.SupervisorEvent{
+		Severity: "error",
+		Source:   "lifecycle",
+		Event:    "supervisor-self-channel-saturated",
+		TaskName: taskName,
+		Body: map[string]any{
+			"event_kind": kind,
+			"note":       "PostSelf returned false; daemon left in StSpawning until next reconcile (fallback to blocking Post would reintroduce the deadlock we are avoiding)",
+		},
+	})
 }
 
 // handleBackoffWaiting is the absorbed responsibility from the deleted
@@ -731,7 +850,7 @@ const respawnBackoffMax = 60 * time.Second
 // Exits when ctx is canceled (supervisor graceful shutdown) or when
 // crashCh is closed. Errors from loop.Post are not possible -
 // EventLoop.Post is non-blocking against a full channel only at the
-// channel-cap level (cap=64 from the production wiring at
+// channel-cap level (cap=1024 from the production wiring at
 // supervise.go:416), and a full channel here would block the
 // bridge but not lose events.
 func runCrashEventBridge(

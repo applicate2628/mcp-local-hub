@@ -12,8 +12,35 @@ type LoopEvent struct {
 // EventLoop is a single-threaded FIFO event consumer. Capacity >= 16
 // per spec to absorb quiesce-complete posts from the side-goroutine
 // drain handler without rendezvous deadlock.
+//
+// Two-channel design (closes bot finding on PR #236 1c0ea09 P2):
+//
+//   - ch is the main channel for EXTERNAL producers (reconcile loop,
+//     IPC commands, crashCh translator, daemon-intent watcher, timer
+//     goroutines). External producers call Post (blocking) or TryPost
+//     (best-effort).
+//
+//   - selfCh is a PRIORITY channel for HANDLER-self-posts (e.g. the
+//     supervisor controller posting EvHealthOK or synthetic EvChildExit
+//     from inside executeSideEffect). Handler callers use PostSelf
+//     (non-blocking). Run priority-drains selfCh before reading from
+//     ch on each iteration, so a handler-issued follow-up event
+//     processes ahead of pre-queued external events. This closes the
+//     FIFO race the bot flagged: previously a pre-queued
+//     EvIntentUpdate(stopped) could be processed against StSpawning
+//     (no transition -> drop) before the handler's inline-Post
+//     EvHealthOK / synthetic EvChildExit transitioned the daemon
+//     out of StSpawning.
+//
+// The selfCh design also eliminates the inline-Post deadlock: the
+// handler is the only producer of selfCh, so PostSelf cannot collide
+// with external producers filling the buffer. PostSelf is
+// non-blocking (TryPost semantics), and the consumer is the SAME
+// handler that just returned - so the priority-drain on next iteration
+// guarantees the self-event lands before any external work.
 type EventLoop struct {
 	ch       chan LoopEvent
+	selfCh   chan LoopEvent
 	handlers []func(LoopEvent)
 }
 
@@ -21,16 +48,25 @@ func NewEventLoop(capacity int) *EventLoop {
 	if capacity < 16 {
 		capacity = 16
 	}
-	return &EventLoop{ch: make(chan LoopEvent, capacity)}
+	// selfCh matches the main channel capacity for symmetry. In practice
+	// selfCh only fills if many handler-self-posts queue up faster than
+	// the loop drains them, which requires a deeply-stacked SM cycle.
+	// At cap == main cap the headroom matches the burst absorption the
+	// main channel was sized for.
+	return &EventLoop{
+		ch:     make(chan LoopEvent, capacity),
+		selfCh: make(chan LoopEvent, capacity),
+	}
 }
 
 func (l *EventLoop) RegisterHandler(h func(LoopEvent)) {
 	l.handlers = append(l.handlers, h)
 }
 
-// Post sends an event to the loop. Buffered up to the loop's
-// capacity (default 64); when the buffer is full, Post BLOCKS until a
-// slot opens. Closes sonnet impl-r1 BLOCKER on misleading "non-blocking"
+// Post sends an event to the loop's main (external) channel. Buffered
+// up to the loop's capacity (default 1024 per supervise.go after PR
+// #236 r4); when the buffer is full, Post BLOCKS until a slot opens.
+// Closes sonnet impl-r1 BLOCKER on misleading "non-blocking"
 // comment; codex impl-r1 LOW flagged the same. Blocking is the safer
 // choice for state-machine events — silently dropping an EvChildExit
 // or EvIntentUpdate would leave a daemon stuck in the wrong SM state
@@ -39,10 +75,14 @@ func (l *EventLoop) RegisterHandler(h func(LoopEvent)) {
 // Producers that cannot tolerate blocking (e.g. interrupt handlers)
 // should use TryPost instead.
 //
-// Capacity is sized at construction (supervise.go uses 64 to absorb
-// quiesce-complete + crash bursts). If a workload starts blocking on
-// Post in production, the right response is increasing capacity at
-// construction, not silently dropping events.
+// Handler callers MUST use PostSelf, NOT Post — see PostSelf doc for
+// the deadlock + FIFO-race reasoning.
+//
+// Capacity is sized at construction (supervise.go uses 1024 to absorb
+// quiesce-complete + crash bursts + Phase 9 maintenance-timer
+// publishers per consultant memo on PR #236 r4). If a workload starts
+// blocking on Post in production, the right response is increasing
+// capacity at construction, not silently dropping events.
 func (l *EventLoop) Post(e LoopEvent) {
 	l.ch <- e
 }
@@ -60,12 +100,62 @@ func (l *EventLoop) TryPost(e LoopEvent) bool {
 	}
 }
 
-// Run consumes events until ctx is canceled.
+// PostSelf enqueues a handler-self-post on the priority channel.
+// Non-blocking by design - returns false if selfCh is full so the
+// caller can audit-log the drop. The loop priority-drains selfCh
+// before reading from the main ch, so a successful PostSelf is
+// guaranteed to land BEFORE any pre-queued external event.
+//
+// PostSelf is the ONLY safe way to post from inside a handler. An
+// inline Post (blocking) from a handler can deadlock when the buffer
+// is full because the handler IS the only consumer; an inline TryPost
+// from a handler races with pre-queued external events because it
+// goes to the main channel tail.
+//
+// Closes bot finding on PR #236 1c0ea09 (P2 blocking-Post deadlock +
+// FIFO race with queued external EvIntentUpdate).
+func (l *EventLoop) PostSelf(e LoopEvent) bool {
+	select {
+	case l.selfCh <- e:
+		return true
+	default:
+		return false
+	}
+}
+
+// Run consumes events until ctx is canceled. selfCh is priority-drained
+// before reading from ch on each iteration so handler-self-posts
+// process FIRST and cannot be overtaken by pre-queued external events.
+//
+// Priority-drain loop: inner for-select with default reads ALL pending
+// selfCh entries before blocking on the outer select. This guarantees
+// that if a handler enqueued N self-posts (e.g. a complex spawn cycle
+// that fires multiple state-machine transitions), all N drain before
+// the next external event is read.
 func (l *EventLoop) Run(ctx context.Context) {
+	drainSelf := func() {
+		for {
+			select {
+			case e := <-l.selfCh:
+				for _, h := range l.handlers {
+					h(e)
+				}
+			default:
+				return
+			}
+		}
+	}
 	for {
+		drainSelf()
 		select {
 		case <-ctx.Done():
 			return
+		case e := <-l.selfCh:
+			// selfCh fired between drainSelf and outer select; process
+			// it directly without entering ch.
+			for _, h := range l.handlers {
+				h(e)
+			}
 		case e := <-l.ch:
 			for _, h := range l.handlers {
 				h(e)
