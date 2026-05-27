@@ -86,14 +86,22 @@ func IsSerenaTaskName(taskName string) bool {
 //
 // Inputs:
 //
-//   - m            - parsed ServerManifest. MUST satisfy
+//   - m                 - parsed ServerManifest. MUST satisfy
 //     m.Kind == config.KindWorkspaceScoped AND m.DaemonTemplate != nil.
 //     If either gate fails the function returns nil.
-//   - workspaces   - registry snapshot returned by
+//   - workspaces        - registry snapshot returned by
 //     (*Registry).SerenaEntries(). Empty or nil -> nil result (NOT
 //     an error; an empty pool is a valid steady state).
-//   - manifestHash - opaque content hash of the parsed manifest.
+//   - manifestHash      - opaque content hash of the parsed manifest.
 //     Empty string is fine for unit tests.
+//   - mcphubBinaryPath  - absolute path to the mcphub binary that the
+//     supervisor will exec for each descriptor. The supervisor uses
+//     exec.Command(d.Command, d.Args...) verbatim and does NOT add
+//     any `mcphub daemon` wrapper of its own (see internal/cli/
+//     supervise.go), so the descriptor MUST already point at the
+//     mcphub binary plus the `daemon --server ... --workspace ...`
+//     argv. Production callers resolve it via canonicalMcphubPath();
+//     tests may pass any non-empty string.
 //
 // Outputs:
 //
@@ -103,11 +111,29 @@ func IsSerenaTaskName(taskName string) bool {
 //
 //   - TaskName follows the canonical form (leading backslash +
 //     mcp-local-hub-serena- + 8-hex-chars-of-WorkspaceKey).
-//   - Server is m.Name.
-//   - Daemon is m.DaemonTemplate.Context.
-//   - Command is m.Command verbatim.
-//   - Args is the concatenation m.BaseArgs ++ ExtraArgsTemplate
-//     followed by token expansion. Both halves are expanded.
+//   - Server is m.Name (e.g. "serena").
+//   - Daemon is the per-workspace WorkspaceKey (8 lowercase hex chars)
+//     so the downstream health/capability lookup at
+//     internal/api/health.go (keyed by Server+"/"+Daemon) keeps
+//     per-workspace rows distinct. Without this, every per-workspace
+//     descriptor would collapse onto a single ("serena", <context>)
+//     pair and only the last workspace's port/backend would survive
+//     in those views.
+//   - Command is mcphubBinaryPath - the supervisor execs mcphub
+//     itself, NOT the raw uvx/python interpreter named in m.Command.
+//     The `mcphub daemon` subcommand wraps the raw interpreter
+//     internally, layering port-binding, health probes, and graceful
+//     shutdown that the supervisor cannot replicate from a bare
+//     interpreter argv. Spec ref:
+//     docs/superpowers/specs/2026-05-20-serena-dynamic-pool.md §6.
+//   - Args is the canonical daemon-wrap argv:
+//     `daemon --server <m.Name> --workspace <ws.WorkspacePath>`.
+//     Note that m.BaseArgs and m.DaemonTemplate.ExtraArgsTemplate
+//     are intentionally NOT propagated into the supervisor descriptor
+//     - those describe what `mcphub daemon` exec's internally
+//     (uvx ... start-mcp-server ... --project <path>), which is
+//     `mcphub daemon`'s contract with the manifest, not the
+//     supervisor's contract with mcphub.
 //   - Env is a CLONE of m.Env (each descriptor owns its own map).
 //   - Env values are passed verbatim. Secret-placeholder expansion
 //     (`secret:KEY` references resolved against the vault) is the
@@ -122,10 +148,13 @@ func IsSerenaTaskName(taskName string) bool {
 // workspaces slice.
 //
 // Plan ref: docs/superpowers/plans/2026-05-20-serena-supervisor-unified.md D.2.
+// Spec ref: docs/superpowers/specs/2026-05-20-serena-dynamic-pool.md §6
+//   (lifecycle / spawn args, port: workspace.serena_port).
 func BuildSupervisorDaemonsForSerena(
 	m *config.ServerManifest,
 	workspaces []WorkspaceEntry,
 	manifestHash string,
+	mcphubBinaryPath string,
 ) []SupervisorDaemon {
 	if m == nil || m.DaemonTemplate == nil {
 		return nil
@@ -137,10 +166,6 @@ func BuildSupervisorDaemonsForSerena(
 		return nil
 	}
 
-	templateArgs := make([]string, 0, len(m.BaseArgs)+len(m.DaemonTemplate.ExtraArgsTemplate))
-	templateArgs = append(templateArgs, m.BaseArgs...)
-	templateArgs = append(templateArgs, m.DaemonTemplate.ExtraArgsTemplate...)
-
 	out := make([]SupervisorDaemon, 0, len(workspaces))
 	for _, ws := range workspaces {
 		if ws.Language != SerenaLanguageSentinel {
@@ -150,14 +175,33 @@ func BuildSupervisorDaemonsForSerena(
 			continue
 		}
 
-		expanded := config.ExpandWorkspacePathTokens(templateArgs, ws.WorkspacePath)
+		// Per-workspace daemon key for the (Server, Daemon) lookup
+		// in health.go and friends. Prefer the persisted
+		// WorkspaceKey from the registry row; fall back to computing
+		// it from the path so the helper stays robust against rows
+		// written before the key was persisted.
+		daemonKey := ws.WorkspaceKey
+		if daemonKey == "" {
+			daemonKey = WorkspaceKey(ws.WorkspacePath)
+		}
+
+		// Canonical supervisor argv per spec §6: the supervisor
+		// invokes `mcphub daemon --server <name> --workspace <path>`,
+		// and the internal `mcphub daemon` subcommand owns the
+		// uvx-fork details that the manifest's Command/BaseArgs/
+		// ExtraArgsTemplate describe.
+		args := []string{
+			"daemon",
+			"--server", m.Name,
+			"--workspace", ws.WorkspacePath,
+		}
 
 		out = append(out, SupervisorDaemon{
 			TaskName:     SerenaTaskNameForWorkspace(ws.WorkspacePath),
 			Server:       m.Name,
-			Daemon:       m.DaemonTemplate.Context,
-			Command:      m.Command,
-			Args:         expanded,
+			Daemon:       daemonKey,
+			Command:      mcphubBinaryPath,
+			Args:         args,
 			Env:          cloneStringMap(m.Env),
 			Workspace:    ws.WorkspacePath,
 			Port:         ws.Port,

@@ -178,6 +178,12 @@ func TestIsSerenaTaskName_NonSerenaTaskName(t *testing.T) {
 	}
 }
 
+// testMcphubBinary is the placeholder mcphub binary path passed to
+// BuildSupervisorDaemonsForSerena across the unit tests. Production
+// callers (D.3 / install_intent) resolve via canonicalMcphubPath();
+// tests just need a non-empty stable string to assert against.
+const testMcphubBinary = `C:\test\bin\mcphub.exe`
+
 // fixtureSerenaManifest returns a minimal *config.ServerManifest
 // matching what Phase D.3 migration would write into
 // servers/serena/manifest.yaml. Used by the fan-out tests below.
@@ -232,10 +238,14 @@ func TestBuildSupervisorIntent_FansOutPerSerenaWorkspace(t *testing.T) {
 			Port:          9123,
 		},
 	}
-	got := BuildSupervisorDaemonsForSerena(m, workspaces, "abc123hash")
+	got := BuildSupervisorDaemonsForSerena(m, workspaces, "abc123hash", testMcphubBinary)
 	if len(got) != 3 {
 		t.Fatalf("got %d descriptors; want 3", len(got))
 	}
+	// Closes review feedback on cbd1b1a (bot P2): each descriptor MUST
+	// carry a workspace-unique Daemon field. Collect the seen values
+	// to assert pairwise distinctness across the fan-out.
+	seenDaemon := map[string]int{}
 	for i, d := range got {
 		ws := workspaces[i]
 		wantTaskName := SerenaTaskNameForWorkspace(ws.WorkspacePath)
@@ -245,11 +255,29 @@ func TestBuildSupervisorIntent_FansOutPerSerenaWorkspace(t *testing.T) {
 		if d.Server != "serena" {
 			t.Errorf("[%d] Server: got=%q want=%q", i, d.Server, "serena")
 		}
-		if d.Daemon != "codex" {
-			t.Errorf("[%d] Daemon: got=%q want=%q (DaemonTemplate.Context)", i, d.Daemon, "codex")
+		wantDaemon := ws.WorkspaceKey
+		if d.Daemon != wantDaemon {
+			t.Errorf("[%d] Daemon: got=%q want=%q (per-workspace WorkspaceKey)", i, d.Daemon, wantDaemon)
 		}
-		if d.Command != "uvx" {
-			t.Errorf("[%d] Command: got=%q want=%q", i, d.Command, "uvx")
+		seenDaemon[d.Daemon]++
+		// Closes review feedback on cbd1b1a (bot P1): supervisor exec
+		// path is `<mcphub binary> daemon --server <name> --workspace
+		// <path>`. The supervisor uses exec.Command(d.Command,
+		// d.Args...) verbatim; if we emitted the raw uvx command and
+		// manifest BaseArgs/ExtraArgsTemplate, the per-workspace port
+		// (ws.Port) would never bind because uvx itself has no
+		// --port understanding - the mcphub daemon wrapper owns
+		// port binding + health probes.
+		if d.Command != testMcphubBinary {
+			t.Errorf("[%d] Command: got=%q want=%q (mcphub binary)", i, d.Command, testMcphubBinary)
+		}
+		wantArgs := []string{
+			"daemon",
+			"--server", "serena",
+			"--workspace", ws.WorkspacePath,
+		}
+		if !reflect.DeepEqual(d.Args, wantArgs) {
+			t.Errorf("[%d] Args:\n got=%#v\nwant=%#v", i, d.Args, wantArgs)
 		}
 		if d.Workspace != ws.WorkspacePath {
 			t.Errorf("[%d] Workspace: got=%q want=%q", i, d.Workspace, ws.WorkspacePath)
@@ -260,16 +288,16 @@ func TestBuildSupervisorIntent_FansOutPerSerenaWorkspace(t *testing.T) {
 		if d.ManifestHash != "abc123hash" {
 			t.Errorf("[%d] ManifestHash: got=%q want=%q", i, d.ManifestHash, "abc123hash")
 		}
-		wantArgs := []string{
-			"--from", "git+https://example.invalid/serena", "serena", "start-mcp-server",
-			"--context", "codex",
-			"--project", ws.WorkspacePath,
-		}
-		if !reflect.DeepEqual(d.Args, wantArgs) {
-			t.Errorf("[%d] Args:\n got=%#v\nwant=%#v", i, d.Args, wantArgs)
-		}
 		if !reflect.DeepEqual(d.Env, m.Env) {
 			t.Errorf("[%d] Env: got=%#v want=%#v", i, d.Env, m.Env)
+		}
+	}
+	// Pairwise-distinctness assertion - no two workspaces may collapse
+	// onto the same Daemon field. Three workspaces -> three distinct
+	// Daemon values. Closes bot P2 finding on cbd1b1a.
+	for d, n := range seenDaemon {
+		if n != 1 {
+			t.Errorf("Daemon %q appeared %d times; want exactly 1 (per-workspace uniqueness)", d, n)
 		}
 	}
 }
@@ -286,7 +314,7 @@ func TestBuildSupervisorIntent_EnvClonedNotAliased(t *testing.T) {
 		Language:      SerenaLanguageSentinel,
 		Port:          9121,
 	}
-	got := BuildSupervisorDaemonsForSerena(m, []WorkspaceEntry{ws}, "")
+	got := BuildSupervisorDaemonsForSerena(m, []WorkspaceEntry{ws}, "", testMcphubBinary)
 	if len(got) != 1 {
 		t.Fatalf("got %d descriptors; want 1", len(got))
 	}
@@ -301,11 +329,11 @@ func TestBuildSupervisorIntent_EnvClonedNotAliased(t *testing.T) {
 // (not an error). Empty pool is a steady state.
 func TestBuildSupervisorIntent_EmptyRegistryNoDescriptors(t *testing.T) {
 	m := fixtureSerenaManifest()
-	got := BuildSupervisorDaemonsForSerena(m, nil, "")
+	got := BuildSupervisorDaemonsForSerena(m, nil, "", testMcphubBinary)
 	if got != nil {
 		t.Errorf("got=%#v want=nil (empty registry)", got)
 	}
-	got = BuildSupervisorDaemonsForSerena(m, []WorkspaceEntry{}, "")
+	got = BuildSupervisorDaemonsForSerena(m, []WorkspaceEntry{}, "", testMcphubBinary)
 	if got != nil {
 		t.Errorf("got=%#v want=nil (empty slice)", got)
 	}
@@ -329,7 +357,7 @@ func TestBuildSupervisorIntent_LegacyDaemonsListStillWorks(t *testing.T) {
 		WorkspacePath: "C:/work/alpha",
 		Language:      SerenaLanguageSentinel,
 		Port:          9121,
-	}}, "")
+	}}, "", testMcphubBinary)
 	if got != nil {
 		t.Fatalf("legacy manifest must yield nil from the dynamic-pool fan-out; got=%#v", got)
 	}
@@ -344,7 +372,7 @@ func TestBuildSupervisorIntent_AddingWorkspaceAddsDescriptor(t *testing.T) {
 		{WorkspacePath: "C:/work/alpha", Language: SerenaLanguageSentinel, Port: 9121},
 		{WorkspacePath: "C:/work/beta", Language: SerenaLanguageSentinel, Port: 9122},
 	}
-	got := BuildSupervisorDaemonsForSerena(m, beforeAdd, "")
+	got := BuildSupervisorDaemonsForSerena(m, beforeAdd, "", testMcphubBinary)
 	if len(got) != 2 {
 		t.Fatalf("before-add: got %d descriptors; want 2", len(got))
 	}
@@ -354,7 +382,7 @@ func TestBuildSupervisorIntent_AddingWorkspaceAddsDescriptor(t *testing.T) {
 		Language:      SerenaLanguageSentinel,
 		Port:          9123,
 	})
-	got = BuildSupervisorDaemonsForSerena(m, afterAdd, "")
+	got = BuildSupervisorDaemonsForSerena(m, afterAdd, "", testMcphubBinary)
 	if len(got) != 3 {
 		t.Fatalf("after-add: got %d descriptors; want 3", len(got))
 	}
@@ -375,7 +403,7 @@ func TestBuildSupervisorIntent_RemovingWorkspaceRemovesDescriptor(t *testing.T) 
 		{WorkspacePath: "C:/work/beta", Language: SerenaLanguageSentinel, Port: 9122},
 		{WorkspacePath: "C:/work/gamma", Language: SerenaLanguageSentinel, Port: 9123},
 	}
-	got := BuildSupervisorDaemonsForSerena(m, beforeRemove, "")
+	got := BuildSupervisorDaemonsForSerena(m, beforeRemove, "", testMcphubBinary)
 	if len(got) != 3 {
 		t.Fatalf("before-remove: got %d descriptors; want 3", len(got))
 	}
@@ -384,7 +412,7 @@ func TestBuildSupervisorIntent_RemovingWorkspaceRemovesDescriptor(t *testing.T) 
 		beforeRemove[0],
 		beforeRemove[2],
 	}
-	got = BuildSupervisorDaemonsForSerena(m, afterRemove, "")
+	got = BuildSupervisorDaemonsForSerena(m, afterRemove, "", testMcphubBinary)
 	if len(got) != 2 {
 		t.Fatalf("after-remove: got %d descriptors; want 2", len(got))
 	}
@@ -406,7 +434,7 @@ func TestBuildSupervisorIntent_RejectsKindGlobal(t *testing.T) {
 	m.Kind = config.KindGlobal
 	got := BuildSupervisorDaemonsForSerena(m, []WorkspaceEntry{
 		{WorkspacePath: "C:/work/alpha", Language: SerenaLanguageSentinel, Port: 9121},
-	}, "")
+	}, "", testMcphubBinary)
 	if got != nil {
 		t.Fatalf("kind=global must be rejected by fan-out; got=%#v", got)
 	}
@@ -418,7 +446,7 @@ func TestBuildSupervisorIntent_RejectsKindGlobal(t *testing.T) {
 func TestBuildSupervisorIntent_NilManifestReturnsNil(t *testing.T) {
 	got := BuildSupervisorDaemonsForSerena(nil, []WorkspaceEntry{
 		{WorkspacePath: "C:/work/alpha", Language: SerenaLanguageSentinel, Port: 9121},
-	}, "")
+	}, "", testMcphubBinary)
 	if got != nil {
 		t.Fatalf("nil manifest must yield nil; got=%#v", got)
 	}
@@ -435,7 +463,7 @@ func TestBuildSupervisorIntent_SkipsNonSentinelRows(t *testing.T) {
 		{WorkspacePath: "C:/work/alpha", Language: "go", Port: 9201},
 		{WorkspacePath: "C:/work/beta", Language: SerenaLanguageSentinel, Port: 9122},
 	}
-	got := BuildSupervisorDaemonsForSerena(m, workspaces, "")
+	got := BuildSupervisorDaemonsForSerena(m, workspaces, "", testMcphubBinary)
 	if len(got) != 2 {
 		t.Fatalf("got %d descriptors; want 2 (LSP row filtered out)", len(got))
 	}
@@ -452,7 +480,7 @@ func TestBuildSupervisorIntent_SkipsRowsWithEmptyWorkspacePath(t *testing.T) {
 		{WorkspacePath: "", Language: SerenaLanguageSentinel, Port: 9122},
 		{WorkspacePath: "C:/work/gamma", Language: SerenaLanguageSentinel, Port: 9123},
 	}
-	got := BuildSupervisorDaemonsForSerena(m, workspaces, "")
+	got := BuildSupervisorDaemonsForSerena(m, workspaces, "", testMcphubBinary)
 	if len(got) != 2 {
 		t.Fatalf("got %d descriptors; want 2 (empty-path row skipped)", len(got))
 	}
@@ -474,59 +502,51 @@ func TestBuildSupervisorIntent_TaskNameMatchesRegisteredEntry(t *testing.T) {
 
 // TestBuildSupervisorIntent_WindowsBackslashPath verifies byte-blind
 // path handling: a workspace path with native Windows backslashes
-// flows through token expansion unchanged. The fan-out treats
-// WorkspacePath as an opaque string; it does NOT normalize separators.
+// flows through to the descriptor's --workspace arg and Workspace
+// field unchanged. The fan-out treats WorkspacePath as an opaque
+// string; it does NOT normalize separators.
 func TestBuildSupervisorIntent_WindowsBackslashPath(t *testing.T) {
 	m := fixtureSerenaManifest()
-	m.DaemonTemplate.ExtraArgsTemplate = []string{"--workspace=${workspace.path}"}
+	const backslashPath = `C:\Users\dev\repos\alpha`
 	workspaces := []WorkspaceEntry{
-		{WorkspacePath: `C:\Users\dev\repos\alpha`, Language: SerenaLanguageSentinel, Port: 9121},
+		{WorkspacePath: backslashPath, Language: SerenaLanguageSentinel, Port: 9121},
 	}
-	got := BuildSupervisorDaemonsForSerena(m, workspaces, "")
+	got := BuildSupervisorDaemonsForSerena(m, workspaces, "", testMcphubBinary)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 descriptor, got %d", len(got))
 	}
-	// The expanded arg must contain the backslash path verbatim.
-	foundExpanded := false
-	for _, a := range got[0].Args {
-		if a == `--workspace=C:\Users\dev\repos\alpha` {
-			foundExpanded = true
-			break
-		}
+	// --workspace and the path must appear as adjacent argv tokens
+	// with the backslashes preserved verbatim (no separator
+	// normalization).
+	wantArgs := []string{"daemon", "--server", "serena", "--workspace", backslashPath}
+	if !reflect.DeepEqual(got[0].Args, wantArgs) {
+		t.Fatalf("backslash path mangled in Args:\n got=%#v\nwant=%#v", got[0].Args, wantArgs)
 	}
-	if !foundExpanded {
-		t.Fatalf("backslash path not expanded byte-blind; args=%v", got[0].Args)
-	}
-	if got[0].Workspace != `C:\Users\dev\repos\alpha` {
-		t.Fatalf("Workspace field must preserve backslashes; got=%q", got[0].Workspace)
+	if got[0].Workspace != backslashPath {
+		t.Fatalf("Workspace field must preserve backslashes; got=%q want=%q", got[0].Workspace, backslashPath)
 	}
 }
 
 // TestBuildSupervisorIntent_UnicodePath verifies unicode characters
 // in workspace paths flow through unchanged. WorkspaceKey hashes the
-// UTF-8 bytes; the fan-out passes the path verbatim.
+// UTF-8 bytes; the fan-out passes the path verbatim into the
+// --workspace argv token and the Workspace field.
 func TestBuildSupervisorIntent_UnicodePath(t *testing.T) {
 	m := fixtureSerenaManifest()
-	m.DaemonTemplate.ExtraArgsTemplate = []string{"--workspace=${workspace.path}"}
+	const unicodePath = "C:/work/проект-альфа"
 	workspaces := []WorkspaceEntry{
-		{WorkspacePath: "C:/work/проект-альфа", Language: SerenaLanguageSentinel, Port: 9121},
+		{WorkspacePath: unicodePath, Language: SerenaLanguageSentinel, Port: 9121},
 	}
-	got := BuildSupervisorDaemonsForSerena(m, workspaces, "")
+	got := BuildSupervisorDaemonsForSerena(m, workspaces, "", testMcphubBinary)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 descriptor, got %d", len(got))
 	}
-	if got[0].Workspace != "C:/work/проект-альфа" {
-		t.Fatalf("unicode workspace path mangled; got=%q", got[0].Workspace)
+	if got[0].Workspace != unicodePath {
+		t.Fatalf("unicode workspace path mangled; got=%q want=%q", got[0].Workspace, unicodePath)
 	}
-	foundExpanded := false
-	for _, a := range got[0].Args {
-		if a == "--workspace=C:/work/проект-альфа" {
-			foundExpanded = true
-			break
-		}
-	}
-	if !foundExpanded {
-		t.Fatalf("unicode path not expanded byte-blind; args=%v", got[0].Args)
+	wantArgs := []string{"daemon", "--server", "serena", "--workspace", unicodePath}
+	if !reflect.DeepEqual(got[0].Args, wantArgs) {
+		t.Fatalf("unicode path mangled in Args:\n got=%#v\nwant=%#v", got[0].Args, wantArgs)
 	}
 }
 
@@ -542,7 +562,7 @@ func TestBuildSupervisorIntent_NilManifestEnvProducesNilDescriptorEnv(t *testing
 		{WorkspacePath: "C:/work/alpha", Language: SerenaLanguageSentinel, Port: 9121},
 		{WorkspacePath: "C:/work/beta", Language: SerenaLanguageSentinel, Port: 9122},
 	}
-	got := BuildSupervisorDaemonsForSerena(m, workspaces, "")
+	got := BuildSupervisorDaemonsForSerena(m, workspaces, "", testMcphubBinary)
 	if len(got) != 2 {
 		t.Fatalf("expected 2 descriptors, got %d", len(got))
 	}
