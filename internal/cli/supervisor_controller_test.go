@@ -715,9 +715,11 @@ func TestSupervisorController_SpawnPreChildErrorRoutesToBackoff(t *testing.T) {
 	// Post EvStart. Expected chain:
 	//   StIdle + EvStart -> StSpawning + spawn() returns
 	//   errSpawnPreChild -> executeSideEffect posts synthetic
-	//   EvChildExit inline (FIFO preserved per controller doc;
-	//   inline-blocking is safe at the production buffer cap=64)
-	//   -> StSpawning + EvChildExit -> StBackoffWaiting
+	//   EvChildExit via PostSelf (priority channel, FIFO preserved
+	//   via Run's priority-drain; deadlock-free because handler is
+	//   only producer of selfCh) -> StSpawning + EvChildExit ->
+	//   StBackoffWaiting (intent re-check passes because no stop
+	//   was queued in this test).
 	loop.Post(api.LoopEvent{Kind: api.EvStart, TaskName: descriptor.TaskName})
 
 	// Poll until state lands on StBackoffWaiting OR the deadline
@@ -823,4 +825,227 @@ func TestSupervisorController_SpawnPostChildErrorDoesNotSynthesizeExit(t *testin
 	if st != api.StSpawning {
 		t.Fatalf("post-generic-error state = %s, want %s (regression: synthetic EvChildExit on non-pre-child error would respawn while the original child is still alive - duplicate daemon)", st, api.StSpawning)
 	}
+}
+
+// setupControllerForB1Test builds a minimal controller wired to a real
+// EventLoop and daemonIntent cache so the B1 + C3 regression tests can
+// drive transitions through the production seam.
+func setupControllerForB1Test(t *testing.T, descriptor api.SupervisorDaemon, intent string, spawn SpawnFunc) (*supervisorController, *api.EventLoop, context.CancelFunc) {
+	t.Helper()
+	tmpHome := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	t.Cleanup(func() { events.Close() })
+
+	tracker := NewDaemonRuntimeTracker()
+	intentFile := &api.SupervisorIntentFile{Daemons: []api.SupervisorDaemon{descriptor}}
+	dintFile := &api.DaemonIntentFile{
+		Tasks: map[string]api.DaemonIntent{
+			descriptor.TaskName: {Desired: intent, UpdatedAt: time.Now().UTC()},
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	loop := api.NewEventLoop(16)
+	ctrl := &supervisorController{
+		intentCache:         newIntentCache(),
+		eventLoop:           loop,
+		tracker:             tracker,
+		events:              events,
+		daemonIntent:        newDaemonIntentCache(),
+		spawn:               spawn,
+		ctx:                 ctx,
+		failureWindow:       respawnFailureWindow,
+		quarantineThreshold: respawnQuarantineThreshold,
+	}
+	ctrl.intentCache.Refresh(intentFile)
+	ctrl.daemonIntent.Refresh(dintFile)
+	loop.RegisterHandler(ctrl.handleLoopEvent)
+	go loop.Run(ctx)
+
+	return ctrl, loop, cancel
+}
+
+// TestSupervisorController_B1_StopDuringSpawn_EvHealthOK_RoutesToStExiting
+// is the B1 regression guard: when a user stop is queued during spawn
+// (queued_action=stop set via StSpawning + EvIntentUpdate(stopped)
+// transition), the subsequent EvHealthOK MUST route to StExiting
+// (issue terminate) instead of StRunning. Closes bot finding B on PR
+// #236 1c0ea09 (stop-during-spawn previously silently dropped).
+func TestSupervisorController_B1_StopDuringSpawn_EvHealthOK_RoutesToStExiting(t *testing.T) {
+	var terminateCalls atomic.Int32
+	fakeSpawn := func(d api.SupervisorDaemon) error { return nil }
+	fakeTerminate := func(d api.SupervisorDaemon) error {
+		terminateCalls.Add(1)
+		return nil
+	}
+
+	descriptor := api.SupervisorDaemon{TaskName: `\mcp-local-hub-test-default`, Server: "test", Daemon: "default"}
+	ctrl, loop, cancel := setupControllerForB1Test(t, descriptor, "running", fakeSpawn)
+	defer cancel()
+	ctrl.terminate = fakeTerminate
+
+	// Stage: state=StSpawning, queued_action=stop (as if the
+	// StSpawning + EvIntentUpdate(stopped) transition fired).
+	ctrl.smStates.Store(descriptor.TaskName, api.StSpawning)
+	ctrl.queuedActions.Store(descriptor.TaskName, "stop")
+
+	loop.Post(api.LoopEvent{Kind: api.EvHealthOK, TaskName: descriptor.TaskName})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if st, _ := ctrl.GetSMState(descriptor.TaskName); st == api.StExiting && terminateCalls.Load() == 1 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	st, _ := ctrl.GetSMState(descriptor.TaskName)
+	t.Fatalf("StSpawning + EvHealthOK with queued_action=stop: state=%s, terminate_calls=%d; want StExiting + 1 terminate call (regression: B1 transition is missing)", st, terminateCalls.Load())
+}
+
+// TestSupervisorController_B1_StopDuringSpawn_EvChildExit_RoutesToStIdle
+// is the B1 regression guard for the pre-child spawn-error path: when a
+// user stop is queued during a spawn that then fails, the synthetic
+// EvChildExit MUST route to StIdle (clear queued_action) instead of
+// StBackoffWaiting (backoff respawn). Closes bot finding B on PR #236
+// 1c0ea09 (pre-child retry overriding queued user stop).
+func TestSupervisorController_B1_StopDuringSpawn_EvChildExit_RoutesToStIdle(t *testing.T) {
+	fakeSpawn := func(d api.SupervisorDaemon) error { return nil }
+	descriptor := api.SupervisorDaemon{TaskName: `\mcp-local-hub-test-default`, Server: "test", Daemon: "default"}
+	ctrl, loop, cancel := setupControllerForB1Test(t, descriptor, "running", fakeSpawn)
+	defer cancel()
+
+	// Stage: state=StSpawning, queued_action=stop.
+	ctrl.smStates.Store(descriptor.TaskName, api.StSpawning)
+	ctrl.queuedActions.Store(descriptor.TaskName, "stop")
+
+	loop.Post(api.LoopEvent{Kind: api.EvChildExit, TaskName: descriptor.TaskName})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if st, _ := ctrl.GetSMState(descriptor.TaskName); st == api.StIdle {
+			// Also verify queued_action was cleared by the
+			// "clear queued_action" side-effect string.
+			if v, ok := ctrl.queuedActions.Load(descriptor.TaskName); !ok || v.(string) != "" {
+				t.Fatalf("queued_action not cleared after StIdle transition: %v", v)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	st, _ := ctrl.GetSMState(descriptor.TaskName)
+	t.Fatalf("StSpawning + EvChildExit with queued_action=stop: state=%s; want StIdle (regression: B1 transition is missing)", st)
+}
+
+// TestSupervisorController_B1_StopDuringBackoff_EvTimerDue_RoutesToStIdle
+// is the B1 regression guard for the backoff window: when a user stop
+// arrives during the backoff window, the EvTimerDue firing MUST
+// re-check intent and route to StIdle instead of StSpawning (respawn).
+// Closes bot finding B on PR #236 1c0ea09 (backoff timer fired blind
+// to current intent state).
+func TestSupervisorController_B1_StopDuringBackoff_EvTimerDue_RoutesToStIdle(t *testing.T) {
+	var spawnCalls atomic.Int32
+	fakeSpawn := func(d api.SupervisorDaemon) error {
+		spawnCalls.Add(1)
+		return nil
+	}
+	descriptor := api.SupervisorDaemon{TaskName: `\mcp-local-hub-test-default`, Server: "test", Daemon: "default"}
+	ctrl, loop, cancel := setupControllerForB1Test(t, descriptor, "stopped", fakeSpawn)
+	defer cancel()
+
+	// Stage: state=StBackoffWaiting (as if the daemon just exited
+	// abnormally and we're in the backoff window). Intent is
+	// already "stopped" via setup.
+	ctrl.smStates.Store(descriptor.TaskName, api.StBackoffWaiting)
+
+	loop.Post(api.LoopEvent{Kind: api.EvTimerDue, TaskName: descriptor.TaskName})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if st, _ := ctrl.GetSMState(descriptor.TaskName); st == api.StIdle {
+			if spawnCalls.Load() != 0 {
+				t.Fatalf("spawn fired despite intent=stopped: %d call(s); want 0", spawnCalls.Load())
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	st, _ := ctrl.GetSMState(descriptor.TaskName)
+	t.Fatalf("StBackoffWaiting + EvTimerDue with intent=stopped: state=%s, spawn_calls=%d; want StIdle + 0 spawn calls (regression: timer ignored intent and respawned)", st, spawnCalls.Load())
+}
+
+// TestSupervisorController_B1_StopDuringSpawn_IntentUpdateSetsQueuedActionStop
+// is the B1 regression guard for the substring-match wiring: when
+// StSpawning + EvIntentUpdate(stopped) fires, the SM returns
+// "set queued_action=stop" and the controller's substring switch MUST
+// store "stop" in queuedActions. Closes bot finding B on PR #236
+// 1c0ea09 (sonnet caught: original switch only handled "respawn"/
+// "none"/"clear"; needed to add "stop" case AND bounded auto-clear).
+func TestSupervisorController_B1_StopDuringSpawn_IntentUpdateSetsQueuedActionStop(t *testing.T) {
+	fakeSpawn := func(d api.SupervisorDaemon) error { return nil }
+	descriptor := api.SupervisorDaemon{TaskName: `\mcp-local-hub-test-default`, Server: "test", Daemon: "default"}
+	ctrl, loop, cancel := setupControllerForB1Test(t, descriptor, "stopped", fakeSpawn)
+	defer cancel()
+
+	ctrl.smStates.Store(descriptor.TaskName, api.StSpawning)
+
+	loop.Post(api.LoopEvent{Kind: api.EvIntentUpdate, TaskName: descriptor.TaskName})
+
+	deadline := time.Now().Add(1 * time.Second)
+	for time.Now().Before(deadline) {
+		if v, ok := ctrl.queuedActions.Load(descriptor.TaskName); ok && v.(string) == "stop" {
+			// Also verify state stayed StSpawning (self-loop).
+			if st, _ := ctrl.GetSMState(descriptor.TaskName); st != api.StSpawning {
+				t.Fatalf("state changed during self-loop: %s; want StSpawning", st)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	v, _ := ctrl.queuedActions.Load(descriptor.TaskName)
+	t.Fatalf("queued_action after StSpawning + EvIntentUpdate(stopped): %v; want \"stop\" (regression: substring switch missing \"stop\" OR auto-clear at line 415-417 wiped it)", v)
+}
+
+// TestSupervisorController_C3_PreChildSpawnFailureUsesPostSelf verifies
+// the C3 wiring: executeSideEffect uses PostSelf (priority channel)
+// instead of inline Post on the main channel. Test by checking the
+// pre-child error path completes without deadlock and routes through
+// backoff. The actual priority-drain ordering is unit-tested in
+// internal/api/supervisor_event_loop_test.go; here we verify the
+// integration that supervisor_controller calls PostSelf and the SM
+// transition fires correctly.
+func TestSupervisorController_C3_PreChildSpawnFailureUsesPostSelf(t *testing.T) {
+	var spawnCalls atomic.Int32
+	fakeSpawn := func(d api.SupervisorDaemon) error {
+		spawnCalls.Add(1)
+		return fmt.Errorf("%w: simulated cmd.Start failure", errSpawnPreChild)
+	}
+	descriptor := api.SupervisorDaemon{TaskName: `\mcp-local-hub-test-default`, Server: "test", Daemon: "default"}
+	// intent="running" so EvStart actually triggers spawn (not
+	// "intent suppresses spawn"). The pre-child spawn error then
+	// synth-posts EvChildExit via PostSelf -> priority drain ->
+	// StSpawning + EvChildExit (intent=running) -> StBackoffWaiting.
+	ctrl, loop, cancel := setupControllerForB1Test(t, descriptor, "running", fakeSpawn)
+	defer cancel()
+
+	ctrl.smStates.Store(descriptor.TaskName, api.StIdle)
+
+	loop.Post(api.LoopEvent{Kind: api.EvStart, TaskName: descriptor.TaskName})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if st, _ := ctrl.GetSMState(descriptor.TaskName); st == api.StBackoffWaiting {
+			if spawnCalls.Load() != 1 {
+				t.Fatalf("spawn called %d times; want 1", spawnCalls.Load())
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	st, _ := ctrl.GetSMState(descriptor.TaskName)
+	t.Fatalf("after EvStart pre-child fail: state=%s, spawn_calls=%d; want StBackoffWaiting + 1 spawn call (regression: PostSelf path or synth EvChildExit missing)", st, spawnCalls.Load())
 }

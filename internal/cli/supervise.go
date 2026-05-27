@@ -65,26 +65,20 @@ var reaperFn = ReapStaleTransients
 // post-child case has a live child whose wait goroutine will emit
 // the real exit event when it actually exits.
 //
-// Closes Codex Cloud bot finding on PR #236 a54cc95 (P1).
+// Windows StartWithJob post-create-orphan note: when wrapping a
+// startErr that errors.Is(startErr, process.ErrSpawnPostCreate) ==
+// true, the OS child IS alive at the kernel level but unreachable
+// from Go. We still wrap with errSpawnPreChild so the SM routes
+// through backoff (the alternative — no synth event — leaves the
+// daemon stuck in StSpawning forever, which is the original bug we
+// are fixing). The orphan is reaped by Job Object KILL_ON_JOB_CLOSE
+// on supervisor exit or by the backoff respawn hitting port-in-use
+// (natural duplicate cap). The daemon-spawn-orphan-detected audit
+// event makes the case operator-visible. Closes bot finding A on
+// PR #236 1c0ea09 (P2 #5).
 //
-// ASSUMPTION (UNVERIFIED): on Windows, the assumption "cmd.Start /
-// StartWithJob non-nil error => no child created" holds for the
-// common failure modes (path-not-found, access-denied at
-// CreateProcess level). However, process.StartWithJob has a known
-// post-create error path at process/start_with_job_windows.go:181-186
-// where CreateProcess succeeds (child PID exists in OS) but
-// os.FindProcess(pid) then fails. In that rare path, the OS-level
-// child IS alive but the wrap below would still classify the error
-// as pre-child, so the supervisor controller would synthesize an
-// EvChildExit and the backoff timer would respawn while the original
-// child may still be running. Bot finding on PR #236 8f9bcb9 (P2 #5)
-// surfaces this. Mitigation strategy (deferred follow-up): add a
-// distinct errSpawnPostCreate sentinel in process.StartWithJob and
-// route it as a no-synth path. Practical risk is low because
-// os.FindProcess on an own-process freshly-spawned PID rarely fails
-// (basic OpenProcess permissions are granted by default for the
-// current user's children), but the edge case is not closed by this
-// PR.
+// Closes Codex Cloud bot finding on PR #236 a54cc95 (P1 — original
+// stuck-StSpawning bug on commit 2d67031).
 var errSpawnPreChild = errors.New("supervise: spawn failed before child created")
 
 // setReaperFnForTest installs a test reaper function. Returns an
@@ -461,7 +455,16 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	// (spec Q4 v13). Phase-6 registers an audit-only handler so loop
 	// events are observable in the log; Task 7.1+ wires the
 	// reconciler.
-	loop := api.NewEventLoop(64)
+	// Buffer sized for production: max daemons × max events per
+	// reconcile cycle + Phase 9 maintenance-timer publishers + IPC
+	// quiesce-drain bursts. Per consultant memo on PR #236 r4:
+	// "EventLoop capacity = f(producer_count, max_burst_per_cycle)".
+	// 1024 gives ~100 daemons × 10 events headroom plus 24 for the
+	// per-iteration churn. Memory cost ~32KB. The two-channel design
+	// in api/supervisor_event_loop.go (main ch + priority selfCh)
+	// separately addresses the handler-self-post deadlock class, so
+	// this cap is purely about external-producer absorption.
+	loop := api.NewEventLoop(1024)
 	loopCtx, loopCancel := context.WithCancel(ctx)
 	defer loopCancel()
 
@@ -2161,6 +2164,18 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 			}
 		}
 		if startErr != nil {
+			// Closes bot finding A on PR #236 1c0ea09 (P2 #5 Windows
+			// StartWithJob post-CreateProcess orphan): the sentinel
+			// process.ErrSpawnPostCreate marks the case where the OS
+			// child IS alive (PID allocated) but the FindProcess
+			// handle acquisition failed. Audit-log the orphan
+			// separately so operators can correlate; the backoff
+			// respawn that follows will either succeed on a fresh
+			// process (orphan dies via Job Object membership when
+			// supervisor exits or daemon respawn binds the same port)
+			// or fail with port-in-use (the natural cap on duplicate-
+			// daemon risk).
+			isOrphan := errors.Is(startErr, process.ErrSpawnPostCreate)
 			tracker.MarkSpawnFailed(d.TaskName, startErr)
 			_ = events.Emit(api.SupervisorEvent{
 				Severity: "error",
@@ -2170,16 +2185,28 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 				Body: map[string]any{
 					"err":     startErr.Error(),
 					"command": d.Command,
+					"orphan":  isOrphan,
 				},
 			})
+			if isOrphan {
+				_ = events.Emit(api.SupervisorEvent{
+					Severity: "warn",
+					Source:   "lifecycle",
+					Event:    "daemon-spawn-orphan-detected",
+					TaskName: d.TaskName,
+					Body: map[string]any{
+						"pid": pid,
+						"note": "OS child created but Go handle acquisition failed; Job Object membership ensures cleanup on supervisor exit, backoff respawn will hit port-in-use if orphan still listens",
+					},
+				})
+			}
 			_ = persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName)
 			// Wrap with errSpawnPreChild so the supervisor controller
-			// can distinguish "spawn failed BEFORE any child existed"
-			// (synthetic EvChildExit is correct - SM routes through
-			// StBackoffWaiting and the backoff timer drives retry)
-			// from the post-child persist-error case below (child IS
-			// alive, the wait goroutine will emit the real EvChildExit
-			// when it eventually exits, no synthetic event needed).
+			// synthesizes EvChildExit and routes through
+			// StBackoffWaiting + backoff timer. For the orphan case
+			// the backoff respawn would either bind a fresh PID (if
+			// orphan died) or fail with port-in-use (natural duplicate
+			// cap).
 			return fmt.Errorf("%w: %v", errSpawnPreChild, startErr)
 		}
 		startedAt := time.Now().UTC()

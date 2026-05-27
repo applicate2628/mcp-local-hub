@@ -73,9 +73,43 @@ func Transition(state SMState, ev SMEvent, ctx SMContext) (newState SMState, sid
 	case StSpawning:
 		switch ev {
 		case EvHealthOK:
+			// If a user stop was queued during spawn (via the
+			// StSpawning + EvIntentUpdate(stopped) transition below),
+			// route directly to StExiting now that we have a live
+			// child to terminate. Closes bot finding B on PR #236
+			// 1c0ea09: previously a stop request arriving while a
+			// daemon was spawning was silently dropped because
+			// StSpawning had no EvIntentUpdate transition.
+			if ctx.QueuedAction == "stop" {
+				return StExiting, "issue terminate, queued_action=none", true, true
+			}
 			return StRunning, "", false, true
 		case EvChildExit:
+			// If user stop was queued during spawn OR current intent
+			// is stopped, route to StIdle instead of backoff. The
+			// synthetic EvChildExit from a pre-child spawn error also
+			// flows through here; if the user queued a stop while the
+			// failed spawn was in flight, the daemon stays stopped
+			// instead of entering the backoff retry loop. Closes bot
+			// finding B on PR #236 1c0ea09 (pre-child retry overriding
+			// queued user stop).
+			if ctx.QueuedAction == "stop" || ctx.IntentDesired == "stopped" {
+				return StIdle, "clear queued_action", true, true
+			}
 			return StBackoffWaiting, "arm timer at backoff(failures)", true, true
+		case EvIntentUpdate:
+			// Record stop-pending in queued_action so EvHealthOK /
+			// EvChildExit transitions above can honor it. Self-loop
+			// (newState == StSpawning) is intentional: the daemon is
+			// still spawning, no SM-level transition is appropriate
+			// yet. The controller's queued_action auto-clear is
+			// bounded to "transition OUT of StExiting" so this set is
+			// preserved across the self-loop. Closes bot finding B
+			// on PR #236 1c0ea09.
+			if ctx.IntentDesired == "stopped" {
+				return StSpawning, "set queued_action=stop", false, true
+			}
+			return StSpawning, "", false, true
 		case EvRequestGraceful:
 			return StExiting, "issue terminate, queued_action=none", true, true
 		}
@@ -129,6 +163,15 @@ func Transition(state SMState, ev SMEvent, ctx SMContext) (newState SMState, sid
 	case StBackoffWaiting:
 		switch ev {
 		case EvTimerDue:
+			// Intent re-check before respawn. If user stop was queued
+			// during spawn or current intent is stopped, do NOT
+			// respawn - route to StIdle. Closes bot finding B on PR
+			// #236 1c0ea09 (timer fired blind to current intent state,
+			// could respawn even after user stop was queued during
+			// spawn or arrived during the backoff window).
+			if ctx.QueuedAction == "stop" || ctx.IntentDesired == "stopped" {
+				return StIdle, "cancel timer, clear queued_action", true, true
+			}
 			if ctx.Failures < 10 {
 				return StSpawning, "bump pid_generation, create-process", true, true
 			}

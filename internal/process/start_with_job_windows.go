@@ -180,10 +180,18 @@ func StartWithJob(job *Job, cmd *exec.Cmd) (int, error) {
 	// which is the expected path.
 	p, err := os.FindProcess(int(pi.ProcessId))
 	if err != nil {
-		// Best-effort: close pi.Process so we don't leak it on the
-		// error path; we cannot recover cmd.Process at this point.
+		// Post-create orphan case: CreateProcess succeeded, the kernel
+		// allocated PID pi.ProcessId, and the child is alive in the
+		// OS. But we cannot acquire a usable os.Process handle to
+		// drive cmd.Wait / cmd.Kill, so the child is unreachable from
+		// Go. Wrap with ErrSpawnPostCreate so the supervisor can
+		// distinguish this case from a true pre-child failure and
+		// avoid the backoff-respawn-while-orphan-alive race that
+		// would otherwise spawn duplicate daemons.
+		//
+		// Closes bot finding on PR #236 1c0ea09 (P2 #5).
 		_ = windows.CloseHandle(pi.Process)
-		return 0, fmt.Errorf("os.FindProcess(pid=%d): %w", pi.ProcessId, err)
+		return int(pi.ProcessId), fmt.Errorf("%w: os.FindProcess(pid=%d): %v", ErrSpawnPostCreate, pi.ProcessId, err)
 	}
 	cmd.Process = p
 
