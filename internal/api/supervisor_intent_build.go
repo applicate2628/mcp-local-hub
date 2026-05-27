@@ -45,9 +45,15 @@ func SerenaTaskNameForWorkspace(workspacePath string) string {
 // IsSerenaTaskName reports whether taskName looks like the canonical
 // supervisor-intent form for a serena per-workspace daemon. Accepts
 // both the bare (no leading backslash) and canonical (leading
-// backslash) forms. Returned true does NOT imply the hash suffix is
-// valid - a bare "mcp-local-hub-serena-" without a trailing hash is
-// treated as a non-match.
+// backslash) forms. The suffix MUST be exactly 8 lowercase hex chars
+// (the WorkspaceKey shape) - any other suffix shape returns false.
+//
+// The 8-hex requirement is intentional and load-bearing: D.3 will use
+// this predicate to classify supervisor-intent.json entries as
+// "serena, owned by registry" vs "serena orphan, prune candidate" vs
+// "non-serena, leave alone". A permissive predicate that accepted
+// "\mcp-local-hub-serena-foo" would mis-classify hand-edited
+// descriptors.
 //
 // Plan ref: docs/superpowers/plans/2026-05-20-serena-supervisor-unified.md D.2.
 func IsSerenaTaskName(taskName string) bool {
@@ -61,7 +67,16 @@ func IsSerenaTaskName(taskName string) bool {
 	default:
 		return false
 	}
-	return len(suffix) > 0
+	if len(suffix) != 8 {
+		return false
+	}
+	for i := 0; i < 8; i++ {
+		c := suffix[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 // BuildSupervisorDaemonsForSerena materializes one SupervisorDaemon
@@ -94,6 +109,10 @@ func IsSerenaTaskName(taskName string) bool {
 //   - Args is the concatenation m.BaseArgs ++ ExtraArgsTemplate
 //     followed by token expansion. Both halves are expanded.
 //   - Env is a CLONE of m.Env (each descriptor owns its own map).
+//   - Env values are passed verbatim. Secret-placeholder expansion
+//     (`secret:KEY` references resolved against the vault) is the
+//     caller's responsibility - this helper is pure and does NOT
+//     consult any vault or runtime state.
 //   - Workspace is the canonical absolute path from the registry row.
 //   - Port is the per-workspace port persisted on the registry row.
 //     The fan-out does NOT re-allocate.

@@ -128,6 +128,38 @@ func TestIsSerenaTaskName_PrefixWithoutSuffix(t *testing.T) {
 	}
 }
 
+func TestIsSerenaTaskName_RejectsNonHexSuffix(t *testing.T) {
+	cases := []struct {
+		name string
+		want bool
+	}{
+		{`\mcp-local-hub-serena-foo!bar`, false},
+		{`\mcp-local-hub-serena-FOOBAR12`, false},
+		{`\mcp-local-hub-serena-deadbeef`, true},
+	}
+	for _, c := range cases {
+		if got := IsSerenaTaskName(c.name); got != c.want {
+			t.Errorf("IsSerenaTaskName(%q) = %v; want %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestIsSerenaTaskName_RejectsWrongLengthSuffix(t *testing.T) {
+	cases := []struct {
+		name string
+		want bool
+	}{
+		{`\mcp-local-hub-serena-abc`, false},
+		{`\mcp-local-hub-serena-abcdef123`, false},
+		{`\mcp-local-hub-serena-abcdef12`, true},
+	}
+	for _, c := range cases {
+		if got := IsSerenaTaskName(c.name); got != c.want {
+			t.Errorf("IsSerenaTaskName(%q) = %v; want %v", c.name, got, c.want)
+		}
+	}
+}
+
 // TestIsSerenaTaskName_NonSerenaTaskName covers LSP-bridge task names
 // (mcp-local-hub-lsp-go-* etc.) and generic non-serena names. None
 // should match.
@@ -366,7 +398,7 @@ func TestBuildSupervisorIntent_RemovingWorkspaceRemovesDescriptor(t *testing.T) 
 
 // TestBuildSupervisorIntent_RejectsKindGlobal verifies the kind-gate:
 // a manifest with daemon_template but kind=global returns nil. The
-// validator at internal/config/manifest.go:307 already rejects this
+// validator at internal/config/manifest.go:306-307 already rejects this
 // combination at parse time; the fan-out enforces it again as defense
 // in depth for in-memory constructions.
 func TestBuildSupervisorIntent_RejectsKindGlobal(t *testing.T) {
@@ -437,5 +469,86 @@ func TestBuildSupervisorIntent_TaskNameMatchesRegisteredEntry(t *testing.T) {
 	bare := canonicalIntentTaskKey("mcp-local-hub-serena-" + WorkspaceKey(ws))
 	if canonical != bare {
 		t.Fatalf("supervisor-intent vs register task-name shape diverged:\n  fan-out:   %q\n  register+canon: %q", canonical, bare)
+	}
+}
+
+// TestBuildSupervisorIntent_WindowsBackslashPath verifies byte-blind
+// path handling: a workspace path with native Windows backslashes
+// flows through token expansion unchanged. The fan-out treats
+// WorkspacePath as an opaque string; it does NOT normalize separators.
+func TestBuildSupervisorIntent_WindowsBackslashPath(t *testing.T) {
+	m := fixtureSerenaManifest()
+	m.DaemonTemplate.ExtraArgsTemplate = []string{"--workspace=${workspace.path}"}
+	workspaces := []WorkspaceEntry{
+		{WorkspacePath: `C:\Users\dev\repos\alpha`, Language: SerenaLanguageSentinel, Port: 9121},
+	}
+	got := BuildSupervisorDaemonsForSerena(m, workspaces, "")
+	if len(got) != 1 {
+		t.Fatalf("expected 1 descriptor, got %d", len(got))
+	}
+	// The expanded arg must contain the backslash path verbatim.
+	foundExpanded := false
+	for _, a := range got[0].Args {
+		if a == `--workspace=C:\Users\dev\repos\alpha` {
+			foundExpanded = true
+			break
+		}
+	}
+	if !foundExpanded {
+		t.Fatalf("backslash path not expanded byte-blind; args=%v", got[0].Args)
+	}
+	if got[0].Workspace != `C:\Users\dev\repos\alpha` {
+		t.Fatalf("Workspace field must preserve backslashes; got=%q", got[0].Workspace)
+	}
+}
+
+// TestBuildSupervisorIntent_UnicodePath verifies unicode characters
+// in workspace paths flow through unchanged. WorkspaceKey hashes the
+// UTF-8 bytes; the fan-out passes the path verbatim.
+func TestBuildSupervisorIntent_UnicodePath(t *testing.T) {
+	m := fixtureSerenaManifest()
+	m.DaemonTemplate.ExtraArgsTemplate = []string{"--workspace=${workspace.path}"}
+	workspaces := []WorkspaceEntry{
+		{WorkspacePath: "C:/work/проект-альфа", Language: SerenaLanguageSentinel, Port: 9121},
+	}
+	got := BuildSupervisorDaemonsForSerena(m, workspaces, "")
+	if len(got) != 1 {
+		t.Fatalf("expected 1 descriptor, got %d", len(got))
+	}
+	if got[0].Workspace != "C:/work/проект-альфа" {
+		t.Fatalf("unicode workspace path mangled; got=%q", got[0].Workspace)
+	}
+	foundExpanded := false
+	for _, a := range got[0].Args {
+		if a == "--workspace=C:/work/проект-альфа" {
+			foundExpanded = true
+			break
+		}
+	}
+	if !foundExpanded {
+		t.Fatalf("unicode path not expanded byte-blind; args=%v", got[0].Args)
+	}
+}
+
+// TestBuildSupervisorIntent_NilManifestEnvProducesNilDescriptorEnv
+// verifies cloneStringMap's nil-safety: when the manifest has no env
+// block (m.Env == nil), each descriptor's Env field is nil too
+// (not an empty map). This matches the supervisor IPC contract where
+// "no env" is canonically encoded as absent rather than empty.
+func TestBuildSupervisorIntent_NilManifestEnvProducesNilDescriptorEnv(t *testing.T) {
+	m := fixtureSerenaManifest()
+	m.Env = nil
+	workspaces := []WorkspaceEntry{
+		{WorkspacePath: "C:/work/alpha", Language: SerenaLanguageSentinel, Port: 9121},
+		{WorkspacePath: "C:/work/beta", Language: SerenaLanguageSentinel, Port: 9122},
+	}
+	got := BuildSupervisorDaemonsForSerena(m, workspaces, "")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 descriptors, got %d", len(got))
+	}
+	for i, d := range got {
+		if d.Env != nil {
+			t.Fatalf("descriptor[%d].Env must be nil when m.Env==nil; got=%#v", i, d.Env)
+		}
 	}
 }
