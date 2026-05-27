@@ -637,3 +637,99 @@ func TestSupervisorController_HandleLoopEvent_OrphanTaskDropped(t *testing.T) {
 		t.Errorf("controller-event-orphan missing from audit log:\n%s", logRaw)
 	}
 }
+
+// TestSupervisorController_SpawnErrorRoutesToBackoff is the regression
+// guard for the Codex Cloud finding on 2d67031: a daemon whose c.spawn
+// returns error (cmd.Start / StartWithJob failed before any child
+// existed) was previously stranded in StSpawning forever because:
+//
+//   - StIdle + EvStart -> StSpawning was stored in smStates BEFORE
+//     the spawn closure ran (supervisor_controller.go ~L390).
+//   - executeSideEffect only posted EvHealthOK on c.spawn() == nil; on
+//     error it posted NOTHING (~L467-470).
+//   - There was no child to produce a real EvChildExit, and the SM
+//     table at supervisor_state_machine.go:73-81 has no StSpawning +
+//     EvStart transition - subsequent reconcile EvStarts were
+//     unmatched and dropped as controller-event-unhandled.
+//
+// The fix: executeSideEffect now posts a SYNTHETIC EvChildExit when
+// c.spawn returns error, so the SM table's StSpawning + EvChildExit
+// transition routes to StBackoffWaiting (which arms the
+// failure-counter timer) and the standard backoff retry pipeline
+// drives the next spawn attempt via EvTimerDue.
+//
+// This test reproduces the PoC: register a fake spawn that returns
+// error, post EvStart, and assert the state lands on StBackoffWaiting
+// after a bounded wait (NOT stuck on StSpawning).
+func TestSupervisorController_SpawnErrorRoutesToBackoff(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	tracker := NewDaemonRuntimeTracker()
+	var spawnCalls atomic.Int32
+	// Fake spawn ALWAYS returns error, mirroring a persistent
+	// cmd.Start failure (missing executable, invalid path,
+	// permission denied, etc.).
+	fakeSpawn := func(d api.SupervisorDaemon) error {
+		spawnCalls.Add(1)
+		return os.ErrNotExist
+	}
+
+	descriptor := api.SupervisorDaemon{
+		TaskName: `\mcp-local-hub-test-default`,
+		Server:   "test",
+		Daemon:   "default",
+	}
+	intent := &api.SupervisorIntentFile{Daemons: []api.SupervisorDaemon{descriptor}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	loop := api.NewEventLoop(16)
+	ctrl := &supervisorController{
+		intentCache:         newIntentCache(),
+		eventLoop:           loop,
+		tracker:             tracker,
+		events:              events,
+		daemonIntent:        newDaemonIntentCache(),
+		spawn:               fakeSpawn,
+		ctx:                 ctx,
+		failureWindow:       respawnFailureWindow,
+		quarantineThreshold: respawnQuarantineThreshold,
+	}
+	ctrl.intentCache.Refresh(intent)
+	ctrl.smStates.Store(descriptor.TaskName, api.StIdle)
+	loop.RegisterHandler(ctrl.handleLoopEvent)
+	go loop.Run(ctx)
+
+	// Post EvStart. Expected chain:
+	//   StIdle + EvStart -> StSpawning + spawn() returns error
+	//   -> executeSideEffect posts synthetic EvChildExit
+	//   -> StSpawning + EvChildExit -> StBackoffWaiting
+	loop.Post(api.LoopEvent{Kind: api.EvStart, TaskName: descriptor.TaskName})
+
+	// Poll until state lands on StBackoffWaiting OR the deadline
+	// expires. With a 2-second deadline and 10ms polling, the loop
+	// has ample time to process both events on a healthy machine.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		st, _ := ctrl.GetSMState(descriptor.TaskName)
+		if st == api.StBackoffWaiting {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if got := spawnCalls.Load(); got != 1 {
+		t.Errorf("spawn call count = %d, want 1 (spawn must be attempted exactly once before backoff)", got)
+	}
+	st, _ := ctrl.GetSMState(descriptor.TaskName)
+	if st != api.StBackoffWaiting {
+		t.Fatalf("post-spawn-error state = %s, want %s (regression: daemon stuck in StSpawning - the synthetic EvChildExit on c.spawn error is missing from executeSideEffect)", st, api.StBackoffWaiting)
+	}
+}

@@ -451,10 +451,7 @@ func (c *supervisorController) executeSideEffect(
 	switch newState {
 	case api.StSpawning:
 		// "bump pid_generation, create-process" - fire the spawn
-		// closure. Errors are swallowed: the spawn fn itself emits
-		// daemon-spawn-failed and the next EvChildExit (or a later
-		// reconcile) will trigger another transition through
-		// StBackoffWaiting.
+		// closure.
 		//
 		// On success, post EvHealthOK to drive StSpawning → StRunning
 		// (closes codex r1 BLOCKER-1: without this transition, daemons
@@ -464,9 +461,30 @@ func (c *supervisorController) executeSideEffect(
 		// success; a proper health probe (port-bind / HTTP /health) is
 		// a follow-up. Mirrors the pre-A.2 dispatcher's "started =
 		// considered healthy" semantic.
+		//
+		// On failure (cmd.Start / StartWithJob error before any child
+		// exists), post a SYNTHETIC EvChildExit so the SM can route
+		// StSpawning → StBackoffWaiting and the backoff timer drives
+		// the retry through the standard failure-counter pipeline.
+		// Closes Codex Cloud finding on 2d67031 (StIdle + EvStart →
+		// StSpawning, c.spawn() returns error → previously no event
+		// posted → StSpawning + EvStart has no SM transition → later
+		// reconciles unmatched → daemon stuck in StSpawning forever).
+		// Synthetic EvChildExit is semantically equivalent because
+		// from the SM's perspective an immediate spawn failure and a
+		// process that exited immediately after start are both
+		// "process did not become healthy" - both should route
+		// through backoff. The spawn fn itself emits the structured
+		// daemon-spawn-failed event for forensic diagnosis; the
+		// synthetic EvChildExit is purely for state-machine routing.
 		if c.spawn != nil {
-			if err := c.spawn(*d); err == nil && c.eventLoop != nil {
-				c.eventLoop.Post(api.LoopEvent{Kind: api.EvHealthOK, TaskName: d.TaskName})
+			err := c.spawn(*d)
+			if c.eventLoop != nil {
+				if err == nil {
+					c.eventLoop.Post(api.LoopEvent{Kind: api.EvHealthOK, TaskName: d.TaskName})
+				} else {
+					c.eventLoop.Post(api.LoopEvent{Kind: api.EvChildExit, TaskName: d.TaskName})
+				}
 			}
 		}
 
