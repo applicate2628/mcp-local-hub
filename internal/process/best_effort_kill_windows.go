@@ -30,18 +30,35 @@ import (
 // is killed and the SM routes through StBackoffWaiting + backoff
 // timer for retry; either the next spawn binds a fresh PID
 // successfully OR fails with port-in-use (natural duplicate cap).
+// bestEffortKillWaitTimeoutMs is the maximum time BestEffortKillByPID
+// blocks waiting for the killed process to fully exit (release its
+// kernel handles, free its port bindings, etc.). 5s mirrors the
+// shutdown timeout discipline used elsewhere in the supervisor
+// (cmd.Process.Kill grace period).
+var bestEffortKillWaitTimeoutMs uint32 = 5000
+
 func BestEffortKillByPID(pid int) error {
 	if pid <= 0 {
 		return nil
 	}
-	h, err := windows.OpenProcess(windows.PROCESS_TERMINATE, false, uint32(pid))
+	// Open the handle with BOTH PROCESS_TERMINATE (to call
+	// TerminateProcess) AND SYNCHRONIZE (to call WaitForSingleObject
+	// for actual exit signaling). Without SYNCHRONIZE, the helper
+	// would return as soon as TerminateProcess succeeded but the
+	// kernel might still be tearing down the process - any caller
+	// that immediately tried to rebind the port (the supervisor's
+	// backoff respawn does exactly this) would race against the
+	// orphan's still-active socket and either succeed-with-races or
+	// fail-with-port-in-use. Closes bot finding on PR #237 82f1899
+	// (P2 wait-for-exit-before-retrying).
+	h, err := windows.OpenProcess(windows.PROCESS_TERMINATE|windows.SYNCHRONIZE, false, uint32(pid))
 	if err != nil {
 		// ERROR_INVALID_PARAMETER means the PID does not refer to a
 		// live process - treat as success (the orphan already died).
 		if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
 			return nil
 		}
-		return fmt.Errorf("OpenProcess(PROCESS_TERMINATE, pid=%d): %w", pid, err)
+		return fmt.Errorf("OpenProcess(PROCESS_TERMINATE|SYNCHRONIZE, pid=%d): %w", pid, err)
 	}
 	defer windows.CloseHandle(h)
 
@@ -49,12 +66,30 @@ func BestEffortKillByPID(pid int) error {
 		// ERROR_ACCESS_DENIED can occur if the process is already
 		// in the middle of exiting (Windows reports the PID as still
 		// alive briefly after ExitProcess but rejects new operations).
-		// Treat as success since the goal (process is dead/dying)
-		// is already met.
-		if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
-			return nil
+		// We still wait below for the handle to signal exit so the
+		// caller knows the process is fully gone.
+		if !errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+			return fmt.Errorf("TerminateProcess(pid=%d): %w", pid, err)
 		}
-		return fmt.Errorf("TerminateProcess(pid=%d): %w", pid, err)
 	}
-	return nil
+
+	// Wait for the handle to signal (process has fully exited and
+	// released its kernel resources). Bounded by
+	// bestEffortKillWaitTimeoutMs so a hung-on-exit process doesn't
+	// block the supervisor indefinitely; if the wait times out the
+	// caller treats this as a kill failure.
+	ev, err := windows.WaitForSingleObject(h, bestEffortKillWaitTimeoutMs)
+	if err != nil {
+		return fmt.Errorf("WaitForSingleObject(pid=%d): %w", pid, err)
+	}
+	switch ev {
+	case windows.WAIT_OBJECT_0:
+		// Process exited; orphan is truly gone. Safe for caller to
+		// rebind the port via backoff respawn.
+		return nil
+	case uint32(windows.WAIT_TIMEOUT):
+		return fmt.Errorf("WaitForSingleObject(pid=%d): timeout after %dms (process did not exit)", pid, bestEffortKillWaitTimeoutMs)
+	default:
+		return fmt.Errorf("WaitForSingleObject(pid=%d): unexpected event %d", pid, ev)
+	}
 }

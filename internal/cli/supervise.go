@@ -2181,36 +2181,43 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 			if isOrphan {
 				// Best-effort kill of the Windows post-create orphan
 				// via process.BestEffortKillByPID (OpenProcess +
-				// TerminateProcess on a separate handle, since
-				// cmd.Process is unavailable). After the kill, the
-				// orphan is dead (or was already gone) so wrapping
-				// with errSpawnPreChild → synth EvChildExit → backoff
-				// retry is safe: fresh respawn won't duplicate the
-				// orphan.
-				//
-				// Closes bot finding on PR #237 a646148: previously
-				// the orphan branch returned raw startErr (NOT
-				// wrapped) so no synthetic EvChildExit was posted
-				// and the daemon stayed in StSpawning forever
-				// (because the SM has no StSpawning + EvStart
-				// transition for reconcile-driven retries). With
-				// best-effort kill + wrap, the SM routes through
-				// StBackoffWaiting + backoff timer.
+				// TerminateProcess + WaitForSingleObject on a
+				// separate handle, since cmd.Process is unavailable).
+				// The helper blocks until the process actually exits
+				// (or 5s timeout) so a subsequent port rebind doesn't
+				// race against still-tearing-down orphan sockets.
 				killErr := process.BestEffortKillByPID(pid)
 				orphanBody := map[string]any{
-					"pid":  pid,
-					"note": "Windows post-create orphan: best-effort TerminateProcess on the orphan PID, then route through backoff retry. Successful kill = orphan gone, fresh respawn will bind cleanly. Kill failure (rare) = orphan still alive, backoff respawn will hit port-in-use as natural duplicate cap.",
+					"pid":           pid,
+					"kill_succeeded": killErr == nil,
 				}
+				severity := "warn"
 				if killErr != nil {
 					orphanBody["kill_error"] = killErr.Error()
+					orphanBody["note"] = "Kill failed - orphan may still be alive. Returning RAW startErr (not wrapped with errSpawnPreChild) so the controller does NOT synth EvChildExit + backoff retry. Daemon stays in StSpawning (preferable to duplicate-daemon risk). Operator should investigate kill_error and may need to terminate orphan manually."
+					severity = "error"
+				} else {
+					orphanBody["note"] = "Orphan terminated cleanly. Wrapping with errSpawnPreChild so the controller synth EvChildExit + backoff timer drives retry. Fresh respawn binds the port without orphan interference."
 				}
 				_ = events.Emit(api.SupervisorEvent{
-					Severity: "warn",
+					Severity: severity,
 					Source:   "lifecycle",
 					Event:    "daemon-spawn-orphan-detected",
 					TaskName: d.TaskName,
 					Body:     orphanBody,
 				})
+				// Closes bot finding on PR #237 82f1899 (P2
+				// do-not-respawn-after-failed-orphan-kill): if the
+				// orphan kill failed, the orphan may still be alive
+				// at pi.ProcessId and holding its port; routing
+				// through backoff respawn would either duplicate the
+				// daemon (if port is freed) or fail with port-in-use
+				// (if not) - both worse than the stuck-StSpawning
+				// state until next external reconcile. Return raw
+				// startErr (no wrap) - controller does NOT synth.
+				if killErr != nil {
+					return startErr
+				}
 			}
 			// Common pre-child case: wrap with errSpawnPreChild so
 			// the supervisor controller synthesizes EvChildExit and
