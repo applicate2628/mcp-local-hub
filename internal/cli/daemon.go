@@ -290,6 +290,10 @@ See also: install, logs, restart, status.`,
 	// Phase 3 workspace-scoped: lazy proxy subcommand the scheduler task
 	// launches per (workspace, language). Hidden — users don't run it.
 	c.AddCommand(newDaemonWorkspaceProxyCmd())
+	// Phase D.2 / dynamic-pool serena: per-workspace native-http daemon
+	// subcommand the supervisor launches per registered serena workspace.
+	// Hidden — supervisor-intent.json descriptors point here.
+	c.AddCommand(newDaemonSerenaProxyCmd())
 	return c
 }
 

@@ -267,9 +267,8 @@ func expandEnvCrossPlatform(s string) (string, []string) {
 //
 // Plan ref: docs/superpowers/plans/2026-05-20-serena-supervisor-unified.md §D.1.
 func containsWorkspacePathTokenInArgs(args []string) bool {
-	const tok = "${workspace.path}"
 	for _, a := range args {
-		if strings.Contains(a, tok) {
+		if strings.Contains(a, WorkspacePathToken) {
 			return true
 		}
 	}
