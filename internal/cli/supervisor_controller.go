@@ -428,6 +428,17 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 	if currentState == api.StExiting && (newState == api.StIdle || newState == api.StSpawning) {
 		c.queuedActions.Store(ev.TaskName, "")
 	}
+	// Sync tracker runtime state when SM transitions to StIdle from a
+	// non-idle state. Without this, persistDaemonRuntimeTracker below
+	// would write supervisor-state.json with stale tracker fields
+	// (e.g. state="backoff-waiting" + CurrentPID=N) while the SM
+	// itself reports state="idle". The mismatch is operator-visible
+	// in mcphub status and the GUI Dashboard. Closes bot finding on
+	// PR #236 db988e0 (StBackoffWaiting + EvTimerDue intent re-check
+	// path persists tracker before tracker is synced to idle).
+	if newState == api.StIdle && currentState != api.StIdle && c.tracker != nil {
+		c.tracker.MarkExited(ev.TaskName)
+	}
 	if persistBefore {
 		// Best-effort persist - audit-log on failure but do NOT block
 		// the side effect. The tracker mirrors the SM state into

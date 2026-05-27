@@ -2164,17 +2164,6 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 			}
 		}
 		if startErr != nil {
-			// Closes bot finding A on PR #236 1c0ea09 (P2 #5 Windows
-			// StartWithJob post-CreateProcess orphan): the sentinel
-			// process.ErrSpawnPostCreate marks the case where the OS
-			// child IS alive (PID allocated) but the FindProcess
-			// handle acquisition failed. Audit-log the orphan
-			// separately so operators can correlate; the backoff
-			// respawn that follows will either succeed on a fresh
-			// process (orphan dies via Job Object membership when
-			// supervisor exits or daemon respawn binds the same port)
-			// or fail with port-in-use (the natural cap on duplicate-
-			// daemon risk).
 			isOrphan := errors.Is(startErr, process.ErrSpawnPostCreate)
 			tracker.MarkSpawnFailed(d.TaskName, startErr)
 			_ = events.Emit(api.SupervisorEvent{
@@ -2188,25 +2177,41 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 					"orphan":  isOrphan,
 				},
 			})
+			_ = persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName)
 			if isOrphan {
+				// Closes bot finding on PR #236 db988e0: do NOT wrap
+				// orphan startErr with errSpawnPreChild. Otherwise
+				// the controller synthesizes EvChildExit + the
+				// backoff timer respawns while the OS-level orphan
+				// is still alive at pi.ProcessId (duplicate-daemon).
+				//
+				// Instead: emit a structured warn-level audit event
+				// so operators can correlate, and return the raw
+				// (unwrapped) error. The controller's switch on
+				// errors.Is(err, errSpawnPreChild) does NOT match;
+				// no synthetic EvChildExit is posted; the daemon
+				// stays in StSpawning until the next external
+				// reconcile-driven EvStart re-evaluates. Job Object
+				// KILL_ON_JOB_CLOSE still reaps the orphan on
+				// supervisor exit, and a future reconcile EvStart
+				// will trigger a fresh spawn attempt which either
+				// succeeds (orphan died via normal cleanup) or
+				// fails with port-in-use (natural duplicate cap).
 				_ = events.Emit(api.SupervisorEvent{
 					Severity: "warn",
 					Source:   "lifecycle",
 					Event:    "daemon-spawn-orphan-detected",
 					TaskName: d.TaskName,
 					Body: map[string]any{
-						"pid": pid,
-						"note": "OS child created but Go handle acquisition failed; Job Object membership ensures cleanup on supervisor exit, backoff respawn will hit port-in-use if orphan still listens",
+						"pid":  pid,
+						"note": "OS child created but Go handle acquisition failed; supervisor will NOT enter backoff respawn (would duplicate the orphan). Daemon stays in StSpawning until next reconcile re-attempts via fresh EvStart. Job Object KILL_ON_JOB_CLOSE reaps orphan on supervisor exit.",
 					},
 				})
+				return startErr
 			}
-			_ = persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName)
-			// Wrap with errSpawnPreChild so the supervisor controller
-			// synthesizes EvChildExit and routes through
-			// StBackoffWaiting + backoff timer. For the orphan case
-			// the backoff respawn would either bind a fresh PID (if
-			// orphan died) or fail with port-in-use (natural duplicate
-			// cap).
+			// Common pre-child case: wrap with errSpawnPreChild so
+			// the supervisor controller synthesizes EvChildExit and
+			// routes through StBackoffWaiting + backoff timer.
 			return fmt.Errorf("%w: %v", errSpawnPreChild, startErr)
 		}
 		startedAt := time.Now().UTC()
