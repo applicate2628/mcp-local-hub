@@ -105,6 +105,80 @@ func TestJob_CloseIdempotent(t *testing.T) {
 	}
 }
 
+// TestJob_TerminateAllWaitsForExit is the load-bearing regression
+// guard for ADR-#239 (per-task Job Object). Pre-ADR the TerminateAll
+// stub returned immediately after TerminateJobObject, racing the
+// kernel teardown — supervisor backoff respawn could rebind the
+// port before the orphan socket was released. This test proves the
+// post-ADR contract: TerminateAll(timeoutMs > 0) must NOT return
+// until ActiveProcesses reaches zero OR the deadline expires.
+//
+// Method: spawn timeout /T 30 child, assign to its own Job (mirrors
+// the per-spawn allocation in runSupervise), call TerminateAll(5000),
+// assert (a) call returned without timeout error, (b) wall-clock
+// elapsed under the deadline, (c) the PID is no longer alive.
+func TestJob_TerminateAllWaitsForExit(t *testing.T) {
+	if _, err := exec.LookPath("timeout"); err != nil {
+		t.Skipf("timeout.exe not on PATH: %v", err)
+	}
+	cmd := exec.Command("timeout", "/T", "30", "/NOBREAK")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	pid := cmd.Process.Pid
+	defer func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+
+	job, err := NewKillOnCloseJob()
+	if err != nil {
+		t.Fatalf("NewKillOnCloseJob: %v", err)
+	}
+	defer job.Close()
+
+	if err := job.Assign(cmd); err != nil {
+		t.Fatalf("Assign: %v", err)
+	}
+	if !processAlive(pid, t) {
+		t.Fatalf("pid=%d already dead before TerminateAll — assignment must not pre-kill", pid)
+	}
+
+	start := time.Now()
+	if err := job.TerminateAll(5000); err != nil {
+		t.Fatalf("TerminateAll: %v (regression: real polling broken OR ActiveProcesses query failed)", err)
+	}
+	elapsed := time.Since(start)
+	if elapsed > 5*time.Second {
+		t.Errorf("TerminateAll took %v; should return well within 5s for one timeout.exe child (regression: returned timeout when it should have completed)", elapsed)
+	}
+	if processAlive(pid, t) {
+		t.Errorf("pid=%d still alive after TerminateAll returned; the wait-for-exit contract is broken (caller will race respawn against still-tearing-down orphan)", pid)
+	}
+}
+
+// TestJob_TerminateAllZeroTimeoutSkipsWait guards the explicit
+// opt-out-of-wait path documented in jobobject_windows.go. Callers
+// that pass timeoutMs=0 want the pre-ADR fire-and-return semantic
+// (e.g. shutdown paths where the kernel will reap on process exit
+// anyway). A future refactor accidentally making zero-timeout wait
+// forever would deadlock supervisor shutdown — this test catches that.
+func TestJob_TerminateAllZeroTimeoutSkipsWait(t *testing.T) {
+	job, err := NewKillOnCloseJob()
+	if err != nil {
+		t.Fatalf("NewKillOnCloseJob: %v", err)
+	}
+	defer job.Close()
+
+	start := time.Now()
+	if err := job.TerminateAll(0); err != nil {
+		t.Errorf("TerminateAll(0) on empty job: %v; want nil (opt-out-of-wait path)", err)
+	}
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Errorf("TerminateAll(0) took %v; want near-instant return (regression: zero-timeout path is waiting when it should not)", elapsed)
+	}
+}
+
 // processAlive returns true if a process with pid is still in the OS
 // process table. Uses windows.OpenProcess with SYNCHRONIZE — sufficient
 // for liveness probe and tolerates the fast post-exit window where the
