@@ -148,16 +148,20 @@ func (p *StatusPoller) poll(ctx context.Context) {
 			"is_maintenance": r.IsMaintenance,
 			"orphan_pid":     r.OrphanPID,
 		}
-		// job_protection emits as bool when explicitly probed (nil
-		// rows omit the field). Frontend renders the warning badge
-		// only on explicit false; nil/true = no badge. This matches
-		// the tri-state contract documented at
-		// api.DaemonStatus.JobProtection. Closes consultant strategic
-		// concern #1 on PR #241: the SSE delta is the steady-state
-		// observability path that converts the fallback's non-fatal
-		// log entry into an operator-visible warning.
+		// job_protection emits as bool when explicitly probed. Initial
+		// nil rows omit the field; known->nil transitions emit JSON
+		// null so the frontend delta merge clears a stale false badge.
+		// Frontend renders the warning badge only on explicit false;
+		// nil/true = no badge. This matches the tri-state contract
+		// documented at api.DaemonStatus.JobProtection. Closes
+		// consultant strategic concern #1 on PR #241: the SSE delta is
+		// the steady-state observability path that converts the
+		// fallback's non-fatal log entry into an operator-visible
+		// warning.
 		if r.JobProtection != nil {
 			body["job_protection"] = *r.JobProtection
+		} else if ok && prev.JobProtection != nil {
+			body["job_protection"] = nil
 		}
 		p.events.Publish(Event{
 			Type: "daemon-state",

@@ -2107,7 +2107,7 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 			} else if events != nil {
 				_ = events.Emit(api.SupervisorEvent{
 					Severity: "warn", Source: "lifecycle",
-					Event: "daemon-env-overlay-spawn-reload-failed",
+					Event:    "daemon-env-overlay-spawn-reload-failed",
 					TaskName: d.TaskName,
 					Body: map[string]any{
 						"path":     overlayPath,
@@ -2176,17 +2176,16 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		daemonJob, jobErr := process.NewKillOnCloseJob()
 		// Record per-spawn Job Object allocation state in the runtime
 		// tracker so it surfaces through supervisor-state.json + IPC
-		// status response + GUI Dashboard. Tri-state via *bool:
-		// &true on success (orphan-protection invariant holds for this
-		// spawn), &false on the documented non-fatal fallback below
-		// (daemon proceeds without StartWithJob, descendant tree
-		// loses KILL_ON_JOB_CLOSE protection). The MarkJobProtection
-		// call is the canonical writer; subsequent Mark* methods
-		// (MarkSpawned, MarkSpawnFailed, MarkExited, ...) preserve
-		// the field. Closes consultant strategic concern #1 on PR
-		// #241 (silent-degradation gap when fallback fires).
-		jobProtected := jobErr == nil
-		tracker.MarkJobProtection(d.TaskName, &jobProtected)
+		// status response + GUI Dashboard. process.JobProtectionStatus
+		// owns platform semantics: Windows emits &true on success and
+		// &false on the documented non-fatal fallback below; POSIX
+		// returns nil because its Job stub is a no-op, not real Job
+		// Object orphan protection. The MarkJobProtection call is the
+		// canonical writer; MarkSpawned preserves it for the running
+		// spawn, and no-current-spawn transitions clear it.
+		// Closes consultant strategic concern #1 on PR #241
+		// (silent-degradation gap when fallback fires).
+		tracker.MarkJobProtection(d.TaskName, process.JobProtectionStatus(jobErr))
 		if jobErr != nil {
 			_ = events.Emit(api.SupervisorEvent{
 				Severity: "warn",

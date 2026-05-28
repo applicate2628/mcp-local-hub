@@ -24,11 +24,13 @@ export interface DaemonStatus {
   //   false     → NewKillOnCloseJob failed AND supervisor fell through
   //                to plain cmd.Start; daemon runs without Job
   //                Object orphan-protection (render: warning badge)
+  //   null      → SSE delta clear back to unknown/no-current-spawn
+  //                (render: no badge)
   // Closes consultant strategic concern #1 on PR #241: the fallback
   // is non-fatal, but without operator visibility through this field
   // a daemon running without orphan-protection can accumulate
   // orphans on supervisor crash with no steady-state warning.
-  job_protection?: boolean;
+  job_protection?: boolean | null;
   state: string;
   task_name?: string;
   is_maintenance?: boolean;

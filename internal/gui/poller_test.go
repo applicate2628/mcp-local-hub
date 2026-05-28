@@ -179,6 +179,48 @@ func TestPoller_EmitsDeltaOnJobProtectionChange(t *testing.T) {
 	}
 }
 
+func TestPoller_EmitsJobProtectionClearOnFalseToUnknown(t *testing.T) {
+	fal := false
+	frames := [][]api.DaemonStatus{
+		{{Server: "memory", State: "Running", Port: 9123, PID: 42, JobProtection: &fal}},
+		{{Server: "memory", State: "Running", Port: 9123, PID: 42, JobProtection: nil}},
+	}
+	status := &scriptedStatus{frames: frames}
+	b := NewBroadcaster()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := b.Subscribe(ctx)
+
+	p := NewStatusPoller(status, b, 50*time.Millisecond)
+	go p.Run(ctx)
+
+	type jpDelta struct {
+		present bool
+		raw     any
+	}
+	var got []jpDelta
+	deadline := time.After(2 * time.Second)
+	for len(got) < 2 {
+		select {
+		case ev := <-ch:
+			if ev.Type != "daemon-state" {
+				continue
+			}
+			raw, present := ev.Body["job_protection"]
+			got = append(got, jpDelta{present: present, raw: raw})
+		case <-deadline:
+			t.Fatalf("did not observe 2 job_protection deltas; got=%v", got)
+		}
+	}
+
+	if !got[0].present || got[0].raw != false {
+		t.Errorf("delta[0] job_protection = %+v, want present=true value=false", got[0])
+	}
+	if !got[1].present || got[1].raw != nil {
+		t.Errorf("delta[1] job_protection = %+v, want present=true value=nil to clear stale frontend false", got[1])
+	}
+}
+
 func TestPoller_EmitsDeltaOnStateChange(t *testing.T) {
 	frames := [][]api.DaemonStatus{
 		{{Server: "memory", State: "Running", Port: 9123}},

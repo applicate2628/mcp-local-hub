@@ -990,6 +990,102 @@ pointing operators at the v0.5.0 supervisor; the watchdog subcommands
 remain functional for the legacy v0.4.x state files but do not
 extend or write supervisor state.
 
+### Job Protection field operator runbook (PR #242)
+
+When the GUI Dashboard renders **Job Protection: UNPROTECTED ⚠** on
+a daemon card, or `mcphub status --json` returns
+`"job_protection": false` for a daemon, the per-spawn Windows Job
+Object allocation failed on the supervisor's last spawn attempt for
+that daemon. The supervisor proceeded via the documented non-fatal
+fallback (ADR #239 Step 1): plain `cmd.Start` without
+`StartWithJob`, so the daemon's descendant tree no longer has
+`KILL_ON_JOB_CLOSE` orphan-protection. If the supervisor crashes
+(`taskkill /F mcphub.exe`, OS reboot, OOM kill), this daemon's
+sub-processes (e.g. `uvx` → `python`, `npx` → `node` wrappers) may
+survive as orphans and continue holding TCP ports — `mcphub`
+respawn will then hit port-in-use until manual cleanup.
+
+The field is tri-state (`*bool` in Go, `boolean | undefined` in
+TypeScript). `nil`/`undefined` means "unknown / legacy state file /
+not yet probed" and renders no badge (default-trust). `true` means
+"per-spawn Job allocated; orphan-protection invariant holds" and
+also renders no badge. `false` is the only state that renders the
+warning badge.
+
+**Realistic underlying causes** for `false`, in order of frequency:
+
+1. **AppLocker / WDAC publisher allowlist** — corporate endpoint
+   management policy denying `CreateJobObjectW`. The supervisor
+   process itself is allowed, but the Job-creation syscall is
+   blocked by group policy. Verify with `Get-AppLockerPolicy
+   -Effective -Xml | findstr CreateJob`; if AppLocker is enforcing
+   on the host, the policy owner (typically the endpoint-management
+   team in a corporate environment) must add an exception.
+2. **Nested Job constraints** (Windows 7 / Server 2008 R2 era hosts
+   without nested-Job support). Win8+ supports
+   `JOB_OBJECT_LIMIT_BREAKAWAY_OK` transparently per Microsoft
+   docs; pre-Win8 hosts fail `AssignProcessToJobObject` when the
+   supervisor is itself in a Job. Mitigation: upgrade the host OS
+   or run the supervisor outside the parent Job.
+3. **Handle exhaustion** — the supervisor (or its parent session)
+   exceeded the per-process kernel handle quota (default ~16M, but
+   environments with handle-leaking AV / monitoring agents can
+   reach saturation). Verify with `Get-Process mcphub | Select
+   Handles`. Mitigation: restart the offending leaker; restart the
+   supervisor.
+4. **Permission denied** on `OpenProcess(PROCESS_SET_QUOTA |
+   PROCESS_TERMINATE)` — extremely rare in single-user mode but
+   possible on hosts where the spawned daemon's binary is owned
+   by a different SID than the supervisor (e.g. binaries installed
+   via an admin-owned MSI then exec'd from a non-admin session).
+   Mitigation: chown the daemon binary to the same SID as the
+   supervisor process owner.
+
+**Operator action when the badge fires**:
+
+- *Single-user solo-dev host (not corp-managed)*: investigate which
+  of causes 2-4 applies. The fallback is rare on solo-dev hosts;
+  the most likely cause is handle exhaustion from a transient
+  leak. Restart the supervisor (`mcphub supervise` → Ctrl+C →
+  restart, or `taskkill /F /IM mcphub.exe && start mcphub supervise`)
+  to retry Job allocation on the next spawn. If the badge clears
+  after restart, the underlying leak was transient. If it persists
+  across restarts, file a bug with the supervisor-events.log
+  `per-spawn-job-create-failed` entries attached.
+- *Corp-managed host with AppLocker / WDAC*: the underlying cause is
+  policy you cannot fix yourself. Confirm with `mcphub status
+  --json` that the field stays `false` across supervisor restarts
+  (single-user-level diagnostic). Then escalate to the
+  endpoint-management policy owner with the `severity: warn` event
+  body from `supervisor-events.log` (path printed by `mcphub
+  supervise --help`) — they need to add a publisher-allowlist
+  exception for the mcphub binary's `CreateJobObjectW` syscall path.
+  Until policy is updated, the daemon DOES still run (the fallback
+  is non-fatal by design), but operator must accept the
+  orphan-protection regression as a known tradeoff. Document the
+  exception in your team's runbook so the badge stops being noise.
+- *Pre-restart `nil` value*: a daemon entry that's been running since
+  before the supervisor binary was upgraded to PR #242's surface
+  reads as nil (unknown). The supervisor never re-probes mid-run;
+  the field flips on the NEXT spawn. To force a re-probe, restart
+  the supervisor (in-place via `mcphub supervise` Ctrl+C + restart,
+  or via the IPC `restart` command).
+
+**Future v0.5.x followups** (NOT in PR #242 scope):
+
+- Configurable `--strict-job-protection` flag that fails-closed on
+  Job-create failure (refuses the spawn, daemon stays Quarantined
+  instead of falling through). For environments where running
+  without orphan-protection is unacceptable.
+- Auto-remediation: retry Job allocation on a bounded schedule
+  (e.g. exponential backoff via the existing supervisor restart
+  policy) so a transient cause clears without operator action.
+- Metrics export (Prometheus / OpenTelemetry counter for
+  `mcphub_supervisor_job_create_failures_total` by cause) so
+  fleet-wide trends are visible.
+- Alerting integration: piping `severity: warn event:
+  per-spawn-job-create-failed` to PagerDuty / Slack / etc.
+
 ## Marketplace (G5, v0.3.0)
 
 `mcphub marketplace {search,show,generate,refresh}` lets an operator
