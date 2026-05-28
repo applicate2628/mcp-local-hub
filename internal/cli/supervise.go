@@ -2186,18 +2186,30 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 				// The helper blocks until the process actually exits
 				// (or 5s timeout) so a subsequent port rebind doesn't
 				// race against still-tearing-down orphan sockets.
-				killErr := process.BestEffortKillByPID(pid)
+				// Kill via the Job Object, NOT via PID-based
+				// TerminateProcess. Closes bot findings on PR #237
+				// 16d99d7:
+				//   - P2 wrapper-descendants: TerminateJobObject
+				//     reaps the whole job tree (orphan root +
+				//     descendants spawned by wrappers like uvx ->
+				//     python or npx -> node).
+				//   - P2 PID-recycling race: kill is keyed by Job
+				//     handle owned by the supervisor; no PID
+				//     argument needed between StartWithJob return
+				//     and our kill call.
+				killErr := job.TerminateAll(5000)
 				orphanBody := map[string]any{
-					"pid":           pid,
+					"pid":            pid,
 					"kill_succeeded": killErr == nil,
+					"kill_method":    "TerminateJobObject",
 				}
 				severity := "warn"
 				if killErr != nil {
 					orphanBody["kill_error"] = killErr.Error()
-					orphanBody["note"] = "Kill failed - orphan may still be alive. Returning RAW startErr (not wrapped with errSpawnPreChild) so the controller does NOT synth EvChildExit + backoff retry. Daemon stays in StSpawning (preferable to duplicate-daemon risk). Operator should investigate kill_error and may need to terminate orphan manually."
+					orphanBody["note"] = "Job-level kill failed - orphan tree may still be alive. Returning RAW startErr (no errSpawnPreChild wrap) so controller does NOT synth EvChildExit + backoff retry. Daemon stays in StSpawning (preferable to duplicate-daemon risk). The orphan PID is PRESERVED in supervisor-state.json (current_pid field) so operator can run `taskkill /F /T /PID <pid>` for manual cleanup."
 					severity = "error"
 				} else {
-					orphanBody["note"] = "Orphan terminated cleanly. Wrapping with errSpawnPreChild so the controller synth EvChildExit + backoff timer drives retry. Fresh respawn binds the port without orphan interference."
+					orphanBody["note"] = "Orphan tree (root + descendants) terminated cleanly via TerminateJobObject. Wrapping with errSpawnPreChild so the controller synth EvChildExit + backoff timer drives retry. Fresh respawn binds the port without orphan interference."
 				}
 				_ = events.Emit(api.SupervisorEvent{
 					Severity: severity,
@@ -2206,16 +2218,15 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 					TaskName: d.TaskName,
 					Body:     orphanBody,
 				})
-				// Closes bot finding on PR #237 82f1899 (P2
-				// do-not-respawn-after-failed-orphan-kill): if the
-				// orphan kill failed, the orphan may still be alive
-				// at pi.ProcessId and holding its port; routing
-				// through backoff respawn would either duplicate the
-				// daemon (if port is freed) or fail with port-in-use
-				// (if not) - both worse than the stuck-StSpawning
-				// state until next external reconcile. Return raw
-				// startErr (no wrap) - controller does NOT synth.
 				if killErr != nil {
+					// Closes bot finding on PR #237 16d99d7 (P2
+					// preserve-orphan-PID): MarkSpawnFailed above
+					// cleared CurrentPID=0; restore via
+					// MarkSpawnFailedPreservePID so the operator
+					// can find the orphan PID in
+					// supervisor-state.json for manual cleanup.
+					tracker.MarkSpawnFailedPreservePID(d.TaskName, startErr, pid)
+					_ = persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName)
 					return startErr
 				}
 			}

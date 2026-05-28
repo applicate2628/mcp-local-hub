@@ -146,6 +146,37 @@ func (t *DaemonRuntimeTracker) MarkSpawnFailed(taskName string, err error) {
 	t.entries[taskName] = entry
 }
 
+// MarkSpawnFailedPreservePID is the orphan-aware variant of
+// MarkSpawnFailed for the Windows post-create-orphan path. Unlike
+// MarkSpawnFailed (which clears CurrentPID=0), this method preserves
+// the supplied orphanPID so the operator can find it in
+// supervisor-state.json for manual cleanup (`taskkill /F /T /PID <pid>`)
+// when the supervisor's best-effort Job-level kill failed.
+//
+// Used only by the orphan path in supervise.go after a TerminateJobObject
+// failure (errors.Is(startErr, process.ErrSpawnPostCreate) && job kill
+// returned non-nil). The common pre-child case still uses MarkSpawnFailed
+// (no orphan PID to preserve).
+//
+// Closes bot finding on PR #237 16d99d7 (P2 preserve-orphan-PID).
+func (t *DaemonRuntimeTracker) MarkSpawnFailedPreservePID(taskName string, err error, orphanPID int) {
+	if t == nil {
+		return
+	}
+	taskName = canonicalSupervisorTaskName(taskName)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	entry := t.entries[taskName]
+	if entry.PIDGeneration > 0 {
+		entry.RestartCount++
+	}
+	entry.State = daemonRuntimeStateBackoff
+	entry.CurrentPID = orphanPID
+	entry.StartedAt = time.Time{}
+	entry.LastError = errorString(err)
+	t.entries[taskName] = entry
+}
+
 func (t *DaemonRuntimeTracker) MarkExited(taskName string) {
 	if t == nil {
 		return
