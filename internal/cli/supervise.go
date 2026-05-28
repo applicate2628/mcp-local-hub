@@ -2026,15 +2026,22 @@ func mergeDaemonEnv(parent []string, manifest, overlay map[string]string) []stri
 	return out
 }
 
-// makeProductionSpawnFn returns the SpawnFunc the Reconciler invokes
-// for each daemon that needs to be (re)started. Each call:
+// makeProductionSpawnFn is a thin compat wrapper that calls
+// makeProductionSpawnFnWithStatePath with empty overlay/statePath
+// inputs. Preserved for callers that don't need the overlay+respawn
+// wiring (currently none in production after the per-spawn Job
+// refactor; kept for symmetry with the WithStatePath form).
+//
+// The SpawnFunc returned here is what the Reconciler invokes for
+// each daemon that needs to be (re)started. Each call:
 //
 //   - builds an exec.Cmd from the SupervisorDaemon descriptor
 //     (command, args, env, workspace)
 //   - applies process.NoConsole so no console window pops on Windows
-//   - routes through process.StartWithJob when a Job Object is held
-//     (Windows: PROC_THREAD_ATTRIBUTE_JOB_LIST assign-at-create;
-//     POSIX: thin cmd.Start() shim per start_with_job_other.go)
+//   - allocates a per-spawn Job Object (ADR #239 Option B) and
+//     routes through process.StartWithJob (Windows:
+//     PROC_THREAD_ATTRIBUTE_JOB_LIST assign-at-create; POSIX: thin
+//     cmd.Start() shim per start_with_job_other.go)
 //   - emits daemon-spawned (success) / daemon-spawn-failed (error)
 //     audit events with the child PID + command + workspace
 //
@@ -2047,11 +2054,10 @@ func mergeDaemonEnv(parent []string, manifest, overlay map[string]string) []stri
 // full os.Environ()-derived block with the descriptor's keys appended
 // in sorted order, matching the v0.4.x daemon-host spawn convention
 // while keeping duplicate-case Windows keys deterministic.
-// makeProductionSpawnFn is a thin compat wrapper that calls
-// makeProductionSpawnFnWithStatePath with empty overlay/statePath
-// inputs. Preserved for callers that don't need the overlay+respawn
-// wiring (currently none in production after the per-spawn Job
-// refactor; kept for symmetry with the WithStatePath form).
+//
+// Closes the orphaned-godoc P3 nit sonnet pr-review-toolkit flagged on
+// PR #241 (separator comment between the two doc blocks meant godoc
+// rendered only the second).
 func makeProductionSpawnFn(events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker) SpawnFunc {
 	return makeProductionSpawnFnWithStatePath(events, tracker, "", nil, "", nil)
 }
@@ -2168,6 +2174,19 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		// protection; this matches the v0.5.x-pre-ADR fallback
 		// semantic at runSupervise:670-679.
 		daemonJob, jobErr := process.NewKillOnCloseJob()
+		// Record per-spawn Job Object allocation state in the runtime
+		// tracker so it surfaces through supervisor-state.json + IPC
+		// status response + GUI Dashboard. Tri-state via *bool:
+		// &true on success (orphan-protection invariant holds for this
+		// spawn), &false on the documented non-fatal fallback below
+		// (daemon proceeds without StartWithJob, descendant tree
+		// loses KILL_ON_JOB_CLOSE protection). The MarkJobProtection
+		// call is the canonical writer; subsequent Mark* methods
+		// (MarkSpawned, MarkSpawnFailed, MarkExited, ...) preserve
+		// the field. Closes consultant strategic concern #1 on PR
+		// #241 (silent-degradation gap when fallback fires).
+		jobProtected := jobErr == nil
+		tracker.MarkJobProtection(d.TaskName, &jobProtected)
 		if jobErr != nil {
 			_ = events.Emit(api.SupervisorEvent{
 				Severity: "warn",

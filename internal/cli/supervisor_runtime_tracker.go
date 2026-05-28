@@ -41,6 +41,24 @@ type DaemonRuntimeEntry struct {
 	// Closes bot finding on PR #238 3ba6773 (P2 don't-expose-orphan-
 	// as-terminable-daemon-PID).
 	OrphanPID int `json:",omitempty"`
+
+	// JobProtection records the per-spawn Job Object allocation state
+	// for the CURRENT spawn attempt. Tri-state semantics via *bool:
+	// nil = unknown/legacy/not-yet-probed (default-trust, no warning
+	// in UI), &true = Job allocated successfully (orphan-cleanup
+	// invariant holds), &false = NewKillOnCloseJob failed AND the
+	// supervisor fell through to cmd.Start (no orphan protection).
+	// Persisted to supervisor-state.json and surfaced through the IPC
+	// status response + GUI Dashboard.
+	//
+	// Field design rationale: a plain Go bool defaults to false on
+	// zero-value, which would retroactively mark every legacy
+	// supervisor-state.json daemon as "unprotected" after a v0.5.x
+	// upgrade adds the field — a silent false-negative diagnostic.
+	// Codex deep-sec flagged this as the load-bearing trap on PR
+	// #242 sequencing review (2026-05-28). *bool with omitempty
+	// preserves the absent-field-means-unknown semantic.
+	JobProtection *bool `json:",omitempty"`
 }
 
 type DaemonRuntimeTracker struct {
@@ -137,6 +155,38 @@ func (t *DaemonRuntimeTracker) ClearCrashes(taskName string) {
 // (P2 clear-stale-orphan-PIDs-after-recovery).
 func clearOrphanPIDLocked(entry *DaemonRuntimeEntry) {
 	entry.OrphanPID = 0
+}
+
+// MarkJobProtection records the per-spawn Job Object allocation
+// state for the daemon's current spawn attempt. Called by the
+// spawn closure in supervise.go:
+//
+//   - protected=&true on the success branch immediately after
+//     process.NewKillOnCloseJob returns nil (orphan-protection
+//     invariant holds for this spawn).
+//   - protected=&false on the documented non-fatal fallback —
+//     NewKillOnCloseJob failed AND the supervisor proceeded with
+//     plain cmd.Start (orphan-protection lost for this spawn).
+//
+// Persisted to supervisor-state.json and surfaced through the IPC
+// status response + api.DaemonStatus + GUI Dashboard so operators
+// see the degraded state in steady-state monitoring rather than
+// only post-incident via the supervisor-events.log warn entry.
+// Closes consultant strategic concern #1 on PR #241.
+//
+// MarkSpawned does NOT clear JobProtection — the value is intrinsic
+// to the spawn attempt and must remain visible until the next spawn
+// rewrites it. MarkJobProtection is the only canonical writer.
+func (t *DaemonRuntimeTracker) MarkJobProtection(taskName string, protected *bool) {
+	if t == nil {
+		return
+	}
+	taskName = canonicalSupervisorTaskName(taskName)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	entry := t.entries[taskName]
+	entry.JobProtection = protected
+	t.entries[taskName] = entry
 }
 
 func (t *DaemonRuntimeTracker) MarkSpawned(taskName string, pid int, startedAt time.Time) {
@@ -333,6 +383,7 @@ func (t *DaemonRuntimeTracker) HydrateFromState(file *api.SupervisorStateFile) {
 			PIDGeneration: daemonState.PIDGeneration,
 			RestartCount:  len(daemonState.RestartHistory),
 			OrphanPID:     daemonState.OrphanPID,
+			JobProtection: daemonState.JobProtection,
 		}
 	}
 }
@@ -367,6 +418,7 @@ func (t *DaemonRuntimeTracker) PersistTo(path string) error {
 			CurrentPID:    entry.CurrentPID,
 			PIDGeneration: entry.PIDGeneration,
 			OrphanPID:     entry.OrphanPID,
+			JobProtection: entry.JobProtection,
 		}
 		if !entry.StartedAt.IsZero() {
 			daemonState.StartedAt = entry.StartedAt.UTC().Format(time.RFC3339Nano)

@@ -91,6 +91,15 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 		if runtimeState.OrphanPID != 0 {
 			row["orphan_pid"] = runtimeState.OrphanPID
 		}
+		// Surface per-spawn Job Object allocation state when it has
+		// been explicitly probed (not nil). Tri-state preserved across
+		// IPC: only &true/&false rows emit the field; nil rows omit
+		// it so legacy state files and pre-spawn daemons surface as
+		// "unknown" (no badge) rather than "unprotected". Closes
+		// consultant strategic concern #1 on PR #241.
+		if runtimeState.JobProtection != nil {
+			row["job_protection"] = *runtimeState.JobProtection
+		}
 		rows = append(rows, row)
 	}
 	return rows, nil

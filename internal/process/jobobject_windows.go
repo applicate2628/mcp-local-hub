@@ -303,6 +303,16 @@ func (j *Job) MemberPIDs() ([]uint32, error) {
 // descendants we never recorded; per-handle wait closes the
 // kernel race for the PIDs we did capture.
 //
+// Grandchildren born in the microsecond window between
+// processIDs() returning and TerminateJobObject firing are NOT in
+// our handles list (they did not exist at enumeration time), so
+// their full-exit guarantee rests on ActiveProcesses==0 alone —
+// per-handle wait does not cover them. The window is sub-millisecond
+// in practice (two adjacent syscalls) and ActiveProcesses is
+// kernel-authoritative for Job membership, so this is acceptable
+// degradation. Closes sonnet pr-review-toolkit P3 doc-completeness
+// nit on PR #241.
+//
 // PRECONDITION: callers MUST use this against a per-spawn Job (one
 // daemon per Job). Calling against a shared Job (the pre-ADR-#239
 // design where runSupervise allocated one Job for the whole
