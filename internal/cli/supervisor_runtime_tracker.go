@@ -125,6 +125,20 @@ func (t *DaemonRuntimeTracker) ClearCrashes(taskName string) {
 	}
 }
 
+// clearOrphanPIDLocked zeroes the orphan PID field. Called by all
+// state transitions that signal "we are past the orphan failure
+// case" - successful spawn, exit, ordinary spawn-failed, backoff,
+// terminate, quarantine. Without this clear, a failed orphan kill
+// + operator manual cleanup + supervisor restart + successful
+// spawn would leave the stale orphan PID in state.json, prompting
+// operators to taskkill an unrelated reused PID.
+//
+// Caller MUST hold t.mu. Closes bot finding on PR #238 044489a
+// (P2 clear-stale-orphan-PIDs-after-recovery).
+func clearOrphanPIDLocked(entry *DaemonRuntimeEntry) {
+	entry.OrphanPID = 0
+}
+
 func (t *DaemonRuntimeTracker) MarkSpawned(taskName string, pid int, startedAt time.Time) {
 	if t == nil {
 		return
@@ -141,6 +155,7 @@ func (t *DaemonRuntimeTracker) MarkSpawned(taskName string, pid int, startedAt t
 	entry.StartedAt = startedAt.UTC()
 	entry.PIDGeneration++
 	entry.LastError = ""
+	clearOrphanPIDLocked(&entry)
 	t.entries[taskName] = entry
 }
 
@@ -159,6 +174,7 @@ func (t *DaemonRuntimeTracker) MarkSpawnFailed(taskName string, err error) {
 	entry.CurrentPID = 0
 	entry.StartedAt = time.Time{}
 	entry.LastError = errorString(err)
+	clearOrphanPIDLocked(&entry)
 	t.entries[taskName] = entry
 }
 
@@ -216,6 +232,7 @@ func (t *DaemonRuntimeTracker) MarkExited(taskName string) {
 	entry.CurrentPID = 0
 	entry.StartedAt = time.Time{}
 	entry.LastError = ""
+	clearOrphanPIDLocked(&entry)
 	t.entries[taskName] = entry
 }
 
@@ -243,6 +260,7 @@ func (t *DaemonRuntimeTracker) MarkBackoff(taskName string) {
 	entry.State = daemonRuntimeStateBackoff
 	entry.CurrentPID = 0
 	entry.StartedAt = time.Time{}
+	clearOrphanPIDLocked(&entry)
 	t.entries[taskName] = entry
 }
 
@@ -267,6 +285,7 @@ func (t *DaemonRuntimeTracker) MarkQuarantined(taskName string) {
 	entry.State = daemonRuntimeStateQuarantine
 	entry.CurrentPID = 0
 	entry.StartedAt = time.Time{}
+	clearOrphanPIDLocked(&entry)
 	t.entries[taskName] = entry
 }
 

@@ -25,6 +25,15 @@ type DaemonStatus struct {
 	PID        int    `json:"pid,omitempty"`
 	RAMBytes   uint64 `json:"ram_bytes,omitempty"`
 	UptimeSec  int64  `json:"uptime_sec,omitempty"`
+	// OrphanPID is the Windows post-create orphan PID when the
+	// supervisor's best-effort kill failed during spawn. Operator-
+	// visible via `mcphub status --json` and the GUI Dashboard for
+	// manual cleanup (`taskkill /F /T /PID <orphan_pid>` on Windows).
+	// Zero (omitted in JSON) on the happy path. Sourced from the
+	// supervisor IPC status response; populated only via the v0.5.x
+	// supervisor IPC path. Closes bot finding on PR #238 044489a
+	// (P2 surface-orphan-PID-through-status-clients).
+	OrphanPID int `json:"orphan_pid,omitempty"`
 
 	// MCP-level health probe (populated only by Status with probeHealth=true).
 	// Running daemon / bound port does NOT imply the MCP protocol is alive —
