@@ -43,6 +43,36 @@ type MaintenanceTimer struct {
 	Server  string   `json:"server,omitempty"`
 	Command string   `json:"command"`
 	Args    []string `json:"args"`
+	// Enabled is the operator-visible off-switch for a maintenance
+	// timer. Tri-state via *bool to preserve backward compatibility
+	// with v0.5.x supervisor-intent.json files written before PR #243:
+	//
+	//   - nil    — field absent in JSON (legacy install); scheduler
+	//              treats as "enabled" (default-on). New installs
+	//              MAY emit &true explicitly for clarity but are
+	//              not required to.
+	//   - &true  — explicitly enabled; scheduler honors the timer.
+	//   - &false — explicitly disabled; scheduler skips the timer
+	//              entirely (no fire, no transient PID, no audit
+	//              event). The operator-supported off-switch
+	//              consultant strategic concern #1 on PR #243 named
+	//              as a pre-merge blocker — the alternative (manual
+	//              JSON surgery on supervisor-intent.json or
+	//              `maintenance_fired_at`) is too weak for unattended
+	//              weekly execution.
+	//
+	// Live reload: the IntentWatcher already re-reads
+	// supervisor-intent.json on mtime change and refreshes the
+	// controller's intent cache. Operator action is therefore: edit
+	// the timer's Enabled to false in supervisor-intent.json, save —
+	// next scheduler Tick (within 60s) honors the new state. No
+	// supervisor restart required.
+	//
+	// The disable lever does NOT clear `maintenance_fired_at[kind]` —
+	// re-enabling a disabled timer resumes from the last-fired
+	// baseline (no catch-up storm of the disabled-window's missed
+	// fires).
+	Enabled *bool `json:"enabled,omitempty"`
 }
 
 // ReadSupervisorIntent reads + parses with DisallowUnknownFields per

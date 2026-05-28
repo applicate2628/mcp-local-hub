@@ -843,6 +843,64 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		},
 	})
 
+	// Phase 9: production maintenance timer scheduler wiring.
+	// Constructed locally in runSupervise so v0.5.0 keeps the
+	// scheduler out of IPC deps until a future fire-now command needs
+	// direct handler access. The timer list is read through the
+	// controller's live intent cache on every Tick; IntentWatcher
+	// refreshes that cache whenever supervisor-intent.json changes.
+	maintenanceState := newMaintenanceStateAdapter(statePath, events)
+	maintenanceProcSpawner := newMaintenanceSpawner(events, &gracefulInProgress)
+	maintenanceScheduler := NewMaintenanceScheduler(maintenanceState)
+	maintenanceScheduler.SetSpawner(maintenanceProcSpawner)
+	maintenanceScheduler.SetFireHook(func(t api.MaintenanceTimer) {
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "info",
+			Source:   "maintenance",
+			Event:    "maintenance-fired",
+			TaskName: t.Name,
+			Body: map[string]any{
+				"kind":    t.Kind,
+				"command": t.Command,
+			},
+		})
+	})
+	go runMaintenanceScheduler(loopCtx.Done(), &gracefulInProgress, maintenanceScheduler, func() []api.MaintenanceTimer {
+		return maintenanceTimersFromController(ctrl)
+	}, 60*time.Second)
+
+	shutdownMaintenance := func(reason string) {
+		result := maintenanceProcSpawner.Shutdown(30 * time.Second)
+		// Synchronously reconcile on-disk transient_pids before this
+		// returns (PR #243 bot P2#2). The per-fire drain goroutine
+		// removes a transient PID only after Spawner.Wait returns, but
+		// the signal/IPC exit path returns right after this closure, so
+		// that goroutine may not run before the process exits — leaving
+		// a stale entry for the next cold start. Removing every entry
+		// whose PID is no longer alive (isPIDAlive reports PID<=0 claim
+		// slots as dead too) is authoritative and race-free: it covers
+		// processes Shutdown drained/killed AND any that drained in the
+		// window between Spawner.Wait's procs delete and the drain
+		// goroutine's RemoveTransientPID. Still-running children are
+		// retained for the cold-start reaper.
+		reconciled := maintenanceState.ReconcileTransientPIDs(isPIDAlive)
+		if result.Drained == 0 && len(result.Killed) == 0 && len(result.StillRunning) == 0 && len(reconciled) == 0 {
+			return
+		}
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "info",
+			Source:   "maintenance",
+			Event:    "maintenance-shutdown-complete",
+			Body: map[string]any{
+				"reason":           reason,
+				"drained":          result.Drained,
+				"killed":           result.Killed,
+				"still_running":    result.StillRunning,
+				"state_reconciled": reconciled,
+			},
+		})
+	}
+
 	// Signal handler. SIGINT and SIGTERM both trigger the graceful-exit
 	// flow. On Windows `os.Interrupt` IS the canonical Ctrl+C / SIGTERM
 	// surface (Windows has no real SIGINT/SIGTERM — Go maps both to
@@ -880,6 +938,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		// short window remains before the process actually exits.
 		gracefulInProgress.Enter()
 		loopCancel()
+		shutdownMaintenance("signal")
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "info",
 			Source:   "lifecycle",
@@ -909,6 +968,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		// short window remains before the process actually exits.
 		gracefulInProgress.Enter()
 		loopCancel()
+		shutdownMaintenance("test-exit")
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "info",
 			Source:   "lifecycle",
@@ -940,6 +1000,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		// short window remains before the process actually exits.
 		gracefulInProgress.Enter()
 		loopCancel()
+		shutdownMaintenance("ipc-exit-graceful")
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "info",
 			Source:   "lifecycle",
@@ -968,6 +1029,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		// short window remains before the process actually exits.
 		gracefulInProgress.Enter()
 		loopCancel()
+		shutdownMaintenance("context-cancel")
 		return ctx.Err()
 	}
 }

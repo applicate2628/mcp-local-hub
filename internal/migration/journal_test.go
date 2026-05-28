@@ -235,7 +235,8 @@ func TestMigrationCarriesWorkingDir(t *testing.T) {
 		"\\mcp-local-hub-memory-default": cleanV04xXML(t, "memory", "default", tx.CurrentUser, tx.State.InstallDir),
 	}
 
-	intent, err := deriveOrLoadIntent(journalDir, tasks, xmlByTask, false, tx.State.Now())
+	maintExe := filepath.Join(tx.State.InstallDir, "mcphub.exe")
+	intent, err := deriveOrLoadIntent(journalDir, tasks, xmlByTask, false, maintExe, tx.State.Now())
 	if err != nil {
 		t.Fatalf("deriveOrLoadIntent: %v", err)
 	}
@@ -244,6 +245,46 @@ func TestMigrationCarriesWorkingDir(t *testing.T) {
 	}
 	if got := intent.Daemons[0].Workspace; got != tx.State.InstallDir {
 		t.Fatalf("Workspace = %q, want migrated WorkingDirectory %q", got, tx.State.InstallDir)
+	}
+	// PR #243 bot round-2 P1: the default workspace-weekly-refresh timer
+	// must be seeded so the scheduler is not a no-op.
+	if len(intent.MaintenanceTimers) != 1 {
+		t.Fatalf("MaintenanceTimers len = %d, want 1 (default workspace timer)", len(intent.MaintenanceTimers))
+	}
+	mt := intent.MaintenanceTimers[0]
+	if mt.Kind != "workspace-weekly-refresh" || mt.Command != maintExe || len(mt.Args) != 1 || mt.Args[0] != "workspace-weekly-refresh" {
+		t.Fatalf("default timer mismatch: %+v (want kind=workspace-weekly-refresh command=%q args=[workspace-weekly-refresh])", mt, maintExe)
+	}
+}
+
+// TestDeriveIntent_SkipsWeeklyRefreshTaskFromDaemons covers PR #243 bot
+// round-2 P1 (the daemon-filter half): a v0.4.x
+// mcp-local-hub-workspace-weekly-refresh task present in the migrated
+// set must NOT become a SupervisorDaemon (it would respawn the one-shot
+// refresh in a loop and duplicate the seeded MaintenanceTimers entry).
+// The skip happens before any XML read, so the task needs no XML entry.
+func TestDeriveIntent_SkipsWeeklyRefreshTaskFromDaemons(t *testing.T) {
+	tx := setupV04xFixture(t)
+	journalDir := filepath.Join(tx.State.StateDir, "migration-journal-skip-weekly")
+	tasks := []scheduler.TaskStatus{
+		{Name: "\\mcp-local-hub-memory-default", Owner: tx.CurrentUser, State: "Ready"},
+		{Name: "\\" + api.WeeklyRefreshTaskName, Owner: tx.CurrentUser, State: "Ready"},
+	}
+	xmlByTask := map[string]string{
+		"\\mcp-local-hub-memory-default": cleanV04xXML(t, "memory", "default", tx.CurrentUser, tx.State.InstallDir),
+		// no XML for the weekly-refresh task — it is skipped before the XML read.
+	}
+
+	maintExe := filepath.Join(tx.State.InstallDir, "mcphub.exe")
+	intent, err := deriveOrLoadIntent(journalDir, tasks, xmlByTask, false, maintExe, tx.State.Now())
+	if err != nil {
+		t.Fatalf("deriveOrLoadIntent: %v", err)
+	}
+	if len(intent.Daemons) != 1 || intent.Daemons[0].TaskName != "\\mcp-local-hub-memory-default" {
+		t.Fatalf("weekly-refresh task must be skipped from Daemons; got %+v", intent.Daemons)
+	}
+	if len(intent.MaintenanceTimers) != 1 {
+		t.Fatalf("MaintenanceTimers len = %d, want exactly 1 (no duplicate from the migrated task)", len(intent.MaintenanceTimers))
 	}
 }
 

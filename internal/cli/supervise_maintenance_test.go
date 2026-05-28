@@ -36,8 +36,9 @@ func (s *testStateStore) GetMaintenanceFiredAt(kind string) (string, bool) {
 	return v, ok
 }
 
-func (s *testStateStore) SetMaintenanceFiredAt(kind, rfc3339nanoUTC string) {
+func (s *testStateStore) SetMaintenanceFiredAt(kind, rfc3339nanoUTC string) error {
 	s.fired[kind] = rfc3339nanoUTC
+	return nil
 }
 
 // Task 9.2 interface methods — no-ops here. The Task 9.1 tests never
@@ -46,8 +47,37 @@ func (s *testStateStore) SetMaintenanceFiredAt(kind, rfc3339nanoUTC string) {
 // StateStore interface at compile time. The Task 9.2 transient tests
 // use a separate state store (transientTestState) that exercises
 // these methods.
-func (s *testStateStore) AddTransientPID(_ api.TransientPID)  {}
-func (s *testStateStore) RemoveTransientPID(_ int)            {}
+func (s *testStateStore) AddTransientPID(_ api.TransientPID) error { return nil }
+func (s *testStateStore) RemoveTransientPID(_ int)                 {}
+func (s *testStateStore) RemoveTransientClaim(_, _ string)         {}
+
+// failingStateStore is a StateStore stub that returns a fixed error
+// from SetMaintenanceFiredAt. Used by TestMaintenance_StormPrevention
+// to verify the scheduler's in-memory cache blocks re-fire when the
+// underlying state write fails — closes consultant strategic concern
+// on PR #243 (repeated-fire-storm at 60s tick cadence).
+type failingStateStore struct {
+	fired   map[string]string
+	failErr error
+	calls   int
+}
+
+func newFailingStateStore() *failingStateStore {
+	return &failingStateStore{fired: map[string]string{}}
+}
+
+func (s *failingStateStore) GetMaintenanceFiredAt(kind string) (string, bool) {
+	v, ok := s.fired[kind]
+	return v, ok
+}
+
+func (s *failingStateStore) SetMaintenanceFiredAt(_, _ string) error {
+	s.calls++
+	return s.failErr
+}
+func (s *failingStateStore) AddTransientPID(_ api.TransientPID) error { return nil }
+func (s *failingStateStore) RemoveTransientPID(_ int)                 {}
+func (s *failingStateStore) RemoveTransientClaim(_, _ string)         {}
 
 // TestMaintenance_FiresOnSunday03Local — verbatim from plan §2324-2341.
 // Sunday 03:05 local with last_fired one week prior → fires once.
@@ -256,3 +286,211 @@ func TestMaintenance_PersistedTimestampSerializedAsRFC3339NanoUTC(t *testing.T) 
 		t.Fatalf("persisted timestamp must parse as RFC3339Nano; got %q err=%v", got, err)
 	}
 }
+
+// TestMaintenance_DisabledTimerSkipsFire covers the operator-supported
+// off-switch (consultant strategic blocker on PR #243). A timer with
+// Enabled=&false must NOT fire even when nextDue has elapsed; nil and
+// &true must fire normally (default-on for legacy intent files).
+func TestMaintenance_DisabledTimerSkipsFire(t *testing.T) {
+	loc := time.Local
+	now := time.Date(2026, 5, 17, 3, 5, 0, 0, loc)
+	tru, fal := true, false
+
+	cases := []struct {
+		name      string
+		enabled   *bool
+		wantFires int
+	}{
+		{name: "nil-default-on", enabled: nil, wantFires: 1},
+		{name: "true-explicit-on", enabled: &tru, wantFires: 1},
+		{name: "false-disabled", enabled: &fal, wantFires: 0},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			state := newTestState(t)
+			state.SetMaintenanceFiredAt("workspace-weekly-refresh", now.AddDate(0, 0, -7).Format(time.RFC3339Nano))
+			timer := api.MaintenanceTimer{Kind: "workspace-weekly-refresh", Enabled: tc.enabled}
+
+			sched := NewMaintenanceScheduler(state)
+			fires := 0
+			sched.SetFireHook(func(api.MaintenanceTimer) { fires++ })
+			sched.Tick(now, []api.MaintenanceTimer{timer})
+
+			if fires != tc.wantFires {
+				t.Errorf("Enabled=%v: got %d fires, want %d", tc.enabled, fires, tc.wantFires)
+			}
+		})
+	}
+}
+
+// TestMaintenance_StormPreventionOnStateWriteFailure covers the
+// consultant strategic blocker on PR #243 (repeated-fire-storm). When
+// the StateStore.SetMaintenanceFiredAt returns an error (transient
+// disk I/O failure, AV scanner, quota policy denial), the scheduler's
+// in-process cache must capture the fire-at timestamp and authoritatively
+// block re-fire on the very next 60s tick — otherwise a single persist
+// failure produces a fire every 60s for the duration of the disk
+// error (60 fires/hour at supervisor's tick cadence).
+func TestMaintenance_StormPreventionOnStateWriteFailure(t *testing.T) {
+	loc := time.Local
+	tickAt := time.Date(2026, 5, 17, 3, 5, 0, 0, loc) // Sunday 03:05 local
+	timer := api.MaintenanceTimer{Kind: "workspace-weekly-refresh"}
+
+	state := newFailingStateStore()
+	state.failErr = errSyntheticDiskFull
+	// Seed: last fire one week ago, so nextDue check passes on the
+	// first Tick (forcing a fire attempt that will hit the failing
+	// state write).
+	state.fired["workspace-weekly-refresh"] = tickAt.AddDate(0, 0, -7).Format(time.RFC3339Nano)
+
+	sched := NewMaintenanceScheduler(state)
+	fires := 0
+	sched.SetFireHook(func(api.MaintenanceTimer) { fires++ })
+
+	// Tick 1: nextDue passes, fire fires, SetMaintenanceFiredAt
+	// FAILS, scheduler caches in-process.
+	sched.Tick(tickAt, []api.MaintenanceTimer{timer})
+	if fires != 1 {
+		t.Fatalf("Tick 1: got %d fires, want 1 (first fire must proceed; cache engaged only after persist error)", fires)
+	}
+	if state.calls != 1 {
+		t.Fatalf("Tick 1: state.SetMaintenanceFiredAt called %d times, want 1", state.calls)
+	}
+
+	// Tick 2: state is still STALE (returns the original 1-week-ago
+	// value because the failing SetMaintenanceFiredAt did not
+	// persist). Without the cache, the scheduler would re-fire here.
+	// With the cache, the cache returns the recent fire-at and
+	// nextDue moves 7 days forward — no re-fire.
+	sched.Tick(tickAt.Add(60*time.Second), []api.MaintenanceTimer{timer})
+	if fires != 1 {
+		t.Errorf("Tick 2 (60s after failed persist): got %d fires, want 1 — STORM regression: in-process cache failed to block re-fire of failing-persist kind", fires)
+	}
+
+	// Tick 3: 10 minutes later, still nothing changed on disk.
+	// Cache must still hold.
+	sched.Tick(tickAt.Add(10*time.Minute), []api.MaintenanceTimer{timer})
+	if fires != 1 {
+		t.Errorf("Tick 3 (10min after failed persist): got %d fires, want 1 — STORM regression: cache eviction broke storm prevention", fires)
+	}
+}
+
+// flakyStateStore stores fired-at values on success but can be told to
+// fail the next SetMaintenanceFiredAt (toggling failNext). Unlike
+// failingStateStore it WRITES the value through on success, so a test
+// can drive the fail→recover→read-back sequence the cache-invariant
+// test (PR #243 bot P1#1) needs.
+type flakyStateStore struct {
+	fired    map[string]string
+	failNext bool
+}
+
+func newFlakyStateStore() *flakyStateStore { return &flakyStateStore{fired: map[string]string{}} }
+
+func (s *flakyStateStore) GetMaintenanceFiredAt(kind string) (string, bool) {
+	v, ok := s.fired[kind]
+	return v, ok
+}
+func (s *flakyStateStore) SetMaintenanceFiredAt(kind, v string) error {
+	if s.failNext {
+		return errSyntheticDiskFull
+	}
+	s.fired[kind] = v
+	return nil
+}
+func (s *flakyStateStore) AddTransientPID(_ api.TransientPID) error { return nil }
+func (s *flakyStateStore) RemoveTransientPID(_ int)                 {}
+func (s *flakyStateStore) RemoveTransientClaim(_, _ string)         {}
+
+// TestMaintenance_CacheClearedAfterPersistRecovers covers PR #243 bot
+// P1#1. The storm-prevention cache is populated on a persist FAILURE so
+// the next 60s tick does not re-fire while disk stays stale. But once a
+// later persist SUCCEEDS, the cache must be cleared — otherwise the
+// stale cached timestamp (frozen at the failed-fire moment) keeps
+// winning over disk, and once it ages past a week every tick looks due
+// → a fire storm that only a supervisor restart ends.
+func TestMaintenance_CacheClearedAfterPersistRecovers(t *testing.T) {
+	loc := time.Local
+	timer := api.MaintenanceTimer{Kind: "workspace-weekly-refresh"}
+	state := newFlakyStateStore()
+	sched := NewMaintenanceScheduler(state)
+	fires := 0
+	sched.SetFireHook(func(api.MaintenanceTimer) { fires++ })
+
+	week1 := time.Date(2026, 5, 17, 4, 0, 0, 0, loc) // Sunday 04:00
+	week2 := time.Date(2026, 5, 24, 4, 0, 0, 0, loc) // next Sunday 04:00
+
+	// Tick 1: due (synthetic baseline), persist FAILS → cache engaged.
+	state.failNext = true
+	sched.Tick(week1, []api.MaintenanceTimer{timer})
+	if fires != 1 {
+		t.Fatalf("Tick 1: want 1 fire, got %d", fires)
+	}
+
+	// Persist recovers for all subsequent ticks.
+	state.failNext = false
+
+	// Tick 1b (+60s): cache (week1) blocks re-fire — no storm yet.
+	sched.Tick(week1.Add(60*time.Second), []api.MaintenanceTimer{timer})
+	if fires != 1 {
+		t.Fatalf("Tick 1b: cache must block re-fire 60s after failed persist; got %d fires", fires)
+	}
+
+	// Tick 2: a week later the window is due again; this fire's persist
+	// SUCCEEDS and must clear the cache so disk becomes authoritative.
+	sched.Tick(week2, []api.MaintenanceTimer{timer})
+	if fires != 2 {
+		t.Fatalf("Tick 2: want 2 fires (new weekly window), got %d", fires)
+	}
+
+	// Tick 2b (+60s): with the cache cleared, the read falls through to
+	// disk (week2) → next_due is 7 days out → NO fire. If the cache had
+	// NOT been cleared it would still hold week1, making this tick (and
+	// every tick after) look due → storm (fires would climb to 3+).
+	sched.Tick(week2.Add(60*time.Second), []api.MaintenanceTimer{timer})
+	if fires != 2 {
+		t.Fatalf("Tick 2b: stale cache not cleared after successful persist — STORM regression: got %d fires, want 2", fires)
+	}
+}
+
+// TestMaintenance_NoRefireOnExactSunday0300 covers PR #243 bot round-2
+// P2. A fire that lands exactly on Sunday 03:00:00 local persists that
+// instant as last_fired_at; with an inclusive next-due boundary the
+// same instant looked due again on the next 60s tick → a double fire.
+// The strictly-after boundary for real fires must advance a full week.
+func TestMaintenance_NoRefireOnExactSunday0300(t *testing.T) {
+	loc := time.Local
+	exact := time.Date(2026, 5, 17, 3, 0, 0, 0, loc) // Sunday 03:00:00 exactly
+	timer := api.MaintenanceTimer{Kind: "workspace-weekly-refresh"}
+	state := newTestState(t) // compat path (no spawner): deterministic fire count
+	sched := NewMaintenanceScheduler(state)
+	fires := 0
+	sched.SetFireHook(func(api.MaintenanceTimer) { fires++ })
+
+	// First tick exactly at Sun 03:00:00 — fires (synthetic baseline due).
+	sched.Tick(exact, []api.MaintenanceTimer{timer})
+	if fires != 1 {
+		t.Fatalf("exact Sun 03:00:00 first tick: want 1 fire, got %d", fires)
+	}
+	// Next 60s tick — must NOT re-fire: last_fired == Sun 03:00:00, so
+	// the strictly-after boundary puts next_due a full week out.
+	sched.Tick(exact.Add(60*time.Second), []api.MaintenanceTimer{timer})
+	if fires != 1 {
+		t.Fatalf("exact-03:00 refire regression: tick +60s re-fired; want 1 got %d", fires)
+	}
+	// Several minutes later still no re-fire.
+	sched.Tick(exact.Add(5*time.Minute), []api.MaintenanceTimer{timer})
+	if fires != 1 {
+		t.Fatalf("exact-03:00 refire regression: tick +5m re-fired; want 1 got %d", fires)
+	}
+}
+
+// errSyntheticDiskFull is the synthetic error injected by the storm
+// prevention test to simulate a state-write failure.
+var errSyntheticDiskFull = newSyntheticErr("synthetic disk full (test-only)")
+
+type syntheticErr struct{ msg string }
+
+func newSyntheticErr(msg string) *syntheticErr { return &syntheticErr{msg: msg} }
+func (e *syntheticErr) Error() string          { return e.msg }

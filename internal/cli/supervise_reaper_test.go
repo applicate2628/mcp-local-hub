@@ -1,13 +1,17 @@
-// Package cli — Tests for Task 13.1 cold-start stale-child reaper.
+//go:build !windows
+
+// Package cli — Tests for Task 13.1 cold-start stale-child reaper
+// (POSIX behavior).
 //
-// Cross-platform: every test uses injected fakes via ReaperDeps so the
-// same suite runs on Windows (where ReapStaleTransients is a no-op
-// stub returning ReaperResult{} immediately) and on POSIX (where the
-// real implementation walks transient_pids, applies the 3-gate
-// ownership check, kills via process-group, settles, and clears
-// state). On Windows the production code path under test is the
-// no-op stub — the suite still verifies the API surface compiles
-// and that the function returns cleanly with no kills, no settle.
+// POSIX-only: this suite exercises the POSIX reaper's 3-gate ownership
+// check + process-group kill semantics via injected ReaperDeps fakes.
+// Before PR #243 the Windows ReapStaleTransients was a no-op stub and
+// this suite ran cross-platform, with expectWindowsNoOp() branches
+// asserting that no-op. PR #243 round-2 P2 gave Windows its own active
+// maintenance-transient reaper (start-time gate + tree-kill), covered
+// by supervise_reaper_windows_test.go; this POSIX-oriented suite is now
+// built only on non-Windows, so the expectWindowsNoOp() branches are
+// dormant here.
 //
 // Discipline (per Task 13.1 spec):
 //   - DO NOT call real /proc/<pid>/* files (inject via ProcessIdentity).
@@ -18,7 +22,6 @@ package cli
 import (
 	"context"
 	"errors"
-	"runtime"
 	"syscall"
 	"testing"
 	"time"
@@ -236,10 +239,12 @@ func (f *reaperFakes) addDeadPID(pid int) {
 	})
 }
 
-// expectWindowsNoOp returns true when the test runs on Windows, where
-// the reaper is a hard no-op (Job Object reaps automatically) and most
-// assertions about kill/settle/state-write must collapse to "zero".
-func expectWindowsNoOp() bool { return runtime.GOOS == "windows" }
+// expectWindowsNoOp is retained as a dormant guard from when this suite
+// ran cross-platform. The file is now built only on non-Windows (the
+// Windows reaper has its own active behavior + test — see the package
+// comment and supervise_reaper_windows_test.go), so this always returns
+// false here and the `if expectWindowsNoOp()` branches never fire.
+func expectWindowsNoOp() bool { return false }
 
 // ---------------------------------------------------------------------
 // TestReaper_EmptyStateNoOp
@@ -633,6 +638,7 @@ func TestReaper_StartedAtGateRejectsProbeFailure(t *testing.T) {
 //   - KillErrors[pid] = EPERM
 //   - TransientPIDs retained in state for retry
 //   - KillProcessGroup AND KillProcess both invoked
+//
 // ---------------------------------------------------------------------
 func TestReaper_ESRCHFromMissingPgroupPreservesState(t *testing.T) {
 	if expectWindowsNoOp() {

@@ -742,7 +742,11 @@ func RunForward(state State, opts ForwardOptions) error {
 	// Step 7: derive supervisor-intent.json. Resume optimization: if
 	// the journal already carries derived-supervisor-intent.json,
 	// reuse it (preserves operator edits between resume attempts).
-	intent, err := deriveOrLoadIntent(journalDir, tasks, xmlByTask, opts.PreMigrationStrictMode, state.nowOrDefault())
+	// state.InstallDir is validated non-empty + stat-able above; the
+	// running mcphub binary lives there and becomes the default
+	// maintenance timer's command.
+	maintExe := filepath.Join(state.InstallDir, "mcphub.exe")
+	intent, err := deriveOrLoadIntent(journalDir, tasks, xmlByTask, opts.PreMigrationStrictMode, maintExe, state.nowOrDefault())
 	if err != nil {
 		return fmt.Errorf("step 7 derive intent: %w", err)
 	}
@@ -1056,7 +1060,7 @@ func writeClassificationReport(journalDir string, report classificationReportFil
 // deriveOrLoadIntent derives supervisor-intent.json from the observed
 // tasks + classifications. If derived-supervisor-intent.json already
 // exists in the journal (resume case), it is loaded verbatim.
-func deriveOrLoadIntent(journalDir string, tasks []scheduler.TaskStatus, xmlByTask map[string]string, strictMode bool, now time.Time) (*api.SupervisorIntentFile, error) {
+func deriveOrLoadIntent(journalDir string, tasks []scheduler.TaskStatus, xmlByTask map[string]string, strictMode bool, exePath string, now time.Time) (*api.SupervisorIntentFile, error) {
 	path := filepath.Join(journalDir, "derived-supervisor-intent.json")
 	if existing, err := api.ReadSupervisorIntent(path); err == nil {
 		return existing, nil
@@ -1071,8 +1075,26 @@ func deriveOrLoadIntent(journalDir string, tasks []scheduler.TaskStatus, xmlByTa
 		UpdatedAt:  now.UTC().Format(time.RFC3339Nano),
 		StrictMode: strictMode,
 		Daemons:    nil,
+		// PR #243 bot round-2 P1: populate the default maintenance
+		// timer so the v0.5.0 supervisor scheduler is not a no-op on
+		// fresh installs/upgrades. Spec §maintenance_timers ships the
+		// single workspace-weekly-refresh entry; server-weekly-refresh
+		// is a recognized forward-compat kind with no default command
+		// yet, so it is intentionally NOT seeded.
+		MaintenanceTimers: defaultMaintenanceTimers(exePath),
 	}
 	for _, t := range tasks {
+		// The v0.4.x workspace-weekly-refresh task is a maintenance
+		// timer, NOT a long-lived daemon. Without this skip it would be
+		// mis-migrated as a SupervisorDaemon with empty Server/Daemon
+		// (parseDaemonArgv finds no --server/--daemon), and the
+		// supervisor would respawn the one-shot refresh command in a
+		// loop AND duplicate the MaintenanceTimers entry above. Rollback
+		// re-registers it verbatim from the legacy-tasks XML snapshot,
+		// so skipping it here does not lose it.
+		if strings.TrimPrefix(t.Name, "\\") == api.WeeklyRefreshTaskName {
+			continue
+		}
 		raw := xmlByTask[t.Name]
 		command, args := extractExecFromXML(raw)
 		workingDir := strings.TrimSpace(extractTag(raw, "WorkingDirectory"))
@@ -1087,6 +1109,28 @@ func deriveOrLoadIntent(journalDir string, tasks []scheduler.TaskStatus, xmlByTa
 		})
 	}
 	return intent, nil
+}
+
+// defaultMaintenanceTimers returns the fixed default maintenance timer
+// set the supervisor scheduler evaluates. Per spec §maintenance_timers
+// this is the single workspace-weekly-refresh entry (Sunday 03:00 local
+// cadence is enforced by the scheduler, not the intent). exePath is the
+// canonical mcphub binary (opts.ExecutablePath); when empty it falls
+// back to the bare "mcphub.exe" the spec example shows, resolved via
+// PATH at spawn time.
+func defaultMaintenanceTimers(exePath string) []api.MaintenanceTimer {
+	command := strings.TrimSpace(exePath)
+	if command == "" {
+		command = "mcphub.exe"
+	}
+	return []api.MaintenanceTimer{
+		{
+			Name:    "\\" + api.WeeklyRefreshTaskName,
+			Kind:    "workspace-weekly-refresh",
+			Command: command,
+			Args:    []string{"workspace-weekly-refresh"},
+		},
+	}
 }
 
 // writeDerivedIntent persists the derived intent in the journal AND in
