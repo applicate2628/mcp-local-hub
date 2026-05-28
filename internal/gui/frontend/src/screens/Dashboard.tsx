@@ -514,6 +514,14 @@ function Card(props: {
           </span>
         </div>
       ) : null}
+      {d.job_protection === false ? (
+        <div class="card-kv" data-testid="job-protection-row">
+          <span>Job Protection</span>
+          <span title="Per-spawn Windows Job Object allocation FAILED for the current spawn. Supervisor proceeded via the non-fatal cmd.Start fallback documented in ADR #239 — daemon runs without KILL_ON_JOB_CLOSE orphan-protection. On supervisor crash, this daemon's descendant tree (e.g. uvx/python or npx/node wrappers) may survive as orphans. Underlying causes are typically AppLocker / nested-job constraints / handle exhaustion on restrictive corp-managed hosts. Reference: PR #242 (consultant strategic concern #1 on PR #241).">
+            UNPROTECTED ⚠
+          </span>
+        </div>
+      ) : null}
       <div class="card-kv">
         <span>State</span>
         <span class="state">

@@ -2,10 +2,10 @@
 //
 // StatusPoller samples statusProvider.Status() on a fixed interval and
 // publishes a "daemon-state" event onto the Broadcaster on every
-// observed change in (Server, Daemon, State, PID, Port, OrphanPID). Fetch errors
-// are surfaced as "poller-error" events and the loop continues on the
-// next tick. Daemons that disappear between samples emit a terminal
-// daemon-state event with state="Gone".
+// observed change in (Server, Daemon, State, PID, Port, OrphanPID,
+// JobProtection). Fetch errors are surfaced as "poller-error" events
+// and the loop continues on the next tick. Daemons that disappear
+// between samples emit a terminal daemon-state event with state="Gone".
 //
 // Spec: §3.6 (real-time event bus).
 // Task 12 lays the pump; Task 13 wires it into `mcphub gui` RunE.
@@ -20,7 +20,8 @@ import (
 
 // StatusPoller samples api.Status() on a fixed interval and publishes
 // a daemon-state event on every observed change in (Server, Daemon,
-// State, PID, Port, OrphanPID). The event body matches spec §3.6.
+// State, PID, Port, OrphanPID, JobProtection). The event body matches
+// spec §3.6.
 //
 // The cache is keyed by the composite "<server>/<daemon>" tuple because
 // api.Status() returns one row per daemon: a multi-daemon server like
@@ -59,6 +60,23 @@ func NewStatusPoller(status statusProvider, events *Broadcaster, interval time.D
 		interval: interval,
 		last:     map[string]api.DaemonStatus{},
 	}
+}
+
+// boolPtrEqual returns true when two *bool values are value-equal.
+// Used by the poller's change-detection key for the tri-state
+// JobProtection field. Pointer-equality is wrong because two
+// successive api.Status() calls can return distinct *bool pointers
+// even when they encode the same value; value-equality is the
+// desired semantic (nil == nil, &true == &true, &false == &false,
+// &true != &false, nil != &true, nil != &false).
+func boolPtrEqual(a, b *bool) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
 }
 
 // keyFor produces the composite cache / delta key for one DaemonStatus
@@ -112,21 +130,42 @@ func (p *StatusPoller) poll(ctx context.Context) {
 		k := keyFor(r)
 		seen[k] = struct{}{}
 		prev, ok := p.last[k]
-		if ok && prev.State == r.State && prev.PID == r.PID && prev.Port == r.Port && prev.OrphanPID == r.OrphanPID {
+		if ok &&
+			prev.State == r.State &&
+			prev.PID == r.PID &&
+			prev.Port == r.Port &&
+			prev.OrphanPID == r.OrphanPID &&
+			boolPtrEqual(prev.JobProtection, r.JobProtection) {
 			continue
 		}
 		p.last[k] = r
+		body := map[string]any{
+			"server":         r.Server,
+			"daemon":         r.Daemon,
+			"state":          r.State,
+			"pid":            r.PID,
+			"port":           r.Port,
+			"is_maintenance": r.IsMaintenance,
+			"orphan_pid":     r.OrphanPID,
+		}
+		// job_protection emits as bool when explicitly probed. Initial
+		// nil rows omit the field; known->nil transitions emit JSON
+		// null so the frontend delta merge clears a stale false badge.
+		// Frontend renders the warning badge only on explicit false;
+		// nil/true = no badge. This matches the tri-state contract
+		// documented at api.DaemonStatus.JobProtection. Closes
+		// consultant strategic concern #1 on PR #241: the SSE delta is
+		// the steady-state observability path that converts the
+		// fallback's non-fatal log entry into an operator-visible
+		// warning.
+		if r.JobProtection != nil {
+			body["job_protection"] = *r.JobProtection
+		} else if ok && prev.JobProtection != nil {
+			body["job_protection"] = nil
+		}
 		p.events.Publish(Event{
 			Type: "daemon-state",
-			Body: map[string]any{
-				"server":         r.Server,
-				"daemon":         r.Daemon,
-				"state":          r.State,
-				"pid":            r.PID,
-				"port":           r.Port,
-				"is_maintenance": r.IsMaintenance,
-				"orphan_pid":     r.OrphanPID,
-			},
+			Body: body,
 		})
 	}
 	// Removed rows: key in last but not in this fetch.

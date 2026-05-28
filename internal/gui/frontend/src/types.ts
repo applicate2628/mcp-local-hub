@@ -15,6 +15,22 @@ export interface DaemonStatus {
   // Windows. Closes bot finding on PR #238 f49ac70 (P2 surface-
   // orphan-PID-in-dashboard).
   orphan_pid?: number;
+  // Per-spawn Windows Job Object allocation state for the daemon's
+  // current spawn attempt. Tri-state with backward-compatible default:
+  //   undefined → unknown / legacy state file / not yet probed
+  //                (render: no badge — default-trust)
+  //   true      → per-spawn Job allocated; orphan-cleanup invariant
+  //                holds (render: no badge)
+  //   false     → NewKillOnCloseJob failed AND supervisor fell through
+  //                to plain cmd.Start; daemon runs without Job
+  //                Object orphan-protection (render: warning badge)
+  //   null      → SSE delta clear back to unknown/no-current-spawn
+  //                (render: no badge)
+  // Closes consultant strategic concern #1 on PR #241: the fallback
+  // is non-fatal, but without operator visibility through this field
+  // a daemon running without orphan-protection can accumulate
+  // orphans on supervisor crash with no steady-state warning.
+  job_protection?: boolean | null;
   state: string;
   task_name?: string;
   is_maintenance?: boolean;

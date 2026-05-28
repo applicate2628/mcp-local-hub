@@ -1,6 +1,31 @@
 # ADR: Supervisor event-ownership model
 
-**Status:** Proposed (open for review)
+**Status:** Accepted — 2026-05-28 (Option B per-task Job Object
+landed via PR #241 squash-merge as `9828bf7`).
+
+**Implementation deviation from §"Implementation outline" Step 2:**
+the outline proposed the tracker would hold the Job handle as
+state and `Close()` would happen in `MarkExited`. The merged
+implementation keeps Job ownership **local to the spawn closure**
+via the `handedOff bool` ownership-transfer pattern — parent owns
+`daemonJob.Close()` on every non-success exit path; the wait
+goroutine takes ownership only after `handedOff = true` is written
+strictly before the goroutine launches. Both reviewers and the
+consultant in the 4-lane review on PR #241 confirmed this deviation
+is materially equivalent to the outlined design and cleaner because
+`TerminateAll` runs synchronously before parent return — so the
+parent defer's `Close()` fires only after kill completes, with no
+tracker plumbing required. Codex deep review on PR #241 explicitly
+noted: "Implementation outline is informative" — this deviation
+falls under that clause.
+
+**Status-surface follow-up (PR #242):** `JobProtection *bool` tri-
+state field added to `SupervisorDaemonState` + `DaemonStatus` +
+GUI Dashboard so the non-fatal fallback documented in Option B
+Step 1 (warn + `daemonJob = nil` + `cmd.Start` continuation) is
+visible in steady-state operator monitoring rather than only post-
+incident in `supervisor-events.log`. Closes consultant strategic
+concern #1 from the PR #241 4-lane review.
 
 **Date:** 2026-05-28
 

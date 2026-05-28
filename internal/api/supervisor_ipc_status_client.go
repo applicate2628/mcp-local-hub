@@ -134,6 +134,15 @@ type supervisorIPCStatusDaemon struct {
 	// emitted by supervisorStatusDaemons before it reached the
 	// DaemonStatus consumer.
 	OrphanPID int `json:"orphan_pid,omitempty"`
+	// JobProtection mirrors SupervisorDaemonState.JobProtection across
+	// the IPC boundary. Tri-state via *bool: nil = unknown/legacy/not-
+	// yet-probed (no badge), &true = per-spawn Job allocated (orphan-
+	// protection invariant holds), &false = NewKillOnCloseJob failed
+	// and the supervisor fell through to plain cmd.Start (orphan-
+	// protection lost). Operator-visible via `mcphub status --json`
+	// and the GUI Dashboard. Closes consultant strategic concern #1
+	// on PR #241 (silent-degradation gap when fallback fires).
+	JobProtection *bool `json:"job_protection,omitempty"`
 }
 
 func validateSupervisorIPCHello(conn net.Conn, expected SupervisorLockOwner) error {
@@ -220,6 +229,7 @@ func decodeSupervisorIPCStatusResult(raw json.RawMessage) ([]DaemonStatus, error
 			Port:          d.Port,
 			PID:           d.CurrentPID,
 			OrphanPID:     d.OrphanPID,
+			JobProtection: d.JobProtection,
 			Workspace:     d.Workspace,
 			IsMaintenance: d.IsMaintenance,
 		})

@@ -40,6 +40,44 @@ type SupervisorDaemonState struct {
 	// field meant `mcphub status` and supervisor-state.json could not
 	// surface it after supervisor restart.
 	OrphanPID int `json:"orphan_pid,omitempty"`
+
+	// JobProtection records whether the per-spawn Windows Job Object
+	// (ADR #239) was successfully allocated for this daemon's CURRENT
+	// spawn attempt. Tri-state via *bool with backward-compatible
+	// default:
+	//
+	//   - nil       — unknown / legacy state file / not yet probed.
+	//                 Operator UI treats this as "no warning" (default-
+	//                 trust). Required to avoid retroactively marking
+	//                 every legacy daemon as unprotected when older
+	//                 supervisor-state.json files (without the field)
+	//                 are read after upgrade. Codex deep-sec flagged
+	//                 this as the load-bearing trap on PR #242
+	//                 sequencing review (2026-05-28).
+	//
+	//   - &true     — supervisor successfully called
+	//                 process.NewKillOnCloseJob and assigned the spawn
+	//                 to the job. Orphan-cleanup invariant holds: the
+	//                 daemon's descendant tree dies on supervisor exit
+	//                 via KILL_ON_JOB_CLOSE; the supervisor's orphan
+	//                 branch can task-scope kill via
+	//                 daemonJob.TerminateAll.
+	//
+	//   - &false    — NewKillOnCloseJob failed (rare; typically AppLocker
+	//                 / nested-job constraints / handle exhaustion on
+	//                 restrictive corp-managed hosts) AND the supervisor
+	//                 fell through to the documented non-fatal fallback:
+	//                 plain cmd.Start without StartWithJob. The daemon
+	//                 runs without Job Object orphan-protection — its
+	//                 descendant tree may survive supervisor crash, and
+	//                 the orphan-cleanup branch downgrades to per-PID
+	//                 BestEffortKillByPID. Operator visibility is the
+	//                 PR #242 raison d'être — consultant's #1 strategic
+	//                 concern on PR #241 was that this branch leaves no
+	//                 status-surface signal between the warn-event log
+	//                 entry (post-incident only) and the actual daemon
+	//                 state.
+	JobProtection *bool `json:"job_protection,omitempty"`
 }
 
 // RestartEvent is one entry in the 30-min sliding window failure-count

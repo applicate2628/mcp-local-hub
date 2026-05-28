@@ -69,6 +69,46 @@ func TestDaemonRuntimeTracker_LifecycleTransitions(t *testing.T) {
 	}
 }
 
+func TestDaemonRuntimeTracker_ClearsJobProtectionWhenNoCurrentSpawn(t *testing.T) {
+	tracker := NewDaemonRuntimeTracker()
+	taskName := `mcp-local-hub-memory-default`
+	unprotected := false
+	startedAt := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
+
+	tracker.MarkJobProtection(taskName, &unprotected)
+	tracker.MarkSpawned(taskName, 4321, startedAt)
+	entry, ok := tracker.Get(taskName)
+	if !ok {
+		t.Fatal("spawned entry missing")
+	}
+	if entry.JobProtection == nil || *entry.JobProtection != false {
+		t.Fatalf("running entry JobProtection = %v, want explicit false", entry.JobProtection)
+	}
+
+	for _, tt := range []struct {
+		name string
+		mark func()
+	}{
+		{"spawn-failed", func() { tracker.MarkSpawnFailed(taskName, errors.New("spawn failed")) }},
+		{"spawn-failed-preserve-pid", func() { tracker.MarkSpawnFailedPreservePID(taskName, errors.New("orphan"), 9876) }},
+		{"exited", func() { tracker.MarkExited(taskName) }},
+		{"backoff", func() { tracker.MarkBackoff(taskName) }},
+		{"quarantined", func() { tracker.MarkQuarantined(taskName) }},
+		{"terminated", func() { tracker.MarkTerminated(taskName) }},
+	} {
+		tracker.MarkJobProtection(taskName, &unprotected)
+		tracker.MarkSpawned(taskName, 4321, startedAt)
+		tt.mark()
+		entry, ok := tracker.Get(taskName)
+		if !ok {
+			t.Fatalf("%s: entry missing", tt.name)
+		}
+		if entry.JobProtection != nil {
+			t.Fatalf("%s: JobProtection = %v, want nil when no current spawn is running", tt.name, *entry.JobProtection)
+		}
+	}
+}
+
 func TestDaemonRuntimeTracker_PersistAndHydrate(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	statePath := filepath.Join(stateDir, "supervisor-state.json")

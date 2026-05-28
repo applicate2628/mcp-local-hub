@@ -35,6 +35,30 @@ type DaemonStatus struct {
 	// (P2 surface-orphan-PID-through-status-clients).
 	OrphanPID int `json:"orphan_pid,omitempty"`
 
+	// JobProtection records the per-spawn Windows Job Object
+	// allocation state for the daemon's current spawn attempt.
+	// Tri-state via *bool with backward-compatible default:
+	//
+	//   - nil    — unknown / legacy state file / not yet probed.
+	//              GUI treats as "no warning" (default-trust).
+	//   - &true  — per-spawn Job allocated successfully (orphan-
+	//              cleanup invariant holds).
+	//   - &false — NewKillOnCloseJob failed AND supervisor fell
+	//              through to plain cmd.Start without StartWithJob.
+	//              Daemon runs without Job Object orphan-protection;
+	//              the orphan-cleanup branch downgrades to per-PID
+	//              BestEffortKillByPID. Operator-visible warning
+	//              badge in the Dashboard.
+	//
+	// Sourced from the v0.5.x supervisor IPC path. Closes consultant
+	// strategic concern #1 on PR #241 (silent-degradation gap when
+	// fallback fires). Codex deep-sec flagged the *bool over plain
+	// bool design as load-bearing for backward compatibility — a
+	// plain bool would retroactively mark every legacy daemon as
+	// unprotected when an older supervisor-state.json file (without
+	// the field) is read after upgrade.
+	JobProtection *bool `json:"job_protection,omitempty"`
+
 	// MCP-level health probe (populated only by Status with probeHealth=true).
 	// Running daemon / bound port does NOT imply the MCP protocol is alive —
 	// the subprocess may be in a broken state, or (in gdb/lldb's case) the

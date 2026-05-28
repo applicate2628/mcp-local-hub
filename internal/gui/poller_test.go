@@ -94,6 +94,133 @@ func TestPoller_EmitsDeltaOnOrphanPIDChange(t *testing.T) {
 	}
 }
 
+// TestPoller_EmitsDeltaOnJobProtectionChange regression-guards the
+// SSE delta path for the v0.5.x per-spawn Job Object protection
+// state surface (PR #242 closes consultant strategic concern #1 on
+// PR #241). The tri-state contract: nil = unknown (no badge),
+// &true = explicit protected (no badge), &false = explicit fallback
+// fired (warning badge in GUI Dashboard).
+//
+// Without JobProtection in the change-detection key, a transition
+// from nil → &true (successful first-time spawn) would not emit a
+// delta, and the Dashboard would never receive the initial
+// confirmation that the daemon is protected. Without it being in
+// the event body, the delta would fire but the frontend has no way
+// to update its render state.
+//
+// The boolPtrEqual helper exists precisely so this test does not
+// race on pointer identity: even though two scripted frames may
+// construct distinct *bool pointers for the same value, the
+// poller must treat them as equal.
+func TestPoller_EmitsDeltaOnJobProtectionChange(t *testing.T) {
+	tru, fal := true, false
+	frames := [][]api.DaemonStatus{
+		// Frame 1: legacy/unknown — JobProtection nil.
+		{{Server: "memory", State: "Running", Port: 9123, PID: 42, JobProtection: nil}},
+		// Frame 2: same spawn, JobProtection explicitly set to true
+		// (e.g. the supervisor's MarkJobProtection wrote the value
+		// after NewKillOnCloseJob succeeded).
+		{{Server: "memory", State: "Running", Port: 9123, PID: 42, JobProtection: &tru}},
+		// Frame 3: respawn under fallback — JobProtection flips to
+		// false (Job-create failed; warning badge should fire).
+		{{Server: "memory", State: "Running", Port: 9123, PID: 99, JobProtection: &fal}},
+	}
+	status := &scriptedStatus{frames: frames}
+	b := NewBroadcaster()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := b.Subscribe(ctx)
+
+	p := NewStatusPoller(status, b, 50*time.Millisecond)
+	go p.Run(ctx)
+
+	// Expected: 3 distinct daemon-state deltas.
+	//   delta[0] (insert, frame 1): no job_protection field in body
+	//            (nil → omitted, matches frontend "unknown" rendering)
+	//   delta[1] (transition, frame 2): job_protection=true in body
+	//            (Dashboard clears any prior warning badge)
+	//   delta[2] (transition, frame 3): job_protection=false in body
+	//            (Dashboard fires the warning badge)
+	type jpDelta struct {
+		present bool
+		value   bool
+	}
+	var got []jpDelta
+	deadline := time.After(2 * time.Second)
+	for len(got) < 3 {
+		select {
+		case ev := <-ch:
+			if ev.Type != "daemon-state" {
+				continue
+			}
+			raw, present := ev.Body["job_protection"]
+			d := jpDelta{present: present}
+			if present {
+				val, ok := raw.(bool)
+				if !ok {
+					t.Fatalf("delta job_protection field is not bool: %T %v", raw, raw)
+				}
+				d.value = val
+			}
+			got = append(got, d)
+		case <-deadline:
+			t.Fatalf("did not observe 3 job_protection deltas; got=%v (regression: change-detection key omits JobProtection OR boolPtrEqual broken OR body omits the field)", got)
+		}
+	}
+
+	if got[0].present {
+		t.Errorf("delta[0] (insert with nil JobProtection): job_protection field present in body; want omitted (frontend treats unknown as no badge)")
+	}
+	if !got[1].present || got[1].value != true {
+		t.Errorf("delta[1] (nil→&true transition): job_protection = %+v, want present=true value=true (Dashboard should clear stale warning badge)", got[1])
+	}
+	if !got[2].present || got[2].value != false {
+		t.Errorf("delta[2] (&true→&false transition): job_protection = %+v, want present=true value=false (Dashboard should fire warning badge — regression: fallback-fired daemon shows no badge)", got[2])
+	}
+}
+
+func TestPoller_EmitsJobProtectionClearOnFalseToUnknown(t *testing.T) {
+	fal := false
+	frames := [][]api.DaemonStatus{
+		{{Server: "memory", State: "Running", Port: 9123, PID: 42, JobProtection: &fal}},
+		{{Server: "memory", State: "Running", Port: 9123, PID: 42, JobProtection: nil}},
+	}
+	status := &scriptedStatus{frames: frames}
+	b := NewBroadcaster()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := b.Subscribe(ctx)
+
+	p := NewStatusPoller(status, b, 50*time.Millisecond)
+	go p.Run(ctx)
+
+	type jpDelta struct {
+		present bool
+		raw     any
+	}
+	var got []jpDelta
+	deadline := time.After(2 * time.Second)
+	for len(got) < 2 {
+		select {
+		case ev := <-ch:
+			if ev.Type != "daemon-state" {
+				continue
+			}
+			raw, present := ev.Body["job_protection"]
+			got = append(got, jpDelta{present: present, raw: raw})
+		case <-deadline:
+			t.Fatalf("did not observe 2 job_protection deltas; got=%v", got)
+		}
+	}
+
+	if !got[0].present || got[0].raw != false {
+		t.Errorf("delta[0] job_protection = %+v, want present=true value=false", got[0])
+	}
+	if !got[1].present || got[1].raw != nil {
+		t.Errorf("delta[1] job_protection = %+v, want present=true value=nil to clear stale frontend false", got[1])
+	}
+}
+
 func TestPoller_EmitsDeltaOnStateChange(t *testing.T) {
 	frames := [][]api.DaemonStatus{
 		{{Server: "memory", State: "Running", Port: 9123}},
