@@ -149,25 +149,29 @@ func (j *Job) HasMember(pid int) bool {
 }
 
 // TerminateAll kills every process currently in the Job Object via
-// the Windows TerminateJobObject syscall. This is the proper
-// orphan-cleanup primitive for the StartWithJob post-create case
-// (start_with_job_windows.go:181-186): when Go-side handle
-// acquisition fails AFTER CreateProcess succeeded, the orphan IS in
-// the Job Object (the kernel attached it via PROC_THREAD_ATTRIBUTE_
-// JOB_LIST during CreateProcess), so a Job-level kill cleans up the
-// orphan AND any descendants the wrapper might have spawned. It also
-// eliminates the PID-recycling race that a PID-based kill would have
-// (no PID required - kill is keyed by the Job handle the supervisor
-// owns).
+// the Windows TerminateJobObject syscall. The current implementation
+// is "fire-and-return-immediately" - the kernel-mode termination is
+// asynchronous, and the timeoutMs parameter is RESERVED but currently
+// ignored (no polling for actual exit).
 //
-// Returns nil on success or if every process already exited; returns
-// a wrapped error if TerminateJobObject failed or the kernel did not
-// signal all members exited within timeoutMs.
+// CONTRACT (current): caller MUST treat this as best-effort. The Job
+// Object handle is shared across all daemons supervised by the
+// runSupervise process (created once at startup), so this method
+// is NOT currently called from the supervisor's orphan-cleanup path
+// (calling it would terminate every healthy daemon along with the
+// orphan - bot P1 on PR #238 331b0df flagged that).
 //
-// Closes bot findings on PR #237 16d99d7 (P2 wrapper-descendants +
-// P2 PID-recycling race) by replacing the PID-based
-// BestEffortKillByPID call on the orphan path with this Job-level
-// alternative.
+// FUTURE: when the supervisor adopts per-daemon Job Objects (per the
+// pending ADR `2026-05-28-supervisor-event-ownership-model.md`),
+// each spawn will own its own Job and this method will be safe to
+// call for orphan cleanup. At that point the timeoutMs polling
+// implementation (IsProcessInJob loop with a deadline) will land
+// alongside the per-daemon refactor.
+//
+// Closes bot finding on PR #238 f49ac70 (P3 honor-the-TerminateAll-
+// timeout-contract): the doc previously implied synchronous wait
+// semantics that the impl did not deliver. Doc now matches impl
+// (best-effort, timeoutMs ignored) until per-daemon Job lands.
 func (j *Job) TerminateAll(timeoutMs uint32) error {
 	if j == nil || j.handle == 0 {
 		return nil
@@ -181,22 +185,12 @@ func (j *Job) TerminateAll(timeoutMs uint32) error {
 		}
 		return fmt.Errorf("TerminateJobObject: %w", err)
 	}
-	// TerminateJobObject is documented as asynchronous - it returns
-	// immediately but actual process exit happens in kernel mode.
-	// Poll via IsProcessInJob on a synthetic probe (we don't have a
-	// specific PID to wait on; use the Job's own member count via
-	// IsProcessInJob loop). For the supervisor's orphan path the
-	// natural fallback is "trust the kernel + check that ports are
-	// rebindable later"; the caller (supervise.go) verifies the
-	// downstream port-rebind via the standard backoff respawn flow.
-	//
-	// We do NOT WaitForSingleObject on the Job handle itself - that
-	// would only signal when the LAST handle to the job is closed
-	// (which won't happen until supervisor exit). For now, sleep
-	// briefly to let the kernel propagate the termination; the
-	// caller's backoff timer (1s minimum) absorbs the remaining
-	// race window.
-	_ = timeoutMs // reserved for future polling implementation
+	// TerminateJobObject is asynchronous in kernel mode; actual
+	// process exit happens after this returns. timeoutMs is reserved
+	// for the future per-daemon Job Object architecture (see method
+	// doc); current impl is fire-and-return-immediately and matches
+	// the documented best-effort contract.
+	_ = timeoutMs
 	return nil
 }
 
