@@ -47,7 +47,7 @@ func globalTwoDaemonManifest() *config.ServerManifest {
 		Name:          "demo",
 		Kind:          config.KindGlobal,
 		Transport:     config.TransportNativeHTTP,
-		Command:       "uvx",
+		Command:       "go", // on PATH whenever `go test` runs; InstallParsedManifest now runs Preflight (LookPath m.Command)
 		Daemons:       []config.DaemonSpec{{Name: "alpha", Port: 9211}, {Name: "beta", Port: 9212}},
 		WeeklyRefresh: true,
 	}
@@ -154,7 +154,7 @@ func serenaTemplateManifest() *config.ServerManifest {
 		Name:      "serena",
 		Kind:      config.KindWorkspaceScoped,
 		Transport: config.TransportNativeHTTP,
-		Command:   "uvx",
+		Command:   "go", // on PATH whenever `go test` runs; InstallParsedManifest now runs Preflight (LookPath m.Command)
 		BaseArgs:  []string{"--from", "git+https://example/serena", "serena"},
 		DaemonTemplate: &config.DaemonTemplate{
 			Context:           "ide-assistant",
@@ -254,5 +254,59 @@ func TestInstallParsedManifest_WorkspaceScoped_NotRefused(t *testing.T) {
 	}
 	if filepath.Base(intentPath) != "supervisor-intent.json" {
 		t.Errorf("intent path basename = %q, want supervisor-intent.json", filepath.Base(intentPath))
+	}
+}
+
+// TestInstallParsedManifest_DryRun_NoWriteNoPath is the FIX-1 regression
+// guard: a dry run must (a) leave the state dir pristine — no committed
+// supervisor-intent.json AND no leftover ".preflight" temp from a
+// pre-flight probe that should be skipped on dry-run — and (b) return an
+// empty intent path so the caller never dereferences a path for a file
+// that was never written. Uses a global manifest (which has logon tasks)
+// so the dry-run short-circuit is exercised on a non-trivial plan; the
+// fake scheduler must see zero Create / Run calls because installPlan
+// short-circuits to the plan print before any mutation.
+func TestInstallParsedManifest_DryRun_NoWriteNoPath(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	m := globalTwoDaemonManifest()
+	a := NewAPI()
+	var buf bytes.Buffer
+	intentPath, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
+		Writer: &buf,
+		DryRun: true,
+	})
+	if err != nil {
+		t.Fatalf("InstallParsedManifest(DryRun): %v", err)
+	}
+	// (b) empty path — nothing was written.
+	if intentPath != "" {
+		t.Errorf("DryRun intentPath = %q, want \"\" (nothing was committed)", intentPath)
+	}
+	// (a) no committed intent file in the state dir.
+	committed := filepath.Join(stateDir, "supervisor-intent.json")
+	if _, statErr := os.Stat(committed); !os.IsNotExist(statErr) {
+		t.Errorf("supervisor-intent.json must not exist after a dry run; stat err = %v", statErr)
+	}
+	// (a) no leftover pre-flight temp probe — the pre-flight write is
+	// skipped entirely on dry-run, so neither the temp file nor its flock
+	// leaf may appear.
+	preflight := filepath.Join(stateDir, "supervisor-intent.json.preflight")
+	if _, statErr := os.Stat(preflight); !os.IsNotExist(statErr) {
+		t.Errorf(".preflight temp must not exist after a dry run (pre-flight write is skipped); stat err = %v", statErr)
+	}
+	if _, statErr := os.Stat(preflight + ".lock"); !os.IsNotExist(statErr) {
+		t.Errorf(".preflight.lock must not exist after a dry run; stat err = %v", statErr)
+	}
+	// The dry-run plan print still happens.
+	if buf.Len() == 0 {
+		t.Error("DryRun must still print the plan to the writer, got empty output")
+	}
+	// No scheduler mutation on dry-run.
+	if f.createCount != 0 || f.runCount != 0 {
+		t.Errorf("DryRun must not mutate the scheduler: createCount=%d runCount=%d, want 0/0", f.createCount, f.runCount)
 	}
 }

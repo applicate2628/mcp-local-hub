@@ -35,9 +35,10 @@ type InstallParsedManifestOpts struct {
 	Writer            io.Writer
 	ClientsInclude    []string
 	IncludeAllClients bool
-	Workspaces        []WorkspaceEntry // pre-loaded snapshot of registered serena workspaces
-	DryRun            bool
-	StartAfterWrite   bool // default true (matches api.Install); migrate driver later passes false
+	// Snapshot of registered serena workspaces; consumed by the D.3b migrate-driver per-workspace daemon fan-out (wired in the next commit on this branch).
+	Workspaces      []WorkspaceEntry
+	DryRun          bool
+	StartAfterWrite bool // default true (matches api.Install); migrate driver later passes false
 }
 
 // InstallParsedManifest installs a pre-parsed manifest in-process and
@@ -45,23 +46,42 @@ type InstallParsedManifestOpts struct {
 //
 // Sequence:
 //
-//  1. Pre-flight gate (fail-fast, no mutation): dry-write the intent file
-//     to a temp path via WriteStateFileAtomic. A failure here (disk full,
-//     permission denied, parent-dir DACL gate refusal under
+//  1. Preflight (fail-fast, check-only, no mutation): LookPath of the daemon
+//     command, ensureCanonicalMcphubPresent, and checkSecretRefs on m.Env —
+//     the same gate the three legacy install paths run. A missing `secret:`
+//     env var or a missing command fails HERE, before any intent or
+//     scheduler mutation, instead of surfacing later at daemon start. Port
+//     checks do not apply to a workspace-scoped DaemonTemplate manifest
+//     (its m.Daemons is empty). Preflight is check-only so it runs on the
+//     dry-run path too, matching api.Install (Preflight precedes its
+//     dry-run short-circuit).
+//  2. Pre-flight intent write (fail-fast, no mutation): dry-write the intent
+//     file to a temp path via WriteStateFileAtomic. A failure here (disk
+//     full, permission denied, parent-dir DACL gate refusal under
 //     MCPHUB_REQUIRE_SINGLE_USER_HOME=1) returns BEFORE any other mutation
-//     so the end-state is pristine.
-//  2. BuildPlanWithOpts on the parsed manifest.
-//  3. installPlan -> executeInstallTo: scheduler-task creation + per-client
+//     so the end-state is pristine. SKIPPED on dry-run — a dry run must not
+//     touch disk.
+//  3. BuildPlanWithOpts on the parsed manifest.
+//  4. installPlan -> executeInstallTo: scheduler-task creation + per-client
 //     config writes, then the supervisor-intent write as the intermediate
 //     step INSIDE executeInstallTo's rollback scope. StartAfterWrite gates
-//     Pass B (immediate daemon start).
+//     Pass B (immediate daemon start). On dry-run, installPlan prints the
+//     plan and returns; this function then returns ("", nil) because nothing
+//     was written and there is no intent path for the caller to dereference.
 //
-// On any sub-failure inside step 3, the shared rollback stack runs and the
+// On any sub-failure inside step 4, the shared rollback stack runs and the
 // function returns the error with every side effect undone.
 func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifest, opts InstallParsedManifestOpts) (intentPath string, err error) {
 	w := opts.Writer
 	if w == nil {
 		w = os.Stderr
+	}
+
+	// 1. Preflight: check-only gate shared with the legacy install paths.
+	// Runs FIRST, before the pre-flight intent write and before any mutation,
+	// so a missing command or unresolved secret: ref fails fast.
+	if err := Preflight(m, ""); err != nil {
+		return "", fmt.Errorf("preflight: %w", err)
 	}
 
 	stateDir, err := DaemonStateDir()
@@ -79,14 +99,17 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 		return "", err
 	}
 
-	// 1. Pre-flight gate: dry-write to a temp path. No rollback push — this
-	// is a read-only-ish probe that leaves no committed side effect (the
-	// temp file is removed immediately).
-	if err := preflightSupervisorIntentWrite(stateDir, desiredIntent); err != nil {
-		return "", fmt.Errorf("pre-flight supervisor-intent write: %w", err)
+	// 2. Pre-flight intent-write gate: dry-write to a temp path. No rollback
+	// push — this is a read-only-ish probe that leaves no committed side
+	// effect (the temp file is removed immediately). SKIPPED on dry-run: a
+	// dry run must not do any flock-guarded disk I/O.
+	if !opts.DryRun {
+		if err := preflightSupervisorIntentWrite(stateDir, desiredIntent); err != nil {
+			return "", fmt.Errorf("pre-flight supervisor-intent write: %w", err)
+		}
 	}
 
-	// 2. Build the plan. NOTE: refuseWorkspaceScopedInstall is intentionally
+	// 3. Build the plan. NOTE: refuseWorkspaceScopedInstall is intentionally
 	// NOT called — workspace-scoped is the intended input here.
 	plan, err := BuildPlanWithOpts(m, BuildPlanOpts{
 		ClientsInclude:    opts.ClientsInclude,
@@ -96,9 +119,10 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 		return "", err
 	}
 
-	// 3. Audit-first + execute, with the supervisor-intent write folded into
-	// executeInstallTo's rollback stack via the intermediate hook.
-	intermediate := func() (func(), error) {
+	// 4. Audit-first + execute, with the supervisor-intent write folded into
+	// executeInstallTo's rollback stack via the intermediate hook. On dry-run
+	// installPlan prints the plan and returns without invoking the hook.
+	var intermediate intentWriteStep = func() (func(), error) {
 		if werr := WriteSupervisorIntent(intentPath, desiredIntent); werr != nil {
 			return nil, fmt.Errorf("write supervisor intent %s: %w", intentPath, werr)
 		}
@@ -130,6 +154,12 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 		Intermediate: intermediate,
 	}); err != nil {
 		return "", err
+	}
+	// Dry-run wrote nothing (the pre-flight write was skipped and the
+	// intermediate hook never fired), so return an empty path — the caller
+	// must not dereference a path for a file that was never committed.
+	if opts.DryRun {
+		return "", nil
 	}
 	return intentPath, nil
 }

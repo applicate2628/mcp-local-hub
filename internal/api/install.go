@@ -1640,7 +1640,7 @@ type installPlanOpts struct {
 	// inside its rollback scope between the client-config block and Pass B.
 	// Used by InstallParsedManifest to fold the supervisor-intent write into
 	// the same rollback stack; legacy callers leave it nil.
-	Intermediate func() (func(), error)
+	Intermediate intentWriteStep
 }
 
 // installPlan is the shared materialization core between api.Install (and
@@ -1684,6 +1684,16 @@ type createdTask struct {
 	trigger string
 }
 
+// intentWriteStep is the typed shape of executeInstallTo's intermediate
+// hook. Runs after scheduler-task creation + per-client-config writes and
+// BEFORE Pass B task-start. Returns an idempotent compensator that is
+// pushed onto executeInstallTo's single shared rollback stack and runs (in
+// reverse) on any later-step failure. MUST NOT mutate the manifest or the
+// workspace registry (those are the outer migrate-driver's rollback scope).
+// Naming the type keeps the core rollback scope from inviting arbitrary
+// future side-effects through a bare func() (func(), error) param.
+type intentWriteStep func() (rollback func(), err error)
+
 // executeInstallTo materializes the plan in two passes. Pass A creates
 // every scheduler task (no Run); the per-client config block runs between
 // the passes, preserving the scheduler-create → client-write → run
@@ -1706,7 +1716,7 @@ type createdTask struct {
 // executeInstallTo returns that error with every side effect undone. Legacy
 // api.Install callers pass nil and observe bit-for-bit identical behavior
 // (they record intent via recordInstallIntentPostSuccess AFTER this returns).
-func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int, startTasks bool, intermediate func() (func(), error)) error {
+func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int, startTasks bool, intermediate intentWriteStep) error {
 	sch, err := newScheduler()
 	if err != nil {
 		return fmt.Errorf("scheduler: %w", err)
