@@ -111,17 +111,29 @@ func TestJob_CloseIdempotent(t *testing.T) {
 // kernel teardown — supervisor backoff respawn could rebind the
 // port before the orphan socket was released. This test proves the
 // post-ADR contract: TerminateAll(timeoutMs > 0) must NOT return
-// until ActiveProcesses reaches zero OR the deadline expires.
+// until ActiveProcesses reaches zero OR the deadline expires AND
+// every per-PID handle is signaled.
 //
-// Method: spawn timeout /T 30 child, assign to its own Job (mirrors
-// the per-spawn allocation in runSupervise), call TerminateAll(5000),
-// assert (a) call returned without timeout error, (b) wall-clock
-// elapsed under the deadline, (c) the PID is no longer alive.
+// Method: spawn ping (Windows builtin, console-free sleep proxy),
+// assign to its own Job (mirrors the per-spawn allocation in
+// runSupervise), call TerminateAll(5000), assert (a) call returned
+// without timeout error, (b) wall-clock elapsed under the deadline,
+// (c) the PID is no longer alive.
+//
+// Uses `ping -n 30 -w 1000 127.0.0.1` instead of `timeout.exe`
+// because timeout.exe exits immediately with "Input redirection is
+// not supported" when stdin is redirected/backgrounded (the
+// default exec.Cmd behavior in `go test` runs with no controlling
+// console attached). Closing bot P2 on PR #241. ping does not
+// require console input and behaves consistently in CI.
 func TestJob_TerminateAllWaitsForExit(t *testing.T) {
-	if _, err := exec.LookPath("timeout"); err != nil {
-		t.Skipf("timeout.exe not on PATH: %v", err)
+	if _, err := exec.LookPath("ping"); err != nil {
+		t.Skipf("ping.exe not on PATH: %v", err)
 	}
-	cmd := exec.Command("timeout", "/T", "30", "/NOBREAK")
+	// `ping -n 30 -w 1000 127.0.0.1` sends 30 echo requests at
+	// ~1s intervals = ~30s wall-clock. The Job's TerminateAll
+	// must reap the process well before that natural exit.
+	cmd := exec.Command("ping", "-n", "30", "-w", "1000", "127.0.0.1")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -141,7 +153,7 @@ func TestJob_TerminateAllWaitsForExit(t *testing.T) {
 		t.Fatalf("Assign: %v", err)
 	}
 	if !processAlive(pid, t) {
-		t.Fatalf("pid=%d already dead before TerminateAll — assignment must not pre-kill", pid)
+		t.Fatalf("pid=%d already dead before TerminateAll — assignment must not pre-kill (or ping exited early — unexpected)", pid)
 	}
 
 	start := time.Now()
@@ -150,7 +162,7 @@ func TestJob_TerminateAllWaitsForExit(t *testing.T) {
 	}
 	elapsed := time.Since(start)
 	if elapsed > 5*time.Second {
-		t.Errorf("TerminateAll took %v; should return well within 5s for one timeout.exe child (regression: returned timeout when it should have completed)", elapsed)
+		t.Errorf("TerminateAll took %v; should return well within 5s for one ping child (regression: returned timeout when it should have completed)", elapsed)
 	}
 	if processAlive(pid, t) {
 		t.Errorf("pid=%d still alive after TerminateAll returned; the wait-for-exit contract is broken (caller will race respawn against still-tearing-down orphan)", pid)

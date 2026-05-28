@@ -2260,10 +2260,31 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 					"kill_succeeded": killErr == nil,
 					"kill_method":    killMethod,
 				}
+				// pidForState is the PID we persist into
+				// supervisor-state.json as orphan_pid. Default is the
+				// root spawn pid, but on TerminateAll timeout the root
+				// may have died while a descendant still holds the
+				// port — closing bot P2 on PR #241. When that
+				// happens, query the surviving Job members and
+				// use the FIRST as the operator-visible orphan_pid
+				// so `taskkill /F /T /PID <orphan_pid>` lands on
+				// a live process. Also surface the full surviving
+				// list in the audit body for operator action.
+				pidForState := pid
 				severity := "warn"
 				if killErr != nil {
 					orphanBody["kill_error"] = killErr.Error()
-					orphanBody["note"] = "Orphan kill failed - tree may still be alive. Returning RAW startErr (no errSpawnPreChild wrap) so controller does NOT synth EvChildExit + backoff retry. Daemon stays in StSpawning (preferable to duplicate-daemon risk). The orphan PID is PRESERVED in supervisor-state.json (orphan_pid field, SEPARATE from current_pid which stays 0) so operator can run `taskkill /F /T /PID <orphan_pid>` for manual cleanup. Also visible via `mcphub status --json` and the GUI Dashboard."
+					var survivors []uint32
+					if daemonJob != nil {
+						survivors, _ = daemonJob.MemberPIDs()
+					}
+					if len(survivors) > 0 {
+						orphanBody["surviving_pids"] = survivors
+						pidForState = int(survivors[0])
+						orphanBody["note"] = "Orphan tree kill failed - root pid (originally returned by StartWithJob) may be dead while one or more descendants are still alive and holding the port. Returning RAW startErr (no errSpawnPreChild wrap) so controller does NOT synth EvChildExit + backoff retry. Daemon stays in StSpawning (preferable to duplicate-daemon risk). orphan_pid in supervisor-state.json is the FIRST surviving member from the Job (NOT the dead root) so the GUI Dashboard and `mcphub status --json` surface a live PID. Operator: run `taskkill /F /T /PID <each>` for EVERY pid in surviving_pids; using only orphan_pid may leave siblings alive."
+					} else {
+						orphanBody["note"] = "Orphan kill failed - tree may still be alive but Job member enumeration returned empty (either MemberPIDs syscall failed, or the kernel reaped members after TerminateAll timeout fired but before this query). Returning RAW startErr (no errSpawnPreChild wrap) so controller does NOT synth EvChildExit + backoff retry. Daemon stays in StSpawning (preferable to duplicate-daemon risk). orphan_pid in supervisor-state.json is the original root pid (best available); the actual descendant holding the port may differ. Operator: check `mcphub status --json` and supplement with `taskkill /F /T /IM <wrapper-image>` if root pid is dead."
+					}
 					severity = "error"
 				} else {
 					orphanBody["note"] = "Orphan tree (root + descendants) terminated cleanly via " + killMethod + ". Wrapping with errSpawnPreChild so the controller synth EvChildExit + backoff timer drives retry. Fresh respawn binds the port cleanly."
@@ -2276,7 +2297,7 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 					Body:     orphanBody,
 				})
 				if killErr != nil {
-					tracker.MarkSpawnFailedPreservePID(d.TaskName, startErr, pid)
+					tracker.MarkSpawnFailedPreservePID(d.TaskName, startErr, pidForState)
 					_ = persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName)
 					return startErr
 				}

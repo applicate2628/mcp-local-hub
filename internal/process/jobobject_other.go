@@ -42,3 +42,11 @@ func (j *Job) Close() error { return nil }
 // exists so the supervisor's orphan-cleanup call site can be
 // cross-platform without runtime.GOOS branches.
 func (j *Job) TerminateAll(_ uint32) error { return nil }
+
+// MemberPIDs is a POSIX stub that always returns an empty list +
+// nil error. The supervisor's orphan-cleanup branch queries this
+// to surface surviving Job members in audit events; on POSIX the
+// Job is a no-op so there are never members to surface, and the
+// audit body falls through to the "Job member enumeration
+// returned empty" copy without breaking cross-platform compile.
+func (j *Job) MemberPIDs() ([]uint32, error) { return nil, nil }

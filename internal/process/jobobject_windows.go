@@ -245,6 +245,23 @@ func (j *Job) processIDs() ([]uint32, error) {
 	return nil, fmt.Errorf("processIDs: buffer grew past safety limit")
 }
 
+// MemberPIDs is the exported wrapper around processIDs for callers
+// outside the process package — specifically the supervisor's
+// orphan-cleanup audit path, which queries the surviving Job
+// members AT-TIMEOUT to give the operator an accurate list of PIDs
+// still holding the port. The root spawn PID may be dead while a
+// descendant is alive (bot P2 finding on PR #241); using only the
+// root pid for `taskkill /F /T /PID <orphan_pid>` operator
+// guidance can point at the wrong process.
+//
+// Returns the same shape as processIDs: a copy of the PID list, or
+// non-nil error if buffer/syscall handling failed. Callers that
+// can degrade to "no surviving-pid hint" treat the error as
+// equivalent to an empty list.
+func (j *Job) MemberPIDs() ([]uint32, error) {
+	return j.processIDs()
+}
+
 // TerminateAll kills every process currently in the Job Object via
 // the Windows TerminateJobObject syscall AND waits up to timeoutMs
 // for the kernel to actually reap the members. The wait is the
@@ -295,12 +312,36 @@ func (j *Job) TerminateAll(timeoutMs uint32) error {
 	if j == nil || j.handle == 0 {
 		return nil
 	}
-	// Pre-enumerate PIDs so we can wait on individual process
-	// handles after TerminateJobObject (defense against the
-	// ActiveProcesses-vs-handle-signaled kernel race). Failures
-	// here are non-fatal: TerminateJobObject still fires, and the
-	// caller degrades to ActiveProcesses-only polling.
+	// Pre-enumerate PIDs AND open SYNCHRONIZE handles BEFORE
+	// TerminateJobObject — closing the PID-recycling race the bot
+	// flagged as P2 on PR #241. When a job member exits quickly
+	// after termination starts, Windows can recycle its PID to an
+	// unrelated process; opening the handle AFTER TerminateJobObject
+	// would then leave us waiting on the unrelated process and
+	// reporting a spurious timeout even though the orphan tree was
+	// successfully killed. The handles installed here are tied to
+	// the ORIGINAL kernel process objects via the SYNCHRONIZE handle
+	// (process object lives until its last handle is closed), so
+	// WaitForSingleObject reports the original process's signaled
+	// state regardless of PID recycling.
+	//
+	// Both processIDs() and per-PID OpenProcess failures are
+	// non-fatal: TerminateJobObject still fires, and the loop
+	// degrades to ActiveProcesses-only polling when the handles
+	// slice is empty (handlesAllSignaled returns true on empty).
 	pids, _ := j.processIDs()
+	handles := make([]windows.Handle, 0, len(pids))
+	for _, pid := range pids {
+		h, err := windows.OpenProcess(windows.SYNCHRONIZE, false, pid)
+		if err == nil {
+			handles = append(handles, h)
+		}
+	}
+	defer func() {
+		for _, h := range handles {
+			_ = windows.CloseHandle(h)
+		}
+	}()
 
 	if err := windows.TerminateJobObject(j.handle, 1); err != nil {
 		// ERROR_ACCESS_DENIED can occur if the job is already being
@@ -318,24 +359,6 @@ func (j *Job) TerminateAll(timeoutMs uint32) error {
 		// down processes).
 		return nil
 	}
-
-	// Open SYNCHRONIZE handles to each pre-enumerated PID for
-	// per-handle wait. OpenProcess failure is fine — typically
-	// "process not found", which means the kernel already reaped
-	// that PID and the handle wait is trivially satisfied. The
-	// handles are released on function return regardless of path.
-	handles := make([]windows.Handle, 0, len(pids))
-	for _, pid := range pids {
-		h, err := windows.OpenProcess(windows.SYNCHRONIZE, false, pid)
-		if err == nil {
-			handles = append(handles, h)
-		}
-	}
-	defer func() {
-		for _, h := range handles {
-			_ = windows.CloseHandle(h)
-		}
-	}()
 
 	// Poll until ActiveProcesses == 0 AND every known process
 	// handle is signaled, OR the deadline elapses.
