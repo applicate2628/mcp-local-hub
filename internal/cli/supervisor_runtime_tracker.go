@@ -25,6 +25,22 @@ type DaemonRuntimeEntry struct {
 	PIDGeneration int
 	RestartCount  int
 	LastError     string
+	// OrphanPID records the PID of a Windows post-create orphan when
+	// the supervisor's best-effort kill failed. SEPARATE from CurrentPID
+	// because makeProductionTerminateFn reads CurrentPID as the live
+	// daemon's PID to terminate; conflating an orphan PID into
+	// CurrentPID would cause the terminate identity-proof check to
+	// silently nil-success (StartedAt empty -> ErrProcessIdentityMismatch
+	// -> handleSupervisorRespawn spawns a new daemon while the orphan
+	// is alive, port-collision).
+	//
+	// Operator visibility: `mcphub status` and the GUI Dashboard
+	// surface OrphanPID alongside CurrentPID. Manual cleanup is
+	// `taskkill /F /T /PID <OrphanPID>` on Windows.
+	//
+	// Closes bot finding on PR #238 3ba6773 (P2 don't-expose-orphan-
+	// as-terminable-daemon-PID).
+	OrphanPID int `json:",omitempty"`
 }
 
 type DaemonRuntimeTracker struct {
@@ -147,16 +163,26 @@ func (t *DaemonRuntimeTracker) MarkSpawnFailed(taskName string, err error) {
 }
 
 // MarkSpawnFailedPreservePID is the orphan-aware variant of
-// MarkSpawnFailed for the Windows post-create-orphan path. Unlike
-// MarkSpawnFailed (which clears CurrentPID=0), this method preserves
-// the supplied orphanPID so the operator can find it in
-// supervisor-state.json for manual cleanup (`taskkill /F /T /PID <pid>`)
-// when the supervisor's best-effort Job-level kill failed.
+// MarkSpawnFailed for the Windows post-create-orphan path. Records
+// the orphan PID in the SEPARATE OrphanPID field (NOT in
+// CurrentPID) so operator visibility is preserved without
+// conflating the orphan with the "live daemon PID, terminate it"
+// semantic of CurrentPID.
 //
-// Used only by the orphan path in supervise.go after a TerminateJobObject
-// failure (errors.Is(startErr, process.ErrSpawnPostCreate) && job kill
-// returned non-nil). The common pre-child case still uses MarkSpawnFailed
-// (no orphan PID to preserve).
+// Why a separate field: makeProductionTerminateFn reads CurrentPID
+// and builds a PID identity proof; conflating an orphan PID into
+// CurrentPID would silently nil-success the terminate (StartedAt
+// empty -> ErrProcessIdentityMismatch -> respawn proceeds while
+// orphan is alive -> port collision). With OrphanPID separate,
+// terminate sees CurrentPID=0 (no live daemon), respawn proceeds
+// normally; if orphan still holds the port, the respawn naturally
+// hits port-in-use as the duplicate cap. Closes bot finding on PR
+// #238 3ba6773 (P2 don't-expose-orphan-as-terminable-daemon-PID).
+//
+// Used only by the orphan path in supervise.go after a
+// process.BestEffortKillByPID failure (errors.Is(startErr,
+// process.ErrSpawnPostCreate) && kill returned non-nil). The
+// common pre-child case still uses MarkSpawnFailed.
 //
 // Closes bot finding on PR #237 16d99d7 (P2 preserve-orphan-PID).
 func (t *DaemonRuntimeTracker) MarkSpawnFailedPreservePID(taskName string, err error, orphanPID int) {
@@ -171,7 +197,8 @@ func (t *DaemonRuntimeTracker) MarkSpawnFailedPreservePID(taskName string, err e
 		entry.RestartCount++
 	}
 	entry.State = daemonRuntimeStateBackoff
-	entry.CurrentPID = orphanPID
+	entry.CurrentPID = 0
+	entry.OrphanPID = orphanPID
 	entry.StartedAt = time.Time{}
 	entry.LastError = errorString(err)
 	t.entries[taskName] = entry
