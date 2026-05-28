@@ -2,7 +2,7 @@
 //
 // StatusPoller samples statusProvider.Status() on a fixed interval and
 // publishes a "daemon-state" event onto the Broadcaster on every
-// observed change in (Server, Daemon, State, PID, Port). Fetch errors
+// observed change in (Server, Daemon, State, PID, Port, OrphanPID). Fetch errors
 // are surfaced as "poller-error" events and the loop continues on the
 // next tick. Daemons that disappear between samples emit a terminal
 // daemon-state event with state="Gone".
@@ -20,7 +20,7 @@ import (
 
 // StatusPoller samples api.Status() on a fixed interval and publishes
 // a daemon-state event on every observed change in (Server, Daemon,
-// State, PID, Port). The event body matches spec §3.6.
+// State, PID, Port, OrphanPID). The event body matches spec §3.6.
 //
 // The cache is keyed by the composite "<server>/<daemon>" tuple because
 // api.Status() returns one row per daemon: a multi-daemon server like
@@ -112,7 +112,7 @@ func (p *StatusPoller) poll(ctx context.Context) {
 		k := keyFor(r)
 		seen[k] = struct{}{}
 		prev, ok := p.last[k]
-		if ok && prev.State == r.State && prev.PID == r.PID && prev.Port == r.Port {
+		if ok && prev.State == r.State && prev.PID == r.PID && prev.Port == r.Port && prev.OrphanPID == r.OrphanPID {
 			continue
 		}
 		p.last[k] = r
@@ -125,6 +125,7 @@ func (p *StatusPoller) poll(ctx context.Context) {
 				"pid":            r.PID,
 				"port":           r.Port,
 				"is_maintenance": r.IsMaintenance,
+				"orphan_pid":     r.OrphanPID,
 			},
 		})
 	}
