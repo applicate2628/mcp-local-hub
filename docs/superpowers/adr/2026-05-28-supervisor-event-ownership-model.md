@@ -100,6 +100,7 @@ the class.
 **Option A — Per-task FSM mailbox (actor model):**
 
 Each daemon owns:
+
 - Its own per-task `mailbox` (buffered channel for that daemon's events)
 - Its own SM state goroutine that drains the mailbox
 - Its own Job Object handle (separate `process.Job` per spawn)
@@ -224,39 +225,91 @@ Single PR, scoped to v0.5.x:
 1. **`process.Job` per spawn.** Move `process.NewKillOnCloseJob()`
    from `runSupervise` into the spawn closure (production path in
    `internal/cli/supervise.go`). Each spawn attempt allocates its
-   own Job; `defer daemonJob.Close()` on the wait goroutine.
+   own Job. The handle is owned by the spawn flow and MUST be closed
+   on EVERY exit path, not just successful-start + wait-goroutine:
+   - **Success path:** `defer daemonJob.Close()` on the wait
+     goroutine (existing pattern; closes when child exits).
+   - **Pre-child failure paths** (closes bot ADR finding @227):
+     `cmd.Start` error, `CreateProcess` failure pre-FindProcess
+     (the common `errSpawnPreChild` case), manifest-validation
+     error before exec, env-resolve failure. EACH of these returns
+     before the wait goroutine launches; the spawn closure MUST
+     `daemonJob.Close()` on the error return so subsequent
+     reconcile/backoff respawn attempts don't accumulate orphan
+     Job handles until supervisor exit. Use a sentinel `closed`
+     bool + single `defer func() { if !closed { daemonJob.Close() } }()`
+     at spawn-closure entry to guarantee close-on-any-return, with
+     wait goroutine taking ownership via `closed = true` on
+     successful launch.
+   - **Post-create orphan path** (`errSpawnPostCreate`): the wait
+     goroutine never launches, so the close belongs to the orphan
+     cleanup block AFTER `TerminateAll` returns (step 3 below).
 2. **Tracker tracks per-task Job handle** (in-memory only, not
    persisted — Job handles are process-lifetime). On orphan
    cleanup, `MarkSpawnFailedPreservePID` records `OrphanPID` plus
-   the Job handle for the orphan cleanup path.
-3. **Orphan branch uses `daemonJob.TerminateAll(5000)`** (the
-   method already implemented in PR #237 r5.1, currently unused).
-   The shared-Job hazard from PR #238 P1 is removed because Job is
-   now task-scoped.
+   the Job handle for the orphan cleanup path. The Job handle is
+   released after `TerminateAll` returns (success or timeout); see
+   step 3.
+3. **`TerminateAll` real wait + orphan branch wiring** (closes bot
+   ADR finding @233): the current `Job.TerminateAll(timeoutMs)`
+   stub fires `TerminateJobObject` and returns immediately, with
+   `timeoutMs` explicitly ignored (docs in
+   `internal/process/jobobject_windows.go` aligned with this in
+   PR #238 r5.3.6 specifically because the method was unused). For
+   per-daemon adoption, the method MUST be upgraded:
+   - Poll `IsProcessInJob` against every PID known to have been in
+     the job (or query active members via `QueryInformationJobObject`
+     with `JobObjectBasicProcessIdList`) until the count reaches
+     zero, with `timeoutMs` as the bounded deadline.
+   - On WAIT_TIMEOUT, return a wrapped error indicating partial
+     termination (consistent with the documented best-effort
+     contract).
+   - Caller in `supervise.go` orphan branch treats wait-success as
+     "safe to rebind port for respawn", wait-timeout as "do NOT
+     respawn" (same kill-failure branch behavior introduced in PR
+     #237 r5.2). The current PID-based `BestEffortKillByPID` does
+     wait-for-exit via `OpenProcess|SYNCHRONIZE + WaitForSingleObject`;
+     the per-Job replacement MUST provide the same guarantee or it
+     reintroduces the port-rebind race.
+   - The polling implementation is part of THIS refactor PR scope,
+     not pre-assumed done.
 4. **`BestEffortKillByPID` retained** but no longer used by the
    supervisor's orphan path. Kept for any future caller that has
    only a PID; alternative would be deletion (low risk, low value
    either way).
-5. **Tests.** Per-task Job creation + cleanup-on-exit + Terminate-
-   All-on-orphan-failure regressions. Estimate ~50 LOC test code
-   on top of the existing supervisor_controller_test.go scaffold.
+5. **Tests.** Per-task Job creation + cleanup-on-exit + cleanup-
+   on-every-error-path + `TerminateAll` actual-wait-for-exit +
+   orphan-cleanup-then-respawn-without-port-race regressions.
+   Estimate ~80 LOC test code on top of the existing
+   `supervisor_controller_test.go` scaffold (revised up from the
+   50 LOC initial estimate to cover the explicit close-on-error
+   paths and the `TerminateAll` wait-for-exit path).
 6. **Migration safety.** Supervisor restart: no schema change to
-   supervisor-state.json (Job handles are process-scoped, not
-   persisted). v0.4.x rollback path: untouched.
+   `supervisor-state.json` (Job handles are process-scoped, not
+   persisted). v0.4.x rollback path: untouched. `OrphanPID` field
+   from PR #238 r5.3.2 remains the operator-visible breadcrumb for
+   the rare case where `TerminateAll` returns timeout AND backoff
+   respawn fails (port still held).
 
-Expected delta: ~150-200 LOC implementation + ~50 LOC tests. Bot
-cascade risk: low (the change is well-scoped and each finding's
-mitigation is localized; unlike PR #236-#238 where each finding
-exposed adjacent architectural concerns).
+Expected delta: ~180-250 LOC implementation + ~80 LOC tests (revised
+from 150-200 + 50 after closing the two ADR-review findings; the
+real-wait `TerminateAll` impl and the explicit close-on-error paths
+add ~50 LOC together). Bot cascade risk: low (the change is well-
+scoped and each finding's mitigation is localized; the two ADR-
+review findings tightened the implementation outline before the
+work starts rather than emerging mid-implementation).
 
 ## References
 
-- PR #236 (supervisor SM stabilization, merged via `--admin` with
-  3 known-debt items): https://github.com/applicate2628/mcp-local-hub/pull/236
-- PR #237 (close #236 known-debt, merged via `--admin` with 3
-  Windows-edge known-debt items): https://github.com/applicate2628/mcp-local-hub/pull/237
-- PR #238 (close #237 known-debt, clean PASS-merge after 6 rounds
-  driving to bot PASS): https://github.com/applicate2628/mcp-local-hub/pull/238
+- [PR #236](https://github.com/applicate2628/mcp-local-hub/pull/236)
+  (supervisor SM stabilization, merged via `--admin` with 3
+  known-debt items)
+- [PR #237](https://github.com/applicate2628/mcp-local-hub/pull/237)
+  (close #236 known-debt, merged via `--admin` with 3 Windows-edge
+  known-debt items)
+- [PR #238](https://github.com/applicate2628/mcp-local-hub/pull/238)
+  (close #237 known-debt, clean PASS-merge after 6 rounds driving
+  to bot PASS)
 - v0.5.0 supervisor architecture spec:
   `docs/superpowers/specs/2026-05-16-v0.5.0-supervisor-architecture.md`
 - Consultant memo on PR #236 r4 (cumulative bot cascade pattern):
