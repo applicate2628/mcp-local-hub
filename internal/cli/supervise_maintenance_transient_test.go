@@ -39,6 +39,10 @@ type transientTestState struct {
 	// SupervisorStateFile.TransientPIDs slice; if non-nil, every
 	// transient mutation writes through to it too.
 	mirror *[]api.TransientPID
+	// addErr, when non-nil, is returned by AddTransientPID WITHOUT
+	// appending — simulating a disk-write failure so the scheduler's
+	// abort-before-spawn path (PR #243 bot P2#3) can be exercised.
+	addErr error
 }
 
 func newTransientTestState() *transientTestState {
@@ -59,13 +63,19 @@ func (s *transientTestState) SetMaintenanceFiredAt(kind, rfc3339nanoUTC string) 
 	return nil
 }
 
-func (s *transientTestState) AddTransientPID(p api.TransientPID) {
+func (s *transientTestState) AddTransientPID(p api.TransientPID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.addErr != nil {
+		// Simulate a non-persisting disk write: do NOT append, return
+		// the error so the scheduler aborts before spawning (P2#3).
+		return s.addErr
+	}
 	s.transient = append(s.transient, p)
 	if s.mirror != nil {
 		*s.mirror = append(*s.mirror, p)
 	}
+	return nil
 }
 
 func (s *transientTestState) RemoveTransientPID(pid int) {
@@ -84,6 +94,38 @@ func (s *transientTestState) RemoveTransientPID(pid int) {
 		mirror := (*s.mirror)[:0]
 		for _, t := range *s.mirror {
 			if t.PID == pid {
+				continue
+			}
+			mirror = append(mirror, t)
+		}
+		*s.mirror = mirror
+	}
+}
+
+// RemoveTransientClaim removes the single PID=0 claim matching
+// (PID==0, Kind, StartedAt) — the identity-based removal the scheduler
+// uses so two kinds' simultaneous claims don't collide (P2#4). Real
+// filter logic (not a no-op) is required so the spawn-failure rollback
+// test observes the claim actually leaving state.
+func (s *transientTestState) RemoveTransientClaim(kind, startedAt string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	match := func(t api.TransientPID) bool {
+		return t.PID == 0 && t.Kind == kind && t.StartedAt == startedAt
+	}
+	out := s.transient[:0]
+	for _, t := range s.transient {
+		if match(t) {
+			continue
+		}
+		out = append(out, t)
+	}
+	s.transient = out
+
+	if s.mirror != nil {
+		mirror := (*s.mirror)[:0]
+		for _, t := range *s.mirror {
+			if match(t) {
 				continue
 			}
 			mirror = append(mirror, t)
@@ -112,6 +154,7 @@ type fakeSpawner struct {
 	startError    error
 	startPanic    bool
 	startCallback func(api.MaintenanceTimer) // observation hook, fires AFTER PID assignment, BEFORE return
+	startCount    atomic.Int32               // total Start invocations; used to assert "spawn never attempted"
 }
 
 func newFakeSpawner() *fakeSpawner {
@@ -123,6 +166,7 @@ func newFakeSpawner() *fakeSpawner {
 }
 
 func (f *fakeSpawner) Start(t api.MaintenanceTimer) (int, error) {
+	f.startCount.Add(1)
 	f.mu.Lock()
 	if f.startPanic {
 		f.mu.Unlock()
@@ -600,5 +644,101 @@ func TestMaintenance_Transient_GoroutineLeakBaseline(t *testing.T) {
 	// catches a per-spawn leak (would be at least 5 new goroutines).
 	if after-baseline > 3 {
 		t.Fatalf("goroutine leak suspected: baseline=%d after=%d delta=%d", baseline, after, after-baseline)
+	}
+}
+
+// TestMaintenance_Transient_ClaimWriteFailureAbortsSpawn covers PR #243
+// bot P2#3. When the PID=0 claim write fails to persist, the scheduler
+// must abort BEFORE Spawner.Start — a child launched with no persisted
+// claim is invisible to quiesce, shutdown cleanup, and the cold-start
+// reaper (a permanent orphan if state stays unwritable). The per-timer
+// slot must still be released so a later tick retries.
+func TestMaintenance_Transient_ClaimWriteFailureAbortsSpawn(t *testing.T) {
+	timer := api.MaintenanceTimer{Kind: "workspace-weekly-refresh"}
+	state := newTransientTestState()
+	state.addErr = errors.New("synthetic claim write failure")
+	sched := NewMaintenanceScheduler(state)
+
+	sp := newFakeSpawner()
+	sched.SetSpawner(sp)
+
+	sched.Tick(sundayDue(), []api.MaintenanceTimer{timer})
+
+	if got := sp.startCount.Load(); got != 0 {
+		t.Fatalf("claim-write failure must abort BEFORE Spawner.Start; got %d Start calls", got)
+	}
+	if snap := state.snapshot(); len(snap) != 0 {
+		t.Fatalf("no transient may be recorded when the claim write fails; got %+v", snap)
+	}
+
+	// Slot released → after recovery + cadence reset, a retry spawns.
+	state.mu.Lock()
+	state.addErr = nil
+	state.mu.Unlock()
+	state.SetMaintenanceFiredAt("workspace-weekly-refresh", "2020-01-01T00:00:00Z")
+	sched.Tick(sundayDue(), []api.MaintenanceTimer{timer})
+	if !waitForCondition(200*time.Millisecond, func() bool {
+		for _, p := range state.snapshot() {
+			if p.PID > 0 {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatalf("retry after claim-write recovery must spawn; got %+v", state.snapshot())
+	}
+	for _, p := range state.snapshot() {
+		if p.PID > 0 {
+			sp.finish(p.PID, nil)
+		}
+	}
+}
+
+// TestMaintenance_Transient_SpawnFailureDoesNotAdvanceFiredAt covers PR
+// #243 bot P1#3. A transient Spawner.Start failure must NOT advance
+// maintenance_fired_at — otherwise the next 60s tick reads the fresh
+// timestamp, computes next_due 7 days out, and silently skips the whole
+// weekly window. The cadence must advance only after a successful spawn.
+func TestMaintenance_Transient_SpawnFailureDoesNotAdvanceFiredAt(t *testing.T) {
+	timer := api.MaintenanceTimer{Kind: "workspace-weekly-refresh"}
+	state := newTransientTestState()
+	// Seed last-fired exactly one week before the tick (local time),
+	// matching the populated-path tests; this makes the tick due.
+	lastWeek := sundayDue().AddDate(0, 0, -7).Format(time.RFC3339Nano)
+	state.SetMaintenanceFiredAt("workspace-weekly-refresh", lastWeek)
+
+	sched := NewMaintenanceScheduler(state)
+	sp := newFakeSpawner()
+	sp.startError = errors.New("synthetic spawn failure")
+	sched.SetSpawner(sp)
+
+	sched.Tick(sundayDue(), []api.MaintenanceTimer{timer})
+
+	// Claim rolled back AND fired_at unchanged.
+	if !waitForCondition(200*time.Millisecond, func() bool {
+		return len(state.snapshot()) == 0
+	}) {
+		t.Fatalf("spawn failure must roll back the claim; got %+v", state.snapshot())
+	}
+	if got, _ := state.GetMaintenanceFiredAt("workspace-weekly-refresh"); got != lastWeek {
+		t.Fatalf("spawn failure must NOT advance fired_at; got %q want %q (unchanged)", got, lastWeek)
+	}
+
+	// Recovery: a successful retry DOES advance fired_at.
+	sp.mu.Lock()
+	sp.startError = nil
+	sp.mu.Unlock()
+	sched.Tick(sundayDue(), []api.MaintenanceTimer{timer})
+	if !waitForCondition(200*time.Millisecond, func() bool {
+		got, _ := state.GetMaintenanceFiredAt("workspace-weekly-refresh")
+		return got != lastWeek
+	}) {
+		got, _ := state.GetMaintenanceFiredAt("workspace-weekly-refresh")
+		t.Fatalf("successful retry must advance fired_at past the seed; still %q", got)
+	}
+	for _, p := range state.snapshot() {
+		if p.PID > 0 {
+			sp.finish(p.PID, nil)
+		}
 	}
 }

@@ -850,7 +850,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	// controller's live intent cache on every Tick; IntentWatcher
 	// refreshes that cache whenever supervisor-intent.json changes.
 	maintenanceState := newMaintenanceStateAdapter(statePath, events)
-	maintenanceProcSpawner := newMaintenanceSpawner(events)
+	maintenanceProcSpawner := newMaintenanceSpawner(events, &gracefulInProgress)
 	maintenanceScheduler := NewMaintenanceScheduler(maintenanceState)
 	maintenanceScheduler.SetSpawner(maintenanceProcSpawner)
 	maintenanceScheduler.SetFireHook(func(t api.MaintenanceTimer) {
@@ -871,7 +871,20 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 
 	shutdownMaintenance := func(reason string) {
 		result := maintenanceProcSpawner.Shutdown(30 * time.Second)
-		if result.Drained == 0 && len(result.Killed) == 0 && len(result.StillRunning) == 0 {
+		// Synchronously reconcile on-disk transient_pids before this
+		// returns (PR #243 bot P2#2). The per-fire drain goroutine
+		// removes a transient PID only after Spawner.Wait returns, but
+		// the signal/IPC exit path returns right after this closure, so
+		// that goroutine may not run before the process exits — leaving
+		// a stale entry for the next cold start. Removing every entry
+		// whose PID is no longer alive (isPIDAlive reports PID<=0 claim
+		// slots as dead too) is authoritative and race-free: it covers
+		// processes Shutdown drained/killed AND any that drained in the
+		// window between Spawner.Wait's procs delete and the drain
+		// goroutine's RemoveTransientPID. Still-running children are
+		// retained for the cold-start reaper.
+		reconciled := maintenanceState.ReconcileTransientPIDs(isPIDAlive)
+		if result.Drained == 0 && len(result.Killed) == 0 && len(result.StillRunning) == 0 && len(reconciled) == 0 {
 			return
 		}
 		_ = events.Emit(api.SupervisorEvent{
@@ -879,10 +892,11 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 			Source:   "maintenance",
 			Event:    "maintenance-shutdown-complete",
 			Body: map[string]any{
-				"reason":        reason,
-				"drained":       result.Drained,
-				"killed":        result.Killed,
-				"still_running": result.StillRunning,
+				"reason":           reason,
+				"drained":          result.Drained,
+				"killed":           result.Killed,
+				"still_running":    result.StillRunning,
+				"state_reconciled": reconciled,
 			},
 		})
 	}

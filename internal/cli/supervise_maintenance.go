@@ -70,16 +70,36 @@ type StateStore interface {
 	// then this same method is called again with the real PID after
 	// spawn succeeds. The store must accept both calls without
 	// deduplication; the second call's caller will have already
-	// removed the claim slot via RemoveTransientPID(0) and is now
+	// removed the claim slot via RemoveTransientClaim and is now
 	// installing the post-spawn entry.
-	AddTransientPID(p api.TransientPID)
+	//
+	// Returns non-nil error when the underlying disk write fails. The
+	// scheduler uses the error on the PRE-spawn claim write to ABORT
+	// the fire before launching a child: a claim that did not persist
+	// would leave the spawned child invisible to quiesce, shutdown
+	// cleanup, and the cold-start reaper (PR #243 bot P2#3).
+	AddTransientPID(p api.TransientPID) error
 
-	// RemoveTransientPID removes ALL entries with the given PID.
-	// Callers use this in two contexts: (a) the post-Wait drain
-	// (removes the real PID); (b) the spawn-failure rollback
-	// (removes the PID=0 claim slot). Implementations must tolerate
-	// "no such PID" as a no-op rather than an error.
+	// RemoveTransientPID removes ALL entries with the given PID. Used
+	// by the post-Wait drain to remove the real (post-spawn) PID. Real
+	// OS PIDs are unique per live process, so "remove all matching"
+	// cannot collide. Implementations must tolerate "no such PID" as a
+	// no-op rather than an error. NOTE: callers must NOT pass 0 here —
+	// PID=0 claim slots are removed via RemoveTransientClaim, which
+	// matches on identity so two kinds' simultaneous claims don't
+	// collide (PR #243 bot P2#4).
 	RemoveTransientPID(pid int)
+
+	// RemoveTransientClaim removes the single PID=0 claim slot matching
+	// (PID==0, Kind, StartedAt). Used for both the post-spawn claim
+	// rewrite and the spawn-failure/bad-pid rollback. Identity-based
+	// matching is required because two maintenance kinds can hold PID=0
+	// claims simultaneously on the same tick; removing by PID alone
+	// would erase the other kind's still-valid claim (PR #243 bot
+	// P2#4). Implementations must require PID==0 in the match so a real
+	// PID entry is never removed, and tolerate "no such claim" as a
+	// no-op.
+	RemoveTransientClaim(kind, startedAt string)
 }
 
 // Spawner abstracts the OS-level process launch so tests can inject a
@@ -183,6 +203,38 @@ func (s *MaintenanceScheduler) loadLastFiredLocally(kind string) (string, bool) 
 	return v, ok
 }
 
+// forgetLastFiredLocally drops the in-process cache entry for kind so
+// the next parseLastFiredOrSynthesise read falls through to disk.
+// Called on a SUCCESSFUL persist: a cache value left over from an
+// earlier transient persist failure would otherwise win over disk
+// forever (parseLastFiredOrSynthesise prefers cache), and once it aged
+// past a week every 60s tick would look due → repeated-fire storm
+// (PR #243 bot P1#1). On the happy path the cache is already empty so
+// this is a no-op; the invariant is "cache is populated ONLY during a
+// storm window, disk is authoritative otherwise".
+func (s *MaintenanceScheduler) forgetLastFiredLocally(kind string) {
+	s.lastFiredCacheMu.Lock()
+	delete(s.lastFiredCache, kind)
+	s.lastFiredCacheMu.Unlock()
+}
+
+// persistFiredAt writes the last-fired timestamp through the state
+// store and reconciles the in-process storm-prevention cache in one
+// place (used by both the spawner path inside fire() and the Task 9.1
+// nil-spawner compat path in Tick):
+//   - persist error  → cache the timestamp so the next 60s tick does
+//     not re-fire while disk stays stale (storm prevention).
+//   - persist success → forget any stale cache entry so disk becomes
+//     authoritative again (PR #243 bot P1#1).
+func (s *MaintenanceScheduler) persistFiredAt(kind, firedAt string) {
+	if err := s.state.SetMaintenanceFiredAt(kind, firedAt); err != nil {
+		s.rememberLastFiredLocally(kind, firedAt)
+		log.Printf("severity=warn event=maintenance-state-write-failed kind=%q err=%v in-memory-cache-engaged=true", kind, err)
+		return
+	}
+	s.forgetLastFiredLocally(kind)
+}
+
 // SetFireHook installs the callback invoked once per fired timer.
 // Task 9.1: production wires this to the transient-spawn path; tests
 // record fires for assertions.
@@ -282,66 +334,64 @@ func (s *MaintenanceScheduler) Tick(now time.Time, timers []api.MaintenanceTimer
 			// immediate follow-up Tick before another Sunday elapses)
 			// cannot re-fire the same window.
 			firedAt := now.UTC().Format(time.RFC3339Nano)
-			// Repeated-fire-storm prevention (PR #243 consultant
-			// blocker): if the disk persist fails (transient I/O
-			// error, AV scanner, quota policy), the cache stores
-			// authoritatively so the next Tick's
-			// parseLastFiredOrSynthesise lookup observes the fire
-			// and does NOT re-fire 60s later. On successful persist
-			// the cache is NOT populated — disk is authoritative
-			// and tests can drive state directly via the StateStore
-			// interface. Cross-restart durability remains the state
-			// store's responsibility.
-			if err := s.state.SetMaintenanceFiredAt(t.Kind, firedAt); err != nil {
-				s.rememberLastFiredLocally(t.Kind, firedAt)
-				log.Printf("severity=warn event=maintenance-state-write-failed kind=%q err=%v in-memory-cache-engaged=true", t.Kind, err)
-			}
 
 			if s.spawner == nil {
-				// Task 9.1 compat path: no spawner → fire the hook
-				// inline. No PID tracking, no per-timer mutex
-				// engagement, no spawn-failure rollback. Existing
-				// Task 9.1 callers (test helpers) keep working.
+				// Task 9.1 compat path: no spawner → no spawn outcome
+				// to gate on, so persist the cadence advance inline,
+				// then fire the hook. persistFiredAt handles the
+				// storm-prevention cache (engage on persist error,
+				// clear on success). No PID tracking, no per-timer
+				// mutex engagement.
+				s.persistFiredAt(t.Kind, firedAt)
 				s.fireHook(t)
 				continue
 			}
 
-			s.fire(t)
+			// Spawner path: DEFER the fired_at write until the child
+			// is actually spawned (PR #243 bot P1#3). A transient
+			// Spawner.Start failure must NOT advance the weekly cadence
+			// — otherwise the next 60s tick reads the fresh timestamp,
+			// computes next_due 7 days out, and silently skips the
+			// whole window. fire() persists fired_at only on spawn
+			// success.
+			s.fire(t, firedAt)
 		}
 	}
 }
 
 // fire is the Task 9.2 per-timer side-effect path. It runs the full
 // claim-before-syscall pipeline + spawns a goroutine that waits for
-// the transient to exit and drains it from state.
+// the transient to exit and drains it from state. `firedAt` is the
+// RFC3339Nano UTC cadence timestamp Tick computed; it is persisted
+// ONLY after the child spawns successfully (PR #243 bot P1#3).
 //
 // Ordering (the load-bearing invariant):
 //
 //  1. Per-timer slot acquired (skip + warn-log if busy). The lock
 //     covers ONLY the inflight-map check; we do NOT hold `s.mu` while
 //     calling into the state store or the spawner.
-//  2. PID=0 claim slot written to state. From this moment, an outside
-//     observer (including a goroutine that survives a panic) can see
-//     "fire was attempted" for this Kind.
+//  2. PID=0 claim slot written to state, identified by (Kind,
+//     StartedAt). From this moment, an outside observer (including a
+//     goroutine that survives a panic) can see "fire was attempted"
+//     for this Kind. If the claim write fails to persist, ABORT before
+//     spawning — an unrecorded child would be invisible to quiesce,
+//     shutdown, and the cold-start reaper (PR #243 bot P2#3).
 //  3. `Spawner.Start` invoked. On panic, the deferred recovery rolls
 //     back the inflight slot but PRESERVES the PID=0 claim (the
 //     forensic record).
-//  4. On Start success: rewrite the claim (Remove(0) then Add(real
-//     PID with StartedAt)). The two-call dance is acceptable because
-//     the production StateStore adapter takes a short lock per call;
-//     no one else mutates this Kind's row mid-fire because we hold
-//     the inflight slot.
-//  5. fireHook invoked for observability AFTER spawn + record
-//     succeeded.
-//  6. Drain goroutine launched: `Spawner.Wait`, then
+//  4. On Start failure / bad PID: remove ONLY this claim (by Kind +
+//     StartedAt, not all PID=0 — PR #243 bot P2#4), release the slot,
+//     and do NOT advance fired_at so the next Tick retries (P1#3).
+//  5. On Start success: persist fired_at NOW (cadence advances only
+//     after a real spawn), record the real PID, then remove this
+//     claim. Real PID is added BEFORE the claim is removed so the
+//     child is never absent from state.
+//  6. fireHook invoked for observability AFTER spawn + record.
+//  7. Drain goroutine launched: `Spawner.Wait`, then
 //     `RemoveTransientPID(realPID)`, then release the inflight slot.
 //     Wait MUST return (the contract); the goroutine has a clear exit
 //     condition.
-//
-// Spawn-error rollback (step 3 returns non-nil err): the PID=0 claim
-// is removed AND the inflight slot is released so the next Tick can
-// retry. The error is logged at warn severity.
-func (s *MaintenanceScheduler) fire(t api.MaintenanceTimer) {
+func (s *MaintenanceScheduler) fire(t api.MaintenanceTimer, firedAt string) {
 	// Step 1: acquire the per-timer slot.
 	s.mu.Lock()
 	if _, busy := s.inflight[t.Kind]; busy {
@@ -355,13 +405,20 @@ func (s *MaintenanceScheduler) fire(t api.MaintenanceTimer) {
 	// Step 2: write the PID=0 claim slot BEFORE the spawn syscall.
 	// Spec §"Single-run guard + transient tracking": "Transient child
 	// PID + kind + started_at recorded in supervisor-state.transient_pids
-	// BEFORE the syscall."
-	claim := api.TransientPID{
-		PID:       0, // sentinel: claim made, no real PID yet
-		Kind:      t.Kind,
-		StartedAt: s.clock().UTC().Format(time.RFC3339Nano),
+	// BEFORE the syscall." The StartedAt is this claim's identity for
+	// RemoveTransientClaim, so it is captured once and reused.
+	startedAt := s.clock().UTC().Format(time.RFC3339Nano)
+	if err := s.state.AddTransientPID(api.TransientPID{PID: 0, Kind: t.Kind, StartedAt: startedAt}); err != nil {
+		// PR #243 bot P2#3: the claim did not persist. Do NOT spawn —
+		// a child launched now would be invisible to quiesce, shutdown
+		// cleanup, and the cold-start reaper. Release the slot so the
+		// next Tick retries; fired_at is untouched.
+		s.mu.Lock()
+		delete(s.inflight, t.Kind)
+		s.mu.Unlock()
+		log.Printf("severity=error event=maintenance-claim-write-failed kind=%q err=%v", t.Kind, err)
+		return
 	}
-	s.state.AddTransientPID(claim)
 
 	// Step 3: spawn. Deferred recovery preserves the claim on panic
 	// (the forensic property) while still releasing the inflight slot
@@ -386,9 +443,11 @@ func (s *MaintenanceScheduler) fire(t api.MaintenanceTimer) {
 	}()
 
 	if startErr != nil {
-		// Step 3 failure: roll back the claim AND release the slot
-		// so the next Tick can retry.
-		s.state.RemoveTransientPID(0)
+		// Step 4 (failure): roll back ONLY this claim and release the
+		// slot so the next Tick can retry. fired_at is NOT advanced
+		// (PR #243 bot P1#3) so a transient spawn failure does not
+		// suppress the timer for the rest of the week.
+		s.state.RemoveTransientClaim(t.Kind, startedAt)
 		s.mu.Lock()
 		delete(s.inflight, t.Kind)
 		s.mu.Unlock()
@@ -397,8 +456,9 @@ func (s *MaintenanceScheduler) fire(t api.MaintenanceTimer) {
 	}
 
 	if pid <= 0 {
-		// Defensive: spawner contract violation. Treat as error.
-		s.state.RemoveTransientPID(0)
+		// Defensive: spawner contract violation. Treat as error — same
+		// rollback as startErr, no fired_at advance.
+		s.state.RemoveTransientClaim(t.Kind, startedAt)
 		s.mu.Lock()
 		delete(s.inflight, t.Kind)
 		s.mu.Unlock()
@@ -406,20 +466,25 @@ func (s *MaintenanceScheduler) fire(t api.MaintenanceTimer) {
 		return
 	}
 
-	// Step 4: rewrite the claim into the real PID record. The
-	// StartedAt timestamp from step 2 is preserved (re-stamped here
-	// for clarity; same clock instance).
-	s.state.RemoveTransientPID(0)
-	s.state.AddTransientPID(api.TransientPID{
-		PID:       pid,
-		Kind:      t.Kind,
-		StartedAt: claim.StartedAt,
-	})
+	// Step 5: spawn succeeded → NOW advance the weekly cadence
+	// (PR #243 bot P1#3). persistFiredAt also reconciles the
+	// storm-prevention cache (PR #243 bot P1#1).
+	s.persistFiredAt(t.Kind, firedAt)
+	// Record the real PID BEFORE removing the claim so the child is
+	// never absent from state. If the real-PID write fails, keep the
+	// PID=0 claim as the forensic record rather than leaving a running
+	// child wholly untracked (degraded tracking — the child is still
+	// recoverable by the reaper via the claim's Kind).
+	if err := s.state.AddTransientPID(api.TransientPID{PID: pid, Kind: t.Kind, StartedAt: startedAt}); err != nil {
+		log.Printf("severity=error event=maintenance-realpid-write-failed kind=%q pid=%d err=%v", t.Kind, pid, err)
+	} else {
+		s.state.RemoveTransientClaim(t.Kind, startedAt)
+	}
 
-	// Step 5: fire the observability hook AFTER spawn + record.
+	// Step 6: fire the observability hook AFTER spawn + record.
 	s.fireHook(t)
 
-	// Step 6: drain goroutine. The goroutine has a single exit
+	// Step 7: drain goroutine. The goroutine has a single exit
 	// condition (Spawner.Wait returning) and updates only state +
 	// the inflight map under s.mu; no `for {}` loop.
 	go func(pid int, kind string) {

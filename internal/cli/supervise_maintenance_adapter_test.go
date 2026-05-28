@@ -80,27 +80,138 @@ func TestMaintenanceStateAdapter_TrackerPersistPreservesMaintenanceState(t *test
 	}
 }
 
-func TestMaintenanceStateAdapter_RemoveTransientPIDRemovesAllMatches(t *testing.T) {
+// TestMaintenanceStateAdapter_RemoveTransientClaimRemovesOnlyMatching
+// covers PR #243 bot P2#4. Two maintenance kinds can each hold a PID=0
+// claim simultaneously (the single-run guard is per-kind). Removing one
+// kind's claim must NOT erase the other kind's still-valid claim, and
+// must NOT touch real-PID entries. The old behaviour
+// (RemoveTransientPID(0) removing ALL PID=0 entries) is the bug; the
+// scheduler now removes claims by (PID==0, Kind, StartedAt) identity.
+func TestMaintenanceStateAdapter_RemoveTransientClaimRemovesOnlyMatching(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	statePath := filepath.Join(stateDir, "supervisor-state.json")
 	adapter := newMaintenanceStateAdapter(statePath, nil)
 
-	adapter.AddTransientPID(api.TransientPID{PID: 0, Kind: "workspace-weekly-refresh", StartedAt: "2026-05-17T04:00:00Z"})
-	adapter.AddTransientPID(api.TransientPID{PID: 0, Kind: "server-weekly-refresh", StartedAt: "2026-05-17T04:00:01Z"})
-	adapter.AddTransientPID(api.TransientPID{PID: 9999, Kind: "server-weekly-refresh", StartedAt: "2026-05-17T04:00:02Z"})
-	adapter.RemoveTransientPID(0)
+	const startedA = "2026-05-17T04:00:00Z"
+	const startedB = "2026-05-17T04:00:01Z"
+	for _, p := range []api.TransientPID{
+		{PID: 0, Kind: "workspace-weekly-refresh", StartedAt: startedA},
+		{PID: 0, Kind: "server-weekly-refresh", StartedAt: startedB},
+		{PID: 9999, Kind: "server-weekly-refresh", StartedAt: "2026-05-17T04:00:02Z"},
+	} {
+		if err := adapter.AddTransientPID(p); err != nil {
+			t.Fatalf("AddTransientPID(%+v): %v", p, err)
+		}
+	}
+
+	// Remove only kind A's claim.
+	adapter.RemoveTransientClaim("workspace-weekly-refresh", startedA)
 
 	got, err := api.ReadSupervisorState(statePath)
 	if err != nil {
 		t.Fatalf("read state: %v", err)
 	}
-	if len(got.TransientPIDs) != 1 || got.TransientPIDs[0].PID != 9999 {
-		t.Fatalf("RemoveTransientPID must remove all matching PIDs only; got %+v", got.TransientPIDs)
+	if len(got.TransientPIDs) != 2 {
+		t.Fatalf("RemoveTransientClaim must remove ONLY the matching claim; got %+v", got.TransientPIDs)
+	}
+	var sawClaimB, sawReal bool
+	for _, p := range got.TransientPIDs {
+		if p.PID == 0 && p.Kind == "server-weekly-refresh" && p.StartedAt == startedB {
+			sawClaimB = true
+		}
+		if p.PID == 9999 {
+			sawReal = true
+		}
+	}
+	if !sawClaimB || !sawReal {
+		t.Fatalf("kind B's claim AND the real PID must survive; got %+v", got.TransientPIDs)
+	}
+
+	// A non-matching identity is a no-op.
+	adapter.RemoveTransientClaim("server-weekly-refresh", "no-such-startedat")
+	if got, _ := api.ReadSupervisorState(statePath); len(got.TransientPIDs) != 2 {
+		t.Fatalf("non-matching RemoveTransientClaim must be a no-op; got %+v", got.TransientPIDs)
+	}
+
+	// Real-PID drain still removes the real entry.
+	adapter.RemoveTransientPID(9999)
+	got, err = api.ReadSupervisorState(statePath)
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	if len(got.TransientPIDs) != 1 || got.TransientPIDs[0].PID != 0 {
+		t.Fatalf("RemoveTransientPID(real) must leave only kind B's claim; got %+v", got.TransientPIDs)
+	}
+}
+
+// TestMaintenanceStateAdapter_ReconcileTransientPIDsRemovesDeadAndClaims
+// covers PR #243 bot P2#2 + the dual-entry crash-window the consultant
+// flagged. After the spawner drains/kills in-flight children at
+// shutdown, the supervisor reconciles on-disk transient_pids by
+// removing every entry whose PID is not alive. A PID=0 claim and a real
+// PID for the SAME kind can legitimately coexist in a crash window;
+// this proves the reconcile (with the production isPIDAlive) drops the
+// claim and any dead PID, retains the live one, and never treats PID 0
+// as a kill target.
+func TestMaintenanceStateAdapter_ReconcileTransientPIDsRemovesDeadAndClaims(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	statePath := filepath.Join(stateDir, "supervisor-state.json")
+	adapter := newMaintenanceStateAdapter(statePath, nil)
+
+	live := os.Getpid() // the test process is always alive
+	for _, p := range []api.TransientPID{
+		{PID: 0, Kind: "workspace-weekly-refresh", StartedAt: "2026-05-17T04:00:00Z"},    // claim
+		{PID: live, Kind: "workspace-weekly-refresh", StartedAt: "2026-05-17T04:00:01Z"}, // real, alive
+	} {
+		if err := adapter.AddTransientPID(p); err != nil {
+			t.Fatalf("AddTransientPID(%+v): %v", p, err)
+		}
+	}
+
+	// isPIDAlive is the production probe; isPIDAlive(0) is false (guard),
+	// isPIDAlive(live) is true.
+	removed := adapter.ReconcileTransientPIDs(isPIDAlive)
+
+	if len(removed) != 1 || removed[0] != 0 {
+		t.Fatalf("reconcile must remove the PID=0 claim only (live PID retained); removed=%v", removed)
+	}
+	got, err := api.ReadSupervisorState(statePath)
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	if len(got.TransientPIDs) != 1 || got.TransientPIDs[0].PID != live {
+		t.Fatalf("only the live real PID must remain; got %+v", got.TransientPIDs)
+	}
+}
+
+// TestMaintenanceSpawner_StartAbortsWhenGracefulInProgress covers PR
+// #243 bot P1#2. When a supervisor graceful-exit is already in
+// progress, Start must refuse to launch the child (so Shutdown cannot
+// snapshot zero processes and exit while a fresh child is launching).
+func TestMaintenanceSpawner_StartAbortsWhenGracefulInProgress(t *testing.T) {
+	var graceful gracefulCounter
+	graceful.Enter() // simulate an in-progress graceful exit
+	sp := newMaintenanceSpawner(nil, &graceful)
+
+	pid, err := sp.Start(api.MaintenanceTimer{
+		Name:    `\mcp-local-hub-maintenance-graceful-abort-test`,
+		Kind:    "workspace-weekly-refresh",
+		Command: shellPathForExitCodeTest(),
+		Args:    shellArgsForExitCodeTest(0),
+	})
+	if err == nil {
+		t.Fatal("Start must abort when graceful-exit is in progress")
+	}
+	if pid != 0 {
+		t.Fatalf("aborted Start must return pid 0; got %d", pid)
+	}
+	if len(sp.snapshotProcesses()) != 0 {
+		t.Fatalf("aborted Start must not register a process; got %+v", sp.snapshotProcesses())
 	}
 }
 
 func TestMaintenanceSpawner_WaitTreatsExitCodeAsCleanProcessExit(t *testing.T) {
-	sp := newMaintenanceSpawner(nil)
+	sp := newMaintenanceSpawner(nil, nil)
 	timer := api.MaintenanceTimer{
 		Name:    `\mcp-local-hub-maintenance-exit-code-test`,
 		Kind:    "workspace-weekly-refresh",
@@ -129,7 +240,7 @@ func TestMaintenanceSpawner_StartFailureEmitsWarnAuditEvent(t *testing.T) {
 	}
 	defer events.Close()
 
-	sp := newMaintenanceSpawner(events)
+	sp := newMaintenanceSpawner(events, nil)
 	_, err = sp.Start(api.MaintenanceTimer{
 		Name:    `\mcp-local-hub-maintenance-missing-command-test`,
 		Kind:    "workspace-weekly-refresh",

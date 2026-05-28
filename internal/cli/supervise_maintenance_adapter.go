@@ -65,17 +65,22 @@ func (a *maintenanceStateAdapter) SetMaintenanceFiredAt(kind, rfc3339nanoUTC str
 	return nil
 }
 
-func (a *maintenanceStateAdapter) AddTransientPID(p api.TransientPID) {
+func (a *maintenanceStateAdapter) AddTransientPID(p api.TransientPID) error {
 	if a == nil {
-		return
+		return nil
 	}
 	err := mutateSupervisorStateFile(a.statePath, func(file *api.SupervisorStateFile) error {
 		file.TransientPIDs = append(file.TransientPIDs, p)
 		return nil
 	})
 	if err != nil {
+		// Propagate to the scheduler so it can abort the fire before
+		// spawning when the PID=0 claim did not persist (PR #243 bot
+		// P2#3). The audit emit is retained for operator visibility.
 		a.emitStateError("maintenance-transient-write-failed", p.Kind, err)
+		return err
 	}
+	return nil
 }
 
 func (a *maintenanceStateAdapter) RemoveTransientPID(pid int) {
@@ -98,6 +103,68 @@ func (a *maintenanceStateAdapter) RemoveTransientPID(pid int) {
 	}
 }
 
+// RemoveTransientClaim removes the single PID=0 claim slot matching
+// (PID==0, Kind, StartedAt). Identity matching (not bare PID==0)
+// prevents two kinds' simultaneous claims from colliding — removing
+// one kind's claim must not erase the other's still-valid in-flight
+// claim (PR #243 bot P2#4). The PID==0 guard ensures a real-PID entry
+// is never removed even if a (Kind, StartedAt) pair were reused.
+func (a *maintenanceStateAdapter) RemoveTransientClaim(kind, startedAt string) {
+	if a == nil {
+		return
+	}
+	err := mutateSupervisorStateFile(a.statePath, func(file *api.SupervisorStateFile) error {
+		out := file.TransientPIDs[:0]
+		for _, p := range file.TransientPIDs {
+			if p.PID == 0 && p.Kind == kind && p.StartedAt == startedAt {
+				continue
+			}
+			out = append(out, p)
+		}
+		file.TransientPIDs = out
+		return nil
+	})
+	if err != nil {
+		a.emitStateError("maintenance-transient-claim-remove-failed", kind, err)
+	}
+}
+
+// ReconcileTransientPIDs removes every transient_pids entry whose PID
+// is no longer alive per `alive`, returning the removed PIDs. The
+// supervisor's shutdown path calls this AFTER the spawner's Shutdown
+// drains/kills in-flight maintenance children, so that the on-disk
+// transient_pids state is synchronously reconciled before the process
+// exits — closing the window where the per-fire drain goroutine had
+// not yet run RemoveTransientPID and a stale entry would survive into
+// the next cold start (PR #243 bot P2#2). `alive` must report
+// PID<=0 (claim slots) as not-alive so abandoned claims are also
+// cleared; the production caller passes isPIDAlive, which does exactly
+// that. Entries still alive (e.g. a StillRunning maintenance child)
+// are retained — the cold-start reaper handles those next start.
+func (a *maintenanceStateAdapter) ReconcileTransientPIDs(alive func(int) bool) []int {
+	if a == nil || alive == nil {
+		return nil
+	}
+	var removed []int
+	err := mutateSupervisorStateFile(a.statePath, func(file *api.SupervisorStateFile) error {
+		out := file.TransientPIDs[:0]
+		for _, p := range file.TransientPIDs {
+			if !alive(p.PID) {
+				removed = append(removed, p.PID)
+				continue
+			}
+			out = append(out, p)
+		}
+		file.TransientPIDs = out
+		return nil
+	})
+	if err != nil {
+		a.emitStateError("maintenance-transient-reconcile-failed", "", err)
+		return nil
+	}
+	return removed
+}
+
 func (a *maintenanceStateAdapter) emitStateError(event, kind string, err error) {
 	if a == nil || a.events == nil || err == nil {
 		return
@@ -117,9 +184,28 @@ func (a *maintenanceStateAdapter) emitStateError(event, kind string, err error) 
 type maintenanceSpawner struct {
 	events *api.SupervisorEventLog
 
+	// graceful, when non-nil, lets Start abort a spawn that races a
+	// supervisor graceful-exit: if a shutdown began before the child
+	// was registered in procs, Shutdown could snapshot zero processes
+	// and return while the freshly-spawned child is still launching,
+	// orphaning it (PR #243 bot P1#2). Start holds mu across cmd.Start +
+	// the post-start graceful re-check + procs registration, and
+	// Shutdown.snapshotProcesses takes the same mu, so the two
+	// serialize: either Shutdown sees the registered child and
+	// tree-kills it, or Start's re-check sees graceful and tree-kills
+	// its own child. Nil in tests that don't exercise the shutdown race.
+	graceful *gracefulCounter
+
 	mu    sync.Mutex
 	procs map[int]*maintenanceProcess
 }
+
+// errMaintenanceShutdownInProgress is returned by Start when a
+// supervisor graceful-exit is in progress; it flows into the
+// scheduler's existing spawn-error path (claim rolled back, slot
+// released, fired_at not advanced) so a shutdown-aborted fire retries
+// on the next supervisor start rather than orphaning a child.
+var errMaintenanceShutdownInProgress = errors.New("maintenance spawn aborted: supervisor graceful-exit in progress")
 
 type maintenanceProcess struct {
 	timer    api.MaintenanceTimer
@@ -135,10 +221,11 @@ type maintenanceShutdownResult struct {
 	StillRunning []int
 }
 
-func newMaintenanceSpawner(events *api.SupervisorEventLog) *maintenanceSpawner {
+func newMaintenanceSpawner(events *api.SupervisorEventLog, graceful *gracefulCounter) *maintenanceSpawner {
 	return &maintenanceSpawner{
-		events: events,
-		procs:  map[int]*maintenanceProcess{},
+		events:   events,
+		graceful: graceful,
+		procs:    map[int]*maintenanceProcess{},
 	}
 }
 
@@ -153,6 +240,29 @@ func (s *maintenanceSpawner) Start(t api.MaintenanceTimer) (int, error) {
 	}
 	cmd := exec.Command(t.Command, t.Args...)
 	process.NoConsole(cmd)
+	// Spawn the child as its own process-group leader (POSIX) so
+	// TreeKillByPID's kill(-pgid) reaches descendants; no-op on Windows
+	// where taskkill /T walks the tree via kernel parent-PID links.
+	// Closes the descendant-orphan half of PR #243 bot P2#1.
+	process.NewProcessGroup(cmd)
+
+	// Hold mu across cmd.Start + the graceful re-check + procs
+	// registration. Shutdown.snapshotProcesses takes the same mu, so a
+	// concurrent graceful-exit either runs entirely before this section
+	// (caught by the pre/post-start graceful checks) or entirely after
+	// (sees the registered child and tree-kills it). cmd.Start returns
+	// immediately (it does not wait for exit), so the critical section
+	// is bounded. waitAndRecord, launched at the end, does not take mu
+	// before its first cmd.Wait, so no self-deadlock.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Pre-start gate (PR #243 bot P1#2): if a graceful-exit already
+	// began, do not launch at all.
+	if s.graceful != nil && s.graceful.InProgress() {
+		return 0, errMaintenanceShutdownInProgress
+	}
+
 	if err := cmd.Start(); err != nil {
 		s.emitSpawnFailed(t, err)
 		return 0, err
@@ -163,14 +273,31 @@ func (s *maintenanceSpawner) Start(t api.MaintenanceTimer) (int, error) {
 		return 0, err
 	}
 	pid := cmd.Process.Pid
+
+	// Post-start gate (PR #243 bot P1#2): a graceful-exit that began
+	// while cmd.Start ran must not leave this freshly-spawned child
+	// orphaned. Tree-kill it and abort; the scheduler's spawn-error
+	// path rolls back the claim. We still hold mu, so Shutdown cannot
+	// have snapshotted-and-returned between cmd.Start and this check.
+	if s.graceful != nil && s.graceful.InProgress() {
+		if err := process.TreeKillByPID(pid); err != nil && s.events != nil {
+			_ = s.events.Emit(api.SupervisorEvent{
+				Severity: "warn",
+				Source:   "maintenance",
+				Event:    "maintenance-shutdown-abort-kill-failed",
+				TaskName: t.Name,
+				Body:     map[string]any{"kind": t.Kind, "pid": pid, "err": err.Error()},
+			})
+		}
+		return 0, errMaintenanceShutdownInProgress
+	}
+
 	entry := &maintenanceProcess{
 		timer: t,
 		cmd:   cmd,
 		done:  make(chan struct{}),
 	}
-	s.mu.Lock()
 	s.procs[pid] = entry
-	s.mu.Unlock()
 
 	go s.waitAndRecord(pid, entry)
 	return pid, nil
@@ -216,7 +343,13 @@ func (s *maintenanceSpawner) Shutdown(timeout time.Duration) maintenanceShutdown
 	remaining = collectFinishedMaintenance(remaining, &result)
 	for pid, entry := range remaining {
 		if entry.cmd != nil && entry.cmd.Process != nil {
-			if err := entry.cmd.Process.Kill(); err == nil {
+			// Tree-kill (PR #243 bot P2#1): a maintenance command may
+			// have spawned descendants (e.g. git/npm under
+			// `mcphub workspace refresh`); cmd.Process.Kill() reaps only
+			// the root PID and orphans the tree. TreeKillByPID walks the
+			// whole tree (taskkill /F /T on Windows, kill(-pgid) on
+			// POSIX since the child was spawned as a group leader).
+			if err := process.TreeKillByPID(pid); err == nil {
 				result.Killed = append(result.Killed, pid)
 			}
 		}
