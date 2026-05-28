@@ -106,10 +106,17 @@ func Transition(state SMState, ev SMEvent, ctx SMContext) (newState SMState, sid
 			// bounded to "transition OUT of StExiting" so this set is
 			// preserved across the self-loop. Closes bot finding B
 			// on PR #236 1c0ea09.
+			//
+			// If intent flips back to "running" before spawn completes,
+			// CLEAR any previously-queued stop so the next EvHealthOK
+			// does not route to StExiting against the operator's
+			// latest intent. Closes bot finding on PR #236 db988e0
+			// (intent flip stopped -> running during StSpawning left
+			// queued_action=stop stale).
 			if ctx.IntentDesired == "stopped" {
 				return StSpawning, "set queued_action=stop", false, true
 			}
-			return StSpawning, "", false, true
+			return StSpawning, "clear queued_action", false, true
 		case EvRequestGraceful:
 			return StExiting, "issue terminate, queued_action=none", true, true
 		}

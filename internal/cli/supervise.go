@@ -2164,17 +2164,6 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 			}
 		}
 		if startErr != nil {
-			// Closes bot finding A on PR #236 1c0ea09 (P2 #5 Windows
-			// StartWithJob post-CreateProcess orphan): the sentinel
-			// process.ErrSpawnPostCreate marks the case where the OS
-			// child IS alive (PID allocated) but the FindProcess
-			// handle acquisition failed. Audit-log the orphan
-			// separately so operators can correlate; the backoff
-			// respawn that follows will either succeed on a fresh
-			// process (orphan dies via Job Object membership when
-			// supervisor exits or daemon respawn binds the same port)
-			// or fail with port-in-use (the natural cap on duplicate-
-			// daemon risk).
 			isOrphan := errors.Is(startErr, process.ErrSpawnPostCreate)
 			tracker.MarkSpawnFailed(d.TaskName, startErr)
 			_ = events.Emit(api.SupervisorEvent{
@@ -2188,25 +2177,51 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 					"orphan":  isOrphan,
 				},
 			})
+			_ = persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName)
 			if isOrphan {
+				// Best-effort kill of the Windows post-create orphan
+				// via process.BestEffortKillByPID (OpenProcess +
+				// TerminateProcess + WaitForSingleObject on a
+				// separate handle, since cmd.Process is unavailable).
+				// The helper blocks until the process actually exits
+				// (or 5s timeout) so a subsequent port rebind doesn't
+				// race against still-tearing-down orphan sockets.
+				killErr := process.BestEffortKillByPID(pid)
+				orphanBody := map[string]any{
+					"pid":           pid,
+					"kill_succeeded": killErr == nil,
+				}
+				severity := "warn"
+				if killErr != nil {
+					orphanBody["kill_error"] = killErr.Error()
+					orphanBody["note"] = "Kill failed - orphan may still be alive. Returning RAW startErr (not wrapped with errSpawnPreChild) so the controller does NOT synth EvChildExit + backoff retry. Daemon stays in StSpawning (preferable to duplicate-daemon risk). Operator should investigate kill_error and may need to terminate orphan manually."
+					severity = "error"
+				} else {
+					orphanBody["note"] = "Orphan terminated cleanly. Wrapping with errSpawnPreChild so the controller synth EvChildExit + backoff timer drives retry. Fresh respawn binds the port without orphan interference."
+				}
 				_ = events.Emit(api.SupervisorEvent{
-					Severity: "warn",
+					Severity: severity,
 					Source:   "lifecycle",
 					Event:    "daemon-spawn-orphan-detected",
 					TaskName: d.TaskName,
-					Body: map[string]any{
-						"pid": pid,
-						"note": "OS child created but Go handle acquisition failed; Job Object membership ensures cleanup on supervisor exit, backoff respawn will hit port-in-use if orphan still listens",
-					},
+					Body:     orphanBody,
 				})
+				// Closes bot finding on PR #237 82f1899 (P2
+				// do-not-respawn-after-failed-orphan-kill): if the
+				// orphan kill failed, the orphan may still be alive
+				// at pi.ProcessId and holding its port; routing
+				// through backoff respawn would either duplicate the
+				// daemon (if port is freed) or fail with port-in-use
+				// (if not) - both worse than the stuck-StSpawning
+				// state until next external reconcile. Return raw
+				// startErr (no wrap) - controller does NOT synth.
+				if killErr != nil {
+					return startErr
+				}
 			}
-			_ = persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName)
-			// Wrap with errSpawnPreChild so the supervisor controller
-			// synthesizes EvChildExit and routes through
-			// StBackoffWaiting + backoff timer. For the orphan case
-			// the backoff respawn would either bind a fresh PID (if
-			// orphan died) or fail with port-in-use (natural duplicate
-			// cap).
+			// Common pre-child case: wrap with errSpawnPreChild so
+			// the supervisor controller synthesizes EvChildExit and
+			// routes through StBackoffWaiting + backoff timer.
 			return fmt.Errorf("%w: %v", errSpawnPreChild, startErr)
 		}
 		startedAt := time.Now().UTC()

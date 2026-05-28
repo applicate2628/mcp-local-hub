@@ -1010,6 +1010,132 @@ func TestSupervisorController_B1_StopDuringSpawn_IntentUpdateSetsQueuedActionSto
 	t.Fatalf("queued_action after StSpawning + EvIntentUpdate(stopped): %v; want \"stop\" (regression: substring switch missing \"stop\" OR auto-clear at line 415-417 wiped it)", v)
 }
 
+// TestSupervisorController_R5_NonPreChildErrorDoesNotSynthExit verifies
+// the controller's contract on receiving a SpawnFunc error that is
+// NOT wrapped with errSpawnPreChild. The switch on
+// errors.Is(err, errSpawnPreChild) MUST NOT match - no synthetic
+// EvChildExit is posted - the daemon stays in StSpawning.
+//
+// This is the controller-level contract that supports both:
+//   - the post-child persist-error case (cmd.Start succeeded, wait
+//     goroutine launched, persistDaemonRuntimeTracker failed); the
+//     real EvChildExit will arrive from the wait goroutine
+//   - any future error path that explicitly chooses to not route
+//     through backoff
+//
+// The Windows post-create orphan case is now handled in
+// supervise.go via process.BestEffortKillByPID + wrap-with-
+// errSpawnPreChild (closes the stuck-StSpawning issue the bot
+// flagged on PR #237 a646148). Production no longer relies on this
+// "don't synth" path for orphans, but the controller contract is
+// still tested here as a defensive guard.
+func TestSupervisorController_R5_NonPreChildErrorDoesNotSynthExit(t *testing.T) {
+	var spawnCalls atomic.Int32
+	fakeSpawn := func(d api.SupervisorDaemon) error {
+		spawnCalls.Add(1)
+		// Non-pre-child error - mirrors post-child persist-error
+		// case (or any other error that's NOT wrapped with
+		// errSpawnPreChild).
+		return errors.New("generic non-pre-child error")
+	}
+	descriptor := api.SupervisorDaemon{TaskName: `\mcp-local-hub-test-default`, Server: "test", Daemon: "default"}
+	ctrl, loop, cancel := setupControllerForB1Test(t, descriptor, "running", fakeSpawn)
+	defer cancel()
+	ctrl.smStates.Store(descriptor.TaskName, api.StIdle)
+
+	loop.Post(api.LoopEvent{Kind: api.EvStart, TaskName: descriptor.TaskName})
+
+	time.Sleep(300 * time.Millisecond)
+
+	if spawnCalls.Load() != 1 {
+		t.Fatalf("spawn called %d times; want exactly 1 (no backoff retry should fire)", spawnCalls.Load())
+	}
+	st, _ := ctrl.GetSMState(descriptor.TaskName)
+	if st != api.StSpawning {
+		t.Fatalf("after non-pre-child spawn error: state=%s; want StSpawning (regression: controller should NOT synth EvChildExit for non-errSpawnPreChild errors)", st)
+	}
+}
+
+// TestSupervisorController_R5_IntentFlipStopThenRun_ClearsQueuedAction is
+// the r5 follow-up regression guard for bot finding on PR #236 db988e0
+// (intent flip stopped -> running stale queued_action). The SM's new
+// StSpawning + EvIntentUpdate(running) self-loop returns
+// "clear queued_action" side string, and the controller's substring
+// switch on "clear queued_action" stores "". This ensures that a
+// later EvHealthOK does not route to StExiting against the operator's
+// LATEST intent.
+func TestSupervisorController_R5_IntentFlipStopThenRun_ClearsQueuedAction(t *testing.T) {
+	fakeSpawn := func(d api.SupervisorDaemon) error { return nil }
+	descriptor := api.SupervisorDaemon{TaskName: `\mcp-local-hub-test-default`, Server: "test", Daemon: "default"}
+	// Initial intent: running (so we can flip to stopped then back).
+	ctrl, loop, cancel := setupControllerForB1Test(t, descriptor, "running", fakeSpawn)
+	defer cancel()
+
+	// Stage: state=StSpawning + queued_action=stop (as if a prior
+	// stop intent had been queued during spawn).
+	ctrl.smStates.Store(descriptor.TaskName, api.StSpawning)
+	ctrl.queuedActions.Store(descriptor.TaskName, "stop")
+
+	// Now post EvIntentUpdate with current intent=running (already
+	// the setup's intent).
+	loop.Post(api.LoopEvent{Kind: api.EvIntentUpdate, TaskName: descriptor.TaskName})
+
+	deadline := time.Now().Add(1 * time.Second)
+	for time.Now().Before(deadline) {
+		if v, ok := ctrl.queuedActions.Load(descriptor.TaskName); ok && v.(string) == "" {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	v, _ := ctrl.queuedActions.Load(descriptor.TaskName)
+	t.Fatalf("after StSpawning + EvIntentUpdate(running) on stale queued_action=stop: queued_action=%v; want \"\" (regression: SM returned empty side or controller substring switch missing \"clear queued_action\")", v)
+}
+
+// TestSupervisorController_R5_StIdleFromStBackoffWaitingMarksTrackerExited
+// is the r5 follow-up regression guard for bot finding on PR #236
+// db988e0 (tracker state drift). When SM transitions to StIdle from
+// a non-idle state (e.g. StBackoffWaiting via the B1 intent re-check
+// path), the controller MUST call tracker.MarkExited BEFORE persist
+// so supervisor-state.json does not record state="backoff-waiting"
+// + CurrentPID=N alongside SM state="idle".
+func TestSupervisorController_R5_StIdleFromStBackoffWaitingMarksTrackerExited(t *testing.T) {
+	fakeSpawn := func(d api.SupervisorDaemon) error { return nil }
+	descriptor := api.SupervisorDaemon{TaskName: `\mcp-local-hub-test-default`, Server: "test", Daemon: "default"}
+	ctrl, loop, cancel := setupControllerForB1Test(t, descriptor, "stopped", fakeSpawn)
+	defer cancel()
+
+	// Seed tracker with a live PID + backoff state (as if the daemon
+	// just crashed and is in the backoff window).
+	ctrl.tracker.MarkSpawned(descriptor.TaskName, 12345, time.Now().UTC())
+	ctrl.tracker.MarkBackoff(descriptor.TaskName)
+	ctrl.smStates.Store(descriptor.TaskName, api.StBackoffWaiting)
+
+	// Fire EvTimerDue with intent=stopped - B1 routes to StIdle.
+	loop.Post(api.LoopEvent{Kind: api.EvTimerDue, TaskName: descriptor.TaskName})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		st, _ := ctrl.GetSMState(descriptor.TaskName)
+		if st != api.StIdle {
+			time.Sleep(10 * time.Millisecond)
+			continue
+		}
+		entry, ok := ctrl.tracker.Get(descriptor.TaskName)
+		if !ok {
+			t.Fatalf("tracker entry missing after MarkExited")
+		}
+		if entry.State != daemonRuntimeStateIdle {
+			t.Fatalf("tracker state = %q; want %q (regression: tracker not synced to idle on StBackoffWaiting -> StIdle transition)", entry.State, daemonRuntimeStateIdle)
+		}
+		if entry.CurrentPID != 0 {
+			t.Fatalf("tracker CurrentPID = %d; want 0 (regression: MarkExited not called)", entry.CurrentPID)
+		}
+		return
+	}
+	st, _ := ctrl.GetSMState(descriptor.TaskName)
+	t.Fatalf("after EvTimerDue with intent=stopped: state=%s; want StIdle (B1 intent re-check missing)", st)
+}
+
 // TestSupervisorController_C3_PreChildSpawnFailureUsesPostSelf verifies
 // the C3 wiring: executeSideEffect uses PostSelf (priority channel)
 // instead of inline Post on the main channel. Test by checking the
