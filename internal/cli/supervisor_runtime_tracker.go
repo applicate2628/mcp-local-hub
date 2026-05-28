@@ -416,36 +416,23 @@ func (t *DaemonRuntimeTracker) PersistTo(path string) error {
 		return fmt.Errorf("empty supervisor state path")
 	}
 	snapshot := t.Snapshot()
-	file := &api.SupervisorStateFile{
-		Version: 1,
-		Daemons: make(map[string]api.SupervisorDaemonState, len(snapshot)),
-	}
-	existing, err := api.ReadSupervisorState(path)
-	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("read existing supervisor state: %w", err)
+	return mutateSupervisorStateFile(path, func(file *api.SupervisorStateFile) error {
+		file.Daemons = make(map[string]api.SupervisorDaemonState, len(snapshot))
+		for taskName, entry := range snapshot {
+			daemonState := api.SupervisorDaemonState{
+				State:         supervisorStateFromRuntimeState(entry.State),
+				CurrentPID:    entry.CurrentPID,
+				PIDGeneration: entry.PIDGeneration,
+				OrphanPID:     entry.OrphanPID,
+				JobProtection: entry.JobProtection,
+			}
+			if !entry.StartedAt.IsZero() {
+				daemonState.StartedAt = entry.StartedAt.UTC().Format(time.RFC3339Nano)
+			}
+			file.Daemons[taskName] = daemonState
 		}
-	} else if existing != nil {
-		if existing.Version != 0 {
-			file.Version = existing.Version
-		}
-		file.TransientPIDs = existing.TransientPIDs
-		file.MaintenanceFiredAt = existing.MaintenanceFiredAt
-	}
-	for taskName, entry := range snapshot {
-		daemonState := api.SupervisorDaemonState{
-			State:         supervisorStateFromRuntimeState(entry.State),
-			CurrentPID:    entry.CurrentPID,
-			PIDGeneration: entry.PIDGeneration,
-			OrphanPID:     entry.OrphanPID,
-			JobProtection: entry.JobProtection,
-		}
-		if !entry.StartedAt.IsZero() {
-			daemonState.StartedAt = entry.StartedAt.UTC().Format(time.RFC3339Nano)
-		}
-		file.Daemons[taskName] = daemonState
-	}
-	return api.WriteStateFileAtomic(path, file)
+		return nil
+	})
 }
 
 func loadDaemonRuntimeTrackerFromStatePath(path string) (*DaemonRuntimeTracker, error) {

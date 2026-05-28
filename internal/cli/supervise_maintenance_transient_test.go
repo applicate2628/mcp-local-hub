@@ -52,10 +52,11 @@ func (s *transientTestState) GetMaintenanceFiredAt(kind string) (string, bool) {
 	return v, ok
 }
 
-func (s *transientTestState) SetMaintenanceFiredAt(kind, rfc3339nanoUTC string) {
+func (s *transientTestState) SetMaintenanceFiredAt(kind, rfc3339nanoUTC string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.fired[kind] = rfc3339nanoUTC
+	return nil
 }
 
 func (s *transientTestState) AddTransientPID(p api.TransientPID) {

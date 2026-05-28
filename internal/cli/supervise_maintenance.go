@@ -54,7 +54,16 @@ import (
 // is the source of truth that QuiesceHandler.Drain consumes).
 type StateStore interface {
 	GetMaintenanceFiredAt(kind string) (string, bool)
-	SetMaintenanceFiredAt(kind, rfc3339nanoUTC string)
+	// SetMaintenanceFiredAt persists the per-kind last-fired
+	// timestamp. Returns non-nil error when the underlying disk
+	// write fails (transient disk error, AV scanner holding the
+	// file open, quota policy denial). Scheduler uses the error to
+	// activate in-process repeated-fire-storm prevention: on persist
+	// failure, the cache stores the timestamp and authoritatively
+	// blocks re-fire at the 60s tick cadence until either (a) a
+	// subsequent persist succeeds, (b) the supervisor restarts and
+	// re-warms from disk.
+	SetMaintenanceFiredAt(kind, rfc3339nanoUTC string) error
 
 	// AddTransientPID appends a TransientPID entry. The "claim slot"
 	// pattern: a `PID=0` entry is written BEFORE the spawn syscall,
@@ -107,17 +116,71 @@ type MaintenanceScheduler struct {
 	mu       sync.Mutex
 	inflight map[string]struct{} // keyed by t.Kind; entry presence = "fire in progress"
 	clock    func() time.Time    // UTC clock used for StartedAt timestamping in fire(); test-injectable
+
+	// lastFiredCache is the in-process authoritative store for the
+	// last-fired-at timestamp per kind. Closes the consultant
+	// strategic concern on PR #243 (repeated-fire-storm prevention):
+	// pre-PR, a transient StateStore.SetMaintenanceFiredAt failure
+	// (disk full, AV scanner holding the file open, quota policy)
+	// meant the persisted last-fired-at stayed at the OLD value, and
+	// the next Tick (60s later) saw the same "still due" deadline and
+	// re-fired — at the supervisor's 60s tick cadence, that's 60 fires
+	// per hour for the duration of the disk error.
+	//
+	// Fix: in-process cache is authoritative for the current process
+	// lifetime. State-write failures emit a warn audit event but do
+	// NOT trigger re-fire because the cache update happens
+	// unconditionally inside Tick, before the state-store call.
+	//
+	// Cross-restart durability remains the StateStore's responsibility
+	// (the on-disk supervisor-state.maintenance_fired_at[kind] is the
+	// source of truth across supervisor cold starts). The cache only
+	// covers the storm window between a transient write failure and
+	// the next successful persist OR supervisor restart.
+	//
+	// Concurrency: lastFiredCacheMu is acquired around every read AND
+	// write. Tick is single-goroutine (the production runner is a
+	// single ticker goroutine), but tests can call Tick concurrently
+	// across multiple kinds, and inflight goroutines reading the
+	// cache via the next Tick must observe the most-recent write.
+	lastFiredCacheMu sync.RWMutex
+	lastFiredCache   map[string]string // kind -> RFC3339Nano UTC; matches StateStore on-disk representation
 }
 
 // NewMaintenanceScheduler builds a scheduler backed by the supplied
 // state store.
 func NewMaintenanceScheduler(state StateStore) *MaintenanceScheduler {
 	return &MaintenanceScheduler{
-		state:    state,
-		fireHook: func(api.MaintenanceTimer) {}, // no-op default keeps Tick crash-free if caller forgets SetFireHook
-		inflight: map[string]struct{}{},
-		clock:    func() time.Time { return time.Now().UTC() },
+		state:          state,
+		fireHook:       func(api.MaintenanceTimer) {}, // no-op default keeps Tick crash-free if caller forgets SetFireHook
+		inflight:       map[string]struct{}{},
+		clock:          func() time.Time { return time.Now().UTC() },
+		lastFiredCache: map[string]string{},
 	}
+}
+
+// rememberLastFiredLocally records a fire timestamp in the in-process
+// cache. Authoritative for the current process lifetime; survives
+// state-store write failures so a transient disk error cannot cause
+// repeated-fire-storm at the 60s tick cadence (consultant blocker on
+// PR #243). Safe for concurrent callers via the cache mutex.
+func (s *MaintenanceScheduler) rememberLastFiredLocally(kind, rfc3339nanoUTC string) {
+	s.lastFiredCacheMu.Lock()
+	if s.lastFiredCache == nil {
+		s.lastFiredCache = map[string]string{}
+	}
+	s.lastFiredCache[kind] = rfc3339nanoUTC
+	s.lastFiredCacheMu.Unlock()
+}
+
+// loadLastFiredLocally reads the in-process cache, returning the
+// cached value if present. Tick consults the cache before the state
+// store so a state-write failure does not cause re-fire.
+func (s *MaintenanceScheduler) loadLastFiredLocally(kind string) (string, bool) {
+	s.lastFiredCacheMu.RLock()
+	v, ok := s.lastFiredCache[kind]
+	s.lastFiredCacheMu.RUnlock()
+	return v, ok
 }
 
 // SetFireHook installs the callback invoked once per fired timer.
@@ -191,6 +254,16 @@ func (s *MaintenanceScheduler) SetClock(c func() time.Time) {
 // finished, otherwise a slow handler would wedge weekly cadence.
 func (s *MaintenanceScheduler) Tick(now time.Time, timers []api.MaintenanceTimer) {
 	for _, t := range timers {
+		// Operator-supported off-switch (PR #243 consultant blocker):
+		// timers with Enabled set to &false are skipped entirely —
+		// no fire, no transient PID, no audit event. nil + &true
+		// both honor the timer (default-on). Live reload via the
+		// IntentWatcher refreshes the cached intent on every
+		// supervisor-intent.json mtime change, so an operator edit
+		// to `enabled: false` takes effect on the next 60s tick.
+		if t.Enabled != nil && !*t.Enabled {
+			continue
+		}
 		switch t.Kind {
 		case "workspace-weekly-refresh", "server-weekly-refresh":
 			// known cadence — fall through to the weekly evaluator
@@ -208,7 +281,21 @@ func (s *MaintenanceScheduler) Tick(now time.Time, timers []api.MaintenanceTimer
 			// rebases next_due past `now`, so the same Tick (and any
 			// immediate follow-up Tick before another Sunday elapses)
 			// cannot re-fire the same window.
-			s.state.SetMaintenanceFiredAt(t.Kind, now.UTC().Format(time.RFC3339Nano))
+			firedAt := now.UTC().Format(time.RFC3339Nano)
+			// Repeated-fire-storm prevention (PR #243 consultant
+			// blocker): if the disk persist fails (transient I/O
+			// error, AV scanner, quota policy), the cache stores
+			// authoritatively so the next Tick's
+			// parseLastFiredOrSynthesise lookup observes the fire
+			// and does NOT re-fire 60s later. On successful persist
+			// the cache is NOT populated — disk is authoritative
+			// and tests can drive state directly via the StateStore
+			// interface. Cross-restart durability remains the state
+			// store's responsibility.
+			if err := s.state.SetMaintenanceFiredAt(t.Kind, firedAt); err != nil {
+				s.rememberLastFiredLocally(t.Kind, firedAt)
+				log.Printf("severity=warn event=maintenance-state-write-failed kind=%q err=%v in-memory-cache-engaged=true", t.Kind, err)
+			}
 
 			if s.spawner == nil {
 				// Task 9.1 compat path: no spawner → fire the hook
@@ -352,12 +439,36 @@ func (s *MaintenanceScheduler) fire(t api.MaintenanceTimer) {
 // entry or, when the entry is missing/empty/unparseable, a synthetic
 // baseline = most-recent-past Sun 03:00 local on or before `now`.
 //
+// Lookup precedence (PR #243 consultant blocker — repeated-fire-storm
+// prevention):
+//
+//  1. In-process cache (lastFiredCache). Populated ONLY when a Tick
+//     fire's StateStore.SetMaintenanceFiredAt returns error. The
+//     cache covers the storm window from a transient persist failure
+//     to either (a) the next successful Tick that updates state,
+//     (b) supervisor restart (cache drops, disk re-reads on next
+//     fire). On the happy path the cache is empty and disk is the
+//     sole source of truth.
+//  2. StateStore.GetMaintenanceFiredAt — disk source of truth across
+//     supervisor restarts and across the happy path (where the
+//     cache never engages).
+//
 // An unparseable stored value is treated identically to a missing
 // entry — the alternative would be silently never firing the timer,
 // which is the worse outcome (operator sees nothing happen and has
 // no diagnostic). Caller flow on first install reaches this with no
 // stored entry.
 func (s *MaintenanceScheduler) parseLastFiredOrSynthesise(kind string, now time.Time) time.Time {
+	if raw, ok := s.loadLastFiredLocally(kind); ok && raw != "" {
+		if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+			return t
+		}
+		// Cache poisoning is impossible in production (only
+		// rememberLastFiredLocally writes here, with a known
+		// time.RFC3339Nano value) but the parse-fail branch matches
+		// the state-store path defensively.
+		log.Printf("severity=warn event=maintenance-last-fired-cache-unparseable kind=%q value=%q", kind, raw)
+	}
 	if raw, ok := s.state.GetMaintenanceFiredAt(kind); ok && raw != "" {
 		if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
 			return t

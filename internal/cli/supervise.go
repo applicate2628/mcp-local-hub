@@ -843,6 +843,50 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		},
 	})
 
+	// Phase 9: production maintenance timer scheduler wiring.
+	// Constructed locally in runSupervise so v0.5.0 keeps the
+	// scheduler out of IPC deps until a future fire-now command needs
+	// direct handler access. The timer list is read through the
+	// controller's live intent cache on every Tick; IntentWatcher
+	// refreshes that cache whenever supervisor-intent.json changes.
+	maintenanceState := newMaintenanceStateAdapter(statePath, events)
+	maintenanceProcSpawner := newMaintenanceSpawner(events)
+	maintenanceScheduler := NewMaintenanceScheduler(maintenanceState)
+	maintenanceScheduler.SetSpawner(maintenanceProcSpawner)
+	maintenanceScheduler.SetFireHook(func(t api.MaintenanceTimer) {
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "info",
+			Source:   "maintenance",
+			Event:    "maintenance-fired",
+			TaskName: t.Name,
+			Body: map[string]any{
+				"kind":    t.Kind,
+				"command": t.Command,
+			},
+		})
+	})
+	go runMaintenanceScheduler(loopCtx.Done(), &gracefulInProgress, maintenanceScheduler, func() []api.MaintenanceTimer {
+		return maintenanceTimersFromController(ctrl)
+	}, 60*time.Second)
+
+	shutdownMaintenance := func(reason string) {
+		result := maintenanceProcSpawner.Shutdown(30 * time.Second)
+		if result.Drained == 0 && len(result.Killed) == 0 && len(result.StillRunning) == 0 {
+			return
+		}
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "info",
+			Source:   "maintenance",
+			Event:    "maintenance-shutdown-complete",
+			Body: map[string]any{
+				"reason":        reason,
+				"drained":       result.Drained,
+				"killed":        result.Killed,
+				"still_running": result.StillRunning,
+			},
+		})
+	}
+
 	// Signal handler. SIGINT and SIGTERM both trigger the graceful-exit
 	// flow. On Windows `os.Interrupt` IS the canonical Ctrl+C / SIGTERM
 	// surface (Windows has no real SIGINT/SIGTERM — Go maps both to
@@ -880,6 +924,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		// short window remains before the process actually exits.
 		gracefulInProgress.Enter()
 		loopCancel()
+		shutdownMaintenance("signal")
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "info",
 			Source:   "lifecycle",
@@ -909,6 +954,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		// short window remains before the process actually exits.
 		gracefulInProgress.Enter()
 		loopCancel()
+		shutdownMaintenance("test-exit")
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "info",
 			Source:   "lifecycle",
@@ -940,6 +986,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		// short window remains before the process actually exits.
 		gracefulInProgress.Enter()
 		loopCancel()
+		shutdownMaintenance("ipc-exit-graceful")
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "info",
 			Source:   "lifecycle",
@@ -968,6 +1015,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		// short window remains before the process actually exits.
 		gracefulInProgress.Enter()
 		loopCancel()
+		shutdownMaintenance("context-cancel")
 		return ctx.Err()
 	}
 }
