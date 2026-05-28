@@ -137,7 +137,13 @@ phases (9, 10, 11) inherit the same fragility.
 - **Closes findings #4 (orphan), #5 (descendants), #6 (PID recycling)
   in one move.** `TerminateJobObject(daemon.Job, 1)` becomes safe
   again — kills only that daemon's tree. The PR #238 `Job.TerminateAll`
-  method (already implemented) is then directly useful.
+  method exists as a stub today but the orphan path use REQUIRES the
+  step 3 wait-for-exit upgrade (current stub fires-and-returns); the
+  synchronous-wait impl is part of this refactor's scope, not
+  pre-assumed done. Closes bot finding on PR #239 01fa587
+  (P2 don't-treat-TerminateAll-as-already-production-ready) by
+  aligning this recommendation summary with the implementation
+  outline below.
 - **Preserves the shared-loop FIFO + selfCh priority design** which is
   working. Findings #1 (stop-during-spawn) and #3 (tracker drift)
   are SM-table issues independent of Job ownership; #2 (self-post
@@ -225,25 +231,70 @@ Single PR, scoped to v0.5.x:
 1. **`process.Job` per spawn.** Move `process.NewKillOnCloseJob()`
    from `runSupervise` into the spawn closure (production path in
    `internal/cli/supervise.go`). Each spawn attempt allocates its
-   own Job. The handle is owned by the spawn flow and MUST be closed
-   on EVERY exit path, not just successful-start + wait-goroutine:
-   - **Success path:** `defer daemonJob.Close()` on the wait
-     goroutine (existing pattern; closes when child exits).
-   - **Pre-child failure paths** (closes bot ADR finding @227):
-     `cmd.Start` error, `CreateProcess` failure pre-FindProcess
-     (the common `errSpawnPreChild` case), manifest-validation
-     error before exec, env-resolve failure. EACH of these returns
-     before the wait goroutine launches; the spawn closure MUST
-     `daemonJob.Close()` on the error return so subsequent
-     reconcile/backoff respawn attempts don't accumulate orphan
-     Job handles until supervisor exit. Use a sentinel `closed`
-     bool + single `defer func() { if !closed { daemonJob.Close() } }()`
-     at spawn-closure entry to guarantee close-on-any-return, with
-     wait goroutine taking ownership via `closed = true` on
-     successful launch.
+   own Job. Two correctness constraints:
+   - **(a) Preserve the existing non-fatal fallback** (closes bot
+     finding @228 on ADR r2): today's `runSupervise` treats a
+     `NewKillOnCloseJob()` failure as a warn-and-continue with
+     `job = nil`, and the spawn still runs via `cmd.Start` without
+     orphan protection. Per-spawn allocation MUST keep the same
+     fallback: failure to create the per-spawn Job logs a warn,
+     sets local `daemonJob = nil`, and proceeds with `cmd.Start`
+     (no `StartWithJob`). Otherwise every daemon would fail on
+     environments where `SetInformationJobObject` is denied (rare
+     corp-managed contexts).
+   - **(b) Close on EVERY exit path with explicit ownership
+     transfer** (closes bot findings @227 and @243): the handle
+     is owned by the spawn flow, transferred to the wait goroutine
+     ONLY after the successful start commits. Use the explicit
+     ownership-transfer pattern (NOT a goroutine-set bool — that
+     races and risks the parent's `defer` running first to trigger
+     `KILL_ON_JOB_CLOSE` against the just-started daemon):
+
+     ```go
+     daemonJob, err := process.NewKillOnCloseJob()
+     if err != nil {
+         // Fallback (a): warn + nil, continue without Job.
+         events.Emit(... warn: per-spawn-job-create-failed ...)
+         daemonJob = nil
+     }
+     // Ownership token; parent's defer below tests it.
+     handedOff := false
+     defer func() {
+         if !handedOff && daemonJob != nil {
+             daemonJob.Close()
+         }
+     }()
+     // ... cmd.Start / StartWithJob / FindProcess ...
+     if startErr != nil {
+         // Pre-child failure path: parent's defer runs Close on return.
+         return startErr
+     }
+     // Successful start: transfer ownership BEFORE launching the
+     // wait goroutine so the goroutine alone owns Close.
+     handedOff = true
+     go func() {
+         defer func() { if daemonJob != nil { daemonJob.Close() } }()
+         cmd.Wait()
+         // ... emit daemon-exited, post crashCh ...
+     }()
+     ```
+
+     The `handedOff` flag is written ONLY by the parent spawn
+     goroutine (no race), read ONLY by the parent's deferred
+     close (single-goroutine read after parent returns). The wait
+     goroutine independently owns its own deferred close. No
+     `KILL_ON_JOB_CLOSE` race against the just-started daemon.
+
+   - **Pre-child failure paths** (`cmd.Start` error, env-resolve
+     error, manifest-validation error - the common
+     `errSpawnPreChild` case): return BEFORE `handedOff = true`;
+     parent's deferred close runs.
    - **Post-create orphan path** (`errSpawnPostCreate`): the wait
-     goroutine never launches, so the close belongs to the orphan
-     cleanup block AFTER `TerminateAll` returns (step 3 below).
+     goroutine never launches AND the parent's defer runs because
+     `handedOff` stays false. The orphan-cleanup block (step 3)
+     calls `daemonJob.TerminateAll(5000)` BEFORE returning, so the
+     Job-level kill completes before `daemonJob.Close()` fires from
+     the parent's defer.
 2. **Tracker tracks per-task Job handle** (in-memory only, not
    persisted — Job handles are process-lifetime). On orphan
    cleanup, `MarkSpawnFailedPreservePID` records `OrphanPID` plus
@@ -251,28 +302,40 @@ Single PR, scoped to v0.5.x:
    released after `TerminateAll` returns (success or timeout); see
    step 3.
 3. **`TerminateAll` real wait + orphan branch wiring** (closes bot
-   ADR finding @233): the current `Job.TerminateAll(timeoutMs)`
+   ADR findings @233 and @263): the current `Job.TerminateAll(timeoutMs)`
    stub fires `TerminateJobObject` and returns immediately, with
    `timeoutMs` explicitly ignored (docs in
    `internal/process/jobobject_windows.go` aligned with this in
    PR #238 r5.3.6 specifically because the method was unused). For
    per-daemon adoption, the method MUST be upgraded:
-   - Poll `IsProcessInJob` against every PID known to have been in
-     the job (or query active members via `QueryInformationJobObject`
-     with `JobObjectBasicProcessIdList`) until the count reaches
-     zero, with `timeoutMs` as the bounded deadline.
+   - **Job-wide member-count polling, NOT root-PID polling** (closes
+     bot finding @263). For wrapper orphans (`uvx -> python`,
+     `npx -> node`), the only PID we know is the root `OrphanPID`;
+     descendants are alive in the same Job but not tracked by us.
+     An `IsProcessInJob` loop over "every PID we recorded" would
+     reach count=0 as soon as the wrapper dies, leaving descendants
+     alive and still holding the port. The polling MUST query the
+     Job's ACTIVE member count via
+     `QueryInformationJobObject(JobObjectBasicProcessIdList)`
+     (returns the full live PID list); the helper waits until
+     `NumberOfAssignedProcesses == 0`, OR uses
+     `JobObjectBasicAccountingInformation.ActiveProcesses == 0`,
+     which is cheaper.
    - On WAIT_TIMEOUT, return a wrapped error indicating partial
      termination (consistent with the documented best-effort
      contract).
    - Caller in `supervise.go` orphan branch treats wait-success as
-     "safe to rebind port for respawn", wait-timeout as "do NOT
-     respawn" (same kill-failure branch behavior introduced in PR
-     #237 r5.2). The current PID-based `BestEffortKillByPID` does
-     wait-for-exit via `OpenProcess|SYNCHRONIZE + WaitForSingleObject`;
-     the per-Job replacement MUST provide the same guarantee or it
-     reintroduces the port-rebind race.
-   - The polling implementation is part of THIS refactor PR scope,
-     not pre-assumed done.
+     "safe to rebind port for respawn" (tree is fully dead),
+     wait-timeout as "do NOT respawn" (same kill-failure branch
+     behavior introduced in PR #237 r5.2). The current PID-based
+     `BestEffortKillByPID` does wait-for-exit via
+     `OpenProcess|SYNCHRONIZE + WaitForSingleObject`; the per-Job
+     replacement MUST provide the same guarantee for the WHOLE
+     tree, not just the root PID, or it reintroduces the
+     port-rebind race AND a duplicate-descendant variant of it.
+   - The polling implementation (member-count query + bounded
+     deadline loop) is part of THIS refactor PR scope, not
+     pre-assumed done.
 4. **`BestEffortKillByPID` retained** but no longer used by the
    supervisor's orphan path. Kept for any future caller that has
    only a PID; alternative would be deletion (low risk, low value
