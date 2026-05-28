@@ -262,22 +262,18 @@ func (a *API) Install(opts InstallOpts) error {
 	if err != nil {
 		return err
 	}
-	// 4. Dry-run?
+	// 4. Dry-run + audit-first + execute via the shared core. StartTasks=true
+	// reproduces the pre-refactor immediate-daemon-start behavior exactly.
+	if err := a.installPlan(context.Background(), m, plan, installPlanOpts{
+		Writer:       w,
+		DaemonFilter: opts.DaemonFilter,
+		DryRun:       opts.DryRun,
+		StartTasks:   true,
+	}); err != nil {
+		return err
+	}
 	if opts.DryRun {
-		return printPlanTo(w, plan)
-	}
-	// 4a. AUDIT-FIRST per plan §62 v12 canonical timing: emit one
-	// server-install audit entry per planned task BEFORE any mutation.
-	// Failure here (incl. ErrIdentityOversize per §51) aborts with an
-	// end-state identical to never-attempted install — no scheduler
-	// tasks created, no intent file modifications, no client configs
-	// touched.
-	if err := a.recordInstallAuditPreMutation(m, opts.DaemonFilter); err != nil {
-		return err
-	}
-	// 5. Execute.
-	if err := executeInstallTo(w, m, plan, a.effectiveBackupKeepN()); err != nil {
-		return err
+		return nil
 	}
 	// 5a. Post-success: record Desired=running intent for each created
 	// scheduler task. Intent failures here are logged + tolerated.
@@ -402,14 +398,16 @@ func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 	if err != nil {
 		return err
 	}
+	if err := a.installPlan(context.Background(), m, plan, installPlanOpts{
+		Writer:       w,
+		DaemonFilter: opts.DaemonFilter,
+		DryRun:       opts.DryRun,
+		StartTasks:   true,
+	}); err != nil {
+		return err
+	}
 	if opts.DryRun {
-		return printPlanTo(w, plan)
-	}
-	if err := a.recordInstallAuditPreMutation(m, opts.DaemonFilter); err != nil {
-		return err
-	}
-	if err := executeInstallTo(w, m, plan, a.effectiveBackupKeepN()); err != nil {
-		return err
+		return nil
 	}
 	a.recordInstallIntentPostSuccess(m, opts.DaemonFilter, w)
 	return nil
@@ -444,14 +442,16 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 	if err != nil {
 		return err
 	}
+	if err := a.installPlan(context.Background(), m, plan, installPlanOpts{
+		Writer:       w,
+		DaemonFilter: opts.DaemonFilter,
+		DryRun:       opts.DryRun,
+		StartTasks:   true,
+	}); err != nil {
+		return err
+	}
 	if opts.DryRun {
-		return printPlanTo(w, plan)
-	}
-	if err := a.recordInstallAuditPreMutation(m, opts.DaemonFilter); err != nil {
-		return err
-	}
-	if err := executeInstallTo(w, m, plan, a.effectiveBackupKeepN()); err != nil {
-		return err
+		return nil
 	}
 	a.recordInstallIntentPostSuccess(m, opts.DaemonFilter, w)
 	return nil
@@ -1627,12 +1627,87 @@ func printPlanTo(w io.Writer, p *Plan) error {
 	return nil
 }
 
-// executeInstallTo materializes the plan: scheduler tasks, then per-client
-// config backup + entry add. keepN caps the rolling timestamped-backup
-// set per client (older copies are pruned in-place by the adapter); 0
-// disables pruning. Production callers feed it via a.effectiveBackupKeepN().
-func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int) error {
-	sch, err := scheduler.New()
+// installPlanOpts carries the per-caller knobs installPlan needs that are
+// not derivable from (m, plan). DaemonFilter drives audit-entry emission;
+// DryRun short-circuits to a plan print; StartTasks gates Pass B inside
+// executeInstallTo. Writer is the progress sink.
+type installPlanOpts struct {
+	Writer       io.Writer
+	DaemonFilter string
+	DryRun       bool
+	StartTasks   bool
+	// Intermediate, when non-nil, is forwarded to executeInstallTo and runs
+	// inside its rollback scope between the client-config block and Pass B.
+	// Used by InstallParsedManifest to fold the supervisor-intent write into
+	// the same rollback stack; legacy callers leave it nil.
+	Intermediate func() (func(), error)
+}
+
+// installPlan is the shared materialization core between api.Install (and
+// its embed/dir siblings) and InstallParsedManifest: emit the audit-first
+// entries per planned task, then execute the plan with the requested
+// daemon-start gating. It deliberately does NOT own dry-run-vs-execute
+// policy beyond the short-circuit, the post-success intent record
+// (recordInstallIntentPostSuccess for the legacy path / WriteSupervisorIntent
+// for the parsed-manifest path), or any rollback ownership — those stay
+// caller-specific because they diverge between the two entrypoints.
+//
+// ctx is accepted for symmetry with the exported InstallParsedManifest
+// seam (and to give future cancellation a home); the underlying audit +
+// scheduler steps are synchronous and do not yet observe it.
+func (a *API) installPlan(ctx context.Context, m *config.ServerManifest, plan *Plan, opts installPlanOpts) error {
+	_ = ctx
+	w := opts.Writer
+	if w == nil {
+		w = os.Stderr
+	}
+	if opts.DryRun {
+		return printPlanTo(w, plan)
+	}
+	// AUDIT-FIRST per plan §62 v12 canonical timing: emit one
+	// server-install audit entry per planned task BEFORE any mutation.
+	// Failure here (incl. ErrIdentityOversize per §51) aborts with an
+	// end-state identical to never-attempted install.
+	if err := a.recordInstallAuditPreMutation(m, opts.DaemonFilter); err != nil {
+		return err
+	}
+	return executeInstallTo(w, m, plan, a.effectiveBackupKeepN(), opts.StartTasks, opts.Intermediate)
+}
+
+// createdTask pairs a scheduler.TaskSpec created in Pass A with the
+// human-readable Trigger string from its source ScheduledTaskPlan. Pass B
+// iterates the created-tasks slice (not p.SchedulerTasks) and re-applies
+// the SAME literal "At logon" filter the single-pass version used, so the
+// daemon-start gate is bit-for-bit identical.
+type createdTask struct {
+	spec    scheduler.TaskSpec
+	trigger string
+}
+
+// executeInstallTo materializes the plan in two passes. Pass A creates
+// every scheduler task (no Run); the per-client config block runs between
+// the passes, preserving the scheduler-create → client-write → run
+// ordering callers depend on; Pass B (gated by startTasks) starts the
+// logon-triggered tasks. keepN caps the rolling timestamped-backup set per
+// client (older copies are pruned in-place by the adapter); 0 disables
+// pruning. Production callers feed it via a.effectiveBackupKeepN().
+//
+// startTasks=true reproduces the pre-two-pass behavior exactly (start
+// logon-triggered daemons immediately). The migrate driver passes false to
+// create tasks + write intent while deferring daemon spawn to the
+// supervisor.
+//
+// intermediate, when non-nil, runs in the gap between the per-client config
+// block and Pass B, INSIDE the rollback scope. It is the supervisor-intent
+// write step for InstallParsedManifest (plan §"v7 executeInstallTo two-pass"
+// — intent write is step 6 of the inner rollback). It returns a compensating
+// undo that is pushed onto the same rollback stack as the scheduler-task and
+// client-config undos; if it returns an error, the whole stack runs and
+// executeInstallTo returns that error with every side effect undone. Legacy
+// api.Install callers pass nil and observe bit-for-bit identical behavior
+// (they record intent via recordInstallIntentPostSuccess AFTER this returns).
+func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int, startTasks bool, intermediate func() (func(), error)) error {
+	sch, err := newScheduler()
 	if err != nil {
 		return fmt.Errorf("scheduler: %w", err)
 	}
@@ -1661,7 +1736,10 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int)
 		}
 	}
 
-	// 1. Create scheduler tasks.
+	// Pass A — create scheduler tasks ONLY (no Run). Collect each created
+	// spec + its source trigger so Pass B can start the logon-triggered
+	// subset without re-deriving from p.SchedulerTasks.
+	var createdTasks []createdTask
 	for _, t := range p.SchedulerTasks {
 		spec := scheduler.TaskSpec{
 			Name:             t.Name,
@@ -1703,6 +1781,7 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int)
 			}
 			fmt.Fprintf(w, "  rollback: deleted scheduler task %s\n", taskName)
 		})
+		createdTasks = append(createdTasks, createdTask{spec: spec, trigger: t.Trigger})
 		fmt.Fprintf(w, "\u2713 Scheduler task created: %s\n", spec.Name)
 	}
 	// 1b. Reconcile scheduler tasks: prune obsolete tasks left from prior
@@ -1793,16 +1872,36 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int)
 		})
 		fmt.Fprintf(w, "\u2713 %s \u2192 %s\n", u.Client, displayURLOf(u))
 	}
-	// 3. Start daemons immediately (without waiting for next logon).
-	for _, t := range p.SchedulerTasks {
-		// Skip weekly refresh — it's triggered on schedule, not on install.
-		if t.Trigger != "At logon" {
-			continue
+	// Intermediate step (InstallParsedManifest only): write supervisor
+	// intent INSIDE the rollback scope so a write failure undoes the
+	// scheduler tasks + client configs already applied. Legacy api.Install
+	// callers pass a nil hook and skip this entirely.
+	if intermediate != nil {
+		undo, err := intermediate()
+		if err != nil {
+			runRollback()
+			return err
 		}
-		if err := sch.Run(t.Name); err != nil {
-			fmt.Fprintf(w, "\u26a0 failed to start %s immediately: %v (will start at next logon)\n", t.Name, err)
-		} else {
-			fmt.Fprintf(w, "\u2713 Started: %s\n", t.Name)
+		if undo != nil {
+			rollback = append(rollback, undo)
+		}
+	}
+	// Pass B - start daemons immediately (without waiting for next logon).
+	// Gated by startTasks: the migrate driver passes false to defer daemon
+	// spawn to the supervisor. A Run failure here is warning-only and must
+	// NOT trigger rollback - the install (tasks + client configs) stands;
+	// regressing this to a rollback-on-Run-failure would be a P0.
+	if startTasks {
+		for _, ct := range createdTasks {
+			// Skip weekly refresh: triggered on schedule, not on install.
+			if ct.trigger != "At logon" {
+				continue
+			}
+			if err := sch.Run(ct.spec.Name); err != nil {
+				fmt.Fprintf(w, "\u26a0 failed to start %s immediately: %v (will start at next logon)\n", ct.spec.Name, err)
+			} else {
+				fmt.Fprintf(w, "\u2713 Started: %s\n", ct.spec.Name)
+			}
 		}
 	}
 	fmt.Fprintln(w, "\nInstall complete.")
