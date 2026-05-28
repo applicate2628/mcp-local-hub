@@ -681,7 +681,7 @@ func TestProductionSpawnFn_FailureEmitsAuditEvent(t *testing.T) {
 	// nil job → spawn fn falls back to plain cmd.Start (Windows: the
 	// Job Object is best-effort; nil job is the audit-row codepath
 	// when NewKillOnCloseJob itself failed).
-	spawnFn := makeProductionSpawnFn(nil, events, NewDaemonRuntimeTracker())
+	spawnFn := makeProductionSpawnFn(events, NewDaemonRuntimeTracker())
 
 	descriptor := api.SupervisorDaemon{
 		TaskName: reconcileWiringTestTaskName,
@@ -723,7 +723,7 @@ func TestProductionSpawnFn_TrackerFailureOnSpawnErr(t *testing.T) {
 	defer events.Close()
 
 	tracker := NewDaemonRuntimeTracker()
-	spawnFn := makeProductionSpawnFn(nil, events, tracker)
+	spawnFn := makeProductionSpawnFn(events, tracker)
 	descriptor := api.SupervisorDaemon{
 		TaskName: reconcileWiringTestTaskName,
 		Server:   "memory",
@@ -817,7 +817,7 @@ func TestProductionSpawnFn_SuccessEmitsAuditEvent(t *testing.T) {
 	}
 	defer events.Close()
 
-	spawnFn := makeProductionSpawnFn(nil, events, NewDaemonRuntimeTracker())
+	spawnFn := makeProductionSpawnFn(events, NewDaemonRuntimeTracker())
 
 	command, args := portableNoopCommand()
 	descriptor := api.SupervisorDaemon{
@@ -865,7 +865,7 @@ func TestProductionSpawnFn_EmitsDaemonExitedOnChildExit(t *testing.T) {
 	}
 	defer events.Close()
 
-	spawnFn := makeProductionSpawnFn(nil, events, NewDaemonRuntimeTracker())
+	spawnFn := makeProductionSpawnFn(events, NewDaemonRuntimeTracker())
 
 	command, args := portableNoopCommand()
 	descriptor := api.SupervisorDaemon{
@@ -917,7 +917,7 @@ func TestProductionSpawnFn_UpdatesTracker(t *testing.T) {
 	defer events.Close()
 
 	tracker := NewDaemonRuntimeTracker()
-	spawnFn := makeProductionSpawnFn(nil, events, tracker)
+	spawnFn := makeProductionSpawnFn(events, tracker)
 	descriptor := api.SupervisorDaemon{
 		TaskName: reconcileWiringTestTaskName,
 		Server:   "memory",
@@ -964,7 +964,7 @@ func TestProductionSpawnFn_ReapsExitedChildProcess(t *testing.T) {
 	}
 	defer events.Close()
 
-	spawnFn := makeProductionSpawnFn(nil, events, NewDaemonRuntimeTracker())
+	spawnFn := makeProductionSpawnFn(events, NewDaemonRuntimeTracker())
 	command, args := portableNoopCommand()
 	descriptor := api.SupervisorDaemon{
 		TaskName: reconcileWiringTestTaskName,

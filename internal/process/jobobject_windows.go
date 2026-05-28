@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -148,50 +149,261 @@ func (j *Job) HasMember(pid int) bool {
 	return isMember != 0
 }
 
+// jobObjectBasicAccountingInformation mirrors Windows
+// JOBOBJECT_BASIC_ACCOUNTING_INFORMATION. golang.org/x/sys/windows
+// exposes the JobObjectBasicAccountingInformation info class
+// constant (= 1) and the QueryInformationJobObject syscall, but not
+// the struct definition. ActiveProcesses is the field
+// TerminateAll's poll loop reads to detect "all members exited".
+//
+// Layout per Microsoft docs:
+// https://learn.microsoft.com/windows/win32/api/winnt/ns-winnt-jobobject_basic_accounting_information
+// 4 × LARGE_INTEGER (8B each) + 4 × DWORD (4B each) = 48 bytes.
+type jobObjectBasicAccountingInformation struct {
+	TotalUserTime             int64
+	TotalKernelTime           int64
+	ThisPeriodTotalUserTime   int64
+	ThisPeriodTotalKernelTime int64
+	TotalPageFaultCount       uint32
+	TotalProcesses            uint32
+	ActiveProcesses           uint32
+	TotalTerminatedProcesses  uint32
+}
+
+// terminateAllPollInterval is how often TerminateAll re-queries
+// JobObjectBasicAccountingInformation while waiting for
+// ActiveProcesses to reach zero. 50ms is a balance between
+// responsiveness (sub-deadline tearing-down processes typically
+// exit in milliseconds on modern Windows) and syscall pressure
+// (each poll is one QueryInformationJobObject call).
+const terminateAllPollInterval = 50 * time.Millisecond
+
+// processIDs enumerates the PIDs currently assigned to the Job via
+// JobObjectBasicProcessIdList. Used by TerminateAll to wait on each
+// individual process's handle AFTER TerminateJobObject — because the
+// kernel decrements ActiveProcesses (per Job accounting) before the
+// process handles become signaled, so a caller that respawns on
+// ActiveProcesses==0 alone still races the orphan's still-tearing-
+// down socket. Pre-enumeration is required because TerminateJobObject
+// removes PIDs from the id-list as part of teardown; once kicked off
+// the list is unreliable.
+//
+// Returns a copy of the PID list; failures are surfaced to the
+// caller, which may proceed with ActiveProcesses-only polling as
+// a degraded fallback.
+func (j *Job) processIDs() ([]uint32, error) {
+	if j == nil || j.handle == 0 {
+		return nil, nil
+	}
+	// JOBOBJECT_BASIC_PROCESS_ID_LIST header is 8 bytes
+	// (NumberOfAssignedProcesses uint32 + NumberOfProcessIdsInList uint32),
+	// followed by NumberOfProcessIdsInList × uintptr PID entries.
+	// Start with room for ~32 PIDs; grow on ERROR_MORE_DATA.
+	ptrSize := uint32(unsafe.Sizeof(uintptr(0)))
+	bufSize := uint32(8) + 32*ptrSize
+	for range 8 {
+		buf := make([]byte, bufSize)
+		var retlen uint32
+		err := windows.QueryInformationJobObject(
+			j.handle,
+			windows.JobObjectBasicProcessIdList,
+			uintptr(unsafe.Pointer(&buf[0])),
+			bufSize,
+			&retlen,
+		)
+		if err != nil {
+			// ERROR_MORE_DATA → grow buffer and retry.
+			if errors.Is(err, windows.ERROR_MORE_DATA) {
+				bufSize *= 2
+				continue
+			}
+			return nil, fmt.Errorf("QueryInformationJobObject(BasicProcessIdList): %w", err)
+		}
+		if retlen < 8 {
+			return nil, nil
+		}
+		numAssigned := *(*uint32)(unsafe.Pointer(&buf[0]))
+		numInList := *(*uint32)(unsafe.Pointer(&buf[4]))
+		if numAssigned > numInList {
+			// More PIDs assigned than the buffer fit — grow + retry.
+			bufSize *= 2
+			continue
+		}
+		out := make([]uint32, 0, numInList)
+		for i := range numInList {
+			off := 8 + i*ptrSize
+			if off+ptrSize > retlen {
+				break
+			}
+			pid := uint32(*(*uintptr)(unsafe.Pointer(&buf[off])))
+			if pid > 0 {
+				out = append(out, pid)
+			}
+		}
+		return out, nil
+	}
+	return nil, fmt.Errorf("processIDs: buffer grew past safety limit")
+}
+
+// MemberPIDs is the exported wrapper around processIDs for callers
+// outside the process package — specifically the supervisor's
+// orphan-cleanup audit path, which queries the surviving Job
+// members AT-TIMEOUT to give the operator an accurate list of PIDs
+// still holding the port. The root spawn PID may be dead while a
+// descendant is alive (bot P2 finding on PR #241); using only the
+// root pid for `taskkill /F /T /PID <orphan_pid>` operator
+// guidance can point at the wrong process.
+//
+// Returns the same shape as processIDs: a copy of the PID list, or
+// non-nil error if buffer/syscall handling failed. Callers that
+// can degrade to "no surviving-pid hint" treat the error as
+// equivalent to an empty list.
+func (j *Job) MemberPIDs() ([]uint32, error) {
+	return j.processIDs()
+}
+
 // TerminateAll kills every process currently in the Job Object via
-// the Windows TerminateJobObject syscall. The current implementation
-// is "fire-and-return-immediately" - the kernel-mode termination is
-// asynchronous, and the timeoutMs parameter is RESERVED but currently
-// ignored (no polling for actual exit).
+// the Windows TerminateJobObject syscall AND waits up to timeoutMs
+// for the kernel to actually reap the members. The wait is the
+// load-bearing part of the contract: TerminateJobObject is
+// asynchronous in kernel mode, and a caller that immediately
+// rebinds a port (e.g., supervisor backoff respawn) races the
+// orphan's still-active socket if there is no wait.
 //
-// CONTRACT (current): caller MUST treat this as best-effort. The Job
-// Object handle is shared across all daemons supervised by the
-// runSupervise process (created once at startup), so this method
-// is NOT currently called from the supervisor's orphan-cleanup path
-// (calling it would terminate every healthy daemon along with the
-// orphan - bot P1 on PR #238 331b0df flagged that).
+// Returns:
+//   - nil when the job has zero active processes AND every known
+//     PID handle is signaled (kill complete, port released, safe
+//     for caller to rebind / respawn)
+//   - wrapped error with "timeout" in the message when timeoutMs
+//     elapsed before both conditions held (caller MUST treat as
+//     kill-failure; do NOT race a respawn)
+//   - wrapped error when TerminateJobObject or
+//     QueryInformationJobObject failed
 //
-// FUTURE: when the supervisor adopts per-daemon Job Objects (per the
-// pending ADR `2026-05-28-supervisor-event-ownership-model.md`),
-// each spawn will own its own Job and this method will be safe to
-// call for orphan cleanup. At that point the timeoutMs polling
-// implementation (IsProcessInJob loop with a deadline) will land
-// alongside the per-daemon refactor.
+// Closes bot finding on PR #239 8163d8b (P2 job-wide member-count
+// polling, not known-PID polling) by querying the Job's
+// ActiveProcesses count via JobObjectBasicAccountingInformation
+// (kernel-authoritative count including wrapper-spawned descendants
+// we never recorded). The earlier alternative — IsProcessInJob over
+// known PIDs only — would have reached count=0 as soon as the
+// wrapper died, leaving its uvx/python descendants alive in the
+// same Job and still holding the port.
 //
-// Closes bot finding on PR #238 f49ac70 (P3 honor-the-TerminateAll-
-// timeout-contract): the doc previously implied synchronous wait
-// semantics that the impl did not deliver. Doc now matches impl
-// (best-effort, timeoutMs ignored) until per-daemon Job lands.
+// The TestJob_TerminateAllWaitsForExit regression on the per-task
+// Job branch caught a second kernel race: Windows decrements
+// ActiveProcesses (per Job accounting) before WaitForSingleObject
+// on the process handle transitions to signaled. Returning on
+// ActiveProcesses==0 alone leaves the caller racing the still-
+// tearing-down process handle — observable as cmd.Process still
+// alive when TerminateAll returned. Fix: pre-enumerate PIDs via
+// JobObjectBasicProcessIdList before TerminateJobObject, open
+// SYNCHRONIZE handles, and require BOTH ActiveProcesses==0 AND
+// every known handle to be signaled before returning.
+// ActiveProcesses stays as the primary guard for wrapper-spawned
+// descendants we never recorded; per-handle wait closes the
+// kernel race for the PIDs we did capture.
+//
+// PRECONDITION: callers MUST use this against a per-spawn Job (one
+// daemon per Job). Calling against a shared Job (the pre-ADR-#239
+// design where runSupervise allocated one Job for the whole
+// supervisor) would terminate every healthy daemon along with the
+// intended target. Bot P1 on PR #238 331b0df documented this hazard.
 func (j *Job) TerminateAll(timeoutMs uint32) error {
 	if j == nil || j.handle == 0 {
 		return nil
 	}
+	// Pre-enumerate PIDs AND open SYNCHRONIZE handles BEFORE
+	// TerminateJobObject — closing the PID-recycling race the bot
+	// flagged as P2 on PR #241. When a job member exits quickly
+	// after termination starts, Windows can recycle its PID to an
+	// unrelated process; opening the handle AFTER TerminateJobObject
+	// would then leave us waiting on the unrelated process and
+	// reporting a spurious timeout even though the orphan tree was
+	// successfully killed. The handles installed here are tied to
+	// the ORIGINAL kernel process objects via the SYNCHRONIZE handle
+	// (process object lives until its last handle is closed), so
+	// WaitForSingleObject reports the original process's signaled
+	// state regardless of PID recycling.
+	//
+	// Both processIDs() and per-PID OpenProcess failures are
+	// non-fatal: TerminateJobObject still fires, and the loop
+	// degrades to ActiveProcesses-only polling when the handles
+	// slice is empty (handlesAllSignaled returns true on empty).
+	pids, _ := j.processIDs()
+	handles := make([]windows.Handle, 0, len(pids))
+	for _, pid := range pids {
+		h, err := windows.OpenProcess(windows.SYNCHRONIZE, false, pid)
+		if err == nil {
+			handles = append(handles, h)
+		}
+	}
+	defer func() {
+		for _, h := range handles {
+			_ = windows.CloseHandle(h)
+		}
+	}()
+
 	if err := windows.TerminateJobObject(j.handle, 1); err != nil {
 		// ERROR_ACCESS_DENIED can occur if the job is already being
-		// torn down. Treat as success - the goal (no processes
-		// remain in the job) is being achieved by the kernel anyway.
-		if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+		// torn down. Continue to the wait loop below - the goal (no
+		// processes remain in the job) may still be reached by the
+		// kernel's in-flight teardown.
+		if !errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+			return fmt.Errorf("TerminateJobObject: %w", err)
+		}
+	}
+	if timeoutMs == 0 {
+		// Caller opted out of wait. Behavior matches the pre-ADR
+		// stub: fire-and-return-immediately. Discouraged for the
+		// orphan-cleanup path (caller will race the still-tearing-
+		// down processes).
+		return nil
+	}
+
+	// Poll until ActiveProcesses == 0 AND every known process
+	// handle is signaled, OR the deadline elapses.
+	var info jobObjectBasicAccountingInformation
+	infoSize := uint32(unsafe.Sizeof(info))
+	deadline := time.Now().Add(time.Duration(timeoutMs) * time.Millisecond)
+	for {
+		var retlen uint32
+		err := windows.QueryInformationJobObject(
+			j.handle,
+			windows.JobObjectBasicAccountingInformation,
+			uintptr(unsafe.Pointer(&info)),
+			infoSize,
+			&retlen,
+		)
+		if err != nil {
+			return fmt.Errorf("QueryInformationJobObject(BasicAccounting): %w", err)
+		}
+		if info.ActiveProcesses == 0 && handlesAllSignaled(handles) {
 			return nil
 		}
-		return fmt.Errorf("TerminateJobObject: %w", err)
+		if time.Now().After(deadline) {
+			return fmt.Errorf("TerminateAll: timeout after %dms with %d processes still in job", timeoutMs, info.ActiveProcesses)
+		}
+		time.Sleep(terminateAllPollInterval)
 	}
-	// TerminateJobObject is asynchronous in kernel mode; actual
-	// process exit happens after this returns. timeoutMs is reserved
-	// for the future per-daemon Job Object architecture (see method
-	// doc); current impl is fire-and-return-immediately and matches
-	// the documented best-effort contract.
-	_ = timeoutMs
-	return nil
+}
+
+// handlesAllSignaled returns true when every process handle in the
+// list is signaled (process fully exited per the kernel). An empty
+// list is trivially satisfied. WaitForSingleObject errors are
+// treated as "signaled" — the handle is gone, so the underlying
+// process must be too. The 0ms timeout makes this a pure state
+// query, not a block.
+func handlesAllSignaled(handles []windows.Handle) bool {
+	for _, h := range handles {
+		ev, err := windows.WaitForSingleObject(h, 0)
+		if err != nil {
+			continue
+		}
+		if ev != uint32(windows.WAIT_OBJECT_0) {
+			return false
+		}
+	}
+	return true
 }
 
 // Close releases the job handle. When this is the last handle, the

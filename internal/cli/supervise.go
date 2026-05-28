@@ -664,25 +664,21 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		})
 		return fmt.Errorf("load supervisor-state.json: %w", stateErr)
 	}
-	job, jobErr := process.NewKillOnCloseJob()
-	if jobErr != nil {
-		// Best-effort: a job-create failure means the supervisor's
-		// children survive its exit, but the supervisor itself stays
-		// up. Audit row preserves root cause for operators.
-		_ = events.Emit(api.SupervisorEvent{
-			Severity: "warn",
-			Source:   "lifecycle",
-			Event:    "reconcile-job-create-failed",
-			Body:     map[string]any{"err": jobErr.Error()},
-		})
-		job = nil
-	}
-	// Hold the Job handle for the lifetime of the supervisor so the
-	// kernel kill-on-close action fires on supervisor exit. defer
-	// Close() balances NewKillOnCloseJob's open handle.
-	if job != nil {
-		defer func() { _ = job.Close() }()
-	}
+	// PER-SPAWN Job Object architecture (ADR #239 Option B,
+	// 2026-05-28). Each daemon spawn allocates its own Job Object
+	// inside the spawn closure, so orphan cleanup is task-scoped
+	// (TerminateJobObject kills only that daemon's tree, not the
+	// supervisor-wide tree). The pre-ADR shared-Job design that
+	// allocated one Job here for the whole supervisor was removed:
+	// bot P1 on PR #238 331b0df flagged that calling TerminateAll on
+	// the shared Job would terminate every healthy daemon along with
+	// the intended orphan target.
+	//
+	// KILL_ON_JOB_CLOSE on each per-spawn Job still fires on its own
+	// child exit (wait goroutine's defer Close), giving the same
+	// "no orphan processes after supervisor exit" guarantee as the
+	// old shared-Job model, but in a task-scoped way that supports
+	// safe orphan-cleanup via daemonJob.TerminateAll.
 
 	// crashCh: buffered channel the spawn fn's wait goroutine posts to
 	// when a child exits non-cleanly. The respawn dispatcher reads these
@@ -695,7 +691,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	crashCh := make(chan crashEvent, 64)
 	spawnFn := reconcileSpawnFn
 	if spawnFn == nil {
-		spawnFn = makeProductionSpawnFnWithStatePath(job, events, runtimeTracker, statePath, overlay, filepath.Join(stateDir, "daemon-env-overrides.yaml"), crashCh)
+		spawnFn = makeProductionSpawnFnWithStatePath(events, runtimeTracker, statePath, overlay, filepath.Join(stateDir, "daemon-env-overrides.yaml"), crashCh)
 	}
 	terminateFn := reconcileTerminateFn
 	if terminateFn == nil {
@@ -2051,8 +2047,13 @@ func mergeDaemonEnv(parent []string, manifest, overlay map[string]string) []stri
 // full os.Environ()-derived block with the descriptor's keys appended
 // in sorted order, matching the v0.4.x daemon-host spawn convention
 // while keeping duplicate-case Windows keys deterministic.
-func makeProductionSpawnFn(job *process.Job, events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker) SpawnFunc {
-	return makeProductionSpawnFnWithStatePath(job, events, tracker, "", nil, "", nil)
+// makeProductionSpawnFn is a thin compat wrapper that calls
+// makeProductionSpawnFnWithStatePath with empty overlay/statePath
+// inputs. Preserved for callers that don't need the overlay+respawn
+// wiring (currently none in production after the per-spawn Job
+// refactor; kept for symmetry with the WithStatePath form).
+func makeProductionSpawnFn(events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker) SpawnFunc {
+	return makeProductionSpawnFnWithStatePath(events, tracker, "", nil, "", nil)
 }
 
 // crashEvent is what the spawn fn posts to the respawn dispatcher
@@ -2075,7 +2076,7 @@ type crashEvent struct {
 // real values for both; legacy callers (makeProductionSpawnFn, tests)
 // pass nil to preserve the existing "no overlay, spawn once, no
 // respawn" behavior.
-func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, statePath string, overlay *daemon_env_overlay.Overlay, overlayPath string, crashCh chan<- crashEvent) SpawnFunc {
+func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, statePath string, overlay *daemon_env_overlay.Overlay, overlayPath string, crashCh chan<- crashEvent) SpawnFunc {
 	return func(d api.SupervisorDaemon) error {
 		cmd := exec.Command(d.Command, d.Args...)
 		if d.Workspace != "" {
@@ -2151,12 +2152,58 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 		}
 		process.NoConsole(cmd)
 
+		// PER-SPAWN Job Object (ADR #239 Option B, decision deadline
+		// BEFORE Phase 9). Each spawn allocates its own Job so
+		// orphan cleanup (TerminateJobObject) is task-scoped — kills
+		// only this daemon's tree, not every healthy daemon. Replaces
+		// the previous design where runSupervise allocated one shared
+		// Job for the whole supervisor (bot P1 on PR #238 331b0df
+		// flagged the shared-Job kill hazard).
+		//
+		// Constraint (a) per ADR step 1: preserve the existing
+		// non-fatal fallback. If per-spawn Job creation fails (rare:
+		// SetInformationJobObject denial in restrictive corp-managed
+		// hosts), warn + daemonJob=nil + proceed via cmd.Start
+		// WITHOUT StartWithJob. The daemon spawns without orphan-
+		// protection; this matches the v0.5.x-pre-ADR fallback
+		// semantic at runSupervise:670-679.
+		daemonJob, jobErr := process.NewKillOnCloseJob()
+		if jobErr != nil {
+			_ = events.Emit(api.SupervisorEvent{
+				Severity: "warn",
+				Source:   "lifecycle",
+				Event:    "per-spawn-job-create-failed",
+				TaskName: d.TaskName,
+				Body: map[string]any{
+					"err":      jobErr.Error(),
+					"fallback": "proceeding via cmd.Start without StartWithJob; daemon spawns without Job Object orphan-protection",
+				},
+			})
+			daemonJob = nil
+		}
+		// Constraint (b) per ADR step 1: explicit ownership-transfer
+		// pattern with handedOff flag. Parent spawn closure owns
+		// daemonJob.Close() on EVERY non-success exit path; wait
+		// goroutine takes ownership ONLY after handedOff=true is
+		// written (before goroutine launches), so the goroutine
+		// alone owns the deferred Close after cmd.Wait().
+		//
+		// handedOff is written ONLY by this parent goroutine (no
+		// race), read ONLY by the parent's deferred close after
+		// return.
+		handedOff := false
+		defer func() {
+			if !handedOff && daemonJob != nil {
+				_ = daemonJob.Close()
+			}
+		}()
+
 		var (
 			pid      int
 			startErr error
 		)
-		if job != nil {
-			pid, startErr = process.StartWithJob(job, cmd)
+		if daemonJob != nil {
+			pid, startErr = process.StartWithJob(daemonJob, cmd)
 		} else {
 			startErr = cmd.Start()
 			if startErr == nil && cmd.Process != nil {
@@ -2179,43 +2226,68 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 			})
 			_ = persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName)
 			if isOrphan {
-				// Best-effort kill of the Windows post-create orphan
-				// via process.BestEffortKillByPID (OpenProcess +
-				// TerminateProcess + WaitForSingleObject on a
-				// separate handle, since cmd.Process is unavailable).
-				// The helper blocks until the process actually exits
-				// (or 5s timeout) so a subsequent port rebind doesn't
-				// race against still-tearing-down orphan sockets.
-				// Best-effort PID-based kill via process.BestEffortKillByPID
-				// (OpenProcess + TerminateProcess + WaitForSingleObject,
-				// 5s timeout). NOTE: this only kills the root orphan
-				// PID; wrappers like uvx that spawned descendants
-				// before failing leave those descendants alive. The
-				// shared supervisor Job Object's KILL_ON_JOB_CLOSE
-				// reaps them on supervisor exit; per-daemon Job
-				// Objects (which would enable per-orphan tree kill
-				// here) are deferred to the ADR redesign (per-task
-				// FSM mailbox + per-task lifecycle-primitive).
+				// Job-level kill of the Windows post-create orphan
+				// via daemonJob.TerminateAll. TerminateJobObject
+				// kills the WHOLE tree (orphan root + uvx/python or
+				// npx/node descendants) by Job handle - no PID
+				// argument means no PID-recycling race between
+				// StartWithJob return and our kill call. Safe
+				// because daemonJob is task-scoped (this spawn
+				// attempt only); no risk of nuking healthy daemons.
+				// Step 3 of ADR #239 implementation outline.
 				//
-				// Bot P1 on r5.3 331b0df rejected the previous
-				// `job.TerminateAll` approach: the Job is SHARED
-				// across all daemons (created once in runSupervise),
-				// so a job-level kill would terminate every healthy
-				// daemon along with the orphan. PID-based kill is
-				// the only safe approach until per-daemon jobs land.
-				killErr := process.BestEffortKillByPID(pid)
+				// daemonJob.TerminateAll(5000) blocks until
+				// ActiveProcesses == 0 OR 5s deadline; nil return =
+				// safe to rebind port for backoff respawn,
+				// non-nil = orphan tree may still be alive,
+				// do NOT respawn.
+				//
+				// Fallback: if daemonJob is nil (per-spawn Job
+				// create failed earlier), there's no Job to
+				// TerminateAll - drop back to the PID-based
+				// BestEffortKillByPID with the same wait-success/
+				// wait-failure semantic.
+				var killErr error
+				killMethod := "TerminateJobObject"
+				if daemonJob != nil {
+					killErr = daemonJob.TerminateAll(5000)
+				} else {
+					killErr = process.BestEffortKillByPID(pid)
+					killMethod = "TerminateProcess(pid)+fallback"
+				}
 				orphanBody := map[string]any{
 					"pid":            pid,
 					"kill_succeeded": killErr == nil,
-					"kill_method":    "TerminateProcess(pid)",
+					"kill_method":    killMethod,
 				}
+				// pidForState is the PID we persist into
+				// supervisor-state.json as orphan_pid. Default is the
+				// root spawn pid, but on TerminateAll timeout the root
+				// may have died while a descendant still holds the
+				// port — closing bot P2 on PR #241. When that
+				// happens, query the surviving Job members and
+				// use the FIRST as the operator-visible orphan_pid
+				// so `taskkill /F /T /PID <orphan_pid>` lands on
+				// a live process. Also surface the full surviving
+				// list in the audit body for operator action.
+				pidForState := pid
 				severity := "warn"
 				if killErr != nil {
 					orphanBody["kill_error"] = killErr.Error()
-					orphanBody["note"] = "PID-based kill failed - orphan may still be alive at pi.ProcessId. Returning RAW startErr (no errSpawnPreChild wrap) so controller does NOT synth EvChildExit + backoff retry. Daemon stays in StSpawning (preferable to duplicate-daemon risk). The orphan PID is PRESERVED in supervisor-state.json (orphan_pid field, SEPARATE from current_pid which stays 0) so operator can run `taskkill /F /T /PID <orphan_pid>` for manual cleanup. Also visible via `mcphub status --json` and the GUI Dashboard."
+					var survivors []uint32
+					if daemonJob != nil {
+						survivors, _ = daemonJob.MemberPIDs()
+					}
+					if len(survivors) > 0 {
+						orphanBody["surviving_pids"] = survivors
+						pidForState = int(survivors[0])
+						orphanBody["note"] = "Orphan tree kill failed - root pid (originally returned by StartWithJob) may be dead while one or more descendants are still alive and holding the port. Returning RAW startErr (no errSpawnPreChild wrap) so controller does NOT synth EvChildExit + backoff retry. Daemon stays in StSpawning (preferable to duplicate-daemon risk). orphan_pid in supervisor-state.json is the FIRST surviving member from the Job (NOT the dead root) so the GUI Dashboard and `mcphub status --json` surface a live PID. Operator: run `taskkill /F /T /PID <each>` for EVERY pid in surviving_pids; using only orphan_pid may leave siblings alive."
+					} else {
+						orphanBody["note"] = "Orphan kill failed - tree may still be alive but Job member enumeration returned empty (either MemberPIDs syscall failed, or the kernel reaped members after TerminateAll timeout fired but before this query). Returning RAW startErr (no errSpawnPreChild wrap) so controller does NOT synth EvChildExit + backoff retry. Daemon stays in StSpawning (preferable to duplicate-daemon risk). orphan_pid in supervisor-state.json is the original root pid (best available); the actual descendant holding the port may differ. Operator: check `mcphub status --json` and supplement with `taskkill /F /T /IM <wrapper-image>` if root pid is dead."
+					}
 					severity = "error"
 				} else {
-					orphanBody["note"] = "Orphan root PID terminated cleanly via TerminateProcess. Wrapping with errSpawnPreChild so the controller synth EvChildExit + backoff timer drives retry. Fresh respawn binds the port if descendants (if any) released it; otherwise hits port-in-use as natural cap. Per-daemon Job Object (proper descendants-tree kill) deferred to ADR."
+					orphanBody["note"] = "Orphan tree (root + descendants) terminated cleanly via " + killMethod + ". Wrapping with errSpawnPreChild so the controller synth EvChildExit + backoff timer drives retry. Fresh respawn binds the port cleanly."
 				}
 				_ = events.Emit(api.SupervisorEvent{
 					Severity: severity,
@@ -2225,20 +2297,16 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 					Body:     orphanBody,
 				})
 				if killErr != nil {
-					// Closes bot finding on PR #237 16d99d7 (P2
-					// preserve-orphan-PID): MarkSpawnFailed above
-					// cleared CurrentPID=0; restore via
-					// MarkSpawnFailedPreservePID so the operator
-					// can find the orphan PID in
-					// supervisor-state.json for manual cleanup.
-					tracker.MarkSpawnFailedPreservePID(d.TaskName, startErr, pid)
+					tracker.MarkSpawnFailedPreservePID(d.TaskName, startErr, pidForState)
 					_ = persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName)
 					return startErr
 				}
 			}
-			// Common pre-child case: wrap with errSpawnPreChild so
-			// the supervisor controller synthesizes EvChildExit and
-			// routes through StBackoffWaiting + backoff timer.
+			// Common pre-child case (and orphan-with-kill-success):
+			// wrap with errSpawnPreChild so the supervisor controller
+			// synthesizes EvChildExit and routes through
+			// StBackoffWaiting + backoff timer. The parent's deferred
+			// Close runs because handedOff stays false.
 			return fmt.Errorf("%w: %v", errSpawnPreChild, startErr)
 		}
 		startedAt := time.Now().UTC()
@@ -2268,7 +2336,19 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 		})
 		spawnLogged := make(chan struct{})
 		close(spawnLogged) // Emit above completed before this point; goroutine starts unblocked.
+		// Transfer Job-handle ownership to the wait goroutine BEFORE
+		// launching it. After this assignment, the parent spawn
+		// closure's deferred close is a no-op (handedOff==true) and
+		// the goroutine alone owns daemonJob.Close() after cmd.Wait()
+		// returns. ADR step 1 constraint (b).
+		handedOff = true
+		jobForWait := daemonJob // capture before goroutine launch
 		go func() {
+			defer func() {
+				if jobForWait != nil {
+					_ = jobForWait.Close()
+				}
+			}()
 			<-spawnLogged
 			waitErr := cmd.Wait()
 			// Diagnostic emit: without this, a wrapper that exits
