@@ -148,6 +148,52 @@ func (j *Job) HasMember(pid int) bool {
 	return isMember != 0
 }
 
+// TerminateAll kills every process currently in the Job Object via
+// the Windows TerminateJobObject syscall. The current implementation
+// is "fire-and-return-immediately" - the kernel-mode termination is
+// asynchronous, and the timeoutMs parameter is RESERVED but currently
+// ignored (no polling for actual exit).
+//
+// CONTRACT (current): caller MUST treat this as best-effort. The Job
+// Object handle is shared across all daemons supervised by the
+// runSupervise process (created once at startup), so this method
+// is NOT currently called from the supervisor's orphan-cleanup path
+// (calling it would terminate every healthy daemon along with the
+// orphan - bot P1 on PR #238 331b0df flagged that).
+//
+// FUTURE: when the supervisor adopts per-daemon Job Objects (per the
+// pending ADR `2026-05-28-supervisor-event-ownership-model.md`),
+// each spawn will own its own Job and this method will be safe to
+// call for orphan cleanup. At that point the timeoutMs polling
+// implementation (IsProcessInJob loop with a deadline) will land
+// alongside the per-daemon refactor.
+//
+// Closes bot finding on PR #238 f49ac70 (P3 honor-the-TerminateAll-
+// timeout-contract): the doc previously implied synchronous wait
+// semantics that the impl did not deliver. Doc now matches impl
+// (best-effort, timeoutMs ignored) until per-daemon Job lands.
+func (j *Job) TerminateAll(timeoutMs uint32) error {
+	if j == nil || j.handle == 0 {
+		return nil
+	}
+	if err := windows.TerminateJobObject(j.handle, 1); err != nil {
+		// ERROR_ACCESS_DENIED can occur if the job is already being
+		// torn down. Treat as success - the goal (no processes
+		// remain in the job) is being achieved by the kernel anyway.
+		if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+			return nil
+		}
+		return fmt.Errorf("TerminateJobObject: %w", err)
+	}
+	// TerminateJobObject is asynchronous in kernel mode; actual
+	// process exit happens after this returns. timeoutMs is reserved
+	// for the future per-daemon Job Object architecture (see method
+	// doc); current impl is fire-and-return-immediately and matches
+	// the documented best-effort contract.
+	_ = timeoutMs
+	return nil
+}
+
 // Close releases the job handle. When this is the last handle, the
 // kernel applies KILL_ON_JOB_CLOSE and terminates every process still
 // in the job. Idempotent.

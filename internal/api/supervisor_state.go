@@ -27,6 +27,19 @@ type SupervisorDaemonState struct {
 	BackoffUntil    string         `json:"backoff_until,omitempty"`
 	QuarantineSince string         `json:"quarantine_since,omitempty"`
 	QueuedAction    *QueuedAction  `json:"queued_action,omitempty"`
+	// OrphanPID records a Windows post-create orphan PID when the
+	// supervisor's best-effort kill failed. Operator-visible via
+	// supervisor-state.json AND IPC status response; SEPARATE from
+	// CurrentPID because terminate-by-PID code reads CurrentPID and
+	// conflating an orphan would silently nil-success the terminate
+	// (StartedAt empty -> ErrProcessIdentityMismatch). Manual cleanup
+	// on Windows: `taskkill /F /T /PID <OrphanPID>`.
+	//
+	// Closes bot finding on PR #238 fd51536 (P2 persist-the-preserved-
+	// orphan-PID): in-memory tracker.OrphanPID without this serialized
+	// field meant `mcphub status` and supervisor-state.json could not
+	// surface it after supervisor restart.
+	OrphanPID int `json:"orphan_pid,omitempty"`
 }
 
 // RestartEvent is one entry in the 30-min sliding window failure-count

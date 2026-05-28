@@ -7,6 +7,14 @@ export interface DaemonStatus {
   daemon: string;
   port?: number;
   pid?: number;
+  // Windows post-create orphan PID surfaced when the supervisor's
+  // best-effort kill failed during spawn (errSpawnPostCreate path).
+  // SEPARATE from `pid` (current live daemon PID); `pid` stays 0/
+  // omitted on this failure path because the daemon is NOT running.
+  // Operator manual cleanup: `taskkill /F /T /PID <orphan_pid>` on
+  // Windows. Closes bot finding on PR #238 f49ac70 (P2 surface-
+  // orphan-PID-in-dashboard).
+  orphan_pid?: number;
   state: string;
   task_name?: string;
   is_maintenance?: boolean;

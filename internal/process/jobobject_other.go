@@ -34,3 +34,11 @@ func (j *Job) Assign(_ *exec.Cmd) error { return nil }
 
 // Close is a no-op on POSIX.
 func (j *Job) Close() error { return nil }
+
+// TerminateAll is a no-op on POSIX. The POSIX StartWithJob path
+// never returns ErrSpawnPostCreate (the Windows-specific
+// FindProcess-after-CreateProcess race does not exist on POSIX),
+// so this code path is never triggered in production. The stub
+// exists so the supervisor's orphan-cleanup call site can be
+// cross-platform without runtime.GOOS branches.
+func (j *Job) TerminateAll(_ uint32) error { return nil }

@@ -124,6 +124,16 @@ type supervisorIPCStatusDaemon struct {
 	CurrentPID    int      `json:"current_pid"`
 	StartedAt     string   `json:"started_at"`
 	IsMaintenance bool     `json:"is_maintenance"`
+	// OrphanPID surfaces a Windows post-create orphan PID when the
+	// supervisor's best-effort kill failed; operator-visible via
+	// `mcphub status --json` and the GUI Dashboard for manual cleanup
+	// (`taskkill /F /T /PID <orphan_pid>` on Windows). Zero (omitted
+	// in JSON) on the happy path. Closes bot finding on PR #238
+	// 044489a (P2 surface-orphan-PID-through-status-clients): without
+	// this field, json.Unmarshal would silently drop the orphan_pid
+	// emitted by supervisorStatusDaemons before it reached the
+	// DaemonStatus consumer.
+	OrphanPID int `json:"orphan_pid,omitempty"`
 }
 
 func validateSupervisorIPCHello(conn net.Conn, expected SupervisorLockOwner) error {
@@ -209,6 +219,7 @@ func decodeSupervisorIPCStatusResult(raw json.RawMessage) ([]DaemonStatus, error
 			State:         normalizeSupervisorIPCStatusState(d.State),
 			Port:          d.Port,
 			PID:           d.CurrentPID,
+			OrphanPID:     d.OrphanPID,
 			Workspace:     d.Workspace,
 			IsMaintenance: d.IsMaintenance,
 		})

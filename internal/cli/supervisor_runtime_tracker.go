@@ -25,6 +25,22 @@ type DaemonRuntimeEntry struct {
 	PIDGeneration int
 	RestartCount  int
 	LastError     string
+	// OrphanPID records the PID of a Windows post-create orphan when
+	// the supervisor's best-effort kill failed. SEPARATE from CurrentPID
+	// because makeProductionTerminateFn reads CurrentPID as the live
+	// daemon's PID to terminate; conflating an orphan PID into
+	// CurrentPID would cause the terminate identity-proof check to
+	// silently nil-success (StartedAt empty -> ErrProcessIdentityMismatch
+	// -> handleSupervisorRespawn spawns a new daemon while the orphan
+	// is alive, port-collision).
+	//
+	// Operator visibility: `mcphub status` and the GUI Dashboard
+	// surface OrphanPID alongside CurrentPID. Manual cleanup is
+	// `taskkill /F /T /PID <OrphanPID>` on Windows.
+	//
+	// Closes bot finding on PR #238 3ba6773 (P2 don't-expose-orphan-
+	// as-terminable-daemon-PID).
+	OrphanPID int `json:",omitempty"`
 }
 
 type DaemonRuntimeTracker struct {
@@ -109,6 +125,20 @@ func (t *DaemonRuntimeTracker) ClearCrashes(taskName string) {
 	}
 }
 
+// clearOrphanPIDLocked zeroes the orphan PID field. Called by all
+// state transitions that signal "we are past the orphan failure
+// case" - successful spawn, exit, ordinary spawn-failed, backoff,
+// terminate, quarantine. Without this clear, a failed orphan kill
+// + operator manual cleanup + supervisor restart + successful
+// spawn would leave the stale orphan PID in state.json, prompting
+// operators to taskkill an unrelated reused PID.
+//
+// Caller MUST hold t.mu. Closes bot finding on PR #238 044489a
+// (P2 clear-stale-orphan-PIDs-after-recovery).
+func clearOrphanPIDLocked(entry *DaemonRuntimeEntry) {
+	entry.OrphanPID = 0
+}
+
 func (t *DaemonRuntimeTracker) MarkSpawned(taskName string, pid int, startedAt time.Time) {
 	if t == nil {
 		return
@@ -125,6 +155,7 @@ func (t *DaemonRuntimeTracker) MarkSpawned(taskName string, pid int, startedAt t
 	entry.StartedAt = startedAt.UTC()
 	entry.PIDGeneration++
 	entry.LastError = ""
+	clearOrphanPIDLocked(&entry)
 	t.entries[taskName] = entry
 }
 
@@ -143,6 +174,49 @@ func (t *DaemonRuntimeTracker) MarkSpawnFailed(taskName string, err error) {
 	entry.CurrentPID = 0
 	entry.StartedAt = time.Time{}
 	entry.LastError = errorString(err)
+	clearOrphanPIDLocked(&entry)
+	t.entries[taskName] = entry
+}
+
+// MarkSpawnFailedPreservePID is the orphan-aware variant of
+// MarkSpawnFailed for the Windows post-create-orphan path. Records
+// the orphan PID in the SEPARATE OrphanPID field (NOT in
+// CurrentPID) so operator visibility is preserved without
+// conflating the orphan with the "live daemon PID, terminate it"
+// semantic of CurrentPID.
+//
+// Why a separate field: makeProductionTerminateFn reads CurrentPID
+// and builds a PID identity proof; conflating an orphan PID into
+// CurrentPID would silently nil-success the terminate (StartedAt
+// empty -> ErrProcessIdentityMismatch -> respawn proceeds while
+// orphan is alive -> port collision). With OrphanPID separate,
+// terminate sees CurrentPID=0 (no live daemon), respawn proceeds
+// normally; if orphan still holds the port, the respawn naturally
+// hits port-in-use as the duplicate cap. Closes bot finding on PR
+// #238 3ba6773 (P2 don't-expose-orphan-as-terminable-daemon-PID).
+//
+// Used only by the orphan path in supervise.go after a
+// process.BestEffortKillByPID failure (errors.Is(startErr,
+// process.ErrSpawnPostCreate) && kill returned non-nil). The
+// common pre-child case still uses MarkSpawnFailed.
+//
+// Closes bot finding on PR #237 16d99d7 (P2 preserve-orphan-PID).
+func (t *DaemonRuntimeTracker) MarkSpawnFailedPreservePID(taskName string, err error, orphanPID int) {
+	if t == nil {
+		return
+	}
+	taskName = canonicalSupervisorTaskName(taskName)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	entry := t.entries[taskName]
+	if entry.PIDGeneration > 0 {
+		entry.RestartCount++
+	}
+	entry.State = daemonRuntimeStateBackoff
+	entry.CurrentPID = 0
+	entry.OrphanPID = orphanPID
+	entry.StartedAt = time.Time{}
+	entry.LastError = errorString(err)
 	t.entries[taskName] = entry
 }
 
@@ -158,6 +232,7 @@ func (t *DaemonRuntimeTracker) MarkExited(taskName string) {
 	entry.CurrentPID = 0
 	entry.StartedAt = time.Time{}
 	entry.LastError = ""
+	clearOrphanPIDLocked(&entry)
 	t.entries[taskName] = entry
 }
 
@@ -185,6 +260,7 @@ func (t *DaemonRuntimeTracker) MarkBackoff(taskName string) {
 	entry.State = daemonRuntimeStateBackoff
 	entry.CurrentPID = 0
 	entry.StartedAt = time.Time{}
+	clearOrphanPIDLocked(&entry)
 	t.entries[taskName] = entry
 }
 
@@ -209,6 +285,7 @@ func (t *DaemonRuntimeTracker) MarkQuarantined(taskName string) {
 	entry.State = daemonRuntimeStateQuarantine
 	entry.CurrentPID = 0
 	entry.StartedAt = time.Time{}
+	clearOrphanPIDLocked(&entry)
 	t.entries[taskName] = entry
 }
 
@@ -255,6 +332,7 @@ func (t *DaemonRuntimeTracker) HydrateFromState(file *api.SupervisorStateFile) {
 			StartedAt:     startedAt,
 			PIDGeneration: daemonState.PIDGeneration,
 			RestartCount:  len(daemonState.RestartHistory),
+			OrphanPID:     daemonState.OrphanPID,
 		}
 	}
 }
@@ -288,6 +366,7 @@ func (t *DaemonRuntimeTracker) PersistTo(path string) error {
 			State:         supervisorStateFromRuntimeState(entry.State),
 			CurrentPID:    entry.CurrentPID,
 			PIDGeneration: entry.PIDGeneration,
+			OrphanPID:     entry.OrphanPID,
 		}
 		if !entry.StartedAt.IsZero() {
 			daemonState.StartedAt = entry.StartedAt.UTC().Format(time.RFC3339Nano)

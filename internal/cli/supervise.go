@@ -2186,18 +2186,36 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 				// The helper blocks until the process actually exits
 				// (or 5s timeout) so a subsequent port rebind doesn't
 				// race against still-tearing-down orphan sockets.
+				// Best-effort PID-based kill via process.BestEffortKillByPID
+				// (OpenProcess + TerminateProcess + WaitForSingleObject,
+				// 5s timeout). NOTE: this only kills the root orphan
+				// PID; wrappers like uvx that spawned descendants
+				// before failing leave those descendants alive. The
+				// shared supervisor Job Object's KILL_ON_JOB_CLOSE
+				// reaps them on supervisor exit; per-daemon Job
+				// Objects (which would enable per-orphan tree kill
+				// here) are deferred to the ADR redesign (per-task
+				// FSM mailbox + per-task lifecycle-primitive).
+				//
+				// Bot P1 on r5.3 331b0df rejected the previous
+				// `job.TerminateAll` approach: the Job is SHARED
+				// across all daemons (created once in runSupervise),
+				// so a job-level kill would terminate every healthy
+				// daemon along with the orphan. PID-based kill is
+				// the only safe approach until per-daemon jobs land.
 				killErr := process.BestEffortKillByPID(pid)
 				orphanBody := map[string]any{
-					"pid":           pid,
+					"pid":            pid,
 					"kill_succeeded": killErr == nil,
+					"kill_method":    "TerminateProcess(pid)",
 				}
 				severity := "warn"
 				if killErr != nil {
 					orphanBody["kill_error"] = killErr.Error()
-					orphanBody["note"] = "Kill failed - orphan may still be alive. Returning RAW startErr (not wrapped with errSpawnPreChild) so the controller does NOT synth EvChildExit + backoff retry. Daemon stays in StSpawning (preferable to duplicate-daemon risk). Operator should investigate kill_error and may need to terminate orphan manually."
+					orphanBody["note"] = "PID-based kill failed - orphan may still be alive at pi.ProcessId. Returning RAW startErr (no errSpawnPreChild wrap) so controller does NOT synth EvChildExit + backoff retry. Daemon stays in StSpawning (preferable to duplicate-daemon risk). The orphan PID is PRESERVED in supervisor-state.json (orphan_pid field, SEPARATE from current_pid which stays 0) so operator can run `taskkill /F /T /PID <orphan_pid>` for manual cleanup. Also visible via `mcphub status --json` and the GUI Dashboard."
 					severity = "error"
 				} else {
-					orphanBody["note"] = "Orphan terminated cleanly. Wrapping with errSpawnPreChild so the controller synth EvChildExit + backoff timer drives retry. Fresh respawn binds the port without orphan interference."
+					orphanBody["note"] = "Orphan root PID terminated cleanly via TerminateProcess. Wrapping with errSpawnPreChild so the controller synth EvChildExit + backoff timer drives retry. Fresh respawn binds the port if descendants (if any) released it; otherwise hits port-in-use as natural cap. Per-daemon Job Object (proper descendants-tree kill) deferred to ADR."
 				}
 				_ = events.Emit(api.SupervisorEvent{
 					Severity: severity,
@@ -2206,16 +2224,15 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 					TaskName: d.TaskName,
 					Body:     orphanBody,
 				})
-				// Closes bot finding on PR #237 82f1899 (P2
-				// do-not-respawn-after-failed-orphan-kill): if the
-				// orphan kill failed, the orphan may still be alive
-				// at pi.ProcessId and holding its port; routing
-				// through backoff respawn would either duplicate the
-				// daemon (if port is freed) or fail with port-in-use
-				// (if not) - both worse than the stuck-StSpawning
-				// state until next external reconcile. Return raw
-				// startErr (no wrap) - controller does NOT synth.
 				if killErr != nil {
+					// Closes bot finding on PR #237 16d99d7 (P2
+					// preserve-orphan-PID): MarkSpawnFailed above
+					// cleared CurrentPID=0; restore via
+					// MarkSpawnFailedPreservePID so the operator
+					// can find the orphan PID in
+					// supervisor-state.json for manual cleanup.
+					tracker.MarkSpawnFailedPreservePID(d.TaskName, startErr, pid)
+					_ = persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName)
 					return startErr
 				}
 			}

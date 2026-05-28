@@ -506,6 +506,14 @@ function Card(props: {
         <span>PID</span>
         <span>{d.pid ?? "—"}</span>
       </div>
+      {d.orphan_pid ? (
+        <div class="card-kv" data-testid="orphan-pid-row">
+          <span>Orphan PID</span>
+          <span title="Windows post-create orphan PID; supervisor's best-effort kill failed. Run `taskkill /F /T /PID` for manual cleanup.">
+            {d.orphan_pid} ⚠
+          </span>
+        </div>
+      ) : null}
       <div class="card-kv">
         <span>State</span>
         <span class="state">
