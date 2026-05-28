@@ -2212,7 +2212,7 @@ func makeProductionSpawnFnWithStatePath(job *process.Job, events *api.Supervisor
 				severity := "warn"
 				if killErr != nil {
 					orphanBody["kill_error"] = killErr.Error()
-					orphanBody["note"] = "PID-based kill failed - orphan may still be alive at pi.ProcessId. Returning RAW startErr (no errSpawnPreChild wrap) so controller does NOT synth EvChildExit + backoff retry. Daemon stays in StSpawning (preferable to duplicate-daemon risk). The orphan PID is PRESERVED in supervisor-state.json (current_pid field) so operator can run `taskkill /F /T /PID <pid>` for manual cleanup."
+					orphanBody["note"] = "PID-based kill failed - orphan may still be alive at pi.ProcessId. Returning RAW startErr (no errSpawnPreChild wrap) so controller does NOT synth EvChildExit + backoff retry. Daemon stays in StSpawning (preferable to duplicate-daemon risk). The orphan PID is PRESERVED in supervisor-state.json (orphan_pid field, SEPARATE from current_pid which stays 0) so operator can run `taskkill /F /T /PID <orphan_pid>` for manual cleanup. Also visible via `mcphub status --json` and the GUI Dashboard."
 					severity = "error"
 				} else {
 					orphanBody["note"] = "Orphan root PID terminated cleanly via TerminateProcess. Wrapping with errSpawnPreChild so the controller synth EvChildExit + backoff timer drives retry. Fresh respawn binds the port if descendants (if any) released it; otherwise hits port-in-use as natural cap. Per-daemon Job Object (proper descendants-tree kill) deferred to ADR."
