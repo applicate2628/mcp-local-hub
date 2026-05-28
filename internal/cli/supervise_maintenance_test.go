@@ -454,6 +454,38 @@ func TestMaintenance_CacheClearedAfterPersistRecovers(t *testing.T) {
 	}
 }
 
+// TestMaintenance_NoRefireOnExactSunday0300 covers PR #243 bot round-2
+// P2. A fire that lands exactly on Sunday 03:00:00 local persists that
+// instant as last_fired_at; with an inclusive next-due boundary the
+// same instant looked due again on the next 60s tick → a double fire.
+// The strictly-after boundary for real fires must advance a full week.
+func TestMaintenance_NoRefireOnExactSunday0300(t *testing.T) {
+	loc := time.Local
+	exact := time.Date(2026, 5, 17, 3, 0, 0, 0, loc) // Sunday 03:00:00 exactly
+	timer := api.MaintenanceTimer{Kind: "workspace-weekly-refresh"}
+	state := newTestState(t) // compat path (no spawner): deterministic fire count
+	sched := NewMaintenanceScheduler(state)
+	fires := 0
+	sched.SetFireHook(func(api.MaintenanceTimer) { fires++ })
+
+	// First tick exactly at Sun 03:00:00 — fires (synthetic baseline due).
+	sched.Tick(exact, []api.MaintenanceTimer{timer})
+	if fires != 1 {
+		t.Fatalf("exact Sun 03:00:00 first tick: want 1 fire, got %d", fires)
+	}
+	// Next 60s tick — must NOT re-fire: last_fired == Sun 03:00:00, so
+	// the strictly-after boundary puts next_due a full week out.
+	sched.Tick(exact.Add(60*time.Second), []api.MaintenanceTimer{timer})
+	if fires != 1 {
+		t.Fatalf("exact-03:00 refire regression: tick +60s re-fired; want 1 got %d", fires)
+	}
+	// Several minutes later still no re-fire.
+	sched.Tick(exact.Add(5*time.Minute), []api.MaintenanceTimer{timer})
+	if fires != 1 {
+		t.Fatalf("exact-03:00 refire regression: tick +5m re-fired; want 1 got %d", fires)
+	}
+}
+
 // errSyntheticDiskFull is the synthetic error injected by the storm
 // prevention test to simulate a state-write failure.
 var errSyntheticDiskFull = newSyntheticErr("synthetic disk full (test-only)")

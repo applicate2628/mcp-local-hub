@@ -320,6 +320,30 @@ func (s *maintenanceSpawner) Wait(pid int) error {
 	return entry.waitErr
 }
 
+// Kill tree-kills the maintenance child rooted at pid. The scheduler
+// invokes it when post-spawn real-PID tracking fails (PR #243 bot
+// round-2 P1). The procs entry is dropped ONLY on a successful kill: if
+// the tree-kill returns an error the child may still be running, and
+// the durable real-PID write already failed, so we must KEEP the procs
+// entry as the sole in-memory handle Shutdown can use to retry the kill
+// (PR #243 bot round-2 review — dropping it on error would orphan a
+// still-running child). On success the waitAndRecord goroutine launched
+// by Start observes cmd.Wait returning after the kill and closes
+// entry.done; dropping the entry here keeps Shutdown's snapshot from
+// re-counting an already-handled child.
+func (s *maintenanceSpawner) Kill(pid int) error {
+	if s == nil {
+		return errors.New("maintenance spawner is nil")
+	}
+	if err := process.TreeKillByPID(pid); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	delete(s.procs, pid)
+	s.mu.Unlock()
+	return nil
+}
+
 func (s *maintenanceSpawner) Shutdown(timeout time.Duration) maintenanceShutdownResult {
 	result := maintenanceShutdownResult{}
 	if s == nil {

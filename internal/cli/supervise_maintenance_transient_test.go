@@ -43,6 +43,11 @@ type transientTestState struct {
 	// appending — simulating a disk-write failure so the scheduler's
 	// abort-before-spawn path (PR #243 bot P2#3) can be exercised.
 	addErr error
+	// addErrRealOnly scopes addErr to real-PID writes (PID>0): the
+	// PID=0 claim write still succeeds, so the scheduler reaches the
+	// post-spawn real-PID write and exercises the kill-on-track-failure
+	// path (PR #243 bot round-2 P1).
+	addErrRealOnly bool
 }
 
 func newTransientTestState() *transientTestState {
@@ -66,9 +71,12 @@ func (s *transientTestState) SetMaintenanceFiredAt(kind, rfc3339nanoUTC string) 
 func (s *transientTestState) AddTransientPID(p api.TransientPID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.addErr != nil {
+	if s.addErr != nil && (!s.addErrRealOnly || p.PID > 0) {
 		// Simulate a non-persisting disk write: do NOT append, return
-		// the error so the scheduler aborts before spawning (P2#3).
+		// the error. With addErrRealOnly, only the real-PID write fails
+		// (the PID=0 claim succeeds) so the kill-on-track-failure path
+		// is exercised; otherwise the claim write fails and the
+		// abort-before-spawn path is exercised.
 		return s.addErr
 	}
 	s.transient = append(s.transient, p)
@@ -155,6 +163,7 @@ type fakeSpawner struct {
 	startPanic    bool
 	startCallback func(api.MaintenanceTimer) // observation hook, fires AFTER PID assignment, BEFORE return
 	startCount    atomic.Int32               // total Start invocations; used to assert "spawn never attempted"
+	killedPIDs    []int                      // PIDs passed to Kill; used to assert the child was killed
 }
 
 func newFakeSpawner() *fakeSpawner {
@@ -200,6 +209,24 @@ func (f *fakeSpawner) Wait(pid int) error {
 	err := f.waitErr[pid]
 	f.mu.Unlock()
 	return err
+}
+
+// Kill records the killed PID and unblocks any pending Wait so the
+// scheduler's real-PID-write-failure path (which kills the child it
+// could not record) is observable and leaks no goroutine.
+func (f *fakeSpawner) Kill(pid int) error {
+	f.mu.Lock()
+	f.killedPIDs = append(f.killedPIDs, pid)
+	ch := f.waitCh[pid]
+	f.mu.Unlock()
+	if ch != nil {
+		select {
+		case <-ch: // already closed
+		default:
+			close(ch)
+		}
+	}
+	return nil
 }
 
 // finish unblocks Wait for the given PID. err may be nil.
@@ -740,5 +767,45 @@ func TestMaintenance_Transient_SpawnFailureDoesNotAdvanceFiredAt(t *testing.T) {
 		if p.PID > 0 {
 			sp.finish(p.PID, nil)
 		}
+	}
+}
+
+// TestMaintenance_Transient_RealPIDWriteFailureKillsChild covers PR
+// #243 bot round-2 P1. If the post-spawn real-PID state write fails,
+// the running child cannot be durably tracked (the PID=0 claim does not
+// help — quiesce and the cold-start reaper both ignore pid<=0), so the
+// scheduler must KILL the child rather than leave an untracked orphan.
+// The claim must be cleared and fired_at must NOT advance (retry next
+// tick).
+func TestMaintenance_Transient_RealPIDWriteFailureKillsChild(t *testing.T) {
+	timer := api.MaintenanceTimer{Kind: "workspace-weekly-refresh"}
+	state := newTransientTestState()
+	state.addErr = errors.New("synthetic real-PID write failure")
+	state.addErrRealOnly = true // PID=0 claim succeeds; real-PID write fails
+	lastWeek := sundayDue().AddDate(0, 0, -7).Format(time.RFC3339Nano)
+	state.SetMaintenanceFiredAt("workspace-weekly-refresh", lastWeek)
+
+	sched := NewMaintenanceScheduler(state)
+	sp := newFakeSpawner()
+	sched.SetSpawner(sp)
+
+	sched.Tick(sundayDue(), []api.MaintenanceTimer{timer})
+
+	// The spawned child (which we could not record) must be killed.
+	if !waitForCondition(200*time.Millisecond, func() bool {
+		sp.mu.Lock()
+		defer sp.mu.Unlock()
+		return len(sp.killedPIDs) == 1
+	}) {
+		sp.mu.Lock()
+		k := append([]int(nil), sp.killedPIDs...)
+		sp.mu.Unlock()
+		t.Fatalf("real-PID-write failure must kill the child; killedPIDs=%v", k)
+	}
+	if snap := state.snapshot(); len(snap) != 0 {
+		t.Fatalf("claim must be cleared after the kill; got %+v", snap)
+	}
+	if got, _ := state.GetMaintenanceFiredAt("workspace-weekly-refresh"); got != lastWeek {
+		t.Fatalf("real-PID-write failure must NOT advance fired_at; got %q want %q", got, lastWeek)
 	}
 }

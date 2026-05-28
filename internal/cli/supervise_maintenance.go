@@ -122,6 +122,14 @@ type StateStore interface {
 type Spawner interface {
 	Start(t api.MaintenanceTimer) (pid int, err error)
 	Wait(pid int) error
+
+	// Kill force-terminates the process tree rooted at pid. The
+	// scheduler calls it when post-spawn real-PID tracking fails: a
+	// running child that cannot be recorded durably must be killed
+	// rather than left as an untracked orphan that quiesce and the
+	// cold-start reaper cannot see (PR #243 bot round-2 P1). Returns nil
+	// when the process is already gone.
+	Kill(pid int) error
 }
 
 // MaintenanceScheduler evaluates maintenance timers and fans fire
@@ -282,28 +290,33 @@ func (s *MaintenanceScheduler) SetClock(c func() time.Time) {
 //
 // Per-timer algorithm (spec lines 458-462):
 //
-//   - Compute next_due = next Sun 03:00 local on or after
-//     last_fired_at[kind] (synthetic baseline = most-recent-past
-//     Sun 03:00 local when the entry is absent).
-//   - If now >= next_due → fire, set last_fired_at = now.UTC().
+//   - Compute next_due from last_fired_at[kind]:
+//   - real last_fired_at → first Sun 03:00 local STRICTLY after it,
+//     so a fire that lands exactly on Sun 03:00:00 does not re-fire
+//     on the next 60s tick (PR #243 bot round-2 P2);
+//   - no entry → synthetic baseline = most-recent-past Sun 03:00
+//     local, with an inclusive boundary so a fresh install catches
+//     up and fires on the first tick.
+//   - If now >= next_due → fire.
 //   - The spec's 6h split (within-6h vs. catch-up) is documentation:
-//     both paths fire ONCE and update last_fired_at to `now`, so a
-//     multi-week sleep produces exactly one catch-up fire on the
-//     first post-sleep tick.
+//     both paths fire ONCE, so a multi-week sleep produces exactly one
+//     catch-up fire on the first post-sleep tick.
 //
 // "Fire" routing (Task 9.2):
 //
-//   - When `spawner` is set: route through `fire(t)` which engages
-//     the per-timer mutex + claim-before-syscall pipeline + post-Wait
-//     drain goroutine.
+//   - When `spawner` is set: route through `fire(t, firedAt)`, which
+//     engages the per-timer mutex + claim-before-syscall pipeline +
+//     post-Wait drain goroutine, and persists last_fired_at ONLY after
+//     the child spawns successfully (PR #243 bot P1#3).
 //   - When `spawner` is nil: fall back to the Task 9.1 fire-hook-only
-//     path so existing tests + callers keep working.
+//     path (persist inline, then fire the hook).
 //
-// `last_fired_at` is set BEFORE the fire path runs (same as Task 9.1).
-// This means a fire that is skipped by the per-timer mutex (overlap)
-// still updates `last_fired_at` — which is correct: the timer's
-// cadence advances regardless of whether the prior instance has
-// finished, otherwise a slow handler would wedge weekly cadence.
+// last_fired_at is advanced on a successful fire (spawner path: after
+// Spawner.Start succeeds; compat path: inline before the hook). A fire
+// skipped by the per-timer mutex (overlap) does NOT advance
+// last_fired_at, so the next tick re-evaluates the same window once the
+// in-flight instance finishes — the cadence does not silently skip a
+// window because a prior run was slow.
 func (s *MaintenanceScheduler) Tick(now time.Time, timers []api.MaintenanceTimer) {
 	for _, t := range timers {
 		// Operator-supported off-switch (PR #243 consultant blocker):
@@ -324,15 +337,24 @@ func (s *MaintenanceScheduler) Tick(now time.Time, timers []api.MaintenanceTimer
 			continue
 		}
 
-		baseline := s.parseLastFiredOrSynthesise(t.Kind, now)
-		nextDue := nextSunday0300Local(baseline)
+		baseline, fired := s.parseLastFiredOrSynthesise(t.Kind, now)
+		// Real last-fire → strictly-after boundary (a fire at exactly
+		// Sun 03:00:00 must not re-fire next tick, PR #243 bot round-2
+		// P2). Synthetic baseline → inclusive, so a fresh install
+		// catches up on the first tick.
+		var nextDue time.Time
+		if fired {
+			nextDue = nextSunday0300LocalAfter(baseline)
+		} else {
+			nextDue = nextSunday0300Local(baseline)
+		}
 
 		if !now.Before(nextDue) {
 			// Fire once. Both within-6h and catch-up paths use the
 			// same single-fire semantics; setting last_fired_at = now
-			// rebases next_due past `now`, so the same Tick (and any
-			// immediate follow-up Tick before another Sunday elapses)
-			// cannot re-fire the same window.
+			// rebases next_due strictly past the just-fired window, so
+			// the same Tick (and any immediate follow-up Tick before
+			// another Sunday elapses) cannot re-fire it.
 			firedAt := now.UTC().Format(time.RFC3339Nano)
 
 			if s.spawner == nil {
@@ -466,20 +488,32 @@ func (s *MaintenanceScheduler) fire(t api.MaintenanceTimer, firedAt string) {
 		return
 	}
 
-	// Step 5: spawn succeeded → NOW advance the weekly cadence
-	// (PR #243 bot P1#3). persistFiredAt also reconciles the
-	// storm-prevention cache (PR #243 bot P1#1).
-	s.persistFiredAt(t.Kind, firedAt)
-	// Record the real PID BEFORE removing the claim so the child is
-	// never absent from state. If the real-PID write fails, keep the
-	// PID=0 claim as the forensic record rather than leaving a running
-	// child wholly untracked (degraded tracking — the child is still
-	// recoverable by the reaper via the claim's Kind).
+	// Step 5: spawn succeeded. Record the real PID BEFORE removing the
+	// claim so the child is never absent from state. If the real-PID
+	// write fails we can NOT durably track the running child — the PID=0
+	// claim does NOT help, because quiesce and the cold-start reaper
+	// both treat pid<=0 as dead and never kill it (PR #243 bot round-2
+	// P1). Leaving it would make IPC quiesce report drained while the
+	// process runs and orphan it on a supervisor crash. So kill the
+	// child, clear the claim, release the slot, and do NOT advance
+	// fired_at — the window retries on the next tick.
 	if err := s.state.AddTransientPID(api.TransientPID{PID: pid, Kind: t.Kind, StartedAt: startedAt}); err != nil {
-		log.Printf("severity=error event=maintenance-realpid-write-failed kind=%q pid=%d err=%v", t.Kind, pid, err)
-	} else {
+		log.Printf("severity=error event=maintenance-realpid-write-failed kind=%q pid=%d err=%v killing-child=true", t.Kind, pid, err)
+		if kerr := s.spawner.Kill(pid); kerr != nil {
+			log.Printf("severity=error event=maintenance-realpid-write-failed-kill-failed kind=%q pid=%d err=%v", t.Kind, pid, kerr)
+		}
 		s.state.RemoveTransientClaim(t.Kind, startedAt)
+		s.mu.Lock()
+		delete(s.inflight, t.Kind)
+		s.mu.Unlock()
+		return
 	}
+	s.state.RemoveTransientClaim(t.Kind, startedAt)
+
+	// Cadence advances only AFTER durable real-PID tracking is
+	// established (PR #243 bot P1#3 + round-2 P1). persistFiredAt also
+	// reconciles the storm-prevention cache (PR #243 bot P1#1).
+	s.persistFiredAt(t.Kind, firedAt)
 
 	// Step 6: fire the observability hook AFTER spawn + record.
 	s.fireHook(t)
@@ -523,10 +557,16 @@ func (s *MaintenanceScheduler) fire(t api.MaintenanceTimer, firedAt string) {
 // which is the worse outcome (operator sees nothing happen and has
 // no diagnostic). Caller flow on first install reaches this with no
 // stored entry.
-func (s *MaintenanceScheduler) parseLastFiredOrSynthesise(kind string, now time.Time) time.Time {
+//
+// The bool return reports whether the baseline is a REAL last-fire
+// (from cache or disk) vs a SYNTHETIC catch-up baseline. The caller
+// uses it to pick a strictly-after vs inclusive due boundary (PR #243
+// bot round-2 P2): a real fire at exactly Sun 03:00:00 must not re-fire
+// next tick, but a synthetic baseline must fire on the first tick.
+func (s *MaintenanceScheduler) parseLastFiredOrSynthesise(kind string, now time.Time) (time.Time, bool) {
 	if raw, ok := s.loadLastFiredLocally(kind); ok && raw != "" {
 		if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
-			return t
+			return t, true
 		}
 		// Cache poisoning is impossible in production (only
 		// rememberLastFiredLocally writes here, with a known
@@ -536,11 +576,11 @@ func (s *MaintenanceScheduler) parseLastFiredOrSynthesise(kind string, now time.
 	}
 	if raw, ok := s.state.GetMaintenanceFiredAt(kind); ok && raw != "" {
 		if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
-			return t
+			return t, true
 		}
 		log.Printf("severity=warn event=maintenance-last-fired-unparseable kind=%q value=%q", kind, raw)
 	}
-	return mostRecentPastSunday0300Local(now)
+	return mostRecentPastSunday0300Local(now), false
 }
 
 // nextSunday0300Local returns the earliest Sunday 03:00 local time
@@ -570,6 +610,30 @@ func nextSunday0300Local(after time.Time) time.Time {
 	// Unreachable: AddDate always lands on a Sunday within 7 steps and
 	// the candidate strictly advances toward `after`. Returning the
 	// last computed value preserves total-function semantics.
+	return candidate
+}
+
+// nextSunday0300LocalAfter returns the earliest Sunday 03:00 local time
+// `t` such that `t` is STRICTLY after `after`. Same DST-safe time.Date +
+// Weekday walk as nextSunday0300Local, but with a strict `>` boundary so
+// a last_fired_at landing exactly on Sunday 03:00:00 advances a full
+// week instead of re-satisfying the due check on the next 60s tick
+// (PR #243 bot round-2 P2). Used only for REAL last-fire baselines; the
+// synthetic catch-up baseline keeps the inclusive nextSunday0300Local.
+func nextSunday0300LocalAfter(after time.Time) time.Time {
+	loc := time.Local
+	a := after.In(loc)
+
+	candidate := time.Date(a.Year(), a.Month(), a.Day(), 3, 0, 0, 0, loc)
+	// Bound 9 covers the worst case: `after` is exactly Sunday 03:00:00,
+	// so the same-day candidate is rejected (not strictly after) and we
+	// step a full 7 days to the next Sunday.
+	for i := 0; i < 9; i++ {
+		if candidate.Weekday() == time.Sunday && candidate.After(after) {
+			return candidate
+		}
+		candidate = candidate.AddDate(0, 0, 1)
+	}
 	return candidate
 }
 

@@ -1,81 +1,212 @@
 //go:build windows
 
-// Package cli — Task 13.1 Windows no-op stub for the cold-start
-// stale-child reaper.
+// Package cli — Task 13.1 Windows cold-start stale-child reaper.
 //
-// On Windows the supervisor owns its daemon children through a Job
-// Object (see internal/process). When the supervisor process exits
-// — gracefully or by crash — the Job Object's KILL_ON_JOB_CLOSE limit
-// kicks in and the kernel terminates every still-running member of
-// the job. There is no scenario in which a Windows supervisor restart
-// finds orphan children of a prior generation: the prior supervisor's
-// Job Object dies with its handle, and the kernel reaper has already
-// collected the children before the new supervisor binds its lock.
+// DAEMON children on Windows are owned through per-task Job Objects
+// (see internal/process). When the supervisor exits — gracefully or by
+// crash — each Job Object's KILL_ON_JOB_CLOSE limit terminates the
+// daemon's whole tree, so a Windows supervisor restart never finds
+// orphan DAEMON children: the prior generation's Job handles die with
+// the process and the kernel reaps the children before the new
+// supervisor binds its lock.
 //
-// The cross-platform API surface still exists on Windows so callers
-// (newSuperviseCmd, tests) can invoke ReapStaleTransients
-// unconditionally; the function returns an empty ReaperResult and a
-// nil error immediately, doing no syscall, no I/O, and no sleep.
+// MAINTENANCE-timer transients are different. Per spec
+// (§supervisor-state.json) `transient_pids[*]` are "fire-and-forget
+// children OUTSIDE Job Object" — they are spawned with plain
+// CreateProcess (process.NewProcessGroup is a no-op on Windows). If the
+// supervisor crashes or is force-killed while a weekly refresh is
+// running, that child is NOT reaped by any Job Object and its recorded
+// PID lingers in supervisor-state.json. This reaper walks
+// `transient_pids` on cold start and kills + clears those stale
+// maintenance children (PR #243 bot round-2 P2). It does NOT touch
+// daemons — they are not in `transient_pids`.
 //
-// Spec source: §"Fallback if step 4 IPC fails" + plan §2660. The
-// fallback exists for Linux/macOS where there is no Job Object
-// equivalent; the spec explicitly carves Windows out of the manual
-// reap path.
+// Spec source: §"Fallback if step 4 IPC fails" + plan §2660.
 package cli
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/process"
 )
 
 // ReaperResult reports what the reaper did during this supervisor cold
-// start. On Windows every field is zero-valued because the Job Object
-// already reaped any prior-generation children before this function
-// runs.
-//
-// Fields mirror the POSIX surface so cross-platform tests compile
-// against the same API. See POSIX impl for field semantics.
+// start. Fields mirror the POSIX surface so cross-platform tests compile
+// against the same API. See the POSIX impl for field semantics.
 type ReaperResult struct {
-	KilledPIDs        []int         // PIDs killed (after ownership + StartedAt gate)
-	SkippedPIDs       []int         // PIDs alive but failed an ownership or StartedAt gate
-	DeadPIDs          []int         // PIDs already gone (no kill needed)
-	KillErrors        map[int]error // PIDs where kill returned a non-ESRCH error; retained in state
-	ClearedTransients int           // size of supervisor-state.transient_pids[] before clear
+	KilledPIDs        []int         // maintenance transients killed (after the start-time gate)
+	SkippedPIDs       []int         // alive but failed/unverifiable identity gate (not killed)
+	DeadPIDs          []int         // PIDs already gone or PID<=0 claim slots (no kill needed)
+	KillErrors        map[int]error // PIDs where the tree-kill returned an error; retained in state
+	ClearedTransients int           // size of supervisor-state.transient_pids[] before reconcile
 	SettleDuration    time.Duration // actual settle wait
 }
 
-// ReaperDeps allows test injection. On Windows every field is unused
-// (the function is a no-op stub); the struct is kept identical to the
-// POSIX surface so cross-platform tests compile against the same API.
+// ReaperDeps allows test injection. Production wires only StateDir; the
+// rest fall back to the Windows defaults below. The struct is kept
+// identical to the POSIX surface so cross-platform tests compile against
+// the same API.
 type ReaperDeps struct {
-	StateDir            string
-	ReadState           func(path string) (*api.SupervisorStateFile, error)
-	WriteState          func(path string, s *api.SupervisorStateFile) error
-	PIDAlive            func(pid int) bool
-	ProcessIdentity     func(pid int) (basename, cmdline string, uid int, ok bool)
-	CurrentUID          func() int
-	KillProcessGroup    func(pid int) error
-	KillProcess         func(pid int) error
-	ProcessStartTime    func(pid int) (time.Time, bool)
-	StartedAtTolerance  time.Duration
-	SettleDuration      time.Duration
-	Now                 func() time.Time
+	StateDir           string
+	ReadState          func(path string) (*api.SupervisorStateFile, error)
+	WriteState         func(path string, s *api.SupervisorStateFile) error
+	PIDAlive           func(pid int) bool
+	ProcessIdentity    func(pid int) (basename, cmdline string, uid int, ok bool)
+	CurrentUID         func() int
+	KillProcessGroup   func(pid int) error
+	KillProcess        func(pid int) error
+	ProcessStartTime   func(pid int) (time.Time, bool)
+	StartedAtTolerance time.Duration
+	SettleDuration     time.Duration
+	Now                func() time.Time
 }
 
-// ReapStaleTransients is a no-op on Windows. The Job Object holding
-// the supervisor's daemon children dies with the supervisor; the
-// kernel-side KILL_ON_JOB_CLOSE handler has already terminated every
-// member by the time a new supervisor process starts and calls into
-// this function. Returning ReaperResult{} signals "nothing to do" —
-// any caller iterating over result.KilledPIDs / .DeadPIDs etc. on
-// Windows will see zero entries and skip its log lines accordingly.
+// ReapStaleTransients walks supervisor-state.transient_pids on Windows
+// cold start and reaps stale maintenance-timer children left behind by a
+// prior supervisor that crashed mid-fire. Per-transient outcome:
 //
-// The function takes ctx for API parity with POSIX; cancellation is
-// not checked because the no-op completes in nanoseconds.
+//   - PID<=0 (claim slot)            → DeadPIDs, cleared (never a kill target).
+//   - PID not alive                  → DeadPIDs, cleared (already gone).
+//   - alive, start time matches the recorded started_at within tolerance
+//     → our orphaned child → tree-kill (taskkill /F /T), KilledPIDs, cleared.
+//   - alive, start time mismatches   → PID recycled to an unrelated
+//     process → SkippedPIDs, entry cleared (not ours; never kill it).
+//   - alive, start time unverifiable → SkippedPIDs, entry RETAINED for
+//     the next cold start (conservative: do not kill what we cannot
+//     identify).
+//   - tree-kill returns an error     → KillErrors, entry retained.
+//
+// The start-time gate is the PID-recycling guard: a recycled PID's
+// creation time differs from the recorded fire timestamp by far more
+// than the tolerance, so it is never killed.
 func ReapStaleTransients(ctx context.Context, deps ReaperDeps) (ReaperResult, error) {
-	_ = ctx
-	_ = deps
-	return ReaperResult{}, nil
+	res := ReaperResult{}
+
+	readState := deps.ReadState
+	if readState == nil {
+		readState = api.ReadSupervisorState
+	}
+	writeState := deps.WriteState
+	if writeState == nil {
+		writeState = api.WriteSupervisorState
+	}
+	pidAlive := deps.PIDAlive
+	if pidAlive == nil {
+		pidAlive = isPIDAlive
+	}
+	startTime := deps.ProcessStartTime
+	if startTime == nil {
+		startTime = process.ProcessStartTime
+	}
+	killTree := deps.KillProcess
+	if killTree == nil {
+		killTree = process.TreeKillByPID
+	}
+	tolerance := deps.StartedAtTolerance
+	if tolerance <= 0 {
+		tolerance = 2 * time.Second
+	}
+
+	statePath := filepath.Join(deps.StateDir, "supervisor-state.json")
+	state, err := readState(statePath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return res, nil
+		}
+		return res, fmt.Errorf("read supervisor state: %w", err)
+	}
+	if state == nil || len(state.TransientPIDs) == 0 {
+		return res, nil
+	}
+	res.ClearedTransients = len(state.TransientPIDs)
+
+	var retained []api.TransientPID
+	killAttempted := false
+	for _, t := range state.TransientPIDs {
+		if err := ctx.Err(); err != nil {
+			return res, err
+		}
+		pid := t.PID
+		if pid <= 0 {
+			// Claim slot — never alive, no kill; clear it.
+			res.DeadPIDs = append(res.DeadPIDs, pid)
+			continue
+		}
+		if !pidAlive(pid) {
+			res.DeadPIDs = append(res.DeadPIDs, pid)
+			continue
+		}
+
+		// Alive: verify this is still OUR maintenance child before
+		// killing, so a recycled PID belonging to an unrelated process
+		// is never terminated.
+		observed, ok := startTime(pid)
+		recorded, perr := time.Parse(time.RFC3339Nano, t.StartedAt)
+		if !ok || perr != nil {
+			// Cannot verify identity — leave the process alone and
+			// retain the entry for the next cold start to retry.
+			res.SkippedPIDs = append(res.SkippedPIDs, pid)
+			retained = append(retained, t)
+			continue
+		}
+		delta := observed.UTC().Sub(recorded.UTC())
+		if delta < 0 {
+			delta = -delta
+		}
+		if delta > tolerance {
+			// Start times disagree → PID recycled to an unrelated
+			// process. Not ours: do NOT kill; clear the stale entry.
+			res.SkippedPIDs = append(res.SkippedPIDs, pid)
+			continue
+		}
+
+		// Confirmed: our orphaned maintenance child. Tree-kill it.
+		//
+		// Residual TOCTOU (PR #243 bot round-2 review): the start-time
+		// probe and the taskkill below are separate operations on a
+		// PID, not one handle-atomic op, so in principle the PID could
+		// exit and be reused between them. This window is the same one
+		// the POSIX reaper (killProcessGroupSIGKILL after its gates) and
+		// `mcphub gui --force --kill` (start-time-precedes-mtime gate)
+		// already accept. It is not practically reachable here: the
+		// recorded started_at belongs to a PRIOR (crashed) supervisor
+		// generation, so a process that grabbed this PID after the crash
+		// has a start time of ~now — far outside the 2s tolerance — and
+		// fails the gate above. The only way past it is a recycle within
+		// 2s of the original fire AND surviving until this cold-start
+		// reap, which the crash→restart→reap latency makes implausible.
+		if kerr := killTree(pid); kerr != nil {
+			if res.KillErrors == nil {
+				res.KillErrors = map[int]error{}
+			}
+			res.KillErrors[pid] = kerr
+			retained = append(retained, t)
+			continue
+		}
+		res.KilledPIDs = append(res.KilledPIDs, pid)
+		killAttempted = true
+	}
+
+	if killAttempted && deps.SettleDuration > 0 {
+		timer := time.NewTimer(deps.SettleDuration)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return res, ctx.Err()
+		case <-timer.C:
+		}
+		res.SettleDuration = deps.SettleDuration
+	}
+
+	state.TransientPIDs = retained
+	if err := writeState(statePath, state); err != nil {
+		return res, fmt.Errorf("write supervisor state: %w", err)
+	}
+	return res, nil
 }
