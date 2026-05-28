@@ -66,7 +66,7 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 				port = p
 			}
 		}
-		rows = append(rows, map[string]any{
+		row := map[string]any{
 			"task_name":        taskName,
 			"server":           server,
 			"daemon":           daemon,
@@ -81,7 +81,17 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 			"backoff_until":    "",
 			"quarantine_since": "",
 			"is_maintenance":   isSupervisorMaintenanceTask(taskName),
-		})
+		}
+		// Surface orphan PID when present (Windows post-create orphan
+		// path where best-effort kill failed). Operator visibility for
+		// manual cleanup; SEPARATE from current_pid because terminate
+		// path reads current_pid as the live daemon PID. Closes bot
+		// finding on PR #238 fd51536 (P2 persist-the-preserved-
+		// orphan-PID).
+		if runtimeState.OrphanPID != 0 {
+			row["orphan_pid"] = runtimeState.OrphanPID
+		}
+		rows = append(rows, row)
 	}
 	return rows, nil
 }

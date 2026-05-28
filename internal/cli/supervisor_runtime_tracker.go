@@ -313,6 +313,7 @@ func (t *DaemonRuntimeTracker) HydrateFromState(file *api.SupervisorStateFile) {
 			StartedAt:     startedAt,
 			PIDGeneration: daemonState.PIDGeneration,
 			RestartCount:  len(daemonState.RestartHistory),
+			OrphanPID:     daemonState.OrphanPID,
 		}
 	}
 }
@@ -346,6 +347,7 @@ func (t *DaemonRuntimeTracker) PersistTo(path string) error {
 			State:         supervisorStateFromRuntimeState(entry.State),
 			CurrentPID:    entry.CurrentPID,
 			PIDGeneration: entry.PIDGeneration,
+			OrphanPID:     entry.OrphanPID,
 		}
 		if !entry.StartedAt.IsZero() {
 			daemonState.StartedAt = entry.StartedAt.UTC().Format(time.RFC3339Nano)
