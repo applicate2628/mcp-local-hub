@@ -468,6 +468,19 @@ type Server struct {
 	// (sticky client-session -> workspace routing) -- the daemon session
 	// id is a new concern this store owns. Thread-safe.
 	serenaDaemonSessions daemonSessionStore
+
+	// ROUTER-COMPLETION phase (P2 findings 4 + 5 + 7) -- router-owned
+	// registry of client sessions minted by a prior `initialize` at this
+	// router, plus the protocol version each negotiated (see
+	// serena_router_session.go). It is the authoritative "this client
+	// session was initialized here" record AND the source of each
+	// session's negotiated version, consumed by the tools/list session
+	// gate (Finding 4), the version-keyed tools/list cache (Finding 5),
+	// and the tool-call protocol-version enforcement (Finding 7).
+	// Distinct from serenaRouterDeps.Sessions (sticky session -> workspace)
+	// and serenaDaemonSessions (session -> upstream daemon session).
+	// Thread-safe.
+	serenaRouterSessions routerSessionStore
 }
 
 // NewServer constructs the Server. It registers the ping handler

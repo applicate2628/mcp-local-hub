@@ -110,46 +110,65 @@ type workspaceLister interface {
 // picking up a serena upgrade within the window.
 const toolsListCacheTTL = 5 * time.Minute
 
+// toolsListCacheEntry is one cached cursorless tools/list result plus the
+// time it was fetched (for TTL).
+type toolsListCacheEntry struct {
+	result  json.RawMessage
+	fetched time.Time
+}
+
 // toolsListCache caches the workspace-agnostic tools/list result (the raw
 // JSON-RPC `result` object) fetched from any live serena daemon. The
 // cache is process-local and lives on the Server so it survives across
 // requests. It is workspace-agnostic by construction (design §2.1 /
 // O1(a): one daemon per workspace, identical MCP surface), so a single
-// cached entry serves every client regardless of which workspace daemon
-// answered the fetch.
+// cached entry per protocol version serves every client regardless of
+// which workspace daemon answered the fetch.
+//
+// Finding E: the cache is KEYED BY the session's negotiated protocol
+// version. The serena tool surface a daemon advertises can differ across
+// protocol revisions, so a payload fetched under 2025-11-25 must not be
+// served to a client that initialized with 2025-06-18. Version-keying is
+// preferred over a global single entry (which the pre-fix cache used) so
+// each negotiated revision gets its own TTL-bounded entry.
 type toolsListCache struct {
 	mu       sync.Mutex
-	result   json.RawMessage
-	fetched  time.Time
+	byVer    map[string]toolsListCacheEntry
 	cacheTTL time.Duration // 0 -> toolsListCacheTTL; overridable in tests
 }
 
-// get returns the cached result and true when a non-expired entry
-// exists.
-func (c *toolsListCache) get(now time.Time) (json.RawMessage, bool) {
+// get returns the cached result for protocolVersion and true when a
+// non-expired entry exists for that version.
+func (c *toolsListCache) get(protocolVersion string, now time.Time) (json.RawMessage, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	ttl := c.cacheTTL
 	if ttl <= 0 {
 		ttl = toolsListCacheTTL
 	}
-	if len(c.result) == 0 {
+	entry, ok := c.byVer[protocolVersion]
+	if !ok || len(entry.result) == 0 {
 		return nil, false
 	}
-	if now.Sub(c.fetched) > ttl {
+	if now.Sub(entry.fetched) > ttl {
 		return nil, false
 	}
-	out := make(json.RawMessage, len(c.result))
-	copy(out, c.result)
+	out := make(json.RawMessage, len(entry.result))
+	copy(out, entry.result)
 	return out, true
 }
 
-// put stores result as the current cached tools/list payload.
-func (c *toolsListCache) put(result json.RawMessage, now time.Time) {
+// put stores result as the cached tools/list payload for protocolVersion.
+func (c *toolsListCache) put(protocolVersion string, result json.RawMessage, now time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.result = append(json.RawMessage(nil), result...)
-	c.fetched = now
+	if c.byVer == nil {
+		c.byVer = make(map[string]toolsListCacheEntry)
+	}
+	c.byVer[protocolVersion] = toolsListCacheEntry{
+		result:  append(json.RawMessage(nil), result...),
+		fetched: now,
+	}
 }
 
 // writeJSONRPCResult writes a JSON-RPC 2.0 success envelope carrying id
@@ -437,6 +456,12 @@ func (s *Server) handleInitialize(w http.ResponseWriter, body []byte, tb *toolBo
 	negotiatedVersion := initParams.ProtocolVersion
 
 	sessionID := newMcpSessionID()
+	// Record the minted session + its negotiated version in the
+	// authoritative router-session registry (P2 findings 4 + 5 + 7). This
+	// is the only place a router session is minted; the tools/list gate,
+	// the version-keyed tools/list cache, and the tool-call version
+	// enforcement all read from here, and the DELETE teardown unbinds it.
+	s.serenaRouterSessions.store(sessionID, negotiatedVersion)
 	result := initializeResult{
 		ProtocolVersion: negotiatedVersion,
 		Capabilities: map[string]any{
@@ -509,6 +534,21 @@ func isNotificationMethod(method string) bool {
 // registered workspace — the surface is identical), caches the daemon's
 // `result`, and returns it.
 //
+// Finding D — require a minted/known router session BEFORE any proxy. A
+// client that skipped initialize (or sent a random id) must not be able to
+// enumerate tools / trigger handshakes / write the cache. The request's
+// Mcp-Session-Id must be present AND minted by a prior initialize at this
+// router (serenaRouterSessions); missing/unknown → -32600 at HTTP 400
+// (mirrors the hub's "session required"/"unknown session" shape). The
+// Phase-3 reconcile probe does initialize ONLY (never tools/list), so this
+// gate does not affect it.
+//
+// Finding E — the cache is keyed by the session's negotiated protocol
+// version. The negotiated version (from serenaRouterSessions, the same
+// source Finding G uses) keys both the cache read and write AND drives the
+// upstream fetch, so a client that negotiated 2025-06-18 cannot be served
+// a payload fetched under 2025-11-25.
+//
 // Cursor-bearing requests bypass the cache entirely (P2 finding 2). The
 // workspace-agnostic cache holds only the first page, so reading it for
 // a `params.cursor` request would return page 1 for every cursor until
@@ -535,12 +575,32 @@ func (s *Server) handleToolsList(
 	upstreamURLFn func(ws *api.WorkspaceEntry) string,
 	auditFn func(level, event string, fields map[string]any) error,
 ) {
+	// Finding D: require a router session minted by a prior initialize. A
+	// missing header or an id this router never minted is rejected -32600
+	// at HTTP 400 before any daemon proxy / cache write (mirrors the hub's
+	// gate-6 session requirement, internal/api/hub_mcp_handler.go). The
+	// negotiated version is captured here and used as the Finding E cache
+	// key + the upstream fetch version.
+	sessionID := r.Header.Get("Mcp-Session-Id")
+	if sessionID == "" {
+		writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidRequest,
+			"session-id required (initialize first)", nil)
+		return
+	}
+	negotiatedVersion, known := s.serenaRouterSessions.negotiatedVersion(sessionID)
+	if !known {
+		writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidRequest,
+			"unknown session (initialize first)", nil)
+		return
+	}
+
 	now := time.Now()
 	// A paginated (cursor-bearing) tools/list bypasses the first-page
-	// cache on BOTH read and write (P2 finding 2).
+	// cache on BOTH read and write (P2 finding 2). The cache read/write are
+	// keyed by the session's negotiated protocol version (P2 finding 5).
 	isCursorRequest := requestedToolsListCursor(body) != ""
 	if !isCursorRequest {
-		if cached, ok := s.serenaToolsListCache.get(now); ok {
+		if cached, ok := s.serenaToolsListCache.get(negotiatedVersion, now); ok {
 			writeJSONRPCResult(w, tb.ID, json.RawMessage(cached), nil)
 			return
 		}
@@ -563,11 +623,13 @@ func (s *Server) handleToolsList(
 
 	// Proxy one tools/list to the first live daemon. On a per-daemon
 	// failure, try the next so a single dead daemon does not blank the
-	// whole tool surface. The client's negotiated MCP-Protocol-Version
-	// threads into the handshake + the upstream tools/list POST (P1
-	// findings 1 + 5).
-	clientProtocolVersion := r.Header.Get("MCP-Protocol-Version")
-	result, ferr := s.fetchToolsListFromAnyDaemon(r.Context(), entries, body, httpClient, upstreamURLFn, auditFn, clientProtocolVersion)
+	// whole tool surface. The handshake + the upstream tools/list POST use
+	// the SESSION's negotiated protocol version (P1 findings 1 + 5, and P2
+	// finding 5 consistency — not the raw per-request header, which Finding
+	// G treats as advisory for a known session). fetchToolsListFromAnyDaemon
+	// also DELETEs each one-shot upstream daemon session after the proxy so
+	// it does not leak until the daemon's idle expiry (P2 finding C).
+	result, ferr := s.fetchToolsListFromAnyDaemon(r.Context(), entries, body, httpClient, upstreamURLFn, auditFn, negotiatedVersion)
 	if ferr != nil {
 		_ = auditFn("warn", "serena-tools-list-fetch-failed", map[string]any{
 			"err":             ferr.Error(),
@@ -578,10 +640,11 @@ func (s *Server) handleToolsList(
 		return
 	}
 
-	// Only the cursorless first page is cacheable. A cursor request's
-	// page-N result must NOT overwrite the first-page cache entry.
+	// Only the cursorless first page is cacheable, keyed by the negotiated
+	// protocol version (P2 finding 5). A cursor request's page-N result
+	// must NOT overwrite the first-page cache entry.
 	if !isCursorRequest {
-		s.serenaToolsListCache.put(result, now)
+		s.serenaToolsListCache.put(negotiatedVersion, result, now)
 	}
 	writeJSONRPCResult(w, tb.ID, json.RawMessage(result), nil)
 }
@@ -595,6 +658,15 @@ func (s *Server) handleToolsList(
 // clientProtocolVersion is threaded to each proxyToolsListOnce so the
 // handshake + tools/list POST carry the version the client negotiated
 // (P1 findings 1 + 5).
+//
+// Finding C: the tools/list handshake mints a fresh ONE-SHOT upstream
+// daemon session (the router does not reuse it for later tool calls — those
+// re-handshake via serenaDaemonSessions). proxyToolsListOnce returns the
+// daemon-issued session id so this loop can best-effort DELETE it after the
+// proxy, on BOTH the success path AND the post-handshake error path
+// (otherwise the session leaks until the daemon's idle expiry). The DELETE
+// is context-detached (a finished/cancelled tools/list request context must
+// not abort the teardown), mirroring the main DELETE path.
 func (s *Server) fetchToolsListFromAnyDaemon(
 	ctx context.Context,
 	entries []*api.WorkspaceEntry,
@@ -614,7 +686,15 @@ func (s *Server) fetchToolsListFromAnyDaemon(
 			lastErr = fmt.Errorf("workspace %q: upstream URL resolution failed", ws.WorkspaceKey)
 			continue
 		}
-		result, err := proxyToolsListOnce(ctx, httpClient, upstreamURL, body, clientProtocolVersion)
+		result, daemonSessionID, err := proxyToolsListOnce(ctx, httpClient, upstreamURL, body, clientProtocolVersion)
+		// Finding C: release the one-shot upstream session regardless of the
+		// proxy outcome, whenever the handshake established one. Detach the
+		// context so a done tools/list request context cannot abort it.
+		if daemonSessionID != "" {
+			delCtx, delCancel := context.WithTimeout(context.Background(), serenaUpstreamTimeout)
+			s.forwardSerenaDeleteUpstream(delCtx, httpClient, upstreamURL, daemonSessionID, ws.WorkspaceKey, ws, auditFn)
+			delCancel()
+		}
 		if err != nil {
 			lastErr = fmt.Errorf("workspace %q (port %d): %w", ws.WorkspaceKey, ws.Port, err)
 			_ = auditFn("warn", "serena-tools-list-daemon-skip", map[string]any{
@@ -659,15 +739,23 @@ func (s *Server) fetchToolsListFromAnyDaemon(
 // whose header is missing OR mismatched. The header is omitted only when
 // the resolved version is empty (cannot happen — the fallback default is
 // non-empty).
-func proxyToolsListOnce(ctx context.Context, httpClient *http.Client, upstreamURL string, body []byte, clientProtocolVersion string) (json.RawMessage, error) {
+//
+// Finding C: it returns the daemon-issued session id (the second return
+// value) so the caller can DELETE the one-shot session afterwards. The id
+// is returned on every path AFTER a successful handshake — including the
+// post-handshake error paths — so the caller tears it down even when the
+// tools/list POST itself fails. A handshake FAILURE returns "" (no upstream
+// session was minted, so there is nothing to release); a sessionless daemon
+// also returns "" (it issued no id).
+func proxyToolsListOnce(ctx context.Context, httpClient *http.Client, upstreamURL string, body []byte, clientProtocolVersion string) (json.RawMessage, string, error) {
 	protocolVersion := effectiveHandshakeProtocolVersion(clientProtocolVersion)
 	daemonSessionID, hsErr := establishDaemonSession(ctx, httpClient, upstreamURL, protocolVersion)
 	if hsErr != nil {
-		return nil, fmt.Errorf("upstream handshake: %w", hsErr)
+		return nil, "", fmt.Errorf("upstream handshake: %w", hsErr)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, daemonSessionID, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	// Accept both shapes; daemons that only emit SSE need the stream
@@ -684,12 +772,12 @@ func proxyToolsListOnce(ctx context.Context, httpClient *http.Client, upstreamUR
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, daemonSessionID, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("upstream tools/list -> status %d", resp.StatusCode)
+		return nil, daemonSessionID, fmt.Errorf("upstream tools/list -> status %d", resp.StatusCode)
 	}
 	payload := extractJSONRPCPayload(resp.Header.Get("Content-Type"), raw)
 	var rpc struct {
@@ -697,15 +785,15 @@ func proxyToolsListOnce(ctx context.Context, httpClient *http.Client, upstreamUR
 		Error  json.RawMessage `json:"error"`
 	}
 	if err := json.Unmarshal(payload, &rpc); err != nil {
-		return nil, fmt.Errorf("upstream tools/list non-JSON-RPC body: %w", err)
+		return nil, daemonSessionID, fmt.Errorf("upstream tools/list non-JSON-RPC body: %w", err)
 	}
 	if len(rpc.Error) > 0 {
-		return nil, fmt.Errorf("upstream tools/list returned JSON-RPC error: %s", string(rpc.Error))
+		return nil, daemonSessionID, fmt.Errorf("upstream tools/list returned JSON-RPC error: %s", string(rpc.Error))
 	}
 	if len(rpc.Result) == 0 {
-		return nil, fmt.Errorf("upstream tools/list returned no result")
+		return nil, daemonSessionID, fmt.Errorf("upstream tools/list returned no result")
 	}
-	return rpc.Result, nil
+	return rpc.Result, daemonSessionID, nil
 }
 
 // extractJSONRPCPayload returns the JSON object to parse from an upstream

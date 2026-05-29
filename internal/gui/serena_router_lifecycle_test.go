@@ -53,6 +53,28 @@ type listerStubResolver struct {
 
 func (r *listerStubResolver) ListWorkspaces() []*api.WorkspaceEntry { return r.list }
 
+// mintRouterSession drives a real synthesized initialize at the router and
+// returns the minted client Mcp-Session-Id. Finding D requires tools/list
+// to carry a session id minted by a prior initialize at this router, so
+// the tools/list tests establish one through this helper rather than
+// inventing a raw id the router never minted.
+func mintRouterSession(t *testing.T, s *Server, protocolVersion string) string {
+	t.Helper()
+	body := buildLifecycleBody(t, "initialize", map[string]any{
+		"protocolVersion": protocolVersion,
+		"capabilities":    map[string]any{},
+	})
+	rr := postSerena(t, s, body, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("mintRouterSession initialize status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	sid := rr.Header().Get("Mcp-Session-Id")
+	if sid == "" {
+		t.Fatalf("mintRouterSession: initialize did not mint a Mcp-Session-Id")
+	}
+	return sid
+}
+
 // ---------------------------------------------------------------------
 // initialize — 200 + JSON-RPC result with protocolVersion/serverInfo/
 // capabilities + a minted Mcp-Session-Id header.
@@ -320,10 +342,13 @@ func TestSerenaRouter_ToolsList_FetchAndCacheFromLiveDaemon(t *testing.T) {
 	}
 	s := newSerenaTestServer(t, deps)
 
+	// Finding D: tools/list requires a session minted by a prior initialize.
+	sid := mintRouterSession(t, s, "2025-11-25")
+	hdr := map[string]string{"Mcp-Session-Id": sid}
 	body := buildLifecycleBody(t, "tools/list", map[string]any{})
 
 	// First call -> handshake + proxies tools/list to the daemon.
-	rr := postSerena(t, s, body, nil)
+	rr := postSerena(t, s, body, hdr)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("first tools/list status = %d, want 200; body=%s", rr.Code, rr.Body.String())
 	}
@@ -331,15 +356,23 @@ func TestSerenaRouter_ToolsList_FetchAndCacheFromLiveDaemon(t *testing.T) {
 	if got := toolHits(); got != 1 {
 		t.Fatalf("daemon tool hits after first call = %d, want 1", got)
 	}
+	// Finding C: the one-shot tools/list session must be torn down upstream.
+	if got := daemonDeleteHits(daemon); got != 1 {
+		t.Fatalf("daemon DELETE hits after first tools/list = %d, want 1 (one-shot session teardown)", got)
+	}
 
 	// Second call -> served from cache, no new daemon hit.
-	rr2 := postSerena(t, s, body, nil)
+	rr2 := postSerena(t, s, body, hdr)
 	if rr2.Code != http.StatusOK {
 		t.Fatalf("second tools/list status = %d, want 200", rr2.Code)
 	}
 	assertToolsListNames(t, rr2.Body.Bytes(), []string{"find_symbol", "list_dir"})
 	if got := toolHits(); got != 1 {
 		t.Fatalf("daemon tool hits after cached call = %d, want 1 (cache hit expected)", got)
+	}
+	// A cache hit performs no upstream handshake, so no new DELETE either.
+	if got := daemonDeleteHits(daemon); got != 1 {
+		t.Fatalf("daemon DELETE hits after cached call = %d, want 1 (cache hit -> no new session)", got)
 	}
 }
 
@@ -366,7 +399,8 @@ func TestSerenaRouter_ToolsList_AcceptsSSEDaemonResponse(t *testing.T) {
 	}
 	s := newSerenaTestServer(t, deps)
 
-	rr := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), nil)
+	sid := mintRouterSession(t, s, "2025-11-25")
+	rr := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), map[string]string{"Mcp-Session-Id": sid})
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
 	}
@@ -402,7 +436,8 @@ func TestSerenaRouter_ToolsList_SkipsDeadDaemonAndUsesNext(t *testing.T) {
 	}
 	s := newSerenaTestServer(t, deps)
 
-	rr := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), nil)
+	sid := mintRouterSession(t, s, "2025-11-25")
+	rr := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), map[string]string{"Mcp-Session-Id": sid})
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
 	}
@@ -421,7 +456,10 @@ func TestSerenaRouter_ToolsList_EmptyPoolReturnsJSONRPCError(t *testing.T) {
 	}
 	s := newSerenaTestServer(t, deps)
 
-	rr := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), nil)
+	// Finding D: a known router session is required to even reach the
+	// empty-pool branch (otherwise the session gate fires first).
+	sid := mintRouterSession(t, s, "2025-11-25")
+	rr := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), map[string]string{"Mcp-Session-Id": sid})
 	// JSON-RPC errors are carried in-band at HTTP 200.
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (JSON-RPC error in-band); body=%s", rr.Code, rr.Body.String())
@@ -467,7 +505,9 @@ func TestSerenaRouter_ToolsList_ResolverWithoutListerReturnsError(t *testing.T) 
 	}
 	s := newSerenaTestServer(t, deps)
 
-	rr := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), nil)
+	// Finding D: mint a session so the request reaches the no-lister branch.
+	sid := mintRouterSession(t, s, "2025-11-25")
+	rr := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), map[string]string{"Mcp-Session-Id": sid})
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
 	}
@@ -583,18 +623,49 @@ func TestSerenaRouter_ToolCallStillRoutesAfterLifecycleAdded(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------
-// toolsListCache unit: TTL expiry forces a re-fetch.
+// toolsListCache unit: TTL expiry forces a re-fetch (per version key).
 // ---------------------------------------------------------------------
 func TestToolsListCache_TTLExpiry(t *testing.T) {
 	c := &toolsListCache{cacheTTL: 50 * time.Millisecond}
 	base := time.Now()
-	c.put(json.RawMessage(`{"tools":[]}`), base)
+	const ver = "2025-11-25"
+	c.put(ver, json.RawMessage(`{"tools":[]}`), base)
 
-	if _, ok := c.get(base.Add(10 * time.Millisecond)); !ok {
+	if _, ok := c.get(ver, base.Add(10*time.Millisecond)); !ok {
 		t.Fatal("expected cache hit within TTL")
 	}
-	if _, ok := c.get(base.Add(100 * time.Millisecond)); ok {
+	if _, ok := c.get(ver, base.Add(100*time.Millisecond)); ok {
 		t.Fatal("expected cache miss after TTL")
+	}
+}
+
+// P2 finding 5 — the cache is keyed by negotiated protocol version: a
+// payload stored under one version is NOT served to a request keyed by a
+// different version.
+func TestToolsListCache_KeyedByProtocolVersion(t *testing.T) {
+	c := &toolsListCache{}
+	now := time.Now()
+	c.put("2025-11-25", json.RawMessage(`{"tools":[{"name":"newest"}]}`), now)
+
+	// Same version -> hit.
+	got, ok := c.get("2025-11-25", now)
+	if !ok || !strings.Contains(string(got), "newest") {
+		t.Fatalf("get(2025-11-25) = (%s, %v), want the stored payload", string(got), ok)
+	}
+	// Different version -> miss (must NOT serve the other version's payload).
+	if got, ok := c.get("2025-06-18", now); ok {
+		t.Fatalf("get(2025-06-18) = (%s, true), want miss (version-keyed cache must not cross versions)", string(got))
+	}
+	// Storing the other version is independent.
+	c.put("2025-06-18", json.RawMessage(`{"tools":[{"name":"older"}]}`), now)
+	gotOld, ok := c.get("2025-06-18", now)
+	if !ok || !strings.Contains(string(gotOld), "older") {
+		t.Fatalf("get(2025-06-18) after put = (%s, %v), want the older payload", string(gotOld), ok)
+	}
+	// The newest entry is untouched by the older put.
+	gotNew, ok := c.get("2025-11-25", now)
+	if !ok || !strings.Contains(string(gotNew), "newest") {
+		t.Fatalf("get(2025-11-25) after older put = (%s, %v), want the newest payload still cached", string(gotNew), ok)
 	}
 }
 
@@ -604,12 +675,13 @@ func TestToolsListCache_ConcurrentAccess(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i < 50; i++ {
 		wg.Add(1)
-		go func() {
+		go func(i int) {
 			defer wg.Done()
 			now := time.Now()
-			c.put(json.RawMessage(`{"tools":[{"name":"a"}]}`), now)
-			_, _ = c.get(now)
-		}()
+			ver := fmt.Sprintf("ver-%d", i%3)
+			c.put(ver, json.RawMessage(`{"tools":[{"name":"a"}]}`), now)
+			_, _ = c.get(ver, now)
+		}(i)
 	}
 	wg.Wait()
 }
@@ -1077,8 +1149,13 @@ func TestSerenaRouter_ToolsList_SendsProtocolVersionHeader(t *testing.T) {
 	}
 	s := newSerenaTestServer(t, deps)
 
+	// Finding D + E: the negotiated version comes from the router SESSION
+	// (minted at initialize), not the raw request header. Mint the session
+	// at 2025-06-18 so the upstream handshake + tools/list POST carry it.
 	const negotiated = "2025-06-18"
+	sid := mintRouterSession(t, s, negotiated)
 	rr := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), map[string]string{
+		"Mcp-Session-Id":       sid,
 		"MCP-Protocol-Version": negotiated,
 	})
 	if rr.Code != http.StatusOK {
@@ -1128,8 +1205,12 @@ func TestSerenaRouter_ToolsList_CursorBypassesCache(t *testing.T) {
 	}
 	s := newSerenaTestServer(t, deps)
 
+	// Finding D: tools/list requires a session minted by a prior initialize.
+	sid := mintRouterSession(t, s, "2025-11-25")
+	hdr := map[string]string{"Mcp-Session-Id": sid}
+
 	// Page 1 (cursorless) -> fetches + caches.
-	rr1 := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), nil)
+	rr1 := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), hdr)
 	if rr1.Code != http.StatusOK {
 		t.Fatalf("page1 status = %d; body=%s", rr1.Code, rr1.Body.String())
 	}
@@ -1140,7 +1221,7 @@ func TestSerenaRouter_ToolsList_CursorBypassesCache(t *testing.T) {
 
 	// Cursor request -> MUST bypass the cache and reach the daemon again,
 	// returning page 2 (not the cached page 1).
-	rrCursor := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{"cursor": "c1"}), nil)
+	rrCursor := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{"cursor": "c1"}), hdr)
 	if rrCursor.Code != http.StatusOK {
 		t.Fatalf("cursor status = %d; body=%s", rrCursor.Code, rrCursor.Body.String())
 	}
@@ -1151,7 +1232,7 @@ func TestSerenaRouter_ToolsList_CursorBypassesCache(t *testing.T) {
 
 	// A subsequent cursorless page-1 request still hits the ORIGINAL
 	// cache (the cursor request must NOT have overwritten it with page 2).
-	rr3 := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), nil)
+	rr3 := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), hdr)
 	if rr3.Code != http.StatusOK {
 		t.Fatalf("page1-again status = %d; body=%s", rr3.Code, rr3.Body.String())
 	}
@@ -1431,6 +1512,14 @@ func daemonDeleteHits(d *fakeSerenaDaemon) int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.deleteHits
+}
+
+// daemonCancelHits returns how many notifications/cancelled POSTs a fake
+// daemon has observed (Finding H cancel forwarding).
+func daemonCancelHits(d *fakeSerenaDaemon) int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.cancelHits
 }
 
 // deleteSerena issues a same-origin DELETE /serena/mcp with the supplied
@@ -1749,8 +1838,9 @@ func TestSerenaRouter_DeleteBranchDoesNotAffectGet405(t *testing.T) {
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Errorf("GET status = %d, want 405", rr.Code)
 	}
-	if rr.Header().Get("Allow") != "POST" {
-		t.Errorf("Allow = %q, want POST", rr.Header().Get("Allow"))
+	// Finding H: the 405 fallback now advertises both accepted verbs.
+	if rr.Header().Get("Allow") != "POST, DELETE" {
+		t.Errorf("Allow = %q, want POST, DELETE", rr.Header().Get("Allow"))
 	}
 }
 
@@ -1861,7 +1951,8 @@ func TestSerenaRouter_ToolsList_MultiDataLineSSEDaemonResponse(t *testing.T) {
 	}
 	s := newSerenaTestServer(t, deps)
 
-	rr := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), nil)
+	sid := mintRouterSession(t, s, "2025-11-25")
+	rr := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), map[string]string{"Mcp-Session-Id": sid})
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
 	}

@@ -237,7 +237,11 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", "POST")
+		// Finding H: DELETE is handled above (client-origin session
+		// termination), so the 405 fallback for every OTHER non-POST method
+		// advertises both verbs the route accepts (mirrors the hub's
+		// `Allow: POST, DELETE`, internal/api/hub_mcp_handler.go).
+		w.Header().Set("Allow", "POST, DELETE")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -279,6 +283,24 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if tb.Method == "" {
 		http.Error(w, "missing required field: method", http.StatusBadRequest)
+		return
+	}
+
+	// Finding F (mirror internal/api/hub_mcp_handler.go handlePost): the
+	// lifecycle/tool dispatch below switches solely on `method`, so a body
+	// with the wrong (or absent) jsonrpc version would still mint a session
+	// / synthesize a 2.0 response. Reject jsonrpc != "2.0" up front with
+	// -32600 at HTTP 400, exactly as the hub does before its method
+	// dispatch. The reconcile readiness probe sends "jsonrpc":"2.0", so it
+	// is unaffected. The id is echoed only when it is a valid request id
+	// (MCP §1.5: a malformed/absent id is rendered as null, never echoed).
+	if tb.JSONRPC != "2.0" {
+		echoID := tb.ID
+		if !isValidJSONRPCRequestID(echoID) {
+			echoID = nil
+		}
+		writeJSONRPCErrorStatus(w, echoID, http.StatusBadRequest, jsonrpcInvalidRequest,
+			"invalid request: jsonrpc must be \"2.0\"", nil)
 		return
 	}
 
@@ -347,6 +369,19 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		s.handleNotificationOrPing(w, &tb)
 		return
+	case tb.Method == "notifications/cancelled":
+		// Finding H (mirror internal/api/hub_mcp_handler.go's
+		// notifications/cancelled fan-out): an id-less notifications/cancelled
+		// must reach the workspace daemon so an in-flight serena tool call is
+		// actually cancelled. The generic notification branch below would
+		// answer a local 202 and never forward it, silently ignoring the
+		// cancellation. Route it through the client session's
+		// serenaDaemonSessions binding instead. An id-bearing
+		// notifications/cancelled stays a -32600 malformed-request (handled
+		// inside handleSerenaCancelled), and a cancel with no bound daemon
+		// session keeps the local 202.
+		s.handleSerenaCancelled(w, r, deps, &tb, body, httpClient, upstreamURLFn, auditFn, sessionID)
+		return
 	case isNotificationMethod(tb.Method):
 		// notifications/* : 202 when id-less, -32600 when id-bearing.
 		s.handleNotificationOrPing(w, &tb)
@@ -410,14 +445,36 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	// dead/slow daemon is diagnosable rather than yielding an opaque
 	// "unknown session" rejection.
 	//
-	// The client's negotiated MCP-Protocol-Version (P1 finding 1) is
+	// The negotiated MCP-Protocol-Version (P1 finding 1 + Finding G) is
 	// threaded into the handshake so the daemon session's initialized
 	// version matches the version this same request (and subsequent
 	// tool-calls) forward verbatim below — otherwise a strict daemon that
 	// binds the header to the session's initialized version rejects the
 	// first tool-call as a protocol-version mismatch when the client
 	// negotiated a non-default supported revision.
+	//
+	// Finding G (mirror internal/api/hub_mcp_handler.go gate 7): when the
+	// id was minted by a prior initialize at this router, the session's
+	// NEGOTIATED version — not the raw per-request header — is the source
+	// of truth. A request header that conflicts with the known session's
+	// negotiated version is a "protocol-version mismatch" (-32600 at HTTP
+	// 400, the hub's exact wording); a missing header is fine (the session
+	// version is used). When there is NO router session for the id (a
+	// tool-call that never initialized at this router — e.g. an older
+	// direct caller), today's behavior is preserved: the raw request header
+	// drives the handshake.
 	clientProtocolVersion := r.Header.Get("MCP-Protocol-Version")
+	if sessionVersion, known := s.serenaRouterSessions.negotiatedVersion(sessionID); known {
+		if clientProtocolVersion != "" && clientProtocolVersion != sessionVersion {
+			writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidRequest,
+				"protocol-version mismatch", nil)
+			return
+		}
+		// Use the session's negotiated version for the upstream handshake so
+		// the daemon session is established under the consistent version even
+		// when this request omitted the header.
+		clientProtocolVersion = sessionVersion
+	}
 	daemonSessionID, hsErr := s.serenaDaemonSessions.resolveDaemonSession(r.Context(), httpClient, upstreamURL, sessionID, ws, clientProtocolVersion)
 	if hsErr != nil {
 		if isTimeoutErr(hsErr) {
@@ -522,18 +579,36 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 // handleSerenaDelete tears down the router-owned session state for a
 // client-origin DELETE /serena/mcp (Finding 3). It mirrors the hub
 // handler's DELETE/session-termination handling
-// (internal/api/hub_mcp_handler.go handleDelete): look up the daemon
-// binding for the client's Mcp-Session-Id, fan a best-effort DELETE out to
-// the workspace daemon's /mcp carrying the daemon-issued session id, then
-// drop both the router-owned daemon-session binding and the sticky
-// deps.Sessions binding. DELETE carries no path-arg, so the workspace is
-// resolved from the STORED binding, never from the request.
+// (internal/api/hub_mcp_handler.go handleDelete): snapshot the daemon
+// binding for the client's Mcp-Session-Id, revoke EVERY local binding
+// FIRST (immediate revocation), then fan a best-effort DELETE out to the
+// workspace daemon's /mcp carrying the daemon-issued session id. DELETE
+// carries no path-arg, so the workspace is resolved from the STORED
+// binding, never from the request.
+//
+// Finding A — local revocation must be IMMEDIATE. The upstream DELETE can
+// block up to the full upstream timeout on a slow daemon; the hub closes
+// the same window by invalidating its session BEFORE the daemon fan-out
+// (internal/api/hub_mcp_handler.go handleDelete). The pre-fix order
+// forwarded first and unbound after, so during that window a concurrent
+// POST with the same Mcp-Session-Id still passed lookup and executed a
+// tool call after the client had terminated the session. We snapshot the
+// binding up front, unbind serenaDaemonSessions + sticky deps.Sessions +
+// the router-session registry FIRST, then forward upstream.
+//
+// Finding B — tear down the upstream session even when the sticky binding
+// is missing. If a path-bearing tool-call completed the upstream handshake
+// but the tool POST then failed before sticky BindSession ran,
+// serenaDaemonSessions holds a live daemon session while
+// deps.Sessions.LookupSession is nil. Resolving the workspace ONLY from the
+// sticky lookup would skip the upstream DELETE and leak the daemon session.
+// Resolve the workspace from the daemon binding's workspaceKey (sticky
+// lookup first, then by-key via the resolver's ListWorkspaces) so the
+// upstream DELETE fires whenever serenaDaemonSessions has a binding.
 //
 // Teardown is best-effort: the response is 204 regardless of the upstream
-// DELETE outcome (a shutdown must not 5xx). The upstream forward fires
-// FIRST — its daemon-session-id is captured up front, so unbinding after
-// it cannot affect correctness — and a transport failure is audited
-// (warn) for diagnosability, consistent with the POST path's audit calls.
+// DELETE outcome (a shutdown must not 5xx), and a transport failure is
+// audited (warn) for diagnosability, consistent with the POST path.
 func (s *Server) handleSerenaDelete(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.Header.Get("Mcp-Session-Id")
 	if sessionID == "" {
@@ -544,11 +619,38 @@ func (s *Server) handleSerenaDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	deps := s.serenaRouterDepsProd()
-	// Even when the routing layer is unwired we still own the
-	// serenaDaemonSessions map, so attempt the binding teardown; deps is
-	// only needed for the upstream forward + sticky unbind.
+	// Snapshot the daemon binding up front so the upstream DELETE still has
+	// the daemon-issued session id AFTER we revoke the local mappings below.
 	wsKey, daemonSessionID, hasBinding := s.serenaDaemonSessions.bindingFor(sessionID)
+
+	// Findings A + B: resolve the workspace for the upstream DELETE UP FRONT,
+	// BEFORE the local revocation clears the sticky map. The sticky binding
+	// is the cheap source when it still exists (the common case after a
+	// successful tool call); the daemon binding's workspaceKey is the robust
+	// fallback for Finding B's leak (handshake completed but the tool POST
+	// failed before BindSession ran, so the sticky binding is nil while
+	// serenaDaemonSessions still holds a live daemon session). Snapshotting
+	// the workspace here is what lets Finding A unbind FIRST without losing
+	// the data the forward needs.
+	var delWS *api.WorkspaceEntry
 	if hasBinding && deps != nil {
+		delWS = s.resolveDeleteWorkspace(deps, sessionID, wsKey)
+	}
+
+	// Finding A: revoke every local binding FIRST so a concurrent POST with
+	// the same Mcp-Session-Id cannot pass lookup and run a tool call during
+	// a slow upstream DELETE. The snapshots above mean unbinding here cannot
+	// affect the forward below.
+	s.serenaDaemonSessions.unbind(sessionID)
+	s.serenaRouterSessions.unbind(sessionID)
+	if deps != nil && deps.Sessions != nil {
+		deps.Sessions.UnbindSession(sessionID)
+	}
+
+	// Best-effort upstream DELETE using the up-front workspace snapshot. A
+	// missing workspace (or nil URL) just skips the forward — the local
+	// revocation already ran so the router does not leak the mapping.
+	if hasBinding && deps != nil && delWS != nil {
 		auditFn := deps.AuditFn
 		if auditFn == nil {
 			auditFn = api.LogHubMcpEvent
@@ -563,39 +665,61 @@ func (s *Server) handleSerenaDelete(w http.ResponseWriter, r *http.Request) {
 		}
 		httpClient := serenaHTTPClient(deps.HTTPClient, upstreamTimeout)
 
-		// Resolve the workspace from the sticky binding (DELETE has no
-		// path-arg). When it is present we can build the daemon /mcp URL
-		// and forward the DELETE so the daemon (internal/daemon/http_host.go)
-		// acknowledges session termination. A missing sticky binding (or a
-		// nil URL) just skips the upstream forward — the local unbind below
-		// still runs so the router does not leak the mapping.
-		var ws *api.WorkspaceEntry
-		if deps.Sessions != nil {
-			ws = deps.Sessions.LookupSession(sessionID)
+		if upstreamURL := upstreamURLFn(delWS); upstreamURL != "" {
+			// Detach from r.Context() (mirror the hub's handleDelete,
+			// internal/api/hub_mcp_handler.go): a client that disconnects
+			// right after sending DELETE would otherwise cancel r.Context()
+			// immediately and short-circuit the daemon-side teardown —
+			// leaking the upstream session this finding exists to release.
+			// Bound the detached context by the upstream timeout.
+			fwdCtx, fwdCancel := context.WithTimeout(context.Background(), upstreamTimeout)
+			s.forwardSerenaDeleteUpstream(fwdCtx, httpClient, upstreamURL, daemonSessionID, wsKey, delWS, auditFn)
+			fwdCancel()
 		}
-		if ws != nil {
-			if upstreamURL := upstreamURLFn(ws); upstreamURL != "" {
-				// Detach from r.Context() (mirror the hub's handleDelete,
-				// internal/api/hub_mcp_handler.go): a client that disconnects
-				// right after sending DELETE would otherwise cancel r.Context()
-				// immediately and short-circuit the daemon-side teardown —
-				// leaking the upstream session this finding exists to release.
-				// Bound the detached context by the upstream timeout.
-				fwdCtx, fwdCancel := context.WithTimeout(context.Background(), upstreamTimeout)
-				s.forwardSerenaDeleteUpstream(fwdCtx, httpClient, upstreamURL, daemonSessionID, wsKey, ws, auditFn)
-				fwdCancel()
-			}
-		}
-	}
-
-	// Drop the router-owned daemon-session binding and the sticky workspace
-	// binding regardless of the upstream forward outcome.
-	s.serenaDaemonSessions.unbind(sessionID)
-	if deps != nil && deps.Sessions != nil {
-		deps.Sessions.UnbindSession(sessionID)
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// resolveDeleteWorkspace resolves the workspace for a DELETE/cancel forward
+// from a client session that carries no path-arg (Findings B + H). It tries
+// the sticky deps.Sessions binding FIRST (cheap, a value-copy, present in
+// the common case where a tool call already bound the session) and falls
+// back to a by-key scan of the resolver's ListWorkspaces — the existing
+// workspaceLister capability (serena_router_lifecycle.go) — for the entry
+// whose WorkspaceKey == wsKey (Finding B's leak case, where the sticky
+// binding never ran). Returns nil when neither path resolves it (unwired
+// sessions + a resolver without enumeration, or a key no longer registered).
+func (s *Server) resolveDeleteWorkspace(deps *serenaRouterDeps, sessionID, wsKey string) *api.WorkspaceEntry {
+	if deps == nil {
+		return nil
+	}
+	if deps.Sessions != nil && sessionID != "" {
+		if ws := deps.Sessions.LookupSession(sessionID); ws != nil {
+			return ws
+		}
+	}
+	return s.resolveWorkspaceByKey(deps, wsKey)
+}
+
+// resolveWorkspaceByKey scans the resolver's ListWorkspaces — the existing
+// workspaceLister capability (serena_router_lifecycle.go) — for the entry
+// whose WorkspaceKey == wsKey. Returns nil when the resolver cannot
+// enumerate workspaces or the key is no longer registered.
+func (s *Server) resolveWorkspaceByKey(deps *serenaRouterDeps, wsKey string) *api.WorkspaceEntry {
+	if deps == nil || wsKey == "" {
+		return nil
+	}
+	lister, ok := deps.Resolver.(workspaceLister)
+	if !ok {
+		return nil
+	}
+	for _, ws := range lister.ListWorkspaces() {
+		if ws != nil && ws.WorkspaceKey == wsKey {
+			return ws
+		}
+	}
+	return nil
 }
 
 // forwardSerenaDeleteUpstream issues a best-effort DELETE to a workspace
@@ -637,6 +761,118 @@ func (s *Server) forwardSerenaDeleteUpstream(ctx context.Context, httpClient *ht
 			"port":          ws.Port,
 			"upstream_url":  upstreamURL,
 			"phase":         "session-teardown",
+			"status":        resp.StatusCode,
+		})
+	}
+}
+
+// handleSerenaCancelled forwards an id-less notifications/cancelled to the
+// workspace daemon the client session is bound to, so an in-flight serena
+// tool call is actually cancelled (Finding H). It mirrors the hub's
+// notifications/cancelled handling (internal/api/hub_mcp_handler.go
+// handlePost case "notifications/cancelled"): an id-bearing
+// notifications/cancelled is a malformed request (-32600); an id-less one
+// forwards best-effort to the bound daemon and answers 202.
+//
+// The forward is best-effort and context-detached (like the DELETE
+// teardown): a client that disconnects right after sending the cancel must
+// not cancel the daemon-side forward. When there is no bound daemon session
+// (nothing in flight) the local 202 is kept — there is no daemon to tell.
+func (s *Server) handleSerenaCancelled(
+	w http.ResponseWriter,
+	r *http.Request,
+	deps *serenaRouterDeps,
+	tb *toolBody,
+	body []byte,
+	httpClient *http.Client,
+	upstreamURLFn func(ws *api.WorkspaceEntry) string,
+	auditFn func(level, event string, fields map[string]any) error,
+	sessionID string,
+) {
+	// An id-bearing notifications/* is a JSON-RPC request that can never be
+	// answered — reject it -32600, same rule as handleNotificationOrPing
+	// (and the hub). Only a genuine (id-less) notification is forwarded.
+	if !isJSONRPCNotificationID(tb.ID) {
+		writeJSONRPCError(w, tb.ID, jsonrpcInvalidRequest,
+			"invalid request: notifications/* must not include id")
+		return
+	}
+
+	if sessionID != "" {
+		if wsKey, daemonSessionID, ok := s.serenaDaemonSessions.bindingFor(sessionID); ok {
+			if ws := s.resolveDeleteWorkspace(deps, sessionID, wsKey); ws != nil {
+				if upstreamURL := upstreamURLFn(ws); upstreamURL != "" {
+					upstreamTimeout := deps.UpstreamTimeout
+					if upstreamTimeout <= 0 {
+						upstreamTimeout = serenaUpstreamTimeout
+					}
+					// Thread the session's negotiated version (Finding G
+					// consistency): a strict daemon binds the
+					// MCP-Protocol-Version header on a non-initialize POST to
+					// the session's initialized version. Fall back to the raw
+					// request header, then the router default.
+					protocolVersion := r.Header.Get("MCP-Protocol-Version")
+					if sessionVersion, known := s.serenaRouterSessions.negotiatedVersion(sessionID); known {
+						protocolVersion = sessionVersion
+					}
+					protocolVersion = effectiveHandshakeProtocolVersion(protocolVersion)
+					fwdCtx, fwdCancel := context.WithTimeout(context.Background(), upstreamTimeout)
+					s.forwardSerenaCancelledUpstream(fwdCtx, httpClient, upstreamURL, daemonSessionID, protocolVersion, wsKey, ws, body, auditFn)
+					fwdCancel()
+				}
+			}
+		}
+	}
+
+	// notifications/* (genuine notification) gets no JSON-RPC response body.
+	w.WriteHeader(http.StatusAccepted)
+}
+
+// forwardSerenaCancelledUpstream POSTs the verbatim notifications/cancelled
+// body to a workspace daemon's /mcp carrying the daemon-issued
+// Mcp-Session-Id + the negotiated MCP-Protocol-Version, so the daemon
+// cancels the matching in-flight tool call. Best-effort: a transport
+// failure or a non-2xx status is audited (warn) but never propagated (a
+// cancellation notification has no response).
+func (s *Server) forwardSerenaCancelledUpstream(ctx context.Context, httpClient *http.Client, upstreamURL, daemonSessionID, protocolVersion, wsKey string, ws *api.WorkspaceEntry, body []byte, auditFn func(level, event string, fields map[string]any) error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, bytes.NewReader(body))
+	if err != nil {
+		_ = auditFn("warn", "serena-upstream-cancel-failed", map[string]any{
+			"workspace_key": wsKey,
+			"port":          ws.Port,
+			"upstream_url":  upstreamURL,
+			"phase":         "cancel-forward",
+			"err":           err.Error(),
+		})
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	if daemonSessionID != "" {
+		req.Header.Set("Mcp-Session-Id", daemonSessionID)
+	}
+	if protocolVersion != "" {
+		req.Header.Set("MCP-Protocol-Version", protocolVersion)
+	}
+	resp, doErr := httpClient.Do(req)
+	if doErr != nil {
+		_ = auditFn("warn", "serena-upstream-cancel-failed", map[string]any{
+			"workspace_key": wsKey,
+			"port":          ws.Port,
+			"upstream_url":  upstreamURL,
+			"phase":         "cancel-forward",
+			"err":           doErr.Error(),
+		})
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		_ = auditFn("warn", "serena-upstream-cancel-failed", map[string]any{
+			"workspace_key": wsKey,
+			"port":          ws.Port,
+			"upstream_url":  upstreamURL,
+			"phase":         "cancel-forward",
 			"status":        resp.StatusCode,
 		})
 	}

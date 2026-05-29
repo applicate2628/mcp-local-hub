@@ -167,6 +167,15 @@ type fakeSerenaDaemon struct {
 	// teardown (the router must still 204 the client — teardown is
 	// best-effort).
 	deleteStatus int
+
+	// cancelHits counts notifications/cancelled POSTs forwarded by the
+	// router (Finding H). lastCancelSession / lastCancelBody / lastCancelHeaders
+	// capture the most recent one so a test can assert the router forwarded
+	// the DAEMON-issued session id + the verbatim body to the bound daemon.
+	cancelHits        int
+	lastCancelSession string
+	lastCancelBody    []byte
+	lastCancelHeaders http.Header
 }
 
 func newFakeSerenaDaemon(prefix string) *fakeSerenaDaemon {
@@ -228,6 +237,19 @@ func (d *fakeSerenaDaemon) handler() http.HandlerFunc {
 				status = http.StatusAccepted
 			}
 			w.WriteHeader(status)
+			return
+		case "notifications/cancelled":
+			// Record the forwarded cancellation (Finding H). A real daemon
+			// answers 202 to a notification. Captured separately from
+			// toolHits so a test can assert the router forwarded the
+			// DAEMON-issued session id and the verbatim body.
+			d.mu.Lock()
+			d.cancelHits++
+			d.lastCancelSession = r.Header.Get("Mcp-Session-Id")
+			d.lastCancelBody = append([]byte(nil), body...)
+			d.lastCancelHeaders = r.Header.Clone()
+			d.mu.Unlock()
+			w.WriteHeader(http.StatusAccepted)
 			return
 		}
 
@@ -1207,8 +1229,9 @@ func TestSerenaRouter_NonPostReturns405(t *testing.T) {
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Errorf("GET status = %d, want 405", rr.Code)
 	}
-	if rr.Header().Get("Allow") != "POST" {
-		t.Errorf("Allow = %q, want POST", rr.Header().Get("Allow"))
+	// Finding H: the 405 fallback now advertises both accepted verbs.
+	if rr.Header().Get("Allow") != "POST, DELETE" {
+		t.Errorf("Allow = %q, want POST, DELETE", rr.Header().Get("Allow"))
 	}
 }
 
