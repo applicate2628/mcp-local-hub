@@ -143,6 +143,13 @@ type fakeSerenaDaemon struct {
 	// most recent upstream initialize POST (P1 finding 1 — the router must
 	// send the client's negotiated version, not a hard-coded one).
 	lastInitProtocolVersion string
+	// negotiatedVersionOverride, when non-empty, forces the daemon's
+	// initialize RESULT to advertise this protocolVersion REGARDLESS of the
+	// version the router requested — modelling a daemon that negotiates DOWN
+	// to a different supported revision (Finding #8). When empty the daemon
+	// echoes the requested version (proper MCP negotiation: a server echoes
+	// the client's offered version when it supports it).
+	negotiatedVersionOverride string
 	// lastInitHeaders / lastInitializedHeaders are clones of the headers on
 	// the most recent initialize and notifications/initialized POSTs, so a
 	// test can assert the MCP-Protocol-Version header threaded onto the
@@ -222,11 +229,21 @@ func (d *fakeSerenaDaemon) handler() http.HandlerFunc {
 			d.issued[sid] = true
 			d.lastInitProtocolVersion = probe.Params.ProtocolVersion
 			d.lastInitHeaders = r.Header.Clone()
+			// MCP negotiation: a server echoes the client's offered version
+			// when supported. The fixture echoes probe.Params.ProtocolVersion
+			// by default so the router forwards subsequent calls under the
+			// version it requested. negotiatedVersionOverride forces a
+			// DIFFERENT negotiated version to exercise Finding #8 (the router
+			// must then use the daemon-negotiated version, not the requested).
+			negotiated := probe.Params.ProtocolVersion
+			if d.negotiatedVersionOverride != "" {
+				negotiated = d.negotiatedVersionOverride
+			}
 			d.mu.Unlock()
 			w.Header().Set("Mcp-Session-Id", sid)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-11-25","serverInfo":{"name":"serena","version":"fake"},"capabilities":{"tools":{}}}}`, idOrNull(probe.ID))
+			_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":%q,"serverInfo":{"name":"serena","version":"fake"},"capabilities":{"tools":{}}}}`, idOrNull(probe.ID), negotiated)
 			return
 		case "notifications/initialized":
 			// Acknowledge; a real daemon advances its session here. A

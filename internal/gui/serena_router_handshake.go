@@ -78,10 +78,22 @@ func effectiveHandshakeProtocolVersion(clientProtocolVersion string) string {
 // session is multiplexed onto: the workspace it bound to and the
 // daemon-issued Mcp-Session-Id to send upstream. lastSeen drives idle
 // expiry.
+//
+// Finding #8 (daemon-negotiated version): daemonProtocolVersion is the
+// protocolVersion the DAEMON returned in its initialize result — which can
+// DIFFER from the version the router requested (a daemon may negotiate down
+// to a revision it supports). A strict daemon binds its session to the
+// version IT negotiated, so every subsequent forward to this daemon session
+// (tool-call POST, notifications/cancelled, the teardown DELETE) MUST carry
+// the daemon-negotiated version on MCP-Protocol-Version, NOT the
+// router-requested one — otherwise the daemon rejects the first forward as a
+// version mismatch. Empty only when the daemon omitted protocolVersion from
+// its result (then the requested version is the fallback).
 type daemonSessionBinding struct {
-	workspaceKey    string // == api.WorkspaceEntry.WorkspaceKey
-	daemonSessionID string
-	lastSeen        time.Time
+	workspaceKey          string // == api.WorkspaceEntry.WorkspaceKey
+	daemonSessionID       string
+	daemonProtocolVersion string
+	lastSeen              time.Time
 }
 
 // daemonSessionStore maps a client-facing Mcp-Session-Id to the real
@@ -130,47 +142,87 @@ func (st *daemonSessionStore) now() time.Time {
 // binding is deleted regardless of the workspace it was bound to
 // (it is stale either way); the `cleanup` method remains for symmetry
 // and an optional periodic sweep.
-func (st *daemonSessionStore) lookup(clientSessionID string, wsKey string) (string, bool) {
+// Finding #8: lookup also returns the daemon-negotiated protocolVersion
+// stored on the binding, so a cache hit forwards under the SAME version the
+// session was established with (not the per-request header).
+func (st *daemonSessionStore) lookup(clientSessionID string, wsKey string) (daemonSessionID string, daemonProtocolVersion string, ok bool) {
 	if clientSessionID == "" {
-		return "", false
+		return "", "", false
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	b, ok := st.bindings[clientSessionID]
-	if !ok || b == nil {
-		return "", false
+	b, present := st.bindings[clientSessionID]
+	if !present || b == nil {
+		return "", "", false
 	}
 	// Expire-on-read: a binding past its idle TTL is stale (the daemon
 	// likely expired its side already). Drop it so the caller
 	// re-handshakes.
 	if st.now().Sub(b.lastSeen) > daemonSessionTTL {
 		delete(st.bindings, clientSessionID)
-		return "", false
+		return "", "", false
 	}
 	if b.workspaceKey != wsKey || b.daemonSessionID == "" {
-		return "", false
+		return "", "", false
 	}
 	b.lastSeen = st.now()
-	return b.daemonSessionID, true
+	return b.daemonSessionID, b.daemonProtocolVersion, true
 }
 
 // store records (clientSessionID -> workspace, daemonSessionID),
 // replacing any prior binding for the same client session. A nil/empty
 // argument is ignored so the map never holds a half-binding.
-func (st *daemonSessionStore) store(clientSessionID string, wsKey string, daemonSessionID string) {
+//
+// Finding #2 (workspace-rebind leak): when store REPLACES an existing
+// binding whose (workspaceKey, daemonSessionID) DIFFERS from the new one —
+// a workspace switch on the same client session — it returns the OLD
+// binding (workspaceKey, daemonSessionID, daemonProtocolVersion) with
+// displaced=true so the caller (resolveDaemonSession) can best-effort
+// upstream-DELETE the now-orphaned old daemon session. Without this the old
+// workspace's daemon session leaks until that daemon's idle expiry, once per
+// switch. displaced stays FALSE when there was no prior binding, OR when the
+// prior binding is unchanged (same workspace+session reused) — tearing down
+// an unchanged binding would kill the session the new store is about to rely
+// on. The store mutator holds mu and has no http client, so the teardown
+// itself is performed by the caller, not here. The displaced daemon-negotiated
+// version (Finding #8) is returned so the teardown DELETE carries the version
+// the OLD daemon session was established under.
+func (st *daemonSessionStore) store(clientSessionID string, wsKey string, daemonSessionID string, daemonProtocolVersion string) (displaced displacedBinding, hadDisplaced bool) {
 	if clientSessionID == "" || daemonSessionID == "" {
-		return
+		return displacedBinding{}, false
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if st.bindings == nil {
 		st.bindings = make(map[string]*daemonSessionBinding)
 	}
-	st.bindings[clientSessionID] = &daemonSessionBinding{
-		workspaceKey:    wsKey,
-		daemonSessionID: daemonSessionID,
-		lastSeen:        st.now(),
+	if prev := st.bindings[clientSessionID]; prev != nil && prev.daemonSessionID != "" &&
+		(prev.workspaceKey != wsKey || prev.daemonSessionID != daemonSessionID) {
+		// A real rebind: the prior daemon session is now orphaned. Hand it
+		// back so the caller releases it upstream (Invariant D).
+		displaced = displacedBinding{
+			workspaceKey:          prev.workspaceKey,
+			daemonSessionID:       prev.daemonSessionID,
+			daemonProtocolVersion: prev.daemonProtocolVersion,
+		}
+		hadDisplaced = true
 	}
+	st.bindings[clientSessionID] = &daemonSessionBinding{
+		workspaceKey:          wsKey,
+		daemonSessionID:       daemonSessionID,
+		daemonProtocolVersion: daemonProtocolVersion,
+		lastSeen:              st.now(),
+	}
+	return displaced, hadDisplaced
+}
+
+// displacedBinding carries the orphaned old daemon session a workspace
+// rebind displaced (Finding #2), so the caller can upstream-DELETE it under
+// the version that old session was established with (Finding #8).
+type displacedBinding struct {
+	workspaceKey          string
+	daemonSessionID       string
+	daemonProtocolVersion string
 }
 
 // unbind drops the mapping for clientSessionID (no-op if absent).
@@ -183,24 +235,28 @@ func (st *daemonSessionStore) unbind(clientSessionID string) {
 	delete(st.bindings, clientSessionID)
 }
 
-// bindingFor returns the (workspaceKey, daemonSessionID) bound to
-// clientSessionID, or ok=false when there is none. Unlike lookup it does
-// NOT refresh lastSeen, expire-on-read, or filter by workspace — it is the
-// read a client-origin DELETE uses to find the upstream daemon session to
-// tear down (Finding 3). An idle-expired binding is still returned so the
-// DELETE fans out best-effort to the daemon that may still hold the
-// session; the caller unbinds it afterwards regardless.
-func (st *daemonSessionStore) bindingFor(clientSessionID string) (wsKey string, daemonSessionID string, ok bool) {
+// bindingFor returns the (workspaceKey, daemonSessionID, daemonProtocolVersion)
+// bound to clientSessionID, or ok=false when there is none. Unlike lookup it
+// does NOT refresh lastSeen, expire-on-read, or filter by workspace — it is
+// the read a client-origin DELETE / cancel uses to find the upstream daemon
+// session to tear down or forward to (Finding 3 / Finding H). An idle-expired
+// binding is still returned so the DELETE fans out best-effort to the daemon
+// that may still hold the session; the caller unbinds it afterwards regardless.
+//
+// Finding #8: the persisted daemon-negotiated protocolVersion is returned so
+// the teardown DELETE / cancel forward carries the version the daemon session
+// was established under (not the per-request header).
+func (st *daemonSessionStore) bindingFor(clientSessionID string) (wsKey string, daemonSessionID string, daemonProtocolVersion string, ok bool) {
 	if clientSessionID == "" {
-		return "", "", false
+		return "", "", "", false
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	b, present := st.bindings[clientSessionID]
 	if !present || b == nil || b.daemonSessionID == "" {
-		return "", "", false
+		return "", "", "", false
 	}
-	return b.workspaceKey, b.daemonSessionID, true
+	return b.workspaceKey, b.daemonSessionID, b.daemonProtocolVersion, true
 }
 
 // cleanup drops bindings idle longer than ttl before now and returns
@@ -250,23 +306,38 @@ func (st *daemonSessionStore) cleanup(now time.Time, ttl time.Duration) int {
 // notifications/initialized header so the daemon session's initialized
 // version matches the version the client's later tool-calls advertise.
 // Empty (older client) falls back to handshakeInitializeProtocolVersion.
-func establishDaemonSession(ctx context.Context, httpClient *http.Client, upstreamURL string, clientProtocolVersion string) (string, error) {
-	protocolVersion := effectiveHandshakeProtocolVersion(clientProtocolVersion)
-	initBody := buildHandshakeInitializeBody(protocolVersion)
-	daemonSessionID, err := postHandshakeInitialize(ctx, httpClient, upstreamURL, initBody)
+//
+// Finding #8: it ALSO returns the protocolVersion the DAEMON negotiated in
+// its initialize result. The daemon may negotiate a DIFFERENT revision than
+// the router requested; a strict daemon then binds its session to ITS
+// version, so notifications/initialized AND every later forward to this
+// daemon session must carry the daemon-negotiated version. When the daemon
+// omits result.protocolVersion the requested version is the fallback (so the
+// returned version is never empty for a session-bearing daemon).
+func establishDaemonSession(ctx context.Context, httpClient *http.Client, upstreamURL string, clientProtocolVersion string) (daemonSessionID string, daemonProtocolVersion string, err error) {
+	requestedVersion := effectiveHandshakeProtocolVersion(clientProtocolVersion)
+	initBody := buildHandshakeInitializeBody(requestedVersion)
+	daemonSessionID, negotiated, err := postHandshakeInitialize(ctx, httpClient, upstreamURL, initBody)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if daemonSessionID == "" {
 		// Daemon did not issue a session id: it does not require session
 		// affinity. Skip notifications/initialized (there is no session to
 		// advance) and signal "no upstream session" to the caller.
-		return "", nil
+		return "", "", nil
 	}
-	if err := postHandshakeInitialized(ctx, httpClient, upstreamURL, daemonSessionID, protocolVersion); err != nil {
-		return "", fmt.Errorf("notifications/initialized: %w", err)
+	// Finding #8: the daemon session is bound to the version the DAEMON
+	// negotiated; fall back to the requested version only when the daemon
+	// omitted the field. notifications/initialized + later forwards use it.
+	daemonProtocolVersion = negotiated
+	if daemonProtocolVersion == "" {
+		daemonProtocolVersion = requestedVersion
 	}
-	return daemonSessionID, nil
+	if err := postHandshakeInitialized(ctx, httpClient, upstreamURL, daemonSessionID, daemonProtocolVersion); err != nil {
+		return "", "", fmt.Errorf("notifications/initialized: %w", err)
+	}
+	return daemonSessionID, daemonProtocolVersion, nil
 }
 
 // buildHandshakeInitializeBody returns the JSON-RPC initialize envelope
@@ -294,24 +365,27 @@ func buildHandshakeInitializeBody(protocolVersion string) []byte {
 }
 
 // postHandshakeInitialize POSTs the initialize body to the daemon and
-// returns the daemon's Mcp-Session-Id response header. It requires
-// HTTP 200 + a JSON-RPC result (rejecting a JSON-RPC error or a non-200
-// transport status); the session-id header may legitimately be empty
-// (sessionless daemon), so an empty header is NOT an error.
-func postHandshakeInitialize(ctx context.Context, httpClient *http.Client, upstreamURL string, body []byte) (string, error) {
+// returns the daemon's Mcp-Session-Id response header PLUS the
+// protocolVersion the daemon negotiated in its initialize result (Finding
+// #8). It requires HTTP 200 + a JSON-RPC result (rejecting a JSON-RPC error
+// or a non-200 transport status); the session-id header may legitimately be
+// empty (sessionless daemon), so an empty header is NOT an error. The
+// returned daemon protocolVersion is empty when the daemon omits the field
+// (the caller then falls back to the requested version).
+func postHandshakeInitialize(ctx context.Context, httpClient *http.Client, upstreamURL string, body []byte) (sessionID string, daemonProtocolVersion string, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, bytes.NewReader(body))
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("upstream initialize -> status %d", resp.StatusCode)
+		return "", "", fmt.Errorf("upstream initialize -> status %d", resp.StatusCode)
 	}
 	// Finding 4: read the response INCREMENTALLY. A Streamable-HTTP daemon
 	// that answers initialize with text/event-stream may keep the stream
@@ -322,22 +396,30 @@ func postHandshakeInitialize(ctx context.Context, httpClient *http.Client, upstr
 	// internal/api/hub_mcp_aggregator.go's doDaemonPost SSE branch.)
 	payload, rerr := readUpstreamJSONRPCResponse(resp.Header.Get("Content-Type"), resp.Body)
 	if rerr != nil {
-		return "", fmt.Errorf("read upstream initialize: %w", rerr)
+		return "", "", fmt.Errorf("read upstream initialize: %w", rerr)
 	}
 	var rpc struct {
 		Result json.RawMessage `json:"result"`
 		Error  json.RawMessage `json:"error"`
 	}
 	if uerr := json.Unmarshal(payload, &rpc); uerr != nil {
-		return "", fmt.Errorf("upstream initialize non-JSON-RPC body: %w", uerr)
+		return "", "", fmt.Errorf("upstream initialize non-JSON-RPC body: %w", uerr)
 	}
 	if len(rpc.Error) > 0 {
-		return "", fmt.Errorf("upstream initialize returned JSON-RPC error: %s", string(rpc.Error))
+		return "", "", fmt.Errorf("upstream initialize returned JSON-RPC error: %s", string(rpc.Error))
 	}
 	if len(rpc.Result) == 0 {
-		return "", fmt.Errorf("upstream initialize returned no result")
+		return "", "", fmt.Errorf("upstream initialize returned no result")
 	}
-	return resp.Header.Get("Mcp-Session-Id"), nil
+	// Finding #8: pull result.protocolVersion so the caller can bind this
+	// daemon session to the version the DAEMON actually negotiated (it may
+	// differ from the version the router requested). A missing/malformed
+	// field yields "" — the caller falls back to the requested version.
+	var resultFields struct {
+		ProtocolVersion string `json:"protocolVersion"`
+	}
+	_ = json.Unmarshal(rpc.Result, &resultFields)
+	return resp.Header.Get("Mcp-Session-Id"), resultFields.ProtocolVersion, nil
 }
 
 // postHandshakeInitialized POSTs notifications/initialized to the daemon
@@ -411,6 +493,23 @@ func postHandshakeInitialized(ctx context.Context, httpClient *http.Client, upst
 // extra session ages out on the daemon's own idle sweep. This is the
 // same "re-bind drops the previous binding without ceremony" tradeoff
 // the sticky-routing SessionRouter already documents.
+//
+// Finding #2 (workspace-rebind leak): when the store displaces an existing
+// binding for a DIFFERENT workspace/daemon-session (a workspace switch on
+// the same client session), teardownDisplaced is invoked with the OLD
+// (workspaceKey, daemonSessionID) so the caller can best-effort
+// upstream-DELETE the orphaned old daemon session (Invariant D: detached +
+// short-bound). The store mutator cannot do this itself (it holds mu and
+// has no http client / resolver), so the caller — which HAS the httpClient
+// and can resolve the old workspace's URL via the resolver — owns it.
+// teardownDisplaced may be nil (callers that do not wire a teardown, e.g.
+// the tools/list one-shot path that never reuses the session); a nil
+// callback simply skips the release.
+//
+// Finding #8: it returns the daemon-negotiated protocolVersion alongside the
+// session id (from a fresh handshake, or persisted on a cache hit) so the
+// caller forwards subsequent requests to this daemon session under the
+// version the daemon bound the session to.
 func (st *daemonSessionStore) resolveDaemonSession(
 	ctx context.Context,
 	httpClient *http.Client,
@@ -418,25 +517,35 @@ func (st *daemonSessionStore) resolveDaemonSession(
 	clientSessionID string,
 	ws *api.WorkspaceEntry,
 	clientProtocolVersion string,
-) (string, error) {
+	teardownDisplaced func(wsKey, daemonSessionID, daemonProtocolVersion string),
+) (daemonSessionID string, daemonProtocolVersion string, err error) {
 	if ws == nil {
-		return "", fmt.Errorf("resolveDaemonSession: nil workspace")
+		return "", "", fmt.Errorf("resolveDaemonSession: nil workspace")
 	}
 	if clientSessionID != "" {
-		if dsid, ok := st.lookup(clientSessionID, ws.WorkspaceKey); ok {
-			return dsid, nil
+		if dsid, dpv, ok := st.lookup(clientSessionID, ws.WorkspaceKey); ok {
+			return dsid, dpv, nil
 		}
 	}
-	dsid, err := establishDaemonSession(ctx, httpClient, upstreamURL, clientProtocolVersion)
+	dsid, dpv, err := establishDaemonSession(ctx, httpClient, upstreamURL, clientProtocolVersion)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	// Only record a mapping when BOTH a client session id and a daemon
 	// session id exist. A sessionless daemon (empty dsid) needs no
 	// mapping; a path-only call with no client session id cannot be
 	// looked up later anyway.
 	if clientSessionID != "" && dsid != "" {
-		st.store(clientSessionID, ws.WorkspaceKey, dsid)
+		old, hadDisplaced := st.store(clientSessionID, ws.WorkspaceKey, dsid, dpv)
+		if hadDisplaced && teardownDisplaced != nil {
+			// Finding #2: release the orphaned old workspace's daemon
+			// session upstream. Best-effort + Invariant D (the callback
+			// detaches the context + bounds it to the short cleanup budget).
+			// The displaced binding carried its own daemon-negotiated version
+			// (Finding #8); pass it so the teardown DELETE is not version-
+			// rejected by a strict old daemon.
+			teardownDisplaced(old.workspaceKey, old.daemonSessionID, old.daemonProtocolVersion)
+		}
 	}
-	return dsid, nil
+	return dsid, dpv, nil
 }

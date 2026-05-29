@@ -2,15 +2,15 @@
 //
 // Code-review-finding tests for the /serena/mcp router (deduplicated to 8):
 //
-//   A — DELETE revokes local bindings BEFORE the upstream forward.
-//   B — DELETE tears down the upstream session even when the sticky
-//       binding is missing (resolve-by-key).
-//   C — tools/list DELETEs the one-shot upstream session after the proxy.
-//   D — tools/list requires a minted/known router session.
-//   E — tools/list cache keyed by negotiated protocol version.
-//   F — lifecycle dispatch validates jsonrpc == "2.0".
-//   G — tool-call persists + enforces the session's negotiated version.
-//   H — Allow: POST, DELETE + notifications/cancelled forwarding.
+//	A — DELETE revokes local bindings BEFORE the upstream forward.
+//	B — DELETE tears down the upstream session even when the sticky
+//	    binding is missing (resolve-by-key).
+//	C — tools/list DELETEs the one-shot upstream session after the proxy.
+//	D — tools/list requires a minted/known router session.
+//	E — tools/list cache keyed by negotiated protocol version.
+//	F — lifecycle dispatch validates jsonrpc == "2.0".
+//	G — tool-call persists + enforces the session's negotiated version.
+//	H — Allow: POST, DELETE + notifications/cancelled forwarding.
 //
 // The shared routerSessionStore (serena_router_session.go) backs D + E + G;
 // initialize populates it, DELETE clears it. These tests exercise the WHOLE
@@ -71,7 +71,7 @@ func TestSerenaRouter_Delete_RevokesLocalBindingsBeforeUpstreamForward(t *testin
 	if rr := postSerena(t, s, buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"}), map[string]string{"Mcp-Session-Id": clientSID}); rr.Code != http.StatusOK {
 		t.Fatalf("setup tool call status = %d; body=%s", rr.Code, rr.Body.String())
 	}
-	if _, _, ok := s.serenaDaemonSessions.bindingFor(clientSID); !ok {
+	if _, _, _, ok := s.serenaDaemonSessions.bindingFor(clientSID); !ok {
 		t.Fatalf("precondition: no daemon binding after tool call")
 	}
 
@@ -88,7 +88,7 @@ func TestSerenaRouter_Delete_RevokesLocalBindingsBeforeUpstreamForward(t *testin
 	deleteEntered.Wait()
 
 	// All three local bindings must already be gone — a racing lookup loses.
-	if _, _, ok := s.serenaDaemonSessions.bindingFor(clientSID); ok {
+	if _, _, _, ok := s.serenaDaemonSessions.bindingFor(clientSID); ok {
 		t.Errorf("serenaDaemonSessions binding still present during in-flight DELETE; Finding A requires revoke-first")
 	}
 	if got := sessions.LookupSession(clientSID); got != nil {
@@ -137,7 +137,7 @@ func TestSerenaRouter_Delete_TearsDownUpstreamWhenStickyBindingMissing(t *testin
 	const clientSID = "sess-leak"
 	// Seed ONLY the daemon binding (the leak state): a handshake completed
 	// and recorded the daemon session, but the sticky BindSession never ran.
-	s.serenaDaemonSessions.store(clientSID, ws.WorkspaceKey, "alpha-seeded-daemon-session")
+	s.serenaDaemonSessions.store(clientSID, ws.WorkspaceKey, "alpha-seeded-daemon-session", "2025-11-25")
 	if got := sessions.LookupSession(clientSID); got != nil {
 		t.Fatalf("precondition: sticky binding must be ABSENT for the leak case; got %+v", got)
 	}
@@ -158,7 +158,7 @@ func TestSerenaRouter_Delete_TearsDownUpstreamWhenStickyBindingMissing(t *testin
 		t.Errorf("upstream DELETE Mcp-Session-Id = %q, want the seeded daemon id", gotSID)
 	}
 	// And the daemon binding is cleared.
-	if _, _, ok := s.serenaDaemonSessions.bindingFor(clientSID); ok {
+	if _, _, _, ok := s.serenaDaemonSessions.bindingFor(clientSID); ok {
 		t.Errorf("daemon binding survived DELETE; want unbound")
 	}
 }
@@ -887,7 +887,7 @@ func TestSerenaRouter_Delete_EnforcesSessionNegotiatedVersion(t *testing.T) {
 	}); rr.Code != http.StatusOK {
 		t.Fatalf("setup tool call status = %d; body=%s", rr.Code, rr.Body.String())
 	}
-	if _, _, ok := s.serenaDaemonSessions.bindingFor(sid); !ok {
+	if _, _, _, ok := s.serenaDaemonSessions.bindingFor(sid); !ok {
 		t.Fatalf("precondition: no daemon binding after tool call")
 	}
 
@@ -920,7 +920,7 @@ func TestSerenaRouter_Delete_EnforcesSessionNegotiatedVersion(t *testing.T) {
 	if !s.serenaRouterSessions.known(sid) {
 		t.Errorf("router session cleared by a REJECTED DELETE; want intact")
 	}
-	if _, _, ok := s.serenaDaemonSessions.bindingFor(sid); !ok {
+	if _, _, _, ok := s.serenaDaemonSessions.bindingFor(sid); !ok {
 		t.Errorf("daemon binding cleared by a REJECTED DELETE; want intact")
 	}
 	if got := sessions.LookupSession(sid); got == nil {
@@ -942,7 +942,7 @@ func TestSerenaRouter_Delete_EnforcesSessionNegotiatedVersion(t *testing.T) {
 	if s.serenaRouterSessions.known(sid) {
 		t.Errorf("router session survived a matching-version DELETE; want cleared")
 	}
-	if _, _, ok := s.serenaDaemonSessions.bindingFor(sid); ok {
+	if _, _, _, ok := s.serenaDaemonSessions.bindingFor(sid); ok {
 		t.Errorf("daemon binding survived a matching-version DELETE; want cleared")
 	}
 	if got := daemonDeleteHits(daemon); got != 1 {
@@ -1009,14 +1009,14 @@ func TestServer_SweepSerenaSessions_DropsIdleKeepsFresh(t *testing.T) {
 
 	// Seed one OLD entry (lastSeen = base) in each store.
 	s.serenaRouterSessions.store("idle-router", "2025-06-18")
-	s.serenaDaemonSessions.store("idle-daemon", "alpha", "alpha-daemon-1")
+	s.serenaDaemonSessions.store("idle-daemon", "alpha", "alpha-daemon-1", "2025-11-25")
 
 	// Advance the clock past the TTL, then seed one FRESH entry in each
 	// store (lastSeen = base + TTL + 1h, well inside the window relative to
 	// the sweep `now` below).
 	clk = base.Add(daemonSessionTTL + time.Hour)
 	s.serenaRouterSessions.store("fresh-router", "2025-11-25")
-	s.serenaDaemonSessions.store("fresh-daemon", "beta", "beta-daemon-1")
+	s.serenaDaemonSessions.store("fresh-daemon", "beta", "beta-daemon-1", "2025-11-25")
 
 	// Sweep with now = the fresh entries' timestamp + a moment. The idle
 	// entries (lastSeen = base) are now > TTL old; the fresh ones are not.
@@ -1030,14 +1030,14 @@ func TestServer_SweepSerenaSessions_DropsIdleKeepsFresh(t *testing.T) {
 	if s.serenaRouterSessions.known("idle-router") {
 		t.Errorf("idle router-session survived the sweep; want dropped")
 	}
-	if _, _, ok := s.serenaDaemonSessions.bindingFor("idle-daemon"); ok {
+	if _, _, _, ok := s.serenaDaemonSessions.bindingFor("idle-daemon"); ok {
 		t.Errorf("idle daemon-session survived the sweep; want dropped")
 	}
 	// The fresh entries are retained in BOTH stores.
 	if !s.serenaRouterSessions.known("fresh-router") {
 		t.Errorf("fresh router-session dropped by the sweep; want retained")
 	}
-	if _, _, ok := s.serenaDaemonSessions.bindingFor("fresh-daemon"); !ok {
+	if _, _, _, ok := s.serenaDaemonSessions.bindingFor("fresh-daemon"); !ok {
 		t.Errorf("fresh daemon-session dropped by the sweep; want retained")
 	}
 }
@@ -1390,7 +1390,7 @@ func TestSerenaRouter_ToolCall_SessionBearingCallNoOneShotTeardown(t *testing.T)
 	}
 
 	// The daemon session is persisted (reused on later calls) — no teardown.
-	if _, _, ok := s.serenaDaemonSessions.bindingFor(clientSID); !ok {
+	if _, _, _, ok := s.serenaDaemonSessions.bindingFor(clientSID); !ok {
 		t.Fatalf("session-bearing call did not persist the daemon binding")
 	}
 	// Give any erroneous deferred teardown a chance to fire, then assert none did.

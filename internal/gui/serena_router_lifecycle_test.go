@@ -1351,40 +1351,58 @@ func TestIsValidJSONRPCRequestID(t *testing.T) {
 // ---------------------------------------------------------------------
 func TestDaemonSessionStore_LookupIsWorkspaceScoped(t *testing.T) {
 	st := &daemonSessionStore{}
-	st.store("client-1", "alpha", "daemon-A")
+	// First store: no prior binding -> no displacement.
+	if _, hadDisplaced := st.store("client-1", "alpha", "daemon-A", "2025-06-18"); hadDisplaced {
+		t.Errorf("first store reported a displaced binding; want none")
+	}
 
-	if dsid, ok := st.lookup("client-1", "alpha"); !ok || dsid != "daemon-A" {
-		t.Fatalf("lookup(client-1, alpha) = (%q, %v), want (daemon-A, true)", dsid, ok)
+	// Finding #8: lookup returns the persisted daemon-negotiated version.
+	if dsid, dpv, ok := st.lookup("client-1", "alpha"); !ok || dsid != "daemon-A" || dpv != "2025-06-18" {
+		t.Fatalf("lookup(client-1, alpha) = (%q, %q, %v), want (daemon-A, 2025-06-18, true)", dsid, dpv, ok)
 	}
 	// Same client session, DIFFERENT workspace -> miss (the cached
 	// daemon session is for another workspace and must be re-established).
-	if dsid, ok := st.lookup("client-1", "beta"); ok {
+	if dsid, _, ok := st.lookup("client-1", "beta"); ok {
 		t.Errorf("lookup(client-1, beta) = (%q, true), want miss on workspace mismatch", dsid)
 	}
 	// Empty client session id -> miss.
-	if _, ok := st.lookup("", "alpha"); ok {
+	if _, _, ok := st.lookup("", "alpha"); ok {
 		t.Errorf("lookup(empty, alpha) = ok, want miss")
 	}
-	// Re-store under a new workspace replaces the binding.
-	st.store("client-1", "beta", "daemon-B")
-	if dsid, ok := st.lookup("client-1", "beta"); !ok || dsid != "daemon-B" {
-		t.Fatalf("lookup(client-1, beta) after re-store = (%q, %v), want (daemon-B, true)", dsid, ok)
+	// Finding #2: re-store under a new workspace replaces the binding AND
+	// reports the OLD binding as displaced (so the caller tears down the
+	// orphaned alpha daemon session), carrying the old daemon-negotiated
+	// version (Finding #8).
+	old, hadDisplaced := st.store("client-1", "beta", "daemon-B", "2025-11-25")
+	if !hadDisplaced {
+		t.Fatalf("workspace-switch store did not report a displaced binding; Finding #2 leak")
 	}
-	if _, ok := st.lookup("client-1", "alpha"); ok {
+	if old.workspaceKey != "alpha" || old.daemonSessionID != "daemon-A" || old.daemonProtocolVersion != "2025-06-18" {
+		t.Errorf("displaced binding = %+v, want {alpha, daemon-A, 2025-06-18}", old)
+	}
+	if dsid, dpv, ok := st.lookup("client-1", "beta"); !ok || dsid != "daemon-B" || dpv != "2025-11-25" {
+		t.Fatalf("lookup(client-1, beta) after re-store = (%q, %q, %v), want (daemon-B, 2025-11-25, true)", dsid, dpv, ok)
+	}
+	if _, _, ok := st.lookup("client-1", "alpha"); ok {
 		t.Errorf("lookup(client-1, alpha) after re-store = ok, want miss (binding moved to beta)")
+	}
+	// Finding #2: re-storing the SAME (workspace, daemon session) is NOT a
+	// displacement (tearing down the live session would break the next call).
+	if _, hadDisplaced := st.store("client-1", "beta", "daemon-B", "2025-11-25"); hadDisplaced {
+		t.Errorf("re-store of an UNCHANGED binding reported a displacement; want none")
 	}
 	// unbind drops it.
 	st.unbind("client-1")
-	if _, ok := st.lookup("client-1", "beta"); ok {
+	if _, _, ok := st.lookup("client-1", "beta"); ok {
 		t.Errorf("lookup after unbind = ok, want miss")
 	}
 }
 
 func TestDaemonSessionStore_IgnoresHalfBindings(t *testing.T) {
 	st := &daemonSessionStore{}
-	st.store("", "alpha", "daemon-A") // empty client id
-	st.store("client-1", "alpha", "") // empty daemon session id
-	if _, ok := st.lookup("client-1", "alpha"); ok {
+	st.store("", "alpha", "daemon-A", "2025-11-25") // empty client id
+	st.store("client-1", "alpha", "", "2025-11-25") // empty daemon session id
+	if _, _, ok := st.lookup("client-1", "alpha"); ok {
 		t.Errorf("a half-binding was stored; want no binding")
 	}
 }
@@ -1397,18 +1415,18 @@ func TestDaemonSessionStore_LookupExpiresStaleBinding(t *testing.T) {
 	base := time.Now()
 	clk := base
 	st := &daemonSessionStore{clock: func() time.Time { return clk }}
-	st.store("client-1", "alpha", "daemon-A")
+	st.store("client-1", "alpha", "daemon-A", "2025-11-25")
 
 	// Just inside TTL -> hit (and lastSeen refreshes to the new clock).
 	clk = base.Add(daemonSessionTTL - time.Minute)
-	if dsid, ok := st.lookup("client-1", "alpha"); !ok || dsid != "daemon-A" {
+	if dsid, _, ok := st.lookup("client-1", "alpha"); !ok || dsid != "daemon-A" {
 		t.Fatalf("lookup within TTL = (%q, %v), want (daemon-A, true)", dsid, ok)
 	}
 
 	// Idle past TTL (measured from the refreshed lastSeen) -> miss, and
 	// the stale binding is dropped on read (no cleanup() call in between).
 	clk = clk.Add(daemonSessionTTL + time.Minute)
-	if dsid, ok := st.lookup("client-1", "alpha"); ok {
+	if dsid, _, ok := st.lookup("client-1", "alpha"); ok {
 		t.Fatalf("lookup past TTL = (%q, true), want miss (expire-on-read)", dsid)
 	}
 	// Prove deletion: a second lookup at the SAME (still-expired) clock is
@@ -1420,8 +1438,8 @@ func TestDaemonSessionStore_LookupExpiresStaleBinding(t *testing.T) {
 	}
 
 	// A subsequent store re-establishes a live binding usable immediately.
-	st.store("client-1", "alpha", "daemon-B")
-	if dsid, ok := st.lookup("client-1", "alpha"); !ok || dsid != "daemon-B" {
+	st.store("client-1", "alpha", "daemon-B", "2025-11-25")
+	if dsid, _, ok := st.lookup("client-1", "alpha"); !ok || dsid != "daemon-B" {
 		t.Fatalf("lookup after re-store = (%q, %v), want (daemon-B, true)", dsid, ok)
 	}
 }
@@ -1430,11 +1448,11 @@ func TestDaemonSessionStore_CleanupExpiresIdle(t *testing.T) {
 	base := time.Now()
 	clk := base
 	st := &daemonSessionStore{clock: func() time.Time { return clk }}
-	st.store("client-1", "alpha", "daemon-A")
+	st.store("client-1", "alpha", "daemon-A", "2025-11-25")
 
 	// Within TTL -> retained, and lookup refreshes lastSeen.
 	clk = base.Add(10 * time.Minute)
-	if _, ok := st.lookup("client-1", "alpha"); !ok {
+	if _, _, ok := st.lookup("client-1", "alpha"); !ok {
 		t.Fatalf("expected hit within TTL")
 	}
 	if n := st.cleanup(clk.Add(1*time.Minute), daemonSessionTTL); n != 0 {
@@ -1444,7 +1462,7 @@ func TestDaemonSessionStore_CleanupExpiresIdle(t *testing.T) {
 	if n := st.cleanup(clk.Add(daemonSessionTTL+time.Minute), daemonSessionTTL); n != 1 {
 		t.Fatalf("cleanup expired %d bindings; want 1", n)
 	}
-	if _, ok := st.lookup("client-1", "alpha"); ok {
+	if _, _, ok := st.lookup("client-1", "alpha"); ok {
 		t.Errorf("binding survived cleanup past TTL")
 	}
 }
@@ -1459,8 +1477,8 @@ func TestDaemonSessionStore_ConcurrentAccess(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			id := fmt.Sprintf("client-%d", i%8)
-			st.store(id, "alpha", fmt.Sprintf("daemon-%d", i))
-			_, _ = st.lookup(id, "alpha")
+			st.store(id, "alpha", fmt.Sprintf("daemon-%d", i), "2025-11-25")
+			_, _, _ = st.lookup(id, "alpha")
 			if i%5 == 0 {
 				st.unbind(id)
 			}
@@ -1657,7 +1675,7 @@ func TestSerenaRouter_Handshake_FailsWhenInitializedRejected(t *testing.T) {
 	if got := sessions.LookupSession("sess-bad-init"); got != nil {
 		t.Errorf("LookupSession(sess-bad-init) = %+v, want nil (no phantom binding)", got)
 	}
-	if _, dsid, ok := s.serenaDaemonSessions.bindingFor("sess-bad-init"); ok {
+	if _, dsid, _, ok := s.serenaDaemonSessions.bindingFor("sess-bad-init"); ok {
 		t.Errorf("serenaDaemonSessions cached %q for sess-bad-init; want no binding on a failed handshake", dsid)
 	}
 	auditMu.Lock()
@@ -1730,7 +1748,7 @@ func TestSerenaRouter_Delete_TearsDownSessionAndForwardsUpstream(t *testing.T) {
 		t.Errorf("upstream DELETE carried the client id %q; the daemon never minted it", clientSID)
 	}
 	// Both bindings are gone.
-	if _, _, ok := s.serenaDaemonSessions.bindingFor(clientSID); ok {
+	if _, _, _, ok := s.serenaDaemonSessions.bindingFor(clientSID); ok {
 		t.Errorf("serenaDaemonSessions binding for %q survived DELETE; want unbound", clientSID)
 	}
 	if got := sessions.LookupSession(clientSID); got != nil {
@@ -1805,7 +1823,7 @@ func TestSerenaRouter_Delete_UpstreamFailureStill204AndUnbinds(t *testing.T) {
 	if delRR.Code != http.StatusNoContent {
 		t.Fatalf("DELETE status = %d, want 204 even on upstream failure; body=%s", delRR.Code, delRR.Body.String())
 	}
-	if _, _, ok := s.serenaDaemonSessions.bindingFor(clientSID); ok {
+	if _, _, _, ok := s.serenaDaemonSessions.bindingFor(clientSID); ok {
 		t.Errorf("serenaDaemonSessions binding survived a failed-upstream DELETE; want unbound")
 	}
 	if got := sessions.LookupSession(clientSID); got != nil {
@@ -1847,7 +1865,7 @@ func TestSerenaRouter_DeleteBranchDoesNotAffectGet405(t *testing.T) {
 // bindingDaemonSession reads the daemon-session id the router bound for a
 // client session id (test accessor over the unexported store).
 func bindingDaemonSession(s *Server, clientSID string) (daemonSID string, ok bool, wsKey string) {
-	wsKey, daemonSID, ok = s.serenaDaemonSessions.bindingFor(clientSID)
+	wsKey, daemonSID, _, ok = s.serenaDaemonSessions.bindingFor(clientSID)
 	return daemonSID, ok, wsKey
 }
 

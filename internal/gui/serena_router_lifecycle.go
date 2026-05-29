@@ -370,23 +370,55 @@ func initializeRawParams(body []byte) json.RawMessage {
 	return probe.Params
 }
 
-// requestedToolsListCursor pulls params.cursor out of a raw MCP
-// tools/list body. A non-empty cursor means the client is paging (MCP
-// basic/utilities/pagination), and the workspace-agnostic tools/list
-// cache MUST be bypassed for it — the cache holds only the first page,
-// so serving it for any cursor would loop the client on the same
-// nextCursor (P2 finding 2). Best-effort: a malformed/absent field
-// yields "".
-func requestedToolsListCursor(body []byte) string {
+// toolsListIsCursorRequest reports whether an MCP tools/list body is a
+// PAGINATED request whose first-page cache must be bypassed (P2 finding 2 +
+// finding #3). A paginated request is one whose params.cursor is PRESENT and
+// is NOT an empty/absent first-page marker:
+//
+//   - cursor ABSENT                         -> cursorless first page (cache OK)
+//   - cursor present, empty string ("")     -> first-page marker (cache OK)
+//   - cursor present, non-empty STRING      -> paging (bypass cache)
+//   - cursor present, WRONG TYPE (number,   -> malformed; bypass the cache and
+//     array, object, or JSON null)             proxy fresh so the DAEMON
+//     validates/rejects it, rather
+//     than masking the error with a
+//     cached page-one (finding #3)
+//
+// The pre-#3 probe unmarshalled cursor into a `string` field, so a present
+// non-string cursor failed the WHOLE-body unmarshal and the function returned
+// "" — treating a malformed paginated request as cursorless and serving it the
+// cached first page. Parsing params.cursor as json.RawMessage detects PRESENCE
+// and TYPE independently of the rest of the body.
+func toolsListIsCursorRequest(body []byte) bool {
 	var probe struct {
 		Params struct {
-			Cursor string `json:"cursor"`
+			Cursor json.RawMessage `json:"cursor"`
 		} `json:"params"`
 	}
 	if err := json.Unmarshal(body, &probe); err != nil {
-		return ""
+		// Whole body is not parseable JSON — handled elsewhere (the handler
+		// already rejected a malformed body); treat as cursorless here.
+		return false
 	}
-	return probe.Params.Cursor
+	raw := bytes.TrimSpace(probe.Params.Cursor)
+	if len(raw) == 0 {
+		// Field absent (json.RawMessage stays nil/empty when the key is
+		// missing): cursorless first page.
+		return false
+	}
+	// Present. If it is a JSON string, only a NON-EMPTY one is a paging
+	// request; "" is the first-page marker (cache OK). Any non-string token
+	// (number/array/object/null) is malformed → bypass so the daemon validates.
+	if raw[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			// Present string-shaped but malformed escapes → bypass (daemon
+			// validates).
+			return true
+		}
+		return s != ""
+	}
+	return true
 }
 
 // handleInitialize synthesizes the InitializeResult and mints a session
@@ -625,7 +657,7 @@ func (s *Server) handleToolsList(
 	// A paginated (cursor-bearing) tools/list bypasses the first-page
 	// cache on BOTH read and write (P2 finding 2). The cache read/write are
 	// keyed by the session's negotiated protocol version (P2 finding 5).
-	isCursorRequest := requestedToolsListCursor(body) != ""
+	isCursorRequest := toolsListIsCursorRequest(body)
 	if !isCursorRequest {
 		if cached, ok := s.serenaToolsListCache.get(negotiatedVersion, now); ok {
 			writeJSONRPCResult(w, tb.ID, json.RawMessage(cached), nil)
@@ -656,7 +688,7 @@ func (s *Server) handleToolsList(
 	// G treats as advisory for a known session). fetchToolsListFromAnyDaemon
 	// also DELETEs each one-shot upstream daemon session after the proxy so
 	// it does not leak until the daemon's idle expiry (P2 finding C).
-	result, ferr := s.fetchToolsListFromAnyDaemon(r.Context(), entries, body, httpClient, upstreamURLFn, auditFn, negotiatedVersion)
+	result, ferr := s.fetchToolsListFromAnyDaemon(r.Context(), entries, body, httpClient, upstreamURLFn, auditFn, negotiatedVersion, deps.UpstreamTimeout)
 	if ferr != nil {
 		_ = auditFn("warn", "serena-tools-list-fetch-failed", map[string]any{
 			"err":             ferr.Error(),
@@ -702,6 +734,7 @@ func (s *Server) fetchToolsListFromAnyDaemon(
 	upstreamURLFn func(ws *api.WorkspaceEntry) string,
 	auditFn func(level, event string, fields map[string]any) error,
 	clientProtocolVersion string,
+	cleanupTimeout time.Duration,
 ) (json.RawMessage, error) {
 	var lastErr error
 	for _, ws := range entries {
@@ -713,19 +746,29 @@ func (s *Server) fetchToolsListFromAnyDaemon(
 			lastErr = fmt.Errorf("workspace %q: upstream URL resolution failed", ws.WorkspaceKey)
 			continue
 		}
-		result, daemonSessionID, err := proxyToolsListOnce(ctx, httpClient, upstreamURL, body, clientProtocolVersion)
+		result, daemonSessionID, daemonProtocolVersion, err := proxyToolsListOnce(ctx, httpClient, upstreamURL, body, clientProtocolVersion)
 		// Finding C: release the one-shot upstream session regardless of the
 		// proxy outcome, whenever the handshake established one. Detach the
 		// context so a done tools/list request context cannot abort it.
 		//
-		// Finding 2 (V-forward): the teardown DELETE carries the SAME resolved
-		// protocol version proxyToolsListOnce used for its handshake
-		// (effectiveHandshakeProtocolVersion), so a strict daemon that binds
-		// the header to the session's initialized version does not 400 the
-		// teardown and leak the one-shot session.
+		// Invariant D (#4): bound the teardown by the SHORT cleanup budget,
+		// NOT serenaUpstreamTimeout (60s). This teardown runs synchronously
+		// before the tools/list result returns to the client, so a hung daemon
+		// would otherwise delay the client's tools/list by up to a minute per
+		// candidate. cleanupContext keeps it detached (Finding C) AND bounded
+		// to <=5s (or the configured upstreamTimeout when shorter, for test
+		// determinism).
+		//
+		// Finding #8 + Finding 2 (V-forward): the teardown DELETE carries the
+		// version the DAEMON negotiated for this one-shot session (the version
+		// it was established + advanced under), not merely the requested
+		// version, so a strict daemon that binds the header to its session's
+		// initialized version does not 400 the teardown and leak the one-shot
+		// session. effectiveHandshakeProtocolVersion fills the router default
+		// only if the daemon returned an empty version.
 		if daemonSessionID != "" {
-			delCtx, delCancel := context.WithTimeout(context.Background(), serenaUpstreamTimeout)
-			s.forwardSerenaDeleteUpstream(delCtx, httpClient, upstreamURL, daemonSessionID, effectiveHandshakeProtocolVersion(clientProtocolVersion), ws.WorkspaceKey, ws, auditFn)
+			delCtx, delCancel := cleanupContext(cleanupTimeout)
+			s.forwardSerenaDeleteUpstream(delCtx, httpClient, upstreamURL, daemonSessionID, effectiveHandshakeProtocolVersion(daemonProtocolVersion), ws.WorkspaceKey, ws, auditFn)
 			delCancel()
 		}
 		if err != nil {
@@ -780,15 +823,24 @@ func (s *Server) fetchToolsListFromAnyDaemon(
 // tools/list POST itself fails. A handshake FAILURE returns "" (no upstream
 // session was minted, so there is nothing to release); a sessionless daemon
 // also returns "" (it issued no id).
-func proxyToolsListOnce(ctx context.Context, httpClient *http.Client, upstreamURL string, body []byte, clientProtocolVersion string) (json.RawMessage, string, error) {
-	protocolVersion := effectiveHandshakeProtocolVersion(clientProtocolVersion)
-	daemonSessionID, hsErr := establishDaemonSession(ctx, httpClient, upstreamURL, protocolVersion)
+func proxyToolsListOnce(ctx context.Context, httpClient *http.Client, upstreamURL string, body []byte, clientProtocolVersion string) (result json.RawMessage, daemonSessionID string, daemonProtocolVersion string, err error) {
+	requestedVersion := effectiveHandshakeProtocolVersion(clientProtocolVersion)
+	daemonSessionID, daemonProtocolVersion, hsErr := establishDaemonSession(ctx, httpClient, upstreamURL, requestedVersion)
 	if hsErr != nil {
-		return nil, "", fmt.Errorf("upstream handshake: %w", hsErr)
+		return nil, "", "", fmt.Errorf("upstream handshake: %w", hsErr)
+	}
+	// Finding #8: send the tools/list POST under the version the DAEMON
+	// negotiated for this session (a strict daemon binds the header on a
+	// non-initialize POST to its session's initialized version, which may
+	// differ from the requested version). Fall back to the requested version
+	// if the daemon was sessionless / omitted its version.
+	postVersion := daemonProtocolVersion
+	if postVersion == "" {
+		postVersion = requestedVersion
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, bytes.NewReader(body))
 	if err != nil {
-		return nil, daemonSessionID, err
+		return nil, daemonSessionID, daemonProtocolVersion, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	// Accept both shapes; daemons that only emit SSE need the stream
@@ -796,20 +848,20 @@ func proxyToolsListOnce(ctx context.Context, httpClient *http.Client, upstreamUR
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	// tools/list is a non-initialize POST: send the negotiated protocol
 	// version so a strict daemon does not reject the missing header
-	// (P1 finding 5). Same version as the handshake above.
-	if protocolVersion != "" {
-		req.Header.Set("MCP-Protocol-Version", protocolVersion)
+	// (P1 finding 5 + Finding #8 — the daemon-negotiated version).
+	if postVersion != "" {
+		req.Header.Set("MCP-Protocol-Version", postVersion)
 	}
 	if daemonSessionID != "" {
 		req.Header.Set("Mcp-Session-Id", daemonSessionID)
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, daemonSessionID, err
+		return nil, daemonSessionID, daemonProtocolVersion, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, daemonSessionID, fmt.Errorf("upstream tools/list -> status %d", resp.StatusCode)
+		return nil, daemonSessionID, daemonProtocolVersion, fmt.Errorf("upstream tools/list -> status %d", resp.StatusCode)
 	}
 	// Finding 4: read INCREMENTALLY (same ReadAll-to-EOF hang as the
 	// handshake — a daemon that answers tools/list as a still-open SSE
@@ -818,22 +870,22 @@ func proxyToolsListOnce(ctx context.Context, httpClient *http.Client, upstreamUR
 	// event for SSE, or a bounded read for application/json.
 	payload, rerr := readUpstreamJSONRPCResponse(resp.Header.Get("Content-Type"), resp.Body)
 	if rerr != nil {
-		return nil, daemonSessionID, fmt.Errorf("read upstream tools/list: %w", rerr)
+		return nil, daemonSessionID, daemonProtocolVersion, fmt.Errorf("read upstream tools/list: %w", rerr)
 	}
 	var rpc struct {
 		Result json.RawMessage `json:"result"`
 		Error  json.RawMessage `json:"error"`
 	}
 	if err := json.Unmarshal(payload, &rpc); err != nil {
-		return nil, daemonSessionID, fmt.Errorf("upstream tools/list non-JSON-RPC body: %w", err)
+		return nil, daemonSessionID, daemonProtocolVersion, fmt.Errorf("upstream tools/list non-JSON-RPC body: %w", err)
 	}
 	if len(rpc.Error) > 0 {
-		return nil, daemonSessionID, fmt.Errorf("upstream tools/list returned JSON-RPC error: %s", string(rpc.Error))
+		return nil, daemonSessionID, daemonProtocolVersion, fmt.Errorf("upstream tools/list returned JSON-RPC error: %s", string(rpc.Error))
 	}
 	if len(rpc.Result) == 0 {
-		return nil, daemonSessionID, fmt.Errorf("upstream tools/list returned no result")
+		return nil, daemonSessionID, daemonProtocolVersion, fmt.Errorf("upstream tools/list returned no result")
 	}
-	return rpc.Result, daemonSessionID, nil
+	return rpc.Result, daemonSessionID, daemonProtocolVersion, nil
 }
 
 // bytesContainsFold is a tiny case-insensitive substring check for
