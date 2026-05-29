@@ -149,6 +149,24 @@ type fakeSerenaDaemon struct {
 	// post-initialize request (P1 finding 1).
 	lastInitHeaders        http.Header
 	lastInitializedHeaders http.Header
+
+	// initializedStatus overrides the HTTP status returned for
+	// notifications/initialized. 0 means the default 202. A non-2xx value
+	// models a daemon that rejects the initialized notification (bad
+	// session/protocol header), which must FAIL the router handshake
+	// (P2 finding 2) rather than be cached as a usable session.
+	initializedStatus int
+
+	// deleteHits counts DELETE /mcp requests (client-origin session
+	// termination, P2 finding 3). lastDeleteSession is the Mcp-Session-Id
+	// observed on the most recent DELETE.
+	deleteHits        int
+	lastDeleteSession string
+	// deleteStatus overrides the HTTP status returned for DELETE. 0 means
+	// the default 204; a non-2xx value models a daemon that fails the
+	// teardown (the router must still 204 the client — teardown is
+	// best-effort).
+	deleteStatus int
 }
 
 func newFakeSerenaDaemon(prefix string) *fakeSerenaDaemon {
@@ -157,6 +175,22 @@ func newFakeSerenaDaemon(prefix string) *fakeSerenaDaemon {
 
 func (d *fakeSerenaDaemon) handler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// DELETE /mcp is client-origin session termination (P2 finding 3).
+		// A real serena/native-http daemon acknowledges with 204. Record
+		// the session id the router forwarded so a test can assert the
+		// router sent the DAEMON-issued id (not the client id).
+		if r.Method == http.MethodDelete {
+			d.mu.Lock()
+			d.deleteHits++
+			d.lastDeleteSession = r.Header.Get("Mcp-Session-Id")
+			status := d.deleteStatus
+			d.mu.Unlock()
+			if status == 0 {
+				status = http.StatusNoContent
+			}
+			w.WriteHeader(status)
+			return
+		}
 		body, _ := io.ReadAll(r.Body)
 		var probe struct {
 			Method string          `json:"method"`
@@ -182,11 +216,18 @@ func (d *fakeSerenaDaemon) handler() http.HandlerFunc {
 			_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-11-25","serverInfo":{"name":"serena","version":"fake"},"capabilities":{"tools":{}}}}`, idOrNull(probe.ID))
 			return
 		case "notifications/initialized":
-			// Acknowledge; a real daemon advances its session here.
+			// Acknowledge; a real daemon advances its session here. A
+			// configured non-2xx initializedStatus models a daemon that
+			// rejects the notification (P2 finding 2) so the router
+			// handshake must fail rather than cache a phantom session.
 			d.mu.Lock()
 			d.lastInitializedHeaders = r.Header.Clone()
+			status := d.initializedStatus
 			d.mu.Unlock()
-			w.WriteHeader(http.StatusAccepted)
+			if status == 0 {
+				status = http.StatusAccepted
+			}
+			w.WriteHeader(status)
 			return
 		}
 

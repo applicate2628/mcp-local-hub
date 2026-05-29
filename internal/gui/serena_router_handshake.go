@@ -183,6 +183,26 @@ func (st *daemonSessionStore) unbind(clientSessionID string) {
 	delete(st.bindings, clientSessionID)
 }
 
+// bindingFor returns the (workspaceKey, daemonSessionID) bound to
+// clientSessionID, or ok=false when there is none. Unlike lookup it does
+// NOT refresh lastSeen, expire-on-read, or filter by workspace — it is the
+// read a client-origin DELETE uses to find the upstream daemon session to
+// tear down (Finding 3). An idle-expired binding is still returned so the
+// DELETE fans out best-effort to the daemon that may still hold the
+// session; the caller unbinds it afterwards regardless.
+func (st *daemonSessionStore) bindingFor(clientSessionID string) (wsKey string, daemonSessionID string, ok bool) {
+	if clientSessionID == "" {
+		return "", "", false
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	b, present := st.bindings[clientSessionID]
+	if !present || b == nil || b.daemonSessionID == "" {
+		return "", "", false
+	}
+	return b.workspaceKey, b.daemonSessionID, true
+}
+
 // cleanup drops bindings idle longer than ttl before now and returns
 // the count dropped. Bounded growth is already tied to live client
 // sessions; cleanup exists for symmetry with the sticky-routing
@@ -213,12 +233,13 @@ func (st *daemonSessionStore) cleanup(now time.Time, ttl time.Duration) int {
 //     caller then forwards subsequent calls with no upstream session id
 //     (back-compat with a sessionless daemon).
 //  2. POST notifications/initialized with the captured session id, so the
-//     daemon's upstream session reaches the operational state. The
-//     daemon answers 202; we tolerate any 2xx and do not fail the
-//     handshake on a non-2xx here (the session already exists from step 1
-//     and the client's first tool call is the authoritative liveness
-//     check) — but a transport error IS surfaced so a dead daemon fails
-//     loud rather than minting a phantom mapping.
+//     daemon's upstream session reaches the operational state. The daemon
+//     answers 2xx (202). A non-2xx is a handshake FAILURE (Finding 2): it
+//     means the daemon did not advance the session, so the mapping must
+//     NOT be cached (a later tools/list / tools/call would fail opaquely
+//     against a half-initialized session). Both a transport error and a
+//     non-2xx status fail the handshake so a dead OR rejecting daemon
+//     fails loud rather than minting a phantom mapping.
 //
 // A 1 MiB read cap bounds the initialize response.
 //
@@ -312,9 +333,11 @@ func postHandshakeInitialize(ctx context.Context, httpClient *http.Client, upstr
 
 // postHandshakeInitialized POSTs notifications/initialized to the daemon
 // carrying the daemon session id, advancing the upstream session to the
-// operational state. The daemon answers 202; a non-2xx is tolerated
-// (the session already exists from initialize), but a transport error is
-// surfaced so a dead daemon fails the handshake.
+// operational state. The daemon answers 2xx (202); a non-2xx is a
+// handshake FAILURE (Finding 2) — it means the daemon did not advance the
+// session, so caching it would make subsequent tools/list / tools/call
+// fail opaquely. Both a transport error and a non-2xx status are surfaced
+// so a dead OR rejecting daemon fails the handshake loud.
 //
 // protocolVersion is set on the MCP-Protocol-Version header (P1 finding
 // 1): notifications/initialized is a POST that follows initialize, so a
@@ -341,9 +364,19 @@ func postHandshakeInitialized(ctx context.Context, httpClient *http.Client, upst
 	}
 	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
-	// 2xx expected; we do not hard-fail on non-2xx because the session
-	// already exists from the initialize step and the client's first
-	// real tool call is the authoritative liveness check.
+	// Finding 2: a non-2xx on notifications/initialized means the daemon
+	// did NOT advance the session to operational (a bad session/protocol
+	// header is the usual cause). Caching that half-initialized session
+	// would make the NEXT tools/list / tools/call fail opaquely with an
+	// upstream "unknown/!operational session" rejection. Fail the
+	// handshake instead — establishDaemonSession wraps this, so
+	// resolveDaemonSession does NOT store the binding and the caller
+	// surfaces the diagnosable 502/504 handshake-failure path. (Mirrors
+	// the hub treating a post-initialize notification failure as an init
+	// failure — internal/api/hub_mcp_handler.go.)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("notifications/initialized -> status %d", resp.StatusCode)
+	}
 	return nil
 }
 

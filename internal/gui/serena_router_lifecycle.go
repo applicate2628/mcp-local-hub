@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -51,6 +52,23 @@ var supportedProtocolVersions = map[string]struct{}{
 // the router does not recognize (or omits the field). It is the latest
 // revision in supportedProtocolVersions.
 const defaultProtocolVersion = "2025-11-25"
+
+// supportedProtocolVersionsList returns the supported MCP protocol
+// versions as a sorted slice, for the error.data.supported field on an
+// initialize rejection (P2 findings 1 + 5). Mirrors the hub handler's
+// hubSupportedVersionsList() (internal/api/hub_mcp_handler.go) but derives
+// the slice from supportedProtocolVersions directly so a future edit to
+// that map cannot leave the advertised list stale. Sorted descending so
+// the newest revision the router speaks is listed first (matches the hub's
+// newest-first ordering).
+func supportedProtocolVersionsList() []string {
+	out := make([]string, 0, len(supportedProtocolVersions))
+	for v := range supportedProtocolVersions {
+		out = append(out, v)
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(out)))
+	return out
+}
 
 // serenaServerInfoName / serenaServerInfoVersion identify the synthesized
 // MCP server. Name matches the manifest server name ("serena") so a
@@ -166,6 +184,38 @@ func writeJSONRPCError(w http.ResponseWriter, id json.RawMessage, code int, mess
 	})
 }
 
+// writeJSONRPCErrorStatus writes a JSON-RPC 2.0 error envelope at an
+// EXPLICIT HTTP status, with an optional error.data field. It mirrors the
+// hub handler's writeJSONRPCErrorStatus
+// (internal/api/hub_mcp_handler.go) so the router's initialize validation
+// (P2 findings 1 + 5) can return the same status/code/data shapes the hub
+// returns. writeJSONRPCError (HTTP 200, no data) remains for the in-band
+// error path that does not need a custom status — initialize rejections
+// that the spec maps to a transport error (e.g. session-id present →
+// HTTP 400) need this status-carrying variant. A nil data is omitted.
+func writeJSONRPCErrorStatus(w http.ResponseWriter, id json.RawMessage, httpStatus, code int, message string, data any) {
+	errObj := map[string]any{
+		"code":    code,
+		"message": message,
+	}
+	if data != nil {
+		errObj["data"] = data
+	}
+	envelope := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      normalizeID(id),
+		"error":   errObj,
+	}
+	payload, err := json.Marshal(envelope)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(httpStatus)
+	_, _ = w.Write(payload)
+}
+
 // normalizeID returns a JSON null RawMessage when id is empty so the
 // emitted envelope always carries an explicit id field (JSON-RPC allows
 // a null id on a response to a request whose id could not be determined).
@@ -267,18 +317,6 @@ type initializeResult struct {
 	ServerInfo      map[string]string `json:"serverInfo"`
 }
 
-// negotiateProtocolVersion echoes the client's requested protocolVersion
-// when the router supports it, else returns defaultProtocolVersion.
-func negotiateProtocolVersion(requested string) string {
-	if requested == "" {
-		return defaultProtocolVersion
-	}
-	if _, ok := supportedProtocolVersions[requested]; ok {
-		return requested
-	}
-	return defaultProtocolVersion
-}
-
 // newMcpSessionID mints a fresh opaque session id (32 hex chars / 16
 // random bytes) for a synthesized initialize. The id is returned to the
 // client in the Mcp-Session-Id response header; it binds to a workspace
@@ -295,19 +333,21 @@ func newMcpSessionID() string {
 	return hex.EncodeToString(b[:])
 }
 
-// requestedProtocolVersion pulls params.protocolVersion out of a raw MCP
+// initializeRawParams pulls the raw `params` object out of an MCP
 // initialize body without disturbing the toolBody decode used for tool
-// routing. Best-effort: a malformed/absent field yields "".
-func requestedProtocolVersion(body []byte) string {
+// routing. Unlike a best-effort string probe, returning the raw bytes lets
+// handleInitialize tell a PRESENT-but-type-mismatched params object (which
+// must be a -32602 error, P2 finding 5) apart from an absent/empty one. A
+// malformed/absent params field yields a nil RawMessage; the caller then
+// treats protocolVersion as absent (also a -32602 error).
+func initializeRawParams(body []byte) json.RawMessage {
 	var probe struct {
-		Params struct {
-			ProtocolVersion string `json:"protocolVersion"`
-		} `json:"params"`
+		Params json.RawMessage `json:"params"`
 	}
 	if err := json.Unmarshal(body, &probe); err != nil {
-		return ""
+		return nil
 	}
-	return probe.Params.ProtocolVersion
+	return probe.Params
 }
 
 // requestedToolsListCursor pulls params.cursor out of a raw MCP
@@ -334,13 +374,71 @@ func requestedToolsListCursor(body []byte) string {
 // serena daemon exposes the same lifecycle surface, and the session is
 // bound to a concrete workspace only on the first path-bearing
 // tools/call.
+//
+// incomingSessionID is the request's Mcp-Session-Id header. The MCP
+// lifecycle forbids a session id on initialize (initialize is what
+// ESTABLISHES the session), and the synthesized body + the rawParams
+// type/version validation below mirror the hub handler's handleInitialize
+// (internal/api/hub_mcp_handler.go) so the router and hub reject the same
+// non-compliant clients identically.
 func (s *Server) handleInitialize(w http.ResponseWriter, body []byte, tb *toolBody, incomingSessionID string) {
-	sessionID := incomingSessionID
-	if sessionID == "" {
-		sessionID = newMcpSessionID()
+	// Finding 1 (mirror hub handleInitialize): a session id on initialize
+	// is invalid — initialize is what mints the session. Reject it instead
+	// of echoing the caller-supplied id (which would let a client
+	// reinitialize-with-stale-id and keep a prior workspace/daemon
+	// binding). The reconcile readiness probe sends NO session-id header,
+	// so it is unaffected.
+	if incomingSessionID != "" {
+		writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidRequest,
+			"session-id only valid after initialize", nil)
+		return
 	}
+
+	// Finding 5 (mirror hub handleInitialize): validate params.protocolVersion
+	// synchronously BEFORE minting a session. initializeRawParams returns the
+	// raw params bytes so a present-but-type-mismatched params object is told
+	// apart from an absent/empty protocolVersion, and the router requires a
+	// SUPPORTED version rather than silently negotiating the default (which
+	// hides a non-compliant client).
+	rawParams := initializeRawParams(body)
+	var initParams struct {
+		ProtocolVersion string `json:"protocolVersion"`
+	}
+	if len(rawParams) > 0 && string(rawParams) != "null" {
+		if uerr := json.Unmarshal(rawParams, &initParams); uerr != nil {
+			writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidParams,
+				"invalid initialize params: "+uerr.Error(), nil)
+			return
+		}
+	}
+	if initParams.ProtocolVersion == "" {
+		// Missing/empty protocolVersion is an invalid-params error
+		// (-32602), not a "default to router-preferred" path.
+		writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidParams,
+			"invalid initialize params: protocolVersion required", map[string]any{
+				"supported": supportedProtocolVersionsList(),
+			})
+		return
+	}
+	if _, ok := supportedProtocolVersions[initParams.ProtocolVersion]; !ok {
+		// Unsupported version: reject with -32600 at HTTP 200 (JSON-RPC
+		// carries the error in-band) + error.data.supported so the client
+		// can re-issue initialize with a version the router speaks. The
+		// router fronts per-workspace daemons that all share one MCP
+		// surface, so silently downgrading to defaultProtocolVersion would
+		// hide a real client/server mismatch — same posture as the hub.
+		writeJSONRPCErrorStatus(w, tb.ID, http.StatusOK, jsonrpcInvalidRequest,
+			"unsupported protocolVersion", map[string]any{
+				"supported": supportedProtocolVersionsList(),
+				"requested": initParams.ProtocolVersion,
+			})
+		return
+	}
+	negotiatedVersion := initParams.ProtocolVersion
+
+	sessionID := newMcpSessionID()
 	result := initializeResult{
-		ProtocolVersion: negotiateProtocolVersion(requestedProtocolVersion(body)),
+		ProtocolVersion: negotiatedVersion,
 		Capabilities: map[string]any{
 			"tools": map[string]any{"listChanged": false},
 		},
@@ -611,25 +709,67 @@ func proxyToolsListOnce(ctx context.Context, httpClient *http.Client, upstreamUR
 }
 
 // extractJSONRPCPayload returns the JSON object to parse from an upstream
-// response. For a text/event-stream body it pulls the last non-empty
-// `data:` line's JSON (the terminal MCP message of a single-event
-// stream); for any other content type it returns raw verbatim.
+// response. For a text/event-stream body it pulls the data of the LAST
+// complete event (the terminal MCP message) — concatenating that event's
+// `data:` lines per the SSE spec; for any other content type it returns
+// raw verbatim.
+//
+// Finding 4: a single SSE event whose JSON-RPC message is split across
+// multiple `data:` lines (a daemon that pretty-prints / wraps its
+// initialize/tools-list JSON) must be reassembled by JOINING those lines
+// with "\n", not by overwriting the accumulator with each line and
+// returning only the last fragment (which yields invalid JSON). Per the
+// SSE spec (WHATWG HTML §server-sent-events), the data buffer accumulates
+// each `data:` field value followed by "\n"; a blank line dispatches the
+// event; the event's data is the buffer with the trailing "\n" removed.
 func extractJSONRPCPayload(contentType string, raw []byte) []byte {
 	if !bytesContainsFold(contentType, "text/event-stream") {
 		return raw
 	}
-	var last []byte
+	const dataPrefix = "data:"
+	var (
+		last    []byte // data of the last COMPLETE (dispatched) event
+		buf     []byte // accumulator for the in-progress event
+		sawData bool   // a `data:` field appeared in the in-progress event
+	)
+	// finalizeEvent records the in-progress event's data as the latest
+	// candidate (when it carried any data) and resets the accumulator.
+	finalizeEvent := func() {
+		if sawData {
+			if trimmed := bytes.TrimSpace(buf); len(trimmed) > 0 {
+				last = trimmed
+			}
+		}
+		buf = buf[:0]
+		sawData = false
+	}
 	for _, line := range bytes.Split(raw, []byte("\n")) {
 		line = bytes.TrimRight(line, "\r")
-		const dataPrefix = "data:"
-		if !bytes.HasPrefix(line, []byte(dataPrefix)) {
+		if len(line) == 0 {
+			// Blank line: dispatch the in-progress event (SSE event boundary).
+			finalizeEvent()
 			continue
 		}
-		payload := bytes.TrimSpace(line[len(dataPrefix):])
-		if len(payload) > 0 {
-			last = payload
+		if !bytes.HasPrefix(line, []byte(dataPrefix)) {
+			// Non-data field (event:, id:, retry:, comment): ignored for
+			// payload extraction but does NOT end the event.
+			continue
 		}
+		// SSE: the value is the text after "data:" with a single optional
+		// leading space stripped. Concatenate multiple data lines with "\n".
+		value := line[len(dataPrefix):]
+		if len(value) > 0 && value[0] == ' ' {
+			value = value[1:]
+		}
+		if sawData {
+			buf = append(buf, '\n')
+		}
+		buf = append(buf, value...)
+		sawData = true
 	}
+	// A stream may end without a trailing blank line; finalize the last
+	// (unterminated) event too.
+	finalizeEvent()
 	if len(last) == 0 {
 		return raw
 	}

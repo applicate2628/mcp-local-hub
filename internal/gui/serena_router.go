@@ -227,6 +227,15 @@ func writeRequiredFieldError(w http.ResponseWriter, field string) {
 }
 
 func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
+	// DELETE is the MCP Streamable HTTP client-origin session-termination
+	// method (Finding 3). A Streamable HTTP client sends DELETE /serena/mcp
+	// on shutdown; without this branch it would 405 and leak the upstream
+	// daemon session + the router-owned bindings until idle expiry. GET and
+	// every other non-POST method keep their current 405 (Allow: POST).
+	if r.Method == http.MethodDelete {
+		s.handleSerenaDelete(w, r)
+		return
+	}
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -508,6 +517,129 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, _ = io.Copy(w, upstreamResp.Body)
+}
+
+// handleSerenaDelete tears down the router-owned session state for a
+// client-origin DELETE /serena/mcp (Finding 3). It mirrors the hub
+// handler's DELETE/session-termination handling
+// (internal/api/hub_mcp_handler.go handleDelete): look up the daemon
+// binding for the client's Mcp-Session-Id, fan a best-effort DELETE out to
+// the workspace daemon's /mcp carrying the daemon-issued session id, then
+// drop both the router-owned daemon-session binding and the sticky
+// deps.Sessions binding. DELETE carries no path-arg, so the workspace is
+// resolved from the STORED binding, never from the request.
+//
+// Teardown is best-effort: the response is 204 regardless of the upstream
+// DELETE outcome (a shutdown must not 5xx). The upstream forward fires
+// FIRST — its daemon-session-id is captured up front, so unbinding after
+// it cannot affect correctness — and a transport failure is audited
+// (warn) for diagnosability, consistent with the POST path's audit calls.
+func (s *Server) handleSerenaDelete(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.Header.Get("Mcp-Session-Id")
+	if sessionID == "" {
+		// No client session to tear down. Acknowledge (best-effort
+		// shutdown semantic) rather than erroring.
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	deps := s.serenaRouterDepsProd()
+	// Even when the routing layer is unwired we still own the
+	// serenaDaemonSessions map, so attempt the binding teardown; deps is
+	// only needed for the upstream forward + sticky unbind.
+	wsKey, daemonSessionID, hasBinding := s.serenaDaemonSessions.bindingFor(sessionID)
+	if hasBinding && deps != nil {
+		auditFn := deps.AuditFn
+		if auditFn == nil {
+			auditFn = api.LogHubMcpEvent
+		}
+		upstreamURLFn := deps.UpstreamURLFn
+		if upstreamURLFn == nil {
+			upstreamURLFn = defaultUpstreamURL
+		}
+		upstreamTimeout := deps.UpstreamTimeout
+		if upstreamTimeout <= 0 {
+			upstreamTimeout = serenaUpstreamTimeout
+		}
+		httpClient := serenaHTTPClient(deps.HTTPClient, upstreamTimeout)
+
+		// Resolve the workspace from the sticky binding (DELETE has no
+		// path-arg). When it is present we can build the daemon /mcp URL
+		// and forward the DELETE so the daemon (internal/daemon/http_host.go)
+		// acknowledges session termination. A missing sticky binding (or a
+		// nil URL) just skips the upstream forward — the local unbind below
+		// still runs so the router does not leak the mapping.
+		var ws *api.WorkspaceEntry
+		if deps.Sessions != nil {
+			ws = deps.Sessions.LookupSession(sessionID)
+		}
+		if ws != nil {
+			if upstreamURL := upstreamURLFn(ws); upstreamURL != "" {
+				// Detach from r.Context() (mirror the hub's handleDelete,
+				// internal/api/hub_mcp_handler.go): a client that disconnects
+				// right after sending DELETE would otherwise cancel r.Context()
+				// immediately and short-circuit the daemon-side teardown —
+				// leaking the upstream session this finding exists to release.
+				// Bound the detached context by the upstream timeout.
+				fwdCtx, fwdCancel := context.WithTimeout(context.Background(), upstreamTimeout)
+				s.forwardSerenaDeleteUpstream(fwdCtx, httpClient, upstreamURL, daemonSessionID, wsKey, ws, auditFn)
+				fwdCancel()
+			}
+		}
+	}
+
+	// Drop the router-owned daemon-session binding and the sticky workspace
+	// binding regardless of the upstream forward outcome.
+	s.serenaDaemonSessions.unbind(sessionID)
+	if deps != nil && deps.Sessions != nil {
+		deps.Sessions.UnbindSession(sessionID)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// forwardSerenaDeleteUpstream issues a best-effort DELETE to a workspace
+// daemon's /mcp carrying the daemon-issued Mcp-Session-Id, so the daemon
+// releases the upstream session. A transport failure or a non-2xx status
+// is audited (warn) but never propagated — the client-origin DELETE
+// teardown is best-effort (Finding 3).
+func (s *Server) forwardSerenaDeleteUpstream(ctx context.Context, httpClient *http.Client, upstreamURL, daemonSessionID, wsKey string, ws *api.WorkspaceEntry, auditFn func(level, event string, fields map[string]any) error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, upstreamURL, nil)
+	if err != nil {
+		_ = auditFn("warn", "serena-upstream-delete-failed", map[string]any{
+			"workspace_key": wsKey,
+			"port":          ws.Port,
+			"upstream_url":  upstreamURL,
+			"phase":         "session-teardown",
+			"err":           err.Error(),
+		})
+		return
+	}
+	if daemonSessionID != "" {
+		req.Header.Set("Mcp-Session-Id", daemonSessionID)
+	}
+	resp, doErr := httpClient.Do(req)
+	if doErr != nil {
+		_ = auditFn("warn", "serena-upstream-delete-failed", map[string]any{
+			"workspace_key": wsKey,
+			"port":          ws.Port,
+			"upstream_url":  upstreamURL,
+			"phase":         "session-teardown",
+			"err":           doErr.Error(),
+		})
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		_ = auditFn("warn", "serena-upstream-delete-failed", map[string]any{
+			"workspace_key": wsKey,
+			"port":          ws.Port,
+			"upstream_url":  upstreamURL,
+			"phase":         "session-teardown",
+			"status":        resp.StatusCode,
+		})
+	}
 }
 
 // defaultUpstreamURL points at the workspace's serena daemon. Per the

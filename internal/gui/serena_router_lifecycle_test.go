@@ -123,9 +123,14 @@ func TestSerenaRouter_Initialize_SynthesizesResultAndSession(t *testing.T) {
 	}
 }
 
-// initialize with an unknown protocolVersion negotiates down to the
-// router default rather than echoing the unsupported value.
-func TestSerenaRouter_Initialize_NegotiatesUnknownProtocolVersion(t *testing.T) {
+// P2 finding 5 — initialize with an UNSUPPORTED protocolVersion is
+// rejected with -32600 at HTTP 200 (JSON-RPC error in-band) carrying
+// error.data.supported + requested, NOT silently negotiated down to the
+// router default (which would hide a non-compliant client). Mirrors the
+// hub handler's strict-rejection posture
+// (internal/api/hub_mcp_handler.go). Replaces the pre-Finding-5
+// negotiate-down test.
+func TestSerenaRouter_Initialize_UnsupportedProtocolVersionRejected(t *testing.T) {
 	deps := &serenaRouterDeps{Resolver: &stubResolver{}, Sessions: NewInMemorySessionRouter()}
 	s := newSerenaTestServer(t, deps)
 
@@ -134,35 +139,150 @@ func TestSerenaRouter_Initialize_NegotiatesUnknownProtocolVersion(t *testing.T) 
 		"capabilities":    map[string]any{},
 	})
 	rr := postSerena(t, s, body, nil)
+	// JSON-RPC errors are carried in-band at HTTP 200 (matches the hub's
+	// unsupported-version path).
 	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+		t.Fatalf("status = %d, want 200 (in-band JSON-RPC error); body=%s", rr.Code, rr.Body.String())
 	}
 	var resp struct {
-		Result struct {
-			ProtocolVersion string `json:"protocolVersion"`
-		} `json:"result"`
+		ID     json.RawMessage `json:"id"`
+		Result json.RawMessage `json:"result"`
+		Error  *struct {
+			Code    int            `json:"code"`
+			Message string         `json:"message"`
+			Data    map[string]any `json:"data"`
+		} `json:"error"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v", err)
+		t.Fatalf("decode: %v; raw=%s", err, rr.Body.String())
 	}
-	if resp.Result.ProtocolVersion != defaultProtocolVersion {
-		t.Errorf("protocolVersion = %q, want default %q", resp.Result.ProtocolVersion, defaultProtocolVersion)
+	if len(resp.Result) > 0 {
+		t.Errorf("result present on unsupported-version initialize; want error only. result=%s", string(resp.Result))
+	}
+	if resp.Error == nil {
+		t.Fatalf("expected JSON-RPC error for unsupported protocolVersion; raw=%s", rr.Body.String())
+	}
+	if resp.Error.Code != jsonrpcInvalidRequest {
+		t.Errorf("error code = %d, want %d (-32600)", resp.Error.Code, jsonrpcInvalidRequest)
+	}
+	if resp.Error.Data["requested"] != "1999-01-01" {
+		t.Errorf("error.data.requested = %v, want 1999-01-01", resp.Error.Data["requested"])
+	}
+	if _, ok := resp.Error.Data["supported"]; !ok {
+		t.Errorf("error.data missing supported list; got %v", resp.Error.Data)
+	}
+	// No session must be minted on a rejected initialize.
+	if sid := rr.Header().Get("Mcp-Session-Id"); sid != "" {
+		t.Errorf("unsupported-version initialize minted Mcp-Session-Id %q; a rejected initialize gets no session", sid)
 	}
 }
 
-// initialize honors an Mcp-Session-Id the client already sent (it does
-// not mint a fresh one over an existing session).
-func TestSerenaRouter_Initialize_PreservesIncomingSessionID(t *testing.T) {
+// P2 finding 5 — initialize with ABSENT/empty protocolVersion is a
+// -32602 invalid-params error at HTTP 400 (mirrors the hub) carrying
+// error.data.supported, and mints no session.
+func TestSerenaRouter_Initialize_MissingProtocolVersionRejected(t *testing.T) {
 	deps := &serenaRouterDeps{Resolver: &stubResolver{}, Sessions: NewInMemorySessionRouter()}
 	s := newSerenaTestServer(t, deps)
 
+	// params present but no protocolVersion field.
 	body := buildLifecycleBody(t, "initialize", map[string]any{"capabilities": map[string]any{}})
-	rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": "client-supplied-id"})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rr.Code)
+	rr := postSerena(t, s, body, nil)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
 	}
-	if got := rr.Header().Get("Mcp-Session-Id"); got != "client-supplied-id" {
-		t.Errorf("Mcp-Session-Id = %q, want the client-supplied id echoed back", got)
+	var resp struct {
+		Result json.RawMessage `json:"result"`
+		Error  *struct {
+			Code int            `json:"code"`
+			Data map[string]any `json:"data"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v; raw=%s", err, rr.Body.String())
+	}
+	if resp.Error == nil || resp.Error.Code != jsonrpcInvalidParams {
+		t.Fatalf("expected -32602 invalid-params; got %+v", resp.Error)
+	}
+	if _, ok := resp.Error.Data["supported"]; !ok {
+		t.Errorf("error.data missing supported list; got %v", resp.Error.Data)
+	}
+	if sid := rr.Header().Get("Mcp-Session-Id"); sid != "" {
+		t.Errorf("missing-version initialize minted Mcp-Session-Id %q; want none", sid)
+	}
+}
+
+// P2 finding 5 — initialize whose params.protocolVersion is the WRONG TYPE
+// (e.g. a number) is a -32602 invalid-params error at HTTP 400, not a
+// silent default-negotiation.
+func TestSerenaRouter_Initialize_TypeMismatchedParamsRejected(t *testing.T) {
+	deps := &serenaRouterDeps{Resolver: &stubResolver{}, Sessions: NewInMemorySessionRouter()}
+	s := newSerenaTestServer(t, deps)
+
+	// protocolVersion as a JSON number -> unmarshal into the string field
+	// fails -> -32602.
+	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":123,"capabilities":{}}}`)
+	rr := postSerena(t, s, body, nil)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v; raw=%s", err, rr.Body.String())
+	}
+	if resp.Error == nil || resp.Error.Code != jsonrpcInvalidParams {
+		t.Fatalf("expected -32602 invalid-params for type-mismatched params; got %+v", resp.Error)
+	}
+	if !strings.Contains(resp.Error.Message, "invalid initialize params") {
+		t.Errorf("error message %q should name invalid initialize params", resp.Error.Message)
+	}
+}
+
+// P2 finding 1 — initialize carrying an Mcp-Session-Id header is REJECTED
+// with -32600 "session-id only valid after initialize" at HTTP 400, and
+// mints no session. initialize is what ESTABLISHES the session; echoing a
+// caller-supplied id would let a client reinitialize-with-stale-id and
+// keep a prior workspace/daemon binding. Mirrors the hub handler
+// (internal/api/hub_mcp_handler.go). Replaces the pre-Finding-1
+// echo-the-id test.
+func TestSerenaRouter_Initialize_RejectsIncomingSessionID(t *testing.T) {
+	deps := &serenaRouterDeps{Resolver: &stubResolver{}, Sessions: NewInMemorySessionRouter()}
+	s := newSerenaTestServer(t, deps)
+
+	body := buildLifecycleBody(t, "initialize", map[string]any{
+		"protocolVersion": "2025-06-18",
+		"capabilities":    map[string]any{},
+	})
+	rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": "client-supplied-id"})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Result json.RawMessage `json:"result"`
+		Error  *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v; raw=%s", err, rr.Body.String())
+	}
+	if len(resp.Result) > 0 {
+		t.Errorf("result present on rejected initialize; want error only")
+	}
+	if resp.Error == nil || resp.Error.Code != jsonrpcInvalidRequest {
+		t.Fatalf("expected -32600 Invalid Request; got %+v", resp.Error)
+	}
+	if !strings.Contains(resp.Error.Message, "session-id only valid after initialize") {
+		t.Errorf("error message = %q, want 'session-id only valid after initialize'", resp.Error.Message)
+	}
+	// The router must NOT echo or mint a session on the rejected request.
+	if got := rr.Header().Get("Mcp-Session-Id"); got != "" {
+		t.Errorf("Mcp-Session-Id = %q on a rejected initialize; want none", got)
 	}
 }
 
@@ -1118,21 +1238,21 @@ func TestIsValidJSONRPCRequestID(t *testing.T) {
 		raw  string
 		want bool
 	}{
-		{``, false},        // absent (len 0) -> not a valid request id
-		{`null`, false},    // MCP forbids null
-		{`true`, false},    // boolean
-		{`false`, false},   // boolean
-		{`{}`, false},      // object
-		{`[1]`, false},     // array
-		{`"abc"`, true},    // string
-		{`""`, true},       // empty string is a valid (if odd) id
-		{`1`, true},        // number
-		{`-3`, true},       // negative number
-		{`1.5`, true},      // fractional number
+		{``, false},                // absent (len 0) -> not a valid request id
+		{`null`, false},            // MCP forbids null
+		{`true`, false},            // boolean
+		{`false`, false},           // boolean
+		{`{}`, false},              // object
+		{`[1]`, false},             // array
+		{`"abc"`, true},            // string
+		{`""`, true},               // empty string is a valid (if odd) id
+		{`1`, true},                // number
+		{`-3`, true},               // negative number
+		{`1.5`, true},              // fractional number
 		{`9007199254740993`, true}, // > 2^53 number
-		{`+1`, false},      // leading + forbidden by JSON grammar
-		{`1]`, false},      // trailing data
-		{`"a" "b"`, false}, // two values
+		{`+1`, false},              // leading + forbidden by JSON grammar
+		{`1]`, false},              // trailing data
+		{`"a" "b"`, false},         // two values
 	}
 	for _, tc := range cases {
 		t.Run(tc.raw, func(t *testing.T) {
@@ -1303,4 +1423,447 @@ func assertToolsListNames(t *testing.T, raw []byte, want []string) {
 			t.Fatalf("tool[%d] = %q, want %q (full=%v)", i, got[i], want[i], got)
 		}
 	}
+}
+
+// daemonDeleteHits returns how many DELETE /mcp requests a fake daemon has
+// observed (P2 finding 3 teardown forwarding).
+func daemonDeleteHits(d *fakeSerenaDaemon) int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.deleteHits
+}
+
+// deleteSerena issues a same-origin DELETE /serena/mcp with the supplied
+// headers (mirrors postSerena for the client-origin teardown path).
+func deleteSerena(t *testing.T, s *Server, headers map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodDelete, "/serena/mcp", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+	return rr
+}
+
+// ---------------------------------------------------------------------
+// P2 finding 5 (probe-compatibility pin) — the EXACT initialize body the
+// Phase-3 reconcile readiness probe POSTs
+// (internal/api/serena_client_reconcile.go) must still return a
+// 200 + JSON-RPC result after the Finding-1/5 validation tightened
+// initialize. The probe offers protocolVersion "2024-11-05" (which MUST
+// stay in supportedProtocolVersions), a valid id:1, and NO session-id
+// header. A future edit that drops "2024-11-05" from the supported set
+// would break the cross-package reconcile coupling and fail THIS test
+// loudly. The probe lives in another package and is out of scope — this
+// is the router-side pin.
+func TestSerenaRouter_Initialize_ReconcileProbeBodyStillSucceeds(t *testing.T) {
+	deps := &serenaRouterDeps{Resolver: &stubResolver{}, Sessions: NewInMemorySessionRouter()}
+	s := newSerenaTestServer(t, deps)
+
+	// Byte-for-byte the reconcile probe body (serena_client_reconcile.go).
+	const probeInitBody = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"mcphub-reconcile-probe","version":"0"}}}`
+	rr := postSerena(t, s, []byte(probeInitBody), nil)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	// Mirror the probe's accept condition: non-empty result AND no error.
+	var rpc struct {
+		Result *struct {
+			ProtocolVersion string `json:"protocolVersion"`
+		} `json:"result"`
+		Error json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &rpc); err != nil {
+		t.Fatalf("decode: %v; raw=%s", err, rr.Body.String())
+	}
+	if len(rpc.Error) > 0 {
+		t.Fatalf("reconcile probe body returned an error (probe would fail closed): %s", string(rpc.Error))
+	}
+	if rpc.Result == nil {
+		t.Fatalf("reconcile probe body returned no result; raw=%s", rr.Body.String())
+	}
+	// A supported version is echoed verbatim (the probe offered a supported one).
+	if rpc.Result.ProtocolVersion != "2024-11-05" {
+		t.Errorf("protocolVersion = %q, want echoed 2024-11-05", rpc.Result.ProtocolVersion)
+	}
+	if _, ok := supportedProtocolVersions["2024-11-05"]; !ok {
+		t.Fatalf("supportedProtocolVersions no longer contains 2024-11-05; the reconcile probe (serena_client_reconcile.go) would fail closed")
+	}
+	// The probe sends no session-id header, so a session IS minted.
+	if rr.Header().Get("Mcp-Session-Id") == "" {
+		t.Errorf("reconcile probe initialize minted no Mcp-Session-Id; want one")
+	}
+}
+
+// supportedProtocolVersionsList unit: returns every supported version,
+// sorted newest-first.
+func TestSupportedProtocolVersionsList(t *testing.T) {
+	got := supportedProtocolVersionsList()
+	if len(got) != len(supportedProtocolVersions) {
+		t.Fatalf("list length = %d, want %d (one per supported version)", len(got), len(supportedProtocolVersions))
+	}
+	for _, v := range got {
+		if _, ok := supportedProtocolVersions[v]; !ok {
+			t.Errorf("list contains %q which is not in supportedProtocolVersions", v)
+		}
+	}
+	// Sorted descending (newest first) -> strictly decreasing string order.
+	for i := 1; i < len(got); i++ {
+		if got[i-1] <= got[i] {
+			t.Errorf("list not sorted newest-first: %v", got)
+			break
+		}
+	}
+	// The newest must be defaultProtocolVersion.
+	if got[0] != defaultProtocolVersion {
+		t.Errorf("first element = %q, want defaultProtocolVersion %q", got[0], defaultProtocolVersion)
+	}
+}
+
+// ---------------------------------------------------------------------
+// P2 finding 2 — when the daemon REJECTS notifications/initialized with a
+// non-2xx, the handshake FAILS: the router does not cache a phantom
+// session, and a subsequent tool call surfaces the diagnosable
+// 502 handshake-failure path instead of an opaque upstream session error.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_Handshake_FailsWhenInitializedRejected(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	// initialize succeeds (mints a session), but notifications/initialized
+	// is rejected -> handshake must fail.
+	daemon.initializedStatus = http.StatusBadRequest
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	sessions := NewInMemorySessionRouter()
+	var auditEvents []string
+	var auditMu sync.Mutex
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:      sessions,
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		AuditFn: func(level, event string, fields map[string]any) error {
+			auditMu.Lock()
+			auditEvents = append(auditEvents, event)
+			auditMu.Unlock()
+			return nil
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"})
+	rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": "sess-bad-init"})
+
+	// The handshake failure is the same failure class as an unreachable
+	// forward -> 502 (the daemon answered initialize but not initialized,
+	// which is a non-timeout error).
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 (handshake failure); body=%s", rr.Code, rr.Body.String())
+	}
+	// No phantom session/binding cached.
+	if got := sessions.LookupSession("sess-bad-init"); got != nil {
+		t.Errorf("LookupSession(sess-bad-init) = %+v, want nil (no phantom binding)", got)
+	}
+	if _, dsid, ok := s.serenaDaemonSessions.bindingFor("sess-bad-init"); ok {
+		t.Errorf("serenaDaemonSessions cached %q for sess-bad-init; want no binding on a failed handshake", dsid)
+	}
+	auditMu.Lock()
+	defer auditMu.Unlock()
+	sawHandshakeFailure := false
+	for _, e := range auditEvents {
+		if e == "serena-upstream-unreachable" {
+			sawHandshakeFailure = true
+		}
+	}
+	if !sawHandshakeFailure {
+		t.Errorf("expected a serena-upstream-unreachable audit on handshake failure; got %v", auditEvents)
+	}
+}
+
+// ---------------------------------------------------------------------
+// P2 finding 3 — a client-origin DELETE /serena/mcp tears down the
+// router-owned session state: it forwards a DELETE (carrying the
+// DAEMON-issued session id) to the workspace daemon, drops the
+// serenaDaemonSessions binding AND the sticky deps.Sessions binding, and
+// answers 204.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_Delete_TearsDownSessionAndForwardsUpstream(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	sessions := NewInMemorySessionRouter()
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:      sessions,
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	const clientSID = "sess-del"
+	// First a tool call establishes the daemon session + sticky binding.
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"})
+	rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": clientSID})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("setup tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	// Capture the daemon session id the router established so we can assert
+	// the DELETE forwards THAT id (not the client id).
+	daemonSID, ok, _ := bindingDaemonSession(s, clientSID)
+	if !ok {
+		t.Fatalf("precondition: no daemon-session binding for %q after tool call", clientSID)
+	}
+	if got := sessions.LookupSession(clientSID); got == nil {
+		t.Fatalf("precondition: sticky binding for %q missing after tool call", clientSID)
+	}
+
+	// Now the DELETE.
+	delRR := deleteSerena(t, s, map[string]string{"Mcp-Session-Id": clientSID})
+	if delRR.Code != http.StatusNoContent {
+		t.Fatalf("DELETE status = %d, want 204; body=%s", delRR.Code, delRR.Body.String())
+	}
+	// Upstream daemon received a DELETE carrying the DAEMON-issued id.
+	if got := daemonDeleteHits(daemon); got != 1 {
+		t.Errorf("daemon DELETE hits = %d, want 1 (router must forward the teardown)", got)
+	}
+	daemon.mu.Lock()
+	gotDeleteSID := daemon.lastDeleteSession
+	daemon.mu.Unlock()
+	if gotDeleteSID != daemonSID {
+		t.Errorf("upstream DELETE Mcp-Session-Id = %q, want the daemon-issued id %q (not the client id %q)", gotDeleteSID, daemonSID, clientSID)
+	}
+	if gotDeleteSID == clientSID {
+		t.Errorf("upstream DELETE carried the client id %q; the daemon never minted it", clientSID)
+	}
+	// Both bindings are gone.
+	if _, _, ok := s.serenaDaemonSessions.bindingFor(clientSID); ok {
+		t.Errorf("serenaDaemonSessions binding for %q survived DELETE; want unbound", clientSID)
+	}
+	if got := sessions.LookupSession(clientSID); got != nil {
+		t.Errorf("sticky binding for %q survived DELETE = %+v; want unbound", clientSID, got)
+	}
+}
+
+// P2 finding 3 — DELETE with no binding (and DELETE with no session-id
+// header) is acknowledged with 204, not 405/5xx; teardown is best-effort.
+func TestSerenaRouter_Delete_NoBindingStillAcknowledges(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	// Unknown session id -> 204, no upstream forward (nothing to tear down).
+	delRR := deleteSerena(t, s, map[string]string{"Mcp-Session-Id": "never-bound"})
+	if delRR.Code != http.StatusNoContent {
+		t.Fatalf("DELETE(unknown) status = %d, want 204; body=%s", delRR.Code, delRR.Body.String())
+	}
+	if got := daemonDeleteHits(daemon); got != 0 {
+		t.Errorf("daemon DELETE hits = %d, want 0 for an unbound session", got)
+	}
+
+	// No session-id header at all -> still 204.
+	delNone := deleteSerena(t, s, nil)
+	if delNone.Code != http.StatusNoContent {
+		t.Fatalf("DELETE(no sid) status = %d, want 204; body=%s", delNone.Code, delNone.Body.String())
+	}
+}
+
+// P2 finding 3 — a failed upstream DELETE (daemon returns non-2xx) still
+// returns 204 to the client AND still drops the local bindings (teardown
+// is best-effort; a shutdown must not 5xx).
+func TestSerenaRouter_Delete_UpstreamFailureStill204AndUnbinds(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	daemon.deleteStatus = http.StatusInternalServerError // daemon fails the teardown
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	sessions := NewInMemorySessionRouter()
+	var auditEvents []string
+	var auditMu sync.Mutex
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:      sessions,
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		AuditFn: func(level, event string, fields map[string]any) error {
+			auditMu.Lock()
+			auditEvents = append(auditEvents, event)
+			auditMu.Unlock()
+			return nil
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+
+	const clientSID = "sess-del-fail"
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"})
+	if rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": clientSID}); rr.Code != http.StatusOK {
+		t.Fatalf("setup tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	delRR := deleteSerena(t, s, map[string]string{"Mcp-Session-Id": clientSID})
+	if delRR.Code != http.StatusNoContent {
+		t.Fatalf("DELETE status = %d, want 204 even on upstream failure; body=%s", delRR.Code, delRR.Body.String())
+	}
+	if _, _, ok := s.serenaDaemonSessions.bindingFor(clientSID); ok {
+		t.Errorf("serenaDaemonSessions binding survived a failed-upstream DELETE; want unbound")
+	}
+	if got := sessions.LookupSession(clientSID); got != nil {
+		t.Errorf("sticky binding survived a failed-upstream DELETE = %+v; want unbound", got)
+	}
+	auditMu.Lock()
+	defer auditMu.Unlock()
+	sawDeleteFailed := false
+	for _, e := range auditEvents {
+		if e == "serena-upstream-delete-failed" {
+			sawDeleteFailed = true
+		}
+	}
+	if !sawDeleteFailed {
+		t.Errorf("expected a serena-upstream-delete-failed audit on a non-2xx upstream DELETE; got %v", auditEvents)
+	}
+}
+
+// GET (and other non-POST, non-DELETE) methods keep their 405 after the
+// DELETE branch was added (regression guard for Finding 3 scope).
+func TestSerenaRouter_DeleteBranchDoesNotAffectGet405(t *testing.T) {
+	deps := &serenaRouterDeps{Resolver: &stubResolver{}, Sessions: NewInMemorySessionRouter()}
+	s := newSerenaTestServer(t, deps)
+
+	req := httptest.NewRequest(http.MethodGet, "/serena/mcp", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Errorf("GET status = %d, want 405", rr.Code)
+	}
+	if rr.Header().Get("Allow") != "POST" {
+		t.Errorf("Allow = %q, want POST", rr.Header().Get("Allow"))
+	}
+}
+
+// bindingDaemonSession reads the daemon-session id the router bound for a
+// client session id (test accessor over the unexported store).
+func bindingDaemonSession(s *Server, clientSID string) (daemonSID string, ok bool, wsKey string) {
+	wsKey, daemonSID, ok = s.serenaDaemonSessions.bindingFor(clientSID)
+	return daemonSID, ok, wsKey
+}
+
+// ---------------------------------------------------------------------
+// P2 finding 4 — extractJSONRPCPayload reassembles a JSON-RPC message
+// split across MULTIPLE data: lines within one SSE event by joining them
+// with "\n" (per the SSE spec), instead of overwriting and returning only
+// the last fragment.
+// ---------------------------------------------------------------------
+func TestExtractJSONRPCPayload_MultiDataLineEvent(t *testing.T) {
+	// A pretty-printed JSON-RPC result split across three data: lines in
+	// ONE event (blank line terminates). Overwriting would return only
+	// `}` (invalid JSON); correct accumulation reconstructs the object.
+	sse := "event: message\n" +
+		"data: {\"jsonrpc\":\"2.0\",\"id\":1,\n" +
+		"data: \"result\":{\"tools\":[{\"name\":\"find_symbol\"}]}\n" +
+		"data: }\n" +
+		"\n"
+	got := extractJSONRPCPayload("text/event-stream", []byte(sse))
+
+	var rpc struct {
+		JSONRPC string `json:"jsonrpc"`
+		Result  struct {
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(got, &rpc); err != nil {
+		t.Fatalf("reassembled payload is not valid JSON: %v; got=%q", err, string(got))
+	}
+	if rpc.JSONRPC != "2.0" {
+		t.Errorf("jsonrpc = %q, want 2.0 (data lines not reassembled)", rpc.JSONRPC)
+	}
+	if len(rpc.Result.Tools) != 1 || rpc.Result.Tools[0].Name != "find_symbol" {
+		t.Errorf("result.tools = %+v, want [find_symbol]", rpc.Result.Tools)
+	}
+}
+
+// P2 finding 4 — when multiple complete events appear, the LAST event's
+// (reassembled) data is returned: that is the terminal MCP message.
+func TestExtractJSONRPCPayload_LastEventWins(t *testing.T) {
+	sse := "event: progress\n" +
+		"data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\"}\n" +
+		"\n" +
+		"event: message\n" +
+		"data: {\"jsonrpc\":\"2.0\",\"id\":1,\n" +
+		"data: \"result\":{\"ok\":true}}\n" +
+		"\n"
+	got := extractJSONRPCPayload("text/event-stream", []byte(sse))
+	var rpc struct {
+		ID     json.RawMessage `json:"id"`
+		Result struct {
+			OK bool `json:"ok"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(got, &rpc); err != nil {
+		t.Fatalf("payload not valid JSON: %v; got=%q", err, string(got))
+	}
+	if string(rpc.ID) != "1" || !rpc.Result.OK {
+		t.Errorf("returned the wrong event: id=%s result.ok=%v; want the terminal message", string(rpc.ID), rpc.Result.OK)
+	}
+}
+
+// P2 finding 4 — the single-data-line case (the common path) still works,
+// and a non-SSE content type returns the raw body verbatim.
+func TestExtractJSONRPCPayload_SingleLineAndNonSSE(t *testing.T) {
+	single := extractJSONRPCPayload("text/event-stream", []byte("data: {\"id\":1,\"result\":{}}\n\n"))
+	if strings.TrimSpace(string(single)) != `{"id":1,"result":{}}` {
+		t.Errorf("single data line = %q, want the JSON verbatim", string(single))
+	}
+	raw := []byte(`{"id":1,"result":{"plain":true}}`)
+	if got := extractJSONRPCPayload("application/json", raw); string(got) != string(raw) {
+		t.Errorf("non-SSE body = %q, want raw verbatim %q", string(got), string(raw))
+	}
+}
+
+// P2 finding 4 (integration) — a daemon that answers tools/list as a
+// MULTI-data-line SSE event is parsed correctly by the router (the bug
+// surfaced as a tools/list parse failure when the daemon wrapped its JSON).
+func TestSerenaRouter_ToolsList_MultiDataLineSSEDaemonResponse(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	daemon.tool = func(w http.ResponseWriter, r *http.Request, b []byte) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		// One event, JSON split across three data: lines.
+		_, _ = w.Write([]byte("event: message\n" +
+			"data: {\"jsonrpc\":\"2.0\",\"id\":1,\n" +
+			"data: \"result\":{\"tools\":[{\"name\":\"read_file\"},\n" +
+			"data: {\"name\":\"list_dir\"}]}}\n" +
+			"\n"))
+	}
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	rr := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	assertToolsListNames(t, rr.Body.Bytes(), []string{"read_file", "list_dir"})
 }
