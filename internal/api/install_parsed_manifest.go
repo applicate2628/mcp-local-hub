@@ -480,20 +480,39 @@ func filterExistingWorkspaceRows(server string, workspaces []WorkspaceEntry, w i
 //
 // No-op unless the manifest is a DaemonTemplate manifest with at least one
 // workspace — the same condition under which the real path fans out.
+//
+// The preview mirrors BuildSupervisorDaemonsForSerena's row filters so it
+// reflects what the real install would actually write: a row whose path is
+// gone is labelled stale, and a row whose Language is not the serena sentinel
+// is labelled non-serena. Both are "would be skipped", so the header's
+// written-row count is the real fan-out size, not the raw snapshot length.
 func previewWorkspaceFanOut(w io.Writer, m *config.ServerManifest, workspaces []WorkspaceEntry) {
 	if m.DaemonTemplate == nil || len(workspaces) == 0 {
 		return
 	}
-	fmt.Fprintf(w, "\nSupervisor-intent daemon rows to write for server %q (%d workspace(s)):\n", m.Name, len(workspaces))
+	type previewRow struct{ task, path, label string }
+	rows := make([]previewRow, 0, len(workspaces))
+	writeCount := 0
 	for _, ws := range workspaces {
 		if ws.WorkspacePath == "" {
 			continue
 		}
-		label := ""
-		if workspacePathStale(ws.WorkspacePath) {
-			label = "  [stale: path no longer exists — would be skipped]"
+		r := previewRow{task: SerenaTaskNameForWorkspace(ws.WorkspacePath), path: ws.WorkspacePath}
+		switch {
+		case ws.Language != SerenaLanguageSentinel:
+			// BuildSupervisorDaemonsForSerena skips non-sentinel rows, so the
+			// real path would write no daemon for this workspace.
+			r.label = "  [skipped: not a serena workspace]"
+		case workspacePathStale(ws.WorkspacePath):
+			r.label = "  [stale: path no longer exists — would be skipped]"
+		default:
+			writeCount++
 		}
-		fmt.Fprintf(w, "    • %s  ->  %s%s\n", SerenaTaskNameForWorkspace(ws.WorkspacePath), ws.WorkspacePath, label)
+		rows = append(rows, r)
+	}
+	fmt.Fprintf(w, "\nSupervisor-intent daemon rows to write for server %q (%d of %d workspace(s)):\n", m.Name, writeCount, len(rows))
+	for _, r := range rows {
+		fmt.Fprintf(w, "    • %s  ->  %s%s\n", r.task, r.path, r.label)
 	}
 }
 

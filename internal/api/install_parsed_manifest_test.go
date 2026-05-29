@@ -1106,11 +1106,13 @@ func TestInstallParsedManifest_DryRunShowsWorkspaceFanOut(t *testing.T) {
 	f := newInstallFakeScheduler()
 	installFakeScheduler(t, f)
 
-	wsLive := t.TempDir()                                   // exists
-	wsStale := filepath.Join(t.TempDir(), "deleted-ws-dir") // absent (never created)
+	wsLive := t.TempDir()                                   // exists, serena sentinel → would write
+	wsStale := filepath.Join(t.TempDir(), "deleted-ws-dir") // absent (never created) → stale skip
+	wsNonSerena := t.TempDir()                              // exists but non-sentinel Language → skipped (mirrors BuildSupervisorDaemonsForSerena)
 	workspaces := []WorkspaceEntry{
 		{WorkspaceKey: WorkspaceKey(wsLive), WorkspacePath: wsLive, Language: SerenaLanguageSentinel, Backend: "serena", Port: 9401},
 		{WorkspaceKey: WorkspaceKey(wsStale), WorkspacePath: wsStale, Language: SerenaLanguageSentinel, Backend: "serena", Port: 9402},
+		{WorkspaceKey: WorkspaceKey(wsNonSerena), WorkspacePath: wsNonSerena, Language: "python", Backend: "lsp", Port: 9403},
 	}
 
 	m := serenaTemplateManifest()
@@ -1141,6 +1143,15 @@ func TestInstallParsedManifest_DryRunShowsWorkspaceFanOut(t *testing.T) {
 	// The stale row is marked as stale.
 	if !strings.Contains(out, "stale") {
 		t.Errorf("dry-run preview must mark the stale workspace row as stale; output:\n%s", out)
+	}
+	// The non-sentinel row is named but labelled non-serena — the preview must
+	// mirror BuildSupervisorDaemonsForSerena, which writes no daemon for it.
+	nonSerenaTask := SerenaTaskNameForWorkspace(wsNonSerena)
+	if !strings.Contains(out, nonSerenaTask) {
+		t.Errorf("dry-run preview missing non-serena workspace task %q; output:\n%s", nonSerenaTask, out)
+	}
+	if !strings.Contains(out, "not a serena workspace") {
+		t.Errorf("dry-run preview must mark the non-sentinel row as non-serena (real path skips it); output:\n%s", out)
 	}
 
 	// Corrupt-safe: the preview touches NO disk. The state dir must hold none
