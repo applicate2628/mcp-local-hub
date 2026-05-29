@@ -338,7 +338,17 @@ func installAuditTaskNames(m *config.ServerManifest, daemonFilter string) []stri
 // no intent file modifications, no client-config writes. Tests in
 // install_intent_test.go assert this end-state invariant.
 func (a *API) recordInstallAuditPreMutation(m *config.ServerManifest, daemonFilter string) error {
-	for _, tn := range installAuditTaskNames(m, daemonFilter) {
+	return a.recordInstallAuditForTasks(installAuditTaskNames(m, daemonFilter))
+}
+
+// recordInstallAuditForTasks emits one server-install audit entry per task in
+// taskNames BEFORE any mutation, with the same fail-closed contract as
+// recordInstallAuditPreMutation. Splitting the per-task emission from the
+// task-list derivation lets the workspace-scoped fan-out (whose manifest has
+// an empty m.Daemons) feed its MATERIALIZED per-workspace task names through
+// the same fail-closed pipeline — see installPlanOpts.AuditTaskNames.
+func (a *API) recordInstallAuditForTasks(taskNames []string) error {
+	for _, tn := range taskNames {
 		// Codex deep-sec PR #135 Finding 1: audit entries carry the
 		// canonical leading-backslash task identity so the on-disk audit
 		// log uses one shape downstream filters can pivot on.
@@ -354,6 +364,18 @@ func (a *API) recordInstallAuditPreMutation(m *config.ServerManifest, daemonFilt
 		}
 	}
 	return nil
+}
+
+// installAuditTaskNamesOrOverride returns override verbatim when it is
+// non-empty, otherwise the manifest-derived installAuditTaskNames(m,
+// daemonFilter). The fan-out install passes the materialized per-workspace
+// task names as override because a DaemonTemplate manifest's m.Daemons is
+// empty; every other caller passes nil and keeps the manifest-derived list.
+func installAuditTaskNamesOrOverride(m *config.ServerManifest, daemonFilter string, override []string) []string {
+	if len(override) > 0 {
+		return override
+	}
+	return installAuditTaskNames(m, daemonFilter)
 }
 
 // recordInstallIntentPostSuccess writes Desired=running intent for

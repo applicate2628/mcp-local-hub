@@ -1650,6 +1650,17 @@ type installPlanOpts struct {
 	// scheduler tasks, so there is nothing to reconcile here. Legacy callers
 	// leave it false (zero value), preserving their reconcile behavior exactly.
 	SkipSchedulerPrune bool
+	// AuditTaskNames, when non-empty, OVERRIDES the manifest-derived task list
+	// the pre-mutation audit (recordInstallAuditPreMutation) fail-closes on.
+	// Set by InstallParsedManifest's workspace-scoped fan-out path: a
+	// DaemonTemplate manifest has an EMPTY m.Daemons, so installAuditTaskNames
+	// would yield zero entries and the fan-out install would commit
+	// per-workspace supervisor-intent daemon rows WITHOUT any fail-closed
+	// server-install audit entry. The fan-out path feeds the MATERIALIZED
+	// per-workspace task names here so the audit fail-closes BEFORE any
+	// intent/scheduler mutation. Legacy callers leave it nil and keep the
+	// manifest-derived audit task list (installAuditTaskNames) exactly.
+	AuditTaskNames []string
 }
 
 // installPlan is the shared materialization core between api.Install (and
@@ -1677,7 +1688,11 @@ func (a *API) installPlan(ctx context.Context, m *config.ServerManifest, plan *P
 	// server-install audit entry per planned task BEFORE any mutation.
 	// Failure here (incl. ErrIdentityOversize per §51) aborts with an
 	// end-state identical to never-attempted install.
-	if err := a.recordInstallAuditPreMutation(m, opts.DaemonFilter); err != nil {
+	//
+	// opts.AuditTaskNames overrides the manifest-derived list for the
+	// workspace-scoped fan-out (whose m.Daemons is empty); legacy callers
+	// leave it nil and audit the installAuditTaskNames(m, filter) set.
+	if err := a.recordInstallAuditForTasks(installAuditTaskNamesOrOverride(m, opts.DaemonFilter, opts.AuditTaskNames)); err != nil {
 		return err
 	}
 	return executeInstallTo(w, m, plan, a.effectiveBackupKeepN(), opts.StartTasks, opts.Intermediate, opts.SkipSchedulerPrune)

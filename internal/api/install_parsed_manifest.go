@@ -106,6 +106,30 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 		return "", fmt.Errorf("StartAfterWrite is not supported for workspace-scoped fan-out installs; per-workspace daemons start via the supervisor reconciler after the intent write — call with StartAfterWrite=false")
 	}
 
+	// 1b. Dry-run short-circuit — runs BEFORE the state-dir resolve, the
+	// intent flock, and the read-merge. A dry run must print the plan and make
+	// ZERO disk changes: it must not create/touch supervisor-intent.json.lock,
+	// must not read or parse the existing supervisor-intent.json (so a corrupt
+	// or unreadable existing intent never fails a dry run), and must not touch
+	// the state dir. Mirrors api.Install, whose dry-run short-circuit also
+	// precedes any intent/scheduler I/O. We build the plan and route it through
+	// installPlan with DryRun=true (which prints via printPlanTo and returns
+	// before any mutation or the intermediate hook), then return an empty path
+	// — nothing was committed, so the caller must not dereference a path.
+	if opts.DryRun {
+		plan, err := BuildPlanWithOpts(m, BuildPlanOpts{
+			ClientsInclude:    opts.ClientsInclude,
+			IncludeAllClients: opts.IncludeAllClients,
+		})
+		if err != nil {
+			return "", err
+		}
+		if err := a.installPlan(ctx, m, plan, installPlanOpts{Writer: w, DryRun: true}); err != nil {
+			return "", err
+		}
+		return "", nil
+	}
+
 	stateDir, err := DaemonStateDir()
 	if err != nil {
 		return "", fmt.Errorf("resolve state dir: %w", err)
@@ -146,14 +170,12 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 
 	// 2. Pre-flight intent-write gate: dry-write to a temp path. No rollback
 	// push — this is a read-only-ish probe that leaves no committed side
-	// effect (the temp file is removed immediately). SKIPPED on dry-run: a
-	// dry run must not do any flock-guarded disk I/O. The probe targets a
+	// effect (the temp file is removed immediately). The probe targets a
 	// DISTINCT ".preflight" path with its OWN ".preflight.lock" leaf, so it
-	// never re-acquires the supervisor-intent.json.lock we hold here.
-	if !opts.DryRun {
-		if err := preflightSupervisorIntentWrite(stateDir, desiredIntent); err != nil {
-			return "", fmt.Errorf("pre-flight supervisor-intent write: %w", err)
-		}
+	// never re-acquires the supervisor-intent.json.lock we hold here. (Dry-run
+	// short-circuited above before reaching this flock-guarded section.)
+	if err := preflightSupervisorIntentWrite(stateDir, desiredIntent); err != nil {
+		return "", fmt.Errorf("pre-flight supervisor-intent write: %w", err)
 	}
 
 	// 3. Build the plan. NOTE: refuseWorkspaceScopedInstall is intentionally
@@ -207,18 +229,13 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	if err := a.installPlan(ctx, m, plan, installPlanOpts{
 		Writer:             w,
 		DaemonFilter:       "",
-		DryRun:             opts.DryRun,
+		DryRun:             false, // dry-run short-circuited above; this path always mutates
 		StartTasks:         opts.StartAfterWrite,
 		Intermediate:       intermediate,
 		SkipSchedulerPrune: m.DaemonTemplate != nil,
+		AuditTaskNames:     fanOutAuditTaskNames(m, desiredIntent),
 	}); err != nil {
 		return "", err
-	}
-	// Dry-run wrote nothing (the pre-flight write was skipped and the
-	// intermediate hook never fired), so return an empty path — the caller
-	// must not dereference a path for a file that was never committed.
-	if opts.DryRun {
-		return "", nil
 	}
 	return intentPath, nil
 }
@@ -265,10 +282,103 @@ func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath s
 		Version:           1,
 		UpdatedAt:         time.Now().UTC().Format(time.RFC3339Nano),
 		Daemons:           kept,
-		MaintenanceTimers: prior.MaintenanceTimers,
+		MaintenanceTimers: mergeServerMaintenanceTimers(m, prior.MaintenanceTimers),
 		StrictMode:        prior.StrictMode,
 	}
 	return merged, prior, existed, nil
+}
+
+// mergeServerMaintenanceTimers applies the same replace-this-server's-rows /
+// preserve-other-servers' discipline used for daemon rows, but to the
+// maintenance-timer set. It drops every prior timer that belongs to m.Name
+// (keyed by the timer's Server field) and re-derives m's timer from the
+// manifest, so a re-install never duplicates m's weekly timer and a flipped
+// `weekly_refresh: false` drops it. Sibling servers' timers pass through
+// untouched.
+//
+// Weekly-timer materialization: when the manifest enables weekly refresh,
+// BuildPlanWithOpts creates the `mcp-local-hub-<server>-weekly-refresh`
+// scheduler task; this materializes the matching supervisor-intent
+// MaintenanceTimer so supervisor-intent consumers (the maintenance scheduler)
+// can own/preserve the weekly job. The timer's Command/Args mirror the
+// scheduler task at install.go's BuildPlanWithOpts weekly-refresh block
+// (`mcphub restart --server <server>`), because the maintenance spawner execs
+// the timer via exec.Command(t.Command, t.Args...) verbatim.
+func mergeServerMaintenanceTimers(m *config.ServerManifest, prior []MaintenanceTimer) []MaintenanceTimer {
+	out := make([]MaintenanceTimer, 0, len(prior)+1)
+	for _, t := range prior {
+		if t.Server == m.Name {
+			continue // replaced below
+		}
+		out = append(out, t)
+	}
+	if t, ok := serverWeeklyRefreshTimer(m); ok {
+		out = append(out, t)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// serverWeeklyRefreshTimer returns the server-weekly-refresh MaintenanceTimer
+// for m when m enables weekly refresh, matching the scheduler task
+// BuildPlanWithOpts builds for a full install. Returns ok=false when m does not
+// enable weekly refresh (no timer to materialize). Workspace-scoped
+// (DaemonTemplate) manifests do not set WeeklyRefresh, so they take the
+// ok=false branch and never materialize a timer.
+func serverWeeklyRefreshTimer(m *config.ServerManifest) (MaintenanceTimer, bool) {
+	if !m.WeeklyRefresh {
+		return MaintenanceTimer{}, false
+	}
+	// canonicalMcphubPath only fails when `mcphub setup` has not run, which the
+	// install preflight already surfaced upstream; fall back to the bare name so
+	// the timer stays well-formed (the maintenance spawner resolves it on PATH),
+	// matching supervisorDaemonsFromPlan's fallback posture.
+	command, perr := canonicalMcphubPath()
+	if perr != nil {
+		command = mcphubShortName
+	}
+	bare := "mcp-local-hub-" + m.Name + "-weekly-refresh"
+	return MaintenanceTimer{
+		Name:    canonicalIntentTaskKey(bare),
+		Kind:    maintenanceKindServerWeeklyRefresh,
+		Server:  m.Name,
+		Command: command,
+		Args:    []string{"restart", "--server", m.Name},
+	}, true
+}
+
+// maintenanceKindServerWeeklyRefresh is the MaintenanceTimer.Kind the
+// supervisor maintenance scheduler recognizes for a per-server weekly restart
+// (internal/cli/supervise_maintenance.go: the weekly-cadence evaluator accepts
+// "workspace-weekly-refresh" and "server-weekly-refresh").
+const maintenanceKindServerWeeklyRefresh = "server-weekly-refresh"
+
+// fanOutAuditTaskNames returns the per-workspace task names the pre-mutation
+// audit must fail-close on for a workspace-scoped fan-out install, derived from
+// the MATERIALIZED supervisor-intent daemon rows for this server (the
+// SerenaTaskNameForWorkspace names BuildSupervisorDaemonsForSerena produced and
+// filterExistingWorkspaceRows already pruned to live workspaces). Returning
+// these names — rather than the empty m.Daemons-derived list — makes
+// recordInstallAuditForTasks emit a server-install audit entry per workspace
+// daemon and fail-close BEFORE any intent/scheduler mutation.
+//
+// Returns nil for a non-fan-out (global) manifest: installPlan then falls back
+// to the manifest-derived installAuditTaskNames list, preserving the legacy
+// audit task set exactly. The guard mirrors serenaOrPlanDaemons's branch
+// condition so the audited names match the daemon rows actually written.
+func fanOutAuditTaskNames(m *config.ServerManifest, desired *SupervisorIntentFile) []string {
+	if m.DaemonTemplate == nil || desired == nil {
+		return nil
+	}
+	var names []string
+	for _, d := range desired.Daemons {
+		if d.Server == m.Name {
+			names = append(names, d.TaskName)
+		}
+	}
+	return names
 }
 
 // serenaOrPlanDaemons returns the SupervisorDaemon descriptors this install
