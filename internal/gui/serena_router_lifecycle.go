@@ -831,6 +831,63 @@ func (s *Server) handleToolsList(
 	writeJSONRPCResult(w, tb.ID, json.RawMessage(result), nil)
 }
 
+// isClientToolsListError classifies an upstream tools/list JSON-RPC error
+// code as a CLIENT/request-level error (the request itself is invalid, so
+// EVERY daemon would reject it identically) vs a SERVER-side error (this one
+// daemon is unhealthy, but another registered daemon could still answer the
+// shared static catalog). It reads the JSON-RPC error `code`:
+//
+//   - CLIENT (true) → -32700 parse error, -32600 invalid request,
+//     -32601 method not found, -32602 invalid params. Per JSON-RPC 2.0 §5.1
+//     these are all faults of the REQUEST; retrying the same body against a
+//     different workspace daemon is pointless, so the caller short-circuits and
+//     forwards the error to the client (Finding 3 + the round-11 #4 behavior
+//     for request-level errors).
+//   - SERVER (false) → -32603 internal error AND the server-reserved range
+//     -32000..-32099 (JSON-RPC §5.1 "reserved for implementation-defined
+//     server-errors"). One daemon's internal failure must NOT blank the whole
+//     tool surface, so the caller treats it as a candidate failure and falls
+//     through to the next daemon (Finding 3 — the bug round-11 #4 introduced by
+//     short-circuiting on ALL well-formed errors).
+//
+// An unknown/out-of-range code (e.g. an application-defined positive code) is
+// treated CONSERVATIVELY as a client error (short-circuit + forward): it is not
+// in the server-reserved range, so it is most likely request-specific, and
+// forwarding the daemon's own error to the client is more honest than masking
+// it by trying other daemons. The classification is intentionally narrow — only
+// the JSON-RPC-defined server codes fall through.
+func isClientToolsListError(code int) bool {
+	switch code {
+	case -32700, -32600, -32601, -32602:
+		return true
+	}
+	// JSON-RPC server-reserved range (-32000..-32099) + the -32603 internal
+	// error are SERVER errors → not client errors.
+	if code == jsonrpcInternalError {
+		return false
+	}
+	if code >= -32099 && code <= -32000 {
+		return false
+	}
+	// Anything else (application-defined / unknown) → conservatively client.
+	return true
+}
+
+// toolsListErrorCode extracts the JSON-RPC error `code` from a well-formed
+// upstream error envelope's error OBJECT bytes (the proxyToolsListResult
+// .upstreamError). It returns (code, true) on a parseable object with an
+// integer code, else (0, false) — a malformed/codeless error object cannot be
+// classified, so the caller treats it conservatively (see the call site).
+func toolsListErrorCode(errObj json.RawMessage) (int, bool) {
+	var e struct {
+		Code *int `json:"code"`
+	}
+	if err := json.Unmarshal(errObj, &e); err != nil || e.Code == nil {
+		return 0, false
+	}
+	return *e.Code, true
+}
+
 // fetchToolsListFromAnyDaemon forwards the verbatim tools/list body to
 // each candidate workspace daemon in turn, returning the first daemon's
 // JSON-RPC `result`. It validates that the daemon answered HTTP 200 with
@@ -850,14 +907,23 @@ func (s *Server) handleToolsList(
 // is context-detached (a finished/cancelled tools/list request context must
 // not abort the teardown), mirroring the main DELETE path.
 //
-// Finding 4: a candidate that ANSWERS with a well-formed JSON-RPC error
-// envelope (upstreamError) is AVAILABLE and rejecting THIS request — it is NOT
-// a transport failure. The loop returns that error envelope IMMEDIATELY (via
-// the upstreamError return) so handleToolsList forwards it to the client
-// unchanged, WITHOUT trying other daemons (retrying the same invalid request
-// against unrelated workspaces would be wrong) and WITHOUT converting it to the
-// router's generic -32603. Only a genuine transport/handshake failure (the
-// `err` return) advances to the next candidate.
+// Finding 4 (round-11) + Finding 3 (this round — CLASSIFY the error): a
+// candidate that ANSWERS with a well-formed JSON-RPC error envelope
+// (upstreamError) is AVAILABLE and rejecting THIS request — it is NOT a
+// transport failure. Round-11 #4 short-circuited on ANY such error (return it
+// immediately, try no other daemons). That is RIGHT for a CLIENT/request-level
+// error (-32700/-32600/-32601/-32602): the request is invalid for every daemon,
+// so forward it unchanged and do not retry. But it was WRONG for a SERVER error
+// (-32603 internal, or the server-reserved -32000..-32099 range): one unhealthy
+// daemon returning an internal error must NOT prevent trying other registered
+// daemons that could answer the shared static catalog. Finding 3 classifies via
+// isClientToolsListError(code): a CLIENT error short-circuits + forwards (the
+// round-11 behavior, now scoped to request-level codes); a SERVER error is
+// treated as a candidate FAILURE — the loop captures it as lastUpstreamError
+// and falls through to the next daemon. When EVERY candidate fails with a server
+// error, the loop returns the LAST server error envelope (forwarded to the
+// client, preserving the signal) rather than the generic transport error. Only a
+// genuine transport/handshake failure (the `err` return) is recorded in lastErr.
 func (s *Server) fetchToolsListFromAnyDaemon(
 	ctx context.Context,
 	entries []*api.WorkspaceEntry,
@@ -869,6 +935,12 @@ func (s *Server) fetchToolsListFromAnyDaemon(
 	upstreamTimeout time.Duration,
 ) (result json.RawMessage, upstreamError json.RawMessage, err error) {
 	var lastErr error
+	// Finding 3: the most recent SERVER-side JSON-RPC error envelope (-32603 or
+	// the -32000..-32099 range). A server error does NOT short-circuit; it is a
+	// candidate failure that falls through to the next daemon. When every
+	// candidate fails with a server error, this is returned so the client gets
+	// the real signal rather than the generic "no daemon answered".
+	var lastUpstreamError json.RawMessage
 	for _, ws := range entries {
 		if ws == nil {
 			continue
@@ -922,17 +994,45 @@ func (s *Server) fetchToolsListFromAnyDaemon(
 			continue
 		}
 		if len(outcome.upstreamError) > 0 {
-			// Finding 4: the daemon answered with a well-formed JSON-RPC error.
-			// It IS available and is rejecting THIS request, so forward the error
-			// envelope to the client unchanged — do NOT try other daemons (the
-			// request is invalid for all of them) and do NOT mask it with -32603.
-			_ = auditFn("info", "serena-tools-list-daemon-error", map[string]any{
+			// Finding 4 + Finding 3: the daemon answered with a well-formed
+			// JSON-RPC error. Classify it by the JSON-RPC `code`. A CLIENT error
+			// (-32700/-32600/-32601/-32602, or an unclassifiable/codeless envelope
+			// treated conservatively as client) is the same for every daemon — the
+			// request is invalid — so forward it to the client UNCHANGED and try no
+			// other daemons (round-11 #4). A SERVER error (-32603 or -32000..-32099)
+			// is THIS daemon's fault, not the request's — capture it and fall
+			// through so a healthier daemon can still answer the shared catalog
+			// (Finding 3 — the regression round-11 #4 introduced).
+			code, hasCode := toolsListErrorCode(outcome.upstreamError)
+			if !hasCode || isClientToolsListError(code) {
+				_ = auditFn("info", "serena-tools-list-daemon-error", map[string]any{
+					"workspace_key": ws.WorkspaceKey,
+					"port":          ws.Port,
+					"jsonrpc_code":  code,
+					"classified":    "client",
+				})
+				return nil, outcome.upstreamError, nil
+			}
+			// Server error: record it as a candidate failure and advance.
+			lastUpstreamError = outcome.upstreamError
+			_ = auditFn("warn", "serena-tools-list-daemon-server-error", map[string]any{
 				"workspace_key": ws.WorkspaceKey,
 				"port":          ws.Port,
+				"jsonrpc_code":  code,
+				"classified":    "server",
 			})
-			return nil, outcome.upstreamError, nil
+			continue
 		}
 		return outcome.result, nil, nil
+	}
+	// Finding 3: every candidate failed. Prefer the LAST server-side JSON-RPC
+	// error envelope (a real daemon-reported signal) over the generic transport
+	// error, so the client sees WHY the daemons could not answer rather than an
+	// opaque "no daemon answered". Fall back to the transport lastErr only when
+	// no daemon returned a server error (every failure was a transport/handshake
+	// fault).
+	if len(lastUpstreamError) > 0 {
+		return nil, lastUpstreamError, nil
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("no candidate workspace daemon available")

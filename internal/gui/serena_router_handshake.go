@@ -27,6 +27,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -35,6 +36,18 @@ import (
 
 	"mcp-local-hub/internal/api"
 )
+
+// errRouterSessionTerminated is returned by resolveDaemonSession when the
+// client's router session was DELETEd or swept DURING the slow upstream
+// handshake (Finding 4 — the store/bind-vs-DELETE TOCTOU class). It is a
+// SENTINEL distinct from a transport/handshake failure: the handshake itself
+// succeeded (a daemon session was minted), but the session it would have been
+// bound to no longer exists, so the binding must NOT be stored. The handler
+// distinguishes this from a 502/504 transport error via errors.Is and emits the
+// router's "session terminated" -32600 (consistent with the round-10 post-gate
+// touch abort, serena_router.go), having already best-effort-released the
+// orphaned daemon session upstream (invariant D).
+var errRouterSessionTerminated = errors.New("router session terminated during handshake")
 
 // daemonSessionTTL bounds how long an idle client→daemon session
 // mapping survives before it is swept. It mirrors
@@ -340,7 +353,9 @@ func establishDaemonSession(ctx context.Context, httpClient *http.Client, upstre
 		// client may have already cancelled, which would then drop the very
 		// cleanup this finding adds. The handshake still fails loud (the wrapped
 		// error is returned); it just no longer leaks the partial session.
-		bestEffortDeleteDaemonSession(httpClient, upstreamURL, daemonSessionID, daemonProtocolVersion)
+		// Finding 2: pass the configured upstreamTimeout so the cleanup honors a
+		// short injected timeout instead of the fixed 5s default.
+		bestEffortDeleteDaemonSession(httpClient, upstreamURL, daemonSessionID, daemonProtocolVersion, upstreamTimeout)
 		return "", "", fmt.Errorf("notifications/initialized: %w", err)
 	}
 	return daemonSessionID, daemonProtocolVersion, nil
@@ -355,16 +370,27 @@ func establishDaemonSession(ctx context.Context, httpClient *http.Client, upstre
 // free function with no *Server / no ws / no auditFn, so this issues the DELETE
 // directly. Invariant D: the request context is DETACHED (cleanupContext is
 // context.Background()-derived, so an already-cancelled inbound request does
-// not abort the cleanup) and SHORT-bounded (serenaCleanupTimeout, never the
-// 60s default). The result is fully discarded — the handshake error the caller
-// returns is the loud signal; a teardown transport failure / non-2xx is itself
-// best-effort and not separately surfaced here (the session would then age out
-// on the daemon's own idle clock). An empty daemonSessionID is a no-op.
-func bestEffortDeleteDaemonSession(httpClient *http.Client, upstreamURL, daemonSessionID, protocolVersion string) {
+// not abort the cleanup) and SHORT-bounded. The result is fully discarded — the
+// handshake error the caller returns is the loud signal; a teardown transport
+// failure / non-2xx is itself best-effort and not separately surfaced here (the
+// session would then age out on the daemon's own idle clock). An empty
+// daemonSessionID is a no-op.
+//
+// Finding 2: the cleanup honors the caller's configured upstreamTimeout.
+// establishDaemonSession knows the configured UpstreamTimeout (it participates
+// in the handshake) and threads it here; cleanupContext caps the budget at
+// min(serenaCleanupTimeout, upstreamTimeout>0). The pre-fix call passed 0 (a
+// fixed serenaCleanupTimeout=5s), so a hung cleanup DELETE could add up to 5s
+// even when a SHORTER UpstreamTimeout was configured (tests/deployments) — on
+// top of the handshake failure the client already waited for. Passing the
+// configured timeout makes this teardown use the same short cap as the other
+// router-side teardown paths (#4 tools/list, #6 path-only, the DELETE forward).
+// A non-positive upstreamTimeout keeps the serenaCleanupTimeout default.
+func bestEffortDeleteDaemonSession(httpClient *http.Client, upstreamURL, daemonSessionID, protocolVersion string, upstreamTimeout time.Duration) {
 	if daemonSessionID == "" {
 		return
 	}
-	ctx, cancel := cleanupContext(0)
+	ctx, cancel := cleanupContext(upstreamTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, upstreamURL, nil)
 	if err != nil {
@@ -555,6 +581,26 @@ func postHandshakeInitialized(ctx context.Context, httpClient *http.Client, upst
 // session id (from a fresh handshake, or persisted on a cache hit) so the
 // caller forwards subsequent requests to this daemon session under the
 // version the daemon bound the session to.
+//
+// Finding 4 (store-vs-DELETE TOCTOU class): sessionLive, when non-nil, is
+// re-evaluated AFTER the slow handshake establishes a daemon session but BEFORE
+// the binding is stored. A client DELETE (or the idle sweeper) can terminate the
+// router session WHILE this handshake is in flight; storing the binding then
+// would RECREATE a daemon mapping for a now-dead client session, and the
+// post-response sticky BindSession in the handler would re-bind it too — so a
+// later pathless call with that terminated id would keep routing as a legacy
+// sticky session, defeating the DELETE. When sessionLive reports the router
+// session is no longer live, this best-effort upstream-DELETEs the just-minted
+// daemon session (invariant D — detached + short-bounded, the configured
+// cleanup budget) and returns errRouterSessionTerminated WITHOUT storing; the
+// handler then aborts with -32600 before BindSession runs. A nil sessionLive
+// (a genuinely sessionless / legacy path-only call that carries no router
+// session) skips the recheck and keeps today's behavior. The recheck is
+// atomic-enough — the peek runs immediately before the store under the same
+// logical step; a sub-microsecond window between the peek and the store remains
+// (a concurrent DELETE landing in that gap), bounded and accepted rather than
+// adding cross-store locking machinery (consistent with the round-11 #3
+// decision).
 func (st *daemonSessionStore) resolveDaemonSession(
 	ctx context.Context,
 	httpClient *http.Client,
@@ -563,6 +609,7 @@ func (st *daemonSessionStore) resolveDaemonSession(
 	ws *api.WorkspaceEntry,
 	clientProtocolVersion string,
 	upstreamTimeout time.Duration,
+	sessionLive func() bool,
 ) (daemonSessionID string, daemonProtocolVersion string, err error) {
 	if ws == nil {
 		return "", "", fmt.Errorf("resolveDaemonSession: nil workspace")
@@ -578,6 +625,19 @@ func (st *daemonSessionStore) resolveDaemonSession(
 	dsid, dpv, err := establishDaemonSession(ctx, httpClient, upstreamURL, clientProtocolVersion, upstreamTimeout)
 	if err != nil {
 		return "", "", err
+	}
+	// Finding 4: re-check the router session is STILL live before storing. The
+	// handshake above is the slow upstream work; a DELETE/sweep can have
+	// terminated the session meanwhile. If it is gone, release the daemon
+	// session we just minted (so it does not leak — invariant D) and signal the
+	// caller to abort instead of recreating a binding for a dead session. Only
+	// when a daemon session was actually minted (dsid != "") is there anything to
+	// release; a sessionless daemon has nothing to clean up.
+	if clientSessionID != "" && sessionLive != nil && !sessionLive() {
+		if dsid != "" {
+			bestEffortDeleteDaemonSession(httpClient, upstreamURL, dsid, dpv, upstreamTimeout)
+		}
+		return "", "", errRouterSessionTerminated
 	}
 	// Only record a mapping when BOTH a client session id and a daemon
 	// session id exist. A sessionless daemon (empty dsid) needs no

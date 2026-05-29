@@ -206,14 +206,68 @@ func registerSerenaRouterRoutes(s *Server) {
 // toolBody is the narrow shape we decode from the incoming MCP body.
 // We re-encode the raw bytes verbatim when forwarding, so this struct
 // only carries the fields we need to make routing decisions.
+//
+// Finding 1 (round-10 conflict now DEMANDED): Params is a json.RawMessage,
+// NOT a typed struct. A typed-struct Params (the pre-fix shape) failed the
+// WHOLE-body json.Unmarshal when params was valid JSON but NOT an object
+// (`"params":[]`, `"params":1`, `"params":"x"`), so serenaRouterHandler
+// rejected it with a plain HTTP 400 "malformed JSON body" — a transport-level
+// failure the per-method -32602 validation never reached, even though an MCP
+// client can parse the body as JSON-RPC and SHOULD get a JSON-RPC error
+// envelope. Decoding params as a RawMessage never fails on a non-object value,
+// so the envelope decodes, dispatch proceeds, and each consumer parses Params
+// for what it needs: the tool-call path via toolCallParams (params.name +
+// params.arguments), the lifecycle methods via lifecycleParamsObjectOrNull
+// (a present-but-non-object params → -32602, mirroring
+// internal/api/hub_mcp_handler.go handleInitialize). initialize's
+// protocolVersion and tools/list's cursor are parsed from the verbatim body
+// (initializeRawParams / toolsListIsCursorRequest), independent of this field.
 type toolBody struct {
 	JSONRPC string          `json:"jsonrpc"`
 	Method  string          `json:"method"`
 	ID      json.RawMessage `json:"id"`
-	Params  struct {
+	Params  json.RawMessage `json:"params"`
+}
+
+// toolCallParams parses a tools/call envelope's `params` (now a RawMessage,
+// Finding 1) into the name + arguments the path-routing needs. A params that
+// is absent, JSON null, or not an object yields ("", nil) — the caller then
+// hits the existing "missing required field: params.name" path-arg error,
+// preserving the pre-Finding-1 tool-call behavior for a malformed params that
+// cannot yield a name (the dispatch only reaches here for non-lifecycle
+// methods, so a tool-call with a bad params is the path-arg error, not a
+// lifecycle -32602).
+func toolCallParams(params json.RawMessage) (name string, arguments json.RawMessage) {
+	trimmed := bytes.TrimSpace(params)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return "", nil
+	}
+	var p struct {
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
-	} `json:"params"`
+	}
+	if err := json.Unmarshal(trimmed, &p); err != nil {
+		return "", nil
+	}
+	return p.Name, p.Arguments
+}
+
+// lifecycleParamsObjectOrNull validates the `params` shape for a request-style
+// lifecycle method (initialize / tools/list / ping). It returns true when
+// params is ABSENT, JSON null, or a JSON object — the shapes the lifecycle
+// accepts. A PRESENT but non-object params (`[]`, `1`, `"x"`) returns false:
+// the caller then rejects the request with JSON-RPC -32602 "invalid params"
+// at HTTP 400, mirroring the hub's handleInitialize type-mismatch rejection
+// (internal/api/hub_mcp_handler.go: a non-object initialize params → -32602).
+// MCP request params, when present, MUST be a structured object
+// (modelcontextprotocol.io basic/lifecycle); a non-object value is a malformed
+// request the client should see as a JSON-RPC error, not a transport 400.
+func lifecycleParamsObjectOrNull(params json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(params)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return true
+	}
+	return trimmed[0] == '{'
 }
 
 // extractPathArg scans the tool body's arguments for any of the known
@@ -415,6 +469,19 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 				"invalid request: id must be a non-null string or number")
 			return
 		}
+		// Finding 1: a PRESENT but non-object params is -32602 (mirrors
+		// internal/api/hub_mcp_handler.go handleInitialize, which -32602s a
+		// non-object initialize params). handleInitialize's own
+		// initializeRawParams path also rejects a non-object params; this gate
+		// makes the rejection uniform across the three lifecycle methods and
+		// keeps the error shape identical. An object params (incl. one with a
+		// wrong-typed protocolVersion) still flows into handleInitialize for the
+		// more specific protocolVersion validation.
+		if !lifecycleParamsObjectOrNull(tb.Params) {
+			writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidParams,
+				"invalid params: params must be an object", nil)
+			return
+		}
 		s.handleInitialize(w, body, &tb, sessionID)
 		return
 	case tb.Method == "tools/list":
@@ -427,6 +494,16 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 				"invalid request: id must be a non-null string or number")
 			return
 		}
+		// Finding 1: a PRESENT but non-object params on tools/list is -32602
+		// (the request itself is malformed; mirror the hub's params type
+		// validation). The pre-Finding-1 toolBody struct decode rejected this
+		// with a plain HTTP 400 before dispatch; now the body decodes and this
+		// gate returns the JSON-RPC error an MCP client expects.
+		if !lifecycleParamsObjectOrNull(tb.Params) {
+			writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidParams,
+				"invalid params: params must be an object", nil)
+			return
+		}
 		s.handleToolsList(w, r, deps, &tb, body, httpClient, upstreamURLFn, auditFn)
 		return
 	case tb.Method == "ping":
@@ -437,6 +514,13 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		if !isValidJSONRPCRequestID(tb.ID) {
 			writeJSONRPCError(w, nil, jsonrpcInvalidRequest,
 				"invalid request: id must be a non-null string or number")
+			return
+		}
+		// Finding 1: a PRESENT but non-object params on ping is -32602, uniform
+		// with initialize / tools/list above.
+		if !lifecycleParamsObjectOrNull(tb.Params) {
+			writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidParams,
+				"invalid params: params must be an object", nil)
 			return
 		}
 		s.handleNotificationOrPing(w, &tb)
@@ -460,12 +544,17 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if tb.Params.Name == "" {
+	// Finding 1: params is now a json.RawMessage; parse the tool-call shape
+	// (name + arguments) here. A malformed/non-object params yields an empty
+	// name and the existing "missing required field: params.name" path-arg
+	// error — the pre-Finding-1 tool-call behavior is preserved.
+	toolName, toolArguments := toolCallParams(tb.Params)
+	if toolName == "" {
 		writeRequiredFieldError(w, "params.name")
 		return
 	}
 
-	pathArg, hasPath := extractPathArg(tb.Params.Arguments)
+	pathArg, hasPath := extractPathArg(toolArguments)
 
 	var ws *api.WorkspaceEntry
 	bindSessionAfterUpstream := false
@@ -536,11 +625,19 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	// direct caller), today's behavior is preserved: the raw request header
 	// drives the handshake.
 	clientProtocolVersion := r.Header.Get("MCP-Protocol-Version")
-	// Finding 4: PEEK the session's negotiated version (no lastSeen refresh)
-	// for this PRE-gate validation — a request rejected for a version mismatch
-	// below must NOT keep the session alive. lastSeen is refreshed via touch
-	// only AFTER the gate passes.
+	// Finding 4 (this round — store-vs-DELETE TOCTOU): routerSessionKnown records
+	// whether this id was minted by a prior initialize at THIS router. It is used
+	// below to decide whether to install the post-handshake liveness recheck: only
+	// a router-minted session has a router-session entry a DELETE/sweep could
+	// terminate mid-handshake. A legacy/path-only caller (no router session) keeps
+	// today's behavior (no recheck).
+	routerSessionKnown := false
+	// Finding 4 (round-10): PEEK the session's negotiated version (no lastSeen
+	// refresh) for this PRE-gate validation — a request rejected for a version
+	// mismatch below must NOT keep the session alive. lastSeen is refreshed via
+	// touch only AFTER the gate passes.
 	if sessionVersion, known := s.serenaRouterSessions.peekNegotiatedVersion(sessionID); known {
+		routerSessionKnown = true
 		if clientProtocolVersion != "" && clientProtocolVersion != sessionVersion {
 			writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidRequest,
 				"protocol-version mismatch", nil)
@@ -575,8 +672,35 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	// leak) and the orphaned UPSTREAM session ages out on the daemon's idle
 	// clock. The explicit client-origin DELETE (handleSerenaDelete) and the
 	// partial-handshake cleanup remain — only the switch-time teardown is gone.
-	daemonSessionID, daemonProtocolVersion, hsErr := s.serenaDaemonSessions.resolveDaemonSession(r.Context(), httpClient, upstreamURL, sessionID, ws, clientProtocolVersion, upstreamTimeout)
+	//
+	// Finding 4 (this round — store-vs-DELETE TOCTOU): pass a liveness recheck
+	// so resolveDaemonSession does NOT store a daemon binding for a router
+	// session that a concurrent DELETE/sweep terminated DURING the slow
+	// handshake. The callback is installed ONLY for a router-minted session
+	// (routerSessionKnown); a sessionless/path-only call has no router session
+	// to check, so it passes nil and keeps today's behavior. known() is a peek
+	// (no lastSeen refresh): the post-gate touch above already refreshed a live
+	// session, so this reports false ONLY when the entry was actually removed.
+	var sessionLive func() bool
+	if routerSessionKnown {
+		sid := sessionID
+		sessionLive = func() bool { return s.serenaRouterSessions.known(sid) }
+	}
+	daemonSessionID, daemonProtocolVersion, hsErr := s.serenaDaemonSessions.resolveDaemonSession(r.Context(), httpClient, upstreamURL, sessionID, ws, clientProtocolVersion, upstreamTimeout, sessionLive)
 	if hsErr != nil {
+		// Finding 4: the router session was DELETEd/swept during the handshake.
+		// resolveDaemonSession already best-effort-released the just-minted daemon
+		// session and stored NO binding; abort with the router's "session
+		// terminated" -32600 (consistent with the round-10 post-gate touch abort,
+		// above) BEFORE the post-response sticky BindSession runs — so a later
+		// pathless call with this id is NOT routed. This is checked before the
+		// transport-error branches because it is NOT a 502/504 (the handshake
+		// itself succeeded).
+		if errors.Is(hsErr, errRouterSessionTerminated) {
+			writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidRequest,
+				"session terminated", nil)
+			return
+		}
 		if isTimeoutErr(hsErr) {
 			_ = auditFn("warn", "serena-upstream-timeout", map[string]any{
 				"workspace_key": ws.WorkspaceKey,
@@ -734,7 +858,31 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(upstreamResp.StatusCode)
 	if bindSessionAfterUpstream {
-		deps.Sessions.BindSession(sessionID, ws)
+		// Finding 4 (store-vs-DELETE TOCTOU — the post-response sticky bind site):
+		// the tool-call forward above is a SECOND slow upstream op; a client DELETE
+		// (or the sweeper) can terminate the router session WHILE it was in flight.
+		// Re-binding the sticky session for a now-terminated id would let a later
+		// pathless call route as a legacy sticky session, defeating the DELETE — the
+		// same class the resolveDaemonSession recheck closes for the store. So, for a
+		// router-minted session, recheck liveness (a peek — known()) before the
+		// sticky bind: if the router session is gone, SKIP BindSession and
+		// best-effort tear down the daemon binding + the upstream daemon session
+		// (which a coordinated DELETE/sweep already removes locally; this also covers
+		// the residual store-after-snapshot micro-window where the daemon binding
+		// outlived the DELETE). The response is already committed (200 written
+		// above), so this site cannot -32600 like the pre-forward store site; it
+		// converges the session state instead. A non-router-minted (legacy)
+		// session keeps today's unconditional bind.
+		if routerSessionKnown && !s.serenaRouterSessions.known(sessionID) {
+			if wsKey, daemonSID, daemonPV, ok := s.serenaDaemonSessions.bindingFor(sessionID); ok {
+				s.serenaDaemonSessions.unbind(sessionID)
+				delCtx, delCancel := cleanupContext(upstreamTimeout)
+				s.forwardSerenaDeleteUpstream(delCtx, httpClient, upstreamURL, daemonSID, effectiveHandshakeProtocolVersion(daemonPV), wsKey, ws, auditFn)
+				delCancel()
+			}
+		} else {
+			deps.Sessions.BindSession(sessionID, ws)
+		}
 	}
 
 	if isSSE {
