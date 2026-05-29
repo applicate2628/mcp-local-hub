@@ -447,6 +447,14 @@ type Server struct {
 	// future hot-reload of the workspace registry can swap the bundle
 	// without restarting the gui-server.
 	serenaRouterDeps atomic.Pointer[serenaRouterDeps]
+
+	// ROUTER-COMPLETION phase -- process-local cache of the
+	// workspace-agnostic tools/list result the router synthesizes by
+	// proxying one tools/list to any live serena daemon (see
+	// serena_router_lifecycle.go). The serena tool surface is identical
+	// across workspace daemons, so a single cached entry serves every
+	// client; the cache is keyed by nothing and TTL-bounded.
+	serenaToolsListCache toolsListCache
 }
 
 // NewServer constructs the Server. It registers the ping handler

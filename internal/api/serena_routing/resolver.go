@@ -137,6 +137,32 @@ func (r *WorkspaceResolver) refresh() {
 	r.mu.Unlock()
 }
 
+// ListWorkspaces returns a snapshot of every registered serena workspace
+// entry as fresh pointer copies, refreshing the in-memory cache if
+// workspaces.yaml mtime has advanced (same reload discipline as
+// ResolveByPath).
+//
+// It exists so the /serena/mcp router can satisfy a workspace-agnostic
+// MCP lifecycle request (tools/list) by proxying to ANY live serena
+// daemon: the router picks an entry from this list, forwards one
+// tools/list to it, and caches the result. The returned pointers are
+// value-copies from the cached snapshot, so callers may read their
+// fields without holding any resolver lock and cannot mutate the cache.
+//
+// Returns an empty (non-nil-distinguishing) slice when no serena
+// workspace is registered; the router treats that as the empty-pool
+// case and answers with an explicit JSON-RPC error rather than a
+// fabricated empty tool list.
+func (r *WorkspaceResolver) ListWorkspaces() []*api.WorkspaceEntry {
+	entries := r.snapshot()
+	out := make([]*api.WorkspaceEntry, len(entries))
+	for i := range entries {
+		e := entries[i]
+		out[i] = &e
+	}
+	return out
+}
+
 // ResolveByPath maps an inbound MCP tool argument path to a registered
 // serena workspace entry.
 //

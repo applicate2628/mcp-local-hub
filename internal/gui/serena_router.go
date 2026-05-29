@@ -272,12 +272,32 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing required field: method", http.StatusBadRequest)
 		return
 	}
+
+	sessionID := r.Header.Get("Mcp-Session-Id")
+
+	// MCP session lifecycle (non-tool, workspace-agnostic) is synthesized
+	// at the router BEFORE the params.name tool-routing requirement. Every
+	// serena daemon exposes the same lifecycle surface and the router has
+	// no per-client identity, so initialize/tools/list/notifications/ping
+	// are answered here rather than forwarded to a workspace daemon (they
+	// carry no path-arg and no bound session). Tool calls fall through to
+	// the path-routing + upstream-forward path below, unchanged.
+	switch {
+	case tb.Method == "initialize":
+		s.handleInitialize(w, body, &tb, sessionID)
+		return
+	case tb.Method == "tools/list":
+		s.handleToolsList(w, r, deps, &tb, body, httpClient, upstreamURLFn, auditFn)
+		return
+	case tb.Method == "ping" || isNotificationMethod(tb.Method):
+		s.handleNotificationOrPing(w, &tb)
+		return
+	}
+
 	if tb.Params.Name == "" {
 		writeRequiredFieldError(w, "params.name")
 		return
 	}
-
-	sessionID := r.Header.Get("Mcp-Session-Id")
 
 	pathArg, hasPath := extractPathArg(tb.Params.Arguments)
 
