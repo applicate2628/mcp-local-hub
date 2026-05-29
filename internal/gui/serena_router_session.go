@@ -196,19 +196,30 @@ func (st *routerSessionStore) unbind(clientSessionID string) {
 // cleanup drops bindings idle longer than ttl before now and returns the
 // count dropped. Bounded growth is already tied to live client sessions;
 // cleanup exists for symmetry with daemonSessionStore.cleanup and an
-// optional periodic sweep.
+// optional periodic sweep. It is a thin count-only wrapper over cleanupExpired.
 func (st *routerSessionStore) cleanup(now time.Time, ttl time.Duration) int {
+	return len(st.cleanupExpired(now, ttl))
+}
+
+// cleanupExpired drops bindings idle longer than ttl before now and returns
+// the IDs it reclaimed (Finding 3). SweepSerenaSessions needs the concrete ids
+// so it can coordinate the other two router-owned stores — an expired router
+// session must be unbound from serenaDaemonSessions AND the sticky
+// deps.Sessions so a swept router session is fully terminated everywhere and
+// can never keep routing a path-less tool call via a not-yet-swept sticky
+// binding (the desync this finding closes). Returns nil when nothing expired.
+func (st *routerSessionStore) cleanupExpired(now time.Time, ttl time.Duration) []string {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	cutoff := now.Add(-ttl)
-	n := 0
+	var expired []string
 	for id, b := range st.bindings {
 		if b == nil || !b.lastSeen.After(cutoff) {
 			delete(st.bindings, id)
-			n++
+			expired = append(expired, id)
 		}
 	}
-	return n
+	return expired
 }
 
 // SweepSerenaSessions drops router-owned serena session bindings idle
@@ -230,7 +241,58 @@ func (st *routerSessionStore) cleanup(now time.Time, ttl time.Duration) int {
 // idle clock with one correctly-shutdown ticker. ttl is the shared
 // idle-TTL the caller already passes the sticky sweep
 // (serena_routing.DefaultSessionTTL == daemonSessionTTL == 24h).
+//
+// Finding 3 (coordinated expiry — no tombstones): when this reclaims an
+// expired routerSessionStore entry, it ALSO unbinds that session id from the
+// sticky deps.Sessions (UnbindSession) and serenaDaemonSessions, so a swept
+// router session is fully terminated everywhere. Without this, a path-less tool
+// call whose router session idle-expired (peeked + dropped on read) but whose
+// sticky binding had NOT yet been swept (the two stores aged independently)
+// would refresh the sticky binding and route as a LEGACY session — re-handshake
+// a daemon and keep routing until the next sticky sweep, defeating the
+// expire-on-read/session-terminated guard. Coordinating the three stores makes
+// the legacy-vs-expired distinction correct: a TRUE legacy caller never had a
+// router session (never in routerSessionStore, never swept from it, sticky
+// binding untouched → still routes); an EXPIRED router session is swept from
+// all three together → its sticky binding is gone → the path-less call finds
+// nothing and is treated as unknown (not routed).
+//
+// Residual (documented, no tombstone machinery — kept simple per the finding):
+// a narrow window remains between an ON-READ peek-expiry of a router session
+// (peekNegotiatedVersion deletes the entry the moment a request observes it
+// past-TTL) and the NEXT periodic SweepSerenaSessions tick. In that window the
+// routerSessionStore entry is already gone but the sticky binding is not yet
+// swept, so a concurrent path-less call could still route once as legacy. This
+// is bounded by the sweep interval (1h in production) and is harmless for the
+// idle-disconnect case this guard targets (no concurrent traffic on a
+// disconnected session). The tool-call path's own pre-gate peek+touch
+// (serena_router.go) already rejects an EXPLICITLY-DELETEd session immediately;
+// only the silent idle-expiry has this residual, and closing it cleanly would
+// require expiry tombstones across the sticky store's cross-package boundary —
+// out of proportion to the bounded, idle-only exposure.
 func (s *Server) SweepSerenaSessions(now time.Time, ttl time.Duration) int {
-	return s.serenaRouterSessions.cleanup(now, ttl) +
-		s.serenaDaemonSessions.cleanup(now, ttl)
+	// Reclaim expired router sessions first and capture their ids so the other
+	// two stores can be coordinated (Finding 3).
+	expiredRouter := s.serenaRouterSessions.cleanupExpired(now, ttl)
+
+	// Coordinate: every expired router session id is unbound from the daemon
+	// store and the sticky session router so the session is terminated
+	// everywhere. Unbinding an id that has no binding in either store is a
+	// no-op, so a router session with no downstream bindings is handled cleanly.
+	var sticky sessionRouter
+	if deps := s.serenaRouterDepsProd(); deps != nil {
+		sticky = deps.Sessions
+	}
+	for _, id := range expiredRouter {
+		s.serenaDaemonSessions.unbind(id)
+		if sticky != nil {
+			sticky.UnbindSession(id)
+		}
+	}
+
+	// Then sweep the daemon store's OWN idle entries (those not already removed
+	// by the coordination above). The total dropped count is the expired router
+	// sessions plus the daemon store's independently-idle bindings.
+	daemonDropped := s.serenaDaemonSessions.cleanup(now, ttl)
+	return len(expiredRouter) + daemonDropped
 }

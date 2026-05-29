@@ -1297,6 +1297,72 @@ func TestSerenaRouter_ToolsList_CursorBypassesCache(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------
+// Finding 1 — a tools/list whose `params.cursor` is the EMPTY STRING ""
+// BYPASSES the first-page cache and proxies to the daemon. An empty string is
+// a VALID opaque cursor (MCP pagination spec), NOT a first-page/end marker, so
+// the router must let the daemon validate it rather than serve the cached
+// cursorless page-one. Pre-fix `cursor:""` was classified as cursorless (cache
+// OK) and a client could never have the daemon validate that token. We seed
+// the first-page cache with a cursorless call, then a `cursor:""` call must
+// trigger a SECOND daemon proxy (proving the bypass).
+// ---------------------------------------------------------------------
+func TestSerenaRouter_ToolsList_EmptyCursorBypassesCache(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	// Page 1 (no cursor key) and the empty-cursor page are answered distinctly
+	// so the test proves which page the router returned.
+	daemon.tool = func(w http.ResponseWriter, r *http.Request, b []byte) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if strings.Contains(string(b), `"cursor"`) {
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"empty_cursor_page"}]}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"page1_tool"}]}}`))
+	}
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+	toolHits := func() int { daemon.mu.Lock(); defer daemon.mu.Unlock(); return daemon.toolHits }
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+	sid := mintRouterSession(t, s, "2025-11-25")
+	hdr := map[string]string{"Mcp-Session-Id": sid}
+
+	// Seed the first-page cache with a cursorless call.
+	if rr := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), hdr); rr.Code != http.StatusOK {
+		t.Fatalf("seed tools/list status = %d; body=%s", rr.Code, rr.Body.String())
+	}
+	if got := toolHits(); got != 1 {
+		t.Fatalf("daemon tool hits after seed = %d, want 1", got)
+	}
+
+	// A repeat cursorless call is served from cache -> NO new daemon hit.
+	if rr := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), hdr); rr.Code != http.StatusOK {
+		t.Fatalf("cached tools/list status = %d", rr.Code)
+	}
+	if got := toolHits(); got != 1 {
+		t.Fatalf("daemon tool hits after cursorless repeat = %d, want 1 (cache hit)", got)
+	}
+
+	// An EMPTY-STRING cursor MUST bypass the cache and proxy FRESH -> a SECOND
+	// daemon hit, returning the empty-cursor page (NOT the cached page-one).
+	rrEmpty := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{"cursor": ""}), hdr)
+	if rrEmpty.Code != http.StatusOK {
+		t.Fatalf("empty-cursor tools/list status = %d; body=%s", rrEmpty.Code, rrEmpty.Body.String())
+	}
+	assertToolsListNames(t, rrEmpty.Body.Bytes(), []string{"empty_cursor_page"})
+	if got := toolHits(); got != 2 {
+		t.Errorf("daemon tool hits after empty cursor = %d, want 2 (Finding 1: cursor:\"\" is a valid opaque cursor and must bypass the cache)", got)
+	}
+}
+
+// ---------------------------------------------------------------------
 // P2 finding 4 — a lifecycle method (initialize / tools/list / ping)
 // whose id is PRESENT but INVALID (null / boolean / array / object) is a
 // malformed JSON-RPC request: -32600, no synthesized result, and (for

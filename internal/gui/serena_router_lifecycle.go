@@ -214,6 +214,37 @@ func writeJSONRPCError(w http.ResponseWriter, id json.RawMessage, code int, mess
 	})
 }
 
+// writeJSONRPCRawError writes a JSON-RPC 2.0 error envelope at HTTP 200 whose
+// `error` member is the RAW error object bytes (code/message/data preserved
+// verbatim). It is used by the workspace-agnostic tools/list to FORWARD a
+// daemon's well-formed JSON-RPC error (e.g. -32602 for an invalid opaque
+// cursor) to the client UNCHANGED (Finding 4) rather than collapsing it to the
+// router's generic -32603. The response id is the CLIENT's request id (MCP
+// requires the response id to match the request — the client correlates on its
+// own id, not the daemon's), threaded via normalizeID like every other writer
+// here. A non-object/empty errObj falls back to a generic internal error so the
+// client always receives a parseable JSON-RPC error.
+func writeJSONRPCRawError(w http.ResponseWriter, id json.RawMessage, errObj json.RawMessage) {
+	trimmed := bytes.TrimSpace(errObj)
+	if len(trimmed) == 0 || trimmed[0] != '{' || !json.Valid(trimmed) {
+		writeJSONRPCError(w, id, jsonrpcInternalError, "serena tools/list: upstream returned a malformed error")
+		return
+	}
+	envelope := map[string]json.RawMessage{
+		"jsonrpc": json.RawMessage(`"2.0"`),
+		"id":      normalizeID(id),
+		"error":   trimmed,
+	}
+	payload, err := json.Marshal(envelope)
+	if err != nil {
+		writeJSONRPCError(w, id, jsonrpcInternalError, "serena tools/list: upstream error re-encode failed")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(payload)
+}
+
 // writeJSONRPCErrorStatus writes a JSON-RPC 2.0 error envelope at an
 // EXPLICIT HTTP status, with an optional error.data field. It mirrors the
 // hub handler's writeJSONRPCErrorStatus
@@ -392,10 +423,20 @@ func initializeRawParams(body []byte) json.RawMessage {
 //     finding #2), rather than masking the
 //     error with a cached page-one
 //   - params is an object, cursor ABSENT    -> cursorless first page (cache OK)
-//   - params object, cursor empty string "" -> first-page marker (cache OK)
-//   - params object, cursor non-empty STRING-> paging (bypass cache)
+//   - params object, cursor PRESENT (string, -> paginated request; bypass cache
+//     incl empty "")                            so the DAEMON validates the
+//     opaque token (Finding 1)
 //   - params object, cursor WRONG TYPE      -> malformed; bypass (finding #3)
 //     (number/array/object/null)
+//
+// Finding 1 (https://modelcontextprotocol.io/specification/draft/server/utilities/pagination):
+// an MCP cursor is an OPAQUE token; an empty string is a VALID cursor value, NOT
+// a first-page/end marker. The router's one-shot tools/list cache holds only the
+// cursorless first page, so any PRESENT `cursor` key (even `""`) must bypass the
+// cache and proxy to a daemon for validation — serving the cached page-one for a
+// `cursor:""` request would silently mask whatever the opaque token meant to the
+// daemon. Detection: the `cursor` KEY being PRESENT (a JSON string, including the
+// empty string) is the cursor signal; only an ABSENT cursor key is cursorless.
 //
 // History: the pre-#3 probe unmarshalled cursor into a `string` field, so a
 // present non-string cursor failed the WHOLE-body unmarshal and the function
@@ -407,6 +448,8 @@ func initializeRawParams(body []byte) json.RawMessage {
 // instead of proxying so the daemon rejects the invalid params (round-10
 // finding #2). Parsing `params` as a json.RawMessage first, then branching on
 // its JSON shape, detects a present non-object params independently of cursor.
+// Finding 1 then tightened the cursor branch: a PRESENT string cursor (any
+// value) bypasses; previously only a NON-EMPTY string did, masking `cursor:""`.
 func toolsListIsCursorRequest(body []byte) bool {
 	var probe struct {
 		Params json.RawMessage `json:"params"`
@@ -439,21 +482,15 @@ func toolsListIsCursorRequest(body []byte) bool {
 	}
 	cursor := bytes.TrimSpace(cursorProbe.Cursor)
 	if len(cursor) == 0 {
-		// cursor field absent: cursorless first page (cache OK).
+		// cursor KEY absent: cursorless first page (cache OK).
 		return false
 	}
-	// cursor present. A JSON string: only a NON-EMPTY one is paging; "" is the
-	// first-page marker (cache OK). Any non-string token (number/array/object/
-	// null) is malformed → bypass so the daemon validates (finding #3).
-	if cursor[0] == '"' {
-		var s string
-		if err := json.Unmarshal(cursor, &s); err != nil {
-			// Present string-shaped but malformed escapes → bypass (daemon
-			// validates).
-			return true
-		}
-		return s != ""
-	}
+	// cursor KEY present (any JSON token: string incl "", or a malformed
+	// number/array/object/null). Finding 1: the mere PRESENCE of the cursor key
+	// makes this a paginated request that must bypass the cache so the daemon
+	// validates the opaque token — an empty string is a VALID cursor, not a
+	// first-page marker (MCP pagination spec), and a wrong-typed cursor is the
+	// daemon's to reject (finding #3). So every present cursor bypasses.
 	return true
 }
 
@@ -764,7 +801,7 @@ func (s *Server) handleToolsList(
 	// G treats as advisory for a known session). fetchToolsListFromAnyDaemon
 	// also DELETEs each one-shot upstream daemon session after the proxy so
 	// it does not leak until the daemon's idle expiry (P2 finding C).
-	result, ferr := s.fetchToolsListFromAnyDaemon(r.Context(), entries, body, httpClient, upstreamURLFn, auditFn, negotiatedVersion, deps.UpstreamTimeout)
+	result, upstreamErr, ferr := s.fetchToolsListFromAnyDaemon(r.Context(), entries, body, httpClient, upstreamURLFn, auditFn, negotiatedVersion, deps.UpstreamTimeout)
 	if ferr != nil {
 		_ = auditFn("warn", "serena-tools-list-fetch-failed", map[string]any{
 			"err":             ferr.Error(),
@@ -772,6 +809,16 @@ func (s *Server) handleToolsList(
 		})
 		writeJSONRPCError(w, tb.ID, jsonrpcInternalError,
 			fmt.Sprintf("serena tools/list: no registered workspace daemon answered (%v); the daemons may still be starting — retry shortly", ferr))
+		return
+	}
+	if len(upstreamErr) > 0 {
+		// Finding 4: a daemon ANSWERED with a well-formed JSON-RPC error (e.g.
+		// -32602 for an invalid opaque cursor). Forward it to the client
+		// UNCHANGED — it is a client-actionable validation error, not a router
+		// fault, and the fetch already stopped trying other daemons. A
+		// page-N/error result is NEVER cached (only the cursorless first page is),
+		// so there is no cache write here.
+		writeJSONRPCRawError(w, tb.ID, upstreamErr)
 		return
 	}
 
@@ -802,6 +849,15 @@ func (s *Server) handleToolsList(
 // (otherwise the session leaks until the daemon's idle expiry). The DELETE
 // is context-detached (a finished/cancelled tools/list request context must
 // not abort the teardown), mirroring the main DELETE path.
+//
+// Finding 4: a candidate that ANSWERS with a well-formed JSON-RPC error
+// envelope (upstreamError) is AVAILABLE and rejecting THIS request — it is NOT
+// a transport failure. The loop returns that error envelope IMMEDIATELY (via
+// the upstreamError return) so handleToolsList forwards it to the client
+// unchanged, WITHOUT trying other daemons (retrying the same invalid request
+// against unrelated workspaces would be wrong) and WITHOUT converting it to the
+// router's generic -32603. Only a genuine transport/handshake failure (the
+// `err` return) advances to the next candidate.
 func (s *Server) fetchToolsListFromAnyDaemon(
 	ctx context.Context,
 	entries []*api.WorkspaceEntry,
@@ -811,7 +867,7 @@ func (s *Server) fetchToolsListFromAnyDaemon(
 	auditFn func(level, event string, fields map[string]any) error,
 	clientProtocolVersion string,
 	upstreamTimeout time.Duration,
-) (json.RawMessage, error) {
+) (result json.RawMessage, upstreamError json.RawMessage, err error) {
 	var lastErr error
 	for _, ws := range entries {
 		if ws == nil {
@@ -826,7 +882,7 @@ func (s *Server) fetchToolsListFromAnyDaemon(
 		// bounds the handshake + tools/list (possibly SSE) body reads — a daemon
 		// that opens an SSE stream but never sends a complete response event no
 		// longer hangs this candidate forever, so the loop can advance.
-		result, daemonSessionID, daemonProtocolVersion, err := proxyToolsListOnce(ctx, httpClient, upstreamURL, body, clientProtocolVersion, upstreamTimeout)
+		outcome, daemonSessionID, daemonProtocolVersion, perr := proxyToolsListOnce(ctx, httpClient, upstreamURL, body, clientProtocolVersion, upstreamTimeout)
 		// Finding C: release the one-shot upstream session regardless of the
 		// proxy outcome, whenever the handshake established one. Detach the
 		// context so a done tools/list request context cannot abort it.
@@ -854,21 +910,34 @@ func (s *Server) fetchToolsListFromAnyDaemon(
 			s.forwardSerenaDeleteUpstream(delCtx, httpClient, upstreamURL, daemonSessionID, effectiveHandshakeProtocolVersion(daemonProtocolVersion), ws.WorkspaceKey, ws, auditFn)
 			delCancel()
 		}
-		if err != nil {
-			lastErr = fmt.Errorf("workspace %q (port %d): %w", ws.WorkspaceKey, ws.Port, err)
+		if perr != nil {
+			// Genuine transport/handshake failure (daemon unavailable): record it
+			// and advance to the next candidate.
+			lastErr = fmt.Errorf("workspace %q (port %d): %w", ws.WorkspaceKey, ws.Port, perr)
 			_ = auditFn("warn", "serena-tools-list-daemon-skip", map[string]any{
 				"workspace_key": ws.WorkspaceKey,
 				"port":          ws.Port,
-				"err":           err.Error(),
+				"err":           perr.Error(),
 			})
 			continue
 		}
-		return result, nil
+		if len(outcome.upstreamError) > 0 {
+			// Finding 4: the daemon answered with a well-formed JSON-RPC error.
+			// It IS available and is rejecting THIS request, so forward the error
+			// envelope to the client unchanged — do NOT try other daemons (the
+			// request is invalid for all of them) and do NOT mask it with -32603.
+			_ = auditFn("info", "serena-tools-list-daemon-error", map[string]any{
+				"workspace_key": ws.WorkspaceKey,
+				"port":          ws.Port,
+			})
+			return nil, outcome.upstreamError, nil
+		}
+		return outcome.result, nil, nil
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("no candidate workspace daemon available")
 	}
-	return nil, lastErr
+	return nil, nil, lastErr
 }
 
 // proxyToolsListOnce POSTs the tools/list body to one daemon's /mcp
@@ -876,6 +945,14 @@ func (s *Server) fetchToolsListFromAnyDaemon(
 // JSON body and a single-event SSE body (serena daemons may answer either
 // per the MCP Streamable HTTP transport). A 1 MiB read cap bounds the
 // response.
+//
+// It returns a proxyToolsListResult carrying EITHER the daemon's `result`
+// (nextCursor stripped — Finding 2) OR the daemon's well-formed JSON-RPC
+// `error` object (Finding 4). The error return is reserved for a genuine
+// transport/handshake failure (daemon unavailable); a daemon that ANSWERS with
+// a JSON-RPC error is a successful round-trip whose error object is carried in
+// the result struct so the caller forwards it unchanged instead of skipping to
+// other daemons.
 //
 // Before the tools/list POST it performs the MCP handshake with the
 // daemon (initialize → notifications/initialized) and sends the
@@ -906,13 +983,13 @@ func (s *Server) fetchToolsListFromAnyDaemon(
 // tools/list POST itself fails. A handshake FAILURE returns "" (no upstream
 // session was minted, so there is nothing to release); a sessionless daemon
 // also returns "" (it issued no id).
-func proxyToolsListOnce(ctx context.Context, httpClient *http.Client, upstreamURL string, body []byte, clientProtocolVersion string, upstreamTimeout time.Duration) (result json.RawMessage, daemonSessionID string, daemonProtocolVersion string, err error) {
+func proxyToolsListOnce(ctx context.Context, httpClient *http.Client, upstreamURL string, body []byte, clientProtocolVersion string, upstreamTimeout time.Duration) (outcome proxyToolsListResult, daemonSessionID string, daemonProtocolVersion string, err error) {
 	requestedVersion := effectiveHandshakeProtocolVersion(clientProtocolVersion)
 	// Finding 3 (round-10): bound the handshake reads by the upstream timeout
 	// (passed through to establishDaemonSession's read context).
 	daemonSessionID, daemonProtocolVersion, hsErr := establishDaemonSession(ctx, httpClient, upstreamURL, requestedVersion, upstreamTimeout)
 	if hsErr != nil {
-		return nil, "", "", fmt.Errorf("upstream handshake: %w", hsErr)
+		return proxyToolsListResult{}, "", "", fmt.Errorf("upstream handshake: %w", hsErr)
 	}
 	// Finding #8: send the tools/list POST under the version the DAEMON
 	// negotiated for this session (a strict daemon binds the header on a
@@ -934,7 +1011,7 @@ func proxyToolsListOnce(ctx context.Context, httpClient *http.Client, upstreamUR
 	defer postCancel()
 	req, err := http.NewRequestWithContext(postCtx, http.MethodPost, upstreamURL, bytes.NewReader(body))
 	if err != nil {
-		return nil, daemonSessionID, daemonProtocolVersion, err
+		return proxyToolsListResult{}, daemonSessionID, daemonProtocolVersion, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	// Accept both shapes; daemons that only emit SSE need the stream
@@ -951,11 +1028,11 @@ func proxyToolsListOnce(ctx context.Context, httpClient *http.Client, upstreamUR
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, daemonSessionID, daemonProtocolVersion, err
+		return proxyToolsListResult{}, daemonSessionID, daemonProtocolVersion, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, daemonSessionID, daemonProtocolVersion, fmt.Errorf("upstream tools/list -> status %d", resp.StatusCode)
+		return proxyToolsListResult{}, daemonSessionID, daemonProtocolVersion, fmt.Errorf("upstream tools/list -> status %d", resp.StatusCode)
 	}
 	// Finding 4: read INCREMENTALLY (same ReadAll-to-EOF hang as the
 	// handshake — a daemon that answers tools/list as a still-open SSE
@@ -964,22 +1041,91 @@ func proxyToolsListOnce(ctx context.Context, httpClient *http.Client, upstreamUR
 	// event for SSE, or a bounded read for application/json.
 	payload, rerr := readUpstreamJSONRPCResponse(resp.Header.Get("Content-Type"), resp.Body)
 	if rerr != nil {
-		return nil, daemonSessionID, daemonProtocolVersion, fmt.Errorf("read upstream tools/list: %w", rerr)
+		return proxyToolsListResult{}, daemonSessionID, daemonProtocolVersion, fmt.Errorf("read upstream tools/list: %w", rerr)
 	}
 	var rpc struct {
 		Result json.RawMessage `json:"result"`
 		Error  json.RawMessage `json:"error"`
 	}
 	if err := json.Unmarshal(payload, &rpc); err != nil {
-		return nil, daemonSessionID, daemonProtocolVersion, fmt.Errorf("upstream tools/list non-JSON-RPC body: %w", err)
+		return proxyToolsListResult{}, daemonSessionID, daemonProtocolVersion, fmt.Errorf("upstream tools/list non-JSON-RPC body: %w", err)
 	}
 	if len(rpc.Error) > 0 {
-		return nil, daemonSessionID, daemonProtocolVersion, fmt.Errorf("upstream tools/list returned JSON-RPC error: %s", string(rpc.Error))
+		// Finding 4: the daemon ANSWERED with a well-formed JSON-RPC error
+		// envelope (e.g. -32602 for an invalid opaque cursor). The daemon IS
+		// available and is rejecting THIS request — it is NOT a transport
+		// failure. Surface the raw error object so fetchToolsListFromAnyDaemon
+		// forwards it to the client UNCHANGED rather than skipping to other
+		// daemons and masking it with the router's generic -32603. (err stays
+		// nil: a daemon-level rejection is a successful round-trip, not a
+		// candidate failure.)
+		return proxyToolsListResult{upstreamError: rpc.Error}, daemonSessionID, daemonProtocolVersion, nil
 	}
 	if len(rpc.Result) == 0 {
-		return nil, daemonSessionID, daemonProtocolVersion, fmt.Errorf("upstream tools/list returned no result")
+		return proxyToolsListResult{}, daemonSessionID, daemonProtocolVersion, fmt.Errorf("upstream tools/list returned no result")
 	}
-	return rpc.Result, daemonSessionID, daemonProtocolVersion, nil
+	// Finding 2: strip any pagination cursor (result.nextCursor) before the
+	// router returns/caches the result. The router's workspace-agnostic
+	// tools/list uses a ONE-SHOT upstream session (handshake → tools/list →
+	// DELETE), so it cannot honor a follow-up opaque cursor across sessions
+	// (cursors are session-scoped — a page-2 request would hit a FRESH daemon
+	// session that never issued that cursor). Presenting the surface as a single
+	// complete page and never advertising a cursor it cannot honor is the
+	// simplest correct option for serena (whose tool surface is static and
+	// single-page — a no-op there) and lossy-but-safe for a hypothetical
+	// paginating daemon (page 1 becomes the surface, no broken cross-session
+	// cursor loop). The `tools` array and every other result field are preserved.
+	stripped, serr := stripToolsListNextCursor(rpc.Result)
+	if serr != nil {
+		return proxyToolsListResult{}, daemonSessionID, daemonProtocolVersion, fmt.Errorf("strip tools/list nextCursor: %w", serr)
+	}
+	return proxyToolsListResult{result: stripped}, daemonSessionID, daemonProtocolVersion, nil
+}
+
+// proxyToolsListResult is the parsed outcome of one upstream tools/list proxy.
+// Exactly one of result / upstreamError is set on a successful round-trip:
+//   - result        : the daemon's JSON-RPC `result` (with nextCursor stripped,
+//     Finding 2) — the surface to return/cache.
+//   - upstreamError  : the daemon's well-formed JSON-RPC `error` object
+//     (Finding 4) — the daemon answered and is rejecting THIS request; forward
+//     it to the client unchanged rather than trying other daemons.
+//
+// A transport/handshake failure (daemon unavailable) is signalled by the
+// separate error return of proxyToolsListOnce, NOT this struct.
+type proxyToolsListResult struct {
+	result        json.RawMessage
+	upstreamError json.RawMessage
+}
+
+// stripToolsListNextCursor removes the `nextCursor` key from a tools/list
+// JSON-RPC result object and re-marshals the rest (Finding 2). The result is
+// decoded into an ordered-key-agnostic map[string]json.RawMessage so every
+// other field (notably `tools`) is preserved byte-faithfully; only the
+// pagination cursor is dropped. A result that is not a JSON object (a daemon
+// bug) is returned unchanged — the strip is a no-op rather than an error so a
+// non-paginating daemon is never penalised. When no nextCursor key is present
+// (the serena case) the original bytes are returned unchanged.
+func stripToolsListNextCursor(result json.RawMessage) (json.RawMessage, error) {
+	trimmed := bytes.TrimSpace(result)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		// Not a JSON object (or empty): nothing to strip.
+		return result, nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &fields); err != nil {
+		return nil, err
+	}
+	if _, ok := fields["nextCursor"]; !ok {
+		// No pagination cursor (the serena single-page case): return verbatim so
+		// the result is byte-identical to what the daemon sent.
+		return result, nil
+	}
+	delete(fields, "nextCursor")
+	out, err := json.Marshal(fields)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // bytesContainsFold is a tiny case-insensitive substring check for

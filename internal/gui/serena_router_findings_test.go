@@ -19,6 +19,8 @@ package gui
 
 import (
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -1913,5 +1915,343 @@ func TestSerenaRouter_ToolsList_EmptyPoolBypassesStaleCache(t *testing.T) {
 	assertToolsListNames(t, rr3.Body.Bytes(), []string{"find_symbol"})
 	if got := toolHits(); got != 2 {
 		t.Errorf("daemon tool hits after re-register = %d, want 2 (the invalidated cache must re-fetch, not resurrect)", got)
+	}
+}
+
+// ---------------------------------------------------------------------
+// Finding 2 — the router strips any pagination cursor (result.nextCursor)
+// from a proxied tools/list result before returning/caching it, so it never
+// advertises a cursor it cannot honor across its one-shot upstream sessions.
+// A daemon that returns BOTH a tools array AND a nextCursor must reach the
+// client as a single complete page: the tools array intact, NO nextCursor.
+// (For serena, whose surface is single-page, this is a no-op; this test models
+// a hypothetical paginating daemon to lock in the strip.)
+// ---------------------------------------------------------------------
+func TestSerenaRouter_ToolsList_StripsUpstreamNextCursor(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	daemon.tool = func(w http.ResponseWriter, r *http.Request, b []byte) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// A first-page result carrying a nextCursor the one-shot model cannot
+		// honor on a follow-up request.
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"find_symbol"},{"name":"list_dir"}],"nextCursor":"opaque-page-2-token"}}`))
+	}
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	rr := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), map[string]string{"Mcp-Session-Id": sid})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("tools/list status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	// The tools array is intact...
+	assertToolsListNames(t, rr.Body.Bytes(), []string{"find_symbol", "list_dir"})
+
+	// ...and the router's response carries NO nextCursor (Finding 2).
+	var resp struct {
+		Result map[string]json.RawMessage `json:"result"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode tools/list result: %v; raw=%s", err, rr.Body.String())
+	}
+	if _, present := resp.Result["nextCursor"]; present {
+		t.Errorf("router response carries nextCursor; Finding 2 requires it be stripped (the one-shot model cannot honor a cross-session cursor). result=%s", rr.Body.String())
+	}
+	if _, present := resp.Result["tools"]; !present {
+		t.Errorf("router response lost the tools array; the strip must preserve every non-cursor field. result=%s", rr.Body.String())
+	}
+}
+
+// Finding 2 (unit) — stripToolsListNextCursor removes only nextCursor and
+// preserves every other field byte-faithfully; a result with no nextCursor is
+// returned verbatim; a non-object result is returned unchanged.
+func TestStripToolsListNextCursor(t *testing.T) {
+	cases := []struct {
+		name          string
+		in            string
+		wantNoCursor  bool // assert nextCursor absent in output
+		wantToolNames []string
+	}{
+		{
+			name:          "strips nextCursor keeps tools",
+			in:            `{"tools":[{"name":"a"},{"name":"b"}],"nextCursor":"tok"}`,
+			wantNoCursor:  true,
+			wantToolNames: []string{"a", "b"},
+		},
+		{
+			name:          "no nextCursor returned verbatim",
+			in:            `{"tools":[{"name":"a"}]}`,
+			wantNoCursor:  true,
+			wantToolNames: []string{"a"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := stripToolsListNextCursor([]byte(tc.in))
+			if err != nil {
+				t.Fatalf("stripToolsListNextCursor: %v", err)
+			}
+			var got struct {
+				Tools []struct {
+					Name string `json:"name"`
+				} `json:"tools"`
+				NextCursor *string `json:"nextCursor"`
+			}
+			if err := json.Unmarshal(out, &got); err != nil {
+				t.Fatalf("decode stripped result: %v; raw=%s", err, string(out))
+			}
+			if tc.wantNoCursor && got.NextCursor != nil {
+				t.Errorf("nextCursor present after strip: %s", string(out))
+			}
+			names := make([]string, 0, len(got.Tools))
+			for _, tool := range got.Tools {
+				names = append(names, tool.Name)
+			}
+			if strings.Join(names, ",") != strings.Join(tc.wantToolNames, ",") {
+				t.Errorf("tool names = %v, want %v", names, tc.wantToolNames)
+			}
+		})
+	}
+
+	// A non-object result is returned unchanged (no-op, no error).
+	nonObj := []byte(`[1,2,3]`)
+	out, err := stripToolsListNextCursor(nonObj)
+	if err != nil {
+		t.Fatalf("stripToolsListNextCursor(non-object): %v", err)
+	}
+	if string(out) != string(nonObj) {
+		t.Errorf("non-object result mutated: got %s, want %s", string(out), string(nonObj))
+	}
+}
+
+// ---------------------------------------------------------------------
+// Finding 4 — when a daemon returns a well-formed JSON-RPC ERROR for
+// tools/list (e.g. -32602 for an invalid opaque cursor), the router forwards
+// that error envelope to the client UNCHANGED (same code), does NOT convert it
+// to the generic -32603, and does NOT try other daemons (the request is
+// invalid for all of them). Two workspaces are registered; the FIRST answers
+// with -32602 and the SECOND must never be contacted.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_ToolsList_ForwardsUpstreamJSONRPCError(t *testing.T) {
+	daemonA := newFakeSerenaDaemon("alpha")
+	daemonA.tool = func(w http.ResponseWriter, r *http.Request, b []byte) {
+		// Handshake already passed; answer tools/list with a JSON-RPC error
+		// (HTTP 200, in-band) — the shape a daemon uses to reject an invalid
+		// opaque cursor.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"invalid cursor: unknown opaque token"}}`))
+	}
+	tsA := httptest.NewServer(daemonA.handler())
+	t.Cleanup(tsA.Close)
+
+	daemonB := newFakeSerenaDaemon("beta")
+	tsB := httptest.NewServer(daemonB.handler())
+	t.Cleanup(tsB.Close)
+
+	wsA := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	wsB := &api.WorkspaceEntry{WorkspaceKey: "beta", WorkspacePath: "/proj/beta", Port: 9202}
+	deps := &serenaRouterDeps{
+		// alpha FIRST so it is the candidate that answers the error.
+		Resolver: &listerStubResolver{list: []*api.WorkspaceEntry{wsA, wsB}},
+		Sessions: NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string {
+			if ws.WorkspaceKey == "beta" {
+				return tsB.URL
+			}
+			return tsA.URL
+		},
+		AuditFn: func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	// Send a cursor request (the realistic trigger for an upstream -32602); the
+	// cursor bypasses the cache and reaches the daemon.
+	rr := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{"cursor": "bad-token"}), map[string]string{"Mcp-Session-Id": sid})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("tools/list status = %d, want 200 (JSON-RPC error is in-band); body=%s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Result json.RawMessage `json:"result"`
+		Error  *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v; raw=%s", err, rr.Body.String())
+	}
+	if len(resp.Result) > 0 {
+		t.Errorf("forwarded upstream error carried a result; want error only. raw=%s", rr.Body.String())
+	}
+	if resp.Error == nil {
+		t.Fatalf("expected a JSON-RPC error forwarded from the daemon; raw=%s", rr.Body.String())
+	}
+	// The CODE is the daemon's -32602 forwarded UNCHANGED, NOT the router's -32603.
+	if resp.Error.Code != jsonrpcInvalidParams {
+		t.Errorf("forwarded error code = %d, want %d (-32602 unchanged, not the generic -32603)", resp.Error.Code, jsonrpcInvalidParams)
+	}
+	if !strings.Contains(resp.Error.Message, "invalid cursor") {
+		t.Errorf("forwarded error message = %q, want the daemon's message verbatim", resp.Error.Message)
+	}
+	// The SECOND daemon (beta) must NEVER have been contacted: a well-formed
+	// upstream error stops the fan-out (no handshake, no tool POST on beta).
+	if mc := daemonMintCount(daemonB); mc != 0 {
+		t.Errorf("beta daemon minted %d sessions; want 0 (a well-formed upstream error must NOT advance to other daemons)", mc)
+	}
+}
+
+// Finding 4 (negative) — a genuine TRANSPORT failure on the first daemon
+// (connection refused) STILL advances to the next daemon (current behavior),
+// proving the transport-vs-JSON-RPC-error distinction: only a well-formed
+// error response short-circuits the fan-out; an unavailable daemon does not.
+func TestSerenaRouter_ToolsList_TransportFailureStillTriesNextDaemon(t *testing.T) {
+	// alpha is a dead address (connection refused = transport failure).
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve port: %v", err)
+	}
+	deadURL := fmt.Sprintf("http://%s", ln.Addr().String())
+	_ = ln.Close()
+
+	// beta is a healthy daemon answering a real tool list.
+	daemonB := newFakeSerenaDaemon("beta")
+	daemonB.tool = func(w http.ResponseWriter, r *http.Request, b []byte) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"find_symbol"}]}}`))
+	}
+	tsB := httptest.NewServer(daemonB.handler())
+	t.Cleanup(tsB.Close)
+
+	wsA := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	wsB := &api.WorkspaceEntry{WorkspaceKey: "beta", WorkspacePath: "/proj/beta", Port: 9202}
+	deps := &serenaRouterDeps{
+		Resolver: &listerStubResolver{list: []*api.WorkspaceEntry{wsA, wsB}},
+		Sessions: NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string {
+			if ws.WorkspaceKey == "beta" {
+				return tsB.URL
+			}
+			return deadURL
+		},
+		HTTPClient: &http.Client{
+			Transport: &http.Transport{
+				DialContext: (&net.Dialer{Timeout: 300 * time.Millisecond}).DialContext,
+			},
+		},
+		UpstreamTimeout: time.Second,
+		AuditFn:         func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	rr := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), map[string]string{"Mcp-Session-Id": sid})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("tools/list status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	// beta answered after alpha's transport failure was skipped.
+	assertToolsListNames(t, rr.Body.Bytes(), []string{"find_symbol"})
+	if mc := daemonMintCount(daemonB); mc != 1 {
+		t.Errorf("beta daemon minted %d sessions; want 1 (transport failure on alpha must advance to beta)", mc)
+	}
+}
+
+// ---------------------------------------------------------------------
+// Finding 3 — an EXPIRED-and-SWEPT router session is unbound from ALL THREE
+// router-owned stores together (router-session + daemon-session + sticky), so
+// a subsequent path-less tool call for that id is NOT routed via a not-yet-
+// swept sticky binding. A NEVER-router (true legacy) sticky binding is left
+// untouched by the sweep and still routes. This locks in the coordinated-expiry
+// fix: a swept router session cannot keep routing as legacy.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_Sweep_CoordinatesStickyAndDaemonUnbind(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	daemon.tool = func(w http.ResponseWriter, r *http.Request, b []byte) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`))
+	}
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	sessions := NewInMemorySessionRouter()
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      sessions,
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	base := time.Now()
+	clk := base
+	// Clock ALL THREE stores deterministically. (The sticky deps.Sessions is a
+	// plain InMemorySessionRouter with no clock — it does not idle-expire on its
+	// own; the sweep's coordinated UnbindSession is what must remove it.)
+	s.serenaRouterSessions.clock = func() time.Time { return clk }
+	s.serenaDaemonSessions.clock = func() time.Time { return clk }
+
+	// --- the EXPIRED-router session: minted, bound to a daemon + sticky ---
+	const expiredSID = "sess-expired-router"
+	const negotiated = "2025-06-18"
+	s.serenaRouterSessions.store(expiredSID, negotiated) // router session, lastSeen=base
+	s.serenaDaemonSessions.store(expiredSID, ws.WorkspaceKey, "alpha-daemon-session-1", negotiated)
+	sessions.BindSession(expiredSID, ws) // sticky binding present
+
+	// --- a TRUE legacy session: ONLY a sticky binding, never a router session ---
+	const legacySID = "sess-legacy-sticky"
+	sessions.BindSession(legacySID, ws)
+
+	// Sweep past the TTL: the router session (lastSeen=base) is now expired.
+	clk = base.Add(daemonSessionTTL + time.Minute)
+	s.SweepSerenaSessions(clk, daemonSessionTTL)
+
+	// The expired router session is gone from ALL THREE stores.
+	if s.serenaRouterSessions.known(expiredSID) {
+		t.Errorf("expired router session still known after sweep; want cleared")
+	}
+	if _, _, _, ok := s.serenaDaemonSessions.bindingFor(expiredSID); ok {
+		t.Errorf("expired session's daemon binding survived the sweep; Finding 3 requires the coordinated unbind")
+	}
+	if got := sessions.LookupSession(expiredSID); got != nil {
+		t.Errorf("expired session's sticky binding survived the sweep = %+v; Finding 3 requires the coordinated UnbindSession", got)
+	}
+
+	// The TRUE legacy sticky binding is UNTOUCHED (never a router session, so the
+	// sweep must not remove it).
+	if got := sessions.LookupSession(legacySID); got == nil {
+		t.Errorf("legacy sticky binding was removed by the sweep; a never-router binding must be left intact")
+	}
+
+	// Behavioral proof: a path-less tool call for the EXPIRED-swept id is NOT
+	// routed (its sticky binding is gone) -> 503 missing_session, no daemon hit.
+	beforeTool := daemonMintCount(daemon)
+	rrExpired := postSerena(t, s, buildToolCallBody(t, "list_memories", map[string]any{}), map[string]string{"Mcp-Session-Id": expiredSID})
+	if rrExpired.Code != http.StatusServiceUnavailable {
+		t.Errorf("path-less call for an expired-swept session status = %d, want 503 (must not route via a lingering sticky binding)", rrExpired.Code)
+	}
+	if got := daemonMintCount(daemon); got != beforeTool {
+		t.Errorf("expired-swept path-less call handshaked a daemon (mint %d -> %d); want none", beforeTool, got)
+	}
+
+	// And a path-less call for the TRUE legacy binding STILL routes (200, daemon
+	// hit) — the sweep did not break legacy routing.
+	rrLegacy := postSerena(t, s, buildToolCallBody(t, "list_memories", map[string]any{}), map[string]string{"Mcp-Session-Id": legacySID})
+	if rrLegacy.Code != http.StatusOK {
+		t.Errorf("path-less call for a true legacy sticky binding status = %d, want 200 (legacy routing must survive the sweep); body=%s", rrLegacy.Code, rrLegacy.Body.String())
 	}
 }

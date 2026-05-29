@@ -566,7 +566,11 @@ func TestToolsListIsCursorRequest_PresenceAndType(t *testing.T) {
 		{"cursor absent", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, false},
 		{"params empty object", `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`, false},
 		{"params null", `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":null}`, false},
-		{"cursor empty string", `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"cursor":""}}`, false},
+		// Finding 1: an empty-string cursor is a VALID opaque cursor (MCP
+		// pagination spec), NOT a first-page marker — its PRESENCE bypasses the
+		// cache so the daemon validates it. (Pre-fix this returned false: only a
+		// non-empty string was treated as paging.)
+		{"cursor empty string", `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"cursor":""}}`, true},
 		{"cursor non-empty string", `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"cursor":"page2"}}`, true},
 		{"cursor number (malformed)", `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"cursor":42}}`, true},
 		{"cursor array (malformed)", `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"cursor":[1,2]}}`, true},
