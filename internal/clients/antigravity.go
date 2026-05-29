@@ -55,14 +55,28 @@ type antigravityClient struct {
 }
 
 func (a *antigravityClient) AddEntry(entry MCPEntry) error {
-	if entry.RelayServer == "" || entry.RelayDaemon == "" {
-		return fmt.Errorf("antigravity adapter requires MCPEntry.RelayServer and RelayDaemon (Cascade only accepts stdio entries for localhost MCP; relay spawner is used to bridge to the shared HTTP daemon)")
-	}
 	if entry.RelayExePath == "" {
 		return fmt.Errorf("antigravity adapter requires MCPEntry.RelayExePath (absolute path to mcphub.exe for the 'command' field)")
 	}
 	if !filepath.IsAbs(entry.RelayExePath) {
 		return fmt.Errorf("antigravity adapter requires MCPEntry.RelayExePath to be absolute (got %q)", entry.RelayExePath)
+	}
+	// Two relay invocation shapes. When RelayURL is set (serena
+	// dynamic-pool client-reconcile — design §5), the relay forwards to
+	// a fixed URL via its --url escape hatch; the constant /serena/mcp
+	// router has no per-daemon manifest port to resolve, so the
+	// manifest-lookup --server/--daemon form cannot be used (and is
+	// mutually exclusive with --url anyway — see resolveRelayURL). When
+	// RelayURL is empty, preserve the legacy manifest-lookup form, which
+	// requires RelayServer + RelayDaemon.
+	var relayArgs []string
+	if entry.RelayURL != "" {
+		relayArgs = []string{"relay", "--url", entry.RelayURL}
+	} else {
+		if entry.RelayServer == "" || entry.RelayDaemon == "" {
+			return fmt.Errorf("antigravity adapter requires MCPEntry.RelayServer and RelayDaemon (Cascade only accepts stdio entries for localhost MCP; relay spawner is used to bridge to the shared HTTP daemon), or set MCPEntry.RelayURL for a direct relay target")
+		}
+		relayArgs = []string{"relay", "--server", entry.RelayServer, "--daemon", entry.RelayDaemon}
 	}
 	m, err := a.readJSON()
 	if err != nil {
@@ -74,7 +88,7 @@ func (a *antigravityClient) AddEntry(entry MCPEntry) error {
 	}
 	serverEntry := map[string]any{
 		"command":  entry.RelayExePath,
-		"args":     []string{"relay", "--server", entry.RelayServer, "--daemon", entry.RelayDaemon},
+		"args":     relayArgs,
 		"disabled": false,
 	}
 	servers[entry.Name] = serverEntry
@@ -106,8 +120,10 @@ func (a *antigravityClient) GetEntry(name string) (*MCPEntry, error) {
 		e.RelayExePath = cmd
 	}
 	if argsAny, ok := raw["args"].([]any); ok {
-		// Pull RelayServer/RelayDaemon back out by position — our writer
-		// always produces [relay, --server, <s>, --daemon, <d>].
+		// Pull RelayServer/RelayDaemon (legacy form) or RelayURL
+		// (dynamic-pool router form) back out by position — our writer
+		// produces either [relay, --server, <s>, --daemon, <d>] or
+		// [relay, --url, <url>].
 		for i, v := range argsAny {
 			s, _ := v.(string)
 			switch s {
@@ -118,6 +134,10 @@ func (a *antigravityClient) GetEntry(name string) (*MCPEntry, error) {
 			case "--daemon":
 				if i+1 < len(argsAny) {
 					e.RelayDaemon, _ = argsAny[i+1].(string)
+				}
+			case "--url":
+				if i+1 < len(argsAny) {
+					e.RelayURL, _ = argsAny[i+1].(string)
 				}
 			}
 		}

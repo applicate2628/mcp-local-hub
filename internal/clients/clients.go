@@ -32,6 +32,19 @@ type MCPEntry struct {
 	RelayServer  string // server name in manifest, e.g., "serena"
 	RelayDaemon  string // daemon name within that manifest, e.g., "claude"
 	RelayExePath string // absolute path to mcphub.exe (from os.Executable() at install time)
+
+	// RelayURL, when non-empty, makes the relay-based stdio adapter
+	// (Antigravity) emit a direct `relay --url <RelayURL>` invocation
+	// instead of the manifest-lookup `relay --server <s> --daemon <d>`
+	// form. The relay's --url escape hatch is mutually exclusive with
+	// --server/--daemon (see internal/cli/relay.go resolveRelayURL), so
+	// the adapter emits ONLY --url when this is set. Used by the serena
+	// dynamic-pool client-reconcile to point the Antigravity relay at the
+	// constant /serena/mcp router endpoint (which has no per-daemon
+	// manifest port to resolve), per the descriptor-proxy design §5.
+	// Empty preserves the legacy --server/--daemon behavior for every
+	// existing caller.
+	RelayURL string
 }
 
 // Client is the OS-/format-abstracted interface for a single MCP client config file.
