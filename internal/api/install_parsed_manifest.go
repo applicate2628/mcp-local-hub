@@ -20,7 +20,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
+
+	"github.com/gofrs/flock"
 
 	"mcp-local-hub/internal/config"
 )
@@ -90,17 +93,53 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 		return "", fmt.Errorf("preflight: %w", err)
 	}
 
+	// 1a. FIX 4 — fail-loud on StartAfterWrite for a workspace-scoped fan-out
+	// install. A workspace-scoped DaemonTemplate manifest with a non-empty
+	// workspaces snapshot produces ZERO scheduler tasks from BuildPlanWithOpts,
+	// so executeInstallTo's Pass B would iterate an empty createdTasks set and
+	// start NO daemon — a silent no-op. The per-workspace serena daemons start
+	// via the supervisor RECONCILER once it observes the new intent, NOT via
+	// this seam's Pass B. Honoring StartAfterWrite here is therefore impossible;
+	// returning a clear error BEFORE any mutation beats a silent no-start (per
+	// the operational-contract failure-transparency discipline).
+	if m.DaemonTemplate != nil && len(opts.Workspaces) > 0 && opts.StartAfterWrite {
+		return "", fmt.Errorf("StartAfterWrite is not supported for workspace-scoped fan-out installs; per-workspace daemons start via the supervisor reconciler after the intent write — call with StartAfterWrite=false")
+	}
+
 	stateDir, err := DaemonStateDir()
 	if err != nil {
 		return "", fmt.Errorf("resolve state dir: %w", err)
 	}
 	intentPath = joinStateFilePath(stateDir, supervisorIntentFileLeaf)
 
-	// Build the intent file we intend to write up front so the pre-flight
-	// dry-write exercises the same payload and the same secure-write
-	// pipeline the real write will use. priorIntent + priorExisted drive the
-	// rollback restore.
-	desiredIntent, priorIntent, priorExisted, err := a.buildMergedSupervisorIntent(m, intentPath, opts.Workspaces)
+	// FIX 1 — atomic read-merge-write of supervisor-intent.json.
+	//
+	// The read (buildMergedSupervisorIntent) → merge → write sequence must be
+	// serialized as ONE critical section against every other supervisor-intent
+	// writer; otherwise two concurrent InstallParsedManifest calls for different
+	// servers each read a stale snapshot, each merge in only THEIR rows, and the
+	// later writer clobbers the earlier writer's sibling-server daemon rows.
+	//
+	// We acquire the canonical per-file flock (supervisor-intent.json.lock — the
+	// same `<path>.lock` leaf WriteStateFileAtomic uses, so this also serializes
+	// against migration / autostart / post-success intent writers across the
+	// process AND across processes) and hold it across the read-merge AND the
+	// commit inside executeInstallTo's intermediate hook. Because we already
+	// hold the lock, the inner commit + rollback restore use the LOCK-FREE
+	// secure-write body (writeSupervisorIntentLockHeld) — re-entering
+	// WriteSupervisorIntent (which re-acquires the same flock) would deadlock,
+	// exactly the readIntentLocked/writeIntentLocked split daemon_intent.go uses.
+	lock := flock.New(intentPath + supervisorIntentLockSuffix)
+	if err := lock.Lock(); err != nil {
+		return "", fmt.Errorf("supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, err)
+	}
+	defer func() { _ = lock.Unlock() }()
+
+	// Build the intent file we intend to write up front (under the held lock)
+	// so the pre-flight dry-write exercises the same payload and the same
+	// secure-write pipeline the real write will use. priorIntent + priorExisted
+	// drive the rollback restore.
+	desiredIntent, priorIntent, priorExisted, err := a.buildMergedSupervisorIntent(m, intentPath, opts.Workspaces, w)
 	if err != nil {
 		return "", err
 	}
@@ -108,7 +147,9 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	// 2. Pre-flight intent-write gate: dry-write to a temp path. No rollback
 	// push — this is a read-only-ish probe that leaves no committed side
 	// effect (the temp file is removed immediately). SKIPPED on dry-run: a
-	// dry run must not do any flock-guarded disk I/O.
+	// dry run must not do any flock-guarded disk I/O. The probe targets a
+	// DISTINCT ".preflight" path with its OWN ".preflight.lock" leaf, so it
+	// never re-acquires the supervisor-intent.json.lock we hold here.
 	if !opts.DryRun {
 		if err := preflightSupervisorIntentWrite(stateDir, desiredIntent); err != nil {
 			return "", fmt.Errorf("pre-flight supervisor-intent write: %w", err)
@@ -127,16 +168,18 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 
 	// 4. Audit-first + execute, with the supervisor-intent write folded into
 	// executeInstallTo's rollback stack via the intermediate hook. On dry-run
-	// installPlan prints the plan and returns without invoking the hook.
+	// installPlan prints the plan and returns without invoking the hook. The
+	// write + rollback restore run LOCK-FREE because the supervisor-intent
+	// flock is already held by this function (see FIX 1 above).
 	var intermediate intentWriteStep = func() (func(), error) {
-		if werr := WriteSupervisorIntent(intentPath, desiredIntent); werr != nil {
+		if werr := writeSupervisorIntentLockHeld(intentPath, desiredIntent); werr != nil {
 			return nil, fmt.Errorf("write supervisor intent %s: %w", intentPath, werr)
 		}
 		// Compensating undo: restore the prior file content verbatim, or
 		// remove the file entirely if it did not exist before this install.
 		undo := func() {
 			if priorExisted {
-				if rerr := WriteSupervisorIntent(intentPath, priorIntent); rerr != nil {
+				if rerr := writeSupervisorIntentLockHeld(intentPath, priorIntent); rerr != nil {
 					fmt.Fprintf(w, "  rollback: restore prior supervisor-intent failed: %v\n", rerr)
 				} else {
 					fmt.Fprintf(w, "  rollback: restored prior supervisor-intent.json\n")
@@ -152,12 +195,22 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 		return undo, nil
 	}
 
+	// FIX 2 — skip scheduler prune for workspace-scoped (DaemonTemplate)
+	// installs. A workspace-scoped manifest yields ZERO SchedulerTasks, but
+	// executeInstallTo's full-install reconcile would then prune EVERY existing
+	// mcp-local-hub-<server>-* scheduler task against an empty planned set —
+	// destroying registered serena workspace tasks before the intent is even
+	// written. Workspace-scoped daemons live in supervisor-intent.json, not in
+	// scheduler tasks, so there is nothing for this seam to reconcile. Legacy
+	// callers (api.Install et al.) pass non-DaemonTemplate manifests and leave
+	// SkipSchedulerPrune false, so their reconcile behavior is unchanged.
 	if err := a.installPlan(ctx, m, plan, installPlanOpts{
-		Writer:       w,
-		DaemonFilter: "",
-		DryRun:       opts.DryRun,
-		StartTasks:   opts.StartAfterWrite,
-		Intermediate: intermediate,
+		Writer:             w,
+		DaemonFilter:       "",
+		DryRun:             opts.DryRun,
+		StartTasks:         opts.StartAfterWrite,
+		Intermediate:       intermediate,
+		SkipSchedulerPrune: m.DaemonTemplate != nil,
 	}); err != nil {
 		return "", err
 	}
@@ -193,7 +246,7 @@ const supervisorIntentFileLeaf = "supervisor-intent.json"
 //     workspaces). This keeps the api.Install path and the
 //     template-only-no-workspaces path byte-identical to the pre-D.3b
 //     behavior.
-func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath string, workspaces []WorkspaceEntry) (merged, prior *SupervisorIntentFile, priorExisted bool, err error) {
+func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath string, workspaces []WorkspaceEntry, w io.Writer) (merged, prior *SupervisorIntentFile, priorExisted bool, err error) {
 	prior, existed, err := readSupervisorIntentForMerge(intentPath)
 	if err != nil {
 		return nil, nil, false, err
@@ -206,7 +259,7 @@ func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath s
 		}
 		kept = append(kept, d)
 	}
-	kept = append(kept, serenaOrPlanDaemons(m, workspaces)...)
+	kept = append(kept, serenaOrPlanDaemons(m, workspaces, w)...)
 
 	merged = &SupervisorIntentFile{
 		Version:           1,
@@ -229,8 +282,17 @@ func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath s
 // m.Kind == KindWorkspaceScoped, and len(workspaces) > 0 (returning nil
 // otherwise), so a non-workspace-scoped manifest or an empty workspaces
 // snapshot deterministically takes the plan-derived branch here.
-func serenaOrPlanDaemons(m *config.ServerManifest, workspaces []WorkspaceEntry) []SupervisorDaemon {
+func serenaOrPlanDaemons(m *config.ServerManifest, workspaces []WorkspaceEntry, w io.Writer) []SupervisorDaemon {
 	if m.DaemonTemplate != nil && len(workspaces) > 0 {
+		// FIX 3 — drop stale workspace rows (path no longer exists on disk)
+		// BEFORE the fan-out. BuildSupervisorDaemonsForSerena's contract
+		// (supervisor_intent_build.go §"Filesystem existence") leaves stale-
+		// path filtering to the caller: it emits a descriptor for every row
+		// verbatim, and the supervisor sets cmd.Dir = d.Workspace
+		// unconditionally before cmd.Start, so a removed/moved workspace dir
+		// makes the daemon spawn-loop. Filter here and emit an operator-
+		// visible warn per dropped row so the prune is never silent.
+		live := filterExistingWorkspaceRows(m.Name, workspaces, w)
 		// Resolve the mcphub binary the supervisor will exec for each
 		// descriptor. canonicalMcphubPath only fails when `mcphub setup`
 		// has not run, which the install preflight already surfaces
@@ -246,11 +308,75 @@ func serenaOrPlanDaemons(m *config.ServerManifest, workspaces []WorkspaceEntry) 
 		// diagnostic provenance only (the supervisor spawns from the
 		// self-sufficient argv, not the hash). A later slice may thread a
 		// real hash through.
-		if serena := BuildSupervisorDaemonsForSerena(m, workspaces, "", mcphubPath); serena != nil {
+		if serena := BuildSupervisorDaemonsForSerena(m, live, "", mcphubPath); serena != nil {
 			return serena
 		}
 	}
 	return supervisorDaemonsFromPlan(m)
+}
+
+// filterExistingWorkspaceRows returns the subset of workspaces whose
+// WorkspacePath still resolves to an existing directory entry on disk. A row
+// whose path is absent (deleted / moved workspace) is dropped and a warn is
+// emitted to w AND to supervisor-events.log (best-effort) so the skipped row
+// is operator-visible rather than silently pruned. A row with an empty path is
+// passed through unchanged — the fan-out helper itself skips empty-path rows,
+// and statting "" would spuriously report not-exist.
+//
+// os.Stat (not os.Lstat) is intentional: a workspace reachable only through a
+// symlinked directory is still a live workspace; we care whether the target
+// resolves, not whether the entry itself is a symlink.
+func filterExistingWorkspaceRows(server string, workspaces []WorkspaceEntry, w io.Writer) []WorkspaceEntry {
+	live := make([]WorkspaceEntry, 0, len(workspaces))
+	for _, ws := range workspaces {
+		if ws.WorkspacePath == "" {
+			live = append(live, ws)
+			continue
+		}
+		if _, statErr := os.Stat(ws.WorkspacePath); statErr != nil && os.IsNotExist(statErr) {
+			if w != nil {
+				fmt.Fprintf(w, "⚠ Skipping stale workspace %q (path no longer exists): %s daemon row dropped from supervisor-intent\n", ws.WorkspacePath, server)
+			}
+			emitStaleWorkspaceSkippedEvent(server, ws.WorkspacePath)
+			continue
+		}
+		// A non-IsNotExist stat error (permission denied, I/O error) is NOT a
+		// stale-path signal — keep the row so a transient stat failure does
+		// not silently drop a live workspace. The supervisor will surface a
+		// real spawn failure if the path is genuinely unusable.
+		live = append(live, ws)
+	}
+	return live
+}
+
+// emitStaleWorkspaceSkippedEvent records a best-effort warn to
+// supervisor-events.log when a stale workspace row is dropped during the
+// install fan-out. Mirrors emitStateFileFallbackEvent's channel discipline:
+// supervisor-events.log is the canonical audit channel for supervisor-domain
+// events; a log failure never blocks the install.
+func emitStaleWorkspaceSkippedEvent(server, workspacePath string) {
+	stateDir, sdErr := DaemonStateDir()
+	if sdErr != nil {
+		return
+	}
+	logger, openErr := OpenSupervisorEventLog(filepath.Join(stateDir, SupervisorEventLogFileLeaf))
+	if openErr != nil {
+		return
+	}
+	defer func() { _ = logger.Close() }()
+	_ = logger.Emit(SupervisorEvent{
+		SchemaVersion: SupervisorEventSchemaVersion,
+		TS:            time.Now().UTC().Format(time.RFC3339Nano),
+		Severity:      SupervisorEventSeverityWarn,
+		Source:        "reconcile",
+		Event:         "stale-workspace-skipped",
+		TaskName:      SerenaTaskNameForWorkspace(workspacePath),
+		Body: map[string]any{
+			"server":         server,
+			"workspace_path": workspacePath,
+			"reason":         "workspace path no longer exists on disk; daemon row dropped before supervisor-intent write to avoid cmd.Dir spawn-loop",
+		},
+	})
 }
 
 // supervisorDaemonsFromPlan derives the SupervisorDaemon descriptors for a

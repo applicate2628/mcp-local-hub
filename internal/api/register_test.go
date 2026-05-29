@@ -1392,6 +1392,8 @@ type fakeScheduler struct {
 	runCount          int               // total Run invocations
 	runHook           func(name string) // optional hook called at the top of Run before the induced-failure check
 	runNames          []string          // ordered list of task names passed to Run
+	listSeed          []scheduler.TaskStatus // pre-seeded tasks returned (prefix-filtered) by List; empty by default
+	deleteNames       []string               // ordered list of task names passed to Delete (prune observability)
 }
 
 func (f *fakeScheduler) Create(spec scheduler.TaskSpec) error {
@@ -1415,7 +1417,22 @@ func (f *fakeScheduler) Create(spec scheduler.TaskSpec) error {
 	}
 	return nil
 }
-func (f *fakeScheduler) Delete(name string) error { delete(f.tasks, name); return nil }
+func (f *fakeScheduler) Delete(name string) error {
+	delete(f.tasks, name)
+	f.deleteNames = append(f.deleteNames, name)
+	// Mirror real Delete on the seeded-List surface so a pruned task no longer
+	// appears in subsequent List calls (and tests can assert deletion via the
+	// remaining listSeed). Match on bare form (List strips the leading "\").
+	bare := strings.TrimPrefix(name, "\\")
+	kept := f.listSeed[:0]
+	for _, t := range f.listSeed {
+		if strings.TrimPrefix(t.Name, "\\") != bare {
+			kept = append(kept, t)
+		}
+	}
+	f.listSeed = kept
+	return nil
+}
 func (f *fakeScheduler) Run(name string) error {
 	if f.runHook != nil {
 		f.runHook(name)

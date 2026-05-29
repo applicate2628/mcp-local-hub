@@ -1641,6 +1641,15 @@ type installPlanOpts struct {
 	// Used by InstallParsedManifest to fold the supervisor-intent write into
 	// the same rollback stack; legacy callers leave it nil.
 	Intermediate intentWriteStep
+	// SkipSchedulerPrune, when true, suppresses the full-install obsolete-task
+	// reconcile (pruneObsoleteServerTasks) inside executeInstallTo. Set by
+	// InstallParsedManifest for workspace-scoped (DaemonTemplate) manifests,
+	// which produce ZERO SchedulerTasks: pruning against an empty planned set
+	// would delete every registered mcp-local-hub-<server>-* scheduler task
+	// for that server. Those daemons live in supervisor-intent.json, not in
+	// scheduler tasks, so there is nothing to reconcile here. Legacy callers
+	// leave it false (zero value), preserving their reconcile behavior exactly.
+	SkipSchedulerPrune bool
 }
 
 // installPlan is the shared materialization core between api.Install (and
@@ -1671,7 +1680,7 @@ func (a *API) installPlan(ctx context.Context, m *config.ServerManifest, plan *P
 	if err := a.recordInstallAuditPreMutation(m, opts.DaemonFilter); err != nil {
 		return err
 	}
-	return executeInstallTo(w, m, plan, a.effectiveBackupKeepN(), opts.StartTasks, opts.Intermediate)
+	return executeInstallTo(w, m, plan, a.effectiveBackupKeepN(), opts.StartTasks, opts.Intermediate, opts.SkipSchedulerPrune)
 }
 
 // createdTask pairs a scheduler.TaskSpec created in Pass A with the
@@ -1716,7 +1725,14 @@ type intentWriteStep func() (rollback func(), err error)
 // executeInstallTo returns that error with every side effect undone. Legacy
 // api.Install callers pass nil and observe bit-for-bit identical behavior
 // (they record intent via recordInstallIntentPostSuccess AFTER this returns).
-func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int, startTasks bool, intermediate intentWriteStep) error {
+//
+// skipPrune suppresses the full-install obsolete-task reconcile (step 1b). It
+// is true only for workspace-scoped (DaemonTemplate) installs through
+// InstallParsedManifest, whose plan carries ZERO SchedulerTasks — pruning
+// against an empty planned set would delete every registered
+// mcp-local-hub-<server>-* scheduler task for that server. Legacy callers pass
+// false and keep the reconcile.
+func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int, startTasks bool, intermediate intentWriteStep, skipPrune bool) error {
 	sch, err := newScheduler()
 	if err != nil {
 		return fmt.Errorf("scheduler: %w", err)
@@ -1799,7 +1815,13 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int,
 	// task from a manifest whose `weekly_refresh` flipped to false). Only
 	// safe for full installs; partial installs target one daemon and must
 	// not touch sibling tasks for daemons outside the filter.
-	if p.FullInstall {
+	//
+	// skipPrune additionally suppresses this for workspace-scoped
+	// (DaemonTemplate) installs: their plan has ZERO SchedulerTasks, so an
+	// empty planned set would prune every registered mcp-local-hub-<server>-*
+	// task. Those daemons are tracked in supervisor-intent.json, not scheduler
+	// tasks — there is nothing for this reconcile to own.
+	if p.FullInstall && !skipPrune {
 		planned := make(map[string]struct{}, len(p.SchedulerTasks))
 		for _, t := range p.SchedulerTasks {
 			planned[t.Name] = struct{}{}

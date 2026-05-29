@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"mcp-local-hub/internal/config"
@@ -23,7 +24,23 @@ func (f *fakeScheduler) Stop(string) error { return nil }
 func (f *fakeScheduler) Status(name string) (scheduler.TaskStatus, error) {
 	return scheduler.TaskStatus{Name: name}, nil
 }
-func (f *fakeScheduler) List(string) ([]scheduler.TaskStatus, error) { return nil, nil }
+
+// List returns every seeded task whose Name carries `prefix` (the same
+// HasPrefix shape the real scheduler.List uses). f.listSeed is empty by
+// default, so existing callers that never seed it observe the prior
+// nil-result behavior. The reconcile-prune path (pruneObsoleteServerTasks)
+// drives this so FIX 2's prune-skip is observable: a seeded
+// mcp-local-hub-serena-<ws> task must (or must NOT) appear in f.tasks after
+// the install depending on whether the prune ran.
+func (f *fakeScheduler) List(prefix string) ([]scheduler.TaskStatus, error) {
+	var out []scheduler.TaskStatus
+	for _, t := range f.listSeed {
+		if strings.HasPrefix(strings.TrimPrefix(t.Name, "\\"), strings.TrimPrefix(prefix, "\\")) {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
 
 // installFakeScheduler routes newScheduler() (the executeInstallTo /
 // installPlan factory seam) at the supplied fake for the duration of t.
@@ -73,7 +90,7 @@ func TestExecuteInstallTo_PassAPassB_Separation(t *testing.T) {
 		}
 
 		var buf bytes.Buffer
-		if err := executeInstallTo(&buf, m, plan, 0, false, nil); err != nil {
+		if err := executeInstallTo(&buf, m, plan, 0, false, nil, false); err != nil {
 			t.Fatalf("executeInstallTo(startTasks=false): %v", err)
 		}
 		if f.createCount != 3 {
@@ -96,7 +113,7 @@ func TestExecuteInstallTo_PassAPassB_Separation(t *testing.T) {
 		}
 
 		var buf bytes.Buffer
-		if err := executeInstallTo(&buf, m, plan, 0, true, nil); err != nil {
+		if err := executeInstallTo(&buf, m, plan, 0, true, nil, false); err != nil {
 			t.Fatalf("executeInstallTo(startTasks=true): %v", err)
 		}
 		if f.createCount != 3 {
@@ -130,7 +147,7 @@ func TestExecuteInstallTo_PassAPassB_Separation(t *testing.T) {
 		var buf bytes.Buffer
 		// A Pass B Run failure must NOT abort the install — existing
 		// warning-only contract. executeInstallTo returns nil.
-		if err := executeInstallTo(&buf, m, plan, 0, true, nil); err != nil {
+		if err := executeInstallTo(&buf, m, plan, 0, true, nil, false); err != nil {
 			t.Fatalf("executeInstallTo: Run failure must be warning-only, got error: %v", err)
 		}
 		// Pass A creates survive: all 3 tasks still present in the fake.
@@ -293,9 +310,11 @@ func TestInstallParsedManifest_FansOutPerWorkspaceDaemons(t *testing.T) {
 
 	// Two registered serena workspaces, each with a distinct path + an
 	// allocated serena port. Language MUST be the serena sentinel — the
-	// fan-out helper filters on it.
-	wsAlpha := "C:/work/alpha"
-	wsBeta := "C:/work/beta"
+	// fan-out helper filters on it. Paths must EXIST on disk: FIX 3 drops
+	// workspace rows whose path is absent before the fan-out, so use real
+	// temp dirs rather than literal placeholders.
+	wsAlpha := t.TempDir()
+	wsBeta := t.TempDir()
 	workspaces := []WorkspaceEntry{
 		{
 			WorkspaceKey:  WorkspaceKey(wsAlpha),
@@ -452,5 +471,254 @@ func TestInstallParsedManifest_DryRun_NoWriteNoPath(t *testing.T) {
 	// No scheduler mutation on dry-run.
 	if f.createCount != 0 || f.runCount != 0 {
 		t.Errorf("DryRun must not mutate the scheduler: createCount=%d runCount=%d, want 0/0", f.createCount, f.runCount)
+	}
+}
+
+// globalSingleDaemonManifest is a minimal global manifest with exactly one
+// logon daemon and no clients/weekly. Used by the FIX-1 concurrency test so
+// each concurrent install contributes exactly one supervisor-intent daemon row
+// keyed by its own server name.
+func globalSingleDaemonManifest(name string, port int) *config.ServerManifest {
+	return &config.ServerManifest{
+		Name:      name,
+		Kind:      config.KindGlobal,
+		Transport: config.TransportNativeHTTP,
+		Command:   "go", // on PATH whenever `go test` runs (Preflight LookPath)
+		Daemons:   []config.DaemonSpec{{Name: "default", Port: port}},
+	}
+}
+
+// TestInstallParsedManifest_ConcurrentInstalls_PreserveSiblingRows is the
+// FIX-1 guard: two InstallParsedManifest calls for DIFFERENT servers running
+// concurrently must not lose each other's daemon rows. Without the
+// flock-guarded read-merge-write critical section, each goroutine reads a
+// stale supervisor-intent snapshot, merges in only ITS server's rows, and the
+// later writer clobbers the earlier writer's sibling row. The shared
+// daemonStateRootOverride + schedulerFactoryFn are process-global, so both
+// goroutines hit the SAME state dir and the SAME fake scheduler — exactly the
+// contended surface the race exploits.
+func TestInstallParsedManifest_ConcurrentInstalls_PreserveSiblingRows(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	mAlpha := globalSingleDaemonManifest("alpha", 9311)
+	mBeta := globalSingleDaemonManifest("beta", 9312)
+
+	a := NewAPI()
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	for i, m := range []*config.ServerManifest{mAlpha, mBeta} {
+		wg.Add(1)
+		go func(idx int, mm *config.ServerManifest) {
+			defer wg.Done()
+			var buf bytes.Buffer
+			_, err := a.InstallParsedManifest(context.Background(), mm, InstallParsedManifestOpts{
+				Writer:          &buf,
+				StartAfterWrite: false,
+			})
+			errs[idx] = err
+		}(i, m)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent InstallParsedManifest[%d]: %v", i, err)
+		}
+	}
+
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	written, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+	servers := map[string]bool{}
+	for _, d := range written.Daemons {
+		servers[d.Server] = true
+	}
+	// BOTH servers' rows must survive the interleaved read-merge-write.
+	if !servers["alpha"] {
+		t.Errorf("alpha daemon row lost (concurrent write clobbered it); written daemons: %+v", written.Daemons)
+	}
+	if !servers["beta"] {
+		t.Errorf("beta daemon row lost (concurrent write clobbered it); written daemons: %+v", written.Daemons)
+	}
+}
+
+// TestInstallParsedManifest_WorkspaceScoped_SkipsPrune is the FIX-2 guard: a
+// workspace-scoped (DaemonTemplate) install produces ZERO SchedulerTasks, so
+// the full-install reconcile would otherwise prune EVERY existing
+// mcp-local-hub-serena-* scheduler task against an empty planned set. The
+// prune must be skipped for DaemonTemplate manifests so a registered serena
+// workspace task survives the intent write.
+func TestInstallParsedManifest_WorkspaceScoped_SkipsPrune(t *testing.T) {
+	daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	// Seed an existing serena scheduler task for a registered workspace. If the
+	// prune ran (the bug), executeInstallTo would Delete it because it is
+	// absent from the empty planned set.
+	wsExisting := t.TempDir()
+	seededTaskBare := "mcp-local-hub-serena-" + WorkspaceKey(wsExisting)
+	f.listSeed = []scheduler.TaskStatus{{Name: "\\" + seededTaskBare}}
+	installFakeScheduler(t, f)
+
+	workspaces := []WorkspaceEntry{{
+		WorkspaceKey:  WorkspaceKey(wsExisting),
+		WorkspacePath: wsExisting,
+		Language:      SerenaLanguageSentinel,
+		Backend:       "serena",
+		Port:          9401,
+	}}
+
+	m := serenaTemplateManifest()
+	a := NewAPI()
+	var buf bytes.Buffer
+	if _, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
+		Writer:          &buf,
+		Workspaces:      workspaces,
+		StartAfterWrite: false,
+	}); err != nil {
+		t.Fatalf("InstallParsedManifest(workspace-scoped): %v", err)
+	}
+
+	// The seeded serena scheduler task must NOT have been deleted.
+	for _, deleted := range f.deleteNames {
+		if strings.TrimPrefix(deleted, "\\") == seededTaskBare {
+			t.Errorf("seeded serena task %q was pruned; prune must be skipped for workspace-scoped installs (deleteNames=%v)", seededTaskBare, f.deleteNames)
+		}
+	}
+	// And it still appears in a subsequent List (Delete removes from listSeed).
+	remaining, _ := f.List("mcp-local-hub-serena-")
+	var stillThere bool
+	for _, t2 := range remaining {
+		if strings.TrimPrefix(t2.Name, "\\") == seededTaskBare {
+			stillThere = true
+		}
+	}
+	if !stillThere {
+		t.Errorf("seeded serena task %q no longer listed after install; it was destructively pruned", seededTaskBare)
+	}
+}
+
+// TestInstallParsedManifest_FiltersStaleWorkspaceRows is the FIX-3 guard: a
+// workspace row whose path no longer exists on disk must be dropped before the
+// fan-out (so the supervisor never sets cmd.Dir to a dead path and spawn-loops)
+// AND the drop must be operator-visible (a warn on the writer), never silent.
+func TestInstallParsedManifest_FiltersStaleWorkspaceRows(t *testing.T) {
+	daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	wsLive := t.TempDir()                                   // exists
+	wsStale := filepath.Join(t.TempDir(), "deleted-ws-dir") // absent (never created)
+
+	workspaces := []WorkspaceEntry{
+		{
+			WorkspaceKey:  WorkspaceKey(wsLive),
+			WorkspacePath: wsLive,
+			Language:      SerenaLanguageSentinel,
+			Backend:       "serena",
+			Port:          9401,
+		},
+		{
+			WorkspaceKey:  WorkspaceKey(wsStale),
+			WorkspacePath: wsStale,
+			Language:      SerenaLanguageSentinel,
+			Backend:       "serena",
+			Port:          9402,
+		},
+	}
+
+	m := serenaTemplateManifest()
+	a := NewAPI()
+	var buf bytes.Buffer
+	intentPath, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
+		Writer:          &buf,
+		Workspaces:      workspaces,
+		StartAfterWrite: false,
+	})
+	if err != nil {
+		t.Fatalf("InstallParsedManifest: %v", err)
+	}
+
+	written, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+	var serenaRows []SupervisorDaemon
+	for _, d := range written.Daemons {
+		if d.Server == "serena" {
+			serenaRows = append(serenaRows, d)
+		}
+	}
+	// Exactly one serena row — the live workspace; the stale one was dropped.
+	if len(serenaRows) != 1 {
+		t.Fatalf("serena daemon rows = %d, want 1 (stale-path row must be dropped); rows: %+v", len(serenaRows), serenaRows)
+	}
+	if serenaRows[0].Workspace != wsLive {
+		t.Errorf("surviving serena row workspace = %q, want %q (the live path)", serenaRows[0].Workspace, wsLive)
+	}
+	// The stale-path task name must be absent entirely.
+	staleTask := SerenaTaskNameForWorkspace(wsStale)
+	for _, d := range serenaRows {
+		if d.TaskName == staleTask {
+			t.Errorf("stale workspace task %q must not appear in the written intent", staleTask)
+		}
+	}
+	// The drop is operator-visible: a warn naming the stale path on the writer.
+	// Match the warn keyword + the path leaf (filepath.Base has no separators,
+	// so the assertion is robust to %q backslash-escaping in the message body).
+	out := buf.String()
+	if !strings.Contains(out, "stale workspace") || !strings.Contains(out, filepath.Base(wsStale)) {
+		t.Errorf("expected an operator-visible warn naming the stale workspace %q, got output:\n%s", wsStale, out)
+	}
+}
+
+// TestInstallParsedManifest_RejectsStartAfterWriteForFanOut is the FIX-4 guard:
+// a workspace-scoped DaemonTemplate manifest with a non-empty Workspaces
+// snapshot AND StartAfterWrite=true cannot honor the start (per-workspace
+// serena daemons start via the supervisor reconciler, not this seam's Pass B),
+// so it must fail loud BEFORE any mutation — no intent written, no scheduler
+// touched.
+func TestInstallParsedManifest_RejectsStartAfterWriteForFanOut(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	wsLive := t.TempDir()
+	workspaces := []WorkspaceEntry{{
+		WorkspaceKey:  WorkspaceKey(wsLive),
+		WorkspacePath: wsLive,
+		Language:      SerenaLanguageSentinel,
+		Backend:       "serena",
+		Port:          9401,
+	}}
+
+	m := serenaTemplateManifest()
+	a := NewAPI()
+	var buf bytes.Buffer
+	intentPath, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
+		Writer:          &buf,
+		Workspaces:      workspaces,
+		StartAfterWrite: true,
+	})
+	if err == nil {
+		t.Fatalf("InstallParsedManifest(StartAfterWrite=true, fan-out): want error, got nil (intentPath=%q)", intentPath)
+	}
+	if !strings.Contains(err.Error(), "StartAfterWrite is not supported") {
+		t.Errorf("error = %q, want it to name the unsupported StartAfterWrite fan-out case", err.Error())
+	}
+	// No mutation: intent file absent, no scheduler create/run.
+	committed := filepath.Join(stateDir, "supervisor-intent.json")
+	if _, statErr := os.Stat(committed); !os.IsNotExist(statErr) {
+		t.Errorf("supervisor-intent.json must not exist after a fail-loud reject; stat err = %v", statErr)
+	}
+	if f.createCount != 0 || f.runCount != 0 {
+		t.Errorf("no scheduler mutation allowed on fail-loud reject: createCount=%d runCount=%d", f.createCount, f.runCount)
 	}
 }

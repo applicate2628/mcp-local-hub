@@ -164,3 +164,36 @@ func isLegacyOneshotDaemon(d SupervisorDaemon) bool {
 func WriteSupervisorIntent(path string, f *SupervisorIntentFile) error {
 	return WriteStateFileAtomic(path, f)
 }
+
+// supervisorIntentLockSuffix is the gofrs/flock lock-leaf suffix for
+// supervisor-intent.json. It is exactly the `<path>.lock` form
+// WriteStateFileAtomic derives internally (state_file_helper.go:85), so a
+// caller that wants an atomic read-modify-write across the supervisor-intent
+// file can acquire `intentPath + supervisorIntentLockSuffix` and serialize
+// against WriteStateFileAtomic writers (migration, autostart,
+// InstallParsedManifest) across goroutines AND processes.
+const supervisorIntentLockSuffix = ".lock"
+
+// writeSupervisorIntentLockHeld marshals + writes the supervisor-intent file
+// WITHOUT acquiring the per-file flock, for callers that already hold
+// `path + supervisorIntentLockSuffix`. It mirrors daemon_intent.go's
+// readIntentLocked/writeIntentLocked split: WriteSupervisorIntent (and the
+// WriteStateFileAtomic it wraps) re-acquires the same flock, so calling it
+// while the lock is held would DEADLOCK on Windows LockFileEx. This helper
+// runs only the lock-free secure-write body (marshal + mkdir +
+// secureWriteStateFileWithOperatorOpt), preserving the hardened DACL/atomic-
+// rename pipeline and the MCPHUB_REQUIRE_SINGLE_USER_HOME posture.
+//
+// PRECONDITION: the caller MUST hold the supervisor-intent flock. Calling this
+// without the lock loses the cross-process write serialization
+// WriteStateFileAtomic otherwise provides.
+func writeSupervisorIntentLockHeld(path string, f *SupervisorIntentFile) error {
+	raw, err := json.MarshalIndent(f, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+	return secureWriteStateFileWithOperatorOpt(path, raw)
+}
