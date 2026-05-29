@@ -29,8 +29,10 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -419,6 +421,53 @@ func defaultRouterReadinessPing(ctx context.Context, port int) error {
 	// broke the fail-closed discovery guarantee).
 	if resp.StatusCode != http.StatusMethodNotAllowed || !strings.Contains(strings.ToUpper(resp.Header.Get("Allow")), "POST") {
 		return fmt.Errorf("port %d responded but is not the mcphub serena router (HEAD %s -> status %d, Allow=%q; expected 405 with Allow: POST) — the GUI may not be up, or the pidport is stale and the port was reused by another service", port, SerenaRouterURLPath, resp.StatusCode, resp.Header.Get("Allow"))
+	}
+	// Step 2 (bot PR #248 P2): verify the router actually SERVES the MCP session
+	// lifecycle before we point any client at it. The HEAD/405 check above only
+	// proves the serena route exists; a real client's FIRST request is an MCP
+	// `initialize` (no workspace path-arg), and the current router rejects any
+	// POST without params.name — so a client pointed at it would fail at session
+	// setup. This probe fails CLOSED until the router-completion phase synthesizes
+	// the non-tool lifecycle, so the reconcile never rewrites a client to a router
+	// that cannot complete `initialize`.
+	return mcpInitializeProbe(ctx, port)
+}
+
+// mcpInitializeProbe POSTs a minimal MCP `initialize` request to the serena
+// router and returns nil only if the router answers with a JSON-RPC RESULT
+// (i.e. it serves the session lifecycle). A non-200 status, a JSON-RPC error, or
+// a missing result means the router does not yet handle the non-tool lifecycle
+// (the pre-router-completion state, where it only routes tool calls by
+// params.name) → fail closed. Loopback-only; same 2s budget as the HEAD ping.
+func mcpInitializeProbe(ctx context.Context, port int) error {
+	url := fmt.Sprintf("http://127.0.0.1:%d%s", port, SerenaRouterURLPath)
+	reqCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	const initBody = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"mcphub-reconcile-probe","version":"0"}}}`
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, url, strings.NewReader(initBody))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("router at port %d does not serve the MCP lifecycle: initialize -> status %d (the /serena/mcp router must synthesize/handle initialize before clients are pointed at it; body=%.200s)", port, resp.StatusCode, string(raw))
+	}
+	var rpc struct {
+		Result json.RawMessage `json:"result"`
+		Error  json.RawMessage `json:"error"`
+	}
+	if jerr := json.Unmarshal(raw, &rpc); jerr != nil {
+		return fmt.Errorf("router at port %d returned a non-JSON-RPC initialize response: %w", port, jerr)
+	}
+	if len(rpc.Error) > 0 || len(rpc.Result) == 0 {
+		return fmt.Errorf("router at port %d rejected MCP initialize (no result; error=%s) — it does not yet serve the non-tool lifecycle (router-completion phase pending)", port, string(rpc.Error))
 	}
 	return nil
 }

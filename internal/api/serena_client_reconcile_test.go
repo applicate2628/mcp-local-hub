@@ -220,22 +220,48 @@ func TestDefaultRouterReadinessPing_RequiresSerenaRouterSignature(t *testing.T) 
 		t.Helper()
 		return ts.Listener.Addr().(*net.TCPAddr).Port
 	}
-
-	// Serena-router signature: 405 + Allow: POST on the router path → ping passes.
-	router := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == SerenaRouterURLPath && r.Method != http.MethodPost {
-			w.Header().Set("Allow", "POST")
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer router.Close()
-	if err := defaultRouterReadinessPing(context.Background(), portOf(t, router)); err != nil {
-		t.Errorf("serena-router signature (405 + Allow: POST) must pass; got %v", err)
+	// serenaRouterStub mimics the GUI serena router: a non-POST request gets
+	// 405 + Allow: POST (the route signature); a POST (our MCP initialize probe)
+	// gets either a valid JSON-RPC initialize result (serveLifecycle=true →
+	// router-completion landed) or a params.name rejection (serveLifecycle=false →
+	// the current tool-only router that has no MCP lifecycle).
+	serenaRouterStub := func(serveLifecycle bool) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != SerenaRouterURLPath {
+				http.NotFound(w, r)
+				return
+			}
+			if r.Method != http.MethodPost {
+				w.Header().Set("Allow", "POST")
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			if serveLifecycle {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","serverInfo":{"name":"serena"},"capabilities":{}}}`))
+				return
+			}
+			http.Error(w, "missing required field: params.name", http.StatusBadRequest)
+		}))
 	}
 
-	// Unrelated server returning 200 on everything → ping must fail closed.
+	// (1) Full router (405 signature AND serves initialize) → ping passes.
+	full := serenaRouterStub(true)
+	defer full.Close()
+	if err := defaultRouterReadinessPing(context.Background(), portOf(t, full)); err != nil {
+		t.Errorf("serena router that serves initialize must pass; got %v", err)
+	}
+
+	// (2) Serena-router signature but NO MCP lifecycle (the current tool-only
+	//     router) → fail closed (bot PR #248 P2): never point a client at a
+	//     router that cannot complete initialize.
+	noLifecycle := serenaRouterStub(false)
+	defer noLifecycle.Close()
+	if err := defaultRouterReadinessPing(context.Background(), portOf(t, noLifecycle)); err == nil {
+		t.Errorf("a serena router that rejects initialize must fail closed; got nil")
+	}
+
+	// (3) Unrelated server (200 on everything) → fails the 405/Allow signature.
 	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -244,7 +270,7 @@ func TestDefaultRouterReadinessPing_RequiresSerenaRouterSignature(t *testing.T) 
 		t.Errorf("a non-router server (200 OK) must fail closed; got nil")
 	}
 
-	// Unrelated server returning 404 → ping must fail closed.
+	// (4) Unrelated server (404) → fails the 405/Allow signature.
 	notfound := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	}))
