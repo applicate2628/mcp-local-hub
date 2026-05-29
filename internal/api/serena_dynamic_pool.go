@@ -53,11 +53,19 @@ const (
 	serenaDefaultContext = "codex"
 
 	// serenaDefaultPortPoolStart / serenaDefaultPortPoolEnd is the default port
-	// range serena workspace daemons allocate from. Anchored on the serena port
-	// the repo already uses (the legacy global daemons bound 9121/9122 —
-	// servers/serena/manifest.yaml) and widened to give the dynamic pool room
-	// for one daemon per registered workspace.
-	serenaDefaultPortPoolStart = 9121
+	// range serena workspace daemons allocate from. It starts ABOVE the legacy
+	// global serena daemon port(s): servers/serena/manifest.yaml binds the shipped
+	// `unified` daemon to 9121 (and a 2-client claude/codex split would add 9122).
+	// The fallback pool MUST NOT overlap those — `mcphub workspace register` can
+	// run BEFORE the Phase 4 cutover removes the legacy daemon, and
+	// AllocateSerenaPort only skips ports already in workspaces.yaml (it does NOT
+	// probe OS-bound ports), so a pool starting at 9121 would hand a new workspace
+	// daemon the live legacy daemon's port and collide when the proxy fans the
+	// sentinel row out to that external port (bot PR #247 P1). Start at 9123 to
+	// clear 9121+9122; the upstream child binds external+NativeHTTPInternalPortOffset
+	// (19123+), so the upstream side never collides either. End at 9199 (below the
+	// LSP workspace-proxy pool at 9200+).
+	serenaDefaultPortPoolStart = 9123
 	serenaDefaultPortPoolEnd   = 9199
 )
 
