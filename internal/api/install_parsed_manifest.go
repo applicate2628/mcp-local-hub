@@ -29,6 +29,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -115,6 +116,45 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	}
 	if m.Kind != config.KindWorkspaceScoped || m.DaemonTemplate == nil {
 		return "", fmt.Errorf("InstallParsedManifest only installs kind=%q dynamic-pool manifests with a daemon_template (manifest %q is kind=%q, has daemon_template=%t); install global or legacy manifests through (*API).Install", config.KindWorkspaceScoped, m.Name, m.Kind, m.DaemonTemplate != nil)
+	}
+	// native-http gate (design §3.1). The serena-proxy no longer re-validates
+	// transport at runtime (it reads a materialized RuntimeSpec, not the
+	// manifest). A stdio-bridge + daemon_template + kind:workspace-scoped
+	// manifest PASSES config.ServerManifest.Validate today (Validate rejects
+	// daemon_template only for kind!=workspace-scoped or transport=remote-http
+	// — internal/config/manifest.go), so this is the only thing stopping a
+	// non-native-http dynamic-pool manifest from reaching the
+	// HTTP-reverse-proxy spawn path. Reject BEFORE any mutation, same
+	// fail-loud style as the kind+template gate above. Additive admission
+	// tightening only — the write/rollback/deferred-start shape is unchanged.
+	if m.Transport != config.TransportNativeHTTP {
+		return "", fmt.Errorf("InstallParsedManifest only installs transport=%q dynamic-pool manifests (manifest %q is transport=%q); a daemon_template manifest spawns an HTTP reverse-proxy, which requires native-http", config.TransportNativeHTTP, m.Name, m.Transport)
+	}
+	// Empty-context gate (bot PR #246 P2). The per-workspace fan-out
+	// (BuildSupervisorDaemonsForSerena → buildSerenaChildArgs, design §5)
+	// APPENDS `--context <DaemonTemplate.Context>` into every materialized
+	// RuntimeSpec.ChildArgs. config.ServerManifest.Validate does NOT check
+	// Context (only port_pool + extra_args_template — internal/config/manifest.go),
+	// so a manifest with an absent/blank daemon_template.context PASSES Validate
+	// but would materialize `--context ""` and the supervisor would respawn a
+	// serena child with an invalid empty context. Reject BEFORE any mutation,
+	// same fail-loud style as the kind+template+transport gates above. This is
+	// the install-time mirror of the build-time skip in
+	// BuildSupervisorDaemonsForSerena. Additive admission tightening only.
+	if strings.TrimSpace(m.DaemonTemplate.Context) == "" {
+		return "", fmt.Errorf("InstallParsedManifest: manifest %q has an empty daemon_template.context; the per-workspace serena proxy materializes --context <value> for the child, so a non-empty context is required (set daemon_template.context in the manifest)", m.Name)
+	}
+
+	// Duplicate-context gate (bot PR #246 r2 P2). The fan-out APPENDS
+	// `--context <DaemonTemplate.Context>`, so a --context token already in
+	// base_args / extra_args_template would double the flag. FAIL LOUD here,
+	// before any mutation: BuildSupervisorDaemonsForSerena returns nil for this
+	// shape (defense-in-depth), but a nil fan-out is merged as "this server has
+	// no daemons" and would SILENTLY remove the server's existing per-workspace
+	// rows (bot finding). config.ServerManifest.Validate also rejects it, but this
+	// seam accepts a PRE-PARSED manifest that may not have been revalidated.
+	if config.ArgsContainContextFlag(m.BaseArgs) || config.ArgsContainContextFlag(m.DaemonTemplate.ExtraArgsTemplate) {
+		return "", fmt.Errorf("InstallParsedManifest: manifest %q places --context in base_args or extra_args_template; the per-workspace serena proxy appends --context <daemon_template.context> at spawn, so a token here would duplicate the flag — remove it (context comes solely from daemon_template.context)", m.Name)
 	}
 
 	// 1a. Preflight: check-only gate shared with the legacy install paths.
@@ -206,6 +246,45 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	desiredIntent, priorIntent, priorExisted, err := a.buildMergedSupervisorIntent(m, intentPath, opts.Workspaces, w)
 	if err != nil {
 		return "", err
+	}
+
+	// §7.1 spec-bearing supervisor-intent write gate (bot PR #246 r2 P2).
+	// desiredIntent may carry runtime_spec rows (materializeSerenaRuntimeSpec).
+	// An ALREADY-RUNNING supervisor MAY be an OLD binary whose
+	// ReadSupervisorIntent uses DisallowUnknownFields: its watcher would reject a
+	// file carrying the new runtime_spec field, keep its stale in-memory intent,
+	// and leave split-brain (this new CLI believes the descriptor was
+	// re-materialized; the old supervisor never sees it). The only safe state for
+	// a spec-bearing write is NO supervisor running — the NEXT supervisor start is
+	// THIS binary, which reads runtime_spec. So this Phase-1 gate refuses while a
+	// supervisor is running OR while liveness is undeterminable (FAIL CLOSED,
+	// consultant PR #246 r2 #1 — assuming "not running" on a probe error would
+	// silently disable the gate on hardened hosts). Non-spec installs (no
+	// runtime_spec rows) are NOT gated — an old supervisor reads legacy/global
+	// rows fine. The cutover phase (design §7.1 / Phase 4) UPGRADES this refuse to
+	// an automatic drive of the cold-restart flow; until then the operator must
+	// STOP the running supervisor (NOT merely `install --upgrade`, which leaves a
+	// supervisor running — the any-running gate would still refuse). The check
+	// runs under the held supervisor-intent flock, immediately before the
+	// preflight + commit; the supervisor lock is a distinct primitive, so an old
+	// binary cold-starting in the tiny probe→commit window is an extreme residual
+	// edge — but it self-heals: a fresh old binary decoding the new file fails
+	// LOUD at supervisor cold start (supervise.go intent-decode hard abort), not
+	// silently.
+	if desiredIntent.HasRuntimeSpecRow() {
+		running, pid, probeErr := SupervisorRunningUnderStateDir(stateDir)
+		switch {
+		case probeErr != nil:
+			emitSpecBearingInstallRefusedEvent(m.Name, "supervisor-liveness-undeterminable", 0)
+			return "", fmt.Errorf("InstallParsedManifest: refusing to write spec-bearing serena dynamic-pool descriptors (runtime_spec) for %q: could not determine whether a supervisor is running (%v) — failing closed to avoid split-brain with an older supervisor whose intent watcher uses DisallowUnknownFields. Stop any running supervisor and resolve the probe error, then re-run the install (design §7.1)", m.Name, probeErr)
+		case running:
+			emitSpecBearingInstallRefusedEvent(m.Name, "supervisor-running", pid)
+			pidNote := ""
+			if pid > 0 {
+				pidNote = fmt.Sprintf(" (pid %d)", pid)
+			}
+			return "", fmt.Errorf("InstallParsedManifest: refusing to write spec-bearing serena dynamic-pool descriptors (runtime_spec) for %q while a supervisor is running%s: an older supervisor binary's intent watcher uses DisallowUnknownFields and would reject the new field, leaving split-brain. STOP the running supervisor first (the next start will be this binary, which reads runtime_spec) — note `mcphub install --upgrade` alone leaves a supervisor running, so the Phase-4 cold-restart driver or a manual stop is required — then re-run the install (design §7.1)", m.Name, pidNote)
+		}
 	}
 
 	// 2. Pre-flight intent-write gate: dry-write to a temp path. No rollback
@@ -543,6 +622,41 @@ func emitStaleWorkspaceSkippedEvent(server, workspacePath string) {
 			"workspace_path": workspacePath,
 			"reason":         "workspace path no longer exists on disk; daemon row dropped before supervisor-intent write to avoid cmd.Dir spawn-loop",
 		},
+	})
+}
+
+// emitSpecBearingInstallRefusedEvent records a best-effort warn to
+// supervisor-events.log when the §7.1 spec-bearing write gate refuses an install
+// (a supervisor is running, or liveness is undeterminable). This gives durable
+// audit parity with the reconcile path's legacy-serena-descriptor-skipped event
+// (consultant PR #246 r2 (d)-observability): without it, the gate refusal lived
+// only in the returned error string. Best-effort: a log failure never blocks or
+// alters the refuse — the returned error is the authoritative operator signal.
+func emitSpecBearingInstallRefusedEvent(server, reason string, pid int) {
+	stateDir, sdErr := DaemonStateDir()
+	if sdErr != nil {
+		return
+	}
+	logger, openErr := OpenSupervisorEventLog(filepath.Join(stateDir, SupervisorEventLogFileLeaf))
+	if openErr != nil {
+		return
+	}
+	defer func() { _ = logger.Close() }()
+	body := map[string]any{
+		"server": server,
+		"reason": reason,
+		"gate":   "spec-bearing-supervisor-intent-write (design §7.1)",
+	}
+	if pid > 0 {
+		body["supervisor_pid"] = pid
+	}
+	_ = logger.Emit(SupervisorEvent{
+		SchemaVersion: SupervisorEventSchemaVersion,
+		TS:            time.Now().UTC().Format(time.RFC3339Nano),
+		Severity:      SupervisorEventSeverityWarn,
+		Source:        "install",
+		Event:         "spec-bearing-install-refused",
+		Body:          body,
 	})
 }
 

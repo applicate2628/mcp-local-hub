@@ -202,8 +202,11 @@ func fixtureSerenaManifest() *config.ServerManifest {
 				Start: 9121,
 				End:   9199,
 			},
+			// design §5: extra_args_template carries ONLY --project
+			// ${workspace.path}. --context is APPENDED by the materializer
+			// from DaemonTemplate.Context (a --context token here would
+			// produce a doubled --context in the child argv).
 			ExtraArgsTemplate: []string{
-				"--context", "codex",
 				"--project", "${workspace.path}",
 			},
 		},
@@ -277,6 +280,7 @@ func TestBuildSupervisorIntent_FansOutPerSerenaWorkspace(t *testing.T) {
 			"--server", "serena",
 			"--workspace", ws.WorkspacePath,
 			"--port", strconv.Itoa(ws.Port),
+			"--task-name", SerenaTaskNameForWorkspace(ws.WorkspacePath),
 		}
 		if !reflect.DeepEqual(d.Args, wantArgs) {
 			t.Errorf("[%d] Args:\n got=%#v\nwant=%#v", i, d.Args, wantArgs)
@@ -362,6 +366,25 @@ func TestBuildSupervisorIntent_LegacyDaemonsListStillWorks(t *testing.T) {
 	}}, "", testMcphubBinary)
 	if got != nil {
 		t.Fatalf("legacy manifest must yield nil from the dynamic-pool fan-out; got=%#v", got)
+	}
+}
+
+// TestBuildSupervisorIntent_RejectsContextInTemplate covers the duplicate-context
+// defense-in-depth gate (bot PR #246 r2 P2): a daemon_template manifest whose
+// extra_args_template already carries --context must yield nil — not a descriptor
+// with a doubled --context (buildSerenaChildArgs appends the authoritative one).
+// config.ServerManifest.Validate rejects this shape up front, but
+// InstallParsedManifest accepts a PRE-PARSED manifest, so the fan-out guards too.
+func TestBuildSupervisorIntent_RejectsContextInTemplate(t *testing.T) {
+	m := fixtureSerenaManifest()
+	m.DaemonTemplate.ExtraArgsTemplate = append([]string{"--context", "codex"}, m.DaemonTemplate.ExtraArgsTemplate...)
+	got := BuildSupervisorDaemonsForSerena(m, []WorkspaceEntry{{
+		WorkspacePath: "C:/work/alpha",
+		Language:      SerenaLanguageSentinel,
+		Port:          9121,
+	}}, "", testMcphubBinary)
+	if got != nil {
+		t.Fatalf("a --context-in-template manifest must yield nil from the fan-out (defense-in-depth); got=%#v", got)
 	}
 }
 
@@ -520,7 +543,7 @@ func TestBuildSupervisorIntent_WindowsBackslashPath(t *testing.T) {
 	// --workspace and the path must appear as adjacent argv tokens
 	// with the backslashes preserved verbatim (no separator
 	// normalization).
-	wantArgs := []string{"daemon", "serena-proxy", "--server", "serena", "--workspace", backslashPath, "--port", "9121"}
+	wantArgs := []string{"daemon", "serena-proxy", "--server", "serena", "--workspace", backslashPath, "--port", "9121", "--task-name", SerenaTaskNameForWorkspace(backslashPath)}
 	if !reflect.DeepEqual(got[0].Args, wantArgs) {
 		t.Fatalf("backslash path mangled in Args:\n got=%#v\nwant=%#v", got[0].Args, wantArgs)
 	}
@@ -546,7 +569,7 @@ func TestBuildSupervisorIntent_UnicodePath(t *testing.T) {
 	if got[0].Workspace != unicodePath {
 		t.Fatalf("unicode workspace path mangled; got=%q want=%q", got[0].Workspace, unicodePath)
 	}
-	wantArgs := []string{"daemon", "serena-proxy", "--server", "serena", "--workspace", unicodePath, "--port", "9121"}
+	wantArgs := []string{"daemon", "serena-proxy", "--server", "serena", "--workspace", unicodePath, "--port", "9121", "--task-name", SerenaTaskNameForWorkspace(unicodePath)}
 	if !reflect.DeepEqual(got[0].Args, wantArgs) {
 		t.Fatalf("unicode path mangled in Args:\n got=%#v\nwant=%#v", got[0].Args, wantArgs)
 	}

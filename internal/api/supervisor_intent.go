@@ -32,6 +32,65 @@ type SupervisorDaemon struct {
 	Workspace    string            `json:"workspace,omitempty"`
 	Port         int               `json:"port"`
 	ManifestHash string            `json:"manifest_hash"`
+
+	// RuntimeSpec is the MATERIALIZED child runtime spec for daemons whose
+	// launcher (e.g. `mcphub daemon serena-proxy`) must NOT re-read the
+	// server manifest at spawn. It carries the final child command + args
+	// (incl. --project <workspace> and an appended --context <value>), the
+	// raw env refs (secret:KEY verbatim), the internal + external ports, and
+	// the canonical workspace path — everything the launcher needs without
+	// touching the embedded manifest.
+	//
+	// nil for legacy/global daemons that the supervisor spawns via the
+	// generic `mcphub daemon --server --daemon` path. Additive + omitempty:
+	// existing pre-RuntimeSpec supervisor-intent.json files round-trip
+	// unchanged through ReadSupervisorIntent's DisallowUnknownFields decoder
+	// (nil spec); a new supervisor reading them re-materializes on next
+	// install. Mirrors the additive-field discipline Lifecycle /
+	// LastMaterializedAt use on WorkspaceEntry.
+	//
+	// Design ref: docs/superpowers/specs/2026-05-29-serena-migrate-redesign-descriptor-proxy.md §3.
+	RuntimeSpec *DaemonRuntimeSpec `json:"runtime_spec,omitempty"`
+}
+
+// DaemonRuntimeSpecVersion is the current DaemonRuntimeSpec.SpecVersion.
+// Bumped on an INCOMPATIBLE field-shape change so a proxy reading a
+// descriptor produced by a newer binary can fail loud rather than
+// mis-spawn. The proxy fails loud on any value it does not support.
+const DaemonRuntimeSpecVersion = 1
+
+// DaemonRuntimeSpec carries everything the launcher needs to spawn the
+// upstream child WITHOUT reading the server manifest. Build-time concerns
+// (port_pool, languages, kind) are intentionally absent — they are
+// register/migrate-time inputs, not runtime.
+//
+// Design ref: docs/superpowers/specs/2026-05-29-serena-migrate-redesign-descriptor-proxy.md §3.
+type DaemonRuntimeSpec struct {
+	// SpecVersion is DaemonRuntimeSpecVersion at materialization time; the
+	// launcher fails loud on an unsupported value (no manifest fallback).
+	SpecVersion int `json:"spec_version"`
+	// ChildCommand is the materialized upstream command (e.g. "uvx") — the
+	// raw interpreter the proxy execs, NOT the mcphub wrapper.
+	ChildCommand string `json:"child_command"`
+	// ChildArgs is FULLY materialized: m.BaseArgs ++ expanded
+	// ExtraArgsTemplate (${workspace.path} already substituted) ++ a
+	// trailing [--context, <DaemonTemplate.Context>] appended by the
+	// materializer. It does NOT include --port; the launcher appends the
+	// internal (upstream) port at spawn.
+	ChildArgs []string `json:"child_args"`
+	// EnvRefs is the raw env map incl. unresolved secret:KEY values — the
+	// launcher resolves them against the vault at spawn so the descriptor
+	// file stays cleartext-free on disk.
+	EnvRefs map[string]string `json:"env_refs,omitempty"`
+	// UpstreamPort is the internal port the child binds (external Port +
+	// config.NativeHTTPInternalPortOffset).
+	UpstreamPort int `json:"upstream_port"`
+	// ExternalPort is the client-facing port the proxy binds; mirrors
+	// SupervisorDaemon.Port (a build-time invariant asserts they agree).
+	ExternalPort int `json:"external_port"`
+	// WorkspacePath is the canonical absolute workspace path; mirrors
+	// SupervisorDaemon.Workspace (a build-time invariant asserts they agree).
+	WorkspacePath string `json:"workspace_path"`
 }
 
 // MaintenanceTimer schedules a fixed-cadence in-process job. Two
@@ -163,6 +222,93 @@ func isLegacyOneshotDaemon(d SupervisorDaemon) bool {
 // WriteSupervisorIntent goes through WriteStateFileAtomic (Task 1.1).
 func WriteSupervisorIntent(path string, f *SupervisorIntentFile) error {
 	return WriteStateFileAtomic(path, f)
+}
+
+// DefaultSupervisorIntentPath returns the absolute path of
+// supervisor-intent.json under the resolved per-user state directory. It is
+// the canonical lookup the supervisor reconciler, the install seam, and the
+// serena-proxy descriptor read all share, so the basename lives in exactly
+// one place. Resolution honors the daemonStateRootOverride test seam
+// (api.SetDaemonStateRootForTest), so cross-package tests redirect it without
+// env vars.
+func DefaultSupervisorIntentPath() (string, error) {
+	stateDir, err := DaemonStateDir()
+	if err != nil {
+		return "", err
+	}
+	return joinStateFilePath(stateDir, supervisorIntentFileLeaf), nil
+}
+
+// SupervisorIntentPathEnvVar is the dedicated mcphub-internal env var the
+// supervisor sets when spawning a descriptor whose launcher must read
+// supervisor-intent.json from a control-plane path that is IMMUNE to the
+// child/manifest env (e.g. the serena-proxy, whose manifest env may set
+// HOME / XDG_*_HOME for the upstream serena data dir). The supervisor resolves
+// the canonical intent path ONCE (against its own environment) and injects it
+// here, AFTER the manifest/overlay env merge so the child env cannot clobber
+// it. ResolveSupervisorIntentPathForProxy reads it.
+//
+// Bot PR #246 P2: without this channel the serena-proxy resolved its intent
+// path via DefaultSupervisorIntentPath → DaemonStateDir, which on POSIX honors
+// the (child-overlaid) HOME / XDG_STATE_HOME — so the proxy looked in the
+// upstream child's configured home, missed the real supervisor-intent.json, and
+// never started.
+const SupervisorIntentPathEnvVar = "MCPHUB_SUPERVISOR_INTENT_PATH"
+
+// ResolveSupervisorIntentPathForProxy returns the supervisor-intent.json path a
+// descriptor-driven launcher (e.g. serena-proxy) should read. It prefers the
+// explicit MCPHUB_SUPERVISOR_INTENT_PATH channel the supervisor injects (immune
+// to the manifest/child env) and falls back to DefaultSupervisorIntentPath when
+// the var is unset (manual invocation, legacy spawn without the channel).
+//
+// The fallback path's state-dir resolution honors HOME / XDG_*_HOME on POSIX,
+// which is exactly why the env channel exists: a serena-proxy spawned with a
+// manifest env that redirects HOME for the serena data dir must NOT resolve its
+// control-plane intent path against that redirected home (bot PR #246 P2).
+func ResolveSupervisorIntentPathForProxy() (string, error) {
+	if p := os.Getenv(SupervisorIntentPathEnvVar); p != "" {
+		return p, nil
+	}
+	return DefaultSupervisorIntentPath()
+}
+
+// FindSupervisorDaemonByTaskName returns a COPY of the descriptor in f whose
+// TaskName matches taskName exactly, or nil if none match. The exact match is
+// load-bearing for the serena-proxy descriptor lookup: the proxy execs with
+// --task-name <its-own-canonical-task-name> and must resolve to exactly its
+// own row (design §3.2). Returns a copy so callers cannot mutate the slice
+// element through the pointer.
+func (f *SupervisorIntentFile) FindSupervisorDaemonByTaskName(taskName string) *SupervisorDaemon {
+	if f == nil {
+		return nil
+	}
+	for i := range f.Daemons {
+		if f.Daemons[i].TaskName == taskName {
+			d := f.Daemons[i]
+			return &d
+		}
+	}
+	return nil
+}
+
+// HasRuntimeSpecRow reports whether any daemon row in f carries a non-nil
+// RuntimeSpec. A runtime_spec-bearing intent file is the §7.1 split-brain
+// hazard (bot PR #246 r2): an OLD supervisor binary's ReadSupervisorIntent uses
+// DisallowUnknownFields and rejects the new field, so any writer that emits such
+// rows must first ensure the running supervisor is this binary (or none is
+// running). The spec-bearing supervisor-intent write gate in InstallParsedManifest
+// uses this to scope the gate: legacy/global intents with no runtime_spec rows
+// are read fine by an old supervisor and are NOT gated.
+func (f *SupervisorIntentFile) HasRuntimeSpecRow() bool {
+	if f == nil {
+		return false
+	}
+	for i := range f.Daemons {
+		if f.Daemons[i].RuntimeSpec != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // supervisorIntentLockSuffix is the gofrs/flock lock-leaf suffix for

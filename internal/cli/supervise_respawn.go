@@ -59,11 +59,11 @@ func (r *respawnLateBindings) Set(s SpawnFunc, t TerminateFunc) {
 // GUI handler at /api/daemon/respawn can map them to HTTP status
 // codes (UNKNOWN_TASK → 400, QUARANTINED → 409, RESPAWN_FAILED → 500).
 const (
-	ipcErrorUnknownTask             = "UNKNOWN_TASK"
-	ipcErrorRespawnQuarantined      = "QUARANTINED"
-	ipcErrorRespawnFailed           = "RESPAWN_FAILED"
-	ipcErrorRespawnNotReady         = "RESPAWN_NOT_READY"
-	ipcErrorRespawnTerminateFailed  = "RESPAWN_TERMINATE_FAILED"
+	ipcErrorUnknownTask            = "UNKNOWN_TASK"
+	ipcErrorRespawnQuarantined     = "QUARANTINED"
+	ipcErrorRespawnFailed          = "RESPAWN_FAILED"
+	ipcErrorRespawnNotReady        = "RESPAWN_NOT_READY"
+	ipcErrorRespawnTerminateFailed = "RESPAWN_TERMINATE_FAILED"
 )
 
 // handleRespawn implements the `respawn` IPC verb. Body shape:
@@ -145,6 +145,28 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 		return writeIPCFrame(conn, api.IPCResponse{
 			ID:    req.ID,
 			Error: &api.IPCErr{Code: ipcErrorUnknownTask, Message: "task_name not in supervisor-intent.json: " + taskNameRaw},
+			Final: true,
+		})
+	}
+
+	// bot PR #246 r2 P2-1: a legacy nil-RuntimeSpec serena-proxy descriptor
+	// (a pre-redesign row left in supervisor-intent.json before RuntimeSpec
+	// existed) cannot be respawned — the redesigned serena-proxy fails loud on a
+	// nil spec (no manifest fallback, by design). The RECONCILER excludes such
+	// rows from its spawn-desired set (supervise_reconcile.go), but THIS IPC
+	// respawn path resolves the descriptor directly from the intent cache and
+	// calls spawnFn itself, so it must apply the SAME exclusion here. Without it,
+	// an operator/GUI respawn of an idle legacy row would cmd.Start a doomed
+	// proxy that exits non-zero → crashCh → restart-policy backoff/quarantine —
+	// the exact churn the reconcile exclusion exists to avoid. Refuse with a
+	// clear, operator-actionable error instead of spawning.
+	if isSerenaProxyDescriptor(*desc) && desc.RuntimeSpec == nil {
+		return writeIPCFrame(conn, api.IPCResponse{
+			ID: req.ID,
+			Error: &api.IPCErr{
+				Code:    ipcErrorRespawnFailed,
+				Message: "legacy serena-proxy descriptor for " + taskNameRaw + " carries no runtime_spec (pre-redesign / stale row) and cannot be respawned; re-install the serena dynamic pool to re-materialize its runtime_spec, then retry",
+			},
 			Final: true,
 		})
 	}
@@ -234,9 +256,9 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 			Source:   "ipc",
 			Event:    "supervisor-respawn-graceful-timeout",
 			Body: map[string]any{
-				"task_name":   taskName,
-				"timeout_ms":  gracefulTimeoutMs,
-				"elapsed_ms":  time.Since(termStart).Milliseconds(),
+				"task_name":  taskName,
+				"timeout_ms": gracefulTimeoutMs,
+				"elapsed_ms": time.Since(termStart).Milliseconds(),
 			},
 		})
 	}

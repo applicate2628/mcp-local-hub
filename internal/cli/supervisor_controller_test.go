@@ -310,19 +310,19 @@ func TestDiffIntentSnapshots_AddedRemovedChanged(t *testing.T) {
 	t1 := t0.Add(time.Hour)
 
 	previous := &api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{
-		`\removed-task`: {Desired: api.IntentDesiredRunning, Reason: api.IntentReasonInstall, UpdatedAt: t0},
-		`\changed-desired-task`: {Desired: api.IntentDesiredRunning, Reason: api.IntentReasonInstall, UpdatedAt: t0},
-		`\changed-reason-task`: {Desired: api.IntentDesiredStopped, Reason: api.IntentReasonUserStop, UpdatedAt: t0},
+		`\removed-task`:            {Desired: api.IntentDesiredRunning, Reason: api.IntentReasonInstall, UpdatedAt: t0},
+		`\changed-desired-task`:    {Desired: api.IntentDesiredRunning, Reason: api.IntentReasonInstall, UpdatedAt: t0},
+		`\changed-reason-task`:     {Desired: api.IntentDesiredStopped, Reason: api.IntentReasonUserStop, UpdatedAt: t0},
 		`\changed-updated-at-task`: {Desired: api.IntentDesiredRunning, Reason: api.IntentReasonInstall, UpdatedAt: t0},
-		`\unchanged-task`: {Desired: api.IntentDesiredRunning, Reason: api.IntentReasonInstall, UpdatedAt: t0},
+		`\unchanged-task`:          {Desired: api.IntentDesiredRunning, Reason: api.IntentReasonInstall, UpdatedAt: t0},
 	}}
 
 	updated := &api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{
-		`\added-task`:             {Desired: api.IntentDesiredRunning, Reason: api.IntentReasonRegister, UpdatedAt: t1},
-		`\changed-desired-task`:   {Desired: api.IntentDesiredStopped, Reason: api.IntentReasonInstall, UpdatedAt: t0},
-		`\changed-reason-task`:    {Desired: api.IntentDesiredStopped, Reason: api.IntentReasonUserDisabled, UpdatedAt: t0},
+		`\added-task`:              {Desired: api.IntentDesiredRunning, Reason: api.IntentReasonRegister, UpdatedAt: t1},
+		`\changed-desired-task`:    {Desired: api.IntentDesiredStopped, Reason: api.IntentReasonInstall, UpdatedAt: t0},
+		`\changed-reason-task`:     {Desired: api.IntentDesiredStopped, Reason: api.IntentReasonUserDisabled, UpdatedAt: t0},
 		`\changed-updated-at-task`: {Desired: api.IntentDesiredRunning, Reason: api.IntentReasonInstall, UpdatedAt: t1},
-		`\unchanged-task`:         {Desired: api.IntentDesiredRunning, Reason: api.IntentReasonInstall, UpdatedAt: t0},
+		`\unchanged-task`:          {Desired: api.IntentDesiredRunning, Reason: api.IntentReasonInstall, UpdatedAt: t0},
 	}}
 
 	delta := diffIntentSnapshots(previous, updated)
@@ -332,11 +332,11 @@ func TestDiffIntentSnapshots_AddedRemovedChanged(t *testing.T) {
 	}
 
 	want := map[string]bool{
-		`\removed-task`:             true,
-		`\added-task`:               true,
-		`\changed-desired-task`:     true,
-		`\changed-reason-task`:      true,
-		`\changed-updated-at-task`:  true,
+		`\removed-task`:            true,
+		`\added-task`:              true,
+		`\changed-desired-task`:    true,
+		`\changed-reason-task`:     true,
+		`\changed-updated-at-task`: true,
 	}
 	for name := range want {
 		if !got[name] {
@@ -411,6 +411,70 @@ func TestSupervisorController_HandleEvStart_TransitionsFromIdleToSpawning(t *tes
 	st, _ := ctrl.GetSMState(descriptor.TaskName)
 	if st != api.StSpawning {
 		t.Errorf("post-EvStart state = %s, want %s", st, api.StSpawning)
+	}
+}
+
+// TestSupervisorController_LegacyNilSpecSerenaProxy_QuarantinedNotSpawned is the
+// bot PR #246 r2 P2 guard for the controller restart path (supervisor_controller.go
+// StSpawning). A legacy nil-RuntimeSpec serena-proxy descriptor that reaches
+// StSpawning — e.g. via EvChildExit→backoff→EvTimerDue for a row that was already
+// running at upgrade and later exited — must be QUARANTINED, not spawned: the
+// redesigned proxy fails loud on a nil spec (its args lack --task-name), so
+// spawning would churn restart backoff. The reconcile pass + IPC respawn cover the
+// other two spawn paths; this is the third. (Positive control: the EvStart test
+// above spawns a normal descriptor → StSpawning.)
+func TestSupervisorController_LegacyNilSpecSerenaProxy_QuarantinedNotSpawned(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	tracker := NewDaemonRuntimeTracker()
+	var spawnCalls atomic.Int32
+	fakeSpawn := func(d api.SupervisorDaemon) error { spawnCalls.Add(1); return nil }
+
+	const legacyTask = `\mcp-local-hub-serena-deadbeef`
+	descriptor := api.SupervisorDaemon{
+		TaskName:    legacyTask,
+		Server:      "serena",
+		Daemon:      "deadbeef",
+		Args:        []string{"daemon", "serena-proxy", "--server", "serena", "--workspace", `C:\work\alpha`, "--port", "9121"},
+		RuntimeSpec: nil, // pre-redesign / stale row
+	}
+	intent := &api.SupervisorIntentFile{Daemons: []api.SupervisorDaemon{descriptor}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ctrl := &supervisorController{
+		intentCache:         newIntentCache(),
+		tracker:             tracker,
+		events:              events,
+		daemonIntent:        newDaemonIntentCache(),
+		spawn:               fakeSpawn,
+		statePath:           filepath.Join(tmpHome, "supervisor-state.json"),
+		ctx:                 ctx,
+		failureWindow:       respawnFailureWindow,
+		quarantineThreshold: respawnQuarantineThreshold,
+	}
+	ctrl.intentCache.Refresh(intent)
+	ctrl.smStates.Store(legacyTask, api.StIdle)
+
+	ctrl.handleLoopEvent(api.LoopEvent{Kind: api.EvStart, TaskName: legacyTask})
+
+	if got := spawnCalls.Load(); got != 0 {
+		t.Errorf("legacy nil-spec serena-proxy must NOT be spawned by the controller; spawn count = %d, want 0", got)
+	}
+	st, _ := ctrl.GetSMState(legacyTask)
+	if st != api.StQuarantined {
+		t.Errorf("legacy nil-spec serena-proxy must be quarantined; state = %s, want %s", st, api.StQuarantined)
+	}
+	logStr := readFileString(t, eventsPath)
+	if !strings.Contains(logStr, `"event":"legacy-serena-descriptor-quarantined"`) {
+		t.Fatalf("expected legacy-serena-descriptor-quarantined event:\n%s", logStr)
 	}
 }
 

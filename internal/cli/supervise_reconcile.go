@@ -75,6 +75,14 @@ type Reconciler struct {
 	// "spawn" branch of the diff. nil falls back to direct r.spawn
 	// invocation (the pre-A.2 behavior preserved for tests).
 	EventLoop *api.EventLoop
+
+	// Events is the supervisor audit log. When non-nil, the
+	// desired-set construction emits a single warn event for each
+	// legacy nil-RuntimeSpec serena-proxy row it EXCLUDES from the
+	// spawn-desired set (bot PR #246 r2 P2). Left nil by tests that
+	// don't assert the audit row; production wiring sets it in
+	// runSupervise alongside EventLoop.
+	Events *api.SupervisorEventLog
 }
 
 // NewReconciler builds a Reconciler with the supplied fan-out
@@ -130,6 +138,58 @@ func (r *Reconciler) Reconcile(
 		}
 
 		running := currentRunning[d.TaskName]
+
+		// Desired-set exclusion for legacy nil-RuntimeSpec serena-proxy rows
+		// (bot PR #246 r2 P2). A serena-proxy descriptor whose RuntimeSpec is
+		// nil is a PRE-REDESIGN row (the fan-out before RuntimeSpec existed
+		// ended its Args at --port with no --task-name and no runtime_spec).
+		// After a binary upgrade the supervisor keeps these old rows until a
+		// re-install re-materializes the intent. The redesigned serena-proxy
+		// CANNOT make a nil-spec row work — it fails loud (no manifest fallback,
+		// which would re-introduce the embed-shadow defect this redesign kills).
+		//
+		// r1 expressed this skip as `return nil` INSIDE the spawn closure, but
+		// the controller's executeSideEffect treats a nil spawn error as SUCCESS:
+		// it posts EvHealthOK and transitions StSpawning → StRunning, leaving a
+		// PHANTOM running daemon (no process started) in supervisor-state.json +
+		// IPC status. A "skip" expressed as a successful spawn is wrong.
+		//
+		// The correct skip is to EXCLUDE the row from the SPAWN-desired set HERE,
+		// before any EvStart / spawn fires: the controller never sees EvStart for
+		// it, so it is never spawned, never marked running, and never churns
+		// restart backoff/quarantine. We emit ONE operator-actionable warn at the
+		// exclusion point (not per spawn). SMOOTH auto-re-materialization of such
+		// rows on `install --upgrade` is the cutover phase's §7.1 upgrade-gate
+		// responsibility; the reconciler only excludes + signals. (Spec-bearing
+		// serena-proxy rows are NOT excluded and spawn normally; the spawn closure
+		// still injects MCPHUB_SUPERVISOR_INTENT_PATH for them. Global daemons
+		// have a legitimately-nil RuntimeSpec and are NOT serena-proxy rows, so
+		// they are NOT excluded.)
+		//
+		// The exclusion is SPAWN-ONLY: it is gated on !running so it cannot
+		// strand an ALREADY-RUNNING legacy row (bot PR #246 r2 P2). If such a row
+		// is running — e.g. a warm restart hydrated it from supervisor-state.json,
+		// or it was spawned by a pre-redesign supervisor before the upgrade — and
+		// daemon-intent.json marks it stopped, it MUST fall through to the
+		// `isStopped && running` terminate branch below; suppressing that path too
+		// would mean an operator stop/quarantine could never stop the live
+		// process until the row is re-materialized or removed.
+		if isSerenaProxyDescriptor(d) && d.RuntimeSpec == nil && !running {
+			if r.Events != nil {
+				_ = r.Events.Emit(api.SupervisorEvent{
+					Severity: "warn",
+					Source:   "lifecycle",
+					Event:    "legacy-serena-descriptor-skipped",
+					TaskName: d.TaskName,
+					Body: map[string]any{
+						"server": d.Server,
+						"reason": "serena-proxy descriptor carries no runtime_spec (pre-redesign / stale row); excluded from the reconcile spawn-desired set instead of spawning a proxy that would fail loud and churn through restart backoff",
+						"action": "run the serena dynamic-pool re-install/migrate to re-materialize this descriptor with a runtime_spec",
+					},
+				})
+			}
+			continue
+		}
 
 		switch {
 		case !isStopped && !running:

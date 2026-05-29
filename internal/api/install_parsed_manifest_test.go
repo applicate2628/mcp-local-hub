@@ -587,6 +587,31 @@ func TestInstallParsedManifest_FansOutPerWorkspaceDaemons(t *testing.T) {
 		if d.Port != want.port {
 			t.Errorf("task %q port = %d, want %d", d.TaskName, d.Port, want.port)
 		}
+		// End-to-end materializer-through-install check: each serena row
+		// must carry a fully-materialized RuntimeSpec after a round-trip
+		// through write + ReadSupervisorIntent (DisallowUnknownFields).
+		// This proves the install fan-out writes spec-bearing descriptors
+		// the proxy can consume (design claim #2 + #5).
+		if d.RuntimeSpec == nil {
+			t.Errorf("task %q must carry a materialized RuntimeSpec after install round-trip; got nil", d.TaskName)
+			continue
+		}
+		if d.RuntimeSpec.ExternalPort != want.port {
+			t.Errorf("task %q RuntimeSpec.ExternalPort = %d, want %d", d.TaskName, d.RuntimeSpec.ExternalPort, want.port)
+		}
+		if d.RuntimeSpec.UpstreamPort != want.port+config.NativeHTTPInternalPortOffset {
+			t.Errorf("task %q RuntimeSpec.UpstreamPort = %d, want %d", d.TaskName, d.RuntimeSpec.UpstreamPort, want.port+config.NativeHTTPInternalPortOffset)
+		}
+		if d.RuntimeSpec.WorkspacePath != want.path {
+			t.Errorf("task %q RuntimeSpec.WorkspacePath = %q, want %q", d.TaskName, d.RuntimeSpec.WorkspacePath, want.path)
+		}
+		// --context (appended) + --project (expanded) must be present in
+		// the materialized child argv. serenaTemplateManifest uses
+		// Context "ide-assistant".
+		n := len(d.RuntimeSpec.ChildArgs)
+		if n < 2 || d.RuntimeSpec.ChildArgs[n-2] != "--context" || d.RuntimeSpec.ChildArgs[n-1] != m.DaemonTemplate.Context {
+			t.Errorf("task %q ChildArgs must END with --context %q; got %v", d.TaskName, m.DaemonTemplate.Context, d.RuntimeSpec.ChildArgs)
+		}
 	}
 	if len(seenTask) != 2 {
 		t.Errorf("matched serena task names = %d, want 2 (both workspaces)", len(seenTask))
@@ -1210,5 +1235,202 @@ func TestInstallParsedManifest_DryRunShowsWorkspaceFanOut(t *testing.T) {
 	// No scheduler mutation on dry-run.
 	if f.createCount != 0 || f.runCount != 0 {
 		t.Errorf("DryRun must not mutate the scheduler: createCount=%d runCount=%d", f.createCount, f.runCount)
+	}
+}
+
+// TestInstallParsedManifest_RejectsStdioBridgeDaemonTemplate is the
+// install-time native-http gate (design §3.1). A stdio-bridge +
+// daemon_template + kind:workspace-scoped manifest PASSES
+// config.ServerManifest.Validate today (Validate rejects daemon_template
+// only for kind!=workspace-scoped or transport=remote-http — see
+// internal/config/manifest.go), so once the proxy's runtime transport check
+// is removed, this contract gate is the ONLY enforcer. The reject MUST happen
+// before any mutation: no supervisor-intent.json written, no scheduler
+// Create/Run.
+func TestInstallParsedManifest_RejectsStdioBridgeDaemonTemplate(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	m := serenaTemplateManifest()
+	m.Transport = config.TransportStdioBridge // workspace-scoped + daemon_template, but NOT native-http
+
+	a := NewAPI()
+	var buf bytes.Buffer
+	_, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
+		Writer:     &buf,
+		Workspaces: []WorkspaceEntry{},
+	})
+	if err == nil {
+		t.Fatal("InstallParsedManifest(stdio-bridge daemon_template): want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "native-http") {
+		t.Errorf("error = %q, want it to name the native-http transport gate", err.Error())
+	}
+	// No mutation: no committed intent, no scheduler create/run.
+	if _, statErr := os.Stat(filepath.Join(stateDir, "supervisor-intent.json")); !os.IsNotExist(statErr) {
+		t.Errorf("no intent must be written on stdio-bridge reject; stat err = %v", statErr)
+	}
+	if f.createCount != 0 || f.runCount != 0 {
+		t.Errorf("no scheduler mutation on reject: createCount=%d runCount=%d", f.createCount, f.runCount)
+	}
+}
+
+// TestInstallParsedManifest_RejectsEmptyContextDaemonTemplate is the
+// install-time empty-context gate (bot PR #246 P2). A workspace-scoped
+// native-http daemon_template manifest whose DaemonTemplate.Context is empty
+// PASSES config.ServerManifest.Validate today (Validate checks port_pool +
+// extra_args_template, NOT Context), but the materializer would persist
+// `--context ""` into every RuntimeSpec.ChildArgs → the supervisor respawns a
+// serena child with an invalid empty context. The contract gate MUST reject it
+// before any mutation: no supervisor-intent.json written, no scheduler
+// Create/Run.
+func TestInstallParsedManifest_RejectsEmptyContextDaemonTemplate(t *testing.T) {
+	for _, ctx := range []string{"", "   "} {
+		stateDir := daemonIntentTestHelper(t)
+		preparePreflightBinaryChecks(t)
+		f := newInstallFakeScheduler()
+		installFakeScheduler(t, f)
+
+		m := serenaTemplateManifest()
+		m.DaemonTemplate.Context = ctx // workspace-scoped + native-http, but empty context
+
+		a := NewAPI()
+		var buf bytes.Buffer
+		_, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
+			Writer:     &buf,
+			Workspaces: []WorkspaceEntry{},
+		})
+		if err == nil {
+			t.Fatalf("InstallParsedManifest(empty context %q): want error, got nil", ctx)
+		}
+		if !strings.Contains(err.Error(), "context") {
+			t.Errorf("error = %q, want it to name the empty daemon_template.context", err.Error())
+		}
+		// No mutation: no committed intent, no scheduler create/run.
+		if _, statErr := os.Stat(filepath.Join(stateDir, "supervisor-intent.json")); !os.IsNotExist(statErr) {
+			t.Errorf("no intent must be written on empty-context reject; stat err = %v", statErr)
+		}
+		if f.createCount != 0 || f.runCount != 0 {
+			t.Errorf("no scheduler mutation on reject: createCount=%d runCount=%d", f.createCount, f.runCount)
+		}
+	}
+}
+
+// TestInstallParsedManifest_AcceptsNativeHTTPDaemonTemplate is the
+// companion positive guard: the native-http gate must NOT reject the valid
+// shape. A kind:workspace-scoped + native-http + daemon_template manifest
+// passes the contract gate and writes an intent (zero-workspace install).
+func TestInstallParsedManifest_AcceptsNativeHTTPDaemonTemplate(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	m := serenaTemplateManifest() // native-http by construction
+	a := NewAPI()
+	var buf bytes.Buffer
+	intentOut, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
+		Writer:     &buf,
+		Workspaces: []WorkspaceEntry{},
+	})
+	if err != nil {
+		t.Fatalf("native-http daemon_template manifest must pass the gate; got error: %v", err)
+	}
+	if intentOut == "" {
+		t.Fatal("want a non-empty intent path on a successful native-http install")
+	}
+	if _, statErr := os.Stat(filepath.Join(stateDir, "supervisor-intent.json")); statErr != nil {
+		t.Errorf("native-http install must write supervisor-intent.json; stat err = %v", statErr)
+	}
+}
+
+// TestInstallParsedManifest_RefusesSpecBearingWriteWhileSupervisorRunning is the
+// bot PR #246 r2 P2 §7.1 gate. A running supervisor MAY be an OLD binary whose
+// ReadSupervisorIntent (DisallowUnknownFields) would reject a newly written
+// runtime_spec field and split-brain. While a supervisor holds its lock, a
+// spec-bearing serena install must REFUSE and point at the cold-restart/upgrade
+// flow rather than write the new field.
+func TestInstallParsedManifest_RefusesSpecBearingWriteWhileSupervisorRunning(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	// Simulate a running supervisor by holding its singleton lock under stateDir.
+	lk, err := AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("acquire fake supervisor lock: %v", err)
+	}
+	defer lk.Release()
+
+	ws := t.TempDir()
+	workspaces := []WorkspaceEntry{{
+		WorkspaceKey:  WorkspaceKey(ws),
+		WorkspacePath: ws,
+		Language:      SerenaLanguageSentinel,
+		Backend:       "serena",
+		Port:          9401,
+	}}
+	m := serenaTemplateManifest()
+	a := NewAPI()
+	var buf bytes.Buffer
+	_, err = a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
+		Writer:     &buf,
+		Workspaces: workspaces,
+	})
+	if err == nil {
+		t.Fatal("expected §7.1 refuse error while a supervisor is running, got nil")
+	}
+	// Error names the gate, the running supervisor, the design ref, AND the
+	// non-circular guidance (consultant r2 #2: STOP the supervisor — `install
+	// --upgrade` alone leaves one running and would still be refused).
+	for _, want := range []string{"refusing to write spec-bearing", "supervisor is running", "STOP the running supervisor", "§7.1"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refuse error %q missing %q", err.Error(), want)
+		}
+	}
+	// The gate fires BEFORE the write — no spec-bearing intent must reach disk.
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	if written, rerr := ReadSupervisorIntent(intentPath); rerr == nil && written.HasRuntimeSpecRow() {
+		t.Fatalf("gate must refuse before writing spec-bearing rows; found runtime_spec rows on disk")
+	}
+	// The refuse emits a durable audit row (consultant r2 (d)-observability),
+	// not just the returned error string.
+	logBytes, _ := os.ReadFile(filepath.Join(stateDir, SupervisorEventLogFileLeaf))
+	if !strings.Contains(string(logBytes), "spec-bearing-install-refused") {
+		t.Errorf("expected durable spec-bearing-install-refused event in supervisor-events.log; got: %s", logBytes)
+	}
+}
+
+// TestInstallParsedManifest_NonSpecInstallNotGatedByRunningSupervisor proves the
+// §7.1 gate is scoped to runtime_spec-bearing writes. An empty-workspaces serena
+// install produces NO runtime_spec rows, so it must proceed even while a
+// supervisor is running (an old supervisor reads a no-runtime_spec intent fine).
+func TestInstallParsedManifest_NonSpecInstallNotGatedByRunningSupervisor(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	lk, err := AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("acquire fake supervisor lock: %v", err)
+	}
+	defer lk.Release()
+
+	m := serenaTemplateManifest()
+	a := NewAPI()
+	var buf bytes.Buffer
+	intentOut, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
+		Writer:     &buf,
+		Workspaces: []WorkspaceEntry{}, // no workspaces => no runtime_spec rows
+	})
+	if err != nil {
+		t.Fatalf("non-spec install must NOT be gated by a running supervisor, got: %v", err)
+	}
+	if intentOut == "" {
+		t.Fatal("want a non-empty intent path on a successful zero-workspace install")
 	}
 }

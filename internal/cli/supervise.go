@@ -826,6 +826,10 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		// legacy direct-spawn path (Reconciler.Reconcile
 		// nil-checks the field and falls back to r.spawn).
 		reconciler.EventLoop = loop
+		// bot PR #246 r2 P2: pass the audit log so the desired-set
+		// exclusion of legacy nil-RuntimeSpec serena-proxy rows emits its
+		// operator-actionable warn at the exclusion point.
+		reconciler.Events = events
 		go reconciler.Reconcile(intent, daemonIntent, currentRunning, time.Now().UTC())
 	}
 
@@ -2088,6 +2092,60 @@ func mergeDaemonEnv(parent []string, manifest, overlay map[string]string) []stri
 	return out
 }
 
+// isSerenaProxyDescriptor reports whether a SupervisorDaemon descriptor is a
+// serena per-workspace proxy row, identified by its wrapper argv carrying the
+// `daemon serena-proxy` subcommand (the shape
+// api.BuildSupervisorDaemonsForSerena emits:
+// `daemon serena-proxy --server … --workspace … --port … --task-name …`).
+// Global/legacy daemon rows carry `daemon --server … --daemon …` and return
+// false. This is the single classification both the legacy-skip guard and the
+// intent-path env-channel injection share, so they can never diverge on what
+// counts as a serena-proxy row.
+func isSerenaProxyDescriptor(d api.SupervisorDaemon) bool {
+	return len(d.Args) >= 2 && d.Args[0] == "daemon" && d.Args[1] == "serena-proxy"
+}
+
+// appendSupervisorIntentChannel returns cmdEnv with the
+// MCPHUB_SUPERVISOR_INTENT_PATH control-channel var appended LAST so it wins
+// over any same-key entry the manifest/overlay merge may have produced (Go's
+// exec honors the last occurrence of a duplicate key). When cmdEnv is nil — the
+// case where the spawned child would otherwise inherit os.Environ() — it
+// materializes os.Environ() first so the appended var survives while preserving
+// the inherit-parent semantics. Pure (modulo os.Environ() when cmdEnv==nil) so
+// the clobber-immunity property is unit-testable without spawning (bot PR #246
+// P2).
+func appendSupervisorIntentChannel(cmdEnv []string, intentPath string) []string {
+	if cmdEnv == nil {
+		cmdEnv = os.Environ()
+	}
+	return append(cmdEnv, api.SupervisorIntentPathEnvVar+"="+intentPath)
+}
+
+// resolveSpawnIntentChannelPath returns the supervisor-intent.json path the
+// spawn fn injects via MCPHUB_SUPERVISOR_INTENT_PATH for a serena-proxy child.
+//
+// It derives the path from the supervisor's ALREADY-RESOLVED state dir (the dir
+// of statePath, the same dir the supervisor reads its own intent from at
+// runSupervise: filepath.Join(stateDir, "supervisor-intent.json")), so the
+// channel value is byte-identical to that path. It deliberately does NOT call
+// api.DefaultSupervisorIntentPath() in the resolved case: that re-runs
+// api.DaemonStateDir, which — unlike the supervisor's own cli stateDirFunc —
+// does NOT honor MCPHUB_STATE_DIR_OVERRIDE and instead resolves via
+// SetDaemonStateRootForTest / a POSIX HOME, so it can resolve to a DIFFERENT dir
+// than the supervisor's actual stateDir and hand the serena-proxy a path where
+// its own descriptor does not exist (bot PR #246 r2 P3; mechanism corrected per
+// review — the override is read by cli stateDirFunc, not by api.DaemonStateDir).
+//
+// statePath == "" is the makeProductionSpawnFn test/manual wrapper: there is no
+// resolved state dir to derive from, so it falls back to DefaultSupervisorIntentPath
+// (the pre-r2 behavior, correct when the supervisor's state dir is not threaded).
+func resolveSpawnIntentChannelPath(statePath string) (string, error) {
+	if statePath != "" {
+		return filepath.Join(filepath.Dir(statePath), "supervisor-intent.json"), nil
+	}
+	return api.DefaultSupervisorIntentPath()
+}
+
 // makeProductionSpawnFn is a thin compat wrapper that calls
 // makeProductionSpawnFnWithStatePath with empty overlay/statePath
 // inputs. Preserved for callers that don't need the overlay+respawn
@@ -2146,6 +2204,16 @@ type crashEvent struct {
 // respawn" behavior.
 func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, statePath string, overlay *daemon_env_overlay.Overlay, overlayPath string, crashCh chan<- crashEvent) SpawnFunc {
 	return func(d api.SupervisorDaemon) error {
+		// NOTE (bot PR #246 r2 P2): the legacy nil-RuntimeSpec serena-proxy SKIP
+		// no longer lives here. r1 expressed it as `return nil` inside this
+		// closure, but the controller's executeSideEffect treats a nil spawn
+		// error as SUCCESS → posts EvHealthOK → StSpawning → StRunning, leaving a
+		// PHANTOM running daemon. The skip is now applied at EVERY path that
+		// reaches spawn: Reconciler.Reconcile excludes such rows from its
+		// spawn-desired set (supervise_reconcile.go), and the IPC respawn handler
+		// refuses them before calling spawnFn (supervise_respawn.go, r2 P2-1) — so
+		// a legacy nil-spec row never reaches this closure. The serena-proxy
+		// launcher keeps its own nil-spec fail-loud as last-resort defense-in-depth.
 		cmd := exec.Command(d.Command, d.Args...)
 		if d.Workspace != "" {
 			cmd.Dir = d.Workspace
@@ -2217,6 +2285,51 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		// os.Environ directly).
 		if merged := mergeDaemonEnv(os.Environ(), d.Env, overlayEnv); merged != nil {
 			cmd.Env = merged
+		}
+
+		// Intent-path control channel (bot PR #246 P2). A serena-proxy resolves
+		// its supervisor-intent.json descriptor by --task-name; on POSIX that
+		// path resolution honors HOME / XDG_*_HOME. Because the serena CHILD's
+		// manifest env (d.Env) may redirect HOME / XDG for the upstream serena
+		// data dir AND that env is what we just merged into cmd.Env, the proxy
+		// would resolve its CONTROL-PLANE intent path against the child's home —
+		// the wrong dir — and never find its own descriptor. Inject the
+		// supervisor's already-resolved canonical intent path as a dedicated
+		// MCPHUB_SUPERVISOR_INTENT_PATH var the proxy reads first
+		// (api.ResolveSupervisorIntentPathForProxy). This MUST run AFTER the
+		// merge so the manifest/overlay env can never clobber it (cmd.Env honors
+		// the LAST occurrence of a duplicate key), and the materialized
+		// EnvRefs/d.Env still apply to the serena CHILD only — the proxy passes
+		// them down via daemon.HTTPHost, not via its own process env. Scoped to
+		// serena-proxy rows so no other daemon's env is touched.
+		if isSerenaProxyDescriptor(d) {
+			if intentPath, perr := resolveSpawnIntentChannelPath(statePath); perr == nil {
+				// appendSupervisorIntentChannel materializes os.Environ() when
+				// cmd.Env is nil (preserving inherit-parent) and appends the
+				// channel var LAST so the merged manifest/overlay env cannot
+				// clobber it. Extracted as a pure helper so the clobber-immunity
+				// property is unit-testable without spawning. intentPath is the
+				// sibling of the supervisor's resolved statePath (NOT a fresh
+				// DefaultSupervisorIntentPath resolution) so it matches the dir
+				// the supervisor reads its own intent from (bot PR #246 r2 P3).
+				cmd.Env = appendSupervisorIntentChannel(cmd.Env, intentPath)
+			} else if events != nil {
+				// Resolution failure only reaches here on the statePath=="" test/
+				// manual wrapper (DefaultSupervisorIntentPath fallback could not
+				// resolve the state dir) — surface it; the proxy will fall
+				// back to its own DefaultSupervisorIntentPath (same failure mode
+				// it would hit anyway). Non-fatal: do not block the spawn.
+				_ = events.Emit(api.SupervisorEvent{
+					Severity: "warn",
+					Source:   "lifecycle",
+					Event:    "supervisor-intent-path-channel-unresolved",
+					TaskName: d.TaskName,
+					Body: map[string]any{
+						"err":      perr.Error(),
+						"fallback": "serena-proxy will resolve its intent path via DefaultSupervisorIntentPath (may be wrong under a child-overlaid HOME)",
+					},
+				})
+			}
 		}
 		process.NoConsole(cmd)
 
