@@ -26,19 +26,25 @@ import (
 )
 
 // InstallParsedManifestOpts controls an InstallParsedManifest invocation.
-//
-// StartAfterWrite defaults to true to match api.Install's
-// immediate-daemon-start behavior; the migrate driver passes false so the
-// daemons are spawned later by the supervisor reconciler when it observes
-// the new supervisor-intent.json rather than at install time.
 type InstallParsedManifestOpts struct {
 	Writer            io.Writer
 	ClientsInclude    []string
 	IncludeAllClients bool
-	// Snapshot of registered serena workspaces; consumed by the D.3b migrate-driver per-workspace daemon fan-out (wired in the next commit on this branch).
-	Workspaces      []WorkspaceEntry
-	DryRun          bool
-	StartAfterWrite bool // default true (matches api.Install); migrate driver later passes false
+	// Snapshot of registered serena workspaces; consumed by the
+	// per-workspace fan-out; populated by future callers (migrate redesign
+	// / E.2 auto-register).
+	Workspaces []WorkspaceEntry
+	DryRun     bool
+	// StartAfterWrite gates Pass B (immediate daemon start). The zero value
+	// (false) means scheduler tasks are created and supervisor-intent.json
+	// is written, but the daemons are NOT started here — the supervisor
+	// reconciler starts them on its next tick once it observes the new
+	// intent. That deferred behavior is the intended default for
+	// workspace-scoped installs through this seam (api.Install does not use
+	// this field; it drives executeInstallTo's Pass B directly). Set true
+	// only when a caller needs the daemons started in-process before this
+	// returns.
+	StartAfterWrite bool
 }
 
 // InstallParsedManifest installs a pre-parsed manifest in-process and

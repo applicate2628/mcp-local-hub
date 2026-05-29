@@ -165,8 +165,8 @@ func serenaTemplateManifest() *config.ServerManifest {
 }
 
 // TestInstallParsedManifest_StartAfterWriteTrue_PreservesLegacyBehavior is
-// the regression guard: StartAfterWrite=true (the api.Install default)
-// must drive Pass B so logon-triggered tasks start. Uses a global manifest
+// the regression guard: an explicit StartAfterWrite=true must drive Pass B
+// so logon-triggered tasks start in-process. Uses a global manifest
 // (which has logon tasks) so the Pass-B Run is observable.
 func TestInstallParsedManifest_StartAfterWriteTrue_PreservesLegacyBehavior(t *testing.T) {
 	daemonIntentTestHelper(t)
@@ -200,8 +200,9 @@ func TestInstallParsedManifest_StartAfterWriteTrue_PreservesLegacyBehavior(t *te
 }
 
 // TestInstallParsedManifest_StartAfterWriteFalse_DefersDaemonSpawn asserts
-// the migrate-driver path: StartAfterWrite=false creates tasks + writes
-// intent but never calls sch.Run (daemon spawn deferred to the supervisor).
+// the default deferred path: StartAfterWrite=false (the zero value) creates
+// tasks + writes intent but never calls sch.Run (daemon spawn deferred to
+// the supervisor reconciler).
 func TestInstallParsedManifest_StartAfterWriteFalse_DefersDaemonSpawn(t *testing.T) {
 	daemonIntentTestHelper(t)
 	preparePreflightBinaryChecks(t)

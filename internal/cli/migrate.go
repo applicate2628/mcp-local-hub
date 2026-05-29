@@ -36,77 +36,65 @@ Examples:
 See also: scan, install, rollback.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runStdioMigrate(cmd, args, clientsFlag, dryRun, jsonOut)
+			var include []string
+			if clientsFlag != "" {
+				include = strings.Split(clientsFlag, ",")
+			}
+			a := api.NewAPI()
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			vscodePath, _ := clientConfigPath("vscode")
+			report, err := a.MigrateFrom(api.MigrateOpts{
+				Servers:        args,
+				ClientsInclude: include,
+				DryRun:         dryRun,
+				ScanOpts: api.ScanOpts{
+					ClaudeConfigPath:      filepath.Join(home, ".claude.json"),
+					CodexConfigPath:       filepath.Join(home, ".codex", "config.toml"),
+					CursorConfigPath:      filepath.Join(home, ".cursor", "mcp.json"),
+					VSCodeConfigPath:      vscodePath,
+					GeminiConfigPath:      filepath.Join(home, ".gemini", "settings.json"),
+					QwenConfigPath:        filepath.Join(home, ".qwen", "settings.json"),
+					AntigravityConfigPath: filepath.Join(home, ".gemini", "antigravity", "mcp_config.json"),
+					ManifestDir:           scanManifestDir(),
+				},
+			})
+			if err != nil {
+				return err
+			}
+			if jsonOut {
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetIndent("", "  ")
+				if err := enc.Encode(report); err != nil {
+					return err
+				}
+				if len(report.Failed) > 0 {
+					// JSON consumers parse Failed[] directly, but exit code
+					// must still signal failure so CI scripts don't treat
+					// partial-success output as success.
+					return fmt.Errorf("%d migration row(s) failed", len(report.Failed))
+				}
+				return nil
+			}
+			for _, app := range report.Applied {
+				fmt.Fprintf(cmd.OutOrStdout(), "✓ %s/%s → %s\n", app.Server, app.Client, app.URL)
+			}
+			for _, f := range report.Failed {
+				fmt.Fprintf(cmd.OutOrStderr(), "✗ %s/%s: %s\n", f.Server, f.Client, f.Err)
+			}
+			if dryRun {
+				fmt.Fprintln(cmd.OutOrStdout(), "\n(dry-run — no files modified)")
+			}
+			if len(report.Failed) > 0 {
+				return fmt.Errorf("%d migration row(s) failed", len(report.Failed))
+			}
+			return nil
 		},
 	}
 	c.Flags().StringVar(&clientsFlag, "clients", "", "comma-separated subset of clients (default: every binding in the manifest)")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change, don't write")
 	c.Flags().BoolVar(&jsonOut, "json", false, "machine-readable JSON output")
-	// `serena` is a subcommand of `migrate` so the dynamic-pool migration
-	// (`migrate serena legacy-to-dynamic-pool`) has a home; its delegating
-	// RunE preserves the existing `migrate serena [more] [flags]` stdio
-	// behavior (see migrate_serena.go for why).
-	c.AddCommand(newMigrateSerenaCmd())
 	return c
-}
-
-// runStdioMigrate is the shared stdio→HTTP migrate body invoked by both
-// `mcphub migrate <server>...` and the `migrate serena` delegating RunE.
-// Extracting it keeps the two entry points byte-identical in behavior.
-func runStdioMigrate(cmd *cobra.Command, servers []string, clientsFlag string, dryRun, jsonOut bool) error {
-	var include []string
-	if clientsFlag != "" {
-		include = strings.Split(clientsFlag, ",")
-	}
-	a := api.NewAPI()
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-	vscodePath, _ := clientConfigPath("vscode")
-	report, err := a.MigrateFrom(api.MigrateOpts{
-		Servers:        servers,
-		ClientsInclude: include,
-		DryRun:         dryRun,
-		ScanOpts: api.ScanOpts{
-			ClaudeConfigPath:      filepath.Join(home, ".claude.json"),
-			CodexConfigPath:       filepath.Join(home, ".codex", "config.toml"),
-			CursorConfigPath:      filepath.Join(home, ".cursor", "mcp.json"),
-			VSCodeConfigPath:      vscodePath,
-			GeminiConfigPath:      filepath.Join(home, ".gemini", "settings.json"),
-			QwenConfigPath:        filepath.Join(home, ".qwen", "settings.json"),
-			AntigravityConfigPath: filepath.Join(home, ".gemini", "antigravity", "mcp_config.json"),
-			ManifestDir:           scanManifestDir(),
-		},
-	})
-	if err != nil {
-		return err
-	}
-	if jsonOut {
-		enc := json.NewEncoder(cmd.OutOrStdout())
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(report); err != nil {
-			return err
-		}
-		if len(report.Failed) > 0 {
-			// JSON consumers parse Failed[] directly, but exit code
-			// must still signal failure so CI scripts don't treat
-			// partial-success output as success.
-			return fmt.Errorf("%d migration row(s) failed", len(report.Failed))
-		}
-		return nil
-	}
-	for _, app := range report.Applied {
-		fmt.Fprintf(cmd.OutOrStdout(), "✓ %s/%s → %s\n", app.Server, app.Client, app.URL)
-	}
-	for _, f := range report.Failed {
-		fmt.Fprintf(cmd.OutOrStderr(), "✗ %s/%s: %s\n", f.Server, f.Client, f.Err)
-	}
-	if dryRun {
-		fmt.Fprintln(cmd.OutOrStdout(), "\n(dry-run — no files modified)")
-	}
-	if len(report.Failed) > 0 {
-		return fmt.Errorf("%d migration row(s) failed", len(report.Failed))
-	}
-	return nil
 }

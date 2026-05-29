@@ -19,26 +19,6 @@ func manifestDirForTests() string {
 	return os.Getenv("MCPHUB_MANIFEST_DIR_OVERRIDE")
 }
 
-// WritableManifestDir returns the on-disk directory that hosts the
-// mutable `servers/<name>/manifest.yaml` tree. It honors the same
-// MCPHUB_MANIFEST_DIR_OVERRIDE test seam the read-side embed-first
-// loader consults, falling back to the binary-relative defaultManifestDir
-// in production.
-//
-// Read paths prefer the embed FS (loadManifestYAMLEmbedFirst), but a
-// caller that must MUTATE a manifest on disk (e.g. the
-// `mcphub migrate serena legacy-to-dynamic-pool` driver that rewrites
-// servers/serena/manifest.yaml in place) needs the writable directory
-// path the embed FS cannot provide. This is the exported accessor for
-// that narrow need; it is a thin wrapper over the existing resolution
-// logic and adds no new mechanism.
-func WritableManifestDir() string {
-	if dir := manifestDirForTests(); dir != "" {
-		return dir
-	}
-	return defaultManifestDir()
-}
-
 // Manifest-source abstraction.
 //
 // Before this file existed, read-side API calls (ManifestList,
