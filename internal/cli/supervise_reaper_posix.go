@@ -20,10 +20,11 @@
 // even if it happens to occupy a slot in our transient list.
 //
 //	Gate 1: image basename equals "mcphub" exactly (from /proc/<pid>/comm).
-//	Gate 2: cmdline matches the transient kind we recorded: daemon-shaped
-//	        entries must contain the daemon token AND --server AND --daemon;
-//	        maintenance entries must contain their maintenance subcommand
-//	        token (for example workspace-weekly-refresh).
+//	Gate 2: cmdline matches the recorded transient kind's invocation
+//	        signature: daemon-shaped entries carry daemon AND --server AND
+//	        --daemon; maintenance entries carry the argv tokens their timer
+//	        Args actually exec (workspace-weekly-refresh → the subcommand
+//	        token; server-weekly-refresh → restart AND --server).
 //	Gate 3: process UID matches the current operator (from stat).
 //
 // All three must pass. If any gate fails, the PID is recorded in
@@ -329,12 +330,15 @@ func startedAtGate(recordedRFC3339 string, pid int, deps ReaperDeps) bool {
 }
 
 // ownershipGate returns true when all 3 gates pass: image basename
-// equals exactly "mcphub"; cmdline matches the recorded transient kind;
-// UID matches the current operator. Gate 2 accepts both historical
-// daemon-shaped transients and maintenance timer children. The latter
-// are recorded with Kind=workspace-weekly-refresh/server-weekly-refresh
-// and are invoked as `mcphub <kind>`, so requiring daemon flags would
-// skip-and-forget live maintenance orphans after a supervisor crash.
+// equals exactly "mcphub"; cmdline matches the recorded transient
+// kind's invocation signature; UID matches the current operator.
+// Gate 2 accepts both daemon-shaped transients and maintenance timer
+// children. Maintenance children are NOT all invoked as `mcphub <kind>`:
+// workspace-weekly-refresh runs `mcphub workspace-weekly-refresh`, but
+// server-weekly-refresh runs `mcphub restart --server <name>`, so the
+// gate matches each kind's real argv tokens (maintenanceCmdlineSignature).
+// A bare kind-token match would skip-and-forget live server-weekly-refresh
+// orphans after a supervisor crash.
 func ownershipGate(kind, basename, cmdline string, procUID, currentUID int) bool {
 	if procUID != currentUID {
 		return false
@@ -342,8 +346,13 @@ func ownershipGate(kind, basename, cmdline string, procUID, currentUID int) bool
 	if basename != "mcphub" {
 		return false
 	}
-	if isMaintenanceTransientKind(kind) {
-		return cmdlineHasToken(cmdline, kind)
+	if sig, ok := maintenanceCmdlineSignature(kind); ok {
+		for _, tok := range sig {
+			if !cmdlineHasToken(cmdline, tok) {
+				return false
+			}
+		}
+		return true
 	}
 	return cmdlineHasToken(cmdline, "daemon") &&
 		cmdlineHasToken(cmdline, "--server") &&
@@ -359,12 +368,24 @@ func cmdlineHasToken(cmdline, token string) bool {
 	return false
 }
 
-func isMaintenanceTransientKind(kind string) bool {
+// maintenanceCmdlineSignature maps a maintenance transient Kind to the
+// argv tokens its `mcphub` invocation always carries, so Gate 2 can
+// confirm a live PID is the maintenance child we recorded — not an
+// unrelated recycled mcphub PID — before killing it. The tokens mirror
+// the timer Args the supervisor execs verbatim via exec.Command:
+//   - workspace-weekly-refresh → `mcphub workspace-weekly-refresh`
+//     (internal/migration/journal.go defaultMaintenanceTimers)
+//   - server-weekly-refresh    → `mcphub restart --server <name>`
+//     (internal/api/install.go weekly-refresh task Args;
+//     internal/api/install_parsed_manifest.go serverWeeklyRefreshTimer)
+func maintenanceCmdlineSignature(kind string) ([]string, bool) {
 	switch kind {
-	case "workspace-weekly-refresh", "server-weekly-refresh":
-		return true
+	case "workspace-weekly-refresh":
+		return []string{"workspace-weekly-refresh"}, true
+	case "server-weekly-refresh":
+		return []string{"restart", "--server"}, true
 	default:
-		return false
+		return nil, false
 	}
 }
 

@@ -186,7 +186,7 @@ func (f *reaperFakes) addOwnedAliveMaintenancePID(pid int, kind string) {
 		pid:       pid,
 		alive:     true,
 		basename:  "mcphub",
-		cmdline:   "mcphub " + kind,
+		cmdline:   maintenanceTestCmdline(kind),
 		uid:       f.currentUID,
 		idOK:      true,
 		startTime: f.now,
@@ -197,6 +197,22 @@ func (f *reaperFakes) addOwnedAliveMaintenancePID(pid int, kind string) {
 		Kind:      kind,
 		StartedAt: f.now.Format(time.RFC3339Nano),
 	})
+}
+
+// maintenanceTestCmdline renders the production-accurate `mcphub` cmdline
+// for a maintenance transient Kind. The supervisor execs each timer's Args
+// verbatim, and they differ per kind: workspace-weekly-refresh runs
+// `mcphub workspace-weekly-refresh`, but server-weekly-refresh runs
+// `mcphub restart --server <name>`. The fake must mirror this so the
+// ownership gate is exercised against the real cmdline shape, not a
+// kind-token stand-in that would mask the server-weekly-refresh mismatch.
+func maintenanceTestCmdline(kind string) string {
+	switch kind {
+	case "server-weekly-refresh":
+		return "mcphub restart --server demo"
+	default:
+		return "mcphub " + kind
+	}
 }
 
 // addOwnedAliveStaleStartPID adds a fake "all ownership gates pass,
@@ -372,6 +388,41 @@ func TestReaper_MaintenanceTransientOwnedByKindKilled(t *testing.T) {
 	}
 	if len(f.killed) != 1 || f.killed[0] != 3030 {
 		t.Errorf("KillProcessGroup invocations = %v; want [3030]", f.killed)
+	}
+	if f.stateAfter == nil {
+		t.Fatalf("WriteState was not called")
+	}
+	if len(f.stateAfter.TransientPIDs) != 0 {
+		t.Errorf("TransientPIDs after reap = %v; want empty after successful kill", f.stateAfter.TransientPIDs)
+	}
+}
+
+// ---------------------------------------------------------------------
+// TestReaper_MaintenanceServerWeeklyRefreshOwnedKilled
+//
+// server-weekly-refresh timers are NOT invoked as `mcphub <kind>` — the
+// supervisor execs their Args verbatim as `mcphub restart --server <name>`
+// (internal/api/install.go). A kind-token-only ownership gate fails to
+// match that cmdline and skip-and-forgets the live orphan. The gate must
+// match the kind's real argv signature (restart AND --server).
+// ---------------------------------------------------------------------
+func TestReaper_MaintenanceServerWeeklyRefreshOwnedKilled(t *testing.T) {
+	f := newReaperFakes(t)
+	f.addOwnedAliveMaintenancePID(3031, "server-weekly-refresh")
+
+	res, err := ReapStaleTransients(context.Background(), f.deps())
+	if err != nil {
+		t.Fatalf("ReapStaleTransients: %v", err)
+	}
+
+	if len(res.SkippedPIDs) != 0 {
+		t.Errorf("SkippedPIDs = %v; want empty (server-weekly-refresh cmdline must match its argv signature)", res.SkippedPIDs)
+	}
+	if len(res.KilledPIDs) != 1 || res.KilledPIDs[0] != 3031 {
+		t.Errorf("KilledPIDs = %v; want [3031]", res.KilledPIDs)
+	}
+	if len(f.killed) != 1 || f.killed[0] != 3031 {
+		t.Errorf("KillProcessGroup invocations = %v; want [3031]", f.killed)
 	}
 	if f.stateAfter == nil {
 		t.Fatalf("WriteState was not called")
