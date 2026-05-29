@@ -618,3 +618,63 @@ func TestSerenaRouter_ToolsList_MalformedCursorBypassesCache(t *testing.T) {
 		t.Errorf("daemon tool hits after malformed cursor = %d, want 2 (#3: a malformed cursor must bypass the cache, not be served page one)", got)
 	}
 }
+
+// ---------------------------------------------------------------------
+// Finding #3 (initialized-fail leak) — when the daemon 200s `initialize`
+// (minting a session) but then 4xxs `notifications/initialized`,
+// establishDaemonSession must best-effort upstream-DELETE the just-minted
+// session BEFORE returning the handshake error. The handshake still fails
+// loud (the tool call surfaces the diagnosable 502 path) AND no upstream
+// daemon session leaks. Pre-fix the session id was dropped on the floor,
+// leaking one upstream daemon session per failed initialized notification
+// until the daemon's idle expiry. The DELETE is detached + short-bounded
+// (Invariant D), issued via bestEffortDeleteDaemonSession.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_Handshake_InitializedFailReleasesDaemonSession(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	// initialize succeeds (mints + records the session id), but
+	// notifications/initialized is rejected -> the handshake must fail AND the
+	// minted session must be torn down upstream.
+	daemon.initializedStatus = http.StatusBadRequest
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	sessions := NewInMemorySessionRouter()
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:      sessions,
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	// A path-bearing tool call drives the lazy handshake; the daemon mints a
+	// session on initialize then rejects notifications/initialized.
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"})
+	rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": "sess-init-fail"})
+
+	// The handshake still fails LOUD (same class as an unreachable forward).
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("tool call status = %d, want 502 (handshake fails on initialized rejection); body=%s", rr.Code, rr.Body.String())
+	}
+	// And the just-minted daemon session was released upstream. The DELETE is
+	// issued synchronously inside establishDaemonSession (defer cancel + direct
+	// Do), so it has completed by the time the 502 returns; poll briefly as a
+	// belt-and-braces guard.
+	waitForDaemonDeleteHits(t, daemon, 1)
+	daemon.mu.Lock()
+	gotDelSID := daemon.lastDeleteSession
+	releasedAMintedSession := gotDelSID != "" && daemon.issued[gotDelSID]
+	daemon.mu.Unlock()
+	if !releasedAMintedSession {
+		t.Errorf("initialized-fail teardown DELETE Mcp-Session-Id = %q is not a session this daemon minted; Finding #3 must DELETE the just-created session id", gotDelSID)
+	}
+	// No phantom binding cached (the handshake failed, so nothing is reusable).
+	if _, dsid, _, ok := s.serenaDaemonSessions.bindingFor("sess-init-fail"); ok {
+		t.Errorf("serenaDaemonSessions cached %q on a failed handshake; want no binding", dsid)
+	}
+	if got := sessions.LookupSession("sess-init-fail"); got != nil {
+		t.Errorf("sticky binding cached on a failed handshake = %+v; want nil", got)
+	}
+}

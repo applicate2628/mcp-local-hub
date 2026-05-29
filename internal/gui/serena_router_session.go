@@ -84,16 +84,27 @@ func (st *routerSessionStore) store(clientSessionID, negotiatedVersion string) {
 	}
 }
 
-// negotiatedVersion returns the protocol version a client session
-// negotiated at initialize, refreshing lastSeen on a hit. ok=false means
-// the id was never minted at this router (or its binding idle-expired).
+// peekNegotiatedVersion returns the protocol version a client session
+// negotiated at initialize WITHOUT refreshing lastSeen. ok=false means the
+// id was never minted at this router (or its binding idle-expired).
 //
-// Expire-on-read (mirrors daemonSessionStore.lookup, P2 finding 3): a
-// binding idle longer than daemonSessionTTL is treated as a miss AND
-// deleted, so a long-idle session id is no longer trusted as "minted
-// here". This is self-contained — it does not depend on an external
-// cleanup ticker.
-func (st *routerSessionStore) negotiatedVersion(clientSessionID string) (string, bool) {
+// Finding 4 (non-touching peek for PRE-gate validation): the tool-call /
+// tools-list / DELETE / cancellation paths read the negotiated version to
+// VALIDATE the request's MCP-Protocol-Version BEFORE the request is accepted.
+// If that read refreshed lastSeen (as the original negotiatedVersion did), a
+// request REJECTED for a version mismatch would still keep the session alive —
+// a buggy/hostile client could spam invalid mismatched requests to make an
+// otherwise-idle initialized session un-reclaimable by the sweeper. So the
+// pre-gate validation uses this peek; lastSeen is refreshed only AFTER the
+// gate passes, via touch (mirrors the hub splitting GetAndTouch back into
+// Get + post-gate Touch, internal/api/hub_mcp_handler.go:395-407).
+//
+// Expire-on-read (mirrors daemonSessionStore.lookup, P2 finding 3) is
+// PRESERVED here: a binding idle longer than daemonSessionTTL is treated as a
+// miss AND deleted, so an already-expired binding is still a miss even though
+// peek does not refresh a live binding. This is self-contained — it does not
+// depend on an external cleanup ticker.
+func (st *routerSessionStore) peekNegotiatedVersion(clientSessionID string) (string, bool) {
 	if clientSessionID == "" {
 		return "", false
 	}
@@ -107,15 +118,55 @@ func (st *routerSessionStore) negotiatedVersion(clientSessionID string) (string,
 		delete(st.bindings, clientSessionID)
 		return "", false
 	}
-	b.lastSeen = st.now()
 	return b.negotiatedVersion, true
 }
 
+// touch refreshes lastSeen for a live (non-idle-expired) binding so an
+// ACCEPTED request keeps its session reclaimable-only-after-idle. It is the
+// post-gate companion to peekNegotiatedVersion (Finding 4): the validation
+// path peeks (no refresh) so a REJECTED request never extends the session,
+// and only a request that PASSES the gate calls touch. It is expire-on-read
+// like peek — an already-expired binding is dropped, not resurrected (so a
+// touch arriving after the idle window does not revive a dead session). A
+// no-op when the id is unknown/expired or empty.
+func (st *routerSessionStore) touch(clientSessionID string) {
+	if clientSessionID == "" {
+		return
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	b, ok := st.bindings[clientSessionID]
+	if !ok || b == nil {
+		return
+	}
+	if st.now().Sub(b.lastSeen) > daemonSessionTTL {
+		delete(st.bindings, clientSessionID)
+		return
+	}
+	b.lastSeen = st.now()
+}
+
+// negotiatedVersion returns the protocol version a client session negotiated
+// at initialize, refreshing lastSeen on a hit (peek + touch in one). It is
+// retained for callers that legitimately combine the read with a refresh.
+//
+// NOTE: the four PRE-gate version-validation sites (tool-call, tools/list,
+// DELETE, cancellation) MUST NOT use this — they use peekNegotiatedVersion so
+// a rejected request never refreshes lastSeen (Finding 4), then touch on the
+// accepted path.
+func (st *routerSessionStore) negotiatedVersion(clientSessionID string) (string, bool) {
+	v, ok := st.peekNegotiatedVersion(clientSessionID)
+	if ok {
+		st.touch(clientSessionID)
+	}
+	return v, ok
+}
+
 // known reports whether clientSessionID was minted at this router and is
-// not idle-expired. It is negotiatedVersion without the version return —
-// the tools/list gate (Finding 4) only needs the existence answer.
+// not idle-expired, WITHOUT refreshing lastSeen (it peeks). An existence
+// probe must not extend the session's idle life (Finding 4).
 func (st *routerSessionStore) known(clientSessionID string) bool {
-	_, ok := st.negotiatedVersion(clientSessionID)
+	_, ok := st.peekNegotiatedVersion(clientSessionID)
 	return ok
 }
 

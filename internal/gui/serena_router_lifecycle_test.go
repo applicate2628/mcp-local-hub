@@ -981,9 +981,12 @@ func TestSerenaRouter_NotificationWithID_ReturnsInvalidRequest(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------
-// P2 #4 — a request-style lifecycle method (initialize / tools/list /
-// ping) arriving WITHOUT an id is a JSON-RPC notification and must NOT
-// receive a response envelope: 202 + empty body, like the hub handler.
+// P2 #4 — a request-style UTILITY lifecycle method (tools/list / ping)
+// arriving WITHOUT an id is a JSON-RPC notification and must NOT receive a
+// response envelope: 202 + empty body, like the hub handler. initialize is
+// the EXCEPTION (Finding 1, covered separately by
+// TestSerenaRouter_Initialize_IdlessRejected): it is the session-
+// establishment request, so an id-less initialize is -32600, never 202.
 // ---------------------------------------------------------------------
 func TestSerenaRouter_IdlessLifecycle_Returns202NoBody(t *testing.T) {
 	// A live daemon is wired so that, if the router WRONGLY proxied an
@@ -1005,13 +1008,12 @@ func TestSerenaRouter_IdlessLifecycle_Returns202NoBody(t *testing.T) {
 	}
 	s := newSerenaTestServer(t, deps)
 
-	for _, method := range []string{"initialize", "tools/list", "ping"} {
+	// initialize is deliberately EXCLUDED here — Finding 1 makes id-less
+	// initialize a -32600, not a 202 (see TestSerenaRouter_Initialize_IdlessRejected).
+	for _, method := range []string{"tools/list", "ping"} {
 		t.Run(method, func(t *testing.T) {
 			// No "id" field -> notification shape.
 			env := map[string]any{"jsonrpc": "2.0", "method": method}
-			if method == "initialize" {
-				env["params"] = map[string]any{"protocolVersion": "2025-06-18", "capabilities": map[string]any{}}
-			}
 			body, _ := json.Marshal(env)
 			rr := postSerena(t, s, body, nil)
 			if rr.Code != http.StatusAccepted {
@@ -1020,13 +1022,65 @@ func TestSerenaRouter_IdlessLifecycle_Returns202NoBody(t *testing.T) {
 			if b := strings.TrimSpace(rr.Body.String()); b != "" {
 				t.Errorf("%s (no id) response body = %q, want empty (no response envelope for a notification)", method, b)
 			}
-			// And the id-less initialize must NOT mint a session header.
-			if method == "initialize" {
-				if sid := rr.Header().Get("Mcp-Session-Id"); sid != "" {
-					t.Errorf("id-less initialize minted Mcp-Session-Id %q; a notification gets no session", sid)
-				}
-			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------
+// Finding 1 — an id-less `initialize` is NOT a notification: it is THE
+// session-establishment request. The router must reject it -32600 at HTTP
+// 400 ("initialize requires a non-null id"), mirroring the hub
+// (internal/api/hub_mcp_handler.go:316-319), instead of 202-ing it (which
+// would hide the client's protocol bug and let it fail later with a
+// missing/unknown session). No session is minted. The present-but-invalid
+// id branch is unchanged (also -32600). tools/list + ping id-less stay 202
+// (TestSerenaRouter_IdlessLifecycle_Returns202NoBody), and the reconcile
+// probe sends id:1 so it is unaffected
+// (TestSerenaRouter_Initialize_ReconcileProbeBodyStillSucceeds).
+// ---------------------------------------------------------------------
+func TestSerenaRouter_Initialize_IdlessRejected(t *testing.T) {
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return "http://unused" },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	// {"jsonrpc":"2.0","method":"initialize",...} with NO "id" field.
+	env := map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "initialize",
+		"params":  map[string]any{"protocolVersion": "2025-06-18", "capabilities": map[string]any{}},
+	}
+	body, _ := json.Marshal(env)
+	rr := postSerena(t, s, body, nil)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("id-less initialize status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		ID    json.RawMessage `json:"id"`
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v; raw=%s", err, rr.Body.String())
+	}
+	if resp.Error == nil || resp.Error.Code != jsonrpcInvalidRequest {
+		t.Fatalf("expected -32600; got %+v", resp.Error)
+	}
+	if !strings.Contains(resp.Error.Message, "initialize requires a non-null id") {
+		t.Errorf("error message %q should match the hub wording 'initialize requires a non-null id'", resp.Error.Message)
+	}
+	// The id could not be determined -> echoed as JSON null (mirrors the hub).
+	if strings.TrimSpace(string(resp.ID)) != "null" {
+		t.Errorf("id = %s, want null (a request whose id could not be determined echoes null)", string(resp.ID))
+	}
+	// No session minted for a rejected initialize.
+	if sid := rr.Header().Get("Mcp-Session-Id"); sid != "" {
+		t.Errorf("rejected id-less initialize minted Mcp-Session-Id %q; want none", sid)
 	}
 }
 
@@ -1390,6 +1444,21 @@ func TestDaemonSessionStore_LookupIsWorkspaceScoped(t *testing.T) {
 	// displacement (tearing down the live session would break the next call).
 	if _, hadDisplaced := st.store("client-1", "beta", "daemon-B", "2025-11-25"); hadDisplaced {
 		t.Errorf("re-store of an UNCHANGED binding reported a displacement; want none")
+	}
+	// Finding #2 (race correction): re-storing the SAME workspace with a
+	// DIFFERENT daemon session id is ALSO NOT a displacement. Two concurrent
+	// first handshakes for the same client session + same workspace each mint a
+	// distinct daemon session id; when the later one stores, tearing down the
+	// earlier same-workspace id would invalidate a still-in-flight request that
+	// is forwarding with that id. Only a WORKSPACE change displaces; a
+	// superseded same-workspace session is reclaimed by the sweeper/TTL.
+	if old, hadDisplaced := st.store("client-1", "beta", "daemon-B2", "2025-11-25"); hadDisplaced {
+		t.Errorf("same-workspace re-store with a DIFFERENT daemon session reported a displacement = %+v; want none (Finding #2 race correction)", old)
+	}
+	// The binding moved to the new daemon session (last store wins) but no
+	// teardown was requested for the superseded same-workspace id.
+	if dsid, _, ok := st.lookup("client-1", "beta"); !ok || dsid != "daemon-B2" {
+		t.Fatalf("lookup(client-1, beta) after same-workspace re-store = (%q, %v), want (daemon-B2, true)", dsid, ok)
 	}
 	// unbind drops it.
 	st.unbind("client-1")

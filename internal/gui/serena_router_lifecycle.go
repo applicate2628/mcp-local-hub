@@ -629,7 +629,11 @@ func (s *Server) handleToolsList(
 			"session-id required (initialize first)", nil)
 		return
 	}
-	negotiatedVersion, known := s.serenaRouterSessions.negotiatedVersion(sessionID)
+	// Finding 4: PEEK (no lastSeen refresh) — both the existence gate just
+	// below and the version gate further down are PRE-acceptance. A tools/list
+	// rejected as unknown OR for a version mismatch must NOT keep the session
+	// alive; lastSeen is refreshed via touch only after BOTH gates pass.
+	negotiatedVersion, known := s.serenaRouterSessions.peekNegotiatedVersion(sessionID)
 	if !known {
 		writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidRequest,
 			"unknown session (initialize first)", nil)
@@ -652,6 +656,10 @@ func (s *Server) handleToolsList(
 			"protocol-version mismatch", nil)
 		return
 	}
+	// Finding 4: both gates passed — this is an accepted tools/list on a
+	// legitimate session, so refresh lastSeen now (touch on the accepted path
+	// only; the peek above did not refresh, so a rejected request never did).
+	s.serenaRouterSessions.touch(sessionID)
 
 	now := time.Now()
 	// A paginated (cursor-bearing) tools/list bypasses the first-page

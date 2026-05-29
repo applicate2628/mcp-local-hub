@@ -737,6 +737,57 @@ func TestRouterSessionStore_ExpireOnRead(t *testing.T) {
 	}
 }
 
+// Finding 4 (store-level) — peekNegotiatedVersion does NOT refresh lastSeen
+// (so a rejected pre-gate read cannot keep an idle session alive), while
+// touch (and the touching negotiatedVersion) DOES. peek + touch both keep
+// expire-on-read; touch never resurrects an already-expired binding.
+func TestRouterSessionStore_PeekDoesNotTouch_TouchRefreshes(t *testing.T) {
+	base := time.Now()
+	clk := base
+	st := &routerSessionStore{clock: func() time.Time { return clk }}
+
+	// --- peek does not refresh ---
+	st.store("peeked", "2025-06-18") // lastSeen = base
+	// Repeated peeks just shy of the TTL must NOT advance lastSeen.
+	for i := 0; i < 5; i++ {
+		clk = base.Add(daemonSessionTTL - time.Minute)
+		if v, ok := st.peekNegotiatedVersion("peeked"); !ok || v != "2025-06-18" {
+			t.Fatalf("peek within TTL = (%q, %v), want (2025-06-18, true)", v, ok)
+		}
+	}
+	// lastSeen is still base (peeks did not refresh): just past TTL from base
+	// -> the entry is reclaimable by cleanup.
+	clk = base.Add(daemonSessionTTL + time.Minute)
+	if n := st.cleanup(clk, daemonSessionTTL); n != 1 {
+		t.Errorf("cleanup dropped %d; want 1 (peeks must NOT have refreshed lastSeen past base)", n)
+	}
+
+	// --- touch refreshes ---
+	clk = base
+	st.store("touched", "2025-06-18") // lastSeen = base
+	clk = base.Add(daemonSessionTTL - time.Minute)
+	st.touch("touched") // lastSeen = base + TTL - 1min
+	// Now base + TTL + 30s is only ~31min past the refreshed lastSeen, well
+	// inside the TTL -> retained.
+	clk = base.Add(daemonSessionTTL + 30*time.Second)
+	if n := st.cleanup(clk, daemonSessionTTL); n != 0 {
+		t.Errorf("cleanup dropped %d; want 0 (touch must have refreshed lastSeen)", n)
+	}
+	if !st.known("touched") {
+		t.Errorf("known(touched) = false after a refresh; want true")
+	}
+
+	// --- touch does not resurrect an expired binding ---
+	clk = base
+	st.store("expired", "2025-06-18") // lastSeen = base
+	clk = base.Add(daemonSessionTTL + time.Minute)
+	st.touch("expired") // binding is already idle-expired -> dropped, not revived
+	clk = base.Add(daemonSessionTTL + 2*time.Minute)
+	if _, ok := st.peekNegotiatedVersion("expired"); ok {
+		t.Errorf("peek(expired) = hit after touch on an expired binding; want miss (touch must not resurrect)")
+	}
+}
+
 func TestRouterSessionStore_ConcurrentAccess(t *testing.T) {
 	st := &routerSessionStore{}
 	var wg sync.WaitGroup
@@ -1039,6 +1090,84 @@ func TestServer_SweepSerenaSessions_DropsIdleKeepsFresh(t *testing.T) {
 	}
 	if _, _, _, ok := s.serenaDaemonSessions.bindingFor("fresh-daemon"); !ok {
 		t.Errorf("fresh daemon-session dropped by the sweep; want retained")
+	}
+}
+
+// ---------------------------------------------------------------------
+// Finding 4 (handler-level) — a session that receives only REJECTED
+// (version-mismatched) requests must NOT stay alive: the pre-gate version
+// read PEEKS (no lastSeen refresh), so the sweeper reclaims the idle session
+// despite the invalid traffic. A session that receives a VALID request DOES
+// refresh (touch on the accepted path), so the sweeper retains it. Pre-fix the
+// read refreshed lastSeen unconditionally, so spamming mismatched requests kept
+// an otherwise-idle session un-reclaimable.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_RejectedRequests_DoNotKeepSessionAlive(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	const negotiated = "2025-06-18"
+	if negotiated == defaultProtocolVersion {
+		t.Fatalf("precondition: negotiated must differ from the router default %q", defaultProtocolVersion)
+	}
+
+	// Drive the router-session store's clock so lastSeen is deterministic. The
+	// handshake's daemon-session store is NOT clocked here (its bindings age on
+	// the real clock), but the assertions only touch serenaRouterSessions.
+	base := time.Now()
+	clk := base
+	s.serenaRouterSessions.clock = func() time.Time { return clk }
+
+	// Mint TWO router sessions at base (each initialize stores lastSeen=base).
+	sidRejected := mintRouterSession(t, s, negotiated)
+	sidValid := mintRouterSession(t, s, negotiated)
+
+	// Advance a minute, then hammer sidRejected with version-MISMATCHED
+	// tool-calls. Each is rejected -32600 by the pre-gate version check, which
+	// PEEKS — so lastSeen must NOT advance past base.
+	clk = base.Add(time.Minute)
+	mismatch := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"})
+	for i := 0; i < 5; i++ {
+		rr := postSerena(t, s, mismatch, map[string]string{
+			"Mcp-Session-Id":       sidRejected,
+			"MCP-Protocol-Version": "2025-11-25", // conflicts with the negotiated 2025-06-18
+		})
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("mismatched tool call %d status = %d, want 400; body=%s", i, rr.Code, rr.Body.String())
+		}
+	}
+
+	// A VALID (matching-version) tool-call on sidValid at the SAME +1min mark
+	// passes the gate and TOUCHES -> its lastSeen advances to base+1min.
+	valid := postSerena(t, s, mismatch, map[string]string{
+		"Mcp-Session-Id":       sidValid,
+		"MCP-Protocol-Version": negotiated,
+	})
+	if valid.Code != http.StatusOK {
+		t.Fatalf("valid tool call status = %d, want 200; body=%s", valid.Code, valid.Body.String())
+	}
+
+	// Sweep at base + TTL + 30s:
+	//   - sidRejected.lastSeen == base        -> age TTL+30s > TTL -> reclaimed.
+	//   - sidValid.lastSeen   == base + 1min  -> age TTL-30s < TTL -> retained.
+	clk = base.Add(daemonSessionTTL + 30*time.Second)
+	s.SweepSerenaSessions(clk, daemonSessionTTL)
+
+	if s.serenaRouterSessions.known(sidRejected) {
+		t.Errorf("session that received only mismatched requests survived the sweep; Finding 4 requires the rejected reads to NOT refresh lastSeen")
+	}
+	if !s.serenaRouterSessions.known(sidValid) {
+		t.Errorf("session that received a VALID request was reclaimed by the sweep; a valid request must refresh lastSeen")
 	}
 }
 

@@ -347,11 +347,14 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	// request-style lifecycle method (initialize / tools/list / ping)
 	// can arrive in three id shapes, and each MUST be handled
 	// differently —
-	//   - id ABSENT  -> JSON-RPC notification: MUST NOT receive a
-	//     response envelope; return 202 + empty body. Without this,
-	//     handleInitialize / handleToolsList would synthesize a result
-	//     with id:null and a strict client would treat the unexpected
-	//     response as a protocol error.
+	//   - id ABSENT  -> for tools/list / ping, a JSON-RPC notification:
+	//     MUST NOT receive a response envelope; return 202 + empty body.
+	//     Without this, handleToolsList would synthesize a result with
+	//     id:null and a strict client would treat the unexpected response
+	//     as a protocol error. initialize is the EXCEPTION: it is the
+	//     session-establishment request, never a notification, so an absent
+	//     id there is -32600 (see the initialize case below + the hub at
+	//     internal/api/hub_mcp_handler.go:316-319), not 202.
 	//   - id PRESENT but INVALID (null / boolean / array / object):
 	//     MCP §1.5 requires a request id to be a non-null String/Number,
 	//     so this is a malformed request -> -32600 Invalid Request. The
@@ -363,8 +366,20 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	//   - id PRESENT and VALID (String/Number): synthesize the response.
 	switch {
 	case tb.Method == "initialize":
+		// initialize is the session-ESTABLISHMENT request, NOT a
+		// fire-and-forget notification: an ABSENT id must NOT 202 like the
+		// other request-style lifecycle methods below. The hub rejects the
+		// same id-less shape with -32600 at HTTP 400 BEFORE creating a session
+		// (internal/api/hub_mcp_handler.go:316-319, "initialize requires a
+		// non-null id"); accepting it here would 202 silently, hide the
+		// client's protocol bug, and let the client fail later with a
+		// missing/unknown session. Mirror the hub byte-for-byte: BOTH an
+		// absent id (this branch) AND a present-but-invalid id (next branch)
+		// → -32600; only a valid String/Number id proceeds to handleInitialize.
+		// The reconcile readiness probe sends id:1, so it is unaffected.
 		if isJSONRPCNotificationID(tb.ID) {
-			w.WriteHeader(http.StatusAccepted)
+			writeJSONRPCErrorStatus(w, json.RawMessage("null"), http.StatusBadRequest, jsonrpcInvalidRequest,
+				"invalid request: initialize requires a non-null id", nil)
 			return
 		}
 		if !isValidJSONRPCRequestID(tb.ID) {
@@ -493,12 +508,20 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	// direct caller), today's behavior is preserved: the raw request header
 	// drives the handshake.
 	clientProtocolVersion := r.Header.Get("MCP-Protocol-Version")
-	if sessionVersion, known := s.serenaRouterSessions.negotiatedVersion(sessionID); known {
+	// Finding 4: PEEK the session's negotiated version (no lastSeen refresh)
+	// for this PRE-gate validation — a request rejected for a version mismatch
+	// below must NOT keep the session alive. lastSeen is refreshed via touch
+	// only AFTER the gate passes.
+	if sessionVersion, known := s.serenaRouterSessions.peekNegotiatedVersion(sessionID); known {
 		if clientProtocolVersion != "" && clientProtocolVersion != sessionVersion {
 			writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidRequest,
 				"protocol-version mismatch", nil)
 			return
 		}
+		// Gate passed for a known router session: this is legitimate session
+		// activity, so refresh lastSeen now (Finding 4 — touch on the accepted
+		// path only).
+		s.serenaRouterSessions.touch(sessionID)
 		// Use the session's negotiated version for the upstream handshake so
 		// the daemon session is established under the consistent version even
 		// when this request omitted the header.
@@ -755,7 +778,11 @@ func (s *Server) handleSerenaDelete(w http.ResponseWriter, r *http.Request) {
 	// daemon session was initialized under); an unknown session falls back to
 	// the raw request header (today's behavior for a legacy caller).
 	deleteProtocolVersion := r.Header.Get("MCP-Protocol-Version")
-	if sessionVersion, known := s.serenaRouterSessions.negotiatedVersion(sessionID); known {
+	// Finding 4: PEEK (no lastSeen refresh). A DELETE rejected for a version
+	// mismatch leaves the session intact and must NOT extend its idle life; a
+	// matching/missing-header DELETE proceeds to tear the session DOWN below
+	// (so there is nothing to touch — the unbind removes the binding entirely).
+	if sessionVersion, known := s.serenaRouterSessions.peekNegotiatedVersion(sessionID); known {
 		if clientProtocolVersion := r.Header.Get("MCP-Protocol-Version"); clientProtocolVersion != "" && clientProtocolVersion != sessionVersion {
 			writeJSONRPCErrorStatus(w, json.RawMessage("null"), http.StatusBadRequest, jsonrpcInvalidRequest,
 				"protocol-version mismatch", nil)
@@ -1004,10 +1031,20 @@ func (s *Server) handleSerenaCancelled(
 	rawProtocolVersion := r.Header.Get("MCP-Protocol-Version")
 	protocolVersion := rawProtocolVersion
 	forward := true
-	if sessionVersion, known := s.serenaRouterSessions.negotiatedVersion(sessionID); known {
+	// Finding 4: PEEK (no lastSeen refresh) for the pre-gate validation. A
+	// cross-version cancel that is suppressed below must NOT keep the session
+	// alive; lastSeen is refreshed via touch only on the ACCEPTED (forwarded)
+	// path.
+	if sessionVersion, known := s.serenaRouterSessions.peekNegotiatedVersion(sessionID); known {
 		if rawProtocolVersion != "" && rawProtocolVersion != sessionVersion {
 			// Cross-version cancel on a known session: do NOT forward.
 			forward = false
+		} else {
+			// Gate passed for a known router session: a forwarded cancel is
+			// legitimate session activity, so refresh lastSeen (Finding 4 —
+			// touch on the accepted path only; a suppressed cross-version
+			// cancel skips this).
+			s.serenaRouterSessions.touch(sessionID)
 		}
 		protocolVersion = sessionVersion
 	}
