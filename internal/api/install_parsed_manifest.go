@@ -85,36 +85,43 @@ type InstallParsedManifestOpts struct {
 //     returns ("", nil) because nothing was written and there is no intent
 //     path for the caller to dereference.
 //
-// The manifest MUST be kind: workspace-scoped (a global or other kind is
-// rejected up front — global manifests go through (*API).Install). On any
-// sub-failure inside step 4, the shared rollback stack runs and the function
-// returns the error with every side effect undone.
+// The manifest MUST be kind: workspace-scoped with a daemon_template (a nil,
+// global, or template-less manifest is rejected up front — those go through
+// (*API).Install), and a non-dry install MUST pass a non-nil Workspaces
+// snapshot (a nil snapshot would silently drop the server's existing daemon
+// rows; pass an empty non-nil slice for an intentional zero-workspace install).
+// On any sub-failure inside step 4, the shared rollback stack runs and the
+// function returns the error with every side effect undone.
 func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifest, opts InstallParsedManifestOpts) (intentPath string, err error) {
 	w := opts.Writer
 	if w == nil {
 		w = os.Stderr
 	}
 
-	// 1. Preflight: check-only gate shared with the legacy install paths.
-	// Runs FIRST, before the pre-flight intent write and before any mutation,
-	// so a missing command or unresolved secret: ref fails fast.
-	if err := Preflight(m, ""); err != nil {
-		return "", fmt.Errorf("preflight: %w", err)
+	// 1. Contract validation — runs FIRST, before Preflight (which dereferences
+	// m) and before any mutation. This seam installs ONLY kind: workspace-scoped
+	// dynamic-pool manifests that carry a daemon_template: it materializes
+	// supervisor-intent daemon rows and defers every daemon start to the
+	// supervisor reconciler. A nil manifest, a global manifest, or a legacy
+	// workspace-scoped manifest WITHOUT a daemon_template belongs to
+	// (*API).Install, which owns the per-daemon scheduler-task + immediate-start
+	// path. Rejecting here keeps such a manifest from silently taking a
+	// deferred-start path that would never start its daemons, and moots the
+	// per-server weekly-cadence machinery a global manifest would otherwise need
+	// from this seam (only workspace-scoped serena flows reach it, and serena
+	// sets weekly_refresh=false).
+	if m == nil {
+		return "", fmt.Errorf("InstallParsedManifest: nil manifest")
+	}
+	if m.Kind != config.KindWorkspaceScoped || m.DaemonTemplate == nil {
+		return "", fmt.Errorf("InstallParsedManifest only installs kind=%q dynamic-pool manifests with a daemon_template (manifest %q is kind=%q, has daemon_template=%t); install global or legacy manifests through (*API).Install", config.KindWorkspaceScoped, m.Name, m.Kind, m.DaemonTemplate != nil)
 	}
 
-	// 1a. Workspace-scoped-only contract. This seam materializes
-	// supervisor-intent daemon rows for kind: workspace-scoped manifests and
-	// defers every daemon start to the supervisor reconciler. A global (or any
-	// other non-workspace-scoped) manifest belongs to (*API).Install, which
-	// owns the per-daemon scheduler-task + immediate-start path. Rejecting it
-	// here — before the dry-run short-circuit and before any mutation — keeps a
-	// non-workspace-scoped manifest from silently taking a deferred-start path
-	// that would never start its daemons. The reject also moots the per-server
-	// weekly-cadence machinery a global manifest would otherwise need from this
-	// seam (FIX B): only workspace-scoped serena flows reach it, and serena
-	// sets weekly_refresh=false.
-	if m.Kind != config.KindWorkspaceScoped {
-		return "", fmt.Errorf("InstallParsedManifest only installs kind=%q manifests (manifest %q is kind=%q); install global manifests through (*API).Install", config.KindWorkspaceScoped, m.Name, m.Kind)
+	// 1a. Preflight: check-only gate shared with the legacy install paths.
+	// Before the pre-flight intent write and before any mutation, so a missing
+	// command or unresolved secret: ref fails fast.
+	if err := Preflight(m, ""); err != nil {
+		return "", fmt.Errorf("preflight: %w", err)
 	}
 
 	// 1b. Dry-run short-circuit — runs BEFORE the state-dir resolve, the
@@ -149,6 +156,18 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 		// uses (workspacePathStale) but emits nothing here — label only.
 		previewWorkspaceFanOut(w, m, opts.Workspaces)
 		return "", nil
+	}
+
+	// 1c. Non-dry install requires the workspace snapshot. A nil snapshot would
+	// fall through serenaOrPlanDaemons to the plan-derived (nil) daemon set and
+	// SILENTLY DROP every existing supervisor-intent daemon row for this server
+	// (buildMergedSupervisorIntent replaces m's rows with whatever
+	// serenaOrPlanDaemons returns). Distinguish a forgotten snapshot (nil →
+	// error) from an intentional zero-workspace install (empty non-nil slice →
+	// proceed, legitimately clearing m's rows). Dry runs are exempt: they write
+	// nothing, so a nil snapshot there is non-destructive.
+	if opts.Workspaces == nil {
+		return "", fmt.Errorf("InstallParsedManifest: a non-nil Workspaces snapshot is required for a non-dry install of %q (pass an empty non-nil slice to install with zero registered workspaces; a nil snapshot would drop the server's existing supervisor-intent daemon rows)", m.Name)
 	}
 
 	stateDir, err := DaemonStateDir()

@@ -215,6 +215,139 @@ func TestInstallParsedManifest_RejectsGlobalManifest(t *testing.T) {
 	}
 }
 
+// TestInstallParsedManifest_RejectsNilManifest — the contract guard runs before
+// Preflight (which would nil-deref m), so a nil manifest fails fast with no
+// mutation.
+func TestInstallParsedManifest_RejectsNilManifest(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	a := NewAPI()
+	var buf bytes.Buffer
+	if _, err := a.InstallParsedManifest(context.Background(), nil, InstallParsedManifestOpts{Writer: &buf}); err == nil {
+		t.Fatal("InstallParsedManifest(nil): want error, got nil")
+	}
+	if _, statErr := os.Stat(filepath.Join(stateDir, "supervisor-intent.json")); !os.IsNotExist(statErr) {
+		t.Errorf("no intent must be written on nil-manifest reject; stat err = %v", statErr)
+	}
+	if f.createCount != 0 || f.runCount != 0 {
+		t.Errorf("no scheduler mutation on reject: createCount=%d runCount=%d", f.createCount, f.runCount)
+	}
+}
+
+// TestInstallParsedManifest_RejectsWorkspaceScopedWithoutTemplate — a
+// workspace-scoped manifest WITHOUT a daemon_template is a legacy (e.g. LSP)
+// shape that belongs to (*API).Install, not this dynamic-pool seam. Rejected up
+// front with no mutation.
+func TestInstallParsedManifest_RejectsWorkspaceScopedWithoutTemplate(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	m := serenaTemplateManifest()
+	m.DaemonTemplate = nil // workspace-scoped but template-less
+
+	a := NewAPI()
+	var buf bytes.Buffer
+	_, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{Writer: &buf, Workspaces: []WorkspaceEntry{}})
+	if err == nil {
+		t.Fatal("InstallParsedManifest(workspace-scoped, no daemon_template): want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "daemon_template") {
+		t.Errorf("error = %q, want it to name the missing daemon_template", err.Error())
+	}
+	if _, statErr := os.Stat(filepath.Join(stateDir, "supervisor-intent.json")); !os.IsNotExist(statErr) {
+		t.Errorf("no intent must be written on template-less reject; stat err = %v", statErr)
+	}
+	if f.createCount != 0 || f.runCount != 0 {
+		t.Errorf("no scheduler mutation on reject: createCount=%d runCount=%d", f.createCount, f.runCount)
+	}
+}
+
+// TestInstallParsedManifest_RejectsNilWorkspacesNonDry — a non-dry install with
+// a nil Workspaces snapshot is a forgotten-snapshot caller bug: it would fall
+// through to the plan-derived (nil) daemon set and SILENTLY DROP this server's
+// existing supervisor-intent daemon rows. The seam rejects nil up front (an
+// intentional zero-workspace install passes an empty non-nil slice instead).
+func TestInstallParsedManifest_RejectsNilWorkspacesNonDry(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	m := serenaTemplateManifest()
+	a := NewAPI()
+	var buf bytes.Buffer
+	// Workspaces omitted → nil.
+	_, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{Writer: &buf})
+	if err == nil {
+		t.Fatal("InstallParsedManifest(non-dry, nil Workspaces): want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "Workspaces") {
+		t.Errorf("error = %q, want it to name the required Workspaces snapshot", err.Error())
+	}
+	if _, statErr := os.Stat(filepath.Join(stateDir, "supervisor-intent.json")); !os.IsNotExist(statErr) {
+		t.Errorf("no intent must be written on nil-Workspaces reject; stat err = %v", statErr)
+	}
+}
+
+// TestInstallParsedManifest_EmptyWorkspacesValid — an intentional zero-workspace
+// install passes an empty NON-NIL slice. It is accepted (distinct from the nil
+// reject), writes an intent, clears this server's daemon rows, and preserves
+// siblings' rows.
+func TestInstallParsedManifest_EmptyWorkspacesValid(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	seed := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{TaskName: "\\mcp-local-hub-serena-stale", Server: "serena", Command: "mcphub.exe"},
+			{TaskName: "\\mcp-local-hub-othersrv-d", Server: "othersrv", Command: "mcphub.exe"},
+		},
+	}
+	if err := WriteSupervisorIntent(intentPath, seed); err != nil {
+		t.Fatalf("seed intent: %v", err)
+	}
+
+	m := serenaTemplateManifest() // Name "serena"
+	a := NewAPI()
+	var buf bytes.Buffer
+	intentOut, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
+		Writer:     &buf,
+		Workspaces: []WorkspaceEntry{}, // intentional zero-workspace install
+	})
+	if err != nil {
+		t.Fatalf("InstallParsedManifest(empty non-nil Workspaces): unexpected error: %v", err)
+	}
+	if intentOut == "" {
+		t.Fatal("want a non-empty intent path on a successful zero-workspace install")
+	}
+
+	written, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+	sawSibling := false
+	for _, d := range written.Daemons {
+		if d.Server == "serena" {
+			t.Errorf("serena daemon row %q must be cleared on a zero-workspace install; rows: %+v", d.TaskName, written.Daemons)
+		}
+		if d.Server == "othersrv" {
+			sawSibling = true
+		}
+	}
+	if !sawSibling {
+		t.Errorf("sibling daemon row must be preserved; rows: %+v", written.Daemons)
+	}
+}
+
 // TestInstallParsedManifest_DefersDaemonSpawn asserts the structural
 // deferred-start contract: a workspace-scoped install creates no scheduler
 // Run (daemon spawn is deferred to the supervisor reconciler). The seam has
@@ -268,7 +401,8 @@ func TestInstallParsedManifest_WorkspaceScoped_NotRefused(t *testing.T) {
 	a := NewAPI()
 	var buf bytes.Buffer
 	intentPath, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
-		Writer: &buf,
+		Writer:     &buf,
+		Workspaces: []WorkspaceEntry{}, // intentional zero-workspace install (empty non-nil; nil would be a forgotten-snapshot reject)
 	})
 	if err != nil {
 		t.Fatalf("InstallParsedManifest(workspace-scoped): want success, got %v", err)
