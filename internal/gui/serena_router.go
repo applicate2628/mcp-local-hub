@@ -282,14 +282,40 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	// are answered here rather than forwarded to a workspace daemon (they
 	// carry no path-arg and no bound session). Tool calls fall through to
 	// the path-routing + upstream-forward path below, unchanged.
+	//
+	// JSON-RPC notification gate (mirrors internal/api/hub_mcp_handler.go):
+	// a request-style lifecycle method (initialize / tools/list / ping)
+	// that arrives WITHOUT an id is a JSON-RPC notification and MUST NOT
+	// receive a response envelope — the server returns 202 + empty body.
+	// (notifications/* is handled inside handleNotificationOrPing, which
+	// also rejects an id-bearing notifications/* with -32600.) Without
+	// this gate, handleInitialize / handleToolsList would synthesize a
+	// result with id:null and a strict client would treat the unexpected
+	// response as a protocol error.
 	switch {
 	case tb.Method == "initialize":
+		if isJSONRPCNotificationID(tb.ID) {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
 		s.handleInitialize(w, body, &tb, sessionID)
 		return
 	case tb.Method == "tools/list":
+		if isJSONRPCNotificationID(tb.ID) {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
 		s.handleToolsList(w, r, deps, &tb, body, httpClient, upstreamURLFn, auditFn)
 		return
-	case tb.Method == "ping" || isNotificationMethod(tb.Method):
+	case tb.Method == "ping":
+		if isJSONRPCNotificationID(tb.ID) {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		s.handleNotificationOrPing(w, &tb)
+		return
+	case isNotificationMethod(tb.Method):
+		// notifications/* : 202 when id-less, -32600 when id-bearing.
 		s.handleNotificationOrPing(w, &tb)
 		return
 	}
@@ -339,15 +365,58 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Bind the client session to a REAL upstream daemon session (P1).
+	// The router synthesized `initialize` for the client and minted the
+	// client-facing Mcp-Session-Id; the workspace daemon has never seen
+	// that id. Establish (lazily, once per client-session×workspace) an
+	// upstream MCP session WITH the daemon — initialize →
+	// notifications/initialized — and forward this and subsequent tool
+	// calls with the daemon-issued id, NOT the router-minted client id.
+	// A handshake transport failure is the same failure class as an
+	// unreachable tool-call forward (502/504), audited identically so a
+	// dead/slow daemon is diagnosable rather than yielding an opaque
+	// "unknown session" rejection.
+	daemonSessionID, hsErr := s.serenaDaemonSessions.resolveDaemonSession(r.Context(), httpClient, upstreamURL, sessionID, ws)
+	if hsErr != nil {
+		if isTimeoutErr(hsErr) {
+			_ = auditFn("warn", "serena-upstream-timeout", map[string]any{
+				"workspace_key": ws.WorkspaceKey,
+				"port":          ws.Port,
+				"upstream_url":  upstreamURL,
+				"timeout_secs":  int(upstreamTimeout / time.Second),
+				"phase":         "handshake",
+				"err":           hsErr.Error(),
+			})
+			http.Error(w, fmt.Sprintf("upstream serena daemon at port %d did not respond to MCP handshake within %ds", ws.Port, int(upstreamTimeout/time.Second)), http.StatusGatewayTimeout)
+			return
+		}
+		_ = auditFn("warn", "serena-upstream-unreachable", map[string]any{
+			"workspace_key": ws.WorkspaceKey,
+			"port":          ws.Port,
+			"upstream_url":  upstreamURL,
+			"phase":         "handshake",
+			"err":           hsErr.Error(),
+		})
+		http.Error(w, fmt.Sprintf("upstream serena daemon at port %d MCP handshake failed: %s", ws.Port, hsErr.Error()), http.StatusBadGateway)
+		return
+	}
+
 	upstreamReq, ureqErr := http.NewRequestWithContext(r.Context(), http.MethodPost, upstreamURL, bytes.NewReader(body))
 	if ureqErr != nil {
 		http.Error(w, "build upstream request: "+ureqErr.Error(), http.StatusInternalServerError)
 		return
 	}
-	for _, h := range []string{"Content-Type", "Accept", "Mcp-Session-Id", "MCP-Protocol-Version"} {
+	// Thread Content-Type/Accept/protocol-version through verbatim, but
+	// NOT the client's Mcp-Session-Id: the daemon does not know the
+	// router-minted client id. Set the daemon-issued session id instead
+	// (omit it entirely when the daemon is sessionless and issued none).
+	for _, h := range []string{"Content-Type", "Accept", "MCP-Protocol-Version"} {
 		if v := r.Header.Get(h); v != "" {
 			upstreamReq.Header.Set(h, v)
 		}
+	}
+	if daemonSessionID != "" {
+		upstreamReq.Header.Set("Mcp-Session-Id", daemonSessionID)
 	}
 	if upstreamReq.Header.Get("Content-Type") == "" {
 		upstreamReq.Header.Set("Content-Type", "application/json")
@@ -378,6 +447,19 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	defer upstreamResp.Body.Close()
 
 	copyHeaders(w.Header(), upstreamResp.Header)
+
+	// The daemon's response carries the DAEMON's Mcp-Session-Id, which is
+	// an internal router↔daemon detail (P1 multiplexing). The client must
+	// keep using its OWN router-minted session id, so we never surface the
+	// daemon id downstream: re-assert the client's id when it sent one,
+	// else drop the header entirely. Leaking the daemon id would make the
+	// client switch session ids mid-stream and break the router's
+	// client-session→daemon-session map on the next call.
+	if sessionID != "" {
+		w.Header().Set("Mcp-Session-Id", sessionID)
+	} else {
+		w.Header().Del("Mcp-Session-Id")
+	}
 
 	contentType := upstreamResp.Header.Get("Content-Type")
 	isSSE := strings.Contains(strings.ToLower(contentType), "text/event-stream")

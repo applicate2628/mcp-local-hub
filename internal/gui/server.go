@@ -455,6 +455,19 @@ type Server struct {
 	// across workspace daemons, so a single cached entry serves every
 	// client; the cache is keyed by nothing and TTL-bounded.
 	serenaToolsListCache toolsListCache
+
+	// ROUTER-COMPLETION phase -- router-owned map of client-facing
+	// Mcp-Session-Id -> the real upstream daemon session it is
+	// multiplexed onto (see serena_router_handshake.go). Because the
+	// router synthesizes `initialize` itself and mints the client
+	// session id, it must perform a SEPARATE MCP handshake with the
+	// workspace daemon (which issues its own session id) before
+	// forwarding tool calls. This store records that binding so
+	// subsequent calls forward the daemon-issued id, not the
+	// router-minted client id. Distinct from serenaRouterDeps.Sessions
+	// (sticky client-session -> workspace routing) -- the daemon session
+	// id is a new concern this store owns. Thread-safe.
+	serenaDaemonSessions daemonSessionStore
 }
 
 // NewServer constructs the Server. It registers the ping handler

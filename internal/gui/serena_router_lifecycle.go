@@ -67,6 +67,7 @@ const (
 // tools/list uses serenaNoWorkspaceCode, a server-defined code in the
 // implementation-defined range (-32000..-32099).
 const (
+	jsonrpcInvalidRequest = -32600
 	jsonrpcInvalidParams  = -32602
 	jsonrpcInternalError  = -32603
 	serenaNoWorkspaceCode = -32001
@@ -174,6 +175,19 @@ func normalizeID(id json.RawMessage) json.RawMessage {
 	return id
 }
 
+// isJSONRPCNotificationID reports whether a JSON-RPC envelope is a
+// notification (no response permitted). It returns true ONLY when the
+// "id" field is absent from the body entirely (len == 0). An explicit
+// `"id": null` token is NOT a notification — MCP §1.5 requires id to be
+// a non-null String/Number, so `id:null` is a malformed request, not a
+// fire-and-forget event. This mirrors the hub handler's
+// isJSONRPCNotificationID byte-for-byte
+// (internal/api/hub_mcp_handler.go) so the router and the hub classify
+// the same wire shape identically.
+func isJSONRPCNotificationID(id json.RawMessage) bool {
+	return len(id) == 0
+}
+
 type jsonrpcEnvelope struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id"`
@@ -264,19 +278,42 @@ func (s *Server) handleInitialize(w http.ResponseWriter, body []byte, tb *toolBo
 
 // handleNotificationOrPing answers MCP utility/lifecycle methods that
 // need no workspace:
-//   - notifications/* (no id) -> HTTP 202 Accepted, empty body (MCP
-//     Streamable HTTP: a POST whose payload is only a notification gets
-//     202 if accepted).
-//   - ping (has id)           -> JSON-RPC result {} (MCP basic/utilities/ping).
+//   - notifications/* WITHOUT an id -> HTTP 202 Accepted, empty body
+//     (MCP Streamable HTTP: a POST whose payload is only a notification
+//     gets 202 if accepted).
+//   - notifications/* WITH an id    -> JSON-RPC -32600 error. An id
+//     present on a notification method makes it a JSON-RPC request, and
+//     the client will block waiting for a response; a notification can
+//     never produce one, so we reject the malformed shape loud instead
+//     of acknowledging it (mirrors the hub handler's
+//     "notifications/* must not include id" rule in
+//     internal/api/hub_mcp_handler.go).
+//   - ping WITH an id   -> JSON-RPC result {} (MCP basic/utilities/ping).
+//   - ping WITHOUT an id -> HTTP 202, empty body (ping-as-notification;
+//     writeJSONRPCResult is not used because a notification gets no
+//     response envelope — handled by the caller's notification gate).
 //
 // Returns true when it handled the method.
+//
+// NOTE: id-less ping is gated to 202 by the caller (serenaRouterHandler)
+// before this runs, so the ping branch here only sees id-bearing pings.
 func (s *Server) handleNotificationOrPing(w http.ResponseWriter, tb *toolBody) bool {
 	switch {
 	case tb.Method == "ping":
+		// Reaches here only with an id present (the caller's notification
+		// gate already 202'd a ping with no id).
 		writeJSONRPCResult(w, tb.ID, map[string]any{}, nil)
 		return true
 	case isNotificationMethod(tb.Method):
-		// Notifications have no id and expect no JSON-RPC response.
+		if !isJSONRPCNotificationID(tb.ID) {
+			// notifications/* with an id is a JSON-RPC request that can
+			// never be answered. Reject -32600 (Invalid Request) so the
+			// client sees the protocol error instead of hanging.
+			writeJSONRPCError(w, tb.ID, jsonrpcInvalidRequest,
+				"invalid request: notifications/* must not include id")
+			return true
+		}
+		// Genuine notification (no id): no JSON-RPC response.
 		w.WriteHeader(http.StatusAccepted)
 		return true
 	}
@@ -284,8 +321,9 @@ func (s *Server) handleNotificationOrPing(w http.ResponseWriter, tb *toolBody) b
 }
 
 // isNotificationMethod reports whether method is an MCP notification
-// (the "notifications/" namespace). Notifications carry no id and the
-// server returns 202 with no body.
+// (the "notifications/" namespace). A genuine notification carries no
+// id and the server returns 202 with no body; a notifications/* method
+// that DOES carry an id is a malformed request (handled by the caller).
 func isNotificationMethod(method string) bool {
 	const prefix = "notifications/"
 	return len(method) >= len(prefix) && method[:len(prefix)] == prefix
@@ -398,7 +436,22 @@ func (s *Server) fetchToolsListFromAnyDaemon(
 // JSON body and a single-event SSE body (serena daemons may answer either
 // per the MCP Streamable HTTP transport). A 1 MiB read cap bounds the
 // response.
+//
+// Before the tools/list POST it performs the MCP handshake with the
+// daemon (initialize → notifications/initialized) and sends the
+// daemon-issued Mcp-Session-Id on the tools/list request (P1). A healthy
+// serena / native-http daemon requires a session for every non-initialize
+// POST, so a bare tools/list with no preceding initialize would be
+// rejected with a 400 / JSON-RPC session error. A handshake failure (dead
+// daemon) surfaces as the per-candidate error so fetchToolsListFromAnyDaemon
+// advances to the next daemon. A sessionless daemon yields an empty
+// session id, in which case tools/list is sent with no Mcp-Session-Id
+// (back-compat).
 func proxyToolsListOnce(ctx context.Context, httpClient *http.Client, upstreamURL string, body []byte) (json.RawMessage, error) {
+	daemonSessionID, hsErr := establishDaemonSession(ctx, httpClient, upstreamURL)
+	if hsErr != nil {
+		return nil, fmt.Errorf("upstream handshake: %w", hsErr)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -407,6 +460,9 @@ func proxyToolsListOnce(ctx context.Context, httpClient *http.Client, upstreamUR
 	// Accept both shapes; daemons that only emit SSE need the stream
 	// Accept, plain-JSON daemons ignore the extra type.
 	req.Header.Set("Accept", "application/json, text/event-stream")
+	if daemonSessionID != "" {
+		req.Header.Set("Mcp-Session-Id", daemonSessionID)
+	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err

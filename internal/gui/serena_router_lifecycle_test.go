@@ -10,6 +10,7 @@ package gui
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -17,7 +18,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -170,19 +170,27 @@ func TestSerenaRouter_Initialize_PreservesIncomingSessionID(t *testing.T) {
 // tools/list — fetch-and-cache from a live daemon, then serve from cache.
 // ---------------------------------------------------------------------
 func TestSerenaRouter_ToolsList_FetchAndCacheFromLiveDaemon(t *testing.T) {
-	var daemonHits atomic.Int32
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		daemonHits.Add(1)
-		// Assert the router forwarded a tools/list, not something else.
-		b, _ := readAllBody(r)
+	// The daemon requires the MCP handshake before answering tools/list
+	// (P1 #2). The fake daemon mints a session on initialize and rejects
+	// a tools/list that arrives without it; the tool handler asserts the
+	// session-gated body carried tools/list AND a daemon session id, then
+	// returns the catalog. "toolHits" counts only session-gated tools/list
+	// calls — the handshake POSTs are counted separately.
+	daemon := newFakeSerenaDaemon("alpha")
+	daemon.tool = func(w http.ResponseWriter, r *http.Request, b []byte) {
 		if !strings.Contains(string(b), `"tools/list"`) {
 			t.Errorf("upstream body did not carry tools/list method; got %s", string(b))
+		}
+		if r.Header.Get("Mcp-Session-Id") == "" {
+			t.Errorf("tools/list reached the daemon with no Mcp-Session-Id; handshake session not threaded")
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"find_symbol"},{"name":"list_dir"}]}}`))
-	}))
+	}
+	ts := httptest.NewServer(daemon.handler())
 	t.Cleanup(ts.Close)
+	toolHits := func() int { daemon.mu.Lock(); defer daemon.mu.Unlock(); return daemon.toolHits }
 
 	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
 	deps := &serenaRouterDeps{
@@ -194,14 +202,14 @@ func TestSerenaRouter_ToolsList_FetchAndCacheFromLiveDaemon(t *testing.T) {
 
 	body := buildLifecycleBody(t, "tools/list", map[string]any{})
 
-	// First call -> proxies to the daemon.
+	// First call -> handshake + proxies tools/list to the daemon.
 	rr := postSerena(t, s, body, nil)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("first tools/list status = %d, want 200; body=%s", rr.Code, rr.Body.String())
 	}
 	assertToolsListNames(t, rr.Body.Bytes(), []string{"find_symbol", "list_dir"})
-	if got := daemonHits.Load(); got != 1 {
-		t.Fatalf("daemon hits after first call = %d, want 1", got)
+	if got := toolHits(); got != 1 {
+		t.Fatalf("daemon tool hits after first call = %d, want 1", got)
 	}
 
 	// Second call -> served from cache, no new daemon hit.
@@ -210,19 +218,24 @@ func TestSerenaRouter_ToolsList_FetchAndCacheFromLiveDaemon(t *testing.T) {
 		t.Fatalf("second tools/list status = %d, want 200", rr2.Code)
 	}
 	assertToolsListNames(t, rr2.Body.Bytes(), []string{"find_symbol", "list_dir"})
-	if got := daemonHits.Load(); got != 1 {
-		t.Fatalf("daemon hits after cached call = %d, want 1 (cache hit expected)", got)
+	if got := toolHits(); got != 1 {
+		t.Fatalf("daemon tool hits after cached call = %d, want 1 (cache hit expected)", got)
 	}
 }
 
 // tools/list accepts a single-event SSE body from the daemon (some MCP
 // servers answer Streamable HTTP requests as text/event-stream).
 func TestSerenaRouter_ToolsList_AcceptsSSEDaemonResponse(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// The daemon answers the tools/list call as a single-event SSE body;
+	// the handshake initialize still answers plain JSON (fake daemon
+	// default).
+	daemon := newFakeSerenaDaemon("alpha")
+	daemon.tool = func(w http.ResponseWriter, r *http.Request, b []byte) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"tools\":[{\"name\":\"read_file\"}]}}\n\n"))
-	}))
+	}
+	ts := httptest.NewServer(daemon.handler())
 	t.Cleanup(ts.Close)
 
 	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
@@ -242,10 +255,16 @@ func TestSerenaRouter_ToolsList_AcceptsSSEDaemonResponse(t *testing.T) {
 
 // tools/list skips a dead daemon and fetches from the next live one.
 func TestSerenaRouter_ToolsList_SkipsDeadDaemonAndUsesNext(t *testing.T) {
-	live := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// The live daemon completes the handshake, then answers tools/list.
+	// The dead candidate is unroutable, so its handshake initialize POST
+	// already fails connection — fetchToolsListFromAnyDaemon advances to
+	// the live one.
+	liveDaemon := newFakeSerenaDaemon("good")
+	liveDaemon.tool = func(w http.ResponseWriter, r *http.Request, b []byte) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"x"}]}}`))
-	}))
+	}
+	live := httptest.NewServer(liveDaemon.handler())
 	t.Cleanup(live.Close)
 
 	dead := &api.WorkspaceEntry{WorkspaceKey: "dead", WorkspacePath: "/proj/dead", Port: 1}
@@ -576,12 +595,348 @@ func TestSerenaRouter_ReconcileReadinessProbeShape_PassesAgainstCompletedRouter(
 	// error) is satisfied -> the reconcile flips from inert to functional.
 }
 
-// --- small helpers ---
+// ---------------------------------------------------------------------
+// P1 #1 — initialize → tool-call establishes a REAL upstream daemon
+// session and forwards the tool call with the daemon-issued id, NOT the
+// router-minted client id. This is the core multiplexing acceptance test.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_InitializeThenToolCall_ForwardsDaemonSession(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
 
-func readAllBody(r *http.Request) ([]byte, error) {
-	defer func() { _ = r.Body.Close() }()
-	return io.ReadAll(r.Body)
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	// Step 1: synthesized initialize at the router -> client session id.
+	initRR := postSerena(t, s, buildLifecycleBody(t, "initialize", map[string]any{
+		"protocolVersion": "2025-06-18",
+		"capabilities":    map[string]any{},
+	}), nil)
+	if initRR.Code != http.StatusOK {
+		t.Fatalf("initialize status = %d, want 200; body=%s", initRR.Code, initRR.Body.String())
+	}
+	clientSID := initRR.Header().Get("Mcp-Session-Id")
+	if clientSID == "" {
+		t.Fatalf("initialize did not mint a client Mcp-Session-Id")
+	}
+	// At initialize time NO upstream handshake should have happened yet —
+	// the handshake is lazy, on the first tool call (so the reconcile
+	// readiness probe stays cheap).
+	if mc := daemonMintCount(daemon); mc != 0 {
+		t.Fatalf("daemon minted %d sessions at initialize; want 0 (handshake must be lazy)", mc)
+	}
+
+	// Step 2: first tool call on that client session -> handshake fires,
+	// tool call forwards with the DAEMON session id.
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/src/main.go"})
+	rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": clientSID})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if mc := daemonMintCount(daemon); mc != 1 {
+		t.Fatalf("daemon minted %d sessions; want exactly 1 handshake", mc)
+	}
+	// The daemon must have seen its OWN minted session id on the tool
+	// call, NOT the router-minted client id.
+	daemon.mu.Lock()
+	gotSID := daemon.lastToolSession
+	known := daemon.issued[gotSID]
+	daemon.mu.Unlock()
+	if gotSID == clientSID {
+		t.Errorf("daemon saw the router-minted client id %q on the tool call; want the daemon-issued id", clientSID)
+	}
+	if !known {
+		t.Errorf("daemon saw session %q it never minted; want the handshake-issued id", gotSID)
+	}
+	// The client keeps its own id downstream (daemon id never leaks).
+	if got := rr.Header().Get("Mcp-Session-Id"); got != clientSID {
+		t.Errorf("downstream Mcp-Session-Id = %q, want the client's own id %q", got, clientSID)
+	}
 }
+
+// P1 #1 — a second tool call on the SAME client session reuses the
+// established daemon session: the daemon handshakes exactly once.
+func TestSerenaRouter_ToolCall_ReusesDaemonSessionAcrossCalls(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"})
+	for i := 0; i < 3; i++ {
+		rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": "sess-reuse"})
+		if rr.Code != http.StatusOK {
+			t.Fatalf("call %d status = %d, want 200; body=%s", i, rr.Code, rr.Body.String())
+		}
+	}
+	if mc := daemonMintCount(daemon); mc != 1 {
+		t.Errorf("daemon minted %d sessions over 3 calls; want exactly 1 (session reuse)", mc)
+	}
+	daemon.mu.Lock()
+	hits := daemon.toolHits
+	daemon.mu.Unlock()
+	if hits != 3 {
+		t.Errorf("daemon tool hits = %d, want 3", hits)
+	}
+}
+
+// P1 #1 — when the SAME client session is later routed to a DIFFERENT
+// workspace (a new path-arg), the router re-handshakes with the new
+// workspace's daemon rather than forwarding the first daemon's session.
+func TestSerenaRouter_ToolCall_ReHandshakesOnWorkspaceSwitch(t *testing.T) {
+	daemonA := newFakeSerenaDaemon("alpha")
+	tsA := httptest.NewServer(daemonA.handler())
+	t.Cleanup(tsA.Close)
+	daemonB := newFakeSerenaDaemon("beta")
+	tsB := httptest.NewServer(daemonB.handler())
+	t.Cleanup(tsB.Close)
+
+	wsA := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	wsB := &api.WorkspaceEntry{WorkspaceKey: "beta", WorkspacePath: "/proj/beta", Port: 9202}
+	deps := &serenaRouterDeps{
+		Resolver: &stubResolver{entries: []*api.WorkspaceEntry{wsA, wsB}},
+		Sessions: NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string {
+			if ws.WorkspaceKey == "beta" {
+				return tsB.URL
+			}
+			return tsA.URL
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+
+	// Call 1 -> workspace alpha.
+	rrA := postSerena(t, s, buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"}), map[string]string{"Mcp-Session-Id": "sess-switch"})
+	if rrA.Code != http.StatusOK {
+		t.Fatalf("alpha call status = %d; body=%s", rrA.Code, rrA.Body.String())
+	}
+	// Call 2 (same client session) -> workspace beta. Must re-handshake.
+	rrB := postSerena(t, s, buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/beta/y"}), map[string]string{"Mcp-Session-Id": "sess-switch"})
+	if rrB.Code != http.StatusOK {
+		t.Fatalf("beta call status = %d; body=%s", rrB.Code, rrB.Body.String())
+	}
+
+	if mc := daemonMintCount(daemonA); mc != 1 {
+		t.Errorf("alpha daemon minted %d sessions; want 1", mc)
+	}
+	if mc := daemonMintCount(daemonB); mc != 1 {
+		t.Errorf("beta daemon minted %d sessions; want 1 (re-handshake on workspace switch)", mc)
+	}
+	daemonB.mu.Lock()
+	betaKnown := daemonB.issued[daemonB.lastToolSession]
+	daemonB.mu.Unlock()
+	if !betaKnown {
+		t.Errorf("beta tool call did not carry a beta-issued session id")
+	}
+}
+
+// ---------------------------------------------------------------------
+// P2 #3 — a notifications/* method that carries an id is a malformed
+// JSON-RPC request and must get a -32600 error (NOT a 202 acknowledgment
+// that leaves the client waiting for a response that never arrives).
+// ---------------------------------------------------------------------
+func TestSerenaRouter_NotificationWithID_ReturnsInvalidRequest(t *testing.T) {
+	deps := &serenaRouterDeps{Resolver: &stubResolver{}, Sessions: NewInMemorySessionRouter()}
+	s := newSerenaTestServer(t, deps)
+
+	for _, method := range []string{"notifications/initialized", "notifications/cancelled"} {
+		t.Run(method, func(t *testing.T) {
+			// id present -> JSON-RPC request shape on a notification method.
+			body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 7, "method": method})
+			rr := postSerena(t, s, body, nil)
+			// JSON-RPC errors are carried in-band at HTTP 200.
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200 (in-band JSON-RPC error); body=%s", rr.Code, rr.Body.String())
+			}
+			var resp struct {
+				ID    json.RawMessage `json:"id"`
+				Error *struct {
+					Code    int    `json:"code"`
+					Message string `json:"message"`
+				} `json:"error"`
+				Result json.RawMessage `json:"result"`
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("decode: %v; raw=%s", err, rr.Body.String())
+			}
+			if resp.Error == nil {
+				t.Fatalf("expected a JSON-RPC error for id-bearing %s; raw=%s", method, rr.Body.String())
+			}
+			if resp.Error.Code != jsonrpcInvalidRequest {
+				t.Errorf("error code = %d, want %d (Invalid Request)", resp.Error.Code, jsonrpcInvalidRequest)
+			}
+			if string(resp.ID) != "7" {
+				t.Errorf("error id = %s, want 7 (echoed)", string(resp.ID))
+			}
+			if len(resp.Result) > 0 {
+				t.Errorf("result present on a rejected notification; want error only")
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------
+// P2 #4 — a request-style lifecycle method (initialize / tools/list /
+// ping) arriving WITHOUT an id is a JSON-RPC notification and must NOT
+// receive a response envelope: 202 + empty body, like the hub handler.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_IdlessLifecycle_Returns202NoBody(t *testing.T) {
+	// A live daemon is wired so that, if the router WRONGLY proxied an
+	// id-less tools/list upstream instead of 202-ing it, the test would
+	// still surface the violation via the body assertion below.
+	daemon := newFakeSerenaDaemon("alpha")
+	daemon.tool = func(w http.ResponseWriter, r *http.Request, b []byte) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"x"}]}}`))
+	}
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	for _, method := range []string{"initialize", "tools/list", "ping"} {
+		t.Run(method, func(t *testing.T) {
+			// No "id" field -> notification shape.
+			env := map[string]any{"jsonrpc": "2.0", "method": method}
+			if method == "initialize" {
+				env["params"] = map[string]any{"protocolVersion": "2025-06-18", "capabilities": map[string]any{}}
+			}
+			body, _ := json.Marshal(env)
+			rr := postSerena(t, s, body, nil)
+			if rr.Code != http.StatusAccepted {
+				t.Fatalf("%s (no id) status = %d, want 202; body=%s", method, rr.Code, rr.Body.String())
+			}
+			if b := strings.TrimSpace(rr.Body.String()); b != "" {
+				t.Errorf("%s (no id) response body = %q, want empty (no response envelope for a notification)", method, b)
+			}
+			// And the id-less initialize must NOT mint a session header.
+			if method == "initialize" {
+				if sid := rr.Header().Get("Mcp-Session-Id"); sid != "" {
+					t.Errorf("id-less initialize minted Mcp-Session-Id %q; a notification gets no session", sid)
+				}
+			}
+		})
+	}
+}
+
+// daemonMintCount returns how many upstream sessions a fake daemon has
+// minted (one per successful handshake initialize).
+func daemonMintCount(d *fakeSerenaDaemon) int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.mintCount
+}
+
+// ---------------------------------------------------------------------
+// daemonSessionStore unit tests: workspace-scoped lookup, TTL cleanup,
+// and concurrency (run under -race).
+// ---------------------------------------------------------------------
+func TestDaemonSessionStore_LookupIsWorkspaceScoped(t *testing.T) {
+	st := &daemonSessionStore{}
+	st.store("client-1", "alpha", "daemon-A")
+
+	if dsid, ok := st.lookup("client-1", "alpha"); !ok || dsid != "daemon-A" {
+		t.Fatalf("lookup(client-1, alpha) = (%q, %v), want (daemon-A, true)", dsid, ok)
+	}
+	// Same client session, DIFFERENT workspace -> miss (the cached
+	// daemon session is for another workspace and must be re-established).
+	if dsid, ok := st.lookup("client-1", "beta"); ok {
+		t.Errorf("lookup(client-1, beta) = (%q, true), want miss on workspace mismatch", dsid)
+	}
+	// Empty client session id -> miss.
+	if _, ok := st.lookup("", "alpha"); ok {
+		t.Errorf("lookup(empty, alpha) = ok, want miss")
+	}
+	// Re-store under a new workspace replaces the binding.
+	st.store("client-1", "beta", "daemon-B")
+	if dsid, ok := st.lookup("client-1", "beta"); !ok || dsid != "daemon-B" {
+		t.Fatalf("lookup(client-1, beta) after re-store = (%q, %v), want (daemon-B, true)", dsid, ok)
+	}
+	if _, ok := st.lookup("client-1", "alpha"); ok {
+		t.Errorf("lookup(client-1, alpha) after re-store = ok, want miss (binding moved to beta)")
+	}
+	// unbind drops it.
+	st.unbind("client-1")
+	if _, ok := st.lookup("client-1", "beta"); ok {
+		t.Errorf("lookup after unbind = ok, want miss")
+	}
+}
+
+func TestDaemonSessionStore_IgnoresHalfBindings(t *testing.T) {
+	st := &daemonSessionStore{}
+	st.store("", "alpha", "daemon-A") // empty client id
+	st.store("client-1", "alpha", "") // empty daemon session id
+	if _, ok := st.lookup("client-1", "alpha"); ok {
+		t.Errorf("a half-binding was stored; want no binding")
+	}
+}
+
+func TestDaemonSessionStore_CleanupExpiresIdle(t *testing.T) {
+	base := time.Now()
+	clk := base
+	st := &daemonSessionStore{clock: func() time.Time { return clk }}
+	st.store("client-1", "alpha", "daemon-A")
+
+	// Within TTL -> retained, and lookup refreshes lastSeen.
+	clk = base.Add(10 * time.Minute)
+	if _, ok := st.lookup("client-1", "alpha"); !ok {
+		t.Fatalf("expected hit within TTL")
+	}
+	if n := st.cleanup(clk.Add(1*time.Minute), daemonSessionTTL); n != 0 {
+		t.Fatalf("cleanup expired %d bindings while still active; want 0", n)
+	}
+	// Idle past TTL -> swept.
+	if n := st.cleanup(clk.Add(daemonSessionTTL+time.Minute), daemonSessionTTL); n != 1 {
+		t.Fatalf("cleanup expired %d bindings; want 1", n)
+	}
+	if _, ok := st.lookup("client-1", "alpha"); ok {
+		t.Errorf("binding survived cleanup past TTL")
+	}
+}
+
+// Concurrency smoke: parallel store/lookup/unbind/cleanup never races
+// (run under -race).
+func TestDaemonSessionStore_ConcurrentAccess(t *testing.T) {
+	st := &daemonSessionStore{}
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			id := fmt.Sprintf("client-%d", i%8)
+			st.store(id, "alpha", fmt.Sprintf("daemon-%d", i))
+			_, _ = st.lookup(id, "alpha")
+			if i%5 == 0 {
+				st.unbind(id)
+			}
+			if i%7 == 0 {
+				_ = st.cleanup(time.Now(), daemonSessionTTL)
+			}
+		}(i)
+	}
+	wg.Wait()
+}
+
+// --- small helpers ---
 
 // assertToolsListNames decodes a JSON-RPC tools/list success envelope and
 // asserts the tool names in order.
