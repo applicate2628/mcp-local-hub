@@ -19,12 +19,12 @@
 // PID assigned to a different operator's process must NOT be killed
 // even if it happens to occupy a slot in our transient list.
 //
-//  Gate 1: image basename equals "mcphub" exactly (from /proc/<pid>/comm).
-//  Gate 2: cmdline contains the daemon token AND --server AND --daemon
-//          (from /proc/<pid>/cmdline) — these are the only invocation
-//          shapes we ever record in transient_pids per
-//          supervise_maintenance.go.
-//  Gate 3: process UID matches the current operator (from stat).
+//	Gate 1: image basename equals "mcphub" exactly (from /proc/<pid>/comm).
+//	Gate 2: cmdline matches the transient kind we recorded: daemon-shaped
+//	        entries must contain the daemon token AND --server AND --daemon;
+//	        maintenance entries must contain their maintenance subcommand
+//	        token (for example workspace-weekly-refresh).
+//	Gate 3: process UID matches the current operator (from stat).
 //
 // All three must pass. If any gate fails, the PID is recorded in
 // SkippedPIDs (not killed) and the operator surfaces it via the
@@ -99,18 +99,18 @@ type ReaperResult struct {
 // (no process-group leader because POSIX spawn paths do not currently
 // call Setpgid — see comment near KillProcessGroup invocation).
 type ReaperDeps struct {
-	StateDir            string
-	ReadState           func(path string) (*api.SupervisorStateFile, error)
-	WriteState          func(path string, s *api.SupervisorStateFile) error
-	PIDAlive            func(pid int) bool
-	ProcessIdentity     func(pid int) (basename, cmdline string, uid int, ok bool)
-	CurrentUID          func() int
-	KillProcessGroup    func(pid int) error
-	KillProcess         func(pid int) error
-	ProcessStartTime    func(pid int) (time.Time, bool)
-	StartedAtTolerance  time.Duration
-	SettleDuration      time.Duration
-	Now                 func() time.Time
+	StateDir           string
+	ReadState          func(path string) (*api.SupervisorStateFile, error)
+	WriteState         func(path string, s *api.SupervisorStateFile) error
+	PIDAlive           func(pid int) bool
+	ProcessIdentity    func(pid int) (basename, cmdline string, uid int, ok bool)
+	CurrentUID         func() int
+	KillProcessGroup   func(pid int) error
+	KillProcess        func(pid int) error
+	ProcessStartTime   func(pid int) (time.Time, bool)
+	StartedAtTolerance time.Duration
+	SettleDuration     time.Duration
+	Now                func() time.Time
 }
 
 // withDefaults returns deps with any unset fields filled from the
@@ -210,7 +210,7 @@ func ReapStaleTransients(ctx context.Context, deps ReaperDeps) (ReaperResult, er
 			continue
 		}
 		basename, cmdline, procUID, ok := deps.ProcessIdentity(pid)
-		if !ok || !ownershipGate(basename, cmdline, procUID, uid) {
+		if !ok || !ownershipGate(t.Kind, basename, cmdline, procUID, uid) {
 			res.SkippedPIDs = append(res.SkippedPIDs, pid)
 			continue
 		}
@@ -329,30 +329,43 @@ func startedAtGate(recordedRFC3339 string, pid int, deps ReaperDeps) bool {
 }
 
 // ownershipGate returns true when all 3 gates pass: image basename
-// equals exactly "mcphub"; cmdline contains the daemon-invocation
-// token shape; UID matches the current operator. Gate 2 checks the
-// presence of three distinct tokens rather than a single substring
-// because /proc/<pid>/cmdline NUL-separates argv: the basename
-// comparison + per-token substring check is enough to confirm this
-// is an mcphub daemon child and not, say, a user's mcphub gui or
-// mcphub install invocation that happens to share the name.
-func ownershipGate(basename, cmdline string, procUID, currentUID int) bool {
+// equals exactly "mcphub"; cmdline matches the recorded transient kind;
+// UID matches the current operator. Gate 2 accepts both historical
+// daemon-shaped transients and maintenance timer children. The latter
+// are recorded with Kind=workspace-weekly-refresh/server-weekly-refresh
+// and are invoked as `mcphub <kind>`, so requiring daemon flags would
+// skip-and-forget live maintenance orphans after a supervisor crash.
+func ownershipGate(kind, basename, cmdline string, procUID, currentUID int) bool {
 	if procUID != currentUID {
 		return false
 	}
 	if basename != "mcphub" {
 		return false
 	}
-	if !strings.Contains(cmdline, "daemon") {
+	if isMaintenanceTransientKind(kind) {
+		return cmdlineHasToken(cmdline, kind)
+	}
+	return cmdlineHasToken(cmdline, "daemon") &&
+		cmdlineHasToken(cmdline, "--server") &&
+		cmdlineHasToken(cmdline, "--daemon")
+}
+
+func cmdlineHasToken(cmdline, token string) bool {
+	for _, field := range strings.Fields(cmdline) {
+		if field == token {
+			return true
+		}
+	}
+	return false
+}
+
+func isMaintenanceTransientKind(kind string) bool {
+	switch kind {
+	case "workspace-weekly-refresh", "server-weekly-refresh":
+		return true
+	default:
 		return false
 	}
-	if !strings.Contains(cmdline, "--server") {
-		return false
-	}
-	if !strings.Contains(cmdline, "--daemon") {
-		return false
-	}
-	return true
 }
 
 // pidAliveSignal0 returns true if kill(pid, 0) succeeds (process exists
