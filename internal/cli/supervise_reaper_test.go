@@ -181,6 +181,24 @@ func (f *reaperFakes) addOwnedAlivePID(pid int) {
 	})
 }
 
+func (f *reaperFakes) addOwnedAliveMaintenancePID(pid int, kind string) {
+	f.procs[pid] = fakeProc{
+		pid:       pid,
+		alive:     true,
+		basename:  "mcphub",
+		cmdline:   "mcphub " + kind,
+		uid:       f.currentUID,
+		idOK:      true,
+		startTime: f.now,
+		startOK:   true,
+	}
+	f.stateBefore.TransientPIDs = append(f.stateBefore.TransientPIDs, api.TransientPID{
+		PID:       pid,
+		Kind:      kind,
+		StartedAt: f.now.Format(time.RFC3339Nano),
+	})
+}
+
 // addOwnedAliveStaleStartPID adds a fake "all ownership gates pass,
 // but computed start time is OUTSIDE the StartedAt tolerance window"
 // process. Used by TestReaper_StartedAtMismatchSkipsRecycledPID to
@@ -326,6 +344,40 @@ func TestReaper_AliveAndOwnedKilled(t *testing.T) {
 	}
 	if len(f.stateAfter.TransientPIDs) != 0 {
 		t.Errorf("stateAfter.TransientPIDs = %v; want empty", f.stateAfter.TransientPIDs)
+	}
+}
+
+// ---------------------------------------------------------------------
+// TestReaper_MaintenanceTransientOwnedByKindKilled
+//
+// Maintenance timers are recorded in transient_pids with their timer kind
+// and are invoked as `mcphub <kind>`, not as daemon children with --server
+// and --daemon flags. A crashed supervisor must still reap that live child
+// instead of skipping it and clearing the only durable PID reference.
+// ---------------------------------------------------------------------
+func TestReaper_MaintenanceTransientOwnedByKindKilled(t *testing.T) {
+	f := newReaperFakes(t)
+	f.addOwnedAliveMaintenancePID(3030, "workspace-weekly-refresh")
+
+	res, err := ReapStaleTransients(context.Background(), f.deps())
+	if err != nil {
+		t.Fatalf("ReapStaleTransients: %v", err)
+	}
+
+	if len(res.SkippedPIDs) != 0 {
+		t.Errorf("SkippedPIDs = %v; want empty (maintenance kind should pass ownership gate)", res.SkippedPIDs)
+	}
+	if len(res.KilledPIDs) != 1 || res.KilledPIDs[0] != 3030 {
+		t.Errorf("KilledPIDs = %v; want [3030]", res.KilledPIDs)
+	}
+	if len(f.killed) != 1 || f.killed[0] != 3030 {
+		t.Errorf("KillProcessGroup invocations = %v; want [3030]", f.killed)
+	}
+	if f.stateAfter == nil {
+		t.Fatalf("WriteState was not called")
+	}
+	if len(f.stateAfter.TransientPIDs) != 0 {
+		t.Errorf("TransientPIDs after reap = %v; want empty after successful kill", f.stateAfter.TransientPIDs)
 	}
 }
 
