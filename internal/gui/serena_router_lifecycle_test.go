@@ -2067,6 +2067,189 @@ func TestReadSSEJSONRPCResponse_ReturnsBeforeStreamClose(t *testing.T) {
 	}
 }
 
+// openStreamNoResponseDaemon is a raw daemon handler that, for an
+// `initialize` POST (and any other non-DELETE POST), returns text/event-stream
+// HEADERS immediately, flushes a single SSE heartbeat COMMENT line (so the HTTP
+// response headers + first body byte have definitively arrived — proving the
+// transport's ResponseHeaderTimeout is satisfied and only the BODY read is
+// outstanding), then BLOCKS forever without ever emitting a complete JSON-RPC
+// response event. It models the Finding 3 failure surface: a daemon that opens
+// an SSE stream but never sends the response the router is awaiting. The
+// handler unblocks only when the test closes `release` (t.Cleanup), so the read
+// the router does must be terminated by the upstream-timeout deadline, not by
+// the daemon closing the connection.
+type openStreamNoResponseDaemon struct {
+	release chan struct{}
+	mu      sync.Mutex
+	hits    int
+}
+
+func (d *openStreamNoResponseDaemon) handler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		d.mu.Lock()
+		d.hits++
+		d.mu.Unlock()
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "no flusher", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		// Heartbeat comment only — NOT a JSON-RPC response event. The router's
+		// readSSEJSONRPCResponse must keep scanning for a response and (pre-fix)
+		// block forever.
+		_, _ = io.WriteString(w, ": heartbeat\n\n")
+		flusher.Flush()
+		<-d.release // hold the stream open until the test releases it
+	}
+}
+
+// ---------------------------------------------------------------------
+// Finding 3 (round-10) — a tool-call whose workspace daemon returns SSE
+// HEADERS + a heartbeat on the synthesized `initialize` handshake but never a
+// complete JSON-RPC response event must NOT hang the handler forever. The
+// handshake read is bounded by the (short, test-injected) upstream timeout, so
+// the router returns a fail-loud 502/504 within that budget instead of
+// blocking until the client gives up. The daemon holds the SSE stream open
+// past the timeout (release channel), so a regression that drops the read
+// deadline would HANG and the deadline-guarded select FAILS.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_ToolCall_OpenSSEHandshakeNoResponse_BoundedByTimeout(t *testing.T) {
+	const upstreamTimeout = 300 * time.Millisecond
+	daemon := &openStreamNoResponseDaemon{release: make(chan struct{})}
+	ts := httptest.NewServer(daemon.handler())
+	// Cleanups run LIFO: register ts.Close FIRST (runs LAST) and the release
+	// close LAST (runs FIRST), so the blocked handler is unblocked BEFORE
+	// ts.Close waits for it — otherwise ts.Close deadlocks against the handler
+	// still parked on <-release.
+	t.Cleanup(ts.Close)
+	t.Cleanup(func() { close(daemon.release) })
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:        &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:        NewInMemorySessionRouter(),
+		UpstreamURLFn:   func(ws *api.WorkspaceEntry) string { return ts.URL },
+		UpstreamTimeout: upstreamTimeout,
+		AuditFn:         func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	type result struct {
+		code int
+		body string
+	}
+	done := make(chan result, 1)
+	go func() {
+		body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"})
+		rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": "sess-open-sse"})
+		done <- result{rr.Code, rr.Body.String()}
+	}()
+
+	// Generous ceiling: the read must be cancelled at ~upstreamTimeout (300ms);
+	// a hang (regression) trips this fail rather than blocking the suite.
+	select {
+	case res := <-done:
+		// The handshake read was deadline-cancelled -> the tool-call surfaces a
+		// fail-loud upstream error (504 deadline / 502 unreachable). The exact
+		// code depends on how the cancellation surfaces; both are fail-loud and
+		// the load-bearing assertion is "not a hang, not a 200 success".
+		if res.code != http.StatusGatewayTimeout && res.code != http.StatusBadGateway {
+			t.Fatalf("status = %d, want 504 or 502 (handshake read deadline); body=%s", res.code, res.body)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("tool-call did not return within 5s (Finding 3 regression: the open-SSE handshake read is not bounded by the upstream timeout and hangs)")
+	}
+}
+
+// ---------------------------------------------------------------------
+// Finding 3 (round-10, tools/list) — a tools/list whose workspace daemon
+// completes the handshake but then answers the tools/list POST with SSE
+// HEADERS + a heartbeat and no response event must NOT hang
+// fetchToolsListFromAnyDaemon. The tools/list POST read is bounded by the
+// upstream timeout, so the per-candidate proxy fails within budget and the
+// loop advances / the handler surfaces a fail-loud error. The daemon holds the
+// stream open past the timeout, so a regression that drops the read deadline
+// would hang.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_ToolsList_OpenSSEPostNoResponse_BoundedByTimeout(t *testing.T) {
+	const upstreamTimeout = 300 * time.Millisecond
+	// A daemon that handshakes normally (mints a session, 202s initialized) but
+	// then answers the tools/list POST with an open SSE stream + heartbeat only.
+	daemon := newFakeSerenaDaemon("alpha")
+	release := make(chan struct{})
+	daemon.tool = func(w http.ResponseWriter, r *http.Request, b []byte) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "no flusher", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, ": heartbeat\n\n") // not a response event
+		flusher.Flush()
+		<-release
+	}
+	ts := httptest.NewServer(daemon.handler())
+	// Cleanups run LIFO: ts.Close registered FIRST (runs LAST), release close
+	// LAST (runs FIRST) so the parked tool handler is unblocked before ts.Close
+	// waits on it (see the tool-call open-SSE test for the same ordering).
+	t.Cleanup(ts.Close)
+	t.Cleanup(func() { close(release) })
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:        &listerStubResolver{list: []*api.WorkspaceEntry{ws}},
+		Sessions:        NewInMemorySessionRouter(),
+		UpstreamURLFn:   func(ws *api.WorkspaceEntry) string { return ts.URL },
+		UpstreamTimeout: upstreamTimeout,
+		AuditFn:         func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+	sid := mintRouterSession(t, s, "2025-11-25")
+
+	type result struct {
+		code int
+		body string
+	}
+	done := make(chan result, 1)
+	go func() {
+		rr := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), map[string]string{"Mcp-Session-Id": sid})
+		done <- result{rr.Code, rr.Body.String()}
+	}()
+
+	select {
+	case res := <-done:
+		// Every candidate's tools/list read was deadline-cancelled -> the
+		// handler surfaces the no-daemon-answered error (HTTP 200 JSON-RPC
+		// -32603, per handleToolsList's fetch-failed path). The load-bearing
+		// assertion is that it RETURNED (no hang) and did NOT serve a tools
+		// result.
+		var resp struct {
+			Result json.RawMessage `json:"result"`
+			Error  *struct {
+				Code int `json:"code"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(res.body), &resp); err != nil {
+			t.Fatalf("decode tools/list body: %v; raw=%s", err, res.body)
+		}
+		if len(resp.Result) > 0 {
+			t.Fatalf("tools/list returned a result despite the daemon never sending one; body=%s", res.body)
+		}
+		if resp.Error == nil {
+			t.Fatalf("tools/list returned neither result nor error; body=%s", res.body)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("tools/list did not return within 5s (Finding 3 regression: the open-SSE tools/list read is not bounded by the upstream timeout and hangs)")
+	}
+}
+
 // P2 finding 4 (integration) — a daemon that answers tools/list as a
 // MULTI-data-line SSE event is parsed correctly by the router (the bug
 // surfaced as a tools/list parse failure when the daemon wrapped its JSON).

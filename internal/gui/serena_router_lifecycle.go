@@ -380,48 +380,74 @@ func initializeRawParams(body []byte) json.RawMessage {
 	return probe.Params
 }
 
-// toolsListIsCursorRequest reports whether an MCP tools/list body is a
-// PAGINATED request whose first-page cache must be bypassed (P2 finding 2 +
-// finding #3). A paginated request is one whose params.cursor is PRESENT and
-// is NOT an empty/absent first-page marker:
+// toolsListIsCursorRequest reports whether an MCP tools/list body must
+// BYPASS the first-page cache (P2 finding 2 + findings #3 + #2-round-10). The
+// cache holds only the cursorless first page; it must be served ONLY for a
+// genuine cursorless first-page request and bypassed for anything the daemon
+// should validate/page:
 //
-//   - cursor ABSENT                         -> cursorless first page (cache OK)
-//   - cursor present, empty string ("")     -> first-page marker (cache OK)
-//   - cursor present, non-empty STRING      -> paging (bypass cache)
-//   - cursor present, WRONG TYPE (number,   -> malformed; bypass the cache and
-//     array, object, or JSON null)             proxy fresh so the DAEMON
-//     validates/rejects it, rather
-//     than masking the error with a
-//     cached page-one (finding #3)
+//   - params ABSENT or JSON null            -> cursorless first page (cache OK)
+//   - params PRESENT but NOT an object      -> malformed; bypass so the DAEMON
+//     (number/array/string)                    validates/rejects it (round-10
+//     finding #2), rather than masking the
+//     error with a cached page-one
+//   - params is an object, cursor ABSENT    -> cursorless first page (cache OK)
+//   - params object, cursor empty string "" -> first-page marker (cache OK)
+//   - params object, cursor non-empty STRING-> paging (bypass cache)
+//   - params object, cursor WRONG TYPE      -> malformed; bypass (finding #3)
+//     (number/array/object/null)
 //
-// The pre-#3 probe unmarshalled cursor into a `string` field, so a present
-// non-string cursor failed the WHOLE-body unmarshal and the function returned
-// "" — treating a malformed paginated request as cursorless and serving it the
-// cached first page. Parsing params.cursor as json.RawMessage detects PRESENCE
-// and TYPE independently of the rest of the body.
+// History: the pre-#3 probe unmarshalled cursor into a `string` field, so a
+// present non-string cursor failed the WHOLE-body unmarshal and the function
+// returned cursorless — serving the cached first page for a malformed paging
+// request. #3 parsed params.cursor as json.RawMessage. But that probe still
+// decoded `params` itself into a STRUCT, so a present-but-NON-OBJECT params
+// (`"params":1`, `"params":[]`, `"params":"x"`) failed the whole-body unmarshal
+// and again returned cursorless — serving the cached page-one as success
+// instead of proxying so the daemon rejects the invalid params (round-10
+// finding #2). Parsing `params` as a json.RawMessage first, then branching on
+// its JSON shape, detects a present non-object params independently of cursor.
 func toolsListIsCursorRequest(body []byte) bool {
 	var probe struct {
-		Params struct {
-			Cursor json.RawMessage `json:"cursor"`
-		} `json:"params"`
+		Params json.RawMessage `json:"params"`
 	}
 	if err := json.Unmarshal(body, &probe); err != nil {
 		// Whole body is not parseable JSON — handled elsewhere (the handler
 		// already rejected a malformed body); treat as cursorless here.
 		return false
 	}
-	raw := bytes.TrimSpace(probe.Params.Cursor)
-	if len(raw) == 0 {
-		// Field absent (json.RawMessage stays nil/empty when the key is
-		// missing): cursorless first page.
+	params := bytes.TrimSpace(probe.Params)
+	if len(params) == 0 || bytes.Equal(params, []byte("null")) {
+		// params absent or JSON null: cursorless first page (cache OK).
 		return false
 	}
-	// Present. If it is a JSON string, only a NON-EMPTY one is a paging
-	// request; "" is the first-page marker (cache OK). Any non-string token
-	// (number/array/object/null) is malformed → bypass so the daemon validates.
-	if raw[0] == '"' {
+	if params[0] != '{' {
+		// params PRESENT but NOT an object (number/array/string): malformed for
+		// tools/list — bypass the cache so the daemon validates/rejects it
+		// (round-10 finding #2), instead of masking it with a cached page-one.
+		return true
+	}
+	// params is an object: inspect cursor.
+	var cursorProbe struct {
+		Cursor json.RawMessage `json:"cursor"`
+	}
+	if err := json.Unmarshal(params, &cursorProbe); err != nil {
+		// An object whose decode fails (a non-cursor field of an incompatible
+		// shape would not error here since cursor is RawMessage; this is
+		// defensive) → bypass so the daemon validates.
+		return true
+	}
+	cursor := bytes.TrimSpace(cursorProbe.Cursor)
+	if len(cursor) == 0 {
+		// cursor field absent: cursorless first page (cache OK).
+		return false
+	}
+	// cursor present. A JSON string: only a NON-EMPTY one is paging; "" is the
+	// first-page marker (cache OK). Any non-string token (number/array/object/
+	// null) is malformed → bypass so the daemon validates (finding #3).
+	if cursor[0] == '"' {
 		var s string
-		if err := json.Unmarshal(raw, &s); err != nil {
+		if err := json.Unmarshal(cursor, &s); err != nil {
 			// Present string-shaped but malformed escapes → bypass (daemon
 			// validates).
 			return true
@@ -669,7 +695,20 @@ func (s *Server) handleToolsList(
 	// Finding 4: both gates passed — this is an accepted tools/list on a
 	// legitimate session, so refresh lastSeen now (touch on the accepted path
 	// only; the peek above did not refresh, so a rejected request never did).
-	s.serenaRouterSessions.touch(sessionID)
+	//
+	// Round-10 (Finding 1 — re-check liveness AFTER the gates, mirroring the
+	// hub's post-gate Touch, internal/api/hub_mcp_handler.go:402-409). The peek
+	// above was PRE-gate; the cleanup ticker or a client DELETE can sweep the
+	// session between that peek and now. touch refreshes lastSeen ONLY for a
+	// still-live binding and reports whether it did. A false return means the
+	// session was swept/terminated mid-flight, so ABORT — do NOT proxy a
+	// tools/list (which would handshake a daemon + write the cache) for a dead
+	// session.
+	if !s.serenaRouterSessions.touch(sessionID) {
+		writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidRequest,
+			"session terminated", nil)
+		return
+	}
 
 	now := time.Now()
 
@@ -771,7 +810,7 @@ func (s *Server) fetchToolsListFromAnyDaemon(
 	upstreamURLFn func(ws *api.WorkspaceEntry) string,
 	auditFn func(level, event string, fields map[string]any) error,
 	clientProtocolVersion string,
-	cleanupTimeout time.Duration,
+	upstreamTimeout time.Duration,
 ) (json.RawMessage, error) {
 	var lastErr error
 	for _, ws := range entries {
@@ -783,7 +822,11 @@ func (s *Server) fetchToolsListFromAnyDaemon(
 			lastErr = fmt.Errorf("workspace %q: upstream URL resolution failed", ws.WorkspaceKey)
 			continue
 		}
-		result, daemonSessionID, daemonProtocolVersion, err := proxyToolsListOnce(ctx, httpClient, upstreamURL, body, clientProtocolVersion)
+		// Finding 3 (round-10): pass the upstream timeout so proxyToolsListOnce
+		// bounds the handshake + tools/list (possibly SSE) body reads — a daemon
+		// that opens an SSE stream but never sends a complete response event no
+		// longer hangs this candidate forever, so the loop can advance.
+		result, daemonSessionID, daemonProtocolVersion, err := proxyToolsListOnce(ctx, httpClient, upstreamURL, body, clientProtocolVersion, upstreamTimeout)
 		// Finding C: release the one-shot upstream session regardless of the
 		// proxy outcome, whenever the handshake established one. Detach the
 		// context so a done tools/list request context cannot abort it.
@@ -804,7 +847,10 @@ func (s *Server) fetchToolsListFromAnyDaemon(
 		// session. effectiveHandshakeProtocolVersion fills the router default
 		// only if the daemon returned an empty version.
 		if daemonSessionID != "" {
-			delCtx, delCancel := cleanupContext(cleanupTimeout)
+			// Invariant D (#4): the teardown still uses the SHORT cleanup budget
+			// (cleanupContext derives min(serenaCleanupTimeout, upstreamTimeout)),
+			// independent of the longer Finding-3 read deadline on the proxy above.
+			delCtx, delCancel := cleanupContext(upstreamTimeout)
 			s.forwardSerenaDeleteUpstream(delCtx, httpClient, upstreamURL, daemonSessionID, effectiveHandshakeProtocolVersion(daemonProtocolVersion), ws.WorkspaceKey, ws, auditFn)
 			delCancel()
 		}
@@ -860,9 +906,11 @@ func (s *Server) fetchToolsListFromAnyDaemon(
 // tools/list POST itself fails. A handshake FAILURE returns "" (no upstream
 // session was minted, so there is nothing to release); a sessionless daemon
 // also returns "" (it issued no id).
-func proxyToolsListOnce(ctx context.Context, httpClient *http.Client, upstreamURL string, body []byte, clientProtocolVersion string) (result json.RawMessage, daemonSessionID string, daemonProtocolVersion string, err error) {
+func proxyToolsListOnce(ctx context.Context, httpClient *http.Client, upstreamURL string, body []byte, clientProtocolVersion string, upstreamTimeout time.Duration) (result json.RawMessage, daemonSessionID string, daemonProtocolVersion string, err error) {
 	requestedVersion := effectiveHandshakeProtocolVersion(clientProtocolVersion)
-	daemonSessionID, daemonProtocolVersion, hsErr := establishDaemonSession(ctx, httpClient, upstreamURL, requestedVersion)
+	// Finding 3 (round-10): bound the handshake reads by the upstream timeout
+	// (passed through to establishDaemonSession's read context).
+	daemonSessionID, daemonProtocolVersion, hsErr := establishDaemonSession(ctx, httpClient, upstreamURL, requestedVersion, upstreamTimeout)
 	if hsErr != nil {
 		return nil, "", "", fmt.Errorf("upstream handshake: %w", hsErr)
 	}
@@ -875,7 +923,16 @@ func proxyToolsListOnce(ctx context.Context, httpClient *http.Client, upstreamUR
 	if postVersion == "" {
 		postVersion = requestedVersion
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, bytes.NewReader(body))
+	// Finding 3 (round-10): bound the tools/list POST + its (possibly SSE) body
+	// read by the upstream timeout. A daemon that answers tools/list with SSE
+	// headers but no complete response event would otherwise hang
+	// readUpstreamJSONRPCResponse forever (the handshake's own deadline context
+	// has already been released by establishDaemonSession's defer cancel). The
+	// derived deadline makes the transport abort the body read so this returns
+	// an error and fetchToolsListFromAnyDaemon advances to the next daemon.
+	postCtx, postCancel := upstreamReadContext(ctx, upstreamTimeout)
+	defer postCancel()
+	req, err := http.NewRequestWithContext(postCtx, http.MethodPost, upstreamURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, daemonSessionID, daemonProtocolVersion, err
 	}

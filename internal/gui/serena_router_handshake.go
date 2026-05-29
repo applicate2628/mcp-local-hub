@@ -294,10 +294,22 @@ func (st *daemonSessionStore) cleanup(now time.Time, ttl time.Duration) int {
 // daemon session must carry the daemon-negotiated version. When the daemon
 // omits result.protocolVersion the requested version is the fallback (so the
 // returned version is never empty for a session-bearing daemon).
-func establishDaemonSession(ctx context.Context, httpClient *http.Client, upstreamURL string, clientProtocolVersion string) (daemonSessionID string, daemonProtocolVersion string, err error) {
+func establishDaemonSession(ctx context.Context, httpClient *http.Client, upstreamURL string, clientProtocolVersion string, upstreamTimeout time.Duration) (daemonSessionID string, daemonProtocolVersion string, err error) {
+	// Finding 3 (round-10): bound the handshake reads by the upstream timeout.
+	// The handshake is part of the tool-call / tools/list the client is
+	// AWAITING, so it stays attached to the request context (a client
+	// disconnect cancels it) and uses the full upstreamTimeout — NOT the short
+	// cleanup budget. Without this, a daemon that returns SSE headers on
+	// initialize but never emits a complete response event makes
+	// postHandshakeInitialize's readSSEJSONRPCResponse block forever (the
+	// client's http.Client has Timeout==0; ResponseHeaderTimeout covers only
+	// headers). The derived deadline makes the transport abort the body read so
+	// postHandshakeInitialize returns an error and the caller fails loud.
+	hsCtx, cancel := upstreamReadContext(ctx, upstreamTimeout)
+	defer cancel()
 	requestedVersion := effectiveHandshakeProtocolVersion(clientProtocolVersion)
 	initBody := buildHandshakeInitializeBody(requestedVersion)
-	daemonSessionID, negotiated, err := postHandshakeInitialize(ctx, httpClient, upstreamURL, initBody)
+	daemonSessionID, negotiated, err := postHandshakeInitialize(hsCtx, httpClient, upstreamURL, initBody)
 	if err != nil {
 		return "", "", err
 	}
@@ -314,7 +326,7 @@ func establishDaemonSession(ctx context.Context, httpClient *http.Client, upstre
 	if daemonProtocolVersion == "" {
 		daemonProtocolVersion = requestedVersion
 	}
-	if err := postHandshakeInitialized(ctx, httpClient, upstreamURL, daemonSessionID, daemonProtocolVersion); err != nil {
+	if err := postHandshakeInitialized(hsCtx, httpClient, upstreamURL, daemonSessionID, daemonProtocolVersion); err != nil {
 		// Finding #3 (initialized-fail leak): initialize ALREADY succeeded and
 		// the daemon minted daemonSessionID, but notifications/initialized then
 		// errored / timed out / returned non-2xx (the Round-3 fail-handshake
@@ -550,6 +562,7 @@ func (st *daemonSessionStore) resolveDaemonSession(
 	clientSessionID string,
 	ws *api.WorkspaceEntry,
 	clientProtocolVersion string,
+	upstreamTimeout time.Duration,
 ) (daemonSessionID string, daemonProtocolVersion string, err error) {
 	if ws == nil {
 		return "", "", fmt.Errorf("resolveDaemonSession: nil workspace")
@@ -559,7 +572,10 @@ func (st *daemonSessionStore) resolveDaemonSession(
 			return dsid, dpv, nil
 		}
 	}
-	dsid, dpv, err := establishDaemonSession(ctx, httpClient, upstreamURL, clientProtocolVersion)
+	// Finding 3 (round-10): thread the upstream timeout into the handshake so a
+	// daemon that opens an SSE stream on initialize but never sends a complete
+	// response event cannot hang this tool-call indefinitely.
+	dsid, dpv, err := establishDaemonSession(ctx, httpClient, upstreamURL, clientProtocolVersion, upstreamTimeout)
 	if err != nil {
 		return "", "", err
 	}

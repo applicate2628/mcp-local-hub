@@ -127,23 +127,35 @@ func (st *routerSessionStore) peekNegotiatedVersion(clientSessionID string) (str
 // path peeks (no refresh) so a REJECTED request never extends the session,
 // and only a request that PASSES the gate calls touch. It is expire-on-read
 // like peek — an already-expired binding is dropped, not resurrected (so a
-// touch arriving after the idle window does not revive a dead session). A
-// no-op when the id is unknown/expired or empty.
-func (st *routerSessionStore) touch(clientSessionID string) {
+// touch arriving after the idle window does not revive a dead session).
+//
+// Round-10 (Finding 1 — report liveness): touch returns whether it actually
+// refreshed a LIVE (present, non-idle-expired) binding. It is the router's
+// equivalent of the hub's post-gate Touch returning bool
+// (internal/api/hub_mcp_handler.go:402-409): a request that PEEKED a valid
+// session pre-gate can be swept by the cleanup ticker / a client DELETE
+// BEFORE the accepted-path touch runs. Returning false on a missing/expired
+// binding lets the accepted-path call site ABORT (return a "session
+// terminated" -32600) instead of proceeding to proxy upstream or RECREATE
+// daemon/sticky bindings for a session that no longer exists — which would
+// defeat immediate-revocation + idle-sweep. false on unknown/expired/empty;
+// true only when a live binding was refreshed.
+func (st *routerSessionStore) touch(clientSessionID string) bool {
 	if clientSessionID == "" {
-		return
+		return false
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	b, ok := st.bindings[clientSessionID]
 	if !ok || b == nil {
-		return
+		return false
 	}
 	if st.now().Sub(b.lastSeen) > daemonSessionTTL {
 		delete(st.bindings, clientSessionID)
-		return
+		return false
 	}
 	b.lastSeen = st.now()
+	return true
 }
 
 // negotiatedVersion returns the protocol version a client session negotiated

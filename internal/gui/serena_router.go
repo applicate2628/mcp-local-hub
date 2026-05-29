@@ -89,6 +89,34 @@ func cleanupContext(upstreamTimeout time.Duration) (context.Context, context.Can
 	return context.WithTimeout(context.Background(), budget)
 }
 
+// upstreamReadContext bounds an upstream MCP request the client is AWAITING
+// (the synthesized handshake + the tools/list proxy) by the full upstream
+// timeout (Finding 3 — round-10). Unlike cleanupContext it stays ATTACHED to
+// the parent request context (the client is blocked on this call, so a client
+// disconnect SHOULD cancel it) and uses the FULL upstreamTimeout rather than
+// the short fire-and-forget budget.
+//
+// Why it is needed: the production http.Client has Timeout==0 (so a long-lived
+// tool-call SSE stream is not killed mid-flight) and the transport's
+// ResponseHeaderTimeout covers only response HEADERS. A daemon that returns
+// text/event-stream HEADERS then never emits a complete JSON-RPC response event
+// (only heartbeats/comments, or nothing) makes readSSEJSONRPCResponse's scanner
+// block INDEFINITELY while r.Context() stays live — hanging the first
+// tool-call / tools/list forever and preventing fetchToolsListFromAnyDaemon
+// from trying the next workspace. Deriving a context.WithTimeout here makes the
+// transport abort the in-flight body read when the deadline fires (the scanner
+// then returns a context-cancellation error), so the caller surfaces a 502/504
+// and the tools/list loop advances. The returned cancel MUST be called by the
+// caller (typically `defer cancel()`). A non-positive upstreamTimeout falls
+// back to serenaUpstreamTimeout so the deadline is always present.
+func upstreamReadContext(parent context.Context, upstreamTimeout time.Duration) (context.Context, context.CancelFunc) {
+	budget := upstreamTimeout
+	if budget <= 0 {
+		budget = serenaUpstreamTimeout
+	}
+	return context.WithTimeout(parent, budget)
+}
+
 func newSerenaTransport(upstreamTimeout time.Duration) *http.Transport {
 	if upstreamTimeout <= 0 {
 		upstreamTimeout = serenaUpstreamTimeout
@@ -518,10 +546,21 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 				"protocol-version mismatch", nil)
 			return
 		}
-		// Gate passed for a known router session: this is legitimate session
-		// activity, so refresh lastSeen now (Finding 4 — touch on the accepted
-		// path only).
-		s.serenaRouterSessions.touch(sessionID)
+		// Round-10 (Finding 1 — re-check liveness AFTER the gate, mirroring the
+		// hub's post-gate Touch, internal/api/hub_mcp_handler.go:402-409). The
+		// peek above was PRE-gate; the cleanup ticker or a client DELETE can
+		// sweep/terminate the session between that peek and now. touch refreshes
+		// lastSeen ONLY for a still-live binding and reports whether it did. A
+		// false return means the session was swept/terminated mid-flight, so
+		// ABORT here — return the router's "session terminated" -32600 and do NOT
+		// proxy upstream or let resolveDaemonSession RECREATE a daemon/sticky
+		// binding for a dead session (which would defeat immediate-revocation +
+		// idle-sweep).
+		if !s.serenaRouterSessions.touch(sessionID) {
+			writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidRequest,
+				"session terminated", nil)
+			return
+		}
 		// Use the session's negotiated version for the upstream handshake so
 		// the daemon session is established under the consistent version even
 		// when this request omitted the header.
@@ -536,7 +575,7 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	// leak) and the orphaned UPSTREAM session ages out on the daemon's idle
 	// clock. The explicit client-origin DELETE (handleSerenaDelete) and the
 	// partial-handshake cleanup remain — only the switch-time teardown is gone.
-	daemonSessionID, daemonProtocolVersion, hsErr := s.serenaDaemonSessions.resolveDaemonSession(r.Context(), httpClient, upstreamURL, sessionID, ws, clientProtocolVersion)
+	daemonSessionID, daemonProtocolVersion, hsErr := s.serenaDaemonSessions.resolveDaemonSession(r.Context(), httpClient, upstreamURL, sessionID, ws, clientProtocolVersion, upstreamTimeout)
 	if hsErr != nil {
 		if isTimeoutErr(hsErr) {
 			_ = auditFn("warn", "serena-upstream-timeout", map[string]any{
@@ -1056,13 +1095,23 @@ func (s *Server) handleSerenaCancelled(
 		if rawProtocolVersion != "" && rawProtocolVersion != sessionVersion {
 			// Cross-version cancel on a known session: do NOT forward.
 			forward = false
-		} else {
-			// Gate passed for a known router session: a forwarded cancel is
-			// legitimate session activity, so refresh lastSeen (Finding 4 —
-			// touch on the accepted path only; a suppressed cross-version
-			// cancel skips this).
-			s.serenaRouterSessions.touch(sessionID)
+		} else if !s.serenaRouterSessions.touch(sessionID) {
+			// Round-10 (Finding 1 — re-check liveness AFTER the gate, mirroring
+			// the hub's post-gate Touch, internal/api/hub_mcp_handler.go:402-409).
+			// The peek above was PRE-gate; the cleanup ticker or a client DELETE
+			// can sweep/terminate the session between that peek and now. touch
+			// refreshes lastSeen ONLY for a still-live binding and reports whether
+			// it did. A false return means the session was swept/terminated
+			// mid-flight, so do NOT forward the cancel to the (now-released)
+			// daemon session — the local 202 is kept (notification semantics: a
+			// notifications/cancelled gets no JSON-RPC response, the same posture
+			// the hub takes for a notification on a swept session,
+			// internal/api/hub_mcp_handler.go:403-405).
+			forward = false
 		}
+		// Gate passed AND touch refreshed a live binding (forward stays true): a
+		// forwarded cancel is legitimate session activity. A suppressed
+		// cross-version OR swept-session cancel skipped the touch.
 		protocolVersion = sessionVersion
 	}
 

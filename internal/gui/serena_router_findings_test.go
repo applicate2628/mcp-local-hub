@@ -788,6 +788,148 @@ func TestRouterSessionStore_PeekDoesNotTouch_TouchRefreshes(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------
+// Finding 1 (unit) — touch reports whether it refreshed a LIVE binding.
+// A missing binding and an idle-expired binding both return false (the
+// expired one is dropped, expire-on-read); only a present non-expired
+// binding returns true. The accepted-path call sites rely on this bool to
+// ABORT a request whose session was swept between the pre-gate peek and the
+// post-gate touch (mirrors the hub's post-gate Touch returning bool,
+// internal/api/hub_mcp_handler.go:402-409).
+// ---------------------------------------------------------------------
+func TestRouterSessionStore_TouchReportsLiveness(t *testing.T) {
+	base := time.Now()
+	clk := base
+	st := &routerSessionStore{clock: func() time.Time { return clk }}
+
+	// Missing binding -> false.
+	if st.touch("never-stored") {
+		t.Errorf("touch(missing) = true, want false")
+	}
+	// Empty id -> false.
+	if st.touch("") {
+		t.Errorf("touch(\"\") = true, want false")
+	}
+
+	// Live binding -> true.
+	st.store("live", "2025-06-18") // lastSeen = base
+	clk = base.Add(daemonSessionTTL - time.Minute)
+	if !st.touch("live") {
+		t.Errorf("touch(live, within TTL) = false, want true")
+	}
+
+	// Expired binding -> false AND dropped (expire-on-read).
+	clk = base
+	st.store("expired", "2025-06-18") // lastSeen = base
+	clk = base.Add(daemonSessionTTL + time.Minute)
+	if st.touch("expired") {
+		t.Errorf("touch(expired) = true, want false (idle-expired binding must not refresh)")
+	}
+	// The expired binding must have been deleted, not merely reported missing.
+	clk = base.Add(daemonSessionTTL + 2*time.Minute)
+	if _, ok := st.peekNegotiatedVersion("expired"); ok {
+		t.Errorf("peek(expired) = hit after touch dropped it; want miss (touch must expire-on-read)")
+	}
+}
+
+// ---------------------------------------------------------------------
+// Finding 1 (integration) — a tool-call whose router session is swept
+// BETWEEN the pre-gate peek and the post-gate touch must be REJECTED
+// ("session terminated" -32600 at HTTP 400) and must NOT proxy upstream or
+// create a daemon/sticky binding. We engineer the swept-mid-flight window
+// deterministically with a clock that reports the binding LIVE on the peek
+// call and IDLE-EXPIRED on the subsequent touch call (the production trigger
+// is the cleanup ticker / a concurrent client DELETE removing the entry in
+// that same window — expire-on-read is the deterministic, race-free stand-in
+// for it). The daemon must see ZERO requests (no handshake, no forward), and
+// the sticky session router must hold no binding afterward.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_ToolCall_SessionSweptBetweenPeekAndTouch_Rejected(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	sessions := NewInMemorySessionRouter()
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:      sessions,
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	const sid = "sess-swept"
+	const negotiated = "2025-06-18"
+
+	// Seed the router session at a fixed base time, then install a clock that
+	// returns base on the FIRST now() (the pre-gate peek -> binding LIVE) and a
+	// past-TTL time on EVERY subsequent now() (the post-gate touch -> binding
+	// idle-expired, dropped, touch returns false). peek consumes exactly one
+	// now(); touch is the next consumer — so this deterministically reproduces
+	// "session swept between peek and touch" without a real timer race.
+	base := time.Now()
+	s.serenaRouterSessions.clock = func() time.Time { return base }
+	s.serenaRouterSessions.store(sid, negotiated) // lastSeen = base
+
+	var calls int
+	s.serenaRouterSessions.clock = func() time.Time {
+		calls++
+		if calls == 1 {
+			return base // peek: binding is live
+		}
+		return base.Add(daemonSessionTTL + time.Minute) // touch onward: expired
+	}
+
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"})
+	rr := postSerena(t, s, body, map[string]string{
+		"Mcp-Session-Id":       sid,
+		"MCP-Protocol-Version": negotiated, // matches -> not a version mismatch; the abort is the touch-false path
+	})
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (session terminated); body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Result json.RawMessage `json:"result"`
+		Error  *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode body: %v; raw=%s", err, rr.Body.String())
+	}
+	if len(resp.Result) > 0 {
+		t.Errorf("swept-session tool-call returned a result; want a -32600 error only")
+	}
+	if resp.Error == nil || resp.Error.Code != jsonrpcInvalidRequest {
+		t.Fatalf("error = %+v, want code %d (session terminated)", resp.Error, jsonrpcInvalidRequest)
+	}
+	if resp.Error.Message != "session terminated" {
+		t.Errorf("error message = %q, want \"session terminated\"", resp.Error.Message)
+	}
+
+	// The daemon must NOT have been contacted: no upstream handshake, no
+	// tool-call forward, no DELETE.
+	daemon.mu.Lock()
+	mintCount, toolHits, deleteHits := daemon.mintCount, daemon.toolHits, daemon.deleteHits
+	daemon.mu.Unlock()
+	if mintCount != 0 || toolHits != 0 || deleteHits != 0 {
+		t.Errorf("daemon was contacted (mint=%d tool=%d delete=%d); a swept-session request must not proxy upstream", mintCount, toolHits, deleteHits)
+	}
+
+	// No daemon binding must have been created for the swept session (Finding
+	// 1: resolveDaemonSession must never run, so it cannot RECREATE a binding).
+	if _, _, _, ok := s.serenaDaemonSessions.bindingFor(sid); ok {
+		t.Errorf("a daemon-session binding was created for a swept session; want none")
+	}
+	// No sticky binding either.
+	if sessions.LookupSession(sid) != nil {
+		t.Errorf("a sticky session binding was created for a swept session; want none")
+	}
+}
+
 func TestRouterSessionStore_ConcurrentAccess(t *testing.T) {
 	st := &routerSessionStore{}
 	var wg sync.WaitGroup

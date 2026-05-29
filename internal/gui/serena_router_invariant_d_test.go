@@ -564,13 +564,20 @@ func TestToolsListIsCursorRequest_PresenceAndType(t *testing.T) {
 		want bool
 	}{
 		{"cursor absent", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, false},
-		{"params absent", `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`, false},
+		{"params empty object", `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`, false},
+		{"params null", `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":null}`, false},
 		{"cursor empty string", `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"cursor":""}}`, false},
 		{"cursor non-empty string", `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"cursor":"page2"}}`, true},
 		{"cursor number (malformed)", `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"cursor":42}}`, true},
 		{"cursor array (malformed)", `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"cursor":[1,2]}}`, true},
 		{"cursor object (malformed)", `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"cursor":{"x":1}}}`, true},
 		{"cursor null (malformed)", `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"cursor":null}}`, true},
+		// Round-10 finding #2: a PRESENT but NON-OBJECT params is malformed for
+		// tools/list — bypass so the daemon validates/rejects it, instead of
+		// being masked as cursorless and served the cached page-one.
+		{"params number (non-object)", `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":1}`, true},
+		{"params array (non-object)", `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":[]}`, true},
+		{"params string (non-object)", `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":"x"}`, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -633,6 +640,78 @@ func TestSerenaRouter_ToolsList_MalformedCursorBypassesCache(t *testing.T) {
 	}
 	if got := toolHits(); got != 2 {
 		t.Errorf("daemon tool hits after malformed cursor = %d, want 2 (#3: a malformed cursor must bypass the cache, not be served page one)", got)
+	}
+}
+
+// ---------------------------------------------------------------------
+// Round-10 finding #2 — a tools/list whose `params` is PRESENT but NOT an
+// object (`"params":[]`, `"params":1`, `"params":"x"`) must NOT be served the
+// cached cursorless first page as success.
+//
+// CONFLICT NOTE (reported to the orchestrator): the finding's stated premise
+// was that such a request reaches the cache-decision and is SERVED a cached
+// page-one. Empirically it does not: serenaRouterHandler decodes the body into
+// `toolBody` (whose `Params` is a struct) BEFORE method dispatch, so a
+// non-object `params` fails that decode and the request is rejected with HTTP
+// 400 "malformed JSON body" — it never reaches handleToolsList /
+// toolsListIsCursorRequest. So the user-facing symptom (stale cache served as
+// success) does NOT occur today; the latent defect was in
+// toolsListIsCursorRequest itself, which would misclassify a non-object params
+// as cursorless IF it were ever reached. The helper is now fixed
+// (defense-in-depth + matching the finding's Fix instruction), and this test
+// locks in the end-to-end guarantee: seed the first-page cache, then a
+// non-object-params tools/list is rejected (NOT served the cached page-one),
+// and the daemon is NOT hit a second time. Loosening the decode gate (out of
+// scope here) would re-expose the helper path, which the unit-level
+// TestToolsListIsCursorRequest_PresenceAndType now covers.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_ToolsList_NonObjectParamsNotServedStaleCache(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	daemon.tool = func(w http.ResponseWriter, r *http.Request, b []byte) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"find_symbol"}]}}`))
+	}
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+	toolHits := func() int { daemon.mu.Lock(); defer daemon.mu.Unlock(); return daemon.toolHits }
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+	sid := mintRouterSession(t, s, "2025-11-25")
+	hdr := map[string]string{"Mcp-Session-Id": sid}
+
+	// Seed the first-page cache with a cursorless call.
+	if rr := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), hdr); rr.Code != http.StatusOK {
+		t.Fatalf("seed tools/list status = %d; body=%s", rr.Code, rr.Body.String())
+	}
+	if got := toolHits(); got != 1 {
+		t.Fatalf("daemon tool hits after seed = %d, want 1", got)
+	}
+
+	// A non-object params (array / number) must NOT be served the cached page
+	// one. With today's decode gate it is rejected 400 "malformed JSON body"
+	// BEFORE the cache decision; the load-bearing assertion is that it is NOT a
+	// 200 carrying the cached result.
+	for _, body := range [][]byte{
+		[]byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":[]}`),
+		[]byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":1}`),
+	} {
+		rr := postSerena(t, s, body, hdr)
+		if rr.Code == http.StatusOK {
+			t.Errorf("non-object params %s returned 200 (cached page-one served); want a fail-loud rejection, not a stale-cache hit; body=%s", body, rr.Body.String())
+		}
+	}
+	// The daemon must NOT have been hit again — a non-object params request is
+	// neither served from cache (asserted above) nor proxied fresh today.
+	if got := toolHits(); got != 1 {
+		t.Errorf("daemon tool hits after non-object params requests = %d, want 1 (no new proxy)", got)
 	}
 }
 
