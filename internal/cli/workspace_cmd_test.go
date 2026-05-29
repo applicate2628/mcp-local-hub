@@ -23,8 +23,14 @@ import (
 // ------------------------------------------------------------------
 
 // withSerenaManifest installs a test-only serena manifest loader that
-// returns a manifest with a daemon_template.port_pool block. Restores
-// the original loader on test cleanup.
+// returns a dynamic-pool manifest with a daemon_template.port_pool block.
+// Register resolves the pool through the shared dynamic-pool service
+// (api.EffectiveSerenaPortPool), which prefers this embed's
+// daemon_template over the built-in default — so these tests still exercise
+// the injected [start,end] pool. The injected manifest carries a non-empty
+// Context so it is a valid dynamic-pool shape under the post-PR-#246 Validate
+// gate (which now rejects daemon_template manifests with an empty/duplicate
+// --context). Restores the original loader on test cleanup.
 func withSerenaManifest(t *testing.T, start, end int) {
 	t.Helper()
 	prev := loadSerenaManifestForCLI
@@ -33,11 +39,39 @@ func withSerenaManifest(t *testing.T, start, end int) {
 		return &config.ServerManifest{
 			Name:      "serena",
 			Kind:      config.KindWorkspaceScoped,
-			Transport: "native-http",
+			Transport: config.TransportNativeHTTP,
 			Command:   "uvx",
 			DaemonTemplate: &config.DaemonTemplate{
+				Context:           "codex",
 				PortPool:          &config.PortPool{Start: start, End: end},
 				ExtraArgsTemplate: []string{"--project", "${workspace.path}"},
+			},
+		}, nil
+	}
+}
+
+// withLegacyGlobalSerenaEmbed installs a test-only serena manifest loader that
+// returns the CURRENT embedded shape: kind: global, native-http, NO
+// daemon_template (the legacy 2-daemon claude/codex catalog). Before Phase 2
+// this shape made `register` fail closed (serenaPortPool errored on the absent
+// daemon_template.port_pool). After Phase 2 the shared dynamic-pool service
+// supplies a built-in default pool, so register succeeds. Restores the original
+// loader on test cleanup.
+func withLegacyGlobalSerenaEmbed(t *testing.T) {
+	t.Helper()
+	prev := loadSerenaManifestForCLI
+	t.Cleanup(func() { loadSerenaManifestForCLI = prev })
+	loadSerenaManifestForCLI = func() (*config.ServerManifest, error) {
+		return &config.ServerManifest{
+			Name:      "serena",
+			Kind:      config.KindGlobal,
+			Transport: config.TransportNativeHTTP,
+			Command:   "uvx",
+			BaseArgs:  []string{"--from", "git+https://example/serena", "serena", "start-mcp-server", "--transport", "streamable-http"},
+			Env:       map[string]string{"PYTHONUNBUFFERED": "1"},
+			Daemons: []config.DaemonSpec{
+				{Name: "claude", Context: "claude-code", Port: 9121, ExtraArgs: []string{"--context", "claude-code"}},
+				{Name: "codex", Context: "codex", Port: 9122, ExtraArgs: []string{"--context", "codex"}},
 			},
 		}, nil
 	}
@@ -239,6 +273,53 @@ func TestWorkspaceRegister_LanguagesFlagOverridesProjectYml(t *testing.T) {
 	want := []string{"cpp", "markdown", "typescript"} // sorted on write
 	if !equalStrings(got[0].Languages, want) {
 		t.Errorf("languages = %v, want %v", got[0].Languages, want)
+	}
+}
+
+// TestWorkspaceRegister_SucceedsAgainstLegacyGlobalEmbed is the Phase 2
+// cycle-break regression guard (finding #3). It injects the CURRENT embedded
+// `kind: global` serena manifest (no daemon_template) via the
+// loadSerenaManifestForCLI seam and asserts that `register` now SUCCEEDS:
+// it allocates a port from the shared dynamic-pool service's built-in default
+// pool instead of failing closed on the absent daemon_template.port_pool.
+// Scheduler-free (register only touches the registry).
+func TestWorkspaceRegister_SucceedsAgainstLegacyGlobalEmbed(t *testing.T) {
+	withLegacyGlobalSerenaEmbed(t)
+	withStateDir(t)
+	tmp := t.TempDir()
+	ws := makeWorkspaceDir(t, tmp, []string{"python", "typescript"})
+
+	out, err := runWorkspaceCmd(t, "register", ws)
+	if err != nil {
+		t.Fatalf("register against legacy kind:global embed should SUCCEED (cycle broken); err=%v\noutput: %s", err, out)
+	}
+
+	regPath, _ := api.DefaultRegistryPath()
+	reg := api.NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("load registry: %v", err)
+	}
+	entries := reg.SerenaEntries()
+	if len(entries) != 1 {
+		t.Fatalf("want 1 serena entry, got %d", len(entries))
+	}
+	// Port must come from the built-in default pool. Confirm against the same
+	// service the register path uses (rather than hard-coding the range here),
+	// so a future default-range change keeps this assertion correct.
+	pool, perr := api.EffectiveSerenaPortPool(nil)
+	if perr != nil {
+		t.Fatalf("EffectiveSerenaPortPool: %v", perr)
+	}
+	if entries[0].Port < pool.Start || entries[0].Port > pool.End {
+		t.Errorf("allocated port %d outside built-in default pool [%d,%d]",
+			entries[0].Port, pool.Start, pool.End)
+	}
+	// On a fresh registry the first allocation is the bottom of the pool.
+	if entries[0].Port != pool.Start {
+		t.Errorf("first allocated port = %d, want bottom-of-pool %d", entries[0].Port, pool.Start)
+	}
+	if entries[0].Language != api.SerenaLanguageSentinel {
+		t.Errorf("language = %q, want %q", entries[0].Language, api.SerenaLanguageSentinel)
 	}
 }
 
