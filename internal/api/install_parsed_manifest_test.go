@@ -348,6 +348,46 @@ func TestInstallParsedManifest_EmptyWorkspacesValid(t *testing.T) {
 	}
 }
 
+// TestInstallParsedManifest_NoSchedulerOnNoWork — a workspace-scoped install
+// has zero scheduler tasks, skips prune, and defers daemon starts, so it must
+// NOT require a working scheduler. On Linux/macOS scheduler.New() returns "not
+// implemented"; acquiring it unconditionally would break serena installs on
+// those hosts before the supervisor-intent write. With an erroring scheduler
+// factory (simulating the POSIX backend) the install must still succeed and
+// write supervisor-intent.json.
+func TestInstallParsedManifest_NoSchedulerOnNoWork(t *testing.T) {
+	daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	orig := schedulerFactoryFn
+	schedulerFactoryFn = func() (scheduler.Scheduler, error) {
+		return nil, errors.New("not implemented (simulated POSIX backend)")
+	}
+	t.Cleanup(func() { schedulerFactoryFn = orig })
+
+	wsLive := t.TempDir()
+	workspaces := []WorkspaceEntry{{
+		WorkspaceKey:  WorkspaceKey(wsLive),
+		WorkspacePath: wsLive,
+		Language:      SerenaLanguageSentinel,
+		Backend:       "serena",
+		Port:          9401,
+	}}
+
+	m := serenaTemplateManifest()
+	a := NewAPI()
+	var buf bytes.Buffer
+	intentPath, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
+		Writer:     &buf,
+		Workspaces: workspaces,
+	})
+	if err != nil {
+		t.Fatalf("workspace-scoped install must not require a working scheduler, got: %v", err)
+	}
+	if _, statErr := os.Stat(intentPath); statErr != nil {
+		t.Errorf("supervisor-intent.json not written at %s: %v", intentPath, statErr)
+	}
+}
+
 // TestInstallParsedManifest_DefersDaemonSpawn asserts the structural
 // deferred-start contract: a workspace-scoped install creates no scheduler
 // Run (daemon spawn is deferred to the supervisor reconciler). The seam has

@@ -1748,9 +1748,25 @@ type intentWriteStep func() (rollback func(), err error)
 // mcp-local-hub-<server>-* scheduler task for that server. Legacy callers pass
 // false and keep the reconcile.
 func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int, startTasks bool, intermediate intentWriteStep, skipPrune bool) error {
-	sch, err := newScheduler()
-	if err != nil {
-		return fmt.Errorf("scheduler: %w", err)
+	// Acquire the scheduler only when there is real scheduler work: tasks to
+	// create, an obsolete-task prune to run, or a Pass B start. A
+	// workspace-scoped InstallParsedManifest (zero SchedulerTasks,
+	// skipPrune=true, startTasks=false) has none. On Linux/macOS
+	// scheduler.New() returns "not implemented", so acquiring it
+	// unconditionally would fail serena/workspace installs on those hosts
+	// before the supervisor-intent write — even though this path has no
+	// scheduler dependency and defers daemon starts to the reconciler. sch
+	// stays nil in that case and is never dereferenced: every use below is
+	// inside the SchedulerTasks loop, the prune block (FullInstall && !skipPrune),
+	// or Pass B (startTasks) — exactly the conditions in needsScheduler.
+	needsScheduler := len(p.SchedulerTasks) > 0 || (p.FullInstall && !skipPrune) || startTasks
+	var sch scheduler.Scheduler
+	if needsScheduler {
+		s, serr := newScheduler()
+		if serr != nil {
+			return fmt.Errorf("scheduler: %w", serr)
+		}
+		sch = s
 	}
 	// WorkingDirectory for the scheduler task: anchor at ~/.local/bin/
 	// (same directory as the canonical mcphub binary). Using os.Getwd()
