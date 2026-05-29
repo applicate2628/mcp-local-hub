@@ -1277,6 +1277,47 @@ func TestInstallParsedManifest_RejectsStdioBridgeDaemonTemplate(t *testing.T) {
 	}
 }
 
+// TestInstallParsedManifest_RejectsEmptyContextDaemonTemplate is the
+// install-time empty-context gate (bot PR #246 P2). A workspace-scoped
+// native-http daemon_template manifest whose DaemonTemplate.Context is empty
+// PASSES config.ServerManifest.Validate today (Validate checks port_pool +
+// extra_args_template, NOT Context), but the materializer would persist
+// `--context ""` into every RuntimeSpec.ChildArgs → the supervisor respawns a
+// serena child with an invalid empty context. The contract gate MUST reject it
+// before any mutation: no supervisor-intent.json written, no scheduler
+// Create/Run.
+func TestInstallParsedManifest_RejectsEmptyContextDaemonTemplate(t *testing.T) {
+	for _, ctx := range []string{"", "   "} {
+		stateDir := daemonIntentTestHelper(t)
+		preparePreflightBinaryChecks(t)
+		f := newInstallFakeScheduler()
+		installFakeScheduler(t, f)
+
+		m := serenaTemplateManifest()
+		m.DaemonTemplate.Context = ctx // workspace-scoped + native-http, but empty context
+
+		a := NewAPI()
+		var buf bytes.Buffer
+		_, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
+			Writer:     &buf,
+			Workspaces: []WorkspaceEntry{},
+		})
+		if err == nil {
+			t.Fatalf("InstallParsedManifest(empty context %q): want error, got nil", ctx)
+		}
+		if !strings.Contains(err.Error(), "context") {
+			t.Errorf("error = %q, want it to name the empty daemon_template.context", err.Error())
+		}
+		// No mutation: no committed intent, no scheduler create/run.
+		if _, statErr := os.Stat(filepath.Join(stateDir, "supervisor-intent.json")); !os.IsNotExist(statErr) {
+			t.Errorf("no intent must be written on empty-context reject; stat err = %v", statErr)
+		}
+		if f.createCount != 0 || f.runCount != 0 {
+			t.Errorf("no scheduler mutation on reject: createCount=%d runCount=%d", f.createCount, f.runCount)
+		}
+	}
+}
+
 // TestInstallParsedManifest_AcceptsNativeHTTPDaemonTemplate is the
 // companion positive guard: the native-http gate must NOT reject the valid
 // shape. A kind:workspace-scoped + native-http + daemon_template manifest

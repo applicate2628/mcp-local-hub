@@ -29,6 +29,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -128,6 +129,20 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	// tightening only — the write/rollback/deferred-start shape is unchanged.
 	if m.Transport != config.TransportNativeHTTP {
 		return "", fmt.Errorf("InstallParsedManifest only installs transport=%q dynamic-pool manifests (manifest %q is transport=%q); a daemon_template manifest spawns an HTTP reverse-proxy, which requires native-http", config.TransportNativeHTTP, m.Name, m.Transport)
+	}
+	// Empty-context gate (bot PR #246 P2). The per-workspace fan-out
+	// (BuildSupervisorDaemonsForSerena → buildSerenaChildArgs, design §5)
+	// APPENDS `--context <DaemonTemplate.Context>` into every materialized
+	// RuntimeSpec.ChildArgs. config.ServerManifest.Validate does NOT check
+	// Context (only port_pool + extra_args_template — internal/config/manifest.go),
+	// so a manifest with an absent/blank daemon_template.context PASSES Validate
+	// but would materialize `--context ""` and the supervisor would respawn a
+	// serena child with an invalid empty context. Reject BEFORE any mutation,
+	// same fail-loud style as the kind+template+transport gates above. This is
+	// the install-time mirror of the build-time skip in
+	// BuildSupervisorDaemonsForSerena. Additive admission tightening only.
+	if strings.TrimSpace(m.DaemonTemplate.Context) == "" {
+		return "", fmt.Errorf("InstallParsedManifest: manifest %q has an empty daemon_template.context; the per-workspace serena proxy materializes --context <value> for the child, so a non-empty context is required (set daemon_template.context in the manifest)", m.Name)
 	}
 
 	// 1a. Preflight: check-only gate shared with the legacy install paths.

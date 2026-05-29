@@ -239,6 +239,39 @@ func DefaultSupervisorIntentPath() (string, error) {
 	return joinStateFilePath(stateDir, supervisorIntentFileLeaf), nil
 }
 
+// SupervisorIntentPathEnvVar is the dedicated mcphub-internal env var the
+// supervisor sets when spawning a descriptor whose launcher must read
+// supervisor-intent.json from a control-plane path that is IMMUNE to the
+// child/manifest env (e.g. the serena-proxy, whose manifest env may set
+// HOME / XDG_*_HOME for the upstream serena data dir). The supervisor resolves
+// the canonical intent path ONCE (against its own environment) and injects it
+// here, AFTER the manifest/overlay env merge so the child env cannot clobber
+// it. ResolveSupervisorIntentPathForProxy reads it.
+//
+// Bot PR #246 P2: without this channel the serena-proxy resolved its intent
+// path via DefaultSupervisorIntentPath → DaemonStateDir, which on POSIX honors
+// the (child-overlaid) HOME / XDG_STATE_HOME — so the proxy looked in the
+// upstream child's configured home, missed the real supervisor-intent.json, and
+// never started.
+const SupervisorIntentPathEnvVar = "MCPHUB_SUPERVISOR_INTENT_PATH"
+
+// ResolveSupervisorIntentPathForProxy returns the supervisor-intent.json path a
+// descriptor-driven launcher (e.g. serena-proxy) should read. It prefers the
+// explicit MCPHUB_SUPERVISOR_INTENT_PATH channel the supervisor injects (immune
+// to the manifest/child env) and falls back to DefaultSupervisorIntentPath when
+// the var is unset (manual invocation, legacy spawn without the channel).
+//
+// The fallback path's state-dir resolution honors HOME / XDG_*_HOME on POSIX,
+// which is exactly why the env channel exists: a serena-proxy spawned with a
+// manifest env that redirects HOME for the serena data dir must NOT resolve its
+// control-plane intent path against that redirected home (bot PR #246 P2).
+func ResolveSupervisorIntentPathForProxy() (string, error) {
+	if p := os.Getenv(SupervisorIntentPathEnvVar); p != "" {
+		return p, nil
+	}
+	return DefaultSupervisorIntentPath()
+}
+
 // FindSupervisorDaemonByTaskName returns a COPY of the descriptor in f whose
 // TaskName matches taskName exactly, or nil if none match. The exact match is
 // load-bearing for the serena-proxy descriptor lookup: the proxy execs with

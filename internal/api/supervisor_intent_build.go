@@ -194,6 +194,18 @@ func BuildSupervisorDaemonsForSerena(
 	if m.Transport != config.TransportNativeHTTP {
 		return nil
 	}
+	// Empty-context gate (bot PR #246 P2). The materializer APPENDS
+	// `--context <DaemonTemplate.Context>` to every RuntimeSpec.ChildArgs
+	// (buildSerenaChildArgs / design §5). config.ServerManifest.Validate does
+	// NOT check Context (it checks port_pool + extra_args_template only —
+	// internal/config/manifest.go:404-415), so an absent/blank context would
+	// silently materialize `--context ""` and the serena child would launch
+	// with an invalid empty context. Return nil here (the install/migrate
+	// caller fails loud via the InstallParsedManifest contract gate, which also
+	// enforces non-empty context) rather than emitting a broken descriptor.
+	if strings.TrimSpace(m.DaemonTemplate.Context) == "" {
+		return nil
+	}
 	if len(workspaces) == 0 {
 		return nil
 	}

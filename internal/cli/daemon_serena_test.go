@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -234,6 +235,68 @@ func TestSerenaProxy_NoManifestRead_OnNilSpec(t *testing.T) {
 	if strings.Contains(err.Error(), "manifest") && strings.Contains(strings.ToLower(err.Error()), "load") {
 		t.Errorf("error looks like a manifest-load fallback — the proxy must NOT read the manifest; got %q", err.Error())
 	}
+}
+
+// TestSerenaProxy_IntentPathFromEnvChannel_ImmuneToUpstreamHome covers bot
+// PR #246 P2 (intent-path lookup must not be influenced by the manifest/child
+// env). The supervisor passes the serena CHILD's env (which may set HOME /
+// XDG_*_HOME for serena's data dir) to the serena-proxy process. If the proxy
+// resolved its supervisor-intent.json path against that child HOME, it would
+// look in the wrong dir and never find its descriptor.
+//
+// The fix: the supervisor sets MCPHUB_SUPERVISOR_INTENT_PATH (a dedicated
+// mcphub-internal channel, separate from the manifest Env) to the canonical
+// resolved path when spawning serena-proxy; the proxy reads that var when set.
+//
+// This test seeds the intent at a REAL path, points the env channel at it,
+// and simultaneously redirects the state-dir resolver to a BOGUS empty dir (the
+// stand-in for "child HOME points elsewhere"): if the proxy honored the env
+// channel it finds its descriptor; if it fell back to DefaultSupervisorIntentPath
+// it would miss. The companion sub-test proves the OLD bug: with no env channel
+// and the bogus state root, the lookup fails.
+func TestSerenaProxy_IntentPathFromEnvChannel_ImmuneToUpstreamHome(t *testing.T) {
+	canonical := serenaWorkspaceDir(t)
+	d := serenaDescriptorFixture(t, canonical, 9121)
+
+	// Write the REAL intent at a path under a dedicated temp dir that the
+	// state-dir resolver does NOT point at.
+	realIntentDir := t.TempDir()
+	realIntentPath := filepath.Join(realIntentDir, "supervisor-intent.json")
+	if err := api.WriteSupervisorIntent(realIntentPath, &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{d},
+	}); err != nil {
+		t.Fatalf("seed real intent: %v", err)
+	}
+
+	// Redirect the state-dir resolver to a DIFFERENT, empty dir — this stands
+	// in for "the upstream child HOME/XDG would resolve the intent path here"
+	// (the wrong place). DefaultSupervisorIntentPath() now points at an empty
+	// dir with NO supervisor-intent.json.
+	bogusRoot := t.TempDir()
+	restore := api.SetDaemonStateRootForTest(bogusRoot)
+	t.Cleanup(restore)
+
+	t.Run("env_channel_set_finds_descriptor", func(t *testing.T) {
+		t.Setenv(api.SupervisorIntentPathEnvVar, realIntentPath)
+		spec, err := loadSerenaProxyRuntimeSpec(d.TaskName, canonical, 9121)
+		if err != nil {
+			t.Fatalf("with the intent-path env channel set to the real path, the proxy must find its descriptor; got error: %v", err)
+		}
+		if spec == nil || spec.WorkspacePath != canonical {
+			t.Fatalf("resolved spec mismatch: %#v", spec)
+		}
+	})
+
+	t.Run("no_env_channel_misses_against_bogus_state_root", func(t *testing.T) {
+		// Ensure the env channel is unset for this sub-test (proves the OLD
+		// bug: the fallback resolves against the bogus state root and misses).
+		t.Setenv(api.SupervisorIntentPathEnvVar, "")
+		_, err := loadSerenaProxyRuntimeSpec(d.TaskName, canonical, 9121)
+		if err == nil {
+			t.Fatal("without the env channel, the fallback resolves against the (bogus) state root and must MISS the descriptor; got nil error")
+		}
+	})
 }
 
 // --- tiny test-local helpers (avoid strconv/fmt in test body) ---

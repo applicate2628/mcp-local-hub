@@ -189,7 +189,14 @@ func newDaemonSerenaProxyCmd() *cobra.Command {
 // flag; flagPort is the raw --port value. The caller resolves both before
 // calling.
 func loadSerenaProxyRuntimeSpec(taskName, canonicalWorkspace string, flagPort int) (*api.DaemonRuntimeSpec, error) {
-	intentPath, err := api.DefaultSupervisorIntentPath()
+	// Resolve the control-plane intent path via the supervisor-injected env
+	// channel (MCPHUB_SUPERVISOR_INTENT_PATH), falling back to
+	// DefaultSupervisorIntentPath only when the channel is unset. The channel is
+	// IMMUNE to the manifest/child env — the supervisor sets it AFTER the env
+	// merge — so a serena-proxy whose manifest env redirects HOME / XDG_*_HOME
+	// for the upstream serena data dir still finds its real descriptor instead
+	// of resolving the path against the child's home (bot PR #246 P2).
+	intentPath, err := api.ResolveSupervisorIntentPathForProxy()
 	if err != nil {
 		return nil, fmt.Errorf("resolve supervisor-intent path: %w", err)
 	}

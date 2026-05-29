@@ -231,6 +231,45 @@ func TestBuildSerenaDaemons_NonNativeHTTP_ReturnsNil(t *testing.T) {
 	}
 }
 
+// TestBuildSerenaDaemons_EmptyContext_ReturnsNil is the build-time empty-context
+// gate (bot PR #246 P2): a workspace-scoped daemon_template manifest whose
+// DaemonTemplate.Context is empty (absent or "") must yield NO descriptors from
+// the materializer. Without this gate, buildSerenaChildArgs would append
+// `--context ""` into every RuntimeSpec.ChildArgs and the serena child would
+// launch with an invalid empty context. Note: such a manifest passes
+// config.ServerManifest.Validate today (Validate checks port_pool +
+// extra_args_template, NOT Context), so this build-time gate plus the
+// InstallParsedManifest contract gate are the only enforcers.
+func TestBuildSerenaDaemons_EmptyContext_ReturnsNil(t *testing.T) {
+	for _, ctx := range []string{"", "   "} {
+		m := serenaDynamicPoolManifest()
+		m.DaemonTemplate.Context = ctx
+		got := BuildSupervisorDaemonsForSerena(m, []WorkspaceEntry{
+			{WorkspacePath: "C:/work/alpha", Language: SerenaLanguageSentinel, Port: 9121},
+		}, "", testMcphubBinary)
+		if got != nil {
+			t.Fatalf("empty/blank daemon_template.context (%q) must yield nil from the materializer; got=%#v", ctx, got)
+		}
+	}
+}
+
+// TestBuildSerenaDaemons_NonEmptyContext_Materializes is the positive control
+// for the empty-context gate: a non-empty Context still materializes a
+// descriptor whose RuntimeSpec.ChildArgs ends with `--context <value>`.
+func TestBuildSerenaDaemons_NonEmptyContext_Materializes(t *testing.T) {
+	m := serenaDynamicPoolManifest() // Context = "codex-placeholder" (non-empty)
+	got := BuildSupervisorDaemonsForSerena(m, []WorkspaceEntry{
+		{WorkspacePath: "C:/work/alpha", Language: SerenaLanguageSentinel, Port: 9121},
+	}, "", testMcphubBinary)
+	if len(got) != 1 || got[0].RuntimeSpec == nil {
+		t.Fatalf("non-empty context must materialize 1 descriptor with RuntimeSpec; got=%#v", got)
+	}
+	ca := got[0].RuntimeSpec.ChildArgs
+	if n := len(ca); n < 2 || ca[n-2] != "--context" || ca[n-1] != "codex-placeholder" {
+		t.Errorf("ChildArgs must end with --context codex-placeholder; got=%v", ca)
+	}
+}
+
 // TestBuildSerenaDaemons_ChildArgsTokenExpansion asserts ${workspace.path}
 // inside extra_args_template is substituted with the registry path (not left
 // literal) in the materialized ChildArgs.

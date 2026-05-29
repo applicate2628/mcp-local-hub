@@ -745,6 +745,228 @@ func TestProductionSpawnFn_TrackerFailureOnSpawnErr(t *testing.T) {
 	}
 }
 
+// TestAppendSupervisorIntentChannel_WinsOverMergedEnv is the bot PR #246 P2
+// supervisor-side guard: the MCPHUB_SUPERVISOR_INTENT_PATH channel var must be
+// appended LAST so it wins over any same-key entry a manifest/overlay merge
+// produced (Go's exec honors the last occurrence of a duplicate key). This is
+// the clobber-immunity property that keeps the serena CHILD's manifest env from
+// redirecting the proxy's control-plane intent-path lookup.
+func TestAppendSupervisorIntentChannel_WinsOverMergedEnv(t *testing.T) {
+	const realPath = `C:\real\state\supervisor-intent.json`
+	// Simulate a merged env where the serena CHILD's manifest env tried to set
+	// HOME (and even a hostile/leftover intent-path) — the channel injection
+	// must still place the canonical value LAST.
+	merged := []string{
+		"PATH=/usr/bin",
+		"HOME=/child/overlay/home",
+		api.SupervisorIntentPathEnvVar + "=/child/overlay/bogus-intent.json",
+	}
+	got := appendSupervisorIntentChannel(merged, realPath)
+
+	// The LAST occurrence of the channel key must carry realPath.
+	wantLast := api.SupervisorIntentPathEnvVar + "=" + realPath
+	if got[len(got)-1] != wantLast {
+		t.Fatalf("channel var must be appended last; got tail=%q want=%q\nfull=%v", got[len(got)-1], wantLast, got)
+	}
+	// HOME from the child env is preserved (the channel does NOT strip it — the
+	// proxy reads the explicit channel var, not HOME, for the intent path).
+	if !containsExact(got, "HOME=/child/overlay/home") {
+		t.Errorf("child HOME must survive (it still applies to the serena child); got=%v", got)
+	}
+}
+
+// TestAppendSupervisorIntentChannel_NilEnvMaterializesParent proves that when
+// cmd.Env is nil (no manifest/overlay env → child inherits os.Environ()), the
+// helper materializes the parent env so the appended channel var survives
+// instead of replacing the whole inherited block with a single var.
+func TestAppendSupervisorIntentChannel_NilEnvMaterializesParent(t *testing.T) {
+	const realPath = `C:\real\state\supervisor-intent.json`
+	got := appendSupervisorIntentChannel(nil, realPath)
+	if len(got) <= 1 {
+		t.Fatalf("nil cmd.Env must materialize os.Environ() before appending; got len=%d", len(got))
+	}
+	if got[len(got)-1] != api.SupervisorIntentPathEnvVar+"="+realPath {
+		t.Fatalf("channel var must be the last entry; got=%q", got[len(got)-1])
+	}
+	// At least one inherited parent var should be present (os.Environ is
+	// non-empty in any real test process).
+	if len(got) < 2 {
+		t.Fatal("expected inherited parent env entries alongside the channel var")
+	}
+}
+
+// containsExact reports whether ss contains the exact string s.
+func containsExact(ss []string, s string) bool {
+	for _, v := range ss {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+// readFileString reads path and returns its contents as a string, failing the
+// test on error. Tiny test-local helper for the spawn-event-log assertions.
+func readFileString(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(raw)
+}
+
+// serenaProxyArgs returns a canonical serena-proxy wrapper argv for the given
+// task name + port. Mirrors what api.BuildSupervisorDaemonsForSerena emits.
+func serenaProxyArgs(taskName string, port int) []string {
+	return []string{
+		"daemon", "serena-proxy",
+		"--server", "serena",
+		"--workspace", `C:\work\alpha`,
+		"--port", strconv.Itoa(port),
+		"--task-name", taskName,
+	}
+}
+
+// TestProductionSpawnFn_SkipsLegacyNilSpecSerenaProxy is the bot PR #246 P1
+// guard. A legacy serena-proxy descriptor (Args carry the `serena-proxy`
+// subcommand) whose RuntimeSpec is nil — a pre-redesign row left in
+// supervisor-intent.json before RuntimeSpec existed — must be SKIPPED by the
+// supervisor spawn path with a clear operator-actionable warn event, NOT exec'd
+// into a doomed serena-proxy that exits non-zero and churns through restart
+// backoff/quarantine. The proxy itself cannot make a nil-spec row work (no
+// manifest fallback — that re-introduces the embed-shadow defect this redesign
+// kills); the clean Phase-1 behavior is a clean skip + clear signal. SMOOTH
+// auto-re-materialization of such rows is the cutover phase's §7.1 upgrade gate.
+func TestProductionSpawnFn_SkipsLegacyNilSpecSerenaProxy(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	tracker := NewDaemonRuntimeTracker()
+	spawnFn := makeProductionSpawnFn(events, tracker)
+
+	const legacyTask = `\mcp-local-hub-serena-deadbeef`
+	descriptor := api.SupervisorDaemon{
+		TaskName: legacyTask,
+		Server:   "serena",
+		Daemon:   "deadbeef",
+		// A real-looking mcphub command path, but RuntimeSpec is nil (legacy
+		// row). If the skip is missing, the spawn would exec `mcphub daemon
+		// serena-proxy ...` which would then fail loud in the proxy.
+		Command:     filepath.Join(tmpHome, "mcphub-does-not-exist"),
+		Args:        serenaProxyArgs(legacyTask, 9121),
+		RuntimeSpec: nil, // pre-redesign / stale row
+	}
+
+	// The skip is a deliberate no-op, NOT an error: returning an error would
+	// drive the controller's errSpawnPreChild → backoff retry, the exact churn
+	// this guard prevents.
+	if err := spawnFn(descriptor); err != nil {
+		t.Fatalf("skip of a legacy nil-spec serena-proxy row must be a clean no-op (nil error), got: %v", err)
+	}
+
+	logStr := readFileString(t, eventsPath)
+	if !strings.Contains(logStr, `"event":"legacy-serena-descriptor-skipped"`) {
+		t.Fatalf("expected legacy-serena-descriptor-skipped event in audit log:\n%s", logStr)
+	}
+	if !strings.Contains(logStr, legacyTask) {
+		t.Fatalf("skip event must name the task %q:\n%s", legacyTask, logStr)
+	}
+	// MUST NOT have attempted a spawn: no daemon-spawn-failed, no exec.
+	if strings.Contains(logStr, `"event":"daemon-spawn-failed"`) {
+		t.Fatalf("legacy nil-spec serena-proxy must be skipped, NOT exec'd (daemon-spawn-failed present):\n%s", logStr)
+	}
+	// The tracker must NOT be marked spawn-failed/backoff for a skipped row.
+	if entry, ok := tracker.Get(legacyTask); ok && (entry.State == daemonRuntimeStateBackoff || entry.LastError != "") {
+		t.Fatalf("skipped row must not enter backoff/spawn-failed tracker state; got %+v", entry)
+	}
+}
+
+// TestProductionSpawnFn_SpecBearingSerenaProxy_NotSkipped is the positive
+// control for the P1 skip: a serena-proxy descriptor WITH a RuntimeSpec is NOT
+// skipped — it is exec'd normally (here with a nonexistent command so the exec
+// fails and emits daemon-spawn-failed, proving the spawn was actually
+// attempted). The skip is scoped to nil-RuntimeSpec serena-proxy rows only.
+func TestProductionSpawnFn_SpecBearingSerenaProxy_NotSkipped(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	const task = `\mcp-local-hub-serena-cafef00d`
+	descriptor := api.SupervisorDaemon{
+		TaskName: task,
+		Server:   "serena",
+		Daemon:   "cafef00d",
+		Command:  filepath.Join(tmpHome, "mcphub-does-not-exist"),
+		Args:     serenaProxyArgs(task, 9121),
+		RuntimeSpec: &api.DaemonRuntimeSpec{
+			SpecVersion:   api.DaemonRuntimeSpecVersion,
+			ChildCommand:  "uvx",
+			ChildArgs:     []string{"serena", "--project", `C:\work\alpha`, "--context", "codex-placeholder"},
+			UpstreamPort:  19121,
+			ExternalPort:  9121,
+			WorkspacePath: `C:\work\alpha`,
+		},
+	}
+	spawnFn := makeProductionSpawnFn(events, NewDaemonRuntimeTracker())
+	if err := spawnFn(descriptor); err == nil {
+		t.Fatal("spec-bearing serena-proxy with a nonexistent command must attempt the spawn and return an error, got nil (was it wrongly skipped?)")
+	}
+	logStr := readFileString(t, eventsPath)
+	if strings.Contains(logStr, `"event":"legacy-serena-descriptor-skipped"`) {
+		t.Fatalf("a spec-bearing serena-proxy row must NOT be skipped:\n%s", logStr)
+	}
+	if !strings.Contains(logStr, `"event":"daemon-spawn-failed"`) {
+		t.Fatalf("spec-bearing serena-proxy spawn was attempted; expected daemon-spawn-failed on the bad command:\n%s", logStr)
+	}
+}
+
+// TestProductionSpawnFn_NilSpecGlobalDaemon_NotSkipped proves the skip is
+// scoped to serena-proxy rows ONLY, not nil-RuntimeSpec rows in general. A
+// legacy/global daemon row (Args do NOT carry `serena-proxy`) with a nil
+// RuntimeSpec must still be spawned (RuntimeSpec is legitimately nil for global
+// daemons — the supervisor spawns them via the generic `mcphub daemon --server
+// --daemon` path). Here the command is nonexistent so the spawn attempt fails
+// loud — proving it was NOT skipped.
+func TestProductionSpawnFn_NilSpecGlobalDaemon_NotSkipped(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	descriptor := api.SupervisorDaemon{
+		TaskName:    reconcileWiringTestTaskName,
+		Server:      "memory",
+		Daemon:      "default",
+		Command:     filepath.Join(tmpHome, "mcphub-does-not-exist"),
+		Args:        []string{"daemon", "--server", "memory", "--daemon", "default"}, // NOT serena-proxy
+		RuntimeSpec: nil,                                                              // legitimately nil for a global daemon
+	}
+	spawnFn := makeProductionSpawnFn(events, NewDaemonRuntimeTracker())
+	if err := spawnFn(descriptor); err == nil {
+		t.Fatal("nil-spec GLOBAL daemon must still be spawned (and fail on the bad command), got nil error (was it wrongly skipped?)")
+	}
+	logStr := readFileString(t, eventsPath)
+	if strings.Contains(logStr, `"event":"legacy-serena-descriptor-skipped"`) {
+		t.Fatalf("a nil-spec GLOBAL daemon must NOT be skipped (skip is serena-proxy-scoped):\n%s", logStr)
+	}
+	if !strings.Contains(logStr, `"event":"daemon-spawn-failed"`) {
+		t.Fatalf("nil-spec global daemon spawn was attempted; expected daemon-spawn-failed:\n%s", logStr)
+	}
+}
+
 func TestProductionSpawnFn_EnvOverrideAppliedDeterministically(t *testing.T) {
 	parent := []string{"BASE=parent"}
 	overrides := map[string]string{
