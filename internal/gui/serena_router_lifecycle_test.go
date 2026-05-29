@@ -1852,21 +1852,25 @@ func bindingDaemonSession(s *Server, clientSID string) (daemonSID string, ok boo
 }
 
 // ---------------------------------------------------------------------
-// P2 finding 4 — extractJSONRPCPayload reassembles a JSON-RPC message
-// split across MULTIPLE data: lines within one SSE event by joining them
-// with "\n" (per the SSE spec), instead of overwriting and returning only
-// the last fragment.
+// Finding 4 — readSSEJSONRPCResponse reassembles a JSON-RPC message split
+// across MULTIPLE data: lines within one SSE event by joining them with
+// "\n" (per the SSE spec), instead of returning only the last fragment.
+// (Replaces the pre-fix extractJSONRPCPayload byte-slice flattener; the
+// reader now parses an io.Reader incrementally — Finding 4.)
 // ---------------------------------------------------------------------
-func TestExtractJSONRPCPayload_MultiDataLineEvent(t *testing.T) {
+func TestReadSSEJSONRPCResponse_MultiDataLineEvent(t *testing.T) {
 	// A pretty-printed JSON-RPC result split across three data: lines in
-	// ONE event (blank line terminates). Overwriting would return only
-	// `}` (invalid JSON); correct accumulation reconstructs the object.
+	// ONE event (blank line terminates). Correct accumulation reconstructs
+	// the object; a per-line overwrite would yield only `}` (invalid JSON).
 	sse := "event: message\n" +
 		"data: {\"jsonrpc\":\"2.0\",\"id\":1,\n" +
 		"data: \"result\":{\"tools\":[{\"name\":\"find_symbol\"}]}\n" +
 		"data: }\n" +
 		"\n"
-	got := extractJSONRPCPayload("text/event-stream", []byte(sse))
+	got, err := readSSEJSONRPCResponse(strings.NewReader(sse), 1<<20)
+	if err != nil {
+		t.Fatalf("readSSEJSONRPCResponse: %v", err)
+	}
 
 	var rpc struct {
 		JSONRPC string `json:"jsonrpc"`
@@ -1887,9 +1891,13 @@ func TestExtractJSONRPCPayload_MultiDataLineEvent(t *testing.T) {
 	}
 }
 
-// P2 finding 4 — when multiple complete events appear, the LAST event's
-// (reassembled) data is returned: that is the terminal MCP message.
-func TestExtractJSONRPCPayload_LastEventWins(t *testing.T) {
+// Finding 4 — when a notification event precedes the response event, the
+// reader SKIPS the notification (id absent, method present) and returns the
+// first JSON-RPC RESPONSE event. This is the behavior change vs the pre-fix
+// last-event-wins flattener: the reader stops at the FIRST response so it
+// does not wait for stream EOF (a daemon may keep the SSE stream open after
+// the response). Mirrors internal/api/hub_mcp_aggregator.go selectJSONRPCResponse.
+func TestReadSSEJSONRPCResponse_SkipsNotificationReturnsFirstResponse(t *testing.T) {
 	sse := "event: progress\n" +
 		"data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\"}\n" +
 		"\n" +
@@ -1897,7 +1905,10 @@ func TestExtractJSONRPCPayload_LastEventWins(t *testing.T) {
 		"data: {\"jsonrpc\":\"2.0\",\"id\":1,\n" +
 		"data: \"result\":{\"ok\":true}}\n" +
 		"\n"
-	got := extractJSONRPCPayload("text/event-stream", []byte(sse))
+	got, err := readSSEJSONRPCResponse(strings.NewReader(sse), 1<<20)
+	if err != nil {
+		t.Fatalf("readSSEJSONRPCResponse: %v", err)
+	}
 	var rpc struct {
 		ID     json.RawMessage `json:"id"`
 		Result struct {
@@ -1908,20 +1919,81 @@ func TestExtractJSONRPCPayload_LastEventWins(t *testing.T) {
 		t.Fatalf("payload not valid JSON: %v; got=%q", err, string(got))
 	}
 	if string(rpc.ID) != "1" || !rpc.Result.OK {
-		t.Errorf("returned the wrong event: id=%s result.ok=%v; want the terminal message", string(rpc.ID), rpc.Result.OK)
+		t.Errorf("returned the wrong event: id=%s result.ok=%v; want the response (notification must be skipped)", string(rpc.ID), rpc.Result.OK)
 	}
 }
 
-// P2 finding 4 — the single-data-line case (the common path) still works,
-// and a non-SSE content type returns the raw body verbatim.
-func TestExtractJSONRPCPayload_SingleLineAndNonSSE(t *testing.T) {
-	single := extractJSONRPCPayload("text/event-stream", []byte("data: {\"id\":1,\"result\":{}}\n\n"))
-	if strings.TrimSpace(string(single)) != `{"id":1,"result":{}}` {
+// Finding 4 — readUpstreamJSONRPCResponse: the single-data-line case (the
+// common path) works, and a non-SSE content type does a bounded read of the
+// raw body verbatim.
+func TestReadUpstreamJSONRPCResponse_SingleLineAndNonSSE(t *testing.T) {
+	single, err := readUpstreamJSONRPCResponse("text/event-stream", strings.NewReader("data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n"))
+	if err != nil {
+		t.Fatalf("SSE single line: %v", err)
+	}
+	if strings.TrimSpace(string(single)) != `{"jsonrpc":"2.0","id":1,"result":{}}` {
 		t.Errorf("single data line = %q, want the JSON verbatim", string(single))
 	}
-	raw := []byte(`{"id":1,"result":{"plain":true}}`)
-	if got := extractJSONRPCPayload("application/json", raw); string(got) != string(raw) {
-		t.Errorf("non-SSE body = %q, want raw verbatim %q", string(got), string(raw))
+	raw := `{"id":1,"result":{"plain":true}}`
+	got, err := readUpstreamJSONRPCResponse("application/json", strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("non-SSE: %v", err)
+	}
+	if string(got) != raw {
+		t.Errorf("non-SSE body = %q, want raw verbatim %q", string(got), raw)
+	}
+}
+
+// Finding 4 — readSSEJSONRPCResponse returns at the FIRST JSON-RPC response
+// event WITHOUT waiting for the stream to close. The reader is fed a pipe
+// whose writer emits the response event and then BLOCKS (modeling a
+// Streamable-HTTP daemon that holds the SSE connection open for later
+// notifications). A regression that drained to EOF would block forever; the
+// test bounds the read with a deadline so a regression FAILS (timeout)
+// rather than hanging the suite.
+func TestReadSSEJSONRPCResponse_ReturnsBeforeStreamClose(t *testing.T) {
+	pr, pw := io.Pipe()
+	writerBlocked := make(chan struct{})
+	t.Cleanup(func() { _ = pw.Close(); _ = pr.Close() })
+
+	go func() {
+		// Emit one complete response event, then BLOCK (never close the
+		// writer) — the open-stream condition.
+		_, _ = io.WriteString(pw, "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}\n\n")
+		close(writerBlocked)
+		<-make(chan struct{}) // block forever; t.Cleanup unblocks via PipeReader close
+	}()
+
+	type readResult struct {
+		payload []byte
+		err     error
+	}
+	done := make(chan readResult, 1)
+	go func() {
+		p, err := readSSEJSONRPCResponse(pr, 1<<20)
+		done <- readResult{p, err}
+	}()
+
+	select {
+	case res := <-done:
+		if res.err != nil {
+			t.Fatalf("readSSEJSONRPCResponse returned error: %v", res.err)
+		}
+		var rpc struct {
+			ID     json.RawMessage `json:"id"`
+			Result struct {
+				OK bool `json:"ok"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal(res.payload, &rpc); err != nil {
+			t.Fatalf("payload not valid JSON: %v; got=%q", err, string(res.payload))
+		}
+		if string(rpc.ID) != "1" || !rpc.Result.OK {
+			t.Errorf("wrong event returned: id=%s ok=%v", string(rpc.ID), rpc.Result.OK)
+		}
+	case <-time.After(3 * time.Second):
+		<-writerBlocked // ensure the writer reached its block (diagnostic ordering)
+		t.Fatal("readSSEJSONRPCResponse did not return before the stream closed (Finding 4 regression: read drains to EOF)")
 	}
 }
 

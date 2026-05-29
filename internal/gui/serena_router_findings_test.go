@@ -1041,3 +1041,388 @@ func TestServer_SweepSerenaSessions_DropsIdleKeepsFresh(t *testing.T) {
 		t.Errorf("fresh daemon-session dropped by the sweep; want retained")
 	}
 }
+
+// ---------------------------------------------------------------------
+// Finding 1 (V-forward) — a tool-call on a KNOWN router session that
+// OMITS the MCP-Protocol-Version header forwards the tools/call POST
+// UPSTREAM carrying the session's negotiated version on its
+// MCP-Protocol-Version header (not an empty header). A strict daemon binds
+// the header on a non-initialize POST to the session's initialized version,
+// so the pre-fix verbatim copy of the (absent) r.Header sent the first
+// tool-call with NO version header → 400. This is distinct from
+// TestSerenaRouter_ToolCall_OmittedHeaderUsesSessionVersion, which only
+// asserts the HANDSHAKE init version, not the forwarded tool POST header.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_ToolCall_ForwardsNegotiatedVersionWhenHeaderOmitted(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	const negotiated = "2025-06-18"
+	if negotiated == defaultProtocolVersion {
+		t.Fatalf("precondition: negotiated must differ from the router default %q", defaultProtocolVersion)
+	}
+	sid := mintRouterSession(t, s, negotiated)
+
+	// Tool call with NO MCP-Protocol-Version header on the known session.
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"})
+	rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": sid})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	daemon.mu.Lock()
+	gotToolPV := daemon.lastToolHeaders.Get("MCP-Protocol-Version")
+	daemon.mu.Unlock()
+	if gotToolPV != negotiated {
+		t.Errorf("forwarded tools/call MCP-Protocol-Version = %q, want the session's negotiated %q (Finding 1: forward the resolved version, not the absent r.Header)", gotToolPV, negotiated)
+	}
+}
+
+// Finding 1 (regression guard) — a tool-call on an UNKNOWN session (legacy
+// direct caller) that OMITS the version header forwards with NO header set
+// (today's raw-header behavior preserved: an absent header stays absent for
+// a session this router never minted).
+func TestSerenaRouter_ToolCall_NoRouterSessionOmittedHeaderStaysAbsent(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	// A raw client id this router never minted, NO version header.
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"})
+	rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": "never-minted-here"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	daemon.mu.Lock()
+	_, present := daemon.lastToolHeaders["Mcp-Protocol-Version"]
+	daemon.mu.Unlock()
+	if present {
+		t.Errorf("forwarded tools/call carried an MCP-Protocol-Version header for an unknown session; want none (legacy raw-header behavior)")
+	}
+}
+
+// ---------------------------------------------------------------------
+// Finding 2 (V-forward) — the client-origin DELETE teardown forwards the
+// upstream DELETE carrying the session's negotiated MCP-Protocol-Version,
+// so a strict daemon (which binds the header on a non-initialize request to
+// the session's initialized version) does not 400 the teardown and leak the
+// upstream session while the client gets 204.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_Delete_ForwardsNegotiatedVersionUpstream(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	const negotiated = "2025-06-18"
+	sid := mintRouterSession(t, s, negotiated)
+	// Establish the daemon session via a tool call (the state DELETE tears down).
+	if rr := postSerena(t, s, buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"}), map[string]string{
+		"Mcp-Session-Id":       sid,
+		"MCP-Protocol-Version": negotiated,
+	}); rr.Code != http.StatusOK {
+		t.Fatalf("setup tool call status = %d; body=%s", rr.Code, rr.Body.String())
+	}
+
+	// DELETE with the matching version -> teardown fires, upstream DELETE
+	// carries the negotiated version.
+	rr := deleteSerena(t, s, map[string]string{
+		"Mcp-Session-Id":       sid,
+		"MCP-Protocol-Version": negotiated,
+	})
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("DELETE status = %d, want 204; body=%s", rr.Code, rr.Body.String())
+	}
+	if got := daemonDeleteHits(daemon); got != 1 {
+		t.Fatalf("daemon DELETE hits = %d, want 1", got)
+	}
+	daemon.mu.Lock()
+	gotPV := daemon.lastDeleteHeaders.Get("MCP-Protocol-Version")
+	daemon.mu.Unlock()
+	if gotPV != negotiated {
+		t.Errorf("upstream DELETE MCP-Protocol-Version = %q, want the session's negotiated %q (Finding 2)", gotPV, negotiated)
+	}
+}
+
+// Finding 2 (V-forward, omitted-header) — a known-session DELETE that omits
+// the version header still forwards a NON-EMPTY MCP-Protocol-Version
+// upstream (the session's negotiated version), so the teardown is not
+// rejected by a strict daemon.
+func TestSerenaRouter_Delete_OmittedHeaderForwardsSessionVersion(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	const negotiated = "2025-06-18"
+	sid := mintRouterSession(t, s, negotiated)
+	if rr := postSerena(t, s, buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"}), map[string]string{"Mcp-Session-Id": sid}); rr.Code != http.StatusOK {
+		t.Fatalf("setup tool call status = %d; body=%s", rr.Code, rr.Body.String())
+	}
+
+	// DELETE with NO version header.
+	rr := deleteSerena(t, s, map[string]string{"Mcp-Session-Id": sid})
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("DELETE status = %d, want 204; body=%s", rr.Code, rr.Body.String())
+	}
+	daemon.mu.Lock()
+	gotPV := daemon.lastDeleteHeaders.Get("MCP-Protocol-Version")
+	daemon.mu.Unlock()
+	if gotPV != negotiated {
+		t.Errorf("upstream DELETE MCP-Protocol-Version (omitted client header) = %q, want the session's negotiated %q", gotPV, negotiated)
+	}
+}
+
+// ---------------------------------------------------------------------
+// Finding 3 (V-validate) — a notifications/cancelled whose
+// MCP-Protocol-Version CONFLICTS with the known session's negotiated version
+// is acknowledged 202 but NOT forwarded upstream (mirrors the hub's gate-7
+// notification handling: a mismatched-version notification is silently
+// dropped). A matching header forwards, carrying the negotiated version.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_NotificationCancelled_RejectsCrossVersionWithoutForwarding(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	const negotiated = "2025-06-18"
+	sid := mintRouterSession(t, s, negotiated)
+	// A tool call establishes the daemon session binding (the in-flight state
+	// the cancel would target).
+	if rr := postSerena(t, s, buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"}), map[string]string{
+		"Mcp-Session-Id":       sid,
+		"MCP-Protocol-Version": negotiated,
+	}); rr.Code != http.StatusOK {
+		t.Fatalf("setup tool call status = %d; body=%s", rr.Code, rr.Body.String())
+	}
+	wantDaemonSID, ok, _ := bindingDaemonSession(s, sid)
+	if !ok {
+		t.Fatalf("precondition: no daemon binding after tool call")
+	}
+
+	cancelBody, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "notifications/cancelled",
+		"params":  map[string]any{"requestId": 7},
+	})
+
+	// Sub-case A: CONFLICTING version -> 202 ack, NO forward.
+	rrConflict := postSerena(t, s, cancelBody, map[string]string{
+		"Mcp-Session-Id":       sid,
+		"MCP-Protocol-Version": "2025-11-25", // differs from the negotiated 2025-06-18
+	})
+	if rrConflict.Code != http.StatusAccepted {
+		t.Fatalf("cross-version cancel status = %d, want 202; body=%s", rrConflict.Code, rrConflict.Body.String())
+	}
+	if got := daemonCancelHits(daemon); got != 0 {
+		t.Errorf("daemon cancel hits after cross-version cancel = %d, want 0 (Finding 3: must not forward a mismatched-version cancel)", got)
+	}
+
+	// Sub-case B: MATCHING version -> forwarded, carrying the negotiated
+	// version + the daemon-issued session id.
+	rrMatch := postSerena(t, s, cancelBody, map[string]string{
+		"Mcp-Session-Id":       sid,
+		"MCP-Protocol-Version": negotiated,
+	})
+	if rrMatch.Code != http.StatusAccepted {
+		t.Fatalf("matching-version cancel status = %d, want 202; body=%s", rrMatch.Code, rrMatch.Body.String())
+	}
+	if got := daemonCancelHits(daemon); got != 1 {
+		t.Fatalf("daemon cancel hits after matching cancel = %d, want 1", got)
+	}
+	daemon.mu.Lock()
+	gotSID := daemon.lastCancelSession
+	gotPV := daemon.lastCancelHeaders.Get("MCP-Protocol-Version")
+	daemon.mu.Unlock()
+	if gotSID != wantDaemonSID {
+		t.Errorf("forwarded cancel Mcp-Session-Id = %q, want the daemon id %q", gotSID, wantDaemonSID)
+	}
+	if gotPV != negotiated {
+		t.Errorf("forwarded cancel MCP-Protocol-Version = %q, want the negotiated %q (V-forward)", gotPV, negotiated)
+	}
+}
+
+// Finding 3 (omitted-header) — a notifications/cancelled with NO version
+// header on a known session forwards (the session version is the source of
+// truth, not a required header), carrying the negotiated version.
+func TestSerenaRouter_NotificationCancelled_OmittedHeaderForwards(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	const negotiated = "2025-06-18"
+	sid := mintRouterSession(t, s, negotiated)
+	if rr := postSerena(t, s, buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"}), map[string]string{"Mcp-Session-Id": sid}); rr.Code != http.StatusOK {
+		t.Fatalf("setup tool call status = %d; body=%s", rr.Code, rr.Body.String())
+	}
+
+	cancelBody, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "notifications/cancelled",
+		"params":  map[string]any{"requestId": 7},
+	})
+	rr := postSerena(t, s, cancelBody, map[string]string{"Mcp-Session-Id": sid})
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("omitted-header cancel status = %d, want 202; body=%s", rr.Code, rr.Body.String())
+	}
+	if got := daemonCancelHits(daemon); got != 1 {
+		t.Fatalf("daemon cancel hits = %d, want 1 (omitted header must still forward)", got)
+	}
+	daemon.mu.Lock()
+	gotPV := daemon.lastCancelHeaders.Get("MCP-Protocol-Version")
+	daemon.mu.Unlock()
+	if gotPV != negotiated {
+		t.Errorf("forwarded cancel MCP-Protocol-Version (omitted client header) = %q, want the negotiated %q", gotPV, negotiated)
+	}
+}
+
+// ---------------------------------------------------------------------
+// Finding 5 (S — one-shot teardown) — a path-bearing tool-call with NO
+// client Mcp-Session-Id handshakes a daemon session that resolveDaemonSession
+// cannot persist; the router must best-effort DELETE that one-shot session
+// upstream after the forwarded response completes (carrying the daemon-issued
+// id), so it does not leak until the daemon's idle expiry.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_ToolCall_PathOnlyOneShotSessionTornDown(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	// Path-bearing tool call with NO Mcp-Session-Id header.
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"})
+	rr := postSerena(t, s, body, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("path-only tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	// The one-shot daemon session minted for this call MUST be torn down
+	// (Finding 5). The DELETE is deferred + context-detached, so it fires
+	// after the response completes; poll briefly for it.
+	waitForDaemonDeleteHits(t, daemon, 1)
+
+	// It carried the daemon-issued session id (a real minted id, not empty /
+	// not the absent client id).
+	daemon.mu.Lock()
+	gotDelSID := daemon.lastDeleteSession
+	known := gotDelSID != "" && daemon.issued[gotDelSID]
+	daemon.mu.Unlock()
+	if !known {
+		t.Errorf("one-shot DELETE Mcp-Session-Id = %q is not a session this daemon minted; want the handshake-issued id", gotDelSID)
+	}
+}
+
+// Finding 5 (negative) — a tool-call WITH a client Mcp-Session-Id persists
+// the daemon session for reuse and must NOT trigger the one-shot teardown
+// (tearing it down would break the next tool-call on the same session).
+func TestSerenaRouter_ToolCall_SessionBearingCallNoOneShotTeardown(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	const clientSID = "sess-persist"
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"})
+	if rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": clientSID}); rr.Code != http.StatusOK {
+		t.Fatalf("tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	// The daemon session is persisted (reused on later calls) — no teardown.
+	if _, _, ok := s.serenaDaemonSessions.bindingFor(clientSID); !ok {
+		t.Fatalf("session-bearing call did not persist the daemon binding")
+	}
+	// Give any erroneous deferred teardown a chance to fire, then assert none did.
+	time.Sleep(50 * time.Millisecond)
+	if got := daemonDeleteHits(daemon); got != 0 {
+		t.Errorf("daemon DELETE hits after a session-bearing call = %d, want 0 (the persisted session must NOT be one-shot torn down)", got)
+	}
+
+	// A SECOND call on the same session reuses the binding (proves the
+	// session was not torn down): the daemon mints no new session.
+	beforeMint := daemonMintCount(daemon)
+	if rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": clientSID}); rr.Code != http.StatusOK {
+		t.Fatalf("second tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if got := daemonMintCount(daemon); got != beforeMint {
+		t.Errorf("daemon minted %d more sessions on the reuse call; want 0 (binding reused, not re-handshaked)", got-beforeMint)
+	}
+}
+
+// waitForDaemonDeleteHits polls until the daemon has observed at least want
+// DELETE /mcp requests, or fails after a bounded deadline. The one-shot
+// teardown (Finding 5) is a context-detached deferred goroutine, so the
+// DELETE can land slightly after the client response; polling avoids a flaky
+// fixed sleep while bounding a regression (no teardown) to a clear failure.
+func waitForDaemonDeleteHits(t *testing.T, d *fakeSerenaDaemon, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if daemonDeleteHits(d) >= want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("daemon DELETE hits = %d after 2s, want >= %d (Finding 5: one-shot session must be torn down)", daemonDeleteHits(d), want)
+}

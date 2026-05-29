@@ -500,19 +500,62 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Finding 5 (S — one-shot teardown): a path-bearing tool-call with NO
+	// client Mcp-Session-Id handshakes a daemon session that
+	// resolveDaemonSession could NOT persist (it stores only when the client
+	// session id is non-empty), and no later DELETE would ever follow — the
+	// session leaks until the daemon's idle expiry. Best-effort DELETE it
+	// upstream after the forwarded response completes, exactly like the
+	// tools/list one-shot path (fetchToolsListFromAnyDaemon → Finding C). The
+	// DELETE is deferred so it fires on EVERY path after the handshake (SSE
+	// completion, plain-body completion, AND the post-handshake error returns
+	// below), and context-detached so a finished/cancelled request context
+	// does not abort the teardown.
+	//
+	// Guard: only when sessionID == "" (the unpersisted one-shot case). A
+	// non-empty sessionID means resolveDaemonSession stored the daemon
+	// session against the client session; it is REUSED on later calls and the
+	// client-origin DELETE (handleSerenaDelete) tears it down — tearing it
+	// down here would break the next tool-call on the same client session.
+	if sessionID == "" && daemonSessionID != "" {
+		oneShotDaemonSessionID := daemonSessionID
+		oneShotURL := upstreamURL
+		oneShotWS := ws
+		oneShotVersion := effectiveHandshakeProtocolVersion(clientProtocolVersion)
+		defer func() {
+			delCtx, delCancel := context.WithTimeout(context.Background(), upstreamTimeout)
+			s.forwardSerenaDeleteUpstream(delCtx, httpClient, oneShotURL, oneShotDaemonSessionID, oneShotVersion, oneShotWS.WorkspaceKey, oneShotWS, auditFn)
+			delCancel()
+		}()
+	}
+
 	upstreamReq, ureqErr := http.NewRequestWithContext(r.Context(), http.MethodPost, upstreamURL, bytes.NewReader(body))
 	if ureqErr != nil {
 		http.Error(w, "build upstream request: "+ureqErr.Error(), http.StatusInternalServerError)
 		return
 	}
-	// Thread Content-Type/Accept/protocol-version through verbatim, but
-	// NOT the client's Mcp-Session-Id: the daemon does not know the
-	// router-minted client id. Set the daemon-issued session id instead
-	// (omit it entirely when the daemon is sessionless and issued none).
-	for _, h := range []string{"Content-Type", "Accept", "MCP-Protocol-Version"} {
+	// Thread Content-Type/Accept through verbatim, but NOT the client's
+	// Mcp-Session-Id: the daemon does not know the router-minted client id.
+	// Set the daemon-issued session id instead (omit it entirely when the
+	// daemon is sessionless and issued none).
+	for _, h := range []string{"Content-Type", "Accept"} {
 		if v := r.Header.Get(h); v != "" {
 			upstreamReq.Header.Set(h, v)
 		}
+	}
+	// Finding 1 (V-forward): forward the RESOLVED protocol version, not the
+	// raw r.Header. For a known router session that omitted the header,
+	// clientProtocolVersion was set to the session's negotiated version
+	// above (Finding G) for the handshake; the tools/call POST is a
+	// non-initialize request, so a strict daemon that binds the header to
+	// the session's initialized version (internal/api/hub_mcp_handler.go
+	// gate 7) 400s a missing/mismatched header. Threading the resolved
+	// version keeps the forward consistent with the daemon session the
+	// handshake just established. An UNKNOWN session that omitted the header
+	// leaves clientProtocolVersion empty → no header set (today's
+	// raw-header behavior for a legacy direct caller is preserved).
+	if clientProtocolVersion != "" {
+		upstreamReq.Header.Set("MCP-Protocol-Version", clientProtocolVersion)
 	}
 	if daemonSessionID != "" {
 		upstreamReq.Header.Set("Mcp-Session-Id", daemonSessionID)
@@ -634,16 +677,24 @@ func (s *Server) handleSerenaDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Finding 3: for a KNOWN router session, reject a conflicting
+	// Finding 3 (V-validate): for a KNOWN router session, reject a conflicting
 	// MCP-Protocol-Version BEFORE any snapshot/unbind so a mismatched DELETE
 	// leaves the session intact. Missing/matching header (or an unknown
 	// session) falls through to the best-effort teardown below.
+	//
+	// Finding 2 (V-forward): capture the version to forward on the upstream
+	// DELETE HERE, before the unbind below clears the router-session record.
+	// A known session forwards its negotiated version (the version the
+	// daemon session was initialized under); an unknown session falls back to
+	// the raw request header (today's behavior for a legacy caller).
+	deleteProtocolVersion := r.Header.Get("MCP-Protocol-Version")
 	if sessionVersion, known := s.serenaRouterSessions.negotiatedVersion(sessionID); known {
 		if clientProtocolVersion := r.Header.Get("MCP-Protocol-Version"); clientProtocolVersion != "" && clientProtocolVersion != sessionVersion {
 			writeJSONRPCErrorStatus(w, json.RawMessage("null"), http.StatusBadRequest, jsonrpcInvalidRequest,
 				"protocol-version mismatch", nil)
 			return
 		}
+		deleteProtocolVersion = sessionVersion
 	}
 
 	deps := s.serenaRouterDepsProd()
@@ -700,8 +751,14 @@ func (s *Server) handleSerenaDelete(w http.ResponseWriter, r *http.Request) {
 			// immediately and short-circuit the daemon-side teardown —
 			// leaking the upstream session this finding exists to release.
 			// Bound the detached context by the upstream timeout.
+			//
+			// Finding 2 (V-forward): resolve the captured version through
+			// effectiveHandshakeProtocolVersion so the teardown carries a
+			// non-empty MCP-Protocol-Version whenever the session existed
+			// (matching the version the daemon session was initialized
+			// under), and a strict daemon does not 400 the DELETE.
 			fwdCtx, fwdCancel := context.WithTimeout(context.Background(), upstreamTimeout)
-			s.forwardSerenaDeleteUpstream(fwdCtx, httpClient, upstreamURL, daemonSessionID, wsKey, delWS, auditFn)
+			s.forwardSerenaDeleteUpstream(fwdCtx, httpClient, upstreamURL, daemonSessionID, effectiveHandshakeProtocolVersion(deleteProtocolVersion), wsKey, delWS, auditFn)
 			fwdCancel()
 		}
 	}
@@ -755,7 +812,16 @@ func (s *Server) resolveWorkspaceByKey(deps *serenaRouterDeps, wsKey string) *ap
 // releases the upstream session. A transport failure or a non-2xx status
 // is audited (warn) but never propagated — the client-origin DELETE
 // teardown is best-effort (Finding 3).
-func (s *Server) forwardSerenaDeleteUpstream(ctx context.Context, httpClient *http.Client, upstreamURL, daemonSessionID, wsKey string, ws *api.WorkspaceEntry, auditFn func(level, event string, fields map[string]any) error) {
+//
+// Finding 2 (V-forward): protocolVersion is set on the MCP-Protocol-Version
+// header. DELETE is a non-initialize request, so a strict daemon that binds
+// the header to the session's initialized version
+// (internal/api/hub_mcp_handler.go gate 7 / handleDelete gate 7) 400s a
+// teardown that omits or mismatches it — leaking the upstream session while
+// the client gets its 204. Callers pass the negotiated version
+// (effectiveHandshakeProtocolVersion-resolved). An empty value omits the
+// header (sessionless daemon / legacy caller).
+func (s *Server) forwardSerenaDeleteUpstream(ctx context.Context, httpClient *http.Client, upstreamURL, daemonSessionID, protocolVersion, wsKey string, ws *api.WorkspaceEntry, auditFn func(level, event string, fields map[string]any) error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, upstreamURL, nil)
 	if err != nil {
 		_ = auditFn("warn", "serena-upstream-delete-failed", map[string]any{
@@ -769,6 +835,9 @@ func (s *Server) forwardSerenaDeleteUpstream(ctx context.Context, httpClient *ht
 	}
 	if daemonSessionID != "" {
 		req.Header.Set("Mcp-Session-Id", daemonSessionID)
+	}
+	if protocolVersion != "" {
+		req.Header.Set("MCP-Protocol-Version", protocolVersion)
 	}
 	resp, doErr := httpClient.Do(req)
 	if doErr != nil {
@@ -806,6 +875,17 @@ func (s *Server) forwardSerenaDeleteUpstream(ctx context.Context, httpClient *ht
 // teardown): a client that disconnects right after sending the cancel must
 // not cancel the daemon-side forward. When there is no bound daemon session
 // (nothing in flight) the local 202 is kept — there is no daemon to tell.
+//
+// Finding 3 (V-validate): for a KNOWN router session whose incoming
+// MCP-Protocol-Version CONFLICTS with the negotiated version, the cancel is
+// NOT forwarded — it is acknowledged 202 with no upstream forward. This
+// mirrors the hub's gate-7 handling of a version-mismatched notification
+// (internal/api/hub_mcp_handler.go handlePost: a notification on a
+// mismatched version returns 202 and is silently dropped, never dispatched).
+// Forwarding a cross-version cancel would let a stray/buggy client cancel an
+// in-flight daemon request it never legitimately negotiated. A matching or
+// missing header (or an UNKNOWN session — a legacy direct caller) forwards
+// as before with the resolved version (V-forward).
 func (s *Server) handleSerenaCancelled(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -826,7 +906,25 @@ func (s *Server) handleSerenaCancelled(
 		return
 	}
 
-	if sessionID != "" {
+	// Finding 3 (V-validate) + V-forward: resolve the forward version and
+	// decide whether to forward at all. For a KNOWN session a raw header that
+	// conflicts with the negotiated version suppresses the forward (silent
+	// 202, mirroring the hub); a matching/missing header forwards with the
+	// negotiated version. For an UNKNOWN session the raw header drives the
+	// forward (today's legacy behavior). protocolVersion is the value sent on
+	// the forwarded cancel (resolved below); forward stays false on mismatch.
+	rawProtocolVersion := r.Header.Get("MCP-Protocol-Version")
+	protocolVersion := rawProtocolVersion
+	forward := true
+	if sessionVersion, known := s.serenaRouterSessions.negotiatedVersion(sessionID); known {
+		if rawProtocolVersion != "" && rawProtocolVersion != sessionVersion {
+			// Cross-version cancel on a known session: do NOT forward.
+			forward = false
+		}
+		protocolVersion = sessionVersion
+	}
+
+	if forward && sessionID != "" {
 		if wsKey, daemonSessionID, ok := s.serenaDaemonSessions.bindingFor(sessionID); ok {
 			if ws := s.resolveDeleteWorkspace(deps, sessionID, wsKey); ws != nil {
 				if upstreamURL := upstreamURLFn(ws); upstreamURL != "" {
@@ -834,18 +932,12 @@ func (s *Server) handleSerenaCancelled(
 					if upstreamTimeout <= 0 {
 						upstreamTimeout = serenaUpstreamTimeout
 					}
-					// Thread the session's negotiated version (Finding G
-					// consistency): a strict daemon binds the
-					// MCP-Protocol-Version header on a non-initialize POST to
-					// the session's initialized version. Fall back to the raw
-					// request header, then the router default.
-					protocolVersion := r.Header.Get("MCP-Protocol-Version")
-					if sessionVersion, known := s.serenaRouterSessions.negotiatedVersion(sessionID); known {
-						protocolVersion = sessionVersion
-					}
-					protocolVersion = effectiveHandshakeProtocolVersion(protocolVersion)
+					// V-forward: thread the resolved version (a strict daemon
+					// binds the MCP-Protocol-Version header on a non-initialize
+					// POST to the session's initialized version). The router
+					// default fills in for a legacy caller that omitted it.
 					fwdCtx, fwdCancel := context.WithTimeout(context.Background(), upstreamTimeout)
-					s.forwardSerenaCancelledUpstream(fwdCtx, httpClient, upstreamURL, daemonSessionID, protocolVersion, wsKey, ws, body, auditFn)
+					s.forwardSerenaCancelledUpstream(fwdCtx, httpClient, upstreamURL, daemonSessionID, effectiveHandshakeProtocolVersion(protocolVersion), wsKey, ws, body, auditFn)
 					fwdCancel()
 				}
 			}

@@ -159,9 +159,12 @@ type fakeSerenaDaemon struct {
 
 	// deleteHits counts DELETE /mcp requests (client-origin session
 	// termination, P2 finding 3). lastDeleteSession is the Mcp-Session-Id
-	// observed on the most recent DELETE.
+	// observed on the most recent DELETE; lastDeleteHeaders is a clone of the
+	// headers on it so a test can assert the MCP-Protocol-Version threaded
+	// onto the teardown (Finding 2).
 	deleteHits        int
 	lastDeleteSession string
+	lastDeleteHeaders http.Header
 	// deleteStatus overrides the HTTP status returned for DELETE. 0 means
 	// the default 204; a non-2xx value models a daemon that fails the
 	// teardown (the router must still 204 the client — teardown is
@@ -192,6 +195,7 @@ func (d *fakeSerenaDaemon) handler() http.HandlerFunc {
 			d.mu.Lock()
 			d.deleteHits++
 			d.lastDeleteSession = r.Header.Get("Mcp-Session-Id")
+			d.lastDeleteHeaders = r.Header.Clone()
 			status := d.deleteStatus
 			d.mu.Unlock()
 			if status == 0 {

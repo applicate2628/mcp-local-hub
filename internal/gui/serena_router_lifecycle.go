@@ -17,6 +17,7 @@
 package gui
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -716,9 +717,15 @@ func (s *Server) fetchToolsListFromAnyDaemon(
 		// Finding C: release the one-shot upstream session regardless of the
 		// proxy outcome, whenever the handshake established one. Detach the
 		// context so a done tools/list request context cannot abort it.
+		//
+		// Finding 2 (V-forward): the teardown DELETE carries the SAME resolved
+		// protocol version proxyToolsListOnce used for its handshake
+		// (effectiveHandshakeProtocolVersion), so a strict daemon that binds
+		// the header to the session's initialized version does not 400 the
+		// teardown and leak the one-shot session.
 		if daemonSessionID != "" {
 			delCtx, delCancel := context.WithTimeout(context.Background(), serenaUpstreamTimeout)
-			s.forwardSerenaDeleteUpstream(delCtx, httpClient, upstreamURL, daemonSessionID, ws.WorkspaceKey, ws, auditFn)
+			s.forwardSerenaDeleteUpstream(delCtx, httpClient, upstreamURL, daemonSessionID, effectiveHandshakeProtocolVersion(clientProtocolVersion), ws.WorkspaceKey, ws, auditFn)
 			delCancel()
 		}
 		if err != nil {
@@ -801,11 +808,18 @@ func proxyToolsListOnce(ctx context.Context, httpClient *http.Client, upstreamUR
 		return nil, daemonSessionID, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode != http.StatusOK {
 		return nil, daemonSessionID, fmt.Errorf("upstream tools/list -> status %d", resp.StatusCode)
 	}
-	payload := extractJSONRPCPayload(resp.Header.Get("Content-Type"), raw)
+	// Finding 4: read INCREMENTALLY (same ReadAll-to-EOF hang as the
+	// handshake — a daemon that answers tools/list as a still-open SSE
+	// stream would otherwise block until the client timeout).
+	// readUpstreamJSONRPCResponse returns at the first JSON-RPC response
+	// event for SSE, or a bounded read for application/json.
+	payload, rerr := readUpstreamJSONRPCResponse(resp.Header.Get("Content-Type"), resp.Body)
+	if rerr != nil {
+		return nil, daemonSessionID, fmt.Errorf("read upstream tools/list: %w", rerr)
+	}
 	var rpc struct {
 		Result json.RawMessage `json:"result"`
 		Error  json.RawMessage `json:"error"`
@@ -822,78 +836,136 @@ func proxyToolsListOnce(ctx context.Context, httpClient *http.Client, upstreamUR
 	return rpc.Result, daemonSessionID, nil
 }
 
-// extractJSONRPCPayload returns the JSON object to parse from an upstream
-// response. For a text/event-stream body it pulls the data of the LAST
-// complete event (the terminal MCP message) — concatenating that event's
-// `data:` lines per the SSE spec; for any other content type it returns
-// raw verbatim.
-//
-// Finding 4: a single SSE event whose JSON-RPC message is split across
-// multiple `data:` lines (a daemon that pretty-prints / wraps its
-// initialize/tools-list JSON) must be reassembled by JOINING those lines
-// with "\n", not by overwriting the accumulator with each line and
-// returning only the last fragment (which yields invalid JSON). Per the
-// SSE spec (WHATWG HTML §server-sent-events), the data buffer accumulates
-// each `data:` field value followed by "\n"; a blank line dispatches the
-// event; the event's data is the buffer with the trailing "\n" removed.
-func extractJSONRPCPayload(contentType string, raw []byte) []byte {
-	if !bytesContainsFold(contentType, "text/event-stream") {
-		return raw
-	}
-	const dataPrefix = "data:"
-	var (
-		last    []byte // data of the last COMPLETE (dispatched) event
-		buf     []byte // accumulator for the in-progress event
-		sawData bool   // a `data:` field appeared in the in-progress event
-	)
-	// finalizeEvent records the in-progress event's data as the latest
-	// candidate (when it carried any data) and resets the accumulator.
-	finalizeEvent := func() {
-		if sawData {
-			if trimmed := bytes.TrimSpace(buf); len(trimmed) > 0 {
-				last = trimmed
-			}
-		}
-		buf = buf[:0]
-		sawData = false
-	}
-	for _, line := range bytes.Split(raw, []byte("\n")) {
-		line = bytes.TrimRight(line, "\r")
-		if len(line) == 0 {
-			// Blank line: dispatch the in-progress event (SSE event boundary).
-			finalizeEvent()
-			continue
-		}
-		if !bytes.HasPrefix(line, []byte(dataPrefix)) {
-			// Non-data field (event:, id:, retry:, comment): ignored for
-			// payload extraction but does NOT end the event.
-			continue
-		}
-		// SSE: the value is the text after "data:" with a single optional
-		// leading space stripped. Concatenate multiple data lines with "\n".
-		value := line[len(dataPrefix):]
-		if len(value) > 0 && value[0] == ' ' {
-			value = value[1:]
-		}
-		if sawData {
-			buf = append(buf, '\n')
-		}
-		buf = append(buf, value...)
-		sawData = true
-	}
-	// A stream may end without a trailing blank line; finalize the last
-	// (unterminated) event too.
-	finalizeEvent()
-	if len(last) == 0 {
-		return raw
-	}
-	return last
-}
-
 // bytesContainsFold is a tiny case-insensitive substring check for
 // content-type matching (avoids importing strings just for ToLower in
 // this file; the value is already lowercased by most servers but we
 // fold defensively).
 func bytesContainsFold(haystack, needle string) bool {
 	return bytes.Contains(bytes.ToLower([]byte(haystack)), bytes.ToLower([]byte(needle)))
+}
+
+// readUpstreamJSONRPCResponse reads a daemon's upstream MCP response body
+// and returns the JSON-RPC envelope bytes to parse, bounded by a 1 MiB
+// defensive cap. It is the read used by the synthesized handshake
+// (postHandshakeInitialize) and the workspace-agnostic tools/list proxy
+// (proxyToolsListOnce) — both expect a single JSON-RPC RESPONSE.
+//
+// Finding 4 — for a text/event-stream body it parses the stream
+// INCREMENTALLY and returns as soon as it assembles the FIRST complete
+// JSON-RPC response event, WITHOUT waiting for the stream to close. A
+// Streamable-HTTP daemon may keep its SSE connection open after emitting
+// the response event (to push later notifications); the pre-fix code did
+// io.ReadAll(resp.Body) to EOF and then flattened with extractJSONRPCPayload,
+// so the handshake blocked until the client timeout (60s) on EVERY first
+// tool-call / tools-list against such a daemon. This mirrors the hub
+// aggregator's readSSEResponse + selectJSONRPCResponse
+// (internal/api/hub_mcp_aggregator.go) — those helpers are unexported in
+// package api (the router lives in package gui), so the technique is
+// replicated here rather than imported. A non-SSE (application/json)
+// body keeps a bounded read (io.ReadAll under the same cap).
+func readUpstreamJSONRPCResponse(contentType string, body io.Reader) ([]byte, error) {
+	const maxBytes = 1 << 20
+	if bytesContainsFold(contentType, "text/event-stream") {
+		return readSSEJSONRPCResponse(body, maxBytes)
+	}
+	raw, err := io.ReadAll(io.LimitReader(body, maxBytes))
+	if err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+// readSSEJSONRPCResponse scans a text/event-stream body line-by-line and
+// returns the data of the FIRST complete event whose payload is a JSON-RPC
+// RESPONSE envelope (jsonrpc=="2.0" with a non-empty `id` and no `method`).
+// It stops at that event without draining the stream to EOF (Finding 4), so
+// a daemon that holds the connection open after the response does not stall
+// the handshake. It mirrors internal/api/hub_mcp_aggregator.go's
+// readSSEResponse byte-for-byte in technique (bufio.Scanner with a maxBytes
+// buffer; blank line dispatches an event; non-data fields and `:` comments
+// are skipped; multiple `data:` lines within one event join with "\n"; one
+// optional leading space stripped from each value); notification events
+// (id absent / method present) are skipped so the caller keeps reading for
+// the actual response. maxBytes caps total bytes so a runaway daemon cannot
+// OOM the router.
+func readSSEJSONRPCResponse(r io.Reader, maxBytes int) ([]byte, error) {
+	scanner := bufio.NewScanner(r)
+	// Allow a single line up to maxBytes — some daemons emit one large
+	// `data:` line carrying the full JSON envelope.
+	scanner.Buffer(make([]byte, 64*1024), maxBytes+1)
+
+	var dataLines [][]byte
+	totalBytes := 0
+	for scanner.Scan() {
+		raw := scanner.Bytes()
+		totalBytes += len(raw) + 1 // +1 for the LF the scanner consumed
+		if totalBytes > maxBytes {
+			return nil, fmt.Errorf("SSE response too large (> %d bytes)", maxBytes)
+		}
+		line := bytes.TrimSuffix(raw, []byte("\r"))
+
+		if len(line) == 0 {
+			// Blank line: dispatch the accumulated event (SSE boundary).
+			if len(dataLines) > 0 {
+				if payload, ok := selectSSEJSONRPCResponse(dataLines); ok {
+					return payload, nil
+				}
+				dataLines = nil
+			}
+			continue
+		}
+		if line[0] == ':' {
+			// SSE comment line — ignored.
+			continue
+		}
+		if !bytes.HasPrefix(line, []byte("data:")) {
+			// Other SSE field (`event:`, `id:`, `retry:`, unknown).
+			continue
+		}
+		value := line[len("data:"):]
+		if len(value) > 0 && value[0] == ' ' {
+			value = value[1:]
+		}
+		// Copy: the scanner reuses its buffer on the next Scan, so retaining
+		// the slice across iterations would corrupt the accumulated event.
+		valueCopy := make([]byte, len(value))
+		copy(valueCopy, value)
+		dataLines = append(dataLines, valueCopy)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read SSE: %w", err)
+	}
+	// Stream ended without a trailing blank line — dispatch any final event.
+	if len(dataLines) > 0 {
+		if payload, ok := selectSSEJSONRPCResponse(dataLines); ok {
+			return payload, nil
+		}
+	}
+	return nil, errors.New("SSE stream ended without a JSON-RPC response event")
+}
+
+// selectSSEJSONRPCResponse joins the accumulated `data:` lines of one SSE
+// event with "\n" and returns the payload IFF it is a JSON-RPC RESPONSE
+// envelope (jsonrpc=="2.0", non-empty `id`, no `method`). Notifications
+// (id absent, method present) and unrelated events are rejected so the
+// caller keeps reading. Mirrors internal/api/hub_mcp_aggregator.go's
+// selectJSONRPCResponse.
+func selectSSEJSONRPCResponse(dataLines [][]byte) ([]byte, bool) {
+	payload := bytes.Join(dataLines, []byte("\n"))
+	var env struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Method  string          `json:"method"`
+	}
+	if err := json.Unmarshal(payload, &env); err != nil {
+		return nil, false
+	}
+	if env.JSONRPC != "2.0" {
+		return nil, false
+	}
+	// JSON-RPC responses ALWAYS carry an `id` and never a `method`.
+	if len(env.ID) == 0 || env.Method != "" {
+		return nil, false
+	}
+	return payload, true
 }

@@ -310,11 +310,20 @@ func postHandshakeInitialize(ctx context.Context, httpClient *http.Client, upstr
 		return "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("upstream initialize -> status %d", resp.StatusCode)
 	}
-	payload := extractJSONRPCPayload(resp.Header.Get("Content-Type"), raw)
+	// Finding 4: read the response INCREMENTALLY. A Streamable-HTTP daemon
+	// that answers initialize with text/event-stream may keep the stream
+	// open after emitting the response event; io.ReadAll(resp.Body) would
+	// then block until the client timeout (60s) on every first handshake.
+	// readUpstreamJSONRPCResponse returns at the first JSON-RPC response
+	// event for SSE, or does a bounded read for application/json. (Mirrors
+	// internal/api/hub_mcp_aggregator.go's doDaemonPost SSE branch.)
+	payload, rerr := readUpstreamJSONRPCResponse(resp.Header.Get("Content-Type"), resp.Body)
+	if rerr != nil {
+		return "", fmt.Errorf("read upstream initialize: %w", rerr)
+	}
 	var rpc struct {
 		Result json.RawMessage `json:"result"`
 		Error  json.RawMessage `json:"error"`
