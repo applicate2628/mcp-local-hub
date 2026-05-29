@@ -85,6 +85,15 @@ func IsSerenaTaskName(taskName string) bool {
 // with a non-nil DaemonTemplate and the snapshot of serena rows from
 // the workspace registry.
 //
+// §7.1 upgrade-gate precondition (bot PR #246 r2): each row carries a
+// RuntimeSpec (materializeSerenaRuntimeSpec below), which an OLD supervisor
+// binary's ReadSupervisorIntent (DisallowUnknownFields) cannot read. ANY caller
+// that WRITES these rows into supervisor-intent.json must first ensure the
+// running supervisor is this binary (or none is running) — otherwise the old
+// supervisor rejects the file and split-brains. InstallParsedManifest enforces
+// this with the SupervisorRunningUnderStateDir refuse-gate; the cutover phase
+// (design §9 Phase 3) upgrades that refuse to an automatic cold-restart drive.
+//
 // Inputs:
 //
 //   - m                 - parsed ServerManifest. MUST satisfy

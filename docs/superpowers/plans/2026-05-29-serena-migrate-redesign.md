@@ -541,17 +541,29 @@ fail-loud guard's airtightness AND the native-http gate's completeness at both b
   rows that end at `--port` with NO `--task-name` and NO `runtime_spec`. After a binary upgrade the supervisor
   keeps executing those old rows until a re-install re-materializes the intent, and the redesigned proxy's
   fail-loud-on-nil-spec would make each such row exit immediately and churn through restart backoff/quarantine.
-  **Phase 1 guarantees only a CLEAN skip + a clear, operator-actionable signal**: the supervisor spawn path
-  (`makeProductionSpawnFnWithStatePath` in [internal/cli/supervise.go](../../../internal/cli/supervise.go))
-  SKIPS a nil-`RuntimeSpec` serena-proxy descriptor (identified by its `daemon serena-proxy` argv) and emits a
-  `severity: warn, event: legacy-serena-descriptor-skipped` supervisor event naming the task, instead of
-  exec'ing a doomed proxy. The proxy keeps its own nil-spec fail-loud as defense-in-depth. The **SMOOTH
-  auto-migration — re-materializing legacy rows on `install --upgrade` so they spawn normally — is the cutover
-  phase's upgrade-gate responsibility (design 7.1 / Phase 4), NOT this phase**; Phase 1 only removes the
-  doomed-spawn churn and makes the required action visible. (Same bot round also added two related guards: the
-  build/install-time empty-`daemon_template.context` reject, and the `MCPHUB_SUPERVISOR_INTENT_PATH` control
-  channel the supervisor injects so the proxy's intent-path lookup is immune to the serena child's
-  HOME/XDG overlay env.)
+  **Phase 1 guarantees a CLEAN EXCLUSION + a clear, operator-actionable signal**: the supervisor reconciler
+  (`Reconciler.Reconcile` in [internal/cli/supervise_reconcile.go](../../../internal/cli/supervise_reconcile.go))
+  EXCLUDES a nil-`RuntimeSpec` serena-proxy descriptor (identified by its `daemon serena-proxy` argv) from the
+  spawn-desired set BEFORE any `EvStart` fires, and emits a `severity: warn, event: legacy-serena-descriptor-skipped`
+  supervisor event naming the task, instead of exec'ing a doomed proxy. (Bot PR #246 r2 P2: r1 expressed this as
+  `return nil` INSIDE the spawn closure, but the controller's `executeSideEffect` treats a nil spawn error as
+  SUCCESS → posts `EvHealthOK` → `StRunning`, leaving a PHANTOM running daemon with no process; the desired-set
+  exclusion never reaches spawn, so there is no phantom state.) The proxy keeps its own nil-spec fail-loud as
+  defense-in-depth. The **SMOOTH auto-migration — re-materializing legacy rows on `install --upgrade` so they
+  spawn normally — is the cutover phase's upgrade-gate responsibility (design 7.1 / Phase 4), NOT this phase**;
+  Phase 1 only removes the doomed-spawn churn and makes the required action visible.
+- **Phase 1 ALSO lands the §7.1 fail-safe write-gate** (bot PR #246 r2 P2): `InstallParsedManifest` refuses to
+  write `runtime_spec`-bearing rows while a supervisor is running (`api.SupervisorRunningUnderStateDir` —
+  a cross-platform `flock` TryLock probe; the owner-sidecar + `isOwnerLive` PID-signal path is POSIX-only and
+  empirically a no-op on Windows, so it cannot be the gate's signal), directing the operator at the cold-restart
+  upgrade flow. This is the FAIL-SAFE form: a running supervisor MAY be an old binary whose
+  `DisallowUnknownFields` decoder would reject the new field and split-brain, and when none is running the next
+  start is the current binary. The cutover phase (Phase 4) UPGRADES this from refuse to an automatic drive of
+  `mcphub install --upgrade`. (Same bot round also added two related guards: the build/install-time
+  empty-`daemon_template.context` reject, and the `MCPHUB_SUPERVISOR_INTENT_PATH` control channel the supervisor
+  injects — resolved from the supervisor's OWN resolved state dir (sibling of `statePath`), bot r2 P3, not a
+  fresh `DefaultSupervisorIntentPath()` — so the proxy's intent-path lookup is immune to both the serena child's
+  HOME/XDG overlay env AND a `MCPHUB_STATE_DIR_OVERRIDE`/test state-dir mismatch.)
 - The current embedded `servers/serena/manifest.yaml` is `kind: global`. **HEAD** has a single `unified`
   daemon on `--context codex` for all clients; the **working tree is mid-edit** on that file (reverted to
   the two-daemon split). Migrating that embed to the dynamic-pool shape (parent plan §G.1) is decoupled from

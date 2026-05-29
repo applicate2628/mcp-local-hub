@@ -32,6 +32,43 @@ func TestSupervisorLock_AcquireRelease(t *testing.T) {
 	lk.Release()
 }
 
+// TestSupervisorRunningUnderStateDir verifies the §7.1 spec-bearing write gate's
+// liveness probe (bot PR #246 r2). The live-self-PID assertion is the
+// cross-platform check the gate depends on: on Windows it must exercise
+// isOwnerLive's OpenProcess/GetExitCodeProcess path (NOT degrade to a
+// Signal(0)-unsupported no-op that would make the gate dormant on the GA
+// platform).
+func TestSupervisorRunningUnderStateDir(t *testing.T) {
+	dir := hardenedTempDir(t)
+	lockPath := filepath.Join(dir, "supervisor.lock")
+
+	// (1) No supervisor holds the lock → not running.
+	if running, pid := SupervisorRunningUnderStateDir(dir); running || pid != 0 {
+		t.Fatalf("no lock held: got (running=%v, pid=%d), want (false, 0)", running, pid)
+	}
+
+	// (2) A live "supervisor" holds the flock (+ wrote the sidecar) → running.
+	// The probe must see the HELD flock (the authoritative cross-platform
+	// signal) and report running. This is the Windows-correctness assertion: a
+	// sidecar-only isOwnerLive probe would wrongly report not-running here
+	// because Go's Windows Process.Signal(0) errors on a live PID.
+	lk, err := AcquireSupervisorLock(lockPath)
+	if err != nil {
+		t.Fatalf("acquire supervisor lock: %v", err)
+	}
+	if running, pid := SupervisorRunningUnderStateDir(dir); !running || pid != os.Getpid() {
+		t.Fatalf("supervisor lock held: got (running=%v, pid=%d), want (true, %d)", running, pid, os.Getpid())
+	}
+	lk.Release()
+
+	// (3) After release the kernel frees the flock → not running (a crashed or
+	// exited supervisor frees the lock; the NEXT start is a fresh process on the
+	// current binary, which is the safe state for a spec-bearing write).
+	if running, _ := SupervisorRunningUnderStateDir(dir); running {
+		t.Fatalf("after release: got running=true, want false")
+	}
+}
+
 func TestSupervisorLock_StaleReclaim(t *testing.T) {
 	dir := hardenedTempDir(t)
 	path := filepath.Join(dir, "supervisor.lock")

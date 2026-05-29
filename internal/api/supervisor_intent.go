@@ -291,6 +291,26 @@ func (f *SupervisorIntentFile) FindSupervisorDaemonByTaskName(taskName string) *
 	return nil
 }
 
+// HasRuntimeSpecRow reports whether any daemon row in f carries a non-nil
+// RuntimeSpec. A runtime_spec-bearing intent file is the §7.1 split-brain
+// hazard (bot PR #246 r2): an OLD supervisor binary's ReadSupervisorIntent uses
+// DisallowUnknownFields and rejects the new field, so any writer that emits such
+// rows must first ensure the running supervisor is this binary (or none is
+// running). The spec-bearing supervisor-intent write gate in InstallParsedManifest
+// uses this to scope the gate: legacy/global intents with no runtime_spec rows
+// are read fine by an old supervisor and are NOT gated.
+func (f *SupervisorIntentFile) HasRuntimeSpecRow() bool {
+	if f == nil {
+		return false
+	}
+	for i := range f.Daemons {
+		if f.Daemons[i].RuntimeSpec != nil {
+			return true
+		}
+	}
+	return false
+}
+
 // supervisorIntentLockSuffix is the gofrs/flock lock-leaf suffix for
 // supervisor-intent.json. It is exactly the `<path>.lock` form
 // WriteStateFileAtomic derives internally (state_file_helper.go:85), so a

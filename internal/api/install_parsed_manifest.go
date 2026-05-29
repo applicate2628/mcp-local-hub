@@ -236,6 +236,32 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 		return "", err
 	}
 
+	// §7.1 spec-bearing supervisor-intent write gate (bot PR #246 r2 P2).
+	// desiredIntent may carry runtime_spec rows (materializeSerenaRuntimeSpec).
+	// An ALREADY-RUNNING supervisor MAY be an OLD binary whose
+	// ReadSupervisorIntent uses DisallowUnknownFields: its watcher would reject a
+	// file carrying the new runtime_spec field, keep its stale in-memory intent,
+	// and leave split-brain (this new CLI believes the descriptor was
+	// re-materialized; the old supervisor never sees it). The only safe states
+	// are (a) no supervisor running — the NEXT supervisor start is THIS binary,
+	// which reads runtime_spec — or (b) the supervisor was cold-restarted onto
+	// this binary first. We refuse the spec-bearing write while a supervisor is
+	// live and point the operator at the existing cold-restart/upgrade flow. The
+	// cutover phase (design §9 Phase 3) replaces this refuse with an automatic
+	// drive of that flow; Phase 1 fails safe. Non-spec installs (no runtime_spec
+	// rows) are NOT gated — an old supervisor reads legacy/global rows fine. The
+	// check runs under the held supervisor-intent flock, immediately before the
+	// preflight + commit, so it is as close to the write as a separate-lock probe
+	// can be (the supervisor lock is a distinct primitive; a supervisor starting
+	// in the tiny remaining window would read the just-written intent on its own
+	// first pass, where a NEW binary is fine and an OLD binary starting fresh is
+	// an extreme edge this best-effort gate does not claim to close).
+	if desiredIntent.HasRuntimeSpecRow() {
+		if running, pid := SupervisorRunningUnderStateDir(stateDir); running {
+			return "", fmt.Errorf("InstallParsedManifest: refusing to write spec-bearing serena dynamic-pool descriptors (runtime_spec) for %q while a supervisor is running (pid %d): an older supervisor binary's intent watcher uses DisallowUnknownFields and would reject the new field, leaving split-brain. Cold-restart the supervisor onto this binary first via the upgrade flow (`mcphub install --upgrade`), then re-run the install (design §7.1)", m.Name, pid)
+		}
+	}
+
 	// 2. Pre-flight intent-write gate: dry-write to a temp path. No rollback
 	// push — this is a read-only-ish probe that leaves no committed side
 	// effect (the temp file is removed immediately). The probe targets a

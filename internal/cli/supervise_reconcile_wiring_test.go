@@ -24,6 +24,8 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -816,6 +818,22 @@ func readFileString(t *testing.T, path string) string {
 	return string(raw)
 }
 
+// readFileStringIfExists reads path and returns its contents, or "" when the
+// file does not exist. The supervisor event log file is created lazily on the
+// first Emit, so a test that asserts NO event was emitted must tolerate a
+// never-created log file rather than treating its absence as a failure.
+func readFileStringIfExists(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return ""
+	}
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(raw)
+}
+
 // serenaProxyArgs returns a canonical serena-proxy wrapper argv for the given
 // task name + port. Mirrors what api.BuildSupervisorDaemonsForSerena emits.
 func serenaProxyArgs(taskName string, port int) []string {
@@ -828,17 +846,18 @@ func serenaProxyArgs(taskName string, port int) []string {
 	}
 }
 
-// TestProductionSpawnFn_SkipsLegacyNilSpecSerenaProxy is the bot PR #246 P1
-// guard. A legacy serena-proxy descriptor (Args carry the `serena-proxy`
-// subcommand) whose RuntimeSpec is nil — a pre-redesign row left in
-// supervisor-intent.json before RuntimeSpec existed — must be SKIPPED by the
-// supervisor spawn path with a clear operator-actionable warn event, NOT exec'd
-// into a doomed serena-proxy that exits non-zero and churns through restart
-// backoff/quarantine. The proxy itself cannot make a nil-spec row work (no
-// manifest fallback — that re-introduces the embed-shadow defect this redesign
-// kills); the clean Phase-1 behavior is a clean skip + clear signal. SMOOTH
-// auto-re-materialization of such rows is the cutover phase's §7.1 upgrade gate.
-func TestProductionSpawnFn_SkipsLegacyNilSpecSerenaProxy(t *testing.T) {
+// TestReconcile_ExcludesLegacyNilSpecSerenaProxyFromDesiredSet is the bot
+// PR #246 r2 P2 guard. r1 expressed the legacy-nil-spec serena-proxy skip as
+// `return nil` INSIDE the spawn closure — but the production controller's
+// executeSideEffect treats a nil spawn error as SUCCESS, posts EvHealthOK, and
+// transitions the task StSpawning → StRunning, leaving a PHANTOM running daemon
+// (no process started) in supervisor state + IPC. r2 moves the skip into the
+// reconcile desired-set construction so the row is EXCLUDED before any EvStart /
+// spawn fires: it is never spawned, never marked running, never churns backoff.
+// This test drives Reconcile on the direct-spawn path (EventLoop nil → r.spawn
+// is the desired-set sink) and asserts the legacy row never reaches spawn while
+// the single warn event is emitted once at the exclusion point.
+func TestReconcile_ExcludesLegacyNilSpecSerenaProxyFromDesiredSet(t *testing.T) {
 	tmpHome := apitest.HardenedTempDir(t)
 	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
 	events, err := api.OpenSupervisorEventLog(eventsPath)
@@ -847,52 +866,104 @@ func TestProductionSpawnFn_SkipsLegacyNilSpecSerenaProxy(t *testing.T) {
 	}
 	defer events.Close()
 
-	tracker := NewDaemonRuntimeTracker()
-	spawnFn := makeProductionSpawnFn(events, tracker)
-
 	const legacyTask = `\mcp-local-hub-serena-deadbeef`
-	descriptor := api.SupervisorDaemon{
-		TaskName: legacyTask,
-		Server:   "serena",
-		Daemon:   "deadbeef",
-		// A real-looking mcphub command path, but RuntimeSpec is nil (legacy
-		// row). If the skip is missing, the spawn would exec `mcphub daemon
-		// serena-proxy ...` which would then fail loud in the proxy.
-		Command:     filepath.Join(tmpHome, "mcphub-does-not-exist"),
-		Args:        serenaProxyArgs(legacyTask, 9121),
-		RuntimeSpec: nil, // pre-redesign / stale row
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{
+			{
+				TaskName:    legacyTask,
+				Server:      "serena",
+				Daemon:      "deadbeef",
+				Command:     "fake-noop",
+				Args:        serenaProxyArgs(legacyTask, 9121),
+				RuntimeSpec: nil, // pre-redesign / stale row
+			},
+		},
 	}
 
-	// The skip is a deliberate no-op, NOT an error: returning an error would
-	// drive the controller's errSpawnPreChild → backoff retry, the exact churn
-	// this guard prevents.
-	if err := spawnFn(descriptor); err != nil {
-		t.Fatalf("skip of a legacy nil-spec serena-proxy row must be a clean no-op (nil error), got: %v", err)
-	}
+	spawned := []string{}
+	r := NewReconciler(
+		func(d api.SupervisorDaemon) error { spawned = append(spawned, d.TaskName); return nil },
+		func(d api.SupervisorDaemon) error { return nil },
+	)
+	r.Events = events
+	r.Reconcile(intent, &api.DaemonIntentFile{}, map[string]bool{}, time.Now().UTC())
 
+	if len(spawned) != 0 {
+		t.Fatalf("legacy nil-spec serena-proxy row must be EXCLUDED from the desired set (never reach spawn); got spawned=%v", spawned)
+	}
 	logStr := readFileString(t, eventsPath)
 	if !strings.Contains(logStr, `"event":"legacy-serena-descriptor-skipped"`) {
-		t.Fatalf("expected legacy-serena-descriptor-skipped event in audit log:\n%s", logStr)
+		t.Fatalf("exclusion must emit a legacy-serena-descriptor-skipped warn event:\n%s", logStr)
 	}
 	if !strings.Contains(logStr, legacyTask) {
-		t.Fatalf("skip event must name the task %q:\n%s", legacyTask, logStr)
+		t.Fatalf("skip event must name the excluded task %q:\n%s", legacyTask, logStr)
 	}
-	// MUST NOT have attempted a spawn: no daemon-spawn-failed, no exec.
-	if strings.Contains(logStr, `"event":"daemon-spawn-failed"`) {
-		t.Fatalf("legacy nil-spec serena-proxy must be skipped, NOT exec'd (daemon-spawn-failed present):\n%s", logStr)
-	}
-	// The tracker must NOT be marked spawn-failed/backoff for a skipped row.
-	if entry, ok := tracker.Get(legacyTask); ok && (entry.State == daemonRuntimeStateBackoff || entry.LastError != "") {
-		t.Fatalf("skipped row must not enter backoff/spawn-failed tracker state; got %+v", entry)
+	// The warn must fire exactly ONCE per reconcile pass for the row (it is the
+	// desired-set construction point, not a per-spawn loop).
+	if n := strings.Count(logStr, `"event":"legacy-serena-descriptor-skipped"`); n != 1 {
+		t.Fatalf("legacy-serena-descriptor-skipped must be emitted exactly once at the exclusion point; got %d:\n%s", n, logStr)
 	}
 }
 
-// TestProductionSpawnFn_SpecBearingSerenaProxy_NotSkipped is the positive
-// control for the P1 skip: a serena-proxy descriptor WITH a RuntimeSpec is NOT
-// skipped — it is exec'd normally (here with a nonexistent command so the exec
-// fails and emits daemon-spawn-failed, proving the spawn was actually
-// attempted). The skip is scoped to nil-RuntimeSpec serena-proxy rows only.
-func TestProductionSpawnFn_SpecBearingSerenaProxy_NotSkipped(t *testing.T) {
+// TestReconcile_ExcludedLegacyRow_PostsNoEvStart proves the exclusion happens
+// at the EventLoop path too: when an EventLoop is wired (the production A.2
+// path), the excluded legacy row must NOT produce an EvStart event. EvStart is
+// the sole source of the StSpawning → spawn → EvHealthOK → StRunning chain that
+// would mark the phantom daemon running; excluding it here is the actual fix.
+func TestReconcile_ExcludedLegacyRow_PostsNoEvStart(t *testing.T) {
+	const legacyTask = `\mcp-local-hub-serena-deadbeef`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{
+			{
+				TaskName:    legacyTask,
+				Server:      "serena",
+				Daemon:      "deadbeef",
+				Command:     "fake-noop",
+				Args:        serenaProxyArgs(legacyTask, 9121),
+				RuntimeSpec: nil,
+			},
+		},
+	}
+
+	loop := api.NewEventLoop(16)
+	posted := []api.LoopEvent{}
+	loop.RegisterHandler(func(ev api.LoopEvent) { posted = append(posted, ev) })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go loop.Run(ctx)
+
+	r := NewReconciler(
+		func(d api.SupervisorDaemon) error {
+			t.Fatalf("EventLoop path must not call spawn directly")
+			return nil
+		},
+		func(d api.SupervisorDaemon) error { return nil },
+	)
+	r.EventLoop = loop
+	r.Reconcile(intent, &api.DaemonIntentFile{}, map[string]bool{}, time.Now().UTC())
+
+	// Allow the loop to drain anything that WAS posted (none should be EvStart).
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if len(posted) > 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	for _, ev := range posted {
+		if ev.Kind == api.EvStart && ev.TaskName == legacyTask {
+			t.Fatalf("excluded legacy nil-spec serena-proxy row must NOT post EvStart; got %+v", posted)
+		}
+	}
+}
+
+// TestReconcile_SpecBearingSerenaProxy_StaysInDesiredSet is the positive
+// control: a serena-proxy row WITH a RuntimeSpec is NOT excluded — it reaches
+// the spawn sink normally. The exclusion is scoped to nil-RuntimeSpec
+// serena-proxy rows only.
+func TestReconcile_SpecBearingSerenaProxy_StaysInDesiredSet(t *testing.T) {
 	tmpHome := apitest.HardenedTempDir(t)
 	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
 	events, err := api.OpenSupervisorEventLog(eventsPath)
@@ -902,42 +973,51 @@ func TestProductionSpawnFn_SpecBearingSerenaProxy_NotSkipped(t *testing.T) {
 	defer events.Close()
 
 	const task = `\mcp-local-hub-serena-cafef00d`
-	descriptor := api.SupervisorDaemon{
-		TaskName: task,
-		Server:   "serena",
-		Daemon:   "cafef00d",
-		Command:  filepath.Join(tmpHome, "mcphub-does-not-exist"),
-		Args:     serenaProxyArgs(task, 9121),
-		RuntimeSpec: &api.DaemonRuntimeSpec{
-			SpecVersion:   api.DaemonRuntimeSpecVersion,
-			ChildCommand:  "uvx",
-			ChildArgs:     []string{"serena", "--project", `C:\work\alpha`, "--context", "codex-placeholder"},
-			UpstreamPort:  19121,
-			ExternalPort:  9121,
-			WorkspacePath: `C:\work\alpha`,
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{
+			{
+				TaskName: task,
+				Server:   "serena",
+				Daemon:   "cafef00d",
+				Command:  "fake-noop",
+				Args:     serenaProxyArgs(task, 9121),
+				RuntimeSpec: &api.DaemonRuntimeSpec{
+					SpecVersion:   api.DaemonRuntimeSpecVersion,
+					ChildCommand:  "uvx",
+					ChildArgs:     []string{"serena", "--project", `C:\work\alpha`, "--context", "codex-placeholder"},
+					UpstreamPort:  19121,
+					ExternalPort:  9121,
+					WorkspacePath: `C:\work\alpha`,
+				},
+			},
 		},
 	}
-	spawnFn := makeProductionSpawnFn(events, NewDaemonRuntimeTracker())
-	if err := spawnFn(descriptor); err == nil {
-		t.Fatal("spec-bearing serena-proxy with a nonexistent command must attempt the spawn and return an error, got nil (was it wrongly skipped?)")
+
+	spawned := []string{}
+	r := NewReconciler(
+		func(d api.SupervisorDaemon) error { spawned = append(spawned, d.TaskName); return nil },
+		func(d api.SupervisorDaemon) error { return nil },
+	)
+	r.Events = events
+	r.Reconcile(intent, &api.DaemonIntentFile{}, map[string]bool{}, time.Now().UTC())
+
+	if len(spawned) != 1 || spawned[0] != task {
+		t.Fatalf("spec-bearing serena-proxy must stay in the desired set and reach spawn; got %v", spawned)
 	}
-	logStr := readFileString(t, eventsPath)
+	// No warn event should fire for a spec-bearing row; the log file may not
+	// even exist (no Emit ever happened), so tolerate a missing file.
+	logStr := readFileStringIfExists(t, eventsPath)
 	if strings.Contains(logStr, `"event":"legacy-serena-descriptor-skipped"`) {
-		t.Fatalf("a spec-bearing serena-proxy row must NOT be skipped:\n%s", logStr)
-	}
-	if !strings.Contains(logStr, `"event":"daemon-spawn-failed"`) {
-		t.Fatalf("spec-bearing serena-proxy spawn was attempted; expected daemon-spawn-failed on the bad command:\n%s", logStr)
+		t.Fatalf("a spec-bearing serena-proxy row must NOT be excluded:\n%s", logStr)
 	}
 }
 
-// TestProductionSpawnFn_NilSpecGlobalDaemon_NotSkipped proves the skip is
+// TestReconcile_NilSpecGlobalDaemon_StaysInDesiredSet proves the exclusion is
 // scoped to serena-proxy rows ONLY, not nil-RuntimeSpec rows in general. A
-// legacy/global daemon row (Args do NOT carry `serena-proxy`) with a nil
-// RuntimeSpec must still be spawned (RuntimeSpec is legitimately nil for global
-// daemons — the supervisor spawns them via the generic `mcphub daemon --server
-// --daemon` path). Here the command is nonexistent so the spawn attempt fails
-// loud — proving it was NOT skipped.
-func TestProductionSpawnFn_NilSpecGlobalDaemon_NotSkipped(t *testing.T) {
+// global daemon (Args do NOT carry serena-proxy) with a nil RuntimeSpec is
+// legitimately nil and must stay in the desired set.
+func TestReconcile_NilSpecGlobalDaemon_StaysInDesiredSet(t *testing.T) {
 	tmpHome := apitest.HardenedTempDir(t)
 	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
 	events, err := api.OpenSupervisorEventLog(eventsPath)
@@ -946,24 +1026,34 @@ func TestProductionSpawnFn_NilSpecGlobalDaemon_NotSkipped(t *testing.T) {
 	}
 	defer events.Close()
 
-	descriptor := api.SupervisorDaemon{
-		TaskName:    reconcileWiringTestTaskName,
-		Server:      "memory",
-		Daemon:      "default",
-		Command:     filepath.Join(tmpHome, "mcphub-does-not-exist"),
-		Args:        []string{"daemon", "--server", "memory", "--daemon", "default"}, // NOT serena-proxy
-		RuntimeSpec: nil,                                                              // legitimately nil for a global daemon
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{
+			{
+				TaskName:    reconcileWiringTestTaskName,
+				Server:      "memory",
+				Daemon:      "default",
+				Command:     "fake-noop",
+				Args:        []string{"daemon", "--server", "memory", "--daemon", "default"}, // NOT serena-proxy
+				RuntimeSpec: nil,                                                             // legitimately nil for a global daemon
+			},
+		},
 	}
-	spawnFn := makeProductionSpawnFn(events, NewDaemonRuntimeTracker())
-	if err := spawnFn(descriptor); err == nil {
-		t.Fatal("nil-spec GLOBAL daemon must still be spawned (and fail on the bad command), got nil error (was it wrongly skipped?)")
+
+	spawned := []string{}
+	r := NewReconciler(
+		func(d api.SupervisorDaemon) error { spawned = append(spawned, d.TaskName); return nil },
+		func(d api.SupervisorDaemon) error { return nil },
+	)
+	r.Events = events
+	r.Reconcile(intent, &api.DaemonIntentFile{}, map[string]bool{}, time.Now().UTC())
+
+	if len(spawned) != 1 || spawned[0] != reconcileWiringTestTaskName {
+		t.Fatalf("nil-spec GLOBAL daemon must stay in the desired set (exclusion is serena-proxy-scoped); got %v", spawned)
 	}
-	logStr := readFileString(t, eventsPath)
+	logStr := readFileStringIfExists(t, eventsPath)
 	if strings.Contains(logStr, `"event":"legacy-serena-descriptor-skipped"`) {
-		t.Fatalf("a nil-spec GLOBAL daemon must NOT be skipped (skip is serena-proxy-scoped):\n%s", logStr)
-	}
-	if !strings.Contains(logStr, `"event":"daemon-spawn-failed"`) {
-		t.Fatalf("nil-spec global daemon spawn was attempted; expected daemon-spawn-failed:\n%s", logStr)
+		t.Fatalf("a nil-spec GLOBAL daemon must NOT be excluded:\n%s", logStr)
 	}
 }
 
@@ -1626,4 +1716,36 @@ func copyCurrentTestBinaryAsReconcileMcphub(t *testing.T) string {
 		t.Fatalf("close helper binary: %v", err)
 	}
 	return dstPath
+}
+
+// TestResolveSpawnIntentChannelPath is the bot PR #246 r2 P3 guard. The spawn fn
+// must hand a serena-proxy the supervisor's ALREADY-RESOLVED intent path (the
+// sibling of statePath, the dir the supervisor reads its own intent from), NOT a
+// fresh api.DefaultSupervisorIntentPath() resolution — which re-runs
+// DaemonStateDir and diverges under MCPHUB_STATE_DIR_OVERRIDE /
+// SetDaemonStateRootForTest / a POSIX child-overlaid HOME, handing the proxy a
+// path where its own descriptor does not exist.
+func TestResolveSpawnIntentChannelPath(t *testing.T) {
+	// statePath set -> intent path is its sibling supervisor-intent.json,
+	// regardless of any ambient DaemonStateDir override.
+	base := t.TempDir()
+	statePath := filepath.Join(base, "supervisor-state.json")
+	got, err := resolveSpawnIntentChannelPath(statePath)
+	if err != nil {
+		t.Fatalf("resolveSpawnIntentChannelPath(%q) error = %v", statePath, err)
+	}
+	if want := filepath.Join(base, "supervisor-intent.json"); got != want {
+		t.Fatalf("resolved intent path = %q, want %q (must be the sibling of statePath, not DefaultSupervisorIntentPath)", got, want)
+	}
+
+	// statePath empty (the makeProductionSpawnFn test/manual wrapper) -> fall
+	// back to DefaultSupervisorIntentPath (the pre-r2 behavior).
+	def, derr := api.DefaultSupervisorIntentPath()
+	gotEmpty, eerr := resolveSpawnIntentChannelPath("")
+	if (derr == nil) != (eerr == nil) {
+		t.Fatalf("empty-statePath fallback error mismatch: default err=%v, helper err=%v", derr, eerr)
+	}
+	if derr == nil && gotEmpty != def {
+		t.Fatalf("empty statePath must fall back to DefaultSupervisorIntentPath %q, got %q", def, gotEmpty)
+	}
 }
