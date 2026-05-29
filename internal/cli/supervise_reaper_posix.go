@@ -376,8 +376,7 @@ func cmdlineHasToken(cmdline, token string) bool {
 //   - workspace-weekly-refresh → `mcphub workspace-weekly-refresh`
 //     (internal/migration/journal.go defaultMaintenanceTimers)
 //   - server-weekly-refresh    → `mcphub restart --server <name>`
-//     (internal/api/install.go weekly-refresh task Args;
-//     internal/api/install_parsed_manifest.go serverWeeklyRefreshTimer)
+//     (internal/api/install.go weekly-refresh task Args)
 func maintenanceCmdlineSignature(kind string) ([]string, bool) {
 	switch kind {
 	case "workspace-weekly-refresh":

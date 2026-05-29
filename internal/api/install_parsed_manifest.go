@@ -1,10 +1,18 @@
 // Package api - Phase D.3 in-process install seam for pre-parsed manifests.
 //
-// InstallParsedManifest is the workspace-scoped sister to (*API).Install.
-// Where Install loads a manifest by name and refuses workspace-scoped
-// kinds, InstallParsedManifest accepts an already-parsed manifest (the
-// caller owns parsing) and BYPASSES refuseWorkspaceScopedInstall because
-// workspace-scoped dynamic-pool manifests are its intended input.
+// InstallParsedManifest is the WORKSPACE-SCOPED-ONLY sister to
+// (*API).Install. Where Install loads a manifest by name and refuses
+// workspace-scoped kinds, InstallParsedManifest accepts an already-parsed
+// manifest (the caller owns parsing) and is restricted to
+// kind: workspace-scoped manifests: it BYPASSES
+// refuseWorkspaceScopedInstall (workspace-scoped dynamic-pool manifests
+// are its intended input) but REJECTS global and any other non-workspace-
+// scoped kind up front. Global manifests go through (*API).Install, which
+// owns the per-daemon scheduler-task + immediate-start path this seam
+// deliberately does not. The seam never starts daemons in-process — its
+// per-workspace serena daemons start via the supervisor reconciler once it
+// observes the new intent — so it always defers the start (there is no
+// StartAfterWrite knob; the deferred-start contract is structural).
 //
 // It shares the materialization core (audit-first emission +
 // executeInstallTo) with Install via the unexported installPlan helper,
@@ -29,6 +37,13 @@ import (
 )
 
 // InstallParsedManifestOpts controls an InstallParsedManifest invocation.
+//
+// There is no StartAfterWrite field: this seam is workspace-scoped-only
+// (a global manifest is rejected up front) and never starts daemons
+// in-process. The per-workspace serena daemons start via the supervisor
+// reconciler on its next tick once it observes the new intent, so the
+// seam always passes StartTasks=false into the materialization core. The
+// deferred-start contract is structural, not a runtime knob.
 type InstallParsedManifestOpts struct {
 	Writer            io.Writer
 	ClientsInclude    []string
@@ -38,16 +53,6 @@ type InstallParsedManifestOpts struct {
 	// / E.2 auto-register).
 	Workspaces []WorkspaceEntry
 	DryRun     bool
-	// StartAfterWrite gates Pass B (immediate daemon start). The zero value
-	// (false) means scheduler tasks are created and supervisor-intent.json
-	// is written, but the daemons are NOT started here — the supervisor
-	// reconciler starts them on its next tick once it observes the new
-	// intent. That deferred behavior is the intended default for
-	// workspace-scoped installs through this seam (api.Install does not use
-	// this field; it drives executeInstallTo's Pass B directly). Set true
-	// only when a caller needs the daemons started in-process before this
-	// returns.
-	StartAfterWrite bool
 }
 
 // InstallParsedManifest installs a pre-parsed manifest in-process and
@@ -73,13 +78,17 @@ type InstallParsedManifestOpts struct {
 //  3. BuildPlanWithOpts on the parsed manifest.
 //  4. installPlan -> executeInstallTo: scheduler-task creation + per-client
 //     config writes, then the supervisor-intent write as the intermediate
-//     step INSIDE executeInstallTo's rollback scope. StartAfterWrite gates
-//     Pass B (immediate daemon start). On dry-run, installPlan prints the
-//     plan and returns; this function then returns ("", nil) because nothing
-//     was written and there is no intent path for the caller to dereference.
+//     step INSIDE executeInstallTo's rollback scope. Pass B (immediate
+//     daemon start) is always gated OFF — the seam defers every start to the
+//     supervisor reconciler — so installPlan receives StartTasks=false. On
+//     dry-run, installPlan prints the plan and returns; this function then
+//     returns ("", nil) because nothing was written and there is no intent
+//     path for the caller to dereference.
 //
-// On any sub-failure inside step 4, the shared rollback stack runs and the
-// function returns the error with every side effect undone.
+// The manifest MUST be kind: workspace-scoped (a global or other kind is
+// rejected up front — global manifests go through (*API).Install). On any
+// sub-failure inside step 4, the shared rollback stack runs and the function
+// returns the error with every side effect undone.
 func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifest, opts InstallParsedManifestOpts) (intentPath string, err error) {
 	w := opts.Writer
 	if w == nil {
@@ -93,17 +102,19 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 		return "", fmt.Errorf("preflight: %w", err)
 	}
 
-	// 1a. FIX 4 — fail-loud on StartAfterWrite for a workspace-scoped fan-out
-	// install. A workspace-scoped DaemonTemplate manifest with a non-empty
-	// workspaces snapshot produces ZERO scheduler tasks from BuildPlanWithOpts,
-	// so executeInstallTo's Pass B would iterate an empty createdTasks set and
-	// start NO daemon — a silent no-op. The per-workspace serena daemons start
-	// via the supervisor RECONCILER once it observes the new intent, NOT via
-	// this seam's Pass B. Honoring StartAfterWrite here is therefore impossible;
-	// returning a clear error BEFORE any mutation beats a silent no-start (per
-	// the operational-contract failure-transparency discipline).
-	if m.DaemonTemplate != nil && len(opts.Workspaces) > 0 && opts.StartAfterWrite {
-		return "", fmt.Errorf("StartAfterWrite is not supported for workspace-scoped fan-out installs; per-workspace daemons start via the supervisor reconciler after the intent write — call with StartAfterWrite=false")
+	// 1a. Workspace-scoped-only contract. This seam materializes
+	// supervisor-intent daemon rows for kind: workspace-scoped manifests and
+	// defers every daemon start to the supervisor reconciler. A global (or any
+	// other non-workspace-scoped) manifest belongs to (*API).Install, which
+	// owns the per-daemon scheduler-task + immediate-start path. Rejecting it
+	// here — before the dry-run short-circuit and before any mutation — keeps a
+	// non-workspace-scoped manifest from silently taking a deferred-start path
+	// that would never start its daemons. The reject also moots the per-server
+	// weekly-cadence machinery a global manifest would otherwise need from this
+	// seam (FIX B): only workspace-scoped serena flows reach it, and serena
+	// sets weekly_refresh=false.
+	if m.Kind != config.KindWorkspaceScoped {
+		return "", fmt.Errorf("InstallParsedManifest only installs kind=%q manifests (manifest %q is kind=%q); install global manifests through (*API).Install", config.KindWorkspaceScoped, m.Name, m.Kind)
 	}
 
 	// 1b. Dry-run short-circuit — runs BEFORE the state-dir resolve, the
@@ -127,6 +138,16 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 		if err := a.installPlan(ctx, m, plan, installPlanOpts{Writer: w, DryRun: true}); err != nil {
 			return "", err
 		}
+		// The legacy plan above carries ZERO scheduler tasks for a
+		// DaemonTemplate manifest, so for the MAIN fan-out case it reports no
+		// planned changes. Print a preview of the per-workspace
+		// supervisor-intent daemon rows the real (non-dry) path would write —
+		// one line per workspace. This preview MUST stay corrupt-safe: it does
+		// NOT read/parse the existing supervisor-intent.json, acquires no
+		// flock, writes no file, and emits no supervisor-events.log entry. The
+		// stale label reuses the SAME pure liveness predicate the non-dry path
+		// uses (workspacePathStale) but emits nothing here — label only.
+		previewWorkspaceFanOut(w, m, opts.Workspaces)
 		return "", nil
 	}
 
@@ -227,10 +248,13 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	// callers (api.Install et al.) pass non-DaemonTemplate manifests and leave
 	// SkipSchedulerPrune false, so their reconcile behavior is unchanged.
 	if err := a.installPlan(ctx, m, plan, installPlanOpts{
-		Writer:             w,
-		DaemonFilter:       "",
-		DryRun:             false, // dry-run short-circuited above; this path always mutates
-		StartTasks:         opts.StartAfterWrite,
+		Writer:       w,
+		DaemonFilter: "",
+		DryRun:       false, // dry-run short-circuited above; this path always mutates
+		// StartTasks is always false: this seam defers every daemon start to
+		// the supervisor reconciler (workspace-scoped-only contract). Pass B
+		// never runs here.
+		StartTasks:         false,
 		Intermediate:       intermediate,
 		SkipSchedulerPrune: m.DaemonTemplate != nil,
 		AuditTaskNames:     fanOutAuditTaskNames(m, desiredIntent),
@@ -257,12 +281,22 @@ const supervisorIntentFileLeaf = "supervisor-intent.json"
 //     non-empty workspaces snapshot -> the D.2 per-workspace serena fan-out
 //     (one SupervisorDaemon per registered serena workspace), keyed by the
 //     canonical SerenaTaskNameForWorkspace task name.
-//   - Otherwise (global manifest, OR a workspace-scoped manifest with no
-//     registered workspaces) -> supervisorDaemonsFromPlan(m): the static
-//     per-daemon descriptors (empty for a template-only manifest with no
-//     workspaces). This keeps the api.Install path and the
+//   - Otherwise (a workspace-scoped manifest with no registered workspaces)
+//     -> supervisorDaemonsFromPlan(m): the static per-daemon descriptors
+//     (empty for a template-only manifest with no workspaces). This keeps the
 //     template-only-no-workspaces path byte-identical to the pre-D.3b
 //     behavior.
+//
+// MaintenanceTimers are carried through from the prior intent VERBATIM (this
+// server's timers AND every sibling's). This seam is workspace-scoped-only,
+// and serena sets weekly_refresh=false, so it never materializes a
+// per-server weekly timer of its own. Preserving the prior set untouched
+// means an operator's deliberately-disabled timer (Enabled=&false) is never
+// dropped and re-added — it survives every re-install of an unrelated
+// workspace-scoped manifest. Per-server weekly-cadence machinery is out of
+// scope for this foundation seam (it would need a maintenance_fired_at schema
+// keyed by Server, not Kind, in the already-merged supervisor maintenance
+// scheduler).
 func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath string, workspaces []WorkspaceEntry, w io.Writer) (merged, prior *SupervisorIntentFile, priorExisted bool, err error) {
 	prior, existed, err := readSupervisorIntentForMerge(intentPath)
 	if err != nil {
@@ -279,81 +313,18 @@ func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath s
 	kept = append(kept, serenaOrPlanDaemons(m, workspaces, w)...)
 
 	merged = &SupervisorIntentFile{
-		Version:           1,
-		UpdatedAt:         time.Now().UTC().Format(time.RFC3339Nano),
-		Daemons:           kept,
-		MaintenanceTimers: mergeServerMaintenanceTimers(m, prior.MaintenanceTimers),
+		Version:   1,
+		UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Daemons:   kept,
+		// Preserve the prior maintenance-timer set untouched (this server's
+		// AND siblings'). See the function doc: workspace-scoped-only seam,
+		// serena has weekly_refresh=false, so there is no per-server timer to
+		// materialize here and an operator's Enabled=&false timer must survive.
+		MaintenanceTimers: prior.MaintenanceTimers,
 		StrictMode:        prior.StrictMode,
 	}
 	return merged, prior, existed, nil
 }
-
-// mergeServerMaintenanceTimers applies the same replace-this-server's-rows /
-// preserve-other-servers' discipline used for daemon rows, but to the
-// maintenance-timer set. It drops every prior timer that belongs to m.Name
-// (keyed by the timer's Server field) and re-derives m's timer from the
-// manifest, so a re-install never duplicates m's weekly timer and a flipped
-// `weekly_refresh: false` drops it. Sibling servers' timers pass through
-// untouched.
-//
-// Weekly-timer materialization: when the manifest enables weekly refresh,
-// BuildPlanWithOpts creates the `mcp-local-hub-<server>-weekly-refresh`
-// scheduler task; this materializes the matching supervisor-intent
-// MaintenanceTimer so supervisor-intent consumers (the maintenance scheduler)
-// can own/preserve the weekly job. The timer's Command/Args mirror the
-// scheduler task at install.go's BuildPlanWithOpts weekly-refresh block
-// (`mcphub restart --server <server>`), because the maintenance spawner execs
-// the timer via exec.Command(t.Command, t.Args...) verbatim.
-func mergeServerMaintenanceTimers(m *config.ServerManifest, prior []MaintenanceTimer) []MaintenanceTimer {
-	out := make([]MaintenanceTimer, 0, len(prior)+1)
-	for _, t := range prior {
-		if t.Server == m.Name {
-			continue // replaced below
-		}
-		out = append(out, t)
-	}
-	if t, ok := serverWeeklyRefreshTimer(m); ok {
-		out = append(out, t)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-// serverWeeklyRefreshTimer returns the server-weekly-refresh MaintenanceTimer
-// for m when m enables weekly refresh, matching the scheduler task
-// BuildPlanWithOpts builds for a full install. Returns ok=false when m does not
-// enable weekly refresh (no timer to materialize). Workspace-scoped
-// (DaemonTemplate) manifests do not set WeeklyRefresh, so they take the
-// ok=false branch and never materialize a timer.
-func serverWeeklyRefreshTimer(m *config.ServerManifest) (MaintenanceTimer, bool) {
-	if !m.WeeklyRefresh {
-		return MaintenanceTimer{}, false
-	}
-	// canonicalMcphubPath only fails when `mcphub setup` has not run, which the
-	// install preflight already surfaced upstream; fall back to the bare name so
-	// the timer stays well-formed (the maintenance spawner resolves it on PATH),
-	// matching supervisorDaemonsFromPlan's fallback posture.
-	command, perr := canonicalMcphubPath()
-	if perr != nil {
-		command = mcphubShortName
-	}
-	bare := "mcp-local-hub-" + m.Name + "-weekly-refresh"
-	return MaintenanceTimer{
-		Name:    canonicalIntentTaskKey(bare),
-		Kind:    maintenanceKindServerWeeklyRefresh,
-		Server:  m.Name,
-		Command: command,
-		Args:    []string{"restart", "--server", m.Name},
-	}, true
-}
-
-// maintenanceKindServerWeeklyRefresh is the MaintenanceTimer.Kind the
-// supervisor maintenance scheduler recognizes for a per-server weekly restart
-// (internal/cli/supervise_maintenance.go: the weekly-cadence evaluator accepts
-// "workspace-weekly-refresh" and "server-weekly-refresh").
-const maintenanceKindServerWeeklyRefresh = "server-weekly-refresh"
 
 // fanOutAuditTaskNames returns the per-workspace task names the pre-mutation
 // audit must fail-close on for a workspace-scoped fan-out install, derived from
@@ -425,38 +396,86 @@ func serenaOrPlanDaemons(m *config.ServerManifest, workspaces []WorkspaceEntry, 
 	return supervisorDaemonsFromPlan(m)
 }
 
-// filterExistingWorkspaceRows returns the subset of workspaces whose
-// WorkspacePath still resolves to an existing directory entry on disk. A row
-// whose path is absent (deleted / moved workspace) is dropped and a warn is
-// emitted to w AND to supervisor-events.log (best-effort) so the skipped row
-// is operator-visible rather than silently pruned. A row with an empty path is
-// passed through unchanged — the fan-out helper itself skips empty-path rows,
-// and statting "" would spuriously report not-exist.
+// workspacePathStale reports whether a workspace path is stale (deleted /
+// moved) for the purpose of dropping its daemon row before the fan-out. It is
+// a PURE predicate: it does an os.Stat and classifies the result, with no
+// logging, no event emission, and no other side effect. The two call sites —
+// filterExistingWorkspaceRows (non-dry path, which emits the warn) and the
+// dry-run preview (label only) — share this one liveness rule so they can
+// never diverge.
+//
+// Classification:
+//   - empty path -> NOT stale (the fan-out helper itself skips empty-path
+//     rows, and statting "" would spuriously report not-exist).
+//   - os.Stat IsNotExist -> stale (the directory entry is gone).
+//   - any other stat error (permission denied, I/O error) -> NOT stale: a
+//     transient stat failure must not silently drop a live workspace; the
+//     supervisor surfaces a real spawn failure if the path is genuinely
+//     unusable.
 //
 // os.Stat (not os.Lstat) is intentional: a workspace reachable only through a
 // symlinked directory is still a live workspace; we care whether the target
 // resolves, not whether the entry itself is a symlink.
+func workspacePathStale(path string) bool {
+	if path == "" {
+		return false
+	}
+	if _, statErr := os.Stat(path); statErr != nil && os.IsNotExist(statErr) {
+		return true
+	}
+	return false
+}
+
+// filterExistingWorkspaceRows returns the subset of workspaces whose
+// WorkspacePath is not stale per workspacePathStale. A dropped row (stale
+// path) gets a warn emitted to w AND to supervisor-events.log (best-effort)
+// so the skipped row is operator-visible rather than silently pruned.
 func filterExistingWorkspaceRows(server string, workspaces []WorkspaceEntry, w io.Writer) []WorkspaceEntry {
 	live := make([]WorkspaceEntry, 0, len(workspaces))
 	for _, ws := range workspaces {
-		if ws.WorkspacePath == "" {
-			live = append(live, ws)
-			continue
-		}
-		if _, statErr := os.Stat(ws.WorkspacePath); statErr != nil && os.IsNotExist(statErr) {
+		if workspacePathStale(ws.WorkspacePath) {
 			if w != nil {
 				fmt.Fprintf(w, "⚠ Skipping stale workspace %q (path no longer exists): %s daemon row dropped from supervisor-intent\n", ws.WorkspacePath, server)
 			}
 			emitStaleWorkspaceSkippedEvent(server, ws.WorkspacePath)
 			continue
 		}
-		// A non-IsNotExist stat error (permission denied, I/O error) is NOT a
-		// stale-path signal — keep the row so a transient stat failure does
-		// not silently drop a live workspace. The supervisor will surface a
-		// real spawn failure if the path is genuinely unusable.
 		live = append(live, ws)
 	}
 	return live
+}
+
+// previewWorkspaceFanOut prints, on a DRY RUN, a one-line preview per
+// workspace of the per-workspace supervisor-intent daemon rows the real
+// (non-dry) path would write for a DaemonTemplate manifest. The legacy
+// BuildPlanWithOpts plan carries zero scheduler tasks for such a manifest, so
+// without this preview a dry run of the main fan-out case reports no planned
+// changes.
+//
+// It is intentionally side-effect-free beyond writing to w: it does NOT read
+// or parse the existing supervisor-intent.json, acquires no flock, writes no
+// file, and emits NO supervisor-events.log entry. Stale rows (path gone) are
+// labelled via the same pure workspacePathStale predicate the non-dry path
+// uses, but here the label is print-only — no warn event is emitted (the
+// real install path owns event emission).
+//
+// No-op unless the manifest is a DaemonTemplate manifest with at least one
+// workspace — the same condition under which the real path fans out.
+func previewWorkspaceFanOut(w io.Writer, m *config.ServerManifest, workspaces []WorkspaceEntry) {
+	if m.DaemonTemplate == nil || len(workspaces) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "\nSupervisor-intent daemon rows to write for server %q (%d workspace(s)):\n", m.Name, len(workspaces))
+	for _, ws := range workspaces {
+		if ws.WorkspacePath == "" {
+			continue
+		}
+		label := ""
+		if workspacePathStale(ws.WorkspacePath) {
+			label = "  [stale: path no longer exists — would be skipped]"
+		}
+		fmt.Fprintf(w, "    • %s  ->  %s%s\n", SerenaTaskNameForWorkspace(ws.WorkspacePath), ws.WorkspacePath, label)
+	}
 }
 
 // emitStaleWorkspaceSkippedEvent records a best-effort warn to

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -182,66 +183,71 @@ func serenaTemplateManifest() *config.ServerManifest {
 	}
 }
 
-// TestInstallParsedManifest_StartAfterWriteTrue_PreservesLegacyBehavior is
-// the regression guard: an explicit StartAfterWrite=true must drive Pass B
-// so logon-triggered tasks start in-process. Uses a global manifest
-// (which has logon tasks) so the Pass-B Run is observable.
-func TestInstallParsedManifest_StartAfterWriteTrue_PreservesLegacyBehavior(t *testing.T) {
-	daemonIntentTestHelper(t)
+// TestInstallParsedManifest_RejectsGlobalManifest is the FIX-A guard: the
+// seam is workspace-scoped-only, so a kind: global manifest is rejected up
+// front (it belongs to (*API).Install). The reject MUST happen before any
+// mutation — no supervisor-intent.json written and no scheduler Create/Run.
+func TestInstallParsedManifest_RejectsGlobalManifest(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
 	preparePreflightBinaryChecks(t)
 	f := newInstallFakeScheduler()
 	installFakeScheduler(t, f)
 
-	m := globalTwoDaemonManifest()
+	m := globalTwoDaemonManifest() // Kind: KindGlobal
 	a := NewAPI()
 	var buf bytes.Buffer
 	intentPath, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
-		Writer:          &buf,
-		StartAfterWrite: true,
+		Writer: &buf,
 	})
-	if err != nil {
-		t.Fatalf("InstallParsedManifest: %v", err)
+	if err == nil {
+		t.Fatalf("InstallParsedManifest(global): want error, got nil (intentPath=%q)", intentPath)
 	}
-	if intentPath == "" {
-		t.Fatal("InstallParsedManifest returned empty intent path")
+	if !strings.Contains(err.Error(), "workspace-scoped") || !strings.Contains(err.Error(), m.Name) {
+		t.Errorf("error = %q, want it to name the workspace-scoped-only contract and the manifest %q", err.Error(), m.Name)
 	}
-	if f.createCount != 3 {
-		t.Errorf("Create calls = %d, want 3", f.createCount)
+	// No mutation: no committed intent, no scheduler create/run.
+	committed := filepath.Join(stateDir, "supervisor-intent.json")
+	if _, statErr := os.Stat(committed); !os.IsNotExist(statErr) {
+		t.Errorf("supervisor-intent.json must not exist after a global-manifest reject; stat err = %v", statErr)
 	}
-	if f.runCount != 2 {
-		t.Errorf("Run calls = %d, want 2 (StartAfterWrite=true must drive Pass B)", f.runCount)
-	}
-	// supervisor-intent.json must exist at the returned path.
-	if _, statErr := os.Stat(intentPath); statErr != nil {
-		t.Errorf("supervisor-intent.json not written at %s: %v", intentPath, statErr)
+	if f.createCount != 0 || f.runCount != 0 {
+		t.Errorf("no scheduler mutation allowed on reject: createCount=%d runCount=%d", f.createCount, f.runCount)
 	}
 }
 
-// TestInstallParsedManifest_StartAfterWriteFalse_DefersDaemonSpawn asserts
-// the default deferred path: StartAfterWrite=false (the zero value) creates
-// tasks + writes intent but never calls sch.Run (daemon spawn deferred to
-// the supervisor reconciler).
-func TestInstallParsedManifest_StartAfterWriteFalse_DefersDaemonSpawn(t *testing.T) {
+// TestInstallParsedManifest_DefersDaemonSpawn asserts the structural
+// deferred-start contract: a workspace-scoped install creates no scheduler
+// Run (daemon spawn is deferred to the supervisor reconciler). The seam has
+// no StartAfterWrite knob — it always passes StartTasks=false — so Pass B
+// never runs regardless of manifest shape. Uses a fan-out manifest so there
+// ARE daemon rows materialized while sch.Run stays at zero.
+func TestInstallParsedManifest_DefersDaemonSpawn(t *testing.T) {
 	daemonIntentTestHelper(t)
 	preparePreflightBinaryChecks(t)
 	f := newInstallFakeScheduler()
 	installFakeScheduler(t, f)
 
-	m := globalTwoDaemonManifest()
+	wsLive := t.TempDir()
+	workspaces := []WorkspaceEntry{{
+		WorkspaceKey:  WorkspaceKey(wsLive),
+		WorkspacePath: wsLive,
+		Language:      SerenaLanguageSentinel,
+		Backend:       "serena",
+		Port:          9401,
+	}}
+
+	m := serenaTemplateManifest()
 	a := NewAPI()
 	var buf bytes.Buffer
 	intentPath, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
-		Writer:          &buf,
-		StartAfterWrite: false,
+		Writer:     &buf,
+		Workspaces: workspaces,
 	})
 	if err != nil {
 		t.Fatalf("InstallParsedManifest: %v", err)
 	}
-	if f.createCount != 3 {
-		t.Errorf("Create calls = %d, want 3 (tasks still created when spawn deferred)", f.createCount)
-	}
 	if f.runCount != 0 {
-		t.Errorf("Run calls = %d, want 0 (StartAfterWrite=false defers daemon spawn)", f.runCount)
+		t.Errorf("Run calls = %d, want 0 (daemon spawn deferred to the supervisor reconciler)", f.runCount)
 	}
 	if _, statErr := os.Stat(intentPath); statErr != nil {
 		t.Errorf("supervisor-intent.json not written at %s: %v", intentPath, statErr)
@@ -262,8 +268,7 @@ func TestInstallParsedManifest_WorkspaceScoped_NotRefused(t *testing.T) {
 	a := NewAPI()
 	var buf bytes.Buffer
 	intentPath, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
-		Writer:          &buf,
-		StartAfterWrite: false,
+		Writer: &buf,
 	})
 	if err != nil {
 		t.Fatalf("InstallParsedManifest(workspace-scoped): want success, got %v", err)
@@ -337,9 +342,8 @@ func TestInstallParsedManifest_FansOutPerWorkspaceDaemons(t *testing.T) {
 	a := NewAPI()
 	var buf bytes.Buffer
 	gotPath, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
-		Writer:          &buf,
-		Workspaces:      workspaces,
-		StartAfterWrite: false,
+		Writer:     &buf,
+		Workspaces: workspaces,
 	})
 	if err != nil {
 		t.Fatalf("InstallParsedManifest(workspaces): %v", err)
@@ -414,10 +418,10 @@ func TestInstallParsedManifest_FansOutPerWorkspaceDaemons(t *testing.T) {
 		t.Errorf("matched serena task names = %d, want 2 (both workspaces)", len(seenTask))
 	}
 
-	// StartAfterWrite=false: no scheduler Run; the template manifest also
+	// Deferred-start contract: no scheduler Run; the template manifest also
 	// produces no scheduler Create tasks.
 	if f.runCount != 0 {
-		t.Errorf("Run calls = %d, want 0 (StartAfterWrite=false)", f.runCount)
+		t.Errorf("Run calls = %d, want 0 (daemon spawn deferred to the supervisor reconciler)", f.runCount)
 	}
 }
 
@@ -452,9 +456,8 @@ func TestInstallParsedManifest_FanOut_AuditsWorkspaceTasks(t *testing.T) {
 		a := NewAPI()
 		var buf bytes.Buffer
 		if _, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
-			Writer:          &buf,
-			Workspaces:      workspaces,
-			StartAfterWrite: false,
+			Writer:     &buf,
+			Workspaces: workspaces,
 		}); err != nil {
 			t.Fatalf("InstallParsedManifest(fan-out): %v", err)
 		}
@@ -500,9 +503,8 @@ func TestInstallParsedManifest_FanOut_AuditsWorkspaceTasks(t *testing.T) {
 		a := NewAPI()
 		var buf bytes.Buffer
 		_, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
-			Writer:          &buf,
-			Workspaces:      workspaces,
-			StartAfterWrite: false,
+			Writer:     &buf,
+			Workspaces: workspaces,
 		})
 		if err == nil {
 			t.Fatalf("InstallParsedManifest must fail when the pre-mutation audit fails; got nil error")
@@ -522,17 +524,17 @@ func TestInstallParsedManifest_FanOut_AuditsWorkspaceTasks(t *testing.T) {
 // supervisor-intent.json AND no leftover ".preflight" temp from a
 // pre-flight probe that should be skipped on dry-run — and (b) return an
 // empty intent path so the caller never dereferences a path for a file
-// that was never written. Uses a global manifest (which has logon tasks)
-// so the dry-run short-circuit is exercised on a non-trivial plan; the
-// fake scheduler must see zero Create / Run calls because installPlan
-// short-circuits to the plan print before any mutation.
+// that was never written. Uses a workspace-scoped manifest (the only kind
+// this seam accepts after FIX A); the fake scheduler must see zero Create /
+// Run calls because installPlan short-circuits to the plan print before any
+// mutation.
 func TestInstallParsedManifest_DryRun_NoWriteNoPath(t *testing.T) {
 	stateDir := daemonIntentTestHelper(t)
 	preparePreflightBinaryChecks(t)
 	f := newInstallFakeScheduler()
 	installFakeScheduler(t, f)
 
-	m := globalTwoDaemonManifest()
+	m := serenaTemplateManifest()
 	a := NewAPI()
 	var buf bytes.Buffer
 	intentPath, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
@@ -603,7 +605,7 @@ func TestInstallParsedManifest_DryRun_CorruptExistingIntentStillSucceeds(t *test
 		t.Fatalf("read planted corrupt intent: %v", err)
 	}
 
-	m := globalTwoDaemonManifest()
+	m := serenaTemplateManifest()
 	a := NewAPI()
 	var buf bytes.Buffer
 	intentPath, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
@@ -634,171 +636,129 @@ func TestInstallParsedManifest_DryRun_CorruptExistingIntentStillSucceeds(t *test
 	}
 }
 
-// TestInstallParsedManifest_MaterializesWeeklyRefreshTimer is the FIX-2 guard:
-// when the manifest enables weekly refresh, BuildPlanWithOpts creates a
-// mcp-local-hub-<server>-weekly-refresh scheduler task, and the merged
-// supervisor-intent MUST carry the corresponding server-weekly-refresh
-// MaintenanceTimer so supervisor-intent consumers can own/preserve the weekly
-// job. A manifest without weekly refresh must produce no such timer. Sibling
-// servers' timers must be preserved with the same replace-this-server's-timers
-// merge discipline used for daemon rows.
-func TestInstallParsedManifest_MaterializesWeeklyRefreshTimer(t *testing.T) {
-	t.Run("weekly_refresh_true_materializes_timer", func(t *testing.T) {
-		stateDir := daemonIntentTestHelper(t)
-		preparePreflightBinaryChecks(t)
-		f := newInstallFakeScheduler()
-		installFakeScheduler(t, f)
+// TestInstallParsedManifest_PreservesPriorMaintenanceTimers is the FIX-B
+// guard: the seam carries the prior intent's MaintenanceTimers through
+// VERBATIM — this server's AND every sibling's — and never materializes,
+// drops, or re-derives a per-server weekly timer of its own. Two prior
+// timers are seeded:
+//
+//   - one for the TARGET server ("serena") with Enabled pointing at false
+//     (an operator's deliberate off-switch). The pre-FIX-B merge dropped
+//     every prior timer whose Server matched m.Name and re-derived from the
+//     manifest, so this disabled timer would have been silently dropped (and,
+//     because serena has weekly_refresh=false, NOT re-added). FIX B carries it
+//     through untouched.
+//   - one for a SIBLING server ("othersrv").
+//
+// After installing the target workspace-scoped manifest, BOTH timers must be
+// present and byte-identical to what was seeded (including the false-valued
+// *bool Enabled).
+func TestInstallParsedManifest_PreservesPriorMaintenanceTimers(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
 
-		m := globalTwoDaemonManifest() // WeeklyRefresh: true
-		a := NewAPI()
-		var buf bytes.Buffer
-		intentPath, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
-			Writer:          &buf,
-			StartAfterWrite: false,
-		})
-		if err != nil {
-			t.Fatalf("InstallParsedManifest: %v", err)
-		}
+	disabled := false
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	targetTimer := MaintenanceTimer{
+		Name:    "\\mcp-local-hub-serena-weekly-refresh",
+		Kind:    "server-weekly-refresh",
+		Server:  "serena", // same server the install targets
+		Command: "mcphub.exe",
+		Args:    []string{"restart", "--server", "serena"},
+		Enabled: &disabled, // operator-disabled; must survive verbatim
+	}
+	siblingTimer := MaintenanceTimer{
+		Name:    "\\mcp-local-hub-othersrv-weekly-refresh",
+		Kind:    "server-weekly-refresh",
+		Server:  "othersrv",
+		Command: "mcphub.exe",
+		Args:    []string{"restart", "--server", "othersrv"},
+	}
+	seed := &SupervisorIntentFile{
+		Version:           1,
+		UpdatedAt:         "2026-05-20T00:00:00Z",
+		MaintenanceTimers: []MaintenanceTimer{targetTimer, siblingTimer},
+	}
+	if err := WriteSupervisorIntent(intentPath, seed); err != nil {
+		t.Fatalf("seed intent: %v", err)
+	}
 
-		written, err := ReadSupervisorIntent(intentPath)
-		if err != nil {
-			t.Fatalf("ReadSupervisorIntent: %v", err)
-		}
+	// Install the target workspace-scoped manifest WITH a live workspace so
+	// the fan-out runs (and the daemon-row merge path replaces serena's daemon
+	// rows) — the timers must still pass through untouched.
+	wsLive := t.TempDir()
+	workspaces := []WorkspaceEntry{{
+		WorkspaceKey:  WorkspaceKey(wsLive),
+		WorkspacePath: wsLive,
+		Language:      SerenaLanguageSentinel,
+		Backend:       "serena",
+		Port:          9401,
+	}}
 
-		wantName := "\\mcp-local-hub-" + m.Name + "-weekly-refresh"
-		var got *MaintenanceTimer
-		for i := range written.MaintenanceTimers {
-			if written.MaintenanceTimers[i].Name == wantName {
-				got = &written.MaintenanceTimers[i]
-			}
-		}
-		if got == nil {
-			t.Fatalf("merged intent missing %q MaintenanceTimer; timers: %+v", wantName, written.MaintenanceTimers)
-		}
-		if got.Kind != "server-weekly-refresh" {
-			t.Errorf("timer Kind = %q, want \"server-weekly-refresh\"", got.Kind)
-		}
-		if got.Server != m.Name {
-			t.Errorf("timer Server = %q, want %q", got.Server, m.Name)
-		}
-		// Command + Args must match how the supervisor maintenance spawner
-		// will exec it (exec.Command(t.Command, t.Args...)) — same shape as
-		// the BuildPlanWithOpts scheduler task: `mcphub restart --server <s>`.
-		canonical, perr := canonicalMcphubPath()
-		if perr != nil {
-			t.Fatalf("canonicalMcphubPath: %v", perr)
-		}
-		if got.Command != canonical {
-			t.Errorf("timer Command = %q, want %q", got.Command, canonical)
-		}
-		wantArgs := []string{"restart", "--server", m.Name}
-		if len(got.Args) != len(wantArgs) {
-			t.Fatalf("timer Args = %v, want %v", got.Args, wantArgs)
-		}
-		for i := range wantArgs {
-			if got.Args[i] != wantArgs[i] {
-				t.Errorf("timer Args[%d] = %q, want %q", i, got.Args[i], wantArgs[i])
-			}
-		}
-		_ = stateDir
-	})
+	m := serenaTemplateManifest() // Name "serena"
+	a := NewAPI()
+	var buf bytes.Buffer
+	if _, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
+		Writer:     &buf,
+		Workspaces: workspaces,
+	}); err != nil {
+		t.Fatalf("InstallParsedManifest: %v", err)
+	}
 
-	t.Run("no_weekly_refresh_no_timer", func(t *testing.T) {
-		daemonIntentTestHelper(t)
-		preparePreflightBinaryChecks(t)
-		f := newInstallFakeScheduler()
-		installFakeScheduler(t, f)
+	written, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
 
-		m := globalSingleDaemonManifest("noweekly", 9321) // WeeklyRefresh defaults false
-		a := NewAPI()
-		var buf bytes.Buffer
-		intentPath, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
-			Writer:          &buf,
-			StartAfterWrite: false,
-		})
-		if err != nil {
-			t.Fatalf("InstallParsedManifest: %v", err)
-		}
-		written, err := ReadSupervisorIntent(intentPath)
-		if err != nil {
-			t.Fatalf("ReadSupervisorIntent: %v", err)
-		}
-		for _, tm := range written.MaintenanceTimers {
-			if tm.Server == m.Name || strings.Contains(tm.Name, m.Name) {
-				t.Errorf("manifest without weekly refresh must not materialize a timer; got %+v", tm)
-			}
-		}
-	})
+	byName := map[string]MaintenanceTimer{}
+	for _, tm := range written.MaintenanceTimers {
+		byName[tm.Name] = tm
+	}
+	if len(written.MaintenanceTimers) != 2 {
+		t.Fatalf("written timers = %d, want 2 (both prior timers preserved verbatim); timers: %+v", len(written.MaintenanceTimers), written.MaintenanceTimers)
+	}
 
-	t.Run("sibling_timers_preserved", func(t *testing.T) {
-		stateDir := daemonIntentTestHelper(t)
-		preparePreflightBinaryChecks(t)
-		f := newInstallFakeScheduler()
-		installFakeScheduler(t, f)
+	gotTarget, ok := byName[targetTimer.Name]
+	if !ok {
+		t.Fatalf("target server's prior timer %q was dropped; timers: %+v", targetTimer.Name, written.MaintenanceTimers)
+	}
+	// reflect.DeepEqual follows the *bool, so a flipped/nil Enabled is caught.
+	if !reflect.DeepEqual(gotTarget, targetTimer) {
+		t.Errorf("target timer not preserved verbatim:\n got  %+v (Enabled=%v)\n want %+v (Enabled=%v)", gotTarget, derefBool(gotTarget.Enabled), targetTimer, derefBool(targetTimer.Enabled))
+	}
+	if gotTarget.Enabled == nil || *gotTarget.Enabled != false {
+		t.Errorf("target timer Enabled = %v, want a non-nil pointer to false (operator off-switch must survive)", gotTarget.Enabled)
+	}
 
-		// Seed a pre-existing intent owning a SIBLING server's weekly timer.
-		// The new install for "demo" must preserve it.
-		intentPath := filepath.Join(stateDir, "supervisor-intent.json")
-		siblingTimer := MaintenanceTimer{
-			Name:    "\\mcp-local-hub-othersrv-weekly-refresh",
-			Kind:    "server-weekly-refresh",
-			Server:  "othersrv",
-			Command: "mcphub.exe",
-			Args:    []string{"restart", "--server", "othersrv"},
-		}
-		seed := &SupervisorIntentFile{
-			Version:           1,
-			UpdatedAt:         "2026-05-20T00:00:00Z",
-			MaintenanceTimers: []MaintenanceTimer{siblingTimer},
-		}
-		if err := WriteSupervisorIntent(intentPath, seed); err != nil {
-			t.Fatalf("seed intent: %v", err)
-		}
-
-		m := globalTwoDaemonManifest() // server "demo", WeeklyRefresh true
-		a := NewAPI()
-		var buf bytes.Buffer
-		if _, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
-			Writer:          &buf,
-			StartAfterWrite: false,
-		}); err != nil {
-			t.Fatalf("InstallParsedManifest: %v", err)
-		}
-
-		written, err := ReadSupervisorIntent(intentPath)
-		if err != nil {
-			t.Fatalf("ReadSupervisorIntent: %v", err)
-		}
-		var siblingFound, demoFound bool
-		for _, tm := range written.MaintenanceTimers {
-			switch tm.Server {
-			case "othersrv":
-				siblingFound = true
-			case "demo":
-				demoFound = true
-			}
-		}
-		if !siblingFound {
-			t.Errorf("sibling server's weekly timer was clobbered; timers: %+v", written.MaintenanceTimers)
-		}
-		if !demoFound {
-			t.Errorf("new server's weekly timer missing; timers: %+v", written.MaintenanceTimers)
-		}
-	})
+	gotSibling, ok := byName[siblingTimer.Name]
+	if !ok {
+		t.Fatalf("sibling server's prior timer %q was dropped; timers: %+v", siblingTimer.Name, written.MaintenanceTimers)
+	}
+	if !reflect.DeepEqual(gotSibling, siblingTimer) {
+		t.Errorf("sibling timer not preserved verbatim:\n got  %+v\n want %+v", gotSibling, siblingTimer)
+	}
 }
 
-// globalSingleDaemonManifest is a minimal global manifest with exactly one
-// logon daemon and no clients/weekly. Used by the FIX-1 concurrency test so
-// each concurrent install contributes exactly one supervisor-intent daemon row
-// keyed by its own server name.
-func globalSingleDaemonManifest(name string, port int) *config.ServerManifest {
-	return &config.ServerManifest{
-		Name:      name,
-		Kind:      config.KindGlobal,
-		Transport: config.TransportNativeHTTP,
-		Command:   "go", // on PATH whenever `go test` runs (Preflight LookPath)
-		Daemons:   []config.DaemonSpec{{Name: "default", Port: port}},
+// derefBool renders a *bool for error messages without panicking on nil.
+func derefBool(b *bool) string {
+	if b == nil {
+		return "<nil>"
 	}
+	if *b {
+		return "true"
+	}
+	return "false"
+}
+
+// serenaTemplateManifestNamed is serenaTemplateManifest with a caller-chosen
+// server name, used by the FIX-1 concurrency test so two installs contribute
+// distinct (per-server-named) supervisor-intent daemon rows.
+func serenaTemplateManifestNamed(name string) *config.ServerManifest {
+	m := serenaTemplateManifest()
+	m.Name = name
+	return m
 }
 
 // TestInstallParsedManifest_ConcurrentInstalls_PreserveSiblingRows is the
@@ -809,15 +769,24 @@ func globalSingleDaemonManifest(name string, port int) *config.ServerManifest {
 // later writer clobbers the earlier writer's sibling row. The shared
 // daemonStateRootOverride + schedulerFactoryFn are process-global, so both
 // goroutines hit the SAME state dir and the SAME fake scheduler — exactly the
-// contended surface the race exploits.
+// contended surface the race exploits. Both manifests are workspace-scoped
+// (the only kind this seam accepts after FIX A) and fan out to a distinct
+// live workspace, so each contributes a daemon row keyed by its own server
+// name + workspace.
 func TestInstallParsedManifest_ConcurrentInstalls_PreserveSiblingRows(t *testing.T) {
 	stateDir := daemonIntentTestHelper(t)
 	preparePreflightBinaryChecks(t)
 	f := newInstallFakeScheduler()
 	installFakeScheduler(t, f)
 
-	mAlpha := globalSingleDaemonManifest("alpha", 9311)
-	mBeta := globalSingleDaemonManifest("beta", 9312)
+	mAlpha := serenaTemplateManifestNamed("serena-alpha")
+	mBeta := serenaTemplateManifestNamed("serena-beta")
+	wsAlpha := t.TempDir()
+	wsBeta := t.TempDir()
+	wsByServer := map[string][]WorkspaceEntry{
+		"serena-alpha": {{WorkspaceKey: WorkspaceKey(wsAlpha), WorkspacePath: wsAlpha, Language: SerenaLanguageSentinel, Backend: "serena", Port: 9411}},
+		"serena-beta":  {{WorkspaceKey: WorkspaceKey(wsBeta), WorkspacePath: wsBeta, Language: SerenaLanguageSentinel, Backend: "serena", Port: 9412}},
+	}
 
 	a := NewAPI()
 	var wg sync.WaitGroup
@@ -828,8 +797,8 @@ func TestInstallParsedManifest_ConcurrentInstalls_PreserveSiblingRows(t *testing
 			defer wg.Done()
 			var buf bytes.Buffer
 			_, err := a.InstallParsedManifest(context.Background(), mm, InstallParsedManifestOpts{
-				Writer:          &buf,
-				StartAfterWrite: false,
+				Writer:     &buf,
+				Workspaces: wsByServer[mm.Name],
 			})
 			errs[idx] = err
 		}(i, m)
@@ -852,11 +821,11 @@ func TestInstallParsedManifest_ConcurrentInstalls_PreserveSiblingRows(t *testing
 		servers[d.Server] = true
 	}
 	// BOTH servers' rows must survive the interleaved read-merge-write.
-	if !servers["alpha"] {
-		t.Errorf("alpha daemon row lost (concurrent write clobbered it); written daemons: %+v", written.Daemons)
+	if !servers["serena-alpha"] {
+		t.Errorf("serena-alpha daemon row lost (concurrent write clobbered it); written daemons: %+v", written.Daemons)
 	}
-	if !servers["beta"] {
-		t.Errorf("beta daemon row lost (concurrent write clobbered it); written daemons: %+v", written.Daemons)
+	if !servers["serena-beta"] {
+		t.Errorf("serena-beta daemon row lost (concurrent write clobbered it); written daemons: %+v", written.Daemons)
 	}
 }
 
@@ -890,9 +859,8 @@ func TestInstallParsedManifest_WorkspaceScoped_SkipsPrune(t *testing.T) {
 	a := NewAPI()
 	var buf bytes.Buffer
 	if _, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
-		Writer:          &buf,
-		Workspaces:      workspaces,
-		StartAfterWrite: false,
+		Writer:     &buf,
+		Workspaces: workspaces,
 	}); err != nil {
 		t.Fatalf("InstallParsedManifest(workspace-scoped): %v", err)
 	}
@@ -950,9 +918,8 @@ func TestInstallParsedManifest_FiltersStaleWorkspaceRows(t *testing.T) {
 	a := NewAPI()
 	var buf bytes.Buffer
 	intentPath, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
-		Writer:          &buf,
-		Workspaces:      workspaces,
-		StartAfterWrite: false,
+		Writer:     &buf,
+		Workspaces: workspaces,
 	})
 	if err != nil {
 		t.Fatalf("InstallParsedManifest: %v", err)
@@ -991,47 +958,72 @@ func TestInstallParsedManifest_FiltersStaleWorkspaceRows(t *testing.T) {
 	}
 }
 
-// TestInstallParsedManifest_RejectsStartAfterWriteForFanOut is the FIX-4 guard:
-// a workspace-scoped DaemonTemplate manifest with a non-empty Workspaces
-// snapshot AND StartAfterWrite=true cannot honor the start (per-workspace
-// serena daemons start via the supervisor reconciler, not this seam's Pass B),
-// so it must fail loud BEFORE any mutation — no intent written, no scheduler
-// touched.
-func TestInstallParsedManifest_RejectsStartAfterWriteForFanOut(t *testing.T) {
+// TestInstallParsedManifest_DryRunShowsWorkspaceFanOut is the FIX-C guard: a
+// dry run of a DaemonTemplate workspace-scoped manifest with workspaces must
+// preview the per-workspace supervisor-intent daemon rows the real path would
+// write — naming each workspace's SerenaTaskNameForWorkspace task and marking
+// rows whose path is stale (gone) — because the legacy plan print carries zero
+// scheduler tasks for such a manifest and would otherwise report no planned
+// changes. The preview must remain corrupt-safe: it touches NO disk (no
+// supervisor-intent.json, no .lock, no supervisor-events.log).
+func TestInstallParsedManifest_DryRunShowsWorkspaceFanOut(t *testing.T) {
 	stateDir := daemonIntentTestHelper(t)
 	preparePreflightBinaryChecks(t)
 	f := newInstallFakeScheduler()
 	installFakeScheduler(t, f)
 
-	wsLive := t.TempDir()
-	workspaces := []WorkspaceEntry{{
-		WorkspaceKey:  WorkspaceKey(wsLive),
-		WorkspacePath: wsLive,
-		Language:      SerenaLanguageSentinel,
-		Backend:       "serena",
-		Port:          9401,
-	}}
+	wsLive := t.TempDir()                                   // exists
+	wsStale := filepath.Join(t.TempDir(), "deleted-ws-dir") // absent (never created)
+	workspaces := []WorkspaceEntry{
+		{WorkspaceKey: WorkspaceKey(wsLive), WorkspacePath: wsLive, Language: SerenaLanguageSentinel, Backend: "serena", Port: 9401},
+		{WorkspaceKey: WorkspaceKey(wsStale), WorkspacePath: wsStale, Language: SerenaLanguageSentinel, Backend: "serena", Port: 9402},
+	}
 
 	m := serenaTemplateManifest()
 	a := NewAPI()
 	var buf bytes.Buffer
 	intentPath, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
-		Writer:          &buf,
-		Workspaces:      workspaces,
-		StartAfterWrite: true,
+		Writer:     &buf,
+		Workspaces: workspaces,
+		DryRun:     true,
 	})
-	if err == nil {
-		t.Fatalf("InstallParsedManifest(StartAfterWrite=true, fan-out): want error, got nil (intentPath=%q)", intentPath)
+	if err != nil {
+		t.Fatalf("InstallParsedManifest(DryRun, fan-out): %v", err)
 	}
-	if !strings.Contains(err.Error(), "StartAfterWrite is not supported") {
-		t.Errorf("error = %q, want it to name the unsupported StartAfterWrite fan-out case", err.Error())
+	if intentPath != "" {
+		t.Errorf("DryRun intentPath = %q, want \"\" (nothing committed)", intentPath)
 	}
-	// No mutation: intent file absent, no scheduler create/run.
-	committed := filepath.Join(stateDir, "supervisor-intent.json")
-	if _, statErr := os.Stat(committed); !os.IsNotExist(statErr) {
-		t.Errorf("supervisor-intent.json must not exist after a fail-loud reject; stat err = %v", statErr)
+
+	out := buf.String()
+	// BOTH per-workspace task rows are named in the preview.
+	liveTask := SerenaTaskNameForWorkspace(wsLive)
+	staleTask := SerenaTaskNameForWorkspace(wsStale)
+	if !strings.Contains(out, liveTask) {
+		t.Errorf("dry-run preview missing live workspace task %q; output:\n%s", liveTask, out)
 	}
+	if !strings.Contains(out, staleTask) {
+		t.Errorf("dry-run preview missing stale workspace task %q; output:\n%s", staleTask, out)
+	}
+	// The stale row is marked as stale.
+	if !strings.Contains(out, "stale") {
+		t.Errorf("dry-run preview must mark the stale workspace row as stale; output:\n%s", out)
+	}
+
+	// Corrupt-safe: the preview touches NO disk. The state dir must hold none
+	// of the supervisor state artifacts after a dry run.
+	for _, leaf := range []string{
+		"supervisor-intent.json",
+		"supervisor-intent.json.lock",
+		"supervisor-intent.json.preflight",
+		SupervisorEventLogFileLeaf,
+	} {
+		p := filepath.Join(stateDir, leaf)
+		if _, statErr := os.Stat(p); !os.IsNotExist(statErr) {
+			t.Errorf("dry run must not create %s; stat err = %v", leaf, statErr)
+		}
+	}
+	// No scheduler mutation on dry-run.
 	if f.createCount != 0 || f.runCount != 0 {
-		t.Errorf("no scheduler mutation allowed on fail-loud reject: createCount=%d runCount=%d", f.createCount, f.runCount)
+		t.Errorf("DryRun must not mutate the scheduler: createCount=%d runCount=%d", f.createCount, f.runCount)
 	}
 }
