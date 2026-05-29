@@ -44,9 +44,12 @@ const defaultWorkspaceFilename = "default-workspace.txt"
 // loadSerenaManifestForCLI is the test-injectable manifest loader. The
 // production form goes through the embed-first manifest pipeline
 // (`api.NewAPI().ManifestGet`); the override seam below lets tests
-// hand-shape a manifest (e.g. with a daemon_template.port_pool block
-// that production serena/manifest.yaml does not yet declare in v0.5.x
-// because Phase D.1 is a separate phase).
+// hand-shape a manifest (e.g. the legacy `kind: global` embed shape, or a
+// daemon_template.port_pool block). The loaded manifest is the CATALOG input
+// to the shared dynamic-pool service (api.EffectiveSerenaPortPool), which
+// supplies a built-in default port pool when the embed has no daemon_template
+// — so `register` works against the current `kind: global` embed without
+// requiring a manifest migration first (Phase 2 cycle-break, finding #3).
 var loadSerenaManifestForCLI = loadSerenaManifestFromDisk
 
 // loadSerenaManifestFromDisk is the production manifest loader. It uses
@@ -66,18 +69,18 @@ func loadSerenaManifestFromDisk() (*config.ServerManifest, error) {
 }
 
 // serenaPortPool resolves the port pool to allocate serena workspace
-// daemons from. Phase D.1 introduces `daemon_template.port_pool` on the
-// serena manifest; until that lands the resolver fails closed with an
-// explicit operator-actionable message instead of silently allocating
-// from the wrong (top-level) pool.
+// daemons from. It delegates to the shared dynamic-pool service
+// (api.EffectiveSerenaPortPool — internal/api/serena_dynamic_pool.go), the
+// single owner of serena port-pool + template policy (Phase 2, finding #3).
+//
+// The service prefers the embed's daemon_template.port_pool when present, else
+// falls back to a built-in dynamic-pool default. This is the cycle-break: the
+// resolver NO LONGER fails closed on the legacy `kind: global` embed (which has
+// no daemon_template) — `register` allocates from the service's effective pool
+// instead. Migrating the embed to the dynamic-pool shape later automatically
+// switches the source to its own declared pool with no change here.
 func serenaPortPool(m *config.ServerManifest) (config.PortPool, error) {
-	if m.DaemonTemplate != nil && m.DaemonTemplate.PortPool != nil {
-		return *m.DaemonTemplate.PortPool, nil
-	}
-	return config.PortPool{}, fmt.Errorf(
-		"serena manifest does not declare daemon_template.port_pool — " +
-			"Phase D.1 manifest migration is required before `mcphub workspace register` " +
-			"can allocate ports for serena daemons")
+	return api.EffectiveSerenaPortPool(m)
 }
 
 // newWorkspaceCmd builds the `mcphub workspace` parent command. The
@@ -120,8 +123,10 @@ func newWorkspaceRegisterCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "register <path>",
 		Short: "Register a workspace for serena dynamic-pool routing",
-		Long: `Allocate a serena port from the manifest's daemon_template.port_pool
+		Long: `Allocate a serena port from the effective dynamic-pool port range
 and persist the workspace as a serena (sentinel) row in workspaces.yaml.
+The port range comes from the embedded serena manifest's daemon_template
+when it declares one, else from a built-in dynamic-pool default.
 
 Behavior:
   - Reads .serena/project.yml under <path> for the languages snapshot.
@@ -181,8 +186,10 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 	}
 	sort.Strings(languages)
 
-	// 2. Resolve serena manifest's port pool. Phase D.1 introduces
-	// daemon_template.port_pool; until that lands this fails closed.
+	// 2. Resolve serena's EFFECTIVE port pool via the shared dynamic-pool
+	// service (Phase 2). The embed is the catalog input; the service supplies
+	// a built-in default pool when the embed has no daemon_template, so this
+	// no longer fails closed on the legacy `kind: global` embed.
 	m, err := loadSerenaManifestForCLI()
 	if err != nil {
 		return err
