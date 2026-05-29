@@ -948,8 +948,6 @@ daemon_template:
   context: codex
   port_pool: {start: 9121, end: 9199}
   extra_args_template:
-    - --context
-    - codex
     - --project
     - "${workspace.path}"
 `
@@ -968,11 +966,11 @@ daemon_template:
 			m.DaemonTemplate.PortPool.End != 9199 {
 			t.Errorf("DaemonTemplate.PortPool = %+v, want {9121,9199}", m.DaemonTemplate.PortPool)
 		}
-		if len(m.DaemonTemplate.ExtraArgsTemplate) != 4 {
-			t.Fatalf("ExtraArgsTemplate len = %d, want 4 (args: %v)", len(m.DaemonTemplate.ExtraArgsTemplate), m.DaemonTemplate.ExtraArgsTemplate)
+		if len(m.DaemonTemplate.ExtraArgsTemplate) != 2 {
+			t.Fatalf("ExtraArgsTemplate len = %d, want 2 (args: %v)", len(m.DaemonTemplate.ExtraArgsTemplate), m.DaemonTemplate.ExtraArgsTemplate)
 		}
-		if m.DaemonTemplate.ExtraArgsTemplate[3] != "${workspace.path}" {
-			t.Errorf("ExtraArgsTemplate[3] = %q, want ${workspace.path}", m.DaemonTemplate.ExtraArgsTemplate[3])
+		if m.DaemonTemplate.ExtraArgsTemplate[1] != "${workspace.path}" {
+			t.Errorf("ExtraArgsTemplate[1] = %q, want ${workspace.path}", m.DaemonTemplate.ExtraArgsTemplate[1])
 		}
 	})
 	t.Run("unknown field under daemon_template fails strict parse", func(t *testing.T) {

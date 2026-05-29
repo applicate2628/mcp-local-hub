@@ -42,10 +42,10 @@ import (
 
 // supervisorController is the long-lived runtime owner.
 type supervisorController struct {
-	intentCache  *IntentCache
-	eventLoop    *api.EventLoop
-	tracker      *DaemonRuntimeTracker
-	smStates     sync.Map // taskName -> api.SMState
+	intentCache *IntentCache
+	eventLoop   *api.EventLoop
+	tracker     *DaemonRuntimeTracker
+	smStates    sync.Map // taskName -> api.SMState
 	// queuedActions tracks per-task queued action ("" | "respawn" | "none")
 	// preserved across StExiting transitions per SM spec §"queued_action
 	// preservation across supervisor exit" (api/supervisor_state_machine.go:99).
@@ -56,9 +56,9 @@ type supervisorController struct {
 	// into SMContext.QueuedAction and writes it back based on the SM's
 	// side-effect string (which encodes set/clear queued_action directives).
 	queuedActions sync.Map // taskName -> string
-	events       *api.SupervisorEventLog
-	graceful     *gracefulCounter
-	daemonIntent *daemonIntentCache
+	events        *api.SupervisorEventLog
+	graceful      *gracefulCounter
+	daemonIntent  *daemonIntentCache
 
 	// spawn is the production SpawnFunc closure constructed in
 	// runSupervise. executeSideEffect calls it when the SM transition
@@ -490,6 +490,41 @@ func (c *supervisorController) executeSideEffect(
 		// queued_action=stop via the "issue terminate, queued_action=
 		// none" side string from the StExiting transition.
 		if !strings.Contains(side, "create-process") {
+			return
+		}
+
+		// bot PR #246 r2 P2: refuse to fire spawn for a legacy nil-RuntimeSpec
+		// serena-proxy descriptor. Such a row reaches StSpawning via the
+		// EvChildExit -> backoff -> EvTimerDue restart path when a row that was
+		// ALREADY RUNNING at upgrade later exits - the THIRD spawn path (the
+		// reconcile pass excludes not-running rows; supervise_respawn.go refuses
+		// IPC respawns). The redesigned proxy fails loud on a nil spec (its args
+		// lack --task-name), so firing spawn would churn restart backoff on a row
+		// that can never start. Quarantine directly (mirrors handleBackoffWaiting's
+		// promotion) so the restart loop stops. Spec-bearing serena-proxy rows and
+		// global daemons are unaffected. StExiting (terminate) is a separate case,
+		// so an operator stop of a running legacy row is still honored.
+		if isSerenaProxyDescriptor(*d) && d.RuntimeSpec == nil {
+			c.smStates.Store(ev.TaskName, api.StQuarantined)
+			if c.tracker != nil {
+				c.tracker.MarkQuarantined(ev.TaskName)
+			}
+			if c.tracker != nil && c.statePath != "" {
+				_ = persistDaemonRuntimeTracker(c.events, c.tracker, c.statePath, ev.TaskName)
+			}
+			if c.events != nil {
+				_ = c.events.Emit(api.SupervisorEvent{
+					Severity: "warn",
+					Source:   "lifecycle",
+					Event:    "legacy-serena-descriptor-quarantined",
+					TaskName: ev.TaskName,
+					Body: map[string]any{
+						"server": d.Server,
+						"reason": "serena-proxy descriptor carries no runtime_spec (pre-redesign / stale row) and cannot be spawned; quarantined to stop the restart loop instead of churning backoff",
+						"action": "run the serena dynamic-pool re-install/migrate to re-materialize this descriptor with a runtime_spec",
+					},
+				})
+			}
 			return
 		}
 

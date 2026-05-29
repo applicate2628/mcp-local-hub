@@ -145,6 +145,18 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 		return "", fmt.Errorf("InstallParsedManifest: manifest %q has an empty daemon_template.context; the per-workspace serena proxy materializes --context <value> for the child, so a non-empty context is required (set daemon_template.context in the manifest)", m.Name)
 	}
 
+	// Duplicate-context gate (bot PR #246 r2 P2). The fan-out APPENDS
+	// `--context <DaemonTemplate.Context>`, so a --context token already in
+	// base_args / extra_args_template would double the flag. FAIL LOUD here,
+	// before any mutation: BuildSupervisorDaemonsForSerena returns nil for this
+	// shape (defense-in-depth), but a nil fan-out is merged as "this server has
+	// no daemons" and would SILENTLY remove the server's existing per-workspace
+	// rows (bot finding). config.ServerManifest.Validate also rejects it, but this
+	// seam accepts a PRE-PARSED manifest that may not have been revalidated.
+	if config.ArgsContainContextFlag(m.BaseArgs) || config.ArgsContainContextFlag(m.DaemonTemplate.ExtraArgsTemplate) {
+		return "", fmt.Errorf("InstallParsedManifest: manifest %q places --context in base_args or extra_args_template; the per-workspace serena proxy appends --context <daemon_template.context> at spawn, so a token here would duplicate the flag — remove it (context comes solely from daemon_template.context)", m.Name)
+	}
+
 	// 1a. Preflight: check-only gate shared with the legacy install paths.
 	// Before the pre-flight intent write and before any mutation, so a missing
 	// command or unresolved secret: ref fails fast.
