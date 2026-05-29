@@ -1,16 +1,15 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"mcp-local-hub/internal/api"
-	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/daemon"
 	"mcp-local-hub/internal/secrets"
 
@@ -25,30 +24,34 @@ import (
 // api.BuildSupervisorDaemonsForSerena point at. Hidden from default
 // help.
 //
-// Flow (mirrors the native-http branch of `mcphub daemon` but with
-// workspace-template arg expansion instead of a named-daemon spec
-// lookup):
+// Flow (descriptor-driven — the proxy reads its MATERIALIZED runtime
+// spec off its own supervisor-intent descriptor and NEVER re-reads the
+// server manifest; design
+// docs/superpowers/specs/2026-05-29-serena-migrate-redesign-descriptor-proxy.md §4):
 //
-//  1. Validate flags (--port, --workspace, --server).
-//  2. Load the server manifest; require kind=workspace-scoped + a
-//     non-nil DaemonTemplate.
-//  3. Resolve env (secret:KEY references via vault).
-//  4. Build childArgs = m.BaseArgs ++ ExpandWorkspacePathTokens(
-//     m.DaemonTemplate.ExtraArgsTemplate, <workspace path>). Append
-//     `--port <internalPort>` where internalPort =
-//     port + config.NativeHTTPInternalPortOffset.
-//  5. Spawn the upstream native-http child via daemon.HTTPHost and
+//  1. Validate flags (--port, --workspace, --server, --task-name).
+//  2. Canonicalize workspace; compute wsKey; open per-workspace log.
+//  3. Load OWN descriptor by --task-name from supervisor-intent.json;
+//     assert the descriptor/flag consistency contract (§3.2) and the
+//     RuntimeSpec nil/unsupported-version fail-loud guard (§4). NO
+//     manifest fallback — a missing/inconsistent spec fails loud.
+//  4. Resolve env (secret:KEY references via vault) over spec.EnvRefs.
+//  5. childArgs = spec.ChildArgs ++ [--port, spec.UpstreamPort]. The
+//     spec already carries the expanded --project <workspace> and the
+//     appended --context <value>; the proxy adds only the internal port.
+//  6. Spawn the upstream native-http child via daemon.HTTPHost and
 //     ListenAndServe an external port -> internal-port reverse proxy.
-//  6. Standard shutdown semantics on cmd.Context().Done() or
-//     ChildExited.
+//  7. Standard shutdown semantics on cmd.Context().Done() or ChildExited.
 //
-// Plan ref: docs/superpowers/plans/2026-05-20-serena-supervisor-unified.md §D.2.
-// Spec ref: docs/superpowers/specs/2026-05-20-serena-dynamic-pool.md §6.
+// The kind/template/transport gates that used to live here moved to
+// build/install time (BuildSupervisorDaemonsForSerena + the
+// InstallParsedManifest native-http contract gate).
 func newDaemonSerenaProxyCmd() *cobra.Command {
 	var (
 		portFlag      int
 		workspaceFlag string
 		serverFlag    string
+		taskNameFlag  string
 	)
 	c := &cobra.Command{
 		Use:    "serena-proxy",
@@ -63,6 +66,9 @@ func newDaemonSerenaProxyCmd() *cobra.Command {
 			}
 			if serverFlag == "" {
 				serverFlag = "serena"
+			}
+			if taskNameFlag == "" {
+				return fmt.Errorf("--task-name is required (the proxy looks up its own supervisor-intent descriptor by task name)")
 			}
 			if err := api.CheckManifestName(serverFlag); err != nil {
 				return err
@@ -84,54 +90,37 @@ func newDaemonSerenaProxyCmd() *cobra.Command {
 				}
 			}()
 
-			raw, err := api.NewAPI().ManifestGet(serverFlag)
-			if err != nil {
-				return fmt.Errorf("load manifest %s: %w", serverFlag, err)
-			}
-			m, err := config.ParseManifest(bytes.NewReader([]byte(raw)))
+			// Load the materialized runtime spec off THIS daemon's own
+			// supervisor-intent descriptor (looked up by --task-name) and
+			// enforce the descriptor/flag consistency contract + the
+			// nil/unsupported-version fail-loud guard. NO manifest read,
+			// NO manifest fallback (design §4) — a missing/inconsistent
+			// spec fails loud rather than re-reading the embedded legacy
+			// kind:global manifest (the defect this redesign kills).
+			spec, err := loadSerenaProxyRuntimeSpec(taskNameFlag, canonical, portFlag)
 			if err != nil {
 				return err
 			}
-			if m.Name != serverFlag {
-				return fmt.Errorf("manifest name %q does not match requested server %q", m.Name, serverFlag)
-			}
-			if m.Kind != config.KindWorkspaceScoped {
-				return fmt.Errorf("serena-proxy requires kind=workspace-scoped manifest; got kind=%q", m.Kind)
-			}
-			if m.DaemonTemplate == nil {
-				return fmt.Errorf("serena-proxy requires manifest with daemon_template block; got nil")
-			}
-			if m.Transport != config.TransportNativeHTTP {
-				return fmt.Errorf("serena-proxy currently supports only transport=native-http; got %q", m.Transport)
-			}
 
-			// Resolve env (secret:KEY -> vault lookup).
+			// Resolve env (secret:KEY -> vault lookup) over the spec's raw
+			// env refs (cleartext-free on disk; resolved in-process here).
 			vault, _ := secrets.OpenVault(defaultKeyPath(), defaultVaultPath())
 			resolver := secrets.NewResolver(vault, nil)
-			env, err := resolver.ResolveMap(m.Env)
+			env, err := resolver.ResolveMap(spec.EnvRefs)
 			if err != nil {
 				return err
 			}
 
-			// Build the uvx (or whatever the manifest says) argv:
-			// BaseArgs ++ template-expanded ExtraArgsTemplate. Token
-			// expansion is the helper's job; we hand it the canonical
-			// workspace path so any `${workspace.path}` reference inside
-			// the template lands as the registry's canonical form.
-			templateArgs := make([]string, 0, len(m.BaseArgs)+len(m.DaemonTemplate.ExtraArgsTemplate))
-			templateArgs = append(templateArgs, m.BaseArgs...)
-			templateArgs = append(templateArgs, m.DaemonTemplate.ExtraArgsTemplate...)
-			childArgs := config.ExpandWorkspacePathTokens(templateArgs, canonical)
+			// Final child argv: the spec's fully-materialized ChildArgs
+			// (already carrying expanded --project + appended --context)
+			// plus the internal upstream port the child binds.
+			childArgs := serenaProxyChildArgs(spec)
 
-			internalPort := portFlag + config.NativeHTTPInternalPortOffset
-			childArgs = append(childArgs, "--port", fmt.Sprintf("%d", internalPort))
-
-			cmdPath := m.Command
 			h, err := daemon.NewHTTPHost(daemon.HTTPHostConfig{
-				Command:      cmdPath,
+				Command:      spec.ChildCommand,
 				Args:         childArgs,
 				Env:          env,
-				UpstreamPort: internalPort,
+				UpstreamPort: spec.UpstreamPort,
 				LogPath:      logPath,
 			})
 			if err != nil {
@@ -176,5 +165,74 @@ func newDaemonSerenaProxyCmd() *cobra.Command {
 	c.Flags().IntVar(&portFlag, "port", 0, "TCP port to bind on 127.0.0.1 (required; per-workspace from registry)")
 	c.Flags().StringVar(&workspaceFlag, "workspace", "", "absolute workspace path (required)")
 	c.Flags().StringVar(&serverFlag, "server", "serena", "manifest name to load (defaults to serena)")
+	c.Flags().StringVar(&taskNameFlag, "task-name", "", "canonical supervisor-intent task name of THIS daemon (required; the proxy reads its own RuntimeSpec descriptor by this key)")
 	return c
+}
+
+// loadSerenaProxyRuntimeSpec loads the serena-proxy's OWN supervisor-intent
+// descriptor by taskName and returns its materialized RuntimeSpec, enforcing
+// the fail-loud boundary defenses (design §4) and the descriptor/flag
+// consistency contract (design §3.2).
+//
+// It NEVER reads the server manifest. Every failure path returns an
+// operator-actionable error and the caller exits non-zero; there is no silent
+// fallback to a manifest read (which would re-introduce the embed-shadow
+// defect this redesign exists to kill).
+//
+//   - descriptor not found for taskName            -> fail loud (names the task)
+//   - RuntimeSpec nil (pre-spec / stale row)        -> fail loud ("reinstall …")
+//   - SpecVersion unsupported by this binary        -> fail loud (names the version)
+//   - --port != RuntimeSpec.ExternalPort            -> fail loud (§3.2; names port)
+//   - canonical(--workspace) != RuntimeSpec.WorkspacePath -> fail loud (§3.2; names workspace)
+//
+// canonicalWorkspace MUST already be the canonical form of the --workspace
+// flag; flagPort is the raw --port value. The caller resolves both before
+// calling.
+func loadSerenaProxyRuntimeSpec(taskName, canonicalWorkspace string, flagPort int) (*api.DaemonRuntimeSpec, error) {
+	intentPath, err := api.DefaultSupervisorIntentPath()
+	if err != nil {
+		return nil, fmt.Errorf("resolve supervisor-intent path: %w", err)
+	}
+	intent, err := api.ReadSupervisorIntent(intentPath)
+	if err != nil {
+		return nil, fmt.Errorf("read supervisor-intent %s: %w", intentPath, err)
+	}
+	d := intent.FindSupervisorDaemonByTaskName(taskName)
+	if d == nil {
+		return nil, fmt.Errorf("serena-proxy: no supervisor-intent descriptor for task %q (reinstall the serena dynamic pool)", taskName)
+	}
+	if d.RuntimeSpec == nil {
+		return nil, fmt.Errorf("serena-proxy: descriptor %q carries no runtime_spec (pre-redesign or stale row); reinstall the serena dynamic pool", taskName)
+	}
+	spec := d.RuntimeSpec
+	if spec.SpecVersion != api.DaemonRuntimeSpecVersion {
+		return nil, fmt.Errorf("serena-proxy: unsupported runtime spec_version %d for task %q (this binary supports %d); reinstall the serena dynamic pool", spec.SpecVersion, taskName, api.DaemonRuntimeSpecVersion)
+	}
+
+	// Descriptor/flag consistency contract (§3.2): argv, top-level descriptor
+	// fields, and the RuntimeSpec must be one self-consistent unit. Any
+	// disagreement fails loud — no silent reconcile to one side.
+	if d.TaskName != taskName {
+		return nil, fmt.Errorf("serena-proxy: descriptor task name %q does not match --task-name %q", d.TaskName, taskName)
+	}
+	if flagPort != spec.ExternalPort || flagPort != d.Port {
+		return nil, fmt.Errorf("serena-proxy: --port %d disagrees with descriptor (runtime_spec.external_port=%d, descriptor.port=%d) for task %q; reinstall the serena dynamic pool", flagPort, spec.ExternalPort, d.Port, taskName)
+	}
+	if canonicalWorkspace != spec.WorkspacePath || canonicalWorkspace != d.Workspace {
+		return nil, fmt.Errorf("serena-proxy: --workspace %q disagrees with descriptor (runtime_spec.workspace_path=%q, descriptor.workspace=%q) for task %q; reinstall the serena dynamic pool", canonicalWorkspace, spec.WorkspacePath, d.Workspace, taskName)
+	}
+	return spec, nil
+}
+
+// serenaProxyChildArgs returns the final upstream child argv:
+// spec.ChildArgs ++ [--port, spec.UpstreamPort]. spec.ChildArgs already
+// carries the expanded --project <workspace> and the appended --context
+// <value> (materialized at build time); the proxy only appends the internal
+// port the child binds. PURE: it clones spec.ChildArgs so the spec is not
+// mutated.
+func serenaProxyChildArgs(spec *api.DaemonRuntimeSpec) []string {
+	out := make([]string, 0, len(spec.ChildArgs)+2)
+	out = append(out, spec.ChildArgs...)
+	out = append(out, "--port", strconv.Itoa(spec.UpstreamPort))
+	return out
 }

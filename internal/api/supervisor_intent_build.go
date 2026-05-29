@@ -129,20 +129,27 @@ func IsSerenaTaskName(taskName string) bool {
 //     docs/superpowers/specs/2026-05-20-serena-dynamic-pool.md §6.
 //   - Args is the canonical daemon-wrap argv:
 //     `daemon serena-proxy --server <m.Name> --workspace
-//     <ws.WorkspacePath> --port <ws.Port>`. The `serena-proxy`
-//     subcommand (internal/cli/daemon_serena.go) reads the manifest,
-//     resolves env, applies workspace-path token expansion to
-//     m.BaseArgs ++ m.DaemonTemplate.ExtraArgsTemplate, and drives
-//     the native-http daemon.HTTPHost lifecycle. The supervisor
-//     itself does NOT see the manifest; the descriptor is
-//     intentionally self-sufficient so a stale supervisor (e.g.
-//     restored from a snapshot) can spawn the right child even if
-//     the manifest is later edited.
+//     <ws.WorkspacePath> --port <ws.Port> --task-name <self>`. The
+//     trailing --task-name lets the `serena-proxy` subcommand
+//     (internal/cli/daemon_serena.go) look up ITS OWN descriptor in
+//     supervisor-intent.json and read the RuntimeSpec below — it no
+//     longer re-reads the manifest. The supervisor itself does NOT
+//     see the manifest; the descriptor is genuinely self-sufficient
+//     (RuntimeSpec carries every launcher input), so a stale
+//     supervisor (e.g. restored from a snapshot) can spawn the right
+//     child even if the embedded manifest is later edited.
+//   - RuntimeSpec is the MATERIALIZED child runtime spec (design §3):
+//     ChildCommand = m.Command; ChildArgs = expanded BaseArgs ++
+//     ExtraArgsTemplate ++ appended [--context, DaemonTemplate.Context];
+//     EnvRefs = clone(m.Env) with secret:KEY verbatim; UpstreamPort =
+//     ws.Port + NativeHTTPInternalPortOffset; ExternalPort = ws.Port;
+//     WorkspacePath = ws.WorkspacePath. The launcher reads this instead
+//     of the manifest.
 //   - Env is a CLONE of m.Env (each descriptor owns its own map).
 //   - Env values are passed verbatim. Secret-placeholder expansion
 //     (`secret:KEY` references resolved against the vault) is the
-//     caller's responsibility - this helper is pure and does NOT
-//     consult any vault or runtime state.
+//     launcher's responsibility (over RuntimeSpec.EnvRefs) - this
+//     helper is pure and does NOT consult any vault or runtime state.
 //   - Workspace is the canonical absolute path from the registry row.
 //   - Port is the per-workspace port persisted on the registry row.
 //     The fan-out does NOT re-allocate.
@@ -162,7 +169,8 @@ func IsSerenaTaskName(taskName string) bool {
 //
 // Plan ref: docs/superpowers/plans/2026-05-20-serena-supervisor-unified.md D.2.
 // Spec ref: docs/superpowers/specs/2026-05-20-serena-dynamic-pool.md §6
-//   (lifecycle / spawn args, port: workspace.serena_port).
+//
+//	(lifecycle / spawn args, port: workspace.serena_port).
 func BuildSupervisorDaemonsForSerena(
 	m *config.ServerManifest,
 	workspaces []WorkspaceEntry,
@@ -173,6 +181,17 @@ func BuildSupervisorDaemonsForSerena(
 		return nil
 	}
 	if m.Kind != config.KindWorkspaceScoped {
+		return nil
+	}
+	// native-http build-time transport gate (design §3.1). The proxy no
+	// longer re-validates transport at runtime (it reads a materialized
+	// RuntimeSpec, not the manifest), and a stdio-bridge + daemon_template +
+	// kind:workspace-scoped manifest PASSES config.ServerManifest.Validate
+	// today — so this is the only thing stopping a non-native-http
+	// dynamic-pool manifest from reaching the HTTP-reverse-proxy spawn path.
+	// Return nil (the install/migrate caller fails loud via the
+	// InstallParsedManifest contract gate, which also enforces native-http).
+	if m.Transport != config.TransportNativeHTTP {
 		return nil
 	}
 	if len(workspaces) == 0 {
@@ -198,26 +217,29 @@ func BuildSupervisorDaemonsForSerena(
 			daemonKey = WorkspaceKey(ws.WorkspacePath)
 		}
 
-		// Canonical supervisor argv per spec §6: the supervisor
-		// invokes `mcphub daemon serena-proxy --server <name>
-		// --workspace <path> --port <port>`. The internal
-		// `daemon serena-proxy` subcommand
-		// (internal/cli/daemon_serena.go) owns the uvx-fork
-		// details that the manifest's Command/BaseArgs/
-		// ExtraArgsTemplate describe, applies the
-		// ExpandWorkspacePathTokens template substitution, and
-		// drives the native-http daemon.HTTPHost lifecycle. The
-		// supervisor itself does NOT see the manifest - the
-		// descriptor is intentionally self-sufficient.
+		// Canonical supervisor argv: the supervisor invokes
+		// `mcphub daemon serena-proxy --server <name> --workspace
+		// <path> --port <port> --task-name <self>`. The trailing
+		// --task-name lets the `serena-proxy` subcommand
+		// (internal/cli/daemon_serena.go) look up ITS OWN descriptor
+		// in supervisor-intent.json and read the materialized
+		// RuntimeSpec below — it no longer re-reads the manifest. The
+		// supervisor itself execs exec.Command(d.Command, d.Args...)
+		// verbatim, so the descriptor is genuinely self-sufficient:
+		// every input the launcher needs (child command/args incl.
+		// --context + --project, env refs, internal/external ports,
+		// workspace) lives on the descriptor, NOT in the manifest.
+		taskName := SerenaTaskNameForWorkspace(ws.WorkspacePath)
 		args := []string{
 			"daemon", "serena-proxy",
 			"--server", m.Name,
 			"--workspace", ws.WorkspacePath,
 			"--port", strconv.Itoa(ws.Port),
+			"--task-name", taskName,
 		}
 
 		out = append(out, SupervisorDaemon{
-			TaskName:     SerenaTaskNameForWorkspace(ws.WorkspacePath),
+			TaskName:     taskName,
 			Server:       m.Name,
 			Daemon:       daemonKey,
 			Command:      mcphubBinaryPath,
@@ -226,9 +248,62 @@ func BuildSupervisorDaemonsForSerena(
 			Workspace:    ws.WorkspacePath,
 			Port:         ws.Port,
 			ManifestHash: manifestHash,
+			RuntimeSpec:  materializeSerenaRuntimeSpec(m, ws),
 		})
 	}
 	return out
+}
+
+// materializeSerenaRuntimeSpec builds the per-workspace DaemonRuntimeSpec the
+// serena-proxy launcher reads instead of re-parsing the manifest. PURE: no
+// filesystem, no vault, no runtime state — same inputs yield the same spec.
+//
+// ChildArgs assembly is the SINGLE mechanism that fixes finding #4 (lost
+// --context): expand ${workspace.path} over BaseArgs ++ ExtraArgsTemplate via
+// config.ExpandWorkspacePathTokens, then APPEND --context <DaemonTemplate.Context>
+// as a separate trailing pair (the template does NOT carry a --context token —
+// design §5). ChildArgs does NOT include --port; the launcher appends the
+// internal (upstream) port at spawn.
+//
+// EnvRefs is a CLONE of m.Env with secret:KEY values left VERBATIM (resolved
+// in the launcher against the vault — cleartext-free on disk, design §3).
+//
+// Port math: UpstreamPort = ws.Port + config.NativeHTTPInternalPortOffset;
+// ExternalPort = ws.Port; WorkspacePath = ws.WorkspacePath. ExternalPort and
+// WorkspacePath mirror the top-level SupervisorDaemon.Port / .Workspace fields
+// (the §3.2 consistency contract asserts they agree at proxy startup).
+//
+// Design ref: docs/superpowers/specs/2026-05-29-serena-migrate-redesign-descriptor-proxy.md §3/§5.
+func materializeSerenaRuntimeSpec(m *config.ServerManifest, ws WorkspaceEntry) *DaemonRuntimeSpec {
+	return &DaemonRuntimeSpec{
+		SpecVersion:   DaemonRuntimeSpecVersion,
+		ChildCommand:  m.Command,
+		ChildArgs:     buildSerenaChildArgs(m, ws.WorkspacePath),
+		EnvRefs:       cloneStringMap(m.Env),
+		UpstreamPort:  ws.Port + config.NativeHTTPInternalPortOffset,
+		ExternalPort:  ws.Port,
+		WorkspacePath: ws.WorkspacePath,
+	}
+}
+
+// buildSerenaChildArgs assembles the upstream child argv from a serena
+// dynamic-pool manifest + a workspace path. It is the one place the
+// --context append (finding #4) and the ${workspace.path} expansion live, so
+// the materializer and any future caller share a single, unit-testable rule.
+//
+//	childArgs = ExpandWorkspacePathTokens(BaseArgs ++ ExtraArgsTemplate, wsPath)
+//	            ++ ["--context", DaemonTemplate.Context]
+//
+// --context is APPENDED (not a template token): config.ExpandWorkspacePathTokens
+// only resolves ${workspace.path}, so a ${context} token would emit a literal
+// invalid argument (design §5). Callers MUST pass a non-nil DaemonTemplate
+// manifest (BuildSupervisorDaemonsForSerena guards that upstream).
+func buildSerenaChildArgs(m *config.ServerManifest, workspacePath string) []string {
+	templateArgs := make([]string, 0, len(m.BaseArgs)+len(m.DaemonTemplate.ExtraArgsTemplate))
+	templateArgs = append(templateArgs, m.BaseArgs...)
+	templateArgs = append(templateArgs, m.DaemonTemplate.ExtraArgsTemplate...)
+	childArgs := config.ExpandWorkspacePathTokens(templateArgs, workspacePath)
+	return append(childArgs, "--context", m.DaemonTemplate.Context)
 }
 
 // cloneStringMap returns a shallow copy of m, or nil when m is nil.

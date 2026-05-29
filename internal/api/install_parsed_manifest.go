@@ -116,6 +116,19 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	if m.Kind != config.KindWorkspaceScoped || m.DaemonTemplate == nil {
 		return "", fmt.Errorf("InstallParsedManifest only installs kind=%q dynamic-pool manifests with a daemon_template (manifest %q is kind=%q, has daemon_template=%t); install global or legacy manifests through (*API).Install", config.KindWorkspaceScoped, m.Name, m.Kind, m.DaemonTemplate != nil)
 	}
+	// native-http gate (design §3.1). The serena-proxy no longer re-validates
+	// transport at runtime (it reads a materialized RuntimeSpec, not the
+	// manifest). A stdio-bridge + daemon_template + kind:workspace-scoped
+	// manifest PASSES config.ServerManifest.Validate today (Validate rejects
+	// daemon_template only for kind!=workspace-scoped or transport=remote-http
+	// — internal/config/manifest.go), so this is the only thing stopping a
+	// non-native-http dynamic-pool manifest from reaching the
+	// HTTP-reverse-proxy spawn path. Reject BEFORE any mutation, same
+	// fail-loud style as the kind+template gate above. Additive admission
+	// tightening only — the write/rollback/deferred-start shape is unchanged.
+	if m.Transport != config.TransportNativeHTTP {
+		return "", fmt.Errorf("InstallParsedManifest only installs transport=%q dynamic-pool manifests (manifest %q is transport=%q); a daemon_template manifest spawns an HTTP reverse-proxy, which requires native-http", config.TransportNativeHTTP, m.Name, m.Transport)
+	}
 
 	// 1a. Preflight: check-only gate shared with the legacy install paths.
 	// Before the pre-flight intent write and before any mutation, so a missing
