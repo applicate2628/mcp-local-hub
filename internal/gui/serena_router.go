@@ -527,29 +527,16 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		// when this request omitted the header.
 		clientProtocolVersion = sessionVersion
 	}
-	// Finding #2 (workspace-rebind leak): when this client session was
-	// previously bound to a DIFFERENT workspace's daemon, resolveDaemonSession
-	// displaces that old binding. Tear the orphaned old daemon session down
-	// upstream (best-effort) so it does not leak until the old daemon's idle
-	// expiry. The closure resolves the OLD workspace's URL by its key (via the
-	// resolver's by-key scan) and forwards a detached + short-bounded DELETE
-	// (Invariant D). It carries the OLD daemon session's own negotiated version
-	// (Finding #8 — passed back from the store), not this request's version, so
-	// a strict old daemon does not version-reject the teardown.
-	teardownDisplaced := func(oldWsKey, oldDaemonSessionID, oldDaemonProtocolVersion string) {
-		oldWS := s.resolveWorkspaceByKey(deps, oldWsKey)
-		if oldWS == nil {
-			return
-		}
-		oldURL := upstreamURLFn(oldWS)
-		if oldURL == "" {
-			return
-		}
-		delCtx, delCancel := cleanupContext(deps.UpstreamTimeout)
-		defer delCancel()
-		s.forwardSerenaDeleteUpstream(delCtx, httpClient, oldURL, oldDaemonSessionID, effectiveHandshakeProtocolVersion(oldDaemonProtocolVersion), oldWsKey, oldWS, auditFn)
-	}
-	daemonSessionID, daemonProtocolVersion, hsErr := s.serenaDaemonSessions.resolveDaemonSession(r.Context(), httpClient, upstreamURL, sessionID, ws, clientProtocolVersion, teardownDisplaced)
+	// Round-9 (Finding 4): a workspace switch on this client session no
+	// longer eagerly tears down the OLD workspace's daemon session. The
+	// rounds 7+8 displaced-teardown raced a still-in-flight tool call in the
+	// old workspace (the router tracks no per-daemon in-flight requests), so
+	// per the reviewer's round-9 guidance we revert to TTL-based reclaim:
+	// resolveDaemonSession overwrites the LOCAL binding immediately (no local
+	// leak) and the orphaned UPSTREAM session ages out on the daemon's idle
+	// clock. The explicit client-origin DELETE (handleSerenaDelete) and the
+	// partial-handshake cleanup remain — only the switch-time teardown is gone.
+	daemonSessionID, daemonProtocolVersion, hsErr := s.serenaDaemonSessions.resolveDaemonSession(r.Context(), httpClient, upstreamURL, sessionID, ws, clientProtocolVersion)
 	if hsErr != nil {
 		if isTimeoutErr(hsErr) {
 			_ = auditFn("warn", "serena-upstream-timeout", map[string]any{
@@ -634,17 +621,27 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	// negotiated at initialize (internal/api/hub_mcp_handler.go gate 7);
 	// daemonProtocolVersion (from resolveDaemonSession) is exactly that version
 	// — it may differ from clientProtocolVersion when the daemon negotiated a
-	// different supported revision (Finding #8). The PRESENCE gate stays
-	// clientProtocolVersion != "": a known router session always has a
-	// non-empty negotiated version (set above by Finding G), and a legacy
-	// caller that sent a header keeps getting one; an UNKNOWN session that
-	// omitted the header still forwards NO header (today's raw-header
-	// back-compat for a direct caller is preserved).
+	// different supported revision (Finding #8).
+	//
+	// Round-9 (Finding 1 — presence gate fix): the PRESENCE gate is the
+	// RESOLVED forwardVersion, NOT the ORIGINAL clientProtocolVersion. A
+	// path-only / older caller that omits MCP-Protocol-Version still drives a
+	// daemon handshake (resolveDaemonSession handshakes under the router
+	// default when the client header is empty), so daemonProtocolVersion — and
+	// hence forwardVersion — is non-empty even though clientProtocolVersion is
+	// empty. Gating on clientProtocolVersion != "" suppressed the header in
+	// exactly that case, and a strict daemon then 400s the non-initialize
+	// tool-call as "session present, no version header". Gating on
+	// forwardVersion != "" forwards the resolved version whenever one exists.
+	// A truly sessionless daemon issues no session id AND no negotiated version
+	// (daemonProtocolVersion == ""), so forwardVersion stays "" when the client
+	// also omitted the header → still NO header (the raw-header back-compat for
+	// a sessionless/direct caller is preserved).
 	forwardVersion := clientProtocolVersion
 	if daemonProtocolVersion != "" {
 		forwardVersion = daemonProtocolVersion
 	}
-	if clientProtocolVersion != "" {
+	if forwardVersion != "" {
 		upstreamReq.Header.Set("MCP-Protocol-Version", forwardVersion)
 	}
 	if daemonSessionID != "" {
@@ -882,24 +879,44 @@ func (s *Server) handleSerenaDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 // resolveDeleteWorkspace resolves the workspace for a DELETE/cancel forward
-// from a client session that carries no path-arg (Findings B + H). It tries
-// the sticky deps.Sessions binding FIRST (cheap, a value-copy, present in
-// the common case where a tool call already bound the session) and falls
-// back to a by-key scan of the resolver's ListWorkspaces — the existing
-// workspaceLister capability (serena_router_lifecycle.go) — for the entry
-// whose WorkspaceKey == wsKey (Finding B's leak case, where the sticky
-// binding never ran). Returns nil when neither path resolves it (unwired
-// sessions + a resolver without enumeration, or a key no longer registered).
+// from a client session that carries no path-arg (Findings B + H). The DELETE
+// / cancel must reach the daemon that actually holds the daemon session being
+// torn down / cancelled, so the daemon binding's wsKey is the AUTHORITATIVE
+// key — the daemon session id and its workspace travel together.
+//
+// Round-9 (Finding 2 — prefer the daemon binding's wsKey over the stale
+// sticky binding): the by-key resolution is tried FIRST when wsKey is
+// non-empty. During a workspace switch the daemon binding (serenaDaemonSessions)
+// is updated to the NEW workspace BEFORE the sticky deps.Sessions binding is
+// refreshed (sticky BindSession runs only AFTER the upstream tool response).
+// In that window a concurrent DELETE / notifications/cancelled passes the NEW
+// wsKey (read from the daemon binding by both callers) while the sticky
+// deps.Sessions.LookupSession still returns the OLD workspace. The pre-fix
+// order tried the sticky lookup FIRST and so resolved the OLD workspace,
+// forwarding the (new) daemon session id to the WRONG daemon — failing to
+// actually tear down / cancel. Resolving by the daemon binding's wsKey first
+// keeps the daemon session id and its workspace consistent. The sticky lookup
+// remains the fallback for Finding B's leak case (a daemon binding with an
+// EMPTY wsKey, or a key no longer registered, while the sticky binding still
+// resolves). Returns nil when neither path resolves it.
 func (s *Server) resolveDeleteWorkspace(deps *serenaRouterDeps, sessionID, wsKey string) *api.WorkspaceEntry {
 	if deps == nil {
 		return nil
 	}
+	// Prefer the daemon binding's wsKey (the workspace the daemon session
+	// actually belongs to) so a mid-switch stale sticky binding cannot
+	// misroute the teardown/cancel to the old daemon (Finding 2).
+	if ws := s.resolveWorkspaceByKey(deps, wsKey); ws != nil {
+		return ws
+	}
+	// Fallback: the daemon binding had no resolvable wsKey (empty, or a key
+	// no longer registered) but the sticky binding still resolves (Finding B).
 	if deps.Sessions != nil && sessionID != "" {
 		if ws := deps.Sessions.LookupSession(sessionID); ws != nil {
 			return ws
 		}
 	}
-	return s.resolveWorkspaceByKey(deps, wsKey)
+	return nil
 }
 
 // resolveWorkspaceByKey scans the resolver's ListWorkspaces — the existing

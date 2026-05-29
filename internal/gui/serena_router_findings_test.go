@@ -1215,11 +1215,20 @@ func TestSerenaRouter_ToolCall_ForwardsNegotiatedVersionWhenHeaderOmitted(t *tes
 	}
 }
 
-// Finding 1 (regression guard) — a tool-call on an UNKNOWN session (legacy
-// direct caller) that OMITS the version header forwards with NO header set
-// (today's raw-header behavior preserved: an absent header stays absent for
-// a session this router never minted).
-func TestSerenaRouter_ToolCall_NoRouterSessionOmittedHeaderStaysAbsent(t *testing.T) {
+// Round-9 (Finding 1) — a tool-call on an UNKNOWN session (a raw client id
+// this router never minted) that OMITS the version header still drives a
+// daemon handshake, and when the daemon MINTS a session the forwarded
+// tools/call MUST carry the resolved (router-default) version. The handshake
+// established the daemon session under the router default, and a strict daemon
+// binds the header on a non-initialize POST to its session's initialized
+// version — so omitting it would 400. (Pre-fix this asserted the header
+// "stays absent" because the gate was clientProtocolVersion != ""; that was
+// the Finding 1 bug for a session-bearing daemon. The truly-sessionless
+// back-compat case — daemon issues NO session id AND NO negotiated version, so
+// forwardVersion == "" → still no header — is preserved by the
+// forwardVersion != "" gate; the fake daemon here always mints a session, so
+// it cannot model the sessionless case.)
+func TestSerenaRouter_ToolCall_UnknownSessionOmittedHeaderForwardsResolvedVersion(t *testing.T) {
 	daemon := newFakeSerenaDaemon("alpha")
 	ts := httptest.NewServer(daemon.handler())
 	t.Cleanup(ts.Close)
@@ -1232,17 +1241,62 @@ func TestSerenaRouter_ToolCall_NoRouterSessionOmittedHeaderStaysAbsent(t *testin
 	}
 	s := newSerenaTestServer(t, deps)
 
-	// A raw client id this router never minted, NO version header.
+	// A raw client id this router never minted, NO version header. The daemon
+	// mints a session on handshake (default negotiation echoes the requested
+	// router-default version), so the forward must carry that version.
 	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"})
 	rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": "never-minted-here"})
 	if rr.Code != http.StatusOK {
 		t.Fatalf("tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
 	}
 	daemon.mu.Lock()
-	_, present := daemon.lastToolHeaders["Mcp-Protocol-Version"]
+	gotToolPV := daemon.lastToolHeaders.Get("MCP-Protocol-Version")
 	daemon.mu.Unlock()
-	if present {
-		t.Errorf("forwarded tools/call carried an MCP-Protocol-Version header for an unknown session; want none (legacy raw-header behavior)")
+	if gotToolPV != handshakeInitializeProtocolVersion {
+		t.Errorf("forwarded tools/call MCP-Protocol-Version = %q, want the resolved router-default %q (Finding 1: a session-bearing daemon needs the version header even when the client omitted it)", gotToolPV, handshakeInitializeProtocolVersion)
+	}
+}
+
+// ---------------------------------------------------------------------
+// Round-9 (Finding 1 — presence gate fix) — a PATH-ONLY tool call (no client
+// Mcp-Session-Id AND no MCP-Protocol-Version header) still drives a daemon
+// handshake under the router default, so the resolved forwardVersion is
+// non-empty. The forwarded tools/call POST MUST carry that resolved version,
+// even though the ORIGINAL client header was empty. The pre-fix presence gate
+// (clientProtocolVersion != "") suppressed the header in exactly this case,
+// and the fixture daemon — which requires a session AND (by header presence)
+// would otherwise be sent no version — exercises a strict daemon's
+// non-initialize POST. Distinct from the KNOWN-session omitted-header test:
+// there Finding G sets clientProtocolVersion to the session version, so the
+// old gate already passed; here there is NO router session at all.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_PathOnlyToolCall_ForwardsResolvedVersionHeader(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	// Path-only tool call: NO Mcp-Session-Id (so no router session, Finding G
+	// does not fire) and NO MCP-Protocol-Version. The router resolves the
+	// workspace from the path, handshakes a daemon session under the router
+	// default, and must forward THAT resolved version on the tool POST.
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"})
+	rr := postSerena(t, s, body, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("path-only tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	daemon.mu.Lock()
+	gotToolPV := daemon.lastToolHeaders.Get("MCP-Protocol-Version")
+	daemon.mu.Unlock()
+	if gotToolPV != handshakeInitializeProtocolVersion {
+		t.Errorf("forwarded path-only tools/call MCP-Protocol-Version = %q, want the resolved router-default %q (Finding 1: gate on forwardVersion, not the empty client header)", gotToolPV, handshakeInitializeProtocolVersion)
 	}
 }
 
@@ -1329,6 +1383,80 @@ func TestSerenaRouter_Delete_OmittedHeaderForwardsSessionVersion(t *testing.T) {
 	daemon.mu.Unlock()
 	if gotPV != negotiated {
 		t.Errorf("upstream DELETE MCP-Protocol-Version (omitted client header) = %q, want the session's negotiated %q", gotPV, negotiated)
+	}
+}
+
+// ---------------------------------------------------------------------
+// Round-9 (Finding 2 — resolve teardown workspace from the daemon binding's
+// wsKey, not the stale sticky binding). During a workspace switch the daemon
+// binding (serenaDaemonSessions) is updated to the NEW workspace BEFORE the
+// sticky deps.Sessions binding is refreshed (sticky BindSession runs only
+// after the upstream tool response). A concurrent DELETE in that window passes
+// the NEW wsKey (read from the daemon binding) but the pre-fix
+// resolveDeleteWorkspace tried the STALE sticky lookup first and resolved the
+// OLD workspace, sending the (new) daemon session id to the WRONG daemon — the
+// teardown never reached the daemon that actually holds the session. This test
+// seeds exactly that mid-switch state (daemon binding -> beta; sticky -> alpha)
+// and asserts the upstream DELETE reaches the BETA daemon carrying the beta
+// daemon session id, and the alpha daemon is never contacted.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_Delete_ResolvesWorkspaceFromDaemonBindingNotStaleSticky(t *testing.T) {
+	daemonA := newFakeSerenaDaemon("alpha")
+	tsA := httptest.NewServer(daemonA.handler())
+	t.Cleanup(tsA.Close)
+	daemonB := newFakeSerenaDaemon("beta")
+	tsB := httptest.NewServer(daemonB.handler())
+	t.Cleanup(tsB.Close)
+
+	wsA := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	wsB := &api.WorkspaceEntry{WorkspaceKey: "beta", WorkspacePath: "/proj/beta", Port: 9202}
+	deps := &serenaRouterDeps{
+		Resolver: &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{wsA, wsB}}, list: []*api.WorkspaceEntry{wsA, wsB}},
+		Sessions: NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string {
+			if ws.WorkspaceKey == "beta" {
+				return tsB.URL
+			}
+			return tsA.URL
+		},
+		AuditFn: func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	const clientSID = "sess-stale-sticky"
+	const negotiated = "2025-06-18"
+	const betaDaemonSID = "beta-daemon-session-xyz"
+	// Make beta accept this daemon session id on its non-initialize requests.
+	daemonB.mu.Lock()
+	daemonB.issued[betaDaemonSID] = true
+	daemonB.mu.Unlock()
+
+	// Seed the mid-switch state directly:
+	//   - router session is known (so the DELETE proceeds to teardown).
+	//   - daemon binding -> beta (the NEW workspace the session moved to).
+	//   - sticky binding -> alpha (the STALE OLD workspace, not yet refreshed).
+	s.serenaRouterSessions.store(clientSID, negotiated)
+	s.serenaDaemonSessions.store(clientSID, "beta", betaDaemonSID, negotiated)
+	deps.Sessions.BindSession(clientSID, wsA)
+
+	rr := deleteSerena(t, s, map[string]string{"Mcp-Session-Id": clientSID, "MCP-Protocol-Version": negotiated})
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("DELETE status = %d, want 204; body=%s", rr.Code, rr.Body.String())
+	}
+
+	// The teardown must reach the BETA daemon (the daemon binding's wsKey),
+	// NOT the stale-sticky alpha daemon.
+	if got := daemonDeleteHits(daemonB); got != 1 {
+		t.Errorf("beta DELETE hits = %d, want 1 (teardown must reach the daemon binding's workspace, not the stale sticky)", got)
+	}
+	if got := daemonDeleteHits(daemonA); got != 0 {
+		t.Errorf("alpha DELETE hits = %d, want 0 (the stale sticky workspace must NOT receive the teardown — Finding 2 misroute)", got)
+	}
+	daemonB.mu.Lock()
+	gotDelSID := daemonB.lastDeleteSession
+	daemonB.mu.Unlock()
+	if gotDelSID != betaDaemonSID {
+		t.Errorf("beta DELETE Mcp-Session-Id = %q, want the beta daemon session %q (the daemon session id and its workspace must travel together)", gotDelSID, betaDaemonSID)
 	}
 }
 
@@ -1554,4 +1682,94 @@ func waitForDaemonDeleteHits(t *testing.T, d *fakeSerenaDaemon, want int) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("daemon DELETE hits = %d after 2s, want >= %d (Finding 5: one-shot session must be torn down)", daemonDeleteHits(d), want)
+}
+
+// ---------------------------------------------------------------------
+// Round-9 (Finding 3 — check the workspace pool before serving the cursorless
+// tools/list cache). After a successful cursorless tools/list caches the
+// catalog, unregistering the last workspace must make a subsequent tools/list
+// return the empty-pool error rather than the stale cached catalog (a client
+// otherwise keeps seeing tools for up to the TTL though no daemon can execute
+// them). This test seeds the cache via a real fetch, empties the pool, then
+// asserts the empty-pool error — and that a re-registered pool re-fetches
+// fresh (the stale entry was invalidated, not resurrected).
+// ---------------------------------------------------------------------
+func TestSerenaRouter_ToolsList_EmptyPoolBypassesStaleCache(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	daemon.tool = func(w http.ResponseWriter, r *http.Request, b []byte) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"find_symbol"}]}}`))
+	}
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+	toolHits := func() int { daemon.mu.Lock(); defer daemon.mu.Unlock(); return daemon.toolHits }
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	resolver := &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}}
+	deps := &serenaRouterDeps{
+		Resolver:      resolver,
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	hdr := map[string]string{"Mcp-Session-Id": sid}
+
+	// First tools/list (pool populated) -> fetches + caches the catalog.
+	rr1 := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), hdr)
+	if rr1.Code != http.StatusOK {
+		t.Fatalf("seed tools/list status = %d; body=%s", rr1.Code, rr1.Body.String())
+	}
+	assertToolsListNames(t, rr1.Body.Bytes(), []string{"find_symbol"})
+	if got := toolHits(); got != 1 {
+		t.Fatalf("daemon tool hits after seed = %d, want 1", got)
+	}
+
+	// Empty the pool (the last workspace was unregistered). The cache still
+	// holds the catalog for this version.
+	resolver.list = nil
+
+	// tools/list now must return the empty-pool error — NOT the stale cache.
+	rr2 := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), hdr)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("empty-pool tools/list status = %d, want 200 (in-band JSON-RPC error); body=%s", rr2.Code, rr2.Body.String())
+	}
+	var resp struct {
+		Result json.RawMessage `json:"result"`
+		Error  *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rr2.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode empty-pool tools/list: %v; raw=%s", err, rr2.Body.String())
+	}
+	if resp.Error == nil {
+		t.Fatalf("empty-pool tools/list returned no error (served the stale cache?); raw=%s", rr2.Body.String())
+	}
+	if resp.Error.Code != serenaNoWorkspaceCode {
+		t.Errorf("empty-pool tools/list error code = %d, want %d (Finding 3: empty pool must win over a stale cache)", resp.Error.Code, serenaNoWorkspaceCode)
+	}
+	if len(resp.Result) > 0 {
+		t.Errorf("empty-pool tools/list carried a result (the stale cached catalog); want error only. result=%s", string(resp.Result))
+	}
+	// The daemon was never re-contacted on the empty-pool path (no candidate).
+	if got := toolHits(); got != 1 {
+		t.Errorf("daemon tool hits after empty-pool tools/list = %d, want 1 (no daemon to proxy to)", got)
+	}
+
+	// Re-register the workspace: tools/list must re-FETCH (the stale entry was
+	// invalidated when the pool was empty, so it is not resurrected).
+	resolver.list = []*api.WorkspaceEntry{ws}
+	rr3 := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), hdr)
+	if rr3.Code != http.StatusOK {
+		t.Fatalf("re-registered tools/list status = %d; body=%s", rr3.Code, rr3.Body.String())
+	}
+	assertToolsListNames(t, rr3.Body.Bytes(), []string{"find_symbol"})
+	if got := toolHits(); got != 2 {
+		t.Errorf("daemon tool hits after re-register = %d, want 2 (the invalidated cache must re-fetch, not resurrect)", got)
+	}
 }

@@ -239,12 +239,18 @@ func TestSerenaRouter_ToolsList_OneShotTeardownBoundedNotSixtySeconds(t *testing
 }
 
 // ---------------------------------------------------------------------
-// #2 — a workspace switch on the SAME client session tears down the OLD
-// workspace's daemon session upstream (best-effort), closing the per-switch
-// leak. The pre-fix store overwrote the binding silently, leaking the alpha
-// daemon session until its idle expiry.
+// Round-9 (Finding 4) — a workspace switch on the SAME client session does
+// NOT eagerly tear down the OLD workspace's daemon session. Rounds 7+8 issued
+// a synchronous upstream DELETE of the displaced old session; the reviewer
+// found that races a still-in-flight tool call in the old workspace (the
+// router tracks no per-daemon in-flight requests), so per the round-9 guidance
+// the old upstream session is left to the daemon's idle TTL. This test asserts
+// NO eager teardown fires on the switch and that the LOCAL binding is replaced
+// with the new workspace's daemon session. (Replaces the rounds 7+8
+// "TearsDownOldDaemonSession" test, which is the behavior we intentionally
+// reverted.)
 // ---------------------------------------------------------------------
-func TestSerenaRouter_WorkspaceSwitch_TearsDownOldDaemonSession(t *testing.T) {
+func TestSerenaRouter_WorkspaceSwitch_NoEagerDaemonSessionTeardown(t *testing.T) {
 	daemonA := newFakeSerenaDaemon("alpha")
 	tsA := httptest.NewServer(daemonA.handler())
 	t.Cleanup(tsA.Close)
@@ -254,8 +260,6 @@ func TestSerenaRouter_WorkspaceSwitch_TearsDownOldDaemonSession(t *testing.T) {
 
 	wsA := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
 	wsB := &api.WorkspaceEntry{WorkspaceKey: "beta", WorkspacePath: "/proj/beta", Port: 9202}
-	// listerStubResolver so resolveWorkspaceByKey can map the OLD wsKey back
-	// to its workspace for the displaced teardown.
 	deps := &serenaRouterDeps{
 		Resolver: &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{wsA, wsB}}, list: []*api.WorkspaceEntry{wsA, wsB}},
 		Sessions: NewInMemorySessionRouter(),
@@ -282,31 +286,44 @@ func TestSerenaRouter_WorkspaceSwitch_TearsDownOldDaemonSession(t *testing.T) {
 		t.Fatalf("alpha DELETE hits before switch = %d, want 0", got)
 	}
 
-	// Call 2 (SAME client session) -> beta. The store displaces the alpha
-	// binding; #2 requires the orphaned alpha daemon session to be DELETEd
-	// upstream. The displaced teardown is synchronous (within resolveDaemonSession),
-	// so it has fired by the time the response returns.
+	// Call 2 (SAME client session) -> beta. The store OVERWRITES the alpha
+	// binding locally. Round-9: NO eager upstream DELETE of the alpha daemon
+	// session may fire (it would race a still-in-flight alpha tool call); the
+	// orphaned alpha upstream session ages out on the daemon's idle clock.
 	if rr := postSerena(t, s, buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/beta/y"}), map[string]string{"Mcp-Session-Id": clientSID}); rr.Code != http.StatusOK {
 		t.Fatalf("beta call status = %d; body=%s", rr.Code, rr.Body.String())
 	}
+	// Give any erroneous deferred/eager teardown a chance to fire, then assert
+	// none did (the switch must be teardown-free).
+	time.Sleep(50 * time.Millisecond)
 
-	// The ALPHA daemon session is torn down (closing the per-switch leak),
-	// carrying the alpha-issued session id.
-	if got := daemonDeleteHits(daemonA); got != 1 {
-		t.Errorf("alpha DELETE hits after switch = %d, want 1 (#2: the displaced old daemon session must be torn down)", got)
+	// No DELETE was issued to EITHER daemon by the switch (the alpha session
+	// is left to TTL; the beta session is live and must not be torn down).
+	if got := daemonDeleteHits(daemonA); got != 0 {
+		t.Errorf("alpha DELETE hits after switch = %d, want 0 (Round-9: the displaced old session is left to TTL, NOT eagerly torn down)", got)
 	}
-	daemonA.mu.Lock()
-	gotDelSID := daemonA.lastDeleteSession
-	daemonA.mu.Unlock()
-	if gotDelSID != alphaDaemonSID {
-		t.Errorf("alpha DELETE Mcp-Session-Id = %q, want the displaced alpha daemon id %q", gotDelSID, alphaDaemonSID)
-	}
-	// The beta binding is now live and was NOT torn down.
 	if got := daemonDeleteHits(daemonB); got != 0 {
 		t.Errorf("beta DELETE hits after switch = %d, want 0 (the new live session must NOT be torn down)", got)
 	}
-	if _, _, _, present := s.serenaDaemonSessions.bindingFor(clientSID); !present {
-		t.Errorf("client session lost its (beta) binding after the switch; want the new binding live")
+
+	// The LOCAL binding is now the BETA daemon session (the switch overwrote
+	// the alpha binding; the new workspace's session is what's bound).
+	betaDaemonSID, present, gotWsKey := bindingDaemonSession(s, clientSID)
+	if !present {
+		t.Fatalf("client session lost its (beta) binding after the switch; want the new binding live")
+	}
+	if gotWsKey != "beta" {
+		t.Errorf("bound wsKey after switch = %q, want beta (the new workspace's session is bound)", gotWsKey)
+	}
+	if betaDaemonSID == alphaDaemonSID {
+		t.Errorf("bound daemon session after switch = %q (still the alpha id); want the new beta daemon session", betaDaemonSID)
+	}
+	// Sanity: the beta daemon actually minted the now-bound session.
+	daemonB.mu.Lock()
+	betaMinted := daemonB.issued[betaDaemonSID]
+	daemonB.mu.Unlock()
+	if !betaMinted {
+		t.Errorf("bound daemon session %q was not minted by the beta daemon; the switch did not rebind to beta", betaDaemonSID)
 	}
 }
 

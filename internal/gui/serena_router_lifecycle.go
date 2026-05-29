@@ -172,6 +172,16 @@ func (c *toolsListCache) put(protocolVersion string, result json.RawMessage, now
 	}
 }
 
+// invalidate drops any cached entry for protocolVersion (no-op when absent).
+// Finding 3: handleToolsList calls this when the workspace pool is empty so a
+// catalog cached while a daemon existed cannot be resurrected on a later read
+// after the last workspace was unregistered.
+func (c *toolsListCache) invalidate(protocolVersion string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.byVer, protocolVersion)
+}
+
 // writeJSONRPCResult writes a JSON-RPC 2.0 success envelope carrying id
 // and result at HTTP 200. id is threaded verbatim from the request (MCP
 // requires the response id to match the request id); a nil/absent id is
@@ -662,17 +672,18 @@ func (s *Server) handleToolsList(
 	s.serenaRouterSessions.touch(sessionID)
 
 	now := time.Now()
-	// A paginated (cursor-bearing) tools/list bypasses the first-page
-	// cache on BOTH read and write (P2 finding 2). The cache read/write are
-	// keyed by the session's negotiated protocol version (P2 finding 5).
-	isCursorRequest := toolsListIsCursorRequest(body)
-	if !isCursorRequest {
-		if cached, ok := s.serenaToolsListCache.get(negotiatedVersion, now); ok {
-			writeJSONRPCResult(w, tb.ID, json.RawMessage(cached), nil)
-			return
-		}
-	}
 
+	// Round-9 (Finding 3 — check the workspace pool BEFORE serving the
+	// cursorless cache). The empty-pool determination is enumerated FIRST so a
+	// stale cached catalog is never served once the last workspace is
+	// unregistered. The pre-fix order read the cache first and returned the
+	// cached tool list on a hit, so a client kept seeing tools for up to the
+	// TTL even though no daemon could execute them (the operator had just run
+	// `mcphub workspace unregister`). Enumerating the pool up front makes the
+	// empty-pool error authoritative over the cache: when the pool is empty we
+	// invalidate the now-unservable entry for this version and fall through to
+	// the fail-loud empty-pool error, the same honest/retryable signal the
+	// no-daemon path uses.
 	lister, ok := deps.Resolver.(workspaceLister)
 	if !ok {
 		// Resolver cannot enumerate workspaces — treat as empty pool.
@@ -683,9 +694,27 @@ func (s *Server) handleToolsList(
 
 	entries := lister.ListWorkspaces()
 	if len(entries) == 0 {
+		// Empty pool: do NOT serve the cache (Finding 3). Invalidate the stale
+		// entry for this version so a later request after a workspace is
+		// re-registered re-fetches fresh rather than resurrecting it, then
+		// fall through to the fail-loud empty-pool error.
+		s.serenaToolsListCache.invalidate(negotiatedVersion)
 		writeJSONRPCError(w, tb.ID, serenaNoWorkspaceCode,
 			"no serena workspace registered: cannot enumerate tools until at least one workspace is registered (run `mcphub workspace register <path>`), then retry tools/list")
 		return
+	}
+
+	// The pool is non-empty: a fresh cursorless cache hit is servable (a
+	// daemon exists to back it). A paginated (cursor-bearing) tools/list
+	// bypasses the first-page cache on BOTH read and write (P2 finding 2). The
+	// cache read/write are keyed by the session's negotiated protocol version
+	// (P2 finding 5).
+	isCursorRequest := toolsListIsCursorRequest(body)
+	if !isCursorRequest {
+		if cached, ok := s.serenaToolsListCache.get(negotiatedVersion, now); ok {
+			writeJSONRPCResult(w, tb.ID, json.RawMessage(cached), nil)
+			return
+		}
 	}
 
 	// Proxy one tools/list to the first live daemon. On a per-daemon

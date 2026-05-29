@@ -1405,10 +1405,8 @@ func TestIsValidJSONRPCRequestID(t *testing.T) {
 // ---------------------------------------------------------------------
 func TestDaemonSessionStore_LookupIsWorkspaceScoped(t *testing.T) {
 	st := &daemonSessionStore{}
-	// First store: no prior binding -> no displacement.
-	if _, hadDisplaced := st.store("client-1", "alpha", "daemon-A", "2025-06-18"); hadDisplaced {
-		t.Errorf("first store reported a displaced binding; want none")
-	}
+	// First store: no prior binding.
+	st.store("client-1", "alpha", "daemon-A", "2025-06-18")
 
 	// Finding #8: lookup returns the persisted daemon-negotiated version.
 	if dsid, dpv, ok := st.lookup("client-1", "alpha"); !ok || dsid != "daemon-A" || dpv != "2025-06-18" {
@@ -1423,40 +1421,25 @@ func TestDaemonSessionStore_LookupIsWorkspaceScoped(t *testing.T) {
 	if _, _, ok := st.lookup("", "alpha"); ok {
 		t.Errorf("lookup(empty, alpha) = ok, want miss")
 	}
-	// Finding #2: re-store under a new workspace replaces the binding AND
-	// reports the OLD binding as displaced (so the caller tears down the
-	// orphaned alpha daemon session), carrying the old daemon-negotiated
-	// version (Finding #8).
-	old, hadDisplaced := st.store("client-1", "beta", "daemon-B", "2025-11-25")
-	if !hadDisplaced {
-		t.Fatalf("workspace-switch store did not report a displaced binding; Finding #2 leak")
-	}
-	if old.workspaceKey != "alpha" || old.daemonSessionID != "daemon-A" || old.daemonProtocolVersion != "2025-06-18" {
-		t.Errorf("displaced binding = %+v, want {alpha, daemon-A, 2025-06-18}", old)
-	}
+	// Round-9 (Finding 4 — TTL-based reclaim, NO eager displaced teardown):
+	// re-storing under a NEW workspace simply OVERWRITES the LOCAL binding.
+	// store no longer reports a displaced old binding; the orphaned old
+	// upstream daemon session is reclaimed by the daemon's idle TTL, not torn
+	// down synchronously on the switch (the rounds 7+8 eager teardown raced an
+	// in-flight tool call in the old workspace). The local binding moves to
+	// beta with no leak and no ceremony.
+	st.store("client-1", "beta", "daemon-B", "2025-11-25")
 	if dsid, dpv, ok := st.lookup("client-1", "beta"); !ok || dsid != "daemon-B" || dpv != "2025-11-25" {
 		t.Fatalf("lookup(client-1, beta) after re-store = (%q, %q, %v), want (daemon-B, 2025-11-25, true)", dsid, dpv, ok)
 	}
 	if _, _, ok := st.lookup("client-1", "alpha"); ok {
 		t.Errorf("lookup(client-1, alpha) after re-store = ok, want miss (binding moved to beta)")
 	}
-	// Finding #2: re-storing the SAME (workspace, daemon session) is NOT a
-	// displacement (tearing down the live session would break the next call).
-	if _, hadDisplaced := st.store("client-1", "beta", "daemon-B", "2025-11-25"); hadDisplaced {
-		t.Errorf("re-store of an UNCHANGED binding reported a displacement; want none")
-	}
-	// Finding #2 (race correction): re-storing the SAME workspace with a
-	// DIFFERENT daemon session id is ALSO NOT a displacement. Two concurrent
-	// first handshakes for the same client session + same workspace each mint a
-	// distinct daemon session id; when the later one stores, tearing down the
-	// earlier same-workspace id would invalidate a still-in-flight request that
-	// is forwarding with that id. Only a WORKSPACE change displaces; a
-	// superseded same-workspace session is reclaimed by the sweeper/TTL.
-	if old, hadDisplaced := st.store("client-1", "beta", "daemon-B2", "2025-11-25"); hadDisplaced {
-		t.Errorf("same-workspace re-store with a DIFFERENT daemon session reported a displacement = %+v; want none (Finding #2 race correction)", old)
-	}
-	// The binding moved to the new daemon session (last store wins) but no
-	// teardown was requested for the superseded same-workspace id.
+	// Re-storing the SAME workspace with a DIFFERENT daemon session id also
+	// just overwrites locally (last store wins). This used to be a documented
+	// race carve-out; with the eager teardown gone it is simply the same
+	// overwrite as any other store.
+	st.store("client-1", "beta", "daemon-B2", "2025-11-25")
 	if dsid, _, ok := st.lookup("client-1", "beta"); !ok || dsid != "daemon-B2" {
 		t.Fatalf("lookup(client-1, beta) after same-workspace re-store = (%q, %v), want (daemon-B2, true)", dsid, ok)
 	}

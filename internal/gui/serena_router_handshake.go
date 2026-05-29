@@ -173,58 +173,29 @@ func (st *daemonSessionStore) lookup(clientSessionID string, wsKey string) (daem
 // replacing any prior binding for the same client session. A nil/empty
 // argument is ignored so the map never holds a half-binding.
 //
-// Finding #2 (workspace-rebind leak): when store REPLACES an existing
-// binding whose WORKSPACE differs from the new one — a workspace switch on
-// the same client session — it returns the OLD binding (workspaceKey,
-// daemonSessionID, daemonProtocolVersion) with displaced=true so the caller
-// (resolveDaemonSession) can best-effort upstream-DELETE the now-orphaned old
-// daemon session. Without this the old workspace's daemon session leaks until
-// that daemon's idle expiry, once per switch. displaced stays FALSE when
-// there was no prior binding, OR when the prior binding is for the SAME
-// workspace — including a same-workspace re-store with a DIFFERENT daemon
-// session id (two concurrent first handshakes racing; see the race note at
-// the displaced-condition site below). Tearing down a same-workspace session
-// could kill a still-in-flight request's daemon session; the superseded one is
-// reclaimed by the idle sweeper / daemon TTL instead. The store mutator holds
-// mu and has no http client, so the teardown itself is performed by the
-// caller, not here. The displaced daemon-negotiated version (Finding #8) is
-// returned so the teardown DELETE carries the version the OLD daemon session
-// was established under.
-func (st *daemonSessionStore) store(clientSessionID string, wsKey string, daemonSessionID string, daemonProtocolVersion string) (displaced displacedBinding, hadDisplaced bool) {
+// Round-9 (Finding 4 — revert the eager displaced-session teardown):
+// store now simply OVERWRITES the binding. It used to return the displaced
+// old binding (workspaceKey, daemonSessionID, daemonProtocolVersion) so the
+// caller could best-effort upstream-DELETE a workspace-switch's orphaned old
+// daemon session. The reviewer's round-9 guidance is to "leave it to the
+// daemon/session TTL instead of deleting it synchronously on workspace
+// switch": the router does not track per-daemon in-flight requests, so a
+// client with a long-running tool call in workspace A that then starts a
+// path-bearing call in workspace B would displace A and immediately DELETE
+// A's daemon session while A's request may still be streaming — an upstream
+// unknown/terminated-session failure. The eager teardown (rounds 7+8) traded
+// a bounded-by-TTL leak for an in-flight race; reverting to TTL-based reclaim
+// is race-safe. The LOCAL binding is overwritten here immediately (no local
+// leak); the orphaned UPSTREAM daemon session is reclaimed by the daemon's
+// own idle expiry, and the local store's idle entries by SweepSerenaSessions.
+func (st *daemonSessionStore) store(clientSessionID string, wsKey string, daemonSessionID string, daemonProtocolVersion string) {
 	if clientSessionID == "" || daemonSessionID == "" {
-		return displacedBinding{}, false
+		return
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if st.bindings == nil {
 		st.bindings = make(map[string]*daemonSessionBinding)
-	}
-	if prev := st.bindings[clientSessionID]; prev != nil && prev.daemonSessionID != "" &&
-		prev.workspaceKey != wsKey {
-		// A real WORKSPACE rebind: the prior daemon session belonged to a
-		// DIFFERENT workspace and is now orphaned. Hand it back so the caller
-		// releases it upstream (Invariant D).
-		//
-		// Finding #2 (race correction): the displaced condition is the
-		// workspace change ALONE — NOT also `prev.daemonSessionID !=
-		// daemonSessionID`. Two FIRST tool-calls for the SAME client session
-		// and SAME workspace can complete the lazy handshake concurrently
-		// (resolveDaemonSession handshakes OUTSIDE the store lock), each
-		// minting a DIFFERENT daemon session id. When the later one stores,
-		// the earlier same-workspace id would — under the old second clause —
-		// be reported displaced, and the caller would immediately DELETE it.
-		// But the earlier request may still be forwarding its tool-call with
-		// that id, so the teardown would invalidate an in-flight request
-		// (upstream unknown-session failure) even though NO workspace rebind
-		// occurred. A superseded SAME-workspace daemon session is harmless and
-		// is reclaimed by the idle sweeper / daemon-side TTL instead — never
-		// torn down here.
-		displaced = displacedBinding{
-			workspaceKey:          prev.workspaceKey,
-			daemonSessionID:       prev.daemonSessionID,
-			daemonProtocolVersion: prev.daemonProtocolVersion,
-		}
-		hadDisplaced = true
 	}
 	st.bindings[clientSessionID] = &daemonSessionBinding{
 		workspaceKey:          wsKey,
@@ -232,16 +203,6 @@ func (st *daemonSessionStore) store(clientSessionID string, wsKey string, daemon
 		daemonProtocolVersion: daemonProtocolVersion,
 		lastSeen:              st.now(),
 	}
-	return displaced, hadDisplaced
-}
-
-// displacedBinding carries the orphaned old daemon session a workspace
-// rebind displaced (Finding #2), so the caller can upstream-DELETE it under
-// the version that old session was established with (Finding #8).
-type displacedBinding struct {
-	workspaceKey          string
-	daemonSessionID       string
-	daemonProtocolVersion string
 }
 
 // unbind drops the mapping for clientSessionID (no-op if absent).
@@ -563,17 +524,20 @@ func postHandshakeInitialized(ctx context.Context, httpClient *http.Client, upst
 // same "re-bind drops the previous binding without ceremony" tradeoff
 // the sticky-routing SessionRouter already documents.
 //
-// Finding #2 (workspace-rebind leak): when the store displaces an existing
-// binding for a DIFFERENT workspace/daemon-session (a workspace switch on
-// the same client session), teardownDisplaced is invoked with the OLD
-// (workspaceKey, daemonSessionID) so the caller can best-effort
-// upstream-DELETE the orphaned old daemon session (Invariant D: detached +
-// short-bound). The store mutator cannot do this itself (it holds mu and
-// has no http client / resolver), so the caller — which HAS the httpClient
-// and can resolve the old workspace's URL via the resolver — owns it.
-// teardownDisplaced may be nil (callers that do not wire a teardown, e.g.
-// the tools/list one-shot path that never reuses the session); a nil
-// callback simply skips the release.
+// Round-9 (Finding 4): the workspace-switch displaced-session teardown is
+// REMOVED. rounds 7+8 invoked a teardownDisplaced callback here to
+// best-effort upstream-DELETE the old workspace's daemon session when a
+// client session rebound to a new workspace. The reviewer found that still
+// races — the router does not track per-daemon in-flight requests, so a
+// long-running tool call in the OLD workspace can still be streaming when
+// the switch DELETEs its daemon session. Per the reviewer's accepted
+// resolution, we revert to TTL-based reclaim: store() simply overwrites the
+// LOCAL binding (no local leak), and the orphaned UPSTREAM daemon session
+// ages out on the daemon's own idle clock (the local store's idle entries via
+// SweepSerenaSessions). The DELETE-driven teardown (handleSerenaDelete) and
+// the partial-handshake cleanup (establishDaemonSession's
+// bestEffortDeleteDaemonSession on a notifications/initialized failure) are
+// NOT racy and are kept — only the switch-time teardown is gone.
 //
 // Finding #8: it returns the daemon-negotiated protocolVersion alongside the
 // session id (from a fresh handshake, or persisted on a cache hit) so the
@@ -586,7 +550,6 @@ func (st *daemonSessionStore) resolveDaemonSession(
 	clientSessionID string,
 	ws *api.WorkspaceEntry,
 	clientProtocolVersion string,
-	teardownDisplaced func(wsKey, daemonSessionID, daemonProtocolVersion string),
 ) (daemonSessionID string, daemonProtocolVersion string, err error) {
 	if ws == nil {
 		return "", "", fmt.Errorf("resolveDaemonSession: nil workspace")
@@ -603,18 +566,12 @@ func (st *daemonSessionStore) resolveDaemonSession(
 	// Only record a mapping when BOTH a client session id and a daemon
 	// session id exist. A sessionless daemon (empty dsid) needs no
 	// mapping; a path-only call with no client session id cannot be
-	// looked up later anyway.
+	// looked up later anyway. A workspace switch on the same client session
+	// just overwrites the prior binding locally (Round-9 / Finding 4 — no
+	// eager upstream teardown; the old upstream session ages out on the
+	// daemon's idle clock).
 	if clientSessionID != "" && dsid != "" {
-		old, hadDisplaced := st.store(clientSessionID, ws.WorkspaceKey, dsid, dpv)
-		if hadDisplaced && teardownDisplaced != nil {
-			// Finding #2: release the orphaned old workspace's daemon
-			// session upstream. Best-effort + Invariant D (the callback
-			// detaches the context + bounds it to the short cleanup budget).
-			// The displaced binding carried its own daemon-negotiated version
-			// (Finding #8); pass it so the teardown DELETE is not version-
-			// rejected by a strict old daemon.
-			teardownDisplaced(old.workspaceKey, old.daemonSessionID, old.daemonProtocolVersion)
-		}
+		st.store(clientSessionID, ws.WorkspaceKey, dsid, dpv)
 	}
 	return dsid, dpv, nil
 }
