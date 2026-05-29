@@ -19,12 +19,13 @@
 // PID assigned to a different operator's process must NOT be killed
 // even if it happens to occupy a slot in our transient list.
 //
-//  Gate 1: image basename equals "mcphub" exactly (from /proc/<pid>/comm).
-//  Gate 2: cmdline contains the daemon token AND --server AND --daemon
-//          (from /proc/<pid>/cmdline) — these are the only invocation
-//          shapes we ever record in transient_pids per
-//          supervise_maintenance.go.
-//  Gate 3: process UID matches the current operator (from stat).
+//	Gate 1: image basename equals "mcphub" exactly (from /proc/<pid>/comm).
+//	Gate 2: cmdline matches the recorded transient kind's invocation
+//	        signature: daemon-shaped entries carry daemon AND --server AND
+//	        --daemon; maintenance entries carry the argv tokens their timer
+//	        Args actually exec (workspace-weekly-refresh → the subcommand
+//	        token; server-weekly-refresh → restart AND --server).
+//	Gate 3: process UID matches the current operator (from stat).
 //
 // All three must pass. If any gate fails, the PID is recorded in
 // SkippedPIDs (not killed) and the operator surfaces it via the
@@ -99,18 +100,18 @@ type ReaperResult struct {
 // (no process-group leader because POSIX spawn paths do not currently
 // call Setpgid — see comment near KillProcessGroup invocation).
 type ReaperDeps struct {
-	StateDir            string
-	ReadState           func(path string) (*api.SupervisorStateFile, error)
-	WriteState          func(path string, s *api.SupervisorStateFile) error
-	PIDAlive            func(pid int) bool
-	ProcessIdentity     func(pid int) (basename, cmdline string, uid int, ok bool)
-	CurrentUID          func() int
-	KillProcessGroup    func(pid int) error
-	KillProcess         func(pid int) error
-	ProcessStartTime    func(pid int) (time.Time, bool)
-	StartedAtTolerance  time.Duration
-	SettleDuration      time.Duration
-	Now                 func() time.Time
+	StateDir           string
+	ReadState          func(path string) (*api.SupervisorStateFile, error)
+	WriteState         func(path string, s *api.SupervisorStateFile) error
+	PIDAlive           func(pid int) bool
+	ProcessIdentity    func(pid int) (basename, cmdline string, uid int, ok bool)
+	CurrentUID         func() int
+	KillProcessGroup   func(pid int) error
+	KillProcess        func(pid int) error
+	ProcessStartTime   func(pid int) (time.Time, bool)
+	StartedAtTolerance time.Duration
+	SettleDuration     time.Duration
+	Now                func() time.Time
 }
 
 // withDefaults returns deps with any unset fields filled from the
@@ -210,7 +211,7 @@ func ReapStaleTransients(ctx context.Context, deps ReaperDeps) (ReaperResult, er
 			continue
 		}
 		basename, cmdline, procUID, ok := deps.ProcessIdentity(pid)
-		if !ok || !ownershipGate(basename, cmdline, procUID, uid) {
+		if !ok || !ownershipGate(t.Kind, basename, cmdline, procUID, uid) {
 			res.SkippedPIDs = append(res.SkippedPIDs, pid)
 			continue
 		}
@@ -329,30 +330,62 @@ func startedAtGate(recordedRFC3339 string, pid int, deps ReaperDeps) bool {
 }
 
 // ownershipGate returns true when all 3 gates pass: image basename
-// equals exactly "mcphub"; cmdline contains the daemon-invocation
-// token shape; UID matches the current operator. Gate 2 checks the
-// presence of three distinct tokens rather than a single substring
-// because /proc/<pid>/cmdline NUL-separates argv: the basename
-// comparison + per-token substring check is enough to confirm this
-// is an mcphub daemon child and not, say, a user's mcphub gui or
-// mcphub install invocation that happens to share the name.
-func ownershipGate(basename, cmdline string, procUID, currentUID int) bool {
+// equals exactly "mcphub"; cmdline matches the recorded transient
+// kind's invocation signature; UID matches the current operator.
+// Gate 2 accepts both daemon-shaped transients and maintenance timer
+// children. Maintenance children are NOT all invoked as `mcphub <kind>`:
+// workspace-weekly-refresh runs `mcphub workspace-weekly-refresh`, but
+// server-weekly-refresh runs `mcphub restart --server <name>`, so the
+// gate matches each kind's real argv tokens (maintenanceCmdlineSignature).
+// A bare kind-token match would skip-and-forget live server-weekly-refresh
+// orphans after a supervisor crash.
+func ownershipGate(kind, basename, cmdline string, procUID, currentUID int) bool {
 	if procUID != currentUID {
 		return false
 	}
 	if basename != "mcphub" {
 		return false
 	}
-	if !strings.Contains(cmdline, "daemon") {
-		return false
+	if sig, ok := maintenanceCmdlineSignature(kind); ok {
+		for _, tok := range sig {
+			if !cmdlineHasToken(cmdline, tok) {
+				return false
+			}
+		}
+		return true
 	}
-	if !strings.Contains(cmdline, "--server") {
-		return false
+	return cmdlineHasToken(cmdline, "daemon") &&
+		cmdlineHasToken(cmdline, "--server") &&
+		cmdlineHasToken(cmdline, "--daemon")
+}
+
+func cmdlineHasToken(cmdline, token string) bool {
+	for _, field := range strings.Fields(cmdline) {
+		if field == token {
+			return true
+		}
 	}
-	if !strings.Contains(cmdline, "--daemon") {
-		return false
+	return false
+}
+
+// maintenanceCmdlineSignature maps a maintenance transient Kind to the
+// argv tokens its `mcphub` invocation always carries, so Gate 2 can
+// confirm a live PID is the maintenance child we recorded — not an
+// unrelated recycled mcphub PID — before killing it. The tokens mirror
+// the timer Args the supervisor execs verbatim via exec.Command:
+//   - workspace-weekly-refresh → `mcphub workspace-weekly-refresh`
+//     (internal/migration/journal.go defaultMaintenanceTimers)
+//   - server-weekly-refresh    → `mcphub restart --server <name>`
+//     (internal/api/install.go weekly-refresh task Args)
+func maintenanceCmdlineSignature(kind string) ([]string, bool) {
+	switch kind {
+	case "workspace-weekly-refresh":
+		return []string{"workspace-weekly-refresh"}, true
+	case "server-weekly-refresh":
+		return []string{"restart", "--server"}, true
+	default:
+		return nil, false
 	}
-	return true
 }
 
 // pidAliveSignal0 returns true if kill(pid, 0) succeeds (process exists
