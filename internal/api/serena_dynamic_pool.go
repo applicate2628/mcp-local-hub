@@ -53,19 +53,28 @@ const (
 	serenaDefaultContext = "codex"
 
 	// serenaDefaultPortPoolStart / serenaDefaultPortPoolEnd is the default port
-	// range serena workspace daemons allocate from. It starts ABOVE the legacy
-	// global serena daemon port(s): servers/serena/manifest.yaml binds the shipped
-	// `unified` daemon to 9121 (and a 2-client claude/codex split would add 9122).
-	// The fallback pool MUST NOT overlap those — `mcphub workspace register` can
-	// run BEFORE the Phase 4 cutover removes the legacy daemon, and
-	// AllocateSerenaPort only skips ports already in workspaces.yaml (it does NOT
-	// probe OS-bound ports), so a pool starting at 9121 would hand a new workspace
-	// daemon the live legacy daemon's port and collide when the proxy fans the
-	// sentinel row out to that external port (bot PR #247 P1). Start at 9123 to
-	// clear 9121+9122; the upstream child binds external+NativeHTTPInternalPortOffset
-	// (19123+), so the upstream side never collides either. End at 9199 (below the
-	// LSP workspace-proxy pool at 9200+).
-	serenaDefaultPortPoolStart = 9123
+	// range serena workspace daemons allocate from. It starts ABOVE the ENTIRE
+	// shipped global-daemon band, not just serena's own legacy ports (bot PR #247
+	// P1). The shipped global servers occupy 9121–9132 today (serena 9121/9122,
+	// memory 9123, sequential-thinking 9124, godbolt 9126, paper-search 9127,
+	// time 9128, gdb 9129, lldb 9130, perftools 9131, wolfram 9132); they are
+	// hand-assigned and grow incrementally. AllocateSerenaPort only skips ports
+	// already in workspaces.yaml — it does NOT probe OS-bound or manifest-bound
+	// ports — so a pool overlapping that band would hand a new workspace daemon a
+	// port a global daemon already owns, and the proxy would collide on its
+	// external listen (`mcphub workspace register` can run before the Phase 4
+	// cutover, while every shipped global is live).
+	//
+	// Repo port-map convention: globals 9121–9149 (room to grow), serena dynamic
+	// pool 9150–9199, LSP workspace-proxy pool 9200–9299. So start at 9150 (clears
+	// 9121–9132 with a growth buffer) and end at 9199. The upstream child binds
+	// external+NativeHTTPInternalPortOffset (19150+), so the upstream side never
+	// collides either.
+	//
+	// A static band is the proportionate fix here; a future hardening could make
+	// AllocateSerenaPort skip manifest-bound ports so the pool is collision-proof
+	// against any port layout (tracked follow-up).
+	serenaDefaultPortPoolStart = 9150
 	serenaDefaultPortPoolEnd   = 9199
 )
 
