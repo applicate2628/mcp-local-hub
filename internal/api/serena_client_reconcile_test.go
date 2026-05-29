@@ -6,6 +6,9 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -204,6 +207,51 @@ func TestSerenaClientReconcile_DiscoversPortFromLivePidport_FailsClosedWhenAbsen
 			t.Errorf("ping should not run for an unusable (0) port")
 		}
 	})
+}
+
+// TestDefaultRouterReadinessPing_RequiresSerenaRouterSignature is the bot PR #248
+// P1 guard: the REAL readiness ping must REJECT a non-serena-router response (a
+// stale pidport's port reused by another local HTTP server), not accept any HTTP
+// status. The mcphub serena router answers a non-POST (our HEAD) with 405 +
+// Allow: POST; anything else must fail closed so the reconcile never rewrites
+// client configs to an unrelated service.
+func TestDefaultRouterReadinessPing_RequiresSerenaRouterSignature(t *testing.T) {
+	portOf := func(t *testing.T, ts *httptest.Server) int {
+		t.Helper()
+		return ts.Listener.Addr().(*net.TCPAddr).Port
+	}
+
+	// Serena-router signature: 405 + Allow: POST on the router path → ping passes.
+	router := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == SerenaRouterURLPath && r.Method != http.MethodPost {
+			w.Header().Set("Allow", "POST")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer router.Close()
+	if err := defaultRouterReadinessPing(context.Background(), portOf(t, router)); err != nil {
+		t.Errorf("serena-router signature (405 + Allow: POST) must pass; got %v", err)
+	}
+
+	// Unrelated server returning 200 on everything → ping must fail closed.
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer other.Close()
+	if err := defaultRouterReadinessPing(context.Background(), portOf(t, other)); err == nil {
+		t.Errorf("a non-router server (200 OK) must fail closed; got nil")
+	}
+
+	// Unrelated server returning 404 → ping must fail closed.
+	notfound := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer notfound.Close()
+	if err := defaultRouterReadinessPing(context.Background(), portOf(t, notfound)); err == nil {
+		t.Errorf("a non-router server (404) must fail closed; got nil")
+	}
 }
 
 // TestSerenaClientReconcile_RewritesToRouterURL_PerClient exercises the REAL

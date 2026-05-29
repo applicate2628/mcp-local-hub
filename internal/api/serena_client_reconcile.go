@@ -409,9 +409,17 @@ func defaultRouterReadinessPing(ctx context.Context, port int) error {
 		return err
 	}
 	_ = resp.Body.Close()
-	// Any HTTP response (even an error status) proves a live local listener
-	// is serving this route. Only a transport error (refused/timeout) means
-	// the GUI is not up.
+	// Verify this is actually the mcphub serena router, NOT just any local HTTP
+	// server that happened to reuse a stale pidport's port (bot PR #248 P1). The
+	// router answers a non-POST request (our HEAD) with 405 + `Allow: POST`
+	// (internal/gui/serena_router.go:231-232) — a signature a random reused-port
+	// server would not produce. A 200/404/other status means something ELSE is
+	// listening here; fail closed so the reconcile never rewrites client configs
+	// to an unrelated service (the prior "any HTTP response = live GUI" check
+	// broke the fail-closed discovery guarantee).
+	if resp.StatusCode != http.StatusMethodNotAllowed || !strings.Contains(strings.ToUpper(resp.Header.Get("Allow")), "POST") {
+		return fmt.Errorf("port %d responded but is not the mcphub serena router (HEAD %s -> status %d, Allow=%q; expected 405 with Allow: POST) — the GUI may not be up, or the pidport is stale and the port was reused by another service", port, SerenaRouterURLPath, resp.StatusCode, resp.Header.Get("Allow"))
+	}
 	return nil
 }
 
