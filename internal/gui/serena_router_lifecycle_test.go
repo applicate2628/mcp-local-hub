@@ -847,6 +847,304 @@ func daemonMintCount(d *fakeSerenaDaemon) int {
 }
 
 // ---------------------------------------------------------------------
+// P1 finding 1 — the upstream daemon handshake uses the client's
+// negotiated MCP-Protocol-Version (not the hard-coded router default),
+// on BOTH the initialize params.protocolVersion AND the
+// notifications/initialized header, AND the routed tool-call forwards
+// the same version. A strict daemon binding the header to the session's
+// initialized version would otherwise reject the first tool-call.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_Handshake_UsesClientNegotiatedProtocolVersion(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	// Client negotiated a supported, NON-default revision.
+	const negotiated = "2025-06-18"
+	if negotiated == defaultProtocolVersion {
+		t.Fatalf("test precondition: negotiated version must differ from the router default %q", defaultProtocolVersion)
+	}
+
+	// First tool call drives the lazy handshake. The client forwards its
+	// negotiated version on the MCP-Protocol-Version header (the value it
+	// got from the router-synthesized initialize).
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/src/main.go"})
+	rr := postSerena(t, s, body, map[string]string{
+		"Mcp-Session-Id":       "sess-pv",
+		"MCP-Protocol-Version": negotiated,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	daemon.mu.Lock()
+	gotInitPV := daemon.lastInitProtocolVersion
+	gotInitializedPV := daemon.lastInitializedHeaders.Get("MCP-Protocol-Version")
+	gotToolPV := daemon.lastToolHeaders.Get("MCP-Protocol-Version")
+	daemon.mu.Unlock()
+
+	if gotInitPV != negotiated {
+		t.Errorf("upstream initialize params.protocolVersion = %q, want client-negotiated %q", gotInitPV, negotiated)
+	}
+	if gotInitializedPV != negotiated {
+		t.Errorf("notifications/initialized MCP-Protocol-Version header = %q, want %q", gotInitializedPV, negotiated)
+	}
+	if gotToolPV != negotiated {
+		t.Errorf("tool-call MCP-Protocol-Version header = %q, want %q", gotToolPV, negotiated)
+	}
+}
+
+// P1 finding 1 — an older client that omits MCP-Protocol-Version on its
+// tool call falls back to the router default handshake version (the
+// daemon handshake must still negotiate a concrete version).
+func TestSerenaRouter_Handshake_FallsBackToDefaultProtocolVersion(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	// No MCP-Protocol-Version header on the tool call.
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"})
+	rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": "sess-nopv"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	daemon.mu.Lock()
+	gotInitPV := daemon.lastInitProtocolVersion
+	daemon.mu.Unlock()
+	if gotInitPV != handshakeInitializeProtocolVersion {
+		t.Errorf("upstream initialize params.protocolVersion = %q, want default fallback %q", gotInitPV, handshakeInitializeProtocolVersion)
+	}
+}
+
+// ---------------------------------------------------------------------
+// P2 finding 5 — the proxied tools/list POST carries the negotiated
+// MCP-Protocol-Version header (and the handshake before it uses the
+// SAME version). A strict daemon rejects a non-initialize POST whose
+// protocol header is missing.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_ToolsList_SendsProtocolVersionHeader(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	daemon.tool = func(w http.ResponseWriter, r *http.Request, b []byte) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"find_symbol"}]}}`))
+	}
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	const negotiated = "2025-06-18"
+	rr := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), map[string]string{
+		"MCP-Protocol-Version": negotiated,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("tools/list status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	assertToolsListNames(t, rr.Body.Bytes(), []string{"find_symbol"})
+
+	daemon.mu.Lock()
+	gotToolsListPV := daemon.lastToolHeaders.Get("MCP-Protocol-Version")
+	gotHandshakePV := daemon.lastInitProtocolVersion
+	daemon.mu.Unlock()
+	if gotToolsListPV != negotiated {
+		t.Errorf("upstream tools/list MCP-Protocol-Version header = %q, want %q", gotToolsListPV, negotiated)
+	}
+	if gotHandshakePV != negotiated {
+		t.Errorf("handshake initialize params.protocolVersion = %q, want %q (handshake + tools/list must use the same version)", gotHandshakePV, negotiated)
+	}
+}
+
+// ---------------------------------------------------------------------
+// P2 finding 2 — a cursor-bearing tools/list bypasses the first-page
+// cache: it reaches a daemon even when a cursorless page is cached, and
+// its page-N result does NOT overwrite the first-page cache entry.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_ToolsList_CursorBypassesCache(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	// The daemon answers page 1 (no cursor) and page 2 (cursor present)
+	// distinctly so the test can prove which page the router returned.
+	daemon.tool = func(w http.ResponseWriter, r *http.Request, b []byte) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if strings.Contains(string(b), `"cursor"`) {
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"page2_tool"}]}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"page1_tool"}],"nextCursor":"c1"}}`))
+	}
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+	toolHits := func() int { daemon.mu.Lock(); defer daemon.mu.Unlock(); return daemon.toolHits }
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	// Page 1 (cursorless) -> fetches + caches.
+	rr1 := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), nil)
+	if rr1.Code != http.StatusOK {
+		t.Fatalf("page1 status = %d; body=%s", rr1.Code, rr1.Body.String())
+	}
+	assertToolsListNames(t, rr1.Body.Bytes(), []string{"page1_tool"})
+	if got := toolHits(); got != 1 {
+		t.Fatalf("daemon tool hits after page1 = %d, want 1", got)
+	}
+
+	// Cursor request -> MUST bypass the cache and reach the daemon again,
+	// returning page 2 (not the cached page 1).
+	rrCursor := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{"cursor": "c1"}), nil)
+	if rrCursor.Code != http.StatusOK {
+		t.Fatalf("cursor status = %d; body=%s", rrCursor.Code, rrCursor.Body.String())
+	}
+	assertToolsListNames(t, rrCursor.Body.Bytes(), []string{"page2_tool"})
+	if got := toolHits(); got != 2 {
+		t.Fatalf("daemon tool hits after cursor request = %d, want 2 (cursor must bypass cache)", got)
+	}
+
+	// A subsequent cursorless page-1 request still hits the ORIGINAL
+	// cache (the cursor request must NOT have overwritten it with page 2).
+	rr3 := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), nil)
+	if rr3.Code != http.StatusOK {
+		t.Fatalf("page1-again status = %d; body=%s", rr3.Code, rr3.Body.String())
+	}
+	assertToolsListNames(t, rr3.Body.Bytes(), []string{"page1_tool"})
+	if got := toolHits(); got != 2 {
+		t.Fatalf("daemon tool hits after cached page1 = %d, want 2 (cache hit; cursor page must not poison the cache)", got)
+	}
+}
+
+// ---------------------------------------------------------------------
+// P2 finding 4 — a lifecycle method (initialize / tools/list / ping)
+// whose id is PRESENT but INVALID (null / boolean / array / object) is a
+// malformed JSON-RPC request: -32600, no synthesized result, and (for
+// initialize) NO minted session. An ABSENT id is a notification (covered
+// by TestSerenaRouter_IdlessLifecycle_Returns202NoBody).
+// ---------------------------------------------------------------------
+func TestSerenaRouter_LifecycleInvalidID_ReturnsInvalidRequest(t *testing.T) {
+	deps := &serenaRouterDeps{Resolver: &listerStubResolver{}, Sessions: NewInMemorySessionRouter()}
+	s := newSerenaTestServer(t, deps)
+
+	invalidIDs := map[string]string{
+		"null":    `null`,
+		"boolean": `true`,
+		"object":  `{"x":1}`,
+		"array":   `[1,2]`,
+	}
+	for _, method := range []string{"initialize", "tools/list", "ping"} {
+		for label, rawID := range invalidIDs {
+			t.Run(method+"/"+label, func(t *testing.T) {
+				// Build the envelope with an explicit raw id token.
+				env := fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"method":%q`, rawID, method)
+				if method == "initialize" {
+					env += `,"params":{"protocolVersion":"2025-06-18","capabilities":{}}`
+				}
+				env += `}`
+
+				rr := postSerena(t, s, []byte(env), nil)
+				// JSON-RPC errors are carried in-band at HTTP 200.
+				if rr.Code != http.StatusOK {
+					t.Fatalf("status = %d, want 200 (in-band JSON-RPC error); body=%s", rr.Code, rr.Body.String())
+				}
+				var resp struct {
+					ID     json.RawMessage `json:"id"`
+					Result json.RawMessage `json:"result"`
+					Error  *struct {
+						Code    int    `json:"code"`
+						Message string `json:"message"`
+					} `json:"error"`
+				}
+				if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+					t.Fatalf("decode: %v; raw=%s", err, rr.Body.String())
+				}
+				if resp.Error == nil {
+					t.Fatalf("expected -32600 for %s with %s id; raw=%s", method, label, rr.Body.String())
+				}
+				if resp.Error.Code != jsonrpcInvalidRequest {
+					t.Errorf("error code = %d, want %d (Invalid Request)", resp.Error.Code, jsonrpcInvalidRequest)
+				}
+				if len(resp.Result) > 0 {
+					t.Errorf("result present on a rejected invalid-id request; want error only")
+				}
+				// A response to a request whose id could not be determined
+				// carries a null id (JSON-RPC).
+				if strings.TrimSpace(string(resp.ID)) != "null" {
+					t.Errorf("error id = %s, want null (invalid request id is not echoed)", string(resp.ID))
+				}
+				// initialize with an invalid id must NOT mint a session.
+				if method == "initialize" {
+					if sid := rr.Header().Get("Mcp-Session-Id"); sid != "" {
+						t.Errorf("invalid-id initialize minted Mcp-Session-Id %q; a malformed request gets no session", sid)
+					}
+				}
+			})
+		}
+	}
+}
+
+// P2 finding 4 — unit coverage of the id-shape predicate the lifecycle
+// gate uses: absent is NOT a valid request id (it is a notification);
+// null/bool/array/object are invalid; non-null string/number are valid;
+// a number with a leading + or trailing JSON is rejected.
+func TestIsValidJSONRPCRequestID(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want bool
+	}{
+		{``, false},        // absent (len 0) -> not a valid request id
+		{`null`, false},    // MCP forbids null
+		{`true`, false},    // boolean
+		{`false`, false},   // boolean
+		{`{}`, false},      // object
+		{`[1]`, false},     // array
+		{`"abc"`, true},    // string
+		{`""`, true},       // empty string is a valid (if odd) id
+		{`1`, true},        // number
+		{`-3`, true},       // negative number
+		{`1.5`, true},      // fractional number
+		{`9007199254740993`, true}, // > 2^53 number
+		{`+1`, false},      // leading + forbidden by JSON grammar
+		{`1]`, false},      // trailing data
+		{`"a" "b"`, false}, // two values
+	}
+	for _, tc := range cases {
+		t.Run(tc.raw, func(t *testing.T) {
+			got := isValidJSONRPCRequestID(json.RawMessage(tc.raw))
+			if got != tc.want {
+				t.Errorf("isValidJSONRPCRequestID(%q) = %v, want %v", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------
 // daemonSessionStore unit tests: workspace-scoped lookup, TTL cleanup,
 // and concurrency (run under -race).
 // ---------------------------------------------------------------------
@@ -887,6 +1185,43 @@ func TestDaemonSessionStore_IgnoresHalfBindings(t *testing.T) {
 	st.store("client-1", "alpha", "") // empty daemon session id
 	if _, ok := st.lookup("client-1", "alpha"); ok {
 		t.Errorf("a half-binding was stored; want no binding")
+	}
+}
+
+// P2 finding 3 — lookup is expire-on-read: a binding idle past
+// daemonSessionTTL is a miss AND is deleted, so the caller re-handshakes
+// instead of forwarding a daemon session the upstream already expired.
+// This must hold WITHOUT any external cleanup ticker being wired.
+func TestDaemonSessionStore_LookupExpiresStaleBinding(t *testing.T) {
+	base := time.Now()
+	clk := base
+	st := &daemonSessionStore{clock: func() time.Time { return clk }}
+	st.store("client-1", "alpha", "daemon-A")
+
+	// Just inside TTL -> hit (and lastSeen refreshes to the new clock).
+	clk = base.Add(daemonSessionTTL - time.Minute)
+	if dsid, ok := st.lookup("client-1", "alpha"); !ok || dsid != "daemon-A" {
+		t.Fatalf("lookup within TTL = (%q, %v), want (daemon-A, true)", dsid, ok)
+	}
+
+	// Idle past TTL (measured from the refreshed lastSeen) -> miss, and
+	// the stale binding is dropped on read (no cleanup() call in between).
+	clk = clk.Add(daemonSessionTTL + time.Minute)
+	if dsid, ok := st.lookup("client-1", "alpha"); ok {
+		t.Fatalf("lookup past TTL = (%q, true), want miss (expire-on-read)", dsid)
+	}
+	// Prove deletion: a second lookup at the SAME (still-expired) clock is
+	// also a miss, but more importantly the map no longer holds the entry,
+	// so a re-handshake's store() starts from a clean slot. cleanup at a
+	// fresh time must report 0 dropped (the entry is already gone).
+	if n := st.cleanup(clk, daemonSessionTTL); n != 0 {
+		t.Errorf("cleanup dropped %d bindings; want 0 (lookup already deleted the stale binding)", n)
+	}
+
+	// A subsequent store re-establishes a live binding usable immediately.
+	st.store("client-1", "alpha", "daemon-B")
+	if dsid, ok := st.lookup("client-1", "alpha"); !ok || dsid != "daemon-B" {
+		t.Fatalf("lookup after re-store = (%q, %v), want (daemon-B, true)", dsid, ok)
 	}
 }
 

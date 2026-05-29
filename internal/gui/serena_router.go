@@ -283,19 +283,33 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	// carry no path-arg and no bound session). Tool calls fall through to
 	// the path-routing + upstream-forward path below, unchanged.
 	//
-	// JSON-RPC notification gate (mirrors internal/api/hub_mcp_handler.go):
-	// a request-style lifecycle method (initialize / tools/list / ping)
-	// that arrives WITHOUT an id is a JSON-RPC notification and MUST NOT
-	// receive a response envelope — the server returns 202 + empty body.
-	// (notifications/* is handled inside handleNotificationOrPing, which
-	// also rejects an id-bearing notifications/* with -32600.) Without
-	// this gate, handleInitialize / handleToolsList would synthesize a
-	// result with id:null and a strict client would treat the unexpected
-	// response as a protocol error.
+	// JSON-RPC id gate (mirrors internal/api/hub_mcp_handler.go): a
+	// request-style lifecycle method (initialize / tools/list / ping)
+	// can arrive in three id shapes, and each MUST be handled
+	// differently —
+	//   - id ABSENT  -> JSON-RPC notification: MUST NOT receive a
+	//     response envelope; return 202 + empty body. Without this,
+	//     handleInitialize / handleToolsList would synthesize a result
+	//     with id:null and a strict client would treat the unexpected
+	//     response as a protocol error.
+	//   - id PRESENT but INVALID (null / boolean / array / object):
+	//     MCP §1.5 requires a request id to be a non-null String/Number,
+	//     so this is a malformed request -> -32600 Invalid Request. The
+	//     pre-fix path treated ANY present id as valid and would BOTH
+	//     synthesize a response AND (for initialize) mint a session for
+	//     `{"id":null,...}` — surfacing nothing of the client's protocol
+	//     bug. (notifications/* is handled inside handleNotificationOrPing,
+	//     which already rejects an id-bearing notifications/* with -32600.)
+	//   - id PRESENT and VALID (String/Number): synthesize the response.
 	switch {
 	case tb.Method == "initialize":
 		if isJSONRPCNotificationID(tb.ID) {
 			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		if !isValidJSONRPCRequestID(tb.ID) {
+			writeJSONRPCError(w, nil, jsonrpcInvalidRequest,
+				"invalid request: id must be a non-null string or number")
 			return
 		}
 		s.handleInitialize(w, body, &tb, sessionID)
@@ -305,11 +319,21 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusAccepted)
 			return
 		}
+		if !isValidJSONRPCRequestID(tb.ID) {
+			writeJSONRPCError(w, nil, jsonrpcInvalidRequest,
+				"invalid request: id must be a non-null string or number")
+			return
+		}
 		s.handleToolsList(w, r, deps, &tb, body, httpClient, upstreamURLFn, auditFn)
 		return
 	case tb.Method == "ping":
 		if isJSONRPCNotificationID(tb.ID) {
 			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		if !isValidJSONRPCRequestID(tb.ID) {
+			writeJSONRPCError(w, nil, jsonrpcInvalidRequest,
+				"invalid request: id must be a non-null string or number")
 			return
 		}
 		s.handleNotificationOrPing(w, &tb)
@@ -376,7 +400,16 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	// unreachable tool-call forward (502/504), audited identically so a
 	// dead/slow daemon is diagnosable rather than yielding an opaque
 	// "unknown session" rejection.
-	daemonSessionID, hsErr := s.serenaDaemonSessions.resolveDaemonSession(r.Context(), httpClient, upstreamURL, sessionID, ws)
+	//
+	// The client's negotiated MCP-Protocol-Version (P1 finding 1) is
+	// threaded into the handshake so the daemon session's initialized
+	// version matches the version this same request (and subsequent
+	// tool-calls) forward verbatim below — otherwise a strict daemon that
+	// binds the header to the session's initialized version rejects the
+	// first tool-call as a protocol-version mismatch when the client
+	// negotiated a non-default supported revision.
+	clientProtocolVersion := r.Header.Get("MCP-Protocol-Version")
+	daemonSessionID, hsErr := s.serenaDaemonSessions.resolveDaemonSession(r.Context(), httpClient, upstreamURL, sessionID, ws, clientProtocolVersion)
 	if hsErr != nil {
 		if isTimeoutErr(hsErr) {
 			_ = auditFn("warn", "serena-upstream-timeout", map[string]any{

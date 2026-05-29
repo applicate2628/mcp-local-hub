@@ -22,6 +22,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -188,6 +189,62 @@ func isJSONRPCNotificationID(id json.RawMessage) bool {
 	return len(id) == 0
 }
 
+// isValidJSONRPCRequestID reports whether a PRESENT JSON-RPC id is a
+// valid request id: a non-null JSON String or Number. MCP §1.5 narrows
+// the JSON-RPC base spec to FORBID null ids, and JSON-RPC's grammar
+// already forbids booleans, arrays, and objects as ids. So `id:null`,
+// `id:true`, `id:{}`, and `id:[1]` are malformed requests, not
+// notifications and not synthesizable requests — the caller rejects
+// them with -32600 Invalid Request.
+//
+// PRE: id is PRESENT (len > 0); an absent id is a notification, handled
+// by isJSONRPCNotificationID before this runs. The router only needs to
+// VALIDATE the id shape (it echoes the id verbatim via normalizeID and
+// never keys a map on it), so this is a focused String/Number predicate
+// rather than the full numeric canonicalizer in
+// internal/api/hub_mcp_request_id.go (which exists only because the hub
+// uses the id as an in-flight map key). The rejection rules match that
+// validator: null/bool/array/object out, string/number in, leading `+`
+// and trailing JSON data on a number rejected.
+func isValidJSONRPCRequestID(id json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(id)
+	if len(trimmed) == 0 {
+		return false
+	}
+	if bytes.Equal(trimmed, []byte("null")) {
+		return false
+	}
+	// JSON string: starts with a quote. json.Valid confirms the escapes
+	// are well-formed (a bare `"foo` would otherwise pass the prefix
+	// check yet be invalid JSON).
+	if trimmed[0] == '"' {
+		return json.Valid(trimmed)
+	}
+	// Anything else must be a JSON number. UseNumber keeps the raw
+	// decimal string (no float64 demotion) and Decode rejects booleans,
+	// arrays, and objects. Demand a single value with nothing trailing.
+	dec := json.NewDecoder(bytes.NewReader(trimmed))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return false
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); !errors.Is(err, io.EOF) {
+		// A second value, or any non-EOF error (e.g. `1]`), means
+		// leftover input — the id is malformed.
+		return false
+	}
+	num, ok := v.(json.Number)
+	if !ok {
+		// bool / array / object.
+		return false
+	}
+	// json.Number admits a leading `+` the JSON grammar forbids; reject
+	// it defensively so the router never echoes a non-spec id.
+	return len(num) == 0 || num[0] != '+'
+}
+
 type jsonrpcEnvelope struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id"`
@@ -251,6 +308,25 @@ func requestedProtocolVersion(body []byte) string {
 		return ""
 	}
 	return probe.Params.ProtocolVersion
+}
+
+// requestedToolsListCursor pulls params.cursor out of a raw MCP
+// tools/list body. A non-empty cursor means the client is paging (MCP
+// basic/utilities/pagination), and the workspace-agnostic tools/list
+// cache MUST be bypassed for it — the cache holds only the first page,
+// so serving it for any cursor would loop the client on the same
+// nextCursor (P2 finding 2). Best-effort: a malformed/absent field
+// yields "".
+func requestedToolsListCursor(body []byte) string {
+	var probe struct {
+		Params struct {
+			Cursor string `json:"cursor"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(body, &probe); err != nil {
+		return ""
+	}
+	return probe.Params.Cursor
 }
 
 // handleInitialize synthesizes the InitializeResult and mints a session
@@ -329,10 +405,20 @@ func isNotificationMethod(method string) bool {
 	return len(method) >= len(prefix) && method[:len(prefix)] == prefix
 }
 
-// handleToolsList answers a workspace-agnostic tools/list. It serves a
-// cached result when fresh; otherwise it proxies one tools/list to a live
-// serena daemon (any registered workspace — the surface is identical),
-// caches the daemon's `result`, and returns it.
+// handleToolsList answers a workspace-agnostic tools/list. For the
+// cursorless first-page request it serves a cached result when fresh;
+// otherwise it proxies one tools/list to a live serena daemon (any
+// registered workspace — the surface is identical), caches the daemon's
+// `result`, and returns it.
+//
+// Cursor-bearing requests bypass the cache entirely (P2 finding 2). The
+// workspace-agnostic cache holds only the first page, so reading it for
+// a `params.cursor` request would return page 1 for every cursor until
+// TTL expiry — the client could never page past the first nextCursor and
+// might loop on it. A cursor request is proxied straight to a daemon and
+// its (page-N) result is NOT written to the first-page cache. Bypass is
+// simpler than keying the cache by cursor and matches serena's
+// typically-small, mostly-single-page static tool surface.
 //
 // Empty-pool case (no workspace registered, so no daemon to fetch from):
 // returns an explicit JSON-RPC error (serenaNoWorkspaceCode) rather than
@@ -352,9 +438,14 @@ func (s *Server) handleToolsList(
 	auditFn func(level, event string, fields map[string]any) error,
 ) {
 	now := time.Now()
-	if cached, ok := s.serenaToolsListCache.get(now); ok {
-		writeJSONRPCResult(w, tb.ID, json.RawMessage(cached), nil)
-		return
+	// A paginated (cursor-bearing) tools/list bypasses the first-page
+	// cache on BOTH read and write (P2 finding 2).
+	isCursorRequest := requestedToolsListCursor(body) != ""
+	if !isCursorRequest {
+		if cached, ok := s.serenaToolsListCache.get(now); ok {
+			writeJSONRPCResult(w, tb.ID, json.RawMessage(cached), nil)
+			return
+		}
 	}
 
 	lister, ok := deps.Resolver.(workspaceLister)
@@ -374,8 +465,11 @@ func (s *Server) handleToolsList(
 
 	// Proxy one tools/list to the first live daemon. On a per-daemon
 	// failure, try the next so a single dead daemon does not blank the
-	// whole tool surface.
-	result, ferr := s.fetchToolsListFromAnyDaemon(r.Context(), entries, body, httpClient, upstreamURLFn, auditFn)
+	// whole tool surface. The client's negotiated MCP-Protocol-Version
+	// threads into the handshake + the upstream tools/list POST (P1
+	// findings 1 + 5).
+	clientProtocolVersion := r.Header.Get("MCP-Protocol-Version")
+	result, ferr := s.fetchToolsListFromAnyDaemon(r.Context(), entries, body, httpClient, upstreamURLFn, auditFn, clientProtocolVersion)
 	if ferr != nil {
 		_ = auditFn("warn", "serena-tools-list-fetch-failed", map[string]any{
 			"err":             ferr.Error(),
@@ -386,7 +480,11 @@ func (s *Server) handleToolsList(
 		return
 	}
 
-	s.serenaToolsListCache.put(result, now)
+	// Only the cursorless first page is cacheable. A cursor request's
+	// page-N result must NOT overwrite the first-page cache entry.
+	if !isCursorRequest {
+		s.serenaToolsListCache.put(result, now)
+	}
 	writeJSONRPCResult(w, tb.ID, json.RawMessage(result), nil)
 }
 
@@ -395,6 +493,10 @@ func (s *Server) handleToolsList(
 // JSON-RPC `result`. It validates that the daemon answered HTTP 200 with
 // a JSON-RPC result (not an error); a non-result answer advances to the
 // next candidate. Returns the last error when every candidate fails.
+//
+// clientProtocolVersion is threaded to each proxyToolsListOnce so the
+// handshake + tools/list POST carry the version the client negotiated
+// (P1 findings 1 + 5).
 func (s *Server) fetchToolsListFromAnyDaemon(
 	ctx context.Context,
 	entries []*api.WorkspaceEntry,
@@ -402,6 +504,7 @@ func (s *Server) fetchToolsListFromAnyDaemon(
 	httpClient *http.Client,
 	upstreamURLFn func(ws *api.WorkspaceEntry) string,
 	auditFn func(level, event string, fields map[string]any) error,
+	clientProtocolVersion string,
 ) (json.RawMessage, error) {
 	var lastErr error
 	for _, ws := range entries {
@@ -413,7 +516,7 @@ func (s *Server) fetchToolsListFromAnyDaemon(
 			lastErr = fmt.Errorf("workspace %q: upstream URL resolution failed", ws.WorkspaceKey)
 			continue
 		}
-		result, err := proxyToolsListOnce(ctx, httpClient, upstreamURL, body)
+		result, err := proxyToolsListOnce(ctx, httpClient, upstreamURL, body, clientProtocolVersion)
 		if err != nil {
 			lastErr = fmt.Errorf("workspace %q (port %d): %w", ws.WorkspaceKey, ws.Port, err)
 			_ = auditFn("warn", "serena-tools-list-daemon-skip", map[string]any{
@@ -447,8 +550,20 @@ func (s *Server) fetchToolsListFromAnyDaemon(
 // advances to the next daemon. A sessionless daemon yields an empty
 // session id, in which case tools/list is sent with no Mcp-Session-Id
 // (back-compat).
-func proxyToolsListOnce(ctx context.Context, httpClient *http.Client, upstreamURL string, body []byte) (json.RawMessage, error) {
-	daemonSessionID, hsErr := establishDaemonSession(ctx, httpClient, upstreamURL)
+//
+// clientProtocolVersion (P1 findings 1 + 5) is the version the client put
+// on the tools/list request's MCP-Protocol-Version header (empty for an
+// older client). The handshake AND the tools/list POST use the SAME
+// resolved version so the daemon's session is initialized at the version
+// the tools/list header advertises — a strict daemon binding the header
+// to the session's initialized version (see
+// internal/api/hub_mcp_handler.go gate 7) rejects a non-initialize POST
+// whose header is missing OR mismatched. The header is omitted only when
+// the resolved version is empty (cannot happen — the fallback default is
+// non-empty).
+func proxyToolsListOnce(ctx context.Context, httpClient *http.Client, upstreamURL string, body []byte, clientProtocolVersion string) (json.RawMessage, error) {
+	protocolVersion := effectiveHandshakeProtocolVersion(clientProtocolVersion)
+	daemonSessionID, hsErr := establishDaemonSession(ctx, httpClient, upstreamURL, protocolVersion)
 	if hsErr != nil {
 		return nil, fmt.Errorf("upstream handshake: %w", hsErr)
 	}
@@ -460,6 +575,12 @@ func proxyToolsListOnce(ctx context.Context, httpClient *http.Client, upstreamUR
 	// Accept both shapes; daemons that only emit SSE need the stream
 	// Accept, plain-JSON daemons ignore the extra type.
 	req.Header.Set("Accept", "application/json, text/event-stream")
+	// tools/list is a non-initialize POST: send the negotiated protocol
+	// version so a strict daemon does not reject the missing header
+	// (P1 finding 5). Same version as the handshake above.
+	if protocolVersion != "" {
+		req.Header.Set("MCP-Protocol-Version", protocolVersion)
+	}
 	if daemonSessionID != "" {
 		req.Header.Set("Mcp-Session-Id", daemonSessionID)
 	}

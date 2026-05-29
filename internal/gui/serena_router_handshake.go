@@ -45,12 +45,34 @@ import (
 const daemonSessionTTL = 24 * time.Hour
 
 // handshakeInitializeProtocolVersion is the protocolVersion the router
-// offers on its synthesized upstream handshake. It uses the router's
-// default (latest published) revision; serena daemons accept it and
-// echo a supported version back. The handshake's negotiated version is
-// not surfaced to the client (the client negotiated independently in
-// the router-synthesized initialize), so a stable value is sufficient.
+// offers on its synthesized upstream handshake when the client did NOT
+// supply one (an older client that omits the MCP-Protocol-Version
+// header on its tool-call / tools/list). It uses the router's default
+// (latest published) revision; serena daemons accept it and echo a
+// supported version back.
+//
+// When the client DID negotiate a version (P1 finding 1), the router
+// threads THAT version into the handshake instead so the daemon
+// session's initialized version equals the version the client's
+// subsequent tool-calls advertise on their MCP-Protocol-Version header.
+// A strict daemon binds the header to the session's initialized version
+// (see internal/api/hub_mcp_handler.go gate 7), so a fixed handshake
+// version would make the first tool-call fail as a protocol-version
+// mismatch whenever the client negotiated a different supported
+// revision (e.g. 2025-06-18).
 const handshakeInitializeProtocolVersion = defaultProtocolVersion
+
+// effectiveHandshakeProtocolVersion picks the protocolVersion to send on
+// the upstream handshake: the client's negotiated version when present,
+// else the router default. clientProtocolVersion is the value the client
+// put on the incoming request's MCP-Protocol-Version header (empty for an
+// older client that omits it).
+func effectiveHandshakeProtocolVersion(clientProtocolVersion string) string {
+	if clientProtocolVersion != "" {
+		return clientProtocolVersion
+	}
+	return handshakeInitializeProtocolVersion
+}
 
 // daemonSessionBinding records the upstream daemon session a client
 // session is multiplexed onto: the workspace it bound to and the
@@ -94,6 +116,20 @@ func (st *daemonSessionStore) now() time.Time {
 // (the client session was re-routed to another workspace by a later
 // path-arg, so the cached daemon session is stale and must be
 // re-established).
+//
+// lookup is expire-on-read (P2 finding 3): a binding idle longer than
+// daemonSessionTTL is treated as a miss AND deleted, so the caller
+// re-handshakes and stores a fresh daemon session. This is self-
+// contained — it does NOT depend on an external cleanup ticker being
+// wired (the production sweep ticker only covers the cross-package
+// serena_routing.SessionRouter, not this router-owned store). Without
+// expire-on-read a long-idle binding would keep refreshing lastSeen on
+// every reuse and forward a daemon session id the upstream daemon has
+// already expired on its own idle clock, leaving the client stuck on
+// upstream "unknown session" errors with no re-handshake. An expired
+// binding is deleted regardless of the workspace it was bound to
+// (it is stale either way); the `cleanup` method remains for symmetry
+// and an optional periodic sweep.
 func (st *daemonSessionStore) lookup(clientSessionID string, wsKey string) (string, bool) {
 	if clientSessionID == "" {
 		return "", false
@@ -101,7 +137,17 @@ func (st *daemonSessionStore) lookup(clientSessionID string, wsKey string) (stri
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	b, ok := st.bindings[clientSessionID]
-	if !ok || b == nil || b.workspaceKey != wsKey || b.daemonSessionID == "" {
+	if !ok || b == nil {
+		return "", false
+	}
+	// Expire-on-read: a binding past its idle TTL is stale (the daemon
+	// likely expired its side already). Drop it so the caller
+	// re-handshakes.
+	if st.now().Sub(b.lastSeen) > daemonSessionTTL {
+		delete(st.bindings, clientSessionID)
+		return "", false
+	}
+	if b.workspaceKey != wsKey || b.daemonSessionID == "" {
 		return "", false
 	}
 	b.lastSeen = st.now()
@@ -175,8 +221,17 @@ func (st *daemonSessionStore) cleanup(now time.Time, ttl time.Duration) int {
 //     loud rather than minting a phantom mapping.
 //
 // A 1 MiB read cap bounds the initialize response.
-func establishDaemonSession(ctx context.Context, httpClient *http.Client, upstreamURL string) (string, error) {
-	initBody := buildHandshakeInitializeBody()
+//
+// clientProtocolVersion (P1 finding 1) is the version the client
+// negotiated in the router-synthesized initialize, surfaced on the
+// incoming request's MCP-Protocol-Version header. It is sent as the
+// upstream initialize's params.protocolVersion AND on the
+// notifications/initialized header so the daemon session's initialized
+// version matches the version the client's later tool-calls advertise.
+// Empty (older client) falls back to handshakeInitializeProtocolVersion.
+func establishDaemonSession(ctx context.Context, httpClient *http.Client, upstreamURL string, clientProtocolVersion string) (string, error) {
+	protocolVersion := effectiveHandshakeProtocolVersion(clientProtocolVersion)
+	initBody := buildHandshakeInitializeBody(protocolVersion)
 	daemonSessionID, err := postHandshakeInitialize(ctx, httpClient, upstreamURL, initBody)
 	if err != nil {
 		return "", err
@@ -187,7 +242,7 @@ func establishDaemonSession(ctx context.Context, httpClient *http.Client, upstre
 		// advance) and signal "no upstream session" to the caller.
 		return "", nil
 	}
-	if err := postHandshakeInitialized(ctx, httpClient, upstreamURL, daemonSessionID); err != nil {
+	if err := postHandshakeInitialized(ctx, httpClient, upstreamURL, daemonSessionID, protocolVersion); err != nil {
 		return "", fmt.Errorf("notifications/initialized: %w", err)
 	}
 	return daemonSessionID, nil
@@ -196,14 +251,17 @@ func establishDaemonSession(ctx context.Context, httpClient *http.Client, upstre
 // buildHandshakeInitializeBody returns the JSON-RPC initialize envelope
 // the router sends to a workspace daemon to mint an upstream session.
 // id is a fixed sentinel (the response id is not threaded anywhere);
-// clientInfo identifies the router as the originator.
-func buildHandshakeInitializeBody() []byte {
+// clientInfo identifies the router as the originator. protocolVersion is
+// the negotiated version the caller resolved via
+// effectiveHandshakeProtocolVersion (the client's version, or the router
+// default for an older client) — P1 finding 1.
+func buildHandshakeInitializeBody(protocolVersion string) []byte {
 	body, _ := json.Marshal(map[string]any{
 		"jsonrpc": "2.0",
 		"id":      "mcphub-router-handshake",
 		"method":  "initialize",
 		"params": map[string]any{
-			"protocolVersion": handshakeInitializeProtocolVersion,
+			"protocolVersion": protocolVersion,
 			"capabilities":    map[string]any{},
 			"clientInfo": map[string]any{
 				"name":    "mcphub-serena-router",
@@ -257,7 +315,12 @@ func postHandshakeInitialize(ctx context.Context, httpClient *http.Client, upstr
 // operational state. The daemon answers 202; a non-2xx is tolerated
 // (the session already exists from initialize), but a transport error is
 // surfaced so a dead daemon fails the handshake.
-func postHandshakeInitialized(ctx context.Context, httpClient *http.Client, upstreamURL, daemonSessionID string) error {
+//
+// protocolVersion is set on the MCP-Protocol-Version header (P1 finding
+// 1): notifications/initialized is a POST that follows initialize, so a
+// strict daemon binding the header to the session's initialized version
+// requires it. It is the same version sent on the initialize params.
+func postHandshakeInitialized(ctx context.Context, httpClient *http.Client, upstreamURL, daemonSessionID, protocolVersion string) error {
 	body, _ := json.Marshal(map[string]any{
 		"jsonrpc": "2.0",
 		"method":  "notifications/initialized",
@@ -269,6 +332,9 @@ func postHandshakeInitialized(ctx context.Context, httpClient *http.Client, upst
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	req.Header.Set("Mcp-Session-Id", daemonSessionID)
+	if protocolVersion != "" {
+		req.Header.Set("MCP-Protocol-Version", protocolVersion)
+	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
@@ -287,6 +353,14 @@ func postHandshakeInitialized(ctx context.Context, httpClient *http.Client, upst
 // daemon does not require session affinity (a sessionless daemon); the
 // caller then forwards with no upstream Mcp-Session-Id.
 //
+// clientProtocolVersion (P1 finding 1) is threaded into the handshake so
+// the daemon session's initialized version matches the version the
+// client's subsequent tool-calls advertise; the caller passes the
+// incoming request's MCP-Protocol-Version header (empty for an older
+// client). It is used ONLY when a handshake actually runs — a cache hit
+// reuses the session established under the version negotiated on the
+// first call.
+//
 // The handshake is performed lazily, OUTSIDE the store lock, so a slow
 // daemon does not serialize unrelated client sessions. Two concurrent
 // first calls for the same client session may each handshake; the last
@@ -301,6 +375,7 @@ func (st *daemonSessionStore) resolveDaemonSession(
 	upstreamURL string,
 	clientSessionID string,
 	ws *api.WorkspaceEntry,
+	clientProtocolVersion string,
 ) (string, error) {
 	if ws == nil {
 		return "", fmt.Errorf("resolveDaemonSession: nil workspace")
@@ -310,7 +385,7 @@ func (st *daemonSessionStore) resolveDaemonSession(
 			return dsid, nil
 		}
 	}
-	dsid, err := establishDaemonSession(ctx, httpClient, upstreamURL)
+	dsid, err := establishDaemonSession(ctx, httpClient, upstreamURL, clientProtocolVersion)
 	if err != nil {
 		return "", err
 	}

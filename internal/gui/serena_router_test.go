@@ -138,6 +138,17 @@ type fakeSerenaDaemon struct {
 	// lastToolHeaders is a clone of the headers on the most recent
 	// session-gated tool POST.
 	lastToolHeaders http.Header
+
+	// lastInitProtocolVersion is params.protocolVersion observed on the
+	// most recent upstream initialize POST (P1 finding 1 — the router must
+	// send the client's negotiated version, not a hard-coded one).
+	lastInitProtocolVersion string
+	// lastInitHeaders / lastInitializedHeaders are clones of the headers on
+	// the most recent initialize and notifications/initialized POSTs, so a
+	// test can assert the MCP-Protocol-Version header threaded onto the
+	// post-initialize request (P1 finding 1).
+	lastInitHeaders        http.Header
+	lastInitializedHeaders http.Header
 }
 
 func newFakeSerenaDaemon(prefix string) *fakeSerenaDaemon {
@@ -150,6 +161,9 @@ func (d *fakeSerenaDaemon) handler() http.HandlerFunc {
 		var probe struct {
 			Method string          `json:"method"`
 			ID     json.RawMessage `json:"id"`
+			Params struct {
+				ProtocolVersion string `json:"protocolVersion"`
+			} `json:"params"`
 		}
 		_ = json.Unmarshal(body, &probe)
 
@@ -159,6 +173,8 @@ func (d *fakeSerenaDaemon) handler() http.HandlerFunc {
 			d.mintCount++
 			sid := fmt.Sprintf("%s-daemon-session-%d", d.sessionPrefix, d.mintCount)
 			d.issued[sid] = true
+			d.lastInitProtocolVersion = probe.Params.ProtocolVersion
+			d.lastInitHeaders = r.Header.Clone()
 			d.mu.Unlock()
 			w.Header().Set("Mcp-Session-Id", sid)
 			w.Header().Set("Content-Type", "application/json")
@@ -167,6 +183,9 @@ func (d *fakeSerenaDaemon) handler() http.HandlerFunc {
 			return
 		case "notifications/initialized":
 			// Acknowledge; a real daemon advances its session here.
+			d.mu.Lock()
+			d.lastInitializedHeaders = r.Header.Clone()
+			d.mu.Unlock()
 			w.WriteHeader(http.StatusAccepted)
 			return
 		}
