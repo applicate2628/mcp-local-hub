@@ -1383,7 +1383,10 @@ func TestInstallParsedManifest_RefusesSpecBearingWriteWhileSupervisorRunning(t *
 	if err == nil {
 		t.Fatal("expected §7.1 refuse error while a supervisor is running, got nil")
 	}
-	for _, want := range []string{"refusing to write spec-bearing", "supervisor is running", "§7.1"} {
+	// Error names the gate, the running supervisor, the design ref, AND the
+	// non-circular guidance (consultant r2 #2: STOP the supervisor — `install
+	// --upgrade` alone leaves one running and would still be refused).
+	for _, want := range []string{"refusing to write spec-bearing", "supervisor is running", "STOP the running supervisor", "§7.1"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("refuse error %q missing %q", err.Error(), want)
 		}
@@ -1392,6 +1395,12 @@ func TestInstallParsedManifest_RefusesSpecBearingWriteWhileSupervisorRunning(t *
 	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
 	if written, rerr := ReadSupervisorIntent(intentPath); rerr == nil && written.HasRuntimeSpecRow() {
 		t.Fatalf("gate must refuse before writing spec-bearing rows; found runtime_spec rows on disk")
+	}
+	// The refuse emits a durable audit row (consultant r2 (d)-observability),
+	// not just the returned error string.
+	logBytes, _ := os.ReadFile(filepath.Join(stateDir, SupervisorEventLogFileLeaf))
+	if !strings.Contains(string(logBytes), "spec-bearing-install-refused") {
+		t.Errorf("expected durable spec-bearing-install-refused event in supervisor-events.log; got: %s", logBytes)
 	}
 }
 

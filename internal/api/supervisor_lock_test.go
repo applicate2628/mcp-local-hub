@@ -42,9 +42,9 @@ func TestSupervisorRunningUnderStateDir(t *testing.T) {
 	dir := hardenedTempDir(t)
 	lockPath := filepath.Join(dir, "supervisor.lock")
 
-	// (1) No supervisor holds the lock → not running.
-	if running, pid := SupervisorRunningUnderStateDir(dir); running || pid != 0 {
-		t.Fatalf("no lock held: got (running=%v, pid=%d), want (false, 0)", running, pid)
+	// (1) No supervisor holds the lock → not running, no error.
+	if running, pid, err := SupervisorRunningUnderStateDir(dir); running || pid != 0 || err != nil {
+		t.Fatalf("no lock held: got (running=%v, pid=%d, err=%v), want (false, 0, nil)", running, pid, err)
 	}
 
 	// (2) A live "supervisor" holds the flock (+ wrote the sidecar) → running.
@@ -56,16 +56,33 @@ func TestSupervisorRunningUnderStateDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("acquire supervisor lock: %v", err)
 	}
-	if running, pid := SupervisorRunningUnderStateDir(dir); !running || pid != os.Getpid() {
-		t.Fatalf("supervisor lock held: got (running=%v, pid=%d), want (true, %d)", running, pid, os.Getpid())
+	if running, pid, perr := SupervisorRunningUnderStateDir(dir); !running || pid != os.Getpid() || perr != nil {
+		t.Fatalf("supervisor lock held: got (running=%v, pid=%d, err=%v), want (true, %d, nil)", running, pid, perr, os.Getpid())
 	}
 	lk.Release()
 
 	// (3) After release the kernel frees the flock → not running (a crashed or
 	// exited supervisor frees the lock; the NEXT start is a fresh process on the
 	// current binary, which is the safe state for a spec-bearing write).
-	if running, _ := SupervisorRunningUnderStateDir(dir); running {
-		t.Fatalf("after release: got running=true, want false")
+	if running, _, err := SupervisorRunningUnderStateDir(dir); running || err != nil {
+		t.Fatalf("after release: got (running=%v, err=%v), want (false, nil)", running, err)
+	}
+}
+
+// TestSupervisorRunningUnderStateDir_FailsClosedOnProbeError verifies the
+// fail-closed contract (consultant PR #246 r2 #1): when the lock probe itself
+// cannot run (here a state dir under a nonexistent parent chain, so the flock
+// file cannot be opened/created), liveness is UNDETERMINABLE and the function
+// returns a non-nil error — so a safety gate refuses rather than silently
+// assuming not-running (which would disable the gate on hardened hosts).
+func TestSupervisorRunningUnderStateDir_FailsClosedOnProbeError(t *testing.T) {
+	bogus := filepath.Join(hardenedTempDir(t), "no-such-parent", "deeper", "state")
+	running, _, err := SupervisorRunningUnderStateDir(bogus)
+	if err == nil {
+		t.Fatalf("probe against a nonexistent parent must return a non-nil error (undeterminable); got running=%v, err=nil", running)
+	}
+	if running {
+		t.Fatalf("undeterminable probe must not report running=true; got running=true, err=%v", err)
 	}
 }
 

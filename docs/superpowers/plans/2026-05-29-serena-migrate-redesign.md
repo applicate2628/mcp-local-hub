@@ -564,6 +564,26 @@ fail-loud guard's airtightness AND the native-http gate's completeness at both b
   injects — resolved from the supervisor's OWN resolved state dir (sibling of `statePath`), bot r2 P3, not a
   fresh `DefaultSupervisorIntentPath()` — so the proxy's intent-path lookup is immune to both the serena child's
   HOME/XDG overlay env AND a `MCPHUB_STATE_DIR_OVERRIDE`/test state-dir mismatch.)
+- **§7.1 gate hardening from the post-bot deeper review** (sonnet code-reviewer + consultant, PR #246 r2):
+  - **Fail-closed on undeterminable liveness** (consultant #1): `SupervisorRunningUnderStateDir` is tri-state
+    `(running, pid, err)`; a lock-probe error (e.g. `LockFileEx` erroring on a locked-down / AV-instrumented
+    Windows host) returns a non-nil err and the gate REFUSES — it never assumes "not running" on a probe error,
+    which would silently disable the gate on exactly the hardened hosts that need split-brain protection most.
+  - **Symmetric skip at EVERY spawn path** (sonnet P2-1): the IPC respawn handler (`supervise_respawn.go`) also
+    excludes legacy nil-spec serena-proxy rows before `spawnFn`, matching the reconcile exclusion; the spawn
+    closure is then unreachable for such rows and its own fail-loud is last-resort defense-in-depth.
+  - **Durable refusal audit** (consultant observability): the gate emits a `spec-bearing-install-refused`
+    supervisor event, parity with the reconcile path's `legacy-serena-descriptor-skipped`.
+  - **Accurate, non-circular guidance** (consultant #2): the refuse error tells the operator to STOP the running
+    supervisor (NOT merely `install --upgrade`, which leaves one running and would still be refused).
+  - **HARD PRECONDITION**: no user-facing spec-bearing install/migrate command ships until **Phase 4** replaces
+    the refuse-only gate with the automatic cold-restart driver. Wiring `InstallParsedManifest` to a CLI command
+    (Phase 2/3) MUST NOT land before Phase 4, or operators hit the refuse with no auto-remediation.
+  - **Tracked follow-ups** (consultant (d), not blocking Phase 1): migrate `isOwnerLive` onto the existing
+    cross-platform `internal/process.IsPidAlive` primitive (OpenProcess + WaitForSingleObject); consider an
+    explicit intent-schema epoch/version field so a future forward-incompatible change is enforced structurally
+    rather than by a best-effort liveness race (`DisallowUnknownFields` is corrupt-state detection, not a
+    forward-compatibility model).
 - The current embedded `servers/serena/manifest.yaml` is `kind: global`. **HEAD** has a single `unified`
   daemon on `--context codex` for all clients; the **working tree is mid-edit** on that file (reverted to
   the two-daemon split). Migrating that embed to the dynamic-pool shape (parent plan §G.1) is decoupled from

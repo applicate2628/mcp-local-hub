@@ -2129,10 +2129,12 @@ func appendSupervisorIntentChannel(cmdEnv []string, intentPath string) []string 
 // runSupervise: filepath.Join(stateDir, "supervisor-intent.json")), so the
 // channel value is byte-identical to that path. It deliberately does NOT call
 // api.DefaultSupervisorIntentPath() in the resolved case: that re-runs
-// DaemonStateDir, which honors MCPHUB_STATE_DIR_OVERRIDE / SetDaemonStateRootForTest
-// / a POSIX child-overlaid HOME and can resolve to a DIFFERENT dir than the
-// supervisor's actual state dir — handing the serena-proxy a path where its own
-// descriptor does not exist, so it fails to start (bot PR #246 r2 P3).
+// api.DaemonStateDir, which — unlike the supervisor's own cli stateDirFunc —
+// does NOT honor MCPHUB_STATE_DIR_OVERRIDE and instead resolves via
+// SetDaemonStateRootForTest / a POSIX HOME, so it can resolve to a DIFFERENT dir
+// than the supervisor's actual stateDir and hand the serena-proxy a path where
+// its own descriptor does not exist (bot PR #246 r2 P3; mechanism corrected per
+// review — the override is read by cli stateDirFunc, not by api.DaemonStateDir).
 //
 // statePath == "" is the makeProductionSpawnFn test/manual wrapper: there is no
 // resolved state dir to derive from, so it falls back to DefaultSupervisorIntentPath
@@ -2206,11 +2208,12 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		// no longer lives here. r1 expressed it as `return nil` inside this
 		// closure, but the controller's executeSideEffect treats a nil spawn
 		// error as SUCCESS → posts EvHealthOK → StSpawning → StRunning, leaving a
-		// PHANTOM running daemon. The skip is now a DESIRED-SET EXCLUSION in
-		// Reconciler.Reconcile (supervise_reconcile.go): such rows are excluded
-		// before EvStart fires, so this closure is never invoked for them. The
-		// serena-proxy launcher keeps its own nil-spec fail-loud as
-		// defense-in-depth if a row ever reaches it through a non-reconcile path.
+		// PHANTOM running daemon. The skip is now applied at EVERY path that
+		// reaches spawn: Reconciler.Reconcile excludes such rows from its
+		// spawn-desired set (supervise_reconcile.go), and the IPC respawn handler
+		// refuses them before calling spawnFn (supervise_respawn.go, r2 P2-1) — so
+		// a legacy nil-spec row never reaches this closure. The serena-proxy
+		// launcher keeps its own nil-spec fail-loud as last-resort defense-in-depth.
 		cmd := exec.Command(d.Command, d.Args...)
 		if d.Workspace != "" {
 			cmd.Dir = d.Workspace

@@ -145,8 +145,10 @@ func (l *SupervisorLock) Release() {
 // ownership signal), as SupervisorRunningUnderStateDir does; isOwnerLive here is
 // only the diagnostic refinement AcquireSupervisorLock applies AFTER its flock
 // TryLock has already failed, so its Windows weakness degrades a message, not a
-// decision. A cross-platform OpenProcess/GetExitCodeProcess liveness fix for
-// isOwnerLive itself is tracked separately.
+// decision. The repo ALREADY ships the correct cross-platform primitive —
+// internal/process.IsPidAlive (Windows OpenProcess + WaitForSingleObject(0));
+// migrating isOwnerLive onto it is a cheap, contained follow-up tracked
+// separately (it would change only the AcquireSupervisorLock diagnostic string).
 //
 // Pattern intentionally simpler than internal/gui/single_instance.go's
 // processID probe — that one needs image basename, argv, and start time
@@ -169,7 +171,11 @@ func isOwnerLive(o SupervisorLockOwner) bool {
 // SupervisorRunningUnderStateDir reports whether a LIVE supervisor process
 // currently owns the singleton lock under stateDir — i.e. its intent watcher is
 // actively re-reading <stateDir>/supervisor-intent.json. It returns the owner
-// PID (best-effort, from the sidecar) alongside the boolean for diagnostics.
+// PID (best-effort, from the sidecar) for diagnostics, plus a TRI-STATE result:
+//
+//   - (false, 0, nil)    — definitively NOT running (lock acquirable).
+//   - (true,  pid, nil)  — definitively running (lock held by another process).
+//   - (false, 0, err)    — UNDETERMINABLE (the lock probe itself errored).
 //
 // The authoritative signal is the gofrs/flock itself, NOT the owner sidecar +
 // isOwnerLive: isOwnerLive's PID-signal probe is POSIX-effective only (Go's
@@ -183,28 +189,35 @@ func isOwnerLive(o SupervisorLockOwner) bool {
 // not running — exactly when the NEXT supervisor start is a fresh process on the
 // current binary.
 //
+// FAIL-CLOSED CONTRACT (consultant PR #246 r2 #1): a non-nil err means liveness
+// could not be determined (a rare open/lock syscall failure — e.g. a
+// locked-down or AV-instrumented Windows host where LockFileEx errors instead of
+// cleanly reporting "held"). A caller gating a destructive/unsafe operation MUST
+// treat err != nil as "assume running" and refuse. Returning "not running" on a
+// probe error (the naive polarity) would SILENTLY disable the gate on exactly
+// the hardened hosts where split-brain protection matters most.
+//
 // Used by the §7.1 spec-bearing supervisor-intent write gate (bot PR #246 r2):
 // an OLD running supervisor binary's ReadSupervisorIntent uses
 // DisallowUnknownFields and would reject a newly written runtime_spec field, so
-// the gate refuses the spec-bearing write while a supervisor is live.
-func SupervisorRunningUnderStateDir(stateDir string) (bool, int) {
+// the gate refuses the spec-bearing write while a supervisor is live (or while
+// liveness is undeterminable).
+func SupervisorRunningUnderStateDir(stateDir string) (running bool, pid int, err error) {
 	lockPath := filepath.Join(stateDir, "supervisor.lock")
 	// Mirror AcquireSupervisorLock's flock leaf: it locks `path + ".lock"`.
 	lk := flock.New(lockPath + ".lock")
-	got, err := lk.TryLock()
-	if err != nil {
-		// Probe error (rare: open/lock syscall failure). Cannot determine; fail
-		// toward "not running" so the gate does not spuriously block a legitimate
-		// install. The proxy/supervisor keep their own defenses.
-		return false, 0
+	got, lerr := lk.TryLock()
+	if lerr != nil {
+		// Probe error → UNDETERMINABLE. Surface it so the gate fails closed.
+		return false, 0, fmt.Errorf("probe supervisor lock %s: %w", lockPath+".lock", lerr)
 	}
 	if got {
 		// We acquired it → no supervisor held it → not running. Release at once.
 		_ = lk.Unlock()
-		return false, 0
+		return false, 0, nil
 	}
 	// Held by another process → a supervisor is running. The PID is best-effort
 	// diagnostic from the sidecar (absent/corrupt → 0).
 	owner, _ := ReadSupervisorLockOwner(lockPath)
-	return true, owner.PID
+	return true, owner.PID, nil
 }

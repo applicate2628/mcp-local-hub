@@ -242,23 +242,36 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	// ReadSupervisorIntent uses DisallowUnknownFields: its watcher would reject a
 	// file carrying the new runtime_spec field, keep its stale in-memory intent,
 	// and leave split-brain (this new CLI believes the descriptor was
-	// re-materialized; the old supervisor never sees it). The only safe states
-	// are (a) no supervisor running — the NEXT supervisor start is THIS binary,
-	// which reads runtime_spec — or (b) the supervisor was cold-restarted onto
-	// this binary first. We refuse the spec-bearing write while a supervisor is
-	// live and point the operator at the existing cold-restart/upgrade flow. The
-	// cutover phase (design §9 Phase 3) replaces this refuse with an automatic
-	// drive of that flow; Phase 1 fails safe. Non-spec installs (no runtime_spec
-	// rows) are NOT gated — an old supervisor reads legacy/global rows fine. The
-	// check runs under the held supervisor-intent flock, immediately before the
-	// preflight + commit, so it is as close to the write as a separate-lock probe
-	// can be (the supervisor lock is a distinct primitive; a supervisor starting
-	// in the tiny remaining window would read the just-written intent on its own
-	// first pass, where a NEW binary is fine and an OLD binary starting fresh is
-	// an extreme edge this best-effort gate does not claim to close).
+	// re-materialized; the old supervisor never sees it). The only safe state for
+	// a spec-bearing write is NO supervisor running — the NEXT supervisor start is
+	// THIS binary, which reads runtime_spec. So this Phase-1 gate refuses while a
+	// supervisor is running OR while liveness is undeterminable (FAIL CLOSED,
+	// consultant PR #246 r2 #1 — assuming "not running" on a probe error would
+	// silently disable the gate on hardened hosts). Non-spec installs (no
+	// runtime_spec rows) are NOT gated — an old supervisor reads legacy/global
+	// rows fine. The cutover phase (design §7.1 / Phase 4) UPGRADES this refuse to
+	// an automatic drive of the cold-restart flow; until then the operator must
+	// STOP the running supervisor (NOT merely `install --upgrade`, which leaves a
+	// supervisor running — the any-running gate would still refuse). The check
+	// runs under the held supervisor-intent flock, immediately before the
+	// preflight + commit; the supervisor lock is a distinct primitive, so an old
+	// binary cold-starting in the tiny probe→commit window is an extreme residual
+	// edge — but it self-heals: a fresh old binary decoding the new file fails
+	// LOUD at supervisor cold start (supervise.go intent-decode hard abort), not
+	// silently.
 	if desiredIntent.HasRuntimeSpecRow() {
-		if running, pid := SupervisorRunningUnderStateDir(stateDir); running {
-			return "", fmt.Errorf("InstallParsedManifest: refusing to write spec-bearing serena dynamic-pool descriptors (runtime_spec) for %q while a supervisor is running (pid %d): an older supervisor binary's intent watcher uses DisallowUnknownFields and would reject the new field, leaving split-brain. Cold-restart the supervisor onto this binary first via the upgrade flow (`mcphub install --upgrade`), then re-run the install (design §7.1)", m.Name, pid)
+		running, pid, probeErr := SupervisorRunningUnderStateDir(stateDir)
+		switch {
+		case probeErr != nil:
+			emitSpecBearingInstallRefusedEvent(m.Name, "supervisor-liveness-undeterminable", 0)
+			return "", fmt.Errorf("InstallParsedManifest: refusing to write spec-bearing serena dynamic-pool descriptors (runtime_spec) for %q: could not determine whether a supervisor is running (%v) — failing closed to avoid split-brain with an older supervisor whose intent watcher uses DisallowUnknownFields. Stop any running supervisor and resolve the probe error, then re-run the install (design §7.1)", m.Name, probeErr)
+		case running:
+			emitSpecBearingInstallRefusedEvent(m.Name, "supervisor-running", pid)
+			pidNote := ""
+			if pid > 0 {
+				pidNote = fmt.Sprintf(" (pid %d)", pid)
+			}
+			return "", fmt.Errorf("InstallParsedManifest: refusing to write spec-bearing serena dynamic-pool descriptors (runtime_spec) for %q while a supervisor is running%s: an older supervisor binary's intent watcher uses DisallowUnknownFields and would reject the new field, leaving split-brain. STOP the running supervisor first (the next start will be this binary, which reads runtime_spec) — note `mcphub install --upgrade` alone leaves a supervisor running, so the Phase-4 cold-restart driver or a manual stop is required — then re-run the install (design §7.1)", m.Name, pidNote)
 		}
 	}
 
@@ -597,6 +610,41 @@ func emitStaleWorkspaceSkippedEvent(server, workspacePath string) {
 			"workspace_path": workspacePath,
 			"reason":         "workspace path no longer exists on disk; daemon row dropped before supervisor-intent write to avoid cmd.Dir spawn-loop",
 		},
+	})
+}
+
+// emitSpecBearingInstallRefusedEvent records a best-effort warn to
+// supervisor-events.log when the §7.1 spec-bearing write gate refuses an install
+// (a supervisor is running, or liveness is undeterminable). This gives durable
+// audit parity with the reconcile path's legacy-serena-descriptor-skipped event
+// (consultant PR #246 r2 (d)-observability): without it, the gate refusal lived
+// only in the returned error string. Best-effort: a log failure never blocks or
+// alters the refuse — the returned error is the authoritative operator signal.
+func emitSpecBearingInstallRefusedEvent(server, reason string, pid int) {
+	stateDir, sdErr := DaemonStateDir()
+	if sdErr != nil {
+		return
+	}
+	logger, openErr := OpenSupervisorEventLog(filepath.Join(stateDir, SupervisorEventLogFileLeaf))
+	if openErr != nil {
+		return
+	}
+	defer func() { _ = logger.Close() }()
+	body := map[string]any{
+		"server": server,
+		"reason": reason,
+		"gate":   "spec-bearing-supervisor-intent-write (design §7.1)",
+	}
+	if pid > 0 {
+		body["supervisor_pid"] = pid
+	}
+	_ = logger.Emit(SupervisorEvent{
+		SchemaVersion: SupervisorEventSchemaVersion,
+		TS:            time.Now().UTC().Format(time.RFC3339Nano),
+		Severity:      SupervisorEventSeverityWarn,
+		Source:        "install",
+		Event:         "spec-bearing-install-refused",
+		Body:          body,
 	})
 }
 

@@ -24,15 +24,19 @@ type fakeIPCConn struct {
 	buf bytes.Buffer
 }
 
-func newFakeIPCConn() *fakeIPCConn                              { return &fakeIPCConn{} }
-func (c *fakeIPCConn) Read(b []byte) (int, error)               { return 0, errors.New("no read in test") }
-func (c *fakeIPCConn) Write(b []byte) (int, error)              { c.mu.Lock(); defer c.mu.Unlock(); return c.buf.Write(b) }
-func (c *fakeIPCConn) Close() error                             { return nil }
-func (c *fakeIPCConn) LocalAddr() net.Addr                      { return fakeAddr{} }
-func (c *fakeIPCConn) RemoteAddr() net.Addr                     { return fakeAddr{} }
-func (c *fakeIPCConn) SetDeadline(t time.Time) error            { return nil }
-func (c *fakeIPCConn) SetReadDeadline(t time.Time) error        { return nil }
-func (c *fakeIPCConn) SetWriteDeadline(t time.Time) error       { return nil }
+func newFakeIPCConn() *fakeIPCConn                { return &fakeIPCConn{} }
+func (c *fakeIPCConn) Read(b []byte) (int, error) { return 0, errors.New("no read in test") }
+func (c *fakeIPCConn) Write(b []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.buf.Write(b)
+}
+func (c *fakeIPCConn) Close() error                       { return nil }
+func (c *fakeIPCConn) LocalAddr() net.Addr                { return fakeAddr{} }
+func (c *fakeIPCConn) RemoteAddr() net.Addr               { return fakeAddr{} }
+func (c *fakeIPCConn) SetDeadline(t time.Time) error      { return nil }
+func (c *fakeIPCConn) SetReadDeadline(t time.Time) error  { return nil }
+func (c *fakeIPCConn) SetWriteDeadline(t time.Time) error { return nil }
 
 type fakeAddr struct{}
 
@@ -154,6 +158,79 @@ func TestHandleRespawn_UnknownTaskReturnsUnknownTaskError(t *testing.T) {
 	if spawnCalls.Load() != 0 || terminateCalls.Load() != 0 {
 		t.Fatalf("spawn/terminate must NOT fire on unknown task; got spawn=%d term=%d",
 			spawnCalls.Load(), terminateCalls.Load())
+	}
+}
+
+// TestHandleRespawn_LegacyNilSpecSerenaProxyRefused is the bot PR #246 r2 P2-1
+// guard. A legacy serena-proxy descriptor (daemon serena-proxy argv) with a nil
+// RuntimeSpec — a pre-redesign row — must be REFUSED on the IPC respawn path,
+// mirroring the reconcile desired-set exclusion. Spawning it would cmd.Start a
+// proxy that fails loud on the nil spec and churns restart backoff/quarantine.
+func TestHandleRespawn_LegacyNilSpecSerenaProxyRefused(t *testing.T) {
+	taskName := `\mcp-local-hub-serena-deadbeef`
+	intent := &api.SupervisorIntentFile{
+		Daemons: []api.SupervisorDaemon{{
+			TaskName:    taskName,
+			Server:      "serena",
+			Daemon:      "deadbeef",
+			Args:        []string{"daemon", "serena-proxy", "--server", "serena", "--workspace", `C:\work\alpha`, "--port", "9121", "--task-name", taskName},
+			RuntimeSpec: nil, // pre-redesign / stale row
+		}},
+	}
+	deps, spawnCalls, terminateCalls := newRespawnTestDeps(t, intent)
+
+	req := api.IPCRequest{ID: 90, Cmd: "respawn", Args: map[string]any{"task_name": taskName, "force": false}}
+	conn := newFakeIPCConn()
+	if err := handleRespawn(conn, req, deps); err != nil {
+		t.Fatalf("handleRespawn: %v", err)
+	}
+	resp := conn.lastResponse(t)
+	if resp.Error == nil || resp.Error.Code != ipcErrorRespawnFailed {
+		t.Fatalf("expected RESPAWN_FAILED for legacy nil-spec serena-proxy; got %+v", resp.Error)
+	}
+	if !strings.Contains(resp.Error.Message, "runtime_spec") {
+		t.Fatalf("refuse message must name the missing runtime_spec; got %q", resp.Error.Message)
+	}
+	if spawnCalls.Load() != 0 || terminateCalls.Load() != 0 {
+		t.Fatalf("legacy nil-spec serena-proxy must NOT spawn/terminate; got spawn=%d term=%d",
+			spawnCalls.Load(), terminateCalls.Load())
+	}
+}
+
+// TestHandleRespawn_SpecBearingSerenaProxyNotRefused is the positive control for
+// P2-1: a serena-proxy WITH a RuntimeSpec is NOT caught by the legacy-row guard
+// and respawns normally.
+func TestHandleRespawn_SpecBearingSerenaProxyNotRefused(t *testing.T) {
+	taskName := `\mcp-local-hub-serena-cafef00d`
+	intent := &api.SupervisorIntentFile{
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "serena",
+			Daemon:   "cafef00d",
+			Args:     []string{"daemon", "serena-proxy", "--server", "serena", "--workspace", `C:\work\beta`, "--port", "9122", "--task-name", taskName},
+			RuntimeSpec: &api.DaemonRuntimeSpec{
+				SpecVersion:   api.DaemonRuntimeSpecVersion,
+				ChildCommand:  "uvx",
+				UpstreamPort:  19122,
+				ExternalPort:  9122,
+				WorkspacePath: `C:\work\beta`,
+			},
+		}},
+	}
+	deps, spawnCalls, _ := newRespawnTestDeps(t, intent)
+	hydrateTrackerState(t, deps.runtimeTracker, taskName, "running")
+
+	req := api.IPCRequest{ID: 91, Cmd: "respawn", Args: map[string]any{"task_name": taskName, "force": false}}
+	conn := newFakeIPCConn()
+	if err := handleRespawn(conn, req, deps); err != nil {
+		t.Fatalf("handleRespawn: %v", err)
+	}
+	resp := conn.lastResponse(t)
+	if resp.Error != nil && resp.Error.Code == ipcErrorRespawnFailed && strings.Contains(resp.Error.Message, "runtime_spec") {
+		t.Fatalf("spec-bearing serena-proxy must NOT be refused by the legacy guard; got %+v", resp.Error)
+	}
+	if spawnCalls.Load() != 1 {
+		t.Fatalf("spec-bearing serena-proxy must respawn (spawn once); got spawn=%d", spawnCalls.Load())
 	}
 }
 
