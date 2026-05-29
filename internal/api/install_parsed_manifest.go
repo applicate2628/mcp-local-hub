@@ -94,7 +94,7 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	// dry-write exercises the same payload and the same secure-write
 	// pipeline the real write will use. priorIntent + priorExisted drive the
 	// rollback restore.
-	desiredIntent, priorIntent, priorExisted, err := a.buildMergedSupervisorIntent(m, intentPath)
+	desiredIntent, priorIntent, priorExisted, err := a.buildMergedSupervisorIntent(m, intentPath, opts.Workspaces)
 	if err != nil {
 		return "", err
 	}
@@ -174,12 +174,20 @@ const supervisorIntentFileLeaf = "supervisor-intent.json"
 // (for rollback). Ownership-preserving: daemons for OTHER servers are left
 // untouched.
 //
-// For a workspace-scoped dynamic-pool manifest the per-workspace serena
-// fan-out (D.2 BuildSupervisorDaemonsForSerena) is NOT applied here — that
-// wiring is a separate task. The install-foundation slice writes the
-// plan-derived daemon set (empty for a template-only manifest), which keeps
-// the on-disk file well-formed and the sibling-server entries intact.
-func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath string) (merged, prior *SupervisorIntentFile, priorExisted bool, err error) {
+// The daemon set this install contributes for m.Name is chosen by
+// serenaOrPlanDaemons:
+//
+//   - Workspace-scoped dynamic-pool manifest (m.DaemonTemplate != nil) WITH a
+//     non-empty workspaces snapshot -> the D.2 per-workspace serena fan-out
+//     (one SupervisorDaemon per registered serena workspace), keyed by the
+//     canonical SerenaTaskNameForWorkspace task name.
+//   - Otherwise (global manifest, OR a workspace-scoped manifest with no
+//     registered workspaces) -> supervisorDaemonsFromPlan(m): the static
+//     per-daemon descriptors (empty for a template-only manifest with no
+//     workspaces). This keeps the api.Install path and the
+//     template-only-no-workspaces path byte-identical to the pre-D.3b
+//     behavior.
+func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath string, workspaces []WorkspaceEntry) (merged, prior *SupervisorIntentFile, priorExisted bool, err error) {
 	prior, existed, err := readSupervisorIntentForMerge(intentPath)
 	if err != nil {
 		return nil, nil, false, err
@@ -192,7 +200,7 @@ func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath s
 		}
 		kept = append(kept, d)
 	}
-	kept = append(kept, supervisorDaemonsFromPlan(m)...)
+	kept = append(kept, serenaOrPlanDaemons(m, workspaces)...)
 
 	merged = &SupervisorIntentFile{
 		Version:           1,
@@ -202,6 +210,41 @@ func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath s
 		StrictMode:        prior.StrictMode,
 	}
 	return merged, prior, existed, nil
+}
+
+// serenaOrPlanDaemons returns the SupervisorDaemon descriptors this install
+// contributes for m. It fans out per registered serena workspace when m is a
+// workspace-scoped dynamic-pool manifest (DaemonTemplate != nil) and the
+// workspaces snapshot is non-empty; otherwise it falls back to the static
+// plan-derived set (supervisorDaemonsFromPlan), which is what api.Install and
+// the template-only-no-workspaces path use.
+//
+// BuildSupervisorDaemonsForSerena itself guards on m.DaemonTemplate != nil,
+// m.Kind == KindWorkspaceScoped, and len(workspaces) > 0 (returning nil
+// otherwise), so a non-workspace-scoped manifest or an empty workspaces
+// snapshot deterministically takes the plan-derived branch here.
+func serenaOrPlanDaemons(m *config.ServerManifest, workspaces []WorkspaceEntry) []SupervisorDaemon {
+	if m.DaemonTemplate != nil && len(workspaces) > 0 {
+		// Resolve the mcphub binary the supervisor will exec for each
+		// descriptor. canonicalMcphubPath only fails when `mcphub setup`
+		// has not run, which the install preflight already surfaces
+		// upstream; fall back to the bare name (the descriptor stays
+		// well-formed and the supervisor resolves it on PATH), matching
+		// supervisorDaemonsFromPlan's fallback posture.
+		mcphubPath, perr := canonicalMcphubPath()
+		if perr != nil {
+			mcphubPath = mcphubShortName
+		}
+		// ManifestHash is left empty here: this slice does not compute a
+		// content hash for the parsed manifest, and the field is
+		// diagnostic provenance only (the supervisor spawns from the
+		// self-sufficient argv, not the hash). A later slice may thread a
+		// real hash through.
+		if serena := BuildSupervisorDaemonsForSerena(m, workspaces, "", mcphubPath); serena != nil {
+			return serena
+		}
+	}
+	return supervisorDaemonsFromPlan(m)
 }
 
 // supervisorDaemonsFromPlan derives the SupervisorDaemon descriptors for a

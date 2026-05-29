@@ -257,6 +257,149 @@ func TestInstallParsedManifest_WorkspaceScoped_NotRefused(t *testing.T) {
 	}
 }
 
+// TestInstallParsedManifest_FansOutPerWorkspaceDaemons is the D.3b-1 wiring
+// guard: when the manifest is workspace-scoped (DaemonTemplate != nil) AND
+// opts.Workspaces is non-empty, InstallParsedManifest must call the D.2
+// BuildSupervisorDaemonsForSerena fan-out and write one supervisor-intent
+// daemon per registered serena workspace, MERGED into the existing intent so
+// a pre-existing sibling-server row survives.
+func TestInstallParsedManifest_FansOutPerWorkspaceDaemons(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	// Seed a pre-existing supervisor-intent.json that owns a sibling-server
+	// daemon (server "memory"). The serena install must NOT clobber it.
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	siblingTask := `\mcp-local-hub-memory-default`
+	seed := &SupervisorIntentFile{
+		Version:   1,
+		UpdatedAt: "2026-05-20T00:00:00Z",
+		Daemons: []SupervisorDaemon{{
+			TaskName: siblingTask,
+			Server:   "memory",
+			Daemon:   "default",
+			Command:  "mcphub.exe",
+			Args:     []string{"daemon", "--server", "memory", "--daemon", "default"},
+			Port:     9128,
+		}},
+		StrictMode: false,
+	}
+	if err := WriteSupervisorIntent(intentPath, seed); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+
+	// Two registered serena workspaces, each with a distinct path + an
+	// allocated serena port. Language MUST be the serena sentinel — the
+	// fan-out helper filters on it.
+	wsAlpha := "C:/work/alpha"
+	wsBeta := "C:/work/beta"
+	workspaces := []WorkspaceEntry{
+		{
+			WorkspaceKey:  WorkspaceKey(wsAlpha),
+			WorkspacePath: wsAlpha,
+			Language:      SerenaLanguageSentinel,
+			Backend:       "serena",
+			Port:          9401,
+		},
+		{
+			WorkspaceKey:  WorkspaceKey(wsBeta),
+			WorkspacePath: wsBeta,
+			Language:      SerenaLanguageSentinel,
+			Backend:       "serena",
+			Port:          9402,
+		},
+	}
+
+	m := serenaTemplateManifest()
+	a := NewAPI()
+	var buf bytes.Buffer
+	gotPath, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
+		Writer:          &buf,
+		Workspaces:      workspaces,
+		StartAfterWrite: false,
+	})
+	if err != nil {
+		t.Fatalf("InstallParsedManifest(workspaces): %v", err)
+	}
+	if gotPath != intentPath {
+		t.Fatalf("intent path = %q, want %q", gotPath, intentPath)
+	}
+
+	written, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+
+	// Partition the written daemons into serena rows and the sibling row.
+	var serenaRows []SupervisorDaemon
+	var siblingFound bool
+	for _, d := range written.Daemons {
+		switch d.Server {
+		case "serena":
+			serenaRows = append(serenaRows, d)
+		case "memory":
+			siblingFound = true
+			if d.TaskName != siblingTask {
+				t.Errorf("sibling task name = %q, want %q", d.TaskName, siblingTask)
+			}
+			if d.Port != 9128 {
+				t.Errorf("sibling port = %d, want 9128 (must be preserved verbatim)", d.Port)
+			}
+		default:
+			t.Errorf("unexpected server in written intent: %q", d.Server)
+		}
+	}
+
+	// Sibling-server row PRESERVED.
+	if !siblingFound {
+		t.Fatalf("sibling-server daemon %q was clobbered; written daemons: %+v", siblingTask, written.Daemons)
+	}
+
+	// Exactly two serena daemon rows (one per workspace).
+	if len(serenaRows) != 2 {
+		t.Fatalf("serena daemon rows = %d, want 2; written daemons: %+v", len(serenaRows), written.Daemons)
+	}
+
+	// Each serena row carries the correct workspace path, allocated port,
+	// and the task name SerenaTaskNameForWorkspace would produce.
+	wantByTask := map[string]struct {
+		path string
+		port int
+	}{
+		SerenaTaskNameForWorkspace(wsAlpha): {path: wsAlpha, port: 9401},
+		SerenaTaskNameForWorkspace(wsBeta):  {path: wsBeta, port: 9402},
+	}
+	seenTask := map[string]bool{}
+	for _, d := range serenaRows {
+		want, ok := wantByTask[d.TaskName]
+		if !ok {
+			t.Errorf("serena row has unexpected task name %q (want one of %v)", d.TaskName, wantByTask)
+			continue
+		}
+		if seenTask[d.TaskName] {
+			t.Errorf("duplicate serena task name %q", d.TaskName)
+		}
+		seenTask[d.TaskName] = true
+		if d.Workspace != want.path {
+			t.Errorf("task %q workspace = %q, want %q", d.TaskName, d.Workspace, want.path)
+		}
+		if d.Port != want.port {
+			t.Errorf("task %q port = %d, want %d", d.TaskName, d.Port, want.port)
+		}
+	}
+	if len(seenTask) != 2 {
+		t.Errorf("matched serena task names = %d, want 2 (both workspaces)", len(seenTask))
+	}
+
+	// StartAfterWrite=false: no scheduler Run; the template manifest also
+	// produces no scheduler Create tasks.
+	if f.runCount != 0 {
+		t.Errorf("Run calls = %d, want 0 (StartAfterWrite=false)", f.runCount)
+	}
+}
+
 // TestInstallParsedManifest_DryRun_NoWriteNoPath is the FIX-1 regression
 // guard: a dry run must (a) leave the state dir pristine — no committed
 // supervisor-intent.json AND no leftover ".preflight" temp from a
