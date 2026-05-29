@@ -275,6 +275,20 @@ func containsWorkspacePathTokenInArgs(args []string) bool {
 	return false
 }
 
+// ArgsContainContextFlag reports whether args carries a --context flag in any
+// supported spelling (`--context value` or `--context=value`). A daemon_template
+// manifest must NOT carry --context in base_args / extra_args_template: the
+// context comes solely from daemon_template.context and is appended at spawn, so
+// a token here would duplicate the flag (bot PR #246 r2 P2).
+func ArgsContainContextFlag(args []string) bool {
+	for _, a := range args {
+		if a == "--context" || strings.HasPrefix(a, "--context=") {
+			return true
+		}
+	}
+	return false
+}
+
 // Validate checks required fields and enum values. Called automatically by ParseManifest.
 //
 // Validate is COMPAT mode for the '__'-in-name policy: structural fields
@@ -412,6 +426,16 @@ func (m *ServerManifest) Validate() error {
 			}
 			if !containsWorkspacePathTokenInArgs(m.DaemonTemplate.ExtraArgsTemplate) {
 				return fmt.Errorf("manifest %s: daemon_template.extra_args_template must contain ${workspace.path} token somewhere (else workspace context is lost on spawn)", m.Name)
+			}
+			// daemon_template.context is the single authoritative context value;
+			// the materializer APPENDS `--context <Context>` to every per-workspace
+			// child argv (design §5). A --context token already present in base_args
+			// or extra_args_template would materialize a SECOND --context flag,
+			// which the child CLI either rejects (duplicate) or silently resolves to
+			// the wrong value when the two differ (bot PR #246 r2 P2). Reject the
+			// malformed shape here so it never reaches RuntimeSpec materialization.
+			if ArgsContainContextFlag(m.BaseArgs) || ArgsContainContextFlag(m.DaemonTemplate.ExtraArgsTemplate) {
+				return fmt.Errorf("manifest %s: daemon_template manifests must not place --context in base_args or extra_args_template; the context comes solely from daemon_template.context and is appended at spawn", m.Name)
 			}
 			return nil
 		}

@@ -906,6 +906,64 @@ func TestReconcile_ExcludesLegacyNilSpecSerenaProxyFromDesiredSet(t *testing.T) 
 	}
 }
 
+// TestReconcile_LegacyRunningSerenaProxy_HonorsStop is the bot PR #246 r2 P2
+// guard (supervise_reconcile.go:168). The legacy nil-spec exclusion is
+// SPAWN-ONLY (gated on !running): a legacy serena-proxy row that is ALREADY
+// RUNNING (e.g. hydrated from supervisor-state.json on a warm restart, or
+// spawned by a pre-redesign supervisor) and marked stopped in daemon-intent.json
+// must still reach the `isStopped && running` terminate branch — an unconditional
+// exclusion would strand the live process so an operator stop could never stop it.
+func TestReconcile_LegacyRunningSerenaProxy_HonorsStop(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	const legacyTask = `\mcp-local-hub-serena-deadbeef`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName:    legacyTask,
+			Server:      "serena",
+			Daemon:      "deadbeef",
+			Command:     "fake-noop",
+			Args:        serenaProxyArgs(legacyTask, 9121),
+			RuntimeSpec: nil, // pre-redesign / stale row
+		}},
+	}
+	now := time.Now().UTC()
+	daemonIntent := &api.DaemonIntentFile{
+		Tasks: map[string]api.DaemonIntent{
+			legacyTask: {Desired: api.IntentDesiredStopped, UpdatedAt: now},
+		},
+	}
+
+	spawned, terminated := []string{}, []string{}
+	r := NewReconciler(
+		func(d api.SupervisorDaemon) error { spawned = append(spawned, d.TaskName); return nil },
+		func(d api.SupervisorDaemon) error { terminated = append(terminated, d.TaskName); return nil },
+	)
+	r.Events = events
+	// currentRunning marks the legacy row RUNNING.
+	r.Reconcile(intent, daemonIntent, map[string]bool{legacyTask: true}, now)
+
+	if len(spawned) != 0 {
+		t.Fatalf("a stopped row must not be spawned; got spawned=%v", spawned)
+	}
+	if len(terminated) != 1 || terminated[0] != legacyTask {
+		t.Fatalf("a RUNNING legacy nil-spec serena-proxy marked stopped must be TERMINATED (not skipped); got terminated=%v", terminated)
+	}
+	// It is being terminated, NOT excluded — the spawn-exclusion skip warn must
+	// NOT fire for a running row.
+	logStr := readFileStringIfExists(t, eventsPath)
+	if strings.Contains(logStr, `"event":"legacy-serena-descriptor-skipped"`) {
+		t.Fatalf("a running row honored for stop must NOT emit the spawn-exclusion skip event:\n%s", logStr)
+	}
+}
+
 // TestReconcile_ExcludedLegacyRow_PostsNoEvStart proves the exclusion happens
 // at the EventLoop path too: when an EventLoop is wired (the production A.2
 // path), the excluded legacy row must NOT produce an EvStart event. EvStart is

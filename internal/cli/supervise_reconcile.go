@@ -154,7 +154,7 @@ func (r *Reconciler) Reconcile(
 		// PHANTOM running daemon (no process started) in supervisor-state.json +
 		// IPC status. A "skip" expressed as a successful spawn is wrong.
 		//
-		// The correct skip is to EXCLUDE the row from the spawn-desired set HERE,
+		// The correct skip is to EXCLUDE the row from the SPAWN-desired set HERE,
 		// before any EvStart / spawn fires: the controller never sees EvStart for
 		// it, so it is never spawned, never marked running, and never churns
 		// restart backoff/quarantine. We emit ONE operator-actionable warn at the
@@ -165,7 +165,16 @@ func (r *Reconciler) Reconcile(
 		// still injects MCPHUB_SUPERVISOR_INTENT_PATH for them. Global daemons
 		// have a legitimately-nil RuntimeSpec and are NOT serena-proxy rows, so
 		// they are NOT excluded.)
-		if isSerenaProxyDescriptor(d) && d.RuntimeSpec == nil {
+		//
+		// The exclusion is SPAWN-ONLY: it is gated on !running so it cannot
+		// strand an ALREADY-RUNNING legacy row (bot PR #246 r2 P2). If such a row
+		// is running — e.g. a warm restart hydrated it from supervisor-state.json,
+		// or it was spawned by a pre-redesign supervisor before the upgrade — and
+		// daemon-intent.json marks it stopped, it MUST fall through to the
+		// `isStopped && running` terminate branch below; suppressing that path too
+		// would mean an operator stop/quarantine could never stop the live
+		// process until the row is re-materialized or removed.
+		if isSerenaProxyDescriptor(d) && d.RuntimeSpec == nil && !running {
 			if r.Events != nil {
 				_ = r.Events.Emit(api.SupervisorEvent{
 					Severity: "warn",

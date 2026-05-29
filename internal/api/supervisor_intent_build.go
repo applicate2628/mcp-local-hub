@@ -215,6 +215,17 @@ func BuildSupervisorDaemonsForSerena(
 	if strings.TrimSpace(m.DaemonTemplate.Context) == "" {
 		return nil
 	}
+	// Duplicate-context gate (bot PR #246 r2 P2). buildSerenaChildArgs APPENDS
+	// the authoritative `--context <DaemonTemplate.Context>`; a --context token
+	// already in base_args / extra_args_template would materialize a SECOND
+	// --context flag (child rejects the duplicate, or silently uses the wrong
+	// value when the two differ). config.ServerManifest.Validate now rejects this
+	// shape, but InstallParsedManifest accepts a PRE-PARSED manifest that may not
+	// have been re-validated — so guard here too (defense-in-depth, mirrors the
+	// transport + empty-context gates above).
+	if config.ArgsContainContextFlag(m.BaseArgs) || config.ArgsContainContextFlag(m.DaemonTemplate.ExtraArgsTemplate) {
+		return nil
+	}
 	if len(workspaces) == 0 {
 		return nil
 	}

@@ -385,9 +385,9 @@ func TestValidateRemoteHTTP_RejectsConflictingFields(t *testing.T) {
 		}
 	}
 	cases := []struct {
-		name  string
+		name   string
 		mutate func(m *ServerManifest)
-		want  string
+		want   string
 	}{
 		{"command", func(m *ServerManifest) { m.Command = "npx" }, "command"},
 		{"base_args", func(m *ServerManifest) { m.BaseArgs = []string{"foo"} }, "base_args"},
@@ -629,9 +629,12 @@ func validDaemonTemplateManifest() *ServerManifest {
 		Transport: TransportNativeHTTP,
 		Command:   "uvx",
 		DaemonTemplate: &DaemonTemplate{
-			Context:           "codex",
-			PortPool:          &PortPool{Start: 9121, End: 9199},
-			ExtraArgsTemplate: []string{"--context", "codex", "--project", "${workspace.path}"},
+			Context:  "codex",
+			PortPool: &PortPool{Start: 9121, End: 9199},
+			// --context is NOT a template token: it is appended at spawn from
+			// DaemonTemplate.Context (design §5). A --context here would double the
+			// flag, which Validate now rejects (bot PR #246 r2 P2).
+			ExtraArgsTemplate: []string{"--project", "${workspace.path}"},
 		},
 	}
 }
@@ -644,6 +647,37 @@ func TestServerManifestValidate_WorkspaceScopedWithDaemonTemplate_Valid(t *testi
 	m := validDaemonTemplateManifest()
 	if err := m.Validate(); err != nil {
 		t.Fatalf("expected valid manifest; got %v", err)
+	}
+}
+
+// TestServerManifestValidate_WorkspaceScopedWithDaemonTemplate_RejectsContextInTemplate
+// pins the duplicate-context gate (bot PR #246 r2 P2): --context must NOT appear
+// in base_args or extra_args_template — it is appended at spawn from
+// daemon_template.context, so a token here would materialize a doubled flag.
+func TestServerManifestValidate_WorkspaceScopedWithDaemonTemplate_RejectsContextInTemplate(t *testing.T) {
+	// --context in extra_args_template → rejected.
+	m := validDaemonTemplateManifest()
+	m.DaemonTemplate.ExtraArgsTemplate = []string{"--context", "codex", "--project", "${workspace.path}"}
+	if err := m.Validate(); err == nil {
+		t.Fatal("expected rejection of --context in extra_args_template; got nil")
+	} else if !strings.Contains(err.Error(), "--context") {
+		t.Errorf("error must mention --context; got %v", err)
+	}
+
+	// --context=value (joined form) in extra_args_template → also rejected.
+	m2 := validDaemonTemplateManifest()
+	m2.DaemonTemplate.ExtraArgsTemplate = []string{"--context=codex", "--project", "${workspace.path}"}
+	if err := m2.Validate(); err == nil {
+		t.Fatal("expected rejection of --context=value in extra_args_template; got nil")
+	}
+
+	// --context in base_args → rejected.
+	m3 := validDaemonTemplateManifest()
+	m3.BaseArgs = []string{"--context", "codex"}
+	if err := m3.Validate(); err == nil {
+		t.Fatal("expected rejection of --context in base_args; got nil")
+	} else if !strings.Contains(err.Error(), "--context") {
+		t.Errorf("error must mention --context; got %v", err)
 	}
 }
 

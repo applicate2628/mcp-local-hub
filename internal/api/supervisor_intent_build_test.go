@@ -369,6 +369,25 @@ func TestBuildSupervisorIntent_LegacyDaemonsListStillWorks(t *testing.T) {
 	}
 }
 
+// TestBuildSupervisorIntent_RejectsContextInTemplate covers the duplicate-context
+// defense-in-depth gate (bot PR #246 r2 P2): a daemon_template manifest whose
+// extra_args_template already carries --context must yield nil — not a descriptor
+// with a doubled --context (buildSerenaChildArgs appends the authoritative one).
+// config.ServerManifest.Validate rejects this shape up front, but
+// InstallParsedManifest accepts a PRE-PARSED manifest, so the fan-out guards too.
+func TestBuildSupervisorIntent_RejectsContextInTemplate(t *testing.T) {
+	m := fixtureSerenaManifest()
+	m.DaemonTemplate.ExtraArgsTemplate = append([]string{"--context", "codex"}, m.DaemonTemplate.ExtraArgsTemplate...)
+	got := BuildSupervisorDaemonsForSerena(m, []WorkspaceEntry{{
+		WorkspacePath: "C:/work/alpha",
+		Language:      SerenaLanguageSentinel,
+		Port:          9121,
+	}}, "", testMcphubBinary)
+	if got != nil {
+		t.Fatalf("a --context-in-template manifest must yield nil from the fan-out (defense-in-depth); got=%#v", got)
+	}
+}
+
 // TestBuildSupervisorIntent_AddingWorkspaceAddsDescriptor covers plan
 // D.2 incremental-add: start with 2 workspaces, register a 3rd, and
 // rebuild the fan-out. Result has exactly 3 descriptors.
