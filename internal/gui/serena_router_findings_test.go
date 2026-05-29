@@ -757,3 +757,287 @@ func TestRouterSessionStore_ConcurrentAccess(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// ---------------------------------------------------------------------
+// Finding 1 — tools/list enforces the session's negotiated protocol
+// version, mirroring the tool-call path's Finding G and the hub's gate 7.
+// A conflicting MCP-Protocol-Version on a known session is rejected
+// "protocol-version mismatch" (-32600 at HTTP 400) before any daemon
+// proxy; a matching or omitted header proceeds. The daemon-skip count
+// proves the rejected request never handshaked.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_ToolsList_EnforcesSessionNegotiatedVersion(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	daemon.tool = func(w http.ResponseWriter, r *http.Request, b []byte) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"find_symbol"}]}}`))
+	}
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	// initialize at the router negotiating a supported, NON-default revision.
+	const negotiated = "2025-06-18"
+	if negotiated == defaultProtocolVersion {
+		t.Fatalf("precondition: negotiated must differ from the router default %q", defaultProtocolVersion)
+	}
+	sid := mintRouterSession(t, s, negotiated)
+	body := buildLifecycleBody(t, "tools/list", map[string]any{})
+
+	// Sub-case A: tools/list header CONFLICTS with the session version ->
+	// rejected -32600 "protocol-version mismatch" at HTTP 400, no daemon
+	// handshake/proxy.
+	rrConflict := postSerena(t, s, body, map[string]string{
+		"Mcp-Session-Id":       sid,
+		"MCP-Protocol-Version": "2025-11-25", // differs from the negotiated 2025-06-18
+	})
+	if rrConflict.Code != http.StatusBadRequest {
+		t.Fatalf("conflicting-version tools/list status = %d, want 400; body=%s", rrConflict.Code, rrConflict.Body.String())
+	}
+	var resp struct {
+		Result json.RawMessage `json:"result"`
+		Error  *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rrConflict.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v; raw=%s", err, rrConflict.Body.String())
+	}
+	if len(resp.Result) > 0 {
+		t.Errorf("result present on a version-rejected tools/list; want error only")
+	}
+	if resp.Error == nil || resp.Error.Code != jsonrpcInvalidRequest {
+		t.Fatalf("expected -32600 mismatch; got %+v", resp.Error)
+	}
+	if !strings.Contains(resp.Error.Message, "protocol-version mismatch") {
+		t.Errorf("error message %q should be the protocol-version-mismatch wording", resp.Error.Message)
+	}
+	if mc := daemonMintCount(daemon); mc != 0 {
+		t.Errorf("daemon minted %d sessions on a rejected mismatched tools/list; want 0 (rejection precedes proxy)", mc)
+	}
+
+	// Sub-case B: tools/list header MATCHES the session version -> proceeds,
+	// reaches the daemon, and the handshake uses the negotiated version.
+	rrMatch := postSerena(t, s, body, map[string]string{
+		"Mcp-Session-Id":       sid,
+		"MCP-Protocol-Version": negotiated,
+	})
+	if rrMatch.Code != http.StatusOK {
+		t.Fatalf("matching-version tools/list status = %d, want 200; body=%s", rrMatch.Code, rrMatch.Body.String())
+	}
+	assertToolsListNames(t, rrMatch.Body.Bytes(), []string{"find_symbol"})
+	daemon.mu.Lock()
+	gotInitPV := daemon.lastInitProtocolVersion
+	daemon.mu.Unlock()
+	if gotInitPV != negotiated {
+		t.Errorf("upstream handshake protocolVersion = %q, want the session's %q", gotInitPV, negotiated)
+	}
+
+	// Sub-case C: tools/list with NO version header -> uses the session
+	// version, served from the cache populated by sub-case B (no new fetch).
+	beforeHits := daemonMintCount(daemon)
+	rrOmit := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": sid})
+	if rrOmit.Code != http.StatusOK {
+		t.Fatalf("omitted-header tools/list status = %d, want 200; body=%s", rrOmit.Code, rrOmit.Body.String())
+	}
+	assertToolsListNames(t, rrOmit.Body.Bytes(), []string{"find_symbol"})
+	if mc := daemonMintCount(daemon); mc != beforeHits {
+		t.Errorf("daemon minted %d more sessions on the omitted-header call; want a cache hit (0 new)", mc-beforeHits)
+	}
+}
+
+// ---------------------------------------------------------------------
+// Finding 3 — DELETE validates the session's negotiated protocol version
+// BEFORE tearing anything down. A conflicting MCP-Protocol-Version on a
+// known session is rejected -32600 at HTTP 400 and the session survives
+// (no local revocation, no upstream DELETE). A matching/omitted header
+// proceeds with teardown; an UNKNOWN session keeps the best-effort 204.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_Delete_EnforcesSessionNegotiatedVersion(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	sessions := NewInMemorySessionRouter()
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      sessions,
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	const negotiated = "2025-06-18"
+	sid := mintRouterSession(t, s, negotiated)
+	// Establish the daemon session + sticky binding via a tool call (the
+	// state a DELETE would tear down).
+	if rr := postSerena(t, s, buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"}), map[string]string{
+		"Mcp-Session-Id":       sid,
+		"MCP-Protocol-Version": negotiated,
+	}); rr.Code != http.StatusOK {
+		t.Fatalf("setup tool call status = %d; body=%s", rr.Code, rr.Body.String())
+	}
+	if _, _, ok := s.serenaDaemonSessions.bindingFor(sid); !ok {
+		t.Fatalf("precondition: no daemon binding after tool call")
+	}
+
+	// Sub-case A: DELETE header CONFLICTS with the session version ->
+	// rejected -32600 at HTTP 400, NOTHING torn down.
+	rrConflict := deleteSerena(t, s, map[string]string{
+		"Mcp-Session-Id":       sid,
+		"MCP-Protocol-Version": "2025-11-25",
+	})
+	if rrConflict.Code != http.StatusBadRequest {
+		t.Fatalf("conflicting-version DELETE status = %d, want 400; body=%s", rrConflict.Code, rrConflict.Body.String())
+	}
+	var resp struct {
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rrConflict.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v; raw=%s", err, rrConflict.Body.String())
+	}
+	if resp.Error == nil || resp.Error.Code != jsonrpcInvalidRequest {
+		t.Fatalf("expected -32600 mismatch; got %+v", resp.Error)
+	}
+	if !strings.Contains(resp.Error.Message, "protocol-version mismatch") {
+		t.Errorf("error message %q should be the protocol-version-mismatch wording", resp.Error.Message)
+	}
+	// The session MUST survive a rejected DELETE: every binding intact, no
+	// upstream teardown fired.
+	if !s.serenaRouterSessions.known(sid) {
+		t.Errorf("router session cleared by a REJECTED DELETE; want intact")
+	}
+	if _, _, ok := s.serenaDaemonSessions.bindingFor(sid); !ok {
+		t.Errorf("daemon binding cleared by a REJECTED DELETE; want intact")
+	}
+	if got := sessions.LookupSession(sid); got == nil {
+		t.Errorf("sticky binding cleared by a REJECTED DELETE; want intact")
+	}
+	if got := daemonDeleteHits(daemon); got != 0 {
+		t.Errorf("upstream DELETE fired on a REJECTED DELETE = %d, want 0 (teardown must not run)", got)
+	}
+
+	// Sub-case B: DELETE with the MATCHING version -> proceeds; session torn
+	// down + upstream DELETE fired.
+	rrMatch := deleteSerena(t, s, map[string]string{
+		"Mcp-Session-Id":       sid,
+		"MCP-Protocol-Version": negotiated,
+	})
+	if rrMatch.Code != http.StatusNoContent {
+		t.Fatalf("matching-version DELETE status = %d, want 204; body=%s", rrMatch.Code, rrMatch.Body.String())
+	}
+	if s.serenaRouterSessions.known(sid) {
+		t.Errorf("router session survived a matching-version DELETE; want cleared")
+	}
+	if _, _, ok := s.serenaDaemonSessions.bindingFor(sid); ok {
+		t.Errorf("daemon binding survived a matching-version DELETE; want cleared")
+	}
+	if got := daemonDeleteHits(daemon); got != 1 {
+		t.Errorf("upstream DELETE hits after matching-version DELETE = %d, want 1", got)
+	}
+}
+
+// Finding 3 — a DELETE with NO MCP-Protocol-Version header on a known
+// session proceeds (the session version is the source of truth); and a
+// DELETE on a session this router never minted keeps today's best-effort
+// 204 even with a version header present (no mismatch rejection).
+func TestSerenaRouter_Delete_OmittedHeaderAndUnknownSessionProceed(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	// Sub-case A: known session, DELETE with NO version header -> proceeds.
+	sid := mintRouterSession(t, s, "2025-06-18")
+	if rr := postSerena(t, s, buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"}), map[string]string{"Mcp-Session-Id": sid}); rr.Code != http.StatusOK {
+		t.Fatalf("setup tool call status = %d; body=%s", rr.Code, rr.Body.String())
+	}
+	rrOmit := deleteSerena(t, s, map[string]string{"Mcp-Session-Id": sid})
+	if rrOmit.Code != http.StatusNoContent {
+		t.Fatalf("omitted-header DELETE status = %d, want 204; body=%s", rrOmit.Code, rrOmit.Body.String())
+	}
+	if s.serenaRouterSessions.known(sid) {
+		t.Errorf("router session survived an omitted-header DELETE; want cleared (teardown proceeded)")
+	}
+
+	// Sub-case B: unknown session (never minted) + a version header ->
+	// best-effort 204, no mismatch rejection (today's behavior preserved).
+	rrUnknown := deleteSerena(t, s, map[string]string{
+		"Mcp-Session-Id":       "never-minted-here",
+		"MCP-Protocol-Version": "2025-06-18",
+	})
+	if rrUnknown.Code != http.StatusNoContent {
+		t.Fatalf("unknown-session DELETE status = %d, want 204 (best-effort, no version gate); body=%s", rrUnknown.Code, rrUnknown.Body.String())
+	}
+}
+
+// ---------------------------------------------------------------------
+// Finding 2 — SweepSerenaSessions reclaims idle-past-TTL entries from BOTH
+// router-owned stores (routerSessionStore + daemonSessionStore) and keeps
+// fresh ones. This is the periodic sweep the GUI ticker calls; without it
+// an initialize-then-disconnect client leaks an entry forever because
+// expire-on-read only fires on reuse/DELETE.
+// ---------------------------------------------------------------------
+func TestServer_SweepSerenaSessions_DropsIdleKeepsFresh(t *testing.T) {
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+
+	base := time.Now()
+	// Drive both stores' clocks so we control lastSeen deterministically.
+	clk := base
+	s.serenaRouterSessions.clock = func() time.Time { return clk }
+	s.serenaDaemonSessions.clock = func() time.Time { return clk }
+
+	// Seed one OLD entry (lastSeen = base) in each store.
+	s.serenaRouterSessions.store("idle-router", "2025-06-18")
+	s.serenaDaemonSessions.store("idle-daemon", "alpha", "alpha-daemon-1")
+
+	// Advance the clock past the TTL, then seed one FRESH entry in each
+	// store (lastSeen = base + TTL + 1h, well inside the window relative to
+	// the sweep `now` below).
+	clk = base.Add(daemonSessionTTL + time.Hour)
+	s.serenaRouterSessions.store("fresh-router", "2025-11-25")
+	s.serenaDaemonSessions.store("fresh-daemon", "beta", "beta-daemon-1")
+
+	// Sweep with now = the fresh entries' timestamp + a moment. The idle
+	// entries (lastSeen = base) are now > TTL old; the fresh ones are not.
+	now := clk.Add(time.Minute)
+	dropped := s.SweepSerenaSessions(now, daemonSessionTTL)
+	if dropped != 2 {
+		t.Fatalf("SweepSerenaSessions dropped %d, want 2 (one idle entry from each store)", dropped)
+	}
+
+	// The idle entries are gone from BOTH stores.
+	if s.serenaRouterSessions.known("idle-router") {
+		t.Errorf("idle router-session survived the sweep; want dropped")
+	}
+	if _, _, ok := s.serenaDaemonSessions.bindingFor("idle-daemon"); ok {
+		t.Errorf("idle daemon-session survived the sweep; want dropped")
+	}
+	// The fresh entries are retained in BOTH stores.
+	if !s.serenaRouterSessions.known("fresh-router") {
+		t.Errorf("fresh router-session dropped by the sweep; want retained")
+	}
+	if _, _, ok := s.serenaDaemonSessions.bindingFor("fresh-daemon"); !ok {
+		t.Errorf("fresh daemon-session dropped by the sweep; want retained")
+	}
+}

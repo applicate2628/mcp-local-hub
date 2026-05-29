@@ -609,6 +609,22 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 // Teardown is best-effort: the response is 204 regardless of the upstream
 // DELETE outcome (a shutdown must not 5xx), and a transport failure is
 // audited (warn) for diagnosability, consistent with the POST path.
+//
+// Finding 3 — validate MCP-Protocol-Version BEFORE tearing anything down,
+// mirroring the tool-call path's Finding G (lines 466-477) and the hub's
+// DELETE gate (internal/api/hub_mcp_handler.go handleDelete gate 7,
+// :655-663). For a KNOWN router session (one this router minted at
+// initialize) a request header that conflicts with the session's negotiated
+// version is a "protocol-version mismatch" (-32600 at HTTP 400) and the
+// session is NOT torn down — a stray DELETE carrying the wrong version must
+// not revoke a live session. A missing or matching header proceeds. An
+// UNKNOWN session (no router-session record — e.g. an older direct caller,
+// or a session the router never minted) keeps today's best-effort teardown
+// so an unbound id still gets its 204 ack and any leaked daemon binding is
+// still released. The router validates against the SESSION version rather
+// than rejecting a missing header outright (as the hub does) because the
+// router mints its own sessions and uses the session version as the source
+// of truth, the same posture Finding G takes on the tool-call path.
 func (s *Server) handleSerenaDelete(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.Header.Get("Mcp-Session-Id")
 	if sessionID == "" {
@@ -616,6 +632,18 @@ func (s *Server) handleSerenaDelete(w http.ResponseWriter, r *http.Request) {
 		// shutdown semantic) rather than erroring.
 		w.WriteHeader(http.StatusNoContent)
 		return
+	}
+
+	// Finding 3: for a KNOWN router session, reject a conflicting
+	// MCP-Protocol-Version BEFORE any snapshot/unbind so a mismatched DELETE
+	// leaves the session intact. Missing/matching header (or an unknown
+	// session) falls through to the best-effort teardown below.
+	if sessionVersion, known := s.serenaRouterSessions.negotiatedVersion(sessionID); known {
+		if clientProtocolVersion := r.Header.Get("MCP-Protocol-Version"); clientProtocolVersion != "" && clientProtocolVersion != sessionVersion {
+			writeJSONRPCErrorStatus(w, json.RawMessage("null"), http.StatusBadRequest, jsonrpcInvalidRequest,
+				"protocol-version mismatch", nil)
+			return
+		}
 	}
 
 	deps := s.serenaRouterDepsProd()

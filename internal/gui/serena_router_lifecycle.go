@@ -549,6 +549,15 @@ func isNotificationMethod(method string) bool {
 // upstream fetch, so a client that negotiated 2025-06-18 cannot be served
 // a payload fetched under 2025-11-25.
 //
+// Finding 1 — reject a tools/list whose MCP-Protocol-Version conflicts with
+// the session's negotiated version BEFORE the cache read or proxy, mirroring
+// the tool-call path's Finding G and the hub's gate 7
+// (internal/api/hub_mcp_handler.go). A missing header uses the session
+// version (the resolved version keys the cache + drives the fetch). Without
+// this gate a session negotiated as 2025-06-18 could enumerate tools under
+// 2025-11-25 and succeed while the hub rejects the same non-initialize
+// mismatch.
+//
 // Cursor-bearing requests bypass the cache entirely (P2 finding 2). The
 // workspace-agnostic cache holds only the first page, so reading it for
 // a `params.cursor` request would return page 1 for every cursor until
@@ -591,6 +600,23 @@ func (s *Server) handleToolsList(
 	if !known {
 		writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidRequest,
 			"unknown session (initialize first)", nil)
+		return
+	}
+
+	// Finding 1 (mirror the tool-call path's Finding G — serena_router.go —
+	// and the hub's gate 7, internal/api/hub_mcp_handler.go:382-392): for a
+	// KNOWN router session the session's NEGOTIATED version is the source of
+	// truth, NOT the raw per-request header. A request MCP-Protocol-Version
+	// that conflicts with the negotiated version is a "protocol-version
+	// mismatch" (-32600 at HTTP 400, the hub's exact wording). A missing
+	// header is fine — negotiatedVersion is used for both the version-keyed
+	// cache lookup and the upstream fetch below, so an omitted header stays
+	// consistent with the tool-call path. The session is always known here
+	// (Finding D's gate above already rejected an unknown/missing session),
+	// so there is no raw-header fallthrough as there is on the tool-call path.
+	if clientProtocolVersion := r.Header.Get("MCP-Protocol-Version"); clientProtocolVersion != "" && clientProtocolVersion != negotiatedVersion {
+		writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidRequest,
+			"protocol-version mismatch", nil)
 		return
 	}
 

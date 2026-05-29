@@ -40,8 +40,8 @@ type HTTPHost struct {
 	cfg HTTPHostConfig
 
 	cmd          *exec.Cmd
-	httpClient   *http.Client // request-response POSTs (60 s timeout)
-	streamClient *http.Client // long-lived GET SSE (no timeout)
+	httpClient   *http.Client  // request-response POSTs (60 s timeout)
+	streamClient *http.Client  // long-lived GET SSE (no timeout)
 	getTokens    chan struct{} // concurrency limiter for GET /mcp passthrough streams
 	upstreamURL  string
 	bridge       *ProtocolBridge
@@ -379,7 +379,18 @@ func (h *HTTPHost) HTTPHandler() http.Handler {
 		case http.MethodGet:
 			h.forwardPassthrough(w, r) // SSE subscription — no transforms
 		case http.MethodDelete:
-			// Session termination: subprocess is shared; just acknowledge.
+			// Session termination. The subprocess is shared across client
+			// sessions, so the bridge itself holds no per-session state to
+			// drop here — but the native-http upstream DOES: every
+			// initialize is forwarded upstream and the upstream mints a
+			// fresh Mcp-Session-Id per initialize (see the NOTE in
+			// handlePOST ~L415). So a DELETE that only 204'd here would
+			// leave the upstream's session for this client live until its
+			// own idle expiry, making the serena router's session teardown
+			// (internal/gui handleSerenaDelete → this bridge → upstream) a
+			// no-op for native-http daemons. Forward the DELETE upstream,
+			// best-effort, carrying this client's session id, THEN 204.
+			h.forwardDeleteUpstream(r)
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -486,6 +497,45 @@ func (h *HTTPHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 	respBody = h.bridge.TransformResponse(origMethod, action.Active, respBody)
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(respBody)
+}
+
+// forwardDeleteUpstream forwards a client-origin DELETE /mcp to the
+// native-http upstream so the upstream releases the session this client
+// established (Finding 4). It is best-effort: the caller has already
+// decided to answer 204, so a transport failure or a non-2xx upstream
+// status (a daemon whose upstream does not implement DELETE answers
+// 404/405) must NOT fail the client's teardown — it is logged to the
+// daemon diagnostic writer and otherwise ignored. The request carries
+// this client's Mcp-Session-Id (the id the upstream minted on initialize
+// and the only thing that identifies WHICH upstream session to terminate)
+// plus MCP-Protocol-Version when present. It uses h.httpClient (the 60 s
+// request-response client, same as handlePOST) and is bound by r.Context()
+// so a client disconnect / host shutdown cancels it.
+func (h *HTTPHost) forwardDeleteUpstream(r *http.Request) {
+	upstreamReq, err := http.NewRequestWithContext(r.Context(), http.MethodDelete, h.upstreamURL, nil)
+	if err != nil {
+		fmt.Fprintf(daemonDiagWriter(), "warn: build upstream DELETE: %v\n", err)
+		return
+	}
+	// Forward only the headers that identify the session to terminate;
+	// a DELETE has no body, so Content-Type/Accept are not needed. (The
+	// POST path's copyHeadersForUpstream allowlist intentionally omits
+	// MCP-Protocol-Version, so set it explicitly here.)
+	if sid := r.Header.Get("Mcp-Session-Id"); sid != "" {
+		upstreamReq.Header.Set("Mcp-Session-Id", sid)
+	}
+	if pv := r.Header.Get("MCP-Protocol-Version"); pv != "" {
+		upstreamReq.Header.Set("MCP-Protocol-Version", pv)
+	}
+	resp, err := h.httpClient.Do(upstreamReq)
+	if err != nil {
+		// Best-effort: the client teardown still 204s. Log for diagnosis.
+		fmt.Fprintf(daemonDiagWriter(), "warn: upstream DELETE: %v (client session terminated locally regardless)\n", err)
+		return
+	}
+	defer resp.Body.Close()
+	// Drain so the connection can be reused; cap the read defensively.
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 }
 
 func readAllWithLimit(r io.Reader, maxBytes int64) ([]byte, error) {

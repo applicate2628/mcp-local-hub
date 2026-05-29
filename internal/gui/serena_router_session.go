@@ -147,3 +147,27 @@ func (st *routerSessionStore) cleanup(now time.Time, ttl time.Duration) int {
 	}
 	return n
 }
+
+// SweepSerenaSessions drops router-owned serena session bindings idle
+// longer than ttl before now from BOTH router-owned session stores, and
+// returns the total count dropped (Finding 2). It is the periodic-sweep
+// entry point the GUI lifecycle wires into its existing session-cleanup
+// ticker (internal/cli.runSessionCleanupTicker).
+//
+// Why this is needed even though both stores already expire-on-read: the
+// expire-on-read path in routerSessionStore.negotiatedVersion /
+// daemonSessionStore.lookup only fires when a session id is reused or
+// DELETEd. A client (or the Phase-3 reconcile probe, which initializes
+// every reconcile cycle and never DELETEs) that initializes then
+// disconnects leaves its entry untouched forever — unbounded growth on a
+// long-running GUI. This sweep is the only thing that reclaims those
+// orphaned entries. It reuses the EXISTING ticker goroutine (no new
+// background goroutine) alongside the cross-package sticky-routing
+// SessionRouter sweep, so all three serena session stores age on the same
+// idle clock with one correctly-shutdown ticker. ttl is the shared
+// idle-TTL the caller already passes the sticky sweep
+// (serena_routing.DefaultSessionTTL == daemonSessionTTL == 24h).
+func (s *Server) SweepSerenaSessions(now time.Time, ttl time.Duration) int {
+	return s.serenaRouterSessions.cleanup(now, ttl) +
+		s.serenaDaemonSessions.cleanup(now, ttl)
+}
