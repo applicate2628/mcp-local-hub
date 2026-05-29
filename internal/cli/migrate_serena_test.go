@@ -196,6 +196,17 @@ daemon_template:
   extra_args_template:
     - --project
     - ${workspace.path}
+# This client_bindings block is INTENTIONALLY present to prove
+# ParseManifest TOLERATES a binding on a workspace-scoped +
+# daemon_template manifest (it does no cross-reference validation of
+# binding.daemon against the template). Note the referenced daemon name
+# "serena" is NOT an entry in m.Daemons — a daemon_template manifest has
+# an empty Daemons slice. Therefore this fixture MUST NOT be fed to
+# BuildPlanWithOpts: that path resolves each binding against m.Daemons
+# and would reject it with "binding references unknown daemon". This
+# fixture is safe ONLY in the already-migrated tests because
+# detectSerenaSourceState short-circuits to the no-op return BEFORE
+# BuildPlanWithOpts (and before allocate/install) is ever reached.
 client_bindings:
   - client: claude-code
     daemon: serena
@@ -633,5 +644,120 @@ func TestMigrateSerena_RoutingPreservesStdioSerena(t *testing.T) {
 				t.Errorf("Find(%v) remaining[%d] = %q, want %q", tc.args, i, remaining[i], tc.wantArgs[i])
 			}
 		}
+	}
+}
+
+// runMigrateSerenaStdioCmd executes `migrate serena [extraArgs...]` (the
+// delegating stdio path — NOT the legacy-to-dynamic-pool leaf) through
+// the real cobra tree and returns combined output. Mirrors
+// runMigrateSerenaLegacyCmd but omits the legacy-to-dynamic-pool token so
+// the delegating `serena` RunE handles the invocation.
+func runMigrateSerenaStdioCmd(t *testing.T, extraArgs ...string) (string, error) {
+	t.Helper()
+	c := newMigrateCmd()
+	buf := &bytes.Buffer{}
+	c.SetOut(buf)
+	c.SetErr(buf)
+	c.SilenceUsage = true
+	c.SilenceErrors = true
+	c.SetArgs(append([]string{"serena"}, extraArgs...))
+	err := c.Execute()
+	return buf.String(), err
+}
+
+// TestMigrateSerena_DelegatingRunEPropagatesFlagsToStdioMigrate is the
+// execution-level companion to TestMigrateSerena_RoutingPreservesStdioSerena
+// (which only checks cobra Command.Find — pure routing). This one EXECUTES
+// the delegating `serena` RunE and proves the migrate flags it declares
+// (--dry-run, --clients, --json) actually reach runStdioMigrate, i.e. the
+// invocation runs the stdio→HTTP migrate dry-run path and NOT the
+// dynamic-pool driver.
+//
+// Distinguishing seam: the stdio dry-run path (runStdioMigrate →
+// MigrateFrom with DryRun=true) emits per-binding "✓ serena/<client> →
+// http://localhost:<legacy-daemon-port>/mcp" lines plus the trailing
+// "(dry-run — no files modified)" marker, and writes nothing. The
+// dynamic-pool driver (runMigrateSerenaDynamicPool) instead rewrites the
+// on-disk manifest to the workspace-scoped + daemon_template shape and
+// emits "supervisor will pick up new intent within 60s". Asserting on
+// these mutually-exclusive signals proves which RunE actually executed.
+//
+// Hermetic: migrateSerenaHarness points MCPHUB_MANIFEST_DIR_OVERRIDE at a
+// temp dir (which loadManifestYAMLEmbedFirst honors over the embedded FS),
+// and HOME/USERPROFILE are redirected to a fresh temp dir so the client
+// scan finds no real configs. Dry-run short-circuits before any adapter
+// write, so no client config is required.
+func TestMigrateSerena_DelegatingRunEPropagatesFlagsToStdioMigrate(t *testing.T) {
+	_, manifestDir := migrateSerenaHarness(t)
+
+	// Redirect HOME so runStdioMigrate's os.UserHomeDir() + the client
+	// adapter construction in clients.AllClients() stay off the
+	// developer's real config (mirrors migrate_legacy_test.go).
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	// Seed the legacy 2-daemon serena manifest. The delegating stdio path
+	// reads this (via the manifest-dir override seam) and derives the
+	// claude/codex daemon ports (9121 / 9122) for the dry-run URL preview.
+	manifestPath := writeSerenaManifest(t, manifestDir, legacy2DaemonManifestBody)
+	before, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read seeded manifest: %v", err)
+	}
+
+	// Execute the delegating RunE with --dry-run AND --clients (narrowing
+	// to claude-code only). Both flags must reach runStdioMigrate.
+	out, err := runMigrateSerenaStdioCmd(t, "--dry-run", "--clients", "claude-code")
+	if err != nil {
+		t.Fatalf("migrate serena --dry-run --clients claude-code: %v\noutput: %s", err, out)
+	}
+
+	// 1. --dry-run reached runStdioMigrate: the stdio dry-run trailer fired.
+	//    (Assert on the two stable substrings around the em-dash so the
+	//    exact dash glyph is not load-bearing.)
+	if !strings.Contains(out, "(dry-run") || !strings.Contains(out, "no files modified") {
+		t.Errorf("output missing stdio dry-run marker '(dry-run — no files modified)':\n%s", out)
+	}
+
+	// 2. The stdio migrate body ran against the LEGACY manifest: the
+	//    claude binding's preview URL carries the legacy daemon port 9121.
+	if !strings.Contains(out, "serena/claude-code") || !strings.Contains(out, "http://localhost:9121") {
+		t.Errorf("output missing legacy-manifest stdio preview row 'serena/claude-code → http://localhost:9121/...':\n%s", out)
+	}
+
+	// 3. --clients claude-code reached runStdioMigrate: the codex binding
+	//    was filtered out (its preview row / port 9122 must be absent).
+	if strings.Contains(out, "serena/codex-cli") || strings.Contains(out, "9122") {
+		t.Errorf("--clients claude-code not honored: codex-cli row present (expected filtered):\n%s", out)
+	}
+
+	// 4. The dynamic-pool driver did NOT run: its success signature line is
+	//    absent (it would only appear on the legacy-to-dynamic-pool leaf).
+	if strings.Contains(out, "supervisor will pick up new intent") {
+		t.Errorf("dynamic-pool driver signature present — wrong RunE executed:\n%s", out)
+	}
+
+	// 5. The dynamic-pool driver did NOT run: the on-disk manifest is
+	//    byte-identical (the pool driver would rewrite it to
+	//    workspace-scoped + daemon_template; the stdio dry-run writes
+	//    nothing).
+	after, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("re-read manifest: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Errorf("dry-run mutated the on-disk manifest (dynamic-pool driver ran?):\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+
+	// 6. --json reached runStdioMigrate too: a second dry-run with --json
+	//    emits the machine-readable report shape (an "applied" key), proving
+	//    the jsonOut flag also propagates through the delegating RunE.
+	jsonOut, err := runMigrateSerenaStdioCmd(t, "--dry-run", "--json")
+	if err != nil {
+		t.Fatalf("migrate serena --dry-run --json: %v\noutput: %s", err, jsonOut)
+	}
+	if !strings.Contains(jsonOut, `"applied"`) {
+		t.Errorf("--json not honored: output is not the JSON MigrateReport shape:\n%s", jsonOut)
 	}
 }

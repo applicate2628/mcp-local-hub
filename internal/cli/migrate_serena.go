@@ -449,11 +449,18 @@ func restoreManifest(path string, backup []byte) error {
 	return nil
 }
 
-// snapshotRegistry returns a deep-enough copy of the registry's
-// workspace rows for rollback restore. WorkspaceEntry is a value type
-// whose only reference fields (ClientEntries map, Languages slice) are
-// not mutated by allocateSerenaPorts, so a shallow per-element copy of
-// the slice is sufficient to restore the pre-allocation port state.
+// snapshotRegistry returns a copy of the registry's workspace rows for
+// rollback restore. A shallow per-element copy of the slice is safe here
+// NOT because allocateSerenaPorts leaves the rows' reference fields
+// (ClientEntries map, Languages slice) alone — that rationale would be
+// fragile against any future per-element mutation — but because the
+// caller (runMigrateSerenaDynamicPool) holds the registry flock across
+// the entire snapshot → mutate → save → restore sequence. No concurrent
+// writer can interleave between the snapshot and a restore, so the only
+// state the rollback must reconstruct is this process's own port
+// allocations, which restoreRegistry re-establishes by overwriting
+// reg.Workspaces with the snapshot slice and re-persisting under the
+// still-held lock.
 func snapshotRegistry(reg *api.Registry) []api.WorkspaceEntry {
 	return append([]api.WorkspaceEntry(nil), reg.Workspaces...)
 }
