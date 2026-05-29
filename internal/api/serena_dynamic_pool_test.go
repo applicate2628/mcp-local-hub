@@ -3,6 +3,7 @@
 package api
 
 import (
+	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/config"
@@ -181,6 +182,34 @@ func TestSerenaDynamicPool_BuildInMemoryManifest_RejectsNilOrCommandless(t *test
 	commandless.Command = ""
 	if _, err := BuildInMemorySerenaDynamicPoolManifest(commandless); err == nil {
 		t.Errorf("command-less embed: want error, got nil")
+	}
+}
+
+// TestSerenaDynamicPool_BuildInMemoryManifest_RejectsBlankEmbedContext is the bot
+// PR #247 P2 guard. ServerManifest.Validate does NOT check DaemonTemplate.Context,
+// so an embed that has migrated to daemon_template but omits/blanks context would
+// otherwise yield a "valid" manifest here and only fail later at Phase 4
+// materialization (the proxy gets --context ""). The builder must reject the blank
+// context at build time. The built-in default always carries a context, so this
+// exercises the embed-wins branch.
+func TestSerenaDynamicPool_BuildInMemoryManifest_RejectsBlankEmbedContext(t *testing.T) {
+	m := &config.ServerManifest{
+		Name:      "serena",
+		Kind:      config.KindWorkspaceScoped,
+		Transport: config.TransportNativeHTTP,
+		Command:   "uvx",
+		DaemonTemplate: &config.DaemonTemplate{
+			Context:           "   ", // whitespace-only = blank
+			PortPool:          &config.PortPool{Start: 9121, End: 9199},
+			ExtraArgsTemplate: []string{"--project", config.WorkspacePathToken},
+		},
+	}
+	_, err := BuildInMemorySerenaDynamicPoolManifest(m)
+	if err == nil {
+		t.Fatal("blank embed daemon_template.context: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "context") {
+		t.Errorf("error must name the empty context; got %v", err)
 	}
 }
 

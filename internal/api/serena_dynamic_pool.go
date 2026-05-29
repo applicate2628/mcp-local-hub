@@ -26,6 +26,7 @@ package api
 
 import (
 	"fmt"
+	"strings"
 
 	"mcp-local-hub/internal/config"
 )
@@ -171,6 +172,15 @@ func BuildInMemorySerenaDynamicPoolManifest(m *config.ServerManifest) (*config.S
 		name = SerenaServerName
 	}
 	tpl := EffectiveSerenaDaemonTemplate(m)
+	// Reject a blank effective context BEFORE returning (bot PR #247 P2).
+	// ServerManifest.Validate does NOT check DaemonTemplate.Context, so an embed
+	// that declares a daemon_template but omits/blanks context would otherwise
+	// yield a "valid" manifest here and only fail later at Phase 4
+	// materialization (the proxy would get --context ""). The built-in default
+	// always carries a non-empty context; this guards the embed-wins branch.
+	if strings.TrimSpace(tpl.Context) == "" {
+		return nil, fmt.Errorf("build serena dynamic-pool manifest: effective daemon_template.context is empty (embedded manifest %q declares a daemon_template without a context); the per-workspace serena proxy materializes --context <value>, so a non-empty context is required", name)
+	}
 	out := &config.ServerManifest{
 		Name:      name,
 		Kind:      config.KindWorkspaceScoped,
