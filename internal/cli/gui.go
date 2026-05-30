@@ -317,7 +317,14 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 		resolver := serena_routing.NewWorkspaceResolver(reg, registryPath)
 		sessions := serena_routing.NewSessionRouter()
 		s.SetSerenaRouterProduction(resolver, sessions)
-		go runSessionCleanupTicker(ctx, sessions, time.Hour, serena_routing.DefaultSessionTTL)
+		// Sweep all three serena session stores on one ticker: the
+		// cross-package sticky-routing SessionRouter AND (Finding 2) the
+		// two router-owned stores (routerSessionStore + daemonSessionStore)
+		// via the gui Server's SweepSerenaSessions. Reusing this existing
+		// goroutine (rather than spawning a second ticker) keeps one
+		// correctly-shutdown background loop and ages every store on the
+		// same 24h idle clock.
+		go runSessionCleanupTicker(ctx, s, sessions, time.Hour, serena_routing.DefaultSessionTTL)
 	} else {
 		fmt.Fprintf(cmd.OutOrStderr(),
 			"serena-router: registry path resolution failed; /serena/mcp will return 503 until next restart: %v\n", regErr)
@@ -639,7 +646,17 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 // runSessionCleanupTicker drops serena session bindings whose lastSeen
 // is older than ttl. It is owned by the GUI server lifecycle and exits
 // when ctx is cancelled.
-func runSessionCleanupTicker(ctx context.Context, sessions *serena_routing.SessionRouter, interval, ttl time.Duration) {
+//
+// Finding 2: each tick sweeps BOTH the cross-package sticky-routing
+// SessionRouter (sessions.CleanupWithTTL) AND the gui Server's two
+// router-owned session stores (s.SweepSerenaSessions — routerSessionStore
+// + daemonSessionStore). Before this, only the sticky router was swept;
+// an initialize-then-disconnect client (e.g. the Phase-3 reconcile probe,
+// which never DELETEs) left router-session + daemon-session entries
+// forever because their expire-on-read only fires on reuse/DELETE. s may
+// be nil in tests that exercise only the sticky-router path; the sweep is
+// skipped then.
+func runSessionCleanupTicker(ctx context.Context, s *gui.Server, sessions *serena_routing.SessionRouter, interval, ttl time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -648,6 +665,9 @@ func runSessionCleanupTicker(ctx context.Context, sessions *serena_routing.Sessi
 			return
 		case now := <-ticker.C:
 			_ = sessions.CleanupWithTTL(now, ttl)
+			if s != nil {
+				_ = s.SweepSerenaSessions(now, ttl)
+			}
 		}
 	}
 }

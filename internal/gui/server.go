@@ -447,6 +447,40 @@ type Server struct {
 	// future hot-reload of the workspace registry can swap the bundle
 	// without restarting the gui-server.
 	serenaRouterDeps atomic.Pointer[serenaRouterDeps]
+
+	// ROUTER-COMPLETION phase -- process-local cache of the
+	// workspace-agnostic tools/list result the router synthesizes by
+	// proxying one tools/list to any live serena daemon (see
+	// serena_router_lifecycle.go). The serena tool surface is identical
+	// across workspace daemons, so a single cached entry serves every
+	// client; the cache is keyed by nothing and TTL-bounded.
+	serenaToolsListCache toolsListCache
+
+	// ROUTER-COMPLETION phase -- router-owned map of client-facing
+	// Mcp-Session-Id -> the real upstream daemon session it is
+	// multiplexed onto (see serena_router_handshake.go). Because the
+	// router synthesizes `initialize` itself and mints the client
+	// session id, it must perform a SEPARATE MCP handshake with the
+	// workspace daemon (which issues its own session id) before
+	// forwarding tool calls. This store records that binding so
+	// subsequent calls forward the daemon-issued id, not the
+	// router-minted client id. Distinct from serenaRouterDeps.Sessions
+	// (sticky client-session -> workspace routing) -- the daemon session
+	// id is a new concern this store owns. Thread-safe.
+	serenaDaemonSessions daemonSessionStore
+
+	// ROUTER-COMPLETION phase (P2 findings 4 + 5 + 7) -- router-owned
+	// registry of client sessions minted by a prior `initialize` at this
+	// router, plus the protocol version each negotiated (see
+	// serena_router_session.go). It is the authoritative "this client
+	// session was initialized here" record AND the source of each
+	// session's negotiated version, consumed by the tools/list session
+	// gate (Finding 4), the version-keyed tools/list cache (Finding 5),
+	// and the tool-call protocol-version enforcement (Finding 7).
+	// Distinct from serenaRouterDeps.Sessions (sticky session -> workspace)
+	// and serenaDaemonSessions (session -> upstream daemon session).
+	// Thread-safe.
+	serenaRouterSessions routerSessionStore
 }
 
 // NewServer constructs the Server. It registers the ping handler

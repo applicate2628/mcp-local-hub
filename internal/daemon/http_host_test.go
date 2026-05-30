@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -595,5 +596,218 @@ func TestHTTPHost_ExitState_NilBeforeStart(t *testing.T) {
 	}
 	if got := h.ExitState(); got != nil {
 		t.Errorf("ExitState() before Start = %v, want nil", got)
+	}
+}
+
+// deleteRecordingUpstream records DELETE /mcp requests so a test can assert
+// the bridge forwarded the client-origin session termination upstream
+// (Finding 4). statusForDelete overrides the status it answers (0 -> 204).
+type deleteRecordingUpstream struct {
+	mu              sync.Mutex
+	server          *httptest.Server
+	deleteHits      int
+	lastDeleteSID   string
+	lastDeletePV    string
+	lastDeleteAuth  string
+	statusForDelete int
+}
+
+func newDeleteRecordingUpstream(t *testing.T, statusForDelete int) *deleteRecordingUpstream {
+	t.Helper()
+	u := &deleteRecordingUpstream{statusForDelete: statusForDelete}
+	u.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			u.mu.Lock()
+			u.deleteHits++
+			u.lastDeleteSID = r.Header.Get("Mcp-Session-Id")
+			u.lastDeletePV = r.Header.Get("MCP-Protocol-Version")
+			u.lastDeleteAuth = r.Header.Get("Authorization")
+			status := u.statusForDelete
+			u.mu.Unlock()
+			if status == 0 {
+				status = http.StatusNoContent
+			}
+			w.WriteHeader(status)
+			return
+		}
+		// Non-DELETE: a trivial OK so any stray request is harmless.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
+	}))
+	t.Cleanup(u.server.Close)
+	return u
+}
+
+func (u *deleteRecordingUpstream) snapshot() (hits int, sid, pv string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.deleteHits, u.lastDeleteSID, u.lastDeletePV
+}
+
+func (u *deleteRecordingUpstream) deleteHitsCount() int {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.deleteHits
+}
+
+func (u *deleteRecordingUpstream) lastAuth() string {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.lastDeleteAuth
+}
+
+// newHTTPHostAgainstURL wires an HTTPHost directly to an arbitrary upstream
+// URL, skipping Start() (no subprocess). Used by the DELETE-forward tests
+// that need a non-mockUpstream server.
+func newHTTPHostAgainstURL(upstreamURL string, client *http.Client) *HTTPHost {
+	return &HTTPHost{
+		httpClient:   client,
+		streamClient: client,
+		getTokens:    make(chan struct{}, maxHTTPHostGETStreams),
+		upstreamURL:  upstreamURL,
+		bridge:       NewProtocolBridge(),
+		done:         make(chan struct{}),
+		childExited:  make(chan struct{}),
+		started:      true,
+	}
+}
+
+// TestHTTPHost_DELETE_ForwardsSessionTerminationUpstream is the Finding 4
+// regression guard: a DELETE /mcp on the bridge must be forwarded to the
+// native-http upstream carrying the client's Mcp-Session-Id (the upstream
+// minted a session per initialize, so the bridge-local 204 alone would
+// leak it), and the client still receives 204.
+func TestHTTPHost_DELETE_ForwardsSessionTerminationUpstream(t *testing.T) {
+	upstream := newDeleteRecordingUpstream(t, 0) // 204 upstream
+	h := newHTTPHostAgainstURL(upstream.server.URL, upstream.server.Client())
+	ts := httptest.NewServer(h.HTTPHandler())
+	t.Cleanup(ts.Close)
+
+	req, err := http.NewRequest(http.MethodDelete, ts.URL+"/mcp", nil)
+	if err != nil {
+		t.Fatalf("build DELETE: %v", err)
+	}
+	req.Header.Set("Mcp-Session-Id", "client-issued-session")
+	req.Header.Set("MCP-Protocol-Version", "2025-06-18")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("client DELETE status = %d, want 204", resp.StatusCode)
+	}
+	hits, sid, pv := upstream.snapshot()
+	if hits != 1 {
+		t.Fatalf("upstream DELETE hits = %d, want 1 (bridge must forward the teardown)", hits)
+	}
+	if sid != "client-issued-session" {
+		t.Errorf("upstream DELETE Mcp-Session-Id = %q, want the client's session id", sid)
+	}
+	if pv != "2025-06-18" {
+		t.Errorf("upstream DELETE MCP-Protocol-Version = %q, want 2025-06-18 (forwarded when present)", pv)
+	}
+}
+
+// TestHTTPHost_DELETE_BestEffortWhenUpstreamRejects: a daemon whose upstream
+// does not implement DELETE answers 405/404; the bridge must STILL 204 the
+// client (Finding 4 best-effort — a shutdown must not surface the upstream's
+// rejection).
+func TestHTTPHost_DELETE_BestEffortWhenUpstreamRejects(t *testing.T) {
+	upstream := newDeleteRecordingUpstream(t, http.StatusMethodNotAllowed)
+	h := newHTTPHostAgainstURL(upstream.server.URL, upstream.server.Client())
+	ts := httptest.NewServer(h.HTTPHandler())
+	t.Cleanup(ts.Close)
+
+	req, err := http.NewRequest(http.MethodDelete, ts.URL+"/mcp", nil)
+	if err != nil {
+		t.Fatalf("build DELETE: %v", err)
+	}
+	req.Header.Set("Mcp-Session-Id", "client-issued-session")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("client DELETE status = %d, want 204 even when upstream returns 405", resp.StatusCode)
+	}
+	if hits, _, _ := upstream.snapshot(); hits != 1 {
+		t.Errorf("upstream DELETE hits = %d, want 1 (forward attempted regardless of upstream support)", hits)
+	}
+}
+
+// TestHTTPHost_DELETE_ForwardsAuthorizationUpstream is the finding #5
+// regression guard: the bridge DELETE forwards via copyHeadersForUpstream
+// (same allowlist as POST/GET), so an auth-protected native-http upstream
+// sees Authorization on the teardown DELETE. The pre-#5 hand-rolled
+// session-only copy dropped Authorization, so an auth-protected upstream
+// 401'd the teardown and leaked the upstream session while the bridge 204'd.
+func TestHTTPHost_DELETE_ForwardsAuthorizationUpstream(t *testing.T) {
+	upstream := newDeleteRecordingUpstream(t, 0)
+	h := newHTTPHostAgainstURL(upstream.server.URL, upstream.server.Client())
+	ts := httptest.NewServer(h.HTTPHandler())
+	t.Cleanup(ts.Close)
+
+	req, err := http.NewRequest(http.MethodDelete, ts.URL+"/mcp", nil)
+	if err != nil {
+		t.Fatalf("build DELETE: %v", err)
+	}
+	req.Header.Set("Mcp-Session-Id", "client-issued-session")
+	req.Header.Set("MCP-Protocol-Version", "2025-06-18")
+	req.Header.Set("Authorization", "Bearer secret-token")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("client DELETE status = %d, want 204", resp.StatusCode)
+	}
+	hits, sid, pv := upstream.snapshot()
+	if hits != 1 {
+		t.Fatalf("upstream DELETE hits = %d, want 1", hits)
+	}
+	if sid != "client-issued-session" {
+		t.Errorf("upstream DELETE Mcp-Session-Id = %q, want the client's session id", sid)
+	}
+	if pv != "2025-06-18" {
+		t.Errorf("upstream DELETE MCP-Protocol-Version = %q, want 2025-06-18 (allowlist omits it; set explicitly)", pv)
+	}
+	if got := upstream.lastAuth(); got != "Bearer secret-token" {
+		t.Errorf("upstream DELETE Authorization = %q, want %q (#5: copyHeadersForUpstream must forward Authorization)", got, "Bearer secret-token")
+	}
+}
+
+// TestHTTPHost_DELETE_DetachedFromInboundContext is the finding #1 (Invariant
+// D-detach) regression guard: the bridge DELETE forward is DETACHED from
+// r.Context(), so a native-http client that disconnects before the bridge's
+// 204 (its request context already cancelled) does NOT abort the upstream
+// DELETE — the upstream session is still released. A regression bound to
+// r.Context() would record 0 upstream hits here.
+func TestHTTPHost_DELETE_DetachedFromInboundContext(t *testing.T) {
+	upstream := newDeleteRecordingUpstream(t, 0)
+	h := newHTTPHostAgainstURL(upstream.server.URL, upstream.server.Client())
+
+	// A DELETE request whose context is ALREADY cancelled (client gone).
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, h.upstreamURL, nil)
+	if err != nil {
+		t.Fatalf("build DELETE: %v", err)
+	}
+	req.Header.Set("Mcp-Session-Id", "client-issued-session")
+
+	// Call the forward directly (same package): with the fix it uses a
+	// detached context.Background()-derived context, so the cancelled inbound
+	// ctx does NOT abort the upstream DELETE.
+	h.forwardDeleteUpstream(req)
+
+	if hits := upstream.deleteHitsCount(); hits != 1 {
+		t.Errorf("upstream DELETE hits = %d, want 1 (#1 D-detach: a cancelled inbound request context must NOT abort the upstream teardown)", hits)
 	}
 }

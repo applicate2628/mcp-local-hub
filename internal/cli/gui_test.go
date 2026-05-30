@@ -99,7 +99,9 @@ func TestRunSessionCleanupTicker_ExpiresOldSessions(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		runSessionCleanupTicker(ctx, sessions, 10*time.Millisecond, time.Hour)
+		// nil Server: this test exercises only the sticky-router sweep;
+		// SweepSerenaSessions is covered by the gui-package unit test.
+		runSessionCleanupTicker(ctx, nil, sessions, 10*time.Millisecond, time.Hour)
 		close(done)
 	}()
 	t.Cleanup(func() {
