@@ -70,6 +70,20 @@ const serenaUpstreamTimeout = 60 * time.Second
 // handleDelete: context.WithTimeout(context.Background(), 5*time.Second)).
 const serenaCleanupTimeout = 5 * time.Second
 
+// serenaDeleteTimeout caps the MAIN client-origin DELETE upstream forward in
+// handleSerenaDelete (sonnet post-PASS finding 1). Unlike the Invariant-D
+// fire-and-forget sites it is the thing the client's DELETE is awaiting (the
+// 204 fires after it), so it is detached-from-r.Context() (it must survive a
+// client disconnect) but NOT routed through cleanupContext. It used to use the
+// 60s serenaUpstreamTimeout default, which blocked the client's teardown 204
+// for up to a minute AND held the handler goroutine 60s after a client
+// disconnect on a hung/slow daemon. Local revocation already ran FIRST (Finding
+// A), so a shortened forward does not weaken correctness — it only bounds the
+// 204 ack. 5s matches the hub's per-daemon teardown budget
+// (internal/api/hub_mcp_handler.go handleDelete: a 5s per-daemon fan-out
+// budget) and internal/daemon/http_host.go's httpHostCleanupTimeout (5s).
+const serenaDeleteTimeout = 5 * time.Second
+
 // cleanupContext returns a context for an Invariant-D best-effort upstream
 // call: DETACHED from the client request (context.Background()-derived, so
 // the client closing its connection does not cancel the teardown/forward —
@@ -581,6 +595,36 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 			writeWorkspaceNotFound(w, "", true)
 			return
 		}
+		// Round-13 (consultant finding — close the pathless reanimation): check
+		// the ROUTER session's liveness BEFORE the sticky LookupSession refresh.
+		// peekVersionState distinguishes three cases (and is expire-on-read, so an
+		// idle-expired router session is deleted from routerSessionStore HERE):
+		//
+		//   - routerSessionExpired: the id WAS minted here but idle-expired on this
+		//     read. The pre-fix code did the sticky LookupSession FIRST, which
+		//     REFRESHED the sticky binding's lastSeen and kept the session routable
+		//     as a "legacy" caller indefinitely (every pathless call re-refreshed
+		//     it), defeating the on-read expiry. We instead coordinate the unbind of
+		//     the sticky deps.Sessions + serenaDaemonSessions for the id (mirroring
+		//     the round-12 SweepSerenaSessions per-id coordination) and treat the
+		//     call as a terminated session: return the router's "session terminated"
+		//     -32600 (consistent with the round-10 post-gate-touch abort and the
+		//     resolveDaemonSession recheck abort) WITHOUT refreshing the sticky or
+		//     routing. The orphaned UPSTREAM daemon session ages out on the daemon's
+		//     own idle clock — the same TTL-reclaim posture round-9 / the round-12
+		//     sweep already take for an expired router session (no eager upstream
+		//     DELETE here, matching the named referent).
+		//   - routerSessionAbsent: the id was NEVER minted at this router → a TRUE
+		//     legacy caller (older direct client that never initialized here). Keep
+		//     today's sticky-routing behavior (route via the sticky binding below).
+		//   - routerSessionLive: today's behavior (route via sticky; the version
+		//     gate + post-gate touch below still run for the known router session).
+		if _, state := s.serenaRouterSessions.peekVersionState(sessionID); state == routerSessionExpired {
+			s.coordinateExpiredRouterSessionUnbind(sessionID, deps.Sessions)
+			writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidRequest,
+				"session terminated", nil)
+			return
+		}
 		ws = deps.Sessions.LookupSession(sessionID)
 		if ws == nil {
 			writeWorkspaceNotFound(w, "", true)
@@ -1035,13 +1079,20 @@ func (s *Server) handleSerenaDelete(w http.ResponseWriter, r *http.Request) {
 			//
 			// Bound: this is handleSerenaDelete's MAIN teardown — the thing the
 			// client's DELETE is awaiting (the 204 fires after it), NOT a
-			// fire-and-forget call. It is therefore OUTSIDE the Invariant-D
-			// 4-site scope and KEEPS its upstreamTimeout bound (the local
-			// revocation already ran above per Finding A, so a slow daemon
-			// cannot delay revocation; it only delays the 204 ack, which is the
-			// awaited behavior). The short cleanup budget is reserved for the
-			// genuine fire-and-forget sites (#4/#6/#7 + the displaced-rebind
-			// teardown).
+			// fire-and-forget call. sonnet post-PASS finding 1: it used to use the
+			// 60s upstreamTimeout default, which blocked the client's 204 for up to
+			// a minute AND held this handler goroutine 60s after a client
+			// disconnect (the context is detached from r.Context()) on a hung/slow
+			// daemon. The local revocation already ran above (Finding A), so a slow
+			// daemon cannot delay revocation — only the 204 ack. Cap it at the SHORT
+			// serenaDeleteTimeout (5s, matching the hub's per-daemon teardown budget
+			// and internal/daemon/http_host.go's httpHostCleanupTimeout) so the
+			// client's teardown 204 lands within ~5s regardless of daemon health.
+			// Still detached from r.Context() (correct — survives client
+			// disconnect), just bounded to 5s instead of 60s. (This is distinct from
+			// the Invariant-D fire-and-forget cleanupContext sites #4/#6/#7 + the
+			// displaced-rebind teardown, which use serenaCleanupTimeout/min budget;
+			// the DELETE forward is awaited so it gets its own equal-5s constant.)
 			//
 			// Finding #8 + Finding 2 (V-forward): forward the version the daemon
 			// session was established under. Prefer the persisted
@@ -1056,7 +1107,7 @@ func (s *Server) handleSerenaDelete(w http.ResponseWriter, r *http.Request) {
 			if teardownVersion == "" {
 				teardownVersion = deleteProtocolVersion
 			}
-			fwdCtx, fwdCancel := context.WithTimeout(context.Background(), upstreamTimeout)
+			fwdCtx, fwdCancel := context.WithTimeout(context.Background(), serenaDeleteTimeout)
 			s.forwardSerenaDeleteUpstream(fwdCtx, httpClient, upstreamURL, daemonSessionID, effectiveHandshakeProtocolVersion(teardownVersion), wsKey, delWS, auditFn)
 			fwdCancel()
 		}
@@ -1267,15 +1318,6 @@ func (s *Server) handleSerenaCancelled(
 		if wsKey, daemonSessionID, daemonProtocolVersion, ok := s.serenaDaemonSessions.bindingFor(sessionID); ok {
 			if ws := s.resolveDeleteWorkspace(deps, sessionID, wsKey); ws != nil {
 				if upstreamURL := upstreamURLFn(ws); upstreamURL != "" {
-					// Invariant D (#7): bound the cancel forward by the SHORT
-					// cleanup budget, NOT upstreamTimeout (60s). The client's
-					// 202 must be effectively immediate — a notifications/cancelled
-					// gets no response, so blocking the 202 up to a minute on a
-					// no-response forward to a hung daemon is the bug. Detached
-					// from r.Context() (via cleanupContext) so a client that
-					// disconnects right after sending the cancel does not abort
-					// the daemon-side forward (which would drop the cancel).
-					//
 					// Finding #8 + V-forward: send the version the daemon SESSION
 					// was established under (persisted daemonProtocolVersion);
 					// fall back to the router-client session version
@@ -1286,15 +1328,51 @@ func (s *Server) handleSerenaCancelled(
 					if forwardVersion == "" {
 						forwardVersion = protocolVersion
 					}
-					fwdCtx, fwdCancel := cleanupContext(deps.UpstreamTimeout)
-					s.forwardSerenaCancelledUpstream(fwdCtx, httpClient, upstreamURL, daemonSessionID, effectiveHandshakeProtocolVersion(forwardVersion), wsKey, ws, body, auditFn)
-					fwdCancel()
+					// sonnet post-PASS finding 2: forward the cancel ASYNCHRONOUSLY
+					// and write the 202 immediately (below). This handler's own
+					// contract is "the client's 202 must be effectively immediate" —
+					// a notifications/cancelled carries NO response body, so a
+					// strict/pipelined client can observe up-to-cleanup-budget (≤5s)
+					// latency before the 202 if the forward blocks it. The pre-fix
+					// code forwarded SYNCHRONOUSLY (bounded by cleanupContext ≤5s)
+					// and wrote the 202 only after, contradicting that comment. The
+					// fix is semantically identical — still best-effort, still
+					// DETACHED from r.Context() (a client disconnect right after the
+					// cancel must NOT abort the daemon-side forward) and still bounded
+					// by cleanupContext (Invariant D #7) — just non-blocking. The
+					// forward/no-forward decision (the version gate + the round-10
+					// swept-session-touch abort above) already ran SYNCHRONOUSLY, so
+					// launching here cannot resurrect a suppressed/swept cancel.
+					//
+					// Capture-by-value (CAUTION): the goroutine outlives this
+					// request, so it must NOT reference request-scoped state that may
+					// be reused. daemonSessionID / forwardVersion / wsKey / upstreamURL
+					// are block-local copies already; ws / httpClient / auditFn are
+					// stable for the request; body is COPIED into a fresh slice so a
+					// later reuse of the inbound buffer cannot race the forward's
+					// bytes.NewReader. fwdCancel's defer moves INTO the goroutine.
+					cancelBody := append([]byte(nil), body...)
+					fwdWS := ws
+					fwdURL := upstreamURL
+					fwdDaemonSID := daemonSessionID
+					fwdVersion := effectiveHandshakeProtocolVersion(forwardVersion)
+					fwdWSKey := wsKey
+					fwdClient := httpClient
+					fwdAudit := auditFn
+					fwdTimeout := deps.UpstreamTimeout
+					go func() {
+						fwdCtx, fwdCancel := cleanupContext(fwdTimeout)
+						defer fwdCancel()
+						s.forwardSerenaCancelledUpstream(fwdCtx, fwdClient, fwdURL, fwdDaemonSID, fwdVersion, fwdWSKey, fwdWS, cancelBody, fwdAudit)
+					}()
 				}
 			}
 		}
 	}
 
-	// notifications/* (genuine notification) gets no JSON-RPC response body.
+	// notifications/* (genuine notification) gets no JSON-RPC response body, and
+	// the upstream cancel forward (if any) was launched detached above — the 202
+	// is written immediately, not after the forward completes (finding 2).
 	w.WriteHeader(http.StatusAccepted)
 }
 

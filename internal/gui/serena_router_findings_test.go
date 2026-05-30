@@ -595,10 +595,8 @@ func TestSerenaRouter_NotificationCancelled_ForwardsToBoundDaemon(t *testing.T) 
 		t.Fatalf("notifications/cancelled status = %d, want 202; body=%s", rr.Code, rr.Body.String())
 	}
 	// Forwarded to the daemon, carrying the DAEMON-issued session id + the
-	// verbatim cancel body.
-	if got := daemonCancelHits(daemon); got != 1 {
-		t.Fatalf("daemon cancel hits = %d, want 1 (router must forward the cancellation)", got)
-	}
+	// verbatim cancel body. The forward is async (finding 2), so wait for it.
+	waitForDaemonCancelHits(t, daemon, 1)
 	daemon.mu.Lock()
 	gotSID := daemon.lastCancelSession
 	gotBody := daemon.lastCancelBody
@@ -1666,9 +1664,8 @@ func TestSerenaRouter_NotificationCancelled_RejectsCrossVersionWithoutForwarding
 	if rrMatch.Code != http.StatusAccepted {
 		t.Fatalf("matching-version cancel status = %d, want 202; body=%s", rrMatch.Code, rrMatch.Body.String())
 	}
-	if got := daemonCancelHits(daemon); got != 1 {
-		t.Fatalf("daemon cancel hits after matching cancel = %d, want 1", got)
-	}
+	// The forward is async (finding 2): wait for the matching-version cancel.
+	waitForDaemonCancelHits(t, daemon, 1)
 	daemon.mu.Lock()
 	gotSID := daemon.lastCancelSession
 	gotPV := daemon.lastCancelHeaders.Get("MCP-Protocol-Version")
@@ -1712,9 +1709,8 @@ func TestSerenaRouter_NotificationCancelled_OmittedHeaderForwards(t *testing.T) 
 	if rr.Code != http.StatusAccepted {
 		t.Fatalf("omitted-header cancel status = %d, want 202; body=%s", rr.Code, rr.Body.String())
 	}
-	if got := daemonCancelHits(daemon); got != 1 {
-		t.Fatalf("daemon cancel hits = %d, want 1 (omitted header must still forward)", got)
-	}
+	// The forward is async (finding 2): wait for the omitted-header cancel.
+	waitForDaemonCancelHits(t, daemon, 1)
 	daemon.mu.Lock()
 	gotPV := daemon.lastCancelHeaders.Get("MCP-Protocol-Version")
 	daemon.mu.Unlock()
@@ -1826,6 +1822,26 @@ func waitForDaemonDeleteHits(t *testing.T, d *fakeSerenaDaemon, want int) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("daemon DELETE hits = %d after 2s, want >= %d (Finding 5: one-shot session must be torn down)", daemonDeleteHits(d), want)
+}
+
+// waitForDaemonCancelHits polls the fake daemon's forwarded-cancel count until
+// it reaches `want` or the deadline. sonnet post-PASS finding 2 made the
+// notifications/cancelled upstream forward ASYNCHRONOUS (the 202 is written
+// before the forward fires), so a test asserting the daemon received the cancel
+// must wait briefly for the detached goroutine rather than read the count
+// synchronously after the 202. Mirrors waitForDaemonDeleteHits; the daemon sets
+// cancelHits and lastCancel* together under d.mu, so once the count is reached
+// the captured session id / body / headers are populated for the caller to read.
+func waitForDaemonCancelHits(t *testing.T, d *fakeSerenaDaemon, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if daemonCancelHits(d) >= want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("daemon cancel hits = %d after 2s, want >= %d (finding 2: async forward must reach the daemon)", daemonCancelHits(d), want)
 }
 
 // ---------------------------------------------------------------------

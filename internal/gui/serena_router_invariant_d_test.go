@@ -148,12 +148,12 @@ func TestSerenaRouter_NotificationCancelled_DetachedFromInboundContext(t *testin
 	if rr.Code != http.StatusAccepted {
 		t.Fatalf("cancel status = %d, want 202; body=%s", rr.Code, rr.Body.String())
 	}
-	// The forward is detached, so the daemon STILL received the cancel even
-	// though the inbound context was cancelled. (A regression forwarding under
-	// r.Context() would record 0 hits here.)
-	if got := daemonCancelHits(daemon); got != 1 {
-		t.Errorf("daemon cancel hits = %d, want 1 (D-detach: a cancelled inbound ctx must NOT abort the forward)", got)
-	}
+	// The forward is detached AND now async (finding 2), so the daemon STILL
+	// receives the cancel even though the inbound context was cancelled — wait
+	// for the detached goroutine. (A regression forwarding under r.Context()
+	// would record 0 hits; a regression that built the forward context from the
+	// inbound ctx would also drop it.)
+	waitForDaemonCancelHits(t, daemon, 1)
 	daemon.mu.Lock()
 	gotSID := daemon.lastCancelSession
 	daemon.mu.Unlock()

@@ -105,20 +105,57 @@ func (st *routerSessionStore) store(clientSessionID, negotiatedVersion string) {
 // peek does not refresh a live binding. This is self-contained — it does not
 // depend on an external cleanup ticker.
 func (st *routerSessionStore) peekNegotiatedVersion(clientSessionID string) (string, bool) {
+	version, state := st.peekVersionState(clientSessionID)
+	return version, state == routerSessionLive
+}
+
+// routerSessionState is the tri-state a pathless tool call needs to tell an
+// EXPIRED-and-just-deleted router session apart from one that was NEVER minted
+// here (Round-13 / consultant finding — the pathless reanimation close). The
+// boolean peekNegotiatedVersion returns collapses both "absent" cases into
+// ok=false, which is enough for the version-validation sites (a missing session
+// just means "no negotiated version to validate against") but NOT enough for
+// the pathless branch: there, an EXPIRED router session must terminate the call
+// and unbind the sticky+daemon bindings (no reanimation), while a TRUE-legacy
+// caller (never minted here) must keep routing via its sticky binding.
+type routerSessionState int
+
+const (
+	// routerSessionLive: the id was minted here and is within its idle TTL.
+	routerSessionLive routerSessionState = iota
+	// routerSessionExpired: the id WAS minted here but has aged past the idle
+	// TTL; peekVersionState deleted the entry on this read (expire-on-read).
+	routerSessionExpired
+	// routerSessionAbsent: no entry for the id (never minted at this router).
+	routerSessionAbsent
+)
+
+// peekVersionState is the tri-state form of peekNegotiatedVersion: it reports
+// whether the id is live / just-expired-and-deleted / absent, WITHOUT
+// refreshing lastSeen. It owns the single expire-on-read + delete decision that
+// peekNegotiatedVersion delegates to (one owner — no duplicated TTL logic).
+//
+// Round-13 / consultant finding: the pathless branch calls THIS (not the
+// boolean peek) so it can distinguish routerSessionExpired (a router session
+// that idle-expired on read — must NOT reanimate via the sticky binding) from
+// routerSessionAbsent (a true-legacy caller — keep sticky routing). An
+// already-expired entry is deleted here exactly as peekNegotiatedVersion did,
+// so the on-read expiry semantics are unchanged for every existing caller.
+func (st *routerSessionStore) peekVersionState(clientSessionID string) (string, routerSessionState) {
 	if clientSessionID == "" {
-		return "", false
+		return "", routerSessionAbsent
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	b, ok := st.bindings[clientSessionID]
 	if !ok || b == nil {
-		return "", false
+		return "", routerSessionAbsent
 	}
 	if st.now().Sub(b.lastSeen) > daemonSessionTTL {
 		delete(st.bindings, clientSessionID)
-		return "", false
+		return "", routerSessionExpired
 	}
-	return b.negotiatedVersion, true
+	return b.negotiatedVersion, routerSessionLive
 }
 
 // touch refreshes lastSeen for a live (non-idle-expired) binding so an
@@ -257,19 +294,26 @@ func (st *routerSessionStore) cleanupExpired(now time.Time, ttl time.Duration) [
 // all three together → its sticky binding is gone → the path-less call finds
 // nothing and is treated as unknown (not routed).
 //
-// Residual (documented, no tombstone machinery — kept simple per the finding):
-// a narrow window remains between an ON-READ peek-expiry of a router session
-// (peekNegotiatedVersion deletes the entry the moment a request observes it
-// past-TTL) and the NEXT periodic SweepSerenaSessions tick. In that window the
-// routerSessionStore entry is already gone but the sticky binding is not yet
-// swept, so a concurrent path-less call could still route once as legacy. This
-// is bounded by the sweep interval (1h in production) and is harmless for the
-// idle-disconnect case this guard targets (no concurrent traffic on a
-// disconnected session). The tool-call path's own pre-gate peek+touch
-// (serena_router.go) already rejects an EXPLICITLY-DELETEd session immediately;
-// only the silent idle-expiry has this residual, and closing it cleanly would
-// require expiry tombstones across the sticky store's cross-package boundary —
-// out of proportion to the bounded, idle-only exposure.
+// Round-13 (consultant finding — the ON-READ pathless reanimation is now
+// CLOSED too): the prior residual was that a router session idle-expiring on a
+// pathless read (peekNegotiatedVersion deletes the entry the moment a request
+// observes it past-TTL) would, in the window before the next sweep, refresh the
+// still-present sticky binding via LookupSession and keep routing as a "legacy"
+// caller indefinitely. The pathless branch in serenaRouterHandler now peeks the
+// tri-state (peekVersionState) BEFORE the sticky refresh and, on
+// routerSessionExpired, runs the SAME per-id coordinated unbind this sweep does
+// (coordinateExpiredRouterSessionUnbind) and aborts -32600 "session terminated"
+// — so an expired router session can no longer reanimate via a pathless call,
+// whether the expiry is observed by this ticker OR on the read itself.
+//
+// Residual (unchanged, documented, no tombstone machinery): the orphaned
+// UPSTREAM daemon session (the serena daemon's own session, distinct from the
+// router-local serenaDaemonSessions binding which IS unbound) ages out on the
+// daemon's own idle clock rather than being eagerly DELETEd here — the same
+// TTL-reclaim posture round-9 takes for a displaced workspace-switch session.
+// This avoids an upstream DELETE on the sweep / on-read paths (the named
+// referent coordinates LOCAL stores only) and is bounded by the daemon's idle
+// TTL.
 func (s *Server) SweepSerenaSessions(now time.Time, ttl time.Duration) int {
 	// Reclaim expired router sessions first and capture their ids so the other
 	// two stores can be coordinated (Finding 3).
@@ -284,10 +328,7 @@ func (s *Server) SweepSerenaSessions(now time.Time, ttl time.Duration) int {
 		sticky = deps.Sessions
 	}
 	for _, id := range expiredRouter {
-		s.serenaDaemonSessions.unbind(id)
-		if sticky != nil {
-			sticky.UnbindSession(id)
-		}
+		s.coordinateExpiredRouterSessionUnbind(id, sticky)
 	}
 
 	// Then sweep the daemon store's OWN idle entries (those not already removed
@@ -295,4 +336,24 @@ func (s *Server) SweepSerenaSessions(now time.Time, ttl time.Duration) int {
 	// sessions plus the daemon store's independently-idle bindings.
 	daemonDropped := s.serenaDaemonSessions.cleanup(now, ttl)
 	return len(expiredRouter) + daemonDropped
+}
+
+// coordinateExpiredRouterSessionUnbind terminates an EXPIRED router session
+// everywhere its downstream bindings live: the router-local daemon-session
+// store and the sticky cross-package sessionRouter. The router-session store
+// entry itself is assumed already removed by the caller (cleanupExpired in the
+// ticker sweep, or the expire-on-read delete in peekVersionState on the
+// pathless path) — this is the per-id coordination of the OTHER two stores.
+//
+// Unbinding an id absent from a store is a no-op, so a router session with no
+// downstream bindings is handled cleanly. sticky may be nil (no production
+// sessionRouter wired) — only the daemon store is then unbound. Extracted so
+// the ticker SweepSerenaSessions and the on-read pathless-expiry close
+// (serenaRouterHandler) share ONE owner for the coordinated-unbind decision
+// rather than duplicating it (Round-13).
+func (s *Server) coordinateExpiredRouterSessionUnbind(id string, sticky sessionRouter) {
+	s.serenaDaemonSessions.unbind(id)
+	if sticky != nil {
+		sticky.UnbindSession(id)
+	}
 }
