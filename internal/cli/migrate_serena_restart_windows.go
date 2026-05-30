@@ -1,24 +1,27 @@
 //go:build windows
 
 // Package cli — Windows production wiring for the serena migrate §7.1
-// supervisor upgrade/restart gate.
+// supervisor REAP-FIRST restart gate (bot PR #250).
 //
-// defaultMigrateSerenaRestart drives the existing cold-restart upgrade flow
-// (RunInstallUpgrade: rename-aside → IPC quiesce-timers → IPC exit{graceful} →
-// force-kill fallback → start-new-supervisor) after the migrate driver has
-// written the spec-bearing supervisor-intent.json. This is the production
-// binding of migrateSerenaRestartFn on Windows (the supervisor cold-restart IPC
-// + spawn primitives are Windows-only in v0.5.0 — release scope is Windows GA /
-// Linux beta / macOS preview); non-Windows builds use the stub in
+// The migrate is a SAME-binary cutover, so it does NOT use RunInstallUpgrade
+// (whose rename-aside step would abort replacing a binary with itself) and it
+// reaps BEFORE writing the spec-bearing intent (the InstallParsedManifest §7.1
+// gate refuses a spec-bearing write while a supervisor is running). The flow is
+// split into two seams the driver calls around its own intent write:
+//
+//   - defaultMigrateSerenaReap  → ReapSupervisorForRestart (IPC quiesce-timers →
+//     exit{graceful} → force-kill fallback → verify ports unbound), NO binary
+//     swap, NO successor start. Runs BEFORE the intent write; expected ports come
+//     from the still-on-disk OLD supervisor-intent.json (the daemons the prior
+//     supervisor is bound to).
+//   - defaultMigrateSerenaStart → v5UpgradeDeps.StartSupervisor (detached per-OS
+//     supervisor spawn). Runs AFTER the intent write commits so the fresh
+//     supervisor cold-reconciles the new runtime_spec intent.
+//
+// Both are the production binding on Windows (the supervisor cold-restart IPC +
+// spawn primitives are Windows-only in v0.5.0 — release scope Windows GA / Linux
+// beta / macOS preview); non-Windows builds use the stubs in
 // migrate_serena_restart_other.go.
-//
-// The wiring mirrors runV5UpgradeWindows (install_migration_wiring_windows.go)
-// but omits its supervisor-intent-present routing discriminator: the migrate
-// driver has just written the intent, so the file is known to exist. The
-// rename-aside step is a no-op-equivalent in-place swap of the running binary
-// onto itself (current exe IS the new image), matching the same-version upgrade
-// path; its purpose here is solely to drive the supervisor reaping + restart so
-// the binary that next reads the runtime_spec intent is the current one.
 package cli
 
 import (
@@ -31,52 +34,60 @@ import (
 	"mcp-local-hub/internal/api"
 )
 
-// defaultMigrateSerenaRestart is the production §7.1 restart driver on Windows.
-func defaultMigrateSerenaRestart(ctx context.Context, w io.Writer) error {
+// migrateSerenaUpgradeDeps builds the shared Windows v5UpgradeDeps used by both
+// the reap and the start seams.
+func migrateSerenaUpgradeDeps() (*v5UpgradeDeps, string, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("resolve executable: %w", err)
-	}
-	target, err := setupTargetPath()
-	if err != nil {
-		return fmt.Errorf("resolve canonical target: %w", err)
+		return nil, "", fmt.Errorf("resolve executable: %w", err)
 	}
 	currentUser, err := currentWindowsUsername()
 	if err != nil {
-		return fmt.Errorf("resolve current user: %w", err)
+		return nil, "", fmt.Errorf("resolve current user: %w", err)
 	}
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
-		return fmt.Errorf("resolve state-dir: %w", err)
+		return nil, "", fmt.Errorf("resolve state-dir: %w", err)
 	}
-
 	deps := &v5UpgradeDeps{
 		exePath:           exe,
-		newBinaryPath:     exe, // current exe IS the new image (in-place swap)
+		newBinaryPath:     exe, // current exe IS the new image (no rename in the reap path)
 		supervisorLockDir: filepath.Join(stateDir, "supervisor.lock"),
 		pipePath:          superviseIPCPipePath(currentUser),
 	}
+	return deps, stateDir, nil
+}
 
-	// Resolve expected daemon ports from the just-written supervisor-intent.json
-	// so the post-force-kill verification proves no zombie children survived.
-	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
-	intent, err := api.ReadSupervisorIntent(intentPath)
+// defaultMigrateSerenaReap is the production §7.1 REAP driver on Windows. It
+// reaps the OLD supervisor WITHOUT replacing the binary and WITHOUT starting a
+// successor (the driver writes the intent + starts the successor itself, after
+// this returns).
+func defaultMigrateSerenaReap(ctx context.Context, w io.Writer) error {
+	deps, stateDir, err := migrateSerenaUpgradeDeps()
 	if err != nil {
-		return fmt.Errorf("supervisor-intent.json unreadable at %s: %w (refusing to skip post-force-kill port verification)", intentPath, err)
+		return err
 	}
-	if intent == nil {
-		return fmt.Errorf("supervisor-intent.json at %s decoded to nil (corrupt envelope); refusing to skip post-force-kill port verification", intentPath)
-	}
+
+	// Expected ports come from the still-on-disk OLD supervisor-intent.json —
+	// the ports the prior supervisor's daemon children are bound to — so the
+	// post-force-kill verification proves no zombie children survived BEFORE the
+	// driver writes the new intent. A missing intent file (the prior supervisor
+	// ran a never-persisted/transient set) is benign: no ports to verify.
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
 	var expectedPorts []int
-	for _, d := range intent.Daemons {
-		if d.Port > 0 {
-			expectedPorts = append(expectedPorts, d.Port)
+	if intent, rerr := api.ReadSupervisorIntent(intentPath); rerr != nil {
+		if !os.IsNotExist(rerr) {
+			return fmt.Errorf("read prior supervisor-intent.json at %s for reap port verification: %w", intentPath, rerr)
+		}
+	} else if intent != nil {
+		for _, d := range intent.Daemons {
+			if d.Port > 0 {
+				expectedPorts = append(expectedPorts, d.Port)
+			}
 		}
 	}
 
-	if err := RunInstallUpgrade(ctx, UpgradeOpts{
-		BinaryPath:         target,
-		NewBinary:          exe,
+	if err := ReapSupervisorForRestart(ctx, ReapOpts{
 		PipePath:           deps.pipePath,
 		Deps:               deps,
 		ExpectedPorts:      expectedPorts,
@@ -84,6 +95,23 @@ func defaultMigrateSerenaRestart(ctx context.Context, w io.Writer) error {
 	}); err != nil {
 		return err
 	}
-	fmt.Fprintln(w, "supervisor restarted; the current binary now reconciles the new serena dynamic-pool intent.")
+	fmt.Fprintln(w, "prior supervisor reaped; ready to write the new serena dynamic-pool intent.")
+	return nil
+}
+
+// defaultMigrateSerenaStart is the production §7.1 START driver on Windows. It
+// starts a fresh supervisor (detached) that cold-reconciles whatever intent is
+// on disk. The driver calls it AFTER its intent write commits (normal cutover)
+// OR as the recovery step when an intent write fails after a reap (the
+// still-on-disk OLD intent is restored).
+func defaultMigrateSerenaStart(_ context.Context, w io.Writer) error {
+	deps, _, err := migrateSerenaUpgradeDeps()
+	if err != nil {
+		return err
+	}
+	if err := deps.StartSupervisor(deps.exePath); err != nil {
+		return err
+	}
+	fmt.Fprintln(w, "supervisor started; the current binary now reconciles the on-disk serena intent.")
 	return nil
 }

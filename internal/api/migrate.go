@@ -41,6 +41,17 @@ type AppliedMigration struct {
 	Server string `json:"server"`
 	Client string `json:"client"`
 	URL    string `json:"url"`
+	// BackupPath is the per-client backup file written immediately BEFORE
+	// the entry rewrite, capturing the pre-rewrite shape of this client's
+	// config. Set by ReconcileSerenaClientsToRouter so a caller can undo a
+	// partially-successful reconcile (restore each Applied client to its
+	// pre-rewrite entry) via RestoreSerenaReconcileApplied — the serena
+	// migrate driver uses this for its outer-rollback "reconcile failed on
+	// some clients, restore the ones that succeeded before the point of no
+	// return" path. Empty for producers that do not snapshot a backup
+	// (e.g. MigrateFrom) or for dry-run rows; omitempty keeps the JSON
+	// surface backward-compatible.
+	BackupPath string `json:"backup_path,omitempty"`
 }
 
 // FailedMigration is one (server, client) pair that could not be migrated.

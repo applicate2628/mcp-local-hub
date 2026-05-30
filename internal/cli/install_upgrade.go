@@ -429,6 +429,124 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 	return nil
 }
 
+// ReapOpts is the input bundle to ReapSupervisorForRestart. It is a
+// subset of UpgradeOpts: the reap path does NOT replace the binary
+// (BinaryPath/NewBinary are absent) and does NOT start a new supervisor
+// (the caller owns the start step explicitly, after its own intent
+// write commits).
+type ReapOpts struct {
+	// PipePath is the per-OS supervisor IPC endpoint (same semantics as
+	// UpgradeOpts.PipePath). Used for QuiesceTimers, ExitGraceful, and
+	// ForceKillSupervisor (PID resolution from the lock sidecar).
+	PipePath string
+	// QuiesceTimeoutMs / ExitTimeoutMs default to the same per-spec
+	// budgets RunInstallUpgrade uses (30000 / 5000) when 0.
+	QuiesceTimeoutMs int
+	ExitTimeoutMs    int
+	// ExpectedPorts + VerifyPortsUnbound mirror UpgradeOpts: after a
+	// force-kill fallback the reap proves the prior supervisor's daemon
+	// listeners are released so the caller's later StartSupervisor can
+	// re-bind without fighting a zombie listener. Empty/nil → skipped.
+	ExpectedPorts      []int
+	VerifyPortsUnbound func(ports []int, perPortTimeout time.Duration) error
+	// Deps provides the IPC + force-kill sub-methods. Only QuiesceTimers,
+	// ExitGraceful, and ForceKillSupervisor are invoked; RenameAsideBinary
+	// and StartSupervisor are NEVER called by the reap path.
+	Deps UpgradeDeps
+}
+
+// ReapSupervisorForRestart reaps a currently-running supervisor WITHOUT
+// replacing the binary and WITHOUT starting a successor. It runs the
+// same IPC quiesce → graceful-exit → force-kill-fallback →
+// verify-ports-unbound sub-sequence as RunInstallUpgrade steps 2-4a, but
+// omits the rename-aside (step 1) and the supervisor start (step 6).
+//
+// This is the §7.1 "reap-first" primitive for the serena dynamic-pool
+// migrate (design §7.1, Phase 4): the migrate must remove the OLD
+// supervisor BEFORE it writes the spec-bearing runtime_spec intent —
+// (a) the InstallParsedManifest §7.1 gate refuses a spec-bearing write
+// while a supervisor is running (so the write can only succeed AFTER the
+// reap), and (b) the migrate is a SAME-binary restart, so the
+// rename-aside step RunInstallUpgrade performs would abort (replace a
+// binary with itself). The caller writes the new intent after this
+// returns nil, then calls Deps.StartSupervisor itself so the fresh
+// supervisor cold-reconciles the just-written intent.
+//
+// Return contract:
+//
+//   - nil  — the prior supervisor was quiesced + exited (gracefully or
+//     via a clean force-kill) and, if ExpectedPorts/VerifyPortsUnbound
+//     were supplied, its daemon ports are confirmed unbound. The caller
+//     may now write the spec-bearing intent (the §7.1 gate will pass —
+//     no supervisor is running) and start the successor.
+//
+//   - non-nil — the prior supervisor could NOT be reaped (force-kill
+//     failed with a non-already-exited cause, or a daemon port stayed
+//     bound past the verify deadline). Per §7.1 acceptance criterion 2
+//     the migrate MUST fail loud here and NOT write a new intent that a
+//     stuck old supervisor would silently ignore (DisallowUnknownFields).
+//
+// QuiesceTimers errors / non-empty still_running are NON-fatal to the
+// reap decision on their own — exactly as in RunInstallUpgrade — but they
+// ROUTE the flow through the force-kill + verify path so an un-drained
+// transient cannot survive as a port-holding orphan.
+func ReapSupervisorForRestart(ctx context.Context, opts ReapOpts) error {
+	if opts.QuiesceTimeoutMs == 0 {
+		opts.QuiesceTimeoutMs = defaultQuiesceTimeoutMs
+	}
+	if opts.ExitTimeoutMs == 0 {
+		opts.ExitTimeoutMs = defaultExitTimeoutMs
+	}
+
+	// Step A: IPC quiesce-timers (drain transients). Consume the result
+	// envelope: a quiesce error OR a non-empty still_running means drain
+	// is unproven, so route through force-kill even if ExitGraceful ACKs
+	// (the same codex-r4-b-p1 invariant RunInstallUpgrade enforces).
+	quiesceResp, qErr := opts.Deps.QuiesceTimers(ctx, opts.PipePath, opts.QuiesceTimeoutMs)
+	quiesceUnclean := false
+	if qErr != nil {
+		quiesceUnclean = true
+	} else if body, ok := quiesceResp.Result.(map[string]any); ok {
+		if stillRun, ok := body["still_running"].([]any); ok && len(stillRun) > 0 {
+			quiesceUnclean = true
+		}
+	}
+
+	// Step B: IPC exit{graceful}. On error (timeout / drop / malformed) OR
+	// an unclean quiesce, fall through to the force-kill fallback.
+	_, exitErr := opts.Deps.ExitGraceful(ctx, opts.PipePath, opts.ExitTimeoutMs)
+	if exitErr != nil || quiesceUnclean {
+		// Step B-a: force-kill fallback. "Already exited" is benign (the
+		// supervisor was already gone); any other error (permission denied,
+		// missing taskkill, corrupt PID) propagates because the prior
+		// supervisor may still be alive and would fight the successor for
+		// the IPC pipe + daemon ports.
+		if killErr := opts.Deps.ForceKillSupervisor(opts.PipePath); killErr != nil {
+			if !isAlreadyExitedError(killErr) {
+				return fmt.Errorf("force-kill supervisor failed during reap-before-restart: %w; "+
+					"the prior supervisor may still be running and would fight the new one for the IPC pipe and daemon ports; "+
+					"resolve the underlying error (often permission denied) and re-run the migrate",
+					killErr)
+			}
+		}
+
+		// Step B-b: prove the prior supervisor's daemon ports are unbound
+		// before the caller starts the successor (no zombie-listener race).
+		if len(opts.ExpectedPorts) > 0 && opts.VerifyPortsUnbound != nil {
+			if err := opts.VerifyPortsUnbound(opts.ExpectedPorts, defaultPostForceKillPortVerifyTimeout); err != nil {
+				return fmt.Errorf("port-unbound verification failed after force-kill supervisor during reap: %w; "+
+					"one or more daemon ports are still bound; "+
+					"identify the offending listener via `netstat -ano | findstr :<port>` and stop it manually before re-running the migrate",
+					err)
+			}
+		}
+	}
+
+	// Reaped. The caller now writes the spec-bearing intent (the §7.1 gate
+	// passes — no supervisor running) and starts the successor.
+	return nil
+}
+
 // isAlreadyExitedError reports whether err originated from a kill
 // invocation against a process that was already gone. taskkill on
 // Windows exits with code 128 ("ERROR_WAIT_NO_CHILDREN") for that

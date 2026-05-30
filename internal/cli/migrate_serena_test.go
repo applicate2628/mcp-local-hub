@@ -180,12 +180,22 @@ func stubReconcile(t *testing.T, fn func(ctx context.Context, w io.Writer) (*api
 	return func() { reconcileSerenaClientsFn = orig }
 }
 
-// stubRestart overrides migrateSerenaRestartFn for the test scope.
-func stubRestart(t *testing.T, fn func(ctx context.Context, w io.Writer) error) func() {
+// stubReap overrides migrateSerenaReapFn for the test scope (the §7.1
+// reap-first primitive — runs BEFORE the spec-bearing intent write).
+func stubReap(t *testing.T, fn func(ctx context.Context, w io.Writer) error) func() {
 	t.Helper()
-	orig := migrateSerenaRestartFn
-	migrateSerenaRestartFn = fn
-	return func() { migrateSerenaRestartFn = orig }
+	orig := migrateSerenaReapFn
+	migrateSerenaReapFn = fn
+	return func() { migrateSerenaReapFn = orig }
+}
+
+// stubStart overrides migrateSerenaStartFn for the test scope (starts the
+// successor supervisor AFTER the intent write commits).
+func stubStart(t *testing.T, fn func(ctx context.Context, w io.Writer) error) func() {
+	t.Helper()
+	orig := migrateSerenaStartFn
+	migrateSerenaStartFn = fn
+	return func() { migrateSerenaStartFn = orig }
 }
 
 // seedSerenaWorkspace registers one serena workspace (sentinel row) WITH a port,
@@ -248,11 +258,12 @@ func TestMigrateSerena_AlreadyMigrated_Idempotent(t *testing.T) {
 	stateDir, manifestDir := migrateSerenaTestEnv(t)
 	seedSerenaManifest(t, manifestDir, alreadyMigratedManifestYAML)
 
-	// Guard: install + reconcile + restart must NOT be invoked on the
+	// Guard: install + reconcile + reap + start must NOT be invoked on the
 	// already-migrated no-op path.
 	installInvoked := false
 	reconcileInvoked := false
-	restartInvoked := false
+	reapInvoked := false
+	startInvoked := false
 	restoreInstall := stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
 		installInvoked = true
 		return "", nil
@@ -263,18 +274,23 @@ func TestMigrateSerena_AlreadyMigrated_Idempotent(t *testing.T) {
 		return &api.MigrateReport{}, nil
 	})
 	defer restoreReconcile()
-	restoreRestart := stubRestart(t, func(ctx context.Context, w io.Writer) error {
-		restartInvoked = true
+	restoreReap := stubReap(t, func(ctx context.Context, w io.Writer) error {
+		reapInvoked = true
 		return nil
 	})
-	defer restoreRestart()
+	defer restoreReap()
+	restoreStart := stubStart(t, func(ctx context.Context, w io.Writer) error {
+		startInvoked = true
+		return nil
+	})
+	defer restoreStart()
 
 	var buf bytes.Buffer
 	if err := runMigrateSerenaDynamicPool(context.Background(), &buf); err != nil {
 		t.Fatalf("already-migrated must be a no-op exit-0; got error: %v", err)
 	}
-	if installInvoked || reconcileInvoked || restartInvoked {
-		t.Errorf("already-migrated path must not install/reconcile/restart (install=%v reconcile=%v restart=%v)", installInvoked, reconcileInvoked, restartInvoked)
+	if installInvoked || reconcileInvoked || reapInvoked || startInvoked {
+		t.Errorf("already-migrated path must not install/reconcile/reap/start (install=%v reconcile=%v reap=%v start=%v)", installInvoked, reconcileInvoked, reapInvoked, startInvoked)
 	}
 	if !strings.Contains(buf.String(), "already migrated") {
 		t.Errorf("output should explain the no-op; got %q", buf.String())
@@ -325,17 +341,23 @@ func TestMigrateSerena_EmptyRegistry_InstallsZeroWorkspaceIntent(t *testing.T) {
 	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
 
 	reconcileInvoked := false
-	restartInvoked := false
+	reapInvoked := false
+	startInvoked := false
 	restoreReconcile := stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
 		reconcileInvoked = true
 		return &api.MigrateReport{}, nil
 	})
 	defer restoreReconcile()
-	restoreRestart := stubRestart(t, func(ctx context.Context, w io.Writer) error {
-		restartInvoked = true
+	restoreReap := stubReap(t, func(ctx context.Context, w io.Writer) error {
+		reapInvoked = true
 		return nil
 	})
-	defer restoreRestart()
+	defer restoreReap()
+	restoreStart := stubStart(t, func(ctx context.Context, w io.Writer) error {
+		startInvoked = true
+		return nil
+	})
+	defer restoreStart()
 
 	// No serena workspaces registered → registry stays empty.
 	var buf bytes.Buffer
@@ -356,13 +378,17 @@ func TestMigrateSerena_EmptyRegistry_InstallsZeroWorkspaceIntent(t *testing.T) {
 	if intent.HasRuntimeSpecRow() {
 		t.Errorf("zero-workspace install must have no runtime_spec rows")
 	}
-	// reconcile runs (clients still get pointed at the router); restart does
-	// NOT (no spec-bearing write → no old-supervisor split-brain risk).
+	// reconcile runs (clients still get pointed at the router); reap + start do
+	// NOT (no spec-bearing write → no old-supervisor split-brain risk → no
+	// cutover reap-first sequence).
 	if !reconcileInvoked {
 		t.Errorf("client-reconcile should run even on a zero-workspace migrate")
 	}
-	if restartInvoked {
-		t.Errorf("no runtime_spec rows → §7.1 restart must be skipped")
+	if reapInvoked {
+		t.Errorf("no candidate workspaces → §7.1 reap must be skipped")
+	}
+	if startInvoked {
+		t.Errorf("no candidate workspaces → §7.1 supervisor start must be skipped")
 	}
 	if !strings.Contains(buf.String(), "zero daemon rows") {
 		t.Errorf("output should explain the zero-workspace install; got %q", buf.String())
@@ -387,16 +413,29 @@ func TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite(t *testing.T) {
 	ws := t.TempDir()
 	seedSerenaWorkspace(t, ws)
 
-	restartInvoked := false
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	reapInvoked := false
+	startInvoked := false
+	intentAbsentAtReap := false
 	restoreReconcile := stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
 		return &api.MigrateReport{}, nil
 	})
 	defer restoreReconcile()
-	restoreRestart := stubRestart(t, func(ctx context.Context, w io.Writer) error {
-		restartInvoked = true
+	restoreReap := stubReap(t, func(ctx context.Context, w io.Writer) error {
+		reapInvoked = true
+		// REAP-FIRST: the spec-bearing intent must NOT be written yet when the
+		// reap fires (reap precedes the write).
+		if _, statErr := os.Stat(intentPath); os.IsNotExist(statErr) {
+			intentAbsentAtReap = true
+		}
 		return nil
 	})
-	defer restoreRestart()
+	defer restoreReap()
+	restoreStart := stubStart(t, func(ctx context.Context, w io.Writer) error {
+		startInvoked = true
+		return nil
+	})
+	defer restoreStart()
 
 	var buf bytes.Buffer
 	if err := runMigrateSerenaDynamicPool(context.Background(), &buf); err != nil {
@@ -413,23 +452,30 @@ func TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite(t *testing.T) {
 	}
 
 	// And the install actually materialized a runtime_spec row in the intent.
-	intent, err := api.ReadSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"))
+	intent, err := api.ReadSupervisorIntent(intentPath)
 	if err != nil {
 		t.Fatalf("read intent: %v", err)
 	}
 	if !intent.HasRuntimeSpecRow() {
 		t.Fatalf("install should have materialized a runtime_spec row for the registered workspace")
 	}
-	if !restartInvoked {
-		t.Errorf("a spec-bearing migrate must drive the §7.1 restart")
+	if !reapInvoked {
+		t.Errorf("a spec-bearing migrate must drive the §7.1 reap")
+	}
+	if !intentAbsentAtReap {
+		t.Errorf("reap-first ordering violated: the spec-bearing intent was already on disk when the reap fired")
+	}
+	if !startInvoked {
+		t.Errorf("a spec-bearing migrate must start the successor supervisor after the intent write")
 	}
 }
 
 // ---------------------------------------------------------------------------
-// 5. Driver rollback restores the registry on install failure.
-//    The install seam is stubbed to fail AFTER the driver has allocated +
-//    saved registry ports; the deferred outer rollback must restore the prior
-//    registry rows.
+// 5. Driver rollback restores the registry on install failure (reap-first
+//    ordering: reconcile + reap have ALREADY run by the time the install/intent
+//    write fails). The deferred outer rollback restores the prior registry rows;
+//    the recovery start fires to restore a running supervisor (the still-on-disk
+//    OLD intent), and the reconcile-restore undo runs.
 // ---------------------------------------------------------------------------
 
 func TestMigrateSerena_RollbackRestoresRegistry_OnInstallFailure(t *testing.T) {
@@ -448,22 +494,34 @@ func TestMigrateSerena_RollbackRestoresRegistry_OnInstallFailure(t *testing.T) {
 	}
 	beforeReg := loadRegistrySerenaPorts(t, regPath)
 
-	// Stub install to fail (its OWN inner rollback already ran by contract;
-	// the driver's outer stack must then restore the registry).
+	// Reconcile + reap succeed (they run BEFORE the install in the reap-first
+	// ordering); the install/intent write then fails. Its OWN inner rollback
+	// already ran by contract; the driver's outer stack must then restore the
+	// registry + reconcile, and the recovery start must fire (a supervisor was
+	// reaped, so a successor must be restored to read the still-on-disk OLD
+	// intent — never leave no-supervisor-running silently).
+	reconcileRan := false
+	reapRan := false
+	recoveryStartRan := false
 	restoreInstall := stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
 		return "", errors.New("synthetic install failure (intent write)")
 	})
 	defer restoreInstall()
 	restoreReconcile := stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
-		t.Errorf("reconcile must NOT run after an install failure")
-		return nil, nil
+		reconcileRan = true
+		return &api.MigrateReport{}, nil
 	})
 	defer restoreReconcile()
-	restoreRestart := stubRestart(t, func(ctx context.Context, w io.Writer) error {
-		t.Errorf("restart must NOT run after an install failure")
+	restoreReap := stubReap(t, func(ctx context.Context, w io.Writer) error {
+		reapRan = true
 		return nil
 	})
-	defer restoreRestart()
+	defer restoreReap()
+	restoreStart := stubStart(t, func(ctx context.Context, w io.Writer) error {
+		recoveryStartRan = true
+		return nil
+	})
+	defer restoreStart()
 
 	var buf bytes.Buffer
 	err = runMigrateSerenaDynamicPool(context.Background(), &buf)
@@ -472,6 +530,12 @@ func TestMigrateSerena_RollbackRestoresRegistry_OnInstallFailure(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "synthetic install failure") {
 		t.Errorf("error should carry the install failure; got %v", err)
+	}
+	if !reconcileRan || !reapRan {
+		t.Errorf("reap-first ordering: reconcile + reap must run BEFORE the install (reconcile=%v reap=%v)", reconcileRan, reapRan)
+	}
+	if !recoveryStartRan {
+		t.Errorf("recovery invariant: a supervisor was reaped then the write failed, so the recovery start must fire to restore a running supervisor")
 	}
 
 	// The registry must be restored to its pre-migrate serena port state.
@@ -487,8 +551,10 @@ func TestMigrateSerena_RollbackRestoresRegistry_OnInstallFailure(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 6. Drives the supervisor restart after the intent write; AND fails loud when
-//    the prior supervisor cannot be exited.
+// 6. REAP-FIRST ordering: the reap fires BEFORE the spec-bearing intent write
+//    and the start fires AFTER it; AND the migrate fails loud when the prior
+//    supervisor cannot be reaped — WITHOUT writing the new intent (finding #1:
+//    the spec-bearing write must never land while a stuck old supervisor runs).
 // ---------------------------------------------------------------------------
 
 func TestMigrateSerena_DrivesSupervisorRestart(t *testing.T) {
@@ -496,94 +562,147 @@ func TestMigrateSerena_DrivesSupervisorRestart(t *testing.T) {
 	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
 	ws := t.TempDir()
 	seedSerenaWorkspace(t, ws)
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
 
 	restoreReconcile := stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
 		return &api.MigrateReport{}, nil
 	})
 	defer restoreReconcile()
 
-	t.Run("restart fires AFTER the intent write", func(t *testing.T) {
-		intentExistedAtRestart := false
-		restartCalled := false
-		restoreRestart := stubRestart(t, func(ctx context.Context, w io.Writer) error {
-			restartCalled = true
-			// The spec-bearing intent must already be on disk by the time the
-			// restart seam fires (ordering: write → reconcile → restart).
-			if intent, err := api.ReadSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json")); err == nil && intent.HasRuntimeSpecRow() {
-				intentExistedAtRestart = true
+	t.Run("reap fires BEFORE the intent write; start fires AFTER", func(t *testing.T) {
+		// Reset any intent from a prior subtest run.
+		_ = os.Remove(intentPath)
+
+		reapCalled := false
+		startCalled := false
+		intentAbsentAtReap := false
+		intentSpecBearingAtStart := false
+		var order []string
+		restoreReap := stubReap(t, func(ctx context.Context, w io.Writer) error {
+			reapCalled = true
+			order = append(order, "reap")
+			// REAP-FIRST: the spec-bearing intent must NOT be on disk yet.
+			if _, statErr := os.Stat(intentPath); os.IsNotExist(statErr) {
+				intentAbsentAtReap = true
 			}
 			return nil
 		})
-		defer restoreRestart()
+		defer restoreReap()
+		restoreStart := stubStart(t, func(ctx context.Context, w io.Writer) error {
+			startCalled = true
+			order = append(order, "start")
+			// START-AFTER: the spec-bearing intent must already be committed.
+			if intent, err := api.ReadSupervisorIntent(intentPath); err == nil && intent.HasRuntimeSpecRow() {
+				intentSpecBearingAtStart = true
+			}
+			return nil
+		})
+		defer restoreStart()
 
 		var buf bytes.Buffer
 		if err := runMigrateSerenaDynamicPool(context.Background(), &buf); err != nil {
 			t.Fatalf("migrate must succeed: %v (out=%s)", err, buf.String())
 		}
-		if !restartCalled {
-			t.Fatal("the §7.1 cold-restart seam must be invoked for a spec-bearing migrate")
+		if !reapCalled || !startCalled {
+			t.Fatalf("a spec-bearing migrate must reap then start (reap=%v start=%v)", reapCalled, startCalled)
 		}
-		if !intentExistedAtRestart {
-			t.Errorf("the restart must fire AFTER the spec-bearing intent write (intent not present/spec-bearing at restart time)")
+		if len(order) != 2 || order[0] != "reap" || order[1] != "start" {
+			t.Fatalf("ordering must be reap → (write) → start; got %v", order)
+		}
+		if !intentAbsentAtReap {
+			t.Errorf("reap-first violated: the spec-bearing intent was already on disk when the reap fired")
+		}
+		if !intentSpecBearingAtStart {
+			t.Errorf("the start must fire AFTER the spec-bearing intent write (intent not present/spec-bearing at start time)")
 		}
 	})
 
-	t.Run("fail-loud when the prior supervisor cannot be exited", func(t *testing.T) {
-		restoreRestart := stubRestart(t, func(ctx context.Context, w io.Writer) error {
-			// Mirror RunInstallUpgrade's non-nil return when ExitGraceful
-			// fails AND force-kill fails with a non-already-exited cause.
-			return errors.New("force-kill supervisor failed after graceful-exit timeout: ACCESS_DENIED")
+	t.Run("fail-loud when the prior supervisor cannot be reaped — intent NOT written", func(t *testing.T) {
+		// Reset any intent from a prior subtest run so the absence assertion is real.
+		_ = os.Remove(intentPath)
+
+		installCalled := false
+		startCalled := false
+		restoreInstall := stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
+			installCalled = true
+			return a.InstallParsedManifest(ctx, m, opts)
 		})
-		defer restoreRestart()
+		defer restoreInstall()
+		restoreReap := stubReap(t, func(ctx context.Context, w io.Writer) error {
+			// Mirror ReapSupervisorForRestart's non-nil return when ExitGraceful
+			// fails AND force-kill fails with a non-already-exited cause.
+			return errors.New("force-kill supervisor failed during reap-before-restart: ACCESS_DENIED")
+		})
+		defer restoreReap()
+		restoreStart := stubStart(t, func(ctx context.Context, w io.Writer) error {
+			startCalled = true
+			return nil
+		})
+		defer restoreStart()
 
 		var buf bytes.Buffer
 		err := runMigrateSerenaDynamicPool(context.Background(), &buf)
 		if err == nil {
-			t.Fatal("migrate must FAIL LOUD when the supervisor restart fails")
+			t.Fatal("migrate must FAIL LOUD when the supervisor reap fails")
 		}
-		if !strings.Contains(err.Error(), "supervisor upgrade/restart gate (§7.1) failed") {
-			t.Errorf("error should name the §7.1 gate failure; got %v", err)
+		if !strings.Contains(err.Error(), "supervisor reap (§7.1) failed BEFORE the runtime_spec intent write") {
+			t.Errorf("error should name the §7.1 reap failure; got %v", err)
 		}
 		if !strings.Contains(err.Error(), "ACCESS_DENIED") {
-			t.Errorf("error should preserve the underlying restart failure; got %v", err)
+			t.Errorf("error should preserve the underlying reap failure; got %v", err)
+		}
+		// THE finding #1 guard: the spec-bearing intent must NEVER be written
+		// when the reap fails (no install, no intent file on disk).
+		if installCalled {
+			t.Errorf("the intent write must NOT run after a reap failure (reap-first: reap is the gate before the write)")
+		}
+		if _, statErr := os.Stat(intentPath); !os.IsNotExist(statErr) {
+			t.Errorf("a reap failure must leave NO spec-bearing intent on disk; stat err = %v", statErr)
+		}
+		if startCalled {
+			t.Errorf("no successor start should fire after a pre-write reap failure (nothing was reaped successfully)")
 		}
 	})
 }
 
-// TestMigrateSerena_DrivesSupervisorRestart_ViaRunInstallUpgradeFakeDeps proves
-// the production restart binding shape: the migrate restart seam, when driven
-// through RunInstallUpgrade with a fakeUpgradeDeps (the install_upgrade_test.go
-// precedent), invokes the cold-restart sequence and fails loud when force-kill
-// fails.
-func TestMigrateSerena_DrivesSupervisorRestart_ViaRunInstallUpgradeFakeDeps(t *testing.T) {
-	// Happy path: rename → quiesce → exit → start, no abort.
+// TestMigrateSerena_ReapViaFakeDeps proves the production REAP binding shape via
+// ReapSupervisorForRestart with a fakeUpgradeDeps (the install_upgrade_test.go
+// precedent): the reap runs quiesce → exit → (force-kill fallback) WITHOUT a
+// binary swap (finding #4 — same binary; rename-aside would abort) and WITHOUT
+// starting a successor, and it fails loud when force-kill fails.
+func TestMigrateSerena_ReapViaFakeDeps(t *testing.T) {
+	// Happy path: quiesce (clean) → exit ACK. No force-kill, no rename, no start.
 	happy := &fakeUpgradeDeps{
 		quiesceResult: api.IPCResponse{ID: 1, OK: true, Result: map[string]any{"drained": 1.0, "still_running": []any{}}, Final: true},
 		exitResult:    api.IPCResponse{ID: 2, OK: true, Result: "exit-acked"},
 	}
-	if err := RunInstallUpgrade(context.Background(), UpgradeOpts{
-		BinaryPath: "/fake/mcphub", NewBinary: "/fake/mcphub.new", PipePath: "fake-pipe", Deps: happy,
-	}); err != nil {
-		t.Fatalf("restart happy path: %v", err)
+	if err := ReapSupervisorForRestart(context.Background(), ReapOpts{PipePath: "fake-pipe", Deps: happy}); err != nil {
+		t.Fatalf("reap happy path: %v", err)
 	}
-	if !happy.startCalled {
-		t.Error("StartSupervisor must run on the restart happy path")
+	if !happy.quiesceCalled || !happy.exitCalled {
+		t.Errorf("reap must drive quiesce + exit (quiesce=%v exit=%v)", happy.quiesceCalled, happy.exitCalled)
+	}
+	// FINDING #4: the reap path must NEVER replace the binary or start a successor.
+	if happy.renameAsideCalled {
+		t.Error("the reap path must NOT call RenameAsideBinary (same-binary cutover; no replacement)")
+	}
+	if happy.startCalled {
+		t.Error("the reap path must NOT call StartSupervisor (the driver starts the successor itself, after the intent write)")
 	}
 
 	// Fail-loud: exit times out AND force-kill fails with a non-already-exited
-	// cause → RunInstallUpgrade returns non-nil (the driver wraps this).
+	// cause → ReapSupervisorForRestart returns non-nil (the driver fails loud
+	// BEFORE the intent write). Still no rename, no start.
 	stuck := &fakeUpgradeDeps{
 		exitErr:      errors.New("timeout"),
 		forceKillErr: errors.New("ACCESS_DENIED: insufficient privileges to terminate the supervisor PID"),
 	}
-	err := RunInstallUpgrade(context.Background(), UpgradeOpts{
-		BinaryPath: "/fake/mcphub", NewBinary: "/fake/mcphub.new", PipePath: "fake-pipe", ExitTimeoutMs: 5000, Deps: stuck,
-	})
+	err := ReapSupervisorForRestart(context.Background(), ReapOpts{PipePath: "fake-pipe", ExitTimeoutMs: 5000, Deps: stuck})
 	if err == nil {
-		t.Fatal("a stuck supervisor (force-kill failure) must make RunInstallUpgrade return non-nil so the migrate fails loud")
+		t.Fatal("a stuck supervisor (force-kill failure) must make ReapSupervisorForRestart return non-nil so the migrate fails loud before the write")
 	}
-	if stuck.startCalled {
-		t.Error("StartSupervisor must NOT run when force-kill failed unsafely")
+	if stuck.renameAsideCalled || stuck.startCalled {
+		t.Errorf("the reap path must never rename or start (rename=%v start=%v)", stuck.renameAsideCalled, stuck.startCalled)
 	}
 }
 
@@ -620,25 +739,27 @@ func TestMigrateSerena_NilSpecRowsHealedBeforeSpawn(t *testing.T) {
 		t.Fatalf("seed pre-existing nil-spec intent: %v", err)
 	}
 
-	specBearingAtRestart := false
+	specBearingAtStart := false
 	restoreReconcile := stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
 		return &api.MigrateReport{}, nil
 	})
 	defer restoreReconcile()
-	restoreRestart := stubRestart(t, func(ctx context.Context, w io.Writer) error {
-		// Assert the row is HEALED (spec materialized) BEFORE the restart
+	restoreReap := stubReap(t, func(ctx context.Context, w io.Writer) error { return nil })
+	defer restoreReap()
+	restoreStart := stubStart(t, func(ctx context.Context, w io.Writer) error {
+		// Assert the row is HEALED (spec materialized) BEFORE the start
 		// seam fires — i.e. before any spawn would happen.
 		intent, err := api.ReadSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"))
 		if err == nil {
 			for _, d := range intent.Daemons {
 				if d.Server == "serena" && d.RuntimeSpec != nil {
-					specBearingAtRestart = true
+					specBearingAtStart = true
 				}
 			}
 		}
 		return nil
 	})
-	defer restoreRestart()
+	defer restoreStart()
 
 	var buf bytes.Buffer
 	if err := runMigrateSerenaDynamicPool(context.Background(), &buf); err != nil {
@@ -664,8 +785,311 @@ func TestMigrateSerena_NilSpecRowsHealedBeforeSpawn(t *testing.T) {
 	if !healed {
 		t.Fatal("expected at least one healed serena row with a fresh RuntimeSpec")
 	}
-	if !specBearingAtRestart {
-		t.Errorf("the row must be healed BEFORE the supervisor restart/spawn (was nil-spec at restart time)")
+	if !specBearingAtStart {
+		t.Errorf("the row must be healed BEFORE the supervisor start/spawn (was nil-spec at start time)")
+	}
+}
+
+// stubRestoreReconcile overrides restoreReconcileFn for the test scope.
+func stubRestoreReconcile(t *testing.T, fn func(report *api.MigrateReport) error) func() {
+	t.Helper()
+	orig := restoreReconcileFn
+	restoreReconcileFn = fn
+	return func() { restoreReconcileFn = orig }
+}
+
+// ---------------------------------------------------------------------------
+// (finding #1, the GAP that let the production-breaking flaw through) Models a
+// LIVE supervisor at migrate time by holding the real supervisor.lock flock —
+// the same signal SupervisorRunningUnderStateDir (and thus the §7.1
+// InstallParsedManifest write gate) reads. With the REAL install, the
+// spec-bearing write would be REFUSED while the supervisor lock is held. The
+// reap-first ordering must reap (here: stubbed to RELEASE the flock, modeling
+// the real reap killing the supervisor) BEFORE the write, so the gate passes
+// naturally. The prior write-first ordering FAILED here because the gate refused
+// the write while the supervisor ran; this test is the regression guard.
+// ---------------------------------------------------------------------------
+
+func TestMigrateSerena_LiveSupervisor_ReapClearsTheGateBeforeWrite(t *testing.T) {
+	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+	ws := t.TempDir()
+	seedSerenaWorkspace(t, ws)
+
+	// Hold the supervisor.lock flock → SupervisorRunningUnderStateDir reports a
+	// LIVE supervisor → the REAL InstallParsedManifest §7.1 gate refuses a
+	// spec-bearing write while it is held.
+	lock, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("acquire supervisor lock (model live supervisor): %v", err)
+	}
+	lockReleased := false
+	defer func() {
+		if !lockReleased {
+			lock.Release()
+		}
+	}()
+
+	// Sanity: with the lock held, the gate sees a running supervisor.
+	if running, _, perr := api.SupervisorRunningUnderStateDir(stateDir); perr != nil || !running {
+		t.Fatalf("precondition: supervisor must read as running while the lock is held (running=%v err=%v)", running, perr)
+	}
+
+	reapFiredBeforeWrite := false
+	restoreReconcile := stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+		return &api.MigrateReport{}, nil
+	})
+	defer restoreReconcile()
+	// The reap RELEASES the flock — modeling the real reap (quiesce → exit →
+	// force-kill) reaping the live supervisor so the lock frees. This is the ONLY
+	// thing that lets the subsequent REAL InstallParsedManifest write pass the gate.
+	restoreReap := stubReap(t, func(ctx context.Context, w io.Writer) error {
+		reapFiredBeforeWrite = true
+		lock.Release()
+		lockReleased = true
+		return nil
+	})
+	defer restoreReap()
+	restoreStart := stubStart(t, func(ctx context.Context, w io.Writer) error { return nil })
+	defer restoreStart()
+
+	var buf bytes.Buffer
+	if err := runMigrateSerenaDynamicPool(context.Background(), &buf); err != nil {
+		t.Fatalf("reap-first migrate must succeed (the reap clears the gate before the write); got error: %v (out=%s)", err, buf.String())
+	}
+	if !reapFiredBeforeWrite {
+		t.Fatal("the reap must have fired (it is what releases the supervisor lock so the write gate passes)")
+	}
+	// The spec-bearing intent was written — proving the gate passed because the
+	// reap ran first. Under the OLD write-first ordering this write would have
+	// been REFUSED by the §7.1 gate while the supervisor lock was held.
+	intent, err := api.ReadSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"))
+	if err != nil {
+		t.Fatalf("read intent after reap-first migrate: %v", err)
+	}
+	if !intent.HasRuntimeSpecRow() {
+		t.Fatal("the spec-bearing intent must be committed after the reap cleared the gate")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 8. (finding #5) Already-migrated by RUNTIME state: the committed
+//    supervisor-intent.json carries a serena dynamic-pool row (runtime_spec
+//    present) even though the CATALOG manifest is still the legacy 2-daemon
+//    shape (the migrate never rewrites the catalog). The migrate must be an
+//    idempotent no-op — NO reconcile/reap/write/start, never bounce the healthy
+//    supervisor.
+// ---------------------------------------------------------------------------
+
+func TestMigrateSerena_AlreadyMigratedByRuntimeIntent_Idempotent(t *testing.T) {
+	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	// CATALOG is still legacy — catalog-shape alone would re-trigger forever.
+	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+
+	// Seed a committed supervisor-intent.json whose serena row ALREADY carries a
+	// materialized RuntimeSpec (the runtime cutover already happened).
+	ws := t.TempDir()
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	migratedIntent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName:  api.SerenaTaskNameForWorkspace(ws),
+			Server:    "serena",
+			Workspace: ws,
+			Command:   "mcphub",
+			Args:      []string{"daemon-serena-proxy", "--workspace", ws},
+			Port:      9150,
+			RuntimeSpec: &api.DaemonRuntimeSpec{
+				SpecVersion:   api.DaemonRuntimeSpecVersion,
+				ChildCommand:  "go",
+				ChildArgs:     []string{"--project", ws, "--context", "codex"},
+				UpstreamPort:  9150 + 1,
+				ExternalPort:  9150,
+				WorkspacePath: ws,
+			},
+		}},
+	}
+	if err := api.WriteStateFileAtomic(intentPath, migratedIntent); err != nil {
+		t.Fatalf("seed already-migrated runtime intent: %v", err)
+	}
+	before, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read seeded intent: %v", err)
+	}
+
+	installInvoked, reconcileInvoked, reapInvoked, startInvoked := false, false, false, false
+	defer stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
+		installInvoked = true
+		return "", nil
+	})()
+	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+		reconcileInvoked = true
+		return &api.MigrateReport{}, nil
+	})()
+	defer stubReap(t, func(ctx context.Context, w io.Writer) error { reapInvoked = true; return nil })()
+	defer stubStart(t, func(ctx context.Context, w io.Writer) error { startInvoked = true; return nil })()
+
+	var buf bytes.Buffer
+	if err := runMigrateSerenaDynamicPool(context.Background(), &buf); err != nil {
+		t.Fatalf("already-migrated-by-runtime must be a no-op exit-0; got error: %v", err)
+	}
+	if installInvoked || reconcileInvoked || reapInvoked || startInvoked {
+		t.Errorf("runtime-already-migrated must not install/reconcile/reap/start (install=%v reconcile=%v reap=%v start=%v)",
+			installInvoked, reconcileInvoked, reapInvoked, startInvoked)
+	}
+	if !strings.Contains(buf.String(), "already migrated") || !strings.Contains(buf.String(), "runtime intent") {
+		t.Errorf("output should explain the runtime-state no-op; got %q", buf.String())
+	}
+	// The committed intent is untouched (we did not bounce the healthy supervisor).
+	after, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("re-read intent: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Errorf("runtime-already-migrated must not rewrite the committed intent")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 9. (finding #3) Partial reconcile (report.Failed non-empty) → the migrate
+//    FAILS before the reap; the reconcile-restore + registry rollback fire;
+//    legacy is untouched (no install, no reap, no start).
+// ---------------------------------------------------------------------------
+
+func TestMigrateSerena_PartialReconcile_FailsBeforeReap_RestoresClientsAndRegistry(t *testing.T) {
+	_, manifestDir := migrateSerenaTestEnv(t)
+	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+
+	// Seed a serena workspace WITHOUT a port so the driver allocates one (the
+	// registry mutation the rollback must undo).
+	ws := t.TempDir()
+	seedSerenaWorkspaceNoPort(t, ws)
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		t.Fatalf("registry path: %v", err)
+	}
+	beforeReg := loadRegistrySerenaPorts(t, regPath)
+
+	installInvoked, reapInvoked, startInvoked := false, false, false
+	restoreReconcileCalled := false
+	var restoredReport *api.MigrateReport
+	defer stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
+		installInvoked = true
+		return "", nil
+	})()
+	// Reconcile reports ONE applied client + ONE failed client → partial.
+	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+		return &api.MigrateReport{
+			Applied: []api.AppliedMigration{{Server: "serena", Client: "claude-code", URL: "http://127.0.0.1:9137/serena/mcp", BackupPath: "/fake/bak"}},
+			Failed:  []api.FailedMigration{{Server: "serena", Client: "cursor", Err: "write denied"}},
+		}, nil
+	})()
+	defer stubRestoreReconcile(t, func(report *api.MigrateReport) error {
+		restoreReconcileCalled = true
+		restoredReport = report
+		return nil
+	})()
+	defer stubReap(t, func(ctx context.Context, w io.Writer) error { reapInvoked = true; return nil })()
+	defer stubStart(t, func(ctx context.Context, w io.Writer) error { startInvoked = true; return nil })()
+
+	var buf bytes.Buffer
+	err = runMigrateSerenaDynamicPool(context.Background(), &buf)
+	if err == nil {
+		t.Fatal("a partial reconcile must FAIL the migrate (refuse to reap with a partially-migrated client set)")
+	}
+	if !strings.Contains(err.Error(), "client-reconcile to /serena/mcp router failed on 1 client") {
+		t.Errorf("error should name the partial-reconcile failure; got %v", err)
+	}
+	// The reap/install/start must NOT run — legacy is untouched, point of no
+	// return never reached.
+	if reapInvoked {
+		t.Errorf("the reap must NOT run after a partial reconcile (legacy stays up)")
+	}
+	if installInvoked {
+		t.Errorf("the intent write must NOT run after a partial reconcile")
+	}
+	if startInvoked {
+		t.Errorf("the supervisor start must NOT run after a partial reconcile")
+	}
+	// The reconcile-restore (restore already-rewritten clients to legacy) fired.
+	if !restoreReconcileCalled {
+		t.Errorf("the reconcile-restore compensator must fire on a partial reconcile")
+	}
+	if restoredReport == nil || len(restoredReport.Applied) != 1 || restoredReport.Applied[0].Client != "claude-code" {
+		t.Errorf("the restore must receive the report with the applied claude-code row; got %+v", restoredReport)
+	}
+	// The registry is restored to its pre-migrate serena port state.
+	afterReg := loadRegistrySerenaPorts(t, regPath)
+	for key, port := range beforeReg {
+		if afterReg[key] != port {
+			t.Errorf("registry rollback mismatch for %s: before port=%d, after port=%d", key, port, afterReg[key])
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 10. (finding #2) Start failure AFTER the intent commit → the migrate fails
+//     loud BUT the registry is NOT rolled back (the intent is the commit point;
+//     rolling the registry back would create split-state: committed intent rows
+//     with ports vs registry reverted to port 0).
+// ---------------------------------------------------------------------------
+
+func TestMigrateSerena_StartFailureAfterIntentCommit_DoesNotRollBackRegistry(t *testing.T) {
+	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+
+	// Seed a serena workspace WITHOUT a port so the driver allocates one; after
+	// the committed install the registry must RETAIN that allocation.
+	ws := t.TempDir()
+	seedSerenaWorkspaceNoPort(t, ws)
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		t.Fatalf("registry path: %v", err)
+	}
+
+	restoreReconcileCalled := false
+	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+		return &api.MigrateReport{}, nil
+	})()
+	defer stubRestoreReconcile(t, func(report *api.MigrateReport) error {
+		restoreReconcileCalled = true
+		return nil
+	})()
+	defer stubReap(t, func(ctx context.Context, w io.Writer) error { return nil })()
+	// REAL install commits the spec-bearing intent; the START then fails.
+	defer stubStart(t, func(ctx context.Context, w io.Writer) error {
+		return errors.New("schtasks /Run failed: the supervisor scheduled task is missing")
+	})()
+
+	var buf bytes.Buffer
+	err = runMigrateSerenaDynamicPool(context.Background(), &buf)
+	if err == nil {
+		t.Fatal("a post-commit start failure must surface as a migrate error")
+	}
+	if !strings.Contains(err.Error(), "supervisor start (§7.1) failed after the runtime_spec intent was committed") {
+		t.Errorf("error should name the post-commit start failure; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "registry is intentionally NOT rolled back") {
+		t.Errorf("error should state the registry is NOT rolled back; got %v", err)
+	}
+	// FINDING #2: the registry allocation is RETAINED (no rollback → no split-state).
+	afterReg := loadRegistrySerenaPorts(t, regPath)
+	gotPort := afterReg[api.WorkspaceKey(ws)]
+	if gotPort == 0 {
+		t.Errorf("registry must RETAIN the allocated serena port after a post-commit start failure (got 0 → rolled back → split-state); rows=%+v", afterReg)
+	}
+	// And the committed intent is on disk with the matching daemon row.
+	intent, ierr := api.ReadSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"))
+	if ierr != nil {
+		t.Fatalf("read committed intent: %v", ierr)
+	}
+	if !intent.HasRuntimeSpecRow() {
+		t.Errorf("the spec-bearing intent must remain committed after a post-commit start failure")
+	}
+	// The reconcile-restore must NOT fire (the rollback stack was disarmed at the
+	// commit point — disarming is what prevents the split-state).
+	if restoreReconcileCalled {
+		t.Errorf("the reconcile-restore must NOT fire after the intent commit (the outer rollback is disarmed)")
 	}
 }
 

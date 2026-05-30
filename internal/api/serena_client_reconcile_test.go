@@ -44,13 +44,17 @@ func seedPidport(t *testing.T, pid, port int) string {
 // invariant. Named distinctly from register_test.go's fakeClient (which
 // implements only a subset of the interface).
 type reconcileFakeClient struct {
-	name        string
-	exists      bool
-	entries     map[string]clients.MCPEntry
-	addErr      error // when non-nil, AddEntry returns it
-	backupCount int
-	addCalls    int
-	removeCalls int
+	name         string
+	exists       bool
+	entries      map[string]clients.MCPEntry
+	addErr       error  // when non-nil, AddEntry returns it
+	backupPath   string // path BackupKeep returns (default "/fake/bak")
+	backupCount  int
+	addCalls     int
+	removeCalls  int
+	restoreCalls int    // RestoreEntryFromBackup invocation count
+	restoreFrom  string // last backupPath passed to RestoreEntryFromBackup
+	restoreErr   error  // when non-nil, RestoreEntryFromBackup returns it
 }
 
 func newReconcileFakeClient(name string) *reconcileFakeClient {
@@ -60,13 +64,19 @@ func newReconcileFakeClient(name string) *reconcileFakeClient {
 func (f *reconcileFakeClient) Name() string       { return f.name }
 func (f *reconcileFakeClient) ConfigPath() string { return "/fake/" + f.name }
 func (f *reconcileFakeClient) Exists() bool       { return f.exists }
+func (f *reconcileFakeClient) backupReturn() string {
+	if f.backupPath != "" {
+		return f.backupPath
+	}
+	return "/fake/bak"
+}
 func (f *reconcileFakeClient) Backup() (string, error) {
 	f.backupCount++
-	return "/fake/bak", nil
+	return f.backupReturn(), nil
 }
 func (f *reconcileFakeClient) BackupKeep(int) (string, error) {
 	f.backupCount++
-	return "/fake/bak", nil
+	return f.backupReturn(), nil
 }
 func (f *reconcileFakeClient) Restore(string) error { return nil }
 func (f *reconcileFakeClient) AddEntry(e clients.MCPEntry) error {
@@ -91,8 +101,10 @@ func (f *reconcileFakeClient) GetEntry(name string) (*clients.MCPEntry, error) {
 	return &cp, nil
 }
 func (f *reconcileFakeClient) LatestBackupPath() (string, bool, error) { return "", false, nil }
-func (f *reconcileFakeClient) RestoreEntryFromBackup(string, string) error {
-	return nil
+func (f *reconcileFakeClient) RestoreEntryFromBackup(backupPath, _ string) error {
+	f.restoreCalls++
+	f.restoreFrom = backupPath
+	return f.restoreErr
 }
 func (f *reconcileFakeClient) BackupContainsEntry(string, string) (bool, error) { return false, nil }
 func (f *reconcileFakeClient) AllStdioEntries() ([]clients.StdioEntry, error)   { return nil, nil }
@@ -515,6 +527,77 @@ func TestSerenaClientReconcile_LegacyEndpointRemovedOnlyAfterRewriteSuccess(t *t
 	cursor := cs["cursor"].(*reconcileFakeClient)
 	if got := cursor.entries["serena"].URL; got != wantURL {
 		t.Errorf("cursor serena URL = %q, want %q", got, wantURL)
+	}
+}
+
+// TestSerenaClientReconcile_AppliedRowCarriesBackupPath verifies the reconcile
+// threads the per-client backup path onto each Applied row (the surface the
+// migrate driver's partial-failure rollback restores from).
+func TestSerenaClientReconcile_AppliedRowCarriesBackupPath(t *testing.T) {
+	managedEntriesTestHelper(t)
+
+	pp := seedPidport(t, 4242, 9151)
+	cs := fakeReconcileClientMap()
+	// Give each fake a distinct backup path so the row mapping is unambiguous.
+	for name, c := range cs {
+		c.(*reconcileFakeClient).backupPath = "/fake/bak-" + name
+	}
+	report, err := ReconcileSerenaClientsToRouter(context.Background(), SerenaReconcileOpts{
+		PidportPath: pp,
+		Ping:        okPing,
+		Clients:     cs,
+	})
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if len(report.Applied) == 0 {
+		t.Fatal("expected applied rewrites")
+	}
+	for _, a := range report.Applied {
+		if a.BackupPath != "/fake/bak-"+a.Client {
+			t.Errorf("applied row %s BackupPath = %q, want %q", a.Client, a.BackupPath, "/fake/bak-"+a.Client)
+		}
+	}
+}
+
+// TestRestoreSerenaReconcileApplied verifies the partial-failure compensator
+// restores every Applied client's serena entry from its recorded backup, skips
+// rows without a backup path, reports a missing adapter, and joins per-client
+// restore errors (best-effort: one failure does not strand the rest).
+func TestRestoreSerenaReconcileApplied(t *testing.T) {
+	cc := newReconcileFakeClient("claude-code")
+	cursor := newReconcileFakeClient("cursor")
+	cursor.restoreErr = errors.New("restore write denied")
+	cs := map[string]clients.Client{"claude-code": cc, "cursor": cursor}
+
+	report := &MigrateReport{Applied: []AppliedMigration{
+		{Server: "serena", Client: "claude-code", BackupPath: "/bak/claude"},
+		{Server: "serena", Client: "cursor", BackupPath: "/bak/cursor"},
+		{Server: "serena", Client: "vscode", BackupPath: ""},          // no backup → skipped
+		{Server: "serena", Client: "gemini-cli", BackupPath: "/bak/g"}, // no adapter → reported
+	}}
+
+	err := RestoreSerenaReconcileApplied(report, cs)
+	if err == nil {
+		t.Fatal("expected a joined error (cursor restore failure + gemini-cli missing adapter)")
+	}
+	// claude-code restored from its backup.
+	if cc.restoreCalls != 1 || cc.restoreFrom != "/bak/claude" {
+		t.Errorf("claude-code restore: calls=%d from=%q, want 1 from /bak/claude", cc.restoreCalls, cc.restoreFrom)
+	}
+	// cursor attempted (and failed).
+	if cursor.restoreCalls != 1 {
+		t.Errorf("cursor restore attempts = %d, want 1", cursor.restoreCalls)
+	}
+	if !strings.Contains(err.Error(), "restore write denied") {
+		t.Errorf("joined error should carry the cursor restore failure; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "gemini-cli") || !strings.Contains(err.Error(), "no adapter") {
+		t.Errorf("joined error should report the missing gemini-cli adapter; got %v", err)
+	}
+	// A nil report is a no-op.
+	if e := RestoreSerenaReconcileApplied(nil, cs); e != nil {
+		t.Errorf("nil report must be a no-op; got %v", e)
 	}
 }
 

@@ -12,36 +12,54 @@
 // api.InstallParsedManifest (Phase 1 seam), so the on-disk manifest is never
 // touched.
 //
-// Sequence (design §6 + §7.1):
+// Sequence (design §6 + §7.1; REAP-FIRST ordering — bot PR #250):
 //
-//  1. Source-state detect (parent plan §D.3 table) from the EMBEDDED/effective
-//     serena manifest: legacy-2-daemon / intermediate-unified → migrate;
-//     already-migrated → idempotent exit-0; malformed → error.
-//  2. Build the dynamic-pool manifest in memory (NOT written to disk).
-//  3. Snapshot + preserve the serena workspace registry rows (the OUTER
-//     rollback scope per §D.3).
-//  4. api.InstallParsedManifest materializes per-workspace RuntimeSpec rows into
-//     supervisor-intent.json (the INNER rollback scope — scheduler/client/intent
-//     undos live there; the outer stack never re-runs them, so no double-undo).
-//  5. Client-reconcile to the constant /serena/mcp router BEFORE the legacy 9121
-//     endpoints are removed (a per-client failure leaves that client on the
-//     still-functional legacy endpoint).
-//  6. §7.1 supervisor upgrade/restart gate: when the intent write introduced
-//     runtime_spec rows, drive the existing cold-restart upgrade flow
-//     (install_upgrade.go: quiesce → exit{graceful} → force-kill fallback →
-//     start-new-supervisor) so no OLD supervisor binary keeps reading the new
-//     runtime_spec intent. If the prior supervisor cannot be quiesced/exited the
-//     migrate FAILS LOUD rather than committing an intent a stuck old supervisor
-//     would ignore.
+//  1. Source-state detect — catalog AND runtime. The catalog shape (parent plan
+//     §D.3 table) classifies legacy-2-daemon / intermediate-unified / malformed,
+//     but it is NEVER rewritten, so it alone cannot mark "already migrated"
+//     (catalog-shape would re-trigger forever). The AUTHORITATIVE
+//     already-migrated signal is the committed supervisor-intent.json carrying a
+//     dynamic-pool serena row (a serena daemon with a materialized runtime_spec).
+//     Either signal → idempotent exit-0 (no reap, no write, no restart — never
+//     bounce a healthy supervisor).
+//  2. Build the dynamic-pool manifest in memory (NOT written to disk) + allocate
+//     a pool port per workspace + register (OUTER rollback armed: registry).
+//  3. Client-reconcile to the constant /serena/mcp router. FAIL on partial: if
+//     the report has ANY failed client, roll the reconcile back (restore the
+//     already-rewritten clients to legacy) + the registry, and abort — BEFORE
+//     the reap, while legacy 9121 is still up so every client keeps working.
+//     Reconcile must FULLY succeed before the point of no return (§7.1: "legacy
+//     endpoints removed only after the router rewrite succeeds").
+//  4. REAP the OLD supervisor via the cold-restart primitives DIRECTLY
+//     (ReapSupervisorForRestart: quiesce → exit{graceful} → force-kill fallback →
+//     verify ports unbound). NO binary swap (same binary — RunInstallUpgrade's
+//     rename-aside would abort), NO successor start yet. If the prior supervisor
+//     cannot be reaped → FAIL LOUD (do not write an intent a stuck old supervisor
+//     would ignore — §7.1 acceptance #2). THIS is the point of no return.
+//  5. Write the spec-bearing intent (api.InstallParsedManifest). The §7.1 gate
+//     now passes NATURALLY — no supervisor is running after the reap.
+//  6. DISARM the outer rollback: once InstallParsedManifest commits the intent,
+//     the install is the commit point. A later (start) failure must NOT roll the
+//     registry/reconcile back — that would create split-state (intent has daemon
+//     rows with ports, registry reverted to 0 → router can't resolve). Finding #2.
+//  7. START the new supervisor (it cold-reconciles the new intent → dynamic-pool
+//     daemons come up). A start failure AFTER the commit is fail-loud-with-guidance
+//     only; the registry is NOT rolled back (#2).
+//
+// Recovery invariant: if the reap (4) succeeds but the intent write (5) fails, no
+// supervisor is running and the OLD intent is still on disk → the driver attempts
+// a best-effort supervisor restart (it reads the still-on-disk old intent →
+// legacy restored), else fails loud with explicit operator guidance. It NEVER
+// leaves no-supervisor-running silently, and reap-first structurally prevents a
+// committed new-intent coexisting with the old supervisor.
 //
 // Rollback composition (parent plan §D.3 "Outer/inner rollback composition"):
-// this driver owns the OUTER stack covering ONLY the registry alloc/save.
-// api.InstallParsedManifest owns the INNER stack for scheduler tasks + per-client
-// config + intent write. When InstallParsedManifest returns an error, its inner
-// stack has ALREADY undone its own steps; the outer stack then undoes only the
-// registry. The outer stack never pushes the inner's undos, so there is no
-// double-undo. (Unlike the removed predecessor, there is NO manifest-write step,
-// so the outer stack does not snapshot/restore a manifest.)
+// this driver owns the OUTER stack covering the registry alloc/save AND the
+// client-reconcile restore. api.InstallParsedManifest owns the INNER stack for
+// scheduler tasks + per-client config + intent write. The outer stack is DISARMED
+// the instant InstallParsedManifest commits (step 6), so a post-commit start
+// failure never re-runs it. (Unlike the removed predecessor, there is NO
+// manifest-write step, so the outer stack does not snapshot/restore a manifest.)
 package cli
 
 import (
@@ -49,6 +67,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -175,15 +194,40 @@ var reconcileSerenaClientsFn = func(ctx context.Context, w io.Writer) (*api.Migr
 	})
 }
 
-// migrateSerenaRestartFn drives the §7.1 supervisor cold-restart after a
-// spec-bearing intent write + client reconcile. Default is the per-platform
-// production binding (defaultMigrateSerenaRestart): on Windows it builds the
-// real UpgradeDeps and calls RunInstallUpgrade; on other platforms it returns
-// errSupervisorRestartUnsupported (the supervisor cold-restart wiring is
+// restoreReconcileFn is the package-level seam over
+// api.RestoreSerenaReconcileApplied — the outer-rollback compensator that
+// restores the already-rewritten clients to their legacy entry when the
+// reconcile fails on some clients (finding #3) OR when a later pre-commit step
+// errors. Default restores against the live clients.AllClients(); tests override
+// it to assert the restore fires without touching real client configs.
+var restoreReconcileFn = func(report *api.MigrateReport) error {
+	return api.RestoreSerenaReconcileApplied(report, nil)
+}
+
+// migrateSerenaReapFn reaps the OLD supervisor BEFORE the spec-bearing intent
+// write (§7.1 reap-first ordering). It runs the IPC quiesce → exit{graceful} →
+// force-kill fallback → verify-ports-unbound sub-sequence (ReapSupervisorForRestart)
+// WITHOUT a binary swap and WITHOUT starting a successor. Default is the
+// per-platform production binding (defaultMigrateSerenaReap): on Windows it
+// builds the real UpgradeDeps and resolves expected ports from the still-on-disk
+// OLD supervisor-intent.json; on other platforms it returns
+// errSupervisorRestartUnsupported (the supervisor cold-restart primitives are
 // Windows-only in v0.5.0 — release scope is Windows GA / Linux beta / macOS
-// preview). Tests override it to assert it fires after the intent write and to
-// exercise the fail-loud path.
-var migrateSerenaRestartFn = defaultMigrateSerenaRestart
+// preview). A non-nil return means the prior supervisor could not be reaped, so
+// the migrate FAILS LOUD before committing an intent a stuck old supervisor
+// would silently ignore (§7.1 acceptance criterion 2). Tests override it to
+// assert it fires BEFORE the intent write and to exercise the fail-loud path.
+var migrateSerenaReapFn = defaultMigrateSerenaReap
+
+// migrateSerenaStartFn starts the NEW supervisor AFTER the spec-bearing intent
+// write commits. The fresh supervisor cold-reconciles from the just-written
+// intent (re-materializing nil-spec serena rows before spawning). Default is
+// the per-platform production binding (defaultMigrateSerenaStart): Windows
+// drives the detached per-OS supervisor spawn; non-Windows fails loud. A
+// non-nil return AFTER the intent commit is fail-loud-with-guidance only — the
+// driver does NOT roll back the registry (the intent is the commit point;
+// rolling back would create split-state per finding #2). Tests override it.
+var migrateSerenaStartFn = defaultMigrateSerenaStart
 
 // ---------------------------------------------------------------------------
 // Command wiring.
@@ -266,9 +310,31 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 		return err
 	}
 
-	// 2. already-migrated → idempotent no-op, exit 0, zero writes.
+	// 2. already-migrated → idempotent no-op, exit 0, zero writes. TWO signals
+	//    are checked, EITHER of which means "nothing to do":
+	//
+	//    (a) catalog shape — the embedded/effective manifest is the dynamic-pool
+	//        daemon_template form (detectSerenaSourceState above). Only relevant
+	//        if the on-disk manifest was ever updated by hand; the migrate never
+	//        rewrites it.
+	//    (b) RUNTIME shape (finding #5, the authoritative one) — the committed
+	//        supervisor-intent.json already carries a serena dynamic-pool row (a
+	//        serena daemon with a materialized runtime_spec). The migrate never
+	//        touches the catalog, so catalog-shape ALONE would re-trigger the
+	//        migration forever; the runtime intent is the truth for "did the
+	//        cutover already happen". When it is already dynamic-pool we MUST NOT
+	//        reap/write/restart — bouncing a healthy supervisor and re-reaping is
+	//        the regression #5 closes.
 	if state == serenaSourceAlreadyMigrated {
-		fmt.Fprintln(w, "serena is already migrated to the dynamic pool; nothing to do.")
+		fmt.Fprintln(w, "serena is already migrated to the dynamic pool (catalog shape); nothing to do.")
+		return nil
+	}
+	alreadyMigrated, amErr := serenaRuntimeIntentIsDynamicPool()
+	if amErr != nil {
+		return fmt.Errorf("inspect supervisor-intent.json for an existing serena dynamic-pool migration: %w", amErr)
+	}
+	if alreadyMigrated {
+		fmt.Fprintln(w, "serena is already migrated to the dynamic pool (runtime intent already carries the workspace-scoped serena descriptor); nothing to do.")
 		return nil
 	}
 
@@ -352,70 +418,137 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 	}
 
 	// Re-read the freshly-allocated serena rows so the fan-out sees the assigned
-	// ports + task names.
+	// ports + task names. A non-nil (possibly empty) Workspaces snapshot is
+	// required for the install: nil would drop the server's existing rows.
 	allocated := reg.SerenaEntries()
-
-	// 6. Install the parsed (in-memory) manifest. The inner stack owns
-	//    scheduler/client/intent undos; on error here those are ALREADY undone
-	//    and the outer stack fires for the registry only. The dynamic-pool
-	//    manifest carries no client_bindings (the /serena/mcp router owns
-	//    routing), so the only side effect is the per-workspace
-	//    supervisor-intent fan-out driven by opts.Workspaces. A non-nil (possibly
-	//    empty) Workspaces snapshot is required: nil would drop the server's
-	//    existing rows.
 	if allocated == nil {
 		allocated = []api.WorkspaceEntry{}
 	}
-	intentPath, ierr := installParsedManifestFn(ctx, api.NewAPI(), dynamicManifest, api.InstallParsedManifestOpts{
-		Writer:     w,
-		Workspaces: allocated,
-	})
-	if ierr != nil {
-		err = ierr
-		return err
-	}
 
-	// 7. Client-reconcile to the constant /serena/mcp router URL BEFORE legacy
-	//    9121 removal (the reconcile itself removes the legacy endpoint only
-	//    AFTER each client's router rewrite succeeds). A whole-run blocker (GUI
-	//    not live) fails the migrate; per-client failures are reported and
-	//    leave that client on the still-functional legacy endpoint.
+	// willReap is the PRE-write predicate for "this migrate is a cutover that
+	// must reap-then-restart the supervisor". At least one candidate workspace
+	// → the install will (modulo stale-workspace pruning) materialize a
+	// runtime_spec row, so an OLD supervisor must be reaped before the write
+	// and a fresh one started after. Zero candidates (claim #7) → the install
+	// writes a no-runtime_spec intent an old supervisor reads fine; no reap, no
+	// restart. NOTE: even if every candidate is pruned as stale at install
+	// time (so the written intent ends up non-spec-bearing), once willReap
+	// fired we have committed to the reap → we ALWAYS start a successor
+	// afterward (recovery invariant: never leave no-supervisor-running).
+	willReap := len(allocated) > 0
+
+	// 6. Client-reconcile to the constant /serena/mcp router URL — BEFORE the
+	//    reap, so legacy 9121 is still up and a per-client failure leaves that
+	//    client on its still-functional legacy endpoint. The reconcile records a
+	//    per-client backup; on a PARTIAL failure (any report.Failed row) we MUST
+	//    NOT proceed to the irreversible reap with only SOME clients on the
+	//    router — restore the rewritten clients to legacy + roll the registry
+	//    back, and abort (finding #3; §7.1 "legacy removed only after the router
+	//    rewrite succeeds" → the rewrite must FULLY succeed first). A whole-run
+	//    blocker (GUI not live) also fails the migrate. The reconcile-restore is
+	//    pushed onto the OUTER rollback so the deferred stack runs it on ANY
+	//    pre-commit error after this point (the reap-fail path included).
 	report, rerr := reconcileSerenaClientsFn(ctx, w)
 	if rerr != nil {
 		err = fmt.Errorf("client-reconcile to /serena/mcp router: %w", rerr)
 		return err
 	}
 	printSerenaReconcileReport(w, report)
-
-	// 8. §7.1 supervisor upgrade/restart gate. Only required when the intent
-	//    write introduced runtime_spec rows: an OLD supervisor binary's intent
-	//    watcher uses DisallowUnknownFields and would reject the new field,
-	//    silently no-op'ing the migration at runtime. Drive the cold-restart so
-	//    the binary that next reads the intent is the new one. A NO-spec write
-	//    (zero workspaces — claim #7) needs no restart: an old supervisor reads a
-	//    no-runtime_spec intent fine.
-	specBearing, scanErr := intentHasRuntimeSpecRow(intentPath)
-	if scanErr != nil {
-		err = fmt.Errorf("verify supervisor-intent runtime_spec rows after write: %w", scanErr)
+	rollback = append(rollback, func() error { return restoreReconcileFn(report) })
+	if len(report.Failed) > 0 {
+		err = fmt.Errorf(
+			"client-reconcile to /serena/mcp router failed on %d client(s) — refusing to reap the supervisor with a partially-migrated client set; "+
+				"the already-rewritten clients are being restored to their legacy endpoint and the registry rolled back. "+
+				"Resolve the per-client failures above and re-run the migrate (legacy serena is untouched)", len(report.Failed))
 		return err
 	}
-	if specBearing {
-		fmt.Fprintln(w, "Restarting the supervisor so the new runtime_spec intent is read by the current binary…")
-		if rsErr := migrateSerenaRestartFn(ctx, w); rsErr != nil {
-			// FAIL LOUD: a stuck old supervisor would ignore the new intent. Do
-			// NOT report success.
+
+	// 7. REAP the OLD supervisor BEFORE the spec-bearing intent write (reap-first
+	//    ordering — bot PR #250). Only for a cutover (willReap): an OLD supervisor
+	//    binary's intent watcher uses DisallowUnknownFields and would reject the
+	//    new runtime_spec field, silently no-op'ing the migration at runtime. The
+	//    reap runs quiesce → exit{graceful} → force-kill fallback → verify ports
+	//    unbound (NO binary swap — same binary; NO successor start yet). If the
+	//    prior supervisor cannot be reaped → FAIL LOUD (the deferred outer stack
+	//    restores the reconcile + registry; legacy stays the source of truth) —
+	//    §7.1 acceptance #2. THIS is the point of no return for the cutover.
+	if willReap {
+		fmt.Fprintln(w, "Reaping the running supervisor before the runtime_spec intent write (so the current binary is the one that reconciles it)…")
+		if reapErr := migrateSerenaReapFn(ctx, w); reapErr != nil {
 			err = fmt.Errorf(
-				"supervisor upgrade/restart gate (§7.1) failed after the runtime_spec intent write: %w; "+
-					"the new serena dynamic-pool intent is committed but the supervisor that reads it was not "+
-					"restarted — stop any running supervisor and re-run `mcphub install --upgrade` (or the migrate) "+
-					"so the current binary reconciles the new intent", rsErr)
+				"supervisor reap (§7.1) failed BEFORE the runtime_spec intent write: %w; "+
+					"the new serena dynamic-pool intent was NOT written and legacy serena is untouched — "+
+					"stop any running supervisor and re-run the migrate", reapErr)
 			return err
 		}
-	} else {
-		fmt.Fprintln(w, "No registered serena workspaces — installed the dynamic-pool intent with zero daemon rows; no supervisor restart required.")
 	}
 
-	// 9. Emit the success audit event.
+	// 8. Write the spec-bearing intent. The §7.1 gate inside InstallParsedManifest
+	//    now passes NATURALLY — after the reap no supervisor holds the lock, so the
+	//    spec-bearing write is the safe state (the NEXT supervisor start is THIS
+	//    binary). The inner stack owns scheduler/client/intent undos; on error here
+	//    those are ALREADY undone and the deferred outer stack restores the
+	//    reconcile + registry. The dynamic-pool manifest carries no client_bindings
+	//    (the /serena/mcp router owns routing), so the only side effect is the
+	//    per-workspace supervisor-intent fan-out driven by opts.Workspaces.
+	intentPath, ierr := installParsedManifestFn(ctx, api.NewAPI(), dynamicManifest, api.InstallParsedManifestOpts{
+		Writer:     w,
+		Workspaces: allocated,
+	})
+	if ierr != nil {
+		// Recovery invariant: if we reaped (step 7) but the write failed, NO
+		// supervisor is running and the OLD intent is still on disk. Restart a
+		// supervisor so it reads the still-on-disk old intent (legacy restored)
+		// rather than leaving no-supervisor-running silently. The outer stack
+		// still restores the reconcile + registry (legacy is the source of truth).
+		err = ierr
+		if willReap {
+			fmt.Fprintln(w, "intent write failed after the supervisor reap — restarting a supervisor to restore the prior (legacy) intent…")
+			if startErr := migrateSerenaStartFn(ctx, w); startErr != nil {
+				err = fmt.Errorf("%w; AND the recovery supervisor start ALSO failed: %v — "+
+					"NO supervisor is running and the prior (legacy) intent is on disk; "+
+					"run `mcphub supervise` from a shell to restore the legacy serena daemons", err, startErr)
+			}
+		}
+		return err
+	}
+
+	// 9. DISARM the outer rollback (finding #2). InstallParsedManifest has
+	//    committed the new intent — that IS the commit point. A later failure
+	//    (the start below) must NOT roll the registry/reconcile back: doing so
+	//    would leave the committed intent with daemon rows + ports while the
+	//    registry reverts to port 0, so the /serena/mcp router could not resolve
+	//    a workspace (split-state). Clear the stack so the deferred undo is a
+	//    no-op from here on.
+	rollback = nil
+
+	// 10. START the new supervisor (only after a cutover reap). It cold-reconciles
+	//     from the just-written intent, re-materializing any nil-spec serena rows
+	//     BEFORE spawning, and the dynamic-pool daemons come up. A start failure
+	//     AFTER the intent commit is fail-loud-with-guidance ONLY — the intent is
+	//     committed, so the registry is NOT rolled back (#2); the operator re-runs
+	//     or starts the supervisor by hand.
+	specBearing, scanErr := intentHasRuntimeSpecRow(intentPath)
+	if scanErr != nil {
+		// The intent IS committed; surface the verify failure but do NOT roll back.
+		return fmt.Errorf("verify supervisor-intent runtime_spec rows after the committed write: %w "+
+			"(the intent is committed; start the supervisor with `mcphub supervise` if it is not already running)", scanErr)
+	}
+	if willReap {
+		fmt.Fprintln(w, "Starting the supervisor so it reconciles the new serena dynamic-pool intent…")
+		if startErr := migrateSerenaStartFn(ctx, w); startErr != nil {
+			// FAIL LOUD with guidance; intent committed, registry NOT rolled back (#2).
+			return fmt.Errorf(
+				"supervisor start (§7.1) failed after the runtime_spec intent was committed: %w; "+
+					"the new serena dynamic-pool intent is on disk but no supervisor is running — "+
+					"run `mcphub supervise` from a shell (or re-run the migrate) so the current binary reconciles it. "+
+					"The registry is intentionally NOT rolled back: the intent is the commit point", startErr)
+		}
+	} else {
+		fmt.Fprintln(w, "No registered serena workspaces — installed the dynamic-pool intent with zero daemon rows; no supervisor reap/restart required.")
+	}
+
+	// 11. Emit the success audit event.
 	if events != nil {
 		_ = events.Emit(api.SupervisorEvent{
 			SchemaVersion: api.SupervisorEventSchemaVersion,
@@ -427,14 +560,49 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 				"target_workspaces": serenaWorkspacePaths(allocated),
 				"allocated_ports":   serenaWorkspacePorts(allocated),
 				"spec_bearing":      specBearing,
+				"reaped":            willReap,
 			},
 		})
 	}
 
-	// 10. Success — clear the rollback so the deferred undo is a no-op.
-	rollback = nil
 	fmt.Fprintln(w, "serena dynamic-pool migration complete.")
 	return nil
+}
+
+// serenaRuntimeIntentIsDynamicPool reports whether the committed
+// supervisor-intent.json already carries a serena dynamic-pool descriptor — a
+// daemon row with Server=="serena" and a materialized RuntimeSpec. This is the
+// AUTHORITATIVE runtime "already migrated" signal (finding #5): the migrate
+// never rewrites the catalog manifest, so the catalog shape alone would
+// re-trigger the migration forever; the runtime intent is the truth for whether
+// the cutover already happened. A missing intent file (cutover never ran) reports
+// (false, nil) — there is nothing to migrate away from yet, but a legacy supervisor
+// may still be running, so the caller proceeds with the migrate. Only a genuine
+// read/parse error (corrupt envelope, insecure parent) propagates.
+func serenaRuntimeIntentIsDynamicPool() (bool, error) {
+	stateDir, err := stateDirFunc()
+	if err != nil {
+		return false, fmt.Errorf("resolve state dir: %w", err)
+	}
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	intent, err := api.ReadSupervisorIntent(intentPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// No committed intent yet — the cutover has not run. Not already
+			// migrated; proceed (a legacy supervisor may still be running).
+			return false, nil
+		}
+		return false, err
+	}
+	if intent == nil {
+		return false, nil
+	}
+	for i := range intent.Daemons {
+		if intent.Daemons[i].Server == serenaMigrateServerName && intent.Daemons[i].RuntimeSpec != nil {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // intentHasRuntimeSpecRow re-reads the written supervisor-intent.json and

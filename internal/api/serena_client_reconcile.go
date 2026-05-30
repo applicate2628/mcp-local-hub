@@ -270,8 +270,12 @@ func ReconcileSerenaClientsToRouter(ctx context.Context, opts SerenaReconcileOpt
 			continue
 		}
 
-		// Back up before mutating, same discipline as MigrateFrom.
-		if _, berr := adapter.BackupKeep(opts.BackupKeepN); berr != nil {
+		// Back up before mutating, same discipline as MigrateFrom. The
+		// returned path is threaded onto the Applied row so a partial-failure
+		// caller (the serena migrate driver) can restore this client to its
+		// pre-rewrite entry via RestoreSerenaReconcileApplied.
+		backupPath, berr := adapter.BackupKeep(opts.BackupKeepN)
+		if berr != nil {
 			report.Failed = append(report.Failed, FailedMigration{
 				Server: serenaEntryName, Client: clientName, Err: berr.Error(),
 			})
@@ -325,11 +329,52 @@ func ReconcileSerenaClientsToRouter(ctx context.Context, opts SerenaReconcileOpt
 		}
 
 		report.Applied = append(report.Applied, AppliedMigration{
-			Server: serenaEntryName, Client: clientName, URL: routerURL,
+			Server: serenaEntryName, Client: clientName, URL: routerURL, BackupPath: backupPath,
 		})
 	}
 
 	return report, nil
+}
+
+// RestoreSerenaReconcileApplied undoes a partially-successful
+// ReconcileSerenaClientsToRouter run by restoring every Applied client's
+// serena entry from the per-client backup the reconcile captured immediately
+// before its rewrite. It is the outer-rollback compensator the serena migrate
+// driver runs when the reconcile reports per-client failures (report.Failed
+// non-empty): the migrate must NOT proceed to the irreversible supervisor reap
+// while only SOME clients point at the router, so the ones that succeeded are
+// reverted to their pre-rewrite (legacy) entry and the whole run is aborted.
+//
+// allClients is the {name -> adapter} map to restore against (the same
+// surface the reconcile rewrote); nil → clients.AllClients(). Restore is
+// best-effort per client: a client whose adapter is missing, whose backup
+// path was not recorded (dry-run / empty), or whose RestoreEntryFromBackup
+// errors is collected into the returned joined error, but every other client
+// is still attempted so one failure does not strand the rest on the router.
+func RestoreSerenaReconcileApplied(report *MigrateReport, allClients map[string]clients.Client) error {
+	if report == nil {
+		return nil
+	}
+	if allClients == nil {
+		allClients = clients.AllClients()
+	}
+	var errs []error
+	for _, app := range report.Applied {
+		if app.BackupPath == "" {
+			// No snapshot to restore from (dry-run row, or a producer that
+			// does not capture a backup). Nothing to undo for this client.
+			continue
+		}
+		adapter := allClients[app.Client]
+		if adapter == nil {
+			errs = append(errs, fmt.Errorf("restore %s/%s: no adapter on this host", app.Server, app.Client))
+			continue
+		}
+		if rerr := adapter.RestoreEntryFromBackup(app.BackupPath, serenaEntryName); rerr != nil {
+			errs = append(errs, fmt.Errorf("restore %s/%s from %s: %w", app.Server, app.Client, app.BackupPath, rerr))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // inScopeReconcileClients returns the client names to reconcile: the full
