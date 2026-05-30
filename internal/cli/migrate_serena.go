@@ -245,6 +245,42 @@ var migrateSerenaStartFn = defaultMigrateSerenaStart
 // confirmed, which the caller treats as a recovery situation. Tests override it.
 var migrateSerenaSupervisorHealthyFn = defaultMigrateSerenaSupervisorHealthy
 
+// migrateSerenaSupervisorRunningFn reports whether a supervisor process is
+// currently RUNNING (bot PR #250 finding #3). Unlike the heavier
+// migrateSerenaSupervisorHealthyFn (which also probes IPC reconcile-ready), this
+// is the lightweight lock-only liveness signal — the same one
+// SupervisorRunningUnderStateDir and the §7.1 install gate read — used PRE-reap
+// to decide whether a cutover reap is even needed. When NO supervisor is running
+// (the operator stopped it per §7.1 guidance, or a fresh host), the reap is a
+// no-op-equivalent whose production stub fails loud on non-Windows, so the
+// cutover would be blocked even though the §7.1 install liveness gate is already
+// satisfied (nothing to reap). Gating willReap on this probe lets such a migrate
+// proceed straight to the intent write + supervisor start.
+//
+// A (_, err) return means liveness is UNDETERMINABLE (e.g. a lock-probe failure
+// on a hardened host); the caller treats that conservatively as "running" and
+// still attempts the reap, so an undeterminable probe never silently skips a
+// needed reap (the §7.1 install gate is the fail-closed backstop either way).
+// Default is the cross-platform lock probe; tests override it.
+var migrateSerenaSupervisorRunningFn = defaultMigrateSerenaSupervisorRunning
+
+// defaultMigrateSerenaSupervisorRunning is the production binding for
+// migrateSerenaSupervisorRunningFn: a cross-platform supervisor-lock liveness
+// probe (the lock primitive is platform-neutral via flock). It resolves the
+// state dir through stateDirFunc so it honors MCPHUB_STATE_DIR_OVERRIDE exactly
+// like serenaRuntimeIntentIsDynamicPool.
+func defaultMigrateSerenaSupervisorRunning() (bool, error) {
+	stateDir, err := stateDirFunc()
+	if err != nil {
+		return false, fmt.Errorf("resolve state dir for supervisor liveness probe: %w", err)
+	}
+	running, _, perr := api.SupervisorRunningUnderStateDir(stateDir)
+	if perr != nil {
+		return false, fmt.Errorf("probe supervisor liveness: %w", perr)
+	}
+	return running, nil
+}
+
 // ---------------------------------------------------------------------------
 // Command wiring.
 // ---------------------------------------------------------------------------
@@ -494,33 +530,67 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 	})
 	releaseRegistryLock()
 
-	// Re-read the freshly-allocated serena rows so the fan-out sees the assigned
-	// ports + task names. A non-nil (possibly empty) Workspaces snapshot is
-	// required for the install: nil would drop the server's existing rows.
+	// Re-read the freshly-allocated serena rows so the PRE-reap predicates see
+	// the assigned ports + task names. This is the count used to decide willReap
+	// / willStart; the AUTHORITATIVE Workspaces snapshot the install fans out
+	// from is RE-READ under a re-acquired lock immediately before the install
+	// (finding #2 — captures any workspace registered during the released-lock
+	// window). A non-nil (possibly empty) slice is required: nil would drop the
+	// server's existing rows.
 	allocated := reg.SerenaEntries()
 	if allocated == nil {
 		allocated = []api.WorkspaceEntry{}
 	}
 
-	// willReap is the PRE-write predicate for "this migrate is a cutover that
-	// must reap-then-restart the supervisor". At least one candidate workspace
-	// → the install will (modulo stale-workspace pruning) materialize a
-	// runtime_spec row, so an OLD supervisor must be reaped before the write
-	// and a fresh one started after. Zero candidates (claim #7) → the install
-	// writes a no-runtime_spec intent an old supervisor reads fine; no reap, no
-	// restart. NOTE: even if every candidate is pruned as stale at install
-	// time (so the written intent ends up non-spec-bearing), once willReap
-	// fired we have committed to the reap → we ALWAYS start a successor
-	// afterward (recovery invariant: never leave no-supervisor-running).
-	willReap := len(allocated) > 0
+	// hasWorkspaces: at least one candidate workspace → the install will (modulo
+	// stale-workspace pruning) materialize a runtime_spec row, so the cutover
+	// must (re)start a supervisor to bring the dynamic-pool daemons live. Zero
+	// candidates (claim #7) → the install writes a no-runtime_spec intent an old
+	// supervisor reads fine; no reap, no restart.
+	hasWorkspaces := len(allocated) > 0
+
+	// supervisorRunning (finding #3): probe supervisor liveness BEFORE deciding
+	// to reap. A reap is only meaningful when a supervisor is actually running;
+	// when none is (the operator stopped it per §7.1 guidance, or a fresh host),
+	// the production reap stub fails loud on non-Windows, so reaping a
+	// non-existent supervisor would needlessly block an otherwise-valid migrate
+	// — the §7.1 install liveness gate is already satisfied (nothing to reap). We
+	// only probe when there are candidate workspaces (a zero-workspace install
+	// never reaps regardless). An undeterminable probe is treated conservatively
+	// as running so a needed reap is never silently skipped.
+	supervisorRunning := false
+	if hasWorkspaces {
+		running, probeErr := migrateSerenaSupervisorRunningFn()
+		if probeErr != nil {
+			fmt.Fprintf(w, "warning: could not determine whether a supervisor is running (%v); assuming one is and reaping it before the intent write.\n", probeErr)
+			supervisorRunning = true
+		} else {
+			supervisorRunning = running
+		}
+	}
+
+	// willReap is the PRE-write predicate for "reap a RUNNING supervisor before
+	// the spec-bearing write" (reap-first ordering). It requires BOTH a candidate
+	// workspace AND a running supervisor (finding #3): a cutover with no
+	// supervisor running skips the reap and goes straight to the intent write
+	// (the §7.1 gate passes — no supervisor), then starts one. willStart is the
+	// PRE-write predicate for "(re)start a supervisor after the write so the new
+	// dynamic-pool intent comes live": it fires whenever there are daemon rows,
+	// whether we reaped a running supervisor or there was none to reap. NOTE:
+	// even if every candidate is pruned as stale at install time (so the written
+	// intent ends up non-spec-bearing), once willReap fired we have committed to
+	// the reap → we ALWAYS start a successor afterward (recovery invariant: never
+	// leave no-supervisor-running).
+	willReap := hasWorkspaces && supervisorRunning
+	willStart := hasWorkspaces
 
 	// Fix 6 (PR #250 deeper review — consultant nice-to-have): warn the operator
 	// up front that a cutover briefly takes serena offline. The reap → intent
 	// write → supervisor-start window (tens of seconds: quiesce up to 30s + exit
 	// up to 5s + port-verify up to 10s + cold reconcile) is when the legacy
 	// serena daemons are gone and the dynamic-pool ones are not yet ready. Only
-	// printed for an actual cutover (willReap); a zero-workspace install never
-	// reaps and stays online.
+	// printed for an actual reap (willReap) — a zero-workspace install or a
+	// no-supervisor-running cutover never reaps an online daemon to take offline.
 	if willReap {
 		fmt.Fprintln(w, "NOTE: this cutover briefly takes serena OFFLINE while the supervisor is reaped and restarted (tens of seconds); clients reconnect once the new dynamic-pool daemons are reconcile-ready.")
 	}
@@ -571,6 +641,43 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 		}
 	}
 
+	// 7b. RE-READ the registry under a re-acquired lock immediately before the
+	//     install (finding #2 — bot PR #250). The lock was released after the
+	//     migrate's Save (Fix 3) so the multi-second reconcile + reap did not
+	//     block concurrent registry ops. During that window a concurrent
+	//     `mcphub workspace register --backend serena` may have committed a NEW
+	//     serena row. If we fed the install the pre-release `allocated` snapshot,
+	//     that workspace would be present in the registry + clients but ABSENT
+	//     from supervisor-intent.json — the router would resolve a workspace whose
+	//     daemon the restarted supervisor never spawns. So we reload, re-run port
+	//     allocation over the CURRENT rows (allocating a pool port for any
+	//     concurrently-added port-less row — allocateSerenaMigratePorts is
+	//     idempotent for rows that already carry one), Save, and read the
+	//     authoritative snapshot the install fans out from. The lock is held ONLY
+	//     across this fast reload/realloc/Save — never across the slow reap. This
+	//     re-acquire is fully nested and released before the install; the install
+	//     acquires a DISTINCT lock (supervisor-intent.json.lock), and the deferred
+	//     registry rollback re-acquires the registry lock only after this function
+	//     returns, so there is no double-hold / deadlock on any path.
+	//
+	//     A failure here lands AFTER the reap (the point of no return), so it is
+	//     handled exactly like an install failure: the recovery start restores a
+	//     running supervisor from the still-on-disk OLD intent when we reaped, and
+	//     the deferred outer stack restores the reconcile + registry.
+	installWorkspaces, reReadErr := reReadAndAllocateSerenaForInstall(regPath, dynamicManifest)
+	if reReadErr != nil {
+		err = fmt.Errorf("re-read registry under a re-acquired lock before the intent write: %w", reReadErr)
+		if willReap {
+			fmt.Fprintln(w, "registry re-read failed after the supervisor reap — restarting a supervisor to restore the prior (legacy) intent…")
+			if startErr := migrateSerenaStartFn(ctx, w); startErr != nil {
+				err = fmt.Errorf("%w; AND the recovery supervisor start ALSO failed: %v — "+
+					"NO supervisor is running and the prior (legacy) intent is on disk; "+
+					"run `mcphub supervise` from a shell to restore the legacy serena daemons", err, startErr)
+			}
+		}
+		return err
+	}
+
 	// 8. Write the spec-bearing intent. The §7.1 gate inside InstallParsedManifest
 	//    now passes NATURALLY — after the reap no supervisor holds the lock, so the
 	//    spec-bearing write is the safe state (the NEXT supervisor start is THIS
@@ -578,10 +685,11 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 	//    those are ALREADY undone and the deferred outer stack restores the
 	//    reconcile + registry. The dynamic-pool manifest carries no client_bindings
 	//    (the /serena/mcp router owns routing), so the only side effect is the
-	//    per-workspace supervisor-intent fan-out driven by opts.Workspaces.
+	//    per-workspace supervisor-intent fan-out driven by opts.Workspaces (the
+	//    finding-#2 re-read snapshot).
 	intentPath, ierr := installParsedManifestFn(ctx, api.NewAPI(), dynamicManifest, api.InstallParsedManifestOpts{
 		Writer:     w,
-		Workspaces: allocated,
+		Workspaces: installWorkspaces,
 	})
 	if ierr != nil {
 		// Recovery invariant: if we reaped (step 7) but the write failed, NO
@@ -620,16 +728,22 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 	if scanErr != nil {
 		// The intent IS committed; the verify re-read failed (a real Windows
 		// file-handle / ACL contention race right after the write). Do NOT roll
-		// back — the intent is the commit point. But if we reaped (willReap),
-		// NO supervisor is running and the just-committed intent must still be
-		// brought live: drive the recovery start so we never leave
+		// back — the intent is the commit point. But if there are daemon rows to
+		// bring live (willStart), the just-committed intent must still be
+		// reconciled: drive the recovery start so we never leave
 		// no-supervisor-running silently (the same invariant the ierr != nil
-		// path upholds). The start failing too surfaces BOTH errors with
+		// path upholds). The message names the reap only when we actually reaped
+		// (willReap); a no-supervisor-running cutover (finding #3) starts a fresh
+		// one without one. The start failing too surfaces BOTH errors with
 		// operator guidance.
 		err = fmt.Errorf("verify supervisor-intent runtime_spec rows after the committed write: %w "+
 			"(the intent is committed; the registry is NOT rolled back)", scanErr)
-		if willReap {
-			fmt.Fprintln(w, "intent-verify re-read failed after the supervisor reap — starting the supervisor anyway so the committed intent is reconciled…")
+		if willStart {
+			if willReap {
+				fmt.Fprintln(w, "intent-verify re-read failed after the supervisor reap — starting the supervisor anyway so the committed intent is reconciled…")
+			} else {
+				fmt.Fprintln(w, "intent-verify re-read failed after the committed write — starting the supervisor so the committed intent is reconciled…")
+			}
 			if startErr := migrateSerenaStartFn(ctx, w); startErr != nil {
 				err = fmt.Errorf("%w; AND the supervisor start ALSO failed: %v — "+
 					"the new serena dynamic-pool intent is committed on disk but no supervisor is running; "+
@@ -640,7 +754,7 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 		}
 		return err
 	}
-	if willReap {
+	if willStart {
 		fmt.Fprintln(w, "Starting the supervisor so it reconciles the new serena dynamic-pool intent…")
 		if startErr := migrateSerenaStartFn(ctx, w); startErr != nil {
 			// FAIL LOUD with guidance; intent committed, registry NOT rolled back (#2).
@@ -797,6 +911,18 @@ func snapshotSerenaRows(reg *api.Registry) []api.WorkspaceEntry {
 // never touched it. The surgical restore leaves every non-snapshotted serena
 // row (and every non-serena row) intact and reverts only the snapshotted keys.
 //
+// DUAL of that surgical guard (finding #1, bot PR #250): a snapshot key may have
+// DISAPPEARED from the reloaded registry — a concurrent
+// `mcphub workspace unregister --backend serena` removed the workspace during
+// the released-lock window. Blindly re-PutSerena-ing it would RESURRECT a row the
+// user just removed (and which the migrate no longer owns). So we restore a
+// snapshot key's prior port ONLY IF that workspace still exists in the reloaded
+// registry; a key gone from disk is SKIPPED (left unregistered). Restoring the
+// concurrent-register case (key present, migrate changed its port) and skipping
+// the concurrent-unregister case (key absent) are the two halves of keeping the
+// rollback consistent with whatever concurrent registry writes landed in the
+// window.
+//
 // The lock is always released before returning (no leaked lock).
 func restoreSerenaRegistryRelocking(regPath string, serenaSnapshot []api.WorkspaceEntry) error {
 	reg := api.NewRegistry(regPath)
@@ -808,12 +934,20 @@ func restoreSerenaRegistryRelocking(regPath string, serenaSnapshot []api.Workspa
 	if err := reg.Load(); err != nil {
 		return fmt.Errorf("restore registry: reload: %w", err)
 	}
-	// Upsert each snapshotted serena row back to its pre-migrate state. PutSerena
-	// is an in-place upsert keyed on (WorkspaceKey, @serena), so this reverts the
-	// port/task-name the migrate assigned to exactly the snapshotted keys and
-	// leaves every other row — non-serena rows AND concurrent new serena
-	// registrations not in the snapshot — untouched on the reloaded disk state.
+	// Upsert each snapshotted serena row back to its pre-migrate state, but ONLY
+	// if the workspace still exists in the reloaded registry. PutSerena is an
+	// in-place upsert keyed on (WorkspaceKey, @serena), so for a still-present key
+	// this reverts the port/task-name the migrate assigned; for a key that a
+	// concurrent unregister removed during the released-lock window, GetSerena
+	// reports absent and we SKIP it rather than resurrect the removed workspace.
+	// Every other row — non-serena rows AND concurrent new serena registrations
+	// not in the snapshot — stays untouched on the reloaded disk state.
 	for _, e := range serenaSnapshot {
+		if _, present := reg.GetSerena(e.WorkspaceKey); !present {
+			// Concurrently unregistered during the released-lock window — do not
+			// re-add a row the user removed and the migrate no longer owns.
+			continue
+		}
 		if err := reg.PutSerena(e); err != nil {
 			return fmt.Errorf("restore registry: put serena row for workspace_key %s: %w", e.WorkspaceKey, err)
 		}
@@ -855,6 +989,46 @@ func allocateSerenaMigratePorts(reg *api.Registry, dynamicManifest *config.Serve
 		}
 	}
 	return nil
+}
+
+// reReadAndAllocateSerenaForInstall re-acquires the registry lock, reloads the
+// CURRENT on-disk registry, re-runs the serena port allocation over it, Saves,
+// and returns the authoritative serena-row snapshot the install fans out from
+// (finding #2, bot PR #250). It exists because the migrate releases the registry
+// lock after its first Save (Fix 3) so the slow reconcile + reap do not block
+// concurrent registry ops; a concurrent `mcphub workspace register --backend
+// serena` may therefore have committed a NEW serena row during that window. By
+// reloading + re-allocating here (idempotent for rows that already carry a port,
+// so the originally-allocated rows are untouched and any concurrently-added
+// port-less row gets a pool port), the returned snapshot reflects every current
+// serena row — the install then writes a supervisor-intent daemon row for each,
+// so the registry/clients and the intent stay consistent.
+//
+// The lock is held ONLY across this fast reload/realloc/Save and released before
+// returning (no leaked lock), so it never overlaps the slow reap. The returned
+// slice is always non-nil (an empty registry yields an empty slice) because
+// InstallParsedManifest requires a non-nil Workspaces snapshot.
+func reReadAndAllocateSerenaForInstall(regPath string, dynamicManifest *config.ServerManifest) ([]api.WorkspaceEntry, error) {
+	reg := api.NewRegistry(regPath)
+	unlock, err := reg.Lock()
+	if err != nil {
+		return nil, fmt.Errorf("re-acquire registry lock: %w", err)
+	}
+	defer unlock()
+	if err := reg.Load(); err != nil {
+		return nil, fmt.Errorf("reload registry: %w", err)
+	}
+	if err := allocateSerenaMigratePorts(reg, dynamicManifest); err != nil {
+		return nil, err
+	}
+	if err := reg.Save(); err != nil {
+		return nil, fmt.Errorf("save registry after re-allocation: %w", err)
+	}
+	entries := reg.SerenaEntries()
+	if entries == nil {
+		entries = []api.WorkspaceEntry{}
+	}
+	return entries, nil
 }
 
 // serenaWorkspacePaths extracts the workspace paths for the audit body.
