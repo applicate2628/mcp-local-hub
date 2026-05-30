@@ -30,9 +30,17 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"mcp-local-hub/internal/api"
 )
+
+// migrateSerenaReconcileReadyTimeout bounds how long defaultMigrateSerenaStart
+// waits for the freshly-started supervisor to reach reconcile_ready=true via
+// IPC `status`. Matches the forward-migration step-14 budget
+// (internal/migration/journal.go:846, 30s) so a cold supervisor start +
+// first-reconcile pass has the same window across both cutover paths.
+const migrateSerenaReconcileReadyTimeout = 30 * time.Second
 
 // migrateSerenaUpgradeDeps builds the shared Windows v5UpgradeDeps used by both
 // the reap and the start seams.
@@ -99,11 +107,56 @@ func defaultMigrateSerenaReap(ctx context.Context, w io.Writer) error {
 	return nil
 }
 
+// defaultMigrateSerenaSupervisorHealthy is the Windows production health probe
+// for Fix 5's idempotency-recovery branch. It reports (true, nil) ONLY when a
+// supervisor is both running (holds supervisor.lock) AND reconcile-ready (IPC
+// `status` reports reconcile_ready=true). A not-running supervisor returns
+// (false, nil) → recovery. A running-but-not-ready or IPC-probe-failure returns
+// (false, err) → the caller treats it as a recovery situation (the redundant
+// start is benign: the supervisor singleton lock makes a duplicate `mcphub
+// supervise` exit, and the start's own readiness poll then confirms the live
+// supervisor).
+func defaultMigrateSerenaSupervisorHealthy() (bool, error) {
+	stateDir, err := api.DaemonStateDir()
+	if err != nil {
+		return false, fmt.Errorf("resolve state-dir for supervisor health probe: %w", err)
+	}
+	running, _, err := api.SupervisorRunningUnderStateDir(stateDir)
+	if err != nil {
+		// Liveness undeterminable (e.g. lock-probe error on a hardened host) →
+		// not confirmed healthy. Surface so the caller recovers.
+		return false, fmt.Errorf("probe supervisor liveness: %w", err)
+	}
+	if !running {
+		return false, nil
+	}
+	// Running — now require reconcile-ready via a single IPC `status` probe.
+	currentUser, err := currentWindowsUsername()
+	if err != nil {
+		return false, fmt.Errorf("resolve current user for reconcile-ready probe: %w", err)
+	}
+	ready, err := probeReconcileReadyOnce(superviseIPCPipePath(currentUser))
+	if err != nil {
+		return false, fmt.Errorf("probe supervisor reconcile-ready: %w", err)
+	}
+	return ready, nil
+}
+
 // defaultMigrateSerenaStart is the production §7.1 START driver on Windows. It
 // starts a fresh supervisor (detached) that cold-reconciles whatever intent is
-// on disk. The driver calls it AFTER its intent write commits (normal cutover)
-// OR as the recovery step when an intent write fails after a reap (the
-// still-on-disk OLD intent is restored).
+// on disk, then SELF-VERIFIES the cutover by polling supervisor IPC `status`
+// until reconcile_ready=true (Fix 4, PR #250 deeper review — consultant Q4/Q5).
+// The driver calls it AFTER its intent write commits (normal cutover) OR as the
+// recovery step when an intent write fails after a reap (the still-on-disk OLD
+// intent is restored).
+//
+// Without the readiness poll the start was fire-and-forget: a detached spawn
+// that returned success the instant CreateProcess succeeded, declaring the
+// cutover done before the new supervisor had read the intent or bound a single
+// daemon port. The poll makes the migrate fail loud (with operator guidance) if
+// the supervisor does not reconcile within the bounded window, so a hung or
+// crash-looping start surfaces as a migrate error rather than a silent
+// "complete" with clients pointed at a router that resolves to nothing.
 func defaultMigrateSerenaStart(_ context.Context, w io.Writer) error {
 	deps, _, err := migrateSerenaUpgradeDeps()
 	if err != nil {
@@ -112,6 +165,18 @@ func defaultMigrateSerenaStart(_ context.Context, w io.Writer) error {
 	if err := deps.StartSupervisor(deps.exePath); err != nil {
 		return err
 	}
-	fmt.Fprintln(w, "supervisor started; the current binary now reconciles the on-disk serena intent.")
+	fmt.Fprintln(w, "supervisor started; waiting for it to reconcile the on-disk serena intent…")
+
+	// Self-verify: poll IPC `status` until reconcile_ready=true (reuse the
+	// existing forward-migration readiness primitive). Bounded so a hung start
+	// cannot block forever.
+	if err := waitReconcileReadyViaIPC(deps.pipePath)(migrateSerenaReconcileReadyTimeout); err != nil {
+		return fmt.Errorf(
+			"supervisor started but did not reach reconcile-ready within %s: %w; "+
+				"the binary spawned a detached supervisor but it never reported reconcile_ready=true over IPC — "+
+				"check `mcphub status` and the supervisor-events.log, then run `mcphub supervise` from a shell to see startup diagnostics",
+			migrateSerenaReconcileReadyTimeout, err)
+	}
+	fmt.Fprintln(w, "supervisor reconcile-ready; the serena dynamic-pool daemons are reconciling on their allocated ports.")
 	return nil
 }

@@ -223,11 +223,24 @@ var migrateSerenaReapFn = defaultMigrateSerenaReap
 // write commits. The fresh supervisor cold-reconciles from the just-written
 // intent (re-materializing nil-spec serena rows before spawning). Default is
 // the per-platform production binding (defaultMigrateSerenaStart): Windows
-// drives the detached per-OS supervisor spawn; non-Windows fails loud. A
-// non-nil return AFTER the intent commit is fail-loud-with-guidance only — the
-// driver does NOT roll back the registry (the intent is the commit point;
-// rolling back would create split-state per finding #2). Tests override it.
+// drives the detached per-OS supervisor spawn THEN polls IPC reconcile-ready
+// (Fix 4); non-Windows fails loud. A non-nil return AFTER the intent commit is
+// fail-loud-with-guidance only — the driver does NOT roll back the registry
+// (the intent is the commit point; rolling back would create split-state per
+// finding #2). Tests override it.
 var migrateSerenaStartFn = defaultMigrateSerenaStart
+
+// migrateSerenaSupervisorHealthyFn reports whether a supervisor is currently
+// running AND reconcile-ready (Fix 5, PR #250 deeper review — consultant Q2).
+// The idempotency-recovery branch uses it to distinguish a GENUINE
+// already-migrated no-op (healthy supervisor → do nothing) from a recovery
+// situation (the dynamic-pool intent is committed but no reconcile-ready
+// supervisor is running → drive the start without re-reaping / re-writing).
+// Default is the per-platform binding (defaultMigrateSerenaSupervisorHealthy):
+// it checks the supervisor lock cross-platform and, on Windows, additionally
+// probes IPC reconcile-ready; a (false, err) return means health could not be
+// confirmed, which the caller treats as a recovery situation. Tests override it.
+var migrateSerenaSupervisorHealthyFn = defaultMigrateSerenaSupervisorHealthy
 
 // ---------------------------------------------------------------------------
 // Command wiring.
@@ -334,7 +347,37 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 		return fmt.Errorf("inspect supervisor-intent.json for an existing serena dynamic-pool migration: %w", amErr)
 	}
 	if alreadyMigrated {
-		fmt.Fprintln(w, "serena is already migrated to the dynamic pool (runtime intent already carries the workspace-scoped serena descriptor); nothing to do.")
+		// The committed intent is ALREADY dynamic-pool. Fix 5 (PR #250 deeper
+		// review — consultant Q2): "already migrated by runtime" is NOT
+		// unconditionally a no-op. Two sub-cases:
+		//
+		//   (i)  supervisor running + reconcile-ready → GENUINE no-op. Do not
+		//        re-reap / re-write / bounce a healthy supervisor.
+		//   (ii) supervisor NOT running / not reconcile-ready → this is a
+		//        RECOVERY situation: a prior run committed the dynamic-pool
+		//        intent then FAILED the start (Fix 4's readiness poll failed,
+		//        or the host crashed). Re-running would otherwise no-op and
+		//        leave the operator stuck — clients on the /serena/mcp router,
+		//        no daemons. Drive the start (with the Fix 4 readiness poll) so
+		//        the re-run brings the already-committed intent live. Do NOT
+		//        re-reap or re-write: the intent is already correct; only the
+		//        supervisor is missing.
+		healthy, hErr := migrateSerenaSupervisorHealthyFn()
+		if hErr != nil {
+			fmt.Fprintf(w, "warning: could not determine supervisor health (%v); treating as a recovery situation and starting the supervisor.\n", hErr)
+		}
+		if healthy {
+			fmt.Fprintln(w, "serena is already migrated to the dynamic pool (runtime intent already carries the workspace-scoped serena descriptor) and the supervisor is running and reconcile-ready; nothing to do.")
+			return nil
+		}
+		fmt.Fprintln(w, "serena is already migrated to the dynamic pool but no reconcile-ready supervisor is running — recovering by starting the supervisor against the already-committed intent (no re-reap, no re-write)…")
+		if startErr := migrateSerenaStartFn(ctx, w); startErr != nil {
+			return fmt.Errorf(
+				"serena dynamic-pool intent is already committed but the recovery supervisor start failed: %w; "+
+					"the intent on disk is correct (no re-reap / re-write needed) — "+
+					"run `mcphub supervise` from a shell so the current binary reconciles it", startErr)
+		}
+		fmt.Fprintln(w, "recovery complete: the supervisor is reconciling the already-committed serena dynamic-pool intent.")
 		return nil
 	}
 
@@ -348,8 +391,13 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 	}
 
 	// 4. Acquire the registry flock; snapshot serena workspaces. The flock is
-	//    held across the whole snapshot → install → (rollback) sequence so no
-	//    concurrent writer interleaves.
+	//    held ONLY across the alloc → Save mutation (Fix 3, PR #250 deeper
+	//    review): the reconcile + reap that follow run for tens of seconds
+	//    (quiesce 30s + exit 5s + port-verify 10s) and touch NOTHING in the
+	//    registry, so holding the lock across them needlessly blocks every
+	//    concurrent `mcphub` registry op (install/register) for that whole
+	//    window. We release the lock the instant Save returns (below). The
+	//    registry rollback closure re-acquires the lock for its restore.
 	regPath, err := api.DefaultRegistryPath()
 	if err != nil {
 		return err
@@ -359,7 +407,21 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	// releaseRegistryLock is the single idempotent unlock path. It is called
+	// explicitly right after the registry Save (the only registry mutation)
+	// and is also deferred as a belt-and-suspenders guard for the error paths
+	// BEFORE that explicit release. Idempotency (regLockReleased guard) means
+	// the deferred call is a harmless no-op once the explicit release fired —
+	// no double-unlock.
+	regLockReleased := false
+	releaseRegistryLock := func() {
+		if regLockReleased {
+			return
+		}
+		regLockReleased = true
+		unlock()
+	}
+	defer releaseRegistryLock()
 	if err := reg.Load(); err != nil {
 		return err
 	}
@@ -403,19 +465,34 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 		}
 	}()
 
-	// 5. Allocate a serena pool port per workspace + Save, pushing the registry
-	//    undo BEFORE the mutation. Snapshot the rows first so the undo restores
-	//    the exact prior rows and re-persists them under the still-held lock.
-	//    Zero workspaces (claim #7) is legitimate: the loop is a no-op, Save is
-	//    a no-op-equivalent, and the install proceeds with zero daemon rows.
-	portsBefore := snapshotSerenaRegistry(reg)
+	// 5. Allocate a serena pool port per workspace + Save. Snapshot the serena
+	//    rows first so the undo restores the exact prior serena state. Zero
+	//    workspaces (claim #7) is legitimate: the loop is a no-op, Save is a
+	//    no-op-equivalent, and the install proceeds with zero daemon rows.
+	serenaBefore := snapshotSerenaRows(reg)
 	if err := allocateSerenaMigratePorts(reg, dynamicManifest); err != nil {
 		return err
 	}
-	rollback = append(rollback, func() error { return restoreSerenaRegistry(reg, portsBefore) })
 	if err := reg.Save(); err != nil {
+		// Save is atomic (tempfile + rename): a failure leaves the prior
+		// on-disk registry intact, so there is nothing to roll back. The
+		// deferred releaseRegistryLock frees the still-held lock. Crucially we
+		// do NOT push the relocking undo here — it would deadlock trying to
+		// re-acquire the lock this same goroutine still holds.
 		return err
 	}
+	// The registry mutation is committed on disk. NOW push the relocking undo
+	// (it re-acquires the lock itself, so it must run only after we release)
+	// and release the lock (Fix 3). Nothing after this point (reconcile, reap,
+	// intent write, start) touches the registry, so holding the lock across the
+	// multi-second reap would only block concurrent registry ops. Ordering is
+	// load-bearing: releaseRegistryLock MUST run before any deferred rollback
+	// fires (it does — the explicit call below executes during the function
+	// body, the deferred rollback runs after the body returns).
+	rollback = append(rollback, func() error {
+		return restoreSerenaRegistryRelocking(regPath, serenaBefore)
+	})
+	releaseRegistryLock()
 
 	// Re-read the freshly-allocated serena rows so the fan-out sees the assigned
 	// ports + task names. A non-nil (possibly empty) Workspaces snapshot is
@@ -436,6 +513,17 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 	// fired we have committed to the reap → we ALWAYS start a successor
 	// afterward (recovery invariant: never leave no-supervisor-running).
 	willReap := len(allocated) > 0
+
+	// Fix 6 (PR #250 deeper review — consultant nice-to-have): warn the operator
+	// up front that a cutover briefly takes serena offline. The reap → intent
+	// write → supervisor-start window (tens of seconds: quiesce up to 30s + exit
+	// up to 5s + port-verify up to 10s + cold reconcile) is when the legacy
+	// serena daemons are gone and the dynamic-pool ones are not yet ready. Only
+	// printed for an actual cutover (willReap); a zero-workspace install never
+	// reaps and stays online.
+	if willReap {
+		fmt.Fprintln(w, "NOTE: this cutover briefly takes serena OFFLINE while the supervisor is reaped and restarted (tens of seconds); clients reconnect once the new dynamic-pool daemons are reconcile-ready.")
+	}
 
 	// 6. Client-reconcile to the constant /serena/mcp router URL — BEFORE the
 	//    reap, so legacy 9121 is still up and a per-client failure leaves that
@@ -530,9 +618,27 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 	//     or starts the supervisor by hand.
 	specBearing, scanErr := intentHasRuntimeSpecRow(intentPath)
 	if scanErr != nil {
-		// The intent IS committed; surface the verify failure but do NOT roll back.
-		return fmt.Errorf("verify supervisor-intent runtime_spec rows after the committed write: %w "+
-			"(the intent is committed; start the supervisor with `mcphub supervise` if it is not already running)", scanErr)
+		// The intent IS committed; the verify re-read failed (a real Windows
+		// file-handle / ACL contention race right after the write). Do NOT roll
+		// back — the intent is the commit point. But if we reaped (willReap),
+		// NO supervisor is running and the just-committed intent must still be
+		// brought live: drive the recovery start so we never leave
+		// no-supervisor-running silently (the same invariant the ierr != nil
+		// path upholds). The start failing too surfaces BOTH errors with
+		// operator guidance.
+		err = fmt.Errorf("verify supervisor-intent runtime_spec rows after the committed write: %w "+
+			"(the intent is committed; the registry is NOT rolled back)", scanErr)
+		if willReap {
+			fmt.Fprintln(w, "intent-verify re-read failed after the supervisor reap — starting the supervisor anyway so the committed intent is reconciled…")
+			if startErr := migrateSerenaStartFn(ctx, w); startErr != nil {
+				err = fmt.Errorf("%w; AND the supervisor start ALSO failed: %v — "+
+					"the new serena dynamic-pool intent is committed on disk but no supervisor is running; "+
+					"run `mcphub supervise` from a shell so the current binary reconciles it", err, startErr)
+			}
+		} else {
+			err = fmt.Errorf("%w — start the supervisor with `mcphub supervise` if it is not already running", err)
+		}
+		return err
 	}
 	if willReap {
 		fmt.Fprintln(w, "Starting the supervisor so it reconciles the new serena dynamic-pool intent…")
@@ -659,20 +765,51 @@ func printSerenaReconcileReport(w io.Writer, report *api.MigrateReport) {
 // Registry snapshot/restore + port allocation (the OUTER §D.3 rollback scope).
 // ---------------------------------------------------------------------------
 
-// snapshotSerenaRegistry returns a copy of the registry's workspace rows for
-// rollback restore. The caller holds the registry flock across the whole
-// snapshot → mutate → save → restore sequence, so no concurrent writer can
-// interleave; the only state the rollback reconstructs is this process's own
-// port allocations.
-func snapshotSerenaRegistry(reg *api.Registry) []api.WorkspaceEntry {
-	return append([]api.WorkspaceEntry(nil), reg.Workspaces...)
+// snapshotSerenaRows returns a copy of just the registry's serena rows for the
+// rollback restore. Only serena rows are snapshotted because the migrate only
+// mutates serena rows (allocateSerenaMigratePorts) — the relocking restore
+// reloads the rest of the registry from disk so concurrent non-serena writes
+// during the (Fix 3) unlocked window survive a rollback.
+func snapshotSerenaRows(reg *api.Registry) []api.WorkspaceEntry {
+	return append([]api.WorkspaceEntry(nil), reg.SerenaEntries()...)
 }
 
-// restoreSerenaRegistry resets the registry rows to the snapshot and persists.
-func restoreSerenaRegistry(reg *api.Registry, snapshot []api.WorkspaceEntry) error {
-	reg.Workspaces = append([]api.WorkspaceEntry(nil), snapshot...)
+// restoreSerenaRegistryRelocking is the registry rollback compensator. Because
+// Fix 3 releases the registry lock right after the migrate's Save (so the
+// multi-second reconcile + reap do not block concurrent registry ops), this
+// restore must RE-ACQUIRE the lock itself. It then RELOADS the current on-disk
+// registry (preserving any concurrent writer's non-serena rows and serena rows
+// this migrate did not touch) and resets the serena rows to the pre-migrate
+// snapshot: every serena row currently on disk is dropped and the snapshot's
+// serena rows are re-added, reverting exactly the port allocations this migrate
+// made. The lock is always released before returning (no leaked lock).
+func restoreSerenaRegistryRelocking(regPath string, serenaSnapshot []api.WorkspaceEntry) error {
+	reg := api.NewRegistry(regPath)
+	unlock, err := reg.Lock()
+	if err != nil {
+		return fmt.Errorf("restore registry: re-acquire lock: %w", err)
+	}
+	defer unlock()
+	if err := reg.Load(); err != nil {
+		return fmt.Errorf("restore registry: reload: %w", err)
+	}
+	// Drop every current serena row, then re-add the pre-migrate snapshot
+	// serena rows. Non-serena rows are preserved from the reloaded disk state
+	// (concurrent non-serena writes during the unlocked window survive); the
+	// migrate is the only serena writer in practice, so dropping current
+	// serena rows + restoring the snapshot reverts exactly this migrate's
+	// allocations.
+	rebuilt := make([]api.WorkspaceEntry, 0, len(reg.Workspaces)+len(serenaSnapshot))
+	for _, e := range reg.Workspaces {
+		if e.Language == api.SerenaLanguageSentinel {
+			continue
+		}
+		rebuilt = append(rebuilt, e)
+	}
+	rebuilt = append(rebuilt, serenaSnapshot...)
+	reg.Workspaces = rebuilt
 	if err := reg.Save(); err != nil {
-		return fmt.Errorf("restore registry: %w", err)
+		return fmt.Errorf("restore registry: save: %w", err)
 	}
 	return nil
 }

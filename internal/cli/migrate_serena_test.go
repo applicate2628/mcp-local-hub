@@ -10,6 +10,9 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/gofrs/flock"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/config"
@@ -196,6 +199,16 @@ func stubStart(t *testing.T, fn func(ctx context.Context, w io.Writer) error) fu
 	orig := migrateSerenaStartFn
 	migrateSerenaStartFn = fn
 	return func() { migrateSerenaStartFn = orig }
+}
+
+// stubSupervisorHealthy overrides migrateSerenaSupervisorHealthyFn for the test
+// scope (Fix 5 idempotency-recovery health probe). The default impl probes the
+// real supervisor lock / IPC; tests inject a deterministic verdict.
+func stubSupervisorHealthy(t *testing.T, fn func() (bool, error)) func() {
+	t.Helper()
+	orig := migrateSerenaSupervisorHealthyFn
+	migrateSerenaSupervisorHealthyFn = fn
+	return func() { migrateSerenaSupervisorHealthyFn = orig }
 }
 
 // seedSerenaWorkspace registers one serena workspace (sentinel row) WITH a port,
@@ -392,6 +405,11 @@ func TestMigrateSerena_EmptyRegistry_InstallsZeroWorkspaceIntent(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "zero daemon rows") {
 		t.Errorf("output should explain the zero-workspace install; got %q", buf.String())
+	}
+	// Fix 6: a NON-cutover (zero workspaces, no reap) must NOT print the outage
+	// warning — the legacy daemons stay online.
+	if strings.Contains(buf.String(), "briefly takes serena OFFLINE") {
+		t.Errorf("a zero-workspace install must NOT print the cutover outage warning; got %q", buf.String())
 	}
 }
 
@@ -615,6 +633,10 @@ func TestMigrateSerena_DrivesSupervisorRestart(t *testing.T) {
 		if !intentSpecBearingAtStart {
 			t.Errorf("the start must fire AFTER the spec-bearing intent write (intent not present/spec-bearing at start time)")
 		}
+		// Fix 6: a real cutover prints the operator outage NOTE up front.
+		if !strings.Contains(buf.String(), "briefly takes serena OFFLINE") {
+			t.Errorf("Fix 6: a cutover must print the operator outage warning; got %q", buf.String())
+		}
 	})
 
 	t.Run("fail-loud when the prior supervisor cannot be reaped — intent NOT written", func(t *testing.T) {
@@ -703,6 +725,84 @@ func TestMigrateSerena_ReapViaFakeDeps(t *testing.T) {
 	}
 	if stuck.renameAsideCalled || stuck.startCalled {
 		t.Errorf("the reap path must never rename or start (rename=%v start=%v)", stuck.renameAsideCalled, stuck.startCalled)
+	}
+}
+
+// TestMigrateSerena_ReapVerifiesPortsOnGracefulExit is the Fix 1 BLOCKER
+// regression guard (PR #250 deeper review). The supervisor's handleExit writes
+// the graceful-exit success ACK BEFORE it tears down its daemon children, and a
+// job_protection:false child (PR #242 fallback) can outlive the supervisor exit
+// holding its TCP port. So a CLEAN graceful exit (no force-kill) must STILL run
+// VerifyPortsUnbound — and if a port stays bound, the reap must fail loud so the
+// migrate aborts before the spec-bearing intent write (legacy stays
+// recoverable). Before Fix 1 the verify ran only on the force-kill path, so a
+// graceful exit with a lingering port-holding child returned nil and the caller
+// started a new supervisor straight into EADDRINUSE.
+func TestMigrateSerena_ReapVerifiesPortsOnGracefulExit(t *testing.T) {
+	// Clean quiesce + clean exit ACK → the force-kill fallback never fires.
+	graceful := &fakeUpgradeDeps{
+		quiesceResult: api.IPCResponse{ID: 1, OK: true, Result: map[string]any{"drained": 0.0, "still_running": []any{}}, Final: true},
+		exitResult:    api.IPCResponse{ID: 2, OK: true, Result: "exit-acked"},
+	}
+	verifyCalled := false
+	verifyPorts := []int{}
+	err := ReapSupervisorForRestart(context.Background(), ReapOpts{
+		PipePath:      "fake-pipe",
+		Deps:          graceful,
+		ExpectedPorts: []int{9150, 9151},
+		VerifyPortsUnbound: func(ports []int, _ time.Duration) error {
+			verifyCalled = true
+			verifyPorts = append(verifyPorts, ports...)
+			// Model a job_protection:false child still holding 9150 after the
+			// graceful exit ACK.
+			return errors.New("port 9150 not released within 10s: listen tcp 127.0.0.1:9150: bind: address already in use")
+		},
+	})
+	if err == nil {
+		t.Fatal("a graceful exit whose daemon ports stay bound must make the reap fail loud (Fix 1: verify runs on BOTH paths)")
+	}
+	if !strings.Contains(err.Error(), "port-unbound verification failed after supervisor reap") {
+		t.Errorf("error should name the post-reap port-verify failure; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "address already in use") {
+		t.Errorf("error should preserve the underlying bind failure; got %v", err)
+	}
+	// The verify MUST have run even though force-kill never did (this is the fix).
+	if !verifyCalled {
+		t.Fatal("VerifyPortsUnbound must run on the CLEAN graceful-exit path (Fix 1); it did not")
+	}
+	if graceful.forceKillCalled {
+		t.Error("a clean graceful exit must NOT force-kill — the verify must run on the graceful path WITHOUT a force-kill")
+	}
+	if len(verifyPorts) != 2 || verifyPorts[0] != 9150 || verifyPorts[1] != 9151 {
+		t.Errorf("verify must receive the OLD on-disk ExpectedPorts; got %v", verifyPorts)
+	}
+	if graceful.renameAsideCalled || graceful.startCalled {
+		t.Errorf("the reap path must never rename or start (rename=%v start=%v)", graceful.renameAsideCalled, graceful.startCalled)
+	}
+
+	// Counterpart: graceful exit + ports confirmed unbound → the reap succeeds.
+	cleanGraceful := &fakeUpgradeDeps{
+		quiesceResult: api.IPCResponse{ID: 1, OK: true, Result: map[string]any{"drained": 0.0, "still_running": []any{}}, Final: true},
+		exitResult:    api.IPCResponse{ID: 2, OK: true, Result: "exit-acked"},
+	}
+	cleanVerifyCalled := false
+	if err := ReapSupervisorForRestart(context.Background(), ReapOpts{
+		PipePath:      "fake-pipe",
+		Deps:          cleanGraceful,
+		ExpectedPorts: []int{9150},
+		VerifyPortsUnbound: func(_ []int, _ time.Duration) error {
+			cleanVerifyCalled = true
+			return nil
+		},
+	}); err != nil {
+		t.Fatalf("graceful exit with ports confirmed unbound must succeed: %v", err)
+	}
+	if !cleanVerifyCalled {
+		t.Error("the verify must run on the graceful path even when it passes")
+	}
+	if cleanGraceful.forceKillCalled {
+		t.Error("a clean graceful exit must not force-kill")
 	}
 }
 
@@ -928,14 +1028,22 @@ func TestMigrateSerena_AlreadyMigratedByRuntimeIntent_Idempotent(t *testing.T) {
 	})()
 	defer stubReap(t, func(ctx context.Context, w io.Writer) error { reapInvoked = true; return nil })()
 	defer stubStart(t, func(ctx context.Context, w io.Writer) error { startInvoked = true; return nil })()
+	// Fix 5: a GENUINE no-op requires the supervisor to be running AND
+	// reconcile-ready. Stub the health probe healthy so this stays a no-op test
+	// (the not-healthy path is the recovery test below).
+	healthProbed := false
+	defer stubSupervisorHealthy(t, func() (bool, error) { healthProbed = true; return true, nil })()
 
 	var buf bytes.Buffer
 	if err := runMigrateSerenaDynamicPool(context.Background(), &buf); err != nil {
 		t.Fatalf("already-migrated-by-runtime must be a no-op exit-0; got error: %v", err)
 	}
 	if installInvoked || reconcileInvoked || reapInvoked || startInvoked {
-		t.Errorf("runtime-already-migrated must not install/reconcile/reap/start (install=%v reconcile=%v reap=%v start=%v)",
+		t.Errorf("runtime-already-migrated (healthy supervisor) must not install/reconcile/reap/start (install=%v reconcile=%v reap=%v start=%v)",
 			installInvoked, reconcileInvoked, reapInvoked, startInvoked)
+	}
+	if !healthProbed {
+		t.Errorf("the idempotency branch must probe supervisor health to decide no-op vs recovery")
 	}
 	if !strings.Contains(buf.String(), "already migrated") || !strings.Contains(buf.String(), "runtime intent") {
 		t.Errorf("output should explain the runtime-state no-op; got %q", buf.String())
@@ -947,6 +1055,150 @@ func TestMigrateSerena_AlreadyMigratedByRuntimeIntent_Idempotent(t *testing.T) {
 	}
 	if !bytes.Equal(before, after) {
 		t.Errorf("runtime-already-migrated must not rewrite the committed intent")
+	}
+}
+
+// TestMigrateSerena_AlreadyMigratedByRuntime_NoHealthySupervisor_Recovers is the
+// Fix 5 recovery guard (PR #250 deeper review — consultant Q2). A prior run
+// committed the dynamic-pool intent then FAILED the start (Fix 4's readiness
+// poll failed, or the host crashed): the committed intent is dynamic-pool but no
+// reconcile-ready supervisor is running. Re-running must NOT silently no-op
+// (which would leave the operator stuck — clients on the router, no daemons); it
+// must drive the start to bring the already-committed intent live. Crucially it
+// must NOT re-reap or re-write — the intent is already correct.
+func TestMigrateSerena_AlreadyMigratedByRuntime_NoHealthySupervisor_Recovers(t *testing.T) {
+	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	// CATALOG is still legacy — only the runtime intent says dynamic-pool.
+	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+
+	// Seed a committed dynamic-pool intent (the prior run's write that survived
+	// even though the start failed).
+	ws := t.TempDir()
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	migratedIntent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName:  api.SerenaTaskNameForWorkspace(ws),
+			Server:    "serena",
+			Workspace: ws,
+			Command:   "mcphub",
+			Args:      []string{"daemon-serena-proxy", "--workspace", ws},
+			Port:      9150,
+			RuntimeSpec: &api.DaemonRuntimeSpec{
+				SpecVersion:   api.DaemonRuntimeSpecVersion,
+				ChildCommand:  "go",
+				ChildArgs:     []string{"--project", ws, "--context", "codex"},
+				UpstreamPort:  9151,
+				ExternalPort:  9150,
+				WorkspacePath: ws,
+			},
+		}},
+	}
+	if err := api.WriteStateFileAtomic(intentPath, migratedIntent); err != nil {
+		t.Fatalf("seed already-migrated runtime intent: %v", err)
+	}
+	before, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read seeded intent: %v", err)
+	}
+
+	installInvoked, reconcileInvoked, reapInvoked, startInvoked := false, false, false, false
+	defer stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
+		installInvoked = true
+		return "", nil
+	})()
+	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+		reconcileInvoked = true
+		return &api.MigrateReport{}, nil
+	})()
+	defer stubReap(t, func(ctx context.Context, w io.Writer) error { reapInvoked = true; return nil })()
+	defer stubStart(t, func(ctx context.Context, w io.Writer) error { startInvoked = true; return nil })()
+	// Fix 5: NO reconcile-ready supervisor is running → recovery, not no-op.
+	defer stubSupervisorHealthy(t, func() (bool, error) { return false, nil })()
+
+	var buf bytes.Buffer
+	if err := runMigrateSerenaDynamicPool(context.Background(), &buf); err != nil {
+		t.Fatalf("recovery re-run must succeed; got error: %v (out=%s)", err, buf.String())
+	}
+	// THE Fix 5 guard: the start MUST fire (recovery), but NOT the reap or the
+	// install/intent write (the intent is already correct).
+	if !startInvoked {
+		t.Error("recovery: the start must fire to bring the already-committed intent live")
+	}
+	if reapInvoked {
+		t.Error("recovery must NOT re-reap (the intent is already correct; only the supervisor is missing)")
+	}
+	if installInvoked {
+		t.Error("recovery must NOT re-write the intent (it is already dynamic-pool)")
+	}
+	if reconcileInvoked {
+		t.Error("recovery must NOT re-reconcile clients (they are already on the router)")
+	}
+	if !strings.Contains(buf.String(), "recovering by starting the supervisor") {
+		t.Errorf("output should explain the recovery; got %q", buf.String())
+	}
+	// The committed intent is byte-identical (no re-write).
+	after, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("re-read intent: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Errorf("recovery must not rewrite the already-committed intent")
+	}
+}
+
+// TestMigrateSerena_AlreadyMigratedByRuntime_HealthProbeError_Recovers proves
+// the conservative polarity of Fix 5: when supervisor health cannot be
+// CONFIRMED (the probe errors — e.g. a lock-probe failure on a hardened host),
+// the driver treats it as a recovery situation and drives the start rather than
+// silently no-op'ing (which could strand a stuck/dead supervisor). The redundant
+// start is benign: the supervisor singleton lock makes a duplicate exit, and the
+// start's own readiness poll confirms any live supervisor.
+func TestMigrateSerena_AlreadyMigratedByRuntime_HealthProbeError_Recovers(t *testing.T) {
+	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+
+	ws := t.TempDir()
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	if err := api.WriteStateFileAtomic(intentPath, &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName:  api.SerenaTaskNameForWorkspace(ws),
+			Server:    "serena",
+			Workspace: ws,
+			Port:      9150,
+			RuntimeSpec: &api.DaemonRuntimeSpec{
+				SpecVersion:   api.DaemonRuntimeSpecVersion,
+				ChildCommand:  "go",
+				ExternalPort:  9150,
+				UpstreamPort:  9151,
+				WorkspacePath: ws,
+			},
+		}},
+	}); err != nil {
+		t.Fatalf("seed runtime intent: %v", err)
+	}
+
+	reapInvoked, startInvoked := false, false
+	defer stubReap(t, func(ctx context.Context, w io.Writer) error { reapInvoked = true; return nil })()
+	defer stubStart(t, func(ctx context.Context, w io.Writer) error { startInvoked = true; return nil })()
+	// Health probe ERRORS → not confirmed healthy → recovery.
+	defer stubSupervisorHealthy(t, func() (bool, error) {
+		return false, errors.New("probe supervisor liveness: flock probe failed")
+	})()
+
+	var buf bytes.Buffer
+	if err := runMigrateSerenaDynamicPool(context.Background(), &buf); err != nil {
+		t.Fatalf("health-probe-error recovery must succeed; got error: %v (out=%s)", err, buf.String())
+	}
+	if !startInvoked {
+		t.Error("a health-probe error must drive the recovery start (conservative polarity)")
+	}
+	if reapInvoked {
+		t.Error("recovery must not re-reap")
+	}
+	if !strings.Contains(buf.String(), "could not determine supervisor health") {
+		t.Errorf("output should surface the health-probe uncertainty; got %q", buf.String())
 	}
 }
 
@@ -1090,6 +1342,159 @@ func TestMigrateSerena_StartFailureAfterIntentCommit_DoesNotRollBackRegistry(t *
 	// commit point — disarming is what prevents the split-state).
 	if restoreReconcileCalled {
 		t.Errorf("the reconcile-restore must NOT fire after the intent commit (the outer rollback is disarmed)")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 11. (Fix 3) The registry flock is released BEFORE the multi-second reap, so a
+//     concurrent registry op is not blocked across the reap window. The reap
+//     stub TryLocks the registry lock and asserts it succeeds (proving the
+//     migrate already released it after its Save).
+// ---------------------------------------------------------------------------
+
+func TestMigrateSerena_RegistryLockReleasedBeforeReap(t *testing.T) {
+	_, manifestDir := migrateSerenaTestEnv(t)
+	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+	ws := t.TempDir()
+	seedSerenaWorkspaceNoPort(t, ws) // force an allocation (a real registry mutation under the lock)
+
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		t.Fatalf("registry path: %v", err)
+	}
+
+	lockFreeAtReap := false
+	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+		return &api.MigrateReport{}, nil
+	})()
+	defer stubReap(t, func(ctx context.Context, w io.Writer) error {
+		// TryLock the SAME lock file the registry uses (Registry.Lock locks
+		// path + ".lock"). If the migrate still held it across the reap (Fix 3
+		// regression), TryLock returns false. A separate flock handle from this
+		// same process conflicts with the migrate's handle, so this is a real
+		// "is the lock free right now" probe.
+		fl := flock.New(regPath + ".lock")
+		got, lerr := fl.TryLock()
+		if lerr != nil {
+			t.Errorf("reap-time TryLock errored: %v", lerr)
+			return nil
+		}
+		if got {
+			lockFreeAtReap = true
+			_ = fl.Unlock()
+		}
+		return nil
+	})()
+	defer stubStart(t, func(ctx context.Context, w io.Writer) error { return nil })()
+
+	var buf bytes.Buffer
+	if err := runMigrateSerenaDynamicPool(context.Background(), &buf); err != nil {
+		t.Fatalf("migrate must succeed: %v (out=%s)", err, buf.String())
+	}
+	if !lockFreeAtReap {
+		t.Fatal("Fix 3: the registry flock must be RELEASED before the reap fires (it was still held)")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 12. (Fix 2) The post-commit intent-verify re-read (intentHasRuntimeSpecRow)
+//     fails with a real error AFTER a cutover reap+write. The driver must still
+//     drive the recovery start (never leave no-supervisor-running silently)
+//     rather than returning with the intent committed but no supervisor.
+// ---------------------------------------------------------------------------
+
+func TestMigrateSerena_PostCommitVerifyError_DrivesRecoveryStart(t *testing.T) {
+	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+	ws := t.TempDir()
+	seedSerenaWorkspace(t, ws)
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+
+	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+		return &api.MigrateReport{}, nil
+	})()
+	defer stubReap(t, func(ctx context.Context, w io.Writer) error { return nil })()
+
+	// Use the REAL install so the intent is genuinely committed; then corrupt the
+	// committed intent file so the post-commit verify re-read (ReadSupervisorIntent)
+	// fails — modeling the Windows file-handle/ACL contention race right after the
+	// write. We do this by overriding the install seam to call the real install
+	// THEN overwrite the file with non-JSON bytes.
+	startCalled := false
+	defer stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
+		path, ierr := a.InstallParsedManifest(ctx, m, opts)
+		if ierr != nil {
+			return "", ierr
+		}
+		// Corrupt the just-committed intent so the verify re-read errors (NOT
+		// os.ErrNotExist — a genuine parse failure).
+		if werr := os.WriteFile(path, []byte("{not-valid-json"), 0o600); werr != nil {
+			t.Fatalf("corrupt committed intent for verify-error model: %v", werr)
+		}
+		return path, nil
+	})()
+	defer stubStart(t, func(ctx context.Context, w io.Writer) error { startCalled = true; return nil })()
+
+	var buf bytes.Buffer
+	err := runMigrateSerenaDynamicPool(context.Background(), &buf)
+	if err == nil {
+		t.Fatal("a post-commit verify-read error must surface as a migrate error")
+	}
+	if !strings.Contains(err.Error(), "verify supervisor-intent runtime_spec rows after the committed write") {
+		t.Errorf("error should name the post-commit verify failure; got %v", err)
+	}
+	// THE Fix 2 guard: even though the verify re-read failed, the recovery start
+	// MUST fire (a supervisor was reaped; the committed intent must be brought
+	// live) so we never leave no-supervisor-running silently.
+	if !startCalled {
+		t.Error("Fix 2: the verify-error path must drive the recovery start when a cutover reap occurred")
+	}
+	if !strings.Contains(buf.String(), "intent-verify re-read failed after the supervisor reap") {
+		t.Errorf("output should explain the verify-error recovery; got %q", buf.String())
+	}
+	// The intent file is still on disk (committed, then corrupted by the model) —
+	// the registry must NOT have been rolled back (it is the commit point).
+	if _, statErr := os.Stat(intentPath); statErr != nil {
+		t.Errorf("the committed intent file must remain on disk: %v", statErr)
+	}
+}
+
+// TestMigrateSerena_PostCommitVerifyError_RecoveryStartAlsoFails surfaces BOTH
+// errors when the verify-error recovery start ALSO fails.
+func TestMigrateSerena_PostCommitVerifyError_RecoveryStartAlsoFails(t *testing.T) {
+	_, manifestDir := migrateSerenaTestEnv(t)
+	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+	ws := t.TempDir()
+	seedSerenaWorkspace(t, ws)
+
+	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+		return &api.MigrateReport{}, nil
+	})()
+	defer stubReap(t, func(ctx context.Context, w io.Writer) error { return nil })()
+	defer stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
+		path, ierr := a.InstallParsedManifest(ctx, m, opts)
+		if ierr != nil {
+			return "", ierr
+		}
+		if werr := os.WriteFile(path, []byte("{not-valid-json"), 0o600); werr != nil {
+			t.Fatalf("corrupt committed intent: %v", werr)
+		}
+		return path, nil
+	})()
+	defer stubStart(t, func(ctx context.Context, w io.Writer) error {
+		return errors.New("schtasks /Run failed: supervisor task missing")
+	})()
+
+	var buf bytes.Buffer
+	err := runMigrateSerenaDynamicPool(context.Background(), &buf)
+	if err == nil {
+		t.Fatal("a verify-error + failed recovery start must surface a migrate error")
+	}
+	if !strings.Contains(err.Error(), "verify supervisor-intent runtime_spec rows") {
+		t.Errorf("error should carry the verify failure; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "the supervisor start ALSO failed") {
+		t.Errorf("error should surface BOTH the verify failure and the start failure; got %v", err)
 	}
 }
 

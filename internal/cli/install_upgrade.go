@@ -443,10 +443,12 @@ type ReapOpts struct {
 	// budgets RunInstallUpgrade uses (30000 / 5000) when 0.
 	QuiesceTimeoutMs int
 	ExitTimeoutMs    int
-	// ExpectedPorts + VerifyPortsUnbound mirror UpgradeOpts: after a
-	// force-kill fallback the reap proves the prior supervisor's daemon
-	// listeners are released so the caller's later StartSupervisor can
-	// re-bind without fighting a zombie listener. Empty/nil → skipped.
+	// ExpectedPorts + VerifyPortsUnbound mirror UpgradeOpts: after the reap
+	// (on BOTH the clean graceful-exit path and the force-kill path — PR
+	// #250 deeper-review BLOCKER) the reap proves the prior supervisor's
+	// daemon listeners are released so the caller's later StartSupervisor
+	// can re-bind without fighting a still-releasing or job_protection:false
+	// orphan child. Empty/nil → skipped.
 	ExpectedPorts      []int
 	VerifyPortsUnbound func(ports []int, perPortTimeout time.Duration) error
 	// Deps provides the IPC + force-kill sub-methods. Only QuiesceTimers,
@@ -490,6 +492,26 @@ type ReapOpts struct {
 // reap decision on their own — exactly as in RunInstallUpgrade — but they
 // ROUTE the flow through the force-kill + verify path so an un-drained
 // transient cannot survive as a port-holding orphan.
+//
+// Port-verify on BOTH exit paths (PR #250 deeper-review BLOCKER). The
+// verify-ports-unbound step runs UNCONDITIONALLY after the reap — on the
+// CLEAN graceful-exit path as well as the force-kill path — not only after
+// a force-kill. The supervisor's handleExit writes the graceful-exit
+// success ACK BEFORE the teardown completes (supervise.go: the response
+// frame is written first so a deferred listener.Close cannot race it,
+// THEN triggerGracefulExit fires the actual child teardown). So ExitGraceful
+// can return success while the daemon children are still being torn down,
+// and a job_protection:false child (PR #242 surface — the per-spawn Job
+// Object allocation fell back to a plain cmd.Start without
+// KILL_ON_JOB_CLOSE) can outlive the supervisor exit holding its TCP port.
+// If the verify were force-kill-only, the caller would then start a fresh
+// supervisor whose first spawn hits EADDRINUSE on a port a reaped-but-not-
+// yet-released child still owns. Running VerifyPortsUnbound on the clean
+// path closes that window: the reap returns nil only once every
+// ExpectedPort is confirmed unbound, so the caller's StartSupervisor never
+// fights a lingering listener. A still-bound port past the deadline on
+// EITHER path makes the reap fail loud (the migrate aborts before the
+// spec-bearing intent write — legacy stays recoverable).
 func ReapSupervisorForRestart(ctx context.Context, opts ReapOpts) error {
 	if opts.QuiesceTimeoutMs == 0 {
 		opts.QuiesceTimeoutMs = defaultQuiesceTimeoutMs
@@ -529,16 +551,24 @@ func ReapSupervisorForRestart(ctx context.Context, opts ReapOpts) error {
 					killErr)
 			}
 		}
+	}
 
-		// Step B-b: prove the prior supervisor's daemon ports are unbound
-		// before the caller starts the successor (no zombie-listener race).
-		if len(opts.ExpectedPorts) > 0 && opts.VerifyPortsUnbound != nil {
-			if err := opts.VerifyPortsUnbound(opts.ExpectedPorts, defaultPostForceKillPortVerifyTimeout); err != nil {
-				return fmt.Errorf("port-unbound verification failed after force-kill supervisor during reap: %w; "+
-					"one or more daemon ports are still bound; "+
-					"identify the offending listener via `netstat -ano | findstr :<port>` and stop it manually before re-running the migrate",
-					err)
-			}
+	// Step B-b: prove the prior supervisor's daemon ports are unbound before
+	// the caller starts the successor (no zombie-listener race). This runs
+	// UNCONDITIONALLY — on the CLEAN graceful-exit path as well as the
+	// force-kill path (PR #250 deeper-review BLOCKER). ExitGraceful returns
+	// success as soon as the supervisor writes its ACK frame, which
+	// handleExit emits BEFORE triggering the child teardown, so a graceful
+	// exit can return with daemon children still releasing their ports — and
+	// a job_protection:false child (PR #242 fallback) can outlive the
+	// supervisor exit entirely. Verifying here on both paths guarantees the
+	// caller's StartSupervisor re-binds cleanly instead of hitting EADDRINUSE.
+	if len(opts.ExpectedPorts) > 0 && opts.VerifyPortsUnbound != nil {
+		if err := opts.VerifyPortsUnbound(opts.ExpectedPorts, defaultPostForceKillPortVerifyTimeout); err != nil {
+			return fmt.Errorf("port-unbound verification failed after supervisor reap: %w; "+
+				"one or more daemon ports are still bound; "+
+				"identify the offending listener via `netstat -ano | findstr :<port>` and stop it manually before re-running the migrate",
+				err)
 		}
 	}
 

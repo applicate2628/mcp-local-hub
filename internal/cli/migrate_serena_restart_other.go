@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+
+	"mcp-local-hub/internal/api"
 )
 
 // errSupervisorReapUnsupported is returned by defaultMigrateSerenaReap on
@@ -47,4 +49,23 @@ func defaultMigrateSerenaStart(_ context.Context, _ io.Writer) error {
 		"supervisor start is not wired on this platform (v0.5.0 ships the supervisor spawn " +
 			"primitive on Windows only; Linux is beta and macOS preview) — run `mcphub supervise` " +
 			"from a shell to start the supervisor")
+}
+
+// defaultMigrateSerenaSupervisorHealthy is the non-Windows health probe for Fix
+// 5's idempotency-recovery branch. There is no IPC reconcile-ready probe wired
+// off Windows in v0.5.0, so health degrades to a supervisor-lock liveness check:
+// running → (true, nil) [treat as healthy, the best signal available]; not
+// running → (false, nil) [recovery]. This path is effectively unreachable for a
+// real cutover on non-Windows (the reap fails loud first), so it exists for
+// compilation + completeness, not as a load-bearing recovery surface.
+func defaultMigrateSerenaSupervisorHealthy() (bool, error) {
+	stateDir, err := api.DaemonStateDir()
+	if err != nil {
+		return false, fmt.Errorf("resolve state-dir for supervisor health probe: %w", err)
+	}
+	running, _, err := api.SupervisorRunningUnderStateDir(stateDir)
+	if err != nil {
+		return false, fmt.Errorf("probe supervisor liveness: %w", err)
+	}
+	return running, nil
 }
