@@ -264,6 +264,20 @@ var migrateSerenaSupervisorHealthyFn = defaultMigrateSerenaSupervisorHealthy
 // Default is the cross-platform lock probe; tests override it.
 var migrateSerenaSupervisorRunningFn = defaultMigrateSerenaSupervisorRunning
 
+// migrateSerenaStartSupportedFn reports whether the platform's supervisor START
+// primitive is wired (bot PR #250 finding #3 preflight). The detached
+// supervisor spawn (defaultMigrateSerenaStart) is Windows-only production wiring
+// in v0.5.0 (release scope: Windows GA / Linux beta / macOS preview); on other
+// platforms it fails loud. When a cutover WILL require a start (willStart) AND
+// this reports false, the driver FAILS LOUD BEFORE the intent write / client
+// rewrite — refusing to commit an intent the platform cannot bring live (which
+// would otherwise leave a committed intent + rewritten clients with no
+// supervisor: a worse half-state than failing upfront). Default is the
+// per-platform binding (defaultMigrateSerenaStartSupported: true on Windows,
+// false elsewhere); tests override it to drive the preflight without a real
+// platform split.
+var migrateSerenaStartSupportedFn = defaultMigrateSerenaStartSupported
+
 // defaultMigrateSerenaSupervisorRunning is the production binding for
 // migrateSerenaSupervisorRunningFn: a cross-platform supervisor-lock liveness
 // probe (the lock primitive is platform-neutral via flock). It resolves the
@@ -383,38 +397,68 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 		return fmt.Errorf("inspect supervisor-intent.json for an existing serena dynamic-pool migration: %w", amErr)
 	}
 	if alreadyMigrated {
-		// The committed intent is ALREADY dynamic-pool. Fix 5 (PR #250 deeper
-		// review — consultant Q2): "already migrated by runtime" is NOT
-		// unconditionally a no-op. Two sub-cases:
+		// The committed intent is ALREADY dynamic-pool. Before declaring a no-op,
+		// reconcile the intent against the CURRENT serena registry (finding #2 —
+		// bot PR #250). A `mcphub workspace register --backend serena` that lands
+		// AFTER the initial cutover updates only the registry (register saves
+		// workspaces.yaml; the supervisor reconciles from supervisor-intent.json),
+		// so the new workspace is router-resolvable but has no daemon row and is
+		// never spawned. Re-running the migrate is the natural fan-out path, but an
+		// unconditional already-migrated no-op blocks it.
 		//
-		//   (i)  supervisor running + reconcile-ready → GENUINE no-op. Do not
-		//        re-reap / re-write / bounce a healthy supervisor.
-		//   (ii) supervisor NOT running / not reconcile-ready → this is a
-		//        RECOVERY situation: a prior run committed the dynamic-pool
-		//        intent then FAILED the start (Fix 4's readiness poll failed,
-		//        or the host crashed). Re-running would otherwise no-op and
-		//        leave the operator stuck — clients on the /serena/mcp router,
-		//        no daemons. Drive the start (with the Fix 4 readiness poll) so
-		//        the re-run brings the already-committed intent live. Do NOT
-		//        re-reap or re-write: the intent is already correct; only the
-		//        supervisor is missing.
-		healthy, hErr := migrateSerenaSupervisorHealthyFn()
-		if hErr != nil {
-			fmt.Fprintf(w, "warning: could not determine supervisor health (%v); treating as a recovery situation and starting the supervisor.\n", hErr)
+		//   - DRIFT (a current serena registry workspace missing from the intent)
+		//     → do NOT no-op: fall through to the main migration flow, which re-runs
+		//     the install over the CURRENT registry (build manifest →
+		//     reReadAndAllocateSerenaForInstall → InstallParsedManifest) and
+		//     reaps/starts as needed so the missing workspace lands in the intent
+		//     and comes live.
+		//   - NO DRIFT (every current serena workspace already has an intent row) →
+		//     the Fix 5 idempotency branch below: GENUINE no-op if the supervisor is
+		//     healthy, recovery-start otherwise.
+		drift, driftErr := serenaIntentRegistryDrift()
+		if driftErr != nil {
+			return fmt.Errorf("reconcile committed serena intent against the registry before the already-migrated no-op: %w", driftErr)
 		}
-		if healthy {
-			fmt.Fprintln(w, "serena is already migrated to the dynamic pool (runtime intent already carries the workspace-scoped serena descriptor) and the supervisor is running and reconcile-ready; nothing to do.")
+		if !drift {
+			// Fix 5 (PR #250 deeper review — consultant Q2): "already migrated by
+			// runtime, no drift" is NOT unconditionally a no-op. Two sub-cases:
+			//
+			//   (i)  supervisor running + reconcile-ready → GENUINE no-op. Do not
+			//        re-reap / re-write / bounce a healthy supervisor.
+			//   (ii) supervisor NOT running / not reconcile-ready → this is a
+			//        RECOVERY situation: a prior run committed the dynamic-pool
+			//        intent then FAILED the start (Fix 4's readiness poll failed,
+			//        or the host crashed). Re-running would otherwise no-op and
+			//        leave the operator stuck — clients on the /serena/mcp router,
+			//        no daemons. Drive the start (with the Fix 4 readiness poll) so
+			//        the re-run brings the already-committed intent live. Do NOT
+			//        re-reap or re-write: the intent is already correct; only the
+			//        supervisor is missing.
+			healthy, hErr := migrateSerenaSupervisorHealthyFn()
+			if hErr != nil {
+				fmt.Fprintf(w, "warning: could not determine supervisor health (%v); treating as a recovery situation and starting the supervisor.\n", hErr)
+			}
+			if healthy {
+				fmt.Fprintln(w, "serena is already migrated to the dynamic pool (runtime intent already carries the workspace-scoped serena descriptor) and the supervisor is running and reconcile-ready; nothing to do.")
+				return nil
+			}
+			fmt.Fprintln(w, "serena is already migrated to the dynamic pool but no reconcile-ready supervisor is running — recovering by starting the supervisor against the already-committed intent (no re-reap, no re-write)…")
+			if startErr := migrateSerenaStartFn(ctx, w); startErr != nil {
+				return fmt.Errorf(
+					"serena dynamic-pool intent is already committed but the recovery supervisor start failed: %w; "+
+						"the intent on disk is correct (no re-reap / re-write needed) — "+
+						"run `mcphub supervise` from a shell so the current binary reconciles it", startErr)
+			}
+			fmt.Fprintln(w, "recovery complete: the supervisor is reconciling the already-committed serena dynamic-pool intent.")
 			return nil
 		}
-		fmt.Fprintln(w, "serena is already migrated to the dynamic pool but no reconcile-ready supervisor is running — recovering by starting the supervisor against the already-committed intent (no re-reap, no re-write)…")
-		if startErr := migrateSerenaStartFn(ctx, w); startErr != nil {
-			return fmt.Errorf(
-				"serena dynamic-pool intent is already committed but the recovery supervisor start failed: %w; "+
-					"the intent on disk is correct (no re-reap / re-write needed) — "+
-					"run `mcphub supervise` from a shell so the current binary reconciles it", startErr)
-		}
-		fmt.Fprintln(w, "recovery complete: the supervisor is reconciling the already-committed serena dynamic-pool intent.")
-		return nil
+		// DRIFT: a current serena registry workspace is missing from the committed
+		// intent. Fall through (do NOT return) to the main migration flow to
+		// re-fan-out the install over the current registry. The §7.1 reap gate means
+		// a running supervisor is reaped before the spec-bearing re-write, then
+		// restarted so it reconciles the intent that now covers the drifted
+		// workspace.
+		fmt.Fprintln(w, "serena is already migrated to the dynamic pool, but the registry has a serena workspace not present in the committed intent (drift — a workspace registered after the initial cutover) — re-fanning out the install over the current registry to cover it…")
 	}
 
 	// 3. Build the dynamic-pool manifest IN MEMORY (the core regression guard:
@@ -584,6 +628,22 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 	willReap := hasWorkspaces && supervisorRunning
 	willStart := hasWorkspaces
 
+	// PREFLIGHT (finding #3 — bot PR #250): if a cutover WILL require a supervisor
+	// start (willStart) but the platform's start primitive is NOT wired (non-Windows
+	// in v0.5.0), FAIL LOUD NOW — BEFORE the reconcile (client rewrite), the reap, or
+	// the intent write. Round-4 made willReap false on non-Windows when no supervisor
+	// is running (skip the unsupported reap stub), but willStart stayed true, so the
+	// path reached the non-Windows START stub only AFTER InstallParsedManifest had
+	// already committed the intent + rewritten the clients — leaving a committed
+	// intent the platform can never bring live (a worse half-state than failing
+	// upfront). Failing here, before any commit/client rewrite, keeps legacy fully
+	// untouched. (A Windows host reports supported and is unaffected.) A second,
+	// post-re-read copy of this guard (below) covers the finding-#1 window where the
+	// first snapshot was empty but a workspace registers during the unlocked window.
+	if willStart && !migrateSerenaStartSupportedFn() {
+		return errMigrateSerenaStartUnsupportedPreflight()
+	}
+
 	// Fix 6 (PR #250 deeper review — consultant nice-to-have): warn the operator
 	// up front that a cutover briefly takes serena offline. The reap → intent
 	// write → supervisor-start window (tens of seconds: quiesce up to 30s + exit
@@ -675,6 +735,38 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 					"run `mcphub supervise` from a shell to restore the legacy serena daemons", err, startErr)
 			}
 		}
+		return err
+	}
+
+	// 7c. RECOMPUTE the start decision from the RE-READ install snapshot (finding
+	//     #1 — bot PR #250). willStart was fixed from the FIRST snapshot
+	//     (len(allocated)>0). But reReadAndAllocateSerenaForInstall above can pick
+	//     up a workspace registered during the released-lock window and return a
+	//     spec-bearing install snapshot even when the first snapshot was EMPTY. In
+	//     that case the spec-bearing intent commits below but, with willStart fixed
+	//     false, the post-commit start would be SKIPPED → clients on the /serena/mcp
+	//     router, the spec-bearing intent on disk, but no supervisor started to
+	//     spawn the newly-registered daemon. So re-evaluate willStart against the
+	//     authoritative install snapshot: ≥1 workspace ⇒ a start is required. willReap
+	//     is NOT recomputed — it is the HISTORICAL fact of whether we already reaped a
+	//     running supervisor (the reap ran above, before this re-read; it cannot be
+	//     retroactively performed), and the recovery-message branches below key on
+	//     that fact. willStart only ever flips false→true here (the re-read can add
+	//     rows that the first snapshot missed, never drop the candidates the first
+	//     snapshot saw and the realloc preserved).
+	willStart = willStart || len(installWorkspaces) > 0
+
+	// PREFLIGHT (finding #3 + #1 interaction): the recompute above can flip
+	// willStart true when the first snapshot was empty (so Preflight A passed) but a
+	// workspace registered in the window. On a platform whose start is unwired, that
+	// would otherwise commit an intent below and then fail at the unwired start stub
+	// — the exact half-state Preflight A prevents for the common case. Re-check here,
+	// BEFORE the install commit. This fires only when Preflight A passed (hasWorkspaces
+	// was false), so no reap ran (supervisorRunning is probed only when hasWorkspaces)
+	// → willReap is false and no recovery start is owed; the deferred outer stack
+	// restores the reconcile + registry, leaving legacy untouched and NO intent on disk.
+	if willStart && !migrateSerenaStartSupportedFn() {
+		err = errMigrateSerenaStartUnsupportedPreflight()
 		return err
 	}
 
@@ -787,6 +879,106 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 
 	fmt.Fprintln(w, "serena dynamic-pool migration complete.")
 	return nil
+}
+
+// serenaIntentRegistryDrift reports whether the current serena registry contains
+// a workspace that the committed supervisor-intent.json does NOT cover with a
+// daemon row (bot PR #250 finding #2). It exists for the runtime-already-migrated
+// branch: a `mcphub workspace register --backend serena` that lands AFTER the
+// initial cutover updates only the registry (register saves workspaces.yaml; the
+// supervisor reconciles from supervisor-intent.json), so the new workspace is
+// router-resolvable but has no daemon row and is never spawned. Re-running the
+// migrate is the natural fan-out path, but the unconditional already-migrated
+// no-op would block it. This predicate lets the driver distinguish a GENUINE
+// no-op (every current serena workspace already has an intent row) from DRIFT (a
+// registry serena workspace missing from the intent) so it can re-fan-out only on
+// drift.
+//
+// It mirrors the install's own row filter (api.filterExistingWorkspaceRows /
+// workspacePathStale, install_parsed_manifest.go): the install drops a serena
+// workspace whose path no longer exists on disk (stale) BEFORE writing the
+// intent, so a stale registry row absent from the intent is an INTENTIONAL skip,
+// NOT drift — counting it as drift would force an endless re-fan-out loop (the
+// install keeps dropping it; drift keeps re-detecting it). So only a serena row
+// with a non-empty, non-stale path that is missing from the intent counts as
+// drift. The intent join key is the canonical SerenaTaskNameForWorkspace the
+// install writes (install_parsed_manifest.go:619).
+//
+// A missing intent file reports (false, nil) — there is nothing to drift against
+// (and this predicate is only reached when serenaRuntimeIntentIsDynamicPool
+// already reported the intent dynamic-pool, so the file exists in practice). Only
+// a genuine read/parse error propagates.
+func serenaIntentRegistryDrift() (bool, error) {
+	stateDir, err := stateDirFunc()
+	if err != nil {
+		return false, fmt.Errorf("resolve state dir for serena intent/registry drift check: %w", err)
+	}
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	intent, err := api.ReadSupervisorIntent(intentPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	intentSerenaTasks := map[string]bool{}
+	if intent != nil {
+		for i := range intent.Daemons {
+			if intent.Daemons[i].Server == serenaMigrateServerName {
+				intentSerenaTasks[intent.Daemons[i].TaskName] = true
+			}
+		}
+	}
+
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		return false, fmt.Errorf("resolve registry path for serena intent/registry drift check: %w", err)
+	}
+	reg := api.NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		return false, fmt.Errorf("load registry for serena intent/registry drift check: %w", err)
+	}
+	for _, e := range reg.SerenaEntries() {
+		// SerenaEntries already filters to the @serena sentinel; additionally skip
+		// rows the install itself would drop (empty/stale path) so a stale row
+		// missing from the intent is not mistaken for drift.
+		if e.WorkspacePath == "" || serenaMigrateWorkspacePathStale(e.WorkspacePath) {
+			continue
+		}
+		if !intentSerenaTasks[api.SerenaTaskNameForWorkspace(e.WorkspacePath)] {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// serenaMigrateWorkspacePathStale mirrors api.workspacePathStale
+// (internal/api/install_parsed_manifest.go:517), which is package-private to api:
+// a non-empty path that does not exist on disk is stale. Kept byte-for-byte
+// equivalent so the drift check (serenaIntentRegistryDrift) classifies a serena
+// row exactly as the install fan-out's own stale filter does.
+func serenaMigrateWorkspacePathStale(path string) bool {
+	if path == "" {
+		return false
+	}
+	if _, statErr := os.Stat(path); statErr != nil && os.IsNotExist(statErr) {
+		return true
+	}
+	return false
+}
+
+// errMigrateSerenaStartUnsupportedPreflight is the finding-#3 preflight error
+// returned when a cutover would require a supervisor start but the platform's
+// start primitive is not wired. It names the v0.5.0 release scope so the operator
+// runs the cutover on a Windows host. Both preflight points (pre-reconcile and
+// post-re-read pre-install) return it so the operator sees identical guidance.
+func errMigrateSerenaStartUnsupportedPreflight() error {
+	return fmt.Errorf(
+		"serena dynamic-pool cutover requires (re)starting the supervisor to bring the new daemons live, " +
+			"but the supervisor start primitive is not wired on this platform (v0.5.0 ships the supervisor " +
+			"spawn/restart flow on Windows only; Linux is beta and macOS preview) — refusing to commit a " +
+			"supervisor-intent this platform cannot bring live. NO intent was written and legacy serena is " +
+			"untouched; run the cutover on a Windows host")
 }
 
 // serenaRuntimeIntentIsDynamicPool reports whether the committed

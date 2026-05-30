@@ -107,6 +107,14 @@ func defaultMigrateSerenaReap(ctx context.Context, w io.Writer) error {
 	return nil
 }
 
+// defaultMigrateSerenaStartSupported is the Windows production binding for
+// migrateSerenaStartSupportedFn: the detached supervisor spawn primitive
+// (defaultMigrateSerenaStart) IS wired on Windows, so a cutover that requires a
+// start can proceed to the intent write. Returns true unconditionally.
+func defaultMigrateSerenaStartSupported() bool {
+	return true
+}
+
 // defaultMigrateSerenaSupervisorHealthy is the Windows production health probe
 // for Fix 5's idempotency-recovery branch. It reports (true, nil) ONLY when a
 // supervisor is both running (holds supervisor.lock) AND reconcile-ready (IPC

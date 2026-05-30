@@ -51,6 +51,17 @@ func defaultMigrateSerenaStart(_ context.Context, _ io.Writer) error {
 			"from a shell to start the supervisor")
 }
 
+// defaultMigrateSerenaStartSupported is the non-Windows binding for
+// migrateSerenaStartSupportedFn: the detached supervisor spawn primitive
+// (defaultMigrateSerenaStart) is Windows-only in v0.5.0, so it is NOT wired
+// here. Returns false so the driver's finding-#3 preflight FAILS LOUD before the
+// intent write whenever a cutover would require a start — refusing to commit an
+// intent this platform cannot bring live (rather than committing then failing at
+// the unwired start stub AFTER the client rewrite + intent commit).
+func defaultMigrateSerenaStartSupported() bool {
+	return false
+}
+
 // defaultMigrateSerenaSupervisorHealthy is the non-Windows health probe for Fix
 // 5's idempotency-recovery branch. There is no IPC reconcile-ready probe wired
 // off Windows in v0.5.0, so health degrades to a supervisor-lock liveness check:

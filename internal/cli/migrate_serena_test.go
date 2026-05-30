@@ -223,6 +223,18 @@ func stubSupervisorRunning(t *testing.T, fn func() (bool, error)) func() {
 	return func() { migrateSerenaSupervisorRunningFn = orig }
 }
 
+// stubStartSupported overrides migrateSerenaStartSupportedFn for the test scope
+// (finding #3 preflight). The default impl is the per-platform binding (true on
+// Windows, false elsewhere); tests inject a deterministic verdict so the
+// unsupported-start preflight can be exercised on any host (these tests run on
+// Windows where the real binding returns true).
+func stubStartSupported(t *testing.T, fn func() bool) func() {
+	t.Helper()
+	orig := migrateSerenaStartSupportedFn
+	migrateSerenaStartSupportedFn = fn
+	return func() { migrateSerenaStartSupportedFn = orig }
+}
+
 // seedSerenaWorkspace registers one serena workspace (sentinel row) WITH a port,
 // rooted at an existing dir (so the install fan-out does not prune it as stale).
 func seedSerenaWorkspace(t *testing.T, wsPath string) {
@@ -1882,6 +1894,448 @@ func TestMigrateSerena_PostCommitVerifyError_RecoveryStartAlsoFails(t *testing.T
 	}
 	if !strings.Contains(err.Error(), "the supervisor start ALSO failed") {
 		t.Errorf("error should surface BOTH the verify failure and the start failure; got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 13. (finding #1 — bot PR #250) willStart is recomputed from the RE-READ install
+//     snapshot, not the FIRST snapshot. When the first snapshot is EMPTY (so
+//     willStart was fixed false) but a workspace is registered during the unlocked
+//     reconcile/reap window, reReadAndAllocateSerenaForInstall picks it up and the
+//     spec-bearing intent commits — the start MUST then fire even though the first
+//     snapshot was empty. Without the recompute the start is skipped → clients on
+//     the router, spec-bearing intent on disk, but no supervisor spawns the
+//     newly-registered daemon.
+// ---------------------------------------------------------------------------
+
+func TestMigrateSerena_EmptyFirstSnapshot_WorkspaceRegisteredInWindow_RecomputesStart(t *testing.T) {
+	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+
+	// FIRST snapshot is EMPTY: no serena workspace registered up front → the driver
+	// computes hasWorkspaces=false, willStart=false, and (hasWorkspaces=false) never
+	// probes supervisor liveness, so willReap=false (no reap fires for an empty
+	// first snapshot).
+
+	// The workspace that gets registered DURING the released-lock window. With an
+	// empty first snapshot the reap is skipped, so the window injection point is the
+	// RECONCILE stub (it fires after the first snapshot, before the finding-#2
+	// re-read). Rooted at an existing dir + registered without a port so the re-read
+	// re-allocation assigns one and the install fan-out does not prune it as stale.
+	wsConcurrent := t.TempDir()
+
+	reconcileInvoked := false
+	startInvoked := false
+	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+		reconcileInvoked = true
+		// Model a concurrent `mcphub workspace register --backend serena` committing
+		// during the released-lock window (after the first snapshot, before re-read).
+		seedSerenaWorkspaceNoPort(t, wsConcurrent)
+		return &api.MigrateReport{}, nil
+	})()
+	// REAL install (no stub) so the spec-bearing intent is genuinely committed and
+	// we can assert it carries the concurrently-registered workspace's row.
+	defer stubReap(t, func(ctx context.Context, w io.Writer) error { return nil })()
+	defer stubStart(t, func(ctx context.Context, w io.Writer) error { startInvoked = true; return nil })()
+
+	var buf bytes.Buffer
+	if err := runMigrateSerenaDynamicPool(context.Background(), &buf); err != nil {
+		t.Fatalf("migrate must succeed: %v (out=%s)", err, buf.String())
+	}
+	if !reconcileInvoked {
+		t.Fatal("reconcile must have run (the window-injection point)")
+	}
+	// THE finding #1 guard: the install fanned out a spec-bearing row for the
+	// window-registered workspace…
+	intent, err := api.ReadSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"))
+	if err != nil {
+		t.Fatalf("read committed intent: %v", err)
+	}
+	if !intent.HasRuntimeSpecRow() {
+		t.Fatalf("the window-registered workspace must produce a spec-bearing intent; got %+v", intent.Daemons)
+	}
+	// …AND the start fired even though the FIRST snapshot was empty (willStart
+	// recomputed from the re-read install snapshot). Before the fix, willStart was
+	// fixed false from the empty first snapshot, so the start was SKIPPED.
+	if !startInvoked {
+		t.Fatal("finding #1: the supervisor start must fire when the re-read install snapshot is spec-bearing, even though the first snapshot was empty")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 14. (finding #2 — bot PR #250) The runtime-already-migrated branch reconciles
+//     the committed intent against the CURRENT serena registry before declaring a
+//     no-op. A serena workspace registered AFTER the initial cutover updates only
+//     the registry (router-resolvable, but no daemon row → never spawned). The
+//     re-run must fan it out (NOT no-op), reusing the install path; a fully-covered
+//     intent + healthy supervisor must still be a genuine no-op.
+// ---------------------------------------------------------------------------
+
+// seedDynamicPoolIntentForWorkspaces writes a committed dynamic-pool
+// supervisor-intent.json carrying a spec-bearing serena daemon row per workspace
+// path (so serenaRuntimeIntentIsDynamicPool reports already-migrated and the
+// finding-#2 drift check joins on SerenaTaskNameForWorkspace).
+func seedDynamicPoolIntentForWorkspaces(t *testing.T, stateDir string, wsPaths ...string) {
+	t.Helper()
+	intent := &api.SupervisorIntentFile{Version: 1}
+	port := 9150
+	for _, ws := range wsPaths {
+		intent.Daemons = append(intent.Daemons, api.SupervisorDaemon{
+			TaskName:  api.SerenaTaskNameForWorkspace(ws),
+			Server:    "serena",
+			Workspace: ws,
+			Command:   "mcphub",
+			Args:      []string{"daemon-serena-proxy", "--workspace", ws},
+			Port:      port,
+			RuntimeSpec: &api.DaemonRuntimeSpec{
+				SpecVersion:   api.DaemonRuntimeSpecVersion,
+				ChildCommand:  "go",
+				ChildArgs:     []string{"--project", ws, "--context", "codex"},
+				UpstreamPort:  port + 100,
+				ExternalPort:  port,
+				WorkspacePath: ws,
+			},
+		})
+		port++
+	}
+	if err := api.WriteStateFileAtomic(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
+		t.Fatalf("seed dynamic-pool intent: %v", err)
+	}
+}
+
+func TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut(t *testing.T) {
+	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	// CATALOG is still legacy — only the runtime intent says dynamic-pool.
+	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+
+	// Two serena workspaces in the CURRENT registry, both rooted at existing dirs.
+	wsCovered := t.TempDir()
+	wsDrifted := t.TempDir()
+	seedSerenaWorkspace(t, wsCovered)
+	seedSerenaWorkspace(t, wsDrifted)
+
+	// Committed intent covers ONLY wsCovered → wsDrifted is registry drift (a
+	// workspace registered after the initial cutover, present in the registry but
+	// missing from the intent).
+	seedDynamicPoolIntentForWorkspaces(t, stateDir, wsCovered)
+
+	// Model a HEALTHY supervisor: without the finding-#2 drift check this would
+	// short-circuit to the genuine no-op (the strongest proof the re-fanout is
+	// drift-driven, not health-driven).
+	defer stubSupervisorHealthy(t, func() (bool, error) { return true, nil })()
+	// A running supervisor → the re-fanout reaps it before the spec-bearing re-write.
+	defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
+
+	reconcileInvoked, reapInvoked, startInvoked := false, false, false
+	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+		reconcileInvoked = true
+		return &api.MigrateReport{}, nil
+	})()
+	// REAL install (no stub) so the re-fanout genuinely commits the intent and we
+	// can assert the drifted workspace's daemon row landed in it.
+	defer stubReap(t, func(ctx context.Context, w io.Writer) error { reapInvoked = true; return nil })()
+	defer stubStart(t, func(ctx context.Context, w io.Writer) error { startInvoked = true; return nil })()
+
+	var buf bytes.Buffer
+	if err := runMigrateSerenaDynamicPool(context.Background(), &buf); err != nil {
+		t.Fatalf("drift re-fanout must succeed; got error: %v (out=%s)", err, buf.String())
+	}
+	// THE finding #2 guard: drift drives a re-fanout (install runs), NOT a no-op.
+	if !reconcileInvoked || !reapInvoked || !startInvoked {
+		t.Fatalf("drift must re-fan-out the install (reconcile=%v reap=%v start=%v); a no-op is the finding #2 bug",
+			reconcileInvoked, reapInvoked, startInvoked)
+	}
+	if strings.Contains(buf.String(), "nothing to do") {
+		t.Errorf("a drifted registry must NOT report the no-op; got %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), "re-fanning out") {
+		t.Errorf("output should explain the drift re-fanout; got %q", buf.String())
+	}
+	// The committed intent now carries a daemon row for BOTH workspaces (the drifted
+	// one landed).
+	intent, err := api.ReadSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"))
+	if err != nil {
+		t.Fatalf("read re-fanned intent: %v", err)
+	}
+	want := map[string]bool{
+		api.SerenaTaskNameForWorkspace(wsCovered): false,
+		api.SerenaTaskNameForWorkspace(wsDrifted): false,
+	}
+	for _, d := range intent.Daemons {
+		if d.Server == "serena" {
+			if _, ok := want[d.TaskName]; ok {
+				want[d.TaskName] = true
+			}
+		}
+	}
+	if !want[api.SerenaTaskNameForWorkspace(wsDrifted)] {
+		t.Errorf("the drifted workspace %q must land in the re-fanned intent; daemons=%+v", wsDrifted, intent.Daemons)
+	}
+	if !want[api.SerenaTaskNameForWorkspace(wsCovered)] {
+		t.Errorf("the already-covered workspace %q must remain in the re-fanned intent; daemons=%+v", wsCovered, intent.Daemons)
+	}
+}
+
+// TestMigrateSerena_AlreadyMigrated_FullyCovered_HealthySupervisor_NoOp is the
+// finding #2 negative guard: when the committed intent already covers EVERY
+// current serena registry workspace and the supervisor is healthy, the migrate is
+// a GENUINE no-op (no install/reconcile/reap/start, no bouncing the supervisor) —
+// the drift check must not over-fire.
+func TestMigrateSerena_AlreadyMigrated_FullyCovered_HealthySupervisor_NoOp(t *testing.T) {
+	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+
+	ws := t.TempDir()
+	seedSerenaWorkspace(t, ws)
+	// The intent covers the only registry serena workspace → no drift.
+	seedDynamicPoolIntentForWorkspaces(t, stateDir, ws)
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	before, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read seeded intent: %v", err)
+	}
+
+	installInvoked, reconcileInvoked, reapInvoked, startInvoked := false, false, false, false
+	defer stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
+		installInvoked = true
+		return "", nil
+	})()
+	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+		reconcileInvoked = true
+		return &api.MigrateReport{}, nil
+	})()
+	defer stubReap(t, func(ctx context.Context, w io.Writer) error { reapInvoked = true; return nil })()
+	defer stubStart(t, func(ctx context.Context, w io.Writer) error { startInvoked = true; return nil })()
+	defer stubSupervisorHealthy(t, func() (bool, error) { return true, nil })()
+
+	var buf bytes.Buffer
+	if err := runMigrateSerenaDynamicPool(context.Background(), &buf); err != nil {
+		t.Fatalf("fully-covered + healthy must be a no-op; got error: %v (out=%s)", err, buf.String())
+	}
+	if installInvoked || reconcileInvoked || reapInvoked || startInvoked {
+		t.Errorf("fully-covered no-op must not install/reconcile/reap/start (install=%v reconcile=%v reap=%v start=%v)",
+			installInvoked, reconcileInvoked, reapInvoked, startInvoked)
+	}
+	if !strings.Contains(buf.String(), "nothing to do") {
+		t.Errorf("output should report the genuine no-op; got %q", buf.String())
+	}
+	if strings.Contains(buf.String(), "re-fanning out") {
+		t.Errorf("a fully-covered intent must NOT trigger the drift re-fanout; got %q", buf.String())
+	}
+	after, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("re-read intent: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Errorf("a no-op must not rewrite the committed intent")
+	}
+}
+
+// TestMigrateSerena_AlreadyMigrated_StaleRegistryRow_NoDrift_NoOp guards the drift
+// check's stale-path filter: a registry serena row whose workspace path no longer
+// exists on disk is one the install would DROP before the intent write, so its
+// absence from the intent is an INTENTIONAL skip, NOT drift. Counting it as drift
+// would force an endless re-fanout loop (install drops it; drift re-detects it).
+// With a healthy supervisor this must stay a genuine no-op.
+func TestMigrateSerena_AlreadyMigrated_StaleRegistryRow_NoDrift_NoOp(t *testing.T) {
+	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+
+	// A live workspace (covered by the intent) + a STALE one (path removed) that the
+	// intent does NOT cover.
+	wsLive := t.TempDir()
+	wsStaleDir := t.TempDir()
+	seedSerenaWorkspace(t, wsLive)
+	seedSerenaWorkspace(t, wsStaleDir)
+	// Remove the stale workspace's dir so its path no longer exists on disk.
+	if err := os.RemoveAll(wsStaleDir); err != nil {
+		t.Fatalf("remove stale workspace dir: %v", err)
+	}
+	// Intent covers only the live workspace; the stale one is absent (as the install
+	// itself would leave it).
+	seedDynamicPoolIntentForWorkspaces(t, stateDir, wsLive)
+
+	installInvoked, reapInvoked, startInvoked := false, false, false
+	defer stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
+		installInvoked = true
+		return "", nil
+	})()
+	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+		return &api.MigrateReport{}, nil
+	})()
+	defer stubReap(t, func(ctx context.Context, w io.Writer) error { reapInvoked = true; return nil })()
+	defer stubStart(t, func(ctx context.Context, w io.Writer) error { startInvoked = true; return nil })()
+	defer stubSupervisorHealthy(t, func() (bool, error) { return true, nil })()
+
+	var buf bytes.Buffer
+	if err := runMigrateSerenaDynamicPool(context.Background(), &buf); err != nil {
+		t.Fatalf("a stale-only uncovered row must NOT count as drift; got error: %v (out=%s)", err, buf.String())
+	}
+	if installInvoked || reapInvoked || startInvoked {
+		t.Errorf("a stale uncovered registry row must not trigger a re-fanout (install=%v reap=%v start=%v)",
+			installInvoked, reapInvoked, startInvoked)
+	}
+	if !strings.Contains(buf.String(), "nothing to do") {
+		t.Errorf("output should report the genuine no-op (stale row is not drift); got %q", buf.String())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 15. (finding #3 — bot PR #250) Non-Windows-style (start unsupported) cutover
+//     with registered workspaces and no supervisor must FAIL LOUD BEFORE the
+//     intent write / client rewrite — refusing to commit an intent the platform
+//     cannot bring live. Asserts no intent committed and no client rewrite.
+// ---------------------------------------------------------------------------
+
+func TestMigrateSerena_StartUnsupported_Workspaces_FailsBeforeCommit(t *testing.T) {
+	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+	// Registered serena workspace → the cutover WILL require a start.
+	ws := t.TempDir()
+	seedSerenaWorkspace(t, ws)
+	// No supervisor running (the operator stopped it / fresh host) — round-4 makes
+	// willReap false here, but willStart is true so a start IS required.
+	defer stubSupervisorRunning(t, func() (bool, error) { return false, nil })()
+	// Model an UNSUPPORTED start platform (non-Windows) regardless of the test host.
+	defer stubStartSupported(t, func() bool { return false })()
+
+	reconcileInvoked, reapInvoked, startInvoked, installInvoked := false, false, false, false
+	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+		reconcileInvoked = true
+		return &api.MigrateReport{}, nil
+	})()
+	defer stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
+		installInvoked = true
+		return "", nil
+	})()
+	defer stubReap(t, func(ctx context.Context, w io.Writer) error { reapInvoked = true; return nil })()
+	defer stubStart(t, func(ctx context.Context, w io.Writer) error { startInvoked = true; return nil })()
+
+	var buf bytes.Buffer
+	err := runMigrateSerenaDynamicPool(context.Background(), &buf)
+	if err == nil {
+		t.Fatal("an unsupported-start cutover with workspaces must FAIL LOUD (refuse to commit an intent the platform cannot bring live)")
+	}
+	if !strings.Contains(err.Error(), "supervisor start primitive is not wired on this platform") {
+		t.Errorf("error should name the unsupported-start preflight; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "NO intent was written") {
+		t.Errorf("error should state no intent was written; got %v", err)
+	}
+	// THE finding #3 guard: the preflight fires BEFORE the reconcile (client
+	// rewrite), reap, install, and start — none must run.
+	if reconcileInvoked {
+		t.Errorf("the preflight must fail BEFORE the client reconcile (no client rewrite); reconcile ran")
+	}
+	if installInvoked {
+		t.Errorf("the preflight must fail BEFORE the intent write; install ran")
+	}
+	if reapInvoked {
+		t.Errorf("the preflight must fail BEFORE the reap; reap ran")
+	}
+	if startInvoked {
+		t.Errorf("the preflight must fail before the (unsupported) start; start ran")
+	}
+	// No intent committed on disk.
+	if _, statErr := os.Stat(filepath.Join(stateDir, "supervisor-intent.json")); !os.IsNotExist(statErr) {
+		t.Errorf("the unsupported-start preflight must leave NO intent on disk; stat err = %v", statErr)
+	}
+}
+
+// TestMigrateSerena_StartUnsupported_EmptyRegistry_Proceeds proves the preflight
+// is scoped to cutovers that REQUIRE a start: a zero-workspace install needs no
+// supervisor (willStart false), so even on an unsupported-start platform it
+// proceeds and writes the zero-row intent (no reap/start required).
+func TestMigrateSerena_StartUnsupported_EmptyRegistry_Proceeds(t *testing.T) {
+	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+	// No serena workspaces → willStart false → no preflight trip.
+	defer stubStartSupported(t, func() bool { return false })()
+
+	reapInvoked, startInvoked := false, false
+	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+		return &api.MigrateReport{}, nil
+	})()
+	defer stubReap(t, func(ctx context.Context, w io.Writer) error { reapInvoked = true; return nil })()
+	defer stubStart(t, func(ctx context.Context, w io.Writer) error { startInvoked = true; return nil })()
+
+	var buf bytes.Buffer
+	if err := runMigrateSerenaDynamicPool(context.Background(), &buf); err != nil {
+		t.Fatalf("a zero-workspace install must proceed even on an unsupported-start platform (no start required); got error: %v (out=%s)", err, buf.String())
+	}
+	// The zero-row intent was written; no reap/start fired.
+	intent, err := api.ReadSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"))
+	if err != nil {
+		t.Fatalf("zero-workspace install must write the intent; read err = %v", err)
+	}
+	if intent.HasRuntimeSpecRow() {
+		t.Errorf("zero-workspace install must have no runtime_spec rows")
+	}
+	if reapInvoked || startInvoked {
+		t.Errorf("a zero-workspace install needs no reap/start (reap=%v start=%v)", reapInvoked, startInvoked)
+	}
+}
+
+// TestMigrateSerena_StartUnsupported_EmptyFirstSnapshot_WindowRegister_FailsBeforeCommit
+// is the finding #1 × finding #3 INTERACTION guard. When the first snapshot is
+// EMPTY, Preflight A (pre-reconcile) passes (willStart false). A workspace then
+// registers during the released-lock window, the finding-#1 re-read recompute
+// flips willStart true — and on an unsupported-start platform the second preflight
+// (post-re-read, pre-install) must STILL fail loud BEFORE the intent commit, so the
+// platform never commits an intent it cannot bring live. The deferred outer
+// rollback restores the already-rewritten clients (reconcile-restore fires).
+func TestMigrateSerena_StartUnsupported_EmptyFirstSnapshot_WindowRegister_FailsBeforeCommit(t *testing.T) {
+	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+	// FIRST snapshot EMPTY → Preflight A passes (willStart false, no reap probe).
+	// Model an UNSUPPORTED start platform.
+	defer stubStartSupported(t, func() bool { return false })()
+
+	wsConcurrent := t.TempDir()
+	installInvoked, reapInvoked, startInvoked := false, false, false
+	restoreReconcileCalled := false
+	// The reconcile runs (Preflight A passed) and is the window-injection point for
+	// the concurrent register (the reap is skipped for an empty first snapshot).
+	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+		seedSerenaWorkspaceNoPort(t, wsConcurrent)
+		return &api.MigrateReport{Applied: []api.AppliedMigration{{Server: "serena", Client: "claude-code", URL: "http://127.0.0.1:9137/serena/mcp", BackupPath: "/fake/bak"}}}, nil
+	})()
+	defer stubRestoreReconcile(t, func(report *api.MigrateReport) error { restoreReconcileCalled = true; return nil })()
+	defer stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
+		installInvoked = true
+		return "", nil
+	})()
+	defer stubReap(t, func(ctx context.Context, w io.Writer) error { reapInvoked = true; return nil })()
+	defer stubStart(t, func(ctx context.Context, w io.Writer) error { startInvoked = true; return nil })()
+
+	var buf bytes.Buffer
+	err := runMigrateSerenaDynamicPool(context.Background(), &buf)
+	if err == nil {
+		t.Fatal("an unsupported-start platform must fail loud when the re-read flips willStart true, even with an empty first snapshot")
+	}
+	if !strings.Contains(err.Error(), "supervisor start primitive is not wired on this platform") {
+		t.Errorf("error should name the unsupported-start preflight; got %v", err)
+	}
+	// THE interaction guard: the second preflight fires BEFORE the install commit
+	// (and before the unsupported start) — neither runs.
+	if installInvoked {
+		t.Errorf("the post-re-read preflight must fail BEFORE the intent write; install ran")
+	}
+	if startInvoked {
+		t.Errorf("the unsupported start must never run; start ran")
+	}
+	// Empty first snapshot → no reap fired (probe never ran).
+	if reapInvoked {
+		t.Errorf("an empty-first-snapshot cutover never reaps; reap ran")
+	}
+	// No intent committed on disk.
+	if _, statErr := os.Stat(filepath.Join(stateDir, "supervisor-intent.json")); !os.IsNotExist(statErr) {
+		t.Errorf("the preflight must leave NO intent on disk; stat err = %v", statErr)
+	}
+	// The deferred outer rollback restored the already-rewritten clients (the
+	// reconcile ran before the preflight tripped).
+	if !restoreReconcileCalled {
+		t.Errorf("the reconcile-restore must fire so the rewritten clients return to legacy")
 	}
 }
 
