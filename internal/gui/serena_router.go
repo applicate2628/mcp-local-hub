@@ -1028,33 +1028,61 @@ func (s *Server) handleSerenaDelete(w http.ResponseWriter, r *http.Request) {
 	// initialized version), not the router-client session version.
 	wsKey, daemonSessionID, daemonProtocolVersion, hasBinding := s.serenaDaemonSessions.bindingFor(sessionID)
 
-	// Findings A + B: resolve the workspace for the upstream DELETE UP FRONT,
-	// BEFORE the local revocation clears the sticky map. The sticky binding
-	// is the cheap source when it still exists (the common case after a
-	// successful tool call); the daemon binding's workspaceKey is the robust
-	// fallback for Finding B's leak (handshake completed but the tool POST
-	// failed before BindSession ran, so the sticky binding is nil while
-	// serenaDaemonSessions still holds a live daemon session). Snapshotting
-	// the workspace here is what lets Finding A unbind FIRST without losing
-	// the data the forward needs.
-	var delWS *api.WorkspaceEntry
-	if hasBinding && deps != nil {
-		delWS = s.resolveDeleteWorkspace(deps, sessionID, wsKey)
+	// Finding B (cheap pre-unbind snapshot ONLY): capture the sticky binding's
+	// workspace BEFORE the revocation below clears the sticky map. This is a
+	// cheap in-memory map lookup (serena_routing.SessionRouter.LookupSession /
+	// InMemorySessionRouter), NOT the blockable registry scan — it is the
+	// fallback the upstream DELETE needs for Finding B's leak case (handshake
+	// completed but the tool POST failed before BindSession ran, so the daemon
+	// binding has an EMPTY wsKey while the sticky binding still resolves the
+	// workspace). It must be read before the unbind because UnbindSession would
+	// otherwise drop it. The by-key resolution (the potentially-blocking part)
+	// is deferred to AFTER the unbind below.
+	var stickyWS *api.WorkspaceEntry
+	if hasBinding && deps != nil && deps.Sessions != nil {
+		stickyWS = deps.Sessions.LookupSession(sessionID)
 	}
 
-	// Finding A: revoke every local binding FIRST so a concurrent POST with
-	// the same Mcp-Session-Id cannot pass lookup and run a tool call during
-	// a slow upstream DELETE. The snapshots above mean unbinding here cannot
-	// affect the forward below.
+	// Finding A + P2 (Codex PR #249) — revoke every local binding FIRST, BEFORE
+	// the (potentially-blocking) workspace resolution below, so a concurrent
+	// POST with the same Mcp-Session-Id cannot pass the router/sticky/daemon
+	// lookups and start another tool call during the revocation window. The
+	// PRIOR order resolved the teardown workspace via resolveDeleteWorkspace ->
+	// ListWorkspaces() — which can BLOCK when the registry refresh holds the
+	// cross-process lock (internal/api/serena_routing/resolver.go refresh) —
+	// BEFORE unbinding the local state, so a concurrent POST could route during
+	// that blocking window and contradict the immediate-revocation guarantee
+	// the DELETE path provides (Codex round-7 #A). Unbinding here (cheap,
+	// in-memory) revokes the session immediately; the cheap snapshots above
+	// (daemon binding via bindingFor + the sticky workspace) mean unbinding
+	// first cannot lose the data the forward needs.
 	s.serenaDaemonSessions.unbind(sessionID)
 	s.serenaRouterSessions.unbind(sessionID)
 	if deps != nil && deps.Sessions != nil {
 		deps.Sessions.UnbindSession(sessionID)
 	}
 
-	// Best-effort upstream DELETE using the up-front workspace snapshot. A
-	// missing workspace (or nil URL) just skips the forward — the local
-	// revocation already ran so the router does not leak the mapping.
+	// Findings A + B (workspace resolution moved to AFTER the unbind): now that
+	// the session is revoked, resolve the workspace for the best-effort upstream
+	// DELETE using the SNAPSHOTTED wsKey. The by-key path (resolveWorkspaceByKey
+	// -> ListWorkspaces) is the authoritative source and is the
+	// potentially-blocking call Finding 3 requires to run after revocation; the
+	// pre-snapshotted sticky workspace is the Finding B fallback when the daemon
+	// binding had an empty/unresolvable wsKey. A missing workspace just skips the
+	// forward — the local revocation already ran so the router does not leak the
+	// mapping.
+	var delWS *api.WorkspaceEntry
+	if hasBinding && deps != nil {
+		if ws := s.resolveWorkspaceByKey(deps, wsKey); ws != nil {
+			delWS = ws
+		} else {
+			delWS = stickyWS
+		}
+	}
+
+	// Best-effort upstream DELETE using the post-unbind workspace resolution
+	// above. A missing workspace (or nil URL) just skips the forward — the
+	// local revocation already ran so the router does not leak the mapping.
 	if hasBinding && deps != nil && delWS != nil {
 		auditFn := deps.AuditFn
 		if auditFn == nil {

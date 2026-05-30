@@ -34,9 +34,45 @@
 package gui
 
 import (
+	"container/list"
 	"sync"
 	"time"
 )
+
+// maxRouterSessions caps the number of live router-minted session entries
+// the store retains (P2, Codex PR #249). Without a cap every valid
+// initialize allocated a routerSessionStore entry kept until DELETE or the
+// 24h idle sweep, with NO bound: a buggy/looping client (or, on a shared
+// host, a malicious local one) could loop initialize with supported
+// protocol versions and grow the map unbounded long before the idle sweeper
+// runs.
+//
+// At-capacity policy: LRU-EVICTION (drop the least-recently-seen entry to
+// make room for the newest), mirroring the hub session store's GLOBAL-cap
+// behavior (internal/api/hub_mcp_session.go: "At global cap, Create evicts
+// the LRU session to make room"; defaultMaxSessionsGlobal = 256). The hub
+// REJECTS only at its PER-CLIENT sub-cap (16) — a dimension this store does
+// not have (it is keyed by session id alone, with no client-id grouping), so
+// the global-cap eviction is the policy that applies here.
+//
+// Eviction (vs the hub's per-client reject) is the right choice for THIS
+// store specifically because of the Phase-3 reconcile probe
+// (internal/api/serena_client_reconcile.go): the probe sends initialize
+// every reconcile cycle and NEVER DELETEs, so probe sessions accumulate
+// until the idle sweep. With LRU-eviction this is self-limiting — the oldest
+// probe entries evict first, and a legitimately-active client (whose entry
+// is moved to the front of the LRU on every accepted request via touch) is
+// never locked out by a churning initialize loop. Reject-at-capacity would
+// instead let a frequent probe / churn loop fill the cap and start refusing
+// legitimate initialize calls, so eviction is the probe-safe policy.
+//
+// The cap is GENEROUS (4096, vs the hub's 256 global) precisely so the probe
+// + a realistic live-client population never approach it; the hub pairs its
+// 256 global with a 16 per-client sub-cap as a backstop, and this store has
+// no such second dimension, so a larger single global is the equivalent
+// headroom. Bounded growth is the invariant; the exact value only sets where
+// eviction begins.
+const maxRouterSessions = 4096
 
 // routerSessionBinding records a client session minted at the router: the
 // protocol version it negotiated at initialize, plus lastSeen for idle
@@ -51,12 +87,23 @@ type routerSessionBinding struct {
 // when it mints a session; the tools/list + tool-call paths read it; the
 // DELETE teardown (and any future session-close) unbinds it.
 //
+// Bound (P2, Codex PR #249): the map is capped at maxRouterSessions with
+// LRU-eviction (see maxRouterSessions). lru is a *list.List ordered
+// most-recently-seen at the FRONT; lruIndex maps each session id to its list
+// element so store/touch/remove are O(1). Both are protected by the SAME mu
+// as bindings — never acquired separately — mirroring the hub session
+// store's single-lock LRU discipline
+// (internal/api/hub_mcp_session.go: "LRU index: a *list.List protected by
+// store.mu (same Lock as sessions)").
+//
 // Concurrency: the map is shared across concurrent requests; every access
 // holds mu.
 type routerSessionStore struct {
 	mu       sync.Mutex
 	bindings map[string]*routerSessionBinding
-	clock    func() time.Time // injectable; nil -> time.Now
+	lru      *list.List               // values are session-id strings; front == most-recently-seen
+	lruIndex map[string]*list.Element // session id -> its lru element
+	clock    func() time.Time         // injectable; nil -> time.Now
 }
 
 func (st *routerSessionStore) now() time.Time {
@@ -66,22 +113,93 @@ func (st *routerSessionStore) now() time.Time {
 	return time.Now()
 }
 
+// ensureInitLocked lazily allocates the maps + LRU list. Caller MUST hold mu.
+// The store is used zero-value (no constructor), so every mutating path that
+// can be the first call routes through here.
+func (st *routerSessionStore) ensureInitLocked() {
+	if st.bindings == nil {
+		st.bindings = make(map[string]*routerSessionBinding)
+	}
+	if st.lru == nil {
+		st.lru = list.New()
+	}
+	if st.lruIndex == nil {
+		st.lruIndex = make(map[string]*list.Element)
+	}
+}
+
+// removeLocked deletes a session id from BOTH the bindings map and the LRU
+// index, keeping the two in lockstep. Idempotent — a missing id is a no-op.
+// Caller MUST hold mu. Every delete site (expire-on-read, unbind, sweep,
+// eviction) routes through here so the LRU never drifts from the map.
+func (st *routerSessionStore) removeLocked(clientSessionID string) {
+	if _, ok := st.bindings[clientSessionID]; ok {
+		delete(st.bindings, clientSessionID)
+	}
+	if el, ok := st.lruIndex[clientSessionID]; ok {
+		if st.lru != nil {
+			st.lru.Remove(el)
+		}
+		delete(st.lruIndex, clientSessionID)
+	}
+}
+
+// evictLRULocked drops the least-recently-seen entry (the LRU list BACK) to
+// free room for a new store at capacity. No-op when the list is empty.
+// Caller MUST hold mu. Mirrors the hub's evictLRULocked
+// (internal/api/hub_mcp_session.go) — but the router store has no in-flight
+// concept, so there is no skip-if-busy walk: the eldest entry is always
+// evictable.
+func (st *routerSessionStore) evictLRULocked() {
+	if st.lru == nil {
+		return
+	}
+	back := st.lru.Back()
+	if back == nil {
+		return
+	}
+	id, _ := back.Value.(string)
+	st.removeLocked(id)
+}
+
 // store records (clientSessionID -> negotiatedVersion), replacing any
 // prior binding for the same client session. An empty client session id
 // is ignored so the map never holds a keyless entry.
+//
+// Bound (P2, Codex PR #249): a fresh insert that would exceed
+// maxRouterSessions first EVICTS the least-recently-seen entry, so the map
+// size never grows past the cap (LRU-eviction — see maxRouterSessions). The
+// new/refreshed entry is promoted to the FRONT of the LRU so it is the LAST
+// to be evicted. Re-storing an existing id (a re-bind on the same session)
+// updates its version + moves it to the front WITHOUT consuming a cap slot,
+// so it can never trigger an eviction.
 func (st *routerSessionStore) store(clientSessionID, negotiatedVersion string) {
 	if clientSessionID == "" {
 		return
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	if st.bindings == nil {
-		st.bindings = make(map[string]*routerSessionBinding)
+	st.ensureInitLocked()
+	if el, ok := st.lruIndex[clientSessionID]; ok {
+		// Existing id: update in place + promote. No cap pressure (the entry
+		// already occupies its slot).
+		st.bindings[clientSessionID] = &routerSessionBinding{
+			negotiatedVersion: negotiatedVersion,
+			lastSeen:          st.now(),
+		}
+		st.lru.MoveToFront(el)
+		return
+	}
+	// New id: enforce the cap by evicting the eldest entry BEFORE inserting,
+	// so the post-insert size is <= maxRouterSessions.
+	if len(st.bindings) >= maxRouterSessions {
+		st.evictLRULocked()
 	}
 	st.bindings[clientSessionID] = &routerSessionBinding{
 		negotiatedVersion: negotiatedVersion,
 		lastSeen:          st.now(),
 	}
+	st.lruIndex[clientSessionID] = st.lru.PushFront(clientSessionID)
 }
 
 // peekNegotiatedVersion returns the protocol version a client session
@@ -152,7 +270,9 @@ func (st *routerSessionStore) peekVersionState(clientSessionID string) (string, 
 		return "", routerSessionAbsent
 	}
 	if st.now().Sub(b.lastSeen) > daemonSessionTTL {
-		delete(st.bindings, clientSessionID)
+		// Expire-on-read: drop from BOTH the map and the LRU index so the cap
+		// accounting stays exact (P2 — removeLocked keeps the two in lockstep).
+		st.removeLocked(clientSessionID)
 		return "", routerSessionExpired
 	}
 	return b.negotiatedVersion, routerSessionLive
@@ -188,10 +308,16 @@ func (st *routerSessionStore) touch(clientSessionID string) bool {
 		return false
 	}
 	if st.now().Sub(b.lastSeen) > daemonSessionTTL {
-		delete(st.bindings, clientSessionID)
+		// Expire-on-read: drop from BOTH the map and the LRU index (P2).
+		st.removeLocked(clientSessionID)
 		return false
 	}
 	b.lastSeen = st.now()
+	// P2: an accepted request promotes the session to the FRONT of the LRU so
+	// an actively-used session is the LAST to be evicted at capacity.
+	if el, ok := st.lruIndex[clientSessionID]; ok && st.lru != nil {
+		st.lru.MoveToFront(el)
+	}
 	return true
 }
 
@@ -227,7 +353,8 @@ func (st *routerSessionStore) unbind(clientSessionID string) {
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	delete(st.bindings, clientSessionID)
+	// P2: removeLocked drops from BOTH the map and the LRU index in lockstep.
+	st.removeLocked(clientSessionID)
 }
 
 // cleanup drops bindings idle longer than ttl before now and returns the
@@ -252,7 +379,10 @@ func (st *routerSessionStore) cleanupExpired(now time.Time, ttl time.Duration) [
 	var expired []string
 	for id, b := range st.bindings {
 		if b == nil || !b.lastSeen.After(cutoff) {
-			delete(st.bindings, id)
+			// P2: removeLocked drops from BOTH the map and the LRU index.
+			// Deleting the current key from the map being ranged is safe in Go;
+			// removeLocked only also touches the sibling LRU list/index.
+			st.removeLocked(id)
 			expired = append(expired, id)
 		}
 	}

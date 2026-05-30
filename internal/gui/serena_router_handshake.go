@@ -522,7 +522,6 @@ func postHandshakeInitialized(ctx context.Context, httpClient *http.Client, upst
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 	// Finding 2: a non-2xx on notifications/initialized means the daemon
 	// did NOT advance the session to operational (a bad session/protocol
 	// header is the usual cause). Caching that half-initialized session
@@ -533,6 +532,22 @@ func postHandshakeInitialized(ctx context.Context, httpClient *http.Client, upst
 	// surfaces the diagnosable 502/504 handshake-failure path. (Mirrors
 	// the hub treating a post-initialize notification failure as an init
 	// failure — internal/api/hub_mcp_handler.go.)
+	//
+	// P2 (Codex PR #249) — do NOT block-drain a 2xx notification body.
+	// notifications/initialized is a NOTIFICATION: it has no response
+	// payload to read, and the status code is the SOLE part of the
+	// contract this function reads (the error message below uses only
+	// resp.StatusCode, never the body). The status check therefore runs
+	// FIRST, before any body handling. On a 2xx the body is simply CLOSED
+	// by the deferred Close with no io.Copy: a daemon that answers 2xx with
+	// an open/never-EOF text/event-stream body would otherwise make
+	// io.Copy(io.Discard, ...) block until the handshake context's
+	// upstreamTimeout fires, so the handshake "succeeds" only after the
+	// full upstream delay. The hub's notification path returns right after
+	// the 2xx headers for exactly this reason
+	// (internal/api/hub_mcp_handler.go). The defer above frees the
+	// connection on every path (the body is small/empty for a notification
+	// even on the non-2xx branch, where the status alone drives the error).
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("notifications/initialized -> status %d", resp.StatusCode)
 	}
