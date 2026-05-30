@@ -522,15 +522,34 @@ func (s *Server) handleInitialize(w http.ResponseWriter, body []byte, tb *toolBo
 	// Finding 5 (mirror hub handleInitialize): validate params.protocolVersion
 	// synchronously BEFORE minting a session. initializeRawParams returns the
 	// raw params bytes so a present-but-type-mismatched params object is told
-	// apart from an absent/empty protocolVersion, and the router requires a
-	// SUPPORTED version rather than silently negotiating the default (which
-	// hides a non-compliant client).
+	// apart from an absent/empty protocolVersion.
+	//
+	// Finding 1 (P2, Codex PR #249 round-2 — NEGOTIATE an unsupported version
+	// instead of rejecting it; DELIBERATE divergence from the hub): the MCP
+	// lifecycle spec REQUIRES a server to respond with a version it DOES support
+	// when it does not support the requested one (version negotiation —
+	// supportedProtocolVersions doc + modelcontextprotocol.io basic/lifecycle).
+	// The hub aggregator REJECTS because it fronts HETEROGENEOUS daemons and
+	// cannot pick one version for all of them; the serena router fronts
+	// HOMOGENEOUS serena daemons (same binary, identical MCP surface), so it CAN
+	// and SHOULD negotiate down. The three cases:
+	//   - PRESENT well-formed string, SUPPORTED  -> echo it (today's behavior).
+	//   - PRESENT well-formed string, UNSUPPORTED -> negotiate: respond 200 with
+	//     defaultProtocolVersion as result.protocolVersion, and store THAT as the
+	//     session's negotiated version. A forward-compatible client offering a
+	//     newer revision can then establish a /serena/mcp session without
+	//     special-casing this router (the bug this finding fixes).
+	//   - MISSING / empty / non-string (type-mismatch) -> still -32602. That is a
+	//     MALFORMED request, not merely an unsupported one — distinct from this
+	//     finding, so the strict rejection is preserved.
 	rawParams := initializeRawParams(body)
 	var initParams struct {
 		ProtocolVersion string `json:"protocolVersion"`
 	}
 	if len(rawParams) > 0 && string(rawParams) != "null" {
 		if uerr := json.Unmarshal(rawParams, &initParams); uerr != nil {
+			// A non-string protocolVersion (e.g. a number) fails this string-field
+			// unmarshal: that is a malformed params, not an unsupported version.
 			writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidParams,
 				"invalid initialize params: "+uerr.Error(), nil)
 			return
@@ -538,28 +557,26 @@ func (s *Server) handleInitialize(w http.ResponseWriter, body []byte, tb *toolBo
 	}
 	if initParams.ProtocolVersion == "" {
 		// Missing/empty protocolVersion is an invalid-params error
-		// (-32602), not a "default to router-preferred" path.
+		// (-32602), not a "default to router-preferred" path: a client that
+		// omits the field entirely is malformed, distinct from one that offers
+		// a well-formed-but-unsupported version (which negotiates below).
 		writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidParams,
 			"invalid initialize params: protocolVersion required", map[string]any{
 				"supported": supportedProtocolVersionsList(),
 			})
 		return
 	}
-	if _, ok := supportedProtocolVersions[initParams.ProtocolVersion]; !ok {
-		// Unsupported version: reject with -32600 at HTTP 200 (JSON-RPC
-		// carries the error in-band) + error.data.supported so the client
-		// can re-issue initialize with a version the router speaks. The
-		// router fronts per-workspace daemons that all share one MCP
-		// surface, so silently downgrading to defaultProtocolVersion would
-		// hide a real client/server mismatch — same posture as the hub.
-		writeJSONRPCErrorStatus(w, tb.ID, http.StatusOK, jsonrpcInvalidRequest,
-			"unsupported protocolVersion", map[string]any{
-				"supported": supportedProtocolVersionsList(),
-				"requested": initParams.ProtocolVersion,
-			})
-		return
-	}
+	// Finding 1: NEGOTIATE rather than reject when the requested version is a
+	// well-formed string the router does not support. The negotiated version is
+	// the router default for an unsupported request, or the requested version
+	// itself when supported. It is what the result advertises AND what is stored
+	// as the session's negotiated version (so the tools/list gate, the
+	// version-keyed cache, and the tool-call version enforcement all key off the
+	// concrete version the session actually settled on).
 	negotiatedVersion := initParams.ProtocolVersion
+	if _, ok := supportedProtocolVersions[initParams.ProtocolVersion]; !ok {
+		negotiatedVersion = defaultProtocolVersion
+	}
 
 	sessionID := newMcpSessionID()
 	// Record the minted session + its negotiated version in the
@@ -567,7 +584,25 @@ func (s *Server) handleInitialize(w http.ResponseWriter, body []byte, tb *toolBo
 	// is the only place a router session is minted; the tools/list gate,
 	// the version-keyed tools/list cache, and the tool-call version
 	// enforcement all read from here, and the DELETE teardown unbinds it.
-	s.serenaRouterSessions.store(sessionID, negotiatedVersion)
+	//
+	// Finding 2 (P2, Codex PR #249 round-2): store returns the LRU-evicted client
+	// session id when the cap forced an eviction. Coordinate that evicted
+	// session's downstream sticky + daemon unbind here — AFTER store returns and
+	// the store lock is released (coordinateExpiredRouterSessionUnbind touches
+	// OTHER stores; doing it under routerSessionStore.mu would risk a
+	// lock-ordering deadlock). Without this, an evicted router session whose
+	// sticky/daemon bindings survived would have later pathless calls routed as
+	// LEGACY, bypassing the negotiated-version checks + coordinated expiry — the
+	// same reanimation class the ticker sweep and on-read expiry close. A nil
+	// production sessionRouter (deps unwired / test seam) is handled by the
+	// coordinator (it then unbinds only the daemon store).
+	if evictedID := s.serenaRouterSessions.store(sessionID, negotiatedVersion); evictedID != "" {
+		var sticky sessionRouter
+		if deps := s.serenaRouterDepsProd(); deps != nil {
+			sticky = deps.Sessions
+		}
+		s.coordinateExpiredRouterSessionUnbind(evictedID, sticky)
+	}
 	result := initializeResult{
 		ProtocolVersion: negotiatedVersion,
 		Capabilities: map[string]any{
@@ -1131,9 +1166,22 @@ func proxyToolsListOnce(ctx context.Context, httpClient *http.Client, upstreamUR
 		return proxyToolsListResult{}, daemonSessionID, daemonProtocolVersion, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return proxyToolsListResult{}, daemonSessionID, daemonProtocolVersion, fmt.Errorf("upstream tools/list -> status %d", resp.StatusCode)
-	}
+	// Finding 3 (P2, Codex PR #249 round-2 — preserve an upstream JSON-RPC error
+	// on a NON-2xx tools/list): a serena daemon that rejects a tools/list with a
+	// JSON-RPC error at HTTP 400 (e.g. an invalid cursor/params — the SAME status
+	// the router uses for its own -32602) ANSWERED with a well-formed JSON-RPC
+	// error. The pre-fix non-200 guard returned a transport error BEFORE reading
+	// the body, so fetchToolsListFromAnyDaemon treated it as a daemon TRANSPORT
+	// failure (tries other daemons → generic -32603), discarding a
+	// client-actionable error. We now read the body on a non-200 too and, when it
+	// carries a parseable JSON-RPC error, surface that error object so the caller
+	// runs the SAME isClientToolsListError classification as the 200 path (a
+	// CLIENT error like -32602 is forwarded + short-circuits other daemons; a
+	// SERVER error falls through to the next daemon). Only a non-200 with NO
+	// parseable JSON-RPC error body (a genuine transport/HTTP failure — e.g. a 5xx
+	// with no JSON body, or an unreadable body) stays a transport failure so the
+	// loop advances.
+	is200 := resp.StatusCode == http.StatusOK
 	// Finding 4: read INCREMENTALLY (same ReadAll-to-EOF hang as the
 	// handshake — a daemon that answers tools/list as a still-open SSE
 	// stream would otherwise block until the client timeout).
@@ -1141,25 +1189,45 @@ func proxyToolsListOnce(ctx context.Context, httpClient *http.Client, upstreamUR
 	// event for SSE, or a bounded read for application/json.
 	payload, rerr := readUpstreamJSONRPCResponse(resp.Header.Get("Content-Type"), resp.Body)
 	if rerr != nil {
+		if !is200 {
+			// Finding 3: a non-200 whose body could not even be read is a genuine
+			// transport/HTTP failure (e.g. a 5xx that hangs or resets) — surface the
+			// status so the caller tries the next daemon, not the unread-body error.
+			return proxyToolsListResult{}, daemonSessionID, daemonProtocolVersion, fmt.Errorf("upstream tools/list -> status %d", resp.StatusCode)
+		}
 		return proxyToolsListResult{}, daemonSessionID, daemonProtocolVersion, fmt.Errorf("read upstream tools/list: %w", rerr)
 	}
 	var rpc struct {
 		Result json.RawMessage `json:"result"`
 		Error  json.RawMessage `json:"error"`
 	}
-	if err := json.Unmarshal(payload, &rpc); err != nil {
-		return proxyToolsListResult{}, daemonSessionID, daemonProtocolVersion, fmt.Errorf("upstream tools/list non-JSON-RPC body: %w", err)
+	if uerr := json.Unmarshal(payload, &rpc); uerr != nil {
+		if !is200 {
+			// Finding 3: a non-200 with a non-JSON (or non-JSON-RPC) body is a
+			// genuine transport/HTTP failure (e.g. a 502 + an HTML error page). Keep
+			// it a transport failure so the loop advances to the next daemon.
+			return proxyToolsListResult{}, daemonSessionID, daemonProtocolVersion, fmt.Errorf("upstream tools/list -> status %d", resp.StatusCode)
+		}
+		return proxyToolsListResult{}, daemonSessionID, daemonProtocolVersion, fmt.Errorf("upstream tools/list non-JSON-RPC body: %w", uerr)
 	}
 	if len(rpc.Error) > 0 {
-		// Finding 4: the daemon ANSWERED with a well-formed JSON-RPC error
-		// envelope (e.g. -32602 for an invalid opaque cursor). The daemon IS
-		// available and is rejecting THIS request — it is NOT a transport
+		// Finding 4 + Finding 3: the daemon ANSWERED with a well-formed JSON-RPC
+		// error envelope (e.g. -32602 for an invalid opaque cursor) — on a 200 OR a
+		// non-2xx status (a daemon may pair a JSON-RPC error with HTTP 400). The
+		// daemon IS available and is rejecting THIS request — it is NOT a transport
 		// failure. Surface the raw error object so fetchToolsListFromAnyDaemon
-		// forwards it to the client UNCHANGED rather than skipping to other
-		// daemons and masking it with the router's generic -32603. (err stays
-		// nil: a daemon-level rejection is a successful round-trip, not a
-		// candidate failure.)
+		// CLASSIFIES it (isClientToolsListError) and either forwards it to the
+		// client UNCHANGED (client error → no other daemons) or falls through to the
+		// next daemon (server error), instead of masking it with the router's
+		// generic -32603. (err stays nil: a daemon-level rejection is a successful
+		// round-trip, not a candidate transport failure.)
 		return proxyToolsListResult{upstreamError: rpc.Error}, daemonSessionID, daemonProtocolVersion, nil
+	}
+	if !is200 {
+		// Finding 3: a non-200 whose body is valid JSON-RPC but carries NO error
+		// (and, below, no usable result) is still a transport/HTTP failure — the
+		// daemon did not answer the request. Surface the status so the loop advances.
+		return proxyToolsListResult{}, daemonSessionID, daemonProtocolVersion, fmt.Errorf("upstream tools/list -> status %d", resp.StatusCode)
 	}
 	if len(rpc.Result) == 0 {
 		return proxyToolsListResult{}, daemonSessionID, daemonProtocolVersion, fmt.Errorf("upstream tools/list returned no result")

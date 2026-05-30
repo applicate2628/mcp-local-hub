@@ -680,7 +680,31 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	// refresh) for this PRE-gate validation — a request rejected for a version
 	// mismatch below must NOT keep the session alive. lastSeen is refreshed via
 	// touch only AFTER the gate passes.
-	if sessionVersion, known := s.serenaRouterSessions.peekNegotiatedVersion(sessionID); known {
+	//
+	// Finding 4 (P2, Codex PR #249 round-2 — distinguish EXPIRED from absent on
+	// the PATH-BEARING branch, mirroring the pathless branch above): use the
+	// tri-state peekVersionState, NOT the boolean peekNegotiatedVersion (which
+	// collapses an expired session into known=false and so would treat a stale id
+	// as TRUE-legacy — fresh handshake + re-bind, letting an expired router
+	// session continue simply by including a path argument). The pathless branch
+	// (Round-13) already does this; the path-bearing branch did not, leaving the
+	// expired-session reanimation class open here. On routerSessionExpired (the
+	// id WAS minted here but idle-expired on this read; peekVersionState deleted
+	// the routerSessionStore entry), coordinate the sticky + daemon unbind for the
+	// id and abort with the router's "session terminated" -32600 — consistent with
+	// the pathless branch and the round-10 post-gate-touch abort. On
+	// routerSessionAbsent (never minted here → a TRUE-legacy / path-only caller),
+	// keep today's behavior: routerSessionKnown stays false, the raw header drives
+	// a fresh handshake. On routerSessionLive, today's behavior (the version gate
+	// + post-gate touch below run for the known session).
+	sessionVersion, sessionState := s.serenaRouterSessions.peekVersionState(sessionID)
+	if sessionState == routerSessionExpired {
+		s.coordinateExpiredRouterSessionUnbind(sessionID, deps.Sessions)
+		writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidRequest,
+			"session terminated", nil)
+		return
+	}
+	if sessionState == routerSessionLive {
 		routerSessionKnown = true
 		if clientProtocolVersion != "" && clientProtocolVersion != sessionVersion {
 			writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidRequest,

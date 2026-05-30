@@ -145,21 +145,29 @@ func (st *routerSessionStore) removeLocked(clientSessionID string) {
 }
 
 // evictLRULocked drops the least-recently-seen entry (the LRU list BACK) to
-// free room for a new store at capacity. No-op when the list is empty.
-// Caller MUST hold mu. Mirrors the hub's evictLRULocked
-// (internal/api/hub_mcp_session.go) — but the router store has no in-flight
-// concept, so there is no skip-if-busy walk: the eldest entry is always
-// evictable.
-func (st *routerSessionStore) evictLRULocked() {
+// free room for a new store at capacity and returns the evicted client session
+// id (or "" when the list is empty / nothing was evicted). Caller MUST hold mu.
+// Mirrors the hub's evictLRULocked (internal/api/hub_mcp_session.go) — but the
+// router store has no in-flight concept, so there is no skip-if-busy walk: the
+// eldest entry is always evictable.
+//
+// Finding 2 (P2, Codex PR #249 round-2): the evicted id is RETURNED rather than
+// silently dropped so the CALLER (handleInitialize, which holds the *Server/deps)
+// can coordinate the downstream sticky + daemon unbind for the evicted session
+// AFTER the store lock is released. coordinateExpiredRouterSessionUnbind touches
+// OTHER stores, so it must NOT run under routerSessionStore.mu (lock-ordering /
+// deadlock risk) — the id is carried out instead.
+func (st *routerSessionStore) evictLRULocked() string {
 	if st.lru == nil {
-		return
+		return ""
 	}
 	back := st.lru.Back()
 	if back == nil {
-		return
+		return ""
 	}
 	id, _ := back.Value.(string)
 	st.removeLocked(id)
+	return id
 }
 
 // store records (clientSessionID -> negotiatedVersion), replacing any
@@ -173,9 +181,22 @@ func (st *routerSessionStore) evictLRULocked() {
 // to be evicted. Re-storing an existing id (a re-bind on the same session)
 // updates its version + moves it to the front WITHOUT consuming a cap slot,
 // so it can never trigger an eviction.
-func (st *routerSessionStore) store(clientSessionID, negotiatedVersion string) {
+//
+// Finding 2 (P2, Codex PR #249 round-2): when a fresh insert evicts the eldest
+// entry, the evicted client session id is RETURNED (evictedID != "") so the
+// caller can coordinate the downstream sticky + daemon unbind for it. Without
+// this, an evicted router session whose sticky/daemon bindings survive would get
+// later pathless calls classified as routerSessionAbsent and routed as LEGACY,
+// bypassing the negotiated-version checks + coordinated expiry router sessions
+// get (the same reanimation class the ticker sweep + on-read expiry close). The
+// caller (handleInitialize) invokes coordinateExpiredRouterSessionUnbind on the
+// returned id AFTER this returns and the store lock is released — that coordinator
+// touches OTHER stores, so calling it under st.mu here would risk a lock-ordering
+// deadlock. evictedID is "" on the no-eviction path (re-store of an existing id,
+// or a fresh insert below the cap).
+func (st *routerSessionStore) store(clientSessionID, negotiatedVersion string) (evictedID string) {
 	if clientSessionID == "" {
-		return
+		return ""
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
@@ -188,18 +209,23 @@ func (st *routerSessionStore) store(clientSessionID, negotiatedVersion string) {
 			lastSeen:          st.now(),
 		}
 		st.lru.MoveToFront(el)
-		return
+		return ""
 	}
 	// New id: enforce the cap by evicting the eldest entry BEFORE inserting,
-	// so the post-insert size is <= maxRouterSessions.
+	// so the post-insert size is <= maxRouterSessions. Capture the evicted id so
+	// the caller can coordinate its downstream unbind (Finding 2). A self-eviction
+	// (the eldest id happening to equal clientSessionID) cannot occur here: this
+	// branch only runs when clientSessionID is NOT already in lruIndex, so it is
+	// not an LRU entry and cannot be the eviction victim.
 	if len(st.bindings) >= maxRouterSessions {
-		st.evictLRULocked()
+		evictedID = st.evictLRULocked()
 	}
 	st.bindings[clientSessionID] = &routerSessionBinding{
 		negotiatedVersion: negotiatedVersion,
 		lastSeen:          st.now(),
 	}
 	st.lruIndex[clientSessionID] = st.lru.PushFront(clientSessionID)
+	return evictedID
 }
 
 // peekNegotiatedVersion returns the protocol version a client session

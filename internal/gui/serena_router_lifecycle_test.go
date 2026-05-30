@@ -145,57 +145,117 @@ func TestSerenaRouter_Initialize_SynthesizesResultAndSession(t *testing.T) {
 	}
 }
 
-// P2 finding 5 — initialize with an UNSUPPORTED protocolVersion is
-// rejected with -32600 at HTTP 200 (JSON-RPC error in-band) carrying
-// error.data.supported + requested, NOT silently negotiated down to the
-// router default (which would hide a non-compliant client). Mirrors the
-// hub handler's strict-rejection posture
-// (internal/api/hub_mcp_handler.go). Replaces the pre-Finding-5
-// negotiate-down test.
-func TestSerenaRouter_Initialize_UnsupportedProtocolVersionRejected(t *testing.T) {
+// Finding 1 (P2, Codex PR #249 round-2) — initialize with a well-formed-string
+// but UNSUPPORTED protocolVersion is NEGOTIATED, not rejected: the router
+// responds 200 with defaultProtocolVersion as the negotiated
+// result.protocolVersion and mints a session bound to THAT version. This is a
+// DELIBERATE divergence from the hub (internal/api/hub_mcp_handler.go), which
+// rejects because it fronts HETEROGENEOUS daemons; the serena router fronts
+// HOMOGENEOUS serena daemons so it CAN and SHOULD negotiate down per the MCP
+// lifecycle spec (a server MUST respond with a version it supports when it does
+// not support the requested one). Replaces the prior strict-reject test (which
+// itself replaced an earlier negotiate-down test — the spec-correct behavior
+// is restored for this homogeneous router). A future ("2099-01-01") version and
+// an old ("1999-01-01") version are both well-formed-unsupported and both
+// negotiate; the future one is the motivating forward-compatible-client case.
+func TestSerenaRouter_Initialize_UnsupportedProtocolVersionNegotiated(t *testing.T) {
 	deps := &serenaRouterDeps{Resolver: &stubResolver{}, Sessions: NewInMemorySessionRouter()}
 	s := newSerenaTestServer(t, deps)
 
-	body := buildLifecycleBody(t, "initialize", map[string]any{
-		"protocolVersion": "1999-01-01",
-		"capabilities":    map[string]any{},
-	})
-	rr := postSerena(t, s, body, nil)
-	// JSON-RPC errors are carried in-band at HTTP 200 (matches the hub's
-	// unsupported-version path).
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (in-band JSON-RPC error); body=%s", rr.Code, rr.Body.String())
+	for _, requested := range []string{"2099-01-01", "1999-01-01"} {
+		t.Run(requested, func(t *testing.T) {
+			// Precondition: the requested version must genuinely be unsupported, else
+			// this asserts the echo path instead of negotiation.
+			if _, ok := supportedProtocolVersions[requested]; ok {
+				t.Fatalf("precondition: %q must be UNSUPPORTED for this test", requested)
+			}
+			body := buildLifecycleBody(t, "initialize", map[string]any{
+				"protocolVersion": requested,
+				"capabilities":    map[string]any{},
+			})
+			rr := postSerena(t, s, body, nil)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200 (negotiated, not rejected); body=%s", rr.Code, rr.Body.String())
+			}
+			var resp struct {
+				ID     json.RawMessage `json:"id"`
+				Result *struct {
+					ProtocolVersion string `json:"protocolVersion"`
+				} `json:"result"`
+				Error json.RawMessage `json:"error"`
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("decode: %v; raw=%s", err, rr.Body.String())
+			}
+			if len(resp.Error) > 0 {
+				t.Fatalf("error present on an unsupported-version initialize; want negotiated result. error=%s", string(resp.Error))
+			}
+			if resp.Result == nil {
+				t.Fatalf("result missing; want a negotiated InitializeResult; raw=%s", rr.Body.String())
+			}
+			// Negotiated DOWN to the router default, NOT the (unsupported) requested.
+			if resp.Result.ProtocolVersion != defaultProtocolVersion {
+				t.Errorf("negotiated protocolVersion = %q, want defaultProtocolVersion %q", resp.Result.ProtocolVersion, defaultProtocolVersion)
+			}
+			// A session IS minted on a negotiated initialize.
+			sid := rr.Header().Get("Mcp-Session-Id")
+			if sid == "" {
+				t.Fatalf("negotiated initialize minted no Mcp-Session-Id; want one")
+			}
+			// And it is stored against the NEGOTIATED version (not the requested one):
+			// a subsequent tools/list carrying the default version must NOT be a
+			// protocol-version mismatch, while one carrying the unsupported requested
+			// version must be (the session settled on the default).
+			if v, ok := s.serenaRouterSessions.peekNegotiatedVersion(sid); !ok || v != defaultProtocolVersion {
+				t.Errorf("stored negotiated version = (%q, %v), want (%q, true)", v, ok, defaultProtocolVersion)
+			}
+		})
 	}
-	var resp struct {
-		ID     json.RawMessage `json:"id"`
-		Result json.RawMessage `json:"result"`
-		Error  *struct {
-			Code    int            `json:"code"`
-			Message string         `json:"message"`
-			Data    map[string]any `json:"data"`
-		} `json:"error"`
+}
+
+// Finding 1 (P2, Codex PR #249 round-2 — the MALFORMED cases are still -32602,
+// NOT negotiated). A missing/empty protocolVersion and a non-string
+// (type-mismatched) protocolVersion are MALFORMED requests, distinct from a
+// well-formed-but-unsupported version. They keep the strict -32602 rejection and
+// mint no session, so the negotiation in Finding 1 cannot mask a genuinely
+// malformed initialize. (The dedicated missing/type-mismatch tests below assert
+// the full shape; this pins the boundary against the new negotiation path.)
+func TestSerenaRouter_Initialize_MalformedVersionNotNegotiated(t *testing.T) {
+	deps := &serenaRouterDeps{Resolver: &stubResolver{}, Sessions: NewInMemorySessionRouter()}
+	s := newSerenaTestServer(t, deps)
+
+	cases := []struct {
+		name string
+		body []byte
+	}{
+		{"missing", buildLifecycleBody(t, "initialize", map[string]any{"capabilities": map[string]any{}})},
+		{"non-string", []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":123,"capabilities":{}}}`)},
 	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v; raw=%s", err, rr.Body.String())
-	}
-	if len(resp.Result) > 0 {
-		t.Errorf("result present on unsupported-version initialize; want error only. result=%s", string(resp.Result))
-	}
-	if resp.Error == nil {
-		t.Fatalf("expected JSON-RPC error for unsupported protocolVersion; raw=%s", rr.Body.String())
-	}
-	if resp.Error.Code != jsonrpcInvalidRequest {
-		t.Errorf("error code = %d, want %d (-32600)", resp.Error.Code, jsonrpcInvalidRequest)
-	}
-	if resp.Error.Data["requested"] != "1999-01-01" {
-		t.Errorf("error.data.requested = %v, want 1999-01-01", resp.Error.Data["requested"])
-	}
-	if _, ok := resp.Error.Data["supported"]; !ok {
-		t.Errorf("error.data missing supported list; got %v", resp.Error.Data)
-	}
-	// No session must be minted on a rejected initialize.
-	if sid := rr.Header().Get("Mcp-Session-Id"); sid != "" {
-		t.Errorf("unsupported-version initialize minted Mcp-Session-Id %q; a rejected initialize gets no session", sid)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := postSerena(t, s, tc.body, nil)
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400 (-32602, not negotiated); body=%s", rr.Code, rr.Body.String())
+			}
+			var resp struct {
+				Result json.RawMessage `json:"result"`
+				Error  *struct {
+					Code int `json:"code"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("decode: %v; raw=%s", err, rr.Body.String())
+			}
+			if len(resp.Result) > 0 {
+				t.Errorf("result present on a malformed-version initialize; want -32602 error only")
+			}
+			if resp.Error == nil || resp.Error.Code != jsonrpcInvalidParams {
+				t.Fatalf("expected -32602 invalid-params; got %+v", resp.Error)
+			}
+			if sid := rr.Header().Get("Mcp-Session-Id"); sid != "" {
+				t.Errorf("malformed-version initialize minted Mcp-Session-Id %q; want none", sid)
+			}
+		})
 	}
 }
 
