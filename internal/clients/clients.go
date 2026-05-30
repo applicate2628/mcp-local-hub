@@ -145,7 +145,35 @@ type Client interface {
 	// cannot be opened or parsed. Idempotent if the live config is
 	// already in the backup's shape. Other entries in the live config
 	// are untouched.
+	//
+	// Defensively refuses (ErrBackupEntryAlreadyMigrated) when the
+	// backup's copy of the entry is itself already in hub-managed shape
+	// — the demigrate guard that prevents restoring a hub-HTTP /
+	// hub-relay entry as if it were the pre-hub form. This is the
+	// correct behavior for the normal demigrate flow.
 	RestoreEntryFromBackup(backupPath, name string) error
+
+	// RestoreEntryFromBackupForRollback is RestoreEntryFromBackup with
+	// the ErrBackupEntryAlreadyMigrated demigrate guard BYPASSED: it
+	// writes the backup's copy of the named entry to the live config
+	// verbatim even when that copy is in hub-managed shape (a loopback
+	// hub-HTTP URL for URL clients, or an mcphub `relay` invocation for
+	// Antigravity). Every other behavior is identical to
+	// RestoreEntryFromBackup (restore the snapshotted entry, or remove
+	// the live entry when the backup lacks it; other entries untouched).
+	//
+	// This exists for ONE caller: the serena dynamic-pool migrate's
+	// controlled abort-rollback (RestoreSerenaReconcileApplied). When
+	// the migrate rewrites pre-cutover clients legacy-9121 → /serena/mcp
+	// and then aborts before committing the dynamic-pool intent, each
+	// rewritten client's pre-reconcile backup IS the legacy hub entry
+	// (`http://localhost:9121/mcp`, or Antigravity's `mcphub relay`
+	// form). Restoring that known pre-reconcile snapshot is exactly what
+	// the rollback must do, but RestoreEntryFromBackup would reject it
+	// with ErrBackupEntryAlreadyMigrated. The rollback path uses this
+	// variant to put the verbatim pre-reconcile bytes back; the
+	// demigrate guard stays in force for the normal demigrate flow.
+	RestoreEntryFromBackupForRollback(backupPath, name string) error
 
 	// BackupContainsEntry reports whether the backup file at backupPath
 	// has a parsed server entry named `name`. Used by Demigrate's

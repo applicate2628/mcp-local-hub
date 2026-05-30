@@ -348,9 +348,22 @@ func ReconcileSerenaClientsToRouter(ctx context.Context, opts SerenaReconcileOpt
 // allClients is the {name -> adapter} map to restore against (the same
 // surface the reconcile rewrote); nil → clients.AllClients(). Restore is
 // best-effort per client: a client whose adapter is missing, whose backup
-// path was not recorded (dry-run / empty), or whose RestoreEntryFromBackup
-// errors is collected into the returned joined error, but every other client
-// is still attempted so one failure does not strand the rest on the router.
+// path was not recorded (dry-run / empty), or whose restore errors is
+// collected into the returned joined error, but every other client is still
+// attempted so one failure does not strand the rest on the router.
+//
+// CRITICAL — this restore uses RestoreEntryFromBackupForRollback, NOT the
+// plain RestoreEntryFromBackup. The per-client backup captured before the
+// reconcile rewrite is the client's PRE-RECONCILE state, which for a normal
+// pre-cutover serena client IS the legacy hub entry (loopback
+// http://localhost:9121/mcp for URL clients, or the `mcphub relay` form for
+// Antigravity). RestoreEntryFromBackup defends the demigrate flow by
+// REFUSING to write a hub-managed-shaped backup entry
+// (ErrBackupEntryAlreadyMigrated) — which would make this abort-rollback
+// FAIL and strand the already-rewritten clients on /serena/mcp even though
+// the migration aborted (no dynamic-pool intent, no daemons). The rollback
+// variant bypasses that guard to put the exact pre-reconcile bytes back; the
+// demigrate guard stays in force for the normal demigrate flow.
 func RestoreSerenaReconcileApplied(report *MigrateReport, allClients map[string]clients.Client) error {
 	if report == nil {
 		return nil
@@ -370,7 +383,7 @@ func RestoreSerenaReconcileApplied(report *MigrateReport, allClients map[string]
 			errs = append(errs, fmt.Errorf("restore %s/%s: no adapter on this host", app.Server, app.Client))
 			continue
 		}
-		if rerr := adapter.RestoreEntryFromBackup(app.BackupPath, serenaEntryName); rerr != nil {
+		if rerr := adapter.RestoreEntryFromBackupForRollback(app.BackupPath, serenaEntryName); rerr != nil {
 			errs = append(errs, fmt.Errorf("restore %s/%s from %s: %w", app.Server, app.Client, app.BackupPath, rerr))
 		}
 	}

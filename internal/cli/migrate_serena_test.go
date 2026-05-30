@@ -267,21 +267,38 @@ func loadRegistrySerenaPorts(t *testing.T, regPath string) map[string]int {
 // 1. Already-migrated → idempotent exit-0.
 // ---------------------------------------------------------------------------
 
-func TestMigrateSerena_AlreadyMigrated_Idempotent(t *testing.T) {
+// TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds is the
+// finding #2 regression guard (and the corrected contract that replaces the
+// pre-fix catalog-shape no-op). The no-op decision is RUNTIME-AUTHORITATIVE: a
+// dynamic-pool-shaped CATALOG (a future embedded-manifest update, or an operator
+// editing only the manifest) does NOT make the migrate a no-op while THIS host's
+// committed runtime intent is still legacy/missing. The catalog shape only
+// classifies the SOURCE for building the manifest; with the cutover not yet run
+// on this host, the migrate must PROCEED so the operator can actually cut over.
+//
+// (Before the fix, the catalog-shape branch short-circuited to no-op BEFORE the
+// runtime check, leaving the legacy clients/supervisor in place with no way to
+// run the cutover.)
+func TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds(t *testing.T) {
 	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	// CATALOG is ALREADY dynamic-pool shape (daemon_template present, no
+	// daemons[]) → detectSerenaSourceState classifies it serenaSourceAlreadyMigrated.
 	seedSerenaManifest(t, manifestDir, alreadyMigratedManifestYAML)
+	// RUNTIME intent is MISSING (no supervisor-intent.json seeded) → the cutover
+	// has NOT happened on this host.
 
-	// Guard: install + reconcile + reap + start must NOT be invoked on the
-	// already-migrated no-op path.
-	installInvoked := false
+	// One registered serena workspace (with a port already, rooted at an existing
+	// dir) so the install fan-out materializes a spec-bearing row and the cutover
+	// reap-first sequence (reap → install → start) fires — the strongest proof the
+	// migrate PROCEEDED rather than no-op'd.
+	ws := t.TempDir()
+	seedSerenaWorkspace(t, ws)
+
 	reconcileInvoked := false
 	reapInvoked := false
 	startInvoked := false
-	restoreInstall := stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
-		installInvoked = true
-		return "", nil
-	})
-	defer restoreInstall()
+	// REAL install (no stub) so the spec-bearing intent is actually written and we
+	// can assert the cutover landed on disk.
 	restoreReconcile := stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
 		reconcileInvoked = true
 		return &api.MigrateReport{}, nil
@@ -300,17 +317,28 @@ func TestMigrateSerena_AlreadyMigrated_Idempotent(t *testing.T) {
 
 	var buf bytes.Buffer
 	if err := runMigrateSerenaDynamicPool(context.Background(), &buf); err != nil {
-		t.Fatalf("already-migrated must be a no-op exit-0; got error: %v", err)
+		t.Fatalf("catalog-dynamic-pool + runtime-missing must PROCEED with the migration; got error: %v", err)
 	}
-	if installInvoked || reconcileInvoked || reapInvoked || startInvoked {
-		t.Errorf("already-migrated path must not install/reconcile/reap/start (install=%v reconcile=%v reap=%v start=%v)", installInvoked, reconcileInvoked, reapInvoked, startInvoked)
+
+	// The migration must have PROCEEDED: reconcile + reap + start all fired (the
+	// full cutover sequence), NOT a no-op.
+	if !reconcileInvoked || !reapInvoked || !startInvoked {
+		t.Fatalf("catalog-dynamic-pool + runtime-missing must run the cutover (reconcile=%v reap=%v start=%v); a catalog-only no-op is the finding #2 bug",
+			reconcileInvoked, reapInvoked, startInvoked)
 	}
-	if !strings.Contains(buf.String(), "already migrated") {
-		t.Errorf("output should explain the no-op; got %q", buf.String())
+	// The no-op message must NOT appear.
+	if strings.Contains(buf.String(), "nothing to do") {
+		t.Errorf("the migrate must not report a no-op when the runtime is still legacy/missing; got %q", buf.String())
 	}
-	// No supervisor-intent.json written.
-	if _, err := os.Stat(filepath.Join(stateDir, "supervisor-intent.json")); !os.IsNotExist(err) {
-		t.Errorf("already-migrated must write nothing; stat supervisor-intent.json err = %v", err)
+	// A spec-bearing supervisor-intent.json must now be on disk (the cutover
+	// committed the dynamic-pool intent).
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	intent, err := api.ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("cutover must write supervisor-intent.json; read err = %v", err)
+	}
+	if !intent.HasRuntimeSpecRow() {
+		t.Errorf("cutover must write a spec-bearing serena intent for the registered workspace; got %+v", intent.Daemons)
 	}
 }
 
@@ -565,6 +593,103 @@ func TestMigrateSerena_RollbackRestoresRegistry_OnInstallFailure(t *testing.T) {
 		if afterReg[key] != port {
 			t.Errorf("registry rollback mismatch for %s: before port=%d, after port=%d", key, port, afterReg[key])
 		}
+	}
+}
+
+// TestMigrateSerena_RegistryRollback_SurgicalPreservesConcurrentSerenaRow is the
+// finding #1 regression guard. The registry rollback (restoreSerenaRegistryRelocking)
+// runs after the lock was released during the reconcile/reap window (round-2
+// Fix 3), so a CONCURRENT `mcphub workspace register` for serena may have
+// committed a NEW serena row during that window. The old blanket
+// "drop every serena row, re-add the snapshot" reset DELETED that concurrent
+// row even though the migrate never touched it. The surgical restore must
+// revert ONLY the snapshotted workspace keys and leave the concurrent serena
+// row (and any non-serena row) intact.
+func TestMigrateSerena_RegistryRollback_SurgicalPreservesConcurrentSerenaRow(t *testing.T) {
+	migrateSerenaTestEnv(t)
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		t.Fatalf("registry path: %v", err)
+	}
+
+	// Snapshot = the serena rows as the migrate saw them BEFORE allocation:
+	// workspace A with NO port yet (the migrate would allocate one).
+	wsA := api.WorkspaceKey("/ws/a")
+	snapshot := []api.WorkspaceEntry{{
+		WorkspaceKey:  wsA,
+		WorkspacePath: "/ws/a",
+		Language:      api.SerenaLanguageSentinel,
+		Backend:       "serena",
+		Port:          0,
+	}}
+
+	// On-disk registry as it stands at rollback time:
+	//   - workspace A: the migrate allocated port 9150 (must be reverted to 0).
+	//   - workspace B: a CONCURRENT serena registration that committed during
+	//     the released-lock window (NOT in the snapshot → must survive).
+	//   - workspace C: a non-serena LSP row (must survive).
+	wsB := api.WorkspaceKey("/ws/b")
+	wsC := api.WorkspaceKey("/ws/c")
+	reg := api.NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("load registry: %v", err)
+	}
+	if err := reg.PutSerena(api.WorkspaceEntry{
+		WorkspaceKey: wsA, WorkspacePath: "/ws/a", Language: api.SerenaLanguageSentinel, Backend: "serena", Port: 9150,
+	}); err != nil {
+		t.Fatalf("put serena A: %v", err)
+	}
+	if err := reg.PutSerena(api.WorkspaceEntry{
+		WorkspaceKey: wsB, WorkspacePath: "/ws/b", Language: api.SerenaLanguageSentinel, Backend: "serena", Port: 9151,
+	}); err != nil {
+		t.Fatalf("put serena B (concurrent): %v", err)
+	}
+	if err := reg.PutLSP(api.WorkspaceEntry{
+		WorkspaceKey: wsC, WorkspacePath: "/ws/c", Language: "go", Port: 9300,
+	}); err != nil {
+		t.Fatalf("put LSP C: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("save registry: %v", err)
+	}
+
+	// Run the surgical rollback.
+	if err := restoreSerenaRegistryRelocking(regPath, snapshot); err != nil {
+		t.Fatalf("restoreSerenaRegistryRelocking: %v", err)
+	}
+
+	// Re-read and assert.
+	after := api.NewRegistry(regPath)
+	if err := after.Load(); err != nil {
+		t.Fatalf("reload registry: %v", err)
+	}
+
+	// A: reverted to the pre-migrate snapshot (port 0).
+	gotA, okA := after.GetSerena(wsA)
+	if !okA {
+		t.Fatalf("workspace A serena row missing after rollback")
+	}
+	if gotA.Port != 0 {
+		t.Errorf("workspace A port = %d after rollback, want 0 (reverted to pre-migrate snapshot)", gotA.Port)
+	}
+
+	// B: the concurrent serena registration MUST survive unchanged (this is the
+	// bug the surgical restore fixes — the old blanket reset deleted it).
+	gotB, okB := after.GetSerena(wsB)
+	if !okB {
+		t.Fatalf("concurrent serena workspace B was DELETED by the rollback — finding #1 regression (surgical restore must preserve serena rows not in the snapshot)")
+	}
+	if gotB.Port != 9151 {
+		t.Errorf("concurrent serena workspace B port = %d after rollback, want 9151 (untouched)", gotB.Port)
+	}
+
+	// C: the non-serena LSP row MUST survive unchanged.
+	gotC, okC := after.Get(wsC, "go")
+	if !okC {
+		t.Fatalf("non-serena LSP workspace C was DELETED by the rollback")
+	}
+	if gotC.Port != 9300 {
+		t.Errorf("LSP workspace C port = %d after rollback, want 9300 (untouched)", gotC.Port)
 	}
 }
 

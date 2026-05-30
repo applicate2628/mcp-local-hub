@@ -15,13 +15,16 @@
 // Sequence (design §6 + §7.1; REAP-FIRST ordering — bot PR #250):
 //
 //  1. Source-state detect — catalog AND runtime. The catalog shape (parent plan
-//     §D.3 table) classifies legacy-2-daemon / intermediate-unified / malformed,
-//     but it is NEVER rewritten, so it alone cannot mark "already migrated"
-//     (catalog-shape would re-trigger forever). The AUTHORITATIVE
-//     already-migrated signal is the committed supervisor-intent.json carrying a
-//     dynamic-pool serena row (a serena daemon with a materialized runtime_spec).
-//     Either signal → idempotent exit-0 (no reap, no write, no restart — never
-//     bounce a healthy supervisor).
+//     §D.3 table) classifies legacy-2-daemon / intermediate-unified /
+//     already-migrated / malformed, but it is NEVER rewritten, so it CANNOT
+//     short-circuit to a no-op — it only classifies the SOURCE for building the
+//     manifest (finding #2). The AUTHORITATIVE "did the cutover happen" signal is
+//     the committed supervisor-intent.json carrying a dynamic-pool serena row (a
+//     serena daemon with a materialized runtime_spec): runtime dynamic-pool →
+//     idempotent exit-0 if the supervisor is healthy, else recovery-start (Fix 5);
+//     runtime legacy/missing → PROCEED with the cutover REGARDLESS of catalog
+//     shape (a dynamic-pool catalog can ship while this host's runtime is still
+//     legacy). A malformed catalog still hard-errors at detect time.
 //  2. Build the dynamic-pool manifest in memory (NOT written to disk) + allocate
 //     a pool port per workspace + register (OUTER rollback armed: registry).
 //  3. Client-reconcile to the constant /serena/mcp router. FAIL on partial: if
@@ -323,25 +326,22 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 		return err
 	}
 
-	// 2. already-migrated → idempotent no-op, exit 0, zero writes. TWO signals
-	//    are checked, EITHER of which means "nothing to do":
+	// 2. already-migrated decision — RUNTIME-AUTHORITATIVE (finding #2 + #5).
+	//    The committed supervisor-intent.json is the SINGLE source of truth for
+	//    "did the cutover already happen". The catalog shape (detectSerenaSourceState
+	//    above) classifies the SOURCE for BUILDING the dynamic-pool manifest, but
+	//    it MUST NOT short-circuit to a no-op: the migrate never rewrites the
+	//    catalog, so a dynamic-pool-shaped catalog can legitimately coexist with a
+	//    still-legacy runtime — e.g. a future embedded-manifest update ships the
+	//    dynamic-pool catalog, or an operator edits only the manifest, while THIS
+	//    host's committed intent is still legacy/missing. A catalog-only no-op
+	//    there would strand the operator: the legacy clients/supervisor stay in
+	//    place with NO way to run the cutover. So:
 	//
-	//    (a) catalog shape — the embedded/effective manifest is the dynamic-pool
-	//        daemon_template form (detectSerenaSourceState above). Only relevant
-	//        if the on-disk manifest was ever updated by hand; the migrate never
-	//        rewrites it.
-	//    (b) RUNTIME shape (finding #5, the authoritative one) — the committed
-	//        supervisor-intent.json already carries a serena dynamic-pool row (a
-	//        serena daemon with a materialized runtime_spec). The migrate never
-	//        touches the catalog, so catalog-shape ALONE would re-trigger the
-	//        migration forever; the runtime intent is the truth for "did the
-	//        cutover already happen". When it is already dynamic-pool we MUST NOT
-	//        reap/write/restart — bouncing a healthy supervisor and re-reaping is
-	//        the regression #5 closes.
-	if state == serenaSourceAlreadyMigrated {
-		fmt.Fprintln(w, "serena is already migrated to the dynamic pool (catalog shape); nothing to do.")
-		return nil
-	}
+	//      - runtime intent already dynamic-pool → the Fix-5 health-check branch
+	//        below (no-op if the supervisor is healthy; recovery-start otherwise).
+	//      - runtime intent legacy/missing → PROCEED with the migration REGARDLESS
+	//        of catalog shape (the cutover has not happened on this host).
 	alreadyMigrated, amErr := serenaRuntimeIntentIsDynamicPool()
 	if amErr != nil {
 		return fmt.Errorf("inspect supervisor-intent.json for an existing serena dynamic-pool migration: %w", amErr)
@@ -778,11 +778,26 @@ func snapshotSerenaRows(reg *api.Registry) []api.WorkspaceEntry {
 // Fix 3 releases the registry lock right after the migrate's Save (so the
 // multi-second reconcile + reap do not block concurrent registry ops), this
 // restore must RE-ACQUIRE the lock itself. It then RELOADS the current on-disk
-// registry (preserving any concurrent writer's non-serena rows and serena rows
-// this migrate did not touch) and resets the serena rows to the pre-migrate
-// snapshot: every serena row currently on disk is dropped and the snapshot's
-// serena rows are re-added, reverting exactly the port allocations this migrate
-// made. The lock is always released before returning (no leaked lock).
+// registry and restores ONLY the serena rows the migrate actually snapshotted —
+// it is SURGICAL (finding #1), not a blanket drop-all-serena-rows reset.
+//
+// The migrate's only serena mutation is allocateSerenaMigratePorts, which
+// iterates the serena rows that existed when serenaSnapshot was taken and
+// assigns each a pool port + task name (PutSerena upsert) — it NEVER adds a
+// serena row for a workspace key absent from the snapshot. So the exact set of
+// serena keys the migrate could have changed IS the snapshot's key set.
+// Restoring is therefore an upsert of each snapshot row back to its
+// pre-migrate port/fields.
+//
+// Crucially, any serena row whose workspace key is NOT in the snapshot is a
+// row the migrate never touched — most importantly a CONCURRENT
+// `mcphub workspace register` for serena that committed a NEW row during the
+// released-lock window. The old blanket "drop every serena row, re-add the
+// snapshot" reset DELETED that concurrent registration even though the migrate
+// never touched it. The surgical restore leaves every non-snapshotted serena
+// row (and every non-serena row) intact and reverts only the snapshotted keys.
+//
+// The lock is always released before returning (no leaked lock).
 func restoreSerenaRegistryRelocking(regPath string, serenaSnapshot []api.WorkspaceEntry) error {
 	reg := api.NewRegistry(regPath)
 	unlock, err := reg.Lock()
@@ -793,21 +808,16 @@ func restoreSerenaRegistryRelocking(regPath string, serenaSnapshot []api.Workspa
 	if err := reg.Load(); err != nil {
 		return fmt.Errorf("restore registry: reload: %w", err)
 	}
-	// Drop every current serena row, then re-add the pre-migrate snapshot
-	// serena rows. Non-serena rows are preserved from the reloaded disk state
-	// (concurrent non-serena writes during the unlocked window survive); the
-	// migrate is the only serena writer in practice, so dropping current
-	// serena rows + restoring the snapshot reverts exactly this migrate's
-	// allocations.
-	rebuilt := make([]api.WorkspaceEntry, 0, len(reg.Workspaces)+len(serenaSnapshot))
-	for _, e := range reg.Workspaces {
-		if e.Language == api.SerenaLanguageSentinel {
-			continue
+	// Upsert each snapshotted serena row back to its pre-migrate state. PutSerena
+	// is an in-place upsert keyed on (WorkspaceKey, @serena), so this reverts the
+	// port/task-name the migrate assigned to exactly the snapshotted keys and
+	// leaves every other row — non-serena rows AND concurrent new serena
+	// registrations not in the snapshot — untouched on the reloaded disk state.
+	for _, e := range serenaSnapshot {
+		if err := reg.PutSerena(e); err != nil {
+			return fmt.Errorf("restore registry: put serena row for workspace_key %s: %w", e.WorkspaceKey, err)
 		}
-		rebuilt = append(rebuilt, e)
 	}
-	rebuilt = append(rebuilt, serenaSnapshot...)
-	reg.Workspaces = rebuilt
 	if err := reg.Save(); err != nil {
 		return fmt.Errorf("restore registry: save: %w", err)
 	}

@@ -157,6 +157,26 @@ func (j *jsonMCPClient) LatestBackupPath() (string, bool, error) {
 // Both paths return ErrBackupEntryAlreadyMigrated so Demigrate can
 // surface a clear operator-facing failure row.
 func (j *jsonMCPClient) RestoreEntryFromBackup(backupPath, name string) error {
+	return j.restoreEntryFromBackup(backupPath, name, false)
+}
+
+// RestoreEntryFromBackupForRollback restores the backup's entry verbatim,
+// bypassing the ErrBackupEntryAlreadyMigrated guard (see the interface
+// doc on Client.RestoreEntryFromBackupForRollback). Used only by the
+// serena dynamic-pool migrate abort-rollback. Inherited by geminiCLI,
+// qwenCLI, cursorClient, and antigravityClient via struct embedding —
+// which is exactly why the serena reconcile (which rewrites all of those)
+// can roll each one back through this one method.
+func (j *jsonMCPClient) RestoreEntryFromBackupForRollback(backupPath, name string) error {
+	return j.restoreEntryFromBackup(backupPath, name, true)
+}
+
+// restoreEntryFromBackup is the shared body. When allowHubEntry is false
+// (demigrate) it refuses a backup entry already in hub-managed shape
+// (hub-HTTP loopback URL for URL clients; mcphub `relay` invocation for
+// Antigravity) with ErrBackupEntryAlreadyMigrated; when true (migrate
+// rollback) it writes the backup bytes verbatim regardless of shape.
+func (j *jsonMCPClient) restoreEntryFromBackup(backupPath, name string, allowHubEntry bool) error {
 	backupData, err := os.ReadFile(backupPath)
 	if err != nil {
 		return fmt.Errorf("read backup %s: %w", backupPath, err)
@@ -178,23 +198,28 @@ func (j *jsonMCPClient) RestoreEntryFromBackup(backupPath, name string) error {
 	}
 	if backupServers != nil {
 		if backupEntry, present := backupServers[name]; present {
-			if rawMap, ok := backupEntry.(map[string]any); ok {
-				if j.urlField == "url" || j.urlField == "httpUrl" {
-					// Hub-HTTP shape: loopback URL present,
-					// `command` absent. User-configured remote HTTP
-					// entries pass through.
-					if urlStr, _ := rawMap[j.urlField].(string); IsHubHTTPURL(urlStr) {
-						if _, hasCmd := rawMap["command"]; !hasCmd {
-							return ErrBackupEntryAlreadyMigrated
-						}
-					}
-				} else {
-					// Antigravity hub-relay shape: command is mcphub,
-					// args[0] == "relay".
-					if cmd, _ := rawMap["command"].(string); IsMcphubBinary(cmd) {
-						if args, ok := rawMap["args"].([]any); ok && len(args) > 0 {
-							if first, _ := args[0].(string); first == "relay" {
+			// Defensive guard (demigrate flow only — the rollback
+			// caller passes allowHubEntry=true to restore the
+			// pre-reconcile legacy hub entry verbatim).
+			if !allowHubEntry {
+				if rawMap, ok := backupEntry.(map[string]any); ok {
+					if j.urlField == "url" || j.urlField == "httpUrl" {
+						// Hub-HTTP shape: loopback URL present,
+						// `command` absent. User-configured remote HTTP
+						// entries pass through.
+						if urlStr, _ := rawMap[j.urlField].(string); IsHubHTTPURL(urlStr) {
+							if _, hasCmd := rawMap["command"]; !hasCmd {
 								return ErrBackupEntryAlreadyMigrated
+							}
+						}
+					} else {
+						// Antigravity hub-relay shape: command is mcphub,
+						// args[0] == "relay".
+						if cmd, _ := rawMap["command"].(string); IsMcphubBinary(cmd) {
+							if args, ok := rawMap["args"].([]any); ok && len(args) > 0 {
+								if first, _ := args[0].(string); first == "relay" {
+									return ErrBackupEntryAlreadyMigrated
+								}
 							}
 						}
 					}
