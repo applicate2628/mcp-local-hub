@@ -321,6 +321,10 @@ func TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds(t *testi
 	// reaps it before the spec-bearing write. The no-supervisor cutover is its own
 	// test (TestMigrateSerena_NoRunningSupervisor_SkipsReap_WritesAndStarts).
 	defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
+	// Stub start-support TRUE so this test exercises the install/reconcile/reap/start
+	// path on non-Windows CI too (the default binding is false off Windows — bot PR
+	// #250 finding #3; without it the run exits at the unsupported-start preflight).
+	defer stubStartSupported(t, func() bool { return true })()
 
 	reconcileInvoked := false
 	reapInvoked := false
@@ -488,6 +492,9 @@ func TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite(t *testing.T) {
 	seedSerenaWorkspace(t, ws)
 	// Model a running supervisor so the cutover reaps it (finding #3).
 	defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
+	// Start-support TRUE so the install/reap/start path runs on non-Windows CI too
+	// (default false off Windows — finding #3).
+	defer stubStartSupported(t, func() bool { return true })()
 
 	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
 	reapInvoked := false
@@ -565,6 +572,9 @@ func TestMigrateSerena_RollbackRestoresRegistry_OnInstallFailure(t *testing.T) {
 	// Model a running supervisor so the cutover reaps it; the reap is what makes
 	// the recovery start fire after the install failure (finding #3).
 	defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
+	// Start-support TRUE so the install path (which then fails) runs on non-Windows
+	// CI too (default false off Windows — finding #3).
+	defer stubStartSupported(t, func() bool { return true })()
 
 	// Snapshot the registry BEFORE the migrate.
 	regPath, err := api.DefaultRegistryPath()
@@ -828,6 +838,9 @@ func TestMigrateSerena_DrivesSupervisorRestart(t *testing.T) {
 	// Both subtests model a RUNNING supervisor so the cutover reaps it before the
 	// spec-bearing write (finding #3). The parent-level defer covers both subtests.
 	defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
+	// Start-support TRUE (parent-level, covers both subtests) so the install/reap/
+	// start path runs on non-Windows CI too (default false off Windows — finding #3).
+	defer stubStartSupported(t, func() bool { return true })()
 
 	restoreReconcile := stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
 		return &api.MigrateReport{}, nil
@@ -1068,6 +1081,9 @@ func TestMigrateSerena_NilSpecRowsHealedBeforeSpawn(t *testing.T) {
 	seedSerenaWorkspace(t, ws)
 	// Model a running supervisor so the cutover reaps it (finding #3).
 	defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
+	// Start-support TRUE so the install/reap/start path runs on non-Windows CI too
+	// (default false off Windows — finding #3).
+	defer stubStartSupported(t, func() bool { return true })()
 
 	// Seed a PRE-EXISTING supervisor-intent.json carrying a nil-spec serena
 	// row for the same workspace (the pre-RuntimeSpec on-disk state §7).
@@ -1164,6 +1180,10 @@ func TestMigrateSerena_LiveSupervisor_ReapClearsTheGateBeforeWrite(t *testing.T)
 	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
 	ws := t.TempDir()
 	seedSerenaWorkspace(t, ws)
+	// Start-support TRUE so the install/reap/start path runs on non-Windows CI too
+	// (default false off Windows — finding #3). Supervisor liveness comes from the
+	// REAL lock (held below), not a stub, so leave migrateSerenaSupervisorRunningFn.
+	defer stubStartSupported(t, func() bool { return true })()
 
 	// Hold the supervisor.lock flock → SupervisorRunningUnderStateDir reports a
 	// LIVE supervisor → the REAL InstallParsedManifest §7.1 gate refuses a
@@ -1465,6 +1485,11 @@ func TestMigrateSerena_PartialReconcile_FailsBeforeReap_RestoresClientsAndRegist
 	// registry mutation the rollback must undo).
 	ws := t.TempDir()
 	seedSerenaWorkspaceNoPort(t, ws)
+	// Start-support TRUE so the run reaches the reconcile (where it then fails
+	// partial) on non-Windows CI too, rather than exiting at the start preflight
+	// (default false off Windows — finding #3). No supervisor is running here, so
+	// willReap stays false regardless.
+	defer stubStartSupported(t, func() bool { return true })()
 	regPath, err := api.DefaultRegistryPath()
 	if err != nil {
 		t.Fatalf("registry path: %v", err)
@@ -1545,6 +1570,9 @@ func TestMigrateSerena_StartFailureAfterIntentCommit_DoesNotRollBackRegistry(t *
 	seedSerenaWorkspaceNoPort(t, ws)
 	// Model a running supervisor so the cutover reaps it (finding #3).
 	defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
+	// Start-support TRUE so the install commits (and the start then fails) on
+	// non-Windows CI too (default false off Windows — finding #3).
+	defer stubStartSupported(t, func() bool { return true })()
 	regPath, err := api.DefaultRegistryPath()
 	if err != nil {
 		t.Fatalf("registry path: %v", err)
@@ -1611,6 +1639,9 @@ func TestMigrateSerena_RegistryLockReleasedBeforeReap(t *testing.T) {
 	// Model a running supervisor so the cutover reaps it (finding #3); the reap
 	// stub is where the lock-released assertion runs.
 	defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
+	// Start-support TRUE so the install/reap/start path runs on non-Windows CI too
+	// (default false off Windows — finding #3).
+	defer stubStartSupported(t, func() bool { return true })()
 
 	regPath, err := api.DefaultRegistryPath()
 	if err != nil {
@@ -1671,6 +1702,9 @@ func TestMigrateSerena_NoRunningSupervisor_SkipsReap_WritesAndStarts(t *testing.
 	// hold the supervisor.lock, so the REAL install's §7.1 gate also sees no
 	// supervisor and ALLOWS the spec-bearing write.
 	defer stubSupervisorRunning(t, func() (bool, error) { return false, nil })()
+	// Start-support TRUE so the write + start path runs on non-Windows CI too
+	// (default false off Windows — finding #3).
+	defer stubStartSupported(t, func() bool { return true })()
 
 	reapInvoked, startInvoked := false, false
 	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
@@ -1729,6 +1763,9 @@ func TestMigrateSerena_ConcurrentRegisterInWindow_AppearsInCommittedIntent(t *te
 	// Model a running supervisor so the cutover reaps it (the reap stub is where we
 	// simulate the concurrent register landing in the released-lock window).
 	defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
+	// Start-support TRUE so the install/reap/start path runs on non-Windows CI too
+	// (default false off Windows — finding #3).
+	defer stubStartSupported(t, func() bool { return true })()
 
 	// The workspace that gets registered DURING the released-lock window. It is
 	// rooted at an existing dir so the install fan-out does not prune it as stale,
@@ -1806,6 +1843,9 @@ func TestMigrateSerena_PostCommitVerifyError_DrivesRecoveryStart(t *testing.T) {
 	// Model a running supervisor so the cutover reaps it; the reap-specific
 	// recovery message is what this test asserts (finding #3).
 	defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
+	// Start-support TRUE so the install/reap path runs on non-Windows CI too
+	// (default false off Windows — finding #3).
+	defer stubStartSupported(t, func() bool { return true })()
 
 	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
 		return &api.MigrateReport{}, nil
@@ -1866,6 +1906,10 @@ func TestMigrateSerena_PostCommitVerifyError_RecoveryStartAlsoFails(t *testing.T
 	// Model a running supervisor so the cutover reaps it (finding #3).
 	defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
 
+	// Start-support TRUE so the install/reap path runs on non-Windows CI too
+	// (default false off Windows — finding #3).
+	defer stubStartSupported(t, func() bool { return true })()
+
 	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
 		return &api.MigrateReport{}, nil
 	})()
@@ -1923,6 +1967,9 @@ func TestMigrateSerena_EmptyFirstSnapshot_WorkspaceRegisteredInWindow_Recomputes
 	// re-read). Rooted at an existing dir + registered without a port so the re-read
 	// re-allocation assigns one and the install fan-out does not prune it as stale.
 	wsConcurrent := t.TempDir()
+	// Start-support TRUE so the post-re-read recompute + start path runs on
+	// non-Windows CI too (default false off Windows — finding #3).
+	defer stubStartSupported(t, func() bool { return true })()
 
 	reconcileInvoked := false
 	startInvoked := false
@@ -2025,6 +2072,9 @@ func TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut(t *testing.T) {
 	defer stubSupervisorHealthy(t, func() (bool, error) { return true, nil })()
 	// A running supervisor → the re-fanout reaps it before the spec-bearing re-write.
 	defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
+	// Start-support TRUE so the re-fanout install/reap/start path runs on
+	// non-Windows CI too (default false off Windows — finding #3).
+	defer stubStartSupported(t, func() bool { return true })()
 
 	reconcileInvoked, reapInvoked, startInvoked := false, false, false
 	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
@@ -2381,5 +2431,207 @@ weekly_refresh: false
 				t.Errorf("state = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 15. (finding #1 — bot PR #250, round-6) LATE REAP on the empty-first-snapshot +
+//     window-register path. When the FIRST snapshot is EMPTY, hasWorkspaces is
+//     false so the step-5 willReap probe is SKIPPED — even if a supervisor is
+//     genuinely running. A workspace then registers during the released-lock
+//     window, the 7c recompute flips willStart true, and the re-read install
+//     snapshot becomes spec-bearing. InstallParsedManifest's §7.1 gate REFUSES a
+//     spec-bearing write while a supervisor is running, so WITHOUT a late reap the
+//     cutover would FAIL at that gate even on Windows. The fix re-probes liveness
+//     after the recompute and reaps EXACTLY ONCE before the install, so the gate
+//     then passes naturally.
+//
+// This is modeled exactly like TestMigrateSerena_LiveSupervisor_ReapClearsTheGate-
+// BeforeWrite (a REAL install + a held real supervisor.lock so the §7.1 gate would
+// refuse) but with an EMPTY first snapshot, so the reap that clears the gate is the
+// LATE one (step 7d), not the step-7 cutover reap.
+// ---------------------------------------------------------------------------
+
+func TestMigrateSerena_EmptyFirstSnapshot_SupervisorRunning_LateReapClearsGate(t *testing.T) {
+	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+
+	// FIRST snapshot is EMPTY: no serena workspace registered up front → the driver
+	// computes hasWorkspaces=false, so it never probes supervisor liveness at step 5
+	// and willReap is false — even though a supervisor IS running (the held lock
+	// below).
+
+	// Hold the REAL supervisor.lock so SupervisorRunningUnderStateDir reports a LIVE
+	// supervisor → the REAL InstallParsedManifest §7.1 gate would REFUSE a
+	// spec-bearing write while it is held. The same probe backs the default
+	// migrateSerenaSupervisorRunningFn the late reap re-reads.
+	lock, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("acquire supervisor lock (model live supervisor): %v", err)
+	}
+	lockReleased := false
+	defer func() {
+		if !lockReleased {
+			lock.Release()
+		}
+	}()
+	// Sanity: with the lock held, the gate sees a running supervisor.
+	if running, _, perr := api.SupervisorRunningUnderStateDir(stateDir); perr != nil || !running {
+		t.Fatalf("precondition: supervisor must read as running while the lock is held (running=%v err=%v)", running, perr)
+	}
+
+	// Start-support TRUE so the post-re-read recompute + (late) reap + start path
+	// runs on non-Windows CI too (default false off Windows — finding #3).
+	defer stubStartSupported(t, func() bool { return true })()
+
+	// The workspace that registers DURING the released-lock window. The first
+	// snapshot is empty and willReap is false, so the reconcile stub is the
+	// window-injection point (it runs after the first snapshot, before the re-read).
+	// Rooted at an existing dir + port-less so the re-read re-allocation assigns one
+	// and the install fan-out does not prune it.
+	wsConcurrent := t.TempDir()
+	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+		seedSerenaWorkspaceNoPort(t, wsConcurrent)
+		return &api.MigrateReport{}, nil
+	})()
+
+	// The LATE reap stub: it must fire EXACTLY ONCE (no step-7 reap ran — willReap
+	// was false), and it RELEASES the supervisor.lock to model the real reap killing
+	// the supervisor, so the subsequent REAL install's §7.1 gate passes. It also
+	// asserts reap-first ordering: the spec-bearing intent is not on disk yet.
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	reapCount := 0
+	intentAbsentAtReap := false
+	defer stubReap(t, func(ctx context.Context, w io.Writer) error {
+		reapCount++
+		if _, statErr := os.Stat(intentPath); os.IsNotExist(statErr) {
+			intentAbsentAtReap = true
+		}
+		// Model the real reap exiting the supervisor: release the lock so the §7.1
+		// gate in the REAL install below no longer sees a running supervisor.
+		lock.Release()
+		lockReleased = true
+		return nil
+	})()
+	// REAL install (no stub) so the spec-bearing write actually exercises the §7.1
+	// gate — proving the late reap cleared it.
+	startInvoked := false
+	defer stubStart(t, func(ctx context.Context, w io.Writer) error { startInvoked = true; return nil })()
+
+	var buf bytes.Buffer
+	if err := runMigrateSerenaDynamicPool(context.Background(), &buf); err != nil {
+		t.Fatalf("the late-reap cutover must succeed (the §7.1 gate must pass after the late reap); got error: %v (out=%s)", err, buf.String())
+	}
+
+	// THE finding #1 (round-6) guards.
+	if reapCount != 1 {
+		t.Fatalf("the late reap must fire EXACTLY ONCE on the empty-first-snapshot + supervisor-running + window-register path; reapCount=%d", reapCount)
+	}
+	if !intentAbsentAtReap {
+		t.Error("reap-first: the spec-bearing intent must NOT be on disk when the late reap fires")
+	}
+	// The spec-bearing intent committed (no §7.1-gate failure) and carries the
+	// window-registered workspace's row.
+	intent, err := api.ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("the spec-bearing intent must be committed: %v", err)
+	}
+	if !intent.HasRuntimeSpecRow() {
+		t.Fatalf("the window-registered workspace must produce a spec-bearing intent; got %+v", intent.Daemons)
+	}
+	foundConcurrent := false
+	for _, d := range intent.Daemons {
+		if d.Server == "serena" && d.TaskName == api.SerenaTaskNameForWorkspace(wsConcurrent) {
+			foundConcurrent = true
+		}
+	}
+	if !foundConcurrent {
+		t.Errorf("the window-registered workspace %q must have a daemon row in the committed intent; daemons=%+v", wsConcurrent, intent.Daemons)
+	}
+	// The start fired (willStart was recomputed true).
+	if !startInvoked {
+		t.Error("the supervisor start must fire after the late-reap cutover commits the spec-bearing intent")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 16. (finding #2 — bot PR #250, round-6) On a PRE-COMMIT abort AFTER the re-read,
+//     the port reReadAndAllocateSerenaForInstall assigned to a concurrently-added
+//     serena row is UNDONE (reverted to its pre-re-read port 0), so the
+//     registry/router is never left pointing that workspace at a dead, un-spawned
+//     port. The snapshotted row (round-4 #1 surgical rollback owns it) restores
+//     normally and independently.
+//
+// The install is stubbed to fail — standing in for any pre-commit abort landing
+// after the re-read (the §7.1 install gate, a scheduler error, the second
+// start-support preflight): all run the same deferred outer rollback stack, which
+// now carries the finding-#2 re-read-allocation undo in addition to the snapshot
+// restore.
+// ---------------------------------------------------------------------------
+
+func TestMigrateSerena_PreCommitAbort_UndoesReReadAllocation_OnConcurrentRow(t *testing.T) {
+	_, manifestDir := migrateSerenaTestEnv(t)
+	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+
+	// A snapshotted serena workspace registered BEFORE the migrate, WITHOUT a port,
+	// so the FIRST allocation assigns one (the snapshot rollback must revert it to
+	// 0). hasWorkspaces is true → willReap is armed (a supervisor is running).
+	wsBefore := t.TempDir()
+	seedSerenaWorkspaceNoPort(t, wsBefore)
+	// Model a running supervisor so the step-7 cutover reaps it; the reap stub is
+	// the window-injection point for the concurrent register.
+	defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
+	// Start-support TRUE so the run reaches the (failing) install on non-Windows CI
+	// too (default false off Windows — finding #3).
+	defer stubStartSupported(t, func() bool { return true })()
+
+	// The concurrently-added serena row that lands DURING the released-lock window
+	// (registered port-less so the re-read re-allocation assigns it a NEW port — the
+	// allocation the finding-#2 undo must clear on abort).
+	wsConcurrent := t.TempDir()
+	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+		return &api.MigrateReport{}, nil
+	})()
+	defer stubReap(t, func(ctx context.Context, w io.Writer) error {
+		seedSerenaWorkspaceNoPort(t, wsConcurrent)
+		return nil
+	})()
+	// PRE-COMMIT abort: the install fails AFTER the re-read (and the late/step-7
+	// reap), so no intent commits and the deferred outer stack runs both the
+	// snapshot restore AND the re-read-allocation undo.
+	defer stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
+		return "", errors.New("synthetic pre-commit install failure (stands in for the §7.1 gate)")
+	})()
+	// A supervisor was reaped, so the install-failure path drives a recovery start.
+	defer stubStart(t, func(ctx context.Context, w io.Writer) error { return nil })()
+
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		t.Fatalf("registry path: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if rerr := runMigrateSerenaDynamicPool(context.Background(), &buf); rerr == nil {
+		t.Fatalf("the pre-commit install failure must propagate as a migrate error (out=%s)", buf.String())
+	} else if !strings.Contains(rerr.Error(), "synthetic pre-commit install failure") {
+		t.Errorf("error should carry the install failure; got %v", rerr)
+	}
+
+	ports := loadRegistrySerenaPorts(t, regPath)
+	// THE finding #2 guard: the concurrently-added row's re-read-allocated port is
+	// CLEARED on abort (reverted to its pre-re-read port 0) — NOT left dangling at
+	// the allocated value. Before the fix the surgical snapshot rollback left this
+	// non-snapshotted row untouched, so its re-read port survived → the router
+	// pointed the workspace at a port no supervisor would ever spawn.
+	if got, present := ports[api.WorkspaceKey(wsConcurrent)]; !present {
+		t.Errorf("the concurrently-added serena row must still EXIST after abort (the undo reverts its port, it does not delete the row); rows=%+v", ports)
+	} else if got != 0 {
+		t.Errorf("finding #2: the concurrently-added row's re-read-allocated port must be CLEARED on a pre-commit abort; got %d, want 0 (rows=%+v)", got, ports)
+	}
+	// The snapshotted row restores normally and independently (seeded port-less →
+	// the snapshot captured port 0 → the surgical restore reverts the first
+	// allocation back to 0).
+	if got := ports[api.WorkspaceKey(wsBefore)]; got != 0 {
+		t.Errorf("the snapshotted row must restore to its pre-migrate port 0; got %d (rows=%+v)", got, ports)
 	}
 }

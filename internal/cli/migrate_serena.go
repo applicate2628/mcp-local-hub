@@ -550,8 +550,12 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 	//    workspaces (claim #7) is legitimate: the loop is a no-op, Save is a
 	//    no-op-equivalent, and the install proceeds with zero daemon rows.
 	serenaBefore := snapshotSerenaRows(reg)
-	if err := allocateSerenaMigratePorts(reg, dynamicManifest); err != nil {
-		return err
+	// The first-allocation rows are ALL in serenaBefore (snapshotted just above),
+	// so the snapshot rollback (restoreSerenaRegistryRelocking) already reverts
+	// them; the newly-allocated set is needed only for the re-read path (finding
+	// #2), whose rows are NOT in serenaBefore. Discard it here.
+	if _, allocErr := allocateSerenaMigratePorts(reg, dynamicManifest); allocErr != nil {
+		return allocErr
 	}
 	if err := reg.Save(); err != nil {
 		// Save is atomic (tempfile + rename): a failure leaves the prior
@@ -724,7 +728,7 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 	//     handled exactly like an install failure: the recovery start restores a
 	//     running supervisor from the still-on-disk OLD intent when we reaped, and
 	//     the deferred outer stack restores the reconcile + registry.
-	installWorkspaces, reReadErr := reReadAndAllocateSerenaForInstall(regPath, dynamicManifest)
+	installWorkspaces, reReadNewlyAllocated, reReadErr := reReadAndAllocateSerenaForInstall(regPath, dynamicManifest)
 	if reReadErr != nil {
 		err = fmt.Errorf("re-read registry under a re-acquired lock before the intent write: %w", reReadErr)
 		if willReap {
@@ -737,6 +741,19 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 		}
 		return err
 	}
+	// Push the finding-#2 surgical undo for the ports the re-read just allocated to
+	// the concurrently-added serena rows (NEW rows the snapshot rollback leaves
+	// untouched). On any PRE-COMMIT abort below (the second start-supported
+	// preflight, the late reap, or the §7.1 install gate), this reverts exactly
+	// those rows to their pre-re-read state so the registry/router is never left
+	// pointing a workspace at a dead, un-spawned port. The instant the install
+	// commits, the outer stack is disarmed (rollback = nil), so this undo never
+	// runs once the committed intent owns those ports. revertSerenaReReadAllocations
+	// is a no-op when the re-read allocated nothing (the common, no-concurrent-register
+	// case), so the push is unconditional and harmless.
+	rollback = append(rollback, func() error {
+		return revertSerenaReReadAllocations(regPath, reReadNewlyAllocated)
+	})
 
 	// 7c. RECOMPUTE the start decision from the RE-READ install snapshot (finding
 	//     #1 — bot PR #250). willStart was fixed from the FIRST snapshot
@@ -747,13 +764,15 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 	//     false, the post-commit start would be SKIPPED → clients on the /serena/mcp
 	//     router, the spec-bearing intent on disk, but no supervisor started to
 	//     spawn the newly-registered daemon. So re-evaluate willStart against the
-	//     authoritative install snapshot: ≥1 workspace ⇒ a start is required. willReap
-	//     is NOT recomputed — it is the HISTORICAL fact of whether we already reaped a
-	//     running supervisor (the reap ran above, before this re-read; it cannot be
-	//     retroactively performed), and the recovery-message branches below key on
-	//     that fact. willStart only ever flips false→true here (the re-read can add
-	//     rows that the first snapshot missed, never drop the candidates the first
-	//     snapshot saw and the realloc preserved).
+	//     authoritative install snapshot: ≥1 workspace ⇒ a start is required.
+	//     willStart only ever flips false→true here (the re-read can add rows that
+	//     the first snapshot missed, never drop the candidates the first snapshot saw
+	//     and the realloc preserved). willReap is NOT recomputed HERE — but the late
+	//     reap in step 7d below DOES perform (and record) a reap when this recompute
+	//     flips willStart true and a supervisor turns out to be running, because the
+	//     first-snapshot-empty path skipped the willReap probe entirely. After 7d,
+	//     willReap is again the HISTORICAL fact of whether a reap happened, which the
+	//     recovery-message branches below key on.
 	willStart = willStart || len(installWorkspaces) > 0
 
 	// PREFLIGHT (finding #3 + #1 interaction): the recompute above can flip
@@ -768,6 +787,51 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 	if willStart && !migrateSerenaStartSupportedFn() {
 		err = errMigrateSerenaStartUnsupportedPreflight()
 		return err
+	}
+
+	// 7d. LATE REAP (finding #1 — bot PR #250). The 7c recompute can flip willStart
+	//     true when the FIRST snapshot was EMPTY (so the earlier willReap probe at
+	//     step 5 was skipped — supervisorRunning is only probed when hasWorkspaces),
+	//     but a workspace registered during the released-lock window made the re-read
+	//     install snapshot spec-bearing. InstallParsedManifest's §7.1 gate refuses a
+	//     spec-bearing write WHILE A SUPERVISOR IS RUNNING (an old binary's intent
+	//     watcher uses DisallowUnknownFields and would reject runtime_spec). Without a
+	//     reap here the cutover would FAIL at that gate EVEN ON WINDOWS — the supervisor
+	//     was never reaped because the empty first snapshot never armed willReap. So
+	//     re-probe liveness now and reap EXACTLY ONCE: only when a spec-bearing write is
+	//     actually required (len(installWorkspaces) > 0), the earlier reap did NOT run
+	//     (!willReap — the first-snapshot-NON-empty cutover already reaped above, and
+	//     re-reaping would be a double-reap of an already-gone supervisor), and a
+	//     supervisor is genuinely running. This runs AFTER the unsupported-start
+	//     preflight (so an unwired platform fails loud BEFORE touching the live
+	//     supervisor — legacy stays fully up) and BEFORE the install write (so the
+	//     §7.1 gate then passes naturally). On success we set willReap = true so this
+	//     late reap folds into the same historical fact the recovery-message and audit
+	//     branches below key on (a post-write failure must drive the recovery start).
+	//     A reap FAILURE here is fail-loud (§7.1 acceptance #2): the intent is NOT
+	//     written and the deferred outer stack restores the reconcile + registry +
+	//     the re-read allocations (legacy untouched); no recovery start is owed because
+	//     no spec-bearing intent committed.
+	if !willReap && len(installWorkspaces) > 0 {
+		running, probeErr := migrateSerenaSupervisorRunningFn()
+		if probeErr != nil {
+			fmt.Fprintf(w, "warning: could not determine whether a supervisor is running before the spec-bearing intent write (%v); assuming one is and reaping it.\n", probeErr)
+			running = true
+		}
+		if running {
+			fmt.Fprintln(w, "NOTE: this cutover briefly takes serena OFFLINE while the supervisor is reaped and restarted (tens of seconds); clients reconnect once the new dynamic-pool daemons are reconcile-ready.")
+			fmt.Fprintln(w, "Reaping the running supervisor before the runtime_spec intent write (a workspace registered during the released-lock window made this a spec-bearing cutover)…")
+			if reapErr := migrateSerenaReapFn(ctx, w); reapErr != nil {
+				err = fmt.Errorf(
+					"supervisor reap (§7.1) failed BEFORE the runtime_spec intent write: %w; "+
+						"the new serena dynamic-pool intent was NOT written and legacy serena is untouched — "+
+						"stop any running supervisor and re-run the migrate", reapErr)
+				return err
+			}
+			// The late reap succeeded: record it so the post-write recovery branches
+			// (and the success audit) treat this run as having reaped a supervisor.
+			willReap = true
+		}
 	}
 
 	// 8. Write the spec-bearing intent. The §7.1 gate inside InstallParsedManifest
@@ -1155,11 +1219,22 @@ func restoreSerenaRegistryRelocking(regPath string, serenaSnapshot []api.Workspa
 // PutSerena. The pool is the EFFECTIVE dynamic-pool port pool (from the built
 // in-memory manifest's daemon_template). Idempotent for rows that already carry
 // a port. Zero serena rows → no-op (claim #7).
-func allocateSerenaMigratePorts(reg *api.Registry, dynamicManifest *config.ServerManifest) error {
+//
+// It returns the PRIOR state (a copy of each row exactly as it stood BEFORE the
+// allocation) of every serena row it newly assigned a port/task-name to (finding
+// #2, bot PR #250). The re-read caller pushes a surgical undo that reverts those
+// exact rows on a pre-commit abort, so a port allocated for a concurrently-added
+// serena row during the released-lock window is not left dangling (the snapshot
+// rollback restoreSerenaRegistryRelocking deliberately leaves non-snapshotted rows
+// untouched, so it cannot revert them). Each returned entry carries the row's
+// pre-allocation Port (always 0, since only port-less rows are assigned) and
+// TaskName, so the undo restores the EXACT prior state.
+func allocateSerenaMigratePorts(reg *api.Registry, dynamicManifest *config.ServerManifest) ([]api.WorkspaceEntry, error) {
 	if dynamicManifest.DaemonTemplate == nil || dynamicManifest.DaemonTemplate.PortPool == nil {
-		return fmt.Errorf("internal: in-memory dynamic-pool manifest has no daemon_template.port_pool")
+		return nil, fmt.Errorf("internal: in-memory dynamic-pool manifest has no daemon_template.port_pool")
 	}
 	pool := *dynamicManifest.DaemonTemplate.PortPool
+	var newlyAllocated []api.WorkspaceEntry
 	for _, ws := range reg.SerenaEntries() {
 		cur, ok := reg.Get(ws.WorkspaceKey, api.SerenaLanguageSentinel)
 		if !ok {
@@ -1168,19 +1243,22 @@ func allocateSerenaMigratePorts(reg *api.Registry, dynamicManifest *config.Serve
 		if cur.Port > 0 {
 			continue
 		}
+		// Snapshot the row's PRIOR state before mutating it, so the re-read
+		// caller can surgically revert exactly this row on a pre-commit abort.
+		newlyAllocated = append(newlyAllocated, cur)
 		port, err := reg.AllocateSerenaPort(pool)
 		if err != nil {
-			return fmt.Errorf("allocate serena port for workspace %s: %w", cur.WorkspacePath, err)
+			return nil, fmt.Errorf("allocate serena port for workspace %s: %w", cur.WorkspacePath, err)
 		}
 		cur.Port = port
 		if cur.TaskName == "" {
 			cur.TaskName = api.SerenaTaskNameForWorkspace(cur.WorkspacePath)
 		}
 		if err := reg.PutSerena(cur); err != nil {
-			return fmt.Errorf("persist allocated port for workspace %s: %w", cur.WorkspacePath, err)
+			return nil, fmt.Errorf("persist allocated port for workspace %s: %w", cur.WorkspacePath, err)
 		}
 	}
-	return nil
+	return newlyAllocated, nil
 }
 
 // reReadAndAllocateSerenaForInstall re-acquires the registry lock, reloads the
@@ -1196,31 +1274,91 @@ func allocateSerenaMigratePorts(reg *api.Registry, dynamicManifest *config.Serve
 // serena row — the install then writes a supervisor-intent daemon row for each,
 // so the registry/clients and the intent stay consistent.
 //
+// It ALSO returns reReadNewlyAllocated — the PRIOR state of every serena row this
+// re-read newly assigned a port to (the concurrently-added port-less rows; the
+// originally-allocated rows already carry a port and are skipped, so they are NOT
+// in this set). The driver pushes a surgical undo over exactly these rows
+// (revertSerenaReReadAllocations), so a PRE-COMMIT abort after this re-read
+// (the second start-supported preflight, the late reap, or the §7.1 install gate)
+// clears the re-read port/task-name from the concurrently-added row instead of
+// leaving it pointing the registry/router at a dead port. The snapshot rollback
+// (restoreSerenaRegistryRelocking) deliberately leaves non-snapshotted rows
+// untouched (round-4 #1, to avoid clobbering concurrent registrations), so it
+// cannot revert these; the two undos cover disjoint key sets (snapshot keys vs
+// concurrently-added keys) and are independent.
+//
 // The lock is held ONLY across this fast reload/realloc/Save and released before
 // returning (no leaked lock), so it never overlaps the slow reap. The returned
 // slice is always non-nil (an empty registry yields an empty slice) because
 // InstallParsedManifest requires a non-nil Workspaces snapshot.
-func reReadAndAllocateSerenaForInstall(regPath string, dynamicManifest *config.ServerManifest) ([]api.WorkspaceEntry, error) {
+func reReadAndAllocateSerenaForInstall(regPath string, dynamicManifest *config.ServerManifest) (installWorkspaces, reReadNewlyAllocated []api.WorkspaceEntry, err error) {
 	reg := api.NewRegistry(regPath)
 	unlock, err := reg.Lock()
 	if err != nil {
-		return nil, fmt.Errorf("re-acquire registry lock: %w", err)
+		return nil, nil, fmt.Errorf("re-acquire registry lock: %w", err)
 	}
 	defer unlock()
 	if err := reg.Load(); err != nil {
-		return nil, fmt.Errorf("reload registry: %w", err)
+		return nil, nil, fmt.Errorf("reload registry: %w", err)
 	}
-	if err := allocateSerenaMigratePorts(reg, dynamicManifest); err != nil {
-		return nil, err
+	newlyAllocated, err := allocateSerenaMigratePorts(reg, dynamicManifest)
+	if err != nil {
+		return nil, nil, err
 	}
 	if err := reg.Save(); err != nil {
-		return nil, fmt.Errorf("save registry after re-allocation: %w", err)
+		return nil, nil, fmt.Errorf("save registry after re-allocation: %w", err)
 	}
 	entries := reg.SerenaEntries()
 	if entries == nil {
 		entries = []api.WorkspaceEntry{}
 	}
-	return entries, nil
+	return entries, newlyAllocated, nil
+}
+
+// revertSerenaReReadAllocations is the finding-#2 (bot PR #250) surgical undo for
+// the port/task-name allocations reReadAndAllocateSerenaForInstall assigned to the
+// concurrently-added serena rows. It re-acquires the registry lock, reloads the
+// CURRENT on-disk registry, and restores each newly-allocated row to its PRIOR
+// (pre-re-read) state via PutSerena — but ONLY when that workspace key still
+// exists in the reloaded registry. A key that a concurrent
+// `mcphub workspace unregister --backend serena` removed during the abort window
+// is SKIPPED, not resurrected (the same dual guard restoreSerenaRegistryRelocking
+// uses, round-5 #1). It touches ONLY the supplied (concurrently-added) keys and
+// leaves the snapshotted rows to restoreSerenaRegistryRelocking, so the two undos
+// never double-touch a row. The lock is always released before returning.
+//
+// It is pushed onto the OUTER rollback stack, so it runs ONLY on a pre-commit
+// abort: the instant InstallParsedManifest commits, the driver clears the stack
+// (rollback = nil), making this undo a no-op from the commit point on (the
+// committed intent now owns those rows' ports — reverting them would strand the
+// router).
+func revertSerenaReReadAllocations(regPath string, newlyAllocated []api.WorkspaceEntry) error {
+	if len(newlyAllocated) == 0 {
+		return nil
+	}
+	reg := api.NewRegistry(regPath)
+	unlock, err := reg.Lock()
+	if err != nil {
+		return fmt.Errorf("revert re-read allocations: re-acquire lock: %w", err)
+	}
+	defer unlock()
+	if err := reg.Load(); err != nil {
+		return fmt.Errorf("revert re-read allocations: reload: %w", err)
+	}
+	for _, prior := range newlyAllocated {
+		if _, present := reg.GetSerena(prior.WorkspaceKey); !present {
+			// Concurrently unregistered during the abort window — do not re-add a
+			// row the user removed and the migrate no longer owns.
+			continue
+		}
+		if err := reg.PutSerena(prior); err != nil {
+			return fmt.Errorf("revert re-read allocations: restore prior serena row for workspace_key %s: %w", prior.WorkspaceKey, err)
+		}
+	}
+	if err := reg.Save(); err != nil {
+		return fmt.Errorf("revert re-read allocations: save: %w", err)
+	}
+	return nil
 }
 
 // serenaWorkspacePaths extracts the workspace paths for the audit body.
