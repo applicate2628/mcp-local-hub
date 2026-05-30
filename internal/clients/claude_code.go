@@ -166,6 +166,23 @@ func (c *claudeCode) LatestBackupPath() (string, bool, error) {
 // of the same client already rewrote this entry — restoring would
 // silently re-apply hub-HTTP data. See ErrBackupEntryAlreadyMigrated.
 func (c *claudeCode) RestoreEntryFromBackup(backupPath, name string) error {
+	return c.restoreEntryFromBackup(backupPath, name, false)
+}
+
+// RestoreEntryFromBackupForRollback restores the backup's entry verbatim,
+// bypassing the ErrBackupEntryAlreadyMigrated guard (see the interface
+// doc on Client.RestoreEntryFromBackupForRollback). Used only by the
+// serena dynamic-pool migrate abort-rollback, whose backups ARE the
+// legacy hub entry it must put back.
+func (c *claudeCode) RestoreEntryFromBackupForRollback(backupPath, name string) error {
+	return c.restoreEntryFromBackup(backupPath, name, true)
+}
+
+// restoreEntryFromBackup is the shared body. When allowHubEntry is false
+// (the demigrate flow) it refuses a hub-HTTP-shaped backup entry with
+// ErrBackupEntryAlreadyMigrated; when true (the migrate rollback) it
+// writes the backup bytes verbatim regardless of shape.
+func (c *claudeCode) restoreEntryFromBackup(backupPath, name string, allowHubEntry bool) error {
 	backupData, err := os.ReadFile(backupPath)
 	if err != nil {
 		return fmt.Errorf("read backup %s: %w", backupPath, err)
@@ -192,11 +209,15 @@ func (c *claudeCode) RestoreEntryFromBackup(backupPath, name string) error {
 			// `url` field (http://localhost:<port>/... or 127.0.0.1)
 			// and no `command` field. User-configured remote HTTP MCP
 			// servers (url pointing at a non-loopback host) pass
-			// through to the normal restore path.
-			if rawMap, ok := backupEntry.(map[string]any); ok {
-				if urlStr, _ := rawMap["url"].(string); IsHubHTTPURL(urlStr) {
-					if _, hasCmd := rawMap["command"]; !hasCmd {
-						return ErrBackupEntryAlreadyMigrated
+			// through to the normal restore path. The rollback caller
+			// (allowHubEntry=true) bypasses this guard to restore the
+			// pre-reconcile legacy hub entry verbatim.
+			if !allowHubEntry {
+				if rawMap, ok := backupEntry.(map[string]any); ok {
+					if urlStr, _ := rawMap["url"].(string); IsHubHTTPURL(urlStr) {
+						if _, hasCmd := rawMap["command"]; !hasCmd {
+							return ErrBackupEntryAlreadyMigrated
+						}
 					}
 				}
 			}

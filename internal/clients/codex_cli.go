@@ -155,6 +155,22 @@ func (c *codexCLI) LatestBackupPath() (string, bool, error) {
 // already in hub-HTTP form (has a `url` key and no `command` key) —
 // see ErrBackupEntryAlreadyMigrated.
 func (c *codexCLI) RestoreEntryFromBackup(backupPath, name string) error {
+	return c.restoreEntryFromBackup(backupPath, name, false)
+}
+
+// RestoreEntryFromBackupForRollback restores the backup's entry verbatim,
+// bypassing the ErrBackupEntryAlreadyMigrated guard (see the interface
+// doc on Client.RestoreEntryFromBackupForRollback). Used only by the
+// serena dynamic-pool migrate abort-rollback.
+func (c *codexCLI) RestoreEntryFromBackupForRollback(backupPath, name string) error {
+	return c.restoreEntryFromBackup(backupPath, name, true)
+}
+
+// restoreEntryFromBackup is the shared body. When allowHubEntry is false
+// (demigrate) it refuses a hub-HTTP-shaped backup entry with
+// ErrBackupEntryAlreadyMigrated; when true (migrate rollback) it writes
+// the backup bytes verbatim regardless of shape.
+func (c *codexCLI) restoreEntryFromBackup(backupPath, name string, allowHubEntry bool) error {
 	backupData, err := os.ReadFile(backupPath)
 	if err != nil {
 		return fmt.Errorf("read backup %s: %w", backupPath, err)
@@ -182,11 +198,15 @@ func (c *codexCLI) RestoreEntryFromBackup(backupPath, name string) error {
 			// Defensive: refuse hub-HTTP-shaped backup entries for
 			// Codex CLI (loopback `url` present, `command` absent).
 			// User-configured remote HTTP entries (non-loopback url)
-			// pass through.
-			if rawMap, ok := backupEntry.(map[string]any); ok {
-				if urlStr, _ := rawMap["url"].(string); IsHubHTTPURL(urlStr) {
-					if _, hasCmd := rawMap["command"]; !hasCmd {
-						return ErrBackupEntryAlreadyMigrated
+			// pass through. The rollback caller (allowHubEntry=true)
+			// bypasses this guard to restore the pre-reconcile legacy
+			// hub entry verbatim.
+			if !allowHubEntry {
+				if rawMap, ok := backupEntry.(map[string]any); ok {
+					if urlStr, _ := rawMap["url"].(string); IsHubHTTPURL(urlStr) {
+						if _, hasCmd := rawMap["command"]; !hasCmd {
+							return ErrBackupEntryAlreadyMigrated
+						}
 					}
 				}
 			}

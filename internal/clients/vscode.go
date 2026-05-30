@@ -159,6 +159,22 @@ func (v *vscodeClient) LatestBackupPath() (string, bool, error) {
 }
 
 func (v *vscodeClient) RestoreEntryFromBackup(backupPath, name string) error {
+	return v.restoreEntryFromBackup(backupPath, name, false)
+}
+
+// RestoreEntryFromBackupForRollback restores the backup's entry verbatim,
+// bypassing the ErrBackupEntryAlreadyMigrated guard (see the interface
+// doc on Client.RestoreEntryFromBackupForRollback). Used only by the
+// serena dynamic-pool migrate abort-rollback.
+func (v *vscodeClient) RestoreEntryFromBackupForRollback(backupPath, name string) error {
+	return v.restoreEntryFromBackup(backupPath, name, true)
+}
+
+// restoreEntryFromBackup is the shared body. When allowHubEntry is false
+// (demigrate) it refuses a hub-HTTP-shaped backup entry with
+// ErrBackupEntryAlreadyMigrated; when true (migrate rollback) it writes
+// the backup bytes verbatim regardless of shape.
+func (v *vscodeClient) restoreEntryFromBackup(backupPath, name string, allowHubEntry bool) error {
 	backupData, err := os.ReadFile(backupPath)
 	if err != nil {
 		return fmt.Errorf("read backup %s: %w", backupPath, err)
@@ -180,10 +196,15 @@ func (v *vscodeClient) RestoreEntryFromBackup(backupPath, name string) error {
 	}
 	if backupServers != nil {
 		if backupEntry, present := backupServers[name]; present {
-			if rawMap, ok := backupEntry.(map[string]any); ok {
-				if urlStr, _ := rawMap["url"].(string); IsHubHTTPURL(urlStr) {
-					if _, hasCmd := rawMap["command"]; !hasCmd {
-						return ErrBackupEntryAlreadyMigrated
+			// Defensive guard (demigrate flow only — the rollback caller
+			// passes allowHubEntry=true to restore the pre-reconcile
+			// legacy hub entry verbatim).
+			if !allowHubEntry {
+				if rawMap, ok := backupEntry.(map[string]any); ok {
+					if urlStr, _ := rawMap["url"].(string); IsHubHTTPURL(urlStr) {
+						if _, hasCmd := rawMap["command"]; !hasCmd {
+							return ErrBackupEntryAlreadyMigrated
+						}
 					}
 				}
 			}

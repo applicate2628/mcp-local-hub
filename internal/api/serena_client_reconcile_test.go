@@ -44,13 +44,18 @@ func seedPidport(t *testing.T, pid, port int) string {
 // invariant. Named distinctly from register_test.go's fakeClient (which
 // implements only a subset of the interface).
 type reconcileFakeClient struct {
-	name        string
-	exists      bool
-	entries     map[string]clients.MCPEntry
-	addErr      error // when non-nil, AddEntry returns it
-	backupCount int
-	addCalls    int
-	removeCalls int
+	name          string
+	exists        bool
+	entries       map[string]clients.MCPEntry
+	addErr        error  // when non-nil, AddEntry returns it
+	backupPath    string // path BackupKeep returns (default "/fake/bak")
+	backupCount   int
+	addCalls      int
+	removeCalls   int
+	restoreCalls  int    // RestoreEntryFromBackup + ...ForRollback invocation count
+	rollbackCalls int    // RestoreEntryFromBackupForRollback invocation count only
+	restoreFrom   string // last backupPath passed to a restore call
+	restoreErr    error  // when non-nil, the restore call returns it
 }
 
 func newReconcileFakeClient(name string) *reconcileFakeClient {
@@ -60,13 +65,19 @@ func newReconcileFakeClient(name string) *reconcileFakeClient {
 func (f *reconcileFakeClient) Name() string       { return f.name }
 func (f *reconcileFakeClient) ConfigPath() string { return "/fake/" + f.name }
 func (f *reconcileFakeClient) Exists() bool       { return f.exists }
+func (f *reconcileFakeClient) backupReturn() string {
+	if f.backupPath != "" {
+		return f.backupPath
+	}
+	return "/fake/bak"
+}
 func (f *reconcileFakeClient) Backup() (string, error) {
 	f.backupCount++
-	return "/fake/bak", nil
+	return f.backupReturn(), nil
 }
 func (f *reconcileFakeClient) BackupKeep(int) (string, error) {
 	f.backupCount++
-	return "/fake/bak", nil
+	return f.backupReturn(), nil
 }
 func (f *reconcileFakeClient) Restore(string) error { return nil }
 func (f *reconcileFakeClient) AddEntry(e clients.MCPEntry) error {
@@ -91,8 +102,22 @@ func (f *reconcileFakeClient) GetEntry(name string) (*clients.MCPEntry, error) {
 	return &cp, nil
 }
 func (f *reconcileFakeClient) LatestBackupPath() (string, bool, error) { return "", false, nil }
-func (f *reconcileFakeClient) RestoreEntryFromBackup(string, string) error {
-	return nil
+func (f *reconcileFakeClient) RestoreEntryFromBackup(backupPath, _ string) error {
+	f.restoreCalls++
+	f.restoreFrom = backupPath
+	return f.restoreErr
+}
+
+// RestoreEntryFromBackupForRollback records into the SAME counters as
+// RestoreEntryFromBackup so the reconcile-rollback compensator
+// (RestoreSerenaReconcileApplied, which calls this guard-bypassing variant)
+// is observable by the existing assertions. rollbackCalls additionally
+// distinguishes which variant fired.
+func (f *reconcileFakeClient) RestoreEntryFromBackupForRollback(backupPath, _ string) error {
+	f.restoreCalls++
+	f.rollbackCalls++
+	f.restoreFrom = backupPath
+	return f.restoreErr
 }
 func (f *reconcileFakeClient) BackupContainsEntry(string, string) (bool, error) { return false, nil }
 func (f *reconcileFakeClient) AllStdioEntries() ([]clients.StdioEntry, error)   { return nil, nil }
@@ -515,6 +540,189 @@ func TestSerenaClientReconcile_LegacyEndpointRemovedOnlyAfterRewriteSuccess(t *t
 	cursor := cs["cursor"].(*reconcileFakeClient)
 	if got := cursor.entries["serena"].URL; got != wantURL {
 		t.Errorf("cursor serena URL = %q, want %q", got, wantURL)
+	}
+}
+
+// TestSerenaClientReconcile_AppliedRowCarriesBackupPath verifies the reconcile
+// threads the per-client backup path onto each Applied row (the surface the
+// migrate driver's partial-failure rollback restores from).
+func TestSerenaClientReconcile_AppliedRowCarriesBackupPath(t *testing.T) {
+	managedEntriesTestHelper(t)
+
+	pp := seedPidport(t, 4242, 9151)
+	cs := fakeReconcileClientMap()
+	// Give each fake a distinct backup path so the row mapping is unambiguous.
+	for name, c := range cs {
+		c.(*reconcileFakeClient).backupPath = "/fake/bak-" + name
+	}
+	report, err := ReconcileSerenaClientsToRouter(context.Background(), SerenaReconcileOpts{
+		PidportPath: pp,
+		Ping:        okPing,
+		Clients:     cs,
+	})
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if len(report.Applied) == 0 {
+		t.Fatal("expected applied rewrites")
+	}
+	for _, a := range report.Applied {
+		if a.BackupPath != "/fake/bak-"+a.Client {
+			t.Errorf("applied row %s BackupPath = %q, want %q", a.Client, a.BackupPath, "/fake/bak-"+a.Client)
+		}
+	}
+}
+
+// TestRestoreSerenaReconcileApplied verifies the partial-failure compensator
+// restores every Applied client's serena entry from its recorded backup, skips
+// rows without a backup path, reports a missing adapter, and joins per-client
+// restore errors (best-effort: one failure does not strand the rest).
+func TestRestoreSerenaReconcileApplied(t *testing.T) {
+	cc := newReconcileFakeClient("claude-code")
+	cursor := newReconcileFakeClient("cursor")
+	cursor.restoreErr = errors.New("restore write denied")
+	cs := map[string]clients.Client{"claude-code": cc, "cursor": cursor}
+
+	report := &MigrateReport{Applied: []AppliedMigration{
+		{Server: "serena", Client: "claude-code", BackupPath: "/bak/claude"},
+		{Server: "serena", Client: "cursor", BackupPath: "/bak/cursor"},
+		{Server: "serena", Client: "vscode", BackupPath: ""},           // no backup → skipped
+		{Server: "serena", Client: "gemini-cli", BackupPath: "/bak/g"}, // no adapter → reported
+	}}
+
+	err := RestoreSerenaReconcileApplied(report, cs)
+	if err == nil {
+		t.Fatal("expected a joined error (cursor restore failure + gemini-cli missing adapter)")
+	}
+	// claude-code restored from its backup.
+	if cc.restoreCalls != 1 || cc.restoreFrom != "/bak/claude" {
+		t.Errorf("claude-code restore: calls=%d from=%q, want 1 from /bak/claude", cc.restoreCalls, cc.restoreFrom)
+	}
+	// cursor attempted (and failed).
+	if cursor.restoreCalls != 1 {
+		t.Errorf("cursor restore attempts = %d, want 1", cursor.restoreCalls)
+	}
+	if !strings.Contains(err.Error(), "restore write denied") {
+		t.Errorf("joined error should carry the cursor restore failure; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "gemini-cli") || !strings.Contains(err.Error(), "no adapter") {
+		t.Errorf("joined error should report the missing gemini-cli adapter; got %v", err)
+	}
+	// A nil report is a no-op.
+	if e := RestoreSerenaReconcileApplied(nil, cs); e != nil {
+		t.Errorf("nil report must be a no-op; got %v", e)
+	}
+}
+
+// TestRestoreSerenaReconcileApplied_BypassesHubEntryGuard_RestoresLegacyHubBackup
+// is the finding #3 regression guard. The migrate abort-rollback restores each
+// already-rewritten client from the per-client backup captured BEFORE the
+// reconcile rewrote it. For a normal pre-cutover serena client, that backup IS
+// the legacy hub entry — a loopback http://localhost:9121/mcp URL for URL
+// clients, or the `mcphub relay` form for Antigravity. The plain
+// RestoreEntryFromBackup REFUSES those (ErrBackupEntryAlreadyMigrated, the
+// demigrate guard), which would make the rollback FAIL and strand the rewritten
+// clients on /serena/mcp even though the migration aborted. This test asserts
+// RestoreSerenaReconcileApplied (which uses the guard-bypassing rollback
+// variant) SUCCEEDS through the REAL adapters and the live configs are back on
+// their legacy hub form.
+func TestRestoreSerenaReconcileApplied_BypassesHubEntryGuard_RestoresLegacyHubBackup(t *testing.T) {
+	t.Cleanup(SetClientWriteFallbackForTest()) // %TEMP% HOME fails the prod DACL gate on Windows
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	writeFile := func(rel, body string) string {
+		p := filepath.Join(home, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", filepath.Dir(p), err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatalf("write %s: %v", p, err)
+		}
+		return p
+	}
+
+	const routerURL = "http://127.0.0.1:9140/serena/mcp"
+	const legacyURL = "http://localhost:9121/mcp"
+
+	// claude-code: live config is post-reconcile (router URL); the backup
+	// captured pre-reconcile is the LEGACY HUB entry (loopback 9121, no
+	// command) — exactly the shape RestoreEntryFromBackup refuses.
+	ccLive := writeFile(".claude.json",
+		`{"mcpServers":{"serena":{"type":"http","url":"`+routerURL+`"}}}`)
+	ccBackup := ccLive + ".bak-mcp-local-hub-20260101-000000"
+	if err := os.WriteFile(ccBackup,
+		[]byte(`{"mcpServers":{"serena":{"type":"http","url":"`+legacyURL+`"}}}`), 0o600); err != nil {
+		t.Fatalf("write claude-code backup: %v", err)
+	}
+
+	// antigravity: live config is post-reconcile (relay --url <router>); the
+	// backup captured pre-reconcile is the LEGACY RELAY entry (command=mcphub,
+	// args[0]="relay", manifest-lookup --server/--daemon form pointing at the
+	// legacy 9121 daemon) — hub-relay shaped, also refused by the guard.
+	// The relay command path is a forward-slash literal (valid JSON, valid
+	// mcphub basename for IsMcphubBinary); its actual value is irrelevant to
+	// the guard, which keys off the basename + args[0]=="relay".
+	const relayCmd = "C:/mcphub.exe"
+	agLive := writeFile(filepath.Join(".gemini", "antigravity", "mcp_config.json"),
+		`{"mcpServers":{"serena":{"command":"`+relayCmd+`","args":["relay","--url","`+routerURL+`"]}}}`)
+	agBackup := agLive + ".bak-mcp-local-hub-20260101-000000"
+	if err := os.WriteFile(agBackup,
+		[]byte(`{"mcpServers":{"serena":{"command":"`+relayCmd+`","args":["relay","--server","serena","--daemon","claude"]}}}`), 0o600); err != nil {
+		t.Fatalf("write antigravity backup: %v", err)
+	}
+
+	report := &MigrateReport{Applied: []AppliedMigration{
+		{Server: "serena", Client: "claude-code", URL: routerURL, BackupPath: ccBackup},
+		{Server: "serena", Client: "antigravity", URL: routerURL, BackupPath: agBackup},
+	}}
+
+	// Sanity guard: the PLAIN restore MUST refuse these backups — otherwise the
+	// test would pass vacuously even if the rollback used the wrong (guarded)
+	// path. This pins the bug the bypass exists to dodge.
+	all := clients.AllClients()
+	if err := all["claude-code"].RestoreEntryFromBackup(ccBackup, "serena"); !errors.Is(err, clients.ErrBackupEntryAlreadyMigrated) {
+		t.Fatalf("precondition: plain RestoreEntryFromBackup on a legacy-9121 hub backup must refuse with ErrBackupEntryAlreadyMigrated, got %v", err)
+	}
+	if err := all["antigravity"].RestoreEntryFromBackup(agBackup, "serena"); !errors.Is(err, clients.ErrBackupEntryAlreadyMigrated) {
+		t.Fatalf("precondition: plain RestoreEntryFromBackup on a legacy relay backup must refuse with ErrBackupEntryAlreadyMigrated, got %v", err)
+	}
+	// Re-write the live configs to the post-reconcile shape (the precondition's
+	// refusal left them untouched, but be explicit so the assertions below test
+	// the rollback in isolation).
+	if err := os.WriteFile(ccLive, []byte(`{"mcpServers":{"serena":{"type":"http","url":"`+routerURL+`"}}}`), 0o600); err != nil {
+		t.Fatalf("rewrite claude-code live: %v", err)
+	}
+
+	// The rollback restore MUST succeed (guard bypassed) and put both clients
+	// back on their legacy hub form.
+	if err := RestoreSerenaReconcileApplied(report, clients.AllClients()); err != nil {
+		t.Fatalf("RestoreSerenaReconcileApplied must succeed via the guard-bypassing rollback restore, got: %v", err)
+	}
+
+	// claude-code is back on the legacy 9121 URL.
+	ccEntry, err := clients.AllClients()["claude-code"].GetEntry("serena")
+	if err != nil {
+		t.Fatalf("GetEntry claude-code: %v", err)
+	}
+	if ccEntry == nil || ccEntry.URL != legacyURL {
+		t.Errorf("claude-code serena entry = %v, want legacy URL %q after rollback", ccEntry, legacyURL)
+	}
+
+	// antigravity is back on the legacy manifest-lookup relay (--server/--daemon),
+	// NOT the router --url form.
+	agRaw, err := os.ReadFile(agLive)
+	if err != nil {
+		t.Fatalf("read antigravity live: %v", err)
+	}
+	ags := string(agRaw)
+	if !strings.Contains(ags, "--server") || !strings.Contains(ags, "--daemon") {
+		t.Errorf("antigravity relay should be back on the legacy --server/--daemon form after rollback; got:\n%s", ags)
+	}
+	if strings.Contains(ags, "--url") {
+		t.Errorf("antigravity relay should NOT carry the router --url form after rollback; got:\n%s", ags)
 	}
 }
 
