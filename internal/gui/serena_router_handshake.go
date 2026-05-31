@@ -25,6 +25,7 @@ package gui
 
 import (
 	"bytes"
+	"container/list"
 	"context"
 	"encoding/json"
 	"errors"
@@ -48,6 +49,13 @@ import (
 // touch abort, serena_router.go), having already best-effort-released the
 // orphaned daemon session upstream (invariant D).
 var errRouterSessionTerminated = errors.New("router session terminated during handshake")
+
+// errDaemonSessionStoreFull is returned before an upstream handshake when a
+// brand-new client supplied session id would exceed the router-owned daemon
+// session cap. Returning before the handshake is important: it bounds both the
+// local bindings map and the upstream daemon sessions that would otherwise be
+// minted for arbitrary legacy Mcp-Session-Id values.
+var errDaemonSessionStoreFull = errors.New("daemon session store full")
 
 // daemonSessionTTL bounds how long an idle client→daemon session
 // mapping survives before it is swept. It mirrors
@@ -126,6 +134,39 @@ type daemonSessionStore struct {
 	mu       sync.Mutex
 	bindings map[string]*daemonSessionBinding
 	clock    func() time.Time // injectable; nil -> time.Now
+	lru      *list.List
+	lruIndex map[string]*list.Element
+}
+
+func (st *daemonSessionStore) ensureInitLocked() {
+	if st.bindings == nil {
+		st.bindings = make(map[string]*daemonSessionBinding)
+	}
+	if st.lru == nil {
+		st.lru = list.New()
+	}
+	if st.lruIndex == nil {
+		st.lruIndex = make(map[string]*list.Element)
+	}
+}
+
+func (st *daemonSessionStore) removeLocked(clientSessionID string) {
+	delete(st.bindings, clientSessionID)
+	if el, ok := st.lruIndex[clientSessionID]; ok {
+		if st.lru != nil {
+			st.lru.Remove(el)
+		}
+		delete(st.lruIndex, clientSessionID)
+	}
+}
+
+func (st *daemonSessionStore) promoteLocked(clientSessionID string) {
+	st.ensureInitLocked()
+	if el, ok := st.lruIndex[clientSessionID]; ok {
+		st.lru.MoveToFront(el)
+		return
+	}
+	st.lruIndex[clientSessionID] = st.lru.PushFront(clientSessionID)
 }
 
 func (st *daemonSessionStore) now() time.Time {
@@ -172,13 +213,14 @@ func (st *daemonSessionStore) lookup(clientSessionID string, wsKey string) (daem
 	// likely expired its side already). Drop it so the caller
 	// re-handshakes.
 	if st.now().Sub(b.lastSeen) > daemonSessionTTL {
-		delete(st.bindings, clientSessionID)
+		st.removeLocked(clientSessionID)
 		return "", "", false
 	}
 	if b.workspaceKey != wsKey || b.daemonSessionID == "" {
 		return "", "", false
 	}
 	b.lastSeen = st.now()
+	st.promoteLocked(clientSessionID)
 	return b.daemonSessionID, b.daemonProtocolVersion, true
 }
 
@@ -201,20 +243,60 @@ func (st *daemonSessionStore) lookup(clientSessionID string, wsKey string) (daem
 // is race-safe. The LOCAL binding is overwritten here immediately (no local
 // leak); the orphaned UPSTREAM daemon session is reclaimed by the daemon's
 // own idle expiry, and the local store's idle entries by SweepSerenaSessions.
-func (st *daemonSessionStore) store(clientSessionID string, wsKey string, daemonSessionID string, daemonProtocolVersion string) {
+func (st *daemonSessionStore) store(clientSessionID string, wsKey string, daemonSessionID string, daemonProtocolVersion string) bool {
 	if clientSessionID == "" || daemonSessionID == "" {
-		return
+		return false
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	if st.bindings == nil {
-		st.bindings = make(map[string]*daemonSessionBinding)
+	st.ensureInitLocked()
+	if _, ok := st.bindings[clientSessionID]; !ok && len(st.bindings) >= maxRouterSessions {
+		return false
 	}
 	st.bindings[clientSessionID] = &daemonSessionBinding{
 		workspaceKey:          wsKey,
 		daemonSessionID:       daemonSessionID,
 		daemonProtocolVersion: daemonProtocolVersion,
 		lastSeen:              st.now(),
+	}
+	st.promoteLocked(clientSessionID)
+	return true
+}
+
+// reserveSlot reserves capacity for a brand-new daemon-session binding before
+// the router performs the upstream initialize handshake. This pre-handshake
+// reservation is what makes the cap effective against arbitrary legacy
+// Mcp-Session-Id churn: if the store is full, the router rejects before the
+// daemon mints another upstream session. Existing client ids do not consume a
+// new slot (workspace switches overwrite in place), and an empty id is the
+// existing one-shot/sessionless path.
+func (st *daemonSessionStore) reserveSlot(clientSessionID string) bool {
+	if clientSessionID == "" {
+		return true
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.ensureInitLocked()
+	if _, ok := st.bindings[clientSessionID]; ok {
+		return true
+	}
+	if len(st.bindings) >= maxRouterSessions {
+		return false
+	}
+	st.bindings[clientSessionID] = &daemonSessionBinding{lastSeen: st.now()}
+	st.promoteLocked(clientSessionID)
+	return true
+}
+
+func (st *daemonSessionStore) releaseReservation(clientSessionID string) {
+	if clientSessionID == "" {
+		return
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	b, ok := st.bindings[clientSessionID]
+	if ok && b != nil && b.daemonSessionID == "" {
+		st.removeLocked(clientSessionID)
 	}
 }
 
@@ -225,7 +307,7 @@ func (st *daemonSessionStore) unbind(clientSessionID string) {
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	delete(st.bindings, clientSessionID)
+	st.removeLocked(clientSessionID)
 }
 
 // bindingFor returns the (workspaceKey, daemonSessionID, daemonProtocolVersion)
@@ -263,7 +345,7 @@ func (st *daemonSessionStore) cleanup(now time.Time, ttl time.Duration) int {
 	n := 0
 	for id, b := range st.bindings {
 		if b == nil || !b.lastSeen.After(cutoff) {
-			delete(st.bindings, id)
+			st.removeLocked(id)
 			n++
 		}
 	}
@@ -633,12 +715,19 @@ func (st *daemonSessionStore) resolveDaemonSession(
 		if dsid, dpv, ok := st.lookup(clientSessionID, ws.WorkspaceKey); ok {
 			return dsid, dpv, nil
 		}
+		if !st.reserveSlot(clientSessionID) {
+			return "", "", errDaemonSessionStoreFull
+		}
 	}
+	reserved := clientSessionID != ""
 	// Finding 3 (round-10): thread the upstream timeout into the handshake so a
 	// daemon that opens an SSE stream on initialize but never sends a complete
 	// response event cannot hang this tool-call indefinitely.
 	dsid, dpv, err := establishDaemonSession(ctx, httpClient, upstreamURL, clientProtocolVersion, upstreamTimeout)
 	if err != nil {
+		if reserved {
+			st.releaseReservation(clientSessionID)
+		}
 		return "", "", err
 	}
 	// Finding 4: re-check the router session is STILL live before storing. The
@@ -649,6 +738,9 @@ func (st *daemonSessionStore) resolveDaemonSession(
 	// when a daemon session was actually minted (dsid != "") is there anything to
 	// release; a sessionless daemon has nothing to clean up.
 	if clientSessionID != "" && sessionLive != nil && !sessionLive() {
+		if reserved {
+			st.releaseReservation(clientSessionID)
+		}
 		if dsid != "" {
 			bestEffortDeleteDaemonSession(httpClient, upstreamURL, dsid, dpv, upstreamTimeout)
 		}
@@ -662,7 +754,12 @@ func (st *daemonSessionStore) resolveDaemonSession(
 	// eager upstream teardown; the old upstream session ages out on the
 	// daemon's idle clock).
 	if clientSessionID != "" && dsid != "" {
-		st.store(clientSessionID, ws.WorkspaceKey, dsid, dpv)
+		if !st.store(clientSessionID, ws.WorkspaceKey, dsid, dpv) {
+			bestEffortDeleteDaemonSession(httpClient, upstreamURL, dsid, dpv, upstreamTimeout)
+			return "", "", errDaemonSessionStoreFull
+		}
+	} else if reserved {
+		st.releaseReservation(clientSessionID)
 	}
 	return dsid, dpv, nil
 }

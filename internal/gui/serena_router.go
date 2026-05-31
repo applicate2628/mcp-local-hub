@@ -769,6 +769,11 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 				"session terminated", nil)
 			return
 		}
+		if errors.Is(hsErr, errDaemonSessionStoreFull) {
+			writeJSONRPCErrorStatus(w, tb.ID, http.StatusTooManyRequests, jsonrpcInvalidRequest,
+				"too many serena daemon sessions", nil)
+			return
+		}
 		if isTimeoutErr(hsErr) {
 			_ = auditFn("warn", "serena-upstream-timeout", map[string]any{
 				"workspace_key": ws.WorkspaceKey,
