@@ -127,8 +127,14 @@ type SerenaReconcileOpts struct {
 	// gui.ReadPidport). Phase 4 may inject gui.ReadPidport directly.
 	ReadPidport func(path string) (pid, port int, err error)
 
-	// Ping confirms the GUI is actually serving on the discovered port.
-	// nil → defaultRouterReadinessPing (a loopback HEAD probe). A nil
+	// VerifyIdentity binds the pidport to the listener before any router URL is
+	// trusted. nil → defaultGUIPidportIdentityCheck, which requires the recorded
+	// PID to still be alive and /api/ping on the recorded port to report the same
+	// PID. Tests may inject a no-op when they are not exercising discovery.
+	VerifyIdentity func(ctx context.Context, pid, port int) error
+
+	// Ping confirms the GUI router is actually serving on the discovered port.
+	// nil → defaultRouterReadinessPing (a loopback HEAD + initialize probe). A nil
 	// return means live; any error fails the reconcile closed. Mirrors the
 	// G4 reconcile's live-probe-before-rewrite posture
 	// (internal/cli/install.go:348-374).
@@ -425,7 +431,7 @@ func discoverLiveGUIPort(ctx context.Context, opts SerenaReconcileOpts) (int, er
 	if readPidport == nil {
 		readPidport = readPidportFn
 	}
-	_, port, err := readPidport(opts.PidportPath)
+	pid, port, err := readPidport(opts.PidportPath)
 	if err != nil {
 		return 0, fmt.Errorf("%w: read pidport %s: %v", ErrSerenaReconcileGUINotLive, opts.PidportPath, err)
 	}
@@ -436,6 +442,13 @@ func discoverLiveGUIPort(ctx context.Context, opts SerenaReconcileOpts) (int, er
 	if port <= 0 || port > 65535 {
 		return 0, fmt.Errorf("%w: pidport %s has no usable bound port (%d) — the GUI listener is not up", ErrSerenaReconcileGUINotLive, opts.PidportPath, port)
 	}
+	verifyIdentity := opts.VerifyIdentity
+	if verifyIdentity == nil {
+		verifyIdentity = defaultGUIPidportIdentityCheck
+	}
+	if ierr := verifyIdentity(ctx, pid, port); ierr != nil {
+		return 0, fmt.Errorf("%w: pidport %s identity check failed for PID %d on port %d: %v", ErrSerenaReconcileGUINotLive, opts.PidportPath, pid, port, ierr)
+	}
 	ping := opts.Ping
 	if ping == nil {
 		ping = defaultRouterReadinessPing
@@ -444,6 +457,62 @@ func discoverLiveGUIPort(ctx context.Context, opts SerenaReconcileOpts) (int, er
 		return 0, fmt.Errorf("%w: GUI on port %d did not answer the readiness ping: %v", ErrSerenaReconcileGUINotLive, port, perr)
 	}
 	return port, nil
+}
+
+// defaultGUIPidportIdentityCheck binds the pidport metadata to the loopback
+// listener before the router readiness probe runs. GUI pidport files are
+// intentionally left on disk after exit, so accepting only the recorded port is
+// not sufficient: a different local process can bind the stale port and mimic
+// /serena/mcp. We therefore require both (1) the recorded PID is still alive and
+// (2) the GUI's /api/ping endpoint on the recorded port reports that same PID.
+func defaultGUIPidportIdentityCheck(ctx context.Context, pid, port int) error {
+	if pid <= 0 {
+		return fmt.Errorf("invalid pid %d", pid)
+	}
+	alive, err := processAlive(pid)
+	if err != nil {
+		return fmt.Errorf("check recorded process liveness: %w", err)
+	}
+	if !alive {
+		return fmt.Errorf("recorded process is not alive")
+	}
+	matchedPID, err := pingGUIIdentity(ctx, port)
+	if err != nil {
+		return err
+	}
+	if matchedPID != pid {
+		return fmt.Errorf("/api/ping PID %d does not match pidport PID %d", matchedPID, pid)
+	}
+	return nil
+}
+
+func pingGUIIdentity(ctx context.Context, port int) (int, error) {
+	reqCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/api/ping", port), nil)
+	if err != nil {
+		return 0, err
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("/api/ping request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("/api/ping status %d", resp.StatusCode)
+	}
+	var body struct {
+		OK  bool `json:"ok"`
+		PID int  `json:"pid"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
+		return 0, fmt.Errorf("decode /api/ping body: %w", err)
+	}
+	if !body.OK {
+		return 0, fmt.Errorf("/api/ping returned ok=false")
+	}
+	return body.PID, nil
 }
 
 // defaultRouterReadinessPing confirms a live local GUI is serving on port by

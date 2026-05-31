@@ -20,7 +20,8 @@ import (
 
 // okPing is a readiness ping that always reports the GUI live. Used by
 // tests that are not exercising the fail-closed discovery path.
-func okPing(context.Context, int) error { return nil }
+func okPing(context.Context, int) error             { return nil }
+func okGUIIdentity(context.Context, int, int) error { return nil }
 
 // seedPidport writes a "<PID> <PORT>\n" pidport file into a temp dir and
 // returns its path. Mirrors gui.formatPidport's exact byte layout so the
@@ -152,9 +153,10 @@ func TestSerenaClientReconcile_DiscoversPortFromLivePidport_FailsClosedWhenAbsen
 		pp := seedPidport(t, 4242, 9137)
 		cs := fakeReconcileClientMap()
 		report, err := ReconcileSerenaClientsToRouter(context.Background(), SerenaReconcileOpts{
-			PidportPath: pp,
-			Ping:        okPing,
-			Clients:     cs,
+			PidportPath:    pp,
+			Ping:           okPing,
+			VerifyIdentity: okGUIIdentity,
+			Clients:        cs,
 		})
 		if err != nil {
 			t.Fatalf("reconcile: %v", err)
@@ -179,9 +181,10 @@ func TestSerenaClientReconcile_DiscoversPortFromLivePidport_FailsClosedWhenAbsen
 	t.Run("missing_pidport_fails_closed", func(t *testing.T) {
 		cs := fakeReconcileClientMap()
 		_, err := ReconcileSerenaClientsToRouter(context.Background(), SerenaReconcileOpts{
-			PidportPath: filepath.Join(t.TempDir(), "does-not-exist.pidport"),
-			Ping:        okPing,
-			Clients:     cs,
+			PidportPath:    filepath.Join(t.TempDir(), "does-not-exist.pidport"),
+			Ping:           okPing,
+			VerifyIdentity: okGUIIdentity,
+			Clients:        cs,
 		})
 		if !errors.Is(err, ErrSerenaReconcileGUINotLive) {
 			t.Fatalf("expected ErrSerenaReconcileGUINotLive, got %v", err)
@@ -200,9 +203,10 @@ func TestSerenaClientReconcile_DiscoversPortFromLivePidport_FailsClosedWhenAbsen
 		cs := fakeReconcileClientMap()
 		failPing := func(context.Context, int) error { return errors.New("connection refused") }
 		_, err := ReconcileSerenaClientsToRouter(context.Background(), SerenaReconcileOpts{
-			PidportPath: pp,
-			Ping:        failPing,
-			Clients:     cs,
+			PidportPath:    pp,
+			Ping:           failPing,
+			VerifyIdentity: okGUIIdentity,
+			Clients:        cs,
 		})
 		if !errors.Is(err, ErrSerenaReconcileGUINotLive) {
 			t.Fatalf("expected ErrSerenaReconcileGUINotLive on ping failure, got %v", err)
@@ -232,6 +236,55 @@ func TestSerenaClientReconcile_DiscoversPortFromLivePidport_FailsClosedWhenAbsen
 			t.Errorf("ping should not run for an unusable (0) port")
 		}
 	})
+}
+
+// TestSerenaClientReconcile_RejectsStalePidportSpoofedRouter verifies the
+// production discovery path does not trust a stale pidport port even when a
+// local listener mimics both the /api/ping JSON shape and the /serena/mcp
+// readiness signature. The recorded PID must still be alive and match the GUI
+// listener before any client config can be rewritten.
+func TestSerenaClientReconcile_RejectsStalePidportSpoofedRouter(t *testing.T) {
+	managedEntriesTestHelper(t)
+
+	const stalePID = 999999999
+	spoof := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/ping":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true,"pid":999999999}`))
+		case SerenaRouterURLPath:
+			if r.Method != http.MethodPost {
+				w.Header().Set("Allow", "POST")
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","serverInfo":{"name":"spoof"},"capabilities":{}}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer spoof.Close()
+
+	port := spoof.Listener.Addr().(*net.TCPAddr).Port
+	pp := seedPidport(t, stalePID, port)
+	cs := fakeReconcileClientMap()
+
+	_, err := ReconcileSerenaClientsToRouter(context.Background(), SerenaReconcileOpts{
+		PidportPath: pp,
+		Clients:     cs,
+	})
+	if !errors.Is(err, ErrSerenaReconcileGUINotLive) {
+		t.Fatalf("expected ErrSerenaReconcileGUINotLive for stale pidport spoof, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "recorded process is not alive") {
+		t.Fatalf("expected stale PID liveness diagnostic, got %v", err)
+	}
+	for name, c := range cs {
+		if fc := c.(*reconcileFakeClient); fc.addCalls != 0 {
+			t.Errorf("client %s: AddEntry called %d times for spoofed stale pidport; want 0", name, fc.addCalls)
+		}
+	}
 }
 
 // TestDefaultRouterReadinessPing_RequiresSerenaRouterSignature is the bot PR #248
@@ -347,6 +400,7 @@ func TestSerenaClientReconcile_RewritesToRouterURL_PerClient(t *testing.T) {
 	report, err := ReconcileSerenaClientsToRouter(context.Background(), SerenaReconcileOpts{
 		PidportPath:    pp,
 		Ping:           okPing,
+		VerifyIdentity: okGUIIdentity,
 		ClientsInclude: urlClients,
 		// Clients: nil → production AllClients() over the hermetic HOME.
 	})
@@ -410,6 +464,7 @@ func TestSerenaClientReconcile_Antigravity_RelayUpstreamIsRouter(t *testing.T) {
 	report, err := ReconcileSerenaClientsToRouter(context.Background(), SerenaReconcileOpts{
 		PidportPath:    pp,
 		Ping:           okPing,
+		VerifyIdentity: okGUIIdentity,
 		ClientsInclude: []string{"antigravity"},
 		McphubExePath:  filepath.Join(home, "mcphub-test-bin"), // abs path required by the adapter
 	})
@@ -459,9 +514,10 @@ func TestSerenaClientReconcile_RecordsManagedEntryMarker(t *testing.T) {
 	pp := seedPidport(t, 4242, 9142)
 	cs := fakeReconcileClientMap()
 	report, err := ReconcileSerenaClientsToRouter(context.Background(), SerenaReconcileOpts{
-		PidportPath: pp,
-		Ping:        okPing,
-		Clients:     cs,
+		PidportPath:    pp,
+		Ping:           okPing,
+		VerifyIdentity: okGUIIdentity,
+		Clients:        cs,
 	})
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
@@ -498,11 +554,12 @@ func TestSerenaClientReconcile_LegacyEndpointRemovedOnlyAfterRewriteSuccess(t *t
 	broken.entries["serena"] = clients.MCPEntry{Name: "serena", URL: "http://localhost:9143/mcp"}
 
 	report, err := ReconcileSerenaClientsToRouter(context.Background(), SerenaReconcileOpts{
-		PidportPath:  pp,
-		Ping:         okPing,
-		Clients:      cs,
-		RemoveLegacy: true,
-		LegacyPort:   9143,
+		PidportPath:    pp,
+		Ping:           okPing,
+		VerifyIdentity: okGUIIdentity,
+		Clients:        cs,
+		RemoveLegacy:   true,
+		LegacyPort:     9143,
 	})
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
@@ -556,9 +613,10 @@ func TestSerenaClientReconcile_AppliedRowCarriesBackupPath(t *testing.T) {
 		c.(*reconcileFakeClient).backupPath = "/fake/bak-" + name
 	}
 	report, err := ReconcileSerenaClientsToRouter(context.Background(), SerenaReconcileOpts{
-		PidportPath: pp,
-		Ping:        okPing,
-		Clients:     cs,
+		PidportPath:    pp,
+		Ping:           okPing,
+		VerifyIdentity: okGUIIdentity,
+		Clients:        cs,
 	})
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
