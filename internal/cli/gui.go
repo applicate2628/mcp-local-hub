@@ -328,6 +328,7 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 		api.SetSerenaAutoRegisterCutoverPrimitives(
 			func(c context.Context) error { return defaultMigrateSerenaReap(c, io.Discard) },
 			func(c context.Context) error { return defaultMigrateSerenaStart(c, io.Discard) },
+			defaultMigrateSerenaStartSupported,
 		)
 		// Sweep all three serena session stores on one ticker: the
 		// cross-package sticky-routing SessionRouter AND (Finding 2) the

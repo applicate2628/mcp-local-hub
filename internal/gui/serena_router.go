@@ -598,7 +598,7 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 			// response (so the caller MUST return on nil). A nil AutoRegisterFn
 			// preserves today's writeWorkspaceNotFound 503.
 			if errors.Is(resolveErr, ErrWorkspaceNotFound) {
-				ws = s.attemptSerenaAutoRegister(w, r, deps, tb.ID, pathArg)
+				ws = s.attemptSerenaAutoRegister(w, r, deps, tb.ID, sessionID, pathArg)
 				if ws == nil {
 					return
 				}
@@ -609,7 +609,7 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		} else if resolved == nil {
 			// resolved==nil is the other not-found shape (resolver returned a
 			// nil entry with a nil error). Same auto-register-on-miss path.
-			ws = s.attemptSerenaAutoRegister(w, r, deps, tb.ID, pathArg)
+			ws = s.attemptSerenaAutoRegister(w, r, deps, tb.ID, sessionID, pathArg)
 			if ws == nil {
 				return
 			}
@@ -1036,10 +1036,33 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 // request-scoped values), WithoutCancel preserves request values while
 // severing only cancellation — the exact posture an important best-effort
 // register needs.
-func (s *Server) attemptSerenaAutoRegister(w http.ResponseWriter, r *http.Request, deps *serenaRouterDeps, id json.RawMessage, pathArg string) *api.WorkspaceEntry {
+func (s *Server) attemptSerenaAutoRegister(w http.ResponseWriter, r *http.Request, deps *serenaRouterDeps, id json.RawMessage, sessionID, pathArg string) *api.WorkspaceEntry {
 	if deps.AutoRegisterFn == nil {
 		writeWorkspaceNotFound(w, pathArg, false)
 		return nil
+	}
+
+	// bot PR #253 P2: validate the router session/version BEFORE auto-registering,
+	// so an expired/terminated or protocol-version-mismatched client cannot trigger
+	// registration (pool-port allocation + workspaces.yaml / supervisor-intent
+	// mutation). This mirrors the authoritative post-branch version gate; for a LIVE
+	// session peekVersionState is non-mutating, so that gate still re-validates and
+	// touches normally after the forward. An EXPIRED session is terminated here
+	// (expire-on-read) and rejected; a fresh path-only call (sessionID == "") has no
+	// router session to validate and proceeds (the legitimate first-call case).
+	if sessionID != "" {
+		sessionVersion, state := s.serenaRouterSessions.peekVersionState(sessionID)
+		if state == routerSessionExpired {
+			s.coordinateExpiredRouterSessionUnbind(sessionID, deps.Sessions)
+			writeJSONRPCErrorStatus(w, id, http.StatusBadRequest, jsonrpcInvalidRequest, "session terminated", nil)
+			return nil
+		}
+		if state == routerSessionLive {
+			if cv := r.Header.Get("MCP-Protocol-Version"); cv != "" && cv != sessionVersion {
+				writeJSONRPCErrorStatus(w, id, http.StatusBadRequest, jsonrpcInvalidRequest, "protocol-version mismatch", nil)
+				return nil
+			}
+		}
 	}
 
 	regCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 45*time.Second)

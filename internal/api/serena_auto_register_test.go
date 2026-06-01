@@ -86,6 +86,10 @@ func autoRegisterTestEnv(t *testing.T) (regPath string) {
 	}
 	t.Cleanup(func() { autoRegisterStartFn = prevStart })
 
+	prevStartSupported := autoRegisterStartSupportedFn
+	autoRegisterStartSupportedFn = func() bool { return true } // platform supports the cutover by default
+	t.Cleanup(func() { autoRegisterStartSupportedFn = prevStartSupported })
+
 	// Reset the per-key concurrency guard so a key registered in a prior test
 	// (package-level map persists across tests) cannot leak a held/known lock.
 	serenaAutoRegisterKeyMu.Lock()
@@ -318,8 +322,8 @@ func TestAutoRegisterSerena_HappyPath_RegistersInstallsReconcilesAndProbes(t *te
 	if entry.Backend != SerenaServerName {
 		t.Errorf("entry.Backend = %q, want %q", entry.Backend, SerenaServerName)
 	}
-	if entry.WorkspacePath != root {
-		t.Errorf("entry.WorkspacePath = %q, want %q", entry.WorkspacePath, root)
+	if entry.WorkspacePath != mustCanonical(t, root) {
+		t.Errorf("entry.WorkspacePath = %q, want canonical %q (bot PR #253 P2 — store canonical, matching manual register)", entry.WorkspacePath, mustCanonical(t, root))
 	}
 	if entry.Port < serenaDefaultPortPoolStart || entry.Port > serenaDefaultPortPoolEnd {
 		t.Errorf("entry.Port = %d, want within built-in pool [%d,%d]", entry.Port, serenaDefaultPortPoolStart, serenaDefaultPortPoolEnd)
@@ -519,8 +523,8 @@ func TestAutoRegisterSerena_FromSubdir_ResolvesToSameRoot_Idempotent(t *testing.
 	if fromSub.WorkspaceKey != fromRoot.WorkspaceKey {
 		t.Errorf("subdir resolved to key %s, want the root key %s (ancestor-walk)", fromSub.WorkspaceKey, fromRoot.WorkspaceKey)
 	}
-	if fromSub.WorkspacePath != root {
-		t.Errorf("subdir resolved WorkspacePath = %q, want the marker root %q", fromSub.WorkspacePath, root)
+	if fromSub.WorkspacePath != mustCanonical(t, root) {
+		t.Errorf("subdir resolved WorkspacePath = %q, want canonical marker root %q", fromSub.WorkspacePath, mustCanonical(t, root))
 	}
 	if rows := loadRegSerenaRows(t, regPath); len(rows) != 1 {
 		t.Errorf("registry has %d serena rows, want 1 (subdir call must not double-register)", len(rows))
@@ -797,8 +801,8 @@ func TestAutoRegisterSerena_Introduce_CutoverUnwired_FailsLoudAndRollsBack(t *te
 	if err == nil {
 		t.Fatal("expected a fail-loud error when cutover primitives are not wired")
 	}
-	if !strings.Contains(err.Error(), "cutover primitives are not wired") {
-		t.Fatalf("error = %v, want it to name the not-wired cutover primitives", err)
+	if !strings.Contains(err.Error(), "not supported on this build/platform") {
+		t.Fatalf("error = %v, want it to name the unavailable cutover (nil primitives are caught by the same gate)", err)
 	}
 	if rows := loadRegSerenaRows(t, regPath); len(rows) != 0 {
 		t.Errorf("registry has %d serena rows after a not-wired-cutover failure, want 0 (rollback)", len(rows))
@@ -861,6 +865,63 @@ func TestAutoRegisterSerena_DifferentRoots_SecondInstallSeesFirstRow(t *testing.
 	// Both rows persisted on disk.
 	if rows := loadRegSerenaRows(t, regPath); len(rows) != 2 {
 		t.Errorf("registry has %d serena rows after two different-root registers, want 2", len(rows))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 15. Relative path → ErrNotASerenaProject (bot PR #253 P1). A relative tool
+//     path must NOT be resolved against the GUI's cwd and registered.
+// ---------------------------------------------------------------------------
+
+func TestAutoRegisterSerena_RelativePath_ReturnsErrNotASerenaProject(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		t.Fatalf("install seam must not be called for a relative path")
+		return "", nil
+	})
+	_, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), filepath.Join("some", "relative", "proj"))
+	if !errors.Is(err, ErrNotASerenaProject) {
+		t.Fatalf("error = %v, want ErrNotASerenaProject for a relative path", err)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 0 {
+		t.Errorf("registry has %d serena rows after a relative-path call, want 0", len(rows))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 16. INTRODUCE with the platform START primitive UNSUPPORTED (non-nil stub) →
+//     fail loud BEFORE any reap/install commit (bot PR #253 P2). The reap/start
+//     functions are wired (non-nil) but startSupported() is false.
+// ---------------------------------------------------------------------------
+
+func TestAutoRegisterSerena_Introduce_StartUnsupported_FailsLoudPreCommit(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return false, nil }) // INTRODUCE
+	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return true, nil })
+	// reap/start are WIRED (non-nil) but the platform does NOT support the start.
+	stubAutoRegisterCutover(t,
+		func(context.Context) error { t.Fatalf("reap must not run when start is unsupported (pre-commit gate)"); return nil },
+		func(context.Context) error { t.Fatalf("start must not run when start is unsupported"); return nil },
+	)
+	prevSupported := autoRegisterStartSupportedFn
+	autoRegisterStartSupportedFn = func() bool { return false }
+	t.Cleanup(func() { autoRegisterStartSupportedFn = prevSupported })
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		t.Fatalf("install must not be reached when the platform cannot start the supervisor (pre-commit refusal)")
+		return "", nil
+	})
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	_, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root)
+	if err == nil {
+		t.Fatal("expected a pre-commit fail-loud when the supervisor start is unsupported")
+	}
+	if !strings.Contains(err.Error(), "not supported on this build/platform") {
+		t.Fatalf("error = %v, want it to name the unsupported cutover", err)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 0 {
+		t.Errorf("registry has %d serena rows after an unsupported-start refusal, want 0 (rollback, nothing committed)", len(rows))
 	}
 }
 

@@ -1514,6 +1514,44 @@ func TestSerenaRouter_AutoRegister_ResolvedNilForwards(t *testing.T) {
 	}
 }
 
+// TestSerenaRouter_AutoRegister_InvalidSession_RejectsBeforeRegister: bot PR #253
+// P2 — a path-bearing first call carrying a router session whose negotiated
+// version conflicts with the request header must be rejected BEFORE auto-register
+// runs, so an invalid/stale client cannot consume a pool port or mutate
+// workspaces.yaml / the supervisor intent.
+func TestSerenaRouter_AutoRegister_InvalidSession_RejectsBeforeRegister(t *testing.T) {
+	var registerCalls int32
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: nil}, // not-found → would auto-register
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return "http://127.0.0.1:0" },
+		AutoRegisterFn: func(ctx context.Context, absPath string) (*api.WorkspaceEntry, error) {
+			atomic.AddInt32(&registerCalls, 1)
+			return &api.WorkspaceEntry{WorkspaceKey: "x", WorkspacePath: "/proj/x", Port: 9303}, nil
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+	// Mint a LIVE router session negotiated at one version.
+	s.serenaRouterSessions.store("sess-vm", "2025-03-26")
+
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/x/main.go"})
+	// The request carries a CONFLICTING protocol version → reject before register.
+	rr := postSerena(t, s, body, map[string]string{
+		"Mcp-Session-Id":       "sess-vm",
+		"MCP-Protocol-Version": "1999-01-01",
+	})
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (protocol-version mismatch before register); body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "protocol-version mismatch") {
+		t.Errorf("body = %s, want protocol-version mismatch", rr.Body.String())
+	}
+	if got := atomic.LoadInt32(&registerCalls); got != 0 {
+		t.Errorf("AutoRegisterFn called %d times, want 0 (an invalid session must not trigger auto-register)", got)
+	}
+}
+
 // TestSerenaRouter_AutoRegister_NotASerenaProject_Returns503: AutoRegisterFn
 // returns api.ErrNotASerenaProject → the canonical workspace-not-found 503
 // (the DoS bound — behave exactly like today's not-found, no marker = no

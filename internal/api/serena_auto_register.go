@@ -174,8 +174,14 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 		return nil, fmt.Errorf("serena auto-register: allocate serena pool port: %w", err)
 	}
 	newEntry := WorkspaceEntry{
-		WorkspaceKey:  key,
-		WorkspacePath: root,
+		WorkspaceKey: key,
+		// Store the CANONICAL (symlink-resolved) path, matching manual
+		// registration (internal/cli/workspace_cmd.go:237). The resolver matches
+		// an incoming absolute path's CanonicalWorkspacePath against stored rows
+		// via canonicalizeWorkspacePath (which does NOT resolve symlinks), so a
+		// row storing the unresolved `root` would never resolve and every call
+		// would re-auto-register (bot PR #253 P2).
+		WorkspacePath: canonical,
 		Language:      SerenaLanguageSentinel,
 		Backend:       SerenaServerName,
 		Port:          port,
@@ -237,8 +243,21 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 	}
 	needReap := !priorHasSpec && supRunning
 	needStart := !priorHasSpec
-	if (needReap || needStart) && (autoRegisterReapFn == nil || autoRegisterStartFn == nil) {
-		return rollback(fmt.Errorf("serena auto-register: %s is the first serena workspace (the supervisor intent carries no runtime_spec yet), so a one-time supervisor cutover is required to introduce it — but the cutover primitives are not wired on this build/platform (supervisor reap/restart is Windows-only in v0.5.0)", root))
+	// PRE-COMMIT cutover-support gate (bot PR #253 P2). The CLI wires NON-nil
+	// reap/start functions on EVERY platform, but off-Windows they are unsupported
+	// stubs (defaultMigrateSerenaStart returns errSupervisorRestartUnsupported). A
+	// nil-ONLY check would let the introduce path reap, commit the intent + the
+	// registry row, and only THEN fail at the post-commit start — leaving a
+	// spec-bearing intent the platform cannot bring live (a fresh host or
+	// zero-workspace migration on Linux/macOS). So refuse BEFORE any reap/install
+	// when the cutover is unwired OR the platform's start primitive is unsupported,
+	// mirroring migrate's pre-commit migrateSerenaStartSupportedFn gate. rollback()
+	// removes our row; nothing is committed.
+	if needReap || needStart {
+		if autoRegisterReapFn == nil || autoRegisterStartFn == nil ||
+			autoRegisterStartSupportedFn == nil || !autoRegisterStartSupportedFn() {
+			return rollback(fmt.Errorf("serena auto-register: %s is the first serena workspace (the supervisor intent carries no runtime_spec yet), so a one-time supervisor cutover (reap → install → start) is required to introduce it — but the supervisor reap/restart primitive is not supported on this build/platform (Windows-only in v0.5.0)", root))
+		}
 	}
 
 	// 8. REAP first (introduce-while-running only) so the spec-bearing write hits
@@ -281,7 +300,7 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 			// POST-COMMIT start failure: fail loud, NO registry rollback (the intent
 			// is the commit point). Audit, then return; the operator restarts the
 			// supervisor and the committed intent is reconciled.
-			emitWorkspaceAutoRegisteredEvent(root, key, port, newEntry.Languages)
+			emitWorkspaceAutoRegisteredEvent(canonical, key, port, newEntry.Languages)
 			return nil, fmt.Errorf("serena auto-register: workspace %s registered and intent committed but the supervisor start failed: %w — run `mcphub supervise` so the current binary reconciles the committed intent (the registry is intentionally NOT rolled back: the intent is the commit point)", root, startErr)
 		}
 	} else if _, recErr := autoRegisterReconcileFn(ctx, true); recErr != nil {
@@ -298,12 +317,12 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 	//     resolves it and the daemon will be up) — return an error wrapping the
 	//     readiness failure so the router maps it to 503 and the client retries.
 	if rdErr := autoRegisterReadinessFn(port, serenaAutoRegisterReadinessTimeout); rdErr != nil {
-		emitWorkspaceAutoRegisteredEvent(root, key, port, newEntry.Languages)
+		emitWorkspaceAutoRegisteredEvent(canonical, key, port, newEntry.Languages)
 		return nil, fmt.Errorf("serena auto-register: workspace %s registered and intent committed, but the per-workspace daemon on port %d was not ready in time: %w (the workspace IS registered; retry the call — the supervisor is bringing the daemon up)", root, port, rdErr)
 	}
 
 	// 13. Audit: emit the success event (best-effort; never fatal).
-	emitWorkspaceAutoRegisteredEvent(root, key, port, newEntry.Languages)
+	emitWorkspaceAutoRegisteredEvent(canonical, key, port, newEntry.Languages)
 
 	e := newEntry
 	return &e, nil
@@ -330,10 +349,18 @@ func resolveSerenaProjectRoot(p string) (string, error) {
 	if strings.TrimSpace(p) == "" {
 		return "", fmt.Errorf("%w: empty path", ErrNotASerenaProject)
 	}
-	abs, err := filepath.Abs(filepath.Clean(p))
-	if err != nil {
-		return "", fmt.Errorf("serena auto-register: resolve path %q: %w", p, err)
+	// Auto-register requires an ABSOLUTE path (bot PR #253 P1). A relative
+	// tool-argument path is relative to the AGENT's environment, which the GUI
+	// server cannot know; resolving it against the GUI's own cwd (filepath.Abs)
+	// would discover the WRONG project (or none) — silently registering a
+	// directory the agent never named. Refuse so the router returns not-found
+	// instead. (Relative paths resolve only for ALREADY-registered workspaces,
+	// via the resolver's per-root matching; a relative FIRST call cannot be
+	// located and must not auto-register.)
+	if !filepath.IsAbs(p) {
+		return "", fmt.Errorf("%w: %q is not an absolute path (auto-register cannot locate a relative path against the GUI's working directory)", ErrNotASerenaProject, p)
 	}
+	abs := filepath.Clean(p)
 	dir := abs
 	for {
 		marker := filepath.Join(dir, ".serena", "project.yml")
@@ -561,15 +588,25 @@ var (
 	autoRegisterStartFn func(ctx context.Context) error
 )
 
+// autoRegisterStartSupportedFn reports whether the platform's supervisor START
+// primitive is actually WIRED (not merely a non-nil unsupported stub). nil or a
+// false return → the introduce cutover refuses BEFORE committing the intent (bot
+// PR #253 P2). Wired by the CLI to defaultMigrateSerenaStartSupported (true on
+// Windows; false elsewhere in v0.5.0).
+var autoRegisterStartSupportedFn func() bool
+
 // SetSerenaAutoRegisterCutoverPrimitives wires the supervisor reap/start used by
 // AutoRegisterSerenaWorkspace when introducing the FIRST serena runtime_spec
-// (the one-time cutover). Called once from CLI GUI-server startup. Passing nil
-// for either clears the wiring (the introduce path then fails loud). Safe to call
-// before the GUI starts serving; the package-global is read under the install
-// mutex on the introduce branch.
-func SetSerenaAutoRegisterCutoverPrimitives(reap, start func(ctx context.Context) error) {
+// (the one-time cutover), plus the start-supported predicate that gates the
+// introduce path BEFORE any commit. Called once from CLI GUI-server startup.
+// Passing nil for reap/start clears the wiring; a nil-or-false startSupported
+// makes the introduce path fail loud pre-commit. Safe to call before the GUI
+// starts serving; the package-globals are read under the install mutex on the
+// introduce branch.
+func SetSerenaAutoRegisterCutoverPrimitives(reap, start func(ctx context.Context) error, startSupported func() bool) {
 	autoRegisterReapFn = reap
 	autoRegisterStartFn = start
+	autoRegisterStartSupportedFn = startSupported
 }
 
 // --- per-workspace-key concurrency guard -----------------------------------
