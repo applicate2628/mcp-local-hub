@@ -584,6 +584,22 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// bot PR #253 P2: an id-less tools/call is a JSON-RPC NOTIFICATION → 202 with
+	// NO execution (mirroring the hub's tools/call gate at internal/api/
+	// hub_mcp_handler.go and the tools/list / ping branches above). This MUST
+	// precede the resolve / auto-register branch so a fire-and-forget or malformed
+	// (non-string/number id) call cannot mutate workspaces.yaml + the supervisor
+	// intent or consume a pool port via auto-register.
+	if isJSONRPCNotificationID(tb.ID) {
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
+	if !isValidJSONRPCRequestID(tb.ID) {
+		writeJSONRPCError(w, nil, jsonrpcInvalidRequest,
+			"invalid request: id must be a non-null string or number")
+		return
+	}
+
 	pathArg, hasPath := extractPathArg(toolArguments)
 
 	var ws *api.WorkspaceEntry

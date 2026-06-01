@@ -311,12 +311,26 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 	// neither the registry nor the intent, so other roots may proceed.
 	releaseInstallMu()
 
-	// 12. Readiness: poll the allocated port's /mcp with a synthetic initialize.
-	//     Ready → return the entry. A timeout AFTER the committed install does NOT
-	//     roll back (the workspace is registered + in the intent; the next call
-	//     resolves it and the daemon will be up) — return an error wrapping the
-	//     readiness failure so the router maps it to 503 and the client retries.
-	if rdErr := autoRegisterReadinessFn(port, serenaAutoRegisterReadinessTimeout); rdErr != nil {
+	// 12. Readiness: poll the allocated port's /mcp with a synthetic initialize,
+	//     bounded by BOTH the fixed cold-start budget AND the router's REMAINING
+	//     auto-register deadline (bot PR #253 P3) — a slow reap/install/start must
+	//     not let this fixed-20s probe block past the handler's advertised 45s
+	//     window. A timeout AFTER the committed install does NOT roll back (the
+	//     workspace is registered + in the intent; the next call resolves it and
+	//     the daemon will be up) — return an error the router maps to 503 so the
+	//     client retries.
+	readinessTimeout := serenaAutoRegisterReadinessTimeout
+	if dl, ok := ctx.Deadline(); ok {
+		if rem := time.Until(dl); rem < readinessTimeout {
+			readinessTimeout = rem
+		}
+	}
+	if readinessTimeout <= 0 {
+		// The router's auto-register budget is already spent — do not block at all.
+		emitWorkspaceAutoRegisteredEvent(canonical, key, port, newEntry.Languages)
+		return nil, fmt.Errorf("serena auto-register: workspace %s registered and intent committed, but the auto-register deadline expired before the daemon on port %d became ready (the workspace IS registered; retry the call — the supervisor is bringing the daemon up)", root, port)
+	}
+	if rdErr := autoRegisterReadinessFn(port, readinessTimeout); rdErr != nil {
 		emitWorkspaceAutoRegisteredEvent(canonical, key, port, newEntry.Languages)
 		return nil, fmt.Errorf("serena auto-register: workspace %s registered and intent committed, but the per-workspace daemon on port %d was not ready in time: %w (the workspace IS registered; retry the call — the supervisor is bringing the daemon up)", root, port, rdErr)
 	}
@@ -377,12 +391,14 @@ func resolveSerenaProjectRoot(p string) (string, error) {
 }
 
 // serenaProjectYMLForAutoRegister is the minimal shape consumed from
-// .serena/project.yml. Only the languages list matters here; every other serena
+// .serena/project.yml. Only the language(s) matter here; every other serena
 // field is left untouched on disk (auto-register never rewrites project.yml).
 // Replicated minimally from internal/cli/workspace_cmd.go:745's serenaProjectYml
-// (the api package cannot import cli).
+// (the api package cannot import cli). Both the modern plural `languages:` list
+// and Serena's legacy singular `language:` scalar are read (bot PR #253 P2).
 type serenaProjectYMLForAutoRegister struct {
 	Languages []string `yaml:"languages"`
+	Language  string   `yaml:"language"` // legacy singular form (`language: python`)
 }
 
 // readSerenaProjectYMLLanguages reads <root>/.serena/project.yml and returns its
@@ -405,7 +421,15 @@ func readSerenaProjectYMLLanguages(root string) ([]string, error) {
 		if strings.TrimSpace(l) == "" {
 			continue
 		}
-		cleaned = append(cleaned, l)
+		cleaned = append(cleaned, strings.TrimSpace(l))
+	}
+	// Legacy singular fallback (bot PR #253 P2): an older Serena project.yml uses
+	// `language: python` instead of the plural list. Auto-register exists to pick
+	// up ALREADY-created Serena projects on first use, so a valid legacy project
+	// must register, not 422. Only consult the scalar when the plural list yielded
+	// nothing (a project carrying both is governed by its plural list).
+	if len(cleaned) == 0 && strings.TrimSpace(doc.Language) != "" {
+		cleaned = append(cleaned, strings.TrimSpace(doc.Language))
 	}
 	if len(cleaned) == 0 {
 		return nil, fmt.Errorf("%w (%s)", ErrNoLanguages, path)

@@ -1552,6 +1552,35 @@ func TestSerenaRouter_AutoRegister_InvalidSession_RejectsBeforeRegister(t *testi
 	}
 }
 
+// TestSerenaRouter_AutoRegister_IdlessNotification_202NoRegister: bot PR #253
+// P2 — an id-less tools/call is a JSON-RPC NOTIFICATION, so it must 202 without
+// auto-registering (no workspaces.yaml / supervisor-intent mutation, no pool
+// port consumed) even for an unregistered marker-bearing path.
+func TestSerenaRouter_AutoRegister_IdlessNotification_202NoRegister(t *testing.T) {
+	var registerCalls int32
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: nil},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return "http://127.0.0.1:0" },
+		AutoRegisterFn: func(ctx context.Context, absPath string) (*api.WorkspaceEntry, error) {
+			atomic.AddInt32(&registerCalls, 1)
+			return &api.WorkspaceEntry{WorkspaceKey: "x", WorkspacePath: "/proj/x", Port: 9304}, nil
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+
+	// id-less tools/call (no "id" field) for an unregistered marker-bearing path.
+	body := []byte(`{"jsonrpc":"2.0","method":"tools/call","params":{"name":"find_symbol","arguments":{"relative_path":"/proj/x/main.go"}}}`)
+	rr := postSerena(t, s, body, nil)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 (id-less notification, no execution); body=%s", rr.Code, rr.Body.String())
+	}
+	if got := atomic.LoadInt32(&registerCalls); got != 0 {
+		t.Errorf("AutoRegisterFn called %d times, want 0 (a notification must not auto-register)", got)
+	}
+}
+
 // TestSerenaRouter_AutoRegister_NotASerenaProject_Returns503: AutoRegisterFn
 // returns api.ErrNotASerenaProject → the canonical workspace-not-found 503
 // (the DoS bound — behave exactly like today's not-found, no marker = no

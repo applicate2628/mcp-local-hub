@@ -925,5 +925,52 @@ func TestAutoRegisterSerena_Introduce_StartUnsupported_FailsLoudPreCommit(t *tes
 	}
 }
 
+// ---------------------------------------------------------------------------
+// 17. Legacy singular `language:` form (bot PR #253 P2) → registers (not 422).
+// ---------------------------------------------------------------------------
+
+func TestAutoRegisterSerena_LegacySingularLanguage_Registers(t *testing.T) {
+	autoRegisterTestEnv(t)
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		return filepath.Join(t.TempDir(), "supervisor-intent.json"), nil
+	})
+	stubAutoRegisterReconcile(t, func(context.Context, bool) (ReconcileResponse, error) { return ReconcileResponse{}, nil })
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
+
+	root := writeSerenaMarker(t, t.TempDir(), "project_name: demo\nlanguage: python\n") // legacy singular scalar
+	entry, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root)
+	if err != nil {
+		t.Fatalf("legacy singular `language:` must register, got: %v", err)
+	}
+	if len(entry.Languages) != 1 || entry.Languages[0] != "python" {
+		t.Errorf("entry.Languages = %v, want [python] (legacy singular form)", entry.Languages)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 18. Readiness probe is bounded by the remaining context deadline (bot PR #253
+//     P3) — a short ctx caps the probe below the 20s default.
+// ---------------------------------------------------------------------------
+
+func TestAutoRegisterSerena_ReadinessHonorsContextDeadline(t *testing.T) {
+	autoRegisterTestEnv(t)
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		return filepath.Join(t.TempDir(), "supervisor-intent.json"), nil
+	})
+	stubAutoRegisterReconcile(t, func(context.Context, bool) (ReconcileResponse, error) { return ReconcileResponse{}, nil })
+	var gotTimeout time.Duration
+	stubAutoRegisterReadiness(t, func(_ int, timeout time.Duration) error { gotTimeout = timeout; return nil })
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := NewAPI().AutoRegisterSerenaWorkspace(ctx, root); err != nil {
+		t.Fatalf("AutoRegisterSerenaWorkspace: %v", err)
+	}
+	if gotTimeout <= 0 || gotTimeout > 2*time.Second {
+		t.Errorf("readiness timeout = %v, want bounded by the ~2s ctx deadline (NOT the %v default)", gotTimeout, serenaAutoRegisterReadinessTimeout)
+	}
+}
+
 // NOTE: mustCanonical(t, ws) is defined in register_test.go (same package) and
 // reused here.
