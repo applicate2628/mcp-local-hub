@@ -115,6 +115,20 @@ type daemonSessionBinding struct {
 	daemonSessionID       string
 	daemonProtocolVersion string
 	lastSeen              time.Time
+	// reservations counts the in-flight reserveSlot holders that have NOT yet
+	// stored a completed handshake on this entry. Two concurrent first requests
+	// for the SAME fresh Mcp-Session-Id both reserveSlot the one placeholder:
+	// the first creates it (reservations=1), the second increments it
+	// (reservations=2). releaseReservation decrements; it removes the entry ONLY
+	// when reservations<=0 AND daemonSessionID=="" (still a placeholder, no
+	// completed handshake). Without this refcount, the first caller's
+	// failed-handshake release would drop the shared placeholder while the second
+	// caller's handshake is still in flight, letting another fresh session consume
+	// that slot and making the second caller's store spuriously 429 after it
+	// already minted an upstream session (Codex PR #251 finding 1). A completed
+	// store sets daemonSessionID (leaving reservations as-is); a later release
+	// then decrements but never removes (daemonSessionID != "").
+	reservations int
 }
 
 // daemonSessionStore maps a client-facing Mcp-Session-Id to the real
@@ -167,6 +181,39 @@ func (st *daemonSessionStore) promoteLocked(clientSessionID string) {
 		return
 	}
 	st.lruIndex[clientSessionID] = st.lru.PushFront(clientSessionID)
+}
+
+// reclaimExpiredLocked drops COMPLETED bindings that are idle past
+// daemonSessionTTL (the daemon has almost certainly expired its side already),
+// freeing cap slots BEFORE store / reserveSlot apply the len>=cap check. Caller
+// MUST hold mu. It is the at-cap counterpart to lookup's expire-on-read: the
+// production sweep (SweepSerenaSessions) runs only periodically, so without this
+// a long-running router sitting at maxRouterSessions with idle-expired entries
+// would 429 valid new sessions until the next sweep tick (Codex PR #251 finding
+// 2). It MUST NOT drop in-flight placeholders (daemonSessionID == "" with a live
+// reservation) — those are active handshakes, not idle sessions. Only entries
+// with a stored daemon session id AND past the idle TTL are reclaimed. A full
+// map scan is acceptable at this scale (cap 4096).
+func (st *daemonSessionStore) reclaimExpiredLocked() {
+	if len(st.bindings) == 0 {
+		return
+	}
+	now := st.now()
+	var expired []string
+	for id, b := range st.bindings {
+		if b == nil {
+			expired = append(expired, id)
+			continue
+		}
+		// Only reclaim a COMPLETED, idle-expired binding. A placeholder
+		// (daemonSessionID == "") is an in-flight handshake and is never idle.
+		if b.daemonSessionID != "" && now.Sub(b.lastSeen) > daemonSessionTTL {
+			expired = append(expired, id)
+		}
+	}
+	for _, id := range expired {
+		st.removeLocked(id)
+	}
 }
 
 func (st *daemonSessionStore) now() time.Time {
@@ -250,14 +297,37 @@ func (st *daemonSessionStore) store(clientSessionID string, wsKey string, daemon
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	st.ensureInitLocked()
-	if _, ok := st.bindings[clientSessionID]; !ok && len(st.bindings) >= maxRouterSessions {
-		return false
+	prior, existed := st.bindings[clientSessionID]
+	// Finding 2 (Codex PR #251): a fresh id that would breach the cap first
+	// reclaims COMPLETED idle-expired bindings, so a long-running router at cap
+	// with idle-expired entries does not 429 a valid new session until the next
+	// periodic sweep. Reclaim is gated on cap pressure (not run on every store) so
+	// it neither perturbs the explicit SweepSerenaSessions accounting nor scans
+	// the map on the common below-cap path. In-flight placeholders (reservations,
+	// daemonSessionID == "") are never reclaimed.
+	if !existed && len(st.bindings) >= maxRouterSessions {
+		st.reclaimExpiredLocked()
+		if len(st.bindings) >= maxRouterSessions {
+			return false
+		}
+	}
+	// Finding 1 (Codex PR #251): preserve the in-flight reservation refcount when
+	// overwriting an existing placeholder. In the resolveDaemonSession flow a
+	// reserveSlot always precedes this store, so the placeholder already holds the
+	// caller's reservation; a concurrent second caller for the same id may still be
+	// mid-handshake holding another. Resetting reservations to 0 here would let that
+	// caller's later releaseReservation under-count. A fresh entry (direct store with
+	// no prior reserveSlot — the test/legacy direct path) starts at 0.
+	reservations := 0
+	if existed && prior != nil {
+		reservations = prior.reservations
 	}
 	st.bindings[clientSessionID] = &daemonSessionBinding{
 		workspaceKey:          wsKey,
 		daemonSessionID:       daemonSessionID,
 		daemonProtocolVersion: daemonProtocolVersion,
 		lastSeen:              st.now(),
+		reservations:          reservations,
 	}
 	st.promoteLocked(clientSessionID)
 	return true
@@ -277,13 +347,29 @@ func (st *daemonSessionStore) reserveSlot(clientSessionID string) bool {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	st.ensureInitLocked()
-	if _, ok := st.bindings[clientSessionID]; ok {
+	// Finding 1 (Codex PR #251): a second concurrent first request for the SAME
+	// fresh id reuses the placeholder but MUST record its ownership by bumping the
+	// refcount, so the first caller's releaseReservation (on a failed handshake)
+	// cannot drop the shared placeholder while this caller's handshake is still in
+	// flight. The matching releaseReservation decrements it.
+	if b, ok := st.bindings[clientSessionID]; ok && b != nil {
+		b.reservations++
+		st.promoteLocked(clientSessionID)
 		return true
 	}
+	// Finding 2 (Codex PR #251): a fresh id at cap first reclaims COMPLETED
+	// idle-expired bindings before returning the store-full rejection, so an
+	// idle-expired-but-uncollected store does not 429 a valid new session before
+	// the periodic sweep runs. Reclaim is gated on cap pressure so it does not
+	// scan the map on the common below-cap path. In-flight placeholders are
+	// retained.
 	if len(st.bindings) >= maxRouterSessions {
-		return false
+		st.reclaimExpiredLocked()
+		if len(st.bindings) >= maxRouterSessions {
+			return false
+		}
 	}
-	st.bindings[clientSessionID] = &daemonSessionBinding{lastSeen: st.now()}
+	st.bindings[clientSessionID] = &daemonSessionBinding{lastSeen: st.now(), reservations: 1}
 	st.promoteLocked(clientSessionID)
 	return true
 }
@@ -295,7 +381,17 @@ func (st *daemonSessionStore) releaseReservation(clientSessionID string) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	b, ok := st.bindings[clientSessionID]
-	if ok && b != nil && b.daemonSessionID == "" {
+	if !ok || b == nil {
+		return
+	}
+	// Finding 1 (Codex PR #251): decrement the refcount; only drop the entry when
+	// no in-flight reserveSlot holder remains AND it is still a placeholder (no
+	// completed handshake stored). A completed store sets daemonSessionID, so this
+	// decrements its refcount but never removes the live binding.
+	if b.reservations > 0 {
+		b.reservations--
+	}
+	if b.reservations <= 0 && b.daemonSessionID == "" {
 		st.removeLocked(clientSessionID)
 	}
 }
@@ -755,6 +851,16 @@ func (st *daemonSessionStore) resolveDaemonSession(
 	// daemon's idle clock).
 	if clientSessionID != "" && dsid != "" {
 		if !st.store(clientSessionID, ws.WorkspaceKey, dsid, dpv) {
+			// Finding 1 (Codex PR #251): release the reservation this call placed
+			// so a store that loses the cap race does not leak the placeholder
+			// refcount. With the reserveSlot above this is normally unreachable
+			// (the placeholder makes store see the id as existing, so it never
+			// hits the cap-reject branch), but releasing keeps every reserve paired
+			// with exactly one release on every return path. releaseReservation is a
+			// safe no-op when the placeholder is already gone.
+			if reserved {
+				st.releaseReservation(clientSessionID)
+			}
 			bestEffortDeleteDaemonSession(httpClient, upstreamURL, dsid, dpv, upstreamTimeout)
 			return "", "", errDaemonSessionStoreFull
 		}
