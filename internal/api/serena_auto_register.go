@@ -37,34 +37,50 @@ import (
 //   - returns any other error for install/spawn/readiness failure (router →
 //     HTTP 503); the implementation rolls back the registry row for a
 //     PRE-COMMIT failure so a failed auto-register leaves no half-registered
-//     workspace. A POST-COMMIT readiness failure does NOT roll back — the
+//     workspace. A POST-COMMIT readiness/start failure does NOT roll back — the
 //     workspace IS registered + in the committed intent, so the next call
-//     resolves it and the daemon comes up under the supervisor reconciler; the
-//     router maps the wrapped error to 503 and the client retries.
+//     resolves it and the daemon comes up under the supervisor; the router maps
+//     the wrapped error to 503 and the client retries.
 //
-// IMPLEMENTATION (Phase 5 Part B) composes, in order, under a per-wsKey
-// concurrency guard so concurrent calls for the same path register exactly once:
-//  1. ancestor-walk for `.serena/project.yml` (ErrNotASerenaProject if absent) +
-//     read its `languages:` (ErrNoLanguages if empty);
-//  2. registry write under flock with re-read idempotency (GetSerena → return
-//     existing if a concurrent winner already registered; else AllocateSerenaPort
-//     + PutSerena + Save), arming a remove-row rollback;
-//  3. BuildInMemorySerenaDynamicPoolManifest + InstallParsedManifest with
-//     Workspaces: reg.SerenaEntries() (the §7.1 gate now ALLOWS this live-add
-//     because the prior intent already carries runtime_spec post-cutover);
-//  4. DialSupervisorIPCReconcile(ctx, true) for an immediate spawn (not the 60s
-//     IntentWatcher poll);
-//  5. readiness probe on the allocated port's /mcp (verifyProxyReady pattern);
-//  6. audit `workspace-auto-registered` {path, languages, port, ...}.
+// TWO INSTALL MODES (bot PR #253 finding 1). The §7.1 gate inside
+// InstallParsedManifest refuses to write a spec-bearing (runtime_spec) intent
+// while a supervisor runs UNLESS the prior on-disk intent already carries
+// runtime_spec (an older supervisor's DisallowUnknownFields watcher would reject
+// the field). So auto-register branches on the prior intent + supervisor liveness:
+//   - LIVE-ADD (prior intent already has a serena runtime_spec row): the running
+//     supervisor is provably the new binary, so install (gate allows) then nudge
+//     it to reconcile NOW (DialSupervisorIPCReconcile apply=true; the 60s
+//     IntentWatcher poll is the backstop). No reap, no bounce.
+//   - INTRODUCE (prior intent has NO runtime_spec): this is the FIRST serena
+//     workspace (e.g. right after a zero-workspace Phase-4 migrate, which writes
+//     a no-runtime_spec intent and does not reap/restart). The supervisor cannot
+//     be proven runtime_spec-capable (it exposes no probeable version), so the
+//     one-time cutover runs: REAP the (possibly old) supervisor — only when one
+//     is running — so the spec-bearing write hits the gate with nothing running,
+//     then INSTALL, then START the current binary which reconciles + spawns. This
+//     bounces the supervisor + its daemons ONCE; every subsequent workspace is a
+//     live-add. The reap/start primitives are Windows-only (injected by the CLI
+//     via SetSerenaAutoRegisterCutoverPrimitives); on a build/platform where they
+//     are not wired the introduce path fails loud (router → 503).
 //
-// This composition is a SIMPLER SUBSET of the Phase 4 migrate
-// (runMigrateSerenaDynamicPool, internal/cli/migrate_serena.go) because
-// auto-register runs while the supervisor is ALREADY RUNNING (post-cutover): no
-// reap (no old supervisor to kill), no supervisor start (it is already up — an
-// immediate reconcile spawns the new daemon now). Spawn is Windows-only (the
-// supervisor start primitive is a no-op stub elsewhere); the decision/rollback
-// logic is cross-platform and the install/reconcile/readiness steps are seamed
-// so the happy path is unit-testable without a live supervisor.
+// CONCURRENCY (bot PR #253 finding 2). A process-global install mutex
+// (serenaAutoRegisterInstallMu) serializes the register → re-read → install →
+// commit-or-rollback critical section across ALL workspace roots. Without it two
+// concurrent auto-registers for DIFFERENT roots would each install from their own
+// stale registry snapshot and clobber each other's supervisor-intent rows
+// (buildMergedSupervisorIntent REPLACES all serena rows with the passed snapshot).
+// Holding the mutex from before the registry row is made visible through the
+// install commit (or its rollback) guarantees each install fans out from the
+// latest on-disk registry and no other root observes a half-committed row. It is
+// released before the readiness probe (which touches neither registry nor intent).
+// The per-key mutex below is the finer idempotency guard (same root → register
+// exactly once); the install mutex is the coarser cross-root install serializer.
+//
+// This composition mirrors the Phase 4 migrate (runMigrateSerenaDynamicPool,
+// internal/cli/migrate_serena.go): reap-first ordering, install-is-the-commit-
+// point, recovery-restart-on-post-reap-failure. The install/reconcile/readiness/
+// reap/start/liveness/prior-intent steps are seamed so the decision + rollback +
+// concurrency logic is unit-testable without a live supervisor.
 func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (entry *WorkspaceEntry, err error) {
 	// 1. Resolve the workspace root: clean/abs absPath, then walk up ancestors
 	//    for `.serena/project.yml`. The found directory IS the WorkspacePath.
@@ -81,34 +97,44 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 		return nil, err
 	}
 
-	// 3. Concurrency guard + idempotency. The keyed mutex serializes concurrent
-	//    callers for the SAME workspace root so they register exactly once; the
-	//    loser blocks here, then the post-acquire GetSerena re-read below returns
-	//    the winner's entry. Use the CANONICALIZED root for the key so symlink
-	//    aliases map to the same guard slot (CanonicalWorkspacePath resolves the
-	//    full path; on failure — e.g. the dir vanished mid-call — fall back to
-	//    the raw cleaned root so the key is still deterministic).
+	// 3. Per-key idempotency guard. The keyed mutex serializes concurrent callers
+	//    for the SAME workspace root so they register exactly once; the loser
+	//    blocks here, then the post-acquire GetSerena re-read below returns the
+	//    winner's entry. Use the CANONICALIZED root for the key so symlink aliases
+	//    map to the same slot (on canonicalize failure — dir vanished mid-call —
+	//    fall back to the raw cleaned root so the key stays deterministic).
 	canonical := root
 	if c, cErr := CanonicalWorkspacePath(root); cErr == nil {
 		canonical = c
 	}
 	key := WorkspaceKey(canonical)
-
 	unlockKey := lockSerenaAutoRegisterKey(key)
 	defer unlockKey()
 
-	// Load the registry under its cross-process flock. Hold the flock across the
-	// registry mutation only (alloc + PutSerena + Save); the install/reconcile/
-	// readiness steps that follow do NOT touch the registry, so we release the
-	// flock right after Save so the install does not hold it and the rollback can
-	// re-acquire it cleanly. The per-key mutex already blocks concurrent same-root
-	// callers; a distinct concurrent root takes a distinct mutex slot but shares
-	// this one flock, so releasing promptly avoids serializing unrelated roots
-	// across the multi-second install.
 	regPath, err := DefaultRegistryPath()
 	if err != nil {
 		return nil, err
 	}
+
+	// 4. GLOBAL install mutex — serialize the register → install → commit/rollback
+	//    critical section across ALL roots (bot PR #253 finding 2). Held from
+	//    before the registry row is made visible through the install commit (or
+	//    its rollback), released before the readiness probe.
+	serenaAutoRegisterInstallMu.Lock()
+	installMuReleased := false
+	releaseInstallMu := func() {
+		if installMuReleased {
+			return
+		}
+		installMuReleased = true
+		serenaAutoRegisterInstallMu.Unlock()
+	}
+	defer releaseInstallMu()
+
+	// 5. Registry session under the cross-process flock: load, idempotent re-read,
+	//    allocate a pool port, persist the row. The flock is released right after
+	//    Save (the install/reap/start steps do not touch the registry); the
+	//    install mutex above is what serializes roots across those steps.
 	reg := NewRegistry(regPath)
 	regUnlock, err := reg.Lock()
 	if err != nil {
@@ -122,11 +148,8 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 		regReleased = true
 		regUnlock()
 	}
-	// Belt-and-suspenders: release on any early-return error path BEFORE the
-	// explicit release fires. Idempotent, so the post-Save explicit release is
-	// authoritative and this deferred call is a harmless no-op after it.
 	defer releaseReg()
-	if err := reg.Load(); err != nil {
+	if err = reg.Load(); err != nil {
 		return nil, err
 	}
 
@@ -138,9 +161,6 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 		return &e, nil
 	}
 
-	// 4. Allocate a pool port + register. Load the serena catalog manifest, take
-	//    the EFFECTIVE port pool (Phase 2 owner — never fails closed on the
-	//    legacy kind:global embed), allocate a free port, build + persist the row.
 	catalog, err := loadSerenaCatalogManifest()
 	if err != nil {
 		return nil, fmt.Errorf("serena auto-register: load serena catalog manifest: %w", err)
@@ -164,90 +184,125 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 		RegisteredVia: "auto-detect",
 		Languages:     append([]string(nil), languages...),
 	}
-	if err := reg.PutSerena(newEntry); err != nil {
+	if err = reg.PutSerena(newEntry); err != nil {
 		return nil, fmt.Errorf("serena auto-register: put serena row: %w", err)
 	}
-	if err := reg.Save(); err != nil {
+	if err = reg.Save(); err != nil {
 		// Save is atomic (tempfile + rename): a failure leaves the prior on-disk
-		// registry intact, so there is nothing to roll back. The deferred
-		// releaseReg frees the still-held flock. Do NOT arm the relocking rollback
-		// here — it would deadlock re-acquiring the flock this goroutine still holds.
+		// registry intact, so there is nothing to roll back.
 		return nil, fmt.Errorf("serena auto-register: save registry: %w", err)
 	}
-
-	// The registry mutation is committed on disk. Arm the PRE-COMMIT rollback
-	// (remove the row we just added) and release the flock so the install does
-	// not hold it. The rollback re-acquires the flock itself.
-	rollbackArmed := true
-	defer func() {
-		if err == nil || !rollbackArmed {
-			return
-		}
-		if rbErr := removeSerenaRowRelocking(regPath, key); rbErr != nil {
-			err = fmt.Errorf("%w; AND the registry rollback also failed: %v", err, rbErr)
-		}
-	}()
 	releaseReg()
 
-	// 5. Build the in-memory dynamic-pool manifest + install it (live-add). The
-	//    Workspaces snapshot is the FULL current serena set (reg.SerenaEntries(),
-	//    which now includes the row we just saved) so InstallParsedManifest
-	//    preserves every existing daemon row and adds ours. The §7.1 gate ALLOWS
-	//    this write because the prior on-disk intent already carries runtime_spec
-	//    (post-cutover) — the gate fires only when INTRODUCING runtime_spec.
-	dyn, err := BuildInMemorySerenaDynamicPoolManifest(catalog)
-	if err != nil {
-		return nil, fmt.Errorf("serena auto-register: build dynamic-pool manifest: %w", err)
+	// The row is committed on disk + visible. From here every PRE-COMMIT error
+	// path must remove it. rollback() runs SYNCHRONOUSLY while the install mutex is
+	// still held (called inline, not deferred) so no concurrent root ever observes
+	// the row in the intent after we have decided to drop it. It re-acquires the
+	// registry flock itself (removeSerenaRowRelocking) and is idempotent via rowSaved.
+	rowSaved := true
+	rollback := func(cause error) (*WorkspaceEntry, error) {
+		if rowSaved {
+			rowSaved = false
+			if rbErr := removeSerenaRowRelocking(regPath, key); rbErr != nil {
+				return nil, fmt.Errorf("%w; AND the registry rollback also failed: %v", cause, rbErr)
+			}
+		}
+		return nil, cause
 	}
-	installWorkspaces := reg.SerenaEntries()
-	if installWorkspaces == nil {
-		// A nil snapshot would silently drop the server's existing daemon rows;
-		// pass a non-nil slice. (Cannot happen here — we just PutSerena'd a row —
-		// but the contract requires non-nil, so guard defensively.)
-		installWorkspaces = []WorkspaceEntry{}
+
+	// 6. Build the in-memory dynamic-pool manifest + take the FRESH install
+	//    snapshot. reReadSerenaEntriesForInstall reloads the registry under a
+	//    re-acquired flock so the install fans out from the current on-disk set —
+	//    capturing any row a concurrent external `mcphub workspace register`
+	//    committed after our Load (other auto-registers are blocked on the install
+	//    mutex, so only an external writer can have raced).
+	dyn, bErr := BuildInMemorySerenaDynamicPoolManifest(catalog)
+	if bErr != nil {
+		return rollback(fmt.Errorf("serena auto-register: build dynamic-pool manifest: %w", bErr))
 	}
-	if _, err = autoRegisterInstallParsedManifestFn(ctx, a, dyn, InstallParsedManifestOpts{
+	installWorkspaces, rrErr := reReadSerenaEntriesForInstall(regPath)
+	if rrErr != nil {
+		return rollback(fmt.Errorf("serena auto-register: re-read registry before install: %w", rrErr))
+	}
+
+	// 7. Cutover decision — INSIDE the install mutex so a concurrent first-call for
+	//    another root sees this call's committed intent and does NOT re-reap.
+	priorHasSpec, phErr := autoRegisterPriorIntentHasSpecFn()
+	if phErr != nil {
+		return rollback(fmt.Errorf("serena auto-register: inspect prior supervisor intent for runtime_spec: %w", phErr))
+	}
+	supRunning := true // an undeterminable liveness probe → treat as running (never skip a needed reap)
+	if running, srErr := autoRegisterSupervisorRunningFn(); srErr == nil {
+		supRunning = running
+	}
+	needReap := !priorHasSpec && supRunning
+	needStart := !priorHasSpec
+	if (needReap || needStart) && (autoRegisterReapFn == nil || autoRegisterStartFn == nil) {
+		return rollback(fmt.Errorf("serena auto-register: %s is the first serena workspace (the supervisor intent carries no runtime_spec yet), so a one-time supervisor cutover is required to introduce it — but the cutover primitives are not wired on this build/platform (supervisor reap/restart is Windows-only in v0.5.0)", root))
+	}
+
+	// 8. REAP first (introduce-while-running only) so the spec-bearing write hits
+	//    the §7.1 gate with no supervisor running. A reap failure lands BEFORE the
+	//    install commit → fail loud; nothing was killed (the reap failed) so the
+	//    daemons stay up, and rollback() removes our row.
+	if needReap {
+		if reapErr := autoRegisterReapFn(ctx); reapErr != nil {
+			return rollback(fmt.Errorf("serena auto-register: reap the running supervisor before introducing runtime_spec for %s: %w", root, reapErr))
+		}
+	}
+
+	// 9. Install (live-add OR post-reap introduce). The §7.1 gate passes: either
+	//    the prior intent already has runtime_spec (live-add), or we just reaped so
+	//    no supervisor is running (introduce).
+	if _, iErr := autoRegisterInstallParsedManifestFn(ctx, a, dyn, InstallParsedManifestOpts{
 		Writer:     io.Discard,
 		Workspaces: installWorkspaces,
-	}); err != nil {
-		// PRE-COMMIT failure: InstallParsedManifest's own inner stack already
-		// undid its scheduler/client/intent side effects; the deferred rollback
-		// above removes our registry row. Return wrapped (router → 503).
-		return nil, fmt.Errorf("serena auto-register: install dynamic-pool descriptor for %s: %w", root, err)
+	}); iErr != nil {
+		cause := fmt.Errorf("serena auto-register: install dynamic-pool descriptor for %s: %w", root, iErr)
+		// If we reaped, restart the supervisor so it restores the prior (still-on-
+		// disk) intent — never leave no-supervisor-running. Then rollback our row.
+		if needReap {
+			if startErr := autoRegisterStartFn(ctx); startErr != nil {
+				cause = fmt.Errorf("%w; AND the recovery supervisor restart after the reap also failed: %v — NO supervisor is running, run `mcphub supervise`", cause, startErr)
+			}
+		}
+		return rollback(cause)
 	}
 
-	// 6. DISARM the rollback the instant the install returns success — that intent
-	//    write is the commit point (mirror migrate step 9). After commit, rolling
-	//    back the registry would create split-state: the intent has the row but
-	//    the registry would not, so the router could not resolve the workspace.
-	rollbackArmed = false
+	// 10. COMMIT POINT (mirror migrate step 9). Disarm the rollback — the intent
+	//     now owns the row; rolling the registry back here would split-state.
+	rowSaved = false
 
-	// 7. Immediate spawn: ask the (already-running) supervisor to reconcile NOW so
-	//    the new daemon comes up immediately instead of on the 60s IntentWatcher
-	//    poll. A SUPERVISOR_STARTING / transient / unavailable response is NOT
-	//    fatal — the 60s reconcile is the backstop — so do not abort; continue to
-	//    the readiness probe. (Best-effort: the committed intent is the source of
-	//    truth; reconcile only accelerates the spawn.)
-	if _, recErr := autoRegisterReconcileFn(ctx, true); recErr != nil {
-		// Non-fatal: fall through to readiness. The supervisor will pick up the
-		// committed intent on its next poll even if this immediate nudge failed.
-		_ = recErr
+	// 11. Bring the new daemon live. INTRODUCE → START the supervisor (it cold-
+	//     reconciles the committed intent and spawns). LIVE-ADD → the supervisor is
+	//     already up; nudge it to reconcile NOW (best-effort; the 60s poll backstops).
+	if needStart {
+		if startErr := autoRegisterStartFn(ctx); startErr != nil {
+			// POST-COMMIT start failure: fail loud, NO registry rollback (the intent
+			// is the commit point). Audit, then return; the operator restarts the
+			// supervisor and the committed intent is reconciled.
+			emitWorkspaceAutoRegisteredEvent(root, key, port, newEntry.Languages)
+			return nil, fmt.Errorf("serena auto-register: workspace %s registered and intent committed but the supervisor start failed: %w — run `mcphub supervise` so the current binary reconciles the committed intent (the registry is intentionally NOT rolled back: the intent is the commit point)", root, startErr)
+		}
+	} else if _, recErr := autoRegisterReconcileFn(ctx, true); recErr != nil {
+		_ = recErr // non-fatal: the 60s IntentWatcher reconcile is the backstop
 	}
 
-	// 8. Readiness: poll the allocated port's /mcp with a synthetic initialize.
-	//    Ready → return the entry. A timeout AFTER the committed install does NOT
-	//    roll back (the workspace is registered + in the intent; the next call
-	//    resolves it and the daemon will be up) — return an error wrapping the
-	//    readiness failure so the router maps it to 503 and the client retries.
+	// Release the install mutex before the readiness probe — readiness touches
+	// neither the registry nor the intent, so other roots may proceed.
+	releaseInstallMu()
+
+	// 12. Readiness: poll the allocated port's /mcp with a synthetic initialize.
+	//     Ready → return the entry. A timeout AFTER the committed install does NOT
+	//     roll back (the workspace is registered + in the intent; the next call
+	//     resolves it and the daemon will be up) — return an error wrapping the
+	//     readiness failure so the router maps it to 503 and the client retries.
 	if rdErr := autoRegisterReadinessFn(port, serenaAutoRegisterReadinessTimeout); rdErr != nil {
-		err = fmt.Errorf("serena auto-register: workspace %s registered and intent committed, but the per-workspace daemon on port %d was not ready in time: %w (the workspace IS registered; retry the call — the supervisor is bringing the daemon up)", root, port, rdErr)
-		// Emit the audit even on the readiness-timeout path: the registration +
-		// install DID commit, so the operator should still see the event.
 		emitWorkspaceAutoRegisteredEvent(root, key, port, newEntry.Languages)
-		return nil, err
+		return nil, fmt.Errorf("serena auto-register: workspace %s registered and intent committed, but the per-workspace daemon on port %d was not ready in time: %w (the workspace IS registered; retry the call — the supervisor is bringing the daemon up)", root, port, rdErr)
 	}
 
-	// 9. Audit: emit the success event (best-effort; never fatal).
+	// 13. Audit: emit the success event (best-effort; never fatal).
 	emitWorkspaceAutoRegisteredEvent(root, key, port, newEntry.Languages)
 
 	e := newEntry
@@ -331,6 +386,28 @@ func readSerenaProjectYMLLanguages(root string) ([]string, error) {
 	return cleaned, nil
 }
 
+// reReadSerenaEntriesForInstall reloads the registry under a freshly-acquired
+// flock and returns the current serena rows — the authoritative snapshot the
+// install fans out from (bot PR #253 finding 2). Always returns a NON-nil slice
+// (a nil Workspaces would make InstallParsedManifest silently drop the server's
+// existing daemon rows). The lock is always released before returning.
+func reReadSerenaEntriesForInstall(regPath string) ([]WorkspaceEntry, error) {
+	reg := NewRegistry(regPath)
+	unlock, err := reg.Lock()
+	if err != nil {
+		return nil, fmt.Errorf("re-acquire registry lock: %w", err)
+	}
+	defer unlock()
+	if err := reg.Load(); err != nil {
+		return nil, fmt.Errorf("reload registry: %w", err)
+	}
+	entries := reg.SerenaEntries()
+	if entries == nil {
+		entries = []WorkspaceEntry{}
+	}
+	return entries, nil
+}
+
 // removeSerenaRowRelocking is the PRE-COMMIT registry rollback compensator. The
 // flock was released after the auto-register Save (so the multi-second install
 // did not hold it), so this re-acquires the flock itself, reloads the current
@@ -409,12 +486,12 @@ var loadSerenaCatalogManifest = func() (*config.ServerManifest, error) {
 
 // --- Test seams ------------------------------------------------------------
 //
-// The install / immediate-reconcile / readiness steps each require a real
-// supervisor or a live network listener; they are routed through package-level
-// function vars (defaulting to the real impls) so unit tests exercise the
-// register + rollback + idempotency + concurrency logic without a supervisor.
-// Mirrors the migrate seam idiom (installParsedManifestFn / reconcileSerenaClientsFn
-// / migrateSerenaStartFn in internal/cli/migrate_serena.go).
+// The install / immediate-reconcile / readiness / reap / start steps each
+// require a real supervisor or a live network listener; they are routed through
+// package-level function vars (defaulting to the real impls) so unit tests
+// exercise the register + cutover-decision + rollback + idempotency + concurrency
+// logic without a supervisor. Mirrors the migrate seam idiom (installParsedManifestFn
+// / reconcileSerenaClientsFn / migrateSerenaStartFn in internal/cli/migrate_serena.go).
 
 // autoRegisterInstallParsedManifestFn is the seam over (*API).InstallParsedManifest.
 // Default calls the real installer; tests override it to inject install success/
@@ -424,9 +501,9 @@ var autoRegisterInstallParsedManifestFn = func(ctx context.Context, a *API, m *c
 }
 
 // autoRegisterReconcileFn is the seam over DialSupervisorIPCReconcile. Default
-// nudges the running supervisor to reconcile NOW; tests override it to assert
-// it is called with apply=true (and that a transient/unavailable error is
-// non-fatal).
+// nudges the running supervisor to reconcile NOW (live-add path); tests override
+// it to assert it is called with apply=true (and that a transient/unavailable
+// error is non-fatal).
 var autoRegisterReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
 	return DialSupervisorIPCReconcile(ctx, apply)
 }
@@ -438,7 +515,68 @@ var autoRegisterReadinessFn = func(port int, timeout time.Duration) error {
 	return verifyProxyReady(port, timeout)
 }
 
+// autoRegisterPriorIntentHasSpecFn reports whether the on-disk supervisor intent
+// already carries a serena runtime_spec row (seam; tests override). A missing
+// intent file → (false, nil) (nothing introduced yet). This drives the LIVE-ADD
+// vs INTRODUCE branch (bot PR #253 finding 1).
+var autoRegisterPriorIntentHasSpecFn = func() (bool, error) {
+	sd, err := DaemonStateDir()
+	if err != nil {
+		return false, err
+	}
+	intent, err := ReadSupervisorIntent(filepath.Join(sd, supervisorIntentFileLeaf))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	if intent == nil {
+		return false, nil
+	}
+	return intent.HasRuntimeSpecRow(), nil
+}
+
+// autoRegisterSupervisorRunningFn reports whether a supervisor process is
+// currently running (seam; tests override). Default: the cross-platform
+// supervisor-lock liveness probe (the same signal the §7.1 install gate reads).
+// Only consulted on the INTRODUCE branch to decide whether a reap is needed.
+var autoRegisterSupervisorRunningFn = func() (bool, error) {
+	sd, err := DaemonStateDir()
+	if err != nil {
+		return false, err
+	}
+	running, _, perr := SupervisorRunningUnderStateDir(sd)
+	return running, perr
+}
+
+// autoRegisterReapFn / autoRegisterStartFn are the supervisor cutover primitives
+// used on the INTRODUCE branch (bot PR #253 finding 1): reap the running
+// supervisor before the first spec-bearing write, then start the current binary.
+// They are nil until the CLI wires them via SetSerenaAutoRegisterCutoverPrimitives
+// at GUI-server startup (the real reap/start live in internal/cli and are
+// Windows-only; api cannot import cli). When nil, the introduce path fails loud.
+var (
+	autoRegisterReapFn  func(ctx context.Context) error
+	autoRegisterStartFn func(ctx context.Context) error
+)
+
+// SetSerenaAutoRegisterCutoverPrimitives wires the supervisor reap/start used by
+// AutoRegisterSerenaWorkspace when introducing the FIRST serena runtime_spec
+// (the one-time cutover). Called once from CLI GUI-server startup. Passing nil
+// for either clears the wiring (the introduce path then fails loud). Safe to call
+// before the GUI starts serving; the package-global is read under the install
+// mutex on the introduce branch.
+func SetSerenaAutoRegisterCutoverPrimitives(reap, start func(ctx context.Context) error) {
+	autoRegisterReapFn = reap
+	autoRegisterStartFn = start
+}
+
 // --- per-workspace-key concurrency guard -----------------------------------
+
+// serenaAutoRegisterInstallMu serializes the register → install → commit/rollback
+// critical section across ALL workspace roots (bot PR #253 finding 2).
+var serenaAutoRegisterInstallMu sync.Mutex
 
 // serenaAutoRegisterKeyMu guards the serenaAutoRegisterKeyLocks map itself.
 var serenaAutoRegisterKeyMu sync.Mutex
@@ -446,9 +584,9 @@ var serenaAutoRegisterKeyMu sync.Mutex
 // serenaAutoRegisterKeyLocks holds one *sync.Mutex per in-flight workspace key
 // so concurrent AutoRegisterSerenaWorkspace calls for the SAME root serialize
 // (register exactly once; the loser re-reads the winner's row), while calls for
-// DISTINCT roots proceed in parallel. Entries are intentionally never deleted:
-// the key space is the bounded set of a single user's workspaces (<100), and a
-// reaper would reintroduce a lost-wakeup race against an in-flight holder.
+// DISTINCT roots proceed to the install mutex. Entries are intentionally never
+// deleted: the key space is the bounded set of a single user's workspaces (<100),
+// and a reaper would reintroduce a lost-wakeup race against an in-flight holder.
 var serenaAutoRegisterKeyLocks = map[string]*sync.Mutex{}
 
 // lockSerenaAutoRegisterKey acquires the per-key mutex for key and returns its

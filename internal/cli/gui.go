@@ -317,6 +317,18 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 		resolver := serena_routing.NewWorkspaceResolver(reg, registryPath)
 		sessions := serena_routing.NewSessionRouter()
 		s.SetSerenaRouterProduction(resolver, sessions)
+		// Phase 5 (bot PR #253 finding 1): wire the one-time supervisor
+		// cutover the auto-register-on-miss path runs when introducing the
+		// FIRST serena runtime_spec while a supervisor is running (reap the
+		// running supervisor → install → start the current binary). The
+		// primitives are the migrate cutover ones (Windows-only; the
+		// non-Windows stubs fail loud, so the introduce path 503s off-Windows).
+		// Progress text goes to io.Discard — auto-register surfaces the wrapped
+		// error to the client (→ 503) and the supervisor-events audit log.
+		api.SetSerenaAutoRegisterCutoverPrimitives(
+			func(c context.Context) error { return defaultMigrateSerenaReap(c, io.Discard) },
+			func(c context.Context) error { return defaultMigrateSerenaStart(c, io.Discard) },
+		)
 		// Sweep all three serena session stores on one ticker: the
 		// cross-package sticky-routing SessionRouter AND (Finding 2) the
 		// two router-owned stores (routerSessionStore + daemonSessionStore)

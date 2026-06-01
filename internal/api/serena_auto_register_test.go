@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -55,6 +56,35 @@ func autoRegisterTestEnv(t *testing.T) (regPath string) {
 		return autoRegisterCatalogManifest(), nil
 	}
 	t.Cleanup(func() { loadSerenaCatalogManifest = prevCatalog })
+
+	// Default the cutover seams to the LIVE-ADD posture (the prior intent already
+	// carries a serena runtime_spec row, a supervisor is up) so the existing
+	// happy-path / idempotency / concurrency / different-root tests exercise the
+	// install→reconcile→readiness path with NO reap/start. The reap/start seams
+	// are fail-if-called sentinels so any accidental cutover on a live-add path is
+	// caught. INTRODUCE tests override autoRegisterPriorIntentHasSpecFn (+ the
+	// liveness + reap/start seams) explicitly. (bot PR #253 finding 1)
+	prevPrior := autoRegisterPriorIntentHasSpecFn
+	autoRegisterPriorIntentHasSpecFn = func() (bool, error) { return true, nil }
+	t.Cleanup(func() { autoRegisterPriorIntentHasSpecFn = prevPrior })
+
+	prevSupRun := autoRegisterSupervisorRunningFn
+	autoRegisterSupervisorRunningFn = func() (bool, error) { return true, nil }
+	t.Cleanup(func() { autoRegisterSupervisorRunningFn = prevSupRun })
+
+	prevReap := autoRegisterReapFn
+	autoRegisterReapFn = func(context.Context) error {
+		t.Fatalf("reap seam must not be called on the live-add path")
+		return nil
+	}
+	t.Cleanup(func() { autoRegisterReapFn = prevReap })
+
+	prevStart := autoRegisterStartFn
+	autoRegisterStartFn = func(context.Context) error {
+		t.Fatalf("start seam must not be called on the live-add path")
+		return nil
+	}
+	t.Cleanup(func() { autoRegisterStartFn = prevStart })
 
 	// Reset the per-key concurrency guard so a key registered in a prior test
 	// (package-level map persists across tests) cannot leak a held/known lock.
@@ -121,6 +151,33 @@ func stubAutoRegisterReadiness(t *testing.T, fn func(port int, timeout time.Dura
 	orig := autoRegisterReadinessFn
 	autoRegisterReadinessFn = fn
 	t.Cleanup(func() { autoRegisterReadinessFn = orig })
+}
+
+// stubAutoRegisterPriorIntentHasSpec overrides the LIVE-ADD-vs-INTRODUCE branch
+// seam (true = prior intent already has runtime_spec = live-add).
+func stubAutoRegisterPriorIntentHasSpec(t *testing.T, fn func() (bool, error)) {
+	t.Helper()
+	orig := autoRegisterPriorIntentHasSpecFn
+	autoRegisterPriorIntentHasSpecFn = fn
+	t.Cleanup(func() { autoRegisterPriorIntentHasSpecFn = orig })
+}
+
+// stubAutoRegisterSupervisorRunning overrides the introduce-branch liveness seam.
+func stubAutoRegisterSupervisorRunning(t *testing.T, fn func() (bool, error)) {
+	t.Helper()
+	orig := autoRegisterSupervisorRunningFn
+	autoRegisterSupervisorRunningFn = fn
+	t.Cleanup(func() { autoRegisterSupervisorRunningFn = orig })
+}
+
+// stubAutoRegisterCutover overrides BOTH cutover primitives (reap + start) for
+// the test scope. Pass nil for either to simulate the not-wired build/platform.
+func stubAutoRegisterCutover(t *testing.T, reap, start func(ctx context.Context) error) {
+	t.Helper()
+	origReap, origStart := autoRegisterReapFn, autoRegisterStartFn
+	autoRegisterReapFn = reap
+	autoRegisterStartFn = start
+	t.Cleanup(func() { autoRegisterReapFn, autoRegisterStartFn = origReap, origStart })
 }
 
 // loadRegSerenaRows loads regPath and returns its serena rows.
@@ -536,6 +593,274 @@ func TestAutoRegisterSerena_Concurrent_SamePath_RegistersOnce(t *testing.T) {
 	// idempotent re-read (so install fired at most once).
 	if installCalled != 1 {
 		t.Errorf("install seam called %d times under concurrent same-path register, want exactly 1", installCalled)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 8. INTRODUCE + supervisor running (bot PR #253 finding 1) → the one-time
+//    cutover: REAP → INSTALL → START, in that order, and NO immediate reconcile
+//    (the started supervisor reconciles the committed intent itself).
+// ---------------------------------------------------------------------------
+
+func TestAutoRegisterSerena_Introduce_SupervisorRunning_ReapsInstallsStarts(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return false, nil }) // INTRODUCE
+	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return true, nil })   // running → reap
+
+	var (
+		mu    sync.Mutex
+		order []string
+	)
+	record := func(step string) { mu.Lock(); order = append(order, step); mu.Unlock() }
+	stubAutoRegisterCutover(t,
+		func(context.Context) error { record("reap"); return nil },
+		func(context.Context) error { record("start"); return nil },
+	)
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		record("install")
+		return filepath.Join(t.TempDir(), "supervisor-intent.json"), nil
+	})
+	stubAutoRegisterReconcile(t, func(context.Context, bool) (ReconcileResponse, error) {
+		t.Fatalf("reconcile seam must not be called on the introduce/start path (the started supervisor reconciles itself)")
+		return ReconcileResponse{}, nil
+	})
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	entry, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root)
+	if err != nil {
+		t.Fatalf("AutoRegisterSerenaWorkspace: %v", err)
+	}
+	if entry == nil {
+		t.Fatal("entry = nil, want a registered entry")
+	}
+	// Order MUST be reap → install → start (reap-first so the spec-bearing write
+	// hits the §7.1 gate with no supervisor running).
+	if len(order) != 3 || order[0] != "reap" || order[1] != "install" || order[2] != "start" {
+		t.Fatalf("cutover order = %v, want [reap install start]", order)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 1 {
+		t.Errorf("registry has %d serena rows, want 1", len(rows))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 9. INTRODUCE + NO supervisor running → no reap (nothing to kill); INSTALL →
+//    START still run (the started supervisor brings the first daemon live).
+// ---------------------------------------------------------------------------
+
+func TestAutoRegisterSerena_Introduce_NoSupervisor_StartsWithoutReap(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return false, nil }) // INTRODUCE
+	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return false, nil })  // none → no reap
+
+	var startCalled int32
+	stubAutoRegisterCutover(t,
+		func(context.Context) error { t.Fatalf("reap must not be called when no supervisor is running"); return nil },
+		func(context.Context) error { atomic.AddInt32(&startCalled, 1); return nil },
+	)
+	var installCalled int32
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		atomic.AddInt32(&installCalled, 1)
+		return filepath.Join(t.TempDir(), "supervisor-intent.json"), nil
+	})
+	stubAutoRegisterReconcile(t, func(context.Context, bool) (ReconcileResponse, error) {
+		t.Fatalf("reconcile must not be called on the introduce/start path")
+		return ReconcileResponse{}, nil
+	})
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	if _, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root); err != nil {
+		t.Fatalf("AutoRegisterSerenaWorkspace: %v", err)
+	}
+	if installCalled != 1 || startCalled != 1 {
+		t.Errorf("installCalled=%d startCalled=%d, want 1 and 1", installCalled, startCalled)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 1 {
+		t.Errorf("registry has %d serena rows, want 1", len(rows))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 10. INTRODUCE reap FAILS (pre-commit) → install NOT called, row rolled back.
+// ---------------------------------------------------------------------------
+
+func TestAutoRegisterSerena_Introduce_ReapFails_RollsBack(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return false, nil })
+	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return true, nil })
+
+	reapErr := errors.New("synthetic reap failure")
+	stubAutoRegisterCutover(t,
+		func(context.Context) error { return reapErr },
+		func(context.Context) error { t.Fatalf("start must not be called when reap fails before any install"); return nil },
+	)
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		t.Fatalf("install must not be called when the reap fails")
+		return "", nil
+	})
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	_, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root)
+	if !errors.Is(err, reapErr) {
+		t.Fatalf("error = %v, want it to wrap the reap failure", err)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 0 {
+		t.Errorf("registry has %d serena rows after a failed reap, want 0 (rollback)", len(rows))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 11. INTRODUCE install FAILS after a successful reap → recovery START restores
+//     the supervisor, and the row is rolled back (pre-commit).
+// ---------------------------------------------------------------------------
+
+func TestAutoRegisterSerena_Introduce_InstallFailsAfterReap_RecoversAndRollsBack(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return false, nil })
+	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return true, nil })
+
+	var startCalled int32
+	stubAutoRegisterCutover(t,
+		func(context.Context) error { return nil },
+		func(context.Context) error { atomic.AddInt32(&startCalled, 1); return nil }, // recovery restart
+	)
+	installErr := errors.New("synthetic install failure after reap")
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		return "", installErr
+	})
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	_, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root)
+	if !errors.Is(err, installErr) {
+		t.Fatalf("error = %v, want it to wrap the install failure", err)
+	}
+	if startCalled != 1 {
+		t.Errorf("recovery start called %d times after install failed post-reap, want 1 (never leave no-supervisor-running)", startCalled)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 0 {
+		t.Errorf("registry has %d serena rows after install failed post-reap, want 0 (rollback)", len(rows))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 12. INTRODUCE start FAILS POST-COMMIT → NO rollback (the intent owns the row).
+// ---------------------------------------------------------------------------
+
+func TestAutoRegisterSerena_Introduce_StartFailsPostCommit_NoRollback(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return false, nil })
+	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return false, nil }) // no reap; needStart only
+
+	startErr := errors.New("synthetic post-commit start failure")
+	stubAutoRegisterCutover(t,
+		func(context.Context) error { t.Fatalf("reap must not be called (no supervisor running)"); return nil },
+		func(context.Context) error { return startErr },
+	)
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		return filepath.Join(t.TempDir(), "supervisor-intent.json"), nil
+	})
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	_, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root)
+	if !errors.Is(err, startErr) {
+		t.Fatalf("error = %v, want it to wrap the post-commit start failure", err)
+	}
+	// Intent is the commit point: the row MUST remain so the next call resolves it.
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 1 {
+		t.Errorf("registry has %d serena rows after a post-commit start failure, want 1 (no rollback after commit)", len(rows))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 13. INTRODUCE with cutover primitives NOT wired (nil) → fail loud, row rolled
+//     back, install never reached.
+// ---------------------------------------------------------------------------
+
+func TestAutoRegisterSerena_Introduce_CutoverUnwired_FailsLoudAndRollsBack(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return false, nil })
+	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return true, nil })
+	stubAutoRegisterCutover(t, nil, nil) // not wired on this build/platform
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		t.Fatalf("install must not be reached when the cutover primitives are not wired")
+		return "", nil
+	})
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	_, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root)
+	if err == nil {
+		t.Fatal("expected a fail-loud error when cutover primitives are not wired")
+	}
+	if !strings.Contains(err.Error(), "cutover primitives are not wired") {
+		t.Fatalf("error = %v, want it to name the not-wired cutover primitives", err)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 0 {
+		t.Errorf("registry has %d serena rows after a not-wired-cutover failure, want 0 (rollback)", len(rows))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 14. Finding 2 — two DIFFERENT roots (sequential live-adds): the SECOND
+//     install's Workspaces snapshot must include the FIRST root's row (the fresh
+//     re-read captures it), so the second install never drops the first.
+// ---------------------------------------------------------------------------
+
+func TestAutoRegisterSerena_DifferentRoots_SecondInstallSeesFirstRow(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+
+	var (
+		mu        sync.Mutex
+		snapshots [][]WorkspaceEntry
+	)
+	stubAutoRegisterInstall(t, func(_ context.Context, _ *API, _ *config.ServerManifest, opts InstallParsedManifestOpts) (string, error) {
+		mu.Lock()
+		snapshots = append(snapshots, append([]WorkspaceEntry(nil), opts.Workspaces...))
+		mu.Unlock()
+		return filepath.Join(t.TempDir(), "supervisor-intent.json"), nil
+	})
+	stubAutoRegisterReconcile(t, func(context.Context, bool) (ReconcileResponse, error) { return ReconcileResponse{}, nil })
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
+
+	rootA := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	rootB := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	a := NewAPI()
+	entryA, err := a.AutoRegisterSerenaWorkspace(context.Background(), rootA)
+	if err != nil {
+		t.Fatalf("register A: %v", err)
+	}
+	entryB, err := a.AutoRegisterSerenaWorkspace(context.Background(), rootB)
+	if err != nil {
+		t.Fatalf("register B: %v", err)
+	}
+
+	if len(snapshots) != 2 {
+		t.Fatalf("install called %d times, want 2", len(snapshots))
+	}
+	// The SECOND install (root B) must carry BOTH rows — proving the fresh
+	// re-read captured root A and the install did not clobber it.
+	second := snapshots[1]
+	haveA, haveB := false, false
+	for _, w := range second {
+		if w.WorkspaceKey == entryA.WorkspaceKey {
+			haveA = true
+		}
+		if w.WorkspaceKey == entryB.WorkspaceKey {
+			haveB = true
+		}
+	}
+	if !haveA || !haveB {
+		t.Errorf("second install Workspaces = %v, want both A(%s) and B(%s) — the re-read must not drop the first root",
+			second, entryA.WorkspaceKey, entryB.WorkspaceKey)
+	}
+	// Both rows persisted on disk.
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 2 {
+		t.Errorf("registry has %d serena rows after two different-root registers, want 2", len(rows))
 	}
 }
 

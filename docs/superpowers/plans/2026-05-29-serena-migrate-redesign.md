@@ -428,8 +428,19 @@ runtime (Phase 1), the cycle-break (Phase 2), and the client-reconcile (Phase 3)
 >   detached+bounded (45s) context, mapping `ErrNotASerenaProject`→503 not-found, `ErrNoLanguages`→422,
 >   other→503, success→fall through to the existing upstream forward. Unwired (`AutoRegisterFn==nil`)
 >   preserves today's 503 (back-compat).
+> - **bot PR #253 hardening (2 P1s)**: (1) *introduce-cutover* — the FIRST serena workspace (prior intent has
+>   no `runtime_spec`, e.g. right after a zero-workspace migrate) cannot be a live-add: the §7.1 gate refuses
+>   introducing `runtime_spec` while a supervisor runs, and the running supervisor cannot be proven
+>   runtime_spec-capable (it exposes no probeable version), so auto-register runs the one-time cutover (REAP the
+>   running supervisor → INSTALL → START the current binary), mirroring migrate's reap-first ordering +
+>   recovery-restart; every subsequent workspace is a live-add. The reap/start primitives are Windows-only,
+>   injected by the CLI via `SetSerenaAutoRegisterCutoverPrimitives` (off-Windows the introduce path 503s).
+>   (2) *concurrent-install serialization* — a process-global install mutex + a fresh registry re-read before
+>   each install stop two concurrent auto-registers for DIFFERENT roots from clobbering each other's intent
+>   rows (`buildMergedSupervisorIntent` replaces all serena rows with the passed snapshot).
 > - **Verified** (integrated tree): `go build ./...`, `go vet ./...`, `go test -race ./internal/api/ -run
->   AutoRegister` (9 tests), `go test -race ./internal/gui/ -run Serena` (128 subtests) all green.
+>   AutoRegister` (16 tests incl. introduce/reap/recovery/concurrency), `go test -race ./internal/gui/ -run
+>   Serena` (128 subtests) all green.
 
 **Scope**: wire auto-register-on-miss (parent plan §E.2) onto the descriptor + builder foundation: when
 the `/serena/mcp` router's `ResolveByPath` returns `ErrWorkspaceNotFound`, survey languages, register the
