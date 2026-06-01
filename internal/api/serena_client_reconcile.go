@@ -127,8 +127,18 @@ type SerenaReconcileOpts struct {
 	// gui.ReadPidport). Phase 4 may inject gui.ReadPidport directly.
 	ReadPidport func(path string) (pid, port int, err error)
 
-	// Ping confirms the GUI is actually serving on the discovered port.
-	// nil → defaultRouterReadinessPing (a loopback HEAD probe). A nil
+	// VerifyIdentity binds the pidport to the listener before any router URL is
+	// trusted. nil → defaultGUIPidportIdentityCheck, which PROVES at the OS
+	// level that the recorded PID owns the loopback router socket: the recorded
+	// PID must be alive, must be the OS-reported owner of the 127.0.0.1:<port>
+	// LISTENING socket (netstat -ano), and that owner's image must be the
+	// mcphub binary. It does NOT trust any PID the listener self-reports over
+	// HTTP (that is forgeable from the world-readable pidport file — bot PR
+	// #252 P1). Tests may inject a no-op when they are not exercising discovery.
+	VerifyIdentity func(ctx context.Context, pid, port int) error
+
+	// Ping confirms the GUI router is actually serving on the discovered port.
+	// nil → defaultRouterReadinessPing (a loopback HEAD + initialize probe). A nil
 	// return means live; any error fails the reconcile closed. Mirrors the
 	// G4 reconcile's live-probe-before-rewrite posture
 	// (internal/cli/install.go:348-374).
@@ -425,7 +435,7 @@ func discoverLiveGUIPort(ctx context.Context, opts SerenaReconcileOpts) (int, er
 	if readPidport == nil {
 		readPidport = readPidportFn
 	}
-	_, port, err := readPidport(opts.PidportPath)
+	pid, port, err := readPidport(opts.PidportPath)
 	if err != nil {
 		return 0, fmt.Errorf("%w: read pidport %s: %v", ErrSerenaReconcileGUINotLive, opts.PidportPath, err)
 	}
@@ -436,6 +446,13 @@ func discoverLiveGUIPort(ctx context.Context, opts SerenaReconcileOpts) (int, er
 	if port <= 0 || port > 65535 {
 		return 0, fmt.Errorf("%w: pidport %s has no usable bound port (%d) — the GUI listener is not up", ErrSerenaReconcileGUINotLive, opts.PidportPath, port)
 	}
+	verifyIdentity := opts.VerifyIdentity
+	if verifyIdentity == nil {
+		verifyIdentity = defaultGUIPidportIdentityCheck
+	}
+	if ierr := verifyIdentity(ctx, pid, port); ierr != nil {
+		return 0, fmt.Errorf("%w: pidport %s identity check failed for PID %d on port %d: %v", ErrSerenaReconcileGUINotLive, opts.PidportPath, pid, port, ierr)
+	}
 	ping := opts.Ping
 	if ping == nil {
 		ping = defaultRouterReadinessPing
@@ -444,6 +461,85 @@ func discoverLiveGUIPort(ctx context.Context, opts SerenaReconcileOpts) (int, er
 		return 0, fmt.Errorf("%w: GUI on port %d did not answer the readiness ping: %v", ErrSerenaReconcileGUINotLive, port, perr)
 	}
 	return port, nil
+}
+
+// loopbackPortOwnerFn is the test seam for the OS-level port→owner-PID
+// resolution. Production: loopbackPortOwnerPID (Windows: `netstat -ano` scan
+// for the 127.0.0.1:<port> LISTENING owner; POSIX: fail-closed stub). Tests
+// override it to inject a synthetic owner without a real listener, mirroring
+// the file's existing readPidportFn / Ping / VerifyIdentity seam style.
+var loopbackPortOwnerFn = loopbackPortOwnerPID
+
+// guiImageForPIDFn is the test seam for the owner-PID → image-basename
+// resolution. Production: guiImageForPID (Windows: procNameAndParent via
+// wmic/PowerShell; POSIX: fail-closed stub). Tests override it to assert the
+// foreign-image rejection without a real process table.
+var guiImageForPIDFn = guiImageForPID
+
+// defaultGUIPidportIdentityCheck PROVES, at the OS level, that the recorded
+// pidport PID is the process that actually owns the loopback router socket —
+// it does NOT trust any value the listener self-reports over HTTP.
+//
+// Why the self-reported path was insufficient (bot PR #252 P1): the GUI
+// pidport file is world-readable and intentionally left on disk after the GUI
+// exits. A local attacker that binds the stale loopback port can read the
+// pidport file and echo its PID back from /api/ping, while processAlive(pid)
+// only proves SOME process with that PID exists — not that it owns the socket.
+// The HTTP-reported PID is therefore forgeable. The fix replaces it with an
+// unforgeable OS binding:
+//
+//  1. processAlive(pid) — cheap pre-check: fail fast if the recorded PID is
+//     already dead (the common stale-pidport case) before shelling out.
+//  2. loopbackPortOwnerFn(port) — ask the OS who owns the 127.0.0.1:<port>
+//     LISTENING socket. Require ownerPID == the recorded pidport pid. A
+//     mismatch means a DIFFERENT process holds the port (stale GUI gone, port
+//     reused by an attacker) → fail closed.
+//  3. guiImageForPIDFn(ownerPID) — require the owning process's image basename
+//     to be the mcphub binary (clients.IsMcphubBinary). A foreign image owning
+//     the port → fail closed.
+//
+// The separate router-readiness probe (opts.Ping / defaultRouterReadinessPing)
+// still runs AFTER this proof to confirm the router is actually serving; it is
+// no longer the identity authority. Every failure path here is fail-closed:
+// any uncertainty refuses the reconcile rather than trusting a guess.
+func defaultGUIPidportIdentityCheck(ctx context.Context, pid, port int) error {
+	if pid <= 0 {
+		return fmt.Errorf("invalid pidport pid %d", pid)
+	}
+	// (1) Cheap liveness pre-check — fail fast on a dead recorded PID.
+	alive, err := processAlive(pid)
+	if err != nil {
+		return fmt.Errorf("check recorded process liveness: %w", err)
+	}
+	if !alive {
+		return fmt.Errorf("recorded process is not alive")
+	}
+	// (2) OS-level port-owner proof. The OWNER of the loopback LISTENING
+	//     socket must be the recorded PID — not a value the listener reports
+	//     about itself.
+	ownerPID, ok, err := loopbackPortOwnerFn(port)
+	if err != nil {
+		// netstat failure OR the POSIX fail-closed stub. Refuse — never fall
+		// back to a self-reported PID.
+		return fmt.Errorf("resolve OS owner of loopback port %d: %w", port, err)
+	}
+	if !ok || ownerPID <= 0 {
+		return fmt.Errorf("no process owns loopback LISTENING port %d (pidport is stale or the GUI listener is down)", port)
+	}
+	if ownerPID != pid {
+		return fmt.Errorf("loopback port %d is owned by PID %d, not the recorded pidport PID %d (stale pidport / port reused by another process)", port, ownerPID, pid)
+	}
+	// (3) The owning process's image must be the mcphub binary. A foreign
+	//     image holding the port fails closed even if it somehow matched the
+	//     recorded PID number.
+	image, ok := guiImageForPIDFn(ownerPID)
+	if !ok {
+		return fmt.Errorf("could not resolve the image of port-%d owner PID %d (OS-level identity proof unavailable)", port, ownerPID)
+	}
+	if !clients.IsMcphubBinary(image) {
+		return fmt.Errorf("loopback port %d owner PID %d image %q is not the mcphub GUI binary (foreign process owns the router port)", port, ownerPID, image)
+	}
+	return nil
 }
 
 // defaultRouterReadinessPing confirms a live local GUI is serving on port by

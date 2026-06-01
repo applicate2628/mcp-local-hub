@@ -20,7 +20,8 @@ import (
 
 // okPing is a readiness ping that always reports the GUI live. Used by
 // tests that are not exercising the fail-closed discovery path.
-func okPing(context.Context, int) error { return nil }
+func okPing(context.Context, int) error             { return nil }
+func okGUIIdentity(context.Context, int, int) error { return nil }
 
 // seedPidport writes a "<PID> <PORT>\n" pidport file into a temp dir and
 // returns its path. Mirrors gui.formatPidport's exact byte layout so the
@@ -152,9 +153,10 @@ func TestSerenaClientReconcile_DiscoversPortFromLivePidport_FailsClosedWhenAbsen
 		pp := seedPidport(t, 4242, 9137)
 		cs := fakeReconcileClientMap()
 		report, err := ReconcileSerenaClientsToRouter(context.Background(), SerenaReconcileOpts{
-			PidportPath: pp,
-			Ping:        okPing,
-			Clients:     cs,
+			PidportPath:    pp,
+			Ping:           okPing,
+			VerifyIdentity: okGUIIdentity,
+			Clients:        cs,
 		})
 		if err != nil {
 			t.Fatalf("reconcile: %v", err)
@@ -179,9 +181,10 @@ func TestSerenaClientReconcile_DiscoversPortFromLivePidport_FailsClosedWhenAbsen
 	t.Run("missing_pidport_fails_closed", func(t *testing.T) {
 		cs := fakeReconcileClientMap()
 		_, err := ReconcileSerenaClientsToRouter(context.Background(), SerenaReconcileOpts{
-			PidportPath: filepath.Join(t.TempDir(), "does-not-exist.pidport"),
-			Ping:        okPing,
-			Clients:     cs,
+			PidportPath:    filepath.Join(t.TempDir(), "does-not-exist.pidport"),
+			Ping:           okPing,
+			VerifyIdentity: okGUIIdentity,
+			Clients:        cs,
 		})
 		if !errors.Is(err, ErrSerenaReconcileGUINotLive) {
 			t.Fatalf("expected ErrSerenaReconcileGUINotLive, got %v", err)
@@ -200,9 +203,10 @@ func TestSerenaClientReconcile_DiscoversPortFromLivePidport_FailsClosedWhenAbsen
 		cs := fakeReconcileClientMap()
 		failPing := func(context.Context, int) error { return errors.New("connection refused") }
 		_, err := ReconcileSerenaClientsToRouter(context.Background(), SerenaReconcileOpts{
-			PidportPath: pp,
-			Ping:        failPing,
-			Clients:     cs,
+			PidportPath:    pp,
+			Ping:           failPing,
+			VerifyIdentity: okGUIIdentity,
+			Clients:        cs,
 		})
 		if !errors.Is(err, ErrSerenaReconcileGUINotLive) {
 			t.Fatalf("expected ErrSerenaReconcileGUINotLive on ping failure, got %v", err)
@@ -230,6 +234,210 @@ func TestSerenaClientReconcile_DiscoversPortFromLivePidport_FailsClosedWhenAbsen
 		}
 		if pingCalled {
 			t.Errorf("ping should not run for an unusable (0) port")
+		}
+	})
+}
+
+// TestSerenaClientReconcile_RejectsStalePidportSpoofedRouter verifies the
+// production discovery path does not trust a stale pidport port even when a
+// local listener fully mimics the /serena/mcp readiness signature AND echoes
+// the recorded PID back from /api/ping. The dead-GUI variant is rejected at
+// the cheap liveness pre-check (the recorded GUI PID is gone); the OS-level
+// owner proof (TestDefaultGUIPidportIdentityCheck_OSPortOwnerProof) covers the
+// live-attacker variant. The self-reported /api/ping PID is deliberately NOT
+// trusted — it is forgeable from the world-readable pidport file (bot PR #252
+// P1), so the spoof's echo must NOT satisfy the check.
+func TestSerenaClientReconcile_RejectsStalePidportSpoofedRouter(t *testing.T) {
+	managedEntriesTestHelper(t)
+
+	const stalePID = 999999999
+	spoof := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/ping":
+			// Attacker echoes the recorded PID from the world-readable pidport
+			// file. The new OS-level proof ignores this self-report entirely.
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true,"pid":999999999}`))
+		case SerenaRouterURLPath:
+			if r.Method != http.MethodPost {
+				w.Header().Set("Allow", "POST")
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","serverInfo":{"name":"spoof"},"capabilities":{}}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer spoof.Close()
+
+	port := spoof.Listener.Addr().(*net.TCPAddr).Port
+	pp := seedPidport(t, stalePID, port)
+	cs := fakeReconcileClientMap()
+
+	_, err := ReconcileSerenaClientsToRouter(context.Background(), SerenaReconcileOpts{
+		PidportPath: pp,
+		Clients:     cs,
+	})
+	if !errors.Is(err, ErrSerenaReconcileGUINotLive) {
+		t.Fatalf("expected ErrSerenaReconcileGUINotLive for stale pidport spoof, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "recorded process is not alive") {
+		t.Fatalf("expected stale PID liveness diagnostic, got %v", err)
+	}
+	for name, c := range cs {
+		if fc := c.(*reconcileFakeClient); fc.addCalls != 0 {
+			t.Errorf("client %s: AddEntry called %d times for spoofed stale pidport; want 0", name, fc.addCalls)
+		}
+	}
+}
+
+// TestDefaultGUIPidportIdentityCheck_OSPortOwnerProof exercises the OS-level
+// port-owner identity proof that REPLACED the forgeable self-reported HTTP-PID
+// check (bot PR #252 P1). It seams the two OS lookups
+// (loopbackPortOwnerFn / guiImageForPIDFn) so the cases run hermetically on
+// every platform — no real netstat / process table required. The recorded PID
+// is this test process's own live PID so the cheap liveness pre-check passes
+// and control reaches the seamed owner+image steps.
+//
+// Cases:
+//   - correct owner + mcphub image           → PASS (the only accept path)
+//   - owner PID mismatch                      → reject (different process owns
+//     the loopback port — stale GUI gone / attacker reused the port)
+//   - foreign image owning the port           → reject (port owner is not the
+//     mcphub binary)
+//   - OS port-owner resolution fails (err)    → reject (e.g. POSIX fail-closed
+//     stub or netstat failure — never fall back to a self-report)
+//   - no owner found (ok=false)               → reject (dead/stale port)
+//   - image lookup fails                       → reject
+//   - recorded PID dead                        → reject (liveness pre-check)
+func TestDefaultGUIPidportIdentityCheck_OSPortOwnerProof(t *testing.T) {
+	const port = 9137
+	livePID := os.Getpid() // this test process is alive → passes processAlive
+
+	// saveSeams snapshots and restores the package seams around each subtest so
+	// one case's fake does not leak into another (mirrors the file's other
+	// seam-overriding tests, which use t.Cleanup-style restoration).
+	saveSeams := func(t *testing.T) {
+		t.Helper()
+		origOwner := loopbackPortOwnerFn
+		origImage := guiImageForPIDFn
+		t.Cleanup(func() {
+			loopbackPortOwnerFn = origOwner
+			guiImageForPIDFn = origImage
+		})
+	}
+
+	t.Run("correct_owner_and_mcphub_image_passes", func(t *testing.T) {
+		saveSeams(t)
+		loopbackPortOwnerFn = func(p int) (int, bool, error) {
+			if p != port {
+				t.Errorf("owner lookup got port %d, want %d", p, port)
+			}
+			return livePID, true, nil
+		}
+		guiImageForPIDFn = func(pid int) (string, bool) {
+			if pid != livePID {
+				t.Errorf("image lookup got pid %d, want owner %d", pid, livePID)
+			}
+			return "mcphub.exe", true
+		}
+		if err := defaultGUIPidportIdentityCheck(context.Background(), livePID, port); err != nil {
+			t.Fatalf("correct owner + mcphub image must pass; got %v", err)
+		}
+	})
+
+	t.Run("owner_pid_mismatch_rejects", func(t *testing.T) {
+		saveSeams(t)
+		// The OS reports a DIFFERENT process owns the loopback port (the
+		// live-attacker spoof scenario: attacker holds the port, but its PID is
+		// not the recorded GUI PID).
+		loopbackPortOwnerFn = func(int) (int, bool, error) { return livePID + 1, true, nil }
+		guiImageForPIDFn = func(int) (string, bool) {
+			t.Errorf("image lookup must NOT run once the owner PID already mismatched")
+			return "mcphub.exe", true
+		}
+		err := defaultGUIPidportIdentityCheck(context.Background(), livePID, port)
+		if err == nil {
+			t.Fatal("owner PID mismatch must fail closed; got nil")
+		}
+		if !strings.Contains(err.Error(), "is owned by PID") {
+			t.Fatalf("expected owner-mismatch diagnostic, got %v", err)
+		}
+	})
+
+	t.Run("foreign_image_owning_port_rejects", func(t *testing.T) {
+		saveSeams(t)
+		loopbackPortOwnerFn = func(int) (int, bool, error) { return livePID, true, nil }
+		guiImageForPIDFn = func(int) (string, bool) { return "python.exe", true }
+		err := defaultGUIPidportIdentityCheck(context.Background(), livePID, port)
+		if err == nil {
+			t.Fatal("a foreign image owning the port must fail closed; got nil")
+		}
+		if !strings.Contains(err.Error(), "is not the mcphub GUI binary") {
+			t.Fatalf("expected foreign-image diagnostic, got %v", err)
+		}
+	})
+
+	t.Run("os_owner_resolution_error_rejects", func(t *testing.T) {
+		saveSeams(t)
+		// Models the POSIX fail-closed stub / a netstat failure: never fall
+		// back to a self-reported PID.
+		loopbackPortOwnerFn = func(int) (int, bool, error) {
+			return 0, false, errors.New("netstat -ano failed")
+		}
+		guiImageForPIDFn = func(int) (string, bool) {
+			t.Errorf("image lookup must NOT run when owner resolution errored")
+			return "", false
+		}
+		err := defaultGUIPidportIdentityCheck(context.Background(), livePID, port)
+		if err == nil {
+			t.Fatal("owner-resolution error must fail closed; got nil")
+		}
+		if !strings.Contains(err.Error(), "resolve OS owner of loopback port") {
+			t.Fatalf("expected owner-resolution-error diagnostic, got %v", err)
+		}
+	})
+
+	t.Run("no_owner_found_rejects", func(t *testing.T) {
+		saveSeams(t)
+		loopbackPortOwnerFn = func(int) (int, bool, error) { return 0, false, nil }
+		err := defaultGUIPidportIdentityCheck(context.Background(), livePID, port)
+		if err == nil {
+			t.Fatal("no owner found must fail closed; got nil")
+		}
+		if !strings.Contains(err.Error(), "no process owns loopback LISTENING port") {
+			t.Fatalf("expected no-owner diagnostic, got %v", err)
+		}
+	})
+
+	t.Run("image_lookup_failure_rejects", func(t *testing.T) {
+		saveSeams(t)
+		loopbackPortOwnerFn = func(int) (int, bool, error) { return livePID, true, nil }
+		guiImageForPIDFn = func(int) (string, bool) { return "", false }
+		err := defaultGUIPidportIdentityCheck(context.Background(), livePID, port)
+		if err == nil {
+			t.Fatal("image-lookup failure must fail closed; got nil")
+		}
+		if !strings.Contains(err.Error(), "could not resolve the image of port-") {
+			t.Fatalf("expected image-resolution diagnostic, got %v", err)
+		}
+	})
+
+	t.Run("recorded_pid_dead_rejects_before_os_lookup", func(t *testing.T) {
+		saveSeams(t)
+		const deadPID = 999999999
+		loopbackPortOwnerFn = func(int) (int, bool, error) {
+			t.Errorf("owner lookup must NOT run once the recorded PID is already dead")
+			return deadPID, true, nil
+		}
+		err := defaultGUIPidportIdentityCheck(context.Background(), deadPID, port)
+		if err == nil {
+			t.Fatal("a dead recorded PID must fail closed; got nil")
+		}
+		if !strings.Contains(err.Error(), "recorded process is not alive") {
+			t.Fatalf("expected dead-PID diagnostic, got %v", err)
 		}
 	})
 }
@@ -347,6 +555,7 @@ func TestSerenaClientReconcile_RewritesToRouterURL_PerClient(t *testing.T) {
 	report, err := ReconcileSerenaClientsToRouter(context.Background(), SerenaReconcileOpts{
 		PidportPath:    pp,
 		Ping:           okPing,
+		VerifyIdentity: okGUIIdentity,
 		ClientsInclude: urlClients,
 		// Clients: nil → production AllClients() over the hermetic HOME.
 	})
@@ -410,6 +619,7 @@ func TestSerenaClientReconcile_Antigravity_RelayUpstreamIsRouter(t *testing.T) {
 	report, err := ReconcileSerenaClientsToRouter(context.Background(), SerenaReconcileOpts{
 		PidportPath:    pp,
 		Ping:           okPing,
+		VerifyIdentity: okGUIIdentity,
 		ClientsInclude: []string{"antigravity"},
 		McphubExePath:  filepath.Join(home, "mcphub-test-bin"), // abs path required by the adapter
 	})
@@ -459,9 +669,10 @@ func TestSerenaClientReconcile_RecordsManagedEntryMarker(t *testing.T) {
 	pp := seedPidport(t, 4242, 9142)
 	cs := fakeReconcileClientMap()
 	report, err := ReconcileSerenaClientsToRouter(context.Background(), SerenaReconcileOpts{
-		PidportPath: pp,
-		Ping:        okPing,
-		Clients:     cs,
+		PidportPath:    pp,
+		Ping:           okPing,
+		VerifyIdentity: okGUIIdentity,
+		Clients:        cs,
 	})
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
@@ -498,11 +709,12 @@ func TestSerenaClientReconcile_LegacyEndpointRemovedOnlyAfterRewriteSuccess(t *t
 	broken.entries["serena"] = clients.MCPEntry{Name: "serena", URL: "http://localhost:9143/mcp"}
 
 	report, err := ReconcileSerenaClientsToRouter(context.Background(), SerenaReconcileOpts{
-		PidportPath:  pp,
-		Ping:         okPing,
-		Clients:      cs,
-		RemoveLegacy: true,
-		LegacyPort:   9143,
+		PidportPath:    pp,
+		Ping:           okPing,
+		VerifyIdentity: okGUIIdentity,
+		Clients:        cs,
+		RemoveLegacy:   true,
+		LegacyPort:     9143,
 	})
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
@@ -556,9 +768,10 @@ func TestSerenaClientReconcile_AppliedRowCarriesBackupPath(t *testing.T) {
 		c.(*reconcileFakeClient).backupPath = "/fake/bak-" + name
 	}
 	report, err := ReconcileSerenaClientsToRouter(context.Background(), SerenaReconcileOpts{
-		PidportPath: pp,
-		Ping:        okPing,
-		Clients:     cs,
+		PidportPath:    pp,
+		Ping:           okPing,
+		VerifyIdentity: okGUIIdentity,
+		Clients:        cs,
 	})
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
