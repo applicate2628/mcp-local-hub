@@ -20,6 +20,7 @@ package gui
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -1395,5 +1396,262 @@ func TestInMemorySessionRouter_BindLookupUnbind(t *testing.T) {
 	wg.Wait()
 	if counter.Load() != 100 {
 		t.Errorf("concurrent bindings observed = %d, want 100", counter.Load())
+	}
+}
+
+// ---------------------------------------------------------------------
+// Phase 5 Part C: auto-register-on-miss.
+//
+// When a tool-call resolves to no registered workspace
+// (ErrWorkspaceNotFound), the router calls deps.AutoRegisterFn to
+// register+spawn the workspace, then forwards the call — instead of the
+// pre-Phase-5 immediate 503. These tests inject a fake AutoRegisterFn via
+// the deps seam (a fake Resolver returning ErrWorkspaceNotFound is the
+// trigger) and assert the four outcome mappings + the unwired back-compat
+// path.
+// ---------------------------------------------------------------------
+
+// nilEntryResolver returns (nil, nil) on every ResolveByPath — the
+// "resolved==nil" not-found shape (distinct from ErrWorkspaceNotFound).
+// stubResolver returns ErrWorkspaceNotFound on no-match, so this dedicated
+// stub exercises the second auto-register call site.
+type nilEntryResolver struct{}
+
+func (nilEntryResolver) ResolveByPath(string) (*api.WorkspaceEntry, error) { return nil, nil }
+
+// TestSerenaRouter_AutoRegister_SuccessForwards: AutoRegisterFn returns
+// (entry, nil) → the tool call is FORWARDED to entry's upstream (NOT a 503).
+func TestSerenaRouter_AutoRegister_SuccessForwards(t *testing.T) {
+	hit := &upstreamHit{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit.record(r)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"workspace":"autoreg"}}`))
+	}))
+	t.Cleanup(ts.Close)
+
+	registered := &api.WorkspaceEntry{WorkspaceKey: "autoreg", WorkspacePath: "/proj/autoreg", Port: 9301, TaskName: `\mcp-local-hub-serena-autoreg`}
+
+	var registerCalls int32
+	var registeredPath string
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: nil}, // no match → ErrWorkspaceNotFound
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		AutoRegisterFn: func(ctx context.Context, absPath string) (*api.WorkspaceEntry, error) {
+			atomic.AddInt32(&registerCalls, 1)
+			registeredPath = absPath
+			return registered, nil
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/autoreg/src/main.go"})
+	rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": "sess-autoreg"})
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (auto-register then forward); body=%s", rr.Code, rr.Body.String())
+	}
+	if got := atomic.LoadInt32(&registerCalls); got != 1 {
+		t.Errorf("AutoRegisterFn call count = %d, want 1", got)
+	}
+	if registeredPath != "/proj/autoreg/src/main.go" {
+		t.Errorf("AutoRegisterFn received path %q, want the tool-arg path", registeredPath)
+	}
+	if !hit.called {
+		t.Fatal("upstream of the auto-registered workspace was not hit")
+	}
+	if hit.method != http.MethodPost {
+		t.Errorf("upstream method = %s, want POST", hit.method)
+	}
+	if !bytes.Contains(hit.body, []byte(`"find_symbol"`)) {
+		t.Errorf("forwarded upstream body did not carry the tool name; got %s", string(hit.body))
+	}
+	// The freshly auto-registered workspace binds the sticky session exactly
+	// like a pre-registered one.
+	if bound := deps.Sessions.LookupSession("sess-autoreg"); bound == nil || bound.WorkspaceKey != "autoreg" {
+		t.Errorf("session binding after auto-register = %+v, want autoreg", bound)
+	}
+}
+
+// TestSerenaRouter_AutoRegister_ResolvedNilForwards: the resolved==nil
+// not-found shape (resolver returns (nil, nil)) also drives auto-register.
+func TestSerenaRouter_AutoRegister_ResolvedNilForwards(t *testing.T) {
+	hit := &upstreamHit{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit.record(r)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
+	}))
+	t.Cleanup(ts.Close)
+
+	registered := &api.WorkspaceEntry{WorkspaceKey: "autoreg2", WorkspacePath: "/proj/autoreg2", Port: 9302}
+	var registerCalls int32
+	deps := &serenaRouterDeps{
+		Resolver:      nilEntryResolver{},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		AutoRegisterFn: func(ctx context.Context, absPath string) (*api.WorkspaceEntry, error) {
+			atomic.AddInt32(&registerCalls, 1)
+			return registered, nil
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/autoreg2/x"})
+	rr := postSerena(t, s, body, nil)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if got := atomic.LoadInt32(&registerCalls); got != 1 {
+		t.Errorf("AutoRegisterFn call count = %d, want 1 (resolved==nil branch)", got)
+	}
+	if !hit.called {
+		t.Fatal("upstream was not hit on the resolved==nil auto-register branch")
+	}
+}
+
+// TestSerenaRouter_AutoRegister_NotASerenaProject_Returns503: AutoRegisterFn
+// returns api.ErrNotASerenaProject → the canonical workspace-not-found 503
+// (the DoS bound — behave exactly like today's not-found, no marker = no
+// register).
+func TestSerenaRouter_AutoRegister_NotASerenaProject_Returns503(t *testing.T) {
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: nil},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return "http://invalid" },
+		AutoRegisterFn: func(ctx context.Context, absPath string) (*api.WorkspaceEntry, error) {
+			return nil, api.ErrNotASerenaProject
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/not/a/project/file.go"})
+	rr := postSerena(t, s, body, nil)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp notFoundJSON
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode not-found body: %v; raw=%s", err, rr.Body.String())
+	}
+	if resp.PhaseEStatus != "deferred" {
+		t.Errorf("phase_e_status = %q, want %q", resp.PhaseEStatus, "deferred")
+	}
+	if !strings.Contains(resp.Error, "register workspace") {
+		t.Errorf("error = %q does not mention register workspace", resp.Error)
+	}
+	if resp.ResolvedPath != "/not/a/project/file.go" {
+		t.Errorf("resolved_path = %q, want the requested path", resp.ResolvedPath)
+	}
+}
+
+// TestSerenaRouter_AutoRegister_NoLanguages_Returns422: AutoRegisterFn returns
+// api.ErrNoLanguages → JSON-RPC -32602 invalid-params at HTTP 422.
+func TestSerenaRouter_AutoRegister_NoLanguages_Returns422(t *testing.T) {
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: nil},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return "http://invalid" },
+		AutoRegisterFn: func(ctx context.Context, absPath string) (*api.WorkspaceEntry, error) {
+			return nil, api.ErrNoLanguages
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/nolang/file.go"})
+	rr := postSerena(t, s, body, nil)
+
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode JSON-RPC error: %v; raw=%s", err, rr.Body.String())
+	}
+	if resp.Error == nil || resp.Error.Code != jsonrpcInvalidParams {
+		t.Fatalf("error code = %+v, want %d (invalid-params)", resp.Error, jsonrpcInvalidParams)
+	}
+	if !strings.Contains(resp.Error.Message, "declares no languages") {
+		t.Errorf("error message %q should name the no-languages condition", resp.Error.Message)
+	}
+}
+
+// TestSerenaRouter_AutoRegister_GenericError_Returns503: AutoRegisterFn returns
+// a generic (install/spawn/readiness) error → JSON-RPC -32603 internal-error at
+// HTTP 503.
+func TestSerenaRouter_AutoRegister_GenericError_Returns503(t *testing.T) {
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: nil},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return "http://invalid" },
+		AutoRegisterFn: func(ctx context.Context, absPath string) (*api.WorkspaceEntry, error) {
+			return nil, fmt.Errorf("supervisor reconcile failed: boom")
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/boom/file.go"})
+	rr := postSerena(t, s, body, nil)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode JSON-RPC error: %v; raw=%s", err, rr.Body.String())
+	}
+	if resp.Error == nil || resp.Error.Code != jsonrpcInternalError {
+		t.Fatalf("error code = %+v, want %d (internal-error)", resp.Error, jsonrpcInternalError)
+	}
+	if !strings.Contains(resp.Error.Message, "serena auto-register failed") {
+		t.Errorf("error message %q should name the auto-register failure", resp.Error.Message)
+	}
+	if !strings.Contains(resp.Error.Message, "boom") {
+		t.Errorf("error message %q should wrap the underlying error", resp.Error.Message)
+	}
+}
+
+// TestSerenaRouter_AutoRegister_Unwired_Returns503: a nil AutoRegisterFn
+// preserves the pre-Phase-5 immediate writeWorkspaceNotFound 503 (back-compat
+// for partially-wired routing).
+func TestSerenaRouter_AutoRegister_Unwired_Returns503(t *testing.T) {
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: nil},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return "http://invalid" },
+		// AutoRegisterFn intentionally nil.
+	}
+	s := newSerenaTestServer(t, deps)
+
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/unknown/path/file.go"})
+	rr := postSerena(t, s, body, nil)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 (unwired back-compat); body=%s", rr.Code, rr.Body.String())
+	}
+	var resp notFoundJSON
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode not-found body: %v; raw=%s", err, rr.Body.String())
+	}
+	if resp.PhaseEStatus != "deferred" {
+		t.Errorf("phase_e_status = %q, want %q", resp.PhaseEStatus, "deferred")
+	}
+	if resp.ResolvedPath != "/unknown/path/file.go" {
+		t.Errorf("resolved_path = %q, want the requested path", resp.ResolvedPath)
 	}
 }

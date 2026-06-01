@@ -50,6 +50,15 @@ type serenaRouterDeps struct {
 	UpstreamURLFn   func(ws *api.WorkspaceEntry) string
 	AuditFn         func(level, event string, fields map[string]any) error
 	UpstreamTimeout time.Duration
+	// AutoRegisterFn is the Phase-5 auto-register-on-miss seam. When a
+	// /serena/mcp tool call resolves to no registered workspace
+	// (ErrWorkspaceNotFound / resolved==nil) the handler calls this to
+	// register+spawn the workspace at runtime, then forwards the call to
+	// the freshly-spawned daemon. Production wires it to
+	// api.(*API).AutoRegisterSerenaWorkspace (SetSerenaRouterProduction).
+	// A nil AutoRegisterFn preserves the pre-Phase-5 immediate-503
+	// behavior (back-compat for partially-wired routing).
+	AutoRegisterFn func(ctx context.Context, absPath string) (*api.WorkspaceEntry, error)
 }
 
 // serenaRouterTestSeam lets tests inject a fully-mocked deps bundle.
@@ -195,6 +204,13 @@ func (s *Server) SetSerenaRouterProduction(resolver *serena_routing.WorkspaceRes
 	s.SetSerenaRouterDeps(&serenaRouterDeps{
 		Resolver: resolver,
 		Sessions: sessions,
+		// Phase 5: auto-register-on-miss. api.NewAPI() per call is the
+		// established pattern (migrate_serena.go does the same) — the API
+		// struct is a thin façade over the live registry/state dir, so a
+		// fresh instance shares the same on-disk truth.
+		AutoRegisterFn: func(ctx context.Context, absPath string) (*api.WorkspaceEntry, error) {
+			return api.NewAPI().AutoRegisterSerenaWorkspace(ctx, absPath)
+		},
 	})
 }
 
@@ -575,18 +591,34 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	if hasPath {
 		resolved, resolveErr := deps.Resolver.ResolveByPath(pathArg)
 		if resolveErr != nil {
+			// Phase 5: on workspace-not-found, attempt auto-register-on-miss
+			// (register+spawn the serena workspace at this path, then forward)
+			// instead of the immediate 503. attemptSerenaAutoRegister returns a
+			// non-nil entry to forward to, or nil AFTER writing the HTTP
+			// response (so the caller MUST return on nil). A nil AutoRegisterFn
+			// preserves today's writeWorkspaceNotFound 503.
 			if errors.Is(resolveErr, ErrWorkspaceNotFound) {
-				writeWorkspaceNotFound(w, pathArg, false)
+				ws = s.attemptSerenaAutoRegister(w, r, deps, tb.ID, pathArg)
+				if ws == nil {
+					return
+				}
+			} else {
+				http.Error(w, "resolve workspace: "+resolveErr.Error(), http.StatusInternalServerError)
 				return
 			}
-			http.Error(w, "resolve workspace: "+resolveErr.Error(), http.StatusInternalServerError)
-			return
+		} else if resolved == nil {
+			// resolved==nil is the other not-found shape (resolver returned a
+			// nil entry with a nil error). Same auto-register-on-miss path.
+			ws = s.attemptSerenaAutoRegister(w, r, deps, tb.ID, pathArg)
+			if ws == nil {
+				return
+			}
+		} else {
+			ws = resolved
 		}
-		if resolved == nil {
-			writeWorkspaceNotFound(w, pathArg, false)
-			return
-		}
-		ws = resolved
+		// A resolved OR freshly auto-registered workspace binds the sticky
+		// session after the upstream forward, exactly as before — auto-register
+		// yields a real workspace indistinguishable from a pre-registered one.
 		if sessionID != "" && deps.Sessions != nil {
 			bindSessionAfterUpstream = true
 		}
@@ -972,6 +1004,78 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, _ = io.Copy(w, upstreamResp.Body)
+}
+
+// attemptSerenaAutoRegister runs the Phase-5 auto-register-on-miss path.
+// It is called from the tool-call handler's not-found branch (the resolver
+// returned ErrWorkspaceNotFound or a nil entry). It returns the registered
+// *api.WorkspaceEntry to forward to, OR nil AFTER it has already written the
+// HTTP response — so the caller MUST return when this returns nil.
+//
+// Outcome mapping (mirrors the api.AutoRegisterSerenaWorkspace contract):
+//   - AutoRegisterFn unwired (nil) → writeWorkspaceNotFound 503 (back-compat:
+//     identical to the pre-Phase-5 immediate-not-found when routing is only
+//     partially wired); return nil.
+//   - success → return the entry (caller falls through to the upstream
+//     forward exactly as if the workspace had been registered all along).
+//   - api.ErrNotASerenaProject → writeWorkspaceNotFound 503 (no `.serena`
+//     marker → NOT auto-registrable; this is the load-bearing DoS bound, so
+//     behave exactly like today's not-found); return nil.
+//   - api.ErrNoLanguages → JSON-RPC -32602 invalid-params at HTTP 422 (the
+//     marker exists but declares no languages → unprocessable); return nil.
+//   - any other error → JSON-RPC -32603 internal-error at HTTP 503 (install /
+//     spawn / readiness failure; the helper rolls back its registry row so no
+//     half-registered workspace is left behind); return nil.
+//
+// The register call runs under a DETACHED + BOUNDED context: detached from
+// r.Context() via context.WithoutCancel so a client that disconnects
+// mid-register does NOT abort the spawn / leave a half-registered workspace
+// (the D-invariant the router's cleanupContext applies to best-effort upstream
+// ops), and bounded at 45s to cover install + reconcile + readiness. Unlike
+// cleanupContext (which detaches via context.Background() and drops
+// request-scoped values), WithoutCancel preserves request values while
+// severing only cancellation — the exact posture an important best-effort
+// register needs.
+func (s *Server) attemptSerenaAutoRegister(w http.ResponseWriter, r *http.Request, deps *serenaRouterDeps, id json.RawMessage, pathArg string) *api.WorkspaceEntry {
+	if deps.AutoRegisterFn == nil {
+		writeWorkspaceNotFound(w, pathArg, false)
+		return nil
+	}
+
+	regCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 45*time.Second)
+	defer cancel()
+
+	entry, err := deps.AutoRegisterFn(regCtx, pathArg)
+	if err == nil {
+		if deps.AuditFn != nil {
+			port := 0
+			if entry != nil {
+				port = entry.Port
+			}
+			_ = deps.AuditFn("info", "serena-workspace-auto-registered", map[string]any{
+				"path": pathArg,
+				"port": port,
+			})
+		}
+		return entry
+	}
+
+	switch {
+	case errors.Is(err, api.ErrNotASerenaProject):
+		// No `.serena/project.yml` marker → not auto-registrable. This is the
+		// DoS bound: behave exactly like today's workspace-not-found 503 so an
+		// attacker cannot register an arbitrary path they do not own.
+		writeWorkspaceNotFound(w, pathArg, false)
+		return nil
+	case errors.Is(err, api.ErrNoLanguages):
+		writeJSONRPCErrorStatus(w, id, http.StatusUnprocessableEntity, jsonrpcInvalidParams,
+			"serena project at "+pathArg+" declares no languages", nil)
+		return nil
+	default:
+		writeJSONRPCErrorStatus(w, id, http.StatusServiceUnavailable, jsonrpcInternalError,
+			"serena auto-register failed: "+err.Error(), nil)
+		return nil
+	}
 }
 
 // handleSerenaDelete tears down the router-owned session state for a
