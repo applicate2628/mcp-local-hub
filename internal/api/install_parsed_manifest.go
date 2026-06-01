@@ -271,7 +271,23 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	// edge — but it self-heals: a fresh old binary decoding the new file fails
 	// LOUD at supervisor cold start (supervise.go intent-decode hard abort), not
 	// silently.
-	if desiredIntent.HasRuntimeSpecRow() {
+	//
+	// Phase-5 live-add refinement (auto-register-on-miss): the gate fires ONLY
+	// when this write INTRODUCES runtime_spec — i.e. desiredIntent carries it but
+	// the prior on-disk intent does NOT. A write that ADDS a workspace to an
+	// intent that ALREADY carries runtime_spec is safe even while a supervisor
+	// runs, because that running supervisor is PROVABLY the new binary: the only
+	// path to a runtime_spec on-disk intent is the Phase-4 cutover, which reaps
+	// the old supervisor BEFORE the first runtime_spec write (this very gate
+	// blocks writing runtime_spec while an old supervisor runs). So
+	// priorIntent.HasRuntimeSpecRow() ⟹ the cutover already happened ⟹ any
+	// running supervisor understands runtime_spec ⟹ a live-add cannot split-brain.
+	// (Verified airtight against every runtime_spec writer: InstallParsedManifest
+	// is gated here; migrate reaps first; strict-mode only PRESERVES, never
+	// INTRODUCES, runtime_spec; the supervisor reconciler never writes it back.)
+	// The introduction case keeps the original FAIL-CLOSED behavior (refuse on
+	// running OR undeterminable liveness).
+	if desiredIntent.HasRuntimeSpecRow() && !priorIntent.HasRuntimeSpecRow() {
 		running, pid, probeErr := SupervisorRunningUnderStateDir(stateDir)
 		switch {
 		case probeErr != nil:
