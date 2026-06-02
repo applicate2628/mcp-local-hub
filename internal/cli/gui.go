@@ -503,6 +503,29 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 		}
 	}()
 
+	// Crash-repair (snapshot-to-action convergence): reconcile any serena registry
+	// rows orphaned by a crash between an auto-register registry Save and its install
+	// commit (the held flock is released on process death, leaving a registry row with
+	// no matching supervisor-intent daemon). Runs ONCE here, after the supervisor is up
+	// so the reconcile spawns the repaired daemons. Non-fatal + bounded: a repair
+	// failure must never block GUI startup.
+	if supervisor != nil {
+		repairCtx, repairCancel := context.WithTimeout(ctx, 30*time.Second)
+		repaired, deferredKeys, rErr := api.NewAPI().RepairOrphanSerenaWorkspaces(repairCtx)
+		repairCancel()
+		switch {
+		case rErr != nil:
+			fmt.Fprintf(cmd.OutOrStderr(), "warning: serena crash-repair: %v\n", rErr)
+		default:
+			if repaired > 0 {
+				fmt.Fprintf(cmd.OutOrStdout(), "serena crash-repair: re-installed %d orphaned workspace daemon(s) from a prior crash\n", repaired)
+			}
+			if len(deferredKeys) > 0 {
+				fmt.Fprintf(cmd.OutOrStderr(), "warning: serena crash-repair: %d orphaned workspace(s) %v need `mcphub migrate` (first-introduce crash; intent carries no runtime_spec)\n", len(deferredKeys), deferredKeys)
+			}
+		}
+	}
+
 	if !noBrowser {
 		url := fmt.Sprintf("http://127.0.0.1:%d/", s.Port())
 		if err := gui.LaunchBrowser(url); err != nil {
