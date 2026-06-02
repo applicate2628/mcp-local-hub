@@ -202,6 +202,33 @@ func (r *Registry) Lock() (func(), error) {
 	return func() { _ = fl.Unlock() }, nil
 }
 
+// TryLock is the non-blocking variant of Lock: it attempts to acquire the
+// cross-process exclusive lock on <registry>.lock WITHOUT waiting. When the
+// lock is free it returns (unlock, true, nil) — the caller must defer the
+// unlock. When another process already holds the lock it returns
+// (nil, false, nil) so a best-effort caller can SKIP rather than block on a
+// hung holder. A real filesystem error (mkdir / flock syscall failure)
+// returns (nil, false, err).
+//
+// Used by RepairSerenaIntentFromRegistry: a supervisor-startup self-heal must
+// never stall on a registry lock held by a concurrent auto-register / migrate
+// (that holder self-heals the orphan anyway), so it TryLocks and skips on
+// contention.
+func (r *Registry) TryLock() (func(), bool, error) {
+	if err := os.MkdirAll(filepath.Dir(r.path), 0700); err != nil {
+		return nil, false, fmt.Errorf("mkdir registry dir: %w", err)
+	}
+	fl := flock.New(r.path + ".lock")
+	locked, err := fl.TryLock()
+	if err != nil {
+		return nil, false, fmt.Errorf("try-lock %s: %w", r.path+".lock", err)
+	}
+	if !locked {
+		return nil, false, nil
+	}
+	return func() { _ = fl.Unlock() }, true, nil
+}
+
 // Put upserts an entry (primary key = workspace_key + language).
 func (r *Registry) Put(e WorkspaceEntry) {
 	for i := range r.Workspaces {
